@@ -4,10 +4,14 @@
     <Project Path="src\GraphDb.Engine.Storage\GraphDb.Engine.Storage.csproj" />
     <Project Path="src\GraphDb.Engine.Codec\GraphDb.Engine.Codec.csproj" />
     <Project Path="src\GraphDb.Engine.Wal\GraphDb.Engine.Wal.csproj" />
+    <Project Path="src\GraphDb.Engine.Stores\GraphDb.Engine.Stores.csproj" />
+    <Project Path="src\GraphDb.Engine.Index\GraphDb.Engine.Index.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests\GraphDb.Engine.Storage.Tests\GraphDb.Engine.Storage.Tests.csproj" />
     <Project Path="tests\GraphDb.Engine.Codec.Tests\GraphDb.Engine.Codec.Tests.csproj" />
     <Project Path="tests\GraphDb.Engine.Wal.Tests\GraphDb.Engine.Wal.Tests.csproj" />
+    <Project Path="tests\GraphDb.Engine.Stores.Tests\GraphDb.Engine.Stores.Tests.csproj" />
+    <Project Path="tests\GraphDb.Engine.Index.Tests\GraphDb.Engine.Index.Tests.csproj" />
   </Folder>
 </Solution>
