@@ -10,6 +10,9 @@
     <Project Path="src\GraphDb.Engine.Stores\GraphDb.Engine.Stores.csproj" />
     <Project Path="src\GraphDb.Engine.Index\GraphDb.Engine.Index.csproj" />
   </Folder>
+  <Folder Name="/sandbox/">
+    <Project Path="sandbox\QuiverSandbox\QuiverSandbox.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests\GraphDb.Engine.Storage.Tests\GraphDb.Engine.Storage.Tests.csproj" />
     <Project Path="tests/GraphDb.Engine.Operators.Tests/GraphDb.Engine.Operators.Tests.csproj" />

@@ -171,6 +171,15 @@ internal sealed class GraphTransaction : IGraphTransaction
 
     // ========== インデックス ==========
 
+    public void IndexInsert(string indexName, string key, NodeId nodeId)
+        => _inner.Indexes.CreateStringIndex(indexName).Insert(key, nodeId.Value);
+
+    public void IndexInsert(string indexName, long key, NodeId nodeId)
+        => _inner.Indexes.CreateInt64Index(indexName).Insert(key, nodeId.Value);
+
+    public void IndexInsert(string indexName, double key, NodeId nodeId)
+        => _inner.Indexes.CreateDoubleIndex(indexName).Insert(key, nodeId.Value);
+
     public NodeIdEnumerator SeekIndex(string indexName, in PropertyValue key)
         => throw new NotImplementedException();
 

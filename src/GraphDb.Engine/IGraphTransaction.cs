@@ -36,7 +36,12 @@ public interface IGraphTransaction : IDisposable
         Direction direction = Direction.Both,
         string? typeFilter = null);
 
-    // インデックス
+    // インデックス書き込み (データ投入時に手動で呼ぶ)
+    void IndexInsert(string indexName, string key, NodeId nodeId);
+    void IndexInsert(string indexName, long key, NodeId nodeId);
+    void IndexInsert(string indexName, double key, NodeId nodeId);
+
+    // インデックス (シーク API は Operator 経由を推奨)
     NodeIdEnumerator SeekIndex(string indexName, in PropertyValue key);
     NodeIdEnumerator RangeIndex(
         string indexName,
