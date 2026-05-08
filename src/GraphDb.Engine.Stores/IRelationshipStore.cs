@@ -1,4 +1,6 @@
+using System.Buffers.Binary;
 using GraphDb.Engine.Core;
+using GraphDb.Engine.Storage;
 
 namespace GraphDb.Engine.Stores;
 
@@ -13,6 +15,8 @@ public interface IRelationshipStore
     long InUseCount { get; }
 }
 
+// RelRecord layout (40 bytes):
+// 0 Flags(1) 1 Source(6) 7 Target(6) 13 TypeId(2) 15 SrcPrev(6) 21 SrcNext(6) 27 TgtPrev(6) 33 TgtNext(6) 39 Pad(1)
 public readonly ref struct RelationshipReadHandle
 {
     private readonly RelationshipId _id;
@@ -20,31 +24,27 @@ public readonly ref struct RelationshipReadHandle
     private readonly NodeId _source;
     private readonly NodeId _target;
     private readonly RelationshipTypeId _type;
-    private readonly RelationshipId _sourcePrev;
-    private readonly RelationshipId _sourceNext;
-    private readonly RelationshipId _targetPrev;
-    private readonly RelationshipId _targetNext;
+    private readonly RelationshipId _srcPrev;
+    private readonly RelationshipId _srcNext;
+    private readonly RelationshipId _tgtPrev;
+    private readonly RelationshipId _tgtNext;
 
     public RelationshipId Id => _id;
     public bool InUse => _inUse;
     public NodeId Source => _source;
     public NodeId Target => _target;
     public RelationshipTypeId Type => _type;
-    public RelationshipId SourcePrev => _sourcePrev;
-    public RelationshipId SourceNext => _sourceNext;
-    public RelationshipId TargetPrev => _targetPrev;
-    public RelationshipId TargetNext => _targetNext;
+    public RelationshipId SourcePrev => _srcPrev;
+    public RelationshipId SourceNext => _srcNext;
+    public RelationshipId TargetPrev => _tgtPrev;
+    public RelationshipId TargetNext => _tgtNext;
 
     internal RelationshipReadHandle(
-        RelationshipId id, bool inUse,
-        NodeId source, NodeId target, RelationshipTypeId type,
-        RelationshipId sourcePrev, RelationshipId sourceNext,
-        RelationshipId targetPrev, RelationshipId targetNext)
+        RelationshipId id, bool inUse, NodeId source, NodeId target, RelationshipTypeId type,
+        RelationshipId srcPrev, RelationshipId srcNext, RelationshipId tgtPrev, RelationshipId tgtNext)
     {
-        _id = id; _inUse = inUse;
-        _source = source; _target = target; _type = type;
-        _sourcePrev = sourcePrev; _sourceNext = sourceNext;
-        _targetPrev = targetPrev; _targetNext = targetNext;
+        _id = id; _inUse = inUse; _source = source; _target = target; _type = type;
+        _srcPrev = srcPrev; _srcNext = srcNext; _tgtPrev = tgtPrev; _tgtNext = tgtNext;
     }
 
     public void Dispose() { }
@@ -52,20 +52,112 @@ public readonly ref struct RelationshipReadHandle
 
 public ref struct RelationshipWriteHandle
 {
-    public NodeId Source;
-    public NodeId Target;
-    public RelationshipTypeId Type;
-    public RelationshipId SourcePrev;
-    public RelationshipId SourceNext;
-    public RelationshipId TargetPrev;
-    public RelationshipId TargetNext;
+    private readonly IPagedFile _file;
+    private readonly PageId _pageId;
+    private Span<byte> _rec;
 
-    public void Dispose() { }
+    internal RelationshipWriteHandle(IPagedFile file, PageId pageId, Span<byte> rec)
+    {
+        _file = file; _pageId = pageId; _rec = rec;
+    }
+
+    public NodeId Source
+    {
+        readonly get => new(RecordHelpers.ReadInt48(_rec[1..]));
+        set => RecordHelpers.WriteInt48(_rec[1..], value.Value);
+    }
+    public NodeId Target
+    {
+        readonly get => new(RecordHelpers.ReadInt48(_rec[7..]));
+        set => RecordHelpers.WriteInt48(_rec[7..], value.Value);
+    }
+    public RelationshipTypeId Type
+    {
+        readonly get => new(BinaryPrimitives.ReadInt16LittleEndian(_rec[13..]));
+        set => BinaryPrimitives.WriteInt16LittleEndian(_rec[13..], (short)value.Value);
+    }
+    public RelationshipId SourcePrev
+    {
+        readonly get => new(RecordHelpers.ReadInt48(_rec[15..]));
+        set => RecordHelpers.WriteInt48(_rec[15..], value.Value);
+    }
+    public RelationshipId SourceNext
+    {
+        readonly get => new(RecordHelpers.ReadInt48(_rec[21..]));
+        set => RecordHelpers.WriteInt48(_rec[21..], value.Value);
+    }
+    public RelationshipId TargetPrev
+    {
+        readonly get => new(RecordHelpers.ReadInt48(_rec[27..]));
+        set => RecordHelpers.WriteInt48(_rec[27..], value.Value);
+    }
+    public RelationshipId TargetNext
+    {
+        readonly get => new(RecordHelpers.ReadInt48(_rec[33..]));
+        set => RecordHelpers.WriteInt48(_rec[33..], value.Value);
+    }
+
+    public void Dispose() => _file.UnpinDirty(_pageId, 0);
 }
 
 public ref struct RelationshipEnumerator
 {
-    public bool MoveNext() => throw new NotImplementedException();
-    public RelationshipReadHandle Current => throw new NotImplementedException();
+    private readonly IRelationshipStore _store;
+    private readonly NodeId _nodeId;
+    private readonly RelationshipTypeId _filterType;
+    private readonly Direction _direction;
+    private readonly bool _hasFilter;
+    private RelationshipId _currentId;
+    private RelationshipReadHandle _current;
+    private bool _started;
+
+    internal RelationshipEnumerator(IRelationshipStore store, NodeId nodeId, RelationshipId firstRelId)
+    {
+        _store = store; _nodeId = nodeId; _currentId = firstRelId;
+        _filterType = default; _direction = Direction.Both; _hasFilter = false; _started = false;
+    }
+
+    internal RelationshipEnumerator(IRelationshipStore store, NodeId nodeId, RelationshipId firstRelId,
+        RelationshipTypeId type, Direction direction)
+    {
+        _store = store; _nodeId = nodeId; _currentId = firstRelId;
+        _filterType = type; _direction = direction; _hasFilter = true; _started = false;
+    }
+
+    public bool MoveNext()
+    {
+        if (_started) _currentId = NextInChain();
+        _started = true;
+
+        while (_currentId.IsValid)
+        {
+            _current = _store.Read(_currentId);
+            if (!_hasFilter || Matches()) return true;
+            _currentId = NextInChain();
+        }
+        return false;
+    }
+
+    private RelationshipId NextInChain()
+    {
+        // Follow the chain for _nodeId's side
+        if (_current.Source == _nodeId)
+            return _current.SourceNext;
+        return _current.TargetNext;
+    }
+
+    private bool Matches()
+    {
+        bool typeOk = _current.Type == _filterType;
+        if (!typeOk) return false;
+        return _direction switch
+        {
+            Direction.Outgoing => _current.Source == _nodeId,
+            Direction.Incoming => _current.Target == _nodeId,
+            _ => true,
+        };
+    }
+
+    public RelationshipReadHandle Current => _current;
     public void Dispose() { }
 }

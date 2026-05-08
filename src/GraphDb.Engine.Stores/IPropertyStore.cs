@@ -22,21 +22,45 @@ public enum PropertyValueType : byte
 
 public readonly ref struct PropertyValue
 {
-    public PropertyValueType Type => default;
-    public bool BoolValue => false;
-    public int Int32Value => 0;
-    public long Int64Value => 0L;
-    public double DoubleValue => 0.0;
-    public ReadOnlySpan<byte> Utf8StringValue => default;
-    public ReadOnlySpan<byte> BytesValue => default;
+    private readonly long _scalar;
+    private readonly ReadOnlySpan<byte> _span;
+    private readonly PropertyValueType _type;
 
-    public static PropertyValue FromBool(bool v) => throw new NotImplementedException();
-    public static PropertyValue FromInt32(int v) => throw new NotImplementedException();
-    public static PropertyValue FromInt64(long v) => throw new NotImplementedException();
-    public static PropertyValue FromDouble(double v) => throw new NotImplementedException();
-    public static PropertyValue FromString(ReadOnlySpan<char> v) => throw new NotImplementedException();
-    public static PropertyValue FromUtf8(ReadOnlySpan<byte> v) => throw new NotImplementedException();
-    public static PropertyValue FromBytes(ReadOnlySpan<byte> v) => throw new NotImplementedException();
+    private PropertyValue(PropertyValueType type, long scalar = 0, ReadOnlySpan<byte> span = default)
+    {
+        _type = type; _scalar = scalar; _span = span;
+    }
+
+    public PropertyValueType Type => _type;
+    public bool BoolValue => _scalar != 0;
+    public int Int32Value => (int)_scalar;
+    public long Int64Value => _scalar;
+    public double DoubleValue => BitConverter.Int64BitsToDouble(_scalar);
+    public ReadOnlySpan<byte> Utf8StringValue => _span;
+    public ReadOnlySpan<byte> BytesValue => _span;
+
+    public static PropertyValue FromBool(bool v) => new(PropertyValueType.Bool, v ? 1L : 0L);
+    public static PropertyValue FromInt32(int v) => new(PropertyValueType.Int32, v);
+    public static PropertyValue FromInt64(long v) => new(PropertyValueType.Int64, v);
+    public static PropertyValue FromDouble(double v) => new(PropertyValueType.Double, BitConverter.DoubleToInt64Bits(v));
+    public static PropertyValue FromString(ReadOnlySpan<char> v)
+    {
+        int len = System.Text.Encoding.UTF8.GetByteCount(v);
+        byte[] buf = new byte[len];
+        System.Text.Encoding.UTF8.GetBytes(v, buf);
+        return new(PropertyValueType.String, 0, buf);
+    }
+    public static PropertyValue FromUtf8(ReadOnlySpan<byte> v) => new(PropertyValueType.String, 0, v);
+    public static PropertyValue FromBytes(ReadOnlySpan<byte> v) => new(PropertyValueType.Bytes, 0, v);
+
+    public int EncodedSize => _type switch
+    {
+        PropertyValueType.Bool => 1,
+        PropertyValueType.Int32 => 4,
+        PropertyValueType.Int64 => 8,
+        PropertyValueType.Double => 8,
+        _ => _span.Length,
+    };
 }
 
 public readonly ref struct PropertyReadHandle
@@ -44,25 +68,41 @@ public readonly ref struct PropertyReadHandle
     private readonly PropertyId _id;
     private readonly PropertyKeyId _keyId;
     private readonly PropertyId _nextPropertyId;
+    private readonly PropertyValue _value;
+
+    internal PropertyReadHandle(PropertyId id, PropertyKeyId keyId, PropertyId nextPropId, PropertyValue value)
+    {
+        _id = id; _keyId = keyId; _nextPropertyId = nextPropId; _value = value;
+    }
 
     public PropertyId Id => _id;
     public PropertyKeyId KeyId => _keyId;
-    public PropertyValue Value => default;
+    public PropertyValue Value => _value;
     public PropertyId NextPropertyId => _nextPropertyId;
-
-    internal PropertyReadHandle(PropertyId id, PropertyKeyId keyId, PropertyId nextPropertyId)
-    {
-        _id = id;
-        _keyId = keyId;
-        _nextPropertyId = nextPropertyId;
-    }
-
     public void Dispose() { }
 }
 
 public ref struct PropertyEnumerator
 {
-    public bool MoveNext() => throw new NotImplementedException();
-    public PropertyReadHandle Current => throw new NotImplementedException();
+    private readonly IPropertyStore _store;
+    private PropertyId _nextId;
+    private PropertyReadHandle _current;
+    private bool _started;
+
+    internal PropertyEnumerator(IPropertyStore store, PropertyId firstId)
+    {
+        _store = store; _nextId = firstId; _started = false; _current = default;
+    }
+
+    public bool MoveNext()
+    {
+        if (_started) _nextId = _current.NextPropertyId;
+        _started = true;
+        if (!_nextId.IsValid) return false;
+        _current = _store.Read(_nextId);
+        return true;
+    }
+
+    public PropertyReadHandle Current => _current;
     public void Dispose() { }
 }

@@ -11,20 +11,6 @@ public interface IBTreeIndex<TKey> : IDisposable
     long EntryCount { get; }
 }
 
-public ref struct BTreeValueEnumerator
-{
-    public bool MoveNext() => throw new NotImplementedException();
-    public long Current => throw new NotImplementedException();
-    public void Dispose() { }
-}
-
-public ref struct BTreeRangeEnumerator
-{
-    public bool MoveNext() => throw new NotImplementedException();
-    public KeyValueEntry Current => throw new NotImplementedException();
-    public void Dispose() { }
-}
-
 public readonly ref struct KeyValueEntry
 {
     private readonly ReadOnlySpan<byte> _keyBytes;
@@ -35,8 +21,7 @@ public readonly ref struct KeyValueEntry
 
     internal KeyValueEntry(ReadOnlySpan<byte> keyBytes, long value)
     {
-        _keyBytes = keyBytes;
-        _value = value;
+        _keyBytes = keyBytes; _value = value;
     }
 }
 
