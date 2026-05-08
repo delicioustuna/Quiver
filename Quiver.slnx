@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src\GraphDb.Engine.Core\GraphDb.Engine.Core.csproj" />
+    <Project Path="src\GraphDb.Engine.Storage\GraphDb.Engine.Storage.csproj" />
+    <Project Path="src\GraphDb.Engine.Codec\GraphDb.Engine.Codec.csproj" />
+    <Project Path="src\GraphDb.Engine.Wal\GraphDb.Engine.Wal.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests\GraphDb.Engine.Storage.Tests\GraphDb.Engine.Storage.Tests.csproj" />
+    <Project Path="tests\GraphDb.Engine.Codec.Tests\GraphDb.Engine.Codec.Tests.csproj" />
+    <Project Path="tests\GraphDb.Engine.Wal.Tests\GraphDb.Engine.Wal.Tests.csproj" />
+  </Folder>
+</Solution>
