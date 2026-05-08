@@ -17,5 +17,9 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\GraphDb.Engine.Transactions\GraphDb.Engine.Transactions.csproj" />
+    <ProjectReference Include="..\..\src\GraphDb.Engine.Stores\GraphDb.Engine.Stores.csproj" />
+    <ProjectReference Include="..\..\src\GraphDb.Engine.Storage\GraphDb.Engine.Storage.csproj" />
+    <ProjectReference Include="..\..\src\GraphDb.Engine.Wal\GraphDb.Engine.Wal.csproj" />
+    <ProjectReference Include="..\..\src\GraphDb.Engine.Index\GraphDb.Engine.Index.csproj" />
   </ItemGroup>
 </Project>
