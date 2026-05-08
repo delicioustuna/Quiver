@@ -2,7 +2,9 @@
   <Folder Name="/src/">
     <Project Path="src\GraphDb.Engine.Core\GraphDb.Engine.Core.csproj" />
     <Project Path="src\GraphDb.Engine.Storage\GraphDb.Engine.Storage.csproj" />
+    <Project Path="src/GraphDb.Engine.Operators/GraphDb.Engine.Operators.csproj" />
     <Project Path="src/GraphDb.Engine.Transactions/GraphDb.Engine.Transactions.csproj" />
+    <Project Path="src/GraphDb.Engine/GraphDb.Engine.csproj" />
     <Project Path="src\GraphDb.Engine.Codec\GraphDb.Engine.Codec.csproj" />
     <Project Path="src\GraphDb.Engine.Wal\GraphDb.Engine.Wal.csproj" />
     <Project Path="src\GraphDb.Engine.Stores\GraphDb.Engine.Stores.csproj" />
@@ -10,6 +12,8 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests\GraphDb.Engine.Storage.Tests\GraphDb.Engine.Storage.Tests.csproj" />
+    <Project Path="tests/GraphDb.Engine.Operators.Tests/GraphDb.Engine.Operators.Tests.csproj" />
+    <Project Path="tests/GraphDb.Engine.Tests/GraphDb.Engine.Tests.csproj" />
     <Project Path="tests/GraphDb.Engine.Transactions.Tests/GraphDb.Engine.Transactions.Tests.csproj" />
     <Project Path="tests\GraphDb.Engine.Codec.Tests\GraphDb.Engine.Codec.Tests.csproj" />
     <Project Path="tests\GraphDb.Engine.Wal.Tests\GraphDb.Engine.Wal.Tests.csproj" />

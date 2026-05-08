@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GraphDb.Engine.Core\GraphDb.Engine.Core.csproj" />
+    <ProjectReference Include="..\GraphDb.Engine.Storage\GraphDb.Engine.Storage.csproj" />
+    <ProjectReference Include="..\GraphDb.Engine.Stores\GraphDb.Engine.Stores.csproj" />
+    <ProjectReference Include="..\GraphDb.Engine.Index\GraphDb.Engine.Index.csproj" />
+    <ProjectReference Include="..\GraphDb.Engine.Transactions\GraphDb.Engine.Transactions.csproj" />
+  </ItemGroup>
+</Project>
