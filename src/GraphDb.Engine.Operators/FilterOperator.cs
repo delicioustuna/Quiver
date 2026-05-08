@@ -19,6 +19,23 @@ public sealed class FilterOperator : IPhysicalOperator
     public TupleRef Current => _source.Current;
 
     public void Open(ITransaction tx) { _tx = tx; _source.Open(tx); }
-    public bool MoveNext() => throw new NotImplementedException();
+
+    public bool MoveNext()
+    {
+        while (_source.MoveNext())
+        {
+            var cur = _source.Current;
+            if (_predicate.Evaluate(in cur, _tx!))
+            {
+                var s = Statistics;
+                s.RowsProduced++;
+                Statistics = s;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public ReadOnlySpan<byte> GetBytes(int column) => _source.GetBytes(column);
     public void Dispose() { _source.Dispose(); }
 }

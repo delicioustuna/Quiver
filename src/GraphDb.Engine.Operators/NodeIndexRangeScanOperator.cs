@@ -1,3 +1,4 @@
+using System.Text;
 using GraphDb.Engine.Transactions;
 
 namespace GraphDb.Engine.Operators;
@@ -10,6 +11,7 @@ public sealed class NodeIndexRangeScanOperator : IPhysicalOperator
     private readonly ITupleProvider _toProvider;
     private readonly bool _toInclusive;
     private ITransaction? _tx;
+    private IEnumerator<long>? _enumerator;
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
 
     public NodeIndexRangeScanOperator(
@@ -28,7 +30,57 @@ public sealed class NodeIndexRangeScanOperator : IPhysicalOperator
     public OperatorStatistics Statistics { get; private set; }
     public TupleRef Current => new(_buffer);
 
-    public void Open(ITransaction tx) => _tx = tx;
-    public bool MoveNext() => throw new NotImplementedException();
-    public void Dispose() { }
+    public void Open(ITransaction tx)
+    {
+        _tx = tx;
+        var emptyRef = new TupleRef(Span<TupleSlot>.Empty);
+        IEnumerable<long> nodeIds;
+
+        switch (_fromProvider.SlotType)
+        {
+            case TupleSlotType.Int64:
+            case TupleSlotType.NodeId:
+            {
+                long from = _fromProvider.Provide(in emptyRef, tx).LongValue;
+                long to = _toProvider.Provide(in emptyRef, tx).LongValue;
+                nodeIds = tx.Indexes.CreateInt64Index(_indexName)
+                    .RangeValues(from, _fromInclusive, to, _toInclusive);
+                break;
+            }
+            case TupleSlotType.Double:
+            {
+                double from = _fromProvider.Provide(in emptyRef, tx).DoubleValue;
+                double to = _toProvider.Provide(in emptyRef, tx).DoubleValue;
+                nodeIds = tx.Indexes.CreateDoubleIndex(_indexName)
+                    .RangeValues(from, _fromInclusive, to, _toInclusive);
+                break;
+            }
+            case TupleSlotType.Utf8String:
+            {
+                var fromBytes = _fromProvider.ProvideBytes(in emptyRef, tx);
+                var toBytes = _toProvider.ProvideBytes(in emptyRef, tx);
+                string from = Encoding.UTF8.GetString(fromBytes);
+                string to = Encoding.UTF8.GetString(toBytes);
+                nodeIds = tx.Indexes.CreateStringIndex(_indexName)
+                    .RangeValues(from, _fromInclusive, to, _toInclusive);
+                break;
+            }
+            default:
+                nodeIds = [];
+                break;
+        }
+        _enumerator = nodeIds.GetEnumerator();
+    }
+
+    public bool MoveNext()
+    {
+        if (_enumerator == null || !_enumerator.MoveNext()) return false;
+        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _enumerator.Current };
+        var s = Statistics;
+        s.RowsProduced++;
+        Statistics = s;
+        return true;
+    }
+
+    public void Dispose() { _enumerator?.Dispose(); }
 }

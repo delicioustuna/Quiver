@@ -23,6 +23,23 @@ public sealed class LimitOperator : IPhysicalOperator
     public TupleRef Current => _source.Current;
 
     public void Open(ITransaction tx) { _tx = tx; _source.Open(tx); }
-    public bool MoveNext() => throw new NotImplementedException();
+
+    public bool MoveNext()
+    {
+        while (_skipped < _skip)
+        {
+            if (!_source.MoveNext()) return false;
+            _skipped++;
+        }
+        if (_produced >= _limit) return false;
+        if (!_source.MoveNext()) return false;
+        _produced++;
+        var s = Statistics;
+        s.RowsProduced++;
+        Statistics = s;
+        return true;
+    }
+
+    public ReadOnlySpan<byte> GetBytes(int column) => _source.GetBytes(column);
     public void Dispose() { _source.Dispose(); }
 }

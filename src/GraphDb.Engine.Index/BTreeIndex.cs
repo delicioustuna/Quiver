@@ -97,6 +97,30 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
     public BTreeRangeEnumerator FullScan() => new(_file, LeftmostLeaf(), null, true, null, true);
 
+    public IEnumerable<long> SeekValues(TKey key)
+    {
+        var list = new List<long>();
+        var en = Seek(in key);
+        while (en.MoveNext()) list.Add(en.Current);
+        return list;
+    }
+
+    public IEnumerable<long> RangeValues(TKey from, bool fromInclusive, TKey to, bool toInclusive)
+    {
+        var list = new List<long>();
+        var en = Range(in from, fromInclusive, in to, toInclusive);
+        while (en.MoveNext()) list.Add(en.Current.Value);
+        return list;
+    }
+
+    public IEnumerable<long> AllValues()
+    {
+        var list = new List<long>();
+        var en = FullScan();
+        while (en.MoveNext()) list.Add(en.Current.Value);
+        return list;
+    }
+
     public void Dispose() => _file.Dispose();
 
     // -----------------------------------------------------------------------
@@ -519,37 +543,3 @@ public ref struct BTreeRangeEnumerator
     public void Dispose() { }
 }
 
-// -----------------------------------------------------------------------
-
-internal sealed class IndexManager : IIndexManager
-{
-    private readonly string _directory;
-
-    public IndexManager(string directory)
-    {
-        _directory = directory;
-        Directory.CreateDirectory(directory);
-    }
-
-    public IBTreeIndex<int> CreateInt32Index(string name) => Open(name, new Int32KeyCodec());
-    public IBTreeIndex<long> CreateInt64Index(string name) => Open(name, new Int64KeyCodec());
-    public IBTreeIndex<double> CreateDoubleIndex(string name) => Open(name, new DoubleKeyCodec());
-    public IBTreeIndex<string> CreateStringIndex(string name) => Open(name, new StringKeyCodec());
-    public IBTreeIndex<byte[]> CreateBytesIndex(string name) => Open(name, new BytesKeyCodec());
-
-    public bool DropIndex(string name)
-    {
-        string p = IndexPath(name);
-        if (!File.Exists(p)) return false;
-        File.Delete(p); return true;
-    }
-
-    public IEnumerable<string> ListIndexes()
-        => Directory.GetFiles(_directory, "*.idx")
-            .Select(f => Path.GetFileNameWithoutExtension(f)!);
-
-    private IBTreeIndex<T> Open<T>(string name, IKeyCodec<T> codec)
-        => new BTreeIndex<T>(new PagedFile(IndexPath(name)), codec);
-
-    private string IndexPath(string name) => Path.Combine(_directory, name + ".idx");
-}

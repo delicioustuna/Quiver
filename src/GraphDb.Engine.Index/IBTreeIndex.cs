@@ -9,6 +9,9 @@ public interface IBTreeIndex<TKey> : IDisposable
     BTreeRangeEnumerator FullScan();
     int Height { get; }
     long EntryCount { get; }
+    IEnumerable<long> SeekValues(TKey key);
+    IEnumerable<long> RangeValues(TKey from, bool fromInclusive, TKey to, bool toInclusive);
+    IEnumerable<long> AllValues();
 }
 
 public readonly ref struct KeyValueEntry

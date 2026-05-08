@@ -11,6 +11,7 @@ public interface IPhysicalOperator : IDisposable
     TupleRef Current { get; }
     TupleSchema Schema { get; }
     OperatorStatistics Statistics { get; }
+    ReadOnlySpan<byte> GetBytes(int column) => ReadOnlySpan<byte>.Empty;
 }
 
 /// <summary>演算子間で受け渡されるタプル参照。背後はオペレータ内のバッファ。</summary>
@@ -51,7 +52,13 @@ public sealed class TupleSchema
 {
     public TupleSchema(IReadOnlyList<ColumnDefinition> columns) => Columns = columns;
     public IReadOnlyList<ColumnDefinition> Columns { get; }
-    public int IndexOf(string name) => throw new NotImplementedException();
+
+    public int IndexOf(string name)
+    {
+        for (int i = 0; i < Columns.Count; i++)
+            if (Columns[i].Name == name) return i;
+        return -1;
+    }
 }
 
 public sealed record ColumnDefinition(string Name, TupleSlotType Type);
