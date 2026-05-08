@@ -25,5 +25,5 @@ public ref struct PageWriteHandle
         Lsn = 0;
     }
 
-    public void Dispose() => _file.UnpinDirty(_pageId);
+    public void Dispose() => _file.UnpinDirty(_pageId, Lsn);
 }
