@@ -34,12 +34,24 @@ using (var tx = db.BeginTransaction())
 
 ### Source Generator（型安全な CRUD）
 
+#### 属性リファレンス
+
+| 属性 | 対象 | 引数 | 省略時の挙動 |
+|---|---|---|---|
+| `[GraphNode]` | クラス | `label` (省略可) | クラス名をラベルとして使用 |
+| `[GraphProperty]` | プロパティ | `key` (省略可) | プロパティ名をグラフキーとして使用 |
+| `[GraphIndexed]` | プロパティ | `indexName` (省略可) | `idx_{label}_{propertyName}` を自動生成。`[GraphProperty]` と併用必須 |
+
+> **注意:** クラス名・プロパティ名を変更すると `[GraphNode]`・`[GraphIndexed]` の自動生成名も変わり、既存インデックスファイルが孤立します。名前が変わる可能性がある場合は明示指定を推奨します。
+
+#### モデル定義例
+
 ```csharp
-// モデル定義 — SourceGenerator が CRUD メソッドを自動生成
-[GraphNode("Person")]
+// ラベル・インデックス名はすべて省略可能（クラス名・プロパティ名から自動生成）
+[GraphNode]               // label = "Person"
 public partial class Person
 {
-    [GraphIndexed("idx_person_name")]
+    [GraphIndexed]        // indexName = "idx_person_name"
     [GraphProperty]
     public string Name { get; set; } = "";
 
@@ -47,18 +59,78 @@ public partial class Person
     public int Age { get; set; }
 }
 
-// 使用例
+// 明示指定も可（リネーム耐性が必要な場合）
+[GraphNode("Person")]
+public partial class Person
+{
+    [GraphIndexed("idx_person_name")]
+    [GraphProperty]
+    public string Name { get; set; } = "";
+}
+```
+
+SourceGenerator は各クラスに対して以下のメソッドを生成します。
+
+| メソッド | シグネチャ | 説明 |
+|---|---|---|
+| `Insert` | `(tx, entity) → NodeId` | ノードを作成してプロパティを保存 |
+| `InsertIndexed` | `(tx, entity) → NodeId` | `Insert` + `[GraphIndexed]` プロパティをインデックス登録 |
+| `Load` | `(tx, id) → T` | プロパティを読み込んでインスタンスを復元 |
+| `Update` | `(tx, id, entity)` | 既存ノードのプロパティを上書き |
+| `Delete` | `(tx, id)` | ノードを削除 |
+| `FindBy{PropName}` | `(tx, value) → List<(NodeId, T)>` | `[GraphIndexed]` プロパティごとに生成 |
+
+#### CRUD 使用例
+
+```csharp
 using var db = GraphDatabase.Open("./mygraph");
 using var tx = db.BeginTransaction();
-var g = tx.G(db.Schema);
 
-var id = g.InsertIndexed(new Person { Name = "Alice", Age = 30 });
-var alice = g.Load<Person>(id);
+var aliceId = Person.InsertIndexed(tx, new Person { Name = "Alice", Age = 30 });
+var alice   = Person.Load(tx, aliceId);
 
 // インデックス検索（生成された FindBy* メソッド）
 var results = Person.FindByName(tx, "Alice");
 
+Person.Update(tx, aliceId, alice with { Age = 31 });
 tx.Commit();
+```
+
+#### リレーションシップの操作
+
+リレーションシップは Source Generator の対象外です。低レベル API または Gremlin ライク API で操作します。
+
+```csharp
+// ── 低レベル API ────────────────────────────────────────
+using (var tx = db.BeginTransaction())
+{
+    var aliceId = Person.InsertIndexed(tx, new Person { Name = "Alice", Age = 30 });
+    var bobId   = Person.InsertIndexed(tx, new Person { Name = "Bob",   Age = 25 });
+
+    // リレーションシップ作成
+    tx.CreateRelationship(aliceId, bobId, "KNOWS");
+    tx.Commit();
+}
+
+// ── Gremlin ライク API ──────────────────────────────────
+using (var tx = db.BeginTransaction())
+{
+    var g = tx.G(db.Schema);
+
+    var alice = g.AddNode("Person").P("Name", "Alice").P("Age", 30).Next();
+    var bob   = g.AddNode("Person").P("Name", "Bob").P("Age", 25).Next();
+
+    g.AddRelationship("KNOWS").From(alice).To(bob).Next();
+
+    // 隣接ノードのトラバーサル
+    var friends = g.V().HasLabel("Person")
+                    .Has("Name", P.Eq("Alice"))
+                    .Out("KNOWS")
+                    .Values("Name")
+                    .ToList();   // → ["Bob"]
+
+    tx.Commit();
+}
 ```
 
 ### Gremlin ライク API（グラフトラバーサル）

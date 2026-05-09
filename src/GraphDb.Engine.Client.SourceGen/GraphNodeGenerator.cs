@@ -69,11 +69,10 @@ public sealed class GraphNodeGenerator : IIncrementalGenerator
                 }
                 else if (attrFqn == GraphIndexedAttributeFqn)
                 {
-                    if (attr.ConstructorArguments.Length > 0 &&
-                        attr.ConstructorArguments[0].Value is string idxArg)
-                    {
-                        indexName = idxArg;
-                    }
+                    indexName = attr.ConstructorArguments.Length > 0 &&
+                                attr.ConstructorArguments[0].Value is string { Length: > 0 } idxArg
+                        ? idxArg
+                        : $"idx_{label.ToLowerInvariant()}_{prop.Name.ToLowerInvariant()}";
                 }
             }
 

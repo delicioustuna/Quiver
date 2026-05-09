@@ -19,6 +19,6 @@ public sealed class GraphPropertyAttribute : Attribute
 [AttributeUsage(AttributeTargets.Property)]
 public sealed class GraphIndexedAttribute : Attribute
 {
-    public GraphIndexedAttribute(string indexName) { IndexName = indexName; }
-    public string IndexName { get; }
+    public GraphIndexedAttribute(string? indexName = null) { IndexName = indexName; }
+    public string? IndexName { get; }
 }
