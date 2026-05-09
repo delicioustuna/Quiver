@@ -487,3 +487,7 @@ docs/design
 # Claude管理ファイル類
 .claude
 CLAUDE.md
+
+# Codex管理ファイル類
+.agents
+AGENTS.md
