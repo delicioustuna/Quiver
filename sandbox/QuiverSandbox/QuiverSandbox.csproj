@@ -8,5 +8,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\GraphDb.Engine\GraphDb.Engine.csproj" />
+    <ProjectReference Include="..\..\src\GraphDb.Engine.Client\GraphDb.Engine.Client.csproj" />
+    <ProjectReference Include="..\..\src\GraphDb.Engine.Client.Attributes\GraphDb.Engine.Client.Attributes.csproj" />
+    <ProjectReference Include="..\..\src\GraphDb.Engine.Client.SourceGen\GraphDb.Engine.Client.SourceGen.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>

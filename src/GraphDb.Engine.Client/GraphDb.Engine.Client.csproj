@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GraphDb.Engine\GraphDb.Engine.csproj" />
+    <ProjectReference Include="..\GraphDb.Engine.Operators\GraphDb.Engine.Operators.csproj" />
+    <ProjectReference Include="..\GraphDb.Engine.Client.Attributes\GraphDb.Engine.Client.Attributes.csproj" />
+    <ProjectReference Include="..\GraphDb.Engine.Client.SourceGen\GraphDb.Engine.Client.SourceGen.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+</Project>

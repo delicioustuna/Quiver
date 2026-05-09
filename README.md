@@ -13,13 +13,11 @@ Pure C# で実装するグラフデータベースエンジン。Amazon Neptune 
 
 ## クイックスタート
 
+### ローレベル API（低レイヤー直接操作）
+
 ```csharp
 using var db = GraphDatabase.Open("./mygraph");
 
-// スキーマ定義
-db.Schema.CreateIndex("Person.name", "Person", "name", IndexKind.StringEquality);
-
-// データ書き込み
 using (var tx = db.BeginTransaction())
 {
     var alice = tx.CreateNode("Person");
@@ -32,29 +30,80 @@ using (var tx = db.BeginTransaction())
     tx.CreateRelationship(alice, bob, "KNOWS");
     tx.Commit();
 }
+```
 
-// 物理プランで「Alice の友人」を検索
-using (var tx = db.BeginTransaction())
+### Source Generator（型安全な CRUD）
+
+```csharp
+// モデル定義 — SourceGenerator が CRUD メソッドを自動生成
+[GraphNode("Person")]
+public partial class Person
 {
-    var plan = new ExpandOperator(
-        new NodeIndexSeekOperator("Person.name", LiteralProvider.String("Alice")),
-        sourceNodeColumn: 0,
-        direction: Direction.Outgoing,
-        typeFilter: tx.GetRelationshipTypeId("KNOWS"),
-        outputMode: ExpandOutputMode.NeighborOnly);
+    [GraphIndexed("idx_person_name")]
+    [GraphProperty]
+    public string Name { get; set; } = "";
 
-    using var result = tx.Execute(plan);
-    foreach (var row in result.Rows())
-    {
-        Console.WriteLine(tx.GetProperty(row.GetNodeId(0), "name").Utf8StringValue); // → "Bob"
-    }
+    [GraphProperty]
+    public int Age { get; set; }
 }
+
+// 使用例
+using var db = GraphDatabase.Open("./mygraph");
+using var tx = db.BeginTransaction();
+var g = tx.G(db.Schema);
+
+var id = g.InsertIndexed(new Person { Name = "Alice", Age = 30 });
+var alice = g.Load<Person>(id);
+
+// インデックス検索（生成された FindBy* メソッド）
+var results = Person.FindByName(tx, "Alice");
+
+tx.Commit();
+```
+
+### Gremlin ライク API（グラフトラバーサル）
+
+```csharp
+var g = tx.G(db.Schema);
+
+// 書き込み
+var alice = g.AddNode("Person").P("Name", "Alice").P("Age", 30).Next();
+var bob   = g.AddNode("Person").P("Name", "Bob").P("Age", 25).Next();
+g.AddRelationship("KNOWS").From(alice).To(bob).Next();
+
+// 型なしトラバーサル
+var names = g.V().HasLabel("Person")
+              .Has("Age", P.Gt(25L))
+              .Values("Name")
+              .ToList();
+
+// 型付きトラバーサル（式ツリーでプロパティ参照）
+var people = g.V<Person>()
+              .Has(p => p.Age, P.Gt(25L))
+              .ToList();  // → List<Person>（自動ロード）
+
+// グラフパターンマッチ（Match DSL）
+var results = g.Match(
+    GraphPattern.Node("n", "Person")
+                .Out("KNOWS", GraphPattern.Node("m", "Person"))
+)
+.Where("n", "Age", P.Gt(25L))
+.Return(v => new
+{
+    PersonName = v["n"].Get<string>("Name"),
+    FriendName = v["m"].Get<string>("Name"),
+})
+.ToList();
 ```
 
 ## アーキテクチャ
 
 ```
-GraphDb.Engine              ← 公開 API ファサード (NuGet パッケージ)
+GraphDb.Engine.Client           ← Gremlin ライク API / Match DSL / SourceGen 糖衣構文
+├── GraphDb.Engine.Client.Attributes  ← [GraphNode] / [GraphProperty] / [GraphIndexed]
+└── GraphDb.Engine.Client.SourceGen   ← Roslyn IIncrementalGenerator (CRUD + FindBy* 生成)
+
+GraphDb.Engine              ← 公開 API ファサード
 ├── GraphDb.Engine.Operators    ← Volcano 型物理演算子
 ├── GraphDb.Engine.Transactions ← TransactionManager / LockManager / RecoveryManager
 ├── GraphDb.Engine.Wal          ← Write-Ahead Log (グループコミット)
@@ -73,6 +122,9 @@ Core ← Storage ← Codec ← Stores ─┬─ Index
                      Wal ──────────┤
                                    ▼
                          Transactions → Operators → Engine(Facade)
+                                                        ↑
+                                              Engine.Client(.Attributes)
+                                              Engine.Client.SourceGen (Analyzer)
 ```
 
 ### ストレージ仕様
@@ -103,11 +155,12 @@ public readonly record struct TransactionId(long Value);
 ## ビルド
 
 ```bash
-dotnet build
-dotnet test
+dotnet build Quiver.slnx
+dotnet test Quiver.slnx
+dotnet run --project sandbox/QuiverSandbox
 ```
 
-要件: .NET 8 以上 / C# 12 以上
+要件: .NET 10 以上 / C# 13 以上
 
 ## テスト
 
@@ -131,16 +184,15 @@ dotnet test
 
 ## 開発状況
 
-Phase 1 コア層を Wave 方式で段階的に実装中。
-
 | Wave | 内容 | 状態 |
 |---|---|---|
 | Wave 1 | Storage / Codec / WAL | 完了 |
 | Wave 2 | Stores / Index | 完了 |
 | Wave 3 | TransactionManager / LockManager / RecoveryManager | 完了 |
 | Wave 4 | Physical Operators / Engine API Facade | 完了 |
+| Wave 5 | Client Layer (Source Generator / Gremlin API / Match DSL) | 完了 |
 
-Phase 2 以降 (クエリパーサ、LINQ プロバイダ、Source Generator) は未着手。
+次のフェーズ候補: Cypher 文字列パーサ、LINQ プロバイダ、NativeAOT 最終検証
 
 ## 設計ドキュメント
 

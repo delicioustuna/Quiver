@@ -1,4 +1,6 @@
 using GraphDb.Engine;
+using GraphDb.Engine.Client;
+using GraphDb.Engine.Client.Match;
 using GraphDb.Engine.Core;
 using GraphDb.Engine.Operators;
 using GraphDb.Engine.Stores;
@@ -14,6 +16,8 @@ try
     Demo5_IndexSearch(Path.Combine(baseDir, "05_index"));
     Demo6_Persistence(Path.Combine(baseDir, "06_persist"));
     Demo7_Diagnostics(Path.Combine(baseDir, "07_diag"));
+    Demo8_SourceGenCrud(Path.Combine(baseDir, "08_sourcegen"));
+    Demo9_GremlinAndMatch(Path.Combine(baseDir, "09_gremlin"));
 }
 finally
 {
@@ -351,6 +355,105 @@ static void Demo7_Diagnostics(string dir)
     Console.WriteLine($"  IsConsistent      = {report.IsConsistent}");
     foreach (var issue in report.Issues)
         Console.WriteLine($"  Issue: {issue}");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Demo 8: SourceGenerator CRUD  ([GraphNode] / [GraphProperty] / [GraphIndexed])
+// ─────────────────────────────────────────────────────────────────────────────
+static void Demo8_SourceGenCrud(string dir)
+{
+    H("Demo 8: SourceGenerator CRUD + g.Insert / g.Load / g.Update / g.Delete");
+    using var db = GraphDatabase.Open(dir);
+    db.Schema.CreateIndex("idx_person_name", "Person", "name", IndexKind.StringEquality);
+
+    using var tx = db.BeginTransaction();
+    var g = tx.G(db.Schema);
+
+    // g.InsertIndexed<T> — SourceGen 経由で IndexInsert も呼ぶ
+    var aliceId = g.InsertIndexed(new Person { Name = "Alice", Age = 30 });
+    var bobId   = g.InsertIndexed(new Person { Name = "Bob",   Age = 25 });
+    tx.CreateRelationship(aliceId, bobId, "KNOWS");
+    Console.WriteLine($"  Inserted Alice (nodeId={aliceId.Value}) and Bob (nodeId={bobId.Value})");
+
+    // g.Load<T>
+    var alice = g.Load<Person>(aliceId);
+    Console.WriteLine($"  Loaded Alice: Name={alice.Name}, Age={alice.Age}");
+
+    // g.Update<T>
+    alice.Age = 31;
+    g.Update(aliceId, alice);
+    Console.WriteLine($"  After Update: Age={g.Load<Person>(aliceId).Age}");
+
+    // FindByName — SourceGen 生成の検索メソッド
+    var found = Person.FindByName(tx, "Alice");
+    Console.WriteLine($"  FindByName(\"Alice\"): {found.Count} 件, Age={found[0].Entity.Age}");
+
+    // g.Delete<T>
+    g.Delete<Person>(bobId);
+    Console.WriteLine($"  Bob deleted: NodeExists={tx.NodeExists(bobId)}");
+
+    tx.Commit();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Demo 9: Gremlin ライク API + Match DSL
+// ─────────────────────────────────────────────────────────────────────────────
+static void Demo9_GremlinAndMatch(string dir)
+{
+    H("Demo 9: Gremlin ライク API + Match DSL");
+    using var db = GraphDatabase.Open(dir);
+    using var tx = db.BeginTransaction();
+
+    var g = tx.G(db.Schema);
+
+    // ── 書き込み: 命名統一後の API ──────────────────────────────────────
+    var alice = g.AddNode("Person").P("Name", "Alice").P("Age", 30).Next();
+    var bob   = g.AddNode("Person").P("Name", "Bob").P("Age", 25).Next();
+    var carol = g.AddNode("Person").P("Name", "Carol").P("Age", 35).Next();
+    g.AddRelationship("KNOWS").From(alice).To(bob).Next();
+    g.AddRelationship("KNOWS").From(alice).To(carol).Next();
+    g.AddRelationship("FOLLOWS").From(bob).To(carol).Next();
+    Console.WriteLine($"  Created nodes: alice={alice.Value}, bob={bob.Value}, carol={carol.Value}");
+
+    // ── 型なしトラバーサル ─────────────────────────────────────────────
+    var names = g.V().HasLabel("Person").Has("Age", P.Gt(25L)).Values("Name").ToList();
+    Console.WriteLine($"  Age > 25 の Person: [{string.Join(", ", names)}]");
+
+    var aliceFriends = g.V(alice).Out("KNOWS").Values("Name").ToList();
+    Console.WriteLine($"  Alice の KNOWS 先: [{string.Join(", ", aliceFriends)}]");
+
+    var knowsCount = g.V().HasLabel("Person").OutE("KNOWS").Count();
+    Console.WriteLine($"  KNOWS エッジ数: {knowsCount}");
+
+    // ── 型付きトラバーサル g.V<T>() + expression-based Has ──────────────
+    var people = g.V<Person>()
+                  .Has(p => p.Age, P.Gt(25L))
+                  .ToList();
+    Console.WriteLine($"  V<Person>().Has(p=>p.Age, Gt(25)): [{string.Join(", ", people.Select(p => p.Name))}]");
+
+    var peopleWithIds = g.V<Person>()
+                         .Has(p => p.Name, "Alice")
+                         .ToListWithIds();
+    Console.WriteLine($"  V<Person>().Has(p=>p.Name,\"Alice\"): id={peopleWithIds[0].Id.Value}, name={peopleWithIds[0].Entity.Name}");
+
+    // ── Match DSL ─────────────────────────────────────────────────────
+    var results = g.Match(
+        GraphPattern.Node("n", "Person")
+                    .Out("KNOWS", GraphPattern.Node("m", "Person"))
+    )
+    .Where("n", "Age", P.Gt(25L))
+    .Return(v => new
+    {
+        PersonName = v["n"].Get<string>("Name"),
+        FriendName = v["m"].Get<string>("Name"),
+    })
+    .ToList();
+
+    Console.WriteLine("  Match DSL (n:Person)-[:KNOWS]->(m:Person) WHERE n.Age > 25:");
+    foreach (var row in results)
+        Console.WriteLine($"    {row.PersonName} → {row.FriendName}");
+
+    tx.Commit();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

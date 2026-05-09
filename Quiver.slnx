@@ -9,6 +9,9 @@
     <Project Path="src\GraphDb.Engine.Wal\GraphDb.Engine.Wal.csproj" />
     <Project Path="src\GraphDb.Engine.Stores\GraphDb.Engine.Stores.csproj" />
     <Project Path="src\GraphDb.Engine.Index\GraphDb.Engine.Index.csproj" />
+    <Project Path="src\GraphDb.Engine.Client.Attributes\GraphDb.Engine.Client.Attributes.csproj" />
+    <Project Path="src\GraphDb.Engine.Client.SourceGen\GraphDb.Engine.Client.SourceGen.csproj" />
+    <Project Path="src\GraphDb.Engine.Client\GraphDb.Engine.Client.csproj" />
   </Folder>
   <Folder Name="/sandbox/">
     <Project Path="sandbox\QuiverSandbox\QuiverSandbox.csproj" />
@@ -22,5 +25,7 @@
     <Project Path="tests\GraphDb.Engine.Wal.Tests\GraphDb.Engine.Wal.Tests.csproj" />
     <Project Path="tests\GraphDb.Engine.Stores.Tests\GraphDb.Engine.Stores.Tests.csproj" />
     <Project Path="tests\GraphDb.Engine.Index.Tests\GraphDb.Engine.Index.Tests.csproj" />
+    <Project Path="tests\GraphDb.Engine.Client.Tests\GraphDb.Engine.Client.Tests.csproj" />
+    <Project Path="tests\GraphDb.Engine.Client.SourceGen.Tests\GraphDb.Engine.Client.SourceGen.Tests.csproj" />
   </Folder>
 </Solution>
