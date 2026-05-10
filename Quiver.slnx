@@ -13,6 +13,9 @@
     <Project Path="src\GraphDb.Engine.Client.SourceGen\GraphDb.Engine.Client.SourceGen.csproj" />
     <Project Path="src\GraphDb.Engine.Client\GraphDb.Engine.Client.csproj" />
   </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks\GraphDb.Benchmarks\GraphDb.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/sandbox/">
     <Project Path="sandbox\QuiverSandbox\QuiverSandbox.csproj" />
   </Folder>
