@@ -215,6 +215,36 @@ internal sealed class RelationshipStore : IRelationshipStore
         return new RelationshipEnumerator(this, nodeId, first, type, direction);
     }
 
+    // --- internal bulk-load helpers (no per-record FlushMeta) ---
+
+    internal void BulkWrite(long id, long src, long tgt, int typeId,
+        long srcPrev, long srcNext, long tgtPrev, long tgtNext)
+    {
+        var (wpid, woff) = Location(id);
+        EnsurePage(wpid);
+        var ph = _file.PinForWrite(wpid);
+        Span<byte> rec = ph.Data.Slice(woff, RecordSize);
+        rec.Clear();
+        rec[0] = FlagInUse;
+        RecordHelpers.WriteInt48(rec[1..], src);
+        RecordHelpers.WriteInt48(rec[7..], tgt);
+        BinaryPrimitives.WriteInt16LittleEndian(rec[13..], (short)typeId);
+        RecordHelpers.WriteInt48(rec[15..], srcPrev);
+        RecordHelpers.WriteInt48(rec[21..], srcNext);
+        RecordHelpers.WriteInt48(rec[27..], tgtPrev);
+        RecordHelpers.WriteInt48(rec[33..], tgtNext);
+        RecordHelpers.WriteInt48(rec[39..], -1L);
+        _file.UnpinDirty(wpid, 0);
+    }
+
+    internal void BulkSetHeaders(long hwm, long inUseCount)
+    {
+        _hwm = hwm;
+        _inUseCount = inUseCount;
+        _freeHead = -1;
+        FlushMeta();
+    }
+
     // --- private helpers ---
 
     private void UpdateListPrev(RelationshipId relId, NodeId side, RelationshipId newPrev)

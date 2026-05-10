@@ -166,6 +166,53 @@ internal sealed class PropertyStore : IPropertyStore
     public PropertyEnumerator Enumerate(PropertyId firstPropId)
         => new(this, firstPropId);
 
+    // --- internal bulk-load helpers ---
+
+    internal PropertyId BulkCreate(int keyId, PropertyValueType type, long scalar, byte[]? data, long nextPropId)
+    {
+        long id = _hwm++;
+        var (wpid, woff) = Location(id);
+        EnsurePage(wpid);
+        var ph = _file.PinForWrite(wpid);
+        Span<byte> rec = ph.Data.Slice(woff, RecordSize);
+        rec.Clear();
+
+        bool spillover = type is PropertyValueType.String or PropertyValueType.Bytes
+            && (data?.Length ?? 0) > InlineCapacity;
+
+        byte flags = FlagInUse;
+        if (spillover) flags |= FlagSpillover;
+        rec[0] = flags;
+        BinaryPrimitives.WriteInt32LittleEndian(rec[1..], keyId);
+        rec[5] = (byte)type;
+        RecordHelpers.WriteInt48(rec[35..], nextPropId);
+
+        if (spillover)
+        {
+            long blobId = _blobs.Write(data!);
+            RecordHelpers.WriteInt40(rec[30..], blobId);
+        }
+        else
+        {
+            PropertyValue pv = type switch
+            {
+                PropertyValueType.Bool   => PropertyValue.FromBool(scalar != 0),
+                PropertyValueType.Int32  => PropertyValue.FromInt32((int)scalar),
+                PropertyValueType.Int64  => PropertyValue.FromInt64(scalar),
+                PropertyValueType.Double => PropertyValue.FromDouble(BitConverter.Int64BitsToDouble(scalar)),
+                PropertyValueType.String => PropertyValue.FromUtf8((data ?? Array.Empty<byte>()).AsSpan()),
+                PropertyValueType.Bytes  => PropertyValue.FromBytes((data ?? Array.Empty<byte>()).AsSpan()),
+                _ => throw new GraphDb.Engine.Core.CorruptionException($"Unknown property type {type}")
+            };
+            WriteInline(rec[6..], pv);
+        }
+
+        _file.UnpinDirty(wpid, 0);
+        return new PropertyId(id);
+    }
+
+    internal void BulkFlushMeta() => FlushMeta();
+
     // --- private ---
 
     private static void WriteInline(Span<byte> inline, in PropertyValue v)

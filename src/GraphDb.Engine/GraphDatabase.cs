@@ -69,6 +69,9 @@ public sealed class GraphDatabase : IDisposable
         return db;
     }
 
+    public BulkLoader BeginBulkLoad()
+        => new(_nodeStore!, _relStore!, _propStore!);
+
     public IGraphTransaction BeginTransaction(
         IsolationLevel level = IsolationLevel.SnapshotIsolation)
     {

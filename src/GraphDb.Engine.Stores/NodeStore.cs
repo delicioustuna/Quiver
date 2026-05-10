@@ -139,6 +139,38 @@ internal sealed class NodeStore : INodeStore
         return new RelationshipId(RecordHelpers.ReadInt48(h.Data[(off + 1)..]));
     }
 
+    // --- internal bulk-load helpers (no per-record FlushMeta) ---
+
+    internal void BulkWrite(long id, int labelId)
+    {
+        var (wpid, woff) = Location(id);
+        EnsurePage(wpid);
+        var ph = _file.PinForWrite(wpid);
+        Span<byte> rec = ph.Data.Slice(woff, RecordSize);
+        rec.Clear();
+        rec[0] = FlagInUse;
+        RecordHelpers.WriteInt48(rec[1..], -1L);
+        RecordHelpers.WriteInt48(rec[7..], -1L);
+        BinaryPrimitives.WriteInt16LittleEndian(rec[13..], (short)labelId);
+        _file.UnpinDirty(wpid, 0);
+    }
+
+    internal void BulkUpdateFirstProp(long id, long firstPropId)
+    {
+        var (pageId, off) = Location(id);
+        var ph = _file.PinForWrite(pageId);
+        RecordHelpers.WriteInt48(ph.Data[(off + 7)..], firstPropId);
+        _file.UnpinDirty(pageId, 0);
+    }
+
+    internal void BulkSetHeaders(long hwm, long inUseCount)
+    {
+        _hwm = hwm;
+        _inUseCount = inUseCount;
+        _freeHead = -1;
+        FlushMeta();
+    }
+
     // --- private ---
 
     private (PageId pageId, int offset) Location(long id)
