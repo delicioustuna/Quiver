@@ -35,6 +35,19 @@ public sealed class GraphRelationshipGenerator : IIncrementalGenerator
         {
             relType = typeArg;
         }
+        else if (relAttr.ApplicationSyntaxReference?.GetSyntax() is
+                 Microsoft.CodeAnalysis.CSharp.Syntax.AttributeSyntax attrSyntax)
+        {
+            var args = attrSyntax.ArgumentList?.Arguments;
+            if (args?.Count > 0 &&
+                args.Value[0].Expression is
+                    Microsoft.CodeAnalysis.CSharp.Syntax.LiteralExpressionSyntax lit &&
+                lit.Token.Value is string litVal &&
+                !string.IsNullOrEmpty(litVal))
+            {
+                relType = litVal;
+            }
+        }
 
         var model = new GraphRelationshipModel
         {
