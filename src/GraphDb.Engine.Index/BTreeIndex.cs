@@ -99,26 +99,65 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
     public IEnumerable<long> SeekValues(TKey key)
     {
-        var list = new List<long>();
-        var en = Seek(in key);
-        while (en.MoveNext()) list.Add(en.Current);
-        return list;
+        byte[] kb = Encode(key);
+        PageId leaf = FindLeaf(kb);
+        var (snap, _) = ReadLeafSnap(leaf);
+        int count = BinaryPrimitives.ReadInt32LittleEndian(snap);
+        int pos = BL.LeafHdr;
+        for (int i = 0; i < count; i++)
+        {
+            int klen = BinaryPrimitives.ReadInt16LittleEndian(snap.AsSpan(pos));
+            long v = BinaryPrimitives.ReadInt64LittleEndian(snap.AsSpan(pos + 2 + klen));
+            int cmp = snap.AsSpan(pos + 2, klen).SequenceCompareTo(kb);
+            pos += 2 + klen + 8;
+            if (cmp < 0) continue;
+            if (cmp > 0) yield break;
+            yield return v;
+        }
     }
 
     public IEnumerable<long> RangeValues(TKey from, bool fromInclusive, TKey to, bool toInclusive)
     {
-        var list = new List<long>();
-        var en = Range(in from, fromInclusive, in to, toInclusive);
-        while (en.MoveNext()) list.Add(en.Current.Value);
-        return list;
+        byte[] fromKb = Encode(from);
+        byte[] toKb = Encode(to);
+        PageId leaf = FindLeaf(fromKb);
+        while (leaf.IsValid)
+        {
+            var (snap, nextLeaf) = ReadLeafSnap(leaf);
+            int count = BinaryPrimitives.ReadInt32LittleEndian(snap);
+            int pos = BL.LeafHdr;
+            for (int i = 0; i < count; i++)
+            {
+                int klen = BinaryPrimitives.ReadInt16LittleEndian(snap.AsSpan(pos));
+                long v = BinaryPrimitives.ReadInt64LittleEndian(snap.AsSpan(pos + 2 + klen));
+                int cmpFrom = snap.AsSpan(pos + 2, klen).SequenceCompareTo(fromKb);
+                int cmpTo = snap.AsSpan(pos + 2, klen).SequenceCompareTo(toKb);
+                pos += 2 + klen + 8;
+                if (fromInclusive ? cmpFrom < 0 : cmpFrom <= 0) continue;
+                if (toInclusive ? cmpTo > 0 : cmpTo >= 0) yield break;
+                yield return v;
+            }
+            leaf = new PageId(nextLeaf);
+        }
     }
 
     public IEnumerable<long> AllValues()
     {
-        var list = new List<long>();
-        var en = FullScan();
-        while (en.MoveNext()) list.Add(en.Current.Value);
-        return list;
+        PageId leaf = LeftmostLeaf();
+        while (leaf.IsValid)
+        {
+            var (snap, nextLeaf) = ReadLeafSnap(leaf);
+            int count = BinaryPrimitives.ReadInt32LittleEndian(snap);
+            int pos = BL.LeafHdr;
+            for (int i = 0; i < count; i++)
+            {
+                int klen = BinaryPrimitives.ReadInt16LittleEndian(snap.AsSpan(pos));
+                long v = BinaryPrimitives.ReadInt64LittleEndian(snap.AsSpan(pos + 2 + klen));
+                pos += 2 + klen + 8;
+                yield return v;
+            }
+            leaf = new PageId(nextLeaf);
+        }
     }
 
     public void Dispose() => _file.Dispose();
@@ -128,12 +167,11 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     private (byte[] median, PageId right)? InsertDown(PageId pid, byte[] key, long value, int depth)
     {
         if (depth == _height - 1) return LeafInsert(pid, key, value);
-        int ci; PageId child;
+        PageId child;
         {
             using var rh = _file.PinForRead(pid);
             int kc = BinaryPrimitives.ReadInt32LittleEndian(rh.Data);
-            ci = ChildIndex(rh.Data, kc, key);
-            child = GetChild(rh.Data, kc, ci);
+            child = FindChild(rh.Data, kc, key);
         }
         var split = InsertDown(child, key, value, depth + 1);
         if (split == null) return null;
@@ -255,12 +293,11 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     private bool DeleteDown(PageId pid, byte[] key, long value, int depth)
     {
         if (depth == _height - 1) return LeafDelete(pid, key, value);
-        int ci; PageId child;
+        PageId child;
         {
             using var rh = _file.PinForRead(pid);
             int kc = BinaryPrimitives.ReadInt32LittleEndian(rh.Data);
-            ci = ChildIndex(rh.Data, kc, key);
-            child = GetChild(rh.Data, kc, ci);
+            child = FindChild(rh.Data, kc, key);
         }
         return DeleteDown(child, key, value, depth + 1);
     }
@@ -292,11 +329,12 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     private PageId FindLeaf(byte[] key)
     {
         PageId cur = _root;
+        ReadOnlySpan<byte> keySpan = key;
         for (int d = 0; d < _height - 1; d++)
         {
             using var h = _file.PinForRead(cur);
             int kc = BinaryPrimitives.ReadInt32LittleEndian(h.Data);
-            cur = GetChild(h.Data, kc, ChildIndex(h.Data, kc, key));
+            cur = FindChild(h.Data, kc, keySpan);
         }
         return cur;
     }
@@ -312,30 +350,46 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         return cur;
     }
 
-    // Returns the child index (0-based) to follow for a given key
-    private static int ChildIndex(ReadOnlySpan<byte> body, int kc, byte[] key)
+    // Binary search on variable-length separator keys to find the child PageId to follow.
+    // Collects separator offsets in a first pass, then binary-searches (upper-bound) for the key.
+    private static PageId FindChild(ReadOnlySpan<byte> body, int kc, ReadOnlySpan<byte> key)
     {
+        if (kc == 0)
+            return new PageId(BinaryPrimitives.ReadInt64LittleEndian(body[4..]));
+
+        Span<int> offsets = kc <= 256 ? stackalloc int[kc] : new int[kc];
         int pos = BL.InternalHdr;
         for (int i = 0; i < kc; i++)
         {
-            int klen = BinaryPrimitives.ReadInt16LittleEndian(body[pos..]);
-            if (((ReadOnlySpan<byte>)key).SequenceCompareTo(body.Slice(pos + 2, klen)) < 0) return i;
-            pos += 2 + klen + 8;
+            offsets[i] = pos;
+            pos += 2 + BinaryPrimitives.ReadInt16LittleEndian(body[pos..]) + 8;
         }
-        return kc;
+
+        // Upper-bound binary search: find first sep index where key < sep
+        int lo = 0, hi = kc;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) >> 1;
+            int sepOff = offsets[mid];
+            int klen = BinaryPrimitives.ReadInt16LittleEndian(body[sepOff..]);
+            if (key.SequenceCompareTo(body.Slice(sepOff + 2, klen)) < 0)
+                hi = mid;
+            else
+                lo = mid + 1;
+        }
+
+        if (lo == 0)
+            return new PageId(BinaryPrimitives.ReadInt64LittleEndian(body[4..]));
+        int o = offsets[lo - 1];
+        int k = BinaryPrimitives.ReadInt16LittleEndian(body[o..]);
+        return new PageId(BinaryPrimitives.ReadInt64LittleEndian(body[(o + 2 + k)..]));
     }
 
-    private static PageId GetChild(ReadOnlySpan<byte> body, int kc, int ci)
+    // Reads a leaf page and returns its body snapshot and the next-leaf PageId value.
+    private (byte[] snap, long nextLeaf) ReadLeafSnap(PageId pid)
     {
-        if (ci == 0) return new PageId(BinaryPrimitives.ReadInt64LittleEndian(body[4..]));
-        int pos = BL.InternalHdr;
-        for (int i = 1; i <= ci; i++)
-        {
-            int klen = BinaryPrimitives.ReadInt16LittleEndian(body[pos..]);
-            if (i == ci) return new PageId(BinaryPrimitives.ReadInt64LittleEndian(body[(pos + 2 + klen)..]));
-            pos += 2 + klen + 8;
-        }
-        throw new InvalidOperationException("GetChild: index out of range");
+        using var h = _file.PinForRead(pid);
+        return (h.Data.ToArray(), BinaryPrimitives.ReadInt64LittleEndian(h.Data[4..]));
     }
 
     private static List<(byte[] k, long v)> ReadLeafEntries(byte[] body, int count)

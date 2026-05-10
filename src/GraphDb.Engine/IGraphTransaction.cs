@@ -50,6 +50,7 @@ public interface IGraphTransaction : IDisposable
 
     // 物理プラン実行
     QueryResult Execute(IPhysicalOperator plan);
+    IQueryCursor ExecuteCursor(IPhysicalOperator plan);
 
     void Commit();
     void Rollback();

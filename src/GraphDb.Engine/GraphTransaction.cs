@@ -265,6 +265,12 @@ internal sealed class GraphTransaction : IGraphTransaction
         return new QueryResult(schema, stats, rows);
     }
 
+    public IQueryCursor ExecuteCursor(IPhysicalOperator plan)
+    {
+        plan.Open(_inner);
+        return new PhysicalOperatorCursor(plan);
+    }
+
     public void Commit() => _inner.Commit();
     public void Rollback() => _inner.Abort();
     public void Dispose() => _inner.Dispose();
