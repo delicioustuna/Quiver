@@ -15,8 +15,8 @@ public interface IRelationshipStore
     long InUseCount { get; }
 }
 
-// RelRecord layout (40 bytes):
-// 0 Flags(1) 1 Source(6) 7 Target(6) 13 TypeId(2) 15 SrcPrev(6) 21 SrcNext(6) 27 TgtPrev(6) 33 TgtNext(6) 39 Pad(1)
+// RelRecord layout (48 bytes):
+// 0 Flags(1) 1 Source(6) 7 Target(6) 13 TypeId(2) 15 SrcPrev(6) 21 SrcNext(6) 27 TgtPrev(6) 33 TgtNext(6) 39 FirstPropId(6) 45 Pad(3)
 public readonly ref struct RelationshipReadHandle
 {
     private readonly RelationshipId _id;
@@ -28,6 +28,7 @@ public readonly ref struct RelationshipReadHandle
     private readonly RelationshipId _srcNext;
     private readonly RelationshipId _tgtPrev;
     private readonly RelationshipId _tgtNext;
+    private readonly PropertyId _firstPropId;
 
     public RelationshipId Id => _id;
     public bool InUse => _inUse;
@@ -38,13 +39,16 @@ public readonly ref struct RelationshipReadHandle
     public RelationshipId SourceNext => _srcNext;
     public RelationshipId TargetPrev => _tgtPrev;
     public RelationshipId TargetNext => _tgtNext;
+    public PropertyId FirstPropertyId => _firstPropId;
 
     internal RelationshipReadHandle(
         RelationshipId id, bool inUse, NodeId source, NodeId target, RelationshipTypeId type,
-        RelationshipId srcPrev, RelationshipId srcNext, RelationshipId tgtPrev, RelationshipId tgtNext)
+        RelationshipId srcPrev, RelationshipId srcNext, RelationshipId tgtPrev, RelationshipId tgtNext,
+        PropertyId firstPropId)
     {
         _id = id; _inUse = inUse; _source = source; _target = target; _type = type;
         _srcPrev = srcPrev; _srcNext = srcNext; _tgtPrev = tgtPrev; _tgtNext = tgtNext;
+        _firstPropId = firstPropId;
     }
 
     public void Dispose() { }
@@ -95,6 +99,11 @@ public ref struct RelationshipWriteHandle
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[33..]));
         set => RecordHelpers.WriteInt48(_rec[33..], value.Value);
+    }
+    public PropertyId FirstPropertyId
+    {
+        readonly get => new(RecordHelpers.ReadInt48(_rec[39..]));
+        set => RecordHelpers.WriteInt48(_rec[39..], value.Value);
     }
 
     public void Dispose() => _file.UnpinDirty(_pageId, 0);

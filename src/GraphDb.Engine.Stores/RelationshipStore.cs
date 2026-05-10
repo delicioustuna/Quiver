@@ -4,12 +4,12 @@ using GraphDb.Engine.Storage;
 
 namespace GraphDb.Engine.Stores;
 
-// Record layout (40 bytes):
+// Record layout (48 bytes):
 //  0 Flags(1) | 1 Source(6) | 7 Target(6) | 13 TypeId(2) |
-// 15 SrcPrev(6) | 21 SrcNext(6) | 27 TgtPrev(6) | 33 TgtNext(6) | 39 Pad(1)
+// 15 SrcPrev(6) | 21 SrcNext(6) | 27 TgtPrev(6) | 33 TgtNext(6) | 39 FirstPropId(6) | 45 Pad(3)
 internal sealed class RelationshipStore : IRelationshipStore
 {
-    public const int RecordSize = 40;
+    public const int RecordSize = 48;
     private const byte FlagInUse = 0x01;
 
     private static readonly PageId HeaderPageId = new(1);
@@ -17,7 +17,7 @@ internal sealed class RelationshipStore : IRelationshipStore
     private const int MetaHwm = 8;
     private const int MetaInUse = 16;
 
-    private static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 204
+    private static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 170
 
     private readonly IPagedFile _file;
     private long _freeHead;
@@ -80,6 +80,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         RecordHelpers.WriteInt48(rec[21..], srcHead.Value);                  // SrcNext
         RecordHelpers.WriteInt48(rec[27..], RelationshipId.Invalid.Value);  // TgtPrev
         RecordHelpers.WriteInt48(rec[33..], tgtHead.Value);                  // TgtNext
+        RecordHelpers.WriteInt48(rec[39..], PropertyId.Invalid.Value);        // FirstPropId
         _file.UnpinDirty(wpid, 0);
 
         // Update old head's SrcPrev / TgtPrev to point back at new rel
@@ -186,7 +187,8 @@ internal sealed class RelationshipStore : IRelationshipStore
         var srcNext = new RelationshipId(RecordHelpers.ReadInt48(rec[21..]));
         var tgtPrev = new RelationshipId(RecordHelpers.ReadInt48(rec[27..]));
         var tgtNext = new RelationshipId(RecordHelpers.ReadInt48(rec[33..]));
-        return new RelationshipReadHandle(relId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext);
+        var firstPropId = new PropertyId(RecordHelpers.ReadInt48(rec[39..]));
+        return new RelationshipReadHandle(relId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstPropId);
     }
 
     public RelationshipWriteHandle Write(RelationshipId relId)

@@ -48,7 +48,7 @@ internal sealed class GraphTransaction : IGraphTransaction
             relId = rel.Source == nodeId ? rel.SourceNext : rel.TargetNext;
         }
         foreach (var rid in toDelete)
-            _inner.Relationships.Delete(_inner.Nodes, rid);
+            DeleteRelationship(rid);
 
         _inner.Nodes.Free(nodeId);
     }
@@ -65,7 +65,23 @@ internal sealed class GraphTransaction : IGraphTransaction
         => _inner.Relationships.Create(_inner.Nodes, source, target, typeId);
 
     public void DeleteRelationship(RelationshipId relId)
-        => _inner.Relationships.Delete(_inner.Nodes, relId);
+    {
+        FreeRelationshipProperties(relId);
+        _inner.Relationships.Delete(_inner.Nodes, relId);
+    }
+
+    private void FreeRelationshipProperties(RelationshipId relId)
+    {
+        var firstPropId = _inner.Relationships.Read(relId).FirstPropertyId;
+        if (!firstPropId.IsValid) return;
+        var toDelete = new List<PropertyId>();
+        var propEnum = _inner.Properties.Enumerate(firstPropId);
+        while (propEnum.MoveNext())
+            toDelete.Add(propEnum.Current.Id);
+        var currentFirst = firstPropId;
+        foreach (var pid in toDelete)
+            currentFirst = _inner.Properties.Delete(pid, currentFirst);
+    }
 
     // ========== プロパティ操作 ==========
 
@@ -77,8 +93,27 @@ internal sealed class GraphTransaction : IGraphTransaction
 
     public void SetProperty(RelationshipId relId, string key, in PropertyValue value)
     {
-        // Phase 1: relationship properties not yet supported — store as node property workaround
-        throw new NotSupportedException("Relationship properties not yet implemented in Phase 1.");
+        var keyId = _propKeyTokens.GetOrCreate(key);
+        SetRelationshipProperty(relId, keyId, in value);
+    }
+
+    private void SetRelationshipProperty(RelationshipId relId, PropertyKeyId keyId, in PropertyValue value)
+    {
+        var firstPropId = _inner.Relationships.Read(relId).FirstPropertyId;
+        var newFirst = firstPropId;
+        var propEnum = _inner.Properties.Enumerate(firstPropId);
+        while (propEnum.MoveNext())
+        {
+            if (propEnum.Current.KeyId == keyId)
+            {
+                newFirst = _inner.Properties.Delete(propEnum.Current.Id, newFirst);
+                break;
+            }
+        }
+        var newPropId = _inner.Properties.Create(keyId, in value, newFirst);
+        var wh = _inner.Relationships.Write(relId);
+        wh.FirstPropertyId = newPropId;
+        wh.Dispose();
     }
 
     private void SetNodeProperty(NodeId nodeId, PropertyKeyId keyId, in PropertyValue value)
@@ -136,7 +171,17 @@ internal sealed class GraphTransaction : IGraphTransaction
     }
 
     public PropertyValue GetProperty(RelationshipId relId, string key)
-        => throw new NotSupportedException("Relationship properties not yet implemented in Phase 1.");
+    {
+        if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
+        var firstPropId = _inner.Relationships.Read(relId).FirstPropertyId;
+        var propEnum = _inner.Properties.Enumerate(firstPropId);
+        while (propEnum.MoveNext())
+        {
+            var prop = propEnum.Current;
+            if (prop.KeyId == keyId) return prop.Value;
+        }
+        return default;
+    }
 
     public bool HasProperty(NodeId nodeId, string key)
     {

@@ -233,4 +233,82 @@ public sealed class GraphDatabaseTests : IDisposable
         neighbors.Should().Contain(bob);
         tx.Rollback();
     }
+
+    // ===== Relationship Properties =====
+
+    [Fact]
+    public void SetProperty_on_relationship_and_GetProperty()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = tx.CreateNode("Person");
+        var bob   = tx.CreateNode("Person");
+        var rel   = tx.CreateRelationship(alice, bob, "KNOWS");
+
+        tx.SetProperty(rel, "since", PropertyValue.FromInt64(2020L));
+        var val = tx.GetProperty(rel, "since");
+
+        val.Type.Should().Be(PropertyValueType.Int64);
+        val.Int64Value.Should().Be(2020L);
+        tx.Commit();
+    }
+
+    [Fact]
+    public void SetProperty_on_relationship_overwrites_previous_value()
+    {
+        using var tx = _db.BeginTransaction();
+        var a   = tx.CreateNode("A");
+        var b   = tx.CreateNode("B");
+        var rel = tx.CreateRelationship(a, b, "LINK");
+
+        tx.SetProperty(rel, "weight", PropertyValue.FromDouble(1.0));
+        tx.SetProperty(rel, "weight", PropertyValue.FromDouble(9.9));
+        var val = tx.GetProperty(rel, "weight");
+
+        val.Type.Should().Be(PropertyValueType.Double);
+        val.DoubleValue.Should().BeApproximately(9.9, 1e-9);
+        tx.Commit();
+    }
+
+    [Fact]
+    public void GetProperty_on_relationship_returns_default_for_missing_key()
+    {
+        using var tx = _db.BeginTransaction();
+        var a   = tx.CreateNode("A");
+        var b   = tx.CreateNode("B");
+        var rel = tx.CreateRelationship(a, b, "LINK");
+
+        var val = tx.GetProperty(rel, "nonexistent");
+        val.Type.Should().Be(default(PropertyValueType));
+        tx.Rollback();
+    }
+
+    [Fact]
+    public void DeleteRelationship_frees_its_properties()
+    {
+        using var tx = _db.BeginTransaction();
+        var a   = tx.CreateNode("A");
+        var b   = tx.CreateNode("B");
+        var rel = tx.CreateRelationship(a, b, "LINK");
+        tx.SetProperty(rel, "since", PropertyValue.FromInt64(2021L));
+
+        tx.DeleteRelationship(rel);
+
+        var en = tx.EnumerateRelationships(a);
+        en.MoveNext().Should().BeFalse();
+        tx.Commit();
+    }
+
+    [Fact]
+    public void DeleteNode_with_relationship_properties_succeeds()
+    {
+        using var tx = _db.BeginTransaction();
+        var a   = tx.CreateNode("A");
+        var b   = tx.CreateNode("B");
+        var rel = tx.CreateRelationship(a, b, "LINK");
+        tx.SetProperty(rel, "x", PropertyValue.FromInt32(42));
+
+        tx.DeleteNode(a);
+        tx.NodeExists(a).Should().BeFalse();
+        tx.Commit();
+    }
 }
