@@ -1,4 +1,5 @@
 using FluentAssertions;
+using GraphDb.Engine.Client;
 using GraphDb.Engine.Core;
 using GraphDb.Engine.Operators;
 using GraphDb.Engine.Stores;
@@ -310,5 +311,94 @@ public sealed class GraphDatabaseTests : IDisposable
         tx.DeleteNode(a);
         tx.NodeExists(a).Should().BeFalse();
         tx.Commit();
+    }
+
+    // ===== 型付き Traversal API =====
+
+    [GraphRelationship("KNOWS")]
+    private partial class KnowsRel : IGraphRelationship<KnowsRel>
+    {
+        [GraphProperty]
+        public int Since { get; set; }
+
+        public static string GraphType => "KNOWS";
+        public static RelationshipId Insert(IGraphTransaction tx, NodeId from, NodeId to, KnowsRel entity)
+        {
+            var id = tx.CreateRelationship(from, to, "KNOWS");
+            tx.SetProperty(id, "Since", PropertyValue.FromInt32(entity.Since));
+            return id;
+        }
+        public static KnowsRel Load(IGraphTransaction tx, RelationshipId id)
+            => new() { Since = tx.GetProperty(id, "Since").Int32Value };
+        public static void Update(IGraphTransaction tx, RelationshipId id, KnowsRel entity)
+            => tx.SetProperty(id, "Since", PropertyValue.FromInt32(entity.Since));
+        public static void Delete(IGraphTransaction tx, RelationshipId id)
+            => tx.DeleteRelationship(id);
+    }
+
+    [GraphNode("Person")]
+    private partial class PersonNode : IGraphNode<PersonNode>
+    {
+        [GraphProperty]
+        public string Name { get; set; } = "";
+
+        public static string GraphLabel => "Person";
+        public static NodeId Insert(IGraphTransaction tx, PersonNode entity)
+        {
+            var id = tx.CreateNode("Person");
+            tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
+            return id;
+        }
+        public static NodeId InsertIndexed(IGraphTransaction tx, PersonNode entity) => Insert(tx, entity);
+        public static PersonNode Load(IGraphTransaction tx, NodeId id)
+            => new() { Name = System.Text.Encoding.UTF8.GetString(tx.GetProperty(id, "Name").Utf8StringValue) };
+        public static void Update(IGraphTransaction tx, NodeId id, PersonNode entity)
+            => tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
+        public static void Delete(IGraphTransaction tx, NodeId id) => tx.DeleteNode(id);
+    }
+
+    [Fact]
+    public void TypedTraversal_Out_generic_finds_neighbor()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = tx.CreateNode("Person");
+        var bob   = tx.CreateNode("Person");
+        tx.CreateRelationship(alice, bob, "KNOWS");
+
+        var g = tx.G(_db.Schema);
+        var neighbors = g.V(alice).Out<KnowsRel>().ToList();
+
+        neighbors.Should().ContainSingle().Which.Should().Be(bob);
+        tx.Rollback();
+    }
+
+    [Fact]
+    public void TypedTraversal_In_generic_finds_neighbor()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = tx.CreateNode("Person");
+        var bob   = tx.CreateNode("Person");
+        tx.CreateRelationship(alice, bob, "KNOWS");
+
+        var g = tx.G(_db.Schema);
+        var neighbors = g.V(bob).In<KnowsRel>().ToList();
+
+        neighbors.Should().ContainSingle().Which.Should().Be(alice);
+        tx.Rollback();
+    }
+
+    [Fact]
+    public void TypedGraphTraversal_Out_generic_finds_neighbor()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = PersonNode.Insert(tx, new PersonNode { Name = "Alice" });
+        var bob   = PersonNode.Insert(tx, new PersonNode { Name = "Bob" });
+        tx.CreateRelationship(alice, bob, "KNOWS");
+
+        var g = tx.G(_db.Schema);
+        var neighbors = g.V<PersonNode>().Out<KnowsRel>().ToList();
+
+        neighbors.Should().Contain(bob);
+        tx.Rollback();
     }
 }

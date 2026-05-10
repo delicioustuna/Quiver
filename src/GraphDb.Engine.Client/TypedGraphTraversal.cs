@@ -43,6 +43,14 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     public GraphTraversal<NodeId> Out(string? type = null) => _inner.Out(type);
     public GraphTraversal<NodeId> In(string? type = null)  => _inner.In(type);
     public GraphTraversal<NodeId> Both(string? type = null) => _inner.Both(type);
+
+    public GraphTraversal<NodeId> Out<TRel>() where TRel : IGraphRelationship<TRel>
+        => _inner.Out<TRel>();
+    public GraphTraversal<NodeId> In<TRel>() where TRel : IGraphRelationship<TRel>
+        => _inner.In<TRel>();
+    public GraphTraversal<NodeId> Both<TRel>() where TRel : IGraphRelationship<TRel>
+        => _inner.Both<TRel>();
+
     public GraphTraversal<string> Values(string key)       => _inner.Values(key);
 
     // ── 終端 ─────────────────────────────────────────────────────────────────

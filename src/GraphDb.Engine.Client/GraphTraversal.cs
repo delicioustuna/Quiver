@@ -111,17 +111,26 @@ public sealed class GraphTraversal<T>
         return new GraphTraversal<NodeId>(_tx, _schema, expand, row => row.GetNodeId(expand.CurrentEntityColumn), expand.CurrentEntityColumn);
     }
 
+    public GraphTraversal<NodeId> Out<TRel>() where TRel : IGraphRelationship<TRel>
+        => Out(TRel.GraphType);
+
     public GraphTraversal<NodeId> In(string? type = null)
     {
         var expand = new ExpandBuilder(_builder, Direction.Incoming, type, ExpandOutputMode.NeighborOnly);
         return new GraphTraversal<NodeId>(_tx, _schema, expand, row => row.GetNodeId(expand.CurrentEntityColumn), expand.CurrentEntityColumn);
     }
 
+    public GraphTraversal<NodeId> In<TRel>() where TRel : IGraphRelationship<TRel>
+        => In(TRel.GraphType);
+
     public GraphTraversal<NodeId> Both(string? type = null)
     {
         var expand = new ExpandBuilder(_builder, Direction.Both, type, ExpandOutputMode.NeighborOnly);
         return new GraphTraversal<NodeId>(_tx, _schema, expand, row => row.GetNodeId(expand.CurrentEntityColumn), expand.CurrentEntityColumn);
     }
+
+    public GraphTraversal<NodeId> Both<TRel>() where TRel : IGraphRelationship<TRel>
+        => Both(TRel.GraphType);
 
     public GraphTraversal<RelationshipId> OutE(string? type = null)
     {
