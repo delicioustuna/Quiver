@@ -95,6 +95,17 @@ public sealed class GraphDatabase : IDisposable
         return new GraphTransaction(inner, _labelTokens!, _relTypeTokens!, _propKeyTokens!);
     }
 
+    /// <summary>
+    /// Opens a snapshot-isolation transaction marked as read-only.
+    /// Read-only transactions are safe to use with parallel traversal operators
+    /// such as <see cref="GraphDb.Engine.Operators.ParallelBfsOperator"/>.
+    /// </summary>
+    public IGraphTransaction BeginReadOnlyTransaction()
+    {
+        var inner = _txManager!.Begin(IsolationLevel.SnapshotIsolation);
+        return new GraphTransaction(inner, _labelTokens!, _relTypeTokens!, _propKeyTokens!, isReadOnly: true);
+    }
+
     public ISchemaApi Schema => _schema!;
     public IDiagnosticsApi Diagnostics => _diagnostics!;
 

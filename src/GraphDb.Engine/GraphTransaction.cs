@@ -16,16 +16,19 @@ internal sealed class GraphTransaction : IGraphTransaction
         ITransaction inner,
         ITokenStore<LabelId> labelTokens,
         ITokenStore<RelationshipTypeId> relTypeTokens,
-        ITokenStore<PropertyKeyId> propKeyTokens)
+        ITokenStore<PropertyKeyId> propKeyTokens,
+        bool isReadOnly = false)
     {
         _inner = inner;
         _labelTokens = labelTokens;
         _relTypeTokens = relTypeTokens;
         _propKeyTokens = propKeyTokens;
+        IsReadOnly = isReadOnly;
     }
 
     public TransactionId Id => _inner.Id;
     public TransactionState State => _inner.State;
+    public bool IsReadOnly { get; }
 
     // ========== ノード操作 ==========
 

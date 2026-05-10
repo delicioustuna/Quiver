@@ -10,6 +10,13 @@ public interface IGraphTransaction : IDisposable
     TransactionId Id { get; }
     TransactionState State { get; }
 
+    /// <summary>
+    /// True when the transaction was opened as read-only.
+    /// Parallel traversal operators (e.g. ParallelBfsOperator) require a read-only
+    /// transaction to avoid concurrent write conflicts.
+    /// </summary>
+    bool IsReadOnly { get; }
+
     // ノード操作
     NodeId CreateNode(string label);
     NodeId CreateNode(LabelId labelId);
