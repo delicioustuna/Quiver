@@ -271,6 +271,8 @@ internal sealed class GraphTransaction : IGraphTransaction
         return new PhysicalOperatorCursor(plan);
     }
 
+    public IAdjacencyBlockStore? AdjacencyBlocks => _inner.AdjacencyBlocks;
+
     public void Commit() => _inner.Commit();
     public void Rollback() => _inner.Abort();
     public void Dispose() => _inner.Dispose();

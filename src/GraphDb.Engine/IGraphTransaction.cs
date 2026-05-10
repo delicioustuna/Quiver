@@ -48,6 +48,9 @@ public interface IGraphTransaction : IDisposable
         in PropertyValue from, bool fromInclusive,
         in PropertyValue to, bool toInclusive);
 
+    // 隣接ブロックインデックス（BulkLoader buildAdjacencyIndex:true 後に利用可能）
+    IAdjacencyBlockStore? AdjacencyBlocks { get; }
+
     // 物理プラン実行
     QueryResult Execute(IPhysicalOperator plan);
     IQueryCursor ExecuteCursor(IPhysicalOperator plan);

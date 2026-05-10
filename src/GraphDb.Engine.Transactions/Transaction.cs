@@ -16,6 +16,7 @@ internal sealed class Transaction : ITransaction
     private readonly TxRelationshipStore _relationships;
     private readonly TxPropertyStore _properties;
     private readonly TxIndexManager _indexes;
+    private readonly IAdjacencyBlockStore? _adjStore;
     private TransactionState _state;
 
     public TransactionId Id { get; }
@@ -27,6 +28,7 @@ internal sealed class Transaction : ITransaction
     public IRelationshipStore Relationships => _relationships;
     public IPropertyStore Properties => _properties;
     public IIndexManager Indexes => _indexes;
+    public IAdjacencyBlockStore? AdjacencyBlocks => _adjStore;
 
     internal Transaction(
         TransactionId id, IsolationLevel level, long snapshotLsn,
@@ -34,12 +36,14 @@ internal sealed class Transaction : ITransaction
         LockManager nodeLocks, LockManager relLocks, LockManager indexLocks,
         TransactionManager manager,
         INodeStore nodeStore, IRelationshipStore relStore,
-        IPropertyStore propStore, IIndexManager indexManager)
+        IPropertyStore propStore, IIndexManager indexManager,
+        IAdjacencyBlockStore? adjStore = null)
     {
         Id = id; Level = level; SnapshotLsn = snapshotLsn;
         _wal = wal;
         _nodeLocks = nodeLocks; _relLocks = relLocks; _indexLocks = indexLocks;
         _manager = manager;
+        _adjStore = adjStore;
         _state = TransactionState.Active;
         _nodes = new TxNodeStore(nodeStore, nodeLocks, id);
         _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes);

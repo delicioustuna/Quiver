@@ -18,9 +18,11 @@ public sealed class GraphDatabase : IDisposable
     private RelationshipTypeTokenStore? _relTypeTokens;
     private PropertyKeyTokenStore? _propKeyTokens;
     private IndexManager? _indexManager;
+    private AdjacencyBlockStore? _adjStore;
     private ITransactionManager? _txManager;
     private ISchemaApi? _schema;
     private IDiagnosticsApi? _diagnostics;
+    private string? _directoryPath;
 
     private GraphDatabase() { }
 
@@ -30,6 +32,7 @@ public sealed class GraphDatabase : IDisposable
         Directory.CreateDirectory(directoryPath);
 
         var db = new GraphDatabase();
+        db._directoryPath = directoryPath;
 
         db._pageManager = new PageManager();
 
@@ -57,11 +60,20 @@ public sealed class GraphDatabase : IDisposable
         var indexDir = Path.Combine(directoryPath, "indexes");
         db._indexManager = new IndexManager(indexDir);
 
+        // Open adjacency block store if pre-built by BulkLoader.
+        var adjDataPath = Path.Combine(directoryPath, "adj.db");
+        var adjIndexPath = Path.Combine(directoryPath, "adj_idx.dat");
+        if (File.Exists(adjDataPath) && File.Exists(adjIndexPath))
+        {
+            var adjFile = db._pageManager.OpenOrCreate(adjDataPath, PageKind.AdjacencyBlock);
+            db._adjStore = new AdjacencyBlockStore(adjFile, adjIndexPath);
+        }
+
         var recovery = new RecoveryManager(db._pageManager, db._wal);
         recovery.Recover();
 
         db._txManager = new TransactionManager(
-            db._wal, db._nodeStore, db._relStore, db._propStore, db._indexManager);
+            db._wal, db._nodeStore, db._relStore, db._propStore, db._indexManager, db._adjStore);
 
         db._schema = new SchemaApi(db._labelTokens, db._relTypeTokens, db._propKeyTokens, db._indexManager);
         db._diagnostics = new DiagnosticsApi(db._nodeStore, db._relStore);
@@ -69,8 +81,12 @@ public sealed class GraphDatabase : IDisposable
         return db;
     }
 
-    public BulkLoader BeginBulkLoad()
-        => new(_nodeStore!, _relStore!, _propStore!);
+    /// <param name="buildAdjacencyIndex">
+    /// When true, <see cref="BulkLoader.Commit"/> additionally builds adj.db + adj_idx.dat
+    /// so the adjacency block store is available for subsequent read-only transactions.
+    /// </param>
+    public BulkLoader BeginBulkLoad(bool buildAdjacencyIndex = false)
+        => new(_nodeStore!, _relStore!, _propStore!, buildAdjacencyIndex ? _directoryPath : null);
 
     public IGraphTransaction BeginTransaction(
         IsolationLevel level = IsolationLevel.SnapshotIsolation)

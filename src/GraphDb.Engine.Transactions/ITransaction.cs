@@ -22,6 +22,12 @@ public interface ITransaction : IDisposable
     IRelationshipStore Relationships { get; }
     IPropertyStore Properties { get; }
     IIndexManager Indexes { get; }
+
+    /// <summary>
+    /// Contiguous adjacency index built by BulkLoader. Null when not yet built or after mutations.
+    /// ExpandOperator uses this for faster neighbor scans; falls back to linked-list when null.
+    /// </summary>
+    IAdjacencyBlockStore? AdjacencyBlocks { get; }
 }
 
 public enum TransactionState : byte

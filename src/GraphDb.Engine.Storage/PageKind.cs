@@ -9,5 +9,6 @@ public enum PageKind : byte
     BTreeInternal = 4,
     BTreeLeaf = 5,
     TokenRecord = 6,
+    AdjacencyBlock = 7,
     Header = 0xFF,
 }

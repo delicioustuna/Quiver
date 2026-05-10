@@ -13,6 +13,7 @@ public sealed class BulkLoader : IDisposable
     private readonly NodeStore _nodeStore;
     private readonly RelationshipStore _relStore;
     private readonly PropertyStore _propStore;
+    private readonly string? _directoryPath;
 
     private readonly List<PendingNode> _nodes = new();
     private readonly List<PendingRel> _rels = new();
@@ -23,11 +24,13 @@ public sealed class BulkLoader : IDisposable
     private record struct PendingRel(long Id, long Src, long Tgt, int TypeId);
     private readonly record struct PendingProp(int KeyId, PropertyValueType Type, long Scalar, byte[]? Data);
 
-    internal BulkLoader(NodeStore nodeStore, RelationshipStore relStore, PropertyStore propStore)
+    internal BulkLoader(NodeStore nodeStore, RelationshipStore relStore, PropertyStore propStore,
+        string? directoryPath = null)
     {
         _nodeStore = nodeStore;
         _relStore = relStore;
         _propStore = propStore;
+        _directoryPath = directoryPath;
     }
 
     public void AppendNode(NodeId id, LabelId label)
@@ -66,6 +69,8 @@ public sealed class BulkLoader : IDisposable
         var ptrs = BuildRelPointers(nodeRelsList);
         CommitRelationships(ptrs, nodeRelsList);
         CommitProperties();
+        if (_directoryPath != null)
+            BuildAdjacencyIndex(_directoryPath);
     }
 
     public void Dispose() { }
@@ -166,6 +171,17 @@ public sealed class BulkLoader : IDisposable
             _nodeStore.BulkUpdateFirstProp(nodeId, nextPropId);
         }
         _propStore.BulkFlushMeta();
+    }
+
+    private void BuildAdjacencyIndex(string directory)
+    {
+        long nodeHwm = _nodes.Count > 0 ? _nodes.Max(n => n.Id) + 1 : 0L;
+        var relData = _rels.Select(r => (r.Id, r.Src, r.Tgt, r.TypeId)).ToList();
+        AdjacencyBlockStore.Build(
+            Path.Combine(directory, "adj.db"),
+            Path.Combine(directory, "adj_idx.dat"),
+            relData,
+            nodeHwm);
     }
 
     private void ThrowIfCommitted()

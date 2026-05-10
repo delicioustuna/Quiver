@@ -13,6 +13,7 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly IRelationshipStore _relStore;
     private readonly IPropertyStore _propStore;
     private readonly IIndexManager _indexManager;
+    private readonly IAdjacencyBlockStore? _adjStore;
     private readonly LockManager _nodeLocks = new();
     private readonly LockManager _relLocks = new();
     private readonly LockManager _indexLocks = new();
@@ -24,13 +25,15 @@ internal sealed class TransactionManager : ITransactionManager
         INodeStore nodeStore,
         IRelationshipStore relStore,
         IPropertyStore propStore,
-        IIndexManager indexManager)
+        IIndexManager indexManager,
+        IAdjacencyBlockStore? adjStore = null)
     {
         _wal = wal;
         _nodeStore = nodeStore;
         _relStore = relStore;
         _propStore = propStore;
         _indexManager = indexManager;
+        _adjStore = adjStore;
     }
 
     public int ActiveCount => _active.Count;
@@ -53,7 +56,7 @@ internal sealed class TransactionManager : ITransactionManager
         _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
         var tx = new Transaction(txId, level, snapshotLsn,
             _wal, _nodeLocks, _relLocks, _indexLocks, this,
-            _nodeStore, _relStore, _propStore, _indexManager);
+            _nodeStore, _relStore, _propStore, _indexManager, _adjStore);
         _active[txId.Value] = tx;
         return tx;
     }
