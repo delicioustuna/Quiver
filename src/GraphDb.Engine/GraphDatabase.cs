@@ -101,6 +101,7 @@ public sealed class GraphDatabase : IDisposable
     public void Dispose()
     {
         _txManager?.Dispose();
+        _adjStore?.Dispose();
         _indexManager?.Dispose();
         _labelTokens?.Dispose();
         _relTypeTokens?.Dispose();
