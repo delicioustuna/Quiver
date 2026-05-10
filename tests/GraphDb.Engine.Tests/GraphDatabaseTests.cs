@@ -401,4 +401,106 @@ public sealed class GraphDatabaseTests : IDisposable
         neighbors.Should().Contain(bob);
         tx.Rollback();
     }
+
+    // ===== OutE<TRel> / InE<TRel> / BothE<TRel> =====
+
+    [Fact]
+    public void OutE_generic_returns_relationship_id()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = tx.CreateNode("Person");
+        var bob   = tx.CreateNode("Person");
+        var rel   = tx.CreateRelationship(alice, bob, "KNOWS");
+
+        var g    = tx.G(_db.Schema);
+        var rels = g.V(alice).OutE<KnowsRel>().ToList();
+
+        rels.Should().ContainSingle().Which.Should().Be(rel);
+        tx.Rollback();
+    }
+
+    [Fact]
+    public void InE_generic_returns_relationship_id()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = tx.CreateNode("Person");
+        var bob   = tx.CreateNode("Person");
+        var rel   = tx.CreateRelationship(alice, bob, "KNOWS");
+
+        var g    = tx.G(_db.Schema);
+        var rels = g.V(bob).InE<KnowsRel>().ToList();
+
+        rels.Should().ContainSingle().Which.Should().Be(rel);
+        tx.Rollback();
+    }
+
+    [Fact]
+    public void BothE_generic_returns_both_directions()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = tx.CreateNode("Person");
+        var bob   = tx.CreateNode("Person");
+        var rel   = tx.CreateRelationship(alice, bob, "KNOWS");
+
+        var g    = tx.G(_db.Schema);
+        var fromAlice = g.V(alice).BothE<KnowsRel>().ToList();
+        var fromBob   = g.V(bob).BothE<KnowsRel>().ToList();
+
+        fromAlice.Should().ContainSingle().Which.Should().Be(rel);
+        fromBob.Should().ContainSingle().Which.Should().Be(rel);
+        tx.Rollback();
+    }
+
+    [Fact]
+    public void TypedTraversal_OutE_generic_returns_relationship_id()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = PersonNode.Insert(tx, new PersonNode { Name = "Alice" });
+        var bob   = PersonNode.Insert(tx, new PersonNode { Name = "Bob" });
+        var rel   = KnowsRel.Insert(tx, alice, bob, new KnowsRel { Since = 2020 });
+
+        var g    = tx.G(_db.Schema);
+        var rels = g.V<PersonNode>().OutE<KnowsRel>().ToList();
+
+        rels.Should().Contain(rel);
+        tx.Rollback();
+    }
+
+    // ===== Values<TProp>(expr) =====
+
+    [Fact]
+    public void TypedTraversal_Values_expression_returns_property()
+    {
+        using var tx = _db.BeginTransaction();
+        PersonNode.Insert(tx, new PersonNode { Name = "Alice" });
+        PersonNode.Insert(tx, new PersonNode { Name = "Bob" });
+
+        var g     = tx.G(_db.Schema);
+        var names = g.V<PersonNode>().Values(p => p.Name).ToList();
+
+        names.Should().Contain("Alice").And.Contain("Bob");
+        tx.Rollback();
+    }
+
+    // ===== Match DSL 型付き overload =====
+
+    [Fact]
+    public void Match_typed_Out_and_Load_returns_entity()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = PersonNode.Insert(tx, new PersonNode { Name = "Alice" });
+        var bob   = PersonNode.Insert(tx, new PersonNode { Name = "Bob" });
+        tx.CreateRelationship(alice, bob, "KNOWS");
+
+        var g = tx.G(_db.Schema);
+        var p = GraphDb.Engine.Client.Match.GraphPattern.Node("p", "Person");
+        var q = GraphDb.Engine.Client.Match.GraphPattern.Node("q", "Person");
+
+        var results = g.Match(p.Out<KnowsRel>(q))
+                       .Return(ctx => ctx.Load<PersonNode>("q"))
+                       .ToList();
+
+        results.Should().ContainSingle().Which.Name.Should().Be("Bob");
+        tx.Rollback();
+    }
 }

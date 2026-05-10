@@ -51,7 +51,17 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     public GraphTraversal<NodeId> Both<TRel>() where TRel : IGraphRelationship<TRel>
         => _inner.Both<TRel>();
 
-    public GraphTraversal<string> Values(string key)       => _inner.Values(key);
+    public GraphTraversal<RelationshipId> OutE(string? type = null)  => _inner.OutE(type);
+    public GraphTraversal<RelationshipId> OutE<TRel>() where TRel : IGraphRelationship<TRel> => _inner.OutE<TRel>();
+    public GraphTraversal<RelationshipId> InE(string? type = null)   => _inner.InE(type);
+    public GraphTraversal<RelationshipId> InE<TRel>() where TRel : IGraphRelationship<TRel>  => _inner.InE<TRel>();
+    public GraphTraversal<RelationshipId> BothE(string? type = null) => _inner.BothE(type);
+    public GraphTraversal<RelationshipId> BothE<TRel>() where TRel : IGraphRelationship<TRel> => _inner.BothE<TRel>();
+
+    public GraphTraversal<string> Values(string key) => _inner.Values(key);
+
+    public GraphTraversal<string> Values<TProp>(Expression<Func<T, TProp>> selector)
+        => _inner.Values(MemberName(selector));
 
     // ── 終端 ─────────────────────────────────────────────────────────────────
 

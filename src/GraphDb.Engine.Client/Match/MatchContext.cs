@@ -1,3 +1,4 @@
+using GraphDb.Engine.Client;
 using GraphDb.Engine.Core;
 using GraphDb.Engine.Stores;
 using System.Text;
@@ -23,6 +24,12 @@ public sealed class MatchContext
             var nodeId = _row.GetNodeId(col);
             return new MatchContextRow(nodeId, _tx);
         }
+    }
+
+    public T Load<T>(string variable) where T : IGraphNode<T>
+    {
+        var col = _varToColumn[variable];
+        return T.Load(_tx, _row.GetNodeId(col));
     }
 }
 

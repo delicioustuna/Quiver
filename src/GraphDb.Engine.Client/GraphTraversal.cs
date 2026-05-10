@@ -138,6 +138,27 @@ public sealed class GraphTraversal<T>
         return new GraphTraversal<RelationshipId>(_tx, _schema, expand, row => row.GetRelationshipId(0), 0);
     }
 
+    public GraphTraversal<RelationshipId> OutE<TRel>() where TRel : IGraphRelationship<TRel>
+        => OutE(TRel.GraphType);
+
+    public GraphTraversal<RelationshipId> InE(string? type = null)
+    {
+        var expand = new ExpandBuilder(_builder, Direction.Incoming, type, ExpandOutputMode.NeighborAndRel);
+        return new GraphTraversal<RelationshipId>(_tx, _schema, expand, row => row.GetRelationshipId(0), 0);
+    }
+
+    public GraphTraversal<RelationshipId> InE<TRel>() where TRel : IGraphRelationship<TRel>
+        => InE(TRel.GraphType);
+
+    public GraphTraversal<RelationshipId> BothE(string? type = null)
+    {
+        var expand = new ExpandBuilder(_builder, Direction.Both, type, ExpandOutputMode.NeighborAndRel);
+        return new GraphTraversal<RelationshipId>(_tx, _schema, expand, row => row.GetRelationshipId(0), 0);
+    }
+
+    public GraphTraversal<RelationshipId> BothE<TRel>() where TRel : IGraphRelationship<TRel>
+        => BothE(TRel.GraphType);
+
     public GraphTraversal<string> Values(string key)
     {
         var lookup = new PropertyLookupBuilder(_builder, key);
