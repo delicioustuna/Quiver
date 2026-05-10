@@ -484,6 +484,9 @@ $RECYCLE.BIN/
 # 設計書
 docs/design
 
+# ベンチマーク実測記録（ローカル計測値のため管理対象外）
+docs/benchmarks/
+
 # Claude管理ファイル類
 .claude
 CLAUDE.md
