@@ -98,6 +98,23 @@ public sealed class GraphDatabase : IDisposable
     public ISchemaApi Schema => _schema!;
     public IDiagnosticsApi Diagnostics => _diagnostics!;
 
+    /// <summary>
+    /// Scan the entire database and return a fresh <see cref="GraphStats"/> snapshot.
+    /// This is an O(N + E) operation and is typically called once at startup or after bulk loads.
+    /// </summary>
+    public GraphStats CollectStats()
+    {
+        using var tx = _txManager!.Begin(IsolationLevel.SnapshotIsolation);
+        return GraphStats.Collect(tx);
+    }
+
+    /// <summary>
+    /// Create a <see cref="QueryOptimizer"/> backed by the given stats (or a freshly collected
+    /// snapshot when <paramref name="stats"/> is null).
+    /// </summary>
+    public QueryOptimizer CreateOptimizer(GraphStats? stats = null)
+        => new(stats ?? CollectStats());
+
     public void Dispose()
     {
         _txManager?.Dispose();
