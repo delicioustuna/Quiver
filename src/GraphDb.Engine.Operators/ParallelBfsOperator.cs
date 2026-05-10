@@ -6,12 +6,14 @@ using GraphDb.Engine.Transactions;
 namespace GraphDb.Engine.Operators;
 
 /// <summary>
-/// PW-7: Parallel BFS operator. Collects all source nodes from upstream,
-/// then runs independent BFS from each source simultaneously using Parallel.ForEach.
+/// PW-7: Parallel BFS implementation. Used internally by BfsOperator when
+/// maxParallelism != 1. Not part of the public API.
 ///
-/// Each parallel task owns private state (frontier queue, visited HashSet,
-/// adjacency entry buffer), so no synchronization is needed during traversal —
-/// only result collection uses a ConcurrentBag.
+/// Collects all source nodes from upstream, then runs independent BFS from each
+/// source simultaneously using Parallel.ForEach. Each parallel task owns private
+/// state (frontier queue, visited HashSet, adjacency entry buffer), so no
+/// synchronization is needed during traversal — only result collection uses a
+/// ConcurrentBag.
 ///
 /// The underlying stores are safe to read concurrently: TxNodeStore.Read() and
 /// TxRelationshipStore.Read() delegate directly to the inner stores without write
@@ -20,7 +22,7 @@ namespace GraphDb.Engine.Operators;
 ///
 /// Schema: (startNode NodeId, endNode NodeId, depth Int64).
 /// </summary>
-public sealed class ParallelBfsOperator : IPhysicalOperator
+internal sealed class ParallelBfsOperator : IPhysicalOperator
 {
     private const int AdjBuf = 512;
 

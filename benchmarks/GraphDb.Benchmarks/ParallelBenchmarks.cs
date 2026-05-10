@@ -101,12 +101,12 @@ public class ParallelBenchmarks
         return total;
     }
 
-    [Benchmark(Description = "2-hop parallel ParallelBfsOperator")]
+    [Benchmark(Description = "2-hop parallel BfsOperator(maxParallelism:-1)")]
     public long TwoHopParallel()
     {
-        var plan = new ParallelBfsOperator(
+        var plan = new BfsOperator(
             new MultiNodeSource(_sourceNodes), sourceNodeColumn: 0,
-            Direction.Outgoing, typeFilter: null, maxDepth: 2);
+            Direction.Outgoing, typeFilter: null, maxDepth: 2, maxParallelism: -1);
         using var result = _readTx.Execute(plan);
         return result.Statistics.RowsProduced;
     }
@@ -128,12 +128,12 @@ public class ParallelBenchmarks
         return total;
     }
 
-    [Benchmark(Description = "3-hop parallel ParallelBfsOperator")]
+    [Benchmark(Description = "3-hop parallel BfsOperator(maxParallelism:-1)")]
     public long ThreeHopParallel()
     {
-        var plan = new ParallelBfsOperator(
+        var plan = new BfsOperator(
             new MultiNodeSource(_sourceNodes), sourceNodeColumn: 0,
-            Direction.Outgoing, typeFilter: null, maxDepth: 3);
+            Direction.Outgoing, typeFilter: null, maxDepth: 3, maxParallelism: -1);
         using var result = _readTx.Execute(plan);
         return result.Statistics.RowsProduced;
     }
