@@ -229,13 +229,51 @@ internal sealed class GraphTransaction : IGraphTransaction
         => _inner.Indexes.CreateDoubleIndex(indexName).Insert(key, nodeId.Value);
 
     public NodeIdEnumerator SeekIndex(string indexName, in PropertyValue key)
-        => throw new NotImplementedException();
+    {
+        IEnumerable<long> values = key.Type switch
+        {
+            PropertyValueType.Int32 or PropertyValueType.Int64 or PropertyValueType.Bool =>
+                _inner.Indexes.CreateInt64Index(indexName).SeekValues(key.Int64Value),
+            PropertyValueType.Double =>
+                _inner.Indexes.CreateDoubleIndex(indexName).SeekValues(key.DoubleValue),
+            PropertyValueType.String =>
+                _inner.Indexes.CreateStringIndex(indexName).SeekValues(
+                    System.Text.Encoding.UTF8.GetString(key.Utf8StringValue)),
+            _ => [],
+        };
+        return new NodeIdEnumerator(values);
+    }
 
     public NodeIdEnumerator RangeIndex(
         string indexName,
         in PropertyValue from, bool fromInclusive,
         in PropertyValue to, bool toInclusive)
-        => throw new NotImplementedException();
+    {
+        IEnumerable<long> values;
+        switch (from.Type)
+        {
+            case PropertyValueType.Int32:
+            case PropertyValueType.Int64:
+            case PropertyValueType.Bool:
+                values = _inner.Indexes.CreateInt64Index(indexName).RangeValues(
+                    from.Int64Value, fromInclusive, to.Int64Value, toInclusive);
+                break;
+            case PropertyValueType.Double:
+                values = _inner.Indexes.CreateDoubleIndex(indexName).RangeValues(
+                    from.DoubleValue, fromInclusive, to.DoubleValue, toInclusive);
+                break;
+            case PropertyValueType.String:
+                string fromStr = System.Text.Encoding.UTF8.GetString(from.Utf8StringValue);
+                string toStr   = System.Text.Encoding.UTF8.GetString(to.Utf8StringValue);
+                values = _inner.Indexes.CreateStringIndex(indexName).RangeValues(
+                    fromStr, fromInclusive, toStr, toInclusive);
+                break;
+            default:
+                values = [];
+                break;
+        }
+        return new NodeIdEnumerator(values);
+    }
 
     // ========== 物理プラン実行 ==========
 

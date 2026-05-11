@@ -482,6 +482,81 @@ public sealed class GraphDatabaseTests : IDisposable
         tx.Rollback();
     }
 
+    // ===== SeekIndex / RangeIndex =====
+
+    [Fact]
+    public void SeekIndex_string_equality_finds_node()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = tx.CreateNode("Person");
+        var bob   = tx.CreateNode("Person");
+        tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
+        tx.SetProperty(bob,   "name", PropertyValue.FromString("Bob"));
+        tx.IndexInsert("idx_name", "Alice", alice);
+        tx.IndexInsert("idx_name", "Bob",   bob);
+
+        var key = PropertyValue.FromString("Alice");
+        var en = tx.SeekIndex("idx_name", key);
+        var results = new List<NodeId>();
+        while (en.MoveNext()) results.Add(en.Current);
+        en.Dispose();
+
+        results.Should().ContainSingle().Which.Should().Be(alice);
+        tx.Rollback();
+    }
+
+    [Fact]
+    public void SeekIndex_int64_equality_finds_node()
+    {
+        using var tx = _db.BeginTransaction();
+        var n42 = tx.CreateNode("Item");
+        var n99 = tx.CreateNode("Item");
+        tx.IndexInsert("idx_score", 42L, n42);
+        tx.IndexInsert("idx_score", 99L, n99);
+
+        var key = PropertyValue.FromInt64(42L);
+        var en = tx.SeekIndex("idx_score", key);
+        var results = new List<NodeId>();
+        while (en.MoveNext()) results.Add(en.Current);
+        en.Dispose();
+
+        results.Should().ContainSingle().Which.Should().Be(n42);
+        tx.Rollback();
+    }
+
+    [Fact]
+    public void RangeIndex_int64_returns_nodes_in_range()
+    {
+        using var tx = _db.BeginTransaction();
+        var n10 = tx.CreateNode("Item");
+        var n20 = tx.CreateNode("Item");
+        var n30 = tx.CreateNode("Item");
+        tx.IndexInsert("idx_val", 10L, n10);
+        tx.IndexInsert("idx_val", 20L, n20);
+        tx.IndexInsert("idx_val", 30L, n30);
+
+        var from = PropertyValue.FromInt64(10L);
+        var to   = PropertyValue.FromInt64(25L);
+        var en = tx.RangeIndex("idx_val", from, fromInclusive: true, to, toInclusive: true);
+        var results = new List<NodeId>();
+        while (en.MoveNext()) results.Add(en.Current);
+        en.Dispose();
+
+        results.Should().Contain(n10).And.Contain(n20).And.NotContain(n30);
+        tx.Rollback();
+    }
+
+    [Fact]
+    public void SeekIndex_on_nonexistent_index_returns_empty()
+    {
+        using var tx = _db.BeginTransaction();
+        var key = PropertyValue.FromInt64(1L);
+        var en = tx.SeekIndex("no_such_index", key);
+        en.MoveNext().Should().BeFalse();
+        en.Dispose();
+        tx.Rollback();
+    }
+
     // ===== Match DSL 型付き overload =====
 
     [Fact]

@@ -68,7 +68,22 @@ public interface IGraphTransaction : IDisposable
 
 public ref struct NodeIdEnumerator
 {
-    public bool MoveNext() => throw new NotImplementedException();
-    public NodeId Current => throw new NotImplementedException();
-    public void Dispose() { }
+    private IEnumerator<long>? _inner;
+    private NodeId _current;
+
+    internal NodeIdEnumerator(IEnumerable<long> source)
+    {
+        _inner = source.GetEnumerator();
+        _current = default;
+    }
+
+    public bool MoveNext()
+    {
+        if (_inner == null || !_inner.MoveNext()) return false;
+        _current = new NodeId(_inner.Current);
+        return true;
+    }
+
+    public NodeId Current => _current;
+    public void Dispose() { _inner?.Dispose(); }
 }
