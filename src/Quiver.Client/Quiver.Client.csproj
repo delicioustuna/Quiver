@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Quiver\Quiver.csproj" />
+    <ProjectReference Include="..\Quiver.Operators\Quiver.Operators.csproj" />
+    <ProjectReference Include="..\Quiver.Client.Attributes\Quiver.Client.Attributes.csproj" />
+    <ProjectReference Include="..\Quiver.SourceGen\Quiver.SourceGen.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+</Project>

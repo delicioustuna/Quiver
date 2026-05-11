@@ -1,4 +1,4 @@
-# Quiver
+﻿# Quiver
 
 Pure C# で実装するグラフデータベースエンジン。Amazon Neptune や Apache TinkerPop のような本格的なグラフ DB のコア層を、マネージドコードのみで構築することを目標とする。
 
@@ -186,19 +186,19 @@ foreach (var name in g.V().HasLabel("Person").Values("Name").AsEnumerable())
 ## アーキテクチャ
 
 ```
-GraphDb.Engine.Client           ← Gremlin ライク API / Match DSL / SourceGen 糖衣構文
-├── GraphDb.Engine.Client.Attributes  ← [GraphNode] / [GraphProperty] / [GraphIndexed]
-└── GraphDb.Engine.Client.SourceGen   ← Roslyn IIncrementalGenerator (CRUD + FindBy* 生成)
+Quiver.Client           ← Gremlin ライク API / Match DSL / SourceGen 糖衣構文
+├── Quiver.Client.Attributes  ← [GraphNode] / [GraphProperty] / [GraphIndexed]
+└── Quiver.SourceGen   ← Roslyn IIncrementalGenerator (CRUD + FindBy* 生成)
 
-GraphDb.Engine              ← 公開 API ファサード
-├── GraphDb.Engine.Operators    ← Volcano 型物理演算子
-├── GraphDb.Engine.Transactions ← TransactionManager / LockManager / RecoveryManager
-├── GraphDb.Engine.Wal          ← Write-Ahead Log (グループコミット)
-├── GraphDb.Engine.Index        ← B+Tree インデックス
-├── GraphDb.Engine.Stores       ← Node / Relationship / Property / Token ストア
-├── GraphDb.Engine.Codec        ← Span<byte> シリアライザ
-├── GraphDb.Engine.Storage      ← ページ管理 + バッファプール (8KB ページ)
-└── GraphDb.Engine.Core         ← 共通型・例外・抽象インタフェース
+Quiver              ← 公開 API ファサード
+├── Quiver.Operators    ← Volcano 型物理演算子
+├── Quiver.Transactions ← TransactionManager / LockManager / RecoveryManager
+├── Quiver.Wal          ← Write-Ahead Log (グループコミット)
+├── Quiver.Index        ← B+Tree インデックス
+├── Quiver.Stores       ← Node / Relationship / Property / Token ストア
+├── Quiver.Codec        ← Span<byte> シリアライザ
+├── Quiver.Storage      ← ページ管理 + バッファプール (8KB ページ)
+└── Quiver.Core         ← 共通型・例外・抽象インタフェース
 ```
 
 ### 依存関係
@@ -298,7 +298,7 @@ dotnet run --project sandbox/QuiverSandbox
 | FT-7 | SourceGen: `[GraphRelationship("KNOWS")]` の type 値を正しく生成 | 完了 |
 | FT-8 | `GraphTransaction.SeekIndex` / `RangeIndex` 公開 API | 完了 |
 | FT-9 | WAL PageImage replay（クラッシュ後の完全なデータ復旧） | 完了 |
-| FT-5 | Namespace 整理（`GraphDb.Engine.*` → `Quiver.*`） | **未完** |
+| FT-5 | Namespace 整理（`Quiver.*` → `Quiver.*`） | **未完** |
 
 ### Perf Wave
 

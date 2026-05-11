@@ -1,34 +1,34 @@
-<Solution>
+﻿<Solution>
   <Folder Name="/src/">
-    <Project Path="src\GraphDb.Engine.Core\GraphDb.Engine.Core.csproj" />
-    <Project Path="src\GraphDb.Engine.Storage\GraphDb.Engine.Storage.csproj" />
-    <Project Path="src/GraphDb.Engine.Operators/GraphDb.Engine.Operators.csproj" />
-    <Project Path="src/GraphDb.Engine.Transactions/GraphDb.Engine.Transactions.csproj" />
-    <Project Path="src/GraphDb.Engine/GraphDb.Engine.csproj" />
-    <Project Path="src\GraphDb.Engine.Codec\GraphDb.Engine.Codec.csproj" />
-    <Project Path="src\GraphDb.Engine.Wal\GraphDb.Engine.Wal.csproj" />
-    <Project Path="src\GraphDb.Engine.Stores\GraphDb.Engine.Stores.csproj" />
-    <Project Path="src\GraphDb.Engine.Index\GraphDb.Engine.Index.csproj" />
-    <Project Path="src\GraphDb.Engine.Client.Attributes\GraphDb.Engine.Client.Attributes.csproj" />
-    <Project Path="src\GraphDb.Engine.Client.SourceGen\GraphDb.Engine.Client.SourceGen.csproj" />
-    <Project Path="src\GraphDb.Engine.Client\GraphDb.Engine.Client.csproj" />
+    <Project Path="src\Quiver.Core\Quiver.Core.csproj" />
+    <Project Path="src\Quiver.Storage\Quiver.Storage.csproj" />
+    <Project Path="src/Quiver.Operators/Quiver.Operators.csproj" />
+    <Project Path="src/Quiver.Transactions/Quiver.Transactions.csproj" />
+    <Project Path="src/Quiver/Quiver.csproj" />
+    <Project Path="src\Quiver.Codec\Quiver.Codec.csproj" />
+    <Project Path="src\Quiver.Wal\Quiver.Wal.csproj" />
+    <Project Path="src\Quiver.Stores\Quiver.Stores.csproj" />
+    <Project Path="src\Quiver.Index\Quiver.Index.csproj" />
+    <Project Path="src\Quiver.Client.Attributes\Quiver.Client.Attributes.csproj" />
+    <Project Path="src\Quiver.SourceGen\Quiver.SourceGen.csproj" />
+    <Project Path="src\Quiver.Client\Quiver.Client.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
-    <Project Path="benchmarks\GraphDb.Benchmarks\GraphDb.Benchmarks.csproj" />
+    <Project Path="benchmarks\Quiver.Benchmarks\Quiver.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/sandbox/">
     <Project Path="sandbox\QuiverSandbox\QuiverSandbox.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests\GraphDb.Engine.Storage.Tests\GraphDb.Engine.Storage.Tests.csproj" />
-    <Project Path="tests/GraphDb.Engine.Operators.Tests/GraphDb.Engine.Operators.Tests.csproj" />
-    <Project Path="tests/GraphDb.Engine.Tests/GraphDb.Engine.Tests.csproj" />
-    <Project Path="tests/GraphDb.Engine.Transactions.Tests/GraphDb.Engine.Transactions.Tests.csproj" />
-    <Project Path="tests\GraphDb.Engine.Codec.Tests\GraphDb.Engine.Codec.Tests.csproj" />
-    <Project Path="tests\GraphDb.Engine.Wal.Tests\GraphDb.Engine.Wal.Tests.csproj" />
-    <Project Path="tests\GraphDb.Engine.Stores.Tests\GraphDb.Engine.Stores.Tests.csproj" />
-    <Project Path="tests\GraphDb.Engine.Index.Tests\GraphDb.Engine.Index.Tests.csproj" />
-    <Project Path="tests\GraphDb.Engine.Client.Tests\GraphDb.Engine.Client.Tests.csproj" />
-    <Project Path="tests\GraphDb.Engine.Client.SourceGen.Tests\GraphDb.Engine.Client.SourceGen.Tests.csproj" />
+    <Project Path="tests\Quiver.Storage.Tests\Quiver.Storage.Tests.csproj" />
+    <Project Path="tests/Quiver.Operators.Tests/Quiver.Operators.Tests.csproj" />
+    <Project Path="tests/Quiver.Tests/Quiver.Tests.csproj" />
+    <Project Path="tests/Quiver.Transactions.Tests/Quiver.Transactions.Tests.csproj" />
+    <Project Path="tests\Quiver.Codec.Tests\Quiver.Codec.Tests.csproj" />
+    <Project Path="tests\Quiver.Wal.Tests\Quiver.Wal.Tests.csproj" />
+    <Project Path="tests\Quiver.Stores.Tests\Quiver.Stores.Tests.csproj" />
+    <Project Path="tests\Quiver.Index.Tests\Quiver.Index.Tests.csproj" />
+    <Project Path="tests\Quiver.Client.Tests\Quiver.Client.Tests.csproj" />
+    <Project Path="tests\Quiver.SourceGen.Tests\Quiver.SourceGen.Tests.csproj" />
   </Folder>
 </Solution>

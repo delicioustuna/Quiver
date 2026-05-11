@@ -1,0 +1,79 @@
+﻿using System.Buffers.Binary;
+using System.IO.Hashing;
+using Quiver.Core;
+
+namespace Quiver.Storage;
+
+/// <summary>
+/// 各ページ先頭 32 バイトのヘッダ定義。
+/// </summary>
+internal static class PageHeader
+{
+    public const int Size = 32;
+    public const uint Magic = 0x47445042; // "GDPB"
+    public const byte LayoutVersion = 1;
+
+    private const int OffsetMagic = 0;
+    private const int OffsetVersion = 4;
+    private const int OffsetKind = 5;
+    private const int OffsetPageId = 8;
+    private const int OffsetLsn = 16;
+    private const int OffsetChecksum = 24;
+
+    public static void Write(Span<byte> page, PageId pageId, PageKind kind, long lsn)
+    {
+        BinaryPrimitives.WriteUInt32LittleEndian(page[OffsetMagic..], Magic);
+        page[OffsetVersion] = LayoutVersion;
+        page[OffsetKind] = (byte)kind;
+        BinaryPrimitives.WriteInt64LittleEndian(page[OffsetPageId..], pageId.Value);
+        BinaryPrimitives.WriteInt64LittleEndian(page[OffsetLsn..], lsn);
+        uint crc = ComputeChecksum(page);
+        BinaryPrimitives.WriteUInt32LittleEndian(page[OffsetChecksum..], crc);
+    }
+
+    public static void UpdateLsnAndChecksum(Span<byte> page, long lsn)
+    {
+        BinaryPrimitives.WriteInt64LittleEndian(page[OffsetLsn..], lsn);
+        BinaryPrimitives.WriteUInt32LittleEndian(page[OffsetChecksum..], 0);
+        uint crc = ComputeChecksum(page);
+        BinaryPrimitives.WriteUInt32LittleEndian(page[OffsetChecksum..], crc);
+    }
+
+    public static void Validate(ReadOnlySpan<byte> page, PageId expectedPageId)
+    {
+        uint magic = BinaryPrimitives.ReadUInt32LittleEndian(page[OffsetMagic..]);
+        if (magic != Magic)
+            throw new CorruptionException($"Invalid page magic: 0x{magic:X8}");
+
+        long pageId = BinaryPrimitives.ReadInt64LittleEndian(page[OffsetPageId..]);
+        if (pageId != expectedPageId.Value)
+            throw new CorruptionException($"Page ID mismatch: expected {expectedPageId.Value}, got {pageId}");
+
+        uint storedCrc = BinaryPrimitives.ReadUInt32LittleEndian(page[OffsetChecksum..]);
+        // 一時的に 0 にしてチェックサム再計算
+        Span<byte> mutable = stackalloc byte[Size];
+        page[..Size].CopyTo(mutable);
+        BinaryPrimitives.WriteUInt32LittleEndian(mutable[OffsetChecksum..], 0);
+
+        // 本体部分(Size 以降)と一緒に計算
+        // ここでは page 全体を対象とする(ヘッダのチェックサムフィールド除く)
+        uint computedCrc = Crc32.HashToUInt32(mutable) ^ Crc32.HashToUInt32(page[Size..]);
+        if (storedCrc != computedCrc)
+            throw new CorruptionException($"Checksum mismatch on page {expectedPageId.Value}");
+    }
+
+    public static long ReadLsn(ReadOnlySpan<byte> page) =>
+        BinaryPrimitives.ReadInt64LittleEndian(page[OffsetLsn..]);
+
+    public static PageKind ReadKind(ReadOnlySpan<byte> page) =>
+        (PageKind)page[OffsetKind];
+
+    private static uint ComputeChecksum(ReadOnlySpan<byte> page)
+    {
+        // チェックサムフィールド自体は 0 扱いで計算
+        Span<byte> header = stackalloc byte[Size];
+        page[..Size].CopyTo(header);
+        BinaryPrimitives.WriteUInt32LittleEndian(header[OffsetChecksum..], 0);
+        return Crc32.HashToUInt32(header) ^ Crc32.HashToUInt32(page[Size..]);
+    }
+}
