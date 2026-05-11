@@ -633,4 +633,75 @@ public sealed class GraphDatabaseTests : IDisposable
         results.Should().ContainSingle().Which.Name.Should().Be("Bob");
         tx.Rollback();
     }
+
+    // ===== PW-11 streaming cursor =====
+
+    [Fact]
+    public void GraphTraversal_AsEnumerable_streams_without_full_materialise()
+    {
+        using var tx = _db.BeginTransaction();
+        tx.CreateNode("Person");
+        tx.CreateNode("Person");
+        tx.CreateNode("Person");
+        tx.Commit();
+
+        using var rtx = _db.BeginReadOnlyTransaction();
+        var g = rtx.G(_db.Schema);
+        int count = 0;
+        foreach (var _ in g.V().HasLabel("Person").AsEnumerable())
+            count++;
+        rtx.Rollback();
+
+        count.Should().Be(3);
+    }
+
+    [Fact]
+    public void GraphTraversal_AsCursor_streams_results()
+    {
+        using var tx = _db.BeginTransaction();
+        for (int i = 0; i < 5; i++)
+        {
+            var id = tx.CreateNode("Counter");
+            tx.SetProperty(id, "n", PropertyValue.FromInt64(i));
+        }
+        tx.Commit();
+
+        using var rtx = _db.BeginReadOnlyTransaction();
+        var g = rtx.G(_db.Schema);
+        var names = new List<string>();
+        using (var cursor = g.V().HasLabel("Counter").Values("n").AsCursor())
+        {
+            while (cursor.MoveNext())
+                names.Add(cursor.Current);
+        }
+        rtx.Rollback();
+
+        names.Should().HaveCount(5);
+    }
+
+    [Fact]
+    public void MatchQuery_AsCursor_streams_results()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = tx.CreateNode("StreamPerson");
+        tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
+        var bob = tx.CreateNode("StreamPerson");
+        tx.SetProperty(bob, "name", PropertyValue.FromString("Bob"));
+        tx.CreateRelationship(alice, bob, "STREAM_KNOWS");
+        tx.Commit();
+
+        using var rtx = _db.BeginReadOnlyTransaction();
+        var g = rtx.G(_db.Schema);
+        var p = GraphDb.Engine.Client.Match.GraphPattern.Node("p", "StreamPerson");
+        var q = GraphDb.Engine.Client.Match.GraphPattern.Node("q", "StreamPerson");
+        var found = new List<string>();
+        using (var cursor = g.Match(p.Out("STREAM_KNOWS", q)).Return(ctx => ctx["q"].Get<string>("name")).AsCursor())
+        {
+            while (cursor.MoveNext())
+                found.Add(cursor.Current);
+        }
+        rtx.Rollback();
+
+        found.Should().ContainSingle().Which.Should().Be("Bob");
+    }
 }

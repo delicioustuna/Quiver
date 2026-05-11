@@ -199,4 +199,25 @@ public sealed class GraphTraversal<T>
             count++;
         return count;
     }
+
+    /// <summary>
+    /// Returns a streaming cursor over the results. The caller owns the cursor lifetime
+    /// and must dispose it. The cursor is valid only within the owning transaction.
+    /// </summary>
+    public ITraversalCursor<T> AsCursor()
+    {
+        var cursor = _tx.ExecuteCursor(_builder.Build(_schema));
+        return new TraversalCursor<T>(cursor, _projection);
+    }
+
+    /// <summary>
+    /// Streams results one-by-one without materializing the full list.
+    /// Valid only within the owning transaction.
+    /// </summary>
+    public IEnumerable<T> AsEnumerable()
+    {
+        using var cursor = _tx.ExecuteCursor(_builder.Build(_schema));
+        while (cursor.MoveNext())
+            yield return _projection(cursor.Current);
+    }
 }

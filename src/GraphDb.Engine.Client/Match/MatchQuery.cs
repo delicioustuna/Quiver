@@ -78,4 +78,27 @@ public sealed class ReturnClause<TResult>
         }
         return default;
     }
+
+    /// <summary>
+    /// Returns a streaming cursor over the results. The caller owns the cursor lifetime
+    /// and must dispose it. The cursor is valid only within the owning transaction.
+    /// </summary>
+    public ITraversalCursor<TResult> AsCursor()
+    {
+        var (plan, varMap) = MatchCompiler.Compile(_tx, _schema, _pattern, _where);
+        var inner = _tx.ExecuteCursor(plan);
+        return new TraversalCursor<TResult>(inner, row => _selector(new MatchContext(row, _tx, varMap)));
+    }
+
+    /// <summary>
+    /// Streams results one-by-one without materializing the full list.
+    /// Valid only within the owning transaction.
+    /// </summary>
+    public IEnumerable<TResult> AsEnumerable()
+    {
+        var (plan, varMap) = MatchCompiler.Compile(_tx, _schema, _pattern, _where);
+        using var cursor = _tx.ExecuteCursor(plan);
+        while (cursor.MoveNext())
+            yield return _selector(new MatchContext(cursor.Current, _tx, varMap));
+    }
 }
