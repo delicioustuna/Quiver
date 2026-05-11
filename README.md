@@ -171,6 +171,15 @@ var results = g.Match(
 })
 .ToList();
 
+// サブトラバーサル述語（WHERE EXISTS / NOT EXISTS 相当）
+var loners = g.V().HasLabel("Person")
+               .Not(t => t.Out("KNOWS"))          // KNOWS エッジを持たないノード
+               .ToList();
+
+var connectors = g.V().HasLabel("Person")
+                   .Where(t => t.Out("KNOWS").HasLabel("Person"))
+                   .ToList();
+
 // ストリーミング（大量結果でメモリを抑えたい場合）
 using var cursor = g.V<Person>().AsCursor();
 while (cursor.MoveNext())
@@ -298,7 +307,8 @@ dotnet run --project sandbox/QuiverSandbox
 | FT-7 | SourceGen: `[GraphRelationship("KNOWS")]` の type 値を正しく生成 | 完了 |
 | FT-8 | `GraphTransaction.SeekIndex` / `RangeIndex` 公開 API | 完了 |
 | FT-9 | WAL PageImage replay（クラッシュ後の完全なデータ復旧） | 完了 |
-| FT-5 | Namespace 整理（`Quiver.*` → `Quiver.*`） | **未完** |
+| FT-5 | Namespace 整理（`GraphDb.Engine.*` → `Quiver.*`） | 完了 |
+| Phase2 | サブトラバーサル述語（`.Where()` / `.Not()`） | 完了 |
 
 ### Perf Wave
 
