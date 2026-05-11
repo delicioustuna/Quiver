@@ -8,8 +8,12 @@ Pure C# で実装するグラフデータベースエンジン。Amazon Neptune 
 - **NativeAOT 対応** — 単一バイナリとして配布可能。リフレクション不使用
 - **ゼロアロケーションホットパス** — `Span<T>` / `ref struct` でヒープ確保を排除
 - **Volcano 型クエリエンジン** — 物理演算子を手書きで合成してクエリを実行
-- **WAL + スナップショット分離** — クラッシュリカバリ付きトランザクション
-- **B+Tree インデックス** — 完全一致・範囲検索に対応
+- **WAL + クラッシュリカバリ** — PageImage replay によるコミット済みデータの完全復元
+- **B+Tree インデックス** — 完全一致・範囲検索（`SeekIndex` / `RangeIndex` 公開 API）
+- **BulkLoader** — append-only バルクロードで通常 TX 比数倍のスループット
+- **AdjacencyBlockStore** — ページ連続配置による高速隣接リスト（低次数・高次数を統一ストレージで管理）
+- **クエリ最適化** — ヒストグラム統計 + ルールベース Optimizer でスキャン順序を自動選択
+- **Streaming cursor** — `AsCursor()` / `AsEnumerable()` で大量結果をメモリを抑えて逐次処理
 
 ## クイックスタート
 
@@ -166,6 +170,17 @@ var results = g.Match(
     FriendName = v["m"].Get<string>("Name"),
 })
 .ToList();
+
+// ストリーミング（大量結果でメモリを抑えたい場合）
+using var cursor = g.V<Person>().AsCursor();
+while (cursor.MoveNext())
+{
+    var person = cursor.Current;   // トランザクション有効期間内のみ有効
+}
+
+// AsEnumerable で foreach / LINQ
+foreach (var name in g.V().HasLabel("Person").Values("Name").AsEnumerable())
+    Console.WriteLine(name);
 ```
 
 ## アーキテクチャ
@@ -247,14 +262,21 @@ dotnet run --project sandbox/QuiverSandbox
 
 ## 性能目標
 
-| 操作 | 目標 |
+以下はすべて設計目標値。実測値は `benchmarks/` の BenchmarkDotNet で計測可能。
+
+| 操作 | 設計目標 |
 |---|---|
 | `CreateNode` | < 1 µs |
 | `SetProperty` | < 2 µs |
-| `EnumerateRelationships`(隣接 10 件) | < 1.5 µs |
+| `EnumerateRelationships`（隣接 10 件） | < 1.5 µs |
 | クエリエンジンのラッパオーバーヘッド | < 5% |
+| BulkLoader（100 万 edge） | 通常 TX 比 5× 以上高速 |
+| 1-hop scan（degree 100、AdjacencyBlockStore） | < 0.5 µs |
+| BFS 2-hop（ハブ degree 100、2 段） | < 5 ms |
 
 ## 開発状況
+
+### アーキテクチャ Wave
 
 | Wave | 内容 | 状態 |
 |---|---|---|
@@ -264,7 +286,42 @@ dotnet run --project sandbox/QuiverSandbox
 | Wave 4 | Physical Operators / Engine API Facade | 完了 |
 | Wave 5 | Client Layer (Source Generator / Gremlin API / Match DSL) | 完了 |
 
-次のフェーズ候補: Cypher 文字列パーサ、LINQ プロバイダ、NativeAOT 最終検証
+### Feature Tasks
+
+| タスク | 内容 | 状態 |
+|---|---|---|
+| FT-1 | Relationship プロパティ対応 | 完了 |
+| FT-2 | `[GraphRelationship]` 属性 | 完了 |
+| FT-3 | Relationship Source Generator | 完了 |
+| FT-4 | 型付き Traversal API（`Out<TRel>()` など） | 完了 |
+| FT-6 | `QuiverDb.OpenDatabase` 入口 API | 完了 |
+| FT-7 | SourceGen: `[GraphRelationship("KNOWS")]` の type 値を正しく生成 | 完了 |
+| FT-8 | `GraphTransaction.SeekIndex` / `RangeIndex` 公開 API | 完了 |
+| FT-9 | WAL PageImage replay（クラッシュ後の完全なデータ復旧） | 完了 |
+| FT-5 | Namespace 整理（`GraphDb.Engine.*` → `Quiver.*`） | **未完** |
+
+### Perf Wave
+
+| Wave | 内容 | 状態 |
+|---|---|---|
+| PW-1 | BenchmarkDotNet 測定基盤 | 完了 |
+| PW-2 | B+Tree バイナリサーチ + QueryCursor streaming | 完了 |
+| PW-3 | BulkLoader（append-only バルクロード） | 完了 |
+| PW-4 | AdjacencyBlockStore（ページ連続配置の隣接リスト） | 完了 |
+| PW-5 | 多段 Operator（BfsOperator / ShortestPathOperator など） | 完了 |
+| PW-6 | ヒストグラム統計 + ルールベース Optimizer | 完了 |
+| PW-7 | 並列 BFS（ParallelBfsOperator） | 完了 |
+| PW-11 | Client 層 streaming cursor（`AsCursor()` / `AsEnumerable()`） | 完了 |
+| PW-8 | 高次数ノード向け BFS adjacency iterator | **未完** |
+| PW-9 | BulkLoader streaming / chunk build（1000 万 edge 超対応） | **未完** |
+| PW-10 | B+Tree 更新系 allocation 削減 | **未完** |
+
+### Gremlin / Cypher Compat
+
+対応状況の詳細は [docs/design/gremlin_cypher_compat.md](docs/design/gremlin_cypher_compat.md) を参照。
+基本探索・比較述語・CRUD は全対応。集約・可変長パス・`as/select` 公開・パス操作は Phase 2 以降。
+
+次のフェーズ候補: Gremlin compat API 拡充（GC-1〜4）、Cypher 文字列パーサ、NativeAOT 最終検証
 
 ## 設計ドキュメント
 
