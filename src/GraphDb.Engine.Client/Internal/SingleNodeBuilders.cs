@@ -5,6 +5,19 @@ using GraphDb.Engine.Transactions;
 
 namespace GraphDb.Engine.Client.Internal;
 
+/// <summary>CorrelatedInputOperator を IOperatorBuilder として包む。SubTraversal の起点に使用する。</summary>
+internal sealed class CorrelatedSeedBuilder : IOperatorBuilder
+{
+    private readonly CorrelatedInputOperator _probe;
+    public int CurrentEntityColumn => 0;
+    public int PredictedOutputColumnCount => 1;
+
+    internal CorrelatedSeedBuilder(CorrelatedInputOperator probe) { _probe = probe; }
+
+    public IPhysicalOperator Build(ISchemaApi schema) => _probe;
+}
+
+
 internal sealed class SingleNodeBuilder : IOperatorBuilder
 {
     private readonly NodeId _nodeId;

@@ -704,4 +704,104 @@ public sealed class GraphDatabaseTests : IDisposable
 
         found.Should().ContainSingle().Which.Should().Be("Bob");
     }
+
+    // ===== Phase 2: サブトラバーサル述語 =====
+
+    [Fact]
+    public void Where_out_exists_keeps_only_nodes_with_neighbor()
+    {
+        // alice → bob (KNOWS), charlie has no edges
+        using var tx = _db.BeginTransaction();
+        var alice   = tx.CreateNode("Person");
+        var bob     = tx.CreateNode("Person");
+        var charlie = tx.CreateNode("Person");
+        tx.CreateRelationship(alice, bob, "KNOWS");
+        tx.Commit();
+
+        using var rtx = _db.BeginReadOnlyTransaction();
+        var g = rtx.G(_db.Schema);
+
+        var results = g.V().HasLabel("Person")
+                          .Where(t => t.Out("KNOWS"))
+                          .ToList();
+
+        results.Should().ContainSingle().Which.Should().Be(alice);
+        rtx.Rollback();
+    }
+
+    [Fact]
+    public void Not_out_exists_keeps_only_nodes_without_neighbor()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice   = tx.CreateNode("Person");
+        var bob     = tx.CreateNode("Person");
+        var charlie = tx.CreateNode("Person");
+        tx.CreateRelationship(alice, bob, "KNOWS");
+        tx.Commit();
+
+        using var rtx = _db.BeginReadOnlyTransaction();
+        var g = rtx.G(_db.Schema);
+
+        var results = g.V().HasLabel("Person")
+                          .Not(t => t.Out("KNOWS"))
+                          .ToList();
+
+        results.Should().HaveCount(2);
+        results.Should().Contain(bob).And.Contain(charlie);
+        results.Should().NotContain(alice);
+        rtx.Rollback();
+    }
+
+    [Fact]
+    public void Where_out_with_property_filter_passes_only_matching_neighbors()
+    {
+        // alice → bob("name"="Bob"), dave → eve("name"="Eve")
+        // Where(t => t.Out("KNOWS").Has("name", "Bob")) should return only alice
+        using var tx = _db.BeginTransaction();
+        var alice = tx.CreateNode("Person");
+        var bob   = tx.CreateNode("Person");
+        var dave  = tx.CreateNode("Person");
+        var eve   = tx.CreateNode("Person");
+        tx.SetProperty(bob, "name", PropertyValue.FromString("Bob"));
+        tx.SetProperty(eve, "name", PropertyValue.FromString("Eve"));
+        tx.CreateRelationship(alice, bob, "KNOWS");
+        tx.CreateRelationship(dave, eve, "KNOWS");
+        tx.Commit();
+
+        using var rtx = _db.BeginReadOnlyTransaction();
+        var g = rtx.G(_db.Schema);
+
+        var results = g.V().HasLabel("Person")
+                          .Where(t => t.Out("KNOWS").Has("name", "Bob"))
+                          .ToList();
+
+        results.Should().ContainSingle().Which.Should().Be(alice);
+        rtx.Rollback();
+    }
+
+    [Fact]
+    public void Where_multiple_nodes_each_probed_independently()
+    {
+        // 10 nodes, even-indexed ones each have a KNOWS edge
+        using var tx = _db.BeginTransaction();
+        var nodes = new NodeId[10];
+        for (int i = 0; i < 10; i++)
+            nodes[i] = tx.CreateNode("Item");
+        for (int i = 0; i < 10; i += 2)
+        {
+            var target = tx.CreateNode("Target");
+            tx.CreateRelationship(nodes[i], target, "LINKS");
+        }
+        tx.Commit();
+
+        using var rtx = _db.BeginReadOnlyTransaction();
+        var g = rtx.G(_db.Schema);
+
+        var results = g.V().HasLabel("Item")
+                          .Where(t => t.Out("LINKS"))
+                          .ToList();
+
+        results.Should().HaveCount(5);
+        rtx.Rollback();
+    }
 }

@@ -159,6 +159,46 @@ public sealed class GraphTraversal<T>
     public GraphTraversal<RelationshipId> BothE<TRel>() where TRel : IGraphRelationship<TRel>
         => BothE(TRel.GraphType);
 
+    /// <summary>
+    /// WHERE EXISTS サブトラバーサルでフィルタする。
+    /// 例: .Where(t => t.Out("KNOWS")) — KNOWS エッジを持つノードのみを通す。
+    /// </summary>
+    public GraphTraversal<T> Where(Func<SubTraversal, SubTraversal> innerTraversal)
+    {
+        var schema = _schema;
+        var outerEntityColumn = _entityColumn;
+        var capturedInner = innerTraversal;
+        return new GraphTraversal<T>(_tx, _schema,
+            new FilterBuilder(_builder, s =>
+            {
+                var probe = new CorrelatedInputOperator();
+                var seed = new CorrelatedSeedBuilder(probe);
+                var start = new SubTraversal(probe, seed, s, 0);
+                return capturedInner(start).BuildExistsPredicate(outerEntityColumn);
+            }),
+            _projection, _entityColumn);
+    }
+
+    /// <summary>
+    /// WHERE NOT EXISTS サブトラバーサルでフィルタする。
+    /// 例: .Not(t => t.Out("KNOWS")) — KNOWS エッジを持たないノードのみを通す。
+    /// </summary>
+    public GraphTraversal<T> Not(Func<SubTraversal, SubTraversal> innerTraversal)
+    {
+        var schema = _schema;
+        var outerEntityColumn = _entityColumn;
+        var capturedInner = innerTraversal;
+        return new GraphTraversal<T>(_tx, _schema,
+            new FilterBuilder(_builder, s =>
+            {
+                var probe = new CorrelatedInputOperator();
+                var seed = new CorrelatedSeedBuilder(probe);
+                var start = new SubTraversal(probe, seed, s, 0);
+                return capturedInner(start).BuildNotExistsPredicate(outerEntityColumn);
+            }),
+            _projection, _entityColumn);
+    }
+
     public GraphTraversal<string> Values(string key)
     {
         var lookup = new PropertyLookupBuilder(_builder, key);

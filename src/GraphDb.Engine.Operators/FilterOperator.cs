@@ -37,5 +37,10 @@ public sealed class FilterOperator : IPhysicalOperator
     }
 
     public ReadOnlySpan<byte> GetBytes(int column) => _source.GetBytes(column);
-    public void Dispose() { _source.Dispose(); }
+
+    public void Dispose()
+    {
+        _source.Dispose();
+        if (_predicate is IDisposable d) d.Dispose();
+    }
 }
