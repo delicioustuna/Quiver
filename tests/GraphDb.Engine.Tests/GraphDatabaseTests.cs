@@ -557,6 +557,61 @@ public sealed class GraphDatabaseTests : IDisposable
         tx.Rollback();
     }
 
+    // ===== WAL 耐久性（クラッシュシナリオ） =====
+
+    [Fact]
+    public void Committed_data_survives_data_file_loss_via_wal_replay()
+    {
+        // Simulate crash: data files are reverted to pre-write state (buffer not flushed),
+        // but WAL is intact. Recovery must restore the committed data.
+        var dir = Path.Combine(Path.GetTempPath(), "quiver_crash_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            // Phase 1: create the database so all files exist in pristine state.
+            {
+                using var db = GraphDatabase.Open(dir);
+            }
+
+            // Capture pre-write snapshots of data files.
+            byte[] nodesSnap = File.ReadAllBytes(Path.Combine(dir, "nodes.db"));
+            byte[] relsSnap  = File.ReadAllBytes(Path.Combine(dir, "rels.db"));
+            byte[] propsSnap = File.ReadAllBytes(Path.Combine(dir, "props.db"));
+            byte[] blobsSnap = File.ReadAllBytes(Path.Combine(dir, "blobs.db"));
+
+            NodeId aliceId;
+
+            // Phase 2: write data and commit (WAL is flushed; buffer pool may not be).
+            {
+                using var db = GraphDatabase.Open(dir);
+                using var tx = db.BeginTransaction();
+                aliceId = tx.CreateNode("Person");
+                tx.SetProperty(aliceId, "name", PropertyValue.FromString("Alice"));
+                tx.Commit();
+                // Do NOT call db.Dispose() — simulate crash before page flush.
+                // We use GC to release unmanaged resources without explicit Flush().
+            }
+
+            // Restore pre-write data files to simulate crash (buffer not written to disk).
+            File.WriteAllBytes(Path.Combine(dir, "nodes.db"), nodesSnap);
+            File.WriteAllBytes(Path.Combine(dir, "rels.db"),  relsSnap);
+            File.WriteAllBytes(Path.Combine(dir, "props.db"), propsSnap);
+            File.WriteAllBytes(Path.Combine(dir, "blobs.db"), blobsSnap);
+
+            // Phase 3: reopen — RecoveryManager replays WAL PageImage records.
+            {
+                using var db = GraphDatabase.Open(dir);
+                using var tx = db.BeginReadOnlyTransaction();
+                tx.NodeExists(aliceId).Should().BeTrue("WAL recovery must restore the committed node");
+                tx.Rollback();
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
     // ===== Match DSL 型付き overload =====
 
     [Fact]

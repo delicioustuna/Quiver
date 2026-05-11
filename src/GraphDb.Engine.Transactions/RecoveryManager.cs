@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using GraphDb.Engine.Core;
 using GraphDb.Engine.Storage;
 using GraphDb.Engine.Wal;
@@ -8,50 +9,51 @@ internal sealed class RecoveryManager : IRecoveryManager
 {
     private readonly IPageManager _pageManager;
     private readonly IWriteAheadLog _wal;
+    private readonly Dictionary<byte, IPagedFile> _fileRegistry;
 
     public RecoveryManager(IPageManager pageManager, IWriteAheadLog wal)
+        : this(pageManager, wal, []) { }
+
+    public RecoveryManager(
+        IPageManager pageManager,
+        IWriteAheadLog wal,
+        Dictionary<byte, IPagedFile> fileRegistry)
     {
         _pageManager = pageManager;
         _wal = wal;
+        _fileRegistry = fileRegistry;
     }
 
     public long Recover()
     {
         long checkpointLsn = FindLastCheckpointLsn();
-        long lastLsn = -1;
-        var activeTxs = new HashSet<long>();
-        var committedTxs = new HashSet<long>();
 
-        using var reader = _wal.OpenReader(checkpointLsn);
-        while (reader.TryReadNext(out var record))
+        // Pass 1: determine which transactions committed and find the last LSN.
+        var committedTxs = new HashSet<long>();
+        long lastLsn = -1;
+        using (var reader = _wal.OpenReader(checkpointLsn))
         {
-            lastLsn = record.Lsn;
-            switch (record.Type)
+            while (reader.TryReadNext(out var record))
             {
-                case WalRecordType.Begin:
-                    activeTxs.Add(record.TransactionId.Value);
-                    break;
-                case WalRecordType.Commit:
-                    activeTxs.Remove(record.TransactionId.Value);
+                lastLsn = record.Lsn;
+                if (record.Type == WalRecordType.Commit)
                     committedTxs.Add(record.TransactionId.Value);
-                    break;
-                case WalRecordType.Abort:
-                    activeTxs.Remove(record.TransactionId.Value);
-                    break;
-                case WalRecordType.PageImage:
-                    // Phase 2: apply page image to the appropriate file.
-                    // Requires a file registry keyed by file-kind that maps to IPagedFile.
-                    // For now: only replay images whose transaction has committed.
-                    if (committedTxs.Contains(record.TransactionId.Value))
-                        ApplyPageImage(record);
-                    break;
-                case WalRecordType.Checkpoint:
-                    // Next Recover pass can start from the newest checkpoint.
-                    break;
             }
         }
 
-        // activeTxs: incomplete at crash time — their dirty pages are simply not replayed.
+        // Pass 2: replay PageImage records for committed transactions only.
+        using (var reader = _wal.OpenReader(checkpointLsn))
+        {
+            while (reader.TryReadNext(out var record))
+            {
+                if (record.Type == WalRecordType.PageImage &&
+                    committedTxs.Contains(record.TransactionId.Value))
+                {
+                    ApplyPageImage(record);
+                }
+            }
+        }
+
         return lastLsn;
     }
 
@@ -68,10 +70,20 @@ internal sealed class RecoveryManager : IRecoveryManager
         return checkpointLsn;
     }
 
-    // Phase 2 hook: write a committed page image back to the owning IPagedFile.
-    private static void ApplyPageImage(in WalRecord record)
+    /// <summary>
+    /// Decode a PageImage WAL record and write the page bytes directly to the owning file.
+    /// Payload format (version 1): [version:1][fileKind:1][pageId:8][pageBytes:N]
+    /// </summary>
+    private void ApplyPageImage(in WalRecord record)
     {
-        // TODO Phase 2: decode (fileKind, pageId, pageBytes) from record.Payload
-        // and call IPagedFile.PinForWrite / write / UnpinDirty.
+        var payload = record.Payload.Span;
+        if (payload.Length < 10) return;
+        if (payload[0] != 1) return; // unsupported version
+        byte fileKind = payload[1];
+        long pageId = BinaryPrimitives.ReadInt64LittleEndian(payload[2..]);
+        var pageBytes = payload[10..];
+
+        if (!_fileRegistry.TryGetValue(fileKind, out var file)) return;
+        file.WritePageForRecovery(new PageId(pageId), pageBytes);
     }
 }

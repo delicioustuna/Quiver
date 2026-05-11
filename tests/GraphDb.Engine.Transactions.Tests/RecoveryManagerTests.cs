@@ -87,6 +87,97 @@ public class RecoveryManagerTests : IDisposable
         recovered.Should().Be(lastLsn);
     }
 
+    // ===== PageImage replay =====
+
+    [Fact]
+    public void ApplyPageImage_writes_committed_page_bytes_to_file()
+    {
+        string dataDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(dataDir);
+        string srcPath = Path.Combine(dataDir, "src.db");
+        string dstPath = Path.Combine(dataDir, "dst.db");
+        try
+        {
+            // Phase 1: write a page through the WAL-logging path to produce valid PageImage records.
+            PageId dataPage;
+            {
+                IPagedFile srcFile = new PagedFile(srcPath);
+                srcFile.EnableWalLogging(1);
+                var txId = new TransactionId(42);
+                _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
+                WalPageContext.Begin(_wal, txId);
+                dataPage = srcFile.AllocatePage(PageKind.NodeRecord);
+                var ph = srcFile.PinForWrite(dataPage);
+                System.Text.Encoding.UTF8.GetBytes("RECOVERED").CopyTo(ph.Data);
+                ph.Dispose(); // calls UnpinDirty → logs PageImage to WAL
+                long commitLsn = _wal.Append(WalRecordType.Commit, txId, ReadOnlySpan<byte>.Empty);
+                _wal.FlushTo(commitLsn);
+                WalPageContext.End();
+                srcFile.Dispose();
+            }
+
+            // Phase 2: recover into a fresh destination file.
+            using IPagedFile dstFile = new PagedFile(dstPath);
+            var registry = new Dictionary<byte, IPagedFile> { { 1, dstFile } };
+            var recovery = new RecoveryManager(new NullPageManager(), _wal, registry);
+            recovery.Recover();
+
+            // Phase 3: verify the sentinel is in the recovered page.
+            var rh = dstFile.PinForRead(dataPage);
+            byte[] body = rh.Data[..9].ToArray();
+            dstFile.Unpin(dataPage);
+
+            System.Text.Encoding.UTF8.GetString(body).Should().Be("RECOVERED");
+        }
+        finally
+        {
+            Directory.Delete(dataDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ApplyPageImage_skips_page_of_aborted_transaction()
+    {
+        string dataDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(dataDir);
+        string srcPath = Path.Combine(dataDir, "src.db");
+        string dstPath = Path.Combine(dataDir, "dst.db");
+        try
+        {
+            // Phase 1: write a page but ABORT the transaction.
+            PageId dataPage;
+            {
+                IPagedFile srcFile = new PagedFile(srcPath);
+                srcFile.EnableWalLogging(1);
+                var txId = new TransactionId(99);
+                _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
+                WalPageContext.Begin(_wal, txId);
+                dataPage = srcFile.AllocatePage(PageKind.NodeRecord);
+                var ph = srcFile.PinForWrite(dataPage);
+                System.Text.Encoding.UTF8.GetBytes("ABORTED!").CopyTo(ph.Data);
+                ph.Dispose(); // logs PageImage to WAL (but tx is aborted below)
+                long abortLsn = _wal.Append(WalRecordType.Abort, txId, ReadOnlySpan<byte>.Empty);
+                _wal.FlushTo(abortLsn);
+                WalPageContext.End();
+                srcFile.Dispose();
+            }
+
+            // Phase 2: recover into a fresh destination file.
+            using IPagedFile dstFile = new PagedFile(dstPath);
+            var registry = new Dictionary<byte, IPagedFile> { { 1, dstFile } };
+            var recovery = new RecoveryManager(new NullPageManager(), _wal, registry);
+            recovery.Recover();
+
+            // Phase 3: the aborted page should NOT be replayed.
+            // dst file only has page 0 (meta). dataPage (page 1) was never applied.
+            dstFile.PageCount.Should().Be(1, "aborted PageImage must not be written to the recovery target");
+        }
+        finally
+        {
+            Directory.Delete(dataDir, recursive: true);
+        }
+    }
+
     private sealed class NullPageManager : IPageManager
     {
         public IPagedFile OpenOrCreate(string path, PageKind defaultKind) => throw new NotSupportedException();

@@ -49,6 +49,7 @@ internal sealed class Transaction : ITransaction
         _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes);
         _properties = new TxPropertyStore(propStore);
         _indexes = new TxIndexManager(indexManager, indexLocks, id);
+        WalPageContext.Begin(wal, id);
     }
 
     public void Commit()
@@ -56,8 +57,11 @@ internal sealed class Transaction : ITransaction
         if (_state != TransactionState.Active)
             throw new TransactionException("Cannot commit: transaction is not Active.");
         _state = TransactionState.Preparing;
+        // All PageImage WAL records are already logged by UnpinDirty calls.
+        // Commit record comes last so recovery only replays images of committed txs.
         long lsn = _wal.Append(WalRecordType.Commit, Id, ReadOnlySpan<byte>.Empty);
         _wal.FlushTo(lsn);
+        WalPageContext.End();
         ReleaseAllLocks();
         _state = TransactionState.Committed;
         _manager.OnCommit(Id);
@@ -67,6 +71,7 @@ internal sealed class Transaction : ITransaction
     {
         if (_state is TransactionState.Committed or TransactionState.Aborted) return;
         _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty);
+        WalPageContext.End();
         ReleaseAllLocks();
         _state = TransactionState.Aborted;
         _manager.OnAbort(Id);

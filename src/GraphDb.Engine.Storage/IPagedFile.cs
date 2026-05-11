@@ -19,4 +19,13 @@ public interface IPagedFile : IDisposable
     void UnpinDirty(PageId pageId, long lsn);
 
     void Flush();
+
+    /// <summary>Register this file for WAL page image logging with the given file kind byte.</summary>
+    void EnableWalLogging(byte fileKind);
+
+    /// <summary>
+    /// Write raw page bytes directly, expanding the file if needed.
+    /// Used by RecoveryManager during WAL replay. Bypasses the buffer pool.
+    /// </summary>
+    void WritePageForRecovery(PageId pageId, ReadOnlySpan<byte> pageBytes);
 }

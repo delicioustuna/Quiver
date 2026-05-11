@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.MemoryMappedFiles;
 using GraphDb.Engine.Core;
+using GraphDb.Engine.Wal;
 
 namespace GraphDb.Engine.Storage;
 
@@ -36,6 +37,7 @@ public sealed class PagedFile : IPagedFile
     private readonly Dictionary<PageId, int> _pageToFrame;
     private int _clockHand;
     private bool _disposed;
+    private byte? _walFileKind;
 
     int IPagedFile.PageSize => PageSizeConst;
     public long PageCount => Volatile.Read(ref _logicalPageCount);
@@ -190,12 +192,49 @@ public sealed class PagedFile : IPagedFile
     {
         lock (_poolLock)
         {
+            if (!_pageToFrame.TryGetValue(pageId, out int frame)) return;
+
+            // Update header with LSN and checksum before WAL logging so the image is valid.
+            PageHeader.UpdateLsnAndChecksum(_frames[frame].Buffer.AsSpan(), lsn);
+
+            // WAL-first: log page image so crash recovery can replay committed writes.
+            if (_walFileKind is byte fileKind)
+                WalPageContext.LogPageImage(fileKind, pageId.Value, _frames[frame].Buffer.AsSpan(0, PageSizeConst));
+
+            _frames[frame].IsDirty = true;
+            Interlocked.Decrement(ref _frames[frame].PinCount);
+        }
+    }
+
+    public void EnableWalLogging(byte fileKind) => _walFileKind = fileKind;
+
+    public void WritePageForRecovery(PageId pageId, ReadOnlySpan<byte> pageBytes)
+    {
+        if (pageBytes.Length != PageSizeConst) return;
+        lock (_poolLock)
+        {
+            EnsureFileSizeAndRemapLocked(pageId.Value + 1);
+
+            long offset = pageId.Value * (long)PageSizeConst;
+            byte[] buf = ArrayPool<byte>.Shared.Rent(PageSizeConst);
+            try
+            {
+                pageBytes.CopyTo(buf);
+                _viewAccessor!.WriteArray(offset, buf, 0, PageSizeConst);
+            }
+            finally { ArrayPool<byte>.Shared.Return(buf); }
+
+            // Refresh in-memory page count when the meta page is replayed.
+            if (pageId == MetaPageId)
+                _logicalPageCount = ReadLogicalPageCountFromMeta();
+            else
+                _logicalPageCount = Math.Max(_logicalPageCount, pageId.Value + 1);
+
+            // Invalidate any cached frame so future reads see the recovered content.
             if (_pageToFrame.TryGetValue(pageId, out int frame))
             {
-                // 書き込み後にチェックサムと LSN をヘッダに反映
-                PageHeader.UpdateLsnAndChecksum(_frames[frame].Buffer.AsSpan(), lsn);
-                _frames[frame].IsDirty = true;
-                Interlocked.Decrement(ref _frames[frame].PinCount);
+                pageBytes.CopyTo(_frames[frame].Buffer.AsSpan());
+                _frames[frame].IsDirty = false;
             }
         }
     }

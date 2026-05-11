@@ -1,3 +1,4 @@
+using GraphDb.Engine.Core;
 using GraphDb.Engine.Index;
 using GraphDb.Engine.Storage;
 using GraphDb.Engine.Stores;
@@ -41,16 +42,20 @@ public sealed class GraphDatabase : IDisposable
 
         var nodeFile = db._pageManager.OpenOrCreate(
             Path.Combine(directoryPath, "nodes.db"), PageKind.Header);
+        nodeFile.EnableWalLogging((byte)WalFileKind.Nodes);
         db._nodeStore = new NodeStore(nodeFile);
 
         var relFile = db._pageManager.OpenOrCreate(
             Path.Combine(directoryPath, "rels.db"), PageKind.Header);
+        relFile.EnableWalLogging((byte)WalFileKind.Relationships);
         db._relStore = new RelationshipStore(relFile);
 
         var propFile = db._pageManager.OpenOrCreate(
             Path.Combine(directoryPath, "props.db"), PageKind.Header);
+        propFile.EnableWalLogging((byte)WalFileKind.Properties);
         var blobFile = db._pageManager.OpenOrCreate(
             Path.Combine(directoryPath, "blobs.db"), PageKind.Header);
+        blobFile.EnableWalLogging((byte)WalFileKind.BlobData);
         db._propStore = new PropertyStore(propFile, blobFile);
 
         db._labelTokens    = new LabelTokenStore(Path.Combine(directoryPath, "labels.tok"));
@@ -69,7 +74,14 @@ public sealed class GraphDatabase : IDisposable
             db._adjStore = new AdjacencyBlockStore(adjFile, adjIndexPath);
         }
 
-        var recovery = new RecoveryManager(db._pageManager, db._wal);
+        var fileRegistry = new Dictionary<byte, IPagedFile>
+        {
+            { (byte)WalFileKind.Nodes,         nodeFile },
+            { (byte)WalFileKind.Relationships, relFile },
+            { (byte)WalFileKind.Properties,    propFile },
+            { (byte)WalFileKind.BlobData,      blobFile },
+        };
+        var recovery = new RecoveryManager(db._pageManager, db._wal, fileRegistry);
         recovery.Recover();
 
         db._txManager = new TransactionManager(
