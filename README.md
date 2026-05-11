@@ -43,6 +43,7 @@ using (var tx = db.BeginTransaction())
 | 属性 | 対象 | 引数 | 省略時の挙動 |
 |---|---|---|---|
 | `[GraphNode]` | クラス | `label` (省略可) | クラス名をラベルとして使用 |
+| `[GraphRelationship]` | クラス | `type` (省略可) | クラス名をリレーションシップ型として使用 |
 | `[GraphProperty]` | プロパティ | `key` (省略可) | プロパティ名をグラフキーとして使用 |
 | `[GraphIndexed]` | プロパティ | `indexName` (省略可) | `idx_{label}_{propertyName}` を自動生成。`[GraphProperty]` と併用必須 |
 
@@ -75,6 +76,8 @@ public partial class Person
 
 SourceGenerator は各クラスに対して以下のメソッドを生成します。
 
+**`[GraphNode]` クラス**
+
 | メソッド | シグネチャ | 説明 |
 |---|---|---|
 | `Insert` | `(tx, entity) → NodeId` | ノードを作成してプロパティを保存 |
@@ -83,6 +86,15 @@ SourceGenerator は各クラスに対して以下のメソッドを生成しま�
 | `Update` | `(tx, id, entity)` | 既存ノードのプロパティを上書き |
 | `Delete` | `(tx, id)` | ノードを削除 |
 | `FindBy{PropName}` | `(tx, value) → List<(NodeId, T)>` | `[GraphIndexed]` プロパティごとに生成 |
+
+**`[GraphRelationship]` クラス**
+
+| メソッド | シグネチャ | 説明 |
+|---|---|---|
+| `Insert` | `(tx, from, to, entity) → RelationshipId` | リレーションシップを作成してプロパティを保存 |
+| `Load` | `(tx, id) → T` | プロパティを読み込んでインスタンスを復元 |
+| `Update` | `(tx, id, entity)` | 既存リレーションシップのプロパティを上書き |
+| `Delete` | `(tx, id)` | リレーションシップを削除 |
 
 #### CRUD 使用例
 
@@ -102,16 +114,36 @@ tx.Commit();
 
 #### リレーションシップの操作
 
-リレーションシップは Source Generator の対象外です。低レベル API または Gremlin ライク API で操作します。
+`[GraphRelationship]` 属性でリレーションシップモデルを定義すると、Source Generator が CRUD メソッドを生成します。型付きトラバーサル（`Out<TRel>()` など）にも対応します。
 
 ```csharp
+[GraphRelationship("KNOWS")]
+public partial class Knows
+{
+    [GraphProperty]
+    public string Since { get; set; } = "";
+}
+```
+
+```csharp
+// ── Source Generator API ────────────────────────────────
+using (var tx = db.BeginTransaction())
+{
+    var aliceId = Person.InsertIndexed(tx, new Person { Name = "Alice", Age = 30 });
+    var bobId   = Person.InsertIndexed(tx, new Person { Name = "Bob",   Age = 25 });
+
+    var relId = Knows.Insert(tx, aliceId, bobId, new Knows { Since = "2024-01" });
+    var rel   = Knows.Load(tx, relId);
+    tx.Commit();
+}
+
 // ── 低レベル API ────────────────────────────────────────
 using (var tx = db.BeginTransaction())
 {
     var aliceId = Person.InsertIndexed(tx, new Person { Name = "Alice", Age = 30 });
     var bobId   = Person.InsertIndexed(tx, new Person { Name = "Bob",   Age = 25 });
 
-    // リレーションシップ作成
+    // プロパティなしの場合は低レベル API も利用可
     tx.CreateRelationship(aliceId, bobId, "KNOWS");
     tx.Commit();
 }
