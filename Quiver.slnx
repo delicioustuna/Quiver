@@ -30,5 +30,6 @@
     <Project Path="tests\Quiver.Index.Tests\Quiver.Index.Tests.csproj" />
     <Project Path="tests\Quiver.Client.Tests\Quiver.Client.Tests.csproj" />
     <Project Path="tests\Quiver.SourceGen.Tests\Quiver.SourceGen.Tests.csproj" />
+    <Project Path="tests\Quiver.Backend.Tests\Quiver.Backend.Tests.csproj" />
   </Folder>
 </Solution>
