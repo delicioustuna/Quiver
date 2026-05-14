@@ -11,7 +11,7 @@ namespace Quiver.Operators;
 ///
 /// Collects all source nodes from upstream, then runs independent BFS from each
 /// source simultaneously using Parallel.ForEach. Each parallel task owns private
-/// state (frontier queue, visited HashSet, adjacency entry buffer), so no
+/// state (frontier queue, visited HashSet, expand cursor), so no
 /// synchronization is needed during traversal — only result collection uses a
 /// ConcurrentBag.
 ///
@@ -24,8 +24,6 @@ namespace Quiver.Operators;
 /// </summary>
 internal sealed class ParallelBfsOperator : IPhysicalOperator
 {
-    private const int AdjBuf = 512;
-
     private readonly IPhysicalOperator _source;
     private readonly int _srcCol;
     private readonly Direction _dir;
@@ -102,7 +100,6 @@ internal sealed class ParallelBfsOperator : IPhysicalOperator
 
         var bag = new ConcurrentBag<(NodeId start, NodeId end, int depth)>();
         var tx = _tx!;
-        var adjStore = tx.AdjacencyBlocks;
         var dir = _dir;
         var typeFilter = _typeFilter;
         var maxDepth = _maxDepth;
@@ -113,7 +110,6 @@ internal sealed class ParallelBfsOperator : IPhysicalOperator
             source =>
             {
                 // All mutable state is thread-local — no cross-task synchronization needed.
-                var adjBuf = new AdjacencyEntry[AdjBuf];
                 var visited = new HashSet<long> { source.Value };
                 var frontier = new Queue<(NodeId node, int depth)>();
                 frontier.Enqueue((source, 0));
@@ -128,39 +124,11 @@ internal sealed class ParallelBfsOperator : IPhysicalOperator
                     if (depth >= maxDepth) continue;
 
                     int next = depth + 1;
-
-                    // Fast path: contiguous adjacency block.
-                    if (adjStore != null && adjStore.HasBlock(node))
+                    using var cursor = tx.Access.Expand(tx, node, dir, typeFilter);
+                    while (cursor.MoveNext())
                     {
-                        int n = adjStore.ReadEdges(node, dir, typeFilter, adjBuf);
-                        if (n < AdjBuf)
-                        {
-                            for (int i = 0; i < n; i++)
-                            {
-                                var nb = adjBuf[i].NeighborId;
-                                if (visited.Add(nb.Value))
-                                    frontier.Enqueue((nb, next));
-                            }
-                            continue;
-                        }
-                        // Buffer exactly full → degree may exceed it; fall through to linked-list.
-                    }
-
-                    // Linked-list fallback: walk the relationship chain.
-                    var relId = tx.Nodes.Read(node).FirstRelationshipId;
-                    while (relId.IsValid)
-                    {
-                        var rel = tx.Relationships.Read(relId);
-                        relId = rel.Source == node ? rel.SourceNext : rel.TargetNext;
-                        bool ok = (!typeFilter.HasValue || rel.Type == typeFilter.Value) &&
-                                  dir switch
-                                  {
-                                      Direction.Outgoing => rel.Source == node,
-                                      Direction.Incoming => rel.Target == node,
-                                      _ => true,
-                                  };
-                        var nb = rel.Source == node ? rel.Target : rel.Source;
-                        if (ok && visited.Add(nb.Value))
+                        var nb = cursor.Neighbor;
+                        if (visited.Add(nb.Value))
                             frontier.Enqueue((nb, next));
                     }
                 }

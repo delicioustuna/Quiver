@@ -1,4 +1,5 @@
-﻿using System.Buffers.Binary;
+﻿using System.Buffers;
+using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Storage;
 
@@ -67,6 +68,124 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
             blockPageId = nextPageId;
         }
         return total;
+    }
+
+    public AdjacencyCursor OpenCursor(NodeId nodeId, Direction direction, RelationshipTypeId? typeFilter)
+    {
+        long blockPageId = GetBlockPageId(nodeId);
+        if (blockPageId < 0) return AdjacencyCursor.Empty;
+        return new BlockChainCursor(_dataFile, blockPageId, direction, typeFilter);
+    }
+
+    private sealed class BlockChainCursor : AdjacencyCursor
+    {
+        // Page body is 8160 bytes and PageReadHandle is a ref struct, so we copy each
+        // visited page into a heap buffer to keep state across MoveNext calls. The
+        // buffer is rented from the shared ArrayPool to avoid one ~8KB allocation per
+        // cursor — Dispose returns it.
+        private byte[] _body;
+        private readonly IPagedFile _dataFile;
+        private readonly Direction _direction;
+        private readonly RelationshipTypeId? _typeFilter;
+
+        private long _nextPageId;     // next page to load when current is exhausted (−1 = none)
+        private int _outCount;
+        private int _inCount;
+        private int _entryIdx;        // index within current section
+        private int _section;         // 0 = out, 1 = in, 2 = page done
+        private bool _pageLoaded;
+        private bool _disposed;
+
+        private NodeId _neighbor;
+        private RelationshipId _relId;
+        private RelationshipTypeId _type;
+
+        internal BlockChainCursor(IPagedFile dataFile, long firstPageId, Direction direction, RelationshipTypeId? typeFilter)
+        {
+            _dataFile = dataFile;
+            _direction = direction;
+            _typeFilter = typeFilter;
+            _nextPageId = firstPageId;
+            _section = 2; // forces page load on first MoveNext
+            _body = ArrayPool<byte>.Shared.Rent(RecordPageMapping.PageBodySize);
+        }
+
+        public override void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            ArrayPool<byte>.Shared.Return(_body);
+            _body = null!;
+        }
+
+        public override NodeId Neighbor => _neighbor;
+        public override RelationshipId Relationship => _relId;
+        public override RelationshipTypeId Type => _type;
+
+        public override bool MoveNext()
+        {
+            while (true)
+            {
+                if (!_pageLoaded || _section == 2)
+                {
+                    if (_nextPageId < 0) return false;
+                    LoadPage(_nextPageId);
+                    _pageLoaded = true;
+                    _section = 0;
+                    _entryIdx = 0;
+                    // Skip out section entirely when only incoming requested.
+                    if (_direction == Direction.Incoming) _section = 1;
+                }
+
+                if (_section == 0)
+                {
+                    while (_entryIdx < _outCount)
+                    {
+                        int off = BlockHeaderSize + _entryIdx * EntrySize;
+                        _entryIdx++;
+                        if (TryDecode(off)) return true;
+                    }
+                    _section = 1;
+                    _entryIdx = 0;
+                    // Skip in section when only outgoing requested.
+                    if (_direction == Direction.Outgoing) _section = 2;
+                }
+
+                if (_section == 1)
+                {
+                    int inBase = BlockHeaderSize + _outCount * EntrySize;
+                    while (_entryIdx < _inCount)
+                    {
+                        int off = inBase + _entryIdx * EntrySize;
+                        _entryIdx++;
+                        if (TryDecode(off)) return true;
+                    }
+                    _section = 2;
+                }
+            }
+        }
+
+        private void LoadPage(long pageId)
+        {
+            using var h = _dataFile.PinForRead(new PageId(pageId));
+            ReadOnlySpan<byte> body = h.Data;
+            _outCount = BinaryPrimitives.ReadInt32LittleEndian(body);
+            _inCount = BinaryPrimitives.ReadInt32LittleEndian(body[4..]);
+            _nextPageId = BinaryPrimitives.ReadInt64LittleEndian(body[8..]);
+            int copyLen = BlockHeaderSize + (_outCount + _inCount) * EntrySize;
+            body[..copyLen].CopyTo(_body);
+        }
+
+        private bool TryDecode(int off)
+        {
+            Span<byte> e = _body.AsSpan(off);
+            var typeId = new RelationshipTypeId(BinaryPrimitives.ReadInt16LittleEndian(e));
+            if (_typeFilter.HasValue && typeId != _typeFilter.Value) return false;
+            _type = typeId;
+            _relId = new RelationshipId(RecordHelpers.ReadInt48(e[2..]));
+            _neighbor = new NodeId(RecordHelpers.ReadInt48(e[8..]));
+            return true;
+        }
     }
 
     // ──────────────────────────── Build ────────────────────────────

@@ -10,7 +10,11 @@ namespace Quiver;
 /// Binary backend's <see cref="IGraphAccessMethods"/> implementation. Delegates
 /// the linked-list vs adjacency-block choice to <see cref="BinaryExpandCursor"/>
 /// and exposes a fallback counter so diagnostics can surface how often the
-/// adjacency fast path was abandoned.
+/// adjacency fast path was unavailable (i.e. the node had no adjacency block
+/// at index-build time, typically because it was created after a bulk load).
+/// PW-8: now that <see cref="IAdjacencyBlockStore.OpenCursor"/> walks the full
+/// page chain, the cursor never abandons the fast path mid-iteration — so this
+/// counter only fires on the "no block at all" path.
 /// </summary>
 internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
 {

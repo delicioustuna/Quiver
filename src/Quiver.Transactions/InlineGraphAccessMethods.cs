@@ -90,16 +90,12 @@ public sealed class InlineGraphAccessMethods : IGraphAccessMethods
 
 internal sealed class InlineExpandCursor : ExpandCursor
 {
-    private const int AdjBufferSize = 8192;
-
     private readonly ITransaction _tx;
     private readonly NodeId _source;
     private readonly Direction _direction;
     private readonly RelationshipTypeId? _typeFilter;
 
-    private readonly AdjacencyEntry[] _adjBuffer = new AdjacencyEntry[AdjBufferSize];
-    private int _adjCount;
-    private int _adjIdx;
+    private AdjacencyCursor? _adjCursor;
     private bool _usingAdj;
     private bool _opened;
     private RelationshipId _nextRelId;
@@ -126,11 +122,10 @@ internal sealed class InlineExpandCursor : ExpandCursor
 
         if (_usingAdj)
         {
-            if (_adjIdx < _adjCount)
+            if (_adjCursor!.MoveNext())
             {
-                var entry = _adjBuffer[_adjIdx++];
-                _neighbor = entry.NeighborId;
-                _relId = entry.RelId;
+                _neighbor = _adjCursor.Neighbor;
+                _relId = _adjCursor.Relationship;
                 return true;
             }
             return false;
@@ -164,18 +159,13 @@ internal sealed class InlineExpandCursor : ExpandCursor
         var adj = _tx.AdjacencyBlocks;
         if (adj != null && adj.HasBlock(_source))
         {
-            int n = adj.ReadEdges(_source, _direction, _typeFilter, _adjBuffer);
-            if (n < AdjBufferSize)
-            {
-                _adjCount = n;
-                _adjIdx = 0;
-                _usingAdj = true;
-                return;
-            }
-            // Buffer filled exactly; fall back. InlineGraphAccessMethods does not
-            // track fallback counts — that's a backend-specific concern.
+            _adjCursor = adj.OpenCursor(_source, _direction, _typeFilter);
+            _usingAdj = true;
+            return;
         }
         _usingAdj = false;
         _nextRelId = _tx.Nodes.Read(_source).FirstRelationshipId;
     }
+
+    public override void Dispose() => _adjCursor?.Dispose();
 }

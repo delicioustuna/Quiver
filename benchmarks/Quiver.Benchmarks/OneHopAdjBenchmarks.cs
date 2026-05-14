@@ -7,22 +7,26 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// PW-4 隣接ブロック vs linked-list の 1-hop 比較。
+/// PW-4 / PW-8 隣接ブロック vs linked-list の 1-hop 比較。
 /// Setup: BulkLoader で adjacency index を構築してから DB を再オープン。
-/// Linked: EnumerateRelationships (linked-list)
-/// Adj:    IAdjacencyBlockStore.ReadEdges (連続メモリ)
+/// Linked:        EnumerateRelationships (linked-list)
+/// ReadEdges:     IAdjacencyBlockStore.ReadEdges (連続メモリ・固定バッファ)
+/// AdjCursor:     IAdjacencyBlockStore.OpenCursor (PW-8 page 継続 iterator)
+///
+/// degree 10_000 / 50_000 では ReadEdges の fixed-buffer fallback と
+/// AdjCursor の差が顕著になる。AdjCursor は degree に依らず fallback しないこと。
 /// </summary>
 [MemoryDiagnoser]
 public class OneHopAdjBenchmarks
 {
-    [Params(10, 100, 1_000, 10_000)]
+    [Params(10, 100, 1_000, 10_000, 50_000)]
     public int Degree { get; set; }
 
     private GraphDatabase _db = null!;
     private string _dbPath = null!;
     private NodeId _hub;
     private IGraphTransaction _readTx = null!;
-    private readonly AdjacencyEntry[] _adjBuf = new AdjacencyEntry[16_384];
+    private readonly AdjacencyEntry[] _adjBuf = new AdjacencyEntry[65_536];
 
     [GlobalSetup]
     public void Setup()
@@ -66,11 +70,21 @@ public class OneHopAdjBenchmarks
         return count;
     }
 
-    [Benchmark(Description = "1-hop AdjacencyBlock")]
+    [Benchmark(Description = "1-hop AdjacencyBlock (ReadEdges)")]
     public int AdjacencyBlock()
     {
         var adj = _readTx.AdjacencyBlocks!;
         int count = adj.ReadEdges(_hub, Direction.Outgoing, null, _adjBuf);
+        return count;
+    }
+
+    [Benchmark(Description = "1-hop AdjacencyCursor (PW-8)")]
+    public int AdjacencyCursor()
+    {
+        var adj = _readTx.AdjacencyBlocks!;
+        int count = 0;
+        using var cursor = adj.OpenCursor(_hub, Direction.Outgoing, null);
+        while (cursor.MoveNext()) count++;
         return count;
     }
 }

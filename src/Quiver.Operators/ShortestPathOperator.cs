@@ -1,4 +1,4 @@
-﻿using Quiver.Core;
+using Quiver.Core;
 using Quiver.Stores;
 using Quiver.Transactions;
 
@@ -11,8 +11,6 @@ namespace Quiver.Operators;
 /// </summary>
 public sealed class ShortestPathOperator : IPhysicalOperator
 {
-    private const int AdjBuf = 512;
-
     private readonly IPhysicalOperator _source;
     private readonly int _srcCol;
     private readonly int _tgtCol;
@@ -21,9 +19,7 @@ public sealed class ShortestPathOperator : IPhysicalOperator
     private readonly long _maxDistance;
 
     private ITransaction? _tx;
-    private IAdjacencyBlockStore? _adjStore;
     private readonly TupleSlot[] _buffer = new TupleSlot[3];
-    private readonly AdjacencyEntry[] _adjBuf = new AdjacencyEntry[AdjBuf];
 
     private static readonly TupleSchema s_schema = new([
         new ColumnDefinition("source",   TupleSlotType.NodeId),
@@ -53,7 +49,6 @@ public sealed class ShortestPathOperator : IPhysicalOperator
     public void Open(ITransaction tx)
     {
         _tx = tx;
-        _adjStore = tx.AdjacencyBlocks;
         _source.Open(tx);
     }
 
@@ -91,38 +86,11 @@ public sealed class ShortestPathOperator : IPhysicalOperator
             long d = dist[node.Value];
             if (d >= _maxDistance) continue;
 
-            if (_adjStore != null && _adjStore.HasBlock(node))
+            using var cursor = _tx!.Access.Expand(_tx, node, _dir, _typeFilter);
+            while (cursor.MoveNext())
             {
-                int n = _adjStore.ReadEdges(node, _dir, _typeFilter, _adjBuf);
-                if (n < AdjBuf)
-                {
-                    for (int i = 0; i < n; i++)
-                    {
-                        var nb = _adjBuf[i].NeighborId;
-                        if (dist.TryAdd(nb.Value, d + 1))
-                        {
-                            if (nb == tgt) return d + 1;
-                            queue.Enqueue(nb);
-                        }
-                    }
-                    continue;
-                }
-            }
-
-            var relId = _tx!.Nodes.Read(node).FirstRelationshipId;
-            while (relId.IsValid)
-            {
-                var rel = _tx.Relationships.Read(relId);
-                relId = rel.Source == node ? rel.SourceNext : rel.TargetNext;
-                bool ok = (!_typeFilter.HasValue || rel.Type == _typeFilter.Value) &&
-                          _dir switch
-                          {
-                              Direction.Outgoing => rel.Source == node,
-                              Direction.Incoming => rel.Target == node,
-                              _ => true,
-                          };
-                var nb = rel.Source == node ? rel.Target : rel.Source;
-                if (ok && dist.TryAdd(nb.Value, d + 1))
+                var nb = cursor.Neighbor;
+                if (dist.TryAdd(nb.Value, d + 1))
                 {
                     if (nb == tgt) return d + 1;
                     queue.Enqueue(nb);
