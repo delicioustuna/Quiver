@@ -10,6 +10,7 @@ public sealed class PropertyLookupOperator : IPhysicalOperator
     private readonly int _entityIdColumn;
     private readonly PropertyKeyId _keyId;
     private readonly string _outputColumnName;
+    private readonly PropertyTypeFlags _expectedTypes;
     private ITransaction? _tx;
     private TupleSlot[]? _buffer;
     private TupleSchema? _schema;
@@ -20,11 +21,29 @@ public sealed class PropertyLookupOperator : IPhysicalOperator
         int entityIdColumn,
         PropertyKeyId keyId,
         string outputColumnName)
+        : this(source, entityIdColumn, keyId, outputColumnName, PropertyTypeFlags.Scalar)
+    {
+    }
+
+    /// <summary>
+    /// BA-8 overload. When <paramref name="expectedTypes"/> is narrower than
+    /// <see cref="PropertyTypeFlags.Scalar"/>, values of other types are skipped
+    /// without materializing string / bytes payloads.
+    /// </summary>
+    public PropertyLookupOperator(
+        IPhysicalOperator source,
+        int entityIdColumn,
+        PropertyKeyId keyId,
+        string outputColumnName,
+        PropertyTypeFlags expectedTypes)
     {
         _source = source;
         _entityIdColumn = entityIdColumn;
         _keyId = keyId;
         _outputColumnName = outputColumnName;
+        _expectedTypes = expectedTypes == PropertyTypeFlags.None
+            ? PropertyTypeFlags.Scalar
+            : expectedTypes;
     }
 
     public TupleSchema Schema => _schema ?? new TupleSchema([]);
@@ -69,6 +88,11 @@ public sealed class PropertyLookupOperator : IPhysicalOperator
             if (prop.KeyId != _keyId) continue;
 
             var val = prop.Value;
+            // BA-8: reject values whose type is not in the expected set BEFORE
+            // copying string / bytes payloads. Output stays Null in that case.
+            if ((val.Type.ToFlags() & _expectedTypes) == PropertyTypeFlags.None)
+                break;
+
             if (val.Type == PropertyValueType.String)
             {
                 _currentBytes = val.Utf8StringValue.ToArray();

@@ -51,20 +51,21 @@ public readonly record struct NodeDegreeSummary(
 }
 
 /// <summary>
-/// Set of <see cref="PropertyValueType"/> values observed for a property key.
-/// BA-8 will replace this with a richer <c>PropertyTypeFlags</c> mask; we use
-/// a thin bitmask here so the surface area is easy to migrate.
+/// Legacy alias kept for source compatibility while BA-8 migrates callers to
+/// <see cref="Quiver.Core.PropertyTypeFlags"/>. The bit values intentionally match
+/// the low bits of <c>PropertyTypeFlags</c> so casts between the two are safe.
 /// </summary>
+[Obsolete("Use Quiver.Core.PropertyTypeFlags instead. PropertyValueTypeMask will be removed.")]
 [Flags]
 public enum PropertyValueTypeMask : uint
 {
     None   = 0,
-    Bool   = 1u << 1,
-    Int32  = 1u << 2,
-    Int64  = 1u << 3,
-    Double = 1u << 4,
-    String = 1u << 5,
-    Bytes  = 1u << 6,
+    Bool   = (uint)(PropertyTypeFlags.Bool),
+    Int32  = (uint)(PropertyTypeFlags.Int32),
+    Int64  = (uint)(PropertyTypeFlags.Int64),
+    Double = (uint)(PropertyTypeFlags.Double),
+    String = (uint)(PropertyTypeFlags.String),
+    Bytes  = (uint)(PropertyTypeFlags.Bytes),
 
     Numeric = Int32 | Int64 | Double,
 }
@@ -83,7 +84,16 @@ public sealed class PropertyKeyStats
 
     public PropertyKeyId KeyId { get; init; }
 
-    public PropertyValueTypeMask ObservedTypes { get; private set; }
+    /// <summary>
+    /// Union of <see cref="PropertyTypeFlags"/> bits for every value observed under this key.
+    /// Used by the optimizer to decide whether a numeric / string predicate can ever match.
+    /// </summary>
+    public PropertyTypeFlags ObservedTypes { get; private set; }
+
+    /// <summary>Legacy view of <see cref="ObservedTypes"/>. Kept while callers migrate to <see cref="PropertyTypeFlags"/>.</summary>
+#pragma warning disable CS0618
+    public PropertyValueTypeMask ObservedTypesLegacy => (PropertyValueTypeMask)(uint)ObservedTypes;
+#pragma warning restore CS0618
 
     /// <summary>Total number of property occurrences observed for this key (across nodes + relationships).</summary>
     public long Count { get; private set; }
@@ -103,49 +113,44 @@ public sealed class PropertyKeyStats
     public double MaxDouble { get; private set; } = double.NegativeInfinity;
 
     public bool HasNumericRange =>
-        (ObservedTypes & PropertyValueTypeMask.Numeric) != 0 && MinInt64 != long.MaxValue;
+        (ObservedTypes & PropertyTypeFlags.Numeric) != 0 && MinInt64 != long.MaxValue;
 
     public bool HasDoubleRange =>
-        (ObservedTypes & PropertyValueTypeMask.Double) != 0 && !double.IsPositiveInfinity(MinDouble);
+        (ObservedTypes & PropertyTypeFlags.Double) != 0 && !double.IsPositiveInfinity(MinDouble);
 
     internal void SetNullOrMissingCount(long n) => NullOrMissingCount = n;
 
     internal void Observe(in PropertyValue value)
     {
         Count++;
+        ObservedTypes |= value.Type.ToFlags();
         switch (value.Type)
         {
             case PropertyValueType.Bool:
-                ObservedTypes |= PropertyValueTypeMask.Bool;
                 BumpDistinctScalar(value.BoolValue ? 1L : 0L);
                 break;
             case PropertyValueType.Int32:
-                ObservedTypes |= PropertyValueTypeMask.Int32;
                 long i32 = value.Int32Value;
                 if (i32 < MinInt64) MinInt64 = i32;
                 if (i32 > MaxInt64) MaxInt64 = i32;
                 BumpDistinctScalar(i32);
                 break;
             case PropertyValueType.Int64:
-                ObservedTypes |= PropertyValueTypeMask.Int64;
                 long i64 = value.Int64Value;
                 if (i64 < MinInt64) MinInt64 = i64;
                 if (i64 > MaxInt64) MaxInt64 = i64;
                 BumpDistinctScalar(i64);
                 break;
             case PropertyValueType.Double:
-                ObservedTypes |= PropertyValueTypeMask.Double;
                 double d = value.DoubleValue;
                 if (d < MinDouble) MinDouble = d;
                 if (d > MaxDouble) MaxDouble = d;
                 BumpDistinctScalar(BitConverter.DoubleToInt64Bits(d));
                 break;
             case PropertyValueType.String:
-                ObservedTypes |= PropertyValueTypeMask.String;
                 BumpDistinctString(System.Text.Encoding.UTF8.GetString(value.Utf8StringValue));
                 break;
             case PropertyValueType.Bytes:
-                ObservedTypes |= PropertyValueTypeMask.Bytes;
                 // Bytes distinct tracking is intentionally skipped to bound memory.
                 if (!_distinctSaturated && DistinctEstimate < DistinctTrackingCap)
                     DistinctEstimate++;

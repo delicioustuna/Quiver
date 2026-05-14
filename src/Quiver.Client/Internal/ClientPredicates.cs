@@ -66,6 +66,12 @@ internal sealed class PropertyInt64Predicate : IPredicate
         {
             var prop = en.Current;
             if (prop.KeyId != _keyId) continue;
+            // BA-8: reject non-integer values without decoding.
+            // (The previous fallback to Int64Value returned scrambled bits for
+            // Double / Bool / String, so Gt(30) on a Double property would lie.)
+            var flags = prop.Value.Type.ToFlags();
+            if ((flags & (PropertyTypeFlags.Int32 | PropertyTypeFlags.Int64)) == PropertyTypeFlags.None)
+                return false;
             long v = prop.Value.Type == PropertyValueType.Int32
                 ? prop.Value.Int32Value
                 : prop.Value.Int64Value;

@@ -403,7 +403,7 @@ public sealed class GraphStatsTests : IDisposable
         var ageStats = stats.PropertyKeys[ageKey];
         ageStats.Count.Should().Be(2);
         ageStats.NullOrMissingCount.Should().Be(1);
-        ageStats.ObservedTypes.Should().HaveFlag(PropertyValueTypeMask.Int32);
+        ageStats.ObservedTypes.Should().HaveFlag(PropertyTypeFlags.Int32);
         ageStats.HasNumericRange.Should().BeTrue();
         ageStats.MinInt64.Should().Be(20);
         ageStats.MaxInt64.Should().Be(40);
@@ -412,7 +412,7 @@ public sealed class GraphStatsTests : IDisposable
         var nameStats = stats.PropertyKeys[nameKey];
         nameStats.Count.Should().Be(2);
         nameStats.NullOrMissingCount.Should().Be(1);
-        nameStats.ObservedTypes.Should().HaveFlag(PropertyValueTypeMask.String);
+        nameStats.ObservedTypes.Should().HaveFlag(PropertyTypeFlags.String);
         nameStats.DistinctEstimate.Should().Be(2);
     }
 
@@ -436,7 +436,7 @@ public sealed class GraphStatsTests : IDisposable
         ws.Count.Should().Be(2);
         // 3 nodes + 2 rels = 5 entities, 2 observations → 3 missing
         ws.NullOrMissingCount.Should().Be(3);
-        ws.ObservedTypes.Should().HaveFlag(PropertyValueTypeMask.Double);
+        ws.ObservedTypes.Should().HaveFlag(PropertyTypeFlags.Double);
         ws.HasDoubleRange.Should().BeTrue();
         ws.MinDouble.Should().BeApproximately(0.5, 1e-9);
         ws.MaxDouble.Should().BeApproximately(2.5, 1e-9);
