@@ -65,9 +65,17 @@ public sealed class GraphDatabase : IDisposable
     /// This is an O(N + E) operation and is typically called once at startup or after bulk loads.
     /// </summary>
     public GraphStats CollectStats()
+        => CollectStats(GraphStats.PowerNodeDegreeThreshold);
+
+    /// <summary>
+    /// Variant that lets the caller override the power-node degree threshold used to
+    /// populate <see cref="GraphStats.PowerNodes"/>. Useful in tests / diagnostics
+    /// where the default <see cref="GraphStats.PowerNodeDegreeThreshold"/> is too large.
+    /// </summary>
+    public GraphStats CollectStats(int powerNodeThreshold)
     {
         using var tx = _backend.Transactions.Begin(IsolationLevel.SnapshotIsolation);
-        return GraphStats.Collect(tx);
+        return GraphStats.Collect(tx, powerNodeThreshold);
     }
 
     /// <summary>

@@ -112,13 +112,7 @@ public sealed class QueryOptimizer
     }
 
     private double EstimateFanOut(TraversalPlanStep step)
-    {
-        if (!step.TypeFilter.HasValue)
-            return _stats.GlobalDegreeHistogram.MeanDegree;
-
-        var edgeCount = _stats.EdgeTypeFrequency.TryGetValue(step.TypeFilter.Value, out var c) ? c : 0L;
-        return _stats.TotalNodes == 0 ? 0.0 : (double)edgeCount / _stats.TotalNodes;
-    }
+        => _stats.EstimateFanOut(sourceLabel: null, step.TypeFilter, step.Direction);
 
     // ---- Expansion plan ----
 
@@ -134,7 +128,7 @@ public sealed class QueryOptimizer
         RelationshipTypeId? typeFilter,
         Direction direction)
     {
-        double fanOut = EstimateFanOut(new TraversalPlanStep(typeFilter, direction));
+        double fanOut = _stats.EstimateFanOut(sourceLabel, typeFilter, direction);
         // BA-3 baseline: backend always handles adjacency / linked-list internally.
         return new ExpandPlan(ExpandStrategy.AdjacencyBlock, fanOut);
     }

@@ -275,6 +275,202 @@ public sealed class GraphStatsTests : IDisposable
         _ = opt.ShouldUseBidirectional(label, hopCount: 20);
     }
 
+    // ---- BA-4: direction / type / power node / property-key stats ----
+
+    [Fact]
+    public void CollectStats_records_direction_aware_global_histograms()
+    {
+        using var tx = _db.BeginTransaction();
+        var hub = tx.CreateNode("Person");
+        var a   = tx.CreateNode("Person");
+        var b   = tx.CreateNode("Person");
+        // hub: out=2, in=0
+        // a:   out=0, in=1
+        // b:   out=0, in=1
+        tx.CreateRelationship(hub, a, "KNOWS");
+        tx.CreateRelationship(hub, b, "KNOWS");
+        tx.Commit();
+
+        var stats = _db.CollectStats();
+
+        stats.GlobalOutDegree.TotalNodes.Should().Be(3);
+        stats.GlobalOutDegree.MaxDegree.Should().Be(2);   // hub
+        stats.GlobalOutDegree.MeanDegree.Should().BeApproximately(2.0 / 3, 1e-9);
+
+        stats.GlobalInDegree.TotalNodes.Should().Be(3);
+        stats.GlobalInDegree.MaxDegree.Should().Be(1);
+        stats.GlobalInDegree.MeanDegree.Should().BeApproximately(2.0 / 3, 1e-9);
+    }
+
+    [Fact]
+    public void CollectStats_records_per_type_direction_histograms()
+    {
+        using var tx = _db.BeginTransaction();
+        var a = tx.CreateNode("Person");
+        var b = tx.CreateNode("Person");
+        var c = tx.CreateNode("Person");
+        tx.CreateRelationship(a, b, "KNOWS");
+        tx.CreateRelationship(a, c, "KNOWS");
+        tx.CreateRelationship(b, c, "LIKES");
+        tx.Commit();
+
+        var stats = _db.CollectStats();
+        var knows = _db.Schema.GetOrCreateRelationshipType("KNOWS");
+        var likes = _db.Schema.GetOrCreateRelationshipType("LIKES");
+
+        // OutDegreeByType[KNOWS]: only nodes with outgoing KNOWS are recorded → a (degree 2)
+        stats.OutDegreeByType.Should().ContainKey(knows);
+        stats.OutDegreeByType[knows].TotalNodes.Should().Be(1);
+        stats.OutDegreeByType[knows].TotalDegree.Should().Be(2);
+
+        // InDegreeByType[KNOWS]: b (1) + c (1) = 2 nodes
+        stats.InDegreeByType[knows].TotalNodes.Should().Be(2);
+        stats.InDegreeByType[knows].TotalDegree.Should().Be(2);
+
+        stats.OutDegreeByType[likes].TotalDegree.Should().Be(1);
+        stats.InDegreeByType[likes].TotalDegree.Should().Be(1);
+    }
+
+    [Fact]
+    public void EstimateFanOut_prefers_direction_and_type_histograms()
+    {
+        using var tx = _db.BeginTransaction();
+        var a = tx.CreateNode("Person");
+        var b = tx.CreateNode("Person");
+        var c = tx.CreateNode("Person");
+        tx.CreateRelationship(a, b, "KNOWS");
+        tx.CreateRelationship(a, c, "KNOWS");
+        tx.CreateRelationship(b, c, "LIKES");
+        tx.Commit();
+
+        var stats = _db.CollectStats();
+        var knows = _db.Schema.GetOrCreateRelationshipType("KNOWS");
+
+        // Type+direction specific: outgoing KNOWS has 1 node with degree 2 → mean 2.0
+        stats.EstimateFanOut(null, knows, Direction.Outgoing).Should().BeApproximately(2.0, 1e-9);
+        // Incoming KNOWS: 2 nodes, each degree 1 → mean 1.0
+        stats.EstimateFanOut(null, knows, Direction.Incoming).Should().BeApproximately(1.0, 1e-9);
+
+        // No type: falls back to direction-aware global means
+        stats.EstimateFanOut(null, null, Direction.Outgoing).Should().BeApproximately(stats.GlobalOutDegree.MeanDegree, 1e-9);
+        stats.EstimateFanOut(null, null, Direction.Both)
+            .Should().BeApproximately(stats.GlobalDegreeHistogram.MeanDegree, 1e-9);
+    }
+
+    [Fact]
+    public void CollectStats_records_power_nodes_above_threshold()
+    {
+        // Use a small threshold so the test can exercise the dense-node path without
+        // creating thousands of relationships.
+        using var tx = _db.BeginTransaction();
+        var hub  = tx.CreateNode("Person");
+        var lone = tx.CreateNode("Person");
+        for (int i = 0; i < 10; i++)
+        {
+            var spoke = tx.CreateNode("Person");
+            tx.CreateRelationship(hub, spoke, "KNOWS");
+        }
+        tx.Commit();
+
+        var stats = _db.CollectStats(powerNodeThreshold: 8);
+
+        stats.PowerNodes.Should().ContainKey(hub);
+        stats.PowerNodes[hub].OutDegree.Should().Be(10);
+        stats.PowerNodes[hub].InDegree.Should().Be(0);
+        stats.PowerNodes[hub].TotalDegree.Should().Be(10);
+        stats.IsLikelyPowerNode(hub).Should().BeTrue();
+        stats.IsLikelyPowerNode(lone).Should().BeFalse();
+    }
+
+    [Fact]
+    public void CollectStats_records_property_key_observed_types_and_range()
+    {
+        using var tx = _db.BeginTransaction();
+        var n1 = tx.CreateNode("Person");
+        var n2 = tx.CreateNode("Person");
+        var n3 = tx.CreateNode("Person");
+        tx.SetProperty(n1, "age", PropertyValue.FromInt32(20));
+        tx.SetProperty(n2, "age", PropertyValue.FromInt32(40));
+        tx.SetProperty(n1, "name", PropertyValue.FromString("Alice"));
+        tx.SetProperty(n2, "name", PropertyValue.FromString("Bob"));
+        // n3 has no properties at all → contributes to NullOrMissingCount for both keys
+        tx.Commit();
+
+        var stats = _db.CollectStats();
+        var ageKey  = _db.Schema.GetOrCreatePropertyKey("age");
+        var nameKey = _db.Schema.GetOrCreatePropertyKey("name");
+
+        var ageStats = stats.PropertyKeys[ageKey];
+        ageStats.Count.Should().Be(2);
+        ageStats.NullOrMissingCount.Should().Be(1);
+        ageStats.ObservedTypes.Should().HaveFlag(PropertyValueTypeMask.Int32);
+        ageStats.HasNumericRange.Should().BeTrue();
+        ageStats.MinInt64.Should().Be(20);
+        ageStats.MaxInt64.Should().Be(40);
+        ageStats.DistinctEstimate.Should().Be(2);
+
+        var nameStats = stats.PropertyKeys[nameKey];
+        nameStats.Count.Should().Be(2);
+        nameStats.NullOrMissingCount.Should().Be(1);
+        nameStats.ObservedTypes.Should().HaveFlag(PropertyValueTypeMask.String);
+        nameStats.DistinctEstimate.Should().Be(2);
+    }
+
+    [Fact]
+    public void CollectStats_records_relationship_property_stats()
+    {
+        using var tx = _db.BeginTransaction();
+        var a = tx.CreateNode("Person");
+        var b = tx.CreateNode("Person");
+        var c = tx.CreateNode("Person");
+        var r1 = tx.CreateRelationship(a, b, "KNOWS");
+        var r2 = tx.CreateRelationship(b, c, "KNOWS");
+        tx.SetProperty(r1, "weight", PropertyValue.FromDouble(0.5));
+        tx.SetProperty(r2, "weight", PropertyValue.FromDouble(2.5));
+        tx.Commit();
+
+        var stats = _db.CollectStats();
+        var weightKey = _db.Schema.GetOrCreatePropertyKey("weight");
+
+        var ws = stats.PropertyKeys[weightKey];
+        ws.Count.Should().Be(2);
+        // 3 nodes + 2 rels = 5 entities, 2 observations → 3 missing
+        ws.NullOrMissingCount.Should().Be(3);
+        ws.ObservedTypes.Should().HaveFlag(PropertyValueTypeMask.Double);
+        ws.HasDoubleRange.Should().BeTrue();
+        ws.MinDouble.Should().BeApproximately(0.5, 1e-9);
+        ws.MaxDouble.Should().BeApproximately(2.5, 1e-9);
+    }
+
+    [Fact]
+    public void QueryOptimizer_OptimizeTraversal_uses_direction_aware_fanout()
+    {
+        using var setup = _db.BeginTransaction();
+        var a = setup.CreateNode("N");
+        var b = setup.CreateNode("N");
+        var c = setup.CreateNode("N");
+        // KNOWS: hub a has 2 outgoing → outgoing fan-out high
+        // LIKES: only b→c → outgoing fan-out very low
+        setup.CreateRelationship(a, b, "KNOWS");
+        setup.CreateRelationship(a, c, "KNOWS");
+        setup.CreateRelationship(b, c, "LIKES");
+        setup.Commit();
+
+        var stats = _db.CollectStats();
+        var opt   = new QueryOptimizer(stats);
+        var knows = _db.Schema.GetOrCreateRelationshipType("KNOWS");
+        var likes = _db.Schema.GetOrCreateRelationshipType("LIKES");
+
+        var outgoing = new List<TraversalPlanStep>
+        {
+            new(knows, Direction.Outgoing),
+            new(likes, Direction.Outgoing),
+        };
+        var ordered = opt.OptimizeTraversal(outgoing);
+        // LIKES outgoing (mean 1.0 across 1 node) vs KNOWS outgoing (mean 2.0 across 1 node)
+        ordered[0].TypeFilter.Should().Be(likes);
+    }
+
     [Fact]
     public void ScanPlan_Build_AllNodesScan_creates_correct_operator()
     {
