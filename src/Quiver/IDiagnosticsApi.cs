@@ -13,7 +13,8 @@ public sealed record DatabaseStatistics(
     long DataFileSize,
     long WalFileSize,
     long BufferPoolHits,
-    long BufferPoolMisses);
+    long BufferPoolMisses,
+    long AdjacencyFallbackCount);
 
 public sealed record ConsistencyReport(
     bool IsConsistent,

@@ -22,7 +22,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
     private readonly TransactionManager _txManager;
     private readonly SchemaApi _schema;
     private readonly DiagnosticsApi _diagnostics;
-    private readonly BinaryGraphAccessMethods _access;
+    private readonly IGraphAccessMethods _access;
     private readonly BulkLoadCapabilities _bulkLoad;
     private readonly string _directoryPath;
 
@@ -38,7 +38,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
         PropertyKeyTokenStore propKeyTokens,
         IndexManager indexManager,
         AdjacencyBlockStore? adjStore,
-        TransactionManager txManager)
+        TransactionManager txManager,
+        BinaryGraphAccessMethods access)
     {
         _directoryPath = directoryPath;
         _pageManager = pageManager;
@@ -54,8 +55,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
         _txManager = txManager;
 
         _schema = new SchemaApi(_labelTokens, _relTypeTokens, _propKeyTokens, _indexManager);
-        _diagnostics = new DiagnosticsApi(_nodeStore, _relStore);
-        _access = new BinaryGraphAccessMethods();
+        _diagnostics = new DiagnosticsApi(_nodeStore, _relStore, access);
+        _access = access;
         _bulkLoad = new BulkLoadCapabilities
         {
             BeginBinaryBulkLoad = buildAdjacencyIndex => new BulkLoader(

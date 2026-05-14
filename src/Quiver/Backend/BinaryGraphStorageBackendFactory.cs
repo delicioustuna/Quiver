@@ -66,11 +66,12 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         var recovery = new RecoveryManager(pageManager, wal, fileRegistry);
         recovery.Recover();
 
+        var access = new BinaryGraphAccessMethods();
         var txManager = new TransactionManager(
-            wal, nodeStore, relStore, propStore, indexManager, adjStore);
+            wal, nodeStore, relStore, propStore, indexManager, adjStore, access);
 
         return new BinaryGraphStorageBackend(
             directoryPath, pageManager, wal, nodeStore, relStore, propStore,
-            labelTokens, relTypeTokens, propKeyTokens, indexManager, adjStore, txManager);
+            labelTokens, relTypeTokens, propKeyTokens, indexManager, adjStore, txManager, access);
     }
 }

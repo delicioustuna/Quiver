@@ -28,6 +28,15 @@ public interface ITransaction : IDisposable
     /// ExpandOperator uses this for faster neighbor scans; falls back to linked-list when null.
     /// </summary>
     IAdjacencyBlockStore? AdjacencyBlocks { get; }
+
+    /// <summary>
+    /// Backend-supplied access methods (BA-3). Operators call into this rather
+    /// than reading <see cref="Nodes"/> / <see cref="Relationships"/> /
+    /// <see cref="AdjacencyBlocks"/> directly. Defaults to
+    /// <see cref="InlineGraphAccessMethods.Instance"/> when no backend-specific
+    /// implementation was supplied at transaction construction time.
+    /// </summary>
+    IGraphAccessMethods Access { get; }
 }
 
 public enum TransactionState : byte

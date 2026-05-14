@@ -612,6 +612,18 @@ public sealed class GraphDatabaseTests : IDisposable
         }
     }
 
+    // ===== BA-3 diagnostics =====
+
+    [Fact]
+    public void Diagnostics_exposes_adjacency_fallback_count()
+    {
+        // Without an adjacency block built, the backend always falls into the
+        // linked-list path so the counter never increments — but it must at
+        // least be a readable field on DatabaseStatistics for BA-3 callers.
+        var stats = _db.Diagnostics.GetStatistics();
+        stats.AdjacencyFallbackCount.Should().BeGreaterOrEqualTo(0);
+    }
+
     // ===== Match DSL 型付き overload =====
 
     [Fact]

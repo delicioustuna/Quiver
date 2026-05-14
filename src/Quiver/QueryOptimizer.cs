@@ -18,6 +18,26 @@ public sealed record TraversalPlanStep(
 /// <summary>The kind of scan the optimizer selected.</summary>
 public enum ScanKind { AllNodesScan, LabelScan, IndexSeek }
 
+/// <summary>
+/// Expansion strategies the optimizer can recommend. The backend's
+/// <c>IGraphAccessMethods.Expand</c> implementation is free to ignore the
+/// hint and pick its own access path; PW-17 will add real plan dispatch.
+/// </summary>
+public enum ExpandStrategy
+{
+    /// <summary>Per-node adjacency-block fast path with linked-list fallback (default for binary backend).</summary>
+    AdjacencyBlock = 1,
+    /// <summary>Walk the relationship linked list (chain) without the adjacency block fast path.</summary>
+    LinkedListChain = 2,
+    /// <summary>Reserved for PW-17: sequential relationship scan + frontier bitset probe.</summary>
+    RelationshipScan = 3,
+}
+
+/// <summary>Expansion plan returned by <see cref="QueryOptimizer.SelectExpandPlan"/>.</summary>
+public sealed record ExpandPlan(
+    ExpandStrategy Strategy,
+    double EstimatedFanOut);
+
 /// <summary>Scan decision returned by <see cref="QueryOptimizer.SelectScan"/>.</summary>
 public sealed record ScanPlan(
     ScanKind Kind,
@@ -98,6 +118,25 @@ public sealed class QueryOptimizer
 
         var edgeCount = _stats.EdgeTypeFrequency.TryGetValue(step.TypeFilter.Value, out var c) ? c : 0L;
         return _stats.TotalNodes == 0 ? 0.0 : (double)edgeCount / _stats.TotalNodes;
+    }
+
+    // ---- Expansion plan ----
+
+    /// <summary>
+    /// Pick an <see cref="ExpandStrategy"/> for a one-hop expansion. The plan is a
+    /// hint consumed by operators / backends; <c>BinaryGraphAccessMethods</c> always
+    /// implements the adjacency-block-with-fallback strategy internally, so for now
+    /// this returns <see cref="ExpandStrategy.AdjacencyBlock"/> in nearly all cases.
+    /// PW-17 will add real dispatch to <c>RelationshipScan</c> for large frontiers.
+    /// </summary>
+    public ExpandPlan SelectExpandPlan(
+        LabelId? sourceLabel,
+        RelationshipTypeId? typeFilter,
+        Direction direction)
+    {
+        double fanOut = EstimateFanOut(new TraversalPlanStep(typeFilter, direction));
+        // BA-3 baseline: backend always handles adjacency / linked-list internally.
+        return new ExpandPlan(ExpandStrategy.AdjacencyBlock, fanOut);
     }
 
     // ---- High-degree pruning ----

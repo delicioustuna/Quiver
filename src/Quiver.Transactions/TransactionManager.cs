@@ -14,6 +14,7 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly IPropertyStore _propStore;
     private readonly IIndexManager _indexManager;
     private readonly IAdjacencyBlockStore? _adjStore;
+    private readonly IGraphAccessMethods _access;
     private readonly LockManager _nodeLocks = new();
     private readonly LockManager _relLocks = new();
     private readonly LockManager _indexLocks = new();
@@ -26,7 +27,8 @@ internal sealed class TransactionManager : ITransactionManager
         IRelationshipStore relStore,
         IPropertyStore propStore,
         IIndexManager indexManager,
-        IAdjacencyBlockStore? adjStore = null)
+        IAdjacencyBlockStore? adjStore = null,
+        IGraphAccessMethods? access = null)
     {
         _wal = wal;
         _nodeStore = nodeStore;
@@ -34,6 +36,7 @@ internal sealed class TransactionManager : ITransactionManager
         _propStore = propStore;
         _indexManager = indexManager;
         _adjStore = adjStore;
+        _access = access ?? InlineGraphAccessMethods.Instance;
     }
 
     public int ActiveCount => _active.Count;
@@ -56,7 +59,7 @@ internal sealed class TransactionManager : ITransactionManager
         _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
         var tx = new Transaction(txId, level, snapshotLsn,
             _wal, _nodeLocks, _relLocks, _indexLocks, this,
-            _nodeStore, _relStore, _propStore, _indexManager, _adjStore);
+            _nodeStore, _relStore, _propStore, _indexManager, _adjStore, _access);
         _active[txId.Value] = tx;
         return tx;
     }

@@ -1,4 +1,4 @@
-﻿using Quiver.Core;
+using Quiver.Core;
 using Quiver.Transactions;
 
 namespace Quiver.Operators;
@@ -6,7 +6,6 @@ namespace Quiver.Operators;
 public sealed class AllNodesScanOperator : IPhysicalOperator
 {
     private readonly LabelId? _filterLabel;
-    private ITransaction? _tx;
     private IEnumerator<NodeId>? _enumerator;
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
 
@@ -18,21 +17,14 @@ public sealed class AllNodesScanOperator : IPhysicalOperator
 
     public void Open(ITransaction tx)
     {
-        _tx = tx;
-        _enumerator = tx.Nodes.Scan().GetEnumerator();
+        _enumerator = tx.Access.ScanNodes(tx, _filterLabel).GetEnumerator();
     }
 
     public bool MoveNext()
     {
-        while (_enumerator!.MoveNext())
+        if (_enumerator!.MoveNext())
         {
-            var nodeId = _enumerator.Current;
-            if (_filterLabel.HasValue)
-            {
-                var h = _tx!.Nodes.Read(nodeId);
-                if (h.Label != _filterLabel.Value) continue;
-            }
-            _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = nodeId.Value };
+            _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _enumerator.Current.Value };
             var s = Statistics;
             s.RowsProduced++;
             Statistics = s;

@@ -1,4 +1,5 @@
-﻿using System.Text;
+using Quiver.Core;
+using Quiver.Stores;
 using Quiver.Transactions;
 
 namespace Quiver.Operators;
@@ -7,8 +8,7 @@ public sealed class NodeIndexSeekOperator : IPhysicalOperator
 {
     private readonly string _indexName;
     private readonly ITupleProvider _keyProvider;
-    private ITransaction? _tx;
-    private IEnumerator<long>? _enumerator;
+    private IEnumerator<NodeId>? _enumerator;
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
 
     public NodeIndexSeekOperator(string indexName, ITupleProvider keyProvider)
@@ -23,44 +23,24 @@ public sealed class NodeIndexSeekOperator : IPhysicalOperator
 
     public void Open(ITransaction tx)
     {
-        _tx = tx;
         var emptyRef = new TupleRef(Span<TupleSlot>.Empty);
-        IEnumerable<long> nodeIds;
-
-        switch (_keyProvider.SlotType)
+        var key = _keyProvider.SlotType switch
         {
-            case TupleSlotType.Int64:
-            case TupleSlotType.NodeId:
-            case TupleSlotType.RelationshipId:
-            {
-                long key = _keyProvider.Provide(in emptyRef, tx).LongValue;
-                nodeIds = tx.Indexes.CreateInt64Index(_indexName).SeekValues(key);
-                break;
-            }
-            case TupleSlotType.Double:
-            {
-                double key = _keyProvider.Provide(in emptyRef, tx).DoubleValue;
-                nodeIds = tx.Indexes.CreateDoubleIndex(_indexName).SeekValues(key);
-                break;
-            }
-            case TupleSlotType.Utf8String:
-            {
-                var bytes = _keyProvider.ProvideBytes(in emptyRef, tx);
-                string key = Encoding.UTF8.GetString(bytes);
-                nodeIds = tx.Indexes.CreateStringIndex(_indexName).SeekValues(key);
-                break;
-            }
-            default:
-                nodeIds = [];
-                break;
-        }
-        _enumerator = nodeIds.GetEnumerator();
+            TupleSlotType.Int64 or TupleSlotType.NodeId or TupleSlotType.RelationshipId =>
+                PropertyValue.FromInt64(_keyProvider.Provide(in emptyRef, tx).LongValue),
+            TupleSlotType.Double =>
+                PropertyValue.FromDouble(_keyProvider.Provide(in emptyRef, tx).DoubleValue),
+            TupleSlotType.Utf8String =>
+                PropertyValue.FromUtf8(_keyProvider.ProvideBytes(in emptyRef, tx)),
+            _ => default,
+        };
+        _enumerator = tx.Access.SeekNodesByIndex(tx, _indexName, key).GetEnumerator();
     }
 
     public bool MoveNext()
     {
         if (_enumerator == null || !_enumerator.MoveNext()) return false;
-        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _enumerator.Current };
+        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _enumerator.Current.Value };
         var s = Statistics;
         s.RowsProduced++;
         Statistics = s;
