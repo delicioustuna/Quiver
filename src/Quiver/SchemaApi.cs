@@ -27,6 +27,8 @@ internal sealed class SchemaApi : ISchemaApi
     public RelationshipTypeId GetOrCreateRelationshipType(string name) => _relTypes.GetOrCreate(name);
     public PropertyKeyId GetOrCreatePropertyKey(string name) => _propKeys.GetOrCreate(name);
 
+    public string? GetLabelName(LabelId id) => id.IsValid ? _labels.GetName(id) : null;
+
     public void CreateIndex(string indexName, string label, string propertyKey, IndexKind kind)
     {
         switch (kind)

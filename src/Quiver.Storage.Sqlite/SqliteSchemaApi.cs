@@ -21,6 +21,16 @@ internal sealed class SqliteSchemaApi : ISchemaApi
         return token;
     }
 
+    public string? GetLabelName(LabelId id)
+    {
+        if (!id.IsValid) return null;
+        using var cmd = NewCommand();
+        cmd.CommandText = "SELECT name FROM labels WHERE id = $id;";
+        cmd.Parameters.AddWithValue("$id", id.Value);
+        var result = cmd.ExecuteScalar();
+        return result is null or DBNull ? null : (string)result;
+    }
+
     public RelationshipTypeId GetOrCreateRelationshipType(string name)
     {
         if (_relTypeCache.TryGetValue(name, out var cached)) return cached;

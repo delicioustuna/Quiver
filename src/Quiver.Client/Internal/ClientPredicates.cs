@@ -144,6 +144,70 @@ internal sealed class PropertyDoublePredicate : IPredicate
     }
 }
 
+/// <summary>
+/// GC-1: existence test for a property key on a node. Used by
+/// <c>.Has(key)</c> (mustExist=true) and <c>.HasNot(key)</c> (mustExist=false).
+/// The mustExist flag inlines negation so GC-1 does not need to wait on
+/// GC-2's NegatedPredicate.
+/// </summary>
+internal sealed class PropertyExistsPredicate : IPredicate
+{
+    private readonly int _nodeColumn;
+    private readonly PropertyKeyId _keyId;
+    private readonly bool _mustExist;
+
+    internal PropertyExistsPredicate(int nodeColumn, PropertyKeyId keyId, bool mustExist)
+    {
+        _nodeColumn = nodeColumn; _keyId = keyId; _mustExist = mustExist;
+    }
+
+    public bool Evaluate(in TupleRef tuple, ITransaction tx)
+    {
+        // Unknown property key (token store never observed it) ⇒ definitely
+        // absent. HasNot(key) returns true, Has(key) returns false.
+        if (!_keyId.IsValid) return !_mustExist;
+
+        var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
+        using var node = tx.Nodes.Read(nodeId);
+        var en = tx.Properties.Enumerate(node.FirstPropertyId);
+        while (en.MoveNext())
+        {
+            if (en.Current.KeyId == _keyId) return _mustExist;
+        }
+        return !_mustExist;
+    }
+}
+
+/// <summary>GC-1: <c>P.Without(...)</c> — string property must not match any listed value.</summary>
+internal sealed class PropertyWithoutStringPredicate : IPredicate
+{
+    private readonly int _nodeColumn;
+    private readonly PropertyKeyId _keyId;
+    private readonly HashSet<string> _values;
+
+    internal PropertyWithoutStringPredicate(int nodeColumn, PropertyKeyId keyId, IEnumerable<string> values)
+    {
+        _nodeColumn = nodeColumn; _keyId = keyId; _values = new HashSet<string>(values);
+    }
+
+    public bool Evaluate(in TupleRef tuple, ITransaction tx)
+    {
+        var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
+        using var node = tx.Nodes.Read(nodeId);
+        var en = tx.Properties.Enumerate(node.FirstPropertyId);
+        while (en.MoveNext())
+        {
+            var prop = en.Current;
+            if (prop.KeyId != _keyId) continue;
+            if (prop.Value.Type != PropertyValueType.String) return true;
+            return !_values.Contains(System.Text.Encoding.UTF8.GetString(prop.Value.Utf8StringValue));
+        }
+        // Missing property: caller's choice; we follow the Gremlin convention
+        // that "without X" includes elements that don't have the key at all.
+        return true;
+    }
+}
+
 internal sealed class PropertyBoolPredicate : IPredicate
 {
     private readonly int _nodeColumn;

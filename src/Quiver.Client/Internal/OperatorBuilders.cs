@@ -122,6 +122,11 @@ internal sealed class PropertyLookupBuilder : IOperatorBuilder
     public int CurrentEntityColumn => _source.CurrentEntityColumn;
     public int PredictedOutputColumnCount => _source.PredictedOutputColumnCount + 1;
 
+    /// <summary>GC-1: exposed so <c>GraphTraversal.Is(value)</c> can rewrite
+    /// <c>Values(key).Is(v)</c> into <c>Has(key, v).Values(key)</c>.</summary>
+    internal IOperatorBuilder Source => _source;
+    internal string Key => _key;
+
     internal PropertyLookupBuilder(IOperatorBuilder source, string key)
     {
         _source = source; _key = key;
@@ -132,4 +137,59 @@ internal sealed class PropertyLookupBuilder : IOperatorBuilder
         var keyId = schema.GetOrCreatePropertyKey(_key);
         return new PropertyLookupOperator(_source.Build(schema), _source.CurrentEntityColumn, keyId, _key);
     }
+}
+
+/// <summary>GC-1: wraps any source with <see cref="LimitOperator"/>'s skip/limit window.</summary>
+internal sealed class LimitBuilder : IOperatorBuilder
+{
+    private readonly IOperatorBuilder _source;
+    private readonly long _limit;
+    private readonly long _skip;
+    public int CurrentEntityColumn => _source.CurrentEntityColumn;
+    public int PredictedOutputColumnCount => _source.PredictedOutputColumnCount;
+
+    internal LimitBuilder(IOperatorBuilder source, long limit, long skip)
+    {
+        _source = source; _limit = limit; _skip = skip;
+    }
+
+    public IPhysicalOperator Build(ISchemaApi schema)
+        => new LimitOperator(_source.Build(schema), _limit, _skip);
+}
+
+/// <summary>GC-1: <c>.outV()</c> / <c>.inV()</c> / <c>.otherV()</c> — resolves
+/// a relationship column into a node column via <see cref="RelationshipEndpointOperator"/>.</summary>
+internal sealed class RelationshipEndpointBuilder : IOperatorBuilder
+{
+    private readonly IOperatorBuilder _source;
+    private readonly int _relColumn;
+    private readonly RelationshipEndpoint _endpoint;
+    public int CurrentEntityColumn => 0;
+    public int PredictedOutputColumnCount => 1;
+
+    internal RelationshipEndpointBuilder(IOperatorBuilder source, int relColumn, RelationshipEndpoint endpoint)
+    {
+        _source = source; _relColumn = relColumn; _endpoint = endpoint;
+    }
+
+    public IPhysicalOperator Build(ISchemaApi schema)
+        => new RelationshipEndpointOperator(_source.Build(schema), _relColumn, _endpoint);
+}
+
+/// <summary>GC-1: <c>.label()</c> — adds a string column carrying the label name for the entity column.</summary>
+internal sealed class LabelNameLookupBuilder : IOperatorBuilder
+{
+    private readonly IOperatorBuilder _source;
+    private readonly int _nodeColumn;
+    private readonly ISchemaApi _schemaRef;
+    public int CurrentEntityColumn => _source.CurrentEntityColumn;
+    public int PredictedOutputColumnCount => _source.PredictedOutputColumnCount + 1;
+
+    internal LabelNameLookupBuilder(IOperatorBuilder source, int nodeColumn, ISchemaApi schemaRef)
+    {
+        _source = source; _nodeColumn = nodeColumn; _schemaRef = schemaRef;
+    }
+
+    public IPhysicalOperator Build(ISchemaApi schema)
+        => new LabelNameLookupOperator(_source.Build(schema), _nodeColumn, _schemaRef.GetLabelName);
 }

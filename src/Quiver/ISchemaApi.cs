@@ -8,6 +8,13 @@ public interface ISchemaApi
     RelationshipTypeId GetOrCreateRelationshipType(string name);
     PropertyKeyId GetOrCreatePropertyKey(string name);
 
+    /// <summary>
+    /// GC-1: reverse lookup for label names. Returns null when the id was
+    /// never registered. Used by Gremlin's <c>.label()</c> step and any
+    /// diagnostic surface that wants to render an id back to its source name.
+    /// </summary>
+    string? GetLabelName(LabelId id);
+
     void CreateIndex(string indexName, string label, string propertyKey, IndexKind kind);
     void DropIndex(string indexName);
     IReadOnlyList<IndexInfo> ListIndexes();

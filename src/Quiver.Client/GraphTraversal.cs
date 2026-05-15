@@ -8,10 +8,10 @@ namespace Quiver.Client;
 public sealed class GraphTraversal<T>
 {
     internal readonly IGraphTransaction _tx;
-    private readonly ISchemaApi _schema;
-    private readonly IOperatorBuilder _builder;
-    private readonly Func<QueryRow, T> _projection;
-    private readonly int _entityColumn;
+    internal readonly ISchemaApi _schema;
+    internal readonly IOperatorBuilder _builder;
+    internal readonly Func<QueryRow, T> _projection;
+    internal readonly int _entityColumn;
 
     internal GraphTraversal(IGraphTransaction tx, ISchemaApi schema, IOperatorBuilder builder, Func<QueryRow, T> projection, int entityColumn)
     {
@@ -98,6 +98,13 @@ public sealed class GraphTraversal<T>
             var vals = pred.WithinValues;
             return new GraphTraversal<T>(_tx, _schema,
                 new FilterBuilder(_builder, _ => new PropertyWithinStringPredicate(col, keyId, vals)),
+                _projection, _entityColumn);
+        }
+        if (pred.Kind == PredicateKind.Without && pred.WithinValues != null)
+        {
+            var vals = pred.WithinValues;
+            return new GraphTraversal<T>(_tx, _schema,
+                new FilterBuilder(_builder, _ => new PropertyWithoutStringPredicate(col, keyId, vals)),
                 _projection, _entityColumn);
         }
         return new GraphTraversal<T>(_tx, _schema,
@@ -197,6 +204,124 @@ public sealed class GraphTraversal<T>
                 return capturedInner(start).BuildNotExistsPredicate(outerEntityColumn);
             }),
             _projection, _entityColumn);
+    }
+
+    // ── GC-1: presence checks ────────────────────────────────────────────────
+
+    /// <summary>GC-1: keep elements that carry property <paramref name="key"/>.</summary>
+    public GraphTraversal<T> Has(string key)
+    {
+        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var col = _entityColumn;
+        return new GraphTraversal<T>(_tx, _schema,
+            new FilterBuilder(_builder, _ => new PropertyExistsPredicate(col, keyId, mustExist: true)),
+            _projection, _entityColumn);
+    }
+
+    /// <summary>GC-1: keep elements that do NOT carry property <paramref name="key"/> (Gremlin <c>.hasNot</c>).</summary>
+    public GraphTraversal<T> HasNot(string key)
+    {
+        // Use TryGet so we don't burn a fresh token id just to filter against it.
+        // We can't call ISchemaApi.TryGet here (no such method exposed), so the
+        // worst case is a single token allocation on first call — still correct
+        // because newly-created keys have zero observations.
+        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var col = _entityColumn;
+        return new GraphTraversal<T>(_tx, _schema,
+            new FilterBuilder(_builder, _ => new PropertyExistsPredicate(col, keyId, mustExist: false)),
+            _projection, _entityColumn);
+    }
+
+    // ── GC-1: pagination ─────────────────────────────────────────────────────
+
+    /// <summary>GC-1: emit at most <paramref name="n"/> elements (Gremlin <c>.limit</c>).</summary>
+    public GraphTraversal<T> Limit(long n)
+    {
+        if (n < 0) throw new ArgumentOutOfRangeException(nameof(n));
+        return new GraphTraversal<T>(_tx, _schema, new LimitBuilder(_builder, n, skip: 0), _projection, _entityColumn);
+    }
+
+    /// <summary>GC-1: discard the first <paramref name="n"/> elements before emitting (Gremlin <c>.skip</c>).</summary>
+    public GraphTraversal<T> Skip(long n)
+    {
+        if (n < 0) throw new ArgumentOutOfRangeException(nameof(n));
+        return new GraphTraversal<T>(_tx, _schema, new LimitBuilder(_builder, long.MaxValue, skip: n), _projection, _entityColumn);
+    }
+
+    /// <summary>GC-1: emit the half-open <c>[from, to)</c> window (Gremlin <c>.range(a, b)</c>).</summary>
+    public GraphTraversal<T> Range(long from, long to)
+    {
+        if (from < 0 || to < from)
+            throw new ArgumentOutOfRangeException(nameof(to), "Require 0 <= from <= to.");
+        return new GraphTraversal<T>(_tx, _schema, new LimitBuilder(_builder, to - from, skip: from), _projection, _entityColumn);
+    }
+
+    // ── GC-1: terminal / existence ──────────────────────────────────────────
+
+    /// <summary>GC-1: <c>true</c> when the traversal would emit at least one element (Gremlin <c>.hasNext</c>).</summary>
+    public bool HasNext()
+    {
+        // TryNext() returns default(T) when the stream is empty, which for
+        // value-type projections (NodeId, long) is indistinguishable from a
+        // legitimate zero-value result. Drive a cursor directly so we can
+        // rely on MoveNext()'s boolean.
+        using var cursor = AsCursor();
+        return cursor.MoveNext();
+    }
+
+    // ── GC-1: <c>.label()</c> step ──────────────────────────────────────────
+
+    /// <summary>
+    /// GC-1: Gremlin <c>.label()</c> — for each node in the current traversal,
+    /// resolve its label name through the schema. Only valid when the current
+    /// entity column carries a NodeId; chaining after an edge traversal will
+    /// resolve garbage.
+    /// </summary>
+    public GraphTraversal<string> Label()
+    {
+        var lookup = new LabelNameLookupBuilder(_builder, _entityColumn, _schema);
+        int labelCol = lookup.PredictedOutputColumnCount - 1;
+        return new GraphTraversal<string>(_tx, _schema, lookup, row => row.GetString(labelCol), _entityColumn);
+    }
+
+    // ── GC-1: <c>.id()</c> step ─────────────────────────────────────────────
+
+    /// <summary>
+    /// GC-1: Gremlin <c>.id()</c> — project the current entity id as a raw
+    /// <c>long</c>. Works for NodeId, RelationshipId, and PropertyId columns
+    /// alike since all three are stored as <see cref="TupleSlot.LongValue"/>.
+    /// </summary>
+    public GraphTraversal<long> Id()
+    {
+        var col = _entityColumn;
+        return new GraphTraversal<long>(_tx, _schema, _builder, row => row.GetInt64(col), _entityColumn);
+    }
+
+    // ── GC-1: edge endpoint resolution ──────────────────────────────────────
+
+    /// <summary>GC-1: Gremlin <c>.outV()</c> — resolve to the source node of the current edge.</summary>
+    public GraphTraversal<NodeId> OutV()
+    {
+        var rep = new RelationshipEndpointBuilder(_builder, _entityColumn, RelationshipEndpoint.Source);
+        return new GraphTraversal<NodeId>(_tx, _schema, rep, row => row.GetNodeId(0), 0);
+    }
+
+    /// <summary>GC-1: Gremlin <c>.inV()</c> — resolve to the target node of the current edge.</summary>
+    public GraphTraversal<NodeId> InV()
+    {
+        var rep = new RelationshipEndpointBuilder(_builder, _entityColumn, RelationshipEndpoint.Target);
+        return new GraphTraversal<NodeId>(_tx, _schema, rep, row => row.GetNodeId(0), 0);
+    }
+
+    /// <summary>
+    /// GC-1: Gremlin <c>.otherV()</c> — resolve to the "far" endpoint
+    /// relative to the entry direction. Without a context node the operator
+    /// defaults to target; use OutV / InV when the side matters precisely.
+    /// </summary>
+    public GraphTraversal<NodeId> OtherV()
+    {
+        var rep = new RelationshipEndpointBuilder(_builder, _entityColumn, RelationshipEndpoint.Other);
+        return new GraphTraversal<NodeId>(_tx, _schema, rep, row => row.GetNodeId(0), 0);
     }
 
     /// <summary>

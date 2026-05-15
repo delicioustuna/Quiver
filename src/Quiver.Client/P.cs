@@ -10,9 +10,16 @@ public static class P
     public static PropertyPredicate Lte(long value)  => new(PredicateKind.Lte, value,  0,      null);
     public static PropertyPredicate Between(long from, long to) => new(PredicateKind.Between, from, to, null);
     public static PropertyPredicate Within(params string[] values) => new(PredicateKind.Within, 0, 0, null, values);
+
+    /// <summary>
+    /// GC-1: <c>P.Without(...)</c> — element passes when the string property
+    /// is NOT in the listed values, or when the property is missing entirely
+    /// (Gremlin's convention).
+    /// </summary>
+    public static PropertyPredicate Without(params string[] values) => new(PredicateKind.Without, 0, 0, null, values);
 }
 
-public enum PredicateKind { Eq, Gt, Gte, Lt, Lte, Between, Within }
+public enum PredicateKind { Eq, Gt, Gte, Lt, Lte, Between, Within, Without }
 
 public sealed class PropertyPredicate
 {
