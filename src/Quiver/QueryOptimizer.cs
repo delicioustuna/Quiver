@@ -36,7 +36,28 @@ public enum ExpandStrategy
 /// <summary>Expansion plan returned by <see cref="QueryOptimizer.SelectExpandPlan"/>.</summary>
 public sealed record ExpandPlan(
     ExpandStrategy Strategy,
-    double EstimatedFanOut);
+    double EstimatedFanOut)
+{
+    /// <summary>
+    /// Materialise the plan as a physical operator. For
+    /// <see cref="ExpandStrategy.RelationshipScan"/> we emit
+    /// <see cref="RelationshipScanExpandOperator"/>; the other strategies are
+    /// served by <see cref="ExpandOperator"/> (the binary backend's access
+    /// methods pick adjacency block vs linked-list internally).
+    /// </summary>
+    public IPhysicalOperator Build(
+        IPhysicalOperator source,
+        int sourceNodeColumn,
+        Direction direction,
+        RelationshipTypeId? typeFilter,
+        ExpandOutputMode outputMode)
+        => Strategy switch
+        {
+            ExpandStrategy.RelationshipScan =>
+                new RelationshipScanExpandOperator(source, sourceNodeColumn, direction, typeFilter, outputMode),
+            _ => new ExpandOperator(source, sourceNodeColumn, direction, typeFilter, outputMode),
+        };
+}
 
 /// <summary>Scan decision returned by <see cref="QueryOptimizer.SelectScan"/>.</summary>
 public sealed record ScanPlan(
@@ -116,20 +137,57 @@ public sealed class QueryOptimizer
 
     // ---- Expansion plan ----
 
+    // PW-17: RelationshipScanExpandOperator only wins once the frontier covers
+    // almost the whole edge set, because the per-node path benefits from
+    // linked-list / adjacency-block fast paths plus stops at each source's
+    // immediate neighbours, whereas the scan path is always O(TotalRelationships).
+    // Measured crossover with the binary backend (linked-list, no adjacency
+    // blocks) was around 85% frontier coverage; with adjacency blocks the
+    // crossover is even higher. See docs/benchmarks/2026-05-15_PW-17_after.md.
+    private const double RelationshipScanFrontierFraction = 0.85;
+
     /// <summary>
-    /// Pick an <see cref="ExpandStrategy"/> for a one-hop expansion. The plan is a
-    /// hint consumed by operators / backends; <c>BinaryGraphAccessMethods</c> always
-    /// implements the adjacency-block-with-fallback strategy internally, so for now
-    /// this returns <see cref="ExpandStrategy.AdjacencyBlock"/> in nearly all cases.
-    /// PW-17 will add real dispatch to <c>RelationshipScan</c> for large frontiers.
+    /// Pick an <see cref="ExpandStrategy"/> for a one-hop expansion when the
+    /// optimizer does not know the upcoming frontier size. Returns the
+    /// adjacency-block strategy that the binary backend handles internally.
+    /// Use the overload taking <paramref name="frontierSize"/> when the planner
+    /// already materialised the frontier (e.g. BFS, multi-hop chain).
     /// </summary>
     public ExpandPlan SelectExpandPlan(
         LabelId? sourceLabel,
         RelationshipTypeId? typeFilter,
         Direction direction)
+        => SelectExpandPlan(sourceLabel, typeFilter, direction, frontierSize: null);
+
+    /// <summary>
+    /// PW-17: Pick an <see cref="ExpandStrategy"/> for a one-hop expansion given a
+    /// known <paramref name="frontierSize"/>. Picks <see cref="ExpandStrategy.RelationshipScan"/>
+    /// when <c>frontierSize * fanOut</c> would touch a large fraction of the
+    /// relationship store, otherwise falls back to <see cref="ExpandStrategy.AdjacencyBlock"/>
+    /// (which the binary backend itself further refines to a linked-list fallback
+    /// when no block exists for a given node).
+    /// </summary>
+    public ExpandPlan SelectExpandPlan(
+        LabelId? sourceLabel,
+        RelationshipTypeId? typeFilter,
+        Direction direction,
+        long? frontierSize)
     {
         double fanOut = _stats.EstimateFanOut(sourceLabel, typeFilter, direction);
-        // BA-3 baseline: backend always handles adjacency / linked-list internally.
+
+        if (frontierSize is long fs && fs > 0 && _stats.TotalRelationships > 0)
+        {
+            // Total work for the per-node path is roughly fs * fanOut linked-list /
+            // adjacency-block probes, each chasing potentially cold pages. The
+            // scan path touches every live relationship page exactly once. We
+            // switch when the per-node probe count exceeds a meaningful slice of
+            // the relationship store.
+            double estimatedProbes = fs * Math.Max(fanOut, 1.0);
+            double threshold = _stats.TotalRelationships * RelationshipScanFrontierFraction;
+            if (estimatedProbes >= threshold)
+                return new ExpandPlan(ExpandStrategy.RelationshipScan, fanOut);
+        }
+
         return new ExpandPlan(ExpandStrategy.AdjacencyBlock, fanOut);
     }
 

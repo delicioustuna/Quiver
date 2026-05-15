@@ -76,6 +76,18 @@ public sealed class ExpandOperator : IPhysicalOperator
             if (!_source.MoveNext()) return false;
             _currentSourceNode = new NodeId(_source.Current[_sourceNodeColumn].LongValue);
             _cursor = _tx!.Access.Expand(_tx, _currentSourceNode, _direction, _typeFilter);
+
+            // PW-17 attribution: count this expansion as an adjacency-block hit
+            // when the source node actually has a block. Diverging from
+            // AdjacencyFallbackCount (which only fires on "no block at all"),
+            // this gives the optimizer a per-operator hit count to compare
+            // against RelationshipScanRecords when picking ExpandStrategy.
+            if (_tx!.AdjacencyBlocks?.HasBlock(_currentSourceNode) == true)
+            {
+                var s = Statistics;
+                s.AdjacencyBlockHits++;
+                Statistics = s;
+            }
         }
     }
 

@@ -194,6 +194,7 @@ public class TransactionManagerTests : IDisposable
         public RelationshipWriteHandle Write(RelationshipId relId) => throw new NotSupportedException();
         public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore ns) => throw new NotSupportedException();
         public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore ns, RelationshipTypeId type, Direction dir) => throw new NotSupportedException();
+        public IEnumerable<RelationshipId> Scan() => [];
     }
 
     private sealed class StubPropertyStore : IPropertyStore

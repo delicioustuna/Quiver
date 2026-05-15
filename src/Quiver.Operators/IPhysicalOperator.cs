@@ -69,4 +69,18 @@ public struct OperatorStatistics
     public long ExecutionTicks;
     public long PageReadsLogical;
     public long PageReadsPhysical;
+
+    /// <summary>
+    /// PW-17 / BA-3: Number of expansions that took the adjacency-block fast path.
+    /// Compare against <see cref="RelationshipScanRecords"/> and the global
+    /// <c>IGraphAccessMethods.AdjacencyFallbackCount</c> to attribute plan choice.
+    /// </summary>
+    public long AdjacencyBlockHits;
+
+    /// <summary>
+    /// PW-17: Number of relationship records inspected by
+    /// <see cref="RelationshipScanExpandOperator"/> (live records only — deleted
+    /// rows are skipped by <c>IRelationshipStore.Scan</c>).
+    /// </summary>
+    public long RelationshipScanRecords;
 }

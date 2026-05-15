@@ -215,6 +215,21 @@ internal sealed class RelationshipStore : IRelationshipStore
         return new RelationshipEnumerator(this, nodeId, first, type, direction);
     }
 
+    public IEnumerable<RelationshipId> Scan()
+    {
+        long hwm = _hwm;
+        for (long id = 0; id < hwm; id++)
+        {
+            var (pageId, off) = Location(id);
+            bool inUse;
+            {
+                using var h = _file.PinForRead(pageId);
+                inUse = (h.Data[off] & FlagInUse) != 0;
+            }
+            if (inUse) yield return new RelationshipId(id);
+        }
+    }
+
     // --- internal bulk-load helpers (no per-record FlushMeta) ---
 
     internal void BulkWrite(long id, long src, long tgt, int typeId,

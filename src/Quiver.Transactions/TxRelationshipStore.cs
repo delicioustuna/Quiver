@@ -41,6 +41,8 @@ internal sealed class TxRelationshipStore : IRelationshipStore
     public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore nodeStore, RelationshipTypeId type, Direction direction)
         => _inner.EnumerateNeighbors(nodeId, nodeStore, type, direction);
 
+    public IEnumerable<RelationshipId> Scan() => _inner.Scan();
+
     private void AcquireLock(long id)
     {
         if (!_locks.TryAcquire(id, _txId))

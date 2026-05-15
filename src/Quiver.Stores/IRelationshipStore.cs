@@ -13,6 +13,14 @@ public interface IRelationshipStore
     RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore nodeStore);
     RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore nodeStore, RelationshipTypeId type, Direction direction);
     long InUseCount { get; }
+
+    /// <summary>
+    /// Yield every live <see cref="RelationshipId"/> in store order (id 0 → hwm-1).
+    /// Used by PW-17 <c>RelationshipScanExpandOperator</c> for large-frontier
+    /// expansion, where scanning sequentially is cheaper than walking many
+    /// per-node linked lists.
+    /// </summary>
+    IEnumerable<RelationshipId> Scan();
 }
 
 // RelRecord layout (48 bytes):
