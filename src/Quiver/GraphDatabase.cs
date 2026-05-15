@@ -93,6 +93,26 @@ public sealed class GraphDatabase : IDisposable
         => new(stats ?? CollectStats());
 
     /// <summary>
+    /// PW-15 / codex_advice_3 §7.7. Build a point-in-time CSR/CSC snapshot of
+    /// the current graph for repeated multi-pass algorithms (PageRank,
+    /// Louvain, repeated BFS / shortest-path). Snapshot construction is
+    /// O(N + E); subsequent neighbor lookups read flat arrays, which is
+    /// cheaper than opening one adjacency cursor per node when an algorithm
+    /// makes many passes over the same graph state.
+    ///
+    /// Internally opens a snapshot-isolation read-only transaction, builds
+    /// the view, then closes the transaction — so the returned view does
+    /// not pin a transaction beyond construction. Mutations after this call
+    /// are invisible to the snapshot. Dispose the view to release pooled
+    /// arrays.
+    /// </summary>
+    public IGraphSnapshotView OpenSnapshotView()
+    {
+        using var tx = _backend.Transactions.Begin(IsolationLevel.SnapshotIsolation);
+        return GraphSnapshotView.Build(tx.Nodes, tx.Relationships, tx.AdjacencyBlocks);
+    }
+
+    /// <summary>
     /// PW-14 / codex_advice_3 §7.6. Rebuild the immutable base adjacency view
     /// from the current relationship state, drop tombstones, and advance the
     /// epoch. After this call all live edges are served from the base view and
