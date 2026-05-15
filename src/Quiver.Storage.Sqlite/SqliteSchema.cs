@@ -100,6 +100,34 @@ CREATE TABLE IF NOT EXISTS index_entries (
 CREATE INDEX IF NOT EXISTS idx_index_entries_int  ON index_entries(name, int_key)    WHERE int_key    IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_index_entries_dbl  ON index_entries(name, double_key) WHERE double_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_index_entries_text ON index_entries(name, text_key)   WHERE text_key   IS NOT NULL;
+
+-- VEC-2: vector index catalog + embedding task lifecycle. Payloads and ANN
+-- structures live in a binary sidecar (codex_advice_3.md §6.5); SQLite only
+-- holds the metadata callers need to inspect/manage indexes externally.
+CREATE TABLE IF NOT EXISTS vector_indexes (
+    name                   TEXT PRIMARY KEY,
+    entity_kind            INTEGER NOT NULL,
+    source_property_key_id INTEGER NOT NULL,
+    dimensions             INTEGER NOT NULL,
+    metric                 INTEGER NOT NULL,
+    provider_id            TEXT NOT NULL,
+    normalization_profile  TEXT,
+    created_at_utc         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS embedding_tasks (
+    entity_kind         INTEGER NOT NULL,
+    entity_id           INTEGER NOT NULL,
+    index_name          TEXT NOT NULL,
+    provider_id         TEXT NOT NULL,
+    state               INTEGER NOT NULL,
+    content_hash        TEXT,
+    last_error          TEXT,
+    last_updated_at_utc TEXT NOT NULL,
+    PRIMARY KEY (entity_kind, entity_id, index_name, provider_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_embedding_tasks_index ON embedding_tasks(index_name);
 ";
 
     /// <summary>
