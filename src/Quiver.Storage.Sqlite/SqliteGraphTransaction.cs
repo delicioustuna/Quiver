@@ -29,6 +29,8 @@ public sealed class SqliteGraphTransaction : IGraphTransaction
     private readonly SqliteGraphStorageBackend _backend;
     private readonly SqliteTransaction _sqliteTx;
     private readonly bool _isReadOnly;
+    private List<Action>? _onCommitted;
+    private List<Action>? _onRolledBack;
     private TransactionState _state;
 
     internal SqliteGraphTransaction(
@@ -351,9 +353,20 @@ public sealed class SqliteGraphTransaction : IGraphTransaction
         if (_state != TransactionState.Active)
             throw new InvalidOperationException($"Cannot commit a transaction in state {_state}.");
         _state = TransactionState.Preparing;
-        _sqliteTx.Commit();
-        _state = TransactionState.Committed;
-        _backend.OnTransactionFinished(this);
+        try
+        {
+            _sqliteTx.Commit();
+            _state = TransactionState.Committed;
+            _backend.OnTransactionFinished(this);
+        }
+        catch
+        {
+            _state = TransactionState.Aborted;
+            _backend.OnTransactionFinished(this);
+            FireHooks(_onRolledBack);
+            throw;
+        }
+        FireHooks(_onCommitted);
     }
 
     public void Rollback()
@@ -362,6 +375,7 @@ public sealed class SqliteGraphTransaction : IGraphTransaction
         _sqliteTx.Rollback();
         _state = TransactionState.Aborted;
         _backend.OnTransactionFinished(this);
+        FireHooks(_onRolledBack);
     }
 
     public void Dispose()
@@ -372,8 +386,54 @@ public sealed class SqliteGraphTransaction : IGraphTransaction
             catch (SqliteException) { /* connection already closed */ }
             _state = TransactionState.Aborted;
             _backend.OnTransactionFinished(this);
+            FireHooks(_onRolledBack);
         }
         _sqliteTx.Dispose();
+    }
+
+    // VEC-3: post-commit / post-rollback hooks. Semantics mirror the binary
+    // backend in Quiver.Transactions.Transaction.
+    public void OnCommitted(Action callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        switch (_state)
+        {
+            case TransactionState.Committed:
+                SafeInvoke(callback);
+                return;
+            case TransactionState.Aborted:
+                return;
+            default:
+                (_onCommitted ??= new List<Action>()).Add(callback);
+                return;
+        }
+    }
+
+    public void OnRolledBack(Action callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        switch (_state)
+        {
+            case TransactionState.Aborted:
+                SafeInvoke(callback);
+                return;
+            case TransactionState.Committed:
+                return;
+            default:
+                (_onRolledBack ??= new List<Action>()).Add(callback);
+                return;
+        }
+    }
+
+    private static void FireHooks(List<Action>? hooks)
+    {
+        if (hooks == null) return;
+        for (int i = 0; i < hooks.Count; i++) SafeInvoke(hooks[i]);
+    }
+
+    private static void SafeInvoke(Action callback)
+    {
+        try { callback(); } catch { }
     }
 
     // ============================================================

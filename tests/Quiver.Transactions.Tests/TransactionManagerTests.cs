@@ -133,6 +133,108 @@ public class TransactionManagerTests : IDisposable
         tx.Level.Should().Be(IsolationLevel.ReadCommitted);
     }
 
+    // ---- Commit hook tests (VEC-3) ----
+
+    [Fact]
+    public void OnCommitted_fires_after_commit_in_registration_order()
+    {
+        var tx = _manager.Begin();
+        var order = new List<int>();
+        tx.OnCommitted(() => order.Add(1));
+        tx.OnCommitted(() => order.Add(2));
+        tx.OnCommitted(() => order.Add(3));
+
+        order.Should().BeEmpty();
+        tx.Commit();
+        order.Should().Equal(1, 2, 3);
+    }
+
+    [Fact]
+    public void OnRolledBack_fires_on_abort_in_registration_order()
+    {
+        var tx = _manager.Begin();
+        var order = new List<int>();
+        tx.OnRolledBack(() => order.Add(1));
+        tx.OnRolledBack(() => order.Add(2));
+
+        tx.Abort();
+        order.Should().Equal(1, 2);
+    }
+
+    [Fact]
+    public void OnRolledBack_does_not_fire_on_commit()
+    {
+        var tx = _manager.Begin();
+        bool fired = false;
+        tx.OnRolledBack(() => fired = true);
+        tx.Commit();
+        fired.Should().BeFalse();
+    }
+
+    [Fact]
+    public void OnCommitted_does_not_fire_on_abort()
+    {
+        var tx = _manager.Begin();
+        bool fired = false;
+        tx.OnCommitted(() => fired = true);
+        tx.Abort();
+        fired.Should().BeFalse();
+    }
+
+    [Fact]
+    public void OnRolledBack_fires_when_disposing_active_transaction()
+    {
+        var tx = _manager.Begin();
+        bool fired = false;
+        tx.OnRolledBack(() => fired = true);
+        tx.Dispose();
+        fired.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Hook_exception_does_not_break_transaction_or_other_hooks()
+    {
+        var tx = _manager.Begin();
+        bool secondRan = false;
+        tx.OnCommitted(() => throw new InvalidOperationException("boom"));
+        tx.OnCommitted(() => secondRan = true);
+
+        var act = () => tx.Commit();
+        act.Should().NotThrow();
+        secondRan.Should().BeTrue();
+        tx.State.Should().Be(TransactionState.Committed);
+    }
+
+    [Fact]
+    public void OnCommitted_registered_after_commit_fires_immediately()
+    {
+        var tx = _manager.Begin();
+        tx.Commit();
+        bool fired = false;
+        tx.OnCommitted(() => fired = true);
+        fired.Should().BeTrue();
+    }
+
+    [Fact]
+    public void OnRolledBack_registered_after_commit_is_ignored()
+    {
+        var tx = _manager.Begin();
+        tx.Commit();
+        bool fired = false;
+        tx.OnRolledBack(() => fired = true);
+        fired.Should().BeFalse();
+    }
+
+    [Fact]
+    public void OnRolledBack_registered_after_abort_fires_immediately()
+    {
+        var tx = _manager.Begin();
+        tx.Abort();
+        bool fired = false;
+        tx.OnRolledBack(() => fired = true);
+        fired.Should().BeTrue();
+    }
+
     // ---- Lock manager tests ----
 
     [Fact]

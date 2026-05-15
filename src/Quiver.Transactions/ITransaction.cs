@@ -5,7 +5,7 @@ using Quiver.Stores;
 namespace Quiver.Transactions;
 
 /// <summary>トランザクションコンテキスト。読み取りスナップショットと書き込みバッファを保持。</summary>
-public interface ITransaction : IDisposable
+public interface ITransaction : IDisposable, ICommitHookRegistrar
 {
     TransactionId Id { get; }
     IsolationLevel Level { get; }

@@ -18,6 +18,8 @@ internal sealed class Transaction : ITransaction
     private readonly TxIndexManager _indexes;
     private readonly IAdjacencyBlockStore? _adjStore;
     private readonly IGraphAccessMethods _access;
+    private List<Action>? _onCommitted;
+    private List<Action>? _onRolledBack;
     private TransactionState _state;
 
     public TransactionId Id { get; }
@@ -61,14 +63,29 @@ internal sealed class Transaction : ITransaction
         if (_state != TransactionState.Active)
             throw new TransactionException("Cannot commit: transaction is not Active.");
         _state = TransactionState.Preparing;
-        // All PageImage WAL records are already logged by UnpinDirty calls.
-        // Commit record comes last so recovery only replays images of committed txs.
-        long lsn = _wal.Append(WalRecordType.Commit, Id, ReadOnlySpan<byte>.Empty);
-        _wal.FlushTo(lsn);
-        WalPageContext.End();
-        ReleaseAllLocks();
-        _state = TransactionState.Committed;
-        _manager.OnCommit(Id);
+        try
+        {
+            // All PageImage WAL records are already logged by UnpinDirty calls.
+            // Commit record comes last so recovery only replays images of committed txs.
+            long lsn = _wal.Append(WalRecordType.Commit, Id, ReadOnlySpan<byte>.Empty);
+            _wal.FlushTo(lsn);
+            WalPageContext.End();
+            ReleaseAllLocks();
+            _state = TransactionState.Committed;
+            _manager.OnCommit(Id);
+        }
+        catch
+        {
+            // Commit failed mid-way (e.g. WAL flush failure). Surface as rollback
+            // so registered OnRolledBack hooks observe a consistent outcome.
+            try { WalPageContext.End(); } catch { }
+            try { ReleaseAllLocks(); } catch { }
+            _state = TransactionState.Aborted;
+            _manager.OnAbort(Id);
+            FireHooks(_onRolledBack);
+            throw;
+        }
+        FireHooks(_onCommitted);
     }
 
     public void Abort()
@@ -79,11 +96,56 @@ internal sealed class Transaction : ITransaction
         ReleaseAllLocks();
         _state = TransactionState.Aborted;
         _manager.OnAbort(Id);
+        FireHooks(_onRolledBack);
     }
 
     public void Dispose()
     {
         if (_state == TransactionState.Active) Abort();
+    }
+
+    public void OnCommitted(Action callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        switch (_state)
+        {
+            case TransactionState.Committed:
+                SafeInvoke(callback);
+                return;
+            case TransactionState.Aborted:
+                return;
+            default:
+                (_onCommitted ??= new List<Action>()).Add(callback);
+                return;
+        }
+    }
+
+    public void OnRolledBack(Action callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        switch (_state)
+        {
+            case TransactionState.Aborted:
+                SafeInvoke(callback);
+                return;
+            case TransactionState.Committed:
+                return;
+            default:
+                (_onRolledBack ??= new List<Action>()).Add(callback);
+                return;
+        }
+    }
+
+    private static void FireHooks(List<Action>? hooks)
+    {
+        if (hooks == null) return;
+        for (int i = 0; i < hooks.Count; i++) SafeInvoke(hooks[i]);
+    }
+
+    private static void SafeInvoke(Action callback)
+    {
+        // Observer exceptions must not affect the transaction outcome.
+        try { callback(); } catch { }
     }
 
     private void ReleaseAllLocks()

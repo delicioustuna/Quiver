@@ -5,7 +5,7 @@ using Quiver.Transactions;
 
 namespace Quiver;
 
-public interface IGraphTransaction : IDisposable
+public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
 {
     TransactionId Id { get; }
     TransactionState State { get; }

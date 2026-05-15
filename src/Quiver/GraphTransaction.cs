@@ -317,4 +317,9 @@ internal sealed class GraphTransaction : IGraphTransaction
     public void Commit() => _inner.Commit();
     public void Rollback() => _inner.Abort();
     public void Dispose() => _inner.Dispose();
+
+    // VEC-3: post-commit / post-rollback hook registration delegates to the
+    // underlying transaction so users can register hooks via IGraphTransaction.
+    public void OnCommitted(Action callback) => _inner.OnCommitted(callback);
+    public void OnRolledBack(Action callback) => _inner.OnRolledBack(callback);
 }
