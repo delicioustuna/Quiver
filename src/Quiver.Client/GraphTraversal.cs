@@ -199,6 +199,24 @@ public sealed class GraphTraversal<T>
             _projection, _entityColumn);
     }
 
+    /// <summary>
+    /// VEC-6: graph-first KNN. Drains the current traversal as a NodeId
+    /// candidate set, then keeps only the top-<paramref name="k"/> by vector
+    /// similarity against <paramref name="query"/>. Pairs with
+    /// <c>g.Knn(...)</c> (vector-first) — use <c>QueryOptimizer.ChooseKnnStrategy</c>
+    /// to decide which to invoke when both are viable.
+    /// </summary>
+    /// <remarks>
+    /// Only valid when the traversal currently produces <see cref="NodeId"/>s
+    /// (i.e. <typeparamref name="T"/> is NodeId). The resulting traversal
+    /// emits NodeId in descending similarity order; score is not surfaced.
+    /// </remarks>
+    public GraphTraversal<NodeId> FilterByKnn(string indexName, ReadOnlySpan<float> query, int k)
+    {
+        var filtered = new Internal.FilteredKnnNodeSourceBuilder(_builder, indexName, query, k);
+        return new GraphTraversal<NodeId>(_tx, _schema, filtered, row => row.GetNodeId(0), 0);
+    }
+
     public GraphTraversal<string> Values(string key)
     {
         var lookup = new PropertyLookupBuilder(_builder, key);

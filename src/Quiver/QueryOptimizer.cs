@@ -205,9 +205,74 @@ public sealed class QueryOptimizer
         return Math.Pow(meanDegree, hopCount) > BidirectionalFanOutThreshold;
     }
 
+    // ---- VEC-6: KNN strategy selection ----
+
+    /// <summary>
+    /// Fraction of the vector index below which graph-first becomes
+    /// attractive — the per-candidate vector lookup beats oversampling KNN
+    /// once the candidate set is tiny relative to the whole index.
+    /// </summary>
+    private const double KnnGraphFirstFraction = 0.05;
+
+    /// <summary>
+    /// VEC-6: choose between vector-first, graph-first, and hybrid rerank
+    /// when KNN and graph constraints both appear in a query. The optimizer
+    /// is allowed to be wrong — operators handle either order correctly —
+    /// but a good choice trims a lot of unnecessary scoring.
+    /// </summary>
+    /// <param name="candidateCount">
+    /// Estimated number of nodes that satisfy the graph / property
+    /// constraint side (label + Has + neighborhood). Pass 0 when unknown;
+    /// the optimizer defaults to vector-first in that case.
+    /// </param>
+    /// <param name="k">Top-k requested by the KNN side.</param>
+    /// <param name="totalIndexedCount">
+    /// Size of the vector index (typically <c>db.Vectors</c> entry count).
+    /// Pass <c>GraphStats.TotalNodes</c> when an exact count isn't handy.
+    /// </param>
+    public KnnStrategy ChooseKnnStrategy(long candidateCount, int k, long totalIndexedCount)
+    {
+        if (k <= 0) throw new ArgumentOutOfRangeException(nameof(k));
+
+        // No graph-side knowledge → assume KNN should drive.
+        if (candidateCount <= 0 || totalIndexedCount <= 0)
+            return KnnStrategy.VectorFirst;
+
+        // Graph-first only makes sense when the candidate set is small enough
+        // that touching every member is cheaper than oversampling KNN. Below
+        // 2k we always want graph-first (we'd oversample at least 4k anyway).
+        if (candidateCount <= Math.Max(2L * k, 16))
+            return KnnStrategy.GraphFirst;
+
+        double fraction = (double)candidateCount / totalIndexedCount;
+        if (fraction < KnnGraphFirstFraction)
+            return KnnStrategy.GraphFirst;
+
+        // Mid-range: hybrid rerank is a future hook. For now we still pick
+        // vector-first (cheap, well-understood) but surface Hybrid so callers
+        // can opt into a custom plan when one lands.
+        if (fraction < 0.5)
+            return KnnStrategy.VectorFirst;
+
+        return KnnStrategy.VectorFirst;
+    }
+
     // ---- Convenience accessors ----
 
     public long EstimateCardinality(LabelId label) => _stats.EstimateCardinality(label);
     public double EstimateMeanDegree(LabelId label) => _stats.EstimateMeanDegree(label);
     public GraphStats Stats => _stats;
+}
+
+/// <summary>
+/// VEC-6: plan ordering between graph constraints and KNN. The vector-first
+/// path runs KNN top-k then applies filters; graph-first computes the
+/// candidate set then asks the vector index for KNN-within-set; hybrid
+/// reserves space for a future score-rerank plan.
+/// </summary>
+public enum KnnStrategy
+{
+    VectorFirst = 1,
+    GraphFirst = 2,
+    Hybrid = 3,
 }

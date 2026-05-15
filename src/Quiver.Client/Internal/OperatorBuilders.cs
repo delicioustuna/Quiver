@@ -91,6 +91,30 @@ internal sealed class KnnNodeSourceBuilder : IOperatorBuilder
         => new KnnNodeSourceOperator(_indexName, _query, _k);
 }
 
+internal sealed class FilteredKnnNodeSourceBuilder : IOperatorBuilder
+{
+    private readonly IOperatorBuilder _source;
+    private readonly string _indexName;
+    private readonly float[] _query;
+    private readonly int _k;
+
+    // Filter still emits the NodeId column at position 0 (single-column tuple).
+    public int CurrentEntityColumn => 0;
+    public int PredictedOutputColumnCount => 1;
+
+    internal FilteredKnnNodeSourceBuilder(IOperatorBuilder source, string indexName, ReadOnlySpan<float> query, int k)
+    {
+        _source = source;
+        _indexName = indexName;
+        _query = query.ToArray();
+        _k = k;
+    }
+
+    public IPhysicalOperator Build(ISchemaApi schema)
+        => new FilteredKnnNodeSourceOperator(
+            _source.Build(schema), _source.CurrentEntityColumn, _indexName, _query, _k);
+}
+
 internal sealed class PropertyLookupBuilder : IOperatorBuilder
 {
     private readonly IOperatorBuilder _source;
