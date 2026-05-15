@@ -152,5 +152,15 @@ public abstract class ExpandCursor : IDisposable
     public abstract bool MoveNext();
     public abstract NodeId Neighbor { get; }
     public abstract RelationshipId Relationship { get; }
+
+    /// <summary>
+    /// BA-6: raw 64-bit payload (typically an edge weight) for the current
+    /// edge. Cursors backed by a V2 adjacency view forward the inline payload
+    /// lane; other cursors return 0. Reinterpret as <see cref="double"/> via
+    /// <see cref="BitConverter.Int64BitsToDouble"/> when the active payload
+    /// kind is Double.
+    /// </summary>
+    public virtual long WeightRaw => 0;
+
     public virtual void Dispose() { }
 }

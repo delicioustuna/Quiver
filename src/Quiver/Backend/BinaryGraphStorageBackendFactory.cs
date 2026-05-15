@@ -48,13 +48,26 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         var indexDir = Path.Combine(directoryPath, "indexes");
         var indexManager = new IndexManager(indexDir);
 
-        AdjacencyBlockStore? adjStore = null;
-        var adjDataPath = Path.Combine(directoryPath, "adj.db");
-        var adjIndexPath = Path.Combine(directoryPath, "adj_idx.dat");
-        if (File.Exists(adjDataPath) && File.Exists(adjIndexPath))
+        // BA-6: prefer V2 (with payload lane) when present, otherwise V1.
+        IAdjacencyBlockStore? adjStore = null;
+        var adjV2DataPath = Path.Combine(directoryPath, "adj_v2.db");
+        var adjV2IndexPath = Path.Combine(directoryPath, "adj_v2_idx.dat");
+        var adjV2MetaPath = Path.Combine(directoryPath, "adj_v2.meta");
+        if (File.Exists(adjV2DataPath) && File.Exists(adjV2IndexPath) && File.Exists(adjV2MetaPath))
         {
-            var adjFile = pageManager.OpenOrCreate(adjDataPath, PageKind.AdjacencyBlock);
-            adjStore = new AdjacencyBlockStore(adjFile, adjIndexPath);
+            var spec = AdjacencyBlockStoreV2.ReadMeta(adjV2MetaPath);
+            var adjFile = pageManager.OpenOrCreate(adjV2DataPath, PageKind.AdjacencyBlock);
+            adjStore = new AdjacencyBlockStoreV2(adjFile, adjV2IndexPath, spec);
+        }
+        else
+        {
+            var adjDataPath = Path.Combine(directoryPath, "adj.db");
+            var adjIndexPath = Path.Combine(directoryPath, "adj_idx.dat");
+            if (File.Exists(adjDataPath) && File.Exists(adjIndexPath))
+            {
+                var adjFile = pageManager.OpenOrCreate(adjDataPath, PageKind.AdjacencyBlock);
+                adjStore = new AdjacencyBlockStore(adjFile, adjIndexPath);
+            }
         }
 
         var fileRegistry = new Dictionary<byte, IPagedFile>

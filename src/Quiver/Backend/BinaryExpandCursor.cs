@@ -48,6 +48,7 @@ internal sealed class BinaryExpandCursor : ExpandCursor
 
     public override NodeId Neighbor => _neighbor;
     public override RelationshipId Relationship => _relId;
+    public override long WeightRaw => _adjCursor?.WeightRaw ?? 0;
 
     public override bool MoveNext()
     {

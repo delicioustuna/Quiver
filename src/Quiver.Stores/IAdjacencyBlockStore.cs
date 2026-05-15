@@ -47,6 +47,15 @@ public abstract class AdjacencyCursor : IDisposable
     /// <summary>Relationship type id for the current entry. Valid only after <see cref="MoveNext"/> returns true.</summary>
     public abstract RelationshipTypeId Type { get; }
 
+    /// <summary>
+    /// BA-6: raw 64-bit payload for the current entry when the cursor is opened on
+    /// an <see cref="AdjacencyBlockStoreV2"/> with a payload lane. V1 cursors and
+    /// V2 cursors built without a payload lane return 0. Reinterpret as
+    /// <c>double</c> via <see cref="BitConverter.Int64BitsToDouble"/> when the
+    /// store's <see cref="PayloadKind"/> is <see cref="PayloadKind.Double"/>.
+    /// </summary>
+    public virtual long WeightRaw => 0;
+
     public virtual void Dispose() { }
 
     /// <summary>Singleton empty cursor used when a node has no adjacency block.</summary>
@@ -59,4 +68,17 @@ public abstract class AdjacencyCursor : IDisposable
         public override RelationshipId Relationship => RelationshipId.Invalid;
         public override RelationshipTypeId Type => default;
     }
+}
+
+/// <summary>
+/// BA-6: optional extension contract for adjacency stores that carry an inline
+/// payload lane (edge weight or similar scalar). Operators can probe for this
+/// via <c>tx.AdjacencyBlocks as IAdjacencyPayloadView</c> and choose a
+/// <see cref="Quiver.Operators.ExpandOutputMode.NeighborAndWeight"/> projection
+/// without going through the property chain.
+/// </summary>
+public interface IAdjacencyPayloadView
+{
+    /// <summary>The payload spec fixed at view-build time. Returned by reference value.</summary>
+    PayloadLaneSpec PayloadSpec { get; }
 }

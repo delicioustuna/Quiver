@@ -19,7 +19,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
     private readonly RelationshipTypeTokenStore _relTypeTokens;
     private readonly PropertyKeyTokenStore _propKeyTokens;
     private readonly IndexManager _indexManager;
-    private readonly AdjacencyBlockStore? _adjStore;
+    // BA-6: holds either AdjacencyBlockStore (V1) or AdjacencyBlockStoreV2.
+    // Disposed at backend teardown — the file lifetime is owned here even
+    // though reads go through the interface only.
+    private readonly IAdjacencyBlockStore? _adjStore;
     private readonly TransactionManager _txManager;
     private readonly SchemaApi _schema;
     private readonly DiagnosticsApi _diagnostics;
@@ -38,7 +41,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
         RelationshipTypeTokenStore relTypeTokens,
         PropertyKeyTokenStore propKeyTokens,
         IndexManager indexManager,
-        AdjacencyBlockStore? adjStore,
+        IAdjacencyBlockStore? adjStore,
         TransactionManager txManager,
         BinaryGraphAccessMethods access,
         IVectorStore vectors)
@@ -84,7 +87,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
     public void Dispose()
     {
         _txManager.Dispose();
-        _adjStore?.Dispose();
+        if (_adjStore is IDisposable d) d.Dispose();
         _indexManager.Dispose();
         _labelTokens.Dispose();
         _relTypeTokens.Dispose();

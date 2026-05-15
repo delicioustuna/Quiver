@@ -14,6 +14,7 @@ public sealed class ExpandOperator : IPhysicalOperator
     private ITransaction? _tx;
     private readonly TupleSlot[] _buffer;
     private readonly TupleSchema _schema;
+    private TupleSlotType _weightSlotType = TupleSlotType.Int64;
 
     private ExpandCursor? _cursor;
     private NodeId _currentSourceNode;
@@ -37,6 +38,10 @@ public sealed class ExpandOperator : IPhysicalOperator
             ExpandOutputMode.NeighborAndRel => (new TupleSlot[2], new TupleSchema([
                 new ColumnDefinition("rel", TupleSlotType.RelationshipId),
                 new ColumnDefinition("neighbor", TupleSlotType.NodeId)])),
+            ExpandOutputMode.NeighborAndWeight => (new TupleSlot[3], new TupleSchema([
+                new ColumnDefinition("rel", TupleSlotType.RelationshipId),
+                new ColumnDefinition("neighbor", TupleSlotType.NodeId),
+                new ColumnDefinition("weight", TupleSlotType.Int64)])),
             _ => (new TupleSlot[3], new TupleSchema([
                 new ColumnDefinition("source", TupleSlotType.NodeId),
                 new ColumnDefinition("rel", TupleSlotType.RelationshipId),
@@ -55,6 +60,21 @@ public sealed class ExpandOperator : IPhysicalOperator
         _source.Open(tx);
         _currentSourceNode = NodeId.Invalid;
         _cursor = null;
+
+        // BA-6: when emitting weights, type the slot to match the V2 payload
+        // lane's kind. If the underlying store has no payload lane the slot
+        // stays Int64 and will carry zero — the operator contract documents
+        // this fallback so callers can branch on schema rather than data.
+        if (_outputMode == ExpandOutputMode.NeighborAndWeight
+            && tx.AdjacencyBlocks is IAdjacencyPayloadView pl
+            && pl.PayloadSpec.Kind == PayloadKind.Double)
+        {
+            _weightSlotType = TupleSlotType.Double;
+        }
+        else
+        {
+            _weightSlotType = TupleSlotType.Int64;
+        }
     }
 
     public bool MoveNext()
@@ -63,7 +83,7 @@ public sealed class ExpandOperator : IPhysicalOperator
         {
             if (_cursor != null && _cursor.MoveNext())
             {
-                BuildOutput(_cursor.Neighbor, _cursor.Relationship);
+                BuildOutput(_cursor.Neighbor, _cursor.Relationship, _cursor.WeightRaw);
                 var s = Statistics;
                 s.RowsProduced++;
                 Statistics = s;
@@ -91,7 +111,7 @@ public sealed class ExpandOperator : IPhysicalOperator
         }
     }
 
-    private void BuildOutput(NodeId neighbor, RelationshipId relId)
+    private void BuildOutput(NodeId neighbor, RelationshipId relId, long weightRaw)
     {
         switch (_outputMode)
         {
@@ -101,6 +121,11 @@ public sealed class ExpandOperator : IPhysicalOperator
             case ExpandOutputMode.NeighborAndRel:
                 _buffer[0] = new TupleSlot { Type = TupleSlotType.RelationshipId, LongValue = relId.Value };
                 _buffer[1] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = neighbor.Value };
+                break;
+            case ExpandOutputMode.NeighborAndWeight:
+                _buffer[0] = new TupleSlot { Type = TupleSlotType.RelationshipId, LongValue = relId.Value };
+                _buffer[1] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = neighbor.Value };
+                _buffer[2] = new TupleSlot { Type = _weightSlotType, LongValue = weightRaw };
                 break;
             default:
                 _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _currentSourceNode.Value };

@@ -18,6 +18,12 @@ public sealed class BulkLoader : IDisposable
     private readonly List<PendingNode> _nodes = new();
     private readonly List<PendingRel> _rels = new();
     private readonly Dictionary<long, List<PendingProp>> _propsByNode = new();
+    // BA-6: collects raw payload values per relationship for the V2 payload
+    // lane. Keyed by (RelationshipId, PropertyKeyId) so the same loader can
+    // serve multiple potential payload keys, but only the one named by
+    // WithPayloadLane is actually inlined.
+    private readonly Dictionary<(long RelId, int KeyId), long> _relPayloads = new();
+    private PayloadLaneSpec? _payloadSpec;
     private bool _committed;
 
     private record struct PendingNode(long Id, int LabelId);
@@ -57,6 +63,34 @@ public sealed class BulkLoader : IDisposable
         if (!_propsByNode.TryGetValue(nodeId.Value, out var props))
             _propsByNode[nodeId.Value] = props = new();
         props.Add(new PendingProp(key.Value, value.Type, value.Int64Value, data));
+    }
+
+    /// <summary>
+    /// BA-6 / codex_advice_3 §7.2. Configure an inline payload lane so
+    /// <see cref="Commit"/> builds <c>AdjacencyBlockStoreV2</c> with the named
+    /// relationship property inlined per edge entry. Subsequent calls to
+    /// <see cref="AppendRelationshipPayload"/> populate the lane; edges
+    /// without a value receive <c>spec.DefaultRaw</c>.
+    /// </summary>
+    public void WithPayloadLane(PayloadLaneSpec spec)
+    {
+        ThrowIfCommitted();
+        if (spec.Kind == PayloadKind.None)
+            throw new ArgumentException("PayloadLaneSpec.Kind must be Int64 or Double.", nameof(spec));
+        _payloadSpec = spec;
+    }
+
+    /// <summary>
+    /// BA-6: record an inline payload value for a relationship. Only the
+    /// values whose key matches <see cref="WithPayloadLane"/>'s spec are
+    /// inlined into the V2 view; other keys are dropped. The raw long is
+    /// either an Int64 value or <c>BitConverter.DoubleToInt64Bits(d)</c>
+    /// depending on the lane kind.
+    /// </summary>
+    public void AppendRelationshipPayload(RelationshipId relId, PropertyKeyId key, long rawValue)
+    {
+        ThrowIfCommitted();
+        _relPayloads[(relId.Value, key.Value)] = rawValue;
     }
 
     public void Commit()
@@ -177,6 +211,29 @@ public sealed class BulkLoader : IDisposable
     {
         long nodeHwm = _nodes.Count > 0 ? _nodes.Max(n => n.Id) + 1 : 0L;
         var relData = _rels.Select(r => (r.Id, r.Src, r.Tgt, r.TypeId)).ToList();
+
+        if (_payloadSpec is { } spec)
+        {
+            // BA-6: V2 build. Filter payloads to the configured key; raw
+            // values are passed through (no double<->long reinterpretation
+            // here — that is the caller's responsibility via AppendRelationshipPayload).
+            var weights = new Dictionary<long, long>(_relPayloads.Count);
+            foreach (var ((relId, keyId), raw) in _relPayloads)
+            {
+                if (keyId == spec.PropertyKeyId)
+                    weights[relId] = raw;
+            }
+            AdjacencyBlockStoreV2.Build(
+                Path.Combine(directory, "adj_v2.db"),
+                Path.Combine(directory, "adj_v2_idx.dat"),
+                Path.Combine(directory, "adj_v2.meta"),
+                relData,
+                weights,
+                nodeHwm,
+                spec);
+            return;
+        }
+
         AdjacencyBlockStore.Build(
             Path.Combine(directory, "adj.db"),
             Path.Combine(directory, "adj_idx.dat"),
