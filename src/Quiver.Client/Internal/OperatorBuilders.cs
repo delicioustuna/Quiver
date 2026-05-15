@@ -71,6 +71,26 @@ internal sealed class ExpandBuilder : IOperatorBuilder
     }
 }
 
+internal sealed class KnnNodeSourceBuilder : IOperatorBuilder
+{
+    private readonly string _indexName;
+    private readonly float[] _query;
+    private readonly int _k;
+
+    public int CurrentEntityColumn => 0;
+    public int PredictedOutputColumnCount => 1;
+
+    internal KnnNodeSourceBuilder(string indexName, ReadOnlySpan<float> query, int k)
+    {
+        _indexName = indexName;
+        _query = query.ToArray();
+        _k = k;
+    }
+
+    public IPhysicalOperator Build(ISchemaApi schema)
+        => new KnnNodeSourceOperator(_indexName, _query, _k);
+}
+
 internal sealed class PropertyLookupBuilder : IOperatorBuilder
 {
     private readonly IOperatorBuilder _source;

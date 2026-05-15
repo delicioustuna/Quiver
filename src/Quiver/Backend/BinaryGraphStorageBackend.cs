@@ -9,6 +9,7 @@ namespace Quiver;
 
 internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
 {
+    private readonly IVectorStore _vectors;
     private readonly PageManager _pageManager;
     private readonly WriteAheadLog _wal;
     private readonly NodeStore _nodeStore;
@@ -39,9 +40,11 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
         IndexManager indexManager,
         AdjacencyBlockStore? adjStore,
         TransactionManager txManager,
-        BinaryGraphAccessMethods access)
+        BinaryGraphAccessMethods access,
+        IVectorStore vectors)
     {
         _directoryPath = directoryPath;
+        _vectors = vectors;
         _pageManager = pageManager;
         _wal = wal;
         _nodeStore = nodeStore;
@@ -70,6 +73,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
     public IDiagnosticsApi Diagnostics => _diagnostics;
     public IGraphAccessMethods Access => _access;
     public BulkLoadCapabilities BulkLoad => _bulkLoad;
+    public IVectorStore Vectors => _vectors;
 
     public IGraphTransaction BeginGraphTransaction(IsolationLevel level, bool readOnly)
     {

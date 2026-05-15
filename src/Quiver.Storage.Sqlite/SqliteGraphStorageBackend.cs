@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Quiver.Core;
 using Quiver.Transactions;
 
 namespace Quiver.Storage.Sqlite;
@@ -18,6 +19,7 @@ public sealed class SqliteGraphStorageBackend : IGraphStorageBackend
     private readonly SqliteGraphAccessMethods _access;
     private readonly SqliteTransactionManager _txManager;
     private readonly BulkLoadCapabilities _bulkLoad;
+    private readonly IVectorStore _vectors;
 
     // Only one outer transaction at a time (single-writer SQLite + sequential test model).
     private SqliteGraphTransaction? _active;
@@ -27,9 +29,10 @@ public sealed class SqliteGraphStorageBackend : IGraphStorageBackend
         _connection = connection;
         _dbPath = dbPath;
 
+        _vectors = new InMemoryVectorStore();
         _schema = new SqliteSchemaApi(this);
         _diagnostics = new SqliteDiagnosticsApi(this);
-        _access = new SqliteGraphAccessMethods();
+        _access = new SqliteGraphAccessMethods(_vectors);
         _txManager = new SqliteTransactionManager(this);
 
         // BA-5 MVP: no binary bulk loader; users wanting fast load should stay on
@@ -42,6 +45,7 @@ public sealed class SqliteGraphStorageBackend : IGraphStorageBackend
     public IDiagnosticsApi Diagnostics => _diagnostics;
     public IGraphAccessMethods Access => _access;
     public BulkLoadCapabilities BulkLoad => _bulkLoad;
+    public IVectorStore Vectors => _vectors;
 
     internal SqliteConnection Connection => _connection;
     internal string DatabasePath => _dbPath;

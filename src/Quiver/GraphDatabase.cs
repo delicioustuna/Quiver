@@ -61,6 +61,13 @@ public sealed class GraphDatabase : IDisposable
     public IDiagnosticsApi Diagnostics => _backend.Diagnostics;
 
     /// <summary>
+    /// VEC-5: the backend's vector store. Users call <c>CreateVectorIndex</c> /
+    /// <c>SetVector</c> here directly; query-side access is via
+    /// <c>g.Knn(...)</c> on the traversal source.
+    /// </summary>
+    public Core.IVectorStore Vectors => _backend.Vectors;
+
+    /// <summary>
     /// Scan the entire database and return a fresh <see cref="GraphStats"/> snapshot.
     /// This is an O(N + E) operation and is typically called once at startup or after bulk loads.
     /// </summary>

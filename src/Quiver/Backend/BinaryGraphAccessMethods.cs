@@ -21,7 +21,17 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     // Accessed via Interlocked from BinaryExpandCursor.
     internal long FallbackCountInternal;
 
+    private readonly IVectorStore _vectors;
+
+    internal BinaryGraphAccessMethods(IVectorStore vectors)
+    {
+        _vectors = vectors;
+    }
+
     public long AdjacencyFallbackCount => Interlocked.Read(ref FallbackCountInternal);
+
+    public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
+        => _vectors.KnnSearch(indexName, query, k);
 
     public IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null)
     {

@@ -1,3 +1,4 @@
+using Quiver.Core;
 using Quiver.Index;
 using Quiver.Storage;
 using Quiver.Stores;
@@ -66,12 +67,13 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         var recovery = new RecoveryManager(pageManager, wal, fileRegistry);
         recovery.Recover();
 
-        var access = new BinaryGraphAccessMethods();
+        var vectors = new InMemoryVectorStore();
+        var access = new BinaryGraphAccessMethods(vectors);
         var txManager = new TransactionManager(
             wal, nodeStore, relStore, propStore, indexManager, adjStore, access);
 
         return new BinaryGraphStorageBackend(
             directoryPath, pageManager, wal, nodeStore, relStore, propStore,
-            labelTokens, relTypeTokens, propKeyTokens, indexManager, adjStore, txManager, access);
+            labelTokens, relTypeTokens, propKeyTokens, indexManager, adjStore, txManager, access, vectors);
     }
 }

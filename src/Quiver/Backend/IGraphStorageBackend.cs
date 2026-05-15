@@ -1,3 +1,4 @@
+using Quiver.Core;
 using Quiver.Transactions;
 
 namespace Quiver;
@@ -14,6 +15,14 @@ public interface IGraphStorageBackend : IDisposable
     IDiagnosticsApi Diagnostics { get; }
     IGraphAccessMethods Access { get; }
     BulkLoadCapabilities BulkLoad { get; }
+
+    /// <summary>
+    /// VEC-5: vector store used by <see cref="IGraphAccessMethods.KnnSearch"/>
+    /// and exposed to users for <c>CreateVectorIndex</c> / <c>SetVector</c>.
+    /// Defaults to an in-memory store on backends that don't yet persist
+    /// vectors durably (binary, SQLite MVP).
+    /// </summary>
+    IVectorStore Vectors { get; }
 
     /// <summary>
     /// Begins a new transaction wrapped in an <see cref="IGraphTransaction"/>

@@ -51,6 +51,22 @@ public interface IGraphAccessMethods
     /// linked-list walk. Surfaced via <c>IDiagnosticsApi.GetStatistics</c>.
     /// </summary>
     long AdjacencyFallbackCount { get; }
+
+    /// <summary>
+    /// VEC-5: KNN access path. Delegates to the backend's <see cref="IVectorStore"/>
+    /// so operators can treat vector search as a first-class scan source. The
+    /// query span is copied internally — callers do not need to keep it alive
+    /// past the call.
+    /// </summary>
+    /// <remarks>
+    /// codex_advice_3.md §6.4. Returns results in descending similarity order
+    /// (Cosine/Dot) or ascending distance (Euclidean — internally negated so
+    /// the cursor's score is still "higher = closer"). Backends without a
+    /// vector store should throw <see cref="NotSupportedException"/>.
+    /// </remarks>
+    VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
+        => throw new NotSupportedException(
+            "This backend does not implement KnnSearch. Wire an IVectorStore into the access methods.");
 }
 
 /// <summary>

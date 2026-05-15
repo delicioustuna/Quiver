@@ -53,6 +53,24 @@ public sealed class GraphTraversalSource
 
     // ── Match DSL ─────────────────────────────────────────────────────────────
     public MatchQuery Match(GraphPattern pattern) => new(_tx, _schema, pattern);
+
+    // ── VEC-5: KNN scan source ────────────────────────────────────────────────
+    /// <summary>
+    /// Top-k vector search as a traversal source. Emits node ids in descending
+    /// similarity order; chain <c>.HasLabel(...)</c>, <c>.Out(...)</c>, etc.
+    /// to compose KNN with the rest of a query (codex_advice_3.md §6.4).
+    /// </summary>
+    /// <remarks>
+    /// Score is not propagated; users who need raw scores should call
+    /// <c>db.Vectors.KnnSearch(...)</c> directly. Index must be bound to
+    /// <see cref="Core.EntityKind.Node"/> — relationship-KNN is intentionally
+    /// out of scope until there is a concrete use case.
+    /// </remarks>
+    public GraphTraversal<NodeId> Knn(string indexName, ReadOnlySpan<float> query, int k)
+    {
+        var builder = new Internal.KnnNodeSourceBuilder(indexName, query, k);
+        return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0);
+    }
 }
 
 public static class GraphTransactionExtensions

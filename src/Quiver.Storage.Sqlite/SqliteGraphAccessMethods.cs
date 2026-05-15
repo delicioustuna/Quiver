@@ -13,7 +13,17 @@ namespace Quiver.Storage.Sqlite;
 /// </summary>
 internal sealed class SqliteGraphAccessMethods : IGraphAccessMethods
 {
+    private readonly IVectorStore _vectors;
+
+    internal SqliteGraphAccessMethods(IVectorStore vectors)
+    {
+        _vectors = vectors;
+    }
+
     public long AdjacencyFallbackCount => 0;
+
+    public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
+        => _vectors.KnnSearch(indexName, query, k);
 
     public IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null)
         => throw NotSupported(nameof(ScanNodes));
