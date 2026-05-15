@@ -27,6 +27,36 @@ public interface IAdjacencyBlockStore
     /// Returns an empty cursor when the node has no adjacency block.
     /// </summary>
     AdjacencyCursor OpenCursor(NodeId nodeId, Direction direction, RelationshipTypeId? typeFilter);
+
+    /// <summary>
+    /// PW-14 / codex_advice_3 §7.6. Monotonic generation counter for the base
+    /// adjacency view; incremented on compact. Stores without a persisted base
+    /// return 0.
+    /// </summary>
+    long Epoch => 0;
+
+    /// <summary>
+    /// PW-14: relationship-id watermark recorded at base build time.
+    /// Relationships with id &lt; <see cref="BaseRelHwm"/> are part of the
+    /// immutable base view; ids &gt;= are post-bulk-load delta records that
+    /// live in the relationship linked list. 0 means there is no base.
+    /// </summary>
+    long BaseRelHwm => 0;
+
+    /// <summary>
+    /// PW-14: true when <paramref name="relId"/> belongs to the base view but
+    /// has been deleted since the view was built. Expand cursors skip these
+    /// entries so deletes are visible without rebuilding the base.
+    /// </summary>
+    bool IsTombstoned(RelationshipId relId) => false;
+
+    /// <summary>
+    /// PW-14: mark a base relationship as deleted. No-op when
+    /// <c>relId.Value &gt;= <see cref="BaseRelHwm"/></c> — delta deletes only
+    /// need the linked-list unlink that <c>RelationshipStore.Delete</c> already
+    /// performs.
+    /// </summary>
+    void Tombstone(RelationshipId relId) { }
 }
 
 /// <summary>

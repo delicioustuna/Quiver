@@ -7,11 +7,20 @@ namespace Quiver;
 // ExpandCursor is now defined in Quiver.Transactions (BA-3); this class extends it.
 
 /// <summary>
-/// Binary-backend expand cursor. When the source node has an adjacency block it walks
-/// the block chain via <see cref="IAdjacencyBlockStore.OpenCursor"/>, which never falls
-/// back mid-iteration regardless of degree (PW-8). Falls back to the relationship linked
-/// list only when no adjacency block was built for the node — that path is tracked by
-/// <see cref="BinaryGraphAccessMethods.AdjacencyFallbackCount"/> so diagnostics can surface it.
+/// Binary-backend expand cursor.
+///
+/// PW-8: When the source has an adjacency block, the cursor walks the block
+/// chain via <see cref="IAdjacencyBlockStore.OpenCursor"/>, which never falls
+/// back mid-iteration regardless of degree.
+///
+/// PW-14: A block covers only the immutable <em>base</em> view captured at
+/// bulk-load / compact time. Relationships created after that point live in
+/// the relationship linked list as <em>delta</em>. After exhausting the
+/// adjacency block (skipping tombstoned base entries) the cursor continues
+/// through the linked list, filtering out anything with
+/// <c>relId &lt; BaseRelHwm</c> — those were already emitted from the base
+/// view, and crucially the chain is monotonically descending so we can break
+/// as soon as we cross that boundary.
 /// </summary>
 internal sealed class BinaryExpandCursor : ExpandCursor
 {
@@ -22,8 +31,9 @@ internal sealed class BinaryExpandCursor : ExpandCursor
     private readonly BinaryGraphAccessMethods _owner;
 
     private AdjacencyCursor? _adjCursor;
-    private bool _usingAdj;
+    private bool _adjActive;     // phase 1: walking the immutable base view
     private bool _opened;
+    private long _baseRelHwm;    // delta-vs-base partition for phase 2
 
     private RelationshipId _nextRelId;
     private NodeId _neighbor;
@@ -48,25 +58,37 @@ internal sealed class BinaryExpandCursor : ExpandCursor
 
     public override NodeId Neighbor => _neighbor;
     public override RelationshipId Relationship => _relId;
-    public override long WeightRaw => _adjCursor?.WeightRaw ?? 0;
+    public override long WeightRaw => _adjActive ? (_adjCursor?.WeightRaw ?? 0) : 0;
 
     public override bool MoveNext()
     {
         if (!_opened) { Open(); _opened = true; }
 
-        if (_usingAdj)
+        // Phase 1: base view via adjacency block. Tombstones get filtered here
+        // so deletes of base relationships are invisible to readers.
+        if (_adjActive)
         {
-            if (_adjCursor!.MoveNext())
+            var adj = _tx.AdjacencyBlocks!;
+            while (_adjCursor!.MoveNext())
             {
+                var rid = _adjCursor.Relationship;
+                if (adj.IsTombstoned(rid)) continue;
                 _neighbor = _adjCursor.Neighbor;
-                _relId = _adjCursor.Relationship;
+                _relId = rid;
                 return true;
             }
-            return false;
+            _adjActive = false; // fall through to phase 2
         }
 
+        // Phase 2: delta walk over the relationship linked list. Skip base
+        // entries (already emitted) by comparing against the watermark. The
+        // chain is strictly descending by id (newest at head), so once we
+        // cross into base ids every remaining entry is also base — break.
         while (_nextRelId.IsValid)
         {
+            if (_baseRelHwm > 0 && _nextRelId.Value < _baseRelHwm)
+                return false;
+
             var rel = _tx.Relationships.Read(_nextRelId);
             var thisRel = _nextRelId;
             _nextRelId = rel.Source == _source ? rel.SourceNext : rel.TargetNext;
@@ -94,13 +116,18 @@ internal sealed class BinaryExpandCursor : ExpandCursor
         if (adj != null && adj.HasBlock(_source))
         {
             _adjCursor = adj.OpenCursor(_source, _direction, _typeFilter);
-            _usingAdj = true;
+            _adjActive = true;
+            _baseRelHwm = adj.BaseRelHwm;
+            // PW-14: prime the delta walk too — after the base phase we'll
+            // resume from the linked-list head and skip ids < BaseRelHwm.
+            _nextRelId = _tx.Nodes.Read(_source).FirstRelationshipId;
             return;
         }
         // No adjacency block for this source — walk the relationship linked list.
-        // Bumped so diagnostics can surface "how often we missed the fast path".
+        // Counted so diagnostics can surface how often the fast path is unavailable.
         System.Threading.Interlocked.Increment(ref _owner.FallbackCountInternal);
-        _usingAdj = false;
+        _adjActive = false;
+        _baseRelHwm = adj?.BaseRelHwm ?? 0;
         _nextRelId = _tx.Nodes.Read(_source).FirstRelationshipId;
     }
 

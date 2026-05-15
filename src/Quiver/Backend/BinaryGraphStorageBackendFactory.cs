@@ -48,16 +48,23 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         var indexDir = Path.Combine(directoryPath, "indexes");
         var indexManager = new IndexManager(indexDir);
 
+        // PW-14: epoch metadata (base relationship hwm + tombstones) is shared
+        // by both V1 and V2 stores. Created by BulkLoader on initial build and
+        // updated in-place on tombstone / compact.
+        var adjEpochPath = Path.Combine(directoryPath, "adj.epoch");
+        AdjacencyEpoch? adjEpoch = File.Exists(adjEpochPath) ? AdjacencyEpoch.Load(adjEpochPath) : null;
+
         // BA-6: prefer V2 (with payload lane) when present, otherwise V1.
         IAdjacencyBlockStore? adjStore = null;
+        IPagedFile? adjPagedFile = null;
         var adjV2DataPath = Path.Combine(directoryPath, "adj_v2.db");
         var adjV2IndexPath = Path.Combine(directoryPath, "adj_v2_idx.dat");
         var adjV2MetaPath = Path.Combine(directoryPath, "adj_v2.meta");
         if (File.Exists(adjV2DataPath) && File.Exists(adjV2IndexPath) && File.Exists(adjV2MetaPath))
         {
             var spec = AdjacencyBlockStoreV2.ReadMeta(adjV2MetaPath);
-            var adjFile = pageManager.OpenOrCreate(adjV2DataPath, PageKind.AdjacencyBlock);
-            adjStore = new AdjacencyBlockStoreV2(adjFile, adjV2IndexPath, spec);
+            adjPagedFile = pageManager.OpenOrCreate(adjV2DataPath, PageKind.AdjacencyBlock);
+            adjStore = new AdjacencyBlockStoreV2(adjPagedFile, adjV2IndexPath, spec, adjEpoch);
         }
         else
         {
@@ -65,8 +72,8 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
             var adjIndexPath = Path.Combine(directoryPath, "adj_idx.dat");
             if (File.Exists(adjDataPath) && File.Exists(adjIndexPath))
             {
-                var adjFile = pageManager.OpenOrCreate(adjDataPath, PageKind.AdjacencyBlock);
-                adjStore = new AdjacencyBlockStore(adjFile, adjIndexPath);
+                adjPagedFile = pageManager.OpenOrCreate(adjDataPath, PageKind.AdjacencyBlock);
+                adjStore = new AdjacencyBlockStore(adjPagedFile, adjIndexPath, adjEpoch);
             }
         }
 
@@ -87,6 +94,7 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
 
         return new BinaryGraphStorageBackend(
             directoryPath, pageManager, wal, nodeStore, relStore, propStore,
-            labelTokens, relTypeTokens, propKeyTokens, indexManager, adjStore, txManager, access, vectors);
+            labelTokens, relTypeTokens, propKeyTokens, indexManager,
+            adjStore, adjPagedFile, txManager, access, vectors);
     }
 }

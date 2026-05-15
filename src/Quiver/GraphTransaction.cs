@@ -70,6 +70,10 @@ internal sealed class GraphTransaction : IGraphTransaction
     public void DeleteRelationship(RelationshipId relId)
     {
         FreeRelationshipProperties(relId);
+        // PW-14: if this id falls inside the immutable base view it still
+        // shows up in the adjacency block — record a tombstone so subsequent
+        // expand cursors skip it. The store no-ops for delta ids.
+        _inner.AdjacencyBlocks?.Tombstone(relId);
         _inner.Relationships.Delete(_inner.Nodes, relId);
     }
 

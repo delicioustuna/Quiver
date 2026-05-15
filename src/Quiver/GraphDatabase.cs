@@ -92,6 +92,24 @@ public sealed class GraphDatabase : IDisposable
     public QueryOptimizer CreateOptimizer(GraphStats? stats = null)
         => new(stats ?? CollectStats());
 
+    /// <summary>
+    /// PW-14 / codex_advice_3 §7.6. Rebuild the immutable base adjacency view
+    /// from the current relationship state, drop tombstones, and advance the
+    /// epoch. After this call all live edges are served from the base view and
+    /// the delta walk becomes a no-op until new relationships are created.
+    /// Throws when the active backend doesn't support compact (anything other
+    /// than the binary backend without a payload lane). Caller must ensure no
+    /// transactions are active.
+    /// </summary>
+    public void CompactAdjacency()
+    {
+        if (_backend is BinaryGraphStorageBackend binary)
+            binary.CompactAdjacency();
+        else
+            throw new NotSupportedException(
+                "CompactAdjacency is only implemented for the binary backend.");
+    }
+
     public void Dispose() => _backend.Dispose();
 }
 

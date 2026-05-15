@@ -35,15 +35,23 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
     private readonly FileStream _indexStream;
     private readonly object _idxLock = new();
     private readonly PayloadLaneSpec _spec;
+    private readonly AdjacencyEpoch? _epoch;
 
     public PayloadLaneSpec PayloadSpec => _spec;
 
-    internal AdjacencyBlockStoreV2(IPagedFile dataFile, string indexPath, PayloadLaneSpec spec)
+    internal AdjacencyBlockStoreV2(IPagedFile dataFile, string indexPath, PayloadLaneSpec spec,
+        AdjacencyEpoch? epoch = null)
     {
         _dataFile = dataFile;
         _indexStream = new FileStream(indexPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         _spec = spec;
+        _epoch = epoch;
     }
+
+    public long Epoch => _epoch?.Epoch ?? 0;
+    public long BaseRelHwm => _epoch?.BaseRelHwm ?? 0;
+    public bool IsTombstoned(RelationshipId relId) => _epoch?.IsTombstoned(relId.Value) ?? false;
+    public void Tombstone(RelationshipId relId) => _epoch?.Tombstone(relId.Value);
 
     // ──────────────────────────── IAdjacencyBlockStore ────────────────────────────
 

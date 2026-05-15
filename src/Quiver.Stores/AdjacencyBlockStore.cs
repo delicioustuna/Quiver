@@ -27,12 +27,19 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
     private readonly IPagedFile _dataFile;
     private readonly FileStream _indexStream;
     private readonly object _idxLock = new();
+    private readonly AdjacencyEpoch? _epoch;
 
-    internal AdjacencyBlockStore(IPagedFile dataFile, string indexPath)
+    internal AdjacencyBlockStore(IPagedFile dataFile, string indexPath, AdjacencyEpoch? epoch = null)
     {
         _dataFile = dataFile;
         _indexStream = new FileStream(indexPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        _epoch = epoch;
     }
+
+    public long Epoch => _epoch?.Epoch ?? 0;
+    public long BaseRelHwm => _epoch?.BaseRelHwm ?? 0;
+    public bool IsTombstoned(RelationshipId relId) => _epoch?.IsTombstoned(relId.Value) ?? false;
+    public void Tombstone(RelationshipId relId) => _epoch?.Tombstone(relId.Value);
 
     // ──────────────────────────── IAdjacencyBlockStore ────────────────────────────
 

@@ -13,7 +13,7 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly IRelationshipStore _relStore;
     private readonly IPropertyStore _propStore;
     private readonly IIndexManager _indexManager;
-    private readonly IAdjacencyBlockStore? _adjStore;
+    private IAdjacencyBlockStore? _adjStore;
     private readonly IGraphAccessMethods _access;
     private readonly LockManager _nodeLocks = new();
     private readonly LockManager _relLocks = new();
@@ -66,6 +66,13 @@ internal sealed class TransactionManager : ITransactionManager
 
     internal void OnCommit(TransactionId txId) => _active.TryRemove(txId.Value, out _);
     internal void OnAbort(TransactionId txId) => _active.TryRemove(txId.Value, out _);
+
+    /// <summary>
+    /// PW-14: swap the active adjacency store reference. Called by the backend
+    /// after a compact rebuild — only safe while <see cref="ActiveCount"/> is 0
+    /// since transactions snapshot the reference at <see cref="Begin"/>.
+    /// </summary>
+    internal void SwapAdjacencyStore(IAdjacencyBlockStore? next) => _adjStore = next;
 
     public void Dispose() { }
 }

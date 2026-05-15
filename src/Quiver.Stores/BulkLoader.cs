@@ -210,6 +210,7 @@ public sealed class BulkLoader : IDisposable
     private void BuildAdjacencyIndex(string directory)
     {
         long nodeHwm = _nodes.Count > 0 ? _nodes.Max(n => n.Id) + 1 : 0L;
+        long relHwm = _rels.Count > 0 ? _rels.Max(r => r.Id) + 1 : 0L;
         var relData = _rels.Select(r => (r.Id, r.Src, r.Tgt, r.TypeId)).ToList();
 
         if (_payloadSpec is { } spec)
@@ -231,14 +232,20 @@ public sealed class BulkLoader : IDisposable
                 weights,
                 nodeHwm,
                 spec);
-            return;
+        }
+        else
+        {
+            AdjacencyBlockStore.Build(
+                Path.Combine(directory, "adj.db"),
+                Path.Combine(directory, "adj_idx.dat"),
+                relData,
+                nodeHwm);
         }
 
-        AdjacencyBlockStore.Build(
-            Path.Combine(directory, "adj.db"),
-            Path.Combine(directory, "adj_idx.dat"),
-            relData,
-            nodeHwm);
+        // PW-14: record the base relationship hwm so post-bulk-load deltas
+        // (rels with id >= relHwm) can be merged at read time without being
+        // double-counted against the immutable base view.
+        AdjacencyEpoch.CreateNew(Path.Combine(directory, "adj.epoch"), relHwm);
     }
 
     private void ThrowIfCommitted()
