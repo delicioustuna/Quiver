@@ -13,6 +13,7 @@
     <Project Path="src\Quiver.SourceGen\Quiver.SourceGen.csproj" />
     <Project Path="src\Quiver.Client\Quiver.Client.csproj" />
     <Project Path="src\Quiver.Storage.Sqlite\Quiver.Storage.Sqlite.csproj" />
+    <Project Path="src\Quiver.Embedding\Quiver.Embedding.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks\Quiver.Benchmarks\Quiver.Benchmarks.csproj" />
