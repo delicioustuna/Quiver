@@ -17,5 +17,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Quiver\Quiver.csproj" />
+    <ProjectReference Include="..\..\src\Quiver.Storage.Sqlite\Quiver.Storage.Sqlite.csproj" />
   </ItemGroup>
 </Project>

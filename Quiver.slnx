@@ -12,6 +12,7 @@
     <Project Path="src\Quiver.Client.Attributes\Quiver.Client.Attributes.csproj" />
     <Project Path="src\Quiver.SourceGen\Quiver.SourceGen.csproj" />
     <Project Path="src\Quiver.Client\Quiver.Client.csproj" />
+    <Project Path="src\Quiver.Storage.Sqlite\Quiver.Storage.Sqlite.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks\Quiver.Benchmarks\Quiver.Benchmarks.csproj" />
