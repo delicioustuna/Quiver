@@ -1,14 +1,8 @@
 namespace Quiver.Core;
 
-/// <summary>
-/// Identifies whether a vector belongs to a Node or a Relationship.
-/// VEC-1; codex_advice_3.md §6.2.
-/// </summary>
-public enum EntityKind : byte
-{
-    Node = 1,
-    Relationship = 2,
-}
+// EntityKind is defined in EntityId.cs (FT-11). Vector code (VEC-1; codex_advice_3.md §6.2)
+// only uses Node / Relationship; Property is reserved for diagnostics / catalog and is
+// rejected by IVectorStore implementations.
 
 /// <summary>
 /// Distance metric used by a vector index. The metric is fixed at index creation
