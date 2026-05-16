@@ -537,6 +537,119 @@ public sealed class GraphTraversal<T>
     /// </summary>
     public List<T> Fold() => ToList();
 
+    // ── GC-4: dedup ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// GC-4: Gremlin <c>.dedup()</c> / Cypher <c>RETURN DISTINCT</c> — drop rows
+    /// whose current entity id has already been seen. First occurrence wins.
+    /// Memory: O(distinct ids) for the hash set inside <c>PathDedupOperator</c>.
+    /// </summary>
+    public GraphTraversal<T> Dedup()
+        => new(_tx, _schema, new DedupBuilder(_builder, _entityColumn), _projection, _entityColumn);
+
+    // ── GC-4: variable-length repeat ─────────────────────────────────────────
+
+    /// <summary>
+    /// GC-4: Gremlin <c>.repeat(out()).times(n)</c> / Cypher
+    /// <c>MATCH (a)-[*1..n]-&gt;(b)</c>. The single-hop step inside
+    /// <paramref name="step"/> is applied repeatedly via
+    /// <c>VariableLengthExpandOperator</c>.
+    /// </summary>
+    /// <param name="step">closure that picks one of <c>Out</c> / <c>In</c> / <c>Both</c> with an optional type filter</param>
+    /// <param name="times">exact number of hops (must be ≥ 1)</param>
+    /// <param name="emit">
+    /// <c>false</c> (default) — emit only the depth-<paramref name="times"/> frontier;
+    /// <c>true</c> — emit every intermediate frontier from depth 1 to <paramref name="times"/>.
+    /// </param>
+    public GraphTraversal<NodeId> Repeat(Action<RepeatStep> step, int times, bool emit = false)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        if (times < 1) throw new ArgumentOutOfRangeException(nameof(times), "Repeat requires times >= 1.");
+        var rs = new RepeatStep();
+        step(rs);
+        int minHops = emit ? 1 : times;
+        var b = new VarLenExpandBuilder(_builder, rs.Direction, rs.TypeFilter, minHops, times);
+        int endCol = b.CurrentEntityColumn;
+        return new GraphTraversal<NodeId>(_tx, _schema, b, row => row.GetNodeId(endCol), endCol);
+    }
+
+    // ── GC-4: shortest path ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// GC-4: Gremlin <c>.shortestPath()</c> truncated to "distance only" — for
+    /// each input row, runs BFS from the current entity to
+    /// <paramref name="target"/> in <paramref name="direction"/> and emits the
+    /// resulting <c>long</c> distance. Rows for which no path exists within
+    /// <paramref name="maxDistance"/> are dropped.
+    /// </summary>
+    public GraphTraversal<long> ShortestPathTo(
+        NodeId target,
+        Direction direction = Direction.Outgoing,
+        string? type = null,
+        long maxDistance = long.MaxValue)
+    {
+        var b = new ShortestPathToBuilder(_builder, target, direction, type, maxDistance);
+        int distCol = b.CurrentEntityColumn;
+        return new GraphTraversal<long>(_tx, _schema, b, row => row.GetInt64(distCol), distCol);
+    }
+
+    // ── GC-4: union / coalesce / optional ────────────────────────────────────
+
+    /// <summary>
+    /// GC-4: Gremlin <c>.union(t1, t2, …)</c> / Cypher <c>UNION ALL</c>. Each
+    /// input row is fed to every branch; results are concatenated. Branches
+    /// must produce single-column NodeId tuples (e.g. <c>s.Out("KNOWS")</c>).
+    /// </summary>
+    public GraphTraversal<NodeId> Union(params Func<SubTraversal, SubTraversal>[] branches)
+        => BuildBranched(branches, BranchedBuilder.Kind.Union);
+
+    /// <summary>
+    /// GC-4: Gremlin <c>.coalesce(t1, t2, …)</c>. The first branch that
+    /// produces at least one row "wins" — its rows are emitted and the
+    /// remaining branches are skipped for that input row. If every branch is
+    /// empty for an input row, that row contributes nothing.
+    /// </summary>
+    public GraphTraversal<NodeId> Coalesce(params Func<SubTraversal, SubTraversal>[] branches)
+        => BuildBranched(branches, BranchedBuilder.Kind.Coalesce);
+
+    /// <summary>
+    /// GC-4: Gremlin <c>.optional(t)</c> / Cypher <c>OPTIONAL MATCH</c>. If the
+    /// branch produces rows, emit those; otherwise emit the input entity
+    /// itself so the upstream row is preserved. Branch must produce a
+    /// single-column NodeId tuple.
+    /// </summary>
+    public GraphTraversal<NodeId> Optional(Func<SubTraversal, SubTraversal> branch)
+    {
+        ArgumentNullException.ThrowIfNull(branch);
+        return BuildBranched(new[] { branch }, BranchedBuilder.Kind.Optional);
+    }
+
+    private GraphTraversal<NodeId> BuildBranched(Func<SubTraversal, SubTraversal>[] branches, BranchedBuilder.Kind kind)
+    {
+        if (branches is null || branches.Length == 0)
+            throw new ArgumentException("At least one branch is required.", nameof(branches));
+        if (kind == BranchedBuilder.Kind.Optional && branches.Length != 1)
+            throw new ArgumentException("Optional accepts exactly one branch.", nameof(branches));
+
+        var captured = branches;
+        var b = new BranchedBuilder(_builder, schema =>
+        {
+            var probes = new CorrelatedInputOperator[captured.Length];
+            var ops = new IPhysicalOperator[captured.Length];
+            for (int i = 0; i < captured.Length; i++)
+            {
+                var probe = new CorrelatedInputOperator();
+                var seed = new CorrelatedSeedBuilder(probe);
+                var start = new SubTraversal(probe, seed, schema, 0);
+                var leaf = captured[i](start);
+                probes[i] = probe;
+                ops[i] = leaf.BuildBranchOperator();
+            }
+            return (probes, ops);
+        }, kind);
+        return new GraphTraversal<NodeId>(_tx, _schema, b, row => row.GetNodeId(0), 0);
+    }
+
     public GraphTraversal<string> Values(string key)
     {
         var lookup = new PropertyLookupBuilder(_builder, key);

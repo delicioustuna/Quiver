@@ -225,6 +225,133 @@ internal sealed class SortBuilder : IOperatorBuilder
     }
 }
 
+/// <summary>
+/// GC-4: <c>.Dedup()</c> — wraps <see cref="PathDedupOperator"/> over a single key column.
+/// Schema is unchanged; first occurrence of each (LongValue of the key column) survives.
+/// </summary>
+internal sealed class DedupBuilder : IOperatorBuilder
+{
+    private readonly IOperatorBuilder _source;
+    private readonly int _keyColumn;
+    public int CurrentEntityColumn => _source.CurrentEntityColumn;
+    public int PredictedOutputColumnCount => _source.PredictedOutputColumnCount;
+
+    internal DedupBuilder(IOperatorBuilder source, int keyColumn)
+    {
+        _source = source; _keyColumn = keyColumn;
+    }
+
+    public IPhysicalOperator Build(ISchemaApi schema)
+        => new PathDedupOperator(_source.Build(schema), _keyColumn);
+}
+
+/// <summary>
+/// GC-4: <c>.Repeat(s => s.Out("KNOWS")).Times(n)</c> — wraps
+/// <see cref="VariableLengthExpandOperator"/>. The operator emits (startNode, endNode);
+/// downstream the current entity column is the endNode (index 1).
+/// </summary>
+internal sealed class VarLenExpandBuilder : IOperatorBuilder
+{
+    private readonly IOperatorBuilder _source;
+    private readonly Direction _direction;
+    private readonly string? _typeFilter;
+    private readonly int _minHops;
+    private readonly int _maxHops;
+
+    public int CurrentEntityColumn => 1; // endNode
+    public int PredictedOutputColumnCount => 2;
+
+    internal VarLenExpandBuilder(
+        IOperatorBuilder source, Direction direction, string? typeFilter, int minHops, int maxHops)
+    {
+        _source = source; _direction = direction; _typeFilter = typeFilter;
+        _minHops = minHops; _maxHops = maxHops;
+    }
+
+    public IPhysicalOperator Build(ISchemaApi schema)
+    {
+        RelationshipTypeId? typeId = _typeFilter != null
+            ? schema.GetOrCreateRelationshipType(_typeFilter)
+            : null;
+        return new VariableLengthExpandOperator(
+            _source.Build(schema), _source.CurrentEntityColumn, _direction, typeId, _minHops, _maxHops);
+    }
+}
+
+/// <summary>
+/// GC-4: <c>.ShortestPathTo(target)</c> — pairs each source row with the
+/// constant target, then runs <see cref="ShortestPathOperator"/>. The result
+/// schema is (source, target, distance) so the downstream entity column is the
+/// distance at index 2; project to <c>long</c> in the GraphTraversal layer.
+/// </summary>
+internal sealed class ShortestPathToBuilder : IOperatorBuilder
+{
+    private readonly IOperatorBuilder _source;
+    private readonly NodeId _target;
+    private readonly Direction _direction;
+    private readonly string? _typeFilter;
+    private readonly long _maxDistance;
+
+    public int CurrentEntityColumn => 2; // distance
+    public int PredictedOutputColumnCount => 3;
+
+    internal ShortestPathToBuilder(
+        IOperatorBuilder source, NodeId target, Direction direction, string? typeFilter, long maxDistance)
+    {
+        _source = source; _target = target;
+        _direction = direction; _typeFilter = typeFilter;
+        _maxDistance = maxDistance;
+    }
+
+    public IPhysicalOperator Build(ISchemaApi schema)
+    {
+        RelationshipTypeId? typeId = _typeFilter != null
+            ? schema.GetOrCreateRelationshipType(_typeFilter)
+            : null;
+        var pair = new PairWithConstantOperator(_source.Build(schema), _source.CurrentEntityColumn, _target);
+        return new ShortestPathOperator(pair, 0, 1, _direction, typeId, _maxDistance);
+    }
+}
+
+/// <summary>
+/// GC-4: <c>.Union</c> / <c>.Coalesce</c> / <c>.Optional</c> shared shape —
+/// resolves each branch closure against a fresh CorrelatedInputOperator at build
+/// time, then hands the (probes, branches) tuple to the chosen physical operator.
+/// </summary>
+internal sealed class BranchedBuilder : IOperatorBuilder
+{
+    public enum Kind { Union, Coalesce, Optional }
+
+    private readonly IOperatorBuilder _source;
+    private readonly Func<ISchemaApi, (CorrelatedInputOperator[] probes, IPhysicalOperator[] branches)> _build;
+    private readonly Kind _kind;
+
+    public int CurrentEntityColumn => 0;
+    public int PredictedOutputColumnCount => 1;
+
+    internal BranchedBuilder(
+        IOperatorBuilder source,
+        Func<ISchemaApi, (CorrelatedInputOperator[], IPhysicalOperator[])> build,
+        Kind kind)
+    {
+        _source = source; _build = build; _kind = kind;
+    }
+
+    public IPhysicalOperator Build(ISchemaApi schema)
+    {
+        var (probes, branches) = _build(schema);
+        var src = _source.Build(schema);
+        int srcCol = _source.CurrentEntityColumn;
+        return _kind switch
+        {
+            Kind.Union    => new UnionOperator(src, srcCol, probes, branches),
+            Kind.Coalesce => new CoalesceOperator(src, srcCol, probes, branches),
+            Kind.Optional => new OptionalOperator(src, srcCol, probes[0], branches[0]),
+            _ => throw new InvalidOperationException(),
+        };
+    }
+}
+
 /// <summary>GC-1: <c>.label()</c> — adds a string column carrying the label name for the entity column.</summary>
 internal sealed class LabelNameLookupBuilder : IOperatorBuilder
 {

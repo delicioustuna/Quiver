@@ -93,4 +93,16 @@ public sealed class SubTraversal
 
     internal IPredicate BuildNotExistsPredicate(int outerEntityColumn)
         => new SubquerySemiJoinPredicate(outerEntityColumn, _probe, _builder.Build(_schema), exists: false);
+
+    /// <summary>
+    /// GC-4: build the sub-traversal as a standalone physical operator for use
+    /// as a branch in <c>.Union</c> / <c>.Coalesce</c> / <c>.Optional</c>.
+    /// Caller is responsible for binding <paramref name="probe"/> via the
+    /// <see cref="CorrelatedInputOperator"/> reference captured when this
+    /// <see cref="SubTraversal"/> was built.
+    /// </summary>
+    internal IPhysicalOperator BuildBranchOperator() => _builder.Build(_schema);
+
+    /// <summary>GC-4: column index that carries the current entity inside the sub-plan output.</summary>
+    internal int BranchEntityColumn => _builder.CurrentEntityColumn;
 }
