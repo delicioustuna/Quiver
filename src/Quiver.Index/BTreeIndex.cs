@@ -1,4 +1,5 @@
-﻿using System.Buffers.Binary;
+﻿using System.Buffers;
+using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Storage;
 
@@ -180,114 +181,269 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
     private (byte[] median, PageId right)? LeafInsert(PageId pid, byte[] key, long value)
     {
-        byte[] snap;
-        { using var rh = _file.PinForRead(pid); snap = rh.Data.ToArray(); }
+        // Phase 1 (read-only scan): locate insertion offset and detect whether the new entry fits.
+        int count;
+        int insOff;        // byte offset within body where the new entry should be written
+        int insIdx;        // logical entry index of the new entry within the (count+1) merged sequence
+        int oldUsed;       // bytes occupied by existing entries (BL.LeafHdr .. BL.LeafHdr + entriesBytes)
+        long oldNext, oldPrev;
+        int newEntrySize = 2 + key.Length + 8;
 
-        int count = BinaryPrimitives.ReadInt32LittleEndian(snap);
-        var entries = ReadLeafEntries(snap, count);
-        int ins = 0;
-        while (ins < entries.Count && CompareBytes(entries[ins].k, key) < 0) ins++;
-        entries.Insert(ins, (key, value));
-
-        int needed = BL.LeafHdr;
-        foreach (var (k, _) in entries) needed += 2 + k.Length + 8;
-
-        long oldNext = BinaryPrimitives.ReadInt64LittleEndian(snap.AsSpan(4));
-        long oldPrev = BinaryPrimitives.ReadInt64LittleEndian(snap.AsSpan(12));
-
-        if (needed <= BL.Body)
         {
-            var ph = _file.PinForWrite(pid);
-            ph.Data[..BL.Body].Clear();
-            BinaryPrimitives.WriteInt64LittleEndian(ph.Data[4..], oldNext);
-            BinaryPrimitives.WriteInt64LittleEndian(ph.Data[12..], oldPrev);
+            using var rh = _file.PinForRead(pid);
+            ReadOnlySpan<byte> body = rh.Data;
+            count = BinaryPrimitives.ReadInt32LittleEndian(body);
+            oldNext = BinaryPrimitives.ReadInt64LittleEndian(body[4..]);
+            oldPrev = BinaryPrimitives.ReadInt64LittleEndian(body[12..]);
+
+            insOff = -1;
+            insIdx = count;
             int pos = BL.LeafHdr;
-            foreach (var (k, v) in entries) WriteEntry(ph.Data, ref pos, k, v);
-            BinaryPrimitives.WriteInt32LittleEndian(ph.Data, entries.Count);
-            ph.Dispose();
+            for (int i = 0; i < count; i++)
+            {
+                int klen = BinaryPrimitives.ReadInt16LittleEndian(body[pos..]);
+                if (insOff < 0 && _codec.Compare(body.Slice(pos + 2, klen), key) >= 0)
+                {
+                    insOff = pos;
+                    insIdx = i;
+                }
+                pos += 2 + klen + 8;
+            }
+            oldUsed = pos;
+            if (insOff < 0) insOff = pos;
+        }
+
+        // Fast path: new entry fits in the current page. Shift trailing entries right and
+        // write the new entry in place — no scratch buffers, no per-entry byte[] copies.
+        if (oldUsed + newEntrySize <= BL.Body)
+        {
+            using var wh = _file.PinForWrite(pid);
+            Span<byte> body = wh.Data;
+            int trailing = oldUsed - insOff;
+            if (trailing > 0)
+                body.Slice(insOff, trailing).CopyTo(body.Slice(insOff + newEntrySize, trailing));
+            BinaryPrimitives.WriteInt16LittleEndian(body[insOff..], (short)key.Length);
+            key.AsSpan().CopyTo(body[(insOff + 2)..]);
+            BinaryPrimitives.WriteInt64LittleEndian(body[(insOff + 2 + key.Length)..], value);
+            BinaryPrimitives.WriteInt32LittleEndian(body, count + 1);
             return null;
         }
 
-        int half = entries.Count / 2;
+        // Split path: snapshot source body once into a pooled scratch so we can rewrite the
+        // source page in place while still copying old entries by index.
+        int newCount = count + 1;
+        int half = newCount / 2;
         PageId rPid = _file.AllocatePage(PageKind.BTreeLeaf);
 
-        var lph = _file.PinForWrite(pid);
-        lph.Data[..BL.Body].Clear();
-        BinaryPrimitives.WriteInt64LittleEndian(lph.Data[4..], rPid.Value);
-        BinaryPrimitives.WriteInt64LittleEndian(lph.Data[12..], oldPrev);
-        int lpos = BL.LeafHdr;
-        for (int i = 0; i < half; i++) WriteEntry(lph.Data, ref lpos, entries[i].k, entries[i].v);
-        BinaryPrimitives.WriteInt32LittleEndian(lph.Data, half);
-        lph.Dispose();
-
-        var rph = _file.PinForWrite(rPid);
-        rph.Data[..BL.Body].Clear();
-        BinaryPrimitives.WriteInt64LittleEndian(rph.Data[4..], oldNext);
-        BinaryPrimitives.WriteInt64LittleEndian(rph.Data[12..], pid.Value);
-        int rpos = BL.LeafHdr;
-        for (int i = half; i < entries.Count; i++) WriteEntry(rph.Data, ref rpos, entries[i].k, entries[i].v);
-        BinaryPrimitives.WriteInt32LittleEndian(rph.Data, entries.Count - half);
-        rph.Dispose();
-
-        if (oldNext >= 0)
+        byte[] scratch = ArrayPool<byte>.Shared.Rent(BL.Body);
+        try
         {
-            var nph = _file.PinForWrite(new PageId(oldNext));
-            BinaryPrimitives.WriteInt64LittleEndian(nph.Data[12..], rPid.Value);
-            nph.Dispose();
+            using (var rh = _file.PinForRead(pid))
+                rh.Data[..BL.Body].CopyTo(scratch);
+
+            int srcPos = BL.LeafHdr;
+
+            // Left page: indices [0, half)
+            using (var lph = _file.PinForWrite(pid))
+            {
+                Span<byte> lbody = lph.Data;
+                lbody[..BL.Body].Clear();
+                BinaryPrimitives.WriteInt64LittleEndian(lbody[4..], rPid.Value);
+                BinaryPrimitives.WriteInt64LittleEndian(lbody[12..], oldPrev);
+                int lpos = BL.LeafHdr;
+                for (int i = 0; i < half; i++)
+                    CopyOrInsertEntry(scratch, ref srcPos, lbody, ref lpos, i, insIdx, key, value);
+                BinaryPrimitives.WriteInt32LittleEndian(lbody, half);
+            }
+
+            // Median key (first entry of right page; new-index = half).
+            byte[] medianBytes;
+            if (half == insIdx)
+            {
+                medianBytes = (byte[])key.Clone();
+            }
+            else
+            {
+                int mklen = BinaryPrimitives.ReadInt16LittleEndian(scratch.AsSpan(srcPos));
+                medianBytes = scratch.AsSpan(srcPos + 2, mklen).ToArray();
+            }
+
+            // Right page: indices [half, newCount)
+            using (var rph = _file.PinForWrite(rPid))
+            {
+                Span<byte> rbody = rph.Data;
+                rbody[..BL.Body].Clear();
+                BinaryPrimitives.WriteInt64LittleEndian(rbody[4..], oldNext);
+                BinaryPrimitives.WriteInt64LittleEndian(rbody[12..], pid.Value);
+                int rpos = BL.LeafHdr;
+                for (int i = half; i < newCount; i++)
+                    CopyOrInsertEntry(scratch, ref srcPos, rbody, ref rpos, i, insIdx, key, value);
+                BinaryPrimitives.WriteInt32LittleEndian(rbody, newCount - half);
+            }
+
+            if (oldNext >= 0)
+            {
+                using var nph = _file.PinForWrite(new PageId(oldNext));
+                BinaryPrimitives.WriteInt64LittleEndian(nph.Data[12..], rPid.Value);
+            }
+            return (medianBytes, rPid);
         }
-        return (entries[half].k, rPid);
+        finally { ArrayPool<byte>.Shared.Return(scratch); }
+    }
+
+    // Helper for leaf split: at new-index i, either emit the inserted entry or copy the next
+    // source entry from scratch. Advances srcPos for old entries and writePos for both.
+    private static void CopyOrInsertEntry(
+        byte[] scratch, ref int srcPos,
+        Span<byte> dest, ref int writePos,
+        int i, int insIdx, byte[] newKey, long newValue)
+    {
+        if (i == insIdx)
+        {
+            BinaryPrimitives.WriteInt16LittleEndian(dest[writePos..], (short)newKey.Length);
+            newKey.AsSpan().CopyTo(dest[(writePos + 2)..]);
+            BinaryPrimitives.WriteInt64LittleEndian(dest[(writePos + 2 + newKey.Length)..], newValue);
+            writePos += 2 + newKey.Length + 8;
+        }
+        else
+        {
+            int klen = BinaryPrimitives.ReadInt16LittleEndian(scratch.AsSpan(srcPos));
+            int entSize = 2 + klen + 8;
+            scratch.AsSpan(srcPos, entSize).CopyTo(dest[writePos..]);
+            srcPos += entSize;
+            writePos += entSize;
+        }
     }
 
     private (byte[] median, PageId right)? InternalInsertSep(PageId pid, byte[] sepKey, PageId newChild)
     {
-        byte[] snap;
-        { using var rh = _file.PinForRead(pid); snap = rh.Data.ToArray(); }
+        // Phase 1: scan body to find insertion offset and total used bytes.
+        int kc;
+        int insOff;
+        int insIdx;
+        int oldUsed;
+        long firstChild;
+        int newEntrySize = 2 + sepKey.Length + 8;
 
-        int kc = BinaryPrimitives.ReadInt32LittleEndian(snap);
-        var seps = ReadInternalSeps(snap, kc);
-        long firstChild = BinaryPrimitives.ReadInt64LittleEndian(snap.AsSpan(4));
-
-        int ins = 0;
-        while (ins < seps.Count && CompareBytes(seps[ins].k, sepKey) < 0) ins++;
-        seps.Insert(ins, (sepKey, newChild));
-
-        int needed = BL.InternalHdr;
-        foreach (var (k, _) in seps) needed += 2 + k.Length + 8;
-
-        if (needed <= BL.Body)
         {
-            var ph = _file.PinForWrite(pid);
-            ph.Data[..BL.Body].Clear();
-            BinaryPrimitives.WriteInt32LittleEndian(ph.Data, seps.Count);
-            BinaryPrimitives.WriteInt64LittleEndian(ph.Data[4..], firstChild);
+            using var rh = _file.PinForRead(pid);
+            ReadOnlySpan<byte> body = rh.Data;
+            kc = BinaryPrimitives.ReadInt32LittleEndian(body);
+            firstChild = BinaryPrimitives.ReadInt64LittleEndian(body[4..]);
+
+            insOff = -1;
+            insIdx = kc;
             int pos = BL.InternalHdr;
-            foreach (var (k, c) in seps) WriteSep(ph.Data, ref pos, k, c);
-            ph.Dispose();
+            for (int i = 0; i < kc; i++)
+            {
+                int klen = BinaryPrimitives.ReadInt16LittleEndian(body[pos..]);
+                if (insOff < 0 && _codec.Compare(body.Slice(pos + 2, klen), sepKey) >= 0)
+                {
+                    insOff = pos;
+                    insIdx = i;
+                }
+                pos += 2 + klen + 8;
+            }
+            oldUsed = pos;
+            if (insOff < 0) insOff = pos;
+        }
+
+        // Fast path: no split — shift trailing separators right and write the new one in place.
+        if (oldUsed + newEntrySize <= BL.Body)
+        {
+            using var wh = _file.PinForWrite(pid);
+            Span<byte> body = wh.Data;
+            int trailing = oldUsed - insOff;
+            if (trailing > 0)
+                body.Slice(insOff, trailing).CopyTo(body.Slice(insOff + newEntrySize, trailing));
+            BinaryPrimitives.WriteInt16LittleEndian(body[insOff..], (short)sepKey.Length);
+            sepKey.AsSpan().CopyTo(body[(insOff + 2)..]);
+            BinaryPrimitives.WriteInt64LittleEndian(body[(insOff + 2 + sepKey.Length)..], newChild.Value);
+            BinaryPrimitives.WriteInt32LittleEndian(body, kc + 1);
             return null;
         }
 
-        int half = seps.Count / 2;
-        byte[] median = seps[half].k;
-        PageId medianChild = seps[half].child;
+        // Split path: internal split promotes the median (removed from both children),
+        // and the median's child becomes the right page's firstChild.
+        int newCount = kc + 1;
+        int half = newCount / 2;
 
-        var lph = _file.PinForWrite(pid);
-        lph.Data[..BL.Body].Clear();
-        BinaryPrimitives.WriteInt32LittleEndian(lph.Data, half);
-        BinaryPrimitives.WriteInt64LittleEndian(lph.Data[4..], firstChild);
-        int lpos = BL.InternalHdr;
-        for (int i = 0; i < half; i++) WriteSep(lph.Data, ref lpos, seps[i].k, seps[i].child);
-        lph.Dispose();
+        byte[] scratch = ArrayPool<byte>.Shared.Rent(BL.Body);
+        try
+        {
+            using (var rh = _file.PinForRead(pid))
+                rh.Data[..BL.Body].CopyTo(scratch);
 
-        PageId rPid = _file.AllocatePage(PageKind.BTreeInternal);
-        var rph = _file.PinForWrite(rPid);
-        rph.Data[..BL.Body].Clear();
-        BinaryPrimitives.WriteInt32LittleEndian(rph.Data, seps.Count - half - 1);
-        BinaryPrimitives.WriteInt64LittleEndian(rph.Data[4..], medianChild.Value);
-        int rpos = BL.InternalHdr;
-        for (int i = half + 1; i < seps.Count; i++) WriteSep(rph.Data, ref rpos, seps[i].k, seps[i].child);
-        rph.Dispose();
+            int srcPos = BL.InternalHdr;
 
-        return (median, rPid);
+            // Left page: new indices [0, half) → kept on source pid.
+            using (var lph = _file.PinForWrite(pid))
+            {
+                Span<byte> lbody = lph.Data;
+                lbody[..BL.Body].Clear();
+                BinaryPrimitives.WriteInt32LittleEndian(lbody, half);
+                BinaryPrimitives.WriteInt64LittleEndian(lbody[4..], firstChild);
+                int lpos = BL.InternalHdr;
+                for (int i = 0; i < half; i++)
+                    CopyOrInsertSep(scratch, ref srcPos, lbody, ref lpos, i, insIdx, sepKey, newChild);
+            }
+
+            // Median (new-index half): key bytes returned to caller; child becomes right's firstChild.
+            byte[] medianBytes;
+            long medianChildValue;
+            if (half == insIdx)
+            {
+                medianBytes = (byte[])sepKey.Clone();
+                medianChildValue = newChild.Value;
+            }
+            else
+            {
+                int mklen = BinaryPrimitives.ReadInt16LittleEndian(scratch.AsSpan(srcPos));
+                medianBytes = scratch.AsSpan(srcPos + 2, mklen).ToArray();
+                medianChildValue = BinaryPrimitives.ReadInt64LittleEndian(scratch.AsSpan(srcPos + 2 + mklen));
+                srcPos += 2 + mklen + 8;
+            }
+
+            // Right page: new indices [half+1, newCount).
+            PageId rPid = _file.AllocatePage(PageKind.BTreeInternal);
+            using (var rph = _file.PinForWrite(rPid))
+            {
+                Span<byte> rbody = rph.Data;
+                rbody[..BL.Body].Clear();
+                BinaryPrimitives.WriteInt32LittleEndian(rbody, newCount - half - 1);
+                BinaryPrimitives.WriteInt64LittleEndian(rbody[4..], medianChildValue);
+                int rpos = BL.InternalHdr;
+                for (int i = half + 1; i < newCount; i++)
+                    CopyOrInsertSep(scratch, ref srcPos, rbody, ref rpos, i, insIdx, sepKey, newChild);
+            }
+
+            return (medianBytes, rPid);
+        }
+        finally { ArrayPool<byte>.Shared.Return(scratch); }
+    }
+
+    // Helper for internal split: at new-index i, either emit the inserted separator or copy the
+    // next source separator from scratch. Layout: KeyLen(int16) + Key + ChildPageId(int64).
+    private static void CopyOrInsertSep(
+        byte[] scratch, ref int srcPos,
+        Span<byte> dest, ref int writePos,
+        int i, int insIdx, byte[] newKey, PageId newChild)
+    {
+        if (i == insIdx)
+        {
+            BinaryPrimitives.WriteInt16LittleEndian(dest[writePos..], (short)newKey.Length);
+            newKey.AsSpan().CopyTo(dest[(writePos + 2)..]);
+            BinaryPrimitives.WriteInt64LittleEndian(dest[(writePos + 2 + newKey.Length)..], newChild.Value);
+            writePos += 2 + newKey.Length + 8;
+        }
+        else
+        {
+            int klen = BinaryPrimitives.ReadInt16LittleEndian(scratch.AsSpan(srcPos));
+            int entSize = 2 + klen + 8;
+            scratch.AsSpan(srcPos, entSize).CopyTo(dest[writePos..]);
+            srcPos += entSize;
+            writePos += entSize;
+        }
     }
 
     private bool DeleteDown(PageId pid, byte[] key, long value, int depth)
@@ -304,23 +460,43 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
     private bool LeafDelete(PageId pid, byte[] key, long value)
     {
-        byte[] snap;
-        { using var rh = _file.PinForRead(pid); snap = rh.Data.ToArray(); }
-        int count = BinaryPrimitives.ReadInt32LittleEndian(snap);
-        var entries = ReadLeafEntries(snap, count);
-        int found = -1;
-        for (int i = 0; i < entries.Count; i++)
-            if (CompareBytes(entries[i].k, key) == 0 && entries[i].v == value) { found = i; break; }
-        if (found < 0) return false;
-        entries.RemoveAt(found);
-        var ph = _file.PinForWrite(pid);
-        ph.Data[..BL.Body].Clear();
-        BinaryPrimitives.WriteInt64LittleEndian(ph.Data[4..], BinaryPrimitives.ReadInt64LittleEndian(snap.AsSpan(4)));
-        BinaryPrimitives.WriteInt64LittleEndian(ph.Data[12..], BinaryPrimitives.ReadInt64LittleEndian(snap.AsSpan(12)));
-        int pos = BL.LeafHdr;
-        foreach (var (k, v) in entries) WriteEntry(ph.Data, ref pos, k, v);
-        BinaryPrimitives.WriteInt32LittleEndian(ph.Data, entries.Count);
-        ph.Dispose();
+        int count;
+        int delOff = -1;
+        int delSize = 0;
+        int oldUsed;
+
+        // Phase 1 (read scan): single pass; find the matching (key, value) entry and total used bytes.
+        {
+            using var rh = _file.PinForRead(pid);
+            ReadOnlySpan<byte> body = rh.Data;
+            count = BinaryPrimitives.ReadInt32LittleEndian(body);
+            int pos = BL.LeafHdr;
+            for (int i = 0; i < count; i++)
+            {
+                int klen = BinaryPrimitives.ReadInt16LittleEndian(body[pos..]);
+                if (delOff < 0 && _codec.Compare(body.Slice(pos + 2, klen), key) == 0)
+                {
+                    long v = BinaryPrimitives.ReadInt64LittleEndian(body[(pos + 2 + klen)..]);
+                    if (v == value)
+                    {
+                        delOff = pos;
+                        delSize = 2 + klen + 8;
+                    }
+                }
+                pos += 2 + klen + 8;
+            }
+            oldUsed = pos;
+        }
+
+        if (delOff < 0) return false;
+
+        using var wh = _file.PinForWrite(pid);
+        Span<byte> wbody = wh.Data;
+        int trailing = oldUsed - (delOff + delSize);
+        if (trailing > 0)
+            wbody.Slice(delOff + delSize, trailing).CopyTo(wbody.Slice(delOff, trailing));
+        wbody.Slice(oldUsed - delSize, delSize).Clear();
+        BinaryPrimitives.WriteInt32LittleEndian(wbody, count - 1);
         return true;
     }
 
@@ -392,42 +568,6 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         return (h.Data.ToArray(), BinaryPrimitives.ReadInt64LittleEndian(h.Data[4..]));
     }
 
-    private static List<(byte[] k, long v)> ReadLeafEntries(byte[] body, int count)
-    {
-        var list = new List<(byte[], long)>(count);
-        int pos = BL.LeafHdr;
-        for (int i = 0; i < count; i++)
-        {
-            int klen = BinaryPrimitives.ReadInt16LittleEndian(body.AsSpan(pos));
-            byte[] k = body[(pos + 2)..(pos + 2 + klen)];
-            long v = BinaryPrimitives.ReadInt64LittleEndian(body.AsSpan(pos + 2 + klen));
-            list.Add((k, v)); pos += 2 + klen + 8;
-        }
-        return list;
-    }
-
-    private static List<(byte[] k, PageId child)> ReadInternalSeps(byte[] body, int kc)
-    {
-        var list = new List<(byte[], PageId)>(kc);
-        int pos = BL.InternalHdr;
-        for (int i = 0; i < kc; i++)
-        {
-            int klen = BinaryPrimitives.ReadInt16LittleEndian(body.AsSpan(pos));
-            byte[] k = body[(pos + 2)..(pos + 2 + klen)];
-            PageId child = new(BinaryPrimitives.ReadInt64LittleEndian(body.AsSpan(pos + 2 + klen)));
-            list.Add((k, child)); pos += 2 + klen + 8;
-        }
-        return list;
-    }
-
-    private static void WriteEntry(Span<byte> dest, ref int pos, byte[] key, long value)
-    {
-        BinaryPrimitives.WriteInt16LittleEndian(dest[pos..], (short)key.Length);
-        key.AsSpan().CopyTo(dest[(pos + 2)..]);
-        BinaryPrimitives.WriteInt64LittleEndian(dest[(pos + 2 + key.Length)..], value);
-        pos += 2 + key.Length + 8;
-    }
-
     private static void WriteSep(Span<byte> dest, ref int pos, byte[] key, PageId child)
     {
         BinaryPrimitives.WriteInt16LittleEndian(dest[pos..], (short)key.Length);
@@ -444,8 +584,6 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[12..], -1L);
         ph.Dispose();
     }
-
-    private int CompareBytes(byte[] a, byte[] b) => _codec.Compare(a, b);
 
     private byte[] Encode(in TKey key)
     {
