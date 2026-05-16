@@ -1,0 +1,141 @@
+using Quiver.Core;
+
+namespace Quiver.Stores;
+
+/// <summary>
+/// FT-12 / codex_advice_3 §7.3 — implementation (a). Dense direct array
+/// indexed by <see cref="RelationshipId"/>. Allocates one
+/// <see cref="long"/> + one presence bit per relationship slot, so memory
+/// is ~9 bytes per slot regardless of population; suitable when relationship
+/// ids are dense (the bulk-load / append-only case) and the indexed key
+/// covers most edges.
+/// </summary>
+/// <remarks>
+/// Sparse populations (key set on a small fraction of relationships) still
+/// pay the slot cost. A future variant could fall back to a
+/// <see cref="Dictionary{TKey, TValue}"/> when entry count drops below a
+/// threshold; for now the dense form is the only one shipped because
+/// weighted-traversal workloads tend to be "all edges have a weight."
+///
+/// Type mismatches are treated as missing — a relationship whose property
+/// value for <see cref="IRelationshipPropertyJoinIndex.KeyId"/> has a
+/// different <see cref="PropertyValueType"/> than the index was built
+/// against is skipped, matching the predicate-false convention from BA-8.
+/// </remarks>
+internal sealed class DirectArrayRelationshipPropertyJoinIndex : IRelationshipPropertyJoinIndex
+{
+    private readonly PropertyKeyId _keyId;
+    private readonly PropertyValueType _type;
+    private readonly long[] _bits;
+    private readonly ulong[] _presence;
+    private readonly long _entryCount;
+
+    private DirectArrayRelationshipPropertyJoinIndex(
+        PropertyKeyId keyId, PropertyValueType type,
+        long[] bits, ulong[] presence, long entryCount)
+    {
+        _keyId = keyId;
+        _type = type;
+        _bits = bits;
+        _presence = presence;
+        _entryCount = entryCount;
+    }
+
+    public PropertyKeyId KeyId => _keyId;
+    public PropertyValueType ValueType => _type;
+    public long EntryCount => _entryCount;
+
+    public bool TryGetScalar(
+        RelationshipId relationshipId,
+        PropertyKeyId keyId,
+        out PropertyValueType type,
+        out long scalarBits)
+    {
+        type = default;
+        scalarBits = 0;
+        if (keyId != _keyId) return false;
+        long id = relationshipId.Value;
+        if ((ulong)id >= (ulong)_bits.LongLength) return false;
+        int word = (int)(id >> 6);
+        ulong mask = 1UL << (int)(id & 63);
+        if ((_presence[word] & mask) == 0) return false;
+        type = _type;
+        scalarBits = _bits[(int)id];
+        return true;
+    }
+
+    /// <summary>
+    /// Scan every live relationship in <paramref name="relStore"/>, walk its
+    /// property chain, and snapshot the scalar value for
+    /// <paramref name="keyId"/> matching <paramref name="expectedType"/>.
+    /// Mutations after the build are invisible — rebuild after material
+    /// graph changes if exact freshness matters.
+    /// </summary>
+    /// <param name="expectedType">
+    /// Must be one of the scalar inline types
+    /// (<see cref="PropertyValueType.Bool"/>, <see cref="PropertyValueType.Int32"/>,
+    /// <see cref="PropertyValueType.Int64"/>, <see cref="PropertyValueType.Double"/>).
+    /// String / Bytes are rejected — those values don't fit a single
+    /// <see cref="long"/> and belong on the property chain.
+    /// </param>
+    public static DirectArrayRelationshipPropertyJoinIndex Build(
+        IRelationshipStore relStore,
+        IPropertyStore propStore,
+        PropertyKeyId keyId,
+        PropertyValueType expectedType)
+    {
+        if (expectedType is not (PropertyValueType.Bool or PropertyValueType.Int32
+                              or PropertyValueType.Int64 or PropertyValueType.Double))
+        {
+            throw new ArgumentException(
+                $"Join index supports scalar inline types only; got {expectedType}.",
+                nameof(expectedType));
+        }
+
+        // Slot count: highest live relId + 1. Scan once to discover hwm so
+        // we can right-size the arrays before the value-collecting pass.
+        long hwm = 0;
+        foreach (var relId in relStore.Scan())
+            if (relId.Value + 1 > hwm) hwm = relId.Value + 1;
+
+        if (hwm > int.MaxValue)
+        {
+            throw new NotSupportedException(
+                $"DirectArrayRelationshipPropertyJoinIndex caps at int.MaxValue relationships (saw hwm={hwm}).");
+        }
+
+        var bits = hwm == 0 ? [] : new long[hwm];
+        var presence = hwm == 0 ? [] : new ulong[(hwm + 63) >> 6];
+        long entryCount = 0;
+
+        foreach (var relId in relStore.Scan())
+        {
+            var rh = relStore.Read(relId);
+            var first = rh.FirstPropertyId;
+            if (!first.IsValid) continue;
+
+            var pe = propStore.Enumerate(first);
+            while (pe.MoveNext())
+            {
+                var cur = pe.Current;
+                if (cur.KeyId != keyId) continue;
+                if (cur.Value.Type != expectedType) break; // type mismatch — predicate false
+                long raw = cur.Value.Type switch
+                {
+                    PropertyValueType.Bool => cur.Value.BoolValue ? 1L : 0L,
+                    PropertyValueType.Int32 => cur.Value.Int32Value,
+                    PropertyValueType.Int64 => cur.Value.Int64Value,
+                    PropertyValueType.Double => BitConverter.DoubleToInt64Bits(cur.Value.DoubleValue),
+                    _ => 0L,
+                };
+                int idx = (int)relId.Value;
+                bits[idx] = raw;
+                presence[idx >> 6] |= 1UL << (idx & 63);
+                entryCount++;
+                break;
+            }
+        }
+
+        return new DirectArrayRelationshipPropertyJoinIndex(keyId, expectedType, bits, presence, entryCount);
+    }
+}

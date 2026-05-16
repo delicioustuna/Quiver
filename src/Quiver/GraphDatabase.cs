@@ -123,6 +123,32 @@ public sealed class GraphDatabase : IDisposable
     }
 
     /// <summary>
+    /// FT-12 / codex_advice_3 §7.3. Build a SID-style join index from
+    /// <see cref="RelationshipId"/> to the scalar value of
+    /// <paramref name="propertyKey"/>. Intended for weighted traversals,
+    /// edge filters, and algorithm kernels that already hold a
+    /// relationship id and want the value without walking the property
+    /// chain.
+    ///
+    /// O(R + P) build cost (one pass over the relationship store plus the
+    /// per-rel property chain walk). Mutations after the build are
+    /// invisible — rebuild after material graph changes when freshness
+    /// matters. The returned index can outlive the build transaction.
+    /// </summary>
+    /// <param name="propertyKey">Property key name; must already exist via <see cref="ISchemaApi.GetOrCreatePropertyKey"/>.</param>
+    /// <param name="expectedType">Scalar inline type to project. Values of other types are skipped.</param>
+    public Stores.IRelationshipPropertyJoinIndex BuildRelationshipPropertyJoinIndex(
+        string propertyKey,
+        Stores.PropertyValueType expectedType)
+    {
+        ArgumentNullException.ThrowIfNull(propertyKey);
+        var keyId = _backend.Schema.GetOrCreatePropertyKey(propertyKey);
+        using var tx = _backend.Transactions.Begin(IsolationLevel.SnapshotIsolation);
+        return Stores.DirectArrayRelationshipPropertyJoinIndex.Build(
+            tx.Relationships, tx.Properties, keyId, expectedType);
+    }
+
+    /// <summary>
     /// PW-14 / codex_advice_3 §7.6. Rebuild the immutable base adjacency view
     /// from the current relationship state, drop tombstones, and advance the
     /// epoch. After this call all live edges are served from the base view and
