@@ -74,6 +74,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
             BeginBinaryBulkLoad = buildAdjacencyIndex => new BulkLoader(
                 _nodeStore, _relStore, _propStore,
                 buildAdjacencyIndex ? _directoryPath : null),
+            BeginStreamingBinaryBulkLoad = buildAdjacencyIndex => new StreamingBulkLoader(
+                _nodeStore, _relStore, _propStore,
+                buildAdjacencyIndex ? _directoryPath : null),
         };
     }
 

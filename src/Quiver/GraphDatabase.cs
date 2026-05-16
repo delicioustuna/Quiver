@@ -45,6 +45,22 @@ public sealed class GraphDatabase : IDisposable
         return fn(buildAdjacencyIndex);
     }
 
+    /// <summary>
+    /// PW-9: opens a <see cref="StreamingBulkLoader"/> for very large imports (10M+ edges).
+    /// Relationship records are streamed to a temp file during append, so peak heap memory
+    /// is bounded by the dense pointer arrays (~32 × maxRelId bytes) rather than scaling
+    /// with the full rel list. Requires <c>AppendRelationship</c> calls to use strictly
+    /// increasing <see cref="RelationshipId"/>; throws <see cref="NotSupportedException"/>
+    /// if the active backend has no streaming bulk-load path.
+    /// </summary>
+    public StreamingBulkLoader BeginStreamingBulkLoad(bool buildAdjacencyIndex = false)
+    {
+        var fn = _backend.BulkLoad.BeginStreamingBinaryBulkLoad
+            ?? throw new NotSupportedException(
+                "The active backend does not support streaming binary bulk loading.");
+        return fn(buildAdjacencyIndex);
+    }
+
     public IGraphTransaction BeginTransaction(
         IsolationLevel level = IsolationLevel.SnapshotIsolation)
         => _backend.BeginGraphTransaction(level, readOnly: false);

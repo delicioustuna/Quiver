@@ -99,9 +99,7 @@ public sealed class BulkLoader : IDisposable
         _committed = true;
 
         CommitNodes();
-        var nodeRelsList = BuildNodeRelsList();
-        var ptrs = BuildRelPointers(nodeRelsList);
-        CommitRelationships(ptrs, nodeRelsList);
+        CommitRelationships();
         CommitProperties();
         if (_directoryPath != null)
             BuildAdjacencyIndex(_directoryPath);
@@ -122,72 +120,97 @@ public sealed class BulkLoader : IDisposable
         _nodeStore.BulkSetHeaders(hwm, _nodes.Count);
     }
 
-    private Dictionary<long, List<(long RelId, bool IsSource)>> BuildNodeRelsList()
+    // PW-9: single-pass dense-array pointer computation. Replaces the prior two-pass
+    // Dictionary<long, List<(long, bool)>> + Dictionary<long, (long, long, long, long)>
+    // approach (which allocated ~700+ MB at 10M edges). Algorithm:
+    //
+    //   For each rel r in RelId ascending order, the chain at every touched node
+    //   interleaves rels where the node is src and rels where it is tgt. We track
+    //   the most recently seen rel per node and which side it sat on; when a new
+    //   rel touches the same node we (1) point its Next field at the prior tail
+    //   and (2) patch the prior tail's Prev field on the appropriate side.
+    //   FirstRelId for each node = the final lastByNode[node] (highest RelId).
+    //
+    // Self-loops: only the src side is recorded in the chain. At write time the
+    // tgt-side fields mirror src — matches the prior implementation's semantics.
+    private void CommitRelationships()
     {
-        var result = new Dictionary<long, List<(long RelId, bool IsSource)>>();
-        foreach (var rel in _rels)
+        if (_rels.Count == 0)
         {
-            GetList(result, rel.Src).Add((rel.Id, true));
-            if (rel.Tgt != rel.Src)
-                GetList(result, rel.Tgt).Add((rel.Id, false));
+            _relStore.BulkSetHeaders(0, 0);
+            return;
         }
-        foreach (var list in result.Values)
-            list.Sort((a, b) => a.RelId.CompareTo(b.RelId));
-        return result;
-    }
 
-    // Builds SrcPrev/SrcNext/TgtPrev/TgtNext for every relationship.
-    // The list per node is sorted ascending by RelId; head = last element (highest = newest).
-    // Within the sorted list:
-    //   next (older)  = element at index - 1  (SrcNext / TgtNext in traversal)
-    //   prev (newer)  = element at index + 1  (SrcPrev / TgtPrev for doubly-linked deletion)
-    private static Dictionary<long, (long SP, long SN, long TP, long TN)>
-        BuildRelPointers(Dictionary<long, List<(long RelId, bool IsSource)>> nodeRelsList)
-    {
-        var ptrs = new Dictionary<long, (long, long, long, long)>();
-
-        foreach (var (_, relList) in nodeRelsList)
+        long relHwm = 0, nodeHwm = 0;
+        foreach (var r in _rels)
         {
-            for (int i = 0; i < relList.Count; i++)
+            if (r.Id  >= relHwm)  relHwm  = r.Id  + 1;
+            if (r.Src >= nodeHwm) nodeHwm = r.Src + 1;
+            if (r.Tgt >= nodeHwm) nodeHwm = r.Tgt + 1;
+        }
+
+        // Rels must be processed in RelId ascending order so chain pointers are
+        // patched in the right direction. Callers typically append sequentially,
+        // making this sort a near-noop, but we sort defensively.
+        _rels.Sort((a, b) => a.Id.CompareTo(b.Id));
+
+        var srcPrev = new long[relHwm];
+        var srcNext = new long[relHwm];
+        var tgtPrev = new long[relHwm];
+        var tgtNext = new long[relHwm];
+        Array.Fill(srcPrev, -1L);
+        Array.Fill(srcNext, -1L);
+        Array.Fill(tgtPrev, -1L);
+        Array.Fill(tgtNext, -1L);
+
+        var lastByNode = new long[nodeHwm];
+        var lastSide   = new byte[nodeHwm]; // 0 = src at this node, 1 = tgt
+        Array.Fill(lastByNode, -1L);
+
+        foreach (var r in _rels)
+        {
+            long prev = lastByNode[r.Src];
+            if (prev >= 0)
             {
-                var (relId, isSource) = relList[i];
-                long prevId = i < relList.Count - 1 ? relList[i + 1].RelId : -1L; // newer
-                long nextId = i > 0 ? relList[i - 1].RelId : -1L;                 // older
+                if (lastSide[r.Src] == 0) srcPrev[prev] = r.Id;
+                else                      tgtPrev[prev] = r.Id;
+            }
+            srcNext[r.Id] = prev;
+            lastByNode[r.Src] = r.Id;
+            lastSide[r.Src] = 0;
 
-                if (!ptrs.TryGetValue(relId, out var p))
-                    p = (-1L, -1L, -1L, -1L);
-
-                ptrs[relId] = isSource
-                    ? (prevId, nextId, p.Item3, p.Item4)
-                    : (p.Item1, p.Item2, prevId, nextId);
+            if (r.Tgt != r.Src)
+            {
+                long prevT = lastByNode[r.Tgt];
+                if (prevT >= 0)
+                {
+                    if (lastSide[r.Tgt] == 0) srcPrev[prevT] = r.Id;
+                    else                      tgtPrev[prevT] = r.Id;
+                }
+                tgtNext[r.Id] = prevT;
+                lastByNode[r.Tgt] = r.Id;
+                lastSide[r.Tgt] = 1;
             }
         }
 
-        return ptrs;
-    }
-
-    private void CommitRelationships(
-        Dictionary<long, (long SP, long SN, long TP, long TN)> ptrs,
-        Dictionary<long, List<(long RelId, bool IsSource)>> nodeRelsList)
-    {
         long hwm = 0;
-        foreach (var rel in _rels)
+        foreach (var r in _rels)
         {
-            ptrs.TryGetValue(rel.Id, out var p);
-            long sp = p.SP, sn = p.SN, tp = p.TP, tn = p.TN;
-            if (rel.Src == rel.Tgt)
-                (tp, tn) = (sp, sn); // self-loop: tgt chain mirrors src chain
+            long sp = srcPrev[r.Id], sn = srcNext[r.Id];
+            long tp, tn;
+            if (r.Src == r.Tgt) { tp = sp; tn = sn; }
+            else                { tp = tgtPrev[r.Id]; tn = tgtNext[r.Id]; }
 
-            _relStore.BulkWrite(rel.Id, rel.Src, rel.Tgt, rel.TypeId, sp, sn, tp, tn);
-            if (rel.Id >= hwm) hwm = rel.Id + 1;
+            _relStore.BulkWrite(r.Id, r.Src, r.Tgt, r.TypeId, sp, sn, tp, tn);
+            if (r.Id >= hwm) hwm = r.Id + 1;
         }
         _relStore.BulkSetHeaders(hwm, _rels.Count);
 
-        // Set each node's FirstRelId to the head of its chain (highest RelId = newest)
-        foreach (var (nodeId, relList) in nodeRelsList)
+        for (long n = 0; n < nodeHwm; n++)
         {
-            long firstRelId = relList[relList.Count - 1].RelId;
-            _nodeStore.UpdateFirstRelId(new NodeId(nodeId), new RelationshipId(firstRelId));
+            long head = lastByNode[n];
+            if (head >= 0)
+                _nodeStore.UpdateFirstRelId(new NodeId(n), new RelationshipId(head));
         }
     }
 
@@ -253,11 +276,4 @@ public sealed class BulkLoader : IDisposable
         if (_committed) throw new InvalidOperationException("BulkLoader has already been committed.");
     }
 
-    private static List<(long RelId, bool IsSource)> GetList(
-        Dictionary<long, List<(long RelId, bool IsSource)>> dict, long key)
-    {
-        if (!dict.TryGetValue(key, out var list))
-            dict[key] = list = new();
-        return list;
-    }
 }
