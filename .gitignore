@@ -481,6 +481,9 @@ $RECYCLE.BIN/
 # Vim temporary swap files
 *.swp
 
+# C# Dev Kit language service cache
+*.csproj.lscache
+
 # 設計書
 docs/design
 
