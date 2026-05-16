@@ -83,4 +83,12 @@ public struct OperatorStatistics
     /// rows are skipped by <c>IRelationshipStore.Scan</c>).
     /// </summary>
     public long RelationshipScanRecords;
+
+    /// <summary>
+    /// PW-12: Number of <see cref="IPredicate.Evaluate"/> calls made by
+    /// <see cref="BitmapFilterOperator"/>. With predicates ordered most-selective
+    /// first this is lower than <c>predicates.Count * rowsIn</c> because each
+    /// later predicate only sees rows still surviving in the page bitmap.
+    /// </summary>
+    public long PredicateEvaluations;
 }

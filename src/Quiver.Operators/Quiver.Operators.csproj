@@ -13,4 +13,7 @@
     <ProjectReference Include="..\Quiver.Index\Quiver.Index.csproj" />
     <ProjectReference Include="..\Quiver.Transactions\Quiver.Transactions.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Quiver.Tests" />
+  </ItemGroup>
 </Project>

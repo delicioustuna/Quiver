@@ -191,6 +191,52 @@ public sealed class QueryOptimizer
         return new ExpandPlan(ExpandStrategy.AdjacencyBlock, fanOut);
     }
 
+    // ---- PW-12: multi-predicate ordering ----
+
+    /// <summary>
+    /// PW-12: hint paired with a predicate. <paramref name="EstimatedMatchingRows"/>
+    /// is the planner's guess at how many input rows this predicate keeps; smaller
+    /// values are more selective and should run first.
+    /// </summary>
+    public readonly record struct PredicateCandidate(IPredicate Predicate, long EstimatedMatchingRows);
+
+    /// <summary>
+    /// PW-12: Order predicates ascending by estimated matching rows so that the
+    /// most selective predicate runs first inside <see cref="BitmapFilterOperator"/>.
+    /// Stable order is preserved for ties.
+    /// </summary>
+    public static IReadOnlyList<IPredicate> OrderPredicatesBySelectivity(
+        IReadOnlyList<PredicateCandidate> candidates)
+    {
+        if (candidates.Count <= 1)
+            return candidates.Count == 0 ? Array.Empty<IPredicate>() : new[] { candidates[0].Predicate };
+        var indexed = new (PredicateCandidate Cand, int Idx)[candidates.Count];
+        for (int i = 0; i < candidates.Count; i++) indexed[i] = (candidates[i], i);
+        Array.Sort(indexed, (a, b) =>
+        {
+            int c = a.Cand.EstimatedMatchingRows.CompareTo(b.Cand.EstimatedMatchingRows);
+            return c != 0 ? c : a.Idx.CompareTo(b.Idx);
+        });
+        var result = new IPredicate[candidates.Count];
+        for (int i = 0; i < indexed.Length; i++) result[i] = indexed[i].Cand.Predicate;
+        return result;
+    }
+
+    /// <summary>
+    /// PW-12: Build a <see cref="BitmapFilterOperator"/> with predicates ordered
+    /// by <see cref="OrderPredicatesBySelectivity"/>. The optimizer keeps full
+    /// freedom over selectivity estimation; callers without per-predicate stats
+    /// can pass <c>EstimatedMatchingRows</c>=0 to preserve input order.
+    /// </summary>
+    public static IPhysicalOperator BuildBitmapFilter(
+        IPhysicalOperator source,
+        IReadOnlyList<PredicateCandidate> candidates)
+    {
+        if (candidates.Count == 0)
+            throw new ArgumentException("at least one predicate required", nameof(candidates));
+        return new BitmapFilterOperator(source, OrderPredicatesBySelectivity(candidates));
+    }
+
     // ---- High-degree pruning ----
 
     /// <summary>
