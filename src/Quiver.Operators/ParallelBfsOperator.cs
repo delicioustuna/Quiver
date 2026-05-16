@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using Quiver.Core;
 using Quiver.Stores;
 using Quiver.Transactions;
@@ -21,6 +21,11 @@ namespace Quiver.Operators;
 /// load/pin the frame, then releases before data is copied.
 ///
 /// Schema: (startNode NodeId, endNode NodeId, depth Int64).
+///
+/// PW-13: per-task BFS reuses <see cref="OneHopExpansion"/> with a private
+/// <see cref="ParallelKernel"/>. Each task owns an isolated
+/// <see cref="FrontierKernelState"/>, so no kernel state crosses task
+/// boundaries.
 /// </summary>
 internal sealed class ParallelBfsOperator : IPhysicalOperator
 {
@@ -103,39 +108,64 @@ internal sealed class ParallelBfsOperator : IPhysicalOperator
         var dir = _dir;
         var typeFilter = _typeFilter;
         var maxDepth = _maxDepth;
+        var kernel = new ParallelKernel(maxDepth);
 
         Parallel.ForEach(
             sources,
             new ParallelOptions { MaxDegreeOfParallelism = _maxParallelism },
-            source =>
+            // Per-task state factory: each worker thread owns its own frontier /
+            // visited buffers and recycles them across the source nodes that the
+            // partitioner hands to it.
+            () => new FrontierKernelState(),
+            (source, _, state) =>
             {
-                // All mutable state is thread-local — no cross-task synchronization needed.
-                var visited = new HashSet<long> { source.Value };
-                var frontier = new Queue<(NodeId node, int depth)>();
-                frontier.Enqueue((source, 0));
+                kernel.Initialize(source, ref state);
 
-                while (frontier.Count > 0)
+                while (state.Frontier!.Count > 0)
                 {
-                    var (node, depth) = frontier.Dequeue();
+                    var (node, depth) = state.Frontier.Dequeue();
 
                     if (depth > 0)
                         bag.Add((source, node, depth));
 
-                    if (depth >= maxDepth) continue;
-
-                    int next = depth + 1;
-                    using var cursor = tx.Access.Expand(tx, node, dir, typeFilter);
-                    while (cursor.MoveNext())
-                    {
-                        var nb = cursor.Neighbor;
-                        if (visited.Add(nb.Value))
-                            frontier.Enqueue((nb, next));
-                    }
+                    if (kernel.ShouldContinue(depth, in state))
+                        OneHopExpansion.Expand(tx, node, dir, typeFilter, depth, kernel, ref state);
                 }
-            });
+                return state;
+            },
+            _ => { });
 
         _results = [.. bag];
     }
 
     public void Dispose() => _source.Dispose();
+
+    /// <summary>
+    /// PW-13: stateless BFS kernel shared by every parallel worker. Frontier /
+    /// visited live in the worker-local <see cref="FrontierKernelState"/> the
+    /// task factory hands in, so no kernel field is mutated concurrently.
+    /// </summary>
+    private sealed class ParallelKernel(int maxDepth) : IGraphKernel<FrontierKernelState>
+    {
+        public void Initialize(NodeId source, ref FrontierKernelState s)
+        {
+            s.Frontier ??= new Queue<(NodeId, int)>();
+            s.Frontier.Clear();
+            s.Visited ??= new HashSet<long>();
+            s.Visited.Clear();
+            s.Visited.Add(source.Value);
+            s.Frontier.Enqueue((source, 0));
+        }
+
+        public bool VisitNeighbor(
+            NodeId source, NodeId target, RelationshipId rel,
+            long weightRaw, int depth, ref FrontierKernelState s)
+        {
+            if (s.Visited!.Add(target.Value))
+                s.Frontier!.Enqueue((target, depth + 1));
+            return true;
+        }
+
+        public bool ShouldContinue(int depth, in FrontierKernelState s) => depth < maxDepth;
+    }
 }

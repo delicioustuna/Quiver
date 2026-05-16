@@ -8,6 +8,11 @@ namespace Quiver.Operators;
 /// BFS-based shortest path. For each (sourceNode, targetNode) pair from the input,
 /// emits (source, target, distance). Pairs with no path within maxDistance are skipped.
 /// BFS runs to completion inside MoveNext() for each pair.
+///
+/// PW-13: per-hop expansion is delegated to <see cref="OneHopExpansion"/> via
+/// <see cref="ShortestPathKernel"/>; the kernel returns <c>false</c> from
+/// <see cref="IGraphKernel{TState}.VisitNeighbor"/> when the target is reached
+/// so the outer loop short-circuits without finishing the current frontier.
 /// </summary>
 public sealed class ShortestPathOperator : IPhysicalOperator
 {
@@ -20,6 +25,8 @@ public sealed class ShortestPathOperator : IPhysicalOperator
 
     private ITransaction? _tx;
     private readonly TupleSlot[] _buffer = new TupleSlot[3];
+    private ShortestPathState _state;
+    private ShortestPathKernel? _kernel;
 
     private static readonly TupleSchema s_schema = new([
         new ColumnDefinition("source",   TupleSlotType.NodeId),
@@ -50,6 +57,8 @@ public sealed class ShortestPathOperator : IPhysicalOperator
     {
         _tx = tx;
         _source.Open(tx);
+        _state = default;
+        _kernel = new ShortestPathKernel(_maxDistance);
     }
 
     public bool MoveNext()
@@ -76,29 +85,67 @@ public sealed class ShortestPathOperator : IPhysicalOperator
     {
         if (src == tgt) return 0;
 
-        var dist = new Dictionary<long, long> { [src.Value] = 0 };
-        var queue = new Queue<NodeId>();
-        queue.Enqueue(src);
+        _state.Target = tgt;
+        _kernel!.Initialize(src, ref _state);
 
-        while (queue.Count > 0)
+        while (_state.Queue!.Count > 0)
         {
-            var node = queue.Dequeue();
-            long d = dist[node.Value];
-            if (d >= _maxDistance) continue;
+            var (node, depth) = _state.Queue.Dequeue();
+            if (!_kernel.ShouldContinue(depth, in _state)) continue;
 
-            using var cursor = _tx!.Access.Expand(_tx, node, _dir, _typeFilter);
-            while (cursor.MoveNext())
-            {
-                var nb = cursor.Neighbor;
-                if (dist.TryAdd(nb.Value, d + 1))
-                {
-                    if (nb == tgt) return d + 1;
-                    queue.Enqueue(nb);
-                }
-            }
+            if (!OneHopExpansion.Expand(_tx!, node, _dir, _typeFilter, depth, _kernel, ref _state))
+                return _state.FoundDistance;
         }
         return -1;
     }
 
     public void Dispose() => _source.Dispose();
+
+    /// <summary>
+    /// PW-13: per-pair BFS state for <see cref="ShortestPathOperator"/>.
+    /// <see cref="Target"/> is reset by the operator before each call to
+    /// <see cref="ShortestPathKernel.Initialize"/>; the kernel uses it to
+    /// detect early termination and writes the matching distance into
+    /// <see cref="FoundDistance"/>.
+    /// </summary>
+    internal struct ShortestPathState
+    {
+        public Queue<(NodeId Node, int Depth)>? Queue;
+        public Dictionary<long, long>? Dist;
+        public NodeId Target;
+        public long FoundDistance;
+    }
+
+    private sealed class ShortestPathKernel(long maxDistance) : IGraphKernel<ShortestPathState>
+    {
+        public void Initialize(NodeId source, ref ShortestPathState s)
+        {
+            s.Queue ??= new Queue<(NodeId, int)>();
+            s.Queue.Clear();
+            s.Dist ??= new Dictionary<long, long>();
+            s.Dist.Clear();
+            s.Dist[source.Value] = 0;
+            s.Queue.Enqueue((source, 0));
+            s.FoundDistance = -1;
+        }
+
+        public bool VisitNeighbor(
+            NodeId source, NodeId target, RelationshipId rel,
+            long weightRaw, int depth, ref ShortestPathState s)
+        {
+            long nextDist = depth + 1;
+            if (!s.Dist!.TryAdd(target.Value, nextDist))
+                return true;
+
+            if (target == s.Target)
+            {
+                s.FoundDistance = nextDist;
+                return false;
+            }
+            s.Queue!.Enqueue((target, (int)nextDist));
+            return true;
+        }
+
+        public bool ShouldContinue(int depth, in ShortestPathState s) => depth < maxDistance;
+    }
 }

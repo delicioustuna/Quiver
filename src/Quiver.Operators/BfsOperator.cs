@@ -13,6 +13,12 @@ namespace Quiver.Operators;
 /// or a positive value greater than 1 to enable parallel execution via
 /// Parallel.ForEach — useful for batch workloads such as vector embedding
 /// generation where many independent source nodes are processed at once.
+///
+/// PW-13: per-hop expansion is delegated to <see cref="OneHopExpansion"/>
+/// driven by a private <see cref="IGraphKernel{TState}"/> implementation,
+/// so the cursor / visited-set logic is shared with
+/// <see cref="VariableLengthExpandOperator"/>, <see cref="ShortestPathOperator"/>
+/// and <see cref="ParallelBfsOperator"/>.
 /// </summary>
 public sealed class BfsOperator : IPhysicalOperator
 {
@@ -23,14 +29,12 @@ public sealed class BfsOperator : IPhysicalOperator
     private readonly int _maxDepth;
     private readonly int _maxParallelism;
 
-    // Sequential state
     private ITransaction? _tx;
     private readonly TupleSlot[] _buffer = new TupleSlot[3];
     private NodeId _startNode;
-    private Queue<(NodeId node, int depth)>? _frontier;
-    private HashSet<long>? _visited;
+    private FrontierKernelState _state;
+    private BfsKernel? _kernel;
 
-    // Parallel delegate (created lazily when maxParallelism != 1)
     private ParallelBfsOperator? _parallel;
 
     private static readonly TupleSchema s_schema = new([
@@ -76,8 +80,8 @@ public sealed class BfsOperator : IPhysicalOperator
         _tx = tx;
         _source.Open(tx);
         _startNode = NodeId.Invalid;
-        _frontier = null;
-        _visited = null;
+        _state = default;
+        _kernel = new BfsKernel(_maxDepth);
     }
 
     public bool MoveNext()
@@ -86,12 +90,12 @@ public sealed class BfsOperator : IPhysicalOperator
 
         while (true)
         {
-            while (_frontier != null && _frontier.Count > 0)
+            while (_state.Frontier is { Count: > 0 } frontier)
             {
-                var (node, depth) = _frontier.Dequeue();
+                var (node, depth) = frontier.Dequeue();
 
-                if (depth < _maxDepth)
-                    ExpandNeighbors(node, depth);
+                if (_kernel!.ShouldContinue(depth, in _state))
+                    OneHopExpansion.Expand(_tx!, node, _dir, _typeFilter, depth, _kernel, ref _state);
 
                 if (depth > 0)
                 {
@@ -105,21 +109,7 @@ public sealed class BfsOperator : IPhysicalOperator
 
             if (!_source.MoveNext()) return false;
             _startNode = new NodeId(_source.Current[_srcCol].LongValue);
-            _frontier = new Queue<(NodeId, int)>();
-            _visited = [_startNode.Value];
-            _frontier.Enqueue((_startNode, 0));
-        }
-    }
-
-    private void ExpandNeighbors(NodeId node, int depth)
-    {
-        int next = depth + 1;
-        using var cursor = _tx!.Access.Expand(_tx, node, _dir, _typeFilter);
-        while (cursor.MoveNext())
-        {
-            var nb = cursor.Neighbor;
-            if (_visited!.Add(nb.Value))
-                _frontier!.Enqueue((nb, next));
+            _kernel!.Initialize(_startNode, ref _state);
         }
     }
 
@@ -128,4 +118,47 @@ public sealed class BfsOperator : IPhysicalOperator
         _parallel?.Dispose();
         if (_parallel == null) _source.Dispose();
     }
+
+    /// <summary>
+    /// PW-13: BFS kernel that pushes unseen neighbours into the shared
+    /// <see cref="FrontierKernelState"/>. Stops descending past
+    /// <c>maxDepth</c>; the operator emits the actual rows.
+    /// </summary>
+    private sealed class BfsKernel(int maxDepth) : IGraphKernel<FrontierKernelState>
+    {
+        public void Initialize(NodeId source, ref FrontierKernelState s)
+        {
+            s.Frontier ??= new Queue<(NodeId, int)>();
+            s.Frontier.Clear();
+            s.Visited ??= new HashSet<long>();
+            s.Visited.Clear();
+            s.Visited.Add(source.Value);
+            s.Frontier.Enqueue((source, 0));
+        }
+
+        public bool VisitNeighbor(
+            NodeId source, NodeId target, RelationshipId rel,
+            long weightRaw, int depth, ref FrontierKernelState s)
+        {
+            if (s.Visited!.Add(target.Value))
+                s.Frontier!.Enqueue((target, depth + 1));
+            return true;
+        }
+
+        public bool ShouldContinue(int depth, in FrontierKernelState s) => depth < maxDepth;
+    }
+}
+
+/// <summary>
+/// PW-13: Shared BFS state for the family of frontier-driven operators
+/// (<see cref="BfsOperator"/>, <see cref="VariableLengthExpandOperator"/>,
+/// <see cref="ParallelBfsOperator"/>). Held by-value in the operator and
+/// passed by <c>ref</c> to each kernel call so that Queue / HashSet
+/// references can be reused across source nodes (their internal buffers
+/// survive Clear).
+/// </summary>
+public struct FrontierKernelState
+{
+    public Queue<(NodeId Node, int Depth)>? Frontier;
+    public HashSet<long>? Visited;
 }

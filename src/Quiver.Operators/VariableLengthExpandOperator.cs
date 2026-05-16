@@ -8,6 +8,10 @@ namespace Quiver.Operators;
 /// Variable-length path expansion: emits (startNode, endNode) for each node reachable
 /// within [minHops, maxHops] hops. BFS with visited-set to prevent cycles.
 /// Start node is emitted when minHops == 0.
+///
+/// PW-13: per-hop expansion is delegated to <see cref="OneHopExpansion"/> via
+/// a private <see cref="IGraphKernel{TState}"/>; frontier / visited bookkeeping
+/// is shared with <see cref="BfsOperator"/> through <see cref="FrontierKernelState"/>.
 /// </summary>
 public sealed class VariableLengthExpandOperator : IPhysicalOperator
 {
@@ -26,8 +30,8 @@ public sealed class VariableLengthExpandOperator : IPhysicalOperator
         new ColumnDefinition("endNode",   TupleSlotType.NodeId)]);
 
     private NodeId _startNode;
-    private Queue<(NodeId node, int depth)>? _frontier;
-    private HashSet<long>? _visited;
+    private FrontierKernelState _state;
+    private VarLenKernel? _kernel;
 
     public VariableLengthExpandOperator(
         IPhysicalOperator source,
@@ -56,8 +60,8 @@ public sealed class VariableLengthExpandOperator : IPhysicalOperator
         _tx = tx;
         _source.Open(tx);
         _startNode = NodeId.Invalid;
-        _frontier = null;
-        _visited = null;
+        _state = default;
+        _kernel = new VarLenKernel(_maxHops);
     }
 
     public bool MoveNext()
@@ -65,12 +69,12 @@ public sealed class VariableLengthExpandOperator : IPhysicalOperator
         while (true)
         {
             // Drain current BFS frontier.
-            while (_frontier != null && _frontier.Count > 0)
+            while (_state.Frontier is { Count: > 0 } frontier)
             {
-                var (node, depth) = _frontier.Dequeue();
+                var (node, depth) = frontier.Dequeue();
 
-                if (depth < _maxHops)
-                    ExpandNeighbors(node, depth);
+                if (_kernel!.ShouldContinue(depth, in _state))
+                    OneHopExpansion.Expand(_tx!, node, _dir, _typeFilter, depth, _kernel, ref _state);
 
                 if (depth >= _minHops)
                 {
@@ -83,27 +87,35 @@ public sealed class VariableLengthExpandOperator : IPhysicalOperator
                 }
             }
 
-            // Advance to next source node.
             if (!_source.MoveNext()) return false;
             _startNode = new NodeId(_source.Current[_srcCol].LongValue);
-            _frontier = new Queue<(NodeId, int)>();
-            _visited = [_startNode.Value];
-            // Enqueue start at depth 0; emit if minHops==0, expand if maxHops>0.
-            _frontier.Enqueue((_startNode, 0));
-        }
-    }
-
-    private void ExpandNeighbors(NodeId node, int depth)
-    {
-        int next = depth + 1;
-        using var cursor = _tx!.Access.Expand(_tx, node, _dir, _typeFilter);
-        while (cursor.MoveNext())
-        {
-            var nb = cursor.Neighbor;
-            if (_visited!.Add(nb.Value))
-                _frontier!.Enqueue((nb, next));
+            _kernel!.Initialize(_startNode, ref _state);
         }
     }
 
     public void Dispose() => _source.Dispose();
+
+    private sealed class VarLenKernel(int maxHops) : IGraphKernel<FrontierKernelState>
+    {
+        public void Initialize(NodeId source, ref FrontierKernelState s)
+        {
+            s.Frontier ??= new Queue<(NodeId, int)>();
+            s.Frontier.Clear();
+            s.Visited ??= new HashSet<long>();
+            s.Visited.Clear();
+            s.Visited.Add(source.Value);
+            s.Frontier.Enqueue((source, 0));
+        }
+
+        public bool VisitNeighbor(
+            NodeId source, NodeId target, RelationshipId rel,
+            long weightRaw, int depth, ref FrontierKernelState s)
+        {
+            if (s.Visited!.Add(target.Value))
+                s.Frontier!.Enqueue((target, depth + 1));
+            return true;
+        }
+
+        public bool ShouldContinue(int depth, in FrontierKernelState s) => depth < maxHops;
+    }
 }
