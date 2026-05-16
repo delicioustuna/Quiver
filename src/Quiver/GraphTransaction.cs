@@ -1,4 +1,5 @@
 ﻿using Quiver.Core;
+using Quiver.Logical;
 using Quiver.Operators;
 using Quiver.Stores;
 using Quiver.Transactions;
@@ -11,19 +12,43 @@ internal sealed class GraphTransaction : IGraphTransaction
     private readonly ITokenStore<LabelId> _labelTokens;
     private readonly ITokenStore<RelationshipTypeId> _relTypeTokens;
     private readonly ITokenStore<PropertyKeyId> _propKeyTokens;
+    // BA-7: when non-null we buffer every public mutation and hand the batch
+    // to the sink after the underlying transaction has durably committed.
+    private readonly ILogicalMutationSink? _logicalSink;
+    private List<LogicalMutation>? _logicalBuffer;
 
     internal GraphTransaction(
         ITransaction inner,
         ITokenStore<LabelId> labelTokens,
         ITokenStore<RelationshipTypeId> relTypeTokens,
         ITokenStore<PropertyKeyId> propKeyTokens,
-        bool isReadOnly = false)
+        bool isReadOnly = false,
+        ILogicalMutationSink? logicalSink = null)
     {
         _inner = inner;
         _labelTokens = labelTokens;
         _relTypeTokens = relTypeTokens;
         _propKeyTokens = propKeyTokens;
         IsReadOnly = isReadOnly;
+        _logicalSink = logicalSink;
+        if (_logicalSink != null)
+        {
+            // Hand the buffer to the sink only after the WAL flush returned —
+            // OnCommitted hooks do not fire on rollback or commit failure.
+            _inner.OnCommitted(FlushLogicalBuffer);
+        }
+    }
+
+    private void RecordLogical(in LogicalMutation mutation)
+    {
+        if (_logicalSink == null) return;
+        (_logicalBuffer ??= new List<LogicalMutation>()).Add(mutation);
+    }
+
+    private void FlushLogicalBuffer()
+    {
+        if (_logicalSink == null || _logicalBuffer == null || _logicalBuffer.Count == 0) return;
+        _logicalSink.OnCommitted(_inner.Id, _logicalBuffer);
     }
 
     public TransactionId Id => _inner.Id;
@@ -33,10 +58,21 @@ internal sealed class GraphTransaction : IGraphTransaction
     // ========== ノード操作 ==========
 
     public NodeId CreateNode(string label)
-        => CreateNode(_labelTokens.GetOrCreate(label));
+    {
+        var labelId = _labelTokens.GetOrCreate(label);
+        var nodeId = _inner.Nodes.Allocate(labelId);
+        if (_logicalSink != null)
+            RecordLogical(LogicalMutation.CreateNode(nodeId, label));
+        return nodeId;
+    }
 
     public NodeId CreateNode(LabelId labelId)
-        => _inner.Nodes.Allocate(labelId);
+    {
+        var nodeId = _inner.Nodes.Allocate(labelId);
+        if (_logicalSink != null)
+            RecordLogical(LogicalMutation.CreateNode(nodeId, _labelTokens.GetName(labelId)));
+        return nodeId;
+    }
 
     public void DeleteNode(NodeId nodeId)
     {
@@ -54,18 +90,64 @@ internal sealed class GraphTransaction : IGraphTransaction
             DeleteRelationship(rid);
 
         _inner.Nodes.Free(nodeId);
+        if (_logicalSink != null)
+            RecordLogical(LogicalMutation.DeleteNode(nodeId));
     }
 
     public bool NodeExists(NodeId nodeId)
         => _inner.Nodes.Read(nodeId).InUse;
 
+    // ========== MERGE (GC-5) ==========
+
+    public (NodeId Id, bool Created) MergeNode(string label, string matchKey, in PropertyValue matchValue)
+    {
+        var labelId = _labelTokens.GetOrCreate(label);
+
+        // Scan-and-compare via the backend access path. We skip the scan when
+        // the property key has never been observed — no node can carry an
+        // unminted key, so the match must be a miss.
+        if (_propKeyTokens.TryGet(matchKey, out var keyId))
+        {
+            foreach (var nodeId in _inner.Access.ScanNodes(_inner, labelId))
+            {
+                var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
+                if (!firstPropId.IsValid) continue;
+                var propEnum = _inner.Properties.Enumerate(firstPropId);
+                while (propEnum.MoveNext())
+                {
+                    var cur = propEnum.Current;
+                    if (cur.KeyId != keyId) continue;
+                    if (PropertyValueEqualityHelper.AreEqual(cur.Value, in matchValue))
+                        return (nodeId, false);
+                    break;
+                }
+            }
+        }
+
+        var newId = _inner.Nodes.Allocate(labelId);
+        SetNodeProperty(newId, _propKeyTokens.GetOrCreate(matchKey), in matchValue);
+        return (newId, true);
+    }
+
     // ========== リレーション操作 ==========
 
     public RelationshipId CreateRelationship(NodeId source, NodeId target, string type)
-        => CreateRelationship(source, target, _relTypeTokens.GetOrCreate(type));
+    {
+        var typeId = _relTypeTokens.GetOrCreate(type);
+        var relId = _inner.Relationships.Create(_inner.Nodes, source, target, typeId);
+        if (_logicalSink != null)
+            RecordLogical(LogicalMutation.CreateRelationship(relId, source, target, type));
+        return relId;
+    }
 
     public RelationshipId CreateRelationship(NodeId source, NodeId target, RelationshipTypeId typeId)
-        => _inner.Relationships.Create(_inner.Nodes, source, target, typeId);
+    {
+        var relId = _inner.Relationships.Create(_inner.Nodes, source, target, typeId);
+        if (_logicalSink != null)
+            RecordLogical(LogicalMutation.CreateRelationship(
+                relId, source, target, _relTypeTokens.GetName(typeId)));
+        return relId;
+    }
 
     public void DeleteRelationship(RelationshipId relId)
     {
@@ -75,6 +157,8 @@ internal sealed class GraphTransaction : IGraphTransaction
         // expand cursors skip it. The store no-ops for delta ids.
         _inner.AdjacencyBlocks?.Tombstone(relId);
         _inner.Relationships.Delete(_inner.Nodes, relId);
+        if (_logicalSink != null)
+            RecordLogical(LogicalMutation.DeleteRelationship(relId));
     }
 
     private void FreeRelationshipProperties(RelationshipId relId)
@@ -95,12 +179,24 @@ internal sealed class GraphTransaction : IGraphTransaction
     public void SetProperty(NodeId nodeId, string key, in PropertyValue value)
     {
         var keyId = _propKeyTokens.GetOrCreate(key);
+        // BA-7: capture before SetNodeProperty mutates the chain — value is a
+        // ref struct, so the heap copy lives in LogicalPropertyValue.
+        if (_logicalSink != null)
+        {
+            var captured = LogicalPropertyValue.Capture(in value);
+            RecordLogical(LogicalMutation.SetNodeProperty(nodeId, key, in captured));
+        }
         SetNodeProperty(nodeId, keyId, in value);
     }
 
     public void SetProperty(RelationshipId relId, string key, in PropertyValue value)
     {
         var keyId = _propKeyTokens.GetOrCreate(key);
+        if (_logicalSink != null)
+        {
+            var captured = LogicalPropertyValue.Capture(in value);
+            RecordLogical(LogicalMutation.SetRelationshipProperty(relId, key, in captured));
+        }
         SetRelationshipProperty(relId, keyId, in value);
     }
 
@@ -159,6 +255,8 @@ internal sealed class GraphTransaction : IGraphTransaction
                 var wh = _inner.Nodes.Write(nodeId);
                 wh.FirstPropertyId = newFirst;
                 wh.Dispose();
+                if (_logicalSink != null)
+                    RecordLogical(LogicalMutation.RemoveNodeProperty(nodeId, key));
                 return;
             }
         }

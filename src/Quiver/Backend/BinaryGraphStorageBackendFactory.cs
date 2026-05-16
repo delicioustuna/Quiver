@@ -95,6 +95,7 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         return new BinaryGraphStorageBackend(
             directoryPath, pageManager, wal, nodeStore, relStore, propStore,
             labelTokens, relTypeTokens, propKeyTokens, indexManager,
-            adjStore, adjPagedFile, txManager, access, vectors);
+            adjStore, adjPagedFile, txManager, access, vectors,
+            options.LogicalMutationSink);
     }
 }

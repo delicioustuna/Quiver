@@ -1,5 +1,6 @@
 using Quiver.Core;
 using Quiver.Index;
+using Quiver.Logical;
 using Quiver.Storage;
 using Quiver.Stores;
 using Quiver.Transactions;
@@ -33,6 +34,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
     private readonly IGraphAccessMethods _access;
     private readonly BulkLoadCapabilities _bulkLoad;
     private readonly string _directoryPath;
+    private readonly ILogicalMutationSink? _logicalSink;
 
     internal BinaryGraphStorageBackend(
         string directoryPath,
@@ -49,8 +51,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
         IPagedFile? adjPagedFile,
         TransactionManager txManager,
         BinaryGraphAccessMethods access,
-        IVectorStore vectors)
+        IVectorStore vectors,
+        ILogicalMutationSink? logicalSink = null)
     {
+        _logicalSink = logicalSink;
         _directoryPath = directoryPath;
         _vectors = vectors;
         _pageManager = pageManager;
@@ -90,7 +94,12 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
     public IGraphTransaction BeginGraphTransaction(IsolationLevel level, bool readOnly)
     {
         var inner = _txManager.Begin(level);
-        return new GraphTransaction(inner, _labelTokens, _relTypeTokens, _propKeyTokens, readOnly);
+        return new GraphTransaction(
+            inner, _labelTokens, _relTypeTokens, _propKeyTokens,
+            readOnly,
+            // BA-7: skip the recorder entirely for read-only transactions and
+            // when no sink is configured so the hot path stays allocation-free.
+            readOnly ? null : _logicalSink);
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using Quiver.Logical;
 using Quiver.Stores;
 using Quiver.Transactions;
 using Microsoft.Extensions.Logging;
@@ -204,4 +205,16 @@ public sealed class GraphDatabaseOptions
     /// Use this to inject custom (e.g. in-memory) backends from tests.
     /// </summary>
     public IGraphStorageBackendFactory? BackendFactory { get; set; }
+
+    /// <summary>
+    /// BA-7 / codex_advice_3 §8. When non-null the backend records every
+    /// public graph mutation (<c>CreateNode</c>, <c>CreateRelationship</c>,
+    /// <c>SetProperty</c>, ...) of each writing transaction and hands the
+    /// batch to this sink after the underlying commit becomes durable. The
+    /// binary backend continues to use its PageImage WAL for crash recovery —
+    /// the logical stream is an optional second sink for SQLite backend
+    /// support, debug / audit log shipping, migration, and future replication.
+    /// Rolled-back transactions are not delivered.
+    /// </summary>
+    public ILogicalMutationSink? LogicalMutationSink { get; set; }
 }
