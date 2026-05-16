@@ -86,29 +86,8 @@ public sealed class GraphTraversal<T>
     {
         var keyId  = _schema.GetOrCreatePropertyKey(key);
         var col    = _entityColumn;
-        if (pred.Kind == PredicateKind.Eq && pred.StringValue != null)
-        {
-            var s = pred.StringValue;
-            return new GraphTraversal<T>(_tx, _schema,
-                new FilterBuilder(_builder, _ => new PropertyEqStringPredicate(col, keyId, s)),
-                _projection, _entityColumn);
-        }
-        if (pred.Kind == PredicateKind.Within && pred.WithinValues != null)
-        {
-            var vals = pred.WithinValues;
-            return new GraphTraversal<T>(_tx, _schema,
-                new FilterBuilder(_builder, _ => new PropertyWithinStringPredicate(col, keyId, vals)),
-                _projection, _entityColumn);
-        }
-        if (pred.Kind == PredicateKind.Without && pred.WithinValues != null)
-        {
-            var vals = pred.WithinValues;
-            return new GraphTraversal<T>(_tx, _schema,
-                new FilterBuilder(_builder, _ => new PropertyWithoutStringPredicate(col, keyId, vals)),
-                _projection, _entityColumn);
-        }
         return new GraphTraversal<T>(_tx, _schema,
-            new FilterBuilder(_builder, _ => new PropertyInt64Predicate(col, keyId, pred)),
+            new FilterBuilder(_builder, _ => PredicateDispatch.Build(col, keyId, pred)),
             _projection, _entityColumn);
     }
 
@@ -229,6 +208,68 @@ public sealed class GraphTraversal<T>
         var col = _entityColumn;
         return new GraphTraversal<T>(_tx, _schema,
             new FilterBuilder(_builder, _ => new PropertyExistsPredicate(col, keyId, mustExist: false)),
+            _projection, _entityColumn);
+    }
+
+    /// <summary>
+    /// GC-2: Cypher <c>IS NULL</c> — keep elements where <paramref name="key"/>
+    /// is absent. Sugar for <see cref="HasNot(string)"/>.
+    /// </summary>
+    public GraphTraversal<T> IsNull(string key) => HasNot(key);
+
+    /// <summary>
+    /// GC-2: Cypher <c>IS NOT NULL</c> — keep elements where <paramref name="key"/>
+    /// is present. Sugar for <see cref="Has(string)"/>.
+    /// </summary>
+    public GraphTraversal<T> IsNotNull(string key) => Has(key);
+
+    // ── GC-2: traversal-level boolean composition ────────────────────────────
+
+    /// <summary>
+    /// GC-2: Gremlin <c>.and(t1, t2, …)</c> — keep elements for which every
+    /// sub-traversal produces at least one row. Equivalent to chaining
+    /// <c>.Where(t1).Where(t2)</c> but spelled out explicitly for cross-condition
+    /// filters. Each sub-traversal is evaluated as an EXISTS sub-query against
+    /// the current entity.
+    /// </summary>
+    public GraphTraversal<T> And(params Func<SubTraversal, SubTraversal>[] traversals)
+    {
+        if (traversals is null || traversals.Length == 0)
+            throw new ArgumentException("And requires at least one sub-traversal.", nameof(traversals));
+        return CombineSubTraversals(traversals, useOr: false);
+    }
+
+    /// <summary>
+    /// GC-2: Gremlin <c>.or(t1, t2, …)</c> / Cypher <c>WHERE cond1 OR cond2</c>
+    /// — keep elements for which at least one sub-traversal produces a row.
+    /// Each sub-traversal is evaluated as its own EXISTS sub-query against the
+    /// current entity; the booleans are short-circuit OR'd at the predicate
+    /// layer.
+    /// </summary>
+    public GraphTraversal<T> Or(params Func<SubTraversal, SubTraversal>[] traversals)
+    {
+        if (traversals is null || traversals.Length == 0)
+            throw new ArgumentException("Or requires at least one sub-traversal.", nameof(traversals));
+        return CombineSubTraversals(traversals, useOr: true);
+    }
+
+    private GraphTraversal<T> CombineSubTraversals(Func<SubTraversal, SubTraversal>[] traversals, bool useOr)
+    {
+        var outerEntityColumn = _entityColumn;
+        var captured = traversals;
+        return new GraphTraversal<T>(_tx, _schema,
+            new FilterBuilder(_builder, s =>
+            {
+                var inners = new IPredicate[captured.Length];
+                for (int i = 0; i < captured.Length; i++)
+                {
+                    var probe = new CorrelatedInputOperator();
+                    var seed = new CorrelatedSeedBuilder(probe);
+                    var start = new SubTraversal(probe, seed, s, 0);
+                    inners[i] = captured[i](start).BuildExistsPredicate(outerEntityColumn);
+                }
+                return useOr ? new OrPredicate(inners) : new AndPredicate(inners);
+            }),
             _projection, _entityColumn);
     }
 

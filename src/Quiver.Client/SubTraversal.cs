@@ -83,15 +83,8 @@ public sealed class SubTraversal
     {
         var keyId = _schema.GetOrCreatePropertyKey(key);
         var col = _entityColumn;
-        if (pred.Kind == PredicateKind.Eq && pred.StringValue != null)
-        {
-            var s = pred.StringValue;
-            return new SubTraversal(_probe,
-                new FilterBuilder(_builder, _ => new PropertyEqStringPredicate(col, keyId, s)),
-                _schema, _entityColumn);
-        }
         return new SubTraversal(_probe,
-            new FilterBuilder(_builder, _ => new PropertyInt64Predicate(col, keyId, pred)),
+            new FilterBuilder(_builder, _ => PredicateDispatch.Build(col, keyId, pred)),
             _schema, _entityColumn);
     }
 

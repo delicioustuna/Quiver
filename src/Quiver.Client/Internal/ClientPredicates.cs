@@ -1,4 +1,5 @@
-﻿using Quiver.Core;
+﻿using System.Text.RegularExpressions;
+using Quiver.Core;
 using Quiver.Operators;
 using Quiver.Stores;
 using Quiver.Transactions;
@@ -205,6 +206,155 @@ internal sealed class PropertyWithoutStringPredicate : IPredicate
         // Missing property: caller's choice; we follow the Gremlin convention
         // that "without X" includes elements that don't have the key at all.
         return true;
+    }
+}
+
+/// <summary>
+/// GC-2: builds an <see cref="IPredicate"/> for a single <c>(column, keyId)</c>
+/// pair from a public-facing <see cref="PropertyPredicate"/>. Centralises the
+/// dispatch so <see cref="GraphTraversal{T}"/> and <see cref="SubTraversal"/>
+/// share one truth table for every <see cref="PredicateKind"/>.
+/// </summary>
+internal static class PredicateDispatch
+{
+    internal static IPredicate Build(int nodeColumn, PropertyKeyId keyId, PropertyPredicate pred)
+    {
+        switch (pred.Kind)
+        {
+            case PredicateKind.Eq when pred.StringValue != null:
+                return new PropertyEqStringPredicate(nodeColumn, keyId, pred.StringValue);
+            case PredicateKind.Within when pred.WithinValues != null:
+                return new PropertyWithinStringPredicate(nodeColumn, keyId, pred.WithinValues);
+            case PredicateKind.Without when pred.WithinValues != null:
+                return new PropertyWithoutStringPredicate(nodeColumn, keyId, pred.WithinValues);
+            case PredicateKind.StartsWith:
+                return new StringPrefixPredicate(nodeColumn, keyId, pred.StringValue ?? string.Empty);
+            case PredicateKind.EndsWith:
+                return new StringSuffixPredicate(nodeColumn, keyId, pred.StringValue ?? string.Empty);
+            case PredicateKind.Contains:
+                return new StringContainsPredicate(nodeColumn, keyId, pred.StringValue ?? string.Empty);
+            case PredicateKind.Regex when pred.CompiledRegex != null:
+                return new RegexPropertyPredicate(nodeColumn, keyId, pred.CompiledRegex);
+            case PredicateKind.Not when pred.Inner != null:
+                return new NegatedPredicate(Build(nodeColumn, keyId, pred.Inner));
+            case PredicateKind.And when pred.InnerArray != null:
+                return new AndPredicate(BuildAll(nodeColumn, keyId, pred.InnerArray));
+            case PredicateKind.Or when pred.InnerArray != null:
+                return new OrPredicate(BuildAll(nodeColumn, keyId, pred.InnerArray));
+            default:
+                // Eq/Gt/Gte/Lt/Lte/Between with numeric comparand fall through
+                // to the int64 predicate, which already enforces type flags.
+                return new PropertyInt64Predicate(nodeColumn, keyId, pred);
+        }
+    }
+
+    private static IPredicate[] BuildAll(int nodeColumn, PropertyKeyId keyId, PropertyPredicate[] preds)
+    {
+        var result = new IPredicate[preds.Length];
+        for (int i = 0; i < preds.Length; i++) result[i] = Build(nodeColumn, keyId, preds[i]);
+        return result;
+    }
+}
+
+/// <summary>
+/// GC-2: shared base for string predicates that load a single string property
+/// and test it against a fixed comparand. Encapsulates the "find the property,
+/// reject non-string types, decode UTF-8" boilerplate so the prefix/suffix/
+/// contains/regex variants only differ in the final match test.
+/// </summary>
+internal abstract class StringPropertyPredicateBase : IPredicate
+{
+    private readonly int _nodeColumn;
+    private readonly PropertyKeyId _keyId;
+
+    protected StringPropertyPredicateBase(int nodeColumn, PropertyKeyId keyId)
+    {
+        _nodeColumn = nodeColumn; _keyId = keyId;
+    }
+
+    public bool Evaluate(in TupleRef tuple, ITransaction tx)
+    {
+        var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
+        using var node = tx.Nodes.Read(nodeId);
+        var en = tx.Properties.Enumerate(node.FirstPropertyId);
+        while (en.MoveNext())
+        {
+            var prop = en.Current;
+            if (prop.KeyId != _keyId) continue;
+            if (prop.Value.Type != PropertyValueType.String) return false;
+            var s = System.Text.Encoding.UTF8.GetString(prop.Value.Utf8StringValue);
+            return Match(s);
+        }
+        return false;
+    }
+
+    protected abstract bool Match(string value);
+}
+
+/// <summary>GC-2: Cypher <c>STARTS WITH</c> / Gremlin <c>TextP.startingWith</c>.</summary>
+internal sealed class StringPrefixPredicate : StringPropertyPredicateBase
+{
+    private readonly string _prefix;
+    internal StringPrefixPredicate(int nodeColumn, PropertyKeyId keyId, string prefix) : base(nodeColumn, keyId) => _prefix = prefix;
+    protected override bool Match(string value) => value.StartsWith(_prefix, StringComparison.Ordinal);
+}
+
+/// <summary>GC-2: Cypher <c>ENDS WITH</c> / Gremlin <c>TextP.endingWith</c>.</summary>
+internal sealed class StringSuffixPredicate : StringPropertyPredicateBase
+{
+    private readonly string _suffix;
+    internal StringSuffixPredicate(int nodeColumn, PropertyKeyId keyId, string suffix) : base(nodeColumn, keyId) => _suffix = suffix;
+    protected override bool Match(string value) => value.EndsWith(_suffix, StringComparison.Ordinal);
+}
+
+/// <summary>GC-2: Cypher <c>CONTAINS</c> / Gremlin <c>TextP.containing</c>.</summary>
+internal sealed class StringContainsPredicate : StringPropertyPredicateBase
+{
+    private readonly string _needle;
+    internal StringContainsPredicate(int nodeColumn, PropertyKeyId keyId, string needle) : base(nodeColumn, keyId) => _needle = needle;
+    protected override bool Match(string value) => value.Contains(_needle, StringComparison.Ordinal);
+}
+
+/// <summary>GC-2: Cypher <c>=~</c> regex match. The Regex is compiled once at
+/// construction and reused per row.</summary>
+internal sealed class RegexPropertyPredicate : StringPropertyPredicateBase
+{
+    private readonly Regex _regex;
+    internal RegexPropertyPredicate(int nodeColumn, PropertyKeyId keyId, Regex regex) : base(nodeColumn, keyId) => _regex = regex;
+    protected override bool Match(string value) => _regex.IsMatch(value);
+}
+
+/// <summary>GC-2: <c>NOT (predicate)</c> — inverts any IPredicate.</summary>
+internal sealed class NegatedPredicate : IPredicate
+{
+    private readonly IPredicate _inner;
+    internal NegatedPredicate(IPredicate inner) => _inner = inner;
+    public bool Evaluate(in TupleRef tuple, ITransaction tx) => !_inner.Evaluate(in tuple, tx);
+}
+
+/// <summary>GC-2: short-circuiting AND across multiple IPredicates.</summary>
+internal sealed class AndPredicate : IPredicate
+{
+    private readonly IPredicate[] _inners;
+    internal AndPredicate(IPredicate[] inners) => _inners = inners;
+    public bool Evaluate(in TupleRef tuple, ITransaction tx)
+    {
+        for (int i = 0; i < _inners.Length; i++)
+            if (!_inners[i].Evaluate(in tuple, tx)) return false;
+        return true;
+    }
+}
+
+/// <summary>GC-2: short-circuiting OR across multiple IPredicates.</summary>
+internal sealed class OrPredicate : IPredicate
+{
+    private readonly IPredicate[] _inners;
+    internal OrPredicate(IPredicate[] inners) => _inners = inners;
+    public bool Evaluate(in TupleRef tuple, ITransaction tx)
+    {
+        for (int i = 0; i < _inners.Length; i++)
+            if (_inners[i].Evaluate(in tuple, tx)) return true;
+        return false;
     }
 }
 
