@@ -176,6 +176,55 @@ internal sealed class RelationshipEndpointBuilder : IOperatorBuilder
         => new RelationshipEndpointOperator(_source.Build(schema), _relColumn, _endpoint);
 }
 
+/// <summary>
+/// GC-3: <c>.OrderBy(key)</c> — chains a <see cref="PropertyLookupOperator"/>
+/// (so the sort key is materialised into a column) and then wraps it in
+/// <see cref="SortOperator"/>. The entity column the caller cares about is
+/// untouched, so downstream projections still read the original NodeId /
+/// RelationshipId.
+/// </summary>
+internal sealed class SortBuilder : IOperatorBuilder
+{
+    private readonly IOperatorBuilder _source;
+    private readonly string? _propertyKey;
+    private readonly int _sortColumn;
+    private readonly bool _descending;
+
+    public int CurrentEntityColumn => _source.CurrentEntityColumn;
+    public int PredictedOutputColumnCount => _propertyKey != null
+        ? _source.PredictedOutputColumnCount + 1
+        : _source.PredictedOutputColumnCount;
+
+    /// <summary>Sort by a property value — the property gets materialised into an extra column first.</summary>
+    internal SortBuilder(IOperatorBuilder source, string propertyKey, bool descending)
+    {
+        _source = source;
+        _propertyKey = propertyKey;
+        _sortColumn = source.PredictedOutputColumnCount; // the column added by PropertyLookup
+        _descending = descending;
+    }
+
+    /// <summary>Sort by an existing column index (e.g. the entity column itself).</summary>
+    internal SortBuilder(IOperatorBuilder source, int sortColumn, bool descending)
+    {
+        _source = source;
+        _propertyKey = null;
+        _sortColumn = sortColumn;
+        _descending = descending;
+    }
+
+    public IPhysicalOperator Build(ISchemaApi schema)
+    {
+        if (_propertyKey != null)
+        {
+            var keyId = schema.GetOrCreatePropertyKey(_propertyKey);
+            var withProp = new PropertyLookupOperator(_source.Build(schema), _source.CurrentEntityColumn, keyId, _propertyKey);
+            return new SortOperator(withProp, _sortColumn, _descending);
+        }
+        return new SortOperator(_source.Build(schema), _sortColumn, _descending);
+    }
+}
+
 /// <summary>GC-1: <c>.label()</c> — adds a string column carrying the label name for the entity column.</summary>
 internal sealed class LabelNameLookupBuilder : IOperatorBuilder
 {

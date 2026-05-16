@@ -383,6 +383,160 @@ public sealed class GraphTraversal<T>
         return new GraphTraversal<NodeId>(_tx, _schema, filtered, row => row.GetNodeId(0), 0);
     }
 
+    // ── GC-3: ordering ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// GC-3: Gremlin <c>.order().by(key)</c> / Cypher <c>ORDER BY n.key</c> —
+    /// sort the current stream by the named property in ascending order.
+    /// Blocking: every input row is materialised before any output row is
+    /// emitted, so pair with <c>.Limit(n)</c> for top-N queries.
+    /// </summary>
+    public GraphTraversal<T> OrderBy(string key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        return new GraphTraversal<T>(_tx, _schema, new SortBuilder(_builder, key, descending: false), _projection, _entityColumn);
+    }
+
+    /// <summary>
+    /// GC-3: Gremlin <c>.order().by(key, desc)</c> / Cypher <c>ORDER BY n.key DESC</c>.
+    /// </summary>
+    public GraphTraversal<T> OrderByDescending(string key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        return new GraphTraversal<T>(_tx, _schema, new SortBuilder(_builder, key, descending: true), _projection, _entityColumn);
+    }
+
+    /// <summary>
+    /// GC-3: sort by the current entity id (NodeId / RelationshipId column).
+    /// Equivalent to Gremlin's <c>.order()</c> without a <c>.by()</c> selector.
+    /// </summary>
+    public GraphTraversal<T> Order(bool descending = false)
+        => new(_tx, _schema, new SortBuilder(_builder, _entityColumn, descending), _projection, _entityColumn);
+
+    // ── GC-3: numeric aggregation (terminal, takes a property key) ───────────
+
+    /// <summary>
+    /// GC-3: Gremlin <c>.values(key).sum()</c> / Cypher <c>sum(n.key)</c>.
+    /// Coerces Int32/Int64 and Double values into a single <see cref="double"/>
+    /// accumulator; non-numeric or missing properties are skipped. Empty input
+    /// returns 0.
+    /// </summary>
+    public double Sum(string key) => AggregateNumeric(key, AggregateKind.Sum) ?? 0.0;
+
+    /// <summary>GC-3: long-precision sum (Int32/Int64 only; Double values are skipped).</summary>
+    public long SumLong(string key) => (long)(AggregateLongSum(key) ?? 0L);
+
+    /// <summary>
+    /// GC-3: Cypher <c>max(n.key)</c>. Returns the largest value across the
+    /// current stream, or <c>null</c> when no rows carry a numeric value for
+    /// <paramref name="key"/>.
+    /// </summary>
+    public double? Max(string key) => AggregateNumeric(key, AggregateKind.Max);
+
+    /// <summary>GC-3: Cypher <c>min(n.key)</c>.</summary>
+    public double? Min(string key) => AggregateNumeric(key, AggregateKind.Min);
+
+    /// <summary>
+    /// GC-3: Cypher <c>avg(n.key)</c>. Returns <c>null</c> when no rows carry a
+    /// numeric value (avoids surfacing NaN to callers who didn't ask for it).
+    /// </summary>
+    public double? Mean(string key)
+    {
+        double sum = 0; long count = 0;
+        ForEachNumeric(key, v => { sum += v; count++; });
+        return count == 0 ? null : sum / count;
+    }
+
+    private enum AggregateKind { Sum, Max, Min }
+
+    private double? AggregateNumeric(string key, AggregateKind kind)
+    {
+        double acc = 0; bool seen = false;
+        ForEachNumeric(key, v =>
+        {
+            if (!seen) { acc = v; seen = true; return; }
+            acc = kind switch
+            {
+                AggregateKind.Sum => acc + v,
+                AggregateKind.Max => v > acc ? v : acc,
+                AggregateKind.Min => v < acc ? v : acc,
+                _ => acc,
+            };
+        });
+        return seen ? acc : null;
+    }
+
+    private long? AggregateLongSum(string key)
+    {
+        long acc = 0; bool seen = false;
+        var plan = new PropertyLookupBuilder(_builder, key).Build(_schema);
+        using var cursor = _tx.ExecuteCursor(plan);
+        int valueCol = cursor.Schema.Columns.Count - 1;
+        while (cursor.MoveNext())
+        {
+            var row = cursor.Current;
+            if (row.GetSlotType(valueCol) != TupleSlotType.Int64) continue;
+            acc += row.GetInt64(valueCol);
+            seen = true;
+        }
+        return seen ? acc : null;
+    }
+
+    private void ForEachNumeric(string key, Action<double> sink)
+    {
+        var plan = new PropertyLookupBuilder(_builder, key).Build(_schema);
+        using var cursor = _tx.ExecuteCursor(plan);
+        int valueCol = cursor.Schema.Columns.Count - 1;
+        while (cursor.MoveNext())
+        {
+            var row = cursor.Current;
+            switch (row.GetSlotType(valueCol))
+            {
+                case TupleSlotType.Int64:  sink(row.GetInt64(valueCol)); break;
+                case TupleSlotType.Double: sink(row.GetDouble(valueCol)); break;
+                // Skip Null / String / Bytes / Bool — Gremlin's sum/max/min
+                // semantics ignore non-numeric values rather than throwing.
+            }
+        }
+    }
+
+    // ── GC-3: grouping ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// GC-3: Gremlin <c>.groupCount().by(key)</c> / Cypher
+    /// <c>RETURN n.key, count(*)</c>. Counts rows by the string property value
+    /// of <paramref name="key"/>; rows where the property is missing or
+    /// non-string are dropped.
+    ///
+    /// Memory: O(distinct keys). For wide cardinalities prefer streaming via
+    /// the property cursor directly.
+    /// </summary>
+    public Dictionary<string, long> GroupCount(string key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        var dict = new Dictionary<string, long>(StringComparer.Ordinal);
+        var plan = new PropertyLookupBuilder(_builder, key).Build(_schema);
+        using var cursor = _tx.ExecuteCursor(plan);
+        int valueCol = cursor.Schema.Columns.Count - 1;
+        while (cursor.MoveNext())
+        {
+            var row = cursor.Current;
+            if (row.GetSlotType(valueCol) != TupleSlotType.Utf8String) continue;
+            var s = row.GetString(valueCol);
+            dict[s] = dict.GetValueOrDefault(s) + 1;
+        }
+        return dict;
+    }
+
+    // ── GC-3: fold ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// GC-3: Gremlin <c>.fold()</c> — collect every emitted element into a
+    /// single list. Identical to <see cref="ToList"/>; provided so traversals
+    /// translated from Gremlin literally still compile.
+    /// </summary>
+    public List<T> Fold() => ToList();
+
     public GraphTraversal<string> Values(string key)
     {
         var lookup = new PropertyLookupBuilder(_builder, key);
