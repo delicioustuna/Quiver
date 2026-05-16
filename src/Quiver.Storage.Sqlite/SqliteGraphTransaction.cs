@@ -102,6 +102,65 @@ public sealed class SqliteGraphTransaction : IGraphTransaction
         return v is not null and not DBNull && Convert.ToInt64(v) == 1L;
     }
 
+    public (NodeId Id, bool Created) MergeNode(string label, string matchKey, in PropertyValue matchValue)
+    {
+        EnsureWritable();
+        var schemaApi = (SqliteSchemaApi)_backend.Schema;
+        var labelId = schemaApi.GetOrCreateLabel(label);
+
+        if (schemaApi.TryGetPropertyKey(matchKey, out var keyId))
+        {
+            var existing = FindNodeByLabelAndProperty(labelId.Value, keyId.Value, in matchValue);
+            if (existing.HasValue) return (new NodeId(existing.Value), false);
+        }
+
+        var newId = CreateNode(labelId);
+        SetProperty(newId, matchKey, in matchValue);
+        return (newId, true);
+    }
+
+    private long? FindNodeByLabelAndProperty(int labelId, int keyId, in PropertyValue value)
+    {
+        string typeClause;
+        object paramValue;
+        switch (value.Type)
+        {
+            case PropertyValueType.Bool:
+            case PropertyValueType.Int32:
+            case PropertyValueType.Int64:
+                typeClause = "p.value_type IN (1,2,3) AND p.int_value = $v";
+                paramValue = value.Int64Value;
+                break;
+            case PropertyValueType.Double:
+                typeClause = "p.value_type = 4 AND p.double_value = $v";
+                paramValue = value.DoubleValue;
+                break;
+            case PropertyValueType.String:
+                typeClause = "p.value_type = 5 AND p.text_value = $v";
+                paramValue = Encoding.UTF8.GetString(value.Utf8StringValue);
+                break;
+            case PropertyValueType.Bytes:
+                typeClause = "p.value_type = 6 AND p.blob_value = $v";
+                paramValue = value.BytesValue.ToArray();
+                break;
+            default:
+                return null;
+        }
+
+        using var cmd = NewCommand();
+        cmd.CommandText = $@"SELECT n.id FROM nodes n
+                             JOIN node_properties p ON p.node_id = n.id
+                             WHERE n.label_id = $lbl AND n.in_use = 1
+                               AND p.key_id = $k AND {typeClause}
+                             ORDER BY n.id LIMIT 1;";
+        cmd.Parameters.AddWithValue("$lbl", labelId);
+        cmd.Parameters.AddWithValue("$k",   keyId);
+        cmd.Parameters.AddWithValue("$v",   paramValue);
+        var r = cmd.ExecuteScalar();
+        if (r is null or DBNull) return null;
+        return Convert.ToInt64(r);
+    }
+
     // ============================================================
     // Relationships
     // ============================================================

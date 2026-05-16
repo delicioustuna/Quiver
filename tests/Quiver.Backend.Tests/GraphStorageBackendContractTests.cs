@@ -276,6 +276,74 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         tx.Commit();
     }
 
+    // ===== MERGE / UPSERT (GC-5) =====
+
+    [Fact]
+    public void MergeNode_creates_when_no_match_exists()
+    {
+        using var tx = BeginWrite();
+        var (id, created) = tx.MergeNode("Person", "name", PropertyValue.FromString("Alice"));
+        created.Should().BeTrue();
+        tx.NodeExists(id).Should().BeTrue();
+        System.Text.Encoding.UTF8.GetString(tx.GetProperty(id, "name").Utf8StringValue)
+            .Should().Be("Alice");
+        tx.Commit();
+    }
+
+    [Fact]
+    public void MergeNode_returns_existing_when_match_exists_in_same_tx()
+    {
+        using var tx = BeginWrite();
+        var first  = tx.MergeNode("Person", "name", PropertyValue.FromString("Alice"));
+        var second = tx.MergeNode("Person", "name", PropertyValue.FromString("Alice"));
+
+        first.Created.Should().BeTrue();
+        second.Created.Should().BeFalse();
+        second.Id.Should().Be(first.Id);
+        tx.Commit();
+    }
+
+    [Fact]
+    public void MergeNode_finds_existing_node_across_commits()
+    {
+        NodeId persisted;
+        using (var tx = BeginWrite())
+        {
+            (persisted, _) = tx.MergeNode("Person", "name", PropertyValue.FromString("Bob"));
+            tx.Commit();
+        }
+
+        using var tx2 = BeginWrite();
+        var (id, created) = tx2.MergeNode("Person", "name", PropertyValue.FromString("Bob"));
+        created.Should().BeFalse();
+        id.Should().Be(persisted);
+        tx2.Commit();
+    }
+
+    [Fact]
+    public void MergeNode_distinguishes_by_label()
+    {
+        using var tx = BeginWrite();
+        var (person, pc) = tx.MergeNode("Person",  "name", PropertyValue.FromString("Alice"));
+        var (city,   cc) = tx.MergeNode("City",    "name", PropertyValue.FromString("Alice"));
+
+        pc.Should().BeTrue();
+        cc.Should().BeTrue();
+        city.Should().NotBe(person);
+        tx.Commit();
+    }
+
+    [Fact]
+    public void MergeNode_matches_by_int_property()
+    {
+        using var tx = BeginWrite();
+        var (a, _) = tx.MergeNode("Item", "sku", PropertyValue.FromInt64(42L));
+        var (b, created) = tx.MergeNode("Item", "sku", PropertyValue.FromInt64(42L));
+        created.Should().BeFalse();
+        b.Should().Be(a);
+        tx.Commit();
+    }
+
     // ===== Commit / Rollback =====
 
     [Fact]

@@ -23,6 +23,19 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     void DeleteNode(NodeId nodeId);
     bool NodeExists(NodeId nodeId);
 
+    /// <summary>
+    /// GC-5: Cypher <c>MERGE (n:label {matchKey: matchValue})</c> — return the
+    /// id of an existing node that matches <paramref name="label"/> and carries
+    /// <paramref name="matchKey"/> equal to <paramref name="matchValue"/>; when
+    /// none exists, allocate a new node, set the match property on it, and
+    /// return that. <c>Created</c> distinguishes the two paths so callers can
+    /// branch into <c>ON CREATE SET</c> / <c>ON MATCH SET</c> logic. The first
+    /// match (by NodeId order) wins when the database holds duplicates.
+    /// Equality is per-byte for String/Bytes, bit-exact for Double, and
+    /// scalar-equal across the Bool/Int32/Int64 family.
+    /// </summary>
+    (NodeId Id, bool Created) MergeNode(string label, string matchKey, in PropertyValue matchValue);
+
     // リレーション操作
     RelationshipId CreateRelationship(NodeId source, NodeId target, string type);
     RelationshipId CreateRelationship(NodeId source, NodeId target, RelationshipTypeId typeId);

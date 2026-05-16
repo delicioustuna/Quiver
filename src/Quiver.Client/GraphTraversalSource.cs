@@ -18,6 +18,14 @@ public sealed class GraphTraversalSource
     public NodeBuilder         AddNode(string label) => new(_tx, label);
     public RelationshipBuilder AddRelationship(string type) => new(_tx, type);
 
+    /// <summary>
+    /// GC-5: Cypher <c>MERGE (n:label {matchKey: matchValue})</c>. Sugar over
+    /// <see cref="IGraphTransaction.MergeNode"/>; the <c>Created</c> flag lets
+    /// callers branch into ON CREATE SET / ON MATCH SET logic.
+    /// </summary>
+    public (NodeId Id, bool Created) MergeNode(string label, string matchKey, in Stores.PropertyValue matchValue)
+        => _tx.MergeNode(label, matchKey, in matchValue);
+
     // ── エンティティ操作糖衣 (IGraphNode<T> ベース) ─────────────────────────
     public NodeId Insert<T>(T entity)             where T : IGraphNode<T> => T.Insert(_tx, entity);
     public NodeId InsertIndexed<T>(T entity)      where T : IGraphNode<T> => T.InsertIndexed(_tx, entity);
