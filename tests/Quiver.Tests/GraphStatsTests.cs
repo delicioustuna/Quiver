@@ -382,6 +382,117 @@ public sealed class GraphStatsTests : IDisposable
         stats.IsLikelyPowerNode(lone).Should().BeFalse();
     }
 
+    // ---- PW-16: dense direct-array degree lookup ----
+
+    [Fact]
+    public void NodeDegrees_dense_path_records_every_node()
+    {
+        // 12 nodes with NodeId values 0..11 → contiguous, dense.
+        using var tx = _db.BeginTransaction();
+        var hub  = tx.CreateNode("Person");
+        var nodes = new List<NodeId> { hub };
+        for (int i = 0; i < 10; i++)
+        {
+            var spoke = tx.CreateNode("Person");
+            nodes.Add(spoke);
+            tx.CreateRelationship(hub, spoke, "KNOWS");
+        }
+        var lone = tx.CreateNode("Person");
+        nodes.Add(lone);
+        tx.Commit();
+
+        var stats = _db.CollectStats(powerNodeThreshold: 8);
+
+        stats.NodeDegrees.IsDense.Should().BeTrue();
+        stats.NodeDegrees.DenseLength.Should().Be(12);
+        stats.NodeDegrees.MaxNodeIdObserved.Should().Be(11);
+
+        // Hub has out-degree 10
+        stats.NodeDegrees.TryGetDegree(hub, out var ho, out var hi).Should().BeTrue();
+        ho.Should().Be(10);
+        hi.Should().Be(0);
+
+        // A spoke has in-degree 1
+        stats.NodeDegrees.TryGetDegree(nodes[1], out var so, out var si).Should().BeTrue();
+        so.Should().Be(0);
+        si.Should().Be(1);
+
+        // Isolated node has both zero (still tracked in dense mode)
+        stats.NodeDegrees.TryGetDegree(lone, out var lo, out var li).Should().BeTrue();
+        lo.Should().Be(0);
+        li.Should().Be(0);
+
+        // O(1) power-node check via bit array
+        stats.NodeDegrees.IsLikelyPowerNode(hub).Should().BeTrue();
+        stats.NodeDegrees.IsLikelyPowerNode(nodes[1]).Should().BeFalse();
+        stats.NodeDegrees.IsLikelyPowerNode(lone).Should().BeFalse();
+        stats.NodeDegrees.PowerNodeCount.Should().Be(1);
+
+        // EnumeratePowerNodes returns ascending NodeId
+        stats.NodeDegrees.EnumeratePowerNodes()
+            .Select(s => s.NodeId).Should().Equal(hub);
+
+        // Legacy PowerNodes view is rebuilt from the dense data
+        stats.PowerNodes.Should().ContainKey(hub);
+        stats.PowerNodes[hub].TotalDegree.Should().Be(10);
+    }
+
+    [Fact]
+    public void NodeDegrees_dense_path_handles_out_of_range_node_id()
+    {
+        using var tx = _db.BeginTransaction();
+        tx.CreateNode("Person");
+        tx.Commit();
+
+        var stats = _db.CollectStats();
+        var future = new NodeId(stats.NodeDegrees.MaxNodeIdObserved + 100);
+
+        stats.NodeDegrees.TryGetDegree(future, out _, out _).Should().BeFalse();
+        stats.NodeDegrees.IsLikelyPowerNode(future).Should().BeFalse();
+    }
+
+    [Fact]
+    public void NodeDegrees_falls_back_to_sparse_when_ratio_exceeds_threshold()
+    {
+        using var tx = _db.BeginTransaction();
+        var hub = tx.CreateNode("Person");
+        for (int i = 0; i < 10; i++)
+        {
+            var spoke = tx.CreateNode("Person");
+            tx.CreateRelationship(hub, spoke, "KNOWS");
+        }
+        tx.Commit();
+
+        // denseThreshold = 0.1 forces sparse fallback (ratio = 1.0 > 0.1).
+        // Combined with the 4096-id dense floor → also disable it by setting
+        // powerNodeThreshold low so the test still exercises power-node
+        // tracking on the sparse path.
+        var stats = _db.CollectStats(powerNodeThreshold: 8, denseThreshold: 0.0);
+
+        stats.NodeDegrees.IsDense.Should().BeFalse();
+
+        // Sparse path: only power nodes are tracked → TryGetDegree returns
+        // true for the hub, false for an arbitrary spoke.
+        stats.NodeDegrees.TryGetDegree(hub, out var ho, out var hi).Should().BeTrue();
+        ho.Should().Be(10);
+        hi.Should().Be(0);
+
+        // IsLikelyPowerNode still works on the sparse path
+        stats.NodeDegrees.IsLikelyPowerNode(hub).Should().BeTrue();
+        stats.NodeDegrees.IsLikelyPowerNode(new NodeId(999)).Should().BeFalse();
+
+        stats.PowerNodes.Should().ContainKey(hub);
+    }
+
+    [Fact]
+    public void NodeDegrees_empty_db_returns_empty_lookup()
+    {
+        var stats = _db.CollectStats();
+        stats.NodeDegrees.PowerNodeCount.Should().Be(0);
+        stats.NodeDegrees.IsLikelyPowerNode(new NodeId(0)).Should().BeFalse();
+        stats.NodeDegrees.TryGetDegree(new NodeId(0), out _, out _).Should().BeFalse();
+    }
+
     [Fact]
     public void CollectStats_records_property_key_observed_types_and_range()
     {

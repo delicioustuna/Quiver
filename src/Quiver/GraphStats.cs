@@ -202,8 +202,21 @@ public sealed class GraphStats
     public IReadOnlyDictionary<RelationshipTypeId, DegreeHistogram> InDegreeByType { get; private init; }
         = new Dictionary<RelationshipTypeId, DegreeHistogram>();
 
-    public IReadOnlyDictionary<NodeId, NodeDegreeSummary> PowerNodes { get; private init; }
-        = new Dictionary<NodeId, NodeDegreeSummary>();
+    /// <summary>
+    /// PW-16: legacy dictionary view of power nodes. Backed by
+    /// <see cref="NodeDegrees"/> — materialised lazily so dense-mode collections
+    /// do not pay for the dictionary unless a caller asks for this view.
+    /// </summary>
+    public IReadOnlyDictionary<NodeId, NodeDegreeSummary> PowerNodes
+        => _powerNodesCache ??= NodeDegrees.SnapshotPowerNodes();
+    private IReadOnlyDictionary<NodeId, NodeDegreeSummary>? _powerNodesCache;
+
+    /// <summary>
+    /// PW-16 / codex_advice_3 §7.5. Direct-array degree cache when the
+    /// observed <c>NodeId</c> space is dense, dictionary fallback when
+    /// sparse. Use this in hot paths instead of <see cref="PowerNodes"/>.
+    /// </summary>
+    public NodeDegreeLookup NodeDegrees { get; private init; } = NodeDegreeLookup.Empty;
 
     public IReadOnlyDictionary<PropertyKeyId, PropertyKeyStats> PropertyKeys { get; private init; }
         = new Dictionary<PropertyKeyId, PropertyKeyStats>();
@@ -258,11 +271,33 @@ public sealed class GraphStats
         };
     }
 
-    public bool IsLikelyPowerNode(NodeId nodeId) => PowerNodes.ContainsKey(nodeId);
+    /// <summary>
+    /// PW-16: O(1) power-node check via <see cref="NodeDegrees"/> (bit test in
+    /// dense mode, dictionary lookup in sparse mode).
+    /// </summary>
+    public bool IsLikelyPowerNode(NodeId nodeId) => NodeDegrees.IsLikelyPowerNode(nodeId);
+
+    /// <summary>
+    /// PW-16: O(1) degree lookup. Returns <c>false</c> when the node id is
+    /// outside the dense range or (in sparse mode) is not a tracked power
+    /// node — callers must not treat <c>false</c> as "degree is zero".
+    /// </summary>
+    public bool TryGetDegree(NodeId nodeId, out long outDegree, out long inDegree)
+        => NodeDegrees.TryGetDegree(nodeId, out outDegree, out inDegree);
 
     public static GraphStats Collect(ITransaction tx) => Collect(tx, PowerNodeDegreeThreshold);
 
     public static GraphStats Collect(ITransaction tx, int powerNodeThreshold)
+        => Collect(tx, powerNodeThreshold, NodeDegreeLookup.DefaultDenseThreshold);
+
+    /// <summary>
+    /// PW-16 overload: lets callers tune the dense/sparse cut-over for the
+    /// per-node degree lookup. The default
+    /// <see cref="NodeDegreeLookup.DefaultDenseThreshold"/> (4.0) is suitable
+    /// for bulk-loaded graphs; tests that intentionally exercise the sparse
+    /// fallback can pass a value &lt; 1.0.
+    /// </summary>
+    public static GraphStats Collect(ITransaction tx, int powerNodeThreshold, double denseThreshold)
     {
         var labelCard       = new Dictionary<LabelId, long>();
         var edgeFreq        = new Dictionary<RelationshipTypeId, long>();
@@ -272,7 +307,7 @@ public sealed class GraphStats
         var globalHist      = new DegreeHistogram();
         var globalOut       = new DegreeHistogram();
         var globalIn        = new DegreeHistogram();
-        var powerNodes      = new Dictionary<NodeId, NodeDegreeSummary>();
+        var degreeBuilder   = new NodeDegreeLookup.Builder(powerNodeThreshold, denseThreshold);
         var propertyKeys    = new Dictionary<PropertyKeyId, PropertyKeyStats>();
 
         long totalNodes = 0;
@@ -359,8 +394,7 @@ public sealed class GraphStats
                 h.Record(perTypeIn[typeId]);
             }
 
-            if (nodeDegree >= powerNodeThreshold)
-                powerNodes[nodeId] = new NodeDegreeSummary(nodeId, outDegree, inDegree);
+            degreeBuilder.Record(nodeId, outDegree, inDegree);
 
             // Node properties → PropertyKeyStats
             var propEnum = tx.Properties.Enumerate(node.FirstPropertyId);
@@ -392,7 +426,7 @@ public sealed class GraphStats
             DegreeByLabel         = degreeByLabel,
             OutDegreeByType       = outDegreeByType,
             InDegreeByType        = inDegreeByType,
-            PowerNodes            = powerNodes,
+            NodeDegrees           = degreeBuilder.Build(),
             PropertyKeys          = propertyKeys,
             TotalNodes            = totalNodes,
             TotalRelationships    = totalRels,

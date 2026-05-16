@@ -86,6 +86,16 @@ public sealed class GraphDatabase : IDisposable
     }
 
     /// <summary>
+    /// PW-16: overload that also lets callers tune the dense/sparse cut-over
+    /// for the per-node degree lookup. See <see cref="NodeDegreeLookup"/>.
+    /// </summary>
+    public GraphStats CollectStats(int powerNodeThreshold, double denseThreshold)
+    {
+        using var tx = _backend.Transactions.Begin(IsolationLevel.SnapshotIsolation);
+        return GraphStats.Collect(tx, powerNodeThreshold, denseThreshold);
+    }
+
+    /// <summary>
     /// Create a <see cref="QueryOptimizer"/> backed by the given stats (or a freshly collected
     /// snapshot when <paramref name="stats"/> is null).
     /// </summary>
