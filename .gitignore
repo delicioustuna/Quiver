@@ -489,6 +489,7 @@ docs/design
 
 # ベンチマーク実測記録（ローカル計測値のため管理対象外）
 docs/benchmarks/
+docs/roadmap.md
 
 # Claude管理ファイル類
 .claude
