@@ -122,47 +122,16 @@ public sealed class InMemoryVectorStore : IVectorStore
 
     // Score returns a value where HIGHER = more similar so a single max-heap
     // works across all metrics. Euclidean is therefore returned as -distance.
+    // VEC-7: delegates to VectorScorer (SIMD via System.Numerics.Vector<float>).
     private static float Score(DistanceMetric metric, float[] q, float[] v)
     {
         return metric switch
         {
-            DistanceMetric.Cosine => Cosine(q, v),
-            DistanceMetric.Dot => Dot(q, v),
-            DistanceMetric.Euclidean => -Euclidean(q, v),
+            DistanceMetric.Cosine => VectorScorer.Cosine(q, v),
+            DistanceMetric.Dot => VectorScorer.Dot(q, v),
+            DistanceMetric.Euclidean => -VectorScorer.Euclidean(q, v),
             _ => throw new VectorException($"Unknown distance metric: {metric}."),
         };
-    }
-
-    private static float Dot(float[] a, float[] b)
-    {
-        float s = 0f;
-        for (int i = 0; i < a.Length; i++) s += a[i] * b[i];
-        return s;
-    }
-
-    private static float Cosine(float[] a, float[] b)
-    {
-        float dot = 0f, na = 0f, nb = 0f;
-        for (int i = 0; i < a.Length; i++)
-        {
-            dot += a[i] * b[i];
-            na += a[i] * a[i];
-            nb += b[i] * b[i];
-        }
-        float denom = MathF.Sqrt(na) * MathF.Sqrt(nb);
-        if (denom == 0f) return 0f;
-        return dot / denom;
-    }
-
-    private static float Euclidean(float[] a, float[] b)
-    {
-        float s = 0f;
-        for (int i = 0; i < a.Length; i++)
-        {
-            float d = a[i] - b[i];
-            s += d * d;
-        }
-        return MathF.Sqrt(s);
     }
 
     private readonly record struct VectorKey(EntityKind Kind, long Id);
