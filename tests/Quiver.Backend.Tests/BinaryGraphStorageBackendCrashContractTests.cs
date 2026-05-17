@@ -1,0 +1,174 @@
+using FluentAssertions;
+using Quiver.Backend.Tests.Faults;
+using Quiver.Core;
+using Quiver.Stores;
+using Quiver.Transactions;
+using Xunit;
+
+namespace Quiver.Backend.Tests;
+
+/// <summary>
+/// BA-9 binary backend crash contract: runs the shared
+/// <see cref="GraphStorageBackendCrashContractTests"/> suite plus three
+/// binary-specific scenarios (WAL segment roll, RecoveryManager edge cases,
+/// adjacency block sidecar loss).
+/// </summary>
+public sealed class BinaryGraphStorageBackendCrashContractTests
+    : GraphStorageBackendCrashContractTests
+{
+    protected override IGraphStorageBackendFactory CreateFactory()
+        => new BinaryGraphStorageBackendFactory();
+
+    protected override void InjectTornWriteAtTail()
+    {
+        // Most recent WAL segment is the durability boundary. Zero-fill the
+        // last 16 bytes so the trailing record's CRC32C never validates.
+        var seg = LatestWalSegment();
+        if (seg is null) return;
+        TornWriteInjector.ZeroFillTail(seg, tailBytes: 16);
+    }
+
+    protected override void InjectChecksumCorruption()
+    {
+        var seg = LatestWalSegment();
+        if (seg is null) return;
+        // WAL header: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32C(4) = 25 B.
+        // Flip a bit in the Type byte of the first record so its CRC fails on replay.
+        ChecksumCorruptor.FlipBitAt(seg, offset: 20, bitInByte: 0);
+    }
+
+    protected override void DeleteSidecarFiles()
+    {
+        // adj.epoch is rebuilt from the adjacency store on next open; deleting
+        // it should be tolerated. If absent (no bulk load happened) this is a no-op.
+        var epoch = Path.Combine(DatabaseDirectory, "adj.epoch");
+        SidecarFileDeleter.TryDelete(epoch);
+    }
+
+    // ===== Binary-specific scenarios =====
+
+    /// <summary>
+    /// Open with a small WAL segment size so that a few commits force a
+    /// segment roll, then simulate a kill and confirm everything still
+    /// recovers. Probes the boundary code that closes one segment and opens
+    /// the next.
+    /// </summary>
+    [Fact]
+    public void KillAcrossWalSegmentRoll_recovers()
+    {
+        var dir = Path.Combine(
+            Path.GetTempPath(),
+            "quiver_crash_walroll_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var factory = new BinaryGraphStorageBackendFactory();
+            // Tiny segments — every other commit will roll.
+            var opts = new GraphDatabaseOptions { WalSegmentSize = 64 * 1024 };
+
+            var ids = new List<NodeId>();
+            for (int i = 0; i < 30; i++)
+            {
+                IGraphStorageBackend? backend = factory.Open(dir, opts);
+                using (var tx = backend.BeginGraphTransaction(
+                    IsolationLevel.SnapshotIsolation, readOnly: false))
+                {
+                    // 1 KB payload so segment fills relatively quickly.
+                    var node = tx.CreateNode("Big");
+                    tx.SetProperty(node, "blob",
+                        PropertyValue.FromString(new string('x', 1024)));
+                    ids.Add(node);
+                    tx.Commit();
+                }
+                KillProcessSimulator.SimulateKill(ref backend);
+            }
+
+            using var reopened = factory.Open(dir, opts);
+            using var rtx = reopened.BeginGraphTransaction(
+                IsolationLevel.SnapshotIsolation, readOnly: true);
+            foreach (var id in ids)
+                rtx.NodeExists(id).Should().BeTrue();
+            rtx.Rollback();
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// Open an empty directory (no WAL, no data files) — the binary backend
+    /// must boot cleanly with an empty RecoveryManager pass.
+    /// </summary>
+    [Fact]
+    public void EmptyDirectory_recovers_with_empty_FileRegistry_pass()
+    {
+        var dir = Path.Combine(
+            Path.GetTempPath(),
+            "quiver_crash_emptydir_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            using var backend = new BinaryGraphStorageBackendFactory()
+                .Open(dir, new GraphDatabaseOptions());
+            using var tx = backend.BeginGraphTransaction(
+                IsolationLevel.SnapshotIsolation, readOnly: false);
+            var node = tx.CreateNode("First");
+            tx.Commit();
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// Truncate the adjacency block index sidecar to 0 bytes after a commit.
+    /// adj_idx.dat is only written by BulkLoader, so if absent the factory
+    /// gracefully skips the V1 path. The committed node store remains
+    /// readable.
+    /// </summary>
+    [Fact]
+    public void AdjacencyIndexSidecar_truncated_backend_falls_back_safely()
+    {
+        IGraphStorageBackend? backend = Open();
+        NodeId persisted;
+        using (var tx = backend.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: false))
+        {
+            persisted = tx.CreateNode("Pre");
+            tx.Commit();
+        }
+        KillProcessSimulator.SimulateKill(ref backend);
+
+        var adjIdx = Path.Combine(DatabaseDirectory, "adj_idx.dat");
+        if (File.Exists(adjIdx))
+            TornWriteInjector.TruncateTail(adjIdx, int.MaxValue); // truncate to 0
+
+        // Either succeeds (linked-list fallback) or fails with StorageException.
+        IGraphStorageBackend? reopened = null;
+        try
+        {
+            reopened = Open();
+            using var rtx = reopened.BeginGraphTransaction(
+                IsolationLevel.SnapshotIsolation, readOnly: true);
+            rtx.NodeExists(persisted).Should().BeTrue();
+            rtx.Rollback();
+        }
+        catch (StorageException) { /* acceptable: fail-safe */ }
+        catch (CorruptionException) { /* acceptable */ }
+        finally
+        {
+            reopened?.Dispose();
+        }
+    }
+
+    private string? LatestWalSegment()
+    {
+        var walDir = Path.Combine(DatabaseDirectory, "wal");
+        if (!Directory.Exists(walDir)) return null;
+        var segs = Directory.EnumerateFiles(walDir)
+            .OrderByDescending(p => p, StringComparer.Ordinal)
+            .ToList();
+        return segs.Count == 0 ? null : segs[0];
+    }
+}
