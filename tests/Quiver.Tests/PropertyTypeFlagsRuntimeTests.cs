@@ -43,7 +43,7 @@ public sealed class PropertyTypeFlagsRuntimeTests : IDisposable
 
         using var read = _db.BeginTransaction();
         var g = read.G(_db.Schema);
-        var matches = g.V().HasLabel("Item").Has("score", P.Gt(100L)).ToList();
+        var matches = g.Nodes().HasLabel("Item").Has("score", P.Gt(100L)).ToList();
 
         matches.Should().BeEmpty();
     }
@@ -61,7 +61,7 @@ public sealed class PropertyTypeFlagsRuntimeTests : IDisposable
 
         using var read = _db.BeginTransaction();
         var g = read.G(_db.Schema);
-        var matches = g.V().HasLabel("Item").Has("active", P.Gt(0L)).ToList();
+        var matches = g.Nodes().HasLabel("Item").Has("active", P.Gt(0L)).ToList();
 
         matches.Should().BeEmpty();
     }
@@ -78,7 +78,7 @@ public sealed class PropertyTypeFlagsRuntimeTests : IDisposable
 
         using var read = _db.BeginTransaction();
         var g = read.G(_db.Schema);
-        var matches = g.V().HasLabel("Item").Has("score", P.Gt(100L)).ToList();
+        var matches = g.Nodes().HasLabel("Item").Has("score", P.Gt(100L)).ToList();
 
         matches.Should().ContainSingle().Which.Should().Be(b);
     }

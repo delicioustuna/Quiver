@@ -1,4 +1,4 @@
-﻿# Quiver
+# Quiver
 
 Pure C# で実装するグラフデータベースエンジン。Amazon Neptune や Apache TinkerPop のような本格的なグラフ DB のコア層を、マネージドコードのみで構築することを目標とする。
 
@@ -159,7 +159,7 @@ using (var tx = db.BeginTransaction())
     g.AddRelationship("KNOWS").From(alice).To(bob).Next();
 
     // 隣接ノードのトラバーサル
-    var friends = g.V().HasLabel("Person")
+    var friends = g.Nodes().HasLabel("Person")
                     .Has("Name", P.Eq("Alice"))
                     .Out("KNOWS")
                     .Values("Name")
@@ -180,13 +180,13 @@ var bob   = g.AddNode("Person").P("Name", "Bob").P("Age", 25).Next();
 g.AddRelationship("KNOWS").From(alice).To(bob).Next();
 
 // 型なしトラバーサル
-var names = g.V().HasLabel("Person")
+var names = g.Nodes().HasLabel("Person")
               .Has("Age", P.Gt(25L))
               .Values("Name")
               .ToList();
 
 // 型付きトラバーサル（式ツリーでプロパティ参照）
-var people = g.V<Person>()
+var people = g.Nodes<Person>()
               .Has(p => p.Age, P.Gt(25L))
               .ToList();  // → List<Person>（自動ロード）
 
@@ -204,23 +204,23 @@ var results = g.Match(
 .ToList();
 
 // サブトラバーサル述語（WHERE EXISTS / NOT EXISTS 相当）
-var loners = g.V().HasLabel("Person")
+var loners = g.Nodes().HasLabel("Person")
                .Not(t => t.Out("KNOWS"))          // KNOWS エッジを持たないノード
                .ToList();
 
-var connectors = g.V().HasLabel("Person")
+var connectors = g.Nodes().HasLabel("Person")
                    .Where(t => t.Out("KNOWS").HasLabel("Person"))
                    .ToList();
 
 // ストリーミング（大量結果でメモリを抑えたい場合）
-using var cursor = g.V<Person>().AsCursor();
+using var cursor = g.Nodes<Person>().AsCursor();
 while (cursor.MoveNext())
 {
     var person = cursor.Current;   // トランザクション有効期間内のみ有効
 }
 
 // AsEnumerable で foreach / LINQ
-foreach (var name in g.V().HasLabel("Person").Values("Name").AsEnumerable())
+foreach (var name in g.Nodes().HasLabel("Person").Values("Name").AsEnumerable())
     Console.WriteLine(name);
 ```
 

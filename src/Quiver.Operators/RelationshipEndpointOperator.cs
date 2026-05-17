@@ -7,8 +7,8 @@ namespace Quiver.Operators;
 /// GC-1: resolves a relationship-id column into a node-id column by looking
 /// up the requested endpoint (source / target / "other" relative to the
 /// inbound traversal direction). Implements Gremlin's <c>.outV()</c> /
-/// <c>.inV()</c> / <c>.otherV()</c> steps when chained after <c>.OutE()</c>
-/// / <c>.InE()</c> / <c>.BothE()</c>.
+/// <c>.inV()</c> / <c>.otherV()</c> steps when chained after
+/// <c>.OutRelationships()</c> / <c>.InRelationships()</c> / <c>.BothRelationships()</c>.
 /// </summary>
 /// <remarks>
 /// For <see cref="RelationshipEndpoint.Other"/> we don't know which side of

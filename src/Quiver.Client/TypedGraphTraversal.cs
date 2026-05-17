@@ -51,12 +51,12 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     public GraphTraversal<NodeId> Both<TRel>() where TRel : IGraphRelationship<TRel>
         => _inner.Both<TRel>();
 
-    public GraphTraversal<RelationshipId> OutE(string? type = null)  => _inner.OutE(type);
-    public GraphTraversal<RelationshipId> OutE<TRel>() where TRel : IGraphRelationship<TRel> => _inner.OutE<TRel>();
-    public GraphTraversal<RelationshipId> InE(string? type = null)   => _inner.InE(type);
-    public GraphTraversal<RelationshipId> InE<TRel>() where TRel : IGraphRelationship<TRel>  => _inner.InE<TRel>();
-    public GraphTraversal<RelationshipId> BothE(string? type = null) => _inner.BothE(type);
-    public GraphTraversal<RelationshipId> BothE<TRel>() where TRel : IGraphRelationship<TRel> => _inner.BothE<TRel>();
+    public GraphTraversal<RelationshipId> OutRelationships(string? type = null)  => _inner.OutRelationships(type);
+    public GraphTraversal<RelationshipId> OutRelationships<TRel>() where TRel : IGraphRelationship<TRel> => _inner.OutRelationships<TRel>();
+    public GraphTraversal<RelationshipId> InRelationships(string? type = null)   => _inner.InRelationships(type);
+    public GraphTraversal<RelationshipId> InRelationships<TRel>() where TRel : IGraphRelationship<TRel>  => _inner.InRelationships<TRel>();
+    public GraphTraversal<RelationshipId> BothRelationships(string? type = null) => _inner.BothRelationships(type);
+    public GraphTraversal<RelationshipId> BothRelationships<TRel>() where TRel : IGraphRelationship<TRel> => _inner.BothRelationships<TRel>();
 
     public GraphTraversal<string> Values(string key) => _inner.Values(key);
 

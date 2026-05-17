@@ -1,4 +1,4 @@
-﻿using Quiver;
+using Quiver;
 using Quiver.Client;
 using Quiver.Client.Match;
 using Quiver.Core;
@@ -416,22 +416,22 @@ static void Demo9_GremlinAndMatch(string dir)
     Console.WriteLine($"  Created nodes: alice={alice.Value}, bob={bob.Value}, carol={carol.Value}");
 
     // ── 型なしトラバーサル ─────────────────────────────────────────────
-    var names = g.V().HasLabel("Person").Has("Age", P.Gt(25L)).Values("Name").ToList();
+    var names = g.Nodes().HasLabel("Person").Has("Age", P.Gt(25L)).Values("Name").ToList();
     Console.WriteLine($"  Age > 25 の Person: [{string.Join(", ", names)}]");
 
-    var aliceFriends = g.V(alice).Out("KNOWS").Values("Name").ToList();
+    var aliceFriends = g.Node(alice).Out("KNOWS").Values("Name").ToList();
     Console.WriteLine($"  Alice の KNOWS 先: [{string.Join(", ", aliceFriends)}]");
 
-    var knowsCount = g.V().HasLabel("Person").OutE("KNOWS").Count();
+    var knowsCount = g.Nodes().HasLabel("Person").OutRelationships("KNOWS").Count();
     Console.WriteLine($"  KNOWS エッジ数: {knowsCount}");
 
-    // ── 型付きトラバーサル g.V<T>() + expression-based Has ──────────────
-    var people = g.V<Person>()
+    // ── 型付きトラバーサル g.Nodes<T>() + expression-based Has ──────────────
+    var people = g.Nodes<Person>()
                   .Has(p => p.Age, P.Gt(25L))
                   .ToList();
     Console.WriteLine($"  V<Person>().Has(p=>p.Age, Gt(25)): [{string.Join(", ", people.Select(p => p.Name))}]");
 
-    var peopleWithIds = g.V<Person>()
+    var peopleWithIds = g.Nodes<Person>()
                          .Has(p => p.Name, "Alice")
                          .ToListWithIds();
     Console.WriteLine($"  V<Person>().Has(p=>p.Name,\"Alice\"): id={peopleWithIds[0].Id.Value}, name={peopleWithIds[0].Entity.Name}");

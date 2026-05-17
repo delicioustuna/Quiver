@@ -60,7 +60,7 @@ public sealed class GremlinCompatGc6Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var ids = g.V().HasLabel("Person").Has("name", "Alice").As("a").Select("a").ToList();
+        var ids = g.Nodes().HasLabel("Person").Has("name", "Alice").As("a").Select("a").ToList();
 
         ids.Should().ContainSingle().Which.Should().Be(alice);
     }
@@ -74,7 +74,7 @@ public sealed class GremlinCompatGc6Tests : IDisposable
 
         // Pin "a"=Alice, walk to her friends, then ask for "a" again — should
         // recover Alice once per outgoing edge (2 friends → 2 occurrences).
-        var aliceCopies = g.V().HasLabel("Person").Has("name", "Alice").As("a")
+        var aliceCopies = g.Nodes().HasLabel("Person").Has("name", "Alice").As("a")
             .Out("KNOWS")
             .Select("a")
             .ToList();
@@ -90,7 +90,7 @@ public sealed class GremlinCompatGc6Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var pairs = g.V().HasLabel("Person").Has("name", "Alice").As("a")
+        var pairs = g.Nodes().HasLabel("Person").Has("name", "Alice").As("a")
             .Out("KNOWS").As("b")
             .Select(t => (Source: t.Node("a"), Friend: t.Node("b")));
 
@@ -110,7 +110,7 @@ public sealed class GremlinCompatGc6Tests : IDisposable
         var g = rtx.G(_db.Schema);
 
         // Bob is the only friend named "Bob" — Has() must not drop carried "a".
-        var pairs = g.V().HasLabel("Person").Has("name", "Alice").As("a")
+        var pairs = g.Nodes().HasLabel("Person").Has("name", "Alice").As("a")
             .Out("KNOWS").Has("name", "Bob").As("b")
             .Select(t => (a: t.Node("a"), b: t.Node("b")));
 
@@ -126,7 +126,7 @@ public sealed class GremlinCompatGc6Tests : IDisposable
 
         // Alice -> Bob -> Dave. After two hops "a"=Alice and "b"=Bob must
         // still resolve correctly alongside the current entity (Dave).
-        var triples = g.V().HasLabel("Person").Has("name", "Alice").As("a")
+        var triples = g.Nodes().HasLabel("Person").Has("name", "Alice").As("a")
             .Out("KNOWS").As("b")
             .Out("KNOWS").As("c")
             .Select(t => (a: t.Node("a"), b: t.Node("b"), c: t.Node("c")));
@@ -144,7 +144,7 @@ public sealed class GremlinCompatGc6Tests : IDisposable
         // After Out("KNOWS"), .Select("a") re-aims back at Alice; .Out("KNOWS")
         // from there should re-walk her two friends. Once for each upstream
         // row, so 2 friends × 2 upstream rows = 4 rows.
-        var friendsOfA = g.V().HasLabel("Person").Has("name", "Alice").As("a")
+        var friendsOfA = g.Nodes().HasLabel("Person").Has("name", "Alice").As("a")
             .Out("KNOWS")
             .Select("a")
             .Out("KNOWS")
@@ -160,7 +160,7 @@ public sealed class GremlinCompatGc6Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var act = () => g.V().HasLabel("Person").As("a").Select("zzz").ToList();
+        var act = () => g.Nodes().HasLabel("Person").As("a").Select("zzz").ToList();
 
         act.Should().Throw<InvalidOperationException>()
            .WithMessage("*zzz*");
@@ -176,9 +176,9 @@ public sealed class GremlinCompatGc6Tests : IDisposable
         // Pin source node "a", capture edge as "r", terminate on the neighbor.
         // OutE keeps rel@0 / neighbor@1, so carry should preserve "a" at the
         // tail and let .Select recover both Alice and the relationship id.
-        var bobEdge = g.V().HasLabel("Person").Has("name", "Alice").As("a")
-            .OutE("KNOWS").As("r")
-            .InV().ToList();
+        var bobEdge = g.Nodes().HasLabel("Person").Has("name", "Alice").As("a")
+            .OutRelationships("KNOWS").As("r")
+            .TargetNode().ToList();
 
         // Sanity: the InV step itself produces 2 neighbors (Bob and Carol).
         bobEdge.Should().HaveCount(2);

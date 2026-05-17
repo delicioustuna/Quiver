@@ -50,8 +50,8 @@ public sealed class GremlinCompatGc3Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        g.V().HasLabel("Person").Sum("age").Should().Be(95);
-        g.V().HasLabel("Person").SumLong("age").Should().Be(95);
+        g.Nodes().HasLabel("Person").Sum("age").Should().Be(95);
+        g.Nodes().HasLabel("Person").SumLong("age").Should().Be(95);
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public sealed class GremlinCompatGc3Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        g.V().HasLabel("Person").Sum("age").Should().Be(70);
+        g.Nodes().HasLabel("Person").Sum("age").Should().Be(70);
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public sealed class GremlinCompatGc3Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        g.V().HasLabel("Person").Sum("height").Should().BeApproximately(3.5, 1e-9);
+        g.Nodes().HasLabel("Person").Sum("height").Should().BeApproximately(3.5, 1e-9);
     }
 
     [Fact]
@@ -98,9 +98,9 @@ public sealed class GremlinCompatGc3Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        g.V().HasLabel("Person").Max("age").Should().Be(40);
-        g.V().HasLabel("Person").Min("age").Should().Be(25);
-        g.V().HasLabel("Person").Mean("age").Should().BeApproximately(95.0 / 3.0, 1e-9);
+        g.Nodes().HasLabel("Person").Max("age").Should().Be(40);
+        g.Nodes().HasLabel("Person").Min("age").Should().Be(25);
+        g.Nodes().HasLabel("Person").Mean("age").Should().BeApproximately(95.0 / 3.0, 1e-9);
     }
 
     [Fact]
@@ -114,10 +114,10 @@ public sealed class GremlinCompatGc3Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        g.V().HasLabel("Person").Sum("age").Should().Be(0.0);
-        g.V().HasLabel("Person").Max("age").Should().BeNull();
-        g.V().HasLabel("Person").Min("age").Should().BeNull();
-        g.V().HasLabel("Person").Mean("age").Should().BeNull();
+        g.Nodes().HasLabel("Person").Sum("age").Should().Be(0.0);
+        g.Nodes().HasLabel("Person").Max("age").Should().BeNull();
+        g.Nodes().HasLabel("Person").Min("age").Should().BeNull();
+        g.Nodes().HasLabel("Person").Mean("age").Should().BeNull();
     }
 
     [Fact]
@@ -134,7 +134,7 @@ public sealed class GremlinCompatGc3Tests : IDisposable
         var g = rtx.G(_db.Schema);
 
         // Sort by age ascending, then read back the names in that order.
-        var names = g.V().HasLabel("Person").OrderBy("age").Values("name").ToList();
+        var names = g.Nodes().HasLabel("Person").OrderBy("age").Values("name").ToList();
         names.Should().Equal("Bob", "Alice", "Carol");
     }
 
@@ -151,7 +151,7 @@ public sealed class GremlinCompatGc3Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var names = g.V().HasLabel("Person").OrderByDescending("age").Values("name").ToList();
+        var names = g.Nodes().HasLabel("Person").OrderByDescending("age").Values("name").ToList();
         names.Should().Equal("Carol", "Alice", "Bob");
     }
 
@@ -167,7 +167,7 @@ public sealed class GremlinCompatGc3Tests : IDisposable
         var g = rtx.G(_db.Schema);
 
         // Top-3 oldest: ages 90, 80, 70 -> P9, P8, P7
-        var top3 = g.V().HasLabel("Person").OrderByDescending("age").Limit(3).Values("name").ToList();
+        var top3 = g.Nodes().HasLabel("Person").OrderByDescending("age").Limit(3).Values("name").ToList();
         top3.Should().Equal("P9", "P8", "P7");
     }
 
@@ -184,7 +184,7 @@ public sealed class GremlinCompatGc3Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var names = g.V().HasLabel("Person").OrderBy("name").Values("name").ToList();
+        var names = g.Nodes().HasLabel("Person").OrderBy("name").Values("name").ToList();
         names.Should().Equal("Alice", "Bob", "Charlie");
     }
 
@@ -201,7 +201,7 @@ public sealed class GremlinCompatGc3Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var names = g.V().HasLabel("Person").OrderBy("age").Values("name").ToList();
+        var names = g.Nodes().HasLabel("Person").OrderBy("age").Values("name").ToList();
         // Null slots are compared after non-null regardless of direction.
         names.Should().Equal("Carol", "Alice", "Bob");
     }
@@ -219,7 +219,7 @@ public sealed class GremlinCompatGc3Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var ids = g.V().HasLabel("Person").Order().Id().ToList();
+        var ids = g.Nodes().HasLabel("Person").Order().Id().ToList();
         ids.Should().Equal(first.Value, second.Value);
     }
 
@@ -237,7 +237,7 @@ public sealed class GremlinCompatGc3Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var counts = g.V().HasLabel("Person").GroupCount("city");
+        var counts = g.Nodes().HasLabel("Person").GroupCount("city");
         counts["Tokyo"].Should().Be(2);
         counts["Osaka"].Should().Be(1);
         counts.Should().NotContainKey("");
@@ -256,8 +256,8 @@ public sealed class GremlinCompatGc3Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var asList = g.V().HasLabel("Person").Values("name").ToList();
-        var asFold = g.V().HasLabel("Person").Values("name").Fold();
+        var asList = g.Nodes().HasLabel("Person").Values("name").ToList();
+        var asFold = g.Nodes().HasLabel("Person").Values("name").Fold();
         asFold.Should().Equal(asList);
     }
 }

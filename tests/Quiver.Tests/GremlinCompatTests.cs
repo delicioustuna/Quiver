@@ -48,7 +48,7 @@ public sealed class GremlinCompatTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var withAge = g.V().HasLabel("Person").Has("age").ToList();
+        var withAge = g.Nodes().HasLabel("Person").Has("age").ToList();
         withAge.Should().HaveCount(1);
     }
 
@@ -65,7 +65,7 @@ public sealed class GremlinCompatTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var ageless = g.V().HasLabel("Person").HasNot("age").ToList();
+        var ageless = g.Nodes().HasLabel("Person").HasNot("age").ToList();
         ageless.Should().HaveCount(2);
     }
 
@@ -80,9 +80,9 @@ public sealed class GremlinCompatTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        g.V().HasLabel("Person").Limit(3).ToList().Should().HaveCount(3);
-        g.V().HasLabel("Person").Skip(7).ToList().Should().HaveCount(3);
-        g.V().HasLabel("Person").Range(2, 5).ToList().Should().HaveCount(3);
+        g.Nodes().HasLabel("Person").Limit(3).ToList().Should().HaveCount(3);
+        g.Nodes().HasLabel("Person").Skip(7).ToList().Should().HaveCount(3);
+        g.Nodes().HasLabel("Person").Range(2, 5).ToList().Should().HaveCount(3);
     }
 
     [Fact]
@@ -96,8 +96,8 @@ public sealed class GremlinCompatTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        g.V().HasLabel("Person").HasNext().Should().BeTrue();
-        g.V().HasLabel("Missing").HasNext().Should().BeFalse();
+        g.Nodes().HasLabel("Person").HasNext().Should().BeTrue();
+        g.Nodes().HasLabel("Missing").HasNext().Should().BeFalse();
     }
 
     [Fact]
@@ -112,7 +112,7 @@ public sealed class GremlinCompatTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var labels = g.V().Label().ToList();
+        var labels = g.Nodes().Label().ToList();
         labels.Should().Contain("Person").And.Contain("Company");
     }
 
@@ -130,7 +130,7 @@ public sealed class GremlinCompatTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var ids = g.V().HasLabel("Person").Id().ToList();
+        var ids = g.Nodes().HasLabel("Person").Id().ToList();
         ids.Should().Contain(firstId).And.HaveCount(2);
     }
 
@@ -148,8 +148,8 @@ public sealed class GremlinCompatTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var sources = g.V(alice).OutE("KNOWS").OutV().ToList();
-        var targets = g.V(alice).OutE("KNOWS").InV().ToList();
+        var sources = g.Node(alice).OutRelationships("KNOWS").SourceNode().ToList();
+        var targets = g.Node(alice).OutRelationships("KNOWS").TargetNode().ToList();
 
         sources.Should().ContainSingle().Which.Value.Should().Be(alice.Value);
         targets.Should().ContainSingle().Which.Value.Should().Be(bob.Value);
@@ -168,7 +168,7 @@ public sealed class GremlinCompatTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var notAlice = g.V().HasLabel("Person")
+        var notAlice = g.Nodes().HasLabel("Person")
             .Has("name", P.Without("Alice", "Bob"))
             .ToList();
         notAlice.Should().HaveCount(1);
@@ -187,7 +187,7 @@ public sealed class GremlinCompatTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var aliceNames = g.V().HasLabel("Person").Values("name").Is("Alice").ToList();
+        var aliceNames = g.Nodes().HasLabel("Person").Values("name").Is("Alice").ToList();
         aliceNames.Should().ContainSingle().Which.Should().Be("Alice");
     }
 }

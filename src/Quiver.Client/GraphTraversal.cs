@@ -134,16 +134,16 @@ public sealed class GraphTraversal<T>
         return new GraphTraversal<NodeId>(_tx, _schema, expand, row => row.GetNodeId(0), 0, newAliases);
     }
 
-    public GraphTraversal<RelationshipId> OutE(string? type = null) => ExpandE(Direction.Outgoing, type);
-    public GraphTraversal<RelationshipId> OutE<TRel>() where TRel : IGraphRelationship<TRel> => OutE(TRel.GraphType);
+    public GraphTraversal<RelationshipId> OutRelationships(string? type = null) => ExpandRelationship(Direction.Outgoing, type);
+    public GraphTraversal<RelationshipId> OutRelationships<TRel>() where TRel : IGraphRelationship<TRel> => OutRelationships(TRel.GraphType);
 
-    public GraphTraversal<RelationshipId> InE(string? type = null) => ExpandE(Direction.Incoming, type);
-    public GraphTraversal<RelationshipId> InE<TRel>() where TRel : IGraphRelationship<TRel> => InE(TRel.GraphType);
+    public GraphTraversal<RelationshipId> InRelationships(string? type = null) => ExpandRelationship(Direction.Incoming, type);
+    public GraphTraversal<RelationshipId> InRelationships<TRel>() where TRel : IGraphRelationship<TRel> => InRelationships(TRel.GraphType);
 
-    public GraphTraversal<RelationshipId> BothE(string? type = null) => ExpandE(Direction.Both, type);
-    public GraphTraversal<RelationshipId> BothE<TRel>() where TRel : IGraphRelationship<TRel> => BothE(TRel.GraphType);
+    public GraphTraversal<RelationshipId> BothRelationships(string? type = null) => ExpandRelationship(Direction.Both, type);
+    public GraphTraversal<RelationshipId> BothRelationships<TRel>() where TRel : IGraphRelationship<TRel> => BothRelationships(TRel.GraphType);
 
-    private GraphTraversal<RelationshipId> ExpandE(Direction direction, string? type)
+    private GraphTraversal<RelationshipId> ExpandRelationship(Direction direction, string? type)
     {
         if (_aliases is null)
         {
@@ -152,14 +152,14 @@ public sealed class GraphTraversal<T>
         }
 
         // NeighborAndRel emits 2 cols (rel@0, neighbor@1). The "current" column
-        // for chained .OutV()/.InV() stays at 0 (rel), so carries start at 2.
+        // for chained .SourceNode()/.TargetNode() stays at 0 (rel), so carries start at 2.
         var (carry, newAliases) = RemapForExpand(baseColumnCount: 2);
         var e = new ExpandBuilder(_builder, direction, type, ExpandOutputMode.NeighborAndRel, carry, sourceColumnOverride: _entityColumn);
         return new GraphTraversal<RelationshipId>(_tx, _schema, e, row => row.GetRelationshipId(0), 0, newAliases);
     }
 
     /// <summary>
-    /// GC-6: shared helper for Out/In/Both/OutE/InE/BothE. Returns the
+    /// GC-6: shared helper for Out/In/Both and OutRelationships/InRelationships/BothRelationships. Returns the
     /// sorted-distinct upstream column list to carry plus the rewritten alias
     /// map pointing at the new tail positions.
     /// </summary>
@@ -348,7 +348,7 @@ public sealed class GraphTraversal<T>
     // ── GC-1: edge endpoint resolution ──────────────────────────────────────
 
     /// <summary>GC-1: Gremlin <c>.outV()</c> — resolve to the source node of the current edge.</summary>
-    public GraphTraversal<NodeId> OutV()
+    public GraphTraversal<NodeId> SourceNode()
     {
         // RelationshipEndpointOperator emits a single-NodeId tuple, discarding
         // upstream — so any live aliases would be lost. Drop them silently;
@@ -358,14 +358,14 @@ public sealed class GraphTraversal<T>
     }
 
     /// <summary>GC-1: Gremlin <c>.inV()</c> — resolve to the target node of the current edge.</summary>
-    public GraphTraversal<NodeId> InV()
+    public GraphTraversal<NodeId> TargetNode()
     {
         var rep = new RelationshipEndpointBuilder(_builder, _entityColumn, RelationshipEndpoint.Target);
         return new GraphTraversal<NodeId>(_tx, _schema, rep, row => row.GetNodeId(0), 0);
     }
 
     /// <summary>GC-1: Gremlin <c>.otherV()</c> — resolve to the "far" endpoint relative to the entry direction.</summary>
-    public GraphTraversal<NodeId> OtherV()
+    public GraphTraversal<NodeId> OtherNode()
     {
         var rep = new RelationshipEndpointBuilder(_builder, _entityColumn, RelationshipEndpoint.Other);
         return new GraphTraversal<NodeId>(_tx, _schema, rep, row => row.GetNodeId(0), 0);
@@ -565,12 +565,12 @@ public sealed class GraphTraversal<T>
     /// <summary>
     /// GC-6: Gremlin <c>.as("label")</c> — pin the current entity column under
     /// <paramref name="label"/> so a downstream <see cref="Select(string)"/>
-    /// can recover it. Subsequent <c>Out</c>/<c>In</c>/<c>Both</c>/<c>OutE</c>/<c>InE</c>/<c>BothE</c>
+    /// can recover it. Subsequent <c>Out</c>/<c>In</c>/<c>Both</c>/<c>OutRelationships</c>/<c>InRelationships</c>/<c>BothRelationships</c>
     /// steps copy the pinned column through (carried in the operator's tail
     /// tuple slots), so memory grows with the alias count × output rows.
     ///
     /// Limitations: Repeat / ShortestPathTo / Union / Coalesce / Optional /
-    /// OutV/InV/OtherV / FilterByKnn rebuild the tuple shape and silently drop
+    /// SourceNode/TargetNode/OtherNode / FilterByKnn rebuild the tuple shape and silently drop
     /// aliases. Re-bind with <c>.As</c> downstream of those steps if needed.
     /// </summary>
     public GraphTraversal<T> As(string label)
@@ -607,7 +607,7 @@ public sealed class GraphTraversal<T>
     /// </summary>
     /// <example>
     /// <code>
-    /// var pairs = g.V().As("a").Out("KNOWS").As("b")
+    /// var pairs = g.Nodes().As("a").Out("KNOWS").As("b")
     ///     .Select(t => (t.Node("a"), t.Node("b")));
     /// </code>
     /// </example>

@@ -49,7 +49,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var aPrefix = g.V().HasLabel("Person").Has("name", P.StartsWith("Al")).ToList();
+        var aPrefix = g.Nodes().HasLabel("Person").Has("name", P.StartsWith("Al")).ToList();
         aPrefix.Should().HaveCount(2);
     }
 
@@ -66,7 +66,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var iceSuffix = g.V().HasLabel("Person").Has("name", P.EndsWith("ice")).ToList();
+        var iceSuffix = g.Nodes().HasLabel("Person").Has("name", P.EndsWith("ice")).ToList();
         iceSuffix.Should().ContainSingle();
     }
 
@@ -83,7 +83,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var li = g.V().HasLabel("Person").Has("name", P.Contains("li")).ToList();
+        var li = g.Nodes().HasLabel("Person").Has("name", P.Contains("li")).ToList();
         li.Should().HaveCount(2);
     }
 
@@ -100,7 +100,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var aStar = g.V().HasLabel("Person").Has("name", P.Regex("^Al.*")).ToList();
+        var aStar = g.Nodes().HasLabel("Person").Has("name", P.Regex("^Al.*")).ToList();
         aStar.Should().HaveCount(2);
     }
 
@@ -117,7 +117,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var notAlice = g.V().HasLabel("Person").Has("name", P.Not(P.Eq("Alice"))).ToList();
+        var notAlice = g.Nodes().HasLabel("Person").Has("name", P.Not(P.Eq("Alice"))).ToList();
         notAlice.Should().HaveCount(2);
     }
 
@@ -136,7 +136,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var notThirty = g.V().HasLabel("Person").Has("age", P.Not(P.Eq(30))).ToList();
+        var notThirty = g.Nodes().HasLabel("Person").Has("age", P.Not(P.Eq(30))).ToList();
         notThirty.Should().HaveCount(1);
     }
 
@@ -154,7 +154,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         var g = rtx.G(_db.Schema);
 
         // half-open range [20, 40) on age
-        var inRange = g.V().HasLabel("Person").Has("age", P.And(P.Gte(20), P.Lt(40))).ToList();
+        var inRange = g.Nodes().HasLabel("Person").Has("age", P.And(P.Gte(20), P.Lt(40))).ToList();
         inRange.Should().HaveCount(2);
     }
 
@@ -171,7 +171,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var alOrBo = g.V().HasLabel("Person")
+        var alOrBo = g.Nodes().HasLabel("Person")
             .Has("name", P.Or(P.StartsWith("Al"), P.StartsWith("Bo")))
             .ToList();
         alOrBo.Should().HaveCount(2);
@@ -194,7 +194,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         var g = rtx.G(_db.Schema);
 
         // matches Alice (KNOWS edge) and Carol (title=VIP); Bob has neither
-        var either = g.V().HasLabel("Person")
+        var either = g.Nodes().HasLabel("Person")
             .Or(t => t.Out("KNOWS"),
                t => t.Has("title", "VIP"))
             .ToList();
@@ -218,7 +218,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         var g = rtx.G(_db.Schema);
 
         // Only Alice has both an outgoing KNOWS edge AND an age property.
-        var both = g.V().HasLabel("Person")
+        var both = g.Nodes().HasLabel("Person")
             .And(t => t.Out("KNOWS"),
                  t => t.Has("age", P.Gte(0)))
             .ToList();
@@ -237,7 +237,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        g.V().HasLabel("Person").IsNull("age").ToList().Should().HaveCount(1);
-        g.V().HasLabel("Person").IsNotNull("age").ToList().Should().HaveCount(1);
+        g.Nodes().HasLabel("Person").IsNull("age").ToList().Should().HaveCount(1);
+        g.Nodes().HasLabel("Person").IsNotNull("age").ToList().Should().HaveCount(1);
     }
 }

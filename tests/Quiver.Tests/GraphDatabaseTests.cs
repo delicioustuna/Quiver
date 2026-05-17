@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using Quiver.Client;
 using Quiver.Core;
 using Quiver.Operators;
@@ -366,7 +366,7 @@ public sealed class GraphDatabaseTests : IDisposable
         tx.CreateRelationship(alice, bob, "KNOWS");
 
         var g = tx.G(_db.Schema);
-        var neighbors = g.V(alice).Out<KnowsRel>().ToList();
+        var neighbors = g.Node(alice).Out<KnowsRel>().ToList();
 
         neighbors.Should().ContainSingle().Which.Should().Be(bob);
         tx.Rollback();
@@ -381,7 +381,7 @@ public sealed class GraphDatabaseTests : IDisposable
         tx.CreateRelationship(alice, bob, "KNOWS");
 
         var g = tx.G(_db.Schema);
-        var neighbors = g.V(bob).In<KnowsRel>().ToList();
+        var neighbors = g.Node(bob).In<KnowsRel>().ToList();
 
         neighbors.Should().ContainSingle().Which.Should().Be(alice);
         tx.Rollback();
@@ -396,7 +396,7 @@ public sealed class GraphDatabaseTests : IDisposable
         tx.CreateRelationship(alice, bob, "KNOWS");
 
         var g = tx.G(_db.Schema);
-        var neighbors = g.V<PersonNode>().Out<KnowsRel>().ToList();
+        var neighbors = g.Nodes<PersonNode>().Out<KnowsRel>().ToList();
 
         neighbors.Should().Contain(bob);
         tx.Rollback();
@@ -413,7 +413,7 @@ public sealed class GraphDatabaseTests : IDisposable
         var rel   = tx.CreateRelationship(alice, bob, "KNOWS");
 
         var g    = tx.G(_db.Schema);
-        var rels = g.V(alice).OutE<KnowsRel>().ToList();
+        var rels = g.Node(alice).OutRelationships<KnowsRel>().ToList();
 
         rels.Should().ContainSingle().Which.Should().Be(rel);
         tx.Rollback();
@@ -428,7 +428,7 @@ public sealed class GraphDatabaseTests : IDisposable
         var rel   = tx.CreateRelationship(alice, bob, "KNOWS");
 
         var g    = tx.G(_db.Schema);
-        var rels = g.V(bob).InE<KnowsRel>().ToList();
+        var rels = g.Node(bob).InRelationships<KnowsRel>().ToList();
 
         rels.Should().ContainSingle().Which.Should().Be(rel);
         tx.Rollback();
@@ -443,8 +443,8 @@ public sealed class GraphDatabaseTests : IDisposable
         var rel   = tx.CreateRelationship(alice, bob, "KNOWS");
 
         var g    = tx.G(_db.Schema);
-        var fromAlice = g.V(alice).BothE<KnowsRel>().ToList();
-        var fromBob   = g.V(bob).BothE<KnowsRel>().ToList();
+        var fromAlice = g.Node(alice).BothRelationships<KnowsRel>().ToList();
+        var fromBob   = g.Node(bob).BothRelationships<KnowsRel>().ToList();
 
         fromAlice.Should().ContainSingle().Which.Should().Be(rel);
         fromBob.Should().ContainSingle().Which.Should().Be(rel);
@@ -460,7 +460,7 @@ public sealed class GraphDatabaseTests : IDisposable
         var rel   = KnowsRel.Insert(tx, alice, bob, new KnowsRel { Since = 2020 });
 
         var g    = tx.G(_db.Schema);
-        var rels = g.V<PersonNode>().OutE<KnowsRel>().ToList();
+        var rels = g.Nodes<PersonNode>().OutRelationships<KnowsRel>().ToList();
 
         rels.Should().Contain(rel);
         tx.Rollback();
@@ -476,7 +476,7 @@ public sealed class GraphDatabaseTests : IDisposable
         PersonNode.Insert(tx, new PersonNode { Name = "Bob" });
 
         var g     = tx.G(_db.Schema);
-        var names = g.V<PersonNode>().Values(p => p.Name).ToList();
+        var names = g.Nodes<PersonNode>().Values(p => p.Name).ToList();
 
         names.Should().Contain("Alice").And.Contain("Bob");
         tx.Rollback();
@@ -660,7 +660,7 @@ public sealed class GraphDatabaseTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
         int count = 0;
-        foreach (var _ in g.V().HasLabel("Person").AsEnumerable())
+        foreach (var _ in g.Nodes().HasLabel("Person").AsEnumerable())
             count++;
         rtx.Rollback();
 
@@ -681,7 +681,7 @@ public sealed class GraphDatabaseTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
         var names = new List<string>();
-        using (var cursor = g.V().HasLabel("Counter").Values("n").AsCursor())
+        using (var cursor = g.Nodes().HasLabel("Counter").Values("n").AsCursor())
         {
             while (cursor.MoveNext())
                 names.Add(cursor.Current);
@@ -733,7 +733,7 @@ public sealed class GraphDatabaseTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var results = g.V().HasLabel("Person")
+        var results = g.Nodes().HasLabel("Person")
                           .Where(t => t.Out("KNOWS"))
                           .ToList();
 
@@ -754,7 +754,7 @@ public sealed class GraphDatabaseTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var results = g.V().HasLabel("Person")
+        var results = g.Nodes().HasLabel("Person")
                           .Not(t => t.Out("KNOWS"))
                           .ToList();
 
@@ -783,7 +783,7 @@ public sealed class GraphDatabaseTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var results = g.V().HasLabel("Person")
+        var results = g.Nodes().HasLabel("Person")
                           .Where(t => t.Out("KNOWS").Has("name", "Bob"))
                           .ToList();
 
@@ -809,7 +809,7 @@ public sealed class GraphDatabaseTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var results = g.V().HasLabel("Item")
+        var results = g.Nodes().HasLabel("Item")
                           .Where(t => t.Out("LINKS"))
                           .ToList();
 

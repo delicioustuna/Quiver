@@ -8,7 +8,7 @@ namespace Quiver.Tests;
 /// <summary>
 /// VEC-6 coverage: filtered KNN (graph-first) and the optimizer's
 /// vector-first / graph-first strategy choice. Verifies:
-/// (a) <c>g.V().HasLabel(L).FilterByKnn(...)</c> returns the correct
+/// (a) <c>g.Nodes().HasLabel(L).FilterByKnn(...)</c> returns the correct
 ///     intersection of label set ∩ top-k,
 /// (b) <c>QueryOptimizer.ChooseKnnStrategy</c> picks graph-first for a small
 ///     frontier and vector-first for a large frontier,
@@ -74,7 +74,7 @@ public sealed class FilteredKnnTests : IDisposable
         var g = rtx.G(_db.Schema);
 
         var query = new float[] { 1f, 0f, 0f, 0f };
-        var topDocs = g.V().HasLabel("Doc")
+        var topDocs = g.Nodes().HasLabel("Doc")
             .FilterByKnn(IndexName, query, k: 2)
             .ToList();
 
@@ -100,7 +100,7 @@ public sealed class FilteredKnnTests : IDisposable
 
         // No nodes carry the label "Missing" → candidate set is empty →
         // KnnSearchFiltered must short-circuit, not throw or return Docs.
-        var result = g.V().HasLabel("Missing")
+        var result = g.Nodes().HasLabel("Missing")
             .FilterByKnn(IndexName, new float[] { 1, 0, 0, 0 }, k: 3)
             .ToList();
 
@@ -133,7 +133,7 @@ public sealed class FilteredKnnTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var result = g.V().HasLabel("Doc")
+        var result = g.Nodes().HasLabel("Doc")
             .FilterByKnn(IndexName, new float[] { 1, 0, 0, 0 }, k: 2)
             .ToList();
 

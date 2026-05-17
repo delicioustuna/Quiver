@@ -58,7 +58,7 @@ public sealed class GremlinCompatGc4Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var depth2 = g.V(a).Repeat(s => s.Out("KNOWS"), times: 2).ToList();
+        var depth2 = g.Node(a).Repeat(s => s.Out("KNOWS"), times: 2).ToList();
         depth2.Should().ContainSingle().Which.Value.Should().Be(c.Value);
     }
 
@@ -69,7 +69,7 @@ public sealed class GremlinCompatGc4Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var nodes = g.V(a).Repeat(s => s.Out("KNOWS"), times: 3, emit: true).ToList()
+        var nodes = g.Node(a).Repeat(s => s.Out("KNOWS"), times: 3, emit: true).ToList()
             .Select(n => n.Value).OrderBy(v => v).ToList();
         nodes.Should().BeEquivalentTo(new[] { b.Value, c.Value, d.Value });
     }
@@ -89,7 +89,7 @@ public sealed class GremlinCompatGc4Tests : IDisposable
         var g = rtx.G(_db.Schema);
 
         // 2 hops of KNOWS from a: only b reachable at depth 1, depth 2 is empty.
-        g.V(a).Repeat(s => s.Out("KNOWS"), times: 2).ToList().Should().BeEmpty();
+        g.Node(a).Repeat(s => s.Out("KNOWS"), times: 2).ToList().Should().BeEmpty();
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public sealed class GremlinCompatGc4Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        FluentActions.Invoking(() => g.V().Repeat(s => s.Out("KNOWS"), times: 0))
+        FluentActions.Invoking(() => g.Nodes().Repeat(s => s.Out("KNOWS"), times: 0))
             .Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -111,7 +111,7 @@ public sealed class GremlinCompatGc4Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        g.V(a).ShortestPathTo(d, type: "KNOWS").Next().Should().Be(3);
+        g.Node(a).ShortestPathTo(d, type: "KNOWS").Next().Should().Be(3);
     }
 
     [Fact]
@@ -132,12 +132,12 @@ public sealed class GremlinCompatGc4Tests : IDisposable
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var nodes = g.V().HasLabel("Person").Has("name", "A").ToList();
+        var nodes = g.Nodes().HasLabel("Person").Has("name", "A").ToList();
         nodes.Should().HaveCount(1);
         var src = nodes[0];
-        var dst = g.V().HasLabel("Person").Has("name", "D").ToList()[0];
+        var dst = g.Nodes().HasLabel("Person").Has("name", "D").ToList()[0];
 
-        g.V(src).ShortestPathTo(dst, type: "K").Next().Should().Be(2);
+        g.Node(src).ShortestPathTo(dst, type: "K").Next().Should().Be(2);
     }
 
     [Fact]
@@ -152,10 +152,10 @@ public sealed class GremlinCompatGc4Tests : IDisposable
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var a = g.V().HasLabel("Person").Has("name", "A").ToList()[0];
-        var z = g.V().HasLabel("Person").Has("name", "Z").ToList()[0];
+        var a = g.Nodes().HasLabel("Person").Has("name", "A").ToList()[0];
+        var z = g.Nodes().HasLabel("Person").Has("name", "Z").ToList()[0];
 
-        g.V(a).ShortestPathTo(z, type: "K").ToList().Should().BeEmpty();
+        g.Node(a).ShortestPathTo(z, type: "K").ToList().Should().BeEmpty();
     }
 
     // ── .Dedup ──────────────────────────────────────────────────────────────
@@ -176,10 +176,10 @@ public sealed class GremlinCompatGc4Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var raw = g.V().HasLabel("Person").Out("K").ToList();
+        var raw = g.Nodes().HasLabel("Person").Out("K").ToList();
         raw.Should().HaveCount(2); // c reached twice
 
-        var deduped = g.V().HasLabel("Person").Out("K").Dedup().ToList();
+        var deduped = g.Nodes().HasLabel("Person").Out("K").Dedup().ToList();
         deduped.Should().HaveCount(1);
     }
 
@@ -200,9 +200,9 @@ public sealed class GremlinCompatGc4Tests : IDisposable
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var a = g.V().HasLabel("Person").Has("name", "A").ToList()[0];
+        var a = g.Nodes().HasLabel("Person").Has("name", "A").ToList()[0];
 
-        var union = g.V(a)
+        var union = g.Node(a)
             .Union(
                 s => s.Out("KNOWS"),
                 s => s.In("KNOWS"))
@@ -227,9 +227,9 @@ public sealed class GremlinCompatGc4Tests : IDisposable
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var a = g.V().HasLabel("Person").Has("name", "A").ToList()[0];
+        var a = g.Nodes().HasLabel("Person").Has("name", "A").ToList()[0];
 
-        var coalesced = g.V(a)
+        var coalesced = g.Node(a)
             .Coalesce(
                 s => s.Out("LIKES"),    // empty
                 s => s.Out("KNOWS"))    // matches — used
@@ -253,10 +253,10 @@ public sealed class GremlinCompatGc4Tests : IDisposable
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var a = g.V().HasLabel("Person").Has("name", "A").ToList()[0];
+        var a = g.Nodes().HasLabel("Person").Has("name", "A").ToList()[0];
 
         // First branch (KNOWS) returns b — LIKES branch is never evaluated.
-        var coalesced = g.V(a)
+        var coalesced = g.Node(a)
             .Coalesce(
                 s => s.Out("KNOWS"),
                 s => s.Out("LIKES"))
@@ -273,7 +273,7 @@ public sealed class GremlinCompatGc4Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var rows = g.V(a).Optional(s => s.Out("KNOWS")).ToList();
+        var rows = g.Node(a).Optional(s => s.Out("KNOWS")).ToList();
         rows.Should().ContainSingle().Which.Value.Should().Be(b.Value);
     }
 
@@ -288,9 +288,9 @@ public sealed class GremlinCompatGc4Tests : IDisposable
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var lonely = g.V().HasLabel("Person").Has("name", "Lonely").ToList()[0];
+        var lonely = g.Nodes().HasLabel("Person").Has("name", "Lonely").ToList()[0];
 
-        var rows = g.V(lonely).Optional(s => s.Out("KNOWS")).ToList();
+        var rows = g.Node(lonely).Optional(s => s.Out("KNOWS")).ToList();
         rows.Should().ContainSingle().Which.Value.Should().Be(lonely.Value);
     }
 }

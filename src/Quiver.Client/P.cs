@@ -65,7 +65,7 @@ public static class P
 
     /// <summary>
     /// GC-2: same-key disjunction (e.g. <c>P.Or(P.StartsWith("Al"), P.StartsWith("Bo"))</c>).
-    /// For cross-key OR, use the traversal-level <c>g.V().Or(t1, t2)</c>.
+    /// For cross-key OR, use the traversal-level <c>g.Nodes().Or(t1, t2)</c>.
     /// </summary>
     public static PropertyPredicate Or(params PropertyPredicate[] predicates) => Compound(PredicateKind.Or, predicates);
 

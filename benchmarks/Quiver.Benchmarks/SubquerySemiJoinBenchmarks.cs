@@ -1,4 +1,4 @@
-﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Attributes;
 using Quiver;
 using Quiver.Client;
 using Quiver.Core;
@@ -60,14 +60,14 @@ public class SubquerySemiJoinBenchmarks
     public int BaselineScan()
     {
         var g = _readTx.G(_db.Schema);
-        return g.V().HasLabel("Person").ToList().Count;
+        return g.Nodes().HasLabel("Person").ToList().Count;
     }
 
     [Benchmark(Description = "Where(t => t.Out(KNOWS)) EXISTS filter")]
     public int WhereOutExists()
     {
         var g = _readTx.G(_db.Schema);
-        return g.V().HasLabel("Person")
+        return g.Nodes().HasLabel("Person")
                     .Where(t => t.Out("KNOWS"))
                     .ToList().Count;
     }
@@ -76,7 +76,7 @@ public class SubquerySemiJoinBenchmarks
     public int NotOutExists()
     {
         var g = _readTx.G(_db.Schema);
-        return g.V().HasLabel("Person")
+        return g.Nodes().HasLabel("Person")
                     .Not(t => t.Out("KNOWS"))
                     .ToList().Count;
     }

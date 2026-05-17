@@ -34,28 +34,28 @@ public sealed class GraphTraversalSource
     public void   Delete<T>(NodeId id)            where T : IGraphNode<T> => T.Delete(_tx, id);
 
     // ── スキャン起点 ─────────────────────────────────────────────────────────
-    public GraphTraversal<NodeId> V()
+    public GraphTraversal<NodeId> Nodes()
     {
         var builder = new ScanBuilder();
         return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0);
     }
 
-    public GraphTraversal<NodeId> V(NodeId nodeId)
+    public GraphTraversal<NodeId> Node(NodeId nodeId)
     {
         var builder = new SingleNodeBuilder(nodeId);
         return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0);
     }
 
-    public GraphTraversal<NodeId> V(params NodeId[] nodeIds)
+    public GraphTraversal<NodeId> Nodes(params NodeId[] nodeIds)
     {
         var builder = new MultiNodeBuilder(nodeIds);
         return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0);
     }
 
     // ── 型付きスキャン起点 ────────────────────────────────────────────────────
-    public TypedGraphTraversal<T> V<T>() where T : IGraphNode<T>
+    public TypedGraphTraversal<T> Nodes<T>() where T : IGraphNode<T>
     {
-        var inner = V().HasLabel(T.GraphLabel);
+        var inner = Nodes().HasLabel(T.GraphLabel);
         return new TypedGraphTraversal<T>(inner, _tx, _schema);
     }
 
