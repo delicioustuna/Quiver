@@ -11,7 +11,8 @@ string dir = Path.Combine(Path.GetTempPath(), "quiver_sourcegen_" + Guid.NewGuid
 try
 {
     using var db = GraphDatabase.Open(dir);
-    db.Schema.CreateIndex("idx_person_name", "Person", "Name", IndexKind.StringEquality);
+    // [GraphIndexed] 付き全プロパティのインデックスを SourceGenerator 生成情報から一括作成。
+    db.EnsureIndexes<Person>();
 
     // ── 1. 型付き Insert / Load / Update / Delete ──
     using (var tx = db.BeginTransaction())

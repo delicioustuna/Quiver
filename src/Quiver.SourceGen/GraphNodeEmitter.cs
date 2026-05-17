@@ -32,6 +32,17 @@ internal static class GraphNodeEmitter
         ["double"]  = "Quiver.Operators.LiteralProvider.Double(value)",
     };
 
+    // PW-18 follow-up: C# 型から既定の IndexKind を推論するマップ。
+    // [GraphIndexed] がここに無い型に付いた場合、EnsureIndexes / CreateIndex 経路は対象外。
+    private static readonly Dictionary<string, string> _indexKindMap = new()
+    {
+        ["string"]  = "Quiver.IndexKind.StringEquality",
+        ["string?"] = "Quiver.IndexKind.StringEquality",
+        ["int"]     = "Quiver.IndexKind.Int32Equality",
+        ["long"]    = "Quiver.IndexKind.Int64Equality",
+        ["double"]  = "Quiver.IndexKind.DoubleEquality",
+    };
+
     public static string Emit(GraphNodeModel model)
     {
         var sb = new StringBuilder();
@@ -54,8 +65,8 @@ internal static class GraphNodeEmitter
         var indexedProps = model.Properties.FindAll(p => p.IndexName != null);
         bool hasIndexed  = indexedProps.Count > 0;
 
-        // IGraphNode<T> 実装宣言
-        sb.AppendLine($"partial class {model.ClassName} : Quiver.Client.IGraphNode<{model.ClassName}>");
+        // IGraphNode<T> 実装宣言。PW-18 follow-up: スキーマ宣言用に IGraphNodeSchema<T> も実装する。
+        sb.AppendLine($"partial class {model.ClassName} : Quiver.Client.IGraphNode<{model.ClassName}>, Quiver.IGraphNodeSchema<{model.ClassName}>");
         sb.AppendLine("{");
         sb.AppendLine($"    public static string GraphLabel => \"{model.Label}\";");
         sb.AppendLine();
@@ -107,6 +118,37 @@ internal static class GraphNodeEmitter
 
         // Delete
         sb.AppendLine($"    public static void Delete(IGraphTransaction tx, Quiver.Core.NodeId id) => tx.DeleteNode(id);");
+
+        // PW-18 follow-up: EnsureIndexes — [GraphIndexed] 付き全プロパティ分の CreateIndex を発行
+        sb.AppendLine();
+        sb.AppendLine("    public static void EnsureIndexes(Quiver.ISchemaApi schema)");
+        sb.AppendLine("    {");
+        foreach (var prop in indexedProps)
+        {
+            if (!_indexKindMap.TryGetValue(prop.CSharpType, out var kindExpr)) continue;
+            sb.AppendLine(
+                $"        schema.CreateIndex(\"{prop.IndexName}\", \"{model.Label}\", \"{prop.GraphKey}\", {kindExpr});");
+        }
+        sb.AppendLine("    }");
+
+        // PW-18 follow-up: CreateIndex(propertyName, kindOverride?) — 単一プロパティ用
+        sb.AppendLine();
+        sb.AppendLine("    public static void CreateIndex(Quiver.ISchemaApi schema, string propertyName, Quiver.IndexKind? kindOverride)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        switch (propertyName)");
+        sb.AppendLine("        {");
+        foreach (var prop in indexedProps)
+        {
+            if (!_indexKindMap.TryGetValue(prop.CSharpType, out var kindExpr)) continue;
+            sb.AppendLine($"            case \"{prop.PropertyName}\":");
+            sb.AppendLine(
+                $"                schema.CreateIndex(\"{prop.IndexName}\", \"{model.Label}\", \"{prop.GraphKey}\", kindOverride ?? {kindExpr});");
+            sb.AppendLine("                return;");
+        }
+        sb.AppendLine("            default:");
+        sb.AppendLine($"                throw new System.ArgumentException(\"'\" + propertyName + \"' は {model.ClassName} で [GraphIndexed] が付与されたプロパティではありません。\");");
+        sb.AppendLine("        }");
+        sb.AppendLine("    }");
 
         // FindBy* — one method per [GraphIndexed] property
         foreach (var prop in indexedProps)
