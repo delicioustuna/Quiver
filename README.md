@@ -315,6 +315,8 @@ dotnet run --project sandbox/QuiverSandbox
 | 1-hop scan（degree 100、AdjacencyBlockStore） | < 0.5 µs |
 | BFS 2-hop（ハブ degree 100、2 段） | < 5 ms |
 
+**PW-18 (複雑/ネストクエリ regression sentinel)**: `HasLabel + Has + Out + Has + Where(sub) + Order + Limit` の 7 step チェーンが 10K Person / AvgDegree=8 で ~367 ms、`Union(3 branches)` は単一 Out の 2.7× (16 → 44 ms)、`As/Select<T>` carry-column は no-alias 比 ±3% 以内。詳細: `benchmarks/Quiver.Benchmarks/{FilterChainExpand,BranchedTraversal,AsSelectProjection,MergeWorkload,OptimizerPlanRegression}Benchmarks.cs`。
+
 ## 開発状況
 
 ### アーキテクチャ Wave
