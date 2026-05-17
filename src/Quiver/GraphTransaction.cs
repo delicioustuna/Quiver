@@ -99,34 +99,88 @@ internal sealed class GraphTransaction : IGraphTransaction
 
     // ========== MERGE (GC-5) ==========
 
+    // PW-18 follow-up: 「インデックス未登録」を初回 MergeNode 呼び出し時に一度だけ警告する。
+    // (label, propertyKey) 単位で重複抑制。プロセス共有で問題ない (誤検出より煩いログ抑制を優先)。
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string, string), byte>
+        _mergeFullscanWarned = new();
+
     public (NodeId Id, bool Created) MergeNode(string label, string matchKey, in PropertyValue matchValue)
     {
         var labelId = _labelTokens.GetOrCreate(label);
 
-        // バックエンドのアクセス経路を介してスキャン + 比較する。プロパティキーが
-        // 一度も観測されていない場合はスキャンを省略する — まだ発行されていないキーを
-        // ノードが保持することはあり得ないため、必ずミスになる。
-        if (_propKeyTokens.TryGet(matchKey, out var keyId))
+        // PW-18 follow-up: (label, matchKey) にインデックスが登録されていれば、
+        // SeekNodesByIndex で O(log n) シーク。なければ既存のフルスキャン経路へフォールバック。
+        if (_inner.Indexes.TryGetIndexName(label, matchKey, out var indexName))
         {
-            foreach (var nodeId in _inner.Access.ScanNodes(_inner, labelId))
+            foreach (var nodeId in _inner.Access.SeekNodesByIndex(_inner, indexName, matchValue))
             {
-                var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
-                if (!firstPropId.IsValid) continue;
-                var propEnum = _inner.Properties.Enumerate(firstPropId);
-                while (propEnum.MoveNext())
+                // インデックスには削除済みノードの古いエントリが残ることがあるので生存確認。
+                if (_inner.Nodes.Read(nodeId).InUse)
+                    return (nodeId, false);
+            }
+            // ヒット無し → 新規作成へ
+        }
+        else
+        {
+            // インデックス未登録: 既存のフルスキャン経路 (label スキャン + プロパティ比較)。
+            // プロパティキーが一度も観測されていない場合は確実にミスなのでスキャン省略。
+            if (_propKeyTokens.TryGet(matchKey, out var keyId))
+            {
+                if (_mergeFullscanWarned.TryAdd((label, matchKey), 0))
                 {
-                    var cur = propEnum.Current;
-                    if (cur.KeyId != keyId) continue;
-                    if (PropertyValueEqualityHelper.AreEqual(cur.Value, in matchValue))
-                        return (nodeId, false);
-                    break;
+                    System.Diagnostics.Trace.TraceWarning(
+                        "Quiver.MergeNode: (label='{0}', key='{1}') にインデックスが未登録のためフルスキャンに落ちました。" +
+                        " 'Schema.CreateIndex(name, label, propertyKey, kind)' で索引を作成すると O(log n) になります。",
+                        label, matchKey);
+                }
+                foreach (var nodeId in _inner.Access.ScanNodes(_inner, labelId))
+                {
+                    var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
+                    if (!firstPropId.IsValid) continue;
+                    var propEnum = _inner.Properties.Enumerate(firstPropId);
+                    while (propEnum.MoveNext())
+                    {
+                        var cur = propEnum.Current;
+                        if (cur.KeyId != keyId) continue;
+                        if (PropertyValueEqualityHelper.AreEqual(cur.Value, in matchValue))
+                            return (nodeId, false);
+                        break;
+                    }
                 }
             }
         }
 
         var newId = _inner.Nodes.Allocate(labelId);
-        SetNodeProperty(newId, _propKeyTokens.GetOrCreate(matchKey), in matchValue);
+        var newKeyId = _propKeyTokens.GetOrCreate(matchKey);
+        SetNodeProperty(newId, newKeyId, in matchValue);
+        // PW-18 follow-up: インデックスが登録されていれば新規エントリも追加する。
+        // これが無いと「初回 MergeNode は遅い、2 回目以降の MergeNode で同じキーを見つけられない」
+        // 状態になり upsert セマンティクスが壊れる。
+        if (!string.IsNullOrEmpty(indexName))
+            InsertIntoIndex(indexName, in matchValue, newId);
         return (newId, true);
+    }
+
+    private void InsertIntoIndex(string indexName, in PropertyValue value, NodeId nodeId)
+    {
+        switch (value.Type)
+        {
+            case PropertyValueType.Bool:
+            case PropertyValueType.Int32:
+            case PropertyValueType.Int64:
+                _inner.Indexes.CreateInt64Index(indexName).Insert(value.Int64Value, nodeId.Value);
+                break;
+            case PropertyValueType.Double:
+                _inner.Indexes.CreateDoubleIndex(indexName).Insert(value.DoubleValue, nodeId.Value);
+                break;
+            case PropertyValueType.String:
+            {
+                var s = System.Text.Encoding.UTF8.GetString(value.Utf8StringValue);
+                _inner.Indexes.CreateStringIndex(indexName).Insert(s, nodeId.Value);
+                break;
+            }
+            // Bytes / 他は現状未対応 — フォールスルー (=フルスキャン経路と同等の安全動作)。
+        }
     }
 
     // ========== リレーション操作 ==========

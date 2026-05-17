@@ -8,6 +8,12 @@ public sealed class IndexManager : IIndexManager, IDisposable
     private readonly string _directory;
     private readonly Dictionary<string, object> _indexes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PropertyTypeFlags> _indexTypes = new(StringComparer.Ordinal);
+    // PW-18 follow-up: (label, propertyKey) → indexName のバインディング。
+    // SchemaApi.CreateIndex から登録され、MergeNode の自動インデックス選択に使われる。
+    private readonly Dictionary<(string Label, string PropertyKey), string> _bindings
+        = new();
+    private readonly Dictionary<string, (string Label, string PropertyKey)> _bindingByName
+        = new(StringComparer.Ordinal);
 
     public IndexManager(string directory)
     {
@@ -27,6 +33,11 @@ public sealed class IndexManager : IIndexManager, IDisposable
         (idx as IDisposable)?.Dispose();
         _indexes.Remove(name);
         _indexTypes.Remove(name);
+        if (_bindingByName.TryGetValue(name, out var key))
+        {
+            _bindings.Remove(key);
+            _bindingByName.Remove(name);
+        }
         var path = IndexPath(name);
         if (File.Exists(path)) File.Delete(path);
         var meta = MetaPath(name);
@@ -35,6 +46,32 @@ public sealed class IndexManager : IIndexManager, IDisposable
     }
 
     public IEnumerable<string> ListIndexes() => _indexes.Keys;
+
+    public void RegisterIndexBinding(string indexName, string label, string propertyKey)
+    {
+        if (string.IsNullOrEmpty(label) || string.IsNullOrEmpty(propertyKey))
+            return; // 空メタデータは無視 (旧 CreateIndex 呼び出しとの互換性)
+        var key = (label, propertyKey);
+        _bindings[key] = indexName;
+        _bindingByName[indexName] = key;
+    }
+
+    public bool TryGetIndexName(string label, string propertyKey, out string indexName)
+    {
+        if (_bindings.TryGetValue((label, propertyKey), out var name))
+        {
+            indexName = name;
+            return true;
+        }
+        indexName = string.Empty;
+        return false;
+    }
+
+    public IEnumerable<(string IndexName, string Label, string PropertyKey)> ListIndexBindings()
+    {
+        foreach (var kv in _bindings)
+            yield return (kv.Value, kv.Key.Label, kv.Key.PropertyKey);
+    }
 
     /// <summary>
     /// BA-8: returns the <see cref="PropertyTypeFlags"/> the index was first

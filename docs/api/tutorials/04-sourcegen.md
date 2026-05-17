@@ -15,9 +15,12 @@ public partial class Person
 }
 ```
 
+> `[GraphIndexed]` は **SourceGenerator に対するマーカー** で、`InsertIndexed` / `FindBy{Prop}` の生成をトリガするだけ。**実行時の B+Tree インデックス自体はユーザが `Schema.CreateIndex` で明示的に作成する必要がある**。属性に書いたインデックス名 (省略時 `idx_{label}_{propertyName}`) と `CreateIndex` の `indexName` 引数を一致させること。`MergeNode` も同じ `(label, propertyKey)` のインデックスを自動で利用するので、業務キー upsert を使う場合も `CreateIndex` は必須。
+
 ```csharp
 using var db = GraphDatabase.Open("./mygraph");
-db.Schema.CreateIndex("idx_person_name", "Person", "name", IndexKind.StringEquality);
+// [GraphIndexed("idx_person_name")] と一致する名前で実体インデックスを作成する。
+db.Schema.CreateIndex("idx_person_name", "Person", "Name", IndexKind.StringEquality);
 
 using var tx = db.BeginTransaction();
 var g = tx.G(db.Schema);

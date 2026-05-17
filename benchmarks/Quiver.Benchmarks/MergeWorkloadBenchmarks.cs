@@ -32,6 +32,16 @@ public class MergeWorkloadBenchmarks
     [Params(10_000)]
     public int PreloadCount { get; set; }
 
+    /// <summary>
+    /// PW-18 follow-up: <c>(label, uid)</c> にインデックスを登録するか。
+    /// <c>true</c> のとき MergeNode は O(log n) シーク経路、
+    /// <c>false</c> のとき従来通り O(N) フルスキャン経路。
+    /// </summary>
+    [Params(false, true)]
+    public bool WithIndex { get; set; }
+
+    private const string IndexName = "idx_person_uid";
+
     private GraphDatabase _db = null!;
     private string _dbPath = null!;
 
@@ -42,12 +52,16 @@ public class MergeWorkloadBenchmarks
         _db = GraphDatabase.Open(_dbPath);
         _ = _db.Schema.GetOrCreateLabel("Person");
         _ = _db.Schema.GetOrCreatePropertyKey("uid");
+        if (WithIndex)
+            _db.Schema.CreateIndex(IndexName, "Person", "uid", IndexKind.Int64Equality);
 
         using var tx = _db.BeginTransaction();
         for (int i = 0; i < PreloadCount; i++)
         {
             var id = tx.CreateNode("Person");
             tx.SetProperty(id, "uid", PropertyValue.FromInt64(i));
+            if (WithIndex)
+                tx.IndexInsert(IndexName, i, id);
         }
         tx.Commit();
     }

@@ -35,7 +35,12 @@ Console.WriteLine($"S→T 最短ホップ数: {hops}");
 
 冪等な書き込みパターン。同じキーで何度実行しても重複ノードを増やさない。
 
+> `MergeNode` は `(label, matchKey)` のインデックスが登録されていれば O(log n) シークを使い、無ければラベル内全スキャンに落ちる (ノード数次第で秒オーダー、PW-18 参照)。MERGE を多用する業務キーには事前に `Schema.CreateIndex` を呼んでおく。
+
 ```csharp
+// データベース起動直後に一度だけ
+db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEquality);
+
 using var tx = db.BeginTransaction();
 
 var (id, created) = tx.MergeNode(
@@ -122,17 +127,22 @@ loader.Commit();
 
 ボイラープレートを削減し、リファクタリング耐性を上げる。
 
+> `[GraphIndexed]` は SourceGenerator に `InsertIndexed` と `FindByName` を生成させるためのマーカーで、実体インデックスは `Schema.CreateIndex` で明示作成する必要がある。属性の名前 (省略時 `idx_{label}_{propertyName}`) と `CreateIndex` の名前を揃える。
+
 ```csharp
 [GraphNode]
 public partial class Person
 {
-    [GraphIndexed]
+    [GraphIndexed]   // SourceGen マーカー — 実体インデックスは下で作成
     [GraphProperty]
     public string Name { get; set; } = "";
 
     [GraphProperty]
     public int Age { get; set; }
 }
+
+// 初期化時に一度だけ。属性側の省略時名 (idx_Person_Name) と揃える。
+db.Schema.CreateIndex("idx_Person_Name", "Person", "Name", IndexKind.StringEquality);
 
 using var tx = db.BeginTransaction();
 var g = tx.G(db.Schema);

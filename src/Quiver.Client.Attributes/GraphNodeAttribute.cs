@@ -36,6 +36,16 @@ public sealed class GraphPropertyAttribute : Attribute
 /// <c>InsertIndexed</c> と <c>FindBy{PropName}</c> の生成・登録を行うための属性。
 /// <see cref="GraphPropertyAttribute"/> と併用が必須。
 /// </summary>
+/// <remarks>
+/// 本属性は <b>SourceGenerator 向けのマーカーに過ぎず、実体の B+Tree インデックスは
+/// ユーザが <c>db.Schema.CreateIndex(indexName, label, propertyKey, kind)</c> で
+/// 明示的に作成する必要がある</b>。属性の <see cref="IndexName"/> (省略時
+/// <c>idx_{label}_{propertyName}</c>) と <c>CreateIndex</c> 第 1 引数を一致させること。
+/// <see cref="IndexName"/> を作り忘れた場合、生成された <c>FindBy{Prop}</c> や
+/// <c>IGraphTransaction.MergeNode</c> はインデックス未登録としてフルスキャン経路に
+/// フォールバックし、初回呼び出しで <see cref="System.Diagnostics.Trace.TraceWarning"/>
+/// が出力される。
+/// </remarks>
 [AttributeUsage(AttributeTargets.Property)]
 public sealed class GraphIndexedAttribute : Attribute
 {

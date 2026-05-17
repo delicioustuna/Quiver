@@ -4,6 +4,11 @@ Cypher の `MERGE` 相当を使い、重複作成を避けつつ ON CREATE / ON 
 
 ```csharp
 using var db = GraphDatabase.Open("./mygraph");
+
+// MergeNode を高速化するため、起動時に一度だけインデックスを作成する。
+// 未作成の場合はフルスキャン経路に落ち、初回呼び出しで Trace 警告が出る。
+db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEquality);
+
 using var tx = db.BeginTransaction();
 
 var (id, created) = tx.MergeNode(

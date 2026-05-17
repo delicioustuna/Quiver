@@ -47,12 +47,32 @@ internal sealed class SchemaApi : ISchemaApi
                 _indexManager.CreateStringIndex(indexName);
                 break;
         }
+        // PW-18 follow-up: バインディングを登録し、MergeNode が自動でこのインデックスを
+        // 引けるようにする。kind は IndexInfo 側のメタデータ復元用に別途記録する。
+        _indexManager.RegisterIndexBinding(indexName, label, propertyKey);
+        _indexKinds[indexName] = kind;
     }
 
-    public void DropIndex(string indexName) => _indexManager.DropIndex(indexName);
+    public void DropIndex(string indexName)
+    {
+        _indexManager.DropIndex(indexName);
+        _indexKinds.Remove(indexName);
+    }
 
     public IReadOnlyList<IndexInfo> ListIndexes()
-        => _indexManager.ListIndexes()
-            .Select(n => new IndexInfo(n, "", "", IndexKind.StringEquality, 0))
-            .ToList();
+    {
+        var bindings = _indexManager.ListIndexBindings()
+            .ToDictionary(b => b.IndexName, b => (b.Label, b.PropertyKey), StringComparer.Ordinal);
+        var result = new List<IndexInfo>();
+        foreach (var n in _indexManager.ListIndexes())
+        {
+            var (label, propKey) = bindings.TryGetValue(n, out var b) ? b : ("", "");
+            var kind = _indexKinds.TryGetValue(n, out var k) ? k : IndexKind.StringEquality;
+            result.Add(new IndexInfo(n, label, propKey, kind, 0));
+        }
+        return result;
+    }
+
+    // PW-18 follow-up: IndexKind は IIndexManager の表現外なので SchemaApi 側で保持する。
+    private readonly Dictionary<string, IndexKind> _indexKinds = new(StringComparer.Ordinal);
 }

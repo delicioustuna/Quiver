@@ -55,6 +55,13 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// 等値判定は String / Bytes はバイト単位、Double はビット完全一致、
     /// Bool / Int32 / Int64 はスカラ等値。
     /// </summary>
+    /// <remarks>
+    /// パフォーマンス: <c>(label, matchKey)</c> に <see cref="ISchemaApi.CreateIndex"/>
+    /// で登録されたインデックスがあれば自動で O(log n) シーク経路を使い、新規作成時の
+    /// インデックスエントリ追加も自動で行う。インデックス未登録の場合はラベル内全ノードに
+    /// 対する O(N) フルスキャン + プロパティ比較に落ち、初回呼び出しで
+    /// <c>System.Diagnostics.Trace.TraceWarning</c> が出力される (サイレント劣化検出用)。
+    /// </remarks>
     (NodeId Id, bool Created) MergeNode(string label, string matchKey, in PropertyValue matchValue);
 
     // ── リレーション操作 ──────────────────────────────────────

@@ -24,6 +24,15 @@ internal sealed class TxIndexManager : IIndexManager
     public bool DropIndex(string name) { AcquireLock(); return _inner.DropIndex(name); }
     public IEnumerable<string> ListIndexes() => _inner.ListIndexes();
 
+    public void RegisterIndexBinding(string indexName, string label, string propertyKey)
+        => _inner.RegisterIndexBinding(indexName, label, propertyKey);
+
+    public bool TryGetIndexName(string label, string propertyKey, out string indexName)
+        => _inner.TryGetIndexName(label, propertyKey, out indexName);
+
+    public IEnumerable<(string IndexName, string Label, string PropertyKey)> ListIndexBindings()
+        => _inner.ListIndexBindings();
+
     private void AcquireLock()
     {
         if (!_locks.TryAcquire(GlobalIndexLockKey, _txId))
