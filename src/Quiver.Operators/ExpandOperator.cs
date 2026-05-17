@@ -11,6 +11,11 @@ public sealed class ExpandOperator : IPhysicalOperator
     private readonly Direction _direction;
     private readonly RelationshipTypeId? _typeFilter;
     private readonly ExpandOutputMode _outputMode;
+    // GC-6: when non-null, copy these upstream column values into the tail of
+    // the output tuple per emitted edge. Same set of indices each call —
+    // allocated once in ctor.
+    private readonly int[]? _carryColumns;
+    private readonly int _baseColumnCount;
     private ITransaction? _tx;
     private readonly TupleSlot[] _buffer;
     private readonly TupleSchema _schema;
@@ -24,29 +29,62 @@ public sealed class ExpandOperator : IPhysicalOperator
         int sourceNodeColumn,
         Direction direction,
         RelationshipTypeId? typeFilter,
-        ExpandOutputMode outputMode)
+        ExpandOutputMode outputMode,
+        int[]? carryColumns = null)
     {
         _source = source;
         _sourceNodeColumn = sourceNodeColumn;
         _direction = direction;
         _typeFilter = typeFilter;
         _outputMode = outputMode;
-        (_buffer, _schema) = outputMode switch
+        _carryColumns = (carryColumns is { Length: > 0 }) ? carryColumns : null;
+
+        IReadOnlyList<ColumnDefinition> baseCols = outputMode switch
         {
-            ExpandOutputMode.NeighborOnly => (new TupleSlot[1], new TupleSchema([
-                new ColumnDefinition("neighbor", TupleSlotType.NodeId)])),
-            ExpandOutputMode.NeighborAndRel => (new TupleSlot[2], new TupleSchema([
-                new ColumnDefinition("rel", TupleSlotType.RelationshipId),
-                new ColumnDefinition("neighbor", TupleSlotType.NodeId)])),
-            ExpandOutputMode.NeighborAndWeight => (new TupleSlot[3], new TupleSchema([
-                new ColumnDefinition("rel", TupleSlotType.RelationshipId),
-                new ColumnDefinition("neighbor", TupleSlotType.NodeId),
-                new ColumnDefinition("weight", TupleSlotType.Int64)])),
-            _ => (new TupleSlot[3], new TupleSchema([
-                new ColumnDefinition("source", TupleSlotType.NodeId),
-                new ColumnDefinition("rel", TupleSlotType.RelationshipId),
-                new ColumnDefinition("neighbor", TupleSlotType.NodeId)])),
+            ExpandOutputMode.NeighborOnly => new ColumnDefinition[]
+            {
+                new("neighbor", TupleSlotType.NodeId),
+            },
+            ExpandOutputMode.NeighborAndRel => new ColumnDefinition[]
+            {
+                new("rel",      TupleSlotType.RelationshipId),
+                new("neighbor", TupleSlotType.NodeId),
+            },
+            ExpandOutputMode.NeighborAndWeight => new ColumnDefinition[]
+            {
+                new("rel",      TupleSlotType.RelationshipId),
+                new("neighbor", TupleSlotType.NodeId),
+                new("weight",   TupleSlotType.Int64),
+            },
+            _ /* Full */ => new ColumnDefinition[]
+            {
+                new("source",   TupleSlotType.NodeId),
+                new("rel",      TupleSlotType.RelationshipId),
+                new("neighbor", TupleSlotType.NodeId),
+            },
         };
+
+        _baseColumnCount = baseCols.Count;
+        int carryCount = _carryColumns?.Length ?? 0;
+        _buffer = new TupleSlot[_baseColumnCount + carryCount];
+
+        if (_carryColumns == null)
+        {
+            _schema = new TupleSchema(baseCols);
+        }
+        else
+        {
+            var cols = new List<ColumnDefinition>(_baseColumnCount + carryCount);
+            cols.AddRange(baseCols);
+            var srcSchema = source.Schema;
+            for (int i = 0; i < _carryColumns.Length; i++)
+            {
+                var srcDef = srcSchema.Columns[_carryColumns[i]];
+                cols.Add(new ColumnDefinition(srcDef.Name, srcDef.Type));
+            }
+            _schema = new TupleSchema(cols);
+        }
+
         _currentSourceNode = NodeId.Invalid;
     }
 
@@ -133,6 +171,28 @@ public sealed class ExpandOperator : IPhysicalOperator
                 _buffer[2] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = neighbor.Value };
                 break;
         }
+
+        // GC-6: copy carried upstream columns into the tail. _source.Current is
+        // still pointing at the row that produced _cursor, so the slots remain
+        // valid here (byte data is also accessible via _source.GetBytes).
+        if (_carryColumns != null)
+        {
+            var src = _source.Current;
+            for (int i = 0; i < _carryColumns.Length; i++)
+                _buffer[_baseColumnCount + i] = src[_carryColumns[i]];
+        }
+    }
+
+    // GC-6: byte payload (Utf8String / Bytes) for carry columns has to come
+    // from the upstream operator because we don't snapshot it locally.
+    public ReadOnlySpan<byte> GetBytes(int column)
+    {
+        if (_carryColumns != null && column >= _baseColumnCount)
+        {
+            int carryIdx = column - _baseColumnCount;
+            return _source.GetBytes(_carryColumns[carryIdx]);
+        }
+        return ReadOnlySpan<byte>.Empty;
     }
 
     public void Dispose()

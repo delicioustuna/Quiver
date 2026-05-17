@@ -42,6 +42,20 @@ internal sealed class ExpandBuilder : IOperatorBuilder
     private readonly Direction _direction;
     private readonly string? _typeFilter;
     private readonly ExpandOutputMode _mode;
+    // GC-6: upstream column indices to forward into the output tuple's tail.
+    // Null when no alias is live so the existing fast path is preserved.
+    private readonly int[]? _carryColumns;
+    // GC-6: column of the source operator to expand from. Defaults to
+    // <c>_source.CurrentEntityColumn</c> — but <c>.Select(alias).Out(...)</c>
+    // needs to expand from the pinned column instead.
+    private readonly int _sourceColumn;
+
+    private int BaseColumnCount => _mode switch
+    {
+        ExpandOutputMode.NeighborOnly    => 1,
+        ExpandOutputMode.NeighborAndRel => 2,
+        _                                => 3,
+    };
 
     public int CurrentEntityColumn => _mode switch
     {
@@ -50,16 +64,23 @@ internal sealed class ExpandBuilder : IOperatorBuilder
         _ /* Full */                     => 2,
     };
 
-    public int PredictedOutputColumnCount => _mode switch
-    {
-        ExpandOutputMode.NeighborOnly    => 1,
-        ExpandOutputMode.NeighborAndRel => 2,
-        _                                => 3,
-    };
+    public int PredictedOutputColumnCount => BaseColumnCount + (_carryColumns?.Length ?? 0);
 
-    internal ExpandBuilder(IOperatorBuilder source, Direction direction, string? typeFilter, ExpandOutputMode mode)
+    /// <summary>GC-6: ordered list of upstream column indices the operator
+    /// will append to its output tuple. <c>null</c> when no carry is requested.</summary>
+    internal int[]? CarryColumns => _carryColumns;
+
+    internal ExpandBuilder(
+        IOperatorBuilder source,
+        Direction direction,
+        string? typeFilter,
+        ExpandOutputMode mode,
+        int[]? carryColumns = null,
+        int? sourceColumnOverride = null)
     {
         _source = source; _direction = direction; _typeFilter = typeFilter; _mode = mode;
+        _carryColumns = (carryColumns is { Length: > 0 }) ? carryColumns : null;
+        _sourceColumn = sourceColumnOverride ?? source.CurrentEntityColumn;
     }
 
     public IPhysicalOperator Build(ISchemaApi schema)
@@ -67,7 +88,7 @@ internal sealed class ExpandBuilder : IOperatorBuilder
         RelationshipTypeId? typeId = _typeFilter != null
             ? schema.GetOrCreateRelationshipType(_typeFilter)
             : null;
-        return new ExpandOperator(_source.Build(schema), _source.CurrentEntityColumn, _direction, typeId, _mode);
+        return new ExpandOperator(_source.Build(schema), _sourceColumn, _direction, typeId, _mode, _carryColumns);
     }
 }
 

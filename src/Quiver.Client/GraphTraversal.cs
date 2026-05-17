@@ -1,4 +1,4 @@
-﻿using Quiver.Client.Internal;
+using Quiver.Client.Internal;
 using Quiver.Core;
 using Quiver.Operators;
 using Quiver.Stores;
@@ -12,11 +12,27 @@ public sealed class GraphTraversal<T>
     internal readonly IOperatorBuilder _builder;
     internal readonly Func<QueryRow, T> _projection;
     internal readonly int _entityColumn;
+    // GC-6: name → column index. Null when no alias has ever been bound on
+    // this chain (the common case). Treated as immutable — replaced wholesale,
+    // never mutated in place.
+    internal readonly Dictionary<string, int>? _aliases;
 
-    internal GraphTraversal(IGraphTransaction tx, ISchemaApi schema, IOperatorBuilder builder, Func<QueryRow, T> projection, int entityColumn)
+    internal GraphTraversal(
+        IGraphTransaction tx,
+        ISchemaApi schema,
+        IOperatorBuilder builder,
+        Func<QueryRow, T> projection,
+        int entityColumn,
+        Dictionary<string, int>? aliases = null)
     {
-        _tx = tx; _schema = schema; _builder = builder; _projection = projection; _entityColumn = entityColumn;
+        _tx = tx; _schema = schema; _builder = builder; _projection = projection;
+        _entityColumn = entityColumn;
+        _aliases = (aliases is { Count: > 0 }) ? aliases : null;
     }
+
+    /// <summary>GC-6: build a chained traversal with the same alias set.</summary>
+    private GraphTraversal<U> Chain<U>(IOperatorBuilder builder, Func<QueryRow, U> projection, int entityColumn)
+        => new(_tx, _schema, builder, projection, entityColumn, _aliases);
 
     // HasLabel: optimize when source is AllNodesScan, otherwise wrap in filter
     public GraphTraversal<NodeId> HasLabel(string label)
@@ -30,14 +46,14 @@ public sealed class GraphTraversal<T>
             var col = _entityColumn;
             next = new FilterBuilder(_builder, _ => new LabelPredicate(labelId, col));
         }
-        return new GraphTraversal<NodeId>(_tx, _schema, next, row => row.GetNodeId(_entityColumn), next.CurrentEntityColumn);
+        return new GraphTraversal<NodeId>(_tx, _schema, next, row => row.GetNodeId(_entityColumn), next.CurrentEntityColumn, _aliases);
     }
 
     public GraphTraversal<T> Has(string key, string value)
     {
         var keyId = _schema.GetOrCreatePropertyKey(key);
         var col   = _entityColumn;
-        return new GraphTraversal<T>(_tx, _schema,
+        return Chain(
             new FilterBuilder(_builder, _ => new PropertyEqStringPredicate(col, keyId, value)),
             _projection, _entityColumn);
     }
@@ -47,7 +63,7 @@ public sealed class GraphTraversal<T>
         var keyId = _schema.GetOrCreatePropertyKey(key);
         var col   = _entityColumn;
         var pred  = P.Eq((long)value);
-        return new GraphTraversal<T>(_tx, _schema,
+        return Chain(
             new FilterBuilder(_builder, _ => new PropertyInt64Predicate(col, keyId, pred)),
             _projection, _entityColumn);
     }
@@ -57,7 +73,7 @@ public sealed class GraphTraversal<T>
         var keyId = _schema.GetOrCreatePropertyKey(key);
         var col   = _entityColumn;
         var pred  = P.Eq(value);
-        return new GraphTraversal<T>(_tx, _schema,
+        return Chain(
             new FilterBuilder(_builder, _ => new PropertyInt64Predicate(col, keyId, pred)),
             _projection, _entityColumn);
     }
@@ -67,7 +83,7 @@ public sealed class GraphTraversal<T>
         var keyId   = _schema.GetOrCreatePropertyKey(key);
         var col     = _entityColumn;
         var encoded = BitConverter.DoubleToInt64Bits(value);
-        return new GraphTraversal<T>(_tx, _schema,
+        return Chain(
             new FilterBuilder(_builder, _ => new PropertyDoublePredicate(col, keyId, encoded)),
             _projection, _entityColumn);
     }
@@ -77,7 +93,7 @@ public sealed class GraphTraversal<T>
         var keyId  = _schema.GetOrCreatePropertyKey(key);
         var col    = _entityColumn;
         var scalar = value ? 1L : 0L;
-        return new GraphTraversal<T>(_tx, _schema,
+        return Chain(
             new FilterBuilder(_builder, _ => new PropertyBoolPredicate(col, keyId, scalar)),
             _projection, _entityColumn);
     }
@@ -86,64 +102,79 @@ public sealed class GraphTraversal<T>
     {
         var keyId  = _schema.GetOrCreatePropertyKey(key);
         var col    = _entityColumn;
-        return new GraphTraversal<T>(_tx, _schema,
+        return Chain(
             new FilterBuilder(_builder, _ => PredicateDispatch.Build(col, keyId, pred)),
             _projection, _entityColumn);
     }
 
-    public GraphTraversal<NodeId> Out(string? type = null)
+    public GraphTraversal<NodeId> Out(string? type = null) => Expand(Direction.Outgoing, type);
+    public GraphTraversal<NodeId> Out<TRel>() where TRel : IGraphRelationship<TRel> => Out(TRel.GraphType);
+
+    public GraphTraversal<NodeId> In(string? type = null) => Expand(Direction.Incoming, type);
+    public GraphTraversal<NodeId> In<TRel>() where TRel : IGraphRelationship<TRel> => In(TRel.GraphType);
+
+    public GraphTraversal<NodeId> Both(string? type = null) => Expand(Direction.Both, type);
+    public GraphTraversal<NodeId> Both<TRel>() where TRel : IGraphRelationship<TRel> => Both(TRel.GraphType);
+
+    private GraphTraversal<NodeId> Expand(Direction direction, string? type)
     {
-        var expand = new ExpandBuilder(_builder, Direction.Outgoing, type, ExpandOutputMode.NeighborOnly);
-        return new GraphTraversal<NodeId>(_tx, _schema, expand, row => row.GetNodeId(expand.CurrentEntityColumn), expand.CurrentEntityColumn);
+        // GC-6: when aliases are live, copy them through the expansion so
+        // .Select(alias) downstream still finds the original entity. Without
+        // aliases this is identical to the pre-GC-6 fast path (no extra cols).
+        // Pass _entityColumn explicitly so .Select(alias).Out(...) expands
+        // from the pinned column, not from the most recent builder's output.
+        if (_aliases is null)
+        {
+            var fast = new ExpandBuilder(_builder, direction, type, ExpandOutputMode.NeighborOnly, sourceColumnOverride: _entityColumn);
+            return new GraphTraversal<NodeId>(_tx, _schema, fast, row => row.GetNodeId(fast.CurrentEntityColumn), fast.CurrentEntityColumn);
+        }
+
+        var (carry, newAliases) = RemapForExpand(baseColumnCount: 1);
+        var expand = new ExpandBuilder(_builder, direction, type, ExpandOutputMode.NeighborOnly, carry, sourceColumnOverride: _entityColumn);
+        return new GraphTraversal<NodeId>(_tx, _schema, expand, row => row.GetNodeId(0), 0, newAliases);
     }
 
-    public GraphTraversal<NodeId> Out<TRel>() where TRel : IGraphRelationship<TRel>
-        => Out(TRel.GraphType);
+    public GraphTraversal<RelationshipId> OutE(string? type = null) => ExpandE(Direction.Outgoing, type);
+    public GraphTraversal<RelationshipId> OutE<TRel>() where TRel : IGraphRelationship<TRel> => OutE(TRel.GraphType);
 
-    public GraphTraversal<NodeId> In(string? type = null)
+    public GraphTraversal<RelationshipId> InE(string? type = null) => ExpandE(Direction.Incoming, type);
+    public GraphTraversal<RelationshipId> InE<TRel>() where TRel : IGraphRelationship<TRel> => InE(TRel.GraphType);
+
+    public GraphTraversal<RelationshipId> BothE(string? type = null) => ExpandE(Direction.Both, type);
+    public GraphTraversal<RelationshipId> BothE<TRel>() where TRel : IGraphRelationship<TRel> => BothE(TRel.GraphType);
+
+    private GraphTraversal<RelationshipId> ExpandE(Direction direction, string? type)
     {
-        var expand = new ExpandBuilder(_builder, Direction.Incoming, type, ExpandOutputMode.NeighborOnly);
-        return new GraphTraversal<NodeId>(_tx, _schema, expand, row => row.GetNodeId(expand.CurrentEntityColumn), expand.CurrentEntityColumn);
+        if (_aliases is null)
+        {
+            var fast = new ExpandBuilder(_builder, direction, type, ExpandOutputMode.NeighborAndRel, sourceColumnOverride: _entityColumn);
+            return new GraphTraversal<RelationshipId>(_tx, _schema, fast, row => row.GetRelationshipId(0), 0);
+        }
+
+        // NeighborAndRel emits 2 cols (rel@0, neighbor@1). The "current" column
+        // for chained .OutV()/.InV() stays at 0 (rel), so carries start at 2.
+        var (carry, newAliases) = RemapForExpand(baseColumnCount: 2);
+        var e = new ExpandBuilder(_builder, direction, type, ExpandOutputMode.NeighborAndRel, carry, sourceColumnOverride: _entityColumn);
+        return new GraphTraversal<RelationshipId>(_tx, _schema, e, row => row.GetRelationshipId(0), 0, newAliases);
     }
 
-    public GraphTraversal<NodeId> In<TRel>() where TRel : IGraphRelationship<TRel>
-        => In(TRel.GraphType);
-
-    public GraphTraversal<NodeId> Both(string? type = null)
+    /// <summary>
+    /// GC-6: shared helper for Out/In/Both/OutE/InE/BothE. Returns the
+    /// sorted-distinct upstream column list to carry plus the rewritten alias
+    /// map pointing at the new tail positions.
+    /// </summary>
+    private (int[] carry, Dictionary<string, int> newAliases) RemapForExpand(int baseColumnCount)
     {
-        var expand = new ExpandBuilder(_builder, Direction.Both, type, ExpandOutputMode.NeighborOnly);
-        return new GraphTraversal<NodeId>(_tx, _schema, expand, row => row.GetNodeId(expand.CurrentEntityColumn), expand.CurrentEntityColumn);
+        // Distinct + sorted so the alias→new-column mapping is deterministic.
+        var carry = new SortedSet<int>(_aliases!.Values).ToArray();
+        var newAliases = new Dictionary<string, int>(_aliases.Count);
+        foreach (var (label, oldCol) in _aliases)
+        {
+            int idx = Array.IndexOf(carry, oldCol);
+            newAliases[label] = baseColumnCount + idx;
+        }
+        return (carry, newAliases);
     }
-
-    public GraphTraversal<NodeId> Both<TRel>() where TRel : IGraphRelationship<TRel>
-        => Both(TRel.GraphType);
-
-    public GraphTraversal<RelationshipId> OutE(string? type = null)
-    {
-        var expand = new ExpandBuilder(_builder, Direction.Outgoing, type, ExpandOutputMode.NeighborAndRel);
-        return new GraphTraversal<RelationshipId>(_tx, _schema, expand, row => row.GetRelationshipId(0), 0);
-    }
-
-    public GraphTraversal<RelationshipId> OutE<TRel>() where TRel : IGraphRelationship<TRel>
-        => OutE(TRel.GraphType);
-
-    public GraphTraversal<RelationshipId> InE(string? type = null)
-    {
-        var expand = new ExpandBuilder(_builder, Direction.Incoming, type, ExpandOutputMode.NeighborAndRel);
-        return new GraphTraversal<RelationshipId>(_tx, _schema, expand, row => row.GetRelationshipId(0), 0);
-    }
-
-    public GraphTraversal<RelationshipId> InE<TRel>() where TRel : IGraphRelationship<TRel>
-        => InE(TRel.GraphType);
-
-    public GraphTraversal<RelationshipId> BothE(string? type = null)
-    {
-        var expand = new ExpandBuilder(_builder, Direction.Both, type, ExpandOutputMode.NeighborAndRel);
-        return new GraphTraversal<RelationshipId>(_tx, _schema, expand, row => row.GetRelationshipId(0), 0);
-    }
-
-    public GraphTraversal<RelationshipId> BothE<TRel>() where TRel : IGraphRelationship<TRel>
-        => BothE(TRel.GraphType);
 
     /// <summary>
     /// WHERE EXISTS サブトラバーサルでフィルタする。
@@ -154,7 +185,7 @@ public sealed class GraphTraversal<T>
         var schema = _schema;
         var outerEntityColumn = _entityColumn;
         var capturedInner = innerTraversal;
-        return new GraphTraversal<T>(_tx, _schema,
+        return Chain(
             new FilterBuilder(_builder, s =>
             {
                 var probe = new CorrelatedInputOperator();
@@ -174,7 +205,7 @@ public sealed class GraphTraversal<T>
         var schema = _schema;
         var outerEntityColumn = _entityColumn;
         var capturedInner = innerTraversal;
-        return new GraphTraversal<T>(_tx, _schema,
+        return Chain(
             new FilterBuilder(_builder, s =>
             {
                 var probe = new CorrelatedInputOperator();
@@ -192,7 +223,7 @@ public sealed class GraphTraversal<T>
     {
         var keyId = _schema.GetOrCreatePropertyKey(key);
         var col = _entityColumn;
-        return new GraphTraversal<T>(_tx, _schema,
+        return Chain(
             new FilterBuilder(_builder, _ => new PropertyExistsPredicate(col, keyId, mustExist: true)),
             _projection, _entityColumn);
     }
@@ -206,7 +237,7 @@ public sealed class GraphTraversal<T>
         // because newly-created keys have zero observations.
         var keyId = _schema.GetOrCreatePropertyKey(key);
         var col = _entityColumn;
-        return new GraphTraversal<T>(_tx, _schema,
+        return Chain(
             new FilterBuilder(_builder, _ => new PropertyExistsPredicate(col, keyId, mustExist: false)),
             _projection, _entityColumn);
     }
@@ -227,10 +258,7 @@ public sealed class GraphTraversal<T>
 
     /// <summary>
     /// GC-2: Gremlin <c>.and(t1, t2, …)</c> — keep elements for which every
-    /// sub-traversal produces at least one row. Equivalent to chaining
-    /// <c>.Where(t1).Where(t2)</c> but spelled out explicitly for cross-condition
-    /// filters. Each sub-traversal is evaluated as an EXISTS sub-query against
-    /// the current entity.
+    /// sub-traversal produces at least one row.
     /// </summary>
     public GraphTraversal<T> And(params Func<SubTraversal, SubTraversal>[] traversals)
     {
@@ -239,13 +267,7 @@ public sealed class GraphTraversal<T>
         return CombineSubTraversals(traversals, useOr: false);
     }
 
-    /// <summary>
-    /// GC-2: Gremlin <c>.or(t1, t2, …)</c> / Cypher <c>WHERE cond1 OR cond2</c>
-    /// — keep elements for which at least one sub-traversal produces a row.
-    /// Each sub-traversal is evaluated as its own EXISTS sub-query against the
-    /// current entity; the booleans are short-circuit OR'd at the predicate
-    /// layer.
-    /// </summary>
+    /// <summary>GC-2: Gremlin <c>.or(t1, t2, …)</c> — keep elements where any sub-traversal matches.</summary>
     public GraphTraversal<T> Or(params Func<SubTraversal, SubTraversal>[] traversals)
     {
         if (traversals is null || traversals.Length == 0)
@@ -257,7 +279,7 @@ public sealed class GraphTraversal<T>
     {
         var outerEntityColumn = _entityColumn;
         var captured = traversals;
-        return new GraphTraversal<T>(_tx, _schema,
+        return Chain(
             new FilterBuilder(_builder, s =>
             {
                 var inners = new IPredicate[captured.Length];
@@ -279,14 +301,14 @@ public sealed class GraphTraversal<T>
     public GraphTraversal<T> Limit(long n)
     {
         if (n < 0) throw new ArgumentOutOfRangeException(nameof(n));
-        return new GraphTraversal<T>(_tx, _schema, new LimitBuilder(_builder, n, skip: 0), _projection, _entityColumn);
+        return Chain(new LimitBuilder(_builder, n, skip: 0), _projection, _entityColumn);
     }
 
     /// <summary>GC-1: discard the first <paramref name="n"/> elements before emitting (Gremlin <c>.skip</c>).</summary>
     public GraphTraversal<T> Skip(long n)
     {
         if (n < 0) throw new ArgumentOutOfRangeException(nameof(n));
-        return new GraphTraversal<T>(_tx, _schema, new LimitBuilder(_builder, long.MaxValue, skip: n), _projection, _entityColumn);
+        return Chain(new LimitBuilder(_builder, long.MaxValue, skip: n), _projection, _entityColumn);
     }
 
     /// <summary>GC-1: emit the half-open <c>[from, to)</c> window (Gremlin <c>.range(a, b)</c>).</summary>
@@ -294,7 +316,7 @@ public sealed class GraphTraversal<T>
     {
         if (from < 0 || to < from)
             throw new ArgumentOutOfRangeException(nameof(to), "Require 0 <= from <= to.");
-        return new GraphTraversal<T>(_tx, _schema, new LimitBuilder(_builder, to - from, skip: from), _projection, _entityColumn);
+        return Chain(new LimitBuilder(_builder, to - from, skip: from), _projection, _entityColumn);
     }
 
     // ── GC-1: terminal / existence ──────────────────────────────────────────
@@ -302,40 +324,25 @@ public sealed class GraphTraversal<T>
     /// <summary>GC-1: <c>true</c> when the traversal would emit at least one element (Gremlin <c>.hasNext</c>).</summary>
     public bool HasNext()
     {
-        // TryNext() returns default(T) when the stream is empty, which for
-        // value-type projections (NodeId, long) is indistinguishable from a
-        // legitimate zero-value result. Drive a cursor directly so we can
-        // rely on MoveNext()'s boolean.
         using var cursor = AsCursor();
         return cursor.MoveNext();
     }
 
     // ── GC-1: <c>.label()</c> step ──────────────────────────────────────────
 
-    /// <summary>
-    /// GC-1: Gremlin <c>.label()</c> — for each node in the current traversal,
-    /// resolve its label name through the schema. Only valid when the current
-    /// entity column carries a NodeId; chaining after an edge traversal will
-    /// resolve garbage.
-    /// </summary>
     public GraphTraversal<string> Label()
     {
         var lookup = new LabelNameLookupBuilder(_builder, _entityColumn, _schema);
         int labelCol = lookup.PredictedOutputColumnCount - 1;
-        return new GraphTraversal<string>(_tx, _schema, lookup, row => row.GetString(labelCol), _entityColumn);
+        return Chain(lookup, row => row.GetString(labelCol), _entityColumn);
     }
 
     // ── GC-1: <c>.id()</c> step ─────────────────────────────────────────────
 
-    /// <summary>
-    /// GC-1: Gremlin <c>.id()</c> — project the current entity id as a raw
-    /// <c>long</c>. Works for NodeId, RelationshipId, and PropertyId columns
-    /// alike since all three are stored as <see cref="TupleSlot.LongValue"/>.
-    /// </summary>
     public GraphTraversal<long> Id()
     {
         var col = _entityColumn;
-        return new GraphTraversal<long>(_tx, _schema, _builder, row => row.GetInt64(col), _entityColumn);
+        return Chain(_builder, row => row.GetInt64(col), _entityColumn);
     }
 
     // ── GC-1: edge endpoint resolution ──────────────────────────────────────
@@ -343,6 +350,9 @@ public sealed class GraphTraversal<T>
     /// <summary>GC-1: Gremlin <c>.outV()</c> — resolve to the source node of the current edge.</summary>
     public GraphTraversal<NodeId> OutV()
     {
+        // RelationshipEndpointOperator emits a single-NodeId tuple, discarding
+        // upstream — so any live aliases would be lost. Drop them silently;
+        // documented as a GC-6 Phase-2 limitation.
         var rep = new RelationshipEndpointBuilder(_builder, _entityColumn, RelationshipEndpoint.Source);
         return new GraphTraversal<NodeId>(_tx, _schema, rep, row => row.GetNodeId(0), 0);
     }
@@ -354,29 +364,14 @@ public sealed class GraphTraversal<T>
         return new GraphTraversal<NodeId>(_tx, _schema, rep, row => row.GetNodeId(0), 0);
     }
 
-    /// <summary>
-    /// GC-1: Gremlin <c>.otherV()</c> — resolve to the "far" endpoint
-    /// relative to the entry direction. Without a context node the operator
-    /// defaults to target; use OutV / InV when the side matters precisely.
-    /// </summary>
+    /// <summary>GC-1: Gremlin <c>.otherV()</c> — resolve to the "far" endpoint relative to the entry direction.</summary>
     public GraphTraversal<NodeId> OtherV()
     {
         var rep = new RelationshipEndpointBuilder(_builder, _entityColumn, RelationshipEndpoint.Other);
         return new GraphTraversal<NodeId>(_tx, _schema, rep, row => row.GetNodeId(0), 0);
     }
 
-    /// <summary>
-    /// VEC-6: graph-first KNN. Drains the current traversal as a NodeId
-    /// candidate set, then keeps only the top-<paramref name="k"/> by vector
-    /// similarity against <paramref name="query"/>. Pairs with
-    /// <c>g.Knn(...)</c> (vector-first) — use <c>QueryOptimizer.ChooseKnnStrategy</c>
-    /// to decide which to invoke when both are viable.
-    /// </summary>
-    /// <remarks>
-    /// Only valid when the traversal currently produces <see cref="NodeId"/>s
-    /// (i.e. <typeparamref name="T"/> is NodeId). The resulting traversal
-    /// emits NodeId in descending similarity order; score is not surfaced.
-    /// </remarks>
+    /// <summary>VEC-6: graph-first KNN. See class docs for full semantics.</summary>
     public GraphTraversal<NodeId> FilterByKnn(string indexName, ReadOnlySpan<float> query, int k)
     {
         var filtered = new Internal.FilteredKnnNodeSourceBuilder(_builder, indexName, query, k);
@@ -385,61 +380,27 @@ public sealed class GraphTraversal<T>
 
     // ── GC-3: ordering ───────────────────────────────────────────────────────
 
-    /// <summary>
-    /// GC-3: Gremlin <c>.order().by(key)</c> / Cypher <c>ORDER BY n.key</c> —
-    /// sort the current stream by the named property in ascending order.
-    /// Blocking: every input row is materialised before any output row is
-    /// emitted, so pair with <c>.Limit(n)</c> for top-N queries.
-    /// </summary>
     public GraphTraversal<T> OrderBy(string key)
     {
         ArgumentNullException.ThrowIfNull(key);
-        return new GraphTraversal<T>(_tx, _schema, new SortBuilder(_builder, key, descending: false), _projection, _entityColumn);
+        return Chain(new SortBuilder(_builder, key, descending: false), _projection, _entityColumn);
     }
 
-    /// <summary>
-    /// GC-3: Gremlin <c>.order().by(key, desc)</c> / Cypher <c>ORDER BY n.key DESC</c>.
-    /// </summary>
     public GraphTraversal<T> OrderByDescending(string key)
     {
         ArgumentNullException.ThrowIfNull(key);
-        return new GraphTraversal<T>(_tx, _schema, new SortBuilder(_builder, key, descending: true), _projection, _entityColumn);
+        return Chain(new SortBuilder(_builder, key, descending: true), _projection, _entityColumn);
     }
 
-    /// <summary>
-    /// GC-3: sort by the current entity id (NodeId / RelationshipId column).
-    /// Equivalent to Gremlin's <c>.order()</c> without a <c>.by()</c> selector.
-    /// </summary>
     public GraphTraversal<T> Order(bool descending = false)
-        => new(_tx, _schema, new SortBuilder(_builder, _entityColumn, descending), _projection, _entityColumn);
+        => Chain(new SortBuilder(_builder, _entityColumn, descending), _projection, _entityColumn);
 
     // ── GC-3: numeric aggregation (terminal, takes a property key) ───────────
 
-    /// <summary>
-    /// GC-3: Gremlin <c>.values(key).sum()</c> / Cypher <c>sum(n.key)</c>.
-    /// Coerces Int32/Int64 and Double values into a single <see cref="double"/>
-    /// accumulator; non-numeric or missing properties are skipped. Empty input
-    /// returns 0.
-    /// </summary>
     public double Sum(string key) => AggregateNumeric(key, AggregateKind.Sum) ?? 0.0;
-
-    /// <summary>GC-3: long-precision sum (Int32/Int64 only; Double values are skipped).</summary>
     public long SumLong(string key) => (long)(AggregateLongSum(key) ?? 0L);
-
-    /// <summary>
-    /// GC-3: Cypher <c>max(n.key)</c>. Returns the largest value across the
-    /// current stream, or <c>null</c> when no rows carry a numeric value for
-    /// <paramref name="key"/>.
-    /// </summary>
     public double? Max(string key) => AggregateNumeric(key, AggregateKind.Max);
-
-    /// <summary>GC-3: Cypher <c>min(n.key)</c>.</summary>
     public double? Min(string key) => AggregateNumeric(key, AggregateKind.Min);
-
-    /// <summary>
-    /// GC-3: Cypher <c>avg(n.key)</c>. Returns <c>null</c> when no rows carry a
-    /// numeric value (avoids surfacing NaN to callers who didn't ask for it).
-    /// </summary>
     public double? Mean(string key)
     {
         double sum = 0; long count = 0;
@@ -494,23 +455,12 @@ public sealed class GraphTraversal<T>
             {
                 case TupleSlotType.Int64:  sink(row.GetInt64(valueCol)); break;
                 case TupleSlotType.Double: sink(row.GetDouble(valueCol)); break;
-                // Skip Null / String / Bytes / Bool — Gremlin's sum/max/min
-                // semantics ignore non-numeric values rather than throwing.
             }
         }
     }
 
     // ── GC-3: grouping ───────────────────────────────────────────────────────
 
-    /// <summary>
-    /// GC-3: Gremlin <c>.groupCount().by(key)</c> / Cypher
-    /// <c>RETURN n.key, count(*)</c>. Counts rows by the string property value
-    /// of <paramref name="key"/>; rows where the property is missing or
-    /// non-string are dropped.
-    ///
-    /// Memory: O(distinct keys). For wide cardinalities prefer streaming via
-    /// the property cursor directly.
-    /// </summary>
     public Dictionary<string, long> GroupCount(string key)
     {
         ArgumentNullException.ThrowIfNull(key);
@@ -530,37 +480,14 @@ public sealed class GraphTraversal<T>
 
     // ── GC-3: fold ───────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// GC-3: Gremlin <c>.fold()</c> — collect every emitted element into a
-    /// single list. Identical to <see cref="ToList"/>; provided so traversals
-    /// translated from Gremlin literally still compile.
-    /// </summary>
     public List<T> Fold() => ToList();
 
     // ── GC-4: dedup ──────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// GC-4: Gremlin <c>.dedup()</c> / Cypher <c>RETURN DISTINCT</c> — drop rows
-    /// whose current entity id has already been seen. First occurrence wins.
-    /// Memory: O(distinct ids) for the hash set inside <c>PathDedupOperator</c>.
-    /// </summary>
-    public GraphTraversal<T> Dedup()
-        => new(_tx, _schema, new DedupBuilder(_builder, _entityColumn), _projection, _entityColumn);
+    public GraphTraversal<T> Dedup() => Chain(new DedupBuilder(_builder, _entityColumn), _projection, _entityColumn);
 
     // ── GC-4: variable-length repeat ─────────────────────────────────────────
 
-    /// <summary>
-    /// GC-4: Gremlin <c>.repeat(out()).times(n)</c> / Cypher
-    /// <c>MATCH (a)-[*1..n]-&gt;(b)</c>. The single-hop step inside
-    /// <paramref name="step"/> is applied repeatedly via
-    /// <c>VariableLengthExpandOperator</c>.
-    /// </summary>
-    /// <param name="step">closure that picks one of <c>Out</c> / <c>In</c> / <c>Both</c> with an optional type filter</param>
-    /// <param name="times">exact number of hops (must be ≥ 1)</param>
-    /// <param name="emit">
-    /// <c>false</c> (default) — emit only the depth-<paramref name="times"/> frontier;
-    /// <c>true</c> — emit every intermediate frontier from depth 1 to <paramref name="times"/>.
-    /// </param>
     public GraphTraversal<NodeId> Repeat(Action<RepeatStep> step, int times, bool emit = false)
     {
         ArgumentNullException.ThrowIfNull(step);
@@ -575,13 +502,6 @@ public sealed class GraphTraversal<T>
 
     // ── GC-4: shortest path ──────────────────────────────────────────────────
 
-    /// <summary>
-    /// GC-4: Gremlin <c>.shortestPath()</c> truncated to "distance only" — for
-    /// each input row, runs BFS from the current entity to
-    /// <paramref name="target"/> in <paramref name="direction"/> and emits the
-    /// resulting <c>long</c> distance. Rows for which no path exists within
-    /// <paramref name="maxDistance"/> are dropped.
-    /// </summary>
     public GraphTraversal<long> ShortestPathTo(
         NodeId target,
         Direction direction = Direction.Outgoing,
@@ -595,29 +515,12 @@ public sealed class GraphTraversal<T>
 
     // ── GC-4: union / coalesce / optional ────────────────────────────────────
 
-    /// <summary>
-    /// GC-4: Gremlin <c>.union(t1, t2, …)</c> / Cypher <c>UNION ALL</c>. Each
-    /// input row is fed to every branch; results are concatenated. Branches
-    /// must produce single-column NodeId tuples (e.g. <c>s.Out("KNOWS")</c>).
-    /// </summary>
     public GraphTraversal<NodeId> Union(params Func<SubTraversal, SubTraversal>[] branches)
         => BuildBranched(branches, BranchedBuilder.Kind.Union);
 
-    /// <summary>
-    /// GC-4: Gremlin <c>.coalesce(t1, t2, …)</c>. The first branch that
-    /// produces at least one row "wins" — its rows are emitted and the
-    /// remaining branches are skipped for that input row. If every branch is
-    /// empty for an input row, that row contributes nothing.
-    /// </summary>
     public GraphTraversal<NodeId> Coalesce(params Func<SubTraversal, SubTraversal>[] branches)
         => BuildBranched(branches, BranchedBuilder.Kind.Coalesce);
 
-    /// <summary>
-    /// GC-4: Gremlin <c>.optional(t)</c> / Cypher <c>OPTIONAL MATCH</c>. If the
-    /// branch produces rows, emit those; otherwise emit the input entity
-    /// itself so the upstream row is preserved. Branch must produce a
-    /// single-column NodeId tuple.
-    /// </summary>
     public GraphTraversal<NodeId> Optional(Func<SubTraversal, SubTraversal> branch)
     {
         ArgumentNullException.ThrowIfNull(branch);
@@ -654,7 +557,71 @@ public sealed class GraphTraversal<T>
     {
         var lookup = new PropertyLookupBuilder(_builder, key);
         int propCol = lookup.PredictedOutputColumnCount - 1;
-        return new GraphTraversal<string>(_tx, _schema, lookup, row => row.GetString(propCol), _entityColumn);
+        return Chain(lookup, row => row.GetString(propCol), _entityColumn);
+    }
+
+    // ── GC-6: as / select — tuple-schema extension ──────────────────────────
+
+    /// <summary>
+    /// GC-6: Gremlin <c>.as("label")</c> — pin the current entity column under
+    /// <paramref name="label"/> so a downstream <see cref="Select(string)"/>
+    /// can recover it. Subsequent <c>Out</c>/<c>In</c>/<c>Both</c>/<c>OutE</c>/<c>InE</c>/<c>BothE</c>
+    /// steps copy the pinned column through (carried in the operator's tail
+    /// tuple slots), so memory grows with the alias count × output rows.
+    ///
+    /// Limitations: Repeat / ShortestPathTo / Union / Coalesce / Optional /
+    /// OutV/InV/OtherV / FilterByKnn rebuild the tuple shape and silently drop
+    /// aliases. Re-bind with <c>.As</c> downstream of those steps if needed.
+    /// </summary>
+    public GraphTraversal<T> As(string label)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(label);
+        var next = _aliases is null
+            ? new Dictionary<string, int>(capacity: 1)
+            : new Dictionary<string, int>(_aliases);
+        next[label] = _entityColumn;
+        return new GraphTraversal<T>(_tx, _schema, _builder, _projection, _entityColumn, next);
+    }
+
+    /// <summary>
+    /// GC-6: Gremlin <c>.select("label")</c> — continue the traversal from the
+    /// column previously pinned with <see cref="As"/>. The returned traversal
+    /// emits <see cref="NodeId"/> regardless of <typeparamref name="T"/> because
+    /// pin targets are always entity columns; chain further steps as usual.
+    /// </summary>
+    public GraphTraversal<NodeId> Select(string label)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(label);
+        if (_aliases is null || !_aliases.TryGetValue(label, out var col))
+            throw new InvalidOperationException($"Alias '{label}' is not defined. Pin it with .As(\"{label}\") first.");
+        // Builder/schema are unchanged; we just re-aim the projection + entity
+        // column at the pinned slot. Aliases stay live for chained .Select.
+        return new GraphTraversal<NodeId>(_tx, _schema, _builder, row => row.GetNodeId(col), col, _aliases);
+    }
+
+    /// <summary>
+    /// GC-6: Gremlin <c>.select("a","b",…)</c> — terminal projection that returns
+    /// one tuple per row with typed accessors keyed by alias name. The
+    /// projection closure receives a <see cref="MatchTuple"/> that resolves
+    /// labels to the carried column values without exposing raw tuple indices.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// var pairs = g.V().As("a").Out("KNOWS").As("b")
+    ///     .Select(t => (t.Node("a"), t.Node("b")));
+    /// </code>
+    /// </example>
+    public List<TResult> Select<TResult>(Func<MatchTuple, TResult> projection)
+    {
+        ArgumentNullException.ThrowIfNull(projection);
+        if (_aliases is null || _aliases.Count == 0)
+            throw new InvalidOperationException("Select(projection) requires at least one .As(label) earlier in the chain.");
+        var aliases = _aliases;
+        var results = new List<TResult>();
+        var qr = _tx.Execute(_builder.Build(_schema));
+        foreach (var row in qr.Rows())
+            results.Add(projection(new MatchTuple(row, aliases)));
+        return results;
     }
 
     public List<T> ToList()
