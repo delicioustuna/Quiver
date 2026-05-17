@@ -194,10 +194,10 @@ public sealed class PagedFile : IPagedFile
         {
             if (!_pageToFrame.TryGetValue(pageId, out int frame)) return;
 
-            // Update header with LSN and checksum before WAL logging so the image is valid.
+            // WAL ログ書き込み前にヘッダの LSN とチェックサムを更新し、ページイメージを有効化する。
             PageHeader.UpdateLsnAndChecksum(_frames[frame].Buffer.AsSpan(), lsn);
 
-            // WAL-first: log page image so crash recovery can replay committed writes.
+            // WAL-first: クラッシュリカバリでコミット済み書き込みを再生できるよう、ページイメージをログに残す。
             if (_walFileKind is byte fileKind)
                 WalPageContext.LogPageImage(fileKind, pageId.Value, _frames[frame].Buffer.AsSpan(0, PageSizeConst));
 
@@ -224,13 +224,13 @@ public sealed class PagedFile : IPagedFile
             }
             finally { ArrayPool<byte>.Shared.Return(buf); }
 
-            // Refresh in-memory page count when the meta page is replayed.
+            // メタページが replay された場合はインメモリのページ数を再計算する。
             if (pageId == MetaPageId)
                 _logicalPageCount = ReadLogicalPageCountFromMeta();
             else
                 _logicalPageCount = Math.Max(_logicalPageCount, pageId.Value + 1);
 
-            // Invalidate any cached frame so future reads see the recovered content.
+            // 後続の読み出しが復旧済み内容を参照できるよう、キャッシュ済みフレームを無効化する。
             if (_pageToFrame.TryGetValue(pageId, out int frame))
             {
                 pageBytes.CopyTo(_frames[frame].Buffer.AsSpan());

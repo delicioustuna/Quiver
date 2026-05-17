@@ -1,8 +1,13 @@
-﻿using Quiver.Core;
+using Quiver.Core;
 using Quiver.Stores;
 
 namespace Quiver.Client;
 
+/// <summary>
+/// <see cref="GraphTraversalSource.AddNode"/> から開始するノード追加ビルダ。
+/// <c>.P(key, value)</c> をチェーンしてプロパティを蓄積し、最後に <see cref="Next"/> で
+/// 実際にノードを作成・コミット (トランザクション内) する。
+/// </summary>
 public sealed class NodeBuilder
 {
     private readonly IGraphTransaction _tx;
@@ -11,12 +16,22 @@ public sealed class NodeBuilder
 
     internal NodeBuilder(IGraphTransaction tx, string label) { _tx = tx; _label = label; }
 
+    /// <summary>文字列プロパティを追加する。</summary>
     public NodeBuilder P(string key, string value)  { _props.Add((tx, id) => tx.SetProperty(id, key, PropertyValue.FromString(value))); return this; }
+
+    /// <summary><see cref="int"/> プロパティを追加する。</summary>
     public NodeBuilder P(string key, int value)     { _props.Add((tx, id) => tx.SetProperty(id, key, PropertyValue.FromInt32(value)));  return this; }
+
+    /// <summary><see cref="long"/> プロパティを追加する。</summary>
     public NodeBuilder P(string key, long value)    { _props.Add((tx, id) => tx.SetProperty(id, key, PropertyValue.FromInt64(value)));  return this; }
+
+    /// <summary><see cref="double"/> プロパティを追加する。</summary>
     public NodeBuilder P(string key, double value)  { _props.Add((tx, id) => tx.SetProperty(id, key, PropertyValue.FromDouble(value))); return this; }
+
+    /// <summary><see cref="bool"/> プロパティを追加する。</summary>
     public NodeBuilder P(string key, bool value)    { _props.Add((tx, id) => tx.SetProperty(id, key, PropertyValue.FromBool(value)));   return this; }
 
+    /// <summary>蓄積されたプロパティを適用して実際にノードを作成し、その ID を返す。</summary>
     public NodeId Next()
     {
         var id = _tx.CreateNode(_label);

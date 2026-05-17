@@ -3,62 +3,58 @@ using Quiver.Core;
 namespace Quiver.Stores;
 
 /// <summary>
-/// PW-15 / codex_advice_3 §7.7. Algorithm-oriented read-only graph snapshot.
-/// Materialises the current adjacency state into compressed sparse row (CSR
-/// for outgoing) and compressed sparse column (CSC for incoming) arrays so
-/// repeated multi-pass algorithms (PageRank, Louvain, repeated BFS / shortest
-/// path) can iterate neighbors as a flat <see cref="ReadOnlySpan{T}"/> instead
-/// of opening a per-call cursor over the page-chained adjacency blocks.
+/// PW-15 / codex_advice_3 7.7 節。アルゴリズム向けの読み取り専用グラフスナップショット。
+/// 現在の隣接状態を CSR (out 用 compressed sparse row) と CSC (in 用 compressed sparse column)
+/// 配列にマテリアライズすることで、PageRank・Louvain・繰り返し BFS / 最短経路など多パス系
+/// アルゴリズムが、ページチェーン隣接ブロックに対する呼び出し毎カーソルではなく
+/// フラットな <see cref="ReadOnlySpan{T}"/> で隣接を走査できるようにする。
 ///
-/// The view is point-in-time — snapshot transactions read this safely without
-/// blocking writers, but mutations after construction are invisible. Dispose
-/// to release the underlying arrays back to <see cref="System.Buffers.ArrayPool{T}"/>.
+/// ビューはポイントインタイム — スナップショットトランザクションはライターをブロックせずに
+/// 安全に読み出せるが、構築後のミューテーションは可視化されない。<see cref="IDisposable.Dispose"/> を
+/// 呼ぶと裏付け配列が <see cref="System.Buffers.ArrayPool{T}"/> に返却される。
 ///
-/// <see cref="Epoch"/> mirrors <see cref="IAdjacencyBlockStore.Epoch"/> at the
-/// time of construction so callers can detect that a compact has invalidated
-/// any cached numeric results computed against this view.
+/// <see cref="Epoch"/> は構築時点の <see cref="IAdjacencyBlockStore.Epoch"/> をそのまま反映する。
+/// 呼び出し側はこの値で compact によるキャッシュ済み計算結果の無効化を検出できる。
 /// </summary>
 public interface IGraphSnapshotView : IDisposable
 {
-    /// <summary>Adjacency epoch captured at snapshot build time. 0 when no base view exists.</summary>
+    /// <summary>スナップショット構築時にキャプチャした隣接エポック。ベースビューが無いときは 0。</summary>
     long Epoch { get; }
 
     /// <summary>
-    /// Number of node slots indexed by this view. Node ids in
-    /// <c>[0, NodeCount)</c> are addressable; ids outside the range return
-    /// empty spans / zero degree.
+    /// このビューがインデックスする node スロット数。<c>[0, NodeCount)</c> 範囲のノード ID が
+    /// アドレス可能。範囲外の ID は空スパン / 0 degree を返す。
     /// </summary>
     long NodeCount { get; }
 
-    /// <summary>Total live relationships materialised into the view.</summary>
+    /// <summary>ビューにマテリアライズした生存中リレーションシップの総数。</summary>
     long EdgeCount { get; }
 
-    /// <summary>True when the view carries an inline weight lane; <see cref="WeightBitsOut"/> returns empty otherwise.</summary>
+    /// <summary>インライン重みレーンを持つ場合に true。false の場合 <see cref="WeightBitsOut"/> は空を返す。</summary>
     bool HasWeights { get; }
 
-    /// <summary>Out-degree for <paramref name="nodeId"/>. Returns 0 when out of range.</summary>
+    /// <summary><paramref name="nodeId"/> の out-degree。範囲外なら 0。</summary>
     int OutDegree(NodeId nodeId);
 
-    /// <summary>In-degree for <paramref name="nodeId"/>. Returns 0 when out of range.</summary>
+    /// <summary><paramref name="nodeId"/> の in-degree。範囲外なら 0。</summary>
     int InDegree(NodeId nodeId);
 
-    /// <summary>Outgoing neighbour ids (target of each out-edge) for <paramref name="nodeId"/>.</summary>
+    /// <summary><paramref name="nodeId"/> の outgoing 隣接ノード ID 列 (各 out-edge の target)。</summary>
     ReadOnlySpan<long> OutNeighbors(NodeId nodeId);
 
-    /// <summary>Incoming neighbour ids (source of each in-edge) for <paramref name="nodeId"/>.</summary>
+    /// <summary><paramref name="nodeId"/> の incoming 隣接ノード ID 列 (各 in-edge の source)。</summary>
     ReadOnlySpan<long> InNeighbors(NodeId nodeId);
 
-    /// <summary>Outgoing relationship ids parallel to <see cref="OutNeighbors"/>.</summary>
+    /// <summary><see cref="OutNeighbors"/> と並列のリレーションシップ ID 列。</summary>
     ReadOnlySpan<long> OutRelationshipIds(NodeId nodeId);
 
-    /// <summary>Incoming relationship ids parallel to <see cref="InNeighbors"/>.</summary>
+    /// <summary><see cref="InNeighbors"/> と並列のリレーションシップ ID 列。</summary>
     ReadOnlySpan<long> InRelationshipIds(NodeId nodeId);
 
     /// <summary>
-    /// Raw 64-bit weight payload parallel to <see cref="OutNeighbors"/>. Reinterpret
-    /// via <see cref="BitConverter.Int64BitsToDouble"/> when the source store
-    /// payload kind was <see cref="PayloadKind.Double"/>. Empty when
-    /// <see cref="HasWeights"/> is false.
+    /// <see cref="OutNeighbors"/> と並列の生 64 ビット重み payload。ソースストアの payload 種別が
+    /// <see cref="PayloadKind.Double"/> の場合は <see cref="BitConverter.Int64BitsToDouble"/> で再解釈する。
+    /// <see cref="HasWeights"/> が false の場合は空。
     /// </summary>
     ReadOnlySpan<long> WeightBitsOut(NodeId nodeId);
 }

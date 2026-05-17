@@ -74,7 +74,7 @@ internal sealed class WalReader : IWalReader
     private string SegmentPath(long segIdx) =>
         Path.Combine(_directory, $"wal.{segIdx:D8}.log");
 
-    // Shared by WalReader and WriteAheadLog.RebuildState
+    // WalReader と WriteAheadLog.RebuildState で共有するヘルパ
     internal static bool TryReadRecord(FileStream fs, out WalRecord record)
     {
         record = default;

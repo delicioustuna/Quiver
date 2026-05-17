@@ -3,28 +3,30 @@ using Quiver.Stores;
 namespace Quiver;
 
 /// <summary>
-/// Optional bulk-load entry points exposed by an <see cref="IGraphStorageBackend"/>.
-/// Backends that do not support a given capability leave the corresponding delegate null.
+/// <see cref="IGraphStorageBackend"/> が公開する任意のバルクロードエントリポイントの集合。
+/// バックエンドがサポートしないケイパビリティは、対応するデリゲートを null のままにしておく。
 /// </summary>
 public sealed class BulkLoadCapabilities
 {
     /// <summary>
-    /// Begins a binary-backend bulk load. The boolean argument controls whether
-    /// <see cref="BulkLoader.Commit"/> additionally builds adj.db / adj_idx.dat.
-    /// Null when the active backend is not the binary backend.
+    /// バイナリバックエンド向けのバルクロード開始関数。bool 引数で
+    /// <see cref="BulkLoader.Commit"/> が adj.db / adj_idx.dat を併せて構築するかを指定する。
+    /// アクティブなバックエンドがバイナリバックエンドでない場合は null。
     /// </summary>
     public Func<bool, BulkLoader>? BeginBinaryBulkLoad { get; init; }
 
+    /// <summary>バイナリバックエンドのバルクロードに対応していれば true。</summary>
     public bool SupportsBinaryBulkLoad => BeginBinaryBulkLoad is not null;
 
     /// <summary>
-    /// PW-9: begins a streaming binary-backend bulk load suited for 10M+ edge imports.
-    /// Backend must produce a <see cref="StreamingBulkLoader"/> that streams relationship
-    /// records to a temp file during append, then computes chain pointers via dense
-    /// <c>long[]</c> arrays at commit time. The boolean controls whether the adjacency
-    /// index is built. Null when the active backend has no streaming bulk-load path.
+    /// PW-9: 1000 万エッジ超のインポートに適したストリーミングバイナリバルクロード開始関数。
+    /// バックエンドは追記中にリレーションシップレコードを一時ファイルへストリーミングし、
+    /// コミット時に dense <c>long[]</c> 配列でチェーンポインタを計算する
+    /// <see cref="StreamingBulkLoader"/> を提供する必要がある。bool 引数で隣接インデックスを構築するかを指定する。
+    /// アクティブなバックエンドにストリーミングバルクロード経路が無い場合は null。
     /// </summary>
     public Func<bool, StreamingBulkLoader>? BeginStreamingBinaryBulkLoad { get; init; }
 
+    /// <summary>ストリーミングバイナリバルクロードに対応していれば true。</summary>
     public bool SupportsStreamingBinaryBulkLoad => BeginStreamingBinaryBulkLoad is not null;
 }

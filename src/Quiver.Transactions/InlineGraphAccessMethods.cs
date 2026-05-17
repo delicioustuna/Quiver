@@ -35,8 +35,8 @@ public sealed class InlineGraphAccessMethods : IGraphAccessMethods
 
     public IEnumerable<NodeId> SeekNodesByIndex(ITransaction tx, string indexName, PropertyValue key)
     {
-        // PropertyValue is a ref struct, so we cannot hold it across a yield.
-        // Materialise the underlying long enumerable up front, then wrap.
+        // PropertyValue は ref struct のため、yield を跨いで保持できない。
+        // 下層の long 列挙を先にマテリアライズし、それをラップする。
         IEnumerable<long> ids = key.Type switch
         {
             PropertyValueType.Int32 or PropertyValueType.Int64 or PropertyValueType.Bool =>

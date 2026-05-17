@@ -13,10 +13,10 @@ public interface ITokenStore<TToken> where TToken : struct
 }
 
 // -----------------------------------------------------------------------
-// Shared base for file-backed token stores
-// Token file format: sequence of fixed-size frames (4+2+N bytes where N is max name len)
-// Each frame: [InUse(1)][TokenIdLE(4)][NameLenLE(2)][Name(NameLen bytes)]
-// We use a simple append-only design loaded fully into memory on open.
+// ファイル裏付けのトークンストアの共通基底
+// トークンファイル形式: 固定長フレームの並び (4+2+N バイト、N は名前最大長)
+// 各フレーム: [InUse(1)][TokenIdLE(4)][NameLenLE(2)][Name(NameLen バイト)]
+// シンプルな append-only 設計で、open 時に全量をメモリへ読み込む。
 // -----------------------------------------------------------------------
 
 public abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposable where TToken : struct
@@ -93,8 +93,8 @@ public abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposable 
         _stream ??= new FileStream(_filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
         _stream.Seek(0, SeekOrigin.End);
         using var writer = new BinaryWriter(_stream, Encoding.UTF8, leaveOpen: true);
-        writer.Write(id);                   // int32
-        writer.Write((ushort)utf8.Length);  // uint16
+        writer.Write(id);                   // 32 ビット整数
+        writer.Write((ushort)utf8.Length);  // 16 ビット符号なし整数
         writer.Write(utf8);
         _stream.Flush();
     }

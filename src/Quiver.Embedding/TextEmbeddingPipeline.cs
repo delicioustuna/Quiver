@@ -120,11 +120,9 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
     }
 
     /// <summary>
-    /// Register a post-commit hook (VEC-3) that calls
-    /// <see cref="EnqueueAsync(EntityRef, string, string, CancellationToken)"/>
-    /// once the transaction's WAL/SQLite commit is durable. The text is
-    /// captured at registration time so the property does not need to be
-    /// re-read on the hook thread.
+    /// post-commit フック (VEC-3) を登録し、トランザクションの WAL / SQLite コミットが永続化された後に
+    /// <see cref="EnqueueAsync(EntityRef, string, string, CancellationToken)"/> を呼び出す。
+    /// テキストは登録時にキャプチャするため、フックスレッドで該当プロパティを再読み出しする必要は無い。
     /// </summary>
     public void EnqueueOnCommit(
         ICommitHookRegistrar tx,
@@ -138,17 +136,16 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
 
         tx.OnCommitted(() =>
         {
-            // The hook contract catches and ignores exceptions — but we still
-            // best-effort enqueue. Fire-and-forget; ScanAndEnqueueAsync covers
-            // anything we drop here.
+            // フックの契約上、例外はキャッチされて無視される — それでもベストエフォートで enqueue を試みる。
+            // fire-and-forget。ここで取りこぼした分は ScanAndEnqueueAsync が拾う。
             _ = EnqueueAsync(entity, indexName, sourceText, CancellationToken.None);
         });
     }
 
     /// <summary>
-    /// Embed a query string synchronously through the provider, returning the
-    /// raw vector for handoff to <c>IVectorStore.KnnSearch</c>. Bypasses the
-    /// queue and the task log.
+    /// クエリ文字列をプロバイダ経由で同期的に埋め込み、
+    /// <c>IVectorStore.KnnSearch</c> に渡せる生ベクトルを返す。
+    /// キューとタスクログをバイパスする経路。
     /// </summary>
     public async ValueTask<ReadOnlyMemory<float>> EmbedQueryAsync(string queryText, CancellationToken ct)
     {
@@ -168,8 +165,8 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(spec);
 
-        // Materialize the entity list under one read session so we don't hold
-        // the session across awaits.
+        // await をまたいでセッションを保持しないよう、1 セッション内でエンティティ一覧を
+        // 一度にマテリアライズする。
         var staged = new List<(EntityRef Entity, string Text)>();
         using (var session = _engine.BeginRead())
         {

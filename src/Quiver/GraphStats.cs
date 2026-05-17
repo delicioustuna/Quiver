@@ -85,8 +85,8 @@ public sealed class PropertyKeyStats
     public PropertyKeyId KeyId { get; init; }
 
     /// <summary>
-    /// Union of <see cref="PropertyTypeFlags"/> bits for every value observed under this key.
-    /// Used by the optimizer to decide whether a numeric / string predicate can ever match.
+    /// このキーに対して観測された全値の <see cref="PropertyTypeFlags"/> ビット和。
+    /// 数値述語 / 文字列述語が原理的にマッチし得るかをオプティマイザが判定するのに使う。
     /// </summary>
     public PropertyTypeFlags ObservedTypes { get; private set; }
 
@@ -250,8 +250,8 @@ public sealed class GraphStats
                     (InDegreeByType.TryGetValue(typeFilter.Value, out var bi) ? bi.MeanDegree : 0.0),
             };
 
-            // Fallback to global edge-type frequency / TotalNodes when histograms are empty
-            // (e.g. when the type appears but no node had it in the sampled scope).
+            // ヒストグラムが空のとき (例えば該当型は存在するがサンプル範囲のノードでは観測されないとき)
+            // は、グローバルなエッジ型頻度 / TotalNodes へフォールバックする。
             if (mean == 0.0 && TotalNodes > 0 &&
                 EdgeTypeFrequency.TryGetValue(typeFilter.Value, out var edgeCount))
             {
@@ -336,9 +336,9 @@ public sealed class GraphStats
             long outDegree = 0;
             long inDegree  = 0;
 
-            // Walk the full relationship chain (both directions).
-            // For source-side visits we additionally process relationship properties so
-            // every relationship is visited exactly once for property collection.
+            // 両方向のリレーションシップチェーンを走査する。
+            // source 側の訪問時はリレーションシップのプロパティも処理することで、
+            // プロパティ収集の観点で各リレーションシップを 1 回ずつ訪問する。
             var relId = node.FirstRelationshipId;
             while (relId.IsValid)
             {

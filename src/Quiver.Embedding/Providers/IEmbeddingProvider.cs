@@ -3,26 +3,31 @@ using Quiver.Core;
 namespace Quiver.Embedding.Providers;
 
 /// <summary>
-/// Adapter to whatever computes a float vector from text. Provider state
-/// (HTTP client, local model handle) is held by the implementation; the
-/// helper pipeline only sees these calls. See 10_embedding_pipeline.md §3.1.
+/// テキストから float ベクトルを生成する処理の抽象。プロバイダ固有の状態
+/// (HTTP クライアント、ローカルモデルハンドルなど) は実装側が保持し、
+/// ヘルパパイプラインはこれらの呼び出しだけを見る。詳細は 10_embedding_pipeline.md 3.1 節を参照。
 /// </summary>
 public interface IEmbeddingProvider : IAsyncDisposable
 {
-    /// <summary>Stable id used inside <see cref="EmbeddingTaskKey"/> so jobs survive provider swaps.</summary>
+    /// <summary><see cref="EmbeddingTaskKey"/> 内で使う安定 ID。プロバイダ切り替え後もジョブが維持されるようにする。</summary>
     string ProviderId { get; }
 
+    /// <summary>生成されるベクトルの次元数。</summary>
     int Dimensions { get; }
 
+    /// <summary>プロバイダがネイティブに使う距離メトリック。</summary>
     DistanceMetric NativeMetric { get; }
 
-    /// <summary>Upper bound on the number of in-flight <see cref="EmbedAsync"/> calls. Local-LLM providers usually report 1.</summary>
+    /// <summary>同時に走らせる <see cref="EmbedAsync"/> 呼び出し数の上限。ローカル LLM プロバイダは通常 1 を返す。</summary>
     int MaxConcurrency { get; }
 
+    /// <summary>プロバイダが受け付ける入力長の制限。</summary>
     EmbeddingInputLimits Limits { get; }
 
+    /// <summary>プロバイダのケイパビリティ。</summary>
     EmbeddingProviderCapabilities Capabilities { get; }
 
+    /// <summary>テキストを 1 件の埋め込みベクトルに変換する。</summary>
     ValueTask<EmbeddingResult> EmbedAsync(EmbeddingRequest request, CancellationToken ct);
 }
 

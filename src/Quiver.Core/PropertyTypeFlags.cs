@@ -1,40 +1,61 @@
 namespace Quiver.Core;
 
 /// <summary>
-/// Set-valued representation of the runtime types a property value can take.
-/// Used by scan / optimizer / index / statistics hot paths so predicate evaluation
-/// and index lookups can reject type-incompatible values without materializing them.
+/// プロパティ値がとり得るランタイム型の集合表現。スキャン / オプティマイザ /
+/// インデックス / 統計の hot path で使われ、述語評価とインデックス参照が
+/// 型互換でない値をマテリアライズせずに排除できるようにする。
 ///
-/// BA-8. Array bits are reserved for future LPG array properties; embedding vectors
-/// are not represented here (see <c>IVectorStore</c> / VEC-1).
+/// BA-8。Array 系ビットは将来の LPG 配列プロパティ用に予約。埋め込みベクトルはここでは
+/// 表現しない (詳細は <c>IVectorStore</c> / VEC-1 を参照)。
 /// </summary>
 [Flags]
 public enum PropertyTypeFlags : ulong
 {
+    /// <summary>型情報なし。</summary>
     None        = 0,
 
-    // Scalar bits — mirror Quiver.Stores.PropertyValueType values 1..6.
+    // スカラビット — Quiver.Stores.PropertyValueType の値 1..6 に対応。
+
+    /// <summary><see cref="bool"/>。</summary>
     Bool        = 1UL << 1,
+    /// <summary><see cref="int"/>。</summary>
     Int32       = 1UL << 2,
+    /// <summary><see cref="long"/>。</summary>
     Int64       = 1UL << 3,
+    /// <summary><see cref="double"/>。</summary>
     Double      = 1UL << 4,
+    /// <summary>UTF-8 文字列。</summary>
     String      = 1UL << 5,
+    /// <summary>任意バイト列。</summary>
     Bytes       = 1UL << 6,
 
-    // Array bits — bit-for-bit parallel to the scalar lane, reserved for future
-    // LPG array property storage (not embedding vectors).
+    // Array 系ビット — スカラレーンと 1 対 1 対応で、将来の LPG 配列プロパティ用に予約 (埋め込みベクトルではない)。
+
+    /// <summary><see cref="bool"/> 配列 (予約)。</summary>
     BoolArray   = 1UL << 17,
+    /// <summary><see cref="int"/> 配列 (予約)。</summary>
     Int32Array  = 1UL << 18,
+    /// <summary><see cref="long"/> 配列 (予約)。</summary>
     Int64Array  = 1UL << 19,
+    /// <summary><see cref="double"/> 配列 (予約)。</summary>
     DoubleArray = 1UL << 20,
+    /// <summary>文字列配列 (予約)。</summary>
     StringArray = 1UL << 21,
+    /// <summary>バイト列配列 (予約)。</summary>
     BytesArray  = 1UL << 22,
 
-    // Composite masks
+    // 複合マスク
+
+    /// <summary>数値スカラ全般。</summary>
     Numeric         = Int32 | Int64 | Double,
+    /// <summary>スカラ全般。</summary>
     Scalar          = Bool | Int32 | Int64 | Double | String | Bytes,
+    /// <summary>数値配列全般。</summary>
     NumericArray    = Int32Array | Int64Array | DoubleArray,
+    /// <summary>配列全般。</summary>
     Array           = BoolArray | Int32Array | Int64Array | DoubleArray | StringArray | BytesArray,
+    /// <summary>可変長型 (文字列 / バイト列 / 配列)。</summary>
     Variable        = String | Bytes | Array,
+    /// <summary>順序比較可能型 (数値 / 文字列)。</summary>
     Comparable      = Numeric | String,
 }

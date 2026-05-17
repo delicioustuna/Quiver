@@ -3,9 +3,9 @@
 namespace Quiver.Operators;
 
 /// <summary>
-/// Deduplicates rows from the source operator based on specified key columns.
-/// Key columns must contain NodeId, RelationshipId, or Int64 values (uses LongValue for hashing).
-/// First occurrence of each unique key is emitted; subsequent duplicates are dropped.
+/// ソースオペレータからの行を、指定したキー列に基づいて重複排除する。
+/// キー列には NodeId / RelationshipId / Int64 のいずれかを保持する必要がある (ハッシュは LongValue を使用)。
+/// 各ユニークキーの最初の出現を放出し、以降の重複行はドロップする。
 /// </summary>
 public sealed class PathDedupOperator : IPhysicalOperator
 {
@@ -16,7 +16,7 @@ public sealed class PathDedupOperator : IPhysicalOperator
 
     public PathDedupOperator(IPhysicalOperator source, params int[] keyColumns)
     {
-        if (keyColumns.Length == 0) throw new ArgumentException("At least one key column required.", nameof(keyColumns));
+        if (keyColumns.Length == 0) throw new ArgumentException("少なくとも 1 つのキー列が必要です。", nameof(keyColumns));
         _source = source;
         _keyColumns = keyColumns;
     }
@@ -53,7 +53,7 @@ public sealed class PathDedupOperator : IPhysicalOperator
         if (_keyColumns.Length == 1)
             return tuple[_keyColumns[0]].LongValue.ToString();
 
-        // For multi-column keys, concatenate values with a separator unlikely to appear in data.
+        // 複数列キーの場合、データに出現しにくい区切り文字で値を連結する。
         var sb = new System.Text.StringBuilder();
         for (int i = 0; i < _keyColumns.Length; i++)
         {

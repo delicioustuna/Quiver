@@ -1,13 +1,20 @@
-﻿using Quiver.Core;
+using Quiver.Core;
 using Quiver.Operators;
 
 namespace Quiver;
 
+/// <summary>
+/// 物理プランをマテリアライズして得られるクエリ結果。
+/// 行 (<see cref="QueryRow"/>) のコレクションと統計情報を保持する。
+/// </summary>
 public sealed class QueryResult : IDisposable
 {
     private readonly List<QueryRow> _rows;
 
+    /// <summary>結果タプルのスキーマ。</summary>
     public TupleSchema Schema { get; }
+
+    /// <summary>実行時に集計したオペレータ統計。</summary>
     public OperatorStatistics Statistics { get; }
 
     internal QueryResult(TupleSchema schema, OperatorStatistics statistics, List<QueryRow> rows)
@@ -17,10 +24,14 @@ public sealed class QueryResult : IDisposable
         _rows = rows;
     }
 
+    /// <summary>すべての結果行を順番に列挙する。</summary>
     public IEnumerable<QueryRow> Rows() => _rows;
+
+    /// <summary>(現状は no-op。<see cref="IDisposable"/> の対称性を保つために提供。)</summary>
     public void Dispose() { }
 }
 
+/// <summary>クエリ結果の 1 行を表す軽量構造体。列アクセスは型ごとのメソッドで行う。</summary>
 public readonly struct QueryRow
 {
     private readonly TupleSlot[] _slots;
@@ -32,17 +43,32 @@ public readonly struct QueryRow
         _byteData = byteData;
     }
 
+    /// <summary>行が保持する列数。</summary>
     public int ColumnCount => _slots.Length;
+
+    /// <summary>指定列の実型を返す。</summary>
     public TupleSlotType GetSlotType(int column) => _slots[column].Type;
+
+    /// <summary>指定列を <see cref="long"/> として取り出す。</summary>
     public long GetInt64(int column) => _slots[column].LongValue;
+
+    /// <summary>指定列を <see cref="NodeId"/> として取り出す。</summary>
     public NodeId GetNodeId(int column) => new(_slots[column].LongValue);
+
+    /// <summary>指定列を <see cref="RelationshipId"/> として取り出す。</summary>
     public RelationshipId GetRelationshipId(int column) => new(_slots[column].LongValue);
+
+    /// <summary>指定列を <see cref="double"/> として取り出す。</summary>
     public double GetDouble(int column) => _slots[column].DoubleValue;
+
+    /// <summary>指定列を <see cref="bool"/> として取り出す。</summary>
     public bool GetBoolean(int column) => _slots[column].LongValue != 0;
 
+    /// <summary>指定列を UTF-8 文字列にデコードして返す。バイトが無ければ空文字。</summary>
     public string GetString(int column)
         => _byteData?[column] is { } b ? System.Text.Encoding.UTF8.GetString(b) : string.Empty;
 
+    /// <summary>指定列のバイト列をそのまま返す (UTF-8 / Bytes 用)。</summary>
     public byte[] GetBytes(int column)
         => _byteData?[column] ?? Array.Empty<byte>();
 }

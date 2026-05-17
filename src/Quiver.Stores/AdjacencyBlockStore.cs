@@ -6,15 +6,15 @@ using Quiver.Storage;
 namespace Quiver.Stores;
 
 /// <summary>
-/// Contiguous adjacency block store: for each node stores out-edges and in-edges
-/// sorted by TypeId in consecutive pages of adj.db. A parallel adj_idx.dat array maps
-/// NodeId → first block PageId (int64, −1 if not indexed).
+/// 連続配置の隣接ブロックストア: 各ノードについて TypeId 順にソートされた out-edge と
+/// in-edge を adj.db の連続ページに保持する。並列の adj_idx.dat 配列が NodeId → 先頭ブロック
+/// PageId (int64、未索引なら −1) を保持する。
 ///
-/// Block page body layout (PageBodySize = 8160 bytes):
-///   OutCount(4) | InCount(4) | NextPageId(8) = 16-byte header
-///   Followed by OutCount out-entries then InCount in-entries.
-///   Entry: TypeId(2) | RelId(6) | NeighborId(6) = 14 bytes.
-///   Max entries per page = (8160 − 16) / 14 = 581.
+/// ブロックページ本体レイアウト (PageBodySize = 8160 バイト):
+///   OutCount(4) | InCount(4) | NextPageId(8) = 16 バイトのヘッダ
+///   続いて OutCount 個の out エントリ、その後 InCount 個の in エントリ。
+///   エントリ: TypeId(2) | RelId(6) | NeighborId(6) = 14 バイト。
+///   1 ページあたり最大エントリ数 = (8160 − 16) / 14 = 581。
 /// </summary>
 internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
 {
@@ -86,20 +86,19 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
 
     private sealed class BlockChainCursor : AdjacencyCursor
     {
-        // Page body is 8160 bytes and PageReadHandle is a ref struct, so we copy each
-        // visited page into a heap buffer to keep state across MoveNext calls. The
-        // buffer is rented from the shared ArrayPool to avoid one ~8KB allocation per
-        // cursor — Dispose returns it.
+        // ページ本体は 8160 バイトで、PageReadHandle は ref struct のため、MoveNext 間で状態を
+        // 保持するには訪問したページをヒープバッファにコピーする必要がある。バッファは共有 ArrayPool から
+        // レンタルし、カーソルごとの ~8KB アロケーションを回避する — Dispose で返却される。
         private byte[] _body;
         private readonly IPagedFile _dataFile;
         private readonly Direction _direction;
         private readonly RelationshipTypeId? _typeFilter;
 
-        private long _nextPageId;     // next page to load when current is exhausted (−1 = none)
+        private long _nextPageId;     // 現在のページを使い切ったときに読み込む次ページ (−1 = なし)
         private int _outCount;
         private int _inCount;
-        private int _entryIdx;        // index within current section
-        private int _section;         // 0 = out, 1 = in, 2 = page done
+        private int _entryIdx;        // 現在セクション内のインデックス
+        private int _section;         // 0 = out, 1 = in, 2 = ページ消化済み
         private bool _pageLoaded;
         private bool _disposed;
 
@@ -113,7 +112,7 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
             _direction = direction;
             _typeFilter = typeFilter;
             _nextPageId = firstPageId;
-            _section = 2; // forces page load on first MoveNext
+            _section = 2; // 最初の MoveNext でページロードを強制する
             _body = ArrayPool<byte>.Shared.Rent(RecordPageMapping.PageBodySize);
         }
 
@@ -140,7 +139,7 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
                     _pageLoaded = true;
                     _section = 0;
                     _entryIdx = 0;
-                    // Skip out section entirely when only incoming requested.
+                    // incoming のみが要求された場合は out セクションを完全にスキップする。
                     if (_direction == Direction.Incoming) _section = 1;
                 }
 
@@ -154,7 +153,7 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
                     }
                     _section = 1;
                     _entryIdx = 0;
-                    // Skip in section when only outgoing requested.
+                    // outgoing のみが要求された場合は in セクションをスキップする。
                     if (_direction == Direction.Outgoing) _section = 2;
                 }
 
@@ -198,8 +197,7 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
     // ──────────────────────────── Build ────────────────────────────
 
     /// <summary>
-    /// Build the adjacency index from scratch. Called by BulkLoader.Commit when
-    /// adjacency index building is requested.
+    /// 隣接インデックスをゼロから構築する。BulkLoader.Commit が隣接インデックス構築を要求したときに呼ばれる。
     /// </summary>
     internal static void Build(
         string adjDataPath,

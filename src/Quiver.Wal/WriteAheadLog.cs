@@ -7,7 +7,7 @@ namespace Quiver.Wal;
 
 public sealed class WriteAheadLog : IWriteAheadLog
 {
-    // Header layout: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32C(4) = 25 bytes
+    // ヘッダレイアウト: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32C(4) = 25 バイト
     internal const int HeaderSize = 25;
     private const long DefaultSegmentCapacity = 64L * 1024 * 1024;
     private const int WriteBufferSize = 1024 * 1024;
@@ -84,7 +84,7 @@ public sealed class WriteAheadLog : IWriteAheadLog
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!_flushChannel.Writer.TryWrite(new FlushRequest(lsn, tcs)))
         {
-            // Channel completed (Dispose called) — check once more
+            // チャネルが完了 (Dispose 済み) — 念のためもう一度確認する
             if (Volatile.Read(ref _flushedLsn) >= lsn) return;
             throw new ObjectDisposedException(nameof(WriteAheadLog));
         }
@@ -111,7 +111,7 @@ public sealed class WriteAheadLog : IWriteAheadLog
                 long segIdx = keys[i];
                 if (segIdx == _currentSegIdx) continue;
                 long nextFirst = _segFirstLsn[keys[i + 1]];
-                // All records in segIdx have LSN < nextFirst; safe to delete if nextFirst-1 <= uptoLsn
+                // segIdx 内の全レコードは LSN < nextFirst を満たすので、nextFirst-1 <= uptoLsn なら安全に削除可能
                 if (nextFirst - 1 <= uptoLsn)
                 {
                     try { File.Delete(SegmentPath(segIdx)); } catch { }
@@ -126,7 +126,7 @@ public sealed class WriteAheadLog : IWriteAheadLog
         long[] segIndices;
         lock (_writeLock)
         {
-            // Find the last segment whose firstLsn <= startLsn
+            // firstLsn <= startLsn を満たす最後のセグメントを探す
             long startSeg = _currentSegIdx;
             foreach (var (segIdx, firstLsn) in _segFirstLsn)
             {
@@ -154,7 +154,7 @@ public sealed class WriteAheadLog : IWriteAheadLog
     }
 
     // -----------------------------------------------------------------------
-    // Write helpers (all called under _writeLock)
+    // 書き込みヘルパ (すべて _writeLock の下で呼ばれる)
     // -----------------------------------------------------------------------
 
     private void WriteRecordToBuffer(long lsn, WalRecordType type, long txId, ReadOnlySpan<byte> payload)
@@ -202,7 +202,7 @@ public sealed class WriteAheadLog : IWriteAheadLog
     }
 
     // -----------------------------------------------------------------------
-    // Flush loop (background task — group commit)
+    // フラッシュループ (バックグラウンドタスク — グループコミット)
     // -----------------------------------------------------------------------
 
     private async Task RunFlushLoopAsync()
@@ -237,7 +237,7 @@ public sealed class WriteAheadLog : IWriteAheadLog
     }
 
     // -----------------------------------------------------------------------
-    // Segment helpers
+    // セグメント関連ヘルパ
     // -----------------------------------------------------------------------
 
     private FileStream OpenSegStream(long segIdx, bool append)

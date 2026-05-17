@@ -5,38 +5,37 @@ using Quiver.Transactions;
 namespace Quiver.Operators;
 
 /// <summary>
-/// PW-13 / codex_advice_3.md §7.8: Callback contract used by BFS-style algorithms
-/// (<see cref="BfsOperator"/>, <see cref="VariableLengthExpandOperator"/>,
-/// <see cref="ShortestPathOperator"/>, <see cref="ParallelBfsOperator"/>) to share
-/// the per-neighbor visit logic while letting each operator own its own state
-/// shape (frontier queue, visited set, distance map…).
+/// PW-13 / codex_advice_3.md 7.8 節: BFS 系アルゴリズム (<see cref="BfsOperator"/>、
+/// <see cref="VariableLengthExpandOperator"/>、<see cref="ShortestPathOperator"/>、
+/// <see cref="ParallelBfsOperator"/>) が、近傍訪問ロジックを共有しつつ各オペレータが
+/// 独自の状態形状 (frontier キュー、visited セット、距離マップなど) を保持できるようにする
+/// コールバックコントラクト。
 /// </summary>
 /// <remarks>
-/// The kernel only describes <c>what to do per neighbor</c>. Frontier scheduling
-/// and row materialisation stay with the operator so that incremental
-/// (Volcano) iteration keeps working without coroutines. Physical access path
-/// selection (adjacency block / linked-list / relationship scan) is hidden in
-/// <see cref="IGraphAccessMethods.Expand"/>; <see cref="OneHopExpansion"/> is
-/// the wrapper kernels call to walk one hop.
+/// カーネルは「近傍ごとに何をするか」だけを記述する。frontier スケジューリングと行マテリアライズは
+/// オペレータ側に残し、コルーチン無しでも段階的 (Volcano) 反復が機能するようにしている。
+/// 物理アクセス経路の選択 (隣接ブロック / リンクリスト / リレーションシップスキャン) は
+/// <see cref="IGraphAccessMethods.Expand"/> に隠蔽されている。
+/// <see cref="OneHopExpansion"/> はカーネルラッパが 1 ホップ走査時に呼ぶヘルパ。
 /// </remarks>
 public interface IGraphKernel<TState>
 {
     /// <summary>
-    /// Called once per source before any hop is expanded. Implementations seed
-    /// the frontier / visited set inside <paramref name="state"/>.
+    /// 各ソースに対し、いずれのホップ展開も始まる前に 1 回だけ呼ばれる。
+    /// 実装は <paramref name="state"/> 内の frontier / visited セットをシードする。
     /// </summary>
     void Initialize(NodeId source, ref TState state);
 
     /// <summary>
-    /// Invoked for every neighbour edge yielded by <see cref="OneHopExpansion.Expand"/>.
-    /// Return <c>true</c> to keep walking the cursor, <c>false</c> to abort the
-    /// remainder of the current hop (e.g. shortest-path target reached).
+    /// <see cref="OneHopExpansion.Expand"/> が放出する近傍エッジ毎に呼ばれる。
+    /// カーソル走査を継続するなら <c>true</c>、現ホップの残りを打ち切るなら <c>false</c> を返す
+    /// (例: 最短経路の終点に到達)。
     /// </summary>
     /// <param name="weightRaw">
-    /// Raw 64-bit payload from <see cref="ExpandCursor.WeightRaw"/>. Cursors
-    /// without a payload lane forward 0; kernels that do not need edge weight
-    /// can ignore it (the cost is one virtual call to <c>WeightRaw</c>, which
-    /// the JIT already inlines for the common no-payload backends).
+    /// <see cref="ExpandCursor.WeightRaw"/> から得る 64 ビット生 payload。payload lane を持たない
+    /// カーソルは 0 を転送する。エッジ重みを必要としないカーネルは無視してよい (コストは
+    /// <c>WeightRaw</c> への 1 度の仮想呼び出しのみ。payload 無しの一般的なバックエンドでは
+    /// JIT が既にインライン化する)。
     /// </param>
     bool VisitNeighbor(
         NodeId source,
@@ -47,9 +46,8 @@ public interface IGraphKernel<TState>
         ref TState state);
 
     /// <summary>
-    /// Asked between hops to decide whether to dequeue the next frontier slot.
-    /// <paramref name="depth"/> is the depth of the slot about to be expanded
-    /// (so <c>0</c> means the source itself).
+    /// 各ホップ間で「次の frontier スロットをデキューするか」を判定するために呼ばれる。
+    /// <paramref name="depth"/> はこれから展開するスロットの深さで、<c>0</c> はソース自身を意味する。
     /// </summary>
     bool ShouldContinue(int depth, in TState state);
 }

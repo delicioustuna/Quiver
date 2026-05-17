@@ -123,8 +123,8 @@ internal sealed class BinaryExpandCursor : ExpandCursor
             _nextRelId = _tx.Nodes.Read(_source).FirstRelationshipId;
             return;
         }
-        // No adjacency block for this source — walk the relationship linked list.
-        // Counted so diagnostics can surface how often the fast path is unavailable.
+        // このソースに対する隣接ブロックが無い — リレーションシップリンクリストを辿る。
+        // fast path が使えなかった頻度を診断で可視化できるよう、カウンタをインクリメントする。
         System.Threading.Interlocked.Increment(ref _owner.FallbackCountInternal);
         _adjActive = false;
         _baseRelHwm = adj?.BaseRelHwm ?? 0;

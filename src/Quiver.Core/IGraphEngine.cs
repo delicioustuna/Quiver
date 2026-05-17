@@ -1,56 +1,53 @@
 namespace Quiver.Core;
 
 /// <summary>
-/// Lightweight (kind, id) handle used by VEC-4 helpers so node and
-/// relationship paths share a single enumeration / lookup shape without
-/// pulling in <c>NodeId</c> / <c>RelationshipId</c> from upper assemblies.
+/// VEC-4 ヘルパーが利用する軽量な (kind, id) ハンドル。上位アセンブリから
+/// <c>NodeId</c> / <c>RelationshipId</c> を引き込まずに、ノードとリレーションシップで
+/// 同じ列挙 / 参照形状を共有できるようにする。
 /// </summary>
 public readonly record struct EntityRef(EntityKind Kind, long Id);
 
 /// <summary>
-/// Thin abstraction the <c>Quiver.Embedding</c> helper depends on instead of
-/// reaching into <c>Quiver.GraphDatabase</c> directly. The adapter lets the
-/// helper stay decoupled from engine internals — see codex_advice_3.md §6.6
-/// and §6.8 (VEC-4).
+/// <c>Quiver.Embedding</c> ヘルパが直接 <c>Quiver.GraphDatabase</c> に依存せずに済むための薄い抽象。
+/// アダプタを介することで、ヘルパはエンジン内部実装から疎結合に保たれる
+/// — 詳細は codex_advice_3.md 6.6 節 / 6.8 節 (VEC-4)。
 /// </summary>
 /// <remarks>
-/// The engine owns the vector store, vector catalog, and the ability to open
-/// short-lived read sessions for the scan / backfill path (Z'). Post-commit
-/// hooks (Y') are wired by the caller through <c>ICommitHookRegistrar</c>
-/// directly on the transaction — the engine does not have to mediate that.
+/// エンジンはベクトルストア・ベクトルカタログ、およびスキャン / バックフィル経路 (Z') 用の
+/// 短命な読み取りセッションのオープン権を所有する。post-commit フック (Y') は呼び出し側が
+/// <c>ICommitHookRegistrar</c> をトランザクション上で直接呼び出して接続するため、エンジンが仲介する必要は無い。
 /// </remarks>
 public interface IGraphEngine
 {
+    /// <summary>エンジンのベクトルストア。</summary>
     IVectorStore Vectors { get; }
 
+    /// <summary>エンジンのベクトルカタログ。</summary>
     IVectorCatalog Catalog { get; }
 
     /// <summary>
-    /// Open a read-only session over the graph for enumerating entities and
-    /// reading their source-text property. Session must be disposed to
-    /// release the underlying transaction.
+    /// エンティティ列挙とその source-text プロパティ読み出しのために、グラフに対する
+    /// 読み取り専用セッションを開く。セッションは必ず Dispose して下層トランザクションを解放すること。
     /// </summary>
     IGraphEngineReadSession BeginRead();
 }
 
 /// <summary>
-/// One-shot read session used by <c>ScanAndEnqueueAsync</c>. Exposes only the
-/// operations the embedding helper needs — full enumeration and string
-/// property lookup — so future engine-internal changes do not ripple into
-/// the helper assembly.
+/// <c>ScanAndEnqueueAsync</c> が利用するワンショット読み取りセッション。埋め込みヘルパが必要とする
+/// 操作 (全エンティティ列挙と文字列プロパティ参照) のみを公開し、将来のエンジン内部変更が
+/// ヘルパアセンブリに波及しないようにする。
 /// </summary>
 public interface IGraphEngineReadSession : IDisposable
 {
     /// <summary>
-    /// Enumerate every live entity of the requested kind. Order is
-    /// implementation-defined; the helper does not rely on it.
+    /// 要求された種別の生存中エンティティをすべて列挙する。順序は実装依存で、
+    /// ヘルパは順序に依存しない。
     /// </summary>
     IEnumerable<EntityRef> EnumerateEntities(EntityKind kind);
 
     /// <summary>
-    /// Read a UTF-8 string property by name. Returns false when the entity
-    /// has no such property or when the property is not a string — non-string
-    /// values are treated as "no source text" rather than coerced.
+    /// 名前で UTF-8 文字列プロパティを読み出す。エンティティが該当プロパティを持たない、
+    /// もしくは文字列以外の場合は false を返す。文字列以外の値は強制変換せず「source text 無し」として扱う。
     /// </summary>
     bool TryReadStringProperty(EntityRef entity, string propertyKey, out string text);
 }

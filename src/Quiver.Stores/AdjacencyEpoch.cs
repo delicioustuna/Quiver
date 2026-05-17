@@ -61,8 +61,8 @@ internal sealed class AdjacencyEpoch
     }
 
     /// <summary>
-    /// Replace the metadata after a compact: bump <see cref="Epoch"/>, take
-    /// the new <see cref="BaseRelHwm"/>, drop all tombstones. Persists atomically.
+    /// compact 後にメタデータを差し替える: <see cref="Epoch"/> をインクリメント、
+    /// 新しい <see cref="BaseRelHwm"/> を採用、tombstone をすべて破棄する。永続化はアトミックに行う。
     /// </summary>
     public void ResetAfterCompact(long newBaseRelHwm)
     {
@@ -127,8 +127,8 @@ internal sealed class AdjacencyEpoch
             {
                 var bytes = new byte[_tombstones.Count * 8];
                 int i = 0;
-                // Sorted for deterministic file content — keeps diffs / golden tests
-                // stable and aids future "load tombstones into a sorted span" probes.
+                // ファイル内容を決定的にするためソートする — diff / golden test が安定し、
+                // 将来「tombstone をソート済みスパンへロード」する probe にも好都合。
                 foreach (long t in _tombstones.OrderBy(x => x))
                 {
                     BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(i * 8), t);

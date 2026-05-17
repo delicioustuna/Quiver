@@ -15,15 +15,14 @@ public interface IRelationshipStore
     long InUseCount { get; }
 
     /// <summary>
-    /// Yield every live <see cref="RelationshipId"/> in store order (id 0 → hwm-1).
-    /// Used by PW-17 <c>RelationshipScanExpandOperator</c> for large-frontier
-    /// expansion, where scanning sequentially is cheaper than walking many
-    /// per-node linked lists.
+    /// 生存中のすべての <see cref="RelationshipId"/> をストア順 (id 0 → hwm-1) で列挙する。
+    /// PW-17 の <c>RelationshipScanExpandOperator</c> が大規模 frontier 展開で利用する経路で、
+    /// ノード毎リンクリストを多数辿るより順次スキャンの方が安価なケース向け。
     /// </summary>
     IEnumerable<RelationshipId> Scan();
 }
 
-// RelRecord layout (48 bytes):
+// RelRecord レイアウト (48 バイト):
 // 0 Flags(1) 1 Source(6) 7 Target(6) 13 TypeId(2) 15 SrcPrev(6) 21 SrcNext(6) 27 TgtPrev(6) 33 TgtNext(6) 39 FirstPropId(6) 45 Pad(3)
 public readonly ref struct RelationshipReadHandle
 {
@@ -157,7 +156,7 @@ public ref struct RelationshipEnumerator
 
     private RelationshipId NextInChain()
     {
-        // Follow the chain for _nodeId's side
+        // _nodeId 側のチェーンを辿る
         if (_current.Source == _nodeId)
             return _current.SourceNext;
         return _current.TargetNext;

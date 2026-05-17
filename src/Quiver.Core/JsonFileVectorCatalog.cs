@@ -4,12 +4,11 @@ using System.Text.Json.Serialization;
 namespace Quiver.Core;
 
 /// <summary>
-/// File-backed <see cref="IVectorCatalog"/> for the binary backend. Both
-/// indexes and tasks live in a single <c>vector_catalog.json</c>; the file is
-/// rewritten in full on every mutation (tens-to-hundreds of indexes is the
-/// expected scale, so rewrite cost is irrelevant compared with vector I/O).
-/// Concurrent access is serialised by an in-process lock — the binary backend
-/// is itself single-writer so this is sufficient. VEC-2.
+/// バイナリバックエンド向けのファイル裏付け <see cref="IVectorCatalog"/>。
+/// インデックスとタスクの両方を 1 つの <c>vector_catalog.json</c> に保持し、
+/// ミューテーション毎にファイル全体を書き直す (規模は数十〜数百インデックスを想定するため、
+/// 書き換えコストはベクトル I/O に比べて無視できる)。並行アクセスはプロセス内ロックで直列化する —
+/// バイナリバックエンド自体が単一書き込みのため、これで十分。VEC-2。
 /// </summary>
 public sealed class JsonFileVectorCatalog : IVectorCatalog
 {
@@ -26,9 +25,9 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
     };
 
     /// <summary>
-    /// Open or create the catalog rooted at <paramref name="path"/>. Missing
-    /// files start empty; corrupt files raise <see cref="VectorException"/>
-    /// so callers can decide whether to back up + reset or refuse to start.
+    /// <paramref name="path"/> をルートとするカタログをオープン (無ければ新規作成) する。
+    /// ファイルが無い場合は空の状態で開始する。破損ファイルでは <see cref="VectorException"/> を投げ、
+    /// 呼び出し側にバックアップ + リセットか起動拒否かを判断させる。
     /// </summary>
     public JsonFileVectorCatalog(string path)
     {
@@ -61,8 +60,7 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
         lock (_gate)
         {
             if (!_indexes.Remove(name)) return false;
-            // Drop all tasks bound to this index — orphans would silently
-            // accumulate otherwise.
+            // このインデックスに紐づくタスクをすべて破棄する — そうしないと孤児が静かに溜まり続ける。
             var stale = _tasks.Keys.Where(k => k.IndexName == name).ToArray();
             foreach (var k in stale) _tasks.Remove(k);
             Save();
@@ -186,8 +184,8 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
                 .ToArray(),
         };
 
-        // Atomic-ish write: tmp file + replace, so a crash mid-serialize does
-        // not leave a half-written catalog behind.
+        // 擬似アトミック書き込み: tmp ファイル + replace。シリアライズ中にクラッシュしても
+        // 書きかけのカタログが残らないようにする。
         var tmp = _path + ".tmp";
         using (var stream = File.Create(tmp))
         {

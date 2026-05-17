@@ -3,10 +3,10 @@
 namespace Quiver.Operators;
 
 /// <summary>
-/// Limits the number of rows emitted per BFS depth level.
-/// Designed to wrap BfsOperator (which outputs a depth column as Int64).
-/// Within each distinct depth value, at most <paramref name="maxFrontierSize"/> rows pass through.
-/// Rows beyond the limit at a given depth are silently dropped.
+/// BFS の深さレベルごとに放出する行数を制限する。
+/// BfsOperator (深さ列を Int64 で出力する) をラップする想定。
+/// 同一深さ値の範囲内では最大 <c>maxFrontierSize</c> 件だけが通過し、
+/// それを超えた行は黙ってドロップされる。
 /// </summary>
 public sealed class FrontierLimitOperator : IPhysicalOperator
 {
@@ -57,7 +57,7 @@ public sealed class FrontierLimitOperator : IPhysicalOperator
                 Statistics = s;
                 return true;
             }
-            // Frontier limit reached at this depth — skip row.
+            // この深さでフロンティア上限に達した — 行をスキップする。
         }
         return false;
     }

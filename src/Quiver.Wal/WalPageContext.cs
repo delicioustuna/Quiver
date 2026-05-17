@@ -1,25 +1,27 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using Quiver.Core;
 
 namespace Quiver.Wal;
 
 /// <summary>
-/// Thread-local WAL context for page image logging during write transactions.
-/// Set when a write transaction begins; cleared at Commit/Abort.
+/// 書き込みトランザクション中のページイメージロギング用に使われる、スレッドローカルな
+/// WAL コンテキスト。書き込みトランザクション開始時にセットし、Commit / Abort 時にクリアする。
 /// </summary>
 public static class WalPageContext
 {
     [ThreadStatic]
     internal static WriteTransactionContext? Current;
 
+    /// <summary>このスレッドで書き込みトランザクションを開始する。</summary>
     public static void Begin(IWriteAheadLog wal, TransactionId txId)
         => Current = new WriteTransactionContext(wal, txId);
 
+    /// <summary>現在の書き込みコンテキストを破棄する。</summary>
     public static void End() => Current = null;
 
     /// <summary>
-    /// If a write transaction is active on this thread, append a PageImage WAL record.
-    /// Returns the WAL LSN of the appended record, or -1 when no context is set.
+    /// このスレッドで書き込みトランザクションがアクティブな場合、PageImage WAL レコードを追記する。
+    /// 追記したレコードの WAL LSN を返す。コンテキスト未設定の場合は -1。
     /// </summary>
     public static long LogPageImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
         => Current is { } ctx ? ctx.LogPageImage(fileKind, pageId, pageBytes) : -1L;
@@ -31,8 +33,8 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     private readonly TransactionId _txId = txId;
 
     /// <summary>
-    /// Encodes and appends a PageImage WAL record.
-    /// Payload format: [version=1:1][fileKind:1][pageId:8][pageBytes:N]
+    /// PageImage WAL レコードをエンコードして追記する。
+    /// ペイロード形式: [version=1:1][fileKind:1][pageId:8][pageBytes:N]
     /// </summary>
     public long LogPageImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
     {

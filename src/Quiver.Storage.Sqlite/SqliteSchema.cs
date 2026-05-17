@@ -145,7 +145,7 @@ CREATE INDEX IF NOT EXISTS idx_embedding_tasks_index ON embedding_tasks(index_na
 
         Exec(connection, Ddl);
 
-        // Stamp the schema version so future migrations have something to diff against.
+        // 後続マイグレーションが差分基準にできるよう、スキーマバージョンを記録する。
         using var cmd = connection.CreateCommand();
         cmd.CommandText = @"INSERT INTO quiver_meta(key, value) VALUES ('schema_version', $v)
                             ON CONFLICT(key) DO NOTHING;";

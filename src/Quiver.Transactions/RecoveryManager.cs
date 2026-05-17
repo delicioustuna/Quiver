@@ -28,7 +28,7 @@ internal sealed class RecoveryManager : IRecoveryManager
     {
         long checkpointLsn = FindLastCheckpointLsn();
 
-        // Pass 1: determine which transactions committed and find the last LSN.
+        // Pass 1: コミット済みトランザクションを特定し、最終 LSN を求める。
         var committedTxs = new HashSet<long>();
         long lastLsn = -1;
         using (var reader = _wal.OpenReader(checkpointLsn))
@@ -41,7 +41,7 @@ internal sealed class RecoveryManager : IRecoveryManager
             }
         }
 
-        // Pass 2: replay PageImage records for committed transactions only.
+        // Pass 2: コミット済みトランザクションの PageImage レコードのみを replay する。
         using (var reader = _wal.OpenReader(checkpointLsn))
         {
             while (reader.TryReadNext(out var record))
@@ -57,7 +57,7 @@ internal sealed class RecoveryManager : IRecoveryManager
         return lastLsn;
     }
 
-    // Scan the WAL once to find the LSN of the last Checkpoint record.
+    // WAL を 1 回スキャンして、最後の Checkpoint レコードの LSN を求める。
     private long FindLastCheckpointLsn()
     {
         long checkpointLsn = 0;
@@ -71,14 +71,14 @@ internal sealed class RecoveryManager : IRecoveryManager
     }
 
     /// <summary>
-    /// Decode a PageImage WAL record and write the page bytes directly to the owning file.
-    /// Payload format (version 1): [version:1][fileKind:1][pageId:8][pageBytes:N]
+    /// PageImage WAL レコードをデコードし、ページバイト列を所有ファイルに直接書き込む。
+    /// ペイロード形式 (version 1): [version:1][fileKind:1][pageId:8][pageBytes:N]
     /// </summary>
     private void ApplyPageImage(in WalRecord record)
     {
         var payload = record.Payload.Span;
         if (payload.Length < 10) return;
-        if (payload[0] != 1) return; // unsupported version
+        if (payload[0] != 1) return; // 未対応バージョン
         byte fileKind = payload[1];
         long pageId = BinaryPrimitives.ReadInt64LittleEndian(payload[2..]);
         var pageBytes = payload[10..];

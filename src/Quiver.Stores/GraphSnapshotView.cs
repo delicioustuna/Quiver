@@ -4,18 +4,17 @@ using Quiver.Core;
 namespace Quiver.Stores;
 
 /// <summary>
-/// PW-15 / codex_advice_3 §7.7. Default <see cref="IGraphSnapshotView"/>
-/// implementation that materialises CSR (outgoing) and CSC (incoming) arrays
-/// from a transaction's relationship store. Designed for repeated multi-pass
-/// algorithms — one O(N+E) build amortised over many traversals.
+/// PW-15 / codex_advice_3 7.7 節。トランザクションのリレーションシップストアから
+/// CSR (outgoing) と CSC (incoming) 配列をマテリアライズする <see cref="IGraphSnapshotView"/> の既定実装。
+/// 同一スナップショットを多数のトラバーサルで使い回すアルゴリズム向けに設計され、1 回の O(N+E) 構築を
+/// 多数の走査で償却する。
 ///
-/// Built by <see cref="Build"/>: snapshot every live <c>(src, tgt, relId)</c>
-/// in two passes — one to size the rows and one to place edges. Arrays are
-/// rented from <see cref="ArrayPool{T}.Shared"/> so dispose returns them.
+/// <see cref="Build"/> の処理: 生存中の <c>(src, tgt, relId)</c> をすべて 2 パスでスナップショット化 —
+/// 1 パス目で行サイズを決め、2 パス目でエッジを配置する。配列は
+/// <see cref="ArrayPool{T}.Shared"/> からレンタルし、Dispose で返却する。
 ///
-/// Weight lane is populated when the source store implements
-/// <see cref="IAdjacencyPayloadView"/>; otherwise <see cref="HasWeights"/>
-/// is false and <see cref="WeightBitsOut"/> returns empty.
+/// ソースストアが <see cref="IAdjacencyPayloadView"/> を実装している場合のみ weight lane が埋まる。
+/// それ以外では <see cref="HasWeights"/> は false で <see cref="WeightBitsOut"/> は空を返す。
 /// </summary>
 public sealed class GraphSnapshotView : IGraphSnapshotView
 {
@@ -53,15 +52,14 @@ public sealed class GraphSnapshotView : IGraphSnapshotView
     }
 
     /// <summary>
-    /// Build a snapshot from the given stores. Lives in Quiver.Stores so the
-    /// snapshot does not depend on the higher-level transaction layer; the
-    /// <see cref="GraphDatabase.OpenSnapshotView"/> facade in Quiver.csproj
-    /// passes the components from a freshly opened snapshot transaction.
+    /// 指定ストアからスナップショットを構築する。本クラスは Quiver.Stores に置くことで、
+    /// スナップショットが上位のトランザクション層に依存しないようにしている。
+    /// Quiver.csproj 側のファサード <see cref="GraphDatabase.OpenSnapshotView"/> が、
+    /// 新規に開いたスナップショットトランザクションのコンポーネントを渡す。
     ///
-    /// The snapshot is point-in-time and does not retain references to the
-    /// passed stores after construction. Pass <paramref name="adj"/> when
-    /// available so the snapshot can pick up the adjacency epoch and any
-    /// inline payload lane (V2 weight); pass null for adjacency-less builds.
+    /// スナップショットはポイントインタイムで、構築後に渡されたストアへの参照は保持しない。
+    /// <paramref name="adj"/> がある場合は渡すことで隣接エポックと inline payload lane (V2 weight) を
+    /// 取り込める。隣接ブロック無しでビルドする場合は null を渡す。
     /// </summary>
     public static GraphSnapshotView Build(
         INodeStore nodes,

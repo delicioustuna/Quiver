@@ -3,11 +3,10 @@ using Quiver.Transactions;
 namespace Quiver.Operators;
 
 /// <summary>
-/// GC-4: Gremlin <c>.coalesce(t1, t2, …)</c>. For each input row, branches are
-/// tried in order — once a branch produces a row, the remainder of that branch
-/// is drained and subsequent branches are skipped. If every branch is empty for
-/// a given input row, the row contributes nothing to the output.
-/// All branches must produce a single-column NodeId tuple.
+/// GC-4: Gremlin の <c>.coalesce(t1, t2, …)</c> 相当。各入力行に対して分岐を順番に試し、
+/// 最初に行を生成した分岐の残りを使い切ったら、それ以降の分岐はスキップする。
+/// 全分岐が空だった入力行は出力に寄与しない。
+/// すべての分岐は単一列 NodeId のタプルを返す必要がある。
 /// </summary>
 public sealed class CoalesceOperator : IPhysicalOperator
 {
@@ -34,7 +33,7 @@ public sealed class CoalesceOperator : IPhysicalOperator
     {
         if (probes is null || branches is null) throw new ArgumentNullException();
         if (probes.Length != branches.Length || branches.Length == 0)
-            throw new ArgumentException("Coalesce requires at least one (probe, branch) pair of equal length.");
+            throw new ArgumentException("Coalesce には少なくとも 1 組、かつ同数の (probe, branch) ペアが必要です。");
         _source = source;
         _srcCol = sourceColumn;
         _probes = probes;
@@ -68,7 +67,7 @@ public sealed class CoalesceOperator : IPhysicalOperator
                     return true;
                 }
 
-                // Current branch exhausted.
+                // 現在の分岐を使い切った。
                 if (_branchEmitted)
                 {
                     _hasSource = false;

@@ -5,6 +5,10 @@ using Quiver.Stores;
 
 namespace Quiver.Client.Match;
 
+/// <summary>
+/// Match DSL のクエリビルダ。<see cref="Where"/> で述語を蓄積し、
+/// <see cref="Return{TResult}"/> で射影クロージャを指定する。
+/// </summary>
 public sealed class MatchQuery
 {
     private readonly IGraphTransaction _tx;
@@ -17,15 +21,21 @@ public sealed class MatchQuery
         _tx = tx; _schema = schema; _pattern = pattern;
     }
 
+    /// <summary>
+    /// パターン変数 <paramref name="variable"/> のプロパティ <paramref name="key"/> に対する
+    /// 述語 <paramref name="pred"/> を蓄積する (Cypher の <c>WHERE</c> 相当)。
+    /// </summary>
     public MatchQuery Where(string variable, string key, PropertyPredicate pred)
     {
         _wherePredicates.Add((variable, key, pred));
         return this;
     }
 
+    /// <summary>射影クロージャを設定して <see cref="ReturnClause{TResult}"/> に進む。</summary>
     public ReturnClause<TResult> Return<TResult>(Func<MatchContext, TResult> selector)
         => new(_tx, _schema, _pattern, _wherePredicates, selector);
 
+    /// <summary>マッチした行の件数を返す。</summary>
     public long Count()
     {
         long count = 0;
@@ -37,6 +47,11 @@ public sealed class MatchQuery
     }
 }
 
+/// <summary>
+/// <see cref="MatchQuery.Return{TResult}"/> から派生する終端ステップ。
+/// 結果の取得方法 (<see cref="ToList"/> / <see cref="First"/> / <see cref="AsCursor"/> /
+/// <see cref="AsEnumerable"/>) を提供する。
+/// </summary>
 public sealed class ReturnClause<TResult>
 {
     private readonly IGraphTransaction _tx;
@@ -54,6 +69,7 @@ public sealed class ReturnClause<TResult>
         _tx = tx; _schema = schema; _pattern = pattern; _where = where; _selector = selector;
     }
 
+    /// <summary>すべての結果をリストとして返す。</summary>
     public List<TResult> ToList()
     {
         var results = new List<TResult>();
@@ -67,6 +83,7 @@ public sealed class ReturnClause<TResult>
         return results;
     }
 
+    /// <summary>最初の 1 件を返す。結果が空のときは <see langword="default"/>。</summary>
     public TResult? First()
     {
         var (plan, varMap) = MatchCompiler.Compile(_tx, _schema, _pattern, _where);
@@ -80,8 +97,8 @@ public sealed class ReturnClause<TResult>
     }
 
     /// <summary>
-    /// Returns a streaming cursor over the results. The caller owns the cursor lifetime
-    /// and must dispose it. The cursor is valid only within the owning transaction.
+    /// 結果のストリーミングカーソルを返す。カーソルの寿命は呼び出し側が管理し、
+    /// 必ず破棄すること。所属トランザクションが生きている間だけ有効。
     /// </summary>
     public ITraversalCursor<TResult> AsCursor()
     {
@@ -91,8 +108,8 @@ public sealed class ReturnClause<TResult>
     }
 
     /// <summary>
-    /// Streams results one-by-one without materializing the full list.
-    /// Valid only within the owning transaction.
+    /// 結果を逐次列挙する <see cref="IEnumerable{TResult}"/> を返す。全件を一度に
+    /// メモリに乗せず、所属トランザクションが生きている間だけ有効。
     /// </summary>
     public IEnumerable<TResult> AsEnumerable()
     {

@@ -1,0 +1,10 @@
+<Project>
+  <!-- FT-14: 公開 API の XML doc 生成を全プロジェクトで一括有効化する -->
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- CS1591: 公開メンバーに XML コメントがない場合の警告。段階導入のため抑制する。 -->
+    <!-- CS1573: パラメータの XML コメントがない場合の警告。同じ理由で抑制する。 -->
+    <!-- CS1574 / CS1734 / CS0419: cref 参照解決失敗 / paramref 名不一致 / オーバーロードあいまい。docfx 側で個別対応する想定で抑制。 -->
+    <NoWarn>$(NoWarn);1591;1573;1574;1734;0419</NoWarn>
+  </PropertyGroup>
+</Project>

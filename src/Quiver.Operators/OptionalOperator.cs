@@ -3,15 +3,14 @@ using Quiver.Transactions;
 namespace Quiver.Operators;
 
 /// <summary>
-/// GC-4: Gremlin <c>.optional(t)</c> / Cypher <c>OPTIONAL MATCH</c>. For each
-/// input row, evaluate the branch against a freshly bound
-/// <see cref="CorrelatedInputOperator"/>. If the branch produces at least one
-/// row, drain it; otherwise emit the input row's entity column once so that the
-/// upstream value flows through with no left-side rows dropped.
+/// GC-4: Gremlin の <c>.optional(t)</c> / Cypher の <c>OPTIONAL MATCH</c> 相当。
+/// 各入力行に対し、新しくバインドされた <see cref="CorrelatedInputOperator"/> を用いて
+/// 分岐を評価する。分岐が少なくとも 1 行を生成すればそれを排出し、生成しなければ入力行の
+/// エンティティ列を 1 回だけそのまま放出する — これにより左側の行がドロップされず、
+/// 上流の値がそのまま流れる。
 ///
-/// The branch must produce a single-column NodeId tuple; the fall-through
-/// shape is the source's entity slot copied verbatim, so the output column is
-/// always a single NodeId.
+/// 分岐は単一列 NodeId のタプルを返す必要がある。フォールスルー時の形状はソースの
+/// エンティティスロットの逐語コピーなので、出力列は常に単一 NodeId。
 /// </summary>
 public sealed class OptionalOperator : IPhysicalOperator
 {

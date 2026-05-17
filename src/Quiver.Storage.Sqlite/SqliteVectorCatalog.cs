@@ -17,8 +17,8 @@ public sealed class SqliteVectorCatalog : IVectorCatalog
     private readonly Lock _gate = new();
 
     /// <summary>
-    /// Wrap an existing open <see cref="SqliteConnection"/>. The caller owns
-    /// the connection lifetime; the catalog does not dispose it.
+    /// 既にオープン済みの <see cref="SqliteConnection"/> をラップする。接続のライフタイムは
+    /// 呼び出し側が所有し、カタログは Dispose しない。
     /// </summary>
     public SqliteVectorCatalog(SqliteConnection connection)
     {

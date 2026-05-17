@@ -5,18 +5,18 @@ using Quiver.Storage;
 
 namespace Quiver.Index;
 
-// Leaf page body (8160 bytes):
+// リーフページ本体 (8160 バイト):
 //   [0..3]  EntryCount (int32)
-//   [4..11] NextLeafPageId (int64, -1 = none)
-//  [12..19] PrevLeafPageId (int64, -1 = none)
-//  [20..]   entries: KeyLen(int16) + Key(var) + Value(int64)
+//   [4..11] NextLeafPageId (int64、-1 = なし)
+//  [12..19] PrevLeafPageId (int64、-1 = なし)
+//  [20..]   エントリ列: KeyLen(int16) + Key(可変) + Value(int64)
 //
-// Internal page body:
+// 内部ページ本体:
 //   [0..3]  KeyCount (int32)
 //   [4..11] FirstChildPageId (int64)
-//  [12..]   separators: KeyLen(int16) + Key(var) + ChildPageId(int64)
+//  [12..]   セパレータ列: KeyLen(int16) + Key(可変) + ChildPageId(int64)
 //
-// Header page (PageId 1) body:
+// ヘッダページ (PageId 1) 本体:
 //   [0..7]  RootPageId
 //   [8..15] EntryCount
 //  [16..19] Height
@@ -213,8 +213,8 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
             if (insOff < 0) insOff = pos;
         }
 
-        // Fast path: new entry fits in the current page. Shift trailing entries right and
-        // write the new entry in place — no scratch buffers, no per-entry byte[] copies.
+        // Fast path: 新エントリが現在ページに収まるケース。後続エントリを右に詰めて
+        // その場で新エントリを書き込む — スクラッチバッファ無し、エントリ毎の byte[] コピー無し。
         if (oldUsed + newEntrySize <= BL.Body)
         {
             using var wh = _file.PinForWrite(pid);
@@ -229,8 +229,8 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
             return null;
         }
 
-        // Split path: snapshot source body once into a pooled scratch so we can rewrite the
-        // source page in place while still copying old entries by index.
+        // Split path: ソース本体を一度プールしたスクラッチへスナップショットし、
+        // インデックス参照で旧エントリをコピーしつつソースページをインプレースで書き換える。
         int newCount = count + 1;
         int half = newCount / 2;
         PageId rPid = _file.AllocatePage(PageKind.BTreeLeaf);
@@ -243,7 +243,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
             int srcPos = BL.LeafHdr;
 
-            // Left page: indices [0, half)
+            // 左ページ: インデックス [0, half) を担当
             using (var lph = _file.PinForWrite(pid))
             {
                 Span<byte> lbody = lph.Data;
@@ -256,7 +256,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
                 BinaryPrimitives.WriteInt32LittleEndian(lbody, half);
             }
 
-            // Median key (first entry of right page; new-index = half).
+            // 中央値キー (右ページの先頭エントリ; new-index = half)。
             byte[] medianBytes;
             if (half == insIdx)
             {
@@ -268,7 +268,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
                 medianBytes = scratch.AsSpan(srcPos + 2, mklen).ToArray();
             }
 
-            // Right page: indices [half, newCount)
+            // 右ページ: インデックス [half, newCount) を担当
             using (var rph = _file.PinForWrite(rPid))
             {
                 Span<byte> rbody = rph.Data;
@@ -291,8 +291,8 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         finally { ArrayPool<byte>.Shared.Return(scratch); }
     }
 
-    // Helper for leaf split: at new-index i, either emit the inserted entry or copy the next
-    // source entry from scratch. Advances srcPos for old entries and writePos for both.
+    // リーフ分割用ヘルパ: new-index i において、新規エントリを出力するかスクラッチから
+    // 次のソースエントリをコピーする。旧エントリでは srcPos を進め、いずれの場合も writePos を進める。
     private static void CopyOrInsertEntry(
         byte[] scratch, ref int srcPos,
         Span<byte> dest, ref int writePos,
@@ -317,7 +317,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
     private (byte[] median, PageId right)? InternalInsertSep(PageId pid, byte[] sepKey, PageId newChild)
     {
-        // Phase 1: scan body to find insertion offset and total used bytes.
+        // Phase 1: 本体を走査して挿入位置オフセットと総使用バイト数を求める。
         int kc;
         int insOff;
         int insIdx;
@@ -363,8 +363,8 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
             return null;
         }
 
-        // Split path: internal split promotes the median (removed from both children),
-        // and the median's child becomes the right page's firstChild.
+        // Split path: 内部分割では中央値を昇格させ (両子から除去)、中央値の子は
+        // 右ページの firstChild になる。
         int newCount = kc + 1;
         int half = newCount / 2;
 
@@ -376,7 +376,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
             int srcPos = BL.InternalHdr;
 
-            // Left page: new indices [0, half) → kept on source pid.
+            // 左ページ: 新インデックス [0, half) → ソース pid 上に残す。
             using (var lph = _file.PinForWrite(pid))
             {
                 Span<byte> lbody = lph.Data;
@@ -388,7 +388,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
                     CopyOrInsertSep(scratch, ref srcPos, lbody, ref lpos, i, insIdx, sepKey, newChild);
             }
 
-            // Median (new-index half): key bytes returned to caller; child becomes right's firstChild.
+            // 中央値 (new-index half): キーバイト列を呼び出し側に返却、子は右ページの firstChild になる。
             byte[] medianBytes;
             long medianChildValue;
             if (half == insIdx)
@@ -404,7 +404,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
                 srcPos += 2 + mklen + 8;
             }
 
-            // Right page: new indices [half+1, newCount).
+            // 右ページ: 新インデックス [half+1, newCount)。
             PageId rPid = _file.AllocatePage(PageKind.BTreeInternal);
             using (var rph = _file.PinForWrite(rPid))
             {
@@ -422,8 +422,8 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         finally { ArrayPool<byte>.Shared.Return(scratch); }
     }
 
-    // Helper for internal split: at new-index i, either emit the inserted separator or copy the
-    // next source separator from scratch. Layout: KeyLen(int16) + Key + ChildPageId(int64).
+    // 内部分割用ヘルパ: new-index i において、新規セパレータを出力するかスクラッチから
+    // 次のソースセパレータをコピーする。レイアウト: KeyLen(int16) + Key + ChildPageId(int64)。
     private static void CopyOrInsertSep(
         byte[] scratch, ref int srcPos,
         Span<byte> dest, ref int writePos,
@@ -465,7 +465,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         int delSize = 0;
         int oldUsed;
 
-        // Phase 1 (read scan): single pass; find the matching (key, value) entry and total used bytes.
+        // Phase 1 (read scan): 単一パスで一致する (key, value) エントリと総使用バイト数を求める。
         {
             using var rh = _file.PinForRead(pid);
             ReadOnlySpan<byte> body = rh.Data;
@@ -526,8 +526,8 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         return cur;
     }
 
-    // Binary search on variable-length separator keys to find the child PageId to follow.
-    // Collects separator offsets in a first pass, then binary-searches (upper-bound) for the key.
+    // 可変長セパレータキーに対する 2 分探索で辿るべき子 PageId を求める。
+    // 初回パスでセパレータオフセットを収集し、次にキーで upper-bound 2 分探索する。
     private static PageId FindChild(ReadOnlySpan<byte> body, int kc, ReadOnlySpan<byte> key)
     {
         if (kc == 0)
@@ -541,7 +541,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
             pos += 2 + BinaryPrimitives.ReadInt16LittleEndian(body[pos..]) + 8;
         }
 
-        // Upper-bound binary search: find first sep index where key < sep
+        // upper-bound 2 分探索: key < sep となる最初のセパレータインデックスを求める
         int lo = 0, hi = kc;
         while (lo < hi)
         {
@@ -561,7 +561,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         return new PageId(BinaryPrimitives.ReadInt64LittleEndian(body[(o + 2 + k)..]));
     }
 
-    // Reads a leaf page and returns its body snapshot and the next-leaf PageId value.
+    // リーフページを読み出し、その本体スナップショットと次のリーフ PageId 値を返す。
     private (byte[] snap, long nextLeaf) ReadLeafSnap(PageId pid)
     {
         using var h = _file.PinForRead(pid);

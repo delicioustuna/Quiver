@@ -365,6 +365,35 @@ dotnet run --project sandbox/QuiverSandbox
 
 次のフェーズ候補: Gremlin compat API 拡充（GC-1〜4）、Cypher 文字列パーサ、NativeAOT 最終検証
 
+## Documentation
+
+`docfx` を用いた API リファレンス + 概念解説 + チュートリアルが [docs/api/](docs/api/) にまとまっている。ローカルビルドは:
+
+```bash
+dotnet tool install -g docfx
+docfx build docfx.json
+docfx serve docs/api/_site
+```
+
+主なエントリ:
+
+- [Getting Started](docs/api/getting-started.md)
+- [Concepts](docs/api/concepts/index.md) — Node/Relationship、Transaction、Traversal、MERGE、KNN、Backends
+- [Tutorials](docs/api/tutorials/index.md)
+- [Cookbook](docs/cookbook.md) — よく使う典型レシピ集
+
+## Samples
+
+[`samples/`](samples/) 配下に機能別の独立サンプルプロジェクトがある。`dotnet run --project samples/<name>` で完走する。
+
+| サンプル | 内容 |
+|---|---|
+| [`Quiver.Samples.Crud`](samples/Quiver.Samples.Crud/) | 基本 CRUD (ノード / リレーション / プロパティの作成・更新・削除) |
+| [`Quiver.Samples.Traversal`](samples/Quiver.Samples.Traversal/) | 多段トラバーサル、フィルタ、可変長 repeat、集約、サブトラバーサル述語、cursor |
+| [`Quiver.Samples.Match`](samples/Quiver.Samples.Match/) | Match DSL によるパターンマッチと MERGE / UPSERT |
+| [`Quiver.Samples.SourceGen`](samples/Quiver.Samples.SourceGen/) | `[GraphNode]` / `[GraphRelationship]` 属性ベースの型付き CRUD |
+| [`Quiver.Samples.Vector`](samples/Quiver.Samples.Vector/) | VEC-5 KNN 起点トラバーサル + VEC-6 graph-first ハイブリッド |
+
 ## 設計ドキュメント
 
 詳細な設計仕様は [docs/design/](docs/design/) を参照。

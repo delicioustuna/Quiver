@@ -1,42 +1,36 @@
 namespace Quiver.Transactions;
 
 /// <summary>
-/// Register callbacks that fire after a transaction's outcome is durable
-/// (commit) or after it has been rolled back. Designed for VEC-3 so embedding
-/// pipelines / cache invalidation / audit log shipping can hook into commit
-/// completion without coupling to the transaction internals. Generic by
-/// design — not embedding-specific.
+/// トランザクションの結果が永続化された後 (コミット時) またはロールバック後に発火するコールバックを
+/// 登録するインタフェース。VEC-3 向けに設計され、埋め込みパイプライン / キャッシュ無効化 /
+/// 監査ログ送出などをトランザクション内部に結合せずにコミット完了へフックできるようにする。
+/// 汎用設計 — 埋め込み専用ではない。
 /// </summary>
 /// <remarks>
-/// Semantics:
+/// セマンティクス:
 /// <list type="bullet">
-/// <item><see cref="OnCommitted"/> fires only after the WAL flush
-/// (or SQLite commit on the SQLite backend) returns successfully.
-/// If commit fails, only <see cref="OnRolledBack"/> handlers run.</item>
-/// <item>Handlers run in registration order. An exception in one handler is
-/// caught and ignored so subsequent handlers still run and the transaction
-/// outcome is not affected.</item>
-/// <item>Handlers registered after the transaction has finished
-/// (Committed / Aborted) are dispatched immediately to match the
-/// already-resolved outcome.</item>
+/// <item><see cref="OnCommitted"/> は WAL フラッシュ (SQLite バックエンドでは SQLite commit) が
+/// 正常に返ったあとにのみ発火する。コミットが失敗した場合は <see cref="OnRolledBack"/> ハンドラのみが走る。</item>
+/// <item>ハンドラは登録順に実行される。あるハンドラで例外が発生してもキャッチして無視するため、
+/// 後続ハンドラは引き続き実行され、トランザクションの結果には影響しない。</item>
+/// <item>トランザクションが既に終了 (Committed / Aborted) した後に登録されたハンドラは、
+/// 既に確定した結果に合わせて即座にディスパッチされる。</item>
 /// </list>
-/// Crash recovery scenario: if the process dies between WAL fsync and the
-/// hook firing, the hook is lost. Callers that need at-least-once delivery
-/// (e.g. embedding task enqueue) must reconcile via a startup scan — see
-/// VEC-4's <c>ScanAndEnqueueAsync</c>.
+/// クラッシュリカバリのシナリオ: WAL fsync 後・フック発火前にプロセスが死ぬとフックは失われる。
+/// at-least-once 配送が必要な呼び出し側 (例: 埋め込みタスクキュー投入) は起動時スキャンで
+/// 再調整すること — VEC-4 の <c>ScanAndEnqueueAsync</c> を参照。
 /// </remarks>
 public interface ICommitHookRegistrar
 {
     /// <summary>
-    /// Register a callback to fire after the transaction has committed
-    /// (WAL flush / SQLite commit complete).
+    /// トランザクションがコミット (WAL フラッシュ / SQLite commit 完了) した後に発火する
+    /// コールバックを登録する。
     /// </summary>
     void OnCommitted(Action callback);
 
     /// <summary>
-    /// Register a callback to fire after the transaction has been rolled
-    /// back (explicit Abort, Dispose of an active transaction, or commit
-    /// failure).
+    /// トランザクションがロールバック (明示的な Abort、Active トランザクションの Dispose、
+    /// またはコミット失敗) された後に発火するコールバックを登録する。
     /// </summary>
     void OnRolledBack(Action callback);
 }

@@ -4,28 +4,27 @@ using Quiver.Core;
 namespace Quiver.Stores;
 
 /// <summary>
-/// PW-9: streaming variant of <see cref="BulkLoader"/> intended for 10M+ edge imports.
-/// Relationship records are streamed to a temporary binary file during <c>AppendRelationship</c>
-/// instead of being held in a <c>List&lt;PendingRel&gt;</c>. <see cref="Commit"/> reads the
-/// temp file twice — first to compute the doubly-linked chain pointers into dense
-/// <c>long[]</c> arrays (sized by maxRelId+1 / maxNodeId+1), then to issue
-/// <c>RelationshipStore.BulkWrite</c> in RelId-ascending order.
+/// PW-9: 1000 万エッジ超の取り込みを想定した <see cref="BulkLoader"/> のストリーミング版。
+/// <c>AppendRelationship</c> 中はリレーションシップレコードを <c>List&lt;PendingRel&gt;</c> に溜めず、
+/// 一時バイナリファイルにストリーミング書き出しする。<see cref="Commit"/> で一時ファイルを 2 回読み出す —
+/// 1 回目で双方向リンクチェーンのポインタを dense <c>long[]</c> 配列 (maxRelId+1 / maxNodeId+1 サイズ) に
+/// 計算し、2 回目で <c>RelationshipStore.BulkWrite</c> を RelId 昇順で発行する。
 ///
-/// Precondition: <see cref="AppendRelationship"/> must be called in strictly increasing
-/// <see cref="RelationshipId"/> order. This holds for typical bulk-import flows that
-/// assign sequential IDs and lets the pointer pass skip a separate sort step.
+/// 事前条件: <see cref="AppendRelationship"/> は <see cref="RelationshipId"/> が厳密に増加する順序で呼ぶ必要がある。
+/// 典型的なバルクインポートでは順次 ID が割り当てられるためこの前提が成り立ち、ポインタ計算パスで
+/// 別途ソート工程を省略できる。
 ///
-/// Memory footprint at 10M edges (no adj build):
-///   - temp file on disk:                                280 MB (28 B/rel)
-///   - pointer arrays (4 × long[maxRelId+1]):           ~320 MB
-///   - lastByNode / lastSide (long[] + byte[] per node): ~9 MB at 1M nodes
-///   Total heap: ~330 MB, vs. ~1.7 GB with the original in-memory <c>BulkLoader</c>.
+/// 1000 万エッジ時のメモリフットプリント (adj 構築なし):
+///   - ディスク上の一時ファイル:                          280 MB (28 B/rel)
+///   - ポインタ配列 (4 × long[maxRelId+1]):             約 320 MB
+///   - lastByNode / lastSide (ノード毎 long[] + byte[]): 100 万ノードで約 9 MB
+///   合計ヒープ: 約 330 MB (旧 <c>BulkLoader</c> 約 1.7 GB と比較)。
 ///
-/// Nodes and properties remain in heap (small for typical workloads). Adjacency index
-/// build re-reads the temp file into a compact list once — that is the only path that
-/// still scales linearly with edge count in heap. Callers planning 10M+ imports should
-/// prefer <c>buildAdjacencyIndex: false</c> and run <c>GraphDatabase.CompactAdjacency()</c>
-/// later if an adjacency index is required.
+/// ノードとプロパティは引き続きヒープ上 (一般的な負荷では小さい)。隣接インデックス構築は
+/// 一時ファイルをコンパクトリストとして 1 回再読み込みする — これが唯一エッジ数に対して
+/// 線形にヒープが伸びる経路。1000 万件超の取り込み計画がある呼び出し側は
+/// <c>buildAdjacencyIndex: false</c> を選び、必要なら後段で <c>GraphDatabase.CompactAdjacency()</c> を
+/// 呼ぶことを推奨する。
 /// </summary>
 public sealed class StreamingBulkLoader : IDisposable
 {

@@ -12,8 +12,8 @@ internal sealed class GraphTransaction : IGraphTransaction
     private readonly ITokenStore<LabelId> _labelTokens;
     private readonly ITokenStore<RelationshipTypeId> _relTypeTokens;
     private readonly ITokenStore<PropertyKeyId> _propKeyTokens;
-    // BA-7: when non-null we buffer every public mutation and hand the batch
-    // to the sink after the underlying transaction has durably committed.
+    // BA-7: null でない場合、公開ミューテーションをすべてバッファし、下層トランザクションが
+    // 永続化コミットされた後にバッチをシンクへ引き渡す。
     private readonly ILogicalMutationSink? _logicalSink;
     private List<LogicalMutation>? _logicalBuffer;
 
@@ -33,8 +33,8 @@ internal sealed class GraphTransaction : IGraphTransaction
         _logicalSink = logicalSink;
         if (_logicalSink != null)
         {
-            // Hand the buffer to the sink only after the WAL flush returned —
-            // OnCommitted hooks do not fire on rollback or commit failure.
+            // WAL フラッシュが完了した後にのみバッファをシンクへ引き渡す。
+            // OnCommitted フックはロールバックやコミット失敗時には発火しない。
             _inner.OnCommitted(FlushLogicalBuffer);
         }
     }
@@ -76,7 +76,7 @@ internal sealed class GraphTransaction : IGraphTransaction
 
     public void DeleteNode(NodeId nodeId)
     {
-        // Collect all relationships first, then delete them
+        // まず関連リレーションシップをすべて収集してから削除する
         var firstRelId = _inner.Nodes.Read(nodeId).FirstRelationshipId;
         var toDelete = new List<RelationshipId>();
         var relId = firstRelId;
@@ -103,9 +103,9 @@ internal sealed class GraphTransaction : IGraphTransaction
     {
         var labelId = _labelTokens.GetOrCreate(label);
 
-        // Scan-and-compare via the backend access path. We skip the scan when
-        // the property key has never been observed — no node can carry an
-        // unminted key, so the match must be a miss.
+        // バックエンドのアクセス経路を介してスキャン + 比較する。プロパティキーが
+        // 一度も観測されていない場合はスキャンを省略する — まだ発行されていないキーを
+        // ノードが保持することはあり得ないため、必ずミスになる。
         if (_propKeyTokens.TryGet(matchKey, out var keyId))
         {
             foreach (var nodeId in _inner.Access.ScanNodes(_inner, labelId))
@@ -152,9 +152,9 @@ internal sealed class GraphTransaction : IGraphTransaction
     public void DeleteRelationship(RelationshipId relId)
     {
         FreeRelationshipProperties(relId);
-        // PW-14: if this id falls inside the immutable base view it still
-        // shows up in the adjacency block — record a tombstone so subsequent
-        // expand cursors skip it. The store no-ops for delta ids.
+        // PW-14: この ID が不変ベースビューに含まれる場合、隣接ブロックには依然として
+        // 現れる — 後続の expand カーソルがスキップできるよう tombstone を記録する。
+        // delta 側 ID に対してはストアは no-op。
         _inner.AdjacencyBlocks?.Tombstone(relId);
         _inner.Relationships.Delete(_inner.Nodes, relId);
         if (_logicalSink != null)
@@ -179,8 +179,8 @@ internal sealed class GraphTransaction : IGraphTransaction
     public void SetProperty(NodeId nodeId, string key, in PropertyValue value)
     {
         var keyId = _propKeyTokens.GetOrCreate(key);
-        // BA-7: capture before SetNodeProperty mutates the chain — value is a
-        // ref struct, so the heap copy lives in LogicalPropertyValue.
+        // BA-7: SetNodeProperty がチェーンを変更する前にキャプチャする — value は
+        // ref struct のため、ヒープコピーは LogicalPropertyValue に閉じ込める。
         if (_logicalSink != null)
         {
             var captured = LogicalPropertyValue.Capture(in value);
@@ -223,7 +223,7 @@ internal sealed class GraphTransaction : IGraphTransaction
     {
         var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
 
-        // Remove old value if exists
+        // 既存値があれば削除する
         var newFirst = firstPropId;
         var propEnum = _inner.Properties.Enumerate(firstPropId);
         while (propEnum.MoveNext())
@@ -420,8 +420,8 @@ internal sealed class GraphTransaction : IGraphTransaction
     public void Rollback() => _inner.Abort();
     public void Dispose() => _inner.Dispose();
 
-    // VEC-3: post-commit / post-rollback hook registration delegates to the
-    // underlying transaction so users can register hooks via IGraphTransaction.
+    // VEC-3: post-commit / post-rollback フックの登録は下層トランザクションへ委譲する。
+    // ユーザは IGraphTransaction 経由でフックを登録できる。
     public void OnCommitted(Action callback) => _inner.OnCommitted(callback);
     public void OnRolledBack(Action callback) => _inner.OnRolledBack(callback);
 }

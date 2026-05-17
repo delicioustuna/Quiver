@@ -5,10 +5,9 @@ using Quiver.Transactions;
 namespace Quiver.Operators;
 
 /// <summary>
-/// Bidirectional BFS shortest path. More efficient than ShortestPathOperator for long paths.
-/// For each (sourceNode, targetNode) pair, emits (source, target, distance) when a path exists.
-/// Expands the forward frontier from source (in <paramref name="direction"/>) and the backward
-/// frontier from target (in the reverse direction) alternately.
+/// 双方向 BFS 最短経路。長いパスでは <see cref="ShortestPathOperator"/> より効率的。
+/// 各 (sourceNode, targetNode) ペアについて、経路が存在すれば (source, target, distance) を放出する。
+/// ソースから前方 (引数 direction 方向) と、ターゲットから後方 (逆方向) を交互に展開する。
 /// </summary>
 public sealed class BidirectionalExpandOperator : IPhysicalOperator
 {
@@ -81,7 +80,7 @@ public sealed class BidirectionalExpandOperator : IPhysicalOperator
     {
         if (src == tgt) return 0;
 
-        // fwdDist[v] = BFS distance from src; bwdDist[v] = BFS distance from tgt (backward).
+        // fwdDist[v] = src から v への BFS 距離、bwdDist[v] = tgt から v への BFS 距離 (後方)。
         var fwdDist = new Dictionary<long, long> { [src.Value] = 0 };
         var bwdDist = new Dictionary<long, long> { [tgt.Value] = 0 };
         var fwdFrontier = new List<NodeId> { src };
@@ -94,7 +93,7 @@ public sealed class BidirectionalExpandOperator : IPhysicalOperator
             long fLevel = fwdFrontier.Count > 0 ? fwdDist[fwdFrontier[0].Value] : long.MaxValue / 2;
             long bLevel = bwdFrontier.Count > 0 ? bwdDist[bwdFrontier[0].Value] : long.MaxValue / 2;
 
-            // Pruning: expanding either side now produces paths >= fLevel+1+bLevel or fLevel+bLevel+1.
+            // 枝刈り: ここから両側のどちらを展開しても、得られる経路長は fLevel+1+bLevel または fLevel+bLevel+1 以上になる。
             if (bestDist != long.MaxValue && fLevel + bLevel + 1 >= bestDist) break;
 
             if (fwdFrontier.Count > 0 && fLevel <= bLevel)

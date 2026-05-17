@@ -161,7 +161,7 @@ internal sealed class RelationshipStore : IRelationshipStore
                 UpdateListPrev(tgtNext, tgt, tgtPrev);
         }
 
-        // Free the record
+        // レコードを解放する
         var (pageId, off) = Location(relId.Value);
         var ph = _file.PinForWrite(pageId);
         Span<byte> rec = ph.Data.Slice(off, RecordSize);

@@ -73,8 +73,8 @@ public sealed class SqliteGraphTransaction : IGraphTransaction
     {
         EnsureWritable();
 
-        // Mirror the binary backend: cascade-delete incident relationships
-        // (including their properties) before tombstoning the node.
+        // バイナリバックエンドと同じ挙動: ノードを tombstone する前に、接続している
+        // リレーションシップ (とそのプロパティ) をカスケード削除する。
         var incident = new List<long>();
         using (var cmd = NewCommand())
         {
@@ -530,8 +530,8 @@ public sealed class SqliteGraphTransaction : IGraphTransaction
         cmd.Parameters.AddWithValue("$k", keyId);
         cmd.Parameters.AddWithValue("$vt", (int)value.Type);
 
-        // Set the column matching the value type; leave the others NULL so the
-        // row remains debuggable via plain SQL.
+        // 値型に対応する列だけセットし、他は NULL のままにする。プレーン SQL でも
+        // 行のデバッグがしやすくなる。
         object intVal = DBNull.Value, dblVal = DBNull.Value, txtVal = DBNull.Value, blbVal = DBNull.Value;
         switch (value.Type)
         {

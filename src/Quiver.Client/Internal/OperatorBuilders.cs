@@ -42,8 +42,8 @@ internal sealed class ExpandBuilder : IOperatorBuilder
     private readonly Direction _direction;
     private readonly string? _typeFilter;
     private readonly ExpandOutputMode _mode;
-    // GC-6: upstream column indices to forward into the output tuple's tail.
-    // Null when no alias is live so the existing fast path is preserved.
+    // GC-6: 出力タプル末尾へ転送する上流列インデックス。
+    // エイリアスが生きていない場合は null にして既存の fast path を維持する。
     private readonly int[]? _carryColumns;
     // GC-6: column of the source operator to expand from. Defaults to
     // <c>_source.CurrentEntityColumn</c> — but <c>.Select(alias).Out(...)</c>

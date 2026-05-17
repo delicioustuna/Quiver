@@ -4,30 +4,29 @@ using Quiver.Stores;
 namespace Quiver.Transactions;
 
 /// <summary>
-/// Backend access-method contract (BA-3, codex_advice_3.md §1). Operators route
-/// scan / seek / expand through this interface instead of directly poking
-/// <see cref="ITransaction.Nodes"/> / <see cref="ITransaction.Relationships"/> /
-/// <see cref="ITransaction.AdjacencyBlocks"/>, so each backend can choose its
-/// own access path (linked-list, adjacency-block, relationship scan, etc.).
+/// バックエンドの access methods コントラクト (BA-3、codex_advice_3.md 1 節)。
+/// オペレータは <see cref="ITransaction.Nodes"/> / <see cref="ITransaction.Relationships"/> /
+/// <see cref="ITransaction.AdjacencyBlocks"/> を直接叩く代わりに、scan / seek / expand を
+/// このインタフェースを経由してルーティングする。これにより各バックエンドは独自の access path
+/// (リンクリスト、隣接ブロック、リレーションシップスキャン等) を選択できる。
 /// </summary>
 public interface IGraphAccessMethods
 {
-    /// <summary>Enumerate live nodes, optionally constrained to a single label.</summary>
+    /// <summary>生存中のノードを列挙する。任意でラベル 1 件に絞り込める。</summary>
     IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null);
 
     /// <summary>
-    /// Seek a B+Tree index by exact key match. Routes to the correct typed
-    /// index based on <paramref name="key"/>'s <see cref="PropertyValue.Type"/>.
-    /// Returns an empty sequence when the index is missing or the type is unsupported.
+    /// B+Tree インデックスを完全一致でシークする。<paramref name="key"/> の
+    /// <see cref="PropertyValue.Type"/> に基づき型ごとのインデックスへルーティングする。
+    /// インデックスが存在しないか、型が未対応の場合は空シーケンスを返す。
     /// </summary>
     IEnumerable<NodeId> SeekNodesByIndex(ITransaction tx, string indexName, PropertyValue key);
 
     /// <summary>
-    /// Open a cursor over edges incident to <paramref name="source"/> matching
-    /// the requested direction and optional type filter. The cursor owns the
-    /// choice of access path (adjacency block with linked-list fallback for
-    /// the binary backend) and bumps <see cref="AdjacencyFallbackCount"/>
-    /// whenever it drops back to the slower path.
+    /// <paramref name="source"/> に接続するエッジのうち、要求された方向と任意の型フィルタに
+    /// マッチするものを列挙するカーソルを開く。アクセス経路の選択 (バイナリバックエンドでは
+    /// 隣接ブロック + リンクリストフォールバック) はカーソルが管理し、低速経路に落ちる度に
+    /// <see cref="AdjacencyFallbackCount"/> を増やす。
     /// </summary>
     ExpandCursor Expand(
         ITransaction tx,
@@ -36,8 +35,8 @@ public interface IGraphAccessMethods
         RelationshipTypeId? typeFilter);
 
     /// <summary>
-    /// Estimated number of edges that <see cref="Expand"/> would emit. Used by
-    /// optimizer plan selection to size buffers / pick strategies.
+    /// <see cref="Expand"/> が放出するエッジ数の推定値。オプティマイザのプラン選択で
+    /// バッファサイズ / ストラテジ選定に使われる。
     /// </summary>
     double EstimateExpandCardinality(
         ITransaction tx,
@@ -46,42 +45,38 @@ public interface IGraphAccessMethods
         RelationshipTypeId? typeFilter);
 
     /// <summary>
-    /// Lifetime counter for how often the expand cursor abandoned a fast path
-    /// (e.g. adjacency block buffer filled exactly) and fell back to the
-    /// linked-list walk. Surfaced via <c>IDiagnosticsApi.GetStatistics</c>.
+    /// expand カーソルが fast path (例: 隣接ブロックバッファが満杯になった場合) を諦めて
+    /// リンクリストウォークにフォールバックした累計回数。<c>IDiagnosticsApi.GetStatistics</c>
+    /// 経由で公開される。
     /// </summary>
     long AdjacencyFallbackCount { get; }
 
     /// <summary>
-    /// VEC-5: KNN access path. Delegates to the backend's <see cref="IVectorStore"/>
-    /// so operators can treat vector search as a first-class scan source. The
-    /// query span is copied internally — callers do not need to keep it alive
-    /// past the call.
+    /// VEC-5: KNN access path。バックエンドの <see cref="IVectorStore"/> に委譲し、
+    /// オペレータがベクトル検索をファーストクラスのスキャンソースとして扱えるようにする。
+    /// query スパンは内部でコピーするので、呼び出し側が呼び出し以降も保持する必要はない。
     /// </summary>
     /// <remarks>
-    /// codex_advice_3.md §6.4. Returns results in descending similarity order
-    /// (Cosine/Dot) or ascending distance (Euclidean — internally negated so
-    /// the cursor's score is still "higher = closer"). Backends without a
-    /// vector store should throw <see cref="NotSupportedException"/>.
+    /// codex_advice_3.md 6.4 節。Cosine / Dot では類似度降順、Euclidean では距離昇順 (内部で
+    /// 符号反転して "高いほど近い" スコアに揃える) で結果を返す。
+    /// ベクトルストアを持たないバックエンドは <see cref="NotSupportedException"/> を投げる。
     /// </remarks>
     VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
         => throw new NotSupportedException(
-            "This backend does not implement KnnSearch. Wire an IVectorStore into the access methods.");
+            "このバックエンドは KnnSearch を実装していません。access methods に IVectorStore を接続してください。");
 
     /// <summary>
-    /// VEC-6: filtered KNN. Returns the top-<paramref name="k"/> vectors that
-    /// are also members of <paramref name="candidates"/>. The default
-    /// implementation oversamples <see cref="KnnSearch"/> (k → 2k → 4k …) and
-    /// post-filters until either k matches are found or the oversample cap
-    /// is reached — backends may pushdown the filter into the vector index
-    /// when the underlying ANN structure supports it.
+    /// VEC-6: フィルタ付き KNN。<paramref name="candidates"/> のメンバーに限定して
+    /// 上位 <paramref name="k"/> 件のベクトルを返す。既定実装は <see cref="KnnSearch"/> を
+    /// オーバーサンプリング (k → 2k → 4k …) してポストフィルタを掛け、k 件揃うか
+    /// オーバーサンプル上限に達するまで繰り返す。ANN 構造がサポートしていれば、
+    /// バックエンドはベクトルインデックス側にフィルタを push down してよい。
     /// </summary>
     /// <remarks>
-    /// codex_advice_3.md §6.4. Score ordering is preserved: results come back
-    /// in descending similarity. <paramref name="candidates"/> with a
-    /// different <see cref="EntityCandidateSet.Kind"/> than the index's
-    /// <see cref="EntityKind"/> match nothing — that's a configuration error
-    /// the operator level surfaces, not a contract violation.
+    /// codex_advice_3.md 6.4 節。スコア順序は維持され、類似度降順で返る。
+    /// <paramref name="candidates"/> の <see cref="EntityCandidateSet.Kind"/> がインデックスの
+    /// <see cref="EntityKind"/> と異なる場合は常に一致無しになる — これは構成誤りで、
+    /// オペレータ層が顕在化させる責務であり、本契約違反ではない。
     /// </remarks>
     VectorSearchCursor KnnSearchFiltered(
         string indexName,
@@ -90,16 +85,16 @@ public interface IGraphAccessMethods
         EntityCandidateSet candidates)
     {
         ArgumentNullException.ThrowIfNull(candidates);
-        if (k <= 0) throw new ArgumentOutOfRangeException(nameof(k), k, "k must be positive.");
+        if (k <= 0) throw new ArgumentOutOfRangeException(nameof(k), k, "k は正の整数である必要があります。");
 
-        // Empty candidate set ⇒ empty result. Avoid touching the vector index
-        // for the trivial case where graph-first already pruned to nothing.
+        // 候補集合が空 ⇒ 結果も空。graph-first が既に全部刈り取っている自明ケースで
+        // ベクトルインデックスに触らないよう早期 return する。
         if (candidates.Count == 0)
             return EmptyVectorSearchCursor.Instance;
 
-        // Two-stage oversample. The cap is generous: max(k*64, candidates.Count*2)
-        // — high enough that even adversarial layouts converge, while still
-        // bounding worst-case work below "score every vector twice".
+        // 2 段オーバーサンプル。上限は寛大: max(k*64, candidates.Count*2)
+        // — 敵対的レイアウトでも収束しつつ、最悪ケースを「全ベクトルを 2 回スコアリング」未満に
+        // バウンドする。
         int oversampleCap = Math.Max(k * 64, candidates.Count * 2);
         int candidateK = Math.Min(Math.Max(k * 4, k + candidates.Count / 4), oversampleCap);
 
@@ -117,8 +112,8 @@ public interface IGraphAccessMethods
                 }
             }
 
-            // Either we hit k or we've exhausted the index (oversample at cap
-            // and still short). Both paths return the partial result.
+            // k 件確保できたか、インデックスを使い切ったか (オーバーサンプルが上限で
+            // まだ足りない) のどちらか。いずれも部分結果を返す。
             if (hits.Count >= k || candidateK >= oversampleCap)
                 return new MaterializedVectorSearchCursor(hits);
 
@@ -132,7 +127,7 @@ internal sealed class EmptyVectorSearchCursor : VectorSearchCursor
     public static readonly EmptyVectorSearchCursor Instance = new();
     public override bool MoveNext() => false;
     public override VectorSearchResult Current
-        => throw new InvalidOperationException("Cursor is empty.");
+        => throw new InvalidOperationException("カーソルは空です。");
 }
 
 internal sealed class MaterializedVectorSearchCursor(IReadOnlyList<VectorSearchResult> hits) : VectorSearchCursor
@@ -143,24 +138,29 @@ internal sealed class MaterializedVectorSearchCursor(IReadOnlyList<VectorSearchR
 }
 
 /// <summary>
-/// Backend-owned cursor for one-hop expansion. Replaces the inline
-/// adjacency-block-or-linked-list bookkeeping that previously lived in
-/// <c>ExpandOperator</c> / <c>BfsOperator</c>.
+/// 1 ホップ展開のためにバックエンドが保持するカーソル。以前 <c>ExpandOperator</c> /
+/// <c>BfsOperator</c> 内にインラインで存在していた「隣接ブロックかリンクリストか」の
+/// 場合分けを置き換える。
 /// </summary>
 public abstract class ExpandCursor : IDisposable
 {
+    /// <summary>次のエッジに進む。エッジを使い切ったら false を返す。</summary>
     public abstract bool MoveNext();
+
+    /// <summary>現在エッジの隣接ノード ID。</summary>
     public abstract NodeId Neighbor { get; }
+
+    /// <summary>現在エッジのリレーションシップ ID。</summary>
     public abstract RelationshipId Relationship { get; }
 
     /// <summary>
-    /// BA-6: raw 64-bit payload (typically an edge weight) for the current
-    /// edge. Cursors backed by a V2 adjacency view forward the inline payload
-    /// lane; other cursors return 0. Reinterpret as <see cref="double"/> via
-    /// <see cref="BitConverter.Int64BitsToDouble"/> when the active payload
-    /// kind is Double.
+    /// BA-6: 現在エッジの生 64 ビット payload (典型的にはエッジ重み)。V2 隣接ビュー裏付けの
+    /// カーソルは inline payload lane を転送する。それ以外のカーソルは 0 を返す。
+    /// 有効な payload 種別が Double のときは <see cref="BitConverter.Int64BitsToDouble"/> で
+    /// <see cref="double"/> として再解釈する。
     /// </summary>
     public virtual long WeightRaw => 0;
 
+    /// <inheritdoc/>
     public virtual void Dispose() { }
 }

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/docfx/main/schemas/docfx.schema.json",
+  "metadata": [
+    {
+      "src": [
+        {
+          "files": [
+            "src/Quiver/**/*.csproj",
+            "src/Quiver.Client/**/*.csproj",
+            "src/Quiver.Client.Attributes/**/*.csproj",
+            "src/Quiver.Core/**/*.csproj",
+            "src/Quiver.Operators/**/*.csproj",
+            "src/Quiver.Stores/**/*.csproj",
+            "src/Quiver.Storage/**/*.csproj",
+            "src/Quiver.Index/**/*.csproj",
+            "src/Quiver.Wal/**/*.csproj",
+            "src/Quiver.Codec/**/*.csproj",
+            "src/Quiver.Transactions/**/*.csproj",
+            "src/Quiver.Embedding/**/*.csproj"
+          ],
+          "src": "."
+        }
+      ],
+      "dest": "docs/api/_apispec",
+      "includePrivateMembers": false,
+      "disableGitFeatures": false,
+      "disableDefaultFilter": false,
+      "noRestore": false,
+      "namespaceLayout": "flattened",
+      "memberLayout": "samePage",
+      "EnumSortOrder": "alphabetic",
+      "allowCompilationErrors": false
+    }
+  ],
+  "build": {
+    "content": [
+      {
+        "files": ["**/*.{md,yml}"],
+        "src": "docs/api",
+        "exclude": ["_apispec/**", "_site/**"]
+      },
+      {
+        "files": ["**/*.{md,yml}"],
+        "src": "docs/api/_apispec",
+        "dest": "api"
+      }
+    ],
+    "resource": [
+      {
+        "files": ["images/**"],
+        "src": "docs/api"
+      }
+    ],
+    "output": "docs/api/_site",
+    "globalMetadata": {
+      "_appName": "Quiver",
+      "_appTitle": "Quiver — Pure C# Graph Database",
+      "_enableSearch": true,
+      "pdf": false,
+      "_lang": "ja"
+    },
+    "template": ["default", "modern"],
+    "postProcessors": ["ExtractSearchIndex"],
+    "keepFileLink": false,
+    "disableGitFeatures": false
+  }
+}

@@ -3,38 +3,38 @@ using Quiver.Core;
 namespace Quiver.Logical;
 
 /// <summary>
-/// BA-7 / codex_advice_3 §8. A semantic record of one graph mutation.
+/// BA-7 / codex_advice_3 8 節。1 件のグラフミューテーションを表すセマンティックレコード。
 ///
-/// Logical mutations are produced by a writing <see cref="IGraphTransaction"/>
-/// after each public mutation call, buffered until commit, and handed to a
-/// <see cref="ILogicalMutationSink"/> once the underlying transaction has
-/// durably committed (binary backend: WAL flush; SQLite backend: COMMIT).
+/// 論理ミューテーションは書き込み中の <see cref="IGraphTransaction"/> によって、
+/// 各公開ミューテーション呼び出しの後に生成され、コミットまでバッファされる。
+/// 下層トランザクションが永続化コミットされる (バイナリバックエンドの場合は WAL フラッシュ、
+/// SQLite バックエンドの場合は COMMIT) と、<see cref="ILogicalMutationSink"/> に渡される。
 ///
-/// The record is self-contained — label / relationship-type / property-key
-/// names are captured as strings rather than tokens so the stream can be
-/// inspected, shipped, and replayed against a graph that has not yet seen
-/// those tokens (token ids will differ between source and target databases).
+/// レコードは自己完結している — ラベル / リレーションシップ型 / プロパティキーの名称は
+/// トークン ID ではなく文字列で保持するため、まだそれらトークンが未登録のグラフに対しても
+/// ストリームを検査・送信・再生できる (トークン ID はソース DB とターゲット DB で異なる)。
 /// </summary>
 public readonly struct LogicalMutation
 {
+    /// <summary>ミューテーションの種別。</summary>
     public LogicalMutationKind Kind { get; }
 
-    /// <summary>Primary node id (CreateNode / DeleteNode / *NodeProperty / CreateRelationship source).</summary>
+    /// <summary>主要なノード ID (CreateNode / DeleteNode / *NodeProperty / CreateRelationship の source)。</summary>
     public NodeId NodeId { get; }
 
-    /// <summary>CreateRelationship target node.</summary>
+    /// <summary>CreateRelationship のターゲットノード。</summary>
     public NodeId TargetNodeId { get; }
 
-    /// <summary>Relationship id (CreateRelationship return / DeleteRelationship / SetRelationshipProperty).</summary>
+    /// <summary>リレーションシップ ID (CreateRelationship の戻り値 / DeleteRelationship / SetRelationshipProperty)。</summary>
     public RelationshipId RelationshipId { get; }
 
-    /// <summary>Label name for <see cref="LogicalMutationKind.CreateNode"/>; relationship type for <see cref="LogicalMutationKind.CreateRelationship"/>.</summary>
+    /// <summary><see cref="LogicalMutationKind.CreateNode"/> ではラベル名、<see cref="LogicalMutationKind.CreateRelationship"/> ではリレーションシップ型名。</summary>
     public string? TokenName { get; }
 
-    /// <summary>Property key name for *Property mutations.</summary>
+    /// <summary>*Property ミューテーションのプロパティキー名。</summary>
     public string? PropertyKey { get; }
 
-    /// <summary>Property value for <see cref="LogicalMutationKind.SetNodeProperty"/> / <see cref="LogicalMutationKind.SetRelationshipProperty"/>.</summary>
+    /// <summary><see cref="LogicalMutationKind.SetNodeProperty"/> / <see cref="LogicalMutationKind.SetRelationshipProperty"/> のプロパティ値。</summary>
     public LogicalPropertyValue PropertyValue { get; }
 
     private LogicalMutation(

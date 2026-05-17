@@ -68,7 +68,7 @@ public sealed class BitmapFilterOperator : IPhysicalOperator
     {
         while (true)
         {
-            // Drain the current batch's surviving rows.
+            // 現在のバッチで生き残った行を排出する。
             if (_batchCount > 0)
             {
                 var bm = new PageSelectionBitmap(_bitmapWords!, _batchCount);

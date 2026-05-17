@@ -1,12 +1,16 @@
-﻿namespace Quiver.Client;
+namespace Quiver.Client;
 
 /// <summary>
-/// Streaming cursor over typed traversal results.
-/// Valid only within the owning transaction; must be disposed by the caller.
+/// 型付きトラバーサル結果のストリーミングカーソル。
+/// 所属トランザクションが生きている間だけ有効で、呼び出し側が必ず破棄する責任を負う。
 /// </summary>
+/// <typeparam name="T">列挙する要素型。</typeparam>
 public interface ITraversalCursor<out T> : IDisposable
 {
+    /// <summary>次の要素に進む。要素が無くなったら <c>false</c>。</summary>
     bool MoveNext();
+
+    /// <summary>直近の <see cref="MoveNext"/> で取得した現在要素。</summary>
     T Current { get; }
 }
 

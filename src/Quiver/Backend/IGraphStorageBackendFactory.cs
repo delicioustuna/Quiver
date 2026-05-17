@@ -1,11 +1,12 @@
 namespace Quiver;
 
 /// <summary>
-/// Factory used by <see cref="GraphDatabase.Open(string, GraphDatabaseOptions?)"/>
-/// to construct the active backend. Allows callers to inject custom backends
-/// (e.g. an in-memory factory in tests) without subclassing <see cref="GraphDatabase"/>.
+/// <see cref="GraphDatabase.Open(string, GraphDatabaseOptions?)"/> がアクティブな
+/// バックエンドを構築する際に使うファクトリ。<see cref="GraphDatabase"/> をサブクラス化せず、
+/// テスト用のインメモリファクトリ等を呼び出し側で注入できる。
 /// </summary>
 public interface IGraphStorageBackendFactory
 {
+    /// <summary>指定ディレクトリとオプションでバックエンドをオープン (新規作成も含む) する。</summary>
     IGraphStorageBackend Open(string directoryPath, GraphDatabaseOptions options);
 }

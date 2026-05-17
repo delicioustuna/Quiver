@@ -5,6 +5,15 @@ using Microsoft.Extensions.Logging;
 
 namespace Quiver;
 
+/// <summary>
+/// Quiver の最上位エントリポイント。グラフデータベースのオープン・トランザクション開始・
+/// バルクロード・スナップショットビュー構築・統計収集の窓口を提供する。
+/// </summary>
+/// <remarks>
+/// 内部では <see cref="IGraphStorageBackend"/> を介してバイナリ / SQLite など複数の
+/// ストレージバックエンドを切り替え可能。通常は <see cref="Open"/> で生成し、用が済んだら
+/// <see cref="Dispose"/> で破棄する。
+/// </remarks>
 public sealed class GraphDatabase : IDisposable
 {
     private readonly IGraphStorageBackend _backend;
@@ -14,6 +23,12 @@ public sealed class GraphDatabase : IDisposable
         _backend = backend;
     }
 
+    /// <summary>
+    /// 指定ディレクトリのデータベースを開く (存在しない場合は新規作成)。
+    /// <paramref name="options"/> 経由でバックエンド種別やバッファプールサイズなどを指定可。
+    /// </summary>
+    /// <param name="directoryPath">データベースディレクトリのパス。</param>
+    /// <param name="options">起動オプション。<c>null</c> の場合は既定値が使われる。</param>
     public static GraphDatabase Open(string directoryPath, GraphDatabaseOptions? options = null)
     {
         options ??= new GraphDatabaseOptions();
@@ -25,76 +40,83 @@ public sealed class GraphDatabase : IDisposable
     private static IGraphStorageBackendFactory CreateDefaultFactory(BackendKind kind) => kind switch
     {
         BackendKind.Binary => new BinaryGraphStorageBackendFactory(),
-        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown backend kind"),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "未知のバックエンド種別です。"),
     };
 
     /// <summary>
-    /// Exposes the underlying backend. Intended for diagnostics and backend-specific
-    /// capabilities; ordinary callers should prefer <see cref="BeginTransaction"/> etc.
+    /// 下層バックエンドを公開する。診断やバックエンド固有機能の利用が目的で、
+    /// 通常の呼び出しは <see cref="BeginTransaction"/> 等を優先する。
     /// </summary>
     public IGraphStorageBackend Backend => _backend;
 
+    /// <summary>
+    /// バルクロード用ローダを開始する。
+    /// </summary>
     /// <param name="buildAdjacencyIndex">
-    /// When true, <see cref="BulkLoader.Commit"/> additionally builds adj.db + adj_idx.dat
-    /// so the adjacency block store is available for subsequent read-only transactions.
+    /// <c>true</c> の場合、<see cref="BulkLoader.Commit"/> 時に adj.db + adj_idx.dat も
+    /// 同時に構築し、その後の読み取り専用トランザクションから隣接ブロックストアが利用可能になる。
     /// </param>
     public BulkLoader BeginBulkLoad(bool buildAdjacencyIndex = false)
     {
         var fn = _backend.BulkLoad.BeginBinaryBulkLoad
             ?? throw new NotSupportedException(
-                "The active backend does not support binary bulk loading.");
+                "現在のバックエンドはバイナリバルクロードに対応していません。");
         return fn(buildAdjacencyIndex);
     }
 
     /// <summary>
-    /// PW-9: opens a <see cref="StreamingBulkLoader"/> for very large imports (10M+ edges).
-    /// Relationship records are streamed to a temp file during append, so peak heap memory
-    /// is bounded by the dense pointer arrays (~32 × maxRelId bytes) rather than scaling
-    /// with the full rel list. Requires <c>AppendRelationship</c> calls to use strictly
-    /// increasing <see cref="RelationshipId"/>; throws <see cref="NotSupportedException"/>
-    /// if the active backend has no streaming bulk-load path.
+    /// PW-9: 1000 万エッジ以上の大規模インポート向けに <see cref="StreamingBulkLoader"/> を開く。
+    /// 追記中はリレーションシップレコードを一時ファイルにストリーミングするため、ピークヒープは
+    /// dense ポインタ配列 (~32 × maxRelId バイト) でバウンドされ、全リレーションシップ数には依存しない。
+    /// <c>AppendRelationship</c> は <see cref="RelationshipId"/> が厳密に増加する順序で呼ぶ必要がある。
+    /// 現在のバックエンドにストリーミングバルクロード経路が無い場合は <see cref="NotSupportedException"/> を投げる。
     /// </summary>
     public StreamingBulkLoader BeginStreamingBulkLoad(bool buildAdjacencyIndex = false)
     {
         var fn = _backend.BulkLoad.BeginStreamingBinaryBulkLoad
             ?? throw new NotSupportedException(
-                "The active backend does not support streaming binary bulk loading.");
+                "現在のバックエンドはストリーミングバイナリバルクロードに対応していません。");
         return fn(buildAdjacencyIndex);
     }
 
+    /// <summary>新規グラフトランザクションを開始する。</summary>
+    /// <param name="level">分離レベル (既定: スナップショット分離)。</param>
     public IGraphTransaction BeginTransaction(
         IsolationLevel level = IsolationLevel.SnapshotIsolation)
         => _backend.BeginGraphTransaction(level, readOnly: false);
 
     /// <summary>
-    /// Opens a snapshot-isolation transaction marked as read-only.
-    /// Read-only transactions are safe to use with parallel traversal operators
-    /// such as <see cref="Quiver.Operators.ParallelBfsOperator"/>.
+    /// 読み取り専用としてマークしたスナップショット分離トランザクションを開く。
+    /// 読み取り専用トランザクションは <see cref="Quiver.Operators.ParallelBfsOperator"/> など
+    /// 並列トラバーサル系オペレータと安全に組み合わせられる。
     /// </summary>
     public IGraphTransaction BeginReadOnlyTransaction()
         => _backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: true);
 
+    /// <summary>ラベル・プロパティキー・リレーションシップ型・インデックスのスキーマ API。</summary>
     public ISchemaApi Schema => _backend.Schema;
+
+    /// <summary>統計取得・整合性検査などの診断 API。</summary>
     public IDiagnosticsApi Diagnostics => _backend.Diagnostics;
 
     /// <summary>
-    /// VEC-5: the backend's vector store. Users call <c>CreateVectorIndex</c> /
-    /// <c>SetVector</c> here directly; query-side access is via
-    /// <c>g.Knn(...)</c> on the traversal source.
+    /// VEC-5: バックエンドのベクトルストア。<c>CreateVectorIndex</c> や
+    /// <c>SetVector</c> は直接ここから呼ぶ。問い合わせ側のアクセスは
+    /// トラバーサルソースの <c>g.Knn(...)</c> 経由。
     /// </summary>
     public Core.IVectorStore Vectors => _backend.Vectors;
 
     /// <summary>
-    /// Scan the entire database and return a fresh <see cref="GraphStats"/> snapshot.
-    /// This is an O(N + E) operation and is typically called once at startup or after bulk loads.
+    /// データベース全体をスキャンして新しい <see cref="GraphStats"/> スナップショットを返す。
+    /// O(N + E) のコストがかかるため、通常は起動時やバルクロード後に 1 回だけ呼ぶ。
     /// </summary>
     public GraphStats CollectStats()
         => CollectStats(GraphStats.PowerNodeDegreeThreshold);
 
     /// <summary>
-    /// Variant that lets the caller override the power-node degree threshold used to
-    /// populate <see cref="GraphStats.PowerNodes"/>. Useful in tests / diagnostics
-    /// where the default <see cref="GraphStats.PowerNodeDegreeThreshold"/> is too large.
+    /// パワーノード判定の degree しきい値を呼び出し側でオーバーライドできる版。
+    /// テストや診断で既定値 (<see cref="GraphStats.PowerNodeDegreeThreshold"/>) が
+    /// 大きすぎる場合に有用。
     /// </summary>
     public GraphStats CollectStats(int powerNodeThreshold)
     {
@@ -103,8 +125,8 @@ public sealed class GraphDatabase : IDisposable
     }
 
     /// <summary>
-    /// PW-16: overload that also lets callers tune the dense/sparse cut-over
-    /// for the per-node degree lookup. See <see cref="NodeDegreeLookup"/>.
+    /// PW-16: ノード毎の degree lookup における dense / sparse 切り替えしきい値を
+    /// 呼び出し側で調整できるオーバーロード。詳細は <see cref="NodeDegreeLookup"/> 参照。
     /// </summary>
     public GraphStats CollectStats(int powerNodeThreshold, double denseThreshold)
     {
@@ -113,26 +135,23 @@ public sealed class GraphDatabase : IDisposable
     }
 
     /// <summary>
-    /// Create a <see cref="QueryOptimizer"/> backed by the given stats (or a freshly collected
-    /// snapshot when <paramref name="stats"/> is null).
+    /// 指定の統計 (または新規収集したスナップショット) を背景に持つ <see cref="QueryOptimizer"/> を生成する。
     /// </summary>
     public QueryOptimizer CreateOptimizer(GraphStats? stats = null)
         => new(stats ?? CollectStats());
 
     /// <summary>
-    /// PW-15 / codex_advice_3 §7.7. Build a point-in-time CSR/CSC snapshot of
-    /// the current graph for repeated multi-pass algorithms (PageRank,
-    /// Louvain, repeated BFS / shortest-path). Snapshot construction is
-    /// O(N + E); subsequent neighbor lookups read flat arrays, which is
-    /// cheaper than opening one adjacency cursor per node when an algorithm
-    /// makes many passes over the same graph state.
-    ///
-    /// Internally opens a snapshot-isolation read-only transaction, builds
-    /// the view, then closes the transaction — so the returned view does
-    /// not pin a transaction beyond construction. Mutations after this call
-    /// are invisible to the snapshot. Dispose the view to release pooled
-    /// arrays.
+    /// PW-15 / codex_advice_3 7.7 節。PageRank・Louvain・繰り返し BFS / 最短経路など
+    /// 同一グラフ状態を複数回パスするアルゴリズム向けに、現在のグラフのポイントインタイム CSR/CSC
+    /// スナップショットを構築する。構築は O(N + E)。その後の隣接アクセスはフラット配列の参照に
+    /// なるため、ノード毎に隣接カーソルを開くより安価になる。
     /// </summary>
+    /// <remarks>
+    /// 内部でスナップショット分離の読み取り専用トランザクションを開いてビューを構築し、
+    /// その後トランザクションを閉じるので、返却ビューは構築後にトランザクションを留めない。
+    /// 本呼び出し以降のミューテーションはスナップショットからは見えない。プール済み配列を
+    /// 解放するためビューは <see cref="IDisposable.Dispose"/> で破棄すること。
+    /// </remarks>
     public IGraphSnapshotView OpenSnapshotView()
     {
         using var tx = _backend.Transactions.Begin(IsolationLevel.SnapshotIsolation);
@@ -140,20 +159,18 @@ public sealed class GraphDatabase : IDisposable
     }
 
     /// <summary>
-    /// FT-12 / codex_advice_3 §7.3. Build a SID-style join index from
-    /// <see cref="RelationshipId"/> to the scalar value of
-    /// <paramref name="propertyKey"/>. Intended for weighted traversals,
-    /// edge filters, and algorithm kernels that already hold a
-    /// relationship id and want the value without walking the property
-    /// chain.
-    ///
-    /// O(R + P) build cost (one pass over the relationship store plus the
-    /// per-rel property chain walk). Mutations after the build are
-    /// invisible — rebuild after material graph changes when freshness
-    /// matters. The returned index can outlive the build transaction.
+    /// FT-12 / codex_advice_3 7.3 節。<see cref="RelationshipId"/> から
+    /// <paramref name="propertyKey"/> のスカラ値へのジョインインデックス (SID 風) を構築する。
+    /// 重み付きトラバーサル、エッジフィルタ、リレーション ID を既に持っているアルゴリズムカーネルで、
+    /// プロパティチェーンを辿らずに値を取り出す用途を想定。
     /// </summary>
-    /// <param name="propertyKey">Property key name; must already exist via <see cref="ISchemaApi.GetOrCreatePropertyKey"/>.</param>
-    /// <param name="expectedType">Scalar inline type to project. Values of other types are skipped.</param>
+    /// <remarks>
+    /// 構築コストは O(R + P) (リレーションストアの 1 パス + 各エッジのプロパティチェーン走査)。
+    /// 構築後のミューテーションは可視化されない — 鮮度が必要なら、グラフを変更した後に再構築する。
+    /// 返却インデックスは構築トランザクションよりも長く生存可能。
+    /// </remarks>
+    /// <param name="propertyKey">プロパティキー名。<see cref="ISchemaApi.GetOrCreatePropertyKey"/> で事前に作成済みであること。</param>
+    /// <param name="expectedType">射影するスカラ型。他の型の値はスキップされる。</param>
     public Stores.IRelationshipPropertyJoinIndex BuildRelationshipPropertyJoinIndex(
         string propertyKey,
         Stores.PropertyValueType expectedType)
@@ -166,13 +183,11 @@ public sealed class GraphDatabase : IDisposable
     }
 
     /// <summary>
-    /// PW-14 / codex_advice_3 §7.6. Rebuild the immutable base adjacency view
-    /// from the current relationship state, drop tombstones, and advance the
-    /// epoch. After this call all live edges are served from the base view and
-    /// the delta walk becomes a no-op until new relationships are created.
-    /// Throws when the active backend doesn't support compact (anything other
-    /// than the binary backend without a payload lane). Caller must ensure no
-    /// transactions are active.
+    /// PW-14 / codex_advice_3 7.6 節。現在のリレーションシップ状態から不変ベースビューを再構築し、
+    /// tombstone を破棄してエポックを進める。本呼び出し以降、生存中のエッジはすべてベースビューから
+    /// 提供され、新しいリレーションシップが作成されるまで delta ウォークは no-op になる。
+    /// payload lane の無いバイナリバックエンド以外はサポート対象外で、その場合は例外を投げる。
+    /// 呼び出し前にアクティブトランザクションが無いことを呼び出し側が保証すること。
     /// </summary>
     public void CompactAdjacency()
     {
@@ -180,41 +195,54 @@ public sealed class GraphDatabase : IDisposable
             binary.CompactAdjacency();
         else
             throw new NotSupportedException(
-                "CompactAdjacency is only implemented for the binary backend.");
+                "CompactAdjacency はバイナリバックエンドのみ実装されています。");
     }
 
+    /// <summary>下層バックエンドを破棄する。</summary>
     public void Dispose() => _backend.Dispose();
 }
 
+/// <summary>
+/// <see cref="GraphDatabase.Open"/> に渡す起動オプション。
+/// バッファプール / WAL / ロックタイムアウト / チェックサム有効化 / バックエンド種別などを指定する。
+/// </summary>
 public sealed class GraphDatabaseOptions
 {
+    /// <summary>バッファプールの目標サイズ (バイト単位)。既定 256 MB。</summary>
     public long BufferPoolSize { get; set; } = 256 * 1024 * 1024;
+
+    /// <summary>WAL 1 セグメントのサイズ (バイト単位)。既定 64 MB。</summary>
     public int WalSegmentSize { get; set; } = 64 * 1024 * 1024;
+
+    /// <summary>ロック取得のタイムアウト。既定 5 秒。</summary>
     public TimeSpan LockTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>ページのチェックサム計算 / 検証を有効にするか。既定 <c>true</c>。</summary>
     public bool EnableChecksums { get; set; } = true;
+
+    /// <summary>ロギング用 <see cref="ILoggerFactory"/>。null のときはログ無し。</summary>
     public ILoggerFactory? LoggerFactory { get; set; }
 
     /// <summary>
-    /// Selects which built-in backend to instantiate when
-    /// <see cref="BackendFactory"/> is null. Defaults to <see cref="BackendKind.Binary"/>.
+    /// <see cref="BackendFactory"/> が null のときに利用する組み込みバックエンドの種別。
+    /// 既定は <see cref="BackendKind.Binary"/>。
     /// </summary>
     public BackendKind Backend { get; set; } = BackendKind.Binary;
 
     /// <summary>
-    /// Optional explicit factory. When set, overrides <see cref="Backend"/>.
-    /// Use this to inject custom (e.g. in-memory) backends from tests.
+    /// 任意のファクトリ。設定すると <see cref="Backend"/> をオーバーライドする。
+    /// テストからインメモリバックエンド等を注入する用途を想定。
     /// </summary>
     public IGraphStorageBackendFactory? BackendFactory { get; set; }
 
     /// <summary>
-    /// BA-7 / codex_advice_3 §8. When non-null the backend records every
-    /// public graph mutation (<c>CreateNode</c>, <c>CreateRelationship</c>,
-    /// <c>SetProperty</c>, ...) of each writing transaction and hands the
-    /// batch to this sink after the underlying commit becomes durable. The
-    /// binary backend continues to use its PageImage WAL for crash recovery —
-    /// the logical stream is an optional second sink for SQLite backend
-    /// support, debug / audit log shipping, migration, and future replication.
-    /// Rolled-back transactions are not delivered.
+    /// BA-7 / codex_advice_3 8 節。null でない場合、書き込みトランザクションが
+    /// 公開するすべてのグラフミューテーション (<c>CreateNode</c>、<c>CreateRelationship</c>、
+    /// <c>SetProperty</c> など) をバックエンドが記録し、コミットが永続化された後に
+    /// このシンクへバッチで引き渡す。バイナリバックエンドはクラッシュリカバリ向けに
+    /// PageImage WAL を引き続き利用する — 論理ストリームはオプションの 2 系統目で、
+    /// SQLite バックエンド連携・デバッグ / 監査ログ転送・マイグレーション・将来の
+    /// レプリケーション用途を想定。ロールバックされたトランザクションは届かない。
     /// </summary>
     public ILogicalMutationSink? LogicalMutationSink { get; set; }
 }

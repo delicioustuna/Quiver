@@ -152,9 +152,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
             _adjPagedFile = null;
         }
 
-        // Rebuild the adjacency files in place. Build expects nodeHwm so that
-        // the index has one entry per logical node id; use the highest src/tgt
-        // we observed + 1, since this is the only signal we have post-bulk-load.
+        // 隣接ファイルをその場で再構築する。Build は論理ノード ID ごとに 1 エントリを持つ前提なので
+        // nodeHwm を要求する。バルクロード後はこれ以外の情報が無いため、観測した src/tgt の最大値 + 1 を使う。
         long nodeHwm = 0;
         foreach (var (_, src, tgt, _) in live)
         {

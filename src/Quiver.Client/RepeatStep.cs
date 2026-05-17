@@ -3,19 +3,18 @@ using Quiver.Stores;
 namespace Quiver.Client;
 
 /// <summary>
-/// GC-4: fluent recorder for <c>.Repeat(s => s.Out("KNOWS")).Times(n)</c>.
-/// Only single-step expansions (one of <see cref="Out"/> / <see cref="In"/> /
-/// <see cref="Both"/>) are recorded; the last call wins. Filters or chained
-/// expansions inside the closure are not supported in Phase 1 because the
-/// underlying <c>VariableLengthExpandOperator</c> takes a single direction +
-/// type.
+/// GC-4: <c>.Repeat(s =&gt; s.Out("KNOWS")).Times(n)</c> 用の fluent な記述レコーダ。
+/// Phase 1 では単一ステップの展開 (<see cref="Out"/> / <see cref="In"/> /
+/// <see cref="Both"/> のいずれか 1 つ) のみを記録し、最後の呼び出しが採用される。
+/// クロージャ内のフィルタや連鎖展開は未対応 — 内部の <c>VariableLengthExpandOperator</c> が
+/// 1 つの方向 + 型のみを受け取るため。
 /// </summary>
 public sealed class RepeatStep
 {
     internal Direction Direction { get; private set; } = Direction.Outgoing;
     internal string? TypeFilter { get; private set; }
 
-    /// <summary>Outgoing single-hop step (Gremlin <c>out()</c>).</summary>
+    /// <summary>外向 (Outgoing) 単一ホップ (Gremlin の <c>out()</c>)。</summary>
     public RepeatStep Out(string? type = null)
     {
         Direction = Direction.Outgoing;
@@ -23,7 +22,7 @@ public sealed class RepeatStep
         return this;
     }
 
-    /// <summary>Incoming single-hop step (Gremlin <c>in()</c>).</summary>
+    /// <summary>内向 (Incoming) 単一ホップ (Gremlin の <c>in()</c>)。</summary>
     public RepeatStep In(string? type = null)
     {
         Direction = Direction.Incoming;
@@ -31,7 +30,7 @@ public sealed class RepeatStep
         return this;
     }
 
-    /// <summary>Undirected single-hop step (Gremlin <c>both()</c>).</summary>
+    /// <summary>双方向の単一ホップ (Gremlin の <c>both()</c>)。</summary>
     public RepeatStep Both(string? type = null)
     {
         Direction = Direction.Both;

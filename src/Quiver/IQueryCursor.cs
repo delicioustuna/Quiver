@@ -9,8 +9,13 @@ namespace Quiver;
 /// </summary>
 public interface IQueryCursor : IDisposable
 {
+    /// <summary>カーソルが返すタプルのスキーマ。</summary>
     TupleSchema Schema { get; }
+
+    /// <summary>次の行に進む。行が無くなったら <c>false</c>。</summary>
     bool MoveNext();
+
+    /// <summary>直近の <see cref="MoveNext"/> で取得した現在行。次回呼び出しまでのみ有効。</summary>
     QueryRow Current { get; }
 }
 

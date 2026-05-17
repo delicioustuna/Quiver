@@ -6,17 +6,15 @@ using Quiver.Transactions;
 namespace Quiver;
 
 /// <summary>
-/// Adapts a <see cref="GraphDatabase"/> + caller-provided
-/// <see cref="IVectorStore"/> / <see cref="IVectorCatalog"/> to the
-/// <see cref="IGraphEngine"/> abstraction <c>Quiver.Embedding</c> talks to
-/// (VEC-4 / codex_advice_3.md §6.6). Keeps the helper free of engine
-/// internals while letting it walk entities and read source-text properties.
+/// <see cref="GraphDatabase"/> と呼び出し側から渡される <see cref="IVectorStore"/> /
+/// <see cref="IVectorCatalog"/> を、<c>Quiver.Embedding</c> が依存する <see cref="IGraphEngine"/>
+/// 抽象に橋渡しするアダプタ (VEC-4 / codex_advice_3.md 6.6 節)。
+/// ヘルパからエンジン内部実装を隠蔽しつつ、エンティティ走査と source-text プロパティ読み出しを公開する。
 /// </summary>
 /// <remarks>
-/// Vector store and catalog are injected rather than constructed by the
-/// adapter — that lets the same database be paired with either the
-/// in-memory reference store or a future ANN-backed store without changing
-/// this class.
+/// ベクトルストアとカタログはアダプタ内で構築せず、外部から注入する。これにより同じ DB を
+/// インメモリリファレンスストアと将来の ANN 裏付けストアのどちらにでも組み合わせられ、
+/// 本クラスを変更する必要がない。
 /// </remarks>
 public sealed class GraphEngineAdapter : IGraphEngine
 {
@@ -24,6 +22,7 @@ public sealed class GraphEngineAdapter : IGraphEngine
     private readonly IVectorStore _vectors;
     private readonly IVectorCatalog _catalog;
 
+    /// <summary>指定 DB と外部から注入されたベクトルストア / カタログでアダプタを生成する。</summary>
     public GraphEngineAdapter(GraphDatabase db, IVectorStore vectors, IVectorCatalog catalog)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -31,9 +30,13 @@ public sealed class GraphEngineAdapter : IGraphEngine
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
     }
 
+    /// <inheritdoc/>
     public IVectorStore Vectors => _vectors;
+
+    /// <inheritdoc/>
     public IVectorCatalog Catalog => _catalog;
 
+    /// <inheritdoc/>
     public IGraphEngineReadSession BeginRead()
         => new ReadSession(_db.Backend.Transactions.Begin(IsolationLevel.SnapshotIsolation), _db.Schema);
 

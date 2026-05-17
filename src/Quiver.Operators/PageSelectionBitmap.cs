@@ -3,11 +3,11 @@ using System.Numerics;
 namespace Quiver.Operators;
 
 /// <summary>
-/// PW-12: Minimal per-batch selection bitmap used by <see cref="BitmapFilterOperator"/>.
-/// Wraps a caller-owned <see cref="Span{T}"/> of <see cref="ulong"/> words plus a
-/// logical bit count (<c>≤ words.Length * 64</c>). Per <c>codex_advice_3.md 7.4</c>,
-/// even on row-oriented pages a small bitmap lets multiple predicates evaluate
-/// in selectivity order without re-touching rows that already failed.
+/// PW-12: <see cref="BitmapFilterOperator"/> が利用するバッチ単位の最小選択ビットマップ。
+/// 呼び出し側が所有する <see cref="ulong"/> ワードの <see cref="Span{T}"/> と論理ビット数
+/// (<c>≤ words.Length * 64</c>) をラップする。
+/// codex_advice_3.md 7.4 節の通り、行指向ページでも小さなビットマップを介在させることで
+/// 複数述語を選択度順に評価でき、既に失格となった行を再度走査せずに済む。
 /// </summary>
 internal ref struct PageSelectionBitmap
 {
@@ -18,7 +18,7 @@ internal ref struct PageSelectionBitmap
     {
         if (count < 0) throw new ArgumentOutOfRangeException(nameof(count));
         int needed = (count + 63) >> 6;
-        if (words.Length < needed) throw new ArgumentException("words too small", nameof(words));
+        if (words.Length < needed) throw new ArgumentException("words が小さすぎます", nameof(words));
         _words = words;
         _count = count;
     }
@@ -69,10 +69,9 @@ internal ref struct PageSelectionBitmap
     public Enumerator GetEnumerator() => new(_words, _count);
 
     /// <summary>
-    /// Yields each set bit index in ascending order. Clears of bits the
-    /// enumerator has already pulled into <c>_current</c> are NOT observed,
-    /// which is the desired pass semantics: predicate <i>k</i> evaluates
-    /// every row still set <i>at the start of pass k</i>.
+    /// セットされているビットのインデックスを昇順で列挙する。enumerator が既に
+    /// <c>_current</c> に取り込んだビットへの後続クリアは観測されない — これは意図した
+    /// パスセマンティクス: 述語 <i>k</i> は「パス k 開始時にセットされていた全行」を評価する。
     /// </summary>
     public ref struct Enumerator
     {

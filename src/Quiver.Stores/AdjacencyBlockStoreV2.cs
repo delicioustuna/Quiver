@@ -6,20 +6,19 @@ using Quiver.Storage;
 namespace Quiver.Stores;
 
 /// <summary>
-/// BA-6 / codex_advice_3 §7.2. Read-optimized adjacency view with an inline
-/// payload lane (edge weight) so weighted traversal / SSSP / top-k neighbor
-/// can avoid the property-chain join for hot-path scalar weights.
+/// BA-6 / codex_advice_3 7.2 節。インライン payload lane (エッジ重み) を持つ
+/// 読み取り最適化済みの隣接ビュー。重み付きトラバーサル / SSSP / top-k 近傍などの
+/// hot path スカラ重みでプロパティチェーンへのジョインを避けられる。
 ///
-/// Block page body layout (PageBodySize = 8160 bytes):
-///   OutCount(4) | InCount(4) | NextPageId(8) = 16-byte header
-///   Followed by OutCount out-entries then InCount in-entries.
-///   Entry: TypeId(2) | RelId(6) | NeighborId(6) | Payload(8) = 22 bytes.
-///   Max entries per page = (8160 − 16) / 22 = 370.
+/// ブロックページ本体レイアウト (PageBodySize = 8160 バイト):
+///   OutCount(4) | InCount(4) | NextPageId(8) = 16 バイトのヘッダ
+///   続いて OutCount 個の out エントリ、その後 InCount 個の in エントリ。
+///   エントリ: TypeId(2) | RelId(6) | NeighborId(6) | Payload(8) = 22 バイト。
+///   1 ページあたり最大エントリ数 = (8160 − 16) / 22 = 370。
 ///
-/// Coexists with V1 (AdjacencyBlockStore) — V2 lives in adj_v2.db /
-/// adj_v2_idx.dat / adj_v2.meta and is opt-in at bulk-load time via
-/// <see cref="BulkLoader.WithPayloadLane"/>. The backend opens whichever
-/// pair of files is present, preferring V2 when both exist.
+/// V1 (AdjacencyBlockStore) と共存する — V2 は adj_v2.db / adj_v2_idx.dat / adj_v2.meta に
+/// 格納され、バルクロード時の <see cref="BulkLoader.WithPayloadLane"/> でオプトインする。
+/// バックエンドはどちらか一方の組が存在すればそれを開き、両方ある場合は V2 を優先する。
 /// </summary>
 internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPayloadView, IDisposable
 {
@@ -247,10 +246,10 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
     // ──────────────────────────── Build ────────────────────────────
 
     /// <summary>
-    /// Build the V2 adjacency index from scratch. <paramref name="weightLookup"/>
-    /// maps relationship id to raw 64-bit payload — callers populate this from
-    /// pending relationship properties before invoking the build. Edges with no
-    /// entry receive <see cref="PayloadLaneSpec.DefaultRaw"/>.
+    /// V2 隣接インデックスをゼロから構築する。<paramref name="weightLookup"/> は
+    /// リレーションシップ ID → 64 ビット生 payload のマップで、呼び出し側はビルド呼び出し前に
+    /// 保留中のリレーションシップ・プロパティから埋めておく。エントリの無いエッジには
+    /// <see cref="PayloadLaneSpec.DefaultRaw"/> が割り当てられる。
     /// </summary>
     internal static void Build(
         string adjDataPath,

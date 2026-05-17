@@ -1,0 +1,30 @@
+# 01. CRUD 基本
+
+ノードとリレーションシップの基本的な作成・読み出し・更新・削除を一通り体験する。
+
+完全なコードは [`samples/Quiver.Samples.Crud`](https://github.com/anthropics/quiver/tree/main/samples/Quiver.Samples.Crud) 参照。
+
+```csharp
+using var db = GraphDatabase.Open("./mygraph");
+using var tx = db.BeginTransaction();
+
+// ── Create ────────────────────────────
+var alice = tx.CreateNode("Person");
+var bob   = tx.CreateNode("Person");
+tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
+tx.SetProperty(alice, "age",  PropertyValue.FromInt32(30));
+tx.SetProperty(bob,   "name", PropertyValue.FromString("Bob"));
+tx.CreateRelationship(alice, bob, "KNOWS");
+
+// ── Read ──────────────────────────────
+Console.WriteLine(tx.NodeExists(alice));                  // True
+Console.WriteLine(tx.GetProperty(alice, "age").Int32Value); // 30
+
+// ── Update ────────────────────────────
+tx.SetProperty(alice, "age", PropertyValue.FromInt32(31));
+
+// ── Delete ────────────────────────────
+tx.RemoveProperty(alice, "age");
+
+tx.Commit();
+```

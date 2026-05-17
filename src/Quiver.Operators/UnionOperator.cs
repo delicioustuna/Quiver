@@ -3,11 +3,10 @@ using Quiver.Transactions;
 namespace Quiver.Operators;
 
 /// <summary>
-/// GC-4: Gremlin <c>.union(t1, t2, …)</c> / Cypher <c>UNION ALL</c>.
-/// For each input row, every branch is reopened against a freshly bound
-/// <see cref="CorrelatedInputOperator"/> and its rows are emitted in order.
-/// All branches must produce a single-column NodeId tuple — the output schema
-/// is a single NodeId column.
+/// GC-4: Gremlin の <c>.union(t1, t2, …)</c> / Cypher の <c>UNION ALL</c> 相当。
+/// 各入力行に対し、新しくバインドされた <see cref="CorrelatedInputOperator"/> を用いて
+/// すべての分岐を再オープンし、各分岐の行を順番に放出する。
+/// すべての分岐は単一列 NodeId のタプルを返す必要があり、出力スキーマも単一 NodeId 列となる。
 /// </summary>
 public sealed class UnionOperator : IPhysicalOperator
 {
@@ -33,7 +32,7 @@ public sealed class UnionOperator : IPhysicalOperator
     {
         if (probes is null || branches is null) throw new ArgumentNullException();
         if (probes.Length != branches.Length || branches.Length == 0)
-            throw new ArgumentException("Union requires at least one (probe, branch) pair of equal length.");
+            throw new ArgumentException("Union には少なくとも 1 組、かつ同数の (probe, branch) ペアが必要です。");
         _source = source;
         _srcCol = sourceColumn;
         _probes = probes;

@@ -65,18 +65,16 @@ internal sealed class DirectArrayRelationshipPropertyJoinIndex : IRelationshipPr
     }
 
     /// <summary>
-    /// Scan every live relationship in <paramref name="relStore"/>, walk its
-    /// property chain, and snapshot the scalar value for
-    /// <paramref name="keyId"/> matching <paramref name="expectedType"/>.
-    /// Mutations after the build are invisible — rebuild after material
-    /// graph changes if exact freshness matters.
+    /// <paramref name="relStore"/> 内のすべての生存中リレーションシップを走査し、
+    /// プロパティチェーンを辿って <paramref name="keyId"/> かつ <paramref name="expectedType"/> に
+    /// 一致するスカラ値をスナップショットする。構築後のミューテーションは可視化されないため、
+    /// 厳密な鮮度が必要な場合はグラフ変更後に再構築する。
     /// </summary>
     /// <param name="expectedType">
-    /// Must be one of the scalar inline types
-    /// (<see cref="PropertyValueType.Bool"/>, <see cref="PropertyValueType.Int32"/>,
-    /// <see cref="PropertyValueType.Int64"/>, <see cref="PropertyValueType.Double"/>).
-    /// String / Bytes are rejected — those values don't fit a single
-    /// <see cref="long"/> and belong on the property chain.
+    /// インラインスカラ型のいずれか (<see cref="PropertyValueType.Bool"/>、
+    /// <see cref="PropertyValueType.Int32"/>、<see cref="PropertyValueType.Int64"/>、
+    /// <see cref="PropertyValueType.Double"/>)。String / Bytes は単一 <see cref="long"/> に収まらず
+    /// プロパティチェーン側で扱うため、ここでは拒否する。
     /// </param>
     public static DirectArrayRelationshipPropertyJoinIndex Build(
         IRelationshipStore relStore,

@@ -3,26 +3,25 @@ using Quiver.Core;
 namespace Quiver;
 
 /// <summary>
-/// PW-16 / codex_advice_3 §7.5. Two-tier per-node degree lookup that backs
-/// <see cref="GraphStats"/>. When the observed <c>NodeId</c> space is dense
-/// (<c>maxNodeId / nodeCount &lt;= DenseThreshold</c>) the lookup uses
-/// direct arrays indexed by <c>NodeId.Value</c> plus a single bit per node
-/// for power-node flagging — <c>O(1)</c> with no boxing and no dictionary
-/// chain walk. When the id space is sparse the lookup falls back to a
-/// per-node dictionary that only materialises power-node entries (matching
-/// the pre-PW-16 memory footprint).
+/// PW-16 / codex_advice_3 7.5 節。<see cref="GraphStats"/> を裏で支える 2 層の
+/// ノード毎 degree lookup。観測された <c>NodeId</c> 空間が密
+/// (<c>maxNodeId / nodeCount &lt;= DenseThreshold</c>) な場合は
+/// <c>NodeId.Value</c> をインデックスとする direct 配列 + ノード毎 1 ビットの
+/// パワーノードフラグを使い、ボクシング無し・辞書チェーンウォーク無しで <c>O(1)</c> 参照を行う。
+/// ID 空間が疎な場合は、パワーノードエントリのみをマテリアライズするノード毎辞書に
+/// フォールバックする (PW-16 以前のメモリフットプリントを維持)。
 /// </summary>
 public sealed class NodeDegreeLookup
 {
     /// <summary>
-    /// Maximum permitted ratio of <c>(maxNodeId + 1) / nodeCount</c> for the
-    /// dense path. With the default of <c>4.0</c> a graph that has used at
-    /// least 25% of its id space is dense; anything sparser falls back to a
-    /// dictionary so we don't allocate hundreds of MB for a graph that only
-    /// has a few thousand live nodes scattered across a huge id range.
+    /// 密経路に進むための <c>(maxNodeId + 1) / nodeCount</c> の上限比率。既定 <c>4.0</c> なら
+    /// 少なくとも ID 空間の 25% を使い切ったグラフが密と判定される。それ未満の疎なグラフは
+    /// 辞書にフォールバックし、数千ノードしか持たないが ID 範囲が巨大なグラフに数百 MB を
+    /// 確保するのを避ける。
     /// </summary>
     public const double DefaultDenseThreshold = 4.0;
 
+    /// <summary>ノードが 1 つも記録されていない空 lookup の sentinel。</summary>
     public static readonly NodeDegreeLookup Empty = new(
         dense: false,
         outDegrees: null,
@@ -42,11 +41,22 @@ public sealed class NodeDegreeLookup
     private readonly IReadOnlyDictionary<NodeId, NodeDegreeSummary>? _sparseDegrees;
     private readonly IReadOnlyDictionary<NodeId, NodeDegreeSummary> _sparsePowerNodes;
 
+    /// <summary>密モード (direct 配列) なら true。</summary>
     public bool IsDense { get; }
+
+    /// <summary>密モードで内部配列が確保するスロット数。</summary>
     public int DenseLength => _denseLength;
+
+    /// <summary>パワーノード判定の degree しきい値。</summary>
     public long PowerNodeThreshold { get; }
+
+    /// <summary>観測された最大 NodeId。記録されていない場合は -1。</summary>
     public long MaxNodeIdObserved { get; }
+
+    /// <summary>密 / 疎切り替えに用いたしきい値。</summary>
     public double DenseThreshold { get; }
+
+    /// <summary>記録されたパワーノードの件数。</summary>
     public int PowerNodeCount { get; }
 
     private NodeDegreeLookup(
@@ -75,11 +85,10 @@ public sealed class NodeDegreeLookup
     }
 
     /// <summary>
-    /// Returns the recorded out/in degrees for <paramref name="nodeId"/> if
-    /// the lookup is dense and <paramref name="nodeId"/> is within range, or
-    /// when the sparse fallback happens to track the node (only power nodes
-    /// are tracked sparsely). Returns <c>false</c> otherwise — callers must
-    /// not interpret a <c>false</c> return as "degree is zero".
+    /// <paramref name="nodeId"/> の out/in degree を返す。
+    /// 密モードかつ範囲内の場合、または疎モードでパワーノードとして追跡されている場合 (疎モードでは
+    /// パワーノードのみ追跡される) に <c>true</c> を返す。それ以外は <c>false</c>。
+    /// <c>false</c> を「degree が 0」と解釈してはいけない。
     /// </summary>
     public bool TryGetDegree(NodeId nodeId, out long outDegree, out long inDegree)
     {
@@ -109,8 +118,8 @@ public sealed class NodeDegreeLookup
     }
 
     /// <summary>
-    /// O(1) power-node check. In dense mode this reads a single bit; in
-    /// sparse mode it falls back to a dictionary <c>ContainsKey</c>.
+    /// O(1) でパワーノードかを判定する。密モードでは 1 ビット読み出し、疎モードでは
+    /// 辞書の <c>ContainsKey</c> にフォールバックする。
     /// </summary>
     public bool IsLikelyPowerNode(NodeId nodeId)
     {
@@ -126,10 +135,8 @@ public sealed class NodeDegreeLookup
     }
 
     /// <summary>
-    /// Enumerate every power node. Dense mode walks the bitset; sparse mode
-    /// enumerates the underlying dictionary. The enumeration is order-stable
-    /// in dense mode (ascending <c>NodeId.Value</c>) and unordered in sparse
-    /// mode.
+    /// 全パワーノードを列挙する。密モードはビットセットを走査、疎モードは内部辞書を列挙する。
+    /// 密モードでは順序は安定 (<c>NodeId.Value</c> 昇順)、疎モードでは順序は未定義。
     /// </summary>
     public IEnumerable<NodeDegreeSummary> EnumeratePowerNodes()
     {
@@ -157,9 +164,9 @@ public sealed class NodeDegreeLookup
     }
 
     /// <summary>
-    /// Snapshot the power-node set as a dictionary. This exists so legacy
-    /// callers of <see cref="GraphStats.PowerNodes"/> keep working without
-    /// forcing dense-mode collection to materialise the dictionary up-front.
+    /// パワーノード集合を辞書としてスナップショット化する。
+    /// <see cref="GraphStats.PowerNodes"/> の既存呼び出し側を、密モード収集時に
+    /// 辞書を前もってマテリアライズせずに済む形で維持するために存在する。
     /// </summary>
     public IReadOnlyDictionary<NodeId, NodeDegreeSummary> SnapshotPowerNodes()
     {
@@ -213,10 +220,9 @@ public sealed class NodeDegreeLookup
             double ratio = (double)denseCapacity / n;
             bool dense = ratio <= _denseThreshold;
 
-            // Bound the dense allocation: above ~32M nodes the direct array
-            // (16 B per node + 1 bit) is large enough that the caller probably
-            // wants explicit consent. Fall back to sparse silently — caller
-            // can still override via the threshold parameter on Collect.
+            // 密確保を上限で制限する: 約 3200 万ノードを超えると direct 配列 (ノード毎 16 B + 1 bit) が
+            // 巨大になり、呼び出し側に明示同意を求めるべき規模になる。ここでは無断で疎フォールバックする
+            // — 呼び出し側は Collect の threshold パラメータで挙動をオーバーライドできる。
             if (denseCapacity > int.MaxValue / 16) dense = false;
 
             if (dense)
@@ -249,8 +255,8 @@ public sealed class NodeDegreeLookup
                     denseThreshold: _denseThreshold);
             }
 
-            // Sparse: only materialise a per-node dictionary for power nodes,
-            // matching pre-PW-16 memory behaviour.
+            // 疎モード: ノード毎辞書はパワーノードのみマテリアライズする。
+            // PW-16 以前のメモリ挙動に揃える。
             return new NodeDegreeLookup(
                 dense: false,
                 outDegrees: null, inDegrees: null, powerNodeBits: null, denseLength: 0,

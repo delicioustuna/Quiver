@@ -1,10 +1,14 @@
-﻿using Quiver.Client;
+using Quiver.Client;
 using Quiver.Core;
 using Quiver.Stores;
 using System.Text;
 
 namespace Quiver.Client.Match;
 
+/// <summary>
+/// Match DSL の <see cref="ReturnClause{TResult}"/> 内で射影クロージャに渡される
+/// 行コンテキスト。パターン変数名から <see cref="MatchContextRow"/> を解決する。
+/// </summary>
 public sealed class MatchContext
 {
     private readonly QueryRow _row;
@@ -16,6 +20,7 @@ public sealed class MatchContext
         _row = row; _tx = tx; _varToColumn = varToColumn;
     }
 
+    /// <summary>パターン変数名でその行のノード参照を取得する。</summary>
     public MatchContextRow this[string variable]
     {
         get
@@ -26,6 +31,7 @@ public sealed class MatchContext
         }
     }
 
+    /// <summary>パターン変数名のノードを <typeparamref name="T"/> インスタンスに復元する。</summary>
     public T Load<T>(string variable) where T : IGraphNode<T>
     {
         var col = _varToColumn[variable];
@@ -33,6 +39,7 @@ public sealed class MatchContext
     }
 }
 
+/// <summary><see cref="MatchContext.this[string]"/> から取り出される個別ノードへの参照。</summary>
 public readonly struct MatchContextRow
 {
     private readonly NodeId _nodeId;
@@ -43,6 +50,12 @@ public readonly struct MatchContextRow
         _nodeId = nodeId; _tx = tx;
     }
 
+    /// <summary>
+    /// このノードのプロパティ <paramref name="key"/> を型 <typeparamref name="T"/> で取り出す。
+    /// 対応型: <see cref="string"/> / <see cref="long"/> / <see cref="int"/> /
+    /// <see cref="double"/> / <see cref="bool"/>。
+    /// </summary>
+    /// <exception cref="NotSupportedException"><typeparamref name="T"/> がサポート外の場合。</exception>
     public T Get<T>(string key)
     {
         var value = _tx.GetProperty(_nodeId, key);
@@ -56,6 +69,6 @@ public readonly struct MatchContextRow
             return (T)(object)value.DoubleValue;
         if (typeof(T) == typeof(bool))
             return (T)(object)value.BoolValue;
-        throw new NotSupportedException($"Type {typeof(T)} is not supported in MatchContextRow.Get<T>.");
+        throw new NotSupportedException($"型 {typeof(T)} は MatchContextRow.Get<T> でサポートされていません。");
     }
 }

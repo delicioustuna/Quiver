@@ -21,6 +21,13 @@
   <Folder Name="/sandbox/">
     <Project Path="sandbox\QuiverSandbox\QuiverSandbox.csproj" />
   </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples\Quiver.Samples.Crud\Quiver.Samples.Crud.csproj" />
+    <Project Path="samples\Quiver.Samples.Traversal\Quiver.Samples.Traversal.csproj" />
+    <Project Path="samples\Quiver.Samples.Match\Quiver.Samples.Match.csproj" />
+    <Project Path="samples\Quiver.Samples.SourceGen\Quiver.Samples.SourceGen.csproj" />
+    <Project Path="samples\Quiver.Samples.Vector\Quiver.Samples.Vector.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests\Quiver.Storage.Tests\Quiver.Storage.Tests.csproj" />
     <Project Path="tests/Quiver.Operators.Tests/Quiver.Operators.Tests.csproj" />
