@@ -132,13 +132,25 @@ public sealed class GraphTraversalSource
     /// <c>db.Vectors.KnnSearch(...)</c> を直接呼び出すこと。
     /// インデックスは <see cref="Core.EntityKind.Node"/> にバインドされている必要がある。
     /// リレーションシップ向け KNN は具体的なユースケースが出るまで意図的にスコープ外とする。
+    /// <para>
+    /// VEC-9: <c>g.Knn(...).HasLabel(...).Has(...)</c> のような後続 pure-filter チェーンは
+    /// 自動的に candidate-side に巻き戻され、<see cref="GraphTraversal{T}.FilterByKnn"/> 相当の
+    /// graph-first プランに変換される。フィルタが小さい場合は数倍〜数十倍高速化される。
+    /// 明示的な graph-first 制御が必要な場合のみ <see cref="GraphTraversal{T}.FilterByKnn"/> を直接呼ぶ。
+    /// </para>
+    /// <para>
+    /// VEC-9: <c>g.Knn(idx, q, k).Limit(n)</c> で <c>n &lt; k</c> のとき、KNN の k を <c>min(k, n)</c> に
+    /// 縮めて実行する (後段 filter は candidate-side 処理済のため安全)。
+    /// </para>
     /// </remarks>
     /// <param name="indexName">対象のベクトルインデックス名。</param>
     /// <param name="query">問い合わせベクトル。</param>
     /// <param name="k">取得する上位件数。</param>
     public GraphTraversal<NodeId> Knn(string indexName, ReadOnlySpan<float> query, int k)
     {
-        var builder = new Internal.KnnNodeSourceBuilder(indexName, query, k);
+        // VEC-9: PendingKnnBuilder で包み、後続の pure-filter / Limit を candidate-side に
+        // 巻き戻せるようにする。filter が積まれなければ terminal で vector-first に materialize される。
+        var builder = new Internal.PendingKnnBuilder(new Internal.ScanBuilder(), indexName, query, k);
         return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0);
     }
 }

@@ -10,6 +10,8 @@ internal sealed class ScanBuilder : IOperatorBuilder
     public int CurrentEntityColumn => 0;
     public int PredictedOutputColumnCount => 1;
 
+    internal string? Label => _label;
+
     internal ScanBuilder(string? label = null) { _label = label; }
 
     public IPhysicalOperator Build(ISchemaApi schema)

@@ -48,6 +48,17 @@ public sealed class GraphTraversal<T>
         => new(_tx, _schema, builder, projection, entityColumn, _aliases);
 
     /// <summary>
+    /// VEC-9: <c>_builder</c> が <see cref="PendingKnnBuilder"/> なら materialize した新トラバーサルを返す。
+    /// non-pure step (Out/OrderBy/Limit 以外/Repeat/...) や terminal の冒頭で呼ぶ。
+    /// </summary>
+    private GraphTraversal<T> EnsureMaterialized()
+    {
+        if (_builder is PendingKnnBuilder pk)
+            return new GraphTraversal<T>(_tx, _schema, pk.Materialize(), _projection, _entityColumn, _aliases);
+        return this;
+    }
+
+    /// <summary>
     /// ラベルでフィルタする (Gremlin の <c>.hasLabel</c>)。
     /// 起点が <c>AllNodesScan</c> の場合は <c>NodeByLabelScan</c> に置き換える最適化を行い、
     /// それ以外はラベル述語のフィルタとして連結する。
@@ -55,6 +66,22 @@ public sealed class GraphTraversal<T>
     /// <param name="label">対象ラベル名。</param>
     public GraphTraversal<NodeId> HasLabel(string label)
     {
+        // VEC-9: Knn() 直後 (または pure-filter 連鎖中) の場合は candidate-side に label を積む。
+        if (_builder is PendingKnnBuilder pk)
+        {
+            IOperatorBuilder candNext;
+            if (pk.Candidate is ScanBuilder cs && cs.Label is null)
+                candNext = new ScanBuilder(label);
+            else
+            {
+                var lid = _schema.GetOrCreateLabel(label);
+                int candCol = pk.Candidate.CurrentEntityColumn;
+                candNext = new FilterBuilder(pk.Candidate, _ => new LabelPredicate(lid, candCol));
+            }
+            var nextPk = pk.WithCandidate(candNext);
+            return new GraphTraversal<NodeId>(_tx, _schema, nextPk, row => row.GetNodeId(0), 0, _aliases);
+        }
+
         IOperatorBuilder next;
         if (_builder is ScanBuilder s && s.CurrentEntityColumn == 0)
             next = new ScanBuilder(label);
@@ -67,58 +94,59 @@ public sealed class GraphTraversal<T>
         return new GraphTraversal<NodeId>(_tx, _schema, next, row => row.GetNodeId(_entityColumn), next.CurrentEntityColumn, _aliases);
     }
 
+    /// <summary>
+    /// VEC-9: pure-filter を builder に積む共通ヘルパ。<see cref="PendingKnnBuilder"/> 経由なら
+    /// candidate-side に、そうでなければ普通に <see cref="FilterBuilder"/> として積む。<paramref name="factoryWithCol"/>
+    /// は filter を適用する対象列番号を受け取り、predicate ファクトリを返す。
+    /// </summary>
+    private GraphTraversal<T> ApplyPureFilter(Func<int, Func<ISchemaApi, IPredicate>> factoryWithCol)
+    {
+        if (_builder is PendingKnnBuilder pk)
+        {
+            int candCol = pk.Candidate.CurrentEntityColumn;
+            var nextCand = new FilterBuilder(pk.Candidate, factoryWithCol(candCol));
+            return Chain(pk.WithCandidate(nextCand), _projection, _entityColumn);
+        }
+        return Chain(new FilterBuilder(_builder, factoryWithCol(_entityColumn)), _projection, _entityColumn);
+    }
+
     /// <summary>プロパティ <paramref name="key"/> が文字列 <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, string value)
     {
         var keyId = _schema.GetOrCreatePropertyKey(key);
-        var col   = _entityColumn;
-        return Chain(
-            new FilterBuilder(_builder, _ => new PropertyEqStringPredicate(col, keyId, value)),
-            _projection, _entityColumn);
+        return ApplyPureFilter(col => _ => new PropertyEqStringPredicate(col, keyId, value));
     }
 
     /// <summary>プロパティ <paramref name="key"/> が <see cref="int"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, int value)
     {
         var keyId = _schema.GetOrCreatePropertyKey(key);
-        var col   = _entityColumn;
         var pred  = P.Eq((long)value);
-        return Chain(
-            new FilterBuilder(_builder, _ => new PropertyInt64Predicate(col, keyId, pred)),
-            _projection, _entityColumn);
+        return ApplyPureFilter(col => _ => new PropertyInt64Predicate(col, keyId, pred));
     }
 
     /// <summary>プロパティ <paramref name="key"/> が <see cref="long"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, long value)
     {
         var keyId = _schema.GetOrCreatePropertyKey(key);
-        var col   = _entityColumn;
         var pred  = P.Eq(value);
-        return Chain(
-            new FilterBuilder(_builder, _ => new PropertyInt64Predicate(col, keyId, pred)),
-            _projection, _entityColumn);
+        return ApplyPureFilter(col => _ => new PropertyInt64Predicate(col, keyId, pred));
     }
 
     /// <summary>プロパティ <paramref name="key"/> が <see cref="double"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, double value)
     {
         var keyId   = _schema.GetOrCreatePropertyKey(key);
-        var col     = _entityColumn;
         var encoded = BitConverter.DoubleToInt64Bits(value);
-        return Chain(
-            new FilterBuilder(_builder, _ => new PropertyDoublePredicate(col, keyId, encoded)),
-            _projection, _entityColumn);
+        return ApplyPureFilter(col => _ => new PropertyDoublePredicate(col, keyId, encoded));
     }
 
     /// <summary>プロパティ <paramref name="key"/> が <see cref="bool"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, bool value)
     {
         var keyId  = _schema.GetOrCreatePropertyKey(key);
-        var col    = _entityColumn;
         var scalar = value ? 1L : 0L;
-        return Chain(
-            new FilterBuilder(_builder, _ => new PropertyBoolPredicate(col, keyId, scalar)),
-            _projection, _entityColumn);
+        return ApplyPureFilter(col => _ => new PropertyBoolPredicate(col, keyId, scalar));
     }
 
     /// <summary>
@@ -127,11 +155,8 @@ public sealed class GraphTraversal<T>
     /// </summary>
     public GraphTraversal<T> Has(string key, PropertyPredicate pred)
     {
-        var keyId  = _schema.GetOrCreatePropertyKey(key);
-        var col    = _entityColumn;
-        return Chain(
-            new FilterBuilder(_builder, _ => PredicateDispatch.Build(col, keyId, pred)),
-            _projection, _entityColumn);
+        var keyId = _schema.GetOrCreatePropertyKey(key);
+        return ApplyPureFilter(col => _ => PredicateDispatch.Build(col, keyId, pred));
     }
 
     /// <summary>外向 (Outgoing) リレーションシップを辿り、隣接ノードを放出する (Gremlin の <c>.out</c>)。</summary>
@@ -154,6 +179,9 @@ public sealed class GraphTraversal<T>
 
     private GraphTraversal<NodeId> Expand(Direction direction, string? type)
     {
+        if (_builder is PendingKnnBuilder)
+            return EnsureMaterialized().Expand(direction, type);
+
         // GC-6: エイリアスが生きているときは展開を通してそれらをコピーし、
         // 下流の .Select(alias) が元のエンティティを引けるようにする。
         // エイリアスが無ければ GC-6 以前と同じ fast path (余分列なし) と等価。
@@ -190,6 +218,9 @@ public sealed class GraphTraversal<T>
 
     private GraphTraversal<RelationshipId> ExpandRelationship(Direction direction, string? type)
     {
+        if (_builder is PendingKnnBuilder)
+            return EnsureMaterialized().ExpandRelationship(direction, type);
+
         if (_aliases is null)
         {
             var fast = new ExpandBuilder(_builder, direction, type, ExpandOutputMode.NeighborAndRel, sourceColumnOverride: _entityColumn);
@@ -229,18 +260,14 @@ public sealed class GraphTraversal<T>
     /// <param name="innerTraversal">外側の現在エンティティを起点とする内部トラバーサル。</param>
     public GraphTraversal<T> Where(Func<SubTraversal, SubTraversal> innerTraversal)
     {
-        var schema = _schema;
-        var outerEntityColumn = _entityColumn;
         var capturedInner = innerTraversal;
-        return Chain(
-            new FilterBuilder(_builder, s =>
-            {
-                var probe = new CorrelatedInputOperator();
-                var seed = new CorrelatedSeedBuilder(probe);
-                var start = new SubTraversal(probe, seed, s, 0);
-                return capturedInner(start).BuildExistsPredicate(outerEntityColumn);
-            }),
-            _projection, _entityColumn);
+        return ApplyPureFilter(col => s =>
+        {
+            var probe = new CorrelatedInputOperator();
+            var seed = new CorrelatedSeedBuilder(probe);
+            var start = new SubTraversal(probe, seed, s, 0);
+            return capturedInner(start).BuildExistsPredicate(col);
+        });
     }
 
     /// <summary>
@@ -250,18 +277,14 @@ public sealed class GraphTraversal<T>
     /// <param name="innerTraversal">外側の現在エンティティを起点とする内部トラバーサル。</param>
     public GraphTraversal<T> Not(Func<SubTraversal, SubTraversal> innerTraversal)
     {
-        var schema = _schema;
-        var outerEntityColumn = _entityColumn;
         var capturedInner = innerTraversal;
-        return Chain(
-            new FilterBuilder(_builder, s =>
-            {
-                var probe = new CorrelatedInputOperator();
-                var seed = new CorrelatedSeedBuilder(probe);
-                var start = new SubTraversal(probe, seed, s, 0);
-                return capturedInner(start).BuildNotExistsPredicate(outerEntityColumn);
-            }),
-            _projection, _entityColumn);
+        return ApplyPureFilter(col => s =>
+        {
+            var probe = new CorrelatedInputOperator();
+            var seed = new CorrelatedSeedBuilder(probe);
+            var start = new SubTraversal(probe, seed, s, 0);
+            return capturedInner(start).BuildNotExistsPredicate(col);
+        });
     }
 
     // ── GC-1: presence checks ────────────────────────────────────────────────
@@ -270,10 +293,7 @@ public sealed class GraphTraversal<T>
     public GraphTraversal<T> Has(string key)
     {
         var keyId = _schema.GetOrCreatePropertyKey(key);
-        var col = _entityColumn;
-        return Chain(
-            new FilterBuilder(_builder, _ => new PropertyExistsPredicate(col, keyId, mustExist: true)),
-            _projection, _entityColumn);
+        return ApplyPureFilter(col => _ => new PropertyExistsPredicate(col, keyId, mustExist: true));
     }
 
     /// <summary>GC-1: プロパティ <paramref name="key"/> を持たない要素のみを通す (Gremlin の <c>.hasNot</c>)。</summary>
@@ -283,10 +303,7 @@ public sealed class GraphTraversal<T>
         // 現状公開されていない。最悪ケースで初回呼び出し時にトークン 1 個を割り当てるだけで
         // 動作は正しい — 新規作成されたキーには観測値が 0 件のため。
         var keyId = _schema.GetOrCreatePropertyKey(key);
-        var col = _entityColumn;
-        return Chain(
-            new FilterBuilder(_builder, _ => new PropertyExistsPredicate(col, keyId, mustExist: false)),
-            _projection, _entityColumn);
+        return ApplyPureFilter(col => _ => new PropertyExistsPredicate(col, keyId, mustExist: false));
     }
 
     /// <summary>
@@ -324,22 +341,19 @@ public sealed class GraphTraversal<T>
 
     private GraphTraversal<T> CombineSubTraversals(Func<SubTraversal, SubTraversal>[] traversals, bool useOr)
     {
-        var outerEntityColumn = _entityColumn;
         var captured = traversals;
-        return Chain(
-            new FilterBuilder(_builder, s =>
+        return ApplyPureFilter(col => s =>
+        {
+            var inners = new IPredicate[captured.Length];
+            for (int i = 0; i < captured.Length; i++)
             {
-                var inners = new IPredicate[captured.Length];
-                for (int i = 0; i < captured.Length; i++)
-                {
-                    var probe = new CorrelatedInputOperator();
-                    var seed = new CorrelatedSeedBuilder(probe);
-                    var start = new SubTraversal(probe, seed, s, 0);
-                    inners[i] = captured[i](start).BuildExistsPredicate(outerEntityColumn);
-                }
-                return useOr ? new OrPredicate(inners) : new AndPredicate(inners);
-            }),
-            _projection, _entityColumn);
+                var probe = new CorrelatedInputOperator();
+                var seed = new CorrelatedSeedBuilder(probe);
+                var start = new SubTraversal(probe, seed, s, 0);
+                inners[i] = captured[i](start).BuildExistsPredicate(col);
+            }
+            return useOr ? new OrPredicate(inners) : new AndPredicate(inners);
+        });
     }
 
     // ── GC-1: pagination ─────────────────────────────────────────────────────
@@ -348,6 +362,16 @@ public sealed class GraphTraversal<T>
     public GraphTraversal<T> Limit(long n)
     {
         if (n < 0) throw new ArgumentOutOfRangeException(nameof(n));
+        // VEC-9: PendingKnn の K を min(K, n) に縮める (後段 filter は candidate-side で処理済のため安全)。
+        // LimitBuilder は被せない: KNN 出力件数 ≤ K' ≤ n のため冗長。
+        if (_builder is PendingKnnBuilder pk)
+        {
+            int newK = n >= pk.K ? pk.K : (int)n;
+            if (newK == pk.K)
+                return this;
+            var shrunk = pk.WithK(newK);
+            return Chain(shrunk, _projection, _entityColumn);
+        }
         return Chain(new LimitBuilder(_builder, n, skip: 0), _projection, _entityColumn);
     }
 
@@ -355,6 +379,7 @@ public sealed class GraphTraversal<T>
     public GraphTraversal<T> Skip(long n)
     {
         if (n < 0) throw new ArgumentOutOfRangeException(nameof(n));
+        if (_builder is PendingKnnBuilder) return EnsureMaterialized().Skip(n);
         return Chain(new LimitBuilder(_builder, long.MaxValue, skip: n), _projection, _entityColumn);
     }
 
@@ -363,6 +388,7 @@ public sealed class GraphTraversal<T>
     {
         if (from < 0 || to < from)
             throw new ArgumentOutOfRangeException(nameof(to), "0 <= from <= to を満たす必要があります。");
+        if (_builder is PendingKnnBuilder) return EnsureMaterialized().Range(from, to);
         return Chain(new LimitBuilder(_builder, to - from, skip: from), _projection, _entityColumn);
     }
 
@@ -380,9 +406,16 @@ public sealed class GraphTraversal<T>
     /// <summary>現在のエンティティのラベル名を取り出す (Gremlin の <c>.label()</c>)。</summary>
     public GraphTraversal<string> Label()
     {
-        var lookup = new LabelNameLookupBuilder(_builder, _entityColumn, _schema);
-        int labelCol = lookup.PredictedOutputColumnCount - 1;
-        return Chain(lookup, row => row.GetString(labelCol), _entityColumn);
+        if (_builder is PendingKnnBuilder)
+        {
+            var mat = EnsureMaterialized();
+            var lookup = new LabelNameLookupBuilder(mat._builder, mat._entityColumn, mat._schema);
+            int labelCol = lookup.PredictedOutputColumnCount - 1;
+            return new GraphTraversal<string>(mat._tx, mat._schema, lookup, row => row.GetString(labelCol), mat._entityColumn, mat._aliases);
+        }
+        var lookup0 = new LabelNameLookupBuilder(_builder, _entityColumn, _schema);
+        int labelCol0 = lookup0.PredictedOutputColumnCount - 1;
+        return Chain(lookup0, row => row.GetString(labelCol0), _entityColumn);
     }
 
     // ── GC-1: <c>.id()</c> ステップ ─────────────────────────────────
@@ -390,6 +423,11 @@ public sealed class GraphTraversal<T>
     /// <summary>現在のエンティティ ID を <see cref="long"/> として取り出す (Gremlin の <c>.id()</c>)。</summary>
     public GraphTraversal<long> Id()
     {
+        if (_builder is PendingKnnBuilder)
+        {
+            var mat = EnsureMaterialized();
+            return new GraphTraversal<long>(mat._tx, mat._schema, mat._builder, row => row.GetInt64(mat._entityColumn), mat._entityColumn, mat._aliases);
+        }
         var col = _entityColumn;
         return Chain(_builder, row => row.GetInt64(col), _entityColumn);
     }
@@ -399,6 +437,7 @@ public sealed class GraphTraversal<T>
     /// <summary>GC-1: Gremlin の <c>.outV()</c> — 現在のエッジのソース (起点) ノードに解決する。</summary>
     public GraphTraversal<NodeId> SourceNode()
     {
+        if (_builder is PendingKnnBuilder) return EnsureMaterialized().SourceNode();
         // RelationshipEndpointOperator は単一 NodeId のタプルを放出し、上流を破棄する。
         // そのため生きていたエイリアスはすべて失われる。GC-6 Phase 2 の既知制限として
         // 暗黙にドロップする運用。
@@ -409,6 +448,7 @@ public sealed class GraphTraversal<T>
     /// <summary>GC-1: Gremlin の <c>.inV()</c> — 現在のエッジのターゲット (終点) ノードに解決する。</summary>
     public GraphTraversal<NodeId> TargetNode()
     {
+        if (_builder is PendingKnnBuilder) return EnsureMaterialized().TargetNode();
         var rep = new RelationshipEndpointBuilder(_builder, _entityColumn, RelationshipEndpoint.Target);
         return new GraphTraversal<NodeId>(_tx, _schema, rep, row => row.GetNodeId(0), 0);
     }
@@ -416,13 +456,20 @@ public sealed class GraphTraversal<T>
     /// <summary>GC-1: Gremlin の <c>.otherV()</c> — 進入方向に対する「向こう側」の端点に解決する。</summary>
     public GraphTraversal<NodeId> OtherNode()
     {
+        if (_builder is PendingKnnBuilder) return EnsureMaterialized().OtherNode();
         var rep = new RelationshipEndpointBuilder(_builder, _entityColumn, RelationshipEndpoint.Other);
         return new GraphTraversal<NodeId>(_tx, _schema, rep, row => row.GetNodeId(0), 0);
     }
 
-    /// <summary>VEC-6: graph-first KNN。詳細セマンティクスはクラスドキュメント参照。</summary>
+    /// <summary>
+    /// VEC-6: graph-first KNN。上流の各ノードを candidate set として KnnSearchFiltered を呼ぶ。
+    /// 通常は <c>g.Knn(...).HasLabel(...).Has(...)</c> チェーンが VEC-9 の logical plan rewrite で
+    /// 自動的にこの形に変換される。本メソッドは明示的に graph-first を選びたい (例: 二段 KNN や
+    /// 複雑な candidate を作る場合) のエスケープハッチとして残す。詳細セマンティクスはクラスドキュメント参照。
+    /// </summary>
     public GraphTraversal<NodeId> FilterByKnn(string indexName, ReadOnlySpan<float> query, int k)
     {
+        if (_builder is PendingKnnBuilder) return EnsureMaterialized().FilterByKnn(indexName, query, k);
         var filtered = new Internal.FilteredKnnNodeSourceBuilder(_builder, indexName, query, k);
         return new GraphTraversal<NodeId>(_tx, _schema, filtered, row => row.GetNodeId(0), 0);
     }
@@ -433,6 +480,7 @@ public sealed class GraphTraversal<T>
     public GraphTraversal<T> OrderBy(string key)
     {
         ArgumentNullException.ThrowIfNull(key);
+        if (_builder is PendingKnnBuilder) return EnsureMaterialized().OrderBy(key);
         return Chain(new SortBuilder(_builder, key, descending: false), _projection, _entityColumn);
     }
 
@@ -440,12 +488,16 @@ public sealed class GraphTraversal<T>
     public GraphTraversal<T> OrderByDescending(string key)
     {
         ArgumentNullException.ThrowIfNull(key);
+        if (_builder is PendingKnnBuilder) return EnsureMaterialized().OrderByDescending(key);
         return Chain(new SortBuilder(_builder, key, descending: true), _projection, _entityColumn);
     }
 
     /// <summary>現在のエンティティ ID 列でソートする。<paramref name="descending"/> が true なら降順。</summary>
     public GraphTraversal<T> Order(bool descending = false)
-        => Chain(new SortBuilder(_builder, _entityColumn, descending), _projection, _entityColumn);
+    {
+        if (_builder is PendingKnnBuilder) return EnsureMaterialized().Order(descending);
+        return Chain(new SortBuilder(_builder, _entityColumn, descending), _projection, _entityColumn);
+    }
 
     // ── GC-3: 数値集約 (終端、プロパティキーを引数に取る) ───────────
 
@@ -490,9 +542,10 @@ public sealed class GraphTraversal<T>
 
     private long? AggregateLongSum(string key)
     {
+        var self = EnsureMaterialized();
         long acc = 0; bool seen = false;
-        var plan = new PropertyLookupBuilder(_builder, key).Build(_schema);
-        using var cursor = _tx.ExecuteCursor(plan);
+        var plan = new PropertyLookupBuilder(self._builder, key).Build(self._schema);
+        using var cursor = self._tx.ExecuteCursor(plan);
         int valueCol = cursor.Schema.Columns.Count - 1;
         while (cursor.MoveNext())
         {
@@ -506,8 +559,9 @@ public sealed class GraphTraversal<T>
 
     private void ForEachNumeric(string key, Action<double> sink)
     {
-        var plan = new PropertyLookupBuilder(_builder, key).Build(_schema);
-        using var cursor = _tx.ExecuteCursor(plan);
+        var self = EnsureMaterialized();
+        var plan = new PropertyLookupBuilder(self._builder, key).Build(self._schema);
+        using var cursor = self._tx.ExecuteCursor(plan);
         int valueCol = cursor.Schema.Columns.Count - 1;
         while (cursor.MoveNext())
         {
@@ -529,9 +583,10 @@ public sealed class GraphTraversal<T>
     public Dictionary<string, long> GroupCount(string key)
     {
         ArgumentNullException.ThrowIfNull(key);
+        var self = EnsureMaterialized();
         var dict = new Dictionary<string, long>(StringComparer.Ordinal);
-        var plan = new PropertyLookupBuilder(_builder, key).Build(_schema);
-        using var cursor = _tx.ExecuteCursor(plan);
+        var plan = new PropertyLookupBuilder(self._builder, key).Build(self._schema);
+        using var cursor = self._tx.ExecuteCursor(plan);
         int valueCol = cursor.Schema.Columns.Count - 1;
         while (cursor.MoveNext())
         {
@@ -551,7 +606,11 @@ public sealed class GraphTraversal<T>
     // ── GC-4: 重複排除 ──────────────────────────────────────
 
     /// <summary>現在のエンティティ列に対して重複排除を行う (Gremlin の <c>.dedup()</c>)。</summary>
-    public GraphTraversal<T> Dedup() => Chain(new DedupBuilder(_builder, _entityColumn), _projection, _entityColumn);
+    public GraphTraversal<T> Dedup()
+    {
+        if (_builder is PendingKnnBuilder) return EnsureMaterialized().Dedup();
+        return Chain(new DedupBuilder(_builder, _entityColumn), _projection, _entityColumn);
+    }
 
     // ── GC-4: 可変長 repeat ─────────────────────────────────
 
@@ -566,6 +625,7 @@ public sealed class GraphTraversal<T>
     {
         ArgumentNullException.ThrowIfNull(step);
         if (times < 1) throw new ArgumentOutOfRangeException(nameof(times), "Repeat には times >= 1 が必要です。");
+        if (_builder is PendingKnnBuilder) return EnsureMaterialized().Repeat(step, times, emit);
         var rs = new RepeatStep();
         step(rs);
         int minHops = emit ? 1 : times;
@@ -590,6 +650,7 @@ public sealed class GraphTraversal<T>
         string? type = null,
         long maxDistance = long.MaxValue)
     {
+        if (_builder is PendingKnnBuilder) return EnsureMaterialized().ShortestPathTo(target, direction, type, maxDistance);
         var b = new ShortestPathToBuilder(_builder, target, direction, type, maxDistance);
         int distCol = b.CurrentEntityColumn;
         return new GraphTraversal<long>(_tx, _schema, b, row => row.GetInt64(distCol), distCol);
@@ -622,6 +683,8 @@ public sealed class GraphTraversal<T>
         if (kind == BranchedBuilder.Kind.Optional && branches.Length != 1)
             throw new ArgumentException("Optional は分岐を 1 つだけ受け取ります。", nameof(branches));
 
+        if (_builder is PendingKnnBuilder) return EnsureMaterialized().BuildBranched(branches, kind);
+
         var captured = branches;
         var b = new BranchedBuilder(_builder, schema =>
         {
@@ -644,9 +707,16 @@ public sealed class GraphTraversal<T>
     /// <summary>プロパティ <paramref name="key"/> の文字列値だけを取り出す (Gremlin の <c>.values(key)</c>)。</summary>
     public GraphTraversal<string> Values(string key)
     {
-        var lookup = new PropertyLookupBuilder(_builder, key);
-        int propCol = lookup.PredictedOutputColumnCount - 1;
-        return Chain(lookup, row => row.GetString(propCol), _entityColumn);
+        if (_builder is PendingKnnBuilder)
+        {
+            var mat = EnsureMaterialized();
+            var lookup = new PropertyLookupBuilder(mat._builder, key);
+            int propCol = lookup.PredictedOutputColumnCount - 1;
+            return new GraphTraversal<string>(mat._tx, mat._schema, lookup, row => row.GetString(propCol), mat._entityColumn, mat._aliases);
+        }
+        var lookup0 = new PropertyLookupBuilder(_builder, key);
+        int propCol0 = lookup0.PredictedOutputColumnCount - 1;
+        return Chain(lookup0, row => row.GetString(propCol0), _entityColumn);
     }
 
     // ── GC-6: as / select — タプルスキーマ拡張 ──────────────────────────
@@ -704,9 +774,10 @@ public sealed class GraphTraversal<T>
         ArgumentNullException.ThrowIfNull(projection);
         if (_aliases is null || _aliases.Count == 0)
             throw new InvalidOperationException("Select(projection) はチェーン中に少なくとも 1 つの .As(label) が必要です。");
-        var aliases = _aliases;
+        var self = EnsureMaterialized();
+        var aliases = self._aliases!;
         var results = new List<TResult>();
-        var qr = _tx.Execute(_builder.Build(_schema));
+        var qr = self._tx.Execute(self._builder.Build(self._schema));
         foreach (var row in qr.Rows())
             results.Add(projection(new MatchTuple(row, aliases)));
         return results;
@@ -715,36 +786,40 @@ public sealed class GraphTraversal<T>
     /// <summary>すべての結果を <see cref="List{T}"/> に展開して返す。</summary>
     public List<T> ToList()
     {
+        var self = EnsureMaterialized();
         var results = new List<T>();
-        var result  = _tx.Execute(_builder.Build(_schema));
+        var result  = self._tx.Execute(self._builder.Build(self._schema));
         foreach (var row in result.Rows())
-            results.Add(_projection(row));
+            results.Add(self._projection(row));
         return results;
     }
 
     /// <summary>最初の 1 件を返す。結果が空のときは <see cref="InvalidOperationException"/> を投げる。</summary>
     public T Next()
     {
-        var result = _tx.Execute(_builder.Build(_schema));
+        var self = EnsureMaterialized();
+        var result = self._tx.Execute(self._builder.Build(self._schema));
         foreach (var row in result.Rows())
-            return _projection(row);
+            return self._projection(row);
         throw new InvalidOperationException("トラバーサルが結果を生成しませんでした。");
     }
 
     /// <summary>最初の 1 件を返す。結果が空のときは <see langword="default"/> を返す。</summary>
     public T? TryNext()
     {
-        var result = _tx.Execute(_builder.Build(_schema));
+        var self = EnsureMaterialized();
+        var result = self._tx.Execute(self._builder.Build(self._schema));
         foreach (var row in result.Rows())
-            return _projection(row);
+            return self._projection(row);
         return default;
     }
 
     /// <summary>結果の件数だけを数える終端ステップ (Gremlin の <c>.count()</c>)。</summary>
     public long Count()
     {
+        var self = EnsureMaterialized();
         long count = 0;
-        var result = _tx.Execute(_builder.Build(_schema));
+        var result = self._tx.Execute(self._builder.Build(self._schema));
         foreach (var _ in result.Rows())
             count++;
         return count;
@@ -757,8 +832,9 @@ public sealed class GraphTraversal<T>
     /// </summary>
     public ITraversalCursor<T> AsCursor()
     {
-        var cursor = _tx.ExecuteCursor(_builder.Build(_schema));
-        return new TraversalCursor<T>(cursor, _projection);
+        var self = EnsureMaterialized();
+        var cursor = self._tx.ExecuteCursor(self._builder.Build(self._schema));
+        return new TraversalCursor<T>(cursor, self._projection);
     }
 
     /// <summary>
@@ -767,8 +843,9 @@ public sealed class GraphTraversal<T>
     /// </summary>
     public IEnumerable<T> AsEnumerable()
     {
-        using var cursor = _tx.ExecuteCursor(_builder.Build(_schema));
+        var self = EnsureMaterialized();
+        using var cursor = self._tx.ExecuteCursor(self._builder.Build(self._schema));
         while (cursor.MoveNext())
-            yield return _projection(cursor.Current);
+            yield return self._projection(cursor.Current);
     }
 }
