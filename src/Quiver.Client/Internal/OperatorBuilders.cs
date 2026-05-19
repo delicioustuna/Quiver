@@ -29,6 +29,11 @@ internal sealed class FilterBuilder : IOperatorBuilder
     public int CurrentEntityColumn => _source.CurrentEntityColumn;
     public int PredictedOutputColumnCount => _source.PredictedOutputColumnCount;
 
+    /// <summary>VEC-10: PendingKnnBuilder の vector-first フォールバック時に candidate-side のフィルタチェーンを後段に再配置するために露出する。</summary>
+    internal IOperatorBuilder Source => _source;
+    /// <summary>VEC-10: フィルタチェーン再配置用に PredicateFactory をそのまま再利用できるよう露出する。</summary>
+    internal Func<ISchemaApi, IPredicate> PredicateFactory => _predicateFactory;
+
     internal FilterBuilder(IOperatorBuilder source, Func<ISchemaApi, IPredicate> factory)
     {
         _source = source; _predicateFactory = factory;

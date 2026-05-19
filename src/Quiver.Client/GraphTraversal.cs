@@ -29,6 +29,10 @@ public sealed class GraphTraversal<T>
     // バインドされていない (一般的なケース) 場合は null。不変として扱い、丸ごと
     // 差し替える運用。インプレース変更は行わない。
     internal readonly Dictionary<string, int>? _aliases;
+    // VEC-10: 任意で注入された GraphStats。PendingKnnBuilder.Materialize に渡し、
+    // graph-first push-down を label cardinality 30% 以上のときに vector-first にフォールバックさせる。
+    // 既存呼び出しは null のまま (= VEC-9 動作 = 構造ヒントのみで判定)。
+    internal readonly GraphStats? _stats;
 
     internal GraphTraversal(
         IGraphTransaction tx,
@@ -36,25 +40,33 @@ public sealed class GraphTraversal<T>
         IOperatorBuilder builder,
         Func<QueryRow, T> projection,
         int entityColumn,
-        Dictionary<string, int>? aliases = null)
+        Dictionary<string, int>? aliases = null,
+        GraphStats? stats = null)
     {
         _tx = tx; _schema = schema; _builder = builder; _projection = projection;
         _entityColumn = entityColumn;
         _aliases = (aliases is { Count: > 0 }) ? aliases : null;
+        _stats = stats;
     }
 
     /// <summary>GC-6: 同じエイリアスセットを引き継いだ後続トラバーサルを構築する内部ヘルパ。</summary>
     private GraphTraversal<U> Chain<U>(IOperatorBuilder builder, Func<QueryRow, U> projection, int entityColumn)
-        => new(_tx, _schema, builder, projection, entityColumn, _aliases);
+        => new(_tx, _schema, builder, projection, entityColumn, _aliases, _stats);
+
+    /// <summary>VEC-10: alias を持ち越さない (= タプル形状をリセットする) 新規 traversal を構築する内部ヘルパ。stats だけは引き継ぐ。</summary>
+    private GraphTraversal<U> Rebase<U>(IOperatorBuilder builder, Func<QueryRow, U> projection, int entityColumn, Dictionary<string, int>? aliases = null)
+        => new(_tx, _schema, builder, projection, entityColumn, aliases, _stats);
 
     /// <summary>
     /// VEC-9: <c>_builder</c> が <see cref="PendingKnnBuilder"/> なら materialize した新トラバーサルを返す。
     /// non-pure step (Out/OrderBy/Limit 以外/Repeat/...) や terminal の冒頭で呼ぶ。
+    /// VEC-10: 注入された <see cref="_stats"/> を <see cref="PendingKnnBuilder.Materialize(GraphStats?, ISchemaApi?)"/>
+    /// に渡し、label cardinality が高い場合は vector-first にフォールバックさせる。
     /// </summary>
     private GraphTraversal<T> EnsureMaterialized()
     {
         if (_builder is PendingKnnBuilder pk)
-            return new GraphTraversal<T>(_tx, _schema, pk.Materialize(), _projection, _entityColumn, _aliases);
+            return new GraphTraversal<T>(_tx, _schema, pk.Materialize(_stats, _schema), _projection, _entityColumn, _aliases, _stats);
         return this;
     }
 
@@ -79,7 +91,7 @@ public sealed class GraphTraversal<T>
                 candNext = new FilterBuilder(pk.Candidate, _ => new LabelPredicate(lid, candCol));
             }
             var nextPk = pk.WithCandidate(candNext);
-            return new GraphTraversal<NodeId>(_tx, _schema, nextPk, row => row.GetNodeId(0), 0, _aliases);
+            return new GraphTraversal<NodeId>(_tx, _schema, nextPk, row => row.GetNodeId(0), 0, _aliases, _stats);
         }
 
         IOperatorBuilder next;
@@ -91,7 +103,7 @@ public sealed class GraphTraversal<T>
             var col = _entityColumn;
             next = new FilterBuilder(_builder, _ => new LabelPredicate(labelId, col));
         }
-        return new GraphTraversal<NodeId>(_tx, _schema, next, row => row.GetNodeId(_entityColumn), next.CurrentEntityColumn, _aliases);
+        return new GraphTraversal<NodeId>(_tx, _schema, next, row => row.GetNodeId(_entityColumn), next.CurrentEntityColumn, _aliases, _stats);
     }
 
     /// <summary>
@@ -190,12 +202,12 @@ public sealed class GraphTraversal<T>
         if (_aliases is null)
         {
             var fast = new ExpandBuilder(_builder, direction, type, ExpandOutputMode.NeighborOnly, sourceColumnOverride: _entityColumn);
-            return new GraphTraversal<NodeId>(_tx, _schema, fast, row => row.GetNodeId(fast.CurrentEntityColumn), fast.CurrentEntityColumn);
+            return Rebase<NodeId>(fast, row => row.GetNodeId(fast.CurrentEntityColumn), fast.CurrentEntityColumn);
         }
 
         var (carry, newAliases) = RemapForExpand(baseColumnCount: 1);
         var expand = new ExpandBuilder(_builder, direction, type, ExpandOutputMode.NeighborOnly, carry, sourceColumnOverride: _entityColumn);
-        return new GraphTraversal<NodeId>(_tx, _schema, expand, row => row.GetNodeId(0), 0, newAliases);
+        return Rebase<NodeId>(expand, row => row.GetNodeId(0), 0, newAliases);
     }
 
     /// <summary>外向リレーションシップ自体を放出する (Gremlin の <c>.outE</c>、Quiver 改名後の名称)。</summary>
@@ -224,7 +236,7 @@ public sealed class GraphTraversal<T>
         if (_aliases is null)
         {
             var fast = new ExpandBuilder(_builder, direction, type, ExpandOutputMode.NeighborAndRel, sourceColumnOverride: _entityColumn);
-            return new GraphTraversal<RelationshipId>(_tx, _schema, fast, row => row.GetRelationshipId(0), 0);
+            return Rebase<RelationshipId>(fast, row => row.GetRelationshipId(0), 0);
         }
 
         // NeighborAndRel は 2 列 (rel@0, neighbor@1) を放出する。連鎖する
@@ -232,7 +244,7 @@ public sealed class GraphTraversal<T>
         // carry は 2 から始まる。
         var (carry, newAliases) = RemapForExpand(baseColumnCount: 2);
         var e = new ExpandBuilder(_builder, direction, type, ExpandOutputMode.NeighborAndRel, carry, sourceColumnOverride: _entityColumn);
-        return new GraphTraversal<RelationshipId>(_tx, _schema, e, row => row.GetRelationshipId(0), 0, newAliases);
+        return Rebase<RelationshipId>(e, row => row.GetRelationshipId(0), 0, newAliases);
     }
 
     /// <summary>
@@ -411,7 +423,7 @@ public sealed class GraphTraversal<T>
             var mat = EnsureMaterialized();
             var lookup = new LabelNameLookupBuilder(mat._builder, mat._entityColumn, mat._schema);
             int labelCol = lookup.PredictedOutputColumnCount - 1;
-            return new GraphTraversal<string>(mat._tx, mat._schema, lookup, row => row.GetString(labelCol), mat._entityColumn, mat._aliases);
+            return mat.Chain<string>(lookup, row => row.GetString(labelCol), mat._entityColumn);
         }
         var lookup0 = new LabelNameLookupBuilder(_builder, _entityColumn, _schema);
         int labelCol0 = lookup0.PredictedOutputColumnCount - 1;
@@ -426,7 +438,7 @@ public sealed class GraphTraversal<T>
         if (_builder is PendingKnnBuilder)
         {
             var mat = EnsureMaterialized();
-            return new GraphTraversal<long>(mat._tx, mat._schema, mat._builder, row => row.GetInt64(mat._entityColumn), mat._entityColumn, mat._aliases);
+            return mat.Chain<long>(mat._builder, row => row.GetInt64(mat._entityColumn), mat._entityColumn);
         }
         var col = _entityColumn;
         return Chain(_builder, row => row.GetInt64(col), _entityColumn);
@@ -442,7 +454,7 @@ public sealed class GraphTraversal<T>
         // そのため生きていたエイリアスはすべて失われる。GC-6 Phase 2 の既知制限として
         // 暗黙にドロップする運用。
         var rep = new RelationshipEndpointBuilder(_builder, _entityColumn, RelationshipEndpoint.Source);
-        return new GraphTraversal<NodeId>(_tx, _schema, rep, row => row.GetNodeId(0), 0);
+        return Rebase<NodeId>(rep, row => row.GetNodeId(0), 0);
     }
 
     /// <summary>GC-1: Gremlin の <c>.inV()</c> — 現在のエッジのターゲット (終点) ノードに解決する。</summary>
@@ -450,7 +462,7 @@ public sealed class GraphTraversal<T>
     {
         if (_builder is PendingKnnBuilder) return EnsureMaterialized().TargetNode();
         var rep = new RelationshipEndpointBuilder(_builder, _entityColumn, RelationshipEndpoint.Target);
-        return new GraphTraversal<NodeId>(_tx, _schema, rep, row => row.GetNodeId(0), 0);
+        return Rebase<NodeId>(rep, row => row.GetNodeId(0), 0);
     }
 
     /// <summary>GC-1: Gremlin の <c>.otherV()</c> — 進入方向に対する「向こう側」の端点に解決する。</summary>
@@ -458,7 +470,7 @@ public sealed class GraphTraversal<T>
     {
         if (_builder is PendingKnnBuilder) return EnsureMaterialized().OtherNode();
         var rep = new RelationshipEndpointBuilder(_builder, _entityColumn, RelationshipEndpoint.Other);
-        return new GraphTraversal<NodeId>(_tx, _schema, rep, row => row.GetNodeId(0), 0);
+        return Rebase<NodeId>(rep, row => row.GetNodeId(0), 0);
     }
 
     /// <summary>
@@ -471,7 +483,7 @@ public sealed class GraphTraversal<T>
     {
         if (_builder is PendingKnnBuilder) return EnsureMaterialized().FilterByKnn(indexName, query, k);
         var filtered = new Internal.FilteredKnnNodeSourceBuilder(_builder, indexName, query, k);
-        return new GraphTraversal<NodeId>(_tx, _schema, filtered, row => row.GetNodeId(0), 0);
+        return Rebase<NodeId>(filtered, row => row.GetNodeId(0), 0);
     }
 
     // ── GC-3: 並び替え ───────────────────────────────────────
@@ -631,7 +643,7 @@ public sealed class GraphTraversal<T>
         int minHops = emit ? 1 : times;
         var b = new VarLenExpandBuilder(_builder, rs.Direction, rs.TypeFilter, minHops, times);
         int endCol = b.CurrentEntityColumn;
-        return new GraphTraversal<NodeId>(_tx, _schema, b, row => row.GetNodeId(endCol), endCol);
+        return Rebase<NodeId>(b, row => row.GetNodeId(endCol), endCol);
     }
 
     // ── GC-4: 最短経路 ─────────────────────────────────────
@@ -653,7 +665,7 @@ public sealed class GraphTraversal<T>
         if (_builder is PendingKnnBuilder) return EnsureMaterialized().ShortestPathTo(target, direction, type, maxDistance);
         var b = new ShortestPathToBuilder(_builder, target, direction, type, maxDistance);
         int distCol = b.CurrentEntityColumn;
-        return new GraphTraversal<long>(_tx, _schema, b, row => row.GetInt64(distCol), distCol);
+        return Rebase<long>(b, row => row.GetInt64(distCol), distCol);
     }
 
     // ── GC-4: union / coalesce / optional ──────────────────
@@ -701,7 +713,7 @@ public sealed class GraphTraversal<T>
             }
             return (probes, ops);
         }, kind);
-        return new GraphTraversal<NodeId>(_tx, _schema, b, row => row.GetNodeId(0), 0);
+        return Rebase<NodeId>(b, row => row.GetNodeId(0), 0);
     }
 
     /// <summary>プロパティ <paramref name="key"/> の文字列値だけを取り出す (Gremlin の <c>.values(key)</c>)。</summary>
@@ -712,7 +724,7 @@ public sealed class GraphTraversal<T>
             var mat = EnsureMaterialized();
             var lookup = new PropertyLookupBuilder(mat._builder, key);
             int propCol = lookup.PredictedOutputColumnCount - 1;
-            return new GraphTraversal<string>(mat._tx, mat._schema, lookup, row => row.GetString(propCol), mat._entityColumn, mat._aliases);
+            return mat.Chain<string>(lookup, row => row.GetString(propCol), mat._entityColumn);
         }
         var lookup0 = new PropertyLookupBuilder(_builder, key);
         int propCol0 = lookup0.PredictedOutputColumnCount - 1;
@@ -740,7 +752,7 @@ public sealed class GraphTraversal<T>
             ? new Dictionary<string, int>(capacity: 1)
             : new Dictionary<string, int>(_aliases);
         next[label] = _entityColumn;
-        return new GraphTraversal<T>(_tx, _schema, _builder, _projection, _entityColumn, next);
+        return new GraphTraversal<T>(_tx, _schema, _builder, _projection, _entityColumn, next, _stats);
     }
 
     /// <summary>
@@ -755,7 +767,7 @@ public sealed class GraphTraversal<T>
             throw new InvalidOperationException($"エイリアス '{label}' は未定義です。先に .As(\"{label}\") で pin してください。");
         // builder / schema は変更しない。射影とエンティティ列を pin スロットに
         // 向け直すだけ。エイリアスは生きたままなので連鎖 .Select もそのまま機能する。
-        return new GraphTraversal<NodeId>(_tx, _schema, _builder, row => row.GetNodeId(col), col, _aliases);
+        return new GraphTraversal<NodeId>(_tx, _schema, _builder, row => row.GetNodeId(col), col, _aliases, _stats);
     }
 
     /// <summary>

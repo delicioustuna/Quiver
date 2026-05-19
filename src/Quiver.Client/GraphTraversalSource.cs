@@ -18,6 +18,10 @@ public sealed class GraphTraversalSource
 {
     private readonly IGraphTransaction _tx;
     private readonly ISchemaApi _schema;
+    // VEC-10: 任意で注入された GraphStats。PendingKnnBuilder.Materialize 経由で
+    // graph-first push-down を label cardinality 30% 以上で vector-first フォールバックさせる。
+    // null のときは VEC-9 動作 (構造ヒントのみで判定)。
+    private readonly GraphStats? _stats;
 
     /// <summary>
     /// 指定したトランザクションとスキーマでトラバーサルソースを生成する。
@@ -26,8 +30,20 @@ public sealed class GraphTraversalSource
     /// <param name="tx">所属するグラフトランザクション。</param>
     /// <param name="schema">ラベル / プロパティキー / リレーションシップ型を解決するスキーマ API。</param>
     public GraphTraversalSource(IGraphTransaction tx, ISchemaApi schema)
+        : this(tx, schema, stats: null)
     {
-        _tx = tx; _schema = schema;
+    }
+
+    /// <summary>
+    /// VEC-10: GraphStats を注入してトラバーサルソースを生成する。
+    /// 後段 <c>g.Knn(...).HasLabel(L)</c> 形式の push-down リライト時に、
+    /// label cardinality が <see cref="Internal.PendingKnnBuilder.VectorFirstLabelFraction"/>
+    /// (既定 30%) 以上のときに vector-first フォールバックを選ぶための判定材料となる。
+    /// stats を渡さない場合は VEC-9 と同じ構造ヒントのみで graph-first を選ぶ。
+    /// </summary>
+    public GraphTraversalSource(IGraphTransaction tx, ISchemaApi schema, GraphStats? stats)
+    {
+        _tx = tx; _schema = schema; _stats = stats;
     }
 
     // ── ノード書き込み ──────────────────────────────────────────────────────
@@ -81,21 +97,21 @@ public sealed class GraphTraversalSource
     public GraphTraversal<NodeId> Nodes()
     {
         var builder = new ScanBuilder();
-        return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0);
+        return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 
     /// <summary>指定 ID のノード 1 件だけを起点とするトラバーサル (Gremlin の <c>g.V(id)</c> 相当)。</summary>
     public GraphTraversal<NodeId> Node(NodeId nodeId)
     {
         var builder = new SingleNodeBuilder(nodeId);
-        return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0);
+        return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 
     /// <summary>指定 ID のノード群を起点とするトラバーサル (Gremlin の <c>g.V(ids)</c> 相当)。</summary>
     public GraphTraversal<NodeId> Nodes(params NodeId[] nodeIds)
     {
         var builder = new MultiNodeBuilder(nodeIds);
-        return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0);
+        return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 
     // ── 型付きスキャン起点 ────────────────────────────────────────────────────
@@ -150,8 +166,9 @@ public sealed class GraphTraversalSource
     {
         // VEC-9: PendingKnnBuilder で包み、後続の pure-filter / Limit を candidate-side に
         // 巻き戻せるようにする。filter が積まれなければ terminal で vector-first に materialize される。
+        // VEC-10: _stats を引き継ぎ、Materialize 経路で label cardinality fallback を効かせる。
         var builder = new Internal.PendingKnnBuilder(new Internal.ScanBuilder(), indexName, query, k);
-        return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0);
+        return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 }
 
@@ -163,4 +180,13 @@ public static class GraphTransactionExtensions
     /// </summary>
     public static GraphTraversalSource G(this IGraphTransaction tx, ISchemaApi schema)
         => new(tx, schema);
+
+    /// <summary>
+    /// VEC-10: GraphStats を渡してトラバーサルソースを構築する。
+    /// <c>g.Knn(...).HasLabel(L)</c> 形式の push-down が、L の cardinality が高いときに
+    /// vector-first にフォールバックして wall-clock 劣化を回避できる。stats を渡さない場合
+    /// は VEC-9 と同じ構造ヒントのみで graph-first を選ぶ。
+    /// </summary>
+    public static GraphTraversalSource G(this IGraphTransaction tx, ISchemaApi schema, GraphStats? stats)
+        => new(tx, schema, stats);
 }
