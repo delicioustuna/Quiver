@@ -74,6 +74,26 @@ public interface IVectorStore
         string indexName,
         ReadOnlySpan<float> query,
         int k);
+
+    /// <summary>
+    /// VEC-8: 同一インデックスに対する複数クエリを 1 回の呼び出しで投げる。
+    /// <see cref="ReadOnlySpan{T}"/> は <see cref="IReadOnlyList{T}"/> に格納できないため、
+    /// 入力は <see cref="ReadOnlyMemory{T}"/> 配列で受ける。既定実装は個別 <see cref="KnnSearch"/>
+    /// を Q 回呼ぶフォールバック。in-memory backend は単一 snapshot 上で
+    /// 「Q 個のクエリ × N 件のコーパス」を gather-then-score でまとめて評価する。
+    /// </summary>
+    /// <remarks>codex_advice_3.md §6.4。返却順序は入力 <paramref name="queries"/> と一致する。</remarks>
+    IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
+        string indexName,
+        IReadOnlyList<ReadOnlyMemory<float>> queries,
+        int k)
+    {
+        ArgumentNullException.ThrowIfNull(queries);
+        var arr = new VectorSearchCursor[queries.Count];
+        for (int i = 0; i < queries.Count; i++)
+            arr[i] = KnnSearch(indexName, queries[i].Span, k);
+        return arr;
+    }
 }
 
 /// <summary>

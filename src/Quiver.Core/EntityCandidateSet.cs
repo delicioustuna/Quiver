@@ -28,6 +28,12 @@ public sealed class EntityCandidateSet
     /// <summary>候補件数。</summary>
     public int Count => _ids.Count;
 
+    /// <summary>
+    /// VEC-8: 候補 ID の列挙。in-memory backend が gather パス
+    /// (candidate ID を直接ルックアップ) を取れるよう露出する。順序は保証しない。
+    /// </summary>
+    public IEnumerable<long> Ids => _ids;
+
     /// <summary>ID を所属判定する。種別は問わない。</summary>
     public bool Contains(long id) => _ids.Contains(id);
 

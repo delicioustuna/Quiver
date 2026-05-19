@@ -25,6 +25,29 @@ internal sealed class SqliteGraphAccessMethods : IGraphAccessMethods
     public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
         => _vectors.KnnSearch(indexName, query, k);
 
+    // VEC-8: SQLite backend も in-memory vector store と組まれている前提なので、
+    // gather-then-score / batch 短絡を有効化する。
+    public VectorSearchCursor KnnSearchFiltered(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        EntityCandidateSet candidates)
+    {
+        if (_vectors is InMemoryVectorStore inMem)
+            return inMem.KnnSearchFiltered(indexName, query, k, candidates);
+        return IGraphAccessMethods.KnnSearchFilteredOversample(this, indexName, query, k, candidates);
+    }
+
+    public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
+        string indexName,
+        IReadOnlyList<ReadOnlyMemory<float>> queries,
+        int k)
+    {
+        if (_vectors is InMemoryVectorStore inMem)
+            return inMem.KnnSearchBatch(indexName, queries, k);
+        return _vectors.KnnSearchBatch(indexName, queries, k);
+    }
+
     public IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null)
         => throw NotSupported(nameof(ScanNodes));
 

@@ -109,6 +109,141 @@ public sealed class InMemoryVectorStore : IVectorStore
         return new HeapCursor(heap.ToSortedArray());
     }
 
+    /// <summary>
+    /// VEC-8: gather-then-score 経路。<paramref name="candidates"/> が
+    /// インデックス全件の 1/4 以下のとき、candidate ID を直接ルックアップして
+    /// ヒット分だけ <see cref="VectorScorer"/> に流す。それ以上の比率では候補ヒット率が
+    /// 高いとみなし全件スキャン + post-filter にフォールバックする。
+    /// 結果は <see cref="IGraphAccessMethods.KnnSearchFiltered"/> 既定実装と完全に一致する
+    /// (順序込み、スコアは相対誤差内)。
+    /// </summary>
+    public VectorSearchCursor KnnSearchFiltered(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        EntityCandidateSet candidates)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        if (k <= 0)
+            throw new VectorException($"KnnSearchFiltered requires positive k (was {k}).");
+
+        var idx = GetIndex(indexName);
+        if (query.Length != idx.Spec.Dimensions)
+            throw new VectorException(
+                $"Vector index '{indexName}' expects {idx.Spec.Dimensions} dimensions, got {query.Length}.");
+
+        // 候補集合が空 / kind 不一致 ⇒ 短絡。ベクトル辞書には触らない。
+        if (candidates.Count == 0 || candidates.Kind != idx.Spec.EntityKind)
+            return new HeapCursor(Array.Empty<VectorSearchResult>());
+
+        // どちらの経路でも metric / snapshot を共有して race を避ける。
+        List<KeyValuePair<VectorKey, float[]>>? gathered = null;
+        KeyValuePair<VectorKey, float[]>[]? scanSnapshot = null;
+        DistanceMetric metric;
+        lock (_gate)
+        {
+            metric = idx.Spec.Metric;
+            int total = idx.Vectors.Count;
+            // gather パス: 候補が「全件の 1/4 以下」のとき直接ルックアップ。
+            // 同点ボーダー (total == 0 を含む) も gather に倒す方が cheaper。
+            if (candidates.Count * 4 <= total || total == 0)
+            {
+                gathered = new List<KeyValuePair<VectorKey, float[]>>(candidates.Count);
+                foreach (var id in candidates.Ids)
+                {
+                    var key = new VectorKey(candidates.Kind, id);
+                    if (idx.Vectors.TryGetValue(key, out var vec))
+                        gathered.Add(new KeyValuePair<VectorKey, float[]>(key, vec));
+                }
+            }
+            else
+            {
+                scanSnapshot = new KeyValuePair<VectorKey, float[]>[total];
+                int i = 0;
+                foreach (var kv in idx.Vectors) scanSnapshot[i++] = kv;
+            }
+        }
+
+        var queryCopy = query.ToArray();
+        var heap = new BoundedMaxHeap(k);
+
+        if (gathered is not null)
+        {
+            foreach (var kv in gathered)
+            {
+                float score = Score(metric, queryCopy, kv.Value);
+                heap.Offer(new VectorSearchResult(kv.Key.Kind, kv.Key.Id, score));
+            }
+        }
+        else
+        {
+            foreach (var kv in scanSnapshot!)
+            {
+                if (!candidates.Contains(kv.Key.Kind, kv.Key.Id)) continue;
+                float score = Score(metric, queryCopy, kv.Value);
+                heap.Offer(new VectorSearchResult(kv.Key.Kind, kv.Key.Id, score));
+            }
+        }
+
+        return new HeapCursor(heap.ToSortedArray());
+    }
+
+    /// <summary>
+    /// VEC-8: 同一インデックスに対する複数クエリを単一 snapshot 上で評価する。
+    /// outer = queries (Q), inner = corpus (N) でクエリベクトルを L1/L2 に滞留させ、
+    /// ロックは snapshot 取得時の 1 回だけ。クエリごとに独立した <see cref="BoundedMaxHeap"/>
+    /// を持つ。次元不一致はループ前に検出する。
+    /// </summary>
+    public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
+        string indexName,
+        IReadOnlyList<ReadOnlyMemory<float>> queries,
+        int k)
+    {
+        ArgumentNullException.ThrowIfNull(queries);
+        if (k <= 0)
+            throw new VectorException($"KnnSearchBatch requires positive k (was {k}).");
+        if (queries.Count == 0)
+            return Array.Empty<VectorSearchCursor>();
+
+        var idx = GetIndex(indexName);
+        for (int q = 0; q < queries.Count; q++)
+        {
+            if (queries[q].Length != idx.Spec.Dimensions)
+                throw new VectorException(
+                    $"Vector index '{indexName}' expects {idx.Spec.Dimensions} dimensions, " +
+                    $"got {queries[q].Length} at query[{q}].");
+        }
+
+        KeyValuePair<VectorKey, float[]>[] snapshot;
+        DistanceMetric metric;
+        lock (_gate)
+        {
+            snapshot = new KeyValuePair<VectorKey, float[]>[idx.Vectors.Count];
+            int i = 0;
+            foreach (var kv in idx.Vectors) snapshot[i++] = kv;
+            metric = idx.Spec.Metric;
+        }
+
+        int Q = queries.Count;
+        var heaps = new BoundedMaxHeap[Q];
+        for (int q = 0; q < Q; q++) heaps[q] = new BoundedMaxHeap(k);
+
+        for (int q = 0; q < Q; q++)
+        {
+            var qSpan = queries[q].Span;
+            var heap = heaps[q];
+            foreach (var kv in snapshot)
+            {
+                float score = Score(metric, qSpan, kv.Value);
+                heap.Offer(new VectorSearchResult(kv.Key.Kind, kv.Key.Id, score));
+            }
+        }
+
+        var cursors = new VectorSearchCursor[Q];
+        for (int q = 0; q < Q; q++) cursors[q] = new HeapCursor(heaps[q].ToSortedArray());
+        return cursors;
+    }
+
     private Index GetIndex(string name)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
@@ -123,7 +258,7 @@ public sealed class InMemoryVectorStore : IVectorStore
     // Score returns a value where HIGHER = more similar so a single max-heap
     // works across all metrics. Euclidean is therefore returned as -distance.
     // VEC-7: delegates to VectorScorer (SIMD via System.Numerics.Vector<float>).
-    private static float Score(DistanceMetric metric, float[] q, float[] v)
+    private static float Score(DistanceMetric metric, ReadOnlySpan<float> q, ReadOnlySpan<float> v)
     {
         return metric switch
         {
@@ -170,7 +305,13 @@ public sealed class InMemoryVectorStore : IVectorStore
         {
             var arr = new VectorSearchResult[_count];
             Array.Copy(_items, arr, _count);
-            Array.Sort(arr, static (a, b) => b.Score.CompareTo(a.Score));
+            // VEC-8: deterministic order — score desc, then EntityId asc on ties
+            // so gather / scan / batch paths all agree.
+            Array.Sort(arr, static (a, b) =>
+            {
+                int c = b.Score.CompareTo(a.Score);
+                return c != 0 ? c : a.EntityId.CompareTo(b.EntityId);
+            });
             return arr;
         }
 

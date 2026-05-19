@@ -33,6 +33,28 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
         => _vectors.KnnSearch(indexName, query, k);
 
+    // VEC-8: in-memory backend では gather-then-score / 単一 snapshot バッチで短絡。
+    public VectorSearchCursor KnnSearchFiltered(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        EntityCandidateSet candidates)
+    {
+        if (_vectors is InMemoryVectorStore inMem)
+            return inMem.KnnSearchFiltered(indexName, query, k, candidates);
+        return IGraphAccessMethods.KnnSearchFilteredOversample(this, indexName, query, k, candidates);
+    }
+
+    public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
+        string indexName,
+        IReadOnlyList<ReadOnlyMemory<float>> queries,
+        int k)
+    {
+        if (_vectors is InMemoryVectorStore inMem)
+            return inMem.KnnSearchBatch(indexName, queries, k);
+        return _vectors.KnnSearchBatch(indexName, queries, k);
+    }
+
     public IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null)
     {
         if (!label.HasValue) return tx.Nodes.Scan();

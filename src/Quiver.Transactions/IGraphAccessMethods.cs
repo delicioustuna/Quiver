@@ -66,6 +66,23 @@ public interface IGraphAccessMethods
             "このバックエンドは KnnSearch を実装していません。access methods に IVectorStore を接続してください。");
 
     /// <summary>
+    /// VEC-8: 同一インデックスに対する複数クエリを 1 回の呼び出しで投げる access path。
+    /// 既定実装は <see cref="KnnSearch"/> を Q 回呼ぶフォールバック。in-memory backend は
+    /// 単一 snapshot で Q×N をスコアリングするオーバーライドを提供する。
+    /// </summary>
+    IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
+        string indexName,
+        IReadOnlyList<ReadOnlyMemory<float>> queries,
+        int k)
+    {
+        ArgumentNullException.ThrowIfNull(queries);
+        var arr = new VectorSearchCursor[queries.Count];
+        for (int i = 0; i < queries.Count; i++)
+            arr[i] = KnnSearch(indexName, queries[i].Span, k);
+        return arr;
+    }
+
+    /// <summary>
     /// VEC-6: フィルタ付き KNN。<paramref name="candidates"/> のメンバーに限定して
     /// 上位 <paramref name="k"/> 件のベクトルを返す。既定実装は <see cref="KnnSearch"/> を
     /// オーバーサンプリング (k → 2k → 4k …) してポストフィルタを掛け、k 件揃うか
@@ -83,25 +100,32 @@ public interface IGraphAccessMethods
         ReadOnlySpan<float> query,
         int k,
         EntityCandidateSet candidates)
+        => KnnSearchFilteredOversample(this, indexName, query, k, candidates);
+
+    /// <summary>
+    /// VEC-6 既定実装の共有ヘルパ。VEC-8 でクラス側 override が高速経路を選んだあと、
+    /// fallback 経路 (非 InMemory backend) でも同じオーバーサンプル挙動を呼べるよう抽出した。
+    /// </summary>
+    internal static VectorSearchCursor KnnSearchFilteredOversample(
+        IGraphAccessMethods access,
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        EntityCandidateSet candidates)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (k <= 0) throw new ArgumentOutOfRangeException(nameof(k), k, "k は正の整数である必要があります。");
 
-        // 候補集合が空 ⇒ 結果も空。graph-first が既に全部刈り取っている自明ケースで
-        // ベクトルインデックスに触らないよう早期 return する。
         if (candidates.Count == 0)
             return EmptyVectorSearchCursor.Instance;
 
-        // 2 段オーバーサンプル。上限は寛大: max(k*64, candidates.Count*2)
-        // — 敵対的レイアウトでも収束しつつ、最悪ケースを「全ベクトルを 2 回スコアリング」未満に
-        // バウンドする。
         int oversampleCap = Math.Max(k * 64, candidates.Count * 2);
         int candidateK = Math.Min(Math.Max(k * 4, k + candidates.Count / 4), oversampleCap);
 
         while (true)
         {
             var hits = new List<VectorSearchResult>(k);
-            using (var cursor = KnnSearch(indexName, query, candidateK))
+            using (var cursor = access.KnnSearch(indexName, query, candidateK))
             {
                 while (cursor.MoveNext())
                 {
@@ -112,8 +136,6 @@ public interface IGraphAccessMethods
                 }
             }
 
-            // k 件確保できたか、インデックスを使い切ったか (オーバーサンプルが上限で
-            // まだ足りない) のどちらか。いずれも部分結果を返す。
             if (hits.Count >= k || candidateK >= oversampleCap)
                 return new MaterializedVectorSearchCursor(hits);
 
