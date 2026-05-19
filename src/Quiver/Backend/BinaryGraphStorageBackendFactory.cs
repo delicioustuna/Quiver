@@ -89,6 +89,16 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
 
         var vectors = new InMemoryVectorStore();
         var access = new BinaryGraphAccessMethods(vectors);
+
+        // VEC-11: in-memory inverted index keyed by LabelId so label-filtered
+        // scans run in O(|L|) instead of O(N). Built lazily from a single
+        // NodeStore.Scan() after WAL recovery; subsequent Allocate/Free are
+        // notified by the store via the LabelNodeIndex hook, and bulk loads
+        // invalidate (next lookup triggers rebuild).
+        var labelIndex = new LabelNodeIndex();
+        nodeStore.AttachLabelIndex(labelIndex);
+        access.AttachLabelIndex(labelIndex);
+
         var txManager = new TransactionManager(
             wal, nodeStore, relStore, propStore, indexManager, adjStore, access);
 

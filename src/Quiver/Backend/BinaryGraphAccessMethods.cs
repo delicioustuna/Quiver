@@ -22,11 +22,20 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     internal long FallbackCountInternal;
 
     private readonly IVectorStore _vectors;
+    // VEC-11: optional label inverted index. When wired, label-filtered
+    // ScanNodes/LabelScan switches from full Scan() to O(|L|) lookup.
+    private LabelNodeIndex? _labelIndex;
 
     internal BinaryGraphAccessMethods(IVectorStore vectors)
     {
         _vectors = vectors;
     }
+
+    /// <summary>
+    /// VEC-11: factory が NodeStore に attach した後の index を共有する。
+    /// 接続前 (open 直後 / unit テスト) は <see cref="ScanByLabelSlow"/> にフォールバックする。
+    /// </summary>
+    internal void AttachLabelIndex(LabelNodeIndex labelIndex) => _labelIndex = labelIndex;
 
     public long AdjacencyFallbackCount => Interlocked.Read(ref FallbackCountInternal);
 
@@ -58,10 +67,16 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     public IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null)
     {
         if (!label.HasValue) return tx.Nodes.Scan();
-        return ScanByLabel(tx, label.Value);
+        // VEC-11: O(|L|) sidecar lookup when wired. Until the factory attaches
+        // the index, fall back to the legacy O(N) scan-and-filter path so
+        // standalone TransactionManager constructions (e.g. backend-less tests)
+        // still work.
+        if (_labelIndex is { } idx)
+            return idx.Lookup(tx.Nodes, label.Value);
+        return ScanByLabelSlow(tx, label.Value);
     }
 
-    private static IEnumerable<NodeId> ScanByLabel(ITransaction tx, LabelId label)
+    private static IEnumerable<NodeId> ScanByLabelSlow(ITransaction tx, LabelId label)
     {
         foreach (var id in tx.Nodes.Scan())
         {

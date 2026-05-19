@@ -1,12 +1,20 @@
-﻿using Quiver.Core;
+using Quiver.Core;
 using Quiver.Transactions;
 
 namespace Quiver.Operators;
 
+/// <summary>
+/// 単一ラベルに属する <see cref="NodeId"/> を列挙するスキャンオペレータ。
+/// </summary>
+/// <remarks>
+/// VEC-11: 内部で <see cref="IGraphAccessMethods.ScanNodes"/> 経由のアクセスパスに委譲する。
+/// バイナリ backend は <c>LabelNodeIndex</c> sidecar を持つため O(|L|) lookup になり、
+/// <c>InlineGraphAccessMethods</c> (backend 不在の単体テスト等) は従来の O(N) スキャン
+/// + ラベルフィルタにフォールバックする (legacy fallback)。
+/// </remarks>
 public sealed class NodeByLabelScanOperator : IPhysicalOperator
 {
     private readonly LabelId _labelId;
-    private ITransaction? _tx;
     private IEnumerator<NodeId>? _enumerator;
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
 
@@ -18,18 +26,14 @@ public sealed class NodeByLabelScanOperator : IPhysicalOperator
 
     public void Open(ITransaction tx)
     {
-        _tx = tx;
-        _enumerator = tx.Nodes.Scan().GetEnumerator();
+        _enumerator = tx.Access.ScanNodes(tx, _labelId).GetEnumerator();
     }
 
     public bool MoveNext()
     {
-        while (_enumerator!.MoveNext())
+        if (_enumerator!.MoveNext())
         {
-            var nodeId = _enumerator.Current;
-            var h = _tx!.Nodes.Read(nodeId);
-            if (h.Label != _labelId) continue;
-            _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = nodeId.Value };
+            _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _enumerator.Current.Value };
             var s = Statistics;
             s.RowsProduced++;
             Statistics = s;

@@ -20,13 +20,20 @@ internal sealed class NodeStore : INodeStore
     public static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 544
 
     private readonly IPagedFile _file;
+    // VEC-11: optional sidecar updated on Allocate / Free / BulkSetHeaders so the
+    // binary backend's access methods can serve label-filtered scans in O(|L|).
+    // null when not wired (e.g. unit tests that construct NodeStore standalone).
+    private LabelNodeIndex? _labelIndex;
     private long _freeHead;
     private long _hwm;
     private long _inUseCount;
 
-    public NodeStore(IPagedFile file)
+    public NodeStore(IPagedFile file) : this(file, labelIndex: null) { }
+
+    public NodeStore(IPagedFile file, LabelNodeIndex? labelIndex)
     {
         _file = file;
+        _labelIndex = labelIndex;
         if (_file.PageCount <= 1)
         {
             _file.AllocatePage(PageKind.Header); // allocates PageId(1)
@@ -38,6 +45,12 @@ internal sealed class NodeStore : INodeStore
             LoadMeta();
         }
     }
+
+    /// <summary>
+    /// VEC-11: 後付けで LabelNodeIndex を接続する。BinaryGraphStorageBackendFactory が
+    /// RecoveryManager.Recover() 完了後に index を構築する流れで使う。
+    /// </summary>
+    public void AttachLabelIndex(LabelNodeIndex labelIndex) => _labelIndex = labelIndex;
 
     public long InUseCount => _inUseCount;
 
@@ -70,7 +83,9 @@ internal sealed class NodeStore : INodeStore
         _file.UnpinDirty(wpid, 0);
 
         FlushMeta();
-        return new NodeId(id);
+        var newId = new NodeId(id);
+        _labelIndex?.OnAllocate(newId, labelId);
+        return newId;
     }
 
     public void Free(NodeId nodeId)
@@ -78,6 +93,9 @@ internal sealed class NodeStore : INodeStore
         var (pageId, off) = Location(nodeId.Value);
         var ph = _file.PinForWrite(pageId);
         Span<byte> rec = ph.Data.Slice(off, RecordSize);
+        // VEC-11: capture label before clearing so the sidecar index can
+        // remove this NodeId from the right bucket.
+        var prevLabel = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(rec[13..]));
         rec.Clear();
         RecordHelpers.WriteInt48(rec[1..], _freeHead); // chain next-free into FirstRelId slot
         _file.UnpinDirty(pageId, 0);
@@ -85,6 +103,7 @@ internal sealed class NodeStore : INodeStore
         _freeHead = nodeId.Value;
         _inUseCount--;
         FlushMeta();
+        _labelIndex?.OnFree(nodeId, prevLabel);
     }
 
     public NodeReadHandle Read(NodeId nodeId)
@@ -169,6 +188,9 @@ internal sealed class NodeStore : INodeStore
         _inUseCount = inUseCount;
         _freeHead = -1;
         FlushMeta();
+        // VEC-11: BulkWrite path bypasses Allocate notifications, so invalidate
+        // the sidecar. Next lookup will trigger a full rebuild via EnsureBuilt.
+        _labelIndex?.Invalidate();
     }
 
     // --- private ---
