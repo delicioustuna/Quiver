@@ -24,8 +24,7 @@ public class GraphStatsBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(
-            Path.GetTempPath(), "quiver_bench_stats_" + Guid.NewGuid().ToString("N")[..8]);
+        _dbPath = BenchTempDir.Create("stats");
 
         {
             using var db = GraphDatabase.Open(_dbPath);
@@ -65,8 +64,8 @@ public class GraphStatsBenchmarks
     public void Cleanup()
     {
         _db?.Dispose();
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, recursive: true);
+        // 残骸蓄積の原因と対策は BenchTempDir 参照。
+        BenchTempDir.Delete(_dbPath);
     }
 
     /// <summary>DB 全体をスキャンして統計を収集する。</summary>
@@ -96,8 +95,7 @@ public class QueryOptimizerBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(
-            Path.GetTempPath(), "quiver_bench_opt_" + Guid.NewGuid().ToString("N")[..8]);
+        _dbPath = BenchTempDir.Create("opt");
 
         {
             using var db = GraphDatabase.Open(_dbPath);
@@ -134,8 +132,8 @@ public class QueryOptimizerBenchmarks
     public void Cleanup()
     {
         _db?.Dispose();
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, recursive: true);
+        // 残骸蓄積の原因と対策は BenchTempDir 参照。
+        BenchTempDir.Delete(_dbPath);
     }
 
     /// <summary>インデックスなし → LabelScan を選択。</summary>

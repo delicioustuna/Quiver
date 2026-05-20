@@ -31,7 +31,7 @@ public class ParallelBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), "quiver_bench_par_" + Guid.NewGuid().ToString("N")[..8]);
+        _dbPath = BenchTempDir.Create("par");
         {
             using var db = GraphDatabase.Open(_dbPath);
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
@@ -80,8 +80,8 @@ public class ParallelBenchmarks
     {
         _readTx?.Dispose();
         _db?.Dispose();
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, recursive: true);
+        // 残骸蓄積の原因と対策は BenchTempDir 参照。
+        BenchTempDir.Delete(_dbPath);
     }
 
     // ── 2-hop ──────────────────────────────────────────────────────────────

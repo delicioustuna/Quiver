@@ -38,7 +38,7 @@ public class WeightedAdjBenchmarks
     public void Setup()
     {
         // V2 path: bulk-load with payload lane configured, weights inlined.
-        _v2Path = Path.Combine(Path.GetTempPath(), "quiver_bench_v2_" + Guid.NewGuid().ToString("N")[..8]);
+        _v2Path = BenchTempDir.Create("v2");
         {
             using var db = GraphDatabase.Open(_v2Path);
             var key = db.Schema.GetOrCreatePropertyKey(WeightProp);
@@ -61,7 +61,7 @@ public class WeightedAdjBenchmarks
         // relationship properties so the linked-list walk has something to
         // fetch. Two-phase so the property chain exercises the same lookup
         // cost a non-V2 user would pay.
-        _v1Path = Path.Combine(Path.GetTempPath(), "quiver_bench_v1_" + Guid.NewGuid().ToString("N")[..8]);
+        _v1Path = BenchTempDir.Create("v1");
         {
             using var db = GraphDatabase.Open(_v1Path);
             using (var loader = db.BeginBulkLoad(buildAdjacencyIndex: false))
@@ -95,8 +95,9 @@ public class WeightedAdjBenchmarks
         _v1Tx?.Dispose();
         _v2Db?.Dispose();
         _v1Db?.Dispose();
-        if (Directory.Exists(_v2Path)) Directory.Delete(_v2Path, recursive: true);
-        if (Directory.Exists(_v1Path)) Directory.Delete(_v1Path, recursive: true);
+        // 残骸蓄積の原因と対策は BenchTempDir 参照。
+        BenchTempDir.Delete(_v2Path);
+        BenchTempDir.Delete(_v1Path);
     }
 
     [Benchmark(Description = "PayloadLane sum (V2 inline)")]

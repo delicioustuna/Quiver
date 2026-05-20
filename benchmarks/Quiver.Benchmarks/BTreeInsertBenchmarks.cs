@@ -20,14 +20,15 @@ public class BTreeInsertBenchmarks
     [IterationSetup]
     public void Setup()
     {
-        _dir = Path.Combine(Path.GetTempPath(), "quiver_bench_btree_" + Guid.NewGuid().ToString("N")[..8]);
+        _dir = BenchTempDir.Create("btree");
         Directory.CreateDirectory(_dir);
     }
 
     [IterationCleanup]
     public void Cleanup()
     {
-        if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
+        // 残骸蓄積の原因と対策は BenchTempDir 参照。
+        BenchTempDir.Delete(_dir);
     }
 
     /// <summary>Sequential Int64 inserts — covers leaf no-split fast path and split path.</summary>

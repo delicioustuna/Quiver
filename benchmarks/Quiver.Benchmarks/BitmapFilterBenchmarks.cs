@@ -39,7 +39,7 @@ public class BitmapFilterBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), "quiver_bench_pw12_" + Guid.NewGuid().ToString("N")[..8]);
+        _dbPath = BenchTempDir.Create("pw12");
         _db = GraphDatabase.Open(_dbPath);
 
         int matchA = (int)(Total * SelectiveFraction);
@@ -68,8 +68,8 @@ public class BitmapFilterBenchmarks
     {
         _readTx?.Dispose();
         _db?.Dispose();
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, recursive: true);
+        // 残骸蓄積の原因と対策は BenchTempDir 参照。
+        BenchTempDir.Delete(_dbPath);
     }
 
     private IPredicate TagEqA() => new BenchTagEqPredicate(_tagKey, "A");

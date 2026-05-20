@@ -31,7 +31,7 @@ public class OneHopAdjBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), "quiver_bench_1hop_adj_" + Guid.NewGuid().ToString("N")[..8]);
+        _dbPath = BenchTempDir.Create("1hop_adj");
         {
             using var db = GraphDatabase.Open(_dbPath);
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
@@ -57,8 +57,8 @@ public class OneHopAdjBenchmarks
     {
         _readTx?.Dispose();
         _db?.Dispose();
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, recursive: true);
+        // 残骸蓄積の原因と対策は BenchTempDir 参照。
+        BenchTempDir.Delete(_dbPath);
     }
 
     [Benchmark(Description = "1-hop LinkedList", Baseline = true)]

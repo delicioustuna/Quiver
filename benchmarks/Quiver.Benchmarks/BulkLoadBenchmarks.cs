@@ -26,18 +26,27 @@ public class BulkLoadBenchmarks
     [IterationSetup]
     public void Setup()
     {
-        string suffix = Guid.NewGuid().ToString("N")[..8];
-        _bulkDbPath      = Path.Combine(Path.GetTempPath(), $"quiver_bulk_{suffix}");
-        _streamingDbPath = Path.Combine(Path.GetTempPath(), $"quiver_streaming_{suffix}");
-        _txDbPath        = Path.Combine(Path.GetTempPath(), $"quiver_tx_{suffix}");
+        // このベンチは 10M edge × 3 DB を作るため 1 DB が GB 級になる。
+        // [IterationSetup] は反復ごとに走り、そのたびに新しいランダム名で
+        // ディレクトリを作るので、kill されると数 GB 単位で残骸が漏れる。
+        // BenchTempDir 経由にして単一ルート配下に集め、起動時 SweepRoot で
+        // 確実に回収できるようにする(原因詳細は BenchTempDir 参照)。
+        _bulkDbPath      = BenchTempDir.Create("bulk");
+        _streamingDbPath = BenchTempDir.Create("streaming");
+        _txDbPath        = BenchTempDir.Create("tx");
     }
 
     [IterationCleanup]
     public void Cleanup()
     {
-        if (Directory.Exists(_bulkDbPath))      Directory.Delete(_bulkDbPath,      recursive: true);
-        if (Directory.Exists(_streamingDbPath)) Directory.Delete(_streamingDbPath, recursive: true);
-        if (Directory.Exists(_txDbPath))        Directory.Delete(_txDbPath,        recursive: true);
+        // 旧実装は Directory.Delete を try/catch 無しで 3 行ベタ書きしていた。
+        // 1 つ目の削除が IOException(mmap ハンドルの解放遅延など)を投げると
+        // 残り 2 つが実行されず確実に漏れ、さらに cleanup の未捕捉例外が BDN
+        // の run 自体を中断させていた。BenchTempDir.Delete はリトライ付きで
+        // 例外を握り潰すため、3 つすべてが必ず削除を試行される。
+        BenchTempDir.Delete(_bulkDbPath);
+        BenchTempDir.Delete(_streamingDbPath);
+        BenchTempDir.Delete(_txDbPath);
     }
 
     [Benchmark(Description = "BulkLoader")]

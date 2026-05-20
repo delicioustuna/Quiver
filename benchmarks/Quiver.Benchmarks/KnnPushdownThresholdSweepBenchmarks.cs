@@ -60,7 +60,7 @@ public class KnnPushdownThresholdSweepBenchmarks
     public void Setup()
     {
         var rng = new Random(2026);
-        _dir = Path.Combine(Path.GetTempPath(), "quiver_bench_vec12_" + Guid.NewGuid().ToString("N"));
+        _dir = BenchTempDir.Create("vec12");
         _db = GraphDatabase.Open(_dir);
 
         var keyId = _db.Schema.GetOrCreatePropertyKey("title");
@@ -94,7 +94,8 @@ public class KnnPushdownThresholdSweepBenchmarks
     public void Cleanup()
     {
         _db.Dispose();
-        if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
+        // 残骸蓄積の原因と対策は BenchTempDir 参照。
+        BenchTempDir.Delete(_dir);
     }
 
     /// <summary>

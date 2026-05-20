@@ -27,7 +27,7 @@ public class ShortestPathBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), "quiver_bench_sp_" + Guid.NewGuid().ToString("N")[..8]);
+        _dbPath = BenchTempDir.Create("sp");
         {
             using var db = GraphDatabase.Open(_dbPath);
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
@@ -50,8 +50,8 @@ public class ShortestPathBenchmarks
     {
         _readTx?.Dispose();
         _db?.Dispose();
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, recursive: true);
+        // 残骸蓄積の原因と対策は BenchTempDir 参照。
+        BenchTempDir.Delete(_dbPath);
     }
 
     [Benchmark(Baseline = true, Description = "ShortestPath (BFS)")]

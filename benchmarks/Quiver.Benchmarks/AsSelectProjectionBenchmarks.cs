@@ -37,7 +37,7 @@ public class AsSelectProjectionBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), "quiver_bench_assel_" + Guid.NewGuid().ToString("N")[..8]);
+        _dbPath = BenchTempDir.Create("assel");
         var rnd = new Random(11);
         using (var db = GraphDatabase.Open(_dbPath))
         {
@@ -87,8 +87,8 @@ public class AsSelectProjectionBenchmarks
     {
         _readTx?.Dispose();
         _db?.Dispose();
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, recursive: true);
+        // 残骸蓄積の原因と対策は BenchTempDir 参照。
+        BenchTempDir.Delete(_dbPath);
     }
 
     [Benchmark(Baseline = true, Description = "Baseline: chain without As/Select")]

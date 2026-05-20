@@ -31,7 +31,7 @@ public class FrontierExpandBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), "quiver_bench_pw17_" + Guid.NewGuid().ToString("N")[..8]);
+        _dbPath = BenchTempDir.Create("pw17");
         _db = GraphDatabase.Open(_dbPath);
 
         var rng = new Random(42);
@@ -59,7 +59,8 @@ public class FrontierExpandBenchmarks
     {
         _readTx?.Dispose();
         _db?.Dispose();
-        if (Directory.Exists(_dbPath)) Directory.Delete(_dbPath, recursive: true);
+        // 残骸蓄積の原因と対策は BenchTempDir 参照。
+        BenchTempDir.Delete(_dbPath);
     }
 
     [Benchmark(Description = "Per-node ExpandOperator", Baseline = true)]

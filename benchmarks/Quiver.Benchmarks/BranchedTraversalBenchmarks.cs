@@ -35,7 +35,7 @@ public class BranchedTraversalBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), "quiver_bench_branched_" + Guid.NewGuid().ToString("N")[..8]);
+        _dbPath = BenchTempDir.Create("branched");
         var rnd = new Random(7);
         using (var db = GraphDatabase.Open(_dbPath))
         {
@@ -100,8 +100,8 @@ public class BranchedTraversalBenchmarks
     {
         _readTx?.Dispose();
         _db?.Dispose();
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, recursive: true);
+        // 残骸蓄積の原因と対策は BenchTempDir 参照。
+        BenchTempDir.Delete(_dbPath);
     }
 
     [Benchmark(Baseline = true, Description = "Baseline: single Out(KNOWS)")]

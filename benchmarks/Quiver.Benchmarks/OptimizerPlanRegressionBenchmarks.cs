@@ -42,7 +42,7 @@ public class OptimizerPlanRegressionBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), "quiver_bench_optplan_" + Guid.NewGuid().ToString("N")[..8]);
+        _dbPath = BenchTempDir.Create("optplan");
         _db = GraphDatabase.Open(_dbPath);
 
         var rng = new Random(123);
@@ -70,7 +70,8 @@ public class OptimizerPlanRegressionBenchmarks
     {
         _readTx?.Dispose();
         _db?.Dispose();
-        if (Directory.Exists(_dbPath)) Directory.Delete(_dbPath, recursive: true);
+        // 残骸蓄積の原因と対策は BenchTempDir 参照。
+        BenchTempDir.Delete(_dbPath);
     }
 
     [Benchmark(Baseline = true, Description = "Forced AdjacencyBlock (per-node ExpandOperator)")]
