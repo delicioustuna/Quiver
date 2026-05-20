@@ -43,6 +43,22 @@ public sealed class InMemoryVectorStore : IVectorStore
         }
     }
 
+    /// <summary>VEC-12: 登録済み index の spec を返す。未登録は <c>false</c>。</summary>
+    public bool TryGetIndex(string name, out VectorIndexSpec spec)
+    {
+        spec = default!;
+        if (string.IsNullOrEmpty(name)) return false;
+        lock (_gate)
+        {
+            if (_indexes.TryGetValue(name, out var idx))
+            {
+                spec = idx.Spec;
+                return true;
+            }
+            return false;
+        }
+    }
+
     public void SetVector(
         EntityKind kind,
         long entityId,

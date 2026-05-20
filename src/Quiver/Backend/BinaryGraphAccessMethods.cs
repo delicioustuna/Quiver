@@ -39,6 +39,16 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
 
     public long AdjacencyFallbackCount => Interlocked.Read(ref FallbackCountInternal);
 
+    /// <summary>
+    /// VEC-12: <c>LabelNodeIndex</c> sidecar が接続されているときに <c>true</c>。
+    /// factory が <see cref="AttachLabelIndex"/> を呼ぶ前 (open 直後 / 単体テスト) は <c>false</c>。
+    /// </summary>
+    public bool HasFastLabelIndex => _labelIndex is not null;
+
+    /// <inheritdoc/>
+    public bool TryGetVectorIndexSpec(string indexName, out VectorIndexSpec spec)
+        => _vectors.TryGetIndex(indexName, out spec);
+
     public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
         => _vectors.KnnSearch(indexName, query, k);
 

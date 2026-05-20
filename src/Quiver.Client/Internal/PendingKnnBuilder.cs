@@ -22,6 +22,8 @@ internal sealed class PendingKnnBuilder : IOperatorBuilder
     private readonly string _indexName;
     private readonly float[] _query;
     private readonly int _k;
+    // VEC-12: 0 = unknown (= legacy 30% 一本に倒れる)。> 0 のとき dim-aware piecewise table を引く。
+    private readonly int _dim;
 
     public int CurrentEntityColumn => 0;
     public int PredictedOutputColumnCount => 1;
@@ -30,38 +32,94 @@ internal sealed class PendingKnnBuilder : IOperatorBuilder
     internal string IndexName => _indexName;
     internal ReadOnlySpan<float> Query => _query;
     internal int K => _k;
+    internal int Dim => _dim;
 
     /// <summary>
     /// VEC-10: 構造ヒントが graph-first を示唆していても、label cardinality / TotalNodes が
-    /// この値以上なら vector-first にフォールバックする。VEC-9 のベンチで graph-first が
-    /// 全 sel で wall-clock 劣位 (NodeByLabelScan が N=100k で ~100ms) だったため、
-    /// k starvation のリスクが残る低 sel 域は引き続き graph-first を選ぶ保守的閾値。
+    /// この値以上なら vector-first にフォールバックする (legacy 経路)。VEC-11 で
+    /// <see cref="GraphStats.HasFastLabelIndex"/> = <c>true</c> の backend では
+    /// <see cref="FastLabelIndexThresholds"/> から dim-aware 値を引くため、この定数は
+    /// sidecar 不在 backend (<c>InlineGraphAccessMethods</c> / 単体テスト経路) でのみ使われる。
     /// </summary>
     internal const double VectorFirstLabelFraction = 0.30;
 
+    /// <summary>
+    /// VEC-12: <see cref="GraphStats.HasFastLabelIndex"/> = <c>true</c> 経路で参照する
+    /// dim → fraction 上限の昇順 piecewise table。各 dim 上限 (含む) のバケットごとに、
+    /// label cardinality / TotalNodes がこの値以上なら vector-first にフォールバックする。
+    /// <para>
+    /// 出典: <c>KnnPushdownThresholdSweepBenchmarks</c> の 5 dim × 8 sel 実測
+    /// ([docs/benchmarks/2026-05-20_VEC-12_after.md](docs/benchmarks/2026-05-20_VEC-12_after.md))。
+    /// 各 dim で <c>GraphFirstForced.Mean == VectorFirstForced.Mean</c> となる sel を線形補間で求め、
+    /// 安全マージン 0.05 を引いた値を採用した:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>dim ≤ 512 (MiniLM-384 等): graph-first が全 sel で vector-first に劣後 (SIMD スコアが安価で
+    ///   O(N) 走査が軽い) → 観測 crossover &lt; 0.30。閾値は VEC-10 と同じ k-starvation correctness floor 0.30。</item>
+    ///   <item>dim ≤ 1024 (ada-002-768 / Cohere-1024): dim=768 で crossover ρ≈0.52 → 0.47。</item>
+    ///   <item>dim ≤ 2048 (text-embedding-3-small-1536): dim=1536 で crossover ρ≈0.75 → 0.70。</item>
+    ///   <item>dim &gt; 2048 (text-embedding-3-large-3072): dim=3072 は測定全域 (ρ≤0.80) で graph-first 優位 → 0.80。</item>
+    /// </list>
+    /// <para>
+    /// クロスオーバーは dim に対して単調増加 (本ファイル先頭の cost 比導出どおり)。バケット境界は
+    /// 実測 dim を代表点に取り、512 / 1024 / 2048 の丸い値に揃えた。
+    /// </para>
+    /// </summary>
+    private static readonly (int MaxDim, double Threshold)[] FastLabelIndexThresholds =
+    {
+        (512,           0.30),
+        (1024,          0.47),
+        (2048,          0.70),
+        (int.MaxValue,  0.80),
+    };
+
     internal PendingKnnBuilder(IOperatorBuilder candidate, string indexName, ReadOnlySpan<float> query, int k)
+        : this(candidate, indexName, query, k, dim: 0)
+    {
+    }
+
+    internal PendingKnnBuilder(IOperatorBuilder candidate, string indexName, ReadOnlySpan<float> query, int k, int dim)
     {
         _candidate = candidate;
         _indexName = indexName;
         _query = query.ToArray();
         _k = k;
+        _dim = dim;
     }
 
     /// <summary>同じ <see cref="_query"/> 配列を共有しつつ candidate を差し替えた新 PendingKnn。</summary>
     internal PendingKnnBuilder WithCandidate(IOperatorBuilder candidate)
-        => new(candidate, _indexName, _query, _k, sharedQuery: true);
+        => new(candidate, _indexName, _query, _k, _dim, sharedQuery: true);
 
     /// <summary>K を差し替えた新 PendingKnn (Limit shrink 用)。</summary>
     internal PendingKnnBuilder WithK(int newK)
-        => new(_candidate, _indexName, _query, newK, sharedQuery: true);
+        => new(_candidate, _indexName, _query, newK, _dim, sharedQuery: true);
 
     // 配列を再コピーしない private ctor。WithCandidate / WithK 経由でのみ呼ばれる。
-    private PendingKnnBuilder(IOperatorBuilder candidate, string indexName, float[] query, int k, bool sharedQuery)
+    private PendingKnnBuilder(IOperatorBuilder candidate, string indexName, float[] query, int k, int dim, bool sharedQuery)
     {
         _candidate = candidate;
         _indexName = indexName;
         _query = query;
         _k = k;
+        _dim = dim;
+    }
+
+    /// <summary>
+    /// VEC-12: <see cref="GraphStats.HasFastLabelIndex"/> = <c>true</c> 経路で
+    /// <paramref name="dim"/> に対応する閾値を <see cref="FastLabelIndexThresholds"/> から線形検索で引く。
+    /// <paramref name="dim"/> &lt;= 0 のとき (spec 未解決) は最終バケット (= 最も寛容な閾値) を返し、
+    /// 「不明なら vector-first フォールバックを起きにくくする」保守側に倒す。
+    /// </summary>
+    internal static double FastIndexThresholdForDim(int dim)
+    {
+        if (dim <= 0)
+            return FastLabelIndexThresholds[^1].Threshold;
+        foreach (var (maxDim, threshold) in FastLabelIndexThresholds)
+        {
+            if (dim <= maxDim) return threshold;
+        }
+        return FastLabelIndexThresholds[^1].Threshold;
     }
 
     /// <summary>
@@ -98,12 +156,27 @@ internal sealed class PendingKnnBuilder : IOperatorBuilder
         };
 
     /// <summary>
-    /// VEC-10: candidate チェーンから「最内 <see cref="ScanBuilder"/> の Label」を取り出し、
-    /// その label cardinality / TotalNodes が <see cref="VectorFirstLabelFraction"/> 以上なら true。
+    /// VEC-10 / VEC-12: candidate チェーンから「最内 <see cref="ScanBuilder"/> の Label」を取り出し、
+    /// label cardinality / TotalNodes が閾値以上なら vector-first にフォールバックする。
+    /// <para>
+    /// 閾値の選択ルール:
+    /// <list type="bullet">
+    ///   <item>
+    ///     <see cref="GraphStats.HasFastLabelIndex"/> = <c>true</c> (backend が
+    ///     <c>NodeByLabelScan</c> を O(|L|) で提供): VEC-12 の dim-aware piecewise table
+    ///     (<see cref="FastIndexThresholdForDim"/>) を引く。dim が大きいほど vector-first
+    ///     にフォールバックする閾値が高くなる (= graph-first を選ぶレンジが広くなる)。
+    ///   </item>
+    ///   <item>
+    ///     <see cref="GraphStats.HasFastLabelIndex"/> = <c>false</c>: 旧 VEC-10 動作と完全に
+    ///     同じ 30% 単一閾値 (<see cref="VectorFirstLabelFraction"/>) を引く。
+    ///   </item>
+    /// </list>
+    /// </para>
     /// label が抽出できない (Has のみで構成された FilterBuilder チェーン等) ときは
-    /// 判断材料が不足するため graph-first を維持する (false を返す)。
+    /// 判断材料が不足するため graph-first を維持する (<c>false</c> を返す)。
     /// </summary>
-    private static bool ShouldFallBackToVectorFirst(IOperatorBuilder candidate, GraphStats stats, ISchemaApi schema)
+    private bool ShouldFallBackToVectorFirst(IOperatorBuilder candidate, GraphStats stats, ISchemaApi schema)
     {
         string? label = FindInnermostScanLabel(candidate);
         if (label is null) return false;
@@ -114,7 +187,10 @@ internal sealed class PendingKnnBuilder : IOperatorBuilder
         if (card <= 0) return false;
 
         double fraction = (double)card / stats.TotalNodes;
-        return fraction >= VectorFirstLabelFraction;
+        double threshold = stats.HasFastLabelIndex
+            ? FastIndexThresholdForDim(_dim)
+            : VectorFirstLabelFraction;
+        return fraction >= threshold;
     }
 
     private static string? FindInnermostScanLabel(IOperatorBuilder b)

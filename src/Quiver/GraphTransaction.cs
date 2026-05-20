@@ -470,6 +470,8 @@ internal sealed class GraphTransaction : IGraphTransaction
 
     public IAdjacencyBlockStore? AdjacencyBlocks => _inner.AdjacencyBlocks;
 
+    public IGraphAccessMethods Access => _inner.Access;
+
     public void Commit() => _inner.Commit();
     public void Rollback() => _inner.Abort();
     public void Dispose() => _inner.Dispose();

@@ -137,6 +137,14 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// </summary>
     IAdjacencyBlockStore? AdjacencyBlocks { get; }
 
+    /// <summary>
+    /// VEC-12: backend が提供する access methods。クライアント API (例: <c>PendingKnnBuilder</c>)
+    /// が <see cref="IGraphAccessMethods.HasFastLabelIndex"/> /
+    /// <see cref="IGraphAccessMethods.TryGetVectorIndexSpec"/> 等の capability を問い合わせる経路。
+    /// 直接の scan / expand に使うのは推奨しない (それらは <c>g.V()</c> ベースの traversal API を使う)。
+    /// </summary>
+    IGraphAccessMethods Access { get; }
+
     // ── 物理プラン実行 ────────────────────────────────────
 
     /// <summary>物理プランを実行して結果を <see cref="QueryResult"/> で返す。</summary>

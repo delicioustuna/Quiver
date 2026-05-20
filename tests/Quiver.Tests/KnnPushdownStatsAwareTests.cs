@@ -38,8 +38,10 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
 
     /// <summary>
     /// 50 Doc + 50 Other (Doc cardinality = 50%) で <c>Knn().HasLabel("Doc")</c> をリライトすると、
-    /// stats を注入したケースでは label cardinality が 30% を超えるため vector-first にフォールバックし
-    /// <see cref="KnnNodeSourceBuilder"/> + 後段 <see cref="FilterBuilder"/> になる。
+    /// stats を注入したケースで vector-first にフォールバックする。
+    /// VEC-11 後 backend は <see cref="GraphStats.HasFastLabelIndex"/> = <c>true</c> を立てるため、
+    /// dim = 4 (テスト用小次元) の dim-aware piecewise table の最小バケット閾値 0.30 を使う。
+    /// 50% &gt;= 0.30 で fallback 発火、<see cref="KnnNodeSourceBuilder"/> + 後段 <see cref="FilterBuilder"/> になる。
     /// </summary>
     [Fact]
     public void HighLabelCardinality_falls_back_to_vector_first_when_stats_present()
@@ -279,6 +281,100 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
 
         // Doc かつ status=active は 5 件。
         result.Should().HaveCount(5);
+    }
+
+    /// <summary>
+    /// VEC-12: dim=768 / sel=40% / HasFastLabelIndex=true のとき、dim-aware piecewise table が
+    /// 0.47 を返す (dim ≤ 1024) ため 0.40 &lt; 0.47 で graph-first を維持する。
+    /// VEC-11 後の binary backend で「VEC-10 の 0.30 一本だと誤発火する sel=0.40」が
+    /// 正しく graph-first に戻ることを示す回帰防止テスト (sweep 実測で dim=768 の
+    /// graph-first 12.5ms &lt; vector-first 14.0ms を確認済み)。
+    /// </summary>
+    [Fact]
+    public void Fast_label_index_keeps_graph_first_at_sel_40pct_dim_768()
+    {
+        const int dim768 = 768;
+        // 100 ノード中 Doc が 40 で sel = 40%。ラベル数が大きいとデータセット作成が遅いため
+        // テストでは sel をマクロに作って fraction の通り道だけ確認する。
+        using (var tx = _db.BeginTransaction())
+        {
+            for (int i = 0; i < 40; i++) _ = tx.CreateNode("Doc");
+            for (int i = 0; i < 60; i++) _ = tx.CreateNode("Other");
+            tx.Commit();
+        }
+
+        var stats = _db.CollectStats();
+        stats.HasFastLabelIndex.Should().BeTrue("binary backend は LabelNodeIndex sidecar を持つ");
+
+        // dim=768 と分かっているシナリオを再現するため、PendingKnnBuilder を直接構築する。
+        // (既存 index は Dim=4 だが threshold lookup は ctor で渡された dim 値だけを見る)
+        var candidate = new ScanBuilder("Doc");
+        var pk = new PendingKnnBuilder(
+            candidate, IndexName, new float[] { 1, 0, 0, 0 }, k: 5, dim: dim768);
+
+        pk.Materialize(stats, _db.Schema)
+            .Should().BeOfType<FilteredKnnNodeSourceBuilder>(
+                "dim=768 / sel=40% は閾値 0.50 を下回るため graph-first を維持");
+    }
+
+    /// <summary>
+    /// VEC-12: 同じ dim=768 / sel=40% でも <see cref="GraphStats.HasFastLabelIndex"/> が false の
+    /// backend (= sidecar 不在 / ANN bypass / 単体テスト経路) では legacy 30% 単一閾値を引くため
+    /// vector-first にフォールバックする。下位互換性確認。
+    /// </summary>
+    [Fact]
+    public void Without_fast_label_index_falls_back_at_sel_40pct()
+    {
+        using (var tx = _db.BeginTransaction())
+        {
+            for (int i = 0; i < 40; i++) _ = tx.CreateNode("Doc");
+            for (int i = 0; i < 60; i++) _ = tx.CreateNode("Other");
+            tx.Commit();
+        }
+
+        var stats = _db.CollectStats().WithFastLabelIndex(false);
+        stats.HasFastLabelIndex.Should().BeFalse();
+
+        var candidate = new ScanBuilder("Doc");
+        var pk = new PendingKnnBuilder(
+            candidate, IndexName, new float[] { 1, 0, 0, 0 }, k: 5, dim: 768);
+
+        pk.Materialize(stats, _db.Schema)
+            .Should().BeOfType<FilterBuilder>(
+                "HasFastLabelIndex=false 経路は legacy 0.30 単一閾値、40% >= 30% で fallback");
+    }
+
+    /// <summary>
+    /// VEC-12: 同じ sel=45% でも dim=128 と dim=3072 で fallback 発火が分岐すること。
+    /// dim=128 → 閾値 0.30 (dim ≤ 512) → 45% &gt;= 0.30 → fallback
+    /// dim=3072 → 閾値 0.80 (dim &gt; 2048) → 45% &lt; 0.80 → graph-first 維持
+    /// </summary>
+    [Fact]
+    public void Threshold_scales_with_dim()
+    {
+        using (var tx = _db.BeginTransaction())
+        {
+            for (int i = 0; i < 45; i++) _ = tx.CreateNode("Doc");
+            for (int i = 0; i < 55; i++) _ = tx.CreateNode("Other");
+            tx.Commit();
+        }
+
+        var stats = _db.CollectStats();
+        stats.HasFastLabelIndex.Should().BeTrue();
+
+        var candidate = new ScanBuilder("Doc");
+
+        var pkLow = new PendingKnnBuilder(
+            candidate, IndexName, new float[] { 1, 0, 0, 0 }, k: 5, dim: 128);
+        pkLow.Materialize(stats, _db.Schema)
+            .Should().BeOfType<FilterBuilder>(
+                "dim=128 (threshold 0.30) で sel=45% は fallback 発火");
+
+        var pkHigh = new PendingKnnBuilder(
+            candidate, IndexName, new float[] { 1, 0, 0, 0 }, k: 5, dim: 3072);
+        pkHigh.Materialize(stats, _db.Schema)
+            .Should().BeOfType<FilteredKnnNodeSourceBuilder>(
+                "dim=3072 (threshold 0.80) で sel=45% は graph-first 維持");
     }
 
     private static PendingKnnBuilder ReadPending(GraphTraversal<NodeId> traversal)

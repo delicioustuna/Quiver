@@ -16,6 +16,26 @@ public interface IGraphAccessMethods
     IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null);
 
     /// <summary>
+    /// VEC-12: ラベル絞り込みが O(|L|) で走るかを backend が申告する capability。
+    /// バイナリ backend は VEC-11 で導入した <c>LabelNodeIndex</c> sidecar が接続されているとき <c>true</c>。
+    /// <c>InlineGraphAccessMethods</c> / 単体テストや ANN bypass 等 sidecar の無い backend では <c>false</c>。
+    /// optimizer (PendingKnnBuilder の push-down 閾値) が graph-first / vector-first の選択に用いる。
+    /// </summary>
+    bool HasFastLabelIndex => false;
+
+    /// <summary>
+    /// VEC-12: 登録済みベクトルインデックスの <see cref="VectorIndexSpec"/> を取得する。
+    /// PendingKnnBuilder が dim を取得して dim-aware piecewise threshold を引くのに使う。
+    /// 既定実装は <c>false</c> — ベクトルメタを expose しない backend では dim awareness を無効化し、
+    /// VEC-10 と同じ単一閾値経路にフォールバックする。
+    /// </summary>
+    bool TryGetVectorIndexSpec(string indexName, out VectorIndexSpec spec)
+    {
+        spec = default!;
+        return false;
+    }
+
+    /// <summary>
     /// B+Tree インデックスを完全一致でシークする。<paramref name="key"/> の
     /// <see cref="PropertyValue.Type"/> に基づき型ごとのインデックスへルーティングする。
     /// インデックスが存在しないか、型が未対応の場合は空シーケンスを返す。

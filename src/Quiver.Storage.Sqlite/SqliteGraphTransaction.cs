@@ -52,6 +52,13 @@ public sealed class SqliteGraphTransaction : IGraphTransaction
     public bool IsReadOnly => _isReadOnly;
     public IAdjacencyBlockStore? AdjacencyBlocks => null;
 
+    /// <summary>
+    /// VEC-12: backend の access methods。SQLite backend は <c>LabelNodeIndex</c> sidecar を
+    /// 持たないため <see cref="IGraphAccessMethods.HasFastLabelIndex"/> は <c>false</c> で、
+    /// PendingKnnBuilder は legacy 30% 単一閾値経路にフォールバックする。
+    /// </summary>
+    public IGraphAccessMethods Access => _backend.Access;
+
     // ============================================================
     // Nodes
     // ============================================================

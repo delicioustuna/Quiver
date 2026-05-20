@@ -62,6 +62,18 @@ public interface IVectorStore
 
     void DropVectorIndex(string name);
 
+    /// <summary>
+    /// VEC-12: 登録済み index の <see cref="VectorIndexSpec"/> を取得する。
+    /// optimizer / push-down rewrite が dim 等のメタ情報を必要とするために用いる。
+    /// 既定実装は <c>false</c> を返す — メタを取得できない backend は dim awareness 無しの
+    /// 旧経路にフォールバックする。
+    /// </summary>
+    bool TryGetIndex(string name, out VectorIndexSpec spec)
+    {
+        spec = default!;
+        return false;
+    }
+
     void SetVector(
         EntityKind kind,
         long entityId,

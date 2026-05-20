@@ -22,6 +22,12 @@ internal sealed class SqliteGraphAccessMethods : IGraphAccessMethods
 
     public long AdjacencyFallbackCount => 0;
 
+    // VEC-12: SQLite backend は LabelNodeIndex sidecar を持たないため、HasFastLabelIndex は
+    // 既定の false のまま。push-down 閾値は legacy 30% 単一値経路に倒れる。
+    // ベクトル spec は in-memory vector store から引けるので forward する。
+    public bool TryGetVectorIndexSpec(string indexName, out VectorIndexSpec spec)
+        => _vectors.TryGetIndex(indexName, out spec);
+
     public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
         => _vectors.KnnSearch(indexName, query, k);
 

@@ -224,6 +224,16 @@ public sealed class GraphStats
     public long TotalNodes { get; private init; }
     public long TotalRelationships { get; private init; }
 
+    /// <summary>
+    /// VEC-12: 観測対象 backend が <c>NodeByLabelScan</c> を O(|L|) で提供できるか。
+    /// バイナリ backend で <c>LabelNodeIndex</c> sidecar が接続されているとき <c>true</c>。
+    /// <c>InlineGraphAccessMethods</c> 経路 / ANN bypass 等 sidecar 無し backend では <c>false</c>。
+    /// <see cref="Quiver.Client.Internal.PendingKnnBuilder"/> の push-down 閾値判定で、
+    /// dim-aware piecewise table を引くか legacy 30% 単一閾値を引くかを切り替えるのに使う。
+    /// テストから明示的に <c>false</c> 経路を再現できるよう <c>init</c> を公開している。
+    /// </summary>
+    public bool HasFastLabelIndex { get; init; }
+
     public long EstimateCardinality(LabelId label)
         => LabelCardinality.TryGetValue(label, out var n) ? n : 0;
 
@@ -284,6 +294,32 @@ public sealed class GraphStats
     /// </summary>
     public bool TryGetDegree(NodeId nodeId, out long outDegree, out long inDegree)
         => NodeDegrees.TryGetDegree(nodeId, out outDegree, out inDegree);
+
+    /// <summary>
+    /// VEC-12: 既存 stats から <see cref="HasFastLabelIndex"/> bit のみを差し替えた複製を返す。
+    /// テストやベンチで「同じ cardinality を持つ stats を sidecar 有 / 無で比較する」用途を想定。
+    /// 他フィールドは参照渡しでコピーされる (元 stats は不変なので副作用は無い)。
+    /// </summary>
+    public GraphStats WithFastLabelIndex(bool hasFastLabelIndex)
+    {
+        if (hasFastLabelIndex == HasFastLabelIndex) return this;
+        return new GraphStats
+        {
+            LabelCardinality      = LabelCardinality,
+            EdgeTypeFrequency     = EdgeTypeFrequency,
+            GlobalDegreeHistogram = GlobalDegreeHistogram,
+            GlobalOutDegree       = GlobalOutDegree,
+            GlobalInDegree        = GlobalInDegree,
+            DegreeByLabel         = DegreeByLabel,
+            OutDegreeByType       = OutDegreeByType,
+            InDegreeByType        = InDegreeByType,
+            NodeDegrees           = NodeDegrees,
+            PropertyKeys          = PropertyKeys,
+            TotalNodes            = TotalNodes,
+            TotalRelationships    = TotalRelationships,
+            HasFastLabelIndex     = hasFastLabelIndex,
+        };
+    }
 
     public static GraphStats Collect(ITransaction tx) => Collect(tx, PowerNodeDegreeThreshold);
 
@@ -430,6 +466,7 @@ public sealed class GraphStats
             PropertyKeys          = propertyKeys,
             TotalNodes            = totalNodes,
             TotalRelationships    = totalRels,
+            HasFastLabelIndex     = tx.Access.HasFastLabelIndex,
         };
     }
 }
