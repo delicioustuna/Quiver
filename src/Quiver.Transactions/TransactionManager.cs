@@ -15,6 +15,8 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly IIndexManager _indexManager;
     private IAdjacencyBlockStore? _adjStore;
     private readonly IGraphAccessMethods _access;
+    // FT-15: abort / コミット失敗時のインプロセス undo を担う。null のときは undo 無し。
+    private readonly AbortUndoHandler? _undoHandler;
     private readonly LockManager _nodeLocks = new();
     private readonly LockManager _relLocks = new();
     private readonly LockManager _indexLocks = new();
@@ -34,7 +36,8 @@ internal sealed class TransactionManager : ITransactionManager
         IPropertyStore propStore,
         IIndexManager indexManager,
         IAdjacencyBlockStore? adjStore = null,
-        IGraphAccessMethods? access = null)
+        IGraphAccessMethods? access = null,
+        AbortUndoHandler? undoHandler = null)
     {
         _wal = wal;
         _nodeStore = nodeStore;
@@ -43,6 +46,7 @@ internal sealed class TransactionManager : ITransactionManager
         _indexManager = indexManager;
         _adjStore = adjStore;
         _access = access ?? InlineGraphAccessMethods.Instance;
+        _undoHandler = undoHandler;
     }
 
     public int ActiveCount => _active.Count;
@@ -65,7 +69,8 @@ internal sealed class TransactionManager : ITransactionManager
         _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
         var tx = new Transaction(txId, level, snapshotLsn,
             _wal, _nodeLocks, _relLocks, _indexLocks, this,
-            _nodeStore, _relStore, _propStore, _indexManager, _adjStore, _access);
+            _nodeStore, _relStore, _propStore, _indexManager, _adjStore, _access,
+            _undoHandler);
         _active[txId.Value] = tx;
         return tx;
     }

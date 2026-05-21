@@ -25,20 +25,20 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
 
         var nodeFile = pageManager.OpenOrCreate(
             Path.Combine(directoryPath, "nodes.db"), PageKind.Header);
-        nodeFile.EnableWalLogging((byte)WalFileKind.Nodes);
+        nodeFile.EnableWalLogging((byte)WalFileKind.Nodes, wal);
         var nodeStore = new NodeStore(nodeFile);
 
         var relFile = pageManager.OpenOrCreate(
             Path.Combine(directoryPath, "rels.db"), PageKind.Header);
-        relFile.EnableWalLogging((byte)WalFileKind.Relationships);
+        relFile.EnableWalLogging((byte)WalFileKind.Relationships, wal);
         var relStore = new RelationshipStore(relFile);
 
         var propFile = pageManager.OpenOrCreate(
             Path.Combine(directoryPath, "props.db"), PageKind.Header);
-        propFile.EnableWalLogging((byte)WalFileKind.Properties);
+        propFile.EnableWalLogging((byte)WalFileKind.Properties, wal);
         var blobFile = pageManager.OpenOrCreate(
             Path.Combine(directoryPath, "blobs.db"), PageKind.Header);
-        blobFile.EnableWalLogging((byte)WalFileKind.BlobData);
+        blobFile.EnableWalLogging((byte)WalFileKind.BlobData, wal);
         var propStore = new PropertyStore(propFile, blobFile);
 
         var labelTokens   = new LabelTokenStore(Path.Combine(directoryPath, "labels.tok"));
@@ -87,6 +87,18 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         var recovery = new RecoveryManager(pageManager, wal, fileRegistry);
         recovery.Recover();
 
+        // FT-15: store metadata (hwm / freeHead / inUseCount) is page-backed; the
+        // constructors above read it from the on-disk header pages BEFORE recovery
+        // ran. After redo / undo rewrote those header pages, re-sync the in-memory
+        // caches so they reflect the recovered state.
+        void ReloadStoreMeta()
+        {
+            nodeStore.ReloadMeta();
+            relStore.ReloadMeta();
+            propStore.ReloadMeta();
+        }
+        ReloadStoreMeta();
+
         var vectors = new InMemoryVectorStore();
         var access = new BinaryGraphAccessMethods(vectors);
 
@@ -99,8 +111,13 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         nodeStore.AttachLabelIndex(labelIndex);
         access.AttachLabelIndex(labelIndex);
 
+        // FT-15: in-process undo handler — restores captured before-images and
+        // re-syncs store metadata on abort / commit failure.
+        var undoHandler = new AbortUndoHandler(fileRegistry, ReloadStoreMeta);
+
         var txManager = new TransactionManager(
-            wal, nodeStore, relStore, propStore, indexManager, adjStore, access);
+            wal, nodeStore, relStore, propStore, indexManager, adjStore, access,
+            undoHandler);
 
         // 案A: チェックポイント契機を配線する。コミットごとに WAL 成長量を見て、
         // しきい値超過 + アクティブ TX 0 の時点で全データページを flush し WAL を truncate する。

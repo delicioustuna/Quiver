@@ -133,6 +133,12 @@ internal sealed class BlobStore
         return newId.Value;
     }
 
+    /// <summary>
+    /// FT-15: ヘッダページからインメモリのメタ (blobFreeHead) を読み直す。
+    /// abort の before-image 巻き戻し後、およびクラッシュ recovery 後に呼ばれる。
+    /// </summary>
+    internal void ReloadMeta() => LoadMeta();
+
     private void LoadMeta()
     {
         using var h = _file.PinForRead(HeaderPageId);

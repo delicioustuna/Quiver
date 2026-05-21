@@ -77,12 +77,12 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
 
     // ===== (b) Kill during write — database remains openable =====
     //
-    // The binary backend does not yet maintain an undo log (see BA-2 fixture
-    // comment), so a kill mid-write may leave the just-written page on disk
-    // without a matching WAL Commit record. SQLite-backed transactions DO
-    // roll back to the BEGIN IMMEDIATE checkpoint. Both backends must at
-    // minimum reopen cleanly; the strict-rollback contract is asserted by
-    // the SQLite-specific override.
+    // FT-15: both backends now enforce strict rollback of uncommitted writes.
+    // The binary backend logs page before-images as CompensationLogRecords and
+    // RecoveryManager runs an ARIES-style undo pass for transactions that
+    // crashed without a Commit record. SQLite-backed transactions roll back to
+    // the BEGIN IMMEDIATE checkpoint. A kill mid-write must leave no trace of
+    // the uncommitted node after reopen.
 
     [Fact]
     public void KillDuringWrite_database_reopens_cleanly()
@@ -104,15 +104,15 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     }
 
     /// <summary>
-    /// Backend-specific assertion about uncommitted-mid-write data after a kill.
-    /// Default (binary): no undo log, so the partial node may or may not be
-    /// visible — accept either. SQLite subclass tightens this to BeFalse.
+    /// FT-15: uncommitted-mid-write data must NOT survive a kill on either
+    /// backend (binary: ARIES undo pass over CompensationLogRecords; SQLite:
+    /// BEGIN IMMEDIATE rollback). Strict for all backends — override only if a
+    /// future backend genuinely cannot meet the strict-rollback contract.
     /// </summary>
     protected virtual void AssertUncommittedKillState(
         IGraphTransaction tx, NodeId uncommittedNode)
-    {
-        _ = tx.NodeExists(uncommittedNode);
-    }
+        => tx.NodeExists(uncommittedNode).Should().BeFalse(
+            "uncommitted writes must not survive a kill (strict rollback contract)");
 
     // ===== (c) Kill mid-mixed-workload preserves committed prefix =====
 

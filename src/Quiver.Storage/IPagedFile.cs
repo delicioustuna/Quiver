@@ -1,4 +1,5 @@
 using Quiver.Core;
+using Quiver.Wal;
 
 namespace Quiver.Storage;
 
@@ -34,8 +35,12 @@ public interface IPagedFile : IDisposable
     /// <summary>バッファプールのダーティページをディスクにフラッシュする。</summary>
     void Flush();
 
-    /// <summary>指定の fileKind バイトで、本ファイルを WAL ページイメージロギング対象として登録する。</summary>
-    void EnableWalLogging(byte fileKind);
+    /// <summary>
+    /// 指定の fileKind バイトで、本ファイルを WAL ページイメージロギング対象として登録する。
+    /// FT-15: <paramref name="wal"/> はダーティページをデータファイルへ書き出す前に
+    /// WAL を先行フラッシュ (write-ahead) するために使う。
+    /// </summary>
+    void EnableWalLogging(byte fileKind, IWriteAheadLog wal);
 
     /// <summary>
     /// 必要に応じてファイルを拡張しつつ、生ページバイト列を直接書き込む。

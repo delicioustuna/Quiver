@@ -1,5 +1,4 @@
-﻿using System.Buffers.Binary;
-using Quiver.Core;
+﻿using Quiver.Core;
 using Quiver.Storage;
 using Quiver.Wal;
 
@@ -28,8 +27,15 @@ internal sealed class RecoveryManager : IRecoveryManager
     {
         long checkpointLsn = FindLastCheckpointLsn();
 
-        // Pass 1: コミット済みトランザクションを特定し、最終 LSN を求める。
+        // Pass 1: コミット済み / アボート済みトランザクションを分類し、最終 LSN を求める。
+        // PageImage を持つトランザクションも記録する: PageImage (after-image) は
+        // Transaction.Commit() のコミットパス (FlushPending) でのみ書かれるため、
+        // 「PageImage はあるが Commit が無い」= コミット直前で Commit レコードが torn /
+        // 欠落しただけ、と判別できる。クラッシュで宙ぶらりんになった真の未完了
+        // トランザクションは FlushPending を通らないので PageImage を 1 件も持たない。
         var committedTxs = new HashSet<long>();
+        var abortedTxs = new HashSet<long>();
+        var txsWithPageImage = new HashSet<long>();
         long lastLsn = -1;
         using (var reader = _wal.OpenReader(checkpointLsn))
         {
@@ -38,10 +44,14 @@ internal sealed class RecoveryManager : IRecoveryManager
                 lastLsn = record.Lsn;
                 if (record.Type == WalRecordType.Commit)
                     committedTxs.Add(record.TransactionId.Value);
+                else if (record.Type == WalRecordType.Abort)
+                    abortedTxs.Add(record.TransactionId.Value);
+                else if (record.Type == WalRecordType.PageImage)
+                    txsWithPageImage.Add(record.TransactionId.Value);
             }
         }
 
-        // Pass 2: コミット済みトランザクションの PageImage レコードのみを replay する。
+        // Pass 2 (redo): コミット済みトランザクションの PageImage (after-image) を replay する。
         using (var reader = _wal.OpenReader(checkpointLsn))
         {
             while (reader.TryReadNext(out var record))
@@ -49,7 +59,34 @@ internal sealed class RecoveryManager : IRecoveryManager
                 if (record.Type == WalRecordType.PageImage &&
                     committedTxs.Contains(record.TransactionId.Value))
                 {
-                    ApplyPageImage(record);
+                    ApplyPagePayload(record);
+                }
+            }
+        }
+
+        // Pass 3 (undo) — FT-15 Tier2 ARIES undo:
+        // クラッシュで宙ぶらりんになった真の未完了トランザクションの
+        // CompensationLogRecord (before-image) を再適用し、未コミットの変更を巻き戻す。
+        // undo 対象は以下をすべて満たすトランザクションのみ:
+        //   - Commit レコードを持たない (コミット済みは redo 済み)
+        //   - Abort レコードを持たない (インプロセス abort 済みは巻き戻しが durable)
+        //   - PageImage を 1 件も持たない (PageImage があるなら FlushPending を通過した
+        //     = コミットパスに入っており、Commit レコードが torn しただけ。これを undo
+        //     するとデータファイルへ flush 済みのコミット内容まで消してしまう)
+        // シングルライタ前提では、クラッシュした未完了トランザクションは WAL 末尾に 1 つだけ
+        // 存在し、その before-image は当該ページの最後のコミット内容と一致するため、
+        // redo → undo の順序に依らず正しい状態へ収束する。
+        using (var reader = _wal.OpenReader(checkpointLsn))
+        {
+            while (reader.TryReadNext(out var record))
+            {
+                long txId = record.TransactionId.Value;
+                if (record.Type == WalRecordType.CompensationLogRecord &&
+                    !committedTxs.Contains(txId) &&
+                    !abortedTxs.Contains(txId) &&
+                    !txsWithPageImage.Contains(txId))
+                {
+                    ApplyPagePayload(record);
                 }
             }
         }
@@ -71,18 +108,15 @@ internal sealed class RecoveryManager : IRecoveryManager
     }
 
     /// <summary>
-    /// PageImage WAL レコードをデコードし、ページバイト列を所有ファイルに直接書き込む。
-    /// ペイロード形式 (version 1): [version:1][fileKind:1][pageId:8][pageBytes:N]
+    /// PageImage (after-image, redo) または CompensationLogRecord (before-image, undo) の
+    /// WAL レコードをデコードし、ページバイト列を所有ファイルへ直接書き込む。両者は
+    /// <see cref="WalPageImageCodec"/> の同一フォーマットを共有する。
     /// </summary>
-    private void ApplyPageImage(in WalRecord record)
+    private void ApplyPagePayload(in WalRecord record)
     {
-        var payload = record.Payload.Span;
-        if (payload.Length < 10) return;
-        if (payload[0] != 1) return; // 未対応バージョン
-        byte fileKind = payload[1];
-        long pageId = BinaryPrimitives.ReadInt64LittleEndian(payload[2..]);
-        var pageBytes = payload[10..];
-
+        if (!WalPageImageCodec.TryDecode(
+                record.Payload.Span, out byte fileKind, out long pageId, out var pageBytes))
+            return;
         if (!_fileRegistry.TryGetValue(fileKind, out var file)) return;
         file.WritePageForRecovery(new PageId(pageId), pageBytes);
     }

@@ -38,6 +38,8 @@ public sealed class PagedFile : IPagedFile
     private int _clockHand;
     private bool _disposed;
     private byte? _walFileKind;
+    // FT-15: WAL を先行フラッシュ (write-ahead) するために保持する。EnableWalLogging で配線。
+    private IWriteAheadLog? _wal;
 
     int IPagedFile.PageSize => PageSizeConst;
     public long PageCount => Volatile.Read(ref _logicalPageCount);
@@ -176,6 +178,11 @@ public sealed class PagedFile : IPagedFile
         int frame = GetOrLoadFrame(pageId);
         Span<byte> raw = ReadFrameSpan(frame);
         PageHeader.Validate(raw, pageId);
+        // FT-15: この書き込みトランザクション内で本ページを初めて pin する時点の内容を
+        // before-image として捕捉する。caller がまだ変更していないこの瞬間が唯一の機会。
+        // frame は pin 済みなので evict されず、span は安定している。
+        if (_walFileKind is byte fileKind)
+            WalPageContext.CaptureBeforeImage(fileKind, pageId.Value, raw);
         return new PageWriteHandle(this, pageId, raw);
     }
 
@@ -206,7 +213,11 @@ public sealed class PagedFile : IPagedFile
         }
     }
 
-    public void EnableWalLogging(byte fileKind) => _walFileKind = fileKind;
+    public void EnableWalLogging(byte fileKind, IWriteAheadLog wal)
+    {
+        _walFileKind = fileKind;
+        _wal = wal;
+    }
 
     public void WritePageForRecovery(PageId pageId, ReadOnlySpan<byte> pageBytes)
     {
@@ -304,11 +315,27 @@ public sealed class PagedFile : IPagedFile
         if (f.PageId.IsValid)
         {
             if (f.IsDirty)
+            {
+                // FT-15: steal ポリシー下では未コミットトランザクションのダーティページが
+                // ここでデータファイルへ漏れうる。クラッシュ時に巻き戻せるよう、ページを
+                // データファイルへ書く前にその before-image (CLR) が WAL に durable で
+                // あることを保証する (write-ahead 順序)。
+                FlushWalBeforeDataWrite();
                 MmfWritePage(f.PageId, f.Buffer);
+            }
             _pageToFrame.Remove(f.PageId);
             f.PageId = PageId.Invalid;
             f.IsDirty = false;
         }
+    }
+
+    // FT-15: ダーティページをデータファイルへ書き出す前に WAL を末尾まで先行フラッシュする。
+    // FlushTo は flushedLsn が既に追いついていれば no-op なので、同一フラッシュ波の中で
+    // 余計な fsync は発生しない。
+    private void FlushWalBeforeDataWrite()
+    {
+        if (_wal is { } wal)
+            wal.FlushTo(wal.CurrentLsn);
     }
 
     private Span<byte> ReadFrameSpan(int frame) => new Span<byte>(_frames[frame].Buffer);
@@ -341,6 +368,15 @@ public sealed class PagedFile : IPagedFile
     // ダーティなフレームを全て MMF に書き出す。_poolLock 保持下で呼び出す。
     private void FlushDirtyFramesLocked()
     {
+        bool anyDirty = false;
+        for (int i = 0; i < _poolCapacity; i++)
+        {
+            if (_frames[i].IsDirty && _frames[i].PageId.IsValid) { anyDirty = true; break; }
+        }
+        // FT-15: データページを書き出す前に WAL を先行フラッシュする (checkpoint / Flush /
+        // ファイル拡張時の remap 経路も含む write-ahead 順序)。
+        if (anyDirty) FlushWalBeforeDataWrite();
+
         for (int i = 0; i < _poolCapacity; i++)
         {
             ref PoolFrame f = ref _frames[i];

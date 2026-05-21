@@ -102,7 +102,7 @@ public class RecoveryManagerTests : IDisposable
             PageId dataPage;
             {
                 IPagedFile srcFile = new PagedFile(srcPath);
-                srcFile.EnableWalLogging(1);
+                srcFile.EnableWalLogging(1, _wal);
                 var txId = new TransactionId(42);
                 _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
                 WalPageContext.Begin(_wal, txId);
@@ -149,7 +149,7 @@ public class RecoveryManagerTests : IDisposable
             PageId dataPage;
             {
                 IPagedFile srcFile = new PagedFile(srcPath);
-                srcFile.EnableWalLogging(1);
+                srcFile.EnableWalLogging(1, _wal);
                 var txId = new TransactionId(99);
                 _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
                 WalPageContext.Begin(_wal, txId);

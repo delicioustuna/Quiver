@@ -20,14 +20,9 @@ public sealed class SqliteGraphStorageBackendCrashContractTests
     protected override IGraphStorageBackendFactory CreateFactory()
         => new SqliteGraphStorageBackendFactory();
 
-    /// <summary>
-    /// SQLite enforces atomic transactions via BEGIN IMMEDIATE, so an
-    /// uncommitted writer's work must NOT be visible after a kill.
-    /// </summary>
-    protected override void AssertUncommittedKillState(
-        IGraphTransaction tx, NodeId uncommittedNode)
-        => tx.NodeExists(uncommittedNode).Should().BeFalse(
-            "SQLite is fully atomic; uncommitted writes must vanish after a kill");
+    // FT-15: the strict-rollback assertion (AssertUncommittedKillState) is now
+    // the shared base default — both backends meet it, so no SQLite override is
+    // needed. SQLite enforces atomicity via BEGIN IMMEDIATE.
 
     protected override void InjectTornWriteAtTail()
     {

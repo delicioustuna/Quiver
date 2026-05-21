@@ -52,6 +52,19 @@ internal sealed class NodeStore : INodeStore
     /// </summary>
     public void AttachLabelIndex(LabelNodeIndex labelIndex) => _labelIndex = labelIndex;
 
+    /// <summary>
+    /// FT-15: ヘッダページからインメモリのメタ (hwm / freeHead / inUseCount) を読み直す。
+    /// abort の before-image 巻き戻しでヘッダページ自体は TX 開始前の状態へ戻っているので、
+    /// ここではページから読み直してインメモリのキャッシュを同期するだけでよい。
+    /// クラッシュ recovery 後にも呼ばれ、redo / undo で書き換わったヘッダページに追従する。
+    /// LabelNodeIndex は abort で OnAllocate/OnFree が宙に浮くため無効化し再構築させる。
+    /// </summary>
+    internal void ReloadMeta()
+    {
+        LoadMeta();
+        _labelIndex?.Invalidate();
+    }
+
     public long InUseCount => _inUseCount;
 
     public NodeId Allocate(LabelId labelId)

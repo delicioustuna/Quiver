@@ -213,6 +213,17 @@ internal sealed class PropertyStore : IPropertyStore
 
     internal void BulkFlushMeta() => FlushMeta();
 
+    /// <summary>
+    /// FT-15: ヘッダページからインメモリのメタ (hwm / freeHead) を読み直す。
+    /// 内部の BlobStore のメタも同時に同期する。abort の before-image 巻き戻し後、
+    /// およびクラッシュ recovery 後に呼ばれる。
+    /// </summary>
+    internal void ReloadMeta()
+    {
+        LoadMeta();
+        _blobs.ReloadMeta();
+    }
+
     // --- private ---
 
     private static void WriteInline(Span<byte> inline, in PropertyValue v)

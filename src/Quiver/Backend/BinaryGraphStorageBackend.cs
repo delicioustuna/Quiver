@@ -184,7 +184,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
         _labelTokens.Dispose();
         _relTypeTokens.Dispose();
         _propKeyTokens.Dispose();
-        _wal.Dispose();
+        // FT-15: flush the data files BEFORE disposing the WAL. PagedFile.Flush()
+        // now does WAL-before-data (write-ahead) ordering, so the WAL must still
+        // be alive while the page manager flushes its dirty frames to disk.
         _pageManager.Dispose();
+        _wal.Dispose();
     }
 }

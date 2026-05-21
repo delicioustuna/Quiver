@@ -30,6 +30,21 @@ public static class WalPageContext
         => Current is { } ctx ? ctx.LogPageImage(fileKind, pageId, pageBytes) : -1L;
 
     /// <summary>
+    /// FT-15: あるページが本トランザクション内で初めて書き込み用に pin された時点の
+    /// 内容 (before-image) を記録する。書き込みトランザクション未アクティブ時は no-op。
+    /// 同一ページの 2 回目以降の pin は無視される (初回タッチのみ保持)。
+    /// </summary>
+    public static void CaptureBeforeImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
+        => Current?.CaptureBeforeImage(fileKind, pageId, pageBytes);
+
+    /// <summary>
+    /// FT-15: 現在の書き込みトランザクションがキャプチャした before-image (CLR ペイロード)
+    /// を列挙する。インプロセス abort の巻き戻しに使う。コンテキスト未設定時は空。
+    /// </summary>
+    public static IReadOnlyCollection<byte[]> CurrentBeforeImagePayloads
+        => Current?.BeforeImagePayloads ?? Array.Empty<byte[]>();
+
+    /// <summary>
     /// 現在の書き込みトランザクションがバッファした PageImage をすべて WAL へ追記する。
     /// コミット時に <c>Commit</c> レコードを書く直前に呼ぶこと。コンテキスト未設定時は no-op。
     /// </summary>
@@ -45,6 +60,15 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     // 案C: 1 トランザクション中に同一ページを何度触っても、コミット時に最新版 1 件だけを
     // WAL に書く。これにより FlushMeta() 等によるホットページの再ログ増幅を解消する。
     private readonly Dictionary<(byte FileKind, long PageId), byte[]> _pending = new();
+
+    // FT-15: (fileKind, pageId) → エンコード済み before-image (CLR) ペイロード。
+    // ページが本トランザクションで「最初に」ダーティ化される直前の内容を 1 枚だけ保持する。
+    // 値は CompensationLogRecord ペイロードそのものなので、WAL 追記とインプロセス abort の
+    // 巻き戻しで同じバッファを共有できる。
+    private readonly Dictionary<(byte FileKind, long PageId), byte[]> _beforeImages = new();
+
+    /// <summary>FT-15: キャプチャ済み before-image (CLR ペイロード) のコレクション。</summary>
+    public IReadOnlyCollection<byte[]> BeforeImagePayloads => _beforeImages.Values;
 
     /// <summary>
     /// PageImage をトランザクションバッファに記録 (または上書き) する。
@@ -65,6 +89,26 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
         }
         pageBytes.CopyTo(payload.AsSpan(10));
         return -1L;
+    }
+
+    /// <summary>
+    /// FT-15: ページの before-image を初回タッチ時に 1 度だけ捕捉する。
+    /// 捕捉した内容は (1) インプロセス abort の巻き戻し用にバッファされ、
+    /// (2) <see cref="WalRecordType.CompensationLogRecord"/> として WAL へ即時追記され、
+    /// クラッシュ recovery の undo パスで使われる。2 回目以降の同一ページ pin は無視する。
+    ///
+    /// 案C の after-image バッファ (<see cref="_pending"/>) と異なり、CLR は遅延せず
+    /// 即時追記する: コミットも abort もせずクラッシュしたトランザクションでも、
+    /// before-image が WAL に残っていなければ巻き戻せないため。1 トランザクション内で
+    /// 同一ページにつき 1 件しか書かないので WAL 肥大には繋がらない。
+    /// </summary>
+    public void CaptureBeforeImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
+    {
+        var key = (fileKind, pageId);
+        if (_beforeImages.ContainsKey(key)) return; // 初回タッチのみ
+        byte[] payload = WalPageImageCodec.Encode(fileKind, pageId, pageBytes);
+        _beforeImages[key] = payload;
+        _wal.Append(WalRecordType.CompensationLogRecord, _txId, payload);
     }
 
     /// <summary>

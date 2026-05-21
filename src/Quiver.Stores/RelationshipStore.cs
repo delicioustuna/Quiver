@@ -260,6 +260,13 @@ internal sealed class RelationshipStore : IRelationshipStore
         FlushMeta();
     }
 
+    /// <summary>
+    /// FT-15: ヘッダページからインメモリのメタ (hwm / freeHead / inUseCount) を読み直す。
+    /// abort の before-image 巻き戻し後、およびクラッシュ recovery 後に呼ばれ、
+    /// ページバックされたメタとインメモリのキャッシュを同期する。
+    /// </summary>
+    internal void ReloadMeta() => LoadMeta();
+
     // --- private helpers ---
 
     private void UpdateListPrev(RelationshipId relId, NodeId side, RelationshipId newPrev)

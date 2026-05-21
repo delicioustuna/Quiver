@@ -366,18 +366,89 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     [Fact]
     public void Rollback_transitions_state_to_aborted_and_releases_tx()
     {
-        // The current engine does not maintain an undo log; rollback releases
-        // locks and ends the tx lifecycle. New transactions can be opened
-        // immediately afterwards on the same backend.
+        // FT-15: rollback undoes the transaction's writes, releases locks and
+        // ends the tx lifecycle. New transactions can be opened immediately
+        // afterwards on the same backend, and the discarded node is invisible.
+        NodeId discarded;
         var tx = BeginWrite();
-        tx.CreateNode("Discarded");
+        discarded = tx.CreateNode("Discarded");
         tx.Rollback();
         tx.State.Should().Be(TransactionState.Aborted);
         tx.Dispose();
 
-        using var next = BeginWrite();
-        next.CreateNode("Subsequent");
-        next.Commit();
+        using (var next = BeginWrite())
+        {
+            next.NodeExists(discarded).Should().BeFalse(
+                "a rolled-back CreateNode must not be visible to later transactions");
+            next.CreateNode("Subsequent");
+            next.Commit();
+        }
+    }
+
+    [Fact]
+    public void Rollback_discards_node_property_and_relationship_writes()
+    {
+        // FT-15 Tier1: every kind of write in an aborted transaction must vanish.
+        NodeId a, b;
+        using (var tx = BeginWrite())
+        {
+            a = tx.CreateNode("A");
+            b = tx.CreateNode("B");
+            tx.SetProperty(a, "score", PropertyValue.FromInt64(123L));
+            tx.CreateRelationship(a, b, "LINK");
+            tx.Rollback();
+        }
+
+        using var rtx = BeginRead();
+        rtx.NodeExists(a).Should().BeFalse("rolled-back node A must be gone");
+        rtx.NodeExists(b).Should().BeFalse("rolled-back node B must be gone");
+        rtx.Rollback();
+    }
+
+    [Fact]
+    public void Dispose_without_commit_discards_writes()
+    {
+        // FT-15 Tier1: letting a write transaction Dispose without Commit aborts
+        // it — the undo must run, not just lock release.
+        NodeId discarded;
+        using (var tx = BeginWrite())
+        {
+            discarded = tx.CreateNode("Discarded");
+            // Intentionally no Commit / no Rollback.
+        }
+
+        using var rtx = BeginRead();
+        rtx.NodeExists(discarded).Should().BeFalse(
+            "a write transaction disposed without Commit must discard its writes");
+        rtx.Rollback();
+    }
+
+    [Fact]
+    public void Rollback_preserves_previously_committed_data()
+    {
+        // FT-15 Tier1: an aborted transaction must not damage data that an
+        // earlier transaction committed, including reverting in-flight mutations
+        // of committed records back to their committed value.
+        NodeId keeper;
+        using (var tx = BeginWrite())
+        {
+            keeper = tx.CreateNode("Keeper");
+            tx.SetProperty(keeper, "v", PropertyValue.FromInt64(7L));
+            tx.Commit();
+        }
+
+        using (var tx = BeginWrite())
+        {
+            tx.CreateNode("Doomed");
+            tx.SetProperty(keeper, "v", PropertyValue.FromInt64(999L));
+            tx.Rollback();
+        }
+
+        using var rtx = BeginRead();
+        rtx.NodeExists(keeper).Should().BeTrue("committed data survives an unrelated rollback");
+        rtx.GetProperty(keeper, "v").Int64Value.Should().Be(7L,
+            "a rolled-back property mutation must restore the committed value");
+        rtx.Rollback();
     }
 
     [Fact]

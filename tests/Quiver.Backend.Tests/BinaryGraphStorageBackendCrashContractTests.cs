@@ -48,6 +48,42 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     // ===== Binary-specific scenarios =====
 
     /// <summary>
+    /// FT-15 Tier2: a transaction explicitly rolled back in-process, then
+    /// followed by a process kill, must leave no uncommitted data. The abort
+    /// flushes its before-image restore durably before the kill, and recovery
+    /// keeps earlier committed work intact.
+    /// </summary>
+    [Fact]
+    public void AbortThenKill_leaves_no_uncommitted_data()
+    {
+        IGraphStorageBackend? backend = Open();
+        NodeId committed;
+        using (var tx = backend.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: false))
+        {
+            committed = tx.CreateNode("Committed");
+            tx.Commit();
+        }
+
+        var abortTx = backend.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: false);
+        NodeId rolledBack = abortTx.CreateNode("RolledBack");
+        abortTx.SetProperty(rolledBack, "ephemeral", PropertyValue.FromInt64(42L));
+        abortTx.Rollback();
+
+        KillProcessSimulator.SimulateKill(ref backend);
+
+        using var reopened = Open();
+        using var rtx = reopened.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: true);
+        rtx.NodeExists(committed).Should().BeTrue(
+            "committed work survives an abort-then-kill sequence");
+        rtx.NodeExists(rolledBack).Should().BeFalse(
+            "an explicitly aborted node must not resurface after a kill");
+        rtx.Rollback();
+    }
+
+    /// <summary>
     /// Open with a small WAL segment size so that a few commits force a
     /// segment roll, then simulate a kill and confirm everything still
     /// recovers. Probes the boundary code that closes one segment and opens

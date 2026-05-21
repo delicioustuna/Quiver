@@ -18,6 +18,9 @@ internal sealed class Transaction : ITransaction
     private readonly TxIndexManager _indexes;
     private readonly IAdjacencyBlockStore? _adjStore;
     private readonly IGraphAccessMethods _access;
+    // FT-15: null でない場合、abort / コミット失敗時にキャプチャ済み before-image を
+    // データファイルへ書き戻し、ストアメタを再ロードしてインプロセス undo を行う。
+    private readonly AbortUndoHandler? _undoHandler;
     private List<Action>? _onCommitted;
     private List<Action>? _onRolledBack;
     private TransactionState _state;
@@ -42,7 +45,8 @@ internal sealed class Transaction : ITransaction
         INodeStore nodeStore, IRelationshipStore relStore,
         IPropertyStore propStore, IIndexManager indexManager,
         IAdjacencyBlockStore? adjStore = null,
-        IGraphAccessMethods? access = null)
+        IGraphAccessMethods? access = null,
+        AbortUndoHandler? undoHandler = null)
     {
         Id = id; Level = level; SnapshotLsn = snapshotLsn;
         _wal = wal;
@@ -50,6 +54,7 @@ internal sealed class Transaction : ITransaction
         _manager = manager;
         _adjStore = adjStore;
         _access = access ?? InlineGraphAccessMethods.Instance;
+        _undoHandler = undoHandler;
         _state = TransactionState.Active;
         _nodes = new TxNodeStore(nodeStore, nodeLocks, id);
         _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes);
@@ -81,6 +86,10 @@ internal sealed class Transaction : ITransaction
         {
             // Commit failed mid-way (e.g. WAL flush failure). Surface as rollback
             // so registered OnRolledBack hooks observe a consistent outcome.
+            // FT-15: roll the page changes back in place before discarding the
+            // context, then mark the transaction aborted on the WAL.
+            try { RollBackInPlace(); } catch { }
+            try { _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty); } catch { }
             try { WalPageContext.End(); } catch { }
             try { ReleaseAllLocks(); } catch { }
             _state = TransactionState.Aborted;
@@ -94,12 +103,27 @@ internal sealed class Transaction : ITransaction
     public void Abort()
     {
         if (_state is TransactionState.Committed or TransactionState.Aborted) return;
+        // FT-15: in-process undo — restore captured before-images to the data
+        // files and reload page-backed store metadata, so discarded nodes /
+        // edges / properties are invisible to subsequent transactions. Must run
+        // before WalPageContext.End() drops the per-transaction before-image buffer.
+        RollBackInPlace();
         _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty);
         WalPageContext.End();
         ReleaseAllLocks();
         _state = TransactionState.Aborted;
         _manager.OnAbort(Id);
         FireHooks(_onRolledBack);
+    }
+
+    // FT-15: apply this transaction's captured before-images in place. No-op for
+    // read-only transactions and for backends without an undo handler wired.
+    private void RollBackInPlace()
+    {
+        if (_undoHandler == null) return;
+        var beforeImages = WalPageContext.CurrentBeforeImagePayloads;
+        if (beforeImages.Count == 0) return;
+        _undoHandler.Undo(beforeImages);
     }
 
     public void Dispose()
