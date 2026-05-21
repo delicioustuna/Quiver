@@ -4,9 +4,10 @@ Quiver の典型ユースケースをすぐに動かせるレシピ集。各レ�
 
 ---
 
-## 1. 重み付き shortest-path
+## 1. 重み付き shortest-path (Dijkstra / A*)
 
-エッジに重みプロパティを乗せ、`ShortestPathTo` でホップ数最短経路を求める。
+エッジに重みプロパティを乗せ、重み合計が最小の経路を求める。
+`g.WeightedShortestPath(...)` は距離だけでなく経路 (ノード列 / エッジ列) も返す。
 
 ```csharp
 var g = tx.G(db.Schema);
@@ -22,12 +23,20 @@ g.AddRelationship("ROAD").From(s).To(b).P("weight", 5.0).Next();
 g.AddRelationship("ROAD").From(a).To(t).P("weight", 2.0).Next();
 g.AddRelationship("ROAD").From(b).To(t).P("weight", 1.0).Next();
 
-// ホップ数最短 (本記事範囲: 重み考慮の Dijkstra は将来対応)
+// 重み付き最短経路 (Dijkstra)。weight プロパティをエッジ重みとして読む。
+var path = g.WeightedShortestPath(s, t, weightKey: "weight", type: "ROAD");
+if (path.Found)
+    Console.WriteLine($"S→T 最短重み: {path.Distance}, 経由ノード数: {path.Nodes.Count}");
+//  → S→A→T (1.0 + 2.0 = 3.0) が S→B→T (5.0 + 1.0 = 6.0) より短い
+
+// ホップ数だけが必要なら従来どおり ShortestPathTo も使える
 var hops = g.Node(s).ShortestPathTo(t, type: "ROAD").TryNext();
-Console.WriteLine($"S→T 最短ホップ数: {hops}");
 ```
 
-> 注: 現状の `ShortestPathTo` はホップ数最短のみ対応。重み付き Dijkstra/A* は PW-13 GraphKernel の上に将来実装する想定。
+> A* を使うときは `WeightedShortestPathAStar(s, t, "weight", "x", "y")` でノードの座標プロパティから
+> ヒューリスティックを自動生成するか、`WeightedShortestPath(s, t, "weight", heuristic: node => ...)` で
+> 推定残コストを渡す。ヒューリスティックが admissible (consistent) なら Dijkstra と同じ最適解を、
+> より少ないノード展開で得られる。エッジ重みは非負である必要がある。
 
 ---
 

@@ -1,6 +1,8 @@
 using Quiver.Client.Internal;
 using Quiver.Client.Match;
 using Quiver.Core;
+using Quiver.Operators;
+using Quiver.Stores;
 
 namespace Quiver.Client;
 
@@ -173,6 +175,153 @@ public sealed class GraphTraversalSource
         int dim = _tx.Access.TryGetVectorIndexSpec(indexName, out var spec) ? spec.Dimensions : 0;
         var builder = new Internal.PendingKnnBuilder(new Internal.ScanBuilder(), indexName, query, k, dim);
         return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
+    }
+
+    // ── 重み付き最短経路 (Dijkstra / A*) ───────────────────────────────────────
+
+    /// <summary>
+    /// <paramref name="source"/> から <paramref name="target"/> までの
+    /// <em>重み付き</em>最短経路を Dijkstra 法で求める。各エッジの重みは
+    /// リレーションシッププロパティ <paramref name="weightKey"/> (数値型) から読む。
+    /// プロパティを持たないエッジの重みは 1.0 として扱う。
+    /// </summary>
+    /// <remarks>
+    /// ホップ数最短の <see cref="GraphTraversal{T}.ShortestPathTo"/> と異なり、
+    /// 結果は重み合計が最小の経路を、距離 + ノード列 + エッジ列として返す。
+    /// 重みは非負でなければならない (負の重みを検出すると
+    /// <see cref="InvalidOperationException"/>)。
+    /// </remarks>
+    /// <param name="source">始点ノード。</param>
+    /// <param name="target">終点ノード。</param>
+    /// <param name="weightKey">エッジ重みを保持するリレーションシッププロパティのキー名。</param>
+    /// <param name="direction">辿る方向。</param>
+    /// <param name="type">辿るリレーションシップ型 (null なら全型)。</param>
+    /// <param name="maxDistance">この重み合計を超える経路は探索しない (既定: 無制限)。</param>
+    public WeightedPathResult WeightedShortestPath(
+        NodeId source, NodeId target, string weightKey,
+        Direction direction = Direction.Outgoing,
+        string? type = null,
+        double maxDistance = double.PositiveInfinity)
+        => RunWeightedShortestPath(source, target, weightKey, direction, type, maxDistance, heuristic: null);
+
+    /// <summary>
+    /// ユーザ提供のヒューリスティック <paramref name="heuristic"/> を用いた A* 探索で
+    /// 重み付き最短経路を求める。<paramref name="heuristic"/> は各ノードから終点までの
+    /// 推定残コストを返す。最適解を保証するには consistent (単調) かつ非負である必要がある。
+    /// </summary>
+    /// <param name="source">始点ノード。</param>
+    /// <param name="target">終点ノード。</param>
+    /// <param name="weightKey">エッジ重みを保持するリレーションシッププロパティのキー名。</param>
+    /// <param name="heuristic">ノード → 終点までの推定残コスト。</param>
+    /// <param name="direction">辿る方向。</param>
+    /// <param name="type">辿るリレーションシップ型 (null なら全型)。</param>
+    /// <param name="maxDistance">この重み合計を超える経路は探索しない (既定: 無制限)。</param>
+    public WeightedPathResult WeightedShortestPath(
+        NodeId source, NodeId target, string weightKey,
+        Func<NodeId, double> heuristic,
+        Direction direction = Direction.Outgoing,
+        string? type = null,
+        double maxDistance = double.PositiveInfinity)
+    {
+        ArgumentNullException.ThrowIfNull(heuristic);
+        return RunWeightedShortestPath(source, target, weightKey, direction, type, maxDistance, heuristic);
+    }
+
+    /// <summary>
+    /// ノードの座標プロパティから自動生成したヒューリスティックを用いた A* 探索で
+    /// 重み付き最短経路を求める。各ノードの座標は数値プロパティ
+    /// <paramref name="xKey"/> / <paramref name="yKey"/> から読む。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="HeuristicMetric.Euclidean"/> では平面距離、
+    /// <see cref="HeuristicMetric.Haversine"/> では緯度経度 (度) からの大圏距離 (m) を
+    /// 推定残コストとする。最適解を保証するには、ヒューリスティックがエッジ重みの単位で
+    /// 実経路長の下界になっている必要がある (例: 重みが平面距離なら Euclidean、
+    /// メートルの道路距離なら Haversine)。
+    /// </remarks>
+    /// <param name="source">始点ノード。</param>
+    /// <param name="target">終点ノード。</param>
+    /// <param name="weightKey">エッジ重みを保持するリレーションシッププロパティのキー名。</param>
+    /// <param name="xKey">X 座標 (経度) を保持するノードプロパティのキー名。</param>
+    /// <param name="yKey">Y 座標 (緯度) を保持するノードプロパティのキー名。</param>
+    /// <param name="metric">座標から推定残コストを計算する距離尺度。</param>
+    /// <param name="direction">辿る方向。</param>
+    /// <param name="type">辿るリレーションシップ型 (null なら全型)。</param>
+    /// <param name="maxDistance">この重み合計を超える経路は探索しない (既定: 無制限)。</param>
+    public WeightedPathResult WeightedShortestPathAStar(
+        NodeId source, NodeId target, string weightKey,
+        string xKey, string yKey,
+        HeuristicMetric metric = HeuristicMetric.Euclidean,
+        Direction direction = Direction.Outgoing,
+        string? type = null,
+        double maxDistance = double.PositiveInfinity)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(xKey);
+        ArgumentException.ThrowIfNullOrEmpty(yKey);
+
+        double targetX = NodeCoordinate(target, xKey);
+        double targetY = NodeCoordinate(target, yKey);
+
+        Func<NodeId, double> heuristic = metric == HeuristicMetric.Haversine
+            ? node => Haversine(NodeCoordinate(node, yKey), NodeCoordinate(node, xKey), targetY, targetX)
+            : node =>
+            {
+                double dx = NodeCoordinate(node, xKey) - targetX;
+                double dy = NodeCoordinate(node, yKey) - targetY;
+                return Math.Sqrt(dx * dx + dy * dy);
+            };
+
+        return RunWeightedShortestPath(source, target, weightKey, direction, type, maxDistance, heuristic);
+    }
+
+    private WeightedPathResult RunWeightedShortestPath(
+        NodeId source, NodeId target, string weightKey,
+        Direction direction, string? type, double maxDistance,
+        Func<NodeId, double>? heuristic)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(weightKey);
+
+        var keyId = _schema.GetOrCreatePropertyKey(weightKey);
+        var weightProvider = new PropertyChainWeightProvider(keyId);
+        RelationshipTypeId? typeId = type != null ? _schema.GetOrCreateRelationshipType(type) : null;
+
+        var pair = new PairWithConstantOperator(new SingleNodeOperator(source), 0, target);
+        var op = new WeightedShortestPathOperator(
+            pair, 0, 1, direction, typeId, weightProvider, heuristic, maxDistance);
+
+        using var result = _tx.Execute(op);
+        foreach (var row in result.Rows())
+        {
+            WeightedPathCodec.Decode(row.GetBytes(3), out var nodes, out var rels);
+            return new WeightedPathResult(true, row.GetDouble(2), nodes, rels);
+        }
+        return WeightedPathResult.NotFound;
+    }
+
+    private double NodeCoordinate(NodeId node, string key)
+    {
+        var v = _tx.GetProperty(node, key);
+        return v.Type switch
+        {
+            Stores.PropertyValueType.Double => v.DoubleValue,
+            Stores.PropertyValueType.Int64 => v.Int64Value,
+            Stores.PropertyValueType.Int32 => v.Int32Value,
+            _ => throw new InvalidOperationException(
+                $"ノード {node.Value} の座標プロパティ '{key}' が数値型ではありません (型: {v.Type})。"),
+        };
+    }
+
+    /// <summary>緯度経度 (度) 2 点間の大圏距離をメートルで返す。</summary>
+    private static double Haversine(double lat1, double lon1, double lat2, double lon2)
+    {
+        const double earthRadiusMeters = 6_371_000.0;
+        const double degToRad = Math.PI / 180.0;
+        double dLat = (lat2 - lat1) * degToRad;
+        double dLon = (lon2 - lon1) * degToRad;
+        double a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2)
+                 + Math.Cos(lat1 * degToRad) * Math.Cos(lat2 * degToRad)
+                 * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        return 2 * earthRadiusMeters * Math.Asin(Math.Min(1.0, Math.Sqrt(a)));
     }
 }
 

@@ -14,6 +14,7 @@ Pure C# で実装するグラフデータベースエンジン。Amazon Neptune 
 - **AdjacencyBlockStore** — ページ連続配置による高速隣接リスト（低次数・高次数を統一ストレージで管理）
 - **クエリ最適化** — ヒストグラム統計 + ルールベース Optimizer でスキャン順序を自動選択
 - **Streaming cursor** — `AsCursor()` / `AsEnumerable()` で大量結果をメモリを抑えて逐次処理
+- **グラフアルゴリズム** — 重み付き最短経路（Dijkstra / A*）・BFS・可変長トラバーサル・パターンマッチ
 
 ## クイックスタート
 
@@ -316,6 +317,8 @@ dotnet run --project sandbox/QuiverSandbox
 | BFS 2-hop（ハブ degree 100、2 段） | < 5 ms |
 
 **PW-18 (複雑/ネストクエリ regression sentinel)**: `HasLabel + Has + Out + Has + Where(sub) + Order + Limit` の 7 step チェーンが 10K Person / AvgDegree=8 で ~367 ms、`Union(3 branches)` は単一 Out の 2.7× (16 → 44 ms)、`As/Select<T>` carry-column は no-alias 比 ±3% 以内。詳細: `benchmarks/Quiver.Benchmarks/{FilterChainExpand,BranchedTraversal,AsSelectProjection,MergeWorkload,OptimizerPlanRegression}Benchmarks.cs`。
+
+**重み付き最短経路 (Dijkstra / A*)**: 格子グラフ・隅から隅・各エッジ重み 1.0・property-chain 重み参照で計測 (AMD Ryzen 7 5700X / .NET 10)。`WeightedShortestPath` (Dijkstra) は BFS ホップ数最短の 1.8〜1.9×、`WeightedShortestPathAStar` (Euclidean ヒューリスティック) は Dijkstra より速い。20×20: BFS 1.05 ms / Dijkstra 1.99 ms / A* 1.80 ms、40×40: BFS 4.27 ms / Dijkstra 7.79 ms / A* 7.63 ms。詳細: `benchmarks/Quiver.Benchmarks/WeightedShortestPathBenchmarks.cs`。
 
 ## 開発状況
 
