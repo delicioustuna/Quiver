@@ -65,8 +65,11 @@ internal sealed class Transaction : ITransaction
         _state = TransactionState.Preparing;
         try
         {
-            // All PageImage WAL records are already logged by UnpinDirty calls.
-            // Commit record comes last so recovery only replays images of committed txs.
+            // 案C: UnpinDirty はページイメージをトランザクションバッファにコアレスするだけ。
+            // ここで全 PageImage を WAL へ追記し、その後に Commit レコードを書く。
+            // Commit を最後に書くことで、recovery はコミット済みトランザクションの
+            // ページイメージのみを replay する。
+            WalPageContext.FlushPending();
             long lsn = _wal.Append(WalRecordType.Commit, Id, ReadOnlySpan<byte>.Empty);
             _wal.FlushTo(lsn);
             WalPageContext.End();

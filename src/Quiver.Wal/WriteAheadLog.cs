@@ -21,6 +21,7 @@ public sealed class WriteAheadLog : IWriteAheadLog
 
     private long _nextLsn;
     private long _flushedLsn = -1;
+    private long _bytesWritten;
     private long _currentSegIdx;
     private long _segBytesUsed;
     private FileStream? _segStream;
@@ -33,6 +34,7 @@ public sealed class WriteAheadLog : IWriteAheadLog
 
     public long CurrentLsn => Volatile.Read(ref _nextLsn) - 1;
     public long FlushedLsn => Volatile.Read(ref _flushedLsn);
+    public long BytesWritten => Volatile.Read(ref _bytesWritten);
 
     public WriteAheadLog(string directory, long segmentCapacity = DefaultSegmentCapacity)
     {
@@ -74,6 +76,7 @@ public sealed class WriteAheadLog : IWriteAheadLog
             long lsn = _nextLsn++;
             _segFirstLsn.TryAdd(_currentSegIdx, lsn);
             WriteRecordToBuffer(lsn, type, tx.Value, payload);
+            _bytesWritten += recordSize;
             return lsn;
         }
     }
@@ -126,8 +129,12 @@ public sealed class WriteAheadLog : IWriteAheadLog
         long[] segIndices;
         lock (_writeLock)
         {
-            // firstLsn <= startLsn を満たす最後のセグメントを探す
-            long startSeg = _currentSegIdx;
+            // firstLsn <= startLsn を満たす最後のセグメントを探す。
+            // どのセグメントも条件を満たさない (startLsn が現存する最古セグメントより
+            // 前 — Truncate 済み) 場合は、利用可能な最古セグメントから読み始める。
+            // 既定を _currentSegIdx にすると Truncate 後の recovery が
+            // 過去セグメントの Checkpoint レコードを取りこぼすため。
+            long startSeg = _segFirstLsn.Count > 0 ? _segFirstLsn.Keys.First() : _currentSegIdx;
             foreach (var (segIdx, firstLsn) in _segFirstLsn)
             {
                 if (firstLsn <= startLsn) startSeg = segIdx;

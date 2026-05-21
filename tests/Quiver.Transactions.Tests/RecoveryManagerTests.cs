@@ -109,7 +109,8 @@ public class RecoveryManagerTests : IDisposable
                 dataPage = srcFile.AllocatePage(PageKind.NodeRecord);
                 var ph = srcFile.PinForWrite(dataPage);
                 System.Text.Encoding.UTF8.GetBytes("RECOVERED").CopyTo(ph.Data);
-                ph.Dispose(); // calls UnpinDirty → logs PageImage to WAL
+                ph.Dispose(); // UnpinDirty → PageImage をトランザクションバッファにコアレス
+                WalPageContext.FlushPending(); // 案C: コミット直前にバッファを WAL へ追記
                 long commitLsn = _wal.Append(WalRecordType.Commit, txId, ReadOnlySpan<byte>.Empty);
                 _wal.FlushTo(commitLsn);
                 WalPageContext.End();
@@ -155,7 +156,10 @@ public class RecoveryManagerTests : IDisposable
                 dataPage = srcFile.AllocatePage(PageKind.NodeRecord);
                 var ph = srcFile.PinForWrite(dataPage);
                 System.Text.Encoding.UTF8.GetBytes("ABORTED!").CopyTo(ph.Data);
-                ph.Dispose(); // logs PageImage to WAL (but tx is aborted below)
+                ph.Dispose(); // UnpinDirty → PageImage をトランザクションバッファにコアレス
+                // PageImage を WAL へ追記したうえで、Commit ではなく Abort で終える。
+                // recovery は「WAL に PageImage はあるが Commit が無い」場合に skip するはず。
+                WalPageContext.FlushPending();
                 long abortLsn = _wal.Append(WalRecordType.Abort, txId, ReadOnlySpan<byte>.Empty);
                 _wal.FlushTo(abortLsn);
                 WalPageContext.End();
@@ -181,6 +185,7 @@ public class RecoveryManagerTests : IDisposable
     private sealed class NullPageManager : IPageManager
     {
         public IPagedFile OpenOrCreate(string path, PageKind defaultKind) => throw new NotSupportedException();
+        public void FlushAll() { }
         public void Dispose() { }
     }
 }

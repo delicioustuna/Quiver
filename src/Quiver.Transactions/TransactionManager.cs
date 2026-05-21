@@ -21,6 +21,12 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly ConcurrentDictionary<long, Transaction> _active = new();
     private long _nextTxId;
 
+    // 案A: チェックポイント契機。EnableCheckpointing で配線される。
+    private Checkpointer? _checkpointer;
+    private long _checkpointThresholdBytes;
+    private long _lastCheckpointBytes;
+    private readonly object _checkpointGate = new();
+
     public TransactionManager(
         IWriteAheadLog wal,
         INodeStore nodeStore,
@@ -64,8 +70,61 @@ internal sealed class TransactionManager : ITransactionManager
         return tx;
     }
 
-    internal void OnCommit(TransactionId txId) => _active.TryRemove(txId.Value, out _);
+    /// <summary>
+    /// 案A: チェックポイント契機を有効化する。<paramref name="thresholdBytes"/> 以上
+    /// WAL が成長し、かつアクティブトランザクションが 0 になった時点でチェックポイントを打つ。
+    /// <paramref name="thresholdBytes"/> が 0 以下のときはチェックポイントを行わない。
+    /// </summary>
+    internal void EnableCheckpointing(Checkpointer checkpointer, long thresholdBytes)
+    {
+        _checkpointer = checkpointer;
+        _checkpointThresholdBytes = thresholdBytes;
+        _lastCheckpointBytes = _wal.BytesWritten;
+    }
+
+    internal void OnCommit(TransactionId txId)
+    {
+        _active.TryRemove(txId.Value, out _);
+        MaybeCheckpoint();
+    }
+
     internal void OnAbort(TransactionId txId) => _active.TryRemove(txId.Value, out _);
+
+    /// <summary>
+    /// コミット直後に呼ばれ、チェックポイント契機を満たしていれば同期的に実行する。
+    ///
+    /// チェックポイントはアクティブトランザクションが 0 のときにのみ打つ。これにより
+    /// 全ダーティページがコミット済み (またはアボード済み — アボートはページを巻き戻さない
+    /// 既存仕様) であることが保証され、シャープチェックポイントとして安全に WAL を truncate
+    /// できる。未コミットトランザクションのダーティページをデータファイルへ流して
+    /// しまうこともない。
+    /// </summary>
+    private void MaybeCheckpoint()
+    {
+        var checkpointer = _checkpointer;
+        if (checkpointer == null || _checkpointThresholdBytes <= 0) return;
+
+        // ロック外の安価な事前判定。
+        if (!_active.IsEmpty) return;
+        if (_wal.BytesWritten - Volatile.Read(ref _lastCheckpointBytes) < _checkpointThresholdBytes)
+            return;
+
+        // 同時コミットによる二重実行を防ぐ。取得できなければ他スレッドが処理中なのでスキップ。
+        if (!Monitor.TryEnter(_checkpointGate)) return;
+        try
+        {
+            // ゲート内で再判定 (TOCTOU 回避)。
+            if (!_active.IsEmpty) return;
+            if (_wal.BytesWritten - _lastCheckpointBytes < _checkpointThresholdBytes) return;
+
+            checkpointer.Checkpoint();
+            Volatile.Write(ref _lastCheckpointBytes, _wal.BytesWritten);
+        }
+        finally
+        {
+            Monitor.Exit(_checkpointGate);
+        }
+    }
 
     /// <summary>
     /// PW-14: swap the active adjacency store reference. Called by the backend

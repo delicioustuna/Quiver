@@ -214,6 +214,14 @@ public sealed class GraphDatabaseOptions
     /// <summary>WAL 1 セグメントのサイズ (バイト単位)。既定 64 MB。</summary>
     public int WalSegmentSize { get; set; } = 64 * 1024 * 1024;
 
+    /// <summary>
+    /// 案A: チェックポイント契機のしきい値 (バイト単位)。前回チェックポイント以降に
+    /// WAL がこのバイト数以上成長し、かつアクティブトランザクションが 0 になった時点で、
+    /// 全データページをフラッシュして WAL を truncate する。既定 64 MB。
+    /// 0 以下を指定するとチェックポイントを行わず、WAL は単調増加する (旧挙動)。
+    /// </summary>
+    public long CheckpointThresholdBytes { get; set; } = 64L * 1024 * 1024;
+
     /// <summary>ロック取得のタイムアウト。既定 5 秒。</summary>
     public TimeSpan LockTimeout { get; set; } = TimeSpan.FromSeconds(5);
 
