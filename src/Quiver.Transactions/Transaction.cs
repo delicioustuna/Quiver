@@ -21,6 +21,9 @@ internal sealed class Transaction : ITransaction
     // FT-15: null でない場合、abort / コミット失敗時にキャプチャ済み before-image を
     // データファイルへ書き戻し、ストアメタを再ロードしてインプロセス undo を行う。
     private readonly AbortUndoHandler? _undoHandler;
+    // FT-17: 本トランザクションの B+Tree インデックス論理 undo ログ。abort 時に
+    // 索引エントリを逆適用 (Insert↔Delete) で巻き戻す。
+    private readonly IndexUndoLog _indexUndoLog;
     private List<Action>? _onCommitted;
     private List<Action>? _onRolledBack;
     private TransactionState _state;
@@ -60,7 +63,9 @@ internal sealed class Transaction : ITransaction
         _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes);
         _properties = new TxPropertyStore(propStore);
         _indexes = new TxIndexManager(indexManager, indexLocks, id);
+        _indexUndoLog = new IndexUndoLog(wal, id, indexManager);
         WalPageContext.Begin(wal, id);
+        IndexUndoContext.Begin(_indexUndoLog);
     }
 
     public void Commit()
@@ -78,6 +83,8 @@ internal sealed class Transaction : ITransaction
             long lsn = _wal.Append(WalRecordType.Commit, Id, ReadOnlySpan<byte>.Empty);
             _wal.FlushTo(lsn);
             WalPageContext.End();
+            // FT-17: コミット時は索引変更を確定する。ambient コンテキストだけ破棄する。
+            IndexUndoContext.End();
             ReleaseAllLocks();
             _state = TransactionState.Committed;
             _manager.OnCommit(Id);
@@ -89,6 +96,7 @@ internal sealed class Transaction : ITransaction
             // FT-15: roll the page changes back in place before discarding the
             // context, then mark the transaction aborted on the WAL.
             try { RollBackInPlace(); } catch { }
+            try { RollBackIndexInPlace(); } catch { }
             try { _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty); } catch { }
             try { WalPageContext.End(); } catch { }
             try { ReleaseAllLocks(); } catch { }
@@ -108,6 +116,7 @@ internal sealed class Transaction : ITransaction
         // edges / properties are invisible to subsequent transactions. Must run
         // before WalPageContext.End() drops the per-transaction before-image buffer.
         RollBackInPlace();
+        RollBackIndexInPlace();
         _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty);
         WalPageContext.End();
         ReleaseAllLocks();
@@ -124,6 +133,15 @@ internal sealed class Transaction : ITransaction
         var beforeImages = WalPageContext.CurrentBeforeImagePayloads;
         if (beforeImages.Count == 0) return;
         _undoHandler.Undo(beforeImages);
+    }
+
+    // FT-17: replay this transaction's B+Tree index mutations in reverse
+    // (Insert↔Delete). Clears the ambient IndexUndoContext first so the inverse
+    // operations are not themselves recorded as new undo entries.
+    private void RollBackIndexInPlace()
+    {
+        IndexUndoContext.End();
+        _indexUndoLog.RollBack();
     }
 
     public void Dispose()

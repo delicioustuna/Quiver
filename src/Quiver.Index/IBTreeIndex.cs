@@ -62,6 +62,15 @@ public interface IIndexManager
     /// </summary>
     IEnumerable<(string IndexName, string Label, string PropertyKey)> ListIndexBindings()
         => Array.Empty<(string, string, string)>();
+
+    /// <summary>
+    /// FT-17: エンコード済みキーで表現された 1 件のインデックス論理ミューテーションを
+    /// 適用する。abort のインプロセス巻き戻しと、クラッシュ recovery の索引 undo パスが
+    /// 共通で使う。既定実装は no-op (索引の永続性を持たないバックエンド向け)。
+    /// </summary>
+    void ApplyEncodedIndexMutation(
+        string indexName, IndexKeyKind keyKind, ReadOnlySpan<byte> keyBytes,
+        long value, bool isInsert) { }
 }
 
 public interface IBulkLoadable<TKey>

@@ -84,6 +84,51 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
+    /// FT-17 索引整合性: a B+Tree index entry inserted by an uncommitted transaction
+    /// must be undone by recovery after a kill, while a committed index entry must
+    /// survive. The binary backend logs index mutations as WalRecordType.IndexMutation
+    /// and RecoveryManager replays the inverse for crashed transactions.
+    /// </summary>
+    [Fact]
+    public void IndexEntry_from_uncommitted_tx_is_undone_after_kill()
+    {
+        IGraphStorageBackend? backend = Open();
+
+        // Committed baseline index entry.
+        using (var tx = backend.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: false))
+        {
+            var keep = tx.CreateNode("Person");
+            tx.IndexInsert("idx_name", "committed", keep);
+            tx.Commit();
+        }
+
+        // Uncommitted transaction inserts an index entry, then the process dies.
+        var dirtyTx = backend.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: false);
+        var doomed = dirtyTx.CreateNode("Person");
+        dirtyTx.IndexInsert("idx_name", "doomed", doomed);
+        // NOTE: no Commit.
+
+        KillProcessSimulator.SimulateKill(ref backend);
+
+        using var reopened = Open();
+        using var rtx = reopened.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: true);
+
+        var survived = rtx.SeekIndex("idx_name", PropertyValue.FromString("committed"));
+        survived.MoveNext().Should().BeTrue(
+            "a committed index entry must survive a kill");
+        survived.Dispose();
+
+        var undone = rtx.SeekIndex("idx_name", PropertyValue.FromString("doomed"));
+        undone.MoveNext().Should().BeFalse(
+            "an uncommitted index entry must be undone by recovery");
+        undone.Dispose();
+        rtx.Rollback();
+    }
+
+    /// <summary>
     /// Open with a small WAL segment size so that a few commits force a
     /// segment roll, then simulate a kill and confirm everything still
     /// recovers. Probes the boundary code that closes one segment and opens

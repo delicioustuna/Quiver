@@ -1,4 +1,5 @@
 ﻿using Quiver.Core;
+using Quiver.Index;
 using Quiver.Storage;
 using Quiver.Wal;
 
@@ -9,6 +10,9 @@ internal sealed class RecoveryManager : IRecoveryManager
     private readonly IPageManager _pageManager;
     private readonly IWriteAheadLog _wal;
     private readonly Dictionary<byte, IPagedFile> _fileRegistry;
+    // FT-17: null でない場合、未コミット TX の IndexMutation レコードを逆適用して
+    // B+Tree インデックスのエントリを巻き戻す。
+    private readonly IIndexManager? _indexManager;
 
     public RecoveryManager(IPageManager pageManager, IWriteAheadLog wal)
         : this(pageManager, wal, []) { }
@@ -16,11 +20,13 @@ internal sealed class RecoveryManager : IRecoveryManager
     public RecoveryManager(
         IPageManager pageManager,
         IWriteAheadLog wal,
-        Dictionary<byte, IPagedFile> fileRegistry)
+        Dictionary<byte, IPagedFile> fileRegistry,
+        IIndexManager? indexManager = null)
     {
         _pageManager = pageManager;
         _wal = wal;
         _fileRegistry = fileRegistry;
+        _indexManager = indexManager;
     }
 
     public long Recover()
@@ -64,9 +70,10 @@ internal sealed class RecoveryManager : IRecoveryManager
             }
         }
 
-        // Pass 3 (undo) — FT-15 Tier2 ARIES undo:
+        // Pass 3 (undo) — FT-15 Tier2 ARIES undo + FT-17 索引論理 undo:
         // クラッシュで宙ぶらりんになった真の未完了トランザクションの
-        // CompensationLogRecord (before-image) を再適用し、未コミットの変更を巻き戻す。
+        // CompensationLogRecord (ページ before-image) と IndexMutation (B+Tree 索引の
+        // 論理ミューテーション) を再適用 / 逆適用し、未コミットの変更を巻き戻す。
         // undo 対象は以下をすべて満たすトランザクションのみ:
         //   - Commit レコードを持たない (コミット済みは redo 済み)
         //   - Abort レコードを持たない (インプロセス abort 済みは巻き戻しが durable)
@@ -81,13 +88,14 @@ internal sealed class RecoveryManager : IRecoveryManager
             while (reader.TryReadNext(out var record))
             {
                 long txId = record.TransactionId.Value;
-                if (record.Type == WalRecordType.CompensationLogRecord &&
-                    !committedTxs.Contains(txId) &&
-                    !abortedTxs.Contains(txId) &&
-                    !txsWithPageImage.Contains(txId))
-                {
+                if (committedTxs.Contains(txId) ||
+                    abortedTxs.Contains(txId) ||
+                    txsWithPageImage.Contains(txId))
+                    continue;
+                if (record.Type == WalRecordType.CompensationLogRecord)
                     ApplyPagePayload(record);
-                }
+                else if (record.Type == WalRecordType.IndexMutation)
+                    ApplyIndexUndo(record);
             }
         }
 
@@ -119,5 +127,22 @@ internal sealed class RecoveryManager : IRecoveryManager
             return;
         if (!_fileRegistry.TryGetValue(fileKind, out var file)) return;
         file.WritePageForRecovery(new PageId(pageId), pageBytes);
+    }
+
+    /// <summary>
+    /// FT-17: IndexMutation WAL レコードをデコードし、その逆操作 (Insert↔Delete) を
+    /// 索引へ適用して、未コミット TX の B+Tree インデックス変更を巻き戻す。
+    /// </summary>
+    private void ApplyIndexUndo(in WalRecord record)
+    {
+        if (_indexManager == null) return;
+        if (!IndexMutationCodec.TryDecode(
+                record.Payload.Span,
+                out string indexName, out IndexKeyKind keyKind,
+                out long value, out bool isInsert, out byte[] keyBytes))
+            return;
+        // 記録された操作の逆を適用する: Insert は Delete、Delete は Insert。
+        _indexManager.ApplyEncodedIndexMutation(
+            indexName, keyKind, keyBytes, value, isInsert: !isInsert);
     }
 }

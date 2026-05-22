@@ -34,13 +34,17 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
     private readonly IPagedFile _file;
     private readonly IKeyCodec<TKey> _codec;
+    // FT-17: 索引名とキー型タグ。Insert / Delete 成功時に IndexUndoContext へ
+    // 論理ミューテーションを通知するために保持する。
+    private readonly string _name;
+    private readonly IndexKeyKind _kind;
     private PageId _root;
     private long _entryCount;
     private int _height;
 
-    internal BTreeIndex(IPagedFile file, IKeyCodec<TKey> codec)
+    internal BTreeIndex(IPagedFile file, IKeyCodec<TKey> codec, string name, IndexKeyKind kind)
     {
-        _file = file; _codec = codec;
+        _file = file; _codec = codec; _name = name; _kind = kind;
         if (_file.PageCount <= 1)
         {
             _file.AllocatePage(PageKind.Header);
@@ -72,6 +76,9 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
             _root = newRoot; _height++;
         }
         _entryCount++; FlushHeader();
+        // FT-17: 進行中の書き込みトランザクションへ論理ミューテーションを通知する。
+        // トランザクション外 (バルク構築・recovery 中の逆適用) では no-op。
+        IndexUndoContext.Record(_name, _kind, kb, value, isInsert: true);
     }
 
     public bool Delete(in TKey key, long value)
@@ -88,7 +95,10 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
             _file.FreePage(_root);
             _root = onlyChild; _height--;
         }
-        FlushHeader(); return true;
+        FlushHeader();
+        // FT-17: 削除が成立したときのみ論理ミューテーションを通知する。
+        IndexUndoContext.Record(_name, _kind, kb, value, isInsert: false);
+        return true;
     }
 
     public BTreeValueEnumerator Seek(in TKey key) => new(_file, FindLeaf(Encode(key)), Encode(key));

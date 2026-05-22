@@ -21,11 +21,62 @@ public sealed class IndexManager : IIndexManager, IDisposable
         Directory.CreateDirectory(directory);
     }
 
-    public IBTreeIndex<int>    CreateInt32Index(string name)  => GetOrCreate(name, new Int32KeyCodec(),  PropertyTypeFlags.Int32);
-    public IBTreeIndex<long>   CreateInt64Index(string name)  => GetOrCreate(name, new Int64KeyCodec(),  PropertyTypeFlags.Int64);
-    public IBTreeIndex<double> CreateDoubleIndex(string name) => GetOrCreate(name, new DoubleKeyCodec(), PropertyTypeFlags.Double);
-    public IBTreeIndex<string> CreateStringIndex(string name) => GetOrCreate(name, new StringKeyCodec(), PropertyTypeFlags.String);
-    public IBTreeIndex<byte[]> CreateBytesIndex(string name)  => GetOrCreate(name, new BytesKeyCodec(),  PropertyTypeFlags.Bytes);
+    public IBTreeIndex<int>    CreateInt32Index(string name)  => GetOrCreate(name, new Int32KeyCodec(),  PropertyTypeFlags.Int32,  IndexKeyKind.Int32);
+    public IBTreeIndex<long>   CreateInt64Index(string name)  => GetOrCreate(name, new Int64KeyCodec(),  PropertyTypeFlags.Int64,  IndexKeyKind.Int64);
+    public IBTreeIndex<double> CreateDoubleIndex(string name) => GetOrCreate(name, new DoubleKeyCodec(), PropertyTypeFlags.Double, IndexKeyKind.Double);
+    public IBTreeIndex<string> CreateStringIndex(string name) => GetOrCreate(name, new StringKeyCodec(), PropertyTypeFlags.String, IndexKeyKind.String);
+    public IBTreeIndex<byte[]> CreateBytesIndex(string name)  => GetOrCreate(name, new BytesKeyCodec(),  PropertyTypeFlags.Bytes,  IndexKeyKind.Bytes);
+
+    /// <summary>
+    /// FT-17: 索引論理 undo の逆適用。recovery (未コミット TX の巻き戻し) と
+    /// インプロセス abort の両方から呼ばれ、エンコード済みキーバイト列を該当型の
+    /// コーデックでデコードして Insert / Delete を適用する。
+    /// <see cref="IndexUndoContext"/> が未設定の経路でのみ呼ぶ前提なので、ここでの
+    /// Insert / Delete は新たな undo レコードを生成しない。
+    /// </summary>
+    public void ApplyEncodedIndexMutation(
+        string indexName, IndexKeyKind keyKind, ReadOnlySpan<byte> keyBytes,
+        long value, bool isInsert)
+    {
+        switch (keyKind)
+        {
+            case IndexKeyKind.Int32:
+            {
+                var idx = CreateInt32Index(indexName);
+                int k = new Int32KeyCodec().Decode(keyBytes);
+                if (isInsert) idx.Insert(k, value); else idx.Delete(k, value);
+                break;
+            }
+            case IndexKeyKind.Int64:
+            {
+                var idx = CreateInt64Index(indexName);
+                long k = new Int64KeyCodec().Decode(keyBytes);
+                if (isInsert) idx.Insert(k, value); else idx.Delete(k, value);
+                break;
+            }
+            case IndexKeyKind.Double:
+            {
+                var idx = CreateDoubleIndex(indexName);
+                double k = new DoubleKeyCodec().Decode(keyBytes);
+                if (isInsert) idx.Insert(k, value); else idx.Delete(k, value);
+                break;
+            }
+            case IndexKeyKind.String:
+            {
+                var idx = CreateStringIndex(indexName);
+                string k = new StringKeyCodec().Decode(keyBytes);
+                if (isInsert) idx.Insert(k, value); else idx.Delete(k, value);
+                break;
+            }
+            case IndexKeyKind.Bytes:
+            {
+                var idx = CreateBytesIndex(indexName);
+                byte[] k = new BytesKeyCodec().Decode(keyBytes);
+                if (isInsert) idx.Insert(k, value); else idx.Delete(k, value);
+                break;
+            }
+        }
+    }
 
     public bool DropIndex(string name)
     {
@@ -81,7 +132,8 @@ public sealed class IndexManager : IIndexManager, IDisposable
     public PropertyTypeFlags GetIndexTypeFlags(string name)
         => _indexTypes.TryGetValue(name, out var f) ? f : PropertyTypeFlags.None;
 
-    private IBTreeIndex<TKey> GetOrCreate<TKey>(string name, IKeyCodec<TKey> codec, PropertyTypeFlags typeFlag)
+    private IBTreeIndex<TKey> GetOrCreate<TKey>(
+        string name, IKeyCodec<TKey> codec, PropertyTypeFlags typeFlag, IndexKeyKind kind)
     {
         if (_indexes.TryGetValue(name, out var existing))
         {
@@ -113,7 +165,7 @@ public sealed class IndexManager : IIndexManager, IDisposable
             File.WriteAllBytes(metaPath, BitConverter.GetBytes((ulong)typeFlag));
         }
 
-        var index = new BTreeIndex<TKey>(new PagedFile(IndexPath(name)), codec);
+        var index = new BTreeIndex<TKey>(new PagedFile(IndexPath(name)), codec, name, kind);
         _indexes[name] = index;
         _indexTypes[name] = typeFlag;
         return index;
