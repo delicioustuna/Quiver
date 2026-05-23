@@ -34,17 +34,17 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
     private readonly IPagedFile _file;
     private readonly IKeyCodec<TKey> _codec;
-    // FT-17: 索引名とキー型タグ。Insert / Delete 成功時に IndexUndoContext へ
-    // 論理ミューテーションを通知するために保持する。
-    private readonly string _name;
-    private readonly IndexKeyKind _kind;
     private PageId _root;
     private long _entryCount;
     private int _height;
 
     internal BTreeIndex(IPagedFile file, IKeyCodec<TKey> codec, string name, IndexKeyKind kind)
     {
-        _file = file; _codec = codec; _name = name; _kind = kind;
+        // FT-20: name / kind は呼び出し側互換のため受け取るが、もう保持しない。
+        // FT-17 の IndexUndoContext.Record 経路 (論理 undo) は AbortUndoHandler の
+        // 物理 before-image undo (FT-19) に統合済みなので不要。
+        _ = name; _ = kind;
+        _file = file; _codec = codec;
         if (_file.PageCount <= 1)
         {
             _file.AllocatePage(PageKind.Header);
@@ -76,9 +76,6 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
             _root = newRoot; _height++;
         }
         _entryCount++; FlushHeader();
-        // FT-17: 進行中の書き込みトランザクションへ論理ミューテーションを通知する。
-        // トランザクション外 (バルク構築・recovery 中の逆適用) では no-op。
-        IndexUndoContext.Record(_name, _kind, kb, value, isInsert: true);
     }
 
     public bool Delete(in TKey key, long value)
@@ -96,8 +93,6 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
             _root = onlyChild; _height--;
         }
         FlushHeader();
-        // FT-17: 削除が成立したときのみ論理ミューテーションを通知する。
-        IndexUndoContext.Record(_name, _kind, kb, value, isInsert: false);
         return true;
     }
 
@@ -175,79 +170,6 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
     /// <summary>FT-18: 本索引のバッファプールダーティページを fsync する。</summary>
     public void Flush() => _file.Flush();
-
-    /// <summary>
-    /// FT-18: <c>(key, value)</c> ペアが既存ならスキップ、不在なら挿入する。
-    /// 索引 redo / undo の冪等再生用 — <see cref="IndexUndoContext"/> へは通知しない。
-    /// </summary>
-    public bool InsertIfAbsent(in TKey key, long value)
-    {
-        byte[] kb = Encode(key);
-        if (LeafContains(FindLeaf(kb), kb, value)) return false;
-        // 通常の Insert ロジックを再利用するが、IndexUndoContext.Record は呼ばない。
-        var split = InsertDown(_root, kb, value, 0);
-        if (split.HasValue)
-        {
-            PageId newRoot = _file.AllocatePage(PageKind.BTreeInternal);
-            var ph = _file.PinForWrite(newRoot);
-            ph.Data.Clear();
-            BinaryPrimitives.WriteInt32LittleEndian(ph.Data, 1);
-            BinaryPrimitives.WriteInt64LittleEndian(ph.Data[4..], _root.Value);
-            int p = BL.InternalHdr;
-            WriteSep(ph.Data, ref p, split.Value.median, split.Value.right);
-            ph.Dispose();
-            _root = newRoot; _height++;
-        }
-        _entryCount++; FlushHeader();
-        return true;
-    }
-
-    /// <summary>
-    /// FT-18: <c>(key, value)</c> ペアが存在すれば削除、不在なら no-op。
-    /// 索引 redo / undo の冪等再生用 — <see cref="IndexUndoContext"/> へは通知しない。
-    /// </summary>
-    public bool DeleteIfPresent(in TKey key, long value)
-    {
-        byte[] kb = Encode(key);
-        bool ok = DeleteDown(_root, kb, value, 0);
-        if (!ok) return false;
-        _entryCount--;
-        while (_height > 1)
-        {
-            using var rh = _file.PinForRead(_root);
-            if (BinaryPrimitives.ReadInt32LittleEndian(rh.Data) != 0) break;
-            PageId onlyChild = new(BinaryPrimitives.ReadInt64LittleEndian(rh.Data[4..]));
-            _file.FreePage(_root);
-            _root = onlyChild; _height--;
-        }
-        FlushHeader();
-        return true;
-    }
-
-    /// <summary>
-    /// FT-18: 指定リーフページに <c>(key, value)</c> ペアが完全一致で存在するか調べる。
-    /// 冪等再生の事前検査用。
-    /// </summary>
-    private bool LeafContains(PageId leaf, byte[] key, long value)
-    {
-        using var h = _file.PinForRead(leaf);
-        ReadOnlySpan<byte> body = h.Data;
-        int count = BinaryPrimitives.ReadInt32LittleEndian(body);
-        int pos = BL.LeafHdr;
-        for (int i = 0; i < count; i++)
-        {
-            int klen = BinaryPrimitives.ReadInt16LittleEndian(body[pos..]);
-            int cmp = body.Slice(pos + 2, klen).SequenceCompareTo(key);
-            if (cmp == 0)
-            {
-                long v = BinaryPrimitives.ReadInt64LittleEndian(body[(pos + 2 + klen)..]);
-                if (v == value) return true;
-            }
-            else if (cmp > 0) return false;
-            pos += 2 + klen + 8;
-        }
-        return false;
-    }
 
     // -----------------------------------------------------------------------
 

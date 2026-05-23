@@ -16,14 +16,13 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
 {
     public IGraphStorageBackend Open(string directoryPath, GraphDatabaseOptions options)
     {
-        // FT-15 / FT-17: a prior backend on this thread may have been killed
-        // mid-transaction (crash simulation), leaving the thread-static WAL /
-        // index undo contexts dangling. RecoveryManager's index undo pass writes
-        // to B+Tree pages, so a stale IndexUndoContext would route those writes
-        // into the dead transaction's disposed WAL. Start clean — equivalent to
-        // the fresh thread-statics a real process restart would have.
+        // FT-15: a prior backend on this thread may have been killed mid-transaction
+        // (crash simulation), leaving the thread-static WAL page context dangling.
+        // Start clean — equivalent to the fresh thread-statics a real process restart
+        // would have.
+        // FT-20: IndexUndoContext was retired (subsumed by AbortUndoHandler), so no
+        // index thread-static cleanup is needed here anymore.
         WalPageContext.End();
-        IndexUndoContext.End();
 
         Directory.CreateDirectory(directoryPath);
 

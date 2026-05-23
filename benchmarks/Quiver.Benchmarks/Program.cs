@@ -1,5 +1,6 @@
 using BenchmarkDotNet.Running;
 using Quiver.Benchmarks;
+using Quiver.Benchmarks.Standalone;
 
 // ── ベンチ一時 DB の残骸を起動時に掃除する ──────────────────────────────
 // 各ベンチは %TEMP%\quiver_bench\ 配下にダミー DB を作り、その削除を BDN の
@@ -17,4 +18,11 @@ BenchTempDir.SweepRoot();
 Console.CancelKeyPress         += (_, _) => BenchTempDir.SweepRoot();
 AppDomain.CurrentDomain.ProcessExit += (_, _) => BenchTempDir.SweepRoot();
 
+// FT-20: standalone runner (BDN を経由せず短時間で参考値計測)
+if (args.Length >= 1 && args[0] == "--ft20-wal")
+{
+    return FT20WalAmplificationRunner.Run();
+}
+
 BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
+return 0;

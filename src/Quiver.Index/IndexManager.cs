@@ -52,58 +52,6 @@ public sealed class IndexManager : IIndexManager, IDisposable
     public IBTreeIndex<byte[]> CreateBytesIndex(string name)  => GetOrCreate(name, new BytesKeyCodec(),  PropertyTypeFlags.Bytes,  IndexKeyKind.Bytes);
 
     /// <summary>
-    /// FT-17 / FT-18: 索引論理ミューテーションの<strong>冪等</strong>適用。recovery の
-    /// undo / redo パスと、in-process abort 巻き戻しの両方から呼ばれる。
-    /// <c>(key, value)</c> ペアの存在を検査してから Insert / Delete するので、
-    /// 二重適用でも <see cref="IBTreeIndex{TKey}.EntryCount"/> が破綻しない。
-    /// <see cref="IndexUndoContext"/> へは通知しない (recovery / abort いずれの呼出元でも
-    /// ambient context は事前にクリア済み)。
-    /// </summary>
-    public void ApplyEncodedIndexMutation(
-        string indexName, IndexKeyKind keyKind, ReadOnlySpan<byte> keyBytes,
-        long value, bool isInsert)
-    {
-        switch (keyKind)
-        {
-            case IndexKeyKind.Int32:
-            {
-                var idx = CreateInt32Index(indexName);
-                int k = new Int32KeyCodec().Decode(keyBytes);
-                if (isInsert) idx.InsertIfAbsent(k, value); else idx.DeleteIfPresent(k, value);
-                break;
-            }
-            case IndexKeyKind.Int64:
-            {
-                var idx = CreateInt64Index(indexName);
-                long k = new Int64KeyCodec().Decode(keyBytes);
-                if (isInsert) idx.InsertIfAbsent(k, value); else idx.DeleteIfPresent(k, value);
-                break;
-            }
-            case IndexKeyKind.Double:
-            {
-                var idx = CreateDoubleIndex(indexName);
-                double k = new DoubleKeyCodec().Decode(keyBytes);
-                if (isInsert) idx.InsertIfAbsent(k, value); else idx.DeleteIfPresent(k, value);
-                break;
-            }
-            case IndexKeyKind.String:
-            {
-                var idx = CreateStringIndex(indexName);
-                string k = new StringKeyCodec().Decode(keyBytes);
-                if (isInsert) idx.InsertIfAbsent(k, value); else idx.DeleteIfPresent(k, value);
-                break;
-            }
-            case IndexKeyKind.Bytes:
-            {
-                var idx = CreateBytesIndex(indexName);
-                byte[] k = new BytesKeyCodec().Decode(keyBytes);
-                if (isInsert) idx.InsertIfAbsent(k, value); else idx.DeleteIfPresent(k, value);
-                break;
-            }
-        }
-    }
-
-    /// <summary>
     /// FT-18: 全索引のバッファプールダーティページを fsync する。
     /// <see cref="Quiver.Transactions.Checkpointer"/> がチェックポイント時に呼び、
     /// 索引ファイル内容を checkpointLsn 時点で durable にして WAL truncate を安全にする。
