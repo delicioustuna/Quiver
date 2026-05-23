@@ -53,27 +53,25 @@ internal static class IndexMutationCodec
 }
 
 /// <summary>
-/// FT-17: 1 書き込みトランザクション分の B+Tree インデックス論理 undo ログ。
+/// FT-17 → FT-19: 1 書き込みトランザクション分の B+Tree インデックス論理 undo ログ。
 /// <see cref="IIndexUndoSink"/> として <see cref="IndexUndoContext"/> に登録され、
 /// <see cref="BTreeIndex{TKey}"/> の Insert / Delete 成功を 1 件ずつ受け取る。
 ///
-/// 各ミューテーションは (1) インプロセス abort の巻き戻し用にバッファされ、
-/// (2) <see cref="WalRecordType.IndexMutation"/> として WAL へ即時追記され、
-/// クラッシュ recovery の索引 undo パスで使われる。索引ファイルは WAL ページ
-/// ロギング対象外なので、FT-15 の before-image / CLR ではなくこの論理 undo で
-/// abort / crash の巻き戻しを行う (論理 undo は B+Tree のページ分割に影響されない)。
+/// FT-19 以降: 索引ファイルが ARIES page-WAL 対象になり、crash recovery は PageImage redo
+/// + CLR undo で完全にカバーされる。よって本クラスは <strong>in-memory 専用</strong>に縮退し、
+/// in-process abort の rollback 速度を稼ぐためだけに残置されている (ページ read back を回避)。
+/// 過去の <see cref="WalRecordType.IndexMutation"/> WAL 追記は撤去済み (enum 値は古い WAL の
+/// 互換性のため予約のまま残し、新規 WAL では発行しない)。
 /// </summary>
 internal sealed class IndexUndoLog : IIndexUndoSink
 {
-    private readonly IWriteAheadLog _wal;
-    private readonly TransactionId _txId;
     private readonly IIndexManager _indexManager;
     private List<Entry>? _buffer;
 
     public IndexUndoLog(IWriteAheadLog wal, TransactionId txId, IIndexManager indexManager)
     {
-        _wal = wal;
-        _txId = txId;
+        // FT-19: wal / txId 引数は呼び出し側互換のため受け取るが、本クラスではもう使わない。
+        _ = wal; _ = txId;
         _indexManager = indexManager;
     }
 
@@ -86,9 +84,9 @@ internal sealed class IndexUndoLog : IIndexUndoSink
     {
         byte[] kb = keyBytes.ToArray();
         (_buffer ??= new List<Entry>()).Add(new Entry(indexName, keyKind, kb, value, isInsert));
-        // FT-17: crash recovery 用に WAL へ即時追記する (CLR と同様、コミットを待たない)。
-        byte[] payload = IndexMutationCodec.Encode(indexName, keyKind, kb, value, isInsert);
-        _wal.Append(WalRecordType.IndexMutation, _txId, payload);
+        // FT-19: crash recovery durability は索引 PagedFile の EnableWalLogging (PageImage / CLR)
+        // が担うので、本経路から WalRecordType.IndexMutation を WAL へ追記する必要はない。
+        // in-process abort 時に RollBack() が _buffer を逆順に再生して索引状態を巻き戻す。
     }
 
     /// <summary>

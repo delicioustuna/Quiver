@@ -385,6 +385,134 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         rtx.Rollback();
     }
 
+    /// <summary>
+    /// FT-19: 大量 insert で B+Tree split を多発させた tx を commit → kill。
+    /// 物理 PageImage WAL ロギングにより、split で touched された全ページが PageImage 経由で
+    /// 再生されるので、partial-disk-arrival シナリオでも recovery 後に B+Tree が構造的に整合し、
+    /// 全エントリが可視に戻る。FT-18 までの論理 redo では出せなかった保証。
+    /// </summary>
+    [Fact]
+    public void IndexHeavySplitWorkload_then_kill_recovers_all_entries()
+    {
+        IGraphStorageBackend? backend = Open();
+        var insertedKeys = new List<int>();
+        var insertedNodes = new List<NodeId>();
+        using (var tx = backend.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: false))
+        {
+            // 1000 件 — 1 leaf (8 KB) を遥かに超えるので multi-level B+Tree に。
+            for (int i = 0; i < 1000; i++)
+            {
+                var n = tx.CreateNode("Person");
+                tx.IndexInsert("idx_split", (long)i, n);
+                insertedKeys.Add(i);
+                insertedNodes.Add(n);
+            }
+            tx.Commit();
+        }
+
+        // Dispose 経由の flush なしで kill。PageImage 経由でしか復旧できない状況を作る。
+        KillProcessSimulator.SimulateKill(ref backend);
+
+        using var reopened = Open();
+        using var rtx = reopened.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: true);
+        for (int probe = 0; probe < 1000; probe += 37)
+        {
+            var cur = rtx.SeekIndex("idx_split", PropertyValue.FromInt64((long)probe));
+            cur.MoveNext().Should().BeTrue($"key {probe} は committed PageImage 経由で復旧されるはず");
+            cur.Current.Should().Be(insertedNodes[probe]);
+            cur.MoveNext().Should().BeFalse("idempotent recovery で重複なし");
+            cur.Dispose();
+        }
+        rtx.Rollback();
+    }
+
+    /// <summary>
+    /// FT-19: 複数索引を同一 tx 内で更新 → kill。各索引は別 fileKind を catalog で
+    /// 割り当てられているので、全 fileKind の PageImage 系統が独立に redo されるはず。
+    /// </summary>
+    [Fact]
+    public void MultipleIndexes_committed_then_kill_all_survive()
+    {
+        IGraphStorageBackend? backend = Open();
+        NodeId nodeA, nodeB;
+        using (var tx = backend.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: false))
+        {
+            nodeA = tx.CreateNode("Person");
+            nodeB = tx.CreateNode("Person");
+            tx.IndexInsert("idx_name", "alice", nodeA);
+            tx.IndexInsert("idx_email", "alice@example.com", nodeA);
+            tx.IndexInsert("idx_age", 30L, nodeA);
+            tx.IndexInsert("idx_name", "bob", nodeB);
+            tx.IndexInsert("idx_email", "bob@example.com", nodeB);
+            tx.IndexInsert("idx_age", 25L, nodeB);
+            tx.Commit();
+        }
+
+        KillProcessSimulator.SimulateKill(ref backend);
+
+        using var reopened = Open();
+        using var rtx = reopened.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: true);
+
+        var nameAlice = rtx.SeekIndex("idx_name", PropertyValue.FromString("alice"));
+        nameAlice.MoveNext().Should().BeTrue("idx_name の alice エントリは PageImage で復旧");
+        nameAlice.Current.Should().Be(nodeA);
+        nameAlice.Dispose();
+
+        var emailBob = rtx.SeekIndex("idx_email", PropertyValue.FromString("bob@example.com"));
+        emailBob.MoveNext().Should().BeTrue("idx_email の bob エントリも復旧");
+        emailBob.Current.Should().Be(nodeB);
+        emailBob.Dispose();
+
+        var age30 = rtx.SeekIndex("idx_age", PropertyValue.FromInt64(30L));
+        age30.MoveNext().Should().BeTrue("idx_age の 30 エントリも復旧");
+        age30.Current.Should().Be(nodeA);
+        age30.Dispose();
+
+        rtx.Rollback();
+    }
+
+    /// <summary>
+    /// FT-19: 索引作成 → kill → 再 open で fileKind catalog から復元される。
+    /// catalog ファイル (indexes/.fileKinds) が永続化されていることを backend レベルで確認。
+    /// </summary>
+    [Fact]
+    public void IndexCatalog_persists_fileKind_across_kill()
+    {
+        IGraphStorageBackend? backend = Open();
+        NodeId node;
+        using (var tx = backend.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: false))
+        {
+            node = tx.CreateNode("Doc");
+            tx.IndexInsert("idx_persistent", 42L, node);
+            tx.Commit();
+        }
+
+        // catalog ファイルが存在することを確認
+        var catalogPath = Path.Combine(DatabaseDirectory, "indexes", ".fileKinds");
+        File.Exists(catalogPath).Should().BeTrue("catalog file は CreateIndex 時に永続化される");
+        var catalogContent = File.ReadAllText(catalogPath);
+        catalogContent.Should().Contain("idx_persistent\t",
+            "catalog に索引名と fileKind が記録されている");
+
+        KillProcessSimulator.SimulateKill(ref backend);
+
+        // 再 open で catalog から fileKind が復元され、索引が WAL ロギング対象として
+        // materialize される。PageImage redo もそれに依存する。
+        using var reopened = Open();
+        using var rtx = reopened.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: true);
+        var cur = rtx.SeekIndex("idx_persistent", PropertyValue.FromInt64(42L));
+        cur.MoveNext().Should().BeTrue();
+        cur.Current.Should().Be(node);
+        cur.Dispose();
+        rtx.Rollback();
+    }
+
     private string? LatestWalSegment()
     {
         var walDir = Path.Combine(DatabaseDirectory, "wal");

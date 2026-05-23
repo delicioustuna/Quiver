@@ -55,10 +55,21 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         var propKeyTokens = new PropertyKeyTokenStore(Path.Combine(directoryPath, "propkeys.tok"));
 
         var indexDir = Path.Combine(directoryPath, "indexes");
-        // FT-18: IndexManager に WAL を渡し、各索引 PagedFile に EnableWalFlushOnly を
-        // 配線する。buffer-pool eviction が索引ページを MMF に書き出す前に WAL を flush
-        // するので、IndexMutation レコードの write-ahead durability が確保される。
-        var indexManager = new IndexManager(indexDir, wal);
+        // FT-19: IndexManager に WAL + runtime fileRegistry を渡し、新規索引作成時に
+        // PagedFile を EnableWalLogging で配線して fileRegistry に登録する経路を貫通させる。
+        // fileRegistry は下で data files を追加した後、indexManager.MaterializeAll で既存索引も
+        // 追加し、recovery が透過的に全 file kind を扱えるようにする。
+        var fileRegistry = new Dictionary<byte, IPagedFile>
+        {
+            { (byte)WalFileKind.Nodes,         nodeFile },
+            { (byte)WalFileKind.Relationships, relFile },
+            { (byte)WalFileKind.Properties,    propFile },
+            { (byte)WalFileKind.BlobData,      blobFile },
+        };
+        var indexManager = new IndexManager(indexDir, wal, fileRegistry);
+        // FT-19: 既存索引を recovery 前に open + EnableWalLogging + fileRegistry へ登録。
+        // これがないと recovery の PageImage / CLR replay が索引ファイルを引けず redo が失敗する。
+        indexManager.MaterializeAll(fileRegistry);
 
         // PW-14: epoch metadata (base relationship hwm + tombstones) is shared
         // by both V1 and V2 stores. Created by BulkLoader on initial build and
@@ -89,16 +100,9 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
             }
         }
 
-        var fileRegistry = new Dictionary<byte, IPagedFile>
-        {
-            { (byte)WalFileKind.Nodes,         nodeFile },
-            { (byte)WalFileKind.Relationships, relFile },
-            { (byte)WalFileKind.Properties,    propFile },
-            { (byte)WalFileKind.BlobData,      blobFile },
-        };
-        // FT-17: indexManager を渡し、未コミット TX の IndexMutation レコードを
-        // recovery の undo パスで逆適用して索引エントリを巻き戻す。
-        var recovery = new RecoveryManager(pageManager, wal, fileRegistry, indexManager);
+        // FT-19: fileRegistry には data file + materialize 済み索引が既に登録されている。
+        // 索引も ARIES page-WAL 対象なので PageImage redo + CLR undo が透過的に走る。
+        var recovery = new RecoveryManager(pageManager, wal, fileRegistry);
         recovery.Recover();
 
         // FT-15: store metadata (hwm / freeHead / inUseCount) is page-backed; the
