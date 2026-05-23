@@ -243,6 +243,148 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         }
     }
 
+    /// <summary>
+    /// FT-18 (gap 1 redo): a B+Tree index entry inserted by a committed transaction
+    /// must survive a process kill that occurs <strong>before</strong> the index
+    /// file was Dispose-flushed. The IndexMutation WAL record was made durable at
+    /// commit-FlushTo, and recovery's new index redo pass replays it forward
+    /// idempotently so the entry reappears in the index file.
+    /// </summary>
+    [Fact]
+    public void CommittedIndexEntry_survives_kill_via_redo()
+    {
+        IGraphStorageBackend? backend = Open();
+        NodeId committed;
+        using (var tx = backend.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: false))
+        {
+            committed = tx.CreateNode("Person");
+            tx.IndexInsert("idx_name", "alice", committed);
+            tx.Commit();
+        }
+
+        // Kill without Dispose — the .idx file may not have been fsync'd.
+        KillProcessSimulator.SimulateKill(ref backend);
+
+        using var reopened = Open();
+        using var rtx = reopened.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: true);
+        var cur = rtx.SeekIndex("idx_name", PropertyValue.FromString("alice"));
+        cur.MoveNext().Should().BeTrue(
+            "committed index entry must be redone from IndexMutation WAL records");
+        cur.Current.Should().Be(committed);
+        cur.MoveNext().Should().BeFalse(
+            "idempotent redo must not create duplicate entries");
+        cur.Dispose();
+        rtx.Rollback();
+    }
+
+    /// <summary>
+    /// FT-18 (truncation safety): once a checkpoint fires, its WAL prefix
+    /// (including the IndexMutation records) is truncated. Without
+    /// <see cref="Quiver.Index.IIndexManager.FlushAll"/>, the index file would
+    /// not be durable and a subsequent kill would lose the committed entry
+    /// permanently. With FT-18 the checkpoint fsyncs the index, so the entry
+    /// survives even after WAL truncation + kill.
+    /// </summary>
+    [Fact]
+    public void CommittedIndexEntry_survives_checkpoint_then_kill()
+    {
+        var dir = Path.Combine(
+            Path.GetTempPath(),
+            "quiver_ft18_chkpt_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var factory = new BinaryGraphStorageBackendFactory();
+            // Tiny threshold so the second commit forces a checkpoint.
+            var opts = new GraphDatabaseOptions { CheckpointThresholdBytes = 1 };
+
+            NodeId committed;
+            IGraphStorageBackend? backend = factory.Open(dir, opts);
+            using (var tx = backend.BeginGraphTransaction(
+                IsolationLevel.SnapshotIsolation, readOnly: false))
+            {
+                committed = tx.CreateNode("Person");
+                tx.IndexInsert("idx_name", "checkpointed", committed);
+                tx.Commit();
+            }
+            // Second commit triggers MaybeCheckpoint (ActiveCount == 0,
+            // BytesWritten >= threshold). The checkpoint flushes the index
+            // and then truncates the WAL prefix containing the IndexMutation.
+            using (var tx = backend.BeginGraphTransaction(
+                IsolationLevel.SnapshotIsolation, readOnly: false))
+            {
+                tx.CreateNode("Filler");
+                tx.Commit();
+            }
+
+            KillProcessSimulator.SimulateKill(ref backend);
+
+            using var reopened = factory.Open(dir, opts);
+            using var rtx = reopened.BeginGraphTransaction(
+                IsolationLevel.SnapshotIsolation, readOnly: true);
+            var cur = rtx.SeekIndex("idx_name", PropertyValue.FromString("checkpointed"));
+            cur.MoveNext().Should().BeTrue(
+                "checkpoint must fsync the index file before truncating its WAL prefix");
+            cur.Current.Should().Be(committed);
+            cur.Dispose();
+            rtx.Rollback();
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// FT-18 (idempotent index undo): pre-FT-18, recovery skipped aborted
+    /// transactions entirely for index undo on the assumption that in-process
+    /// abort was already durable. But the in-process inverse runs through the
+    /// buffer pool (not direct fsync), so under steal it could be lost.
+    /// FT-18 re-applies the inverse on recovery via check-before-apply, so
+    /// after abort + kill the prior committed state is intact, the aborted
+    /// insert is gone, and no duplicates are introduced by double-undo.
+    /// </summary>
+    [Fact]
+    public void AbortedIndexInsert_then_kill_leaves_no_residual_entry()
+    {
+        IGraphStorageBackend? backend = Open();
+        NodeId baseline;
+        using (var tx = backend.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: false))
+        {
+            baseline = tx.CreateNode("Person");
+            tx.IndexInsert("idx_name", "baseline", baseline);
+            tx.Commit();
+        }
+
+        var abortTx = backend.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: false);
+        var resurrected = abortTx.CreateNode("Person");
+        abortTx.IndexInsert("idx_name", "resurrected", resurrected);
+        abortTx.Rollback();
+
+        KillProcessSimulator.SimulateKill(ref backend);
+
+        using var reopened = Open();
+        using var rtx = reopened.BeginGraphTransaction(
+            IsolationLevel.SnapshotIsolation, readOnly: true);
+
+        var keepCur = rtx.SeekIndex("idx_name", PropertyValue.FromString("baseline"));
+        keepCur.MoveNext().Should().BeTrue(
+            "committed index entry must survive abort + kill via idempotent redo");
+        keepCur.Current.Should().Be(baseline);
+        keepCur.MoveNext().Should().BeFalse(
+            "idempotent recovery must not duplicate the surviving entry");
+        keepCur.Dispose();
+
+        var gone = rtx.SeekIndex("idx_name", PropertyValue.FromString("resurrected"));
+        gone.MoveNext().Should().BeFalse(
+            "aborted index entry must remain undone after abort + kill");
+        gone.Dispose();
+        rtx.Rollback();
+    }
+
     private string? LatestWalSegment()
     {
         var walDir = Path.Combine(DatabaseDirectory, "wal");

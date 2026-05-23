@@ -173,6 +173,82 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
     public void Dispose() => _file.Dispose();
 
+    /// <summary>FT-18: 本索引のバッファプールダーティページを fsync する。</summary>
+    public void Flush() => _file.Flush();
+
+    /// <summary>
+    /// FT-18: <c>(key, value)</c> ペアが既存ならスキップ、不在なら挿入する。
+    /// 索引 redo / undo の冪等再生用 — <see cref="IndexUndoContext"/> へは通知しない。
+    /// </summary>
+    public bool InsertIfAbsent(in TKey key, long value)
+    {
+        byte[] kb = Encode(key);
+        if (LeafContains(FindLeaf(kb), kb, value)) return false;
+        // 通常の Insert ロジックを再利用するが、IndexUndoContext.Record は呼ばない。
+        var split = InsertDown(_root, kb, value, 0);
+        if (split.HasValue)
+        {
+            PageId newRoot = _file.AllocatePage(PageKind.BTreeInternal);
+            var ph = _file.PinForWrite(newRoot);
+            ph.Data.Clear();
+            BinaryPrimitives.WriteInt32LittleEndian(ph.Data, 1);
+            BinaryPrimitives.WriteInt64LittleEndian(ph.Data[4..], _root.Value);
+            int p = BL.InternalHdr;
+            WriteSep(ph.Data, ref p, split.Value.median, split.Value.right);
+            ph.Dispose();
+            _root = newRoot; _height++;
+        }
+        _entryCount++; FlushHeader();
+        return true;
+    }
+
+    /// <summary>
+    /// FT-18: <c>(key, value)</c> ペアが存在すれば削除、不在なら no-op。
+    /// 索引 redo / undo の冪等再生用 — <see cref="IndexUndoContext"/> へは通知しない。
+    /// </summary>
+    public bool DeleteIfPresent(in TKey key, long value)
+    {
+        byte[] kb = Encode(key);
+        bool ok = DeleteDown(_root, kb, value, 0);
+        if (!ok) return false;
+        _entryCount--;
+        while (_height > 1)
+        {
+            using var rh = _file.PinForRead(_root);
+            if (BinaryPrimitives.ReadInt32LittleEndian(rh.Data) != 0) break;
+            PageId onlyChild = new(BinaryPrimitives.ReadInt64LittleEndian(rh.Data[4..]));
+            _file.FreePage(_root);
+            _root = onlyChild; _height--;
+        }
+        FlushHeader();
+        return true;
+    }
+
+    /// <summary>
+    /// FT-18: 指定リーフページに <c>(key, value)</c> ペアが完全一致で存在するか調べる。
+    /// 冪等再生の事前検査用。
+    /// </summary>
+    private bool LeafContains(PageId leaf, byte[] key, long value)
+    {
+        using var h = _file.PinForRead(leaf);
+        ReadOnlySpan<byte> body = h.Data;
+        int count = BinaryPrimitives.ReadInt32LittleEndian(body);
+        int pos = BL.LeafHdr;
+        for (int i = 0; i < count; i++)
+        {
+            int klen = BinaryPrimitives.ReadInt16LittleEndian(body[pos..]);
+            int cmp = body.Slice(pos + 2, klen).SequenceCompareTo(key);
+            if (cmp == 0)
+            {
+                long v = BinaryPrimitives.ReadInt64LittleEndian(body[(pos + 2 + klen)..]);
+                if (v == value) return true;
+            }
+            else if (cmp > 0) return false;
+            pos += 2 + klen + 8;
+        }
+        return false;
+    }
+
     // -----------------------------------------------------------------------
 
     private (byte[] median, PageId right)? InsertDown(PageId pid, byte[] key, long value, int depth)

@@ -55,7 +55,10 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         var propKeyTokens = new PropertyKeyTokenStore(Path.Combine(directoryPath, "propkeys.tok"));
 
         var indexDir = Path.Combine(directoryPath, "indexes");
-        var indexManager = new IndexManager(indexDir);
+        // FT-18: IndexManager に WAL を渡し、各索引 PagedFile に EnableWalFlushOnly を
+        // 配線する。buffer-pool eviction が索引ページを MMF に書き出す前に WAL を flush
+        // するので、IndexMutation レコードの write-ahead durability が確保される。
+        var indexManager = new IndexManager(indexDir, wal);
 
         // PW-14: epoch metadata (base relationship hwm + tombstones) is shared
         // by both V1 and V2 stores. Created by BulkLoader on initial build and
@@ -132,7 +135,10 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
 
         // 案A: チェックポイント契機を配線する。コミットごとに WAL 成長量を見て、
         // しきい値超過 + アクティブ TX 0 の時点で全データページを flush し WAL を truncate する。
-        var checkpointer = new Checkpointer(pageManager, wal, () => txManager.OldestActiveLsn);
+        // FT-18: IndexManager も渡し、checkpoint 時に索引ファイルも一緒に fsync する。
+        // これが無いと WAL truncate 後にコミット済み索引エントリが恒久消失する。
+        var checkpointer = new Checkpointer(
+            pageManager, wal, () => txManager.OldestActiveLsn, indexManager);
         txManager.EnableCheckpointing(checkpointer, options.CheckpointThresholdBytes);
 
         return new BinaryGraphStorageBackend(

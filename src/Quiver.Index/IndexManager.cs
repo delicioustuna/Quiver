@@ -1,11 +1,15 @@
 ﻿using Quiver.Core;
 using Quiver.Storage;
+using Quiver.Wal;
 
 namespace Quiver.Index;
 
 public sealed class IndexManager : IIndexManager, IDisposable
 {
     private readonly string _directory;
+    // FT-18: null でない場合、各索引 PagedFile に EnableWalFlushOnly を呼び、
+    // buffer-pool eviction の write-ahead 順序を効かせる (gap 2 を FT-15 同パリティへ)。
+    private readonly IWriteAheadLog? _wal;
     private readonly Dictionary<string, object> _indexes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PropertyTypeFlags> _indexTypes = new(StringComparer.Ordinal);
     // PW-18 follow-up: (label, propertyKey) → indexName のバインディング。
@@ -15,9 +19,12 @@ public sealed class IndexManager : IIndexManager, IDisposable
     private readonly Dictionary<string, (string Label, string PropertyKey)> _bindingByName
         = new(StringComparer.Ordinal);
 
-    public IndexManager(string directory)
+    public IndexManager(string directory) : this(directory, wal: null) { }
+
+    public IndexManager(string directory, IWriteAheadLog? wal)
     {
         _directory = directory;
+        _wal = wal;
         Directory.CreateDirectory(directory);
     }
 
@@ -28,11 +35,12 @@ public sealed class IndexManager : IIndexManager, IDisposable
     public IBTreeIndex<byte[]> CreateBytesIndex(string name)  => GetOrCreate(name, new BytesKeyCodec(),  PropertyTypeFlags.Bytes,  IndexKeyKind.Bytes);
 
     /// <summary>
-    /// FT-17: 索引論理 undo の逆適用。recovery (未コミット TX の巻き戻し) と
-    /// インプロセス abort の両方から呼ばれ、エンコード済みキーバイト列を該当型の
-    /// コーデックでデコードして Insert / Delete を適用する。
-    /// <see cref="IndexUndoContext"/> が未設定の経路でのみ呼ぶ前提なので、ここでの
-    /// Insert / Delete は新たな undo レコードを生成しない。
+    /// FT-17 / FT-18: 索引論理ミューテーションの<strong>冪等</strong>適用。recovery の
+    /// undo / redo パスと、in-process abort 巻き戻しの両方から呼ばれる。
+    /// <c>(key, value)</c> ペアの存在を検査してから Insert / Delete するので、
+    /// 二重適用でも <see cref="IBTreeIndex{TKey}.EntryCount"/> が破綻しない。
+    /// <see cref="IndexUndoContext"/> へは通知しない (recovery / abort いずれの呼出元でも
+    /// ambient context は事前にクリア済み)。
     /// </summary>
     public void ApplyEncodedIndexMutation(
         string indexName, IndexKeyKind keyKind, ReadOnlySpan<byte> keyBytes,
@@ -44,38 +52,49 @@ public sealed class IndexManager : IIndexManager, IDisposable
             {
                 var idx = CreateInt32Index(indexName);
                 int k = new Int32KeyCodec().Decode(keyBytes);
-                if (isInsert) idx.Insert(k, value); else idx.Delete(k, value);
+                if (isInsert) idx.InsertIfAbsent(k, value); else idx.DeleteIfPresent(k, value);
                 break;
             }
             case IndexKeyKind.Int64:
             {
                 var idx = CreateInt64Index(indexName);
                 long k = new Int64KeyCodec().Decode(keyBytes);
-                if (isInsert) idx.Insert(k, value); else idx.Delete(k, value);
+                if (isInsert) idx.InsertIfAbsent(k, value); else idx.DeleteIfPresent(k, value);
                 break;
             }
             case IndexKeyKind.Double:
             {
                 var idx = CreateDoubleIndex(indexName);
                 double k = new DoubleKeyCodec().Decode(keyBytes);
-                if (isInsert) idx.Insert(k, value); else idx.Delete(k, value);
+                if (isInsert) idx.InsertIfAbsent(k, value); else idx.DeleteIfPresent(k, value);
                 break;
             }
             case IndexKeyKind.String:
             {
                 var idx = CreateStringIndex(indexName);
                 string k = new StringKeyCodec().Decode(keyBytes);
-                if (isInsert) idx.Insert(k, value); else idx.Delete(k, value);
+                if (isInsert) idx.InsertIfAbsent(k, value); else idx.DeleteIfPresent(k, value);
                 break;
             }
             case IndexKeyKind.Bytes:
             {
                 var idx = CreateBytesIndex(indexName);
                 byte[] k = new BytesKeyCodec().Decode(keyBytes);
-                if (isInsert) idx.Insert(k, value); else idx.Delete(k, value);
+                if (isInsert) idx.InsertIfAbsent(k, value); else idx.DeleteIfPresent(k, value);
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// FT-18: 全索引のバッファプールダーティページを fsync する。
+    /// <see cref="Quiver.Transactions.Checkpointer"/> がチェックポイント時に呼び、
+    /// 索引ファイル内容を checkpointLsn 時点で durable にして WAL truncate を安全にする。
+    /// </summary>
+    public void FlushAll()
+    {
+        foreach (var idx in _indexes.Values)
+            if (idx is IBTreeIndexFlushable f) f.Flush();
     }
 
     public bool DropIndex(string name)
@@ -165,7 +184,11 @@ public sealed class IndexManager : IIndexManager, IDisposable
             File.WriteAllBytes(metaPath, BitConverter.GetBytes((ulong)typeFlag));
         }
 
-        var index = new BTreeIndex<TKey>(new PagedFile(IndexPath(name)), codec, name, kind);
+        var pagedFile = new PagedFile(IndexPath(name));
+        // FT-18: 索引ファイルにも write-ahead 順序を効かせる。物理 PageImage は出さず、
+        // buffer-pool eviction 前に WAL を flush して IndexMutation の durability を確保する。
+        if (_wal != null) pagedFile.EnableWalFlushOnly(_wal);
+        var index = new BTreeIndex<TKey>(pagedFile, codec, name, kind);
         _indexes[name] = index;
         _indexTypes[name] = typeFlag;
         return index;

@@ -43,6 +43,14 @@ public interface IPagedFile : IDisposable
     void EnableWalLogging(byte fileKind, IWriteAheadLog wal);
 
     /// <summary>
+    /// FT-18: WAL 参照のみ配線する (物理 PageImage / before-image は出さない)。
+    /// buffer-pool eviction や flush の直前に WAL を write-ahead でフラッシュすることで、
+    /// ページが OS-MMF に到達する前に対応する論理ログ (例: IndexMutation) が durable に
+    /// なっていることを保証する。索引ファイル用の軽量配線。
+    /// </summary>
+    void EnableWalFlushOnly(IWriteAheadLog wal) { }
+
+    /// <summary>
     /// 必要に応じてファイルを拡張しつつ、生ページバイト列を直接書き込む。
     /// WAL リプレイ中の RecoveryManager が利用する経路で、バッファプールをバイパスする。
     /// </summary>

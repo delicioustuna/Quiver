@@ -219,6 +219,18 @@ public sealed class PagedFile : IPagedFile
         _wal = wal;
     }
 
+    /// <summary>
+    /// FT-18: WAL 参照のみ配線する (fileKind は付けない)。物理 PageImage / before-image
+    /// は出さないが、buffer-pool eviction やフラッシュ前に WAL を write-ahead でフラッシュする
+    /// ので、ページが OS-MMF に到達する前に対応する論理ログ (IndexMutation 等) が durable に
+    /// なっていることを保証できる。B+Tree インデックスファイル用 — 物理ロギングのコスト
+    /// (split 1 回で 3 ページ ×8KB) を回避しつつデータファイルと同じ write-ahead 順序を効かせる。
+    /// </summary>
+    public void EnableWalFlushOnly(IWriteAheadLog wal)
+    {
+        _wal = wal;
+    }
+
     public void WritePageForRecovery(PageId pageId, ReadOnlySpan<byte> pageBytes)
     {
         if (pageBytes.Length != PageSizeConst) return;
