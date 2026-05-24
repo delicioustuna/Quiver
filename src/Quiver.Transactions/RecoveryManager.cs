@@ -102,15 +102,30 @@ internal sealed class RecoveryManager : IRecoveryManager
         return lastLsn;
     }
 
-    // WAL を 1 回スキャンして、最後の Checkpoint レコードの LSN を求める。
+    // FT-21: WAL を 1 回スキャンして、recovery の redo 起点となる LSN を求める。
+    //
+    // 新形式 (CheckpointBegin/End sentinel):
+    //   - 最後の CheckpointEnd の LSN を起点に取る。
+    //   - CheckpointBegin だけで対応する End が無い (= partial checkpoint で kill された)
+    //     場合は無視し、起点は前回 End のまま (起点を Begin より前に保つことで、partial
+    //     状態のページが WAL から redo されて整合に戻る)。
+    //
+    // 旧形式 (Checkpoint = 100) との互換:
+    //   - 1 段で Begin/End を兼ねていた旧 Checkpoint レコードは「End と同等」とみなし
+    //     起点を更新する。混在しても (新旧どちらか後発の End/Checkpoint まで進む) のが
+    //     LSN 単調なので正しい挙動になる。
     private long FindLastCheckpointLsn()
     {
         long checkpointLsn = 0;
         using var reader = _wal.OpenReader(0);
         while (reader.TryReadNext(out var record))
         {
-            if (record.Type == WalRecordType.Checkpoint)
+            if (record.Type == WalRecordType.CheckpointEnd ||
+                record.Type == WalRecordType.Checkpoint)
+            {
                 checkpointLsn = record.Lsn;
+            }
+            // CheckpointBegin は単独では起点を進めない (End が来て初めて完了とみなす)。
         }
         return checkpointLsn;
     }

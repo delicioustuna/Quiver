@@ -104,6 +104,28 @@ public sealed class WriteAheadLog : IWriteAheadLog
         return lsn;
     }
 
+    public long WriteCheckpointBegin(long oldestActiveLsn, int dirtyPageCount)
+    {
+        // ペイロード: oldestActiveLsn(8) + dirtyPageCount(4) + timestampTicks(8) = 20 バイト
+        Span<byte> payload = stackalloc byte[20];
+        BinaryPrimitives.WriteInt64LittleEndian(payload, oldestActiveLsn);
+        BinaryPrimitives.WriteInt32LittleEndian(payload[8..], dirtyPageCount);
+        BinaryPrimitives.WriteInt64LittleEndian(payload[12..], DateTime.UtcNow.Ticks);
+        long lsn = Append(WalRecordType.CheckpointBegin, new TransactionId(-1), payload);
+        FlushTo(lsn);
+        return lsn;
+    }
+
+    public long WriteCheckpointEnd(long beginLsn)
+    {
+        // ペイロード: beginLsn(8) = 8 バイト
+        Span<byte> payload = stackalloc byte[8];
+        BinaryPrimitives.WriteInt64LittleEndian(payload, beginLsn);
+        long lsn = Append(WalRecordType.CheckpointEnd, new TransactionId(-1), payload);
+        FlushTo(lsn);
+        return lsn;
+    }
+
     public void Truncate(long uptoLsn)
     {
         lock (_writeLock)
