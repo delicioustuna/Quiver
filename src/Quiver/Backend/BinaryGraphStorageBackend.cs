@@ -52,6 +52,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
         TransactionManager txManager,
         BinaryGraphAccessMethods access,
         IVectorStore vectors,
+        LabelNodeIndex? labelIndex = null,
         ILogicalMutationSink? logicalSink = null)
     {
         _logicalSink = logicalSink;
@@ -71,7 +72,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
         _txManager = txManager;
 
         _schema = new SchemaApi(_labelTokens, _relTypeTokens, _propKeyTokens, _indexManager);
-        _diagnostics = new DiagnosticsApi(_nodeStore, _relStore, access);
+        // FT-22: index manager と label index を DiagnosticsApi に渡して
+        // CheckIndexConsistency / RepairIndexes が機能するようにする。
+        _diagnostics = new DiagnosticsApi(_nodeStore, _relStore, access, _indexManager, labelIndex);
         _access = access;
         _bulkLoad = new BulkLoadCapabilities
         {

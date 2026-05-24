@@ -100,6 +100,21 @@ public sealed class LabelNodeIndex
     public int CountFor(LabelId label)
         => _byLabel.TryGetValue(label.Value, out var s) ? s.Count : 0;
 
+    /// <summary>
+    /// FT-22: 現在 index に載っている (label, nodeId) ペアを列挙する。
+    /// 未構築時は空。orphan 検出側で <see cref="INodeStore.Read"/> を引いて
+    /// <c>InUse</c> を確認する用途を想定。
+    /// </summary>
+    public IEnumerable<(LabelId Label, NodeId Node)> EnumerateEntries()
+    {
+        if (!_built) yield break;
+        foreach (var (labelValue, set) in _byLabel)
+        {
+            foreach (var nodeIdValue in set)
+                yield return (new LabelId(labelValue), new NodeId(nodeIdValue));
+        }
+    }
+
     private void AddCore(int labelValue, long nodeIdValue)
     {
         if (!_byLabel.TryGetValue(labelValue, out var set))

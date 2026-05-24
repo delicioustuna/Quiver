@@ -171,6 +171,54 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     /// <summary>FT-18: 本索引のバッファプールダーティページを fsync する。</summary>
     public void Flush() => _file.Flush();
 
+    /// <summary>
+    /// FT-22: leaf 連結リストを左端から末尾まで歩いて全 (生キー, 値) ペアを列挙する。
+    /// orphan GC は型を意識せずに走査するため、生キーは byte[] のまま渡す。
+    /// </summary>
+    public IEnumerable<KeyValuePair<byte[], long>> EnumerateRawEntries()
+    {
+        PageId leaf = LeftmostLeaf();
+        while (leaf.IsValid)
+        {
+            var (snap, nextLeaf) = ReadLeafSnap(leaf);
+            int count = BinaryPrimitives.ReadInt32LittleEndian(snap);
+            int pos = BL.LeafHdr;
+            for (int i = 0; i < count; i++)
+            {
+                int klen = BinaryPrimitives.ReadInt16LittleEndian(snap.AsSpan(pos));
+                byte[] keyCopy = snap.AsSpan(pos + 2, klen).ToArray();
+                long v = BinaryPrimitives.ReadInt64LittleEndian(snap.AsSpan(pos + 2 + klen));
+                pos += 2 + klen + 8;
+                yield return new KeyValuePair<byte[], long>(keyCopy, v);
+            }
+            leaf = new PageId(nextLeaf);
+        }
+    }
+
+    /// <summary>
+    /// FT-22: 生キー版の <see cref="Delete"/>。orphan repair が
+    /// <see cref="EnumerateRawEntries"/> から拾った生キーをそのまま削除に使うため、
+    /// コーデックの Encode を経由しない。内部は通常の <see cref="Delete"/> と同じく
+    /// <c>DeleteDown</c> → エントリカウント減 → root collapse → ヘッダフラッシュ。
+    /// </summary>
+    public bool DeleteRawEntry(ReadOnlySpan<byte> rawKey, long value)
+    {
+        byte[] kb = rawKey.ToArray();
+        bool ok = DeleteDown(_root, kb, value, 0);
+        if (!ok) return false;
+        _entryCount--;
+        while (_height > 1)
+        {
+            using var rh = _file.PinForRead(_root);
+            if (BinaryPrimitives.ReadInt32LittleEndian(rh.Data) != 0) break;
+            PageId onlyChild = new(BinaryPrimitives.ReadInt64LittleEndian(rh.Data[4..]));
+            _file.FreePage(_root);
+            _root = onlyChild; _height--;
+        }
+        FlushHeader();
+        return true;
+    }
+
     // -----------------------------------------------------------------------
 
     private (byte[] median, PageId right)? InsertDown(PageId pid, byte[] key, long value, int depth)

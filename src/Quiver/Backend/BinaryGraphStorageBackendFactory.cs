@@ -144,10 +144,19 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
             pageManager, wal, () => txManager.OldestActiveLsn, indexManager);
         txManager.EnableCheckpointing(checkpointer, options.CheckpointThresholdBytes);
 
-        return new BinaryGraphStorageBackend(
+        var backend = new BinaryGraphStorageBackend(
             directoryPath, pageManager, wal, nodeStore, relStore, propStore,
             labelTokens, relTypeTokens, propKeyTokens, indexManager,
             adjStore, adjPagedFile, txManager, access, vectors,
+            labelIndex,
             options.LogicalMutationSink);
+
+        // FT-22: recovery 直後に opt-in で orphan を掃除する。recovery が tornw write 等で
+        // 「base data の delete commit が durable / 索引 delete が未到達」だった場合に発生する
+        // orphan entry を運用者の介入なしに除去する。default false。
+        if (options.AutoRepairOrphansOnRecovery)
+            backend.Diagnostics.RepairIndexes(IndexRepairMode.Apply);
+
+        return backend;
     }
 }

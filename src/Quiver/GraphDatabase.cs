@@ -253,4 +253,13 @@ public sealed class GraphDatabaseOptions
     /// レプリケーション用途を想定。ロールバックされたトランザクションは届かない。
     /// </summary>
     public ILogicalMutationSink? LogicalMutationSink { get; set; }
+
+    /// <summary>
+    /// FT-22: <c>true</c> のとき、バックエンド open 完了直後に
+    /// <see cref="IDiagnosticsApi.RepairIndexes"/> を <see cref="IndexRepairMode.Apply"/> で
+    /// 自動実行し、recovery 後に残った orphan 索引エントリを除去する。
+    /// 既定 <c>false</c> (運用者が必要なときに <see cref="IDiagnosticsApi.CheckIndexConsistency"/> /
+    /// <see cref="IDiagnosticsApi.RepairIndexes"/> を明示的に呼ぶ前提)。
+    /// </summary>
+    public bool AutoRepairOrphansOnRecovery { get; set; } = false;
 }

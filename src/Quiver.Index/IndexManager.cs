@@ -62,6 +62,48 @@ public sealed class IndexManager : IIndexManager, IDisposable
             if (idx is IBTreeIndexFlushable f) f.Flush();
     }
 
+    /// <summary>
+    /// FT-22: 全 B+Tree 索引を走査し、<paramref name="isLive"/> が <c>false</c> を返した
+    /// 値 (NodeId.Value 互換 long) を持つ orphan エントリを <paramref name="output"/> に集める。
+    /// 戻り値は (走査索引本数, 走査エントリ総数)。<see cref="RemoveOrphans"/> で実削除する。
+    /// </summary>
+    public (int IndexCount, long EntryCount) CollectOrphans(
+        Func<long, bool> isLive,
+        ICollection<(string IndexName, byte[] RawKey, long Value)> output)
+    {
+        int indexCount = 0;
+        long entryCount = 0;
+        foreach (var (name, idxObj) in _indexes)
+        {
+            if (idxObj is not IBTreeIndexFlushable flushable) continue;
+            indexCount++;
+            foreach (var kv in flushable.EnumerateRawEntries())
+            {
+                entryCount++;
+                if (!isLive(kv.Value))
+                    output.Add((name, kv.Key, kv.Value));
+            }
+        }
+        return (indexCount, entryCount);
+    }
+
+    /// <summary>
+    /// FT-22: 与えた orphan 一覧を索引から削除する。索引名で <see cref="_indexes"/> を引き、
+    /// <see cref="IBTreeIndexFlushable.DeleteRawEntry"/> で生キー削除する。
+    /// 索引が見つからない / 既に削除済みのエントリはスキップする (戻り値はカウントしない)。
+    /// </summary>
+    public int RemoveOrphans(IEnumerable<(string IndexName, byte[] RawKey, long Value)> orphans)
+    {
+        int removed = 0;
+        foreach (var (name, key, value) in orphans)
+        {
+            if (!_indexes.TryGetValue(name, out var idxObj)) continue;
+            if (idxObj is not IBTreeIndexFlushable flushable) continue;
+            if (flushable.DeleteRawEntry(key, value)) removed++;
+        }
+        return removed;
+    }
+
     public bool DropIndex(string name)
     {
         if (!_indexes.TryGetValue(name, out var idx)) return false;
