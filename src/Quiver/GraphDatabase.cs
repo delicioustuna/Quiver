@@ -219,8 +219,47 @@ public sealed class GraphDatabaseOptions
     /// WAL がこのバイト数以上成長し、かつアクティブトランザクションが 0 になった時点で、
     /// 全データページをフラッシュして WAL を truncate する。既定 64 MB。
     /// 0 以下を指定するとチェックポイントを行わず、WAL は単調増加する (旧挙動)。
+    /// <see cref="CheckpointPolicy"/> が <see cref="Quiver.Transactions.CheckpointPolicy.Adaptive"/>
+    /// のときは初期値としてのみ使われ、以降 <see cref="AdaptiveCheckpointController"/> が
+    /// 観測した bytes/tx から自動再計算する。
     /// </summary>
     public long CheckpointThresholdBytes { get; set; } = 64L * 1024 * 1024;
+
+    /// <summary>
+    /// FT-28: チェックポイント threshold の運用ポリシー。
+    /// <see cref="Quiver.Transactions.CheckpointPolicy.Fixed"/> (既定) は
+    /// <see cref="CheckpointThresholdBytes"/> をそのまま使い続ける旧挙動。
+    /// <see cref="Quiver.Transactions.CheckpointPolicy.Adaptive"/> は直近
+    /// <see cref="AdaptiveSampleWindow"/> 件の bytes/tx 移動平均から、
+    /// <see cref="TargetRecoveryTime"/> を満たす threshold を周期的に再計算する。
+    /// </summary>
+    public Quiver.Transactions.CheckpointPolicy CheckpointPolicy { get; set; }
+        = Quiver.Transactions.CheckpointPolicy.Fixed;
+
+    /// <summary>
+    /// FT-28: <see cref="Quiver.Transactions.CheckpointPolicy.Adaptive"/> 選択時の
+    /// 復旧時間目標。recovery が WAL を再生する際の上限値として扱い、threshold が
+    /// この目標を超えないように制御する。既定 5 秒。
+    /// </summary>
+    public TimeSpan TargetRecoveryTime { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// FT-28: Adaptive 計算時の threshold 下限 (バイト単位)。これより小さい threshold は
+    /// 採用しない。書き込みの度に checkpoint が走る病的な状態を避けるための安全弁。既定 4 MB。
+    /// </summary>
+    public long MinCheckpointThresholdBytes { get; set; } = 4L * 1024 * 1024;
+
+    /// <summary>
+    /// FT-28: Adaptive 計算時の threshold 上限 (バイト単位)。これより大きい threshold は
+    /// 採用しない。WAL が過大に肥大するのを避けるための上限。既定 1 GB。
+    /// </summary>
+    public long MaxCheckpointThresholdBytes { get; set; } = 1024L * 1024 * 1024;
+
+    /// <summary>
+    /// FT-28: Adaptive 移動平均のサンプル窓 (トランザクション数)。リングバッファで
+    /// 直近 N 件の bytes/tx を保持する。既定 1000。
+    /// </summary>
+    public int AdaptiveSampleWindow { get; set; } = 1000;
 
     /// <summary>ロック取得のタイムアウト。既定 5 秒。</summary>
     public TimeSpan LockTimeout { get; set; } = TimeSpan.FromSeconds(5);

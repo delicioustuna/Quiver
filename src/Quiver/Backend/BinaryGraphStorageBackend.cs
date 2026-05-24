@@ -53,7 +53,11 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
         BinaryGraphAccessMethods access,
         IVectorStore vectors,
         LabelNodeIndex? labelIndex = null,
-        ILogicalMutationSink? logicalSink = null)
+        ILogicalMutationSink? logicalSink = null,
+        TimeSpan? adaptiveTargetRecoveryTime = null,
+        long adaptiveMinThresholdBytes = 4L * 1024 * 1024,
+        long adaptiveMaxThresholdBytes = 1024L * 1024 * 1024,
+        int adaptiveSampleWindow = 1000)
     {
         _logicalSink = logicalSink;
         _directoryPath = directoryPath;
@@ -74,7 +78,15 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
         _schema = new SchemaApi(_labelTokens, _relTypeTokens, _propKeyTokens, _indexManager);
         // FT-22: index manager と label index を DiagnosticsApi に渡して
         // CheckIndexConsistency / RepairIndexes が機能するようにする。
-        _diagnostics = new DiagnosticsApi(_nodeStore, _relStore, access, _indexManager, labelIndex);
+        // FT-28: TransactionManager を渡し、CurrentCheckpointThresholdBytes /
+        // SetCheckpointPolicy をホットスワップ経路として公開する。Adaptive 用パラメタは
+        // factory で既知の options 値を持つので、後段で AttachAdaptiveDefaults により上書き可能。
+        _diagnostics = new DiagnosticsApi(
+            _nodeStore, _relStore, access, _indexManager, labelIndex, _txManager,
+            adaptiveTargetRecoveryTime,
+            adaptiveMinThresholdBytes,
+            adaptiveMaxThresholdBytes,
+            adaptiveSampleWindow);
         _access = access;
         _bulkLoad = new BulkLoadCapabilities
         {

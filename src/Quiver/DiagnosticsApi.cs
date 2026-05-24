@@ -14,19 +14,62 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     // IIndexManager の non-generic 経路を直接持つ。
     private readonly IndexManager? _indexManager;
     private readonly LabelNodeIndex? _labelIndex;
+    // FT-28: Adaptive checkpoint controller の現在 threshold と policy 切り替えを公開する経路。
+    private readonly TransactionManager? _txManager;
+    // FT-28: SetCheckpointPolicy(Adaptive, ...) で新規 controller を構築するための保存値。
+    private readonly TimeSpan _adaptiveTargetRecoveryTime;
+    private readonly long _adaptiveMinThresholdBytes;
+    private readonly long _adaptiveMaxThresholdBytes;
+    private readonly int _adaptiveSampleWindow;
 
     internal DiagnosticsApi(
         INodeStore nodeStore,
         IRelationshipStore relStore,
         IGraphAccessMethods access,
         IndexManager? indexManager = null,
-        LabelNodeIndex? labelIndex = null)
+        LabelNodeIndex? labelIndex = null,
+        TransactionManager? txManager = null,
+        TimeSpan? adaptiveTargetRecoveryTime = null,
+        long adaptiveMinThresholdBytes = 4L * 1024 * 1024,
+        long adaptiveMaxThresholdBytes = 1024L * 1024 * 1024,
+        int adaptiveSampleWindow = 1000)
     {
         _nodeStore = nodeStore;
         _relStore = relStore;
         _access = access;
         _indexManager = indexManager;
         _labelIndex = labelIndex;
+        _txManager = txManager;
+        _adaptiveTargetRecoveryTime = adaptiveTargetRecoveryTime ?? TimeSpan.FromSeconds(5);
+        _adaptiveMinThresholdBytes = adaptiveMinThresholdBytes;
+        _adaptiveMaxThresholdBytes = adaptiveMaxThresholdBytes;
+        _adaptiveSampleWindow = adaptiveSampleWindow;
+    }
+
+    public long CurrentCheckpointThresholdBytes
+        => _txManager?.CurrentCheckpointThresholdBytes ?? 0;
+
+    public void SetCheckpointPolicy(CheckpointPolicy policy, long? fixedThresholdBytes = null)
+    {
+        if (_txManager == null) return;
+        long initial = fixedThresholdBytes ?? _txManager.CurrentCheckpointThresholdBytes;
+        if (initial <= 0) initial = 64L * 1024 * 1024;
+        if (policy == CheckpointPolicy.Fixed)
+        {
+            _txManager.SetAdaptiveController(null);
+            _txManager.SetFixedThreshold(initial);
+        }
+        else
+        {
+            _txManager.SetFixedThreshold(initial);
+            var controller = new AdaptiveCheckpointController(
+                initial,
+                _adaptiveTargetRecoveryTime,
+                _adaptiveMinThresholdBytes,
+                _adaptiveMaxThresholdBytes,
+                _adaptiveSampleWindow);
+            _txManager.SetAdaptiveController(controller);
+        }
     }
 
     public DatabaseStatistics GetStatistics() => new(

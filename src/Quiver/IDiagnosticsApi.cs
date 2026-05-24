@@ -30,6 +30,28 @@ public interface IDiagnosticsApi
     /// </summary>
     IndexRepairReport RepairIndexes(IndexRepairMode mode)
         => new(0, Array.Empty<OrphanIndexEntry>(), false);
+
+    /// <summary>
+    /// FT-28: 現在採用中のチェックポイント threshold (バイト単位)。
+    /// <see cref="Quiver.Transactions.CheckpointPolicy.Fixed"/> 時は起動時に与えた値、
+    /// <see cref="Quiver.Transactions.CheckpointPolicy.Adaptive"/> 時は controller が
+    /// 観測した移動平均から導出した最新値。観測サンプルが少ない warmup 期は initial
+    /// threshold をそのまま返す。既定実装は 0 (未配線のバックエンド)。
+    /// </summary>
+    long CurrentCheckpointThresholdBytes => 0;
+
+    /// <summary>
+    /// FT-28: チェックポイント threshold ポリシーを実行時に切り替える (ホットスワップ)。
+    /// <see cref="Quiver.Transactions.CheckpointPolicy.Fixed"/> 時は
+    /// <paramref name="fixedThresholdBytes"/> を新しい固定 threshold として採用。
+    /// <see cref="Quiver.Transactions.CheckpointPolicy.Adaptive"/> 時は
+    /// <paramref name="fixedThresholdBytes"/> を initial threshold として controller を
+    /// 作り直し、それ以降の OnCommit でサンプリングを再開する。
+    /// 既定実装は no-op (サポートしないバックエンド)。
+    /// </summary>
+    void SetCheckpointPolicy(
+        Quiver.Transactions.CheckpointPolicy policy,
+        long? fixedThresholdBytes = null) { }
 }
 
 /// <summary>

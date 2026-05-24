@@ -155,13 +155,30 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         var checkpointer = new Checkpointer(
             pageManager, wal, () => txManager.OldestActiveLsn, indexManager);
         txManager.EnableCheckpointing(checkpointer, options.CheckpointThresholdBytes);
+        // FT-28: Adaptive ポリシー時は controller を作成して TxManager に注入。
+        // controller は warmup 完了までは options.CheckpointThresholdBytes (initial) を返す。
+        if (options.CheckpointPolicy == Quiver.Transactions.CheckpointPolicy.Adaptive
+            && options.CheckpointThresholdBytes > 0)
+        {
+            var adaptive = new AdaptiveCheckpointController(
+                options.CheckpointThresholdBytes,
+                options.TargetRecoveryTime,
+                options.MinCheckpointThresholdBytes,
+                options.MaxCheckpointThresholdBytes,
+                options.AdaptiveSampleWindow);
+            txManager.SetAdaptiveController(adaptive);
+        }
 
         var backend = new BinaryGraphStorageBackend(
             directoryPath, pageManager, wal, nodeStore, relStore, propStore,
             labelTokens, relTypeTokens, propKeyTokens, indexManager,
             adjStore, adjPagedFile, txManager, access, vectors,
             labelIndex,
-            options.LogicalMutationSink);
+            options.LogicalMutationSink,
+            options.TargetRecoveryTime,
+            options.MinCheckpointThresholdBytes,
+            options.MaxCheckpointThresholdBytes,
+            options.AdaptiveSampleWindow);
 
         // FT-22: recovery 直後に opt-in で orphan を掃除する。recovery が tornw write 等で
         // 「base data の delete commit が durable / 索引 delete が未到達」だった場合に発生する

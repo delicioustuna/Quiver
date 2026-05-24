@@ -29,6 +29,12 @@ internal sealed class TransactionManager : ITransactionManager
     private long _lastCheckpointBytes;
     private readonly object _checkpointGate = new();
 
+    // FT-28: Adaptive ポリシー時のみ非 null。OnCommit ごとに per-tx WAL byte delta を
+    // サンプリングして threshold を更新する。
+    private AdaptiveCheckpointController? _adaptiveController;
+    // 直前 OnCommit 時の _wal.BytesWritten。次回 OnCommit でこれとの差分を tx サンプルとする。
+    private long _lastSampledWalBytes;
+
     // FT-24: ロック戦略 (ExclusiveOnly / ReaderWriter) と timeout を transaction へ流す。
     private readonly LockingMode _lockingMode;
     private readonly TimeSpan _lockTimeout;
@@ -150,6 +156,46 @@ internal sealed class TransactionManager : ITransactionManager
         _checkpointer = checkpointer;
         _checkpointThresholdBytes = thresholdBytes;
         _lastCheckpointBytes = _wal.BytesWritten;
+        _lastSampledWalBytes = _wal.BytesWritten;
+    }
+
+    /// <summary>
+    /// FT-28: Adaptive ポリシーを有効化する。<paramref name="controller"/> は per-tx の
+    /// WAL byte delta を観測して内部 threshold を更新し、<see cref="MaybeCheckpoint"/> は
+    /// 固定値ではなく controller の現在値を使う。<c>null</c> を渡すと Fixed 挙動に戻す
+    /// (ホットスワップ可)。
+    /// </summary>
+    internal void SetAdaptiveController(AdaptiveCheckpointController? controller)
+    {
+        _adaptiveController = controller;
+        _lastSampledWalBytes = _wal.BytesWritten;
+    }
+
+    /// <summary>
+    /// FT-28: ホットスワップ用。既存の checkpointer 配線は維持したまま threshold (Fixed) を
+    /// 差し替える。Adaptive と Fixed の切り替えは <see cref="SetAdaptiveController"/> と
+    /// 併用する (Fixed に戻す場合は <c>SetAdaptiveController(null)</c> + 本メソッドで新しい
+    /// 固定値を渡す)。
+    /// </summary>
+    internal void SetFixedThreshold(long thresholdBytes)
+    {
+        _checkpointThresholdBytes = thresholdBytes;
+    }
+
+    /// <summary>
+    /// FT-28: 現在採用中のチェックポイント threshold (バイト単位)。Adaptive のときは
+    /// controller の最新値を返す。Adaptive controller が warmup 中 (サンプル不足) のときは
+    /// initial threshold をそのまま返す。
+    /// </summary>
+    internal long CurrentCheckpointThresholdBytes
+    {
+        get
+        {
+            var controller = _adaptiveController;
+            if (controller != null && controller.HasEnoughSamples)
+                return controller.CurrentThresholdBytes;
+            return _checkpointThresholdBytes;
+        }
     }
 
     internal void OnCommit(TransactionId txId)
@@ -161,6 +207,20 @@ internal sealed class TransactionManager : ITransactionManager
             _committed.MarkCommitted(txId);
             _active.TryRemove(txId.Value, out _);
         }
+
+        // FT-28: Adaptive ポリシーが有効なら per-tx WAL delta をサンプルとして controller へ。
+        // _wal.BytesWritten は単調増加。直前 OnCommit との差分が、本 tx が WAL に追記した量
+        // (Begin / PageImage / Commit) の合計。並列 commit 経路では別 tx の延べバイト数が
+        // 混在しうるが、移動平均で平準化されるため統計的に問題ない。
+        var controller = _adaptiveController;
+        if (controller != null)
+        {
+            long current = _wal.BytesWritten;
+            long prev = Interlocked.Exchange(ref _lastSampledWalBytes, current);
+            long delta = current - prev;
+            if (delta > 0) controller.RecordTxBytes(delta);
+        }
+
         MaybeCheckpoint();
     }
 
@@ -185,11 +245,14 @@ internal sealed class TransactionManager : ITransactionManager
     private void MaybeCheckpoint()
     {
         var checkpointer = _checkpointer;
-        if (checkpointer == null || _checkpointThresholdBytes <= 0) return;
+        if (checkpointer == null) return;
+        // FT-28: 実効 threshold は Fixed 値か、Adaptive controller が warmup 完了後に返す値。
+        long threshold = CurrentCheckpointThresholdBytes;
+        if (threshold <= 0) return;
 
         // ロック外の安価な事前判定。
         if (!_active.IsEmpty) return;
-        if (_wal.BytesWritten - Volatile.Read(ref _lastCheckpointBytes) < _checkpointThresholdBytes)
+        if (_wal.BytesWritten - Volatile.Read(ref _lastCheckpointBytes) < threshold)
             return;
 
         // 同時コミットによる二重実行を防ぐ。取得できなければ他スレッドが処理中なのでスキップ。
@@ -198,7 +261,9 @@ internal sealed class TransactionManager : ITransactionManager
         {
             // ゲート内で再判定 (TOCTOU 回避)。
             if (!_active.IsEmpty) return;
-            if (_wal.BytesWritten - _lastCheckpointBytes < _checkpointThresholdBytes) return;
+            threshold = CurrentCheckpointThresholdBytes;
+            if (threshold <= 0) return;
+            if (_wal.BytesWritten - _lastCheckpointBytes < threshold) return;
 
             checkpointer.Checkpoint();
             Volatile.Write(ref _lastCheckpointBytes, _wal.BytesWritten);
