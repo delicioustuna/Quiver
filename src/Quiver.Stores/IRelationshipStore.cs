@@ -148,6 +148,13 @@ public ref struct RelationshipEnumerator
         while (_currentId.IsValid)
         {
             _current = _store.Read(_currentId);
+            // FT-26: 論理削除された (= MVCC visibility で invisible な) record は
+            // Read が InUse=false を返す。チェーンは維持されているので next に進む。
+            if (!_current.InUse)
+            {
+                _currentId = NextInChain();
+                continue;
+            }
             if (!_hasFilter || Matches()) return true;
             _currentId = NextInChain();
         }

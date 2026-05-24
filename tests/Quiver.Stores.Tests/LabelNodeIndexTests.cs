@@ -76,21 +76,21 @@ public class LabelNodeIndexTests : IDisposable
     }
 
     [Fact]
-    public void Allocate_after_free_reuses_id_into_new_label_bucket()
+    public void Allocate_after_free_uses_new_id_under_mvcc()
     {
+        // FT-26 MVCC: Free は論理削除のみ。slot は vacuum (OP-3) 後にのみ再利用される。
+        // インデックスは Free 時にバケット 1 から除去され、新規 Allocate は新 id で
+        // バケット 2 に入る。
         _index.EnsureBuilt(_store);
         var first = _store.Allocate(new LabelId(1));
         _store.Free(first);
 
-        // NodeStore recycles the freed id back into the free list, so the next
-        // allocate gets the same id but with a fresh label. The index must move
-        // it from bucket(1) to bucket(2).
-        var reused = _store.Allocate(new LabelId(2));
-        reused.Value.Should().Be(first.Value);
+        var newAlloc = _store.Allocate(new LabelId(2));
+        newAlloc.Value.Should().NotBe(first.Value);
 
         _index.Lookup(_store, new LabelId(1)).Should().BeEmpty();
         _index.Lookup(_store, new LabelId(2)).Select(n => n.Value)
-            .Should().BeEquivalentTo(new[] { reused.Value });
+            .Should().BeEquivalentTo(new[] { newAlloc.Value });
     }
 
     [Fact]

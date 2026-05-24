@@ -56,7 +56,9 @@ internal sealed class Transaction : ITransaction
         IGraphAccessMethods? access = null,
         AbortUndoHandler? undoHandler = null,
         LockingMode lockingMode = LockingMode.ExclusiveOnly,
-        TimeSpan? lockTimeout = null)
+        TimeSpan? lockTimeout = null,
+        SnapshotState snapshot = default,
+        CommittedTxRegistry? committed = null)
     {
         Id = id; Level = level; SnapshotLsn = snapshotLsn;
         _wal = wal;
@@ -67,11 +69,21 @@ internal sealed class Transaction : ITransaction
         _undoHandler = undoHandler;
         _state = TransactionState.Active;
         var timeout = lockTimeout ?? TimeSpan.FromSeconds(5);
-        _nodes = new TxNodeStore(nodeStore, nodeLocks, id, lockingMode, timeout);
-        _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes, lockingMode, timeout);
-        _properties = new TxPropertyStore(propStore);
+        // FT-26: per-tx ambient コンテキストを Tx wrapper にも持たせ、各操作直前に
+        // MvccContext を再アクティベートする (同一スレッドで複数 tx 操作を交互に
+        // 行う場合の thread-static の取り違えを防ぐ)。
+        var snap = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
+        _nodes = new TxNodeStore(nodeStore, nodeLocks, id, lockingMode, timeout, snap, committed);
+        _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes, lockingMode, timeout, snap, committed);
+        _properties = new TxPropertyStore(propStore, id, snap, committed);
         _indexes = new TxIndexManager(indexManager, indexLocks, id, timeout);
         WalPageContext.Begin(wal, id);
+        // FT-26: MVCC ambient コンテキスト開始 (Tx wrapper を介さない経路のため)。
+        // null なら旧テスト等の互換経路として MvccContext を起動しない (= Bootstrap fallback)。
+        if (committed != null)
+        {
+            MvccContext.Begin(id, snap, committed);
+        }
     }
 
     public void Commit()
@@ -89,6 +101,9 @@ internal sealed class Transaction : ITransaction
             long lsn = _wal.Append(WalRecordType.Commit, Id, ReadOnlySpan<byte>.Empty);
             _wal.FlushTo(lsn);
             WalPageContext.End();
+            // FT-26: MVCC ambient コンテキスト終了 (これ以降このスレッドは
+            // ベンチ / bulk loader 等の Bootstrap fallback 経路に戻る)。
+            MvccContext.End();
             ReleaseAllLocks();
             _state = TransactionState.Committed;
             _manager.OnCommit(Id);
@@ -102,6 +117,7 @@ internal sealed class Transaction : ITransaction
             try { RollBackInPlace(); } catch { }
             try { _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty); } catch { }
             try { WalPageContext.End(); } catch { }
+            try { MvccContext.End(); } catch { }
             try { ReleaseAllLocks(); } catch { }
             _state = TransactionState.Aborted;
             _manager.OnAbort(Id);
@@ -121,6 +137,7 @@ internal sealed class Transaction : ITransaction
         RollBackInPlace();
         _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty);
         WalPageContext.End();
+        MvccContext.End();
         ReleaseAllLocks();
         _state = TransactionState.Aborted;
         _manager.OnAbort(Id);

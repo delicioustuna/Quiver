@@ -1,23 +1,34 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Storage;
 
 namespace Quiver.Stores;
 
-// Property record layout (41 bytes):
-//  0 Flags(1) | 1 KeyId(4) | 5 ValueType(1) | 6 InlineValue(24) | 30 SpilloverId(5) | 35 NextPropId(6)
+// FT-26 v2 (MVCC) property record layout (57 バイト):
+//  0 Flags(1) | 1 KeyId(4) | 5 ValueType(1) | 6 InlineValue(24) |
+// 30 SpilloverId(5) | 35 NextPropId(6) | 41 Xmin(8) | 49 Xmax(8)
+//
+// Xmin / Xmax = TransactionId.Value (long)。0 = unset。
+//   Create: xmin = MvccContext.CurrentTxId, xmax = 0、chain head に prepend
+//   Delete (論理): xmax = MvccContext.CurrentTxId
+//     チェーンは unlink せず slot も free list に戻さない。snapshot reader が辿れる。
+//     SetProperty (= 上書き) は「既存 prop に xmax スタンプ + 新 prop を head に挿入」。
+//     enumerate は invisible record を skip するので、key 検索で最初に当たる visible が新値。
 internal sealed class PropertyStore : IPropertyStore
 {
-    public const int RecordSize = 41;
+    public const int RecordSize = 57;
     private const byte FlagInUse = 0x01;
     private const byte FlagSpillover = 0x02;
     private const int InlineCapacity = 24;
+    internal const int XminOffset = 41;
+    internal const int XmaxOffset = 49;
 
     private static readonly PageId HeaderPageId = new(1);
     private const int MetaFreeHead = 0;
     private const int MetaHwm = 8;
+    private const int MetaFormatVersion = 31; // byte (FT-26)
 
-    private static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 199
+    private static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 143
 
     private readonly IPagedFile _file;
     private readonly BlobStore _blobs;
@@ -32,16 +43,18 @@ internal sealed class PropertyStore : IPropertyStore
         {
             _file.AllocatePage(PageKind.Header);
             _freeHead = -1; _hwm = 0;
-            FlushMeta();
+            FlushMeta(initialise: true);
         }
         else
         {
+            CheckFormatVersion();
             LoadMeta();
         }
     }
 
     public PropertyId Create(PropertyKeyId keyId, in PropertyValue value, PropertyId currentFirst)
     {
+        // FT-26 MVCC: 論理削除に伴う slot 非再利用で free list は空のまま hwm 単調増加。
         long id;
         if (_freeHead >= 0)
         {
@@ -70,6 +83,8 @@ internal sealed class PropertyStore : IPropertyStore
         BinaryPrimitives.WriteInt32LittleEndian(rec[1..], keyId.Value);
         rec[5] = (byte)value.Type;
         RecordHelpers.WriteInt48(rec[35..], currentFirst.Value); // NextPropId = old head
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XminOffset..], MvccContext.CurrentTxId.Value);
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], 0L);
 
         if (spillover)
         {
@@ -90,46 +105,14 @@ internal sealed class PropertyStore : IPropertyStore
 
     public PropertyId Delete(PropertyId propId, PropertyId currentFirst)
     {
-        // Find record, free blob if spillover, unlink from chain
+        // FT-26 MVCC: 論理削除のみ — xmax をスタンプ、チェーン unlink / free list 投入 / blob 解放はしない。
+        // currentFirst (= chain head) は変更されないのでそのまま返す (snapshot reader が辿れる)。
+        // 物理回収 (blob 含む) は vacuum (OP-3) 担当。
         var (pageId, off) = Location(propId.Value);
         var ph = _file.PinForWrite(pageId);
         Span<byte> rec = ph.Data.Slice(off, RecordSize);
-        bool spillover = (rec[0] & FlagSpillover) != 0;
-        long nextId = RecordHelpers.ReadInt48(rec[35..]);
-        if (spillover)
-        {
-            long blobId = RecordHelpers.ReadInt40(rec[30..]);
-            _blobs.Free(blobId);
-        }
-        rec.Clear();
-        RecordHelpers.WriteInt48(rec[35..], _freeHead); // chain into free list
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], MvccContext.CurrentTxId.Value);
         _file.UnpinDirty(pageId, 0);
-
-        _freeHead = propId.Value;
-        FlushMeta();
-
-        // If propId was the head, the new head is nextId
-        if (propId == currentFirst)
-            return new PropertyId(nextId);
-
-        // Otherwise scan chain to unlink
-        PropertyId prev = currentFirst;
-        while (prev.IsValid)
-        {
-            using var h = _file.PinForRead(Location(prev.Value).pageId);
-            var (pid2, off2) = Location(prev.Value);
-            using var hr = _file.PinForRead(pid2);
-            long nx = RecordHelpers.ReadInt48(hr.Data[(off2 + 35)..]);
-            if (nx == propId.Value)
-            {
-                // Patch prev.next = nextId
-                var pw = _file.PinForWrite(pid2);
-                RecordHelpers.WriteInt48(pw.Data[(off2 + 35)..], nextId);
-                _file.UnpinDirty(pid2, 0);
-                break;
-            }
-            prev = new PropertyId(nx);
-        }
 
         return currentFirst;
     }
@@ -143,6 +126,9 @@ internal sealed class PropertyStore : IPropertyStore
         var vtype = (PropertyValueType)rec[5];
         var nextId = new PropertyId(RecordHelpers.ReadInt48(rec[35..]));
         bool spillover = (rec[0] & FlagSpillover) != 0;
+        bool inUse = (rec[0] & FlagInUse) != 0;
+        long xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[XminOffset..]);
+        long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
 
         PropertyValue value;
         if (spillover)
@@ -160,7 +146,11 @@ internal sealed class PropertyStore : IPropertyStore
             value = ReadInline(rec[6..], vtype);
         }
 
-        return new PropertyReadHandle(propId, keyId, nextId, value);
+        // FT-26: MVCC visibility をフィルタする。invisible は InUse=false に縮退。
+        if (inUse && !Visibility.IsVisibleAmbient(xmin, xmax))
+            inUse = false;
+
+        return new PropertyReadHandle(propId, keyId, nextId, value, inUse);
     }
 
     public PropertyEnumerator Enumerate(PropertyId firstPropId)
@@ -186,6 +176,9 @@ internal sealed class PropertyStore : IPropertyStore
         BinaryPrimitives.WriteInt32LittleEndian(rec[1..], keyId);
         rec[5] = (byte)type;
         RecordHelpers.WriteInt48(rec[35..], nextPropId);
+        // FT-26: bulk load は MvccContext が無いので Bootstrap を xmin に。
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XminOffset..], TransactionId.Bootstrap.Value);
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], 0L);
 
         if (spillover)
         {
@@ -299,11 +292,21 @@ internal sealed class PropertyStore : IPropertyStore
         _hwm = BinaryPrimitives.ReadInt64LittleEndian(h.Data[MetaHwm..]);
     }
 
-    private void FlushMeta()
+    private void CheckFormatVersion()
+    {
+        using var h = _file.PinForRead(HeaderPageId);
+        byte v = h.Data[MetaFormatVersion];
+        if (v != FormatVersion.V2Mvcc)
+            throw new FormatVersionMismatchException("props", v, FormatVersion.V2Mvcc);
+    }
+
+    private void FlushMeta(bool initialise = false)
     {
         var ph = _file.PinForWrite(HeaderPageId);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaFreeHead..], _freeHead);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaHwm..], _hwm);
+        if (initialise)
+            ph.Data[MetaFormatVersion] = FormatVersion.V2Mvcc;
         _file.UnpinDirty(HeaderPageId, 0);
     }
 }

@@ -69,16 +69,22 @@ public readonly ref struct PropertyReadHandle
     private readonly PropertyKeyId _keyId;
     private readonly PropertyId _nextPropertyId;
     private readonly PropertyValue _value;
+    private readonly bool _inUse;
 
-    internal PropertyReadHandle(PropertyId id, PropertyKeyId keyId, PropertyId nextPropId, PropertyValue value)
+    /// <summary>FT-26: inUse 既定 true で旧呼出元 (BulkLoader 等) と互換。</summary>
+    internal PropertyReadHandle(PropertyId id, PropertyKeyId keyId, PropertyId nextPropId, PropertyValue value, bool inUse = true)
     {
-        _id = id; _keyId = keyId; _nextPropertyId = nextPropId; _value = value;
+        _id = id; _keyId = keyId; _nextPropertyId = nextPropId; _value = value; _inUse = inUse;
     }
 
     public PropertyId Id => _id;
     public PropertyKeyId KeyId => _keyId;
     public PropertyValue Value => _value;
     public PropertyId NextPropertyId => _nextPropertyId;
+    /// <summary>
+    /// FT-26: MVCC visibility 判定の結果。false の場合は論理削除 / 不可視で、enumerate は skip すべき。
+    /// </summary>
+    public bool InUse => _inUse;
     public void Dispose() { }
 }
 
@@ -98,9 +104,14 @@ public ref struct PropertyEnumerator
     {
         if (_started) _nextId = _current.NextPropertyId;
         _started = true;
-        if (!_nextId.IsValid) return false;
-        _current = _store.Read(_nextId);
-        return true;
+        // FT-26: 論理削除 / invisible な record はチェーンを進める。
+        while (_nextId.IsValid)
+        {
+            _current = _store.Read(_nextId);
+            if (_current.InUse) return true;
+            _nextId = _current.NextPropertyId;
+        }
+        return false;
     }
 
     public PropertyReadHandle Current => _current;

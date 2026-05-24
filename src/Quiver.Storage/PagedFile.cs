@@ -168,35 +168,72 @@ public sealed class PagedFile : IPagedFile
     public PageReadHandle PinForRead(PageId pageId)
     {
         int frame = GetOrLoadFrame(pageId);
-        Span<byte> raw = ReadFrameSpan(frame);
-        PageHeader.Validate(raw, pageId);
-        return new PageReadHandle(this, pageId, raw);
+        // FT-26: ハンドル生存中、他スレッドからの書き込みからバッファを保護する。
+        _frames[frame].FrameLock.EnterReadLock();
+        try
+        {
+            Span<byte> raw = ReadFrameSpan(frame);
+            PageHeader.Validate(raw, pageId);
+            return new PageReadHandle(this, pageId, raw);
+        }
+        catch
+        {
+            _frames[frame].FrameLock.ExitReadLock();
+            lock (_poolLock)
+            {
+                if (_pageToFrame.TryGetValue(pageId, out int f))
+                    Interlocked.Decrement(ref _frames[f].PinCount);
+            }
+            throw;
+        }
     }
 
     public PageWriteHandle PinForWrite(PageId pageId)
     {
         int frame = GetOrLoadFrame(pageId);
-        Span<byte> raw = ReadFrameSpan(frame);
-        PageHeader.Validate(raw, pageId);
-        // FT-15: この書き込みトランザクション内で本ページを初めて pin する時点の内容を
-        // before-image として捕捉する。caller がまだ変更していないこの瞬間が唯一の機会。
-        // frame は pin 済みなので evict されず、span は安定している。
-        if (_walFileKind is byte fileKind)
-            WalPageContext.CaptureBeforeImage(fileKind, pageId.Value, raw);
-        return new PageWriteHandle(this, pageId, raw);
+        // FT-26: ハンドル生存中、他スレッドからの読み書きを排他する。
+        _frames[frame].FrameLock.EnterWriteLock();
+        try
+        {
+            Span<byte> raw = ReadFrameSpan(frame);
+            PageHeader.Validate(raw, pageId);
+            // FT-15: この書き込みトランザクション内で本ページを初めて pin する時点の内容を
+            // before-image として捕捉する。caller がまだ変更していないこの瞬間が唯一の機会。
+            // frame は pin 済みなので evict されず、span は安定している。
+            if (_walFileKind is byte fileKind)
+                WalPageContext.CaptureBeforeImage(fileKind, pageId.Value, raw);
+            return new PageWriteHandle(this, pageId, raw);
+        }
+        catch
+        {
+            _frames[frame].FrameLock.ExitWriteLock();
+            lock (_poolLock)
+            {
+                if (_pageToFrame.TryGetValue(pageId, out int f))
+                    Interlocked.Decrement(ref _frames[f].PinCount);
+            }
+            throw;
+        }
     }
 
     void IPagedFile.Unpin(PageId pageId)
     {
+        int? lockedFrame = null;
         lock (_poolLock)
         {
             if (_pageToFrame.TryGetValue(pageId, out int frame))
+            {
                 Interlocked.Decrement(ref _frames[frame].PinCount);
+                lockedFrame = frame;
+            }
         }
+        if (lockedFrame is int f)
+            _frames[f].FrameLock.ExitReadLock();
     }
 
     void IPagedFile.UnpinDirty(PageId pageId, long lsn)
     {
+        int? lockedFrame = null;
         lock (_poolLock)
         {
             if (!_pageToFrame.TryGetValue(pageId, out int frame)) return;
@@ -210,7 +247,10 @@ public sealed class PagedFile : IPagedFile
 
             _frames[frame].IsDirty = true;
             Interlocked.Decrement(ref _frames[frame].PinCount);
+            lockedFrame = frame;
         }
+        if (lockedFrame is int f)
+            _frames[f].FrameLock.ExitWriteLock();
     }
 
     public void EnableWalLogging(byte fileKind, IWriteAheadLog wal)
@@ -487,5 +527,11 @@ public sealed class PagedFile : IPagedFile
         public bool Referenced;
         public bool IsDirty;
         public readonly byte[] Buffer = new byte[PageSizeConst];
+        // FT-26: per-frame RW lock — Pin{Read|Write} 中の他スレッドからのページバッファ
+        // 並行アクセスを排他する。NodeStore.Allocate などで「同一ページ上の異なるレコード」を
+        // 別 tx (= 別スレッド) が同時更新するケースをサポート (Postgres SI 風)。
+        // SupportsRecursion: NodeStore は同 tx 内で同一ページに対し PinForRead → PinForWrite を
+        // 連続させる経路 (例: header ページ更新) があるため、recursion を許可する。
+        public readonly ReaderWriterLockSlim FrameLock = new(LockRecursionPolicy.SupportsRecursion);
     }
 }

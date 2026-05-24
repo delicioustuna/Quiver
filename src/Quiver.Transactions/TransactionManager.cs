@@ -36,6 +36,13 @@ internal sealed class TransactionManager : ITransactionManager
     // FT-25: デッドロック検出器 (null = 無効)。Dispose で停止。
     private DeadlockDetector? _deadlockDetector;
 
+    // FT-26: MVCC visibility 用。Begin / OnCommit の atomicity を保護するゲート。
+    // Begin は (txId 採番 + activeAtBegin 集合のキャプチャ + _active への登録) を、
+    // OnCommit は (registry.MarkCommitted + _active からの除去) を 1 ブロックで行う。
+    // これにより新規 snapshot が「コミット済みかつ active には残っていない」状態を観測する。
+    private readonly object _snapshotGate = new();
+    private readonly CommittedTxRegistry _committed;
+
     public TransactionManager(
         IWriteAheadLog wal,
         INodeStore nodeStore,
@@ -47,7 +54,8 @@ internal sealed class TransactionManager : ITransactionManager
         AbortUndoHandler? undoHandler = null,
         LockingMode lockingMode = LockingMode.ExclusiveOnly,
         TimeSpan? lockTimeout = null,
-        TimeSpan? deadlockDetectionInterval = null)
+        TimeSpan? deadlockDetectionInterval = null,
+        CommittedTxRegistry? committedRegistry = null)
     {
         _wal = wal;
         _nodeStore = nodeStore;
@@ -59,10 +67,34 @@ internal sealed class TransactionManager : ITransactionManager
         _undoHandler = undoHandler;
         _lockingMode = lockingMode;
         _lockTimeout = lockTimeout ?? TimeSpan.FromSeconds(5);
+        _committed = committedRegistry ?? new CommittedTxRegistry();
+        // FT-26: _nextTxId は最初の Increment で 1 を返す (= Bootstrap.Value)。
+        // Bootstrap は予約済みなので、最初の "ユーザ" tx が 2 から始まるよう offset しておく。
+        _nextTxId = TransactionId.Bootstrap.Value + 1;
         if (deadlockDetectionInterval is { } interval && interval > TimeSpan.Zero)
         {
             _deadlockDetector = new DeadlockDetector(
                 new[] { _nodeLocks, _relLocks, _indexLocks }, interval);
+        }
+    }
+
+    /// <summary>
+    /// FT-26: backend factory から recovery 経路で WAL を走査して構築済みの registry を注入する経路。
+    /// </summary>
+    internal CommittedTxRegistry CommittedRegistry => _committed;
+
+    /// <summary>
+    /// FT-26: recovery で観測した最大 TxId + 1 まで _nextTxId を巻き上げる。
+    /// 既に進んでいる場合は no-op。
+    /// </summary>
+    internal void AdvanceNextTxIdAtLeast(long minimum)
+    {
+        long current = Volatile.Read(ref _nextTxId);
+        while (minimum > current)
+        {
+            long prev = Interlocked.CompareExchange(ref _nextTxId, minimum, current);
+            if (prev == current) return;
+            current = prev;
         }
     }
 
@@ -84,14 +116,27 @@ internal sealed class TransactionManager : ITransactionManager
 
     public ITransaction Begin(IsolationLevel level = IsolationLevel.SnapshotIsolation)
     {
-        var txId = new TransactionId(Interlocked.Increment(ref _nextTxId) - 1);
+        // FT-26: snapshot (txId 採番 + activeAtBegin 集合キャプチャ + _active 登録) を 1 ブロックで。
+        // _active 登録まで含めないと、Begin 中の自身を他の Begin の activeAtBegin に含めるかどうかが
+        // 競合する。MarkCommitted も同じゲートを取るので「コミット直後の tx が見えるかどうか」は
+        // ゲート取得順で決まり、Postgres SI 風になる。
+        TransactionId txId;
+        SnapshotState snapshot;
         long snapshotLsn = _wal.FlushedLsn;
-        _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
-        var tx = new Transaction(txId, level, snapshotLsn,
-            _wal, _nodeLocks, _relLocks, _indexLocks, this,
-            _nodeStore, _relStore, _propStore, _indexManager, _adjStore, _access,
-            _undoHandler, _lockingMode, _lockTimeout);
-        _active[txId.Value] = tx;
+        Transaction tx;
+        lock (_snapshotGate)
+        {
+            txId = new TransactionId(Interlocked.Increment(ref _nextTxId) - 1);
+            var activeAtBegin = new HashSet<long>(_active.Keys);
+            snapshot = new SnapshotState(txId, activeAtBegin);
+            _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
+            tx = new Transaction(txId, level, snapshotLsn,
+                _wal, _nodeLocks, _relLocks, _indexLocks, this,
+                _nodeStore, _relStore, _propStore, _indexManager, _adjStore, _access,
+                _undoHandler, _lockingMode, _lockTimeout,
+                snapshot, _committed);
+            _active[txId.Value] = tx;
+        }
         return tx;
     }
 
@@ -109,11 +154,24 @@ internal sealed class TransactionManager : ITransactionManager
 
     internal void OnCommit(TransactionId txId)
     {
-        _active.TryRemove(txId.Value, out _);
+        // FT-26: MarkCommitted と _active 除去を 1 ブロックで。新規 Begin が
+        // 「コミット済みかつ active 集合に居ない」状態を観測するための atomicity。
+        lock (_snapshotGate)
+        {
+            _committed.MarkCommitted(txId);
+            _active.TryRemove(txId.Value, out _);
+        }
         MaybeCheckpoint();
     }
 
-    internal void OnAbort(TransactionId txId) => _active.TryRemove(txId.Value, out _);
+    internal void OnAbort(TransactionId txId)
+    {
+        // FT-26: registry には登録しない (= visibility 判定で aborted = invisible)。
+        lock (_snapshotGate)
+        {
+            _active.TryRemove(txId.Value, out _);
+        }
+    }
 
     /// <summary>
     /// コミット直後に呼ばれ、チェックポイント契機を満たしていれば同期的に実行する。

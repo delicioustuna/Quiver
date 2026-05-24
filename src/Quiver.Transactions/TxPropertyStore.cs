@@ -8,16 +8,46 @@ namespace Quiver.Transactions;
 internal sealed class TxPropertyStore : IPropertyStore
 {
     private readonly IPropertyStore _inner;
+    private readonly TransactionId _txId;
+    private readonly SnapshotState _snapshot;
+    private readonly CommittedTxRegistry? _committed;
 
-    internal TxPropertyStore(IPropertyStore inner) => _inner = inner;
+    internal TxPropertyStore(IPropertyStore inner, TransactionId txId = default,
+        SnapshotState snapshot = default, CommittedTxRegistry? committed = null)
+    {
+        _inner = inner;
+        _txId = txId;
+        _snapshot = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
+        _committed = committed;
+    }
 
     public PropertyId Create(PropertyKeyId keyId, in PropertyValue value, PropertyId currentFirst)
-        => _inner.Create(keyId, in value, currentFirst);
+    {
+        ActivateMvccContext();
+        return _inner.Create(keyId, in value, currentFirst);
+    }
 
     public PropertyId Delete(PropertyId propId, PropertyId currentFirst)
-        => _inner.Delete(propId, currentFirst);
+    {
+        ActivateMvccContext();
+        return _inner.Delete(propId, currentFirst);
+    }
 
-    public PropertyReadHandle Read(PropertyId propId) => _inner.Read(propId);
+    public PropertyReadHandle Read(PropertyId propId)
+    {
+        ActivateMvccContext();
+        return _inner.Read(propId);
+    }
 
-    public PropertyEnumerator Enumerate(PropertyId firstPropId) => _inner.Enumerate(firstPropId);
+    public PropertyEnumerator Enumerate(PropertyId firstPropId)
+    {
+        ActivateMvccContext();
+        return _inner.Enumerate(firstPropId);
+    }
+
+    private void ActivateMvccContext()
+    {
+        if (_committed != null)
+            MvccContext.Begin(_txId, _snapshot, _committed);
+    }
 }

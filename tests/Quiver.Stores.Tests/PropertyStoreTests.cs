@@ -87,13 +87,21 @@ public class PropertyStoreTests : IDisposable
     }
 
     [Fact]
-    public void Delete_head_updates_chain()
+    public void Delete_returns_unchanged_head_and_skips_invisible_in_enumerate()
     {
+        // FT-26 MVCC: Delete はチェーンを unlink せず xmax をスタンプするだけ。
+        // 戻り値は currentFirst のまま (snapshot reader が辿れるよう head 維持)。
+        // 新規 reader からは Enumerate が invisible (= xmax committed) を skip するので
+        // first だけが見える。
         var head = PropertyId.Invalid;
         var first = _store.Create(new PropertyKeyId(1), PropertyValue.FromInt32(1), head);
         var second = _store.Create(new PropertyKeyId(2), PropertyValue.FromInt32(2), first);
-        // chain is: second → first → Invalid
         var newHead = _store.Delete(second, second);
-        newHead.Should().Be(first);
+        newHead.Should().Be(second, "MVCC では論理削除のみで物理 chain は不変");
+
+        var keys = new List<int>();
+        var en = _store.Enumerate(newHead);
+        while (en.MoveNext()) keys.Add(en.Current.KeyId.Value);
+        keys.Should().BeEquivalentTo(new[] { 1 }, "削除した key=2 は visibility で skip される");
     }
 }

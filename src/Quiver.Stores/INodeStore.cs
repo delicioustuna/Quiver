@@ -1,4 +1,4 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Storage;
 
@@ -21,6 +21,8 @@ public readonly ref struct NodeReadHandle
     private readonly RelationshipId _firstRelId;
     private readonly PropertyId _firstPropId;
     private readonly LabelId _label;
+    private readonly long _xmin;
+    private readonly long _xmax;
 
     public NodeId Id => _id;
     public bool InUse => _inUse;
@@ -28,15 +30,22 @@ public readonly ref struct NodeReadHandle
     public PropertyId FirstPropertyId => _firstPropId;
     public LabelId Label => _label;
 
-    internal NodeReadHandle(NodeId id, bool inUse, RelationshipId firstRelId, PropertyId firstPropId, LabelId label)
+    /// <summary>FT-26: record を生成したトランザクション ID。</summary>
+    public long Xmin => _xmin;
+
+    /// <summary>FT-26: record を論理削除したトランザクション ID (0 = 生存)。</summary>
+    public long Xmax => _xmax;
+
+    internal NodeReadHandle(NodeId id, bool inUse, RelationshipId firstRelId, PropertyId firstPropId, LabelId label, long xmin = 0, long xmax = 0)
     {
         _id = id; _inUse = inUse; _firstRelId = firstRelId; _firstPropId = firstPropId; _label = label;
+        _xmin = xmin; _xmax = xmax;
     }
 
     public void Dispose() { }
 }
 
-// Offsets: Flags(0,1) FirstRelId(1,6) FirstPropId(7,6) LabelId(13,2) — 15 bytes
+// FT-26 v2 layout: Flags(0,1) FirstRelId(1,6) FirstPropId(7,6) LabelId(13,2) Xmin(15,8) Xmax(23,8) — 31 bytes
 public ref struct NodeWriteHandle
 {
     private readonly IPagedFile _file;

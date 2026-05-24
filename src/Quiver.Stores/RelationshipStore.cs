@@ -1,23 +1,34 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Storage;
 
 namespace Quiver.Stores;
 
-// Record layout (48 bytes):
+// FT-26 v2 (MVCC) record layout (64 バイト):
 //  0 Flags(1) | 1 Source(6) | 7 Target(6) | 13 TypeId(2) |
-// 15 SrcPrev(6) | 21 SrcNext(6) | 27 TgtPrev(6) | 33 TgtNext(6) | 39 FirstPropId(6) | 45 Pad(3)
+// 15 SrcPrev(6) | 21 SrcNext(6) | 27 TgtPrev(6) | 33 TgtNext(6) | 39 FirstPropId(6) |
+// 45 Xmin(8) | 53 Xmax(8) | 61 Pad(3)
+//
+// Xmin / Xmax = TransactionId.Value (long). 0 = unset。
+//   Create: xmin = MvccContext.CurrentTxId, xmax = 0
+//   Delete (論理): xmax = MvccContext.CurrentTxId
+//     チェーン (SrcPrev/SrcNext/TgtPrev/TgtNext) は unlink せず、slot も free list に戻さない。
+//     これにより snapshot reader (xmax コミット以前にスナップショットを取った tx) が
+//     依然として元の record を辿れる。物理回収は vacuum (OP-3) 担当。
 internal sealed class RelationshipStore : IRelationshipStore
 {
-    public const int RecordSize = 48;
+    public const int RecordSize = 64;
     private const byte FlagInUse = 0x01;
+    internal const int XminOffset = 45;
+    internal const int XmaxOffset = 53;
 
     private static readonly PageId HeaderPageId = new(1);
-    private const int MetaFreeHead = 0;
-    private const int MetaHwm = 8;
-    private const int MetaInUse = 16;
+    private const int MetaFreeHead = 0;       // int64
+    private const int MetaHwm = 8;            // int64
+    private const int MetaInUse = 16;         // int64
+    private const int MetaFormatVersion = 31; // byte (FT-26)
 
-    private static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 170
+    private static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 127
 
     private readonly IPagedFile _file;
     private long _freeHead;
@@ -31,10 +42,11 @@ internal sealed class RelationshipStore : IRelationshipStore
         {
             _file.AllocatePage(PageKind.Header);
             _freeHead = -1; _hwm = 0; _inUseCount = 0;
-            FlushMeta();
+            FlushMeta(initialise: true);
         }
         else
         {
+            CheckFormatVersion();
             LoadMeta();
         }
     }
@@ -43,6 +55,7 @@ internal sealed class RelationshipStore : IRelationshipStore
 
     public RelationshipId Create(INodeStore nodeStore, NodeId source, NodeId target, RelationshipTypeId type)
     {
+        // FT-26 MVCC: 論理削除に伴う slot 非再利用で free list は空のまま hwm 単調増加 (vacuum 完了後のみ free 投入)。
         long id;
         if (_freeHead >= 0)
         {
@@ -58,7 +71,6 @@ internal sealed class RelationshipStore : IRelationshipStore
         _inUseCount++;
         var relId = new RelationshipId(id);
 
-        // Read current first-rel of source and target
         RelationshipId srcHead = nodeStore is NodeStore ns
             ? ns.GetFirstRelId(source)
             : ReadFirstRelId(nodeStore, source);
@@ -66,7 +78,6 @@ internal sealed class RelationshipStore : IRelationshipStore
             ? ns2.GetFirstRelId(target)
             : ReadFirstRelId(nodeStore, target);
 
-        // Write new relationship record
         var (wpid, woff) = Location(id);
         EnsurePage(wpid);
         var ph = _file.PinForWrite(wpid);
@@ -76,20 +87,22 @@ internal sealed class RelationshipStore : IRelationshipStore
         RecordHelpers.WriteInt48(rec[1..], source.Value);
         RecordHelpers.WriteInt48(rec[7..], target.Value);
         BinaryPrimitives.WriteInt16LittleEndian(rec[13..], (short)type.Value);
-        RecordHelpers.WriteInt48(rec[15..], RelationshipId.Invalid.Value);  // SrcPrev
-        RecordHelpers.WriteInt48(rec[21..], srcHead.Value);                  // SrcNext
-        RecordHelpers.WriteInt48(rec[27..], RelationshipId.Invalid.Value);  // TgtPrev
-        RecordHelpers.WriteInt48(rec[33..], tgtHead.Value);                  // TgtNext
-        RecordHelpers.WriteInt48(rec[39..], PropertyId.Invalid.Value);        // FirstPropId
+        RecordHelpers.WriteInt48(rec[15..], RelationshipId.Invalid.Value);
+        RecordHelpers.WriteInt48(rec[21..], srcHead.Value);
+        RecordHelpers.WriteInt48(rec[27..], RelationshipId.Invalid.Value);
+        RecordHelpers.WriteInt48(rec[33..], tgtHead.Value);
+        RecordHelpers.WriteInt48(rec[39..], PropertyId.Invalid.Value);
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XminOffset..], MvccContext.CurrentTxId.Value);
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], 0L);
         _file.UnpinDirty(wpid, 0);
 
-        // Update old head's SrcPrev / TgtPrev to point back at new rel
+        // 旧 head の物理 SrcPrev/TgtPrev を新 rel に向ける。MVCC でも prev pointer は
+        // 「双方向リンクの維持」のために物理的に更新する (visibility 判定は xmin/xmax で行う)。
         if (srcHead.IsValid)
             UpdateListPrev(srcHead, source, relId);
         if (tgtHead.IsValid && tgtHead != srcHead)
             UpdateListPrev(tgtHead, target, relId);
 
-        // Update both nodes' FirstRelId
         if (nodeStore is NodeStore ns3)
         {
             ns3.UpdateFirstRelId(source, relId);
@@ -111,65 +124,16 @@ internal sealed class RelationshipStore : IRelationshipStore
 
     public void Delete(INodeStore nodeStore, RelationshipId relId)
     {
-        var rh = Read(relId);
-        NodeId src = rh.Source;
-        NodeId tgt = rh.Target;
-        RelationshipId srcPrev = rh.SourcePrev;
-        RelationshipId srcNext = rh.SourceNext;
-        RelationshipId tgtPrev = rh.TargetPrev;
-        RelationshipId tgtNext = rh.TargetNext;
-
-        // Unlink from source chain
-        if (!srcPrev.IsValid)
-        {
-            // was head of source's list
-            if (nodeStore is NodeStore ns)
-                ns.UpdateFirstRelId(src, srcNext);
-            else
-            {
-                var w = nodeStore.Write(src);
-                w.FirstRelationshipId = srcNext;
-                w.Dispose();
-            }
-        }
-        else
-        {
-            UpdateListNext(srcPrev, src, srcNext);
-        }
-        if (srcNext.IsValid)
-            UpdateListPrev(srcNext, src, srcPrev);
-
-        // Unlink from target chain (only if src != tgt, i.e. not a self-loop)
-        if (src != tgt)
-        {
-            if (!tgtPrev.IsValid)
-            {
-                if (nodeStore is NodeStore ns)
-                    ns.UpdateFirstRelId(tgt, tgtNext);
-                else
-                {
-                    var w = nodeStore.Write(tgt);
-                    w.FirstRelationshipId = tgtNext;
-                    w.Dispose();
-                }
-            }
-            else
-            {
-                UpdateListNext(tgtPrev, tgt, tgtNext);
-            }
-            if (tgtNext.IsValid)
-                UpdateListPrev(tgtNext, tgt, tgtPrev);
-        }
-
-        // レコードを解放する
+        // FT-26 MVCC: 論理削除のみ — xmax をスタンプ、チェーンや slot は維持する。
+        // 物理回収 + chain 整理 + free list 投入は vacuum (OP-3) で行う。
+        // 関連: nodeStore.firstRelId は更新しない (snapshot reader が辿れるよう head 維持)。
+        _ = nodeStore;
         var (pageId, off) = Location(relId.Value);
         var ph = _file.PinForWrite(pageId);
         Span<byte> rec = ph.Data.Slice(off, RecordSize);
-        rec.Clear();
-        RecordHelpers.WriteInt48(rec[1..], _freeHead);
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], MvccContext.CurrentTxId.Value);
         _file.UnpinDirty(pageId, 0);
 
-        _freeHead = relId.Value;
         _inUseCount--;
         FlushMeta();
     }
@@ -188,6 +152,11 @@ internal sealed class RelationshipStore : IRelationshipStore
         var tgtPrev = new RelationshipId(RecordHelpers.ReadInt48(rec[27..]));
         var tgtNext = new RelationshipId(RecordHelpers.ReadInt48(rec[33..]));
         var firstPropId = new PropertyId(RecordHelpers.ReadInt48(rec[39..]));
+        long xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[XminOffset..]);
+        long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
+        // FT-26: MVCC visibility をフィルタする。
+        if (inUse && !Visibility.IsVisibleAmbient(xmin, xmax))
+            inUse = false;
         return new RelationshipReadHandle(relId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstPropId);
     }
 
@@ -222,11 +191,16 @@ internal sealed class RelationshipStore : IRelationshipStore
         {
             var (pageId, off) = Location(id);
             bool inUse;
+            long xmin, xmax;
             {
                 using var h = _file.PinForRead(pageId);
-                inUse = (h.Data[off] & FlagInUse) != 0;
+                ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
+                inUse = (rec[0] & FlagInUse) != 0;
+                xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[XminOffset..]);
+                xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
             }
-            if (inUse) yield return new RelationshipId(id);
+            if (inUse && Visibility.IsVisibleAmbient(xmin, xmax))
+                yield return new RelationshipId(id);
         }
     }
 
@@ -249,6 +223,9 @@ internal sealed class RelationshipStore : IRelationshipStore
         RecordHelpers.WriteInt48(rec[27..], tgtPrev);
         RecordHelpers.WriteInt48(rec[33..], tgtNext);
         RecordHelpers.WriteInt48(rec[39..], -1L);
+        // FT-26: bulk load は MvccContext が無いので Bootstrap を xmin に。
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XminOffset..], TransactionId.Bootstrap.Value);
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], 0L);
         _file.UnpinDirty(wpid, 0);
     }
 
@@ -277,17 +254,6 @@ internal sealed class RelationshipStore : IRelationshipStore
         NodeId recSrc = new(RecordHelpers.ReadInt48(snap[1..]));
         int prevOff = recSrc == side ? off + 15 : off + 27;
         RecordHelpers.WriteInt48(ph.Data[prevOff..], newPrev.Value);
-        _file.UnpinDirty(pageId, 0);
-    }
-
-    private void UpdateListNext(RelationshipId relId, NodeId side, RelationshipId newNext)
-    {
-        var (pageId, off) = Location(relId.Value);
-        var ph = _file.PinForWrite(pageId);
-        ReadOnlySpan<byte> snap = ph.Data.Slice(off, RecordSize);
-        NodeId recSrc = new(RecordHelpers.ReadInt48(snap[1..]));
-        int nextOff = recSrc == side ? off + 21 : off + 33;
-        RecordHelpers.WriteInt48(ph.Data[nextOff..], newNext.Value);
         _file.UnpinDirty(pageId, 0);
     }
 
@@ -323,12 +289,22 @@ internal sealed class RelationshipStore : IRelationshipStore
         _inUseCount = BinaryPrimitives.ReadInt64LittleEndian(h.Data[MetaInUse..]);
     }
 
-    private void FlushMeta()
+    private void CheckFormatVersion()
+    {
+        using var h = _file.PinForRead(HeaderPageId);
+        byte v = h.Data[MetaFormatVersion];
+        if (v != FormatVersion.V2Mvcc)
+            throw new FormatVersionMismatchException("rels", v, FormatVersion.V2Mvcc);
+    }
+
+    private void FlushMeta(bool initialise = false)
     {
         var ph = _file.PinForWrite(HeaderPageId);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaFreeHead..], _freeHead);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaHwm..], _hwm);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaInUse..], _inUseCount);
+        if (initialise)
+            ph.Data[MetaFormatVersion] = FormatVersion.V2Mvcc;
         _file.UnpinDirty(HeaderPageId, 0);
     }
 }

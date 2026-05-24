@@ -22,7 +22,9 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         // would have.
         // FT-20: IndexUndoContext was retired (subsumed by AbortUndoHandler), so no
         // index thread-static cleanup is needed here anymore.
+        // FT-26: MvccContext も同様にスレッドローカルなので念のため初期化。
         WalPageContext.End();
+        MvccContext.End();
 
         Directory.CreateDirectory(directoryPath);
 
@@ -99,9 +101,14 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
             }
         }
 
+        // FT-26: MVCC visibility 判定用の committed TxId 集合。recovery が WAL を走査して
+        // (Commit レコードがあり、かつ Abort も無く、PageImage を持つ等の信頼できる条件を満たす)
+        // tx を Mark してから TransactionManager 配線へ。Bootstrap は ctor で自動登録される。
+        var committedRegistry = new CommittedTxRegistry();
+
         // FT-19: fileRegistry には data file + materialize 済み索引が既に登録されている。
         // 索引も ARIES page-WAL 対象なので PageImage redo + CLR undo が透過的に走る。
-        var recovery = new RecoveryManager(pageManager, wal, fileRegistry);
+        var recovery = new RecoveryManager(pageManager, wal, fileRegistry, committedRegistry: committedRegistry);
         recovery.Recover();
 
         // FT-15: store metadata (hwm / freeHead / inUseCount) is page-backed; the
@@ -135,7 +142,11 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         var txManager = new TransactionManager(
             wal, nodeStore, relStore, propStore, indexManager, adjStore, access,
             undoHandler, options.LockingMode, options.LockTimeout,
-            options.DeadlockDetectionInterval);
+            options.DeadlockDetectionInterval, committedRegistry);
+        // FT-26: recovery で観測した最大 TxId より大きい値から新規 tx を採番するよう、
+        // TransactionManager の _nextTxId を巻き上げる。これがないと新規 tx ID が
+        // 過去 commit 済み TxId と衝突して registry が同じ entry を 2 回 Mark してしまう。
+        txManager.AdvanceNextTxIdAtLeast(committedRegistry.MaxObservedTxId + 1);
 
         // 案A: チェックポイント契機を配線する。コミットごとに WAL 成長量を見て、
         // しきい値超過 + アクティブ TX 0 の時点で全データページを flush し WAL を truncate する。

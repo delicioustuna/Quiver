@@ -10,6 +10,7 @@ internal sealed class RecoveryManager : IRecoveryManager
     private readonly IPageManager _pageManager;
     private readonly IWriteAheadLog _wal;
     private readonly Dictionary<byte, IPagedFile> _fileRegistry;
+    private readonly CommittedTxRegistry? _committedRegistry;
 
     public RecoveryManager(IPageManager pageManager, IWriteAheadLog wal)
         : this(pageManager, wal, []) { }
@@ -18,7 +19,8 @@ internal sealed class RecoveryManager : IRecoveryManager
         IPageManager pageManager,
         IWriteAheadLog wal,
         Dictionary<byte, IPagedFile> fileRegistry,
-        IIndexManager? indexManager = null)
+        IIndexManager? indexManager = null,
+        CommittedTxRegistry? committedRegistry = null)
     {
         // FT-19: indexManager 引数は呼び出し側互換のため受け取るが、索引が ARIES page-WAL
         // 対象になったので recovery 内では使わない。fileRegistry に索引も登録されている前提で、
@@ -27,11 +29,59 @@ internal sealed class RecoveryManager : IRecoveryManager
         _pageManager = pageManager;
         _wal = wal;
         _fileRegistry = fileRegistry;
+        _committedRegistry = committedRegistry;
     }
 
     public long Recover()
     {
         long checkpointLsn = FindLastCheckpointLsn();
+
+        // Pass 0 (FT-26): WAL を走査し、CommittedTxRegistry を再構築する。
+        // committed と認識する条件: Commit レコードがある OR (PageImage を持ち、かつ Abort が無い)。
+        // 後者は Pass 3 で「PageImage を持つ tx は FlushPending を通過 = データファイルに
+        // commit 内容が durable なので、torn Commit レコードでも undo しない」とする扱いと整合させる。
+        // これがないと、data file には xmin=T の record があるのに registry に T が居ないため
+        // visibility 判定で invisible となり、torn-tail テストで「直前 commit が消える」誤動作になる。
+        // 他にも:
+        //   - 最小 TxId → RecoveryHorizon (truncate 区間より古い xmin は presumed-committed)
+        //   - 最大 TxId → MaxObservedTxId (_nextTxId 起点)
+        if (_committedRegistry != null)
+        {
+            long maxObservedTxId = TransactionId.Bootstrap.Value;
+            long minTxIdInWal = long.MaxValue;
+            var committedSet = new HashSet<long>();
+            var pageImageSet = new HashSet<long>();
+            var abortedSet = new HashSet<long>();
+            using (var fullReader = _wal.OpenReader(0))
+            {
+                while (fullReader.TryReadNext(out var record))
+                {
+                    long txIdValue = record.TransactionId.Value;
+                    switch (record.Type)
+                    {
+                        case WalRecordType.Commit: committedSet.Add(txIdValue); break;
+                        case WalRecordType.Abort: abortedSet.Add(txIdValue); break;
+                        case WalRecordType.PageImage: pageImageSet.Add(txIdValue); break;
+                    }
+                    if (txIdValue > 0 && txIdValue > maxObservedTxId)
+                        maxObservedTxId = txIdValue;
+                    if (txIdValue > 0 && txIdValue < minTxIdInWal)
+                        minTxIdInWal = txIdValue;
+                }
+            }
+            foreach (long txId in committedSet)
+                _committedRegistry.MarkCommitted(new TransactionId(txId));
+            // PageImage を持ち Abort も Commit も無い tx は torn-Commit 扱いで presume-committed。
+            foreach (long txId in pageImageSet)
+            {
+                if (committedSet.Contains(txId)) continue;
+                if (abortedSet.Contains(txId)) continue;
+                _committedRegistry.MarkCommitted(new TransactionId(txId));
+            }
+            _committedRegistry.RecordMaxObservedTxId(maxObservedTxId);
+            if (minTxIdInWal != long.MaxValue && minTxIdInWal > TransactionId.Bootstrap.Value)
+                _committedRegistry.RecoveryHorizon = minTxIdInWal - 1;
+        }
 
         // Pass 1: コミット済み / アボート済みトランザクションを分類し、最終 LSN を求める。
         // PageImage を持つトランザクションも記録する: PageImage (after-image) は

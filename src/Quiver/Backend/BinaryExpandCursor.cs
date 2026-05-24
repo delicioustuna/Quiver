@@ -93,6 +93,9 @@ internal sealed class BinaryExpandCursor : ExpandCursor
             var thisRel = _nextRelId;
             _nextRelId = rel.Source == _source ? rel.SourceNext : rel.TargetNext;
 
+            // FT-26: MVCC visibility 判定で invisible になった record はスキップ。
+            if (!rel.InUse) continue;
+
             bool typeOk = !_typeFilter.HasValue || rel.Type == _typeFilter.Value;
             bool dirOk = _direction switch
             {

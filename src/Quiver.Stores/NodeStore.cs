@@ -1,28 +1,33 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Storage;
 
 namespace Quiver.Stores;
 
-// Record layout (15 bytes):
-//  0 Flags(1) | 1 FirstRelId(6) | 7 FirstPropId(6) | 13 LabelId(2)
+// FT-26 v2 (MVCC) record layout (31 bytes):
+//  0 Flags(1) | 1 FirstRelId(6) | 7 FirstPropId(6) | 13 LabelId(2) | 15 Xmin(8) | 23 Xmax(8)
+//
+// Xmin / Xmax = TransactionId.Value (long). 0 = unset.
+//   Allocate: xmin = MvccContext.CurrentTxId, xmax = 0
+//   Free (logical delete): xmax = MvccContext.CurrentTxId
+//     チェーン / record 本体は保持 (snapshot reader が辿れるよう)、物理回収は vacuum (OP-3) 担当。
 internal sealed class NodeStore : INodeStore
 {
-    public const int RecordSize = 15;
+    public const int RecordSize = 31;
     private const byte FlagInUse = 0x01;
+    internal const int XminOffset = 15;
+    internal const int XmaxOffset = 23;
 
     // PageId(0) = PagedFile meta; PageId(1) = NodeStore header; PageId(2+) = records
     private static readonly PageId HeaderPageId = new(1);
-    private const int MetaFreeHead = 0;  // int64
-    private const int MetaHwm = 8;       // int64 (next fresh id = high-water mark)
-    private const int MetaInUse = 16;    // int64
+    private const int MetaFreeHead = 0;       // int64
+    private const int MetaHwm = 8;            // int64
+    private const int MetaInUse = 16;         // int64
+    private const int MetaFormatVersion = 31; // byte (FT-26 sentinel — 詳細は FormatVersion)
 
-    public static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 544
+    public static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 263
 
     private readonly IPagedFile _file;
-    // VEC-11: optional sidecar updated on Allocate / Free / BulkSetHeaders so the
-    // binary backend's access methods can serve label-filtered scans in O(|L|).
-    // null when not wired (e.g. unit tests that construct NodeStore standalone).
     private LabelNodeIndex? _labelIndex;
     private long _freeHead;
     private long _hwm;
@@ -38,27 +43,17 @@ internal sealed class NodeStore : INodeStore
         {
             _file.AllocatePage(PageKind.Header); // allocates PageId(1)
             _freeHead = -1; _hwm = 0; _inUseCount = 0;
-            FlushMeta();
+            FlushMeta(initialise: true);
         }
         else
         {
+            CheckFormatVersion();
             LoadMeta();
         }
     }
 
-    /// <summary>
-    /// VEC-11: 後付けで LabelNodeIndex を接続する。BinaryGraphStorageBackendFactory が
-    /// RecoveryManager.Recover() 完了後に index を構築する流れで使う。
-    /// </summary>
     public void AttachLabelIndex(LabelNodeIndex labelIndex) => _labelIndex = labelIndex;
 
-    /// <summary>
-    /// FT-15: ヘッダページからインメモリのメタ (hwm / freeHead / inUseCount) を読み直す。
-    /// abort の before-image 巻き戻しでヘッダページ自体は TX 開始前の状態へ戻っているので、
-    /// ここではページから読み直してインメモリのキャッシュを同期するだけでよい。
-    /// クラッシュ recovery 後にも呼ばれ、redo / undo で書き換わったヘッダページに追従する。
-    /// LabelNodeIndex は abort で OnAllocate/OnFree が宙に浮くため無効化し再構築させる。
-    /// </summary>
     internal void ReloadMeta()
     {
         LoadMeta();
@@ -69,13 +64,14 @@ internal sealed class NodeStore : INodeStore
 
     public NodeId Allocate(LabelId labelId)
     {
+        // FT-26: 論理削除に伴うチェーン非解除で free list の slot を物理的に再利用しなくなる。
+        // フリーリストは vacuum (OP-3) 完了時にのみエントリが入る。それまでは hwm 単調増加。
         long id;
         if (_freeHead >= 0)
         {
             id = _freeHead;
             var (fpid, foff) = Location(id);
             using var fh = _file.PinForRead(fpid);
-            // Next-free pointer stored in FirstRelId slot
             _freeHead = RecordHelpers.ReadInt48(fh.Data[(foff + 1)..]);
         }
         else
@@ -90,9 +86,11 @@ internal sealed class NodeStore : INodeStore
         Span<byte> rec = ph.Data.Slice(woff, RecordSize);
         rec.Clear();
         rec[0] = FlagInUse;
-        RecordHelpers.WriteInt48(rec[1..], -1L);   // FirstRelId = invalid
-        RecordHelpers.WriteInt48(rec[7..], -1L);   // FirstPropId = invalid
+        RecordHelpers.WriteInt48(rec[1..], -1L);
+        RecordHelpers.WriteInt48(rec[7..], -1L);
         BinaryPrimitives.WriteInt16LittleEndian(rec[13..], (short)labelId.Value);
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XminOffset..], MvccContext.CurrentTxId.Value);
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], 0L);
         _file.UnpinDirty(wpid, 0);
 
         FlushMeta();
@@ -103,17 +101,15 @@ internal sealed class NodeStore : INodeStore
 
     public void Free(NodeId nodeId)
     {
+        // FT-26 MVCC: 論理削除のみ — xmax をスタンプして record / チェーンは維持する。
+        // 物理回収 + free list 投入は vacuum 経路 (OP-3) で行う。
         var (pageId, off) = Location(nodeId.Value);
         var ph = _file.PinForWrite(pageId);
         Span<byte> rec = ph.Data.Slice(off, RecordSize);
-        // VEC-11: capture label before clearing so the sidecar index can
-        // remove this NodeId from the right bucket.
         var prevLabel = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(rec[13..]));
-        rec.Clear();
-        RecordHelpers.WriteInt48(rec[1..], _freeHead); // chain next-free into FirstRelId slot
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], MvccContext.CurrentTxId.Value);
         _file.UnpinDirty(pageId, 0);
 
-        _freeHead = nodeId.Value;
         _inUseCount--;
         FlushMeta();
         _labelIndex?.OnFree(nodeId, prevLabel);
@@ -128,13 +124,18 @@ internal sealed class NodeStore : INodeStore
         var firstRel = new RelationshipId(RecordHelpers.ReadInt48(rec[1..]));
         var firstProp = new PropertyId(RecordHelpers.ReadInt48(rec[7..]));
         var label = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(rec[13..]));
-        return new NodeReadHandle(nodeId, inUse, firstRel, firstProp, label);
+        long xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[XminOffset..]);
+        long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
+        // FT-26: ambient MVCC コンテキストで可視性をフィルタする。
+        // 不可視なら InUse=false に縮退して呼出側に "存在しない" と見せる。
+        if (inUse && !Visibility.IsVisibleAmbient(xmin, xmax))
+            inUse = false;
+        return new NodeReadHandle(nodeId, inUse, firstRel, firstProp, label, xmin, xmax);
     }
 
     public NodeWriteHandle Write(NodeId nodeId)
     {
         var (pageId, off) = Location(nodeId.Value);
-        // PinForWrite increments pin count. NodeWriteHandle.Dispose() calls UnpinDirty.
         var ph = _file.PinForWrite(pageId);
         return new NodeWriteHandle(_file, pageId, ph.Data.Slice(off, RecordSize));
     }
@@ -145,11 +146,15 @@ internal sealed class NodeStore : INodeStore
         {
             var (pageId, off) = Location(id);
             bool inUse;
+            long xmin, xmax;
             {
                 using var h = _file.PinForRead(pageId);
-                inUse = (h.Data[off] & FlagInUse) != 0;
+                ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
+                inUse = (rec[0] & FlagInUse) != 0;
+                xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[XminOffset..]);
+                xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
             }
-            if (inUse)
+            if (inUse && Visibility.IsVisibleAmbient(xmin, xmax))
                 yield return new NodeId(id);
         }
     }
@@ -184,6 +189,10 @@ internal sealed class NodeStore : INodeStore
         RecordHelpers.WriteInt48(rec[1..], -1L);
         RecordHelpers.WriteInt48(rec[7..], -1L);
         BinaryPrimitives.WriteInt16LittleEndian(rec[13..], (short)labelId);
+        // FT-26: bulk load は MvccContext が無いことが多いため Bootstrap TxId を xmin に。
+        // CommittedTxRegistry には常に Bootstrap が登録済みなので全 snapshot で可視。
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XminOffset..], TransactionId.Bootstrap.Value);
+        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], 0L);
         _file.UnpinDirty(wpid, 0);
     }
 
@@ -201,8 +210,6 @@ internal sealed class NodeStore : INodeStore
         _inUseCount = inUseCount;
         _freeHead = -1;
         FlushMeta();
-        // VEC-11: BulkWrite path bypasses Allocate notifications, so invalidate
-        // the sidecar. Next lookup will trigger a full rebuild via EnsureBuilt.
         _labelIndex?.Invalidate();
     }
 
@@ -228,12 +235,22 @@ internal sealed class NodeStore : INodeStore
         _inUseCount = BinaryPrimitives.ReadInt64LittleEndian(h.Data[MetaInUse..]);
     }
 
-    private void FlushMeta()
+    private void CheckFormatVersion()
+    {
+        using var h = _file.PinForRead(HeaderPageId);
+        byte v = h.Data[MetaFormatVersion];
+        if (v != FormatVersion.V2Mvcc)
+            throw new FormatVersionMismatchException("nodes", v, FormatVersion.V2Mvcc);
+    }
+
+    private void FlushMeta(bool initialise = false)
     {
         var ph = _file.PinForWrite(HeaderPageId);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaFreeHead..], _freeHead);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaHwm..], _hwm);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaInUse..], _inUseCount);
+        if (initialise)
+            ph.Data[MetaFormatVersion] = FormatVersion.V2Mvcc;
         _file.UnpinDirty(HeaderPageId, 0);
     }
 }
