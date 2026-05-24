@@ -36,5 +36,11 @@ if (args.Length >= 1 && args[0] == "--ft25-deadlock")
     return DeadlockDetectionRunner.Run();
 }
 
+// FT-26: MVCC single-tx write throughput standalone runner
+if (args.Length >= 1 && args[0] == "--ft26-mvcc")
+{
+    return Ft26MvccThroughputRunner.Run();
+}
+
 BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
 return 0;
