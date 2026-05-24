@@ -134,7 +134,8 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
 
         var txManager = new TransactionManager(
             wal, nodeStore, relStore, propStore, indexManager, adjStore, access,
-            undoHandler);
+            undoHandler, options.LockingMode, options.LockTimeout,
+            options.DeadlockDetectionInterval);
 
         // 案A: チェックポイント契機を配線する。コミットごとに WAL 成長量を見て、
         // しきい値超過 + アクティブ TX 0 の時点で全データページを flush し WAL を truncate する。

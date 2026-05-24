@@ -225,6 +225,15 @@ public sealed class GraphDatabaseOptions
     /// <summary>ロック取得のタイムアウト。既定 5 秒。</summary>
     public TimeSpan LockTimeout { get; set; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// FT-24: ロック戦略。<see cref="Quiver.Transactions.LockingMode.ExclusiveOnly"/> (既定) は
+    /// 読み取りロック無し (現挙動)、<see cref="Quiver.Transactions.LockingMode.ReaderWriter"/> は
+    /// 読み取りを <see cref="Quiver.Transactions.LockMode.Shared"/>・書き込みを
+    /// <see cref="Quiver.Transactions.LockMode.Exclusive"/> として、複数 reader 間の競合を解消する。
+    /// </summary>
+    public Quiver.Transactions.LockingMode LockingMode { get; set; }
+        = Quiver.Transactions.LockingMode.ExclusiveOnly;
+
     /// <summary>ページのチェックサム計算 / 検証を有効にするか。既定 <c>true</c>。</summary>
     public bool EnableChecksums { get; set; } = true;
 
@@ -262,4 +271,14 @@ public sealed class GraphDatabaseOptions
     /// <see cref="IDiagnosticsApi.RepairIndexes"/> を明示的に呼ぶ前提)。
     /// </summary>
     public bool AutoRepairOrphansOnRecovery { get; set; } = false;
+
+    /// <summary>
+    /// FT-25: デッドロック検出器の周期。<c>null</c> または <see cref="TimeSpan.Zero"/> 以下で無効化
+    /// (既定。<see cref="LockTimeout"/> でフォールバックする旧挙動)。値を設定すると周期ごとに
+    /// 全 <c>LockManager</c> の wait-for graph snapshot を取り、Tarjan SCC で閉路を検出する。
+    /// 閉路内で最も若い tx (<see cref="Quiver.Core.TransactionId.Value"/> が最大) を犠牲者として
+    /// <see cref="Quiver.Transactions.DeadlockException"/> で中断させる。
+    /// 推奨値: 100ms (検出遅延が短く、CPU オーバーヘッドも 1% 未満を狙える)。
+    /// </summary>
+    public TimeSpan? DeadlockDetectionInterval { get; set; }
 }

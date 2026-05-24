@@ -3,3 +3,4 @@
 [assembly: InternalsVisibleTo("Quiver")]
 [assembly: InternalsVisibleTo("Quiver.Storage.Sqlite")]
 [assembly: InternalsVisibleTo("Quiver.Backend.Tests")]
+[assembly: InternalsVisibleTo("Quiver.Benchmarks")]

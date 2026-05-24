@@ -29,6 +29,13 @@ internal sealed class TransactionManager : ITransactionManager
     private long _lastCheckpointBytes;
     private readonly object _checkpointGate = new();
 
+    // FT-24: ロック戦略 (ExclusiveOnly / ReaderWriter) と timeout を transaction へ流す。
+    private readonly LockingMode _lockingMode;
+    private readonly TimeSpan _lockTimeout;
+
+    // FT-25: デッドロック検出器 (null = 無効)。Dispose で停止。
+    private DeadlockDetector? _deadlockDetector;
+
     public TransactionManager(
         IWriteAheadLog wal,
         INodeStore nodeStore,
@@ -37,7 +44,10 @@ internal sealed class TransactionManager : ITransactionManager
         IIndexManager indexManager,
         IAdjacencyBlockStore? adjStore = null,
         IGraphAccessMethods? access = null,
-        AbortUndoHandler? undoHandler = null)
+        AbortUndoHandler? undoHandler = null,
+        LockingMode lockingMode = LockingMode.ExclusiveOnly,
+        TimeSpan? lockTimeout = null,
+        TimeSpan? deadlockDetectionInterval = null)
     {
         _wal = wal;
         _nodeStore = nodeStore;
@@ -47,7 +57,17 @@ internal sealed class TransactionManager : ITransactionManager
         _adjStore = adjStore;
         _access = access ?? InlineGraphAccessMethods.Instance;
         _undoHandler = undoHandler;
+        _lockingMode = lockingMode;
+        _lockTimeout = lockTimeout ?? TimeSpan.FromSeconds(5);
+        if (deadlockDetectionInterval is { } interval && interval > TimeSpan.Zero)
+        {
+            _deadlockDetector = new DeadlockDetector(
+                new[] { _nodeLocks, _relLocks, _indexLocks }, interval);
+        }
     }
+
+    /// <summary>FT-25: テスト / 診断用。null のときは検出器無効。</summary>
+    internal DeadlockDetector? DeadlockDetector => _deadlockDetector;
 
     public int ActiveCount => _active.Count;
 
@@ -70,7 +90,7 @@ internal sealed class TransactionManager : ITransactionManager
         var tx = new Transaction(txId, level, snapshotLsn,
             _wal, _nodeLocks, _relLocks, _indexLocks, this,
             _nodeStore, _relStore, _propStore, _indexManager, _adjStore, _access,
-            _undoHandler);
+            _undoHandler, _lockingMode, _lockTimeout);
         _active[txId.Value] = tx;
         return tx;
     }
@@ -138,5 +158,9 @@ internal sealed class TransactionManager : ITransactionManager
     /// </summary>
     internal void SwapAdjacencyStore(IAdjacencyBlockStore? next) => _adjStore = next;
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        _deadlockDetector?.Dispose();
+        _deadlockDetector = null;
+    }
 }

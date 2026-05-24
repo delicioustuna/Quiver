@@ -1,4 +1,4 @@
-﻿using Quiver.Core;
+using Quiver.Core;
 using Quiver.Index;
 
 namespace Quiver.Transactions;
@@ -9,11 +9,12 @@ internal sealed class TxIndexManager : IIndexManager
     private readonly IIndexManager _inner;
     private readonly LockManager _locks;
     private readonly TransactionId _txId;
+    private readonly TimeSpan _timeout;
     private const long GlobalIndexLockKey = long.MinValue;
 
-    internal TxIndexManager(IIndexManager inner, LockManager locks, TransactionId txId)
+    internal TxIndexManager(IIndexManager inner, LockManager locks, TransactionId txId, TimeSpan timeout)
     {
-        _inner = inner; _locks = locks; _txId = txId;
+        _inner = inner; _locks = locks; _txId = txId; _timeout = timeout;
     }
 
     public IBTreeIndex<int> CreateInt32Index(string name) { AcquireLock(); return _inner.CreateInt32Index(name); }
@@ -35,7 +36,7 @@ internal sealed class TxIndexManager : IIndexManager
 
     private void AcquireLock()
     {
-        if (!_locks.TryAcquire(GlobalIndexLockKey, _txId))
+        if (!_locks.TryAcquire(GlobalIndexLockKey, _txId, LockMode.Exclusive, _timeout))
             throw new TransactionException("Lock timeout acquiring index lock.");
     }
 }

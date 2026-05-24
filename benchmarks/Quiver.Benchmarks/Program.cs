@@ -24,5 +24,17 @@ if (args.Length >= 1 && args[0] == "--ft20-wal")
     return FT20WalAmplificationRunner.Run();
 }
 
+// FT-24: lock contention (shared vs exclusive) standalone runner
+if (args.Length >= 1 && args[0] == "--ft24-lock")
+{
+    return LockContentionRunner.Run();
+}
+
+// FT-25: deadlock detection latency / CPU overhead standalone runner
+if (args.Length >= 1 && args[0] == "--ft25-deadlock")
+{
+    return DeadlockDetectionRunner.Run();
+}
+
 BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
 return 0;

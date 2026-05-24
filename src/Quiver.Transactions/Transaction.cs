@@ -54,7 +54,9 @@ internal sealed class Transaction : ITransaction
         IPropertyStore propStore, IIndexManager indexManager,
         IAdjacencyBlockStore? adjStore = null,
         IGraphAccessMethods? access = null,
-        AbortUndoHandler? undoHandler = null)
+        AbortUndoHandler? undoHandler = null,
+        LockingMode lockingMode = LockingMode.ExclusiveOnly,
+        TimeSpan? lockTimeout = null)
     {
         Id = id; Level = level; SnapshotLsn = snapshotLsn;
         _wal = wal;
@@ -64,10 +66,11 @@ internal sealed class Transaction : ITransaction
         _access = access ?? InlineGraphAccessMethods.Instance;
         _undoHandler = undoHandler;
         _state = TransactionState.Active;
-        _nodes = new TxNodeStore(nodeStore, nodeLocks, id);
-        _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes);
+        var timeout = lockTimeout ?? TimeSpan.FromSeconds(5);
+        _nodes = new TxNodeStore(nodeStore, nodeLocks, id, lockingMode, timeout);
+        _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes, lockingMode, timeout);
         _properties = new TxPropertyStore(propStore);
-        _indexes = new TxIndexManager(indexManager, indexLocks, id);
+        _indexes = new TxIndexManager(indexManager, indexLocks, id, timeout);
         WalPageContext.Begin(wal, id);
     }
 
