@@ -457,6 +457,74 @@ public sealed class SqliteGraphTransaction : IGraphTransaction
         _sqliteTx.Dispose();
     }
 
+    // ============================================================
+    // FT-23: Savepoint / nested undo
+    // SQLite はネイティブに SAVEPOINT / ROLLBACK TO / RELEASE をサポートしているので
+    // それをそのままラップする。SQLite の SAVEPOINT 名は識別子なので、Quiver の
+    // 連番 + 任意名を組み合わせて衝突しないラベルを生成する。
+    // ============================================================
+
+    private long _nextSavepointId;
+    private List<(long Id, string SqliteName)>? _savepoints;
+
+    public SavepointId Savepoint(string? name = null)
+    {
+        if (_state != TransactionState.Active)
+            throw new TransactionException("Cannot create savepoint: transaction is not Active.");
+        long id = ++_nextSavepointId;
+        // SQLite identifier として安全な名前を作る (英数字 + アンダースコアのみ)。
+        string sqliteName = $"quiver_sp_{id}";
+        using (var cmd = _sqliteTx.Connection!.CreateCommand())
+        {
+            cmd.Transaction = _sqliteTx;
+            cmd.CommandText = $"SAVEPOINT {sqliteName};";
+            cmd.ExecuteNonQuery();
+        }
+        (_savepoints ??= new List<(long, string)>()).Add((id, sqliteName));
+        return new SavepointId(id, name);
+    }
+
+    public void RollbackTo(SavepointId savepoint)
+    {
+        if (_state != TransactionState.Active)
+            throw new TransactionException("Cannot rollback to savepoint: transaction is not Active.");
+        int index = FindSavepointIndex(savepoint.Value);
+        if (index < 0)
+            throw new TransactionException($"Savepoint {savepoint} is not valid in this transaction.");
+        var (_, sqliteName) = _savepoints![index];
+        // SQL 標準: ROLLBACK TO Sn は Sn より新しい全ての savepoint も解放する。Sn 自身は残す。
+        _savepoints.RemoveRange(index + 1, _savepoints.Count - index - 1);
+        using var cmd = _sqliteTx.Connection!.CreateCommand();
+        cmd.Transaction = _sqliteTx;
+        cmd.CommandText = $"ROLLBACK TO SAVEPOINT {sqliteName};";
+        cmd.ExecuteNonQuery();
+    }
+
+    public void ReleaseSavepoint(SavepointId savepoint)
+    {
+        if (_state != TransactionState.Active)
+            throw new TransactionException("Cannot release savepoint: transaction is not Active.");
+        int index = FindSavepointIndex(savepoint.Value);
+        if (index < 0)
+            throw new TransactionException($"Savepoint {savepoint} is not valid in this transaction.");
+        var (_, sqliteName) = _savepoints![index];
+        _savepoints.RemoveRange(index, _savepoints.Count - index);
+        using var cmd = _sqliteTx.Connection!.CreateCommand();
+        cmd.Transaction = _sqliteTx;
+        cmd.CommandText = $"RELEASE SAVEPOINT {sqliteName};";
+        cmd.ExecuteNonQuery();
+    }
+
+    private int FindSavepointIndex(long id)
+    {
+        if (_savepoints == null) return -1;
+        for (int i = 0; i < _savepoints.Count; i++)
+        {
+            if (_savepoints[i].Id == id) return i;
+        }
+        return -1;
+    }
+
     // VEC-3: post-commit / post-rollback hooks. Semantics mirror the binary
     // backend in Quiver.Transactions.Transaction.
     public void OnCommitted(Action callback)

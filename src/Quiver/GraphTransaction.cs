@@ -476,6 +476,11 @@ internal sealed class GraphTransaction : IGraphTransaction
     public void Rollback() => _inner.Abort();
     public void Dispose() => _inner.Dispose();
 
+    // FT-23: savepoint / nested undo — 下層トランザクションへ委譲する。
+    public SavepointId Savepoint(string? name = null) => _inner.Savepoint(name);
+    public void RollbackTo(SavepointId savepoint) => _inner.RollbackTo(savepoint);
+    public void ReleaseSavepoint(SavepointId savepoint) => _inner.ReleaseSavepoint(savepoint);
+
     // VEC-3: post-commit / post-rollback フックの登録は下層トランザクションへ委譲する。
     // ユーザは IGraphTransaction 経由でフックを登録できる。
     public void OnCommitted(Action callback) => _inner.OnCommitted(callback);

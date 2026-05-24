@@ -27,6 +27,12 @@ internal sealed class Transaction : ITransaction
     private List<Action>? _onRolledBack;
     private TransactionState _state;
 
+    // FT-23: savepoint 管理。SavepointId.Value (連番) → スタック深度 (= WalPageContext のバケット index)。
+    // RollbackTo で巻き戻しても savepoint 自体は消費しないので、Value は同じレベルで再利用される。
+    // ReleaseSavepoint または親 savepoint の Rollback/Release で初めて無効化される。
+    private long _nextSavepointId;
+    private List<(long Id, int Level)>? _savepoints;
+
     public TransactionId Id { get; }
     public IsolationLevel Level { get; }
     public long SnapshotLsn { get; }
@@ -126,6 +132,66 @@ internal sealed class Transaction : ITransaction
         var beforeImages = WalPageContext.CurrentBeforeImagePayloads;
         if (beforeImages.Count == 0) return;
         _undoHandler.Undo(beforeImages);
+    }
+
+    // ==================== FT-23: Savepoint ====================
+
+    public SavepointId Savepoint(string? name = null)
+    {
+        if (_state != TransactionState.Active)
+            throw new TransactionException("Cannot create savepoint: transaction is not Active.");
+        int level = WalPageContext.PushSavepoint();
+        if (level < 0)
+        {
+            // 書き込みコンテキストが無い (例: 読み取り専用 tx) — savepoint は no-op で良いが、
+            // RollbackTo / Release の正当性チェックのため id だけは発行しておく。
+            level = 0;
+        }
+        long id = ++_nextSavepointId;
+        (_savepoints ??= new List<(long, int)>()).Add((id, level));
+        return new SavepointId(id, name);
+    }
+
+    public void RollbackTo(SavepointId savepoint)
+    {
+        if (_state != TransactionState.Active)
+            throw new TransactionException("Cannot rollback to savepoint: transaction is not Active.");
+        int index = FindSavepointIndex(savepoint.Value);
+        if (index < 0)
+            throw new TransactionException($"Savepoint {savepoint} is not valid in this transaction.");
+
+        int level = _savepoints![index].Level;
+        // FT-23: 上位 savepoint も同時に無効化する (PostgreSQL / SQL 標準: ROLLBACK TO Sn は
+        // Sn より新しい全ての savepoint も解放する)。Sn 自身は消費しない。
+        _savepoints.RemoveRange(index + 1, _savepoints.Count - index - 1);
+
+        var beforeImages = WalPageContext.RollbackToSavepoint(level);
+        if (_undoHandler != null && beforeImages.Count > 0)
+            _undoHandler.UndoPartial(beforeImages);
+    }
+
+    public void ReleaseSavepoint(SavepointId savepoint)
+    {
+        if (_state != TransactionState.Active)
+            throw new TransactionException("Cannot release savepoint: transaction is not Active.");
+        int index = FindSavepointIndex(savepoint.Value);
+        if (index < 0)
+            throw new TransactionException($"Savepoint {savepoint} is not valid in this transaction.");
+
+        int level = _savepoints![index].Level;
+        // Release した savepoint より新しい savepoint も同時に無効化する (SQL 標準準拠)。
+        _savepoints.RemoveRange(index, _savepoints.Count - index);
+        WalPageContext.ReleaseSavepoint(level);
+    }
+
+    private int FindSavepointIndex(long id)
+    {
+        if (_savepoints == null) return -1;
+        for (int i = 0; i < _savepoints.Count; i++)
+        {
+            if (_savepoints[i].Id == id) return i;
+        }
+        return -1;
     }
 
     public void Dispose()

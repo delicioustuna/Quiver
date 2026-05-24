@@ -469,4 +469,150 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         rtx.GetProperty(persisted, "ok").Type.Should().Be(PropertyValueType.Bool);
         rtx.Rollback();
     }
+
+    // ===== FT-23: Savepoint / nested undo =====
+
+    [Fact]
+    public void Savepoint_RollbackTo_discards_changes_after_savepoint_only()
+    {
+        // Savepoint 前の変更は保たれ、Savepoint 後の変更だけが消える。
+        NodeId before, after;
+        using (var tx = BeginWrite())
+        {
+            before = tx.CreateNode("Before");
+            tx.SetProperty(before, "k", PropertyValue.FromInt64(1L));
+            var sp = tx.Savepoint();
+            after = tx.CreateNode("After");
+            tx.SetProperty(before, "k", PropertyValue.FromInt64(999L));
+            tx.RollbackTo(sp);
+            tx.Commit();
+        }
+
+        using var rtx = BeginRead();
+        rtx.NodeExists(before).Should().BeTrue("savepoint 以前のノードは生存");
+        rtx.NodeExists(after).Should().BeFalse("savepoint 以後のノードは消える");
+        rtx.GetProperty(before, "k").Int64Value.Should().Be(1L,
+            "savepoint 以後のプロパティ上書きは取り消される");
+        rtx.Rollback();
+    }
+
+    [Fact]
+    public void Savepoint_nested_three_levels_rolls_back_to_each_level()
+    {
+        // 3 段ネスト: SP1 → 操作 → SP2 → 操作 → SP3 → 操作 → RollbackTo(SP2) で SP2 直後の状態へ。
+        NodeId n0, n1, n2, n3;
+        using (var tx = BeginWrite())
+        {
+            n0 = tx.CreateNode("L0");
+            var sp1 = tx.Savepoint("sp1");
+            n1 = tx.CreateNode("L1");
+            var sp2 = tx.Savepoint("sp2");
+            n2 = tx.CreateNode("L2");
+            var sp3 = tx.Savepoint("sp3");
+            n3 = tx.CreateNode("L3");
+
+            tx.RollbackTo(sp2);
+            // sp2 以降 (n2, n3 含む sp3 も) が消える。n0, n1 は残る。
+            tx.Commit();
+        }
+
+        using var rtx = BeginRead();
+        rtx.NodeExists(n0).Should().BeTrue();
+        rtx.NodeExists(n1).Should().BeTrue();
+        rtx.NodeExists(n2).Should().BeFalse("RollbackTo(sp2) で n2 は消える");
+        rtx.NodeExists(n3).Should().BeFalse("RollbackTo(sp2) で sp3 配下の n3 も消える");
+        rtx.Rollback();
+    }
+
+    [Fact]
+    public void ReleaseSavepoint_keeps_all_changes_in_committed_tx()
+    {
+        // Release は savepoint を消費するが、savepoint 内の変更は親へマージされる。
+        NodeId outer, inner;
+        using (var tx = BeginWrite())
+        {
+            outer = tx.CreateNode("Outer");
+            var sp = tx.Savepoint();
+            inner = tx.CreateNode("Inner");
+            tx.ReleaseSavepoint(sp);
+            tx.Commit();
+        }
+
+        using var rtx = BeginRead();
+        rtx.NodeExists(outer).Should().BeTrue();
+        rtx.NodeExists(inner).Should().BeTrue("released savepoint 内の変更はコミットで永続化");
+        rtx.Rollback();
+    }
+
+    [Fact]
+    public void Savepoint_can_be_rolled_back_to_multiple_times()
+    {
+        // SQL 標準: ROLLBACK TO は savepoint を消費せず、同じ id で再度 RollbackTo できる。
+        NodeId pre;
+        using (var tx = BeginWrite())
+        {
+            pre = tx.CreateNode("Pre");
+            var sp = tx.Savepoint();
+
+            tx.CreateNode("Throw1");
+            tx.RollbackTo(sp);
+
+            tx.CreateNode("Throw2");
+            tx.RollbackTo(sp);
+
+            tx.Commit();
+        }
+
+        // pre 以外のノードは何も残らない (Throw1/Throw2 は両方とも消えた)。
+        using var rtx = BeginRead();
+        rtx.NodeExists(pre).Should().BeTrue();
+        rtx.Rollback();
+    }
+
+    [Fact]
+    public void Savepoint_RollbackTo_invalidates_inner_savepoints()
+    {
+        // RollbackTo(sp_outer) は sp_outer より新しい savepoint をすべて無効化する (SQL 標準)。
+        // 以降に内側 SavepointId を使うと例外。
+        using var tx = BeginWrite();
+        var spOuter = tx.Savepoint();
+        var spInner = tx.Savepoint();
+        tx.CreateNode("Mid");
+        tx.RollbackTo(spOuter);
+
+        var act = () => tx.RollbackTo(spInner);
+        act.Should().Throw<Exception>(
+            "RollbackTo(spOuter) は spInner を無効化したので、その後 spInner を使うと throw");
+        tx.Rollback();
+    }
+
+    [Fact]
+    public void RollbackTo_unknown_savepoint_throws()
+    {
+        using var tx1 = BeginWrite();
+        SavepointId stranger = tx1.Savepoint();
+        tx1.Rollback();
+
+        using var tx2 = BeginWrite();
+        var act = () => tx2.RollbackTo(stranger);
+        act.Should().Throw<Exception>("別 tx の savepoint id を渡すと throw");
+        tx2.Rollback();
+    }
+
+    [Fact]
+    public void Plain_commit_without_savepoint_behaves_unchanged()
+    {
+        // Regression: savepoint を使わない既存パスの挙動が変わらないこと。
+        NodeId committed;
+        using (var tx = BeginWrite())
+        {
+            committed = tx.CreateNode("Plain");
+            tx.SetProperty(committed, "v", PropertyValue.FromInt64(42L));
+            tx.Commit();
+        }
+        using var rtx = BeginRead();
+        rtx.NodeExists(committed).Should().BeTrue();
+        rtx.GetProperty(committed, "v").Int64Value.Should().Be(42L);
+        rtx.Rollback();
+    }
 }

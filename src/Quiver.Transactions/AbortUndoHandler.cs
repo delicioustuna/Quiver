@@ -11,6 +11,10 @@ namespace Quiver.Transactions;
 /// バイナリバックエンドの ACID Atomicity を本物にするための「インプロセス undo」担当。
 /// クラッシュ中の未コミットデータ漏れは <see cref="RecoveryManager"/> の undo パス
 /// (CompensationLogRecord の再適用) が塞ぐ — 本クラスはその対になる即時版。
+///
+/// FT-23: <see cref="UndoPartial"/> を追加し、savepoint への部分ロールバックでも
+/// 同じ復元ロジックを再利用できるようにした。partial rollback は durable にしない
+/// (commit 前のサブステップなので flush 不要) ことが abort との違い。
 /// </summary>
 internal sealed class AbortUndoHandler
 {
@@ -35,6 +39,23 @@ internal sealed class AbortUndoHandler
     /// 未コミットデータがデータファイルへ残らないようにする (abort-then-crash 耐性)。
     /// </summary>
     public void Undo(IReadOnlyCollection<byte[]> beforeImagePayloads)
+        => UndoCore(beforeImagePayloads, flushAfter: true, updatePending: false);
+
+    /// <summary>
+    /// FT-23: <see cref="ITransaction.RollbackTo"/> の partial rollback 用。
+    /// before-image をデータファイル + バッファプールへ復元し、ストアメタを再ロードする。
+    /// abort と異なり <c>flushAfter: false</c> でフラッシュしない (commit 前のサブステップ
+    /// であり durable 化は最終 commit に委ねる)。また、各復元ページの内容を
+    /// <c>_pending</c> へ反映し、後続 commit 時の WAL PageImage が rollback 後の状態を
+    /// 正しく永続化するようにする (= savepoint なしの flat tx に対する PageImage 整合性を維持)。
+    /// </summary>
+    public void UndoPartial(IReadOnlyCollection<byte[]> beforeImagePayloads)
+        => UndoCore(beforeImagePayloads, flushAfter: false, updatePending: true);
+
+    private void UndoCore(
+        IReadOnlyCollection<byte[]> beforeImagePayloads,
+        bool flushAfter,
+        bool updatePending)
     {
         if (beforeImagePayloads.Count == 0) return;
 
@@ -49,6 +70,12 @@ internal sealed class AbortUndoHandler
                 // 直接書き、キャッシュ済みフレームも before-image で上書きして dirty を落とす。
                 file.WritePageForRecovery(new PageId(pageId), pageBytes);
                 touched.Add(file);
+
+                // FT-23: partial rollback の場合、後続 commit でこのページの PageImage が
+                // 「rollback 後の内容」になるよう _pending を上書きする。abort 経路では
+                // _pending ごと丸ごと破棄されるので呼ばない。
+                if (updatePending)
+                    WalPageContext.OverwritePendingFromBeforeImage(fileKind, pageId, pageBytes);
             }
         }
 
@@ -58,6 +85,7 @@ internal sealed class AbortUndoHandler
         // インメモリメタ (hwm / freeHead / inUseCount) をページから読み直す。
         _reloadStoreMeta();
 
+        if (!flushAfter) return;
         // 巻き戻した状態を durable にしてから (Transaction 側が) Abort レコードを書く。
         // これにより「abort 後にクラッシュ」しても未コミットデータが残らない。
         foreach (var file in touched)

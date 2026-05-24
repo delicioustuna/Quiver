@@ -158,6 +158,33 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
 
     /// <summary>トランザクションをロールバックする。</summary>
     void Rollback();
+
+    // ── FT-23: Savepoint / nested undo ────────────────────────────────
+
+    /// <summary>
+    /// FT-23: トランザクション内に savepoint を作成し識別子を返す。
+    /// <see cref="RollbackTo"/> でこの時点まで部分的に巻き戻したり、
+    /// <see cref="ReleaseSavepoint"/> で親スコープへマージしたりできる。Nested savepoint 可。
+    /// </summary>
+    /// <remarks>
+    /// 部分ロールバックは durable ではない — クラッシュ復旧では tx 全体の commit / abort のみ
+    /// 反映され、savepoint 境界は再現されない。長い tx の途中失敗で部分的に巻き戻し
+    /// 残りを継続したい運用用途。
+    /// </remarks>
+    /// <param name="name">診断・例外メッセージ用の任意名。</param>
+    SavepointId Savepoint(string? name = null);
+
+    /// <summary>
+    /// FT-23: 指定 savepoint 以降の変更を巻き戻す。Savepoint は消費されず、続けて
+    /// 別の変更を行ったあと再度 <see cref="RollbackTo"/> できる。
+    /// </summary>
+    void RollbackTo(SavepointId savepoint);
+
+    /// <summary>
+    /// FT-23: 指定 savepoint を解放し、その savepoint 以降の変更を親スコープへマージする。
+    /// 解放後は当該 SavepointId は無効。
+    /// </summary>
+    void ReleaseSavepoint(SavepointId savepoint);
 }
 
 /// <summary><c>long</c> 列挙子を <see cref="NodeId"/> に変換するための薄いラッパ。</summary>
