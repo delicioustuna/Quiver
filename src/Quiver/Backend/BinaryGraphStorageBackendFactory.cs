@@ -31,7 +31,7 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         var pageManager = new PageManager();
 
         var walDir = Path.Combine(directoryPath, "wal");
-        var wal = new WriteAheadLog(walDir, options.WalSegmentSize);
+        var wal = new WriteAheadLog(walDir, options.WalSegmentSize, options.GroupCommitWindow);
 
         var nodeFile = pageManager.OpenOrCreate(
             Path.Combine(directoryPath, "nodes.db"), PageKind.Header);

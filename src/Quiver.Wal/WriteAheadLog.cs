@@ -1,4 +1,5 @@
 ﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using System.IO.Hashing;
 using System.Threading.Channels;
 using Quiver.Core;
@@ -18,6 +19,14 @@ public sealed class WriteAheadLog : IWriteAheadLog
     private readonly object _writeLock = new();
     private readonly Channel<FlushRequest> _flushChannel;
     private readonly Task _flushTask;
+    // FT-27: group commit window を Stopwatch tick に変換して保持 (0 = 無効)。
+    // sub-millisecond 精度の spin-wait に Stopwatch.GetTimestamp を使う。
+    private readonly long _groupCommitWindowTicks;
+    // FT-27: 観測用カウンタ (テスト・診断用)。
+    // FlushBatchCount = fsync が走った回数、FlushRequestCount = FlushTo を呼んだ回数。
+    // 両者の比 (FlushRequestCount / FlushBatchCount) が平均バッチサイズになる。
+    private long _flushBatchCount;
+    private long _flushRequestCount;
 
     private long _nextLsn;
     private long _flushedLsn = -1;
@@ -36,10 +45,28 @@ public sealed class WriteAheadLog : IWriteAheadLog
     public long FlushedLsn => Volatile.Read(ref _flushedLsn);
     public long BytesWritten => Volatile.Read(ref _bytesWritten);
 
+    /// <summary>
+    /// FT-27: バックグラウンドフラッシュループが実際に fsync を起動した回数。
+    /// テスト・診断用。
+    /// </summary>
+    public long FlushBatchCount => Volatile.Read(ref _flushBatchCount);
+
+    /// <summary>
+    /// FT-27: <see cref="FlushTo"/> 経由でフラッシュ要求された累計回数。
+    /// <c>FlushRequestCount / FlushBatchCount</c> が平均グループサイズ。
+    /// </summary>
+    public long FlushRequestCount => Volatile.Read(ref _flushRequestCount);
+
     public WriteAheadLog(string directory, long segmentCapacity = DefaultSegmentCapacity)
+        : this(directory, segmentCapacity, TimeSpan.Zero) { }
+
+    public WriteAheadLog(string directory, long segmentCapacity, TimeSpan groupCommitWindow)
     {
         _directory = directory;
         _segmentCapacity = segmentCapacity;
+        _groupCommitWindowTicks = groupCommitWindow > TimeSpan.Zero
+            ? (long)(groupCommitWindow.TotalSeconds * Stopwatch.Frequency)
+            : 0;
         Directory.CreateDirectory(directory);
         _flushChannel = Channel.CreateUnbounded<FlushRequest>(
             new UnboundedChannelOptions { SingleReader = true });
@@ -84,6 +111,7 @@ public sealed class WriteAheadLog : IWriteAheadLog
     public void FlushTo(long lsn)
     {
         if (Volatile.Read(ref _flushedLsn) >= lsn) return;
+        Interlocked.Increment(ref _flushRequestCount);
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!_flushChannel.Writer.TryWrite(new FlushRequest(lsn, tcs)))
         {
@@ -239,6 +267,19 @@ public sealed class WriteAheadLog : IWriteAheadLog
         var pending = new List<FlushRequest>();
         while (await _flushChannel.Reader.WaitToReadAsync())
         {
+            // FT-27: group commit window — 最初の要求が来た時点でこの window 経過まで
+            // spin-wait し、追加で積まれた要求も同じ fsync で処理する。Windows の
+            // Task.Delay は ~15ms 解像度なので Stopwatch + Thread.SpinWait で sub-ms 精度を
+            // 確保する。本タスクは LongRunning 専用スレッドで動くため busy-wait しても
+            // 他のワークを阻害しない。Dispose と同時に Channel が完了するので、最後の
+            // 周回も window を待ってから drain → fsync して整合性を保つ。
+            if (_groupCommitWindowTicks > 0 && !_disposed)
+            {
+                long deadline = Stopwatch.GetTimestamp() + _groupCommitWindowTicks;
+                while (Stopwatch.GetTimestamp() < deadline && !_disposed)
+                    Thread.SpinWait(50);
+            }
+
             while (_flushChannel.Reader.TryRead(out var req))
                 pending.Add(req);
 
@@ -250,6 +291,9 @@ public sealed class WriteAheadLog : IWriteAheadLog
                 highestLsn = _nextLsn > 0 ? _nextLsn - 1 : -1;
                 Volatile.Write(ref _flushedLsn, highestLsn);
             }
+            // バッチサイズに関わらず fsync 1 回ごとに 1 カウントする
+            // (pending が空でも WaitToReadAsync は要求があったから戻った)。
+            Interlocked.Increment(ref _flushBatchCount);
 
             for (int i = pending.Count - 1; i >= 0; i--)
             {

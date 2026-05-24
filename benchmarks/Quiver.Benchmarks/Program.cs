@@ -42,5 +42,11 @@ if (args.Length >= 1 && args[0] == "--ft26-mvcc")
     return Ft26MvccThroughputRunner.Run();
 }
 
+// FT-27: WAL group commit throughput standalone runner
+if (args.Length >= 1 && args[0] == "--ft27-groupcommit")
+{
+    return Ft27GroupCommitRunner.Run();
+}
+
 BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
 return 0;

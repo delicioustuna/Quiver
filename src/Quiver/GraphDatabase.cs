@@ -281,4 +281,19 @@ public sealed class GraphDatabaseOptions
     /// 推奨値: 100ms (検出遅延が短く、CPU オーバーヘッドも 1% 未満を狙える)。
     /// </summary>
     public TimeSpan? DeadlockDetectionInterval { get; set; }
+
+    /// <summary>
+    /// FT-27: WAL グループコミットの coalesce window。<see cref="TimeSpan.Zero"/> (既定) で無効
+    /// (各 commit の <c>FlushTo</c> が即座に fsync を起動する旧挙動)。0 より大きい値を指定すると、
+    /// 最初の commit が到着した時点でこの window の経過まで spin-wait して後続 commit を貯め、
+    /// 累積した全 commit を 1 回の fsync で一括処理する。
+    ///
+    /// 効果: 多 commit 並列ワークロードでは fsync 回数が激減し IOPS を節約できる。代償として
+    /// 単一 commit のレイテンシが (fsync 自体の時間 + window) まで増える。推奨値は 100µs
+    /// 〜 1ms。Windows の <c>Task.Delay</c> 解像度 (~15ms) を回避するため、内部実装は
+    /// <see cref="System.Diagnostics.Stopwatch"/> + <see cref="Thread.SpinWait"/> による
+    /// busy-wait で sub-millisecond 精度を確保している (専用 LongRunning スレッドで実行されるため
+    /// 他スレッドを阻害しない)。
+    /// </summary>
+    public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.Zero;
 }
