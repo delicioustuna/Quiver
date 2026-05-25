@@ -48,5 +48,11 @@ if (args.Length >= 1 && args[0] == "--ft27-groupcommit")
     return Ft27GroupCommitRunner.Run();
 }
 
+// FT-29: Per-tx PageImage coalescing standalone runner
+if (args.Length >= 1 && args[0] == "--ft29-coalesce")
+{
+    return Ft29PageImageCoalesceRunner.Run();
+}
+
 BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
 return 0;

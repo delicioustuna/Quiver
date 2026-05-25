@@ -140,7 +140,12 @@ public static class IndexWalAmplificationStandalone
         var dbPath = BenchTempDir.Create("ft20_standalone");
         try
         {
-            using var db = GraphDatabase.Open(dbPath);
+            // 並列シナリオは group commit window を opt-in にして coalesce 窓を広げる。
+            var options = scenario == "per-tx-parallel"
+                ? new GraphDatabaseOptions { GroupCommitWindow = TimeSpan.FromMicroseconds(100) }
+                : new GraphDatabaseOptions();
+
+            using var db = GraphDatabase.Open(dbPath, options);
             _ = db.Schema.GetOrCreateLabel("Doc");
             _ = db.Schema.GetOrCreatePropertyKey("idx");
             db.Schema.CreateIndex("idx_bench", "Doc", "idx", IndexKind.Int64Equality);
@@ -168,6 +173,32 @@ public static class IndexWalAmplificationStandalone
                         tx.IndexInsert("idx_bench", (long)i, node);
                         tx.Commit();
                     }
+                    break;
+                }
+                case "per-tx-parallel":
+                {
+                    // FT-29: 並列 per-tx insert で cross-tx coalescing 効果を測定。
+                    // group commit window を opt-in (100µs) して flush ループ内で
+                    // 複数 tx の PageImage を 1 drain に集約させる。
+                    int threadCount = Math.Max(8, Environment.ProcessorCount);
+                    int perThread = entryCount / threadCount;
+                    var threads = new Thread[threadCount];
+                    for (int t = 0; t < threadCount; t++)
+                    {
+                        int tid = t;
+                        threads[t] = new Thread(() =>
+                        {
+                            for (int i = 0; i < perThread; i++)
+                            {
+                                using var tx = db.BeginTransaction();
+                                var node = tx.CreateNode("Doc");
+                                tx.IndexInsert("idx_bench", tid * 1_000_000L + i, node);
+                                tx.Commit();
+                            }
+                        });
+                    }
+                    foreach (var th in threads) th.Start();
+                    foreach (var th in threads) th.Join();
                     break;
                 }
                 default: throw new ArgumentException($"Unknown scenario: {scenario}");

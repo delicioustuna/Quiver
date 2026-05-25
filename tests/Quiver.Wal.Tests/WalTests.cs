@@ -265,4 +265,288 @@ public class WalTests : IDisposable
         wal.FlushTo(lastLsn);
         wal.FlushedLsn.Should().BeGreaterThanOrEqualTo(lastLsn);
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // FT-29: Per-tx PageImage coalescing (WAL-level cross-tx shared buffer)
+    // ─────────────────────────────────────────────────────────────────────
+
+    private static byte[] MakePageImagePayload(byte fileKind, long pageId, byte fill, int pageSize = 64)
+    {
+        var page = new byte[pageSize];
+        Array.Fill(page, fill);
+        return WalPageImageCodec.Encode(fileKind, pageId, page);
+    }
+
+    [Fact]
+    public void Ft29_BufferedPageImage_IsNotWrittenUntilCommit()
+    {
+        using var wal = new WriteAheadLog(_dir);
+        var tx = new TransactionId(1);
+        var payload = MakePageImagePayload(fileKind: 1, pageId: 100, fill: 0xAB);
+
+        wal.BufferPageImage(tx, fileKind: 1, pageId: 100, payload);
+
+        // Commit / Abort / Checkpoint 系のレコード追加までは PageImage は WAL に書かれない。
+        wal.BytesWritten.Should().Be(0);
+        wal.CurrentLsn.Should().Be(-1);
+    }
+
+    [Fact]
+    public void Ft29_BufferedPageImage_IsDrainedOnCommit()
+    {
+        using var wal = new WriteAheadLog(_dir);
+        var tx = new TransactionId(1);
+        var payload = MakePageImagePayload(fileKind: 1, pageId: 100, fill: 0xAB);
+
+        wal.BufferPageImage(tx, 1, 100, payload);
+        long commitLsn = wal.Append(WalRecordType.Commit, tx, []);
+        wal.FlushTo(commitLsn);
+
+        // drain で PageImage (LSN=0)、続いて Commit (LSN=1) の順で書かれる。
+        wal.DrainedPageImageCount.Should().Be(1);
+        using var reader = wal.OpenReader(0);
+        reader.TryReadNext(out var rec0).Should().BeTrue();
+        rec0.Type.Should().Be(WalRecordType.PageImage);
+        rec0.TransactionId.Should().Be(tx);
+        reader.TryReadNext(out var rec1).Should().BeTrue();
+        rec1.Type.Should().Be(WalRecordType.Commit);
+        rec1.Lsn.Should().BeGreaterThan(rec0.Lsn);
+    }
+
+    [Fact]
+    public void Ft29_BufferedPageImage_SamePage_SameTx_LatestWins()
+    {
+        // intra-tx coalesce: 同一 tx の同一 (fileKind, pageId) は latest-wins。
+        using var wal = new WriteAheadLog(_dir);
+        var tx = new TransactionId(1);
+        var firstPayload = MakePageImagePayload(1, 100, 0xAA);
+        var secondPayload = MakePageImagePayload(1, 100, 0xCC);
+
+        wal.BufferPageImage(tx, 1, 100, firstPayload);
+        wal.BufferPageImage(tx, 1, 100, secondPayload);
+        wal.CoalescedPageImageCount.Should().Be(1, "同一 tx で 1 回 latest-wins 置換");
+
+        long commitLsn = wal.Append(WalRecordType.Commit, tx, []);
+        wal.FlushTo(commitLsn);
+
+        wal.DrainedPageImageCount.Should().Be(1);
+        using var reader = wal.OpenReader(0);
+        WalRecord pageImageRec = default;
+        while (reader.TryReadNext(out var rec))
+            if (rec.Type == WalRecordType.PageImage) pageImageRec = rec;
+        WalPageImageCodec.TryDecode(pageImageRec.Payload.Span, out _, out _, out var pageBytes).Should().BeTrue();
+        pageBytes[0].Should().Be(0xCC, "intra-tx latest-wins により最新 payload が残る");
+    }
+
+    [Fact]
+    public void Ft29_BufferedPageImage_SamePage_DifferentTx_DoesNotCoalesce()
+    {
+        // cross-tx の同一 page は coalesce しない: 既存エントリを drain して per-tx 帰属を維持。
+        // これにより undo Pass 3 で CLR_A が tx_B の committed content を壊す経路を排除する。
+        using var wal = new WriteAheadLog(_dir);
+        var txA = new TransactionId(1);
+        var txB = new TransactionId(2);
+
+        wal.BufferPageImage(txA, 1, 100, MakePageImagePayload(1, 100, 0xAA));
+        wal.BufferPageImage(txB, 1, 100, MakePageImagePayload(1, 100, 0xBB));
+
+        // Tx_A のエントリは drain されたはず (cross-tx の場合は即時 drain)。
+        wal.DrainedPageImageCount.Should().Be(1, "別 tx 衝突で既存エントリが drain される");
+        wal.CoalescedPageImageCount.Should().Be(0, "cross-tx は intra-tx coalesce ではない");
+
+        long commitLsn = wal.Append(WalRecordType.Commit, txB, []);
+        wal.FlushTo(commitLsn);
+
+        // Tx_A 分 + Tx_B 分 + Commit_B = PageImage 2 件 + Commit 1 件。
+        wal.DrainedPageImageCount.Should().Be(2);
+        var pageImages = new List<(TransactionId Tx, byte First)>();
+        using var reader = wal.OpenReader(0);
+        while (reader.TryReadNext(out var rec))
+        {
+            if (rec.Type == WalRecordType.PageImage)
+            {
+                WalPageImageCodec.TryDecode(rec.Payload.Span, out _, out _, out var pageBytes).Should().BeTrue();
+                pageImages.Add((rec.TransactionId, pageBytes[0]));
+            }
+        }
+        pageImages.Should().HaveCount(2);
+        pageImages.Should().Contain((txA, (byte)0xAA));
+        pageImages.Should().Contain((txB, (byte)0xBB));
+    }
+
+    [Fact]
+    public void Ft29_BufferedPageImage_DifferentPages_BothPersisted()
+    {
+        using var wal = new WriteAheadLog(_dir);
+        var tx = new TransactionId(1);
+
+        wal.BufferPageImage(tx, 1, 100, MakePageImagePayload(1, 100, 0xAA));
+        wal.BufferPageImage(tx, 1, 200, MakePageImagePayload(1, 200, 0xBB));
+        wal.BufferPageImage(tx, 2, 100, MakePageImagePayload(2, 100, 0xCC));
+
+        wal.CoalescedPageImageCount.Should().Be(0, "別キー同士は重複なし");
+
+        long commitLsn = wal.Append(WalRecordType.Commit, tx, []);
+        wal.FlushTo(commitLsn);
+
+        wal.DrainedPageImageCount.Should().Be(3);
+
+        int piCount = 0;
+        using var reader = wal.OpenReader(0);
+        while (reader.TryReadNext(out var rec))
+            if (rec.Type == WalRecordType.PageImage) piCount++;
+        piCount.Should().Be(3);
+    }
+
+    [Fact]
+    public void Ft29_EvictCoalescedPageImagesFor_RemovesEntriesForTx()
+    {
+        using var wal = new WriteAheadLog(_dir);
+        var txA = new TransactionId(1);
+        var txB = new TransactionId(2);
+
+        wal.BufferPageImage(txA, 1, 100, MakePageImagePayload(1, 100, 0xAA));
+        wal.BufferPageImage(txB, 1, 200, MakePageImagePayload(1, 200, 0xBB));
+
+        // Tx_A だけ evict → Tx_A のページは drain されず、Tx_B のページだけが書かれる。
+        wal.EvictCoalescedPageImagesFor(txA);
+
+        long commitLsn = wal.Append(WalRecordType.Commit, txB, []);
+        wal.FlushTo(commitLsn);
+
+        wal.DrainedPageImageCount.Should().Be(1);
+        using var reader = wal.OpenReader(0);
+        WalRecord rec = default;
+        bool found = false;
+        while (reader.TryReadNext(out rec))
+        {
+            if (rec.Type == WalRecordType.PageImage)
+            {
+                found = true;
+                rec.TransactionId.Should().Be(txB);
+            }
+        }
+        found.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Ft29_BufferedPageImage_DrainedOnAbort_AttributedToWritingTx()
+    {
+        using var wal = new WriteAheadLog(_dir);
+        var tx = new TransactionId(1);
+        wal.BufferPageImage(tx, 1, 100, MakePageImagePayload(1, 100, 0xAA));
+
+        long abortLsn = wal.Append(WalRecordType.Abort, tx, []);
+        wal.FlushTo(abortLsn);
+
+        // Abort 経路でも drain される (eviction 前に Abort が呼ばれた場合のフォールバック)。
+        // recovery 側で abortedTxs に入っているので PageImage は redo されない (correctness は維持)。
+        wal.DrainedPageImageCount.Should().Be(1);
+
+        int piCount = 0, abortCount = 0;
+        using var reader = wal.OpenReader(0);
+        while (reader.TryReadNext(out var rec))
+        {
+            if (rec.Type == WalRecordType.PageImage) piCount++;
+            if (rec.Type == WalRecordType.Abort) abortCount++;
+        }
+        piCount.Should().Be(1);
+        abortCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void Ft29_DirectAppendPageImage_StillWorks_BackwardCompat()
+    {
+        // 既存テストは wal.Append(PageImage, ...) を直接使用する。互換のため引き続き動作すること。
+        using var wal = new WriteAheadLog(_dir);
+        var tx = new TransactionId(7);
+        var payload = MakePageImagePayload(1, 100, 0xAA);
+
+        long lsn = wal.Append(WalRecordType.PageImage, tx, payload);
+        wal.FlushTo(lsn);
+
+        // coalesce 経路を経由しないため drain カウンタは増えない。
+        wal.DrainedPageImageCount.Should().Be(0);
+        wal.CoalescedPageImageCount.Should().Be(0);
+
+        using var reader = wal.OpenReader(0);
+        reader.TryReadNext(out var rec).Should().BeTrue();
+        rec.Type.Should().Be(WalRecordType.PageImage);
+        rec.TransactionId.Should().Be(tx);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // FT-29: WalPageImageCodec v2 (trim) codec-level tests
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Codec_v2_TrimsTrailingZeros_RoundTrip()
+    {
+        // 63 バイト non-zero + 8129 バイト zero の 8192 バイトページを encode/decode する。
+        var page = new byte[WalPageImageCodec.FullPageBytes];
+        for (int i = 0; i < 63; i++) page[i] = (byte)(i + 1);
+        // 末尾 8129 バイトは初期値 0 のまま。
+
+        var encoded = WalPageImageCodec.Encode(fileKind: 1, pageId: 100, page);
+        // payload = v2 header (12B) + 63 バイト (= 末尾 zero 直前まで)。
+        // ただし MinKeptBytes=32 のため 63 >= 32 で trim 影響なし → 12+63 = 75 バイト前後。
+        encoded.Length.Should().BeInRange(WalPageImageCodec.HeaderLengthV2, WalPageImageCodec.HeaderLengthV2 + WalPageImageCodec.FullPageBytes);
+        encoded.Length.Should().BeLessThan(200, "sparse page は trim で大幅に小さくなる");
+
+        WalPageImageCodec.TryDecode(encoded, out byte fileKind, out long pageId, out byte[] pageBytes).Should().BeTrue();
+        fileKind.Should().Be(1);
+        pageId.Should().Be(100);
+        pageBytes.Length.Should().Be(WalPageImageCodec.FullPageBytes);
+        for (int i = 0; i < 63; i++) pageBytes[i].Should().Be((byte)(i + 1));
+        for (int i = 63; i < WalPageImageCodec.FullPageBytes; i++) pageBytes[i].Should().Be(0);
+    }
+
+    [Fact]
+    public void Codec_v1_StillDecodes_BackwardCompat()
+    {
+        // 旧 v1 形式 (8192 バイト全保持) を手動構築して TryDecode が復元できることを確認。
+        // pre-FT-29 DB に残る WAL レコードを安全に読み出せる互換性保証。
+        var v1Payload = new byte[WalPageImageCodec.HeaderLength + WalPageImageCodec.FullPageBytes];
+        v1Payload[0] = 1; // version=1
+        v1Payload[1] = 7; // fileKind
+        System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(v1Payload.AsSpan(2), 42L);
+        v1Payload[WalPageImageCodec.HeaderLength + 100] = 0xEF; // 適当な位置に non-zero
+
+        WalPageImageCodec.TryDecode(v1Payload, out byte fileKind, out long pageId, out byte[] pageBytes).Should().BeTrue();
+        fileKind.Should().Be(7);
+        pageId.Should().Be(42L);
+        pageBytes.Length.Should().Be(WalPageImageCodec.FullPageBytes);
+        pageBytes[100].Should().Be(0xEF);
+    }
+
+    [Fact]
+    public void Codec_v2_FullPage_NoTrim()
+    {
+        // 全部非ゼロのページは trim 効果なし。encoded サイズが v1 と同等になることを確認 (regression なし)。
+        var page = new byte[WalPageImageCodec.FullPageBytes];
+        for (int i = 0; i < page.Length; i++) page[i] = (byte)((i & 0xFE) | 1); // 全て非ゼロ
+
+        var encoded = WalPageImageCodec.Encode(fileKind: 1, pageId: 5, page);
+        encoded.Length.Should().Be(WalPageImageCodec.HeaderLengthV2 + WalPageImageCodec.FullPageBytes,
+            "full page は trim 効果なしで v2 header + 8192 バイトのまま");
+
+        WalPageImageCodec.TryDecode(encoded, out _, out _, out byte[] pageBytes).Should().BeTrue();
+        pageBytes.Should().BeEquivalentTo(page);
+    }
+
+    [Fact]
+    public void Codec_v2_PreservesPageHeader_When_AllZeroExceptHeader()
+    {
+        // ページが全部ゼロでも MinKeptBytes (32) は残す保険ロジックが効くこと。
+        var page = new byte[WalPageImageCodec.FullPageBytes];
+        // 全部ゼロ。
+
+        var encoded = WalPageImageCodec.Encode(fileKind: 2, pageId: 9, page);
+        encoded.Length.Should().Be(WalPageImageCodec.HeaderLengthV2 + WalPageImageCodec.MinKeptBytes,
+            "全ゼロでも 32B (MinKeptBytes) は残す");
+
+        WalPageImageCodec.TryDecode(encoded, out _, out _, out byte[] pageBytes).Should().BeTrue();
+        pageBytes.Length.Should().Be(WalPageImageCodec.FullPageBytes);
+        pageBytes.Should().AllBeEquivalentTo((byte)0);
+    }
 }

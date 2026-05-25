@@ -115,6 +115,8 @@ internal sealed class Transaction : ITransaction
             // FT-15: roll the page changes back in place before discarding the
             // context, then mark the transaction aborted on the WAL.
             try { RollBackInPlace(); } catch { }
+            // FT-29: drain 前に自分の PageImage を coalesce バッファから除去 (最適化)。
+            try { _wal.EvictCoalescedPageImagesFor(Id); } catch { }
             try { _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty); } catch { }
             try { WalPageContext.End(); } catch { }
             try { MvccContext.End(); } catch { }
@@ -135,6 +137,10 @@ internal sealed class Transaction : ITransaction
         // edges / properties are invisible to subsequent transactions. Must run
         // before WalPageContext.End() drops the per-transaction before-image buffer.
         RollBackInPlace();
+        // FT-29: 共有 coalesce バッファに残った自分の PageImage を破棄してから Abort を書く。
+        // (Append(Abort) の drain で aborted tx の after-image が WAL に漏れるのを抑制する最適化。
+        // 漏れても recovery で abortedTxs により skip されるため correctness には影響しない。)
+        _wal.EvictCoalescedPageImagesFor(Id);
         _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty);
         WalPageContext.End();
         MvccContext.End();

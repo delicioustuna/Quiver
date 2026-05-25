@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using Quiver.Core;
 
 namespace Quiver.Wal;
@@ -102,6 +101,10 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     // (fileKind, pageId) → エンコード済み PageImage ペイロード。
     // 案C: 1 トランザクション中に同一ページを何度触っても、コミット時に最新版 1 件だけを
     // WAL に書く。これにより FlushMeta() 等によるホットページの再ログ増幅を解消する。
+    // FT-29: FlushPending では Append ではなく WAL の coalesce バッファへ投入することで、
+    // 並行 tx 間でも latest-wins de-dup が効くようにする (同一ページに対する書き込みは
+    // PagedFile のフレーム X-lock で直列化されるが、FlushPending と Append(Commit) の間に
+    // 別 tx が同一ページを上書きするケースに対応)。
     private readonly Dictionary<(byte FileKind, long PageId), byte[]> _pending = new();
 
     // FT-15 / FT-23: (fileKind, pageId) → エンコード済み before-image (CLR ペイロード)。
@@ -127,22 +130,16 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
 
     /// <summary>
     /// PageImage をトランザクションバッファに記録 (または上書き) する。
-    /// ペイロード形式: [version=1:1][fileKind:1][pageId:8][pageBytes:N]
+    /// FT-29: ペイロードは <see cref="WalPageImageCodec.Encode"/> 経由で v2 形式 (末尾ゼロ trim) に。
+    /// 同一ページの 2 回目以降の書き込みは新しい trimmed payload で置き換える
+    /// (intra-tx coalesce: latest-wins)。
     /// </summary>
     public long LogPageImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
     {
         var key = (fileKind, pageId);
-        int payloadLen = 10 + pageBytes.Length;
-        // 同一ページは常に同じページサイズなのでバッファを再利用し、最新内容で上書きする。
-        if (!_pending.TryGetValue(key, out var payload) || payload.Length != payloadLen)
-        {
-            payload = new byte[payloadLen];
-            payload[0] = 1;
-            payload[1] = fileKind;
-            BinaryPrimitives.WriteInt64LittleEndian(payload.AsSpan(2), pageId);
-            _pending[key] = payload;
-        }
-        pageBytes.CopyTo(payload.AsSpan(10));
+        // FT-29: trim 後の payload はページ毎に長さが変わるので、buffer の再利用ではなく
+        // 毎回 Encode → 新規 byte[] を割り当てる。sparse page では allocation も小さい (gen0 で安価)。
+        _pending[key] = WalPageImageCodec.Encode(fileKind, pageId, pageBytes);
         return -1L;
     }
 
@@ -177,15 +174,18 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     }
 
     /// <summary>
-    /// バッファした PageImage をすべて WAL へ追記し、バッファをクリアする。
+    /// バッファした PageImage をすべて WAL の共有 coalesce バッファへ投入し、ローカルの
+    /// per-tx バッファをクリアする。FT-29: 実際の WAL 追記は次の Commit / CheckpointBegin /
+    /// CheckpointEnd / Abort 出力時にまとめて行われる。同一 (fileKind, pageId) は WAL レベルで
+    /// latest-wins de-dup される。
     /// アボート時は呼ばれず、バッファは <see cref="WalPageContext.End"/> による
     /// コンテキスト破棄とともに破棄される (アボートしたトランザクションのページは WAL に残らない)。
     /// </summary>
     public void FlushPending()
     {
         if (_pending.Count == 0) return;
-        foreach (var payload in _pending.Values)
-            _wal.Append(WalRecordType.PageImage, _txId, payload);
+        foreach (var kv in _pending)
+            _wal.BufferPageImage(_txId, kv.Key.FileKind, kv.Key.PageId, kv.Value);
         _pending.Clear();
     }
 

@@ -28,6 +28,18 @@ public sealed class WriteAheadLog : IWriteAheadLog
     private long _flushBatchCount;
     private long _flushRequestCount;
 
+    // FT-29: 複数 tx の PageImage を Commit/CheckpointBegin/CheckpointEnd の直前にまとめて
+    // drain する共有 coalesce バッファ。`(fileKind, pageId)` ごとに「最後に書いた tx」の
+    // payload を 1 件だけ保持し、同一ページに対する重複 PageImage 出力を抑制する。
+    // 並行 tx が異なるページを同時にコミットすると drain 段階で 1 バッチに集約され、
+    // ロック回数も減るため WAL 書き込みオーバヘッドが下がる。
+    // 同一ページに対する書き込みは PagedFile のフレーム X-lock により直列化されるが、
+    // 「Tx_A の FlushPending 〜 Append(Commit_A)」の窓に Tx_B が同一ページを上書きする
+    // 経路は存在しうるため、latest-wins de-dup が必要。
+    private readonly Dictionary<(byte FileKind, long PageId), CoalescedPageImage> _coalescedPageImages = new();
+    private long _coalescedPageImageCount;
+    private long _drainedPageImageCount;
+
     private long _nextLsn;
     private long _flushedLsn = -1;
     private long _bytesWritten;
@@ -57,6 +69,17 @@ public sealed class WriteAheadLog : IWriteAheadLog
     /// </summary>
     public long FlushRequestCount => Volatile.Read(ref _flushRequestCount);
 
+    /// <summary>
+    /// FT-29: 同一 (fileKind, pageId) が coalesce バッファで上書きされた回数 (cross-tx
+    /// de-dup ヒット数)。<c>BufferPageImage</c> が既存エントリを置き換えた件数の累計。
+    /// </summary>
+    public long CoalescedPageImageCount => Volatile.Read(ref _coalescedPageImageCount);
+
+    /// <summary>
+    /// FT-29: coalesce バッファから drain されて WAL レコード化された PageImage 件数の累計。
+    /// </summary>
+    public long DrainedPageImageCount => Volatile.Read(ref _drainedPageImageCount);
+
     public WriteAheadLog(string directory, long segmentCapacity = DefaultSegmentCapacity)
         : this(directory, segmentCapacity, TimeSpan.Zero) { }
 
@@ -83,30 +106,126 @@ public sealed class WriteAheadLog : IWriteAheadLog
         if (payload.Length > MaxPayloadSize)
             throw new StorageException($"WAL payload size {payload.Length} exceeds max {MaxPayloadSize}");
 
-        int recordSize = HeaderSize + payload.Length;
-
         lock (_writeLock)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
-            if (_segBytesUsed + _bufPos + recordSize > _segmentCapacity)
+            // FT-29: Commit / Checkpoint sentinel の直前で coalesce バッファを drain。
+            // PageImage LSN < Commit/CheckpointBegin/End LSN の不変条件を保ち、
+            // recovery が PageImage を Commit より先に観測できることを保証する。
+            // (torn-Commit heuristic は「PageImage が durable で Commit が無い」場合を
+            // committed 扱いするため、PageImage は必ず Commit より先に LSN を取る。)
+            if (type == WalRecordType.Commit ||
+                type == WalRecordType.CheckpointBegin ||
+                type == WalRecordType.CheckpointEnd ||
+                type == WalRecordType.Checkpoint ||
+                type == WalRecordType.Abort)
             {
-                WriteMarkerLocked(WalRecordType.EndOfSegment);
-                FlushBufferLocked();
-                RollSegmentLocked();
-            }
-            else if (_bufPos + recordSize > WriteBufferSize)
-            {
-                FlushBufferLocked();
+                DrainCoalesceBufferLocked();
             }
 
-            long lsn = _nextLsn++;
-            _segFirstLsn.TryAdd(_currentSegIdx, lsn);
-            WriteRecordToBuffer(lsn, type, tx.Value, payload);
-            _bytesWritten += recordSize;
-            return lsn;
+            return WriteRecordLocked(type, tx.Value, payload);
         }
     }
+
+    private long WriteRecordLocked(WalRecordType type, long txIdValue, ReadOnlySpan<byte> payload)
+    {
+        int recordSize = HeaderSize + payload.Length;
+
+        if (_segBytesUsed + _bufPos + recordSize > _segmentCapacity)
+        {
+            WriteMarkerLocked(WalRecordType.EndOfSegment);
+            FlushBufferLocked();
+            RollSegmentLocked();
+        }
+        else if (_bufPos + recordSize > WriteBufferSize)
+        {
+            FlushBufferLocked();
+        }
+
+        long lsn = _nextLsn++;
+        _segFirstLsn.TryAdd(_currentSegIdx, lsn);
+        WriteRecordToBuffer(lsn, type, txIdValue, payload);
+        _bytesWritten += recordSize;
+        return lsn;
+    }
+
+    /// <summary>
+    /// FT-29: PageImage を共有 coalesce バッファへ投入する。
+    ///
+    /// 同一 tx の同一 `(fileKind, pageId)` は latest-wins で de-dup (intra-tx coalesce)。
+    /// 異なる tx が同一キーで来た場合は <b>既存エントリを先に drain</b> してから新エントリを
+    /// 入れる (cross-tx は coalesce しない)。これにより 1 PageImage レコードは必ず単一の
+    /// "writer tx" にしか紐付かず、Pass 3 undo の CLR が別 tx の committed content を
+    /// 巻き戻す危険を完全に排除する (= correctness 優先設計)。
+    ///
+    /// 実際の WAL 追記は次の <see cref="WalRecordType.Commit"/> /
+    /// <see cref="WalRecordType.CheckpointBegin"/> / <see cref="WalRecordType.CheckpointEnd"/> /
+    /// <see cref="WalRecordType.Abort"/> 出力時に <see cref="DrainCoalesceBufferLocked"/> で
+    /// まとめて行う。
+    /// </summary>
+    public void BufferPageImage(TransactionId tx, byte fileKind, long pageId, byte[] payload)
+    {
+        if (payload == null) throw new ArgumentNullException(nameof(payload));
+        if (payload.Length > MaxPayloadSize)
+            throw new StorageException($"WAL payload size {payload.Length} exceeds max {MaxPayloadSize}");
+
+        var key = (fileKind, pageId);
+        lock (_writeLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_coalescedPageImages.TryGetValue(key, out var existing))
+            {
+                if (existing.Tx.Value != tx.Value)
+                {
+                    // 別 tx が同一ページに書こうとした: 既存エントリを drain して per-tx 帰属を
+                    // 保持する (cross-tx coalesce は意図的に行わない — recovery undo の安全性のため)。
+                    WriteRecordLocked(WalRecordType.PageImage, existing.Tx.Value, existing.Payload);
+                    Interlocked.Increment(ref _drainedPageImageCount);
+                }
+                else
+                {
+                    // 同一 tx の同一ページに対する再書き込み = intra-tx coalesce hit。
+                    Interlocked.Increment(ref _coalescedPageImageCount);
+                }
+            }
+            _coalescedPageImages[key] = new CoalescedPageImage(tx, payload);
+        }
+    }
+
+    /// <summary>
+    /// FT-29: <paramref name="tx"/> が coalesce バッファに残しているエントリをすべて除去する。
+    /// abort 経路から呼ばれ、ロールバックされた tx の PageImage が後続の drain で WAL へ漏れるのを防ぐ。
+    /// </summary>
+    public void EvictCoalescedPageImagesFor(TransactionId tx)
+    {
+        lock (_writeLock)
+        {
+            if (_disposed || _coalescedPageImages.Count == 0) return;
+            List<(byte, long)>? remove = null;
+            foreach (var kv in _coalescedPageImages)
+            {
+                if (kv.Value.Tx.Value == tx.Value)
+                    (remove ??= new()).Add(kv.Key);
+            }
+            if (remove == null) return;
+            foreach (var key in remove)
+                _coalescedPageImages.Remove(key);
+        }
+    }
+
+    private void DrainCoalesceBufferLocked()
+    {
+        if (_coalescedPageImages.Count == 0) return;
+        foreach (var entry in _coalescedPageImages.Values)
+        {
+            WriteRecordLocked(WalRecordType.PageImage, entry.Tx.Value, entry.Payload);
+            Interlocked.Increment(ref _drainedPageImageCount);
+        }
+        _coalescedPageImages.Clear();
+    }
+
+    private readonly record struct CoalescedPageImage(TransactionId Tx, byte[] Payload);
 
     public void FlushTo(long lsn)
     {
@@ -198,6 +317,14 @@ public sealed class WriteAheadLog : IWriteAheadLog
     public void Dispose()
     {
         if (_disposed) return;
+        // FT-29: Dispose 完了前に coalesce バッファを最終 drain する。
+        // 残っているのは「FlushPending したが Commit/Abort まだ」の窓で Dispose された
+        // ケース (typical には正常 shutdown の最終 checkpoint で空になっているはず) で、
+        // recovery 側で「PageImage あり Commit 無し」= 正常な torn-Commit 経路として扱われる。
+        lock (_writeLock)
+        {
+            DrainCoalesceBufferLocked();
+        }
         _disposed = true;
         _flushChannel.Writer.TryComplete();
         try { _flushTask.GetAwaiter().GetResult(); } catch { }

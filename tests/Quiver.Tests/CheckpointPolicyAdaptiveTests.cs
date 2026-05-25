@@ -70,8 +70,11 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
     [Fact]
     public void Adaptive_policy_shrinks_threshold_under_per_tx_amplification()
     {
-        // per-tx 100 件: 各 tx は数 KB の WAL を吐く (Begin + PageImage 複数 + Commit)。
-        // amp > 1KB なので Adaptive は threshold を default 16MB から min=4MB に縮める。
+        // 各 tx で 100 ノード作成して per-tx WAL 数 KB 以上を強制する。
+        // FT-29 (PageImage trim) 後は sparse page では trim が効くため、
+        // 単一 node tx は数百バイト/tx と非常に小さくなる (Adaptive はむしろ threshold を
+        // 拡大する方向に動く)。本テストの「Adaptive が threshold を縮める」挙動を確かめるには
+        // FT-29 でも trim 効果が限定的になる「ページ充填率の高い workload」を流す必要がある。
         var opts = new GraphDatabaseOptions
         {
             WalSegmentSize = 256 * 1024,
@@ -86,10 +89,14 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
         using var db = GraphDatabase.Open(_dir, opts);
 
         // warmup 完了まで commit を流す (warmup 閾値 = max(16, window/64) = 16)。
+        // 各 tx で 300 ノードを作成し、複数ページを大きく dirty 化することで FT-29 trim 効果を抑え、
+        // per-tx で十分な WAL バイト数 (~16KB 以上) を発生させる。
+        // Adaptive モデル: recommended = 5s × 50MB/s × 1KB / avg。
+        // 16MB threshold 以下にするには avg ≥ 16KB が必要 → 約 300 ノード/tx。
         for (int i = 0; i < 32; i++)
         {
             using var tx = db.BeginTransaction();
-            tx.CreateNode("Person");
+            for (int j = 0; j < 300; j++) tx.CreateNode("Person");
             tx.Commit();
         }
 
