@@ -4,6 +4,17 @@ using Quiver.Storage;
 
 namespace Quiver.Stores;
 
+/// <summary>OP-3 vacuum: 可視性フィルタを通さない raw ノードレコード。</summary>
+internal struct RawNodeRecord
+{
+    public bool InUse;
+    public RelationshipId FirstRelId;
+    public PropertyId FirstPropId;
+    public LabelId Label;
+    public long Xmin;
+    public long Xmax;
+}
+
 // FT-26 v2 (MVCC) record layout (31 bytes):
 //  0 Flags(1) | 1 FirstRelId(6) | 7 FirstPropId(6) | 13 LabelId(2) | 15 Xmin(8) | 23 Xmax(8)
 //
@@ -314,6 +325,43 @@ internal sealed class NodeStore : INodeStore
 
     /// <summary>OP-3 / テスト用。free list 先頭 (-1 で空)。</summary>
     internal long FreeHead => _freeHead;
+
+    /// <summary>
+    /// OP-3 vacuum: 可視性フィルタを通さない raw 読み取り。<paramref name="id"/> 範囲外は
+    /// InUse=false の値を返す。
+    /// </summary>
+    internal RawNodeRecord ReadRaw(long id)
+    {
+        if (id < 0 || id >= _hwm) return default;
+        var (pageId, off) = Location(id);
+        using var h = _file.PinForRead(pageId);
+        ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
+        return new RawNodeRecord
+        {
+            InUse = (rec[0] & FlagInUse) != 0,
+            FirstRelId = new RelationshipId(RecordHelpers.ReadInt48(rec[1..])),
+            FirstPropId = new PropertyId(RecordHelpers.ReadInt48(rec[7..])),
+            Label = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(rec[13..])),
+            Xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[XminOffset..]),
+            Xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]),
+        };
+    }
+
+    /// <summary>OP-3 vacuum: ノードの FirstPropId を書き換える。chain 整理用。</summary>
+    internal void UpdateFirstPropId(NodeId nodeId, PropertyId newFirstPropId)
+    {
+        var (pageId, off) = Location(nodeId.Value);
+        var ph = _file.PinForWrite(pageId);
+        RecordHelpers.WriteInt48(ph.Data[(off + 7)..], newFirstPropId.Value);
+        _file.UnpinDirty(pageId, 0);
+    }
+
+    /// <summary>OP-3 vacuum: ノードの FirstRelId raw 取得。<see cref="GetFirstRelId"/> の internal エイリアス。</summary>
+    internal RelationshipId GetFirstRelIdRaw(NodeId nodeId) => GetFirstRelId(nodeId);
+
+    /// <summary>OP-3 vacuum: ノードの FirstRelId 書き換え。<see cref="UpdateFirstRelId"/> の internal エイリアス。</summary>
+    internal void UpdateFirstRelIdRaw(NodeId nodeId, RelationshipId newFirstRelId)
+        => UpdateFirstRelId(nodeId, newFirstRelId);
 
     // --- private ---
 

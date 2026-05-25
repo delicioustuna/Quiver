@@ -1,4 +1,5 @@
 using Quiver.Logical;
+using Quiver.Maintenance;
 using Quiver.Stores;
 using Quiver.Transactions;
 using Microsoft.Extensions.Logging;
@@ -213,6 +214,20 @@ public sealed class GraphDatabase : IDisposable
     public void CreateSnapshot(string targetDirectory, SnapshotOptions? options = null)
         => _backend.CreateSnapshot(targetDirectory, options);
 
+    /// <summary>
+    /// OP-3: 削除済みエンティティ (FT-26 MVCC の dead version) を物理回収する vacuum を
+    /// 同期的に実行する。アクティブトランザクションがあるときは安全側で何もせず
+    /// <see cref="VacuumReport.Skipped"/> = true で返る。
+    ///
+    /// 現状の MVP はノードストアのみを対象とする (リレーション / プロパティ / 索引の
+    /// 物理回収は後続ステップで拡張)。<see cref="VacuumOptions.Mode"/> に
+    /// <see cref="VacuumMode.DryRun"/> を渡せば書き込み無しで実行できる。
+    ///
+    /// バイナリ以外のバックエンドはサポート対象外 (<see cref="NotSupportedException"/>)。
+    /// </summary>
+    public VacuumReport Vacuum(VacuumOptions? options = null)
+        => _backend.Vacuum(options);
+
     /// <summary>下層バックエンドを破棄する。</summary>
     public void Dispose() => _backend.Dispose();
 }
@@ -350,4 +365,12 @@ public sealed class GraphDatabaseOptions
     /// 他スレッドを阻害しない)。
     /// </summary>
     public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.Zero;
+
+    /// <summary>
+    /// OP-3: <c>true</c> のとき、バックエンドが提供するバックグラウンドワーカーで
+    /// 周期的に <see cref="GraphDatabase.Vacuum"/> を起動する。既定 <c>false</c>
+    /// (運用者が明示的に <see cref="GraphDatabase.Vacuum"/> を呼ぶ前提)。
+    /// MVP では本フラグは設定値として保持されるのみで、自動起動経路は未実装。
+    /// </summary>
+    public bool AutoVacuum { get; set; } = false;
 }

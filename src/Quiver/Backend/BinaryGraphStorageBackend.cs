@@ -1,6 +1,7 @@
 using Quiver.Core;
 using Quiver.Index;
 using Quiver.Logical;
+using Quiver.Maintenance;
 using Quiver.Storage;
 using Quiver.Stores;
 using Quiver.Transactions;
@@ -212,6 +213,18 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
     ///
     /// target の recovery 後 LSN は snapshot WAL 末尾 LSN まで進む。
     /// </summary>
+    /// <summary>
+    /// OP-3: ノードストアの dead version 物理回収 + committed registry の prune。
+    /// アクティブトランザクションが残っているときは安全側で何もせず Skip 報告する。
+    /// </summary>
+    public VacuumReport Vacuum(VacuumOptions? options = null)
+    {
+        var vac = new Vacuum(
+            _nodeStore, _relStore, _propStore,
+            _txManager, _txManager.CommittedRegistry);
+        return vac.Run(options);
+    }
+
     public void CreateSnapshot(string targetDirectory, SnapshotOptions? options = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(targetDirectory);

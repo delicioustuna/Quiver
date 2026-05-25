@@ -109,6 +109,24 @@ internal sealed class TransactionManager : ITransactionManager
 
     public int ActiveCount => _active.Count;
 
+    /// <summary>
+    /// OP-3: vacuum 用 visibility horizon。「これ未満の TxId が刻まれた dead version は
+    /// 物理回収しても誰のスナップショットも壊さない」境界を返す。
+    ///
+    /// 計算: 現在 active な tx の <see cref="Transaction.Id"/> 最小値。active が 0 件なら
+    /// 次に採番される TxId (= _nextTxId)。戻り値以上の TxId を xmax に持つ dead version は
+    /// まだ古い snapshot から参照され得る可能性があるので vacuum は触れてはならない。
+    /// </summary>
+    internal long GetVisibilityHorizon()
+    {
+        long oldest = long.MaxValue;
+        foreach (var tx in _active.Values)
+            if (tx.Id.Value < oldest) oldest = tx.Id.Value;
+        if (oldest == long.MaxValue)
+            return Volatile.Read(ref _nextTxId);
+        return oldest;
+    }
+
     public long OldestActiveLsn
     {
         get

@@ -245,6 +245,227 @@ internal sealed class RelationshipStore : IRelationshipStore
     }
 
     /// <summary>
+    /// OP-3 vacuum: ノードストアと協調してリレーション双方向 chain を再構築し、
+    /// dead version を物理回収する。実行手順:
+    /// <list type="number">
+    ///   <item>各 live ノードの chain を walk → live rel だけで chain 再構築 (node.FirstRelId 更新含む)。
+    ///         dead rel は reclaim 集合に追加。</item>
+    ///   <item>残った rel slot を走査し、reclaim 集合に未登録の dead rel (両端 dead ノードに繋がる、など)
+    ///         を追加。</item>
+    ///   <item>reclaim 集合の各 slot を物理 free (clear + free list 投入)。</item>
+    /// </list>
+    /// 呼び出し前提: アクティブトランザクション 0 件、ノード vacuum **前**。
+    /// </summary>
+    /// <returns>物理回収したリレーションシップ版数。</returns>
+    internal int VacuumDeadVersions(NodeStore nodeStore, long horizonTxId, CommittedTxRegistry committed)
+    {
+        var reclaimSet = new HashSet<long>();
+
+        // Pass 1: 各ノード (live / dead 区別なく raw inUse=1) の chain を rebuild。
+        // dead ノードの chain 上の rel は全て dead 想定 (DeleteNode の cascade による) → 全部 reclaim 集合へ。
+        long nodeHwm = nodeStore.Hwm;
+        for (long nid = 0; nid < nodeHwm; nid++)
+        {
+            var raw = nodeStore.ReadRaw(nid);
+            if (!raw.InUse) continue;
+            if (!raw.FirstRelId.IsValid) continue;
+
+            bool nodeWillBeReclaimed = raw.Xmax != 0
+                && raw.Xmax < horizonTxId
+                && committed.IsCommitted(raw.Xmax);
+
+            RebuildChainForNode(new NodeId(nid), raw.FirstRelId, nodeStore,
+                horizonTxId, committed, reclaimSet, nodeWillBeReclaimed);
+        }
+
+        // Pass 2: 全 rel slot を走査し、まだ reclaim 集合に居ない dead rel を拾う。
+        for (long id = 0; id < _hwm; id++)
+        {
+            if (reclaimSet.Contains(id)) continue;
+            var (pageId, off) = Location(id);
+            using var h = _file.PinForRead(pageId);
+            ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
+            bool inUse = (rec[0] & FlagInUse) != 0;
+            if (!inUse) continue;
+            long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
+            bool dead = xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax);
+            if (dead) reclaimSet.Add(id);
+        }
+
+        // Pass 3: reclaim 集合の slot を物理 free。
+        foreach (var id in reclaimSet)
+            ReclaimSlot(id);
+
+        if (reclaimSet.Count > 0)
+        {
+            ShrinkHwmFromTrailingFreeSlots();
+            FlushMeta();
+        }
+        return reclaimSet.Count;
+    }
+
+    private void RebuildChainForNode(NodeId node, RelationshipId head,
+        NodeStore nodeStore, long horizonTxId, CommittedTxRegistry committed,
+        HashSet<long> reclaimSet, bool nodeWillBeReclaimed)
+    {
+        // chain を遍歴して live rel 列を抜き出す。各 chain entry は (relId, side)。
+        // side: このノードが source か target か。
+        var entries = new List<(RelationshipId Id, bool NodeIsSource, bool Dead)>();
+        var cur = head;
+        long guard = _hwm + 1;
+        while (cur.IsValid && guard-- > 0)
+        {
+            var (pageId, off) = Location(cur.Value);
+            bool nodeIsSource;
+            bool dead;
+            RelationshipId nextOnThisSide;
+            using (var h = _file.PinForRead(pageId))
+            {
+                ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
+                bool inUse = (rec[0] & FlagInUse) != 0;
+                long src = RecordHelpers.ReadInt48(rec[1..]);
+                long tgt = RecordHelpers.ReadInt48(rec[7..]);
+                nodeIsSource = src == node.Value;
+                bool nodeIsTarget = tgt == node.Value;
+                if (!nodeIsSource && !nodeIsTarget)
+                {
+                    // chain 整合性が崩れている (FT-15/17 のリカバリで起きうる) → ここで打ち切る
+                    break;
+                }
+                nextOnThisSide = nodeIsSource
+                    ? new RelationshipId(RecordHelpers.ReadInt48(rec[21..])) // srcNext
+                    : new RelationshipId(RecordHelpers.ReadInt48(rec[33..])); // tgtNext
+                if (!inUse)
+                {
+                    dead = true;
+                }
+                else
+                {
+                    long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
+                    dead = xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax);
+                }
+            }
+            entries.Add((cur, nodeIsSource, dead));
+            if (dead) reclaimSet.Add(cur.Value);
+            cur = nextOnThisSide;
+        }
+
+        if (nodeWillBeReclaimed)
+        {
+            // ノード自体が消えるので chain head 更新は不要。
+            // dead だけでなく live (xmax=0) もこのノードからは参照不能になる:
+            // - 相手ノードが live なら相手の chain rebuild で扱われる (= live 維持)。
+            // - 相手ノードも dead なら、reclaim 集合に入る (Pass 2 で拾われる)。
+            // 何もしなくて良い。
+            return;
+        }
+
+        // live ノード: live entries だけ残して chain を再構築。
+        RelationshipId newHead = RelationshipId.Invalid;
+        for (int i = entries.Count - 1; i >= 0; i--)
+        {
+            var (id, nodeIsSource, dead) = entries[i];
+            if (dead) continue;
+            // この rel の "node-side" prev/next を再リンク。
+            // newHead (= 後続) と、後で前任者が書き込む prev=Invalid を初期値にしておく。
+            var (pageId, off) = Location(id.Value);
+            var ph = _file.PinForWrite(pageId);
+            // nodeIsSource ? srcPrev=15/srcNext=21 : tgtPrev=27/tgtNext=33
+            int prevOff = nodeIsSource ? 15 : 27;
+            int nextOff = nodeIsSource ? 21 : 33;
+            RecordHelpers.WriteInt48(ph.Data[(off + prevOff)..], RelationshipId.Invalid.Value);
+            RecordHelpers.WriteInt48(ph.Data[(off + nextOff)..], newHead.Value);
+            _file.UnpinDirty(pageId, 0);
+
+            if (newHead.IsValid)
+            {
+                // newHead 側の prev を id にする。newHead の source/target どちらが node かは
+                // 後続 (前に処理した) entry の nodeIsSource フラグで判明している。
+                // entries[i+1...] の中で最初の live のものが newHead だが、ここでは順序逆走で
+                // 一つ前の live を覚えておけば良い → リファクタする。
+                // 簡略のため後続パスで再走する。
+            }
+            newHead = id;
+        }
+
+        // newHead の前任者 (= newHead 自身の prev) は Invalid のままで、後続の prev は前任者を指す。
+        // 上のループでは prev を Invalid に固定したので、もう一度走って各 live の prev を正しく書く。
+        RelationshipId prev = RelationshipId.Invalid;
+        foreach (var (id, nodeIsSource, dead) in entries)
+        {
+            if (dead) continue;
+            var (pageId, off) = Location(id.Value);
+            var ph = _file.PinForWrite(pageId);
+            int prevOff = nodeIsSource ? 15 : 27;
+            RecordHelpers.WriteInt48(ph.Data[(off + prevOff)..], prev.Value);
+            _file.UnpinDirty(pageId, 0);
+            prev = id;
+        }
+
+        // ノードの FirstRelId を更新。
+        nodeStore.UpdateFirstRelIdRaw(node, newHead);
+    }
+
+    private void ReclaimSlot(long id)
+    {
+        var (pageId, off) = Location(id);
+        var ph = _file.PinForWrite(pageId);
+        Span<byte> rec = ph.Data.Slice(off, RecordSize);
+        rec.Clear();
+        // free list ポインタは byte[1..7] (48-bit)。NodeStore と同じ。
+        RecordHelpers.WriteInt48(rec[1..], _freeHead);
+        _file.UnpinDirty(pageId, 0);
+        _freeHead = id;
+    }
+
+    private void ShrinkHwmFromTrailingFreeSlots()
+    {
+        long oldHwm = _hwm;
+        long newHwm = oldHwm;
+        while (newHwm > 0)
+        {
+            long candidate = newHwm - 1;
+            var (pageId, off) = Location(candidate);
+            using var h = _file.PinForRead(pageId);
+            bool inUse = (h.Data[off] & FlagInUse) != 0;
+            if (inUse) break;
+            newHwm--;
+        }
+        if (newHwm == oldHwm) return;
+
+        long head = _freeHead;
+        var keep = new List<long>();
+        long guard = oldHwm + 1;
+        while (head >= 0 && guard-- > 0)
+        {
+            if (head < newHwm) keep.Add(head);
+            var (pageId, off) = Location(head);
+            using var h = _file.PinForRead(pageId);
+            long next = RecordHelpers.ReadInt48(h.Data[(off + 1)..]);
+            head = next;
+        }
+        long newHeadFree = -1;
+        for (int i = keep.Count - 1; i >= 0; i--)
+        {
+            long id = keep[i];
+            var (pageId, off) = Location(id);
+            var ph = _file.PinForWrite(pageId);
+            Span<byte> rec = ph.Data.Slice(off, RecordSize);
+            RecordHelpers.WriteInt48(rec[1..], newHeadFree);
+            _file.UnpinDirty(pageId, 0);
+            newHeadFree = id;
+        }
+        _freeHead = newHeadFree;
+        _hwm = newHwm;
+    }
+
+    /// <summary>OP-3 / テスト用。現在の HWM スロット数 (free 含む)。</summary>
+    internal long Hwm => _hwm;
+
+    /// <summary>OP-3 / テスト用。free list 先頭 (-1 で空)。</summary>
+    internal long FreeHead => _freeHead;
+
+    /// <summary>
     /// FT-15: ヘッダページからインメモリのメタ (hwm / freeHead / inUseCount) を読み直す。
     /// abort の before-image 巻き戻し後、およびクラッシュ recovery 後に呼ばれ、
     /// ページバックされたメタとインメモリのキャッシュを同期する。

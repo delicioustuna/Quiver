@@ -210,6 +210,219 @@ internal sealed class PropertyStore : IPropertyStore
     internal void BulkFlushMeta() => FlushMeta();
 
     /// <summary>
+    /// OP-3 vacuum: ノードストアと協調してプロパティ chain を整理し、dead version を
+    /// 物理回収する。実行手順:
+    /// <list type="number">
+    ///   <item>各ノード slot を raw 走査。</item>
+    ///   <item>ノードが reclaim 対象 (xmax committed かつ horizon 未満) なら、その prop chain を
+    ///         全 free (blob 含む) しノードの FirstPropId は触らない (ノード vacuum で record ごと消える)。</item>
+    ///   <item>ノードが live なら chain を walk し、dead prop を unlink + free。</item>
+    /// </list>
+    /// </summary>
+    /// <remarks>呼び出し前提: アクティブトランザクション 0 件。</remarks>
+    /// <returns>物理回収したプロパティ版数。</returns>
+    internal int VacuumDeadVersions(NodeStore nodeStore, long horizonTxId, CommittedTxRegistry committed)
+    {
+        int reclaimed = 0;
+        long hwm = nodeStore.Hwm;
+        for (long nid = 0; nid < hwm; nid++)
+        {
+            var raw = nodeStore.ReadRaw(nid);
+            if (!raw.InUse) continue;
+            if (!raw.FirstPropId.IsValid) continue;
+
+            bool nodeWillBeReclaimed = raw.Xmax != 0
+                && raw.Xmax < horizonTxId
+                && committed.IsCommitted(raw.Xmax);
+
+            if (nodeWillBeReclaimed)
+            {
+                // 全 chain を解放。NodeStore 側で FirstPropId はクリアされる。
+                reclaimed += ReclaimEntireChain(raw.FirstPropId);
+            }
+            else
+            {
+                // 部分解放: dead prop だけ unlink + free。chain head が変わったら NodeStore に書き戻す。
+                reclaimed += CompactChain(new NodeId(nid), raw.FirstPropId, nodeStore, horizonTxId, committed);
+            }
+        }
+        if (reclaimed > 0)
+        {
+            ShrinkHwmFromTrailingFreeSlots();
+            FlushMeta();
+        }
+        return reclaimed;
+    }
+
+    private int ReclaimEntireChain(PropertyId head)
+    {
+        int count = 0;
+        var cur = head;
+        // chain 長は通常数件程度。万一のループ防止として hwm を上限にする。
+        long guard = _hwm + 1;
+        while (cur.IsValid && guard-- > 0)
+        {
+            var next = ReclaimSlot(cur);
+            cur = next;
+            count++;
+        }
+        return count;
+    }
+
+    private int CompactChain(NodeId owner, PropertyId head, NodeStore nodeStore,
+        long horizonTxId, CommittedTxRegistry committed)
+    {
+        // raw に chain を遍歴して live/dead に分類。
+        var entries = new List<(PropertyId Id, PropertyId Next, bool Dead)>();
+        var cur = head;
+        long guard = _hwm + 1;
+        while (cur.IsValid && guard-- > 0)
+        {
+            var (pageId, off) = Location(cur.Value);
+            PropertyId next;
+            bool dead;
+            using (var h = _file.PinForRead(pageId))
+            {
+                ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
+                bool inUse = (rec[0] & FlagInUse) != 0;
+                next = new PropertyId(RecordHelpers.ReadInt48(rec[35..]));
+                if (!inUse)
+                {
+                    // すでに物理 free。chain 上にあれば後段で繋ぎ替え、props は触らない。
+                    dead = true;
+                }
+                else
+                {
+                    long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
+                    dead = xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax);
+                }
+            }
+            entries.Add((cur, next, dead));
+            cur = next;
+        }
+
+        if (entries.Count == 0) return 0;
+
+        // live 順序を保ったまま再リンク。
+        PropertyId newHead = PropertyId.Invalid;
+        int reclaimedHere = 0;
+        // 後ろから組み立て (NextPropId は単方向リンク)。
+        for (int i = entries.Count - 1; i >= 0; i--)
+        {
+            var (id, _, dead) = entries[i];
+            if (dead)
+            {
+                // free 操作。raw inUse=1 のみ blob 解放してリクレイム (= 既に物理 free の場合はスキップ)。
+                var (pageId, off) = Location(id.Value);
+                bool wasInUse;
+                {
+                    using var h = _file.PinForRead(pageId);
+                    wasInUse = (h.Data[off] & FlagInUse) != 0;
+                }
+                if (wasInUse)
+                {
+                    ReclaimSlot(id);
+                    reclaimedHere++;
+                }
+                continue;
+            }
+            // live: rewrite NextPropId → newHead
+            var (lpid, loff) = Location(id.Value);
+            var ph = _file.PinForWrite(lpid);
+            RecordHelpers.WriteInt48(ph.Data[(loff + 35)..], newHead.Value);
+            _file.UnpinDirty(lpid, 0);
+            newHead = id;
+        }
+
+        // node.FirstPropId 更新
+        nodeStore.UpdateFirstPropId(owner, newHead);
+        return reclaimedHere;
+    }
+
+    /// <summary>
+    /// 単一プロパティ slot を物理回収する。blob 解放 + 記録クリア + free list 投入。
+    /// 戻り値は元レコードの NextPropId (= chain 上で次の prop)。
+    /// </summary>
+    private PropertyId ReclaimSlot(PropertyId id)
+    {
+        var (pageId, off) = Location(id.Value);
+        PropertyId next;
+        long blobId = -1;
+        bool spillover;
+
+        {
+            using var h = _file.PinForRead(pageId);
+            ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
+            byte flags = rec[0];
+            spillover = (flags & FlagSpillover) != 0;
+            next = new PropertyId(RecordHelpers.ReadInt48(rec[35..]));
+            if (spillover) blobId = RecordHelpers.ReadInt40(rec[30..]);
+        }
+
+        if (spillover && blobId >= 0)
+            _blobs.Free(blobId);
+
+        var ph = _file.PinForWrite(pageId);
+        Span<byte> rec2 = ph.Data.Slice(off, RecordSize);
+        rec2.Clear();
+        // free list ポインタは NextPropId 位置 (offset 35, 48-bit) に書く。
+        RecordHelpers.WriteInt48(rec2[35..], _freeHead);
+        _file.UnpinDirty(pageId, 0);
+
+        _freeHead = id.Value;
+        return next;
+    }
+
+    private void ShrinkHwmFromTrailingFreeSlots()
+    {
+        long oldHwm = _hwm;
+        long newHwm = oldHwm;
+        while (newHwm > 0)
+        {
+            long candidate = newHwm - 1;
+            var (pageId, off) = Location(candidate);
+            using var h = _file.PinForRead(pageId);
+            bool inUse = (h.Data[off] & FlagInUse) != 0;
+            if (inUse) break;
+            newHwm--;
+        }
+        if (newHwm == oldHwm) return;
+
+        // free list 内の対象 slot を取り除き繋ぎ直す。NextPropId フィールド (offset 35) に
+        // 次の free ポインタが入っている。
+        long head = _freeHead;
+        var keep = new List<long>();
+        long guard = oldHwm + 1;
+        while (head >= 0 && guard-- > 0)
+        {
+            if (head < newHwm) keep.Add(head);
+            var (pageId, off) = Location(head);
+            using var h = _file.PinForRead(pageId);
+            long next = RecordHelpers.ReadInt48(h.Data[(off + 35)..]);
+            head = next;
+        }
+        long newHeadFree = -1;
+        for (int i = keep.Count - 1; i >= 0; i--)
+        {
+            long id = keep[i];
+            var (pageId, off) = Location(id);
+            var ph = _file.PinForWrite(pageId);
+            Span<byte> rec = ph.Data.Slice(off, RecordSize);
+            RecordHelpers.WriteInt48(rec[35..], newHeadFree);
+            _file.UnpinDirty(pageId, 0);
+            newHeadFree = id;
+        }
+        _freeHead = newHeadFree;
+        _hwm = newHwm;
+    }
+
+    /// <summary>OP-3 / テスト用。現在の HWM スロット数 (free 含む)。</summary>
+    internal long Hwm => _hwm;
+
+    /// <summary>OP-3 / テスト用。free list 先頭 (-1 で空)。</summary>
+    internal long FreeHead => _freeHead;
+
+    /// <summary>
     /// FT-15: ヘッダページからインメモリのメタ (hwm / freeHead) を読み直す。
     /// 内部の BlobStore のメタも同時に同期する。abort の before-image 巻き戻し後、
     /// およびクラッシュ recovery 後に呼ばれる。

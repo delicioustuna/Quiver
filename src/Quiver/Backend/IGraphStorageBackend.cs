@@ -1,4 +1,5 @@
 using Quiver.Core;
+using Quiver.Maintenance;
 using Quiver.Transactions;
 
 namespace Quiver;
@@ -53,4 +54,12 @@ public interface IGraphStorageBackend : IDisposable
     void CreateSnapshot(string targetDirectory, SnapshotOptions? options = null)
         => throw new NotSupportedException(
             "CreateSnapshot is not supported by this backend.");
+
+    /// <summary>
+    /// OP-3: dead version の物理回収 / free list 圧縮を行う vacuum を実行する。
+    /// 既定実装は <see cref="NotSupportedException"/>。バイナリバックエンドのみ実装。
+    /// </summary>
+    VacuumReport Vacuum(VacuumOptions? options = null)
+        => throw new NotSupportedException(
+            "Vacuum is not supported by this backend.");
 }
