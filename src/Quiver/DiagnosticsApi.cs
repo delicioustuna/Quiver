@@ -1,4 +1,5 @@
 using Quiver.Core;
+using Quiver.Core.Telemetry;
 using Quiver.Index;
 using Quiver.Stores;
 using Quiver.Transactions;
@@ -103,6 +104,10 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
         var orphanEntries = new List<OrphanIndexEntry>(orphans.Count);
         foreach (var (name, key, value) in orphans)
             orphanEntries.Add(new OrphanIndexEntry(name, key, value));
+
+        // OB-2: index-orphan-count gauge は CheckIndexConsistency が呼ばれた時点の観測値を保持。
+        // B+Tree orphan + LabelIndex orphan の合計。
+        QuiverEventSource.Log.SetIndexOrphanCount(orphanEntries.Count + labelOrphans);
 
         return new IndexConsistencyReport(
             IndexCount: indexCount,

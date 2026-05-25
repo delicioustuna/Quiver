@@ -1,4 +1,5 @@
 using Quiver.Core;
+using Quiver.Core.Telemetry;
 using Quiver.Index;
 using Quiver.Storage;
 using Quiver.Wal;
@@ -34,6 +35,8 @@ internal sealed class RecoveryManager : IRecoveryManager
 
     public long Recover()
     {
+        // OB-2: crash-recovery-count レートカウンタ。Recover() は起動 1 回につき 1 度呼ばれる。
+        QuiverEventSource.Log.CrashRecovery();
         long checkpointLsn = FindLastCheckpointLsn();
 
         // Pass 0 (FT-26): WAL を走査し、CommittedTxRegistry を再構築する。

@@ -31,6 +31,8 @@ internal sealed class LockManager
             : DateTime.UtcNow + timeout;
         // OB-1: lock 取得の wait 時間を測る。即時取得時は near-zero。
         var sw = Stopwatch.StartNew();
+        // OB-2: 一度でも Wait() に入ったかを記録し、contention カウンタに反映する。
+        bool contended = false;
         try
         {
 
@@ -61,6 +63,7 @@ internal sealed class LockManager
                     }
                     // 昇格待ち: waiter として並ぶが、現在保有している shared はリリースしない
                     // (典型的な S→X upgrade。他 reader が release するのを待つ)。
+                    contended = true;
                     if (!Wait(entry, txId, mode, deadline))
                         return false;
                     continue;
@@ -75,6 +78,7 @@ internal sealed class LockManager
 
                 // wait queue に並ぶ。barrier: 既に waiter が居れば FIFO を維持するため新規も並ぶ
                 // (writer starvation 防止)。
+                contended = true;
                 if (!Wait(entry, txId, mode, deadline))
                     return false;
                 // 起こされた → ループ先頭で再評価。
@@ -83,7 +87,9 @@ internal sealed class LockManager
         }
         finally
         {
-            QuiverTelemetry.LockWaitMs.Record(sw.Elapsed.TotalMilliseconds);
+            double elapsedMs = sw.Elapsed.TotalMilliseconds;
+            QuiverTelemetry.LockWaitMs.Record(elapsedMs);
+            QuiverEventSource.Log.RecordLockWait(elapsedMs, contended);
         }
     }
 

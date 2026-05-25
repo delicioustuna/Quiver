@@ -208,3 +208,50 @@ if (!report.IsConsistent)
         Console.WriteLine($"  問題: {issue}");
 }
 ```
+
+---
+
+## 9. dotnet-counters でリアルタイム観測 (OB-2)
+
+`Quiver-EventSource` は in-box (追加 NuGet 不要) で公開される `EventSource`。
+別ターミナルから `dotnet-counters` を当てるだけで、buffer-pool / WAL / トランザクション /
+ロック / 索引 / vacuum の主要メトリクスを 1 秒粒度で観測できる。
+
+```pwsh
+# 1) インストール (初回のみ)
+dotnet tool install -g dotnet-counters
+
+# 2) Quiver を埋め込んだプロセスの PID を調べる
+dotnet-counters ps
+
+# 3) Quiver の全メトリクスをリアルタイム表示
+dotnet-counters monitor -n <YourProcessName> --counters Quiver-EventSource
+
+# あるいは PID 指定:
+dotnet-counters monitor -p <pid> --counters Quiver-EventSource
+```
+
+公開メトリクス (一部抜粋):
+
+| 名前 | 種類 | 説明 |
+|---|---|---|
+| `buffer-pool-hit-ratio` | gauge | フレーム再利用率 (hits / (hits+misses)) |
+| `buffer-pool-evictions` | gauge | 累計 eviction 件数 |
+| `buffer-pool-size-bytes` | gauge | 全 PagedFile のバッファプール総バイト数 |
+| `wal-bytes-per-sec` | rate | WAL 追記スループット |
+| `wal-pending-flush-count` | gauge | fsync 待ちの FlushTo 件数 |
+| `current-checkpoint-threshold-bytes` | gauge | Fixed / Adaptive 現在値 (FT-28) |
+| `active-tx-count` | gauge | アクティブな transaction 数 |
+| `tx-commit-per-sec` | rate | コミットスループット |
+| `tx-abort-per-sec` | rate | アボートスループット |
+| `tx-deadlock-victim-count` | rate | DeadlockDetector が中断した犠牲者 / 秒 (FT-25) |
+| `lock-wait-avg-ms` | gauge | 平均ロック取得待ち (ms) |
+| `lock-contention-count` | gauge | 累計コンテンション件数 |
+| `index-orphan-count` | gauge | `CheckIndexConsistency()` 最新観測の orphan 件数 (FT-22) |
+| `vacuum-progress-percent` | gauge | vacuum 実行中の進捗 (0 = 非実行) (OP-3) |
+| `crash-recovery-count` | rate | crash recovery 起動回数 (通常 0) |
+
+`Quiver-EventSource` を有効化しない限り PollingCounter は生成されないので、
+本機能の overhead は実質ゼロ。OpenTelemetry 経由でメトリクスを送りたい場合は
+`Quiver.OpenTelemetry` パッケージの `AddQuiverInstrumentation()` を使う (OB-1)。
+

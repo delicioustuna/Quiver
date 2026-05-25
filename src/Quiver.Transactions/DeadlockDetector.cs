@@ -1,4 +1,5 @@
 using Quiver.Core;
+using Quiver.Core.Telemetry;
 
 namespace Quiver.Transactions;
 
@@ -55,6 +56,8 @@ internal sealed class DeadlockDetector : IDisposable
                     if (lm.TryAbortWaiter(victim))
                     {
                         Interlocked.Increment(ref _detectedCount);
+                        // OB-2: dotnet-counters の tx-deadlock-victim-count に反映。
+                        QuiverEventSource.Log.DeadlockVictim();
                         aborted++;
                         break;
                     }

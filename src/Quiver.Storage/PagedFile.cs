@@ -41,6 +41,8 @@ public sealed class PagedFile : IPagedFile
     private byte? _walFileKind;
     // FT-15: WAL を先行フラッシュ (write-ahead) するために保持する。EnableWalLogging で配線。
     private IWriteAheadLog? _wal;
+    // OB-2: dotnet-counters の buffer-pool-size-bytes gauge へ提供する provider 登録ハンドル。
+    private readonly IDisposable _bufferPoolSizeRegistration;
 
     int IPagedFile.PageSize => PageSizeConst;
     public long PageCount => Volatile.Read(ref _logicalPageCount);
@@ -54,6 +56,12 @@ public sealed class PagedFile : IPagedFile
         _pageToFrame = new Dictionary<PageId, int>(poolCapacity);
         for (int i = 0; i < poolCapacity; i++)
             _frames[i] = new PoolFrame();
+
+        // OB-2: 本 PagedFile が保有するバッファプールサイズを EventCounters の gauge に登録する。
+        // 複数 PagedFile (data + index 等) が並存しても合算されて 1 つのメトリクスとして出る。
+        long bufferPoolBytes = (long)_poolCapacity * PageSizeConst;
+        _bufferPoolSizeRegistration =
+            QuiverEventSource.Log.RegisterBufferPoolSizeBytesProvider(() => bufferPoolBytes);
 
         bool isNew = !File.Exists(path);
         _fileStream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
@@ -328,10 +336,14 @@ public sealed class PagedFile : IPagedFile
                 Interlocked.Increment(ref _frames[existing].PinCount);
                 // OB-1: バッファプールヒット計上 (lock 内で counter add は軽量)。
                 QuiverTelemetry.BufferPoolHits.Add(1);
+                QuiverEventSource.Log.BufferPoolHit();
                 return existing;
             }
 
             int victim = FindVictim();
+            // OB-2: 既存ページを追い出してから新規ロードする場合のみ eviction としてカウント。
+            // 起動直後の空フレーム埋めはミスにはなるが eviction ではない。
+            bool wasEviction = _frames[victim].PageId.IsValid;
             EvictFrame(victim);
 
             _frames[victim].PageId = pageId;
@@ -342,6 +354,8 @@ public sealed class PagedFile : IPagedFile
             Interlocked.Increment(ref _frames[victim].PinCount);
             // OB-1: バッファプールミス (eviction + page-in 発生)。
             QuiverTelemetry.BufferPoolMisses.Add(1);
+            QuiverEventSource.Log.BufferPoolMiss();
+            if (wasEviction) QuiverEventSource.Log.BufferPoolEviction();
             return victim;
         }
     }
@@ -524,6 +538,8 @@ public sealed class PagedFile : IPagedFile
         _viewAccessor?.Dispose();
         _mmf?.Dispose();
         _fileStream.Dispose();
+        // OB-2: dotnet-counters の gauge プロバイダから抜ける。
+        _bufferPoolSizeRegistration.Dispose();
     }
 
     private sealed class PoolFrame

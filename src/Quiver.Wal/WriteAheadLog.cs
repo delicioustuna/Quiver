@@ -149,6 +149,7 @@ public sealed class WriteAheadLog : IWriteAheadLog
         WriteRecordToBuffer(lsn, type, txIdValue, payload);
         _bytesWritten += recordSize;
         QuiverTelemetry.WalBytesWritten.Add(recordSize);
+        QuiverEventSource.Log.WalBytesWritten(recordSize);
         return lsn;
     }
 
@@ -238,15 +239,24 @@ public sealed class WriteAheadLog : IWriteAheadLog
             "wal.flush", ActivityKind.Internal);
         activity?.SetTag("quiver.wal.target_lsn", lsn);
         var sw = Stopwatch.StartNew();
-        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!_flushChannel.Writer.TryWrite(new FlushRequest(lsn, tcs)))
+        // OB-2: dotnet-counters の wal-pending-flush-count gauge。fsync 完了で decrement。
+        QuiverEventSource.Log.WalFlushRequestStarted();
+        try
         {
-            // チャネルが完了 (Dispose 済み) — 念のためもう一度確認する
-            if (Volatile.Read(ref _flushedLsn) >= lsn) return;
-            throw new ObjectDisposedException(nameof(WriteAheadLog));
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!_flushChannel.Writer.TryWrite(new FlushRequest(lsn, tcs)))
+            {
+                // チャネルが完了 (Dispose 済み) — 念のためもう一度確認する
+                if (Volatile.Read(ref _flushedLsn) >= lsn) return;
+                throw new ObjectDisposedException(nameof(WriteAheadLog));
+            }
+            tcs.Task.GetAwaiter().GetResult();
+            QuiverTelemetry.WalFlushDurationMs.Record(sw.Elapsed.TotalMilliseconds);
         }
-        tcs.Task.GetAwaiter().GetResult();
-        QuiverTelemetry.WalFlushDurationMs.Record(sw.Elapsed.TotalMilliseconds);
+        finally
+        {
+            QuiverEventSource.Log.WalFlushRequestCompleted();
+        }
     }
 
     public long WriteCheckpoint(long oldestActiveLsn, long lastFlushedDataLsn)

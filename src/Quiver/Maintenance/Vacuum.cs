@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Quiver.Core;
+using Quiver.Core.Telemetry;
 using Quiver.Stores;
 using Quiver.Transactions;
 
@@ -57,53 +58,66 @@ internal sealed class Vacuum : IVacuum
                 Skipped: true);
         }
 
-        long horizon = _txManager.GetVisibilityHorizon();
-        bool dryRun = options.Mode == VacuumMode.DryRun;
-
-        // 順序:
-        //   1. Properties (dead ノードの prop chain は node.FirstPropId 経由でしか辿れないので、
-        //      node vacuum 前に処理する必要がある)
-        //   2. Relationships (同じく node の FirstRelId 経由で辿る)
-        //   3. Nodes
-        // committed registry prune は最後 (visibility 判定に依存する処理が全て終わってから)。
-        int reclaimedProps = 0;
-        if (!dryRun && (options.Targets & VacuumTarget.Properties) != 0)
+        // OB-2: vacuum-progress-percent gauge は phase 単位で 0 → 25 → 50 → 75 → 100 と進む。
+        // 完了時に 0 へ戻すことで dotnet-counters では「現在実行中か」が判別できる。
+        QuiverEventSource.Log.SetVacuumProgress(0);
+        try
         {
-            reclaimedProps = _propStore.VacuumDeadVersions(_nodeStore, horizon, _committed);
-        }
+            long horizon = _txManager.GetVisibilityHorizon();
+            bool dryRun = options.Mode == VacuumMode.DryRun;
 
-        int reclaimedRels = 0;
-        if (!dryRun && (options.Targets & VacuumTarget.Relationships) != 0)
+            // 順序:
+            //   1. Properties (dead ノードの prop chain は node.FirstPropId 経由でしか辿れないので、
+            //      node vacuum 前に処理する必要がある)
+            //   2. Relationships (同じく node の FirstRelId 経由で辿る)
+            //   3. Nodes
+            // committed registry prune は最後 (visibility 判定に依存する処理が全て終わってから)。
+            int reclaimedProps = 0;
+            if (!dryRun && (options.Targets & VacuumTarget.Properties) != 0)
+            {
+                reclaimedProps = _propStore.VacuumDeadVersions(_nodeStore, horizon, _committed);
+            }
+            QuiverEventSource.Log.SetVacuumProgress(25);
+
+            int reclaimedRels = 0;
+            if (!dryRun && (options.Targets & VacuumTarget.Relationships) != 0)
+            {
+                reclaimedRels = _relStore.VacuumDeadVersions(_nodeStore, horizon, _committed);
+            }
+            QuiverEventSource.Log.SetVacuumProgress(50);
+
+            int reclaimedNodes = 0;
+            if (!dryRun && (options.Targets & VacuumTarget.Nodes) != 0)
+            {
+                reclaimedNodes = _nodeStore.VacuumDeadVersions(horizon, _committed);
+            }
+            QuiverEventSource.Log.SetVacuumProgress(75);
+
+            // committed registry を horizon で prune。RecoveryHorizon を horizon-1 まで進めてから
+            // 取り除かないと、データファイル上の xmin がまだ参照する committed tx を「未コミット」と
+            // 誤判定してしまう。aborted tx は before-image undo で record ごと消えるため、horizon 未満の
+            // 全 tx を presumed-committed として扱っても correctness は崩れない。
+            int prunedTxEntries = 0;
+            if (!dryRun)
+            {
+                long newRecoveryHorizon = horizon - 1;
+                if (newRecoveryHorizon > _committed.RecoveryHorizon)
+                    _committed.RecoveryHorizon = newRecoveryHorizon;
+                prunedTxEntries = _committed.PruneBelow(horizon);
+            }
+
+            return new VacuumReport(
+                ReclaimedNodes: reclaimedNodes,
+                ReclaimedRelationships: reclaimedRels,
+                ReclaimedProperties: reclaimedProps,
+                PrunedCommittedTxEntries: prunedTxEntries,
+                ElapsedMs: sw.ElapsedMilliseconds,
+                HorizonTxId: horizon,
+                Skipped: false);
+        }
+        finally
         {
-            reclaimedRels = _relStore.VacuumDeadVersions(_nodeStore, horizon, _committed);
+            QuiverEventSource.Log.SetVacuumProgress(0);
         }
-
-        int reclaimedNodes = 0;
-        if (!dryRun && (options.Targets & VacuumTarget.Nodes) != 0)
-        {
-            reclaimedNodes = _nodeStore.VacuumDeadVersions(horizon, _committed);
-        }
-
-        // committed registry を horizon で prune。RecoveryHorizon を horizon-1 まで進めてから
-        // 取り除かないと、データファイル上の xmin がまだ参照する committed tx を「未コミット」と
-        // 誤判定してしまう。aborted tx は before-image undo で record ごと消えるため、horizon 未満の
-        // 全 tx を presumed-committed として扱っても correctness は崩れない。
-        int prunedTxEntries = 0;
-        if (!dryRun)
-        {
-            long newRecoveryHorizon = horizon - 1;
-            if (newRecoveryHorizon > _committed.RecoveryHorizon)
-                _committed.RecoveryHorizon = newRecoveryHorizon;
-            prunedTxEntries = _committed.PruneBelow(horizon);
-        }
-
-        return new VacuumReport(
-            ReclaimedNodes: reclaimedNodes,
-            ReclaimedRelationships: reclaimedRels,
-            ReclaimedProperties: reclaimedProps,
-            PrunedCommittedTxEntries: prunedTxEntries,
-            ElapsedMs: sw.ElapsedMilliseconds,
-            HorizonTxId: horizon,
-            Skipped: false);
     }
 }

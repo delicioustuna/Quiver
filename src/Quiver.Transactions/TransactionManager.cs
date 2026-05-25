@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using Quiver.Core;
+using Quiver.Core.Telemetry;
 using Quiver.Index;
 using Quiver.Stores;
 using Quiver.Wal;
@@ -42,6 +43,11 @@ internal sealed class TransactionManager : ITransactionManager
     // FT-25: デッドロック検出器 (null = 無効)。Dispose で停止。
     private DeadlockDetector? _deadlockDetector;
 
+    // OB-2: dotnet-counters の active-tx-count / current-checkpoint-threshold-bytes に値を
+    // 流し込む provider 登録ハンドル。Dispose で解除して別インスタンスとの混線を防ぐ。
+    private readonly IDisposable _activeTxCountRegistration;
+    private readonly IDisposable _checkpointThresholdRegistration;
+
     // FT-26: MVCC visibility 用。Begin / OnCommit の atomicity を保護するゲート。
     // Begin は (txId 採番 + activeAtBegin 集合のキャプチャ + _active への登録) を、
     // OnCommit は (registry.MarkCommitted + _active からの除去) を 1 ブロックで行う。
@@ -82,6 +88,11 @@ internal sealed class TransactionManager : ITransactionManager
             _deadlockDetector = new DeadlockDetector(
                 new[] { _nodeLocks, _relLocks, _indexLocks }, interval);
         }
+        // OB-2: gauge provider 登録 (PollingCounter から sum-of-providers として参照される)。
+        _activeTxCountRegistration =
+            QuiverEventSource.Log.RegisterActiveTxCountProvider(() => _active.Count);
+        _checkpointThresholdRegistration =
+            QuiverEventSource.Log.RegisterCheckpointThresholdProvider(() => CurrentCheckpointThresholdBytes);
     }
 
     /// <summary>
@@ -329,5 +340,8 @@ internal sealed class TransactionManager : ITransactionManager
     {
         _deadlockDetector?.Dispose();
         _deadlockDetector = null;
+        // OB-2: gauge provider を解除して別インスタンス / 二重登録による加算ズレを防ぐ。
+        _activeTxCountRegistration.Dispose();
+        _checkpointThresholdRegistration.Dispose();
     }
 }

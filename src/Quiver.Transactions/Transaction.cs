@@ -117,6 +117,7 @@ internal sealed class Transaction : ITransaction
             _manager.OnCommit(Id);
             QuiverTelemetry.TxCommitCount.Add(1);
             QuiverTelemetry.TxCommitDurationMs.Record(sw.Elapsed.TotalMilliseconds);
+            QuiverEventSource.Log.TxCommit();
             activity?.SetStatus(ActivityStatusCode.Ok);
         }
         catch
@@ -136,6 +137,7 @@ internal sealed class Transaction : ITransaction
             _manager.OnAbort(Id);
             QuiverTelemetry.TxAbortCount.Add(1);
             QuiverTelemetry.TxAbortDurationMs.Record(sw.Elapsed.TotalMilliseconds);
+            QuiverEventSource.Log.TxAbort();
             activity?.SetStatus(ActivityStatusCode.Error, "commit failed → rolled back");
             FireHooks(_onRolledBack);
             throw;
