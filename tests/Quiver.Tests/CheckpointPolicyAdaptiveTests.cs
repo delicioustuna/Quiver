@@ -89,14 +89,14 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
         using var db = GraphDatabase.Open(_dir, opts);
 
         // warmup 完了まで commit を流す (warmup 閾値 = max(16, window/64) = 16)。
-        // 各 tx で 300 ノードを作成し、複数ページを大きく dirty 化することで FT-29 trim 効果を抑え、
-        // per-tx で十分な WAL バイト数 (~16KB 以上) を発生させる。
+        // 各 tx で 1000 ノードを作成し、複数ページを大きく dirty 化することで
+        // FT-29 trim + FT-29b RLE 効果後でも per-tx ≥ 16KB を確保する (マージン込み)。
         // Adaptive モデル: recommended = 5s × 50MB/s × 1KB / avg。
-        // 16MB threshold 以下にするには avg ≥ 16KB が必要 → 約 300 ノード/tx。
+        // 16MB threshold 以下にするには avg ≥ 16KB が必要 → trim+RLE 後 ~18 B/node × 1000 = 18KB。
         for (int i = 0; i < 32; i++)
         {
             using var tx = db.BeginTransaction();
-            for (int j = 0; j < 300; j++) tx.CreateNode("Person");
+            for (int j = 0; j < 1000; j++) tx.CreateNode("Person");
             tx.Commit();
         }
 
@@ -125,9 +125,10 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
         for (int i = 0; i < 32; i++)
         {
             using var tx = db.BeginTransaction();
-            // 1 tx で大量のノード作成 → 100KB 超の WAL bytes/tx を確保し min 値 (4MB) に
+            // 1 tx で大量のノード作成 → 64KB 超の WAL bytes/tx を確保し min 値 (4MB) に
             // clamp させる。recommended = 250MB × 1024 / amp なので amp > 64 KB で min に張り付く。
-            for (int j = 0; j < 2000; j++) tx.CreateNode("Person");
+            // FT-29 trim + FT-29b RLE 後でも 5000 nodes ≈ 90 KB を見込んで clamp 強制。
+            for (int j = 0; j < 5000; j++) tx.CreateNode("Person");
             tx.Commit();
         }
 
@@ -153,11 +154,12 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
         // ホットスワップ: Adaptive に切替。
         db.Diagnostics.SetCheckpointPolicy(CheckpointPolicy.Adaptive, fixedThresholdBytes: 32 * 1024 * 1024);
 
-        // warmup 完了まで commit を流す。
+        // warmup 完了まで commit を流す。FT-29b RLE 後でも threshold 縮小を観測するため
+        // 400 nodes/tx で per-tx を ~8 KB 以上に押し上げる。
         for (int i = 0; i < 32; i++)
         {
             using var tx = db.BeginTransaction();
-            for (int j = 0; j < 20; j++) tx.CreateNode("Person");
+            for (int j = 0; j < 400; j++) tx.CreateNode("Person");
             tx.Commit();
         }
 

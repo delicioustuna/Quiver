@@ -520,15 +520,30 @@ public class WalTests : IDisposable
     }
 
     [Fact]
-    public void Codec_v2_FullPage_NoTrim()
+    public void Codec_v3_FullPage_NoRuns_RoundTrip()
     {
-        // 全部非ゼロのページは trim 効果なし。encoded サイズが v1 と同等になることを確認 (regression なし)。
+        // 全部非ゼロかつ run 化できないパターン (alternating bytes) なページの round-trip。
+        // RLE 効果なし、literal chunk 1 個 + 1+2 バイトの chunk overhead で v2 比 +3B 程度。
         var page = new byte[WalPageImageCodec.FullPageBytes];
-        for (int i = 0; i < page.Length; i++) page[i] = (byte)((i & 0xFE) | 1); // 全て非ゼロ
+        for (int i = 0; i < page.Length; i++) page[i] = (byte)((i & 0xFE) | 1); // 全て非ゼロ、隣接同値なし
 
         var encoded = WalPageImageCodec.Encode(fileKind: 1, pageId: 5, page);
-        encoded.Length.Should().Be(WalPageImageCodec.HeaderLengthV2 + WalPageImageCodec.FullPageBytes,
-            "full page は trim 効果なしで v2 header + 8192 バイトのまま");
+        // v3 = header (12) + literal chunk header (1 + 2 varint) + 8192 = 8207 バイト。
+        encoded.Length.Should().BeInRange(8205, 8210, "literal chunk 1 個でほぼ生サイズ");
+
+        WalPageImageCodec.TryDecode(encoded, out _, out _, out byte[] pageBytes).Should().BeTrue();
+        pageBytes.Should().BeEquivalentTo(page);
+    }
+
+    [Fact]
+    public void Codec_v2_EncodeV2_NoCompression_StillWorks()
+    {
+        // EncodeV2 は v2 (trim 単独、RLE なし) を生成する fallback 用 API。decode 互換確認。
+        var page = new byte[WalPageImageCodec.FullPageBytes];
+        for (int i = 0; i < page.Length; i++) page[i] = (byte)((i & 0xFE) | 1);
+
+        var encoded = WalPageImageCodec.EncodeV2(fileKind: 1, pageId: 5, page);
+        encoded.Length.Should().Be(WalPageImageCodec.HeaderLengthV2 + WalPageImageCodec.FullPageBytes);
 
         WalPageImageCodec.TryDecode(encoded, out _, out _, out byte[] pageBytes).Should().BeTrue();
         pageBytes.Should().BeEquivalentTo(page);
@@ -542,11 +557,125 @@ public class WalTests : IDisposable
         // 全部ゼロ。
 
         var encoded = WalPageImageCodec.Encode(fileKind: 2, pageId: 9, page);
-        encoded.Length.Should().Be(WalPageImageCodec.HeaderLengthV2 + WalPageImageCodec.MinKeptBytes,
-            "全ゼロでも 32B (MinKeptBytes) は残す");
+        // v3 (RLE) では 32B 全ゼロは Run chunk 1 個 = ~5B で圧縮されるため、v2 サイズ比較は撤廃。
 
         WalPageImageCodec.TryDecode(encoded, out _, out _, out byte[] pageBytes).Should().BeTrue();
         pageBytes.Length.Should().Be(WalPageImageCodec.FullPageBytes);
         pageBytes.Should().AllBeEquivalentTo((byte)0);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // FT-29b: v3 RLE chunk encoding
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Codec_v3_NodeStoreRecordPattern_CompressesByteRuns()
+    {
+        // NodeStore record (31B) パターン: 01 FF×12 01 00 XX×8 00×8
+        // FF×12 と 00×8 が Run chunk で圧縮されることを確認。
+        var page = new byte[WalPageImageCodec.FullPageBytes];
+        // ヘッダ後に 1 record。
+        int off = 32; // PageHeader.Size
+        page[off + 0] = 0x01;
+        for (int i = 1; i <= 12; i++) page[off + i] = 0xFF;
+        page[off + 13] = 0x01;
+        page[off + 14] = 0x00;
+        for (int i = 15; i <= 22; i++) page[off + i] = (byte)(i - 14); // Xmin varint
+        // bytes 23-30 are zero (Xmax)
+        // bytes 32+31=63 以降は zero。
+
+        var encoded = WalPageImageCodec.Encode(fileKind: 1, pageId: 5, page);
+        // 末尾ゼロは trim、record 内の FF/00 run は RLE 化。
+        // 期待: encoded はおおよそ 30-50 バイト程度 (v2 trim では 75 バイト前後)。
+        encoded.Length.Should().BeLessThan(80,
+            "RLE で FF×12 と 00×8 が 1 chunk = 3 バイトずつに圧縮される");
+
+        // round-trip 復元の検証。
+        WalPageImageCodec.TryDecode(encoded, out byte fileKind, out long pageId, out byte[] pageBytes).Should().BeTrue();
+        fileKind.Should().Be(1);
+        pageId.Should().Be(5);
+        pageBytes.Length.Should().Be(WalPageImageCodec.FullPageBytes);
+        pageBytes.AsSpan(0, 63).ToArray().Should().BeEquivalentTo(page.AsSpan(0, 63).ToArray(),
+            "record 領域の content が完全に復元される");
+        // 残りは zero-pad。
+        for (int i = 63; i < WalPageImageCodec.FullPageBytes; i++) pageBytes[i].Should().Be(0);
+    }
+
+    [Fact]
+    public void Codec_v3_NoRunsBelowThreshold_StaysLiteral()
+    {
+        // 3 バイト未満の run は literal 扱い (chunk overhead 回避)。
+        // 例: ABCABC... のパターンは run 化しない。
+        var page = new byte[WalPageImageCodec.FullPageBytes];
+        for (int i = 0; i < 60; i++) page[i] = (byte)((i % 3) + 1); // 1,2,3,1,2,3,...
+
+        var encoded = WalPageImageCodec.Encode(fileKind: 1, pageId: 5, page);
+        // 全部 literal 1 chunk。chunk header (1B + varint 1B) + 60B literal = 62B + v3 header 12B = 74B。
+        encoded.Length.Should().BeInRange(70, 80);
+
+        WalPageImageCodec.TryDecode(encoded, out _, out _, out byte[] pageBytes).Should().BeTrue();
+        for (int i = 0; i < 60; i++) pageBytes[i].Should().Be((byte)((i % 3) + 1));
+    }
+
+    [Fact]
+    public void Codec_v3_FullPageOfSameByte_CompressesToSingleRunChunk()
+    {
+        // 8192B 全部 0xFF のページは Run chunk 1 個 = ~5B (chunk type 1 + value 1 + varint 2) で完結。
+        var page = new byte[WalPageImageCodec.FullPageBytes];
+        Array.Fill(page, (byte)0xFF);
+
+        var encoded = WalPageImageCodec.Encode(fileKind: 1, pageId: 5, page);
+        // v3 header 12B + Run chunk ~5B = 17B 前後。劇的削減。
+        encoded.Length.Should().BeLessThan(25, "全 0xFF は 1 Run chunk で表現できる");
+
+        WalPageImageCodec.TryDecode(encoded, out _, out _, out byte[] pageBytes).Should().BeTrue();
+        pageBytes.Should().AllBeEquivalentTo((byte)0xFF);
+    }
+
+    [Fact]
+    public void Codec_v3_MixedLiteralAndRun_RoundTrip()
+    {
+        // 複雑な mix: literal / run / literal / run / literal を交互に。
+        var page = new byte[WalPageImageCodec.FullPageBytes];
+        page[0] = 0xAA; page[1] = 0xBB; page[2] = 0xCC; // literal (3B, < MinRunBytes なので literal 扱い)
+        for (int i = 3; i < 20; i++) page[i] = 0x11; // run 17B
+        page[20] = 0x99; page[21] = 0x88; // literal 2B
+        for (int i = 22; i < 100; i++) page[i] = 0xEE; // run 78B
+        page[100] = 0x77; // literal 1B
+
+        var encoded = WalPageImageCodec.Encode(fileKind: 7, pageId: 42, page);
+        WalPageImageCodec.TryDecode(encoded, out byte fileKind, out long pageId, out byte[] pageBytes).Should().BeTrue();
+        fileKind.Should().Be(7);
+        pageId.Should().Be(42L);
+        pageBytes.AsSpan(0, 101).ToArray().Should().BeEquivalentTo(page.AsSpan(0, 101).ToArray());
+    }
+
+    [Fact]
+    public void Codec_v3_AllZeroPage_CompressesToSingleZeroRun()
+    {
+        // 全ゼロページは v3 では MinKeptBytes (32) 分の Zero run 1 chunk。
+        var page = new byte[WalPageImageCodec.FullPageBytes];
+
+        var encoded = WalPageImageCodec.Encode(fileKind: 1, pageId: 1, page);
+        // v3 header 12B + Run chunk (32 zero) ~4B = 16B 前後。
+        encoded.Length.Should().BeLessThan(25);
+
+        WalPageImageCodec.TryDecode(encoded, out _, out _, out byte[] pageBytes).Should().BeTrue();
+        pageBytes.Should().AllBeEquivalentTo((byte)0);
+    }
+
+    [Fact]
+    public void Codec_v3_Decode_RejectsCorruptedChunkStream()
+    {
+        // 壊れた v3 payload (未知の chunk type) は TryDecode が false を返す。
+        var bad = new byte[]
+        {
+            3, // version=3
+            1, // fileKind
+            0, 0, 0, 0, 0, 0, 0, 0, // pageId=0
+            10, 0, // usedLen=10
+            0xFF, // 未知の chunk type
+        };
+        WalPageImageCodec.TryDecode(bad, out _, out _, out _).Should().BeFalse();
     }
 }
