@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO.Hashing;
 using System.Threading.Channels;
 using Quiver.Core;
+using Quiver.Core.Telemetry;
 
 namespace Quiver.Wal;
 
@@ -147,6 +148,7 @@ public sealed class WriteAheadLog : IWriteAheadLog
         _segFirstLsn.TryAdd(_currentSegIdx, lsn);
         WriteRecordToBuffer(lsn, type, txIdValue, payload);
         _bytesWritten += recordSize;
+        QuiverTelemetry.WalBytesWritten.Add(recordSize);
         return lsn;
     }
 
@@ -231,6 +233,11 @@ public sealed class WriteAheadLog : IWriteAheadLog
     {
         if (Volatile.Read(ref _flushedLsn) >= lsn) return;
         Interlocked.Increment(ref _flushRequestCount);
+        // OB-1: WAL flush span + duration histogram。
+        using var activity = QuiverTelemetry.WalFlushActivitySource.StartActivity(
+            "wal.flush", ActivityKind.Internal);
+        activity?.SetTag("quiver.wal.target_lsn", lsn);
+        var sw = Stopwatch.StartNew();
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!_flushChannel.Writer.TryWrite(new FlushRequest(lsn, tcs)))
         {
@@ -239,6 +246,7 @@ public sealed class WriteAheadLog : IWriteAheadLog
             throw new ObjectDisposedException(nameof(WriteAheadLog));
         }
         tcs.Task.GetAwaiter().GetResult();
+        QuiverTelemetry.WalFlushDurationMs.Record(sw.Elapsed.TotalMilliseconds);
     }
 
     public long WriteCheckpoint(long oldestActiveLsn, long lastFlushedDataLsn)

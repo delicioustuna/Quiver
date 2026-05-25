@@ -2,6 +2,7 @@
 using System.Buffers.Binary;
 using System.IO.MemoryMappedFiles;
 using Quiver.Core;
+using Quiver.Core.Telemetry;
 using Quiver.Wal;
 
 namespace Quiver.Storage;
@@ -325,6 +326,8 @@ public sealed class PagedFile : IPagedFile
             {
                 _frames[existing].Referenced = true;
                 Interlocked.Increment(ref _frames[existing].PinCount);
+                // OB-1: バッファプールヒット計上 (lock 内で counter add は軽量)。
+                QuiverTelemetry.BufferPoolHits.Add(1);
                 return existing;
             }
 
@@ -337,6 +340,8 @@ public sealed class PagedFile : IPagedFile
             _frames[victim].IsDirty = false;
             _pageToFrame[pageId] = victim;
             Interlocked.Increment(ref _frames[victim].PinCount);
+            // OB-1: バッファプールミス (eviction + page-in 発生)。
+            QuiverTelemetry.BufferPoolMisses.Add(1);
             return victim;
         }
     }

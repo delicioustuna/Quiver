@@ -15,6 +15,7 @@
     <Project Path="src\Quiver.Storage.Sqlite\Quiver.Storage.Sqlite.csproj" />
     <Project Path="src\Quiver.Embedding\Quiver.Embedding.csproj" />
     <Project Path="src\Quiver.Hosting\Quiver.Hosting.csproj" />
+    <Project Path="src\Quiver.OpenTelemetry\Quiver.OpenTelemetry.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks\Quiver.Benchmarks\Quiver.Benchmarks.csproj" />
@@ -29,6 +30,7 @@
     <Project Path="samples\Quiver.Samples.SourceGen\Quiver.Samples.SourceGen.csproj" />
     <Project Path="samples\Quiver.Samples.Vector\Quiver.Samples.Vector.csproj" />
     <Project Path="samples\Quiver.Samples.Hosting\Quiver.Samples.Hosting.csproj" />
+    <Project Path="samples\Quiver.Samples.Observability\Quiver.Samples.Observability.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests\Quiver.Storage.Tests\Quiver.Storage.Tests.csproj" />

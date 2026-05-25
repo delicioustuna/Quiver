@@ -1,4 +1,6 @@
-﻿using Quiver.Core;
+﻿using System.Diagnostics;
+using Quiver.Core;
+using Quiver.Core.Telemetry;
 using Quiver.Index;
 using Quiver.Stores;
 using Quiver.Wal;
@@ -91,6 +93,12 @@ internal sealed class Transaction : ITransaction
         if (_state != TransactionState.Active)
             throw new TransactionException("Cannot commit: transaction is not Active.");
         _state = TransactionState.Preparing;
+        // OB-1: span + duration histogram。AlwaysOnSampler が無い環境 (StartActivity が null) では
+        // ActivitySource はコストゼロで Stopwatch のみ走る。
+        using var activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
+            "tx.commit", ActivityKind.Internal);
+        activity?.SetTag("quiver.tx.id", Id.Value);
+        var sw = Stopwatch.StartNew();
         try
         {
             // 案C: UnpinDirty はページイメージをトランザクションバッファにコアレスするだけ。
@@ -107,6 +115,9 @@ internal sealed class Transaction : ITransaction
             ReleaseAllLocks();
             _state = TransactionState.Committed;
             _manager.OnCommit(Id);
+            QuiverTelemetry.TxCommitCount.Add(1);
+            QuiverTelemetry.TxCommitDurationMs.Record(sw.Elapsed.TotalMilliseconds);
+            activity?.SetStatus(ActivityStatusCode.Ok);
         }
         catch
         {
@@ -123,6 +134,9 @@ internal sealed class Transaction : ITransaction
             try { ReleaseAllLocks(); } catch { }
             _state = TransactionState.Aborted;
             _manager.OnAbort(Id);
+            QuiverTelemetry.TxAbortCount.Add(1);
+            QuiverTelemetry.TxAbortDurationMs.Record(sw.Elapsed.TotalMilliseconds);
+            activity?.SetStatus(ActivityStatusCode.Error, "commit failed → rolled back");
             FireHooks(_onRolledBack);
             throw;
         }
@@ -132,6 +146,11 @@ internal sealed class Transaction : ITransaction
     public void Abort()
     {
         if (_state is TransactionState.Committed or TransactionState.Aborted) return;
+        // OB-1: abort span + duration。Commit と同じ ActivitySource を共有。
+        using var activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
+            "tx.abort", ActivityKind.Internal);
+        activity?.SetTag("quiver.tx.id", Id.Value);
+        var sw = Stopwatch.StartNew();
         // FT-15: in-process undo — restore captured before-images to the data
         // files and reload page-backed store metadata, so discarded nodes /
         // edges / properties are invisible to subsequent transactions. Must run
@@ -147,6 +166,8 @@ internal sealed class Transaction : ITransaction
         ReleaseAllLocks();
         _state = TransactionState.Aborted;
         _manager.OnAbort(Id);
+        QuiverTelemetry.TxAbortCount.Add(1);
+        QuiverTelemetry.TxAbortDurationMs.Record(sw.Elapsed.TotalMilliseconds);
         FireHooks(_onRolledBack);
     }
 

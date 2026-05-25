@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using Quiver.Core;
+using Quiver.Core.Telemetry;
 
 namespace Quiver.Transactions;
 
@@ -27,6 +29,10 @@ internal sealed class LockManager
         DateTime deadline = timeout == Timeout.InfiniteTimeSpan
             ? DateTime.MaxValue
             : DateTime.UtcNow + timeout;
+        // OB-1: lock 取得の wait 時間を測る。即時取得時は near-zero。
+        var sw = Stopwatch.StartNew();
+        try
+        {
 
         lock (_gate)
         {
@@ -73,6 +79,11 @@ internal sealed class LockManager
                     return false;
                 // 起こされた → ループ先頭で再評価。
             }
+        }
+        }
+        finally
+        {
+            QuiverTelemetry.LockWaitMs.Record(sw.Elapsed.TotalMilliseconds);
         }
     }
 

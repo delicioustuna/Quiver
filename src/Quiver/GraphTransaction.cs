@@ -1,4 +1,6 @@
-﻿using Quiver.Core;
+﻿using System.Diagnostics;
+using Quiver.Core;
+using Quiver.Core.Telemetry;
 using Quiver.Logical;
 using Quiver.Operators;
 using Quiver.Stores;
@@ -435,6 +437,11 @@ internal sealed class GraphTransaction : IGraphTransaction
 
     public QueryResult Execute(IPhysicalOperator plan)
     {
+        // OB-1: query 実行全体を span + duration histogram で計測。
+        using var activity = QuiverTelemetry.QueryActivitySource.StartActivity(
+            "query.execute", ActivityKind.Internal);
+        activity?.SetTag("quiver.tx.id", _inner.Id.Value);
+        var sw = Stopwatch.StartNew();
         plan.Open(_inner);
         var rows = new List<QueryRow>();
 
@@ -459,6 +466,8 @@ internal sealed class GraphTransaction : IGraphTransaction
         var schema = plan.Schema;
         var stats = plan.Statistics;
         plan.Dispose();
+        QuiverTelemetry.QueryDurationMs.Record(sw.Elapsed.TotalMilliseconds);
+        activity?.SetTag("quiver.query.rows", rows.Count);
         return new QueryResult(schema, stats, rows);
     }
 

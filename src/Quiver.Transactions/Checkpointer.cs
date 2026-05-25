@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using Quiver.Core.Telemetry;
 using Quiver.Index;
 using Quiver.Storage;
 using Quiver.Wal;
@@ -60,6 +62,10 @@ internal sealed class Checkpointer(
     /// </summary>
     public void Checkpoint()
     {
+        // OB-1: checkpoint span + duration histogram。
+        using var activity = QuiverTelemetry.CheckpointActivitySource.StartActivity(
+            "checkpoint", ActivityKind.Internal);
+        var sw = Stopwatch.StartNew();
         // 1. Begin sentinel を書いて fsync。これより前に walk が来た場合、ここに到達する
         //    前に kill されたなら Begin すら無いので「checkpoint が始まらなかった」と等価。
         // dirtyPageCount は診断用の advisory フィールド (recovery では未使用)。
@@ -89,6 +95,8 @@ internal sealed class Checkpointer(
         //    ならない (次回 recovery が End sentinel を読めるようにするため)。
         _wal.Truncate(beginLsn - 1);
         PhaseInjector?.Invoke(CheckpointPhase.AfterTruncate);
+        QuiverTelemetry.CheckpointDurationMs.Record(sw.Elapsed.TotalMilliseconds);
+        activity?.SetTag("quiver.checkpoint.begin_lsn", beginLsn);
     }
 }
 
