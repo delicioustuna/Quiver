@@ -140,6 +140,13 @@ internal sealed class RelationshipStore : IRelationshipStore
 
     public RelationshipReadHandle Read(RelationshipId relId)
     {
+        // FT-30: HWM 超 / 負 ID は "存在しない" 扱い。NodeStore.Read と同じ理由。
+        if (relId.Value < 0 || relId.Value >= _hwm)
+            return new RelationshipReadHandle(
+                relId, inUse: false, default, default, default,
+                RelationshipId.Invalid, RelationshipId.Invalid,
+                RelationshipId.Invalid, RelationshipId.Invalid,
+                PropertyId.Invalid);
         var (pageId, off) = Location(relId.Value);
         using var h = _file.PinForRead(pageId);
         ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);

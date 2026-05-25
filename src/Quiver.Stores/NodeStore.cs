@@ -117,6 +117,12 @@ internal sealed class NodeStore : INodeStore
 
     public NodeReadHandle Read(NodeId nodeId)
     {
+        // FT-30: HWM を超える ID / 負の ID は "存在しない" 扱いで safe-return する。
+        // これがないと PagedFile.PinForRead が未割当ページの magic=0 を検出して
+        // CorruptionException を投げ、NodeExists / HasProperty 等の defensive read API が
+        // false を返す契約を破ってしまう (OP-2 sample の GET /nodes/{id} で発覚)。
+        if (nodeId.Value < 0 || nodeId.Value >= _hwm)
+            return new NodeReadHandle(nodeId, inUse: false, RelationshipId.Invalid, PropertyId.Invalid, default);
         var (pageId, off) = Location(nodeId.Value);
         using var h = _file.PinForRead(pageId);
         ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
@@ -212,6 +218,102 @@ internal sealed class NodeStore : INodeStore
         FlushMeta();
         _labelIndex?.Invalidate();
     }
+
+    /// <summary>
+    /// OP-3 vacuum: <paramref name="horizonTxId"/> 未満で xmax がコミット済みな dead version を
+    /// 物理回収し、slot を free list に投入する。inUseCount は <see cref="Free"/> 時に既に
+    /// 減算されているので触らない。<paramref name="committed"/> は xmax のコミット判定に使う
+    /// registry。末尾の連続 free slot が hwm を下げられる場合は hwm も縮める。
+    /// </summary>
+    /// <remarks>
+    /// 呼び出し側 (<c>Vacuum.Run</c>) はアクティブトランザクションが 0 の前提を保証する。
+    /// ラベル索引は <see cref="Free"/> 時点で既に <c>OnFree</c> 済みなので触らない。
+    /// </remarks>
+    /// <returns>物理回収した dead version 数。</returns>
+    internal int VacuumDeadVersions(long horizonTxId, CommittedTxRegistry committed)
+    {
+        int reclaimed = 0;
+        for (long id = 0; id < _hwm; id++)
+        {
+            var (pageId, off) = Location(id);
+            bool reclaimThis;
+            {
+                using var h = _file.PinForRead(pageId);
+                ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
+                bool inUse = (rec[0] & FlagInUse) != 0;
+                if (!inUse) { continue; } // 既に物理 free
+                long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
+                reclaimThis = xmax != 0
+                    && xmax < horizonTxId
+                    && committed.IsCommitted(xmax);
+            }
+            if (!reclaimThis) continue;
+
+            var ph = _file.PinForWrite(pageId);
+            Span<byte> rec2 = ph.Data.Slice(off, RecordSize);
+            rec2.Clear();
+            // free list link: byte[1..7] に prev head (48-bit signed)。
+            RecordHelpers.WriteInt48(rec2[1..], _freeHead);
+            _file.UnpinDirty(pageId, 0);
+            _freeHead = id;
+            reclaimed++;
+        }
+
+        if (reclaimed > 0)
+        {
+            ShrinkHwmFromTrailingFreeSlots();
+            FlushMeta();
+        }
+        return reclaimed;
+    }
+
+    private void ShrinkHwmFromTrailingFreeSlots()
+    {
+        long oldHwm = _hwm;
+        long newHwm = oldHwm;
+        while (newHwm > 0)
+        {
+            long candidate = newHwm - 1;
+            var (pageId, off) = Location(candidate);
+            using var h = _file.PinForRead(pageId);
+            ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
+            bool inUse = (rec[0] & FlagInUse) != 0;
+            if (inUse) break;
+            newHwm--;
+        }
+        if (newHwm == oldHwm) return;
+
+        // 末尾 slot を hwm 範囲外に出すので、free list 内の対象 slot を取り除き、繋ぎ直す。
+        long head = _freeHead;
+        var keep = new List<long>();
+        while (head >= 0)
+        {
+            if (head < newHwm) keep.Add(head);
+            var (pageId, off) = Location(head);
+            using var h = _file.PinForRead(pageId);
+            long next = RecordHelpers.ReadInt48(h.Data[(off + 1)..]);
+            head = next;
+        }
+        long newHead = -1;
+        for (int i = keep.Count - 1; i >= 0; i--)
+        {
+            long id = keep[i];
+            var (pageId, off) = Location(id);
+            var ph = _file.PinForWrite(pageId);
+            Span<byte> rec = ph.Data.Slice(off, RecordSize);
+            RecordHelpers.WriteInt48(rec[1..], newHead);
+            _file.UnpinDirty(pageId, 0);
+            newHead = id;
+        }
+        _freeHead = newHead;
+        _hwm = newHwm;
+    }
+
+    /// <summary>OP-3 / テスト用。現在の HWM スロット数 (free 含む)。</summary>
+    internal long Hwm => _hwm;
+
+    /// <summary>OP-3 / テスト用。free list 先頭 (-1 で空)。</summary>
+    internal long FreeHead => _freeHead;
 
     // --- private ---
 

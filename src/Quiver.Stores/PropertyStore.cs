@@ -119,6 +119,9 @@ internal sealed class PropertyStore : IPropertyStore
 
     public PropertyReadHandle Read(PropertyId propId)
     {
+        // FT-30: HWM 超 / 負 ID は "存在しない" 扱い。NodeStore.Read と同じ理由。
+        if (propId.Value < 0 || propId.Value >= _hwm)
+            return new PropertyReadHandle(propId, default, PropertyId.Invalid, default, inUse: false);
         var (pageId, off) = Location(propId.Value);
         using var h = _file.PinForRead(pageId);
         ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);

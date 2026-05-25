@@ -166,6 +166,66 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         tx.Commit();
     }
 
+    // ===== FT-30: defensive read API (HWM safe) =====
+
+    [Fact]
+    public void NodeExists_returns_false_for_id_past_hwm()
+    {
+        using var tx = BeginWrite();
+        var id = tx.CreateNode("Person");
+        // 既存より十分大きい ID は未割当 → false (例外なし)。
+        tx.NodeExists(new NodeId(id.Value + 1_000_000)).Should().BeFalse();
+        tx.NodeExists(new NodeId(long.MaxValue / 2)).Should().BeFalse();
+        tx.Commit();
+    }
+
+    [Fact]
+    public void NodeExists_returns_false_for_negative_id()
+    {
+        using var tx = BeginWrite();
+        tx.CreateNode("Person");
+        tx.NodeExists(new NodeId(-1L)).Should().BeFalse();
+        tx.NodeExists(new NodeId(long.MinValue)).Should().BeFalse();
+        tx.Commit();
+    }
+
+    [Fact]
+    public void HasProperty_returns_false_for_nonexistent_node()
+    {
+        using var tx = BeginWrite();
+        var id = tx.CreateNode("Person");
+        tx.SetProperty(id, "name", PropertyValue.FromString("alice"));
+        var ghost = new NodeId(id.Value + 999_999);
+        tx.HasProperty(ghost, "name").Should().BeFalse();
+        // 既存ノードでも未設定 key は false。
+        tx.HasProperty(id, "missing_key").Should().BeFalse();
+        tx.Commit();
+    }
+
+    [Fact]
+    public void GetProperty_returns_default_for_nonexistent_node()
+    {
+        using var tx = BeginWrite();
+        tx.CreateNode("Person");
+        var ghost = new NodeId(999_999L);
+        var pv = tx.GetProperty(ghost, "anything");
+        pv.Type.Should().Be(default(PropertyValueType));
+        tx.Commit();
+    }
+
+    [Fact]
+    public void NodeExists_in_readonly_tx_does_not_throw_for_past_hwm()
+    {
+        using (var tx = BeginWrite())
+        {
+            tx.CreateNode("Person");
+            tx.Commit();
+        }
+        using var rtx = BeginRead();
+        rtx.NodeExists(new NodeId(42_000L)).Should().BeFalse();
+        rtx.HasProperty(new NodeId(42_000L), "x").Should().BeFalse();
+    }
+
     [Fact]
     public void Relationship_property_round_trips()
     {

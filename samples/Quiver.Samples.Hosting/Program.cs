@@ -17,10 +17,25 @@ builder.Services.AddQuiver(builder.Configuration.GetSection("Quiver"));
 
 var app = builder.Build();
 
-app.MapGet("/", () => "Quiver hosting sample. POST /nodes / GET /nodes/{id}");
-
-app.MapPost("/nodes", (CreateNodeRequest req, GraphDatabase db) =>
+app.MapGet("/", () => Results.Ok(new
 {
+    service = "Quiver Hosting Sample",
+    endpoints = new[]
+    {
+        "POST /nodes { label, name? }",
+        "GET  /nodes/{id}",
+        "DELETE /nodes/{id}",
+        "POST /nodes/{id}/properties { key, value }",
+        "POST /relationships { source, target, type }",
+        "GET  /relationships/{id}",
+        "GET  /stats",
+    },
+}));
+
+app.MapPost("/nodes", (CreateNodeRequest? req, GraphDatabase db) =>
+{
+    if (req is null || string.IsNullOrEmpty(req.Label))
+        return Results.BadRequest(new { error = "label is required" });
     using var tx = db.BeginTransaction();
     var id = tx.CreateNode(req.Label);
     if (!string.IsNullOrEmpty(req.Name))
@@ -33,24 +48,77 @@ app.MapGet("/nodes/{id:long}", (long id, GraphDatabase db) =>
 {
     using var tx = db.BeginReadOnlyTransaction();
     var nid = new NodeId(id);
-    // NodeExists / HasProperty / GetProperty は HWM を超えた ID で
-    // Quiver.Core.CorruptionException を投げる (page magic ゼロ判定)。
-    // sample API としては 404 に丸める。
-    try
-    {
-        if (!tx.NodeExists(nid))
-            return Results.NotFound();
-        var name = tx.HasProperty(nid, "name")
-            ? System.Text.Encoding.UTF8.GetString(tx.GetProperty(nid, "name").Utf8StringValue)
-            : null;
-        return Results.Ok(new { id, name });
-    }
-    catch (CorruptionException)
-    {
+    // FT-30: HWM 超 / 負 ID は Core 側で safe-return される (例外なし)。
+    if (!tx.NodeExists(nid))
         return Results.NotFound();
-    }
+    var name = tx.HasProperty(nid, "name")
+        ? System.Text.Encoding.UTF8.GetString(tx.GetProperty(nid, "name").Utf8StringValue)
+        : null;
+    return Results.Ok(new { id, name });
+});
+
+app.MapDelete("/nodes/{id:long}", (long id, GraphDatabase db) =>
+{
+    using var tx = db.BeginTransaction();
+    var nid = new NodeId(id);
+    if (!tx.NodeExists(nid))
+        return Results.NotFound();
+    tx.DeleteNode(nid);
+    tx.Commit();
+    return Results.NoContent();
+});
+
+app.MapPost("/nodes/{id:long}/properties", (long id, SetPropertyRequest? req, GraphDatabase db) =>
+{
+    if (req is null || string.IsNullOrEmpty(req.Key))
+        return Results.BadRequest(new { error = "key is required" });
+    using var tx = db.BeginTransaction();
+    var nid = new NodeId(id);
+    if (!tx.NodeExists(nid))
+        return Results.NotFound();
+    tx.SetProperty(nid, req.Key, PropertyValue.FromString(req.Value ?? string.Empty));
+    tx.Commit();
+    return Results.NoContent();
+});
+
+app.MapPost("/relationships", (CreateRelationshipRequest? req, GraphDatabase db) =>
+{
+    if (req is null || string.IsNullOrEmpty(req.Type))
+        return Results.BadRequest(new { error = "type is required" });
+    using var tx = db.BeginTransaction();
+    var src = new NodeId(req.Source);
+    var tgt = new NodeId(req.Target);
+    if (!tx.NodeExists(src) || !tx.NodeExists(tgt))
+        return Results.NotFound(new { error = "source or target node does not exist" });
+    var rid = tx.CreateRelationship(src, tgt, req.Type);
+    tx.Commit();
+    return Results.Created($"/relationships/{rid.Value}",
+        new { id = rid.Value, source = req.Source, target = req.Target, type = req.Type });
+});
+
+app.MapGet("/relationships/{id:long}", (long id, GraphDatabase db) =>
+{
+    using var tx = db.BeginReadOnlyTransaction();
+    // FT-30: GraphTransaction には RelationshipExists が無いので Stats / NodeExists 系のみ。
+    // ここではノードと同じ HWM 安全契約を期待するが、現状の IGraphTransaction には
+    // RelationshipExists API が無いので存在チェックは sample 範囲では省略する。
+    // (将来 API 追加時にここを補強する)
+    _ = tx;
+    return Results.Ok(new { id });
+});
+
+app.MapGet("/stats", (GraphDatabase db) =>
+{
+    var stats = db.Diagnostics.GetStatistics();
+    return Results.Ok(new { nodeCount = stats.NodeCount, relationshipCount = stats.RelationshipCount });
 });
 
 app.Run();
 
 internal sealed record CreateNodeRequest(string Label, string? Name);
+internal sealed record SetPropertyRequest(string Key, string? Value);
+internal sealed record CreateRelationshipRequest(long Source, long Target, string Type);
+
+// FT-30: Quiver.Hosting.Tests から WebApplicationFactory<Program> で起動するために
+// 暗黙の Program クラスを public partial として公開する。
+public partial class Program { }
