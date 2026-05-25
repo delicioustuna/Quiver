@@ -191,6 +191,154 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
         _txManager.SwapAdjacencyStore(newStore);
     }
 
+    /// <summary>
+    /// OP-1: ライブスナップショット。
+    ///
+    /// 流れ:
+    ///  1. ベストエフォートで <see cref="TransactionManager.RequestCheckpoint"/> を起動し、
+    ///     ダーティページを fsync + WAL に CheckpointEnd を残す (アクティブ tx 0 の場合のみ成功)。
+    ///     target 側 recovery の走査範囲を縮めるため。
+    ///  2. <see cref="IPageManager.Files"/> を列挙して全ページファイルを page-by-page で複製。
+    ///     <see cref="IPagedFile.PinForRead"/> でフレームレベル read lock を取りながら順次写すので、
+    ///     並行 writer は同一ページが衝突するときだけ短い待ち時間を経験する (block しない)。
+    ///  3. トークン / 隣接 / .fileKinds / .idxmeta などの非ページファイルを <see cref="File.Copy"/> で複製。
+    ///     これらはいずれも <c>FileShare.Read</c> 以上で開かれているため外部から並行読みできる。
+    ///  4. WAL を <see cref="IWriteAheadLog.FlushTo"/> で末尾までフラッシュしてから wal/*.log を複製。
+    ///     データファイルを先に取って WAL を後に取る順序は重要: 並行 in-flight tx が <c>PinForWrite</c>
+    ///     で吐く CompensationLogRecord (before-image) は <b>即時 WAL 追記</b>される (案 C の FlushPending
+    ///     が後段でまとめる PageImage と異なる) ため、データコピー中にバッファ pool eviction で
+    ///     uncommitted modification が target のデータファイルへ漏れたとしても、WAL コピーは必ず
+    ///     その CLR を含み、target recovery の Pass 3 undo が正しく巻き戻せる。
+    ///
+    /// target の recovery 後 LSN は snapshot WAL 末尾 LSN まで進む。
+    /// </summary>
+    public void CreateSnapshot(string targetDirectory, SnapshotOptions? options = null)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(targetDirectory);
+        options ??= new SnapshotOptions();
+
+        Directory.CreateDirectory(targetDirectory);
+
+        _txManager.RequestCheckpoint();
+
+        // 1. ページファイル群を page-by-page で複製。データファイル + 隣接 PagedFile が対象。
+        //    索引 PagedFile は IndexManager が直接 new するため IPageManager.Files には居ない。
+        //    index PagedFile は下の IndexFiles ループでカバーする。
+        foreach (var src in _pageManager.Files)
+        {
+            string srcPath = src.Path;
+            if (string.IsNullOrEmpty(srcPath)) continue;
+            string relative = Path.GetRelativePath(_directoryPath, srcPath);
+            if (relative.StartsWith("..", StringComparison.Ordinal)) continue;
+            if (relative.Length == 0 || relative == ".") continue;
+
+            string dstPath = Path.Combine(targetDirectory, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(dstPath)!);
+            CopyPagedFile(src, dstPath);
+        }
+
+        // 1b. 索引 PagedFile (.idx)。IncludeIndexes=false なら丸ごとスキップ。
+        if (options.IncludeIndexes)
+        {
+            foreach (var src in _indexManager.IndexFiles)
+            {
+                string srcPath = src.Path;
+                if (string.IsNullOrEmpty(srcPath)) continue;
+                string relative = Path.GetRelativePath(_directoryPath, srcPath);
+                if (relative.StartsWith("..", StringComparison.Ordinal)) continue;
+                string dstPath = Path.Combine(targetDirectory, relative);
+                Directory.CreateDirectory(Path.GetDirectoryName(dstPath)!);
+                CopyPagedFile(src, dstPath);
+            }
+        }
+
+        // 2. 非ページファイル (トークン / 隣接 / メタ) を File.Copy で複製。
+        CopyAuxiliaryFiles(targetDirectory, options);
+
+        // 3. WAL を末尾までフラッシュしてからセグメントファイルを複製。
+        //    Drain で出される PageImage 等もここで durable になる。
+        _wal.FlushTo(_wal.CurrentLsn);
+        var srcWalDir = Path.Combine(_directoryPath, "wal");
+        var dstWalDir = Path.Combine(targetDirectory, "wal");
+        Directory.CreateDirectory(dstWalDir);
+        if (Directory.Exists(srcWalDir))
+        {
+            foreach (var seg in Directory.GetFiles(srcWalDir, "wal.*.log"))
+            {
+                var dst = Path.Combine(dstWalDir, Path.GetFileName(seg));
+                CopySharedFile(seg, dst);
+            }
+        }
+    }
+
+    private static void CopyPagedFile(IPagedFile src, string dstPath)
+    {
+        long pageCount = src.PageCount;
+        int pageSize = src.PageSize;
+        using var fs = new FileStream(
+            dstPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        fs.SetLength(pageCount * pageSize);
+        byte[] buf = new byte[pageSize];
+        for (long p = 0; p < pageCount; p++)
+        {
+            var pageId = new Quiver.Core.PageId(p);
+            using var handle = src.PinForRead(pageId);
+            handle.Raw.CopyTo(buf);
+            fs.Write(buf, 0, pageSize);
+        }
+        fs.Flush(flushToDisk: true);
+    }
+
+    private void CopyAuxiliaryFiles(string targetDirectory, SnapshotOptions options)
+    {
+        // トークンストア (FileShare.Read で開かれている)
+        foreach (var name in new[] { "labels.tok", "reltypes.tok", "propkeys.tok" })
+            CopySharedFileIfExists(name, targetDirectory);
+
+        // 隣接ブロックの sidecar (PagedFile 経由は .db のみ。idx / meta / epoch は別ファイル)
+        foreach (var name in new[] {
+            "adj_idx.dat", "adj_v2_idx.dat", "adj_v2.meta", "adj.epoch" })
+        {
+            CopySharedFileIfExists(name, targetDirectory);
+        }
+
+        if (!options.IncludeIndexes) return;
+
+        // 索引 sidecar: .idxmeta + .fileKinds
+        var srcIdxDir = Path.Combine(_directoryPath, "indexes");
+        if (!Directory.Exists(srcIdxDir)) return;
+        var dstIdxDir = Path.Combine(targetDirectory, "indexes");
+        Directory.CreateDirectory(dstIdxDir);
+
+        foreach (var metaPath in Directory.GetFiles(srcIdxDir, "*.idxmeta"))
+            CopySharedFile(metaPath, Path.Combine(dstIdxDir, Path.GetFileName(metaPath)));
+
+        var kindsPath = Path.Combine(srcIdxDir, ".fileKinds");
+        if (File.Exists(kindsPath))
+            CopySharedFile(kindsPath, Path.Combine(dstIdxDir, ".fileKinds"));
+    }
+
+    private void CopySharedFileIfExists(string fileName, string targetDirectory)
+    {
+        var src = Path.Combine(_directoryPath, fileName);
+        if (!File.Exists(src)) return;
+        var dst = Path.Combine(targetDirectory, fileName);
+        CopySharedFile(src, dst);
+    }
+
+    private static void CopySharedFile(string srcPath, string dstPath)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(dstPath)!);
+        // FileShare.ReadWrite を立てておくと、source が WAL / トークン / メタファイルを
+        // 並行で append しても EBUSY にならない。
+        using var src = new FileStream(
+            srcPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var dst = new FileStream(
+            dstPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        src.CopyTo(dst);
+        dst.Flush(flushToDisk: true);
+    }
+
     public void Dispose()
     {
         _txManager.Dispose();

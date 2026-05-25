@@ -14,6 +14,12 @@ public interface IPagedFile : IDisposable
     /// <summary>論理的に割り当て済みのページ数。</summary>
     long PageCount { get; }
 
+    /// <summary>
+    /// OP-1: 本ファイルの実体パス。<see cref="GraphDatabase.CreateSnapshot"/> が
+    /// page-by-page コピーの対象ファイル名を解決するために参照する。既定実装は空文字列。
+    /// </summary>
+    string Path => string.Empty;
+
     /// <summary>新しいページを割り当ててその <see cref="PageId"/> を返す。</summary>
     PageId AllocatePage(PageKind kind);
 

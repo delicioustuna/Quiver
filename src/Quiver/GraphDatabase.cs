@@ -198,6 +198,21 @@ public sealed class GraphDatabase : IDisposable
                 "CompactAdjacency はバイナリバックエンドのみ実装されています。");
     }
 
+    /// <summary>
+    /// OP-1: 書き込みを止めずに <paramref name="targetDirectory"/> にライブスナップショットを
+    /// 取る。target は <see cref="Open"/> で独立した DB として開ける。
+    ///
+    /// 内部では (1) ベストエフォートでシャープチェックポイントを起動、(2) page-by-page で
+    /// データ / 索引ファイルを複製、(3) WAL を末尾までフラッシュしてセグメントを複製、
+    /// という流れで、並行 writer はフレームレベルロックの粒度で短くしか待たない。
+    /// target を開くと recovery が走り、snapshot 時点までの commit 群が redo され、
+    /// 中途半端だった in-flight tx は CompensationLogRecord で undo される。
+    ///
+    /// バイナリ以外のバックエンドはサポート対象外 (<see cref="NotSupportedException"/>)。
+    /// </summary>
+    public void CreateSnapshot(string targetDirectory, SnapshotOptions? options = null)
+        => _backend.CreateSnapshot(targetDirectory, options);
+
     /// <summary>下層バックエンドを破棄する。</summary>
     public void Dispose() => _backend.Dispose();
 }

@@ -43,6 +43,7 @@ public sealed class PagedFile : IPagedFile
 
     int IPagedFile.PageSize => PageSizeConst;
     public long PageCount => Volatile.Read(ref _logicalPageCount);
+    public string Path => _path;
 
     public PagedFile(string path, int poolCapacity = DefaultPoolCapacity)
     {

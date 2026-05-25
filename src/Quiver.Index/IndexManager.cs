@@ -115,6 +115,7 @@ public sealed class IndexManager : IIndexManager, IDisposable
         (idx as IDisposable)?.Dispose();
         _indexes.Remove(name);
         _indexTypes.Remove(name);
+        _indexFiles.Remove(name);
         if (_bindingByName.TryGetValue(name, out var key))
         {
             _bindings.Remove(key);
@@ -133,6 +134,18 @@ public sealed class IndexManager : IIndexManager, IDisposable
     }
 
     public IEnumerable<string> ListIndexes() => _indexes.Keys;
+
+    // OP-1: name → backing PagedFile を保持し、snapshot から (idx 名, PagedFile) を引けるようにする。
+    private readonly Dictionary<string, IPagedFile> _indexFiles
+        = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// OP-1: 配下の全 B+Tree 索引 (<see cref="BTreeIndex{TKey}"/>) の
+    /// <see cref="IPagedFile"/> をライブスナップショット用に列挙する。索引 PagedFile は
+    /// <see cref="IndexManager"/> が <see cref="PagedFile"/> を直接 new するため
+    /// <see cref="IPageManager"/> には登録されていない。よって snapshot 経路はここから引く。
+    /// </summary>
+    public IEnumerable<IPagedFile> IndexFiles => _indexFiles.Values;
 
     public void RegisterIndexBinding(string indexName, string label, string propertyKey)
     {
@@ -214,6 +227,7 @@ public sealed class IndexManager : IIndexManager, IDisposable
         var index = new BTreeIndex<TKey>(pagedFile, codec, name, kind);
         _indexes[name] = index;
         _indexTypes[name] = typeFlag;
+        _indexFiles[name] = pagedFile;
         return index;
     }
 
@@ -284,6 +298,7 @@ public sealed class IndexManager : IIndexManager, IDisposable
         var index = new BTreeIndex<TKey>(pagedFile, codec, name, kind);
         _indexes[name] = index;
         _indexTypes[name] = typeFlag;
+        _indexFiles[name] = pagedFile;
     }
 
     private string IndexPath(string name) => Path.Combine(_directory, $"{name}.idx");
@@ -295,5 +310,6 @@ public sealed class IndexManager : IIndexManager, IDisposable
             idx.Dispose();
         _indexes.Clear();
         _indexTypes.Clear();
+        _indexFiles.Clear();
     }
 }

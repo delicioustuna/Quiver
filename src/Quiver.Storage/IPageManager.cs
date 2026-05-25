@@ -12,4 +12,11 @@ public interface IPageManager : IDisposable
     /// チェックポイント時に、WAL を truncate する前にデータページの永続化を保証するために使う。
     /// </summary>
     void FlushAll();
+
+    /// <summary>
+    /// OP-1: 管理下の全 <see cref="IPagedFile"/> をスナップショット用に列挙する。
+    /// 返却順序は無保証。スナップショット中に並行で <see cref="OpenOrCreate"/> / <c>Drop</c>
+    /// が走っても列挙器が壊れないよう、実装は配列スナップショットを返す前提。
+    /// </summary>
+    IReadOnlyList<IPagedFile> Files => Array.Empty<IPagedFile>();
 }

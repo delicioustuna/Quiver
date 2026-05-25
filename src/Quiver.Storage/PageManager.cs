@@ -21,6 +21,14 @@ public sealed class PageManager : IPageManager
             f.Flush();
     }
 
+    public IReadOnlyList<IPagedFile> Files
+    {
+        get
+        {
+            lock (_filesLock) return _files.ToArray();
+        }
+    }
+
     /// <summary>
     /// Detach <paramref name="file"/> from manager-owned lifecycle. The caller
     /// becomes responsible for disposal. PW-14 uses this when compact reopens

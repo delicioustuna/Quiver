@@ -38,4 +38,19 @@ public interface IGraphStorageBackend : IDisposable
     /// 新しいトランザクションを <see cref="IGraphTransaction"/> でラップして開始する。
     /// </summary>
     IGraphTransaction BeginGraphTransaction(IsolationLevel level, bool readOnly);
+
+    /// <summary>
+    /// OP-1: 書き込みを止めずに <paramref name="targetDirectory"/> に
+    /// クラッシュ整合なライブスナップショットを取る。
+    /// 既定実装は <see cref="NotSupportedException"/>。
+    ///
+    /// バイナリバックエンドの実装は: ベストエフォートでシャープチェックポイントを起動し、
+    /// 全データページファイル / 索引ファイルを page-by-page で複製した後、WAL セグメントを
+    /// 末尾までコピーする。並行で書き込むトランザクションは block されず、target を
+    /// <see cref="GraphDatabase.Open"/> で開いたときに recovery が WAL から redo / undo して
+    /// snapshot 時点までの整合状態に収束する。
+    /// </summary>
+    void CreateSnapshot(string targetDirectory, SnapshotOptions? options = null)
+        => throw new NotSupportedException(
+            "CreateSnapshot is not supported by this backend.");
 }

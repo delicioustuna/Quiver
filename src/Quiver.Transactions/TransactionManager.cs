@@ -281,6 +281,32 @@ internal sealed class TransactionManager : ITransactionManager
     /// </summary>
     internal void SwapAdjacencyStore(IAdjacencyBlockStore? next) => _adjStore = next;
 
+    /// <summary>
+    /// OP-1: <see cref="GraphDatabase.CreateSnapshot"/> の前段で呼ばれ、ベストエフォートで
+    /// シャープチェックポイントを 1 回起動する。アクティブトランザクションが居る場合は
+    /// (シャープチェックポイントの不変条件を破らないよう) スキップする。スキップしても
+    /// snapshot 自体は WAL から redo / undo して target を整合させるため correctness には
+    /// 影響しないが、checkpoint 直後だと target 側 recovery の WAL 走査範囲が短くて済む。
+    /// </summary>
+    internal void RequestCheckpoint()
+    {
+        var checkpointer = _checkpointer;
+        if (checkpointer == null) return;
+        if (!_active.IsEmpty) return;
+
+        if (!Monitor.TryEnter(_checkpointGate)) return;
+        try
+        {
+            if (!_active.IsEmpty) return;
+            checkpointer.Checkpoint();
+            Volatile.Write(ref _lastCheckpointBytes, _wal.BytesWritten);
+        }
+        finally
+        {
+            Monitor.Exit(_checkpointGate);
+        }
+    }
+
     public void Dispose()
     {
         _deadlockDetector?.Dispose();
