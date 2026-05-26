@@ -13,6 +13,9 @@
 *.userosscache
 *.sln.docstates
 
+# VS auto-generated launch profiles (contain per-user ports)
+**/Properties/launchSettings.json
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
