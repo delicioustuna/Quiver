@@ -252,6 +252,9 @@ public sealed class WriteAheadLog : IWriteAheadLog
             }
             tcs.Task.GetAwaiter().GetResult();
             QuiverTelemetry.WalFlushDurationMs.Record(sw.Elapsed.TotalMilliseconds);
+            // OB-3: Trace レベルで残す。bytes/sec のメトリクスは別経路で取れるので、
+            // ここはトラブル時に有効化する用途を想定して Trace 止まり (allocation はソース生成で抑制)。
+            QuiverLog.WalFlushed(QuiverLog.WalLogger, lsn, sw.Elapsed.TotalMilliseconds);
         }
         finally
         {

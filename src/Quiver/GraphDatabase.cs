@@ -33,6 +33,12 @@ public sealed class GraphDatabase : IDisposable
     public static GraphDatabase Open(string directoryPath, GraphDatabaseOptions? options = null)
     {
         options ??= new GraphDatabaseOptions();
+        // OB-3: ホット path 各所が参照する構造化ログのファサードに ILoggerFactory を流し込む。
+        // null のときはあえて触らない — 別 DB が事前に設定したロガーを取り消さないことで、
+        // テスト並列実行時の汚染や、複数 DB を 1 プロセスで開く運用での意外な reset を避ける
+        // (OTel ActivitySource / EventSource は構造上プロセス共有なので、最後勝ち回避はここだけ)。
+        if (options.LoggerFactory != null)
+            Quiver.Core.Telemetry.QuiverLog.LoggerFactory = options.LoggerFactory;
         var factory = options.BackendFactory ?? CreateDefaultFactory(options.Backend);
         var backend = factory.Open(directoryPath, options);
         return new GraphDatabase(backend);

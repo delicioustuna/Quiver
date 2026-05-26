@@ -97,6 +97,8 @@ internal sealed class Checkpointer(
         PhaseInjector?.Invoke(CheckpointPhase.AfterTruncate);
         QuiverTelemetry.CheckpointDurationMs.Record(sw.Elapsed.TotalMilliseconds);
         activity?.SetTag("quiver.checkpoint.begin_lsn", beginLsn);
+        // OB-3: 構造化ログ。Information は運用上「実際にチェックポイントが完走した」マイルストーンとして残す。
+        QuiverLog.CheckpointCompleted(QuiverLog.CheckpointLogger, beginLsn, sw.Elapsed.TotalMilliseconds);
     }
 }
 

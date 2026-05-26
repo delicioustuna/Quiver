@@ -98,6 +98,8 @@ internal sealed class Transaction : ITransaction
         using var activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
             "tx.commit", ActivityKind.Internal);
         activity?.SetTag("quiver.tx.id", Id.Value);
+        // OB-3: tx 境界に構造化スコープを通す。Logger 未設定時は null になり no-op。
+        using var logScope = QuiverLog.BeginTxScope(QuiverLog.TransactionLogger, Id.Value, "Commit");
         var sw = Stopwatch.StartNew();
         try
         {
@@ -118,9 +120,10 @@ internal sealed class Transaction : ITransaction
             QuiverTelemetry.TxCommitCount.Add(1);
             QuiverTelemetry.TxCommitDurationMs.Record(sw.Elapsed.TotalMilliseconds);
             QuiverEventSource.Log.TxCommit();
+            QuiverLog.TxCommitted(QuiverLog.TransactionLogger, Id.Value, sw.Elapsed.TotalMilliseconds);
             activity?.SetStatus(ActivityStatusCode.Ok);
         }
-        catch
+        catch (Exception ex)
         {
             // Commit failed mid-way (e.g. WAL flush failure). Surface as rollback
             // so registered OnRolledBack hooks observe a consistent outcome.
@@ -138,6 +141,7 @@ internal sealed class Transaction : ITransaction
             QuiverTelemetry.TxAbortCount.Add(1);
             QuiverTelemetry.TxAbortDurationMs.Record(sw.Elapsed.TotalMilliseconds);
             QuiverEventSource.Log.TxAbort();
+            QuiverLog.TxCommitFailed(QuiverLog.TransactionLogger, Id.Value, ex.Message, ex);
             activity?.SetStatus(ActivityStatusCode.Error, "commit failed → rolled back");
             FireHooks(_onRolledBack);
             throw;
@@ -152,6 +156,8 @@ internal sealed class Transaction : ITransaction
         using var activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
             "tx.abort", ActivityKind.Internal);
         activity?.SetTag("quiver.tx.id", Id.Value);
+        // OB-3: 明示 Abort も同じスコープキーを通す。
+        using var logScope = QuiverLog.BeginTxScope(QuiverLog.TransactionLogger, Id.Value, "Abort");
         var sw = Stopwatch.StartNew();
         // FT-15: in-process undo — restore captured before-images to the data
         // files and reload page-backed store metadata, so discarded nodes /
@@ -170,6 +176,7 @@ internal sealed class Transaction : ITransaction
         _manager.OnAbort(Id);
         QuiverTelemetry.TxAbortCount.Add(1);
         QuiverTelemetry.TxAbortDurationMs.Record(sw.Elapsed.TotalMilliseconds);
+        QuiverLog.TxAborted(QuiverLog.TransactionLogger, Id.Value, sw.Elapsed.TotalMilliseconds);
         FireHooks(_onRolledBack);
     }
 
