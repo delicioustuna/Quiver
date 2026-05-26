@@ -15,5 +15,6 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Quiver.Tests" />
     <InternalsVisibleTo Include="Quiver.Benchmarks" />
+    <InternalsVisibleTo Include="Quiver.Operators.Tests" />
   </ItemGroup>
 </Project>
