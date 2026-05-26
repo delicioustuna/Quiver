@@ -1,6 +1,7 @@
+using Quiver.Backend.Tests;
 using Quiver.Storage.Sqlite;
 
-namespace Quiver.Backend.Tests;
+namespace Quiver.Storage.Sqlite.Tests;
 
 /// <summary>
 /// Runs the shared BA-2 backend contract suite against the SQLite backend (BA-5).

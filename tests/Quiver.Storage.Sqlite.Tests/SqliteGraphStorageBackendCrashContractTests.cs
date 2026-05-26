@@ -1,12 +1,13 @@
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
+using Quiver.Backend.Tests;
 using Quiver.Backend.Tests.Faults;
 using Quiver.Core;
 using Quiver.Storage.Sqlite;
 using Quiver.Transactions;
 using Xunit;
 
-namespace Quiver.Backend.Tests;
+namespace Quiver.Storage.Sqlite.Tests;
 
 /// <summary>
 /// BA-9 SQLite backend crash contract: runs the shared

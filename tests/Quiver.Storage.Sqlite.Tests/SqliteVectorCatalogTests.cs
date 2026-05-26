@@ -4,7 +4,7 @@ using Quiver.Core;
 using Quiver.Storage.Sqlite;
 using Xunit;
 
-namespace Quiver.Backend.Tests;
+namespace Quiver.Storage.Sqlite.Tests;
 
 /// <summary>
 /// VEC-2 persistence contract for <see cref="SqliteVectorCatalog"/>. Symmetric to
