@@ -46,5 +46,6 @@
     <Project Path="tests\Quiver.Backend.Tests\Quiver.Backend.Tests.csproj" />
     <Project Path="tests\Quiver.Storage.Sqlite.Tests\Quiver.Storage.Sqlite.Tests.csproj" />
     <Project Path="tests\Quiver.Hosting.Tests\Quiver.Hosting.Tests.csproj" />
+    <Project Path="tests\Quiver.PropertyTests\Quiver.PropertyTests.csproj" />
   </Folder>
 </Solution>
