@@ -76,6 +76,34 @@ public static class SpanCodec
         return ZigZagDecode(result);
     }
 
+    /// <summary>
+    /// VarInt の bounds-checked デコード。truncated / 過長 (shift &gt; 63) のときは
+    /// <c>false</c> を返す。fuzz / 信頼できない入力経路で使う安全版。
+    /// production の hot path は <see cref="ReadVarInt64"/> を継続使用。
+    /// </summary>
+    public static bool TryReadVarInt64(
+        ReadOnlySpan<byte> span, int offset, out long value, out int consumed)
+    {
+        value = 0;
+        consumed = 0;
+        if ((uint)offset > (uint)span.Length) return false;
+        ulong result = 0;
+        int shift = 0;
+        while (true)
+        {
+            int idx = offset + consumed;
+            if ((uint)idx >= (uint)span.Length) return false;
+            byte b = span[idx];
+            consumed++;
+            result |= (ulong)(b & 0x7F) << shift;
+            if ((b & 0x80) == 0) break;
+            shift += 7;
+            if (shift > 63) return false;
+        }
+        value = ZigZagDecode(result);
+        return true;
+    }
+
     /// <summary>UTF-8 文字列を VarInt 長さプレフィックス付きで書き込む。書き込んだ総バイト数を返す。</summary>
     public static int WriteUtf8(Span<byte> span, int offset, ReadOnlySpan<char> value)
     {
