@@ -1,0 +1,26 @@
+using BenchmarkDotNet.Attributes;
+using Quiver.Operators;
+
+namespace Quiver.Benchmarks.Operators;
+
+/// <summary>TS-6 sentinel: <see cref="PairWithConstantOperator"/> pairs every input with a fixed node.</summary>
+[MemoryDiagnoser]
+[ShortRunJob]
+public class PairWithConstantOperatorBench
+{
+    private OperatorBenchSeed _seed = null!;
+
+    [GlobalSetup]
+    public void Setup() => _seed = new OperatorBenchSeed("pairconst");
+
+    [GlobalCleanup]
+    public void Cleanup() => _seed.Dispose();
+
+    [Benchmark]
+    public int Pair_with_first_person()
+    {
+        var src = new NodeArraySource(_seed.PersonNodes);
+        using var op = new PairWithConstantOperator(src, 0, _seed.PersonNodes[0]);
+        return OperatorBenchDrain.Drain(op, _seed.ReadTx);
+    }
+}

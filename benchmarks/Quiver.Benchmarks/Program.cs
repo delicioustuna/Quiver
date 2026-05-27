@@ -1,3 +1,5 @@
+using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Exporters.Json;
 using BenchmarkDotNet.Running;
 using Quiver.Benchmarks;
 using Quiver.Benchmarks.Standalone;
@@ -54,5 +56,9 @@ if (args.Length >= 1 && args[0] == "--ft29-coalesce")
     return Ft29PageImageCoalesceRunner.Run();
 }
 
-BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
+// TS-6: JsonExporter.Full は <ResultsDir>/<Class>-report-full.json を出す。
+// Quiver.Benchmarks.RegressionCheck はこの形式を読んで baselines/main.json と
+// 比較する。default config の Markdown / CSV exporter は残したまま追加する。
+var config = DefaultConfig.Instance.AddExporter(JsonExporter.Full);
+BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, config);
 return 0;

@@ -19,6 +19,7 @@
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks\Quiver.Benchmarks\Quiver.Benchmarks.csproj" />
+    <Project Path="benchmarks\Quiver.Benchmarks.RegressionCheck\Quiver.Benchmarks.RegressionCheck.csproj" />
   </Folder>
   <Folder Name="/sandbox/">
     <Project Path="sandbox\QuiverSandbox\QuiverSandbox.csproj" />

@@ -1,0 +1,26 @@
+using BenchmarkDotNet.Attributes;
+using Quiver.Operators;
+
+namespace Quiver.Benchmarks.Operators;
+
+/// <summary>TS-6 sentinel: <see cref="FilterOperator"/> with a single even-id predicate.</summary>
+[MemoryDiagnoser]
+[ShortRunJob]
+public class FilterOperatorBench
+{
+    private OperatorBenchSeed _seed = null!;
+
+    [GlobalSetup]
+    public void Setup() => _seed = new OperatorBenchSeed("filter");
+
+    [GlobalCleanup]
+    public void Cleanup() => _seed.Dispose();
+
+    [Benchmark]
+    public int Filter_even_id()
+    {
+        var src = new NodeArraySource(_seed.PersonNodes);
+        using var op = new FilterOperator(src, new EvenIdPredicate());
+        return OperatorBenchDrain.Drain(op, _seed.ReadTx);
+    }
+}
