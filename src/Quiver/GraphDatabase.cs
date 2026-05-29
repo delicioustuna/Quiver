@@ -19,11 +19,17 @@ public sealed class GraphDatabase : IDisposable
 {
     private readonly IGraphStorageBackend _backend;
     private readonly string _directoryPath;
+    // OP-7: AutoVacuum が有効なときのみ非 null。Dispose で停止する。
+    private readonly AutoVacuumWorker? _autoVacuumWorker;
 
-    private GraphDatabase(IGraphStorageBackend backend, string directoryPath)
+    private GraphDatabase(
+        IGraphStorageBackend backend,
+        string directoryPath,
+        AutoVacuumWorker? autoVacuumWorker = null)
     {
         _backend = backend;
         _directoryPath = directoryPath;
+        _autoVacuumWorker = autoVacuumWorker;
     }
 
     /// <summary>OP-4: <see cref="Open"/> に渡したデータディレクトリのパス。</summary>
@@ -46,7 +52,14 @@ public sealed class GraphDatabase : IDisposable
             Quiver.Core.Telemetry.QuiverLog.LoggerFactory = options.LoggerFactory;
         var factory = options.BackendFactory ?? CreateDefaultFactory(options.Backend);
         var backend = factory.Open(directoryPath, options);
-        return new GraphDatabase(backend, directoryPath);
+
+        // OP-7: AutoVacuum 有効時は周期ワーカーを起動する。各 tick は backend.Vacuum() を
+        // 呼ぶだけで、アクティブ tx があれば vacuum 自身が Skipped で安全に no-op する。
+        AutoVacuumWorker? worker = null;
+        if (options.AutoVacuum && options.AutoVacuumInterval > TimeSpan.Zero)
+            worker = new AutoVacuumWorker(() => backend.Vacuum(), options.AutoVacuumInterval);
+
+        return new GraphDatabase(backend, directoryPath, worker);
     }
 
     private static IGraphStorageBackendFactory CreateDefaultFactory(BackendKind kind) => kind switch
@@ -254,8 +267,17 @@ public sealed class GraphDatabase : IDisposable
     public IReadOnlyList<Migrations.MigrationHistoryEntry> GetMigrationHistory()
         => new Migrations.MigrationHistory(_directoryPath).Entries;
 
-    /// <summary>下層バックエンドを破棄する。</summary>
-    public void Dispose() => _backend.Dispose();
+    /// <summary>
+    /// バックグラウンドの AutoVacuum ワーカー (OP-7) を停止してから下層バックエンドを破棄する。
+    /// ワーカー停止は進行中の vacuum tick の完了を待ってから戻る。
+    /// </summary>
+    public void Dispose()
+    {
+        // 先にワーカーを止めてから backend を閉じる。逆順だと進行中 tick が
+        // 破棄済み backend に触れて落ちうる。
+        _autoVacuumWorker?.Dispose();
+        _backend.Dispose();
+    }
 }
 
 /// <summary>
@@ -396,7 +418,18 @@ public sealed class GraphDatabaseOptions
     /// OP-3: <c>true</c> のとき、バックエンドが提供するバックグラウンドワーカーで
     /// 周期的に <see cref="GraphDatabase.Vacuum"/> を起動する。既定 <c>false</c>
     /// (運用者が明示的に <see cref="GraphDatabase.Vacuum"/> を呼ぶ前提)。
-    /// MVP では本フラグは設定値として保持されるのみで、自動起動経路は未実装。
+    /// OP-7 でバックグラウンドワーカーを配線済み。<c>true</c> かつ
+    /// <see cref="AutoVacuumInterval"/> が正のとき、<see cref="GraphDatabase.Open"/> が
+    /// <see cref="Quiver.Maintenance.AutoVacuumWorker"/> を起動し、
+    /// <see cref="GraphDatabase.Dispose"/> で停止する。
     /// </summary>
     public bool AutoVacuum { get; set; } = false;
+
+    /// <summary>
+    /// OP-7: <see cref="AutoVacuum"/> 有効時の vacuum 起動周期。既定 1 時間。
+    /// 初回も DB open から 1 周期後に発火する (open 直後の vacuum 突入で起動レイテンシを
+    /// 悪化させないため)。<see cref="TimeSpan.Zero"/> 以下にすると <see cref="AutoVacuum"/> が
+    /// <c>true</c> でもワーカーは起動しない。
+    /// </summary>
+    public TimeSpan AutoVacuumInterval { get; set; } = TimeSpan.FromHours(1);
 }
