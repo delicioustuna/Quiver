@@ -7,6 +7,14 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>Quiver.Samples.Crud</RootNamespace>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- CI-1: AOT publish smoke のターゲット。コマンドライン -p:PublishAot=true は
+         P2P 参照先 (netstandard2.0 の Client.Attributes / SourceGen) にも伝播して
+         NETSDK1207 を起こす。プロジェクトプロパティはこの csproj 内に閉じて参照先へ
+         伝播しないので、ここで PublishAot を有効化し、workflow 側は -p: を渡さない。
+         PublishAot は publish 時のみ ILCompiler を引き込むため、通常の
+         dotnet build Quiver.slnx には影響しない。 -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot>true</PublishAot>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Quiver\Quiver.csproj" />

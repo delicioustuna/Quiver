@@ -1,0 +1,65 @@
+name: Benchmarks (nightly)
+
+# CI-1: nightly ベンチ。BenchmarkDotNet を走らせ JsonExporter.Full の結果を
+# benchmarks/baselines/main.json と Quiver.Benchmarks.RegressionCheck で比較し、
+# 20% (かつ >3σ) の wall-clock 劣化があれば fail する (TS-6 と連動)。
+# 結果 JSON は artifact として保存する (gh-pages への push は remote 整備後に追加)。
+on:
+  schedule:
+    # 毎日 UTC 18:00 (JST 03:00)。
+    - cron: '0 18 * * *'
+  workflow_dispatch: {}   # 手動トリガも許可
+
+concurrency:
+  group: bench-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: nightly benchmark
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Run benchmarks
+        shell: pwsh
+        run: |
+          dotnet run --project benchmarks/Quiver.Benchmarks/Quiver.Benchmarks.csproj `
+            --configuration Release `
+            -- --filter '*' `
+            2>&1 | Tee-Object -FilePath bench.log
+          if ($LASTEXITCODE -ne 0) { throw "benchmark run failed" }
+
+      - name: Merge results
+        shell: pwsh
+        run: |
+          dotnet run --project benchmarks/Quiver.Benchmarks.RegressionCheck/Quiver.Benchmarks.RegressionCheck.csproj `
+            --configuration Release `
+            -- --merge BenchmarkDotNet.Artifacts/results --output artifacts/current.json
+          if ($LASTEXITCODE -ne 0) { throw "merge failed" }
+
+      - name: Regression check vs baseline
+        shell: pwsh
+        run: |
+          dotnet run --project benchmarks/Quiver.Benchmarks.RegressionCheck/Quiver.Benchmarks.RegressionCheck.csproj `
+            --configuration Release `
+            -- --baseline benchmarks/baselines/main.json --current artifacts/current.json
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            BenchmarkDotNet.Artifacts/results/
+            artifacts/current.json
+            bench.log
+          retention-days: 30

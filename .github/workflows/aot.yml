@@ -1,0 +1,70 @@
+name: AOT publish smoke
+
+# CI-1: AOT 互換性スモーク。Quiver.Samples.Crud を NativeAOT 公開し、
+# トリム / AOT 警告が出ないこと + 生成された native binary が実際に起動することを確認する。
+# PW-19 (AOT publish smoke) と連動。段階導入のため windows-latest 単独で開始する。
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: aot-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  aot-smoke:
+    name: AOT publish smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # NativeAOT は C++ ツールチェーンを要する。windows-latest には MSVC が
+      # プリインストールされているので追加 setup は不要。
+      # PublishAot は Crud sample の csproj 側で有効化済み。コマンドラインで
+      # -p:PublishAot=true を渡すと netstandard2.0 の P2P 参照先へ伝播して
+      # NETSDK1207 になるため、ここでは渡さない。
+      - name: Publish (NativeAOT)
+        shell: pwsh
+        run: |
+          dotnet publish samples/Quiver.Samples.Crud/Quiver.Samples.Crud.csproj `
+            --configuration Release `
+            --runtime ${{ matrix.rid }} `
+            --output artifacts/aot `
+            2>&1 | Tee-Object -FilePath aot-publish.log
+          if ($LASTEXITCODE -ne 0) { throw "AOT publish failed" }
+
+      # AOT / trim 警告 (IL2xxx / IL3xxx) が 1 件でもあれば fail させる。
+      - name: Fail on AOT/trim warnings
+        shell: pwsh
+        run: |
+          $warnings = Select-String -Path aot-publish.log -Pattern 'warning IL(2|3)\d{3}'
+          if ($warnings) {
+            Write-Host "::error::AOT/trim warnings detected:"
+            $warnings | ForEach-Object { Write-Host $_.Line }
+            exit 1
+          }
+          Write-Host "No AOT/trim warnings."
+
+      - name: Run published binary (smoke)
+        shell: pwsh
+        run: |
+          $exe = Join-Path "artifacts/aot" "Quiver.Samples.Crud.exe"
+          if (-not (Test-Path $exe)) { throw "published binary not found: $exe" }
+          & $exe
+          if ($LASTEXITCODE -ne 0) { throw "published binary exited with $LASTEXITCODE" }
