@@ -10,11 +10,19 @@ public static class FormatVersion
     /// <summary>v1: FT-15 までのレイアウト (xmin/xmax 無し)。FT-26 より開けない。</summary>
     public const byte V1 = 1;
 
-    /// <summary>v2: FT-26 MVCC レイアウト。record header に xmin/xmax を持つ。</summary>
+    /// <summary>v2: FT-26 MVCC レイアウト。record header に xmin/xmax を持つ。FT-32 より開けない。</summary>
     public const byte V2Mvcc = 2;
 
+    /// <summary>
+    /// v3: FT-32 MVCC sidecar レイアウト。record から xmin/xmax を撤去し、EntityKind 別の
+    /// sidecar (<see cref="Quiver.Wal.WalFileKind.NodeVersionMeta"/> 等) に移管した。record が縮み
+    /// (Node 31→15B / Rel 64→48B / Prop 57→41B)、cache line residency が改善する。v2 とはバイト配置が
+    /// 非互換 (record サイズが縮小し、xmin/xmax が別ファイルに移る)。
+    /// </summary>
+    public const byte V3MvccSidecar = 3;
+
     /// <summary>現行 (= 新規 DB を作成するときに書き込むバージョン)。</summary>
-    public const byte Current = V2Mvcc;
+    public const byte Current = V3MvccSidecar;
 }
 
 /// <summary>

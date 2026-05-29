@@ -33,15 +33,26 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         var walDir = Path.Combine(directoryPath, "wal");
         var wal = new WriteAheadLog(walDir, options.WalSegmentSize, options.GroupCommitWindow);
 
+        // FT-32: MVCC sidecar — record から撤去した xmin/xmax を EntityKind 別 sidecar に持つ。
+        // 各 sidecar PagedFile も EnableWalLogging で同一 WAL に連動させ、データレコードと
+        // 同一トランザクションで PageImage / before-image が記録される (commit / abort / crash で整合)。
         var nodeFile = pageManager.OpenOrCreate(
             Path.Combine(directoryPath, "nodes.db"), PageKind.Header);
         nodeFile.EnableWalLogging((byte)WalFileKind.Nodes, wal);
-        var nodeStore = new NodeStore(nodeFile);
+        var nodeVerFile = pageManager.OpenOrCreate(
+            Path.Combine(directoryPath, "nodes.ver"), PageKind.Header);
+        nodeVerFile.EnableWalLogging((byte)WalFileKind.NodeVersionMeta, wal);
+        var nodeVersions = new EntityVersionStore(nodeVerFile);
+        var nodeStore = new NodeStore(nodeFile, labelIndex: null, nodeVersions);
 
         var relFile = pageManager.OpenOrCreate(
             Path.Combine(directoryPath, "rels.db"), PageKind.Header);
         relFile.EnableWalLogging((byte)WalFileKind.Relationships, wal);
-        var relStore = new RelationshipStore(relFile);
+        var relVerFile = pageManager.OpenOrCreate(
+            Path.Combine(directoryPath, "rels.ver"), PageKind.Header);
+        relVerFile.EnableWalLogging((byte)WalFileKind.RelationshipVersionMeta, wal);
+        var relVersions = new EntityVersionStore(relVerFile);
+        var relStore = new RelationshipStore(relFile, relVersions);
 
         var propFile = pageManager.OpenOrCreate(
             Path.Combine(directoryPath, "props.db"), PageKind.Header);
@@ -49,7 +60,11 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         var blobFile = pageManager.OpenOrCreate(
             Path.Combine(directoryPath, "blobs.db"), PageKind.Header);
         blobFile.EnableWalLogging((byte)WalFileKind.BlobData, wal);
-        var propStore = new PropertyStore(propFile, blobFile);
+        var propVerFile = pageManager.OpenOrCreate(
+            Path.Combine(directoryPath, "props.ver"), PageKind.Header);
+        propVerFile.EnableWalLogging((byte)WalFileKind.PropertyVersionMeta, wal);
+        var propVersions = new EntityVersionStore(propVerFile);
+        var propStore = new PropertyStore(propFile, blobFile, propVersions);
 
         var labelTokens   = new LabelTokenStore(Path.Combine(directoryPath, "labels.tok"));
         var relTypeTokens = new RelationshipTypeTokenStore(Path.Combine(directoryPath, "reltypes.tok"));
@@ -66,6 +81,11 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
             { (byte)WalFileKind.Relationships, relFile },
             { (byte)WalFileKind.Properties,    propFile },
             { (byte)WalFileKind.BlobData,      blobFile },
+            // FT-32: sidecar も ARIES page-WAL 対象。recovery の PageImage redo / abort の
+            // before-image undo がデータレコードと一貫して走るよう registry に登録する。
+            { (byte)WalFileKind.NodeVersionMeta,         nodeVerFile },
+            { (byte)WalFileKind.RelationshipVersionMeta, relVerFile },
+            { (byte)WalFileKind.PropertyVersionMeta,     propVerFile },
         };
         var indexManager = new IndexManager(indexDir, wal, fileRegistry);
         // FT-19: 既存索引を recovery 前に open + EnableWalLogging + fileRegistry へ登録。

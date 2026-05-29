@@ -313,7 +313,10 @@ public sealed class VacuumTests : IDisposable
             {
                 aliveId = tx.CreateNode("Person").Value;
                 tx.SetProperty(new Core.NodeId(aliveId), "name", Stores.PropertyValue.FromInt32(42));
-                for (int i = 0; i < 500; i++)
+                // FT-32: NodeStore record が 31→15B に縮み records/page が 263→544 に増えたため、
+                // 末尾 free page を truncate させるには alive ノード (id 0) の居る page を超えて
+                // 複数 record page に跨る数の deleted ノードが必要。1200 で page 2〜4 に跨る。
+                for (int i = 0; i < 1200; i++)
                     deletedIds.Add(tx.CreateNode("Person").Value);
                 tx.Commit();
             }

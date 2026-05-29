@@ -15,19 +15,18 @@ internal struct RawNodeRecord
     public long Xmax;
 }
 
-// FT-26 v2 (MVCC) record layout (31 bytes):
-//  0 Flags(1) | 1 FirstRelId(6) | 7 FirstPropId(6) | 13 LabelId(2) | 15 Xmin(8) | 23 Xmax(8)
+// FT-32 v3 (MVCC sidecar) record layout (15 bytes):
+//  0 Flags(1) | 1 FirstRelId(6) | 7 FirstPropId(6) | 13 LabelId(2)
 //
-// Xmin / Xmax = TransactionId.Value (long). 0 = unset.
-//   Allocate: xmin = MvccContext.CurrentTxId, xmax = 0
-//   Free (logical delete): xmax = MvccContext.CurrentTxId
+// Xmin / Xmax は record から撤去し、EntityVersionMeta sidecar (NodeVersionMeta) に
+// localId (= NodeId.Value) をキーとして移管した。
+//   Allocate: sidecar.Write(id, { Xmin = MvccContext.CurrentTxId, Xmax = 0 })
+//   Free (logical delete): sidecar.UpdateXmax(id, MvccContext.CurrentTxId)
 //     チェーン / record 本体は保持 (snapshot reader が辿れるよう)、物理回収は vacuum (OP-3) 担当。
 internal sealed class NodeStore : INodeStore
 {
-    public const int RecordSize = 31;
+    public const int RecordSize = 15;
     private const byte FlagInUse = 0x01;
-    internal const int XminOffset = 15;
-    internal const int XmaxOffset = 23;
 
     // PageId(0) = PagedFile meta; PageId(1) = NodeStore header; PageId(2+) = records
     private static readonly PageId HeaderPageId = new(1);
@@ -36,19 +35,23 @@ internal sealed class NodeStore : INodeStore
     private const int MetaInUse = 16;         // int64
     private const int MetaFormatVersion = 31; // byte (FT-26 sentinel — 詳細は FormatVersion)
 
-    public static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 263
+    public static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 544
 
     private readonly IPagedFile _file;
+    private readonly IEntityVersionStore _versions;
     private LabelNodeIndex? _labelIndex;
     private long _freeHead;
     private long _hwm;
     private long _inUseCount;
 
-    public NodeStore(IPagedFile file) : this(file, labelIndex: null) { }
+    public NodeStore(IPagedFile file) : this(file, labelIndex: null, versions: null) { }
 
-    public NodeStore(IPagedFile file, LabelNodeIndex? labelIndex)
+    public NodeStore(IPagedFile file, LabelNodeIndex? labelIndex) : this(file, labelIndex, versions: null) { }
+
+    public NodeStore(IPagedFile file, LabelNodeIndex? labelIndex, IEntityVersionStore? versions)
     {
         _file = file;
+        _versions = versions ?? new InMemoryEntityVersionStore();
         _labelIndex = labelIndex;
         if (_file.PageCount <= 1)
         {
@@ -100,9 +103,10 @@ internal sealed class NodeStore : INodeStore
         RecordHelpers.WriteInt48(rec[1..], -1L);
         RecordHelpers.WriteInt48(rec[7..], -1L);
         BinaryPrimitives.WriteInt16LittleEndian(rec[13..], (short)labelId.Value);
-        BinaryPrimitives.WriteInt64LittleEndian(rec[XminOffset..], MvccContext.CurrentTxId.Value);
-        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], 0L);
         _file.UnpinDirty(wpid, 0);
+
+        // FT-32: xmin/xmax は sidecar に書く。Pstamp=0 / Sstamp=MaxValue は SSN (FT-33) の既定。
+        _versions.Write(id, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue));
 
         FlushMeta();
         var newId = new NodeId(id);
@@ -115,11 +119,13 @@ internal sealed class NodeStore : INodeStore
         // FT-26 MVCC: 論理削除のみ — xmax をスタンプして record / チェーンは維持する。
         // 物理回収 + free list 投入は vacuum 経路 (OP-3) で行う。
         var (pageId, off) = Location(nodeId.Value);
-        var ph = _file.PinForWrite(pageId);
-        Span<byte> rec = ph.Data.Slice(off, RecordSize);
-        var prevLabel = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(rec[13..]));
-        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], MvccContext.CurrentTxId.Value);
-        _file.UnpinDirty(pageId, 0);
+        LabelId prevLabel;
+        {
+            using var rh = _file.PinForRead(pageId);
+            prevLabel = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(rh.Data.Slice(off, RecordSize)[13..]));
+        }
+        // FT-32: 論理削除は sidecar の xmax をスタンプするだけ。record 本体は触らない。
+        _versions.UpdateXmax(nodeId.Value, MvccContext.CurrentTxId.Value);
 
         _inUseCount--;
         FlushMeta();
@@ -135,18 +141,30 @@ internal sealed class NodeStore : INodeStore
         if (nodeId.Value < 0 || nodeId.Value >= _hwm)
             return new NodeReadHandle(nodeId, inUse: false, RelationshipId.Invalid, PropertyId.Invalid, default);
         var (pageId, off) = Location(nodeId.Value);
-        using var h = _file.PinForRead(pageId);
-        ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
-        bool inUse = (rec[0] & FlagInUse) != 0;
-        var firstRel = new RelationshipId(RecordHelpers.ReadInt48(rec[1..]));
-        var firstProp = new PropertyId(RecordHelpers.ReadInt48(rec[7..]));
-        var label = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(rec[13..]));
-        long xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[XminOffset..]);
-        long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
-        // FT-26: ambient MVCC コンテキストで可視性をフィルタする。
-        // 不可視なら InUse=false に縮退して呼出側に "存在しない" と見せる。
-        if (inUse && !Visibility.IsVisibleAmbient(xmin, xmax))
-            inUse = false;
+        bool inUse;
+        RelationshipId firstRel;
+        PropertyId firstProp;
+        LabelId label;
+        {
+            using var h = _file.PinForRead(pageId);
+            ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
+            inUse = (rec[0] & FlagInUse) != 0;
+            firstRel = new RelationshipId(RecordHelpers.ReadInt48(rec[1..]));
+            firstProp = new PropertyId(RecordHelpers.ReadInt48(rec[7..]));
+            label = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(rec[13..]));
+        }
+        // FT-32: xmin/xmax は sidecar から引く。物理 free スロット (inUse=false) は
+        // sidecar を引かずに早期 return する (無駄な pin を避ける + stale sidecar を読まない)。
+        long xmin = 0, xmax = 0;
+        if (inUse)
+        {
+            var meta = _versions.Read(nodeId.Value);
+            xmin = meta.Xmin; xmax = meta.Xmax;
+            // FT-26: ambient MVCC コンテキストで可視性をフィルタする。
+            // 不可視なら InUse=false に縮退して呼出側に "存在しない" と見せる。
+            if (!Visibility.IsVisibleAmbient(xmin, xmax))
+                inUse = false;
+        }
         return new NodeReadHandle(nodeId, inUse, firstRel, firstProp, label, xmin, xmax);
     }
 
@@ -163,15 +181,14 @@ internal sealed class NodeStore : INodeStore
         {
             var (pageId, off) = Location(id);
             bool inUse;
-            long xmin, xmax;
             {
                 using var h = _file.PinForRead(pageId);
                 ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
                 inUse = (rec[0] & FlagInUse) != 0;
-                xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[XminOffset..]);
-                xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
             }
-            if (inUse && Visibility.IsVisibleAmbient(xmin, xmax))
+            if (!inUse) continue;
+            var meta = _versions.Read(id);
+            if (Visibility.IsVisibleAmbient(meta.Xmin, meta.Xmax))
                 yield return new NodeId(id);
         }
     }
@@ -206,11 +223,10 @@ internal sealed class NodeStore : INodeStore
         RecordHelpers.WriteInt48(rec[1..], -1L);
         RecordHelpers.WriteInt48(rec[7..], -1L);
         BinaryPrimitives.WriteInt16LittleEndian(rec[13..], (short)labelId);
-        // FT-26: bulk load は MvccContext が無いことが多いため Bootstrap TxId を xmin に。
-        // CommittedTxRegistry には常に Bootstrap が登録済みなので全 snapshot で可視。
-        BinaryPrimitives.WriteInt64LittleEndian(rec[XminOffset..], TransactionId.Bootstrap.Value);
-        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], 0L);
         _file.UnpinDirty(wpid, 0);
+        // FT-26/FT-32: bulk load は MvccContext が無いことが多いため Bootstrap TxId を xmin に。
+        // CommittedTxRegistry には常に Bootstrap が登録済みなので全 snapshot で可視。
+        _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue));
     }
 
     internal void BulkUpdateFirstProp(long id, long firstPropId)
@@ -253,7 +269,7 @@ internal sealed class NodeStore : INodeStore
                 ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
                 bool inUse = (rec[0] & FlagInUse) != 0;
                 if (!inUse) { continue; } // 既に物理 free
-                long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
+                long xmax = _versions.Read(id).Xmax; // FT-32: xmax は sidecar から
                 reclaimThis = xmax != 0
                     && xmax < horizonTxId
                     && committed.IsCommitted(xmax);
@@ -344,6 +360,7 @@ internal sealed class NodeStore : INodeStore
     {
         if (id < 0 || id >= _hwm) return default;
         var (pageId, off) = Location(id);
+        var meta = _versions.Read(id); // FT-32: xmin/xmax は sidecar から
         using var h = _file.PinForRead(pageId);
         ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
         return new RawNodeRecord
@@ -352,8 +369,8 @@ internal sealed class NodeStore : INodeStore
             FirstRelId = new RelationshipId(RecordHelpers.ReadInt48(rec[1..])),
             FirstPropId = new PropertyId(RecordHelpers.ReadInt48(rec[7..])),
             Label = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(rec[13..])),
-            Xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[XminOffset..]),
-            Xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]),
+            Xmin = meta.Xmin,
+            Xmax = meta.Xmax,
         };
     }
 
@@ -399,8 +416,8 @@ internal sealed class NodeStore : INodeStore
     {
         using var h = _file.PinForRead(HeaderPageId);
         byte v = h.Data[MetaFormatVersion];
-        if (v != FormatVersion.V2Mvcc)
-            throw new FormatVersionMismatchException("nodes", v, FormatVersion.V2Mvcc);
+        if (v != FormatVersion.V3MvccSidecar)
+            throw new FormatVersionMismatchException("nodes", v, FormatVersion.V3MvccSidecar);
     }
 
     private void FlushMeta(bool initialise = false)
@@ -410,7 +427,7 @@ internal sealed class NodeStore : INodeStore
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaHwm..], _hwm);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaInUse..], _inUseCount);
         if (initialise)
-            ph.Data[MetaFormatVersion] = FormatVersion.V2Mvcc;
+            ph.Data[MetaFormatVersion] = FormatVersion.V3MvccSidecar;
         _file.UnpinDirty(HeaderPageId, 0);
     }
 }

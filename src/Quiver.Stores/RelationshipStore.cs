@@ -4,23 +4,21 @@ using Quiver.Storage;
 
 namespace Quiver.Stores;
 
-// FT-26 v2 (MVCC) record layout (64 バイト):
+// FT-32 v3 (MVCC sidecar) record layout (48 バイト):
 //  0 Flags(1) | 1 Source(6) | 7 Target(6) | 13 TypeId(2) |
-// 15 SrcPrev(6) | 21 SrcNext(6) | 27 TgtPrev(6) | 33 TgtNext(6) | 39 FirstPropId(6) |
-// 45 Xmin(8) | 53 Xmax(8) | 61 Pad(3)
+// 15 SrcPrev(6) | 21 SrcNext(6) | 27 TgtPrev(6) | 33 TgtNext(6) | 39 FirstPropId(6) | 45 Pad(3)
 //
-// Xmin / Xmax = TransactionId.Value (long). 0 = unset。
-//   Create: xmin = MvccContext.CurrentTxId, xmax = 0
-//   Delete (論理): xmax = MvccContext.CurrentTxId
+// Xmin / Xmax は record から撤去し、RelationshipVersionMeta sidecar に
+// localId (= RelationshipId.Value) をキーとして移管した。
+//   Create: sidecar.Write(id, { Xmin = MvccContext.CurrentTxId, Xmax = 0 })
+//   Delete (論理): sidecar.UpdateXmax(id, MvccContext.CurrentTxId)
 //     チェーン (SrcPrev/SrcNext/TgtPrev/TgtNext) は unlink せず、slot も free list に戻さない。
 //     これにより snapshot reader (xmax コミット以前にスナップショットを取った tx) が
 //     依然として元の record を辿れる。物理回収は vacuum (OP-3) 担当。
 internal sealed class RelationshipStore : IRelationshipStore
 {
-    public const int RecordSize = 64;
+    public const int RecordSize = 48;
     private const byte FlagInUse = 0x01;
-    internal const int XminOffset = 45;
-    internal const int XmaxOffset = 53;
 
     private static readonly PageId HeaderPageId = new(1);
     private const int MetaFreeHead = 0;       // int64
@@ -28,16 +26,20 @@ internal sealed class RelationshipStore : IRelationshipStore
     private const int MetaInUse = 16;         // int64
     private const int MetaFormatVersion = 31; // byte (FT-26)
 
-    private static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 127
+    private static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 170
 
     private readonly IPagedFile _file;
+    private readonly IEntityVersionStore _versions;
     private long _freeHead;
     private long _hwm;
     private long _inUseCount;
 
-    public RelationshipStore(IPagedFile file)
+    public RelationshipStore(IPagedFile file) : this(file, versions: null) { }
+
+    public RelationshipStore(IPagedFile file, IEntityVersionStore? versions)
     {
         _file = file;
+        _versions = versions ?? new InMemoryEntityVersionStore();
         if (_file.PageCount <= 1)
         {
             _file.AllocatePage(PageKind.Header);
@@ -92,9 +94,9 @@ internal sealed class RelationshipStore : IRelationshipStore
         RecordHelpers.WriteInt48(rec[27..], RelationshipId.Invalid.Value);
         RecordHelpers.WriteInt48(rec[33..], tgtHead.Value);
         RecordHelpers.WriteInt48(rec[39..], PropertyId.Invalid.Value);
-        BinaryPrimitives.WriteInt64LittleEndian(rec[XminOffset..], MvccContext.CurrentTxId.Value);
-        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], 0L);
         _file.UnpinDirty(wpid, 0);
+        // FT-32: xmin/xmax は sidecar に書く。
+        _versions.Write(id, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue));
 
         // 旧 head の物理 SrcPrev/TgtPrev を新 rel に向ける。MVCC でも prev pointer は
         // 「双方向リンクの維持」のために物理的に更新する (visibility 判定は xmin/xmax で行う)。
@@ -128,11 +130,8 @@ internal sealed class RelationshipStore : IRelationshipStore
         // 物理回収 + chain 整理 + free list 投入は vacuum (OP-3) で行う。
         // 関連: nodeStore.firstRelId は更新しない (snapshot reader が辿れるよう head 維持)。
         _ = nodeStore;
-        var (pageId, off) = Location(relId.Value);
-        var ph = _file.PinForWrite(pageId);
-        Span<byte> rec = ph.Data.Slice(off, RecordSize);
-        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], MvccContext.CurrentTxId.Value);
-        _file.UnpinDirty(pageId, 0);
+        // FT-32: 論理削除は sidecar の xmax をスタンプするだけ。record 本体は触らない。
+        _versions.UpdateXmax(relId.Value, MvccContext.CurrentTxId.Value);
 
         _inUseCount--;
         FlushMeta();
@@ -159,11 +158,13 @@ internal sealed class RelationshipStore : IRelationshipStore
         var tgtPrev = new RelationshipId(RecordHelpers.ReadInt48(rec[27..]));
         var tgtNext = new RelationshipId(RecordHelpers.ReadInt48(rec[33..]));
         var firstPropId = new PropertyId(RecordHelpers.ReadInt48(rec[39..]));
-        long xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[XminOffset..]);
-        long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
-        // FT-26: MVCC visibility をフィルタする。
-        if (inUse && !Visibility.IsVisibleAmbient(xmin, xmax))
-            inUse = false;
+        // FT-32: xmin/xmax は sidecar から。物理 free スロットは sidecar を引かない。
+        if (inUse)
+        {
+            var meta = _versions.Read(relId.Value);
+            if (!Visibility.IsVisibleAmbient(meta.Xmin, meta.Xmax))
+                inUse = false;
+        }
         return new RelationshipReadHandle(relId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstPropId);
     }
 
@@ -198,15 +199,14 @@ internal sealed class RelationshipStore : IRelationshipStore
         {
             var (pageId, off) = Location(id);
             bool inUse;
-            long xmin, xmax;
             {
                 using var h = _file.PinForRead(pageId);
                 ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
                 inUse = (rec[0] & FlagInUse) != 0;
-                xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[XminOffset..]);
-                xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
             }
-            if (inUse && Visibility.IsVisibleAmbient(xmin, xmax))
+            if (!inUse) continue;
+            var meta = _versions.Read(id);
+            if (Visibility.IsVisibleAmbient(meta.Xmin, meta.Xmax))
                 yield return new RelationshipId(id);
         }
     }
@@ -230,10 +230,9 @@ internal sealed class RelationshipStore : IRelationshipStore
         RecordHelpers.WriteInt48(rec[27..], tgtPrev);
         RecordHelpers.WriteInt48(rec[33..], tgtNext);
         RecordHelpers.WriteInt48(rec[39..], -1L);
-        // FT-26: bulk load は MvccContext が無いので Bootstrap を xmin に。
-        BinaryPrimitives.WriteInt64LittleEndian(rec[XminOffset..], TransactionId.Bootstrap.Value);
-        BinaryPrimitives.WriteInt64LittleEndian(rec[XmaxOffset..], 0L);
         _file.UnpinDirty(wpid, 0);
+        // FT-26/FT-32: bulk load は MvccContext が無いので Bootstrap を xmin に (sidecar)。
+        _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue));
     }
 
     internal void BulkSetHeaders(long hwm, long inUseCount)
@@ -287,7 +286,7 @@ internal sealed class RelationshipStore : IRelationshipStore
             ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
             bool inUse = (rec[0] & FlagInUse) != 0;
             if (!inUse) continue;
-            long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
+            long xmax = _versions.Read(id).Xmax; // FT-32: xmax は sidecar から
             bool dead = xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax);
             if (dead) reclaimSet.Add(id);
         }
@@ -341,7 +340,7 @@ internal sealed class RelationshipStore : IRelationshipStore
                 }
                 else
                 {
-                    long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[XmaxOffset..]);
+                    long xmax = _versions.Read(cur.Value).Xmax; // FT-32: xmax は sidecar から
                     dead = xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax);
                 }
             }
@@ -528,8 +527,8 @@ internal sealed class RelationshipStore : IRelationshipStore
     {
         using var h = _file.PinForRead(HeaderPageId);
         byte v = h.Data[MetaFormatVersion];
-        if (v != FormatVersion.V2Mvcc)
-            throw new FormatVersionMismatchException("rels", v, FormatVersion.V2Mvcc);
+        if (v != FormatVersion.V3MvccSidecar)
+            throw new FormatVersionMismatchException("rels", v, FormatVersion.V3MvccSidecar);
     }
 
     private void FlushMeta(bool initialise = false)
@@ -539,7 +538,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaHwm..], _hwm);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaInUse..], _inUseCount);
         if (initialise)
-            ph.Data[MetaFormatVersion] = FormatVersion.V2Mvcc;
+            ph.Data[MetaFormatVersion] = FormatVersion.V3MvccSidecar;
         _file.UnpinDirty(HeaderPageId, 0);
     }
 }

@@ -30,10 +30,10 @@ public readonly ref struct NodeReadHandle
     public PropertyId FirstPropertyId => _firstPropId;
     public LabelId Label => _label;
 
-    /// <summary>FT-26: record を生成したトランザクション ID。</summary>
+    /// <summary>FT-26/FT-32: record を生成したトランザクション ID (sidecar 由来)。</summary>
     public long Xmin => _xmin;
 
-    /// <summary>FT-26: record を論理削除したトランザクション ID (0 = 生存)。</summary>
+    /// <summary>FT-26/FT-32: record を論理削除したトランザクション ID (sidecar 由来、0 = 生存)。</summary>
     public long Xmax => _xmax;
 
     internal NodeReadHandle(NodeId id, bool inUse, RelationshipId firstRelId, PropertyId firstPropId, LabelId label, long xmin = 0, long xmax = 0)
@@ -45,7 +45,8 @@ public readonly ref struct NodeReadHandle
     public void Dispose() { }
 }
 
-// FT-26 v2 layout: Flags(0,1) FirstRelId(1,6) FirstPropId(7,6) LabelId(13,2) Xmin(15,8) Xmax(23,8) — 31 bytes
+// FT-32 v3 layout: Flags(0,1) FirstRelId(1,6) FirstPropId(7,6) LabelId(13,2) — 15 bytes
+// (Xmin/Xmax は NodeVersionMeta sidecar に移管)
 public ref struct NodeWriteHandle
 {
     private readonly IPagedFile _file;
