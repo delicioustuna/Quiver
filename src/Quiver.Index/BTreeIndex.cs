@@ -26,6 +26,11 @@ internal static class BL // BTreeLayout
     public const int LeafHdr = 20;
     public const int InternalHdr = 12;
     public const int Body = 8160;
+
+    // OP-6: ページ使用バイト数がこの閾値を下回ると under-filled とみなし、
+    // 兄弟ページと merge / redistribute を試みる (fill factor ≒ 1/3)。
+    // 可変長キーのため「最小キー数」ではなくバイト占有率で判定する。
+    public const int MinFill = Body / 3;
 }
 
 internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
@@ -506,12 +511,24 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     {
         if (depth == _height - 1) return LeafDelete(pid, key, value);
         PageId child;
+        int childIdx;
         {
             using var rh = _file.PinForRead(pid);
             int kc = BinaryPrimitives.ReadInt32LittleEndian(rh.Data);
-            child = FindChild(rh.Data, kc, key);
+            (child, childIdx) = FindChildWithIndex(rh.Data, kc, key);
         }
-        return DeleteDown(child, key, value, depth + 1);
+        bool ok = DeleteDown(child, key, value, depth + 1);
+        if (!ok) return false;
+
+        // OP-6: 子が under-filled になったら兄弟と merge / redistribute して
+        // 縮退させる。merge で空いたページは _file.FreePage で free list へ戻る。
+        // この再均衡で親 (pid) のセパレータが減ると、呼び出し元 (祖父) が次に pid の
+        // 充填率を検査して再均衡を伝搬させる。root の縮退は Delete/DeleteRawEntry の
+        // root-collapse ループが担当する。
+        bool childIsLeaf = (depth + 1) == _height - 1;
+        if (IsUnderfull(child, childIsLeaf))
+            RebalanceChild(pid, childIdx, childIsLeaf);
+        return true;
     }
 
     private bool LeafDelete(PageId pid, byte[] key, long value)
@@ -554,6 +571,277 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         wbody.Slice(oldUsed - delSize, delSize).Clear();
         BinaryPrimitives.WriteInt32LittleEndian(wbody, count - 1);
         return true;
+    }
+
+    // -----------------------------------------------------------------------
+    // OP-6: under-filled ページの merge / redistribute
+    // -----------------------------------------------------------------------
+
+    /// <summary>ページの使用バイト数が <see cref="BL.MinFill"/> 未満かを判定する。</summary>
+    private bool IsUnderfull(PageId pid, bool isLeaf)
+    {
+        using var h = _file.PinForRead(pid);
+        ReadOnlySpan<byte> body = h.Data;
+        int cnt = BinaryPrimitives.ReadInt32LittleEndian(body);
+        int pos = isLeaf ? BL.LeafHdr : BL.InternalHdr;
+        for (int i = 0; i < cnt; i++)
+            pos += 2 + BinaryPrimitives.ReadInt16LittleEndian(body[pos..]) + 8;
+        return pos < BL.MinFill;
+    }
+
+    /// <summary>
+    /// 親 <paramref name="parent"/> の子インデックス <paramref name="ci"/> (0 = firstChild、
+    /// i = セパレータ i-1 の子) が under-filled なので、隣接兄弟と merge または
+    /// redistribute する。左兄弟を優先し、結合後が 1 ページに収まれば merge、収まらなければ
+    /// 1 エントリ移動して親セパレータを更新する。
+    /// </summary>
+    private void RebalanceChild(PageId parent, int ci, bool childIsLeaf)
+    {
+        var (firstChild, seps) = DecodeInternal(parent);
+        if (seps.Count == 0) return; // 兄弟が居ない退化ノード (上位で merge されるまで放置)
+
+        PageId ChildAt(int idx) => new(idx == 0 ? firstChild : seps[idx - 1].Value);
+
+        if (ci > 0)
+        {
+            int sepIdx = ci - 1;
+            PageId leftPid = ChildAt(ci - 1);
+            PageId childPid = ChildAt(ci);
+            bool merged = childIsLeaf
+                ? TryMergeLeaf(leftPid, childPid)
+                : TryMergeInternal(leftPid, childPid, seps[sepIdx].Key);
+            if (merged) seps.RemoveAt(sepIdx);
+            else if (childIsLeaf) BorrowLeafFromLeft(leftPid, childPid, seps, sepIdx);
+            else BorrowInternalFromLeft(leftPid, childPid, seps, sepIdx);
+        }
+        else
+        {
+            int sepIdx = 0;
+            PageId childPid = ChildAt(0);
+            PageId rightPid = ChildAt(1);
+            bool merged = childIsLeaf
+                ? TryMergeLeaf(childPid, rightPid)
+                : TryMergeInternal(childPid, rightPid, seps[sepIdx].Key);
+            if (merged) seps.RemoveAt(sepIdx);
+            else if (childIsLeaf) BorrowLeafFromRight(childPid, rightPid, seps, sepIdx);
+            else BorrowInternalFromRight(childPid, rightPid, seps, sepIdx);
+        }
+
+        EncodeInternal(parent, firstChild, seps);
+    }
+
+    // --- leaf merge / borrow ---
+
+    /// <summary>左右リーフが 1 ページに収まれば右を左へ統合し、右ページを free する。</summary>
+    private bool TryMergeLeaf(PageId leftPid, PageId rightPid)
+    {
+        var (le, _, lprev) = DecodeLeaf(leftPid);
+        var (re, rnext, _) = DecodeLeaf(rightPid);
+        int combined = BL.LeafHdr;
+        foreach (var e in le) combined += 2 + e.Key.Length + 8;
+        foreach (var e in re) combined += 2 + e.Key.Length + 8;
+        if (combined > BL.Body) return false;
+
+        le.AddRange(re);
+        EncodeLeaf(leftPid, le, rnext, lprev);
+        if (rnext >= 0)
+        {
+            using var nh = _file.PinForWrite(new PageId(rnext));
+            BinaryPrimitives.WriteInt64LittleEndian(nh.Data[12..], leftPid.Value);
+        }
+        _file.FreePage(rightPid);
+        return true;
+    }
+
+    private void BorrowLeafFromLeft(PageId leftPid, PageId childPid,
+        List<KeyValuePair<byte[], long>> seps, int sepIdx)
+    {
+        var (le, lnext, lprev) = DecodeLeaf(leftPid);
+        var (ce, cnext, cprev) = DecodeLeaf(childPid);
+        var moved = le[^1];
+        le.RemoveAt(le.Count - 1);
+        ce.Insert(0, moved);
+        EncodeLeaf(leftPid, le, lnext, lprev);
+        EncodeLeaf(childPid, ce, cnext, cprev);
+        // 親セパレータ (左兄弟 | 子 の境界) = 子の新しい先頭キー、子ポインタは不変。
+        seps[sepIdx] = new KeyValuePair<byte[], long>(moved.Key, seps[sepIdx].Value);
+    }
+
+    private void BorrowLeafFromRight(PageId childPid, PageId rightPid,
+        List<KeyValuePair<byte[], long>> seps, int sepIdx)
+    {
+        var (ce, cnext, cprev) = DecodeLeaf(childPid);
+        var (re, rnext, rprev) = DecodeLeaf(rightPid);
+        var moved = re[0];
+        re.RemoveAt(0);
+        ce.Add(moved);
+        EncodeLeaf(childPid, ce, cnext, cprev);
+        EncodeLeaf(rightPid, re, rnext, rprev);
+        // 親セパレータ (子 | 右兄弟 の境界) = 右兄弟の新しい先頭キー、子ポインタは不変。
+        seps[sepIdx] = new KeyValuePair<byte[], long>(re[0].Key, seps[sepIdx].Value);
+    }
+
+    // --- internal merge / borrow ---
+
+    /// <summary>
+    /// 左右の内部ノードと親セパレータ <paramref name="sepKey"/> が 1 ページに収まれば、
+    /// 親セパレータを pull-down しつつ右を左へ統合し、右ページを free する。
+    /// </summary>
+    private bool TryMergeInternal(PageId leftPid, PageId rightPid, byte[] sepKey)
+    {
+        var (lfc, lseps) = DecodeInternal(leftPid);
+        var (rfc, rseps) = DecodeInternal(rightPid);
+        int combined = BL.InternalHdr;
+        foreach (var s in lseps) combined += 2 + s.Key.Length + 8;
+        combined += 2 + sepKey.Length + 8; // pull-down するセパレータ
+        foreach (var s in rseps) combined += 2 + s.Key.Length + 8;
+        if (combined > BL.Body) return false;
+
+        lseps.Add(new KeyValuePair<byte[], long>(sepKey, rfc)); // 親セパレータ + 右の firstChild
+        lseps.AddRange(rseps);
+        EncodeInternal(leftPid, lfc, lseps);
+        _file.FreePage(rightPid);
+        return true;
+    }
+
+    private void BorrowInternalFromLeft(PageId leftPid, PageId childPid,
+        List<KeyValuePair<byte[], long>> seps, int sepIdx)
+    {
+        var (lfc, lseps) = DecodeInternal(leftPid);
+        var (cfc, cseps) = DecodeInternal(childPid);
+        var lastSep = lseps[^1];
+        lseps.RemoveAt(lseps.Count - 1);
+        // 右回転: 親セパレータを子の先頭セパレータへ降ろし、子の旧 firstChild を従える。
+        cseps.Insert(0, new KeyValuePair<byte[], long>(seps[sepIdx].Key, cfc));
+        EncodeInternal(childPid, lastSep.Value, cseps);
+        EncodeInternal(leftPid, lfc, lseps);
+        seps[sepIdx] = new KeyValuePair<byte[], long>(lastSep.Key, seps[sepIdx].Value);
+    }
+
+    private void BorrowInternalFromRight(PageId childPid, PageId rightPid,
+        List<KeyValuePair<byte[], long>> seps, int sepIdx)
+    {
+        var (cfc, cseps) = DecodeInternal(childPid);
+        var (rfc, rseps) = DecodeInternal(rightPid);
+        var firstRSep = rseps[0];
+        rseps.RemoveAt(0);
+        // 左回転: 親セパレータを子の末尾セパレータへ降ろし、右の旧 firstChild を従える。
+        cseps.Add(new KeyValuePair<byte[], long>(seps[sepIdx].Key, rfc));
+        EncodeInternal(childPid, cfc, cseps);
+        EncodeInternal(rightPid, firstRSep.Value, rseps);
+        seps[sepIdx] = new KeyValuePair<byte[], long>(firstRSep.Key, seps[sepIdx].Value);
+    }
+
+    // --- page decode / encode helpers ---
+
+    private (List<KeyValuePair<byte[], long>> entries, long next, long prev) DecodeLeaf(PageId pid)
+    {
+        using var h = _file.PinForRead(pid);
+        ReadOnlySpan<byte> body = h.Data;
+        int count = BinaryPrimitives.ReadInt32LittleEndian(body);
+        long next = BinaryPrimitives.ReadInt64LittleEndian(body[4..]);
+        long prev = BinaryPrimitives.ReadInt64LittleEndian(body[12..]);
+        var list = new List<KeyValuePair<byte[], long>>(count);
+        int pos = BL.LeafHdr;
+        for (int i = 0; i < count; i++)
+        {
+            int klen = BinaryPrimitives.ReadInt16LittleEndian(body[pos..]);
+            byte[] k = body.Slice(pos + 2, klen).ToArray();
+            long v = BinaryPrimitives.ReadInt64LittleEndian(body[(pos + 2 + klen)..]);
+            list.Add(new KeyValuePair<byte[], long>(k, v));
+            pos += 2 + klen + 8;
+        }
+        return (list, next, prev);
+    }
+
+    private void EncodeLeaf(PageId pid, List<KeyValuePair<byte[], long>> entries, long next, long prev)
+    {
+        using var h = _file.PinForWrite(pid);
+        Span<byte> body = h.Data;
+        body[..BL.Body].Clear();
+        BinaryPrimitives.WriteInt32LittleEndian(body, entries.Count);
+        BinaryPrimitives.WriteInt64LittleEndian(body[4..], next);
+        BinaryPrimitives.WriteInt64LittleEndian(body[12..], prev);
+        int pos = BL.LeafHdr;
+        foreach (var e in entries)
+        {
+            BinaryPrimitives.WriteInt16LittleEndian(body[pos..], (short)e.Key.Length);
+            e.Key.AsSpan().CopyTo(body[(pos + 2)..]);
+            BinaryPrimitives.WriteInt64LittleEndian(body[(pos + 2 + e.Key.Length)..], e.Value);
+            pos += 2 + e.Key.Length + 8;
+        }
+    }
+
+    private (long firstChild, List<KeyValuePair<byte[], long>> seps) DecodeInternal(PageId pid)
+    {
+        using var h = _file.PinForRead(pid);
+        ReadOnlySpan<byte> body = h.Data;
+        int kc = BinaryPrimitives.ReadInt32LittleEndian(body);
+        long firstChild = BinaryPrimitives.ReadInt64LittleEndian(body[4..]);
+        var seps = new List<KeyValuePair<byte[], long>>(kc);
+        int pos = BL.InternalHdr;
+        for (int i = 0; i < kc; i++)
+        {
+            int klen = BinaryPrimitives.ReadInt16LittleEndian(body[pos..]);
+            byte[] k = body.Slice(pos + 2, klen).ToArray();
+            long child = BinaryPrimitives.ReadInt64LittleEndian(body[(pos + 2 + klen)..]);
+            seps.Add(new KeyValuePair<byte[], long>(k, child));
+            pos += 2 + klen + 8;
+        }
+        return (firstChild, seps);
+    }
+
+    private void EncodeInternal(PageId pid, long firstChild, List<KeyValuePair<byte[], long>> seps)
+    {
+        using var h = _file.PinForWrite(pid);
+        Span<byte> body = h.Data;
+        body[..BL.Body].Clear();
+        BinaryPrimitives.WriteInt32LittleEndian(body, seps.Count);
+        BinaryPrimitives.WriteInt64LittleEndian(body[4..], firstChild);
+        int pos = BL.InternalHdr;
+        foreach (var s in seps)
+        {
+            BinaryPrimitives.WriteInt16LittleEndian(body[pos..], (short)s.Key.Length);
+            s.Key.AsSpan().CopyTo(body[(pos + 2)..]);
+            BinaryPrimitives.WriteInt64LittleEndian(body[(pos + 2 + s.Key.Length)..], s.Value);
+            pos += 2 + s.Key.Length + 8;
+        }
+    }
+
+    // 可変長セパレータキーに対する 2 分探索で、辿るべき子 PageId とその子インデックス
+    // (0 = firstChild、i = セパレータ i-1 の子) を求める。<see cref="FindChild"/> の
+    // インデックス付き版で、削除時の再均衡が親内の子位置を知るために使う。
+    private static (PageId child, int index) FindChildWithIndex(
+        ReadOnlySpan<byte> body, int kc, ReadOnlySpan<byte> key)
+    {
+        if (kc == 0)
+            return (new PageId(BinaryPrimitives.ReadInt64LittleEndian(body[4..])), 0);
+
+        Span<int> offsets = kc <= 256 ? stackalloc int[kc] : new int[kc];
+        int pos = BL.InternalHdr;
+        for (int i = 0; i < kc; i++)
+        {
+            offsets[i] = pos;
+            pos += 2 + BinaryPrimitives.ReadInt16LittleEndian(body[pos..]) + 8;
+        }
+
+        int lo = 0, hi = kc;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) >> 1;
+            int sepOff = offsets[mid];
+            int klen = BinaryPrimitives.ReadInt16LittleEndian(body[sepOff..]);
+            if (key.SequenceCompareTo(body.Slice(sepOff + 2, klen)) < 0)
+                hi = mid;
+            else
+                lo = mid + 1;
+        }
+
+        if (lo == 0)
+            return (new PageId(BinaryPrimitives.ReadInt64LittleEndian(body[4..])), 0);
+        int o = offsets[lo - 1];
+        int k = BinaryPrimitives.ReadInt16LittleEndian(body[o..]);
+        return (new PageId(BinaryPrimitives.ReadInt64LittleEndian(body[(o + 2 + k)..])), lo);
     }
 
     // -----------------------------------------------------------------------
