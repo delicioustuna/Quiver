@@ -61,4 +61,14 @@ public interface IPagedFile : IDisposable
     /// WAL リプレイ中の RecoveryManager が利用する経路で、バッファプールをバイパスする。
     /// </summary>
     void WritePageForRecovery(PageId pageId, ReadOnlySpan<byte> pageBytes);
+
+    /// <summary>
+    /// OP-5: ページファイルを <paramref name="newPageCount"/> へ物理 truncate する。
+    /// バッファプール上で newPageCount 以上のページキャッシュを drop し、MMF を unmap、
+    /// <c>SetLength</c> 後に remap、メタページの PageCount を新しい値で書き戻す。
+    /// 呼び出し側は事前に <see cref="WalRecordType.FileTruncate"/> を WAL に書いて durable 化し、
+    /// アクティブ tx が 0 であることを保証する。recovery 中の冪等再生にも使われる。
+    /// 既定実装は <see cref="NotSupportedException"/> を投げる。
+    /// </summary>
+    void Truncate(long newPageCount) => throw new NotSupportedException();
 }

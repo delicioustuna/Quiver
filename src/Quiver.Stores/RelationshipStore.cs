@@ -465,6 +465,13 @@ internal sealed class RelationshipStore : IRelationshipStore
     /// <summary>OP-3 / テスト用。free list 先頭 (-1 で空)。</summary>
     internal long FreeHead => _freeHead;
 
+    /// <summary>OP-5: 現在の <c>_hwm</c> を保持するのに必要な最小ページ数 (meta + header + record pages)。</summary>
+    internal long ComputeRequiredPageCount()
+        => _hwm == 0 ? 2L : ((_hwm - 1) / RecordsPerPage) + 3L;
+
+    /// <summary>OP-5: 内部 PagedFile への参照 (vacuum/truncate 経路で使用)。</summary>
+    internal IPagedFile UnderlyingFile => _file;
+
     /// <summary>
     /// FT-15: ヘッダページからインメモリのメタ (hwm / freeHead / inUseCount) を読み直す。
     /// abort の before-image 巻き戻し後、およびクラッシュ recovery 後に呼ばれ、

@@ -219,9 +219,11 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
     /// </summary>
     public VacuumReport Vacuum(VacuumOptions? options = null)
     {
+        // OP-5: WAL を渡して、dead version 回収後の末尾連続 free page を物理 truncate する。
+        // WAL の FileTruncate レコード経由で crash recovery に対する冪等再生を保証する。
         var vac = new Vacuum(
             _nodeStore, _relStore, _propStore,
-            _txManager, _txManager.CommittedRegistry);
+            _txManager, _txManager.CommittedRegistry, _wal);
         return vac.Run(options);
     }
 

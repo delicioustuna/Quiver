@@ -254,4 +254,120 @@ public sealed class VacuumTests : IDisposable
         using var read = db.BeginReadOnlyTransaction();
         read.NodeExists(new Core.NodeId(aliveId)).Should().BeTrue();
     }
+
+    // ---------- OP-5: 物理 truncate + WAL FileTruncate ----------
+
+    /// <summary>
+    /// OP-5: 1000 ノード作成 → 全削除 → vacuum で物理ページが truncate されること。
+    /// nodes.db / props.db のページファイルが Close 後にサイズ縮減していることを確認する。
+    /// </summary>
+    [Fact]
+    public void Vacuum_physically_truncates_page_files_after_mass_delete()
+    {
+        long beforeNodesSize, afterNodesSize;
+        long truncatedPages;
+
+        // 1000 ノードを作成。3 ストアに pages が確保される。
+        {
+            using var db = GraphDatabase.Open(_dir);
+            var ids = new List<long>();
+            using (var tx = db.BeginTransaction())
+            {
+                for (int i = 0; i < 1000; i++)
+                    ids.Add(tx.CreateNode("Person").Value);
+                tx.Commit();
+            }
+            // 全削除 (logical)。
+            using (var tx = db.BeginTransaction())
+            {
+                foreach (var id in ids)
+                    tx.DeleteNode(new Core.NodeId(id));
+                tx.Commit();
+            }
+            beforeNodesSize = new FileInfo(Path.Combine(_dir, "nodes.db")).Length;
+
+            var report = db.Vacuum();
+            report.Skipped.Should().BeFalse();
+            report.ReclaimedNodes.Should().Be(1000);
+            truncatedPages = report.TruncatedPages;
+        }
+
+        afterNodesSize = new FileInfo(Path.Combine(_dir, "nodes.db")).Length;
+        truncatedPages.Should().BeGreaterThan(0);
+        afterNodesSize.Should().BeLessThan(beforeNodesSize);
+    }
+
+    /// <summary>
+    /// OP-5: Vacuum の物理 truncate 後に DB を再 open しても整合性が保たれ、
+    /// 残った live データが読めること。truncate 操作は WAL FileTruncate で durable 化されている。
+    /// </summary>
+    [Fact]
+    public void Vacuum_truncate_survives_reopen()
+    {
+        long aliveId;
+        // フェーズ 1: 多数作成 → 一部削除 → vacuum で truncate。
+        {
+            using var db = GraphDatabase.Open(_dir);
+            var deletedIds = new List<long>();
+            using (var tx = db.BeginTransaction())
+            {
+                aliveId = tx.CreateNode("Person").Value;
+                tx.SetProperty(new Core.NodeId(aliveId), "name", Stores.PropertyValue.FromInt32(42));
+                for (int i = 0; i < 500; i++)
+                    deletedIds.Add(tx.CreateNode("Person").Value);
+                tx.Commit();
+            }
+            using (var tx = db.BeginTransaction())
+            {
+                foreach (var id in deletedIds)
+                    tx.DeleteNode(new Core.NodeId(id));
+                tx.Commit();
+            }
+            db.Vacuum().TruncatedPages.Should().BeGreaterThan(0);
+        }
+
+        // フェーズ 2: 再 open。残った live ノードと property が読めること。
+        using var db2 = GraphDatabase.Open(_dir);
+        using var read = db2.BeginReadOnlyTransaction();
+        read.NodeExists(new Core.NodeId(aliveId)).Should().BeTrue();
+        read.GetProperty(new Core.NodeId(aliveId), "name").Int32Value.Should().Be(42);
+    }
+
+    /// <summary>
+    /// OP-5: vacuum で truncate された範囲は新規 AllocatePage で再拡張されて埋まる。
+    /// truncate 後に同じ程度の新規ノードを作成して全部書けること。
+    /// </summary>
+    [Fact]
+    public void Pages_truncated_by_Vacuum_can_be_reallocated()
+    {
+        using var db = GraphDatabase.Open(_dir);
+
+        // 500 ノード作成 → 全削除 → vacuum (truncate を狙う)。
+        var ids = new List<long>();
+        using (var tx = db.BeginTransaction())
+        {
+            for (int i = 0; i < 500; i++)
+                ids.Add(tx.CreateNode("Person").Value);
+            tx.Commit();
+        }
+        using (var tx = db.BeginTransaction())
+        {
+            foreach (var id in ids) tx.DeleteNode(new Core.NodeId(id));
+            tx.Commit();
+        }
+        db.Vacuum();
+
+        // truncate 後に再び 500 ノード作る — エラーなく完了し全件読める。
+        var newIds = new List<long>();
+        using (var tx = db.BeginTransaction())
+        {
+            for (int i = 0; i < 500; i++)
+                newIds.Add(tx.CreateNode("Person").Value);
+            tx.Commit();
+        }
+
+        using var read = db.BeginReadOnlyTransaction();
+        foreach (var id in newIds)
+            read.NodeExists(new Core.NodeId(id)).Should().BeTrue();
+    }
 }

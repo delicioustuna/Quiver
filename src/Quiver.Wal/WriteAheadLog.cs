@@ -294,6 +294,19 @@ public sealed class WriteAheadLog : IWriteAheadLog
         return lsn;
     }
 
+    public long WriteFileTruncate(byte fileKind, long newPageCount)
+    {
+        if (newPageCount < 0)
+            throw new ArgumentOutOfRangeException(nameof(newPageCount));
+        // ペイロード: fileKind(1) + newPageCount(8) = 9 バイト
+        Span<byte> payload = stackalloc byte[9];
+        payload[0] = fileKind;
+        BinaryPrimitives.WriteInt64LittleEndian(payload[1..], newPageCount);
+        long lsn = Append(WalRecordType.FileTruncate, new TransactionId(-1), payload);
+        FlushTo(lsn);
+        return lsn;
+    }
+
     public void Truncate(long uptoLsn)
     {
         lock (_writeLock)

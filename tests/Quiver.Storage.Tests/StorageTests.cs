@@ -207,4 +207,81 @@ public class StorageTests : IDisposable
 
         pf.PageSize.Should().Be(8192);
     }
+
+    // ------------------------------------------------------------------
+    // OP-5: Truncate
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Truncate_ShrinksPageCount_AndPhysicalSize()
+    {
+        string path = TmpFile();
+        using (var f = new PagedFile(path))
+        {
+            for (int i = 0; i < 10; i++)
+                f.AllocatePage(PageKind.NodeRecord);
+            f.PageCount.Should().Be(11); // meta + 10
+            f.Flush();
+        }
+        long beforeSize = new FileInfo(path).Length;
+
+        using (var f = new PagedFile(path))
+        {
+            f.Truncate(3); // meta + 2 record pages
+            f.PageCount.Should().Be(3);
+        }
+
+        long afterSize = new FileInfo(path).Length;
+        afterSize.Should().BeLessThan(beforeSize);
+        afterSize.Should().Be(3L * PagedFile.PageSizeConst);
+
+        // 再 open しても PageCount が縮減後の値を保つこと。
+        using var reopen = new PagedFile(path);
+        reopen.PageCount.Should().Be(3);
+    }
+
+    [Fact]
+    public void Truncate_IsNoOp_WhenNewCount_NotLessThanCurrent()
+    {
+        using var f = new PagedFile(TmpFile());
+        f.AllocatePage(PageKind.NodeRecord);
+        f.AllocatePage(PageKind.NodeRecord);
+        f.PageCount.Should().Be(3);
+
+        f.Truncate(3); // 同じ
+        f.PageCount.Should().Be(3);
+        f.Truncate(100); // 拡張は無視
+        f.PageCount.Should().Be(3);
+    }
+
+    [Fact]
+    public void Truncate_Throws_WhenNewCount_Below1()
+    {
+        using var f = new PagedFile(TmpFile());
+        Action act = () => f.Truncate(0);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void Truncate_AllowsReallocation_AfterShrink()
+    {
+        using var f = new PagedFile(TmpFile());
+        for (int i = 0; i < 5; i++)
+            f.AllocatePage(PageKind.NodeRecord);
+        f.PageCount.Should().Be(6);
+
+        f.Truncate(2);
+        f.PageCount.Should().Be(2);
+
+        // 縮減後にも新規ページが確保できて読める。
+        var newId = f.AllocatePage(PageKind.NodeRecord);
+        newId.Value.Should().Be(2);
+        using (var wh = f.PinForWrite(newId))
+        {
+            wh.Data[0] = 0x55;
+        }
+        f.Flush();
+        using var rh = f.PinForRead(newId);
+        rh.Data[0].Should().Be(0x55);
+    }
 }

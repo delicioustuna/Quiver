@@ -322,6 +322,75 @@ public sealed class PagedFile : IPagedFile
         _fileStream.Flush(flushToDisk: true);
     }
 
+    /// <summary>
+    /// OP-5: ページファイルを <paramref name="newPageCount"/> へ物理 truncate する。
+    /// 現在のページ数より大きい値を渡すと no-op (拡張は行わない)。バッファプール上で
+    /// PageId >= newPageCount のフレームを drop、MMF を unmap、<c>SetLength</c>、remap、
+    /// メタページの PageCount を書き戻して fsync する。
+    /// </summary>
+    /// <remarks>
+    /// 呼び出し側 (<c>Vacuum</c> / <c>RecoveryManager</c>) は事前に
+    /// <see cref="IWriteAheadLog.WriteFileTruncate"/> を書いて durable 化する。
+    /// 再 mmf 範囲は <c>PageSizeConst</c> を下限とする (空ファイルは作らない)。
+    /// </remarks>
+    public void Truncate(long newPageCount)
+    {
+        if (newPageCount < 1)
+            throw new ArgumentOutOfRangeException(
+                nameof(newPageCount), "newPageCount must be >= 1 (meta page must be retained).");
+        lock (_poolLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (newPageCount >= _logicalPageCount) return;
+
+            // 1. 削除対象範囲のキャッシュフレームを drop (dirty も discard — vacuum 前提で
+            //    呼ばれるので、未コミット変更は存在しない / 既に flush 済み)。
+            for (int i = 0; i < _poolCapacity; i++)
+            {
+                ref PoolFrame f = ref _frames[i];
+                if (!f.PageId.IsValid) continue;
+                if (f.PageId.Value < newPageCount) continue;
+                if (f.PinCount > 0)
+                    throw new InvalidOperationException(
+                        $"Cannot truncate: page {f.PageId.Value} is pinned (PinCount={f.PinCount}).");
+                _pageToFrame.Remove(f.PageId);
+                f.PageId = PageId.Invalid;
+                f.IsDirty = false;
+                f.Referenced = false;
+            }
+
+            // 2. 残るフレーム (truncate 範囲外) のダーティをファイルへ反映。
+            FlushDirtyFramesLocked();
+            _viewAccessor?.Flush();
+
+            // 3. MMF を一旦 unmap してから SetLength → 再 map。
+            long newLength = newPageCount * (long)PageSizeConst;
+            _viewAccessor?.Dispose();
+            _mmf?.Dispose();
+            _mmf = null;
+            _viewAccessor = null;
+            _fileStream.SetLength(newLength);
+            _fileStream.Flush(flushToDisk: true);
+            MapFile();
+
+            // 4. メタページの PageCount を更新 (firstFree はそのまま — vacuum 前提では空)。
+            _logicalPageCount = newPageCount;
+            byte[] metaBuf = ArrayPool<byte>.Shared.Rent(PageSizeConst);
+            try
+            {
+                MmfReadPage(MetaPageId, metaBuf);
+                BinaryPrimitives.WriteInt64LittleEndian(
+                    metaBuf.AsSpan(PageHeader.Size + MetaOffsetPageCount), newPageCount);
+                PageHeader.Write(metaBuf.AsSpan(0, PageSizeConst), MetaPageId, PageKind.Header, lsn: 0);
+                MmfWritePageAndSync(MetaPageId, metaBuf);
+            }
+            finally { ArrayPool<byte>.Shared.Return(metaBuf); }
+
+            _viewAccessor?.Flush();
+            _fileStream.Flush(flushToDisk: true);
+        }
+    }
+
     // ------------------------------------------------------------------
     // バッファプール内部実装
     // ------------------------------------------------------------------

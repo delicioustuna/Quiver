@@ -25,6 +25,12 @@ public enum WalRecordType : byte
     // ペイロード形式は WriteAheadLog.WriteCheckpointBegin / WriteCheckpointEnd を参照。
     CheckpointBegin = 14,
     CheckpointEnd = 15,
+    // OP-5: Vacuum がページファイル末尾を物理 truncate した直後に書く。recovery の
+    // Pass 2 redo で再適用される (= 冪等)。ペイロードは [fileKind:1][newPageCount:8]。
+    // WAL 順序の不変条件: 同一 fileKind に対する後続の AllocatePage は newPageCount より
+    // 大きな PageId を生成しうるので、recovery 側は LSN 順に処理することで「truncate →
+    // 拡張」を再現する (truncate より後の WAL record が再びファイルを必要なサイズへ拡張)。
+    FileTruncate = 16,
     // 旧型式 (FT-21 以前)。「page fsync → log fsync → truncate」を 1 レコードで表現していた。
     // 既存 DB との互換のため recovery 側で読み飛ばし起点として認識する。新規には書かない。
     Checkpoint = 100,

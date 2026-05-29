@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Core.Telemetry;
 using Quiver.Index;
@@ -116,6 +117,9 @@ internal sealed class RecoveryManager : IRecoveryManager
         // Pass 2 (redo): コミット済みトランザクションの PageImage (after-image) を replay する。
         // FT-19: 索引 PagedFile も EnableWalLogging により PageImage 経路を共有するため、
         // ここで fileRegistry に登録された索引ファイルにも自動的に redo が適用される。
+        // OP-5: FileTruncate も同じパスで replay する。LSN 順に処理することで
+        // 「先行 LSN の PageImage で必要なら一度拡張 → 後続 LSN の FileTruncate で再縮減」
+        // が再現される (= 物理操作の冪等再生)。
         using (var reader = _wal.OpenReader(checkpointLsn))
         {
             while (reader.TryReadNext(out var record))
@@ -124,6 +128,10 @@ internal sealed class RecoveryManager : IRecoveryManager
                     committedTxs.Contains(record.TransactionId.Value))
                 {
                     ApplyPagePayload(record);
+                }
+                else if (record.Type == WalRecordType.FileTruncate)
+                {
+                    ApplyFileTruncate(record);
                 }
             }
         }
@@ -195,5 +203,28 @@ internal sealed class RecoveryManager : IRecoveryManager
             return;
         if (!_fileRegistry.TryGetValue(fileKind, out var file)) return;
         file.WritePageForRecovery(new PageId(pageId), pageBytes);
+    }
+
+    /// <summary>
+    /// OP-5: FileTruncate レコードの redo。ペイロードは <c>[fileKind:1][newPageCount:8]</c>。
+    /// fileKind が fileRegistry に存在しない / IPagedFile.Truncate が NotSupported を返した
+    /// 場合は黙って skip (索引等の未対応 backend でも recovery が止まらないように)。
+    /// </summary>
+    private void ApplyFileTruncate(in WalRecord record)
+    {
+        if (record.Payload.Length < 9) return;
+        var payload = record.Payload.Span;
+        byte fileKind = payload[0];
+        long newPageCount = BinaryPrimitives.ReadInt64LittleEndian(payload[1..]);
+        if (newPageCount < 1) return;
+        if (!_fileRegistry.TryGetValue(fileKind, out var file)) return;
+        try
+        {
+            file.Truncate(newPageCount);
+        }
+        catch (NotSupportedException)
+        {
+            // backend が truncate 未対応 — 黙って skip。
+        }
     }
 }

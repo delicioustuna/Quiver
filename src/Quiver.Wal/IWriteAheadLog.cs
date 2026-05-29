@@ -56,6 +56,15 @@ public interface IWriteAheadLog : IDisposable
     /// </summary>
     long WriteCheckpointEnd(long beginLsn);
 
+    /// <summary>
+    /// OP-5: 指定 fileKind のページファイルを <paramref name="newPageCount"/> へ物理 truncate
+    /// したことを WAL に記録する。書き込み直後に <see cref="FlushTo"/> で durable 化することで、
+    /// 「WAL の FileTruncate より物理 truncate が先行した状態」を crash でも recovery 側が
+    /// 再現できる (= 物理操作の冪等再生)。呼び出し側は本メソッドが返ってから
+    /// <c>PagedFile.Truncate</c> を実行する。
+    /// </summary>
+    long WriteFileTruncate(byte fileKind, long newPageCount);
+
     void Truncate(long uptoLsn);
     IWalReader OpenReader(long startLsn);
 }

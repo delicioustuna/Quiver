@@ -323,6 +323,16 @@ internal sealed class NodeStore : INodeStore
     /// <summary>OP-3 / テスト用。現在の HWM スロット数 (free 含む)。</summary>
     internal long Hwm => _hwm;
 
+    /// <summary>
+    /// OP-5: 現在の <c>_hwm</c> を保持するのに必要な最小ページ数 (meta=0 + header=1 + record pages)。
+    /// <c>_hwm=0</c> でも meta/header の 2 ページは残す。
+    /// </summary>
+    internal long ComputeRequiredPageCount()
+        => _hwm == 0 ? 2L : ((_hwm - 1) / RecordsPerPage) + 3L;
+
+    /// <summary>OP-5: 内部 PagedFile への参照 (vacuum/truncate 経路で使用)。</summary>
+    internal IPagedFile UnderlyingFile => _file;
+
     /// <summary>OP-3 / テスト用。free list 先頭 (-1 で空)。</summary>
     internal long FreeHead => _freeHead;
 

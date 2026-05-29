@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using Quiver.Core;
 using Quiver.Core.Telemetry;
+using Quiver.Storage;
 using Quiver.Stores;
 using Quiver.Transactions;
+using Quiver.Wal;
 
 namespace Quiver.Maintenance;
 
@@ -26,19 +28,22 @@ internal sealed class Vacuum : IVacuum
     private readonly PropertyStore _propStore;
     private readonly TransactionManager _txManager;
     private readonly CommittedTxRegistry _committed;
+    private readonly IWriteAheadLog? _wal;
 
     internal Vacuum(
         NodeStore nodeStore,
         RelationshipStore relStore,
         PropertyStore propStore,
         TransactionManager txManager,
-        CommittedTxRegistry committed)
+        CommittedTxRegistry committed,
+        IWriteAheadLog? wal = null)
     {
         _nodeStore = nodeStore;
         _relStore = relStore;
         _propStore = propStore;
         _txManager = txManager;
         _committed = committed;
+        _wal = wal;
     }
 
     public VacuumReport Run(VacuumOptions? options = null)
@@ -106,6 +111,30 @@ internal sealed class Vacuum : IVacuum
                 prunedTxEntries = _committed.PruneBelow(horizon);
             }
 
+            // OP-5: dead version 回収後に末尾の連続 free page を物理 truncate する。
+            // 各ストアの hwm から「必要最小ページ数」を計算し、現在の PageCount より小さければ
+            //   1) WAL に FileTruncate を書いて fsync
+            //   2) PagedFile.Truncate で MMF unmap → SetLength → remap → meta page 書き戻し
+            // を行う。両者の間で crash した場合は recovery の Pass 2 redo が FileTruncate を
+            // 再生して冪等に追いつかせる。WAL 未配線 (= テスト経路など) のときは skip。
+            long truncatedPages = 0;
+            if (!dryRun && _wal != null)
+            {
+                truncatedPages += TryTruncateStore(
+                    WalFileKind.Properties,
+                    _propStore.UnderlyingFile,
+                    _propStore.ComputeRequiredPageCount());
+                truncatedPages += TryTruncateStore(
+                    WalFileKind.Relationships,
+                    _relStore.UnderlyingFile,
+                    _relStore.ComputeRequiredPageCount());
+                truncatedPages += TryTruncateStore(
+                    WalFileKind.Nodes,
+                    _nodeStore.UnderlyingFile,
+                    _nodeStore.ComputeRequiredPageCount());
+            }
+            QuiverEventSource.Log.SetVacuumProgress(100);
+
             return new VacuumReport(
                 ReclaimedNodes: reclaimedNodes,
                 ReclaimedRelationships: reclaimedRels,
@@ -113,11 +142,29 @@ internal sealed class Vacuum : IVacuum
                 PrunedCommittedTxEntries: prunedTxEntries,
                 ElapsedMs: sw.ElapsedMilliseconds,
                 HorizonTxId: horizon,
-                Skipped: false);
+                Skipped: false,
+                TruncatedPages: truncatedPages);
         }
         finally
         {
             QuiverEventSource.Log.SetVacuumProgress(0);
         }
+    }
+
+    private long TryTruncateStore(WalFileKind kind, IPagedFile file, long newPageCount)
+    {
+        long current = file.PageCount;
+        if (newPageCount < 1) newPageCount = 1;
+        if (newPageCount >= current) return 0;
+        // 順序が重要:
+        //   1. WAL に FileTruncate を書いて fsync。これより前に物理 truncate が起きると
+        //      recovery が「pageId が存在しない」と読み損なう可能性があるが、
+        //      実際の Truncate は (2) なので不変条件は維持される。
+        //   2. PagedFile.Truncate で MMF unmap → SetLength → meta page 書き戻し → fsync。
+        // (1) と (2) の間で crash しても、recovery Pass 2 redo が FileTruncate を再生して
+        // 物理 file が再 truncate される (PagedFile.Truncate は newPageCount >= 現状 は no-op)。
+        _wal!.WriteFileTruncate((byte)kind, newPageCount);
+        file.Truncate(newPageCount);
+        return current - newPageCount;
     }
 }
