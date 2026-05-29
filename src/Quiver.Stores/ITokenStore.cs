@@ -10,6 +10,14 @@ public interface ITokenStore<TToken> where TToken : struct
     ReadOnlySpan<byte> GetNameUtf8(TToken token);
     string GetName(TToken token);
     IEnumerable<TToken> All();
+
+    /// <summary>
+    /// OP-4: トークン ID を保持したまま名前を <paramref name="oldName"/> から
+    /// <paramref name="newName"/> へ変更する。<paramref name="oldName"/> が未登録なら
+    /// 何もせず <c>false</c> を返す (冪等)。<paramref name="newName"/> が別の ID に
+    /// 既に割り当てられているときは <see cref="InvalidOperationException"/>。
+    /// </summary>
+    bool Rename(string oldName, string newName);
 }
 
 // -----------------------------------------------------------------------
@@ -58,6 +66,67 @@ public abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposable 
         _byId.TryGetValue(GetId(token), out byte[]? utf8) ? Encoding.UTF8.GetString(utf8) : string.Empty;
 
     public IEnumerable<TToken> All() => _byId.Keys.Select(MakeToken);
+
+    /// <summary>
+    /// OP-4: 名前 → ID マップの差し替えとファイルの全書き換えで rename を実装する。
+    /// 旧名が無ければ no-op (冪等)。新名が別 ID に占有されていれば例外。トークンファイルは
+    /// 通常 1KB 未満で、tx 境界外の schema rename 用途のため atomic な writefile + replace
+    /// で十分整合する (open 中の他プロセスからの並行読みは FileShare.Read で許容)。
+    /// </summary>
+    public bool Rename(string oldName, string newName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(oldName);
+        ArgumentException.ThrowIfNullOrEmpty(newName);
+        if (oldName == newName) return false;
+
+        if (!_byName.TryGetValue(oldName, out var token))
+        {
+            // 旧名が無ければ、新名で既に存在していれば「既に rename 済み」と解釈して true 扱いにする。
+            // どちらも無いときは false を返して呼び出し側の判断に委ねる。
+            return _byName.ContainsKey(newName);
+        }
+
+        if (_byName.TryGetValue(newName, out var existing))
+        {
+            if (GetId(existing) == GetId(token)) return true; // 既に同名
+            throw new InvalidOperationException(
+                $"Token '{newName}' is already assigned to a different id (existing={GetId(existing)}, requested-source={GetId(token)}).");
+        }
+
+        int id = GetId(token);
+        _byName.Remove(oldName);
+        _byName[newName] = token;
+        _byId[id] = Encoding.UTF8.GetBytes(newName);
+
+        RewriteFile();
+        return true;
+    }
+
+    private void RewriteFile()
+    {
+        // append-only 形式を保ったまま、現在のメモリ状態を tmp に書き出し、replace。
+        // 既存 _stream を一度閉じてからファイルを差し替える。
+        _stream?.Flush();
+        _stream?.Dispose();
+        _stream = null;
+
+        string dir = Path.GetDirectoryName(_filePath) ?? ".";
+        string tmpPath = Path.Combine(dir, Path.GetFileName(_filePath) + ".tmp");
+        using (var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (var writer = new BinaryWriter(fs, Encoding.UTF8, leaveOpen: true))
+        {
+            foreach (var (id, utf8) in _byId.OrderBy(kv => kv.Key))
+            {
+                writer.Write(id);
+                writer.Write((ushort)utf8.Length);
+                writer.Write(utf8);
+            }
+            fs.Flush(flushToDisk: true);
+        }
+        File.Move(tmpPath, _filePath, overwrite: true);
+        _stream = new FileStream(_filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+        _stream.Seek(0, SeekOrigin.End);
+    }
 
     protected abstract TToken MakeToken(int id);
     protected abstract int GetId(TToken token);

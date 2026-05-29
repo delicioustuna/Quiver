@@ -57,6 +57,9 @@ internal sealed class GraphTransaction : IGraphTransaction
     public TransactionState State => _inner.State;
     public bool IsReadOnly { get; }
 
+    // OP-4: MigrationContext.ForEachNode が Access.ScanNodes に渡す。
+    internal ITransaction Inner => _inner;
+
     // ========== ノード操作 ==========
 
     public NodeId CreateNode(string label)

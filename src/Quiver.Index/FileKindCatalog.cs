@@ -85,6 +85,29 @@ internal sealed class FileKindCatalog
     /// 指定索引名を catalog から除去し、対応 fileKind を予約レンジに返却する。
     /// 索引 drop の経路で呼ぶ。
     /// </summary>
+    /// <summary>
+    /// OP-4: 索引名を <paramref name="oldName"/> から <paramref name="newName"/> へ rename する。
+    /// fileKind は維持されるため WAL 上の PageImage / CLR の意味は変わらない。
+    /// 旧名が無ければ false、新名が既に別 fileKind に使われていれば例外。
+    /// </summary>
+    public bool Rename(string oldName, string newName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(oldName);
+        ArgumentException.ThrowIfNullOrEmpty(newName);
+        if (oldName == newName) return false;
+        lock (_gate)
+        {
+            if (!_nameToKind.TryGetValue(oldName, out byte kind)) return false;
+            if (_nameToKind.ContainsKey(newName))
+                throw new InvalidOperationException(
+                    $"Index '{newName}' already exists in catalog.");
+            _nameToKind.Remove(oldName);
+            _nameToKind[newName] = kind;
+            PersistLocked();
+            return true;
+        }
+    }
+
     public bool Remove(string indexName)
     {
         ArgumentException.ThrowIfNullOrEmpty(indexName);

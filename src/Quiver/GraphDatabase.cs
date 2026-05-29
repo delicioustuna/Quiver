@@ -18,11 +18,16 @@ namespace Quiver;
 public sealed class GraphDatabase : IDisposable
 {
     private readonly IGraphStorageBackend _backend;
+    private readonly string _directoryPath;
 
-    private GraphDatabase(IGraphStorageBackend backend)
+    private GraphDatabase(IGraphStorageBackend backend, string directoryPath)
     {
         _backend = backend;
+        _directoryPath = directoryPath;
     }
+
+    /// <summary>OP-4: <see cref="Open"/> に渡したデータディレクトリのパス。</summary>
+    public string DirectoryPath => _directoryPath;
 
     /// <summary>
     /// 指定ディレクトリのデータベースを開く (存在しない場合は新規作成)。
@@ -41,7 +46,7 @@ public sealed class GraphDatabase : IDisposable
             Quiver.Core.Telemetry.QuiverLog.LoggerFactory = options.LoggerFactory;
         var factory = options.BackendFactory ?? CreateDefaultFactory(options.Backend);
         var backend = factory.Open(directoryPath, options);
-        return new GraphDatabase(backend);
+        return new GraphDatabase(backend, directoryPath);
     }
 
     private static IGraphStorageBackendFactory CreateDefaultFactory(BackendKind kind) => kind switch
@@ -233,6 +238,21 @@ public sealed class GraphDatabase : IDisposable
     /// </summary>
     public VacuumReport Vacuum(VacuumOptions? options = null)
         => _backend.Vacuum(options);
+
+    /// <summary>
+    /// OP-4: 与えたマイグレーションのうち未適用のものを <see cref="IMigration.Version"/> 昇順 →
+    /// <see cref="IMigration.Id"/> Ordinal 昇順で適用する。各マイグレーションは独立した tx で実行され、
+    /// 失敗時はその tx のミューテーションだけ rollback される (schema rename は tx 境界を跨ぐ点に注意)。
+    /// 既に適用済みの ID は skip される (冪等)。
+    /// </summary>
+    public Task<Migrations.MigrationResult> MigrateAsync(
+        IEnumerable<Migrations.IMigration> migrations,
+        CancellationToken cancellationToken = default)
+        => Migrations.Migrator.RunAsync(this, _directoryPath, migrations, cancellationToken);
+
+    /// <summary>OP-4: 適用済みマイグレーション履歴のスナップショット (適用順)。</summary>
+    public IReadOnlyList<Migrations.MigrationHistoryEntry> GetMigrationHistory()
+        => new Migrations.MigrationHistory(_directoryPath).Entries;
 
     /// <summary>下層バックエンドを破棄する。</summary>
     public void Dispose() => _backend.Dispose();

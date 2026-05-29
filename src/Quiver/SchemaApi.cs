@@ -29,6 +29,13 @@ internal sealed class SchemaApi : ISchemaApi
 
     public string? GetLabelName(LabelId id) => id.IsValid ? _labels.GetName(id) : null;
 
+    // OP-4: 冪等な rename 判定用。auto-create を回避するため TokenStore.TryGet を直叩き。
+    public bool TryGetLabelId(string name, out LabelId id) => _labels.TryGet(name, out id);
+    public bool TryGetPropertyKeyId(string name, out PropertyKeyId id) => _propKeys.TryGet(name, out id);
+    public bool TryGetRelationshipTypeId(string name, out RelationshipTypeId id) => _relTypes.TryGet(name, out id);
+
+    public bool IndexExists(string indexName) => _indexManager.ListIndexes().Contains(indexName);
+
     public void CreateIndex(string indexName, string label, string propertyKey, IndexKind kind)
     {
         switch (kind)
@@ -75,4 +82,19 @@ internal sealed class SchemaApi : ISchemaApi
 
     // PW-18 follow-up: IndexKind は IIndexManager の表現外なので SchemaApi 側で保持する。
     private readonly Dictionary<string, IndexKind> _indexKinds = new(StringComparer.Ordinal);
+
+    public bool RenameLabel(string oldName, string newName) => _labels.Rename(oldName, newName);
+    public bool RenamePropertyKey(string oldName, string newName) => _propKeys.Rename(oldName, newName);
+    public bool RenameRelationshipType(string oldName, string newName) => _relTypes.Rename(oldName, newName);
+
+    public bool RenameIndex(string oldName, string newName)
+    {
+        var ok = _indexManager.RenameIndex(oldName, newName);
+        if (ok && _indexKinds.TryGetValue(oldName, out var kind))
+        {
+            _indexKinds.Remove(oldName);
+            _indexKinds[newName] = kind;
+        }
+        return ok;
+    }
 }

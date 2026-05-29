@@ -135,6 +135,103 @@ public sealed class IndexManager : IIndexManager, IDisposable
 
     public IEnumerable<string> ListIndexes() => _indexes.Keys;
 
+    /// <summary>
+    /// OP-4: 索引名を <paramref name="oldName"/> から <paramref name="newName"/> へ変更する。
+    /// 索引ファイル (.idx / .idxmeta) を物理 rename し、in-memory dictionary / binding / catalog の
+    /// マッピングを追従させる。fileKind は維持されるため WAL 上の PageImage / CLR の意味は変わらない。
+    /// 旧名が存在しないときは <c>false</c> を返す (冪等)。新名が衝突するときは例外。
+    ///
+    /// 注意: 物理 rename のため、対象索引の <see cref="IPagedFile"/> を一度 Dispose して再 open する。
+    /// 呼び出し側がそれまでに取得した <see cref="IBTreeIndex{TKey}"/> 参照は無効になる。
+    /// rename 完了後は <c>CreateXxxIndex(newName)</c> や <c>ListIndexes</c> 経由で再取得すること。
+    /// </summary>
+    public bool RenameIndex(string oldName, string newName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(oldName);
+        ArgumentException.ThrowIfNullOrEmpty(newName);
+        if (oldName == newName) return false;
+
+        if (!_indexes.TryGetValue(oldName, out var idxObj))
+        {
+            return _indexes.ContainsKey(newName);
+        }
+        if (_indexes.ContainsKey(newName))
+            throw new InvalidOperationException(
+                $"Index '{newName}' already exists.");
+
+        var typeFlag = _indexTypes.TryGetValue(oldName, out var f) ? f : PropertyTypeFlags.None;
+        if (typeFlag == PropertyTypeFlags.None)
+            throw new InvalidOperationException(
+                $"Index '{oldName}' has no recorded PropertyTypeFlags; cannot rename.");
+
+        byte? fileKind = null;
+        if (_catalog != null && _catalog.TryGet(oldName, out byte k)) fileKind = k;
+
+        // 既存 BTreeIndex / PagedFile を閉じてから物理ファイルを rename する。
+        (idxObj as IDisposable)?.Dispose();
+        if (fileKind is byte oldKind)
+            _runtimeFileRegistry?.Remove(oldKind);
+        _indexes.Remove(oldName);
+        _indexTypes.Remove(oldName);
+        _indexFiles.Remove(oldName);
+
+        var oldIdxPath = IndexPath(oldName);
+        var newIdxPath = IndexPath(newName);
+        var oldMetaPath = MetaPath(oldName);
+        var newMetaPath = MetaPath(newName);
+        if (File.Exists(oldIdxPath)) File.Move(oldIdxPath, newIdxPath, overwrite: false);
+        if (File.Exists(oldMetaPath)) File.Move(oldMetaPath, newMetaPath, overwrite: false);
+
+        // catalog を新名に追従。
+        _catalog?.Rename(oldName, newName);
+
+        // 新名で再 open。fileKind は維持されるので catalog の Rename と組み合わせて整合する。
+        switch (typeFlag)
+        {
+            case PropertyTypeFlags.Int32:
+                ReopenAfterRename(newName, new Int32KeyCodec(), typeFlag, IndexKeyKind.Int32, fileKind);
+                break;
+            case PropertyTypeFlags.Int64:
+                ReopenAfterRename(newName, new Int64KeyCodec(), typeFlag, IndexKeyKind.Int64, fileKind);
+                break;
+            case PropertyTypeFlags.Double:
+                ReopenAfterRename(newName, new DoubleKeyCodec(), typeFlag, IndexKeyKind.Double, fileKind);
+                break;
+            case PropertyTypeFlags.String:
+                ReopenAfterRename(newName, new StringKeyCodec(), typeFlag, IndexKeyKind.String, fileKind);
+                break;
+            case PropertyTypeFlags.Bytes:
+                ReopenAfterRename(newName, new BytesKeyCodec(), typeFlag, IndexKeyKind.Bytes, fileKind);
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported PropertyTypeFlags {typeFlag} for rename.");
+        }
+
+        // バインディングは index 名で逆引きしているので追従させる。
+        if (_bindingByName.TryGetValue(oldName, out var binding))
+        {
+            _bindingByName.Remove(oldName);
+            _bindingByName[newName] = binding;
+            _bindings[binding] = newName;
+        }
+        return true;
+    }
+
+    private void ReopenAfterRename<TKey>(
+        string name, IKeyCodec<TKey> codec, PropertyTypeFlags typeFlag, IndexKeyKind kind, byte? fileKind)
+    {
+        var pagedFile = new PagedFile(IndexPath(name));
+        if (_wal != null && fileKind is byte kindByte)
+        {
+            pagedFile.EnableWalLogging(kindByte, _wal);
+            _runtimeFileRegistry?[kindByte] = pagedFile;
+        }
+        var index = new BTreeIndex<TKey>(pagedFile, codec, name, kind);
+        _indexes[name] = index;
+        _indexTypes[name] = typeFlag;
+        _indexFiles[name] = pagedFile;
+    }
+
     // OP-1: name → backing PagedFile を保持し、snapshot から (idx 名, PagedFile) を引けるようにする。
     private readonly Dictionary<string, IPagedFile> _indexFiles
         = new(StringComparer.Ordinal);

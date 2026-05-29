@@ -67,6 +67,16 @@ public interface IIndexManager
     IEnumerable<string> ListIndexes();
 
     /// <summary>
+    /// OP-4: 索引を <paramref name="oldName"/> から <paramref name="newName"/> へリネームする。
+    /// fileKind や PagedFile 実体は維持されるので WAL 上の PageImage / CLR の意味は変わらない。
+    /// 索引ファイル (.idx / .idxmeta) と (label, propertyKey) バインディングも追従する。
+    /// 旧名が見つからない場合は <c>false</c> を返す (冪等)。
+    /// 既定実装は <see cref="NotSupportedException"/>。
+    /// </summary>
+    bool RenameIndex(string oldName, string newName)
+        => throw new NotSupportedException("RenameIndex is not supported by this index manager.");
+
+    /// <summary>
     /// PW-18 follow-up: スキーマ層から呼ばれ、(label, propertyKey) → indexName の対応を
     /// 登録する。これにより MergeNode が業務キー検索で自動的にインデックスを利用できる。
     /// 既定実装は no-op (バインディングを保持しないバックエンドはフルスキャン経路に落ちる)。
