@@ -137,6 +137,28 @@ internal sealed class TransactionManager : ITransactionManager
     }
 
     /// <summary>
+    /// FT-34: 大域クロックから新しい候補 commit stamp を 1 つ採番する (単調)。SSN の commit stamp
+    /// は最終的に <c>cstamp(T) = π(T)</c> (候補で上限を取った値) になるため、候補採番と確定 (
+    /// <see cref="SetCommitStamp"/>) を分離する。候補値は restart 連続性用の高水位としても使う。
+    /// </summary>
+    internal long NextCommitStamp() => Interlocked.Increment(ref _commitStamp);
+
+    /// <summary>
+    /// FT-34: Serializable tx の最終 commit stamp (= π(T)) を確定して登録する。後続 tx の
+    /// <see cref="CommitStampOf"/> はこの値を返し、SSN の η/π 伝播が推移的に効く。
+    /// </summary>
+    internal void SetCommitStamp(long txIdValue, long cstamp) => _txCstamp[txIdValue] = cstamp;
+
+    /// <summary>
+    /// FT-34: 現在の commit-stamp クロック値 (スナップショット下限)。Serializable tx が Begin 時に
+    /// 捕捉し、読んだバージョンの overwriter cstamp (v.sstamp) を π に反映するかの判定に使う:
+    /// <c>v.sstamp &gt; snapshotClock</c> のときだけ「自分が読んだのは上書き前の版」= rw-antidependency
+    /// として π を下げる。これにより既に commit 済みの上書き後の版を読むだけの retry が
+    /// stale な sstamp で false-abort するのを防ぐ (safe-retry, Theorem 7)。
+    /// </summary>
+    internal long CurrentCommitStampClock => Volatile.Read(ref _commitStamp);
+
+    /// <summary>
     /// FT-33 (④): 再起動時に永続化済みの commit-stamp 高水位までクロックを巻き上げる。
     /// これにより新規 commit stamp は過去に永続化されたどの version stamp よりも大きくなり、
     /// 旧/新 stamp 空間の混在 (= 再起動後の false-abort ストーム) を防ぐ。既に進んでいれば no-op。

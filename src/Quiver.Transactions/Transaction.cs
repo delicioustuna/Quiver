@@ -40,6 +40,9 @@ internal sealed class Transaction : ITransaction
     private readonly SsnContext? _ssn;
     private readonly IEntityVersionStore? _nodeVersions;
     private readonly IEntityVersionStore? _relVersions;
+    // FT-34: Begin 時の commit-stamp クロック (snapshot 下限)。読んだ版の v.sstamp を π に
+    // 反映するかの判定に使う (詳細は TransactionManager.CurrentCommitStampClock)。
+    private readonly long _ssnSnapshotCstamp;
 
     public TransactionId Id { get; }
     public IsolationLevel Level { get; }
@@ -86,6 +89,9 @@ internal sealed class Transaction : ITransaction
         _ssn = (level == IsolationLevel.Serializable && committed != null
             && nodeVersions != null && relVersions != null)
             ? new SsnContext() : null;
+        // FT-34: Serializable のときだけ Begin 時点の commit-stamp クロックを捕捉する
+        // (ctor は TransactionManager.Begin の _snapshotGate 下で走るため一貫した下限)。
+        _ssnSnapshotCstamp = _ssn != null ? manager.CurrentCommitStampClock : 0;
         // FT-26: per-tx ambient コンテキストを Tx wrapper にも持たせ、各操作直前に
         // MvccContext を再アクティベートする (同一スレッドで複数 tx 操作を交互に
         // 行う場合の thread-static の取り違えを防ぐ)。
@@ -241,13 +247,13 @@ internal sealed class Transaction : ITransaction
         var ssn = _ssn!;
         lock (_manager.SsnCommitGate)
         {
-            // c(T) を確定 (gate 下なので並行 Serializable commit との順序 = commit 順)。
-            long cT = _manager.GetOrAssignCommitStamp(Id.Value);
+            // 候補 commit stamp (単調)。最終 cstamp(T) は下で π(T) に確定する。
+            long candidate = _manager.NextCommitStamp();
             // FT-33 (④): commit-stamp 高水位を node sidecar ヘッダへ耐久化する。本 tx の
             // WalPageContext がまだ生きているので commit と同一 page-WAL 単位で永続化され、
             // 再起動後の Open でこの値からクロックを再開できる (旧/新 stamp 空間の混在を防ぐ)。
-            // c(T) は gate 下で単調増加するため最新書き込みが最高値。
-            _nodeVersions!.WriteCommitStampHighWater(cT);
+            // 候補は gate 下で単調増加するため最新書き込みが最高値。
+            _nodeVersions!.WriteCommitStampHighWater(candidate);
             long eta = 0;                 // η(T)
             long pi = long.MaxValue;      // π(T)
 
@@ -260,7 +266,10 @@ internal sealed class Transaction : ITransaction
                     long c = _manager.CommitStampOf(meta.Xmin);
                     if (c > eta) eta = c;
                 }
-                if (meta.Sstamp < pi) pi = meta.Sstamp;
+                // overwriter cstamp を π に反映するのは「上書きが自分の snapshot より後」=
+                // 自分が読んだのが上書き前の版のときだけ (rw-antidependency)。既に commit 済みの
+                // 上書き後の版を読んだだけなら rw 依存は無いので π を下げない (safe-retry)。
+                if (meta.Sstamp < pi && meta.Sstamp > _ssnSnapshotCstamp) pi = meta.Sstamp;
             }
             // 上書きしたバージョン: その reader (v.pstamp) は self への r:w in-edge → η に。
             foreach (var w in ssn.Writes)
@@ -268,30 +277,36 @@ internal sealed class Transaction : ITransaction
                 long p = ReadMeta(w).Pstamp;
                 if (p > eta) eta = p;
             }
-            // π = min(π, c(T))。
-            if (cT < pi) pi = cT;
+            // π = min(π, candidate)。
+            if (candidate < pi) pi = candidate;
 
             // exclusion window 違反なら abort。
             if (eta >= pi)
                 throw new SerializabilityException(Id,
                     $"Transaction {Id.Value} would violate serializability (η={eta} ≥ π={pi}).");
 
-            // post-commit: 読んだバージョンに reader cstamp を、上書きしたバージョンに
-            // overwriter cstamp を記録する。これらの書き込みは WalPageContext がまだ
+            // FT-34: 最終 commit stamp = π(T)。これを後続 tx が CommitStampOf / version stamp
+            // 経由で観測することで η/π 伝播が推移的になり、3-cycle 以上の dangerous structure も
+            // 検出できる (fresh counter のままだと推移性が壊れる)。
+            long cstamp = pi;
+            _manager.SetCommitStamp(Id.Value, cstamp);
+
+            // post-commit: 読んだバージョンに reader cstamp (π(T)) を、上書きしたバージョンに
+            // overwriter cstamp (π(T)) を記録する。これらの書き込みは WalPageContext がまだ
             // 生きているため本 tx の PageImage として WAL に乗り、commit と一体で durable になる。
             foreach (var r in ssn.Reads)
             {
                 var store = StoreFor(r.Kind);
                 if (store == null) continue;
-                if (cT > store.Read(r.LocalId).Pstamp)
-                    store.UpdatePstamp(r.LocalId, cT);
+                if (cstamp > store.Read(r.LocalId).Pstamp)
+                    store.UpdatePstamp(r.LocalId, cstamp);
             }
             foreach (var w in ssn.Writes)
             {
                 var store = StoreFor(w.Kind);
                 if (store == null) continue;
-                if (cT < store.Read(w.LocalId).Sstamp)
-                    store.UpdateSstamp(w.LocalId, cT);
+                if (cstamp < store.Read(w.LocalId).Sstamp)
+                    store.UpdateSstamp(w.LocalId, cstamp);
             }
         }
     }
