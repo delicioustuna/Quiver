@@ -390,6 +390,7 @@ docfx serve docs/api/_site
 - [Concepts](docs/api/concepts/index.md) — Node/Relationship、Transaction、Traversal、MERGE、KNN、Backends
 - [Tutorials](docs/api/tutorials/index.md)
 - [Cookbook](docs/cookbook.md) — よく使う典型レシピ集
+- [運用ガイド (Operations)](docs/operations/README.md) — quickstart / backup・restore / performance tuning / recovery / known limits
 
 ## Samples
 
@@ -419,6 +420,16 @@ docfx serve docs/api/_site
 | [07_transaction_recovery.md](docs/design/07_transaction_recovery.md) | トランザクション・リカバリ |
 | [08_physical_operators.md](docs/design/08_physical_operators.md) | Volcano 型物理演算子 |
 | [09_graph_api.md](docs/design/09_graph_api.md) | 公開 CRUD API |
+
+## Versioning
+
+Quiver は [Semantic Versioning](https://semver.org/lang/ja/) (`MAJOR.MINOR.PATCH`) に従う。MAJOR は breaking change、MINOR は後方互換な機能追加、PATCH はバグ修正のみ。`1.0.0` 未満 (`0.x` / `-rc`) は安定性の保証対象外。
+
+安定性を保証する public API は `Quiver` / `Quiver.Client` / `Quiver.Core` の public 型に限る。非推奨化は最低 1 MINOR の `[Obsolete]` 告知期間を置いてから次の MAJOR で削除する。
+
+public API surface は [tests/Quiver.PublicApi.Tests/](tests/Quiver.PublicApi.Tests/) の approval test (`PublicApiGenerator`) で機械的に固定されており、意図しない breaking change は CI で検出される。
+
+詳細は [docs/api-stability.md](docs/api-stability.md) を参照。
 
 ## ライセンス
 
