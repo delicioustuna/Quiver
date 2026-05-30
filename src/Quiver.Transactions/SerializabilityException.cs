@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Quiver.Core;
 
 namespace Quiver.Transactions;
@@ -14,7 +15,11 @@ namespace Quiver.Transactions;
 ///
 /// <para>並列モデルは <see cref="DeadlockException"/> と同様 (<see cref="GraphDbException"/> 派生、
 /// 犠牲 tx の識別子を保持)。</para>
+///
+/// <para>DOC-2: SSN ベースの Serializable 分離は評価中のため <c>[Experimental("QUIVER001")]</c> 指定。
+/// SemVer の安定性保証対象外 (docs/api-stability.md §5)。</para>
 /// </summary>
+[Experimental("QUIVER001")]
 public sealed class SerializabilityException : GraphDbException
 {
     /// <summary>直列化可能性違反で abort された tx 識別子。</summary>

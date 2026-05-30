@@ -5,6 +5,24 @@
     <!-- CS1591: 公開メンバーに XML コメントがない場合の警告。段階導入のため抑制する。 -->
     <!-- CS1573: パラメータの XML コメントがない場合の警告。同じ理由で抑制する。 -->
     <!-- CS1574 / CS1734 / CS0419: cref 参照解決失敗 / paramref 名不一致 / オーバーロードあいまい。docfx 側で個別対応する想定で抑制。 -->
-    <NoWarn>$(NoWarn);1591;1573;1574;1734;0419</NoWarn>
+    <!-- QUIVER001: experimental API (SSN ベースの Serializable 分離, docs/api-stability.md §5)。
+         ライブラリ自身の src/tests/benchmarks/samples は内部利用なのでソリューション全体で抑制する。
+         この NoWarn は当ソリューション内のビルドにのみ効き、公開 NuGet を取り込む外部利用者には
+         QUIVER001 診断がそのまま出る (=experimental の opt-in が機能する)。 -->
+    <NoWarn>$(NoWarn);1591;1573;1574;1734;0419;QUIVER001</NoWarn>
+  </PropertyGroup>
+
+  <!-- DOC-2: API 安定性ポリシー (docs/api-stability.md)。SemVer の正本となるバージョンを一元管理する。
+       1.0 GA 前は -rc。MAJOR.MINOR.PATCH の意味は docs/api-stability.md §1 を参照。 -->
+  <PropertyGroup>
+    <VersionPrefix>1.0.0</VersionPrefix>
+    <VersionSuffix>rc.1</VersionSuffix>
+  </PropertyGroup>
+
+  <!-- DOC-2: NuGet パッケージ生成 (dotnet pack) 時に直前リリースとの public API 差分を検出し、
+       breaking change をパック時エラーにする。pack 時のみ走り、通常の build/test には影響しない。
+       PackageValidationBaselineVersion は最初の GA (1.0.0) 公開後に設定する。 -->
+  <PropertyGroup>
+    <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
 </Project>

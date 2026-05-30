@@ -1,0 +1,395 @@
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Benchmarks")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Tests")]
+namespace Quiver.Core
+{
+    public sealed class CommittedTxRegistry
+    {
+        public CommittedTxRegistry() { }
+        public int Count { get; }
+        public long MaxObservedTxId { get; }
+        public long RecoveryHorizon { get; set; }
+        public bool IsCommitted(long txId) { }
+        public void MarkCommitted(Quiver.Core.TransactionId txId) { }
+        public int PruneBelow(long horizonTxId) { }
+        public void RecordMaxObservedTxId(long observed) { }
+    }
+    public sealed class ConstraintException : Quiver.Core.GraphDbException
+    {
+        public ConstraintException(string message, System.Exception? inner = null) { }
+    }
+    public sealed class CorruptionException : Quiver.Core.GraphDbException
+    {
+        public CorruptionException(string message, System.Exception? inner = null) { }
+    }
+    public enum DistanceMetric : byte
+    {
+        Cosine = 1,
+        Dot = 2,
+        Euclidean = 3,
+    }
+    public readonly struct EmbeddingTaskKey : System.IEquatable<Quiver.Core.EmbeddingTaskKey>
+    {
+        public EmbeddingTaskKey(Quiver.Core.EntityKind EntityKind, long EntityId, string IndexName, string ProviderId) { }
+        public long EntityId { get; init; }
+        public Quiver.Core.EntityKind EntityKind { get; init; }
+        public string IndexName { get; init; }
+        public string ProviderId { get; init; }
+    }
+    public sealed class EmbeddingTaskRecord : System.IEquatable<Quiver.Core.EmbeddingTaskRecord>
+    {
+        public EmbeddingTaskRecord(Quiver.Core.EntityKind EntityKind, long EntityId, string IndexName, string ProviderId, Quiver.Core.EmbeddingTaskState State, string? ContentHash, string? LastError, System.DateTimeOffset LastUpdatedAtUtc) { }
+        public string? ContentHash { get; init; }
+        public long EntityId { get; init; }
+        public Quiver.Core.EntityKind EntityKind { get; init; }
+        public string IndexName { get; init; }
+        public Quiver.Core.EmbeddingTaskKey Key { get; }
+        public string? LastError { get; init; }
+        public System.DateTimeOffset LastUpdatedAtUtc { get; init; }
+        public string ProviderId { get; init; }
+        public Quiver.Core.EmbeddingTaskState State { get; init; }
+    }
+    public enum EmbeddingTaskState : byte
+    {
+        NotStarted = 0,
+        InProgress = 1,
+        Completed = 2,
+        FailedRetryable = 3,
+        FailedPermanent = 4,
+        Stale = 5,
+    }
+    public sealed class EntityCandidateSet
+    {
+        public EntityCandidateSet(Quiver.Core.EntityKind kind, System.Collections.Generic.IEnumerable<long> ids) { }
+        public int Count { get; }
+        public System.Collections.Generic.IEnumerable<long> Ids { get; }
+        public Quiver.Core.EntityKind Kind { get; }
+        public bool Contains(long id) { }
+        public bool Contains(Quiver.Core.EntityKind kind, long id) { }
+    }
+    public readonly struct EntityId : System.IEquatable<Quiver.Core.EntityId>
+    {
+        public static readonly Quiver.Core.EntityId Invalid;
+        public EntityId(Quiver.Core.EntityKind Kind, long LocalId) { }
+        public bool IsValid { get; }
+        public Quiver.Core.EntityKind Kind { get; init; }
+        public long LocalId { get; init; }
+        public Quiver.Core.NodeId AsNode() { }
+        public Quiver.Core.PropertyId AsProperty() { }
+        public Quiver.Core.RelationshipId AsRelationship() { }
+        public ulong ToPacked() { }
+        public override string ToString() { }
+        public static Quiver.Core.EntityId FromNode(Quiver.Core.NodeId id) { }
+        public static Quiver.Core.EntityId FromPacked(ulong packed) { }
+        public static Quiver.Core.EntityId FromProperty(Quiver.Core.PropertyId id) { }
+        public static Quiver.Core.EntityId FromRelationship(Quiver.Core.RelationshipId id) { }
+    }
+    public enum EntityKind : byte
+    {
+        Node = 1,
+        Relationship = 2,
+        Property = 3,
+    }
+    public readonly struct EntityRef : System.IEquatable<Quiver.Core.EntityRef>
+    {
+        public EntityRef(Quiver.Core.EntityKind Kind, long Id) { }
+        public long Id { get; init; }
+        public Quiver.Core.EntityKind Kind { get; init; }
+    }
+    public static class FormatVersion
+    {
+        public const byte Current = 3;
+        public const byte V1 = 1;
+        public const byte V2Mvcc = 2;
+        public const byte V3MvccSidecar = 3;
+    }
+    public sealed class FormatVersionMismatchException : Quiver.Core.GraphDbException
+    {
+        public FormatVersionMismatchException(string fileKind, byte found, byte expected) { }
+        public byte Expected { get; }
+        public string FileKind { get; }
+        public byte Found { get; }
+    }
+    public abstract class GraphDbException : System.Exception
+    {
+        protected GraphDbException(string message) { }
+        protected GraphDbException(string message, System.Exception inner) { }
+    }
+    public interface IGraphEngine
+    {
+        Quiver.Core.IVectorCatalog Catalog { get; }
+        Quiver.Core.IVectorStore Vectors { get; }
+        Quiver.Core.IGraphEngineReadSession BeginRead();
+    }
+    public interface IGraphEngineReadSession : System.IDisposable
+    {
+        System.Collections.Generic.IEnumerable<Quiver.Core.EntityRef> EnumerateEntities(Quiver.Core.EntityKind kind);
+        bool TryReadStringProperty(Quiver.Core.EntityRef entity, string propertyKey, out string text);
+    }
+    public interface ISsnReadSink
+    {
+        void OnVisibleRead(Quiver.Core.EntityKind kind, long localId);
+    }
+    public interface IVectorCatalog
+    {
+        void CreateIndex(Quiver.Core.VectorIndexSpec spec);
+        bool DeleteTask(Quiver.Core.EmbeddingTaskKey key);
+        bool DropIndex(string name);
+        Quiver.Core.EmbeddingTaskRecord? GetTask(Quiver.Core.EmbeddingTaskKey key);
+        System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorIndexSpec> ListIndexes();
+        System.Collections.Generic.IEnumerable<Quiver.Core.EmbeddingTaskRecord> ListTasks(string? indexName = null);
+        bool TryGetIndex(string name, out Quiver.Core.VectorIndexSpec spec);
+        void UpsertTask(Quiver.Core.EmbeddingTaskRecord record);
+    }
+    public interface IVectorStore
+    {
+        void CreateVectorIndex(Quiver.Core.VectorIndexSpec spec);
+        void DropVectorIndex(string name);
+        Quiver.Core.VectorSearchCursor KnnSearch(string indexName, System.ReadOnlySpan<float> query, int k);
+        System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorSearchCursor> KnnSearchBatch(string indexName, System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>> queries, int k);
+        void RemoveVector(Quiver.Core.EntityKind kind, long entityId, string indexName);
+        void SetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.ReadOnlySpan<float> vector);
+        bool TryGetIndex(string name, out Quiver.Core.VectorIndexSpec spec);
+    }
+    public sealed class InMemoryVectorStore : Quiver.Core.IVectorStore
+    {
+        public InMemoryVectorStore() { }
+        public void CreateVectorIndex(Quiver.Core.VectorIndexSpec spec) { }
+        public void DropVectorIndex(string name) { }
+        public Quiver.Core.VectorSearchCursor KnnSearch(string indexName, System.ReadOnlySpan<float> query, int k) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorSearchCursor> KnnSearchBatch(string indexName, System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>> queries, int k) { }
+        public Quiver.Core.VectorSearchCursor KnnSearchFiltered(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.EntityCandidateSet candidates) { }
+        public void RemoveVector(Quiver.Core.EntityKind kind, long entityId, string indexName) { }
+        public void SetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.ReadOnlySpan<float> vector) { }
+        public bool TryGetIndex(string name, out Quiver.Core.VectorIndexSpec spec) { }
+    }
+    public sealed class JsonFileVectorCatalog : Quiver.Core.IVectorCatalog
+    {
+        public JsonFileVectorCatalog(string path) { }
+        public void CreateIndex(Quiver.Core.VectorIndexSpec spec) { }
+        public bool DeleteTask(Quiver.Core.EmbeddingTaskKey key) { }
+        public bool DropIndex(string name) { }
+        public Quiver.Core.EmbeddingTaskRecord? GetTask(Quiver.Core.EmbeddingTaskKey key) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorIndexSpec> ListIndexes() { }
+        public System.Collections.Generic.IEnumerable<Quiver.Core.EmbeddingTaskRecord> ListTasks(string? indexName = null) { }
+        public bool TryGetIndex(string name, out Quiver.Core.VectorIndexSpec spec) { }
+        public void UpsertTask(Quiver.Core.EmbeddingTaskRecord record) { }
+    }
+    public readonly struct LabelId : System.IEquatable<Quiver.Core.LabelId>
+    {
+        public static readonly Quiver.Core.LabelId Invalid;
+        public LabelId(int Value) { }
+        public bool IsValid { get; }
+        public int Value { get; init; }
+    }
+    public static class MvccContext
+    {
+        public static Quiver.Core.CommittedTxRegistry? CurrentCommitted { get; }
+        public static Quiver.Core.SnapshotState CurrentSnapshot { get; }
+        public static Quiver.Core.TransactionId CurrentTxId { get; }
+        public static bool IsActive { get; }
+        public static void Begin(Quiver.Core.TransactionId selfTxId, in Quiver.Core.SnapshotState snapshot, Quiver.Core.CommittedTxRegistry committed, Quiver.Core.ISsnReadSink? readSink = null) { }
+        public static void End() { }
+        public static void RecordRead(Quiver.Core.EntityKind kind, long localId) { }
+    }
+    public readonly struct NodeId : System.IEquatable<Quiver.Core.NodeId>
+    {
+        public static readonly Quiver.Core.NodeId Invalid;
+        public NodeId(long Value) { }
+        public bool IsValid { get; }
+        public long Value { get; init; }
+    }
+    public readonly struct PageId : System.IEquatable<Quiver.Core.PageId>
+    {
+        public static readonly Quiver.Core.PageId Invalid;
+        public PageId(long Value) { }
+        public bool IsValid { get; }
+        public long Value { get; init; }
+    }
+    public readonly struct PropertyId : System.IEquatable<Quiver.Core.PropertyId>
+    {
+        public static readonly Quiver.Core.PropertyId Invalid;
+        public PropertyId(long Value) { }
+        public bool IsValid { get; }
+        public long Value { get; init; }
+    }
+    public readonly struct PropertyKeyId : System.IEquatable<Quiver.Core.PropertyKeyId>
+    {
+        public static readonly Quiver.Core.PropertyKeyId Invalid;
+        public PropertyKeyId(int Value) { }
+        public bool IsValid { get; }
+        public int Value { get; init; }
+    }
+    [System.Flags]
+    public enum PropertyTypeFlags : ulong
+    {
+        None = 0ul,
+        Bool = 2ul,
+        Int32 = 4ul,
+        Int64 = 8ul,
+        Double = 16ul,
+        String = 32ul,
+        Bytes = 64ul,
+        BoolArray = 131072ul,
+        Int32Array = 262144ul,
+        Int64Array = 524288ul,
+        DoubleArray = 1048576ul,
+        StringArray = 2097152ul,
+        BytesArray = 4194304ul,
+        Numeric = 28ul,
+        Scalar = 126ul,
+        NumericArray = 1835008ul,
+        Array = 8257536ul,
+        Variable = 8257632ul,
+        Comparable = 60ul,
+    }
+    public readonly struct RelationshipId : System.IEquatable<Quiver.Core.RelationshipId>
+    {
+        public static readonly Quiver.Core.RelationshipId Invalid;
+        public RelationshipId(long Value) { }
+        public bool IsValid { get; }
+        public long Value { get; init; }
+    }
+    public readonly struct RelationshipTypeId : System.IEquatable<Quiver.Core.RelationshipTypeId>
+    {
+        public static readonly Quiver.Core.RelationshipTypeId Invalid;
+        public RelationshipTypeId(int Value) { }
+        public bool IsValid { get; }
+        public int Value { get; init; }
+    }
+    public readonly struct SnapshotState
+    {
+        public SnapshotState(Quiver.Core.TransactionId snapshotTxId, System.Collections.Generic.IReadOnlySet<long> activeAtBegin) { }
+        public System.Collections.Generic.IReadOnlySet<long> ActiveAtBegin { get; }
+        public Quiver.Core.TransactionId SnapshotTxId { get; }
+        public static Quiver.Core.SnapshotState Empty { get; }
+    }
+    public sealed class StorageException : Quiver.Core.GraphDbException
+    {
+        public StorageException(string message, System.Exception? inner = null) { }
+    }
+    public sealed class TransactionException : Quiver.Core.GraphDbException
+    {
+        public TransactionException(string message, System.Exception? inner = null) { }
+    }
+    public readonly struct TransactionId : System.IEquatable<Quiver.Core.TransactionId>
+    {
+        public static readonly Quiver.Core.TransactionId Bootstrap;
+        public static readonly Quiver.Core.TransactionId Invalid;
+        public TransactionId(long Value) { }
+        public bool IsValid { get; }
+        public long Value { get; init; }
+    }
+    public sealed class VectorException : Quiver.Core.GraphDbException
+    {
+        public VectorException(string message, System.Exception? inner = null) { }
+    }
+    public sealed class VectorIndexSpec : System.IEquatable<Quiver.Core.VectorIndexSpec>
+    {
+        public VectorIndexSpec(string Name, Quiver.Core.EntityKind EntityKind, Quiver.Core.PropertyKeyId SourcePropertyKeyId, int Dimensions, Quiver.Core.DistanceMetric Metric, string ProviderId, string? NormalizationProfile = null) { }
+        public int Dimensions { get; init; }
+        public Quiver.Core.EntityKind EntityKind { get; init; }
+        public Quiver.Core.DistanceMetric Metric { get; init; }
+        public string Name { get; init; }
+        public string? NormalizationProfile { get; init; }
+        public string ProviderId { get; init; }
+        public Quiver.Core.PropertyKeyId SourcePropertyKeyId { get; init; }
+    }
+    public abstract class VectorSearchCursor : System.IDisposable
+    {
+        protected VectorSearchCursor() { }
+        public abstract Quiver.Core.VectorSearchResult Current { get; }
+        public virtual void Dispose() { }
+        public abstract bool MoveNext();
+    }
+    public readonly struct VectorSearchResult : System.IEquatable<Quiver.Core.VectorSearchResult>
+    {
+        public VectorSearchResult(Quiver.Core.EntityKind EntityKind, long EntityId, float Score) { }
+        public long EntityId { get; init; }
+        public Quiver.Core.EntityKind EntityKind { get; init; }
+        public float Score { get; init; }
+    }
+    public static class Visibility
+    {
+        public static bool IsVisible(long xmin, long xmax, in Quiver.Core.SnapshotState snapshot, Quiver.Core.TransactionId self, Quiver.Core.CommittedTxRegistry committed) { }
+        public static bool IsVisibleAmbient(long xmin, long xmax) { }
+    }
+}
+namespace Quiver.Core.Telemetry
+{
+    [System.Diagnostics.Tracing.EventSource(Name="Quiver-EventSource")]
+    public sealed class QuiverEventSource : System.Diagnostics.Tracing.EventSource
+    {
+        public static readonly Quiver.Core.Telemetry.QuiverEventSource Log;
+        public void BufferPoolEviction() { }
+        public void BufferPoolHit() { }
+        public void BufferPoolMiss() { }
+        public void CrashRecovery() { }
+        public void DeadlockVictim() { }
+        protected override void OnEventCommand(System.Diagnostics.Tracing.EventCommandEventArgs command) { }
+        public void RecordLockWait(double waitMs, bool contended) { }
+        public System.IDisposable RegisterActiveTxCountProvider(System.Func<long> provider) { }
+        public System.IDisposable RegisterBufferPoolSizeBytesProvider(System.Func<long> provider) { }
+        public System.IDisposable RegisterCheckpointThresholdProvider(System.Func<long> provider) { }
+        public void SetIndexOrphanCount(long count) { }
+        public void SetVacuumProgress(long percent) { }
+        public void TxAbort() { }
+        public void TxCommit() { }
+        public void WalBytesWritten(long bytes) { }
+        public void WalFlushRequestCompleted() { }
+        public void WalFlushRequestStarted() { }
+    }
+    public static class QuiverLog
+    {
+        public const string CheckpointCategory = "Quiver.Checkpoint";
+        public const string QueryCategory = "Quiver.Query";
+        public const string StorageCategory = "Quiver.Storage";
+        public const string TransactionCategory = "Quiver.Transaction";
+        public const string WalCategory = "Quiver.Wal";
+        public static Microsoft.Extensions.Logging.ILogger CheckpointLogger { get; }
+        public static Microsoft.Extensions.Logging.ILoggerFactory LoggerFactory { get; set; }
+        public static Microsoft.Extensions.Logging.ILogger QueryLogger { get; }
+        public static Microsoft.Extensions.Logging.ILogger StorageLogger { get; }
+        public static Microsoft.Extensions.Logging.ILogger TransactionLogger { get; }
+        public static Microsoft.Extensions.Logging.ILogger WalLogger { get; }
+        public static System.IDisposable? BeginQueryScope(Microsoft.Extensions.Logging.ILogger logger, long txId, string operation = "Execute") { }
+        public static System.IDisposable? BeginTxScope(Microsoft.Extensions.Logging.ILogger logger, long txId, string operation) { }
+        [Microsoft.Extensions.Logging.LoggerMessage(EventId=10, Level=Microsoft.Extensions.Logging.LogLevel.Information, Message="checkpoint beginLsn={BeginLsn} completed in {DurationMs:F2} ms")]
+        public static void CheckpointCompleted(Microsoft.Extensions.Logging.ILogger logger, long beginLsn, double durationMs) { }
+        [Microsoft.Extensions.Logging.LoggerMessage(EventId=30, Level=Microsoft.Extensions.Logging.LogLevel.Debug, Message="query executed: rows={Rows} in {DurationMs:F2} ms")]
+        public static void QueryExecuted(Microsoft.Extensions.Logging.ILogger logger, int rows, double durationMs) { }
+        [Microsoft.Extensions.Logging.LoggerMessage(EventId=2, Level=Microsoft.Extensions.Logging.LogLevel.Warning, Message="tx {TxId} aborted in {DurationMs:F2} ms")]
+        public static void TxAborted(Microsoft.Extensions.Logging.ILogger logger, long txId, double durationMs) { }
+        [Microsoft.Extensions.Logging.LoggerMessage(EventId=3, Level=Microsoft.Extensions.Logging.LogLevel.Error, Message="tx {TxId} commit failed: {Reason}")]
+        public static void TxCommitFailed(Microsoft.Extensions.Logging.ILogger logger, long txId, string reason, System.Exception? ex) { }
+        [Microsoft.Extensions.Logging.LoggerMessage(EventId=1, Level=Microsoft.Extensions.Logging.LogLevel.Information, Message="tx {TxId} committed in {DurationMs:F2} ms")]
+        public static void TxCommitted(Microsoft.Extensions.Logging.ILogger logger, long txId, double durationMs) { }
+        [Microsoft.Extensions.Logging.LoggerMessage(EventId=20, Level=Microsoft.Extensions.Logging.LogLevel.Trace, Message="wal flush targetLsn={TargetLsn} completed in {DurationMs:F2} ms")]
+        public static void WalFlushed(Microsoft.Extensions.Logging.ILogger logger, long targetLsn, double durationMs) { }
+    }
+    public static class QuiverTelemetry
+    {
+        public const string CheckpointSourceName = "Quiver.Checkpoint";
+        public const string MeterName = "Quiver";
+        public const string QuerySourceName = "Quiver.Query";
+        public const string TransactionSourceName = "Quiver.Transaction";
+        public const string Version = "1.0.0";
+        public const string WalFlushSourceName = "Quiver.WalFlush";
+        public static readonly string[] AllSourceNames;
+        public static readonly System.Diagnostics.Metrics.Counter<long> BufferPoolHits;
+        public static readonly System.Diagnostics.Metrics.Counter<long> BufferPoolMisses;
+        public static readonly System.Diagnostics.ActivitySource CheckpointActivitySource;
+        public static readonly System.Diagnostics.Metrics.Histogram<double> CheckpointDurationMs;
+        public static readonly System.Diagnostics.Metrics.Histogram<double> LockWaitMs;
+        public static readonly System.Diagnostics.Metrics.Meter Meter;
+        public static readonly System.Diagnostics.ActivitySource QueryActivitySource;
+        public static readonly System.Diagnostics.Metrics.Histogram<double> QueryDurationMs;
+        public static readonly System.Diagnostics.ActivitySource TransactionActivitySource;
+        public static readonly System.Diagnostics.Metrics.Counter<long> TxAbortCount;
+        public static readonly System.Diagnostics.Metrics.Histogram<double> TxAbortDurationMs;
+        public static readonly System.Diagnostics.Metrics.Counter<long> TxCommitCount;
+        public static readonly System.Diagnostics.Metrics.Histogram<double> TxCommitDurationMs;
+        public static readonly System.Diagnostics.Metrics.Counter<long> WalBytesWritten;
+        public static readonly System.Diagnostics.ActivitySource WalFlushActivitySource;
+        public static readonly System.Diagnostics.Metrics.Histogram<double> WalFlushDurationMs;
+    }
+}

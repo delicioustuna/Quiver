@@ -1,0 +1,579 @@
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Storage.Sqlite")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Tests")]
+namespace Quiver
+{
+    public enum BackendKind
+    {
+        Binary = 1,
+    }
+    public sealed class BinaryGraphStorageBackendFactory : Quiver.IGraphStorageBackendFactory
+    {
+        public BinaryGraphStorageBackendFactory() { }
+        public Quiver.IGraphStorageBackend Open(string directoryPath, Quiver.GraphDatabaseOptions options) { }
+    }
+    public sealed class BulkLoadCapabilities
+    {
+        public BulkLoadCapabilities() { }
+        public System.Func<bool, Quiver.Stores.BulkLoader>? BeginBinaryBulkLoad { get; init; }
+        public System.Func<bool, Quiver.Stores.StreamingBulkLoader>? BeginStreamingBinaryBulkLoad { get; init; }
+        public bool SupportsBinaryBulkLoad { get; }
+        public bool SupportsStreamingBinaryBulkLoad { get; }
+    }
+    public sealed class ConsistencyReport : System.IEquatable<Quiver.ConsistencyReport>
+    {
+        public ConsistencyReport(bool IsConsistent, System.Collections.Generic.IReadOnlyList<string> Issues) { }
+        public bool IsConsistent { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> Issues { get; init; }
+    }
+    public sealed class DatabaseStatistics : System.IEquatable<Quiver.DatabaseStatistics>
+    {
+        public DatabaseStatistics(long NodeCount, long RelationshipCount, long PropertyCount, long DataFileSize, long WalFileSize, long BufferPoolHits, long BufferPoolMisses, long AdjacencyFallbackCount) { }
+        public long AdjacencyFallbackCount { get; init; }
+        public long BufferPoolHits { get; init; }
+        public long BufferPoolMisses { get; init; }
+        public long DataFileSize { get; init; }
+        public long NodeCount { get; init; }
+        public long PropertyCount { get; init; }
+        public long RelationshipCount { get; init; }
+        public long WalFileSize { get; init; }
+    }
+    public sealed class DegreeHistogram
+    {
+        public DegreeHistogram() { }
+        public System.Collections.Generic.IReadOnlyList<long> BucketCounts { get; }
+        public long MaxDegree { get; }
+        public double MeanDegree { get; }
+        public long TotalDegree { get; }
+        public long TotalNodes { get; }
+    }
+    public sealed class ExpandPlan : System.IEquatable<Quiver.ExpandPlan>
+    {
+        public ExpandPlan(Quiver.ExpandStrategy Strategy, double EstimatedFanOut) { }
+        public double EstimatedFanOut { get; init; }
+        public Quiver.ExpandStrategy Strategy { get; init; }
+        public Quiver.Operators.IPhysicalOperator Build(Quiver.Operators.IPhysicalOperator source, int sourceNodeColumn, Quiver.Stores.Direction direction, Quiver.Core.RelationshipTypeId? typeFilter, Quiver.Operators.ExpandOutputMode outputMode) { }
+    }
+    public enum ExpandStrategy
+    {
+        AdjacencyBlock = 1,
+        LinkedListChain = 2,
+        RelationshipScan = 3,
+    }
+    public sealed class GraphDatabase : System.IDisposable
+    {
+        public Quiver.IGraphStorageBackend Backend { get; }
+        public Quiver.IDiagnosticsApi Diagnostics { get; }
+        public string DirectoryPath { get; }
+        public Quiver.ISchemaApi Schema { get; }
+        public Quiver.Core.IVectorStore Vectors { get; }
+        public Quiver.Stores.BulkLoader BeginBulkLoad(bool buildAdjacencyIndex = false) { }
+        public Quiver.IGraphTransaction BeginReadOnlyTransaction() { }
+        public Quiver.Stores.StreamingBulkLoader BeginStreamingBulkLoad(bool buildAdjacencyIndex = false) { }
+        public Quiver.IGraphTransaction BeginTransaction(Quiver.Transactions.IsolationLevel level = 2) { }
+        public Quiver.Stores.IRelationshipPropertyJoinIndex BuildRelationshipPropertyJoinIndex(string propertyKey, Quiver.Stores.PropertyValueType expectedType) { }
+        public Quiver.GraphStats CollectStats() { }
+        public Quiver.GraphStats CollectStats(int powerNodeThreshold) { }
+        public Quiver.GraphStats CollectStats(int powerNodeThreshold, double denseThreshold) { }
+        public void CompactAdjacency() { }
+        public Quiver.QueryOptimizer CreateOptimizer(Quiver.GraphStats? stats = null) { }
+        public void CreateSnapshot(string targetDirectory, Quiver.SnapshotOptions? options = null) { }
+        public void Dispose() { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Migrations.MigrationHistoryEntry> GetMigrationHistory() { }
+        public System.Threading.Tasks.Task<Quiver.Migrations.MigrationResult> MigrateAsync(System.Collections.Generic.IEnumerable<Quiver.Migrations.IMigration> migrations, System.Threading.CancellationToken cancellationToken = default) { }
+        public Quiver.Stores.IGraphSnapshotView OpenSnapshotView() { }
+        public Quiver.Maintenance.VacuumReport Vacuum(Quiver.Maintenance.VacuumOptions? options = null) { }
+        public static Quiver.GraphDatabase Open(string directoryPath, Quiver.GraphDatabaseOptions? options = null) { }
+    }
+    public sealed class GraphDatabaseOptions
+    {
+        public GraphDatabaseOptions() { }
+        public int AdaptiveSampleWindow { get; set; }
+        public bool AutoRepairOrphansOnRecovery { get; set; }
+        public bool AutoVacuum { get; set; }
+        public System.TimeSpan AutoVacuumInterval { get; set; }
+        public Quiver.BackendKind Backend { get; set; }
+        public Quiver.IGraphStorageBackendFactory? BackendFactory { get; set; }
+        public long BufferPoolSize { get; set; }
+        public Quiver.Transactions.CheckpointPolicy CheckpointPolicy { get; set; }
+        public long CheckpointThresholdBytes { get; set; }
+        public System.TimeSpan? DeadlockDetectionInterval { get; set; }
+        public bool EnableChecksums { get; set; }
+        public System.TimeSpan GroupCommitWindow { get; set; }
+        public System.TimeSpan LockTimeout { get; set; }
+        public Quiver.Transactions.LockingMode LockingMode { get; set; }
+        public Microsoft.Extensions.Logging.ILoggerFactory? LoggerFactory { get; set; }
+        public Quiver.Logical.ILogicalMutationSink? LogicalMutationSink { get; set; }
+        public long MaxCheckpointThresholdBytes { get; set; }
+        public long MinCheckpointThresholdBytes { get; set; }
+        public System.TimeSpan TargetRecoveryTime { get; set; }
+        public int WalSegmentSize { get; set; }
+    }
+    public static class GraphDatabaseSchemaExtensions
+    {
+        public static void CreateIndex<T>(this Quiver.GraphDatabase db, System.Linq.Expressions.Expression<System.Func<T, object?>> propertySelector, Quiver.IndexKind? kindOverride = default)
+            where T : Quiver.IGraphNodeSchema<T> { }
+        public static void EnsureIndexes<T>(this Quiver.GraphDatabase db)
+            where T : Quiver.IGraphNodeSchema<T> { }
+    }
+    public sealed class GraphEngineAdapter : Quiver.Core.IGraphEngine
+    {
+        public GraphEngineAdapter(Quiver.GraphDatabase db, Quiver.Core.IVectorStore vectors, Quiver.Core.IVectorCatalog catalog) { }
+        public Quiver.Core.IVectorCatalog Catalog { get; }
+        public Quiver.Core.IVectorStore Vectors { get; }
+        public Quiver.Core.IGraphEngineReadSession BeginRead() { }
+    }
+    public sealed class GraphStats
+    {
+        public const int PowerNodeDegreeThreshold = 256;
+        public static readonly Quiver.GraphStats Empty;
+        public GraphStats() { }
+        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.LabelId, Quiver.DegreeHistogram> DegreeByLabel { get; }
+        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.RelationshipTypeId, long> EdgeTypeFrequency { get; }
+        public Quiver.DegreeHistogram GlobalDegreeHistogram { get; }
+        public Quiver.DegreeHistogram GlobalInDegree { get; }
+        public Quiver.DegreeHistogram GlobalOutDegree { get; }
+        public bool HasFastLabelIndex { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.RelationshipTypeId, Quiver.DegreeHistogram> InDegreeByType { get; }
+        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.LabelId, long> LabelCardinality { get; }
+        public Quiver.NodeDegreeLookup NodeDegrees { get; }
+        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.RelationshipTypeId, Quiver.DegreeHistogram> OutDegreeByType { get; }
+        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.NodeId, Quiver.NodeDegreeSummary> PowerNodes { get; }
+        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.PropertyKeyId, Quiver.PropertyKeyStats> PropertyKeys { get; }
+        public long TotalNodes { get; }
+        public long TotalRelationships { get; }
+        public long EstimateCardinality(Quiver.Core.LabelId label) { }
+        public double EstimateFanOut(Quiver.Core.LabelId? sourceLabel, Quiver.Core.RelationshipTypeId? typeFilter, Quiver.Stores.Direction direction) { }
+        public double EstimateMeanDegree(Quiver.Core.LabelId label) { }
+        public double EstimateSelectivity(Quiver.Core.LabelId label) { }
+        public bool IsLikelyPowerNode(Quiver.Core.NodeId nodeId) { }
+        public bool TryGetDegree(Quiver.Core.NodeId nodeId, out long outDegree, out long inDegree) { }
+        public Quiver.GraphStats WithFastLabelIndex(bool hasFastLabelIndex) { }
+        public static Quiver.GraphStats Collect(Quiver.Transactions.ITransaction tx) { }
+        public static Quiver.GraphStats Collect(Quiver.Transactions.ITransaction tx, int powerNodeThreshold) { }
+        public static Quiver.GraphStats Collect(Quiver.Transactions.ITransaction tx, int powerNodeThreshold, double denseThreshold) { }
+    }
+    public interface IDiagnosticsApi
+    {
+        long CurrentCheckpointThresholdBytes { get; }
+        Quiver.ConsistencyReport CheckConsistency();
+        Quiver.IndexConsistencyReport CheckIndexConsistency();
+        Quiver.DatabaseStatistics GetStatistics();
+        Quiver.IndexRepairReport RepairIndexes(Quiver.IndexRepairMode mode);
+        void SetCheckpointPolicy(Quiver.Transactions.CheckpointPolicy policy, long? fixedThresholdBytes = default);
+    }
+    public interface IGraphNodeSchema<TSelf>
+        where TSelf : Quiver.IGraphNodeSchema<TSelf>
+    {
+        void CreateIndex(Quiver.ISchemaApi schema, string propertyName, Quiver.IndexKind? kindOverride);
+        void EnsureIndexes(Quiver.ISchemaApi schema);
+    }
+    public interface IGraphStorageBackend : System.IDisposable
+    {
+        Quiver.Transactions.IGraphAccessMethods Access { get; }
+        Quiver.BulkLoadCapabilities BulkLoad { get; }
+        Quiver.IDiagnosticsApi Diagnostics { get; }
+        Quiver.ISchemaApi Schema { get; }
+        Quiver.Transactions.ITransactionManager Transactions { get; }
+        Quiver.Core.IVectorStore Vectors { get; }
+        Quiver.IGraphTransaction BeginGraphTransaction(Quiver.Transactions.IsolationLevel level, bool readOnly);
+        void CreateSnapshot(string targetDirectory, Quiver.SnapshotOptions? options = null);
+        Quiver.Maintenance.VacuumReport Vacuum(Quiver.Maintenance.VacuumOptions? options = null);
+    }
+    public interface IGraphStorageBackendFactory
+    {
+        Quiver.IGraphStorageBackend Open(string directoryPath, Quiver.GraphDatabaseOptions options);
+    }
+    public interface IGraphTransaction : Quiver.Transactions.ICommitHookRegistrar, System.IDisposable
+    {
+        Quiver.Transactions.IGraphAccessMethods Access { get; }
+        Quiver.Stores.IAdjacencyBlockStore? AdjacencyBlocks { get; }
+        Quiver.Core.TransactionId Id { get; }
+        bool IsReadOnly { get; }
+        Quiver.Transactions.TransactionState State { get; }
+        void Commit();
+        Quiver.Core.NodeId CreateNode(Quiver.Core.LabelId labelId);
+        Quiver.Core.NodeId CreateNode(string label);
+        Quiver.Core.RelationshipId CreateRelationship(Quiver.Core.NodeId source, Quiver.Core.NodeId target, Quiver.Core.RelationshipTypeId typeId);
+        Quiver.Core.RelationshipId CreateRelationship(Quiver.Core.NodeId source, Quiver.Core.NodeId target, string type);
+        void DeleteNode(Quiver.Core.NodeId nodeId);
+        void DeleteRelationship(Quiver.Core.RelationshipId relId);
+        Quiver.Stores.PropertyEnumerator EnumerateProperties(Quiver.Core.NodeId nodeId);
+        Quiver.Stores.RelationshipEnumerator EnumerateRelationships(Quiver.Core.NodeId nodeId, Quiver.Stores.Direction direction = 3, string? typeFilter = null);
+        Quiver.QueryResult Execute(Quiver.Operators.IPhysicalOperator plan);
+        Quiver.IQueryCursor ExecuteCursor(Quiver.Operators.IPhysicalOperator plan);
+        Quiver.Stores.PropertyValue GetProperty(Quiver.Core.NodeId nodeId, string key);
+        Quiver.Stores.PropertyValue GetProperty(Quiver.Core.RelationshipId relId, string key);
+        bool HasProperty(Quiver.Core.NodeId nodeId, string key);
+        void IndexInsert(string indexName, double key, Quiver.Core.NodeId nodeId);
+        void IndexInsert(string indexName, long key, Quiver.Core.NodeId nodeId);
+        void IndexInsert(string indexName, string key, Quiver.Core.NodeId nodeId);
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Id",
+                "Created"})]
+        System.ValueTuple<Quiver.Core.NodeId, bool> MergeNode(string label, string matchKey, in Quiver.Stores.PropertyValue matchValue);
+        bool NodeExists(Quiver.Core.NodeId nodeId);
+        Quiver.NodeIdEnumerator RangeIndex(string indexName, in Quiver.Stores.PropertyValue from, bool fromInclusive, in Quiver.Stores.PropertyValue to, bool toInclusive);
+        void ReleaseSavepoint(Quiver.Transactions.SavepointId savepoint);
+        void RemoveProperty(Quiver.Core.NodeId nodeId, string key);
+        void Rollback();
+        void RollbackTo(Quiver.Transactions.SavepointId savepoint);
+        Quiver.Transactions.SavepointId Savepoint(string? name = null);
+        Quiver.NodeIdEnumerator SeekIndex(string indexName, in Quiver.Stores.PropertyValue key);
+        void SetProperty(Quiver.Core.NodeId nodeId, string key, in Quiver.Stores.PropertyValue value);
+        void SetProperty(Quiver.Core.RelationshipId relId, string key, in Quiver.Stores.PropertyValue value);
+    }
+    public interface IQueryCursor : System.IDisposable
+    {
+        Quiver.QueryRow Current { get; }
+        Quiver.Operators.TupleSchema Schema { get; }
+        bool MoveNext();
+    }
+    public interface ISchemaApi
+    {
+        void CreateIndex(string indexName, string label, string propertyKey, Quiver.IndexKind kind);
+        void DropIndex(string indexName);
+        string? GetLabelName(Quiver.Core.LabelId id);
+        Quiver.Core.LabelId GetOrCreateLabel(string name);
+        Quiver.Core.PropertyKeyId GetOrCreatePropertyKey(string name);
+        Quiver.Core.RelationshipTypeId GetOrCreateRelationshipType(string name);
+        bool IndexExists(string indexName);
+        System.Collections.Generic.IReadOnlyList<Quiver.IndexInfo> ListIndexes();
+        bool RenameIndex(string oldName, string newName);
+        bool RenameLabel(string oldName, string newName);
+        bool RenamePropertyKey(string oldName, string newName);
+        bool RenameRelationshipType(string oldName, string newName);
+        bool TryGetLabelId(string name, out Quiver.Core.LabelId id);
+        bool TryGetPropertyKeyId(string name, out Quiver.Core.PropertyKeyId id);
+        bool TryGetRelationshipTypeId(string name, out Quiver.Core.RelationshipTypeId id);
+    }
+    public sealed class IndexCandidate : System.IEquatable<Quiver.IndexCandidate>
+    {
+        public IndexCandidate(string IndexName, Quiver.Core.LabelId Label, long EstimatedRows) { }
+        public long EstimatedRows { get; init; }
+        public string IndexName { get; init; }
+        public Quiver.Core.LabelId Label { get; init; }
+    }
+    public sealed class IndexConsistencyReport : System.IEquatable<Quiver.IndexConsistencyReport>
+    {
+        public IndexConsistencyReport(int IndexCount, long EntryCount, long OrphanCount, System.Collections.Generic.IReadOnlyList<Quiver.OrphanIndexEntry> Orphans, long LabelIndexOrphanCount) { }
+        public long EntryCount { get; init; }
+        public int IndexCount { get; init; }
+        public long LabelIndexOrphanCount { get; init; }
+        public long OrphanCount { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Quiver.OrphanIndexEntry> Orphans { get; init; }
+    }
+    public sealed class IndexInfo : System.IEquatable<Quiver.IndexInfo>
+    {
+        public IndexInfo(string Name, string Label, string PropertyKey, Quiver.IndexKind Kind, long EntryCount) { }
+        public long EntryCount { get; init; }
+        public Quiver.IndexKind Kind { get; init; }
+        public string Label { get; init; }
+        public string Name { get; init; }
+        public string PropertyKey { get; init; }
+    }
+    public enum IndexKind
+    {
+        Int32Equality = 0,
+        Int64Equality = 1,
+        DoubleEquality = 2,
+        StringEquality = 3,
+        StringRange = 4,
+    }
+    public enum IndexRepairMode
+    {
+        DryRun = 0,
+        Apply = 1,
+    }
+    public sealed class IndexRepairReport : System.IEquatable<Quiver.IndexRepairReport>
+    {
+        public IndexRepairReport(int RemovedCount, System.Collections.Generic.IReadOnlyList<Quiver.OrphanIndexEntry> Orphans, bool LabelIndexInvalidated) { }
+        public bool LabelIndexInvalidated { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Quiver.OrphanIndexEntry> Orphans { get; init; }
+        public int RemovedCount { get; init; }
+    }
+    public enum KnnStrategy
+    {
+        VectorFirst = 1,
+        GraphFirst = 2,
+        Hybrid = 3,
+    }
+    public sealed class NodeDegreeLookup
+    {
+        public const double DefaultDenseThreshold = 4D;
+        public static readonly Quiver.NodeDegreeLookup Empty;
+        public int DenseLength { get; }
+        public double DenseThreshold { get; }
+        public bool IsDense { get; }
+        public long MaxNodeIdObserved { get; }
+        public int PowerNodeCount { get; }
+        public long PowerNodeThreshold { get; }
+        public System.Collections.Generic.IEnumerable<Quiver.NodeDegreeSummary> EnumeratePowerNodes() { }
+        public bool IsLikelyPowerNode(Quiver.Core.NodeId nodeId) { }
+        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.NodeId, Quiver.NodeDegreeSummary> SnapshotPowerNodes() { }
+        public bool TryGetDegree(Quiver.Core.NodeId nodeId, out long outDegree, out long inDegree) { }
+    }
+    public readonly struct NodeDegreeSummary : System.IEquatable<Quiver.NodeDegreeSummary>
+    {
+        public NodeDegreeSummary(Quiver.Core.NodeId NodeId, long OutDegree, long InDegree) { }
+        public long InDegree { get; init; }
+        public Quiver.Core.NodeId NodeId { get; init; }
+        public long OutDegree { get; init; }
+        public long TotalDegree { get; }
+    }
+    public ref struct NodeIdEnumerator
+    {
+        public Quiver.Core.NodeId Current { get; }
+        public void Dispose() { }
+        public bool MoveNext() { }
+    }
+    public sealed class OrphanIndexEntry : System.IEquatable<Quiver.OrphanIndexEntry>
+    {
+        public OrphanIndexEntry(string IndexName, byte[] RawKey, long EntityId) { }
+        public long EntityId { get; init; }
+        public string IndexName { get; init; }
+        public byte[] RawKey { get; init; }
+    }
+    public sealed class PropertyKeyStats
+    {
+        public const int DistinctTrackingCap = 4096;
+        public PropertyKeyStats() { }
+        public long Count { get; }
+        public long DistinctEstimate { get; }
+        public bool HasDoubleRange { get; }
+        public bool HasNumericRange { get; }
+        public Quiver.Core.PropertyKeyId KeyId { get; init; }
+        public double MaxDouble { get; }
+        public long MaxInt64 { get; }
+        public double MinDouble { get; }
+        public long MinInt64 { get; }
+        public long NullOrMissingCount { get; }
+        public Quiver.Core.PropertyTypeFlags ObservedTypes { get; }
+        public Quiver.PropertyValueTypeMask ObservedTypesLegacy { get; }
+    }
+    [System.Flags]
+    [System.Obsolete("Use Quiver.Core.PropertyTypeFlags instead. PropertyValueTypeMask will be removed.")]
+    public enum PropertyValueTypeMask : uint
+    {
+        None = 0u,
+        Bool = 2u,
+        Int32 = 4u,
+        Int64 = 8u,
+        Double = 16u,
+        String = 32u,
+        Bytes = 64u,
+        Numeric = 28u,
+    }
+    public sealed class QueryOptimizer
+    {
+        public QueryOptimizer(Quiver.GraphStats stats) { }
+        public Quiver.GraphStats Stats { get; }
+        public Quiver.KnnStrategy ChooseKnnStrategy(long candidateCount, int k, long totalIndexedCount) { }
+        public long EstimateCardinality(Quiver.Core.LabelId label) { }
+        public double EstimateMeanDegree(Quiver.Core.LabelId label) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.TraversalPlanStep> OptimizeTraversal(System.Collections.Generic.IReadOnlyList<Quiver.TraversalPlanStep> steps) { }
+        public Quiver.ExpandPlan SelectExpandPlan(Quiver.Core.LabelId? sourceLabel, Quiver.Core.RelationshipTypeId? typeFilter, Quiver.Stores.Direction direction) { }
+        public Quiver.ExpandPlan SelectExpandPlan(Quiver.Core.LabelId? sourceLabel, Quiver.Core.RelationshipTypeId? typeFilter, Quiver.Stores.Direction direction, long? frontierSize) { }
+        public Quiver.ScanPlan SelectScan(Quiver.Core.LabelId? label, System.Collections.Generic.IReadOnlyList<Quiver.IndexCandidate>? candidates = null) { }
+        public bool ShouldUseBidirectional(Quiver.Core.LabelId startLabel, int hopCount) { }
+        public static Quiver.Operators.IPhysicalOperator BuildBitmapFilter(Quiver.Operators.IPhysicalOperator source, System.Collections.Generic.IReadOnlyList<Quiver.QueryOptimizer.PredicateCandidate> candidates) { }
+        public static System.Collections.Generic.IReadOnlyList<Quiver.Operators.IPredicate> OrderPredicatesBySelectivity(System.Collections.Generic.IReadOnlyList<Quiver.QueryOptimizer.PredicateCandidate> candidates) { }
+        public readonly struct PredicateCandidate : System.IEquatable<Quiver.QueryOptimizer.PredicateCandidate>
+        {
+            public PredicateCandidate(Quiver.Operators.IPredicate Predicate, long EstimatedMatchingRows) { }
+            public long EstimatedMatchingRows { get; init; }
+            public Quiver.Operators.IPredicate Predicate { get; init; }
+        }
+    }
+    public sealed class QueryResult : System.IDisposable
+    {
+        public Quiver.Operators.TupleSchema Schema { get; }
+        public Quiver.Operators.OperatorStatistics Statistics { get; }
+        public void Dispose() { }
+        public System.Collections.Generic.IEnumerable<Quiver.QueryRow> Rows() { }
+    }
+    public readonly struct QueryRow
+    {
+        public int ColumnCount { get; }
+        public bool GetBoolean(int column) { }
+        public byte[] GetBytes(int column) { }
+        public double GetDouble(int column) { }
+        public long GetInt64(int column) { }
+        public Quiver.Core.NodeId GetNodeId(int column) { }
+        public Quiver.Core.RelationshipId GetRelationshipId(int column) { }
+        public Quiver.Operators.TupleSlotType GetSlotType(int column) { }
+        public string GetString(int column) { }
+    }
+    public static class QuiverDb
+    {
+        public static Quiver.GraphDatabase OpenDatabase(string path) { }
+        public static Quiver.GraphDatabase OpenDatabase(string path, Quiver.GraphDatabaseOptions options) { }
+    }
+    public enum ScanKind
+    {
+        AllNodesScan = 0,
+        LabelScan = 1,
+        IndexSeek = 2,
+    }
+    public sealed class ScanPlan : System.IEquatable<Quiver.ScanPlan>
+    {
+        public ScanPlan(Quiver.ScanKind Kind, Quiver.Core.LabelId? Label, string? IndexName, long EstimatedRows) { }
+        public long EstimatedRows { get; init; }
+        public string? IndexName { get; init; }
+        public Quiver.ScanKind Kind { get; init; }
+        public Quiver.Core.LabelId? Label { get; init; }
+        public Quiver.Operators.IPhysicalOperator Build(Quiver.Operators.ITupleProvider? indexKey = null) { }
+    }
+    public sealed class SnapshotOptions
+    {
+        public SnapshotOptions() { }
+        public bool IncludeIndexes { get; set; }
+    }
+    public sealed class TraversalPlanStep : System.IEquatable<Quiver.TraversalPlanStep>
+    {
+        public TraversalPlanStep(Quiver.Core.RelationshipTypeId? TypeFilter, Quiver.Stores.Direction Direction) { }
+        public Quiver.Stores.Direction Direction { get; init; }
+        public Quiver.Core.RelationshipTypeId? TypeFilter { get; init; }
+    }
+}
+namespace Quiver.Logical
+{
+    public interface ILogicalMutationSink
+    {
+        void OnCommitted(Quiver.Core.TransactionId transactionId, System.Collections.Generic.IReadOnlyList<Quiver.Logical.LogicalMutation> mutations);
+    }
+    public sealed class InMemoryLogicalMutationSink : Quiver.Logical.ILogicalMutationSink
+    {
+        public InMemoryLogicalMutationSink() { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Logical.InMemoryLogicalMutationSink.CommittedBatch> Batches { get; }
+        public System.Collections.Generic.IEnumerable<Quiver.Logical.LogicalMutation> Mutations { get; }
+        public void Clear() { }
+        public void OnCommitted(Quiver.Core.TransactionId transactionId, System.Collections.Generic.IReadOnlyList<Quiver.Logical.LogicalMutation> mutations) { }
+        public readonly struct CommittedBatch : System.IEquatable<Quiver.Logical.InMemoryLogicalMutationSink.CommittedBatch>
+        {
+            public CommittedBatch(Quiver.Core.TransactionId TransactionId, System.Collections.Generic.IReadOnlyList<Quiver.Logical.LogicalMutation> Mutations) { }
+            public System.Collections.Generic.IReadOnlyList<Quiver.Logical.LogicalMutation> Mutations { get; init; }
+            public Quiver.Core.TransactionId TransactionId { get; init; }
+        }
+    }
+    public readonly struct LogicalMutation
+    {
+        public Quiver.Logical.LogicalMutationKind Kind { get; }
+        public Quiver.Core.NodeId NodeId { get; }
+        public string? PropertyKey { get; }
+        public Quiver.Logical.LogicalPropertyValue PropertyValue { get; }
+        public Quiver.Core.RelationshipId RelationshipId { get; }
+        public Quiver.Core.NodeId TargetNodeId { get; }
+        public string? TokenName { get; }
+        public static Quiver.Logical.LogicalMutation CreateNode(Quiver.Core.NodeId nodeId, string label) { }
+        public static Quiver.Logical.LogicalMutation CreateRelationship(Quiver.Core.RelationshipId relId, Quiver.Core.NodeId source, Quiver.Core.NodeId target, string type) { }
+        public static Quiver.Logical.LogicalMutation DeleteNode(Quiver.Core.NodeId nodeId) { }
+        public static Quiver.Logical.LogicalMutation DeleteRelationship(Quiver.Core.RelationshipId relId) { }
+        public static Quiver.Logical.LogicalMutation RemoveNodeProperty(Quiver.Core.NodeId nodeId, string key) { }
+        public static Quiver.Logical.LogicalMutation SetNodeProperty(Quiver.Core.NodeId nodeId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
+        public static Quiver.Logical.LogicalMutation SetRelationshipProperty(Quiver.Core.RelationshipId relId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
+    }
+    public enum LogicalMutationKind : byte
+    {
+        CreateNode = 1,
+        DeleteNode = 2,
+        CreateRelationship = 3,
+        DeleteRelationship = 4,
+        SetNodeProperty = 5,
+        SetRelationshipProperty = 6,
+        RemoveNodeProperty = 7,
+    }
+    public static class LogicalMutationReplay
+    {
+        public static void Apply(Quiver.IGraphTransaction tx, System.Collections.Generic.IEnumerable<Quiver.Logical.LogicalMutation> mutations, System.Collections.Generic.IDictionary<long, Quiver.Core.NodeId>? nodeMap = null, System.Collections.Generic.IDictionary<long, Quiver.Core.RelationshipId>? relationshipMap = null) { }
+    }
+    public readonly struct LogicalPropertyValue
+    {
+        public byte[]? Bytes { get; }
+        public long Scalar { get; }
+        public Quiver.Stores.PropertyValueType Type { get; }
+        public Quiver.Stores.PropertyValue ToPropertyValue() { }
+        public static Quiver.Logical.LogicalPropertyValue Capture(in Quiver.Stores.PropertyValue value) { }
+    }
+}
+namespace Quiver.Maintenance
+{
+    public interface IVacuum
+    {
+        Quiver.Maintenance.VacuumReport Run(Quiver.Maintenance.VacuumOptions? options = null);
+    }
+    public enum VacuumMode
+    {
+        Full = 0,
+        DryRun = 1,
+    }
+    public sealed class VacuumOptions
+    {
+        public VacuumOptions() { }
+        public int MaxDurationMs { get; init; }
+        public Quiver.Maintenance.VacuumMode Mode { get; init; }
+        public Quiver.Maintenance.VacuumTarget Targets { get; init; }
+    }
+    public enum VacuumPolicy
+    {
+        Manual = 0,
+        Auto = 1,
+    }
+    public sealed class VacuumReport : System.IEquatable<Quiver.Maintenance.VacuumReport>
+    {
+        public VacuumReport(int ReclaimedNodes, int ReclaimedRelationships, int ReclaimedProperties, int PrunedCommittedTxEntries, long ElapsedMs, long HorizonTxId, bool Skipped, long TruncatedPages = 0) { }
+        public long ElapsedMs { get; init; }
+        public long HorizonTxId { get; init; }
+        public int PrunedCommittedTxEntries { get; init; }
+        public int ReclaimedNodes { get; init; }
+        public int ReclaimedProperties { get; init; }
+        public int ReclaimedRelationships { get; init; }
+        public bool Skipped { get; init; }
+        public long TruncatedPages { get; init; }
+    }
+    [System.Flags]
+    public enum VacuumTarget
+    {
+        None = 0,
+        Nodes = 1,
+        Relationships = 2,
+        Properties = 4,
+        Indexes = 8,
+        All = 15,
+    }
+}
+namespace Quiver.Migrations
+{
+    public interface IMigration
+    {
+        string Id { get; }
+        int Version { get; }
+        System.Threading.Tasks.Task ApplyAsync(Quiver.Migrations.IMigrationContext ctx);
+        System.Threading.Tasks.Task RevertAsync(Quiver.Migrations.IMigrationContext ctx);
+    }
+    public interface IMigrationContext
+    {
+        string MigrationId { get; }
+        Quiver.ISchemaApi Schema { get; }
+        Quiver.IGraphTransaction Transaction { get; }
+        void AddIndex(string indexName, string label, string propertyKey, Quiver.IndexKind kind);
+        void DropIndex(string indexName);
+        void ForEachNode(string label, System.Action<Quiver.Core.NodeId> action);
+        bool RenameIndex(string oldName, string newName);
+        bool RenameLabel(string oldName, string newName);
+        bool RenamePropertyKey(string oldName, string newName);
+        bool RenameRelationshipType(string oldName, string newName);
+    }
+    public sealed class MigrationHistoryEntry : System.IEquatable<Quiver.Migrations.MigrationHistoryEntry>
+    {
+        public MigrationHistoryEntry(string Id, int Version, System.DateTime AppliedAtUtc) { }
+        public System.DateTime AppliedAtUtc { get; init; }
+        public string Id { get; init; }
+        public int Version { get; init; }
+    }
+    public sealed class MigrationResult : System.IEquatable<Quiver.Migrations.MigrationResult>
+    {
+        public MigrationResult(System.Collections.Generic.IReadOnlyList<Quiver.Migrations.MigrationHistoryEntry> Applied, System.Collections.Generic.IReadOnlyList<string> Skipped) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Migrations.MigrationHistoryEntry> Applied { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> Skipped { get; init; }
+    }
+}

@@ -1,4 +1,6 @@
-﻿namespace Quiver.Transactions;
+﻿using System.Diagnostics.CodeAnalysis;
+
+namespace Quiver.Transactions;
 
 /// <summary>トランザクション管理の入口。</summary>
 public interface ITransactionManager : IDisposable
@@ -24,5 +26,11 @@ public enum IsolationLevel : byte
     /// write skew / read-only anomaly 等の SI アノマリを検出して一方を
     /// <see cref="SerializabilityException"/> で abort する。binary backend でのみ有効。
     /// </summary>
+    /// <remarks>
+    /// DOC-2: SSN ベースの Serializable 分離は評価中のため <c>[Experimental("QUIVER001")]</c> 指定。
+    /// SemVer の安定性保証対象外であり、シグネチャ・挙動は MINOR/PATCH でも変わりうる
+    /// (docs/api-stability.md §5)。利用には診断 ID <c>QUIVER001</c> の suppress が必要。
+    /// </remarks>
+    [Experimental("QUIVER001")]
     Serializable = 3,
 }

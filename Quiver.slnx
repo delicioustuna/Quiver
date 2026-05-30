@@ -50,5 +50,6 @@
     <Project Path="tests\Quiver.Hosting.Tests\Quiver.Hosting.Tests.csproj" />
     <Project Path="tests\Quiver.PropertyTests\Quiver.PropertyTests.csproj" />
     <Project Path="tests\Quiver.FuzzTests\Quiver.FuzzTests.csproj" />
+    <Project Path="tests\Quiver.PublicApi.Tests\Quiver.PublicApi.Tests.csproj" />
   </Folder>
 </Solution>
