@@ -14,6 +14,7 @@ public sealed class InMemoryEntityVersionStore : IEntityVersionStore
 {
     private EntityVersionMeta[] _entries = new EntityVersionMeta[256];
     private long _count; // 書き込み済み上限 (= 最大 localId + 1)
+    private long _commitStampHighWater; // FT-33: in-memory なので耐久性はないが API 整合のため保持
 
     /// <inheritdoc/>
     public EntityVersionMeta Read(long localId)
@@ -53,6 +54,12 @@ public sealed class InMemoryEntityVersionStore : IEntityVersionStore
         EnsureCapacity(localId);
         _entries[localId] = _entries[localId] with { Sstamp = sstamp };
     }
+
+    /// <inheritdoc/>
+    public void WriteCommitStampHighWater(long value) => _commitStampHighWater = value;
+
+    /// <inheritdoc/>
+    public long ReadCommitStampHighWater() => _commitStampHighWater;
 
     /// <inheritdoc/>
     public void Dispose() { }

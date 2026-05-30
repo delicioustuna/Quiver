@@ -17,4 +17,12 @@ public enum IsolationLevel : byte
 {
     ReadCommitted = 1,
     SnapshotIsolation = 2,
+
+    /// <summary>
+    /// FT-33: SSN (Serial Safety Net, Wang et al. DaMoN'15) を用いた真の直列化可能分離レベル。
+    /// snapshot isolation の上に commit 時の exclusion-window 検証 (π(T) &gt; η(T)) を重ね、
+    /// write skew / read-only anomaly 等の SI アノマリを検出して一方を
+    /// <see cref="SerializabilityException"/> で abort する。binary backend でのみ有効。
+    /// </summary>
+    Serializable = 3,
 }

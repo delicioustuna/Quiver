@@ -165,6 +165,9 @@ internal sealed class RelationshipStore : IRelationshipStore
             if (!Visibility.IsVisibleAmbient(meta.Xmin, meta.Xmax))
                 inUse = false;
         }
+        // FT-33: 可視な relationship を観測したら SSN read-set に記録する (Serializable 時のみ)。
+        // traversal の RelationshipEnumerator もこの Read を通るので隣接走査が一律捕捉される。
+        if (inUse) MvccContext.RecordRead(EntityKind.Relationship, relId.Value);
         return new RelationshipReadHandle(relId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstPropId);
     }
 
@@ -207,7 +210,11 @@ internal sealed class RelationshipStore : IRelationshipStore
             if (!inUse) continue;
             var meta = _versions.Read(id);
             if (Visibility.IsVisibleAmbient(meta.Xmin, meta.Xmax))
+            {
+                // FT-33: scan で観測した可視 relationship も SSN read-set に記録する。
+                MvccContext.RecordRead(EntityKind.Relationship, id);
                 yield return new RelationshipId(id);
+            }
         }
     }
 

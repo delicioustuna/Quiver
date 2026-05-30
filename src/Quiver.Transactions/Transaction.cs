@@ -35,6 +35,12 @@ internal sealed class Transaction : ITransaction
     private long _nextSavepointId;
     private List<(long Id, int Level)>? _savepoints;
 
+    // FT-33: SSN (Serializable) のときのみ非 null。read/write hook が η/π を更新し、
+    // Commit の pre-commit 検証 + post-commit スタンプ書き戻しで使う。
+    private readonly SsnContext? _ssn;
+    private readonly IEntityVersionStore? _nodeVersions;
+    private readonly IEntityVersionStore? _relVersions;
+
     public TransactionId Id { get; }
     public IsolationLevel Level { get; }
     public long SnapshotLsn { get; }
@@ -60,7 +66,9 @@ internal sealed class Transaction : ITransaction
         LockingMode lockingMode = LockingMode.ExclusiveOnly,
         TimeSpan? lockTimeout = null,
         SnapshotState snapshot = default,
-        CommittedTxRegistry? committed = null)
+        CommittedTxRegistry? committed = null,
+        IEntityVersionStore? nodeVersions = null,
+        IEntityVersionStore? relVersions = null)
     {
         Id = id; Level = level; SnapshotLsn = snapshotLsn;
         _wal = wal;
@@ -71,20 +79,27 @@ internal sealed class Transaction : ITransaction
         _undoHandler = undoHandler;
         _state = TransactionState.Active;
         var timeout = lockTimeout ?? TimeSpan.FromSeconds(5);
+        // FT-33: Serializable かつ MVCC コンテキストがあるときのみ SSN を起動する。
+        // sidecar が無い (旧テスト経路など) 場合は SI と同じ挙動に縮退する。
+        _nodeVersions = nodeVersions;
+        _relVersions = relVersions;
+        _ssn = (level == IsolationLevel.Serializable && committed != null
+            && nodeVersions != null && relVersions != null)
+            ? new SsnContext() : null;
         // FT-26: per-tx ambient コンテキストを Tx wrapper にも持たせ、各操作直前に
         // MvccContext を再アクティベートする (同一スレッドで複数 tx 操作を交互に
         // 行う場合の thread-static の取り違えを防ぐ)。
         var snap = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
-        _nodes = new TxNodeStore(nodeStore, nodeLocks, id, lockingMode, timeout, snap, committed);
-        _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes, lockingMode, timeout, snap, committed);
-        _properties = new TxPropertyStore(propStore, id, snap, committed);
+        _nodes = new TxNodeStore(nodeStore, nodeLocks, id, lockingMode, timeout, snap, committed, _ssn);
+        _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes, lockingMode, timeout, snap, committed, _ssn);
+        _properties = new TxPropertyStore(propStore, id, snap, committed, _ssn);
         _indexes = new TxIndexManager(indexManager, indexLocks, id, timeout);
         WalPageContext.Begin(wal, id);
         // FT-26: MVCC ambient コンテキスト開始 (Tx wrapper を介さない経路のため)。
         // null なら旧テスト等の互換経路として MvccContext を起動しない (= Bootstrap fallback)。
         if (committed != null)
         {
-            MvccContext.Begin(id, snap, committed);
+            MvccContext.Begin(id, snap, committed, _ssn);
         }
     }
 
@@ -103,6 +118,12 @@ internal sealed class Transaction : ITransaction
         var sw = Stopwatch.StartNew();
         try
         {
+            // FT-33: Serializable のときは PageImage を WAL へ流す前に SSN の
+            // exclusion-window 検証を行う。違反なら SerializabilityException を投げ、
+            // 下の catch が in-place rollback + Abort を行う。検証を通ったら同じ
+            // critical section で post-commit スタンプを sidecar に書き戻し、それも
+            // 本 tx の PageImage として WAL に乗せて durable にする。
+            if (_ssn != null) SsnValidateAndStamp();
             // 案C: UnpinDirty はページイメージをトランザクションバッファにコアレスするだけ。
             // ここで全 PageImage を WAL へ追記し、その後に Commit レコードを書く。
             // Commit を最後に書くことで、recovery はコミット済みトランザクションの
@@ -189,6 +210,104 @@ internal sealed class Transaction : ITransaction
         if (beforeImages.Count == 0) return;
         _undoHandler.Undo(beforeImages);
     }
+
+    // ==================== FT-33: SSN commit protocol ====================
+
+    /// <summary>
+    /// SSN (Wang et al. DaMoN'15) Algorithm 1 の commit 時検証 + post-commit スタンプ書き戻し。
+    /// π/η は <see cref="TransactionManager"/> の大域 commit-stamp クロックで計算する
+    /// (begin-order の TxId ではなく commit-order)。read/write hook が収集した read/write set を
+    /// もとに、creator cstamp / reader pstamp / overwriter sstamp を畳み込んで exclusion window
+    /// (π(T) &gt; η(T)) を判定する。検証 + 書き戻しは <see cref="TransactionManager.SsnCommitGate"/>
+    /// 下で直列化し、並行 Serializable commit 間の version スタンプ read-modify-write を保護する。
+    ///
+    /// <para>read 捕捉は <see cref="ISsnReadSink"/> をストアの物理読み取り点 (NodeStore /
+    /// RelationshipStore の Read・Scan) に挿しているため、直接 Read だけでなく traversal の隣接走査・
+    /// scan・index seek 後のレコード読みも一律 read-set に入る (= rw-antidependency の取りこぼしなし)。</para>
+    ///
+    /// <para>仕様上の限界 (設計でスコープ外、index versioning / 別タスク前提): phantom protection は
+    /// 対象外 — 述語に新規一致する行や隣接の増加 (= 既存バージョンの読みではない) は検出しない。
+    /// lock は SSN と併存し撤去しない (将来別タスク)。</para>
+    ///
+    /// <para>実装上の割り切り (いずれも安全側 = false-abort 方向で、missed-anomaly は起こさない):
+    /// (1) 競合粒度は Node / Relationship 単位で per-property ではない (同一ノードの別プロパティ同士も
+    /// 衝突扱い = over-abort)。(2) early-abort は入れず commit 時に一括判定 (perf 最適化の見送りで
+    /// correctness 不変)。(3) commit-stamp クロックはプロセスローカルで再起動時リセット
+    /// (永続化/復元せず)。再起動を跨ぐと旧/新 stamp 空間が混在し得るが η は下限・π は上限なので
+    /// false-abort のみ (safe-retry で回復可能)。</para>
+    /// </summary>
+    private void SsnValidateAndStamp()
+    {
+        var ssn = _ssn!;
+        lock (_manager.SsnCommitGate)
+        {
+            // c(T) を確定 (gate 下なので並行 Serializable commit との順序 = commit 順)。
+            long cT = _manager.GetOrAssignCommitStamp(Id.Value);
+            // FT-33 (④): commit-stamp 高水位を node sidecar ヘッダへ耐久化する。本 tx の
+            // WalPageContext がまだ生きているので commit と同一 page-WAL 単位で永続化され、
+            // 再起動後の Open でこの値からクロックを再開できる (旧/新 stamp 空間の混在を防ぐ)。
+            // c(T) は gate 下で単調増加するため最新書き込みが最高値。
+            _nodeVersions!.WriteCommitStampHighWater(cT);
+            long eta = 0;                 // η(T)
+            long pi = long.MaxValue;      // π(T)
+
+            // 読んだバージョン: creator cstamp を η に、上書き済みなら overwriter sstamp を π に。
+            foreach (var r in ssn.Reads)
+            {
+                var meta = ReadMeta(r);
+                if (meta.Xmin != 0 && meta.Xmin != Id.Value)
+                {
+                    long c = _manager.CommitStampOf(meta.Xmin);
+                    if (c > eta) eta = c;
+                }
+                if (meta.Sstamp < pi) pi = meta.Sstamp;
+            }
+            // 上書きしたバージョン: その reader (v.pstamp) は self への r:w in-edge → η に。
+            foreach (var w in ssn.Writes)
+            {
+                long p = ReadMeta(w).Pstamp;
+                if (p > eta) eta = p;
+            }
+            // π = min(π, c(T))。
+            if (cT < pi) pi = cT;
+
+            // exclusion window 違反なら abort。
+            if (eta >= pi)
+                throw new SerializabilityException(Id,
+                    $"Transaction {Id.Value} would violate serializability (η={eta} ≥ π={pi}).");
+
+            // post-commit: 読んだバージョンに reader cstamp を、上書きしたバージョンに
+            // overwriter cstamp を記録する。これらの書き込みは WalPageContext がまだ
+            // 生きているため本 tx の PageImage として WAL に乗り、commit と一体で durable になる。
+            foreach (var r in ssn.Reads)
+            {
+                var store = StoreFor(r.Kind);
+                if (store == null) continue;
+                if (cT > store.Read(r.LocalId).Pstamp)
+                    store.UpdatePstamp(r.LocalId, cT);
+            }
+            foreach (var w in ssn.Writes)
+            {
+                var store = StoreFor(w.Kind);
+                if (store == null) continue;
+                if (cT < store.Read(w.LocalId).Sstamp)
+                    store.UpdateSstamp(w.LocalId, cT);
+            }
+        }
+    }
+
+    private EntityVersionMeta ReadMeta(EntityId id)
+    {
+        var store = StoreFor(id.Kind);
+        return store == null ? EntityVersionMeta.Unset : store.Read(id.LocalId);
+    }
+
+    private IEntityVersionStore? StoreFor(EntityKind kind) => kind switch
+    {
+        EntityKind.Node => _nodeVersions,
+        EntityKind.Relationship => _relVersions,
+        _ => null,
+    };
 
     // ==================== FT-23: Savepoint ====================
 

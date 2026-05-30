@@ -29,4 +29,14 @@ public interface IEntityVersionStore : IDisposable
 
     /// <summary>Sstamp のみを更新する (SSN post-commit: overwriter cstamp 反映)。他フィールドは不変。</summary>
     void UpdateSstamp(long localId, long sstamp);
+
+    /// <summary>
+    /// FT-33: SSN の大域 commit-stamp 高水位を耐久メタ (sidecar ヘッダ) に書き込む。
+    /// commit と同一の page-WAL 単位で永続化され、再起動跨ぎで commit-stamp クロックを単調連続に保つ
+    /// (= 旧/新 stamp 空間の混在による false-abort ストームを防ぐ)。
+    /// </summary>
+    void WriteCommitStampHighWater(long value);
+
+    /// <summary>FT-33: 永続化済みの commit-stamp 高水位を読み出す。未書き込みなら 0。</summary>
+    long ReadCommitStampHighWater();
 }

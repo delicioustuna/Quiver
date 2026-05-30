@@ -13,13 +13,17 @@ internal sealed class TxRelationshipStore : IRelationshipStore
     private readonly TimeSpan _timeout;
     private readonly SnapshotState _snapshot;
     private readonly CommittedTxRegistry? _committed;
+    // FT-33: SSN (Serializable) のときのみ非 null。read/write set 収集のみ。
+    private readonly SsnContext? _ssn;
 
     internal TxRelationshipStore(IRelationshipStore inner, LockManager locks, TransactionId txId, TxNodeStore txNodes, LockingMode mode, TimeSpan timeout,
-        SnapshotState snapshot = default, CommittedTxRegistry? committed = null)
+        SnapshotState snapshot = default, CommittedTxRegistry? committed = null,
+        SsnContext? ssn = null)
     {
         _inner = inner; _locks = locks; _txId = txId; _txNodes = txNodes; _mode = mode; _timeout = timeout;
         _snapshot = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
         _committed = committed;
+        _ssn = ssn;
     }
 
     public long InUseCount => _inner.InUseCount;
@@ -34,6 +38,7 @@ internal sealed class TxRelationshipStore : IRelationshipStore
     {
         Acquire(relId.Value, LockMode.Exclusive);
         ActivateMvccContext();
+        SsnOnWrite(relId.Value);
         _inner.Delete(_txNodes, relId);
     }
 
@@ -41,6 +46,8 @@ internal sealed class TxRelationshipStore : IRelationshipStore
     {
         if (_mode == LockingMode.ReaderWriter)
             Acquire(relId.Value, LockMode.Shared);
+        // FT-33: read-set は sink 経由で _inner.Read が記録する (traversal の隣接走査も
+        // RelationshipEnumerator が _inner.Read を呼ぶので同経路で捕捉される)。
         ActivateMvccContext();
         return _inner.Read(relId);
     }
@@ -49,6 +56,7 @@ internal sealed class TxRelationshipStore : IRelationshipStore
     {
         Acquire(relId.Value, LockMode.Exclusive);
         ActivateMvccContext();
+        SsnOnWrite(relId.Value);
         return _inner.Write(relId);
     }
 
@@ -73,7 +81,19 @@ internal sealed class TxRelationshipStore : IRelationshipStore
     private void ActivateMvccContext()
     {
         if (_committed != null)
-            MvccContext.Begin(_txId, _snapshot, _committed);
+            MvccContext.Begin(_txId, _snapshot, _committed, _ssn);
+    }
+
+    // ==================== FT-33: SSN write-set 収集 ====================
+    // read-set は MvccContext の sink 経由でストアの Read/Scan/隣接走査が記録する。
+    // Create は新規バージョン (誰も読めなかった) なので SSN write set には登録しない。
+
+    private void SsnOnWrite(long localId)
+    {
+        if (_ssn == null || localId < 0) return;
+        var id = new EntityId(EntityKind.Relationship, localId);
+        _ssn.Writes.Add(id);
+        _ssn.Reads.Remove(id);
     }
 
     private void Acquire(long id, LockMode mode)

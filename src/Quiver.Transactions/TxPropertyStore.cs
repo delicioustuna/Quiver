@@ -11,14 +11,20 @@ internal sealed class TxPropertyStore : IPropertyStore
     private readonly TransactionId _txId;
     private readonly SnapshotState _snapshot;
     private readonly CommittedTxRegistry? _committed;
+    // FT-33: SSN read-sink。プロパティ操作でも ambient sink を維持し、直後/直前の
+    // traversal 等が sink を失わないようにする (プロパティ自体は node/rel 粒度の read で
+    // 既に捕捉されるため、PropertyStore は RecordRead を呼ばない)。
+    private readonly ISsnReadSink? _ssn;
 
     internal TxPropertyStore(IPropertyStore inner, TransactionId txId = default,
-        SnapshotState snapshot = default, CommittedTxRegistry? committed = null)
+        SnapshotState snapshot = default, CommittedTxRegistry? committed = null,
+        ISsnReadSink? ssn = null)
     {
         _inner = inner;
         _txId = txId;
         _snapshot = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
         _committed = committed;
+        _ssn = ssn;
     }
 
     public PropertyId Create(PropertyKeyId keyId, in PropertyValue value, PropertyId currentFirst)
@@ -48,6 +54,6 @@ internal sealed class TxPropertyStore : IPropertyStore
     private void ActivateMvccContext()
     {
         if (_committed != null)
-            MvccContext.Begin(_txId, _snapshot, _committed);
+            MvccContext.Begin(_txId, _snapshot, _committed, _ssn);
     }
 }

@@ -162,11 +162,17 @@ public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFacto
         var txManager = new TransactionManager(
             wal, nodeStore, relStore, propStore, indexManager, adjStore, access,
             undoHandler, options.LockingMode, options.LockTimeout,
-            options.DeadlockDetectionInterval, committedRegistry);
+            options.DeadlockDetectionInterval, committedRegistry,
+            // FT-33: SSN (Serializable) は version sidecar の Pstamp/Sstamp を使う。
+            nodeVersions, relVersions);
         // FT-26: recovery で観測した最大 TxId より大きい値から新規 tx を採番するよう、
         // TransactionManager の _nextTxId を巻き上げる。これがないと新規 tx ID が
         // 過去 commit 済み TxId と衝突して registry が同じ entry を 2 回 Mark してしまう。
         txManager.AdvanceNextTxIdAtLeast(committedRegistry.MaxObservedTxId + 1);
+        // FT-33 (④): recovery 後の node sidecar ヘッダから SSN commit-stamp 高水位を読み、
+        // クロックをそこまで巻き上げる。これがないと再起動でクロックが 0 に戻り、永続化済みの
+        // 旧 stamp 空間と新 stamp 空間が混在して Serializable tx が過剰 abort する。
+        txManager.SeedCommitStamp(nodeVersions.ReadCommitStampHighWater());
 
         // 案A: チェックポイント契機を配線する。コミットごとに WAL 成長量を見て、
         // しきい値超過 + アクティブ TX 0 の時点で全データページを flush し WAL を truncate する。

@@ -165,6 +165,9 @@ internal sealed class NodeStore : INodeStore
             if (!Visibility.IsVisibleAmbient(xmin, xmax))
                 inUse = false;
         }
+        // FT-33: 可視バージョンを観測したら SSN read-set に記録する (Serializable 時のみ。
+        // 直接 Read だけでなく traversal の隣接走査もこの経路を通る)。
+        if (inUse) MvccContext.RecordRead(EntityKind.Node, nodeId.Value);
         return new NodeReadHandle(nodeId, inUse, firstRel, firstProp, label, xmin, xmax);
     }
 
@@ -189,7 +192,11 @@ internal sealed class NodeStore : INodeStore
             if (!inUse) continue;
             var meta = _versions.Read(id);
             if (Visibility.IsVisibleAmbient(meta.Xmin, meta.Xmax))
+            {
+                // FT-33: scan で観測した可視ノードも SSN read-set に記録する。
+                MvccContext.RecordRead(EntityKind.Node, id);
                 yield return new NodeId(id);
+            }
         }
     }
 

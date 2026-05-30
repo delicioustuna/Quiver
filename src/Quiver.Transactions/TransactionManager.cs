@@ -55,6 +55,23 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly object _snapshotGate = new();
     private readonly CommittedTxRegistry _committed;
 
+    // FT-33: SSN 用の version sidecar (Serializable のときのみ Transaction に渡して使う)。
+    private readonly IEntityVersionStore? _nodeVersions;
+    private readonly IEntityVersionStore? _relVersions;
+    // FT-33: Serializable commit の pre-commit 検証 + post-commit スタンプ書き戻しを
+    // 直列化するゲート。並行 Serializable commit 間で version スタンプの read-modify-write を保護する。
+    private readonly object _ssnCommitGate = new();
+    // FT-33: 全 commit に単調な commit stamp c(T) を採番する大域クロック。SSN の π/η は
+    // begin-order TxId ではなくこの commit-order stamp 空間で計算する。Serializable tx は
+    // SSN 検証時 (SsnCommitGate 下)、SI/RC tx は OnCommit 時に採番する。
+    private long _commitStamp;
+    // creator TxId.Value → 採番済み commit stamp。Serializable tx の read が読んだバージョンの
+    // creator cstamp を解決するのに使う。Bootstrap (= bulk load / 既定 xmin) は時刻 0 として seed。
+    private readonly ConcurrentDictionary<long, long> _txCstamp = new()
+    {
+        [TransactionId.Bootstrap.Value] = 0,
+    };
+
     public TransactionManager(
         IWriteAheadLog wal,
         INodeStore nodeStore,
@@ -67,7 +84,9 @@ internal sealed class TransactionManager : ITransactionManager
         LockingMode lockingMode = LockingMode.ExclusiveOnly,
         TimeSpan? lockTimeout = null,
         TimeSpan? deadlockDetectionInterval = null,
-        CommittedTxRegistry? committedRegistry = null)
+        CommittedTxRegistry? committedRegistry = null,
+        IEntityVersionStore? nodeVersions = null,
+        IEntityVersionStore? relVersions = null)
     {
         _wal = wal;
         _nodeStore = nodeStore;
@@ -80,6 +99,8 @@ internal sealed class TransactionManager : ITransactionManager
         _lockingMode = lockingMode;
         _lockTimeout = lockTimeout ?? TimeSpan.FromSeconds(5);
         _committed = committedRegistry ?? new CommittedTxRegistry();
+        _nodeVersions = nodeVersions;
+        _relVersions = relVersions;
         // FT-26: _nextTxId は最初の Increment で 1 を返す (= Bootstrap.Value)。
         // Bootstrap は予約済みなので、最初の "ユーザ" tx が 2 から始まるよう offset しておく。
         _nextTxId = TransactionId.Bootstrap.Value + 1;
@@ -99,6 +120,47 @@ internal sealed class TransactionManager : ITransactionManager
     /// FT-26: backend factory から recovery 経路で WAL を走査して構築済みの registry を注入する経路。
     /// </summary>
     internal CommittedTxRegistry CommittedRegistry => _committed;
+
+    /// <summary>FT-33: Serializable commit を直列化するゲート (Transaction から参照)。</summary>
+    internal object SsnCommitGate => _ssnCommitGate;
+
+    /// <summary>
+    /// FT-33: 指定 tx の commit stamp c(T) を返す。未採番なら大域クロックから 1 つ採番する
+    /// (冪等)。Serializable tx は SSN 検証時にこれを呼んで c(T) を確定させ、その後の OnCommit
+    /// 経由の再呼び出しでは同じ値を返す。
+    /// </summary>
+    internal long GetOrAssignCommitStamp(long txIdValue)
+    {
+        if (_txCstamp.TryGetValue(txIdValue, out var existing)) return existing;
+        long assigned = Interlocked.Increment(ref _commitStamp);
+        return _txCstamp.GetOrAdd(txIdValue, assigned);
+    }
+
+    /// <summary>
+    /// FT-33 (④): 再起動時に永続化済みの commit-stamp 高水位までクロックを巻き上げる。
+    /// これにより新規 commit stamp は過去に永続化されたどの version stamp よりも大きくなり、
+    /// 旧/新 stamp 空間の混在 (= 再起動後の false-abort ストーム) を防ぐ。既に進んでいれば no-op。
+    /// </summary>
+    internal void SeedCommitStamp(long highWater)
+    {
+        long current = Volatile.Read(ref _commitStamp);
+        while (highWater > current)
+        {
+            long prev = Interlocked.CompareExchange(ref _commitStamp, highWater, current);
+            if (prev == current) return;
+            current = prev;
+        }
+    }
+
+    /// <summary>
+    /// FT-33: creator TxId の commit stamp を返す。未知 (= recovery 前のプロセスで commit された
+    /// バージョン等) は 0 (= 太古の committed) として扱う。SSN の read-side η 下限として安全側。
+    /// </summary>
+    internal long CommitStampOf(long creatorTxIdValue)
+    {
+        if (creatorTxIdValue == 0) return 0;
+        return _txCstamp.TryGetValue(creatorTxIdValue, out var c) ? c : 0;
+    }
 
     /// <summary>
     /// FT-26: recovery で観測した最大 TxId + 1 まで _nextTxId を巻き上げる。
@@ -169,7 +231,7 @@ internal sealed class TransactionManager : ITransactionManager
                 _wal, _nodeLocks, _relLocks, _indexLocks, this,
                 _nodeStore, _relStore, _propStore, _indexManager, _adjStore, _access,
                 _undoHandler, _lockingMode, _lockTimeout,
-                snapshot, _committed);
+                snapshot, _committed, _nodeVersions, _relVersions);
             _active[txId.Value] = tx;
         }
         return tx;
@@ -236,6 +298,11 @@ internal sealed class TransactionManager : ITransactionManager
             _committed.MarkCommitted(txId);
             _active.TryRemove(txId.Value, out _);
         }
+
+        // FT-33: commit 済み tx に commit stamp を確定させる (SI/RC はここで初採番、
+        // Serializable は SSN 検証時に採番済みなので冪等 no-op)。Serializable tx が
+        // 後で読んだバージョンの creator cstamp を解決できるよう、全 commit を登録する。
+        GetOrAssignCommitStamp(txId.Value);
 
         // FT-28: Adaptive ポリシーが有効なら per-tx WAL delta をサンプルとして controller へ。
         // _wal.BytesWritten は単調増加。直前 OnCommit との差分が、本 tx が WAL に追記した量

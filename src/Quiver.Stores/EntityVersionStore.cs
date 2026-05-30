@@ -31,6 +31,7 @@ public sealed class EntityVersionStore : IEntityVersionStore
     public static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize;
 
     private static readonly PageId HeaderPageId = new(1);
+    private const int MetaCommitStampHighWater = 0; // int64 (FT-33: SSN commit-stamp 高水位)
     private const int MetaFormatVersion = 31; // byte (FT-26 NodeStore と同 offset)
     internal const byte SidecarFormatVersion = 1;
 
@@ -105,6 +106,21 @@ public sealed class EntityVersionStore : IEntityVersionStore
 
     /// <inheritdoc/>
     public void UpdateSstamp(long localId, long sstamp) => UpdateField(localId, OffsetSstamp, sstamp);
+
+    /// <inheritdoc/>
+    public void WriteCommitStampHighWater(long value)
+    {
+        var ph = _file.PinForWrite(HeaderPageId);
+        BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaCommitStampHighWater..], value);
+        _file.UnpinDirty(HeaderPageId, 0);
+    }
+
+    /// <inheritdoc/>
+    public long ReadCommitStampHighWater()
+    {
+        using var h = _file.PinForRead(HeaderPageId);
+        return BinaryPrimitives.ReadInt64LittleEndian(h.Data[MetaCommitStampHighWater..]);
+    }
 
     /// <inheritdoc/>
     public void Dispose()
