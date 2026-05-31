@@ -7,7 +7,6 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Quiver.Core\Quiver.Core.csproj" />
-    <ProjectReference Include="..\Quiver.Transactions\Quiver.Transactions.csproj" />
+    <ProjectReference Include="..\Quiver\Quiver.csproj" />
   </ItemGroup>
 </Project>

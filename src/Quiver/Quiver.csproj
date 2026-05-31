@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -6,16 +6,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
+  <!-- Phase 0 (ARCH-1): 旧 Quiver.Core / Codec / Wal / Storage / Stores / Index /
+       Transactions / Operators / Client を本プロジェクトへ統合 (単一アセンブリ)。
+       各サブ領域はフォルダ (Core/ Codec/ Wal/ Storage/ Stores/ Index/ Transactions/
+       Operators/ Client/) で分離し、名前空間は従来どおり維持する。 -->
   <ItemGroup>
-    <ProjectReference Include="..\Quiver.Core\Quiver.Core.csproj" />
-    <ProjectReference Include="..\Quiver.Storage\Quiver.Storage.csproj" />
-    <ProjectReference Include="..\Quiver.Wal\Quiver.Wal.csproj" />
-    <ProjectReference Include="..\Quiver.Stores\Quiver.Stores.csproj" />
-    <ProjectReference Include="..\Quiver.Index\Quiver.Index.csproj" />
-    <ProjectReference Include="..\Quiver.Transactions\Quiver.Transactions.csproj" />
-    <ProjectReference Include="..\Quiver.Operators\Quiver.Operators.csproj" />
+    <PackageReference Include="System.IO.Hashing" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
+    <!-- 型付きエンティティ属性。将来本体へ吸収予定だが現状は別アセンブリ参照を維持。 -->
+    <ProjectReference Include="..\Quiver.Client.Attributes\Quiver.Client.Attributes.csproj" />
+    <!-- source generator は自アセンブリに生成できない Roslyn 制約のため別プロジェクト維持。 -->
+    <ProjectReference Include="..\Quiver.SourceGen\Quiver.SourceGen.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>

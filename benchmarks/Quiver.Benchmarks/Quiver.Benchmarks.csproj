@@ -16,7 +16,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Quiver\Quiver.csproj" />
-    <ProjectReference Include="..\..\src\Quiver.Client\Quiver.Client.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -17,11 +17,6 @@
     <PackageReference Include="FsCheck.Xunit" Version="3.0.1" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Quiver.Core\Quiver.Core.csproj" />
-    <ProjectReference Include="..\..\src\Quiver.Wal\Quiver.Wal.csproj" />
-    <ProjectReference Include="..\..\src\Quiver.Storage\Quiver.Storage.csproj" />
-    <ProjectReference Include="..\..\src\Quiver.Index\Quiver.Index.csproj" />
-    <ProjectReference Include="..\..\src\Quiver.Transactions\Quiver.Transactions.csproj" />
-    <ProjectReference Include="..\..\src\Quiver.Operators\Quiver.Operators.csproj" />
+    <ProjectReference Include="..\..\src\Quiver\Quiver.csproj" />
   </ItemGroup>
 </Project>

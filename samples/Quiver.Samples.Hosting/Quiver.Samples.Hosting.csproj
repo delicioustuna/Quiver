@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -9,7 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Quiver\Quiver.csproj" />
-    <ProjectReference Include="..\..\src\Quiver.Core\Quiver.Core.csproj" />
     <ProjectReference Include="..\..\src\Quiver.Hosting\Quiver.Hosting.csproj" />
   </ItemGroup>
   <ItemGroup>

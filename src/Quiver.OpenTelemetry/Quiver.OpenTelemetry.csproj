@@ -7,7 +7,7 @@
     <Description>OpenTelemetry instrumentation registration for Quiver graph database.</Description>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Quiver.Core\Quiver.Core.csproj" />
+    <ProjectReference Include="..\Quiver\Quiver.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- OB-1: optional の OpenTelemetry SDK 拡張。OpenTelemetry.Api だけに依存し、

@@ -10,11 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Quiver\Quiver.csproj" />
-    <ProjectReference Include="..\Quiver.Core\Quiver.Core.csproj" />
-    <ProjectReference Include="..\Quiver.Stores\Quiver.Stores.csproj" />
-    <ProjectReference Include="..\Quiver.Transactions\Quiver.Transactions.csproj" />
-    <ProjectReference Include="..\Quiver.Index\Quiver.Index.csproj" />
-    <ProjectReference Include="..\Quiver.Operators\Quiver.Operators.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.7" />

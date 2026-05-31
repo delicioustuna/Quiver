@@ -20,9 +20,6 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Quiver.Operators\Quiver.Operators.csproj" />
-    <ProjectReference Include="..\..\src\Quiver.Stores\Quiver.Stores.csproj" />
     <ProjectReference Include="..\..\src\Quiver\Quiver.csproj" />
-    <ProjectReference Include="..\..\src\Quiver.Client\Quiver.Client.csproj" />
   </ItemGroup>
 </Project>

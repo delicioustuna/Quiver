@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -17,8 +17,7 @@
     <PackageReference Include="SharpFuzz" Version="2.2.0" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Quiver.Codec\Quiver.Codec.csproj" />
-    <ProjectReference Include="..\..\src\Quiver.Wal\Quiver.Wal.csproj" />
+    <ProjectReference Include="..\..\src\Quiver\Quiver.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="corpus\**\*" CopyToOutputDirectory="PreserveNewest" />

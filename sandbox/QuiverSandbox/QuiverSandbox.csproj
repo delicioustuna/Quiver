@@ -8,7 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Quiver\Quiver.csproj" />
-    <ProjectReference Include="..\..\src\Quiver.Client\Quiver.Client.csproj" />
     <ProjectReference Include="..\..\src\Quiver.Client.Attributes\Quiver.Client.Attributes.csproj" />
     <ProjectReference Include="..\..\src\Quiver.SourceGen\Quiver.SourceGen.csproj"
                       OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
