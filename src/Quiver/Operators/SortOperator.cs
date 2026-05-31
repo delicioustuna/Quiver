@@ -1,6 +1,6 @@
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// GC-3: blocking sort. Drains the entire input on <see cref="Open"/>, captures

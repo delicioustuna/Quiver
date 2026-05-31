@@ -1,10 +1,10 @@
 using FluentAssertions;
 using Quiver.Core;
 using Quiver.Storage;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Xunit;
 
-namespace Quiver.Stores.Tests;
+namespace Quiver.Storage.Records.Tests;
 
 /// <summary>
 /// VEC-11: <see cref="LabelNodeIndex"/> の round-trip / 増分更新 / reopen rebuild / bulk load invalidation を直接検証する。

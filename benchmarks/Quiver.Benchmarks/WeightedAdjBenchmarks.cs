@@ -1,7 +1,7 @@
 using BenchmarkDotNet.Attributes;
 using Quiver;
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 
 namespace Quiver.Benchmarks;

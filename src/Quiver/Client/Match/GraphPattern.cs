@@ -1,6 +1,6 @@
-using Quiver.Client;
+using Quiver.Api;
 
-namespace Quiver.Client.Match;
+namespace Quiver.Api.Match;
 
 /// <summary>
 /// Match DSL のグラフパターン (ノード - エッジ - ノード) を表す不変オブジェクト。

@@ -1,8 +1,8 @@
 using Quiver;
 using Quiver.Core;
-using Quiver.Operators;
+using Quiver.Query.Physical;
 
-namespace Quiver.Client;
+namespace Quiver.Api;
 
 /// <summary>
 /// GC-6: <c>.Select&lt;TResult&gt;(Func&lt;MatchTuple, TResult&gt;)</c> に渡される型付きアクセサ。

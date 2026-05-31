@@ -25,11 +25,11 @@ internal static class GraphNodeEmitter
 
     private static readonly Dictionary<string, string> _seekCallMap = new()
     {
-        ["string"]  = "Quiver.Operators.LiteralProvider.String(value)",
-        ["string?"] = "Quiver.Operators.LiteralProvider.String(value ?? \"\")",
-        ["int"]     = "Quiver.Operators.LiteralProvider.Int64((long)value)",
-        ["long"]    = "Quiver.Operators.LiteralProvider.Int64(value)",
-        ["double"]  = "Quiver.Operators.LiteralProvider.Double(value)",
+        ["string"]  = "Quiver.Query.Physical.LiteralProvider.String(value)",
+        ["string?"] = "Quiver.Query.Physical.LiteralProvider.String(value ?? \"\")",
+        ["int"]     = "Quiver.Query.Physical.LiteralProvider.Int64((long)value)",
+        ["long"]    = "Quiver.Query.Physical.LiteralProvider.Int64(value)",
+        ["double"]  = "Quiver.Query.Physical.LiteralProvider.Double(value)",
     };
 
     // PW-18 follow-up: C# 型から既定の IndexKind を推論するマップ。
@@ -50,10 +50,10 @@ internal static class GraphNodeEmitter
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
         sb.AppendLine("using Quiver;");
-        sb.AppendLine("using Quiver.Client;");
+        sb.AppendLine("using Quiver.Api;");
         sb.AppendLine("using Quiver.Core;");
-        sb.AppendLine("using Quiver.Operators;");
-        sb.AppendLine("using Quiver.Stores;");
+        sb.AppendLine("using Quiver.Query.Physical;");
+        sb.AppendLine("using Quiver.Storage.Records;");
         sb.AppendLine();
 
         if (!string.IsNullOrEmpty(model.Namespace))
@@ -66,7 +66,7 @@ internal static class GraphNodeEmitter
         bool hasIndexed  = indexedProps.Count > 0;
 
         // IGraphNode<T> 実装宣言。PW-18 follow-up: スキーマ宣言用に IGraphNodeSchema<T> も実装する。
-        sb.AppendLine($"partial class {model.ClassName} : Quiver.Client.IGraphNode<{model.ClassName}>, Quiver.IGraphNodeSchema<{model.ClassName}>");
+        sb.AppendLine($"partial class {model.ClassName} : Quiver.Api.IGraphNode<{model.ClassName}>, Quiver.IGraphNodeSchema<{model.ClassName}>");
         sb.AppendLine("{");
         sb.AppendLine($"    public static string GraphLabel => \"{model.Label}\";");
         sb.AppendLine();

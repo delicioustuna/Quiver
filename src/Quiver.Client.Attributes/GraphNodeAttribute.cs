@@ -1,6 +1,6 @@
 using System;
 
-namespace Quiver.Client;
+namespace Quiver.Api;
 
 /// <summary>
 /// 付与したクラスを Quiver のグラフノードとしてマークし、SourceGenerator が

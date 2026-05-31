@@ -1,7 +1,7 @@
 using System.Text;
 using System.Threading;
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 
 namespace Quiver;

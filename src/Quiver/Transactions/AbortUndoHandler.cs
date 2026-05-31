@@ -1,6 +1,6 @@
 using Quiver.Core;
 using Quiver.Storage;
-using Quiver.Wal;
+using Quiver.Storage.Wal;
 
 namespace Quiver.Transactions;
 

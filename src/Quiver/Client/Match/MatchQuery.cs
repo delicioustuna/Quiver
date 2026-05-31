@@ -1,9 +1,9 @@
-﻿using Quiver.Client.Internal;
+﻿using Quiver.Api.Internal;
 using Quiver.Core;
-using Quiver.Operators;
-using Quiver.Stores;
+using Quiver.Query.Physical;
+using Quiver.Storage.Records;
 
-namespace Quiver.Client.Match;
+namespace Quiver.Api.Match;
 
 /// <summary>
 /// Match DSL のクエリビルダ。<see cref="Where"/> で述語を蓄積し、

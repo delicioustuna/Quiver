@@ -1,6 +1,6 @@
 using Quiver.Core;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// FT-12 / codex_advice_3 §7.3 — implementation (a). Dense direct array

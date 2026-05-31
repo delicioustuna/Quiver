@@ -1,7 +1,7 @@
 using Quiver.Core;
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// GC-4: helper for <c>.ShortestPathTo(target)</c>. Wraps an upstream operator and

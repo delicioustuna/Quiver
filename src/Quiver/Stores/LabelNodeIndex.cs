@@ -1,6 +1,6 @@
 using Quiver.Core;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// VEC-11: ラベル → 生存中 <see cref="NodeId"/> 集合の in-memory inverted index。

@@ -1,8 +1,8 @@
 using FluentAssertions;
-using Quiver.Client;
+using Quiver.Api;
 using Quiver.Core;
-using Quiver.Operators;
-using Quiver.Stores;
+using Quiver.Query.Physical;
+using Quiver.Storage.Records;
 using Xunit;
 
 namespace Quiver.Tests;
@@ -635,8 +635,8 @@ public sealed class GraphDatabaseTests : IDisposable
         tx.CreateRelationship(alice, bob, "KNOWS");
 
         var g = tx.G(_db.Schema);
-        var p = Quiver.Client.Match.GraphPattern.Node("p", "Person");
-        var q = Quiver.Client.Match.GraphPattern.Node("q", "Person");
+        var p = Quiver.Api.Match.GraphPattern.Node("p", "Person");
+        var q = Quiver.Api.Match.GraphPattern.Node("q", "Person");
 
         var results = g.Match(p.Out<KnowsRel>(q))
                        .Return(ctx => ctx.Load<PersonNode>("q"))
@@ -704,8 +704,8 @@ public sealed class GraphDatabaseTests : IDisposable
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var p = Quiver.Client.Match.GraphPattern.Node("p", "StreamPerson");
-        var q = Quiver.Client.Match.GraphPattern.Node("q", "StreamPerson");
+        var p = Quiver.Api.Match.GraphPattern.Node("p", "StreamPerson");
+        var q = Quiver.Api.Match.GraphPattern.Node("q", "StreamPerson");
         var found = new List<string>();
         using (var cursor = g.Match(p.Out("STREAM_KNOWS", q)).Return(ctx => ctx["q"].Get<string>("name")).AsCursor())
         {

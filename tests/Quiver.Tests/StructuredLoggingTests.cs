@@ -2,8 +2,8 @@ using System.Collections.Concurrent;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Quiver.Core.Telemetry;
-using Quiver.Operators;
+using Quiver.Telemetry;
+using Quiver.Query.Physical;
 using Xunit;
 
 namespace Quiver.Tests;

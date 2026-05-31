@@ -1,8 +1,8 @@
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// BFS traversal. For each source node, emits (startNode, endNode, depth)

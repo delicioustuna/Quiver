@@ -1,7 +1,7 @@
 ﻿using Quiver.Core;
-using Quiver.Operators;
+using Quiver.Query.Physical;
 
-namespace Quiver.Client.Internal;
+namespace Quiver.Api.Internal;
 
 internal interface IOperatorBuilder
 {

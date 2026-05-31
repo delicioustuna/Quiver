@@ -1,6 +1,6 @@
 using Quiver.Core;
 
-namespace Quiver.Client;
+namespace Quiver.Api;
 
 /// <summary>
 /// SourceGenerator が <c>[GraphRelationship]</c> 付与クラスに自動実装する

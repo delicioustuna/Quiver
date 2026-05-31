@@ -3,7 +3,7 @@
 // 実行: dotnet run --project samples/Quiver.Samples.Traversal
 
 using Quiver;
-using Quiver.Client;
+using Quiver.Api;
 using Quiver.Core;
 
 string dir = Path.Combine(Path.GetTempPath(), "quiver_traversal_" + Guid.NewGuid().ToString("N")[..8]);

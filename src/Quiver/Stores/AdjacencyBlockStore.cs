@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Storage;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// 連続配置の隣接ブロックストア: 各ノードについて TypeId 順にソートされた out-edge と

@@ -1,6 +1,6 @@
 using Quiver.Core;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// Membership set of <see cref="NodeId"/>s used as the probe side of

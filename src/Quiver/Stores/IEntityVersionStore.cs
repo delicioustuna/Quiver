@@ -1,4 +1,4 @@
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// FT-31: <see cref="EntityVersionMeta"/> を <c>EntityId.LocalId</c> をキーに格納する sidecar の抽象。

@@ -1,4 +1,4 @@
-using Quiver.Stores;
+using Quiver.Storage.Records;
 
 namespace Quiver.Logical;
 

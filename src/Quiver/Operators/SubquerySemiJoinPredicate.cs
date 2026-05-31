@@ -1,6 +1,6 @@
 ﻿using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// 相関サブクエリ述語。外側タプルの entityColumn 列を内側プランに渡し、

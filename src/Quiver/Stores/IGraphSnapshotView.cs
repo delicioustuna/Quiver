@@ -1,6 +1,6 @@
 using Quiver.Core;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// PW-15 / codex_advice_3 7.7 節。アルゴリズム向けの読み取り専用グラフスナップショット。

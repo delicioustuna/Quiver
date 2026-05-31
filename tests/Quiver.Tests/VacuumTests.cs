@@ -165,7 +165,7 @@ public sealed class VacuumTests : IDisposable
         // a の chain は r1, r3 だけが残ること。
         using var read = db.BeginReadOnlyTransaction();
         var outs = new List<long>();
-        var en = read.EnumerateRelationships(new Core.NodeId(aId), Stores.Direction.Outgoing);
+        var en = read.EnumerateRelationships(new Core.NodeId(aId), Storage.Records.Direction.Outgoing);
         while (en.MoveNext())
             outs.Add(en.Current.Id.Value);
         outs.Should().BeEquivalentTo(new[] { r1, r3 });
@@ -181,9 +181,9 @@ public sealed class VacuumTests : IDisposable
         using (var tx = db.BeginTransaction())
         {
             nodeId = tx.CreateNode("Person").Value;
-            tx.SetProperty(new Core.NodeId(nodeId), "k1", Stores.PropertyValue.FromInt32(1));
-            tx.SetProperty(new Core.NodeId(nodeId), "k2", Stores.PropertyValue.FromInt32(2));
-            tx.SetProperty(new Core.NodeId(nodeId), "k3", Stores.PropertyValue.FromInt32(3));
+            tx.SetProperty(new Core.NodeId(nodeId), "k1", Storage.Records.PropertyValue.FromInt32(1));
+            tx.SetProperty(new Core.NodeId(nodeId), "k2", Storage.Records.PropertyValue.FromInt32(2));
+            tx.SetProperty(new Core.NodeId(nodeId), "k3", Storage.Records.PropertyValue.FromInt32(3));
             tx.Commit();
         }
         // 1 つだけ削除 (= xmax がスタンプされて dead version 化)。
@@ -213,8 +213,8 @@ public sealed class VacuumTests : IDisposable
         using (var tx = db.BeginTransaction())
         {
             deletedId = tx.CreateNode("Person").Value;
-            tx.SetProperty(new Core.NodeId(deletedId), "a", Stores.PropertyValue.FromInt32(1));
-            tx.SetProperty(new Core.NodeId(deletedId), "b", Stores.PropertyValue.FromInt32(2));
+            tx.SetProperty(new Core.NodeId(deletedId), "a", Storage.Records.PropertyValue.FromInt32(1));
+            tx.SetProperty(new Core.NodeId(deletedId), "b", Storage.Records.PropertyValue.FromInt32(2));
             tx.Commit();
         }
         using (var tx = db.BeginTransaction())
@@ -312,7 +312,7 @@ public sealed class VacuumTests : IDisposable
             using (var tx = db.BeginTransaction())
             {
                 aliveId = tx.CreateNode("Person").Value;
-                tx.SetProperty(new Core.NodeId(aliveId), "name", Stores.PropertyValue.FromInt32(42));
+                tx.SetProperty(new Core.NodeId(aliveId), "name", Storage.Records.PropertyValue.FromInt32(42));
                 // FT-32: NodeStore record が 31→15B に縮み records/page が 263→544 に増えたため、
                 // 末尾 free page を truncate させるには alive ノード (id 0) の居る page を超えて
                 // 複数 record page に跨る数の deleted ノードが必要。1200 で page 2〜4 に跨る。

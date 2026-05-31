@@ -6,8 +6,8 @@ namespace Quiver.SourceGen;
 [Generator]
 public sealed class GraphRelationshipGenerator : IIncrementalGenerator
 {
-    private const string GraphRelationshipAttributeFqn = "Quiver.Client.GraphRelationshipAttribute";
-    private const string GraphPropertyAttributeFqn = "Quiver.Client.GraphPropertyAttribute";
+    private const string GraphRelationshipAttributeFqn = "Quiver.Api.GraphRelationshipAttribute";
+    private const string GraphPropertyAttributeFqn = "Quiver.Api.GraphPropertyAttribute";
 
     public void Initialize(IncrementalGeneratorInitializationContext ctx)
     {

@@ -2,7 +2,7 @@
 using Quiver.Core;
 using Quiver.Storage;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 // Blob page body (8160 bytes):
 //  0 NextPageId(8) | 8 TotalLen(8, first page only) | 16 Data(8144)

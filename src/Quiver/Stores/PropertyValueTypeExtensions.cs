@@ -1,6 +1,6 @@
 using Quiver.Core;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// Branchless lookup from <see cref="PropertyValueType"/> to <see cref="PropertyTypeFlags"/>.

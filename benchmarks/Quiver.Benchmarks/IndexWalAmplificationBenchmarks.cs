@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using BenchmarkDotNet.Attributes;
 using Quiver;
-using Quiver.Client;
+using Quiver.Api;
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 
 namespace Quiver.Benchmarks;
 

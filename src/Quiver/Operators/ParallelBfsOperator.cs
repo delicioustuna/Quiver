@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// PW-7: Parallel BFS implementation. Used internally by BfsOperator when

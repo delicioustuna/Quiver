@@ -1,7 +1,7 @@
 using Quiver.Core;
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// GC-1: resolves a relationship-id column into a node-id column by looking

@@ -1,9 +1,9 @@
 ﻿using Xunit;
-using Quiver.Wal;
+using Quiver.Storage.Wal;
 using Quiver.Core;
 using FluentAssertions;
 
-namespace Quiver.Wal.Tests;
+namespace Quiver.Storage.Wal.Tests;
 
 public class WalTests : IDisposable
 {

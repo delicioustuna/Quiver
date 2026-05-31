@@ -1,9 +1,9 @@
-using Quiver.Client.Internal;
+using Quiver.Api.Internal;
 using Quiver.Core;
-using Quiver.Operators;
-using Quiver.Stores;
+using Quiver.Query.Physical;
+using Quiver.Storage.Records;
 
-namespace Quiver.Client;
+namespace Quiver.Api;
 
 /// <summary>
 /// Gremlin 風のグラフトラバーサルチェーン。

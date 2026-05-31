@@ -1,6 +1,6 @@
 ﻿using Quiver.Core;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 public interface IPropertyStore
 {

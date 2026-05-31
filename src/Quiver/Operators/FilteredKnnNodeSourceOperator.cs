@@ -1,7 +1,7 @@
 using Quiver.Core;
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// VEC-6 leaf-ish operator: drains an upstream NodeId-producing operator into

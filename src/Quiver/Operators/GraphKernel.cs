@@ -1,8 +1,8 @@
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// PW-13 / codex_advice_3.md 7.8 節: BFS 系アルゴリズム (<see cref="BfsOperator"/>、

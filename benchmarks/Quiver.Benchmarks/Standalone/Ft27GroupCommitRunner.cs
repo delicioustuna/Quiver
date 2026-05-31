@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using Quiver.Core;
-using Quiver.Wal;
+using Quiver.Storage.Wal;
 
 namespace Quiver.Benchmarks.Standalone;
 

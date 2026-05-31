@@ -14,7 +14,7 @@ public enum PropertyTypeFlags : ulong
     /// <summary>型情報なし。</summary>
     None        = 0,
 
-    // スカラビット — Quiver.Stores.PropertyValueType の値 1..6 に対応。
+    // スカラビット — Quiver.Storage.Records.PropertyValueType の値 1..6 に対応。
 
     /// <summary><see cref="bool"/>。</summary>
     Bool        = 1UL << 1,

@@ -3,10 +3,10 @@
 // 実行: dotnet run --project samples/Quiver.Samples.Match
 
 using Quiver;
-using Quiver.Client;
-using Quiver.Client.Match;
+using Quiver.Api;
+using Quiver.Api.Match;
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 
 string dir = Path.Combine(Path.GetTempPath(), "quiver_match_" + Guid.NewGuid().ToString("N")[..8]);
 try

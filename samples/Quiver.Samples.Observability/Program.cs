@@ -13,7 +13,7 @@ using OpenTelemetry.Trace;
 using Quiver;
 using Quiver.Core;
 using Quiver.OpenTelemetry;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 
 var resource = ResourceBuilder.CreateDefault()
     .AddService(serviceName: "quiver-sample-observability", serviceVersion: "1.0.0");

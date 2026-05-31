@@ -1,12 +1,12 @@
 using FluentAssertions;
-using Quiver.Client.Internal;
+using Quiver.Api.Internal;
 using Quiver.Core;
-using Quiver.Operators;
-using Quiver.Stores;
-using Quiver.Operators.Tests.Support;
+using Quiver.Query.Physical;
+using Quiver.Storage.Records;
+using Quiver.Query.Physical.Tests.Support;
 using Xunit;
 
-namespace Quiver.Operators.Tests;
+namespace Quiver.Query.Physical.Tests;
 
 public class PropertyExistsPredicateTests
 {

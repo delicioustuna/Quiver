@@ -1,10 +1,10 @@
 using FluentAssertions;
 using Quiver.Core;
-using Quiver.Operators;
-using Quiver.Operators.Tests.Support;
+using Quiver.Query.Physical;
+using Quiver.Query.Physical.Tests.Support;
 using Xunit;
 
-namespace Quiver.Operators.Tests;
+namespace Quiver.Query.Physical.Tests;
 
 public class BitmapFilterOperatorTests
 {

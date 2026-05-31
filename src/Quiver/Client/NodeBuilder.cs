@@ -1,7 +1,7 @@
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 
-namespace Quiver.Client;
+namespace Quiver.Api;
 
 /// <summary>
 /// <see cref="GraphTraversalSource.AddNode"/> から開始するノード追加ビルダ。

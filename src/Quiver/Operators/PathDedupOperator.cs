@@ -1,6 +1,6 @@
 ﻿using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// ソースオペレータからの行を、指定したキー列に基づいて重複排除する。

@@ -1,9 +1,9 @@
 using System.Buffers.Binary;
 using Quiver.Core;
-using Quiver.Core.Telemetry;
+using Quiver.Telemetry;
 using Quiver.Index;
 using Quiver.Storage;
-using Quiver.Wal;
+using Quiver.Storage.Wal;
 
 namespace Quiver.Transactions;
 

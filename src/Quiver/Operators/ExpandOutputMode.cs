@@ -1,4 +1,4 @@
-﻿namespace Quiver.Operators;
+﻿namespace Quiver.Query.Physical;
 
 public enum ExpandOutputMode
 {

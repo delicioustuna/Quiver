@@ -1,4 +1,4 @@
-﻿namespace Quiver.Stores;
+﻿namespace Quiver.Storage.Records;
 
 public enum Direction : byte
 {

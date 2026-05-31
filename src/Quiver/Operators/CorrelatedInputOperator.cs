@@ -1,6 +1,6 @@
 ﻿using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// Correlated subquery の起点となる単行演算子。

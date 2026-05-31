@@ -1,7 +1,7 @@
 using Quiver.Core;
-using Quiver.Core.Telemetry;
+using Quiver.Telemetry;
 using Quiver.Index;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 
 namespace Quiver;

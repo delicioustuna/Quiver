@@ -1,6 +1,6 @@
 ﻿using Quiver.Core;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// Append-only bulk loader for initial data import.

@@ -1,6 +1,6 @@
 using Quiver.Core;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// PW-15. Reference graph-algorithm kernels that operate against an

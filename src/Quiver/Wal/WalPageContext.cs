@@ -1,6 +1,6 @@
 using Quiver.Core;
 
-namespace Quiver.Wal;
+namespace Quiver.Storage.Wal;
 
 /// <summary>
 /// 書き込みトランザクション中のページイメージロギング用に使われる、スレッドローカルな

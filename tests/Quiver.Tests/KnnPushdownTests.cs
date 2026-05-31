@@ -1,8 +1,8 @@
 using FluentAssertions;
-using Quiver.Client;
-using Quiver.Client.Internal;
+using Quiver.Api;
+using Quiver.Api.Internal;
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Xunit;
 
 namespace Quiver.Tests;

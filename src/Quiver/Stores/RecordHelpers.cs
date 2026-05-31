@@ -1,6 +1,6 @@
 ﻿using System.Buffers.Binary;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 internal static class RecordHelpers
 {

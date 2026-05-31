@@ -1,5 +1,5 @@
 using Quiver.Core;
-using Quiver.Wal;
+using Quiver.Storage.Wal;
 
 namespace Quiver.Storage;
 

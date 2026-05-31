@@ -4,7 +4,7 @@
 using Quiver;
 using Quiver.Core;
 using Quiver.Migrations;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 
 var dir = Path.Combine(Path.GetTempPath(), "quiver_sample_migration_" + Guid.NewGuid().ToString("N"));
 Console.WriteLine($"Data directory: {dir}");

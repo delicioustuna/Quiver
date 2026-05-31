@@ -9,7 +9,7 @@
 using Quiver;
 using Quiver.Core;
 using Quiver.Hosting;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 
 var builder = WebApplication.CreateBuilder(args);
 

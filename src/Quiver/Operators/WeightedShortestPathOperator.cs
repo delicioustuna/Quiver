@@ -1,9 +1,9 @@
 using System.Buffers.Binary;
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// 重み付き最短経路オペレータ — 単一実装で Dijkstra と A* を兼ねる。

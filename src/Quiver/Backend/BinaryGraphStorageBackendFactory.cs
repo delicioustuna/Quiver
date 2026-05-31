@@ -1,9 +1,9 @@
 using Quiver.Core;
 using Quiver.Index;
 using Quiver.Storage;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
-using Quiver.Wal;
+using Quiver.Storage.Wal;
 
 namespace Quiver;
 

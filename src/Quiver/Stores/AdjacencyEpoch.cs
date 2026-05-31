@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// PW-14 / codex_advice_3 §7.6. Persistent metadata for the immutable base

@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace Quiver.Client;
+namespace Quiver.Api;
 
 /// <summary>
 /// Gremlin の <c>P</c> に相当するプロパティ述語ファクトリ。

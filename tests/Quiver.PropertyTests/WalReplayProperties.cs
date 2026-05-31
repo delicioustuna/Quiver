@@ -3,7 +3,7 @@ using FsCheck;
 using FsCheck.Fluent;
 using FsCheck.Xunit;
 using Quiver.Core;
-using Quiver.Wal;
+using Quiver.Storage.Wal;
 using Xunit;
 
 namespace Quiver.PropertyTests;

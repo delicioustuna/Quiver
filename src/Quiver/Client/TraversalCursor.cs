@@ -1,4 +1,4 @@
-namespace Quiver.Client;
+namespace Quiver.Api;
 
 /// <summary>
 /// 型付きトラバーサル結果のストリーミングカーソル。

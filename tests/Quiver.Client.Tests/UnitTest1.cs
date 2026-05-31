@@ -1,6 +1,6 @@
 ﻿using FluentAssertions;
 
-namespace Quiver.Client.Tests;
+namespace Quiver.Api.Tests;
 
 public class AttributesTest
 {

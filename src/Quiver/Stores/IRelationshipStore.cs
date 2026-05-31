@@ -2,7 +2,7 @@
 using Quiver.Core;
 using Quiver.Storage;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 public interface IRelationshipStore
 {

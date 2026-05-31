@@ -1,9 +1,9 @@
 using Quiver;
-using Quiver.Client;
-using Quiver.Client.Match;
+using Quiver.Api;
+using Quiver.Api.Match;
 using Quiver.Core;
-using Quiver.Operators;
-using Quiver.Stores;
+using Quiver.Query.Physical;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 
 string baseDir = Path.Combine(Path.GetTempPath(), "quiver_sandbox_" + Guid.NewGuid().ToString("N")[..8]);

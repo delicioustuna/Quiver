@@ -1,8 +1,8 @@
 ﻿using Quiver.Core;
-using Quiver.Operators;
-using Quiver.Stores;
+using Quiver.Query.Physical;
+using Quiver.Storage.Records;
 
-namespace Quiver.Client.Internal;
+namespace Quiver.Api.Internal;
 
 internal sealed class ScanBuilder : IOperatorBuilder
 {

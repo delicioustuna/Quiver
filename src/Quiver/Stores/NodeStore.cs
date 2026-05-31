@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Storage;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>OP-3 vacuum: 可視性フィルタを通さない raw ノードレコード。</summary>
 internal struct RawNodeRecord

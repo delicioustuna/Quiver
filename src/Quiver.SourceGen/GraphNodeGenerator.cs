@@ -6,9 +6,9 @@ namespace Quiver.SourceGen;
 [Generator]
 public sealed class GraphNodeGenerator : IIncrementalGenerator
 {
-    private const string GraphNodeAttributeFqn = "Quiver.Client.GraphNodeAttribute";
-    private const string GraphPropertyAttributeFqn = "Quiver.Client.GraphPropertyAttribute";
-    private const string GraphIndexedAttributeFqn = "Quiver.Client.GraphIndexedAttribute";
+    private const string GraphNodeAttributeFqn = "Quiver.Api.GraphNodeAttribute";
+    private const string GraphPropertyAttributeFqn = "Quiver.Api.GraphPropertyAttribute";
+    private const string GraphIndexedAttributeFqn = "Quiver.Api.GraphIndexedAttribute";
 
     public void Initialize(IncrementalGeneratorInitializationContext ctx)
     {

@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using Quiver.Core;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// PW-9: 1000 万エッジ超の取り込みを想定した <see cref="BulkLoader"/> のストリーミング版。

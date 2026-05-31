@@ -17,7 +17,7 @@ public interface ISsnReadSink
 }
 
 /// <summary>
-/// FT-26: MVCC アンビエントコンテキスト。<c>Quiver.Wal.WalPageContext</c> と対で
+/// FT-26: MVCC アンビエントコンテキスト。<c>Quiver.Storage.Wal.WalPageContext</c> と対で
 /// スレッドローカルにトランザクションの可視性スナップショット (TxId / ActiveAtBegin / committed registry)
 /// を持つ。下層ストア (NodeStore / RelationshipStore / PropertyStore) はこれを参照して
 /// record の xmin / xmax を埋め、可視性判定を行う。
@@ -28,7 +28,7 @@ public interface ISsnReadSink
 /// </para>
 ///
 /// <para>
-/// 配置: <c>Quiver.Stores</c> から参照される必要があるため <c>Quiver.Core</c> に置く
+/// 配置: <c>Quiver.Storage.Records</c> から参照される必要があるため <c>Quiver.Core</c> に置く
 /// (Quiver.Transactions は Stores より上位なので循環参照を避ける目的)。
 /// </para>
 /// </summary>

@@ -1,6 +1,6 @@
 using FluentAssertions;
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 using Xunit;
 

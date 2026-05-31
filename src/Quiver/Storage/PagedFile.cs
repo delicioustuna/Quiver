@@ -2,8 +2,8 @@
 using System.Buffers.Binary;
 using System.IO.MemoryMappedFiles;
 using Quiver.Core;
-using Quiver.Core.Telemetry;
-using Quiver.Wal;
+using Quiver.Telemetry;
+using Quiver.Storage.Wal;
 
 namespace Quiver.Storage;
 

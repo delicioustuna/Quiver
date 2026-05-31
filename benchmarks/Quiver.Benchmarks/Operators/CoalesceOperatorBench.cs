@@ -1,6 +1,6 @@
 using BenchmarkDotNet.Attributes;
 using Quiver.Core;
-using Quiver.Operators;
+using Quiver.Query.Physical;
 using Quiver.Transactions;
 
 namespace Quiver.Benchmarks.Operators;

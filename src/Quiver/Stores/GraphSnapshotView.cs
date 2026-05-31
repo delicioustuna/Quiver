@@ -1,7 +1,7 @@
 using System.Buffers;
 using Quiver.Core;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// PW-15 / codex_advice_3 7.7 節。トランザクションのリレーションシップストアから
@@ -52,7 +52,7 @@ public sealed class GraphSnapshotView : IGraphSnapshotView
     }
 
     /// <summary>
-    /// 指定ストアからスナップショットを構築する。本クラスは Quiver.Stores に置くことで、
+    /// 指定ストアからスナップショットを構築する。本クラスは Quiver.Storage.Records に置くことで、
     /// スナップショットが上位のトランザクション層に依存しないようにしている。
     /// Quiver.csproj 側のファサード <see cref="GraphDatabase.OpenSnapshotView"/> が、
     /// 新規に開いたスナップショットトランザクションのコンポーネントを渡す。

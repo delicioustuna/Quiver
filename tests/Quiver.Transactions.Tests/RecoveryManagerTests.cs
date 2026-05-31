@@ -1,7 +1,7 @@
 ﻿using FluentAssertions;
 using Quiver.Core;
 using Quiver.Storage;
-using Quiver.Wal;
+using Quiver.Storage.Wal;
 using Xunit;
 
 namespace Quiver.Transactions.Tests;

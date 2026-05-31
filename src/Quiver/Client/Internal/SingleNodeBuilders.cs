@@ -1,9 +1,9 @@
 ﻿using Quiver.Core;
-using Quiver.Operators;
-using Quiver.Stores;
+using Quiver.Query.Physical;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 
-namespace Quiver.Client.Internal;
+namespace Quiver.Api.Internal;
 
 /// <summary>CorrelatedInputOperator を IOperatorBuilder として包む。SubTraversal の起点に使用する。</summary>
 internal sealed class CorrelatedSeedBuilder : IOperatorBuilder

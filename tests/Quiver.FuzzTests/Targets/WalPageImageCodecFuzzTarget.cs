@@ -1,4 +1,4 @@
-using Quiver.Wal;
+using Quiver.Storage.Wal;
 
 namespace Quiver.FuzzTests.Targets;
 

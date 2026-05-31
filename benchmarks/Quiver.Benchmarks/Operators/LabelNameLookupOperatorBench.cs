@@ -1,5 +1,5 @@
 using BenchmarkDotNet.Attributes;
-using Quiver.Operators;
+using Quiver.Query.Physical;
 
 namespace Quiver.Benchmarks.Operators;
 

@@ -1,9 +1,9 @@
 ﻿using FluentAssertions;
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Xunit;
 
-namespace Quiver.Stores.Tests;
+namespace Quiver.Storage.Records.Tests;
 
 public class TokenStoreTests : IDisposable
 {

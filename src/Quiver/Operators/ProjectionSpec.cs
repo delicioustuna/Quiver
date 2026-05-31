@@ -1,6 +1,6 @@
 ﻿using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 // TupleRef は ref struct のため Func<> の型引数に使えない。専用インタフェースで代替する。
 public interface IProjectionCompute

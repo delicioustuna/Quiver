@@ -19,7 +19,7 @@ public sealed class PublicApiApprovalTests
 {
     public static IEnumerable<object[]> StableAssemblies()
     {
-        // ARCH-1 (Phase 0): 旧 Quiver / Quiver.Client / Quiver.Core は単一 'Quiver' アセンブリに
+        // ARCH-1 (Phase 0): 旧 Quiver / Quiver.Api / Quiver.Core は単一 'Quiver' アセンブリに
         // 統合されたため、安定性の対象は 1 アセンブリのみ (3 つの typeof はすべて同一 Assembly を指す)。
         yield return new object[] { typeof(global::Quiver.GraphDatabase).Assembly };
     }

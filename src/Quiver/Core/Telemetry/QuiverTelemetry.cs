@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 
-namespace Quiver.Core.Telemetry;
+namespace Quiver.Telemetry;
 
 /// <summary>
 /// OB-1: Quiver 全体の OpenTelemetry 計装ポイント。

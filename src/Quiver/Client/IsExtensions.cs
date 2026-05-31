@@ -1,7 +1,7 @@
-using Quiver.Client.Internal;
+using Quiver.Api.Internal;
 using Quiver.Core;
 
-namespace Quiver.Client;
+namespace Quiver.Api;
 
 /// <summary>
 /// GC-1: プロパティ値トラバーサル向けの <c>.is(value)</c> ステップ。

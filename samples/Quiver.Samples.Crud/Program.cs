@@ -4,7 +4,7 @@
 
 using Quiver;
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 
 string dir = Path.Combine(Path.GetTempPath(), "quiver_crud_" + Guid.NewGuid().ToString("N")[..8]);
 try

@@ -3,7 +3,7 @@ using FsCheck;
 using FsCheck.Fluent;
 using FsCheck.Xunit;
 using Quiver.Core;
-using Quiver.Operators;
+using Quiver.Query.Physical;
 using Quiver.Transactions;
 using Xunit;
 

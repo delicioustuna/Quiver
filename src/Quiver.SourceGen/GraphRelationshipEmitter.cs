@@ -21,9 +21,9 @@ internal static class GraphRelationshipEmitter
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
         sb.AppendLine("using Quiver;");
-        sb.AppendLine("using Quiver.Client;");
+        sb.AppendLine("using Quiver.Api;");
         sb.AppendLine("using Quiver.Core;");
-        sb.AppendLine("using Quiver.Stores;");
+        sb.AppendLine("using Quiver.Storage.Records;");
         sb.AppendLine();
 
         if (!string.IsNullOrEmpty(model.Namespace))
@@ -32,7 +32,7 @@ internal static class GraphRelationshipEmitter
             sb.AppendLine();
         }
 
-        sb.AppendLine($"partial class {model.ClassName} : Quiver.Client.IGraphRelationship<{model.ClassName}>");
+        sb.AppendLine($"partial class {model.ClassName} : Quiver.Api.IGraphRelationship<{model.ClassName}>");
         sb.AppendLine("{");
         sb.AppendLine($"    public static string GraphType => \"{model.RelType}\";");
         sb.AppendLine();

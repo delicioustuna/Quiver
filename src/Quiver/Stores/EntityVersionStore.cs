@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Storage;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// FT-31: <see cref="IEntityVersionStore"/> の PagedFile 実装。

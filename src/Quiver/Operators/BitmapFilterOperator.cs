@@ -1,6 +1,6 @@
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// PW-12: Batch filter that evaluates multiple predicates against a fixed-size

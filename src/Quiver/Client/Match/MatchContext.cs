@@ -1,9 +1,9 @@
-using Quiver.Client;
+using Quiver.Api;
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using System.Text;
 
-namespace Quiver.Client.Match;
+namespace Quiver.Api.Match;
 
 /// <summary>
 /// Match DSL の <see cref="ReturnClause{TResult}"/> 内で射影クロージャに渡される

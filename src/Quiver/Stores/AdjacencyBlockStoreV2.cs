@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Storage;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// BA-6 / codex_advice_3 7.2 節。インライン payload lane (エッジ重み) を持つ

@@ -1,7 +1,7 @@
 using System.Text;
 using Quiver.Backend.Tests.Faults;
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 
 namespace Quiver.Backend.Tests.Chaos;

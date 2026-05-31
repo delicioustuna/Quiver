@@ -1,9 +1,9 @@
 using Quiver;
 using Quiver.Core;
-using Quiver.Operators;
+using Quiver.Query.Physical;
 using Quiver.Transactions;
 
-namespace Quiver.Operators.Tests.Support;
+namespace Quiver.Query.Physical.Tests.Support;
 
 /// <summary>
 /// TS-2: shared DB-backed fixture for operator unit tests. Each fixture opens

@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using FluentAssertions;
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Xunit;
 
 namespace Quiver.Tests;

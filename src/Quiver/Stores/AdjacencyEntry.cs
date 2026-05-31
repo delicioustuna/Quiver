@@ -1,6 +1,6 @@
 ﻿using Quiver.Core;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// On-disk: TypeId(2) | RelId(6) | NeighborId(6) = 14 bytes.

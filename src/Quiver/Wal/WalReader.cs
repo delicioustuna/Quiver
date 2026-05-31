@@ -2,7 +2,7 @@
 using System.IO.Hashing;
 using Quiver.Core;
 
-namespace Quiver.Wal;
+namespace Quiver.Storage.Wal;
 
 internal sealed class WalReader : IWalReader
 {

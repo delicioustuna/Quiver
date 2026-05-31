@@ -1,6 +1,6 @@
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// GC-4: Gremlin の <c>.optional(t)</c> / Cypher の <c>OPTIONAL MATCH</c> 相当。

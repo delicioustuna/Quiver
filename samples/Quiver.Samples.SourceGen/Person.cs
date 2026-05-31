@@ -1,4 +1,4 @@
-using Quiver.Client;
+using Quiver.Api;
 
 namespace Quiver.Samples.SourceGen;
 

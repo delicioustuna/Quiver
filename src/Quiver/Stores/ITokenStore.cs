@@ -1,7 +1,7 @@
 ﻿using System.Text;
 using Quiver.Core;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 public interface ITokenStore<TToken> where TToken : struct
 {

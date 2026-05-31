@@ -1,4 +1,4 @@
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// FT-32: <see cref="IEntityVersionStore"/> の in-memory 実装。

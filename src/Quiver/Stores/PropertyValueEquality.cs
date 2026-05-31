@@ -1,4 +1,4 @@
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// GC-5: MERGE-time value comparison. Two <see cref="PropertyValue"/>s match

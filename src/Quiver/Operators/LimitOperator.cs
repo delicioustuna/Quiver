@@ -1,6 +1,6 @@
 ﻿using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 public sealed class LimitOperator : IPhysicalOperator
 {

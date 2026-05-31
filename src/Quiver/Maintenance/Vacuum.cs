@@ -1,10 +1,10 @@
 using System.Diagnostics;
 using Quiver.Core;
-using Quiver.Core.Telemetry;
+using Quiver.Telemetry;
 using Quiver.Storage;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
-using Quiver.Wal;
+using Quiver.Storage.Wal;
 
 namespace Quiver.Maintenance;
 

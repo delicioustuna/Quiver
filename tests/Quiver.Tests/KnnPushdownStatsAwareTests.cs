@@ -1,6 +1,6 @@
 using FluentAssertions;
-using Quiver.Client;
-using Quiver.Client.Internal;
+using Quiver.Api;
+using Quiver.Api.Internal;
 using Quiver.Core;
 using Xunit;
 
@@ -226,7 +226,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
             for (int i = 0; i < 30; i++)
             {
                 var d = tx.CreateNode("Doc");
-                tx.SetProperty(d, "status", Stores.PropertyValue.FromString(i == 0 ? "active" : "archived"));
+                tx.SetProperty(d, "status", Storage.Records.PropertyValue.FromString(i == 0 ? "active" : "archived"));
                 _db.Vectors.SetVector(EntityKind.Node, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             tx.Commit();
@@ -257,13 +257,13 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
             for (int i = 0; i < 40; i++)
             {
                 var d = tx.CreateNode("Doc");
-                tx.SetProperty(d, "status", Stores.PropertyValue.FromString(i < 5 ? "active" : "archived"));
+                tx.SetProperty(d, "status", Storage.Records.PropertyValue.FromString(i < 5 ? "active" : "archived"));
                 _db.Vectors.SetVector(EntityKind.Node, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             for (int i = 0; i < 40; i++)
             {
                 var o = tx.CreateNode("Other");
-                tx.SetProperty(o, "status", Stores.PropertyValue.FromString("active"));
+                tx.SetProperty(o, "status", Storage.Records.PropertyValue.FromString("active"));
                 _db.Vectors.SetVector(EntityKind.Node, o.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             tx.Commit();

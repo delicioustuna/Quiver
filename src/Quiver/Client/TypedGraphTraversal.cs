@@ -1,8 +1,8 @@
 using System.Linq.Expressions;
-using Quiver.Client.Internal;
+using Quiver.Api.Internal;
 using Quiver.Core;
 
-namespace Quiver.Client;
+namespace Quiver.Api;
 
 /// <summary>
 /// <see cref="IGraphNode{T}"/> 実装型でフィルタ済みの型付きトラバーサル。

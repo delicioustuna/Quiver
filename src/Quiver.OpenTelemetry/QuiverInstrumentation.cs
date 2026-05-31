@@ -1,6 +1,6 @@
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
-using Quiver.Core.Telemetry;
+using Quiver.Telemetry;
 
 namespace Quiver.OpenTelemetry;
 

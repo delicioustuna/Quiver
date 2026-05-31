@@ -1,4 +1,4 @@
-﻿using Quiver.Client;
+﻿using Quiver.Api;
 
 [GraphNode("Person")]
 public partial class Person

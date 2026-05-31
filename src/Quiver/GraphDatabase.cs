@@ -1,6 +1,6 @@
 using Quiver.Logical;
 using Quiver.Maintenance;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 using Microsoft.Extensions.Logging;
 
@@ -49,7 +49,7 @@ public sealed class GraphDatabase : IDisposable
         // テスト並列実行時の汚染や、複数 DB を 1 プロセスで開く運用での意外な reset を避ける
         // (OTel ActivitySource / EventSource は構造上プロセス共有なので、最後勝ち回避はここだけ)。
         if (options.LoggerFactory != null)
-            Quiver.Core.Telemetry.QuiverLog.LoggerFactory = options.LoggerFactory;
+            Quiver.Telemetry.QuiverLog.LoggerFactory = options.LoggerFactory;
         var factory = options.BackendFactory ?? CreateDefaultFactory(options.Backend);
         var backend = factory.Open(directoryPath, options);
 
@@ -196,14 +196,14 @@ public sealed class GraphDatabase : IDisposable
     /// </remarks>
     /// <param name="propertyKey">プロパティキー名。<see cref="ISchemaApi.GetOrCreatePropertyKey"/> で事前に作成済みであること。</param>
     /// <param name="expectedType">射影するスカラ型。他の型の値はスキップされる。</param>
-    public Stores.IRelationshipPropertyJoinIndex BuildRelationshipPropertyJoinIndex(
+    public Storage.Records.IRelationshipPropertyJoinIndex BuildRelationshipPropertyJoinIndex(
         string propertyKey,
-        Stores.PropertyValueType expectedType)
+        Storage.Records.PropertyValueType expectedType)
     {
         ArgumentNullException.ThrowIfNull(propertyKey);
         var keyId = _backend.Schema.GetOrCreatePropertyKey(propertyKey);
         using var tx = _backend.Transactions.Begin(IsolationLevel.SnapshotIsolation);
-        return Stores.DirectArrayRelationshipPropertyJoinIndex.Build(
+        return Storage.Records.DirectArrayRelationshipPropertyJoinIndex.Build(
             tx.Relationships, tx.Properties, keyId, expectedType);
     }
 

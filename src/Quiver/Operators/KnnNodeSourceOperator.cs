@@ -1,7 +1,7 @@
 using Quiver.Core;
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// VEC-5 leaf operator: streams the top-<c>k</c> node ids from a vector index

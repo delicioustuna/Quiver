@@ -66,7 +66,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         using (var tx = _db.BeginTransaction())
         {
             node = tx.CreateNode("Page");
-            tx.SetProperty(node, SourceProp, Stores.PropertyValue.FromString("hello world"));
+            tx.SetProperty(node, SourceProp, Storage.Records.PropertyValue.FromString("hello world"));
             pipeline.EnqueueOnCommit(tx,
                 new EntityRef(EntityKind.Node, node.Value),
                 IndexName,
@@ -97,7 +97,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         using (var tx = _db.BeginTransaction())
         {
             var node = tx.CreateNode("Page");
-            tx.SetProperty(node, SourceProp, Stores.PropertyValue.FromString("dropped"));
+            tx.SetProperty(node, SourceProp, Storage.Records.PropertyValue.FromString("dropped"));
             pipeline.EnqueueOnCommit(tx,
                 new EntityRef(EntityKind.Node, node.Value),
                 IndexName,
@@ -125,7 +125,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
             for (int i = 0; i < 3; i++)
             {
                 var nid = tx.CreateNode("Page");
-                tx.SetProperty(nid, SourceProp, Stores.PropertyValue.FromString($"doc {i}"));
+                tx.SetProperty(nid, SourceProp, Storage.Records.PropertyValue.FromString($"doc {i}"));
                 ids.Add(nid.Value);
             }
             tx.Commit();
@@ -166,7 +166,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         using (var tx = _db.BeginTransaction())
         {
             var nid = tx.CreateNode("Page");
-            tx.SetProperty(nid, SourceProp, Stores.PropertyValue.FromString("same"));
+            tx.SetProperty(nid, SourceProp, Storage.Records.PropertyValue.FromString("same"));
             tx.Commit();
         }
 

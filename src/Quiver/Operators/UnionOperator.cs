@@ -1,6 +1,6 @@
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// GC-4: Gremlin の <c>.union(t1, t2, …)</c> / Cypher の <c>UNION ALL</c> 相当。

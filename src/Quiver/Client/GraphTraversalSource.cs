@@ -1,10 +1,10 @@
-using Quiver.Client.Internal;
-using Quiver.Client.Match;
+using Quiver.Api.Internal;
+using Quiver.Api.Match;
 using Quiver.Core;
-using Quiver.Operators;
-using Quiver.Stores;
+using Quiver.Query.Physical;
+using Quiver.Storage.Records;
 
-namespace Quiver.Client;
+namespace Quiver.Api;
 
 /// <summary>
 /// Gremlin 風のグラフトラバーサルを構築するエントリポイント。
@@ -73,7 +73,7 @@ public sealed class GraphTraversalSource
     /// <param name="matchKey">マッチに用いるプロパティキー。</param>
     /// <param name="matchValue">マッチに用いるプロパティ値。</param>
     /// <returns>マッチした or 作成されたノード ID と、新規作成だったかを表すフラグの組。</returns>
-    public (NodeId Id, bool Created) MergeNode(string label, string matchKey, in Stores.PropertyValue matchValue)
+    public (NodeId Id, bool Created) MergeNode(string label, string matchKey, in Storage.Records.PropertyValue matchValue)
         => _tx.MergeNode(label, matchKey, in matchValue);
 
     // ── エンティティ操作糖衣 (IGraphNode<T> ベース) ─────────────────────────
@@ -303,9 +303,9 @@ public sealed class GraphTraversalSource
         var v = _tx.GetProperty(node, key);
         return v.Type switch
         {
-            Stores.PropertyValueType.Double => v.DoubleValue,
-            Stores.PropertyValueType.Int64 => v.Int64Value,
-            Stores.PropertyValueType.Int32 => v.Int32Value,
+            Storage.Records.PropertyValueType.Double => v.DoubleValue,
+            Storage.Records.PropertyValueType.Int64 => v.Int64Value,
+            Storage.Records.PropertyValueType.Int32 => v.Int32Value,
             _ => throw new InvalidOperationException(
                 $"ノード {node.Value} の座標プロパティ '{key}' が数値型ではありません (型: {v.Type})。"),
         };

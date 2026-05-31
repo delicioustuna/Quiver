@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace Quiver.Wal;
+namespace Quiver.Storage.Wal;
 
 /// <summary>
 /// FT-15: <see cref="WalRecordType.PageImage"/> と

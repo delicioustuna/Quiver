@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Storage;
 
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 // FT-32 v3 (MVCC sidecar) property record layout (41 バイト):
 //  0 Flags(1) | 1 KeyId(4) | 5 ValueType(1) | 6 InlineValue(24) |

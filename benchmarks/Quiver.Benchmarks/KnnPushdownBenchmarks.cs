@@ -1,7 +1,7 @@
 using BenchmarkDotNet.Attributes;
 using Quiver;
-using Quiver.Client;
-using Quiver.Client.Internal;
+using Quiver.Api;
+using Quiver.Api.Internal;
 using Quiver.Core;
 
 namespace Quiver.Benchmarks;

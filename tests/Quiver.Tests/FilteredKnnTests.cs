@@ -1,5 +1,5 @@
 using FluentAssertions;
-using Quiver.Client;
+using Quiver.Api;
 using Quiver.Core;
 using Xunit;
 

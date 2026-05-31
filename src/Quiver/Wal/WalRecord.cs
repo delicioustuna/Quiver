@@ -1,6 +1,6 @@
 ﻿using Quiver.Core;
 
-namespace Quiver.Wal;
+namespace Quiver.Storage.Wal;
 
 /// <summary>
 /// 読み出された WAL レコード。Payload は内部バッファのスナップショット。

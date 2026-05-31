@@ -1,11 +1,11 @@
 using FluentAssertions;
 using Quiver.Core;
-using Quiver.Operators;
-using Quiver.Operators.Tests.Support;
+using Quiver.Query.Physical;
+using Quiver.Query.Physical.Tests.Support;
 using Xunit;
-using static Quiver.Operators.Tests.Support.OperatorCollect;
+using static Quiver.Query.Physical.Tests.Support.OperatorCollect;
 
-namespace Quiver.Operators.Tests;
+namespace Quiver.Query.Physical.Tests;
 
 public class LimitOperatorTests
 {

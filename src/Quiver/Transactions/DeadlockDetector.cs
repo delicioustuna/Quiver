@@ -1,5 +1,5 @@
 using Quiver.Core;
-using Quiver.Core.Telemetry;
+using Quiver.Telemetry;
 
 namespace Quiver.Transactions;
 

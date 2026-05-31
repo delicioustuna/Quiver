@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// PW-12: <see cref="BitmapFilterOperator"/> が利用するバッチ単位の最小選択ビットマップ。

@@ -3,7 +3,7 @@
 // 実行: dotnet run --project samples/Quiver.Samples.SourceGen
 
 using Quiver;
-using Quiver.Client;
+using Quiver.Api;
 using Quiver.Core;
 using Quiver.Samples.SourceGen;
 

@@ -1,6 +1,6 @@
 ﻿using Quiver.Core;
 
-namespace Quiver.Wal;
+namespace Quiver.Storage.Wal;
 
 /// <summary>WAL ライタ・リーダの統合インタフェース。</summary>
 public interface IWriteAheadLog : IDisposable

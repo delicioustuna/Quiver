@@ -1,6 +1,6 @@
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// GC-4: Gremlin の <c>.coalesce(t1, t2, …)</c> 相当。各入力行に対して分岐を順番に試し、

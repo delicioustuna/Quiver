@@ -1,4 +1,4 @@
-﻿namespace Quiver.Wal;
+﻿namespace Quiver.Storage.Wal;
 
 /// <summary>
 /// WAL の前方読み出し。リカバリ専用。

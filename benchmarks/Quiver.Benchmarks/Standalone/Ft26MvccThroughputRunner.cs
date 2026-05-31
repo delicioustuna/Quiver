@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using Quiver;
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 
 namespace Quiver.Benchmarks.Standalone;
 

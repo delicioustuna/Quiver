@@ -24,11 +24,11 @@ public class GraphNodeGeneratorTests
     [Fact]
     public void Generator_emits_partial_class_for_GraphNode()
     {
-        var attributeRef = typeof(Quiver.Client.GraphNodeAttribute).Assembly.Location;
+        var attributeRef = typeof(Quiver.Api.GraphNodeAttribute).Assembly.Location;
         var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
 
         var source = """
-            using Quiver.Client;
+            using Quiver.Api;
             namespace MyApp;
 
             [GraphNode("Person")]
@@ -90,11 +90,11 @@ public class GraphRelationshipGeneratorTests
     [Fact]
     public void Generator_emits_partial_class_for_GraphRelationship()
     {
-        var attributeRef = typeof(Quiver.Client.GraphRelationshipAttribute).Assembly.Location;
+        var attributeRef = typeof(Quiver.Api.GraphRelationshipAttribute).Assembly.Location;
         var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
 
         var source = """
-            using Quiver.Client;
+            using Quiver.Api;
             namespace MyApp;
 
             [GraphRelationship("KNOWS")]

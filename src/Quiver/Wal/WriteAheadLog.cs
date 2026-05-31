@@ -3,9 +3,9 @@ using System.Diagnostics;
 using System.IO.Hashing;
 using System.Threading.Channels;
 using Quiver.Core;
-using Quiver.Core.Telemetry;
+using Quiver.Telemetry;
 
-namespace Quiver.Wal;
+namespace Quiver.Storage.Wal;
 
 public sealed class WriteAheadLog : IWriteAheadLog
 {

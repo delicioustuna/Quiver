@@ -1,9 +1,9 @@
 ﻿using System.Diagnostics;
 using Quiver.Core;
-using Quiver.Core.Telemetry;
+using Quiver.Telemetry;
 using Quiver.Logical;
-using Quiver.Operators;
-using Quiver.Stores;
+using Quiver.Query.Physical;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 
 namespace Quiver;

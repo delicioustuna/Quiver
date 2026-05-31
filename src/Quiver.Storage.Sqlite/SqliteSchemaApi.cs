@@ -85,9 +85,9 @@ internal sealed class SqliteSchemaApi : ISchemaApi
         // value_type is inferred from the IndexKind so we don't lose seek semantics.
         int valueType = kind switch
         {
-            IndexKind.Int32Equality or IndexKind.Int64Equality => (int)Stores.PropertyValueType.Int64,
-            IndexKind.DoubleEquality => (int)Stores.PropertyValueType.Double,
-            IndexKind.StringEquality or IndexKind.StringRange => (int)Stores.PropertyValueType.String,
+            IndexKind.Int32Equality or IndexKind.Int64Equality => (int)Storage.Records.PropertyValueType.Int64,
+            IndexKind.DoubleEquality => (int)Storage.Records.PropertyValueType.Double,
+            IndexKind.StringEquality or IndexKind.StringRange => (int)Storage.Records.PropertyValueType.String,
             _ => 0,
         };
 

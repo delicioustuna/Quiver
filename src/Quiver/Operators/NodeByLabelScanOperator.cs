@@ -1,7 +1,7 @@
 using Quiver.Core;
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// 単一ラベルに属する <see cref="NodeId"/> を列挙するスキャンオペレータ。

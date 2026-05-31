@@ -1,10 +1,10 @@
 ﻿using System.Text.RegularExpressions;
 using Quiver.Core;
-using Quiver.Operators;
-using Quiver.Stores;
+using Quiver.Query.Physical;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 
-namespace Quiver.Client.Internal;
+namespace Quiver.Api.Internal;
 
 internal sealed class LabelPredicate : IPredicate
 {

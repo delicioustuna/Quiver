@@ -1,6 +1,6 @@
 ﻿using Quiver.Core;
 using Quiver.Index;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 
 namespace Quiver;
 

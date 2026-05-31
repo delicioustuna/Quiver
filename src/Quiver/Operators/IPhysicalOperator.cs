@@ -1,7 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>物理演算子の基底契約。Volcano イテレータモデル。</summary>
 public interface IPhysicalOperator : IDisposable

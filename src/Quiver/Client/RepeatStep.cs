@@ -1,6 +1,6 @@
-using Quiver.Stores;
+using Quiver.Storage.Records;
 
-namespace Quiver.Client;
+namespace Quiver.Api;
 
 /// <summary>
 /// GC-4: <c>.Repeat(s =&gt; s.Out("KNOWS")).Times(n)</c> 用の fluent な記述レコーダ。

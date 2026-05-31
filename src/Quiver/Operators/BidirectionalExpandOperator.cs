@@ -1,8 +1,8 @@
 using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 
-namespace Quiver.Operators;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// 双方向 BFS 最短経路。長いパスでは <see cref="ShortestPathOperator"/> より効率的。

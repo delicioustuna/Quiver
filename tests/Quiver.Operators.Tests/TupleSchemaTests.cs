@@ -1,8 +1,8 @@
 using FluentAssertions;
-using Quiver.Operators;
+using Quiver.Query.Physical;
 using Xunit;
 
-namespace Quiver.Operators.Tests;
+namespace Quiver.Query.Physical.Tests;
 
 public class TupleSchemaTests
 {

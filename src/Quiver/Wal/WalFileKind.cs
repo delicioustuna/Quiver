@@ -1,4 +1,4 @@
-﻿namespace Quiver.Wal;
+﻿namespace Quiver.Storage.Wal;
 
 public enum WalFileKind : byte
 {

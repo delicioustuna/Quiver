@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Tracing;
 
-namespace Quiver.Core.Telemetry;
+namespace Quiver.Telemetry;
 
 /// <summary>
 /// OB-2: <c>dotnet-counters monitor -n &lt;pid&gt; --counters Quiver-EventSource</c> で

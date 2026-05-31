@@ -1,6 +1,6 @@
 using Quiver.Core;
 
-namespace Quiver.Client;
+namespace Quiver.Api;
 
 /// <summary>
 /// 重み付き最短経路 (<see cref="GraphTraversalSource.WeightedShortestPath(NodeId, NodeId, string, Quiver.Stores.Direction, string?, double)"/> /

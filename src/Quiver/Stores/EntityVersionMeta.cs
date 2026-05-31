@@ -1,4 +1,4 @@
-namespace Quiver.Stores;
+namespace Quiver.Storage.Records;
 
 /// <summary>
 /// FT-31: MVCC + SSN (Wang et al. DaMoN'15) のメタデータを sidecar PagedFile に格納するための

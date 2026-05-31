@@ -1,7 +1,7 @@
 using Quiver.Core;
-using Quiver.Operators;
+using Quiver.Query.Physical;
 
-namespace Quiver.Client.Internal;
+namespace Quiver.Api.Internal;
 
 /// <summary>
 /// VEC-9: <c>g.Knn(...)</c> 直後の遅延 builder。後続が pure-filter (HasLabel/Has/Where/...) や
