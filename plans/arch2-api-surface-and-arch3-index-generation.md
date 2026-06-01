@@ -87,6 +87,9 @@ ARCH-1 でエンジン中核 9 プロジェクトを単一アセンブリ `Quive
 
 ## §3. ARCH-3 — インデックスへの Generation 導入
 
+> **✅ 完了 (develop, commit 0f33e2a)**。索引値レーンを `GenerationalRef` (Kind4/Gen16/Seq44、`EntityId` の top-4bit=Kind と整合) でパックし、slot 再利用 (ABA) を解決時の世代照合で検出。
+> 主要決定: ①Generation 供給元は候補A — `EntityVersionMeta` に独立フィールド追加 (32→40B、MVCC stamp とは別概念の incarnation)。Node/Rel/Prop 共有 sidecar に載り Phase 2/3 の前方プロビジョニングも兼ねる ②`NodeStore.Allocate` が free/hwm 両経路で「現世代+1」発番 (vacuum/hwm-shrink が sidecar 世代を消さない性質を利用)、上限到達 slot は永久退役 ③`INodeStore.CurrentGeneration` を新設し全索引読取経路 (`GraphTransaction.Seek/RangeIndex`、`BinaryGraphAccessMethods`/`InlineGraphAccessMethods.SeekNodesByIndex`、`NodeIndexRangeScanOperator`) を `IndexValueResolver` で世代照合 + unpack、書込経路を pack ④orphan GC は freed + 世代不一致を回収。公開 `OrphanIndexEntry.EntityId` は unpacked NodeId.Value を維持し削除は内部 packed 値で実施 ⑤`FormatVersion` V3→V4 / sidecar 1→2。`EntityId` 本体は無改変 (Phase 2 で `GenerationalRef` と統一)。索引は Node 限定で稼働、rel/vector の Kind ビットは予約のみ。build 0 errors / 全 16 テストプロジェクト 1143 passed (新規 ARCH-3 10 件含む) / PublicApi baseline 不変。
+
 ### 目的
 B+Tree インデックスが格納する「値」を、裸の `long` (sequence のみ) から **Generation を含む形**へ拡張し、slot 再利用に伴う stale 索引エントリが別の生存エンティティを指す問題 (ABA) を検出可能にする。これは docs/design/11 §3 の「Kind+Generation+Sequence ID」の**インデックス側の先行実装**であり、ID 全体の再設計 (Phase 2) のうち**索引が触れる範囲に限定したスコープ**とする。
 
