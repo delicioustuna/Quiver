@@ -73,7 +73,7 @@ internal ref struct PageSelectionBitmap
     /// <c>_current</c> に取り込んだビットへの後続クリアは観測されない — これは意図した
     /// パスセマンティクス: 述語 <i>k</i> は「パス k 開始時にセットされていた全行」を評価する。
     /// </summary>
-    public ref struct Enumerator
+    internal ref struct Enumerator
     {
         private readonly Span<ulong> _words;
         private readonly int _count;

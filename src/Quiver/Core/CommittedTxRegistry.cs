@@ -25,7 +25,7 @@ namespace Quiver.Core;
 /// 起動時に登録しておく必要がある (= ベンチ / bulk-load / recovery 経路の xmin として使われる)。
 /// </para>
 /// </summary>
-public sealed class CommittedTxRegistry
+internal sealed class CommittedTxRegistry
 {
     // ConcurrentDictionary を HashSet 代わりに使う (Set はスレッドセーフ実装が無いため)。
     // Value は dummy。Key だけが意味を持つ。

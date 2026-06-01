@@ -6,7 +6,7 @@ namespace Quiver.Storage;
 /// 読み書きページハンドル。Dispose 時に dirty マークが付く。
 /// パターンベース using のため IDisposable は実装しない。
 /// </summary>
-public ref struct PageWriteHandle
+internal ref struct PageWriteHandle
 {
     private readonly IPagedFile _file;
     private readonly PageId _pageId;

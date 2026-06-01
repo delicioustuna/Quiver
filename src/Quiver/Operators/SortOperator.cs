@@ -13,7 +13,7 @@ namespace Quiver.Query.Physical;
 /// don't fuse limit + sort yet because the gain is small relative to the
 /// terminal materialization the rest of the engine already does.
 /// </summary>
-public sealed class SortOperator : IPhysicalOperator
+internal sealed class SortOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _sortColumn;

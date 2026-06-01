@@ -7,7 +7,7 @@ namespace Quiver;
 /// 物理プランをマテリアライズして得られるクエリ結果。
 /// 行 (<see cref="QueryRow"/>) のコレクションと統計情報を保持する。
 /// </summary>
-public sealed class QueryResult : IDisposable
+internal sealed class QueryResult : IDisposable
 {
     private readonly List<QueryRow> _rows;
 
@@ -32,7 +32,7 @@ public sealed class QueryResult : IDisposable
 }
 
 /// <summary>クエリ結果の 1 行を表す軽量構造体。列アクセスは型ごとのメソッドで行う。</summary>
-public readonly struct QueryRow
+internal readonly struct QueryRow
 {
     private readonly TupleSlot[] _slots;
     private readonly byte[]?[]? _byteData;

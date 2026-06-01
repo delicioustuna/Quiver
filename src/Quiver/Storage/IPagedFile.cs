@@ -6,7 +6,7 @@ namespace Quiver.Storage;
 /// <summary>
 /// 単一データファイルのページ単位アクセスを提供する。
 /// </summary>
-public interface IPagedFile : IDisposable
+internal interface IPagedFile : IDisposable
 {
     /// <summary>1 ページのサイズ (バイト)。</summary>
     int PageSize { get; }

@@ -9,7 +9,7 @@ namespace Quiver.Query.Physical;
 /// 各 (sourceNode, targetNode) ペアについて、経路が存在すれば (source, target, distance) を放出する。
 /// ソースから前方 (引数 direction 方向) と、ターゲットから後方 (逆方向) を交互に展開する。
 /// </summary>
-public sealed class BidirectionalExpandOperator : IPhysicalOperator
+internal sealed class BidirectionalExpandOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _srcCol;

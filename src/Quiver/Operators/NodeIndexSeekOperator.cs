@@ -4,7 +4,7 @@ using Quiver.Transactions;
 
 namespace Quiver.Query.Physical;
 
-public sealed class NodeIndexSeekOperator : IPhysicalOperator
+internal sealed class NodeIndexSeekOperator : IPhysicalOperator
 {
     private readonly string _indexName;
     private readonly ITupleProvider _keyProvider;

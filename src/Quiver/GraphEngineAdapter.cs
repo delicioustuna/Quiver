@@ -16,7 +16,7 @@ namespace Quiver;
 /// インメモリリファレンスストアと将来の ANN 裏付けストアのどちらにでも組み合わせられ、
 /// 本クラスを変更する必要がない。
 /// </remarks>
-public sealed class GraphEngineAdapter : IGraphEngine
+internal sealed class GraphEngineAdapter : IGraphEngine
 {
     private readonly GraphDatabase _db;
     private readonly IVectorStore _vectors;
@@ -38,7 +38,7 @@ public sealed class GraphEngineAdapter : IGraphEngine
 
     /// <inheritdoc/>
     public IGraphEngineReadSession BeginRead()
-        => new ReadSession(_db.Backend.Transactions.Begin(IsolationLevel.SnapshotIsolation), _db.Schema);
+        => new ReadSession(_db.BackendInternal.Transactions.Begin(IsolationLevel.SnapshotIsolation), _db.Schema);
 
     private sealed class ReadSession : IGraphEngineReadSession
     {

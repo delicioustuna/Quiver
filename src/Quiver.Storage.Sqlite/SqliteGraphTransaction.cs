@@ -22,7 +22,7 @@ namespace Quiver.Storage.Sqlite;
 /// ref-struct contract is honoured without persisting linked-list pointers.
 /// </para>
 /// </summary>
-public sealed class SqliteGraphTransaction : IGraphTransaction
+internal sealed class SqliteGraphTransaction : IGraphTransactionInternal
 {
     private static long _txIdCounter;
 

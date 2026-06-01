@@ -2,7 +2,7 @@
 
 namespace Quiver.Query.Physical;
 
-public interface IPredicate
+internal interface IPredicate
 {
     bool Evaluate(in TupleRef tuple, ITransaction tx);
 }

@@ -4,7 +4,7 @@ using Quiver.Transactions;
 
 namespace Quiver.Query.Physical;
 
-public sealed class LiteralProvider : ITupleProvider
+internal sealed class LiteralProvider : ITupleProvider
 {
     private readonly TupleSlotType _type;
     private readonly long _scalar;

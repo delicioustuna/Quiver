@@ -11,7 +11,7 @@ namespace Quiver.Storage.Records;
 /// visibility access path を sidecar 経由に切り替え、FT-33 で SSN protocol が Pstamp/Sstamp の
 /// post-commit 更新で使い始める。</para>
 /// </summary>
-public interface IEntityVersionStore : IDisposable
+internal interface IEntityVersionStore : IDisposable
 {
     /// <summary>
     /// 指定 LocalId のエントリを読み出す。未書き込みなら <see cref="EntityVersionMeta.Unset"/>。

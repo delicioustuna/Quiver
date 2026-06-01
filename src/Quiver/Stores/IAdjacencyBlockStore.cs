@@ -6,7 +6,7 @@ namespace Quiver.Storage.Records;
 /// 連続配置の隣接ブロックストアの読み取りインタフェース。
 /// <c>BulkLoader.Commit(buildAdjacencyIndex: true)</c> で構築され、以降は不変として扱う。
 /// </summary>
-public interface IAdjacencyBlockStore
+internal interface IAdjacencyBlockStore
 {
     /// <summary>指定ノードが隣接ブロックを持つ (= インデックス構築時に存在した) 場合に true を返す。</summary>
     bool HasBlock(NodeId nodeId);
@@ -60,7 +60,7 @@ public interface IAdjacencyBlockStore
 /// ノードの隣接ブロックチェーンに対するストリーミングカーソル。実装は同時に 1 ページだけを pin し、
 /// 隣接ノード全体をマテリアライズせずにリンクされたページを辿る。
 /// </summary>
-public abstract class AdjacencyCursor : IDisposable
+internal abstract class AdjacencyCursor : IDisposable
 {
     /// <summary>次のマッチエントリへ進む。チェーンを使い切ったら false を返す。</summary>
     public abstract bool MoveNext();
@@ -102,7 +102,7 @@ public abstract class AdjacencyCursor : IDisposable
 /// オペレータは <c>tx.AdjacencyBlocks as IAdjacencyPayloadView</c> で能力検査し、
 /// プロパティチェーンを経由せず <see cref="Quiver.Operators.ExpandOutputMode.NeighborAndWeight"/> 射影を選べる。
 /// </summary>
-public interface IAdjacencyPayloadView
+internal interface IAdjacencyPayloadView
 {
     /// <summary>ビュー構築時に固定された payload 仕様。値で返す。</summary>
     PayloadLaneSpec PayloadSpec { get; }

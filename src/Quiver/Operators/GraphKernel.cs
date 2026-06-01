@@ -18,7 +18,7 @@ namespace Quiver.Query.Physical;
 /// <see cref="IGraphAccessMethods.Expand"/> に隠蔽されている。
 /// <see cref="OneHopExpansion"/> はカーネルラッパが 1 ホップ走査時に呼ぶヘルパ。
 /// </remarks>
-public interface IGraphKernel<TState>
+internal interface IGraphKernel<TState>
 {
     /// <summary>
     /// 各ソースに対し、いずれのホップ展開も始まる前に 1 回だけ呼ばれる。
@@ -60,7 +60,7 @@ public interface IGraphKernel<TState>
 /// the SQLite backend's index path, or a future CSR snapshot view without
 /// changes to the kernel.
 /// </summary>
-public static class OneHopExpansion
+internal static class OneHopExpansion
 {
     /// <summary>
     /// Walk all edges incident to <paramref name="source"/> in

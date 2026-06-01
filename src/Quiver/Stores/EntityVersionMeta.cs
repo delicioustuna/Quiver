@@ -16,7 +16,7 @@ namespace Quiver.Storage.Records;
 /// FT-32 で record から Xmin/Xmax を撤去し sidecar 経由 access へ移行、FT-33 で SSN protocol が
 /// Pstamp/Sstamp を使い始める。</para>
 /// </summary>
-public readonly record struct EntityVersionMeta(long Xmin, long Xmax, long Pstamp, long Sstamp)
+internal readonly record struct EntityVersionMeta(long Xmin, long Xmax, long Pstamp, long Sstamp)
 {
     /// <summary>1 エントリのバイトサイズ (32)。</summary>
     public const int Size = 32;

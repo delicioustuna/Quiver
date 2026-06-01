@@ -10,7 +10,7 @@ namespace Quiver.Storage.Sqlite;
 /// on the active <see cref="SqliteGraphTransaction"/> or run in autocommit when
 /// no transaction is open.
 /// </summary>
-public sealed class SqliteGraphStorageBackend : IGraphStorageBackend
+internal sealed class SqliteGraphStorageBackend : IGraphStorageBackendInternal
 {
     private readonly SqliteConnection _connection;
     private readonly string _dbPath;

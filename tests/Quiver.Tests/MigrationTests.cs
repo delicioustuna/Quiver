@@ -1,3 +1,4 @@
+using Quiver;
 using FluentAssertions;
 using Quiver.Core;
 using Quiver.Migrations;
@@ -49,7 +50,7 @@ public sealed class MigrationTests : IDisposable
 
             using var tx = db.BeginReadOnlyTransaction();
             int count = 0;
-            foreach (var _ in tx.Access.ScanNodes(GetInner(tx), db.Schema.GetOrCreateLabel("Person")))
+            foreach (var _ in tx.AsInternal().Access.ScanNodes(GetInner(tx), db.Schema.GetOrCreateLabel("Person")))
                 count++;
             count.Should().Be(3);
         }
@@ -101,7 +102,7 @@ public sealed class MigrationTests : IDisposable
             using var tx = db.BeginReadOnlyTransaction();
             var oldId = db.Schema.GetOrCreateLabel("OldLabel");
             int oldCount = 0;
-            foreach (var _ in tx.Access.ScanNodes(GetInner(tx), oldId)) oldCount++;
+            foreach (var _ in tx.AsInternal().Access.ScanNodes(GetInner(tx), oldId)) oldCount++;
             oldCount.Should().Be(1, "rename failed, so the node should still be under OldLabel");
         }
 
@@ -111,7 +112,7 @@ public sealed class MigrationTests : IDisposable
             using var tx = db.BeginReadOnlyTransaction();
             var oldId = db.Schema.GetOrCreateLabel("OldLabel");
             int oldCount = 0;
-            foreach (var _ in tx.Access.ScanNodes(GetInner(tx), oldId)) oldCount++;
+            foreach (var _ in tx.AsInternal().Access.ScanNodes(GetInner(tx), oldId)) oldCount++;
             oldCount.Should().Be(1);
         }
     }
@@ -145,7 +146,7 @@ public sealed class MigrationTests : IDisposable
         // B のままであるべき (A に巻き戻ってはいけない)
         using var rtx = db.BeginReadOnlyTransaction();
         int bCount = 0;
-        foreach (var _ in rtx.Access.ScanNodes(GetInner(rtx), db.Schema.GetOrCreateLabel("B")))
+        foreach (var _ in rtx.AsInternal().Access.ScanNodes(GetInner(rtx), db.Schema.GetOrCreateLabel("B")))
             bCount++;
         bCount.Should().Be(1, "first migration's B should be preserved");
     }

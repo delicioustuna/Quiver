@@ -4,7 +4,7 @@ using Quiver.Transactions;
 
 namespace Quiver.Query.Physical;
 
-public sealed class PropertyLookupOperator : IPhysicalOperator
+internal sealed class PropertyLookupOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _entityIdColumn;

@@ -25,7 +25,7 @@ namespace Quiver.Query.Physical;
 /// regardless.
 /// </para>
 /// </remarks>
-public sealed class RelationshipScanExpandOperator : IPhysicalOperator
+internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _sourceNodeColumn;

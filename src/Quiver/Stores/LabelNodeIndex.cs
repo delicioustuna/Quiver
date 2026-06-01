@@ -10,7 +10,7 @@ namespace Quiver.Storage.Records;
 /// <see cref="INodeStore.Scan"/> から再構築する。WAL 復旧後に呼ばれる前提のため、
 /// crash recovery 時もそのまま整合する。
 /// </summary>
-public sealed class LabelNodeIndex
+internal sealed class LabelNodeIndex
 {
     private readonly Dictionary<int, SortedSet<long>> _byLabel = new();
     private bool _built;

@@ -18,7 +18,7 @@ namespace Quiver.Query.Physical;
 /// surfaced in the tuple stream; callers can hold a reference to the access
 /// method directly when raw scores are needed.
 /// </remarks>
-public sealed class FilteredKnnNodeSourceOperator : IPhysicalOperator
+internal sealed class FilteredKnnNodeSourceOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _sourceNodeColumn;

@@ -14,8 +14,11 @@ public sealed class SqliteGraphStorageBackendFactory : IGraphStorageBackendFacto
     public IGraphStorageBackend Open(string directoryPath, GraphDatabaseOptions options)
         => OpenBackend(directoryPath, options);
 
-    /// <summary>Resolved overload for callers that already know they want the SQLite backend.</summary>
-    public static SqliteGraphStorageBackend OpenBackend(string directoryPath, GraphDatabaseOptions options)
+    /// <summary>
+    /// ARCH-2: SqliteGraphStorageBackend は internal のため internal static。テスト (IVT) が
+    /// 具象バックエンドを直接開く用途。利用者は <see cref="Open"/> / GraphDatabaseOptions.BackendFactory を使う。
+    /// </summary>
+    internal static SqliteGraphStorageBackend OpenBackend(string directoryPath, GraphDatabaseOptions options)
     {
         Directory.CreateDirectory(directoryPath);
         var dbPath = Path.Combine(directoryPath, "quiver.sqlite");

@@ -8,7 +8,7 @@ namespace Quiver.Query.Physical;
 /// a dense bitmap when ids cluster near 0, or a <see cref="HashSet{T}"/> when
 /// the id space is sparse. The chosen strategy is opaque to callers.
 /// </summary>
-public sealed class FrontierSet
+internal sealed class FrontierSet
 {
     private readonly NodeBitSet? _bits;
     private readonly HashSet<long>? _hash;
@@ -57,7 +57,7 @@ public sealed class FrontierSet
 /// Dense bitmap over <c>[0, Capacity)</c>. Backs <see cref="FrontierSet"/> in the
 /// dense-id case. Allocates <c>(Capacity + 63) / 64</c> ulongs.
 /// </summary>
-public sealed class NodeBitSet
+internal sealed class NodeBitSet
 {
     private readonly ulong[] _words;
     private int _count;

@@ -25,7 +25,7 @@ namespace Quiver.Storage.Wal;
 ///            chunks の合計データ長 = usedLen バイト。
 ///            recovery 側で chunks を decode して先頭 usedLen バイトを構築、残りを zero-pad。
 /// </summary>
-public static class WalPageImageCodec
+internal static class WalPageImageCodec
 {
     /// <summary>v1 ヘッダ長 (バイト)。version + fileKind + pageId。</summary>
     public const int HeaderLength = 10;

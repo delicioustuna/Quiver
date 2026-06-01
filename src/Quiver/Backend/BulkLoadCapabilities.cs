@@ -6,7 +6,7 @@ namespace Quiver;
 /// <see cref="IGraphStorageBackend"/> が公開する任意のバルクロードエントリポイントの集合。
 /// バックエンドがサポートしないケイパビリティは、対応するデリゲートを null のままにしておく。
 /// </summary>
-public sealed class BulkLoadCapabilities
+internal sealed class BulkLoadCapabilities
 {
     /// <summary>
     /// バイナリバックエンド向けのバルクロード開始関数。bool 引数で

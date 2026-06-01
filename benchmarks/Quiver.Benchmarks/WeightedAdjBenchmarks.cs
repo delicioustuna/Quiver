@@ -104,7 +104,7 @@ public class WeightedAdjBenchmarks
     public long PayloadLane()
     {
         long sum = 0;
-        using var cursor = _v2Tx.AdjacencyBlocks!.OpenCursor(_hub, Direction.Outgoing, null);
+        using var cursor = _v2Tx.AsInternal().AdjacencyBlocks!.OpenCursor(_hub, Direction.Outgoing, null);
         while (cursor.MoveNext())
             sum += cursor.WeightRaw;
         return sum;

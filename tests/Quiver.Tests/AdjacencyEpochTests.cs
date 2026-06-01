@@ -1,3 +1,4 @@
+using Quiver;
 using FluentAssertions;
 using Quiver.Core;
 using Quiver.Query.Physical;
@@ -42,9 +43,9 @@ public sealed class AdjacencyEpochTests : IDisposable
         using var tx = _db.BeginTransaction();
         var neighbors = ExpandOut(tx, new NodeId(0));
         neighbors.Should().BeEquivalentTo(new[] { 1L, 2L });
-        tx.AdjacencyBlocks!.BaseRelHwm.Should().Be(2,
+        tx.AsInternal().AdjacencyBlocks!.BaseRelHwm.Should().Be(2,
             "BulkLoader wrote 2 rels so the watermark sits at id 2");
-        tx.AdjacencyBlocks.Epoch.Should().Be(1);
+        tx.AsInternal().AdjacencyBlocks.Epoch.Should().Be(1);
     }
 
     [Fact]
@@ -84,7 +85,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         {
             var neighbors = ExpandOut(tx, new NodeId(0));
             neighbors.Should().BeEquivalentTo(new[] { 2L });
-            tx.AdjacencyBlocks!.IsTombstoned(new RelationshipId(0)).Should().BeTrue();
+            tx.AsInternal().AdjacencyBlocks!.IsTombstoned(new RelationshipId(0)).Should().BeTrue();
         }
     }
 
@@ -130,7 +131,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         }
         _db = GraphDatabase.Open(_dir);
         using var tx2 = _db.BeginTransaction();
-        tx2.AdjacencyBlocks!.IsTombstoned(new RelationshipId(0)).Should().BeTrue();
+        tx2.AsInternal().AdjacencyBlocks!.IsTombstoned(new RelationshipId(0)).Should().BeTrue();
         var neighbors = ExpandOut(tx2, new NodeId(0));
         neighbors.Should().BeEquivalentTo(new[] { 2L });
     }
@@ -153,16 +154,16 @@ public sealed class AdjacencyEpochTests : IDisposable
         long epochBefore;
         using (var tx = _db.BeginTransaction())
         {
-            epochBefore = tx.AdjacencyBlocks!.Epoch;
+            epochBefore = tx.AsInternal().AdjacencyBlocks!.Epoch;
         }
 
         _db.CompactAdjacency();
 
         using var txAfter = _db.BeginTransaction();
-        txAfter.AdjacencyBlocks!.Epoch.Should().Be(epochBefore + 1);
+        txAfter.AsInternal().AdjacencyBlocks!.Epoch.Should().Be(epochBefore + 1);
         // After compact, BaseRelHwm must cover every live rel id — there are
         // 4 ids in [0..3] so hwm = 4.
-        txAfter.AdjacencyBlocks.BaseRelHwm.Should().Be(4);
+        txAfter.AsInternal().AdjacencyBlocks.BaseRelHwm.Should().Be(4);
         ExpandOut(txAfter, new NodeId(0))
             .Should().BeEquivalentTo(new[] { 1L, 2L, 3L, 4L });
     }
@@ -180,7 +181,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         }
         using (var tx = _db.BeginTransaction())
         {
-            tx.AdjacencyBlocks!.IsTombstoned(new RelationshipId(1)).Should().BeTrue();
+            tx.AsInternal().AdjacencyBlocks!.IsTombstoned(new RelationshipId(1)).Should().BeTrue();
         }
 
         _db.CompactAdjacency();
@@ -188,7 +189,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         using var tx2 = _db.BeginTransaction();
         // After compact the deleted edge is physically gone, so the tombstone
         // for the *new* base has nothing to do — IsTombstoned should report false.
-        tx2.AdjacencyBlocks!.IsTombstoned(new RelationshipId(1)).Should().BeFalse();
+        tx2.AsInternal().AdjacencyBlocks!.IsTombstoned(new RelationshipId(1)).Should().BeFalse();
         ExpandOut(tx2, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 3L });
     }
 

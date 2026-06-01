@@ -14,7 +14,7 @@ namespace Quiver.Query.Physical;
 /// adjacency / property column view goes column-oriented the same scan shape
 /// keeps working without operator changes.
 /// </summary>
-public sealed class BitmapFilterOperator : IPhysicalOperator
+internal sealed class BitmapFilterOperator : IPhysicalOperator
 {
     private const int DefaultBatchSize = 64;
 

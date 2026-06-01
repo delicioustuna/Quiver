@@ -4,7 +4,7 @@ using Quiver.Storage;
 
 namespace Quiver.Storage.Records;
 
-public interface IRelationshipStore
+internal interface IRelationshipStore
 {
     RelationshipId Create(INodeStore nodeStore, NodeId source, NodeId target, RelationshipTypeId type);
     void Delete(INodeStore nodeStore, RelationshipId relId);
@@ -61,7 +61,7 @@ public readonly ref struct RelationshipReadHandle
     public void Dispose() { }
 }
 
-public ref struct RelationshipWriteHandle
+internal ref struct RelationshipWriteHandle
 {
     private readonly IPagedFile _file;
     private readonly PageId _pageId;

@@ -18,7 +18,7 @@ namespace Quiver.Query.Physical;
 /// "other than X" relative to a known node should use the typed
 /// <see cref="ExpandOperator"/> output mode instead.
 /// </remarks>
-public sealed class RelationshipEndpointOperator : IPhysicalOperator
+internal sealed class RelationshipEndpointOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _relColumn;
@@ -66,7 +66,7 @@ public sealed class RelationshipEndpointOperator : IPhysicalOperator
     public void Dispose() => _source.Dispose();
 }
 
-public enum RelationshipEndpoint : byte
+internal enum RelationshipEndpoint : byte
 {
     Source = 1,
     Target = 2,

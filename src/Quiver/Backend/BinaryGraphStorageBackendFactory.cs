@@ -12,7 +12,7 @@ namespace Quiver;
 /// <see cref="BackendKind.Binary"/>. Produces a <see cref="BinaryGraphStorageBackend"/>
 /// constructed from the binary page / WAL / store / index components.
 /// </summary>
-public sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFactory
+internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFactory
 {
     public IGraphStorageBackend Open(string directoryPath, GraphDatabaseOptions options)
     {

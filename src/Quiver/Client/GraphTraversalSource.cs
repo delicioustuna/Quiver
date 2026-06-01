@@ -172,7 +172,7 @@ public sealed class GraphTraversalSource
         // VEC-12: backend が capability 経路で spec を返せれば dim を解決し、PendingKnnBuilder に
         //         dim-aware piecewise threshold を引かせる。spec を返さない backend では dim=0 で
         //         legacy 30% 単一閾値経路に倒れる (HasFastLabelIndex 経路は使われない)。
-        int dim = _tx.Access.TryGetVectorIndexSpec(indexName, out var spec) ? spec.Dimensions : 0;
+        int dim = _tx.AsInternal().Access.TryGetVectorIndexSpec(indexName, out var spec) ? spec.Dimensions : 0;
         var builder = new Internal.PendingKnnBuilder(new Internal.ScanBuilder(), indexName, query, k, dim);
         return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }

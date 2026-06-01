@@ -1,6 +1,6 @@
 ﻿namespace Quiver.Storage;
 
-public sealed class PageManager : IPageManager
+internal sealed class PageManager : IPageManager
 {
     private readonly List<IPagedFile> _files = new();
     private readonly object _filesLock = new();

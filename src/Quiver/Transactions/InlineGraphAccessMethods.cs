@@ -12,7 +12,7 @@ namespace Quiver.Transactions;
 /// path with linked-list fallback. Does not track <see cref="AdjacencyFallbackCount"/>;
 /// real backends should supply their own implementation for that.
 /// </summary>
-public sealed class InlineGraphAccessMethods : IGraphAccessMethods
+internal sealed class InlineGraphAccessMethods : IGraphAccessMethods
 {
     public static readonly InlineGraphAccessMethods Instance = new();
 

@@ -6,7 +6,7 @@ namespace Quiver.Index;
 /// デコードするかを決める。<see cref="IndexManager"/> が索引のキーコーデックと
 /// 1:1 で対応付ける。
 /// </summary>
-public enum IndexKeyKind : byte
+internal enum IndexKeyKind : byte
 {
     Int32 = 1,
     Int64 = 2,

@@ -3,7 +3,7 @@
 namespace Quiver.Transactions;
 
 /// <summary>トランザクション管理の入口。</summary>
-public interface ITransactionManager : IDisposable
+internal interface ITransactionManager : IDisposable
 {
     /// <summary>新規トランザクションを開始。</summary>
     ITransaction Begin(IsolationLevel level = IsolationLevel.SnapshotIsolation);

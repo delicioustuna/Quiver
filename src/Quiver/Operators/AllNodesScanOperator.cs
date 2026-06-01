@@ -3,7 +3,7 @@ using Quiver.Transactions;
 
 namespace Quiver.Query.Physical;
 
-public sealed class AllNodesScanOperator : IPhysicalOperator
+internal sealed class AllNodesScanOperator : IPhysicalOperator
 {
     private readonly LabelId? _filterLabel;
     private IEnumerator<NodeId>? _enumerator;

@@ -22,7 +22,7 @@ namespace Quiver.Core;
 ///   それ以外                        → 可視 (aborted / 未コミットの削除は無視)
 /// </code>
 /// </summary>
-public static class Visibility
+internal static class Visibility
 {
     /// <summary>レコードの xmin / xmax から可視性を判定する。</summary>
     public static bool IsVisible(long xmin, long xmax, in SnapshotState snapshot, TransactionId self, CommittedTxRegistry committed)

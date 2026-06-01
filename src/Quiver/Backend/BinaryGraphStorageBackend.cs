@@ -9,7 +9,7 @@ using Quiver.Storage.Wal;
 
 namespace Quiver;
 
-internal sealed class BinaryGraphStorageBackend : IGraphStorageBackend
+internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 {
     private readonly IVectorStore _vectors;
     private readonly PageManager _pageManager;

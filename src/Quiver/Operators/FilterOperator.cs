@@ -2,7 +2,7 @@
 
 namespace Quiver.Query.Physical;
 
-public sealed class FilterOperator : IPhysicalOperator
+internal sealed class FilterOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly IPredicate _predicate;

@@ -36,7 +36,7 @@ public readonly record struct PropertyKeyId(int Value)
     public bool IsValid => Value >= 0;
 }
 
-public readonly record struct PageId(long Value)
+internal readonly record struct PageId(long Value)
 {
     public static readonly PageId Invalid = new(-1);
     public bool IsValid => Value >= 0;

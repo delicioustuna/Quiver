@@ -22,7 +22,7 @@ namespace Quiver.Storage.Records;
 /// <para>FT-31 時点ではこの store は backend factory から配線されていない (デッドコード相当)。
 /// FT-32 で各 store の MVCC access path に紐付ける。</para>
 /// </summary>
-public sealed class EntityVersionStore : IEntityVersionStore
+internal sealed class EntityVersionStore : IEntityVersionStore
 {
     /// <summary>1 エントリのサイズ (32 バイト)。</summary>
     public const int RecordSize = EntityVersionMeta.Size;

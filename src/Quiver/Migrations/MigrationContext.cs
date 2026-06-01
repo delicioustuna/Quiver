@@ -118,7 +118,7 @@ internal sealed class MigrationContext : IMigrationContext
         if (Transaction is not GraphTransaction gtx)
             throw new InvalidOperationException(
                 "MigrationContext.ForEachNode requires the default GraphTransaction implementation.");
-        foreach (var nodeId in Transaction.Access.ScanNodes(gtx.Inner, labelId))
+        foreach (var nodeId in gtx.Access.ScanNodes(gtx.Inner, labelId))
             action(nodeId);
     }
 }

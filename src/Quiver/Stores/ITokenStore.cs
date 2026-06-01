@@ -3,7 +3,7 @@ using Quiver.Core;
 
 namespace Quiver.Storage.Records;
 
-public interface ITokenStore<TToken> where TToken : struct
+internal interface ITokenStore<TToken> where TToken : struct
 {
     TToken GetOrCreate(ReadOnlySpan<char> name);
     bool TryGet(ReadOnlySpan<char> name, out TToken token);
@@ -27,7 +27,7 @@ public interface ITokenStore<TToken> where TToken : struct
 // シンプルな append-only 設計で、open 時に全量をメモリへ読み込む。
 // -----------------------------------------------------------------------
 
-public abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposable where TToken : struct
+internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposable where TToken : struct
 {
     private readonly string _filePath;
     protected readonly Dictionary<string, TToken> _byName = new(StringComparer.Ordinal);
@@ -169,21 +169,21 @@ public abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposable 
     }
 }
 
-public sealed class LabelTokenStore : TokenStoreBase<LabelId>
+internal sealed class LabelTokenStore : TokenStoreBase<LabelId>
 {
     public LabelTokenStore(string filePath) : base(filePath) { }
     protected override LabelId MakeToken(int id) => new(id);
     protected override int GetId(LabelId token) => token.Value;
 }
 
-public sealed class RelationshipTypeTokenStore : TokenStoreBase<RelationshipTypeId>
+internal sealed class RelationshipTypeTokenStore : TokenStoreBase<RelationshipTypeId>
 {
     public RelationshipTypeTokenStore(string filePath) : base(filePath) { }
     protected override RelationshipTypeId MakeToken(int id) => new(id);
     protected override int GetId(RelationshipTypeId token) => token.Value;
 }
 
-public sealed class PropertyKeyTokenStore : TokenStoreBase<PropertyKeyId>
+internal sealed class PropertyKeyTokenStore : TokenStoreBase<PropertyKeyId>
 {
     public PropertyKeyTokenStore(string filePath) : base(filePath) { }
     protected override PropertyKeyId MakeToken(int id) => new(id);

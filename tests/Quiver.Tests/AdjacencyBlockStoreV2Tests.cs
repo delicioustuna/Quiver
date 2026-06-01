@@ -1,3 +1,4 @@
+using Quiver;
 using FluentAssertions;
 using Quiver.Core;
 using Quiver.Query.Physical;
@@ -39,7 +40,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
 
         _db = GraphDatabase.Open(_dir);
         using var tx = _db.BeginTransaction();
-        var adj = tx.AdjacencyBlocks;
+        var adj = tx.AsInternal().AdjacencyBlocks;
         adj.Should().NotBeNull();
 
         var view = adj as IAdjacencyPayloadView;
@@ -84,7 +85,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         _db = GraphDatabase.Open(_dir);
         using var tx = _db.BeginTransaction();
         var seen = new Dictionary<long, double>();
-        using var cursor = tx.AdjacencyBlocks!.OpenCursor(new NodeId(0), Direction.Outgoing, null);
+        using var cursor = tx.AsInternal().AdjacencyBlocks!.OpenCursor(new NodeId(0), Direction.Outgoing, null);
         while (cursor.MoveNext())
             seen[cursor.Neighbor.Value] = BitConverter.Int64BitsToDouble(cursor.WeightRaw);
 
@@ -114,7 +115,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         _db = GraphDatabase.Open(_dir);
         using var tx = _db.BeginTransaction();
         var seen = new Dictionary<long, long>();
-        using var cursor = tx.AdjacencyBlocks!.OpenCursor(new NodeId(0), Direction.Outgoing, null);
+        using var cursor = tx.AsInternal().AdjacencyBlocks!.OpenCursor(new NodeId(0), Direction.Outgoing, null);
         while (cursor.MoveNext())
             seen[cursor.Neighbor.Value] = cursor.WeightRaw;
 
@@ -133,7 +134,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
 
         using var tx = _db.BeginTransaction();
         var seen = new Dictionary<long, long>();
-        using var cursor = tx.AdjacencyBlocks!.OpenCursor(new NodeId(0), Direction.Outgoing, null);
+        using var cursor = tx.AsInternal().AdjacencyBlocks!.OpenCursor(new NodeId(0), Direction.Outgoing, null);
         while (cursor.MoveNext())
             seen[cursor.Neighbor.Value] = cursor.WeightRaw;
 
@@ -183,7 +184,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         _db = GraphDatabase.Open(_dir);
 
         using var tx = _db.BeginTransaction();
-        var view = tx.AdjacencyBlocks as IAdjacencyPayloadView;
+        var view = tx.AsInternal().AdjacencyBlocks as IAdjacencyPayloadView;
         view.Should().NotBeNull();
         view!.PayloadSpec.Kind.Should().Be(PayloadKind.Int64);
         view.PayloadSpec.DefaultRaw.Should().Be(0);

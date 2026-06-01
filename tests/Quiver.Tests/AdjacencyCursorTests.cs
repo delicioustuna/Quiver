@@ -1,3 +1,4 @@
+using Quiver;
 using FluentAssertions;
 using Quiver.Core;
 using Quiver.Storage.Records;
@@ -38,7 +39,7 @@ public sealed class AdjacencyCursorTests : IDisposable
         _db = GraphDatabase.Open(_dir);
 
         using var tx = _db.BeginTransaction();
-        var adj = tx.AdjacencyBlocks!;
+        var adj = tx.AsInternal().AdjacencyBlocks!;
         adj.HasBlock(new NodeId(0)).Should().BeTrue();
 
         var seen = new HashSet<long>();
@@ -75,7 +76,7 @@ public sealed class AdjacencyCursorTests : IDisposable
         _db = GraphDatabase.Open(_dir);
 
         using var tx = _db.BeginTransaction();
-        var adj = tx.AdjacencyBlocks!;
+        var adj = tx.AsInternal().AdjacencyBlocks!;
         int count = 0;
         using var cursor = adj.OpenCursor(new NodeId(0), Direction.Outgoing, new RelationshipTypeId(0));
         while (cursor.MoveNext())
@@ -95,7 +96,7 @@ public sealed class AdjacencyCursorTests : IDisposable
         _db = GraphDatabase.Open(_dir);
 
         using var tx = _db.BeginTransaction();
-        var adj = tx.AdjacencyBlocks!;
+        var adj = tx.AsInternal().AdjacencyBlocks!;
         // Node id beyond the high watermark has no block.
         adj.HasBlock(new NodeId(99_999)).Should().BeFalse();
         using var cursor = adj.OpenCursor(new NodeId(99_999), Direction.Outgoing, null);

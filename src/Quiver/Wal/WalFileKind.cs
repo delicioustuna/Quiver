@@ -1,6 +1,6 @@
 ﻿namespace Quiver.Storage.Wal;
 
-public enum WalFileKind : byte
+internal enum WalFileKind : byte
 {
     Nodes         = 1,
     Relationships = 2,

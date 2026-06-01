@@ -9,7 +9,7 @@ namespace Quiver.Query.Physical;
 /// NodeId, producing a fresh 2-column tuple <c>(source, target)</c> that the
 /// <see cref="ShortestPathOperator"/> can consume.
 /// </summary>
-public sealed class PairWithConstantOperator : IPhysicalOperator
+internal sealed class PairWithConstantOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _sourceColumn;

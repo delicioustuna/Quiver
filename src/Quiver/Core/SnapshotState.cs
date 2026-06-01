@@ -9,7 +9,7 @@ namespace Quiver.Core;
 /// (= committed AND txId &lt;= SnapshotTxId AND NOT ActiveAtBegin.Contains) が可視。
 /// </para>
 /// </summary>
-public readonly struct SnapshotState
+internal readonly struct SnapshotState
 {
     /// <summary>スナップショット取得時の高水位 TxId (自身の TxId はまだ含まれていない最大値)。</summary>
     public TransactionId SnapshotTxId { get; }

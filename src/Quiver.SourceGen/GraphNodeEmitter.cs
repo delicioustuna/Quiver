@@ -23,13 +23,15 @@ internal static class GraphNodeEmitter
         ["double"]  = "tx.IndexInsert(\"{0}\", entity.{1}, id);",
     };
 
+    // ARCH-2: 生成コードは公開 API のみを使う。索引シークは tx.SeekIndex(name, PropertyValue)
+    // (NodeIndexSeekOperator / LiteralProvider / tx.Execute は internal 化したため不可)。
     private static readonly Dictionary<string, string> _seekCallMap = new()
     {
-        ["string"]  = "Quiver.Query.Physical.LiteralProvider.String(value)",
-        ["string?"] = "Quiver.Query.Physical.LiteralProvider.String(value ?? \"\")",
-        ["int"]     = "Quiver.Query.Physical.LiteralProvider.Int64((long)value)",
-        ["long"]    = "Quiver.Query.Physical.LiteralProvider.Int64(value)",
-        ["double"]  = "Quiver.Query.Physical.LiteralProvider.Double(value)",
+        ["string"]  = "Quiver.Storage.Records.PropertyValue.FromString(value)",
+        ["string?"] = "Quiver.Storage.Records.PropertyValue.FromString(value ?? \"\")",
+        ["int"]     = "Quiver.Storage.Records.PropertyValue.FromInt64((long)value)",
+        ["long"]    = "Quiver.Storage.Records.PropertyValue.FromInt64(value)",
+        ["double"]  = "Quiver.Storage.Records.PropertyValue.FromDouble(value)",
     };
 
     // PW-18 follow-up: C# 型から既定の IndexKind を推論するマップ。
@@ -52,7 +54,6 @@ internal static class GraphNodeEmitter
         sb.AppendLine("using Quiver;");
         sb.AppendLine("using Quiver.Api;");
         sb.AppendLine("using Quiver.Core;");
-        sb.AppendLine("using Quiver.Query.Physical;");
         sb.AppendLine("using Quiver.Storage.Records;");
         sb.AppendLine();
 
@@ -160,11 +161,10 @@ internal static class GraphNodeEmitter
             sb.AppendLine($"        IGraphTransaction tx, {paramType} value)");
             sb.AppendLine("    {");
             sb.AppendLine($"        var results = new System.Collections.Generic.List<(Quiver.Core.NodeId, {model.ClassName})>();");
-            sb.AppendLine($"        var op = new NodeIndexSeekOperator(\"{prop.IndexName}\", {seekExpr});");
-            sb.AppendLine("        using var r = tx.Execute(op);");
-            sb.AppendLine("        foreach (var row in r.Rows())");
+            sb.AppendLine($"        var seek = tx.SeekIndex(\"{prop.IndexName}\", {seekExpr});");
+            sb.AppendLine("        while (seek.MoveNext())");
             sb.AppendLine("        {");
-            sb.AppendLine("            var id = row.GetNodeId(0);");
+            sb.AppendLine("            var id = seek.Current;");
             sb.AppendLine("            results.Add((id, Load(tx, id)));");
             sb.AppendLine("        }");
             sb.AppendLine("        return results;");

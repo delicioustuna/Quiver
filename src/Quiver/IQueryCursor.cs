@@ -7,7 +7,7 @@ namespace Quiver;
 /// MoveNext() を呼ぶたびに Current が更新される。
 /// Current は次の MoveNext() 呼び出しまでのみ有効。
 /// </summary>
-public interface IQueryCursor : IDisposable
+internal interface IQueryCursor : IDisposable
 {
     /// <summary>カーソルが返すタプルのスキーマ。</summary>
     TupleSchema Schema { get; }

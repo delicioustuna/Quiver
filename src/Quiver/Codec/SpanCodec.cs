@@ -8,7 +8,7 @@ namespace Quiver.Codec;
 /// Span&lt;byte&gt; への型安全なリトルエンディアン読み書きヘルパ。
 /// 全メソッドはインライン化され、ゼロアロケーション。
 /// </summary>
-public static class SpanCodec
+internal static class SpanCodec
 {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static byte ReadByte(ReadOnlySpan<byte> span, int offset) => span[offset];

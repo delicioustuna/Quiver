@@ -73,7 +73,7 @@ public class OneHopAdjBenchmarks
     [Benchmark(Description = "1-hop AdjacencyBlock (ReadEdges)")]
     public int AdjacencyBlock()
     {
-        var adj = _readTx.AdjacencyBlocks!;
+        var adj = _readTx.AsInternal().AdjacencyBlocks!;
         int count = adj.ReadEdges(_hub, Direction.Outgoing, null, _adjBuf);
         return count;
     }
@@ -81,7 +81,7 @@ public class OneHopAdjBenchmarks
     [Benchmark(Description = "1-hop AdjacencyCursor (PW-8)")]
     public int AdjacencyCursor()
     {
-        var adj = _readTx.AdjacencyBlocks!;
+        var adj = _readTx.AsInternal().AdjacencyBlocks!;
         int count = 0;
         using var cursor = adj.OpenCursor(_hub, Direction.Outgoing, null);
         while (cursor.MoveNext()) count++;

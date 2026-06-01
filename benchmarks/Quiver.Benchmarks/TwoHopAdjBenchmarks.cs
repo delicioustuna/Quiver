@@ -82,7 +82,7 @@ public class TwoHopAdjBenchmarks
     [Benchmark(Description = "2-hop AdjacencyBlock")]
     public int AdjacencyBlock()
     {
-        var adj = _readTx.AdjacencyBlocks!;
+        var adj = _readTx.AsInternal().AdjacencyBlocks!;
         int count = 0;
         int midCount = adj.ReadEdges(_hub, Direction.Outgoing, null, _l1Buf);
         for (int i = 0; i < midCount; i++)

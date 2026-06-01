@@ -12,7 +12,7 @@ namespace Quiver.Query.Physical;
 /// <c>InlineGraphAccessMethods</c> (backend 不在の単体テスト等) は従来の O(N) スキャン
 /// + ラベルフィルタにフォールバックする (legacy fallback)。
 /// </remarks>
-public sealed class NodeByLabelScanOperator : IPhysicalOperator
+internal sealed class NodeByLabelScanOperator : IPhysicalOperator
 {
     private readonly LabelId _labelId;
     private IEnumerator<NodeId>? _enumerator;

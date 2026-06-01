@@ -8,7 +8,7 @@ namespace Quiver.Query.Physical;
 /// 全分岐が空だった入力行は出力に寄与しない。
 /// すべての分岐は単一列 NodeId のタプルを返す必要がある。
 /// </summary>
-public sealed class CoalesceOperator : IPhysicalOperator
+internal sealed class CoalesceOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _srcCol;

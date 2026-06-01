@@ -25,6 +25,9 @@ ARCH-1 でエンジン中核 9 プロジェクトを単一アセンブリ `Quive
 
 ## §2. ARCH-2 — API 露出修正 + それに合わせた型名修正
 
+> **✅ 完了 (develop)**。公開型 255→124。内部化 132 型 + 新設 `Quiver.Api.MatchValueType`。
+> 主要決定: ①backend SPI を `IGraphStorageBackendInternal` へ退避 (factory/`BackendFactory` 拡張点は public 維持、SQLite 衛星は IVT で実装) ②`IGraphTransaction` から Execute/ExecuteCursor/Access/AdjacencyBlocks を `IGraphTransactionInternal` へ退避 (Execute/ExecuteCursor は internal 拡張で後方互換、テスト/DSL 無改変) ③型名修正は `MatchTuple.TypeOf`→`MatchValueType`、`GraphEngineAdapter`→`GraphDatabase.CreateEmbeddingEngine` の 2 件のみ ④source generator を public API (`tx.SeekIndex`) emit に是正 ⑤`PropertyValueTypeMask`/`ObservedTypesLegacy` 削除。build 0 errors / test 1133 passed / PublicApi baseline 再承認済み。
+
 ### 目的
 単一アセンブリの公開 API を「利用者が実際に使うべき表層 (facade / DSL / 安定 ID / スキーマ / オプション)」に絞り込み、実装レイヤーを `internal` 化する。露出を絞る過程で、公開に残す型・内部化する型の**命名を再設計後の役割に合わせて整える**（型名修正）。
 

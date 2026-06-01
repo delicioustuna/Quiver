@@ -2,7 +2,7 @@
 
 namespace Quiver.Query.Physical;
 
-public interface ITupleProvider
+internal interface ITupleProvider
 {
     TupleSlot Provide(in TupleRef current, ITransaction tx);
     TupleSlotType SlotType { get; }

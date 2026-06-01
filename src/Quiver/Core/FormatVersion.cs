@@ -5,7 +5,7 @@ namespace Quiver.Core;
 /// xmin / xmax 8B 各を追加するため、旧 v1 とはバイト配置が非互換 (record サイズが拡大)。
 /// develop 段階のためマイグレーションは提供せず、open 時に v1 を検出したら例外。
 /// </summary>
-public static class FormatVersion
+internal static class FormatVersion
 {
     /// <summary>v1: FT-15 までのレイアウト (xmin/xmax 無し)。FT-26 より開けない。</summary>
     public const byte V1 = 1;

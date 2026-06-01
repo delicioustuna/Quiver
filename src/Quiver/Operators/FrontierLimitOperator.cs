@@ -8,7 +8,7 @@ namespace Quiver.Query.Physical;
 /// 同一深さ値の範囲内では最大 <c>maxFrontierSize</c> 件だけが通過し、
 /// それを超えた行は黙ってドロップされる。
 /// </summary>
-public sealed class FrontierLimitOperator : IPhysicalOperator
+internal sealed class FrontierLimitOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _depthColumn;

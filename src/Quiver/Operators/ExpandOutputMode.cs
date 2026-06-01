@@ -1,6 +1,6 @@
 ﻿namespace Quiver.Query.Physical;
 
-public enum ExpandOutputMode
+internal enum ExpandOutputMode
 {
     NeighborOnly = 1,
     NeighborAndRel = 2,

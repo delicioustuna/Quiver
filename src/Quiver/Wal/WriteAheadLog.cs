@@ -7,7 +7,7 @@ using Quiver.Telemetry;
 
 namespace Quiver.Storage.Wal;
 
-public sealed class WriteAheadLog : IWriteAheadLog
+internal sealed class WriteAheadLog : IWriteAheadLog
 {
     // ヘッダレイアウト: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32C(4) = 25 バイト
     internal const int HeaderSize = 25;

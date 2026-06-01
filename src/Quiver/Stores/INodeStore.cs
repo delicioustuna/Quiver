@@ -4,7 +4,7 @@ using Quiver.Storage;
 
 namespace Quiver.Storage.Records;
 
-public interface INodeStore
+internal interface INodeStore
 {
     NodeId Allocate(LabelId labelId);
     void Free(NodeId nodeId);
@@ -14,7 +14,7 @@ public interface INodeStore
     long InUseCount { get; }
 }
 
-public readonly ref struct NodeReadHandle
+internal readonly ref struct NodeReadHandle
 {
     private readonly NodeId _id;
     private readonly bool _inUse;
@@ -47,7 +47,7 @@ public readonly ref struct NodeReadHandle
 
 // FT-32 v3 layout: Flags(0,1) FirstRelId(1,6) FirstPropId(7,6) LabelId(13,2) — 15 bytes
 // (Xmin/Xmax は NodeVersionMeta sidecar に移管)
-public ref struct NodeWriteHandle
+internal ref struct NodeWriteHandle
 {
     private readonly IPagedFile _file;
     private readonly PageId _pageId;

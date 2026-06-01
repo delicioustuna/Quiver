@@ -20,7 +20,7 @@ namespace Quiver.Telemetry;
 /// 設計判断: <see cref="QuiverTelemetry"/> (ActivitySource / Meter) と同じく
 /// プロセス静的シングルトンに揃えた。マルチ DB 構成でも観測シンクは集約される想定。
 /// </remarks>
-public static partial class QuiverLog
+internal static partial class QuiverLog
 {
     /// <summary>tx 境界用ロガーのカテゴリ名。</summary>
     public const string TransactionCategory = "Quiver.Transaction";

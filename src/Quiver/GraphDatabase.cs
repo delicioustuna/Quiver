@@ -17,7 +17,7 @@ namespace Quiver;
 /// </remarks>
 public sealed class GraphDatabase : IDisposable
 {
-    private readonly IGraphStorageBackend _backend;
+    private readonly IGraphStorageBackendInternal _backend;
     private readonly string _directoryPath;
     // OP-7: AutoVacuum が有効なときのみ非 null。Dispose で停止する。
     private readonly AutoVacuumWorker? _autoVacuumWorker;
@@ -27,7 +27,8 @@ public sealed class GraphDatabase : IDisposable
         string directoryPath,
         AutoVacuumWorker? autoVacuumWorker = null)
     {
-        _backend = backend;
+        // ARCH-2: 内部 SPI へキャスト (binary / SQLite の双方が IGraphStorageBackendInternal を実装)。
+        _backend = (IGraphStorageBackendInternal)backend;
         _directoryPath = directoryPath;
         _autoVacuumWorker = autoVacuumWorker;
     }
@@ -69,10 +70,9 @@ public sealed class GraphDatabase : IDisposable
     };
 
     /// <summary>
-    /// 下層バックエンドを公開する。診断やバックエンド固有機能の利用が目的で、
-    /// 通常の呼び出しは <see cref="BeginTransaction"/> 等を優先する。
+    /// ARCH-2: 下層バックエンド内部 SPI。embedding adapter など内部経路専用で、公開 API ではない。
     /// </summary>
-    public IGraphStorageBackend Backend => _backend;
+    internal IGraphStorageBackendInternal BackendInternal => _backend;
 
     /// <summary>
     /// バルクロード用ローダを開始する。
@@ -132,6 +132,14 @@ public sealed class GraphDatabase : IDisposable
     public Core.IVectorStore Vectors => _backend.Vectors;
 
     /// <summary>
+    /// ARCH-2 / VEC-4: 埋め込みパイプライン (<c>Quiver.Embedding</c>) が消費する
+    /// <see cref="Core.IGraphEngine"/> ブリッジを生成する。グラフ読み取りと
+    /// <paramref name="vectors"/> / <paramref name="catalog"/> を 1 つのエンジン契約に束ねる。
+    /// </summary>
+    public Core.IGraphEngine CreateEmbeddingEngine(Core.IVectorStore vectors, Core.IVectorCatalog catalog)
+        => new GraphEngineAdapter(this, vectors, catalog);
+
+    /// <summary>
     /// データベース全体をスキャンして新しい <see cref="GraphStats"/> スナップショットを返す。
     /// O(N + E) のコストがかかるため、通常は起動時やバルクロード後に 1 回だけ呼ぶ。
     /// </summary>
@@ -160,9 +168,10 @@ public sealed class GraphDatabase : IDisposable
     }
 
     /// <summary>
-    /// 指定の統計 (または新規収集したスナップショット) を背景に持つ <see cref="QueryOptimizer"/> を生成する。
+    /// ARCH-2: <see cref="QueryOptimizer"/> は内部最適化機構のため internal。指定の統計
+    /// (または新規収集したスナップショット) を背景に持つオプティマイザを生成する。
     /// </summary>
-    public QueryOptimizer CreateOptimizer(GraphStats? stats = null)
+    internal QueryOptimizer CreateOptimizer(GraphStats? stats = null)
         => new(stats ?? CollectStats());
 
     /// <summary>

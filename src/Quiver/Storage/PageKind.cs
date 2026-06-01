@@ -1,6 +1,6 @@
 ﻿namespace Quiver.Storage;
 
-public enum PageKind : byte
+internal enum PageKind : byte
 {
     Free = 0,
     NodeRecord = 1,

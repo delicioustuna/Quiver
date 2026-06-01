@@ -3,7 +3,7 @@
 namespace Quiver.Storage.Wal;
 
 /// <summary>WAL ライタ・リーダの統合インタフェース。</summary>
-public interface IWriteAheadLog : IDisposable
+internal interface IWriteAheadLog : IDisposable
 {
     long CurrentLsn { get; }
     long FlushedLsn { get; }

@@ -2,7 +2,7 @@
 
 namespace Quiver.Storage.Records;
 
-public interface IPropertyStore
+internal interface IPropertyStore
 {
     PropertyId Create(PropertyKeyId keyId, in PropertyValue value, PropertyId currentFirst);
     PropertyId Delete(PropertyId propId, PropertyId currentFirst);

@@ -51,26 +51,6 @@ public readonly record struct NodeDegreeSummary(
 }
 
 /// <summary>
-/// Legacy alias kept for source compatibility while BA-8 migrates callers to
-/// <see cref="Quiver.Core.PropertyTypeFlags"/>. The bit values intentionally match
-/// the low bits of <c>PropertyTypeFlags</c> so casts between the two are safe.
-/// </summary>
-[Obsolete("Use Quiver.Core.PropertyTypeFlags instead. PropertyValueTypeMask will be removed.")]
-[Flags]
-public enum PropertyValueTypeMask : uint
-{
-    None   = 0,
-    Bool   = (uint)(PropertyTypeFlags.Bool),
-    Int32  = (uint)(PropertyTypeFlags.Int32),
-    Int64  = (uint)(PropertyTypeFlags.Int64),
-    Double = (uint)(PropertyTypeFlags.Double),
-    String = (uint)(PropertyTypeFlags.String),
-    Bytes  = (uint)(PropertyTypeFlags.Bytes),
-
-    Numeric = Int32 | Int64 | Double,
-}
-
-/// <summary>
 /// Per-property-key statistics. Populated by <see cref="GraphStats.Collect"/>.
 /// </summary>
 public sealed class PropertyKeyStats
@@ -89,11 +69,6 @@ public sealed class PropertyKeyStats
     /// 数値述語 / 文字列述語が原理的にマッチし得るかをオプティマイザが判定するのに使う。
     /// </summary>
     public PropertyTypeFlags ObservedTypes { get; private set; }
-
-    /// <summary>Legacy view of <see cref="ObservedTypes"/>. Kept while callers migrate to <see cref="PropertyTypeFlags"/>.</summary>
-#pragma warning disable CS0618
-    public PropertyValueTypeMask ObservedTypesLegacy => (PropertyValueTypeMask)(uint)ObservedTypes;
-#pragma warning restore CS0618
 
     /// <summary>Total number of property occurrences observed for this key (across nodes + relationships).</summary>
     public long Count { get; private set; }
@@ -321,9 +296,11 @@ public sealed class GraphStats
         };
     }
 
-    public static GraphStats Collect(ITransaction tx) => Collect(tx, PowerNodeDegreeThreshold);
+    // ARCH-2: ITransaction は内部型のため Collect(ITransaction ...) は internal 化。
+    // 公開経路は GraphDatabase.CollectStats()。
+    internal static GraphStats Collect(ITransaction tx) => Collect(tx, PowerNodeDegreeThreshold);
 
-    public static GraphStats Collect(ITransaction tx, int powerNodeThreshold)
+    internal static GraphStats Collect(ITransaction tx, int powerNodeThreshold)
         => Collect(tx, powerNodeThreshold, NodeDegreeLookup.DefaultDenseThreshold);
 
     /// <summary>
@@ -333,7 +310,7 @@ public sealed class GraphStats
     /// for bulk-loaded graphs; tests that intentionally exercise the sparse
     /// fallback can pass a value &lt; 1.0.
     /// </summary>
-    public static GraphStats Collect(ITransaction tx, int powerNodeThreshold, double denseThreshold)
+    internal static GraphStats Collect(ITransaction tx, int powerNodeThreshold, double denseThreshold)
     {
         var labelCard       = new Dictionary<LabelId, long>();
         var edgeFreq        = new Dictionary<RelationshipTypeId, long>();

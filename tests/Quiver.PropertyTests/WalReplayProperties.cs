@@ -25,7 +25,8 @@ public class WalReplayProperties
     /// </summary>
     public sealed record WalOp(byte TypeRaw, long TxId, byte[] Payload)
     {
-        public WalRecordType Type => (WalRecordType)TypeRaw;
+        // ARCH-2: WalRecordType は internal 化したため公開 record 上では internal で露出する。
+        internal WalRecordType Type => (WalRecordType)TypeRaw;
     }
 
     public static Arbitrary<WalOp> WalOpArb()

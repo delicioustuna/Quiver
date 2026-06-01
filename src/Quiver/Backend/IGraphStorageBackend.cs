@@ -12,20 +12,15 @@ namespace Quiver;
 /// </summary>
 public interface IGraphStorageBackend : IDisposable
 {
-    /// <summary>このバックエンドのトランザクションマネージャ。</summary>
-    ITransactionManager Transactions { get; }
+    // ARCH-2: Transactions (ITransactionManager) / Access (IGraphAccessMethods) /
+    // BulkLoad (BulkLoadCapabilities) は内部実装型を露出するため公開面から外し、
+    // internal な IGraphStorageBackendInternal へ移設した。
 
     /// <summary>このバックエンドのスキーマ API。</summary>
     ISchemaApi Schema { get; }
 
     /// <summary>このバックエンドの診断 API。</summary>
     IDiagnosticsApi Diagnostics { get; }
-
-    /// <summary>access methods 抽象 (BA-3)。スキャン / シーク / KNN などの物理アクセス経路を提供する。</summary>
-    IGraphAccessMethods Access { get; }
-
-    /// <summary>バルクロード関連の機能ケイパビリティ。</summary>
-    BulkLoadCapabilities BulkLoad { get; }
 
     /// <summary>
     /// VEC-5: <see cref="IGraphAccessMethods.KnnSearch"/> が利用するベクトルストア。

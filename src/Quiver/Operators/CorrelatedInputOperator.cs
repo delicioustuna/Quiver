@@ -8,7 +8,7 @@ namespace Quiver.Query.Physical;
 /// Open() を呼ぶたびに再アームされるため、SubquerySemiJoinPredicate が Open() を繰り返し呼ぶことで
 /// 外側の各行に対して内側プランを再評価できる。
 /// </summary>
-public sealed class CorrelatedInputOperator : IPhysicalOperator
+internal sealed class CorrelatedInputOperator : IPhysicalOperator
 {
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
     private TupleSlot _bound;

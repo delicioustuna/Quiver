@@ -1,6 +1,6 @@
 ﻿namespace Quiver.Storage.Wal;
 
-public enum WalRecordType : byte
+internal enum WalRecordType : byte
 {
     Begin = 1,
     Commit = 2,

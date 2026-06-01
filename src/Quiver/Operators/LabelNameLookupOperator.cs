@@ -14,7 +14,7 @@ namespace Quiver.Query.Physical;
 /// returns null when the LabelId is unknown — the operator emits an empty
 /// string in that case rather than failing the whole stream.
 /// </remarks>
-public sealed class LabelNameLookupOperator : IPhysicalOperator
+internal sealed class LabelNameLookupOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _nodeColumn;

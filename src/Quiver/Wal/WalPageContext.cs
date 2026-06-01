@@ -6,7 +6,7 @@ namespace Quiver.Storage.Wal;
 /// 書き込みトランザクション中のページイメージロギング用に使われる、スレッドローカルな
 /// WAL コンテキスト。書き込みトランザクション開始時にセットし、Commit / Abort 時にクリアする。
 /// </summary>
-public static class WalPageContext
+internal static class WalPageContext
 {
     [ThreadStatic]
     internal static WriteTransactionContext? Current;

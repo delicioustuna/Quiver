@@ -10,7 +10,7 @@ namespace Quiver.Storage.Records;
 /// <para>localId をインデックスとする growable 配列で O(1) read/write。未書き込みスロットは
 /// <see cref="EntityVersionMeta.Unset"/> を返す (全フィールド 0 を Unset に正規化)。</para>
 /// </summary>
-public sealed class InMemoryEntityVersionStore : IEntityVersionStore
+internal sealed class InMemoryEntityVersionStore : IEntityVersionStore
 {
     private EntityVersionMeta[] _entries = new EntityVersionMeta[256];
     private long _count; // 書き込み済み上限 (= 最大 localId + 1)

@@ -140,17 +140,18 @@ public sealed class FilteredKnnTests : IDisposable
         result.Select(n => n.Value).Should().BeEquivalentTo(docIds);
     }
 
+    // ARCH-2: KnnStrategy は internal 化したため [Theory] の公開シグネチャでは int に投影する。
     [Theory]
-    [InlineData(8L,       100,  10,    /* expected */ KnnStrategy.GraphFirst)]   // tiny candidate set
-    [InlineData(100L,    1_000, 50,    KnnStrategy.GraphFirst)]                  // 10% of index, but threshold is 5%... actually let me pick numbers
-    [InlineData(50L,    10_000, 10,    KnnStrategy.GraphFirst)]                  // 0.5% → graph-first
-    [InlineData(5_000L, 10_000, 10,    KnnStrategy.VectorFirst)]                 // 50% → vector-first
-    [InlineData(0L,     10_000, 10,    KnnStrategy.VectorFirst)]                 // unknown → vector-first
+    [InlineData(8L,       100,  10,    (int)KnnStrategy.GraphFirst)]   // tiny candidate set
+    [InlineData(100L,    1_000, 50,    (int)KnnStrategy.GraphFirst)]   // 10% of index
+    [InlineData(50L,    10_000, 10,    (int)KnnStrategy.GraphFirst)]   // 0.5% → graph-first
+    [InlineData(5_000L, 10_000, 10,    (int)KnnStrategy.VectorFirst)]  // 50% → vector-first
+    [InlineData(0L,     10_000, 10,    (int)KnnStrategy.VectorFirst)]  // unknown → vector-first
     public void ChooseKnnStrategy_picks_by_candidate_fraction(
-        long candidateCount, long totalIndexed, int k, KnnStrategy expected)
+        long candidateCount, long totalIndexed, int k, int expected)
     {
         var optimizer = _db.CreateOptimizer();
         var actual = optimizer.ChooseKnnStrategy(candidateCount, k, totalIndexed);
-        actual.Should().Be(expected);
+        ((int)actual).Should().Be(expected);
     }
 }

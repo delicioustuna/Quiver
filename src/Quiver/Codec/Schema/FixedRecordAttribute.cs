@@ -5,7 +5,7 @@
 /// Source Generator がオフセット定数とアクセサを自動生成する。
 /// </summary>
 [AttributeUsage(AttributeTargets.Struct)]
-public sealed class FixedRecordAttribute : Attribute
+internal sealed class FixedRecordAttribute : Attribute
 {
     public int Size { get; }
     public FixedRecordAttribute(int size) { Size = size; }

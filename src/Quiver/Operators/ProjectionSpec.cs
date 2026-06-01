@@ -3,12 +3,12 @@
 namespace Quiver.Query.Physical;
 
 // TupleRef は ref struct のため Func<> の型引数に使えない。専用インタフェースで代替する。
-public interface IProjectionCompute
+internal interface IProjectionCompute
 {
     TupleSlot Compute(in TupleRef tuple, ITransaction tx);
 }
 
-public sealed class ProjectionSpec
+internal sealed class ProjectionSpec
 {
     public string OutputName { get; }
     public IProjectionCompute Compute { get; }

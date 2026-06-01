@@ -3,7 +3,7 @@ using Quiver.Transactions;
 
 namespace Quiver.Query.Physical;
 
-public sealed class NodeIndexRangeScanOperator : IPhysicalOperator
+internal sealed class NodeIndexRangeScanOperator : IPhysicalOperator
 {
     private readonly string _indexName;
     private readonly ITupleProvider _fromProvider;

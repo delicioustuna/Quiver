@@ -9,7 +9,7 @@ namespace Quiver.Query.Physical;
 /// 内側プランは Evaluate() が呼ばれるたびに Open() でリセットされる。
 /// CorrelatedInputOperator.Open() が re-arm するため、追加アロケーションは発生しない。
 /// </summary>
-public sealed class SubquerySemiJoinPredicate : IPredicate, IDisposable
+internal sealed class SubquerySemiJoinPredicate : IPredicate, IDisposable
 {
     private readonly int _outerEntityColumn;
     private readonly CorrelatedInputOperator _probe;

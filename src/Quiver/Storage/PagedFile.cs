@@ -11,7 +11,7 @@ namespace Quiver.Storage;
 /// MemoryMappedFile + Clock バッファプールによる IPagedFile 実装。
 /// ページ 0 をメタデータページとして使用し、Free List と総ページ数を管理する。
 /// </summary>
-public sealed class PagedFile : IPagedFile
+internal sealed class PagedFile : IPagedFile
 {
     public const int PageSizeConst = 8192;
     public const int BodySize = PageSizeConst - PageHeader.Size;

@@ -137,21 +137,22 @@ public class QueryOptimizerBenchmarks
     }
 
     /// <summary>インデックスなし → LabelScan を選択。</summary>
+    // ARCH-2: ScanKind は internal 化したため戻り値は int に投影 (BDN の DCE 回避目的)。
     [Benchmark(Baseline = true, Description = "SelectScan (LabelScan)")]
-    public ScanKind SelectScanLabelOnly()
-        => _optimizer.SelectScan(_personLabel).Kind;
+    public int SelectScanLabelOnly()
+        => (int)_optimizer.SelectScan(_personLabel).Kind;
 
     /// <summary>高選択率インデックス1候補 → IndexSeek を選択。</summary>
     [Benchmark(Description = "SelectScan (IndexSeek, 1 candidate)")]
-    public ScanKind SelectScanWithSelectiveIndex()
+    public int SelectScanWithSelectiveIndex()
     {
         var candidates = new[] { new IndexCandidate("name_idx", _personLabel, EstimatedRows: 5) };
-        return _optimizer.SelectScan(_personLabel, candidates).Kind;
+        return (int)_optimizer.SelectScan(_personLabel, candidates).Kind;
     }
 
     /// <summary>複数インデックス候補 → 最選択率のものを選択。</summary>
     [Benchmark(Description = "SelectScan (best of 3 candidates)")]
-    public ScanKind SelectScanBestOfThree()
+    public int SelectScanBestOfThree()
     {
         var candidates = new[]
         {
@@ -159,7 +160,7 @@ public class QueryOptimizerBenchmarks
             new IndexCandidate("age_idx",   _personLabel, EstimatedRows: 50),
             new IndexCandidate("score_idx", _personLabel, EstimatedRows: 3),
         };
-        return _optimizer.SelectScan(_personLabel, candidates).Kind;
+        return (int)_optimizer.SelectScan(_personLabel, candidates).Kind;
     }
 
     /// <summary>2ステップ traversal の並び替え。</summary>

@@ -10,7 +10,7 @@ namespace Quiver.Core;
 /// もれなく read-set に入り、SSN が rw-antidependency を取りこぼさない。phantom (述語に新規一致する
 /// 行や隣接の増加) は別途 index versioning が必要なため対象外。</para>
 /// </summary>
-public interface ISsnReadSink
+internal interface ISsnReadSink
 {
     /// <summary>可視なバージョンを 1 件読み取ったことを記録する。</summary>
     void OnVisibleRead(EntityKind kind, long localId);
@@ -32,7 +32,7 @@ public interface ISsnReadSink
 /// (Quiver.Transactions は Stores より上位なので循環参照を避ける目的)。
 /// </para>
 /// </summary>
-public static class MvccContext
+internal static class MvccContext
 {
     [ThreadStatic]
     private static MvccTransactionContext? _current;

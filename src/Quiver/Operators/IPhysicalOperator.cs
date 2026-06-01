@@ -4,7 +4,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>物理演算子の基底契約。Volcano イテレータモデル。</summary>
-public interface IPhysicalOperator : IDisposable
+internal interface IPhysicalOperator : IDisposable
 {
     void Open(ITransaction tx);
     bool MoveNext();
@@ -15,7 +15,7 @@ public interface IPhysicalOperator : IDisposable
 }
 
 /// <summary>演算子間で受け渡されるタプル参照。背後はオペレータ内のバッファ。</summary>
-public readonly ref struct TupleRef
+internal readonly ref struct TupleRef
 {
     private readonly Span<TupleSlot> _slots;
 
@@ -27,7 +27,7 @@ public readonly ref struct TupleRef
 
 /// <summary>タプルの 1 列分。型ごとのユニオン。</summary>
 [StructLayout(LayoutKind.Explicit, Size = 24)]
-public struct TupleSlot
+internal struct TupleSlot
 {
     [FieldOffset(0)] public TupleSlotType Type;
     [FieldOffset(8)] public long LongValue;
@@ -36,7 +36,7 @@ public struct TupleSlot
     [FieldOffset(20)] public int BytesLength;
 }
 
-public enum TupleSlotType : byte
+internal enum TupleSlotType : byte
 {
     Null = 0,
     NodeId = 1,
@@ -48,7 +48,7 @@ public enum TupleSlotType : byte
     Bytes = 7,
 }
 
-public sealed class TupleSchema
+internal sealed class TupleSchema
 {
     public TupleSchema(IReadOnlyList<ColumnDefinition> columns) => Columns = columns;
     public IReadOnlyList<ColumnDefinition> Columns { get; }
@@ -61,9 +61,9 @@ public sealed class TupleSchema
     }
 }
 
-public sealed record ColumnDefinition(string Name, TupleSlotType Type);
+internal sealed record ColumnDefinition(string Name, TupleSlotType Type);
 
-public struct OperatorStatistics
+internal struct OperatorStatistics
 {
     public long RowsProduced;
     public long ExecutionTicks;

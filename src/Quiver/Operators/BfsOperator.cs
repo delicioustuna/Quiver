@@ -20,7 +20,7 @@ namespace Quiver.Query.Physical;
 /// <see cref="VariableLengthExpandOperator"/>, <see cref="ShortestPathOperator"/>
 /// and <see cref="ParallelBfsOperator"/>.
 /// </summary>
-public sealed class BfsOperator : IPhysicalOperator
+internal sealed class BfsOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _srcCol;
@@ -157,7 +157,7 @@ public sealed class BfsOperator : IPhysicalOperator
 /// references can be reused across source nodes (their internal buffers
 /// survive Clear).
 /// </summary>
-public struct FrontierKernelState
+internal struct FrontierKernelState
 {
     public Queue<(NodeId Node, int Depth)>? Frontier;
     public HashSet<long>? Visited;

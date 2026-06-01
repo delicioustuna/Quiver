@@ -958,7 +958,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 // Enumerators
 // -----------------------------------------------------------------------
 
-public ref struct BTreeValueEnumerator
+internal ref struct BTreeValueEnumerator
 {
     private readonly IPagedFile _file;
     private readonly PageId _leaf;
@@ -1004,7 +1004,7 @@ public ref struct BTreeValueEnumerator
     public void Dispose() { }
 }
 
-public ref struct BTreeRangeEnumerator
+internal ref struct BTreeRangeEnumerator
 {
     private readonly IPagedFile _file;
     private PageId _leaf;

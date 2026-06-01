@@ -4,7 +4,7 @@ using Quiver.Storage.Wal;
 
 namespace Quiver.Index;
 
-public sealed class IndexManager : IIndexManager, IDisposable
+internal sealed class IndexManager : IIndexManager, IDisposable
 {
     private readonly string _directory;
     // FT-19: null でない場合、各索引 PagedFile に EnableWalLogging を呼んで物理 PageImage /

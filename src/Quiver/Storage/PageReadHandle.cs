@@ -6,7 +6,7 @@ namespace Quiver.Storage;
 /// 読み取り専用ページハンドル。Dispose で Unpin。
 /// パターンベース using のため IDisposable は実装しない。
 /// </summary>
-public readonly ref struct PageReadHandle
+internal readonly ref struct PageReadHandle
 {
     private readonly IPagedFile _file;
     private readonly PageId _pageId;

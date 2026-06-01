@@ -32,7 +32,7 @@ namespace Quiver.Query.Physical;
 /// <see cref="WeightedPathCodec"/> でシリアライズして <see cref="GetBytes"/> で公開する。
 /// </para>
 /// </remarks>
-public sealed class WeightedShortestPathOperator : IPhysicalOperator
+internal sealed class WeightedShortestPathOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _srcCol;
@@ -204,7 +204,7 @@ public sealed class WeightedShortestPathOperator : IPhysicalOperator
 /// レイアウト (すべて little-endian): <c>[int32 nodeCount][int32 relCount]
 /// [nodeCount × int64 NodeId][relCount × int64 RelationshipId]</c>。
 /// </summary>
-public static class WeightedPathCodec
+internal static class WeightedPathCodec
 {
     /// <summary>ノード列・リレーションシップ列をバイト列にエンコードする。</summary>
     public static byte[] Encode(IReadOnlyList<NodeId> nodes, IReadOnlyList<RelationshipId> relationships)

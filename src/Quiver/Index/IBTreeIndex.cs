@@ -1,6 +1,6 @@
 ﻿namespace Quiver.Index;
 
-public interface IBTreeIndex<TKey> : IDisposable, IBTreeIndexFlushable
+internal interface IBTreeIndex<TKey> : IDisposable, IBTreeIndexFlushable
 {
     void Insert(in TKey key, long value);
     bool Delete(in TKey key, long value);
@@ -21,7 +21,7 @@ public interface IBTreeIndex<TKey> : IDisposable, IBTreeIndexFlushable
 /// FT-22 では orphan GC が型を意識せず全索引を走査するため、生キー / 生エントリ操作も
 /// この non-generic 経路に乗せる。
 /// </summary>
-public interface IBTreeIndexFlushable
+internal interface IBTreeIndexFlushable
 {
     /// <summary>索引バッファプールのダーティページを fsync する。</summary>
     void Flush();
@@ -42,7 +42,7 @@ public interface IBTreeIndexFlushable
     bool DeleteRawEntry(ReadOnlySpan<byte> rawKey, long value);
 }
 
-public readonly ref struct KeyValueEntry
+internal readonly ref struct KeyValueEntry
 {
     private readonly ReadOnlySpan<byte> _keyBytes;
     private readonly long _value;
@@ -56,7 +56,7 @@ public readonly ref struct KeyValueEntry
     }
 }
 
-public interface IIndexManager
+internal interface IIndexManager
 {
     IBTreeIndex<int> CreateInt32Index(string name);
     IBTreeIndex<long> CreateInt64Index(string name);
@@ -128,7 +128,7 @@ public interface IIndexManager
     int RemoveOrphans(IEnumerable<(string IndexName, byte[] RawKey, long Value)> orphans) => 0;
 }
 
-public interface IBulkLoadable<TKey>
+internal interface IBulkLoadable<TKey>
 {
     void BulkLoad(IEnumerable<KeyValuePair<TKey, long>> sortedEntries);
 }

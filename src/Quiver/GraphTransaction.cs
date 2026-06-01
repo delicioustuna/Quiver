@@ -8,7 +8,7 @@ using Quiver.Transactions;
 
 namespace Quiver;
 
-internal sealed class GraphTransaction : IGraphTransaction
+internal sealed class GraphTransaction : IGraphTransactionInternal
 {
     private readonly ITransaction _inner;
     private readonly ITokenStore<LabelId> _labelTokens;

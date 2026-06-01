@@ -1,5 +1,4 @@
 using Quiver.Core;
-using Quiver.Query.Physical;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
 
@@ -131,27 +130,9 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
         in PropertyValue from, bool fromInclusive,
         in PropertyValue to, bool toInclusive);
 
-    /// <summary>
-    /// 隣接ブロックインデックス。<see cref="GraphDatabase.BeginBulkLoad"/> を
-    /// <c>buildAdjacencyIndex: true</c> で完了させた後に利用可。
-    /// </summary>
-    IAdjacencyBlockStore? AdjacencyBlocks { get; }
-
-    /// <summary>
-    /// VEC-12: backend が提供する access methods。クライアント API (例: <c>PendingKnnBuilder</c>)
-    /// が <see cref="IGraphAccessMethods.HasFastLabelIndex"/> /
-    /// <see cref="IGraphAccessMethods.TryGetVectorIndexSpec"/> 等の capability を問い合わせる経路。
-    /// 直接の scan / expand に使うのは推奨しない (それらは <c>g.V()</c> ベースの traversal API を使う)。
-    /// </summary>
-    IGraphAccessMethods Access { get; }
-
-    // ── 物理プラン実行 ────────────────────────────────────
-
-    /// <summary>物理プランを実行して結果を <see cref="QueryResult"/> で返す。</summary>
-    QueryResult Execute(IPhysicalOperator plan);
-
-    /// <summary>物理プランをストリーミング実行し、結果を <see cref="IQueryCursor"/> で逐次取得する。</summary>
-    IQueryCursor ExecuteCursor(IPhysicalOperator plan);
+    // ARCH-2: 物理プラン実行 (Execute/ExecuteCursor)、access methods (Access)、隣接ブロック
+    // (AdjacencyBlocks) は内部実装型を露出するため公開面から除外し、internal な
+    // IGraphTransactionInternal へ移設した (利用者は g.V() ベースの DSL を使う)。
 
     /// <summary>トランザクションをコミットする。</summary>
     void Commit();

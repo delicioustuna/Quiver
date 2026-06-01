@@ -16,7 +16,7 @@ namespace Quiver.Query.Physical;
 /// to <see cref="EntityKind.Relationship"/> are rejected — relationship-KNN
 /// will land as a sibling operator when there is demand.
 /// </remarks>
-public sealed class KnnNodeSourceOperator : IPhysicalOperator
+internal sealed class KnnNodeSourceOperator : IPhysicalOperator
 {
     private readonly string _indexName;
     private readonly float[] _query;

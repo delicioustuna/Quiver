@@ -20,7 +20,7 @@ public enum EntityKind : byte
 /// 内部タグ付き識別子。診断、オペレータ配線、将来のカタログ用途を想定。
 /// オンディスクフォーマットには含まれない — シリアライズする場合は事前にフォーマットバージョンバイトを導入すること。
 /// </summary>
-public readonly record struct EntityId(EntityKind Kind, long LocalId)
+internal readonly record struct EntityId(EntityKind Kind, long LocalId)
 {
     /// <summary>無効値を表す sentinel。</summary>
     public static readonly EntityId Invalid = new((EntityKind)0, -1);

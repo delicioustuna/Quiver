@@ -13,7 +13,7 @@ namespace Quiver.Query.Physical;
 /// a private <see cref="IGraphKernel{TState}"/>; frontier / visited bookkeeping
 /// is shared with <see cref="BfsOperator"/> through <see cref="FrontierKernelState"/>.
 /// </summary>
-public sealed class VariableLengthExpandOperator : IPhysicalOperator
+internal sealed class VariableLengthExpandOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _srcCol;

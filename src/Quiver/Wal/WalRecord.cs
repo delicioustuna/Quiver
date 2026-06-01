@@ -5,7 +5,7 @@ namespace Quiver.Storage.Wal;
 /// <summary>
 /// 読み出された WAL レコード。Payload は内部バッファのスナップショット。
 /// </summary>
-public readonly struct WalRecord
+internal readonly struct WalRecord
 {
     public long Lsn { get; init; }
     public WalRecordType Type { get; init; }

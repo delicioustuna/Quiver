@@ -14,3 +14,7 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("Quiver.Storage.Sqlite.Tests")]
 [assembly: InternalsVisibleTo("Quiver.Storage.Sqlite")]
 [assembly: InternalsVisibleTo("Quiver.Benchmarks")]
+// ARCH-2: 内部実装 (codec / WAL parser / 物理オペレータ) を直接検査する dev/test 系。
+[assembly: InternalsVisibleTo("Quiver.Codec.Tests")]
+[assembly: InternalsVisibleTo("Quiver.FuzzTests")]
+[assembly: InternalsVisibleTo("QuiverSandbox")]

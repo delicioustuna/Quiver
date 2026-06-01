@@ -12,7 +12,7 @@ namespace Quiver.Query.Physical;
 /// 分岐は単一列 NodeId のタプルを返す必要がある。フォールスルー時の形状はソースの
 /// エンティティスロットの逐語コピーなので、出力列は常に単一 NodeId。
 /// </summary>
-public sealed class OptionalOperator : IPhysicalOperator
+internal sealed class OptionalOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _srcCol;

@@ -9,7 +9,7 @@ namespace Quiver.Query.Physical;
 /// エッジ 1 本の重みを取得するための抽象。バックエンドごとに最適な経路
 /// (property-chain 走査 / payload lane / join index) を差し替えられるようにする。
 /// </summary>
-public interface IEdgeWeightProvider
+internal interface IEdgeWeightProvider
 {
     /// <summary>
     /// リレーションシップ <paramref name="relationshipId"/> の重みを返す。
@@ -29,7 +29,7 @@ public interface IEdgeWeightProvider
 /// エッジあたり O(P) (P = そのエッジのプロパティ数)。大規模ホットパスでは
 /// <see cref="PayloadLaneWeightProvider"/> や FT-12 join index 版に差し替えるとよい。
 /// </summary>
-public sealed class PropertyChainWeightProvider : IEdgeWeightProvider
+internal sealed class PropertyChainWeightProvider : IEdgeWeightProvider
 {
     private readonly PropertyKeyId _weightKey;
     private readonly double _defaultWeight;
@@ -75,7 +75,7 @@ public sealed class PropertyChainWeightProvider : IEdgeWeightProvider
 /// <c>PayloadLaneSpec.ForDouble</c> で構築したグラフ向けの、プロパティ参照不要な経路。
 /// payload lane を持たないグラフでは全エッジ重み 0.0 になる点に注意。
 /// </summary>
-public sealed class PayloadLaneWeightProvider : IEdgeWeightProvider
+internal sealed class PayloadLaneWeightProvider : IEdgeWeightProvider
 {
     /// <summary>状態を持たないため共有可能な単一インスタンス。</summary>
     public static readonly PayloadLaneWeightProvider Instance = new();

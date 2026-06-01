@@ -2,7 +2,7 @@
 
 namespace Quiver.Query.Physical;
 
-public sealed class ProjectOperator : IPhysicalOperator
+internal sealed class ProjectOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly ProjectionSpec[] _projections;

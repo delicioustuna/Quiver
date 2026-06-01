@@ -2,6 +2,7 @@
 // v1 → v2 で `User` ラベルを `Person` にリネームし、email 索引を追加する。
 
 using Quiver;
+using Quiver.Api;
 using Quiver.Core;
 using Quiver.Migrations;
 using Quiver.Storage.Records;
@@ -46,10 +47,8 @@ try
         Console.WriteLine("[v2 schema] verifying Person label + email index");
 
         using var tx = db.BeginReadOnlyTransaction();
-        var personLabel = db.Schema.GetOrCreateLabel("Person");
-        int personCount = 0;
-        foreach (var _ in tx.Access.ScanNodes(GetInner(tx), personLabel))
-            personCount++;
+        // 公開 DSL でラベル別にノードを数える (g.V().HasLabel(...).Count())。
+        long personCount = tx.G(db.Schema).Nodes().HasLabel("Person").Count();
         Console.WriteLine($"  Person count = {personCount}");
 
         var indexes = db.Schema.ListIndexes()
@@ -86,16 +85,6 @@ finally
 {
     if (Directory.Exists(dir))
         Directory.Delete(dir, recursive: true);
-}
-
-// MigrationContext.ForEachNode を使わず手動で Access.ScanNodes に渡したい場合の helper。
-// sample ではトランザクション越しに ScanNodes を直接呼ぶデモを兼ねる。
-static Quiver.Transactions.ITransaction GetInner(IGraphTransaction tx)
-{
-    var prop = tx.GetType().GetProperty("Inner",
-        System.Reflection.BindingFlags.Instance |
-        System.Reflection.BindingFlags.NonPublic);
-    return (Quiver.Transactions.ITransaction)prop!.GetValue(tx)!;
 }
 
 internal sealed class V1ToV2_UserToPersonWithEmailIndex : IMigration

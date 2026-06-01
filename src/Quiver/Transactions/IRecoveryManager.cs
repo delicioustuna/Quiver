@@ -1,7 +1,7 @@
 ﻿namespace Quiver.Transactions;
 
 /// <summary>クラッシュリカバリの実行者。エンジン起動時に1回だけ呼ばれる。</summary>
-public interface IRecoveryManager
+internal interface IRecoveryManager
 {
     /// <summary>
     /// WAL を走査し、最後のチェックポイント以降を REDO する。

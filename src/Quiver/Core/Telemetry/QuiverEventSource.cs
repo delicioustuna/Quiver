@@ -44,7 +44,7 @@ namespace Quiver.Telemetry;
 /// </list>
 /// </remarks>
 [EventSource(Name = "Quiver-EventSource")]
-public sealed class QuiverEventSource : EventSource
+internal sealed class QuiverEventSource : EventSource
 {
     /// <summary>プロセス全体の singleton。各 hot path はここから直接インクリメント API を呼ぶ。</summary>
     public static readonly QuiverEventSource Log = new();

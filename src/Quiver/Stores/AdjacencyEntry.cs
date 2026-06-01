@@ -6,7 +6,7 @@ namespace Quiver.Storage.Records;
 /// On-disk: TypeId(2) | RelId(6) | NeighborId(6) = 14 bytes.
 /// In-memory: natural-width fields.
 /// </summary>
-public readonly struct AdjacencyEntry
+internal readonly struct AdjacencyEntry
 {
     public readonly RelationshipTypeId Type;
     public readonly RelationshipId RelId;
@@ -23,7 +23,7 @@ public readonly struct AdjacencyEntry
 /// interpretation of <see cref="PayloadRaw"/> depends on the V2 store's
 /// <see cref="PayloadLaneSpec.Kind"/>.
 /// </summary>
-public readonly struct AdjacencyEntryV2
+internal readonly struct AdjacencyEntryV2
 {
     public readonly RelationshipTypeId Type;
     public readonly RelationshipId RelId;

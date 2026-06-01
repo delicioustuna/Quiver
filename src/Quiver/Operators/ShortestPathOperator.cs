@@ -14,7 +14,7 @@ namespace Quiver.Query.Physical;
 /// <see cref="IGraphKernel{TState}.VisitNeighbor"/> when the target is reached
 /// so the outer loop short-circuits without finishing the current frontier.
 /// </summary>
-public sealed class ShortestPathOperator : IPhysicalOperator
+internal sealed class ShortestPathOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _srcCol;

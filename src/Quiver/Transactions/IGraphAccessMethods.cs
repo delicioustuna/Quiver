@@ -10,7 +10,7 @@ namespace Quiver.Transactions;
 /// このインタフェースを経由してルーティングする。これにより各バックエンドは独自の access path
 /// (リンクリスト、隣接ブロック、リレーションシップスキャン等) を選択できる。
 /// </summary>
-public interface IGraphAccessMethods
+internal interface IGraphAccessMethods
 {
     /// <summary>生存中のノードを列挙する。任意でラベル 1 件に絞り込める。</summary>
     IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null);
@@ -184,7 +184,7 @@ internal sealed class MaterializedVectorSearchCursor(IReadOnlyList<VectorSearchR
 /// <c>BfsOperator</c> 内にインラインで存在していた「隣接ブロックかリンクリストか」の
 /// 場合分けを置き換える。
 /// </summary>
-public abstract class ExpandCursor : IDisposable
+internal abstract class ExpandCursor : IDisposable
 {
     /// <summary>次のエッジに進む。エッジを使い切ったら false を返す。</summary>
     public abstract bool MoveNext();

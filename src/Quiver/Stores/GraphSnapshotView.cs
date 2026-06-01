@@ -16,7 +16,7 @@ namespace Quiver.Storage.Records;
 /// ソースストアが <see cref="IAdjacencyPayloadView"/> を実装している場合のみ weight lane が埋まる。
 /// それ以外では <see cref="HasWeights"/> は false で <see cref="WeightBitsOut"/> は空を返す。
 /// </summary>
-public sealed class GraphSnapshotView : IGraphSnapshotView
+internal sealed class GraphSnapshotView : IGraphSnapshotView
 {
     private long[] _outOffsets;
     private long[] _outNeighbors;

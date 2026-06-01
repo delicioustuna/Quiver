@@ -47,5 +47,15 @@ public readonly struct MatchTuple
     public double Double(string alias) => _row.GetDouble(Column(alias));
 
     /// <summary>エイリアスに紐づくスロットの実型を返す。</summary>
-    public TupleSlotType TypeOf(string alias) => _row.GetSlotType(Column(alias));
+    public MatchValueType TypeOf(string alias) => _row.GetSlotType(Column(alias)) switch
+    {
+        TupleSlotType.NodeId => MatchValueType.Node,
+        TupleSlotType.RelationshipId => MatchValueType.Relationship,
+        TupleSlotType.Bool => MatchValueType.Boolean,
+        TupleSlotType.Int64 => MatchValueType.Int64,
+        TupleSlotType.Double => MatchValueType.Double,
+        TupleSlotType.Utf8String => MatchValueType.String,
+        TupleSlotType.Bytes => MatchValueType.Bytes,
+        _ => MatchValueType.Null,
+    };
 }

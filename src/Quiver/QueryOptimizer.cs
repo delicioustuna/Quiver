@@ -5,18 +5,18 @@ using Quiver.Storage.Records;
 namespace Quiver;
 
 /// <summary>オプティマイザが評価対象とする候補インデックスを表す。</summary>
-public sealed record IndexCandidate(
+internal sealed record IndexCandidate(
     string IndexName,
     LabelId Label,
     long EstimatedRows);
 
 /// <summary>多段トラバーサルプランの 1 ホップ。</summary>
-public sealed record TraversalPlanStep(
+internal sealed record TraversalPlanStep(
     RelationshipTypeId? TypeFilter,
     Direction Direction);
 
 /// <summary>オプティマイザが選択したスキャン種別。</summary>
-public enum ScanKind
+internal enum ScanKind
 {
     /// <summary>全ノードスキャン。</summary>
     AllNodesScan,
@@ -31,7 +31,7 @@ public enum ScanKind
 /// <c>IGraphAccessMethods.Expand</c> 実装はこのヒントを無視して独自の access path を
 /// 選ぶ自由がある。PW-17 で本格的なプランディスパッチを追加する。
 /// </summary>
-public enum ExpandStrategy
+internal enum ExpandStrategy
 {
     /// <summary>ノード毎の隣接ブロック fast path + リンクリストフォールバック (バイナリバックエンドの既定)。</summary>
     AdjacencyBlock = 1,
@@ -42,7 +42,7 @@ public enum ExpandStrategy
 }
 
 /// <summary><see cref="QueryOptimizer.SelectExpandPlan"/> が返す展開プラン。</summary>
-public sealed record ExpandPlan(
+internal sealed record ExpandPlan(
     ExpandStrategy Strategy,
     double EstimatedFanOut)
 {
@@ -67,7 +67,7 @@ public sealed record ExpandPlan(
 }
 
 /// <summary><see cref="QueryOptimizer.SelectScan"/> が返すスキャン決定。</summary>
-public sealed record ScanPlan(
+internal sealed record ScanPlan(
     ScanKind Kind,
     LabelId? Label,
     string? IndexName,
@@ -88,7 +88,7 @@ public sealed record ScanPlan(
 /// コストベースクエリオプティマイザ。<see cref="GraphStats"/> を使って中間結果サイズを
 /// 最小化するスキャンストラテジとトラバーサル順を選ぶ。
 /// </summary>
-public sealed class QueryOptimizer
+internal sealed class QueryOptimizer
 {
     // 推定行数がラベル件数のこの比率を下回るときに IndexSeek を採用する。
     private const double IndexSelectivityThreshold = 0.05;
@@ -318,7 +318,7 @@ public sealed class QueryOptimizer
 /// フィルタを適用、graph-first は候補集合を計算してから KNN-within-set を求め、
 /// hybrid は将来のスコアリランクプラン拡張点として予約。
 /// </summary>
-public enum KnnStrategy
+internal enum KnnStrategy
 {
     /// <summary>KNN を先に評価する。</summary>
     VectorFirst = 1,
