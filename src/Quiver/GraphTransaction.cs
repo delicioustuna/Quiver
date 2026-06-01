@@ -168,25 +168,31 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     private void InsertIntoIndex(string indexName, in PropertyValue value, NodeId nodeId)
     {
+        long packed = PackNode(nodeId);
         switch (value.Type)
         {
             case PropertyValueType.Bool:
             case PropertyValueType.Int32:
             case PropertyValueType.Int64:
-                _inner.Indexes.CreateInt64Index(indexName).Insert(value.Int64Value, nodeId.Value);
+                _inner.Indexes.CreateInt64Index(indexName).Insert(value.Int64Value, packed);
                 break;
             case PropertyValueType.Double:
-                _inner.Indexes.CreateDoubleIndex(indexName).Insert(value.DoubleValue, nodeId.Value);
+                _inner.Indexes.CreateDoubleIndex(indexName).Insert(value.DoubleValue, packed);
                 break;
             case PropertyValueType.String:
             {
                 var s = System.Text.Encoding.UTF8.GetString(value.Utf8StringValue);
-                _inner.Indexes.CreateStringIndex(indexName).Insert(s, nodeId.Value);
+                _inner.Indexes.CreateStringIndex(indexName).Insert(s, packed);
                 break;
             }
             // Bytes / 他は現状未対応 — フォールスルー (=フルスキャン経路と同等の安全動作)。
         }
     }
+
+    // ARCH-3: 索引の値レーンに (Kind=Node, Sequence=nodeId, Generation=現世代) をパックする。
+    // 解決時に現 slot 世代と照合して slot 再利用 (ABA) の stale 参照を弾けるようにする。
+    private long PackNode(NodeId nodeId)
+        => GenerationalRef.Pack(EntityKind.Node, nodeId.Value, _inner.Nodes.CurrentGeneration(nodeId.Value));
 
     // ========== リレーション操作 ==========
 
@@ -381,13 +387,13 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     // ========== インデックス ==========
 
     public void IndexInsert(string indexName, string key, NodeId nodeId)
-        => _inner.Indexes.CreateStringIndex(indexName).Insert(key, nodeId.Value);
+        => _inner.Indexes.CreateStringIndex(indexName).Insert(key, PackNode(nodeId));
 
     public void IndexInsert(string indexName, long key, NodeId nodeId)
-        => _inner.Indexes.CreateInt64Index(indexName).Insert(key, nodeId.Value);
+        => _inner.Indexes.CreateInt64Index(indexName).Insert(key, PackNode(nodeId));
 
     public void IndexInsert(string indexName, double key, NodeId nodeId)
-        => _inner.Indexes.CreateDoubleIndex(indexName).Insert(key, nodeId.Value);
+        => _inner.Indexes.CreateDoubleIndex(indexName).Insert(key, PackNode(nodeId));
 
     public NodeIdEnumerator SeekIndex(string indexName, in PropertyValue key)
     {
@@ -402,7 +408,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                     System.Text.Encoding.UTF8.GetString(key.Utf8StringValue)),
             _ => [],
         };
-        return new NodeIdEnumerator(values);
+        // ARCH-3: パック値を世代照合しつつ NodeId.Value へ unpack する。
+        return new NodeIdEnumerator(IndexValueResolver.ResolveLiveNodeSequences(values, _inner.Nodes));
     }
 
     public NodeIdEnumerator RangeIndex(
@@ -433,7 +440,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                 values = [];
                 break;
         }
-        return new NodeIdEnumerator(values);
+        // ARCH-3: パック値を世代照合しつつ NodeId.Value へ unpack する。
+        return new NodeIdEnumerator(IndexValueResolver.ResolveLiveNodeSequences(values, _inner.Nodes));
     }
 
     // ========== 物理プラン実行 ==========

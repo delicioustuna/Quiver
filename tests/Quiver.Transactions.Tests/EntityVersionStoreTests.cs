@@ -91,9 +91,9 @@ public sealed class EntityVersionStoreTests : IDisposable
     {
         using var store = CreateStore();
 
-        // RecordsPerPage = 255 なので、255 番目 (= 2 ページ目の先頭) は別 page に乗る
+        // ARCH-3: entry 32→40B で RecordsPerPage = 8160/40 = 204。rpp 番目は別 page に乗る
         int rpp = EntityVersionStore.RecordsPerPage;
-        rpp.Should().Be(255);
+        rpp.Should().Be(204);
 
         var lastOnPage1 = new EntityVersionMeta(Xmin: 100, Xmax: 0, Pstamp: 0, Sstamp: long.MaxValue);
         var firstOnPage2 = new EntityVersionMeta(Xmin: 200, Xmax: 0, Pstamp: 0, Sstamp: long.MaxValue);

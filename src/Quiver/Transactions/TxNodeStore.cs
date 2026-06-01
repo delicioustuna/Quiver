@@ -78,6 +78,9 @@ internal sealed class TxNodeStore : INodeStore
         return _inner.Scan();
     }
 
+    // ARCH-3: 世代照合は raw な sidecar 読み取り (MVCC / lock 不要)。そのまま委譲する。
+    public int CurrentGeneration(long localId) => _inner.CurrentGeneration(localId);
+
     private void ActivateMvccContext()
     {
         if (_committed != null)

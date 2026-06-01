@@ -17,12 +17,21 @@ internal static class FormatVersion
     /// v3: FT-32 MVCC sidecar レイアウト。record から xmin/xmax を撤去し、EntityKind 別の
     /// sidecar (<see cref="Quiver.Wal.WalFileKind.NodeVersionMeta"/> 等) に移管した。record が縮み
     /// (Node 31→15B / Rel 64→48B / Prop 57→41B)、cache line residency が改善する。v2 とはバイト配置が
-    /// 非互換 (record サイズが縮小し、xmin/xmax が別ファイルに移る)。
+    /// 非互換 (record サイズが縮小し、xmin/xmax が別ファイルに移る)。ARCH-3 より開けない。
     /// </summary>
     public const byte V3MvccSidecar = 3;
 
+    /// <summary>
+    /// v4: ARCH-3 索引 Generation レイアウト。EntityVersionMeta sidecar に slot incarnation を表す
+    /// Generation レーンを追加し (entry 32→40B)、B+Tree 索引の値レーンを
+    /// <see cref="EntityRef"/> (Kind/Generation/Sequence) でパックする。slot 再利用に伴う stale
+    /// 索引エントリ (ABA) を解決時の世代照合で弾けるようにする。v3 とは sidecar entry サイズが
+    /// 非互換。
+    /// </summary>
+    public const byte V4IndexGeneration = 4;
+
     /// <summary>現行 (= 新規 DB を作成するときに書き込むバージョン)。</summary>
-    public const byte Current = V3MvccSidecar;
+    public const byte Current = V4IndexGeneration;
 }
 
 /// <summary>

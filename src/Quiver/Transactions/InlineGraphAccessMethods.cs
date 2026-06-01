@@ -48,12 +48,8 @@ internal sealed class InlineGraphAccessMethods : IGraphAccessMethods
                     .SeekValues(Encoding.UTF8.GetString(key.Utf8StringValue)),
             _ => [],
         };
-        return WrapNodeIds(ids);
-    }
-
-    private static IEnumerable<NodeId> WrapNodeIds(IEnumerable<long> ids)
-    {
-        foreach (var v in ids) yield return new NodeId(v);
+        // ARCH-3: パック値を世代照合しつつ NodeId へ unpack し、slot 再利用の stale 参照を弾く。
+        return IndexValueResolver.ResolveLiveNodeIds(ids, tx.Nodes);
     }
 
     public ExpandCursor Expand(

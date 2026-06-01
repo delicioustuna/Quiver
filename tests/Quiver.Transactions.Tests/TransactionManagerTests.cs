@@ -285,6 +285,7 @@ public class TransactionManagerTests : IDisposable
         public NodeReadHandle Read(NodeId nodeId) => throw new NotSupportedException();
         public NodeWriteHandle Write(NodeId nodeId) => throw new NotSupportedException();
         public IEnumerable<NodeId> Scan() => [];
+        public int CurrentGeneration(long localId) => -1;
     }
 
     private sealed class StubRelationshipStore : IRelationshipStore

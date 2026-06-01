@@ -80,19 +80,29 @@ internal sealed class NodeStore : INodeStore
     {
         // FT-26: 論理削除に伴うチェーン非解除で free list の slot を物理的に再利用しなくなる。
         // フリーリストは vacuum (OP-3) 完了時にのみエントリが入る。それまでは hwm 単調増加。
-        long id;
-        if (_freeHead >= 0)
+        // ARCH-3: slot を再利用するたびに Generation を +1 する。世代は sidecar に残るため
+        // (vacuum / hwm shrink は sidecar を消さない)、free を跨いで前回値を読んで継ぐ。
+        long id = -1;
+        while (_freeHead >= 0)
         {
-            id = _freeHead;
-            var (fpid, foff) = Location(id);
-            using var fh = _file.PinForRead(fpid);
-            _freeHead = RecordHelpers.ReadInt48(fh.Data[(foff + 1)..]);
+            long candidate = _freeHead;
+            var (fpid, foff) = Location(candidate);
+            using (var fh = _file.PinForRead(fpid))
+                _freeHead = RecordHelpers.ReadInt48(fh.Data[(foff + 1)..]);
+            // ARCH-3: 世代が上限に達した slot は再利用しない (free list から外して永久退役)。
+            // wraparound で古い索引エントリの世代と衝突するのを防ぐ。
+            if (_versions.Read(candidate).Generation >= GenerationalRef.MaxGeneration)
+                continue;
+            id = candidate;
+            break;
         }
-        else
-        {
+        if (id < 0)
             id = _hwm++;
-        }
         _inUseCount++;
+
+        // hwm shrink で縮んだ slot が再び hwm 経由で割り当たる場合も sidecar に旧世代が残るため、
+        // free / hwm のどちらの経路でも「現世代 + 1」を発番する (新規 slot は Unset→0→1)。
+        long generation = _versions.Read(id).Generation + 1;
 
         var (wpid, woff) = Location(id);
         EnsurePage(wpid);
@@ -106,7 +116,8 @@ internal sealed class NodeStore : INodeStore
         _file.UnpinDirty(wpid, 0);
 
         // FT-32: xmin/xmax は sidecar に書く。Pstamp=0 / Sstamp=MaxValue は SSN (FT-33) の既定。
-        _versions.Write(id, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue));
+        // ARCH-3: Generation を同時に書き込む。
+        _versions.Write(id, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue, generation));
 
         FlushMeta();
         var newId = new NodeId(id);
@@ -233,7 +244,23 @@ internal sealed class NodeStore : INodeStore
         _file.UnpinDirty(wpid, 0);
         // FT-26/FT-32: bulk load は MvccContext が無いことが多いため Bootstrap TxId を xmin に。
         // CommittedTxRegistry には常に Bootstrap が登録済みなので全 snapshot で可視。
-        _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue));
+        // ARCH-3: bulk load は新規 slot 割当のみ (再利用しない) なので Generation = 1。
+        _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue, 1));
+    }
+
+    /// <summary>
+    /// ARCH-3: slot <paramref name="localId"/> の現在の世代 (incarnation) を返す。索引値
+    /// (<see cref="GenerationalRef"/>) の世代照合で stale 参照を弾くのに使う。範囲外 / 負は -1。
+    /// MVCC 可視性は適用せず sidecar の世代だけを読む (= 索引の非可視フィルタ挙動を維持しつつ
+    /// slot 再利用のみ検出する)。物理 free な slot も sidecar には旧世代が残るが、その slot を
+    /// 指す古い索引エントリは「同世代」で一致し得る — 呼び出し側の後続 Read が InUse=false で
+    /// 弾くため、現挙動 (FT-30 defensive read) と等価。
+    /// </summary>
+    public int CurrentGeneration(long localId)
+    {
+        if (localId < 0) return -1;
+        long gen = _versions.Read(localId).Generation;
+        return gen > int.MaxValue ? int.MaxValue : (int)gen;
     }
 
     internal void BulkUpdateFirstProp(long id, long firstPropId)
@@ -423,8 +450,8 @@ internal sealed class NodeStore : INodeStore
     {
         using var h = _file.PinForRead(HeaderPageId);
         byte v = h.Data[MetaFormatVersion];
-        if (v != FormatVersion.V3MvccSidecar)
-            throw new FormatVersionMismatchException("nodes", v, FormatVersion.V3MvccSidecar);
+        if (v != FormatVersion.V4IndexGeneration)
+            throw new FormatVersionMismatchException("nodes", v, FormatVersion.V4IndexGeneration);
     }
 
     private void FlushMeta(bool initialise = false)
@@ -434,7 +461,7 @@ internal sealed class NodeStore : INodeStore
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaHwm..], _hwm);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaInUse..], _inUseCount);
         if (initialise)
-            ph.Data[MetaFormatVersion] = FormatVersion.V3MvccSidecar;
+            ph.Data[MetaFormatVersion] = FormatVersion.V4IndexGeneration;
         _file.UnpinDirty(HeaderPageId, 0);
     }
 }

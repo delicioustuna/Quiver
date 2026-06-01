@@ -12,6 +12,12 @@ internal interface INodeStore
     NodeWriteHandle Write(NodeId nodeId);
     IEnumerable<NodeId> Scan();
     long InUseCount { get; }
+
+    /// <summary>
+    /// ARCH-3: slot <paramref name="localId"/> の現在の世代 (incarnation)。範囲外 / 負は -1。
+    /// 索引値 (<see cref="Quiver.Core.GenerationalRef"/>) の世代照合に使う。
+    /// </summary>
+    int CurrentGeneration(long localId);
 }
 
 internal readonly ref struct NodeReadHandle

@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using Quiver.Storage.Records;
 using Quiver.Transactions;
 
 namespace Quiver.Query.Physical;
@@ -69,7 +70,9 @@ internal sealed class NodeIndexRangeScanOperator : IPhysicalOperator
                 nodeIds = [];
                 break;
         }
-        _enumerator = nodeIds.GetEnumerator();
+        // ARCH-3: 索引値はパック済み (Kind/Generation/Sequence)。世代照合しつつ
+        // NodeId.Value へ unpack し、slot 再利用 (ABA) の stale 参照を弾く。
+        _enumerator = IndexValueResolver.ResolveLiveNodeSequences(nodeIds, tx.Nodes).GetEnumerator();
     }
 
     public bool MoveNext()

@@ -91,19 +91,8 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     /// </summary>
     public IndexConsistencyReport CheckIndexConsistency()
     {
-        var orphans = new List<(string IndexName, byte[] RawKey, long Value)>();
-        int indexCount = 0;
-        long entryCount = 0;
-        if (_indexManager != null)
-        {
-            (indexCount, entryCount) = _indexManager.CollectOrphans(IsLiveNode, orphans);
-        }
-
-        long labelOrphans = CountLabelIndexOrphans();
-
-        var orphanEntries = new List<OrphanIndexEntry>(orphans.Count);
-        foreach (var (name, key, value) in orphans)
-            orphanEntries.Add(new OrphanIndexEntry(name, key, value));
+        var (indexCount, entryCount, rawOrphans, labelOrphans) = ScanOrphans();
+        var orphanEntries = ToPublicOrphans(rawOrphans);
 
         // OB-2: index-orphan-count gauge は CheckIndexConsistency が呼ばれた時点の観測値を保持。
         // B+Tree orphan + LabelIndex orphan の合計。
@@ -124,37 +113,65 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     /// orphan が 1 件でもあれば <c>Invalidate()</c> して次回 lookup での再構築に委ねる
     /// (in-memory index なので部分削除より rebuild の方が簡潔)。
     /// </summary>
+    /// <remarks>
+    /// ARCH-3: 削除は索引に格納された raw な packed 値 (<see cref="GenerationalRef"/>) で行う必要がある
+    /// (<c>DeleteRawEntry</c> は値の完全一致で消すため)。公開 <see cref="OrphanIndexEntry.EntityId"/> は
+    /// unpacked な NodeId.Value なので、削除には内部 raw リストを使う。
+    /// </remarks>
     public IndexRepairReport RepairIndexes(IndexRepairMode mode)
     {
-        var report = CheckIndexConsistency();
+        var (_, _, rawOrphans, labelOrphans) = ScanOrphans();
+        var orphanEntries = ToPublicOrphans(rawOrphans);
+
         if (mode == IndexRepairMode.DryRun)
-            return new IndexRepairReport(0, report.Orphans, false);
+            return new IndexRepairReport(0, orphanEntries, false);
 
         int removed = 0;
-        if (_indexManager != null && report.Orphans.Count > 0)
-        {
-            var pairs = new List<(string, byte[], long)>(report.Orphans.Count);
-            foreach (var o in report.Orphans)
-                pairs.Add((o.IndexName, o.RawKey, o.EntityId));
-            removed = _indexManager.RemoveOrphans(pairs);
-        }
+        if (_indexManager != null && rawOrphans.Count > 0)
+            removed = _indexManager.RemoveOrphans(rawOrphans);
 
         bool labelInvalidated = false;
-        if (_labelIndex != null && report.LabelIndexOrphanCount > 0)
+        if (_labelIndex != null && labelOrphans > 0)
         {
             _labelIndex.Invalidate();
             labelInvalidated = true;
         }
 
-        return new IndexRepairReport(removed, report.Orphans, labelInvalidated);
+        return new IndexRepairReport(removed, orphanEntries, labelInvalidated);
     }
 
-    private bool IsLiveNode(long entityIdValue)
+    /// <summary>
+    /// 全 B+Tree 索引を 1 回走査し、(走査索引数, 走査エントリ数, raw orphan 一覧, LabelIndex orphan 数)
+    /// を返す。raw orphan の <c>Value</c> は索引に格納された packed 値 (削除に使う)。
+    /// </summary>
+    private (int IndexCount, long EntryCount, List<(string IndexName, byte[] RawKey, long Value)> Raw, long LabelOrphans) ScanOrphans()
     {
-        // FT-22: B+Tree 索引は IndexInsert 経路でしか書かれず、現状は NodeId 限定。
-        // RelationshipId に拡張された場合は EntityKind を載せる必要があるが、いまは Node のみ。
-        var nodeId = new NodeId(entityIdValue);
-        return _nodeStore.Read(nodeId).InUse;
+        var raw = new List<(string IndexName, byte[] RawKey, long Value)>();
+        int indexCount = 0;
+        long entryCount = 0;
+        if (_indexManager != null)
+            (indexCount, entryCount) = _indexManager.CollectOrphans(IsLiveNode, raw);
+        return (indexCount, entryCount, raw, CountLabelIndexOrphans());
+    }
+
+    /// <summary>raw orphan (packed 値) を公開 <see cref="OrphanIndexEntry"/> (unpacked NodeId.Value) へ変換。</summary>
+    private static List<OrphanIndexEntry> ToPublicOrphans(List<(string IndexName, byte[] RawKey, long Value)> raw)
+    {
+        var list = new List<OrphanIndexEntry>(raw.Count);
+        foreach (var (name, key, value) in raw)
+            list.Add(new OrphanIndexEntry(name, key, GenerationalRef.Sequence(value)));
+        return list;
+    }
+
+    private bool IsLiveNode(long packedValue)
+    {
+        // FT-22 / ARCH-3: B+Tree 索引値は EntityRef でパック済み (Kind/Generation/Sequence)。
+        // 索引は現状 Node 限定。Node 以外、物理的に解放済み (InUse=false)、または slot が
+        // 再利用されて世代が食い違う (ABA) エントリは orphan とみなす。
+        if (GenerationalRef.Kind(packedValue) != EntityKind.Node) return false;
+        long seq = GenerationalRef.Sequence(packedValue);
+        return _nodeStore.Read(new NodeId(seq)).InUse
+            && _nodeStore.CurrentGeneration(seq) == GenerationalRef.Generation(packedValue);
     }
 
     private long CountLabelIndexOrphans()
