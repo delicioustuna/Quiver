@@ -1,5 +1,7 @@
-﻿using System.Text;
+﻿using System.Buffers.Binary;
+using System.Text;
 using Quiver.Core;
+using Quiver.Storage;
 
 namespace Quiver.Storage.Records;
 
@@ -27,19 +29,43 @@ internal interface ITokenStore<TToken> where TToken : struct
 // シンプルな append-only 設計で、open 時に全量をメモリへ読み込む。
 // -----------------------------------------------------------------------
 
+/// <summary>
+/// ARCH-4: トークンの永続化方式を抽象化する。<see cref="FileTokenPersistence"/> は従来の
+/// <c>*.tok</c> サイドカーファイル、<see cref="PagedTokenPersistence"/> は単一ファイルコンテナの
+/// テナント (<see cref="IPagedFile"/>) に格納する。
+/// </summary>
+internal interface ITokenPersistence : IDisposable
+{
+    /// <summary>永続化済みの全フレームを id 昇順で列挙する。</summary>
+    IEnumerable<(int Id, byte[] Utf8)> Load();
+
+    /// <summary>現在の全フレーム (<paramref name="byId"/>) を丸ごと書き戻す。</summary>
+    void Persist(IReadOnlyDictionary<int, byte[]> byId);
+}
+
 internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposable where TToken : struct
 {
-    private readonly string _filePath;
+    private readonly ITokenPersistence _persistence;
     protected readonly Dictionary<string, TToken> _byName = new(StringComparer.Ordinal);
     protected readonly Dictionary<int, byte[]> _byId = new();
     private int _nextId;
-    private FileStream? _stream;
 
-    protected TokenStoreBase(string filePath)
+    protected TokenStoreBase(ITokenPersistence persistence)
     {
-        _filePath = filePath;
-        Load();
+        _persistence = persistence;
+        foreach (var (id, utf8) in _persistence.Load())
+        {
+            string name = Encoding.UTF8.GetString(utf8);
+            _byName[name] = MakeToken(id);
+            _byId[id] = utf8;
+            if (id >= _nextId) _nextId = id + 1;
+        }
     }
+
+    protected TokenStoreBase(string filePath) : this(new FileTokenPersistence(filePath)) { }
+
+    /// <summary>ARCH-4: 単一ファイルコンテナのテナント上にトークンを格納する。</summary>
+    protected TokenStoreBase(IPagedFile file) : this(new PagedTokenPersistence(file)) { }
 
     public TToken GetOrCreate(ReadOnlySpan<char> name)
     {
@@ -52,7 +78,7 @@ internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposabl
         byte[] utf8 = Encoding.UTF8.GetBytes(key);
         _byName[key] = token;
         _byId[id] = utf8;
-        Append(id, utf8);
+        _persistence.Persist(_byId);
         return token;
     }
 
@@ -98,24 +124,48 @@ internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposabl
         _byName[newName] = token;
         _byId[id] = Encoding.UTF8.GetBytes(newName);
 
-        RewriteFile();
+        _persistence.Persist(_byId);
         return true;
     }
 
-    private void RewriteFile()
-    {
-        // append-only 形式を保ったまま、現在のメモリ状態を tmp に書き出し、replace。
-        // 既存 _stream を一度閉じてからファイルを差し替える。
-        _stream?.Flush();
-        _stream?.Dispose();
-        _stream = null;
+    protected abstract TToken MakeToken(int id);
+    protected abstract int GetId(TToken token);
 
+    public void Dispose() => _persistence.Dispose();
+}
+
+/// <summary>
+/// 従来の <c>*.tok</c> append-only ファイル裏付け。フレーム: <c>[id:4][nameLen:2][name:N]</c>。
+/// </summary>
+internal sealed class FileTokenPersistence : ITokenPersistence
+{
+    private readonly string _filePath;
+
+    public FileTokenPersistence(string filePath) => _filePath = filePath;
+
+    public IEnumerable<(int Id, byte[] Utf8)> Load()
+    {
+        if (!File.Exists(_filePath)) yield break;
+        using var fs = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var reader = new BinaryReader(fs, Encoding.UTF8, leaveOpen: true);
+        while (fs.Position < fs.Length)
+        {
+            int id = reader.ReadInt32();
+            int nameLen = reader.ReadUInt16();
+            byte[] utf8 = reader.ReadBytes(nameLen);
+            yield return (id, utf8);
+        }
+    }
+
+    public void Persist(IReadOnlyDictionary<int, byte[]> byId)
+    {
+        // atomic rewrite: tmp に全フレームを書いて fsync → replace。
         string dir = Path.GetDirectoryName(_filePath) ?? ".";
         string tmpPath = Path.Combine(dir, Path.GetFileName(_filePath) + ".tmp");
         using (var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
         using (var writer = new BinaryWriter(fs, Encoding.UTF8, leaveOpen: true))
         {
-            foreach (var (id, utf8) in _byId.OrderBy(kv => kv.Key))
+            foreach (var (id, utf8) in byId.OrderBy(kv => kv.Key))
             {
                 writer.Write(id);
                 writer.Write((ushort)utf8.Length);
@@ -124,54 +174,111 @@ internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposabl
             fs.Flush(flushToDisk: true);
         }
         File.Move(tmpPath, _filePath, overwrite: true);
-        _stream = new FileStream(_filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
-        _stream.Seek(0, SeekOrigin.End);
     }
 
-    protected abstract TToken MakeToken(int id);
-    protected abstract int GetId(TToken token);
+    public void Dispose() { }
+}
 
-    private void Load()
+/// <summary>
+/// ARCH-4: 単一ファイルコンテナのテナント (<see cref="IPagedFile"/>) 裏付け。トークン辞書は小さい
+/// (通常 1 ページ) ので、変更ごとに全フレームを直列化してページ連鎖へ書き戻す (rewrite-all)。
+/// レイアウト: 論理 page1 = ヘッダ <c>[frameCount:4][blobLen:8]</c>、論理 page2.. = 直列化ブロブ。
+/// 物理ページなので WAL / recovery / checkpoint がそのまま効く。
+/// </summary>
+internal sealed class PagedTokenPersistence : ITokenPersistence
+{
+    private static readonly PageId HeaderPage = new(1);
+    private const int HdrFrameCount = 0; // int32
+    private const int HdrBlobLen = 4;    // int64
+    private static int BodySize => PagedFile.BodySize;
+
+    private readonly IPagedFile _file;
+
+    public PagedTokenPersistence(IPagedFile file) => _file = file;
+
+    public IEnumerable<(int Id, byte[] Utf8)> Load()
     {
-        if (!File.Exists(_filePath)) return;
-        _stream = new FileStream(_filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
-        using var reader = new BinaryReader(_stream, Encoding.UTF8, leaveOpen: true);
-        while (_stream.Position < _stream.Length)
+        if (_file.PageCount <= 1) yield break; // ヘッダ未確立 = 空
+        int frameCount;
+        long blobLen;
         {
-            int id = reader.ReadInt32();
-            int nameLen = reader.ReadUInt16();
-            byte[] utf8 = reader.ReadBytes(nameLen);
-            string name = Encoding.UTF8.GetString(utf8);
-            TToken token = MakeToken(id);
-            _byName[name] = token;
-            _byId[id] = utf8;
-            if (id >= _nextId) _nextId = id + 1;
+            using var h = _file.PinForRead(HeaderPage);
+            frameCount = BinaryPrimitives.ReadInt32LittleEndian(h.Data[HdrFrameCount..]);
+            blobLen = BinaryPrimitives.ReadInt64LittleEndian(h.Data[HdrBlobLen..]);
         }
-        _stream.Seek(0, SeekOrigin.End);
+        if (frameCount == 0 || blobLen == 0) yield break;
+
+        byte[] blob = new byte[blobLen];
+        int off = 0;
+        long logical = 2;
+        while (off < blobLen)
+        {
+            using var h = _file.PinForRead(new PageId(logical));
+            int n = (int)Math.Min(BodySize, blobLen - off);
+            h.Data[..n].CopyTo(blob.AsSpan(off));
+            off += n;
+            logical++;
+        }
+
+        int pos = 0;
+        for (int i = 0; i < frameCount; i++)
+        {
+            int id = BinaryPrimitives.ReadInt32LittleEndian(blob.AsSpan(pos)); pos += 4;
+            int nameLen = BinaryPrimitives.ReadUInt16LittleEndian(blob.AsSpan(pos)); pos += 2;
+            byte[] utf8 = blob.AsSpan(pos, nameLen).ToArray(); pos += nameLen;
+            yield return (id, utf8);
+        }
     }
 
-    public void Dispose()
+    public void Persist(IReadOnlyDictionary<int, byte[]> byId)
     {
-        _stream?.Flush();
-        _stream?.Dispose();
-        _stream = null;
+        // 直列化
+        int byteLen = 0;
+        foreach (var kv in byId) byteLen += 4 + 2 + kv.Value.Length;
+        byte[] blob = new byte[byteLen];
+        int pos = 0;
+        foreach (var (id, utf8) in byId.OrderBy(kv => kv.Key))
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(blob.AsSpan(pos), id); pos += 4;
+            BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(pos), (ushort)utf8.Length); pos += 2;
+            utf8.CopyTo(blob.AsSpan(pos)); pos += utf8.Length;
+        }
+
+        int dataPages = byteLen == 0 ? 0 : (byteLen + BodySize - 1) / BodySize;
+        EnsureLogical(1 + dataPages); // ヘッダ(logical 1) + data(logical 2..1+dataPages)
+
+        // データページを書く
+        int off = 0;
+        for (int p = 0; p < dataPages; p++)
+        {
+            var w = _file.PinForWrite(new PageId(2 + p));
+            int n = Math.Min(BodySize, byteLen - off);
+            w.Data.Clear();
+            blob.AsSpan(off, n).CopyTo(w.Data);
+            off += n;
+            _file.UnpinDirty(new PageId(2 + p), 0);
+        }
+
+        // ヘッダを書く
+        var wh = _file.PinForWrite(HeaderPage);
+        BinaryPrimitives.WriteInt32LittleEndian(wh.Data[HdrFrameCount..], byId.Count);
+        BinaryPrimitives.WriteInt64LittleEndian(wh.Data[HdrBlobLen..], byteLen);
+        _file.UnpinDirty(HeaderPage, 0);
     }
 
-    private void Append(int id, byte[] utf8)
+    private void EnsureLogical(long maxLogical)
     {
-        _stream ??= new FileStream(_filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
-        _stream.Seek(0, SeekOrigin.End);
-        using var writer = new BinaryWriter(_stream, Encoding.UTF8, leaveOpen: true);
-        writer.Write(id);                   // 32 ビット整数
-        writer.Write((ushort)utf8.Length);  // 16 ビット符号なし整数
-        writer.Write(utf8);
-        _stream.Flush();
+        while (_file.PageCount <= maxLogical)
+            _file.AllocatePage(PageKind.TokenRecord);
     }
+
+    public void Dispose() { }
 }
 
 internal sealed class LabelTokenStore : TokenStoreBase<LabelId>
 {
     public LabelTokenStore(string filePath) : base(filePath) { }
+    public LabelTokenStore(IPagedFile file) : base(file) { }
     protected override LabelId MakeToken(int id) => new(id);
     protected override int GetId(LabelId token) => token.Value;
 }
@@ -179,6 +286,7 @@ internal sealed class LabelTokenStore : TokenStoreBase<LabelId>
 internal sealed class RelationshipTypeTokenStore : TokenStoreBase<RelationshipTypeId>
 {
     public RelationshipTypeTokenStore(string filePath) : base(filePath) { }
+    public RelationshipTypeTokenStore(IPagedFile file) : base(file) { }
     protected override RelationshipTypeId MakeToken(int id) => new(id);
     protected override int GetId(RelationshipTypeId token) => token.Value;
 }
@@ -186,6 +294,7 @@ internal sealed class RelationshipTypeTokenStore : TokenStoreBase<RelationshipTy
 internal sealed class PropertyKeyTokenStore : TokenStoreBase<PropertyKeyId>
 {
     public PropertyKeyTokenStore(string filePath) : base(filePath) { }
+    public PropertyKeyTokenStore(IPagedFile file) : base(file) { }
     protected override PropertyKeyId MakeToken(int id) => new(id);
     protected override int GetId(PropertyKeyId token) => token.Value;
 }
