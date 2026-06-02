@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using Quiver.Core;
+using Quiver.Storage.Wal;
 
 namespace Quiver.Storage;
 
@@ -109,6 +110,24 @@ internal sealed class SingleFileContainer : IDisposable
     internal PageId AllocatePhysical(PageKind kind) => _physical.AllocatePage(kind);
 
     internal void FreePhysical(PageId phys) => _physical.FreePage(phys);
+
+    /// <summary>
+    /// option B: 全テナント (= 物理ページ全体) を単一の <paramref name="dataFileKind"/> で WAL
+    /// ロギング対象にする。物理ページ ID は全テナント横断で一意なので、WAL / recovery は純物理
+    /// ページ単位で動く。recovery 時は fileRegistry に <c>{ dataFileKind: container.Physical }</c>
+    /// を渡せば PageImage / CLR が物理ページへ透過適用される。
+    /// </summary>
+    internal void EnableWalLogging(byte dataFileKind, IWriteAheadLog wal)
+        => _physical.EnableWalLogging(dataFileKind, wal);
+
+    /// <summary>
+    /// recovery が物理 page1 (カタログ root) を書き戻した後に、in-memory のテナント記述子を
+    /// 再読込する。<b>テナントを open する前に呼ぶこと</b> (open 済みテナントの記述子参照は更新しない)。
+    /// </summary>
+    internal void ReloadCatalog()
+    {
+        lock (_gate) LoadCatalog();
+    }
 
     /// <summary>記述子 (logicalPageCount / freeHead / pageTableHead) の変更をカタログページへ書き戻す。</summary>
     internal void PersistCatalogEntry(CatalogEntry entry)
