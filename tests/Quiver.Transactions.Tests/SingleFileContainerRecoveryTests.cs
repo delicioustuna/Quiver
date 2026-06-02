@@ -90,7 +90,7 @@ public class SingleFileContainerRecoveryTests : IDisposable
         using var dst = new SingleFileContainer(_crashPath);
         var registry = new Dictionary<byte, IPagedFile> { { DataFileKind, dst.Physical } };
         new RecoveryManager(new NullPageManager(), _wal, registry).Recover();
-        dst.ReloadCatalog();
+        dst.ReloadAll();
 
         var recovered = OpenNodeStore(dst);
         using var h = recovered.Read(id);
@@ -123,7 +123,7 @@ public class SingleFileContainerRecoveryTests : IDisposable
         using var dst = new SingleFileContainer(_crashPath);
         var registry = new Dictionary<byte, IPagedFile> { { DataFileKind, dst.Physical } };
         new RecoveryManager(new NullPageManager(), _wal, registry).Recover();
-        dst.ReloadCatalog();
+        dst.ReloadAll();
 
         // 中断 tx のレコード / ヘッダ更新は redo されないため、ノードは存在しない (hwm は pre-tx のまま)。
         var recovered = OpenNodeStore(dst);

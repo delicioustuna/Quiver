@@ -187,6 +187,15 @@ internal sealed class TenantPagedFile : IPagedFile
         }
     }
 
+    /// <summary>
+    /// recovery / abort 後に in-memory page table をディスクから再読込する。<see cref="_entry"/> は
+    /// <see cref="SingleFileContainer.ReloadAll"/> が in-place 更新済みである前提。
+    /// </summary>
+    internal void ReloadPageTable()
+    {
+        lock (_gate) LoadPageTable();
+    }
+
     private void LoadPageTable()
     {
         _pageTable.Clear();

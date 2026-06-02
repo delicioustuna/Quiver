@@ -121,12 +121,19 @@ internal sealed class SingleFileContainer : IDisposable
         => _physical.EnableWalLogging(dataFileKind, wal);
 
     /// <summary>
-    /// recovery が物理 page1 (カタログ root) を書き戻した後に、in-memory のテナント記述子を
-    /// 再読込する。<b>テナントを open する前に呼ぶこと</b> (open 済みテナントの記述子参照は更新しない)。
+    /// recovery / abort (CLR undo) が物理 page1 (カタログ root) と page-table ページを書き戻した
+    /// 後に、in-memory のテナント記述子 (CatalogEntry) と各 open テナントの page table を
+    /// ディスクから再同期する。記述子は <b>in-place 更新</b>するため、open 済みテナントが保持する
+    /// CatalogEntry 参照はそのまま有効。
     /// </summary>
-    internal void ReloadCatalog()
+    internal void ReloadAll()
     {
-        lock (_gate) LoadCatalog();
+        lock (_gate)
+        {
+            LoadCatalog(inPlace: true);
+            foreach (var tenant in _tenants.Values)
+                tenant.ReloadPageTable();
+        }
     }
 
     /// <summary>記述子 (logicalPageCount / freeHead / pageTableHead) の変更をカタログページへ書き戻す。</summary>
@@ -155,9 +162,9 @@ internal sealed class SingleFileContainer : IDisposable
     // カタログ I/O
     // ------------------------------------------------------------------
 
-    private void LoadCatalog()
+    private void LoadCatalog(bool inPlace = false)
     {
-        _catalog.Clear();
+        if (!inPlace) _catalog.Clear();
         long catalogPage = CatalogRootPageId.Value;
         while (catalogPage >= 0)
         {
@@ -171,7 +178,17 @@ internal sealed class SingleFileContainer : IDisposable
                 for (long i = 0; i < count && offset + DescriptorSize <= body.Length; i++, offset += DescriptorSize)
                 {
                     var entry = ReadDescriptor(body[offset..]);
-                    _catalog[entry.TenantId] = entry;
+                    // in-place: open 済みテナントの CatalogEntry 参照を保つため、既存はフィールド更新。
+                    if (inPlace && _catalog.TryGetValue(entry.TenantId, out var existing))
+                    {
+                        existing.PageTableHead = entry.PageTableHead;
+                        existing.LogicalPageCount = entry.LogicalPageCount;
+                        existing.LogicalFreeHead = entry.LogicalFreeHead;
+                    }
+                    else
+                    {
+                        _catalog[entry.TenantId] = entry;
+                    }
                 }
                 catalogPage = next;
             }

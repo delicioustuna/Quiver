@@ -13,6 +13,16 @@ internal sealed class PageManager : IPageManager
         return file;
     }
 
+    /// <summary>
+    /// ARCH-4: 外部 (SingleFileContainer) が生成済みの <see cref="IPagedFile"/> を管理下に取り込み、
+    /// <see cref="FlushAll"/> / <see cref="Files"/> / <see cref="Dispose"/> の対象にする。
+    /// 単一ファイルコンテナの物理ファイルを checkpoint / snapshot 経路に乗せるのに使う。
+    /// </summary>
+    public void Adopt(IPagedFile file)
+    {
+        lock (_filesLock) _files.Add(file);
+    }
+
     public void FlushAll()
     {
         IPagedFile[] snapshot;
