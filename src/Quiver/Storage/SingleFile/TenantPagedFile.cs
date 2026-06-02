@@ -108,6 +108,49 @@ internal sealed class TenantPagedFile : IPagedFile
     public void WritePageForRecovery(PageId pageId, ReadOnlySpan<byte> pageBytes)
         => _physical.WritePageForRecovery(Translate(pageId), pageBytes);
 
+    /// <summary>
+    /// OP-5 vacuum: テナント論理空間を <paramref name="newPageCount"/> 論理ページへ縮小し、除去
+    /// される論理ページの物理ページをグローバル free list へ返却する (= 物理ページ再利用での回収)。
+    /// 物理ファイル自体は縮まないが、解放ページは他テナントへ再割当できる。
+    ///
+    /// crash 安全な順序: ① page table エントリを unmapped に + LogicalPageCount 縮小 + カタログ
+    /// 永続化 → ② flush (= クリア済みマッピングを durable に) → ③ 物理ページ解放 → ④ flush。
+    /// ②の後にクラッシュしても「page table はもう指していない」ので、解放途中でも ABA は起きない。
+    /// </summary>
+    public void Truncate(long newPageCount)
+    {
+        lock (_gate)
+        {
+            if (newPageCount < 1) newPageCount = 1;
+            if (newPageCount >= _entry.LogicalPageCount) return; // 拡張は無視
+
+            // 除去される論理ページの物理ページを収集。
+            var toFree = new List<long>();
+            for (long l = newPageCount; l < _entry.LogicalPageCount; l++)
+            {
+                if (l < _pageTable.Count && _pageTable[(int)l] >= 0)
+                    toFree.Add(_pageTable[(int)l]);
+            }
+
+            // ① page table を unmapped に + 論理 free list を破棄 + 論理ページ数を縮小。
+            for (long l = newPageCount; l < _entry.LogicalPageCount; l++)
+                if (l < _pageTable.Count) SetPageTableEntry((int)l, -1L);
+            _entry.LogicalPageCount = newPageCount;
+            _entry.LogicalFreeHead = 0; // 除去範囲を指しうる free 連鎖を破棄
+            _container.PersistCatalogEntry(_entry);
+
+            // ② クリア済みマッピングを durable 化してから物理ページを解放する。
+            _physical.Flush();
+
+            // ③ 物理ページをグローバル free list へ返却 (他テナントが再利用可能)。
+            foreach (var p in toFree)
+                _container.FreePhysical(new PageId(p));
+
+            // ④ free list を durable 化。
+            _physical.Flush();
+        }
+    }
+
     // テナントは物理ファイルを所有しない (所有権は SingleFileContainer)。dispose は no-op。
     public void Dispose() { }
 

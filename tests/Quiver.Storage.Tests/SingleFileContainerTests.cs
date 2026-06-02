@@ -165,6 +165,39 @@ public class SingleFileContainerTests : IDisposable
     // ------------------------------------------------------------------
 
     [Fact]
+    public void Truncate_ReclaimsTenantPages_AndPersists()
+    {
+        string path = DbFile();
+        using (var c = new SingleFileContainer(path))
+        {
+            var t = c.OpenTenant(1, PageKind.NodeRecord);
+            for (int i = 0; i < 10; i++)
+                WriteMarker(t, t.AllocatePage(PageKind.NodeRecord), 100 + i);
+            t.PageCount.Should().Be(11); // logical 0 予約 + 10
+
+            ((IPagedFile)t).Truncate(6); // 論理 1..5 を残し 6..10 を除去
+            t.PageCount.Should().Be(6);
+
+            // 残った論理ページは読める。
+            ReadMarker(t, new PageId(1)).Should().Be(100);
+            ReadMarker(t, new PageId(5)).Should().Be(104);
+
+            // 解放された物理ページは再割当で再利用され、論理は 6 から再成長する。
+            var reused = t.AllocatePage(PageKind.NodeRecord);
+            reused.Value.Should().Be(6);
+            WriteMarker(t, reused, 999);
+            c.Flush();
+        }
+        using (var c = new SingleFileContainer(path))
+        {
+            var t = c.OpenTenant(1, PageKind.NodeRecord);
+            t.PageCount.Should().Be(7);
+            ReadMarker(t, new PageId(1)).Should().Be(100);
+            ReadMarker(t, new PageId(6)).Should().Be(999);
+        }
+    }
+
+    [Fact]
     public void PageTableChaining_AcrossManyPages_PersistsAcrossReopen()
     {
         string path = DbFile();
