@@ -3,6 +3,70 @@
 > 作成: 2026-06-02 / ブランチ: develop / 指示書: `plans/arch4-to-arch8-rearchitecture-phases.md` §2
 > 着手承認: 取得済み (ユーザ「本タスクで実施」/ Open API = ファイルパスに変更)
 
+---
+
+## ★ 引き継ぎサマリ (2026-06-03 時点 / 別セッション再開用) ★
+
+**状態: コア完了・全テストスイート緑。残り = 完全 single-file-at-rest 化 (索引/adjacency/WAL/API/format)。**
+SKILL.md 分類 K の ARCH-4 行は **未** のまま (完了承認前)。
+
+### 完了済み (develop, commit `b0eecb4` → `1b3533b`)
+- 増分1 `b0eecb4`: `SingleFileContainer` + `TenantPagedFile` (論理↔物理 page table) + page テスト。
+- 増分2a `a20b027`: 実ストア (NodeStore/Rel/EntityVersionStore) がテナント上で無改修動作。
+- 増分2b `fe37549`: コンテナ上の WAL logging + crash recovery。
+- 増分3a `fc50d22`: トークンストアを `IPagedFile` テナントへ永続化可能に (`PagedTokenPersistence`)。
+- 増分3b `e641a4b`: `container.ReloadAll` / `PageManager.Adopt` / `TenantPagedFile.ReloadPageTable`。
+- 増分3c `d11cd99`: `TenantPagedFile.Truncate` (テナントページ回収)。
+- 増分4 `1b3533b`: **本番 `BinaryGraphStorageBackendFactory` を単一コンテナへ全面切替**。
+  コア store + version sidecar + token を `graph.quiver` 1 ファイルに同居。`BufferPoolSize` 実配線。
+  **全テストスイート緑** (Backend 186 incl. chaos120/crash-contract, Operators 167, Transactions 79,
+  SQLite 60, Quiver.Tests 442, 他)。
+
+### 設計上の確定事項 (再導出不要・厳守)
+- **option B**: 全テナントを 1 物理ページ空間に集約し、WAL/recovery/checkpoint は **純物理ページ単位**
+  で温存。物理層は既存 `PagedFile` を 1 個だけ再利用。論理→物理変換は runtime のみ。
+- **`DataFileKind = 0x20`** (`BinaryGraphStorageBackendFactory`)。**1 にしてはいけない** (旧
+  `WalFileKind.Nodes=1` と衝突 → vacuum の FileTruncate が `graph.quiver` 全体を物理 truncate する事故)。
+  カタログ内テナント ID は別空間で core=1..10 (TenantNodes..TenantPropKeyTok)。索引予約は 0x40+。
+- **recovery は必ず OpenTenant より前に実行**。kill 後 reopen でカタログ/page-table の content が
+  未フラッシュで失われうるため、recovery が物理 page1 (カタログ) + page-table を WAL 復元してから
+  `container.ReloadAll()` → `OpenTenant`。順序を崩すと committed データ取りこぼし。
+- **トークンは abort で in-memory 辞書を `TokenStoreBase.Reload()` で再同期**。トークンページが
+  コンテナ WAL 対象になり CLR でディスクが巻き戻るが辞書は残るため、後続 commit が再永続化を
+  スキップし reopen で消える。`ReloadStoreMeta` デリゲート (= AbortUndoHandler コールバック) で reload。
+- **`container.ReloadAll()`**: テナント未 open 時は全再読込 (`LoadCatalog(inPlace:false)`)、open 済みは
+  in-place 更新 + 各テナント `ReloadPageTable()` (CatalogEntry 参照を保つため)。
+- **vacuum**: `TenantPagedFile` には WAL `WriteFileTruncate` を書かない (テナント truncate は論理 +
+  自己 flush)。物理ファイルは縮まず、ページはグローバル free list へ回収され再利用される。
+
+### 現在の静止時ファイル構成 (まだ完全単一ではない)
+`<dir>/graph.quiver` (コア+sidecar+token) + `<dir>/wal/wal.*.log` (segment 群) +
+索引使用時 `<dir>/indexes/*.idx + .idxmeta + .fileKinds` + bulk load 時 `<dir>/adj.*`。
+`GraphDatabase.Open(directory)` のまま (ファイルパス API は増分8)。
+
+### 残り増分 (build/test 緑を保ち別コミット。推奨順)
+- **増分5 (索引, 中リスク)**: B+Tree 索引 + メタを container へ。`IndexManager` を container-only へ
+  整理 (FileKindCatalog/EnableWalLogging/runtimeFileRegistry/.idxmeta 撤去 → 索引はコンテナテナント
+  = DataFileKind, 索引カタログ name→{tenantId, PropertyTypeFlags} をコンテナ内テナントへ直列化)。
+  recovery は単一 fileKind で簡素化。`new IndexManager(dir)` 直叩きテスト約16箇所 (IndexManagerTypeSafetyTests
+  / BTreeIndexTests / PropertyTests) を container 生成へ移行。RenameIndex は tenantId 不変で簡素化。
+  DropIndex は catalog 除去 + tenant truncate。snapshot の `IndexFiles` は空に (graph.quiver に同居)。
+- **増分6 (adjacency, 中)**: adjacency block (V1/V2) + epoch/meta を container テナント/カタログへ。
+  `adj.*` 全廃。BulkLoader / CompactAdjacency / factory の adjacency 読込経路を container へ。
+- **増分7 (WAL, 高リスク・最重要)**: `wal/` segment 群 → `graph.quiver-wal` 単一サイドカー。
+  クリーン終了 (Dispose) で最終 checkpoint → WAL 削除 (静止時 graph.quiver のみ)。`WriteAheadLog` の
+  segment 管理を単一ファイル + compaction (sharp checkpoint 後に live tail を前詰め or reset) へ。
+  Wal.Tests 33 + recovery + chaos120 が安全網。
+- **増分8 (仕上げ, 機械的)**: `GraphDatabase.Open(directory)` → `Open(filePath="*.quiver")` (154 呼び出し
+  箇所 + DirectoryPath 系 API + Migration/Snapshot の path 解決を追従)。`FormatVersion` V4→V5 (旧は
+  `FormatVersionMismatchException`)。`Quiver.approved.txt` (PublicApi) 再承認。完了条件全確認後、
+  ユーザ完了承認を得て SKILL.md 分類 K の ARCH-4 を ✅ に更新 + 指示書 §2 に要約追記。
+
+### 再開コマンド
+新セッションで `/quiver-implement arch-4` を起動 → 本ファイルの本節を読み、**増分5 (索引) から再開**。
+
+---
+
 ## 0. 再考結論 (スコープ)
 
 - **ARCH-4 と ARCH-5a を統合**して実施する。理由: 完了条件「静止時=単一ファイル」を満たすには
