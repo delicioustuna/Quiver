@@ -50,7 +50,7 @@ public class FilterChainExpandBenchmarks
         // KNOWS エッジ: Person 間で AvgDegree 本ずつ
         // WORKS_AT エッジ: Person → Company (各 Person 1 本)
         var rnd = new Random(42);
-        using (var db = GraphDatabase.Open(_dbPath))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver")))
         {
             // schema をウォームアップ
             using (var schemaTx = db.BeginTransaction())
@@ -126,7 +126,7 @@ public class FilterChainExpandBenchmarks
             }
         }
 
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _readTx = _db.BeginReadOnlyTransaction();
     }
 

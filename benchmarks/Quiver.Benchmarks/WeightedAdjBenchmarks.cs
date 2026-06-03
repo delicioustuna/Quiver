@@ -40,7 +40,7 @@ public class WeightedAdjBenchmarks
         // V2 path: bulk-load with payload lane configured, weights inlined.
         _v2Path = BenchTempDir.Create("v2");
         {
-            using var db = GraphDatabase.Open(_v2Path);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_v2Path, "graph.quiver"));
             var key = db.Schema.GetOrCreatePropertyKey(WeightProp);
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
             loader.WithPayloadLane(PayloadLaneSpec.ForInt64(key.Value));
@@ -54,7 +54,7 @@ public class WeightedAdjBenchmarks
             }
             loader.Commit();
         }
-        _v2Db = GraphDatabase.Open(_v2Path);
+        _v2Db = GraphDatabase.Open(System.IO.Path.Combine(_v2Path, "graph.quiver"));
         _v2Tx = _v2Db.BeginTransaction();
 
         // V1 path: bulk-load without payload lane, then set the weight via
@@ -63,7 +63,7 @@ public class WeightedAdjBenchmarks
         // cost a non-V2 user would pay.
         _v1Path = BenchTempDir.Create("v1");
         {
-            using var db = GraphDatabase.Open(_v1Path);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_v1Path, "graph.quiver"));
             using (var loader = db.BeginBulkLoad(buildAdjacencyIndex: false))
             {
                 loader.AppendNode(new NodeId(0), new LabelId(0));
@@ -82,7 +82,7 @@ public class WeightedAdjBenchmarks
             }
             tx.Commit();
         }
-        _v1Db = GraphDatabase.Open(_v1Path);
+        _v1Db = GraphDatabase.Open(System.IO.Path.Combine(_v1Path, "graph.quiver"));
         _v1Tx = _v1Db.BeginTransaction();
 
         _hub = new NodeId(0);

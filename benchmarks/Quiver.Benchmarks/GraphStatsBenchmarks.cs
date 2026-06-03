@@ -27,7 +27,7 @@ public class GraphStatsBenchmarks
         _dbPath = BenchTempDir.Create("stats");
 
         {
-            using var db = GraphDatabase.Open(_dbPath);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: false);
 
             // 3 labels: Person(60%), Car(30%), City(10%)
@@ -57,7 +57,7 @@ public class GraphStatsBenchmarks
             loader.Commit();
         }
 
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
     }
 
     [GlobalCleanup]
@@ -98,7 +98,7 @@ public class QueryOptimizerBenchmarks
         _dbPath = BenchTempDir.Create("opt");
 
         {
-            using var db = GraphDatabase.Open(_dbPath);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: false);
 
             for (int i = 0; i < 10_000; i++)
@@ -117,7 +117,7 @@ public class QueryOptimizerBenchmarks
             loader.Commit();
         }
 
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _personLabel = new LabelId(0);
         _carLabel    = new LabelId(1);
         _knowsType   = new RelationshipTypeId(0);

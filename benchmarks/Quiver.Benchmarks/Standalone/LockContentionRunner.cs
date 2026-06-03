@@ -120,7 +120,7 @@ public static class LockContentionRunner
         {
             // Seed: 1 hot node with a Int64 property.
             NodeId hot;
-            using (var db = GraphDatabase.Open(dir, new GraphDatabaseOptions
+            using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions
             {
                 LockingMode = mode,
                 LockTimeout = TimeSpan.FromSeconds(2),
@@ -132,7 +132,7 @@ public static class LockContentionRunner
                 tx.Commit();
             }
 
-            using var db2 = GraphDatabase.Open(dir, new GraphDatabaseOptions
+            using var db2 = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions
             {
                 LockingMode = mode,
                 LockTimeout = TimeSpan.FromSeconds(2),

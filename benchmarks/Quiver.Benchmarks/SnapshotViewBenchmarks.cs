@@ -41,7 +41,7 @@ public class SnapshotViewBenchmarks
 
         var rng = new Random(42);
         {
-            using var db = GraphDatabase.Open(_dbPath);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
             for (int i = 0; i < NodeCount; i++)
                 loader.AppendNode(new NodeId(i), new LabelId(0));
@@ -61,7 +61,7 @@ public class SnapshotViewBenchmarks
             }
             loader.Commit();
         }
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _readTx = _db.BeginTransaction();
     }
 

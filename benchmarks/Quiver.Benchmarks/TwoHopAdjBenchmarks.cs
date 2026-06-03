@@ -28,7 +28,7 @@ public class TwoHopAdjBenchmarks
     {
         _dbPath = BenchTempDir.Create("2hop_adj");
         {
-            using var db = GraphDatabase.Open(_dbPath);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
 
             // Node IDs: hub=0, mid=[1..Degree], leaf=[Degree+1..]
@@ -51,7 +51,7 @@ public class TwoHopAdjBenchmarks
             }
             loader.Commit();
         }
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _hub = new NodeId(0);
         _readTx = _db.BeginTransaction();
     }

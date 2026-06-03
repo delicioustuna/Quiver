@@ -30,7 +30,7 @@ public class MultiHopOperatorBenchmarks
     {
         _dbPath = BenchTempDir.Create("mhop");
         {
-            using var db = GraphDatabase.Open(_dbPath);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
 
             long nodeId = 0;
@@ -69,7 +69,7 @@ public class MultiHopOperatorBenchmarks
 
             loader.Commit();
         }
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _hub = new NodeId(0);
         _readTx = _db.BeginTransaction();
     }

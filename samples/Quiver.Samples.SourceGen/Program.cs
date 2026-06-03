@@ -10,7 +10,7 @@ using Quiver.Samples.SourceGen;
 string dir = Path.Combine(Path.GetTempPath(), "quiver_sourcegen_" + Guid.NewGuid().ToString("N")[..8]);
 try
 {
-    using var db = GraphDatabase.Open(dir);
+    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     // [GraphIndexed] 付き全プロパティのインデックスを SourceGenerator 生成情報から一括作成。
     db.EnsureIndexes<Person>();
 

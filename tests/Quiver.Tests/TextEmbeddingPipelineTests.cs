@@ -29,7 +29,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_vec4_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         _catalog = new JsonFileVectorCatalog(Path.Combine(_dir, "vector_catalog.json"));
         _engine = new GraphEngineAdapter(_db, _vectors, _catalog);
 

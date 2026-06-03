@@ -25,7 +25,7 @@ public class OneHopBenchmarks
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("1hop");
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
 
         using var tx = _db.BeginTransaction();
         _hub = tx.CreateNode("Hub");

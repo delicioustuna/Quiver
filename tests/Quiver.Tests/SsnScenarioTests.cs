@@ -20,7 +20,7 @@ namespace Quiver.Tests;
 public sealed class SsnScenarioTests
 {
     private static GraphDatabase Open(string dir)
-        => GraphDatabase.Open(dir, new GraphDatabaseOptions
+        => GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions
         {
             // ww cycle (lost update / 相互上書き) は SSN ではなく wait-for graph で解く。
             DeadlockDetectionInterval = TimeSpan.FromMilliseconds(100),

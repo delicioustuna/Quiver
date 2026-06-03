@@ -32,11 +32,12 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     private readonly DiagnosticsApi _diagnostics;
     private readonly IGraphAccessMethods _access;
     private readonly BulkLoadCapabilities _bulkLoad;
-    private readonly string _directoryPath;
+    // ARCH-4 増分8: 単一コンテナ (*.quiver) のフルパス。WAL サイドカー = _containerPath + "-wal"。
+    private readonly string _containerPath;
     private readonly ILogicalMutationSink? _logicalSink;
 
     internal BinaryGraphStorageBackend(
-        string directoryPath,
+        string containerPath,
         SingleFileContainer container,
         PageManager pageManager,
         WriteAheadLog wal,
@@ -59,7 +60,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         int adaptiveSampleWindow = 1000)
     {
         _logicalSink = logicalSink;
-        _directoryPath = directoryPath;
+        _containerPath = containerPath;
         _container = container;
         _vectors = vectors;
         _pageManager = pageManager;
@@ -97,6 +98,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
                 buildAdjacencyIndex ? _container : null),
         };
     }
+
+    // ARCH-4 増分8: *.quiver の親ディレクトリ (operational metadata = migrations.history の保存先)。
+    public string DataDirectory => Path.GetDirectoryName(_containerPath) is { Length: > 0 } d ? d : ".";
 
     public ITransactionManager Transactions => _txManager;
     public ISchemaApi Schema => _schema;
@@ -216,56 +220,30 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         return vac.Run(options);
     }
 
-    public void CreateSnapshot(string targetDirectory, SnapshotOptions? options = null)
+    public void CreateSnapshot(string targetFilePath, SnapshotOptions? options = null)
     {
-        ArgumentException.ThrowIfNullOrEmpty(targetDirectory);
+        ArgumentException.ThrowIfNullOrEmpty(targetFilePath);
         options ??= new SnapshotOptions();
 
-        Directory.CreateDirectory(targetDirectory);
+        // ARCH-4 増分8: snapshot ターゲットも単一ファイル (*.quiver)。親ディレクトリを用意する。
+        var parentDir = Path.GetDirectoryName(targetFilePath);
+        if (!string.IsNullOrEmpty(parentDir)) Directory.CreateDirectory(parentDir);
 
         _txManager.RequestCheckpoint();
 
-        // 1. ページファイル群を page-by-page で複製。データファイル + 隣接 PagedFile が対象。
-        //    索引 PagedFile は IndexManager が直接 new するため IPageManager.Files には居ない。
-        //    index PagedFile は下の IndexFiles ループでカバーする。
-        foreach (var src in _pageManager.Files)
-        {
-            string srcPath = src.Path;
-            if (string.IsNullOrEmpty(srcPath)) continue;
-            string relative = Path.GetRelativePath(_directoryPath, srcPath);
-            if (relative.StartsWith("..", StringComparison.Ordinal)) continue;
-            if (relative.Length == 0 || relative == ".") continue;
+        // 1. コンテナ (graph.quiver = コア / 索引 / 隣接 / token / epoch を同居) を page-by-page で
+        //    複製する。PinForRead でフレームレベル read lock を取りながら写すので、並行 writer は
+        //    同一ページ衝突時だけ短く待つ (block しない)。IncludeIndexes は単一ファイルでは no-op
+        //    (索引はコンテナに同居するため常に含まれる)。
+        CopyPagedFile(_container.Physical, targetFilePath);
 
-            string dstPath = Path.Combine(targetDirectory, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(dstPath)!);
-            CopyPagedFile(src, dstPath);
-        }
-
-        // 1b. 索引 PagedFile (.idx)。IncludeIndexes=false なら丸ごとスキップ。
-        if (options.IncludeIndexes)
-        {
-            foreach (var src in _indexManager.IndexFiles)
-            {
-                string srcPath = src.Path;
-                if (string.IsNullOrEmpty(srcPath)) continue;
-                string relative = Path.GetRelativePath(_directoryPath, srcPath);
-                if (relative.StartsWith("..", StringComparison.Ordinal)) continue;
-                string dstPath = Path.Combine(targetDirectory, relative);
-                Directory.CreateDirectory(Path.GetDirectoryName(dstPath)!);
-                CopyPagedFile(src, dstPath);
-            }
-        }
-
-        // 2. 非ページファイル (トークン / 隣接 / メタ) を File.Copy で複製。
-        CopyAuxiliaryFiles(targetDirectory, options);
-
-        // 3. ARCH-4 増分7: WAL を末尾までフラッシュしてから単一サイドカー graph.quiver-wal を複製。
+        // 2. ARCH-4 増分7/8: WAL を末尾までフラッシュしてから単一サイドカー *.quiver-wal を複製。
         //    Drain で出される PageImage 等もここで durable になる。target を開くと recovery が
         //    この WAL を replay して整合する。
         _wal.FlushTo(_wal.CurrentLsn);
-        var srcWal = Path.Combine(_directoryPath, "graph.quiver-wal");
+        var srcWal = _containerPath + "-wal";
         if (File.Exists(srcWal))
-            CopySharedFile(srcWal, Path.Combine(targetDirectory, "graph.quiver-wal"));
+            CopySharedFile(srcWal, targetFilePath + "-wal");
     }
 
     private static void CopyPagedFile(IPagedFile src, string dstPath)
@@ -284,17 +262,6 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             fs.Write(buf, 0, pageSize);
         }
         fs.Flush(flushToDisk: true);
-    }
-
-    private void CopyAuxiliaryFiles(string targetDirectory, SnapshotOptions options)
-    {
-        // ARCH-4 増分5/6: コア store / version sidecar / token / 索引 / 隣接ブロック / epoch は
-        // すべて graph.quiver に同居するため、CreateSnapshot の page-by-page コピー
-        // (pageManager.Files) が一括でカバーする。独立サイドカー (labels.tok / adj_*.dat /
-        // adj.epoch / *.idx 等) は廃止されたので、ここで追加コピーするものは無い。
-        // 静止外のファイルは WAL セグメントのみで、それは CreateSnapshot 側で複製する。
-        _ = targetDirectory;
-        _ = options;
     }
 
     private static void CopySharedFile(string srcPath, string dstPath)

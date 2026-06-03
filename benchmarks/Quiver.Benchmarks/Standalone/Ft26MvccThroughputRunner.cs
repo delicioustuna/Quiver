@@ -74,7 +74,7 @@ public static class Ft26MvccThroughputRunner
         string dir = BenchTempDir.Create("ft26_mvcc_node");
         try
         {
-            using var db = GraphDatabase.Open(dir);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
             var sw = Stopwatch.StartNew();
             using (var tx = db.BeginTransaction())
             {
@@ -93,7 +93,7 @@ public static class Ft26MvccThroughputRunner
         string dir = BenchTempDir.Create("ft26_mvcc_nodeprop");
         try
         {
-            using var db = GraphDatabase.Open(dir);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
             var sw = Stopwatch.StartNew();
             using (var tx = db.BeginTransaction())
             {
@@ -115,7 +115,7 @@ public static class Ft26MvccThroughputRunner
         string dir = BenchTempDir.Create("ft26_mvcc_rel");
         try
         {
-            using var db = GraphDatabase.Open(dir);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
             using (var seed = db.BeginTransaction())
             {
                 _ = seed.CreateNode("A"); // NodeId(0)

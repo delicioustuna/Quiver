@@ -37,7 +37,7 @@ public class BranchedTraversalBenchmarks
     {
         _dbPath = BenchTempDir.Create("branched");
         var rnd = new Random(7);
-        using (var db = GraphDatabase.Open(_dbPath))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver")))
         {
             _ = db.Schema.GetOrCreateLabel("Person");
             _ = db.Schema.GetOrCreateRelationshipType("KNOWS");
@@ -91,7 +91,7 @@ public class BranchedTraversalBenchmarks
             }
         }
 
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _readTx = _db.BeginReadOnlyTransaction();
     }
 

@@ -29,7 +29,7 @@ public sealed class StructuredLoggingTests : IDisposable
             b.SetMinimumLevel(LogLevel.Trace);
             b.AddProvider(_provider);
         });
-        _db = GraphDatabase.Open(_dir, new GraphDatabaseOptions { LoggerFactory = _factory });
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), new GraphDatabaseOptions { LoggerFactory = _factory });
     }
 
     public void Dispose()
@@ -165,7 +165,7 @@ public sealed class StructuredLoggingTests : IDisposable
         var nullDir = Path.Combine(Path.GetTempPath(), "quiver_oblog_null_" + Guid.NewGuid().ToString("N"));
         try
         {
-            using var db = GraphDatabase.Open(nullDir, new GraphDatabaseOptions { LoggerFactory = null });
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(nullDir, "graph.quiver"), new GraphDatabaseOptions { LoggerFactory = null });
             QuiverLog.LoggerFactory.Should().BeSameAs(beforeFactory,
                 "null LoggerFactory は既存のロガー設定を上書きしない");
             using var tx = db.BeginTransaction();

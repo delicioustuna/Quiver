@@ -27,7 +27,7 @@ public sealed class MigrationTests : IDisposable
     {
         // seed: 3 User ノードを作って "User" ラベルを使う
         {
-            using var db = GraphDatabase.Open(_dir);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
             using var tx = db.BeginTransaction();
             for (int i = 0; i < 3; i++)
             {
@@ -38,7 +38,7 @@ public sealed class MigrationTests : IDisposable
         }
 
         // 1 回目: 適用される
-        using (var db = GraphDatabase.Open(_dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             var migrations = new IMigration[] { new RenameUserToPerson() };
             var result = await db.MigrateAsync(migrations);
@@ -56,7 +56,7 @@ public sealed class MigrationTests : IDisposable
         }
 
         // 2 回目: history があるので skip
-        using (var db = GraphDatabase.Open(_dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             var migrations = new IMigration[] { new RenameUserToPerson() };
             var result = await db.MigrateAsync(migrations);
@@ -68,7 +68,7 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task Migration_failure_rolls_back_data_mutations_but_does_not_record_history()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var migrations = new IMigration[] { new FailingMigration() };
 
         Func<Task> act = () => db.MigrateAsync(migrations);
@@ -85,14 +85,14 @@ public sealed class MigrationTests : IDisposable
     {
         // seed: "OldLabel" を持つノード
         {
-            using var db = GraphDatabase.Open(_dir);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
             using var tx = db.BeginTransaction();
             tx.CreateNode("OldLabel");
             tx.Commit();
         }
 
         // rename → 例外 → tx rollback 経由で rename も巻き戻る
-        using (var db = GraphDatabase.Open(_dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             var migrations = new IMigration[] { new RenameThenFailMigration() };
             Func<Task> act = () => db.MigrateAsync(migrations);
@@ -107,7 +107,7 @@ public sealed class MigrationTests : IDisposable
         }
 
         // 再 open でも "OldLabel" が durable に残っていることを確認
-        using (var db = GraphDatabase.Open(_dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             using var tx = db.BeginReadOnlyTransaction();
             var oldId = db.Schema.GetOrCreateLabel("OldLabel");
@@ -122,7 +122,7 @@ public sealed class MigrationTests : IDisposable
     {
         // Bug 1 regression: 旧 rename("A","B") を別 migration が冪等 no-op として通したとき、
         // その migration が失敗しても B → A の逆操作が発火してはいけない (corruption)。
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         // 先行 migration が完了: A→B
         {
@@ -156,7 +156,7 @@ public sealed class MigrationTests : IDisposable
     {
         // Bug 2 regression: 既に存在する索引に対し AddIndex を呼んでも、
         // それは no-op であり、後の rollback で既存索引を消してはいけない。
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_preexisting", "Foo", "bar", IndexKind.StringEquality);
 
         Func<Task> act = () => db.MigrateAsync(new IMigration[] { new VersionedMigration("addidx", 1, ctx =>
@@ -174,7 +174,7 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task Migration_failure_rolls_back_AddIndex_via_OnRolledBack_hook()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var migrations = new IMigration[] { new AddIndexThenFailMigration() };
         Func<Task> act = () => db.MigrateAsync(migrations);
         await act.Should().ThrowAsync<InvalidOperationException>();
@@ -187,7 +187,7 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task Multiple_migrations_applied_in_version_order()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var migrations = new IMigration[]
         {
             new VersionedMigration("c", 3, _ => { }),
@@ -201,7 +201,7 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task Duplicate_migration_ids_throw()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var migrations = new IMigration[]
         {
             new VersionedMigration("dup", 1, _ => { }),
@@ -214,7 +214,7 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task AddIndex_via_migration_then_seek_works()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         // データを先に投入
         {
             using var tx = db.BeginTransaction();

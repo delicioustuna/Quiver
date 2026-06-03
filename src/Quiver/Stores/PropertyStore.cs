@@ -521,8 +521,8 @@ internal sealed class PropertyStore : IPropertyStore
     {
         using var h = _file.PinForRead(HeaderPageId);
         byte v = h.Data[MetaFormatVersion];
-        if (v != FormatVersion.V4IndexGeneration)
-            throw new FormatVersionMismatchException("props", v, FormatVersion.V4IndexGeneration);
+        if (v != FormatVersion.Current)
+            throw new FormatVersionMismatchException("props", v, FormatVersion.Current);
     }
 
     private void FlushMeta(bool initialise = false)
@@ -531,7 +531,7 @@ internal sealed class PropertyStore : IPropertyStore
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaFreeHead..], _freeHead);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaHwm..], _hwm);
         if (initialise)
-            ph.Data[MetaFormatVersion] = FormatVersion.V4IndexGeneration;
+            ph.Data[MetaFormatVersion] = FormatVersion.Current;
         _file.UnpinDirty(HeaderPageId, 0);
     }
 }

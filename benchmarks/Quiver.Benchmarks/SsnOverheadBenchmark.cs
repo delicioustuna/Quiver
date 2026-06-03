@@ -32,7 +32,7 @@ public class SsnOverheadBenchmark
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("ssn_overhead");
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _ids = new NodeId[NodeCount];
         using var tx = _db.BeginTransaction();
         for (int i = 0; i < NodeCount; i++)

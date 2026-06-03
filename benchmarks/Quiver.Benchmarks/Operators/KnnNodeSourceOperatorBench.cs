@@ -24,7 +24,7 @@ public class KnnNodeSourceOperatorBench
     public void Setup()
     {
         _dir = BenchTempDir.Create("knn");
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var keyId = _db.Schema.GetOrCreatePropertyKey("embed");
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName, EntityKind.Node, keyId, Dim,

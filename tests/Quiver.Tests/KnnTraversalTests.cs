@@ -23,7 +23,7 @@ public sealed class KnnTraversalTests : IDisposable
     public KnnTraversalTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_vec5_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         var keyId = _db.Schema.GetOrCreatePropertyKey("title");
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(

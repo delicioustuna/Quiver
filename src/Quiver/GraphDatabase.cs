@@ -18,31 +18,33 @@ namespace Quiver;
 public sealed class GraphDatabase : IDisposable
 {
     private readonly IGraphStorageBackendInternal _backend;
-    private readonly string _directoryPath;
+    private readonly string _path;
     // OP-7: AutoVacuum が有効なときのみ非 null。Dispose で停止する。
     private readonly AutoVacuumWorker? _autoVacuumWorker;
 
     private GraphDatabase(
         IGraphStorageBackend backend,
-        string directoryPath,
+        string path,
         AutoVacuumWorker? autoVacuumWorker = null)
     {
         // ARCH-2: 内部 SPI へキャスト (binary / SQLite の双方が IGraphStorageBackendInternal を実装)。
         _backend = (IGraphStorageBackendInternal)backend;
-        _directoryPath = directoryPath;
+        _path = path;
         _autoVacuumWorker = autoVacuumWorker;
     }
 
-    /// <summary>OP-4: <see cref="Open"/> に渡したデータディレクトリのパス。</summary>
-    public string DirectoryPath => _directoryPath;
+    /// <summary>ARCH-4: <see cref="Open"/> に渡したデータベースファイルのパス (<c>*.quiver</c>)。</summary>
+    public string Path => _path;
 
     /// <summary>
-    /// 指定ディレクトリのデータベースを開く (存在しない場合は新規作成)。
+    /// 指定した単一データベースファイル (<c>*.quiver</c>) を開く (存在しない場合は新規作成)。
+    /// ARCH-4 以降、Quiver の binary backend は全データ (コア / 索引 / 隣接 / token / epoch) を
+    /// 単一の <c>*.quiver</c> ファイルに格納し、運用中のみサイドカー <c>*.quiver-wal</c> を伴う。
     /// <paramref name="options"/> 経由でバックエンド種別やバッファプールサイズなどを指定可。
     /// </summary>
-    /// <param name="directoryPath">データベースディレクトリのパス。</param>
+    /// <param name="filePath">データベースファイル (<c>*.quiver</c>) のパス。</param>
     /// <param name="options">起動オプション。<c>null</c> の場合は既定値が使われる。</param>
-    public static GraphDatabase Open(string directoryPath, GraphDatabaseOptions? options = null)
+    public static GraphDatabase Open(string filePath, GraphDatabaseOptions? options = null)
     {
         options ??= new GraphDatabaseOptions();
         // OB-3: ホット path 各所が参照する構造化ログのファサードに ILoggerFactory を流し込む。
@@ -52,7 +54,7 @@ public sealed class GraphDatabase : IDisposable
         if (options.LoggerFactory != null)
             Quiver.Telemetry.QuiverLog.LoggerFactory = options.LoggerFactory;
         var factory = options.BackendFactory ?? CreateDefaultFactory(options.Backend);
-        var backend = factory.Open(directoryPath, options);
+        var backend = factory.Open(filePath, options);
 
         // OP-7: AutoVacuum 有効時は周期ワーカーを起動する。各 tick は backend.Vacuum() を
         // 呼ぶだけで、アクティブ tx があれば vacuum 自身が Skipped で安全に no-op する。
@@ -60,7 +62,7 @@ public sealed class GraphDatabase : IDisposable
         if (options.AutoVacuum && options.AutoVacuumInterval > TimeSpan.Zero)
             worker = new AutoVacuumWorker(() => backend.Vacuum(), options.AutoVacuumInterval);
 
-        return new GraphDatabase(backend, directoryPath, worker);
+        return new GraphDatabase(backend, filePath, worker);
     }
 
     private static IGraphStorageBackendFactory CreateDefaultFactory(BackendKind kind) => kind switch
@@ -234,19 +236,19 @@ public sealed class GraphDatabase : IDisposable
     }
 
     /// <summary>
-    /// OP-1: 書き込みを止めずに <paramref name="targetDirectory"/> にライブスナップショットを
-    /// 取る。target は <see cref="Open"/> で独立した DB として開ける。
+    /// OP-1 / ARCH-4: 書き込みを止めずに <paramref name="targetFilePath"/> (<c>*.quiver</c>) へ
+    /// ライブスナップショットを取る。target は <see cref="Open"/> で独立した DB として開ける。
     ///
-    /// 内部では (1) ベストエフォートでシャープチェックポイントを起動、(2) page-by-page で
-    /// データ / 索引ファイルを複製、(3) WAL を末尾までフラッシュしてセグメントを複製、
-    /// という流れで、並行 writer はフレームレベルロックの粒度で短くしか待たない。
-    /// target を開くと recovery が走り、snapshot 時点までの commit 群が redo され、
-    /// 中途半端だった in-flight tx は CompensationLogRecord で undo される。
+    /// 内部では (1) ベストエフォートでシャープチェックポイントを起動、(2) 単一コンテナを
+    /// page-by-page で複製、(3) WAL を末尾までフラッシュして単一サイドカーを複製、という流れで、
+    /// 並行 writer はフレームレベルロックの粒度で短くしか待たない。target を開くと recovery が走り、
+    /// snapshot 時点までの commit 群が redo され、中途半端だった in-flight tx は
+    /// CompensationLogRecord で undo される。
     ///
     /// バイナリ以外のバックエンドはサポート対象外 (<see cref="NotSupportedException"/>)。
     /// </summary>
-    public void CreateSnapshot(string targetDirectory, SnapshotOptions? options = null)
-        => _backend.CreateSnapshot(targetDirectory, options);
+    public void CreateSnapshot(string targetFilePath, SnapshotOptions? options = null)
+        => _backend.CreateSnapshot(targetFilePath, options);
 
     /// <summary>
     /// OP-3: 削除済みエンティティ (FT-26 MVCC の dead version) を物理回収する vacuum を
@@ -271,11 +273,16 @@ public sealed class GraphDatabase : IDisposable
     public Task<Migrations.MigrationResult> MigrateAsync(
         IEnumerable<Migrations.IMigration> migrations,
         CancellationToken cancellationToken = default)
-        => Migrations.Migrator.RunAsync(this, _directoryPath, migrations, cancellationToken);
+        => Migrations.Migrator.RunAsync(this, MigrationDirectory, migrations, cancellationToken);
 
     /// <summary>OP-4: 適用済みマイグレーション履歴のスナップショット (適用順)。</summary>
     public IReadOnlyList<Migrations.MigrationHistoryEntry> GetMigrationHistory()
-        => new Migrations.MigrationHistory(_directoryPath).Entries;
+        => new Migrations.MigrationHistory(MigrationDirectory).Entries;
+
+    // ARCH-4 増分8: migrations.history はバックエンドのデータディレクトリに置く (operational metadata)。
+    // binary は *.quiver の親、SQLite はデータディレクトリそのもの。_path から直接 GetDirectoryName すると
+    // SQLite (パス = ディレクトリ) で親に逸れるため、backend の DataDirectory を正本とする。
+    private string MigrationDirectory => _backend.DataDirectory;
 
     /// <summary>
     /// バックグラウンドの AutoVacuum ワーカー (OP-7) を停止してから下層バックエンドを破棄する。

@@ -13,7 +13,7 @@ Console.WriteLine($"Data directory: {dir}");
 try
 {
     // ─── v1 スキーマでデータを投入 ───────────────────────────
-    using (var db = GraphDatabase.Open(dir))
+    using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
     {
         Console.WriteLine();
         Console.WriteLine("[v1 schema] seeding 3 User nodes");
@@ -27,7 +27,7 @@ try
     }
 
     // ─── v2 へマイグレーション ───────────────────────────────
-    using (var db = GraphDatabase.Open(dir))
+    using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
     {
         Console.WriteLine();
         Console.WriteLine("[migrate] applying v1 → v2 migration");
@@ -41,7 +41,7 @@ try
     }
 
     // ─── v2 スキーマで検証 ─────────────────────────────────
-    using (var db = GraphDatabase.Open(dir))
+    using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
     {
         Console.WriteLine();
         Console.WriteLine("[v2 schema] verifying Person label + email index");
@@ -64,7 +64,7 @@ try
     }
 
     // ─── 同じマイグレーションを再実行しても skip される (冪等性) ──
-    using (var db = GraphDatabase.Open(dir))
+    using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
     {
         Console.WriteLine();
         Console.WriteLine("[re-run] applying the same migration again — should be a no-op");

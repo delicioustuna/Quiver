@@ -27,7 +27,7 @@ public sealed class SsnSmokeTests : IDisposable
     public SsnSmokeTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_ssn_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
     }
 
     public void Dispose()
@@ -116,7 +116,7 @@ public sealed class SsnSmokeTests : IDisposable
         {
             NodeId x;
             // Phase 1: Serializable な read tx を繰り返して X.Pstamp とクロックを進める。
-            using (var db = GraphDatabase.Open(dir))
+            using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
             {
                 using (var tx = db.BeginTransaction())
                 {
@@ -134,7 +134,7 @@ public sealed class SsnSmokeTests : IDisposable
 
             // Phase 2: 再 open。競合の無い単独 Serializable tx が X を上書きする。
             // クロックが連続していれば c(T) > X.Pstamp となり false-abort しない。
-            using (var db = GraphDatabase.Open(dir))
+            using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
             {
                 using var wtx = db.BeginTransaction(IsolationLevel.Serializable);
                 wtx.SetProperty(x, "v", PropertyValue.FromInt32(2));

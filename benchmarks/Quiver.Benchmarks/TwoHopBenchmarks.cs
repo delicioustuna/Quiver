@@ -25,7 +25,7 @@ public class TwoHopBenchmarks
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("2hop");
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
 
         const int BatchSize = 2_000;
         int totalMid = Degree;

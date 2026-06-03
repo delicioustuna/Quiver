@@ -38,7 +38,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         const int degree = 10;
         var weightKey = BuildWithInt64Weights(degree);
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var tx = _db.BeginTransaction();
         var adj = tx.AsInternal().AdjacencyBlocks;
         adj.Should().NotBeNull();
@@ -67,7 +67,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
     public void Double_payload_round_trips_via_bitcast()
     {
         // Use a double key.
-        using (var db = GraphDatabase.Open(_dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             var key = db.Schema.GetOrCreatePropertyKey("score");
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
@@ -82,7 +82,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
             loader.Commit();
         }
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var tx = _db.BeginTransaction();
         var seen = new Dictionary<long, double>();
         using var cursor = tx.AsInternal().AdjacencyBlocks!.OpenCursor(new NodeId(0), Direction.Outgoing, null);
@@ -97,7 +97,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
     [Fact]
     public void Default_raw_applied_when_edge_has_no_payload()
     {
-        using (var db = GraphDatabase.Open(_dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             var key = db.Schema.GetOrCreatePropertyKey("weight");
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
@@ -112,7 +112,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
             loader.Commit();
         }
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var tx = _db.BeginTransaction();
         var seen = new Dictionary<long, long>();
         using var cursor = tx.AsInternal().AdjacencyBlocks!.OpenCursor(new NodeId(0), Direction.Outgoing, null);
@@ -130,7 +130,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
     public void Weights_preserved_across_multi_page_chain(int degree)
     {
         BuildWithInt64Weights(degree);
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         using var tx = _db.BeginTransaction();
         var seen = new Dictionary<long, long>();
@@ -148,7 +148,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
     {
         const int degree = 5;
         BuildWithInt64Weights(degree);
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         using var tx = _db.BeginTransaction();
         var op = new ExpandOperator(
@@ -179,9 +179,9 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         BuildWithInt64Weights(3);
 
         // Close & reopen to ensure meta file persists.
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         _db.Dispose();
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         using var tx = _db.BeginTransaction();
         var view = tx.AsInternal().AdjacencyBlocks as IAdjacencyPayloadView;
@@ -192,7 +192,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
 
     private PropertyKeyId BuildWithInt64Weights(int degree)
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var key = db.Schema.GetOrCreatePropertyKey("weight");
         using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
         loader.WithPayloadLane(PayloadLaneSpec.ForInt64(key.Value));

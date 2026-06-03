@@ -39,7 +39,7 @@ internal sealed class OperatorBenchSeed : IDisposable
     public OperatorBenchSeed(string tag)
     {
         Dir = BenchTempDir.Create("opbench_" + tag);
-        Db = GraphDatabase.Open(Dir);
+        Db = GraphDatabase.Open(System.IO.Path.Combine(Dir, "graph.quiver"));
 
         Db.Schema.CreateIndex("idx_value", "Person", "value", IndexKind.Int64Equality);
         Db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);

@@ -36,7 +36,7 @@ Directory.CreateDirectory(dbDir);
 
 try
 {
-    using var db = GraphDatabase.Open(dbDir);
+    using var db = GraphDatabase.Open(System.IO.Path.Combine(dbDir, "graph.quiver"));
 
     // 100 トランザクションを回して tx.commit / wal.flush / buffer-pool / query を計装出力。
     for (int i = 0; i < 100; i++)

@@ -32,7 +32,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     private const byte TenantRelTypeTok = 9;
     private const byte TenantPropKeyTok = 10;
 
-    public IGraphStorageBackend Open(string directoryPath, GraphDatabaseOptions options)
+    public IGraphStorageBackend Open(string filePath, GraphDatabaseOptions options)
     {
         // FT-15: a prior backend on this thread may have been killed mid-transaction
         // (crash simulation), leaving the thread-static WAL page context dangling.
@@ -44,23 +44,23 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         WalPageContext.End();
         MvccContext.End();
 
-        Directory.CreateDirectory(directoryPath);
+        // ARCH-4 増分8: filePath は単一コンテナ (*.quiver) のフルパス。親ディレクトリを用意する。
+        var parentDir = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrEmpty(parentDir)) Directory.CreateDirectory(parentDir);
 
         var pageManager = new PageManager();
 
-        // ARCH-4 増分7: WAL は wal/ セグメント群ではなく単一サイドカー graph.quiver-wal。
-        // クリーン終了で削除され、静止時は graph.quiver のみが残る。
-        var walPath = Path.Combine(directoryPath, "graph.quiver-wal");
+        // ARCH-4 増分7/8: WAL は単一サイドカー <filePath>-wal。クリーン終了で削除され、
+        // 静止時は *.quiver のみが残る。
+        var walPath = filePath + "-wal";
         var wal = new WriteAheadLog(walPath, options.WalSegmentSize, options.GroupCommitWindow);
 
-        // ARCH-4: 単一ファイルコンテナ。コア store / version sidecar / token を 1 つの
-        // graph.quiver に同居させ、全ページを単一 DATA fileKind で WAL に載せる (option B)。
+        // ARCH-4: 単一ファイルコンテナ。コア store / version sidecar / token / 索引 / 隣接ブロック /
+        // epoch をすべて *.quiver に同居させ、全ページを単一 DATA fileKind で WAL に載せる (option B)。
         // 物理ページ ID は全テナント横断で一意なので recovery / abort は純物理ページ単位で動く。
-        // 索引は引き続き予約レンジ (0x40+) の別ファイル (増分4 で吸収予定)。
         // GraphDatabaseOptions.BufferPoolSize を共有プール容量に実配線する。
         int poolPages = (int)Math.Max(64, options.BufferPoolSize / PagedFile.PageSizeConst);
-        var container = new SingleFileContainer(
-            Path.Combine(directoryPath, "graph.quiver"), poolPages);
+        var container = new SingleFileContainer(filePath, poolPages);
         container.EnableWalLogging(DataFileKind, wal);
         // checkpoint (pageManager.FlushAll) / snapshot 経路に container 物理ファイルを乗せる。
         pageManager.Adopt(container.Physical);
@@ -221,7 +221,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         }
 
         var backend = new BinaryGraphStorageBackend(
-            directoryPath, container, pageManager, wal, nodeStore, relStore, propStore,
+            filePath, container, pageManager, wal, nodeStore, relStore, propStore,
             labelTokens, relTypeTokens, propKeyTokens, indexManager,
             adjStore, txManager, access, vectors,
             labelIndex,

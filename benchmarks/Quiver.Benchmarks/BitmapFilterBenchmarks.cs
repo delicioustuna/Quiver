@@ -40,7 +40,7 @@ public class BitmapFilterBenchmarks
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("pw12");
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
 
         int matchA = (int)(Total * SelectiveFraction);
         int matchHot = (int)(Total * BroadFraction);

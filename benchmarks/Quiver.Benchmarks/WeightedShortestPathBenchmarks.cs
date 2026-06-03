@@ -35,7 +35,7 @@ public class WeightedShortestPathBenchmarks
         int n = GridSize;
         var grid = new NodeId[n, n];
 
-        using (var db = GraphDatabase.Open(_dbPath))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver")))
         using (var tx = db.BeginTransaction())
         {
             for (int r = 0; r < n; r++)
@@ -58,7 +58,7 @@ public class WeightedShortestPathBenchmarks
             for (int c = 0; c < n; c++)
                 _coords[grid[r, c].Value] = (r, c);
 
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _readTx = _db.BeginTransaction();
         var keyId = _db.Schema.GetOrCreatePropertyKey("w");
         _weightProvider = new PropertyChainWeightProvider(keyId);

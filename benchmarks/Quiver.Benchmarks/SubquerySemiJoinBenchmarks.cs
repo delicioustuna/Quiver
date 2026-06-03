@@ -30,7 +30,7 @@ public class SubquerySemiJoinBenchmarks
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("ssj");
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
 
         using var tx = _db.BeginTransaction();
         for (int i = 0; i < NodeCount; i++)

@@ -33,7 +33,7 @@ public class ParallelBenchmarks
     {
         _dbPath = BenchTempDir.Create("par");
         {
-            using var db = GraphDatabase.Open(_dbPath);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
 
             long nodeId = 0;
@@ -65,7 +65,7 @@ public class ParallelBenchmarks
             loader.Commit();
         }
 
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _sourceNodes = new NodeId[Sources];
         // hub nodes are at stride = 1 + Degree + Degree*Degree per source
         long stride = 1 + Degree + (long)Degree * Degree;

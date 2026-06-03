@@ -26,7 +26,7 @@ internal sealed class OperatorTestFixture : IDisposable
     public static OperatorTestFixture OpenEmpty(string tag = "")
     {
         var dir = Path.Combine(Path.GetTempPath(), $"quiver_ts2_{tag}_{Guid.NewGuid():N}");
-        var db = GraphDatabase.Open(dir);
+        var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
         return new OperatorTestFixture(dir, db);
     }
 

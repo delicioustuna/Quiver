@@ -39,7 +39,7 @@ public class AsSelectProjectionBenchmarks
     {
         _dbPath = BenchTempDir.Create("assel");
         var rnd = new Random(11);
-        using (var db = GraphDatabase.Open(_dbPath))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver")))
         {
             _ = db.Schema.GetOrCreateLabel("Person");
             _ = db.Schema.GetOrCreateRelationshipType("KNOWS");
@@ -78,7 +78,7 @@ public class AsSelectProjectionBenchmarks
             }
         }
 
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _readTx = _db.BeginReadOnlyTransaction();
     }
 

@@ -53,7 +53,7 @@ public class BulkLoadBenchmarks
     public void BulkLoad()
     {
         int nodeCount = Math.Max(EdgeCount / 10, 1_000);
-        using var db = GraphDatabase.Open(_bulkDbPath);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_bulkDbPath, "graph.quiver"));
         var labelId   = db.Schema.GetOrCreateLabel("Vertex");
         var relTypeId = db.Schema.GetOrCreateRelationshipType("KNOWS");
 
@@ -78,7 +78,7 @@ public class BulkLoadBenchmarks
     public void StreamingBulkLoad()
     {
         int nodeCount = Math.Max(EdgeCount / 10, 1_000);
-        using var db = GraphDatabase.Open(_streamingDbPath);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_streamingDbPath, "graph.quiver"));
         var labelId   = db.Schema.GetOrCreateLabel("Vertex");
         var relTypeId = db.Schema.GetOrCreateRelationshipType("KNOWS");
 
@@ -104,7 +104,7 @@ public class BulkLoadBenchmarks
         if (EdgeCount >= 10_000_000) return; // skip — TX path is hours at this size
         const int BatchSize = 1_000;
         int nodeCount = Math.Max(EdgeCount / 10, 1_000);
-        using var db = GraphDatabase.Open(_txDbPath);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_txDbPath, "graph.quiver"));
 
         var nodeIds = new NodeId[nodeCount];
         for (int i = 0; i < nodeCount; i += BatchSize)

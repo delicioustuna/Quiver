@@ -30,7 +30,7 @@ public sealed class IndexOrphanGcTests : IDisposable
     [Fact]
     public void HealthyDatabase_reports_zero_orphans_and_Repair_is_noop()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
 
         using (var tx = db.BeginTransaction())
@@ -60,7 +60,7 @@ public sealed class IndexOrphanGcTests : IDisposable
     [Fact]
     public void DeleteNode_creates_orphan_detected_by_CheckIndexConsistency()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
 
         NodeId aliveOnly, doomed;
@@ -91,7 +91,7 @@ public sealed class IndexOrphanGcTests : IDisposable
     [Fact]
     public void RepairIndexes_Apply_removes_orphans_then_CheckIndexConsistency_clean()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
 
         NodeId alive, doomed1, doomed2;
@@ -137,7 +137,7 @@ public sealed class IndexOrphanGcTests : IDisposable
     [Fact]
     public void RepairIndexes_DryRun_reports_orphans_but_does_not_delete()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
 
         NodeId doomed;
@@ -165,7 +165,7 @@ public sealed class IndexOrphanGcTests : IDisposable
     [Fact]
     public void RepairIndexes_handles_multiple_indexes()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
         db.Schema.CreateIndex("idx_age", "Person", "age", IndexKind.Int64Equality);
 
@@ -202,7 +202,7 @@ public sealed class IndexOrphanGcTests : IDisposable
     {
         // orphan を作る (commit 後の DeleteNode)
         NodeId alive;
-        using (var db = GraphDatabase.Open(_dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
             NodeId doomed;
@@ -224,7 +224,7 @@ public sealed class IndexOrphanGcTests : IDisposable
 
         // AutoRepairOrphansOnRecovery=true で再 open → orphan が自動除去される
         using (var db = GraphDatabase.Open(
-            _dir,
+            System.IO.Path.Combine(_dir, "graph.quiver"),
             new GraphDatabaseOptions { AutoRepairOrphansOnRecovery = true }))
         {
             db.Diagnostics.CheckIndexConsistency().OrphanCount.Should().Be(0);
@@ -242,7 +242,7 @@ public sealed class IndexOrphanGcTests : IDisposable
     [Fact]
     public void AutoRepairOrphansOnRecovery_default_false_keeps_orphan()
     {
-        using (var db = GraphDatabase.Open(_dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
             NodeId doomed;
@@ -260,7 +260,7 @@ public sealed class IndexOrphanGcTests : IDisposable
         }
 
         // 既定 (option 未指定) では orphan は残る
-        using (var db = GraphDatabase.Open(_dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             db.Diagnostics.CheckIndexConsistency().OrphanCount.Should().Be(1);
         }
@@ -275,7 +275,7 @@ public sealed class IndexOrphanGcTests : IDisposable
         const int nodeCount = 10_000;
         const int indexCount = 5;
 
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         for (int i = 0; i < indexCount; i++)
             db.Schema.CreateIndex($"idx_{i}", "Doc", $"key_{i}", IndexKind.Int64Equality);
 

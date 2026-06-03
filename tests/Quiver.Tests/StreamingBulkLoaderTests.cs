@@ -33,11 +33,11 @@ public sealed class StreamingBulkLoaderTests : IDisposable
     public void Empty_graph_commits_without_error()
     {
         var dir = Path.Combine(_baseDir, "empty");
-        using (var db = GraphDatabase.Open(dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
         using (var loader = db.BeginStreamingBulkLoad())
             loader.Commit();
 
-        using var reopened = GraphDatabase.Open(dir);
+        using var reopened = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
         using var tx = reopened.BeginTransaction();
         // No nodes, no rels — but the db must be openable.
         tx.Should().NotBeNull();
@@ -73,7 +73,7 @@ public sealed class StreamingBulkLoaderTests : IDisposable
     public void Streaming_throws_when_appendrelationship_is_out_of_order()
     {
         var dir = Path.Combine(_baseDir, "oodo");
-        using var db = GraphDatabase.Open(dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
         using var loader = db.BeginStreamingBulkLoad();
         loader.AppendNode(new NodeId(0), new LabelId(0));
         loader.AppendNode(new NodeId(1), new LabelId(0));
@@ -95,8 +95,8 @@ public sealed class StreamingBulkLoaderTests : IDisposable
         Build(streamDir, streaming: true,  nodeCount: 4, edges, buildAdj: true);
 
         // The adjacency index must produce identical Expand results for every source.
-        using var dbA = GraphDatabase.Open(inmemDir);
-        using var dbB = GraphDatabase.Open(streamDir);
+        using var dbA = GraphDatabase.Open(System.IO.Path.Combine(inmemDir, "graph.quiver"));
+        using var dbB = GraphDatabase.Open(System.IO.Path.Combine(streamDir, "graph.quiver"));
         for (long n = 0; n < 4; n++)
         {
             using var txA = dbA.BeginTransaction();
@@ -138,7 +138,7 @@ public sealed class StreamingBulkLoaderTests : IDisposable
     private static void Build(string dir, bool streaming, int nodeCount,
         (long Src, long Tgt)[] edges, bool buildAdj)
     {
-        using var db = GraphDatabase.Open(dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
         if (streaming)
         {
             using var loader = db.BeginStreamingBulkLoad(buildAdjacencyIndex: buildAdj);
@@ -167,7 +167,7 @@ public sealed class StreamingBulkLoaderTests : IDisposable
 
     private static void BuildWithProps(string dir, bool streaming)
     {
-        using var db = GraphDatabase.Open(dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
         var keyName = db.Schema.GetOrCreatePropertyKey("name");
         var keyAge  = db.Schema.GetOrCreatePropertyKey("age");
 

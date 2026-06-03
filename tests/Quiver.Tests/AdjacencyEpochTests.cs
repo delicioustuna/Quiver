@@ -40,7 +40,7 @@ public sealed class AdjacencyEpochTests : IDisposable
     {
         BulkLoad(nodeCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var tx = _db.BeginTransaction();
         var neighbors = ExpandOut(tx, new NodeId(0));
         neighbors.Should().BeEquivalentTo(new[] { 1L, 2L });
@@ -54,7 +54,7 @@ public sealed class AdjacencyEpochTests : IDisposable
     {
         BulkLoad(nodeCount: 4, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         // node 3 was reserved at bulk-load (4 nodes) but had no edges; add a
         // new delta edge 0→3. The new rel gets id >= BaseRelHwm so the merge
         // must yield {1, 2, 3} with no double-emission of 1 or 2.
@@ -75,7 +75,7 @@ public sealed class AdjacencyEpochTests : IDisposable
     {
         BulkLoad(nodeCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var tx = _db.BeginTransaction())
         {
             // Delete the rel pointing 0→1 (id 0 by bulk-load order).
@@ -95,7 +95,7 @@ public sealed class AdjacencyEpochTests : IDisposable
     {
         BulkLoad(nodeCount: 5, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         long deltaRelId;
         using (var tx = _db.BeginTransaction())
         {
@@ -124,13 +124,13 @@ public sealed class AdjacencyEpochTests : IDisposable
     {
         BulkLoad(nodeCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        using (var db = GraphDatabase.Open(_dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         using (var tx = db.BeginTransaction())
         {
             tx.DeleteRelationship(new RelationshipId(0));
             tx.Commit();
         }
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var tx2 = _db.BeginTransaction();
         tx2.AsInternal().AdjacencyBlocks!.IsTombstoned(new RelationshipId(0)).Should().BeTrue();
         var neighbors = ExpandOut(tx2, new NodeId(0));
@@ -144,7 +144,7 @@ public sealed class AdjacencyEpochTests : IDisposable
     {
         BulkLoad(nodeCount: 5, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var tx = _db.BeginTransaction())
         {
             tx.CreateRelationship(new NodeId(0), new NodeId(3), "R");
@@ -174,7 +174,7 @@ public sealed class AdjacencyEpochTests : IDisposable
     {
         BulkLoad(nodeCount: 4, edges: new[] { (0L, 1L), (0L, 2L), (0L, 3L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var tx = _db.BeginTransaction())
         {
             tx.DeleteRelationship(new RelationshipId(1)); // base edge 0→2
@@ -199,7 +199,7 @@ public sealed class AdjacencyEpochTests : IDisposable
     {
         BulkLoad(nodeCount: 2, edges: new[] { (0L, 1L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var tx = _db.BeginTransaction();
         Action act = () => _db.CompactAdjacency();
         act.Should().Throw<InvalidOperationException>()
@@ -278,7 +278,7 @@ public sealed class AdjacencyEpochTests : IDisposable
 
     private void BulkLoad(int nodeCount, (long Src, long Tgt)[] edges)
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
         for (int i = 0; i < nodeCount; i++)
             loader.AppendNode(new NodeId(i), new LabelId(0));

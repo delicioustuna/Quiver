@@ -33,7 +33,7 @@ public class OneHopAdjBenchmarks
     {
         _dbPath = BenchTempDir.Create("1hop_adj");
         {
-            using var db = GraphDatabase.Open(_dbPath);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
 
             long hubId = 0;
@@ -47,7 +47,7 @@ public class OneHopAdjBenchmarks
             loader.Commit();
         }
         // adj.db が書き出された状態で再オープン
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _hub = new NodeId(0);
         _readTx = _db.BeginTransaction();
     }

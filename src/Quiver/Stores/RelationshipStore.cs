@@ -534,8 +534,8 @@ internal sealed class RelationshipStore : IRelationshipStore
     {
         using var h = _file.PinForRead(HeaderPageId);
         byte v = h.Data[MetaFormatVersion];
-        if (v != FormatVersion.V4IndexGeneration)
-            throw new FormatVersionMismatchException("rels", v, FormatVersion.V4IndexGeneration);
+        if (v != FormatVersion.Current)
+            throw new FormatVersionMismatchException("rels", v, FormatVersion.Current);
     }
 
     private void FlushMeta(bool initialise = false)
@@ -545,7 +545,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaHwm..], _hwm);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaInUse..], _inUseCount);
         if (initialise)
-            ph.Data[MetaFormatVersion] = FormatVersion.V4IndexGeneration;
+            ph.Data[MetaFormatVersion] = FormatVersion.Current;
         _file.UnpinDirty(HeaderPageId, 0);
     }
 }

@@ -32,7 +32,7 @@ public sealed class GraphSnapshotViewTests : IDisposable
         // Build a small DAG: 0→1, 0→2, 1→3, 2→3.
         BulkLoad(nodeCount: 4, edges: new[] { (0L, 1L), (0L, 2L), (1L, 3L), (2L, 3L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var view = _db.OpenSnapshotView();
 
         view.NodeCount.Should().Be(4);
@@ -54,7 +54,7 @@ public sealed class GraphSnapshotViewTests : IDisposable
     {
         BulkLoad(nodeCount: 5, edges: new[] { (0L, 1L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var view = _db.OpenSnapshotView();
 
         view.NodeCount.Should().Be(5);
@@ -71,7 +71,7 @@ public sealed class GraphSnapshotViewTests : IDisposable
     {
         BulkLoad(nodeCount: 2, edges: new[] { (0L, 1L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var view = _db.OpenSnapshotView();
 
         view.OutDegree(new NodeId(99)).Should().Be(0);
@@ -84,7 +84,7 @@ public sealed class GraphSnapshotViewTests : IDisposable
     {
         BulkLoad(nodeCount: 3, edges: new[] { (0L, 1L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var tx = _db.BeginTransaction())
         {
             tx.CreateRelationship(new NodeId(0), new NodeId(2), "R");
@@ -101,7 +101,7 @@ public sealed class GraphSnapshotViewTests : IDisposable
     {
         BulkLoad(nodeCount: 3, edges: new[] { (0L, 1L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var view = _db.OpenSnapshotView();
         long edgesBefore = view.EdgeCount;
 
@@ -121,7 +121,7 @@ public sealed class GraphSnapshotViewTests : IDisposable
     {
         BulkLoad(nodeCount: 2, edges: new[] { (0L, 1L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var view = _db.OpenSnapshotView();
         view.HasWeights.Should().BeFalse();
         view.WeightBitsOut(new NodeId(0)).IsEmpty.Should().BeTrue();
@@ -131,7 +131,7 @@ public sealed class GraphSnapshotViewTests : IDisposable
     public void Dispose_returns_arrays_to_pool_safely_when_called_twice()
     {
         BulkLoad(nodeCount: 2, edges: new[] { (0L, 1L) });
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var view = _db.OpenSnapshotView();
         view.Dispose();
         Action act = view.Dispose;
@@ -147,7 +147,7 @@ public sealed class GraphSnapshotViewTests : IDisposable
         // node 1 redistributing uniformly, rank[1] ends up larger than rank[0].
         BulkLoad(nodeCount: 2, edges: new[] { (0L, 1L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var view = _db.OpenSnapshotView();
         var ranks = GraphAlgorithms.PageRank(view, damping: 0.85, iterations: 50);
 
@@ -163,7 +163,7 @@ public sealed class GraphSnapshotViewTests : IDisposable
         // Symmetric cycle 0→1→2→0 — every node has identical structural role.
         BulkLoad(nodeCount: 3, edges: new[] { (0L, 1L), (1L, 2L), (2L, 0L) });
 
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var view = _db.OpenSnapshotView();
         var ranks = GraphAlgorithms.PageRank(view, damping: 0.85, iterations: 100);
 
@@ -177,7 +177,7 @@ public sealed class GraphSnapshotViewTests : IDisposable
     public void PageRank_handles_empty_graph()
     {
         BulkLoad(nodeCount: 0, edges: Array.Empty<(long, long)>());
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var view = _db.OpenSnapshotView();
         var ranks = GraphAlgorithms.PageRank(view);
         ranks.Should().BeEmpty();
@@ -187,7 +187,7 @@ public sealed class GraphSnapshotViewTests : IDisposable
 
     private void BulkLoad(int nodeCount, (long Src, long Tgt)[] edges)
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
         for (int i = 0; i < nodeCount; i++)
             loader.AppendNode(new NodeId(i), new LabelId(0));

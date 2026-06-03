@@ -23,7 +23,7 @@ public sealed class MvccVisibilityTests : IDisposable
     public MvccVisibilityTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_mvcc_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
     }
 
     public void Dispose()
@@ -120,7 +120,7 @@ public sealed class MvccVisibilityTests : IDisposable
         }
         _db.Dispose();
 
-        using var reopened = GraphDatabase.Open(_dir);
+        using var reopened = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var rtx = reopened.BeginTransaction();
         // recovery の CommittedTxRegistry rebuild と horizon により xmin が registry / horizon 経由で visible。
         rtx.NodeExists(pre).Should().BeTrue();

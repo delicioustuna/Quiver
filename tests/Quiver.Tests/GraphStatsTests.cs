@@ -14,7 +14,7 @@ public sealed class GraphStatsTests : IDisposable
     public GraphStatsTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_stats_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
     }
 
     public void Dispose()

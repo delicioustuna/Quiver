@@ -40,6 +40,9 @@ internal sealed class SqliteGraphStorageBackend : IGraphStorageBackendInternal
         _bulkLoad = new BulkLoadCapabilities { BeginBinaryBulkLoad = null };
     }
 
+    // ARCH-4 増分8: quiver.sqlite の親ディレクトリ (= Open に渡されたデータディレクトリ)。
+    public string DataDirectory => System.IO.Path.GetDirectoryName(_dbPath) is { Length: > 0 } d ? d : ".";
+
     public ITransactionManager Transactions => _txManager;
     public ISchemaApi Schema => _schema;
     public IDiagnosticsApi Diagnostics => _diagnostics;

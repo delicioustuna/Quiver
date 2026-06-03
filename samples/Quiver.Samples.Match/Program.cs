@@ -11,7 +11,7 @@ using Quiver.Storage.Records;
 string dir = Path.Combine(Path.GetTempPath(), "quiver_match_" + Guid.NewGuid().ToString("N")[..8]);
 try
 {
-    using var db = GraphDatabase.Open(dir);
+    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
 
     // ── データ投入 ──
     using (var tx = db.BeginTransaction())

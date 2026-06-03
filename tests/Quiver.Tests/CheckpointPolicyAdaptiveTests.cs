@@ -32,7 +32,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
     /// </summary>
     private long RunPerTxWorkload(GraphDatabaseOptions options, int commits)
     {
-        using var db = GraphDatabase.Open(_dir, options);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
         for (int i = 0; i < commits; i++)
         {
             using var tx = db.BeginTransaction();
@@ -53,7 +53,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
         };
         opts.CheckpointPolicy.Should().Be(CheckpointPolicy.Fixed);
 
-        using var db = GraphDatabase.Open(_dir, opts);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), opts);
         db.Diagnostics.CurrentCheckpointThresholdBytes.Should().Be(16 * 1024 * 1024);
 
         // 通常の動作 (commit + read) に regression 無し。
@@ -86,7 +86,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
             MaxCheckpointThresholdBytes = 64L * 1024 * 1024,
         };
 
-        using var db = GraphDatabase.Open(_dir, opts);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), opts);
 
         // warmup 完了まで commit を流す (warmup 閾値 = max(16, window/64) = 16)。
         // 各 tx で 1000 ノードを作成し、複数ページを大きく dirty 化することで
@@ -121,7 +121,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
             MaxCheckpointThresholdBytes = 1024L * 1024 * 1024,
         };
 
-        using var db = GraphDatabase.Open(_dir, opts);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), opts);
         for (int i = 0; i < 32; i++)
         {
             using var tx = db.BeginTransaction();
@@ -148,7 +148,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
             MinCheckpointThresholdBytes = 4L * 1024 * 1024,
             MaxCheckpointThresholdBytes = 256L * 1024 * 1024,
         };
-        using var db = GraphDatabase.Open(_dir, opts);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), opts);
         db.Diagnostics.CurrentCheckpointThresholdBytes.Should().Be(32 * 1024 * 1024);
 
         // ホットスワップ: Adaptive に切替。
@@ -186,7 +186,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
         };
 
         long expectedNodeCount;
-        using (var db = GraphDatabase.Open(_dir, opts))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), opts))
         {
             for (int i = 0; i < 64; i++)
             {
@@ -199,7 +199,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
 
         // 再 open でデータが完全に復元できる (Adaptive が打った checkpoint で WAL truncate が
         // 走っていても recovery が正しく動くこと)。
-        using (var db2 = GraphDatabase.Open(_dir, opts))
+        using (var db2 = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), opts))
         {
             db2.Diagnostics.GetStatistics().NodeCount.Should().Be(expectedNodeCount);
         }

@@ -26,7 +26,7 @@ public sealed class VacuumTests : IDisposable
     [Fact]
     public void Vacuum_reclaims_committed_dead_node_versions()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         // 100 個のノードを作成 → 全削除 → vacuum で物理回収。
         var ids = new List<long>();
@@ -56,7 +56,7 @@ public sealed class VacuumTests : IDisposable
     [Fact]
     public void Vacuum_returns_Skipped_when_active_transactions_exist()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         // 削除済み version を 1 件作る (vacuum 対象がある状態)。
         long id;
@@ -81,7 +81,7 @@ public sealed class VacuumTests : IDisposable
     [Fact]
     public void Vacuum_freed_slots_are_reused_by_subsequent_Allocate()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         // 10 ノード作成 → 全削除 → vacuum。
         var ids = new List<long>();
@@ -115,7 +115,7 @@ public sealed class VacuumTests : IDisposable
     [Fact]
     public void DryRun_does_not_write()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var tx = db.BeginTransaction())
         {
             var n = tx.CreateNode("Person");
@@ -136,7 +136,7 @@ public sealed class VacuumTests : IDisposable
     [Fact]
     public void Vacuum_reclaims_dead_relationships_and_keeps_live_chain()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         // 3 ノード a/b/c。a→b, a→c, a→b の 3 リレーション。
         long aId, bId, cId;
@@ -175,7 +175,7 @@ public sealed class VacuumTests : IDisposable
     [Fact]
     public void Vacuum_reclaims_dead_properties_and_keeps_live_chain()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         long nodeId;
         using (var tx = db.BeginTransaction())
@@ -207,7 +207,7 @@ public sealed class VacuumTests : IDisposable
     [Fact]
     public void Vacuum_reclaims_property_chain_when_node_is_deleted()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         long deletedId;
         using (var tx = db.BeginTransaction())
@@ -232,7 +232,7 @@ public sealed class VacuumTests : IDisposable
     [Fact]
     public void Vacuum_does_not_reclaim_live_versions()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         long aliveId, deletedId;
         using (var tx = db.BeginTransaction())
@@ -267,7 +267,7 @@ public sealed class VacuumTests : IDisposable
     [Fact]
     public void Vacuum_reclaims_tenant_pages_for_reuse_after_mass_delete()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         var ids = new List<long>();
         using (var tx = db.BeginTransaction())
@@ -314,7 +314,7 @@ public sealed class VacuumTests : IDisposable
         long aliveId;
         // フェーズ 1: 多数作成 → 一部削除 → vacuum で truncate。
         {
-            using var db = GraphDatabase.Open(_dir);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
             var deletedIds = new List<long>();
             using (var tx = db.BeginTransaction())
             {
@@ -337,7 +337,7 @@ public sealed class VacuumTests : IDisposable
         }
 
         // フェーズ 2: 再 open。残った live ノードと property が読めること。
-        using var db2 = GraphDatabase.Open(_dir);
+        using var db2 = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var read = db2.BeginReadOnlyTransaction();
         read.NodeExists(new Core.NodeId(aliveId)).Should().BeTrue();
         read.GetProperty(new Core.NodeId(aliveId), "name").Int32Value.Should().Be(42);
@@ -350,7 +350,7 @@ public sealed class VacuumTests : IDisposable
     [Fact]
     public void Pages_truncated_by_Vacuum_can_be_reallocated()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         // 500 ノード作成 → 全削除 → vacuum (truncate を狙う)。
         var ids = new List<long>();

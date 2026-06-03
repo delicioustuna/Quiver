@@ -32,7 +32,7 @@ public sealed class SnapshotTests : IDisposable
     public void Snapshot_of_quiescent_database_preserves_all_committed_data()
     {
         var ids = new List<NodeId>();
-        using (var db = GraphDatabase.Open(_dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             using var tx = db.BeginTransaction();
             for (int i = 0; i < 50; i++)
@@ -43,10 +43,10 @@ public sealed class SnapshotTests : IDisposable
             }
             tx.Commit();
 
-            db.CreateSnapshot(_snapDir);
+            db.CreateSnapshot(System.IO.Path.Combine(_snapDir, "graph.quiver"));
         }
 
-        using var target = GraphDatabase.Open(_snapDir);
+        using var target = GraphDatabase.Open(System.IO.Path.Combine(_snapDir, "graph.quiver"));
         using var read = target.BeginReadOnlyTransaction();
         foreach (var id in ids)
         {
@@ -59,7 +59,7 @@ public sealed class SnapshotTests : IDisposable
     [Fact]
     public void Snapshot_includes_indexes_so_target_can_lookup_by_index()
     {
-        using (var db = GraphDatabase.Open(_dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             db.Schema.CreateIndex("idx_email", "Person", "email", IndexKind.StringEquality);
             using (var tx = db.BeginTransaction())
@@ -73,10 +73,10 @@ public sealed class SnapshotTests : IDisposable
                 tx.Commit();
             }
 
-            db.CreateSnapshot(_snapDir);
+            db.CreateSnapshot(System.IO.Path.Combine(_snapDir, "graph.quiver"));
         }
 
-        using var target = GraphDatabase.Open(_snapDir);
+        using var target = GraphDatabase.Open(System.IO.Path.Combine(_snapDir, "graph.quiver"));
         using var read = target.BeginReadOnlyTransaction();
         for (int i = 0; i < 20; i++)
         {
@@ -92,7 +92,7 @@ public sealed class SnapshotTests : IDisposable
     [Fact]
     public void Snapshot_excludes_indexes_when_IncludeIndexes_is_false()
     {
-        using (var db = GraphDatabase.Open(_dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             db.Schema.CreateIndex("idx_email", "Person", "email", IndexKind.StringEquality);
             using (var tx = db.BeginTransaction())
@@ -103,7 +103,7 @@ public sealed class SnapshotTests : IDisposable
                 tx.Commit();
             }
 
-            db.CreateSnapshot(_snapDir, new SnapshotOptions { IncludeIndexes = false });
+            db.CreateSnapshot(System.IO.Path.Combine(_snapDir, "graph.quiver"), new SnapshotOptions { IncludeIndexes = false });
         }
 
         var idxDir = Path.Combine(_snapDir, "indexes");
@@ -117,7 +117,7 @@ public sealed class SnapshotTests : IDisposable
     [Fact]
     public void Snapshot_target_passes_CheckConsistency_after_concurrent_writes()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var tx = db.BeginTransaction())
         {
             for (int i = 0; i < 100; i++) tx.CreateNode("Seed");
@@ -149,7 +149,7 @@ public sealed class SnapshotTests : IDisposable
         {
             // Writer が回り始めるまでウォーミング
             Thread.Sleep(50);
-            db.CreateSnapshot(_snapDir);
+            db.CreateSnapshot(System.IO.Path.Combine(_snapDir, "graph.quiver"));
         }
         finally
         {
@@ -157,7 +157,7 @@ public sealed class SnapshotTests : IDisposable
             writer.Wait(TimeSpan.FromSeconds(5));
         }
 
-        using var target = GraphDatabase.Open(_snapDir);
+        using var target = GraphDatabase.Open(System.IO.Path.Combine(_snapDir, "graph.quiver"));
         var report = target.Diagnostics.CheckConsistency();
         report.IsConsistent.Should().BeTrue(
             "snapshot target は recovery 後に整合状態へ収束していなければならない。issues: "
@@ -170,17 +170,17 @@ public sealed class SnapshotTests : IDisposable
         // snapshot 末尾 LSN >= source 側 snapshot 開始時点の LSN を簡易に確認する。
         // target を Open すると recovery が走り、Open 直後に新規 tx を始められれば「target の
         // WAL 末尾 LSN > 0」(= snapshot 時点を超える new tx を受け付ける) ことが確認できる。
-        using (var db = GraphDatabase.Open(_dir))
+        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             using (var tx = db.BeginTransaction())
             {
                 tx.CreateNode("A");
                 tx.Commit();
             }
-            db.CreateSnapshot(_snapDir);
+            db.CreateSnapshot(System.IO.Path.Combine(_snapDir, "graph.quiver"));
         }
 
-        using var target = GraphDatabase.Open(_snapDir);
+        using var target = GraphDatabase.Open(System.IO.Path.Combine(_snapDir, "graph.quiver"));
         using (var tx = target.BeginTransaction())
         {
             tx.CreateNode("B");
@@ -188,7 +188,7 @@ public sealed class SnapshotTests : IDisposable
         }
         // 再 Open しても両方のノードが見えること
         target.Dispose();
-        using var reopened = GraphDatabase.Open(_snapDir);
+        using var reopened = GraphDatabase.Open(System.IO.Path.Combine(_snapDir, "graph.quiver"));
         var stats = reopened.Diagnostics.GetStatistics();
         stats.NodeCount.Should().BeGreaterThanOrEqualTo(2);
     }

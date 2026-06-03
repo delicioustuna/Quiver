@@ -49,7 +49,7 @@ public class MergeWorkloadBenchmarks
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("merge");
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _ = _db.Schema.GetOrCreateLabel("Person");
         _ = _db.Schema.GetOrCreatePropertyKey("uid");
         if (WithIndex)

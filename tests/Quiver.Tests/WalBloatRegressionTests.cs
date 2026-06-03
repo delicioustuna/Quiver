@@ -47,7 +47,7 @@ public sealed class WalBloatRegressionTests : IDisposable
         var rnd = new Random(42);
         var nodeIds = new NodeId[nodeCount];
         _peakWalBytes = 0;
-        using var db = GraphDatabase.Open(_dir, options);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
 
         using (var tx = db.BeginTransaction())
         {
@@ -144,7 +144,7 @@ public sealed class WalBloatRegressionTests : IDisposable
     /// </summary>
     private long CountKnowsEdges(GraphDatabaseOptions? options = null)
     {
-        using var db = GraphDatabase.Open(_dir, options);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
         using var tx = db.BeginReadOnlyTransaction();
         var g = tx.G(db.Schema);
         return g.Nodes().HasLabel("Person").Out("KNOWS").ToList().Count;

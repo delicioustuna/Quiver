@@ -15,7 +15,7 @@ public sealed class GraphDatabaseTests : IDisposable
     public GraphDatabaseTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_test_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
     }
 
     public void Dispose()
@@ -570,7 +570,7 @@ public sealed class GraphDatabaseTests : IDisposable
         {
             // Phase 1: create the database so all files exist in pristine state.
             {
-                using var db = GraphDatabase.Open(dir);
+                using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
             }
 
             // ARCH-4: 単一ファイルコンテナ。全コアデータは graph.quiver 1 ファイル。
@@ -583,7 +583,7 @@ public sealed class GraphDatabaseTests : IDisposable
             // graph.quiver が確定して WAL が消える。WAL replay 経路を検証するため、未コミットの tx を
             // 1 つ開いたまま Dispose して「クラッシュ (ActiveCount>0 → WAL 非削除)」を模擬する。
             {
-                var db = GraphDatabase.Open(dir);
+                var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
                 using (var tx = db.BeginTransaction())
                 {
                     aliceId = tx.CreateNode("Person");
@@ -599,7 +599,7 @@ public sealed class GraphDatabaseTests : IDisposable
 
             // Phase 3: reopen — RecoveryManager replays WAL PageImage records.
             {
-                using var db = GraphDatabase.Open(dir);
+                using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
                 using var tx = db.BeginReadOnlyTransaction();
                 tx.NodeExists(aliceId).Should().BeTrue("WAL recovery must restore the committed node");
                 tx.Rollback();

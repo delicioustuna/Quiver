@@ -37,7 +37,7 @@ public class IndexWalAmplificationBenchmarks
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("ft20_wal_amp");
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _ = _db.Schema.GetOrCreateLabel("Doc");
         _ = _db.Schema.GetOrCreatePropertyKey("idx");
         _db.Schema.CreateIndex("idx_bench", "Doc", "idx", IndexKind.Int64Equality);
@@ -145,7 +145,7 @@ public static class IndexWalAmplificationStandalone
                 ? new GraphDatabaseOptions { GroupCommitWindow = TimeSpan.FromMicroseconds(100) }
                 : new GraphDatabaseOptions();
 
-            using var db = GraphDatabase.Open(dbPath, options);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(dbPath, "graph.quiver"), options);
             _ = db.Schema.GetOrCreateLabel("Doc");
             _ = db.Schema.GetOrCreatePropertyKey("idx");
             db.Schema.CreateIndex("idx_bench", "Doc", "idx", IndexKind.Int64Equality);

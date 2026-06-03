@@ -55,7 +55,7 @@ public sealed class IndexGenerationTests : IDisposable
     [Fact]
     public void Stale_index_entry_is_skipped_after_slot_reuse()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
 
         // nodeA を作って "alice" で索引登録。
@@ -106,7 +106,7 @@ public sealed class IndexGenerationTests : IDisposable
     [Fact]
     public void RangeIndex_skips_stale_entry_after_slot_reuse()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_age", "Person", "age", IndexKind.Int64Equality);
 
         NodeId nodeA;
@@ -155,7 +155,7 @@ public sealed class IndexGenerationTests : IDisposable
     [Fact]
     public void OrphanGc_collects_and_repairs_generation_mismatch_after_reuse()
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
 
         NodeId nodeA;
@@ -206,9 +206,10 @@ public sealed class IndexGenerationTests : IDisposable
     // ---- Format version gate ----
 
     [Fact]
-    public void FormatVersion_current_is_v4()
+    public void FormatVersion_current_is_v5()
     {
-        FormatVersion.Current.Should().Be(FormatVersion.V4IndexGeneration);
+        // ARCH-4 増分8: 単一ファイル化に伴い V4→V5 へ bump。
+        FormatVersion.Current.Should().Be(FormatVersion.V5SingleFile);
     }
 
     [Fact]

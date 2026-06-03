@@ -25,7 +25,7 @@ public sealed class ReaderWriterLockingModeTests : IDisposable
     }
 
     private GraphDatabase OpenWithReaderWriter()
-        => GraphDatabase.Open(_dir, new GraphDatabaseOptions
+        => GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), new GraphDatabaseOptions
         {
             LockingMode = LockingMode.ReaderWriter,
             LockTimeout = TimeSpan.FromMilliseconds(500),
@@ -39,7 +39,7 @@ public sealed class ReaderWriterLockingModeTests : IDisposable
     {
         // ExclusiveOnly: read API はロックを取らないので、書き込み tx が exclusive を持っていても
         // 別 tx の Read は即座に通る (現挙動を破壊していないことの確認)。
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         NodeId nodeId;
         using (var tx = db.BeginTransaction())
         {

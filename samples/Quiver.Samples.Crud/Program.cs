@@ -9,7 +9,7 @@ using Quiver.Storage.Records;
 string dir = Path.Combine(Path.GetTempPath(), "quiver_crud_" + Guid.NewGuid().ToString("N")[..8]);
 try
 {
-    using var db = GraphDatabase.Open(dir);
+    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     using var tx = db.BeginTransaction();
 
     Console.WriteLine("── 1. ノード作成 + プロパティ ──");

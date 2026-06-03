@@ -31,7 +31,7 @@ public sealed class LogicalMutationTests : IDisposable
     }
 
     private static GraphDatabase OpenWithSink(string dir, ILogicalMutationSink sink)
-        => GraphDatabase.Open(dir, new GraphDatabaseOptions { LogicalMutationSink = sink });
+        => GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions { LogicalMutationSink = sink });
 
     [Fact]
     public void Commit_publishes_buffered_mutations()
@@ -100,7 +100,7 @@ public sealed class LogicalMutationTests : IDisposable
         // No sink → no logical buffering at all. We can't observe a missing
         // sink directly; instead exercise the full mutation surface and confirm
         // no exceptions and normal semantics.
-        using var db = GraphDatabase.Open(NewDir());
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(NewDir(), "graph.quiver"));
         using var tx = db.BeginTransaction();
         var a = tx.CreateNode("X");
         tx.SetProperty(a, "k", PropertyValue.FromInt32(1));
@@ -136,7 +136,7 @@ public sealed class LogicalMutationTests : IDisposable
 
         // Open a brand new database and replay against it.
         string targetDir = NewDir();
-        using var target = GraphDatabase.Open(targetDir);
+        using var target = GraphDatabase.Open(System.IO.Path.Combine(targetDir, "graph.quiver"));
         using (var tx = target.BeginTransaction())
         {
             LogicalMutationReplay.Apply(tx, sink.Mutations);

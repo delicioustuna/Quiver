@@ -31,7 +31,7 @@ finally
 static void Demo1_BasicCrud(string dir)
 {
     H("Demo 1: 基本 CRUD — ソーシャルグラフ");
-    using var db = GraphDatabase.Open(dir);
+    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     using var tx = db.BeginTransaction();
 
     // ── ノード作成 & プロパティ設定 ──────────────────────────────────────
@@ -87,7 +87,7 @@ static void Demo1_BasicCrud(string dir)
 static void Demo2_AllPropertyTypes(string dir)
 {
     H("Demo 2: プロパティ各型");
-    using var db = GraphDatabase.Open(dir);
+    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     using var tx = db.BeginTransaction();
 
     var n = tx.CreateNode("Item");
@@ -127,7 +127,7 @@ static void Demo2_AllPropertyTypes(string dir)
 static void Demo3_OperatorPipeline(string dir)
 {
     H("Demo 3: Volcano オペレータパイプライン");
-    using var db = GraphDatabase.Open(dir);
+    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     using var tx = db.BeginTransaction();
 
     for (int i = 0; i < 10; i++)
@@ -184,7 +184,7 @@ static void Demo3_OperatorPipeline(string dir)
 static void Demo4_ExpandOperator(string dir)
 {
     H("Demo 4: ExpandOperator — グラフパターンマッチング");
-    using var db = GraphDatabase.Open(dir);
+    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     using var tx = db.BeginTransaction();
 
     // グラフ構築: Alice→Bob→Dave, Alice→Carol→Dave (KNOWS), Carol→Dave (FOLLOWS)
@@ -238,7 +238,7 @@ static void Demo4_ExpandOperator(string dir)
 static void Demo5_IndexSearch(string dir)
 {
     H("Demo 5: インデックス検索 (Seek / Range)");
-    using var db = GraphDatabase.Open(dir);
+    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
 
     db.Schema.CreateIndex("idx_name",  "Person", "name",  IndexKind.StringEquality);
     db.Schema.CreateIndex("idx_score", "Person", "score", IndexKind.Int64Equality);
@@ -304,7 +304,7 @@ static void Demo6_Persistence(string dir)
     NodeId savedId;
 
     // 書き込み & クローズ
-    using (var db = GraphDatabase.Open(dir))
+    using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
     {
         using var tx = db.BeginTransaction();
         savedId = tx.CreateNode("Config");
@@ -315,7 +315,7 @@ static void Demo6_Persistence(string dir)
     }
 
     // 再オープン & 読み出し
-    using (var db = GraphDatabase.Open(dir))
+    using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
     {
         using var tx = db.BeginTransaction();
         Console.WriteLine($"  再オープン後: NodeExists={tx.NodeExists(savedId)}");
@@ -331,7 +331,7 @@ static void Demo6_Persistence(string dir)
 static void Demo7_Diagnostics(string dir)
 {
     H("Demo 7: 診断 API");
-    using var db = GraphDatabase.Open(dir);
+    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
 
     using (var tx = db.BeginTransaction())
     {
@@ -363,7 +363,7 @@ static void Demo7_Diagnostics(string dir)
 static void Demo8_SourceGenCrud(string dir)
 {
     H("Demo 8: SourceGenerator CRUD + g.Insert / g.Load / g.Update / g.Delete");
-    using var db = GraphDatabase.Open(dir);
+    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     db.Schema.CreateIndex("idx_person_name", "Person", "name", IndexKind.StringEquality);
 
     using var tx = db.BeginTransaction();
@@ -401,7 +401,7 @@ static void Demo8_SourceGenCrud(string dir)
 static void Demo9_GremlinAndMatch(string dir)
 {
     H("Demo 9: Gremlin ライク API + Match DSL");
-    using var db = GraphDatabase.Open(dir);
+    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     using var tx = db.BeginTransaction();
 
     var g = tx.G(db.Schema);

@@ -137,7 +137,7 @@ public sealed class AutoVacuumWorkerTests : IDisposable
     public void GraphDatabase_disabled_AutoVacuum_does_not_auto_run()
     {
         // 既定 (AutoVacuum=false) では open しても自動 vacuum は走らない。
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var tx = db.BeginTransaction())
         {
             tx.CreateNode("Person");
@@ -156,7 +156,7 @@ public sealed class AutoVacuumWorkerTests : IDisposable
             AutoVacuum = true,
             AutoVacuumInterval = TimeSpan.FromMilliseconds(50),
         };
-        using var db = GraphDatabase.Open(_dir, options);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
 
         // ノードを作って全削除 → バックグラウンド worker が回収するのを待つ。
         var ids = new List<long>();
@@ -196,7 +196,7 @@ public sealed class AutoVacuumWorkerTests : IDisposable
             AutoVacuum = true,
             AutoVacuumInterval = TimeSpan.FromMilliseconds(30),
         };
-        var db = GraphDatabase.Open(_dir, options);
+        var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
         using (var tx = db.BeginTransaction())
         {
             tx.CreateNode("Person");
@@ -219,7 +219,7 @@ public sealed class AutoVacuumWorkerTests : IDisposable
         // ワーカーは立たないが open/dispose は問題なく通る。
         var act = () =>
         {
-            using var db = GraphDatabase.Open(_dir, options);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
             using var tx = db.BeginTransaction();
             tx.CreateNode("Person");
             tx.Commit();

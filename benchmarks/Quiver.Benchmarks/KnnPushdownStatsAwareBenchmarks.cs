@@ -45,7 +45,7 @@ public class KnnPushdownStatsAwareBenchmarks
     {
         var rng = new Random(2026);
         _dir = BenchTempDir.Create("vec10");
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         var keyId = _db.Schema.GetOrCreatePropertyKey("title");
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(

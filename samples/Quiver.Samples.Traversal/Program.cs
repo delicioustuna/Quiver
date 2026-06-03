@@ -9,7 +9,7 @@ using Quiver.Core;
 string dir = Path.Combine(Path.GetTempPath(), "quiver_traversal_" + Guid.NewGuid().ToString("N")[..8]);
 try
 {
-    using var db = GraphDatabase.Open(dir);
+    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     using var tx = db.BeginTransaction();
     var g = tx.G(db.Schema);
 

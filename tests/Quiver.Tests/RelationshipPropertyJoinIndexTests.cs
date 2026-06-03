@@ -32,7 +32,7 @@ public sealed class RelationshipPropertyJoinIndexTests : IDisposable
     public void Int64_round_trips_through_join_index()
     {
         BuildGraphWithInt64Weight(edgeCount: 16);
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         var idx = _db.BuildRelationshipPropertyJoinIndex("weight", PropertyValueType.Int64);
         idx.KeyId.Value.Should().BeGreaterOrEqualTo(0);
@@ -52,7 +52,7 @@ public sealed class RelationshipPropertyJoinIndexTests : IDisposable
     public void Double_round_trips_via_bit_cast()
     {
         BuildGraphWithDoubleWeight(edgeCount: 8);
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         var idx = _db.BuildRelationshipPropertyJoinIndex("score", PropertyValueType.Double);
         idx.ValueType.Should().Be(PropertyValueType.Double);
@@ -69,7 +69,7 @@ public sealed class RelationshipPropertyJoinIndexTests : IDisposable
     public void Missing_or_wrong_key_returns_false()
     {
         BuildGraphWithInt64Weight(edgeCount: 4);
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var idx = _db.BuildRelationshipPropertyJoinIndex("weight", PropertyValueType.Int64);
 
         // Out-of-range relationship id.
@@ -87,7 +87,7 @@ public sealed class RelationshipPropertyJoinIndexTests : IDisposable
     public void Edges_without_the_indexed_property_are_omitted()
     {
         // 5 edges total — only the first 3 carry the weight property.
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         _db.Schema.GetOrCreatePropertyKey("weight");
         using (var tx = _db.BeginTransaction())
         {
@@ -117,7 +117,7 @@ public sealed class RelationshipPropertyJoinIndexTests : IDisposable
     [Fact]
     public void Type_mismatch_is_treated_as_missing()
     {
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var tx = _db.BeginTransaction())
         {
             tx.CreateNode("N"); tx.CreateNode("N");
@@ -141,7 +141,7 @@ public sealed class RelationshipPropertyJoinIndexTests : IDisposable
         // observed ratio on a dev box is comfortably north of 10×.
         const int edgeCount = 4_000;
         BuildGraphWithInt64Weight(edgeCount);
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         var idx = _db.BuildRelationshipPropertyJoinIndex("weight", PropertyValueType.Int64);
         using var tx = _db.BeginTransaction();
@@ -185,7 +185,7 @@ public sealed class RelationshipPropertyJoinIndexTests : IDisposable
 
     private void BuildGraphWithInt64Weight(int edgeCount)
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var key = db.Schema.GetOrCreatePropertyKey("weight");
         using var tx = db.BeginTransaction();
         for (int i = 0; i <= edgeCount; i++) tx.CreateNode("N");
@@ -199,7 +199,7 @@ public sealed class RelationshipPropertyJoinIndexTests : IDisposable
 
     private void BuildGraphWithDoubleWeight(int edgeCount)
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var key = db.Schema.GetOrCreatePropertyKey("score");
         using var tx = db.BeginTransaction();
         for (int i = 0; i <= edgeCount; i++) tx.CreateNode("N");

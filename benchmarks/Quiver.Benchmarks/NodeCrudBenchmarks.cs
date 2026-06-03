@@ -25,7 +25,7 @@ public class NodeCrudBenchmarks
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("crud");
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _nodeIds = new NodeId[NodeCount];
 
         const int BatchSize = 5_000;

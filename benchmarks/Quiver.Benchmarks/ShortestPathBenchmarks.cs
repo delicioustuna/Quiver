@@ -29,7 +29,7 @@ public class ShortestPathBenchmarks
     {
         _dbPath = BenchTempDir.Create("sp");
         {
-            using var db = GraphDatabase.Open(_dbPath);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
 
             for (int i = 0; i <= PathLength; i++)
@@ -39,7 +39,7 @@ public class ShortestPathBenchmarks
                     new NodeId(i), new NodeId(i + 1), new RelationshipTypeId(0));
             loader.Commit();
         }
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _srcNode = new NodeId(0);
         _tgtNode = new NodeId(PathLength);
         _readTx = _db.BeginTransaction();

@@ -32,7 +32,7 @@ public class FrontierExpandBenchmarks
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("pw17");
-        _db = GraphDatabase.Open(_dbPath);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
 
         var rng = new Random(42);
         var ids = new NodeId[NodeCount];

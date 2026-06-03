@@ -30,8 +30,18 @@ internal static class FormatVersion
     /// </summary>
     public const byte V4IndexGeneration = 4;
 
+    /// <summary>
+    /// v5: ARCH-4 単一ファイル化。コア store / version sidecar / token / 索引 / 隣接ブロック / epoch を
+    /// すべて単一 <c>*.quiver</c> コンテナ (<see cref="Quiver.Storage.SingleFileContainer"/>) のテナント
+    /// として同居させ、WAL を単一サイドカー <c>*.quiver-wal</c> へ一本化、クリーン終了で WAL を削除する。
+    /// コンテナのカタログ root に committed TxId 高水位フィールドを追加 (記述子オフセット変更) しており、
+    /// v4 (索引 / adjacency / token / WAL がサイドカー群、カタログ記述子 offset 16) とは
+    /// レイアウト非互換。develop 段階のためマイグレーションは提供しない。
+    /// </summary>
+    public const byte V5SingleFile = 5;
+
     /// <summary>現行 (= 新規 DB を作成するときに書き込むバージョン)。</summary>
-    public const byte Current = V4IndexGeneration;
+    public const byte Current = V5SingleFile;
 }
 
 /// <summary>

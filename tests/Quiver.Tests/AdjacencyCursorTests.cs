@@ -36,7 +36,7 @@ public sealed class AdjacencyCursorTests : IDisposable
     public void OpenCursor_returns_all_neighbors_regardless_of_degree(int degree)
     {
         BulkLoadHub(degree);
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         using var tx = _db.BeginTransaction();
         var adj = tx.AsInternal().AdjacencyBlocks!;
@@ -59,7 +59,7 @@ public sealed class AdjacencyCursorTests : IDisposable
         // skip the non-matching ones across multiple pages.
         const int half = 1_000;
         {
-            using var db = GraphDatabase.Open(_dir);
+            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
             loader.AppendNode(new NodeId(0), new LabelId(0));
             long relId = 0;
@@ -73,7 +73,7 @@ public sealed class AdjacencyCursorTests : IDisposable
             }
             loader.Commit();
         }
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         using var tx = _db.BeginTransaction();
         var adj = tx.AsInternal().AdjacencyBlocks!;
@@ -93,7 +93,7 @@ public sealed class AdjacencyCursorTests : IDisposable
     public void OpenCursor_returns_empty_when_node_has_no_block()
     {
         BulkLoadHub(10);
-        _db = GraphDatabase.Open(_dir);
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         using var tx = _db.BeginTransaction();
         var adj = tx.AsInternal().AdjacencyBlocks!;
@@ -105,7 +105,7 @@ public sealed class AdjacencyCursorTests : IDisposable
 
     private void BulkLoadHub(int degree)
     {
-        using var db = GraphDatabase.Open(_dir);
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
         loader.AppendNode(new NodeId(0), new LabelId(0));
         for (int i = 1; i <= degree; i++)

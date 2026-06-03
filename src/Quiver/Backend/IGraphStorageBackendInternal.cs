@@ -20,4 +20,11 @@ internal interface IGraphStorageBackendInternal : IGraphStorageBackend
 
     /// <summary>バルクロード関連の機能ケイパビリティ。</summary>
     BulkLoadCapabilities BulkLoad { get; }
+
+    /// <summary>
+    /// ARCH-4 増分8: このバックエンドのデータが置かれているディレクトリ。
+    /// migration history (<c>migrations.history</c>) など operational metadata の保存先解決に使う。
+    /// binary backend は <c>*.quiver</c> の親ディレクトリ、SQLite backend はデータディレクトリそのもの。
+    /// </summary>
+    string DataDirectory { get; }
 }
