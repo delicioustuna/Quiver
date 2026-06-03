@@ -197,14 +197,16 @@ public sealed class StreamingBulkLoaderTests : IDisposable
         }
     }
 
+    // ARCH-4: 全コア store は単一ファイル graph.quiver に同居する。bulk load は決定的かつ
+    // WAL 非対象 (LSN=0) なので、streaming / in-memory の graph.quiver はバイト一致するはず。
     private static void AssertNodeStoreBytesEqual(string dirA, string dirB)
-        => AssertFileBytesEqual(Path.Combine(dirA, "nodes.db"), Path.Combine(dirB, "nodes.db"));
+        => AssertFileBytesEqual(Path.Combine(dirA, "graph.quiver"), Path.Combine(dirB, "graph.quiver"));
 
     private static void AssertRelStoreBytesEqual(string dirA, string dirB)
-        => AssertFileBytesEqual(Path.Combine(dirA, "rels.db"), Path.Combine(dirB, "rels.db"));
+        => AssertFileBytesEqual(Path.Combine(dirA, "graph.quiver"), Path.Combine(dirB, "graph.quiver"));
 
     private static void AssertPropStoreBytesEqual(string dirA, string dirB)
-        => AssertFileBytesEqual(Path.Combine(dirA, "props.db"), Path.Combine(dirB, "props.db"));
+        => AssertFileBytesEqual(Path.Combine(dirA, "graph.quiver"), Path.Combine(dirB, "graph.quiver"));
 
     private static void AssertFileBytesEqual(string a, string b)
     {

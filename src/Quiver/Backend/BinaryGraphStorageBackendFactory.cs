@@ -14,6 +14,24 @@ namespace Quiver;
 /// </summary>
 internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFactory
 {
+    // ARCH-4: コンテナ内の全コアページを載せる単一 WAL fileKind。旧 per-store WalFileKind
+    // (Nodes=1..PropertyVersionMeta=7) とも索引予約レンジ (0x40+) とも衝突しない値を使う。
+    // 特に vacuum の WriteFileTruncate は WalFileKind.Nodes 等を渡すため、DataFileKind がそれらと
+    // 衝突すると recovery の FileTruncate replay が container.Physical 全体を誤って物理 truncate する。
+    private const byte DataFileKind = 0x20;
+
+    // ARCH-4: カタログ内のテナント ID (WAL fileKind とは別空間。各 store / sidecar / token に 1 つ)。
+    private const byte TenantNodes = 1;
+    private const byte TenantRels = 2;
+    private const byte TenantProps = 3;
+    private const byte TenantBlobs = 4;
+    private const byte TenantNodeVer = 5;
+    private const byte TenantRelVer = 6;
+    private const byte TenantPropVer = 7;
+    private const byte TenantLabelTok = 8;
+    private const byte TenantRelTypeTok = 9;
+    private const byte TenantPropKeyTok = 10;
+
     public IGraphStorageBackend Open(string directoryPath, GraphDatabaseOptions options)
     {
         // FT-15: a prior backend on this thread may have been killed mid-transaction
@@ -33,63 +51,32 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var walDir = Path.Combine(directoryPath, "wal");
         var wal = new WriteAheadLog(walDir, options.WalSegmentSize, options.GroupCommitWindow);
 
-        // FT-32: MVCC sidecar — record から撤去した xmin/xmax を EntityKind 別 sidecar に持つ。
-        // 各 sidecar PagedFile も EnableWalLogging で同一 WAL に連動させ、データレコードと
-        // 同一トランザクションで PageImage / before-image が記録される (commit / abort / crash で整合)。
-        var nodeFile = pageManager.OpenOrCreate(
-            Path.Combine(directoryPath, "nodes.db"), PageKind.Header);
-        nodeFile.EnableWalLogging((byte)WalFileKind.Nodes, wal);
-        var nodeVerFile = pageManager.OpenOrCreate(
-            Path.Combine(directoryPath, "nodes.ver"), PageKind.Header);
-        nodeVerFile.EnableWalLogging((byte)WalFileKind.NodeVersionMeta, wal);
-        var nodeVersions = new EntityVersionStore(nodeVerFile);
-        var nodeStore = new NodeStore(nodeFile, labelIndex: null, nodeVersions);
+        // ARCH-4: 単一ファイルコンテナ。コア store / version sidecar / token を 1 つの
+        // graph.quiver に同居させ、全ページを単一 DATA fileKind で WAL に載せる (option B)。
+        // 物理ページ ID は全テナント横断で一意なので recovery / abort は純物理ページ単位で動く。
+        // 索引は引き続き予約レンジ (0x40+) の別ファイル (増分4 で吸収予定)。
+        // GraphDatabaseOptions.BufferPoolSize を共有プール容量に実配線する。
+        int poolPages = (int)Math.Max(64, options.BufferPoolSize / PagedFile.PageSizeConst);
+        var container = new SingleFileContainer(
+            Path.Combine(directoryPath, "graph.quiver"), poolPages);
+        container.EnableWalLogging(DataFileKind, wal);
+        // checkpoint (pageManager.FlushAll) / snapshot 経路に container 物理ファイルを乗せる。
+        pageManager.Adopt(container.Physical);
 
-        var relFile = pageManager.OpenOrCreate(
-            Path.Combine(directoryPath, "rels.db"), PageKind.Header);
-        relFile.EnableWalLogging((byte)WalFileKind.Relationships, wal);
-        var relVerFile = pageManager.OpenOrCreate(
-            Path.Combine(directoryPath, "rels.ver"), PageKind.Header);
-        relVerFile.EnableWalLogging((byte)WalFileKind.RelationshipVersionMeta, wal);
-        var relVersions = new EntityVersionStore(relVerFile);
-        var relStore = new RelationshipStore(relFile, relVersions);
-
-        var propFile = pageManager.OpenOrCreate(
-            Path.Combine(directoryPath, "props.db"), PageKind.Header);
-        propFile.EnableWalLogging((byte)WalFileKind.Properties, wal);
-        var blobFile = pageManager.OpenOrCreate(
-            Path.Combine(directoryPath, "blobs.db"), PageKind.Header);
-        blobFile.EnableWalLogging((byte)WalFileKind.BlobData, wal);
-        var propVerFile = pageManager.OpenOrCreate(
-            Path.Combine(directoryPath, "props.ver"), PageKind.Header);
-        propVerFile.EnableWalLogging((byte)WalFileKind.PropertyVersionMeta, wal);
-        var propVersions = new EntityVersionStore(propVerFile);
-        var propStore = new PropertyStore(propFile, blobFile, propVersions);
-
-        var labelTokens   = new LabelTokenStore(Path.Combine(directoryPath, "labels.tok"));
-        var relTypeTokens = new RelationshipTypeTokenStore(Path.Combine(directoryPath, "reltypes.tok"));
-        var propKeyTokens = new PropertyKeyTokenStore(Path.Combine(directoryPath, "propkeys.tok"));
-
+        // ARCH-4: テナント (= 各 store) は recovery 完了後に open する。kill 後の reopen では
+        // カタログ / page-table の content が未フラッシュで失われうるため、recovery が物理 page1
+        // (カタログ) と page-table ページを WAL から復元してから OpenTenant しないと、空カタログを
+        // 見て tenant を再生成し、WAL の物理ページ ID と乖離して committed データを取りこぼす。
         var indexDir = Path.Combine(directoryPath, "indexes");
-        // FT-19: IndexManager に WAL + runtime fileRegistry を渡し、新規索引作成時に
-        // PagedFile を EnableWalLogging で配線して fileRegistry に登録する経路を貫通させる。
-        // fileRegistry は下で data files を追加した後、indexManager.MaterializeAll で既存索引も
-        // 追加し、recovery が透過的に全 file kind を扱えるようにする。
+        // ARCH-4: コア store / sidecar / token は単一 DATA fileKind = container.Physical。
+        // 索引は IndexManager が予約レンジ (0x40+) を別ファイルへ割り当て、MaterializeAll で
+        // fileRegistry に追加する (recovery が透過的に全 fileKind を扱う)。
         var fileRegistry = new Dictionary<byte, IPagedFile>
         {
-            { (byte)WalFileKind.Nodes,         nodeFile },
-            { (byte)WalFileKind.Relationships, relFile },
-            { (byte)WalFileKind.Properties,    propFile },
-            { (byte)WalFileKind.BlobData,      blobFile },
-            // FT-32: sidecar も ARIES page-WAL 対象。recovery の PageImage redo / abort の
-            // before-image undo がデータレコードと一貫して走るよう registry に登録する。
-            { (byte)WalFileKind.NodeVersionMeta,         nodeVerFile },
-            { (byte)WalFileKind.RelationshipVersionMeta, relVerFile },
-            { (byte)WalFileKind.PropertyVersionMeta,     propVerFile },
+            { DataFileKind, container.Physical },
         };
         var indexManager = new IndexManager(indexDir, wal, fileRegistry);
         // FT-19: 既存索引を recovery 前に open + EnableWalLogging + fileRegistry へ登録。
-        // これがないと recovery の PageImage / CLR replay が索引ファイルを引けず redo が失敗する。
         indexManager.MaterializeAll(fileRegistry);
 
         // PW-14: epoch metadata (base relationship hwm + tombstones) is shared
@@ -131,17 +118,45 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var recovery = new RecoveryManager(pageManager, wal, fileRegistry, committedRegistry: committedRegistry);
         recovery.Recover();
 
-        // FT-15: store metadata (hwm / freeHead / inUseCount) is page-backed; the
-        // constructors above read it from the on-disk header pages BEFORE recovery
-        // ran. After redo / undo rewrote those header pages, re-sync the in-memory
-        // caches so they reflect the recovered state.
+        // ARCH-4: recovery が物理 page1 (カタログ) + page-table + header ページを WAL から復元した。
+        // ここで container の in-memory カタログを正本へ読み直してから、テナントを open する。
+        container.ReloadAll();
+
+        var nodeFile = container.OpenTenant(TenantNodes, PageKind.Header);
+        var nodeVerFile = container.OpenTenant(TenantNodeVer, PageKind.Header);
+        var nodeVersions = new EntityVersionStore(nodeVerFile);
+        var nodeStore = new NodeStore(nodeFile, labelIndex: null, nodeVersions);
+
+        var relFile = container.OpenTenant(TenantRels, PageKind.Header);
+        var relVerFile = container.OpenTenant(TenantRelVer, PageKind.Header);
+        var relVersions = new EntityVersionStore(relVerFile);
+        var relStore = new RelationshipStore(relFile, relVersions);
+
+        var propFile = container.OpenTenant(TenantProps, PageKind.Header);
+        var blobFile = container.OpenTenant(TenantBlobs, PageKind.Header);
+        var propVerFile = container.OpenTenant(TenantPropVer, PageKind.Header);
+        var propVersions = new EntityVersionStore(propVerFile);
+        var propStore = new PropertyStore(propFile, blobFile, propVersions);
+
+        var labelTokens   = new LabelTokenStore(container.OpenTenant(TenantLabelTok, PageKind.TokenRecord));
+        var relTypeTokens = new RelationshipTypeTokenStore(container.OpenTenant(TenantRelTypeTok, PageKind.TokenRecord));
+        var propKeyTokens = new PropertyKeyTokenStore(container.OpenTenant(TenantPropKeyTok, PageKind.TokenRecord));
+
+        // FT-15 / ARCH-4: abort (CLR undo) 後に container のテナント記述子 / page table と store メタを
+        // 再同期するコールバック。AbortUndoHandler が before-image 復元後に呼ぶ。
         void ReloadStoreMeta()
         {
+            container.ReloadAll();
             nodeStore.ReloadMeta();
             relStore.ReloadMeta();
             propStore.ReloadMeta();
+            // ARCH-4: トークンページもコンテナの WAL 対象なので、abort で CLR がディスクを
+            // tx 開始前へ戻す。in-memory 辞書も読み直してディスクと一致させないと、後続 commit が
+            // 「メモリにあるがディスクに無い」トークンの再永続化をスキップし reopen で消える。
+            labelTokens.Reload();
+            relTypeTokens.Reload();
+            propKeyTokens.Reload();
         }
-        ReloadStoreMeta();
 
         var vectors = new InMemoryVectorStore();
         var access = new BinaryGraphAccessMethods(vectors);

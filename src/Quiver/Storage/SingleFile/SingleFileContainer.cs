@@ -130,9 +130,19 @@ internal sealed class SingleFileContainer : IDisposable
     {
         lock (_gate)
         {
-            LoadCatalog(inPlace: true);
-            foreach (var tenant in _tenants.Values)
-                tenant.ReloadPageTable();
+            if (_tenants.Count == 0)
+            {
+                // recovery 直後 (テナント未 open): カタログを丸ごと読み直す。kill 後の reopen で
+                // ctor が読んだ stale カタログを、recovery が物理 page1 を復元した後の正本で置換する。
+                LoadCatalog(inPlace: false);
+            }
+            else
+            {
+                // abort (CLR undo) 後: open 済みテナントの CatalogEntry 参照を保つため in-place 更新。
+                LoadCatalog(inPlace: true);
+                foreach (var tenant in _tenants.Values)
+                    tenant.ReloadPageTable();
+            }
         }
     }
 

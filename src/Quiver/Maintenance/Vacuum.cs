@@ -163,7 +163,13 @@ internal sealed class Vacuum : IVacuum
         //   2. PagedFile.Truncate で MMF unmap → SetLength → meta page 書き戻し → fsync。
         // (1) と (2) の間で crash しても、recovery Pass 2 redo が FileTruncate を再生して
         // 物理 file が再 truncate される (PagedFile.Truncate は newPageCount >= 現状 は no-op)。
-        _wal!.WriteFileTruncate((byte)kind, newPageCount);
+        // ARCH-4: TenantPagedFile (単一ファイルコンテナ) の truncate はテナント論理空間の縮小 +
+        // 物理ページのグローバル free list 返却で、自身で flush して durable 化する (物理ファイルは
+        // 縮まない)。WAL FileTruncate は per-store 物理ファイルの物理 truncate 冪等再生用なので、
+        // テナントに対しては書かない (書くと recovery が fileKind を container.Physical に誤マップして
+        // 全体を物理 truncate しうる)。
+        if (file is not TenantPagedFile)
+            _wal!.WriteFileTruncate((byte)kind, newPageCount);
         file.Truncate(newPageCount);
         return current - newPageCount;
     }

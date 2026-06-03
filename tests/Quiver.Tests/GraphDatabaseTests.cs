@@ -573,11 +573,8 @@ public sealed class GraphDatabaseTests : IDisposable
                 using var db = GraphDatabase.Open(dir);
             }
 
-            // Capture pre-write snapshots of data files.
-            byte[] nodesSnap = File.ReadAllBytes(Path.Combine(dir, "nodes.db"));
-            byte[] relsSnap  = File.ReadAllBytes(Path.Combine(dir, "rels.db"));
-            byte[] propsSnap = File.ReadAllBytes(Path.Combine(dir, "props.db"));
-            byte[] blobsSnap = File.ReadAllBytes(Path.Combine(dir, "blobs.db"));
+            // ARCH-4: 単一ファイルコンテナ。全コアデータは graph.quiver 1 ファイル。
+            byte[] dataSnap = File.ReadAllBytes(Path.Combine(dir, "graph.quiver"));
 
             NodeId aliceId;
 
@@ -592,11 +589,8 @@ public sealed class GraphDatabaseTests : IDisposable
                 // We use GC to release unmanaged resources without explicit Flush().
             }
 
-            // Restore pre-write data files to simulate crash (buffer not written to disk).
-            File.WriteAllBytes(Path.Combine(dir, "nodes.db"), nodesSnap);
-            File.WriteAllBytes(Path.Combine(dir, "rels.db"),  relsSnap);
-            File.WriteAllBytes(Path.Combine(dir, "props.db"), propsSnap);
-            File.WriteAllBytes(Path.Combine(dir, "blobs.db"), blobsSnap);
+            // Restore pre-write data file to simulate crash (buffer not written to disk).
+            File.WriteAllBytes(Path.Combine(dir, "graph.quiver"), dataSnap);
 
             // Phase 3: reopen — RecoveryManager replays WAL PageImage records.
             {

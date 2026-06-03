@@ -53,6 +53,26 @@ internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposabl
     protected TokenStoreBase(ITokenPersistence persistence)
     {
         _persistence = persistence;
+        LoadFromPersistence();
+    }
+
+    /// <summary>
+    /// ARCH-4: in-memory 辞書を永続化層 (ディスク) から読み直す。トークンページがコンテナの
+    /// WAL ロギング対象になったため、abort (CLR undo) でディスク側はトランザクション開始前へ
+    /// 戻る。その際 in-memory 辞書も戻さないと「メモリにはあるがディスクには無い」トークンが生じ、
+    /// 後続 commit が再永続化をスキップして reopen 時にトークンが消える。abort 後に本メソッドを
+    /// 呼んで in-memory をディスクと一致させる。
+    /// </summary>
+    public void Reload()
+    {
+        _byName.Clear();
+        _byId.Clear();
+        _nextId = 0;
+        LoadFromPersistence();
+    }
+
+    private void LoadFromPersistence()
+    {
         foreach (var (id, utf8) in _persistence.Load())
         {
             string name = Encoding.UTF8.GetString(utf8);

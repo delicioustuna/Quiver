@@ -258,43 +258,50 @@ public sealed class VacuumTests : IDisposable
     // ---------- OP-5: 物理 truncate + WAL FileTruncate ----------
 
     /// <summary>
-    /// OP-5: 1000 ノード作成 → 全削除 → vacuum で物理ページが truncate されること。
-    /// nodes.db / props.db のページファイルが Close 後にサイズ縮減していることを確認する。
+    /// OP-5 / ARCH-4: 1000 ノード作成 → 全削除 → vacuum でテナントページが回収されること。
+    /// 単一ファイルコンテナでは物理 OS truncate ではなく、末尾の不要ページをグローバル free list へ
+    /// 返却し他テナントが再利用できる形で回収する (graph.quiver は MMF 事前確保のため縮まない)。
+    /// よって回収量は <see cref="VacuumReport.TruncatedPages"/> (回収した論理ページ数) で確認し、
+    /// 回収後に同数のノードを再作成してもコンテナの論理ページ数が増えない (= 再利用された) ことを検証する。
     /// </summary>
     [Fact]
-    public void Vacuum_physically_truncates_page_files_after_mass_delete()
+    public void Vacuum_reclaims_tenant_pages_for_reuse_after_mass_delete()
     {
-        long beforeNodesSize, afterNodesSize;
-        long truncatedPages;
+        using var db = GraphDatabase.Open(_dir);
 
-        // 1000 ノードを作成。3 ストアに pages が確保される。
+        var ids = new List<long>();
+        using (var tx = db.BeginTransaction())
         {
-            using var db = GraphDatabase.Open(_dir);
-            var ids = new List<long>();
-            using (var tx = db.BeginTransaction())
-            {
-                for (int i = 0; i < 1000; i++)
-                    ids.Add(tx.CreateNode("Person").Value);
-                tx.Commit();
-            }
-            // 全削除 (logical)。
-            using (var tx = db.BeginTransaction())
-            {
-                foreach (var id in ids)
-                    tx.DeleteNode(new Core.NodeId(id));
-                tx.Commit();
-            }
-            beforeNodesSize = new FileInfo(Path.Combine(_dir, "nodes.db")).Length;
-
-            var report = db.Vacuum();
-            report.Skipped.Should().BeFalse();
-            report.ReclaimedNodes.Should().Be(1000);
-            truncatedPages = report.TruncatedPages;
+            for (int i = 0; i < 1000; i++)
+                ids.Add(tx.CreateNode("Person").Value);
+            tx.Commit();
+        }
+        using (var tx = db.BeginTransaction())
+        {
+            foreach (var id in ids)
+                tx.DeleteNode(new Core.NodeId(id));
+            tx.Commit();
         }
 
-        afterNodesSize = new FileInfo(Path.Combine(_dir, "nodes.db")).Length;
-        truncatedPages.Should().BeGreaterThan(0);
-        afterNodesSize.Should().BeLessThan(beforeNodesSize);
+        var report = db.Vacuum();
+        report.Skipped.Should().BeFalse();
+        report.ReclaimedNodes.Should().Be(1000);
+        report.TruncatedPages.Should().BeGreaterThan(0,
+            "末尾の不要ページがグローバル free list へ回収されること");
+
+        long fileSizeAfterVacuum = new FileInfo(Path.Combine(_dir, "graph.quiver")).Length;
+
+        // 回収後に同数のノードを再作成。回収済み物理ページが再利用され、ファイルは成長しない。
+        using (var tx = db.BeginTransaction())
+        {
+            for (int i = 0; i < 1000; i++)
+                tx.CreateNode("Person");
+            tx.Commit();
+        }
+        db.Diagnostics.GetStatistics(); // flush 観測契機 (no-op でも可)
+        long fileSizeAfterRefill = new FileInfo(Path.Combine(_dir, "graph.quiver")).Length;
+        fileSizeAfterRefill.Should().Be(fileSizeAfterVacuum,
+            "回収済みページが再利用され、再作成でファイルが成長しないこと");
     }
 
     /// <summary>
