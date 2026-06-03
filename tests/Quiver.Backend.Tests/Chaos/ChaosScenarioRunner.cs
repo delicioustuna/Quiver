@@ -152,8 +152,8 @@ internal sealed class ChaosScenarioRunner
         }
         finally
         {
-            try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
-            catch { /* best-effort temp cleanup */ }
+            // ARCH-4 増分8: kill 後ハンドル解放を待ってから確実に削除し %TEMP% リークを抑える。
+            Quiver.Backend.Tests.Faults.TestTempCleanup.DeleteDirectoryRobust(dir);
         }
     }
 

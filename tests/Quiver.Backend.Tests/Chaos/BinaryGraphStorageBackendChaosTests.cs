@@ -49,9 +49,9 @@ public sealed class BinaryGraphStorageBackendChaosTests
         var scenario = new ChaosScenario(seed, txCount, fault);
         var runner = new ChaosScenarioRunner(
             openDefault: dir => new BinaryGraphStorageBackendFactory()
-                .Open(dir, new GraphDatabaseOptions()),
+                .Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions()),
             openCheckpointSensitive: dir => new BinaryGraphStorageBackendFactory()
-                .Open(dir, new GraphDatabaseOptions { CheckpointThresholdBytes = 1 }),
+                .Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions { CheckpointThresholdBytes = 1 }),
             injectorFactory: dir => new BinaryBackendFaultInjector(dir));
 
         var result = runner.Run(scenario);

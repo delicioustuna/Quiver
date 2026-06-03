@@ -33,15 +33,8 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            if (Directory.Exists(_dir))
-                Directory.Delete(_dir, recursive: true);
-        }
-        catch
-        {
-            // OS may still hold a few handles after a torn-shutdown test — best effort cleanup.
-        }
+        // ARCH-4 増分8: torn-shutdown 後はハンドル解放を待ってから確実に削除する (%TEMP% リーク抑制)。
+        Faults.TestTempCleanup.DeleteDirectoryRobust(_dir);
     }
 
     protected abstract IGraphStorageBackendFactory CreateFactory();
@@ -49,8 +42,14 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     /// <summary>Database directory under test. Exposed to subclasses for backend-specific file paths.</summary>
     protected string DatabaseDirectory => _dir;
 
+    /// <summary>
+    /// ARCH-4 増分8: factory.Open に渡すパス。SQLite はディレクトリ (既定)、binary backend は
+    /// <c>&lt;dir&gt;/graph.quiver</c> ファイルパス (サブクラスが override)。
+    /// </summary>
+    protected virtual string DatabasePath => _dir;
+
     protected IGraphStorageBackend Open()
-        => _factory.Open(_dir, new GraphDatabaseOptions());
+        => _factory.Open(DatabasePath, new GraphDatabaseOptions());
 
     // ===== (a) Commit -> kill -> reopen recovers committed data =====
 

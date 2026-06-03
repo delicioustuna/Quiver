@@ -7,8 +7,17 @@
 
 ## ★ 引き継ぎサマリ (2026-06-03 時点 / 別セッション再開用) ★
 
-**状態: コア完了・全テストスイート緑。残り = 完全 single-file-at-rest 化 (索引/adjacency/WAL/API/format)。**
-SKILL.md 分類 K の ARCH-4 行は **未** のまま (完了承認前)。
+**状態: ✅ ARCH-4 完了 (増分1-8 全て完了・全テストスイート緑、commit `b0eecb4`→`f623ba1`)。**
+SKILL.md 分類 K の ARCH-4 行は ✅ に更新済 (2026-06-03 ユーザ完了承認)。静止時 `*.quiver` 単一ファイル +
+運用中のみ `*.quiver-wal`、クリーン終了で WAL 削除を達成。
+- 増分5 `db7bedd`: 索引 + 索引カタログをコンテナテナントへ (FileKindCatalog/.idxmeta 全廃)。
+- 増分6 `c6767e7`: adjacency(V1/V2)+索引+epoch をコンテナへ (adj.* 全廃)。AdjacencyContainer 新設。
+- 増分7 `2be1857`: WAL を `*.quiver-wal` 単一サイドカーへ + Truncate コンパクション + クリーン終了削除。
+  committed-TxId 高水位を container カタログ root に永続化 (WAL 削除後の MVCC visibility / 採番維持)。
+- 増分8 `f623ba1`: Open(filePath) / DirectoryPath→Path / CreateSnapshot(filePath) クリーンブレイク、
+  FormatVersion V4→V5SingleFile、PublicApi 再承認、呼び出し ~226 箇所を機械移行。
+
+以下は当時の作業途中サマリ (履歴として残置):
 
 ### 完了済み (develop, commit `b0eecb4` → `1b3533b`)
 - 増分1 `b0eecb4`: `SingleFileContainer` + `TenantPagedFile` (論理↔物理 page table) + page テスト。

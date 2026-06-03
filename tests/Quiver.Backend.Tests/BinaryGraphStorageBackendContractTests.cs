@@ -16,6 +16,10 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
     protected override IGraphStorageBackendFactory CreateFactory()
         => new BinaryGraphStorageBackendFactory();
 
+    // ARCH-4 増分8: binary backend は単一ファイル <dir>/graph.quiver を開く。
+    protected override string DatabasePath
+        => System.IO.Path.Combine(DatabaseDirectory, "graph.quiver");
+
     /// <summary>
     /// FT-15 Tier1: rollback must roll back page-backed store metadata (the node
     /// store high-water mark), so the slot freed by the aborted CreateNode is
@@ -32,7 +36,7 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
         try
         {
             var factory = new BinaryGraphStorageBackendFactory();
-            using var backend = factory.Open(dir, new GraphDatabaseOptions());
+            using var backend = factory.Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions());
 
             NodeId discarded;
             using (var tx = backend.BeginGraphTransaction(
@@ -184,7 +188,7 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
         try
         {
             using var backend = new BinaryGraphStorageBackendFactory()
-                .Open(dir, new GraphDatabaseOptions());
+                .Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions());
             body(backend);
         }
         finally

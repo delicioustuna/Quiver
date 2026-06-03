@@ -19,6 +19,11 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     protected override IGraphStorageBackendFactory CreateFactory()
         => new BinaryGraphStorageBackendFactory();
 
+    // ARCH-4 増分8: binary backend は単一ファイル *.quiver。コンテナは <dir>/graph.quiver、
+    // WAL は <dir>/graph.quiver-wal。fault injector の LatestWalSegment / sidecar 削除はこの前提。
+    protected override string DatabasePath
+        => System.IO.Path.Combine(DatabaseDirectory, "graph.quiver");
+
     protected override void InjectTornWriteAtTail()
     {
         // Most recent WAL segment is the durability boundary. Zero-fill the
@@ -149,7 +154,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             var ids = new List<NodeId>();
             for (int i = 0; i < 30; i++)
             {
-                IGraphStorageBackend? backend = factory.Open(dir, opts);
+                IGraphStorageBackend? backend = factory.Open(System.IO.Path.Combine(dir, "graph.quiver"), opts);
                 using (var tx = backend.BeginGraphTransaction(
                     IsolationLevel.SnapshotIsolation, readOnly: false))
                 {
@@ -163,7 +168,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
                 KillProcessSimulator.SimulateKill(ref backend);
             }
 
-            using var reopened = factory.Open(dir, opts);
+            using var reopened = factory.Open(System.IO.Path.Combine(dir, "graph.quiver"), opts);
             using var rtx = reopened.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: true);
             foreach (var id in ids)
@@ -172,7 +177,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         }
         finally
         {
-            try { Directory.Delete(dir, recursive: true); } catch { }
+            Faults.TestTempCleanup.DeleteDirectoryRobust(dir);
         }
     }
 
@@ -190,7 +195,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         {
             Directory.CreateDirectory(dir);
             using var backend = new BinaryGraphStorageBackendFactory()
-                .Open(dir, new GraphDatabaseOptions());
+                .Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions());
             using var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false);
             var node = tx.CreateNode("First");
@@ -198,7 +203,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         }
         finally
         {
-            try { Directory.Delete(dir, recursive: true); } catch { }
+            Faults.TestTempCleanup.DeleteDirectoryRobust(dir);
         }
     }
 
@@ -300,7 +305,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             var opts = new GraphDatabaseOptions { CheckpointThresholdBytes = 1 };
 
             NodeId committed;
-            IGraphStorageBackend? backend = factory.Open(dir, opts);
+            IGraphStorageBackend? backend = factory.Open(System.IO.Path.Combine(dir, "graph.quiver"), opts);
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
@@ -320,7 +325,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
 
             KillProcessSimulator.SimulateKill(ref backend);
 
-            using var reopened = factory.Open(dir, opts);
+            using var reopened = factory.Open(System.IO.Path.Combine(dir, "graph.quiver"), opts);
             using var rtx = reopened.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: true);
             var cur = rtx.SeekIndex("idx_name", PropertyValue.FromString("checkpointed"));
@@ -332,7 +337,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         }
         finally
         {
-            try { Directory.Delete(dir, recursive: true); } catch { }
+            Faults.TestTempCleanup.DeleteDirectoryRobust(dir);
         }
     }
 
@@ -539,7 +544,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             // が完走するのは構わない (このシナリオでテストしたいのは「次の checkpoint
             // が phase X で kill されたとき」の挙動)。
             var preserved = new List<NodeId>();
-            IGraphStorageBackend? backend = factory.Open(dir, opts);
+            IGraphStorageBackend? backend = factory.Open(System.IO.Path.Combine(dir, "graph.quiver"), opts);
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
@@ -589,7 +594,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             // 整合に戻る)。
             KillProcessSimulator.SimulateKill(ref backend);
 
-            using var reopened = factory.Open(dir, opts);
+            using var reopened = factory.Open(System.IO.Path.Combine(dir, "graph.quiver"), opts);
             using var rtx = reopened.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: true);
             // PreKill tx 自体も commit record が durable に書かれていれば redo されているはず。
@@ -607,7 +612,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         finally
         {
             Checkpointer.PhaseInjector = null;
-            try { Directory.Delete(dir, recursive: true); } catch { }
+            Faults.TestTempCleanup.DeleteDirectoryRobust(dir);
         }
     }
 

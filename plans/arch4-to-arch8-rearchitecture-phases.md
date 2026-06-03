@@ -27,6 +27,16 @@ ARCH-1〜3 で「単一アセンブリ化 / 公開 API 整理 / 索引 Generatio
 
 ## §2. ARCH-4 — Phase 1: L0 単一ファイル Pager + 共有 buffer pool + WAL 一本化
 
+> ✅ **完了 (develop, commit `b0eecb4` → `f623ba1`)。** ARCH-5a (テナント化) を前倒し統合して実施
+> (§3.6 の二度手間回避判断)。静止時 `*.quiver` 単一ファイル + 運用中 `*.quiver-wal` を達成。
+> - 増分1-4 (`b0eecb4`→`1b3533b`): SingleFileContainer + TenantPagedFile、コア store/version sidecar/token を単一コンテナへ、WAL logging + crash recovery、factory 全面切替。
+> - 増分5 (`db7bedd`): B+Tree 索引 + 索引カタログをコンテナテナントへ (FileKindCatalog/.idxmeta 全廃)。
+> - 増分6 (`c6767e7`): adjacency block (V1/V2) + 索引 + epoch をコンテナへ (adj.* 全廃)。
+> - 増分7 (`2be1857`): WAL を `*.quiver-wal` 単一サイドカーへ一本化 + Truncate コンパクション + クリーン終了で削除。committed-TxId 高水位を container カタログへ永続化し WAL 削除後の MVCC visibility / 採番を維持。
+> - 増分8 (`f623ba1`): `GraphDatabase.Open(filePath="*.quiver")` / `DirectoryPath`→`Path` / `CreateSnapshot(targetFilePath)` へクリーンブレイク、`FormatVersion V4→V5SingleFile`、PublicApi 再承認、呼び出し ~226 箇所を機械移行。
+> - `BufferPoolSize` は container 物理 PagedFile のプール容量へ実配線済 (増分4)。全スイート緑。
+> 詳細な増分プラン: `plans/arch4-single-file-pager-impl.md`。
+
 ### 目的
 DB を「ディレクトリ + 15+ ファイル」から **単一データファイル `*.quiver` (+ 運用中のみ `*.quiver-wal` サイドカー)** に集約し、SQLite 的ポータビリティ (コピー/メールで運べる) を満たす。あわせて dead config の `BufferPoolSize` を実配線する。
 
