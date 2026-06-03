@@ -199,6 +199,12 @@ internal sealed class TransactionManager : ITransactionManager
         }
     }
 
+    /// <summary>
+    /// ARCH-4 増分7: 次に採番される TxId。クリーン終了時に container へ committed TxId 高水位
+    /// として永続化し、WAL 削除後の reopen で visibility horizon / 採番起点を復元する。
+    /// </summary>
+    internal long PeekNextTxId() => Volatile.Read(ref _nextTxId);
+
     /// <summary>FT-25: テスト / 診断用。null のときは検出器無効。</summary>
     internal DeadlockDetector? DeadlockDetector => _deadlockDetector;
 

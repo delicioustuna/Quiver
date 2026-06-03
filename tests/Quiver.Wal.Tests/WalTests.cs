@@ -31,7 +31,7 @@ public class WalTests : IDisposable
     [Fact]
     public void Append_ReturnsMonontonicallyIncreasingLsn()
     {
-        using var wal = new WriteAheadLog(_dir);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         var tx = new TransactionId(1);
 
         long lsn0 = wal.Append(WalRecordType.Begin, tx, ReadOnlySpan<byte>.Empty);
@@ -45,7 +45,7 @@ public class WalTests : IDisposable
     [Fact]
     public void AppendAndRead_RoundTrip()
     {
-        using var wal = new WriteAheadLog(_dir);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         var tx = new TransactionId(42);
         byte[] payload = [1, 2, 3, 4, 5];
 
@@ -63,7 +63,7 @@ public class WalTests : IDisposable
     [Fact]
     public void AppendMultiple_ReadAll_InOrder()
     {
-        using var wal = new WriteAheadLog(_dir);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         var lsns = new List<long>();
 
         for (int i = 0; i < 10; i++)
@@ -86,7 +86,7 @@ public class WalTests : IDisposable
     [Fact]
     public void FlushTo_UpdatesFlushedLsn()
     {
-        using var wal = new WriteAheadLog(_dir);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         long lsn = wal.Append(WalRecordType.Begin, new TransactionId(1), []);
         wal.FlushedLsn.Should().BeLessThan(lsn);
         wal.FlushTo(lsn);
@@ -96,7 +96,7 @@ public class WalTests : IDisposable
     [Fact]
     public void WriteCheckpoint_ProducesCheckpointRecord()
     {
-        using var wal = new WriteAheadLog(_dir);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         long cpLsn = wal.WriteCheckpoint(oldestActiveLsn: 0, lastFlushedDataLsn: 0);
 
         using var reader = wal.OpenReader(cpLsn);
@@ -109,20 +109,20 @@ public class WalTests : IDisposable
     public void CorruptedRecord_IsSkipped_ReturnsNoMore()
     {
         long lsn;
-        using (var wal = new WriteAheadLog(_dir))
+        using (var wal = new WriteAheadLog(Path.Combine(_dir, "wal")))
         {
             lsn = wal.Append(WalRecordType.Begin, new TransactionId(1), []);
             wal.FlushTo(lsn);
         }
 
-        // Corrupt the checksum bytes in the segment file
-        string segFile = Path.Combine(_dir, "wal.00000000.log");
-        byte[] bytes = File.ReadAllBytes(segFile);
+        // ARCH-4 増分7: 単一ファイル WAL のチェックサムバイトを破損させる。
+        string walFile = Path.Combine(_dir, "wal");
+        byte[] bytes = File.ReadAllBytes(walFile);
         // Flip the checksum (bytes 21..24 of the record)
         bytes[21] ^= 0xFF;
-        File.WriteAllBytes(segFile, bytes);
+        File.WriteAllBytes(walFile, bytes);
 
-        using var wal2 = new WriteAheadLog(_dir);
+        using var wal2 = new WriteAheadLog(Path.Combine(_dir, "wal"));
         using var reader = wal2.OpenReader(0);
         reader.TryReadNext(out _).Should().BeFalse();
     }
@@ -131,13 +131,13 @@ public class WalTests : IDisposable
     public void Reopen_RestoresState_AndCanContinueAppending()
     {
         long lsnBefore;
-        using (var wal = new WriteAheadLog(_dir))
+        using (var wal = new WriteAheadLog(Path.Combine(_dir, "wal")))
         {
             lsnBefore = wal.Append(WalRecordType.Begin, new TransactionId(1), [0, 1]);
             wal.FlushTo(lsnBefore);
         }
 
-        using var wal2 = new WriteAheadLog(_dir);
+        using var wal2 = new WriteAheadLog(Path.Combine(_dir, "wal"));
         long lsnAfter = wal2.Append(WalRecordType.Commit, new TransactionId(1), [2, 3]);
         wal2.FlushTo(lsnAfter);
 
@@ -151,30 +151,60 @@ public class WalTests : IDisposable
     }
 
     [Fact]
-    public void Truncate_RemovesOldSegments()
+    public void Truncate_CompactsSingleFile_DroppingOldPrefix()
     {
-        // Use tiny segment size so we roll quickly
-        using var wal = new WriteAheadLog(_dir, segmentCapacity: 256);
+        // ARCH-4 増分7: 単一ファイル WAL の Truncate はセグメント削除ではなく
+        // prefix を捨てて live tail を前詰めするコンパクション。
+        string walFile = Path.Combine(_dir, "wal");
+        using var wal = new WriteAheadLog(walFile);
 
-        byte[] bigPayload = new byte[200];
+        byte[] bigPayload = new byte[2000];
         long lsn0 = wal.Append(WalRecordType.PageImage, new TransactionId(1), bigPayload);
         long lsn1 = wal.Append(WalRecordType.PageImage, new TransactionId(2), bigPayload);
+        long lsn2 = wal.Append(WalRecordType.PageImage, new TransactionId(3), bigPayload);
+        wal.FlushTo(lsn2);
+
+        long sizeBefore = new FileInfo(walFile).Length;
+        sizeBefore.Should().BeGreaterThan(6000);
+
+        // lsn0/lsn1 を捨てて lsn2 だけを残す。
+        wal.Truncate(lsn1);
+
+        long sizeAfter = new FileInfo(walFile).Length;
+        sizeAfter.Should().BeLessThan(sizeBefore, "コンパクションで前詰めされファイルが縮む");
+
+        // 残った tail から lsn2 だけが読めること。
+        using var reader = wal.OpenReader(0);
+        reader.TryReadNext(out var rec).Should().BeTrue();
+        rec.Lsn.Should().Be(lsn2);
+        reader.TryReadNext(out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Truncate_DropsEverything_WhenAllBelowThreshold()
+    {
+        // 全レコードが uptoLsn 以下なら単一ファイルは空になる。
+        string walFile = Path.Combine(_dir, "wal");
+        using var wal = new WriteAheadLog(walFile);
+        long lsn0 = wal.Append(WalRecordType.PageImage, new TransactionId(1), new byte[100]);
+        long lsn1 = wal.Append(WalRecordType.PageImage, new TransactionId(2), new byte[100]);
         wal.FlushTo(lsn1);
 
-        // Should have at least 2 segment files now
-        int segsBefore = Directory.GetFiles(_dir, "wal.????????.log").Length;
-        segsBefore.Should().BeGreaterThan(1);
+        wal.Truncate(lsn1); // 全部捨てる
 
-        wal.Truncate(lsn0);
+        new FileInfo(walFile).Length.Should().Be(0);
+        using var reader = wal.OpenReader(0);
+        reader.TryReadNext(out _).Should().BeFalse();
 
-        int segsAfter = Directory.GetFiles(_dir, "wal.????????.log").Length;
-        segsAfter.Should().BeLessThan(segsBefore);
+        // 空ファイルへの追記が続けられること (LSN は単調継続)。
+        long lsn2 = wal.Append(WalRecordType.Commit, new TransactionId(3), []);
+        lsn2.Should().BeGreaterThan(lsn1);
     }
 
     [Fact]
     public void OpenReader_StartLsn_SkipsPriorRecords()
     {
-        using var wal = new WriteAheadLog(_dir);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         long lsn0 = wal.Append(WalRecordType.Begin, new TransactionId(1), []);
         long lsn1 = wal.Append(WalRecordType.Commit, new TransactionId(1), []);
         wal.FlushTo(lsn1);
@@ -195,7 +225,7 @@ public class WalTests : IDisposable
         // window=0 (既定) では従来の opportunistic group commit のみで、
         // 各 FlushTo は確実に fsync を起動する。シングルスレッド逐次 commit では
         // 1 commit = 1 batch になることを確認する。
-        using var wal = new WriteAheadLog(_dir, 64L * 1024 * 1024, TimeSpan.Zero);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"), 64L * 1024 * 1024, TimeSpan.Zero);
         for (int i = 0; i < 5; i++)
         {
             long lsn = wal.Append(WalRecordType.Commit, new TransactionId(i + 1), []);
@@ -211,7 +241,7 @@ public class WalTests : IDisposable
         // window > 0 では複数スレッドが並列に FlushTo した commit が同じ fsync に束ねられる。
         // 64 concurrent FlushTo / window=5ms (テスト安定性のため仕様の 100µs より広め) で、
         // batch 数 <= request 数 / 4 になることを確認 (緩い閾値で false positive 回避)。
-        using var wal = new WriteAheadLog(_dir, 64L * 1024 * 1024, TimeSpan.FromMilliseconds(5));
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"), 64L * 1024 * 1024, TimeSpan.FromMilliseconds(5));
 
         const int threadCount = 64;
         var ready = new ManualResetEventSlim(false);
@@ -245,7 +275,7 @@ public class WalTests : IDisposable
     {
         // 単一 commit のレイテンシは概ね「fsync 時間 + window」で済む。
         // window=2ms で 1 commit を流して 200ms 以内 (緩い上限で flaky 回避) に完了することを確認。
-        using var wal = new WriteAheadLog(_dir, 64L * 1024 * 1024, TimeSpan.FromMilliseconds(2));
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"), 64L * 1024 * 1024, TimeSpan.FromMilliseconds(2));
         long lsn = wal.Append(WalRecordType.Commit, new TransactionId(1), []);
         var sw = System.Diagnostics.Stopwatch.StartNew();
         wal.FlushTo(lsn);
@@ -258,7 +288,7 @@ public class WalTests : IDisposable
     public void GroupCommit_AfterFlush_AdvancesFlushedLsn()
     {
         // batch flush 後、待機していた全 caller の TargetLsn 以上が flushedLsn に反映される。
-        using var wal = new WriteAheadLog(_dir, 64L * 1024 * 1024, TimeSpan.FromMilliseconds(3));
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"), 64L * 1024 * 1024, TimeSpan.FromMilliseconds(3));
         long lastLsn = -1;
         for (int i = 0; i < 8; i++)
             lastLsn = wal.Append(WalRecordType.Commit, new TransactionId(i + 1), []);
@@ -280,7 +310,7 @@ public class WalTests : IDisposable
     [Fact]
     public void Ft29_BufferedPageImage_IsNotWrittenUntilCommit()
     {
-        using var wal = new WriteAheadLog(_dir);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         var tx = new TransactionId(1);
         var payload = MakePageImagePayload(fileKind: 1, pageId: 100, fill: 0xAB);
 
@@ -294,7 +324,7 @@ public class WalTests : IDisposable
     [Fact]
     public void Ft29_BufferedPageImage_IsDrainedOnCommit()
     {
-        using var wal = new WriteAheadLog(_dir);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         var tx = new TransactionId(1);
         var payload = MakePageImagePayload(fileKind: 1, pageId: 100, fill: 0xAB);
 
@@ -317,7 +347,7 @@ public class WalTests : IDisposable
     public void Ft29_BufferedPageImage_SamePage_SameTx_LatestWins()
     {
         // intra-tx coalesce: 同一 tx の同一 (fileKind, pageId) は latest-wins。
-        using var wal = new WriteAheadLog(_dir);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         var tx = new TransactionId(1);
         var firstPayload = MakePageImagePayload(1, 100, 0xAA);
         var secondPayload = MakePageImagePayload(1, 100, 0xCC);
@@ -343,7 +373,7 @@ public class WalTests : IDisposable
     {
         // cross-tx の同一 page は coalesce しない: 既存エントリを drain して per-tx 帰属を維持。
         // これにより undo Pass 3 で CLR_A が tx_B の committed content を壊す経路を排除する。
-        using var wal = new WriteAheadLog(_dir);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         var txA = new TransactionId(1);
         var txB = new TransactionId(2);
 
@@ -377,7 +407,7 @@ public class WalTests : IDisposable
     [Fact]
     public void Ft29_BufferedPageImage_DifferentPages_BothPersisted()
     {
-        using var wal = new WriteAheadLog(_dir);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         var tx = new TransactionId(1);
 
         wal.BufferPageImage(tx, 1, 100, MakePageImagePayload(1, 100, 0xAA));
@@ -401,7 +431,7 @@ public class WalTests : IDisposable
     [Fact]
     public void Ft29_EvictCoalescedPageImagesFor_RemovesEntriesForTx()
     {
-        using var wal = new WriteAheadLog(_dir);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         var txA = new TransactionId(1);
         var txB = new TransactionId(2);
 
@@ -432,7 +462,7 @@ public class WalTests : IDisposable
     [Fact]
     public void Ft29_BufferedPageImage_DrainedOnAbort_AttributedToWritingTx()
     {
-        using var wal = new WriteAheadLog(_dir);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         var tx = new TransactionId(1);
         wal.BufferPageImage(tx, 1, 100, MakePageImagePayload(1, 100, 0xAA));
 
@@ -458,7 +488,7 @@ public class WalTests : IDisposable
     public void Ft29_DirectAppendPageImage_StillWorks_BackwardCompat()
     {
         // 既存テストは wal.Append(PageImage, ...) を直接使用する。互換のため引き続き動作すること。
-        using var wal = new WriteAheadLog(_dir);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         var tx = new TransactionId(7);
         var payload = MakePageImagePayload(1, 100, 0xAA);
 

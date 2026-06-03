@@ -54,7 +54,7 @@ public static class Ft27GroupCommitRunner
         Directory.CreateDirectory(dir);
         try
         {
-            using var wal = new WriteAheadLog(dir, 256L * 1024 * 1024, window);
+            using var wal = new WriteAheadLog(Path.Combine(dir, "wal"), 256L * 1024 * 1024, window);
 
             long commits = 0;
             using var stop = new ManualResetEventSlim(false);

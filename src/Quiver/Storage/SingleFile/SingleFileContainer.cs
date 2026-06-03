@@ -28,7 +28,10 @@ internal sealed class SingleFileContainer : IDisposable
     // カタログ root body レイアウト
     private const int CatalogNextOffset = 0;          // int64: 次カタログページ物理 ID (-1 = なし)
     private const int CatalogCountOffset = 8;          // int64: 記述子件数
-    private const int CatalogDescriptorsOffset = 16;   // 以降 DescriptorSize バイトずつ
+    // ARCH-4 増分7: クリーン終了で WAL を削除しても MVCC visibility / TxId 採番を継続できるよう、
+    // 「これ未満の TxId は committed と presume してよい」高水位 (= 終了時の次 TxId) を root に保持する。
+    private const int CommittedHighWaterOffset = 16;   // int64: committed TxId 高水位 (= 次採番 TxId)
+    private const int CatalogDescriptorsOffset = 24;   // 以降 DescriptorSize バイトずつ
 
     // 記述子: tenantId(1) flags(1) pageTableHead(8) logicalPageCount(8) logicalFreeHead(8) = 26B
     private const int DescriptorSize = 26;
@@ -43,9 +46,40 @@ internal sealed class SingleFileContainer : IDisposable
     private readonly Dictionary<byte, TenantPagedFile> _tenants = new();
     private readonly object _gate = new();
     private bool _disposed;
+    // ARCH-4 増分7: committed TxId 高水位 (= 最終クリーン終了時の次採番 TxId)。0 = 未設定。
+    private long _committedHighWaterTxId;
 
     public string Path => _physical.Path;
     internal PagedFile Physical => _physical;
+
+    /// <summary>
+    /// ARCH-4 増分7: 永続化されている committed TxId 高水位。クリーン終了で WAL を削除しても、
+    /// reopen 時に「これ未満の TxId は committed」と presume して MVCC visibility を維持し、
+    /// 次 TxId 採番をここから継続するために factory が参照する。0 = 未設定 (WAL から復元)。
+    /// </summary>
+    public long CommittedHighWaterTxId
+    {
+        get { lock (_gate) return _committedHighWaterTxId; }
+    }
+
+    /// <summary>
+    /// ARCH-4 増分7: クリーン終了時に backend が呼び、終了時点の次採番 TxId をカタログ root へ
+    /// 書き込む。実際の durable 化は呼び出し側の <c>FlushAll</c> に委ねる (本メソッドは buffer pool 更新)。
+    /// </summary>
+    public void SetCommittedHighWaterTxId(long value)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _committedHighWaterTxId = value;
+            var wh = _physical.PinForWrite(CatalogRootPageId);
+            try
+            {
+                BinaryPrimitives.WriteInt64LittleEndian(wh.Data[CommittedHighWaterOffset..], value);
+            }
+            finally { wh.Dispose(); }
+        }
+    }
 
     public SingleFileContainer(string path, int poolCapacityPages = 256)
     {
@@ -198,6 +232,9 @@ internal sealed class SingleFileContainer : IDisposable
                 var body = rh.Data;
                 long next = BinaryPrimitives.ReadInt64LittleEndian(body[CatalogNextOffset..]);
                 long count = BinaryPrimitives.ReadInt64LittleEndian(body[CatalogCountOffset..]);
+                // ARCH-4 増分7: committed TxId 高水位は root ページ (page 1) にのみ持つ。
+                if (catalogPage == CatalogRootPageId.Value)
+                    _committedHighWaterTxId = BinaryPrimitives.ReadInt64LittleEndian(body[CommittedHighWaterOffset..]);
                 int offset = CatalogDescriptorsOffset;
                 for (long i = 0; i < count && offset + DescriptorSize <= body.Length; i++, offset += DescriptorSize)
                 {

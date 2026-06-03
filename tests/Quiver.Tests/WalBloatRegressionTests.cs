@@ -26,19 +26,27 @@ public sealed class WalBloatRegressionTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private static long DirSize(string path)
-        => !Directory.Exists(path)
-            ? 0
-            : new DirectoryInfo(path).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length);
+    // ARCH-4 増分7: WAL は単一サイドカー graph.quiver-wal。クリーン終了で削除されるため、
+    // 「構築中に肥大しないこと」は DB を開いている間の peak サイズで測る。
+    private string WalPath => Path.Combine(_dir, "graph.quiver-wal");
+    private long _peakWalBytes;
+
+    private void SampleWal()
+    {
+        if (File.Exists(WalPath))
+            _peakWalBytes = Math.Max(_peakWalBytes, new FileInfo(WalPath).Length);
+    }
 
     /// <summary>
     /// filterchain ベンチ GlobalSetup を縮小したグラフ構築 — ノードを 1 TX、
     /// エッジを <paramref name="batchSize"/> 本ごとにバッチ commit する。生成したエッジ数を返す。
+    /// 各バッチ commit 後に WAL サイドカーの peak サイズを <see cref="_peakWalBytes"/> へ記録する。
     /// </summary>
     private long BuildGraph(GraphDatabaseOptions? options, int nodeCount, int avgDegree, int batchSize)
     {
         var rnd = new Random(42);
         var nodeIds = new NodeId[nodeCount];
+        _peakWalBytes = 0;
         using var db = GraphDatabase.Open(_dir, options);
 
         using (var tx = db.BeginTransaction())
@@ -47,6 +55,7 @@ public sealed class WalBloatRegressionTests : IDisposable
                 nodeIds[i] = tx.CreateNode("Person");
             tx.Commit();
         }
+        SampleWal();
 
         long created = 0;
         var batchTx = db.BeginTransaction();
@@ -59,8 +68,10 @@ public sealed class WalBloatRegressionTests : IDisposable
                     batchTx.CreateRelationship(nodeIds[i], nodeIds[rnd.Next(nodeCount)], "KNOWS");
                     if (++created % batchSize == 0)
                     {
+                        SampleWal(); // checkpoint compaction 直前のサイズも測る
                         batchTx.Commit();
                         batchTx.Dispose();
+                        SampleWal();
                         batchTx = db.BeginTransaction();
                     }
                 }
@@ -71,6 +82,7 @@ public sealed class WalBloatRegressionTests : IDisposable
         {
             batchTx.Dispose();
         }
+        SampleWal();
         return created;
     }
 
@@ -81,46 +93,47 @@ public sealed class WalBloatRegressionTests : IDisposable
         const int avgDegree = 8;
         long edges = BuildGraph(options: null, nodeCount, avgDegree, batchSize: 10_000);
 
-        long walBytes = DirSize(Path.Combine(_dir, "wal"));
+        long walBytes = _peakWalBytes;
 
         // 旧挙動 (毎エッジ 6 ページ × 8KB のフルページログ、truncate 無し) なら
-        // edges × ~48KB に達する。案C のコアレスでこれが桁違いに縮む。
+        // edges × ~48KB に達する。案C のコアレス + 案A の checkpoint コンパクションでこれが桁違いに縮む。
         long oldBehaviorEstimate = edges * 6 * 8192;
         walBytes.Should().BeLessThan(oldBehaviorEstimate / 8,
-            "案C のコアレスで WAL は旧フルページログより桁違いに小さいはず");
+            "案C のコアレスで WAL の peak は旧フルページログより桁違いに小さいはず");
         walBytes.Should().BeLessThan(256L * 1024 * 1024,
             "WAL が数百 MB を超えて肥大してはならない");
+
+        // ARCH-4 増分7: クリーン終了で WAL サイドカーは削除され静止時は graph.quiver のみ。
+        File.Exists(WalPath).Should().BeFalse(
+            "クリーン終了後は WAL サイドカーが削除されているはず");
 
         // データが壊れていないこと (clean close → reopen)。
         CountKnowsEdges().Should().Be(edges);
     }
 
     [Fact]
-    public void Checkpoint_truncates_old_wal_segments_and_data_survives_reopen()
+    public void Checkpoint_compacts_single_wal_file_and_data_survives_reopen()
     {
-        // 小さい WAL セグメント + 小さい checkpoint しきい値で truncate を確実に発火させる。
+        // 小さい checkpoint しきい値でコンパクションを確実に発火させる。
         var options = new GraphDatabaseOptions
         {
-            WalSegmentSize = 256 * 1024,
+            WalSegmentSize = 256 * 1024, // ARCH-4 増分7: 単一ファイルでは未使用だが API 互換のため残す
             CheckpointThresholdBytes = 256 * 1024,
         };
         const int nodeCount = 5_000;
         const int avgDegree = 8;
         long edges = BuildGraph(options, nodeCount, avgDegree, batchSize: 8_000);
 
-        string walDir = Path.Combine(_dir, "wal");
-        var segments = Directory.GetFiles(walDir, "wal.????????.log");
+        // ARCH-4 増分7: 単一ファイル WAL。checkpoint のコンパクションで prefix が前詰めされ、
+        // 構築中の peak でも数 MB に収まるはず (旧挙動なら 40k エッジで数十 MB+)。
+        _peakWalBytes.Should().BeLessThan(8L * 1024 * 1024,
+            "checkpoint のコンパクションで WAL の peak は数 MB に収まるはず");
 
-        // truncate が効いていれば、構築中に多数のセグメント (40k エッジ ≈ 数十本) が作られても
-        // 残るのは末尾の数本だけ。最古セグメント wal.00000000.log は削除されているはず。
-        segments.Length.Should().BeLessThanOrEqualTo(4,
-            "checkpoint で過去 WAL セグメントが truncate されているはず");
-        File.Exists(Path.Combine(walDir, "wal.00000000.log")).Should().BeFalse(
-            "最古 WAL セグメントは truncate 済みのはず");
-        DirSize(walDir).Should().BeLessThan(4L * 1024 * 1024,
-            "truncate 後の WAL は数 MB 程度に収まるはず");
+        // クリーン終了で WAL サイドカーは削除され静止時は graph.quiver のみ。
+        File.Exists(WalPath).Should().BeFalse(
+            "クリーン終了後は WAL サイドカーが削除されているはず");
 
-        // truncate 後も reopen でデータが完全に復元できること。
+        // コンパクション後も reopen でデータが完全に復元できること。
         CountKnowsEdges(options).Should().Be(edges);
     }
 

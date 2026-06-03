@@ -259,20 +259,13 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         // 2. 非ページファイル (トークン / 隣接 / メタ) を File.Copy で複製。
         CopyAuxiliaryFiles(targetDirectory, options);
 
-        // 3. WAL を末尾までフラッシュしてからセグメントファイルを複製。
-        //    Drain で出される PageImage 等もここで durable になる。
+        // 3. ARCH-4 増分7: WAL を末尾までフラッシュしてから単一サイドカー graph.quiver-wal を複製。
+        //    Drain で出される PageImage 等もここで durable になる。target を開くと recovery が
+        //    この WAL を replay して整合する。
         _wal.FlushTo(_wal.CurrentLsn);
-        var srcWalDir = Path.Combine(_directoryPath, "wal");
-        var dstWalDir = Path.Combine(targetDirectory, "wal");
-        Directory.CreateDirectory(dstWalDir);
-        if (Directory.Exists(srcWalDir))
-        {
-            foreach (var seg in Directory.GetFiles(srcWalDir, "wal.*.log"))
-            {
-                var dst = Path.Combine(dstWalDir, Path.GetFileName(seg));
-                CopySharedFile(seg, dst);
-            }
-        }
+        var srcWal = Path.Combine(_directoryPath, "graph.quiver-wal");
+        if (File.Exists(srcWal))
+            CopySharedFile(srcWal, Path.Combine(targetDirectory, "graph.quiver-wal"));
     }
 
     private static void CopyPagedFile(IPagedFile src, string dstPath)
@@ -317,8 +310,29 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         dst.Flush(flushToDisk: true);
     }
 
+    private bool _disposed;
+
     public void Dispose()
     {
+        // ARCH-4 増分7: 二重 Dispose ガード。クリーン終了処理は _physical 等へアクセスするため
+        // 冪等でないので、2 回目以降は no-op にする (テストが db を二重 Dispose する経路がある)。
+        if (_disposed) return;
+        _disposed = true;
+
+        // ARCH-4 増分7: クリーン終了。アクティブ tx が無ければ全データを graph.quiver へ
+        // durable 化し、WAL サイドカーを削除対象にする (静止時は graph.quiver のみ)。
+        // ActiveCount==0 なので未コミットデータは存在せず、flush 後の graph.quiver は完全。
+        bool cleanShutdown = _txManager.ActiveCount == 0;
+        if (cleanShutdown)
+        {
+            // ARCH-4 増分7: committed TxId 高水位を container へ永続化してから flush する。
+            // WAL 削除後の reopen で MVCC visibility horizon と次 TxId 採番を復元するため。
+            _container.SetCommittedHighWaterTxId(_txManager.PeekNextTxId());
+            _pageManager.FlushAll();   // 全データページを fsync (container.Physical を含む)
+            _indexManager.FlushAll();  // 索引も container 上だが念のため
+            _wal.MarkDeleteOnDispose();
+        }
+
         _txManager.Dispose();
         if (_adjStore is IDisposable d) d.Dispose();
         _indexManager.Dispose();

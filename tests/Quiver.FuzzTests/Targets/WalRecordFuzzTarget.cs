@@ -3,13 +3,13 @@ using Quiver.Storage.Wal;
 namespace Quiver.FuzzTests.Targets;
 
 /// <summary>
-/// TS-5: WAL セグメントファイル全体の parse 経路を任意バイト列で叩く。
+/// TS-5 / ARCH-4 増分7: 単一ファイル WAL の parse 経路を任意バイト列で叩く。
 /// <see cref="WriteAheadLog"/> コンストラクタ (RebuildState) と
 /// <see cref="WriteAheadLog.OpenReader"/>.TryReadNext を一巡させる。
 ///
 /// 契約:
-///   - 任意バイト列を <c>wal.00000000.log</c> として配置しても、コンストラクタ
-///     は破損を黙って吸収して return しなければならない (RebuildState の catch 経由)。
+///   - 任意バイト列を WAL サイドカーファイルとして配置しても、コンストラクタは破損を
+///     黙って吸収して return しなければならない (RebuildState の catch 経由)。
 ///   - reader.TryReadNext は <c>false</c> を返して終了するだけで、例外を投げてはならない。
 ///   - IOException / EndOfStreamException 系は temp file 取り回しの環境要因として
 ///     許容するが、CorruptionException / NullReferenceException / IndexOutOfRangeException
@@ -24,10 +24,10 @@ public static class WalRecordFuzzTarget
         Directory.CreateDirectory(dir);
         try
         {
-            string segPath = Path.Combine(dir, "wal.00000000.log");
-            File.WriteAllBytes(segPath, input.ToArray());
+            string walPath = Path.Combine(dir, "wal");
+            File.WriteAllBytes(walPath, input.ToArray());
 
-            using var wal = new WriteAheadLog(dir);
+            using var wal = new WriteAheadLog(walPath);
             using var reader = wal.OpenReader(0);
             int safety = 0;
             while (reader.TryReadNext(out _))

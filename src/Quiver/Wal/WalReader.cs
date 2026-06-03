@@ -1,25 +1,25 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using System.IO.Hashing;
 using Quiver.Core;
 
 namespace Quiver.Storage.Wal;
 
+/// <summary>
+/// ARCH-4 増分7: 単一ファイル WAL のシーケンシャルリーダ。先頭から順に読み、
+/// <see cref="WalRecordType.EndOfSegment"/> マーカ (旧形式の残骸) と LSN &lt; startLsn の
+/// レコードはスキップする。
+/// </summary>
 internal sealed class WalReader : IWalReader
 {
-    private readonly string _directory;
-    private readonly long[] _segmentIndices;
     private readonly long _startLsn;
-    private int _segArrIdx;
     private FileStream? _stream;
     private bool _disposed;
 
-    internal WalReader(string directory, long[] sortedSegmentIndices, long startLsn)
+    internal WalReader(string path, long startLsn)
     {
-        _directory = directory;
-        _segmentIndices = sortedSegmentIndices;
         _startLsn = startLsn;
-        if (sortedSegmentIndices.Length > 0)
-            OpenCurrentSegment();
+        if (File.Exists(path))
+            _stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
     }
 
     public bool TryReadNext(out WalRecord record)
@@ -30,17 +30,9 @@ internal sealed class WalReader : IWalReader
             if (_disposed || _stream == null) return false;
 
             if (!TryReadRecord(_stream, out record))
-            {
-                if (!AdvanceToNextSegment()) return false;
-                continue;
-            }
+                return false;
 
-            if (record.Type == WalRecordType.EndOfSegment)
-            {
-                if (!AdvanceToNextSegment()) return false;
-                continue;
-            }
-
+            if (record.Type == WalRecordType.EndOfSegment) continue;
             if (record.Lsn < _startLsn) continue;
 
             return true;
@@ -55,26 +47,7 @@ internal sealed class WalReader : IWalReader
         _stream = null;
     }
 
-    private void OpenCurrentSegment()
-    {
-        _stream?.Dispose();
-        string path = SegmentPath(_segmentIndices[_segArrIdx]);
-        if (!File.Exists(path)) { _stream = null; return; }
-        _stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-    }
-
-    private bool AdvanceToNextSegment()
-    {
-        _segArrIdx++;
-        if (_segArrIdx >= _segmentIndices.Length) return false;
-        OpenCurrentSegment();
-        return _stream != null;
-    }
-
-    private string SegmentPath(long segIdx) =>
-        Path.Combine(_directory, $"wal.{segIdx:D8}.log");
-
-    // WalReader と WriteAheadLog.RebuildState で共有するヘルパ
+    // WalReader と WriteAheadLog.RebuildState / Truncate で共有するヘルパ
     internal static bool TryReadRecord(FileStream fs, out WalRecord record)
     {
         record = default;

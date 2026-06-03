@@ -579,14 +579,19 @@ public sealed class GraphDatabaseTests : IDisposable
             NodeId aliceId;
 
             // Phase 2: write data and commit (WAL is flushed; buffer pool may not be).
+            // ARCH-4 増分7: クリーン終了 (ActiveCount==0) では Dispose が FlushAll + WAL 削除を行い
+            // graph.quiver が確定して WAL が消える。WAL replay 経路を検証するため、未コミットの tx を
+            // 1 つ開いたまま Dispose して「クラッシュ (ActiveCount>0 → WAL 非削除)」を模擬する。
             {
-                using var db = GraphDatabase.Open(dir);
-                using var tx = db.BeginTransaction();
-                aliceId = tx.CreateNode("Person");
-                tx.SetProperty(aliceId, "name", PropertyValue.FromString("Alice"));
-                tx.Commit();
-                // Do NOT call db.Dispose() — simulate crash before page flush.
-                // We use GC to release unmanaged resources without explicit Flush().
+                var db = GraphDatabase.Open(dir);
+                using (var tx = db.BeginTransaction())
+                {
+                    aliceId = tx.CreateNode("Person");
+                    tx.SetProperty(aliceId, "name", PropertyValue.FromString("Alice"));
+                    tx.Commit();
+                }
+                _ = db.BeginTransaction(); // 未コミットのまま放置 → ActiveCount>0 → クリーン終了抑止 → WAL 残存
+                db.Dispose();
             }
 
             // Restore pre-write data file to simulate crash (buffer not written to disk).

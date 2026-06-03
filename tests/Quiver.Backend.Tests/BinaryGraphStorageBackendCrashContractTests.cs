@@ -678,11 +678,8 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
 
     private string? LatestWalSegment()
     {
-        var walDir = Path.Combine(DatabaseDirectory, "wal");
-        if (!Directory.Exists(walDir)) return null;
-        var segs = Directory.EnumerateFiles(walDir)
-            .OrderByDescending(p => p, StringComparer.Ordinal)
-            .ToList();
-        return segs.Count == 0 ? null : segs[0];
+        // ARCH-4 増分7: WAL は単一サイドカー graph.quiver-wal。
+        var walPath = Path.Combine(DatabaseDirectory, "graph.quiver-wal");
+        return File.Exists(walPath) ? walPath : null;
     }
 }

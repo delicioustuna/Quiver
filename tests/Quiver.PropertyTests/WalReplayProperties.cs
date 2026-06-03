@@ -64,7 +64,7 @@ public class WalReplayProperties
             try
             {
                 long[] lsns = new long[seq.Length];
-                using (var wal = new WriteAheadLog(dir))
+                using (var wal = new WriteAheadLog(Path.Combine(dir, "wal")))
                 {
                     for (int i = 0; i < seq.Length; i++)
                     {
@@ -75,7 +75,7 @@ public class WalReplayProperties
                     wal.FlushedLsn.Should().BeGreaterThanOrEqualTo(lsns[^1]);
                 }
                 // 別 instance で読み直して完全復元できることを確認 (cross-process durability)。
-                using (var wal2 = new WriteAheadLog(dir))
+                using (var wal2 = new WriteAheadLog(Path.Combine(dir, "wal")))
                 using (var reader = wal2.OpenReader(0))
                 {
                     for (int i = 0; i < seq.Length; i++)
@@ -107,7 +107,7 @@ public class WalReplayProperties
             Directory.CreateDirectory(dir);
             try
             {
-                using var wal = new WriteAheadLog(dir);
+                using var wal = new WriteAheadLog(Path.Combine(dir, "wal"));
                 long lastLsn = -1;
                 foreach (var op in seq)
                     lastLsn = wal.Append(op.Type, new TransactionId(op.TxId), op.Payload);
@@ -152,7 +152,7 @@ public class WalReplayProperties
             Directory.CreateDirectory(dir);
             try
             {
-                using var wal = new WriteAheadLog(dir);
+                using var wal = new WriteAheadLog(Path.Combine(dir, "wal"));
                 foreach (var op in seq)
                 {
                     long lsn = wal.Append(op.Type, new TransactionId(op.TxId), op.Payload);

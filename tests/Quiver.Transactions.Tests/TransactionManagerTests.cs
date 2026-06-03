@@ -15,7 +15,7 @@ public class TransactionManagerTests : IDisposable
 
     public TransactionManagerTests()
     {
-        _wal = new WriteAheadLog(_walDir);
+        _wal = new WriteAheadLog(Path.Combine(_walDir, "wal"));
         _manager = new TransactionManager(_wal,
             new StubNodeStore(), new StubRelationshipStore(),
             new StubPropertyStore(), new NullIndexManager());

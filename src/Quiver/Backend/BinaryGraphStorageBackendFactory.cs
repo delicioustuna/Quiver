@@ -48,8 +48,10 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
 
         var pageManager = new PageManager();
 
-        var walDir = Path.Combine(directoryPath, "wal");
-        var wal = new WriteAheadLog(walDir, options.WalSegmentSize, options.GroupCommitWindow);
+        // ARCH-4 増分7: WAL は wal/ セグメント群ではなく単一サイドカー graph.quiver-wal。
+        // クリーン終了で削除され、静止時は graph.quiver のみが残る。
+        var walPath = Path.Combine(directoryPath, "graph.quiver-wal");
+        var wal = new WriteAheadLog(walPath, options.WalSegmentSize, options.GroupCommitWindow);
 
         // ARCH-4: 単一ファイルコンテナ。コア store / version sidecar / token を 1 つの
         // graph.quiver に同居させ、全ページを単一 DATA fileKind で WAL に載せる (option B)。
@@ -182,6 +184,20 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // クロックをそこまで巻き上げる。これがないと再起動でクロックが 0 に戻り、永続化済みの
         // 旧 stamp 空間と新 stamp 空間が混在して Serializable tx が過剰 abort する。
         txManager.SeedCommitStamp(nodeVersions.ReadCommitStampHighWater());
+
+        // ARCH-4 増分7: クリーン終了で WAL が削除されていた場合、recovery では committedRegistry が
+        // 空のままになる (WAL から復元できない)。container に永続化された committed TxId 高水位から
+        // visibility horizon (= これ未満は presumed-committed) と次 TxId 採番起点を復元する。
+        // abort 済み tx の効果は CLR で巻き戻り済みなので、高水位未満を一律 committed と presume しても
+        // 生存レコードはすべて committed tx の xmin を持ち、安全。crash 経路では WAL 由来の horizon が
+        // より新しいため max を取る。
+        long containerHighWater = container.CommittedHighWaterTxId;
+        if (containerHighWater > 0)
+        {
+            if (containerHighWater - 1 > committedRegistry.RecoveryHorizon)
+                committedRegistry.RecoveryHorizon = containerHighWater - 1;
+            txManager.AdvanceNextTxIdAtLeast(containerHighWater);
+        }
 
         // 案A: チェックポイント契機を配線する。コミットごとに WAL 成長量を見て、
         // しきい値超過 + アクティブ TX 0 の時点で全データページを flush し WAL を truncate する。

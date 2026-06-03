@@ -33,7 +33,7 @@ public class SingleFileContainerRecoveryTests : IDisposable
 
     public SingleFileContainerRecoveryTests()
     {
-        _wal = new WriteAheadLog(_walDir);
+        _wal = new WriteAheadLog(Path.Combine(_walDir, "wal"));
     }
 
     public void Dispose()
