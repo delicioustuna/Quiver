@@ -1,48 +1,82 @@
-﻿using Quiver.Core;
+using System.Buffers.Binary;
+using System.Text;
+using Quiver.Core;
 using Quiver.Storage;
 using Quiver.Storage.Wal;
 
 namespace Quiver.Index;
 
+/// <summary>
+/// ARCH-4 増分5: 各 B+Tree 索引とその索引カタログ (name → tenantId / PropertyTypeFlags) を
+/// <see cref="SingleFileContainer"/> 内のテナントとして格納する索引マネージャ。
+///
+/// 旧実装は索引ごとに <c>*.idx</c> ファイルを別途 new し、<c>.fileKinds</c> (FileKindCatalog) と
+/// <c>.idxmeta</c> をサイドカーとして持っていた。本実装ではそれらを全廃し、索引も含めて
+/// すべてのページを単一 <c>graph.quiver</c> に同居させる:
+/// <list type="bullet">
+///   <item>各索引 = コンテナ内テナント (ID は <see cref="IndexTenantRangeStart"/>..
+///     <see cref="IndexTenantRangeEnd"/> から動的割当)。物理ページは container の WAL/recovery で
+///     透過的に保護される (DataFileKind 1 個に統一)。</item>
+///   <item>索引カタログ = 専用テナント <see cref="CatalogTenantId"/>。name → {tenantId, typeFlags} を
+///     直列化して保持し、再起動時の materialize に使う。</item>
+/// </list>
+/// </summary>
 internal sealed class IndexManager : IIndexManager, IDisposable
 {
-    private readonly string _directory;
-    // FT-19: null でない場合、各索引 PagedFile に EnableWalLogging を呼んで物理 PageImage /
-    // before-image (CLR) を WAL に流す。data ファイルと同じ ARIES regime に乗せて
-    // partial-split を含む構造破綻に対する自動復旧を可能にする。
-    private readonly IWriteAheadLog? _wal;
-    // FT-19: WAL 有効時のみ。索引名 → fileKind の永続マッピング。動的に増減する索引の
-    // fileKind を予約レンジ (0x40..0xFF) から割り当てる。
-    private readonly FileKindCatalog? _catalog;
-    // FT-19: WAL 有効時のみ。新規索引作成時に新しい PagedFile を fileRegistry へ登録する経路。
-    // RecoveryManager / AbortUndoHandler / Checkpointer が透過的に索引を扱えるようにする。
-    private readonly IDictionary<byte, IPagedFile>? _runtimeFileRegistry;
+    /// <summary>索引カタログを格納する予約テナント (索引テナントレンジ 0x40 の直前)。</summary>
+    internal const byte CatalogTenantId = 0x3F;
+
+    /// <summary>索引 B+Tree テナントの割当下限 (旧 FileKindCatalog 予約レンジを踏襲)。</summary>
+    internal const byte IndexTenantRangeStart = 0x40;
+
+    /// <summary>索引 B+Tree テナントの割当上限 (含む)。192 索引まで同時保持可能。</summary>
+    internal const byte IndexTenantRangeEnd = 0xFF;
+
+    // カタログ header (テナント論理 page 1) body レイアウト。
+    private const int CatalogBlobLenOffset = 0;   // int32: 直列化ブロブ長
+    private const int CatalogEntryCountOffset = 4; // int32: 索引件数
+
+    private readonly SingleFileContainer _container;
+    private readonly bool _ownsContainer;
+    private readonly IPagedFile _catalogTenant;
+
     private readonly Dictionary<string, object> _indexes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PropertyTypeFlags> _indexTypes = new(StringComparer.Ordinal);
+    // 索引名 → 割当済みテナント ID。永続カタログの正本。
+    private readonly Dictionary<string, byte> _indexTenantIds = new(StringComparer.Ordinal);
+    // 索引名 → backing テナント (IPagedFile)。page-count 観測 / truncate に使う (内部用)。
+    private readonly Dictionary<string, IPagedFile> _indexFiles = new(StringComparer.Ordinal);
+    private readonly HashSet<byte> _usedTenantIds = [];
+
     // PW-18 follow-up: (label, propertyKey) → indexName のバインディング。
     // SchemaApi.CreateIndex から登録され、MergeNode の自動インデックス選択に使われる。
-    private readonly Dictionary<(string Label, string PropertyKey), string> _bindings
-        = new();
+    private readonly Dictionary<(string Label, string PropertyKey), string> _bindings = new();
     private readonly Dictionary<string, (string Label, string PropertyKey)> _bindingByName
         = new(StringComparer.Ordinal);
 
-    public IndexManager(string directory) : this(directory, wal: null, runtimeFileRegistry: null) { }
+    /// <summary>本番経路: factory が共有 container を渡す。container の所有権は移らない。</summary>
+    public IndexManager(SingleFileContainer container) : this(container, ownsContainer: false) { }
 
-    public IndexManager(string directory, IWriteAheadLog? wal)
-        : this(directory, wal, runtimeFileRegistry: null) { }
-
-    public IndexManager(
-        string directory,
-        IWriteAheadLog? wal,
-        IDictionary<byte, IPagedFile>? runtimeFileRegistry)
+    private IndexManager(SingleFileContainer container, bool ownsContainer)
     {
-        _directory = directory;
-        _wal = wal;
-        _runtimeFileRegistry = runtimeFileRegistry;
+        _container = container;
+        _ownsContainer = ownsContainer;
+        _catalogTenant = container.OpenTenant(CatalogTenantId, PageKind.Header);
+        LoadCatalogAndMaterialize();
+    }
+
+    /// <summary>
+    /// ARCH-4 増分5: テスト / ベンチ用。<paramref name="directory"/> 直下に
+    /// <c>graph.quiver</c> コンテナを作成 (または開いて) その上に索引テナントを載せた
+    /// 単独所有の <see cref="IndexManager"/> を返す。返した IndexManager の
+    /// <see cref="Dispose"/> でコンテナも閉じる。本番経路は
+    /// <see cref="IndexManager(SingleFileContainer)"/> を使い container 寿命は backend が握る。
+    /// </summary>
+    internal static IndexManager OpenStandalone(string directory)
+    {
         Directory.CreateDirectory(directory);
-        // FT-19: WAL 有効時のみ catalog を初期化する。WAL なしの経路 (tests, SQLite backend)
-        // では fileKind の割り当てが不要なので catalog ファイルも作らない。
-        _catalog = wal != null ? new FileKindCatalog(directory) : null;
+        var container = new SingleFileContainer(Path.Combine(directory, "graph.quiver"));
+        return new IndexManager(container, ownsContainer: true);
     }
 
     public IBTreeIndex<int>    CreateInt32Index(string name)  => GetOrCreate(name, new Int32KeyCodec(),  PropertyTypeFlags.Int32,  IndexKeyKind.Int32);
@@ -54,12 +88,12 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     /// <summary>
     /// FT-18: 全索引のバッファプールダーティページを fsync する。
     /// <see cref="Quiver.Transactions.Checkpointer"/> がチェックポイント時に呼び、
-    /// 索引ファイル内容を checkpointLsn 時点で durable にして WAL truncate を安全にする。
+    /// 索引内容を checkpointLsn 時点で durable にして WAL truncate を安全にする。
+    /// ARCH-4: 全索引は単一 container 上のテナントなので 1 回の flush で足りる。
     /// </summary>
     public void FlushAll()
     {
-        foreach (var idx in _indexes.Values)
-            if (idx is IBTreeIndexFlushable f) f.Flush();
+        if (_indexes.Count > 0) _container.Flush();
     }
 
     /// <summary>
@@ -90,7 +124,6 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     /// <summary>
     /// FT-22: 与えた orphan 一覧を索引から削除する。索引名で <see cref="_indexes"/> を引き、
     /// <see cref="IBTreeIndexFlushable.DeleteRawEntry"/> で生キー削除する。
-    /// 索引が見つからない / 既に削除済みのエントリはスキップする (戻り値はカウントしない)。
     /// </summary>
     public int RemoveOrphans(IEnumerable<(string IndexName, byte[] RawKey, long Value)> orphans)
     {
@@ -107,43 +140,40 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     public bool DropIndex(string name)
     {
         if (!_indexes.TryGetValue(name, out var idx)) return false;
-        // FT-19: catalog 引きで fileKind を取り、fileRegistry からも除去する。
-        // 索引 Dispose 前に取り出さないと _indexes から消えた後で参照できない。
-        byte? fileKindToFree = null;
-        if (_catalog != null && _catalog.TryGet(name, out byte k)) fileKindToFree = k;
 
         (idx as IDisposable)?.Dispose();
         _indexes.Remove(name);
         _indexTypes.Remove(name);
-        _indexFiles.Remove(name);
+        // ARCH-4: 索引テナントの論理ページをグローバル free list へ回収する
+        // (graph.quiver 自体は縮まないが、解放ページは他テナントへ再割当できる)。
+        if (_indexFiles.TryGetValue(name, out var tenant))
+        {
+            tenant.Truncate(1);
+            _indexFiles.Remove(name);
+        }
+        if (_indexTenantIds.TryGetValue(name, out var tenantId))
+        {
+            _indexTenantIds.Remove(name);
+            _usedTenantIds.Remove(tenantId);
+        }
         if (_bindingByName.TryGetValue(name, out var key))
         {
             _bindings.Remove(key);
             _bindingByName.Remove(name);
         }
-        if (fileKindToFree is byte freedKind)
-        {
-            _runtimeFileRegistry?.Remove(freedKind);
-            _catalog?.Remove(name);
-        }
-        var path = IndexPath(name);
-        if (File.Exists(path)) File.Delete(path);
-        var meta = MetaPath(name);
-        if (File.Exists(meta)) File.Delete(meta);
+        PersistCatalog();
         return true;
     }
 
     public IEnumerable<string> ListIndexes() => _indexes.Keys;
 
     /// <summary>
-    /// OP-4: 索引名を <paramref name="oldName"/> から <paramref name="newName"/> へ変更する。
-    /// 索引ファイル (.idx / .idxmeta) を物理 rename し、in-memory dictionary / binding / catalog の
-    /// マッピングを追従させる。fileKind は維持されるため WAL 上の PageImage / CLR の意味は変わらない。
+    /// OP-4 / ARCH-4: 索引名を <paramref name="oldName"/> から <paramref name="newName"/> へ変更する。
+    /// 索引はテナント ID で識別されるため、リネームは <b>カタログ上の name キーの付け替えだけ</b>で済む
+    /// (テナント / B+Tree 実体・ページ・WAL 意味はすべて不変)。旧実装と異なり物理 rename も
+    /// PagedFile の再 open も不要なので、呼び出し側が保持する <see cref="IBTreeIndex{TKey}"/> 参照は
+    /// リネーム後も有効なまま残る。
     /// 旧名が存在しないときは <c>false</c> を返す (冪等)。新名が衝突するときは例外。
-    ///
-    /// 注意: 物理 rename のため、対象索引の <see cref="IPagedFile"/> を一度 Dispose して再 open する。
-    /// 呼び出し側がそれまでに取得した <see cref="IBTreeIndex{TKey}"/> 参照は無効になる。
-    /// rename 完了後は <c>CreateXxxIndex(newName)</c> や <c>ListIndexes</c> 経由で再取得すること。
     /// </summary>
     public bool RenameIndex(string oldName, string newName)
     {
@@ -159,53 +189,11 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             throw new InvalidOperationException(
                 $"Index '{newName}' already exists.");
 
-        var typeFlag = _indexTypes.TryGetValue(oldName, out var f) ? f : PropertyTypeFlags.None;
-        if (typeFlag == PropertyTypeFlags.None)
-            throw new InvalidOperationException(
-                $"Index '{oldName}' has no recorded PropertyTypeFlags; cannot rename.");
-
-        byte? fileKind = null;
-        if (_catalog != null && _catalog.TryGet(oldName, out byte k)) fileKind = k;
-
-        // 既存 BTreeIndex / PagedFile を閉じてから物理ファイルを rename する。
-        (idxObj as IDisposable)?.Dispose();
-        if (fileKind is byte oldKind)
-            _runtimeFileRegistry?.Remove(oldKind);
         _indexes.Remove(oldName);
-        _indexTypes.Remove(oldName);
-        _indexFiles.Remove(oldName);
-
-        var oldIdxPath = IndexPath(oldName);
-        var newIdxPath = IndexPath(newName);
-        var oldMetaPath = MetaPath(oldName);
-        var newMetaPath = MetaPath(newName);
-        if (File.Exists(oldIdxPath)) File.Move(oldIdxPath, newIdxPath, overwrite: false);
-        if (File.Exists(oldMetaPath)) File.Move(oldMetaPath, newMetaPath, overwrite: false);
-
-        // catalog を新名に追従。
-        _catalog?.Rename(oldName, newName);
-
-        // 新名で再 open。fileKind は維持されるので catalog の Rename と組み合わせて整合する。
-        switch (typeFlag)
-        {
-            case PropertyTypeFlags.Int32:
-                ReopenAfterRename(newName, new Int32KeyCodec(), typeFlag, IndexKeyKind.Int32, fileKind);
-                break;
-            case PropertyTypeFlags.Int64:
-                ReopenAfterRename(newName, new Int64KeyCodec(), typeFlag, IndexKeyKind.Int64, fileKind);
-                break;
-            case PropertyTypeFlags.Double:
-                ReopenAfterRename(newName, new DoubleKeyCodec(), typeFlag, IndexKeyKind.Double, fileKind);
-                break;
-            case PropertyTypeFlags.String:
-                ReopenAfterRename(newName, new StringKeyCodec(), typeFlag, IndexKeyKind.String, fileKind);
-                break;
-            case PropertyTypeFlags.Bytes:
-                ReopenAfterRename(newName, new BytesKeyCodec(), typeFlag, IndexKeyKind.Bytes, fileKind);
-                break;
-            default:
-                throw new InvalidOperationException($"Unsupported PropertyTypeFlags {typeFlag} for rename.");
-        }
+        _indexes[newName] = idxObj;
+        if (_indexTypes.Remove(oldName, out var tf)) _indexTypes[newName] = tf;
+        if (_indexFiles.Remove(oldName, out var file)) _indexFiles[newName] = file;
+        if (_indexTenantIds.Remove(oldName, out var tid)) _indexTenantIds[newName] = tid;
 
         // バインディングは index 名で逆引きしているので追従させる。
         if (_bindingByName.TryGetValue(oldName, out var binding))
@@ -214,35 +202,23 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             _bindingByName[newName] = binding;
             _bindings[binding] = newName;
         }
+        PersistCatalog();
         return true;
     }
 
-    private void ReopenAfterRename<TKey>(
-        string name, IKeyCodec<TKey> codec, PropertyTypeFlags typeFlag, IndexKeyKind kind, byte? fileKind)
-    {
-        var pagedFile = new PagedFile(IndexPath(name));
-        if (_wal != null && fileKind is byte kindByte)
-        {
-            pagedFile.EnableWalLogging(kindByte, _wal);
-            _runtimeFileRegistry?[kindByte] = pagedFile;
-        }
-        var index = new BTreeIndex<TKey>(pagedFile, codec, name, kind);
-        _indexes[name] = index;
-        _indexTypes[name] = typeFlag;
-        _indexFiles[name] = pagedFile;
-    }
-
-    // OP-1: name → backing PagedFile を保持し、snapshot から (idx 名, PagedFile) を引けるようにする。
-    private readonly Dictionary<string, IPagedFile> _indexFiles
-        = new(StringComparer.Ordinal);
+    /// <summary>
+    /// OP-1 / ARCH-4: 旧実装では索引ごとの <c>*.idx</c> PagedFile を snapshot へ列挙していたが、
+    /// 索引は <c>graph.quiver</c> に同居するようになったため、snapshot の page-by-page コピーは
+    /// container 物理ファイル (pageManager 経由) が一括カバーする。よって本プロパティは空を返す。
+    /// </summary>
+    public IEnumerable<IPagedFile> IndexFiles => Array.Empty<IPagedFile>();
 
     /// <summary>
-    /// OP-1: 配下の全 B+Tree 索引 (<see cref="BTreeIndex{TKey}"/>) の
-    /// <see cref="IPagedFile"/> をライブスナップショット用に列挙する。索引 PagedFile は
-    /// <see cref="IndexManager"/> が <see cref="PagedFile"/> を直接 new するため
-    /// <see cref="IPageManager"/> には登録されていない。よって snapshot 経路はここから引く。
+    /// ARCH-4 (テスト用): 指定索引の backing テナントの論理ページ数を返す。
+    /// free-list 回収・再利用の観測に使う (未知の索引名なら 0)。
     /// </summary>
-    public IEnumerable<IPagedFile> IndexFiles => _indexFiles.Values;
+    internal long GetIndexTenantPageCount(string name)
+        => _indexFiles.TryGetValue(name, out var f) ? f.PageCount : 0L;
 
     public void RegisterIndexBinding(string indexName, string label, string propertyKey)
     {
@@ -283,123 +259,167 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     {
         if (_indexes.TryGetValue(name, out var existing))
         {
-            // BA-8: an index file is single-type. Re-opening with a different key
+            // BA-8: an index tenant is single-type. Re-opening with a different key
             // type would corrupt the B+ tree, so fail fast instead of silently
-            // mixing numeric and string entries.
+            // mixing numeric and string entries. The persisted catalog reloads the
+            // recorded type on restart, so this check also covers cross-restart reuse.
             if (_indexTypes.TryGetValue(name, out var stored) && stored != typeFlag)
                 throw new ConstraintException(
                     $"Index '{name}' was created as {stored}; cannot reopen it as {typeFlag}.");
             return (IBTreeIndex<TKey>)existing;
         }
 
-        // Persisted type flag survives restarts so a different process can't
-        // accidentally open a String index as Int64.
-        var metaPath = MetaPath(name);
-        if (File.Exists(metaPath))
-        {
-            var bytes = File.ReadAllBytes(metaPath);
-            if (bytes.Length >= 8)
-            {
-                var persisted = (PropertyTypeFlags)BitConverter.ToUInt64(bytes, 0);
-                if (persisted != typeFlag)
-                    throw new ConstraintException(
-                        $"Index '{name}' on disk is {persisted}; cannot open it as {typeFlag}.");
-            }
-        }
-        else
-        {
-            File.WriteAllBytes(metaPath, BitConverter.GetBytes((ulong)typeFlag));
-        }
-
-        var pagedFile = new PagedFile(IndexPath(name));
-        // FT-19: 索引ファイルを ARIES 物理 page-WAL ロギング対象にする。
-        // PinForWrite で before-image (CLR) を捕捉し、UnpinDirty で PageImage を蓄積する。
-        // partial-split を含む全構造破綻シナリオが PageImage redo + CLR undo で自動復旧可能になる。
-        if (_wal != null && _catalog != null)
-        {
-            byte fileKind = _catalog.GetOrAllocate(name);
-            pagedFile.EnableWalLogging(fileKind, _wal);
-            _runtimeFileRegistry?[fileKind] = pagedFile;
-        }
-        var index = new BTreeIndex<TKey>(pagedFile, codec, name, kind);
+        byte tenantId = AllocateTenantId();
+        var tenant = _container.OpenTenant(tenantId, PageKind.Header);
+        var index = new BTreeIndex<TKey>(tenant, codec, name, kind);
         _indexes[name] = index;
         _indexTypes[name] = typeFlag;
-        _indexFiles[name] = pagedFile;
+        _indexFiles[name] = tenant;
+        _indexTenantIds[name] = tenantId;
+        _usedTenantIds.Add(tenantId);
+        PersistCatalog();
         return index;
     }
 
-    /// <summary>
-    /// FT-19: 既存索引ファイルを recovery 前に全 open し、各々 WAL ロギング対象として
-    /// <paramref name="fileRegistry"/> に登録する。<see cref="Quiver.Wal.WalRecordType.PageImage"/>
-    /// / <see cref="Quiver.Wal.WalRecordType.CompensationLogRecord"/> の replay 経路は
-    /// fileRegistry で fileKind から <see cref="IPagedFile"/> を引いてページを書くため、
-    /// recovery 開始時点で索引ファイルが登録されていないと redo が落ちる。
-    ///
-    /// catalog 由来の (name, fileKind) ペアを順に走査し、.idxmeta の PropertyTypeFlags で
-    /// TKey をディスパッチして <see cref="BTreeIndex{TKey}"/> を materialize する。
-    /// </summary>
-    public void MaterializeAll(IDictionary<byte, IPagedFile> fileRegistry)
+    private byte AllocateTenantId()
     {
-        ArgumentNullException.ThrowIfNull(fileRegistry);
-        if (_wal == null || _catalog == null) return;
-
-        foreach (var (name, fileKind) in _catalog.Entries)
+        for (int b = IndexTenantRangeStart; b <= IndexTenantRangeEnd; b++)
         {
-            var idxPath = IndexPath(name);
-            if (!File.Exists(idxPath))
-                throw new CorruptionException(
-                    $"catalog が索引 '{name}' (fileKind {fileKind:X2}) を参照しているが " +
-                    $"{idxPath} が存在しない。");
-            var metaPath = MetaPath(name);
-            if (!File.Exists(metaPath))
-                throw new CorruptionException($"索引 '{name}' の .idxmeta が存在しない。");
+            if (!_usedTenantIds.Contains((byte)b)) return (byte)b;
+        }
+        throw new ConstraintException(
+            $"索引テナントの予約レンジ ({IndexTenantRangeStart:X2}..{IndexTenantRangeEnd:X2}) を使い切った。" +
+            $"同時保持できる索引数は最大 {IndexTenantRangeEnd - IndexTenantRangeStart + 1} 個。");
+    }
 
-            var metaBytes = File.ReadAllBytes(metaPath);
-            if (metaBytes.Length < 8)
-                throw new CorruptionException($"索引 '{name}' の .idxmeta が破損 (size {metaBytes.Length}).");
-            var flags = (PropertyTypeFlags)BitConverter.ToUInt64(metaBytes, 0);
+    // ------------------------------------------------------------------
+    // 索引カタログ I/O (専用テナント上のブロブ)
+    // ------------------------------------------------------------------
 
-            switch (flags)
+    private void LoadCatalogAndMaterialize()
+    {
+        long pageCount = _catalogTenant.PageCount;
+        if (pageCount < 2) return; // header 未作成 = 索引ゼロ
+
+        int blobLen, entryCount;
+        var hh = _catalogTenant.PinForRead(new PageId(1));
+        try
+        {
+            blobLen = BinaryPrimitives.ReadInt32LittleEndian(hh.Data[CatalogBlobLenOffset..]);
+            entryCount = BinaryPrimitives.ReadInt32LittleEndian(hh.Data[CatalogEntryCountOffset..]);
+        }
+        finally { hh.Dispose(); }
+        if (blobLen <= 0 || entryCount <= 0) return;
+
+        byte[] blob = new byte[blobLen];
+        int off = 0;
+        long dataPage = 2;
+        while (off < blobLen)
+        {
+            var rh = _catalogTenant.PinForRead(new PageId(dataPage));
+            try
             {
-                case PropertyTypeFlags.Int32:
-                    MaterializeOne(name, fileKind, new Int32KeyCodec(), flags, IndexKeyKind.Int32, fileRegistry);
-                    break;
-                case PropertyTypeFlags.Int64:
-                    MaterializeOne(name, fileKind, new Int64KeyCodec(), flags, IndexKeyKind.Int64, fileRegistry);
-                    break;
-                case PropertyTypeFlags.Double:
-                    MaterializeOne(name, fileKind, new DoubleKeyCodec(), flags, IndexKeyKind.Double, fileRegistry);
-                    break;
-                case PropertyTypeFlags.String:
-                    MaterializeOne(name, fileKind, new StringKeyCodec(), flags, IndexKeyKind.String, fileRegistry);
-                    break;
-                case PropertyTypeFlags.Bytes:
-                    MaterializeOne(name, fileKind, new BytesKeyCodec(), flags, IndexKeyKind.Bytes, fileRegistry);
-                    break;
-                default:
-                    throw new CorruptionException(
-                        $"索引 '{name}' の PropertyTypeFlags={flags} が materialize 対象外。");
+                int n = Math.Min(PagedFile.BodySize, blobLen - off);
+                rh.Data[..n].CopyTo(blob.AsSpan(off));
             }
+            finally { rh.Dispose(); }
+            off += PagedFile.BodySize;
+            dataPage++;
+        }
+
+        int pos = 0;
+        for (int i = 0; i < entryCount; i++)
+        {
+            byte tenantId = blob[pos]; pos += 1;
+            var typeFlags = (PropertyTypeFlags)BinaryPrimitives.ReadUInt64LittleEndian(blob.AsSpan(pos)); pos += 8;
+            int nameLen = BinaryPrimitives.ReadUInt16LittleEndian(blob.AsSpan(pos)); pos += 2;
+            string indexName = Encoding.UTF8.GetString(blob, pos, nameLen); pos += nameLen;
+
+            _indexTenantIds[indexName] = tenantId;
+            _indexTypes[indexName] = typeFlags;
+            _usedTenantIds.Add(tenantId);
+            MaterializeIndex(indexName, tenantId, typeFlags);
         }
     }
 
-    private void MaterializeOne<TKey>(
-        string name, byte fileKind, IKeyCodec<TKey> codec,
-        PropertyTypeFlags typeFlag, IndexKeyKind kind,
-        IDictionary<byte, IPagedFile> fileRegistry)
+    private void MaterializeIndex(string name, byte tenantId, PropertyTypeFlags typeFlags)
     {
-        var pagedFile = new PagedFile(IndexPath(name));
-        pagedFile.EnableWalLogging(fileKind, _wal!);
-        fileRegistry[fileKind] = pagedFile;
-
-        var index = new BTreeIndex<TKey>(pagedFile, codec, name, kind);
+        var tenant = _container.OpenTenant(tenantId, PageKind.Header);
+        object index = typeFlags switch
+        {
+            PropertyTypeFlags.Int32  => new BTreeIndex<int>(tenant, new Int32KeyCodec(), name, IndexKeyKind.Int32),
+            PropertyTypeFlags.Int64  => new BTreeIndex<long>(tenant, new Int64KeyCodec(), name, IndexKeyKind.Int64),
+            PropertyTypeFlags.Double => new BTreeIndex<double>(tenant, new DoubleKeyCodec(), name, IndexKeyKind.Double),
+            PropertyTypeFlags.String => new BTreeIndex<string>(tenant, new StringKeyCodec(), name, IndexKeyKind.String),
+            PropertyTypeFlags.Bytes  => new BTreeIndex<byte[]>(tenant, new BytesKeyCodec(), name, IndexKeyKind.Bytes),
+            _ => throw new CorruptionException(
+                $"索引 '{name}' の PropertyTypeFlags={typeFlags} が materialize 対象外。"),
+        };
         _indexes[name] = index;
-        _indexTypes[name] = typeFlag;
-        _indexFiles[name] = pagedFile;
+        _indexFiles[name] = tenant;
     }
 
-    private string IndexPath(string name) => Path.Combine(_directory, $"{name}.idx");
-    private string MetaPath(string name)  => Path.Combine(_directory, $"{name}.idxmeta");
+    private void PersistCatalog()
+    {
+        // 1. カタログを直列化する: tenantId(1) typeFlags(8) nameLen(2) nameBytes(可変)。
+        var entries = new List<(byte TenantId, ulong TypeFlags, byte[] Name)>(_indexTenantIds.Count);
+        int totalLen = 0;
+        foreach (var (name, tenantId) in _indexTenantIds)
+        {
+            var nameBytes = Encoding.UTF8.GetBytes(name);
+            ulong tf = (ulong)(_indexTypes.TryGetValue(name, out var f) ? f : PropertyTypeFlags.None);
+            entries.Add((tenantId, tf, nameBytes));
+            totalLen += 1 + 8 + 2 + nameBytes.Length;
+        }
+
+        byte[] blob = new byte[totalLen];
+        int p = 0;
+        foreach (var (tenantId, tf, nameBytes) in entries)
+        {
+            blob[p] = tenantId; p += 1;
+            BinaryPrimitives.WriteUInt64LittleEndian(blob.AsSpan(p), tf); p += 8;
+            BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(p), (ushort)nameBytes.Length); p += 2;
+            nameBytes.CopyTo(blob.AsSpan(p)); p += nameBytes.Length;
+        }
+
+        // 2. 必要なテナント論理ページを確保する (header = 論理 1, data = 論理 2..)。
+        int dataPages = (blob.Length + PagedFile.BodySize - 1) / PagedFile.BodySize;
+        while (_catalogTenant.PageCount < 2 + dataPages)
+            _catalogTenant.AllocatePage(PageKind.Header);
+
+        // 3. header を書く。
+        var wh = _catalogTenant.PinForWrite(new PageId(1));
+        try
+        {
+            wh.Data[..(CatalogEntryCountOffset + 4)].Clear();
+            BinaryPrimitives.WriteInt32LittleEndian(wh.Data[CatalogBlobLenOffset..], blob.Length);
+            BinaryPrimitives.WriteInt32LittleEndian(wh.Data[CatalogEntryCountOffset..], entries.Count);
+        }
+        finally { wh.Dispose(); }
+
+        // 4. ブロブを data ページへ書く。
+        int off = 0;
+        long dataPage = 2;
+        while (off < blob.Length)
+        {
+            var dh = _catalogTenant.PinForWrite(new PageId(dataPage));
+            try
+            {
+                int n = Math.Min(PagedFile.BodySize, blob.Length - off);
+                blob.AsSpan(off, n).CopyTo(dh.Data);
+            }
+            finally { dh.Dispose(); }
+            off += PagedFile.BodySize;
+            dataPage++;
+        }
+
+        // 5. tx 外の DDL (SchemaApi.CreateIndex 等) ではカタログ更新が WAL に乗らないため、
+        //    旧 .fileKinds/.idxmeta の即時 fsync と同等の durability を保つよう container を flush する。
+        //    tx 内 (IndexInsert 経由の遅延作成) では PageImage が WAL に乗り commit/checkpoint で
+        //    durable になるので flush しない (uncommitted ページの早期 steal を避ける)。
+        if (WalPageContext.Current is null)
+            _container.Flush();
+    }
 
     public void Dispose()
     {
@@ -408,5 +428,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         _indexes.Clear();
         _indexTypes.Clear();
         _indexFiles.Clear();
+        _indexTenantIds.Clear();
+        _usedTenantIds.Clear();
+        if (_ownsContainer) _container.Dispose();
     }
 }

@@ -67,17 +67,13 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // カタログ / page-table の content が未フラッシュで失われうるため、recovery が物理 page1
         // (カタログ) と page-table ページを WAL から復元してから OpenTenant しないと、空カタログを
         // 見て tenant を再生成し、WAL の物理ページ ID と乖離して committed データを取りこぼす。
-        var indexDir = Path.Combine(directoryPath, "indexes");
-        // ARCH-4: コア store / sidecar / token は単一 DATA fileKind = container.Physical。
-        // 索引は IndexManager が予約レンジ (0x40+) を別ファイルへ割り当て、MaterializeAll で
-        // fileRegistry に追加する (recovery が透過的に全 fileKind を扱う)。
+        // ARCH-4 増分5: コア store / sidecar / token / 索引はすべて単一 DATA fileKind =
+        // container.Physical 上のテナント。索引も物理ページとして同居するので、recovery / abort は
+        // 索引も含めて純物理ページ単位で透過的に動く (索引専用 fileKind / MaterializeAll は不要)。
         var fileRegistry = new Dictionary<byte, IPagedFile>
         {
             { DataFileKind, container.Physical },
         };
-        var indexManager = new IndexManager(indexDir, wal, fileRegistry);
-        // FT-19: 既存索引を recovery 前に open + EnableWalLogging + fileRegistry へ登録。
-        indexManager.MaterializeAll(fileRegistry);
 
         // PW-14: epoch metadata (base relationship hwm + tombstones) is shared
         // by both V1 and V2 stores. Created by BulkLoader on initial build and
@@ -121,6 +117,11 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // ARCH-4: recovery が物理 page1 (カタログ) + page-table + header ページを WAL から復元した。
         // ここで container の in-memory カタログを正本へ読み直してから、テナントを open する。
         container.ReloadAll();
+
+        // ARCH-4 増分5: 索引マネージャは recovery + ReloadAll の後に構築する。索引カタログ
+        // テナントと各索引テナントの page-table は物理ページとして recovery 済みなので、
+        // ここで container から開き直すだけで永続済み索引を materialize できる。
+        var indexManager = new IndexManager(container);
 
         var nodeFile = container.OpenTenant(TenantNodes, PageKind.Header);
         var nodeVerFile = container.OpenTenant(TenantNodeVer, PageKind.Header);

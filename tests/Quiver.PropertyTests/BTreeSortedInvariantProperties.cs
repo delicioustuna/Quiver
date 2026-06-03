@@ -40,7 +40,7 @@ public class BTreeSortedInvariantProperties
             Directory.CreateDirectory(dir);
             try
             {
-                using var mgr = new IndexManager(dir);
+                using var mgr = IndexManager.OpenStandalone(dir);
                 using var idx = mgr.CreateInt32Index("p");
 
                 // model: multi-set of (key, value)。Delete は (key, value) ペア完全一致のみ消える。
@@ -114,7 +114,7 @@ public class BTreeSortedInvariantProperties
             Directory.CreateDirectory(dir);
             try
             {
-                using var mgr = new IndexManager(dir);
+                using var mgr = IndexManager.OpenStandalone(dir);
                 using var idx = mgr.CreateInt32Index("p");
                 // multi-set モデル: 同一 (key, value) ペアの重複も保持する。Delete はペア完全一致で 1 件消す。
                 var model = new List<(int Key, long Value)>();

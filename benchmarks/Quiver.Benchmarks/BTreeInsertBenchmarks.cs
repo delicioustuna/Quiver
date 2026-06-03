@@ -35,7 +35,7 @@ public class BTreeInsertBenchmarks
     [Benchmark(Description = "Int64 Insert (sequential)")]
     public long Int64InsertSequential()
     {
-        using var mgr = new IndexManager(_dir);
+        using var mgr = IndexManager.OpenStandalone(_dir);
         var idx = mgr.CreateInt64Index("bench");
         for (long i = 0; i < EntryCount; i++)
             idx.Insert(i, i);
@@ -46,7 +46,7 @@ public class BTreeInsertBenchmarks
     [Benchmark(Description = "Int64 Insert (random)")]
     public long Int64InsertRandom()
     {
-        using var mgr = new IndexManager(_dir);
+        using var mgr = IndexManager.OpenStandalone(_dir);
         var idx = mgr.CreateInt64Index("bench");
         var rng = new Random(42);
         for (int i = 0; i < EntryCount; i++)

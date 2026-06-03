@@ -317,20 +317,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             CopySharedFileIfExists(name, targetDirectory);
         }
 
-        if (!options.IncludeIndexes) return;
-
-        // 索引 sidecar: .idxmeta + .fileKinds
-        var srcIdxDir = Path.Combine(_directoryPath, "indexes");
-        if (!Directory.Exists(srcIdxDir)) return;
-        var dstIdxDir = Path.Combine(targetDirectory, "indexes");
-        Directory.CreateDirectory(dstIdxDir);
-
-        foreach (var metaPath in Directory.GetFiles(srcIdxDir, "*.idxmeta"))
-            CopySharedFile(metaPath, Path.Combine(dstIdxDir, Path.GetFileName(metaPath)));
-
-        var kindsPath = Path.Combine(srcIdxDir, ".fileKinds");
-        if (File.Exists(kindsPath))
-            CopySharedFile(kindsPath, Path.Combine(dstIdxDir, ".fileKinds"));
+        // ARCH-4 増分5: 索引は graph.quiver に同居するため、上の page-by-page コピーが
+        // 索引ページも一括カバーする。独立した .idx / .idxmeta / .fileKinds サイドカーは
+        // 存在しないので、index 専用のコピーは不要 (IncludeIndexes は単一ファイルでは no-op)。
     }
 
     private void CopySharedFileIfExists(string fileName, string targetDirectory)

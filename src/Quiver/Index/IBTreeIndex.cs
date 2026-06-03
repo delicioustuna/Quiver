@@ -67,9 +67,9 @@ internal interface IIndexManager
     IEnumerable<string> ListIndexes();
 
     /// <summary>
-    /// OP-4: 索引を <paramref name="oldName"/> から <paramref name="newName"/> へリネームする。
-    /// fileKind や PagedFile 実体は維持されるので WAL 上の PageImage / CLR の意味は変わらない。
-    /// 索引ファイル (.idx / .idxmeta) と (label, propertyKey) バインディングも追従する。
+    /// OP-4 / ARCH-4: 索引を <paramref name="oldName"/> から <paramref name="newName"/> へリネームする。
+    /// 索引はテナント ID で識別されるため、テナント / B+Tree 実体・ページ・WAL 意味はすべて不変で、
+    /// カタログ上の name キーと (label, propertyKey) バインディングだけが追従する。
     /// 旧名が見つからない場合は <c>false</c> を返す (冪等)。
     /// 既定実装は <see cref="NotSupportedException"/>。
     /// </summary>

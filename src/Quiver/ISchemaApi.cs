@@ -62,8 +62,9 @@ public interface ISchemaApi
     bool RenameRelationshipType(string oldName, string newName);
 
     /// <summary>
-    /// OP-4: インデックス名を rename する。索引ファイル (.idx / .idxmeta) は物理 rename され、
-    /// fileKind は維持されるため WAL 整合性に影響しない。
+    /// OP-4 / ARCH-4: インデックス名を rename する。索引は <c>graph.quiver</c> 内テナントとして
+    /// 同居するため、リネームはカタログ上の name 付け替えのみで完結し (テナント実体・ページ・WAL
+    /// 整合性は不変)、物理ファイル rename は発生しない。
     /// </summary>
     bool RenameIndex(string oldName, string newName);
 }

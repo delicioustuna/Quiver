@@ -27,7 +27,7 @@ public sealed class IndexManagerTypeSafetyTests : IDisposable
     [Fact]
     public void Index_records_type_flag_on_creation()
     {
-        using var mgr = new IndexManager(_dir);
+        using var mgr = IndexManager.OpenStandalone(_dir);
         _ = mgr.CreateInt64Index("by_age");
 
         mgr.GetIndexTypeFlags("by_age").Should().Be(PropertyTypeFlags.Int64);
@@ -36,7 +36,7 @@ public sealed class IndexManagerTypeSafetyTests : IDisposable
     [Fact]
     public void Reopening_same_index_with_same_type_returns_same_instance()
     {
-        using var mgr = new IndexManager(_dir);
+        using var mgr = IndexManager.OpenStandalone(_dir);
         var a = mgr.CreateInt64Index("by_age");
         var b = mgr.CreateInt64Index("by_age");
         b.Should().BeSameAs(a);
@@ -45,7 +45,7 @@ public sealed class IndexManagerTypeSafetyTests : IDisposable
     [Fact]
     public void Reopening_index_with_different_type_in_process_throws()
     {
-        using var mgr = new IndexManager(_dir);
+        using var mgr = IndexManager.OpenStandalone(_dir);
         _ = mgr.CreateInt64Index("by_age");
 
         Action act = () => mgr.CreateStringIndex("by_age");
@@ -57,12 +57,12 @@ public sealed class IndexManagerTypeSafetyTests : IDisposable
     [Fact]
     public void Reopening_index_with_different_type_after_restart_throws()
     {
-        using (var mgr = new IndexManager(_dir))
+        using (var mgr = IndexManager.OpenStandalone(_dir))
         {
             _ = mgr.CreateStringIndex("by_name");
         }
 
-        using var reopened = new IndexManager(_dir);
+        using var reopened = IndexManager.OpenStandalone(_dir);
 
         Action act = () => reopened.CreateInt64Index("by_name");
 
@@ -73,12 +73,12 @@ public sealed class IndexManagerTypeSafetyTests : IDisposable
     [Fact]
     public void Reopening_index_with_same_type_after_restart_succeeds()
     {
-        using (var mgr = new IndexManager(_dir))
+        using (var mgr = IndexManager.OpenStandalone(_dir))
         {
             _ = mgr.CreateInt32Index("by_score");
         }
 
-        using var reopened = new IndexManager(_dir);
+        using var reopened = IndexManager.OpenStandalone(_dir);
         _ = reopened.CreateInt32Index("by_score");
         reopened.GetIndexTypeFlags("by_score").Should().Be(PropertyTypeFlags.Int32);
     }
@@ -86,7 +86,7 @@ public sealed class IndexManagerTypeSafetyTests : IDisposable
     [Fact]
     public void DropIndex_clears_persisted_type_flag()
     {
-        using var mgr = new IndexManager(_dir);
+        using var mgr = IndexManager.OpenStandalone(_dir);
         _ = mgr.CreateStringIndex("by_name");
         mgr.DropIndex("by_name").Should().BeTrue();
         mgr.GetIndexTypeFlags("by_name").Should().Be(PropertyTypeFlags.None);

@@ -476,8 +476,11 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
-    /// FT-19: 索引作成 → kill → 再 open で fileKind catalog から復元される。
-    /// catalog ファイル (indexes/.fileKinds) が永続化されていることを backend レベルで確認。
+    /// FT-19 / ARCH-4 増分5: 索引作成 → kill → 再 open で索引カタログから復元される。
+    /// 旧実装の indexes/.fileKinds サイドカーは廃止され、索引カタログ (name → tenantId /
+    /// PropertyTypeFlags) は graph.quiver 内の専用テナントに同居する。よってファイル存在の
+    /// 代わりに「kill 後に索引が再 materialize され、コミット済みエントリが引ける」ことで
+    /// カタログ永続化を behavioral に確認する。
     /// </summary>
     [Fact]
     public void IndexCatalog_persists_fileKind_across_kill()
@@ -492,16 +495,13 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             tx.Commit();
         }
 
-        // catalog ファイルが存在することを確認
-        var catalogPath = Path.Combine(DatabaseDirectory, "indexes", ".fileKinds");
-        File.Exists(catalogPath).Should().BeTrue("catalog file は CreateIndex 時に永続化される");
-        var catalogContent = File.ReadAllText(catalogPath);
-        catalogContent.Should().Contain("idx_persistent\t",
-            "catalog に索引名と fileKind が記録されている");
+        // ARCH-4: 索引は graph.quiver に同居するため、独立した .idx / .fileKinds は作られない。
+        File.Exists(Path.Combine(DatabaseDirectory, "indexes", ".fileKinds")).Should().BeFalse(
+            "ARCH-4 では索引カタログは graph.quiver 内テナントに同居し別ファイルを作らない");
 
         KillProcessSimulator.SimulateKill(ref backend);
 
-        // 再 open で catalog から fileKind が復元され、索引が WAL ロギング対象として
+        // 再 open で索引カタログテナントが recovery → ReloadAll で復元され、索引が
         // materialize される。PageImage redo もそれに依存する。
         using var reopened = Open();
         using var rtx = reopened.BeginGraphTransaction(
