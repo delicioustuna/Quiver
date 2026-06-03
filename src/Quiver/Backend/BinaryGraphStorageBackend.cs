@@ -22,13 +22,11 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     private readonly PropertyKeyTokenStore _propKeyTokens;
     private readonly IndexManager _indexManager;
     // BA-6: holds either AdjacencyBlockStore (V1) or AdjacencyBlockStoreV2.
-    // Disposed at backend teardown — the file lifetime is owned here even
-    // though reads go through the interface only.
     // PW-14: mutable so CompactAdjacency can swap in a freshly rebuilt store.
+    // ARCH-4 増分6: 隣接データは container 内テナントに同居するため、別 PagedFile の所有は不要。
     private IAdjacencyBlockStore? _adjStore;
-    // PW-14: kept so CompactAdjacency can release the exclusive lock on
-    // adj.db before AdjacencyBlockStore.Build reopens the path.
-    private IPagedFile? _adjPagedFile;
+    // ARCH-4 増分6: bulk load / CompactAdjacency が隣接テナントを構築するために保持する。
+    private readonly SingleFileContainer _container;
     private readonly TransactionManager _txManager;
     private readonly SchemaApi _schema;
     private readonly DiagnosticsApi _diagnostics;
@@ -39,6 +37,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
     internal BinaryGraphStorageBackend(
         string directoryPath,
+        SingleFileContainer container,
         PageManager pageManager,
         WriteAheadLog wal,
         NodeStore nodeStore,
@@ -49,7 +48,6 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         PropertyKeyTokenStore propKeyTokens,
         IndexManager indexManager,
         IAdjacencyBlockStore? adjStore,
-        IPagedFile? adjPagedFile,
         TransactionManager txManager,
         BinaryGraphAccessMethods access,
         IVectorStore vectors,
@@ -62,6 +60,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     {
         _logicalSink = logicalSink;
         _directoryPath = directoryPath;
+        _container = container;
         _vectors = vectors;
         _pageManager = pageManager;
         _wal = wal;
@@ -73,7 +72,6 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _propKeyTokens = propKeyTokens;
         _indexManager = indexManager;
         _adjStore = adjStore;
-        _adjPagedFile = adjPagedFile;
         _txManager = txManager;
 
         _schema = new SchemaApi(_labelTokens, _relTypeTokens, _propKeyTokens, _indexManager);
@@ -93,10 +91,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         {
             BeginBinaryBulkLoad = buildAdjacencyIndex => new BulkLoader(
                 _nodeStore, _relStore, _propStore,
-                buildAdjacencyIndex ? _directoryPath : null),
+                buildAdjacencyIndex ? _container : null),
             BeginStreamingBinaryBulkLoad = buildAdjacencyIndex => new StreamingBulkLoader(
                 _nodeStore, _relStore, _propStore,
-                buildAdjacencyIndex ? _directoryPath : null),
+                buildAdjacencyIndex ? _container : null),
         };
     }
 
@@ -151,24 +149,13 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         }
         long newBaseHwm = maxId + 1; // 0 when there are no rels — matches "no base"
 
-        // Tear down the current store. The PagedFile holds an exclusive lock
-        // on adj.db, so we must dispose AND drop it from the page manager
-        // before AdjacencyBlockStore.Build reopens the path.
-        var adjDataPath = Path.Combine(_directoryPath, "adj.db");
-        var adjIndexPath = Path.Combine(_directoryPath, "adj_idx.dat");
-        var adjEpochPath = Path.Combine(_directoryPath, "adj.epoch");
-
+        // ARCH-4 増分6: 隣接データは container 内テナントに同居する。Build は対象テナントを
+        // truncate して作り直すため、旧 PagedFile を pageManager から drop する必要はない。
         if (_adjStore is AdjacencyBlockStore old) old.Dispose();
         _txManager.SwapAdjacencyStore(null);
         _adjStore = null;
-        if (_adjPagedFile != null)
-        {
-            _pageManager.Drop(_adjPagedFile);
-            _adjPagedFile.Dispose();
-            _adjPagedFile = null;
-        }
 
-        // 隣接ファイルをその場で再構築する。Build は論理ノード ID ごとに 1 エントリを持つ前提なので
+        // 隣接インデックスをその場で再構築する。Build は論理ノード ID ごとに 1 エントリを持つ前提なので
         // nodeHwm を要求する。バルクロード後はこれ以外の情報が無いため、観測した src/tgt の最大値 + 1 を使う。
         long nodeHwm = 0;
         foreach (var (_, src, tgt, _) in live)
@@ -176,19 +163,21 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             if (src + 1 > nodeHwm) nodeHwm = src + 1;
             if (tgt + 1 > nodeHwm) nodeHwm = tgt + 1;
         }
-        AdjacencyBlockStore.Build(adjDataPath, adjIndexPath, live, nodeHwm);
+
+        var adjData = _container.OpenTenant(AdjacencyContainer.DataTenant, PageKind.AdjacencyBlock);
+        var adjIdx = _container.OpenTenant(AdjacencyContainer.IndexTenant, PageKind.Header);
+        AdjacencyBlockStore.Build(adjData, adjIdx, live, nodeHwm);
 
         // Reset epoch metadata and reopen. ResetAfterCompact bumps the epoch
         // counter (so observers can detect the rebuild) and drops tombstones
         // since the new base view contains only live edges.
-        AdjacencyEpoch newEpoch = File.Exists(adjEpochPath)
-            ? AdjacencyEpoch.Load(adjEpochPath)
-            : AdjacencyEpoch.CreateNew(adjEpochPath, 0);
+        var epochTenant = _container.OpenTenant(AdjacencyContainer.EpochTenant, PageKind.Header);
+        AdjacencyEpoch newEpoch = AdjacencyEpoch.Open(epochTenant);
         newEpoch.ResetAfterCompact(newBaseHwm);
-        var newAdjFile = _pageManager.OpenOrCreate(adjDataPath, PageKind.AdjacencyBlock);
-        var newStore = new AdjacencyBlockStore(newAdjFile, adjIndexPath, newEpoch);
+        // CompactAdjacency は tx 外なので、再構築したページを durable 化する。
+        _container.Flush();
+        var newStore = new AdjacencyBlockStore(adjData, adjIdx, newEpoch);
         _adjStore = newStore;
-        _adjPagedFile = newAdjFile;
         _txManager.SwapAdjacencyStore(newStore);
     }
 
@@ -306,28 +295,13 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
     private void CopyAuxiliaryFiles(string targetDirectory, SnapshotOptions options)
     {
-        // トークンストア (FileShare.Read で開かれている)
-        foreach (var name in new[] { "labels.tok", "reltypes.tok", "propkeys.tok" })
-            CopySharedFileIfExists(name, targetDirectory);
-
-        // 隣接ブロックの sidecar (PagedFile 経由は .db のみ。idx / meta / epoch は別ファイル)
-        foreach (var name in new[] {
-            "adj_idx.dat", "adj_v2_idx.dat", "adj_v2.meta", "adj.epoch" })
-        {
-            CopySharedFileIfExists(name, targetDirectory);
-        }
-
-        // ARCH-4 増分5: 索引は graph.quiver に同居するため、上の page-by-page コピーが
-        // 索引ページも一括カバーする。独立した .idx / .idxmeta / .fileKinds サイドカーは
-        // 存在しないので、index 専用のコピーは不要 (IncludeIndexes は単一ファイルでは no-op)。
-    }
-
-    private void CopySharedFileIfExists(string fileName, string targetDirectory)
-    {
-        var src = Path.Combine(_directoryPath, fileName);
-        if (!File.Exists(src)) return;
-        var dst = Path.Combine(targetDirectory, fileName);
-        CopySharedFile(src, dst);
+        // ARCH-4 増分5/6: コア store / version sidecar / token / 索引 / 隣接ブロック / epoch は
+        // すべて graph.quiver に同居するため、CreateSnapshot の page-by-page コピー
+        // (pageManager.Files) が一括でカバーする。独立サイドカー (labels.tok / adj_*.dat /
+        // adj.epoch / *.idx 等) は廃止されたので、ここで追加コピーするものは無い。
+        // 静止外のファイルは WAL セグメントのみで、それは CreateSnapshot 側で複製する。
+        _ = targetDirectory;
+        _ = options;
     }
 
     private static void CopySharedFile(string srcPath, string dstPath)

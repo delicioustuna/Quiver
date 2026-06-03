@@ -75,35 +75,6 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             { DataFileKind, container.Physical },
         };
 
-        // PW-14: epoch metadata (base relationship hwm + tombstones) is shared
-        // by both V1 and V2 stores. Created by BulkLoader on initial build and
-        // updated in-place on tombstone / compact.
-        var adjEpochPath = Path.Combine(directoryPath, "adj.epoch");
-        AdjacencyEpoch? adjEpoch = File.Exists(adjEpochPath) ? AdjacencyEpoch.Load(adjEpochPath) : null;
-
-        // BA-6: prefer V2 (with payload lane) when present, otherwise V1.
-        IAdjacencyBlockStore? adjStore = null;
-        IPagedFile? adjPagedFile = null;
-        var adjV2DataPath = Path.Combine(directoryPath, "adj_v2.db");
-        var adjV2IndexPath = Path.Combine(directoryPath, "adj_v2_idx.dat");
-        var adjV2MetaPath = Path.Combine(directoryPath, "adj_v2.meta");
-        if (File.Exists(adjV2DataPath) && File.Exists(adjV2IndexPath) && File.Exists(adjV2MetaPath))
-        {
-            var spec = AdjacencyBlockStoreV2.ReadMeta(adjV2MetaPath);
-            adjPagedFile = pageManager.OpenOrCreate(adjV2DataPath, PageKind.AdjacencyBlock);
-            adjStore = new AdjacencyBlockStoreV2(adjPagedFile, adjV2IndexPath, spec, adjEpoch);
-        }
-        else
-        {
-            var adjDataPath = Path.Combine(directoryPath, "adj.db");
-            var adjIndexPath = Path.Combine(directoryPath, "adj_idx.dat");
-            if (File.Exists(adjDataPath) && File.Exists(adjIndexPath))
-            {
-                adjPagedFile = pageManager.OpenOrCreate(adjDataPath, PageKind.AdjacencyBlock);
-                adjStore = new AdjacencyBlockStore(adjPagedFile, adjIndexPath, adjEpoch);
-            }
-        }
-
         // FT-26: MVCC visibility 判定用の committed TxId 集合。recovery が WAL を走査して
         // (Commit レコードがあり、かつ Abort も無く、PageImage を持つ等の信頼できる条件を満たす)
         // tx を Mark してから TransactionManager 配線へ。Bootstrap は ctor で自動登録される。
@@ -122,6 +93,25 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // テナントと各索引テナントの page-table は物理ページとして recovery 済みなので、
         // ここで container から開き直すだけで永続済み索引を materialize できる。
         var indexManager = new IndexManager(container);
+
+        // ARCH-4 増分6: 隣接ビュー (bulk load 済みのときのみ存在) を container テナントから開く。
+        // PW-14 epoch (base hwm + tombstones) も EpochTenant に同居。V1/V2 種別は DataTenant の
+        // 記述子で判別する。recovery + ReloadAll 後なのでテナントページは復元済み。
+        IAdjacencyBlockStore? adjStore = null;
+        AdjacencyEpoch? adjEpoch = null;
+        if (container.HasTenant(AdjacencyContainer.DataTenant))
+        {
+            var adjData = container.OpenTenant(AdjacencyContainer.DataTenant, PageKind.AdjacencyBlock);
+            var (adjKind, adjSpec) = AdjacencyContainer.ReadDescriptor(adjData);
+            if (adjKind != AdjacencyContainer.KindNone)
+            {
+                var adjIdx = container.OpenTenant(AdjacencyContainer.IndexTenant, PageKind.Header);
+                adjEpoch = AdjacencyEpoch.Open(container.OpenTenant(AdjacencyContainer.EpochTenant, PageKind.Header));
+                adjStore = adjKind == AdjacencyContainer.KindV2
+                    ? new AdjacencyBlockStoreV2(adjData, adjIdx, adjSpec!.Value, adjEpoch)
+                    : new AdjacencyBlockStore(adjData, adjIdx, adjEpoch);
+            }
+        }
 
         var nodeFile = container.OpenTenant(TenantNodes, PageKind.Header);
         var nodeVerFile = container.OpenTenant(TenantNodeVer, PageKind.Header);
@@ -157,6 +147,9 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             labelTokens.Reload();
             relTypeTokens.Reload();
             propKeyTokens.Reload();
+            // ARCH-4 増分6: epoch テナントも container WAL 対象。abort で CLR がページを戻すので
+            // in-memory の epoch / baseRelHwm / tombstone を読み直してディスクと一致させる。
+            adjEpoch?.Reload();
         }
 
         var vectors = new InMemoryVectorStore();
@@ -212,9 +205,9 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         }
 
         var backend = new BinaryGraphStorageBackend(
-            directoryPath, pageManager, wal, nodeStore, relStore, propStore,
+            directoryPath, container, pageManager, wal, nodeStore, relStore, propStore,
             labelTokens, relTypeTokens, propKeyTokens, indexManager,
-            adjStore, adjPagedFile, txManager, access, vectors,
+            adjStore, txManager, access, vectors,
             labelIndex,
             options.LogicalMutationSink,
             options.TargetRecoveryTime,

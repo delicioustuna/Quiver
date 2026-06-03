@@ -13,7 +13,8 @@ public sealed class BulkLoader : IDisposable
     private readonly NodeStore _nodeStore;
     private readonly RelationshipStore _relStore;
     private readonly PropertyStore _propStore;
-    private readonly string? _directoryPath;
+    // ARCH-4 増分6: 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
+    private readonly Quiver.Storage.SingleFileContainer? _container;
 
     private readonly List<PendingNode> _nodes = new();
     private readonly List<PendingRel> _rels = new();
@@ -31,12 +32,12 @@ public sealed class BulkLoader : IDisposable
     private readonly record struct PendingProp(int KeyId, PropertyValueType Type, long Scalar, byte[]? Data);
 
     internal BulkLoader(NodeStore nodeStore, RelationshipStore relStore, PropertyStore propStore,
-        string? directoryPath = null)
+        Quiver.Storage.SingleFileContainer? container = null)
     {
         _nodeStore = nodeStore;
         _relStore = relStore;
         _propStore = propStore;
-        _directoryPath = directoryPath;
+        _container = container;
     }
 
     public void AppendNode(NodeId id, LabelId label)
@@ -101,8 +102,8 @@ public sealed class BulkLoader : IDisposable
         CommitNodes();
         CommitRelationships();
         CommitProperties();
-        if (_directoryPath != null)
-            BuildAdjacencyIndex(_directoryPath);
+        if (_container != null)
+            BuildAdjacencyIndex(_container);
     }
 
     public void Dispose() { }
@@ -230,45 +231,29 @@ public sealed class BulkLoader : IDisposable
         _propStore.BulkFlushMeta();
     }
 
-    private void BuildAdjacencyIndex(string directory)
+    private void BuildAdjacencyIndex(Quiver.Storage.SingleFileContainer container)
     {
         long nodeHwm = _nodes.Count > 0 ? _nodes.Max(n => n.Id) + 1 : 0L;
         long relHwm = _rels.Count > 0 ? _rels.Max(r => r.Id) + 1 : 0L;
         var relData = _rels.Select(r => (r.Id, r.Src, r.Tgt, r.TypeId)).ToList();
 
+        Dictionary<long, long>? weights = null;
         if (_payloadSpec is { } spec)
         {
-            // BA-6: V2 build. Filter payloads to the configured key; raw
-            // values are passed through (no double<->long reinterpretation
-            // here — that is the caller's responsibility via AppendRelationshipPayload).
-            var weights = new Dictionary<long, long>(_relPayloads.Count);
+            // BA-6: V2 build. Filter payloads to the configured key; raw values pass
+            // through (double<->long reinterpretation is the caller's responsibility
+            // via AppendRelationshipPayload).
+            weights = new Dictionary<long, long>(_relPayloads.Count);
             foreach (var ((relId, keyId), raw) in _relPayloads)
             {
                 if (keyId == spec.PropertyKeyId)
                     weights[relId] = raw;
             }
-            AdjacencyBlockStoreV2.Build(
-                Path.Combine(directory, "adj_v2.db"),
-                Path.Combine(directory, "adj_v2_idx.dat"),
-                Path.Combine(directory, "adj_v2.meta"),
-                relData,
-                weights,
-                nodeHwm,
-                spec);
-        }
-        else
-        {
-            AdjacencyBlockStore.Build(
-                Path.Combine(directory, "adj.db"),
-                Path.Combine(directory, "adj_idx.dat"),
-                relData,
-                nodeHwm);
         }
 
-        // PW-14: record the base relationship hwm so post-bulk-load deltas
-        // (rels with id >= relHwm) can be merged at read time without being
-        // double-counted against the immutable base view.
-        AdjacencyEpoch.CreateNew(Path.Combine(directory, "adj.epoch"), relHwm);
+        // PW-14: relHwm を base watermark として記録し、post-bulk-load の delta
+        // (id >= relHwm) を読み取り時に base ビューへ二重計上せず merge できるようにする。
+        AdjacencyContainer.Build(container, relData, nodeHwm, relHwm, _payloadSpec, weights);
     }
 
     private void ThrowIfCommitted()

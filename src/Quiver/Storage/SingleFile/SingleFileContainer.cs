@@ -76,6 +76,20 @@ internal sealed class SingleFileContainer : IDisposable
     /// テナント <paramref name="tenantId"/> の論理ページ空間を <see cref="IPagedFile"/> として開く。
     /// 既存なら同一インスタンスを返し、未存在なら新規記述子を作って永続化する。
     /// </summary>
+    /// <summary>
+    /// ARCH-4 増分6: テナント <paramref name="tenantId"/> がカタログに既存か (= 過去に一度
+    /// open / 永続化されたか) を、新規作成せずに判定する。adjacency のように「bulk load 済みなら
+    /// 開く / 無ければスキップ」を判断する factory 経路で使う。
+    /// </summary>
+    public bool HasTenant(byte tenantId)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _catalog.ContainsKey(tenantId);
+        }
+    }
+
     public IPagedFile OpenTenant(byte tenantId, PageKind defaultKind)
     {
         lock (_gate)

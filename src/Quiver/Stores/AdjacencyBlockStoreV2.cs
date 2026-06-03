@@ -16,9 +16,9 @@ namespace Quiver.Storage.Records;
 ///   エントリ: TypeId(2) | RelId(6) | NeighborId(6) | Payload(8) = 22 バイト。
 ///   1 ページあたり最大エントリ数 = (8160 − 16) / 22 = 370。
 ///
-/// V1 (AdjacencyBlockStore) と共存する — V2 は adj_v2.db / adj_v2_idx.dat / adj_v2.meta に
-/// 格納され、バルクロード時の <see cref="BulkLoader.WithPayloadLane"/> でオプトインする。
-/// バックエンドはどちらか一方の組が存在すればそれを開き、両方ある場合は V2 を優先する。
+/// V1 (AdjacencyBlockStore) と排他 — バルクロード時の <see cref="BulkLoader.WithPayloadLane"/> で
+/// V2 をオプトインする。ARCH-4 増分6 以降、V1/V2 とも graph.quiver 内の同一テナント
+/// (<see cref="AdjacencyContainer.DataTenant"/>) に格納され、種別は DataTenant の記述子で判別する。
 /// </summary>
 internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPayloadView, IDisposable
 {
@@ -26,23 +26,20 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
     internal const int EntrySize = 22; // 2 + 6 + 6 + 8
     internal const int EntriesPerPage = (RecordPageMapping.PageBodySize - BlockHeaderSize) / EntrySize; // 370
 
-    private const uint MetaMagic = 0x32305651; // "QV02" little-endian
-    private const ushort MetaVersion = 1;
-    internal const int MetaSize = 20; // Magic(4) Version(2) Kind(1) reserved(1) PropKey(4) DefaultRaw(8)
-
     private readonly IPagedFile _dataFile;
-    private readonly FileStream _indexStream;
-    private readonly object _idxLock = new();
+    private readonly IPagedFile _indexFile;
+    private readonly long _idxEntryCount;
     private readonly PayloadLaneSpec _spec;
     private readonly AdjacencyEpoch? _epoch;
 
     public PayloadLaneSpec PayloadSpec => _spec;
 
-    internal AdjacencyBlockStoreV2(IPagedFile dataFile, string indexPath, PayloadLaneSpec spec,
+    internal AdjacencyBlockStoreV2(IPagedFile dataFile, IPagedFile indexFile, PayloadLaneSpec spec,
         AdjacencyEpoch? epoch = null)
     {
         _dataFile = dataFile;
-        _indexStream = new FileStream(indexPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        _indexFile = indexFile;
+        _idxEntryCount = AdjacencyContainer.ReadIndexEntryCount(indexFile);
         _spec = spec;
         _epoch = epoch;
     }
@@ -252,18 +249,15 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
     /// <see cref="PayloadLaneSpec.DefaultRaw"/> が割り当てられる。
     /// </summary>
     internal static void Build(
-        string adjDataPath,
-        string adjIndexPath,
-        string adjMetaPath,
+        IPagedFile dataFile,
+        IPagedFile indexFile,
         IReadOnlyList<(long Id, long Src, long Tgt, int TypeId)> rels,
         IReadOnlyDictionary<long, long> weightLookup,
         long nodeHwm,
         PayloadLaneSpec spec)
     {
-        WriteMeta(adjMetaPath, spec);
-
-        using var dataFile = new PagedFile(adjDataPath);
-        dataFile.AllocatePage(PageKind.AdjacencyBlock); // page 1 placeholder
+        dataFile.Truncate(1);
+        dataFile.AllocatePage(PageKind.AdjacencyBlock); // logical page 1 = 記述子 placeholder
 
         var outEdges = new Dictionary<long, List<(short TypeId, long RelId, long NeighborId, long Payload)>>();
         var inEdges = new Dictionary<long, List<(short TypeId, long RelId, long NeighborId, long Payload)>>();
@@ -279,9 +273,7 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
         foreach (var list in outEdges.Values) list.Sort((a, b) => a.TypeId.CompareTo(b.TypeId));
         foreach (var list in inEdges.Values) list.Sort((a, b) => a.TypeId.CompareTo(b.TypeId));
 
-        using var idxStream = new FileStream(adjIndexPath, FileMode.Create, FileAccess.Write, FileShare.None);
-        Span<byte> idxEntry = stackalloc byte[8];
-
+        var firstPageIds = new long[nodeHwm];
         for (long nodeId = 0; nodeId < nodeHwm; nodeId++)
         {
             outEdges.TryGetValue(nodeId, out var outs);
@@ -290,59 +282,17 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
             long firstPageId = -1;
             if ((outs?.Count ?? 0) > 0 || (ins?.Count ?? 0) > 0)
                 firstPageId = WriteBlocks(dataFile, outs ?? [], ins ?? []);
-
-            BinaryPrimitives.WriteInt64LittleEndian(idxEntry, firstPageId);
-            idxStream.Write(idxEntry);
+            firstPageIds[nodeId] = firstPageId;
         }
 
-        idxStream.Flush();
-    }
-
-    internal static PayloadLaneSpec ReadMeta(string metaPath)
-    {
-        Span<byte> buf = stackalloc byte[MetaSize];
-        using var fs = new FileStream(metaPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        fs.ReadExactly(buf);
-        uint magic = BinaryPrimitives.ReadUInt32LittleEndian(buf);
-        if (magic != MetaMagic)
-            throw new InvalidDataException($"adj_v2.meta: bad magic 0x{magic:X8}");
-        ushort version = BinaryPrimitives.ReadUInt16LittleEndian(buf[4..]);
-        if (version != MetaVersion)
-            throw new InvalidDataException($"adj_v2.meta: unsupported version {version}");
-        var kind = (PayloadKind)buf[6];
-        int propKey = BinaryPrimitives.ReadInt32LittleEndian(buf[8..]);
-        long defaultRaw = BinaryPrimitives.ReadInt64LittleEndian(buf[12..]);
-        return new PayloadLaneSpec(kind, propKey, defaultRaw);
-    }
-
-    private static void WriteMeta(string metaPath, PayloadLaneSpec spec)
-    {
-        Span<byte> buf = stackalloc byte[MetaSize];
-        BinaryPrimitives.WriteUInt32LittleEndian(buf, MetaMagic);
-        BinaryPrimitives.WriteUInt16LittleEndian(buf[4..], MetaVersion);
-        buf[6] = (byte)spec.Kind;
-        buf[7] = 0; // reserved
-        BinaryPrimitives.WriteInt32LittleEndian(buf[8..], spec.PropertyKeyId);
-        BinaryPrimitives.WriteInt64LittleEndian(buf[12..], spec.DefaultRaw);
-        using var fs = new FileStream(metaPath, FileMode.Create, FileAccess.Write, FileShare.None);
-        fs.Write(buf);
-        fs.Flush();
+        AdjacencyContainer.WriteDescriptor(dataFile, AdjacencyContainer.KindV2, spec);
+        AdjacencyContainer.WriteIndex(indexFile, firstPageIds);
     }
 
     // ──────────────────────────── private ────────────────────────────
 
     private long GetBlockPageId(NodeId nodeId)
-    {
-        long offset = nodeId.Value * 8;
-        lock (_idxLock)
-        {
-            if (_indexStream.Length < offset + 8) return -1;
-            _indexStream.Seek(offset, SeekOrigin.Begin);
-            Span<byte> buf = stackalloc byte[8];
-            _indexStream.ReadExactly(buf);
-            return BinaryPrimitives.ReadInt64LittleEndian(buf);
-        }
-    }
+        => AdjacencyContainer.ReadIndexEntry(_indexFile, _idxEntryCount, nodeId.Value);
 
     private static int CopyEntries(
         ReadOnlySpan<byte> span, RelationshipTypeId? typeFilter,
@@ -446,5 +396,6 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
         return list;
     }
 
-    public void Dispose() => _indexStream.Dispose();
+    // テナントは container が所有する。dispose は no-op。
+    public void Dispose() { }
 }

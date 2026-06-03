@@ -7,14 +7,18 @@ namespace Quiver.Storage.Records;
 
 /// <summary>
 /// 連続配置の隣接ブロックストア: 各ノードについて TypeId 順にソートされた out-edge と
-/// in-edge を adj.db の連続ページに保持する。並列の adj_idx.dat 配列が NodeId → 先頭ブロック
-/// PageId (int64、未索引なら −1) を保持する。
+/// in-edge を <see cref="AdjacencyContainer.DataTenant"/> の連続ページに保持する。並列の
+/// <see cref="AdjacencyContainer.IndexTenant"/> が NodeId → 先頭ブロック論理 PageId
+/// (int64、未索引なら −1) を保持する。
 ///
 /// ブロックページ本体レイアウト (PageBodySize = 8160 バイト):
 ///   OutCount(4) | InCount(4) | NextPageId(8) = 16 バイトのヘッダ
 ///   続いて OutCount 個の out エントリ、その後 InCount 個の in エントリ。
 ///   エントリ: TypeId(2) | RelId(6) | NeighborId(6) = 14 バイト。
 ///   1 ページあたり最大エントリ数 = (8160 − 16) / 14 = 581。
+///
+/// ARCH-4 増分6: 旧来の adj.db / adj_idx.dat サイドカーは廃止され、データ・索引とも
+/// graph.quiver 内のテナント (IPagedFile) に同居する。
 /// </summary>
 internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
 {
@@ -22,17 +26,16 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
     internal const int EntrySize = 14;
     internal const int EntriesPerPage = (RecordPageMapping.PageBodySize - BlockHeaderSize) / EntrySize; // 581
 
-    private static readonly PageId StoreHeaderPageId = new(1);
-
     private readonly IPagedFile _dataFile;
-    private readonly FileStream _indexStream;
-    private readonly object _idxLock = new();
+    private readonly IPagedFile _indexFile;
+    private readonly long _idxEntryCount;
     private readonly AdjacencyEpoch? _epoch;
 
-    internal AdjacencyBlockStore(IPagedFile dataFile, string indexPath, AdjacencyEpoch? epoch = null)
+    internal AdjacencyBlockStore(IPagedFile dataFile, IPagedFile indexFile, AdjacencyEpoch? epoch = null)
     {
         _dataFile = dataFile;
-        _indexStream = new FileStream(indexPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        _indexFile = indexFile;
+        _idxEntryCount = AdjacencyContainer.ReadIndexEntryCount(indexFile);
         _epoch = epoch;
     }
 
@@ -197,16 +200,18 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
     // ──────────────────────────── Build ────────────────────────────
 
     /// <summary>
-    /// 隣接インデックスをゼロから構築する。BulkLoader.Commit が隣接インデックス構築を要求したときに呼ばれる。
+    /// 隣接インデックスをゼロから構築する。BulkLoader.Commit / CompactAdjacency が要求したときに呼ばれる。
+    /// ARCH-4 増分6: 既存の <paramref name="dataFile"/> / <paramref name="indexFile"/> テナントを
+    /// 一旦 truncate して作り直す (graph.quiver に同居)。
     /// </summary>
     internal static void Build(
-        string adjDataPath,
-        string adjIndexPath,
+        IPagedFile dataFile,
+        IPagedFile indexFile,
         IReadOnlyList<(long Id, long Src, long Tgt, int TypeId)> rels,
         long nodeHwm)
     {
-        using var dataFile = new PagedFile(adjDataPath);
-        dataFile.AllocatePage(PageKind.AdjacencyBlock); // page 1 = store header placeholder
+        dataFile.Truncate(1);
+        dataFile.AllocatePage(PageKind.AdjacencyBlock); // logical page 1 = 記述子 placeholder
 
         var outEdges = new Dictionary<long, List<(short TypeId, long RelId, long NeighborId)>>();
         var inEdges = new Dictionary<long, List<(short TypeId, long RelId, long NeighborId)>>();
@@ -221,9 +226,7 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
         foreach (var list in outEdges.Values) list.Sort((a, b) => a.TypeId.CompareTo(b.TypeId));
         foreach (var list in inEdges.Values) list.Sort((a, b) => a.TypeId.CompareTo(b.TypeId));
 
-        using var idxStream = new FileStream(adjIndexPath, FileMode.Create, FileAccess.Write, FileShare.None);
-        Span<byte> idxEntry = stackalloc byte[8];
-
+        var firstPageIds = new long[nodeHwm];
         for (long nodeId = 0; nodeId < nodeHwm; nodeId++)
         {
             outEdges.TryGetValue(nodeId, out var outs);
@@ -232,28 +235,17 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
             long firstPageId = -1;
             if ((outs?.Count ?? 0) > 0 || (ins?.Count ?? 0) > 0)
                 firstPageId = WriteBlocks(dataFile, outs ?? [], ins ?? []);
-
-            BinaryPrimitives.WriteInt64LittleEndian(idxEntry, firstPageId);
-            idxStream.Write(idxEntry);
+            firstPageIds[nodeId] = firstPageId;
         }
 
-        idxStream.Flush();
+        AdjacencyContainer.WriteDescriptor(dataFile, AdjacencyContainer.KindV1, null);
+        AdjacencyContainer.WriteIndex(indexFile, firstPageIds);
     }
 
     // ──────────────────────────── private ────────────────────────────
 
     private long GetBlockPageId(NodeId nodeId)
-    {
-        long offset = nodeId.Value * 8;
-        lock (_idxLock)
-        {
-            if (_indexStream.Length < offset + 8) return -1;
-            _indexStream.Seek(offset, SeekOrigin.Begin);
-            Span<byte> buf = stackalloc byte[8];
-            _indexStream.ReadExactly(buf);
-            return BinaryPrimitives.ReadInt64LittleEndian(buf);
-        }
-    }
+        => AdjacencyContainer.ReadIndexEntry(_indexFile, _idxEntryCount, nodeId.Value);
 
     private static int CopyEntries(
         ReadOnlySpan<byte> span, RelationshipTypeId? typeFilter,
@@ -339,5 +331,6 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
         return list;
     }
 
-    public void Dispose() => _indexStream.Dispose();
+    // テナントは container が所有する。dispose は no-op。
+    public void Dispose() { }
 }

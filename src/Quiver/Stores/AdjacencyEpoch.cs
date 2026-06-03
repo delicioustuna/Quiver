@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using Quiver.Core;
+using Quiver.Storage;
 
 namespace Quiver.Storage.Records;
 
@@ -6,35 +8,41 @@ namespace Quiver.Storage.Records;
 /// PW-14 / codex_advice_3 §7.6. Persistent metadata for the immutable base
 /// adjacency view: the relationship-id watermark separating base from delta,
 /// a monotonic compact epoch, and the set of base relationships deleted since
-/// the base was last built (tombstones). Lives alongside the adjacency files
-/// as <c>adj.epoch</c>.
+/// the base was last built (tombstones).
 ///
-/// File layout:
-///   Magic(4 "QEPC") | Version(2) | Reserved(2) | Epoch(8) | BaseRelHwm(8) |
-///   TombstoneCount(4) | Reserved(4) | Tombstones[Count](8 each, sorted)
+/// ARCH-4 増分6: 旧来は <c>adj.epoch</c> サイドカーファイルに置かれていたが、
+/// 単一ファイル化のため <see cref="SingleFileContainer"/> 内の専用テナント
+/// (<see cref="AdjacencyContainer.EpochTenant"/>) のページへ移した。物理ページは container の
+/// 単一 WAL fileKind に乗るため、tombstone 書き込みは tx 内なら WAL に記録され recovery / abort で
+/// 透過的に巻き戻る (in-memory ハッシュセットは <see cref="Reload"/> で再同期する)。
 ///
-/// Tombstone writes go through a tmp + rename so a crash mid-write leaves
-/// the previous file intact. The hashset is the source of truth at runtime.
+/// テナントレイアウト:
+///   論理 page 1 (header): Magic(4) "QEPC" | Version(2) | Reserved(2) | Epoch(8) | BaseRelHwm(8) |
+///                          TombstoneCount(4)
+///   論理 page 2+        : ソート済み int64 tombstone 配列 (1 ページ 1020 件)
+///
+/// ハッシュセットがランタイムの真実の源。
 /// </summary>
 internal sealed class AdjacencyEpoch
 {
     private const uint Magic = 0x43504551; // "QEPC"
     private const ushort Version = 1;
-    internal const int HeaderSize = 32;
+    private const int TombstonesPerPage = RecordPageMapping.PageBodySize / 8; // 1020
+    private static readonly PageId HeaderPage = new(1);
 
-    private readonly string _path;
+    private readonly IPagedFile _file;
     private readonly object _lock = new();
     private long _epoch;
     private long _baseRelHwm;
-    private readonly HashSet<long> _tombstones;
+    private HashSet<long> _tombstones;
 
     public long Epoch { get { lock (_lock) return _epoch; } }
     public long BaseRelHwm { get { lock (_lock) return _baseRelHwm; } }
     public int TombstoneCount { get { lock (_lock) return _tombstones.Count; } }
 
-    private AdjacencyEpoch(string path, long epoch, long baseRelHwm, IEnumerable<long>? tombstones)
+    private AdjacencyEpoch(IPagedFile file, long epoch, long baseRelHwm, IEnumerable<long>? tombstones)
     {
-        _path = path;
+        _file = file;
         _epoch = epoch;
         _baseRelHwm = baseRelHwm;
         _tombstones = tombstones is null ? new HashSet<long>() : new HashSet<long>(tombstones);
@@ -62,7 +70,7 @@ internal sealed class AdjacencyEpoch
 
     /// <summary>
     /// compact 後にメタデータを差し替える: <see cref="Epoch"/> をインクリメント、
-    /// 新しい <see cref="BaseRelHwm"/> を採用、tombstone をすべて破棄する。永続化はアトミックに行う。
+    /// 新しい <see cref="BaseRelHwm"/> を採用、tombstone をすべて破棄する。
     /// </summary>
     public void ResetAfterCompact(long newBaseRelHwm)
     {
@@ -75,70 +83,113 @@ internal sealed class AdjacencyEpoch
         }
     }
 
-    public static AdjacencyEpoch CreateNew(string path, long baseRelHwm)
+    /// <summary>
+    /// ARCH-4 増分6: abort / recovery がテナントページをディスク内容へ戻した後、in-memory の
+    /// epoch / baseRelHwm / tombstone をテナントから読み直す。<see cref="BinaryGraphStorageBackendFactory"/>
+    /// の ReloadStoreMeta から呼ばれる。
+    /// </summary>
+    public void Reload()
     {
-        var e = new AdjacencyEpoch(path, 1, baseRelHwm, null);
+        lock (_lock)
+        {
+            var (epoch, hwm, tombs) = ReadFile(_file);
+            _epoch = epoch;
+            _baseRelHwm = hwm;
+            _tombstones = tombs;
+        }
+    }
+
+    /// <summary>新規 base ビュー構築時 (bulk load) に epoch=1 / 指定 hwm / tombstone 空で初期化する。</summary>
+    public static AdjacencyEpoch CreateNew(IPagedFile file, long baseRelHwm)
+    {
+        var e = new AdjacencyEpoch(file, 1, baseRelHwm, null);
         lock (e._lock) e.PersistLocked();
         return e;
     }
 
-    public static AdjacencyEpoch Load(string path)
+    /// <summary>既存テナントから epoch メタを読み込む。header 未書込なら epoch=0 / 空で返す。</summary>
+    public static AdjacencyEpoch Open(IPagedFile file)
     {
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        Span<byte> header = stackalloc byte[HeaderSize];
-        fs.ReadExactly(header);
-        uint magic = BinaryPrimitives.ReadUInt32LittleEndian(header);
-        if (magic != Magic)
-            throw new InvalidDataException($"adj.epoch: bad magic 0x{magic:X8}");
-        ushort version = BinaryPrimitives.ReadUInt16LittleEndian(header[4..]);
-        if (version != Version)
-            throw new InvalidDataException($"adj.epoch: unsupported version {version}");
-        long epoch = BinaryPrimitives.ReadInt64LittleEndian(header[8..]);
-        long hwm = BinaryPrimitives.ReadInt64LittleEndian(header[16..]);
-        int count = BinaryPrimitives.ReadInt32LittleEndian(header[24..]);
+        var (epoch, hwm, tombs) = ReadFile(file);
+        return new AdjacencyEpoch(file, epoch, hwm, tombs);
+    }
 
-        var tombs = new long[count];
-        if (count > 0)
+    private static (long Epoch, long Hwm, HashSet<long> Tombstones) ReadFile(IPagedFile file)
+    {
+        if (file.PageCount < 2) return (0, 0, new HashSet<long>());
+
+        long epoch, hwm;
+        int count;
+        var hh = file.PinForRead(HeaderPage);
+        try
         {
-            var bytes = new byte[count * 8];
-            fs.ReadExactly(bytes);
-            for (int i = 0; i < count; i++)
-                tombs[i] = BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(i * 8));
+            var body = hh.Data;
+            uint magic = BinaryPrimitives.ReadUInt32LittleEndian(body);
+            if (magic != Magic)
+                throw new InvalidDataException($"adjacency epoch: bad magic 0x{magic:X8}");
+            ushort version = BinaryPrimitives.ReadUInt16LittleEndian(body[4..]);
+            if (version != Version)
+                throw new InvalidDataException($"adjacency epoch: unsupported version {version}");
+            epoch = BinaryPrimitives.ReadInt64LittleEndian(body[8..]);
+            hwm = BinaryPrimitives.ReadInt64LittleEndian(body[16..]);
+            count = BinaryPrimitives.ReadInt32LittleEndian(body[24..]);
         }
-        return new AdjacencyEpoch(path, epoch, hwm, tombs);
+        finally { hh.Dispose(); }
+
+        var tombs = new HashSet<long>(count);
+        long read = 0;
+        int page = 0;
+        while (read < count)
+        {
+            var dh = file.PinForRead(new PageId(2 + page));
+            try
+            {
+                var body = dh.Data;
+                int slots = (int)Math.Min(TombstonesPerPage, count - read);
+                for (int s = 0; s < slots; s++, read++)
+                    tombs.Add(BinaryPrimitives.ReadInt64LittleEndian(body[(s * 8)..]));
+            }
+            finally { dh.Dispose(); }
+            page++;
+        }
+        return (epoch, hwm, tombs);
     }
 
     private void PersistLocked()
     {
-        var tmpPath = _path + ".tmp";
-        using (var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
-        {
-            Span<byte> header = stackalloc byte[HeaderSize];
-            BinaryPrimitives.WriteUInt32LittleEndian(header, Magic);
-            BinaryPrimitives.WriteUInt16LittleEndian(header[4..], Version);
-            BinaryPrimitives.WriteUInt16LittleEndian(header[6..], 0);
-            BinaryPrimitives.WriteInt64LittleEndian(header[8..], _epoch);
-            BinaryPrimitives.WriteInt64LittleEndian(header[16..], _baseRelHwm);
-            BinaryPrimitives.WriteInt32LittleEndian(header[24..], _tombstones.Count);
-            BinaryPrimitives.WriteInt32LittleEndian(header[28..], 0);
-            fs.Write(header);
+        // ソート済み配列にしてファイル内容を決定的にする (diff / golden test が安定する)。
+        long[] sorted = new long[_tombstones.Count];
+        _tombstones.CopyTo(sorted);
+        System.Array.Sort(sorted);
 
-            if (_tombstones.Count > 0)
-            {
-                var bytes = new byte[_tombstones.Count * 8];
-                int i = 0;
-                // ファイル内容を決定的にするためソートする — diff / golden test が安定し、
-                // 将来「tombstone をソート済みスパンへロード」する probe にも好都合。
-                foreach (long t in _tombstones.OrderBy(x => x))
-                {
-                    BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(i * 8), t);
-                    i++;
-                }
-                fs.Write(bytes);
-            }
-            fs.Flush();
+        int dataPages = (sorted.Length + TombstonesPerPage - 1) / TombstonesPerPage;
+        while (_file.PageCount < 2 + dataPages) _file.AllocatePage(PageKind.Header);
+
+        var hh = _file.PinForWrite(HeaderPage);
+        try
+        {
+            var body = hh.Data;
+            body[..28].Clear();
+            BinaryPrimitives.WriteUInt32LittleEndian(body, Magic);
+            BinaryPrimitives.WriteUInt16LittleEndian(body[4..], Version);
+            BinaryPrimitives.WriteInt64LittleEndian(body[8..], _epoch);
+            BinaryPrimitives.WriteInt64LittleEndian(body[16..], _baseRelHwm);
+            BinaryPrimitives.WriteInt32LittleEndian(body[24..], sorted.Length);
         }
-        if (File.Exists(_path)) File.Delete(_path);
-        File.Move(tmpPath, _path);
+        finally { hh.Dispose(); }
+
+        long node = 0;
+        for (int page = 0; page < dataPages; page++)
+        {
+            var dh = _file.PinForWrite(new PageId(2 + page));
+            try
+            {
+                var body = dh.Data;
+                int slots = (int)Math.Min(TombstonesPerPage, sorted.Length - node);
+                for (int s = 0; s < slots; s++, node++)
+                    BinaryPrimitives.WriteInt64LittleEndian(body[(s * 8)..], sorted[node]);
+            }
+            finally { dh.Dispose(); }
+        }
     }
 }

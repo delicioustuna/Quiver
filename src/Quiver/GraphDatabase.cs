@@ -78,8 +78,9 @@ public sealed class GraphDatabase : IDisposable
     /// バルクロード用ローダを開始する。
     /// </summary>
     /// <param name="buildAdjacencyIndex">
-    /// <c>true</c> の場合、<see cref="BulkLoader.Commit"/> 時に adj.db + adj_idx.dat も
-    /// 同時に構築し、その後の読み取り専用トランザクションから隣接ブロックストアが利用可能になる。
+    /// <c>true</c> の場合、<see cref="BulkLoader.Commit"/> 時に隣接ブロックビュー (ARCH-4 以降は
+    /// graph.quiver 内テナントに同居) も併せて構築し、その後の読み取り専用トランザクションから
+    /// 隣接ブロックストアが利用可能になる。
     /// </param>
     public BulkLoader BeginBulkLoad(bool buildAdjacencyIndex = false)
     {

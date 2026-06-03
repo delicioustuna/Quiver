@@ -10,8 +10,8 @@ internal sealed class BulkLoadCapabilities
 {
     /// <summary>
     /// バイナリバックエンド向けのバルクロード開始関数。bool 引数で
-    /// <see cref="BulkLoader.Commit"/> が adj.db / adj_idx.dat を併せて構築するかを指定する。
-    /// アクティブなバックエンドがバイナリバックエンドでない場合は null。
+    /// <see cref="BulkLoader.Commit"/> が隣接ブロックビュー (ARCH-4 以降は graph.quiver 内テナント)
+    /// を併せて構築するかを指定する。アクティブなバックエンドがバイナリバックエンドでない場合は null。
     /// </summary>
     public Func<bool, BulkLoader>? BeginBinaryBulkLoad { get; init; }
 

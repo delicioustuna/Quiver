@@ -31,7 +31,8 @@ public sealed class StreamingBulkLoader : IDisposable
     private readonly NodeStore _nodeStore;
     private readonly RelationshipStore _relStore;
     private readonly PropertyStore _propStore;
-    private readonly string? _directoryPath;
+    // ARCH-4 増分6: 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
+    private readonly Quiver.Storage.SingleFileContainer? _container;
 
     private const int RelRecordSize = 28; // Id(8) + Src(8) + Tgt(8) + TypeId(4)
 
@@ -55,12 +56,12 @@ public sealed class StreamingBulkLoader : IDisposable
 
     internal StreamingBulkLoader(
         NodeStore nodeStore, RelationshipStore relStore, PropertyStore propStore,
-        string? directoryPath = null)
+        Quiver.Storage.SingleFileContainer? container = null)
     {
         _nodeStore = nodeStore;
         _relStore = relStore;
         _propStore = propStore;
-        _directoryPath = directoryPath;
+        _container = container;
 
         _tempPath = Path.Combine(
             Path.GetTempPath(),
@@ -136,8 +137,8 @@ public sealed class StreamingBulkLoader : IDisposable
         CommitNodes();
         CommitRelationshipsStreaming();
         CommitProperties();
-        if (_directoryPath != null)
-            BuildAdjacencyIndexStreaming(_directoryPath);
+        if (_container != null)
+            BuildAdjacencyIndexStreaming(_container);
     }
 
     public void Dispose()
@@ -261,9 +262,9 @@ public sealed class StreamingBulkLoader : IDisposable
         _propStore.BulkFlushMeta();
     }
 
-    private void BuildAdjacencyIndexStreaming(string directory)
+    private void BuildAdjacencyIndexStreaming(Quiver.Storage.SingleFileContainer container)
     {
-        // Materialize rels into a compact list for the existing AdjacencyBlockStore.Build.
+        // Materialize rels into a compact list for AdjacencyContainer.Build.
         // Full streaming adj-build (chunk-sort by src/tgt) is a future task — see PW-9 notes.
         var relData = new List<(long Id, long Src, long Tgt, int TypeId)>((int)Math.Min(_relCount, int.MaxValue));
         var buf = new byte[RelRecordSize];
@@ -281,26 +282,15 @@ public sealed class StreamingBulkLoader : IDisposable
         long nodeHwm = _maxNodeId + 1;
         long relHwm = _maxRelId + 1;
 
+        Dictionary<long, long>? weights = null;
         if (_payloadSpec is { } spec)
         {
-            var weights = new Dictionary<long, long>(_relPayloads.Count);
+            weights = new Dictionary<long, long>(_relPayloads.Count);
             foreach (var ((relId, keyId), raw) in _relPayloads)
                 if (keyId == spec.PropertyKeyId)
                     weights[relId] = raw;
-            AdjacencyBlockStoreV2.Build(
-                Path.Combine(directory, "adj_v2.db"),
-                Path.Combine(directory, "adj_v2_idx.dat"),
-                Path.Combine(directory, "adj_v2.meta"),
-                relData, weights, nodeHwm, spec);
         }
-        else
-        {
-            AdjacencyBlockStore.Build(
-                Path.Combine(directory, "adj.db"),
-                Path.Combine(directory, "adj_idx.dat"),
-                relData, nodeHwm);
-        }
-        AdjacencyEpoch.CreateNew(Path.Combine(directory, "adj.epoch"), relHwm);
+        AdjacencyContainer.Build(container, relData, nodeHwm, relHwm, _payloadSpec, weights);
     }
 
     private void ThrowIfCommitted()

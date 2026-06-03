@@ -28,6 +28,7 @@ public sealed class AdjacencyEpochTests : IDisposable
     public void Dispose()
     {
         _db?.Dispose();
+        foreach (var c in _containers) c.Dispose();
         if (Directory.Exists(_dir))
             Directory.Delete(_dir, recursive: true);
     }
@@ -207,18 +208,30 @@ public sealed class AdjacencyEpochTests : IDisposable
 
     // ────────────────────── AdjacencyEpoch unit-level ────────────────────────
 
+    // ARCH-4 増分6: epoch は専用テナント (IPagedFile) に保存される。同一 container 上で
+    // Open し直すと、ページに書かれた内容 (buffer pool 経由) からメタを再構築できる。
+    private Quiver.Storage.SingleFileContainer NewContainer()
+    {
+        Directory.CreateDirectory(_dir);
+        var c = new Quiver.Storage.SingleFileContainer(
+            Path.Combine(_dir, "epoch_" + Guid.NewGuid().ToString("N")[..8] + ".quiver"));
+        _containers.Add(c);
+        return c;
+    }
+    private readonly List<Quiver.Storage.SingleFileContainer> _containers = new();
+
     [Fact]
     public void AdjacencyEpoch_round_trip_preserves_tombstones_and_epoch()
     {
-        var path = Path.Combine(_dir, "epoch.dat");
-        Directory.CreateDirectory(_dir);
+        var container = NewContainer();
+        var tenant = container.OpenTenant(AdjacencyContainer.EpochTenant, Quiver.Storage.PageKind.Header);
 
-        var e = AdjacencyEpoch.CreateNew(path, baseRelHwm: 100);
+        var e = AdjacencyEpoch.CreateNew(tenant, baseRelHwm: 100);
         e.Tombstone(5);
         e.Tombstone(42);
         e.Tombstone(42); // duplicate; should stay at 2
 
-        var reloaded = AdjacencyEpoch.Load(path);
+        var reloaded = AdjacencyEpoch.Open(tenant);
         reloaded.Epoch.Should().Be(1);
         reloaded.BaseRelHwm.Should().Be(100);
         reloaded.TombstoneCount.Should().Be(2);
@@ -230,10 +243,10 @@ public sealed class AdjacencyEpochTests : IDisposable
     [Fact]
     public void AdjacencyEpoch_tombstone_outside_base_range_is_noop()
     {
-        var path = Path.Combine(_dir, "epoch.dat");
-        Directory.CreateDirectory(_dir);
+        var container = NewContainer();
+        var tenant = container.OpenTenant(AdjacencyContainer.EpochTenant, Quiver.Storage.PageKind.Header);
 
-        var e = AdjacencyEpoch.CreateNew(path, baseRelHwm: 10);
+        var e = AdjacencyEpoch.CreateNew(tenant, baseRelHwm: 10);
         e.Tombstone(15); // outside base — ignored
         e.TombstoneCount.Should().Be(0);
         e.IsTombstoned(15).Should().BeFalse();
@@ -242,10 +255,10 @@ public sealed class AdjacencyEpochTests : IDisposable
     [Fact]
     public void AdjacencyEpoch_reset_after_compact_clears_tombstones_and_bumps_epoch()
     {
-        var path = Path.Combine(_dir, "epoch.dat");
-        Directory.CreateDirectory(_dir);
+        var container = NewContainer();
+        var tenant = container.OpenTenant(AdjacencyContainer.EpochTenant, Quiver.Storage.PageKind.Header);
 
-        var e = AdjacencyEpoch.CreateNew(path, baseRelHwm: 50);
+        var e = AdjacencyEpoch.CreateNew(tenant, baseRelHwm: 50);
         e.Tombstone(3);
         e.Tombstone(7);
         e.ResetAfterCompact(newBaseRelHwm: 200);
@@ -255,7 +268,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         e.TombstoneCount.Should().Be(0);
 
         // Persisted state matches in-memory state.
-        var reloaded = AdjacencyEpoch.Load(path);
+        var reloaded = AdjacencyEpoch.Open(tenant);
         reloaded.Epoch.Should().Be(2);
         reloaded.BaseRelHwm.Should().Be(200);
         reloaded.TombstoneCount.Should().Be(0);
