@@ -80,6 +80,21 @@ DB を「ディレクトリ + 15+ ファイル」から **単一データファ�
 ## §3. ARCH-5 — Phase 2: テナント化 + ID 全面 Kind+Gen+Seq + property 再設計
 
 > 巨大タスク。**3 サブステップ (5a → 5b → 5c) に分けて段階実装**し、各サブステップで build/test 緑 + 着手承認を取る。
+>
+> **進捗**: 5a ✅ (ARCH-4 に前倒し統合) / **5b ✅ 完了 (develop, commit `bf7edff`, 2026-06-04 ユーザ完了承認)** / 5c 未。
+> - **5b 完了済み要約**: `GenerationalRef` を `EntityRef` (Kind4/Gen16/Seq44 packing) に統一 (VEC-4 ハンドルへ
+>   `partial` 相乗り、`UnpackKind`/`Pack`/`PackLocal`/`Sequence`/`Generation`)。`NodeId`/`RelationshipId`/
+>   `PropertyId.Value` を packed (`Gen16<<44|Seq44`) 化し公開 `Sequence`/`Generation`/`Create` + equality-by-Sequence
+>   を追加。世代付与は `NodeStore.Allocate` のみで、`Read` が carried gen を照合し slot 再利用後の stale ハンドルを
+>   not-found に縮退 (`TryResolve` 相当、新テスト緑)。クエリパイプラインは **Sequence 空間 (gen=0)** で実行し、
+>   利用者境界 (`QueryRowMaterializer.StampNodeGenerations`) で NodeId 列に現世代を load して `result.Value ==
+>   CreateNode().Value` を保証 (hot path コスト回避)。seed 入口正規化 + operator 内部 dedup/距離/frontier は一律
+>   `.Sequence` キー。オンディスク Int48 は Sequence 格納、lock/SSN/dense/CSR/adjacency も Sequence。vector binding は
+>   slot Sequence キーに正規化 (世代照合は ARCH-6)。**on-disk バイト無変更につき FormatVersion 据え置き (V5SingleFile)**。
+>   既存テスト ~21 件を slot 同一性 `.Value`→`.Sequence` へ追従、PublicApi 再承認 (追加のみ)。全スイート緑。詳細プラン
+>   `plans/arch5b-id-kind-gen-seq.md`。
+> - **5c 残**: property 格納再設計 (連結リスト → inline/列指向/slotted + `FlushMeta` コミット時バッチ化)。5b 確定の
+>   record レイアウト上で改めて詳細設計する (本セッションでは未着手、ユーザのスコープ選択による)。
 
 ### ARCH-5a: ストアのテナント化
 - **目的**: node/rel/prop/blob/version/adjacency/index/vector/token/catalog を ARCH-4 の単一ファイルページ領域に同居させ、per-store ヘッダ/freelist/format の重複 (docs/design/11 §2.1) を廃する。
