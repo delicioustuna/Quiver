@@ -302,7 +302,8 @@ public sealed class AdjacencyEpochTests : IDisposable
             typeFilter: null,
             ExpandOutputMode.NeighborOnly);
         var result = tx.Execute(op);
-        return result.Rows().Select(r => r.GetNodeId(0).Value).ToList();
+        // ARCH-5b: 隣接の slot 番号 (Sequence) を検証する。Value は世代を含む。
+        return result.Rows().Select(r => r.GetNodeId(0).Sequence).ToList();
     }
 
     private sealed class SingleNodeSource : IPhysicalOperator

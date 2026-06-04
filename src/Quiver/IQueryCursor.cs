@@ -22,9 +22,14 @@ internal interface IQueryCursor : IDisposable
 internal sealed class PhysicalOperatorCursor : IQueryCursor
 {
     private readonly IPhysicalOperator _plan;
+    private readonly Quiver.Storage.Records.INodeStore _nodes;
     private QueryRow _current;
 
-    internal PhysicalOperatorCursor(IPhysicalOperator plan) => _plan = plan;
+    internal PhysicalOperatorCursor(IPhysicalOperator plan, Quiver.Storage.Records.INodeStore nodes)
+    {
+        _plan = plan;
+        _nodes = nodes;
+    }
 
     public TupleSchema Schema => _plan.Schema;
 
@@ -43,6 +48,8 @@ internal sealed class PhysicalOperatorCursor : IQueryCursor
                 byteData[i] = _plan.GetBytes(i).ToArray();
             }
         }
+        // ARCH-5b: 結果 NodeId 列に現世代を load (round-trip 一貫)。
+        QueryRowMaterializer.StampNodeGenerations(slots, _nodes);
         _current = new QueryRow(slots, byteData);
         return true;
     }

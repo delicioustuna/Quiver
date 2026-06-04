@@ -34,10 +34,11 @@ public class LabelNodeIndexTests : IDisposable
         var docB = _store.Allocate(new LabelId(1));
         var otherA = _store.Allocate(new LabelId(2));
 
-        _index.Lookup(_store, new LabelId(1)).Select(n => n.Value)
-            .Should().BeEquivalentTo(new[] { docA.Value, docB.Value });
-        _index.Lookup(_store, new LabelId(2)).Select(n => n.Value)
-            .Should().BeEquivalentTo(new[] { otherA.Value });
+        // ARCH-5b: index は Sequence 空間 id を返す。slot 同一性で照合。
+        _index.Lookup(_store, new LabelId(1)).Select(n => n.Sequence)
+            .Should().BeEquivalentTo(new[] { docA.Sequence, docB.Sequence });
+        _index.Lookup(_store, new LabelId(2)).Select(n => n.Sequence)
+            .Should().BeEquivalentTo(new[] { otherA.Sequence });
         _index.Lookup(_store, new LabelId(3)).Should().BeEmpty();
     }
 
@@ -51,10 +52,10 @@ public class LabelNodeIndexTests : IDisposable
 
         _store.Free(b);
 
-        _index.Lookup(_store, new LabelId(1)).Select(n => n.Value)
-            .Should().BeEquivalentTo(new[] { a.Value });
-        _index.Lookup(_store, new LabelId(2)).Select(n => n.Value)
-            .Should().BeEquivalentTo(new[] { c.Value });
+        _index.Lookup(_store, new LabelId(1)).Select(n => n.Sequence)
+            .Should().BeEquivalentTo(new[] { a.Sequence });
+        _index.Lookup(_store, new LabelId(2)).Select(n => n.Sequence)
+            .Should().BeEquivalentTo(new[] { c.Sequence });
     }
 
     [Fact]
@@ -86,11 +87,11 @@ public class LabelNodeIndexTests : IDisposable
         _store.Free(first);
 
         var newAlloc = _store.Allocate(new LabelId(2));
-        newAlloc.Value.Should().NotBe(first.Value);
+        newAlloc.Sequence.Should().NotBe(first.Sequence); // 論理削除のみ → 新 slot (再利用は vacuum 後)
 
         _index.Lookup(_store, new LabelId(1)).Should().BeEmpty();
-        _index.Lookup(_store, new LabelId(2)).Select(n => n.Value)
-            .Should().BeEquivalentTo(new[] { newAlloc.Value });
+        _index.Lookup(_store, new LabelId(2)).Select(n => n.Sequence)
+            .Should().BeEquivalentTo(new[] { newAlloc.Sequence });
     }
 
     [Fact]
@@ -105,9 +106,10 @@ public class LabelNodeIndexTests : IDisposable
         _index.Invalidate();
         _index.IsBuilt.Should().BeFalse();
 
-        var l0 = _index.Lookup(_store, new LabelId(0)).Select(n => n.Value).ToList();
-        var l1 = _index.Lookup(_store, new LabelId(1)).Select(n => n.Value).ToList();
-        var l2 = _index.Lookup(_store, new LabelId(2)).Select(n => n.Value).ToList();
+        // ARCH-5b: slot 番号 (Sequence) で検証する。Value は世代を含む。
+        var l0 = _index.Lookup(_store, new LabelId(0)).Select(n => n.Sequence).ToList();
+        var l1 = _index.Lookup(_store, new LabelId(1)).Select(n => n.Sequence).ToList();
+        var l2 = _index.Lookup(_store, new LabelId(2)).Select(n => n.Sequence).ToList();
 
         // Live ids by label (i % 3 == bucket, excluding ids 4 and 7):
         //   bucket 0: 0, 3, 6, 9
@@ -124,8 +126,8 @@ public class LabelNodeIndexTests : IDisposable
         _index.EnsureBuilt(_store);
         for (int i = 0; i < 5; i++) _store.Allocate(new LabelId(7));
 
-        var got = _index.Lookup(_store, new LabelId(7)).Select(n => n.Value).ToList();
-        got.Should().Equal(new long[] { 0, 1, 2, 3, 4 });
+        var got = _index.Lookup(_store, new LabelId(7)).Select(n => n.Sequence).ToList();
+        got.Should().Equal(new long[] { 0, 1, 2, 3, 4 }); // ARCH-5b: slot 番号で昇順検証
     }
 
     [Fact]

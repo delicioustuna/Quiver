@@ -15,7 +15,7 @@ internal interface INodeStore
 
     /// <summary>
     /// ARCH-3: slot <paramref name="localId"/> の現在の世代 (incarnation)。範囲外 / 負は -1。
-    /// 索引値 (<see cref="Quiver.Core.GenerationalRef"/>) の世代照合に使う。
+    /// 索引値 (<see cref="Quiver.Core.EntityRef"/>) の世代照合に使う。
     /// </summary>
     int CurrentGeneration(long localId);
 }
@@ -67,13 +67,13 @@ internal ref struct NodeWriteHandle
     public RelationshipId FirstRelationshipId
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[1..]));
-        set => RecordHelpers.WriteInt48(_rec[1..], value.Value);
+        set => RecordHelpers.WriteInt48(_rec[1..], value.Sequence); // ARCH-5b: Int48 は Sequence
     }
 
     public PropertyId FirstPropertyId
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[7..]));
-        set => RecordHelpers.WriteInt48(_rec[7..], value.Value);
+        set => RecordHelpers.WriteInt48(_rec[7..], value.Sequence); // ARCH-5b: Int48 は Sequence
     }
 
     public LabelId Label

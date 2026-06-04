@@ -32,5 +32,6 @@ internal sealed class LiteralProvider : ITupleProvider
     public static LiteralProvider Bool(bool v) => new(TupleSlotType.Bool, v ? 1L : 0L, null);
     public static LiteralProvider String(string s) => new(TupleSlotType.Utf8String, 0, Encoding.UTF8.GetBytes(s));
     public static LiteralProvider Bytes(byte[] b) => new(TupleSlotType.Bytes, 0, b);
-    public static LiteralProvider NodeId(NodeId id) => new(TupleSlotType.NodeId, id.Value, null);
+    // ARCH-5b: クエリパイプラインは Sequence 空間で動く。利用者 seed の gen を入口で剥がす。
+    public static LiteralProvider NodeId(NodeId id) => new(TupleSlotType.NodeId, id.Sequence, null);
 }

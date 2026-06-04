@@ -162,7 +162,7 @@ public sealed class AutoVacuumWorkerTests : IDisposable
         var ids = new List<long>();
         using (var tx = db.BeginTransaction())
         {
-            for (int i = 0; i < 50; i++) ids.Add(tx.CreateNode("Person").Value);
+            for (int i = 0; i < 50; i++) ids.Add(tx.CreateNode("Person").Sequence); // ARCH-5b: slot は Sequence
             tx.Commit();
         }
         using (var tx = db.BeginTransaction())
@@ -177,7 +177,7 @@ public sealed class AutoVacuumWorkerTests : IDisposable
         bool reused = SpinWaitUntil(() =>
         {
             using var tx = db.BeginTransaction();
-            long newId = tx.CreateNode("Person").Value;
+            long newId = tx.CreateNode("Person").Sequence; // ARCH-5b: 再利用判定は Sequence
             tx.Commit();
             reusedId = newId;
             // 回収済みなら元の範囲 [0..49] のどれかを再利用するはず。

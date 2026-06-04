@@ -84,7 +84,7 @@ public sealed class IndexOrphanGcTests : IDisposable
         report.EntryCount.Should().Be(2);
         report.OrphanCount.Should().Be(1);
         report.Orphans.Should().ContainSingle()
-            .Which.EntityId.Should().Be(doomed.Value);
+            .Which.EntityId.Should().Be(doomed.Sequence); // ARCH-5b: OrphanIndexEntry.EntityId は unpacked seq
         report.Orphans[0].IndexName.Should().Be("idx_name");
     }
 

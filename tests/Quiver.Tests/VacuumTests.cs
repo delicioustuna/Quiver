@@ -104,7 +104,7 @@ public sealed class VacuumTests : IDisposable
         using (var tx = db.BeginTransaction())
         {
             for (int i = 0; i < 5; i++)
-                newIds.Add(tx.CreateNode("Person").Value);
+                newIds.Add(tx.CreateNode("Person").Sequence); // ARCH-5b: slot 再利用は Sequence で確認
             tx.Commit();
         }
 

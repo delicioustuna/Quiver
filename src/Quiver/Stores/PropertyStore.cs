@@ -85,7 +85,7 @@ internal sealed class PropertyStore : IPropertyStore
         rec[0] = flags;
         BinaryPrimitives.WriteInt32LittleEndian(rec[1..], keyId.Value);
         rec[5] = (byte)value.Type;
-        RecordHelpers.WriteInt48(rec[35..], currentFirst.Value); // NextPropId = old head
+        RecordHelpers.WriteInt48(rec[35..], currentFirst.Sequence); // NextPropId = old head (ARCH-5b: Sequence)
 
         if (spillover)
         {
@@ -112,7 +112,7 @@ internal sealed class PropertyStore : IPropertyStore
         // currentFirst (= chain head) は変更されないのでそのまま返す (snapshot reader が辿れる)。
         // 物理回収 (blob 含む) は vacuum (OP-3) 担当。
         // FT-32: 論理削除は sidecar の xmax をスタンプするだけ。record 本体は触らない。
-        _versions.UpdateXmax(propId.Value, MvccContext.CurrentTxId.Value);
+        _versions.UpdateXmax(propId.Sequence, MvccContext.CurrentTxId.Value); // ARCH-5b: version キーは Sequence
 
         return currentFirst;
     }
@@ -120,9 +120,11 @@ internal sealed class PropertyStore : IPropertyStore
     public PropertyReadHandle Read(PropertyId propId)
     {
         // FT-30: HWM 超 / 負 ID は "存在しない" 扱い。NodeStore.Read と同じ理由。
-        if (propId.Value < 0 || propId.Value >= _hwm)
+        // ARCH-5b: slot 演算 / version キーは Sequence (packed Value ではない)。
+        long seq = propId.Sequence;
+        if (seq < 0 || seq >= _hwm)
             return new PropertyReadHandle(propId, default, PropertyId.Invalid, default, inUse: false);
-        var (pageId, off) = Location(propId.Value);
+        var (pageId, off) = Location(seq);
         using var h = _file.PinForRead(pageId);
         ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
         var keyId = new PropertyKeyId(BinaryPrimitives.ReadInt32LittleEndian(rec[1..]));
@@ -151,7 +153,7 @@ internal sealed class PropertyStore : IPropertyStore
         // FT-26: MVCC visibility をフィルタする。invisible は InUse=false に縮退。
         if (inUse)
         {
-            var meta = _versions.Read(propId.Value);
+            var meta = _versions.Read(seq);
             if (!Visibility.IsVisibleAmbient(meta.Xmin, meta.Xmax))
                 inUse = false;
         }
@@ -280,7 +282,7 @@ internal sealed class PropertyStore : IPropertyStore
         long guard = _hwm + 1;
         while (cur.IsValid && guard-- > 0)
         {
-            var (pageId, off) = Location(cur.Value);
+            var (pageId, off) = Location(cur.Sequence); // ARCH-5b: slot は Sequence
             PropertyId next;
             bool dead;
             using (var h = _file.PinForRead(pageId))
@@ -295,7 +297,7 @@ internal sealed class PropertyStore : IPropertyStore
                 }
                 else
                 {
-                    long xmax = _versions.Read(cur.Value).Xmax; // FT-32: xmax は sidecar から
+                    long xmax = _versions.Read(cur.Sequence).Xmax; // FT-32: xmax は sidecar から
                     dead = xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax);
                 }
             }
@@ -315,7 +317,7 @@ internal sealed class PropertyStore : IPropertyStore
             if (dead)
             {
                 // free 操作。raw inUse=1 のみ blob 解放してリクレイム (= 既に物理 free の場合はスキップ)。
-                var (pageId, off) = Location(id.Value);
+                var (pageId, off) = Location(id.Sequence);
                 bool wasInUse;
                 {
                     using var h = _file.PinForRead(pageId);
@@ -329,9 +331,9 @@ internal sealed class PropertyStore : IPropertyStore
                 continue;
             }
             // live: rewrite NextPropId → newHead
-            var (lpid, loff) = Location(id.Value);
+            var (lpid, loff) = Location(id.Sequence);
             var ph = _file.PinForWrite(lpid);
-            RecordHelpers.WriteInt48(ph.Data[(loff + 35)..], newHead.Value);
+            RecordHelpers.WriteInt48(ph.Data[(loff + 35)..], newHead.Sequence);
             _file.UnpinDirty(lpid, 0);
             newHead = id;
         }
@@ -347,7 +349,7 @@ internal sealed class PropertyStore : IPropertyStore
     /// </summary>
     private PropertyId ReclaimSlot(PropertyId id)
     {
-        var (pageId, off) = Location(id.Value);
+        var (pageId, off) = Location(id.Sequence);
         PropertyId next;
         long blobId = -1;
         bool spillover;
@@ -371,7 +373,7 @@ internal sealed class PropertyStore : IPropertyStore
         RecordHelpers.WriteInt48(rec2[35..], _freeHead);
         _file.UnpinDirty(pageId, 0);
 
-        _freeHead = id.Value;
+        _freeHead = id.Sequence; // ARCH-5b: free list は Sequence
         return next;
     }
 

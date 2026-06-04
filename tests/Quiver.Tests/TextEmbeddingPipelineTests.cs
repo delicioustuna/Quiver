@@ -79,7 +79,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         var query = provider.Vectorize("hello world");
         using var cursor = _vectors.KnnSearch(IndexName, query, k: 1);
         cursor.MoveNext().Should().BeTrue();
-        cursor.Current.EntityId.Should().Be(node.Value);
+        cursor.Current.EntityId.Should().Be(node.Sequence); // ARCH-5b: vector binding キーは slot Sequence
         provider.CallCount.Should().Be(1);
 
         cts.Cancel();
@@ -126,7 +126,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
             {
                 var nid = tx.CreateNode("Page");
                 tx.SetProperty(nid, SourceProp, Storage.Records.PropertyValue.FromString($"doc {i}"));
-                ids.Add(nid.Value);
+                ids.Add(nid.Sequence); // ARCH-5b: vector binding キーは slot Sequence
             }
             tx.Commit();
         }

@@ -25,28 +25,28 @@ public sealed class IndexGenerationTests : IDisposable
         try { Directory.Delete(_dir, recursive: true); } catch { }
     }
 
-    // ---- GenerationalRef pack / unpack ----
+    // ---- EntityRef pack / unpack (ARCH-5b: 旧 GenerationalRef を吸収) ----
 
     [Theory]
     [InlineData(EntityKind.Node, 0L, 0)]
     [InlineData(EntityKind.Node, 1L, 1)]
     [InlineData(EntityKind.Relationship, 42L, 7)]
-    [InlineData(EntityKind.Node, GenerationalRef.SequenceMask, GenerationalRef.MaxGeneration)]
-    public void GenerationalRef_roundtrips(EntityKind kind, long seq, int gen)
+    [InlineData(EntityKind.Node, EntityRef.SequenceMask, EntityRef.MaxGeneration)]
+    public void EntityRef_roundtrips(EntityKind kind, long seq, int gen)
     {
-        long packed = GenerationalRef.Pack(kind, seq, gen);
-        GenerationalRef.Kind(packed).Should().Be(kind);
-        GenerationalRef.Sequence(packed).Should().Be(seq);
-        GenerationalRef.Generation(packed).Should().Be(gen);
+        long packed = EntityRef.Pack(kind, seq, gen);
+        EntityRef.UnpackKind(packed).Should().Be(kind);
+        EntityRef.Sequence(packed).Should().Be(seq);
+        EntityRef.Generation(packed).Should().Be(gen);
     }
 
     [Fact]
-    public void GenerationalRef_rejects_out_of_range()
+    public void EntityRef_rejects_out_of_range()
     {
-        Action seqOverflow = () => GenerationalRef.Pack(EntityKind.Node, GenerationalRef.SequenceMask + 1, 0);
+        Action seqOverflow = () => EntityRef.Pack(EntityKind.Node, EntityRef.SequenceMask + 1, 0);
         seqOverflow.Should().Throw<ArgumentOutOfRangeException>();
 
-        Action genOverflow = () => GenerationalRef.Pack(EntityKind.Node, 0, GenerationalRef.MaxGeneration + 1);
+        Action genOverflow = () => EntityRef.Pack(EntityKind.Node, 0, EntityRef.MaxGeneration + 1);
         genOverflow.Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -83,8 +83,10 @@ public sealed class IndexGenerationTests : IDisposable
             tx.IndexInsert("idx_name", "bob", nodeB);
             tx.Commit();
         }
-        // ABA の前提: 同一 slot が再利用されていること。
-        nodeB.Value.Should().Be(nodeA.Value);
+        // ABA の前提: 同一 slot が再利用されていること (ARCH-5b: slot 同一性は Sequence。
+        // Value は世代を含むため reincarnation では nodeA と nodeB で異なる)。
+        nodeB.Sequence.Should().Be(nodeA.Sequence);
+        nodeB.Generation.Should().NotBe(nodeA.Generation);
 
         using var rtx = db.BeginReadOnlyTransaction();
 
@@ -130,7 +132,7 @@ public sealed class IndexGenerationTests : IDisposable
             tx.IndexInsert("idx_age", 99L, nodeB);
             tx.Commit();
         }
-        nodeB.Value.Should().Be(nodeA.Value);
+        nodeB.Sequence.Should().Be(nodeA.Sequence); // ARCH-5b: slot 同一性は Sequence
 
         using var rtx = db.BeginReadOnlyTransaction();
 
@@ -147,6 +149,49 @@ public sealed class IndexGenerationTests : IDisposable
         fresh.Current.Should().Be(nodeB);
         fresh.Dispose();
 
+        rtx.Rollback();
+    }
+
+    // ---- ARCH-5b: 世代付き NodeId の外部往復検証 (TryResolve → 不一致で not-found) ----
+
+    [Fact]
+    public void Stale_node_handle_resolves_to_not_found_after_slot_reuse()
+    {
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+
+        // nodeA を作って外部に往復した想定のハンドルとして保持する。
+        NodeId nodeA;
+        using (var tx = db.BeginTransaction())
+        {
+            nodeA = tx.CreateNode("Person");
+            tx.Commit();
+        }
+
+        // 削除 → vacuum で slot を物理回収 → 同一 slot を nodeB が再利用 (世代 +1)。
+        using (var tx = db.BeginTransaction())
+        {
+            tx.DeleteNode(nodeA);
+            tx.Commit();
+        }
+        db.Vacuum().ReclaimedNodes.Should().Be(1);
+        NodeId nodeB;
+        using (var tx = db.BeginTransaction())
+        {
+            nodeB = tx.CreateNode("Person");
+            tx.Commit();
+        }
+
+        // 同一 slot・別世代であること (= ABA の前提)。
+        nodeB.Sequence.Should().Be(nodeA.Sequence);
+        nodeB.Generation.Should().NotBe(nodeA.Generation);
+
+        using var rtx = db.BeginReadOnlyTransaction();
+        // 旧ハンドル nodeA は世代不一致で not-found (別ノード nodeB を誤って指さない)。
+        rtx.NodeExists(nodeA).Should().BeFalse("stale generation handle must not resolve to the reused slot");
+        // 現ハンドル nodeB は現世代と一致 → 存在する。
+        rtx.NodeExists(nodeB).Should().BeTrue();
+        // 世代を持たない (= 内部/旧来) ハンドルは照合をスキップし、生存 slot を素直に解決する。
+        rtx.NodeExists(new NodeId(nodeA.Sequence)).Should().BeTrue();
         rtx.Rollback();
     }
 
@@ -179,14 +224,14 @@ public sealed class IndexGenerationTests : IDisposable
             tx.IndexInsert("idx_name", "bob", nodeB);
             tx.Commit();
         }
-        nodeB.Value.Should().Be(nodeA.Value);
+        nodeB.Sequence.Should().Be(nodeA.Sequence); // ARCH-5b: slot 同一性は Sequence
 
         // slot は in-use (nodeB) だが "alice" は世代違いなので orphan。
         var report = db.Diagnostics.CheckIndexConsistency();
         report.EntryCount.Should().Be(2);
         report.OrphanCount.Should().Be(1);
         report.Orphans[0].IndexName.Should().Be("idx_name");
-        report.Orphans[0].EntityId.Should().Be(nodeB.Value); // 同一 slot → unpacked seq
+        report.Orphans[0].EntityId.Should().Be(nodeB.Sequence); // OrphanIndexEntry.EntityId は unpacked seq
 
         // 修復で stale エントリのみ消える。
         db.Diagnostics.RepairIndexes(IndexRepairMode.Apply).RemovedCount.Should().Be(1);

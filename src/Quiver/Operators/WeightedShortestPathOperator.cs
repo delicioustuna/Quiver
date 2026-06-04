@@ -157,28 +157,29 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
         {
             if (!_state.Settled!.Add(node)) continue;   // 既に確定済の重複エントリ
             ExpandedNodeCount++;
-            if (node == tgt.Value) break;               // 確定 = 最短重み距離
+            if (node == tgt.Sequence) break;            // 確定 = 最短重み距離 (ARCH-5b: slot 同一性)
             OneHopExpansion.Expand(_tx!, new NodeId(node), _dir, _typeFilter, depth: 0, _kernel, ref _state);
         }
 
         // 終点が settled に入っていれば Dist[終点] が最短重み距離。
         // PQ を出ても settled に無ければ (= 重み maxDistance 以内では) 到達不能。
-        if (!_state.Settled!.Contains(tgt.Value))
+        if (!_state.Settled!.Contains(tgt.Sequence))
         {
             distance = 0.0;
             return false;
         }
-        distance = _state.Dist![tgt.Value];
+        distance = _state.Dist![tgt.Sequence];
         _pathBytes = ReconstructPath(src, tgt);
         return true;
     }
 
     private byte[] ReconstructPath(NodeId src, NodeId tgt)
     {
-        var nodes = new List<long> { tgt.Value };
+        // ARCH-5b: 内部の距離/前任マップは slot 同一性 (Sequence) でキーされる。
+        var nodes = new List<long> { tgt.Sequence };
         var rels = new List<long>();
-        long cur = tgt.Value;
-        while (cur != src.Value)
+        long cur = tgt.Sequence;
+        while (cur != src.Sequence)
         {
             var (predNode, relId) = _state.Pred![cur];
             rels.Add(relId);
@@ -287,8 +288,9 @@ internal sealed class WeightedShortestPathKernel(
         (s.Settled ??= []).Clear();
         (s.Pq ??= new PriorityQueue<long, double>()).Clear();
 
-        s.Dist[source.Value] = 0.0;
-        s.Pq.Enqueue(source.Value, Heuristic(source));
+        // ARCH-5b: PQ / Dist / Pred / Settled は slot 同一性 (Sequence) でキーされる。
+        s.Dist[source.Sequence] = 0.0;
+        s.Pq.Enqueue(source.Sequence, Heuristic(source));
     }
 
     /// <inheritdoc/>
@@ -296,7 +298,7 @@ internal sealed class WeightedShortestPathKernel(
         NodeId source, NodeId target, RelationshipId relationshipId,
         long weightRaw, int depth, ref WeightedShortestPathState s)
     {
-        if (s.Settled!.Contains(target.Value)) return true;   // 確定済ノードは緩和不要
+        if (s.Settled!.Contains(target.Sequence)) return true;   // 確定済ノードは緩和不要
 
         double w = weightProvider.GetWeight(tx, relationshipId, weightRaw);
         if (w < 0.0)
@@ -304,14 +306,14 @@ internal sealed class WeightedShortestPathKernel(
                 $"重み付き最短経路 (Dijkstra/A*) は負のエッジ重みをサポートしません " +
                 $"(relationship {relationshipId.Value}, weight {w})。負の重みには Bellman-Ford 系が必要です。");
 
-        double cand = s.Dist![source.Value] + w;
+        double cand = s.Dist![source.Sequence] + w;
         if (cand > maxDistance) return true;
 
-        if (cand < s.Dist.GetValueOrDefault(target.Value, double.PositiveInfinity))
+        if (cand < s.Dist.GetValueOrDefault(target.Sequence, double.PositiveInfinity))
         {
-            s.Dist[target.Value] = cand;
-            s.Pred![target.Value] = (source.Value, relationshipId.Value);
-            s.Pq!.Enqueue(target.Value, cand + Heuristic(target));
+            s.Dist[target.Sequence] = cand;
+            s.Pred![target.Sequence] = (source.Sequence, relationshipId.Sequence);
+            s.Pq!.Enqueue(target.Sequence, cand + Heuristic(target));
         }
         return true;
     }

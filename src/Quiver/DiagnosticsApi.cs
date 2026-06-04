@@ -114,7 +114,7 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     /// (in-memory index なので部分削除より rebuild の方が簡潔)。
     /// </summary>
     /// <remarks>
-    /// ARCH-3: 削除は索引に格納された raw な packed 値 (<see cref="GenerationalRef"/>) で行う必要がある
+    /// ARCH-3: 削除は索引に格納された raw な packed 値 (<see cref="EntityRef"/>) で行う必要がある
     /// (<c>DeleteRawEntry</c> は値の完全一致で消すため)。公開 <see cref="OrphanIndexEntry.EntityId"/> は
     /// unpacked な NodeId.Value なので、削除には内部 raw リストを使う。
     /// </remarks>
@@ -159,7 +159,7 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     {
         var list = new List<OrphanIndexEntry>(raw.Count);
         foreach (var (name, key, value) in raw)
-            list.Add(new OrphanIndexEntry(name, key, GenerationalRef.Sequence(value)));
+            list.Add(new OrphanIndexEntry(name, key, EntityRef.Sequence(value)));
         return list;
     }
 
@@ -168,10 +168,10 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
         // FT-22 / ARCH-3: B+Tree 索引値は EntityRef でパック済み (Kind/Generation/Sequence)。
         // 索引は現状 Node 限定。Node 以外、物理的に解放済み (InUse=false)、または slot が
         // 再利用されて世代が食い違う (ABA) エントリは orphan とみなす。
-        if (GenerationalRef.Kind(packedValue) != EntityKind.Node) return false;
-        long seq = GenerationalRef.Sequence(packedValue);
+        if (EntityRef.UnpackKind(packedValue) != EntityKind.Node) return false;
+        long seq = EntityRef.Sequence(packedValue);
         return _nodeStore.Read(new NodeId(seq)).InUse
-            && _nodeStore.CurrentGeneration(seq) == GenerationalRef.Generation(packedValue);
+            && _nodeStore.CurrentGeneration(seq) == EntityRef.Generation(packedValue);
     }
 
     private long CountLabelIndexOrphans()

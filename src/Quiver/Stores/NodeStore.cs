@@ -91,7 +91,7 @@ internal sealed class NodeStore : INodeStore
                 _freeHead = RecordHelpers.ReadInt48(fh.Data[(foff + 1)..]);
             // ARCH-3: 世代が上限に達した slot は再利用しない (free list から外して永久退役)。
             // wraparound で古い索引エントリの世代と衝突するのを防ぐ。
-            if (_versions.Read(candidate).Generation >= GenerationalRef.MaxGeneration)
+            if (_versions.Read(candidate).Generation >= EntityRef.MaxGeneration)
                 continue;
             id = candidate;
             break;
@@ -120,7 +120,9 @@ internal sealed class NodeStore : INodeStore
         _versions.Write(id, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue, generation));
 
         FlushMeta();
-        var newId = new NodeId(id);
+        // ARCH-5b: 払い出す NodeId に世代を載せる。外部に往復したこの id は、後で slot が
+        // 再利用 (free→vacuum→再 Allocate で gen+1) されると Read の世代照合で not-found になる。
+        var newId = NodeId.Create(id, (int)generation);
         _labelIndex?.OnAllocate(newId, labelId);
         return newId;
     }
@@ -129,14 +131,16 @@ internal sealed class NodeStore : INodeStore
     {
         // FT-26 MVCC: 論理削除のみ — xmax をスタンプして record / チェーンは維持する。
         // 物理回収 + free list 投入は vacuum 経路 (OP-3) で行う。
-        var (pageId, off) = Location(nodeId.Value);
+        // ARCH-5b: slot 演算 / version キーは Sequence (packed Value ではない)。
+        long seq = nodeId.Sequence;
+        var (pageId, off) = Location(seq);
         LabelId prevLabel;
         {
             using var rh = _file.PinForRead(pageId);
             prevLabel = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(rh.Data.Slice(off, RecordSize)[13..]));
         }
         // FT-32: 論理削除は sidecar の xmax をスタンプするだけ。record 本体は触らない。
-        _versions.UpdateXmax(nodeId.Value, MvccContext.CurrentTxId.Value);
+        _versions.UpdateXmax(seq, MvccContext.CurrentTxId.Value);
 
         _inUseCount--;
         FlushMeta();
@@ -149,9 +153,11 @@ internal sealed class NodeStore : INodeStore
         // これがないと PagedFile.PinForRead が未割当ページの magic=0 を検出して
         // CorruptionException を投げ、NodeExists / HasProperty 等の defensive read API が
         // false を返す契約を破ってしまう (OP-2 sample の GET /nodes/{id} で発覚)。
-        if (nodeId.Value < 0 || nodeId.Value >= _hwm)
+        // ARCH-5b: slot 演算 / version キーは Sequence (packed Value ではない)。
+        long seq = nodeId.Sequence;
+        if (seq < 0 || seq >= _hwm)
             return new NodeReadHandle(nodeId, inUse: false, RelationshipId.Invalid, PropertyId.Invalid, default);
-        var (pageId, off) = Location(nodeId.Value);
+        var (pageId, off) = Location(seq);
         bool inUse;
         RelationshipId firstRel;
         PropertyId firstProp;
@@ -169,22 +175,28 @@ internal sealed class NodeStore : INodeStore
         long xmin = 0, xmax = 0;
         if (inUse)
         {
-            var meta = _versions.Read(nodeId.Value);
+            var meta = _versions.Read(seq);
             xmin = meta.Xmin; xmax = meta.Xmax;
+            // ARCH-5b: 呼出元が世代付き NodeId (= Allocate 由来) を持つ場合、現 slot 世代と照合し、
+            // 不一致 (slot 再利用に伴う stale 参照) なら "存在しない" 扱いにする。世代 0 (= 内部
+            // パイプライン / bulk / 旧来 new NodeId(seq)) は照合をスキップする。
+            int carriedGen = nodeId.Generation;
+            if (carriedGen != 0 && carriedGen != (int)meta.Generation)
+                inUse = false;
             // FT-26: ambient MVCC コンテキストで可視性をフィルタする。
             // 不可視なら InUse=false に縮退して呼出側に "存在しない" と見せる。
-            if (!Visibility.IsVisibleAmbient(xmin, xmax))
+            else if (!Visibility.IsVisibleAmbient(xmin, xmax))
                 inUse = false;
         }
         // FT-33: 可視バージョンを観測したら SSN read-set に記録する (Serializable 時のみ。
         // 直接 Read だけでなく traversal の隣接走査もこの経路を通る)。
-        if (inUse) MvccContext.RecordRead(EntityKind.Node, nodeId.Value);
+        if (inUse) MvccContext.RecordRead(EntityKind.Node, seq);
         return new NodeReadHandle(nodeId, inUse, firstRel, firstProp, label, xmin, xmax);
     }
 
     public NodeWriteHandle Write(NodeId nodeId)
     {
-        var (pageId, off) = Location(nodeId.Value);
+        var (pageId, off) = Location(nodeId.Sequence); // ARCH-5b: slot は Sequence
         var ph = _file.PinForWrite(pageId);
         return new NodeWriteHandle(_file, pageId, ph.Data.Slice(off, RecordSize));
     }
@@ -206,6 +218,8 @@ internal sealed class NodeStore : INodeStore
             {
                 // FT-33: scan で観測した可視ノードも SSN read-set に記録する。
                 MvccContext.RecordRead(EntityKind.Node, id);
+                // ARCH-5b: クエリパイプラインは Sequence 空間 (gen=0) で実行する。世代は利用者境界
+                // (QueryRow マテリアライズ) で load するため、scan は素の Sequence id を返す。
                 yield return new NodeId(id);
             }
         }
@@ -215,15 +229,15 @@ internal sealed class NodeStore : INodeStore
 
     internal void UpdateFirstRelId(NodeId nodeId, RelationshipId newFirstRelId)
     {
-        var (pageId, off) = Location(nodeId.Value);
+        var (pageId, off) = Location(nodeId.Sequence);
         var ph = _file.PinForWrite(pageId);
-        RecordHelpers.WriteInt48(ph.Data[(off + 1)..], newFirstRelId.Value);
+        RecordHelpers.WriteInt48(ph.Data[(off + 1)..], newFirstRelId.Sequence); // ARCH-5b: Int48 は Sequence
         _file.UnpinDirty(pageId, 0);
     }
 
     internal RelationshipId GetFirstRelId(NodeId nodeId)
     {
-        var (pageId, off) = Location(nodeId.Value);
+        var (pageId, off) = Location(nodeId.Sequence);
         using var h = _file.PinForRead(pageId);
         return new RelationshipId(RecordHelpers.ReadInt48(h.Data[(off + 1)..]));
     }
@@ -250,7 +264,7 @@ internal sealed class NodeStore : INodeStore
 
     /// <summary>
     /// ARCH-3: slot <paramref name="localId"/> の現在の世代 (incarnation) を返す。索引値
-    /// (<see cref="GenerationalRef"/>) の世代照合で stale 参照を弾くのに使う。範囲外 / 負は -1。
+    /// (<see cref="EntityRef"/>) の世代照合で stale 参照を弾くのに使う。範囲外 / 負は -1。
     /// MVCC 可視性は適用せず sidecar の世代だけを読む (= 索引の非可視フィルタ挙動を維持しつつ
     /// slot 再利用のみ検出する)。物理 free な slot も sidecar には旧世代が残るが、その slot を
     /// 指す古い索引エントリは「同世代」で一致し得る — 呼び出し側の後続 Read が InUse=false で
@@ -411,9 +425,9 @@ internal sealed class NodeStore : INodeStore
     /// <summary>OP-3 vacuum: ノードの FirstPropId を書き換える。chain 整理用。</summary>
     internal void UpdateFirstPropId(NodeId nodeId, PropertyId newFirstPropId)
     {
-        var (pageId, off) = Location(nodeId.Value);
+        var (pageId, off) = Location(nodeId.Sequence);
         var ph = _file.PinForWrite(pageId);
-        RecordHelpers.WriteInt48(ph.Data[(off + 7)..], newFirstPropId.Value);
+        RecordHelpers.WriteInt48(ph.Data[(off + 7)..], newFirstPropId.Sequence); // ARCH-5b: Int48 は Sequence
         _file.UnpinDirty(pageId, 0);
     }
 

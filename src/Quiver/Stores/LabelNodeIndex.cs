@@ -39,7 +39,7 @@ internal sealed class LabelNodeIndex
         {
             var h = nodes.Read(nodeId);
             if (!h.InUse) continue;
-            AddCore(h.Label.Value, nodeId.Value);
+            AddCore(h.Label.Value, nodeId.Sequence); // ARCH-5b: index は Sequence を格納
         }
         _built = true;
     }
@@ -61,7 +61,7 @@ internal sealed class LabelNodeIndex
     public void OnAllocate(NodeId id, LabelId label)
     {
         if (!_built) return;
-        AddCore(label.Value, id.Value);
+        AddCore(label.Value, id.Sequence); // ARCH-5b: index は Sequence を格納 (id は gen 付きで届きうる)
     }
 
     /// <summary>
@@ -72,7 +72,7 @@ internal sealed class LabelNodeIndex
     {
         if (!_built) return;
         if (_byLabel.TryGetValue(previousLabel.Value, out var set))
-            set.Remove(id.Value);
+            set.Remove(id.Sequence); // ARCH-5b: index は Sequence を格納 (id は gen 付きで届きうる)
     }
 
     /// <summary>
@@ -122,6 +122,8 @@ internal sealed class LabelNodeIndex
         set.Add(nodeIdValue);
     }
 
+    // ARCH-5b: パイプラインは Sequence 空間 (gen=0)。世代は利用者境界 (QueryRow) で load するため
+    // index は素の Sequence id を返す。
     private static IEnumerable<NodeId> WrapNodeIds(long[] arr)
     {
         foreach (var v in arr) yield return new NodeId(v);

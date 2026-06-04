@@ -41,8 +41,9 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
 
     public long Epoch => _epoch?.Epoch ?? 0;
     public long BaseRelHwm => _epoch?.BaseRelHwm ?? 0;
-    public bool IsTombstoned(RelationshipId relId) => _epoch?.IsTombstoned(relId.Value) ?? false;
-    public void Tombstone(RelationshipId relId) => _epoch?.Tombstone(relId.Value);
+    // ARCH-5b: tombstone epoch のキーは Sequence (packed Value ではない)。
+    public bool IsTombstoned(RelationshipId relId) => _epoch?.IsTombstoned(relId.Sequence) ?? false;
+    public void Tombstone(RelationshipId relId) => _epoch?.Tombstone(relId.Sequence);
 
     // ──────────────────────────── IAdjacencyBlockStore ────────────────────────────
 
@@ -245,7 +246,7 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
     // ──────────────────────────── private ────────────────────────────
 
     private long GetBlockPageId(NodeId nodeId)
-        => AdjacencyContainer.ReadIndexEntry(_indexFile, _idxEntryCount, nodeId.Value);
+        => AdjacencyContainer.ReadIndexEntry(_indexFile, _idxEntryCount, nodeId.Sequence); // ARCH-5b: index キーは Sequence
 
     private static int CopyEntries(
         ReadOnlySpan<byte> span, RelationshipTypeId? typeFilter,

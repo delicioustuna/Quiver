@@ -20,8 +20,9 @@ internal sealed class FrontierSet
     public int Count => _bits?.Count ?? _hash!.Count;
 
     /// <summary>True when <paramref name="nodeId"/> was added to the set.</summary>
+    // ARCH-5b: id→long の平坦化は Sequence (packed Value ではない)。
     public bool Contains(NodeId nodeId)
-        => _bits?.Contains(nodeId.Value) ?? _hash!.Contains(nodeId.Value);
+        => _bits?.Contains(nodeId.Sequence) ?? _hash!.Contains(nodeId.Sequence);
 
     /// <summary>Build a frontier from <paramref name="nodes"/>. Heuristic picks bitset vs hashset.</summary>
     public static FrontierSet Build(IEnumerable<NodeId> nodes)
@@ -31,8 +32,8 @@ internal sealed class FrontierSet
         long max = -1;
         foreach (var n in nodes)
         {
-            buf.Add(n.Value);
-            if (n.Value > max) max = n.Value;
+            buf.Add(n.Sequence);
+            if (n.Sequence > max) max = n.Sequence;
         }
         return Build(buf, max);
     }

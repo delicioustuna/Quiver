@@ -75,9 +75,10 @@ internal sealed class GraphSnapshotView : IGraphSnapshotView
         foreach (var relId in rels.Scan())
         {
             var r = rels.Read(relId);
-            long src = r.Source.Value;
-            long tgt = r.Target.Value;
-            relList.Add((src, tgt, relId.Value));
+            // ARCH-5b: CSR の node/rel index は Sequence (packed Value ではない)。
+            long src = r.Source.Sequence;
+            long tgt = r.Target.Sequence;
+            relList.Add((src, tgt, relId.Sequence));
             if (src > maxNodeIdSeen) maxNodeIdSeen = src;
             if (tgt > maxNodeIdSeen) maxNodeIdSeen = tgt;
         }
@@ -86,7 +87,7 @@ internal sealed class GraphSnapshotView : IGraphSnapshotView
         long nodeHwm = 0;
         foreach (var nid in nodes.Scan())
         {
-            if (nid.Value + 1 > nodeHwm) nodeHwm = nid.Value + 1;
+            if (nid.Sequence + 1 > nodeHwm) nodeHwm = nid.Sequence + 1;
         }
         long nodeCount = Math.Max(nodeHwm, maxNodeIdSeen + 1);
 
@@ -145,7 +146,7 @@ internal sealed class GraphSnapshotView : IGraphSnapshotView
                     while (c.MoveNext())
                     {
                         if (!adj.IsTombstoned(c.Relationship))
-                            weightByRel[c.Relationship.Value] = c.WeightRaw;
+                            weightByRel[c.Relationship.Sequence] = c.WeightRaw; // ARCH-5b: rel key は Sequence
                     }
                 }
             }
@@ -177,21 +178,21 @@ internal sealed class GraphSnapshotView : IGraphSnapshotView
 
     public int OutDegree(NodeId nodeId)
     {
-        long n = nodeId.Value;
+        long n = nodeId.Sequence; // ARCH-5b: CSR index は Sequence
         if ((ulong)n >= (ulong)NodeCount) return 0;
         return (int)(_outOffsets[n + 1] - _outOffsets[n]);
     }
 
     public int InDegree(NodeId nodeId)
     {
-        long n = nodeId.Value;
+        long n = nodeId.Sequence; // ARCH-5b: CSR index は Sequence
         if ((ulong)n >= (ulong)NodeCount) return 0;
         return (int)(_inOffsets[n + 1] - _inOffsets[n]);
     }
 
     public ReadOnlySpan<long> OutNeighbors(NodeId nodeId)
     {
-        long n = nodeId.Value;
+        long n = nodeId.Sequence; // ARCH-5b: CSR index は Sequence
         if ((ulong)n >= (ulong)NodeCount) return ReadOnlySpan<long>.Empty;
         long start = _outOffsets[n];
         long len = _outOffsets[n + 1] - start;
@@ -200,7 +201,7 @@ internal sealed class GraphSnapshotView : IGraphSnapshotView
 
     public ReadOnlySpan<long> InNeighbors(NodeId nodeId)
     {
-        long n = nodeId.Value;
+        long n = nodeId.Sequence; // ARCH-5b: CSR index は Sequence
         if ((ulong)n >= (ulong)NodeCount) return ReadOnlySpan<long>.Empty;
         long start = _inOffsets[n];
         long len = _inOffsets[n + 1] - start;
@@ -209,7 +210,7 @@ internal sealed class GraphSnapshotView : IGraphSnapshotView
 
     public ReadOnlySpan<long> OutRelationshipIds(NodeId nodeId)
     {
-        long n = nodeId.Value;
+        long n = nodeId.Sequence; // ARCH-5b: CSR index は Sequence
         if ((ulong)n >= (ulong)NodeCount) return ReadOnlySpan<long>.Empty;
         long start = _outOffsets[n];
         long len = _outOffsets[n + 1] - start;
@@ -218,7 +219,7 @@ internal sealed class GraphSnapshotView : IGraphSnapshotView
 
     public ReadOnlySpan<long> InRelationshipIds(NodeId nodeId)
     {
-        long n = nodeId.Value;
+        long n = nodeId.Sequence; // ARCH-5b: CSR index は Sequence
         if ((ulong)n >= (ulong)NodeCount) return ReadOnlySpan<long>.Empty;
         long start = _inOffsets[n];
         long len = _inOffsets[n + 1] - start;
@@ -228,7 +229,7 @@ internal sealed class GraphSnapshotView : IGraphSnapshotView
     public ReadOnlySpan<long> WeightBitsOut(NodeId nodeId)
     {
         if (_outWeightBits == null) return ReadOnlySpan<long>.Empty;
-        long n = nodeId.Value;
+        long n = nodeId.Sequence; // ARCH-5b: CSR index は Sequence
         if ((ulong)n >= (ulong)NodeCount) return ReadOnlySpan<long>.Empty;
         long start = _outOffsets[n];
         long len = _outOffsets[n + 1] - start;

@@ -708,9 +708,20 @@ namespace Quiver.Core
     }
     public readonly struct EntityRef : System.IEquatable<Quiver.Core.EntityRef>
     {
+        public const int GenerationBits = 16;
+        public const int GenerationShift = 44;
+        public const int KindShift = 60;
+        public const int MaxGeneration = 65535;
+        public const int SequenceBits = 44;
+        public const long SequenceMask = 17592186044415;
         public EntityRef(Quiver.Core.EntityKind Kind, long Id) { }
         public long Id { get; init; }
         public Quiver.Core.EntityKind Kind { get; init; }
+        public static int Generation(long packed) { }
+        public static long Pack(Quiver.Core.EntityKind kind, long sequence, int generation) { }
+        public static long PackLocal(long sequence, int generation) { }
+        public static long Sequence(long packed) { }
+        public static Quiver.Core.EntityKind UnpackKind(long packed) { }
     }
     public sealed class FormatVersionMismatchException : Quiver.Core.GraphDbException
     {
@@ -791,15 +802,25 @@ namespace Quiver.Core
     {
         public static readonly Quiver.Core.NodeId Invalid;
         public NodeId(long Value) { }
+        public int Generation { get; }
         public bool IsValid { get; }
+        public long Sequence { get; }
         public long Value { get; init; }
+        public bool Equals(Quiver.Core.NodeId other) { }
+        public override int GetHashCode() { }
+        public static Quiver.Core.NodeId Create(long sequence, int generation) { }
     }
     public readonly struct PropertyId : System.IEquatable<Quiver.Core.PropertyId>
     {
         public static readonly Quiver.Core.PropertyId Invalid;
         public PropertyId(long Value) { }
+        public int Generation { get; }
         public bool IsValid { get; }
+        public long Sequence { get; }
         public long Value { get; init; }
+        public bool Equals(Quiver.Core.PropertyId other) { }
+        public override int GetHashCode() { }
+        public static Quiver.Core.PropertyId Create(long sequence, int generation) { }
     }
     public readonly struct PropertyKeyId : System.IEquatable<Quiver.Core.PropertyKeyId>
     {
@@ -835,8 +856,13 @@ namespace Quiver.Core
     {
         public static readonly Quiver.Core.RelationshipId Invalid;
         public RelationshipId(long Value) { }
+        public int Generation { get; }
         public bool IsValid { get; }
+        public long Sequence { get; }
         public long Value { get; init; }
+        public bool Equals(Quiver.Core.RelationshipId other) { }
+        public override int GetHashCode() { }
+        public static Quiver.Core.RelationshipId Create(long sequence, int generation) { }
     }
     public readonly struct RelationshipTypeId : System.IEquatable<Quiver.Core.RelationshipTypeId>
     {

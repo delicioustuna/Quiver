@@ -192,7 +192,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     // ARCH-3: 索引の値レーンに (Kind=Node, Sequence=nodeId, Generation=現世代) をパックする。
     // 解決時に現 slot 世代と照合して slot 再利用 (ABA) の stale 参照を弾けるようにする。
     private long PackNode(NodeId nodeId)
-        => GenerationalRef.Pack(EntityKind.Node, nodeId.Value, _inner.Nodes.CurrentGeneration(nodeId.Value));
+        => EntityRef.Pack(EntityKind.Node, nodeId.Sequence, _inner.Nodes.CurrentGeneration(nodeId.Sequence));
 
     // ========== リレーション操作 ==========
 
@@ -473,6 +473,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                     byteData[i] = plan.GetBytes(i).ToArray();
                 }
             }
+            // ARCH-5b: 結果 NodeId 列に現世代を load (round-trip 一貫)。
+            QueryRowMaterializer.StampNodeGenerations(slots, _inner.Nodes);
             rows.Add(new QueryRow(slots, byteData));
         }
 
@@ -489,7 +491,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public IQueryCursor ExecuteCursor(IPhysicalOperator plan)
     {
         plan.Open(_inner);
-        return new PhysicalOperatorCursor(plan);
+        return new PhysicalOperatorCursor(plan, _inner.Nodes);
     }
 
     public IAdjacencyBlockStore? AdjacencyBlocks => _inner.AdjacencyBlocks;

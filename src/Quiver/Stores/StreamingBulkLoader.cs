@@ -74,29 +74,30 @@ public sealed class StreamingBulkLoader : IDisposable
     public void AppendNode(NodeId id, LabelId label)
     {
         ThrowIfCommitted();
-        _nodes.Add(new PendingNode(id.Value, label.Value));
-        if (id.Value > _maxNodeId) _maxNodeId = id.Value;
+        // ARCH-5b: 物理 slot は Sequence (利用側が gen 付き id を渡しても正しく正規化)。
+        _nodes.Add(new PendingNode(id.Sequence, label.Value));
+        if (id.Sequence > _maxNodeId) _maxNodeId = id.Sequence;
     }
 
     public void AppendRelationship(RelationshipId id, NodeId from, NodeId to, RelationshipTypeId type)
     {
         ThrowIfCommitted();
-        if (id.Value <= _maxRelId)
+        if (id.Sequence <= _maxRelId)
             throw new InvalidOperationException(
                 $"StreamingBulkLoader requires AppendRelationship in strictly increasing " +
-                $"RelationshipId order (got {id.Value}, last was {_maxRelId}). " +
+                $"RelationshipId order (got {id.Sequence}, last was {_maxRelId}). " +
                 $"Use BulkLoader for unordered input.");
 
-        BinaryPrimitives.WriteInt64LittleEndian(_writeBuf.AsSpan(0),  id.Value);
-        BinaryPrimitives.WriteInt64LittleEndian(_writeBuf.AsSpan(8),  from.Value);
-        BinaryPrimitives.WriteInt64LittleEndian(_writeBuf.AsSpan(16), to.Value);
+        BinaryPrimitives.WriteInt64LittleEndian(_writeBuf.AsSpan(0),  id.Sequence);
+        BinaryPrimitives.WriteInt64LittleEndian(_writeBuf.AsSpan(8),  from.Sequence);
+        BinaryPrimitives.WriteInt64LittleEndian(_writeBuf.AsSpan(16), to.Sequence);
         BinaryPrimitives.WriteInt32LittleEndian(_writeBuf.AsSpan(24), type.Value);
         _relTemp.Write(_writeBuf, 0, RelRecordSize);
 
         _relCount++;
-        _maxRelId = id.Value;
-        if (from.Value > _maxNodeId) _maxNodeId = from.Value;
-        if (to.Value   > _maxNodeId) _maxNodeId = to.Value;
+        _maxRelId = id.Sequence;
+        if (from.Sequence > _maxNodeId) _maxNodeId = from.Sequence;
+        if (to.Sequence   > _maxNodeId) _maxNodeId = to.Sequence;
     }
 
     public void AppendProperty(NodeId nodeId, PropertyKeyId key, in PropertyValue value)
@@ -108,8 +109,8 @@ public sealed class StreamingBulkLoader : IDisposable
         else if (value.Type is PropertyValueType.Bytes)
             data = value.BytesValue.ToArray();
 
-        if (!_propsByNode.TryGetValue(nodeId.Value, out var props))
-            _propsByNode[nodeId.Value] = props = new();
+        if (!_propsByNode.TryGetValue(nodeId.Sequence, out var props)) // ARCH-5b: key は Sequence
+            _propsByNode[nodeId.Sequence] = props = new();
         props.Add(new PendingProp(key.Value, value.Type, value.Int64Value, data));
     }
 
@@ -124,7 +125,7 @@ public sealed class StreamingBulkLoader : IDisposable
     public void AppendRelationshipPayload(RelationshipId relId, PropertyKeyId key, long rawValue)
     {
         ThrowIfCommitted();
-        _relPayloads[(relId.Value, key.Value)] = rawValue;
+        _relPayloads[(relId.Sequence, key.Value)] = rawValue; // ARCH-5b: rel key は Sequence
     }
 
     public void Commit()
@@ -255,7 +256,7 @@ public sealed class StreamingBulkLoader : IDisposable
             foreach (var prop in props)
             {
                 var propId = _propStore.BulkCreate(prop.KeyId, prop.Type, prop.Scalar, prop.Data, nextPropId);
-                nextPropId = propId.Value;
+                nextPropId = propId.Sequence; // ARCH-5b: Int48 NextPropId は Sequence
             }
             _nodeStore.BulkUpdateFirstProp(nodeId, nextPropId);
         }

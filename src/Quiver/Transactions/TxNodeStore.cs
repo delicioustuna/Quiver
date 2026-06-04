@@ -45,9 +45,10 @@ internal sealed class TxNodeStore : INodeStore
     public void Free(NodeId nodeId)
     {
         ActivateMvccContext();
-        Acquire(nodeId.Value, LockMode.Exclusive);
+        // ARCH-5b: lock / SSN キーは Sequence (read-set 側 RecordRead と整合させる)。
+        Acquire(nodeId.Sequence, LockMode.Exclusive);
         // FT-33: 論理削除は既存バージョンの上書きと同じ依存を生む。
-        SsnOnWrite(nodeId.Value);
+        SsnOnWrite(nodeId.Sequence);
         _inner.Free(nodeId);
     }
 
@@ -56,7 +57,7 @@ internal sealed class TxNodeStore : INodeStore
         // FT-24: ReaderWriter モードでは共有ロックを取り、書き込み tx と分離する。
         // ExclusiveOnly (既定) は後方互換のため無ロック。
         if (_mode == LockingMode.ReaderWriter)
-            Acquire(nodeId.Value, LockMode.Shared);
+            Acquire(nodeId.Sequence, LockMode.Shared);
         // FT-33: read-set は ActivateMvccContext で登録した sink 経由で _inner.Read が記録する
         // (可視判定後の 1 件のみ)。traversal / scan も同じ _inner.Read を通るので一律捕捉される。
         ActivateMvccContext();
@@ -65,10 +66,10 @@ internal sealed class TxNodeStore : INodeStore
 
     public NodeWriteHandle Write(NodeId nodeId)
     {
-        Acquire(nodeId.Value, LockMode.Exclusive);
+        Acquire(nodeId.Sequence, LockMode.Exclusive);
         ActivateMvccContext();
         // FT-33: early-abort は _inner.Write のミューテーション前に評価する。
-        SsnOnWrite(nodeId.Value);
+        SsnOnWrite(nodeId.Sequence);
         return _inner.Write(nodeId);
     }
 

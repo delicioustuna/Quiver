@@ -92,7 +92,7 @@ public sealed class NodeDegreeLookup
     /// </summary>
     public bool TryGetDegree(NodeId nodeId, out long outDegree, out long inDegree)
     {
-        long v = nodeId.Value;
+        long v = nodeId.Sequence; // ARCH-5b: dense 配列 index は Sequence
         if (IsDense)
         {
             if ((ulong)v < (ulong)_denseLength)
@@ -123,7 +123,7 @@ public sealed class NodeDegreeLookup
     /// </summary>
     public bool IsLikelyPowerNode(NodeId nodeId)
     {
-        long v = nodeId.Value;
+        long v = nodeId.Sequence; // ARCH-5b: dense bit index は Sequence
         if (IsDense)
         {
             if ((ulong)v >= (ulong)_denseLength) return false;
@@ -196,7 +196,7 @@ public sealed class NodeDegreeLookup
         internal void Record(NodeId nodeId, long outDegree, long inDegree)
         {
             _records.Add(new NodeDegreeRecord(nodeId, outDegree, inDegree));
-            if (nodeId.Value > _maxNodeId) _maxNodeId = nodeId.Value;
+            if (nodeId.Sequence > _maxNodeId) _maxNodeId = nodeId.Sequence; // ARCH-5b: dense サイズは Sequence
             long total = outDegree + inDegree;
             if (total >= _powerNodeThreshold)
                 _powerNodes[nodeId] = new NodeDegreeSummary(nodeId, outDegree, inDegree);
@@ -235,7 +235,7 @@ public sealed class NodeDegreeLookup
 
                 foreach (var r in _records)
                 {
-                    int v = (int)r.NodeId.Value;
+                    int v = (int)r.NodeId.Sequence; // ARCH-5b: dense 配列 index は Sequence
                     outs[v] = r.OutDegree;
                     ins[v] = r.InDegree;
                     if (r.OutDegree + r.InDegree >= _powerNodeThreshold)

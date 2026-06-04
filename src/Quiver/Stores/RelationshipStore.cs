@@ -86,14 +86,15 @@ internal sealed class RelationshipStore : IRelationshipStore
         Span<byte> rec = ph.Data.Slice(woff, RecordSize);
         rec.Clear();
         rec[0] = FlagInUse;
-        RecordHelpers.WriteInt48(rec[1..], source.Value);
-        RecordHelpers.WriteInt48(rec[7..], target.Value);
+        // ARCH-5b: オンディスク Int48 は Sequence (sentinel -1 は Sequence がそのまま返す)。
+        RecordHelpers.WriteInt48(rec[1..], source.Sequence);
+        RecordHelpers.WriteInt48(rec[7..], target.Sequence);
         BinaryPrimitives.WriteInt16LittleEndian(rec[13..], (short)type.Value);
-        RecordHelpers.WriteInt48(rec[15..], RelationshipId.Invalid.Value);
-        RecordHelpers.WriteInt48(rec[21..], srcHead.Value);
-        RecordHelpers.WriteInt48(rec[27..], RelationshipId.Invalid.Value);
-        RecordHelpers.WriteInt48(rec[33..], tgtHead.Value);
-        RecordHelpers.WriteInt48(rec[39..], PropertyId.Invalid.Value);
+        RecordHelpers.WriteInt48(rec[15..], RelationshipId.Invalid.Sequence);
+        RecordHelpers.WriteInt48(rec[21..], srcHead.Sequence);
+        RecordHelpers.WriteInt48(rec[27..], RelationshipId.Invalid.Sequence);
+        RecordHelpers.WriteInt48(rec[33..], tgtHead.Sequence);
+        RecordHelpers.WriteInt48(rec[39..], PropertyId.Invalid.Sequence);
         _file.UnpinDirty(wpid, 0);
         // FT-32: xmin/xmax は sidecar に書く。
         _versions.Write(id, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue));
@@ -131,7 +132,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         // 関連: nodeStore.firstRelId は更新しない (snapshot reader が辿れるよう head 維持)。
         _ = nodeStore;
         // FT-32: 論理削除は sidecar の xmax をスタンプするだけ。record 本体は触らない。
-        _versions.UpdateXmax(relId.Value, MvccContext.CurrentTxId.Value);
+        _versions.UpdateXmax(relId.Sequence, MvccContext.CurrentTxId.Value); // ARCH-5b: version キーは Sequence
 
         _inUseCount--;
         FlushMeta();
@@ -140,13 +141,15 @@ internal sealed class RelationshipStore : IRelationshipStore
     public RelationshipReadHandle Read(RelationshipId relId)
     {
         // FT-30: HWM 超 / 負 ID は "存在しない" 扱い。NodeStore.Read と同じ理由。
-        if (relId.Value < 0 || relId.Value >= _hwm)
+        // ARCH-5b: slot 演算 / version キーは Sequence (packed Value ではない)。
+        long seq = relId.Sequence;
+        if (seq < 0 || seq >= _hwm)
             return new RelationshipReadHandle(
                 relId, inUse: false, default, default, default,
                 RelationshipId.Invalid, RelationshipId.Invalid,
                 RelationshipId.Invalid, RelationshipId.Invalid,
                 PropertyId.Invalid);
-        var (pageId, off) = Location(relId.Value);
+        var (pageId, off) = Location(seq);
         using var h = _file.PinForRead(pageId);
         ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
         bool inUse = (rec[0] & FlagInUse) != 0;
@@ -161,19 +164,19 @@ internal sealed class RelationshipStore : IRelationshipStore
         // FT-32: xmin/xmax は sidecar から。物理 free スロットは sidecar を引かない。
         if (inUse)
         {
-            var meta = _versions.Read(relId.Value);
+            var meta = _versions.Read(seq);
             if (!Visibility.IsVisibleAmbient(meta.Xmin, meta.Xmax))
                 inUse = false;
         }
         // FT-33: 可視な relationship を観測したら SSN read-set に記録する (Serializable 時のみ)。
         // traversal の RelationshipEnumerator もこの Read を通るので隣接走査が一律捕捉される。
-        if (inUse) MvccContext.RecordRead(EntityKind.Relationship, relId.Value);
+        if (inUse) MvccContext.RecordRead(EntityKind.Relationship, seq);
         return new RelationshipReadHandle(relId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstPropId);
     }
 
     public RelationshipWriteHandle Write(RelationshipId relId)
     {
-        var (pageId, off) = Location(relId.Value);
+        var (pageId, off) = Location(relId.Sequence); // ARCH-5b: slot は Sequence
         var ph = _file.PinForWrite(pageId);
         return new RelationshipWriteHandle(_file, pageId, ph.Data.Slice(off, RecordSize));
     }
@@ -321,7 +324,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         long guard = _hwm + 1;
         while (cur.IsValid && guard-- > 0)
         {
-            var (pageId, off) = Location(cur.Value);
+            var (pageId, off) = Location(cur.Sequence); // ARCH-5b: slot は Sequence
             bool nodeIsSource;
             bool dead;
             RelationshipId nextOnThisSide;
@@ -331,8 +334,9 @@ internal sealed class RelationshipStore : IRelationshipStore
                 bool inUse = (rec[0] & FlagInUse) != 0;
                 long src = RecordHelpers.ReadInt48(rec[1..]);
                 long tgt = RecordHelpers.ReadInt48(rec[7..]);
-                nodeIsSource = src == node.Value;
-                bool nodeIsTarget = tgt == node.Value;
+                // オンディスク src/tgt は Sequence。node も Sequence で突き合わせる。
+                nodeIsSource = src == node.Sequence;
+                bool nodeIsTarget = tgt == node.Sequence;
                 if (!nodeIsSource && !nodeIsTarget)
                 {
                     // chain 整合性が崩れている (FT-15/17 のリカバリで起きうる) → ここで打ち切る
@@ -347,12 +351,12 @@ internal sealed class RelationshipStore : IRelationshipStore
                 }
                 else
                 {
-                    long xmax = _versions.Read(cur.Value).Xmax; // FT-32: xmax は sidecar から
+                    long xmax = _versions.Read(cur.Sequence).Xmax; // FT-32: xmax は sidecar から
                     dead = xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax);
                 }
             }
             entries.Add((cur, nodeIsSource, dead));
-            if (dead) reclaimSet.Add(cur.Value);
+            if (dead) reclaimSet.Add(cur.Sequence);
             cur = nextOnThisSide;
         }
 
@@ -374,13 +378,13 @@ internal sealed class RelationshipStore : IRelationshipStore
             if (dead) continue;
             // この rel の "node-side" prev/next を再リンク。
             // newHead (= 後続) と、後で前任者が書き込む prev=Invalid を初期値にしておく。
-            var (pageId, off) = Location(id.Value);
+            var (pageId, off) = Location(id.Sequence);
             var ph = _file.PinForWrite(pageId);
             // nodeIsSource ? srcPrev=15/srcNext=21 : tgtPrev=27/tgtNext=33
             int prevOff = nodeIsSource ? 15 : 27;
             int nextOff = nodeIsSource ? 21 : 33;
-            RecordHelpers.WriteInt48(ph.Data[(off + prevOff)..], RelationshipId.Invalid.Value);
-            RecordHelpers.WriteInt48(ph.Data[(off + nextOff)..], newHead.Value);
+            RecordHelpers.WriteInt48(ph.Data[(off + prevOff)..], RelationshipId.Invalid.Sequence);
+            RecordHelpers.WriteInt48(ph.Data[(off + nextOff)..], newHead.Sequence);
             _file.UnpinDirty(pageId, 0);
 
             if (newHead.IsValid)
@@ -400,10 +404,10 @@ internal sealed class RelationshipStore : IRelationshipStore
         foreach (var (id, nodeIsSource, dead) in entries)
         {
             if (dead) continue;
-            var (pageId, off) = Location(id.Value);
+            var (pageId, off) = Location(id.Sequence);
             var ph = _file.PinForWrite(pageId);
             int prevOff = nodeIsSource ? 15 : 27;
-            RecordHelpers.WriteInt48(ph.Data[(off + prevOff)..], prev.Value);
+            RecordHelpers.WriteInt48(ph.Data[(off + prevOff)..], prev.Sequence);
             _file.UnpinDirty(pageId, 0);
             prev = id;
         }
@@ -489,12 +493,12 @@ internal sealed class RelationshipStore : IRelationshipStore
 
     private void UpdateListPrev(RelationshipId relId, NodeId side, RelationshipId newPrev)
     {
-        var (pageId, off) = Location(relId.Value);
+        var (pageId, off) = Location(relId.Sequence);
         var ph = _file.PinForWrite(pageId);
         ReadOnlySpan<byte> snap = ph.Data.Slice(off, RecordSize);
-        NodeId recSrc = new(RecordHelpers.ReadInt48(snap[1..]));
+        NodeId recSrc = new(RecordHelpers.ReadInt48(snap[1..])); // gen=0、equality は Sequence ベース
         int prevOff = recSrc == side ? off + 15 : off + 27;
-        RecordHelpers.WriteInt48(ph.Data[prevOff..], newPrev.Value);
+        RecordHelpers.WriteInt48(ph.Data[prevOff..], newPrev.Sequence);
         _file.UnpinDirty(pageId, 0);
     }
 

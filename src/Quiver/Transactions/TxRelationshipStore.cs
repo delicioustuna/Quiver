@@ -36,16 +36,17 @@ internal sealed class TxRelationshipStore : IRelationshipStore
 
     public void Delete(INodeStore _, RelationshipId relId)
     {
-        Acquire(relId.Value, LockMode.Exclusive);
+        // ARCH-5b: lock / SSN キーは Sequence (read-set 側 RecordRead と整合させる)。
+        Acquire(relId.Sequence, LockMode.Exclusive);
         ActivateMvccContext();
-        SsnOnWrite(relId.Value);
+        SsnOnWrite(relId.Sequence);
         _inner.Delete(_txNodes, relId);
     }
 
     public RelationshipReadHandle Read(RelationshipId relId)
     {
         if (_mode == LockingMode.ReaderWriter)
-            Acquire(relId.Value, LockMode.Shared);
+            Acquire(relId.Sequence, LockMode.Shared);
         // FT-33: read-set は sink 経由で _inner.Read が記録する (traversal の隣接走査も
         // RelationshipEnumerator が _inner.Read を呼ぶので同経路で捕捉される)。
         ActivateMvccContext();
@@ -54,9 +55,9 @@ internal sealed class TxRelationshipStore : IRelationshipStore
 
     public RelationshipWriteHandle Write(RelationshipId relId)
     {
-        Acquire(relId.Value, LockMode.Exclusive);
+        Acquire(relId.Sequence, LockMode.Exclusive);
         ActivateMvccContext();
-        SsnOnWrite(relId.Value);
+        SsnOnWrite(relId.Sequence);
         return _inner.Write(relId);
     }
 

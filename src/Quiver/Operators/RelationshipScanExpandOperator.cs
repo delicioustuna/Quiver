@@ -80,7 +80,9 @@ internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
         long max = -1;
         while (_source.MoveNext())
         {
-            long v = _source.Current[_sourceNodeColumn].LongValue;
+            // ARCH-5b: frontier は slot 同一性 (Sequence) でキーする。probe 側 (rel.Source/Target)
+            // も Sequence なので、seed が gen 付きで届いても整合する。
+            long v = EntityRef.Sequence(_source.Current[_sourceNodeColumn].LongValue);
             ids.Add(v);
             if (v > max) max = v;
         }

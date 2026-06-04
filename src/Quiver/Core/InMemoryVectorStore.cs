@@ -76,7 +76,11 @@ public sealed class InMemoryVectorStore : IVectorStore
         var copy = vector.ToArray();
         lock (_gate)
         {
-            idx.Vectors[new VectorKey(kind, entityId)] = copy;
+            // ARCH-5b: binding キーは slot Sequence。利用者は node.Value (gen 付き packed) を
+            // 渡しうるが、グラフ側 (label index / adjacency / candidate set) は Sequence 空間で
+            // 動くため、ここで slot へ正規化して KNN を整合させる。世代照合による stale binding
+            // 検出 (slot 再利用で旧ベクトルを弾く) は ARCH-6 で導入する。
+            idx.Vectors[new VectorKey(kind, EntityRef.Sequence(entityId))] = copy;
         }
     }
 
@@ -85,7 +89,7 @@ public sealed class InMemoryVectorStore : IVectorStore
         var idx = GetIndex(indexName);
         lock (_gate)
         {
-            idx.Vectors.Remove(new VectorKey(kind, entityId));
+            idx.Vectors.Remove(new VectorKey(kind, EntityRef.Sequence(entityId))); // ARCH-5b: slot key
         }
     }
 

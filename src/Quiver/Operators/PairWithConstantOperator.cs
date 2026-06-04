@@ -24,7 +24,7 @@ internal sealed class PairWithConstantOperator : IPhysicalOperator
     {
         _source = source;
         _sourceColumn = sourceColumn;
-        _constantValue = constant.Value;
+        _constantValue = constant.Sequence; // ARCH-5b: seed の gen を剥がしてパイプラインを Sequence 空間に保つ
     }
 
     public TupleSchema Schema => s_schema;

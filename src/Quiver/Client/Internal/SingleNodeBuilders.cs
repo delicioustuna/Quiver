@@ -58,7 +58,8 @@ internal sealed class SingleNodeOperator : IPhysicalOperator
     {
         if (_done) return false;
         _done = true;
-        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _nodeId.Value };
+        // ARCH-5b: seed の gen を剥がしてパイプラインを Sequence 空間に保つ。
+        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _nodeId.Sequence };
         var s = Statistics; s.RowsProduced++; Statistics = s;
         return true;
     }
@@ -83,7 +84,8 @@ internal sealed class MultiNodeOperator : IPhysicalOperator
     public bool MoveNext()
     {
         if (_index >= _nodeIds.Length) return false;
-        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _nodeIds[_index++].Value };
+        // ARCH-5b: seed の gen を剥がす。
+        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _nodeIds[_index++].Sequence };
         var s = Statistics; s.RowsProduced++; Statistics = s;
         return true;
     }

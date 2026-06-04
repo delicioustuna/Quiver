@@ -54,7 +54,7 @@ internal sealed class DirectArrayRelationshipPropertyJoinIndex : IRelationshipPr
         type = default;
         scalarBits = 0;
         if (keyId != _keyId) return false;
-        long id = relationshipId.Value;
+        long id = relationshipId.Sequence; // ARCH-5b: dense 配列 index は Sequence
         if ((ulong)id >= (ulong)_bits.LongLength) return false;
         int word = (int)(id >> 6);
         ulong mask = 1UL << (int)(id & 63);
@@ -94,7 +94,7 @@ internal sealed class DirectArrayRelationshipPropertyJoinIndex : IRelationshipPr
         // we can right-size the arrays before the value-collecting pass.
         long hwm = 0;
         foreach (var relId in relStore.Scan())
-            if (relId.Value + 1 > hwm) hwm = relId.Value + 1;
+            if (relId.Sequence + 1 > hwm) hwm = relId.Sequence + 1; // ARCH-5b: 配列サイズは Sequence
 
         if (hwm > int.MaxValue)
         {
@@ -126,7 +126,7 @@ internal sealed class DirectArrayRelationshipPropertyJoinIndex : IRelationshipPr
                     PropertyValueType.Double => BitConverter.DoubleToInt64Bits(cur.Value.DoubleValue),
                     _ => 0L,
                 };
-                int idx = (int)relId.Value;
+                int idx = (int)relId.Sequence; // ARCH-5b: dense 配列 index は Sequence
                 bits[idx] = raw;
                 presence[idx >> 6] |= 1UL << (idx & 63);
                 entryCount++;

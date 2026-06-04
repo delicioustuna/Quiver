@@ -124,7 +124,7 @@ internal sealed class ShortestPathOperator : IPhysicalOperator
             s.Queue.Clear();
             s.Dist ??= new Dictionary<long, long>();
             s.Dist.Clear();
-            s.Dist[source.Value] = 0;
+            s.Dist[source.Sequence] = 0; // ARCH-5b: 距離マップのキーは slot 同一性 (Sequence)
             s.Queue.Enqueue((source, 0));
             s.FoundDistance = -1;
         }
@@ -134,7 +134,7 @@ internal sealed class ShortestPathOperator : IPhysicalOperator
             long weightRaw, int depth, ref ShortestPathState s)
         {
             long nextDist = depth + 1;
-            if (!s.Dist!.TryAdd(target.Value, nextDist))
+            if (!s.Dist!.TryAdd(target.Sequence, nextDist))
                 return true;
 
             if (target == s.Target)

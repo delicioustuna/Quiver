@@ -167,7 +167,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         rows.Should().HaveCount(degree);
         foreach (var row in rows)
         {
-            long n = row.GetNodeId(1).Value;
+            long n = row.GetNodeId(1).Sequence; // ARCH-5b: 重みは slot 番号基準で設定したので Sequence で照合
             long w = row.GetInt64(2);
             w.Should().Be(100 + n);
         }

@@ -148,8 +148,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         foreach (var relId in _relStore.Scan())
         {
             var r = _relStore.Read(relId);
-            live.Add((relId.Value, r.Source.Value, r.Target.Value, r.Type.Value));
-            if (relId.Value > maxId) maxId = relId.Value;
+            // ARCH-5b: 隣接ビルドへ渡す id は Sequence (packed Value ではない)。
+            live.Add((relId.Sequence, r.Source.Sequence, r.Target.Sequence, r.Type.Value));
+            if (relId.Sequence > maxId) maxId = relId.Sequence;
         }
         long newBaseHwm = maxId + 1; // 0 when there are no rels — matches "no base"
 

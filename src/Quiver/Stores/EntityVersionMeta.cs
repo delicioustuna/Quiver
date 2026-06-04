@@ -11,7 +11,7 @@ namespace Quiver.Storage.Records;
 ///   <item><c>Pstamp</c> (8B): η(V)、最新の reader cstamp。SSN 用、未使用時は 0。</item>
 ///   <item><c>Sstamp</c> (8B): π(V)、上書き tx の cstamp。SSN 用、未上書き時は <see cref="long.MaxValue"/>。</item>
 ///   <item><c>Generation</c> (8B): ARCH-3 slot incarnation。Allocate で発番、Free→vacuum→再 Allocate で +1。
-///     索引値の <see cref="Quiver.Core.GenerationalRef"/> 世代照合に使う。MVCC version とは別概念。</item>
+///     索引値の <see cref="Quiver.Core.EntityRef"/> 世代照合に使う。MVCC version とは別概念。</item>
 /// </list>
 ///
 /// <para>FT-31 時点では sidecar は配線されていない (record 内の Xmin/Xmax が引き続き正)。

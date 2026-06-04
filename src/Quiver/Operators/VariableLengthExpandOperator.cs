@@ -103,7 +103,7 @@ internal sealed class VariableLengthExpandOperator : IPhysicalOperator
             s.Frontier.Clear();
             s.Visited ??= new HashSet<long>();
             s.Visited.Clear();
-            s.Visited.Add(source.Value);
+            s.Visited.Add(source.Sequence); // ARCH-5b: 内部 dedup は slot 同一性 (Sequence)
             s.Frontier.Enqueue((source, 0));
         }
 
@@ -111,7 +111,7 @@ internal sealed class VariableLengthExpandOperator : IPhysicalOperator
             NodeId source, NodeId target, RelationshipId rel,
             long weightRaw, int depth, ref FrontierKernelState s)
         {
-            if (s.Visited!.Add(target.Value))
+            if (s.Visited!.Add(target.Sequence))
                 s.Frontier!.Enqueue((target, depth + 1));
             return true;
         }

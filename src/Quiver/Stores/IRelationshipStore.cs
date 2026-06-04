@@ -72,15 +72,16 @@ internal ref struct RelationshipWriteHandle
         _file = file; _pageId = pageId; _rec = rec;
     }
 
+    // ARCH-5b: オンディスク Int48 は Sequence (sentinel -1 は Sequence がそのまま返す)。
     public NodeId Source
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[1..]));
-        set => RecordHelpers.WriteInt48(_rec[1..], value.Value);
+        set => RecordHelpers.WriteInt48(_rec[1..], value.Sequence);
     }
     public NodeId Target
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[7..]));
-        set => RecordHelpers.WriteInt48(_rec[7..], value.Value);
+        set => RecordHelpers.WriteInt48(_rec[7..], value.Sequence);
     }
     public RelationshipTypeId Type
     {
@@ -90,27 +91,27 @@ internal ref struct RelationshipWriteHandle
     public RelationshipId SourcePrev
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[15..]));
-        set => RecordHelpers.WriteInt48(_rec[15..], value.Value);
+        set => RecordHelpers.WriteInt48(_rec[15..], value.Sequence);
     }
     public RelationshipId SourceNext
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[21..]));
-        set => RecordHelpers.WriteInt48(_rec[21..], value.Value);
+        set => RecordHelpers.WriteInt48(_rec[21..], value.Sequence);
     }
     public RelationshipId TargetPrev
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[27..]));
-        set => RecordHelpers.WriteInt48(_rec[27..], value.Value);
+        set => RecordHelpers.WriteInt48(_rec[27..], value.Sequence);
     }
     public RelationshipId TargetNext
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[33..]));
-        set => RecordHelpers.WriteInt48(_rec[33..], value.Value);
+        set => RecordHelpers.WriteInt48(_rec[33..], value.Sequence);
     }
     public PropertyId FirstPropertyId
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[39..]));
-        set => RecordHelpers.WriteInt48(_rec[39..], value.Value);
+        set => RecordHelpers.WriteInt48(_rec[39..], value.Sequence);
     }
 
     public void Dispose() => _file.UnpinDirty(_pageId, 0);

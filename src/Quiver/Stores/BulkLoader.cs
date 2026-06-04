@@ -43,13 +43,14 @@ public sealed class BulkLoader : IDisposable
     public void AppendNode(NodeId id, LabelId label)
     {
         ThrowIfCommitted();
-        _nodes.Add(new PendingNode(id.Value, label.Value));
+        // ARCH-5b: 物理 slot は Sequence (利用側が gen 付き id を渡しても正しく正規化)。
+        _nodes.Add(new PendingNode(id.Sequence, label.Value));
     }
 
     public void AppendRelationship(RelationshipId id, NodeId from, NodeId to, RelationshipTypeId type)
     {
         ThrowIfCommitted();
-        _rels.Add(new PendingRel(id.Value, from.Value, to.Value, type.Value));
+        _rels.Add(new PendingRel(id.Sequence, from.Sequence, to.Sequence, type.Value));
     }
 
     public void AppendProperty(NodeId nodeId, PropertyKeyId key, in PropertyValue value)
@@ -61,8 +62,8 @@ public sealed class BulkLoader : IDisposable
         else if (value.Type is PropertyValueType.Bytes)
             data = value.BytesValue.ToArray();
 
-        if (!_propsByNode.TryGetValue(nodeId.Value, out var props))
-            _propsByNode[nodeId.Value] = props = new();
+        if (!_propsByNode.TryGetValue(nodeId.Sequence, out var props))
+            _propsByNode[nodeId.Sequence] = props = new();
         props.Add(new PendingProp(key.Value, value.Type, value.Int64Value, data));
     }
 
@@ -91,7 +92,7 @@ public sealed class BulkLoader : IDisposable
     public void AppendRelationshipPayload(RelationshipId relId, PropertyKeyId key, long rawValue)
     {
         ThrowIfCommitted();
-        _relPayloads[(relId.Value, key.Value)] = rawValue;
+        _relPayloads[(relId.Sequence, key.Value)] = rawValue;
     }
 
     public void Commit()
@@ -224,7 +225,7 @@ public sealed class BulkLoader : IDisposable
             foreach (var prop in props)
             {
                 var propId = _propStore.BulkCreate(prop.KeyId, prop.Type, prop.Scalar, prop.Data, nextPropId);
-                nextPropId = propId.Value;
+                nextPropId = propId.Sequence; // ARCH-5b: Int48 NextPropId は Sequence
             }
             _nodeStore.BulkUpdateFirstProp(nodeId, nextPropId);
         }

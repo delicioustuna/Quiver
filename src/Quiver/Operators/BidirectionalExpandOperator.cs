@@ -81,8 +81,9 @@ internal sealed class BidirectionalExpandOperator : IPhysicalOperator
         if (src == tgt) return 0;
 
         // fwdDist[v] = src から v への BFS 距離、bwdDist[v] = tgt から v への BFS 距離 (後方)。
-        var fwdDist = new Dictionary<long, long> { [src.Value] = 0 };
-        var bwdDist = new Dictionary<long, long> { [tgt.Value] = 0 };
+        // ARCH-5b: 距離マップのキーは slot 同一性 (Sequence)。
+        var fwdDist = new Dictionary<long, long> { [src.Sequence] = 0 };
+        var bwdDist = new Dictionary<long, long> { [tgt.Sequence] = 0 };
         var fwdFrontier = new List<NodeId> { src };
         var bwdFrontier = new List<NodeId> { tgt };
         var scratch = new List<NodeId>();
@@ -90,8 +91,8 @@ internal sealed class BidirectionalExpandOperator : IPhysicalOperator
 
         while (fwdFrontier.Count > 0 || bwdFrontier.Count > 0)
         {
-            long fLevel = fwdFrontier.Count > 0 ? fwdDist[fwdFrontier[0].Value] : long.MaxValue / 2;
-            long bLevel = bwdFrontier.Count > 0 ? bwdDist[bwdFrontier[0].Value] : long.MaxValue / 2;
+            long fLevel = fwdFrontier.Count > 0 ? fwdDist[fwdFrontier[0].Sequence] : long.MaxValue / 2;
+            long bLevel = bwdFrontier.Count > 0 ? bwdDist[bwdFrontier[0].Sequence] : long.MaxValue / 2;
 
             // 枝刈り: ここから両側のどちらを展開しても、得られる経路長は fLevel+1+bLevel または fLevel+bLevel+1 以上になる。
             if (bestDist != long.MaxValue && fLevel + bLevel + 1 >= bestDist) break;
@@ -102,8 +103,8 @@ internal sealed class BidirectionalExpandOperator : IPhysicalOperator
                 foreach (var node in fwdFrontier)
                     ExpandInto(node, _fwdDir, fwdDist, scratch);
                 foreach (var nb in scratch)
-                    if (bwdDist.TryGetValue(nb.Value, out long bd))
-                        bestDist = Math.Min(bestDist, fwdDist[nb.Value] + bd);
+                    if (bwdDist.TryGetValue(nb.Sequence, out long bd))
+                        bestDist = Math.Min(bestDist, fwdDist[nb.Sequence] + bd);
                 (fwdFrontier, scratch) = (scratch, fwdFrontier);
             }
             else if (bwdFrontier.Count > 0)
@@ -112,8 +113,8 @@ internal sealed class BidirectionalExpandOperator : IPhysicalOperator
                 foreach (var node in bwdFrontier)
                     ExpandInto(node, _bwdDir, bwdDist, scratch);
                 foreach (var nb in scratch)
-                    if (fwdDist.TryGetValue(nb.Value, out long fd))
-                        bestDist = Math.Min(bestDist, fd + bwdDist[nb.Value]);
+                    if (fwdDist.TryGetValue(nb.Sequence, out long fd))
+                        bestDist = Math.Min(bestDist, fd + bwdDist[nb.Sequence]);
                 (bwdFrontier, scratch) = (scratch, bwdFrontier);
             }
             else break;
@@ -124,12 +125,12 @@ internal sealed class BidirectionalExpandOperator : IPhysicalOperator
 
     private void ExpandInto(NodeId node, Direction dir, Dictionary<long, long> dist, List<NodeId> next)
     {
-        long nextDist = dist[node.Value] + 1;
+        long nextDist = dist[node.Sequence] + 1;
         using var cursor = _tx!.Access.Expand(_tx, node, dir, _typeFilter);
         while (cursor.MoveNext())
         {
             var nb = cursor.Neighbor;
-            if (dist.TryAdd(nb.Value, nextDist))
+            if (dist.TryAdd(nb.Sequence, nextDist))
                 next.Add(nb);
         }
     }

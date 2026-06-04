@@ -86,7 +86,7 @@ internal sealed class BinaryExpandCursor : ExpandCursor
         // cross into base ids every remaining entry is also base — break.
         while (_nextRelId.IsValid)
         {
-            if (_baseRelHwm > 0 && _nextRelId.Value < _baseRelHwm)
+            if (_baseRelHwm > 0 && _nextRelId.Sequence < _baseRelHwm) // ARCH-5b: hwm 比較は Sequence
                 return false;
 
             var rel = _tx.Relationships.Read(_nextRelId);

@@ -1,7 +1,29 @@
 using Quiver.Core;
 using Quiver.Query.Physical;
+using Quiver.Storage.Records;
 
 namespace Quiver;
+
+/// <summary>
+/// ARCH-5b: 結果行をマテリアライズする際に、NodeId 列へ現 slot 世代 (incarnation) を load する。
+/// 内部クエリパイプラインは Sequence 空間 (gen=0) で動かして hot path のコストを避けつつ、
+/// 利用者に返す NodeId の <c>Value</c> を <c>CreateNode</c>/<c>Allocate</c> が返した id と一致させる
+/// (round-trip 一貫 + 世代付きで往復検証が効く)。リレーションシップは世代を持たないので素通し。
+/// </summary>
+internal static class QueryRowMaterializer
+{
+    public static void StampNodeGenerations(TupleSlot[] slots, INodeStore nodes)
+    {
+        for (int i = 0; i < slots.Length; i++)
+        {
+            if (slots[i].Type != TupleSlotType.NodeId) continue;
+            long seq = slots[i].LongValue;
+            if (seq < 0) continue;
+            int gen = nodes.CurrentGeneration(seq);
+            if (gen > 0) slots[i].LongValue = EntityRef.PackLocal(seq, gen);
+        }
+    }
+}
 
 /// <summary>
 /// 物理プランをマテリアライズして得られるクエリ結果。

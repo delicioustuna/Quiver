@@ -39,46 +39,46 @@ public static class LogicalMutationReplay
                 case LogicalMutationKind.CreateNode:
                 {
                     var newId = tx.CreateNode(m.TokenName ?? string.Empty);
-                    nodeMap[m.NodeId.Value] = newId;
+                    nodeMap[m.NodeId.Sequence] = newId;
                     break;
                 }
                 case LogicalMutationKind.DeleteNode:
                 {
-                    if (nodeMap.TryGetValue(m.NodeId.Value, out var nodeId))
+                    if (nodeMap.TryGetValue(m.NodeId.Sequence, out var nodeId))
                         tx.DeleteNode(nodeId);
                     break;
                 }
                 case LogicalMutationKind.CreateRelationship:
                 {
-                    if (!nodeMap.TryGetValue(m.NodeId.Value, out var src)) break;
-                    if (!nodeMap.TryGetValue(m.TargetNodeId.Value, out var tgt)) break;
+                    if (!nodeMap.TryGetValue(m.NodeId.Sequence, out var src)) break;
+                    if (!nodeMap.TryGetValue(m.TargetNodeId.Sequence, out var tgt)) break;
                     var newId = tx.CreateRelationship(src, tgt, m.TokenName ?? string.Empty);
-                    relationshipMap[m.RelationshipId.Value] = newId;
+                    relationshipMap[m.RelationshipId.Sequence] = newId;
                     break;
                 }
                 case LogicalMutationKind.DeleteRelationship:
                 {
-                    if (relationshipMap.TryGetValue(m.RelationshipId.Value, out var relId))
+                    if (relationshipMap.TryGetValue(m.RelationshipId.Sequence, out var relId))
                         tx.DeleteRelationship(relId);
                     break;
                 }
                 case LogicalMutationKind.SetNodeProperty:
                 {
-                    if (!nodeMap.TryGetValue(m.NodeId.Value, out var nodeId)) break;
+                    if (!nodeMap.TryGetValue(m.NodeId.Sequence, out var nodeId)) break;
                     var value = m.PropertyValue.ToPropertyValue();
                     tx.SetProperty(nodeId, m.PropertyKey ?? string.Empty, value);
                     break;
                 }
                 case LogicalMutationKind.SetRelationshipProperty:
                 {
-                    if (!relationshipMap.TryGetValue(m.RelationshipId.Value, out var relId)) break;
+                    if (!relationshipMap.TryGetValue(m.RelationshipId.Sequence, out var relId)) break;
                     var value = m.PropertyValue.ToPropertyValue();
                     tx.SetProperty(relId, m.PropertyKey ?? string.Empty, value);
                     break;
                 }
                 case LogicalMutationKind.RemoveNodeProperty:
                 {
-                    if (nodeMap.TryGetValue(m.NodeId.Value, out var nodeId))
+                    if (nodeMap.TryGetValue(m.NodeId.Sequence, out var nodeId))
                         tx.RemoveProperty(nodeId, m.PropertyKey ?? string.Empty);
                     break;
                 }

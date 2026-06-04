@@ -76,7 +76,8 @@ public class NodeStoreTests : IDisposable
         var c = _store.Allocate(new LabelId(3));
         _store.Free(b);
         var ids = _store.Scan().ToList();
-        ids.Should().BeEquivalentTo(new[] { a, c });
+        // ARCH-5b: scan は Sequence 空間 id を返す (世代は利用者境界で load)。slot 同一性で照合。
+        ids.Select(n => n.Sequence).Should().BeEquivalentTo(new[] { a.Sequence, c.Sequence });
     }
 
     [Fact]
