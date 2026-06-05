@@ -24,7 +24,7 @@ namespace Quiver.Maintenance;
 internal sealed class Vacuum : IVacuum
 {
     private readonly VersionedNodeStore _nodeStore;
-    private readonly RelationshipStore _relStore;
+    private readonly VersionedRelationshipStore _relStore;
     private readonly PropertyStore _propStore;
     private readonly TransactionManager _txManager;
     private readonly CommittedTxRegistry _committed;
@@ -32,7 +32,7 @@ internal sealed class Vacuum : IVacuum
 
     internal Vacuum(
         VersionedNodeStore nodeStore,
-        RelationshipStore relStore,
+        VersionedRelationshipStore relStore,
         PropertyStore propStore,
         TransactionManager txManager,
         CommittedTxRegistry committed,

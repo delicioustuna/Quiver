@@ -15,7 +15,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     private readonly PageManager _pageManager;
     private readonly WriteAheadLog _wal;
     private readonly VersionedNodeStore _nodeStore;
-    private readonly RelationshipStore _relStore;
+    private readonly VersionedRelationshipStore _relStore;
     private readonly PropertyStore _propStore;
     private readonly LabelTokenStore _labelTokens;
     private readonly RelationshipTypeTokenStore _relTypeTokens;
@@ -42,7 +42,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         PageManager pageManager,
         WriteAheadLog wal,
         VersionedNodeStore nodeStore,
-        RelationshipStore relStore,
+        VersionedRelationshipStore relStore,
         PropertyStore propStore,
         LabelTokenStore labelTokens,
         RelationshipTypeTokenStore relTypeTokens,

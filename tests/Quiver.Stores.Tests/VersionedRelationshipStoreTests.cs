@@ -50,13 +50,15 @@ public class VersionedRelationshipStoreTests : IDisposable
     }
 
     [Fact]
-    public void Create_returns_valid_rel_with_generation()
+    public void Create_returns_valid_rel_in_sequence_space()
     {
         var a = _nodes.Allocate(new LabelId(1));
         var b = _nodes.Allocate(new LabelId(1));
         var rel = _rels.Create(_nodes, a, b, new RelationshipTypeId(0));
         rel.IsValid.Should().BeTrue();
-        rel.Generation.Should().Be(1);
+        // 旧 RelationshipStore と同じく rel は Sequence 空間 (gen=0)。
+        rel.Generation.Should().Be(0);
+        rel.Value.Should().Be(rel.Sequence);
         _rels.InUseCount.Should().Be(1);
     }
 
@@ -162,14 +164,17 @@ public class VersionedRelationshipStoreTests : IDisposable
     }
 
     [Fact]
-    public void Stale_generation_handle_reads_as_not_in_use()
+    public void Reused_sequence_after_vacuum_is_handed_out_again()
     {
         var a = _nodes.Allocate(new LabelId(1));
         var b = _nodes.Allocate(new LabelId(1));
-        var rel = _rels.Create(_nodes, a, b, new RelationshipTypeId(0));
-        var stale = RelationshipId.Create(rel.Sequence, generation: rel.Generation + 1);
-        using var h = _rels.Read(stale);
-        h.InUse.Should().BeFalse();
+        var r1 = _rels.Create(_nodes, a, b, new RelationshipTypeId(0));
+        _rels.Delete(_nodes, r1);
+        var committed = new CommittedTxRegistry();
+        _rels.VacuumDeadVersions(_nodes, long.MaxValue, committed);
+        // 回収後 seq は free list に戻り、次の Create で再利用される。
+        var r2 = _rels.Create(_nodes, a, b, new RelationshipTypeId(0));
+        r2.Sequence.Should().Be(r1.Sequence);
     }
 
     [Fact]

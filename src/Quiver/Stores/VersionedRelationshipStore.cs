@@ -84,19 +84,12 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
 
     public RelationshipId Create(INodeStore nodeStore, NodeId source, NodeId target, RelationshipTypeId type)
     {
-        // ARCH-3/5b: vacuum 回収済み seq を free list から再利用する。世代上限の seq は永久退役。
-        long seq = -1;
-        while (true)
-        {
-            long cand = _map.PopFreeSeq();
-            if (cand < 0) break;
-            if (_versions.Read(cand).Generation >= EntityRef.MaxGeneration) continue;
-            seq = cand;
-            break;
-        }
+        // 旧 RelationshipStore と同じく rel は Sequence 空間 (gen=0) で払い出す (ARCH-5b は rel に
+        // 世代を surface しない。adjacency / chain pointer も Sequence 格納)。vacuum 回収済み seq は
+        // map free list から再利用する。
+        long seq = _map.PopFreeSeq();
         if (seq < 0) seq = _map.Hwm;
-        long generation = _versions.Read(seq).Generation + 1;
-        var relId = RelationshipId.Create(seq, (int)generation);
+        var relId = new RelationshipId(seq);
 
         RelationshipId srcHead = GetFirstRelId(nodeStore, source);
         RelationshipId tgtHead = GetFirstRelId(nodeStore, target);
@@ -114,7 +107,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         RecordHelpers.WriteInt48(payload[OffFirstProp..], PropertyId.Invalid.Sequence);
 
         _heap.Insert(seq, payload, MvccContext.CurrentTxId.Value);
-        _versions.Write(seq, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue, generation));
+        _versions.Write(seq, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue));
         _inUseCount++;
 
         // 旧 head の物理 prev を新 rel に向ける (双方向リンク維持。visibility は xmin/xmax で判定)。
@@ -146,16 +139,14 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         if (seq < 0 || seq >= _map.Hwm)
             return NotInUse(relId);
 
-        if (!_heap.TryReadVisible(seq, AmbientVisible, out var payload, out _, out _))
+        // 構造フィールド (endpoint / type / 双方向 chain pointer / firstProp) は **head version**
+        // (物理最新, in-place 更新) から読む。これにより rel 自身が reader に不可視でも chain pointer
+        // を返せ、RelationshipEnumerator が不可視 rel を skip して次へ進める (旧 RelationshipStore と
+        // 同じセマンティクス。chain は物理一本で visibility は xmin/xmax で判定)。
+        if (!_heap.TryReadHeadRaw(seq, out var payload, out _, out _))
             return NotInUse(relId);
 
         var span = payload.AsSpan();
-        bool inUse = true;
-        // ARCH-5b: 世代付き RelationshipId は現世代 (sidecar) と照合。gen=0 (内部経路) はスキップ。
-        int carriedGen = relId.Generation;
-        if (carriedGen != 0 && carriedGen != (int)_versions.Read(seq).Generation)
-            return NotInUse(relId);
-
         var src = new NodeId(RecordHelpers.ReadInt48(span[OffSource..]));
         var tgt = new NodeId(RecordHelpers.ReadInt48(span[OffTarget..]));
         var type = new RelationshipTypeId(BinaryPrimitives.ReadInt16LittleEndian(span[OffType..]));
@@ -164,6 +155,10 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         var tgtPrev = new RelationshipId(RecordHelpers.ReadInt48(span[OffTgtPrev..]));
         var tgtNext = new RelationshipId(RecordHelpers.ReadInt48(span[OffTgtNext..]));
         var firstProp = new PropertyId(RecordHelpers.ReadInt48(span[OffFirstProp..]));
+
+        // InUse は可視性で判定する: 版チェーンに reader から見える版があるか。
+        bool inUse = (span[OffFlags] & FlagInUse) != 0
+            && _heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _);
 
         if (inUse) MvccContext.RecordRead(EntityKind.Relationship, seq);
         return new RelationshipReadHandle(relId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstProp);
