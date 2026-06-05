@@ -369,7 +369,8 @@ public sealed class GraphStats
                     perTypeOut.TryGetValue(rel.Type, out var po);
                     perTypeOut[rel.Type] = po + 1;
 
-                    var rpe = tx.Properties.Enumerate(rel.FirstPropertyId);
+                    // ARCH-5c Phase 4: rel の inline + overflow を結合列挙する。
+                    var rpe = tx.Relationships.EnumerateProperties(relId, tx.Properties);
                     while (rpe.MoveNext())
                     {
                         var ph = rpe.Current;

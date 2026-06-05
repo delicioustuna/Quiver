@@ -80,7 +80,7 @@ internal sealed class GraphEngineAdapter : IGraphEngine
                 return false;
             }
 
-            // ARCH-5c Phase 3: node は inline + overflow を結合列挙、rel は overflow チェーンのみ。
+            // ARCH-5c Phase 3/4: node / rel とも inline + overflow を結合列挙する。
             PropertyEnumerator enumerator;
             if (entity.Kind == EntityKind.Node)
             {
@@ -88,9 +88,7 @@ internal sealed class GraphEngineAdapter : IGraphEngine
             }
             else if (entity.Kind == EntityKind.Relationship)
             {
-                var firstProp = _tx.Relationships.Read(new RelationshipId(entity.Id)).FirstPropertyId;
-                if (!firstProp.IsValid) { text = string.Empty; return false; }
-                enumerator = _tx.Properties.Enumerate(firstProp);
+                enumerator = _tx.Relationships.EnumerateProperties(new RelationshipId(entity.Id), _tx.Properties);
             }
             else
             {

@@ -304,6 +304,11 @@ public class TransactionManagerTests : IDisposable
         public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore ns) => throw new NotSupportedException();
         public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore ns, RelationshipTypeId type, Direction dir) => throw new NotSupportedException();
         public IEnumerable<RelationshipId> Scan() => [];
+        public bool TryGetInlineProperty(RelationshipId relId, PropertyKeyId keyId, out PropertyValue value) { value = default; return false; }
+        public bool HasInlineProperty(RelationshipId relId, PropertyKeyId keyId) => false;
+        public bool SetInlineProperty(RelationshipId relId, PropertyKeyId keyId, in PropertyValue value) => false;
+        public bool RemoveInlineProperty(RelationshipId relId, PropertyKeyId keyId) => false;
+        public PropertyEnumerator EnumerateProperties(RelationshipId relId, IPropertyStore overflowStore) => new PropertyEnumerator(overflowStore, PropertyId.Invalid);
     }
 
     private sealed class StubPropertyStore : IPropertyStore

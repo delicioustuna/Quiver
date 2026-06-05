@@ -221,6 +221,15 @@ internal sealed class RelationshipStore : IRelationshipStore
         }
     }
 
+    // ARCH-5c Phase 4: 旧 RelationshipStore は inline property 非対応。すべて false を返し、property は
+    // overflow チェーン (PropertyStore) に委ねる (graceful degrade)。production では未配線。
+    public bool TryGetInlineProperty(RelationshipId relId, PropertyKeyId keyId, out PropertyValue value) { value = default; return false; }
+    public bool HasInlineProperty(RelationshipId relId, PropertyKeyId keyId) => false;
+    public bool SetInlineProperty(RelationshipId relId, PropertyKeyId keyId, in PropertyValue value) => false;
+    public bool RemoveInlineProperty(RelationshipId relId, PropertyKeyId keyId) => false;
+    public PropertyEnumerator EnumerateProperties(RelationshipId relId, IPropertyStore overflowStore)
+        => new PropertyEnumerator(overflowStore, Read(relId).FirstPropertyId);
+
     // --- internal bulk-load helpers (no per-record FlushMeta) ---
 
     internal void BulkWrite(long id, long src, long tgt, int typeId,

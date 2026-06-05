@@ -201,6 +201,57 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         }
     }
 
+    // ===== ARCH-5c Phase 4: inline property storage (rel 粒度 copy-on-write) =====
+    // 符号化は InlinePropertyCodec (RelFixedSize=45) に集約。node 側と同じ copy-on-write 機構。
+
+    public bool TryGetInlineProperty(RelationshipId relId, PropertyKeyId keyId, out PropertyValue value)
+    {
+        value = default;
+        if (!_heap.TryReadVisible(relId.Sequence, AmbientVisible, out var payload, out _, out _)) return false;
+        // FT-33: property read = rel read。可視版を観測したので SSN read-set に記録する。
+        MvccContext.RecordRead(EntityKind.Relationship, relId.Sequence);
+        if (!InlinePropertyCodec.TryScan(payload, InlinePropertyCodec.RelFixedSize, keyId.Value, out var type, out var span)) return false;
+        value = InlinePropertyCodec.Decode(type, span);
+        return true;
+    }
+
+    public bool HasInlineProperty(RelationshipId relId, PropertyKeyId keyId)
+    {
+        if (!_heap.TryReadVisible(relId.Sequence, AmbientVisible, out var payload, out _, out _)) return false;
+        MvccContext.RecordRead(EntityKind.Relationship, relId.Sequence);
+        return InlinePropertyCodec.TryScan(payload, InlinePropertyCodec.RelFixedSize, keyId.Value, out _, out _);
+    }
+
+    public bool SetInlineProperty(RelationshipId relId, PropertyKeyId keyId, in PropertyValue value)
+    {
+        if (!InlinePropertyCodec.IsInlineable(value)) return false;
+        long seq = relId.Sequence;
+        if (!_heap.TryReadVisible(seq, AmbientVisible, out var cur, out _, out _)) return false;
+        byte[] np = InlinePropertyCodec.Build(cur, InlinePropertyCodec.RelFixedSize, keyId.Value, in value, remove: false);
+        if (np.Length > VersionedRecordHeap.MaxPayloadSize) return false; // payload 予算超過 → overflow
+        _heap.AppendOrReplaceHead(seq, np, MvccContext.CurrentTxId.Value);
+        return true;
+    }
+
+    public bool RemoveInlineProperty(RelationshipId relId, PropertyKeyId keyId)
+    {
+        long seq = relId.Sequence;
+        if (!_heap.TryReadVisible(seq, AmbientVisible, out var cur, out _, out _)) return false;
+        if (!InlinePropertyCodec.TryScan(cur, InlinePropertyCodec.RelFixedSize, keyId.Value, out _, out _)) return false;
+        byte[] np = InlinePropertyCodec.Build(cur, InlinePropertyCodec.RelFixedSize, keyId.Value, default, remove: true);
+        _heap.AppendOrReplaceHead(seq, np, MvccContext.CurrentTxId.Value);
+        return true;
+    }
+
+    public PropertyEnumerator EnumerateProperties(RelationshipId relId, IPropertyStore overflowStore)
+    {
+        if (!_heap.TryReadVisible(relId.Sequence, AmbientVisible, out var payload, out _, out _))
+            return new PropertyEnumerator(overflowStore, PropertyId.Invalid);
+        MvccContext.RecordRead(EntityKind.Relationship, relId.Sequence); // FT-33: property 列挙 = rel read
+        var firstProp = new PropertyId(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProp)));
+        return new PropertyEnumerator(payload, overflowStore, firstProp, InlinePropertyCodec.RelFixedSize);
+    }
+
     // --- internal bulk-load helpers (no MvccContext; heap insert handles paging) ---
 
     internal void BulkWrite(long id, long src, long tgt, int typeId,
@@ -297,6 +348,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         }
 
         // Pass 2: 全 rel slot を走査し、まだ reclaim 集合に居ない dead rel を拾う。
+        // live rel は inline property 更新の copy-on-write で生じた dead 旧版を prune する (node 3d 相当)。
         long hwm = _map.Hwm;
         for (long seq = 0; seq < hwm; seq++)
         {
@@ -305,7 +357,11 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
             bool inUse = (payload[OffFlags] & FlagInUse) != 0;
             if (!inUse) continue;
             bool dead = xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax);
-            if (dead) reclaimSet.Add(seq);
+            if (dead)
+                reclaimSet.Add(seq);
+            else if (xmax == 0)
+                _heap.PruneDeadVersions(seq,
+                    (_, vx) => vx != 0 && vx < horizonTxId && committed.IsCommitted(vx));
         }
 
         // Pass 3: reclaim 集合の slot を物理 free。

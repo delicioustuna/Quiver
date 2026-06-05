@@ -100,6 +100,16 @@ internal sealed class SqliteRelChainStore : IRelationshipStore
     public IEnumerable<RelationshipId> Scan()
         => _byId.Keys.OrderBy(k => k).Select(k => new RelationshipId(k));
 
+    // ARCH-5c Phase 4: inline property は binary backend 専用機構。SQLite backend は property を
+    // SQL テーブルで保持するため、この shim は inline を持たない (SqliteGraphTransaction が
+    // property を直接処理する)。列挙パス以外で呼ばれることは無い。
+    public bool TryGetInlineProperty(RelationshipId relId, PropertyKeyId keyId, out PropertyValue value) { value = default; return false; }
+    public bool HasInlineProperty(RelationshipId relId, PropertyKeyId keyId) => false;
+    public bool SetInlineProperty(RelationshipId relId, PropertyKeyId keyId, in PropertyValue value) => false;
+    public bool RemoveInlineProperty(RelationshipId relId, PropertyKeyId keyId) => false;
+    public PropertyEnumerator EnumerateProperties(RelationshipId relId, IPropertyStore overflowStore)
+        => new PropertyEnumerator(overflowStore, PropertyId.Invalid);
+
     internal readonly record struct RelRow(long Id, long Source, long Target, int TypeId);
     private readonly record struct RelEntry(RelRow Row, RelationshipId SourceNext, RelationshipId TargetNext);
 }

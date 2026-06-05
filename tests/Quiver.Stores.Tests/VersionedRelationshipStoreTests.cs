@@ -221,6 +221,86 @@ public class VersionedRelationshipStoreTests : IDisposable
         hd.InUse.Should().BeFalse();
     }
 
+    // ===== ARCH-5c Phase 4: inline property =====
+
+    private RelationshipId NewRel()
+    {
+        var a = _nodes.Allocate(new LabelId(1));
+        var b = _nodes.Allocate(new LabelId(1));
+        return _rels.Create(_nodes, a, b, new RelationshipTypeId(0));
+    }
+
+    [Fact]
+    public void Inline_property_scalar_roundtrip()
+    {
+        var rel = NewRel();
+        _rels.SetInlineProperty(rel, new PropertyKeyId(10), PropertyValue.FromInt32(42)).Should().BeTrue();
+        _rels.HasInlineProperty(rel, new PropertyKeyId(10)).Should().BeTrue();
+        _rels.TryGetInlineProperty(rel, new PropertyKeyId(10), out var v).Should().BeTrue();
+        v.Int32Value.Should().Be(42);
+        _rels.HasInlineProperty(rel, new PropertyKeyId(99)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Inline_property_replace_and_remove()
+    {
+        var rel = NewRel();
+        var key = new PropertyKeyId(5);
+        _rels.SetInlineProperty(rel, key, PropertyValue.FromInt32(1));
+        _rels.SetInlineProperty(rel, key, PropertyValue.FromInt32(2));
+        _rels.TryGetInlineProperty(rel, key, out var v).Should().BeTrue();
+        v.Int32Value.Should().Be(2);
+        _rels.RemoveInlineProperty(rel, key).Should().BeTrue();
+        _rels.HasInlineProperty(rel, key).Should().BeFalse();
+        _rels.RemoveInlineProperty(rel, key).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Inline_property_does_not_corrupt_endpoints_or_chain()
+    {
+        var a = _nodes.Allocate(new LabelId(1));
+        var b = _nodes.Allocate(new LabelId(1));
+        var c = _nodes.Allocate(new LabelId(1));
+        var r1 = _rels.Create(_nodes, a, b, new RelationshipTypeId(3));
+        var r2 = _rels.Create(_nodes, a, c, new RelationshipTypeId(3));
+        // r1 に inline property を付けても endpoint / chain は保持される。
+        _rels.SetInlineProperty(r1, new PropertyKeyId(1), PropertyValue.FromString("weight"));
+        using (var h = _rels.Read(r1))
+        {
+            h.Source.Should().Be(a);
+            h.Target.Should().Be(b);
+            h.Type.Value.Should().Be(3);
+        }
+        var neighbors = new List<long>();
+        var en = _rels.EnumerateNeighbors(a, _nodes);
+        while (en.MoveNext()) neighbors.Add(en.Current.Id.Sequence);
+        neighbors.Should().BeEquivalentTo(new[] { r1.Sequence, r2.Sequence });
+    }
+
+    [Fact]
+    public void Inline_rejects_oversized_value()
+    {
+        var rel = NewRel();
+        var big = new string('a', 300); // > 255 → inline 不可
+        _rels.SetInlineProperty(rel, new PropertyKeyId(1), PropertyValue.FromString(big)).Should().BeFalse();
+        _rels.HasInlineProperty(rel, new PropertyKeyId(1)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Inline_property_persists_across_reopen()
+    {
+        var rel = NewRel();
+        _rels.SetInlineProperty(rel, new PropertyKeyId(10), PropertyValue.FromInt64(123456789L));
+        _rels.SetInlineProperty(rel, new PropertyKeyId(11), PropertyValue.FromString("persist"));
+
+        Reopen();
+
+        _rels.TryGetInlineProperty(rel, new PropertyKeyId(10), out var v10).Should().BeTrue();
+        v10.Int64Value.Should().Be(123456789L);
+        _rels.TryGetInlineProperty(rel, new PropertyKeyId(11), out var v11).Should().BeTrue();
+        System.Text.Encoding.UTF8.GetString(v11.Utf8StringValue).Should().Be("persist");
+    }
+
     [Fact]
     public void Vacuum_reclaims_dead_relationships_and_rebuilds_chain()
     {

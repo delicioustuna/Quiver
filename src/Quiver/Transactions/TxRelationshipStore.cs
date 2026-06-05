@@ -79,6 +79,45 @@ internal sealed class TxRelationshipStore : IRelationshipStore
         return _inner.Scan();
     }
 
+    // ARCH-5c Phase 4: inline property — TxNodeStore と同型に lock + SSN + MVCC コンテキストでラップ。
+
+    public bool TryGetInlineProperty(RelationshipId relId, PropertyKeyId keyId, out PropertyValue value)
+    {
+        if (_mode == LockingMode.ReaderWriter) Acquire(relId.Sequence, LockMode.Shared);
+        ActivateMvccContext();
+        return _inner.TryGetInlineProperty(relId, keyId, out value);
+    }
+
+    public bool HasInlineProperty(RelationshipId relId, PropertyKeyId keyId)
+    {
+        if (_mode == LockingMode.ReaderWriter) Acquire(relId.Sequence, LockMode.Shared);
+        ActivateMvccContext();
+        return _inner.HasInlineProperty(relId, keyId);
+    }
+
+    public bool SetInlineProperty(RelationshipId relId, PropertyKeyId keyId, in PropertyValue value)
+    {
+        Acquire(relId.Sequence, LockMode.Exclusive);
+        ActivateMvccContext();
+        SsnOnWrite(relId.Sequence);
+        return _inner.SetInlineProperty(relId, keyId, in value);
+    }
+
+    public bool RemoveInlineProperty(RelationshipId relId, PropertyKeyId keyId)
+    {
+        Acquire(relId.Sequence, LockMode.Exclusive);
+        ActivateMvccContext();
+        SsnOnWrite(relId.Sequence);
+        return _inner.RemoveInlineProperty(relId, keyId);
+    }
+
+    public PropertyEnumerator EnumerateProperties(RelationshipId relId, IPropertyStore overflowStore)
+    {
+        if (_mode == LockingMode.ReaderWriter) Acquire(relId.Sequence, LockMode.Shared);
+        ActivateMvccContext();
+        return _inner.EnumerateProperties(relId, overflowStore);
+    }
+
     private void ActivateMvccContext()
     {
         if (_committed != null)

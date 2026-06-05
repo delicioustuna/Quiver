@@ -79,12 +79,12 @@ internal sealed class VersionedNodeStore : INodeStore
         // 世代は sidecar 由来。新規 seq は Unset(0)→1、再利用 seq は前回値 +1。
         long generation = _versions.Read(seq).Generation + 1;
 
-        Span<byte> payload = stackalloc byte[InlinePropertyCodec.BaseSize];
+        Span<byte> payload = stackalloc byte[InlinePropertyCodec.BaseSize(InlinePropertyCodec.NodeFixedSize)];
         payload[OffFlags] = FlagInUse;
         RecordHelpers.WriteInt48(payload[OffFirstRel..], -1L);
         RecordHelpers.WriteInt48(payload[OffFirstProp..], -1L);
         BinaryPrimitives.WriteInt16LittleEndian(payload[OffLabel..], (short)labelId.Value);
-        payload[InlinePropertyCodec.OffInlineCount] = 0; // inline props: 0 件
+        payload[InlinePropertyCodec.OffInlineCount(InlinePropertyCodec.NodeFixedSize)] = 0; // inline props: 0 件
 
         _heap.Insert(seq, payload, MvccContext.CurrentTxId.Value);
         _versions.Write(seq, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue, generation));
@@ -181,7 +181,7 @@ internal sealed class VersionedNodeStore : INodeStore
         // FT-33: property read = node read。可視版を観測したので SSN read-set に記録する
         // (write skew 検出のため。inline hit で早期 return しても捕捉漏れしない)。
         MvccContext.RecordRead(EntityKind.Node, nodeId.Sequence);
-        if (!InlinePropertyCodec.TryScan(payload, keyId.Value, out var type, out var span)) return false;
+        if (!InlinePropertyCodec.TryScan(payload, InlinePropertyCodec.NodeFixedSize, keyId.Value, out var type, out var span)) return false;
         value = InlinePropertyCodec.Decode(type, span);
         return true;
     }
@@ -190,7 +190,7 @@ internal sealed class VersionedNodeStore : INodeStore
     {
         if (!_heap.TryReadVisible(nodeId.Sequence, AmbientVisible, out var payload, out _, out _)) return false;
         MvccContext.RecordRead(EntityKind.Node, nodeId.Sequence);
-        return InlinePropertyCodec.TryScan(payload, keyId.Value, out _, out _);
+        return InlinePropertyCodec.TryScan(payload, InlinePropertyCodec.NodeFixedSize, keyId.Value, out _, out _);
     }
 
     /// <summary>
@@ -202,7 +202,7 @@ internal sealed class VersionedNodeStore : INodeStore
         if (!InlinePropertyCodec.IsInlineable(value)) return false;
         long seq = nodeId.Sequence;
         if (!_heap.TryReadVisible(seq, AmbientVisible, out var cur, out _, out _)) return false;
-        byte[] np = InlinePropertyCodec.Build(cur, keyId.Value, in value, remove: false);
+        byte[] np = InlinePropertyCodec.Build(cur, InlinePropertyCodec.NodeFixedSize, keyId.Value, in value, remove: false);
         if (np.Length > VersionedRecordHeap.MaxPayloadSize) return false; // payload 予算超過 → overflow
         _heap.AppendOrReplaceHead(seq, np, MvccContext.CurrentTxId.Value);
         return true;
@@ -212,8 +212,8 @@ internal sealed class VersionedNodeStore : INodeStore
     {
         long seq = nodeId.Sequence;
         if (!_heap.TryReadVisible(seq, AmbientVisible, out var cur, out _, out _)) return false;
-        if (!InlinePropertyCodec.TryScan(cur, keyId.Value, out _, out _)) return false;
-        byte[] np = InlinePropertyCodec.Build(cur, keyId.Value, default, remove: true);
+        if (!InlinePropertyCodec.TryScan(cur, InlinePropertyCodec.NodeFixedSize, keyId.Value, out _, out _)) return false;
+        byte[] np = InlinePropertyCodec.Build(cur, InlinePropertyCodec.NodeFixedSize, keyId.Value, default, remove: true);
         _heap.AppendOrReplaceHead(seq, np, MvccContext.CurrentTxId.Value);
         return true;
     }
@@ -228,7 +228,7 @@ internal sealed class VersionedNodeStore : INodeStore
             return new PropertyEnumerator(overflowStore, PropertyId.Invalid);
         MvccContext.RecordRead(EntityKind.Node, nodeId.Sequence); // FT-33: property 列挙 = node read
         var firstProp = new PropertyId(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProp)));
-        return new PropertyEnumerator(payload, overflowStore, firstProp);
+        return new PropertyEnumerator(payload, overflowStore, firstProp, InlinePropertyCodec.NodeFixedSize);
     }
 
     // --- internal helpers (RelationshipStore fast-path / vacuum / bulk 経路用) ---
@@ -322,12 +322,12 @@ internal sealed class VersionedNodeStore : INodeStore
 
     internal void BulkWrite(long id, int labelId)
     {
-        Span<byte> payload = stackalloc byte[InlinePropertyCodec.BaseSize];
+        Span<byte> payload = stackalloc byte[InlinePropertyCodec.BaseSize(InlinePropertyCodec.NodeFixedSize)];
         payload[OffFlags] = FlagInUse;
         RecordHelpers.WriteInt48(payload[OffFirstRel..], -1L);
         RecordHelpers.WriteInt48(payload[OffFirstProp..], -1L);
         BinaryPrimitives.WriteInt16LittleEndian(payload[OffLabel..], (short)labelId);
-        payload[InlinePropertyCodec.OffInlineCount] = 0;
+        payload[InlinePropertyCodec.OffInlineCount(InlinePropertyCodec.NodeFixedSize)] = 0;
         _heap.Insert(id, payload, TransactionId.Bootstrap.Value);
         // FT-26/FT-32: bulk load は tx 外。Bootstrap を xmin に、Generation=1 (新規 slot)。
         _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue, 1));

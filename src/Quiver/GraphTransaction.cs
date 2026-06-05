@@ -266,6 +266,20 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     private void SetRelationshipProperty(RelationshipId relId, PropertyKeyId keyId, in PropertyValue value)
     {
+        // ARCH-5c Phase 4: 小さい値は rel record へ inline (copy-on-write)。
+        if (InlinePropertyCodec.IsInlineable(value) && _inner.Relationships.SetInlineProperty(relId, keyId, in value))
+        {
+            // size-class 変更で同 key が overflow に残っていれば除去する。
+            RemoveRelOverflowIfPresent(relId, keyId);
+            return;
+        }
+        // inline 不可 / 予算超過 → overflow チェーン。inline 側に旧値があれば除去。
+        _inner.Relationships.RemoveInlineProperty(relId, keyId);
+        SetRelationshipOverflow(relId, keyId, in value);
+    }
+
+    private void SetRelationshipOverflow(RelationshipId relId, PropertyKeyId keyId, in PropertyValue value)
+    {
         var firstPropId = _inner.Relationships.Read(relId).FirstPropertyId;
         var newFirst = firstPropId;
         var propEnum = _inner.Properties.Enumerate(firstPropId);
@@ -281,6 +295,24 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         var wh = _inner.Relationships.Write(relId);
         wh.FirstPropertyId = newPropId;
         wh.Dispose();
+    }
+
+    private void RemoveRelOverflowIfPresent(RelationshipId relId, PropertyKeyId keyId)
+    {
+        var firstPropId = _inner.Relationships.Read(relId).FirstPropertyId;
+        if (!firstPropId.IsValid) return;
+        var propEnum = _inner.Properties.Enumerate(firstPropId);
+        while (propEnum.MoveNext())
+        {
+            if (propEnum.Current.KeyId == keyId)
+            {
+                var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
+                var wh = _inner.Relationships.Write(relId);
+                wh.FirstPropertyId = newFirst;
+                wh.Dispose();
+                return;
+            }
+        }
     }
 
     private void SetNodeProperty(NodeId nodeId, PropertyKeyId keyId, in PropertyValue value)
@@ -379,6 +411,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public PropertyValue GetProperty(RelationshipId relId, string key)
     {
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
+        // ARCH-5c Phase 4: inline を先に引き、無ければ overflow チェーンを walk。
+        if (_inner.Relationships.TryGetInlineProperty(relId, keyId, out var inlineVal)) return inlineVal;
         var firstPropId = _inner.Relationships.Read(relId).FirstPropertyId;
         var propEnum = _inner.Properties.Enumerate(firstPropId);
         while (propEnum.MoveNext())

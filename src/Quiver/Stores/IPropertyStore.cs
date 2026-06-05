@@ -95,22 +95,22 @@ public ref struct PropertyEnumerator
     private PropertyReadHandle _current;
     private bool _chainStarted;
 
-    // ARCH-5c Phase 3: node の inline property 領域を chain より先に列挙する (rel / chain-only は空)。
+    // ARCH-5c Phase 3/4: entity の inline property 領域を chain より先に列挙する (chain-only は空)。
     private readonly ReadOnlySpan<byte> _inline;
     private readonly int _inlineCount;
     private int _inlineIndex;
     private int _inlinePos;
 
     internal PropertyEnumerator(IPropertyStore store, PropertyId firstId)
-        : this(default, store, firstId) { }
+        : this(default, store, firstId, InlinePropertyCodec.NodeFixedSize) { }
 
-    internal PropertyEnumerator(ReadOnlySpan<byte> inlinePayload, IPropertyStore store, PropertyId firstId)
+    internal PropertyEnumerator(ReadOnlySpan<byte> inlinePayload, IPropertyStore store, PropertyId firstId, int fixedSize)
     {
         _store = store; _nextId = firstId; _chainStarted = false; _current = default;
         _inline = inlinePayload;
-        _inlineCount = InlinePropertyCodec.Count(inlinePayload);
+        _inlineCount = InlinePropertyCodec.Count(inlinePayload, fixedSize);
         _inlineIndex = 0;
-        _inlinePos = InlinePropertyCodec.BaseSize;
+        _inlinePos = InlinePropertyCodec.BaseSize(fixedSize);
     }
 
     public bool MoveNext()

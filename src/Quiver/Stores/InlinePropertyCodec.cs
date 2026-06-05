@@ -4,23 +4,32 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// ARCH-5c Phase 3: node version payload 内の inline property 領域の符号化/復号。
-/// VersionedNodeStore (set/remove/scan) と <see cref="PropertyEnumerator"/> (列挙) で共用する。
+/// ARCH-5c Phase 3/4: entity version payload 内の inline property 領域の符号化/復号。
+/// <see cref="VersionedNodeStore"/> / <see cref="VersionedRelationshipStore"/> (set/remove/scan) と
+/// <see cref="PropertyEnumerator"/> (列挙) で共用する。
 ///
-/// <para>payload レイアウト: 固定 15B (flags/firstRel/firstProp/label) + [15] inlineCount(u8) +
-/// entries。entry = <c>[keyId:4][type:1][len:1][value:len]</c>。len は u8 のため値長 ≤ 255。
-/// それを超える string/bytes は inline 不可で overflow チェーン (PropertyStore) 行き。</para>
+/// <para>payload レイアウト: 固定 <c>fixedSize</c> B (entity ごとの構造フィールド) +
+/// [fixedSize] inlineCount(u8) + entries。entry = <c>[keyId:4][type:1][len:1][value:len]</c>。
+/// len は u8 のため値長 ≤ 255。それを超える string/bytes は inline 不可で overflow チェーン
+/// (PropertyStore) 行き。fixedSize は node=15 (flags/firstRel/firstProp/label) /
+/// rel=45 (flags/source/target/type/4本chain pointer/firstProp)。</para>
 /// </summary>
 internal static class InlinePropertyCodec
 {
-    public const int FixedSize = 15;       // NodeWriteHandle が触る固定フィールド領域
-    public const int OffInlineCount = 15;  // u8
-    public const int BaseSize = 16;        // 固定 + inlineCount (inline 0 件時の payload 長)
+    /// <summary>node version payload の固定フィールド領域長 (flags/firstRel/firstProp/label)。</summary>
+    public const int NodeFixedSize = 15;
+    /// <summary>rel version payload の固定フィールド領域長 (flags/source/target/type/4本chain/firstProp)。</summary>
+    public const int RelFixedSize = 45;
     public const int EntryHeader = 6;      // keyId(4) + type(1) + len(1)
     public const int ValueMax = 255;       // len は u8
 
-    public static int Count(ReadOnlySpan<byte> payload)
-        => payload.Length > OffInlineCount ? payload[OffInlineCount] : 0;
+    /// <summary>inlineCount(u8) の byte offset。</summary>
+    public static int OffInlineCount(int fixedSize) => fixedSize;
+    /// <summary>inline 0 件時の payload 長 (固定 + inlineCount)。entries はここから始まる。</summary>
+    public static int BaseSize(int fixedSize) => fixedSize + 1;
+
+    public static int Count(ReadOnlySpan<byte> payload, int fixedSize)
+        => payload.Length > fixedSize ? payload[fixedSize] : 0;
 
     public static bool IsInlineable(in PropertyValue v) => v.EncodedSize <= ValueMax;
 
@@ -36,11 +45,11 @@ internal static class InlinePropertyCodec
     public static ReadOnlySpan<byte> ValueAt(ReadOnlySpan<byte> payload, int pos)
         => payload.Slice(pos + EntryHeader, payload[pos + 5]);
 
-    public static bool TryScan(ReadOnlySpan<byte> payload, int keyId, out PropertyValueType type, out ReadOnlySpan<byte> val)
+    public static bool TryScan(ReadOnlySpan<byte> payload, int fixedSize, int keyId, out PropertyValueType type, out ReadOnlySpan<byte> val)
     {
         type = default; val = default;
-        int count = Count(payload);
-        int pos = BaseSize;
+        int count = Count(payload, fixedSize);
+        int pos = BaseSize(fixedSize);
         for (int i = 0; i < count; i++)
         {
             int k = BinaryPrimitives.ReadInt32LittleEndian(payload[pos..]);
@@ -80,12 +89,13 @@ internal static class InlinePropertyCodec
         }
     }
 
-    /// <summary>cur payload を基に keyId の entry を set/remove した新 payload を作る (固定 15B 保持)。</summary>
-    public static byte[] Build(ReadOnlySpan<byte> cur, int keyId, in PropertyValue value, bool remove)
+    /// <summary>cur payload を基に keyId の entry を set/remove した新 payload を作る (固定 fixedSize B 保持)。</summary>
+    public static byte[] Build(ReadOnlySpan<byte> cur, int fixedSize, int keyId, in PropertyValue value, bool remove)
     {
-        int count = Count(cur);
+        int baseSize = BaseSize(fixedSize);
+        int count = Count(cur, fixedSize);
         int keepBytes = 0, keepCount = 0;
-        int pos = BaseSize;
+        int pos = baseSize;
         for (int i = 0; i < count; i++)
         {
             int k = BinaryPrimitives.ReadInt32LittleEndian(cur[pos..]);
@@ -94,13 +104,13 @@ internal static class InlinePropertyCodec
             pos += entrySize;
         }
         int vlen = remove ? 0 : value.EncodedSize;
-        int total = BaseSize + keepBytes + (remove ? 0 : EntryHeader + vlen);
+        int total = baseSize + keepBytes + (remove ? 0 : EntryHeader + vlen);
         var buf = new byte[total];
-        cur.Slice(0, FixedSize).CopyTo(buf);
-        buf[OffInlineCount] = (byte)(keepCount + (remove ? 0 : 1));
+        cur.Slice(0, fixedSize).CopyTo(buf);
+        buf[OffInlineCount(fixedSize)] = (byte)(keepCount + (remove ? 0 : 1));
 
-        int w = BaseSize;
-        pos = BaseSize;
+        int w = baseSize;
+        pos = baseSize;
         for (int i = 0; i < count; i++)
         {
             int k = BinaryPrimitives.ReadInt32LittleEndian(cur[pos..]);

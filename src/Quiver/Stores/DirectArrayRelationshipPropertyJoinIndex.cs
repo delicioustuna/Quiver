@@ -108,11 +108,9 @@ internal sealed class DirectArrayRelationshipPropertyJoinIndex : IRelationshipPr
 
         foreach (var relId in relStore.Scan())
         {
-            var rh = relStore.Read(relId);
-            var first = rh.FirstPropertyId;
-            if (!first.IsValid) continue;
-
-            var pe = propStore.Enumerate(first);
+            // ARCH-5c Phase 4: scalar 値は rel record へ inline されるため、join index も
+            // inline + overflow を結合列挙する (join index 対象型はすべて inline 対象)。
+            var pe = relStore.EnumerateProperties(relId, propStore);
             while (pe.MoveNext())
             {
                 var cur = pe.Current;
