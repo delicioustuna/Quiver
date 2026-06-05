@@ -9,32 +9,51 @@ using Xunit;
 namespace Quiver.Storage.Records.Tests;
 
 /// <summary>
-/// ARCH-5c Phase 2: VersionedNodeStore (heap+map 上の INodeStore 実装) の単体テスト。
+/// ARCH-5c Phase 2: VersionedNodeStore (heap+map+sidecar 上の INodeStore drop-in) の単体テスト。
 /// MVCC コンテキスト無し (= Bootstrap / committed registry null) で実行する。
+/// MVCC / generation は永続 EntityVersionStore sidecar に載せ、reopen でも保持する。
 /// </summary>
 public class VersionedNodeStoreTests : IDisposable
 {
     private readonly string _heapPath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
     private readonly string _mapPath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+    private readonly string _verPath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
     private PagedFile _heapFile;
     private PagedFile _mapFile;
+    private PagedFile _verFile;
     private ItemPointerMap _map;
+    private EntityVersionStore _versions;
     private VersionedNodeStore _store;
 
     public VersionedNodeStoreTests()
     {
         _heapFile = new PagedFile(_heapPath);
         _mapFile = new PagedFile(_mapPath);
+        _verFile = new PagedFile(_verPath);
         _map = new ItemPointerMap(_mapFile);
-        _store = new VersionedNodeStore(_heapFile, _map);
+        _versions = new EntityVersionStore(_verFile);
+        _store = new VersionedNodeStore(_heapFile, _map, labelIndex: null, _versions);
     }
 
     public void Dispose()
     {
         _heapFile.Dispose();
         _mapFile.Dispose();
+        _verFile.Dispose();
         File.Delete(_heapPath);
         File.Delete(_mapPath);
+        File.Delete(_verPath);
+    }
+
+    private void Reopen()
+    {
+        _heapFile.Dispose(); _mapFile.Dispose(); _verFile.Dispose();
+        _heapFile = new PagedFile(_heapPath);
+        _mapFile = new PagedFile(_mapPath);
+        _verFile = new PagedFile(_verPath);
+        _map = new ItemPointerMap(_mapFile);
+        _versions = new EntityVersionStore(_verFile);
+        _store = new VersionedNodeStore(_heapFile, _map, labelIndex: null, _versions);
     }
 
     [Fact]
@@ -80,7 +99,7 @@ public class VersionedNodeStoreTests : IDisposable
         _store.Free(id);
         _store.InUseCount.Should().Be(0);
         using var r = _store.Read(id);
-        r.InUse.Should().BeFalse(); // xmax スタンプで不可視
+        r.InUse.Should().BeFalse();
     }
 
     [Fact]
@@ -102,7 +121,7 @@ public class VersionedNodeStoreTests : IDisposable
         var b = _store.Allocate(new LabelId(1));
         _store.Free(a);
         var c = _store.Allocate(new LabelId(1));
-        c.Sequence.Should().BeGreaterThan(b.Sequence); // free しても再利用しない
+        c.Sequence.Should().BeGreaterThan(b.Sequence);
     }
 
     [Fact]
@@ -118,7 +137,7 @@ public class VersionedNodeStoreTests : IDisposable
     public void Stale_generation_handle_reads_as_not_in_use()
     {
         var id = _store.Allocate(new LabelId(1));
-        var stale = NodeId.Create(id.Sequence, generation: 2); // 現世代 (1) と不一致
+        var stale = NodeId.Create(id.Sequence, generation: 2);
         using var r = _store.Read(stale);
         r.InUse.Should().BeFalse();
     }
@@ -150,12 +169,7 @@ public class VersionedNodeStoreTests : IDisposable
         var freed = _store.Allocate(new LabelId(6));
         _store.Free(freed);
 
-        _heapFile.Dispose();
-        _mapFile.Dispose();
-        _heapFile = new PagedFile(_heapPath);
-        _mapFile = new PagedFile(_mapPath);
-        _map = new ItemPointerMap(_mapFile);
-        _store = new VersionedNodeStore(_heapFile, _map);
+        Reopen();
 
         _store.InUseCount.Should().Be(1);
         using var r = _store.Read(id);
@@ -164,5 +178,22 @@ public class VersionedNodeStoreTests : IDisposable
         r.FirstPropertyId.Value.Should().Be(11);
         using var rf = _store.Read(freed);
         rf.InUse.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Vacuum_removes_dead_nodes_below_horizon()
+    {
+        var a = _store.Allocate(new LabelId(1));
+        var b = _store.Allocate(new LabelId(1));
+        _store.Free(b); // xmax = Bootstrap
+
+        // Bootstrap は CommittedTxRegistry に常に登録済。horizon を十分大きく取る。
+        var committed = new CommittedTxRegistry();
+        int reclaimed = _store.VacuumDeadVersions(horizonTxId: long.MaxValue, committed);
+        reclaimed.Should().Be(1);
+
+        // a は生存、b は heap から消えて Scan に出ない
+        var live = _store.Scan().Select(n => n.Sequence).ToList();
+        live.Should().Equal(a.Sequence);
     }
 }

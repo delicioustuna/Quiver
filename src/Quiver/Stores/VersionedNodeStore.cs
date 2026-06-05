@@ -6,51 +6,50 @@ namespace Quiver.Storage.Records;
 
 /// <summary>
 /// ARCH-5c Phase 2: <see cref="VersionedRecordHeap"/> + <see cref="ItemPointerMap"/> 上に実装した
-/// <see cref="INodeStore"/>。MVCC の xmin/xmax を record (version ヘッダ) へ再内包し、論理 ID
-/// (Sequence) は map 経由で物理位置へ解決する統一レコードモデル (docs/design/11 §6.3)。
+/// ノードストア。旧 <c>NodeStore</c> の置き換えで、論理 ID (Sequence) を map 経由で物理位置へ
+/// 解決する。固定サイズ record 配列をやめ可変長 slotted record にすることで、Phase 3 の
+/// property inline 化の土台になる。
 ///
-/// <para>ノード payload (19B, version ヘッダ 24B の後ろ):</para>
+/// <para>ノード payload (15B, 旧 NodeStore record と同形 — version ヘッダ 24B の後ろ):</para>
 /// <code>
-///   [0]  flags       : u8       (FlagInUse)
-///   [1]  firstRel    : Int48    (Sequence)
-///   [7]  firstProp   : Int48    (Sequence)
-///   [13] label       : i16
-///   [15] generation  : u32      (ARCH-5b incarnation)
+///   [0]  flags     : u8     (FlagInUse)
+///   [1]  firstRel  : Int48  (Sequence)
+///   [7]  firstProp : Int48  (Sequence)
+///   [13] label     : i16
 /// </code>
-/// 先頭 15B (<see cref="NodeFieldsSize"/>) は旧 NodeStore の固定レイアウトと同形のため、
-/// <see cref="NodeWriteHandle"/> をそのまま再利用して in-place 更新できる。
+/// 先頭 15B がそのまま <see cref="NodeWriteHandle"/> のレイアウトと一致するので in-place 更新に再利用する。
 ///
-/// <para>ID モデル: Sequence は monotonic (slot 非再利用)。slot 再利用後の stale 参照は
-/// 版チェーン + map-null + MVCC visibility で弾くため free list / 世代不一致は不要だが、
-/// ARCH-5b の Kind+Gen+Seq ID 契約 (§3) を保つため generation を record に保持する
-/// (monotonic では seq 毎に 1 固定)。</para>
+/// <para><b>Phase 2 staging</b>: MVCC (xmin/xmax) / Generation / SSN (Pstamp/Sstamp) /
+/// commit-stamp 高水位は従来どおり <see cref="IEntityVersionStore"/> sidecar で管理する
+/// (SSN の依存を変えないため)。xmin/xmax の record 再内包と sidecar 廃止は版チェーンが要る
+/// Phase 3 へ後ろ倒し。Sequence は monotonic (slot 非再利用)、stale 参照は sidecar の Generation
+/// 照合 + map-null + MVCC visibility で弾く。</para>
 /// </summary>
 internal sealed class VersionedNodeStore : INodeStore
 {
-    private const int PayloadSize = 19;
+    private const int PayloadSize = 15;
     private const int OffFlags = 0;
     private const int OffFirstRel = 1;
     private const int OffFirstProp = 7;
     private const int OffLabel = 13;
-    private const int OffGeneration = 15;
     private const byte FlagInUse = 0x01;
-
-    /// <summary>NodeWriteHandle が触る先頭領域 (flags + firstRel + firstProp + label)。</summary>
-    private const int NodeFieldsSize = 15;
 
     private static readonly int HdrSize = VersionedRecordHeap.VersionHeaderSize;
 
     private readonly IPagedFile _file;
     private readonly ItemPointerMap _map;
     private readonly VersionedRecordHeap _heap;
+    private readonly IEntityVersionStore _versions;
     private LabelNodeIndex? _labelIndex;
     private long _inUseCount;
 
-    public VersionedNodeStore(IPagedFile heapFile, ItemPointerMap map, LabelNodeIndex? labelIndex = null)
+    public VersionedNodeStore(IPagedFile heapFile, ItemPointerMap map,
+        LabelNodeIndex? labelIndex = null, IEntityVersionStore? versions = null)
     {
         _file = heapFile;
         _map = map;
         _heap = new VersionedRecordHeap(heapFile, map);
+        _versions = versions ?? new InMemoryEntityVersionStore();
         _labelIndex = labelIndex;
         _inUseCount = RecomputeInUse();
     }
@@ -61,17 +60,18 @@ internal sealed class VersionedNodeStore : INodeStore
 
     public NodeId Allocate(LabelId labelId)
     {
-        long seq = _map.Hwm;       // monotonic Sequence
-        const uint generation = 1; // slot 非再利用 → 世代は 1 固定 (ID 契約のため保持)
+        long seq = _map.Hwm; // monotonic Sequence (slot 非再利用)
+        // ARCH-3/5b: 世代は sidecar 由来。monotonic なので新規 seq は Unset(0)→1。
+        long generation = _versions.Read(seq).Generation + 1;
 
         Span<byte> payload = stackalloc byte[PayloadSize];
         payload[OffFlags] = FlagInUse;
         RecordHelpers.WriteInt48(payload[OffFirstRel..], -1L);
         RecordHelpers.WriteInt48(payload[OffFirstProp..], -1L);
         BinaryPrimitives.WriteInt16LittleEndian(payload[OffLabel..], (short)labelId.Value);
-        BinaryPrimitives.WriteUInt32LittleEndian(payload[OffGeneration..], generation);
 
         _heap.Insert(seq, payload, MvccContext.CurrentTxId.Value);
+        _versions.Write(seq, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue, generation));
         _inUseCount++;
 
         var newId = NodeId.Create(seq, (int)generation);
@@ -82,10 +82,10 @@ internal sealed class VersionedNodeStore : INodeStore
     public void Free(NodeId nodeId)
     {
         long seq = nodeId.Sequence;
-        if (!_heap.TryReadHeadRaw(seq, out var payload, out _, out long xmax)) return;
-        if (xmax != 0) return; // 既に論理削除済
+        if (!_heap.TryReadHeadRaw(seq, out var payload, out _, out _)) return;
         var prevLabel = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(OffLabel)));
-        _heap.StampXmax(seq, MvccContext.CurrentTxId.Value);
+        // 論理削除: sidecar の xmax をスタンプ。record / map は維持 (snapshot reader / vacuum)。
+        _versions.UpdateXmax(seq, MvccContext.CurrentTxId.Value);
         _inUseCount--;
         _labelIndex?.OnFree(nodeId, prevLabel);
     }
@@ -96,20 +96,27 @@ internal sealed class VersionedNodeStore : INodeStore
         if (seq < 0 || seq >= _map.Hwm)
             return new NodeReadHandle(nodeId, inUse: false, RelationshipId.Invalid, PropertyId.Invalid, default);
 
-        if (!_heap.TryReadVisible(seq, AmbientVisible, out var payload, out long xmin, out long xmax))
+        if (!_heap.TryReadHeadRaw(seq, out var payload, out _, out _))
             return new NodeReadHandle(nodeId, inUse: false, RelationshipId.Invalid, PropertyId.Invalid, default);
 
         var span = payload.AsSpan();
+        bool inUse = (span[OffFlags] & FlagInUse) != 0;
         var firstRel = new RelationshipId(RecordHelpers.ReadInt48(span[OffFirstRel..]));
         var firstProp = new PropertyId(RecordHelpers.ReadInt48(span[OffFirstProp..]));
         var label = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(span[OffLabel..]));
-        int gen = (int)BinaryPrimitives.ReadUInt32LittleEndian(span[OffGeneration..]);
 
-        bool inUse = true;
-        // ARCH-5b: 世代付き NodeId (Allocate 由来) は現世代と照合。gen=0 (内部パイプライン) はスキップ。
-        int carriedGen = nodeId.Generation;
-        if (carriedGen != 0 && carriedGen != gen) inUse = false;
-
+        long xmin = 0, xmax = 0;
+        if (inUse)
+        {
+            var meta = _versions.Read(seq);
+            xmin = meta.Xmin; xmax = meta.Xmax;
+            // ARCH-5b: 世代付き NodeId は現世代と照合。gen=0 (内部パイプライン) はスキップ。
+            int carriedGen = nodeId.Generation;
+            if (carriedGen != 0 && carriedGen != (int)meta.Generation)
+                inUse = false;
+            else if (!Visibility.IsVisibleAmbient(xmin, xmax))
+                inUse = false;
+        }
         if (inUse) MvccContext.RecordRead(EntityKind.Node, seq);
         return new NodeReadHandle(nodeId, inUse, firstRel, firstProp, label, xmin, xmax);
     }
@@ -127,8 +134,7 @@ internal sealed class VersionedNodeStore : INodeStore
             _file.Unpin(pageId);
             throw new CorruptionException($"missing version slot for node seq={nodeId.Sequence}");
         }
-        // 先頭 15B (flags+rel+prop+label) を NodeWriteHandle に渡す。Dispose で UnpinDirty。
-        var fields = rec.Slice(HdrSize, NodeFieldsSize);
+        var fields = rec.Slice(HdrSize, PayloadSize);
         return new NodeWriteHandle(_file, pageId, fields);
     }
 
@@ -137,7 +143,9 @@ internal sealed class VersionedNodeStore : INodeStore
         long hwm = _map.Hwm;
         for (long seq = 0; seq < hwm; seq++)
         {
-            if (_heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _))
+            if (_heap.GetHead(seq).IsNull) continue; // vacuum 済
+            var meta = _versions.Read(seq);
+            if (Visibility.IsVisibleAmbient(meta.Xmin, meta.Xmax))
             {
                 MvccContext.RecordRead(EntityKind.Node, seq);
                 // ARCH-5b: パイプラインは Sequence 空間 (gen=0)。世代は利用者境界で stamp。
@@ -149,11 +157,11 @@ internal sealed class VersionedNodeStore : INodeStore
     public int CurrentGeneration(long localId)
     {
         if (localId < 0 || localId >= _map.Hwm) return -1;
-        if (!_heap.TryReadHeadRaw(localId, out var payload, out _, out _)) return -1;
-        return (int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(OffGeneration));
+        long gen = _versions.Read(localId).Generation;
+        return gen > int.MaxValue ? int.MaxValue : (int)gen;
     }
 
-    // --- internal helpers (RelationshipStore / vacuum 経路用、旧 NodeStore と同シグネチャ) ---
+    // --- internal helpers (RelationshipStore fast-path / vacuum / bulk 経路用) ---
 
     internal void UpdateFirstRelId(NodeId nodeId, RelationshipId newFirstRelId)
         => MutateHeadField(nodeId.Sequence, OffFirstRel, newFirstRelId.Sequence);
@@ -180,7 +188,8 @@ internal sealed class VersionedNodeStore : INodeStore
     internal RawNodeRecord ReadRaw(long id)
     {
         if (id < 0 || id >= _map.Hwm) return default;
-        if (!_heap.TryReadHeadRaw(id, out var payload, out long xmin, out long xmax)) return default;
+        if (!_heap.TryReadHeadRaw(id, out var payload, out _, out _)) return default;
+        var meta = _versions.Read(id);
         var s = payload.AsSpan();
         return new RawNodeRecord
         {
@@ -188,25 +197,85 @@ internal sealed class VersionedNodeStore : INodeStore
             FirstRelId = new RelationshipId(RecordHelpers.ReadInt48(s[OffFirstRel..])),
             FirstPropId = new PropertyId(RecordHelpers.ReadInt48(s[OffFirstProp..])),
             Label = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(s[OffLabel..])),
-            Xmin = xmin,
-            Xmax = xmax,
+            Xmin = meta.Xmin,
+            Xmax = meta.Xmax,
         };
     }
 
-    /// <summary>OP-3 / テスト用。採番済み Sequence 数 (= 最大 seq + 1)。</summary>
+    internal void UpdateFirstPropIdRaw(NodeId nodeId, PropertyId newFirstPropId)
+        => UpdateFirstPropId(nodeId, newFirstPropId);
+
+    /// <summary>採番済み Sequence 数 (= 最大 seq + 1)。</summary>
     internal long Hwm => _map.Hwm;
+
+    /// <summary>OP-3 / テスト用。free list は持たない (monotonic seq)。</summary>
+    internal long FreeHead => -1;
+
+    /// <summary>
+    /// OP-5: heap モデルは物理 truncate での縮小をしない (slot が散在するため)。現ページ数を返し、
+    /// vacuum の truncate を no-op にする。
+    /// </summary>
+    internal long ComputeRequiredPageCount() => _file.PageCount;
+
+    /// <summary>OP-5: 内部 heap PagedFile。</summary>
+    internal IPagedFile UnderlyingFile => _file;
+
+    /// <summary>
+    /// OP-3 vacuum: horizon 未満で xmax がコミット済みの dead ノードを heap から物理回収する
+    /// (全 version slot を tombstone + map エントリ null 化)。inUseCount は <see cref="Free"/> で
+    /// 既に減算済みなので触らない。
+    /// </summary>
+    internal int VacuumDeadVersions(long horizonTxId, CommittedTxRegistry committed)
+    {
+        int reclaimed = 0;
+        long hwm = _map.Hwm;
+        for (long seq = 0; seq < hwm; seq++)
+        {
+            if (_heap.GetHead(seq).IsNull) continue;
+            long xmax = _versions.Read(seq).Xmax;
+            if (xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax))
+            {
+                _heap.Remove(seq);
+                reclaimed++;
+            }
+        }
+        return reclaimed;
+    }
+
+    // --- bulk-load helpers (no per-record sidecar flush nuance; heap insert handles paging) ---
+
+    internal void BulkWrite(long id, int labelId)
+    {
+        Span<byte> payload = stackalloc byte[PayloadSize];
+        payload[OffFlags] = FlagInUse;
+        RecordHelpers.WriteInt48(payload[OffFirstRel..], -1L);
+        RecordHelpers.WriteInt48(payload[OffFirstProp..], -1L);
+        BinaryPrimitives.WriteInt16LittleEndian(payload[OffLabel..], (short)labelId);
+        _heap.Insert(id, payload, TransactionId.Bootstrap.Value);
+        // FT-26/FT-32: bulk load は tx 外。Bootstrap を xmin に、Generation=1 (新規 slot)。
+        _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue, 1));
+    }
+
+    internal void BulkUpdateFirstProp(long id, long firstPropId)
+        => MutateHeadField(id, OffFirstProp, firstPropId);
+
+    internal void BulkSetHeaders(long hwm, long inUseCount)
+    {
+        // hwm は map.Hwm が BulkWrite 経由で既に到達済み。inUse のみ採用。
+        _inUseCount = inUseCount;
+        _labelIndex?.Invalidate();
+    }
 
     /// <summary>FT-15 / recovery 用: map メタを読み直し inUse を再計算する。</summary>
     internal void ReloadMeta()
     {
         _map.ReloadMeta();
+        _heap.ReloadMeta();
         _inUseCount = RecomputeInUse();
         _labelIndex?.Invalidate();
     }
 
     // --- private ---
-
-    private static bool AmbientVisible(long xmin, long xmax) => Visibility.IsVisibleAmbient(xmin, xmax);
 
     private void MutateHeadField(long seq, int payloadOffset, long sequenceValue)
     {
@@ -224,7 +293,7 @@ internal sealed class VersionedNodeStore : INodeStore
         long count = 0;
         long hwm = _map.Hwm;
         for (long seq = 0; seq < hwm; seq++)
-            if (_heap.TryReadHeadRaw(seq, out _, out _, out long xmax) && xmax == 0)
+            if (!_heap.GetHead(seq).IsNull && _versions.Read(seq).Xmax == 0)
                 count++;
         return count;
     }

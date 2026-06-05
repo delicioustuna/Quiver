@@ -40,8 +40,17 @@ internal static class FormatVersion
     /// </summary>
     public const byte V5SingleFile = 5;
 
+    /// <summary>
+    /// v6: ARCH-5c property 再設計 Phase 2。ノードストアを固定サイズ record 配列から
+    /// slotted ヒープ (<see cref="Quiver.Storage.VersionedRecordHeap"/>) + 論理 ID 間接層
+    /// (<see cref="Quiver.Storage.ItemPointerMap"/>) へ移行する。ノードテナントのページ
+    /// レイアウトが非互換 (固定 15B record/page → version ヘッダ付き可変長 slotted record)。
+    /// develop 段階のためマイグレーションは提供しない (旧 v5 DB は open 時に reject)。
+    /// </summary>
+    public const byte V6PropertyRedesign = 6;
+
     /// <summary>現行 (= 新規 DB を作成するときに書き込むバージョン)。</summary>
-    public const byte Current = V5SingleFile;
+    public const byte Current = V6PropertyRedesign;
 }
 
 /// <summary>

@@ -251,10 +251,11 @@ public sealed class IndexGenerationTests : IDisposable
     // ---- Format version gate ----
 
     [Fact]
-    public void FormatVersion_current_is_v5()
+    public void FormatVersion_current_is_v6()
     {
-        // ARCH-4 増分8: 単一ファイル化に伴い V4→V5 へ bump。
-        FormatVersion.Current.Should().Be(FormatVersion.V5SingleFile);
+        // ARCH-4 増分8: 単一ファイル化で V4→V5。
+        // ARCH-5c Phase 2: ノードストアの slotted ヒープ化で V5→V6 へ bump。
+        FormatVersion.Current.Should().Be(FormatVersion.V6PropertyRedesign);
     }
 
     [Fact]

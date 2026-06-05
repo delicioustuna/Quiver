@@ -165,6 +165,31 @@ internal sealed class VersionedRecordHeap
     /// <summary>head version の物理位置を返す (in-place write handle 構築用)。未登録は <see cref="ItemPointer.Null"/>。</summary>
     public ItemPointer GetHead(long seq) => _map.Get(seq);
 
+    /// <summary>
+    /// seq の全 version を物理回収する (vacuum 用)。head から nextVersionPtr を辿って各 slot を
+    /// tombstone し、map エントリを null にする。バイトの実回収は次回 insert 時の compaction で行う。
+    /// </summary>
+    public void Remove(long seq)
+    {
+        var ptr = _map.Get(seq);
+        long guard = _map.Hwm + 2;
+        while (!ptr.IsNull)
+        {
+            if (--guard < 0)
+                throw new CorruptionException("version chain too long or cyclic");
+            ItemPointer next;
+            using (var ph = _file.PinForWrite(new PageId(ptr.PageId)))
+            {
+                var sp = new SlottedPage(ph.Data);
+                if (!sp.TryGetMutable(ptr.Slot, out var rec)) break;
+                next = ItemPointer.Unpack(BinaryPrimitives.ReadInt64LittleEndian(rec[OffNext..]));
+                sp.Delete(ptr.Slot);
+            }
+            ptr = next;
+        }
+        _map.Set(seq, ItemPointer.Null);
+    }
+
     /// <summary>FT-15 / recovery 用: ヘッダから append page を読み直す。</summary>
     public void ReloadMeta() => LoadHeader();
 
