@@ -158,4 +158,34 @@ public class VersionedRecordHeapTests : IDisposable
         _heap.TryReadVisible(0, SnapshotAt(2), out var newer).Should().BeTrue();
         newer.Should().Equal(Bytes("v2")); // 新 snapshot は新版
     }
+
+    [Fact]
+    public void PruneDeadVersions_removes_dead_keeps_head()
+    {
+        _heap.Insert(seq: 0, Bytes("v0"), xmin: 1);
+        _heap.AppendVersion(seq: 0, Bytes("v1"), xmin: 2); // v0.xmax=2
+        _heap.AppendVersion(seq: 0, Bytes("v2"), xmin: 3); // v1.xmax=3
+        // chain: v2(head, xmax=0) -> v1(xmax=3) -> v0(xmax=2)
+
+        int removed = _heap.PruneDeadVersions(0, (_, xmax) => xmax != 0 && xmax <= 10);
+        removed.Should().Be(2); // v0, v1 を回収、head v2 は保持
+
+        _heap.TryReadVisible(0, SnapshotAt(3), out var p).Should().BeTrue();
+        p.Should().Equal(Bytes("v2"));
+        // 旧版は消え、十分新しい snapshot のみ head を見る。
+        _heap.TryReadVisible(0, SnapshotAt(1), out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void PruneDeadVersions_keeps_still_referenced_versions()
+    {
+        _heap.Insert(seq: 0, Bytes("v0"), xmin: 1);
+        _heap.AppendVersion(seq: 0, Bytes("v1"), xmin: 5); // v0.xmax=5
+
+        // horizon=3 未満の xmax のみ回収 → v0.xmax=5 は回収しない。
+        int removed = _heap.PruneDeadVersions(0, (_, xmax) => xmax != 0 && xmax < 3);
+        removed.Should().Be(0);
+        _heap.TryReadVisible(0, SnapshotAt(1), out var older).Should().BeTrue();
+        older.Should().Equal(Bytes("v0")); // まだ辿れる
+    }
 }

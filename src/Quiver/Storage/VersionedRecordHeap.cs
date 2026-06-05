@@ -218,6 +218,67 @@ internal sealed class VersionedRecordHeap
     }
 
     /// <summary>
+    /// ARCH-5c Phase 3d: head を残し、版チェーン上の dead な非 head 版 (property 更新の
+    /// copy-on-write で生じた旧版) を回収する。<paramref name="reclaimable"/> が true を返す版を
+    /// tombstone し、生存版を再リンクする。head (最新版) は常に保持。回収数を返す。
+    /// </summary>
+    public int PruneDeadVersions(long seq, Func<long, long, bool> reclaimable)
+    {
+        var head = _map.Get(seq);
+        if (head.IsNull) return 0;
+
+        // チェーンを収集 (head が index 0)。
+        var chain = new List<(ItemPointer Ptr, long Xmin, long Xmax)>();
+        var ptr = head;
+        long guard = _map.Hwm + 2;
+        while (!ptr.IsNull)
+        {
+            if (--guard < 0) throw new CorruptionException("version chain too long or cyclic");
+            ItemPointer next;
+            using (var h = _file.PinForRead(new PageId(ptr.PageId)))
+            {
+                var sp = new ReadOnlySlottedPage(h.Data);
+                if (!sp.TryGet(ptr.Slot, out var rec)) break;
+                long xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[OffXmin..]);
+                long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[OffXmax..]);
+                next = ItemPointer.Unpack(BinaryPrimitives.ReadInt64LittleEndian(rec[OffNext..]));
+                chain.Add((ptr, xmin, xmax));
+            }
+            ptr = next;
+        }
+        if (chain.Count <= 1) return 0;
+
+        // head は常に保持。非 head のうち reclaimable を tombstone、生存版を kept に。
+        var kept = new List<ItemPointer> { chain[0].Ptr };
+        int removed = 0;
+        for (int i = 1; i < chain.Count; i++)
+        {
+            if (reclaimable(chain[i].Xmin, chain[i].Xmax))
+            {
+                using var ph = _file.PinForWrite(new PageId(chain[i].Ptr.PageId));
+                new SlottedPage(ph.Data).Delete(chain[i].Ptr.Slot);
+                removed++;
+            }
+            else
+            {
+                kept.Add(chain[i].Ptr);
+            }
+        }
+        if (removed == 0) return 0;
+
+        // 生存版を順に再リンク (kept[j].nextPtr = kept[j+1] or null)。
+        for (int j = 0; j < kept.Count; j++)
+        {
+            var next = j + 1 < kept.Count ? kept[j + 1] : ItemPointer.Null;
+            using var ph = _file.PinForWrite(new PageId(kept[j].PageId));
+            var sp = new SlottedPage(ph.Data);
+            if (sp.TryGetMutable(kept[j].Slot, out var rec))
+                BinaryPrimitives.WriteInt64LittleEndian(rec[OffNext..], next.Pack());
+        }
+        return removed;
+    }
+
+    /// <summary>
     /// seq の全 version を物理回収する (vacuum 用)。head から nextVersionPtr を辿って各 slot を
     /// tombstone し、map エントリを null にする。バイトの実回収は次回 insert 時の compaction で行う。
     /// </summary>

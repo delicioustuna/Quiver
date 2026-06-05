@@ -308,6 +308,12 @@ internal sealed class VersionedNodeStore : INodeStore
                 _map.PushFreeSeq(seq); // seq を再利用待ちへ (世代は sidecar に残る)
                 reclaimed++;
             }
+            else if (xmax == 0)
+            {
+                // Phase 3d: live ノード — property 更新の copy-on-write で生じた dead 旧版を回収。
+                _heap.PruneDeadVersions(seq,
+                    (_, vx) => vx != 0 && vx < horizonTxId && committed.IsCommitted(vx));
+            }
         }
         return reclaimed;
     }
