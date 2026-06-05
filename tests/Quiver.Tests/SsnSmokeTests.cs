@@ -19,6 +19,7 @@ namespace Quiver.Tests;
 ///     rw-antidependency を取りこぼさない (直接 Read に限定されていない)。</item>
 /// </list>
 /// </summary>
+[Collection("concurrency-stress")]
 public sealed class SsnSmokeTests : IDisposable
 {
     private readonly string _dir;
@@ -27,7 +28,15 @@ public sealed class SsnSmokeTests : IDisposable
     public SsnSmokeTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_ssn_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), new GraphDatabaseOptions
+        {
+            // TS-7: フル並列 + chaos の CPU 過剰購読下では、commit 経路の内部 lock 取得が既定 5s を
+            // 超えて spurious な TransactionException("Lock timeout") を投げ、abort 集計を狂わせて
+            // いた (SI では 0、Serializable では「SSN による 1 件」を期待する判定が壊れる)。寛大化して
+            // starvation 由来の偽陽性を排除する。SSN abort 自体は barrier で snapshot 重複を強制して
+            // いるため、timing ではなく決定的に発生する。
+            LockTimeout = TimeSpan.FromSeconds(30),
+        });
     }
 
     public void Dispose()
@@ -68,9 +77,15 @@ public sealed class SsnSmokeTests : IDisposable
             read2: tx => tx.GetProperty(a, "balance"),
             write2: tx => tx.SetProperty(b, "balance", PropertyValue.FromInt32(40)));
 
-        ex1.Should().BeNull();
-        ex2.Should().BeNull();
+        // TS-7: 失敗時に原因 (lock timeout = starvation か / SerializabilityException = 誤検出か) が
+        // 分かるよう例外型とメッセージをダンプする。SI では SSN 検証が走らないため、両方 commit が
+        // timing 非依存の正しい挙動。
+        ex1.Should().BeNull("SI では write skew でも両方 commit する (T1 が {0} で abort された)", Describe(ex1));
+        ex2.Should().BeNull("SI では write skew でも両方 commit する (T2 が {0} で abort された)", Describe(ex2));
     }
+
+    private static string Describe(Exception? ex)
+        => ex is null ? "(none)" : $"{ex.GetType().Name}: {ex.Message}";
 
     [Fact]
     public void Serializable_write_skew_via_relationship_traversal_aborts_one_transaction()

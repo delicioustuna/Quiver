@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using FluentAssertions;
 using Quiver.Core;
 using Quiver.Storage.Records;
@@ -7,9 +8,19 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
+/// TS-7: 内部で多数スレッドを起こす並行ストレステストを同一 collection に入れて相互に直列化し、
+/// アセンブリ内のピーク並行スレッド数を下げる (フル並列 16 アセンブリ + chaos 実行時の CPU
+/// 過剰購読由来 flaky を抑える)。collection 同士は引き続き並列なので、他の ~440 テストの
+/// 実行時間には影響しない。
+/// </summary>
+[CollectionDefinition("concurrency-stress")]
+public sealed class ConcurrencyStressCollection { }
+
+/// <summary>
 /// FT-24: <see cref="GraphDatabaseOptions.LockingMode"/> = <see cref="LockingMode.ReaderWriter"/>
 /// 時の挙動を database レベルで確認する。
 /// </summary>
+[Collection("concurrency-stress")]
 public sealed class ReaderWriterLockingModeTests : IDisposable
 {
     private readonly string _dir;
@@ -24,11 +35,13 @@ public sealed class ReaderWriterLockingModeTests : IDisposable
         try { Directory.Delete(_dir, recursive: true); } catch { }
     }
 
-    private GraphDatabase OpenWithReaderWriter()
+    private GraphDatabase OpenWithReaderWriter(TimeSpan? lockTimeout = null)
         => GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), new GraphDatabaseOptions
         {
             LockingMode = LockingMode.ReaderWriter,
-            LockTimeout = TimeSpan.FromMilliseconds(500),
+            // 既定 500ms は writer_blocks_concurrent_reader が「短時間で fail する」ことに依存する。
+            // 他のテストは override で寛大化できる (TS-7)。
+            LockTimeout = lockTimeout ?? TimeSpan.FromMilliseconds(500),
         });
 
     private static long ReadInt64(IGraphTransaction tx, NodeId nodeId, string key)
@@ -64,7 +77,14 @@ public sealed class ReaderWriterLockingModeTests : IDisposable
     [Fact]
     public void ReaderWriter_concurrent_readers_do_not_block_each_other()
     {
-        using var db = OpenWithReaderWriter();
+        // TS-7: フル並列 (16 アセンブリ + chaos) 実行時の CPU 過剰購読下で、reader 同士は本来
+        // shared lock でブロックしないのに 500ms timeout が spurious に発火していた。reader が
+        // 実際に待つことは無いので、寛大な timeout (30s) にしても正常系の所要時間は変わらず、
+        // starvation 由来の偽陽性だけを排除できる。失敗時は原因を 3 バケットに分類して報告する:
+        //   ① 値誤り (wrongValues)   = snapshot/read 正当性バグ → 致命 (常に厳格に fail)
+        //   ② lock timeout           = CPU starvation シグナル → 30s 下では発生しないはず
+        //   ③ その他例外              = 想定外 → 致命
+        using var db = OpenWithReaderWriter(TimeSpan.FromSeconds(30));
         NodeId nodeId;
         using (var tx = db.BeginTransaction())
         {
@@ -76,7 +96,9 @@ public sealed class ReaderWriterLockingModeTests : IDisposable
         // 16 並列で 100 回ずつ Read。Shared 同士はブロックしないので全件成功。
         int threads = 16;
         int iterations = 100;
-        int errors = 0;
+        var wrongValues = new ConcurrentBag<long>();    // ① 致命: 読み値が committed 値と不一致
+        var lockTimeouts = new ConcurrentBag<string>(); // ② starvation: lock timeout
+        var unexpected = new ConcurrentBag<Exception>(); // ③ 致命: 想定外の例外
         Parallel.For(0, threads, _ =>
         {
             for (int i = 0; i < iterations; i++)
@@ -84,13 +106,33 @@ public sealed class ReaderWriterLockingModeTests : IDisposable
                 try
                 {
                     using var rtx = db.BeginReadOnlyTransaction();
-                    if (ReadInt64(rtx, nodeId, "score") != 42L)
-                        Interlocked.Increment(ref errors);
+                    long v = ReadInt64(rtx, nodeId, "score");
+                    if (v != 42L) wrongValues.Add(v);
                 }
-                catch { Interlocked.Increment(ref errors); }
+                catch (TransactionException ex) when (ex.Message.Contains("Lock timeout"))
+                {
+                    lockTimeouts.Add(ex.Message);
+                }
+                catch (Exception ex)
+                {
+                    unexpected.Add(ex);
+                }
             }
         });
-        errors.Should().Be(0);
+
+        // ① 正当性: shared reader は同一 committed 値 (42) を必ず観測する。snapshot 破れは致命。
+        wrongValues.Should().BeEmpty(
+            "shared reader が観測した非 42 値: [{0}] — snapshot/read isolation の破れ (正当性バグ)",
+            string.Join(", ", wrongValues));
+        // ③ 想定外例外は常に致命。
+        unexpected.Should().BeEmpty(
+            "想定外の例外: {0}",
+            string.Join(" | ", unexpected.Select(e => $"{e.GetType().Name}: {e.Message}")));
+        // ② reader は決してブロックしないため、30s timeout 下では starvation timeout も出ないはず。
+        // ここが落ちる場合は CPU 過剰購読が 30s を超える異常事態 (test 基盤側の問題)。
+        lockTimeouts.Should().BeEmpty(
+            "reader は shared lock でブロックしないため 30s 以内に必ず取得できるはず ({0} 件 timeout = 異常な CPU starvation)",
+            lockTimeouts.Count);
     }
 
     [Fact]

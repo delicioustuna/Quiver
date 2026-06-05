@@ -34,10 +34,11 @@ public sealed class StructuredLoggingTests : IDisposable
 
     public void Dispose()
     {
+        // TS-7: プロセス静的を先に NullLoggerFactory へ戻してから factory を破棄する。逆順だと、
+        // 並列実行中の他テストが破棄済み factory へログを流し込む窓ができる (cross-test 汚染)。
+        QuiverLog.LoggerFactory = NullLoggerFactory.Instance;
         _db.Dispose();
         _factory.Dispose();
-        // プロセス静的を NullLoggerFactory に戻し、他テストへの汚染を防ぐ。
-        QuiverLog.LoggerFactory = NullLoggerFactory.Instance;
         if (Directory.Exists(_dir))
             try { Directory.Delete(_dir, recursive: true); } catch { }
     }
@@ -201,15 +202,25 @@ public sealed class StructuredLoggingTests : IDisposable
 
     private sealed class CapturingLogger(string category, CapturingLoggerProvider owner) : ILogger
     {
-        private readonly AsyncLocal<List<IReadOnlyList<KeyValuePair<string, object?>>>> _scopes = new();
+        // TS-7: QuiverLog.LoggerFactory はプロセス静的なので、StructuredLoggingTests が本 logger を
+        // 全プロセスに設置している間、並列実行中の他テストの hot-path ログも本 logger に流れ込む。
+        // 旧実装は AsyncLocal の List を in-place で Add/RemoveAt していたが、AsyncLocal は List の
+        // 参照を ExecutionContext 経由で並列ワーカーへ伝播させるため、複数スレッドが同一 List を
+        // 同時に列挙+変更し "Collection was modified" を投げていた (フル並列 + chaos 時の flaky 主因)。
+        // copy-on-write (各 push/pop で新しい不変スナップショットに差し替え) にして共有 List の
+        // in-place 変更を無くす。MEL の LoggerExternalScopeProvider と同じ方式。
+        private readonly AsyncLocal<IReadOnlyList<IReadOnlyList<KeyValuePair<string, object?>>>?> _scopes = new();
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull
         {
-            _scopes.Value ??= new List<IReadOnlyList<KeyValuePair<string, object?>>>();
             if (state is IReadOnlyList<KeyValuePair<string, object?>> kvs)
             {
-                _scopes.Value.Add(kvs);
-                return new PopOnDispose(_scopes);
+                var previous = _scopes.Value;
+                // 既存配列は不変のまま、新しい配列に差し替える (共有参照の in-place 変更を避ける)。
+                _scopes.Value = previous is null
+                    ? new[] { kvs }
+                    : [.. previous, kvs];
+                return new RestoreOnDispose(_scopes, previous);
             }
             return null;
         }
@@ -221,6 +232,7 @@ public sealed class StructuredLoggingTests : IDisposable
             Func<TState, Exception?, string> formatter)
         {
             var snapshot = new List<KeyValuePair<string, object?>>();
+            // _scopes.Value は不変スナップショットなので、並列ログでも安全に列挙できる。
             if (_scopes.Value is { } scopes)
             {
                 foreach (var scope in scopes)
@@ -231,14 +243,12 @@ public sealed class StructuredLoggingTests : IDisposable
                 category, logLevel, eventId, formatter(state, exception), exception, snapshot));
         }
 
-        private sealed class PopOnDispose(AsyncLocal<List<IReadOnlyList<KeyValuePair<string, object?>>>> al)
+        private sealed class RestoreOnDispose(
+            AsyncLocal<IReadOnlyList<IReadOnlyList<KeyValuePair<string, object?>>>?> al,
+            IReadOnlyList<IReadOnlyList<KeyValuePair<string, object?>>>? previous)
             : IDisposable
         {
-            public void Dispose()
-            {
-                var list = al.Value;
-                if (list is { Count: > 0 }) list.RemoveAt(list.Count - 1);
-            }
+            public void Dispose() => al.Value = previous;
         }
     }
 
