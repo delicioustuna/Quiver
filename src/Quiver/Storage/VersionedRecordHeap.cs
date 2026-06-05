@@ -101,8 +101,16 @@ internal sealed class VersionedRecordHeap
     /// payload (コピー) を返す。可視な version が無ければ false。
     /// </summary>
     public bool TryReadVisible(long seq, VersionVisible visible, out byte[] payload)
+        => TryReadVisible(seq, visible, out payload, out _, out _);
+
+    /// <summary>
+    /// <see cref="TryReadVisible(long, VersionVisible, out byte[])"/> の拡張。選ばれた version の
+    /// xmin / xmax も返す (NodeReadHandle 等が MVCC スタンプを必要とするため)。
+    /// </summary>
+    public bool TryReadVisible(long seq, VersionVisible visible, out byte[] payload, out long xmin, out long xmax)
     {
         payload = Array.Empty<byte>();
+        xmin = 0; xmax = 0;
         var ptr = _map.Get(seq);
         long guard = _map.Hwm + 2; // チェーン長は通常 1〜数件。cycle 防御。
         while (!ptr.IsNull)
@@ -111,27 +119,51 @@ internal sealed class VersionedRecordHeap
                 throw new CorruptionException("version chain too long or cyclic");
 
             byte[]? found = null;
+            long vXmin, vXmax;
             ItemPointer next;
             using (var h = _file.PinForRead(new PageId(ptr.PageId)))
             {
                 var sp = new ReadOnlySlottedPage(h.Data);
                 if (!sp.TryGet(ptr.Slot, out var rec))
                     return false; // dangling pointer
-                long xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[OffXmin..]);
-                long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[OffXmax..]);
+                vXmin = BinaryPrimitives.ReadInt64LittleEndian(rec[OffXmin..]);
+                vXmax = BinaryPrimitives.ReadInt64LittleEndian(rec[OffXmax..]);
                 next = ItemPointer.Unpack(BinaryPrimitives.ReadInt64LittleEndian(rec[OffNext..]));
-                if (visible(xmin, xmax))
+                if (visible(vXmin, vXmax))
                     found = rec[VersionHeaderSize..].ToArray();
             }
             if (found != null)
             {
                 payload = found;
+                xmin = vXmin; xmax = vXmax;
                 return true;
             }
             ptr = next;
         }
         return false;
     }
+
+    /// <summary>
+    /// head version の生 payload (コピー) + xmin/xmax を可視性フィルタ無しで返す。vacuum / raw 読み
+    /// 取り用。エントリが無ければ false。
+    /// </summary>
+    public bool TryReadHeadRaw(long seq, out byte[] payload, out long xmin, out long xmax)
+    {
+        payload = Array.Empty<byte>();
+        xmin = 0; xmax = 0;
+        var ptr = _map.Get(seq);
+        if (ptr.IsNull) return false;
+        using var h = _file.PinForRead(new PageId(ptr.PageId));
+        var sp = new ReadOnlySlottedPage(h.Data);
+        if (!sp.TryGet(ptr.Slot, out var rec)) return false;
+        xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[OffXmin..]);
+        xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[OffXmax..]);
+        payload = rec[VersionHeaderSize..].ToArray();
+        return true;
+    }
+
+    /// <summary>head version の物理位置を返す (in-place write handle 構築用)。未登録は <see cref="ItemPointer.Null"/>。</summary>
+    public ItemPointer GetHead(long seq) => _map.Get(seq);
 
     /// <summary>FT-15 / recovery 用: ヘッダから append page を読み直す。</summary>
     public void ReloadMeta() => LoadHeader();

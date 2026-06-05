@@ -41,6 +41,9 @@
 
 - **Phase 1 — slotted ページ基盤**: `SlottedPage` プリミティブ（insert/update/compact/delete）+ `VersionedRecordHeap` 骨格 + `ItemPointerMap`。未配線。slotted ページ単体テスト。
 - **Phase 2 — NodeStore を版チェーン slotted ヒープへ**: xmin/xmax in-record + 版チェーン + ItemPointerMap indirection。Read/Allocate/Free/visibility 改修、NodeStore 呼び出し側追従。**properties は当面チェーン据え置き**（record モデル変更を孤立させる）。WAL/ARIES/lock/SSN を新 record で緑化。
+  - **ID モデル決定 (docs/design/11 §3 準拠)**: ノードは **monotonic Sequence (slot 非再利用)**。版チェーン + map-null + MVCC visibility が stale 参照を弾くため free list / 世代不一致機構は不要。ただし Kind+Gen+Seq の ID 契約を保つため **generation を record payload に保持** (monotonic では seq 毎に 1 固定、`NodeId.Create`/`CurrentGeneration`/索引値レーン互換を維持)。
+  - **進捗 — Phase 2a ✅ (純加算)**: `VersionedNodeStore` (heap+map 上の `INodeStore` 実装) を追加。payload 19B = flags(1)/firstRel(6)/firstProp(6)/label(2)/generation(4)、先頭 15B は旧 NodeStore と同形で `NodeWriteHandle` を再利用 (in-place ポインタ更新)。inUse は open 時に raw scan で再計算 (Phase 6 で永続化)。VersionedRecordHeap に `TryReadVisible(out xmin/xmax)` / `TryReadHeadRaw` / `GetHead` を追加。単体テスト 10 件緑、Stores 78/78 緑。**既存 NodeStore は温存**。
+  - **Phase 2b 残 (要注意)**: factory 配線 (heap/map をコンテナテナント化 + WAL logging) + recovery `ReloadMeta` 経路 + Vacuum / BulkLoader / StreamingBulkLoader / PropertyStore.VacuumDeadVersions / IndexValueResolver の追従 + 旧 NodeStore 撤去。recovery/SSN/vacuum 回帰リスクのため着手前にユーザ確認。
 - **Phase 3 — property inline 化**: 小/固定値を node record version へ inline、可変長は slotted overflow。`GraphTransaction` の get/has/set/remove を inline 走査へ。PropertyStore は overflow/可変長専用へ縮退。vacuum を版チェーン walk へ。
 - **Phase 4 — RelationshipStore 同様化**: rel property inline。
 - **Phase 5 — 列指向セグメント**（D4、最高リスク・descope 判断点）: 索引対象 key の列化。optimizer projection/filter 連携。bench gate。
