@@ -196,4 +196,95 @@ public class VersionedNodeStoreTests : IDisposable
         var live = _store.Scan().Select(n => n.Sequence).ToList();
         live.Should().Equal(a.Sequence);
     }
+
+    // ===== ARCH-5c Phase 3: inline property =====
+
+    [Fact]
+    public void Inline_property_scalar_roundtrip()
+    {
+        var id = _store.Allocate(new LabelId(1));
+        _store.SetInlineProperty(id, new PropertyKeyId(10), PropertyValue.FromInt32(42)).Should().BeTrue();
+        _store.HasInlineProperty(id, new PropertyKeyId(10)).Should().BeTrue();
+        _store.TryGetInlineProperty(id, new PropertyKeyId(10), out var v).Should().BeTrue();
+        v.Int32Value.Should().Be(42);
+        _store.HasInlineProperty(id, new PropertyKeyId(99)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Inline_property_string_roundtrip()
+    {
+        var id = _store.Allocate(new LabelId(1));
+        _store.SetInlineProperty(id, new PropertyKeyId(7), PropertyValue.FromString("hello")).Should().BeTrue();
+        _store.TryGetInlineProperty(id, new PropertyKeyId(7), out var v).Should().BeTrue();
+        System.Text.Encoding.UTF8.GetString(v.Utf8StringValue).Should().Be("hello");
+    }
+
+    [Fact]
+    public void Inline_property_replace_updates_value()
+    {
+        var id = _store.Allocate(new LabelId(1));
+        var key = new PropertyKeyId(5);
+        _store.SetInlineProperty(id, key, PropertyValue.FromInt32(1));
+        _store.SetInlineProperty(id, key, PropertyValue.FromInt32(2));
+        _store.TryGetInlineProperty(id, key, out var v).Should().BeTrue();
+        v.Int32Value.Should().Be(2);
+    }
+
+    [Fact]
+    public void Inline_property_remove()
+    {
+        var id = _store.Allocate(new LabelId(1));
+        var key = new PropertyKeyId(5);
+        _store.SetInlineProperty(id, key, PropertyValue.FromBool(true));
+        _store.RemoveInlineProperty(id, key).Should().BeTrue();
+        _store.HasInlineProperty(id, key).Should().BeFalse();
+        _store.TryGetInlineProperty(id, key, out _).Should().BeFalse();
+        _store.RemoveInlineProperty(id, key).Should().BeFalse(); // 二度目は無し
+    }
+
+    [Fact]
+    public void Inline_multiple_keys_independent()
+    {
+        var id = _store.Allocate(new LabelId(1));
+        _store.SetInlineProperty(id, new PropertyKeyId(1), PropertyValue.FromInt32(100));
+        _store.SetInlineProperty(id, new PropertyKeyId(2), PropertyValue.FromString("x"));
+        _store.SetInlineProperty(id, new PropertyKeyId(3), PropertyValue.FromBool(true));
+
+        _store.TryGetInlineProperty(id, new PropertyKeyId(1), out var v1).Should().BeTrue();
+        v1.Int32Value.Should().Be(100);
+        _store.TryGetInlineProperty(id, new PropertyKeyId(2), out var v2).Should().BeTrue();
+        System.Text.Encoding.UTF8.GetString(v2.Utf8StringValue).Should().Be("x");
+        _store.TryGetInlineProperty(id, new PropertyKeyId(3), out var v3).Should().BeTrue();
+        v3.BoolValue.Should().BeTrue();
+
+        // 1 つ消しても他は残る
+        _store.RemoveInlineProperty(id, new PropertyKeyId(2));
+        _store.HasInlineProperty(id, new PropertyKeyId(1)).Should().BeTrue();
+        _store.HasInlineProperty(id, new PropertyKeyId(2)).Should().BeFalse();
+        _store.HasInlineProperty(id, new PropertyKeyId(3)).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Inline_rejects_oversized_value()
+    {
+        var id = _store.Allocate(new LabelId(1));
+        var big = new string('a', 300); // > 255 → inline 不可
+        _store.SetInlineProperty(id, new PropertyKeyId(1), PropertyValue.FromString(big)).Should().BeFalse();
+        _store.HasInlineProperty(id, new PropertyKeyId(1)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Inline_property_persists_across_reopen()
+    {
+        var id = _store.Allocate(new LabelId(1));
+        _store.SetInlineProperty(id, new PropertyKeyId(10), PropertyValue.FromInt64(123456789L));
+        _store.SetInlineProperty(id, new PropertyKeyId(11), PropertyValue.FromString("persist"));
+
+        Reopen();
+
+        _store.TryGetInlineProperty(id, new PropertyKeyId(10), out var v10).Should().BeTrue();
+        v10.Int64Value.Should().Be(123456789L);
+        _store.TryGetInlineProperty(id, new PropertyKeyId(11), out var v11).Should().BeTrue();
+        System.Text.Encoding.UTF8.GetString(v11.Utf8StringValue).Should().Be("persist");
+    }
 }

@@ -166,6 +166,58 @@ internal sealed class VersionedRecordHeap
     public ItemPointer GetHead(long seq) => _map.Get(seq);
 
     /// <summary>
+    /// ARCH-5c Phase 3: head version の payload を新しい内容へ更新する。head が同一 tx の
+    /// 未コミット版 (xmin==currentTxId, xmax==0) なら **in-place 置換** (版を増やさず intra-tx
+    /// bloat を避ける)、それ以外 (可視な committed 版) なら **copy-on-write** で新版を prepend する。
+    /// inline property の set/remove で使う。未登録 seq は新規 Insert。
+    /// </summary>
+    public ItemPointer AppendOrReplaceHead(long seq, ReadOnlySpan<byte> payload, long currentTxId)
+    {
+        var ptr = _map.Get(seq);
+        if (ptr.IsNull) return Insert(seq, payload, currentTxId);
+
+        long xmin, xmax;
+        ItemPointer next;
+        using (var h = _file.PinForRead(new PageId(ptr.PageId)))
+        {
+            var sp = new ReadOnlySlottedPage(h.Data);
+            if (!sp.TryGet(ptr.Slot, out var rec))
+                return AppendVersion(seq, payload, currentTxId);
+            xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[OffXmin..]);
+            xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[OffXmax..]);
+            next = ItemPointer.Unpack(BinaryPrimitives.ReadInt64LittleEndian(rec[OffNext..]));
+        }
+
+        // 他 tx から見えない自分の未コミット head → in-place 置換を試みる (版ヘッダ保持)。
+        if (xmin == currentTxId && xmax == 0)
+        {
+            if (payload.Length > MaxPayloadSize)
+                throw new ArgumentException($"payload {payload.Length}B exceeds max {MaxPayloadSize}B", nameof(payload));
+            int total = VersionHeaderSize + payload.Length;
+            byte[] buf = ArrayPool<byte>.Shared.Rent(total);
+            try
+            {
+                var rec = buf.AsSpan(0, total);
+                BinaryPrimitives.WriteInt64LittleEndian(rec[OffXmin..], xmin);
+                BinaryPrimitives.WriteInt64LittleEndian(rec[OffXmax..], xmax);
+                BinaryPrimitives.WriteInt64LittleEndian(rec[OffNext..], next.Pack());
+                payload.CopyTo(rec[VersionHeaderSize..]);
+                using var ph = _file.PinForWrite(new PageId(ptr.PageId));
+                var sp = new SlottedPage(ph.Data);
+                if (sp.TryUpdate(ptr.Slot, rec))
+                    return ptr; // slot index 保持 → map 不変
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buf);
+            }
+            // ページに収まらない → copy-on-write へフォールバック (旧自版は xmax=self で self-invisible)。
+        }
+
+        return AppendVersion(seq, payload, currentTxId);
+    }
+
+    /// <summary>
     /// seq の全 version を物理回収する (vacuum 用)。head から nextVersionPtr を辿って各 slot を
     /// tombstone し、map エントリを null にする。バイトの実回収は次回 insert 時の compaction で行う。
     /// </summary>

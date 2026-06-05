@@ -134,4 +134,28 @@ public class VersionedRecordHeapTests : IDisposable
         _heap.TryReadVisible(0, SnapshotAt(1), out var p).Should().BeTrue();
         p.Should().Equal(Bytes("durable"));
     }
+
+    [Fact]
+    public void AppendOrReplaceHead_same_tx_replaces_in_place()
+    {
+        _heap.Insert(seq: 0, Bytes("v1"), xmin: 5);
+        _heap.AppendOrReplaceHead(seq: 0, Bytes("v1b"), currentTxId: 5); // 同一 tx → in-place
+
+        _heap.TryReadVisible(0, SnapshotAt(5), out var p).Should().BeTrue();
+        p.Should().Equal(Bytes("v1b"));
+        // 版は 1 つだけ (xmin=5 のまま)。snapshot=4 では不可視。
+        _heap.TryReadVisible(0, SnapshotAt(4), out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void AppendOrReplaceHead_other_tx_copies_on_write()
+    {
+        _heap.Insert(seq: 0, Bytes("v1"), xmin: 1);
+        _heap.AppendOrReplaceHead(seq: 0, Bytes("v2"), currentTxId: 2); // 別 tx → 新版 prepend
+
+        _heap.TryReadVisible(0, SnapshotAt(1), out var older).Should().BeTrue();
+        older.Should().Equal(Bytes("v1")); // 旧 snapshot は旧版
+        _heap.TryReadVisible(0, SnapshotAt(2), out var newer).Should().BeTrue();
+        newer.Should().Equal(Bytes("v2")); // 新 snapshot は新版
+    }
 }
