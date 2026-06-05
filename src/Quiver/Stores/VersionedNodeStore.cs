@@ -94,10 +94,11 @@ internal sealed class VersionedNodeStore : INodeStore
     public void Free(NodeId nodeId)
     {
         long seq = nodeId.Sequence;
-        if (!_heap.TryReadHeadRaw(seq, out var payload, out _, out _)) return;
+        // Phase 3a: xmin/xmax は heap version へ再内包。論理削除は head version に xmax をスタンプ。
+        if (!_heap.TryReadHeadRaw(seq, out var payload, out _, out long xmax)) return;
+        if (xmax != 0) return; // 既に論理削除済
         var prevLabel = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(OffLabel)));
-        // 論理削除: sidecar の xmax をスタンプ。record / map は維持 (snapshot reader / vacuum)。
-        _versions.UpdateXmax(seq, MvccContext.CurrentTxId.Value);
+        _heap.StampXmax(seq, MvccContext.CurrentTxId.Value);
         _inUseCount--;
         _labelIndex?.OnFree(nodeId, prevLabel);
     }
@@ -108,27 +109,21 @@ internal sealed class VersionedNodeStore : INodeStore
         if (seq < 0 || seq >= _map.Hwm)
             return new NodeReadHandle(nodeId, inUse: false, RelationshipId.Invalid, PropertyId.Invalid, default);
 
-        if (!_heap.TryReadHeadRaw(seq, out var payload, out _, out _))
+        // Phase 3a: 可視性は heap version の xmin/xmax で判定する (TryReadVisible が版チェーンを辿る)。
+        if (!_heap.TryReadVisible(seq, AmbientVisible, out var payload, out long xmin, out long xmax))
             return new NodeReadHandle(nodeId, inUse: false, RelationshipId.Invalid, PropertyId.Invalid, default);
 
         var span = payload.AsSpan();
-        bool inUse = (span[OffFlags] & FlagInUse) != 0;
         var firstRel = new RelationshipId(RecordHelpers.ReadInt48(span[OffFirstRel..]));
         var firstProp = new PropertyId(RecordHelpers.ReadInt48(span[OffFirstProp..]));
         var label = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(span[OffLabel..]));
 
-        long xmin = 0, xmax = 0;
-        if (inUse)
-        {
-            var meta = _versions.Read(seq);
-            xmin = meta.Xmin; xmax = meta.Xmax;
-            // ARCH-5b: 世代付き NodeId は現世代と照合。gen=0 (内部パイプライン) はスキップ。
-            int carriedGen = nodeId.Generation;
-            if (carriedGen != 0 && carriedGen != (int)meta.Generation)
-                inUse = false;
-            else if (!Visibility.IsVisibleAmbient(xmin, xmax))
-                inUse = false;
-        }
+        bool inUse = true;
+        // ARCH-5b: 世代付き NodeId は現世代 (sidecar) と照合。gen=0 (内部パイプライン) はスキップ。
+        int carriedGen = nodeId.Generation;
+        if (carriedGen != 0 && carriedGen != (int)_versions.Read(seq).Generation)
+            inUse = false;
+
         if (inUse) MvccContext.RecordRead(EntityKind.Node, seq);
         return new NodeReadHandle(nodeId, inUse, firstRel, firstProp, label, xmin, xmax);
     }
@@ -155,9 +150,8 @@ internal sealed class VersionedNodeStore : INodeStore
         long hwm = _map.Hwm;
         for (long seq = 0; seq < hwm; seq++)
         {
-            if (_heap.GetHead(seq).IsNull) continue; // vacuum 済
-            var meta = _versions.Read(seq);
-            if (Visibility.IsVisibleAmbient(meta.Xmin, meta.Xmax))
+            // Phase 3a: 可視性は heap version で判定 (null head / 不可視は false)。
+            if (_heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _))
             {
                 MvccContext.RecordRead(EntityKind.Node, seq);
                 // ARCH-5b: パイプラインは Sequence 空間 (gen=0)。世代は利用者境界で stamp。
@@ -200,8 +194,8 @@ internal sealed class VersionedNodeStore : INodeStore
     internal RawNodeRecord ReadRaw(long id)
     {
         if (id < 0 || id >= _map.Hwm) return default;
-        if (!_heap.TryReadHeadRaw(id, out var payload, out _, out _)) return default;
-        var meta = _versions.Read(id);
+        // Phase 3a: xmin/xmax は heap version から (sidecar ではなく)。
+        if (!_heap.TryReadHeadRaw(id, out var payload, out long xmin, out long xmax)) return default;
         var s = payload.AsSpan();
         return new RawNodeRecord
         {
@@ -209,8 +203,8 @@ internal sealed class VersionedNodeStore : INodeStore
             FirstRelId = new RelationshipId(RecordHelpers.ReadInt48(s[OffFirstRel..])),
             FirstPropId = new PropertyId(RecordHelpers.ReadInt48(s[OffFirstProp..])),
             Label = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(s[OffLabel..])),
-            Xmin = meta.Xmin,
-            Xmax = meta.Xmax,
+            Xmin = xmin,
+            Xmax = xmax,
         };
     }
 
@@ -243,8 +237,7 @@ internal sealed class VersionedNodeStore : INodeStore
         long hwm = _map.Hwm;
         for (long seq = 0; seq < hwm; seq++)
         {
-            if (_heap.GetHead(seq).IsNull) continue;
-            long xmax = _versions.Read(seq).Xmax;
+            if (!_heap.TryReadHeadRaw(seq, out _, out _, out long xmax)) continue;
             if (xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax))
             {
                 _heap.Remove(seq);   // 全 version slot tombstone + map entry null
@@ -290,6 +283,8 @@ internal sealed class VersionedNodeStore : INodeStore
 
     // --- private ---
 
+    private static bool AmbientVisible(long xmin, long xmax) => Visibility.IsVisibleAmbient(xmin, xmax);
+
     private void MutateHeadField(long seq, int payloadOffset, long sequenceValue)
     {
         var ptr = _heap.GetHead(seq);
@@ -306,7 +301,8 @@ internal sealed class VersionedNodeStore : INodeStore
         long count = 0;
         long hwm = _map.Hwm;
         for (long seq = 0; seq < hwm; seq++)
-            if (!_heap.GetHead(seq).IsNull && _versions.Read(seq).Xmax == 0)
+            // Phase 3a: live = heap head が存在し xmax==0 (sidecar ではなく heap version 由来)。
+            if (_heap.TryReadHeadRaw(seq, out _, out _, out long xmax) && xmax == 0)
                 count++;
         return count;
     }
