@@ -89,7 +89,9 @@ public class LockManagerSharedLockTests
         lm.TryAcquire(42, r, LockMode.Shared, Short).Should().BeTrue();
 
         var waitTask = Task.Run(() => lm.TryAcquire(42, w, LockMode.Exclusive, Long));
-        await Task.Delay(50);
+        // TS-7: 固定 Task.Delay は threadpool 飽和時に writer がまだ起動しておらず flaky になるため、
+        // writer が実際に wait queue へ並ぶまで決定的に待つ。
+        WaitUntilEnqueued(lm, w);
         waitTask.IsCompleted.Should().BeFalse("writer should be queued behind shared reader");
 
         lm.Release(42, r);
@@ -109,13 +111,14 @@ public class LockManagerSharedLockTests
         lm.TryAcquire(42, r1, LockMode.Shared, Short).Should().BeTrue();
 
         var writerTask = Task.Run(() => lm.TryAcquire(42, w, LockMode.Exclusive, Long));
-        await Task.Delay(50);
+        // TS-7: 固定 Task.Delay(50) だと、フル並列 (16 アセンブリ) でプロセスが CPU を奪われ writer の
+        // Task.Run がまだ起動していない隙に後続 reader が FIFO をすり抜けて grant され、BeFalse が
+        // 偽陽性で落ちていた。writer が確実に enqueue されるまで決定的に待ってから後続 reader を出す。
+        WaitUntilEnqueued(lm, w);
 
         var laterReaderTask = Task.Run(() => lm.TryAcquire(42, r2, LockMode.Shared, Short));
-        await Task.Delay(50);
 
-        // 後続 reader は writer より後ろに並ぶので、r1 が release するまで待つ。
-        // 短い timeout で false。
+        // 後続 reader は writer より後ろに並ぶので、r1 が release するまで grant されず短い timeout で false。
         (await laterReaderTask).Should().BeFalse();
 
         lm.Release(42, r1);
@@ -136,12 +139,36 @@ public class LockManagerSharedLockTests
         var t1 = Task.Run(() => lm.TryAcquire(42, r1, LockMode.Shared, Long));
         var t2 = Task.Run(() => lm.TryAcquire(42, r2, LockMode.Shared, Long));
         var t3 = Task.Run(() => lm.TryAcquire(42, r3, LockMode.Shared, Long));
-        await Task.Delay(50);
+        // TS-7: burst wake の意図 (queue 済みの shared 群を一斉に起こす) を検証するため、3 reader が
+        // 確実に enqueue されてから w を release する。固定 Task.Delay だと飽和時に未 enqueue のまま
+        // release され、テストの意図が形骸化する (結果は true でも burst を検証できていない)。
+        WaitUntilEnqueued(lm, r1);
+        WaitUntilEnqueued(lm, r2);
+        WaitUntilEnqueued(lm, r3);
 
         lm.Release(42, w);
 
         var results = await Task.WhenAll(t1, t2, t3);
         results.Should().AllBeEquivalentTo(true);
+    }
+
+    /// <summary>
+    /// TS-7: <paramref name="waiter"/> が <see cref="LockManager"/> の wait queue に並ぶまで決定的に待つ。
+    /// 固定スリープ依存だと CPU/threadpool 飽和時に <see cref="Task.Run"/> がまだ起動しておらず、
+    /// 順序前提のアサーションが偽陽性で落ちる。LockManager 自身の待機エッジ状態を観測して同期する。
+    /// </summary>
+    private static void WaitUntilEnqueued(LockManager lm, TransactionId waiter)
+    {
+        var edges = new List<(TransactionId Waiter, TransactionId Holder)>();
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            edges.Clear();
+            lm.SnapshotWaitEdges(edges);
+            if (edges.Exists(e => e.Waiter == waiter)) return;
+            Thread.Sleep(1);
+        }
+        throw new TimeoutException($"waiter tx {waiter.Value} did not enqueue within 10s");
     }
 
     [Fact]
