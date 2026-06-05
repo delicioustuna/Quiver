@@ -13,5 +13,8 @@ internal enum PageKind : byte
     // ARCH-4: 単一ファイルコンテナのカタログ root / テナント page-table ページ。
     Catalog = 8,
     PageTable = 9,
+    // ARCH-5c: 版チェーン付き可変長レコードの slotted ヒープ / ItemPointerMap エントリページ。
+    SlottedHeap = 10,
+    ItemPointerMap = 11,
     Header = 0xFF,
 }
