@@ -99,7 +99,7 @@ public sealed class BitmapFilterOperatorTests : IDisposable
         var tagSelective = new CountingPredicate((nid, t) =>
         {
             using var h = t.Nodes.Read(nid);
-            var en = t.Properties.Enumerate(h.FirstPropertyId);
+            var en = t.Nodes.EnumerateProperties(nid, t.Properties); // ARCH-5c: inline + overflow
             while (en.MoveNext())
                 if (en.Current.KeyId == tagKey)
                     return System.Text.Encoding.UTF8.GetString(en.Current.Value.Utf8StringValue) == "A";
@@ -108,7 +108,7 @@ public sealed class BitmapFilterOperatorTests : IDisposable
         var hotBroad = new CountingPredicate((nid, t) =>
         {
             using var h = t.Nodes.Read(nid);
-            var en = t.Properties.Enumerate(h.FirstPropertyId);
+            var en = t.Nodes.EnumerateProperties(nid, t.Properties); // ARCH-5c: inline + overflow
             while (en.MoveNext())
                 if (en.Current.KeyId == hotKey)
                     return en.Current.Value.BoolValue;
@@ -142,7 +142,7 @@ public sealed class BitmapFilterOperatorTests : IDisposable
         var tagSelective = new CountingPredicate((nid, t) =>
         {
             using var h = t.Nodes.Read(nid);
-            var en = t.Properties.Enumerate(h.FirstPropertyId);
+            var en = t.Nodes.EnumerateProperties(nid, t.Properties); // ARCH-5c: inline + overflow
             while (en.MoveNext())
                 if (en.Current.KeyId == tagKey)
                     return System.Text.Encoding.UTF8.GetString(en.Current.Value.Utf8StringValue) == "A";
@@ -151,7 +151,7 @@ public sealed class BitmapFilterOperatorTests : IDisposable
         var hotBroad = new CountingPredicate((nid, t) =>
         {
             using var h = t.Nodes.Read(nid);
-            var en = t.Properties.Enumerate(h.FirstPropertyId);
+            var en = t.Nodes.EnumerateProperties(nid, t.Properties); // ARCH-5c: inline + overflow
             while (en.MoveNext())
                 if (en.Current.KeyId == hotKey)
                     return en.Current.Value.BoolValue;
@@ -236,7 +236,7 @@ public sealed class BitmapFilterOperatorTests : IDisposable
         var pickA = new CountingPredicate((nid, t) =>
         {
             using var h = t.Nodes.Read(nid);
-            var en = t.Properties.Enumerate(h.FirstPropertyId);
+            var en = t.Nodes.EnumerateProperties(nid, t.Properties); // ARCH-5c: inline + overflow
             while (en.MoveNext())
                 if (en.Current.KeyId == tagKey)
                     return System.Text.Encoding.UTF8.GetString(en.Current.Value.Utf8StringValue) == "A";
@@ -350,7 +350,7 @@ file sealed class TagEqPredicate : IPredicate
     {
         var nid = new NodeId(tuple[0].LongValue);
         using var h = tx.Nodes.Read(nid);
-        var en = tx.Properties.Enumerate(h.FirstPropertyId);
+        var en = tx.Nodes.EnumerateProperties(nid, tx.Properties); // ARCH-5c: inline + overflow
         while (en.MoveNext())
         {
             if (en.Current.KeyId != _key) continue;
@@ -370,7 +370,7 @@ file sealed class HotEqPredicate : IPredicate
     {
         var nid = new NodeId(tuple[0].LongValue);
         using var h = tx.Nodes.Read(nid);
-        var en = tx.Properties.Enumerate(h.FirstPropertyId);
+        var en = tx.Nodes.EnumerateProperties(nid, tx.Properties); // ARCH-5c: inline + overflow
         while (en.MoveNext())
         {
             if (en.Current.KeyId != _key) continue;

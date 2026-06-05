@@ -286,6 +286,12 @@ public class TransactionManagerTests : IDisposable
         public NodeWriteHandle Write(NodeId nodeId) => throw new NotSupportedException();
         public IEnumerable<NodeId> Scan() => [];
         public int CurrentGeneration(long localId) => -1;
+        public bool TryGetInlineProperty(NodeId nodeId, PropertyKeyId keyId, out PropertyValue value) { value = default; return false; }
+        public bool HasInlineProperty(NodeId nodeId, PropertyKeyId keyId) => false;
+        public bool SetInlineProperty(NodeId nodeId, PropertyKeyId keyId, in PropertyValue value) => false;
+        public bool RemoveInlineProperty(NodeId nodeId, PropertyKeyId keyId) => false;
+        public PropertyEnumerator EnumerateProperties(NodeId nodeId, IPropertyStore overflowStore)
+            => new PropertyEnumerator(overflowStore, PropertyId.Invalid);
     }
 
     private sealed class StubRelationshipStore : IRelationshipStore

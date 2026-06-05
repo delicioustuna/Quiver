@@ -140,9 +140,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                 }
                 foreach (var nodeId in _inner.Access.ScanNodes(_inner, labelId))
                 {
-                    var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
-                    if (!firstPropId.IsValid) continue;
-                    var propEnum = _inner.Properties.Enumerate(firstPropId);
+                    // ARCH-5c Phase 3: inline + overflow を結合列挙 (inline のみのノードも拾う)。
+                    var propEnum = _inner.Nodes.EnumerateProperties(nodeId, _inner.Properties);
                     while (propEnum.MoveNext())
                     {
                         var cur = propEnum.Current;
@@ -286,9 +285,21 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     private void SetNodeProperty(NodeId nodeId, PropertyKeyId keyId, in PropertyValue value)
     {
-        var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
+        // ARCH-5c Phase 3: 小さい値は node record へ inline (copy-on-write)。
+        if (InlinePropertyCodec.IsInlineable(value) && _inner.Nodes.SetInlineProperty(nodeId, keyId, in value))
+        {
+            // size-class 変更で同 key が overflow に残っていれば除去する。
+            RemoveNodeOverflowIfPresent(nodeId, keyId);
+            return;
+        }
+        // inline 不可 / 予算超過 → overflow チェーン。inline 側に旧値があれば除去。
+        _inner.Nodes.RemoveInlineProperty(nodeId, keyId);
+        SetNodeOverflow(nodeId, keyId, in value);
+    }
 
-        // 既存値があれば削除する
+    private void SetNodeOverflow(NodeId nodeId, PropertyKeyId keyId, in PropertyValue value)
+    {
+        var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
         var newFirst = firstPropId;
         var propEnum = _inner.Properties.Enumerate(firstPropId);
         while (propEnum.MoveNext())
@@ -299,18 +310,16 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                 break;
             }
         }
-
         var newPropId = _inner.Properties.Create(keyId, in value, newFirst);
         var wh = _inner.Nodes.Write(nodeId);
         wh.FirstPropertyId = newPropId;
         wh.Dispose();
     }
 
-    public void RemoveProperty(NodeId nodeId, string key)
+    private void RemoveNodeOverflowIfPresent(NodeId nodeId, PropertyKeyId keyId)
     {
-        if (!_propKeyTokens.TryGet(key, out var keyId)) return;
-
         var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
+        if (!firstPropId.IsValid) return;
         var propEnum = _inner.Properties.Enumerate(firstPropId);
         while (propEnum.MoveNext())
         {
@@ -320,16 +329,43 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                 var wh = _inner.Nodes.Write(nodeId);
                 wh.FirstPropertyId = newFirst;
                 wh.Dispose();
-                if (_logicalSink != null)
-                    RecordLogical(LogicalMutation.RemoveNodeProperty(nodeId, key));
                 return;
             }
         }
     }
 
+    public void RemoveProperty(NodeId nodeId, string key)
+    {
+        if (!_propKeyTokens.TryGet(key, out var keyId)) return;
+
+        // ARCH-5c Phase 3: inline を先に試し、無ければ overflow チェーンから除去。
+        bool removed = _inner.Nodes.RemoveInlineProperty(nodeId, keyId);
+        if (!removed)
+        {
+            var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
+            var propEnum = _inner.Properties.Enumerate(firstPropId);
+            while (propEnum.MoveNext())
+            {
+                if (propEnum.Current.KeyId == keyId)
+                {
+                    var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
+                    var wh = _inner.Nodes.Write(nodeId);
+                    wh.FirstPropertyId = newFirst;
+                    wh.Dispose();
+                    removed = true;
+                    break;
+                }
+            }
+        }
+        if (removed && _logicalSink != null)
+            RecordLogical(LogicalMutation.RemoveNodeProperty(nodeId, key));
+    }
+
     public PropertyValue GetProperty(NodeId nodeId, string key)
     {
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
+        // ARCH-5c Phase 3: inline を先に引き、無ければ overflow チェーンを walk。
+        if (_inner.Nodes.TryGetInlineProperty(nodeId, keyId, out var inlineVal)) return inlineVal;
         var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
         var propEnum = _inner.Properties.Enumerate(firstPropId);
         while (propEnum.MoveNext())
@@ -356,6 +392,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public bool HasProperty(NodeId nodeId, string key)
     {
         if (!_propKeyTokens.TryGet(key, out var keyId)) return false;
+        if (_inner.Nodes.HasInlineProperty(nodeId, keyId)) return true;
         var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
         var propEnum = _inner.Properties.Enumerate(firstPropId);
         while (propEnum.MoveNext())
@@ -366,10 +403,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     }
 
     public PropertyEnumerator EnumerateProperties(NodeId nodeId)
-    {
-        var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
-        return _inner.Properties.Enumerate(firstPropId);
-    }
+        // ARCH-5c Phase 3: inline (visible 版) + overflow チェーンを結合して列挙。
+        => _inner.Nodes.EnumerateProperties(nodeId, _inner.Properties);
 
     // ========== トラバーサル ==========
 

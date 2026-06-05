@@ -93,18 +93,44 @@ public ref struct PropertyEnumerator
     private readonly IPropertyStore _store;
     private PropertyId _nextId;
     private PropertyReadHandle _current;
-    private bool _started;
+    private bool _chainStarted;
+
+    // ARCH-5c Phase 3: node の inline property 領域を chain より先に列挙する (rel / chain-only は空)。
+    private readonly ReadOnlySpan<byte> _inline;
+    private readonly int _inlineCount;
+    private int _inlineIndex;
+    private int _inlinePos;
 
     internal PropertyEnumerator(IPropertyStore store, PropertyId firstId)
+        : this(default, store, firstId) { }
+
+    internal PropertyEnumerator(ReadOnlySpan<byte> inlinePayload, IPropertyStore store, PropertyId firstId)
     {
-        _store = store; _nextId = firstId; _started = false; _current = default;
+        _store = store; _nextId = firstId; _chainStarted = false; _current = default;
+        _inline = inlinePayload;
+        _inlineCount = InlinePropertyCodec.Count(inlinePayload);
+        _inlineIndex = 0;
+        _inlinePos = InlinePropertyCodec.BaseSize;
     }
 
     public bool MoveNext()
     {
-        if (_started) _nextId = _current.NextPropertyId;
-        _started = true;
-        // FT-26: 論理削除 / invisible な record はチェーンを進める。
+        // Phase 1: inline entries (すべて visible 版由来なので skip 不要)。
+        if (_inlineIndex < _inlineCount)
+        {
+            var (keyId, type, nextPos) = InlinePropertyCodec.ReadEntryHeader(_inline, _inlinePos);
+            var val = InlinePropertyCodec.ValueAt(_inline, _inlinePos);
+            _inlinePos = nextPos;
+            _inlineIndex++;
+            _current = new PropertyReadHandle(
+                PropertyId.Invalid, new PropertyKeyId(keyId), PropertyId.Invalid,
+                InlinePropertyCodec.Decode(type, val), inUse: true);
+            return true;
+        }
+
+        // Phase 2: overflow チェーン。FT-26: 論理削除 / invisible はチェーンを進める。
+        if (_chainStarted) _nextId = _current.NextPropertyId;
+        _chainStarted = true;
         while (_nextId.IsValid)
         {
             _current = _store.Read(_nextId);

@@ -79,9 +79,8 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
         _buffer![srcCols] = default; // Null by default
 
         var entityId = new NodeId(cur[_entityIdColumn].LongValue);
-        var firstPropId = _tx!.Nodes.Read(entityId).FirstPropertyId;
-
-        var propEnum = _tx!.Properties.Enumerate(firstPropId);
+        // ARCH-5c Phase 3: inline (node 版) + overflow チェーンを結合して走査する。
+        var propEnum = _tx!.Nodes.EnumerateProperties(entityId, _tx!.Properties);
         while (propEnum.MoveNext())
         {
             var prop = propEnum.Current;

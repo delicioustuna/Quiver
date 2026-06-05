@@ -82,6 +82,45 @@ internal sealed class TxNodeStore : INodeStore
     // ARCH-3: 世代照合は raw な sidecar 読み取り (MVCC / lock 不要)。そのまま委譲する。
     public int CurrentGeneration(long localId) => _inner.CurrentGeneration(localId);
 
+    // ===== ARCH-5c Phase 3: inline property (read は共有ロック / write は排他ロック + SSN write) =====
+
+    public bool TryGetInlineProperty(NodeId nodeId, PropertyKeyId keyId, out PropertyValue value)
+    {
+        if (_mode == LockingMode.ReaderWriter) Acquire(nodeId.Sequence, LockMode.Shared);
+        ActivateMvccContext();
+        return _inner.TryGetInlineProperty(nodeId, keyId, out value);
+    }
+
+    public bool HasInlineProperty(NodeId nodeId, PropertyKeyId keyId)
+    {
+        if (_mode == LockingMode.ReaderWriter) Acquire(nodeId.Sequence, LockMode.Shared);
+        ActivateMvccContext();
+        return _inner.HasInlineProperty(nodeId, keyId);
+    }
+
+    public bool SetInlineProperty(NodeId nodeId, PropertyKeyId keyId, in PropertyValue value)
+    {
+        Acquire(nodeId.Sequence, LockMode.Exclusive);
+        ActivateMvccContext();
+        SsnOnWrite(nodeId.Sequence);
+        return _inner.SetInlineProperty(nodeId, keyId, in value);
+    }
+
+    public bool RemoveInlineProperty(NodeId nodeId, PropertyKeyId keyId)
+    {
+        Acquire(nodeId.Sequence, LockMode.Exclusive);
+        ActivateMvccContext();
+        SsnOnWrite(nodeId.Sequence);
+        return _inner.RemoveInlineProperty(nodeId, keyId);
+    }
+
+    public PropertyEnumerator EnumerateProperties(NodeId nodeId, IPropertyStore overflowStore)
+    {
+        if (_mode == LockingMode.ReaderWriter) Acquire(nodeId.Sequence, LockMode.Shared);
+        ActivateMvccContext();
+        return _inner.EnumerateProperties(nodeId, overflowStore);
+    }
+
     private void ActivateMvccContext()
     {
         if (_committed != null)

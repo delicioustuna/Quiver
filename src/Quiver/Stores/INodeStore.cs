@@ -18,6 +18,26 @@ internal interface INodeStore
     /// 索引値 (<see cref="Quiver.Core.EntityRef"/>) の世代照合に使う。
     /// </summary>
     int CurrentGeneration(long localId);
+
+    // ARCH-5c Phase 3: node 粒度の inline property。小さい値は node record へ inline 格納し
+    // get/has/set/remove を O(small) 化する。inline 不可な値 (大きい string/bytes) は false を返し、
+    // 呼出側 (GraphTransaction) が overflow チェーン (PropertyStore) へ回す。inline を持たない実装
+    // (旧 NodeStore / Stub) は false を返して全 property を overflow に委ねる (graceful degrade)。
+
+    /// <summary>visible 版の inline 領域から property を読む。inline に無ければ false。</summary>
+    bool TryGetInlineProperty(NodeId nodeId, PropertyKeyId keyId, out PropertyValue value);
+
+    /// <summary>visible 版の inline 領域に keyId があるか。</summary>
+    bool HasInlineProperty(NodeId nodeId, PropertyKeyId keyId);
+
+    /// <summary>inline property を set (copy-on-write)。inline 不可 / 予算超過なら false。</summary>
+    bool SetInlineProperty(NodeId nodeId, PropertyKeyId keyId, in PropertyValue value);
+
+    /// <summary>inline property を remove (copy-on-write)。inline に無ければ false。</summary>
+    bool RemoveInlineProperty(NodeId nodeId, PropertyKeyId keyId);
+
+    /// <summary>inline + overflow チェーンを結合した property 列挙子を返す。</summary>
+    PropertyEnumerator EnumerateProperties(NodeId nodeId, IPropertyStore overflowStore);
 }
 
 internal readonly ref struct NodeReadHandle

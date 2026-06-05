@@ -409,8 +409,8 @@ public sealed class GraphStats
 
             degreeBuilder.Record(nodeId, outDegree, inDegree);
 
-            // Node properties → PropertyKeyStats
-            var propEnum = tx.Properties.Enumerate(node.FirstPropertyId);
+            // Node properties → PropertyKeyStats (ARCH-5c: inline + overflow)
+            var propEnum = tx.Nodes.EnumerateProperties(nodeId, tx.Properties);
             while (propEnum.MoveNext())
             {
                 var ph = propEnum.Current;

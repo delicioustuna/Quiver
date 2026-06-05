@@ -277,6 +277,15 @@ internal sealed class NodeStore : INodeStore
         return gen > int.MaxValue ? int.MaxValue : (int)gen;
     }
 
+    // ARCH-5c Phase 3: 旧 NodeStore は inline property 非対応。すべて false を返し、property は
+    // overflow チェーン (PropertyStore) に委ねる (graceful degrade)。production では未配線。
+    public bool TryGetInlineProperty(NodeId nodeId, PropertyKeyId keyId, out PropertyValue value) { value = default; return false; }
+    public bool HasInlineProperty(NodeId nodeId, PropertyKeyId keyId) => false;
+    public bool SetInlineProperty(NodeId nodeId, PropertyKeyId keyId, in PropertyValue value) => false;
+    public bool RemoveInlineProperty(NodeId nodeId, PropertyKeyId keyId) => false;
+    public PropertyEnumerator EnumerateProperties(NodeId nodeId, IPropertyStore overflowStore)
+        => new PropertyEnumerator(overflowStore, Read(nodeId).FirstPropertyId);
+
     internal void BulkUpdateFirstProp(long id, long firstPropId)
     {
         var (pageId, off) = Location(id);

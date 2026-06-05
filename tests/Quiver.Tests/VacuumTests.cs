@@ -177,13 +177,18 @@ public sealed class VacuumTests : IDisposable
     {
         using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
+        // ARCH-5c Phase 3: 小さい値は node record へ inline 化されチェーンに乗らない。本テストは
+        // overflow チェーン vacuum (PropertyStore.VacuumDeadVersions) を検証する意図なので、
+        // 255B を超える大きい文字列 (= overflow チェーン行き) を使う。
+        static string Big(string s) => new string('x', 300) + s;
+
         long nodeId;
         using (var tx = db.BeginTransaction())
         {
             nodeId = tx.CreateNode("Person").Value;
-            tx.SetProperty(new Core.NodeId(nodeId), "k1", Storage.Records.PropertyValue.FromInt32(1));
-            tx.SetProperty(new Core.NodeId(nodeId), "k2", Storage.Records.PropertyValue.FromInt32(2));
-            tx.SetProperty(new Core.NodeId(nodeId), "k3", Storage.Records.PropertyValue.FromInt32(3));
+            tx.SetProperty(new Core.NodeId(nodeId), "k1", Storage.Records.PropertyValue.FromString(Big("1")));
+            tx.SetProperty(new Core.NodeId(nodeId), "k2", Storage.Records.PropertyValue.FromString(Big("2")));
+            tx.SetProperty(new Core.NodeId(nodeId), "k3", Storage.Records.PropertyValue.FromString(Big("3")));
             tx.Commit();
         }
         // 1 つだけ削除 (= xmax がスタンプされて dead version 化)。
@@ -199,8 +204,8 @@ public sealed class VacuumTests : IDisposable
 
         // 残った k1 / k3 が読めて、k2 は消えていること。
         using var read = db.BeginReadOnlyTransaction();
-        read.GetProperty(new Core.NodeId(nodeId), "k1").Int32Value.Should().Be(1);
-        read.GetProperty(new Core.NodeId(nodeId), "k3").Int32Value.Should().Be(3);
+        System.Text.Encoding.UTF8.GetString(read.GetProperty(new Core.NodeId(nodeId), "k1").Utf8StringValue).Should().Be(Big("1"));
+        System.Text.Encoding.UTF8.GetString(read.GetProperty(new Core.NodeId(nodeId), "k3").Utf8StringValue).Should().Be(Big("3"));
         read.HasProperty(new Core.NodeId(nodeId), "k2").Should().BeFalse();
     }
 
@@ -209,12 +214,16 @@ public sealed class VacuumTests : IDisposable
     {
         using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
+        // ARCH-5c Phase 3: overflow チェーン上のプロパティ回収を検証するため大きい文字列を使う
+        // (小さい値は inline 化され node version に同梱で消えるため chain には乗らない)。
+        static string Big(string s) => new string('x', 300) + s;
+
         long deletedId;
         using (var tx = db.BeginTransaction())
         {
             deletedId = tx.CreateNode("Person").Value;
-            tx.SetProperty(new Core.NodeId(deletedId), "a", Storage.Records.PropertyValue.FromInt32(1));
-            tx.SetProperty(new Core.NodeId(deletedId), "b", Storage.Records.PropertyValue.FromInt32(2));
+            tx.SetProperty(new Core.NodeId(deletedId), "a", Storage.Records.PropertyValue.FromString(Big("a")));
+            tx.SetProperty(new Core.NodeId(deletedId), "b", Storage.Records.PropertyValue.FromString(Big("b")));
             tx.Commit();
         }
         using (var tx = db.BeginTransaction())
@@ -224,7 +233,7 @@ public sealed class VacuumTests : IDisposable
         }
 
         var report = db.Vacuum();
-        // ノード 1 つ + そのプロパティ 2 つを回収。
+        // ノード 1 つ + その overflow プロパティ 2 つを回収。
         report.ReclaimedNodes.Should().Be(1);
         report.ReclaimedProperties.Should().Be(2);
     }

@@ -80,19 +80,23 @@ internal sealed class GraphEngineAdapter : IGraphEngine
                 return false;
             }
 
-            PropertyId firstProp = entity.Kind switch
+            // ARCH-5c Phase 3: node は inline + overflow を結合列挙、rel は overflow チェーンのみ。
+            PropertyEnumerator enumerator;
+            if (entity.Kind == EntityKind.Node)
             {
-                EntityKind.Node => _tx.Nodes.Read(new NodeId(entity.Id)).FirstPropertyId,
-                EntityKind.Relationship => _tx.Relationships.Read(new RelationshipId(entity.Id)).FirstPropertyId,
-                _ => PropertyId.Invalid,
-            };
-            if (!firstProp.IsValid)
+                enumerator = _tx.Nodes.EnumerateProperties(new NodeId(entity.Id), _tx.Properties);
+            }
+            else if (entity.Kind == EntityKind.Relationship)
+            {
+                var firstProp = _tx.Relationships.Read(new RelationshipId(entity.Id)).FirstPropertyId;
+                if (!firstProp.IsValid) { text = string.Empty; return false; }
+                enumerator = _tx.Properties.Enumerate(firstProp);
+            }
+            else
             {
                 text = string.Empty;
                 return false;
             }
-
-            var enumerator = _tx.Properties.Enumerate(firstProp);
             while (enumerator.MoveNext())
             {
                 var prop = enumerator.Current;

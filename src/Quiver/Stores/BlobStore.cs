@@ -105,8 +105,11 @@ internal sealed class BlobStore
         long pid = blobId;
         while (pid >= 0)
         {
-            using var h = _file.PinForRead(new PageId(pid));
-            long nextPid = BinaryPrimitives.ReadInt64LittleEndian(h.Data);
+            // フレーム単位 ReaderWriterLockSlim (NoRecursion) のため、同一ページの read pin は
+            // write pin を取る前に解放する (read 保持中の write は LockRecursionException)。
+            long nextPid;
+            using (var h = _file.PinForRead(new PageId(pid)))
+                nextPid = BinaryPrimitives.ReadInt64LittleEndian(h.Data);
 
             var ph = _file.PinForWrite(new PageId(pid));
             ph.Data.Clear();

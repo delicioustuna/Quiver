@@ -35,7 +35,7 @@ internal sealed class PropertyEqStringPredicate : IPredicate
     {
         var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
         using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Properties.Enumerate(node.FirstPropertyId);
+        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -62,7 +62,7 @@ internal sealed class PropertyInt64Predicate : IPredicate
     {
         var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
         using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Properties.Enumerate(node.FirstPropertyId);
+        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -106,7 +106,7 @@ internal sealed class PropertyWithinStringPredicate : IPredicate
     {
         var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
         using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Properties.Enumerate(node.FirstPropertyId);
+        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -133,7 +133,7 @@ internal sealed class PropertyDoublePredicate : IPredicate
     {
         var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
         using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Properties.Enumerate(node.FirstPropertyId);
+        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -170,7 +170,7 @@ internal sealed class PropertyExistsPredicate : IPredicate
 
         var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
         using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Properties.Enumerate(node.FirstPropertyId);
+        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
         while (en.MoveNext())
         {
             if (en.Current.KeyId == _keyId) return _mustExist;
@@ -195,7 +195,7 @@ internal sealed class PropertyWithoutStringPredicate : IPredicate
     {
         var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
         using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Properties.Enumerate(node.FirstPropertyId);
+        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -276,7 +276,7 @@ internal abstract class StringPropertyPredicateBase : IPredicate
     {
         var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
         using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Properties.Enumerate(node.FirstPropertyId);
+        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -373,7 +373,7 @@ internal sealed class PropertyBoolPredicate : IPredicate
     {
         var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
         using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Properties.Enumerate(node.FirstPropertyId);
+        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
         while (en.MoveNext())
         {
             var prop = en.Current;

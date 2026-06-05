@@ -36,12 +36,7 @@ internal sealed class VersionedNodeStore : INodeStore
     private const int OffLabel = 13;
     private const byte FlagInUse = 0x01;
 
-    // ARCH-5c Phase 3: inline property 領域。固定 15B の後ろに inlineCount(u8) + entries。
-    //   entry = [keyId:4][type:1][len:1][value:len]
-    private const int OffInlineCount = 15;       // u8
-    private const int BaseSize = 16;             // 固定 15B + inlineCount(1B)、inline 0 件時の payload 長
-    private const int InlineEntryHeader = 6;     // keyId(4)+type(1)+len(1)
-    private const int InlineValueMax = 255;      // len は u8。超える string/bytes は overflow チェーンへ
+    // ARCH-5c Phase 3: inline property の符号化は InlinePropertyCodec に集約 (PropertyEnumerator と共用)。
 
     private static readonly int HdrSize = VersionedRecordHeap.VersionHeaderSize;
 
@@ -84,12 +79,12 @@ internal sealed class VersionedNodeStore : INodeStore
         // 世代は sidecar 由来。新規 seq は Unset(0)→1、再利用 seq は前回値 +1。
         long generation = _versions.Read(seq).Generation + 1;
 
-        Span<byte> payload = stackalloc byte[BaseSize];
+        Span<byte> payload = stackalloc byte[InlinePropertyCodec.BaseSize];
         payload[OffFlags] = FlagInUse;
         RecordHelpers.WriteInt48(payload[OffFirstRel..], -1L);
         RecordHelpers.WriteInt48(payload[OffFirstProp..], -1L);
         BinaryPrimitives.WriteInt16LittleEndian(payload[OffLabel..], (short)labelId.Value);
-        payload[OffInlineCount] = 0; // inline props: 0 件
+        payload[InlinePropertyCodec.OffInlineCount] = 0; // inline props: 0 件
 
         _heap.Insert(seq, payload, MvccContext.CurrentTxId.Value);
         _versions.Write(seq, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue, generation));
@@ -177,137 +172,63 @@ internal sealed class VersionedNodeStore : INodeStore
     }
 
     // ===== ARCH-5c Phase 3: inline property storage (node 粒度 copy-on-write) =====
+    // 符号化は InlinePropertyCodec に集約。読み取りは visible 版を引き、書き込みは copy-on-write。
 
-    /// <summary>value が node record へ inline 可能か (len が u8 に収まるか)。超過は overflow チェーン行き。</summary>
-    internal static bool IsInlineable(in PropertyValue value) => value.EncodedSize <= InlineValueMax;
-
-    /// <summary>
-    /// visible 版の inline 領域から property を読む。inline に無ければ false (overflow は呼出側で walk)。
-    /// 返す <see cref="PropertyValue"/> の span は内部の payload コピーを参照する。
-    /// </summary>
-    internal bool TryGetInlineProperty(NodeId nodeId, PropertyKeyId keyId, out PropertyValue value)
+    public bool TryGetInlineProperty(NodeId nodeId, PropertyKeyId keyId, out PropertyValue value)
     {
         value = default;
         if (!_heap.TryReadVisible(nodeId.Sequence, AmbientVisible, out var payload, out _, out _)) return false;
-        if (!TryScanInline(payload, keyId.Value, out var type, out var span)) return false;
-        value = DecodeInline(type, span);
+        // FT-33: property read = node read。可視版を観測したので SSN read-set に記録する
+        // (write skew 検出のため。inline hit で早期 return しても捕捉漏れしない)。
+        MvccContext.RecordRead(EntityKind.Node, nodeId.Sequence);
+        if (!InlinePropertyCodec.TryScan(payload, keyId.Value, out var type, out var span)) return false;
+        value = InlinePropertyCodec.Decode(type, span);
         return true;
     }
 
-    /// <summary>visible 版の inline 領域に keyId があるか。</summary>
-    internal bool HasInlineProperty(NodeId nodeId, PropertyKeyId keyId)
+    public bool HasInlineProperty(NodeId nodeId, PropertyKeyId keyId)
     {
         if (!_heap.TryReadVisible(nodeId.Sequence, AmbientVisible, out var payload, out _, out _)) return false;
-        return TryScanInline(payload, keyId.Value, out _, out _);
+        MvccContext.RecordRead(EntityKind.Node, nodeId.Sequence);
+        return InlinePropertyCodec.TryScan(payload, keyId.Value, out _, out _);
     }
 
     /// <summary>
     /// inline property を set (replace-or-add)。copy-on-write で新 node 版を作る (同一 tx の未コミット
     /// head は in-place)。inline 不可 (大きすぎ / 予算超過) なら false を返し、呼出側が overflow へ回す。
     /// </summary>
-    internal bool SetInlineProperty(NodeId nodeId, PropertyKeyId keyId, in PropertyValue value)
+    public bool SetInlineProperty(NodeId nodeId, PropertyKeyId keyId, in PropertyValue value)
     {
-        if (!IsInlineable(value)) return false;
+        if (!InlinePropertyCodec.IsInlineable(value)) return false;
         long seq = nodeId.Sequence;
         if (!_heap.TryReadVisible(seq, AmbientVisible, out var cur, out _, out _)) return false;
-        byte[] np = BuildPayload(cur, keyId.Value, in value, remove: false);
+        byte[] np = InlinePropertyCodec.Build(cur, keyId.Value, in value, remove: false);
         if (np.Length > VersionedRecordHeap.MaxPayloadSize) return false; // payload 予算超過 → overflow
         _heap.AppendOrReplaceHead(seq, np, MvccContext.CurrentTxId.Value);
         return true;
     }
 
-    /// <summary>inline property を remove。inline に無ければ false。copy-on-write で新版を作る。</summary>
-    internal bool RemoveInlineProperty(NodeId nodeId, PropertyKeyId keyId)
+    public bool RemoveInlineProperty(NodeId nodeId, PropertyKeyId keyId)
     {
         long seq = nodeId.Sequence;
         if (!_heap.TryReadVisible(seq, AmbientVisible, out var cur, out _, out _)) return false;
-        if (!TryScanInline(cur, keyId.Value, out _, out _)) return false;
-        byte[] np = BuildPayload(cur, keyId.Value, default, remove: true);
+        if (!InlinePropertyCodec.TryScan(cur, keyId.Value, out _, out _)) return false;
+        byte[] np = InlinePropertyCodec.Build(cur, keyId.Value, default, remove: true);
         _heap.AppendOrReplaceHead(seq, np, MvccContext.CurrentTxId.Value);
         return true;
     }
 
-    private static bool TryScanInline(ReadOnlySpan<byte> payload, int keyId, out PropertyValueType type, out ReadOnlySpan<byte> val)
+    /// <summary>
+    /// inline property (visible 版) + overflow チェーンを結合して列挙する。
+    /// inline を先に、続いて <paramref name="overflowStore"/> 上の firstProp チェーンを辿る。
+    /// </summary>
+    public PropertyEnumerator EnumerateProperties(NodeId nodeId, IPropertyStore overflowStore)
     {
-        type = default; val = default;
-        if (payload.Length <= OffInlineCount) return false;
-        int count = payload[OffInlineCount];
-        int pos = BaseSize;
-        for (int i = 0; i < count; i++)
-        {
-            int k = BinaryPrimitives.ReadInt32LittleEndian(payload[pos..]);
-            int len = payload[pos + 5];
-            if (k == keyId)
-            {
-                type = (PropertyValueType)payload[pos + 4];
-                val = payload.Slice(pos + InlineEntryHeader, len);
-                return true;
-            }
-            pos += InlineEntryHeader + len;
-        }
-        return false;
-    }
-
-    private static PropertyValue DecodeInline(PropertyValueType type, ReadOnlySpan<byte> val) => type switch
-    {
-        PropertyValueType.Bool => PropertyValue.FromBool(val[0] != 0),
-        PropertyValueType.Int32 => PropertyValue.FromInt32(BinaryPrimitives.ReadInt32LittleEndian(val)),
-        PropertyValueType.Int64 => PropertyValue.FromInt64(BinaryPrimitives.ReadInt64LittleEndian(val)),
-        PropertyValueType.Double => PropertyValue.FromDouble(BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(val))),
-        PropertyValueType.String => PropertyValue.FromUtf8(val),
-        PropertyValueType.Bytes => PropertyValue.FromBytes(val),
-        _ => throw new CorruptionException($"unknown inline property type {type}"),
-    };
-
-    private static void WriteInlineValue(Span<byte> dst, in PropertyValue v)
-    {
-        switch (v.Type)
-        {
-            case PropertyValueType.Bool: dst[0] = v.BoolValue ? (byte)1 : (byte)0; break;
-            case PropertyValueType.Int32: BinaryPrimitives.WriteInt32LittleEndian(dst, v.Int32Value); break;
-            case PropertyValueType.Int64: BinaryPrimitives.WriteInt64LittleEndian(dst, v.Int64Value); break;
-            case PropertyValueType.Double: BinaryPrimitives.WriteInt64LittleEndian(dst, BitConverter.DoubleToInt64Bits(v.DoubleValue)); break;
-            case PropertyValueType.String: v.Utf8StringValue.CopyTo(dst); break;
-            case PropertyValueType.Bytes: v.BytesValue.CopyTo(dst); break;
-        }
-    }
-
-    /// <summary>cur payload を基に keyId の entry を set/remove した新 payload を作る (固定 15B は保持)。</summary>
-    private static byte[] BuildPayload(ReadOnlySpan<byte> cur, int keyId, in PropertyValue value, bool remove)
-    {
-        int count = cur.Length > OffInlineCount ? cur[OffInlineCount] : 0;
-        int keepBytes = 0, keepCount = 0;
-        int pos = BaseSize;
-        for (int i = 0; i < count; i++)
-        {
-            int k = BinaryPrimitives.ReadInt32LittleEndian(cur[pos..]);
-            int entrySize = InlineEntryHeader + cur[pos + 5];
-            if (k != keyId) { keepBytes += entrySize; keepCount++; }
-            pos += entrySize;
-        }
-        int vlen = remove ? 0 : value.EncodedSize;
-        int total = BaseSize + keepBytes + (remove ? 0 : InlineEntryHeader + vlen);
-        var buf = new byte[total];
-        cur.Slice(0, PayloadSize).CopyTo(buf);               // 固定フィールド
-        buf[OffInlineCount] = (byte)(keepCount + (remove ? 0 : 1));
-
-        int w = BaseSize;
-        pos = BaseSize;
-        for (int i = 0; i < count; i++)
-        {
-            int k = BinaryPrimitives.ReadInt32LittleEndian(cur[pos..]);
-            int entrySize = InlineEntryHeader + cur[pos + 5];
-            if (k != keyId) { cur.Slice(pos, entrySize).CopyTo(buf.AsSpan(w)); w += entrySize; }
-            pos += entrySize;
-        }
-        if (!remove)
-        {
-            BinaryPrimitives.WriteInt32LittleEndian(buf.AsSpan(w), keyId);
-            buf[w + 4] = (byte)value.Type;
-            buf[w + 5] = (byte)vlen;
-            WriteInlineValue(buf.AsSpan(w + InlineEntryHeader, vlen), in value);
-        }
-        return buf;
+        if (!_heap.TryReadVisible(nodeId.Sequence, AmbientVisible, out var payload, out _, out _))
+            return new PropertyEnumerator(overflowStore, PropertyId.Invalid);
+        MvccContext.RecordRead(EntityKind.Node, nodeId.Sequence); // FT-33: property 列挙 = node read
+        var firstProp = new PropertyId(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProp)));
+        return new PropertyEnumerator(payload, overflowStore, firstProp);
     }
 
     // --- internal helpers (RelationshipStore fast-path / vacuum / bulk 経路用) ---
@@ -395,12 +316,12 @@ internal sealed class VersionedNodeStore : INodeStore
 
     internal void BulkWrite(long id, int labelId)
     {
-        Span<byte> payload = stackalloc byte[BaseSize];
+        Span<byte> payload = stackalloc byte[InlinePropertyCodec.BaseSize];
         payload[OffFlags] = FlagInUse;
         RecordHelpers.WriteInt48(payload[OffFirstRel..], -1L);
         RecordHelpers.WriteInt48(payload[OffFirstProp..], -1L);
         BinaryPrimitives.WriteInt16LittleEndian(payload[OffLabel..], (short)labelId);
-        payload[OffInlineCount] = 0;
+        payload[InlinePropertyCodec.OffInlineCount] = 0;
         _heap.Insert(id, payload, TransactionId.Bootstrap.Value);
         // FT-26/FT-32: bulk load は tx 外。Bootstrap を xmin に、Generation=1 (新規 slot)。
         _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue, 1));
