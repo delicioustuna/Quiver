@@ -73,10 +73,10 @@ internal sealed class RelationshipStore : IRelationshipStore
         _inUseCount++;
         var relId = new RelationshipId(id);
 
-        RelationshipId srcHead = nodeStore is NodeStore ns
+        RelationshipId srcHead = nodeStore is VersionedNodeStore ns
             ? ns.GetFirstRelId(source)
             : ReadFirstRelId(nodeStore, source);
-        RelationshipId tgtHead = nodeStore is NodeStore ns2
+        RelationshipId tgtHead = nodeStore is VersionedNodeStore ns2
             ? ns2.GetFirstRelId(target)
             : ReadFirstRelId(nodeStore, target);
 
@@ -106,7 +106,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         if (tgtHead.IsValid && tgtHead != srcHead)
             UpdateListPrev(tgtHead, target, relId);
 
-        if (nodeStore is NodeStore ns3)
+        if (nodeStore is VersionedNodeStore ns3)
         {
             ns3.UpdateFirstRelId(source, relId);
             ns3.UpdateFirstRelId(target, relId);
@@ -183,7 +183,7 @@ internal sealed class RelationshipStore : IRelationshipStore
 
     public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore nodeStore)
     {
-        RelationshipId first = nodeStore is NodeStore ns
+        RelationshipId first = nodeStore is VersionedNodeStore ns
             ? ns.GetFirstRelId(nodeId)
             : GetFirstRelIdViaInterface(nodeStore, nodeId);
         return new RelationshipEnumerator(this, nodeId, first);
@@ -192,7 +192,7 @@ internal sealed class RelationshipStore : IRelationshipStore
     public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore nodeStore,
         RelationshipTypeId type, Direction direction)
     {
-        RelationshipId first = nodeStore is NodeStore ns
+        RelationshipId first = nodeStore is VersionedNodeStore ns
             ? ns.GetFirstRelId(nodeId)
             : GetFirstRelIdViaInterface(nodeStore, nodeId);
         return new RelationshipEnumerator(this, nodeId, first, type, direction);
@@ -266,7 +266,7 @@ internal sealed class RelationshipStore : IRelationshipStore
     /// 呼び出し前提: アクティブトランザクション 0 件、ノード vacuum **前**。
     /// </summary>
     /// <returns>物理回収したリレーションシップ版数。</returns>
-    internal int VacuumDeadVersions(NodeStore nodeStore, long horizonTxId, CommittedTxRegistry committed)
+    internal int VacuumDeadVersions(VersionedNodeStore nodeStore, long horizonTxId, CommittedTxRegistry committed)
     {
         var reclaimSet = new HashSet<long>();
 
@@ -314,7 +314,7 @@ internal sealed class RelationshipStore : IRelationshipStore
     }
 
     private void RebuildChainForNode(NodeId node, RelationshipId head,
-        NodeStore nodeStore, long horizonTxId, CommittedTxRegistry committed,
+        VersionedNodeStore nodeStore, long horizonTxId, CommittedTxRegistry committed,
         HashSet<long> reclaimSet, bool nodeWillBeReclaimed)
     {
         // chain を遍歴して live rel 列を抜き出す。各 chain entry は (relId, side)。

@@ -10,7 +10,7 @@ namespace Quiver.Storage.Records;
 /// </summary>
 public sealed class BulkLoader : IDisposable
 {
-    private readonly NodeStore _nodeStore;
+    private readonly VersionedNodeStore _nodeStore;
     private readonly RelationshipStore _relStore;
     private readonly PropertyStore _propStore;
     // ARCH-4 増分6: 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
@@ -31,7 +31,7 @@ public sealed class BulkLoader : IDisposable
     private record struct PendingRel(long Id, long Src, long Tgt, int TypeId);
     private readonly record struct PendingProp(int KeyId, PropertyValueType Type, long Scalar, byte[]? Data);
 
-    internal BulkLoader(NodeStore nodeStore, RelationshipStore relStore, PropertyStore propStore,
+    internal BulkLoader(VersionedNodeStore nodeStore, RelationshipStore relStore, PropertyStore propStore,
         Quiver.Storage.SingleFileContainer? container = null)
     {
         _nodeStore = nodeStore;

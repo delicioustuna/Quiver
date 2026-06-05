@@ -225,7 +225,7 @@ internal sealed class PropertyStore : IPropertyStore
     /// </summary>
     /// <remarks>呼び出し前提: アクティブトランザクション 0 件。</remarks>
     /// <returns>物理回収したプロパティ版数。</returns>
-    internal int VacuumDeadVersions(NodeStore nodeStore, long horizonTxId, CommittedTxRegistry committed)
+    internal int VacuumDeadVersions(VersionedNodeStore nodeStore, long horizonTxId, CommittedTxRegistry committed)
     {
         int reclaimed = 0;
         long hwm = nodeStore.Hwm;
@@ -273,7 +273,7 @@ internal sealed class PropertyStore : IPropertyStore
         return count;
     }
 
-    private int CompactChain(NodeId owner, PropertyId head, NodeStore nodeStore,
+    private int CompactChain(NodeId owner, PropertyId head, VersionedNodeStore nodeStore,
         long horizonTxId, CommittedTxRegistry committed)
     {
         // raw に chain を遍歴して live/dead に分類。

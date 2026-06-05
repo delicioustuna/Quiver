@@ -22,8 +22,9 @@ namespace Quiver.Storage.Records;
 /// <para><b>Phase 2 staging</b>: MVCC (xmin/xmax) / Generation / SSN (Pstamp/Sstamp) /
 /// commit-stamp 高水位は従来どおり <see cref="IEntityVersionStore"/> sidecar で管理する
 /// (SSN の依存を変えないため)。xmin/xmax の record 再内包と sidecar 廃止は版チェーンが要る
-/// Phase 3 へ後ろ倒し。Sequence は monotonic (slot 非再利用)、stale 参照は sidecar の Generation
-/// 照合 + map-null + MVCC visibility で弾く。</para>
+/// Phase 3 へ後ろ倒し。Sequence は vacuum 回収後に再利用する (ItemPointerMap の free list)。
+/// slot 再利用に伴う stale 参照は ARCH-3/5b の世代カウンタ照合 + MVCC visibility で弾く
+/// (旧 NodeStore と同セマンティクス)。</para>
 /// </summary>
 internal sealed class VersionedNodeStore : INodeStore
 {
@@ -60,8 +61,19 @@ internal sealed class VersionedNodeStore : INodeStore
 
     public NodeId Allocate(LabelId labelId)
     {
-        long seq = _map.Hwm; // monotonic Sequence (slot 非再利用)
-        // ARCH-3/5b: 世代は sidecar 由来。monotonic なので新規 seq は Unset(0)→1。
+        // ARCH-3/5b: vacuum 回収済み seq を free list から再利用する。世代が上限に達した seq は
+        // 永久退役 (ABA 回避)。空なら hwm から新規採番。
+        long seq = -1;
+        while (true)
+        {
+            long cand = _map.PopFreeSeq();
+            if (cand < 0) break;
+            if (_versions.Read(cand).Generation >= EntityRef.MaxGeneration) continue;
+            seq = cand;
+            break;
+        }
+        if (seq < 0) seq = _map.Hwm;
+        // 世代は sidecar 由来。新規 seq は Unset(0)→1、再利用 seq は前回値 +1。
         long generation = _versions.Read(seq).Generation + 1;
 
         Span<byte> payload = stackalloc byte[PayloadSize];
@@ -235,7 +247,8 @@ internal sealed class VersionedNodeStore : INodeStore
             long xmax = _versions.Read(seq).Xmax;
             if (xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax))
             {
-                _heap.Remove(seq);
+                _heap.Remove(seq);   // 全 version slot tombstone + map entry null
+                _map.PushFreeSeq(seq); // seq を再利用待ちへ (世代は sidecar に残る)
                 reclaimed++;
             }
         }

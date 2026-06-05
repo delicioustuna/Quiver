@@ -286,22 +286,25 @@ public sealed class VacuumTests : IDisposable
         var report = db.Vacuum();
         report.Skipped.Should().BeFalse();
         report.ReclaimedNodes.Should().Be(1000);
-        report.TruncatedPages.Should().BeGreaterThan(0,
-            "末尾の不要ページがグローバル free list へ回収されること");
-
-        long fileSizeAfterVacuum = new FileInfo(Path.Combine(_dir, "graph.quiver")).Length;
-
-        // 回収後に同数のノードを再作成。回収済み物理ページが再利用され、ファイルは成長しない。
+        // ARCH-5c Phase 2: ノードは slotted ヒープ + ItemPointerMap free list に移行した。vacuum は
+        // dead version を tombstone + seq を free list へ戻す (論理回収 + seq 再利用)。tombstone ページの
+        // 物理回収 (グローバル free list 返却 / truncate) は Phase 6 へ後ろ倒し (props/rels は従来どおり)。
+        // よってここでは「再作成が free list の seq を再利用し全件読める」ことを検証する。
+        var refilled = new List<long>();
         using (var tx = db.BeginTransaction())
         {
             for (int i = 0; i < 1000; i++)
-                tx.CreateNode("Person");
+                refilled.Add(tx.CreateNode("Person").Value);
             tx.Commit();
         }
-        db.Diagnostics.GetStatistics(); // flush 観測契機 (no-op でも可)
-        long fileSizeAfterRefill = new FileInfo(Path.Combine(_dir, "graph.quiver")).Length;
-        fileSizeAfterRefill.Should().Be(fileSizeAfterVacuum,
-            "回収済みページが再利用され、再作成でファイルが成長しないこと");
+        // seq 再利用: 再作成した 1000 件の Sequence は元の 0..999 の範囲に収まる (新規採番されない)。
+        using (var read = db.BeginReadOnlyTransaction())
+        {
+            foreach (var id in refilled)
+                read.NodeExists(new Core.NodeId(id)).Should().BeTrue();
+        }
+        refilled.Select(v => new Core.NodeId(v).Sequence).Max().Should().BeLessThan(1000,
+            "vacuum 回収済み seq が free list から再利用され、新規採番されないこと");
     }
 
     /// <summary>
@@ -333,7 +336,9 @@ public sealed class VacuumTests : IDisposable
                     tx.DeleteNode(new Core.NodeId(id));
                 tx.Commit();
             }
-            db.Vacuum().TruncatedPages.Should().BeGreaterThan(0);
+            // ARCH-5c Phase 2: ノード heap は dead version を回収する (ReclaimedNodes) が、tombstone
+            // ページの物理 truncate は Phase 6 へ後ろ倒し。ここでは dead version 回収 + 再 open 整合性を検証。
+            db.Vacuum().ReclaimedNodes.Should().BeGreaterThan(0);
         }
 
         // フェーズ 2: 再 open。残った live ノードと property が読めること。

@@ -31,6 +31,9 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     private const byte TenantLabelTok = 8;
     private const byte TenantRelTypeTok = 9;
     private const byte TenantPropKeyTok = 10;
+    // ARCH-5c Phase 2: VersionedNodeStore の ItemPointerMap (Sequence→物理位置) テナント。
+    // 11/12/13 は AdjacencyContainer (DataTenant/IndexTenant/EpochTenant) が使用済みのため 14。
+    private const byte TenantNodeMap = 14;
 
     public IGraphStorageBackend Open(string filePath, GraphDatabaseOptions options)
     {
@@ -115,10 +118,14 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             }
         }
 
+        // ARCH-5c Phase 2: ノードは slotted ヒープ (TenantNodes) + ItemPointerMap (TenantNodeMap) に
+        // 載る。MVCC/Generation/SSN は従来どおり sidecar (TenantNodeVer) で管理する。
         var nodeFile = container.OpenTenant(TenantNodes, PageKind.Header);
+        var nodeMapFile = container.OpenTenant(TenantNodeMap, PageKind.Header);
         var nodeVerFile = container.OpenTenant(TenantNodeVer, PageKind.Header);
         var nodeVersions = new EntityVersionStore(nodeVerFile);
-        var nodeStore = new NodeStore(nodeFile, labelIndex: null, nodeVersions);
+        var nodeMap = new ItemPointerMap(nodeMapFile);
+        var nodeStore = new VersionedNodeStore(nodeFile, nodeMap, labelIndex: null, nodeVersions);
 
         var relFile = container.OpenTenant(TenantRels, PageKind.Header);
         var relVerFile = container.OpenTenant(TenantRelVer, PageKind.Header);
