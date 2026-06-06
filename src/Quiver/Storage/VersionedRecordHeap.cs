@@ -144,6 +144,44 @@ internal sealed class VersionedRecordHeap
     }
 
     /// <summary>
+    /// ARCH-5c Phase 6: 最初に可視な version の payload を <paramref name="dest"/> へコピーする
+    /// (byte[] を割り当てない alloc-free 経路。inline property の scalar read で使う)。
+    /// 戻り値 = payload 長。戻り値 &gt; <c>dest.Length</c> のときは収まらず dest 未変更 (呼出側は
+    /// 割当版 <see cref="TryReadVisible(long, VersionVisible, out byte[])"/> へフォールバック)。
+    /// 可視版が無ければ 0 (dest 未変更)。
+    /// </summary>
+    public int TryReadVisibleInto(long seq, VersionVisible visible, Span<byte> dest, out long xmin, out long xmax)
+    {
+        xmin = 0; xmax = 0;
+        var ptr = _map.Get(seq);
+        long guard = _map.Hwm + 2;
+        while (!ptr.IsNull)
+        {
+            if (--guard < 0)
+                throw new CorruptionException("version chain too long or cyclic");
+            ItemPointer next;
+            using (var h = _file.PinForRead(new PageId(ptr.PageId)))
+            {
+                var sp = new ReadOnlySlottedPage(h.Data);
+                if (!sp.TryGet(ptr.Slot, out var rec))
+                    return 0; // dangling pointer
+                long vXmin = BinaryPrimitives.ReadInt64LittleEndian(rec[OffXmin..]);
+                long vXmax = BinaryPrimitives.ReadInt64LittleEndian(rec[OffXmax..]);
+                next = ItemPointer.Unpack(BinaryPrimitives.ReadInt64LittleEndian(rec[OffNext..]));
+                if (visible(vXmin, vXmax))
+                {
+                    var body = rec[VersionHeaderSize..];
+                    xmin = vXmin; xmax = vXmax;
+                    if (body.Length <= dest.Length) body.CopyTo(dest);
+                    return body.Length;
+                }
+            }
+            ptr = next;
+        }
+        return 0;
+    }
+
+    /// <summary>
     /// head version の生 payload (コピー) + xmin/xmax を可視性フィルタ無しで返す。vacuum / raw 読み
     /// 取り用。エントリが無ければ false。
     /// </summary>

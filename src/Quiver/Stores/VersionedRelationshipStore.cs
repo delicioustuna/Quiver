@@ -62,6 +62,9 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     private const int OffTgtNext = 33;
     private const int OffFirstProp = 39;
     private const byte FlagInUse = 0x01;
+    // Phase 6 alloc-free read: 典型 inline payload (45 固定 + 数 entry) を収める stackalloc 量。
+    // 超過分は割当版へフォールバックする。
+    private const int InlineReadBuffer = 256;
 
     private static readonly int HdrSize = VersionedRecordHeap.VersionHeaderSize;
 
@@ -207,18 +210,40 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     public bool TryGetInlineProperty(RelationshipId relId, PropertyKeyId keyId, out PropertyValue value)
     {
         value = default;
-        if (!_heap.TryReadVisible(relId.Sequence, AmbientVisible, out var payload, out _, out _)) return false;
+        long seq = relId.Sequence;
+        // ARCH-5c Phase 6: alloc-free 経路。可視版 payload を stackalloc バッファへコピーして scan する
+        // (per-read の byte[] 割当を回避)。scalar は値コピーなので buffer 上 decode で安全、String/Bytes
+        // のみ安定 byte[] へコピーする。payload が buffer 超過なら割当版へフォールバック。
+        Span<byte> buf = stackalloc byte[InlineReadBuffer];
+        int len = _heap.TryReadVisibleInto(seq, AmbientVisible, buf, out _, out _);
+        if (len == 0) return false;
         // FT-33: property read = rel read。可視版を観測したので SSN read-set に記録する。
-        MvccContext.RecordRead(EntityKind.Relationship, relId.Sequence);
-        if (!InlinePropertyCodec.TryScan(payload, InlinePropertyCodec.RelFixedSize, keyId.Value, out var type, out var span)) return false;
-        value = InlinePropertyCodec.Decode(type, span);
+        MvccContext.RecordRead(EntityKind.Relationship, seq);
+        if (len <= buf.Length)
+        {
+            if (!InlinePropertyCodec.TryScan(buf[..len], InlinePropertyCodec.RelFixedSize, keyId.Value, out var type, out var span))
+                return false;
+            value = InlinePropertyCodec.IsScalar(type)
+                ? InlinePropertyCodec.DecodeScalar(type, span)
+                : InlinePropertyCodec.Decode(type, span.ToArray());
+            return true;
+        }
+        if (!_heap.TryReadVisible(seq, AmbientVisible, out var payload, out _, out _)) return false;
+        if (!InlinePropertyCodec.TryScan(payload, InlinePropertyCodec.RelFixedSize, keyId.Value, out var t2, out var s2)) return false;
+        value = InlinePropertyCodec.Decode(t2, s2);
         return true;
     }
 
     public bool HasInlineProperty(RelationshipId relId, PropertyKeyId keyId)
     {
-        if (!_heap.TryReadVisible(relId.Sequence, AmbientVisible, out var payload, out _, out _)) return false;
-        MvccContext.RecordRead(EntityKind.Relationship, relId.Sequence);
+        long seq = relId.Sequence;
+        Span<byte> buf = stackalloc byte[InlineReadBuffer];
+        int len = _heap.TryReadVisibleInto(seq, AmbientVisible, buf, out _, out _);
+        if (len == 0) return false;
+        MvccContext.RecordRead(EntityKind.Relationship, seq);
+        if (len <= buf.Length)
+            return InlinePropertyCodec.TryScan(buf[..len], InlinePropertyCodec.RelFixedSize, keyId.Value, out _, out _);
+        if (!_heap.TryReadVisible(seq, AmbientVisible, out var payload, out _, out _)) return false;
         return InlinePropertyCodec.TryScan(payload, InlinePropertyCodec.RelFixedSize, keyId.Value, out _, out _);
     }
 

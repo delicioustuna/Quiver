@@ -33,6 +33,15 @@ internal static class InlinePropertyCodec
 
     public static bool IsInlineable(in PropertyValue v) => v.EncodedSize <= ValueMax;
 
+    /// <summary>
+    /// scalar 型 (Bool/Int32/Int64/Double) は <see cref="PropertyValue"/> に値をコピーして保持する
+    /// (span を握らない) ため、stackalloc バッファ上で decode しても返した値が dangle しない。
+    /// String/Bytes は span を握るので安定メモリ (byte[]) が要る。
+    /// </summary>
+    public static bool IsScalar(PropertyValueType t)
+        => t is PropertyValueType.Bool or PropertyValueType.Int32
+             or PropertyValueType.Int64 or PropertyValueType.Double;
+
     /// <summary>pos (byte offset) の entry を読み、次の pos を返す。</summary>
     public static (int KeyId, PropertyValueType Type, int NextPos) ReadEntryHeader(ReadOnlySpan<byte> payload, int pos)
     {
@@ -64,6 +73,20 @@ internal static class InlinePropertyCodec
         }
         return false;
     }
+
+    /// <summary>
+    /// scalar 値を decode する。<c>scoped</c> 入力で、返す <see cref="PropertyValue"/> は span を
+    /// 握らず値をコピーするため、呼出側の stackalloc バッファ上の span を渡しても安全 (escape しない)。
+    /// String/Bytes は span を握るのでこのメソッドでは扱わない (<see cref="Decode"/> + 安定 byte[] を使う)。
+    /// </summary>
+    public static PropertyValue DecodeScalar(PropertyValueType type, scoped ReadOnlySpan<byte> val) => type switch
+    {
+        PropertyValueType.Bool => PropertyValue.FromBool(val[0] != 0),
+        PropertyValueType.Int32 => PropertyValue.FromInt32(BinaryPrimitives.ReadInt32LittleEndian(val)),
+        PropertyValueType.Int64 => PropertyValue.FromInt64(BinaryPrimitives.ReadInt64LittleEndian(val)),
+        PropertyValueType.Double => PropertyValue.FromDouble(BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(val))),
+        _ => throw new CorruptionException($"non-scalar inline property type {type}"),
+    };
 
     public static PropertyValue Decode(PropertyValueType type, ReadOnlySpan<byte> val) => type switch
     {
