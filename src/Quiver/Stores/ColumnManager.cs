@@ -13,36 +13,101 @@ namespace Quiver.Storage.Records;
 /// </summary>
 internal sealed class ColumnManager
 {
-    private readonly ColumnCatalog _catalog;
     private readonly SingleFileContainer _container;
+    private readonly byte _catalogTenantId;
     private readonly VersionedRelationshipStore _relStore;
     private readonly VersionedNodeStore _nodeStore;
     private readonly PropertyStore _propStore;
     private readonly Dictionary<(EntityKind, int), ScalarColumnStore> _columns = new();
+    // catalog は遅延生成 (ColumnCatalog ctor が空テナントにヘッダページを書くため)。
+    // これにより列を使わない DB は catalog テナントを物理生成せず、既存 DB の on-disk
+    // レイアウトを撹乱しない。CreateColumn (= 初回登録) で初めて生成される。
+    private ColumnCatalog? _catalog;
 
     public ColumnManager(
-        IPagedFile catalogFile,
         SingleFileContainer container,
+        byte catalogTenantId,
         VersionedRelationshipStore relStore,
         VersionedNodeStore nodeStore,
         PropertyStore propStore)
     {
-        _catalog = new ColumnCatalog(catalogFile);
         _container = container;
+        _catalogTenantId = catalogTenantId;
         _relStore = relStore;
         _nodeStore = nodeStore;
         _propStore = propStore;
 
-        // 登録済み列を開く (head ページから cache rebuild)。
-        foreach (var e in _catalog.Entries)
-            _columns[(e.Kind, e.KeyId)] = new ScalarColumnStore(
-                _container.OpenTenant(e.TenantId, PageKind.ItemPointerMap));
+        // 既に catalog テナントが存在する DB のみ、登録済み列を eager に開く
+        // (head ページから cache rebuild)。未生成なら何もしない (列無効状態)。
+        if (_container.HasTenant(catalogTenantId))
+        {
+            _catalog = new ColumnCatalog(_container.OpenTenant(catalogTenantId, PageKind.Header));
+            foreach (var e in _catalog.Entries)
+                _columns[(e.Kind, e.KeyId)] = new ScalarColumnStore(
+                    _container.OpenTenant(e.TenantId, PageKind.ItemPointerMap));
+        }
     }
+
+    // CreateColumn で初めて catalog テナントを生成する (遅延)。
+    private ColumnCatalog Catalog => _catalog ??= new ColumnCatalog(
+        _container.OpenTenant(_catalogTenantId, PageKind.Header));
 
     public bool TryGetColumn(EntityKind kind, int keyId, out ScalarColumnStore column)
         => _columns.TryGetValue((kind, keyId), out column!);
 
     public bool IsColumn(EntityKind kind, int keyId) => _columns.ContainsKey((kind, keyId));
+
+    /// <summary>登録済み列が 1 つ以上あるか (write hook / abort hook の早期 bail に使う)。</summary>
+    public bool HasAnyColumns => _columns.Count > 0;
+
+    // ===== Phase 5c: write 経路統合 =====
+
+    /// <summary>
+    /// <see cref="GraphTransaction.SetProperty"/> から呼ばれ、(kind, keyId) が列なら同 tx で
+    /// 列を維持する。scalar なら <see cref="ScalarColumnStore.Set"/>、scalar でなくなった
+    /// (overflow へ逃げた) なら <see cref="ScalarColumnStore.Delete"/> で論理削除する
+    /// (列は scalar 値のみ保持するため)。
+    /// </summary>
+    public void OnSetProperty(EntityKind kind, long seq, PropertyKeyId keyId, in PropertyValue value, long txId)
+    {
+        if (!_columns.TryGetValue((kind, keyId.Value), out var col)) return;
+        if (TryScalarBits(in value, out long bits))
+            col.Set(seq, bits, txId);
+        else
+            col.Delete(seq, txId);
+    }
+
+    /// <summary>プロパティ除去: (kind, keyId) が列なら論理削除 (head に xmax)。</summary>
+    public void OnRemoveProperty(EntityKind kind, long seq, PropertyKeyId keyId, long txId)
+    {
+        if (_columns.TryGetValue((kind, keyId.Value), out var col))
+            col.Delete(seq, txId);
+    }
+
+    /// <summary>エンティティ削除: その kind の全列で seq を論理削除する。</summary>
+    public void OnDeleteEntity(EntityKind kind, long seq, long txId)
+    {
+        foreach (var kv in _columns)
+            if (kv.Key.Item1 == kind)
+                kv.Value.Delete(seq, txId);
+    }
+
+    /// <summary>
+    /// abort の before-image undo 後 (<c>ReloadStoreMeta</c> 経由) に呼ばれ、復元された head
+    /// ページから各列の in-memory cache を再構築する。head 値の正当性を回復する。
+    /// </summary>
+    public void ReloadColumns()
+    {
+        foreach (var kv in _columns)
+            kv.Value.ReloadFromPages();
+    }
+
+    /// <summary>abort 完了後 (OnRolledBack) に呼ばれ、中止 tx が積んだ delta 版を全列から捨てる。</summary>
+    public void PruneAbortedTx(long txId)
+    {
+        foreach (var kv in _columns)
+            kv.Value.PruneTx(txId);
+    }
 
     /// <summary>列を登録し、現データから構築する。既存なら no-op で false。</summary>
     public bool CreateColumn(EntityKind kind, int keyId)
@@ -51,7 +116,7 @@ internal sealed class ColumnManager
             throw new NotSupportedException($"columnar is only supported for Node / Relationship, got {kind}.");
         if (_columns.ContainsKey((kind, keyId))) return false;
 
-        byte tenantId = _catalog.Register(kind, keyId);
+        byte tenantId = Catalog.Register(kind, keyId);
         var store = new ScalarColumnStore(_container.OpenTenant(tenantId, PageKind.ItemPointerMap));
         BuildFromData(store, kind, keyId);
         _columns[(kind, keyId)] = store;
@@ -62,7 +127,7 @@ internal sealed class ColumnManager
     public bool DropColumn(EntityKind kind, int keyId)
     {
         if (!_columns.Remove((kind, keyId))) return false;
-        _catalog.Unregister(kind, keyId);
+        Catalog.Unregister(kind, keyId);
         return true;
     }
 
@@ -90,17 +155,23 @@ internal sealed class ColumnManager
         {
             var cur = pe.Current;
             if (cur.KeyId != key) continue;
-            if (!InlinePropertyCodec.IsScalar(cur.Value.Type)) return false;
-            bits = cur.Value.Type switch
-            {
-                PropertyValueType.Bool => cur.Value.BoolValue ? 1L : 0L,
-                PropertyValueType.Int32 => cur.Value.Int32Value,
-                PropertyValueType.Int64 => cur.Value.Int64Value,
-                PropertyValueType.Double => BitConverter.DoubleToInt64Bits(cur.Value.DoubleValue),
-                _ => 0L,
-            };
-            return true;
+            return TryScalarBits(cur.Value, out bits);
         }
         return false;
+    }
+
+    /// <summary>scalar (Bool/Int32/Int64/Double) を 8B にパックする。非 scalar は false。</summary>
+    private static bool TryScalarBits(in PropertyValue value, out long bits)
+    {
+        if (!InlinePropertyCodec.IsScalar(value.Type)) { bits = 0; return false; }
+        bits = value.Type switch
+        {
+            PropertyValueType.Bool => value.BoolValue ? 1L : 0L,
+            PropertyValueType.Int32 => value.Int32Value,
+            PropertyValueType.Int64 => value.Int64Value,
+            PropertyValueType.Double => BitConverter.DoubleToInt64Bits(value.DoubleValue),
+            _ => 0L,
+        };
+        return true;
     }
 }

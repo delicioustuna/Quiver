@@ -36,6 +36,8 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     private const byte TenantNodeMap = 14;
     // ARCH-5c Phase 4: VersionedRelationshipStore の ItemPointerMap テナント。
     private const byte TenantRelMap = 15;
+    // ARCH-5c Phase 5b: opt-in 列の catalog テナント (各列テナントは ColumnCatalog が 64+ で採番)。
+    private const byte TenantColumnCatalog = 16;
 
     public IGraphStorageBackend Open(string filePath, GraphDatabaseOptions options)
     {
@@ -148,6 +150,12 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var relTypeTokens = new RelationshipTypeTokenStore(container.OpenTenant(TenantRelTypeTok, PageKind.TokenRecord));
         var propKeyTokens = new PropertyKeyTokenStore(container.OpenTenant(TenantPropKeyTok, PageKind.TokenRecord));
 
+        // ARCH-5c Phase 5c: 列マネージャを startup で eager に開く (5b の遅延生成から昇格)。
+        // 登録済み列の head cache を開いておくことで (1) write 経路が列を維持でき、
+        // (2) abort の ReloadStoreMeta から列 cache を head ページへ再同期できる。
+        var columnManager = new ColumnManager(
+            container, TenantColumnCatalog, relStore, nodeStore, propStore);
+
         // FT-15 / ARCH-4: abort (CLR undo) 後に container のテナント記述子 / page table と store メタを
         // 再同期するコールバック。AbortUndoHandler が before-image 復元後に呼ぶ。
         void ReloadStoreMeta()
@@ -165,6 +173,10 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             // ARCH-4 増分6: epoch テナントも container WAL 対象。abort で CLR がページを戻すので
             // in-memory の epoch / baseRelHwm / tombstone を読み直してディスクと一致させる。
             adjEpoch?.Reload();
+            // ARCH-5c Phase 5c: 列 head ページも container WAL 対象。abort の before-image undo で
+            // head ページが tx 開始前へ戻るので、列の in-memory cache をページから再構築して
+            // head 値の正当性を回復する。delta の中止 tx 分は OnRolledBack の PruneAbortedTx で掃除。
+            columnManager.ReloadColumns();
         }
 
         var vectors = new InMemoryVectorStore();
@@ -237,6 +249,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             filePath, container, pageManager, wal, nodeStore, relStore, propStore,
             labelTokens, relTypeTokens, propKeyTokens, indexManager,
             adjStore, txManager, access, vectors,
+            columnManager,
             labelIndex,
             options.LogicalMutationSink,
             options.TargetRecoveryTime,

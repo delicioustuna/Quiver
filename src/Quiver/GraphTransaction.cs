@@ -18,6 +18,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     // 永続化コミットされた後にバッチをシンクへ引き渡す。
     private readonly ILogicalMutationSink? _logicalSink;
     private List<LogicalMutation>? _logicalBuffer;
+    // ARCH-5c Phase 5c: opt-in 列の write 維持。null = 列無効 (read-only tx 含む)。
+    private readonly Storage.Records.ColumnManager? _columns;
 
     internal GraphTransaction(
         ITransaction inner,
@@ -25,7 +27,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         ITokenStore<RelationshipTypeId> relTypeTokens,
         ITokenStore<PropertyKeyId> propKeyTokens,
         bool isReadOnly = false,
-        ILogicalMutationSink? logicalSink = null)
+        ILogicalMutationSink? logicalSink = null,
+        Storage.Records.ColumnManager? columns = null)
     {
         _inner = inner;
         _labelTokens = labelTokens;
@@ -33,11 +36,20 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         _propKeyTokens = propKeyTokens;
         IsReadOnly = isReadOnly;
         _logicalSink = logicalSink;
+        // ARCH-5c Phase 5c: 登録済み列があるときだけ列維持を有効化し、ホット path の
+        // 余計な hook 登録 / dict lookup を避ける。
+        _columns = columns is { HasAnyColumns: true } ? columns : null;
         if (_logicalSink != null)
         {
             // WAL フラッシュが完了した後にのみバッファをシンクへ引き渡す。
             // OnCommitted フックはロールバックやコミット失敗時には発火しない。
             _inner.OnCommitted(FlushLogicalBuffer);
+        }
+        if (_columns != null)
+        {
+            // abort 後: before-image undo + ReloadColumns で head は復元済み。中止 tx が
+            // 積んだ delta 版 (不可視ゴミ) をこの tx スコープで掃除する。
+            _inner.OnRolledBack(() => _columns.PruneAbortedTx(_inner.Id.Value));
         }
     }
 
@@ -95,6 +107,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
             DeleteRelationship(rid);
 
         _inner.Nodes.Free(nodeId);
+        // ARCH-5c Phase 5c: ノード削除に伴い、その kind の全列で seq を論理削除する。
+        _columns?.OnDeleteEntity(Core.EntityKind.Node, nodeId.Sequence, _inner.Id.Value);
         if (_logicalSink != null)
             RecordLogical(LogicalMutation.DeleteNode(nodeId));
     }
@@ -221,6 +235,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         // delta 側 ID に対してはストアは no-op。
         _inner.AdjacencyBlocks?.Tombstone(relId);
         _inner.Relationships.Delete(_inner.Nodes, relId);
+        // ARCH-5c Phase 5c: リレーション削除に伴い、その kind の全列で seq を論理削除する。
+        _columns?.OnDeleteEntity(Core.EntityKind.Relationship, relId.Sequence, _inner.Id.Value);
         if (_logicalSink != null)
             RecordLogical(LogicalMutation.DeleteRelationship(relId));
     }
@@ -251,6 +267,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
             RecordLogical(LogicalMutation.SetNodeProperty(nodeId, key, in captured));
         }
         SetNodeProperty(nodeId, keyId, in value);
+        // ARCH-5c Phase 5c: 列化済み key なら同 tx で列を維持する。
+        _columns?.OnSetProperty(Core.EntityKind.Node, nodeId.Sequence, keyId, in value, _inner.Id.Value);
     }
 
     public void SetProperty(RelationshipId relId, string key, in PropertyValue value)
@@ -262,6 +280,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
             RecordLogical(LogicalMutation.SetRelationshipProperty(relId, key, in captured));
         }
         SetRelationshipProperty(relId, keyId, in value);
+        // ARCH-5c Phase 5c: 列化済み key なら同 tx で列を維持する。
+        _columns?.OnSetProperty(Core.EntityKind.Relationship, relId.Sequence, keyId, in value, _inner.Id.Value);
     }
 
     private void SetRelationshipProperty(RelationshipId relId, PropertyKeyId keyId, in PropertyValue value)
@@ -389,8 +409,13 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                 }
             }
         }
-        if (removed && _logicalSink != null)
-            RecordLogical(LogicalMutation.RemoveNodeProperty(nodeId, key));
+        if (removed)
+        {
+            // ARCH-5c Phase 5c: 列化済み key なら列も論理削除する。
+            _columns?.OnRemoveProperty(Core.EntityKind.Node, nodeId.Sequence, keyId, _inner.Id.Value);
+            if (_logicalSink != null)
+                RecordLogical(LogicalMutation.RemoveNodeProperty(nodeId, key));
+        }
     }
 
     public PropertyValue GetProperty(NodeId nodeId, string key)

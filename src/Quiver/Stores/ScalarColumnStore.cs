@@ -150,6 +150,26 @@ internal sealed class ScalarColumnStore
         RebuildCacheFromPages();
     }
 
+    /// <summary>
+    /// Phase 5c (abort): 中止した <paramref name="txId"/> が積んだ delta 版を捨てる。head は
+    /// abort の before-image undo + <see cref="ReloadFromPages"/> で旧版へ復元済みなので、
+    /// その tx が退避させた (xmax==txId) / 自分で再上書きした (xmin==txId) delta エントリは
+    /// 不可視のゴミになる。これを除去して slow leak を防ぐ。回収数を返す。
+    /// 並行する他 tx の delta (別 txId) には触れない。
+    /// </summary>
+    public int PruneTx(long txId)
+    {
+        int removed = 0;
+        foreach (var kv in _delta)
+        {
+            var list = kv.Value;
+            int before = list.Count;
+            list.RemoveAll(e => e.Xmin == txId || e.Xmax == txId);
+            removed += before - list.Count;
+        }
+        return removed;
+    }
+
     // --- private ---
 
     private void WriteHeadPage(long seq, long value, long xmin, long xmax)

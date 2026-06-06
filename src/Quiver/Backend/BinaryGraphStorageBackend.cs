@@ -52,6 +52,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         TransactionManager txManager,
         BinaryGraphAccessMethods access,
         IVectorStore vectors,
+        ColumnManager columnManager,
         LabelNodeIndex? labelIndex = null,
         ILogicalMutationSink? logicalSink = null,
         TimeSpan? adaptiveTargetRecoveryTime = null,
@@ -74,6 +75,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _indexManager = indexManager;
         _adjStore = adjStore;
         _txManager = txManager;
+        _columnManager = columnManager;
 
         _schema = new SchemaApi(_labelTokens, _relTypeTokens, _propKeyTokens, _indexManager);
         // FT-22: index manager と label index を DiagnosticsApi に渡して
@@ -102,18 +104,18 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     // ARCH-4 増分8: *.quiver の親ディレクトリ (operational metadata = migrations.history の保存先)。
     public string DataDirectory => Path.GetDirectoryName(_containerPath) is { Length: > 0 } d ? d : ".";
 
-    // ARCH-5c Phase 5b: opt-in 列。catalog はテナント 16、各列テナントは 64+ (ColumnCatalog 採番)。
-    // 5b では遅延生成 (列操作の初回に catalog を読み登録済み列を開く)。5c で startup eager 化する。
-    private const byte ColumnCatalogTenant = 16;
-    private ColumnManager? _columnManager;
-    private ColumnManager ColumnMgr => _columnManager ??= new ColumnManager(
-        _container.OpenTenant(ColumnCatalogTenant, PageKind.Header),
-        _container, _relStore, _nodeStore, _propStore);
+    // ARCH-5c Phase 5b/5c: opt-in 列。catalog はテナント 16、各列テナントは 64+ (ColumnCatalog 採番)。
+    // 5c で startup eager 化 (factory が構築して注入)。write 経路 (GraphTransaction) と abort hook
+    // (ReloadStoreMeta → ReloadColumns) の両方から参照される。
+    private readonly ColumnManager _columnManager;
 
-    internal bool CreateColumn(EntityKind kind, int keyId) => ColumnMgr.CreateColumn(kind, keyId);
-    internal bool DropColumn(EntityKind kind, int keyId) => ColumnMgr.DropColumn(kind, keyId);
+    /// <summary>Phase 5c: write 経路 (列維持) のため GraphTransaction へ渡す列マネージャ。</summary>
+    internal ColumnManager Columns => _columnManager;
+
+    internal bool CreateColumn(EntityKind kind, int keyId) => _columnManager.CreateColumn(kind, keyId);
+    internal bool DropColumn(EntityKind kind, int keyId) => _columnManager.DropColumn(kind, keyId);
     internal bool TryGetColumn(EntityKind kind, int keyId, out ScalarColumnStore column)
-        => ColumnMgr.TryGetColumn(kind, keyId, out column);
+        => _columnManager.TryGetColumn(kind, keyId, out column);
 
     /// <summary>
     /// Phase 5b 検証用 (interim): 列の可視値合計。read 経路が無い 5b で登録/構築/永続を確認するため。
@@ -146,7 +148,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             readOnly,
             // BA-7: skip the recorder entirely for read-only transactions and
             // when no sink is configured so the hot path stays allocation-free.
-            readOnly ? null : _logicalSink);
+            readOnly ? null : _logicalSink,
+            // ARCH-5c Phase 5c: read-only tx は書かないので列維持は不要。
+            readOnly ? null : _columnManager);
     }
 
     /// <summary>
