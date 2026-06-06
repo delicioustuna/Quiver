@@ -102,6 +102,35 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     // ARCH-4 増分8: *.quiver の親ディレクトリ (operational metadata = migrations.history の保存先)。
     public string DataDirectory => Path.GetDirectoryName(_containerPath) is { Length: > 0 } d ? d : ".";
 
+    // ARCH-5c Phase 5b: opt-in 列。catalog はテナント 16、各列テナントは 64+ (ColumnCatalog 採番)。
+    // 5b では遅延生成 (列操作の初回に catalog を読み登録済み列を開く)。5c で startup eager 化する。
+    private const byte ColumnCatalogTenant = 16;
+    private ColumnManager? _columnManager;
+    private ColumnManager ColumnMgr => _columnManager ??= new ColumnManager(
+        _container.OpenTenant(ColumnCatalogTenant, PageKind.Header),
+        _container, _relStore, _nodeStore, _propStore);
+
+    internal bool CreateColumn(EntityKind kind, int keyId) => ColumnMgr.CreateColumn(kind, keyId);
+    internal bool DropColumn(EntityKind kind, int keyId) => ColumnMgr.DropColumn(kind, keyId);
+    internal bool TryGetColumn(EntityKind kind, int keyId, out ScalarColumnStore column)
+        => ColumnMgr.TryGetColumn(kind, keyId, out column);
+
+    /// <summary>
+    /// Phase 5b 検証用 (interim): 列の可視値合計。read 経路が無い 5b で登録/構築/永続を確認するため。
+    /// 5d で optimizer/operator 経由の本 read 経路に置き換わる。
+    /// </summary>
+    internal long ColumnProjectSumForTest(EntityKind kind, int keyId)
+    {
+        if (!TryGetColumn(kind, keyId, out var col)) return -1;
+        var tx = _txManager.Begin(IsolationLevel.SnapshotIsolation);
+        try
+        {
+            _ = tx.Relationships.Read(new RelationshipId(0)); // MvccContext を activate
+            return col.ProjectSum(MvccContext.CurrentSnapshot, MvccContext.CurrentTxId, MvccContext.CurrentCommitted!);
+        }
+        finally { tx.Dispose(); }
+    }
+
     public ITransactionManager Transactions => _txManager;
     public ISchemaApi Schema => _schema;
     public IDiagnosticsApi Diagnostics => _diagnostics;

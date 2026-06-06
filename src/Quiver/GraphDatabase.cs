@@ -219,6 +219,39 @@ public sealed class GraphDatabase : IDisposable
             tx.Relationships, tx.Properties, keyId, expectedType);
     }
 
+    // ===== ARCH-5c Phase 5b: opt-in 列指向 (CreateColumn / DropColumn) =====
+
+    private BinaryGraphStorageBackend RequireBinaryForColumns()
+        => _backend as BinaryGraphStorageBackend
+           ?? throw new NotSupportedException("列指向 (CreateColumn) は binary backend 専用です。");
+
+    /// <summary>
+    /// Phase 5b: 指定 <paramref name="kind"/> の scalar プロパティ <paramref name="propertyKey"/> を
+    /// 列化登録する (opt-in)。現データから列を構築し登録を永続化する。既に列化済みなら false。
+    /// <para>5b 時点では登録 + 初期構築まで。以後の write での自動維持は 5c で配線する。</para>
+    /// </summary>
+    public bool CreateColumn(Core.EntityKind kind, string propertyKey)
+    {
+        ArgumentNullException.ThrowIfNull(propertyKey);
+        var keyId = _backend.Schema.GetOrCreatePropertyKey(propertyKey);
+        return RequireBinaryForColumns().CreateColumn(kind, keyId.Value);
+    }
+
+    /// <summary>Phase 5b: 列化登録を解除する。未登録なら false。</summary>
+    public bool DropColumn(Core.EntityKind kind, string propertyKey)
+    {
+        ArgumentNullException.ThrowIfNull(propertyKey);
+        if (!_backend.Schema.TryGetPropertyKeyId(propertyKey, out var keyId)) return false;
+        return RequireBinaryForColumns().DropColumn(kind, keyId.Value);
+    }
+
+    /// <summary>Phase 5b 検証用 (interim、5d で本 read 経路へ): 列の可視値合計。未登録は -1。</summary>
+    internal long ColumnProjectSumForTest(Core.EntityKind kind, string propertyKey)
+    {
+        if (!_backend.Schema.TryGetPropertyKeyId(propertyKey, out var keyId)) return -1;
+        return RequireBinaryForColumns().ColumnProjectSumForTest(kind, keyId.Value);
+    }
+
     /// <summary>
     /// PW-14 / codex_advice_3 7.6 節。現在のリレーションシップ状態から不変ベースビューを再構築し、
     /// tombstone を破棄してエポックを進める。本呼び出し以降、生存中のエッジはすべてベースビューから

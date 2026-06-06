@@ -396,9 +396,11 @@ namespace Quiver
         public Quiver.GraphStats CollectStats(int powerNodeThreshold) { }
         public Quiver.GraphStats CollectStats(int powerNodeThreshold, double denseThreshold) { }
         public void CompactAdjacency() { }
+        public bool CreateColumn(Quiver.Core.EntityKind kind, string propertyKey) { }
         public Quiver.Core.IGraphEngine CreateEmbeddingEngine(Quiver.Core.IVectorStore vectors, Quiver.Core.IVectorCatalog catalog) { }
         public void CreateSnapshot(string targetFilePath, Quiver.SnapshotOptions? options = null) { }
         public void Dispose() { }
+        public bool DropColumn(Quiver.Core.EntityKind kind, string propertyKey) { }
         public System.Collections.Generic.IReadOnlyList<Quiver.Migrations.MigrationHistoryEntry> GetMigrationHistory() { }
         public System.Threading.Tasks.Task<Quiver.Migrations.MigrationResult> MigrateAsync(System.Collections.Generic.IEnumerable<Quiver.Migrations.IMigration> migrations, System.Threading.CancellationToken cancellationToken = default) { }
         public Quiver.Storage.Records.IGraphSnapshotView OpenSnapshotView() { }
