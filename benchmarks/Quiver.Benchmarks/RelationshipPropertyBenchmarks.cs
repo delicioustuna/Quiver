@@ -26,6 +26,7 @@ public class RelationshipPropertyBenchmarks
     private RelationshipId[] _relIds = null!;
     private IGraphTransaction _readTx = null!;
     private NodeId _hub;
+    private Quiver.Storage.Records.IRelationshipPropertyJoinIndex _weightColumn = null!;
     private readonly Random _rng = new(42);
 
     [GlobalSetup]
@@ -58,6 +59,10 @@ public class RelationshipPropertyBenchmarks
         }
 
         _readTx = _db.BeginTransaction();
+
+        // Phase 5 列指向 proto: dense Sequence→value 列セグメント (join index) を 1 回構築。
+        // projection はこれを逐次走査でき per-rel page pin / chain walk を回避する。
+        _weightColumn = _db.BuildRelationshipPropertyJoinIndex("weight", PropertyValueType.Int64);
     }
 
     [GlobalCleanup]
@@ -86,12 +91,23 @@ public class RelationshipPropertyBenchmarks
         return rel;
     }
 
-    [Benchmark(Description = "ProjectionScan weight over all rels")]
+    [Benchmark(Description = "ProjectionScan weight (inline read)")]
     public long ProjectionScanWeights()
     {
         long sum = 0;
         for (int i = 0; i < _relIds.Length; i++)
             sum += _readTx.GetProperty(_relIds[i], "weight").Int64Value;
+        return sum;
+    }
+
+    [Benchmark(Description = "ProjectionScan weight (columnar dense array)")]
+    public long ProjectionScanWeightsColumnar()
+    {
+        long sum = 0;
+        var key = _weightColumn.KeyId;
+        for (int i = 0; i < _relIds.Length; i++)
+            if (_weightColumn.TryGetScalar(_relIds[i], key, out _, out long bits))
+                sum += bits;
         return sum;
     }
 }
