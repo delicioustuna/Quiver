@@ -110,4 +110,22 @@ public class RelationshipPropertyBenchmarks
                 sum += bits;
         return sum;
     }
+
+    // Case B: 単一エッジ point read を列指向 (dense array) で。inline の GetProperty(warm) と比較し、
+    // 列指向が point read を速くしない (むしろ overhead 側) ことを確認する。
+    [Benchmark(Description = "PointRead weight (columnar)")]
+    public long PointReadColumnar()
+    {
+        var id = _relIds[_rng.Next(_relIds.Length)];
+        return _weightColumn.TryGetScalar(id, _weightColumn.KeyId, out _, out long bits) ? bits : 0;
+    }
+
+    // 列の build/rebuild コスト (全 rel を 1 パス走査)。常時 RW では commit のたびにこれが要るため、
+    // 「rebuild 1 回 = projection scan 何回分か」= join index 償却閾値を可視化する。
+    [Benchmark(Description = "Build column (rebuild cost)")]
+    public long BuildColumn()
+    {
+        var idx = _db.BuildRelationshipPropertyJoinIndex("weight", PropertyValueType.Int64);
+        return idx.EntryCount;
+    }
 }
