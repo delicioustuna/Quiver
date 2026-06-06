@@ -29,4 +29,6 @@
 - 対象ワークロード (mutation:projection 比) を製品要件として確認済み。
 
 ## 結論欄
-- (進行中)
+- 進行中。完了: 5a (4c0ca8f, 列ストア永続基盤) / 5b (bfdee14, opt-in 登録+catalog) / 5c (ef5b692, write 経路統合)。
+- 5c メモ: abort 正当性は MVCC 可視性 (before-image undo → ReloadColumns で head cache 再構築 → OnRolledBack で delta prune)。delta は in-memory 維持 (永続 delta-log は 5e/compaction で再検討、ユーザ選択)。
+- 残: 5d (read/optimizer 統合) → 5e (compaction) → 5f (全型+node列+多key) → 5g (hardening / format bump 確定)。
