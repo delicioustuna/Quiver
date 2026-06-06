@@ -45,11 +45,13 @@ internal sealed class VersionedRecordHeap
 
     private static readonly PageId HeaderPageId = new(1);
     private const int MetaAppendPage = 0;      // int64
+    private const int MetaFreePageHead = 8;    // int64 (ARCH-5c Phase 6: 空きページ free list 先頭、0 = 空)
     private const int MetaFormatVersion = 31;  // byte
 
     private readonly IPagedFile _file;
     private readonly ItemPointerMap _map;
-    private long _appendPage; // 末尾 append 先データページ (< 2 で未割当)
+    private long _appendPage;    // 末尾 append 先データページ (< 2 で未割当)
+    private long _freePageHead;  // 空きページ free list 先頭 (< 2 で空)。各空きページ body[0..8) に次リンク。
 
     public VersionedRecordHeap(IPagedFile file, ItemPointerMap map)
     {
@@ -59,6 +61,7 @@ internal sealed class VersionedRecordHeap
         {
             _file.AllocatePage(PageKind.Header);
             _appendPage = 0;
+            _freePageHead = 0;
             SaveHeader(initialise: true);
         }
         else
@@ -288,13 +291,15 @@ internal sealed class VersionedRecordHeap
 
         // head は常に保持。非 head のうち reclaimable を tombstone、生存版を kept に。
         var kept = new List<ItemPointer> { chain[0].Ptr };
+        HashSet<long>? touched = null;
         int removed = 0;
         for (int i = 1; i < chain.Count; i++)
         {
             if (reclaimable(chain[i].Xmin, chain[i].Xmax))
             {
-                using var ph = _file.PinForWrite(new PageId(chain[i].Ptr.PageId));
-                new SlottedPage(ph.Data).Delete(chain[i].Ptr.Slot);
+                using (var ph = _file.PinForWrite(new PageId(chain[i].Ptr.PageId)))
+                    new SlottedPage(ph.Data).Delete(chain[i].Ptr.Slot);
+                (touched ??= new HashSet<long>()).Add(chain[i].Ptr.PageId);
                 removed++;
             }
             else
@@ -313,6 +318,9 @@ internal sealed class VersionedRecordHeap
             if (sp.TryGetMutable(kept[j].Slot, out var rec))
                 BinaryPrimitives.WriteInt64LittleEndian(rec[OffNext..], next.Pack());
         }
+        // ARCH-5c Phase 6: tombstone で空になったページを free list へ回収する。
+        if (touched != null)
+            foreach (var pg in touched) FreePageIfEmpty(pg);
         return removed;
     }
 
@@ -324,6 +332,7 @@ internal sealed class VersionedRecordHeap
     {
         var ptr = _map.Get(seq);
         long guard = _map.Hwm + 2;
+        HashSet<long>? touched = null;
         while (!ptr.IsNull)
         {
             if (--guard < 0)
@@ -336,9 +345,14 @@ internal sealed class VersionedRecordHeap
                 next = ItemPointer.Unpack(BinaryPrimitives.ReadInt64LittleEndian(rec[OffNext..]));
                 sp.Delete(ptr.Slot);
             }
+            (touched ??= new HashSet<long>()).Add(ptr.PageId);
             ptr = next;
         }
         _map.Set(seq, ItemPointer.Null);
+        // ARCH-5c Phase 6: 空になったページを free list へ回収する (チェーン walk 後にまとめて、
+        // 同一ページの多重 free を避ける)。
+        if (touched != null)
+            foreach (var pg in touched) FreePageIfEmpty(pg);
     }
 
     /// <summary>FT-15 / recovery 用: ヘッダから append page を読み直す。</summary>
@@ -380,8 +394,9 @@ internal sealed class VersionedRecordHeap
                 return new ItemPointer(_appendPage, slot);
         }
 
-        // 新規データページを割り当てて追記。
-        var pid = _file.AllocatePage(PageKind.SlottedHeap);
+        // ARCH-5c Phase 6: 末尾ページが満杯なら、まず vacuum 回収済みの空きページを再利用する
+        // (free list が空のときだけ物理ページを新規割り当て)。これで churn 下の物理成長を抑える。
+        PageId pid = PopFreePageOrAllocate();
         int newSlot;
         using (var ph = _file.PinForWrite(pid))
         {
@@ -393,6 +408,42 @@ internal sealed class VersionedRecordHeap
         _appendPage = pid.Value;
         SaveHeader();
         return new ItemPointer(pid.Value, newSlot);
+    }
+
+    /// <summary>空きページ free list から 1 ページ pop する。空なら物理ページを新規割り当て。</summary>
+    private PageId PopFreePageOrAllocate()
+    {
+        if (_freePageHead >= 2)
+        {
+            var pid = new PageId(_freePageHead);
+            long next;
+            using (var h = _file.PinForRead(pid))
+                next = BinaryPrimitives.ReadInt64LittleEndian(h.Data); // body[0..8) = 次リンク
+            _freePageHead = next;
+            return pid;
+        }
+        return _file.AllocatePage(PageKind.SlottedHeap);
+    }
+
+    /// <summary>
+    /// ARCH-5c Phase 6: live スロットが 0 になった heap データページを free list へ回収する。
+    /// 現在の append 先ページは除外する (継続して追記するため)。vacuum (Remove/PruneDeadVersions)
+    /// から、スロット削除後に touch したページに対して呼ぶ。
+    /// </summary>
+    private void FreePageIfEmpty(long pageId)
+    {
+        if (pageId < 2 || pageId == _appendPage) return;
+        // 読取で空判定 (空でなければ dirty にしない)。
+        bool empty;
+        using (var h = _file.PinForRead(new PageId(pageId)))
+            empty = new ReadOnlySlottedPage(h.Data).HasNoLiveSlots();
+        if (!empty) return;
+        // body[0..8) に旧 free head を書き、この空きページを新 head にする。
+        // (live データは無いので slotted ヘッダを潰しても安全。再利用時に Init で上書きする)
+        using (var ph = _file.PinForWrite(new PageId(pageId)))
+            BinaryPrimitives.WriteInt64LittleEndian(ph.Data, _freePageHead);
+        _freePageHead = pageId;
+        SaveHeader();
     }
 
     private void StampXmaxAt(ItemPointer ptr, long xmax)
@@ -407,6 +458,7 @@ internal sealed class VersionedRecordHeap
     {
         using var h = _file.PinForRead(HeaderPageId);
         _appendPage = BinaryPrimitives.ReadInt64LittleEndian(h.Data[MetaAppendPage..]);
+        _freePageHead = BinaryPrimitives.ReadInt64LittleEndian(h.Data[MetaFreePageHead..]);
     }
 
     private void CheckFormatVersion()
@@ -421,6 +473,7 @@ internal sealed class VersionedRecordHeap
     {
         using var ph = _file.PinForWrite(HeaderPageId);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaAppendPage..], _appendPage);
+        BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaFreePageHead..], _freePageHead);
         if (initialise)
             ph.Data[MetaFormatVersion] = FormatVersion.Current;
     }

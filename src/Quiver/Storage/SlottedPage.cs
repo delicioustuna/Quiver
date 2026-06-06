@@ -143,6 +143,18 @@ internal ref struct SlottedPage
         return true;
     }
 
+    /// <summary>
+    /// live スロット (off != 0) が 1 つも無いか。ARCH-5c Phase 6: vacuum が空になった heap
+    /// ページを free-page list へ回収する判定に使う (全 version が tombstone 済みのページ)。
+    /// </summary>
+    public bool HasNoLiveSlots()
+    {
+        int sc = SlotCount;
+        for (int i = 0; i < sc; i++)
+            if (ReadSlot(i).off != 0) return false;
+        return true;
+    }
+
     /// <summary>slot を tombstone する。バイトの物理回収は <see cref="Compact"/> まで遅延。</summary>
     public bool Delete(int slot)
     {
@@ -232,6 +244,18 @@ internal readonly ref struct ReadOnlySlottedPage
         int len = BinaryPrimitives.ReadUInt16LittleEndian(_body[(p + 2)..]);
         if (off == 0) return false;
         record = _body.Slice(off, len);
+        return true;
+    }
+
+    /// <summary>live スロット (off != 0) が 1 つも無いか。ARCH-5c Phase 6 の free-page 判定 (読取側)。</summary>
+    public bool HasNoLiveSlots()
+    {
+        int sc = SlotCount;
+        for (int i = 0; i < sc; i++)
+        {
+            int p = SlottedPage.SlotDirStart + i * SlottedPage.SlotEntrySize;
+            if (BinaryPrimitives.ReadUInt16LittleEndian(_body[p..]) != 0) return false;
+        }
         return true;
     }
 }

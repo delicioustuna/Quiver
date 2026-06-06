@@ -302,6 +302,40 @@ public class VersionedRelationshipStoreTests : IDisposable
     }
 
     [Fact]
+    public void Vacuum_frees_heap_pages_for_reuse_under_churn()
+    {
+        var a = _nodes.Allocate(new LabelId(1));
+        var b = _nodes.Allocate(new LabelId(1));
+        var committed = new CommittedTxRegistry();
+        const int N = 2000;
+
+        // round 1: 多数の rel を inline property 付きで作成 (heap ページを埋める)。
+        var rels = new List<RelationshipId>();
+        for (int i = 0; i < N; i++)
+        {
+            var r = _rels.Create(_nodes, a, b, new RelationshipTypeId(0));
+            _rels.SetInlineProperty(r, new PropertyKeyId(1), PropertyValue.FromInt64(i));
+            rels.Add(r);
+        }
+        long pagesRound1 = _rels.UnderlyingFile.PageCount;
+
+        // 全削除 → vacuum で物理回収 (空ページは free list へ)。
+        foreach (var r in rels) _rels.Delete(_nodes, r);
+        _rels.VacuumDeadVersions(_nodes, long.MaxValue, committed);
+
+        // round 2: 再び多数作成 → free list のページを再利用し、ファイルはほぼ成長しないはず。
+        for (int i = 0; i < N; i++)
+        {
+            var r = _rels.Create(_nodes, a, b, new RelationshipTypeId(0));
+            _rels.SetInlineProperty(r, new PropertyKeyId(1), PropertyValue.FromInt64(i));
+        }
+        long pagesRound2 = _rels.UnderlyingFile.PageCount;
+
+        // 回収が効いていれば round2 は round1 とほぼ同じ (倍化しない)。
+        pagesRound2.Should().BeLessThan(pagesRound1 + 5);
+    }
+
+    [Fact]
     public void Vacuum_reclaims_dead_relationships_and_rebuilds_chain()
     {
         var a = _nodes.Allocate(new LabelId(1));
