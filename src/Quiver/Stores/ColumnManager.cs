@@ -132,6 +132,18 @@ internal sealed class ColumnManager
             kv.Value.PruneTx(txId);
     }
 
+    /// <summary>
+    /// Phase 5e: vacuum から呼ばれ、全列で visibility <paramref name="horizon"/> 未満かつ commit 済みの
+    /// 超過 delta 版を merge する (どの snapshot からも不要になった旧版を回収)。回収版数の合計を返す。
+    /// </summary>
+    public int Compact(long horizon, CommittedTxRegistry committed)
+    {
+        int removed = 0;
+        foreach (var kv in _columns)
+            removed += kv.Value.Merge(horizon, committed);
+        return removed;
+    }
+
     /// <summary>列を登録し、現データから構築する。既存なら no-op で false。</summary>
     public bool CreateColumn(EntityKind kind, int keyId)
     {

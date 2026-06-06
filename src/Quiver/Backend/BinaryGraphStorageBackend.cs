@@ -252,7 +252,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         // WAL の FileTruncate レコード経由で crash recovery に対する冪等再生を保証する。
         var vac = new Vacuum(
             _nodeStore, _relStore, _propStore,
-            _txManager, _txManager.CommittedRegistry, _wal);
+            _txManager, _txManager.CommittedRegistry, _wal, _columnManager);
         return vac.Run(options);
     }
 

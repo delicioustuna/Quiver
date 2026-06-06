@@ -69,6 +69,7 @@ public enum VacuumTarget
 /// <param name="HorizonTxId">この実行で採用した visibility horizon。これ未満の xmax を持つ dead version が回収対象。</param>
 /// <param name="Skipped">前提 (アクティブ tx 0) を満たせず未実行のとき true。</param>
 /// <param name="TruncatedPages">OP-5: 物理 truncate で nodes/rels/props 3 ストア合計から削減したページ数。</param>
+/// <param name="ReclaimedColumnVersions">ARCH-5c Phase 5e: 列 (opt-in) の delta から merge した超過版数。</param>
 public sealed record VacuumReport(
     int ReclaimedNodes,
     int ReclaimedRelationships,
@@ -77,4 +78,5 @@ public sealed record VacuumReport(
     long ElapsedMs,
     long HorizonTxId,
     bool Skipped,
-    long TruncatedPages = 0);
+    long TruncatedPages = 0,
+    int ReclaimedColumnVersions = 0);

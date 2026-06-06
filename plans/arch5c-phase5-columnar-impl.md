@@ -29,7 +29,8 @@
 - 対象ワークロード (mutation:projection 比) を製品要件として確認済み。
 
 ## 結論欄
-- 進行中。完了: 5a (4c0ca8f, 列ストア永続基盤) / 5b (bfdee14, opt-in 登録+catalog) / 5c (ef5b692, write 経路統合) / 5d (8284b2e, read/optimizer 統合)。
+- 進行中。完了: 5a (4c0ca8f, 列ストア永続基盤) / 5b (bfdee14, opt-in 登録+catalog) / 5c (ef5b692, write 経路統合) / 5d (8284b2e, read/optimizer 統合) / 5e (delta compaction を vacuum へ配線)。
 - 5c メモ: abort 正当性は MVCC 可視性 (before-image undo → ReloadColumns で head cache 再構築 → OnRolledBack で delta prune)。delta は in-memory 維持 (永続 delta-log は 5e/compaction で再検討、ユーザ選択)。
 - 5d メモ: full-scan 集約 (g.Nodes()/g.Relationships() の Sum/SumLong/Mean/Max/Min) を列スキャン化。ScalarColumnStore に scalar 型ヘッダ + TryAggregate、QueryOptimizer.ShouldUseColumnAggregate コスト判定、ITransaction.Snapshot/Committed 露出、g.Relationships() 新 API + PropertyLookup の EntityKind 対応。数値型のみ列、filter 付きは row fallback。列==行は「列あり vs DropColumn 後」で同値検証。opt-in 並行性 (CreateColumn 跨ぎ writer) は非保証→5g。
-- 残: 5e (compaction) → 5f (全型 breadth: Int32/Bool 列の集約 + 多key) → 5g (hardening / format bump 確定 / opt-in 並行性)。
+- 5e メモ: ColumnManager.Compact を Vacuum (node 回収後・committed prune 前) に配線。VacuumReport.ReclaimedColumnVersions 追加。AutoVacuum は backend.Vacuum() 経由で自動的に periodic 化。
+- 残: 5f (全型 breadth: Int32/Bool 列の集約 + 多key) → 5g (hardening / format bump 確定 / opt-in 並行性)。

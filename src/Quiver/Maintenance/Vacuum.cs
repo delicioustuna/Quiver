@@ -29,6 +29,8 @@ internal sealed class Vacuum : IVacuum
     private readonly TransactionManager _txManager;
     private readonly CommittedTxRegistry _committed;
     private readonly IWriteAheadLog? _wal;
+    // ARCH-5c Phase 5e: opt-in 列の delta compaction 対象 (列無し DB では null)。
+    private readonly ColumnManager? _columns;
 
     internal Vacuum(
         VersionedNodeStore nodeStore,
@@ -36,7 +38,8 @@ internal sealed class Vacuum : IVacuum
         PropertyStore propStore,
         TransactionManager txManager,
         CommittedTxRegistry committed,
-        IWriteAheadLog? wal = null)
+        IWriteAheadLog? wal = null,
+        ColumnManager? columns = null)
     {
         _nodeStore = nodeStore;
         _relStore = relStore;
@@ -44,6 +47,7 @@ internal sealed class Vacuum : IVacuum
         _txManager = txManager;
         _committed = committed;
         _wal = wal;
+        _columns = columns;
     }
 
     public VacuumReport Run(VacuumOptions? options = null)
@@ -98,6 +102,16 @@ internal sealed class Vacuum : IVacuum
             }
             QuiverEventSource.Log.SetVacuumProgress(75);
 
+            // ARCH-5c Phase 5e: opt-in 列の delta compaction。committed registry の prune より前に
+            // 走らせる (Merge は committed.IsCommitted を見るため、prune で presumed-committed 化される前に
+            // 判定する必要がある — dead version 回収と同じ順序制約)。targets に依らず常に実行する
+            // (in-memory delta の merge は安価で常に有益)。
+            int reclaimedColumnVersions = 0;
+            if (!dryRun && _columns != null)
+            {
+                reclaimedColumnVersions = _columns.Compact(horizon, _committed);
+            }
+
             // committed registry を horizon で prune。RecoveryHorizon を horizon-1 まで進めてから
             // 取り除かないと、データファイル上の xmin がまだ参照する committed tx を「未コミット」と
             // 誤判定してしまう。aborted tx は before-image undo で record ごと消えるため、horizon 未満の
@@ -143,7 +157,8 @@ internal sealed class Vacuum : IVacuum
                 ElapsedMs: sw.ElapsedMilliseconds,
                 HorizonTxId: horizon,
                 Skipped: false,
-                TruncatedPages: truncatedPages);
+                TruncatedPages: truncatedPages,
+                ReclaimedColumnVersions: reclaimedColumnVersions);
         }
         finally
         {

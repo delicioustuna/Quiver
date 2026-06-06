@@ -1,0 +1,89 @@
+using FluentAssertions;
+using Quiver;
+using Quiver.Api;
+using Quiver.Core;
+using Quiver.Storage.Records;
+using Xunit;
+
+namespace Quiver.Tests;
+
+/// <summary>
+/// ARCH-5c Phase 5 (5e): vacuum が列の超過 delta 版 (上書きで退避された旧版) を merge することを検証。
+/// 上書きを重ねて delta を積み、vacuum で horizon 未満の commit 済み版が回収され、かつ集約結果は
+/// 不変であることを確認する。
+/// </summary>
+public sealed class ColumnCompactionTests : IDisposable
+{
+    private readonly string _dir;
+    private readonly string _path;
+
+    public ColumnCompactionTests()
+    {
+        _dir = Path.Combine(Path.GetTempPath(), "quiver_colcompact_" + Guid.NewGuid().ToString("N"));
+        _path = Path.Combine(_dir, "graph.quiver");
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
+    }
+
+    [Fact]
+    public void Vacuum_merges_superseded_column_delta_versions()
+    {
+        using var db = GraphDatabase.Open(_path);
+        // 複数 rel を使う (heap version-chain guard は ~entity 数依存なので、単一 rel を多重上書き
+        // すると小グラフで guard に当たる — それは列とは無関係の既存ヒューリスティック)。
+        var rels = new RelationshipId[6];
+        using (var tx = db.BeginTransaction())
+        {
+            var a = tx.CreateNode("A");
+            var b = tx.CreateNode("B");
+            for (int i = 0; i < rels.Length; i++)
+            {
+                rels[i] = tx.CreateRelationship(a, b, "R");
+                tx.SetProperty(rels[i], "w", PropertyValue.FromInt64(1));
+            }
+            tx.Commit();
+        }
+        db.CreateColumn(EntityKind.Relationship, "w").Should().BeTrue();
+
+        // 各 rel を数回上書きして delta (超過版) を積む。各 commit が旧 head を delta へ退避する。
+        for (long round = 2; round <= 4; round++)
+        {
+            using var tx = db.BeginTransaction();
+            foreach (var r in rels)
+                tx.SetProperty(r, "w", PropertyValue.FromInt64(round));
+            tx.Commit();
+        }
+
+        // 最新値が見える (全 rel が w=4 → 合計 24)。
+        using (var tx = db.BeginReadOnlyTransaction())
+            tx.G(db.Schema).Relationships().SumLong("w").Should().Be(24);
+
+        // vacuum で horizon 未満の commit 済み超過版を回収する。
+        var report = db.Vacuum();
+        report.Skipped.Should().BeFalse();
+        report.ReclaimedColumnVersions.Should().BeGreaterThan(0);
+
+        // 回収後も最新値は不変。
+        using (var tx = db.BeginReadOnlyTransaction())
+            tx.G(db.Schema).Relationships().SumLong("w").Should().Be(24);
+
+        // 二度目の vacuum では回収するものが無い (冪等)。
+        db.Vacuum().ReclaimedColumnVersions.Should().Be(0);
+    }
+
+    [Fact]
+    public void Vacuum_without_columns_reports_zero_column_reclaim()
+    {
+        using var db = GraphDatabase.Open(_path);
+        using (var tx = db.BeginTransaction())
+        {
+            var n = tx.CreateNode("A");
+            tx.SetProperty(n, "x", PropertyValue.FromInt64(1));
+            tx.Commit();
+        }
+        db.Vacuum().ReclaimedColumnVersions.Should().Be(0);
+    }
+}

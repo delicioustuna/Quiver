@@ -1005,10 +1005,11 @@ namespace Quiver.Maintenance
     }
     public sealed class VacuumReport : System.IEquatable<Quiver.Maintenance.VacuumReport>
     {
-        public VacuumReport(int ReclaimedNodes, int ReclaimedRelationships, int ReclaimedProperties, int PrunedCommittedTxEntries, long ElapsedMs, long HorizonTxId, bool Skipped, long TruncatedPages = 0) { }
+        public VacuumReport(int ReclaimedNodes, int ReclaimedRelationships, int ReclaimedProperties, int PrunedCommittedTxEntries, long ElapsedMs, long HorizonTxId, bool Skipped, long TruncatedPages = 0, int ReclaimedColumnVersions = 0) { }
         public long ElapsedMs { get; init; }
         public long HorizonTxId { get; init; }
         public int PrunedCommittedTxEntries { get; init; }
+        public int ReclaimedColumnVersions { get; init; }
         public int ReclaimedNodes { get; init; }
         public int ReclaimedProperties { get; init; }
         public int ReclaimedRelationships { get; init; }
