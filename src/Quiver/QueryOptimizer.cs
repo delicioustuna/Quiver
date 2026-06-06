@@ -128,6 +128,27 @@ internal sealed class QueryOptimizer
         return new ScanPlan(ScanKind.AllNodesScan, null, null, _stats.TotalNodes);
     }
 
+    // ---- ARCH-5c Phase 5d: 列スキャン集約のコスト判定 ----
+
+    // 列 dense スキャンの 1 entry あたり概算コスト (in-memory 配列舐め + visibility 判定)。
+    private const double ColumnScanCostPerEntry = 1.0;
+    // row path 集約の 1 row あたり概算コスト (per-row プロパティチェーン走査 + ページ pin)。
+    // spike 実測で projection は列が ~325× 速かった (= per-row が 2 桁 ns、列が ~1ns)。
+    private const double RowAggregateCostPerRow = 50.0;
+
+    /// <summary>
+    /// Phase 5d: full-scan 集約で列スキャンと row path のどちらが安いかを判定する。
+    /// 列コスト = (head entries + delta versions) × <see cref="ColumnScanCostPerEntry"/>、
+    /// row コスト = 推定行数 × <see cref="RowAggregateCostPerRow"/>。delta が肥大して列が不利になる
+    /// 状況 (compaction 前) でのみ row へ倒れる。compaction (5e) で delta は horizon 未満に保たれる。
+    /// </summary>
+    public static bool ShouldUseColumnAggregate(long columnHeadEntries, long deltaVersions, long estimatedRows)
+    {
+        double columnCost = (columnHeadEntries + deltaVersions) * ColumnScanCostPerEntry;
+        double rowCost = estimatedRows * RowAggregateCostPerRow;
+        return columnCost <= rowCost;
+    }
+
     // ---- トラバーサル順最適化 ----
 
     /// <summary>

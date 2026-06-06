@@ -410,6 +410,13 @@ internal sealed class SqliteGraphTransaction : IGraphTransactionInternal
         => throw new NotSupportedException(
             "SQLite backend does not run physical operators (BA-5 MVP).");
 
+    // ARCH-5c Phase 5d: 列指向は binary backend 専用。SQLite は常に row path フォールバック。
+    public bool TryColumnAggregate(Core.EntityKind kind, string key, out ColumnAggregate result)
+    {
+        result = default;
+        return false;
+    }
+
     // ============================================================
     // Lifecycle
     // ============================================================

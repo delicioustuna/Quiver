@@ -72,9 +72,32 @@ internal sealed class ColumnManager
     {
         if (!_columns.TryGetValue((kind, keyId.Value), out var col)) return;
         if (TryScalarBits(in value, out long bits))
-            col.Set(seq, bits, txId);
+            col.Set(seq, bits, txId, value.Type);
         else
             col.Delete(seq, txId);
+    }
+
+    /// <summary>
+    /// Phase 5d: (kind, keyId) が列なら可視値で count/sum/min/max/longSum を 1 パス集計する。
+    /// 列が無い / mixed / 未設定なら false (呼び出し側が row path フォールバック)。
+    /// <paramref name="valueType"/> は列の scalar 型 (集約側で SumLong 可否などの判定に使う)。
+    /// </summary>
+    public bool TryAggregate(EntityKind kind, int keyId,
+        in SnapshotState snap, TransactionId self, CommittedTxRegistry committed,
+        out long count, out double sum, out double min, out double max, out long longSum,
+        out PropertyValueType valueType)
+    {
+        count = 0; sum = 0; min = 0; max = 0; longSum = 0; valueType = default;
+        if (!_columns.TryGetValue((kind, keyId), out var col)) return false;
+        // Phase 5d: optimizer コストモデルで列スキャン vs row path を判定する。delta 肥大時
+        // (compaction 前) は row へフォールバックして列の point 劣化を避ける。head entries を
+        // 行数推定の proxy に使う (full scan は全エンティティ ≒ 列エントリ数を訪れる)。
+        if (!Quiver.QueryOptimizer.ShouldUseColumnAggregate(col.Hwm, col.DeltaVersionCount, col.Hwm))
+            return false;
+        if (!col.TryAggregate(in snap, self, committed, out count, out sum, out min, out max, out longSum))
+            return false;
+        valueType = col.ValueType;
+        return true;
     }
 
     /// <summary>プロパティ除去: (kind, keyId) が列なら論理削除 (head に xmax)。</summary>
@@ -137,24 +160,25 @@ internal sealed class ColumnManager
         if (kind == EntityKind.Relationship)
         {
             foreach (var relId in _relStore.Scan())
-                if (TryExtractScalar(_relStore.EnumerateProperties(relId, _propStore), key, out long bits))
-                    store.Set(relId.Sequence, bits, TransactionId.Bootstrap.Value);
+                if (TryExtractScalar(_relStore.EnumerateProperties(relId, _propStore), key, out long bits, out var type))
+                    store.Set(relId.Sequence, bits, TransactionId.Bootstrap.Value, type);
         }
         else // Node
         {
             foreach (var nodeId in _nodeStore.Scan())
-                if (TryExtractScalar(_nodeStore.EnumerateProperties(nodeId, _propStore), key, out long bits))
-                    store.Set(nodeId.Sequence, bits, TransactionId.Bootstrap.Value);
+                if (TryExtractScalar(_nodeStore.EnumerateProperties(nodeId, _propStore), key, out long bits, out var type))
+                    store.Set(nodeId.Sequence, bits, TransactionId.Bootstrap.Value, type);
         }
     }
 
-    private static bool TryExtractScalar(PropertyEnumerator pe, PropertyKeyId key, out long bits)
+    private static bool TryExtractScalar(PropertyEnumerator pe, PropertyKeyId key, out long bits, out PropertyValueType type)
     {
-        bits = 0;
+        bits = 0; type = default;
         while (pe.MoveNext())
         {
             var cur = pe.Current;
             if (cur.KeyId != key) continue;
+            type = cur.Value.Type;
             return TryScalarBits(cur.Value, out bits);
         }
         return false;

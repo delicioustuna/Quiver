@@ -32,11 +32,17 @@ internal sealed class ScalarColumnStore
 
     private static readonly PageId HeaderPageId = new(1);
     private const int MetaHwm = 0;            // i64 (採番済み seq 数)
+    private const int MetaValueType = 9;      // byte: 0=未設定 / 255=mixed / else (byte)PropertyValueType
     private const int MetaFormatVersion = 31; // byte
+    private const byte ValueTypeUnset = 0;
+    private const byte ValueTypeMixed = 255;
     private static int EntriesPerPage => RecordPageMapping.PageBodySize / EntrySize; // 340
 
     private readonly IPagedFile _file;
     private long _hwm;
+    // Phase 5d: 列の scalar 型 (集約で raw bits を解釈するのに必要)。homogeneous 前提で、
+    // 異なる scalar 型が来たら mixed (255) に倒し、集約は row path フォールバックさせる。
+    private byte _valueType;
 
     // read 加速 cache (head の写し)。open 時に head ページから rebuild。
     private long[] _value;
@@ -52,6 +58,7 @@ internal sealed class ScalarColumnStore
         {
             _file.AllocatePage(PageKind.Header);
             _hwm = 0;
+            _valueType = ValueTypeUnset;
             SaveMeta(initialise: true);
             _value = new long[16];
             _xmin = new long[16];
@@ -71,6 +78,14 @@ internal sealed class ScalarColumnStore
     /// <summary>採番済み seq 数 (= 最大 seq + 1)。</summary>
     public long Hwm => _hwm;
 
+    /// <summary>列の scalar 型 (未設定なら <see cref="PropertyValueType.Null"/>)。</summary>
+    public PropertyValueType ValueType => _valueType is ValueTypeUnset or ValueTypeMixed
+        ? default
+        : (PropertyValueType)_valueType;
+
+    /// <summary>複数の scalar 型が混在した列か (集約は row path フォールバックすべき)。</summary>
+    public bool IsMixed => _valueType == ValueTypeMixed;
+
     /// <summary>delta に積まれた超過版の総数 (compaction 計測 / テスト用)。</summary>
     public int DeltaVersionCount
     {
@@ -81,7 +96,7 @@ internal sealed class ScalarColumnStore
     /// seq の値を txId で set/上書きする。旧 head (live) は xmax=txId を立てて delta へ退避する。
     /// head ページ (永続) + cache を更新する。
     /// </summary>
-    public void Set(long seq, long value, long txId)
+    public void Set(long seq, long value, long txId, PropertyValueType valueType = PropertyValueType.Int64)
     {
         EnsureCapacity(seq);
         if (_xmin[seq] != 0 && _xmax[seq] == 0)
@@ -94,7 +109,12 @@ internal sealed class ScalarColumnStore
         _value[seq] = value;
         _xmin[seq] = txId;
         _xmax[seq] = 0;
-        if (seq >= _hwm) { _hwm = seq + 1; SaveMeta(); }
+        bool metaDirty = false;
+        if (seq >= _hwm) { _hwm = seq + 1; metaDirty = true; }
+        // Phase 5d: scalar 型を記録 (homogeneous 前提)。異種が来たら mixed に倒す。
+        if (_valueType == ValueTypeUnset) { _valueType = (byte)valueType; metaDirty = true; }
+        else if (_valueType != ValueTypeMixed && _valueType != (byte)valueType) { _valueType = ValueTypeMixed; metaDirty = true; }
+        if (metaDirty) SaveMeta();
         WriteHeadPage(seq, value, txId, 0);
     }
 
@@ -127,6 +147,49 @@ internal sealed class ScalarColumnStore
             if (TryGet(s, in snap, self, committed, out long v)) sum += v;
         return sum;
     }
+
+    /// <summary>
+    /// Phase 5d: 可視な全エントリで count/sum/min/max を 1 パスで集計する (集約 operator の列スキャン)。
+    /// raw bits を <see cref="ValueType"/> で数値解釈する。mixed / 未設定の列は false を返し、
+    /// 呼び出し側 (集約) が row path へフォールバックする。<paramref name="longSum"/> は整数型の
+    /// 厳密な long 合計 (SumLong 用)、Double 型では参考値。
+    /// </summary>
+    public bool TryAggregate(in SnapshotState snap, TransactionId self, CommittedTxRegistry committed,
+        out long count, out double sum, out double min, out double max, out long longSum)
+    {
+        count = 0; sum = 0; min = 0; max = 0; longSum = 0;
+        if (_valueType is ValueTypeUnset or ValueTypeMixed) return false;
+        var vt = (PropertyValueType)_valueType;
+        bool first = true;
+        long n = _hwm;
+        for (long s = 0; s < n; s++)
+        {
+            if (!TryGet(s, in snap, self, committed, out long bits)) continue;
+            double d = BitsToDouble(bits, vt);
+            sum += d;
+            longSum += BitsToLong(bits, vt);
+            count++;
+            if (first) { min = max = d; first = false; }
+            else { if (d < min) min = d; if (d > max) max = d; }
+        }
+        return true;
+    }
+
+    private static double BitsToDouble(long bits, PropertyValueType vt) => vt switch
+    {
+        PropertyValueType.Double => BitConverter.Int64BitsToDouble(bits),
+        PropertyValueType.Int32 => (int)bits,
+        PropertyValueType.Bool => bits != 0 ? 1.0 : 0.0,
+        _ => bits, // Int64
+    };
+
+    private static long BitsToLong(long bits, PropertyValueType vt) => vt switch
+    {
+        PropertyValueType.Double => (long)BitConverter.Int64BitsToDouble(bits),
+        PropertyValueType.Int32 => (int)bits,
+        PropertyValueType.Bool => bits != 0 ? 1L : 0L,
+        _ => bits, // Int64
+    };
 
     /// <summary>compaction: horizon 未満で xmax コミット済みの delta 版を捨てる。回収数を返す。</summary>
     public int Merge(long horizon, CommittedTxRegistry committed)
@@ -219,6 +282,7 @@ internal sealed class ScalarColumnStore
     {
         using var h = _file.PinForRead(HeaderPageId);
         _hwm = BinaryPrimitives.ReadInt64LittleEndian(h.Data[MetaHwm..]);
+        _valueType = h.Data[MetaValueType];
     }
 
     private void CheckFormatVersion()
@@ -233,6 +297,7 @@ internal sealed class ScalarColumnStore
     {
         using var ph = _file.PinForWrite(HeaderPageId);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaHwm..], _hwm);
+        ph.Data[MetaValueType] = _valueType;
         if (initialise)
             ph.Data[MetaFormatVersion] = FormatVersion.Current;
     }

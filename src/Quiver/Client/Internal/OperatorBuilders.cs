@@ -22,6 +22,15 @@ internal sealed class ScanBuilder : IOperatorBuilder
     }
 }
 
+/// <summary>ARCH-5c Phase 5d: 全リレーションシップスキャン起点 (<c>g.Relationships()</c>)。</summary>
+internal sealed class RelationshipScanBuilder : IOperatorBuilder
+{
+    public int CurrentEntityColumn => 0;
+    public int PredictedOutputColumnCount => 1;
+
+    public IPhysicalOperator Build(ISchemaApi schema) => new AllRelationshipsScanOperator();
+}
+
 internal sealed class FilterBuilder : IOperatorBuilder
 {
     private readonly IOperatorBuilder _source;
@@ -147,6 +156,9 @@ internal sealed class PropertyLookupBuilder : IOperatorBuilder
 {
     private readonly IOperatorBuilder _source;
     private readonly string _key;
+    // ARCH-5c Phase 5d: entity 列の kind。既定は Node。g.Relationships() 経由の集約 row path では
+    // Relationship を渡して rel プロパティを引かせる。
+    private readonly EntityKind _entityKind;
     public int CurrentEntityColumn => _source.CurrentEntityColumn;
     public int PredictedOutputColumnCount => _source.PredictedOutputColumnCount + 1;
 
@@ -155,15 +167,17 @@ internal sealed class PropertyLookupBuilder : IOperatorBuilder
     internal IOperatorBuilder Source => _source;
     internal string Key => _key;
 
-    internal PropertyLookupBuilder(IOperatorBuilder source, string key)
+    internal PropertyLookupBuilder(IOperatorBuilder source, string key, EntityKind entityKind = EntityKind.Node)
     {
-        _source = source; _key = key;
+        _source = source; _key = key; _entityKind = entityKind;
     }
 
     public IPhysicalOperator Build(ISchemaApi schema)
     {
         var keyId = schema.GetOrCreatePropertyKey(_key);
-        return new PropertyLookupOperator(_source.Build(schema), _source.CurrentEntityColumn, keyId, _key);
+        return new PropertyLookupOperator(
+            _source.Build(schema), _source.CurrentEntityColumn, keyId, _key,
+            PropertyTypeFlags.Scalar, _entityKind);
     }
 }
 

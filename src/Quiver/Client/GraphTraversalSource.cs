@@ -102,6 +102,17 @@ public sealed class GraphTraversalSource
         return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 
+    /// <summary>
+    /// ARCH-5c Phase 5d: 全リレーションシップをスキャン起点とするトラバーサル (Gremlin の <c>g.E()</c> 相当)。
+    /// 主用途は全件集約 (<c>Sum</c>/<c>Mean</c>/<c>Max</c>/<c>Min</c>) で、対象プロパティが列化済みなら
+    /// 列スキャンで高速集計する (それ以外は row path フォールバック)。<c>ToList()</c> で全 rel ID も取れる。
+    /// </summary>
+    public GraphTraversal<RelationshipId> Relationships()
+    {
+        var builder = new RelationshipScanBuilder();
+        return new GraphTraversal<RelationshipId>(_tx, _schema, builder, row => row.GetRelationshipId(0), 0, aliases: null, stats: _stats);
+    }
+
     /// <summary>指定 ID のノード 1 件だけを起点とするトラバーサル (Gremlin の <c>g.V(id)</c> 相当)。</summary>
     public GraphTraversal<NodeId> Node(NodeId nodeId)
     {

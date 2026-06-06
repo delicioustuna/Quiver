@@ -45,6 +45,7 @@ namespace Quiver.Api
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Nodes(params Quiver.Core.NodeId[] nodeIds) { }
         public Quiver.Api.TypedGraphTraversal<T> Nodes<T>()
             where T : Quiver.Api.IGraphNode<T> { }
+        public Quiver.Api.GraphTraversal<Quiver.Core.RelationshipId> Relationships() { }
         public void Update<T>(Quiver.Core.NodeId id, T entity)
             where T : Quiver.Api.IGraphNode<T> { }
         public Quiver.Api.WeightedPathResult WeightedShortestPath(Quiver.Core.NodeId source, Quiver.Core.NodeId target, string weightKey, Quiver.Storage.Records.Direction direction = 1, string? type = null, double maxDistance = Infinity) { }

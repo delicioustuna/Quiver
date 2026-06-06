@@ -149,8 +149,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             // BA-7: skip the recorder entirely for read-only transactions and
             // when no sink is configured so the hot path stays allocation-free.
             readOnly ? null : _logicalSink,
-            // ARCH-5c Phase 5c: read-only tx は書かないので列維持は不要。
-            readOnly ? null : _columnManager);
+            // ARCH-5c Phase 5c/5d: 列マネージャは read/write 双方へ渡す。write hook は
+            // mutation メソッドからのみ呼ばれるので read-only tx では起動せず、read 集約
+            // (TryColumnAggregate) は read-only tx でも列スキャンを使える。
+            _columnManager);
     }
 
     /// <summary>

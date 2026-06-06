@@ -12,6 +12,17 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     long SnapshotLsn { get; }
     TransactionState State { get; }
 
+    /// <summary>
+    /// ARCH-5c Phase 5d: この tx の MVCC 可視性スナップショット。列スキャン集約が
+    /// operator 経路を介さず直接可視性判定するために露出する。
+    /// </summary>
+    SnapshotState Snapshot { get; }
+
+    /// <summary>
+    /// ARCH-5c Phase 5d: committed TxId レジストリ (可視性判定用)。旧テスト互換経路では null。
+    /// </summary>
+    CommittedTxRegistry? Committed { get; }
+
     /// <summary>コミット。WAL のフラッシュ完了まで同期的に待つ。</summary>
     void Commit();
 

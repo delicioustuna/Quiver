@@ -11,6 +11,9 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
     private readonly PropertyKeyId _keyId;
     private readonly string _outputColumnName;
     private readonly PropertyTypeFlags _expectedTypes;
+    // ARCH-5c Phase 5d: entity 列が Node か Relationship か。Relationship のときは rel ストアの
+    // 結合プロパティ列挙子を使う (g.Relationships() の row path フォールバック用)。
+    private readonly EntityKind _entityKind;
     private ITransaction? _tx;
     private TupleSlot[]? _buffer;
     private TupleSchema? _schema;
@@ -21,7 +24,7 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
         int entityIdColumn,
         PropertyKeyId keyId,
         string outputColumnName)
-        : this(source, entityIdColumn, keyId, outputColumnName, PropertyTypeFlags.Scalar)
+        : this(source, entityIdColumn, keyId, outputColumnName, PropertyTypeFlags.Scalar, EntityKind.Node)
     {
     }
 
@@ -36,6 +39,18 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
         PropertyKeyId keyId,
         string outputColumnName,
         PropertyTypeFlags expectedTypes)
+        : this(source, entityIdColumn, keyId, outputColumnName, expectedTypes, EntityKind.Node)
+    {
+    }
+
+    /// <summary>ARCH-5c Phase 5d: entity kind を指定する overload (Relationship のとき rel プロパティを読む)。</summary>
+    public PropertyLookupOperator(
+        IPhysicalOperator source,
+        int entityIdColumn,
+        PropertyKeyId keyId,
+        string outputColumnName,
+        PropertyTypeFlags expectedTypes,
+        EntityKind entityKind)
     {
         _source = source;
         _entityIdColumn = entityIdColumn;
@@ -44,6 +59,7 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
         _expectedTypes = expectedTypes == PropertyTypeFlags.None
             ? PropertyTypeFlags.Scalar
             : expectedTypes;
+        _entityKind = entityKind;
     }
 
     public TupleSchema Schema => _schema ?? new TupleSchema([]);
@@ -78,9 +94,12 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
         _currentBytes = null;
         _buffer![srcCols] = default; // Null by default
 
-        var entityId = new NodeId(cur[_entityIdColumn].LongValue);
-        // ARCH-5c Phase 3: inline (node 版) + overflow チェーンを結合して走査する。
-        var propEnum = _tx!.Nodes.EnumerateProperties(entityId, _tx!.Properties);
+        // ARCH-5c Phase 3/5d: inline + overflow チェーンを結合して走査する。entity kind により
+        // node / relationship のどちらのストアを引くか切り替える。
+        long localId = cur[_entityIdColumn].LongValue;
+        var propEnum = _entityKind == EntityKind.Relationship
+            ? _tx!.Relationships.EnumerateProperties(new RelationshipId(localId), _tx!.Properties)
+            : _tx!.Nodes.EnumerateProperties(new NodeId(localId), _tx!.Properties);
         while (propEnum.MoveNext())
         {
             var prop = propEnum.Current;

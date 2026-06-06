@@ -22,7 +22,27 @@ internal interface IGraphTransactionInternal : IGraphTransaction
 
     /// <summary>物理プランをストリーミング実行し、<see cref="IQueryCursor"/> で逐次取得する。</summary>
     IQueryCursor ExecuteCursor(IPhysicalOperator plan);
+
+    /// <summary>
+    /// ARCH-5c Phase 5d: <paramref name="kind"/> の全件 (full scan) を対象とする集約で、
+    /// <paramref name="key"/> が列化済みなら列スキャンで count/sum/min/max を直接集計する。
+    /// 列が無い / mixed / backend 非対応なら false を返し、呼び出し側が row path フォールバックする。
+    /// </summary>
+    bool TryColumnAggregate(Core.EntityKind kind, string key, out ColumnAggregate result);
 }
+
+/// <summary>
+/// ARCH-5c Phase 5d: 列スキャン集約の結果。<see cref="Sum"/>/<see cref="Min"/>/<see cref="Max"/> は
+/// 数値 (double)、<see cref="LongSum"/> は整数型の厳密 long 合計 (SumLong 用)。
+/// <see cref="ValueType"/> は列の scalar 型 (SumLong 可否判定などに使う)。
+/// </summary>
+internal readonly record struct ColumnAggregate(
+    long Count,
+    double Sum,
+    double Min,
+    double Max,
+    long LongSum,
+    Storage.Records.PropertyValueType ValueType);
 
 /// <summary>
 /// ARCH-2: 旧 <see cref="IGraphTransaction"/> の物理実行 API を internal 拡張として温存し、

@@ -49,6 +49,12 @@ internal sealed class Transaction : ITransaction
     public long SnapshotLsn { get; }
     public TransactionState State => _state;
 
+    // ARCH-5c Phase 5d: 列スキャン集約が直接可視性判定するための snapshot / committed 露出。
+    private readonly SnapshotState _snapshot;
+    private readonly CommittedTxRegistry? _committed;
+    public SnapshotState Snapshot => _snapshot;
+    public CommittedTxRegistry? Committed => _committed;
+
     public INodeStore Nodes => _nodes;
     public IRelationshipStore Relationships => _relationships;
     public IPropertyStore Properties => _properties;
@@ -96,6 +102,8 @@ internal sealed class Transaction : ITransaction
         // MvccContext を再アクティベートする (同一スレッドで複数 tx 操作を交互に
         // 行う場合の thread-static の取り違えを防ぐ)。
         var snap = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
+        _snapshot = snap;
+        _committed = committed;
         _nodes = new TxNodeStore(nodeStore, nodeLocks, id, lockingMode, timeout, snap, committed, _ssn);
         _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes, lockingMode, timeout, snap, committed, _ssn);
         _properties = new TxPropertyStore(propStore, id, snap, committed, _ssn);

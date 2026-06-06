@@ -592,6 +592,21 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public IGraphAccessMethods Access => _inner.Access;
 
+    // ARCH-5c Phase 5d: full-scan 集約の列スキャン経路。列が無い / mixed / committed registry
+    // 無し (旧テスト互換経路) では false を返し、呼び出し側 (GraphTraversal) が row path へ。
+    public bool TryColumnAggregate(Core.EntityKind kind, string key, out ColumnAggregate result)
+    {
+        result = default;
+        if (_columns == null) return false;
+        if (_inner.Committed is not { } committed) return false;
+        if (!_propKeyTokens.TryGet(key, out var keyId)) return false;
+        if (!_columns.TryAggregate(kind, keyId.Value, _inner.Snapshot, _inner.Id, committed,
+                out long count, out double sum, out double min, out double max, out long longSum, out var vt))
+            return false;
+        result = new ColumnAggregate(count, sum, min, max, longSum, vt);
+        return true;
+    }
+
     public void Commit() => _inner.Commit();
     public void Rollback() => _inner.Abort();
     public void Dispose() => _inner.Dispose();
