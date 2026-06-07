@@ -115,16 +115,22 @@ internal sealed class PersistentVectorStore : IVectorStore
         lock (_gate)
         {
             h.Payload.Set(seq, gen, vector);
-            // ARCH-6d: payload を書いた後 HNSW へ挿入 (既存 seq は no-op = overwrite は payload のみ)。
-            h.Hnsw.Insert(seq);
+            // ARCH-6d/①: payload を書いた後 HNSW へ upsert。既存 seq は re-link (overwrite で
+            // 新ベクトルに基づく近傍へ張り直す)、新規 seq は挿入。
+            h.Hnsw.Upsert(seq);
         }
     }
 
     public void RemoveVector(EntityKind kind, long entityId, string indexName)
     {
         IndexHandle h = GetIndex(indexName);
+        long seq = EntityRef.Sequence(entityId);
         lock (_gate)
-            h.Payload.Remove(EntityRef.Sequence(entityId));
+        {
+            h.Payload.Remove(seq);
+            // ARCH-6②: HNSW グラフからも物理削除 (近傍の back-ref 除去 + entry 付け替え)。
+            h.Hnsw.Delete(seq);
+        }
     }
 
     public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)

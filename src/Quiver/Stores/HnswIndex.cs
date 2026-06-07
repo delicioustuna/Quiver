@@ -56,6 +56,9 @@ internal sealed class HnswIndex
     private int _maxLevel = -1;
     private long _count;
     private long _maxSeq;
+    // 削除で生じた tombstone 数 (in-memory ヒューリスティック。reload で 0 にリセット)。
+    // 削除が生存ノードを上回ると Rebuild を自動起動してグラフ劣化を回収する。
+    private long _tombstones;
 
     // 決定的構築のための per-index 乱数 (seq を seed に混ぜて再現性を持たせる)。
     private readonly Random _rng = new(0x6D6E7377);
@@ -134,6 +137,86 @@ internal sealed class HnswIndex
             SaveMeta();
         }
         finally { ArrayPool<float>.Shared.Return(buf); }
+    }
+
+    /// <summary>
+    /// ARCH-6 ①: overwrite 時の再リンク。既存 seq はグラフから外して新ベクトルで挿入し直す。
+    /// payload は呼び出し側が事前に更新済みの前提。新規 seq は単純 <see cref="Insert"/>。
+    /// </summary>
+    public void Upsert(long seq)
+    {
+        if (_nodes.ContainsKey(seq)) Delete(seq);
+        Insert(seq);
+    }
+
+    /// <summary>
+    /// ARCH-6 ②: seq をグラフから物理削除する。全近傍の隣接リストから seq を除去し、entry なら
+    /// 付け替える。removed レコードは present=0 で永続化。削除が蓄積したら <see cref="Rebuild"/> で回収。
+    /// グラフに無い seq は no-op。
+    /// </summary>
+    public void Delete(long seq)
+    {
+        if (!_nodes.Remove(seq)) return;
+        _count = Math.Max(0, _count - 1);
+
+        // 全ノードの隣接から seq への back-ref を除去する (近傍は非対称になりうるため全走査)。
+        var touched = new List<long>();
+        foreach (var (otherSeq, other) in _nodes)
+        {
+            bool changed = false;
+            for (int lc = 0; lc < other.Layers.Length; lc++)
+            {
+                var arr = other.Layers[lc];
+                int idx = Array.IndexOf(arr, seq);
+                if (idx < 0) continue;
+                var shrunk = new long[arr.Length - 1];
+                Array.Copy(arr, 0, shrunk, 0, idx);
+                Array.Copy(arr, idx + 1, shrunk, idx, arr.Length - idx - 1);
+                other.Layers[lc] = shrunk;
+                changed = true;
+            }
+            if (changed) touched.Add(otherSeq);
+        }
+
+        // entry の付け替え (最高 level の残存ノード)。
+        if (_entry == seq)
+        {
+            _entry = -1; _maxLevel = -1;
+            foreach (var (s, n) in _nodes)
+                if (n.Level > _maxLevel) { _maxLevel = n.Level; _entry = s; }
+        }
+
+        WriteAbsent(seq);
+        foreach (var t in touched) Persist(t);
+        _tombstones++;
+        SaveMeta();
+
+        // 削除が生存ノードを上回り、かつ一定数たまったらグラフを再構築して劣化を回収する。
+        if (_tombstones >= 16 && _tombstones > _count) Rebuild();
+    }
+
+    /// <summary>
+    /// ARCH-6 ②: payload の present な seq だけから HNSW を全再構築する (削除蓄積でグラフが
+    /// 劣化したとき)。旧レコード領域を一掃してから昇順に挿入し直す。
+    /// </summary>
+    public void Rebuild()
+    {
+        var present = new List<long>();
+        var buf = ArrayPool<float>.Shared.Rent(_dim);
+        try
+        {
+            var dest = buf.AsSpan(0, _dim);
+            long hwm = _payload.Hwm;
+            for (long seq = 0; seq < hwm; seq++)
+                if (_payload.TryGet(seq, dest, out _)) present.Add(seq);
+        }
+        finally { ArrayPool<float>.Shared.Return(buf); }
+
+        for (long seq = 0; seq < _maxSeq; seq++) WriteAbsent(seq);
+        _nodes.Clear();
+        _entry = -1; _maxLevel = -1; _count = 0; _maxSeq = 0; _tombstones = 0;
+        foreach (var seq in present) Insert(seq);
+        SaveMeta();
     }
 
     /// <summary>
@@ -356,6 +439,13 @@ internal sealed class HnswIndex
             for (int i = 0; i < arr.Length; i++)
                 BinaryPrimitives.WriteInt64LittleEndian(rec[(off + i * 8)..], arr[i]);
         }
+        WriteBytes(seq * (long)RecordSize, rec);
+    }
+
+    private void WriteAbsent(long seq)
+    {
+        Span<byte> rec = stackalloc byte[RecordSize];
+        rec.Clear(); // present=0
         WriteBytes(seq * (long)RecordSize, rec);
     }
 
