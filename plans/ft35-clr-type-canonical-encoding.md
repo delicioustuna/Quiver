@@ -4,6 +4,17 @@
 > 起点: GC-7 (式ツリー述語) で double 範囲・各種 CLR 型が `NotSupportedException` になることが判明。
 > 方針: ユーザ承認済み「薄い物理層 + 賢いエッジ」。C# ユーザに自然な CLR 型をクエリ述語で扱えるようにする。
 
+## 進捗
+
+- **増分1 ✅ 完了 (commit `efeb3d2`)**: 浮動小数点 (double/float/Half) の範囲クエリ。`P.*(double)` +
+  `PropertyDoubleRangePredicate` (復号比較=option b、format 不変) + GC-7 を**メンバ CLR 型 routing**へ +
+  `Has`/source-gen に float/Half (Double widen 格納)。Quiver.Tests 490 緑。
+- **増分2 未**: DateTime 系 (DateTime=UTC Ticks / DateOnly=DayNumber / TimeSpan / TimeOnly) を Int64 で
+  round-trip + long 範囲。`DateTimeOffset` は UTC Ticks 正規化。source-gen `_typeMap` + `Has`/GC-7 +
+  `PropertyValue` 経路。format 不変。
+- **増分3 未**: 索引 (B+Tree) range シーク用の OrderedFloat 順序保存エンコードを store/index で一致
+  (`KeyCodecs`)。これは format bump。filter は増分1で足りているため index 最適化として後続。
+
 ## 目的
 
 `Where(p => p.When > someDateTime)` / `Where(p => p.Score > 1.5)` のような、C# ユーザに自然な
