@@ -20,6 +20,9 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     private List<LogicalMutation>? _logicalBuffer;
     // ARCH-5c Phase 5c: opt-in 列の write 維持。null = 列無効 (read-only tx 含む)。
     private readonly Storage.Records.ColumnManager? _columns;
+    // ARCH-6: tx 配下の SetVector/RemoveVector が書く生のベクトルストア。tx スレッドの
+    // ambient WalPageContext 下で書くので、グラフ変更と同じ WAL に乗り原子整合する。
+    private readonly Core.IVectorStore? _vectors;
 
     internal GraphTransaction(
         ITransaction inner,
@@ -28,7 +31,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         ITokenStore<PropertyKeyId> propKeyTokens,
         bool isReadOnly = false,
         ILogicalMutationSink? logicalSink = null,
-        Storage.Records.ColumnManager? columns = null)
+        Storage.Records.ColumnManager? columns = null,
+        Core.IVectorStore? vectors = null)
     {
         _inner = inner;
         _labelTokens = labelTokens;
@@ -36,6 +40,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         _propKeyTokens = propKeyTokens;
         IsReadOnly = isReadOnly;
         _logicalSink = logicalSink;
+        _vectors = vectors;
         // ARCH-5c Phase 5c: 登録済み列があるときだけ列維持を有効化し、ホット path の
         // 余計な hook 登録 / dict lookup を避ける。
         _columns = columns is { HasAnyColumns: true } ? columns : null;
@@ -605,6 +610,28 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
             return false;
         result = new ColumnAggregate(count, sum, min, max, longSum, vt);
         return true;
+    }
+
+    // ========== ARCH-6: ベクトル (tx 配下) ==========
+
+    public void SetVector(Core.EntityKind kind, long entityId, string indexName, ReadOnlySpan<float> vector)
+    {
+        if (IsReadOnly)
+            throw new InvalidOperationException("Cannot SetVector in a read-only transaction.");
+        if (_vectors is null)
+            throw new NotSupportedException("This backend does not support transaction-scoped SetVector.");
+        // tx スレッドの ambient WalPageContext 下で書く → グラフ変更と同じ WAL に乗り、
+        // commit で原子確定 / abort・crash で CLR undo により巻き戻る。
+        _vectors.SetVector(kind, entityId, indexName, vector);
+    }
+
+    public void RemoveVector(Core.EntityKind kind, long entityId, string indexName)
+    {
+        if (IsReadOnly)
+            throw new InvalidOperationException("Cannot RemoveVector in a read-only transaction.");
+        if (_vectors is null)
+            throw new NotSupportedException("This backend does not support transaction-scoped RemoveVector.");
+        _vectors.RemoveVector(kind, entityId, indexName);
     }
 
     public void Commit() => _inner.Commit();

@@ -238,7 +238,19 @@ internal sealed class PersistentVectorStore : IVectorStore
     {
         lock (_gate)
         {
-            _catalog?.Reload();
+            if (_catalog is null) return;
+            _catalog.Reload();
+            // catalog を正本に _indexes を再構築する。abort で消えた index (CreateVectorIndex を
+            // 中止した tx 分) の handle を落とし、catalog に残る index の payload meta を読み直す。
+            var live = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var e in _catalog.Entries)
+            {
+                live.Add(e.Spec.Name);
+                if (!_indexes.ContainsKey(e.Spec.Name))
+                    _indexes[e.Spec.Name] = OpenHandle(e);
+            }
+            foreach (var name in _indexes.Keys.Where(n => !live.Contains(n)).ToList())
+                _indexes.Remove(name);
             foreach (var h in _indexes.Values)
                 h.Payload.ReloadMeta();
         }

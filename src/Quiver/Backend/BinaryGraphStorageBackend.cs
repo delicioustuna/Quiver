@@ -12,6 +12,10 @@ namespace Quiver;
 internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 {
     private readonly IVectorStore _vectors;
+    // ARCH-6: db.Vectors の公開面。tx 外のミューテーションを autocommit tx で包む
+    // (tx 内の呼び出しは ambient WalPageContext を検出して join する)。生の _vectors は
+    // access methods / tx 配下 SetVector の委譲先として内部で使い続ける。
+    private IVectorStore? _vectorsFacade;
     private readonly PageManager _pageManager;
     private readonly WriteAheadLog _wal;
     private readonly VersionedNodeStore _nodeStore;
@@ -174,7 +178,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     public IDiagnosticsApi Diagnostics => _diagnostics;
     public IGraphAccessMethods Access => _access;
     public BulkLoadCapabilities BulkLoad => _bulkLoad;
-    public IVectorStore Vectors => _vectors;
+    public IVectorStore Vectors => _vectorsFacade ??= new AutocommitVectorStore(
+        _vectors, () => BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false));
 
     public IGraphTransaction BeginGraphTransaction(IsolationLevel level, bool readOnly)
     {
@@ -188,7 +193,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             // ARCH-5c Phase 5c/5d: 列マネージャは read/write 双方へ渡す。write hook は
             // mutation メソッドからのみ呼ばれるので read-only tx では起動せず、read 集約
             // (TryColumnAggregate) は read-only tx でも列スキャンを使える。
-            _columnManager);
+            _columnManager,
+            // ARCH-6: tx 配下 SetVector/RemoveVector の委譲先 (生のストア)。read-only tx でも
+            // 渡すが、メソッド側で IsReadOnly ガードする。
+            _vectors);
     }
 
     /// <summary>

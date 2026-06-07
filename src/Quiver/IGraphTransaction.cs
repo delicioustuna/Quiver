@@ -130,6 +130,25 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
         in PropertyValue from, bool fromInclusive,
         in PropertyValue to, bool toInclusive);
 
+    // ── ARCH-6: ベクトル (tx 配下) ────────────────────────────────
+
+    /// <summary>
+    /// ARCH-6: このトランザクション境界の内側でベクトルを set / 上書きする。書き込みは
+    /// グラフ変更と同じ container WAL に乗り、<see cref="Commit"/> で原子確定、
+    /// <see cref="Rollback"/> / クラッシュで巻き戻る (グラフ変更と原子整合)。
+    /// バインドキーは <paramref name="entityId"/> の Sequence。永続化に対応しないバックエンド
+    /// (SQLite MVP) では <see cref="NotSupportedException"/>。
+    /// </summary>
+    void SetVector(EntityKind kind, long entityId, string indexName, ReadOnlySpan<float> vector)
+        => throw new NotSupportedException("This backend does not support transaction-scoped SetVector.");
+
+    /// <summary>
+    /// ARCH-6: このトランザクション境界の内側でベクトルを論理削除する。原子性は
+    /// <see cref="SetVector"/> と同じ。永続化に対応しないバックエンドでは <see cref="NotSupportedException"/>。
+    /// </summary>
+    void RemoveVector(EntityKind kind, long entityId, string indexName)
+        => throw new NotSupportedException("This backend does not support transaction-scoped RemoveVector.");
+
     // ARCH-2: 物理プラン実行 (Execute/ExecuteCursor)、access methods (Access)、隣接ブロック
     // (AdjacencyBlocks) は内部実装型を露出するため公開面から除外し、internal な
     // IGraphTransactionInternal へ移設した (利用者は g.V() ベースの DSL を使う)。
