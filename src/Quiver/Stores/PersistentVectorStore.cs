@@ -52,7 +52,10 @@ internal sealed class PersistentVectorStore : IVectorStore
     {
         var payload = new VectorPayloadStore(
             _container.OpenTenant(e.PayloadTenant, PageKind.Header), e.Spec.Dimensions);
-        return new IndexHandle(e.Spec, payload);
+        // ARCH-6d: HNSW ANN 索引を別テナントに永続化。payload を距離計算/再スコアの後ろ盾に使う。
+        var hnsw = new HnswIndex(
+            _container.OpenTenant(e.HnswTenant, PageKind.Header), payload, e.Spec.Metric);
+        return new IndexHandle(e.Spec, payload, hnsw);
     }
 
     public void CreateVectorIndex(VectorIndexSpec spec)
@@ -110,7 +113,11 @@ internal sealed class PersistentVectorStore : IVectorStore
         long seq = EntityRef.Sequence(entityId);
         ushort gen = ResolveGen(kind, seq);
         lock (_gate)
+        {
             h.Payload.Set(seq, gen, vector);
+            // ARCH-6d: payload を書いた後 HNSW へ挿入 (既存 seq は no-op = overwrite は payload のみ)。
+            h.Hnsw.Insert(seq);
+        }
     }
 
     public void RemoveVector(EntityKind kind, long entityId, string indexName)
@@ -128,24 +135,13 @@ internal sealed class PersistentVectorStore : IVectorStore
             throw new VectorException(
                 $"Vector index '{indexName}' expects {h.Spec.Dimensions} dimensions, got {query.Length}.");
 
-        int dim = h.Spec.Dimensions;
-        var metric = h.Spec.Metric;
         var kind = h.Spec.EntityKind;
-        var heap = new VectorKnnHeap(k);
-        var buf = ArrayPool<float>.Shared.Rent(dim);
-        try
-        {
-            var dest = buf.AsSpan(0, dim);
-            lock (_gate)
-            {
-                long hwm = h.Payload.Hwm;
-                for (long seq = 0; seq < hwm; seq++)
-                    if (h.Payload.TryGet(seq, dest, out var gen) && IsLive(kind, seq, gen))
-                        heap.Offer(new VectorSearchResult(kind, seq, VectorMetrics.Score(metric, query, dest)));
-            }
-        }
-        finally { ArrayPool<float>.Shared.Return(buf); }
-        return new SortedVectorCursor(heap.ToSortedArray());
+        // ARCH-6d: HNSW ANN グラフで top-k を探索する。world は payload で再スコアされ、
+        // present + 世代照合を満たす候補だけが返る。flat scan は KnnSearchFiltered / Batch が使う。
+        VectorSearchResult[] sorted;
+        lock (_gate)
+            sorted = h.Hnsw.Search(query, k, kind, (seq, gen) => IsLive(kind, seq, gen));
+        return new SortedVectorCursor(sorted);
     }
 
     /// <summary>
@@ -261,7 +257,12 @@ internal sealed class PersistentVectorStore : IVectorStore
             foreach (var name in _indexes.Keys.Where(n => !live.Contains(n)).ToList())
                 _indexes.Remove(name);
             foreach (var h in _indexes.Values)
+            {
                 h.Payload.ReloadMeta();
+                // ARCH-6d: HNSW グラフも container WAL 対象。abort の before-image undo / reopen で
+                // ページが復元されるので in-memory 隣接を読み直す。
+                h.Hnsw.ReloadFromPages();
+            }
         }
     }
 
@@ -296,5 +297,5 @@ internal sealed class PersistentVectorStore : IVectorStore
         return cur >= 0 && (ushort)Math.Min(cur, EntityRef.MaxGeneration) == storedGen;
     }
 
-    private sealed record IndexHandle(VectorIndexSpec Spec, VectorPayloadStore Payload);
+    private sealed record IndexHandle(VectorIndexSpec Spec, VectorPayloadStore Payload, HnswIndex Hnsw);
 }
