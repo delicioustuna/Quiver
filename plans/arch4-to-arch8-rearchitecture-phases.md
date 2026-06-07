@@ -119,6 +119,14 @@ DB を「ディレクトリ + 15+ ファイル」から **単一データファ�
 
 ## §4. ARCH-6 — Phase 3: vector/ANN の in-file 永続化 + SetVector の tx 統合
 
+> ✅ **完了 (develop, commit `19ab427` → `eb2a3f4`, 2026-06-07 ユーザ完了承認)。** 6a〜6e の 5 サブステップ。
+> - **6a** (`19ab427`): `PersistentVectorStore` + `VectorPayloadStore` (固定次元 payload を `[gen|present|float×dim]` でページ striping) + `VectorIndexCatalog` (tenant 17、payload/HNSW テナントを 200+ で採番)。`InMemoryVectorStore` を置換し close→reopen で KNN 再現。
+> - **6b** (`1103643`): `IGraphTransaction.SetVector`/`RemoveVector` を DIM で追加 (binary の `GraphTransaction` が実装、SQLite は既定 throw)。`AutocommitVectorStore` が `db.Vectors` 公開面で tx 内は `WalPageContext.Current` 検出して join / tx 外は autocommit。abort で graph+vector 一緒に巻き戻る (ambient WalPageContext → 同一 page-WAL/ARIES)。
+> - **6c** (`29ce22c`): `VersionedRelationshipStore.CurrentGeneration` 追加。SetVector が現世代を payload に焼き込み、KNN read が現 slot 世代と照合して slot 再利用 (vacuum 後) の stale binding を棄却。
+> - **6d** (`879d0de`): 永続 `HnswIndex` (M=16/Mmax0=32/efConstruction=200/8層)。seq 直接 index の固定長レコードをページ write-through 永続化、open 時に in-memory 隣接へ rebuild。距離 = -Score 統一、最終 top-k は `VectorKnnHeap` と同一 tie-break (recall 100% のとき flat scan と完全一致)。`KnnSearch` を HNSW へ切替、Filtered/Batch は flat scan 据置。recall≥0.85 / reopen 再現 / abort 巻き戻し実証。
+> - **6e** (`eb2a3f4`): FormatVersion V6→**V7** (`V7VectorInFile`)。`InMemoryVectorStore` を非永続リファレンス実装へ降格 (SQLite MVP / fixture 用に残置)。`HnswSearchBenchmarks` (HNSW vs flat scan)。全ソリューションテスト緑。
+> - **MVP の既知の制限** (後続フォローアップ): ①overwrite は payload のみ更新し HNSW を再リンクしない ②HNSW ノードの物理削除/再構築は未対応 (removed は read 時フィルタ) ③`KnnSearchFiltered`/`KnnSearchBatch` は flat scan 据置。
+
 ### 目的
 現状 binary backend は `InMemoryVectorStore` でベクトルを**永続化していない・非トランザクショナル** (`db.Vectors` 直叩き)。ベクトル payload と ANN 索引 (HNSW/IVF) を**同一ファイルのページに永続化**し、`SetVector` をトランザクション境界に取り込んでグラフ変更と原子整合させる。
 
