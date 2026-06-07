@@ -6,14 +6,14 @@ namespace Quiver.SourceGen;
 [Generator]
 public sealed class GraphRelationshipGenerator : IIncrementalGenerator
 {
-    private const string GraphRelationshipAttributeFqn = "Quiver.Api.GraphRelationshipAttribute`2";
-    private const string GraphPropertyAttributeFqn = "Quiver.Api.GraphPropertyAttribute";
+    private const string RelationshipAttributeFqn = "Quiver.Api.RelationshipAttribute`2";
+    private const string PropertyAttributeFqn = "Quiver.Api.PropertyAttribute";
 
     public void Initialize(IncrementalGeneratorInitializationContext ctx)
     {
         var provider = ctx.SyntaxProvider
             .ForAttributeWithMetadataName(
-                GraphRelationshipAttributeFqn,
+                RelationshipAttributeFqn,
                 predicate: static (n, _) => n is ClassDeclarationSyntax,
                 transform: static (ctx, _) => BuildModel(ctx))
             .Where(static m => m is not null);
@@ -49,7 +49,7 @@ public sealed class GraphRelationshipGenerator : IIncrementalGenerator
             }
         }
 
-        // ジェネリック属性 GraphRelationshipAttribute<TSource, TTarget> の型引数から端点型を取得する。
+        // ジェネリック属性 RelationshipAttribute<TSource, TTarget> の型引数から端点型を取得する。
         var attrClass = relAttr.AttributeClass;
         if (attrClass is null || attrClass.TypeArguments.Length != 2)
             return null;
@@ -77,7 +77,7 @@ public sealed class GraphRelationshipGenerator : IIncrementalGenerator
             string? graphKey = null;
             foreach (var attr in prop.GetAttributes())
             {
-                if (attr.AttributeClass?.ToDisplayString() == GraphPropertyAttributeFqn)
+                if (attr.AttributeClass?.ToDisplayString() == PropertyAttributeFqn)
                 {
                     graphKey = prop.Name;
                     if (attr.ConstructorArguments.Length > 0 &&

@@ -35,7 +35,7 @@ internal static class GraphNodeEmitter
     };
 
     // PW-18 follow-up: C# 型から既定の IndexKind を推論するマップ。
-    // [GraphIndexed] がここに無い型に付いた場合、EnsureIndexes / CreateIndex 経路は対象外。
+    // [Indexed] がここに無い型に付いた場合、EnsureIndexes / CreateIndex 経路は対象外。
     private static readonly Dictionary<string, string> _indexKindMap = new()
     {
         ["string"]  = "Quiver.IndexKind.StringEquality",
@@ -120,7 +120,7 @@ internal static class GraphNodeEmitter
         // Delete
         sb.AppendLine($"    public static void Delete(IGraphTransaction tx, Quiver.Core.NodeId id) => tx.DeleteNode(id);");
 
-        // PW-18 follow-up: EnsureIndexes — [GraphIndexed] 付き全プロパティ分の CreateIndex を発行
+        // PW-18 follow-up: EnsureIndexes — [Indexed] 付き全プロパティ分の CreateIndex を発行
         sb.AppendLine();
         sb.AppendLine("    public static void EnsureIndexes(Quiver.ISchemaApi schema)");
         sb.AppendLine("    {");
@@ -147,11 +147,11 @@ internal static class GraphNodeEmitter
             sb.AppendLine("                return;");
         }
         sb.AppendLine("            default:");
-        sb.AppendLine($"                throw new System.ArgumentException(\"'\" + propertyName + \"' は {model.ClassName} で [GraphIndexed] が付与されたプロパティではありません。\");");
+        sb.AppendLine($"                throw new System.ArgumentException(\"'\" + propertyName + \"' は {model.ClassName} で [Indexed] が付与されたプロパティではありません。\");");
         sb.AppendLine("        }");
         sb.AppendLine("    }");
 
-        // FindBy* — one method per [GraphIndexed] property
+        // FindBy* — one method per [Indexed] property
         foreach (var prop in indexedProps)
         {
             if (!_seekCallMap.TryGetValue(prop.CSharpType, out var seekExpr)) continue;

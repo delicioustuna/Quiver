@@ -1,21 +1,21 @@
 # 04. SourceGenerator で型付き CRUD
 
-`[GraphNode]` / `[GraphProperty]` / `[GraphIndexed]` / `[GraphRelationship]` を付与すると、Roslyn SourceGenerator が型安全な CRUD メソッドを自動生成する。完全コードは [`samples/Quiver.Samples.SourceGen`](https://github.com/anthropics/quiver/tree/main/samples/Quiver.Samples.SourceGen)。
+`[Node]` / `[Property]` / `[Indexed]` / `[Relationship]` を付与すると、Roslyn SourceGenerator が型安全な CRUD メソッドを自動生成する。完全コードは [`samples/Quiver.Samples.SourceGen`](https://github.com/anthropics/quiver/tree/main/samples/Quiver.Samples.SourceGen)。
 
 ```csharp
-[GraphNode]
+[Node]
 public partial class Person
 {
-    [GraphIndexed]
-    [GraphProperty]
+    [Indexed]
+    [Property]
     public string Name { get; set; } = "";
 
-    [GraphProperty]
+    [Property]
     public int Age { get; set; }
 }
 ```
 
-> `[GraphIndexed]` は **SourceGenerator に対するマーカー** で、`InsertIndexed` / `FindBy{Prop}` の生成と、属性情報を実体インデックスに反映する `EnsureIndexes` / `CreateIndex` の生成をトリガする。実行時の B+Tree インデックス自体は起動時に明示的に作成する必要があり、推奨は SourceGenerator 由来の糖衣 API:
+> `[Indexed]` は **SourceGenerator に対するマーカー** で、`InsertIndexed` / `FindBy{Prop}` の生成と、属性情報を実体インデックスに反映する `EnsureIndexes` / `CreateIndex` の生成をトリガする。実行時の B+Tree インデックス自体は起動時に明示的に作成する必要があり、推奨は SourceGenerator 由来の糖衣 API:
 >
 > ```csharp
 > db.EnsureIndexes<Person>();                          // 属性付き全プロパティ一括
@@ -27,7 +27,7 @@ public partial class Person
 
 ```csharp
 using var db = GraphDatabase.Open("./mygraph");
-db.EnsureIndexes<Person>();   // [GraphIndexed] 付きプロパティをまとめて作成
+db.EnsureIndexes<Person>();   // [Indexed] 付きプロパティをまとめて作成
 
 using var tx = db.BeginTransaction();
 var g = tx.G(db.Schema);

@@ -46,7 +46,7 @@ Quiver は [Semantic Versioning 2.0.0](https://semver.org/lang/ja/) (`MAJOR.MINO
 | アセンブリ | 対象 | 備考 |
 |---|---|---|
 | `Quiver` | ✅ 対象 | 公開ファサード (`GraphDatabase`, `GraphTransaction`, options 等) |
-| `Quiver.Client` | ✅ 対象 | Gremlin ライク API / Match DSL / `[GraphNode]` 等の属性 |
+| `Quiver.Client` | ✅ 対象 | Gremlin ライク API / Match DSL / `[Node]` 等の属性 |
 | `Quiver.Core` | ✅ 対象 | 共通 ID 型・例外型・`PropertyValue` 等の基礎型 |
 
 以下は **安定性の対象外**。SemVer に関係なく MINOR/PATCH でも変更しうる:

@@ -3,13 +3,13 @@ using Quiver.Core;
 namespace Quiver.Api;
 
 /// <summary>
-/// SourceGenerator が <c>[GraphRelationship]</c> 付与クラスに自動実装する
+/// SourceGenerator が <c>[Relationship]</c> 付与クラスに自動実装する
 /// 型安全リレーションシップ CRUD のためのインタフェース。手動実装は通常不要。
 /// </summary>
 /// <typeparam name="TSelf">自分自身の型 (CRTP)。</typeparam>
 public interface IGraphRelationship<TSelf> where TSelf : IGraphRelationship<TSelf>
 {
-    /// <summary>リレーションシップ型名。SourceGenerator が <c>[GraphRelationship("...")]</c> から決定する。</summary>
+    /// <summary>リレーションシップ型名。SourceGenerator が <c>[Relationship("...")]</c> から決定する。</summary>
     static abstract string GraphType { get; }
 
     /// <summary>新規リレーションシップを作成してプロパティを書き込み、その ID を返す。</summary>
@@ -28,7 +28,7 @@ public interface IGraphRelationship<TSelf> where TSelf : IGraphRelationship<TSel
 /// <summary>
 /// 始点 (<typeparamref name="TSource"/>) / 終点 (<typeparamref name="TTarget"/>) ノード型を
 /// 型レベルで保持するリレーションシップ。SourceGenerator が
-/// <c>[GraphRelationship&lt;TSource, TTarget&gt;]</c> から自動実装する。CRUD 契約は
+/// <c>[Relationship&lt;TSource, TTarget&gt;]</c> から自動実装する。CRUD 契約は
 /// 基底 <see cref="IGraphRelationship{TSelf}"/> から継承し、本インタフェースは端点型の
 /// 制約を足すだけ (追加メンバーなし)。これにより <c>TypedGraphTraversal&lt;TSource&gt;</c> の
 /// <c>Out&lt;TRel, TTarget&gt;()</c> がホップ間で型を保存できる (ARCH-8)。

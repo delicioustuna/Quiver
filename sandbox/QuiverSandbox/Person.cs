@@ -1,12 +1,12 @@
 ﻿using Quiver.Api;
 
-[GraphNode("Person")]
+[Node("Person")]
 public partial class Person
 {
-    [GraphIndexed("idx_person_name")]
-    [GraphProperty]
+    [Indexed("idx_person_name")]
+    [Property]
     public string Name { get; set; } = "";
 
-    [GraphProperty]
+    [Property]
     public int Age { get; set; }
 }

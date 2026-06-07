@@ -24,20 +24,20 @@ public class GraphNodeGeneratorTests
     [Fact]
     public void Generator_emits_partial_class_for_GraphNode()
     {
-        var attributeRef = typeof(Quiver.Api.GraphNodeAttribute).Assembly.Location;
+        var attributeRef = typeof(Quiver.Api.NodeAttribute).Assembly.Location;
         var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
 
         var source = """
             using Quiver.Api;
             namespace MyApp;
 
-            [GraphNode("Person")]
+            [Node("Person")]
             public partial class Person
             {
-                [GraphProperty]
+                [Property]
                 public string Name { get; set; } = "";
 
-                [GraphProperty]
+                [Property]
                 public int Age { get; set; }
             }
             """;
@@ -61,7 +61,7 @@ public class GraphNodeGeneratorTests
 
         var result = driver.GetRunResult();
         var generated = result.GeneratedTrees;
-        generated.Should().NotBeEmpty("generator should emit code for [GraphNode] class");
+        generated.Should().NotBeEmpty("generator should emit code for [Node] class");
 
         var generatedSource = generated[0].ToString();
         generatedSource.Should().Contain("public static string GraphLabel => \"Person\"");
@@ -90,24 +90,24 @@ public class GraphRelationshipGeneratorTests
     [Fact]
     public void Generator_emits_partial_class_for_GraphRelationship()
     {
-        var attributeRef = typeof(Quiver.Api.GraphRelationshipAttribute<,>).Assembly.Location;
+        var attributeRef = typeof(Quiver.Api.RelationshipAttribute<,>).Assembly.Location;
         var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
 
         var source = """
             using Quiver.Api;
             namespace MyApp;
 
-            [GraphNode("Person")]
+            [Node("Person")]
             public partial class Person
             {
-                [GraphProperty]
+                [Property]
                 public string Name { get; set; } = "";
             }
 
-            [GraphRelationship<Person, Person>("KNOWS")]
+            [Relationship<Person, Person>("KNOWS")]
             public partial class Knows
             {
-                [GraphProperty]
+                [Property]
                 public int Since { get; set; }
             }
             """;
@@ -130,7 +130,7 @@ public class GraphRelationshipGeneratorTests
         driver = driver.RunGenerators(compilation);
 
         var result = driver.GetRunResult();
-        result.GeneratedTrees.Should().NotBeEmpty("generator should emit code for [GraphRelationship] class");
+        result.GeneratedTrees.Should().NotBeEmpty("generator should emit code for [Relationship] class");
 
         var generatedSource = result.GeneratedTrees[0].ToString();
         generatedSource.Should().Contain("public static string GraphType => \"KNOWS\"");

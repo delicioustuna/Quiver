@@ -47,52 +47,54 @@ using (var tx = db.BeginTransaction())
 
 | 属性 | 対象 | 引数 | 省略時の挙動 |
 |---|---|---|---|
-| `[GraphNode]` | クラス | `label` (省略可) | クラス名をラベルとして使用 |
-| `[GraphRelationship]` | クラス | `type` (省略可) | クラス名をリレーションシップ型として使用 |
-| `[GraphProperty]` | プロパティ | `key` (省略可) | プロパティ名をグラフキーとして使用 |
-| `[GraphIndexed]` | プロパティ | `indexName` (省略可) | `idx_{label}_{propertyName}` を自動生成。`[GraphProperty]` と併用必須 |
+| `[Node]` | クラス | `label` (省略可) | クラス名をラベルとして使用 |
+| `[Relationship]` | クラス | `type` (省略可) | クラス名をリレーションシップ型として使用 |
+| `[Property]` | プロパティ | `key` (省略可) | プロパティ名をグラフキーとして使用 |
+| `[Indexed]` | プロパティ | `indexName` (省略可) | `idx_{label}_{propertyName}` を自動生成。`[Property]` と併用必須 |
 
-> **注意:** クラス名・プロパティ名を変更すると `[GraphNode]`・`[GraphIndexed]` の自動生成名も変わり、既存インデックスファイルが孤立します。名前が変わる可能性がある場合は明示指定を推奨します。
+> **注意:** クラス名・プロパティ名を変更すると `[Node]`・`[Indexed]` の自動生成名も変わり、既存インデックスファイルが孤立します。名前が変わる可能性がある場合は明示指定を推奨します。
+>
+> **名前衝突について:** 属性はすべて `Quiver.Api` 名前空間にあります。`[Node]` / `[Property]` のような一般名は他ライブラリの属性 (例: FsCheck の `[Property]`) と衝突し得ます。その場合は名前空間で限定してください (例: `[Quiver.Api.Property]`、または相手側を `[FsCheck.Xunit.Property]`)。これは名前空間で解決する設計です。
 
 #### モデル定義例
 
 ```csharp
 // ラベル・インデックス名はすべて省略可能（クラス名・プロパティ名から自動生成）
-[GraphNode]               // label = "Person"
+[Node]               // label = "Person"
 public partial class Person
 {
-    [GraphIndexed]        // indexName = "idx_person_name"
-    [GraphProperty]
+    [Indexed]        // indexName = "idx_person_name"
+    [Property]
     public string Name { get; set; } = "";
 
-    [GraphProperty]
+    [Property]
     public int Age { get; set; }
 }
 
 // 明示指定も可（リネーム耐性が必要な場合）
-[GraphNode("Person")]
+[Node("Person")]
 public partial class Person
 {
-    [GraphIndexed("idx_person_name")]
-    [GraphProperty]
+    [Indexed("idx_person_name")]
+    [Property]
     public string Name { get; set; } = "";
 }
 ```
 
 SourceGenerator は各クラスに対して以下のメソッドを生成します。
 
-**`[GraphNode]` クラス**
+**`[Node]` クラス**
 
 | メソッド | シグネチャ | 説明 |
 |---|---|---|
 | `Insert` | `(tx, entity) → NodeId` | ノードを作成してプロパティを保存 |
-| `InsertIndexed` | `(tx, entity) → NodeId` | `Insert` + `[GraphIndexed]` プロパティをインデックス登録 |
+| `InsertIndexed` | `(tx, entity) → NodeId` | `Insert` + `[Indexed]` プロパティをインデックス登録 |
 | `Load` | `(tx, id) → T` | プロパティを読み込んでインスタンスを復元 |
 | `Update` | `(tx, id, entity)` | 既存ノードのプロパティを上書き |
 | `Delete` | `(tx, id)` | ノードを削除 |
-| `FindBy{PropName}` | `(tx, value) → List<(NodeId, T)>` | `[GraphIndexed]` プロパティごとに生成 |
+| `FindBy{PropName}` | `(tx, value) → List<(NodeId, T)>` | `[Indexed]` プロパティごとに生成 |
 
-**`[GraphRelationship]` クラス**
+**`[Relationship]` クラス**
 
 | メソッド | シグネチャ | 説明 |
 |---|---|---|
@@ -119,13 +121,13 @@ tx.Commit();
 
 #### リレーションシップの操作
 
-`[GraphRelationship<TSource, TTarget>]` 属性でリレーションシップモデルを定義すると、Source Generator が CRUD メソッドと、始点 `TSource` から終点 `TTarget` への**型保存トラバーサル糖衣**（リレーション型名そのもののメソッド）を生成します。型名を省略するとクラス名がリレーション型になります。
+`[Relationship<TSource, TTarget>]` 属性でリレーションシップモデルを定義すると、Source Generator が CRUD メソッドと、始点 `TSource` から終点 `TTarget` への**型保存トラバーサル糖衣**（リレーション型名そのもののメソッド）を生成します。型名を省略するとクラス名がリレーション型になります。
 
 ```csharp
-[GraphRelationship<Person, Person>("KNOWS")]
+[Relationship<Person, Person>("KNOWS")]
 public partial class Knows
 {
-    [GraphProperty]
+    [Property]
     public string Since { get; set; } = "";
 }
 
@@ -240,7 +242,7 @@ foreach (var name in g.Nodes().HasLabel("Person").Values("Name").AsEnumerable())
 
 ```
 Quiver.Client           ← Gremlin ライク API / Match DSL / SourceGen 糖衣構文
-├── Quiver.Client.Attributes  ← [GraphNode] / [GraphProperty] / [GraphIndexed]
+├── Quiver.Client.Attributes  ← [Node] / [Property] / [Indexed]
 └── Quiver.SourceGen   ← Roslyn IIncrementalGenerator (CRUD + FindBy* 生成)
 
 Quiver              ← 公開 API ファサード
@@ -348,11 +350,11 @@ dotnet run --project sandbox/QuiverSandbox
 | タスク | 内容 | 状態 |
 |---|---|---|
 | FT-1 | Relationship プロパティ対応 | 完了 |
-| FT-2 | `[GraphRelationship]` 属性 | 完了 |
+| FT-2 | `[Relationship]` 属性 | 完了 |
 | FT-3 | Relationship Source Generator | 完了 |
 | FT-4 | 型付き Traversal API（`Out<TRel>()` など） | 完了 |
 | FT-6 | `QuiverDb.OpenDatabase` 入口 API | 完了 |
-| FT-7 | SourceGen: `[GraphRelationship("KNOWS")]` の type 値を正しく生成 | 完了 |
+| FT-7 | SourceGen: `[Relationship("KNOWS")]` の type 値を正しく生成 | 完了 |
 | FT-8 | `GraphTransaction.SeekIndex` / `RangeIndex` 公開 API | 完了 |
 | FT-9 | WAL PageImage replay（クラッシュ後の完全なデータ復旧） | 完了 |
 | FT-5 | Namespace 整理（`GraphDb.Engine.*` → `Quiver.*`） | 完了 |
@@ -408,7 +410,7 @@ docfx serve docs/api/_site
 | [`Quiver.Samples.Crud`](samples/Quiver.Samples.Crud/) | 基本 CRUD (ノード / リレーション / プロパティの作成・更新・削除) |
 | [`Quiver.Samples.Traversal`](samples/Quiver.Samples.Traversal/) | 多段トラバーサル、フィルタ、可変長 repeat、集約、サブトラバーサル述語、cursor |
 | [`Quiver.Samples.Match`](samples/Quiver.Samples.Match/) | Match DSL によるパターンマッチと MERGE / UPSERT |
-| [`Quiver.Samples.SourceGen`](samples/Quiver.Samples.SourceGen/) | `[GraphNode]` / `[GraphRelationship]` 属性ベースの型付き CRUD |
+| [`Quiver.Samples.SourceGen`](samples/Quiver.Samples.SourceGen/) | `[Node]` / `[Relationship]` 属性ベースの型付き CRUD |
 | [`Quiver.Samples.Vector`](samples/Quiver.Samples.Vector/) | VEC-5 KNN 起点トラバーサル + VEC-6 graph-first ハイブリッド |
 
 ## 設計ドキュメント

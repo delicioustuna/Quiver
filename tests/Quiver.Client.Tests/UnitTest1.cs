@@ -5,23 +5,23 @@ namespace Quiver.Api.Tests;
 public class AttributesTest
 {
     [Fact]
-    public void GraphNodeAttribute_stores_label()
+    public void NodeAttribute_stores_label()
     {
-        var attr = new GraphNodeAttribute("Person");
+        var attr = new NodeAttribute("Person");
         attr.Label.Should().Be("Person");
     }
 
     [Fact]
-    public void GraphPropertyAttribute_stores_key()
+    public void PropertyAttribute_stores_key()
     {
-        var attr = new GraphPropertyAttribute("name");
+        var attr = new PropertyAttribute("name");
         attr.Key.Should().Be("name");
     }
 
     [Fact]
-    public void GraphIndexedAttribute_stores_index_name()
+    public void IndexedAttribute_stores_index_name()
     {
-        var attr = new GraphIndexedAttribute("idx_name");
+        var attr = new IndexedAttribute("idx_name");
         attr.IndexName.Should().Be("idx_name");
     }
 

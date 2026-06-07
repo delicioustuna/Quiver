@@ -2,22 +2,22 @@ using Quiver.Api;
 
 namespace Quiver.Samples.SourceGen;
 
-// [GraphNode] / [GraphIndexed] / [GraphProperty] を付けると、Roslyn SourceGenerator が
+// [Node] / [Indexed] / [Property] を付けると、Roslyn SourceGenerator が
 // Insert / InsertIndexed / Load / Update / Delete / FindByName を自動生成する。
-[GraphNode("Person")]
+[Node("Person")]
 public partial class Person
 {
-    [GraphIndexed("idx_person_name")]
-    [GraphProperty]
+    [Indexed("idx_person_name")]
+    [Property]
     public string Name { get; set; } = "";
 
-    [GraphProperty]
+    [Property]
     public int Age { get; set; }
 }
 
-[GraphRelationship<Person, Person>("KNOWS")]
+[Relationship<Person, Person>("KNOWS")]
 public partial class Knows
 {
-    [GraphProperty]
+    [Property]
     public string Since { get; set; } = "";
 }

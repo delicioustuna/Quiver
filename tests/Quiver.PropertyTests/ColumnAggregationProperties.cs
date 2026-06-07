@@ -16,7 +16,7 @@ namespace Quiver.PropertyTests;
 /// </summary>
 public class ColumnAggregationProperties
 {
-    [Property(MaxTest = 60)]
+    [FsCheck.Xunit.Property(MaxTest = 60)]
     public Property Column_aggregation_equals_row_path_and_naive(int[]? input)
     {
         // グラフを小さく保つため値数を制限。空配列も有効ケース (合計 0)。

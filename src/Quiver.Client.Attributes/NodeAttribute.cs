@@ -8,10 +8,10 @@ namespace Quiver.Api;
 /// <c>FindBy{PropName}</c>) を自動生成するための属性。
 /// </summary>
 [AttributeUsage(AttributeTargets.Class)]
-public sealed class GraphNodeAttribute : Attribute
+public sealed class NodeAttribute : Attribute
 {
     /// <summary>付与クラスをグラフノードとしてマークする。<paramref name="label"/> が null のときはクラス名がラベルとして使われる。</summary>
-    public GraphNodeAttribute(string? label = null) { Label = label; }
+    public NodeAttribute(string? label = null) { Label = label; }
 
     /// <summary>明示指定されたラベル名 (省略時は <c>null</c>)。</summary>
     public string? Label { get; }
@@ -22,10 +22,10 @@ public sealed class GraphNodeAttribute : Attribute
 /// プロパティの読み書きコードを自動生成するための属性。
 /// </summary>
 [AttributeUsage(AttributeTargets.Property)]
-public sealed class GraphPropertyAttribute : Attribute
+public sealed class PropertyAttribute : Attribute
 {
     /// <summary>プロパティをグラフプロパティとしてマークする。<paramref name="key"/> が null のときはプロパティ名がキーとして使われる。</summary>
-    public GraphPropertyAttribute(string? key = null) { Key = key; }
+    public PropertyAttribute(string? key = null) { Key = key; }
 
     /// <summary>明示指定されたグラフプロパティキー (省略時は <c>null</c>)。</summary>
     public string? Key { get; }
@@ -34,7 +34,7 @@ public sealed class GraphPropertyAttribute : Attribute
 /// <summary>
 /// 付与したプロパティをインデックス対象としてマークし、SourceGenerator が
 /// <c>InsertIndexed</c> と <c>FindBy{PropName}</c> の生成・登録を行うための属性。
-/// <see cref="GraphPropertyAttribute"/> と併用が必須。
+/// <see cref="PropertyAttribute"/> と併用が必須。
 /// </summary>
 /// <remarks>
 /// 本属性は <b>SourceGenerator 向けのマーカーに過ぎず、実体の B+Tree インデックスは
@@ -47,10 +47,10 @@ public sealed class GraphPropertyAttribute : Attribute
 /// が出力される。
 /// </remarks>
 [AttributeUsage(AttributeTargets.Property)]
-public sealed class GraphIndexedAttribute : Attribute
+public sealed class IndexedAttribute : Attribute
 {
     /// <summary>プロパティを索引対象としてマークする。<paramref name="indexName"/> が null のときは <c>idx_{label}_{propertyName}</c> が自動生成される。</summary>
-    public GraphIndexedAttribute(string? indexName = null) { IndexName = indexName; }
+    public IndexedAttribute(string? indexName = null) { IndexName = indexName; }
 
     /// <summary>明示指定された索引名 (省略時は <c>null</c>)。</summary>
     public string? IndexName { get; }

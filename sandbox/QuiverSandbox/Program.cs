@@ -358,7 +358,7 @@ static void Demo7_Diagnostics(string dir)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Demo 8: SourceGenerator CRUD  ([GraphNode] / [GraphProperty] / [GraphIndexed])
+// Demo 8: SourceGenerator CRUD  ([Node] / [Property] / [Indexed])
 // ─────────────────────────────────────────────────────────────────────────────
 static void Demo8_SourceGenCrud(string dir)
 {

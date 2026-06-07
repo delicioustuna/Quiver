@@ -317,7 +317,7 @@ public sealed class GraphDatabaseTests : IDisposable
 
     private partial class KnowsRel : IGraphRelationship<KnowsRel, PersonNode, PersonNode>
     {
-        [GraphProperty]
+        [Property]
         public int Since { get; set; }
 
         public static string GraphType => "KNOWS";
@@ -335,10 +335,10 @@ public sealed class GraphDatabaseTests : IDisposable
             => tx.DeleteRelationship(id);
     }
 
-    [GraphNode("Person")]
+    [Node("Person")]
     private partial class PersonNode : IGraphNode<PersonNode>
     {
-        [GraphProperty]
+        [Property]
         public string Name { get; set; } = "";
 
         public static string GraphLabel => "Person";

@@ -140,21 +140,21 @@ loader.Commit();
 
 ボイラープレートを削減し、リファクタリング耐性を上げる。
 
-> `[GraphIndexed]` は SourceGenerator に `InsertIndexed` / `FindByName` および属性情報からインデックスを作成する `EnsureIndexes` / `CreateIndex` の生成を指示するマーカー。実体インデックスは `db.EnsureIndexes<T>()` (一括) もしくは `db.CreateIndex<T>(p => p.Prop)` (単一) で作成する。文字列直書きの `db.Schema.CreateIndex(...)` も引き続き使えるが、属性値との二重管理になる。
+> `[Indexed]` は SourceGenerator に `InsertIndexed` / `FindByName` および属性情報からインデックスを作成する `EnsureIndexes` / `CreateIndex` の生成を指示するマーカー。実体インデックスは `db.EnsureIndexes<T>()` (一括) もしくは `db.CreateIndex<T>(p => p.Prop)` (単一) で作成する。文字列直書きの `db.Schema.CreateIndex(...)` も引き続き使えるが、属性値との二重管理になる。
 
 ```csharp
-[GraphNode]
+[Node]
 public partial class Person
 {
-    [GraphIndexed]   // SourceGen マーカー — 実体インデックスは下で作成
-    [GraphProperty]
+    [Indexed]   // SourceGen マーカー — 実体インデックスは下で作成
+    [Property]
     public string Name { get; set; } = "";
 
-    [GraphProperty]
+    [Property]
     public int Age { get; set; }
 }
 
-// 初期化時に一度だけ — [GraphIndexed] 付きプロパティを SourceGen 情報からまとめて作成。
+// 初期化時に一度だけ — [Indexed] 付きプロパティを SourceGen 情報からまとめて作成。
 db.EnsureIndexes<Person>();
 
 using var tx = db.BeginTransaction();

@@ -6,15 +6,15 @@ namespace Quiver.SourceGen;
 [Generator]
 public sealed class GraphNodeGenerator : IIncrementalGenerator
 {
-    private const string GraphNodeAttributeFqn = "Quiver.Api.GraphNodeAttribute";
-    private const string GraphPropertyAttributeFqn = "Quiver.Api.GraphPropertyAttribute";
-    private const string GraphIndexedAttributeFqn = "Quiver.Api.GraphIndexedAttribute";
+    private const string NodeAttributeFqn = "Quiver.Api.NodeAttribute";
+    private const string PropertyAttributeFqn = "Quiver.Api.PropertyAttribute";
+    private const string IndexedAttributeFqn = "Quiver.Api.IndexedAttribute";
 
     public void Initialize(IncrementalGeneratorInitializationContext ctx)
     {
         var provider = ctx.SyntaxProvider
             .ForAttributeWithMetadataName(
-                GraphNodeAttributeFqn,
+                NodeAttributeFqn,
                 predicate: static (n, _) => n is ClassDeclarationSyntax,
                 transform: static (ctx, _) => BuildModel(ctx))
             .Where(static m => m is not null);
@@ -57,7 +57,7 @@ public sealed class GraphNodeGenerator : IIncrementalGenerator
             foreach (var attr in prop.GetAttributes())
             {
                 var attrFqn = attr.AttributeClass?.ToDisplayString();
-                if (attrFqn == GraphPropertyAttributeFqn)
+                if (attrFqn == PropertyAttributeFqn)
                 {
                     graphKey = prop.Name;
                     if (attr.ConstructorArguments.Length > 0 &&
@@ -67,7 +67,7 @@ public sealed class GraphNodeGenerator : IIncrementalGenerator
                         graphKey = keyArg;
                     }
                 }
-                else if (attrFqn == GraphIndexedAttributeFqn)
+                else if (attrFqn == IndexedAttributeFqn)
                 {
                     indexName = attr.ConstructorArguments.Length > 0 &&
                                 attr.ConstructorArguments[0].Value is string { Length: > 0 } idxArg

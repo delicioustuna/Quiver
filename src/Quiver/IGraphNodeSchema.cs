@@ -3,7 +3,7 @@ using System.Linq.Expressions;
 namespace Quiver;
 
 /// <summary>
-/// SourceGenerator が <c>[GraphNode]</c> 付与クラスに自動実装するスキーマ宣言 API。
+/// SourceGenerator が <c>[Node]</c> 付与クラスに自動実装するスキーマ宣言 API。
 /// 属性で宣言されたインデックス情報 (label / propertyName / 推論された <see cref="IndexKind"/>)
 /// を実体 B+Tree インデックスとして登録する手段を提供する。
 /// </summary>
@@ -15,7 +15,7 @@ namespace Quiver;
 public interface IGraphNodeSchema<TSelf> where TSelf : IGraphNodeSchema<TSelf>
 {
     /// <summary>
-    /// <c>[GraphIndexed]</c> が付与された全プロパティについて、属性で指定された
+    /// <c>[Indexed]</c> が付与された全プロパティについて、属性で指定された
     /// インデックス名 (省略時 <c>idx_{label}_{propertyName}</c>) と C# 型から推論した
     /// <see cref="IndexKind"/> で <see cref="ISchemaApi.CreateIndex"/> を冪等に呼び出す。
     /// 起動時に一度呼べばよい。
@@ -30,7 +30,7 @@ public interface IGraphNodeSchema<TSelf> where TSelf : IGraphNodeSchema<TSelf>
     /// <see cref="IndexKind.StringRange"/> を使う)。
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// <paramref name="propertyName"/> が <c>[GraphIndexed]</c> を持たない場合。
+    /// <paramref name="propertyName"/> が <c>[Indexed]</c> を持たない場合。
     /// </exception>
     static abstract void EnsureIndex(ISchemaApi schema, string propertyName, IndexKind? kindOverride);
 }
@@ -41,7 +41,7 @@ public interface IGraphNodeSchema<TSelf> where TSelf : IGraphNodeSchema<TSelf>
 public static class GraphDatabaseSchemaExtensions
 {
     /// <summary>
-    /// <c>[GraphIndexed]</c> 付き全プロパティのインデックスを一括作成する。
+    /// <c>[Indexed]</c> 付き全プロパティのインデックスを一括作成する。
     /// </summary>
     /// <example>
     /// <code>
