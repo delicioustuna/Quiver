@@ -195,14 +195,20 @@ namespace Quiver.Api
     public static class P
     {
         public static Quiver.Api.PropertyPredicate And(params Quiver.Api.PropertyPredicate[] predicates) { }
+        public static Quiver.Api.PropertyPredicate Between(double from, double to) { }
         public static Quiver.Api.PropertyPredicate Between(long from, long to) { }
         public static Quiver.Api.PropertyPredicate Contains(string needle) { }
         public static Quiver.Api.PropertyPredicate EndsWith(string suffix) { }
+        public static Quiver.Api.PropertyPredicate Eq(double value) { }
         public static Quiver.Api.PropertyPredicate Eq(long value) { }
         public static Quiver.Api.PropertyPredicate Eq(string value) { }
+        public static Quiver.Api.PropertyPredicate Gt(double value) { }
         public static Quiver.Api.PropertyPredicate Gt(long value) { }
+        public static Quiver.Api.PropertyPredicate Gte(double value) { }
         public static Quiver.Api.PropertyPredicate Gte(long value) { }
+        public static Quiver.Api.PropertyPredicate Lt(double value) { }
         public static Quiver.Api.PropertyPredicate Lt(long value) { }
+        public static Quiver.Api.PropertyPredicate Lte(double value) { }
         public static Quiver.Api.PropertyPredicate Lte(long value) { }
         public static Quiver.Api.PropertyPredicate Not(Quiver.Api.PropertyPredicate inner) { }
         public static Quiver.Api.PropertyPredicate Or(params Quiver.Api.PropertyPredicate[] predicates) { }

@@ -30,6 +30,28 @@ public static class P
     /// <summary>閉区間 <c>[from, to]</c> の範囲比較。</summary>
     public static PropertyPredicate Between(long from, long to) => new(PredicateKind.Between, from, to, null);
 
+    // ── FT-35: 浮動小数点 (double/float/Half) の比較・範囲述語 ──────────────────
+
+    private static long D(double v) => BitConverter.DoubleToInt64Bits(v);
+
+    /// <summary>等値比較 (<see cref="double"/> 値)。float/Half は double に widen して渡す。</summary>
+    public static PropertyPredicate Eq(double value)  => new(PredicateKind.Eq,  D(value), 0, null, isDouble: true);
+
+    /// <summary>より大 (<c>&gt;</c>, <see cref="double"/>)。</summary>
+    public static PropertyPredicate Gt(double value)  => new(PredicateKind.Gt,  D(value), 0, null, isDouble: true);
+
+    /// <summary>以上 (<c>&gt;=</c>, <see cref="double"/>)。</summary>
+    public static PropertyPredicate Gte(double value) => new(PredicateKind.Gte, D(value), 0, null, isDouble: true);
+
+    /// <summary>より小 (<c>&lt;</c>, <see cref="double"/>)。</summary>
+    public static PropertyPredicate Lt(double value)  => new(PredicateKind.Lt,  D(value), 0, null, isDouble: true);
+
+    /// <summary>以下 (<c>&lt;=</c>, <see cref="double"/>)。</summary>
+    public static PropertyPredicate Lte(double value) => new(PredicateKind.Lte, D(value), 0, null, isDouble: true);
+
+    /// <summary>半開区間 <c>[from, to)</c> の範囲比較 (<see cref="double"/>)。</summary>
+    public static PropertyPredicate Between(double from, double to) => new(PredicateKind.Between, D(from), D(to), null, isDouble: true);
+
     /// <summary>文字列プロパティが指定した候補値のいずれかと一致する場合に通す。</summary>
     public static PropertyPredicate Within(params string[] values) => new(PredicateKind.Within, 0, 0, null, values);
 
@@ -153,6 +175,18 @@ public sealed class PropertyPredicate
     internal PropertyPredicate[]? InnerArray { get; }
     internal Regex? CompiledRegex { get; }
 
+    /// <summary>
+    /// FT-35: 比較対象が浮動小数点 (double/float/Half) であることを示す。true のとき
+    /// <see cref="LongFrom"/>/<see cref="LongTo"/> は <see cref="System.BitConverter.DoubleToInt64Bits"/>
+    /// でエンコードされた double ビットを保持する。
+    /// </summary>
+    internal bool IsDouble { get; }
+
+    /// <summary>FT-35: 浮動小数点比較の下限値 (<see cref="IsDouble"/> が true のとき有効)。</summary>
+    internal double DoubleFrom => BitConverter.Int64BitsToDouble(LongFrom);
+    /// <summary>FT-35: 浮動小数点比較の上限値 (<see cref="IsDouble"/> が true のとき有効)。</summary>
+    internal double DoubleTo => BitConverter.Int64BitsToDouble(LongTo);
+
     internal PropertyPredicate(
         PredicateKind kind,
         long from,
@@ -161,9 +195,11 @@ public sealed class PropertyPredicate
         string[]? within = null,
         PropertyPredicate? inner = null,
         PropertyPredicate[]? innerArray = null,
-        Regex? compiledRegex = null)
+        Regex? compiledRegex = null,
+        bool isDouble = false)
     {
         Kind = kind; LongFrom = from; LongTo = to; StringValue = str;
         WithinValues = within; Inner = inner; InnerArray = innerArray; CompiledRegex = compiledRegex;
+        IsDouble = isDouble;
     }
 }

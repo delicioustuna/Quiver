@@ -13,6 +13,10 @@ public partial class Person
 
     [Property]
     public int Age { get; set; }
+
+    // FT-35: float は Double に widen して格納・型付きクエリで範囲比較できる。
+    [Property]
+    public float Height { get; set; }
 }
 
 [Relationship<Person, Person>("KNOWS")]

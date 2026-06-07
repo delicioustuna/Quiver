@@ -19,8 +19,8 @@ try
     {
         var g = tx.G(db.Schema);
 
-        var aliceId = g.InsertIndexed(new Person { Name = "Alice", Age = 30 });
-        var bobId   = g.InsertIndexed(new Person { Name = "Bob",   Age = 25 });
+        var aliceId = g.InsertIndexed(new Person { Name = "Alice", Age = 30, Height = 1.65f });
+        var bobId   = g.InsertIndexed(new Person { Name = "Bob",   Age = 25, Height = 1.80f });
         Console.WriteLine($"  Insert: Alice={aliceId.Value}, Bob={bobId.Value}");
 
         Knows.Insert(tx, aliceId, bobId, new Knows { Since = "2024-01" });
@@ -68,6 +68,14 @@ try
         Console.WriteLine($"  Where(Age>20 && Name^=A): {lambdaFiltered.Count} 件");
         foreach (var p in lambdaFiltered)
             Console.WriteLine($"    {p.Name}, age={p.Age}");
+
+        // ── FT-35: 浮動小数点 (float) の範囲述語 ──
+        var tall = g.Nodes<Person>()
+                    .Where(p => p.Height > 1.7f)   // float メンバの範囲比較
+                    .ToList();
+        Console.WriteLine($"  Height > 1.7: {tall.Count} 件");
+        foreach (var p in tall)
+            Console.WriteLine($"    {p.Name}, height={p.Height}");
 
         // ── 5. GC-8: エッジ述語付き型保存ホップ (.Knows(e => ...)) ──
         var recentlyKnown = g.Nodes<Person>()

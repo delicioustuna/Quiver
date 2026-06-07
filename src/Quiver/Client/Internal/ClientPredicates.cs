@@ -174,6 +174,57 @@ internal sealed class PropertyDoublePredicate : IPredicate
 }
 
 /// <summary>
+/// FT-35: 浮動小数点プロパティ (Double に格納) に対する範囲・比較述語。格納ビットを
+/// double に復号して double として比較する (順序保存エンコード不要 — filter は走査するため)。
+/// 整数プロパティ (Int32/Int64) も double に widen して受け入れ、混在比較を許容する。
+/// </summary>
+internal sealed class PropertyDoubleRangePredicate : IPredicate
+{
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+
+    private readonly int _nodeColumn;
+    private readonly PropertyKeyId _keyId;
+    private readonly PredicateKind _kind;
+    private readonly double _from;
+    private readonly double _to;
+
+    internal PropertyDoubleRangePredicate(int nodeColumn, PropertyKeyId keyId, PropertyPredicate pred)
+    {
+        _nodeColumn = nodeColumn; _keyId = keyId; _kind = pred.Kind;
+        _from = pred.DoubleFrom; _to = pred.DoubleTo;
+    }
+
+    public bool Evaluate(in TupleRef tuple, ITransaction tx)
+    {
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
+        while (en.MoveNext())
+        {
+            var prop = en.Current;
+            if (prop.KeyId != _keyId) continue;
+            double v;
+            switch (prop.Value.Type)
+            {
+                case PropertyValueType.Double: v = prop.Value.DoubleValue; break;
+                case PropertyValueType.Int64:  v = prop.Value.Int64Value;  break;
+                case PropertyValueType.Int32:  v = prop.Value.Int32Value;  break;
+                default: return false;
+            }
+            return _kind switch
+            {
+                PredicateKind.Eq      => v == _from,
+                PredicateKind.Gt      => v >  _from,
+                PredicateKind.Gte     => v >= _from,
+                PredicateKind.Lt      => v <  _from,
+                PredicateKind.Lte     => v <= _from,
+                PredicateKind.Between => v >= _from && v < _to,
+                _                     => false,
+            };
+        }
+        return false;
+    }
+}
+
+/// <summary>
 /// GC-1: existence test for a property key on a node. Used by
 /// <c>.Has(key)</c> (mustExist=true) and <c>.HasNot(key)</c> (mustExist=false).
 /// The mustExist flag inlines negation so GC-1 does not need to wait on
@@ -270,6 +321,10 @@ internal static class PredicateDispatch
                 return new AndPredicate(BuildAll(nodeColumn, keyId, pred.InnerArray, entity));
             case PredicateKind.Or when pred.InnerArray != null:
                 return new OrPredicate(BuildAll(nodeColumn, keyId, pred.InnerArray, entity));
+            case PredicateKind.Eq or PredicateKind.Gt or PredicateKind.Gte
+                or PredicateKind.Lt or PredicateKind.Lte or PredicateKind.Between when pred.IsDouble:
+                // FT-35: 浮動小数点の比較・範囲は double として復号比較する。
+                return new PropertyDoubleRangePredicate(nodeColumn, keyId, pred) { Entity = entity };
             default:
                 // Eq/Gt/Gte/Lt/Lte/Between with numeric comparand fall through
                 // to the int64 predicate, which already enforces type flags.

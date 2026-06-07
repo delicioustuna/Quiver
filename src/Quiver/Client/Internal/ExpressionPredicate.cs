@@ -89,32 +89,52 @@ internal static class ExpressionPredicate
         // メンバが右辺だった場合は演算子の向きを反転 (例: 20 < p.Age → p.Age > 20)。
         if (flipped) op = Flip(op);
 
-        return value switch
-        {
-            string s => (key, op switch
+        // FT-35: 述語ドメインは「メンバの CLR 型」で決める (リテラル型ではない)。
+        // これにより doubleProp > 2 (整数リテラル) でも double 比較になる。
+        var memberType = Nullable.GetUnderlyingType(member.Type) ?? member.Type;
+
+        if (memberType == typeof(string))
+            return (key, op switch
             {
-                ExpressionType.Equal              => P.Eq(s),
-                ExpressionType.NotEqual           => P.Not(P.Eq(s)),
-                ExpressionType.GreaterThan        => P.Gt(StringErr()),
-                _ => throw new NotSupportedException($"文字列プロパティ '{key}' に対する比較 {op} は非対応です (== / != のみ)。"),
-            }),
-            bool b => op switch
+                ExpressionType.Equal    => P.Eq((string)value!),
+                ExpressionType.NotEqual => P.Not(P.Eq((string)value!)),
+                _ => throw new NotSupportedException($"文字列プロパティ '{key}' に対する比較 {op} は非対応です (== / != / StartsWith 等を使ってください)。"),
+            });
+
+        if (memberType == typeof(bool))
+        {
+            bool b = Convert.ToBoolean(value);
+            return op switch
             {
                 ExpressionType.Equal    => (key, P.Eq(b ? 1 : 0)),
                 ExpressionType.NotEqual => (key, P.Eq(b ? 0 : 1)),
                 _ => throw new NotSupportedException($"bool プロパティ '{key}' に対する比較 {op} は非対応です (== / != のみ)。"),
-            },
-            _ when IsIntegral(value) => (key, IntegralPredicate(op, Convert.ToInt64(value), key)),
-            _ => throw new NotSupportedException(
-                $"プロパティ '{key}' の値型 {value?.GetType().Name ?? "null"} は式ツリー述語で非対応です " +
-                "(int/long/string/bool のみ)。範囲は Has(key, P.xxx) を使ってください。"),
-        };
+            };
+        }
+
+        if (memberType == typeof(double) || memberType == typeof(float) || memberType == typeof(Half))
+            return (key, DoublePredicate(op, Convert.ToDouble(value), key));
+
+        if (IsIntegralType(memberType))
+            return (key, IntegralPredicate(op, Convert.ToInt64(value), key));
+
+        throw new NotSupportedException(
+            $"プロパティ '{key}' の型 {memberType.Name} は式ツリー述語で非対応です " +
+            "(string/bool/整数/double/float/Half)。decimal/Guid 等の範囲は Has(key, P.xxx) を使ってください。");
     }
 
-    private static long StringErr()
-        => throw new NotSupportedException("文字列プロパティに対する大小比較は非対応です (== / != / StartsWith 等を使ってください)。");
-
     private static PropertyPredicate IntegralPredicate(ExpressionType op, long v, string key) => op switch
+    {
+        ExpressionType.Equal              => P.Eq(v),
+        ExpressionType.NotEqual           => P.Not(P.Eq(v)),
+        ExpressionType.GreaterThan        => P.Gt(v),
+        ExpressionType.GreaterThanOrEqual => P.Gte(v),
+        ExpressionType.LessThan           => P.Lt(v),
+        ExpressionType.LessThanOrEqual    => P.Lte(v),
+        _ => throw new NotSupportedException($"プロパティ '{key}' に対する比較 {op} は非対応です。"),
+    };
+
+    private static PropertyPredicate DoublePredicate(ExpressionType op, double v, string key) => op switch
     {
         ExpressionType.Equal              => P.Eq(v),
         ExpressionType.NotEqual           => P.Not(P.Eq(v)),
@@ -172,7 +192,10 @@ internal static class ExpressionPredicate
         _ => t, // Equal / NotEqual は対称
     };
 
-    private static bool IsIntegral(object? v) => v is int or long or short or byte or sbyte or uint or ushort;
+    private static bool IsIntegralType(Type t) =>
+        t == typeof(int) || t == typeof(long) || t == typeof(short) || t == typeof(byte) ||
+        t == typeof(sbyte) || t == typeof(uint) || t == typeof(ushort) || t == typeof(char) ||
+        t.IsEnum;
 
     private static object? Eval(Expression e)
     {

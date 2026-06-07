@@ -36,6 +36,8 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
             int     i => _inner.Has(key, i),
             long    l => _inner.Has(key, l),
             double  d => _inner.Has(key, d),
+            float   f => _inner.Has(key, (double)f),   // FT-35: float は Double に widen 格納
+            Half    h => _inner.Has(key, (double)h),   // FT-35: Half も Double に widen
             bool    b => _inner.Has(key, b),
             _         => throw new NotSupportedException($"Has<{typeof(TProp).Name}> は未対応です。範囲述語には Has(string key, PropertyPredicate pred) を使ってください。"),
         };

@@ -11,6 +11,8 @@ internal static class GraphNodeEmitter
         ["int"]     = ("PropertyValue.FromInt32(entity.{0})", "tx.GetProperty(id, \"{1}\").Int32Value"),
         ["long"]    = ("PropertyValue.FromInt64(entity.{0})", "tx.GetProperty(id, \"{1}\").Int64Value"),
         ["double"]  = ("PropertyValue.FromDouble(entity.{0})", "tx.GetProperty(id, \"{1}\").DoubleValue"),
+        ["float"]   = ("PropertyValue.FromDouble((double)entity.{0})", "(float)tx.GetProperty(id, \"{1}\").DoubleValue"),
+        ["Half"]    = ("PropertyValue.FromDouble((double)entity.{0})", "(System.Half)tx.GetProperty(id, \"{1}\").DoubleValue"),
         ["bool"]    = ("PropertyValue.FromBool(entity.{0})", "tx.GetProperty(id, \"{1}\").BoolValue"),
     };
 

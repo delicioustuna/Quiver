@@ -335,22 +335,26 @@ public sealed class GraphDatabaseTests : IDisposable
             => tx.DeleteRelationship(id);
     }
 
-    [Node("Person")]
     private partial class PersonNode : IGraphNode<PersonNode>
     {
-        [Property]
         public string Name { get; set; } = "";
+        public double Score { get; set; }   // FT-35: 浮動小数点プロパティ
 
         public static string GraphLabel => "Person";
         public static NodeId Insert(IGraphTransaction tx, PersonNode entity)
         {
             var id = tx.CreateNode("Person");
             tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
+            tx.SetProperty(id, "Score", PropertyValue.FromDouble(entity.Score));
             return id;
         }
         public static NodeId InsertIndexed(IGraphTransaction tx, PersonNode entity) => Insert(tx, entity);
         public static PersonNode Load(IGraphTransaction tx, NodeId id)
-            => new() { Name = System.Text.Encoding.UTF8.GetString(tx.GetProperty(id, "Name").Utf8StringValue) };
+            => new()
+            {
+                Name = System.Text.Encoding.UTF8.GetString(tx.GetProperty(id, "Name").Utf8StringValue),
+                Score = tx.GetProperty(id, "Score").DoubleValue,
+            };
         public static void Update(IGraphTransaction tx, NodeId id, PersonNode entity)
             => tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
         public static void Delete(IGraphTransaction tx, NodeId id) => tx.DeleteNode(id);
@@ -438,6 +442,37 @@ public sealed class GraphDatabaseTests : IDisposable
                       .ToListWithIds();
 
         recent.Select(n => n.Id).Should().Contain(carol).And.NotContain(bob);
+        tx.Rollback();
+    }
+
+    // ===== FT-35: 浮動小数点の範囲述語 =====
+
+    [Fact]
+    public void Has_double_range_filters_via_predicate()
+    {
+        using var tx = _db.BeginTransaction();
+        var a = tx.CreateNode("Item"); tx.SetProperty(a, "score", PropertyValue.FromDouble(1.5));
+        var b = tx.CreateNode("Item"); tx.SetProperty(b, "score", PropertyValue.FromDouble(2.5));
+
+        var g = tx.G(_db.Schema);
+        var hi = g.Nodes().HasLabel("Item").Has("score", P.Gt(2.0)).ToList();
+
+        hi.Should().ContainSingle().Which.Should().Be(b);
+        tx.Rollback();
+    }
+
+    [Fact]
+    public void TypedWhere_double_range_filters()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = PersonNode.Insert(tx, new PersonNode { Name = "Alice", Score = 1.5 });
+        var bob   = PersonNode.Insert(tx, new PersonNode { Name = "Bob",   Score = 2.5 });
+
+        var g = tx.G(_db.Schema);
+        // FT-35: double メンバの式ツリー比較 (整数リテラルでも double 比較に routing)。
+        var found = g.Nodes<PersonNode>().Where(p => p.Score > 2).ToListWithIds();
+
+        found.Select(n => n.Id).Should().Contain(bob).And.NotContain(alice);
         tx.Rollback();
     }
 

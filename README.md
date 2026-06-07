@@ -208,7 +208,9 @@ var people = g.Nodes<Person>()
 var adults = g.Nodes<Person>()
               .Where(p => p.Age > 25 && p.Name.StartsWith("A"))
               .ToList();
-// 非対応の式（キー跨ぎ ||・double 範囲など）は Has(p => p.X, P.xxx) を使う
+// FT-35: 浮動小数点 (double/float/Half) の範囲比較も可（float は Double に widen 格納）
+var tall = g.Nodes<Person>().Where(p => p.Height > 1.7f).ToList();
+// P.Gt(double) 等の述語直指定も可: .Has("score", P.Between(1.0, 2.0))
 
 // GC-8: エッジ（リレーションシップ）プロパティでの絞り込み
 //   生成糖衣にエッジ述語を渡すと、型保存したまま絞り込んで終点へ辿る
