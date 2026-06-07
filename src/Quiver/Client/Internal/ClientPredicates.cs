@@ -6,6 +6,29 @@ using Quiver.Transactions;
 
 namespace Quiver.Api.Internal;
 
+/// <summary>GC-8: 述語が読むエンティティの種別 (ノード / リレーションシップ)。</summary>
+internal enum PredicateEntity
+{
+    /// <summary>ノードプロパティ (<see cref="ITransaction.Nodes"/>)。</summary>
+    Node,
+    /// <summary>リレーションシップ (エッジ) プロパティ (<see cref="ITransaction.Relationships"/>)。</summary>
+    Relationship,
+}
+
+/// <summary>
+/// GC-8: <see cref="PredicateEntity"/> に応じて正しいストアからプロパティを列挙する。
+/// ノード専用だった述語をエッジプロパティ (<c>OutRelationships().Has(...)</c> /
+/// <c>.Knows(e =&gt; ...)</c>) でも機能させるための共通経路。両ストアの
+/// <c>EnumerateProperties</c> は同じ <see cref="PropertyEnumerator"/> を返すため分岐 1 箇所で済む。
+/// </summary>
+internal static class EntityProps
+{
+    public static PropertyEnumerator Enumerate(ITransaction tx, PredicateEntity entity, long id)
+        => entity == PredicateEntity.Relationship
+            ? tx.Relationships.EnumerateProperties(new RelationshipId(id), tx.Properties)
+            : tx.Nodes.EnumerateProperties(new NodeId(id), tx.Properties);
+}
+
 internal sealed class LabelPredicate : IPredicate
 {
     private readonly int _column;
@@ -27,6 +50,8 @@ internal sealed class LabelPredicate : IPredicate
 
 internal sealed class PropertyEqStringPredicate : IPredicate
 {
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+
     private readonly int _nodeColumn;
     private readonly PropertyKeyId _keyId;
     private readonly string _value;
@@ -38,9 +63,7 @@ internal sealed class PropertyEqStringPredicate : IPredicate
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
-        using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -54,6 +77,8 @@ internal sealed class PropertyEqStringPredicate : IPredicate
 
 internal sealed class PropertyInt64Predicate : IPredicate
 {
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+
     private readonly int _nodeColumn;
     private readonly PropertyKeyId _keyId;
     private readonly PropertyPredicate _pred;
@@ -65,9 +90,7 @@ internal sealed class PropertyInt64Predicate : IPredicate
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
-        using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -98,6 +121,8 @@ internal sealed class PropertyInt64Predicate : IPredicate
 
 internal sealed class PropertyWithinStringPredicate : IPredicate
 {
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+
     private readonly int _nodeColumn;
     private readonly PropertyKeyId _keyId;
     private readonly HashSet<string> _values;
@@ -109,9 +134,7 @@ internal sealed class PropertyWithinStringPredicate : IPredicate
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
-        using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -125,6 +148,8 @@ internal sealed class PropertyWithinStringPredicate : IPredicate
 
 internal sealed class PropertyDoublePredicate : IPredicate
 {
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+
     private readonly int _nodeColumn;
     private readonly PropertyKeyId _keyId;
     private readonly long _encodedValue;
@@ -136,9 +161,7 @@ internal sealed class PropertyDoublePredicate : IPredicate
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
-        using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -158,6 +181,8 @@ internal sealed class PropertyDoublePredicate : IPredicate
 /// </summary>
 internal sealed class PropertyExistsPredicate : IPredicate
 {
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+
     private readonly int _nodeColumn;
     private readonly PropertyKeyId _keyId;
     private readonly bool _mustExist;
@@ -173,9 +198,7 @@ internal sealed class PropertyExistsPredicate : IPredicate
         // absent. HasNot(key) returns true, Has(key) returns false.
         if (!_keyId.IsValid) return !_mustExist;
 
-        var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
-        using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
         while (en.MoveNext())
         {
             if (en.Current.KeyId == _keyId) return _mustExist;
@@ -187,6 +210,8 @@ internal sealed class PropertyExistsPredicate : IPredicate
 /// <summary>GC-1: <c>P.Without(...)</c> — string property must not match any listed value.</summary>
 internal sealed class PropertyWithoutStringPredicate : IPredicate
 {
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+
     private readonly int _nodeColumn;
     private readonly PropertyKeyId _keyId;
     private readonly HashSet<string> _values;
@@ -198,9 +223,7 @@ internal sealed class PropertyWithoutStringPredicate : IPredicate
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
-        using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -222,41 +245,43 @@ internal sealed class PropertyWithoutStringPredicate : IPredicate
 /// </summary>
 internal static class PredicateDispatch
 {
-    internal static IPredicate Build(int nodeColumn, PropertyKeyId keyId, PropertyPredicate pred)
+    internal static IPredicate Build(int nodeColumn, PropertyKeyId keyId, PropertyPredicate pred,
+        PredicateEntity entity = PredicateEntity.Node)
     {
         switch (pred.Kind)
         {
             case PredicateKind.Eq when pred.StringValue != null:
-                return new PropertyEqStringPredicate(nodeColumn, keyId, pred.StringValue);
+                return new PropertyEqStringPredicate(nodeColumn, keyId, pred.StringValue) { Entity = entity };
             case PredicateKind.Within when pred.WithinValues != null:
-                return new PropertyWithinStringPredicate(nodeColumn, keyId, pred.WithinValues);
+                return new PropertyWithinStringPredicate(nodeColumn, keyId, pred.WithinValues) { Entity = entity };
             case PredicateKind.Without when pred.WithinValues != null:
-                return new PropertyWithoutStringPredicate(nodeColumn, keyId, pred.WithinValues);
+                return new PropertyWithoutStringPredicate(nodeColumn, keyId, pred.WithinValues) { Entity = entity };
             case PredicateKind.StartsWith:
-                return new StringPrefixPredicate(nodeColumn, keyId, pred.StringValue ?? string.Empty);
+                return new StringPrefixPredicate(nodeColumn, keyId, pred.StringValue ?? string.Empty) { Entity = entity };
             case PredicateKind.EndsWith:
-                return new StringSuffixPredicate(nodeColumn, keyId, pred.StringValue ?? string.Empty);
+                return new StringSuffixPredicate(nodeColumn, keyId, pred.StringValue ?? string.Empty) { Entity = entity };
             case PredicateKind.Contains:
-                return new StringContainsPredicate(nodeColumn, keyId, pred.StringValue ?? string.Empty);
+                return new StringContainsPredicate(nodeColumn, keyId, pred.StringValue ?? string.Empty) { Entity = entity };
             case PredicateKind.Regex when pred.CompiledRegex != null:
-                return new RegexPropertyPredicate(nodeColumn, keyId, pred.CompiledRegex);
+                return new RegexPropertyPredicate(nodeColumn, keyId, pred.CompiledRegex) { Entity = entity };
             case PredicateKind.Not when pred.Inner != null:
-                return new NegatedPredicate(Build(nodeColumn, keyId, pred.Inner));
+                return new NegatedPredicate(Build(nodeColumn, keyId, pred.Inner, entity));
             case PredicateKind.And when pred.InnerArray != null:
-                return new AndPredicate(BuildAll(nodeColumn, keyId, pred.InnerArray));
+                return new AndPredicate(BuildAll(nodeColumn, keyId, pred.InnerArray, entity));
             case PredicateKind.Or when pred.InnerArray != null:
-                return new OrPredicate(BuildAll(nodeColumn, keyId, pred.InnerArray));
+                return new OrPredicate(BuildAll(nodeColumn, keyId, pred.InnerArray, entity));
             default:
                 // Eq/Gt/Gte/Lt/Lte/Between with numeric comparand fall through
                 // to the int64 predicate, which already enforces type flags.
-                return new PropertyInt64Predicate(nodeColumn, keyId, pred);
+                return new PropertyInt64Predicate(nodeColumn, keyId, pred) { Entity = entity };
         }
     }
 
-    private static IPredicate[] BuildAll(int nodeColumn, PropertyKeyId keyId, PropertyPredicate[] preds)
+    private static IPredicate[] BuildAll(int nodeColumn, PropertyKeyId keyId, PropertyPredicate[] preds,
+        PredicateEntity entity)
     {
         var result = new IPredicate[preds.Length];
-        for (int i = 0; i < preds.Length; i++) result[i] = Build(nodeColumn, keyId, preds[i]);
+        for (int i = 0; i < preds.Length; i++) result[i] = Build(nodeColumn, keyId, preds[i], entity);
         return result;
     }
 }
@@ -269,6 +294,8 @@ internal static class PredicateDispatch
 /// </summary>
 internal abstract class StringPropertyPredicateBase : IPredicate
 {
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+
     private readonly int _nodeColumn;
     private readonly PropertyKeyId _keyId;
 
@@ -279,9 +306,7 @@ internal abstract class StringPropertyPredicateBase : IPredicate
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
-        using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -365,6 +390,8 @@ internal sealed class OrPredicate : IPredicate
 
 internal sealed class PropertyBoolPredicate : IPredicate
 {
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+
     private readonly int _nodeColumn;
     private readonly PropertyKeyId _keyId;
     private readonly long _scalar;
@@ -376,9 +403,7 @@ internal sealed class PropertyBoolPredicate : IPredicate
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var nodeId = new NodeId(tuple[_nodeColumn].LongValue);
-        using var node = tx.Nodes.Read(nodeId);
-        var en = tx.Nodes.EnumerateProperties(nodeId, tx.Properties); // ARCH-5c: inline + overflow
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;

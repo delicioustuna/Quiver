@@ -420,6 +420,47 @@ public sealed class GraphDatabaseTests : IDisposable
         tx.Rollback();
     }
 
+    [Fact]
+    public void TypedGraphTraversal_OutWhere_edge_predicate_filters()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = PersonNode.Insert(tx, new PersonNode { Name = "Alice" });
+        var bob   = PersonNode.Insert(tx, new PersonNode { Name = "Bob" });
+        var carol = PersonNode.Insert(tx, new PersonNode { Name = "Carol" });
+        KnowsRel.Insert(tx, alice, bob,   new KnowsRel { Since = 2020 });
+        KnowsRel.Insert(tx, alice, carol, new KnowsRel { Since = 2024 });
+
+        var g = tx.G(_db.Schema);
+        // GC-8: エッジプロパティ Since で絞り込みつつ PersonNode 型を保存して target へ。
+        var recent = g.Nodes<PersonNode>()
+                      .Where(p => p.Name == "Alice")
+                      .OutWhere<KnowsRel, PersonNode>(e => e.Since > 2022)
+                      .ToListWithIds();
+
+        recent.Select(n => n.Id).Should().Contain(carol).And.NotContain(bob);
+        tx.Rollback();
+    }
+
+    [Fact]
+    public void EdgeTraversal_Has_filters_relationship_properties()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = tx.CreateNode("Person");
+        var bob   = tx.CreateNode("Person");
+        var carol = tx.CreateNode("Person");
+        var r1 = tx.CreateRelationship(alice, bob,   "KNOWS");
+        var r2 = tx.CreateRelationship(alice, carol, "KNOWS");
+        tx.SetProperty(r1, "since", PropertyValue.FromInt64(2020));
+        tx.SetProperty(r2, "since", PropertyValue.FromInt64(2024));
+
+        var g = tx.G(_db.Schema);
+        // GC-8: エッジトラバーサルの .Has がリレーションシッププロパティを読む (旧: 常に空)。
+        var rels = g.Node(alice).OutRelationships("KNOWS").Has("since", P.Gt(2022L)).ToList();
+
+        rels.Should().ContainSingle().Which.Should().Be(r2);
+        tx.Rollback();
+    }
+
     // ===== OutE<TRel> / InE<TRel> / BothE<TRel> =====
 
     [Fact]

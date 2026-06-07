@@ -40,6 +40,12 @@ public sealed class GraphTraversal<T>
     // 既存呼び出しは null のまま (= VEC-9 動作 = 構造ヒントのみで判定)。
     internal readonly GraphStats? _stats;
 
+    // GC-8: この列が保持するエンティティ種別。T が RelationshipId なら
+    // エッジトラバーサル (OutRelationships<T>() 等) なので述語をリレーションシップ
+    // プロパティ読みに切り替える。それ以外 (NodeId / string 等) はノード。
+    private static readonly PredicateEntity EntityKindForT =
+        typeof(T) == typeof(RelationshipId) ? PredicateEntity.Relationship : PredicateEntity.Node;
+
     internal GraphTraversal(
         IGraphTransaction tx,
         ISchemaApi schema,
@@ -105,7 +111,7 @@ public sealed class GraphTraversal<T>
     public GraphTraversal<T> Has(string key, string value)
     {
         var keyId = _schema.GetOrCreatePropertyKey(key);
-        return ApplyPureFilter(col => _ => new PropertyEqStringPredicate(col, keyId, value));
+        return ApplyPureFilter(col => _ => new PropertyEqStringPredicate(col, keyId, value) { Entity = EntityKindForT });
     }
 
     /// <summary>プロパティ <paramref name="key"/> が <see cref="int"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
@@ -113,7 +119,7 @@ public sealed class GraphTraversal<T>
     {
         var keyId = _schema.GetOrCreatePropertyKey(key);
         var pred  = P.Eq((long)value);
-        return ApplyPureFilter(col => _ => new PropertyInt64Predicate(col, keyId, pred));
+        return ApplyPureFilter(col => _ => new PropertyInt64Predicate(col, keyId, pred) { Entity = EntityKindForT });
     }
 
     /// <summary>プロパティ <paramref name="key"/> が <see cref="long"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
@@ -121,7 +127,7 @@ public sealed class GraphTraversal<T>
     {
         var keyId = _schema.GetOrCreatePropertyKey(key);
         var pred  = P.Eq(value);
-        return ApplyPureFilter(col => _ => new PropertyInt64Predicate(col, keyId, pred));
+        return ApplyPureFilter(col => _ => new PropertyInt64Predicate(col, keyId, pred) { Entity = EntityKindForT });
     }
 
     /// <summary>プロパティ <paramref name="key"/> が <see cref="double"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
@@ -129,7 +135,7 @@ public sealed class GraphTraversal<T>
     {
         var keyId   = _schema.GetOrCreatePropertyKey(key);
         var encoded = BitConverter.DoubleToInt64Bits(value);
-        return ApplyPureFilter(col => _ => new PropertyDoublePredicate(col, keyId, encoded));
+        return ApplyPureFilter(col => _ => new PropertyDoublePredicate(col, keyId, encoded) { Entity = EntityKindForT });
     }
 
     /// <summary>プロパティ <paramref name="key"/> が <see cref="bool"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
@@ -137,7 +143,7 @@ public sealed class GraphTraversal<T>
     {
         var keyId  = _schema.GetOrCreatePropertyKey(key);
         var scalar = value ? 1L : 0L;
-        return ApplyPureFilter(col => _ => new PropertyBoolPredicate(col, keyId, scalar));
+        return ApplyPureFilter(col => _ => new PropertyBoolPredicate(col, keyId, scalar) { Entity = EntityKindForT });
     }
 
     /// <summary>
@@ -147,7 +153,7 @@ public sealed class GraphTraversal<T>
     public GraphTraversal<T> Has(string key, PropertyPredicate pred)
     {
         var keyId = _schema.GetOrCreatePropertyKey(key);
-        return ApplyPureFilter(col => _ => PredicateDispatch.Build(col, keyId, pred));
+        return ApplyPureFilter(col => _ => PredicateDispatch.Build(col, keyId, pred, EntityKindForT));
     }
 
     /// <summary>外向 (Outgoing) リレーションシップを辿り、隣接ノードを放出する (Gremlin の <c>.out</c>)。</summary>
@@ -278,7 +284,7 @@ public sealed class GraphTraversal<T>
     public GraphTraversal<T> Has(string key)
     {
         var keyId = _schema.GetOrCreatePropertyKey(key);
-        return ApplyPureFilter(col => _ => new PropertyExistsPredicate(col, keyId, mustExist: true));
+        return ApplyPureFilter(col => _ => new PropertyExistsPredicate(col, keyId, mustExist: true) { Entity = EntityKindForT });
     }
 
     /// <summary>GC-1: プロパティ <paramref name="key"/> を持たない要素のみを通す (Gremlin の <c>.hasNot</c>)。</summary>
@@ -288,7 +294,7 @@ public sealed class GraphTraversal<T>
         // 現状公開されていない。最悪ケースで初回呼び出し時にトークン 1 個を割り当てるだけで
         // 動作は正しい — 新規作成されたキーには観測値が 0 件のため。
         var keyId = _schema.GetOrCreatePropertyKey(key);
-        return ApplyPureFilter(col => _ => new PropertyExistsPredicate(col, keyId, mustExist: false));
+        return ApplyPureFilter(col => _ => new PropertyExistsPredicate(col, keyId, mustExist: false) { Entity = EntityKindForT });
     }
 
     /// <summary>

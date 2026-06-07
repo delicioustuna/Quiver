@@ -59,6 +59,21 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     public TypedGraphTraversal<T> Where(Expression<Func<T, bool>> predicate)
         => new TypedGraphTraversal<T>(ExpressionPredicate.Apply(_inner, predicate), _tx, _schema);
 
+    /// <summary>
+    /// GC-8: エッジ述語付きの型保存ホップ。<typeparamref name="TRel"/> エッジを
+    /// <paramref name="edgeFilter"/> (式ツリー述語) で絞り込んでから終点 <typeparamref name="TTarget"/> へ辿る。
+    /// 通常は SourceGenerator 生成の糖衣 (<c>.Knows(e =&gt; e.Since == "2024-01")</c>) から呼ばれる。
+    /// エッジプロパティ述語は <see cref="ExpressionPredicate"/> がリレーションシップ用に構築する。
+    /// </summary>
+    public TypedGraphTraversal<TTarget> OutWhere<TRel, TTarget>(Expression<Func<TRel, bool>> edgeFilter)
+        where TRel : IGraphRelationship<TRel, T, TTarget>
+        where TTarget : IGraphNode<TTarget>
+    {
+        var edges = _inner.OutRelationships(TRel.GraphType);
+        var filtered = ExpressionPredicate.Apply(edges, edgeFilter);
+        return new TypedGraphTraversal<TTarget>(filtered.TargetNode(), _tx, _schema);
+    }
+
     // ── トラバーサル（型なしに降格） ─────────────────────────────────────────
 
     /// <summary>外向に辿る (型なし <see cref="GraphTraversal{T}"/> に降格)。</summary>

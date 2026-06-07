@@ -68,6 +68,15 @@ try
         Console.WriteLine($"  Where(Age>20 && Name^=A): {lambdaFiltered.Count} 件");
         foreach (var p in lambdaFiltered)
             Console.WriteLine($"    {p.Name}, age={p.Age}");
+
+        // ── 5. GC-8: エッジ述語付き型保存ホップ (.Knows(e => ...)) ──
+        var recentlyKnown = g.Nodes<Person>()
+                             .Where(p => p.Name == "Alice")
+                             .Knows(e => e.Since == "2024-01")  // ← エッジ Knows.Since で絞り込み (型保存)
+                             .ToList();
+        Console.WriteLine($"  Alice が 2024-01 に知った: {recentlyKnown.Count} 件");
+        foreach (var p in recentlyKnown)
+            Console.WriteLine($"    {p.Name}, age={p.Age}");
     }
 }
 finally

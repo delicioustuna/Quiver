@@ -83,6 +83,10 @@ internal static class GraphRelationshipEmitter
         sb.AppendLine($"    /// <summary>{model.SourceFqn} から {model.RelType} を外向に辿り、{model.TargetFqn} 型を保存する。</summary>");
         sb.AppendLine($"    public static Quiver.Api.TypedGraphTraversal<{model.TargetFqn}> {model.ClassName}(this Quiver.Api.TypedGraphTraversal<{model.SourceFqn}> source)");
         sb.AppendLine($"        => source.Out<{model.ClassName}, {model.TargetFqn}>();");
+        sb.AppendLine();
+        sb.AppendLine($"    /// <summary>GC-8: {model.RelType} エッジを式ツリー述語で絞り込んでから {model.TargetFqn} 型を保存して辿る。</summary>");
+        sb.AppendLine($"    public static Quiver.Api.TypedGraphTraversal<{model.TargetFqn}> {model.ClassName}(this Quiver.Api.TypedGraphTraversal<{model.SourceFqn}> source, System.Linq.Expressions.Expression<System.Func<{model.ClassName}, bool>> edgeFilter)");
+        sb.AppendLine($"        => source.OutWhere<{model.ClassName}, {model.TargetFqn}>(edgeFilter);");
         sb.AppendLine("}");
         return sb.ToString();
     }

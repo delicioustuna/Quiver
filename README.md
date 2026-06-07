@@ -210,6 +210,14 @@ var adults = g.Nodes<Person>()
               .ToList();
 // 非対応の式（キー跨ぎ ||・double 範囲など）は Has(p => p.X, P.xxx) を使う
 
+// GC-8: エッジ（リレーションシップ）プロパティでの絞り込み
+//   生成糖衣にエッジ述語を渡すと、型保存したまま絞り込んで終点へ辿る
+var recent = g.Nodes<Person>()
+              .Where(p => p.Name == "Alice")
+              .Knows(e => e.Since == "2024-01")  // Knows エッジの Since で絞り込み
+              .ToList();
+// 型なしエッジ経路でも可: g.Node(a).OutRelationships("KNOWS").Has("since", P.Gt(2022L)).TargetNode()
+
 // グラフパターンマッチ（Match DSL）
 var results = g.Match(
     GraphPattern.Node("n", "Person")

@@ -296,6 +296,9 @@ namespace Quiver.Api
         public Quiver.Api.GraphTraversal<Quiver.Core.RelationshipId> OutRelationships(string? type = null) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.RelationshipId> OutRelationships<TRel>()
             where TRel : Quiver.Api.IGraphRelationship<TRel> { }
+        public Quiver.Api.TypedGraphTraversal<TTarget> OutWhere<TRel, TTarget>(System.Linq.Expressions.Expression<System.Func<TRel, bool>> edgeFilter)
+            where TRel : Quiver.Api.IGraphRelationship<TRel, T, TTarget>
+            where TTarget : Quiver.Api.IGraphNode<TTarget> { }
         public System.Collections.Generic.List<T> ToList() { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "Id",
