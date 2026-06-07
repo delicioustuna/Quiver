@@ -251,11 +251,12 @@ public sealed class IndexGenerationTests : IDisposable
     // ---- Format version gate ----
 
     [Fact]
-    public void FormatVersion_current_is_v6()
+    public void FormatVersion_current_is_v7()
     {
         // ARCH-4 増分8: 単一ファイル化で V4→V5。
         // ARCH-5c Phase 2: ノードストアの slotted ヒープ化で V5→V6 へ bump。
-        FormatVersion.Current.Should().Be(FormatVersion.V6PropertyRedesign);
+        // ARCH-6: ベクトル / HNSW の in-file 永続化で V6→V7 へ bump。
+        FormatVersion.Current.Should().Be(FormatVersion.V7VectorInFile);
     }
 
     [Fact]

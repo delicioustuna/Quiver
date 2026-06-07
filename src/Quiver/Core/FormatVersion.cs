@@ -49,8 +49,17 @@ internal static class FormatVersion
     /// </summary>
     public const byte V6PropertyRedesign = 6;
 
+    /// <summary>
+    /// v7: ARCH-6 ベクトル / ANN の in-file 永続化。ベクトル payload (<see cref="Quiver.Storage.Records.VectorPayloadStore"/>) と
+    /// HNSW ANN 索引 (<see cref="Quiver.Storage.Records.HnswIndex"/>) を新規 container テナント
+    /// (catalog=17 / payload=200+ / HNSW) として同居させ、<c>SetVector</c> をトランザクション境界へ
+    /// 取り込む。ベクトルは従来 in-memory・非永続だったため新テナントの追加でカタログ記述子が増える。
+    /// develop 段階のためマイグレーションは提供しない (旧 v6 DB は open 時に reject)。
+    /// </summary>
+    public const byte V7VectorInFile = 7;
+
     /// <summary>現行 (= 新規 DB を作成するときに書き込むバージョン)。</summary>
-    public const byte Current = V6PropertyRedesign;
+    public const byte Current = V7VectorInFile;
 }
 
 /// <summary>

@@ -5,10 +5,17 @@ namespace Quiver.Core;
 /// <summary>
 /// Reference flat-scan <see cref="IVectorStore"/>. Holds every vector in a
 /// per-index dictionary keyed by <c>(EntityKind, EntityId)</c> and scores every
-/// stored vector against the query on each <see cref="KnnSearch"/>. ANN
-/// structures land in follow-up tasks; this implementation exists to (a) pin
-/// down the contract behaviour and (b) back unit tests / smoke samples.
+/// stored vector against the query on each <see cref="KnnSearch"/>.
 /// VEC-1.
+///
+/// <para><b>ARCH-6</b>: This is now the <b>non-persistent reference implementation</b>,
+/// no longer the binary backend default. The binary backend persists vectors and an
+/// HNSW ANN index in-file via
+/// <see cref="Quiver.Storage.Records.PersistentVectorStore"/> +
+/// <see cref="Quiver.Storage.Records.HnswIndex"/>. This in-memory store remains for
+/// (a) the SQLite MVP backend (vector persistence out of scope there), (b) unit tests /
+/// smoke samples / fixtures, and (c) pinning down the contract behaviour the persistent
+/// store mirrors. See docs/design/11 §6.3.</para>
 /// </summary>
 public sealed class InMemoryVectorStore : IVectorStore
 {
