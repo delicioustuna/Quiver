@@ -1,5 +1,6 @@
 using Quiver.Api.Internal;
 using Quiver.Core;
+using Quiver.Query.Logical;
 
 namespace Quiver.Api;
 
@@ -17,17 +18,17 @@ public static class IsExtensions
     {
         ArgumentNullException.ThrowIfNull(traversal);
         ArgumentNullException.ThrowIfNull(value);
-        if (traversal._builder is not PropertyLookupBuilder lookup)
+        if (traversal._plan is not PropertyLookupOp lookup)
             throw new InvalidOperationException(
                 "GraphTraversal<string>.Is(value) は .Values(key) の直後でのみ有効です。" +
                 "他の文字列ソース (例: .Label()) はフィルタ対象のプロパティキー文脈を保持しません。");
 
         var keyId = traversal._schema.GetOrCreatePropertyKey(lookup.Key);
         var sourceCol = lookup.Source.CurrentEntityColumn;
-        var filtered = new FilterBuilder(
+        var filtered = new FilterOp(
             lookup.Source,
             _ => new PropertyEqStringPredicate(sourceCol, keyId, value));
-        var rebuiltLookup = new PropertyLookupBuilder(filtered, lookup.Key);
+        var rebuiltLookup = new PropertyLookupOp(filtered, lookup.Key, EntityKind.Node);
         int valueCol = rebuiltLookup.PredictedOutputColumnCount - 1;
         return new GraphTraversal<string>(
             traversal._tx, traversal._schema, rebuiltLookup,
@@ -38,7 +39,7 @@ public static class IsExtensions
     public static GraphTraversal<long> Is(this GraphTraversal<long> traversal, long value)
     {
         ArgumentNullException.ThrowIfNull(traversal);
-        if (traversal._builder is not PropertyLookupBuilder lookup)
+        if (traversal._plan is not PropertyLookupOp lookup)
             throw new InvalidOperationException(
                 "GraphTraversal<long>.Is(value) は .Values(key) または .Id() の直後でのみ有効です。" +
                 "生の ID をフィルタするには .Has(key, P.Eq(value)) を直接使用してください。");
@@ -46,10 +47,10 @@ public static class IsExtensions
         var keyId = traversal._schema.GetOrCreatePropertyKey(lookup.Key);
         var sourceCol = lookup.Source.CurrentEntityColumn;
         var pred = P.Eq(value);
-        var filtered = new FilterBuilder(
+        var filtered = new FilterOp(
             lookup.Source,
             _ => new PropertyInt64Predicate(sourceCol, keyId, pred));
-        var rebuiltLookup = new PropertyLookupBuilder(filtered, lookup.Key);
+        var rebuiltLookup = new PropertyLookupOp(filtered, lookup.Key, EntityKind.Node);
         int valueCol = rebuiltLookup.PredictedOutputColumnCount - 1;
         return new GraphTraversal<long>(
             traversal._tx, traversal._schema, rebuiltLookup,

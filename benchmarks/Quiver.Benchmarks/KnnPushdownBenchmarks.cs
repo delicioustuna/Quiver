@@ -9,10 +9,10 @@ namespace Quiver.Benchmarks;
 /// <summary>
 /// VEC-9: post-filter (vector-first) vs push-down (graph-first) for the
 /// <c>g.Knn(idx, q, K).HasLabel("Hit").ToList()</c> pattern. The push-down
-/// path is the default behavior after VEC-9. The post-filter baseline is
-/// reproduced by constructing a <see cref="KnnNodeSourceBuilder"/>-based
-/// traversal directly (bypassing the <see cref="PendingKnnBuilder"/> rewrite)
-/// and applying <c>.HasLabel("Hit")</c> as a downstream FilterBuilder.
+/// path is the default behavior after VEC-9 (ARCH-7 で optimizer に集約)。
+/// The post-filter baseline is reproduced by building the KNN top-K → label
+/// post-filter physical plan directly via <see cref="KnnBenchSupport"/>
+/// (optimizer を介さない vector-first 基準)。
 ///
 /// Expected speedup (from VEC-8 extrapolation): 0.1% sel ~100×, 1% ~30-50×,
 /// 5% ~10-20×, 25% ~2-3×.
@@ -77,20 +77,14 @@ public class KnnPushdownBenchmarks
     }
 
     /// <summary>
-    /// Legacy post-filter: top-K from full N, then drop by label. Construct
-    /// the traversal with <see cref="KnnNodeSourceBuilder"/> directly so the
-    /// PendingKnn rewrite does not kick in; subsequent <c>HasLabel</c> on a
-    /// non-PendingKnn / non-ScanBuilder source becomes a FilterBuilder
-    /// (= the VEC-9 pre-rewrite plan).
+    /// Legacy post-filter: top-K from full N, then drop by label. KNN top-K →
+    /// label post-filter の物理プランを直接構築して測る (= VEC-9 pre-rewrite plan)。
     /// </summary>
     [Benchmark(Baseline = true)]
     public int PostFilter()
     {
         using var rtx = _db.BeginReadOnlyTransaction();
-        var knnBuilder = new KnnNodeSourceBuilder(IndexName, _query, K);
-        var traversal = new GraphTraversal<NodeId>(rtx, _db.Schema, knnBuilder, row => row.GetNodeId(0), 0);
-        var result = traversal.HasLabel("Hit").ToList();
-        return result.Count;
+        return KnnBenchSupport.PostFilterCount(rtx, _db.Schema, IndexName, _query, K, "Hit");
     }
 
     /// <summary>VEC-9 default: <c>g.Knn().HasLabel()</c> is rewritten to graph-first.</summary>

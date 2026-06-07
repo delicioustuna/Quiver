@@ -1,45 +1,10 @@
-﻿using Quiver.Core;
-using Quiver.Query.Physical;
+using Quiver.Core;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
 
-namespace Quiver.Api.Internal;
+namespace Quiver.Query.Physical;
 
-/// <summary>CorrelatedInputOperator を IOperatorBuilder として包む。SubTraversal の起点に使用する。</summary>
-internal sealed class CorrelatedSeedBuilder : IOperatorBuilder
-{
-    private readonly CorrelatedInputOperator _probe;
-    public int CurrentEntityColumn => 0;
-    public int PredictedOutputColumnCount => 1;
-
-    internal CorrelatedSeedBuilder(CorrelatedInputOperator probe) { _probe = probe; }
-
-    public IPhysicalOperator Build(ISchemaApi schema) => _probe;
-}
-
-
-internal sealed class SingleNodeBuilder : IOperatorBuilder
-{
-    private readonly NodeId _nodeId;
-    public int CurrentEntityColumn => 0;
-    public int PredictedOutputColumnCount => 1;
-
-    internal SingleNodeBuilder(NodeId nodeId) { _nodeId = nodeId; }
-
-    public IPhysicalOperator Build(ISchemaApi schema) => new SingleNodeOperator(_nodeId);
-}
-
-internal sealed class MultiNodeBuilder : IOperatorBuilder
-{
-    private readonly NodeId[] _nodeIds;
-    public int CurrentEntityColumn => 0;
-    public int PredictedOutputColumnCount => 1;
-
-    internal MultiNodeBuilder(NodeId[] nodeIds) { _nodeIds = nodeIds; }
-
-    public IPhysicalOperator Build(ISchemaApi schema) => new MultiNodeOperator(_nodeIds);
-}
-
+/// <summary>定数 1 ノードを起点として 1 行だけ放出する物理オペレータ (<c>g.Node(id)</c>)。</summary>
 internal sealed class SingleNodeOperator : IPhysicalOperator
 {
     private readonly NodeId _nodeId;
@@ -67,6 +32,7 @@ internal sealed class SingleNodeOperator : IPhysicalOperator
     public void Dispose() { }
 }
 
+/// <summary>定数 N ノードを起点として各 1 行を放出する物理オペレータ (<c>g.Nodes(ids)</c>)。</summary>
 internal sealed class MultiNodeOperator : IPhysicalOperator
 {
     private readonly NodeId[] _nodeIds;

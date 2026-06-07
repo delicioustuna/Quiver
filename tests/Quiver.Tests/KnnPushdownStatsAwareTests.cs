@@ -1,16 +1,22 @@
 using FluentAssertions;
+using Quiver;
 using Quiver.Api;
 using Quiver.Api.Internal;
 using Quiver.Core;
+using Quiver.Query.Logical;
+using Quiver.Query.Optimizer;
 using Xunit;
 
 namespace Quiver.Tests;
 
 /// <summary>
-/// VEC-10 coverage: statistics-aware fallback in <see cref="PendingKnnBuilder.Materialize(GraphStats?, Quiver.ISchemaApi?)"/>.
+/// VEC-10 coverage: statistics-aware fallback in <see cref="LogicalOptimizer"/> の KnnPushdown rule。
 /// 構造ヒントが graph-first を示唆していても label cardinality / TotalNodes が
-/// <see cref="PendingKnnBuilder.VectorFirstLabelFraction"/> (既定 30%) 以上のときは vector-first にフォールバックする。
+/// <see cref="LogicalOptimizer.VectorFirstLabelFraction"/> (既定 30%) 以上のときは vector-first にフォールバックする。
 /// stats を渡さない場合 (g.G(schema) 経由) は VEC-9 と同じ構造ヒントのみで graph-first を選ぶ。
+/// <para>
+/// ARCH-7: graph-first = <see cref="KnnOp"/> (Candidate != null) / vector-first = 先頭が <see cref="FilterOp"/>。
+/// </para>
 /// </summary>
 public sealed class KnnPushdownStatsAwareTests : IDisposable
 {
@@ -36,12 +42,30 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
+    private static void AssertGraphFirst(LogicalOp op, string because)
+    {
+        op.Should().BeOfType<KnnOp>(because);
+        ((KnnOp)op).Candidate.Should().NotBeNull(because);
+    }
+
+    private static void AssertVectorFirst(LogicalOp op, string because)
+        => op.Should().BeOfType<FilterOp>(because);
+
+    /// <summary>dim を明示してラベルフィルタ付き KnnOp を組み、optimizer を直接適用する (dim sweep 用)。</summary>
+    private LogicalOp OptimizeManual(GraphStats stats, int dim, string label)
+    {
+        var plan = new FilterOp(
+            new KnnOp(null, IndexName, new float[] { 1, 0, 0, 0 }, K: 5, Dim: dim),
+            _ => new LabelPredicate(_db.Schema.GetOrCreateLabel(label), 0));
+        return LogicalOptimizer.Optimize(plan, stats, _db.Schema);
+    }
+
     /// <summary>
     /// 50 Doc + 50 Other (Doc cardinality = 50%) で <c>Knn().HasLabel("Doc")</c> をリライトすると、
     /// stats を注入したケースで vector-first にフォールバックする。
     /// VEC-11 後 backend は <see cref="GraphStats.HasFastLabelIndex"/> = <c>true</c> を立てるため、
     /// dim = 4 (テスト用小次元) の dim-aware piecewise table の最小バケット閾値 0.30 を使う。
-    /// 50% &gt;= 0.30 で fallback 発火、<see cref="KnnNodeSourceBuilder"/> + 後段 <see cref="FilterBuilder"/> になる。
+    /// 50% &gt;= 0.30 で fallback 発火、vector-first (先頭 FilterOp) になる。
     /// </summary>
     [Fact]
     public void HighLabelCardinality_falls_back_to_vector_first_when_stats_present()
@@ -65,16 +89,14 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema, stats);
-        var traversal = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).HasLabel("Doc");
+        var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).HasLabel("Doc").Optimized();
 
-        var pk = ReadPending(traversal);
-        var materialized = pk.Materialize(stats, _db.Schema);
-        materialized.Should().BeOfType<FilterBuilder>("label cardinality 50% >= 30% threshold → vector-first fallback");
+        AssertVectorFirst(optimized, "label cardinality 50% >= 30% threshold → vector-first fallback");
     }
 
     /// <summary>
     /// 同じ構造でも stats を渡さない (g.G(schema)) と VEC-9 の構造ヒントのみで判定するため
-    /// <see cref="FilteredKnnNodeSourceBuilder"/> (graph-first) を選ぶ。後方互換性の確認。
+    /// graph-first を選ぶ。後方互換性の確認。
     /// </summary>
     [Fact]
     public void HighLabelCardinality_keeps_graph_first_when_stats_absent()
@@ -93,10 +115,9 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema); // stats 注入なし
-        var traversal = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).HasLabel("Doc");
+        var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).HasLabel("Doc").Optimized();
 
-        var pk = ReadPending(traversal);
-        pk.Materialize().Should().BeOfType<FilteredKnnNodeSourceBuilder>("stats 不在 → 構造ヒントのみで graph-first");
+        AssertGraphFirst(optimized, "stats 不在 → 構造ヒントのみで graph-first");
     }
 
     /// <summary>
@@ -125,11 +146,9 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema, stats);
-        var traversal = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).HasLabel("Doc");
+        var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).HasLabel("Doc").Optimized();
 
-        var pk = ReadPending(traversal);
-        pk.Materialize(stats, _db.Schema).Should().BeOfType<FilteredKnnNodeSourceBuilder>(
-            "label cardinality 5% < 30% → graph-first 維持");
+        AssertGraphFirst(optimized, "label cardinality 5% < 30% → graph-first 維持");
     }
 
     /// <summary>
@@ -215,7 +234,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
 
     /// <summary>
     /// 純粋 property filter (HasLabel なし) で構造ヒントが graph-first を示唆するケース。
-    /// candidate チェーンの最内 ScanBuilder に Label が無いため stats 経路では fallback 判定材料が無く、
+    /// candidate チェーンに Label predicate が無いため stats 経路では fallback 判定材料が無く、
     /// graph-first を維持する。
     /// </summary>
     [Fact]
@@ -236,12 +255,10 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema, stats);
 
-        // Has のみ (HasLabel なし) — candidate = FilterBuilder(ScanBuilder(label=null), ...) 形状。
-        // label 不在のため FindInnermostScanLabel が null を返し、stats 経路では fallback しない。
-        var traversal = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).Has("status", "active");
-        var pk = ReadPending(traversal);
-        pk.Materialize(stats, _db.Schema).Should().BeOfType<FilteredKnnNodeSourceBuilder>(
-            "label 抽出不可 → 構造ヒントのみで graph-first 維持");
+        // Has のみ (HasLabel なし) — filter に LabelPredicate が無いため FindLabel が null を返し、
+        // stats 経路では fallback しない。
+        var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).Has("status", "active").Optimized();
+        AssertGraphFirst(optimized, "label 抽出不可 → 構造ヒントのみで graph-first 維持");
     }
 
     /// <summary>
@@ -286,16 +303,10 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     /// <summary>
     /// VEC-12: dim=768 / sel=40% / HasFastLabelIndex=true のとき、dim-aware piecewise table が
     /// 0.47 を返す (dim ≤ 1024) ため 0.40 &lt; 0.47 で graph-first を維持する。
-    /// VEC-11 後の binary backend で「VEC-10 の 0.30 一本だと誤発火する sel=0.40」が
-    /// 正しく graph-first に戻ることを示す回帰防止テスト (sweep 実測で dim=768 の
-    /// graph-first 12.5ms &lt; vector-first 14.0ms を確認済み)。
     /// </summary>
     [Fact]
     public void Fast_label_index_keeps_graph_first_at_sel_40pct_dim_768()
     {
-        const int dim768 = 768;
-        // 100 ノード中 Doc が 40 で sel = 40%。ラベル数が大きいとデータセット作成が遅いため
-        // テストでは sel をマクロに作って fraction の通り道だけ確認する。
         using (var tx = _db.BeginTransaction())
         {
             for (int i = 0; i < 40; i++) _ = tx.CreateNode("Doc");
@@ -306,21 +317,14 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
         var stats = _db.CollectStats();
         stats.HasFastLabelIndex.Should().BeTrue("binary backend は LabelNodeIndex sidecar を持つ");
 
-        // dim=768 と分かっているシナリオを再現するため、PendingKnnBuilder を直接構築する。
-        // (既存 index は Dim=4 だが threshold lookup は ctor で渡された dim 値だけを見る)
-        var candidate = new ScanBuilder("Doc");
-        var pk = new PendingKnnBuilder(
-            candidate, IndexName, new float[] { 1, 0, 0, 0 }, k: 5, dim: dim768);
-
-        pk.Materialize(stats, _db.Schema)
-            .Should().BeOfType<FilteredKnnNodeSourceBuilder>(
-                "dim=768 / sel=40% は閾値 0.50 を下回るため graph-first を維持");
+        AssertGraphFirst(
+            OptimizeManual(stats, dim: 768, label: "Doc"),
+            "dim=768 / sel=40% は閾値 0.47 を下回るため graph-first を維持");
     }
 
     /// <summary>
     /// VEC-12: 同じ dim=768 / sel=40% でも <see cref="GraphStats.HasFastLabelIndex"/> が false の
-    /// backend (= sidecar 不在 / ANN bypass / 単体テスト経路) では legacy 30% 単一閾値を引くため
-    /// vector-first にフォールバックする。下位互換性確認。
+    /// backend では legacy 30% 単一閾値を引くため vector-first にフォールバックする。下位互換性確認。
     /// </summary>
     [Fact]
     public void Without_fast_label_index_falls_back_at_sel_40pct()
@@ -335,13 +339,9 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
         var stats = _db.CollectStats().WithFastLabelIndex(false);
         stats.HasFastLabelIndex.Should().BeFalse();
 
-        var candidate = new ScanBuilder("Doc");
-        var pk = new PendingKnnBuilder(
-            candidate, IndexName, new float[] { 1, 0, 0, 0 }, k: 5, dim: 768);
-
-        pk.Materialize(stats, _db.Schema)
-            .Should().BeOfType<FilterBuilder>(
-                "HasFastLabelIndex=false 経路は legacy 0.30 単一閾値、40% >= 30% で fallback");
+        AssertVectorFirst(
+            OptimizeManual(stats, dim: 768, label: "Doc"),
+            "HasFastLabelIndex=false 経路は legacy 0.30 単一閾値、40% >= 30% で fallback");
     }
 
     /// <summary>
@@ -362,25 +362,12 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
         var stats = _db.CollectStats();
         stats.HasFastLabelIndex.Should().BeTrue();
 
-        var candidate = new ScanBuilder("Doc");
+        AssertVectorFirst(
+            OptimizeManual(stats, dim: 128, label: "Doc"),
+            "dim=128 (threshold 0.30) で sel=45% は fallback 発火");
 
-        var pkLow = new PendingKnnBuilder(
-            candidate, IndexName, new float[] { 1, 0, 0, 0 }, k: 5, dim: 128);
-        pkLow.Materialize(stats, _db.Schema)
-            .Should().BeOfType<FilterBuilder>(
-                "dim=128 (threshold 0.30) で sel=45% は fallback 発火");
-
-        var pkHigh = new PendingKnnBuilder(
-            candidate, IndexName, new float[] { 1, 0, 0, 0 }, k: 5, dim: 3072);
-        pkHigh.Materialize(stats, _db.Schema)
-            .Should().BeOfType<FilteredKnnNodeSourceBuilder>(
-                "dim=3072 (threshold 0.80) で sel=45% は graph-first 維持");
-    }
-
-    private static PendingKnnBuilder ReadPending(GraphTraversal<NodeId> traversal)
-    {
-        var field = typeof(GraphTraversal<NodeId>).GetField(
-            "_builder", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        return (PendingKnnBuilder)field.GetValue(traversal)!;
+        AssertGraphFirst(
+            OptimizeManual(stats, dim: 3072, label: "Doc"),
+            "dim=3072 (threshold 0.80) で sel=45% は graph-first 維持");
     }
 }

@@ -1,7 +1,7 @@
 using FluentAssertions;
 using Quiver.Api;
-using Quiver.Api.Internal;
 using Quiver.Core;
+using Quiver.Query.Logical;
 using Quiver.Storage.Records;
 using Xunit;
 
@@ -10,10 +10,11 @@ namespace Quiver.Tests;
 /// <summary>
 /// VEC-9 coverage: post-filter push-down rewrite that converts
 /// <c>g.Knn(...).HasLabel(...).Has(...).ToList()</c> into a graph-first
-/// <see cref="FilteredKnnNodeSourceBuilder"/> plan. Verifies result equivalence
-/// with the manual <c>g.Nodes().HasLabel(...).FilterByKnn(...)</c> form, the
-/// "k starvation" bug fix, the Limit-driven K shrink optimization, and the
-/// fall-back to vector-first when no selectivity hint exists.
+/// <see cref="KnnOp"/> (Candidate != null) plan via <c>LogicalOptimizer</c>.
+/// Verifies result equivalence with the manual
+/// <c>g.Nodes().HasLabel(...).FilterByKnn(...)</c> form, the "k starvation"
+/// bug fix, the Limit-driven K shrink optimization, and the fall-back to
+/// vector-first when no selectivity hint exists.
 /// </summary>
 public sealed class KnnPushdownTests : IDisposable
 {
@@ -140,17 +141,15 @@ public sealed class KnnPushdownTests : IDisposable
     [Fact]
     public void Knn_Limit_smaller_than_k_shrinks_KNN_k()
     {
-        // 没 filter chain → vector-first fallback. Limit shrinks K to 5.
+        // 無 filter chain → vector-first. Limit が KNN の K を 5 に縮める。
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var traversal = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 20).Limit(5);
+        var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 20).Limit(5).Optimized();
 
-        // Observe internal builder shape.
-        var builderField = typeof(GraphTraversal<NodeId>).GetField(
-            "_builder", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        var pk = (PendingKnnBuilder)builderField.GetValue(traversal)!;
-        pk.K.Should().Be(5);
-        pk.Materialize().Should().BeOfType<KnnNodeSourceBuilder>();
+        optimized.Should().BeOfType<KnnOp>();
+        var knn = (KnnOp)optimized;
+        knn.K.Should().Be(5);
+        knn.Candidate.Should().BeNull("filter chain が無いため vector-first");
     }
 
     [Fact]
@@ -158,15 +157,15 @@ public sealed class KnnPushdownTests : IDisposable
     {
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var traversal = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 20)
+        var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 20)
             .HasLabel("Doc")
-            .Limit(5);
+            .Limit(5)
+            .Optimized();
 
-        var builderField = typeof(GraphTraversal<NodeId>).GetField(
-            "_builder", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        var pk = (PendingKnnBuilder)builderField.GetValue(traversal)!;
-        pk.K.Should().Be(5);
-        pk.Materialize().Should().BeOfType<FilteredKnnNodeSourceBuilder>();
+        optimized.Should().BeOfType<KnnOp>();
+        var knn = (KnnOp)optimized;
+        knn.K.Should().Be(5);
+        knn.Candidate.Should().NotBeNull("HasLabel → graph-first");
     }
 
     [Fact]
@@ -174,12 +173,10 @@ public sealed class KnnPushdownTests : IDisposable
     {
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var traversal = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).Limit(20);
+        var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).Limit(20).Optimized();
 
-        var builderField = typeof(GraphTraversal<NodeId>).GetField(
-            "_builder", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        var pk = (PendingKnnBuilder)builderField.GetValue(traversal)!;
-        pk.K.Should().Be(5);
+        optimized.Should().BeOfType<KnnOp>();
+        ((KnnOp)optimized).K.Should().Be(5);
     }
 
     [Fact]
@@ -187,12 +184,10 @@ public sealed class KnnPushdownTests : IDisposable
     {
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var traversal = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5);
+        var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).Optimized();
 
-        var builderField = typeof(GraphTraversal<NodeId>).GetField(
-            "_builder", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        var pk = (PendingKnnBuilder)builderField.GetValue(traversal)!;
-        pk.Materialize().Should().BeOfType<KnnNodeSourceBuilder>();
+        optimized.Should().BeOfType<KnnOp>();
+        ((KnnOp)optimized).Candidate.Should().BeNull("vector-first");
     }
 
     [Fact]
@@ -200,12 +195,10 @@ public sealed class KnnPushdownTests : IDisposable
     {
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var traversal = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).HasLabel("Doc");
+        var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).HasLabel("Doc").Optimized();
 
-        var builderField = typeof(GraphTraversal<NodeId>).GetField(
-            "_builder", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        var pk = (PendingKnnBuilder)builderField.GetValue(traversal)!;
-        pk.Materialize().Should().BeOfType<FilteredKnnNodeSourceBuilder>();
+        optimized.Should().BeOfType<KnnOp>();
+        ((KnnOp)optimized).Candidate.Should().NotBeNull("graph-first");
     }
 
     [Fact]

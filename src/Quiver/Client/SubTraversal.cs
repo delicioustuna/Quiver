@@ -1,5 +1,7 @@
-﻿using Quiver.Api.Internal;
+using Quiver.Api.Internal;
 using Quiver.Core;
+using Quiver.Query.Logical;
+using Quiver.Query.Optimizer;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
 
@@ -12,14 +14,14 @@ namespace Quiver.Api;
 public sealed class SubTraversal
 {
     private readonly CorrelatedInputOperator _probe;
-    private readonly IOperatorBuilder _builder;
+    private readonly LogicalOp _plan;
     private readonly ISchemaApi _schema;
     private readonly int _entityColumn;
 
-    internal SubTraversal(CorrelatedInputOperator probe, IOperatorBuilder builder, ISchemaApi schema, int entityColumn = 0)
+    internal SubTraversal(CorrelatedInputOperator probe, LogicalOp plan, ISchemaApi schema, int entityColumn = 0)
     {
         _probe = probe;
-        _builder = builder;
+        _plan = plan;
         _schema = schema;
         _entityColumn = entityColumn;
     }
@@ -27,7 +29,7 @@ public sealed class SubTraversal
     /// <summary>外向 (Outgoing) リレーションシップを辿る。</summary>
     public SubTraversal Out(string? type = null)
     {
-        var expand = new ExpandBuilder(_builder, Direction.Outgoing, type, ExpandOutputMode.NeighborOnly);
+        var expand = new ExpandOp(_plan, _plan.CurrentEntityColumn, Direction.Outgoing, type, ExpandOutputMode.NeighborOnly, null);
         return new SubTraversal(_probe, expand, _schema, expand.CurrentEntityColumn);
     }
 
@@ -38,7 +40,7 @@ public sealed class SubTraversal
     /// <summary>内向 (Incoming) リレーションシップを辿る。</summary>
     public SubTraversal In(string? type = null)
     {
-        var expand = new ExpandBuilder(_builder, Direction.Incoming, type, ExpandOutputMode.NeighborOnly);
+        var expand = new ExpandOp(_plan, _plan.CurrentEntityColumn, Direction.Incoming, type, ExpandOutputMode.NeighborOnly, null);
         return new SubTraversal(_probe, expand, _schema, expand.CurrentEntityColumn);
     }
 
@@ -49,7 +51,7 @@ public sealed class SubTraversal
     /// <summary>双方向のリレーションシップを辿る。</summary>
     public SubTraversal Both(string? type = null)
     {
-        var expand = new ExpandBuilder(_builder, Direction.Both, type, ExpandOutputMode.NeighborOnly);
+        var expand = new ExpandOp(_plan, _plan.CurrentEntityColumn, Direction.Both, type, ExpandOutputMode.NeighborOnly, null);
         return new SubTraversal(_probe, expand, _schema, expand.CurrentEntityColumn);
     }
 
@@ -63,7 +65,7 @@ public sealed class SubTraversal
         var labelId = _schema.GetOrCreateLabel(label);
         var col = _entityColumn;
         return new SubTraversal(_probe,
-            new FilterBuilder(_builder, _ => new LabelPredicate(labelId, col)),
+            new FilterOp(_plan, _ => new LabelPredicate(labelId, col)),
             _schema, _entityColumn);
     }
 
@@ -73,7 +75,7 @@ public sealed class SubTraversal
         var keyId = _schema.GetOrCreatePropertyKey(key);
         var col = _entityColumn;
         return new SubTraversal(_probe,
-            new FilterBuilder(_builder, _ => new PropertyEqStringPredicate(col, keyId, value)),
+            new FilterOp(_plan, _ => new PropertyEqStringPredicate(col, keyId, value)),
             _schema, _entityColumn);
     }
 
@@ -84,7 +86,7 @@ public sealed class SubTraversal
         var col = _entityColumn;
         var pred = P.Eq(value);
         return new SubTraversal(_probe,
-            new FilterBuilder(_builder, _ => new PropertyInt64Predicate(col, keyId, pred)),
+            new FilterOp(_plan, _ => new PropertyInt64Predicate(col, keyId, pred)),
             _schema, _entityColumn);
     }
 
@@ -94,23 +96,23 @@ public sealed class SubTraversal
         var keyId = _schema.GetOrCreatePropertyKey(key);
         var col = _entityColumn;
         return new SubTraversal(_probe,
-            new FilterBuilder(_builder, _ => PredicateDispatch.Build(col, keyId, pred)),
+            new FilterOp(_plan, _ => PredicateDispatch.Build(col, keyId, pred)),
             _schema, _entityColumn);
     }
 
     internal IPredicate BuildExistsPredicate(int outerEntityColumn)
-        => new SubquerySemiJoinPredicate(outerEntityColumn, _probe, _builder.Build(_schema), exists: true);
+        => new SubquerySemiJoinPredicate(outerEntityColumn, _probe, PhysicalPlanner.Plan(_plan, _schema), exists: true);
 
     internal IPredicate BuildNotExistsPredicate(int outerEntityColumn)
-        => new SubquerySemiJoinPredicate(outerEntityColumn, _probe, _builder.Build(_schema), exists: false);
+        => new SubquerySemiJoinPredicate(outerEntityColumn, _probe, PhysicalPlanner.Plan(_plan, _schema), exists: false);
 
     /// <summary>
     /// GC-4: <c>.Union</c> / <c>.Coalesce</c> / <c>.Optional</c> の分岐として使うため、
     /// サブトラバーサルを単独の物理オペレータとして構築する。<see cref="CorrelatedInputOperator"/> の
     /// バインドは <see cref="SubTraversal"/> 構築時にキャプチャした参照を介して呼び出し側が行う。
     /// </summary>
-    internal IPhysicalOperator BuildBranchOperator() => _builder.Build(_schema);
+    internal IPhysicalOperator BuildBranchOperator() => PhysicalPlanner.Plan(_plan, _schema);
 
     /// <summary>GC-4: サブプラン出力中で現在のエンティティを保持する列番号。</summary>
-    internal int BranchEntityColumn => _builder.CurrentEntityColumn;
+    internal int BranchEntityColumn => _plan.CurrentEntityColumn;
 }

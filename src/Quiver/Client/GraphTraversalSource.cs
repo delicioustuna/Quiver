@@ -1,6 +1,7 @@
 using Quiver.Api.Internal;
 using Quiver.Api.Match;
 using Quiver.Core;
+using Quiver.Query.Logical;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
 
@@ -98,8 +99,8 @@ public sealed class GraphTraversalSource
     /// <summary>全ノードをスキャン起点とするトラバーサルを生成する (Gremlin の <c>g.V()</c> 相当)。</summary>
     public GraphTraversal<NodeId> Nodes()
     {
-        var builder = new ScanBuilder();
-        return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
+        var plan = new ScanOp(EntityKind.Node, null);
+        return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 
     /// <summary>
@@ -109,22 +110,22 @@ public sealed class GraphTraversalSource
     /// </summary>
     public GraphTraversal<RelationshipId> Relationships()
     {
-        var builder = new RelationshipScanBuilder();
-        return new GraphTraversal<RelationshipId>(_tx, _schema, builder, row => row.GetRelationshipId(0), 0, aliases: null, stats: _stats);
+        var plan = new ScanOp(EntityKind.Relationship, null);
+        return new GraphTraversal<RelationshipId>(_tx, _schema, plan, row => row.GetRelationshipId(0), 0, aliases: null, stats: _stats);
     }
 
     /// <summary>指定 ID のノード 1 件だけを起点とするトラバーサル (Gremlin の <c>g.V(id)</c> 相当)。</summary>
     public GraphTraversal<NodeId> Node(NodeId nodeId)
     {
-        var builder = new SingleNodeBuilder(nodeId);
-        return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
+        var plan = new NodeSeedOp(new[] { nodeId });
+        return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 
     /// <summary>指定 ID のノード群を起点とするトラバーサル (Gremlin の <c>g.V(ids)</c> 相当)。</summary>
     public GraphTraversal<NodeId> Nodes(params NodeId[] nodeIds)
     {
-        var builder = new MultiNodeBuilder(nodeIds);
-        return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
+        var plan = new NodeSeedOp(nodeIds);
+        return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 
     // ── 型付きスキャン起点 ────────────────────────────────────────────────────
@@ -184,8 +185,10 @@ public sealed class GraphTraversalSource
         //         dim-aware piecewise threshold を引かせる。spec を返さない backend では dim=0 で
         //         legacy 30% 単一閾値経路に倒れる (HasFastLabelIndex 経路は使われない)。
         int dim = _tx.AsInternal().Access.TryGetVectorIndexSpec(indexName, out var spec) ? spec.Dimensions : 0;
-        var builder = new Internal.PendingKnnBuilder(new Internal.ScanBuilder(), indexName, query, k, dim);
-        return new GraphTraversal<NodeId>(_tx, _schema, builder, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
+        // ARCH-7: vector-first を既定とする KnnOp(Candidate=null) を積む。後続の pure-filter / Limit は
+        // 終端で LogicalOptimizer の KnnPushdown が candidate-side に巻き戻して graph-first 化を判定する。
+        var plan = new KnnOp(null, indexName, query.ToArray(), k, dim);
+        return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 
     // ── 重み付き最短経路 (Dijkstra / A*) ───────────────────────────────────────

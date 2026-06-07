@@ -156,6 +156,21 @@ DB を「ディレクトリ + 15+ ファイル」から **単一データファ�
 
 ## §5. ARCH-7 — Phase 4: 単一 LogicalPlan IR + optimizer 集約
 
+> ✅ **完了 (develop, 2026-06-07 ユーザ完了承認)。** Option A (フル新設 LogicalPlan 代数) を実装。
+> - 新規 `Quiver.Query.Logical.LogicalOp` (15 record 代数: Scan/NodeSeed/CorrelatedInput/Filter/Expand/
+>   VarLenExpand/Path/Knn/PropertyLookup/LabelNameLookup/RelationshipEndpoint/Limit/Sort/Dedup/Branch。
+>   `Aggregate` は dead code 回避で terminal fold へ、weighted `Path` は leaf terminal のため IR 化せず据置)。
+> - 新規 `Quiver.Query.Optimizer.PhysicalPlanner` (`LogicalOp → IPhysicalOperator` 選択表、旧 builder の
+>   `Build` 本体を集約) + `LogicalOptimizer` (KnnPushdown / KnnLimitPushdown / LabelScanRewrite の 3 rule、
+>   `PendingKnnBuilder` の dim-aware piecewise 閾値を全移設)。
+> - fluent DSL (`GraphTraversal` の `_builder`→`_plan`、KNN 特別扱い ~18 箇所撤去、terminal で Optimize→Plan) /
+>   `MatchCompiler` / `SubTraversal` / `IsExtensions` を LogicalOp emit へ。`IOperatorBuilder` + 全 `*Builder` +
+>   `PendingKnnBuilder` を削除。`SingleNode/MultiNodeOperator` は物理層へ移設。
+> - on-disk 無変更につき **FormatVersion 据え置き (V7VectorInFile)**。PublicApi 不変 (approved.txt 変更なし)。
+> - 検証: build 0 errors / テスト緑 (Quiver.Tests 485, Operators 167, Backend 186, Sqlite 60, Client 5, PublicApi 1)。
+>   white-box KNN テストは `LogicalOptimizer` ベースに移植、bench の post-filter baseline は物理直結化。
+>   詳細プラン: `plans/arch7-logical-plan-ir.md`。
+
 ### 目的
 計画層の 3 系統分散 (`IOperatorBuilder` 論理もどき + `Quiver.Query.Physical` 物理 + `Match` コンパイラ) と、表層 DSL に埋め込まれた KNN 最適化 (`PendingKnnBuilder`) を、**単一 `LogicalPlan` 代数**に集約する。
 

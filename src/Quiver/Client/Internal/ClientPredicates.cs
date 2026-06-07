@@ -12,6 +12,11 @@ internal sealed class LabelPredicate : IPredicate
     private readonly LabelId _labelId;
     internal LabelPredicate(LabelId labelId, int column = 0) { _labelId = labelId; _column = column; }
 
+    /// <summary>ARCH-7: optimizer の LabelScanRewrite / KNN cost-fallback がラベルを introspect するための公開。</summary>
+    internal LabelId Label => _labelId;
+    /// <summary>ARCH-7: 述語が参照するタプル列番号 (col 0 のみ scan へ畳める)。</summary>
+    internal int Column => _column;
+
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
         var nodeId = new NodeId(tuple[_column].LongValue);

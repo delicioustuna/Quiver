@@ -10,8 +10,7 @@ namespace Quiver.Benchmarks;
 /// VEC-10: statistics-aware push-down fallback の wall-clock 効果計測。
 /// 同じ <c>g.Knn(idx, q, K).HasLabel("Hit")</c> パターンを 3 ルートで比較する:
 /// <list type="number">
-///   <item><c>PostFilter</c> — 旧 vector-first (PendingKnn を bypass し
-///   <see cref="KnnNodeSourceBuilder"/> + 後段 FilterBuilder)。baseline。</item>
+///   <item><c>PostFilter</c> — 旧 vector-first (KNN top-K → label post-filter の物理プランを直接構築)。baseline。</item>
 ///   <item><c>PushdownVec9</c> — VEC-9 graph-first push-down (stats 不注入、構造ヒントのみ)。</item>
 ///   <item><c>PushdownVec10</c> — VEC-10 stats-aware (label cardinality &gt;= 30% で
 ///   vector-first にフォールバック)。</item>
@@ -84,16 +83,13 @@ public class KnnPushdownStatsAwareBenchmarks
 
     /// <summary>
     /// 旧 vector-first baseline: top-K を全 N から取得後、HasLabel で post-filter。
-    /// <see cref="KnnNodeSourceBuilder"/> を直接構築して PendingKnn rewrite を bypass する。
+    /// KNN top-K → label post-filter の物理プランを直接構築する (ARCH-7: optimizer を介さない)。
     /// </summary>
     [Benchmark(Baseline = true)]
     public int PostFilter()
     {
         using var rtx = _db.BeginReadOnlyTransaction();
-        var knnBuilder = new KnnNodeSourceBuilder(IndexName, _query, K);
-        var traversal = new GraphTraversal<NodeId>(rtx, _db.Schema, knnBuilder, row => row.GetNodeId(0), 0);
-        var result = traversal.HasLabel("Hit").ToList();
-        return result.Count;
+        return KnnBenchSupport.PostFilterCount(rtx, _db.Schema, IndexName, _query, K, "Hit");
     }
 
     /// <summary>VEC-9 default: stats 不注入で構造ヒントのみで graph-first を選ぶ。</summary>

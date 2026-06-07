@@ -1,5 +1,7 @@
-﻿using Quiver.Api.Internal;
+using Quiver.Api.Internal;
 using Quiver.Core;
+using Quiver.Query.Logical;
+using Quiver.Query.Optimizer;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
 
@@ -17,12 +19,12 @@ internal static class MatchCompiler
     {
         var varToColumn = new Dictionary<string, int>();
 
-        IOperatorBuilder builder;
+        LogicalOp builder;
         var startNode = pattern.StartNode;
 
-        builder = startNode.Label != null
-            ? new ScanBuilder(startNode.Label)
-            : new ScanBuilder();
+        builder = new ScanOp(
+            EntityKind.Node,
+            startNode.Label != null ? schema.GetOrCreateLabel(startNode.Label) : null);
 
         if (pattern.Edge == null || pattern.EndNode == null)
         {
@@ -37,7 +39,7 @@ internal static class MatchCompiler
             var direction = edge.Outgoing ? Direction.Outgoing : Direction.Incoming;
 
             // Full expand: col0=source, col1=rel, col2=neighbor
-            builder = new ExpandBuilder(builder, direction, edge.Type, ExpandOutputMode.Full);
+            builder = new ExpandOp(builder, builder.CurrentEntityColumn, direction, edge.Type, ExpandOutputMode.Full, null);
             varToColumn[startNode.Variable] = 0;
             varToColumn[endNode.Variable]   = 2;
 
@@ -45,7 +47,7 @@ internal static class MatchCompiler
             if (endNode.Label != null)
             {
                 var labelId = schema.GetOrCreateLabel(endNode.Label);
-                builder = new FilterBuilder(builder, _ => new LabelPredicate(labelId, column: 2));
+                builder = new FilterOp(builder, _ => new LabelPredicate(labelId, column: 2));
             }
         }
 
@@ -60,24 +62,22 @@ internal static class MatchCompiler
             var capturedKey  = keyId;
             var capturedPred = pred;
 
-            IOperatorBuilder filter;
             if (pred.Kind == PredicateKind.Eq && pred.StringValue != null)
             {
                 var strVal = pred.StringValue;
-                filter = new FilterBuilder(builder, _ => new PropertyEqStringPredicate(capturedCol, capturedKey, strVal));
+                builder = new FilterOp(builder, _ => new PropertyEqStringPredicate(capturedCol, capturedKey, strVal));
             }
             else if (pred.Kind == PredicateKind.Within && pred.WithinValues != null)
             {
                 var values = pred.WithinValues;
-                filter = new FilterBuilder(builder, _ => new PropertyWithinStringPredicate(capturedCol, capturedKey, values));
+                builder = new FilterOp(builder, _ => new PropertyWithinStringPredicate(capturedCol, capturedKey, values));
             }
             else
             {
-                filter = new FilterBuilder(builder, _ => new PropertyInt64Predicate(capturedCol, capturedKey, capturedPred));
+                builder = new FilterOp(builder, _ => new PropertyInt64Predicate(capturedCol, capturedKey, capturedPred));
             }
-            builder = filter;
         }
 
-        return (builder.Build(schema), varToColumn);
+        return (PhysicalPlanner.Plan(builder, schema), varToColumn);
     }
 }

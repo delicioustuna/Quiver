@@ -7,30 +7,28 @@ using Quiver.Core;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// VEC-12: PendingKnnBuilder の vector-first フォールバック閾値を dim × sel の 2 軸で実測する
-/// クロスオーバー sweep。VEC-11 で <c>NodeByLabelScan</c> が O(N) → O(|L|) になり、
-/// VEC-10 の 0.30 一本の閾値が dim ごとに異なる crossover を表現できなくなったための再評価用。
+/// VEC-12: vector-first フォールバック閾値を dim × sel の 2 軸で実測するクロスオーバー sweep。
+/// VEC-11 で <c>NodeByLabelScan</c> が O(N) → O(|L|) になり、VEC-10 の 0.30 一本の閾値が
+/// dim ごとに異なる crossover を表現できなくなったための再評価用。
 /// <para>
 /// 各 (dim, sel) で次の 3 メソッドを計測:
 /// </para>
 /// <list type="bullet">
 ///   <item>
-///     <c>PostFilter</c> — baseline。<c>KnnNodeSourceBuilder</c> を直接構築して
-///     <see cref="PendingKnnBuilder"/> rewrite を bypass し、後段に <c>HasLabel</c> FilterBuilder を被せる
-///     (vector-first 直結, post-filter)。
+///     <c>PostFilter</c> — baseline。KNN top-K → label post-filter の物理プランを直接構築
+///     (vector-first 直結)。
 ///   </item>
 ///   <item>
 ///     <c>GraphFirstForced</c> — VEC-11 後の graph-first 経路を強制。stats 不注入で構造ヒントのみで
-///     <see cref="FilteredKnnNodeSourceBuilder"/> (graph-first) を選ばせる。
+///     graph-first (FilteredKnn) を選ばせる。
 ///   </item>
 ///   <item>
-///     <c>VectorFirstForced</c> — VEC-10 fallback と同等の plan を強制。<c>KnnNodeSourceBuilder</c>
-///     を直接構築して PendingKnn rewrite を bypass、後段に <c>LabelPredicate</c> を被せる。
+///     <c>VectorFirstForced</c> — VEC-10 fallback と同等の plan を強制。post-filter 物理プランを直接構築。
 ///   </item>
 /// </list>
 /// <para>
 /// 各 dim ごとに <c>GraphFirstForced.Mean == VectorFirstForced.Mean</c> となる sel を線形補間で求め、
-/// 安全マージン 0.05 を引いた値を <see cref="PendingKnnBuilder"/> の dim-aware piecewise table に採用する。
+/// 安全マージン 0.05 を引いた値を <c>LogicalOptimizer</c> の dim-aware piecewise table に採用する。
 /// </para>
 /// </summary>
 [MemoryDiagnoser]
@@ -99,16 +97,14 @@ public class KnnPushdownThresholdSweepBenchmarks
     }
 
     /// <summary>
-    /// post-filter baseline。<see cref="KnnNodeSourceBuilder"/> を直接構築して
-    /// PendingKnn rewrite を bypass、後段に <c>HasLabel("Hit")</c> FilterBuilder を被せる。
+    /// post-filter baseline。KNN top-K → label post-filter の物理プランを直接構築する
+    /// (ARCH-7: optimizer を介さない vector-first 基準)。
     /// </summary>
     [Benchmark(Baseline = true)]
     public int PostFilter()
     {
         using var rtx = _db.BeginReadOnlyTransaction();
-        var knnBuilder = new KnnNodeSourceBuilder(IndexName, _query, K);
-        var traversal = new GraphTraversal<NodeId>(rtx, _db.Schema, knnBuilder, row => row.GetNodeId(0), 0);
-        return traversal.HasLabel("Hit").ToList().Count;
+        return KnnBenchSupport.PostFilterCount(rtx, _db.Schema, IndexName, _query, K, "Hit");
     }
 
     /// <summary>
@@ -125,16 +121,13 @@ public class KnnPushdownThresholdSweepBenchmarks
     }
 
     /// <summary>
-    /// VEC-10 fallback 経路と同等の plan を強制。<see cref="KnnNodeSourceBuilder"/> を直接構築して
-    /// PendingKnn rewrite を bypass、ScanBuilder("Hit") のラベル指定を post-filter
-    /// (<c>LabelPredicate</c>) として再配置する形を模倣。
+    /// VEC-10 fallback 経路と同等の plan を強制。KNN top-K → label post-filter の物理プランを
+    /// 直接構築する (= PostFilter と同形、vector-first)。
     /// </summary>
     [Benchmark]
     public int VectorFirstForced()
     {
         using var rtx = _db.BeginReadOnlyTransaction();
-        var knnBuilder = new KnnNodeSourceBuilder(IndexName, _query, K);
-        var traversal = new GraphTraversal<NodeId>(rtx, _db.Schema, knnBuilder, row => row.GetNodeId(0), 0);
-        return traversal.HasLabel("Hit").ToList().Count;
+        return KnnBenchSupport.PostFilterCount(rtx, _db.Schema, IndexName, _query, K, "Hit");
     }
 }
