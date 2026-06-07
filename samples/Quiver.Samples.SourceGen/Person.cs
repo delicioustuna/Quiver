@@ -17,6 +17,10 @@ public partial class Person
     // FT-35: float は Double に widen して格納・型付きクエリで範囲比較できる。
     [Property]
     public float Height { get; set; }
+
+    // FT-35 増分2: DateTime は UTC Ticks に正準化して格納 (TimeZone はマシン非依存)。
+    [Property]
+    public DateTime CreatedAt { get; set; }
 }
 
 [Relationship<Person, Person>("KNOWS")]

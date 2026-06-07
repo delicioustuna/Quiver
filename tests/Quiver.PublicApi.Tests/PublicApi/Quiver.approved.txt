@@ -1158,18 +1158,28 @@ namespace Quiver.Storage.Records
     {
         public bool BoolValue { get; }
         public System.ReadOnlySpan<byte> BytesValue { get; }
+        public System.DateOnly DateOnlyValue { get; }
+        public System.DateTimeOffset DateTimeOffsetValue { get; }
+        public System.DateTime DateTimeValue { get; }
         public double DoubleValue { get; }
         public int EncodedSize { get; }
         public int Int32Value { get; }
         public long Int64Value { get; }
+        public System.TimeOnly TimeOnlyValue { get; }
+        public System.TimeSpan TimeSpanValue { get; }
         public Quiver.Storage.Records.PropertyValueType Type { get; }
         public System.ReadOnlySpan<byte> Utf8StringValue { get; }
         public static Quiver.Storage.Records.PropertyValue FromBool(bool v) { }
         public static Quiver.Storage.Records.PropertyValue FromBytes(System.ReadOnlySpan<byte> v) { }
+        public static Quiver.Storage.Records.PropertyValue FromDateOnly(System.DateOnly v) { }
+        public static Quiver.Storage.Records.PropertyValue FromDateTime(System.DateTime v) { }
+        public static Quiver.Storage.Records.PropertyValue FromDateTimeOffset(System.DateTimeOffset v) { }
         public static Quiver.Storage.Records.PropertyValue FromDouble(double v) { }
         public static Quiver.Storage.Records.PropertyValue FromInt32(int v) { }
         public static Quiver.Storage.Records.PropertyValue FromInt64(long v) { }
         public static Quiver.Storage.Records.PropertyValue FromString(System.ReadOnlySpan<char> v) { }
+        public static Quiver.Storage.Records.PropertyValue FromTimeOnly(System.TimeOnly v) { }
+        public static Quiver.Storage.Records.PropertyValue FromTimeSpan(System.TimeSpan v) { }
         public static Quiver.Storage.Records.PropertyValue FromUtf8(System.ReadOnlySpan<byte> v) { }
     }
     public static class PropertyValueEqualityHelper

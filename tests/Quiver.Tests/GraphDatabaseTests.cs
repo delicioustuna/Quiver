@@ -338,7 +338,8 @@ public sealed class GraphDatabaseTests : IDisposable
     private partial class PersonNode : IGraphNode<PersonNode>
     {
         public string Name { get; set; } = "";
-        public double Score { get; set; }   // FT-35: 浮動小数点プロパティ
+        public double Score { get; set; }       // FT-35 増分1: 浮動小数点プロパティ
+        public DateTime CreatedAt { get; set; }  // FT-35 増分2: 日時プロパティ
 
         public static string GraphLabel => "Person";
         public static NodeId Insert(IGraphTransaction tx, PersonNode entity)
@@ -346,6 +347,7 @@ public sealed class GraphDatabaseTests : IDisposable
             var id = tx.CreateNode("Person");
             tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
             tx.SetProperty(id, "Score", PropertyValue.FromDouble(entity.Score));
+            tx.SetProperty(id, "CreatedAt", PropertyValue.FromDateTime(entity.CreatedAt));
             return id;
         }
         public static NodeId InsertIndexed(IGraphTransaction tx, PersonNode entity) => Insert(tx, entity);
@@ -354,6 +356,7 @@ public sealed class GraphDatabaseTests : IDisposable
             {
                 Name = System.Text.Encoding.UTF8.GetString(tx.GetProperty(id, "Name").Utf8StringValue),
                 Score = tx.GetProperty(id, "Score").DoubleValue,
+                CreatedAt = tx.GetProperty(id, "CreatedAt").DateTimeValue,
             };
         public static void Update(IGraphTransaction tx, NodeId id, PersonNode entity)
             => tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
@@ -473,6 +476,37 @@ public sealed class GraphDatabaseTests : IDisposable
         var found = g.Nodes<PersonNode>().Where(p => p.Score > 2).ToListWithIds();
 
         found.Select(n => n.Id).Should().Contain(bob).And.NotContain(alice);
+        tx.Rollback();
+    }
+
+    [Fact]
+    public void DateTime_roundtrip_canonicalizes_to_utc_instant()
+    {
+        // FT-35 増分2: Local 入力は UTC 瞬時へ正準化され、復元は Utc Kind。
+        var local = new DateTime(2024, 6, 1, 12, 0, 0, DateTimeKind.Local);
+        var pv = PropertyValue.FromDateTime(local);
+        pv.DateTimeValue.Should().Be(local.ToUniversalTime());
+        pv.DateTimeValue.Kind.Should().Be(DateTimeKind.Utc);
+
+        // Unspecified は (マシン依存を避けるため) UTC 扱い = ticks そのまま。
+        var unspec = new DateTime(2024, 6, 1, 12, 0, 0, DateTimeKind.Unspecified);
+        PropertyValue.FromDateTime(unspec).Int64Value.Should().Be(unspec.Ticks);
+    }
+
+    [Fact]
+    public void TypedWhere_DateTime_range_filters_with_tz_normalization()
+    {
+        using var tx = _db.BeginTransaction();
+        var utc = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var alice = PersonNode.Insert(tx, new PersonNode { Name = "Alice", CreatedAt = utc.AddDays(1) });
+        var bob   = PersonNode.Insert(tx, new PersonNode { Name = "Bob",   CreatedAt = utc.AddDays(10) });
+
+        var g = tx.G(_db.Schema);
+        // 同一瞬時を Local で渡しても UTC へ正準化され一貫比較される。
+        var cutoffLocal = utc.AddDays(5).ToLocalTime();
+        var recent = g.Nodes<PersonNode>().Where(p => p.CreatedAt > cutoffLocal).ToListWithIds();
+
+        recent.Select(n => n.Id).Should().Contain(bob).And.NotContain(alice);
         tx.Rollback();
     }
 

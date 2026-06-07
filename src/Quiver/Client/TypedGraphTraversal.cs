@@ -39,6 +39,12 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
             float   f => _inner.Has(key, (double)f),   // FT-35: float は Double に widen 格納
             Half    h => _inner.Has(key, (double)h),   // FT-35: Half も Double に widen
             bool    b => _inner.Has(key, b),
+            // FT-35 (増分2): 日時系は格納と同じ正準 long へ (TemporalCodec 共有)。
+            DateTime dt        => _inner.Has(key, Quiver.Storage.Records.TemporalCodec.ToUtcTicks(dt)),
+            DateTimeOffset dto => _inner.Has(key, Quiver.Storage.Records.TemporalCodec.OffsetToUtcTicks(dto)),
+            DateOnly d         => _inner.Has(key, Quiver.Storage.Records.TemporalCodec.ToDayNumber(d)),
+            TimeOnly t         => _inner.Has(key, Quiver.Storage.Records.TemporalCodec.ToTicks(t)),
+            TimeSpan ts        => _inner.Has(key, Quiver.Storage.Records.TemporalCodec.ToTicks(ts)),
             _         => throw new NotSupportedException($"Has<{typeof(TProp).Name}> は未対応です。範囲述語には Has(string key, PropertyPredicate pred) を使ってください。"),
         };
         return new TypedGraphTraversal<T>(next, _tx, _schema);

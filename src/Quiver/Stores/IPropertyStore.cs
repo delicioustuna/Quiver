@@ -53,6 +53,24 @@ public readonly ref struct PropertyValue
     public static PropertyValue FromUtf8(ReadOnlySpan<byte> v) => new(PropertyValueType.String, 0, v);
     public static PropertyValue FromBytes(ReadOnlySpan<byte> v) => new(PropertyValueType.Bytes, 0, v);
 
+    // ── FT-35 (増分2): 日時系 — 物理は Int64。正準化は TemporalCodec に集約 (TimeZone 契約はそこ参照) ──
+    public static PropertyValue FromDateTime(DateTime v) => new(PropertyValueType.Int64, TemporalCodec.ToUtcTicks(v));
+    public static PropertyValue FromDateTimeOffset(DateTimeOffset v) => new(PropertyValueType.Int64, TemporalCodec.OffsetToUtcTicks(v));
+    public static PropertyValue FromDateOnly(DateOnly v) => new(PropertyValueType.Int64, TemporalCodec.ToDayNumber(v));
+    public static PropertyValue FromTimeOnly(TimeOnly v) => new(PropertyValueType.Int64, TemporalCodec.ToTicks(v));
+    public static PropertyValue FromTimeSpan(TimeSpan v) => new(PropertyValueType.Int64, TemporalCodec.ToTicks(v));
+
+    /// <summary>FT-35: UTC 正準化された <see cref="DateTime"/> (<see cref="DateTimeKind.Utc"/>)。</summary>
+    public DateTime DateTimeValue => TemporalCodec.FromUtcTicks(_scalar);
+    /// <summary>FT-35: オフセット 0 (UTC) の <see cref="DateTimeOffset"/>。</summary>
+    public DateTimeOffset DateTimeOffsetValue => TemporalCodec.FromUtcTicksToOffset(_scalar);
+    /// <summary>FT-35: <see cref="DateOnly"/>。</summary>
+    public DateOnly DateOnlyValue => TemporalCodec.FromDayNumber(_scalar);
+    /// <summary>FT-35: <see cref="TimeOnly"/>。</summary>
+    public TimeOnly TimeOnlyValue => TemporalCodec.ToTimeOnly(_scalar);
+    /// <summary>FT-35: <see cref="TimeSpan"/>。</summary>
+    public TimeSpan TimeSpanValue => TemporalCodec.ToTimeSpan(_scalar);
+
     public int EncodedSize => _type switch
     {
         PropertyValueType.Bool => 1,

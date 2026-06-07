@@ -19,8 +19,8 @@ try
     {
         var g = tx.G(db.Schema);
 
-        var aliceId = g.InsertIndexed(new Person { Name = "Alice", Age = 30, Height = 1.65f });
-        var bobId   = g.InsertIndexed(new Person { Name = "Bob",   Age = 25, Height = 1.80f });
+        var aliceId = g.InsertIndexed(new Person { Name = "Alice", Age = 30, Height = 1.65f, CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc) });
+        var bobId   = g.InsertIndexed(new Person { Name = "Bob",   Age = 25, Height = 1.80f, CreatedAt = new DateTime(2024, 6, 1, 0, 0, 0, DateTimeKind.Utc) });
         Console.WriteLine($"  Insert: Alice={aliceId.Value}, Bob={bobId.Value}");
 
         Knows.Insert(tx, aliceId, bobId, new Knows { Since = "2024-01" });
@@ -76,6 +76,14 @@ try
         Console.WriteLine($"  Height > 1.7: {tall.Count} 件");
         foreach (var p in tall)
             Console.WriteLine($"    {p.Name}, height={p.Height}");
+
+        // ── FT-35 増分2: DateTime の範囲述語 (TimeZone 正準化) ──
+        var afterMarch = g.Nodes<Person>()
+                          .Where(p => p.CreatedAt > new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc))
+                          .ToList();
+        Console.WriteLine($"  CreatedAt > 2024-03: {afterMarch.Count} 件");
+        foreach (var p in afterMarch)
+            Console.WriteLine($"    {p.Name}, created={p.CreatedAt:yyyy-MM-dd}");
 
         // ── 5. GC-8: エッジ述語付き型保存ホップ (.Knows(e => ...)) ──
         var recentlyKnown = g.Nodes<Person>()

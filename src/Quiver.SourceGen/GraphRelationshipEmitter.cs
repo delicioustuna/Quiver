@@ -14,6 +14,12 @@ internal static class GraphRelationshipEmitter
         ["float"]   = ("PropertyValue.FromDouble((double)entity.{0})", "(float)tx.GetProperty(id, \"{1}\").DoubleValue"),
         ["Half"]    = ("PropertyValue.FromDouble((double)entity.{0})", "(System.Half)tx.GetProperty(id, \"{1}\").DoubleValue"),
         ["bool"]    = ("PropertyValue.FromBool(entity.{0})", "tx.GetProperty(id, \"{1}\").BoolValue"),
+        // FT-35 (増分2): 日時系は Int64 (Ticks/DayNumber) に正準化して格納。TimeZone 契約は TemporalCodec。
+        ["DateTime"]       = ("PropertyValue.FromDateTime(entity.{0})", "tx.GetProperty(id, \"{1}\").DateTimeValue"),
+        ["DateTimeOffset"] = ("PropertyValue.FromDateTimeOffset(entity.{0})", "tx.GetProperty(id, \"{1}\").DateTimeOffsetValue"),
+        ["DateOnly"]       = ("PropertyValue.FromDateOnly(entity.{0})", "tx.GetProperty(id, \"{1}\").DateOnlyValue"),
+        ["TimeOnly"]       = ("PropertyValue.FromTimeOnly(entity.{0})", "tx.GetProperty(id, \"{1}\").TimeOnlyValue"),
+        ["TimeSpan"]       = ("PropertyValue.FromTimeSpan(entity.{0})", "tx.GetProperty(id, \"{1}\").TimeSpanValue"),
     };
 
     public static string Emit(GraphRelationshipModel model)

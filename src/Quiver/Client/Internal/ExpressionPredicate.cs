@@ -115,12 +115,16 @@ internal static class ExpressionPredicate
         if (memberType == typeof(double) || memberType == typeof(float) || memberType == typeof(Half))
             return (key, DoublePredicate(op, Convert.ToDouble(value), key));
 
+        // FT-35 (増分2): 日時系は格納と同じ TemporalCodec で long 正準化してから比較する。
+        if (TryTemporalToLong(memberType, value, out long tv))
+            return (key, IntegralPredicate(op, tv, key));
+
         if (IsIntegralType(memberType))
             return (key, IntegralPredicate(op, Convert.ToInt64(value), key));
 
         throw new NotSupportedException(
             $"プロパティ '{key}' の型 {memberType.Name} は式ツリー述語で非対応です " +
-            "(string/bool/整数/double/float/Half)。decimal/Guid 等の範囲は Has(key, P.xxx) を使ってください。");
+            "(string/bool/整数/double/float/Half/DateTime系)。decimal/Guid 等の範囲は Has(key, P.xxx) を使ってください。");
     }
 
     private static PropertyPredicate IntegralPredicate(ExpressionType op, long v, string key) => op switch
@@ -191,6 +195,17 @@ internal static class ExpressionPredicate
         ExpressionType.LessThanOrEqual    => ExpressionType.GreaterThanOrEqual,
         _ => t, // Equal / NotEqual は対称
     };
+
+    /// <summary>FT-35: 日時系 CLR 型を格納と同じ正準 long へ変換する (TemporalCodec 共有)。</summary>
+    private static bool TryTemporalToLong(Type t, object? value, out long result)
+    {
+        if (t == typeof(DateTime))       { result = Quiver.Storage.Records.TemporalCodec.ToUtcTicks((DateTime)value!); return true; }
+        if (t == typeof(DateTimeOffset)) { result = Quiver.Storage.Records.TemporalCodec.OffsetToUtcTicks((DateTimeOffset)value!); return true; }
+        if (t == typeof(DateOnly))       { result = Quiver.Storage.Records.TemporalCodec.ToDayNumber((DateOnly)value!); return true; }
+        if (t == typeof(TimeOnly))       { result = Quiver.Storage.Records.TemporalCodec.ToTicks((TimeOnly)value!); return true; }
+        if (t == typeof(TimeSpan))       { result = Quiver.Storage.Records.TemporalCodec.ToTicks((TimeSpan)value!); return true; }
+        result = 0; return false;
+    }
 
     private static bool IsIntegralType(Type t) =>
         t == typeof(int) || t == typeof(long) || t == typeof(short) || t == typeof(byte) ||
