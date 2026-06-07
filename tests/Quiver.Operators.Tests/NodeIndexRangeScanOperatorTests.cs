@@ -66,6 +66,33 @@ public class NodeIndexRangeScanOperatorTests
     }
 
     [Fact]
+    public void Double_range_orders_across_negative_boundary()
+    {
+        // FT-35 増分3: 浮動小数点の索引 range シークが負値をまたいで正しく順序づくこと。
+        // DoubleKeyCodec の total-order 変換 (符号ビット反転 + 負値は全ビット反転) を検証する。
+        // 素朴な DoubleToInt64Bits 直格納では負値が逆順になりこのテストは落ちる。
+        using var fx = OperatorTestFixture.OpenEmpty();
+        fx.Db.Schema.CreateIndex("idx_d", "Item", "d", IndexKind.DoubleEquality);
+        double[] vals = { -2.5, -0.5, 0.0, 1.5, 3.0 };
+        using (var tx = fx.Db.BeginTransaction())
+        {
+            foreach (var v in vals)
+            {
+                var n = tx.CreateNode("Item");
+                tx.SetProperty(n, "d", PropertyValue.FromDouble(v));
+                tx.IndexInsert("idx_d", v, n);
+            }
+            tx.Commit();
+        }
+        using var tx2 = fx.Db.BeginTransaction();
+        // [-1.0, 2.0] は符号境界をまたいで -0.5 / 0.0 / 1.5 を含む。
+        using var result = tx2.Execute(new NodeIndexRangeScanOperator(
+            "idx_d", LiteralProvider.Double(-1.0), true, LiteralProvider.Double(2.0), true));
+        result.Rows().Should().HaveCount(3);
+        tx2.Rollback();
+    }
+
+    [Fact]
     public void Empty_window_yields_empty()
     {
         using var fx = OperatorTestFixture.OpenEmpty();

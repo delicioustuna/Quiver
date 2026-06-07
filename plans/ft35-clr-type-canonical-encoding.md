@@ -13,8 +13,18 @@
   Int64 で round-trip + long 範囲。`TemporalCodec` に正準化集約。**TimeZone 契約**: 可搬性のため
   Unspecified を UTC 扱い (Local 扱いしない)、Local は UTC へ変換、復元は Utc Kind、DateTimeOffset は
   UtcTicks に畳む。Quiver.Tests 492 緑。
-- **増分3 未**: 索引 (B+Tree) range シーク用の OrderedFloat 順序保存エンコードを store/index で一致
-  (`KeyCodecs`)。これは format bump。filter は増分1で足りているため index 最適化として後続。
+- **増分3 ✅ 確認済み (実装は既存、検証テスト追加)**: 索引 range の OrderedFloat エンコードは
+  **FT-35 以前から実装済みだった**。`DoubleKeyCodec` ([KeyCodecs.cs](../src/Quiver/Index/KeyCodecs.cs))
+  が total-order 変換 (符号ビット反転 + 負値は全ビット反転) を実装済で、`RangeIndex` の Double 経路
+  ([GraphTransaction.cs](../src/Quiver/GraphTransaction.cs)) が `CreateDoubleIndex` (順序保存) を range-seek
+  する。**format bump 不要**。負値をまたぐ double range シークの回帰テストを追加して固定
+  (`NodeIndexRangeScanOperatorTests.Double_range_orders_across_negative_boundary`)。
+  - **残る任意の最適化 (FT-35 スコープ外・PW 系)**: optimizer が `Where(p => p.Score > x)` の数値 range 述語を
+    full-scan + filter ではなく `NodeIndexRangeScanOperator` (索引 range) に押し下げる選択。正確性は増分1-2 で
+    達成済のため、これは純粋な性能最適化。`IndexKind` に数値 Range 種別を露出し optimizer を配線する別タスク。
+
+**結論**: FT-35 は increments 1-3 で **CLR 型のクエリ正確性 (float/Half/double/DateTime系の比較・範囲) を達成**。
+索引 range の順序保存も既存実装で担保済み。数値 range 述語の索引押し下げ (性能) は別 PW タスクへ。
 
 ## 目的
 
