@@ -112,8 +112,44 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     /// <summary>Phase 5c: write 経路 (列維持) のため GraphTransaction へ渡す列マネージャ。</summary>
     internal ColumnManager Columns => _columnManager;
 
-    internal bool CreateColumn(EntityKind kind, int keyId) => _columnManager.CreateColumn(kind, keyId);
-    internal bool DropColumn(EntityKind kind, int keyId) => _columnManager.DropColumn(kind, keyId);
+    internal bool CreateColumn(EntityKind kind, int keyId)
+    {
+        // ARCH-5c Phase 5g: opt-in 列の DDL はアクティブ tx 無しを要求する。CreateColumn は
+        // 現コミット済みデータから列を 1 パス構築するため、構築を跨ぐ並行 writer がいると列が
+        // 取りこぼし、列スキャン集約が row path と乖離しうる。CompactAdjacency と同じ契約で塞ぐ。
+        if (_txManager.ActiveCount > 0)
+            throw new InvalidOperationException("CreateColumn requires no active transactions.");
+        // ARCH-5c Phase 5g: 構築 (列データ / 列テナント page-table / catalog ページの書き込み) を
+        // WAL 文脈下で行い commit する。これにより crash recovery / CreateSnapshot (online backup) が
+        // 列ページを redo / 複製できる。tx 外で書くと clean Dispose のフラッシュ依存になり、
+        // 未チェックポイント crash や snapshot で列が失われる。
+        return RunColumnDdl(() => _columnManager.CreateColumn(kind, keyId));
+    }
+
+    internal bool DropColumn(EntityKind kind, int keyId)
+    {
+        if (_txManager.ActiveCount > 0)
+            throw new InvalidOperationException("DropColumn requires no active transactions.");
+        return RunColumnDdl(() => _columnManager.DropColumn(kind, keyId));
+    }
+
+    // ARCH-5c Phase 5g: 列 DDL の page 書き込みを WAL ログ + commit して durable 化する共通ラッパ。
+    private bool RunColumnDdl(Func<bool> ddl)
+    {
+        var tx = _txManager.Begin(IsolationLevel.SnapshotIsolation);
+        try
+        {
+            bool result = ddl();
+            tx.Commit();
+            return result;
+        }
+        catch
+        {
+            try { tx.Abort(); } catch { /* best-effort */ }
+            throw;
+        }
+        finally { tx.Dispose(); }
+    }
     internal bool TryGetColumn(EntityKind kind, int keyId, out ScalarColumnStore column)
         => _columnManager.TryGetColumn(kind, keyId, out column);
 

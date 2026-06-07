@@ -29,9 +29,10 @@
 - 対象ワークロード (mutation:projection 比) を製品要件として確認済み。
 
 ## 結論欄
-- 進行中。完了: 5a (4c0ca8f, 列ストア永続基盤) / 5b (bfdee14, opt-in 登録+catalog) / 5c (ef5b692, write 経路統合) / 5d (8284b2e, read/optimizer 統合) / 5e (cd3af9c, delta compaction を vacuum へ配線) / 5f (eeeace0, breadth 検証 test-only)。
+- **完了 (Phase 5 全段)**: 5a (4c0ca8f, 列ストア永続基盤) / 5b (bfdee14, opt-in 登録+catalog) / 5c (ef5b692, write 経路統合) / 5d (8284b2e, read/optimizer 統合) / 5e (cd3af9c, delta compaction を vacuum へ配線) / 5f (eeeace0, breadth 検証 test-only) / 5g (hardening: 並行性契約 + DDL WAL 永続化修正 + crash/snapshot/property/bench)。
 - 5c メモ: abort 正当性は MVCC 可視性 (before-image undo → ReloadColumns で head cache 再構築 → OnRolledBack で delta prune)。delta は in-memory 維持 (永続 delta-log は 5e/compaction で再検討、ユーザ選択)。
 - 5d メモ: full-scan 集約 (g.Nodes()/g.Relationships() の Sum/SumLong/Mean/Max/Min) を列スキャン化。ScalarColumnStore に scalar 型ヘッダ + TryAggregate、QueryOptimizer.ShouldUseColumnAggregate コスト判定、ITransaction.Snapshot/Committed 露出、g.Relationships() 新 API + PropertyLookup の EntityKind 対応。数値型のみ列、filter 付きは row fallback。列==行は「列あり vs DropColumn 後」で同値検証。opt-in 並行性 (CreateColumn 跨ぎ writer) は非保証→5g。
 - 5e メモ: ColumnManager.Compact を Vacuum (node 回収後・committed prune 前) に配線。VacuumReport.ReclaimedColumnVersions 追加。AutoVacuum は backend.Vacuum() 経由で自動的に periodic 化。
 - 5f メモ: breadth は本体変更不要 (汎用実装済) → test-only で固定。Bool 列は値保持のみ (数値集約は row フォールバック)。
-- 残: 5g (hardening: crash contract 両 backend / property test / TS-6 bench / PublicApi 再承認 / format bump 確定 / opt-in 並行性)。
+- 5g メモ: CreateColumn/DropColumn はアクティブ tx 無し必須 (列==行保証)。DDL 構築を RunColumnDdl で WAL 文脈 tx 下 commit に変更 (従来 tx 外で WAL 非対象 → 未 checkpoint crash / snapshot で列消失したバグを修正)。core FormatVersion 据え置き。property test (FsCheck) + crash/snapshot test + TS-6 bench 追加。
+- **完了条件達成。Phase 5 (永続 MVCC 列指向) クローズ。**
