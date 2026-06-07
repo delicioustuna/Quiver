@@ -199,6 +199,25 @@ DB を「ディレクトリ + 15+ ファイル」から **単一データファ�
 
 ## §6. ARCH-8 — Phase 5: Hop 型保存トラバーサル
 
+> ✅ **完了 (develop, commit `f4075a9`, 2026-06-07 ユーザ完了承認)。**
+> - 基底 `IGraphRelationship<TSelf>` (CRUD) を残し、派生 `IGraphRelationship<TSelf, TSource, TTarget>`
+>   (端点型制約のみ・追加メンバーなし) を新設。`Out<TRel>()` が `GraphTraversal<NodeId>`/`SubTraversal`/
+>   `GraphPattern` でも uniform に効くよう基底は維持 (一本化すると Match DSL の `Out<TRel>()` が壊れるため)。
+> - 属性を **ジェネリック化** `GraphRelationshipAttribute<TSource, TTarget>(string? type = null)` (C# 11 generic
+>   attribute、`typeof` 廃止・型名省略でクラス名)。非ジェネリック版は廃止 (プレリリース・統一性重視)。
+>   属性アセンブリは Quiver 本体を参照しないため型引数に `IGraphNode` 制約は課さず、生成 interface 側で担保。
+> - source generator: `ForAttributeWithMetadataName("...GraphRelationshipAttribute`2")` で
+>   `AttributeClass.TypeArguments` から端点 FQN を取得 → 3 引数 interface 実装 + **リレーション型名そのものの
+>   型保存糖衣** (`{ClassName}TraversalExtensions.{ClassName}(this TypedGraphTraversal<Source>)
+>   → TypedGraphTraversal<Target>`、`source.Out<TRel,TTarget>()` を被せる薄い拡張) を emit。
+> - `TypedGraphTraversal<T>`: 旧 `Out<TRel>()`/`In<TRel>()` (→NodeId 降格) を `Out<TRel, TTarget>()` /
+>   `In<TRel, TSource>()` (制約 `IGraphRelationship<TRel, T, TTarget>` で source/target=T 強制) に置換。
+>   `Both<TRel>()`/`Out(string)`/`In(string)` 型なしは併存 (多態・動的)。`OutRelationships<TRel>()` 系は据置。
+> - 検証: build 0 errors / 全スイート緑 (Quiver.Tests 485, Operators 167, Backend 186, Sqlite 60, SourceGen 4,
+>   PublicApi 1, …)。サンプル実行で `.Knows()` 型保存をランタイム確認。on-disk 無変更 → **FormatVersion 据え置き
+>   (V7VectorInFile)**、PublicApi baseline 再承認 (3 引数 interface + 型付き Out/In の追加のみ)。
+> - **これで全 ARCH タスク (1〜8) 完了。**
+
 ### 目的
 `TypedGraphTraversal<T>` が `Out`/`In`/`Both` で**型なし `GraphTraversal<NodeId>` に降格**する現状を解消し、`Person -KNOWS-> Person` のようなホップ間の型保存を可能にする。
 
