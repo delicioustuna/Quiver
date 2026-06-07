@@ -125,7 +125,7 @@ DB を「ディレクトリ + 15+ ファイル」から **単一データファ�
 > - **6c** (`29ce22c`): `VersionedRelationshipStore.CurrentGeneration` 追加。SetVector が現世代を payload に焼き込み、KNN read が現 slot 世代と照合して slot 再利用 (vacuum 後) の stale binding を棄却。
 > - **6d** (`879d0de`): 永続 `HnswIndex` (M=16/Mmax0=32/efConstruction=200/8層)。seq 直接 index の固定長レコードをページ write-through 永続化、open 時に in-memory 隣接へ rebuild。距離 = -Score 統一、最終 top-k は `VectorKnnHeap` と同一 tie-break (recall 100% のとき flat scan と完全一致)。`KnnSearch` を HNSW へ切替、Filtered/Batch は flat scan 据置。recall≥0.85 / reopen 再現 / abort 巻き戻し実証。
 > - **6e** (`eb2a3f4`): FormatVersion V6→**V7** (`V7VectorInFile`)。`InMemoryVectorStore` を非永続リファレンス実装へ降格 (SQLite MVP / fixture 用に残置)。`HnswSearchBenchmarks` (HNSW vs flat scan)。全ソリューションテスト緑。
-> - **MVP の既知の制限** (後続フォローアップ): ①overwrite は payload のみ更新し HNSW を再リンクしない ②HNSW ノードの物理削除/再構築は未対応 (removed は read 時フィルタ) ③`KnnSearchFiltered`/`KnnSearchBatch` は flat scan 据置。
+> - **MVP 制限の解消** (フォローアップ、commit `1fe076e` / `ac84c54`): ①overwrite は `HnswIndex.Upsert` (Delete+Insert) で新ベクトルへ再リンク ②`HnswIndex.Delete` でグラフ物理削除 (back-ref 除去 + entry 付け替え) + tombstone 蓄積で `Rebuild` 自動起動 ③`KnnSearchFiltered` 大候補は HNSW + post-filter (ef オーバーサンプル)、`KnnSearchBatch` は per-query HNSW。recall≥0.85 (真 brute force 比) を実証。
 
 ### 目的
 現状 binary backend は `InMemoryVectorStore` でベクトルを**永続化していない・非トランザクショナル** (`db.Vectors` 直叩き)。ベクトル payload と ANN 索引 (HNSW/IVF) を**同一ファイルのページに永続化**し、`SetVector` をトランザクション境界に取り込んでグラフ変更と原子整合させる。
