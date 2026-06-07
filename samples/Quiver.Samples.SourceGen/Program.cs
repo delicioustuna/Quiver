@@ -60,6 +60,14 @@ try
         Console.WriteLine($"  Alice が知る 30 歳未満: {known.Count} 件");
         foreach (var p in known)
             Console.WriteLine($"    {p.Name}, age={p.Age}");
+
+        // ── 4. GC-7: 式ツリー述語 (.Where) — LINQ ライクなノード絞り込み ──
+        var lambdaFiltered = g.Nodes<Person>()
+                              .Where(p => p.Age > 20 && p.Name.StartsWith("A"))
+                              .ToList();
+        Console.WriteLine($"  Where(Age>20 && Name^=A): {lambdaFiltered.Count} 件");
+        foreach (var p in lambdaFiltered)
+            Console.WriteLine($"    {p.Name}, age={p.Age}");
     }
 }
 finally

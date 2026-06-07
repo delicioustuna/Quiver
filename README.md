@@ -204,6 +204,12 @@ var people = g.Nodes<Person>()
               .Has(p => p.Age, P.Gt(25L))
               .ToList();  // → List<Person>（自動ロード）
 
+// GC-7: LINQ ライクな式ツリー述語（比較 / && / 同一キー || / StartsWith 等）
+var adults = g.Nodes<Person>()
+              .Where(p => p.Age > 25 && p.Name.StartsWith("A"))
+              .ToList();
+// 非対応の式（キー跨ぎ ||・double 範囲など）は Has(p => p.X, P.xxx) を使う
+
 // グラフパターンマッチ（Match DSL）
 var results = g.Match(
     GraphPattern.Node("n", "Person")

@@ -49,6 +49,16 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
         return new TypedGraphTraversal<T>(_inner.Has(key, pred), _tx, _schema);
     }
 
+    /// <summary>
+    /// GC-7: C# 式ツリーによる述語フィルタ (LINQ ライク)。比較 (<c>&gt; &gt;= &lt; &lt;= == !=</c>)、
+    /// <c>&amp;&amp;</c> (暗黙 AND)、同一キーの <c>||</c>、<c>StartsWith/EndsWith/Contains</c>、否定 <c>!</c> に対応する。
+    /// 例: <c>.Where(p =&gt; p.Age &gt; 20 &amp;&amp; p.Name.StartsWith("A"))</c>。
+    /// 対応外の式 (キー跨ぎ <c>||</c>、double 範囲など) は <see cref="NotSupportedException"/>。
+    /// その場合は <see cref="Has{TProp}(Expression{Func{T, TProp}}, PropertyPredicate)"/> を使う。
+    /// </summary>
+    public TypedGraphTraversal<T> Where(Expression<Func<T, bool>> predicate)
+        => new TypedGraphTraversal<T>(ExpressionPredicate.Apply(_inner, predicate), _tx, _schema);
+
     // ── トラバーサル（型なしに降格） ─────────────────────────────────────────
 
     /// <summary>外向に辿る (型なし <see cref="GraphTraversal{T}"/> に降格)。</summary>

@@ -402,6 +402,24 @@ public sealed class GraphDatabaseTests : IDisposable
         tx.Rollback();
     }
 
+    // ===== GC-7: 式ツリー述語 (Where / OutWhere) =====
+
+    [Fact]
+    public void TypedGraphTraversal_Where_expression_filters_nodes()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = PersonNode.Insert(tx, new PersonNode { Name = "Alice" });
+        var bob   = PersonNode.Insert(tx, new PersonNode { Name = "Bob" });
+
+        var g = tx.G(_db.Schema);
+        var found = g.Nodes<PersonNode>()
+                     .Where(p => p.Name == "Alice" || p.Name.StartsWith("Al"))
+                     .ToListWithIds();
+
+        found.Select(n => n.Id).Should().Contain(alice).And.NotContain(bob);
+        tx.Rollback();
+    }
+
     // ===== OutE<TRel> / InE<TRel> / BothE<TRel> =====
 
     [Fact]

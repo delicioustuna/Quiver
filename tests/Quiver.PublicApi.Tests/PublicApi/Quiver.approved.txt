@@ -303,6 +303,7 @@ namespace Quiver.Api
         public System.Collections.Generic.List<System.ValueTuple<Quiver.Core.NodeId, T>> ToListWithIds() { }
         public Quiver.Api.GraphTraversal<string> Values(string key) { }
         public Quiver.Api.GraphTraversal<string> Values<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>> selector) { }
+        public Quiver.Api.TypedGraphTraversal<T> Where(System.Linq.Expressions.Expression<System.Func<T, bool>> predicate) { }
     }
     public sealed class WeightedPathResult : System.IEquatable<Quiver.Api.WeightedPathResult>
     {
