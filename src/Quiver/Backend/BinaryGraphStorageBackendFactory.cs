@@ -38,6 +38,9 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     private const byte TenantRelMap = 15;
     // ARCH-5c Phase 5b: opt-in 列の catalog テナント (各列テナントは ColumnCatalog が 64+ で採番)。
     private const byte TenantColumnCatalog = 16;
+    // ARCH-6: 永続ベクトルインデックスの catalog テナント (各 index の payload/HNSW テナントは
+    // VectorIndexCatalog が 200+ で採番)。
+    private const byte TenantVectorCatalog = 17;
 
     public IGraphStorageBackend Open(string filePath, GraphDatabaseOptions options)
     {
@@ -156,6 +159,10 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var columnManager = new ColumnManager(
             container, TenantColumnCatalog, relStore, nodeStore, propStore);
 
+        // ARCH-6: ベクトル payload を container テナントへ永続化するストア。InMemoryVectorStore を置換し、
+        // 再起動を跨いで KNN を再現する。書き込みは container WAL に乗るので tx 配下なら原子整合する。
+        var vectors = new PersistentVectorStore(container, TenantVectorCatalog);
+
         // FT-15 / ARCH-4: abort (CLR undo) 後に container のテナント記述子 / page table と store メタを
         // 再同期するコールバック。AbortUndoHandler が before-image 復元後に呼ぶ。
         void ReloadStoreMeta()
@@ -177,9 +184,11 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             // head ページが tx 開始前へ戻るので、列の in-memory cache をページから再構築して
             // head 値の正当性を回復する。delta の中止 tx 分は OnRolledBack の PruneAbortedTx で掃除。
             columnManager.ReloadColumns();
+            // ARCH-6: ベクトル payload / catalog ページも container WAL 対象。abort の before-image
+            // undo でページが tx 開始前へ戻るので、in-memory の catalog / payload meta を読み直す。
+            vectors.ReloadAll();
         }
 
-        var vectors = new InMemoryVectorStore();
         var access = new BinaryGraphAccessMethods(vectors);
 
         // VEC-11: in-memory inverted index keyed by LabelId so label-filtered

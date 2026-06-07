@@ -61,6 +61,9 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     {
         if (_vectors is InMemoryVectorStore inMem)
             return inMem.KnnSearchFiltered(indexName, query, k, candidates);
+        // ARCH-6: 永続ストアも gather-then-score / scan+post-filter を直接持つ。
+        if (_vectors is Storage.Records.PersistentVectorStore persistent)
+            return persistent.KnnSearchFiltered(indexName, query, k, candidates);
         return IGraphAccessMethods.KnnSearchFilteredOversample(this, indexName, query, k, candidates);
     }
 
