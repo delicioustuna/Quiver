@@ -50,6 +50,16 @@ try
         Console.WriteLine($"  type-safe traversal: {adults.Count} 件");
         foreach (var p in adults)
             Console.WriteLine($"    {p.Name}, age={p.Age}");
+
+        // ── 3. Hop 型保存トラバーサル (ARCH-8): .Knows() が TypedGraphTraversal<Person> を保つ ──
+        var known = g.Nodes<Person>()
+                     .Has(p => p.Name, "Alice")
+                     .Knows()                 // ← Person -KNOWS-> Person、型保存のまま
+                     .Has(p => p.Age, P.Lt(30L))
+                     .ToList();
+        Console.WriteLine($"  Alice が知る 30 歳未満: {known.Count} 件");
+        foreach (var p in known)
+            Console.WriteLine($"    {p.Name}, age={p.Age}");
     }
 }
 finally

@@ -148,6 +148,10 @@ namespace Quiver.Api
         TSelf Load(Quiver.IGraphTransaction tx, Quiver.Core.RelationshipId id);
         void Update(Quiver.IGraphTransaction tx, Quiver.Core.RelationshipId id, TSelf entity);
     }
+    public interface IGraphRelationship<TSelf, TSource, TTarget> : Quiver.Api.IGraphRelationship<TSelf>
+        where TSelf : Quiver.Api.IGraphRelationship<TSelf, TSource, TTarget>
+        where TSource : Quiver.Api.IGraphNode<TSource>
+        where TTarget : Quiver.Api.IGraphNode<TTarget> { }
     public interface ITraversalCursor<out T> : System.IDisposable
     {
         T Current { get; }
@@ -279,14 +283,16 @@ namespace Quiver.Api
         public Quiver.Api.TypedGraphTraversal<T> Has<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>> selector, Quiver.Api.PropertyPredicate pred) { }
         public Quiver.Api.TypedGraphTraversal<T> Has<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>> selector, TProp value) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> In(string? type = null) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> In<TRel>()
-            where TRel : Quiver.Api.IGraphRelationship<TRel> { }
+        public Quiver.Api.TypedGraphTraversal<TSource> In<TRel, TSource>()
+            where TRel : Quiver.Api.IGraphRelationship<TRel, TSource, T>
+            where TSource : Quiver.Api.IGraphNode<TSource> { }
         public Quiver.Api.GraphTraversal<Quiver.Core.RelationshipId> InRelationships(string? type = null) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.RelationshipId> InRelationships<TRel>()
             where TRel : Quiver.Api.IGraphRelationship<TRel> { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Out(string? type = null) { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Out<TRel>()
-            where TRel : Quiver.Api.IGraphRelationship<TRel> { }
+        public Quiver.Api.TypedGraphTraversal<TTarget> Out<TRel, TTarget>()
+            where TRel : Quiver.Api.IGraphRelationship<TRel, T, TTarget>
+            where TTarget : Quiver.Api.IGraphNode<TTarget> { }
         public Quiver.Api.GraphTraversal<Quiver.Core.RelationshipId> OutRelationships(string? type = null) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.RelationshipId> OutRelationships<TRel>()
             where TRel : Quiver.Api.IGraphRelationship<TRel> { }

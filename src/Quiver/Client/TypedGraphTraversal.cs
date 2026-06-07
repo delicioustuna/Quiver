@@ -60,15 +60,29 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     /// <summary>双方向に辿る (型なし <see cref="GraphTraversal{T}"/> に降格)。</summary>
     public GraphTraversal<NodeId> Both(string? type = null) => _inner.Both(type);
 
-    /// <summary>型付きリレーションシップで外向に辿る。</summary>
-    public GraphTraversal<NodeId> Out<TRel>() where TRel : IGraphRelationship<TRel>
-        => _inner.Out<TRel>();
+    /// <summary>
+    /// 端点型を保持するリレーションシップ <typeparamref name="TRel"/> で外向に辿り、
+    /// 終点 <typeparamref name="TTarget"/> 型の型付きトラバーサルを返す (ARCH-8 ホップ型保存)。
+    /// 制約 <c>IGraphRelationship&lt;TRel, T, TTarget&gt;</c> が「現在のノード型 <typeparamref name="T"/> が
+    /// <typeparamref name="TRel"/> の始点である」ことをコンパイル時に強制する。
+    /// 通常は SourceGenerator 生成の糖衣 (<c>.Knows()</c> 等) を使い、明示形は escape hatch。
+    /// </summary>
+    public TypedGraphTraversal<TTarget> Out<TRel, TTarget>()
+        where TRel : IGraphRelationship<TRel, T, TTarget>
+        where TTarget : IGraphNode<TTarget>
+        => new TypedGraphTraversal<TTarget>(_inner.Out(TRel.GraphType), _tx, _schema);
 
-    /// <summary>型付きリレーションシップで内向に辿る。</summary>
-    public GraphTraversal<NodeId> In<TRel>() where TRel : IGraphRelationship<TRel>
-        => _inner.In<TRel>();
+    /// <summary>
+    /// 端点型を保持するリレーションシップ <typeparamref name="TRel"/> で内向に辿り、
+    /// 始点 <typeparamref name="TSource"/> 型の型付きトラバーサルを返す (ARCH-8 ホップ型保存)。
+    /// 現在のノード型 <typeparamref name="T"/> は <typeparamref name="TRel"/> の終点。
+    /// </summary>
+    public TypedGraphTraversal<TSource> In<TRel, TSource>()
+        where TRel : IGraphRelationship<TRel, TSource, T>
+        where TSource : IGraphNode<TSource>
+        => new TypedGraphTraversal<TSource>(_inner.In(TRel.GraphType), _tx, _schema);
 
-    /// <summary>型付きリレーションシップで双方向に辿る。</summary>
+    /// <summary>型付きリレーションシップで双方向に辿る (方向が定まらないため型なしに降格)。</summary>
     public GraphTraversal<NodeId> Both<TRel>() where TRel : IGraphRelationship<TRel>
         => _inner.Both<TRel>();
 

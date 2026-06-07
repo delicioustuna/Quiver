@@ -90,14 +90,21 @@ public class GraphRelationshipGeneratorTests
     [Fact]
     public void Generator_emits_partial_class_for_GraphRelationship()
     {
-        var attributeRef = typeof(Quiver.Api.GraphRelationshipAttribute).Assembly.Location;
+        var attributeRef = typeof(Quiver.Api.GraphRelationshipAttribute<,>).Assembly.Location;
         var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
 
         var source = """
             using Quiver.Api;
             namespace MyApp;
 
-            [GraphRelationship("KNOWS")]
+            [GraphNode("Person")]
+            public partial class Person
+            {
+                [GraphProperty]
+                public string Name { get; set; } = "";
+            }
+
+            [GraphRelationship<Person, Person>("KNOWS")]
             public partial class Knows
             {
                 [GraphProperty]

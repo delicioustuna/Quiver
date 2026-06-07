@@ -15,7 +15,7 @@ public partial class Person
     public int Age { get; set; }
 }
 
-[GraphRelationship("KNOWS")]
+[GraphRelationship<Person, Person>("KNOWS")]
 public partial class Knows
 {
     [GraphProperty]

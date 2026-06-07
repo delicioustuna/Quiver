@@ -32,7 +32,7 @@ internal static class GraphRelationshipEmitter
             sb.AppendLine();
         }
 
-        sb.AppendLine($"partial class {model.ClassName} : Quiver.Api.IGraphRelationship<{model.ClassName}>");
+        sb.AppendLine($"partial class {model.ClassName} : Quiver.Api.IGraphRelationship<{model.ClassName}, {model.SourceFqn}, {model.TargetFqn}>");
         sb.AppendLine("{");
         sb.AppendLine($"    public static string GraphType => \"{model.RelType}\";");
         sb.AppendLine();
@@ -72,6 +72,17 @@ internal static class GraphRelationshipEmitter
         // Delete
         sb.AppendLine($"    public static void Delete(IGraphTransaction tx, Quiver.Core.RelationshipId id) => tx.DeleteRelationship(id);");
 
+        sb.AppendLine("}");
+        sb.AppendLine();
+
+        // Hop 型保存トラバーサル糖衣 (ARCH-8): g.Nodes<Source>().<RelType>() が
+        // TypedGraphTraversal<Target> を返す。型安全な Out<TRel, TTarget>() を被せる薄い拡張。
+        sb.AppendLine($"/// <summary>{model.ClassName} (型保存トラバーサル糖衣) — SourceGenerator 生成。</summary>");
+        sb.AppendLine($"public static class {model.ClassName}TraversalExtensions");
+        sb.AppendLine("{");
+        sb.AppendLine($"    /// <summary>{model.SourceFqn} から {model.RelType} を外向に辿り、{model.TargetFqn} 型を保存する。</summary>");
+        sb.AppendLine($"    public static Quiver.Api.TypedGraphTraversal<{model.TargetFqn}> {model.ClassName}(this Quiver.Api.TypedGraphTraversal<{model.SourceFqn}> source)");
+        sb.AppendLine($"        => source.Out<{model.ClassName}, {model.TargetFqn}>();");
         sb.AppendLine("}");
         return sb.ToString();
     }

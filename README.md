@@ -119,15 +119,22 @@ tx.Commit();
 
 #### リレーションシップの操作
 
-`[GraphRelationship]` 属性でリレーションシップモデルを定義すると、Source Generator が CRUD メソッドを生成します。型付きトラバーサル（`Out<TRel>()` など）にも対応します。
+`[GraphRelationship<TSource, TTarget>]` 属性でリレーションシップモデルを定義すると、Source Generator が CRUD メソッドと、始点 `TSource` から終点 `TTarget` への**型保存トラバーサル糖衣**（リレーション型名そのもののメソッド）を生成します。型名を省略するとクラス名がリレーション型になります。
 
 ```csharp
-[GraphRelationship("KNOWS")]
+[GraphRelationship<Person, Person>("KNOWS")]
 public partial class Knows
 {
     [GraphProperty]
     public string Since { get; set; } = "";
 }
+
+// 型保存トラバーサル: Knows() が TypedGraphTraversal<Person> を保つ (ホップ間で型が降格しない)
+var known = g.Nodes<Person>()
+             .Has(p => p.Name, "Alice")
+             .Knows()                       // Person -KNOWS-> Person
+             .Has(p => p.Age, P.Lt(30L))
+             .ToList();
 ```
 
 ```csharp

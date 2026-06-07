@@ -315,8 +315,7 @@ public sealed class GraphDatabaseTests : IDisposable
 
     // ===== 型付き Traversal API =====
 
-    [GraphRelationship("KNOWS")]
-    private partial class KnowsRel : IGraphRelationship<KnowsRel>
+    private partial class KnowsRel : IGraphRelationship<KnowsRel, PersonNode, PersonNode>
     {
         [GraphProperty]
         public int Since { get; set; }
@@ -396,9 +395,10 @@ public sealed class GraphDatabaseTests : IDisposable
         tx.CreateRelationship(alice, bob, "KNOWS");
 
         var g = tx.G(_db.Schema);
-        var neighbors = g.Nodes<PersonNode>().Out<KnowsRel>().ToList();
+        // ARCH-8: Out<TRel, TTarget>() は TypedGraphTraversal<PersonNode> を型保存する。
+        var neighbors = g.Nodes<PersonNode>().Out<KnowsRel, PersonNode>().ToListWithIds();
 
-        neighbors.Should().Contain(bob);
+        neighbors.Select(n => n.Id).Should().Contain(bob);
         tx.Rollback();
     }
 

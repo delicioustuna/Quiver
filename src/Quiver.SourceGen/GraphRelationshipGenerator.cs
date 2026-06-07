@@ -6,7 +6,7 @@ namespace Quiver.SourceGen;
 [Generator]
 public sealed class GraphRelationshipGenerator : IIncrementalGenerator
 {
-    private const string GraphRelationshipAttributeFqn = "Quiver.Api.GraphRelationshipAttribute";
+    private const string GraphRelationshipAttributeFqn = "Quiver.Api.GraphRelationshipAttribute`2";
     private const string GraphPropertyAttributeFqn = "Quiver.Api.GraphPropertyAttribute";
 
     public void Initialize(IncrementalGeneratorInitializationContext ctx)
@@ -49,6 +49,15 @@ public sealed class GraphRelationshipGenerator : IIncrementalGenerator
             }
         }
 
+        // ジェネリック属性 GraphRelationshipAttribute<TSource, TTarget> の型引数から端点型を取得する。
+        var attrClass = relAttr.AttributeClass;
+        if (attrClass is null || attrClass.TypeArguments.Length != 2)
+            return null;
+
+        var fqnFormat = SymbolDisplayFormat.FullyQualifiedFormat;
+        var sourceFqn = attrClass.TypeArguments[0].ToDisplayString(fqnFormat);
+        var targetFqn = attrClass.TypeArguments[1].ToDisplayString(fqnFormat);
+
         var model = new GraphRelationshipModel
         {
             Namespace = classSymbol.ContainingNamespace.IsGlobalNamespace
@@ -56,6 +65,8 @@ public sealed class GraphRelationshipGenerator : IIncrementalGenerator
                 : classSymbol.ContainingNamespace.ToDisplayString(),
             ClassName = classSymbol.Name,
             RelType = relType,
+            SourceFqn = sourceFqn,
+            TargetFqn = targetFqn,
         };
 
         foreach (var member in classSymbol.GetMembers())
