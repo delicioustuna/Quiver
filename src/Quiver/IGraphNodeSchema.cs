@@ -10,7 +10,7 @@ namespace Quiver;
 /// <typeparam name="TSelf">自分自身の型 (CRTP)。</typeparam>
 /// <remarks>
 /// 通常は <see cref="GraphDatabaseSchemaExtensions.EnsureIndexes{T}"/> /
-/// <see cref="GraphDatabaseSchemaExtensions.CreateIndex{T}"/> 経由で呼ぶ。手動実装は不要。
+/// <see cref="GraphDatabaseSchemaExtensions.EnsureIndex{T}"/> 経由で呼ぶ。手動実装は不要。
 /// </remarks>
 public interface IGraphNodeSchema<TSelf> where TSelf : IGraphNodeSchema<TSelf>
 {
@@ -23,8 +23,8 @@ public interface IGraphNodeSchema<TSelf> where TSelf : IGraphNodeSchema<TSelf>
     static abstract void EnsureIndexes(ISchemaApi schema);
 
     /// <summary>
-    /// 単一プロパティのインデックスを作成する。<paramref name="propertyName"/> は呼び出し側
-    /// (典型的には <see cref="GraphDatabaseSchemaExtensions.CreateIndex{T}"/>) が
+    /// 単一プロパティのインデックスを冪等に作成する。<paramref name="propertyName"/> は呼び出し側
+    /// (典型的には <see cref="GraphDatabaseSchemaExtensions.EnsureIndex{T}"/>) が
     /// ラムダから抽出した CLR プロパティ名。<paramref name="kindOverride"/> を渡すと
     /// 推論された既定 kind を上書きできる (例: 文字列プロパティに対し
     /// <see cref="IndexKind.StringRange"/> を使う)。
@@ -32,7 +32,7 @@ public interface IGraphNodeSchema<TSelf> where TSelf : IGraphNodeSchema<TSelf>
     /// <exception cref="ArgumentException">
     /// <paramref name="propertyName"/> が <c>[GraphIndexed]</c> を持たない場合。
     /// </exception>
-    static abstract void CreateIndex(ISchemaApi schema, string propertyName, IndexKind? kindOverride);
+    static abstract void EnsureIndex(ISchemaApi schema, string propertyName, IndexKind? kindOverride);
 }
 
 /// <summary>
@@ -52,23 +52,23 @@ public static class GraphDatabaseSchemaExtensions
         => T.EnsureIndexes(db.Schema);
 
     /// <summary>
-    /// 単一プロパティ用のインデックスを作成する。<paramref name="propertySelector"/> は
-    /// <c>p =&gt; p.Name</c> 形式のメンバアクセス式に限る。
+    /// 単一プロパティ用のインデックスを冪等に作成する (既存なら何もしない)。
+    /// <paramref name="propertySelector"/> は <c>p =&gt; p.Name</c> 形式のメンバアクセス式に限る。
     /// <paramref name="kindOverride"/> を渡すと推論された既定 kind を上書きできる。
     /// </summary>
     /// <example>
     /// <code>
-    /// db.CreateIndex&lt;Person&gt;(p =&gt; p.Name);                              // 推論 (StringEquality)
-    /// db.CreateIndex&lt;Person&gt;(p =&gt; p.Name, IndexKind.StringRange);        // 上書き
+    /// db.EnsureIndex&lt;Person&gt;(p =&gt; p.Name);                              // 推論 (StringEquality)
+    /// db.EnsureIndex&lt;Person&gt;(p =&gt; p.Name, IndexKind.StringRange);        // 上書き
     /// </code>
     /// </example>
-    public static void CreateIndex<T>(
+    public static void EnsureIndex<T>(
         this GraphDatabase db,
         Expression<Func<T, object?>> propertySelector,
         IndexKind? kindOverride = null) where T : IGraphNodeSchema<T>
     {
         var name = ExtractMemberName(propertySelector.Body);
-        T.CreateIndex(db.Schema, name, kindOverride);
+        T.EnsureIndex(db.Schema, name, kindOverride);
     }
 
     private static string ExtractMemberName(Expression body)

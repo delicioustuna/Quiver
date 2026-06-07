@@ -132,9 +132,9 @@ internal static class GraphNodeEmitter
         }
         sb.AppendLine("    }");
 
-        // PW-18 follow-up: CreateIndex(propertyName, kindOverride?) — 単一プロパティ用
+        // PW-18 follow-up: EnsureIndex(propertyName, kindOverride?) — 単一プロパティ用 (冪等)
         sb.AppendLine();
-        sb.AppendLine("    public static void CreateIndex(Quiver.ISchemaApi schema, string propertyName, Quiver.IndexKind? kindOverride)");
+        sb.AppendLine("    public static void EnsureIndex(Quiver.ISchemaApi schema, string propertyName, Quiver.IndexKind? kindOverride)");
         sb.AppendLine("    {");
         sb.AppendLine("        switch (propertyName)");
         sb.AppendLine("        {");
