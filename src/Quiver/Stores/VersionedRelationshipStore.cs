@@ -315,6 +315,17 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     /// <summary>採番済み Sequence 数 (= 最大 seq + 1)。</summary>
     internal long Hwm => _map.Hwm;
 
+    /// <summary>
+    /// ARCH-6: seq の現世代を返す (ベクトル binding の slot 再利用検出用)。範囲外は -1。
+    /// <see cref="VersionedNodeStore.CurrentGeneration"/> と同形。
+    /// </summary>
+    public int CurrentGeneration(long localId)
+    {
+        if (localId < 0 || localId >= _map.Hwm) return -1;
+        long gen = _versions.Read(localId).Generation;
+        return gen > int.MaxValue ? int.MaxValue : (int)gen;
+    }
+
     /// <summary>OP-3 / テスト用。free list は ItemPointerMap が持つ。</summary>
     internal long FreeHead => _map.FreeHead;
 

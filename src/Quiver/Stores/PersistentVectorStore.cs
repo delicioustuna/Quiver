@@ -20,16 +20,22 @@ internal sealed class PersistentVectorStore : IVectorStore
 {
     private readonly SingleFileContainer _container;
     private readonly byte _catalogTenantId;
+    // ARCH-6c: (kind, sequence) → 現世代を引く resolver。slot 再利用で別エンティティに化けた
+    // stale binding を KNN read 時に弾くために使う。null = 旧経路 / テスト (世代照合なし)。
+    private readonly Func<EntityKind, long, int>? _currentGeneration;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, IndexHandle> _indexes = new(StringComparer.Ordinal);
     // catalog は遅延生成 (ctor が空テナントへヘッダページを書くのを避け、ベクトルを使わない DB の
     // on-disk レイアウトを撹乱しない)。CreateVectorIndex で初めて生成される。
     private VectorIndexCatalog? _catalog;
 
-    public PersistentVectorStore(SingleFileContainer container, byte catalogTenantId)
+    public PersistentVectorStore(
+        SingleFileContainer container, byte catalogTenantId,
+        Func<EntityKind, long, int>? currentGeneration = null)
     {
         _container = container;
         _catalogTenantId = catalogTenantId;
+        _currentGeneration = currentGeneration;
         // 既存 DB のみ、登録済み index を eager に開く。
         if (_container.HasTenant(catalogTenantId))
         {
@@ -99,9 +105,12 @@ internal sealed class PersistentVectorStore : IVectorStore
             throw new VectorException(
                 $"Vector index '{indexName}' expects {h.Spec.Dimensions} dimensions, got {vector.Length}.");
         // ARCH-5b: binding キーは slot Sequence へ正規化 (node.Value (gen 付き packed) を渡されうる)。
-        // 世代照合による stale binding 棄却は 6c で導入する (現状 gen=0)。
+        // ARCH-6c: 現世代を payload に焼き込み、slot 再利用で別エンティティに化けた stale binding を
+        // KNN read 時に弾けるようにする。resolver 無し (テスト) は 0。
+        long seq = EntityRef.Sequence(entityId);
+        ushort gen = ResolveGen(kind, seq);
         lock (_gate)
-            h.Payload.Set(EntityRef.Sequence(entityId), 0, vector);
+            h.Payload.Set(seq, gen, vector);
     }
 
     public void RemoveVector(EntityKind kind, long entityId, string indexName)
@@ -131,7 +140,7 @@ internal sealed class PersistentVectorStore : IVectorStore
             {
                 long hwm = h.Payload.Hwm;
                 for (long seq = 0; seq < hwm; seq++)
-                    if (h.Payload.TryGet(seq, dest, out _))
+                    if (h.Payload.TryGet(seq, dest, out var gen) && IsLive(kind, seq, gen))
                         heap.Offer(new VectorSearchResult(kind, seq, VectorMetrics.Score(metric, query, dest)));
             }
         }
@@ -169,7 +178,7 @@ internal sealed class PersistentVectorStore : IVectorStore
                 if (candidates.Count * 4 <= hwm || hwm == 0)
                 {
                     foreach (var seq in candidates.Ids)
-                        if (h.Payload.TryGet(seq, dest, out _))
+                        if (h.Payload.TryGet(seq, dest, out var gen) && IsLive(kind, seq, gen))
                             heap.Offer(new VectorSearchResult(kind, seq, VectorMetrics.Score(metric, query, dest)));
                 }
                 else
@@ -177,7 +186,7 @@ internal sealed class PersistentVectorStore : IVectorStore
                     for (long seq = 0; seq < hwm; seq++)
                     {
                         if (!candidates.Contains(kind, seq)) continue;
-                        if (h.Payload.TryGet(seq, dest, out _))
+                        if (h.Payload.TryGet(seq, dest, out var gen) && IsLive(kind, seq, gen))
                             heap.Offer(new VectorSearchResult(kind, seq, VectorMetrics.Score(metric, query, dest)));
                     }
                 }
@@ -217,7 +226,7 @@ internal sealed class PersistentVectorStore : IVectorStore
                 long hwm = h.Payload.Hwm;
                 for (long seq = 0; seq < hwm; seq++)
                 {
-                    if (!h.Payload.TryGet(seq, dest, out _)) continue;
+                    if (!h.Payload.TryGet(seq, dest, out var gen) || !IsLive(kind, seq, gen)) continue;
                     for (int q = 0; q < Q; q++)
                         heaps[q].Offer(new VectorSearchResult(kind, seq, VectorMetrics.Score(metric, queries[q].Span, dest)));
                 }
@@ -265,6 +274,26 @@ internal sealed class PersistentVectorStore : IVectorStore
                 throw new VectorException($"Vector index '{name}' does not exist.");
             return h;
         }
+    }
+
+    /// <summary>ARCH-6c: (kind, seq) の現世代を ushort に丸めて返す。resolver 無し / 範囲外は 0。</summary>
+    private ushort ResolveGen(EntityKind kind, long seq)
+    {
+        if (_currentGeneration is null) return 0;
+        int g = _currentGeneration(kind, seq);
+        return g <= 0 ? (ushort)0 : (ushort)Math.Min(g, EntityRef.MaxGeneration);
+    }
+
+    /// <summary>
+    /// ARCH-6c: payload に焼かれた世代 <paramref name="storedGen"/> が現在の slot 世代と一致するか。
+    /// 不一致なら slot が再利用され別エンティティに化けた stale binding なので KNN から除外する。
+    /// resolver 無し (テスト / 旧経路) は常に live 扱い。
+    /// </summary>
+    private bool IsLive(EntityKind kind, long seq, ushort storedGen)
+    {
+        if (_currentGeneration is null) return true;
+        int cur = _currentGeneration(kind, seq);
+        return cur >= 0 && (ushort)Math.Min(cur, EntityRef.MaxGeneration) == storedGen;
     }
 
     private sealed record IndexHandle(VectorIndexSpec Spec, VectorPayloadStore Payload);

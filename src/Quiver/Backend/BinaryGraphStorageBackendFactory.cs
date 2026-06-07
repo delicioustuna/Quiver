@@ -161,7 +161,14 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
 
         // ARCH-6: ベクトル payload を container テナントへ永続化するストア。InMemoryVectorStore を置換し、
         // 再起動を跨いで KNN を再現する。書き込みは container WAL に乗るので tx 配下なら原子整合する。
-        var vectors = new PersistentVectorStore(container, TenantVectorCatalog);
+        // ARCH-6c: (kind, seq) → 現世代 resolver を渡し、slot 再利用で化けた stale binding を弾く。
+        var vectors = new PersistentVectorStore(container, TenantVectorCatalog,
+            (kind, seq) => kind switch
+            {
+                Core.EntityKind.Node => nodeStore.CurrentGeneration(seq),
+                Core.EntityKind.Relationship => relStore.CurrentGeneration(seq),
+                _ => -1,
+            });
 
         // FT-15 / ARCH-4: abort (CLR undo) 後に container のテナント記述子 / page table と store メタを
         // 再同期するコールバック。AbortUndoHandler が before-image 復元後に呼ぶ。
