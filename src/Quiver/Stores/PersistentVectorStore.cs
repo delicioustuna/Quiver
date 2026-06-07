@@ -151,8 +151,8 @@ internal sealed class PersistentVectorStore : IVectorStore
     }
 
     /// <summary>
-    /// VEC-8 互換: 候補集合に対する KNN。候補が全件の 1/4 以下なら直接 gather、それ以上は
-    /// 全件 scan + post-filter。<see cref="InMemoryVectorStore.KnnSearchFiltered"/> と同一の順序を返す。
+    /// ③: 候補集合に対する KNN。小候補 (全件の 1/4 以下) は直接 gather + brute (HNSW より速く exact)、
+    /// 大候補 (低選択率) は HNSW 探索 + post-filter (ef オーバーサンプルで k 件を確保)。
     /// </summary>
     public VectorSearchCursor KnnSearchFiltered(
         string indexName, ReadOnlySpan<float> query, int k, EntityCandidateSet candidates)
@@ -169,33 +169,30 @@ internal sealed class PersistentVectorStore : IVectorStore
         int dim = h.Spec.Dimensions;
         var metric = h.Spec.Metric;
         var kind = h.Spec.EntityKind;
-        var heap = new VectorKnnHeap(k);
-        var buf = ArrayPool<float>.Shared.Rent(dim);
-        try
+        lock (_gate)
         {
-            var dest = buf.AsSpan(0, dim);
-            lock (_gate)
+            long hwm = h.Payload.Hwm;
+            if (candidates.Count * 4 <= hwm || hwm == 0)
             {
-                long hwm = h.Payload.Hwm;
-                if (candidates.Count * 4 <= hwm || hwm == 0)
+                // 小候補: 候補だけ直接ルックアップして brute スコア (exact、HNSW を回さない方が速い)。
+                var heap = new VectorKnnHeap(k);
+                var buf = ArrayPool<float>.Shared.Rent(dim);
+                try
                 {
+                    var dest = buf.AsSpan(0, dim);
                     foreach (var seq in candidates.Ids)
                         if (h.Payload.TryGet(seq, dest, out var gen) && IsLive(kind, seq, gen))
                             heap.Offer(new VectorSearchResult(kind, seq, VectorMetrics.Score(metric, query, dest)));
                 }
-                else
-                {
-                    for (long seq = 0; seq < hwm; seq++)
-                    {
-                        if (!candidates.Contains(kind, seq)) continue;
-                        if (h.Payload.TryGet(seq, dest, out var gen) && IsLive(kind, seq, gen))
-                            heap.Offer(new VectorSearchResult(kind, seq, VectorMetrics.Score(metric, query, dest)));
-                    }
-                }
+                finally { ArrayPool<float>.Shared.Return(buf); }
+                return new SortedVectorCursor(heap.ToSortedArray());
             }
+            // 大候補: HNSW 探索 (ef オーバーサンプル) + present/世代/メンバシップ post-filter。
+            var sorted = h.Hnsw.Search(query, k, kind,
+                (seq, gen) => IsLive(kind, seq, gen),
+                seq => candidates.Contains(kind, seq));
+            return new SortedVectorCursor(sorted);
         }
-        finally { ArrayPool<float>.Shared.Return(buf); }
-        return new SortedVectorCursor(heap.ToSortedArray());
     }
 
     public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
@@ -212,32 +209,18 @@ internal sealed class PersistentVectorStore : IVectorStore
                     $"Vector index '{indexName}' expects {h.Spec.Dimensions} dimensions, " +
                     $"got {queries[q].Length} at query[{q}].");
 
-        int dim = h.Spec.Dimensions;
-        var metric = h.Spec.Metric;
+        // ③: 各クエリを HNSW で独立に探索する (単一 KnnSearch と同一セマンティクス)。
         var kind = h.Spec.EntityKind;
         int Q = queries.Count;
-        var heaps = new VectorKnnHeap[Q];
-        for (int q = 0; q < Q; q++) heaps[q] = new VectorKnnHeap(k);
-
-        var buf = ArrayPool<float>.Shared.Rent(dim);
-        try
+        var cursors = new VectorSearchCursor[Q];
+        lock (_gate)
         {
-            var dest = buf.AsSpan(0, dim);
-            lock (_gate)
+            for (int q = 0; q < Q; q++)
             {
-                long hwm = h.Payload.Hwm;
-                for (long seq = 0; seq < hwm; seq++)
-                {
-                    if (!h.Payload.TryGet(seq, dest, out var gen) || !IsLive(kind, seq, gen)) continue;
-                    for (int q = 0; q < Q; q++)
-                        heaps[q].Offer(new VectorSearchResult(kind, seq, VectorMetrics.Score(metric, queries[q].Span, dest)));
-                }
+                var sorted = h.Hnsw.Search(queries[q].Span, k, kind, (seq, gen) => IsLive(kind, seq, gen));
+                cursors[q] = new SortedVectorCursor(sorted);
             }
         }
-        finally { ArrayPool<float>.Shared.Return(buf); }
-
-        var cursors = new VectorSearchCursor[Q];
-        for (int q = 0; q < Q; q++) cursors[q] = new SortedVectorCursor(heaps[q].ToSortedArray());
         return cursors;
     }
 

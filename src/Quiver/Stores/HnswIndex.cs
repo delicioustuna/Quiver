@@ -225,17 +225,19 @@ internal sealed class HnswIndex
     /// <paramref name="isLive"/> は世代照合 (ARCH-6c) — false の候補は除外する。
     /// </summary>
     public VectorSearchResult[] Search(
-        ReadOnlySpan<float> query, int k, EntityKind kind, Func<long, ushort, bool> isLive)
+        ReadOnlySpan<float> query, int k, EntityKind kind, Func<long, ushort, bool> isLive,
+        Func<long, bool>? inFilter = null)
     {
         if (_entry < 0 || k <= 0) return Array.Empty<VectorSearchResult>();
         long ep = _entry;
         for (int lc = _maxLevel; lc > 0; lc--)
             ep = GreedyDescent(query, ep, lc);
 
-        int ef = Math.Max(EfConstruction, k);
+        // ③: フィルタ付き検索は post-filter で k 件に満たなくなりうるため ef をオーバーサンプルする。
+        int ef = inFilter is null ? Math.Max(EfConstruction, k) : Math.Max(EfConstruction, k * 8);
         var w = SearchLayer(query, ep, ef, 0);
 
-        // 層0の候補を payload で再スコアし、present + 世代照合を通したものだけ top-k へ。
+        // 層0の候補を payload で再スコアし、present + 世代照合 (+ フィルタ) を通したものだけ top-k へ。
         var heap = new VectorKnnHeap(k);
         var buf = ArrayPool<float>.Shared.Rent(_dim);
         try
@@ -243,6 +245,7 @@ internal sealed class HnswIndex
             var dest = buf.AsSpan(0, _dim);
             foreach (var c in w)
             {
+                if (inFilter is not null && !inFilter(c.Seq)) continue;
                 if (!_payload.TryGet(c.Seq, dest, out var gen)) continue;
                 if (!isLive(c.Seq, gen)) continue;
                 heap.Offer(new VectorSearchResult(kind, c.Seq, VectorMetrics.Score(_metric, query, dest)));

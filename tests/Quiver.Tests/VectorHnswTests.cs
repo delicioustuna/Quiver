@@ -43,11 +43,27 @@ public sealed class VectorHnswTests : IDisposable
         }
     }
 
+    private static float Cosine(float[] a, float[] b)
+    {
+        double dot = 0, na = 0, nb = 0;
+        for (int i = 0; i < a.Length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+        double denom = Math.Sqrt(na) * Math.Sqrt(nb);
+        return denom == 0 ? 0f : (float)(dot / denom);
+    }
+
+    // 真の brute force top-k (seq = corpus index)。
+    private static List<long> BruteTopK(IReadOnlyList<float[]> corpus, float[] query, int k)
+        => Enumerable.Range(0, corpus.Count)
+            .Select(i => (Seq: (long)i, Score: Cosine(query, corpus[i])))
+            .OrderByDescending(x => x.Score).ThenBy(x => x.Seq)
+            .Take(k).Select(x => x.Seq).ToList();
+
     [Fact]
     public void Hnsw_recall_is_high_versus_bruteforce()
     {
         const int Dim = 32, N = 1000, K = 10, Queries = 20;
         var rng = new Random(12345);
+        var corpus = new List<float[]>(N);
 
         using var db = GraphDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
@@ -58,8 +74,10 @@ public sealed class VectorHnswTests : IDisposable
         {
             for (int i = 0; i < N; i++)
             {
+                var v = RandomVec(rng, Dim);
+                corpus.Add(v);
                 var n = tx.CreateNode("Doc");
-                db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, RandomVec(rng, Dim));
+                db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -69,9 +87,8 @@ public sealed class VectorHnswTests : IDisposable
         {
             var q = RandomVec(rng, Dim);
             var hnsw = TopK(db.Vectors.KnnSearch(IndexName, q, K), K);
-            // brute-force 基準 = flat scan (KnnSearchBatch)。
-            var brute = TopK(db.Vectors.KnnSearchBatch(
-                IndexName, new[] { (ReadOnlyMemory<float>)q.AsMemory() }, K)[0], K);
+            // 真の brute force (テスト内で全件を直接スコア)。HNSW ではなく独立計算。
+            var brute = BruteTopK(corpus, q, K);
 
             int overlap = hnsw.Count(x => brute.Contains(x));
             totalRecall += overlap / (double)K;
