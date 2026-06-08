@@ -1,7 +1,7 @@
 namespace Quiver.Migrations;
 
 /// <summary>
-/// OP-4: 宣言的スキーママイグレーション。EF Core 風に <see cref="Version"/> の昇順で適用される。
+/// 宣言的スキーママイグレーション。EF Core 風に <see cref="Version"/> の昇順で適用される。
 /// </summary>
 /// <remarks>
 /// 各マイグレーションは <see cref="GraphDatabase.MigrateAsync"/> に渡され、未適用のものだけが

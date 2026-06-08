@@ -73,10 +73,15 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     IGraphAccessMethods Access { get; }
 }
 
+/// <summary>トランザクションのライフサイクル状態。</summary>
 public enum TransactionState : byte
 {
+    /// <summary>実行中 (読み書き可能)。</summary>
     Active = 1,
+    /// <summary>コミット準備中 (prepare フェーズ)。</summary>
     Preparing = 2,
+    /// <summary>コミット済み。</summary>
     Committed = 3,
+    /// <summary>ロールバック済み。</summary>
     Aborted = 4,
 }

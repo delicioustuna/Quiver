@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Logical;
 
 /// <summary>
-/// BA-7 helper that re-applies a captured <see cref="LogicalMutation"/> stream
+/// Helper that re-applies a captured <see cref="LogicalMutation"/> stream
 /// against a fresh <see cref="IGraphTransaction"/>. Node and relationship ids
 /// are remapped on the fly because the target database assigns its own ids —
 /// callers can supply pre-seeded maps to chain multiple replay passes.

@@ -1,8 +1,8 @@
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// GC-5: MERGE-time value comparison. Two <see cref="PropertyValue"/>s match
-/// when they represent the "same scalar" in the Cypher sense:
+/// MERGE 時の値比較。2 つの <see cref="PropertyValue"/> は Cypher の意味で「同じスカラ」を
+/// 表すときに一致する:
 /// Bool/Int32/Int64 are interchangeable (all carry an integer scalar), Double
 /// matches Double bit-exact (NaN never matches NaN, consistent with Cypher),
 /// and String / Bytes match by byte-sequence equality. Type mismatch across
@@ -10,6 +10,7 @@ namespace Quiver.Storage.Records;
 /// </summary>
 public static class PropertyValueEqualityHelper
 {
+    /// <summary>2 つのプロパティ値が MERGE の意味で等しいかを判定する。</summary>
     public static bool AreEqual(in PropertyValue a, in PropertyValue b)
     {
         var ta = a.Type;

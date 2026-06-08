@@ -1,7 +1,7 @@
 namespace Quiver.Transactions;
 
 /// <summary>
-/// FT-28: チェックポイント threshold の運用ポリシー。
+/// チェックポイント threshold の運用ポリシー。
 /// </summary>
 public enum CheckpointPolicy
 {
@@ -17,7 +17,7 @@ public enum CheckpointPolicy
 }
 
 /// <summary>
-/// FT-28: Adaptive ポリシー時のチェックポイント threshold を計算するコントローラ。
+/// Adaptive ポリシー時のチェックポイント threshold を計算するコントローラ。
 ///
 /// モデル:
 ///   <c>recommended = clamp(Min, Max, TargetBytes_RecoveryBound × BaselineBytesPerTx / observed_avg_bytes_per_tx)</c>

@@ -44,7 +44,7 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     bool NodeExists(NodeId nodeId);
 
     /// <summary>
-    /// GC-5: Cypher の <c>MERGE (n:label {matchKey: matchValue})</c> 相当 —
+    /// Cypher の <c>MERGE (n:label {matchKey: matchValue})</c> 相当 —
     /// <paramref name="label"/> を持ち、<paramref name="matchKey"/> が
     /// <paramref name="matchValue"/> と等しいノードが存在すればその ID を返す。
     /// 存在しなければ新規ノードを確保してマッチプロパティをセットし、その ID を返す。
@@ -133,7 +133,7 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     // ── ARCH-6: ベクトル (tx 配下) ────────────────────────────────
 
     /// <summary>
-    /// ARCH-6: このトランザクション境界の内側でベクトルを set / 上書きする。書き込みは
+    /// このトランザクション境界の内側でベクトルを set / 上書きする。書き込みは
     /// グラフ変更と同じ container WAL に乗り、<see cref="Commit"/> で原子確定、
     /// <see cref="Rollback"/> / クラッシュで巻き戻る (グラフ変更と原子整合)。
     /// バインドキーは <paramref name="entityId"/> の Sequence。永続化に対応しないバックエンド
@@ -143,7 +143,7 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
         => throw new NotSupportedException("This backend does not support transaction-scoped SetVector.");
 
     /// <summary>
-    /// ARCH-6: このトランザクション境界の内側でベクトルを論理削除する。原子性は
+    /// このトランザクション境界の内側でベクトルを論理削除する。原子性は
     /// <see cref="SetVector"/> と同じ。永続化に対応しないバックエンドでは <see cref="NotSupportedException"/>。
     /// </summary>
     void RemoveVector(EntityKind kind, long entityId, string indexName)
@@ -162,7 +162,7 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     // ── FT-23: Savepoint / nested undo ────────────────────────────────
 
     /// <summary>
-    /// FT-23: トランザクション内に savepoint を作成し識別子を返す。
+    /// トランザクション内に savepoint を作成し識別子を返す。
     /// <see cref="RollbackTo"/> でこの時点まで部分的に巻き戻したり、
     /// <see cref="ReleaseSavepoint"/> で親スコープへマージしたりできる。Nested savepoint 可。
     /// </summary>
@@ -175,13 +175,13 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     SavepointId Savepoint(string? name = null);
 
     /// <summary>
-    /// FT-23: 指定 savepoint 以降の変更を巻き戻す。Savepoint は消費されず、続けて
+    /// 指定 savepoint 以降の変更を巻き戻す。Savepoint は消費されず、続けて
     /// 別の変更を行ったあと再度 <see cref="RollbackTo"/> できる。
     /// </summary>
     void RollbackTo(SavepointId savepoint);
 
     /// <summary>
-    /// FT-23: 指定 savepoint を解放し、その savepoint 以降の変更を親スコープへマージする。
+    /// 指定 savepoint を解放し、その savepoint 以降の変更を親スコープへマージする。
     /// 解放後は当該 SavepointId は無効。
     /// </summary>
     void ReleaseSavepoint(SavepointId savepoint);

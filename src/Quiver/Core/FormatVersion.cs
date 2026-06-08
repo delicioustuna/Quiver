@@ -63,15 +63,19 @@ internal static class FormatVersion
 }
 
 /// <summary>
-/// FT-26: 期待しないフォーマットバージョンの DB を open したときに throw する。
-/// develop 段階で v1 → v2 への自動マイグレーションを提供しないため、旧 DB は新規作成し直す必要がある。
+/// 期待しないフォーマットバージョンの DB を open したときに throw する。
+/// 未リリース段階では自動マイグレーションを提供しないため、旧 DB は新規作成し直す必要がある。
 /// </summary>
 public sealed class FormatVersionMismatchException : GraphDbException
 {
+    /// <summary>ファイルに記録されていたフォーマットバージョン。</summary>
     public byte Found { get; }
+    /// <summary>このビルドが要求するフォーマットバージョン。</summary>
     public byte Expected { get; }
+    /// <summary>不一致が検出されたファイル種別の名称。</summary>
     public string FileKind { get; }
 
+    /// <summary>ファイル種別 / 検出バージョン / 期待バージョンを指定して例外を生成する。</summary>
     public FormatVersionMismatchException(string fileKind, byte found, byte expected)
         : base($"Format version mismatch on {fileKind}: file is v{found}, this build requires v{expected}. " +
                "Pre-release breaking change (FT-26 MVCC). Recreate the database from source data.")

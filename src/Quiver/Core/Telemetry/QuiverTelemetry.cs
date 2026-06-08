@@ -4,7 +4,7 @@ using System.Diagnostics.Metrics;
 namespace Quiver.Telemetry;
 
 /// <summary>
-/// OB-1: Quiver 全体の OpenTelemetry 計装ポイント。
+/// Quiver 全体の OpenTelemetry 計装ポイント。
 /// <c>System.Diagnostics.ActivitySource</c> / <c>System.Diagnostics.Metrics.Meter</c>
 /// は BCL に含まれており、ここでは OpenTelemetry SDK への依存を持たない。
 /// <c>Quiver.OpenTelemetry</c> パッケージが本クラスが公開する Source / Meter 名を

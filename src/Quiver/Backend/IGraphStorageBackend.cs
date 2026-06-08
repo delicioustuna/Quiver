@@ -23,7 +23,7 @@ public interface IGraphStorageBackend : IDisposable
     IDiagnosticsApi Diagnostics { get; }
 
     /// <summary>
-    /// VEC-5: <see cref="IGraphAccessMethods.KnnSearch"/> が利用するベクトルストア。
+    /// <see cref="IGraphAccessMethods.KnnSearch"/> が利用するベクトルストア。
     /// ユーザにも <c>CreateVectorIndex</c> / <c>SetVector</c> 用に公開される。
     /// ベクトルの永続化に未対応のバックエンド (バイナリ、SQLite MVP) ではインメモリストアが既定。
     /// </summary>
@@ -36,7 +36,7 @@ public interface IGraphStorageBackend : IDisposable
     IGraphTransaction BeginGraphTransaction(IsolationLevel level, bool readOnly);
 
     /// <summary>
-    /// OP-1: 書き込みを止めずに <paramref name="targetDirectory"/> に
+    /// 書き込みを止めずに <paramref name="targetDirectory"/> に
     /// クラッシュ整合なライブスナップショットを取る。
     /// 既定実装は <see cref="NotSupportedException"/>。
     ///
@@ -51,7 +51,7 @@ public interface IGraphStorageBackend : IDisposable
             "CreateSnapshot is not supported by this backend.");
 
     /// <summary>
-    /// OP-3: dead version の物理回収 / free list 圧縮を行う vacuum を実行する。
+    /// dead version の物理回収 / free list 圧縮を行う vacuum を実行する。
     /// 既定実装は <see cref="NotSupportedException"/>。バイナリバックエンドのみ実装。
     /// </summary>
     VacuumReport Vacuum(VacuumOptions? options = null)

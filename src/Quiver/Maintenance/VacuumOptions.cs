@@ -1,7 +1,7 @@
 namespace Quiver.Maintenance;
 
 /// <summary>
-/// OP-3 vacuum 実行ポリシー。
+/// vacuum 実行ポリシー。
 /// </summary>
 public enum VacuumPolicy
 {
@@ -12,7 +12,7 @@ public enum VacuumPolicy
 }
 
 /// <summary>
-/// OP-3 vacuum 実行モード。
+/// vacuum 実行モード。
 /// </summary>
 public enum VacuumMode
 {
@@ -27,7 +27,7 @@ public enum VacuumMode
 }
 
 /// <summary>
-/// OP-3 vacuum オプション。
+/// vacuum オプション。
 /// </summary>
 public sealed class VacuumOptions
 {
@@ -46,20 +46,26 @@ public sealed class VacuumOptions
     public VacuumTarget Targets { get; init; } = VacuumTarget.All;
 }
 
-/// <summary>OP-3: vacuum 対象エンティティの指定。複数ビット同時指定可。</summary>
+/// <summary>vacuum 対象エンティティの指定。複数ビット同時指定可。</summary>
 [System.Flags]
 public enum VacuumTarget
 {
+    /// <summary>対象なし。</summary>
     None = 0,
+    /// <summary>ノードを対象にする。</summary>
     Nodes = 1 << 0,
+    /// <summary>リレーションシップを対象にする。</summary>
     Relationships = 1 << 1,
+    /// <summary>プロパティを対象にする。</summary>
     Properties = 1 << 2,
+    /// <summary>索引を対象にする。</summary>
     Indexes = 1 << 3,
+    /// <summary>すべてのエンティティ種別を対象にする。</summary>
     All = Nodes | Relationships | Properties | Indexes,
 }
 
 /// <summary>
-/// OP-3 vacuum 実行結果。
+/// vacuum 実行結果。
 /// </summary>
 /// <param name="ReclaimedNodes">物理回収した dead ノード版数。</param>
 /// <param name="ReclaimedRelationships">物理回収した dead リレーションシップ版数 (MVP は 0)。</param>
@@ -68,8 +74,8 @@ public enum VacuumTarget
 /// <param name="ElapsedMs">実行に要した時間 (ミリ秒)。</param>
 /// <param name="HorizonTxId">この実行で採用した visibility horizon。これ未満の xmax を持つ dead version が回収対象。</param>
 /// <param name="Skipped">前提 (アクティブ tx 0) を満たせず未実行のとき true。</param>
-/// <param name="TruncatedPages">OP-5: 物理 truncate で nodes/rels/props 3 ストア合計から削減したページ数。</param>
-/// <param name="ReclaimedColumnVersions">ARCH-5c Phase 5e: 列 (opt-in) の delta から merge した超過版数。</param>
+/// <param name="TruncatedPages">物理 truncate で nodes/rels/props 3 ストア合計から削減したページ数。</param>
+/// <param name="ReclaimedColumnVersions">列 (opt-in) の delta から merge した超過版数。</param>
 public sealed record VacuumReport(
     int ReclaimedNodes,
     int ReclaimedRelationships,

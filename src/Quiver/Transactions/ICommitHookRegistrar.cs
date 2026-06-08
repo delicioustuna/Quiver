@@ -2,7 +2,7 @@ namespace Quiver.Transactions;
 
 /// <summary>
 /// トランザクションの結果が永続化された後 (コミット時) またはロールバック後に発火するコールバックを
-/// 登録するインタフェース。VEC-3 向けに設計され、埋め込みパイプライン / キャッシュ無効化 /
+/// 登録するインタフェース。埋め込みパイプライン / キャッシュ無効化 /
 /// 監査ログ送出などをトランザクション内部に結合せずにコミット完了へフックできるようにする。
 /// 汎用設計 — 埋め込み専用ではない。
 /// </summary>
@@ -18,7 +18,7 @@ namespace Quiver.Transactions;
 /// </list>
 /// クラッシュリカバリのシナリオ: WAL fsync 後・フック発火前にプロセスが死ぬとフックは失われる。
 /// at-least-once 配送が必要な呼び出し側 (例: 埋め込みタスクキュー投入) は起動時スキャンで
-/// 再調整すること — VEC-4 の <c>ScanAndEnqueueAsync</c> を参照。
+/// 再調整すること — 埋め込みパイプラインの <c>ScanAndEnqueueAsync</c> を参照。
 /// </remarks>
 public interface ICommitHookRegistrar
 {

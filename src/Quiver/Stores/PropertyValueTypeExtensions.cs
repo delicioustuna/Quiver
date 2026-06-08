@@ -3,8 +3,7 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// Branchless lookup from <see cref="PropertyValueType"/> to <see cref="PropertyTypeFlags"/>.
-/// BA-8.
+/// <see cref="PropertyValueType"/> から <see cref="PropertyTypeFlags"/> への分岐なしルックアップ。
 /// </summary>
 public static class PropertyValueTypeExtensions
 {
@@ -23,6 +22,7 @@ public static class PropertyValueTypeExtensions
         PropertyTypeFlags.None,    // 7 (reserved)
     ];
 
+    /// <summary>プロパティ値型を対応する <see cref="PropertyTypeFlags"/> ビットへ変換する。</summary>
     public static PropertyTypeFlags ToFlags(this PropertyValueType type)
     {
         uint i = (uint)type;

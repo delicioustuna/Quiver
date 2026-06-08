@@ -1,7 +1,7 @@
 namespace Quiver.Core;
 
 /// <summary>
-/// VEC-6: <c>IGraphAccessMethods.KnnSearchFiltered</c> の所属判定側として使う、
+/// <c>IGraphAccessMethods.KnnSearchFiltered</c> の所属判定側として使う、
 /// 事前計算済みのエンティティ ID 集合。graph-first プランが (label / property / 近傍マッチによる)
 /// 候補 frontier を vector access path に渡すことで、ベクトルインデックスを関連ノードだけに
 /// スコアリング対象を絞ることができる。
@@ -29,7 +29,7 @@ public sealed class EntityCandidateSet
     public int Count => _ids.Count;
 
     /// <summary>
-    /// VEC-8: 候補 ID の列挙。in-memory backend が gather パス
+    /// 候補 ID の列挙。in-memory backend が gather パス
     /// (candidate ID を直接ルックアップ) を取れるよう露出する。順序は保証しない。
     /// </summary>
     public IEnumerable<long> Ids => _ids;

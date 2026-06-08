@@ -1,7 +1,7 @@
 namespace Quiver.Logical;
 
 /// <summary>
-/// BA-7 / codex_advice_3 8 節。<see cref="LogicalMutation"/> の判別子。
+/// <see cref="LogicalMutation"/> の判別子。
 /// <see cref="IGraphTransaction"/> の公開ミューテーション API と対応する。
 /// </summary>
 public enum LogicalMutationKind : byte

@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Migrations;
 
 /// <summary>
-/// OP-4: <see cref="IMigration.ApplyAsync"/> / <see cref="IMigration.RevertAsync"/> に渡される
+/// <see cref="IMigration.ApplyAsync"/> / <see cref="IMigration.RevertAsync"/> に渡される
 /// 操作面。スキーマ rename / 索引 add/drop / ノード走査を declarative にラップする。
 /// </summary>
 /// <remarks>

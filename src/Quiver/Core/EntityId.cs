@@ -2,8 +2,8 @@ namespace Quiver.Core;
 
 /// <summary>
 /// <see cref="EntityId"/> がどのエンティティ種別を指すかを示すタグ。
-/// ベクトルストア (VEC-1; codex_advice_3.md 6.2 節 — Node / Relationship を利用) と、
-/// 内部タグ付き ID API (FT-11; codex_advice_3.md 7.1 節 — 診断 / カタログ用に Property を追加) で共有する。
+/// ベクトルストア (Node / Relationship を利用) と、
+/// 内部タグ付き ID API (診断 / カタログ用に Property を追加) で共有する。
 /// </summary>
 public enum EntityKind : byte
 {

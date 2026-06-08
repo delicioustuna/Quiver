@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// PW-15. Reference graph-algorithm kernels that operate against an
+/// Reference graph-algorithm kernels that operate against an
 /// <see cref="IGraphSnapshotView"/>. These exist to validate the snapshot
 /// API surface — they intentionally do the simplest correct thing rather
 /// than chasing the lowest-allocation variant.

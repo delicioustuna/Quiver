@@ -1,7 +1,7 @@
 namespace Quiver.Transactions;
 
 /// <summary>
-/// FT-23: トランザクション内のセーブポイントを識別する不変ハンドル。
+/// トランザクション内のセーブポイントを識別する不変ハンドル。
 /// <see cref="ITransaction.Savepoint"/> が発行し、<see cref="ITransaction.RollbackTo"/> /
 /// <see cref="ITransaction.ReleaseSavepoint"/> のターゲットとして渡す。
 /// 異なるトランザクション間や、解放/ロールバック後の savepoint id を使うと

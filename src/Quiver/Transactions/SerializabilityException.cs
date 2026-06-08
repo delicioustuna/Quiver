@@ -4,7 +4,7 @@ using Quiver.Core;
 namespace Quiver.Transactions;
 
 /// <summary>
-/// FT-33: <see cref="IsolationLevel.Serializable"/> のトランザクションが SSN (Serial Safety Net) の
+/// <see cref="IsolationLevel.Serializable"/> のトランザクションが SSN (Serial Safety Net) の
 /// exclusion window 検証 (π(T) &gt; η(T)) に違反したときに投げられる例外。
 ///
 /// <para>SSN は serializable 違反 (write skew / dangerous structure / read-only anomaly 等) を
@@ -16,7 +16,7 @@ namespace Quiver.Transactions;
 /// <para>並列モデルは <see cref="DeadlockException"/> と同様 (<see cref="GraphDbException"/> 派生、
 /// 犠牲 tx の識別子を保持)。</para>
 ///
-/// <para>DOC-2: SSN ベースの Serializable 分離は評価中のため <c>[Experimental("QUIVER001")]</c> 指定。
+/// <para>SSN ベースの Serializable 分離は評価中のため <c>[Experimental("QUIVER001")]</c> 指定。
 /// SemVer の安定性保証対象外 (docs/api-stability.md §5)。</para>
 /// </summary>
 [Experimental("QUIVER001")]

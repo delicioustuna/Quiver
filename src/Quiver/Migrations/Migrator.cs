@@ -1,7 +1,7 @@
 namespace Quiver.Migrations;
 
 /// <summary>
-/// OP-4: <see cref="GraphDatabase.MigrateAsync"/> から呼ばれるオーケストレータ。
+/// <see cref="GraphDatabase.MigrateAsync"/> から呼ばれるオーケストレータ。
 /// 未適用マイグレーションを <see cref="IMigration.Version"/> 昇順 → <see cref="IMigration.Id"/>
 /// Ordinal 昇順で並べ、それぞれ独立した tx で適用する。
 /// </summary>
@@ -85,7 +85,7 @@ internal static class Migrator
 }
 
 /// <summary>
-/// OP-4: <see cref="GraphDatabase.MigrateAsync"/> の結果。新規適用 / スキップの内訳を返す。
+/// <see cref="GraphDatabase.MigrateAsync"/> の結果。新規適用 / スキップの内訳を返す。
 /// </summary>
 /// <param name="Applied">この呼び出しで新規適用されたマイグレーション。</param>
 /// <param name="Skipped">既に <see cref="MigrationHistory"/> にあったため skip した ID。</param>

@@ -5,8 +5,8 @@ namespace Quiver.Core;
 /// インデックス / 統計の hot path で使われ、述語評価とインデックス参照が
 /// 型互換でない値をマテリアライズせずに排除できるようにする。
 ///
-/// BA-8。Array 系ビットは将来の LPG 配列プロパティ用に予約。埋め込みベクトルはここでは
-/// 表現しない (詳細は <c>IVectorStore</c> / VEC-1 を参照)。
+/// Array 系ビットは将来の LPG 配列プロパティ用に予約。埋め込みベクトルはここでは
+/// 表現しない (詳細は <c>IVectorStore</c> を参照)。
 /// </summary>
 [Flags]
 public enum PropertyTypeFlags : ulong

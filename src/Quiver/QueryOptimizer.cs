@@ -29,7 +29,7 @@ internal enum ScanKind
 /// <summary>
 /// オプティマイザが推奨できる展開ストラテジ。バックエンドの
 /// <c>IGraphAccessMethods.Expand</c> 実装はこのヒントを無視して独自の access path を
-/// 選ぶ自由がある。PW-17 で本格的なプランディスパッチを追加する。
+/// 選ぶ自由がある。本格的なプランディスパッチを追加する。
 /// </summary>
 internal enum ExpandStrategy
 {
@@ -37,7 +37,7 @@ internal enum ExpandStrategy
     AdjacencyBlock = 1,
     /// <summary>隣接ブロック fast path を使わず、リレーションシップリンクリスト (チェーン) を辿る。</summary>
     LinkedListChain = 2,
-    /// <summary>PW-17 用に予約: シーケンシャルリレーションシップスキャン + frontier ビットセット probe。</summary>
+    /// <summary>予約: シーケンシャルリレーションシップスキャン + frontier ビットセット probe。</summary>
     RelationshipScan = 3,
 }
 
@@ -187,7 +187,7 @@ internal sealed class QueryOptimizer
         => SelectExpandPlan(sourceLabel, typeFilter, direction, frontierSize: null);
 
     /// <summary>
-    /// PW-17: 既知の <paramref name="frontierSize"/> から 1 ホップ展開向けに
+    /// 既知の <paramref name="frontierSize"/> から 1 ホップ展開向けに
     /// <see cref="ExpandStrategy"/> を選ぶ。<c>frontierSize * fanOut</c> がリレーションシップストアの
     /// 大部分に触れる見込みなら <see cref="ExpandStrategy.RelationshipScan"/> を、それ以外は
     /// <see cref="ExpandStrategy.AdjacencyBlock"/> (バイナリバックエンドはブロック未保有ノードでは
@@ -219,13 +219,13 @@ internal sealed class QueryOptimizer
     // ---- PW-12: 述語順最適化 ----
 
     /// <summary>
-    /// PW-12: 述語に紐付くヒント。<paramref name="EstimatedMatchingRows"/> はプランナによる
+    /// 述語に紐付くヒント。<paramref name="EstimatedMatchingRows"/> はプランナによる
     /// 「この述語が残す入力行数」の推定値で、値が小さいほど選択的なので先に評価すべき。
     /// </summary>
     public readonly record struct PredicateCandidate(IPredicate Predicate, long EstimatedMatchingRows);
 
     /// <summary>
-    /// PW-12: 推定マッチ行数の昇順で述語を並び替え、<see cref="BitmapFilterOperator"/> 内で
+    /// 推定マッチ行数の昇順で述語を並び替え、<see cref="BitmapFilterOperator"/> 内で
     /// 最も選択的な述語が先に評価されるようにする。タイブレークは安定順序を維持する。
     /// </summary>
     public static IReadOnlyList<IPredicate> OrderPredicatesBySelectivity(
@@ -246,7 +246,7 @@ internal sealed class QueryOptimizer
     }
 
     /// <summary>
-    /// PW-12: <see cref="OrderPredicatesBySelectivity"/> で並び替えた述語列を持つ
+    /// <see cref="OrderPredicatesBySelectivity"/> で並び替えた述語列を持つ
     /// <see cref="BitmapFilterOperator"/> を構築する。選択度推定はオプティマイザの自由で、
     /// 述語毎統計を持たない呼び出し側は <c>EstimatedMatchingRows</c>=0 を渡して入力順を維持できる。
     /// </summary>
@@ -282,7 +282,7 @@ internal sealed class QueryOptimizer
     private const double KnnGraphFirstFraction = 0.05;
 
     /// <summary>
-    /// VEC-6: クエリに KNN とグラフ制約の両方が現れるとき、vector-first / graph-first /
+    /// クエリに KNN とグラフ制約の両方が現れるとき、vector-first / graph-first /
     /// hybrid rerank を選ぶ。オペレータはどちらの順序も正しく処理できるため、
     /// オプティマイザが誤っても結果は正しいが、適切な選択により無駄なスコアリングを大幅に削減できる。
     /// </summary>
@@ -335,7 +335,7 @@ internal sealed class QueryOptimizer
 }
 
 /// <summary>
-/// VEC-6: グラフ制約と KNN の評価順を表すストラテジ。vector-first は KNN top-k を取ってから
+/// グラフ制約と KNN の評価順を表すストラテジ。vector-first は KNN top-k を取ってから
 /// フィルタを適用、graph-first は候補集合を計算してから KNN-within-set を求め、
 /// hybrid は将来のスコアリランクプラン拡張点として予約。
 /// </summary>

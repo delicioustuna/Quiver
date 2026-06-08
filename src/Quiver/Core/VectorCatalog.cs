@@ -2,8 +2,8 @@ namespace Quiver.Core;
 
 /// <summary>
 /// 1 件の (entity, index, provider) に対する埋め込みジョブのライフサイクル状態。
-/// <c>Quiver.Embedding</c> (VEC-4) のヘルパ側 enum と対応しており、ヘルパが
-/// バック参照無しでカタログを問い合わせられるようにする。VEC-2。
+/// <c>Quiver.Embedding</c> のヘルパ側 enum と対応しており、ヘルパが
+/// バック参照無しでカタログを問い合わせられるようにする。
 /// </summary>
 public enum EmbeddingTaskState : byte
 {
@@ -53,7 +53,7 @@ public sealed record EmbeddingTaskRecord(
 /// ベクトルインデックスと埋め込みタスクライフサイクルの永続メタデータ。カタログは
 /// <see cref="VectorIndexSpec"/> 定義とエンティティ別タスクレコードを保持する。
 /// 実際のベクトル payload と ANN インデックスは別の場所 (バイナリサイドカー / 将来の ANN バックエンド) に
-/// 持つ — 詳細は codex_advice_3.md 6.5 節。VEC-2。
+/// 持つ — 詳細は codex_advice_3.md 6.5 節。
 /// </summary>
 public interface IVectorCatalog
 {

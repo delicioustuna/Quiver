@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// PW-15 / codex_advice_3 7.7 節。アルゴリズム向けの読み取り専用グラフスナップショット。
+/// アルゴリズム向けの読み取り専用グラフスナップショット。
 /// 現在の隣接状態を CSR (out 用 compressed sparse row) と CSC (in 用 compressed sparse column)
 /// 配列にマテリアライズすることで、PageRank・Louvain・繰り返し BFS / 最短経路など多パス系
 /// アルゴリズムが、ページチェーン隣接ブロックに対する呼び出し毎カーソルではなく

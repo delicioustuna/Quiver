@@ -3,13 +3,13 @@ using Quiver.Core;
 namespace Quiver;
 
 /// <summary>
-/// PW-16 / codex_advice_3 7.5 節。<see cref="GraphStats"/> を裏で支える 2 層の
+/// <see cref="GraphStats"/> を裏で支える 2 層の
 /// ノード毎 degree lookup。観測された <c>NodeId</c> 空間が密
 /// (<c>maxNodeId / nodeCount &lt;= DenseThreshold</c>) な場合は
 /// <c>NodeId.Value</c> をインデックスとする direct 配列 + ノード毎 1 ビットの
 /// パワーノードフラグを使い、ボクシング無し・辞書チェーンウォーク無しで <c>O(1)</c> 参照を行う。
 /// ID 空間が疎な場合は、パワーノードエントリのみをマテリアライズするノード毎辞書に
-/// フォールバックする (PW-16 以前のメモリフットプリントを維持)。
+/// フォールバックする (従来のメモリフットプリントを維持)。
 /// </summary>
 public sealed class NodeDegreeLookup
 {

@@ -1,7 +1,7 @@
 namespace Quiver.Transactions;
 
 /// <summary>
-/// FT-24: ロック取得モード。<see cref="LockManager"/> に渡す。
+/// ロック取得モード。<see cref="LockManager"/> に渡す。
 /// </summary>
 public enum LockMode : byte
 {
@@ -12,7 +12,7 @@ public enum LockMode : byte
 }
 
 /// <summary>
-/// FT-24: <see cref="Quiver.GraphDatabaseOptions"/> のロック戦略。
+/// <see cref="Quiver.GraphDatabaseOptions"/> のロック戦略。
 /// <see cref="ExclusiveOnly"/> は読み取りロック無し (現挙動の互換維持)、
 /// <see cref="ReaderWriter"/> は read を <see cref="LockMode.Shared"/> で取り writer と分離する。
 /// </summary>

@@ -1,11 +1,11 @@
 namespace Quiver.Core;
 
 /// <summary>
-/// VEC-4 ヘルパーが利用する軽量な (kind, id) ハンドル。上位アセンブリから
+/// 埋め込みパイプラインのヘルパーが利用する軽量な (kind, id) ハンドル。上位アセンブリから
 /// <c>NodeId</c> / <c>RelationshipId</c> を引き込まずに、ノードとリレーションシップで
 /// 同じ列挙 / 参照形状を共有できるようにする。<see cref="Id"/> は slot 局所 ID (Sequence)。
 ///
-/// <para>ARCH-5b: 物理 ID の統一パック表現 (Kind4/Gen16/Seq44) の静的 packing メソッド
+/// <para>物理 ID の統一パック表現 (Kind4/Gen16/Seq44) の静的 packing メソッド
 /// (<see cref="Pack"/> / <see cref="PackLocal"/> / <see cref="Sequence"/> / <see cref="Generation"/> /
 /// <see cref="UnpackKind"/>) を本型に集約した (旧 <c>GenerationalRef</c> を吸収)。</para>
 /// </summary>
@@ -14,7 +14,7 @@ public readonly partial record struct EntityRef(EntityKind Kind, long Id);
 /// <summary>
 /// <c>Quiver.Embedding</c> ヘルパが直接 <c>Quiver.GraphDatabase</c> に依存せずに済むための薄い抽象。
 /// アダプタを介することで、ヘルパはエンジン内部実装から疎結合に保たれる
-/// — 詳細は codex_advice_3.md 6.6 節 / 6.8 節 (VEC-4)。
+/// — 詳細は codex_advice_3.md 6.6 節 / 6.8 節。
 /// </summary>
 /// <remarks>
 /// エンジンはベクトルストア・ベクトルカタログ、およびスキャン / バックフィル経路 (Z') 用の

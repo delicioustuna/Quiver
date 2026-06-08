@@ -3,12 +3,17 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Quiver.SourceGen;
 
+/// <summary>
+/// <c>[Relationship&lt;TSource, TTarget&gt;]</c> 属性付きクラスから型付きリレーションシップ実装を
+/// 生成するソースジェネレータ。
+/// </summary>
 [Generator]
 public sealed class GraphRelationshipGenerator : IIncrementalGenerator
 {
     private const string RelationshipAttributeFqn = "Quiver.Api.RelationshipAttribute`2";
     private const string PropertyAttributeFqn = "Quiver.Api.PropertyAttribute";
 
+    /// <summary>生成パイプラインを登録する (<see cref="IIncrementalGenerator"/> 実装)。</summary>
     public void Initialize(IncrementalGeneratorInitializationContext ctx)
     {
         var provider = ctx.SyntaxProvider

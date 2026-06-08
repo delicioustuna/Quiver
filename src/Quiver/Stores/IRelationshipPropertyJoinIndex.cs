@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// FT-12 / codex_advice_3 §7.3. SID-style join index from
+/// SID-style join index from
 /// <see cref="RelationshipId"/> to a scalar property value. Built once and
 /// kept alongside a snapshot so weighted traversals, edge filters, and
 /// algorithm kernels can resolve <c>edge.weight</c> without walking the

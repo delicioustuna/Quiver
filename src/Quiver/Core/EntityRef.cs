@@ -1,7 +1,7 @@
 namespace Quiver.Core;
 
 /// <summary>
-/// ARCH-5b: 物理 ID の統一パック表現。ARCH-3 の <c>GenerationalRef</c> を吸収し、
+/// 物理 ID の統一パック表現。旧 <c>GenerationalRef</c> を吸収し、
 /// 索引値レーン・ベクトル binding キー・外部往復 ID と、論理 ID 構造体
 /// (<see cref="NodeId"/> / <see cref="RelationshipId"/> / <see cref="PropertyId"/>) の
 /// 内部 <c>Value</c> を、ただ一つの packing 規約に集約する。

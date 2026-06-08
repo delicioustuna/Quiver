@@ -3,7 +3,7 @@ using System.Text;
 namespace Quiver.Migrations;
 
 /// <summary>
-/// OP-4: 適用済みマイグレーションの永続記録。tab 区切りテキスト 1 行 / 1 エントリで
+/// 適用済みマイグレーションの永続記録。tab 区切りテキスト 1 行 / 1 エントリで
 /// <c>&lt;DataDirectory&gt;/migrations.history</c> に保存する。
 /// 形式: <c>Id\tVersion\tAppliedAtUtcIso\n</c>
 /// </summary>
@@ -89,5 +89,5 @@ internal sealed class MigrationHistory
     private static string Unescape(string s) => s.Replace("\\n", "\n").Replace("\\t", "\t").Replace("\\\\", "\\");
 }
 
-/// <summary>OP-4: 適用済みマイグレーション 1 件の記録。</summary>
+/// <summary>適用済みマイグレーション 1 件の記録。</summary>
 public sealed record MigrationHistoryEntry(string Id, int Version, DateTime AppliedAtUtc);

@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Logical;
 
 /// <summary>
-/// BA-7 / codex_advice_3 §8. Receives the logical mutation stream of a
+/// Receives the logical mutation stream of a
 /// committed transaction. The sink fires exactly once per successful commit,
 /// after the underlying physical durability boundary (binary backend: WAL flush;
 /// SQLite backend: <c>COMMIT</c>) has returned successfully. Rolled-back
@@ -21,7 +21,7 @@ namespace Quiver.Logical;
 /// Exceptions raised by the sink are swallowed: a faulty audit sink must not
 /// be allowed to mask a successful commit. Sinks that need at-least-once
 /// delivery should persist before returning and use their own reconciliation
-/// at startup (see VEC-4 for the analogous embedding pattern).
+/// at startup.
 /// </para>
 /// </remarks>
 public interface ILogicalMutationSink

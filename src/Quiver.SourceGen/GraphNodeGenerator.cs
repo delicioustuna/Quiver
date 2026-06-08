@@ -3,6 +3,9 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Quiver.SourceGen;
 
+/// <summary>
+/// <c>[Node]</c> 属性付きクラスから <c>IGraphNode&lt;T&gt;</c> の CRUD 実装を生成するソースジェネレータ。
+/// </summary>
 [Generator]
 public sealed class GraphNodeGenerator : IIncrementalGenerator
 {
@@ -10,6 +13,7 @@ public sealed class GraphNodeGenerator : IIncrementalGenerator
     private const string PropertyAttributeFqn = "Quiver.Api.PropertyAttribute";
     private const string IndexedAttributeFqn = "Quiver.Api.IndexedAttribute";
 
+    /// <summary>生成パイプラインを登録する (<see cref="IIncrementalGenerator"/> 実装)。</summary>
     public void Initialize(IncrementalGeneratorInitializationContext ctx)
     {
         var provider = ctx.SyntaxProvider

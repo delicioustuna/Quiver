@@ -3,19 +3,17 @@ using System.Threading;
 namespace Quiver.Core;
 
 /// <summary>
-/// Reference flat-scan <see cref="IVectorStore"/>. Holds every vector in a
-/// per-index dictionary keyed by <c>(EntityKind, EntityId)</c> and scores every
-/// stored vector against the query on each <see cref="KnnSearch"/>.
-/// VEC-1.
+/// 全件フラットスキャンの参照 <see cref="IVectorStore"/>。全ベクトルをインデックス毎の辞書に
+/// <c>(EntityKind, EntityId)</c> をキーに保持し、<see cref="KnnSearch"/> の度に全ベクトルを
+/// クエリに対してスコアリングする。
 ///
-/// <para><b>ARCH-6</b>: This is now the <b>non-persistent reference implementation</b>,
-/// no longer the binary backend default. The binary backend persists vectors and an
-/// HNSW ANN index in-file via
+/// <para>これは <b>非永続の参照実装</b> であり、binary backend の既定ではない。
+/// binary backend はベクトルと HNSW ANN 索引を
 /// <see cref="Quiver.Storage.Records.PersistentVectorStore"/> +
-/// <see cref="Quiver.Storage.Records.HnswIndex"/>. This in-memory store remains for
-/// (a) the SQLite MVP backend (vector persistence out of scope there), (b) unit tests /
-/// smoke samples / fixtures, and (c) pinning down the contract behaviour the persistent
-/// store mirrors. See docs/design/11 §6.3.</para>
+/// <see cref="Quiver.Storage.Records.HnswIndex"/> で in-file に永続化する。
+/// この in-memory ストアは (a) SQLite MVP backend (ベクトル永続化は対象外)、
+/// (b) 単体テスト / smoke サンプル / fixtures、(c) 永続ストアが満たすべき契約挙動の
+/// 基準、のために残している。docs/design/11 §6.3 参照。</para>
 /// </summary>
 public sealed class InMemoryVectorStore : IVectorStore
 {
@@ -23,6 +21,7 @@ public sealed class InMemoryVectorStore : IVectorStore
 
     private readonly Dictionary<string, Index> _indexes = new(StringComparer.Ordinal);
 
+    /// <summary>新しいベクトルインデックスを作成する。空名 / 非正の次元 / 名前重複は <see cref="VectorException"/>。</summary>
     public void CreateVectorIndex(VectorIndexSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
@@ -40,6 +39,7 @@ public sealed class InMemoryVectorStore : IVectorStore
         }
     }
 
+    /// <summary>指定名のベクトルインデックスを削除する。存在しなければ <see cref="VectorException"/>。</summary>
     public void DropVectorIndex(string name)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
@@ -50,7 +50,7 @@ public sealed class InMemoryVectorStore : IVectorStore
         }
     }
 
-    /// <summary>VEC-12: 登録済み index の spec を返す。未登録は <c>false</c>。</summary>
+    /// <summary>登録済み index の spec を返す。未登録は <c>false</c>。</summary>
     public bool TryGetIndex(string name, out VectorIndexSpec spec)
     {
         spec = default!;
@@ -66,6 +66,7 @@ public sealed class InMemoryVectorStore : IVectorStore
         }
     }
 
+    /// <summary>指定エンティティのベクトルを設定 (上書き) する。次元 / 種別不一致は <see cref="VectorException"/>。</summary>
     public void SetVector(
         EntityKind kind,
         long entityId,
@@ -91,6 +92,7 @@ public sealed class InMemoryVectorStore : IVectorStore
         }
     }
 
+    /// <summary>指定エンティティのベクトルをインデックスから除去する。</summary>
     public void RemoveVector(EntityKind kind, long entityId, string indexName)
     {
         var idx = GetIndex(indexName);
@@ -100,6 +102,7 @@ public sealed class InMemoryVectorStore : IVectorStore
         }
     }
 
+    /// <summary>クエリベクトルに対する上位 <paramref name="k"/> 件の近傍を全件スキャンで検索する。</summary>
     public VectorSearchCursor KnnSearch(
         string indexName,
         ReadOnlySpan<float> query,
@@ -137,7 +140,7 @@ public sealed class InMemoryVectorStore : IVectorStore
     }
 
     /// <summary>
-    /// VEC-8: gather-then-score 経路。<paramref name="candidates"/> が
+    /// gather-then-score 経路。<paramref name="candidates"/> が
     /// インデックス全件の 1/4 以下のとき、candidate ID を直接ルックアップして
     /// ヒット分だけ <see cref="VectorScorer"/> に流す。それ以上の比率では候補ヒット率が
     /// 高いとみなし全件スキャン + post-filter にフォールバックする。
@@ -216,7 +219,7 @@ public sealed class InMemoryVectorStore : IVectorStore
     }
 
     /// <summary>
-    /// VEC-8: 同一インデックスに対する複数クエリを単一 snapshot 上で評価する。
+    /// 同一インデックスに対する複数クエリを単一 snapshot 上で評価する。
     /// outer = queries (Q), inner = corpus (N) でクエリベクトルを L1/L2 に滞留させ、
     /// ロックは snapshot 取得時の 1 回だけ。クエリごとに独立した <see cref="BoundedMaxHeap"/>
     /// を持つ。次元不一致はループ前に検出する。
