@@ -3,7 +3,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Api;
 
 /// <summary>
-/// GC-4: <c>.Repeat(s =&gt; s.Out("KNOWS")).Times(n)</c> 用の fluent な記述レコーダ。
+/// <c>.Repeat(s =&gt; s.Out("KNOWS")).Times(n)</c> 用の fluent な記述レコーダ。
 /// Phase 1 では単一ステップの展開 (<see cref="Out"/> / <see cref="In"/> /
 /// <see cref="Both"/> のいずれか 1 つ) のみを記録し、最後の呼び出しが採用される。
 /// クロージャ内のフィルタや連鎖展開は未対応 — 内部の <c>VariableLengthExpandOperator</c> が

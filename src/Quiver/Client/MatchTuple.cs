@@ -5,7 +5,7 @@ using Quiver.Query.Physical;
 namespace Quiver.Api;
 
 /// <summary>
-/// GC-6: <c>.Select&lt;TResult&gt;(Func&lt;MatchTuple, TResult&gt;)</c> に渡される型付きアクセサ。
+/// <c>.Select&lt;TResult&gt;(Func&lt;MatchTuple, TResult&gt;)</c> に渡される型付きアクセサ。
 /// 事前に <c>.As(name)</c> でバインドされたエイリアス名を、対応するタプルスロットへ解決する。
 /// 未定義のエイリアスは <see cref="InvalidOperationException"/>、型不一致のアクセスは
 /// スロットの宣言型に基づき <see cref="InvalidCastException"/> を投げる。

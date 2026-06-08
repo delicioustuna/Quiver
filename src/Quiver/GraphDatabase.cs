@@ -33,12 +33,12 @@ public sealed class GraphDatabase : IDisposable
         _autoVacuumWorker = autoVacuumWorker;
     }
 
-    /// <summary>ARCH-4: <see cref="Open"/> に渡したデータベースファイルのパス (<c>*.quiver</c>)。</summary>
+    /// <summary><see cref="Open"/> に渡したデータベースファイルのパス (<c>*.quiver</c>)。</summary>
     public string Path => _path;
 
     /// <summary>
     /// 指定した単一データベースファイル (<c>*.quiver</c>) を開く (存在しない場合は新規作成)。
-    /// ARCH-4 以降、Quiver の binary backend は全データ (コア / 索引 / 隣接 / token / epoch) を
+    /// Quiver の binary backend は全データ (コア / 索引 / 隣接 / token / epoch) を
     /// 単一の <c>*.quiver</c> ファイルに格納し、運用中のみサイドカー <c>*.quiver-wal</c> を伴う。
     /// <paramref name="options"/> 経由でバックエンド種別やバッファプールサイズなどを指定可。
     /// </summary>
@@ -72,7 +72,7 @@ public sealed class GraphDatabase : IDisposable
     };
 
     /// <summary>
-    /// ARCH-2: 下層バックエンド内部 SPI。embedding adapter など内部経路専用で、公開 API ではない。
+    /// 下層バックエンド内部 SPI。embedding adapter など内部経路専用で、公開 API ではない。
     /// </summary>
     internal IGraphStorageBackendInternal BackendInternal => _backend;
 
@@ -80,8 +80,8 @@ public sealed class GraphDatabase : IDisposable
     /// バルクロード用ローダを開始する。
     /// </summary>
     /// <param name="buildAdjacencyIndex">
-    /// <c>true</c> の場合、<see cref="BulkLoader.Commit"/> 時に隣接ブロックビュー (ARCH-4 以降は
-    /// graph.quiver 内テナントに同居) も併せて構築し、その後の読み取り専用トランザクションから
+    /// <c>true</c> の場合、<see cref="BulkLoader.Commit"/> 時に隣接ブロックビュー (graph.quiver
+    /// 内テナントに同居) も併せて構築し、その後の読み取り専用トランザクションから
     /// 隣接ブロックストアが利用可能になる。
     /// </param>
     public BulkLoader BeginBulkLoad(bool buildAdjacencyIndex = false)
@@ -93,7 +93,7 @@ public sealed class GraphDatabase : IDisposable
     }
 
     /// <summary>
-    /// PW-9: 1000 万エッジ以上の大規模インポート向けに <see cref="StreamingBulkLoader"/> を開く。
+    /// 1000 万エッジ以上の大規模インポート向けに <see cref="StreamingBulkLoader"/> を開く。
     /// 追記中はリレーションシップレコードを一時ファイルにストリーミングするため、ピークヒープは
     /// dense ポインタ配列 (~32 × maxRelId バイト) でバウンドされ、全リレーションシップ数には依存しない。
     /// <c>AppendRelationship</c> は <see cref="RelationshipId"/> が厳密に増加する順序で呼ぶ必要がある。
@@ -128,14 +128,14 @@ public sealed class GraphDatabase : IDisposable
     public IDiagnosticsApi Diagnostics => _backend.Diagnostics;
 
     /// <summary>
-    /// VEC-5: バックエンドのベクトルストア。<c>CreateVectorIndex</c> や
+    /// バックエンドのベクトルストア。<c>CreateVectorIndex</c> や
     /// <c>SetVector</c> は直接ここから呼ぶ。問い合わせ側のアクセスは
     /// トラバーサルソースの <c>g.Knn(...)</c> 経由。
     /// </summary>
     public Core.IVectorStore Vectors => _backend.Vectors;
 
     /// <summary>
-    /// ARCH-2 / VEC-4: 埋め込みパイプライン (<c>Quiver.Embedding</c>) が消費する
+    /// 埋め込みパイプライン (<c>Quiver.Embedding</c>) が消費する
     /// <see cref="Core.IGraphEngine"/> ブリッジを生成する。グラフ読み取りと
     /// <paramref name="vectors"/> / <paramref name="catalog"/> を 1 つのエンジン契約に束ねる。
     /// </summary>
@@ -161,7 +161,7 @@ public sealed class GraphDatabase : IDisposable
     }
 
     /// <summary>
-    /// PW-16: ノード毎の degree lookup における dense / sparse 切り替えしきい値を
+    /// ノード毎の degree lookup における dense / sparse 切り替えしきい値を
     /// 呼び出し側で調整できるオーバーロード。詳細は <see cref="NodeDegreeLookup"/> 参照。
     /// </summary>
     public GraphStats CollectStats(int powerNodeThreshold, double denseThreshold)
@@ -171,14 +171,14 @@ public sealed class GraphDatabase : IDisposable
     }
 
     /// <summary>
-    /// ARCH-2: <see cref="QueryOptimizer"/> は内部最適化機構のため internal。指定の統計
+    /// <see cref="QueryOptimizer"/> は内部最適化機構のため internal。指定の統計
     /// (または新規収集したスナップショット) を背景に持つオプティマイザを生成する。
     /// </summary>
     internal QueryOptimizer CreateOptimizer(GraphStats? stats = null)
         => new(stats ?? CollectStats());
 
     /// <summary>
-    /// PW-15 / codex_advice_3 7.7 節。PageRank・Louvain・繰り返し BFS / 最短経路など
+    /// PageRank・Louvain・繰り返し BFS / 最短経路など
     /// 同一グラフ状態を複数回パスするアルゴリズム向けに、現在のグラフのポイントインタイム CSR/CSC
     /// スナップショットを構築する。構築は O(N + E)。その後の隣接アクセスはフラット配列の参照に
     /// なるため、ノード毎に隣接カーソルを開くより安価になる。
@@ -196,7 +196,7 @@ public sealed class GraphDatabase : IDisposable
     }
 
     /// <summary>
-    /// FT-12 / codex_advice_3 7.3 節。<see cref="RelationshipId"/> から
+    /// <see cref="RelationshipId"/> から
     /// <paramref name="propertyKey"/> のスカラ値へのジョインインデックス (SID 風) を構築する。
     /// 重み付きトラバーサル、エッジフィルタ、リレーション ID を既に持っているアルゴリズムカーネルで、
     /// プロパティチェーンを辿らずに値を取り出す用途を想定。
@@ -253,7 +253,7 @@ public sealed class GraphDatabase : IDisposable
     }
 
     /// <summary>
-    /// PW-14 / codex_advice_3 7.6 節。現在のリレーションシップ状態から不変ベースビューを再構築し、
+    /// 現在のリレーションシップ状態から不変ベースビューを再構築し、
     /// tombstone を破棄してエポックを進める。本呼び出し以降、生存中のエッジはすべてベースビューから
     /// 提供され、新しいリレーションシップが作成されるまで delta ウォークは no-op になる。
     /// payload lane の無いバイナリバックエンド以外はサポート対象外で、その場合は例外を投げる。
@@ -269,7 +269,7 @@ public sealed class GraphDatabase : IDisposable
     }
 
     /// <summary>
-    /// OP-1 / ARCH-4: 書き込みを止めずに <paramref name="targetFilePath"/> (<c>*.quiver</c>) へ
+    /// 書き込みを止めずに <paramref name="targetFilePath"/> (<c>*.quiver</c>) へ
     /// ライブスナップショットを取る。target は <see cref="Open"/> で独立した DB として開ける。
     ///
     /// 内部では (1) ベストエフォートでシャープチェックポイントを起動、(2) 単一コンテナを
@@ -284,7 +284,7 @@ public sealed class GraphDatabase : IDisposable
         => _backend.CreateSnapshot(targetFilePath, options);
 
     /// <summary>
-    /// OP-3: 削除済みエンティティ (FT-26 MVCC の dead version) を物理回収する vacuum を
+    /// 削除済みエンティティ (MVCC の dead version) を物理回収する vacuum を
     /// 同期的に実行する。アクティブトランザクションがあるときは安全側で何もせず
     /// <see cref="VacuumReport.Skipped"/> = true で返る。
     ///
@@ -298,7 +298,7 @@ public sealed class GraphDatabase : IDisposable
         => _backend.Vacuum(options);
 
     /// <summary>
-    /// OP-4: 与えたマイグレーションのうち未適用のものを <see cref="IMigration.Version"/> 昇順 →
+    /// 与えたマイグレーションのうち未適用のものを <see cref="IMigration.Version"/> 昇順 →
     /// <see cref="IMigration.Id"/> Ordinal 昇順で適用する。各マイグレーションは独立した tx で実行され、
     /// 失敗時はその tx のミューテーションだけ rollback される (schema rename は tx 境界を跨ぐ点に注意)。
     /// 既に適用済みの ID は skip される (冪等)。
@@ -308,7 +308,7 @@ public sealed class GraphDatabase : IDisposable
         CancellationToken cancellationToken = default)
         => Migrations.Migrator.RunAsync(this, MigrationDirectory, migrations, cancellationToken);
 
-    /// <summary>OP-4: 適用済みマイグレーション履歴のスナップショット (適用順)。</summary>
+    /// <summary>適用済みマイグレーション履歴のスナップショット (適用順)。</summary>
     public IReadOnlyList<Migrations.MigrationHistoryEntry> GetMigrationHistory()
         => new Migrations.MigrationHistory(MigrationDirectory).Entries;
 
@@ -318,7 +318,7 @@ public sealed class GraphDatabase : IDisposable
     private string MigrationDirectory => _backend.DataDirectory;
 
     /// <summary>
-    /// バックグラウンドの AutoVacuum ワーカー (OP-7) を停止してから下層バックエンドを破棄する。
+    /// バックグラウンドの AutoVacuum ワーカーを停止してから下層バックエンドを破棄する。
     /// ワーカー停止は進行中の vacuum tick の完了を待ってから戻る。
     /// </summary>
     public void Dispose()
@@ -354,7 +354,7 @@ public sealed class GraphDatabaseOptions
     public long CheckpointThresholdBytes { get; set; } = 64L * 1024 * 1024;
 
     /// <summary>
-    /// FT-28: チェックポイント threshold の運用ポリシー。
+    /// チェックポイント threshold の運用ポリシー。
     /// <see cref="Quiver.Transactions.CheckpointPolicy.Fixed"/> (既定) は
     /// <see cref="CheckpointThresholdBytes"/> をそのまま使い続ける旧挙動。
     /// <see cref="Quiver.Transactions.CheckpointPolicy.Adaptive"/> は直近
@@ -365,26 +365,26 @@ public sealed class GraphDatabaseOptions
         = Quiver.Transactions.CheckpointPolicy.Fixed;
 
     /// <summary>
-    /// FT-28: <see cref="Quiver.Transactions.CheckpointPolicy.Adaptive"/> 選択時の
+    /// <see cref="Quiver.Transactions.CheckpointPolicy.Adaptive"/> 選択時の
     /// 復旧時間目標。recovery が WAL を再生する際の上限値として扱い、threshold が
     /// この目標を超えないように制御する。既定 5 秒。
     /// </summary>
     public TimeSpan TargetRecoveryTime { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// FT-28: Adaptive 計算時の threshold 下限 (バイト単位)。これより小さい threshold は
+    /// Adaptive 計算時の threshold 下限 (バイト単位)。これより小さい threshold は
     /// 採用しない。書き込みの度に checkpoint が走る病的な状態を避けるための安全弁。既定 4 MB。
     /// </summary>
     public long MinCheckpointThresholdBytes { get; set; } = 4L * 1024 * 1024;
 
     /// <summary>
-    /// FT-28: Adaptive 計算時の threshold 上限 (バイト単位)。これより大きい threshold は
+    /// Adaptive 計算時の threshold 上限 (バイト単位)。これより大きい threshold は
     /// 採用しない。WAL が過大に肥大するのを避けるための上限。既定 1 GB。
     /// </summary>
     public long MaxCheckpointThresholdBytes { get; set; } = 1024L * 1024 * 1024;
 
     /// <summary>
-    /// FT-28: Adaptive 移動平均のサンプル窓 (トランザクション数)。リングバッファで
+    /// Adaptive 移動平均のサンプル窓 (トランザクション数)。リングバッファで
     /// 直近 N 件の bytes/tx を保持する。既定 1000。
     /// </summary>
     public int AdaptiveSampleWindow { get; set; } = 1000;
@@ -393,7 +393,7 @@ public sealed class GraphDatabaseOptions
     public TimeSpan LockTimeout { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// FT-24: ロック戦略。<see cref="Quiver.Transactions.LockingMode.ExclusiveOnly"/> (既定) は
+    /// ロック戦略。<see cref="Quiver.Transactions.LockingMode.ExclusiveOnly"/> (既定) は
     /// 読み取りロック無し (現挙動)、<see cref="Quiver.Transactions.LockingMode.ReaderWriter"/> は
     /// 読み取りを <see cref="Quiver.Transactions.LockMode.Shared"/>・書き込みを
     /// <see cref="Quiver.Transactions.LockMode.Exclusive"/> として、複数 reader 間の競合を解消する。
@@ -420,7 +420,7 @@ public sealed class GraphDatabaseOptions
     public IGraphStorageBackendFactory? BackendFactory { get; set; }
 
     /// <summary>
-    /// BA-7 / codex_advice_3 8 節。null でない場合、書き込みトランザクションが
+    /// null でない場合、書き込みトランザクションが
     /// 公開するすべてのグラフミューテーション (<c>CreateNode</c>、<c>CreateRelationship</c>、
     /// <c>SetProperty</c> など) をバックエンドが記録し、コミットが永続化された後に
     /// このシンクへバッチで引き渡す。バイナリバックエンドはクラッシュリカバリ向けに
@@ -431,7 +431,7 @@ public sealed class GraphDatabaseOptions
     public ILogicalMutationSink? LogicalMutationSink { get; set; }
 
     /// <summary>
-    /// FT-22: <c>true</c> のとき、バックエンド open 完了直後に
+    /// <c>true</c> のとき、バックエンド open 完了直後に
     /// <see cref="IDiagnosticsApi.RepairIndexes"/> を <see cref="IndexRepairMode.Apply"/> で
     /// 自動実行し、recovery 後に残った orphan 索引エントリを除去する。
     /// 既定 <c>false</c> (運用者が必要なときに <see cref="IDiagnosticsApi.CheckIndexConsistency"/> /
@@ -440,7 +440,7 @@ public sealed class GraphDatabaseOptions
     public bool AutoRepairOrphansOnRecovery { get; set; } = false;
 
     /// <summary>
-    /// FT-25: デッドロック検出器の周期。<c>null</c> または <see cref="TimeSpan.Zero"/> 以下で無効化
+    /// デッドロック検出器の周期。<c>null</c> または <see cref="TimeSpan.Zero"/> 以下で無効化
     /// (既定。<see cref="LockTimeout"/> でフォールバックする旧挙動)。値を設定すると周期ごとに
     /// 全 <c>LockManager</c> の wait-for graph snapshot を取り、Tarjan SCC で閉路を検出する。
     /// 閉路内で最も若い tx (<see cref="Quiver.Core.TransactionId.Value"/> が最大) を犠牲者として
@@ -450,7 +450,7 @@ public sealed class GraphDatabaseOptions
     public TimeSpan? DeadlockDetectionInterval { get; set; }
 
     /// <summary>
-    /// FT-27: WAL グループコミットの coalesce window。<see cref="TimeSpan.Zero"/> (既定) で無効
+    /// WAL グループコミットの coalesce window。<see cref="TimeSpan.Zero"/> (既定) で無効
     /// (各 commit の <c>FlushTo</c> が即座に fsync を起動する旧挙動)。0 より大きい値を指定すると、
     /// 最初の commit が到着した時点でこの window の経過まで spin-wait して後続 commit を貯め、
     /// 累積した全 commit を 1 回の fsync で一括処理する。
@@ -465,10 +465,10 @@ public sealed class GraphDatabaseOptions
     public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.Zero;
 
     /// <summary>
-    /// OP-3: <c>true</c> のとき、バックエンドが提供するバックグラウンドワーカーで
+    /// <c>true</c> のとき、バックエンドが提供するバックグラウンドワーカーで
     /// 周期的に <see cref="GraphDatabase.Vacuum"/> を起動する。既定 <c>false</c>
     /// (運用者が明示的に <see cref="GraphDatabase.Vacuum"/> を呼ぶ前提)。
-    /// OP-7 でバックグラウンドワーカーを配線済み。<c>true</c> かつ
+    /// <c>true</c> かつ
     /// <see cref="AutoVacuumInterval"/> が正のとき、<see cref="GraphDatabase.Open"/> が
     /// <see cref="Quiver.Maintenance.AutoVacuumWorker"/> を起動し、
     /// <see cref="GraphDatabase.Dispose"/> で停止する。
@@ -476,7 +476,7 @@ public sealed class GraphDatabaseOptions
     public bool AutoVacuum { get; set; } = false;
 
     /// <summary>
-    /// OP-7: <see cref="AutoVacuum"/> 有効時の vacuum 起動周期。既定 1 時間。
+    /// <see cref="AutoVacuum"/> 有効時の vacuum 起動周期。既定 1 時間。
     /// 初回も DB open から 1 周期後に発火する (open 直後の vacuum 突入で起動レイテンシを
     /// 悪化させないため)。<see cref="TimeSpan.Zero"/> 以下にすると <see cref="AutoVacuum"/> が
     /// <c>true</c> でもワーカーは起動しない。

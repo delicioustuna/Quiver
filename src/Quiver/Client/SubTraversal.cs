@@ -107,12 +107,12 @@ public sealed class SubTraversal
         => new SubquerySemiJoinPredicate(outerEntityColumn, _probe, PhysicalPlanner.Plan(_plan, _schema), exists: false);
 
     /// <summary>
-    /// GC-4: <c>.Union</c> / <c>.Coalesce</c> / <c>.Optional</c> の分岐として使うため、
+    /// <c>.Union</c> / <c>.Coalesce</c> / <c>.Optional</c> の分岐として使うため、
     /// サブトラバーサルを単独の物理オペレータとして構築する。<see cref="CorrelatedInputOperator"/> の
     /// バインドは <see cref="SubTraversal"/> 構築時にキャプチャした参照を介して呼び出し側が行う。
     /// </summary>
     internal IPhysicalOperator BuildBranchOperator() => PhysicalPlanner.Plan(_plan, _schema);
 
-    /// <summary>GC-4: サブプラン出力中で現在のエンティティを保持する列番号。</summary>
+    /// <summary>サブプラン出力中で現在のエンティティを保持する列番号。</summary>
     internal int BranchEntityColumn => _plan.CurrentEntityColumn;
 }

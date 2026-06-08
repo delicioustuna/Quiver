@@ -31,7 +31,7 @@ public interface IGraphRelationship<TSelf> where TSelf : IGraphRelationship<TSel
 /// <c>[Relationship&lt;TSource, TTarget&gt;]</c> から自動実装する。CRUD 契約は
 /// 基底 <see cref="IGraphRelationship{TSelf}"/> から継承し、本インタフェースは端点型の
 /// 制約を足すだけ (追加メンバーなし)。これにより <c>TypedGraphTraversal&lt;TSource&gt;</c> の
-/// <c>Out&lt;TRel, TTarget&gt;()</c> がホップ間で型を保存できる (ARCH-8)。
+/// <c>Out&lt;TRel, TTarget&gt;()</c> がホップ間で型を保存できる。
 /// </summary>
 /// <typeparam name="TSelf">自分自身の型 (CRTP)。</typeparam>
 /// <typeparam name="TSource">始点ノード型。</typeparam>

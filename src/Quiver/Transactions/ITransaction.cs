@@ -13,13 +13,13 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     TransactionState State { get; }
 
     /// <summary>
-    /// ARCH-5c Phase 5d: この tx の MVCC 可視性スナップショット。列スキャン集約が
+    /// この tx の MVCC 可視性スナップショット。列スキャン集約が
     /// operator 経路を介さず直接可視性判定するために露出する。
     /// </summary>
     SnapshotState Snapshot { get; }
 
     /// <summary>
-    /// ARCH-5c Phase 5d: committed TxId レジストリ (可視性判定用)。旧テスト互換経路では null。
+    /// committed TxId レジストリ (可視性判定用)。旧テスト互換経路では null。
     /// </summary>
     CommittedTxRegistry? Committed { get; }
 
@@ -30,7 +30,7 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     void Abort();
 
     /// <summary>
-    /// FT-23: トランザクション内に savepoint を作成し、その識別子を返す。
+    /// トランザクション内に savepoint を作成し、その識別子を返す。
     /// 以後の変更を <see cref="RollbackTo"/> で巻き戻したり、<see cref="ReleaseSavepoint"/> で
     /// 親スコープへマージしたりできる。Nested savepoint をサポート。
     /// 非アクティブな tx では <see cref="TransactionException"/> をスロー。
@@ -40,14 +40,14 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     SavepointId Savepoint(string? name = null);
 
     /// <summary>
-    /// FT-23: 指定 savepoint 以降の変更を巻き戻す。Savepoint 自体は消費されず、再度
+    /// 指定 savepoint 以降の変更を巻き戻す。Savepoint 自体は消費されず、再度
     /// <see cref="RollbackTo"/> を呼ぶことができる (SQL 標準準拠)。
     /// 解放済みの savepoint や別 tx の savepoint を渡すと <see cref="TransactionException"/>。
     /// </summary>
     void RollbackTo(SavepointId savepoint);
 
     /// <summary>
-    /// FT-23: 指定 savepoint を解放する (= 親スコープへマージし以後は無効化)。
+    /// 指定 savepoint を解放する (= 親スコープへマージし以後は無効化)。
     /// 親スコープの巻き戻し対象には savepoint 期間中に触れた未巻き戻しページが含まれる。
     /// </summary>
     void ReleaseSavepoint(SavepointId savepoint);
@@ -64,7 +64,7 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     IAdjacencyBlockStore? AdjacencyBlocks { get; }
 
     /// <summary>
-    /// Backend-supplied access methods (BA-3). Operators call into this rather
+    /// Backend-supplied access methods. Operators call into this rather
     /// than reading <see cref="Nodes"/> / <see cref="Relationships"/> /
     /// <see cref="AdjacencyBlocks"/> directly. Defaults to
     /// <see cref="InlineGraphAccessMethods.Instance"/> when no backend-specific

@@ -58,7 +58,7 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     }
 
     /// <summary>
-    /// GC-7: C# 式ツリーによる述語フィルタ (LINQ ライク)。比較 (<c>&gt; &gt;= &lt; &lt;= == !=</c>)、
+    /// C# 式ツリーによる述語フィルタ (LINQ ライク)。比較 (<c>&gt; &gt;= &lt; &lt;= == !=</c>)、
     /// <c>&amp;&amp;</c> (暗黙 AND)、同一キーの <c>||</c>、<c>StartsWith/EndsWith/Contains</c>、否定 <c>!</c> に対応する。
     /// 例: <c>.Where(p =&gt; p.Age &gt; 20 &amp;&amp; p.Name.StartsWith("A"))</c>。
     /// 対応外の式 (キー跨ぎ <c>||</c>、double 範囲など) は <see cref="NotSupportedException"/>。
@@ -68,7 +68,7 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
         => new TypedGraphTraversal<T>(ExpressionPredicate.Apply(_inner, predicate), _tx, _schema);
 
     /// <summary>
-    /// GC-8: エッジ述語付きの型保存ホップ。<typeparamref name="TRel"/> エッジを
+    /// エッジ述語付きの型保存ホップ。<typeparamref name="TRel"/> エッジを
     /// <paramref name="edgeFilter"/> (式ツリー述語) で絞り込んでから終点 <typeparamref name="TTarget"/> へ辿る。
     /// 通常は SourceGenerator 生成の糖衣 (<c>.Knows(e =&gt; e.Since == "2024-01")</c>) から呼ばれる。
     /// エッジプロパティ述語は <see cref="ExpressionPredicate"/> がリレーションシップ用に構築する。
@@ -95,7 +95,7 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
 
     /// <summary>
     /// 端点型を保持するリレーションシップ <typeparamref name="TRel"/> で外向に辿り、
-    /// 終点 <typeparamref name="TTarget"/> 型の型付きトラバーサルを返す (ARCH-8 ホップ型保存)。
+    /// 終点 <typeparamref name="TTarget"/> 型の型付きトラバーサルを返す (ホップ間で型を保存)。
     /// 制約 <c>IGraphRelationship&lt;TRel, T, TTarget&gt;</c> が「現在のノード型 <typeparamref name="T"/> が
     /// <typeparamref name="TRel"/> の始点である」ことをコンパイル時に強制する。
     /// 通常は SourceGenerator 生成の糖衣 (<c>.Knows()</c> 等) を使い、明示形は escape hatch。
@@ -107,7 +107,7 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
 
     /// <summary>
     /// 端点型を保持するリレーションシップ <typeparamref name="TRel"/> で内向に辿り、
-    /// 始点 <typeparamref name="TSource"/> 型の型付きトラバーサルを返す (ARCH-8 ホップ型保存)。
+    /// 始点 <typeparamref name="TSource"/> 型の型付きトラバーサルを返す (ホップ間で型を保存)。
     /// 現在のノード型 <typeparamref name="T"/> は <typeparamref name="TRel"/> の終点。
     /// </summary>
     public TypedGraphTraversal<TSource> In<TRel, TSource>()

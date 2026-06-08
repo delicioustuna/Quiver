@@ -56,24 +56,24 @@ public static class P
     public static PropertyPredicate Within(params string[] values) => new(PredicateKind.Within, 0, 0, null, values);
 
     /// <summary>
-    /// GC-1: <c>P.Without(...)</c> — 文字列プロパティが指定値のいずれにも該当しない場合、
+    /// <c>P.Without(...)</c> — 文字列プロパティが指定値のいずれにも該当しない場合、
     /// またはプロパティ自体が存在しない場合に通す (Gremlin の慣例)。
     /// </summary>
     public static PropertyPredicate Without(params string[] values) => new(PredicateKind.Without, 0, 0, null, values);
 
     // ── GC-2: テキスト述語 ─────────────────────────────────────────────────
 
-    /// <summary>GC-2: Cypher の <c>STARTS WITH</c> — オーディナル・大文字小文字を区別する前方一致判定。</summary>
+    /// <summary>Cypher の <c>STARTS WITH</c> — オーディナル・大文字小文字を区別する前方一致判定。</summary>
     public static PropertyPredicate StartsWith(string prefix) => new(PredicateKind.StartsWith, 0, 0, prefix ?? throw new ArgumentNullException(nameof(prefix)));
 
-    /// <summary>GC-2: Cypher の <c>ENDS WITH</c> — オーディナル・大文字小文字を区別する後方一致判定。</summary>
+    /// <summary>Cypher の <c>ENDS WITH</c> — オーディナル・大文字小文字を区別する後方一致判定。</summary>
     public static PropertyPredicate EndsWith(string suffix) => new(PredicateKind.EndsWith, 0, 0, suffix ?? throw new ArgumentNullException(nameof(suffix)));
 
-    /// <summary>GC-2: Cypher の <c>CONTAINS</c> — オーディナル・大文字小文字を区別する部分文字列判定。</summary>
+    /// <summary>Cypher の <c>CONTAINS</c> — オーディナル・大文字小文字を区別する部分文字列判定。</summary>
     public static PropertyPredicate Contains(string needle) => new(PredicateKind.Contains, 0, 0, needle ?? throw new ArgumentNullException(nameof(needle)));
 
     /// <summary>
-    /// GC-2: Cypher の <c>=~</c> 正規表現マッチ。先行コンパイルしておくことで、述語が走査する
+    /// Cypher の <c>=~</c> 正規表現マッチ。先行コンパイルしておくことで、述語が走査する
     /// 各行で同一の <see cref="Regex"/> インスタンスを再利用する。
     /// </summary>
     public static PropertyPredicate Regex(string pattern, RegexOptions options = RegexOptions.None)
@@ -86,7 +86,7 @@ public static class P
     // ── GC-2: 述語レベルの真偽演算 ────────────────────────────────
 
     /// <summary>
-    /// GC-2: <c>NOT (predicate)</c>。任意の <see cref="PropertyPredicate"/> をラップし、
+    /// <c>NOT (predicate)</c>。任意の <see cref="PropertyPredicate"/> をラップし、
     /// 内側述語の評価結果を反転する。プロパティ欠落時は内側述語が <c>false</c> となり、
     /// 反転して <c>true</c> を返す (Cypher の <c>NOT n.age = 30</c> が欠落 <c>age</c> に対して
     /// <c>NOT false = true</c> となる挙動と一致)。
@@ -98,13 +98,13 @@ public static class P
     }
 
     /// <summary>
-    /// GC-2: 同一キーに対する AND 結合 (例: <c>P.And(P.Gt(20), P.Lt(40))</c> で半開区間)。
+    /// 同一キーに対する AND 結合 (例: <c>P.And(P.Gt(20), P.Lt(40))</c> で半開区間)。
     /// 異なるキーをまたぐ AND は <c>.Has(...).Has(...)</c> の連結 (暗黙の AND) を使うこと。
     /// </summary>
     public static PropertyPredicate And(params PropertyPredicate[] predicates) => Compound(PredicateKind.And, predicates);
 
     /// <summary>
-    /// GC-2: 同一キーに対する OR 結合 (例: <c>P.Or(P.StartsWith("Al"), P.StartsWith("Bo"))</c>)。
+    /// 同一キーに対する OR 結合 (例: <c>P.Or(P.StartsWith("Al"), P.StartsWith("Bo"))</c>)。
     /// 異なるキーをまたぐ OR にはトラバーサルレベルの <c>g.Nodes().Or(t1, t2)</c> を使うこと。
     /// </summary>
     public static PropertyPredicate Or(params PropertyPredicate[] predicates) => Compound(PredicateKind.Or, predicates);
@@ -176,15 +176,15 @@ public sealed class PropertyPredicate
     internal Regex? CompiledRegex { get; }
 
     /// <summary>
-    /// FT-35: 比較対象が浮動小数点 (double/float/Half) であることを示す。true のとき
+    /// 比較対象が浮動小数点 (double/float/Half) であることを示す。true のとき
     /// <see cref="LongFrom"/>/<see cref="LongTo"/> は <see cref="System.BitConverter.DoubleToInt64Bits"/>
     /// でエンコードされた double ビットを保持する。
     /// </summary>
     internal bool IsDouble { get; }
 
-    /// <summary>FT-35: 浮動小数点比較の下限値 (<see cref="IsDouble"/> が true のとき有効)。</summary>
+    /// <summary>浮動小数点比較の下限値 (<see cref="IsDouble"/> が true のとき有効)。</summary>
     internal double DoubleFrom => BitConverter.Int64BitsToDouble(LongFrom);
-    /// <summary>FT-35: 浮動小数点比較の上限値 (<see cref="IsDouble"/> が true のとき有効)。</summary>
+    /// <summary>浮動小数点比較の上限値 (<see cref="IsDouble"/> が true のとき有効)。</summary>
     internal double DoubleTo => BitConverter.Int64BitsToDouble(LongTo);
 
     internal PropertyPredicate(

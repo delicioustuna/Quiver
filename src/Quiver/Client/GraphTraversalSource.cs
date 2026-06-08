@@ -38,11 +38,11 @@ public sealed class GraphTraversalSource
     }
 
     /// <summary>
-    /// VEC-10: GraphStats を注入してトラバーサルソースを生成する。
+    /// GraphStats を注入してトラバーサルソースを生成する。
     /// 後段 <c>g.Knn(...).HasLabel(L)</c> 形式の push-down リライト時に、
     /// label cardinality が <see cref="Internal.PendingKnnBuilder.VectorFirstLabelFraction"/>
     /// (既定 30%) 以上のときに vector-first フォールバックを選ぶための判定材料となる。
-    /// stats を渡さない場合は VEC-9 と同じ構造ヒントのみで graph-first を選ぶ。
+    /// stats を渡さない場合は構造ヒントのみで graph-first を選ぶ。
     /// </summary>
     public GraphTraversalSource(IGraphTransaction tx, ISchemaApi schema, GraphStats? stats)
     {
@@ -66,7 +66,7 @@ public sealed class GraphTraversalSource
     public RelationshipBuilder AddRelationship(string type) => new(_tx, type);
 
     /// <summary>
-    /// GC-5: Cypher の <c>MERGE (n:label {matchKey: matchValue})</c> に相当する糖衣構文。
+    /// Cypher の <c>MERGE (n:label {matchKey: matchValue})</c> に相当する糖衣構文。
     /// <see cref="IGraphTransaction.MergeNode"/> のラッパで、<c>Created</c> フラグを
     /// 用いて ON CREATE SET / ON MATCH SET の分岐を呼び出し側で書ける。
     /// </summary>
@@ -104,7 +104,7 @@ public sealed class GraphTraversalSource
     }
 
     /// <summary>
-    /// ARCH-5c Phase 5d: 全リレーションシップをスキャン起点とするトラバーサル (Gremlin の <c>g.E()</c> 相当)。
+    /// 全リレーションシップをスキャン起点とするトラバーサル (Gremlin の <c>g.E()</c> 相当)。
     /// 主用途は全件集約 (<c>Sum</c>/<c>Mean</c>/<c>Max</c>/<c>Min</c>) で、対象プロパティが列化済みなら
     /// 列スキャンで高速集計する (それ以外は row path フォールバック)。<c>ToList()</c> で全 rel ID も取れる。
     /// </summary>
@@ -163,13 +163,13 @@ public sealed class GraphTraversalSource
     /// インデックスは <see cref="Core.EntityKind.Node"/> にバインドされている必要がある。
     /// リレーションシップ向け KNN は具体的なユースケースが出るまで意図的にスコープ外とする。
     /// <para>
-    /// VEC-9: <c>g.Knn(...).HasLabel(...).Has(...)</c> のような後続 pure-filter チェーンは
+    /// <c>g.Knn(...).HasLabel(...).Has(...)</c> のような後続 pure-filter チェーンは
     /// 自動的に candidate-side に巻き戻され、<see cref="GraphTraversal{T}.FilterByKnn"/> 相当の
     /// graph-first プランに変換される。フィルタが小さい場合は数倍〜数十倍高速化される。
     /// 明示的な graph-first 制御が必要な場合のみ <see cref="GraphTraversal{T}.FilterByKnn"/> を直接呼ぶ。
     /// </para>
     /// <para>
-    /// VEC-9: <c>g.Knn(idx, q, k).Limit(n)</c> で <c>n &lt; k</c> のとき、KNN の k を <c>min(k, n)</c> に
+    /// <c>g.Knn(idx, q, k).Limit(n)</c> で <c>n &lt; k</c> のとき、KNN の k を <c>min(k, n)</c> に
     /// 縮めて実行する (後段 filter は candidate-side 処理済のため安全)。
     /// </para>
     /// </remarks>
@@ -349,10 +349,10 @@ public static class GraphTransactionExtensions
         => new(tx, schema);
 
     /// <summary>
-    /// VEC-10: GraphStats を渡してトラバーサルソースを構築する。
+    /// GraphStats を渡してトラバーサルソースを構築する。
     /// <c>g.Knn(...).HasLabel(L)</c> 形式の push-down が、L の cardinality が高いときに
     /// vector-first にフォールバックして wall-clock 劣化を回避できる。stats を渡さない場合
-    /// は VEC-9 と同じ構造ヒントのみで graph-first を選ぶ。
+    /// は構造ヒントのみで graph-first を選ぶ。
     /// </summary>
     public static GraphTraversalSource G(this IGraphTransaction tx, ISchemaApi schema, GraphStats? stats)
         => new(tx, schema, stats);

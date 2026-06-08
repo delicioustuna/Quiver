@@ -20,7 +20,7 @@ namespace Quiver.Api;
 /// 中間結果を変数に保持して分岐させても副作用は発生しない。所属トランザクションの境界を
 /// 越えて利用しないこと。
 /// <para>
-/// ARCH-7: 各ステップは <see cref="LogicalOp"/> (論理プラン IR) を構築するだけで、KNN 押し下げ等の
+/// 各ステップは <see cref="LogicalOp"/> (論理プラン IR) を構築するだけで、KNN 押し下げ等の
 /// 最適化は終端で <see cref="LogicalOptimizer"/> に委譲する (旧 <c>PendingKnnBuilder</c> の DSL 埋め込みは撤去)。
 /// </para>
 /// </remarks>
@@ -61,21 +61,21 @@ public sealed class GraphTraversal<T>
         _stats = stats;
     }
 
-    /// <summary>GC-6: 同じエイリアスセットを引き継いだ後続トラバーサルを構築する内部ヘルパ。</summary>
+    /// <summary>同じエイリアスセットを引き継いだ後続トラバーサルを構築する内部ヘルパ。</summary>
     private GraphTraversal<U> Chain<U>(LogicalOp plan, Func<QueryRow, U> projection, int entityColumn)
         => new(_tx, _schema, plan, projection, entityColumn, _aliases, _stats);
 
-    /// <summary>VEC-10: alias を持ち越さない (= タプル形状をリセットする) 新規 traversal を構築する内部ヘルパ。stats だけは引き継ぐ。</summary>
+    /// <summary>alias を持ち越さない (= タプル形状をリセットする) 新規 traversal を構築する内部ヘルパ。stats だけは引き継ぐ。</summary>
     private GraphTraversal<U> Rebase<U>(LogicalOp plan, Func<QueryRow, U> projection, int entityColumn, Dictionary<string, int>? aliases = null)
         => new(_tx, _schema, plan, projection, entityColumn, aliases, _stats);
 
-    /// <summary>ARCH-7: 論理プランを最適化 (KNN 押し下げ等) してから物理オペレータへ落とす。</summary>
+    /// <summary>論理プランを最適化 (KNN 押し下げ等) してから物理オペレータへ落とす。</summary>
     private IPhysicalOperator Compile() => CompilePlan(_plan);
 
-    /// <summary>ARCH-7: テスト用 — 現在の論理プランに optimizer を適用した結果を公開する (KNN 押し下げ判定の検証)。</summary>
+    /// <summary>テスト用 — 現在の論理プランに optimizer を適用した結果を公開する (KNN 押し下げ判定の検証)。</summary>
     internal LogicalOp Optimized() => LogicalOptimizer.Optimize(_plan, _stats, _schema);
 
-    /// <summary>ARCH-7: 任意の論理プランを最適化 + 物理化する共通ヘルパ (集約 row path 用)。</summary>
+    /// <summary>任意の論理プランを最適化 + 物理化する共通ヘルパ (集約 row path 用)。</summary>
     private IPhysicalOperator CompilePlan(LogicalOp plan)
         => PhysicalPlanner.Plan(LogicalOptimizer.Optimize(plan, _stats, _schema), _schema);
 
@@ -100,7 +100,7 @@ public sealed class GraphTraversal<T>
     }
 
     /// <summary>
-    /// VEC-9: pure-filter を plan に積む共通ヘルパ。<paramref name="factoryWithCol"/> は filter を適用する
+    /// pure-filter を plan に積む共通ヘルパ。<paramref name="factoryWithCol"/> は filter を適用する
     /// 対象列番号を受け取り、predicate ファクトリを返す。KNN 押し下げ (candidate-side rewrite) は
     /// 終端で <see cref="LogicalOptimizer"/> が <see cref="FilterOp"/> 連鎖から再構成する。
     /// </summary>
@@ -227,7 +227,7 @@ public sealed class GraphTraversal<T>
     }
 
     /// <summary>
-    /// GC-6: Out/In/Both と OutRelationships/InRelationships/BothRelationships の共通ヘルパ。
+    /// Out/In/Both と OutRelationships/InRelationships/BothRelationships の共通ヘルパ。
     /// 持ち越し対象の上流列リスト (重複排除 + ソート済み) と、新しい末尾位置を指す
     /// 書き換え済みのエイリアスマップを返す。
     /// </summary>
@@ -280,14 +280,14 @@ public sealed class GraphTraversal<T>
 
     // ── GC-1: presence checks ────────────────────────────────────────────────
 
-    /// <summary>GC-1: プロパティ <paramref name="key"/> を保持する要素のみを通す (Gremlin の <c>.has(key)</c>)。</summary>
+    /// <summary>プロパティ <paramref name="key"/> を保持する要素のみを通す (Gremlin の <c>.has(key)</c>)。</summary>
     public GraphTraversal<T> Has(string key)
     {
         var keyId = _schema.GetOrCreatePropertyKey(key);
         return ApplyPureFilter(col => _ => new PropertyExistsPredicate(col, keyId, mustExist: true) { Entity = EntityKindForT });
     }
 
-    /// <summary>GC-1: プロパティ <paramref name="key"/> を持たない要素のみを通す (Gremlin の <c>.hasNot</c>)。</summary>
+    /// <summary>プロパティ <paramref name="key"/> を持たない要素のみを通す (Gremlin の <c>.hasNot</c>)。</summary>
     public GraphTraversal<T> HasNot(string key)
     {
         // TryGet があれば不要なトークン ID 割り当てを避けられるが、ISchemaApi.TryGet は
@@ -298,13 +298,13 @@ public sealed class GraphTraversal<T>
     }
 
     /// <summary>
-    /// GC-2: Cypher の <c>IS NULL</c> — プロパティ <paramref name="key"/> を保持しない要素のみを通す。
+    /// Cypher の <c>IS NULL</c> — プロパティ <paramref name="key"/> を保持しない要素のみを通す。
     /// <see cref="HasNot(string)"/> の糖衣構文。
     /// </summary>
     public GraphTraversal<T> IsNull(string key) => HasNot(key);
 
     /// <summary>
-    /// GC-2: Cypher の <c>IS NOT NULL</c> — プロパティ <paramref name="key"/> を保持する要素のみを通す。
+    /// Cypher の <c>IS NOT NULL</c> — プロパティ <paramref name="key"/> を保持する要素のみを通す。
     /// <see cref="Has(string)"/> の糖衣構文。
     /// </summary>
     public GraphTraversal<T> IsNotNull(string key) => Has(key);
@@ -312,7 +312,7 @@ public sealed class GraphTraversal<T>
     // ── GC-2: traversal-level boolean composition ────────────────────────────
 
     /// <summary>
-    /// GC-2: Gremlin の <c>.and(t1, t2, …)</c> — すべてのサブトラバーサルが
+    /// Gremlin の <c>.and(t1, t2, …)</c> — すべてのサブトラバーサルが
     /// 少なくとも 1 行を生成する要素のみを通す。
     /// </summary>
     public GraphTraversal<T> And(params Func<SubTraversal, SubTraversal>[] traversals)
@@ -322,7 +322,7 @@ public sealed class GraphTraversal<T>
         return CombineSubTraversals(traversals, useOr: false);
     }
 
-    /// <summary>GC-2: Gremlin の <c>.or(t1, t2, …)</c> — いずれかのサブトラバーサルがマッチする要素のみを通す。</summary>
+    /// <summary>Gremlin の <c>.or(t1, t2, …)</c> — いずれかのサブトラバーサルがマッチする要素のみを通す。</summary>
     public GraphTraversal<T> Or(params Func<SubTraversal, SubTraversal>[] traversals)
     {
         if (traversals is null || traversals.Length == 0)
@@ -349,7 +349,7 @@ public sealed class GraphTraversal<T>
 
     // ── GC-1: pagination ─────────────────────────────────────────────────────
 
-    /// <summary>GC-1: 最大 <paramref name="n"/> 件まで放出する (Gremlin の <c>.limit</c>)。</summary>
+    /// <summary>最大 <paramref name="n"/> 件まで放出する (Gremlin の <c>.limit</c>)。</summary>
     public GraphTraversal<T> Limit(long n)
     {
         if (n < 0) throw new ArgumentOutOfRangeException(nameof(n));
@@ -357,14 +357,14 @@ public sealed class GraphTraversal<T>
         return Chain(new LimitOp(_plan, n, Skip: 0), _projection, _entityColumn);
     }
 
-    /// <summary>GC-1: 先頭 <paramref name="n"/> 件をスキップしてから放出を開始する (Gremlin の <c>.skip</c>)。</summary>
+    /// <summary>先頭 <paramref name="n"/> 件をスキップしてから放出を開始する (Gremlin の <c>.skip</c>)。</summary>
     public GraphTraversal<T> Skip(long n)
     {
         if (n < 0) throw new ArgumentOutOfRangeException(nameof(n));
         return Chain(new LimitOp(_plan, long.MaxValue, Skip: n), _projection, _entityColumn);
     }
 
-    /// <summary>GC-1: 半開区間 <c>[from, to)</c> のウィンドウを放出する (Gremlin の <c>.range(a, b)</c>)。</summary>
+    /// <summary>半開区間 <c>[from, to)</c> のウィンドウを放出する (Gremlin の <c>.range(a, b)</c>)。</summary>
     public GraphTraversal<T> Range(long from, long to)
     {
         if (from < 0 || to < from)
@@ -374,7 +374,7 @@ public sealed class GraphTraversal<T>
 
     // ── GC-1: 終端 / 存在判定 ──────────────────────────────────────
 
-    /// <summary>GC-1: トラバーサルが少なくとも 1 件放出する場合に <c>true</c> (Gremlin の <c>.hasNext</c>)。</summary>
+    /// <summary>トラバーサルが少なくとも 1 件放出する場合に <c>true</c> (Gremlin の <c>.hasNext</c>)。</summary>
     public bool HasNext()
     {
         using var cursor = AsCursor();
@@ -402,7 +402,7 @@ public sealed class GraphTraversal<T>
 
     // ── GC-1: エッジ端点解決 ──────────────────────────────────────
 
-    /// <summary>GC-1: Gremlin の <c>.outV()</c> — 現在のエッジのソース (起点) ノードに解決する。</summary>
+    /// <summary>Gremlin の <c>.outV()</c> — 現在のエッジのソース (起点) ノードに解決する。</summary>
     public GraphTraversal<NodeId> SourceNode()
     {
         // RelationshipEndpointOp は単一 NodeId のタプルを放出し、上流を破棄する。
@@ -412,14 +412,14 @@ public sealed class GraphTraversal<T>
         return Rebase<NodeId>(rep, row => row.GetNodeId(0), 0);
     }
 
-    /// <summary>GC-1: Gremlin の <c>.inV()</c> — 現在のエッジのターゲット (終点) ノードに解決する。</summary>
+    /// <summary>Gremlin の <c>.inV()</c> — 現在のエッジのターゲット (終点) ノードに解決する。</summary>
     public GraphTraversal<NodeId> TargetNode()
     {
         var rep = new RelationshipEndpointOp(_plan, _entityColumn, RelationshipEndpoint.Target);
         return Rebase<NodeId>(rep, row => row.GetNodeId(0), 0);
     }
 
-    /// <summary>GC-1: Gremlin の <c>.otherV()</c> — 進入方向に対する「向こう側」の端点に解決する。</summary>
+    /// <summary>Gremlin の <c>.otherV()</c> — 進入方向に対する「向こう側」の端点に解決する。</summary>
     public GraphTraversal<NodeId> OtherNode()
     {
         var rep = new RelationshipEndpointOp(_plan, _entityColumn, RelationshipEndpoint.Other);
@@ -427,7 +427,7 @@ public sealed class GraphTraversal<T>
     }
 
     /// <summary>
-    /// VEC-6: graph-first KNN。上流の各ノードを candidate set として KnnSearchFiltered を呼ぶ。
+    /// graph-first KNN。上流の各ノードを candidate set として KnnSearchFiltered を呼ぶ。
     /// 通常は <c>g.Knn(...).HasLabel(...).Has(...)</c> チェーンが LogicalOptimizer の KnnPushdown で
     /// 自動的にこの形に変換される。本メソッドは明示的に graph-first を選びたい (例: 二段 KNN や
     /// 複雑な candidate を作る場合) のエスケープハッチとして残す。詳細セマンティクスはクラスドキュメント参照。
@@ -519,7 +519,7 @@ public sealed class GraphTraversal<T>
              or Storage.Records.PropertyValueType.Int64;
 
     /// <summary>
-    /// ARCH-5c Phase 5d: チェーンが「ある kind の全件 full scan」なら、対象 <paramref name="key"/> が
+    /// チェーンが「ある kind の全件 full scan」なら、対象 <paramref name="key"/> が
     /// 列化済みかを backend に問い合わせ、列スキャンの集約結果を得る。full scan でない / 列が無い /
     /// mixed のときは false で、呼び出し側が row path にフォールバックする。
     /// </summary>
@@ -729,7 +729,7 @@ public sealed class GraphTraversal<T>
     // ── GC-6: as / select — タプルスキーマ拡張 ──────────────────────────
 
     /// <summary>
-    /// GC-6: Gremlin の <c>.as("label")</c> — 現在のエンティティ列を <paramref name="label"/> に
+    /// Gremlin の <c>.as("label")</c> — 現在のエンティティ列を <paramref name="label"/> に
     /// ピン留めし、下流の <see cref="Select(string)"/> から復元できるようにする。
     /// 後続の <c>Out</c>/<c>In</c>/<c>Both</c>/<c>OutRelationships</c>/<c>InRelationships</c>/<c>BothRelationships</c>
     /// は pin した列を持ち越す (operator の末尾タプルスロットに保持) ため、
@@ -751,7 +751,7 @@ public sealed class GraphTraversal<T>
     }
 
     /// <summary>
-    /// GC-6: Gremlin の <c>.select("label")</c> — 以前 <see cref="As"/> で pin した列から
+    /// Gremlin の <c>.select("label")</c> — 以前 <see cref="As"/> で pin した列から
     /// トラバーサルを続行する。pin 先は常にエンティティ列のため、戻り値は
     /// <typeparamref name="T"/> によらず <see cref="NodeId"/> となる。以後のステップを通常通り連結できる。
     /// </summary>
@@ -766,7 +766,7 @@ public sealed class GraphTraversal<T>
     }
 
     /// <summary>
-    /// GC-6: Gremlin の <c>.select("a","b",…)</c> — 各行をタプルとして返す終端射影。
+    /// Gremlin の <c>.select("a","b",…)</c> — 各行をタプルとして返す終端射影。
     /// 射影クロージャは <see cref="MatchTuple"/> を受け取り、生のタプル列番号を
     /// 露出せずにエイリアス名で値を解決できる。
     /// </summary>

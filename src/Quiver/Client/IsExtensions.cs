@@ -5,7 +5,7 @@ using Quiver.Query.Logical;
 namespace Quiver.Api;
 
 /// <summary>
-/// GC-1: プロパティ値トラバーサル向けの <c>.is(value)</c> ステップ。
+/// プロパティ値トラバーサル向けの <c>.is(value)</c> ステップ。
 /// <c>t.Values(key).Is(v)</c> を <c>t.Has(key, v).Values(key)</c> に書き換えることで、
 /// 等値比較を (バイト列が存在する) プロパティストア側で行わせる。タプルストリームに
 /// 射影後フィルタを掛ける方法だと、単一パスの Volcano モデルでは UTF-8 バイト列を
@@ -13,7 +13,7 @@ namespace Quiver.Api;
 /// </summary>
 public static class IsExtensions
 {
-    /// <summary>GC-1: <c>.Values(key).Is(value)</c> 用の文字列等値フィルタ。</summary>
+    /// <summary><c>.Values(key).Is(value)</c> 用の文字列等値フィルタ。</summary>
     public static GraphTraversal<string> Is(this GraphTraversal<string> traversal, string value)
     {
         ArgumentNullException.ThrowIfNull(traversal);
@@ -35,7 +35,7 @@ public static class IsExtensions
             row => row.GetString(valueCol), traversal._entityColumn);
     }
 
-    /// <summary>GC-1: <c>.Values(key).Is(value)</c> 用の <see cref="long"/> 等値フィルタ。</summary>
+    /// <summary><c>.Values(key).Is(value)</c> 用の <see cref="long"/> 等値フィルタ。</summary>
     public static GraphTraversal<long> Is(this GraphTraversal<long> traversal, long value)
     {
         ArgumentNullException.ThrowIfNull(traversal);

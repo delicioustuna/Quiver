@@ -18,24 +18,24 @@ public interface ISchemaApi
     PropertyKeyId GetOrCreatePropertyKey(string name);
 
     /// <summary>
-    /// GC-1: ラベル ID から名前へ逆引きする。未登録 ID では <c>null</c> を返す。
+    /// ラベル ID から名前へ逆引きする。未登録 ID では <c>null</c> を返す。
     /// Gremlin の <c>.label()</c> ステップや、ID を元の名前で表示したい診断系で利用する。
     /// </summary>
     string? GetLabelName(LabelId id);
 
     /// <summary>
-    /// OP-4: 自動作成せず、ラベル名から ID を引く。未登録なら <c>false</c>。
+    /// 自動作成せず、ラベル名から ID を引く。未登録なら <c>false</c>。
     /// MigrationContext が「rename が実際に状態を変えるかどうか」を判定するために使う。
     /// </summary>
     bool TryGetLabelId(string name, out LabelId id);
 
-    /// <summary>OP-4: 自動作成せず、プロパティキー名から ID を引く。</summary>
+    /// <summary>自動作成せず、プロパティキー名から ID を引く。</summary>
     bool TryGetPropertyKeyId(string name, out PropertyKeyId id);
 
-    /// <summary>OP-4: 自動作成せず、リレーションシップ型名から ID を引く。</summary>
+    /// <summary>自動作成せず、リレーションシップ型名から ID を引く。</summary>
     bool TryGetRelationshipTypeId(string name, out RelationshipTypeId id);
 
-    /// <summary>OP-4: 指定名の索引が存在するか。AddIndex が新規作成になるかの判定用。</summary>
+    /// <summary>指定名の索引が存在するか。AddIndex が新規作成になるかの判定用。</summary>
     bool IndexExists(string indexName);
 
     /// <summary>新規インデックスを作成する。</summary>
@@ -48,21 +48,21 @@ public interface ISchemaApi
     IReadOnlyList<IndexInfo> ListIndexes();
 
     /// <summary>
-    /// OP-4: ラベル名を <paramref name="oldName"/> から <paramref name="newName"/> へ変更する。
+    /// ラベル名を <paramref name="oldName"/> から <paramref name="newName"/> へ変更する。
     /// ラベル ID は維持されるため、既存ノードのラベル所属関係は変更されない (テキスト表記のみ更新)。
     /// 旧名が無く新名が既にある場合は冪等な no-op として <c>true</c>。旧名も新名も無い場合は <c>false</c>。
     /// 新名が他のラベル ID に占有されているときは <see cref="InvalidOperationException"/>。
     /// </summary>
     bool RenameLabel(string oldName, string newName);
 
-    /// <summary>OP-4: プロパティキー名を rename する。意味論は <see cref="RenameLabel"/> と同じ。</summary>
+    /// <summary>プロパティキー名を rename する。意味論は <see cref="RenameLabel"/> と同じ。</summary>
     bool RenamePropertyKey(string oldName, string newName);
 
-    /// <summary>OP-4: リレーションシップ型名を rename する。意味論は <see cref="RenameLabel"/> と同じ。</summary>
+    /// <summary>リレーションシップ型名を rename する。意味論は <see cref="RenameLabel"/> と同じ。</summary>
     bool RenameRelationshipType(string oldName, string newName);
 
     /// <summary>
-    /// OP-4 / ARCH-4: インデックス名を rename する。索引は <c>graph.quiver</c> 内テナントとして
+    /// インデックス名を rename する。索引は <c>graph.quiver</c> 内テナントとして
     /// 同居するため、リネームはカタログ上の name 付け替えのみで完結し (テナント実体・ページ・WAL
     /// 整合性は不変)、物理ファイル rename は発生しない。
     /// </summary>
