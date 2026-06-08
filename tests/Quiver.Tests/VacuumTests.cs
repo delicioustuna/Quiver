@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Quiver.Api;
 using Quiver.Maintenance;
 using Xunit;
 
@@ -110,6 +111,71 @@ public sealed class VacuumTests : IDisposable
 
         // 元の ID 範囲 [0..9] のいずれかが再利用される (free list / hwm 縮減後の dense slot)。
         newIds.Should().OnlyContain(id => id < 10);
+    }
+
+    // gen-stamp-fastpath: 再利用 (gen>=2) が起きた後、クエリ結果の NodeId が bump 世代を
+    // 載せること = 世代 stamping の高速パスが正しく per-row read へフォールバックしている検証。
+    [Fact]
+    public void Query_after_slot_reuse_returns_bumped_generation()
+    {
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+
+        long seq;
+        using (var tx = db.BeginTransaction())
+        {
+            var a = tx.CreateNode("Person");
+            seq = a.Sequence;
+            a.Generation.Should().Be(1);
+            tx.Commit();
+        }
+        using (var tx = db.BeginTransaction())
+        {
+            tx.DeleteNode(new Core.NodeId(seq));
+            tx.Commit();
+        }
+        db.Vacuum().ReclaimedNodes.Should().Be(1);
+
+        Core.NodeId reused;
+        using (var tx = db.BeginTransaction())
+        {
+            reused = tx.CreateNode("Person");
+            tx.Commit();
+        }
+        reused.Sequence.Should().Be(seq);   // 同 slot を再利用
+        reused.Generation.Should().Be(2);   // 世代 bump
+
+        using (var tx = db.BeginReadOnlyTransaction())
+        {
+            var rows = tx.G(db.Schema).Nodes().ToList();
+            rows.Should().ContainSingle();
+            rows[0].Sequence.Should().Be(seq);
+            rows[0].Generation.Should().Be(2);          // stamping が bump 世代を載せる
+            rows[0].Value.Should().Be(reused.Value);    // 往復一貫
+        }
+    }
+
+    // gen-stamp-fastpath: AnyReuse フラグが sidecar ヘッダに永続化され、reopen 後も
+    // 高速パスが無効のまま正しい世代を返すこと。
+    [Fact]
+    public void Reopen_after_slot_reuse_keeps_bumped_generation_in_query()
+    {
+        string path = System.IO.Path.Combine(_dir, "graph.quiver");
+        long seq;
+        using (var db = GraphDatabase.Open(path))
+        {
+            using (var tx = db.BeginTransaction()) { seq = tx.CreateNode("P").Sequence; tx.Commit(); }
+            using (var tx = db.BeginTransaction()) { tx.DeleteNode(new Core.NodeId(seq)); tx.Commit(); }
+            db.Vacuum();
+            using (var tx = db.BeginTransaction()) { tx.CreateNode("P").Generation.Should().Be(2); tx.Commit(); }
+        }
+
+        using (var db = GraphDatabase.Open(path))
+        using (var tx = db.BeginReadOnlyTransaction())
+        {
+            var rows = tx.G(db.Schema).Nodes().ToList();
+            rows.Should().ContainSingle();
+            rows[0].Generation.Should().Be(2);
+        }
     }
 
     [Fact]

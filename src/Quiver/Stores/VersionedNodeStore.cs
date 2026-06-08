@@ -48,6 +48,9 @@ internal sealed class VersionedNodeStore : INodeStore
     private readonly IEntityVersionStore _versions;
     private LabelNodeIndex? _labelIndex;
     private long _inUseCount;
+    // gen-stamp-fastpath: 世代再利用が一度でも起きたか。false の間は全ライブ slot の
+    // generation = 1 が成立し、CurrentGeneration を sidecar read 無しで確定できる。
+    private bool _anyReuse;
 
     public VersionedNodeStore(IPagedFile heapFile, ItemPointerMap map,
         LabelNodeIndex? labelIndex = null, IEntityVersionStore? versions = null)
@@ -58,6 +61,7 @@ internal sealed class VersionedNodeStore : INodeStore
         _versions = versions ?? new InMemoryEntityVersionStore();
         _labelIndex = labelIndex;
         _inUseCount = RecomputeInUse();
+        _anyReuse = _versions.AnyGenerationReuse;
     }
 
     public void AttachLabelIndex(LabelNodeIndex labelIndex) => _labelIndex = labelIndex;
@@ -80,6 +84,13 @@ internal sealed class VersionedNodeStore : INodeStore
         if (seq < 0) seq = _map.Hwm;
         // 世代は sidecar 由来。新規 seq は Unset(0)→1、再利用 seq は前回値 +1。
         long generation = _versions.Read(seq).Generation + 1;
+        // gen-stamp-fastpath: generation >= 2 は free list の slot 再利用。以後 stamping は
+        // 高速パス (gen=1 即返し) を使えないため、永続フラグを立て CurrentGeneration を実読みへ戻す。
+        if (generation >= 2 && !_anyReuse)
+        {
+            _versions.MarkGenerationReuse();
+            _anyReuse = true;
+        }
 
         Span<byte> payload = stackalloc byte[InlinePropertyCodec.BaseSize(InlinePropertyCodec.NodeFixedSize)];
         payload[OffFlags] = FlagInUse;
@@ -169,6 +180,9 @@ internal sealed class VersionedNodeStore : INodeStore
     public int CurrentGeneration(long localId)
     {
         if (localId < 0 || localId >= _map.Hwm) return -1;
+        // gen-stamp-fastpath: 再利用が一度も起きていなければ [0, Hwm) の全 slot は generation = 1
+        // (monotonic 採番 + 再利用なし)。per-row の version sidecar read を省く。
+        if (!_anyReuse) return 1;
         long gen = _versions.Read(localId).Generation;
         return gen > int.MaxValue ? int.MaxValue : (int)gen;
     }
