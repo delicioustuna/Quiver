@@ -86,6 +86,45 @@ vacuum 再利用後の経路も従来どおり正しい世代を返すこと（�
 `src/Quiver/IQueryCursor.cs`（cursor バッファ再利用）。
 ※ `LogicalOptimizer`/`PhysicalPlanner`/plan cache は **不要**（spike で棄却）。
 
+### A-sub 着手手順（別セッション cold start 用）
+
+**現状**: A-main は develop 採用済み（merge `8e8e0a8`、`docs/benchmarks/2026-06-08_TaskA_GenStampFastPath.md`）。
+世代 stamping は高速化済みで、1-hop クエリ（`AsCursor` 経路）の残コスト ~78 ns/edge のうち、
+per-row の `TupleSlot[]`/`byteData` 確保（`--spike-a` で allocated **6,584 bytes/query**）が主。
+`QueryRow` は struct なので確保コストは配列側。
+
+**目的**: streaming カーソル `PhysicalOperatorCursor`（`src/Quiver/IQueryCursor.cs`）の per-row 配列確保を
+1 回確保 + 再利用に置き換え、per-row アロケーションをゼロ化する。
+
+**契約根拠**: `IQueryCursor.Current` は「次の `MoveNext` まで有効」（同 interface の doc 明記）。
+`TraversalCursor<T>` は `_projection(cursor.Current)` で即座に値型へ射影（コピーアウト）するため、
+slots バッファを跨いで再利用しても安全。
+
+**スコープ（重要）**:
+- 対象は **streaming 経路のみ**（`GraphTransaction.ExecuteCursor` → `PhysicalOperatorCursor`）。
+- `GraphTransaction.Execute`（materialize → `List<QueryRow>`、`ToList`/`Next`/`Count` が使う、`GraphTransaction.cs` 548-）は
+  行が保持されるため **プール対象外**（各行独立の配列が要る）。触らない。
+
+**実装手順**:
+1. `PhysicalOperatorCursor` に再利用バッファ `private TupleSlot[]? _slots;`（初回 `MoveNext` で `cur.ColumnCount` 長を確保し以後再利用）。
+2. `MoveNext` で `new TupleSlot[...]` を毎回確保せず `_slots` を上書き。`_current = new QueryRow(_slots, _byteData)`（struct なので確保なし）。
+3. `byteData` は string/bytes 列が無ければ null のまま（典型の `NeighborOnly` では発生しない）。列がある場合のみ
+   配列を保持し、行ごとに該当スロットを詰め直す（前行の残骸を残さない）。
+4. （任意・別件）`GraphTraversal.Count()`（`src/Quiver/Client/GraphTraversal.cs`）は行を捨てるので
+   materialize ではなく `ExecuteCursor` で数えるだけにすると確保を回避できる — A-sub の射程外なら触らない。
+
+**Kill criteria**:
+- `--spike-a` の `allocated` が 6,584 bytes/query → 一定（初回バッファのみ、数百 bytes 以下）。
+- `--spike-a` FULL / `--basic-perf` wrapper の per-edge が 78 → **≤50 ns/edge**。
+- クエリ結果・行順・値が不変。
+
+**検証**: `dotnet build benchmarks/Quiver.Benchmarks -c Release` → `--spike-a` / `--basic-perf` before/after。
+`dotnet test tests/Quiver.Tests` + `tests/Quiver.Operators.Tests`（カーソルは全 traversal が使う）。
+緑 & kill criteria クリアで commit（`perf: [Task A-sub] streaming cursor バッファ再利用`）→ develop。
+
+**対象ファイル**: `src/Quiver/IQueryCursor.cs`（`PhysicalOperatorCursor`）。射程を広げる場合のみ
+`src/Quiver/Client/GraphTraversal.cs`（`Count`）。
+
 ---
 
 ## タスク B — 非bulk 読取経路の高速化（高優先）
