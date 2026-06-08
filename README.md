@@ -349,6 +349,7 @@ AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch で計測した
 | 1-hop scan（degree 100、AdjacencyBlockStore） | < 0.5 µs | **~1.4 µs**（~14 ns/edge） |
 | 1-hop scan（degree 100、linked-list / 索引なし） | — | **~230 µs**（~2.3 µs/edge、MVCC 可視性込み） |
 | BFS 2-hop（ハブ degree 100、leaf 10,000、隣接ブロック） | < 5 ms | **~0.14 ms** |
+| 1-hop クエリ（`g.Node().Out()`、degree 100、隣接ブロック） | クエリラッパ < 5% | **~8 µs/query**（~78 ns/edge、生隣接の ~5.6×） |
 | BulkLoader（10 万 edge） | 通常 TX 比 5× 以上高速 | 通常 TX（batch 1000）比 **~11.8×** |
 
 > **読み取りは隣接インデックスの有無で 100× 以上変わる。** `BeginBulkLoad(buildAdjacencyIndex: true)`
@@ -361,9 +362,11 @@ AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch で計測した
 > （`GraphDatabaseOptions.GroupCommitWindow`）でスループットが桁違いに上がる
 > （64-thread で window=0 比 ~28×、別計測 FT-27）。
 >
-> クエリ DSL（`g.Node().Out()` 等）はクエリごとにプラン構築 + 物理オペレータ生成の固定コストを
-> 払うため、degree 100 程度の小規模スキャンでは生の隣接アクセス比で相対オーバーヘッドが大きい
-> （~60 µs/query）。大きな結果集合で償却される設計。
+> **クエリ DSL（`g.Node().Out()` 等）の 1-hop（degree 100）は ~8 µs/query（~78 ns/edge、生の隣接
+> アクセスの ~5.6×）。** プラン構築 + 物理オペレータ生成は ~0.4 µs と僅少。結果行ごとの NodeId 世代
+> スタンプ（識別子の往復一貫性のための version 解決）は、スロット再利用（vacuum 回収）が無い間は
+> version sidecar 読み取りを省く高速パスで処理する。これにより 1-hop クエリは ~62 → ~8 µs/query
+> （**~7.7×**）に短縮した。
 
 **PW-18 (複雑/ネストクエリ regression sentinel)**: `HasLabel + Has + Out + Has + Where(sub) + Order + Limit` の 7 step チェーンが 10K Person / AvgDegree=8 で ~367 ms、`Union(3 branches)` は単一 Out の 2.7× (16 → 44 ms)、`As/Select<T>` carry-column は no-alias 比 ±3% 以内。詳細: `benchmarks/Quiver.Benchmarks/{FilterChainExpand,BranchedTraversal,AsSelectProjection,MergeWorkload,OptimizerPlanRegression}Benchmarks.cs`。
 

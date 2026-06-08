@@ -150,9 +150,8 @@ A/B/C は別 commit。**C のみ spike 結果を提示してから本実装の�
 
 ## 進捗
 
-- [ ] A0 spike（配分計測）
-- [ ] A1 低コスト改善 → 採否
-- [ ] A2 plan cache（必要時）→ 採否
-- [ ] A 本実装 + README/bench + commit
+- [x] A0 spike（配分計測）— **仮説反転**: 真因は per-row 世代 stamping (sidecar read) 88%、plan cache 不要
+- [x] A-main 実装 + 計測（7.7×）+ 回帰テスト + README/bench → **develop 採用** (merge 8e8e0a8)
+- [ ] A-sub: streaming cursor の per-row `TupleSlot[]`/`QueryRow` 確保をバッファ再利用へ（残 ~78 ns/edge）
 - [ ] B1 spike → B2 実装 → B1 opt-in → commit
 - [ ] C0 spike → 採否（≥85%）→（採用時）本実装 + format V8 + commit
