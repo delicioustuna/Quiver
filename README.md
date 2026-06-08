@@ -331,19 +331,39 @@ dotnet run --project sandbox/QuiverSandbox
 
 コア層のカバレッジ目標: **分岐カバレッジ 80% 以上**
 
-## 性能目標
+## 性能目標と実測
 
-以下はすべて設計目標値。実測値は `benchmarks/` の BenchmarkDotNet で計測可能。
+「設計目標」は初期設計時の目標値。「実測」は現行ビルドの参考計測値で、
+standalone runner `--basic-perf`（[BasicPerfRunner.cs](benchmarks/Quiver.Benchmarks/Standalone/BasicPerfRunner.cs)、
+`dotnet run --project benchmarks/Quiver.Benchmarks -c Release -- --basic-perf`）を
+AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch で計測した値（2026-06-08）。
+厳密な再現は `benchmarks/Quiver.Benchmarks` の BenchmarkDotNet ベンチで。
 
-| 操作 | 設計目標 |
-|---|---|
-| `CreateNode` | < 1 µs |
-| `SetProperty` | < 2 µs |
-| `EnumerateRelationships`（隣接 10 件） | < 1.5 µs |
-| クエリエンジンのラッパオーバーヘッド | < 5% |
-| BulkLoader（100 万 edge） | 通常 TX 比 5× 以上高速 |
-| 1-hop scan（degree 100、AdjacencyBlockStore） | < 0.5 µs |
-| BFS 2-hop（ハブ degree 100、2 段） | < 5 ms |
+| 操作 | 設計目標 | 実測 (2026-06-08) |
+|---|---|---|
+| ノード作成（単一 tx 償却） | < 1 µs ※インメモリ操作目標 | **~17 µs/op**（~59K ops/s） |
+| ノード作成 + プロパティ設定（同上） | < 2 µs | **~29 µs/op** |
+| リレーション作成（同上） | — | **~37 µs/op** |
+| 単発 durable commit（1 op = 1 commit、単一スレッド） | — | **~1.0 ms/commit**（WAL flush 律速） |
+| `EnumerateRelationships`（隣接 10 件、隣接ブロック） | < 1.5 µs | **~1.1 µs** |
+| 1-hop scan（degree 100、AdjacencyBlockStore） | < 0.5 µs | **~1.4 µs**（~14 ns/edge） |
+| 1-hop scan（degree 100、linked-list / 索引なし） | — | **~230 µs**（~2.3 µs/edge、MVCC 可視性込み） |
+| BFS 2-hop（ハブ degree 100、leaf 10,000、隣接ブロック） | < 5 ms | **~0.14 ms** |
+| BulkLoader（10 万 edge） | 通常 TX 比 5× 以上高速 | 通常 TX（batch 1000）比 **~11.8×** |
+
+> **読み取りは隣接インデックスの有無で 100× 以上変わる。** `BeginBulkLoad(buildAdjacencyIndex: true)`
+> で隣接ブロックを構築すると 1-hop が ~14 ns/edge になり、索引なしの linked-list 経路
+> （~2.3 µs/edge、MVCC 可視性チェック込み）より degree 100 で **~160×** 速い。読み取り主体の
+> ワークロードでは隣接インデックスを構築すること。
+>
+> **書き込みは単発 durable commit が ~1 ms（WAL flush 律速）。** 大量書き込みは 1 tx にまとめる
+> （償却 ~17 µs/node）か BulkLoader を使う。並行 commit では group commit
+> （`GraphDatabaseOptions.GroupCommitWindow`）でスループットが桁違いに上がる
+> （64-thread で window=0 比 ~28×、別計測 FT-27）。
+>
+> クエリ DSL（`g.Node().Out()` 等）はクエリごとにプラン構築 + 物理オペレータ生成の固定コストを
+> 払うため、degree 100 程度の小規模スキャンでは生の隣接アクセス比で相対オーバーヘッドが大きい
+> （~60 µs/query）。大きな結果集合で償却される設計。
 
 **PW-18 (複雑/ネストクエリ regression sentinel)**: `HasLabel + Has + Out + Has + Where(sub) + Order + Limit` の 7 step チェーンが 10K Person / AvgDegree=8 で ~367 ms、`Union(3 branches)` は単一 Out の 2.7× (16 → 44 ms)、`As/Select<T>` carry-column は no-alias 比 ±3% 以内。詳細: `benchmarks/Quiver.Benchmarks/{FilterChainExpand,BranchedTraversal,AsSelectProjection,MergeWorkload,OptimizerPlanRegression}Benchmarks.cs`。
 
