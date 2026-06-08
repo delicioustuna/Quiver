@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Logical;
 
 /// <summary>
-/// BA-7 / codex_advice_3 8 節。1 件のグラフミューテーションを表すセマンティックレコード。
+/// 1 件のグラフミューテーションを表すセマンティックレコード。
 ///
 /// 論理ミューテーションは書き込み中の <see cref="IGraphTransaction"/> によって、
 /// 各公開ミューテーション呼び出しの後に生成され、コミットまでバッファされる。
@@ -55,28 +55,35 @@ public readonly struct LogicalMutation
         PropertyValue = propertyValue;
     }
 
+    /// <summary>ノード作成のミューテーションレコードを生成する。</summary>
     public static LogicalMutation CreateNode(NodeId nodeId, string label)
         => new(LogicalMutationKind.CreateNode, nodeId: nodeId, tokenName: label);
 
+    /// <summary>ノード削除のミューテーションレコードを生成する。</summary>
     public static LogicalMutation DeleteNode(NodeId nodeId)
         => new(LogicalMutationKind.DeleteNode, nodeId: nodeId);
 
+    /// <summary>リレーションシップ作成のミューテーションレコードを生成する。</summary>
     public static LogicalMutation CreateRelationship(
         RelationshipId relId, NodeId source, NodeId target, string type)
         => new(LogicalMutationKind.CreateRelationship,
             nodeId: source, targetNodeId: target,
             relationshipId: relId, tokenName: type);
 
+    /// <summary>リレーションシップ削除のミューテーションレコードを生成する。</summary>
     public static LogicalMutation DeleteRelationship(RelationshipId relId)
         => new(LogicalMutationKind.DeleteRelationship, relationshipId: relId);
 
+    /// <summary>ノードプロパティ設定のミューテーションレコードを生成する。</summary>
     public static LogicalMutation SetNodeProperty(NodeId nodeId, string key, in LogicalPropertyValue value)
         => new(LogicalMutationKind.SetNodeProperty, nodeId: nodeId, propertyKey: key, propertyValue: value);
 
+    /// <summary>リレーションシッププロパティ設定のミューテーションレコードを生成する。</summary>
     public static LogicalMutation SetRelationshipProperty(RelationshipId relId, string key, in LogicalPropertyValue value)
         => new(LogicalMutationKind.SetRelationshipProperty,
             relationshipId: relId, propertyKey: key, propertyValue: value);
 
+    /// <summary>ノードプロパティ削除のミューテーションレコードを生成する。</summary>
     public static LogicalMutation RemoveNodeProperty(NodeId nodeId, string key)
         => new(LogicalMutationKind.RemoveNodeProperty, nodeId: nodeId, propertyKey: key);
 }

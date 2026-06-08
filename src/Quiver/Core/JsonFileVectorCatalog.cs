@@ -8,7 +8,7 @@ namespace Quiver.Core;
 /// インデックスとタスクの両方を 1 つの <c>vector_catalog.json</c> に保持し、
 /// ミューテーション毎にファイル全体を書き直す (規模は数十〜数百インデックスを想定するため、
 /// 書き換えコストはベクトル I/O に比べて無視できる)。並行アクセスはプロセス内ロックで直列化する —
-/// バイナリバックエンド自体が単一書き込みのため、これで十分。VEC-2。
+/// バイナリバックエンド自体が単一書き込みのため、これで十分。
 /// </summary>
 public sealed class JsonFileVectorCatalog : IVectorCatalog
 {
@@ -36,6 +36,7 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
         Load();
     }
 
+    /// <summary>新しいベクトルインデックスを登録する。空名 / 非正の次元 / 名前重複は <see cref="VectorException"/>。</summary>
     public void CreateIndex(VectorIndexSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
@@ -54,6 +55,7 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
         }
     }
 
+    /// <summary>指定名のインデックスと紐づくタスクを削除する。存在しなければ <c>false</c>。</summary>
     public bool DropIndex(string name)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
@@ -68,6 +70,7 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
         }
     }
 
+    /// <summary>指定名のインデックス仕様を取得する。見つかれば <c>true</c>。</summary>
     public bool TryGetIndex(string name, out VectorIndexSpec spec)
     {
         lock (_gate)
@@ -76,6 +79,7 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
         }
     }
 
+    /// <summary>登録済みインデックス仕様の一覧を返す。</summary>
     public IReadOnlyList<VectorIndexSpec> ListIndexes()
     {
         lock (_gate)
@@ -84,6 +88,7 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
         }
     }
 
+    /// <summary>指定キーの埋め込みタスクを取得する。無ければ <c>null</c>。</summary>
     public EmbeddingTaskRecord? GetTask(EmbeddingTaskKey key)
     {
         lock (_gate)
@@ -92,6 +97,7 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
         }
     }
 
+    /// <summary>埋め込みタスクを挿入または更新する。</summary>
     public void UpsertTask(EmbeddingTaskRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -102,6 +108,7 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
         }
     }
 
+    /// <summary>指定キーの埋め込みタスクを削除する。無ければ <c>false</c>。</summary>
     public bool DeleteTask(EmbeddingTaskKey key)
     {
         lock (_gate)
@@ -112,6 +119,7 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
         }
     }
 
+    /// <summary>埋め込みタスクを列挙する。<paramref name="indexName"/> 指定時はそのインデックス分のみ。</summary>
     public IEnumerable<EmbeddingTaskRecord> ListTasks(string? indexName = null)
     {
         lock (_gate)

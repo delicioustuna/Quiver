@@ -40,6 +40,7 @@ public sealed class BulkLoader : IDisposable
         _container = container;
     }
 
+    /// <summary>ノードを追加する (ラベル付き)。</summary>
     public void AppendNode(NodeId id, LabelId label)
     {
         ThrowIfCommitted();
@@ -47,12 +48,14 @@ public sealed class BulkLoader : IDisposable
         _nodes.Add(new PendingNode(id.Sequence, label.Value));
     }
 
+    /// <summary>リレーションシップを追加する (順不同で可)。</summary>
     public void AppendRelationship(RelationshipId id, NodeId from, NodeId to, RelationshipTypeId type)
     {
         ThrowIfCommitted();
         _rels.Add(new PendingRel(id.Sequence, from.Sequence, to.Sequence, type.Value));
     }
 
+    /// <summary>ノードにプロパティを追加する。</summary>
     public void AppendProperty(NodeId nodeId, PropertyKeyId key, in PropertyValue value)
     {
         ThrowIfCommitted();
@@ -68,11 +71,10 @@ public sealed class BulkLoader : IDisposable
     }
 
     /// <summary>
-    /// BA-6 / codex_advice_3 §7.2. Configure an inline payload lane so
-    /// <see cref="Commit"/> builds <c>AdjacencyBlockStoreV2</c> with the named
-    /// relationship property inlined per edge entry. Subsequent calls to
-    /// <see cref="AppendRelationshipPayload"/> populate the lane; edges
-    /// without a value receive <c>spec.DefaultRaw</c>.
+    /// inline payload lane を設定し、<see cref="Commit"/> で指定したリレーションシッププロパティを
+    /// エッジエントリ毎に inline 格納した <c>AdjacencyBlockStoreV2</c> を構築させる
+    /// (codex_advice_3 §7.2)。以後の <see cref="AppendRelationshipPayload"/> で lane を埋め、
+    /// 値の無いエッジには <c>spec.DefaultRaw</c> が入る。
     /// </summary>
     public void WithPayloadLane(PayloadLaneSpec spec)
     {
@@ -83,11 +85,9 @@ public sealed class BulkLoader : IDisposable
     }
 
     /// <summary>
-    /// BA-6: record an inline payload value for a relationship. Only the
-    /// values whose key matches <see cref="WithPayloadLane"/>'s spec are
-    /// inlined into the V2 view; other keys are dropped. The raw long is
-    /// either an Int64 value or <c>BitConverter.DoubleToInt64Bits(d)</c>
-    /// depending on the lane kind.
+    /// リレーションシップの inline payload 値を記録する。<see cref="WithPayloadLane"/> の spec と
+    /// キーが一致する値のみが V2 ビューに inline され、他キーは破棄される。生の long は lane の
+    /// 種別に応じて Int64 値または <c>BitConverter.DoubleToInt64Bits(d)</c>。
     /// </summary>
     public void AppendRelationshipPayload(RelationshipId relId, PropertyKeyId key, long rawValue)
     {
@@ -95,6 +95,7 @@ public sealed class BulkLoader : IDisposable
         _relPayloads[(relId.Sequence, key.Value)] = rawValue;
     }
 
+    /// <summary>溜めたノード / リレーションシップ / プロパティを 1 回のフラッシュで書き出し確定する。</summary>
     public void Commit()
     {
         ThrowIfCommitted();
@@ -107,6 +108,7 @@ public sealed class BulkLoader : IDisposable
             BuildAdjacencyIndex(_container);
     }
 
+    /// <summary>ローダを破棄する (現状は no-op)。</summary>
     public void Dispose() { }
 
     // -----------------------------------------------------------------------

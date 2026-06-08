@@ -4,7 +4,7 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// PW-9: 1000 万エッジ超の取り込みを想定した <see cref="BulkLoader"/> のストリーミング版。
+/// 1000 万エッジ超の取り込みを想定した <see cref="BulkLoader"/> のストリーミング版。
 /// <c>AppendRelationship</c> 中はリレーションシップレコードを <c>List&lt;PendingRel&gt;</c> に溜めず、
 /// 一時バイナリファイルにストリーミング書き出しする。<see cref="Commit"/> で一時ファイルを 2 回読み出す —
 /// 1 回目で双方向リンクチェーンのポインタを dense <c>long[]</c> 配列 (maxRelId+1 / maxNodeId+1 サイズ) に
@@ -71,6 +71,7 @@ public sealed class StreamingBulkLoader : IDisposable
             bufferSize: 64 * 1024, FileOptions.DeleteOnClose);
     }
 
+    /// <summary>ノードを追加する (ラベル付き)。</summary>
     public void AppendNode(NodeId id, LabelId label)
     {
         ThrowIfCommitted();
@@ -79,6 +80,10 @@ public sealed class StreamingBulkLoader : IDisposable
         if (id.Sequence > _maxNodeId) _maxNodeId = id.Sequence;
     }
 
+    /// <summary>
+    /// リレーションシップを追加する。<paramref name="id"/> は厳密に増加する順序で渡す必要がある
+    /// (順不同入力には <see cref="BulkLoader"/> を使う)。
+    /// </summary>
     public void AppendRelationship(RelationshipId id, NodeId from, NodeId to, RelationshipTypeId type)
     {
         ThrowIfCommitted();
@@ -100,6 +105,7 @@ public sealed class StreamingBulkLoader : IDisposable
         if (to.Sequence   > _maxNodeId) _maxNodeId = to.Sequence;
     }
 
+    /// <summary>ノードにプロパティを追加する。</summary>
     public void AppendProperty(NodeId nodeId, PropertyKeyId key, in PropertyValue value)
     {
         ThrowIfCommitted();
@@ -114,6 +120,7 @@ public sealed class StreamingBulkLoader : IDisposable
         props.Add(new PendingProp(key.Value, value.Type, value.Int64Value, data));
     }
 
+    /// <summary>隣接インデックスに inline する payload lane を設定する (Kind は Int64 / Double のみ)。</summary>
     public void WithPayloadLane(PayloadLaneSpec spec)
     {
         ThrowIfCommitted();
@@ -122,12 +129,14 @@ public sealed class StreamingBulkLoader : IDisposable
         _payloadSpec = spec;
     }
 
+    /// <summary>リレーションシップの payload lane 値 (生の 64bit) を追加する。</summary>
     public void AppendRelationshipPayload(RelationshipId relId, PropertyKeyId key, long rawValue)
     {
         ThrowIfCommitted();
         _relPayloads[(relId.Sequence, key.Value)] = rawValue; // ARCH-5b: rel key は Sequence
     }
 
+    /// <summary>溜めたノード / リレーションシップ / プロパティをストアへ書き出し確定する。</summary>
     public void Commit()
     {
         ThrowIfCommitted();
@@ -142,6 +151,7 @@ public sealed class StreamingBulkLoader : IDisposable
             BuildAdjacencyIndexStreaming(_container);
     }
 
+    /// <summary>一時ファイルを破棄する (<see cref="Commit"/> 有無に関わらずクリーンアップする)。</summary>
     public void Dispose()
     {
         if (_disposed) return;

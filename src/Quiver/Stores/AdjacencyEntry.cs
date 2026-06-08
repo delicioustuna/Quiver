@@ -19,9 +19,8 @@ internal readonly struct AdjacencyEntry
 }
 
 /// <summary>
-/// BA-6: V2 entry with an inline payload lane (Int64 or Double). The
-/// interpretation of <see cref="PayloadRaw"/> depends on the V2 store's
-/// <see cref="PayloadLaneSpec.Kind"/>.
+/// inline payload lane (Int64 または Double) を持つ V2 隣接エントリ。
+/// <see cref="PayloadRaw"/> の解釈は V2 ストアの <see cref="PayloadLaneSpec.Kind"/> に依存する。
 /// </summary>
 internal readonly struct AdjacencyEntryV2
 {
@@ -39,29 +38,34 @@ internal readonly struct AdjacencyEntryV2
 }
 
 /// <summary>
-/// BA-6: kind of value inlined in the V2 payload lane.
+/// V2 payload lane に inline する値の種別。
 /// </summary>
 public enum PayloadKind : byte
 {
+    /// <summary>payload lane 無し。</summary>
     None = 0,
+    /// <summary>64bit 整数を inline する。</summary>
     Int64 = 1,
+    /// <summary>倍精度浮動小数点を inline する。</summary>
     Double = 2,
 }
 
 /// <summary>
-/// BA-6: configuration for the optional payload lane attached to an
-/// <see cref="AdjacencyBlockStoreV2"/>. <see cref="PropertyKeyId"/> identifies
-/// which relationship property is inlined; <see cref="DefaultRaw"/> is the raw
-/// 64-bit value substituted when an edge has no value for that key (or the
-/// value has the wrong type). The default policy is fixed at view-build time
-/// per codex_advice_3.md §7.2.
+/// <see cref="AdjacencyBlockStoreV2"/> に付随する任意の payload lane の設定。
+/// <see cref="PropertyKeyId"/> はどのリレーションシッププロパティを inline するかを示し、
+/// <see cref="DefaultRaw"/> はそのキーの値を持たない (または型が異なる) エッジに代入する生の
+/// 64bit 値。既定値ポリシーはビュー構築時に固定される (codex_advice_3.md §7.2)。
 /// </summary>
 public readonly struct PayloadLaneSpec
 {
+    /// <summary>inline する値の種別。</summary>
     public readonly PayloadKind Kind;
+    /// <summary>inline 対象のリレーションシッププロパティキー ID。</summary>
     public readonly int PropertyKeyId;
+    /// <summary>値が無い / 型不一致のエッジに代入する生の 64bit 既定値。</summary>
     public readonly long DefaultRaw;
 
+    /// <summary>種別 / プロパティキー / 既定値を指定して payload lane 設定を生成する。</summary>
     public PayloadLaneSpec(PayloadKind kind, int propertyKeyId, long defaultRaw)
     {
         Kind = kind;
@@ -69,9 +73,11 @@ public readonly struct PayloadLaneSpec
         DefaultRaw = defaultRaw;
     }
 
+    /// <summary>Int64 payload lane の設定を生成する。</summary>
     public static PayloadLaneSpec ForInt64(int propertyKeyId, long defaultValue = 0)
         => new(PayloadKind.Int64, propertyKeyId, defaultValue);
 
+    /// <summary>Double payload lane の設定を生成する (既定値は double ビットで格納)。</summary>
     public static PayloadLaneSpec ForDouble(int propertyKeyId, double defaultValue = 0.0)
         => new(PayloadKind.Double, propertyKeyId, BitConverter.DoubleToInt64Bits(defaultValue));
 }
