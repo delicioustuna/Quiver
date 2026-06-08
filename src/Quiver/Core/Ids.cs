@@ -1,4 +1,4 @@
-﻿namespace Quiver.Core;
+namespace Quiver.Core;
 
 // ARCH-5b: NodeId / RelationshipId / PropertyId の Value を packed 物理 ID
 // (kind 消去ローカル形 Gen16<<44 | Seq44、kind は型で表現) にする。
@@ -10,9 +10,14 @@
 //     Read 由来の gen≥1 ID が「同一ノード」として一致し traversal / frontier / dict が壊れない。
 //     stale 参照検出は equality ではなく Read の明示世代照合 (TryResolve) で行う。
 
+/// <summary>ノードの識別子。<paramref name="Value"/> は世代 (上位) と slot 局所 ID (下位) を詰めた packed 値。</summary>
+/// <param name="Value">packed 物理 ID (Generation &lt;&lt; 44 | Sequence)。</param>
 public readonly record struct NodeId(long Value)
 {
+    /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
     public static readonly NodeId Invalid = new(-1);
+
+    /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
     public bool IsValid => Value >= 0;
 
     /// <summary>
@@ -30,13 +35,21 @@ public readonly record struct NodeId(long Value)
 
     // ARCH-5b: 同一性は Sequence (slot) ベース。adjacency 由来 (gen=0) と Read 由来 (gen≥1) の
     // 同一ノードを等値とし traversal / frontier / dict を壊さない。stale 検出は TryResolve で行う。
+    /// <summary>slot (Sequence) ベースで同一ノードかを判定する (世代差は無視)。</summary>
     public bool Equals(NodeId other) => Sequence == other.Sequence;
+
+    /// <summary>Sequence ベースのハッシュ値 (<see cref="Equals(NodeId)"/> と整合)。</summary>
     public override int GetHashCode() => Sequence.GetHashCode();
 }
 
+/// <summary>リレーションシップ (エッジ) の識別子。<paramref name="Value"/> は世代 + slot 局所 ID の packed 値。</summary>
+/// <param name="Value">packed 物理 ID (Generation &lt;&lt; 44 | Sequence)。</param>
 public readonly record struct RelationshipId(long Value)
 {
+    /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
     public static readonly RelationshipId Invalid = new(-1);
+
+    /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
     public bool IsValid => Value >= 0;
 
     /// <summary>slot 局所 ID (下位 44bit)。負値 (Invalid) は sentinel をそのまま返す。</summary>
@@ -48,13 +61,21 @@ public readonly record struct RelationshipId(long Value)
     /// <summary>(sequence, generation) から packed な <see cref="RelationshipId"/> を生成する。</summary>
     public static RelationshipId Create(long sequence, int generation) => new(EntityRef.PackLocal(sequence, generation));
 
+    /// <summary>slot (Sequence) ベースで同一エッジかを判定する (世代差は無視)。</summary>
     public bool Equals(RelationshipId other) => Sequence == other.Sequence;
+
+    /// <summary>Sequence ベースのハッシュ値 (<see cref="Equals(RelationshipId)"/> と整合)。</summary>
     public override int GetHashCode() => Sequence.GetHashCode();
 }
 
+/// <summary>プロパティレコードの識別子。<paramref name="Value"/> は世代 + slot 局所 ID の packed 値。</summary>
+/// <param name="Value">packed 物理 ID (Generation &lt;&lt; 44 | Sequence)。</param>
 public readonly record struct PropertyId(long Value)
 {
+    /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
     public static readonly PropertyId Invalid = new(-1);
+
+    /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
     public bool IsValid => Value >= 0;
 
     /// <summary>slot 局所 ID (下位 44bit)。負値 (Invalid) は sentinel をそのまま返す。</summary>
@@ -66,25 +87,43 @@ public readonly record struct PropertyId(long Value)
     /// <summary>(sequence, generation) から packed な <see cref="PropertyId"/> を生成する。</summary>
     public static PropertyId Create(long sequence, int generation) => new(EntityRef.PackLocal(sequence, generation));
 
+    /// <summary>slot (Sequence) ベースで同一プロパティかを判定する (世代差は無視)。</summary>
     public bool Equals(PropertyId other) => Sequence == other.Sequence;
+
+    /// <summary>Sequence ベースのハッシュ値 (<see cref="Equals(PropertyId)"/> と整合)。</summary>
     public override int GetHashCode() => Sequence.GetHashCode();
 }
 
+/// <summary>ラベルの識別子 (トークンストアが払い出す稠密 int)。</summary>
+/// <param name="Value">ラベルトークン ID。</param>
 public readonly record struct LabelId(int Value)
 {
+    /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
     public static readonly LabelId Invalid = new(-1);
+
+    /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
     public bool IsValid => Value >= 0;
 }
 
+/// <summary>リレーションシップ型の識別子 (トークンストアが払い出す稠密 int)。</summary>
+/// <param name="Value">リレーションシップ型トークン ID。</param>
 public readonly record struct RelationshipTypeId(int Value)
 {
+    /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
     public static readonly RelationshipTypeId Invalid = new(-1);
+
+    /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
     public bool IsValid => Value >= 0;
 }
 
+/// <summary>プロパティキーの識別子 (トークンストアが払い出す稠密 int)。</summary>
+/// <param name="Value">プロパティキートークン ID。</param>
 public readonly record struct PropertyKeyId(int Value)
 {
+    /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
     public static readonly PropertyKeyId Invalid = new(-1);
+
+    /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
     public bool IsValid => Value >= 0;
 }
 
@@ -94,13 +133,19 @@ internal readonly record struct PageId(long Value)
     public bool IsValid => Value >= 0;
 }
 
+/// <summary>トランザクションの識別子 (単調増加する long)。</summary>
+/// <param name="Value">トランザクション ID。</param>
 public readonly record struct TransactionId(long Value)
 {
+    /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
     public static readonly TransactionId Invalid = new(-1);
+
     /// <summary>
-    /// FT-26: MVCC コンテキスト未設定時 (bulk loader / recovery / 一部テスト) で xmin に書く既定値。
+    /// MVCC コンテキスト未設定時 (bulk loader / recovery / 一部テスト) で xmin に書く既定値。
     /// 起動時に <c>CommittedTxRegistry</c> へ committed として登録され、全 snapshot から可視として扱われる。
     /// </summary>
     public static readonly TransactionId Bootstrap = new(1);
+
+    /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
     public bool IsValid => Value >= 0;
 }

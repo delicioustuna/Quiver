@@ -44,6 +44,10 @@ internal interface IRelationshipStore
 
 // RelRecord レイアウト (48 バイト):
 // 0 Flags(1) 1 Source(6) 7 Target(6) 13 TypeId(2) 15 SrcPrev(6) 21 SrcNext(6) 27 TgtPrev(6) 33 TgtNext(6) 39 FirstPropId(6) 45 Pad(3)
+/// <summary>
+/// リレーションシップレコードを読み出したハンドル。端点 (source/target)、型、両端の双方向リンク、
+/// 先頭プロパティ ID を公開する (アロケーションを避ける ref struct)。
+/// </summary>
 public readonly ref struct RelationshipReadHandle
 {
     private readonly RelationshipId _id;
@@ -57,15 +61,25 @@ public readonly ref struct RelationshipReadHandle
     private readonly RelationshipId _tgtNext;
     private readonly PropertyId _firstPropId;
 
+    /// <summary>このリレーションシップの ID。</summary>
     public RelationshipId Id => _id;
+    /// <summary>MVCC 可視性の結果。false なら論理削除 / 不可視で、列挙はスキップすべき。</summary>
     public bool InUse => _inUse;
+    /// <summary>始点ノード。</summary>
     public NodeId Source => _source;
+    /// <summary>終点ノード。</summary>
     public NodeId Target => _target;
+    /// <summary>リレーションシップ型。</summary>
     public RelationshipTypeId Type => _type;
+    /// <summary>始点ノードの隣接チェーン上の前エントリ。</summary>
     public RelationshipId SourcePrev => _srcPrev;
+    /// <summary>始点ノードの隣接チェーン上の次エントリ。</summary>
     public RelationshipId SourceNext => _srcNext;
+    /// <summary>終点ノードの隣接チェーン上の前エントリ。</summary>
     public RelationshipId TargetPrev => _tgtPrev;
+    /// <summary>終点ノードの隣接チェーン上の次エントリ。</summary>
     public RelationshipId TargetNext => _tgtNext;
+    /// <summary>プロパティチェーンの先頭 ID (無しは <see cref="PropertyId.Invalid"/>)。</summary>
     public PropertyId FirstPropertyId => _firstPropId;
 
     internal RelationshipReadHandle(
@@ -78,6 +92,7 @@ public readonly ref struct RelationshipReadHandle
         _firstPropId = firstPropId;
     }
 
+    /// <summary>ハンドルを破棄する (現状は no-op)。</summary>
     public void Dispose() { }
 }
 
@@ -137,6 +152,10 @@ internal ref struct RelationshipWriteHandle
     public void Dispose() => _file.UnpinDirty(_pageId, 0);
 }
 
+/// <summary>
+/// あるノードの隣接リレーションシップを双方向リンクに沿って列挙する前方イテレータ。
+/// 型 / 方向フィルタと MVCC 可視性スキップに対応する。
+/// </summary>
 public ref struct RelationshipEnumerator
 {
     private readonly IRelationshipStore _store;
@@ -161,6 +180,7 @@ public ref struct RelationshipEnumerator
         _filterType = type; _direction = direction; _hasFilter = true; _started = false;
     }
 
+    /// <summary>次の可視リレーションシップへ進む。見つかれば <c>true</c>、列挙完了で <c>false</c>。</summary>
     public bool MoveNext()
     {
         if (_started) _currentId = NextInChain();
@@ -169,7 +189,7 @@ public ref struct RelationshipEnumerator
         while (_currentId.IsValid)
         {
             _current = _store.Read(_currentId);
-            // FT-26: 論理削除された (= MVCC visibility で invisible な) record は
+            // 論理削除された (= MVCC visibility で invisible な) record は
             // Read が InUse=false を返す。チェーンは維持されているので next に進む。
             if (!_current.InUse)
             {
@@ -202,6 +222,8 @@ public ref struct RelationshipEnumerator
         };
     }
 
+    /// <summary>現在指しているリレーションシップの読み取りハンドル。</summary>
     public RelationshipReadHandle Current => _current;
+    /// <summary>イテレータを破棄する (現状は no-op)。</summary>
     public void Dispose() { }
 }
