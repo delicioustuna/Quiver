@@ -62,6 +62,12 @@ if (args.Length >= 1 && args[0] == "--basic-perf")
     return BasicPerfRunner.Run();
 }
 
+// タスク A Spike A0: クエリ compile コスト配分
+if (args.Length >= 1 && args[0] == "--spike-a")
+{
+    return SpikeAPlanCompileRunner.Run();
+}
+
 // TS-6: JsonExporter.Full は <ResultsDir>/<Class>-report-full.json を出す。
 // Quiver.Benchmarks.RegressionCheck はこの形式を読んで baselines/main.json と
 // 比較する。default config の Markdown / CSV exporter は残したまま追加する。
