@@ -32,9 +32,11 @@ internal sealed class EntityVersionStore : IEntityVersionStore
 
     private static readonly PageId HeaderPageId = new(1);
     private const int MetaCommitStampHighWater = 0; // int64 (FT-33: SSN commit-stamp 高水位)
+    private const int MetaAnyReuse = 8; // byte: 世代再利用が一度でも起きたか (stamping 高速パスのゲート)
     private const int MetaFormatVersion = 31; // byte (FT-26 NodeStore と同 offset)
     // ARCH-3: entry が 32→40B に拡張され Generation レーンを持つため sidecar 版を 1→2 に上げる。
-    internal const byte SidecarFormatVersion = 2;
+    // gen-stamp-fastpath: ヘッダに MetaAnyReuse を追加したため 2→3。
+    internal const byte SidecarFormatVersion = 3;
 
     // entry 内 offset
     private const int OffsetXmin = 0;
@@ -45,6 +47,7 @@ internal sealed class EntityVersionStore : IEntityVersionStore
 
     private readonly IPagedFile _file;
     private bool _disposed;
+    private bool _anyReuse;
 
     /// <summary>
     /// 既存ファイル / 新規ファイルのいずれも受け入れる。新規時は page 0 (PagedFile メタ)
@@ -63,6 +66,21 @@ internal sealed class EntityVersionStore : IEntityVersionStore
         {
             CheckFormatVersion();
         }
+        using (var h = _file.PinForRead(HeaderPageId))
+            _anyReuse = h.Data[MetaAnyReuse] != 0;
+    }
+
+    /// <inheritdoc/>
+    public bool AnyGenerationReuse => _anyReuse;
+
+    /// <inheritdoc/>
+    public void MarkGenerationReuse()
+    {
+        if (_anyReuse) return;
+        _anyReuse = true;
+        var ph = _file.PinForWrite(HeaderPageId);
+        ph.Data[MetaAnyReuse] = 1;
+        _file.UnpinDirty(HeaderPageId, 0);
     }
 
     /// <inheritdoc/>

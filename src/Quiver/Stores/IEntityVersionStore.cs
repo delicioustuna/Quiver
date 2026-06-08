@@ -39,4 +39,19 @@ internal interface IEntityVersionStore : IDisposable
 
     /// <summary>FT-33: 永続化済みの commit-stamp 高水位を読み出す。未書き込みなら 0。</summary>
     long ReadCommitStampHighWater();
+
+    /// <summary>
+    /// 世代再利用 (vacuum 回収済み slot を Allocate が再利用し generation を 2 以上に上げる事象) が
+    /// この store で一度でも起きたか。<c>false</c> の間は「全ライブ slot の generation = 1」が成立し、
+    /// 結果行の世代 stamping を sidecar read 無しで gen=1 として確定できる (hot path 高速化)。
+    /// 耐久メタ (sidecar ヘッダ) に永続化され reopen を跨ぐ。
+    /// </summary>
+    bool AnyGenerationReuse { get; }
+
+    /// <summary>
+    /// 世代再利用が起きたことを記録する (冪等)。<see cref="AnyGenerationReuse"/> を恒久的に <c>true</c> へ。
+    /// Allocate が generation ≥ 2 を払い出した時に呼ぶ。呼び出し tx の WAL コンテキストで永続化され、
+    /// abort / crash では他の割り当てと一緒に巻き戻る。
+    /// </summary>
+    void MarkGenerationReuse();
 }
