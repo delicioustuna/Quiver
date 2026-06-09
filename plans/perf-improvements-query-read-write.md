@@ -195,5 +195,11 @@ A/B/C は別 commit。**C のみ spike 結果を提示してから本実装の�
   allocated 6,584→1,848 B/query (−72%, per-row ゼロ化) は達成だが `≤50 ns/edge` は**未達**（72–73.5 ns/edge）。
   残 ~60 ns/edge は operator/volcano/MVCC 反復コスト＝**タスク B 領分**。アロケーション削減（正確・ゼロリスク・
   結果件数比例で効き GC 圧減）の価値でユーザ判断 **develop 採用**。`docs/benchmarks/2026-06-09_TaskA-sub_CursorBufferReuse.md`
-- [ ] B1 spike → B2 実装 → B1 opt-in → commit  ← **次**: 残 ~60 ns/edge（MVCC 可視性 / operator 反復）の実体はここ
-- [ ] C0 spike → 採否（≥85%）→（採用時）本実装 + format V8 + commit
+- [x] B1 spike + B2 実装 — **仮説反転（再）**: linked-list overhead の真因は MVCC 可視性ではなく
+  (1) `Read` の per-edge 2 回 pin + 破棄 ToArray (145 B/edge)、(2) `PagedFile.PinForRead/Write` の
+  **pin ごと全 8KB CRC32**。B2 = 単一 pin combined read (`VersionedRecordHeap.TryReadHeadInto`) +
+  **checksum 検証を load 時のみに** (`PagedFile`)。結果 linked-list 1-hop **2.228→0.110 µs/edge (20×)**、
+  kill criterion ≤0.8 を 7× マージンで達成。read/write/2-hop/query 全般に波及 (write も ~1.2×、
+  2-hop 3.7×、wrapper 1.75×)。全スイート緑 (crash/chaos/公開API 含む) → **develop 採用**。
+  B1 opt-in (CompactAdjacency) は当面不要。`docs/benchmarks/2026-06-09_TaskB_ReadPathChecksumAtLoad.md`
+- [ ] C0 spike → 採否（≥85%）→（採用時）本実装 + format V8 + commit  ← **次**: format bump、spike 結果を提示してから本実装承認

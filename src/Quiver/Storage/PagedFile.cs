@@ -179,23 +179,9 @@ internal sealed class PagedFile : IPagedFile
     {
         int frame = GetOrLoadFrame(pageId);
         // FT-26: ハンドル生存中、他スレッドからの書き込みからバッファを保護する。
+        // Task B: 検証はロード時に済んでいるので pin ごとの再検証はしない (上記 GetOrLoadFrame 参照)。
         _frames[frame].FrameLock.EnterReadLock();
-        try
-        {
-            Span<byte> raw = ReadFrameSpan(frame);
-            PageHeader.Validate(raw, pageId);
-            return new PageReadHandle(this, pageId, raw);
-        }
-        catch
-        {
-            _frames[frame].FrameLock.ExitReadLock();
-            lock (_poolLock)
-            {
-                if (_pageToFrame.TryGetValue(pageId, out int f))
-                    Interlocked.Decrement(ref _frames[f].PinCount);
-            }
-            throw;
-        }
+        return new PageReadHandle(this, pageId, ReadFrameSpan(frame));
     }
 
     public PageWriteHandle PinForWrite(PageId pageId)
@@ -206,7 +192,7 @@ internal sealed class PagedFile : IPagedFile
         try
         {
             Span<byte> raw = ReadFrameSpan(frame);
-            PageHeader.Validate(raw, pageId);
+            // Task B: 検証はロード時に済んでいるので pin ごとの再検証はしない (GetOrLoadFrame 参照)。
             // FT-15: この書き込みトランザクション内で本ページを初めて pin する時点の内容を
             // before-image として捕捉する。caller がまだ変更していないこの瞬間が唯一の機会。
             // frame は pin 済みなので evict されず、span は安定している。
@@ -417,6 +403,11 @@ internal sealed class PagedFile : IPagedFile
 
             _frames[victim].PageId = pageId;
             MmfReadPage(pageId, _frames[victim].Buffer);
+            // Task B: checksum / magic / pageId の検証は disk→frame ロード時 (= ここ) のみ行う。
+            // 常駐フレームの pin ごとに全ページ CRC を再計算するのは冗長 (RAM 上の内容は disk 破損に
+            // 晒されず、書込は UnpinDirty で checksum を更新し FrameLock が read/write pin を排他する)。
+            // 破損ページの早期検出はロード時で十分 (StorageTests.CorruptMagic / crash contract が担保)。
+            PageHeader.Validate(ReadFrameSpan(victim), pageId);
             _frames[victim].Referenced = true;
             _frames[victim].IsDirty = false;
             _pageToFrame[pageId] = victim;

@@ -203,6 +203,34 @@ internal sealed class VersionedRecordHeap
         return true;
     }
 
+    /// <summary>
+    /// B2 (Task B): head version を <b>1 回の pin</b> で読む alloc-free 経路。<paramref name="dest"/> へ
+    /// payload 先頭をコピー (収まる分だけ) し、head の xmin/xmax と「より古い版が続くか」
+    /// (<paramref name="hasOlderVersion"/>) を返す。戻り値 = payload 全長 (0 = エントリ無し)。
+    ///
+    /// <para>構造フィールドだけ要る呼出側 (<see cref="Records.VersionedRelationshipStore.Read"/>) は固定長
+    /// prefix span を渡せばよい (payload 全長 &gt; <c>dest.Length</c> でも先頭はコピー済み)。可視性は
+    /// 呼出側が xmin/xmax で判定し、head 不可視かつ <paramref name="hasOlderVersion"/> のときだけ
+    /// <see cref="TryReadVisible(long, VersionVisible, out byte[])"/> へフォールバックする
+    /// (= 従来の per-read 2 回 pin + 破棄 ToArray を最頻ケースで省く)。</para>
+    /// </summary>
+    public int TryReadHeadInto(long seq, Span<byte> dest, out long xmin, out long xmax, out bool hasOlderVersion)
+    {
+        xmin = 0; xmax = 0; hasOlderVersion = false;
+        var ptr = _map.Get(seq);
+        if (ptr.IsNull) return 0;
+        using var h = _file.PinForRead(new PageId(ptr.PageId));
+        var sp = new ReadOnlySlottedPage(h.Data);
+        if (!sp.TryGet(ptr.Slot, out var rec)) return 0;
+        xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[OffXmin..]);
+        xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[OffXmax..]);
+        hasOlderVersion = !ItemPointer.Unpack(BinaryPrimitives.ReadInt64LittleEndian(rec[OffNext..])).IsNull;
+        var body = rec[VersionHeaderSize..];
+        int n = Math.Min(body.Length, dest.Length);
+        body[..n].CopyTo(dest);
+        return body.Length;
+    }
+
     /// <summary>head version の物理位置を返す (in-place write handle 構築用)。未登録は <see cref="ItemPointer.Null"/>。</summary>
     public ItemPointer GetHead(long seq) => _map.Get(seq);
 

@@ -336,37 +336,42 @@ dotnet run --project sandbox/QuiverSandbox
 「設計目標」は初期設計時の目標値。「実測」は現行ビルドの参考計測値で、
 standalone runner `--basic-perf`（[BasicPerfRunner.cs](benchmarks/Quiver.Benchmarks/Standalone/BasicPerfRunner.cs)、
 `dotnet run --project benchmarks/Quiver.Benchmarks -c Release -- --basic-perf`）を
-AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch で計測した値（2026-06-08）。
+AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch で計測した値（2026-06-09）。
 厳密な再現は `benchmarks/Quiver.Benchmarks` の BenchmarkDotNet ベンチで。
 
-| 操作 | 設計目標 | 実測 (2026-06-08) |
+| 操作 | 設計目標 | 実測 (2026-06-09) |
 |---|---|---|
-| ノード作成（単一 tx 償却） | < 1 µs ※インメモリ操作目標 | **~17 µs/op**（~59K ops/s） |
-| ノード作成 + プロパティ設定（同上） | < 2 µs | **~29 µs/op** |
-| リレーション作成（同上） | — | **~37 µs/op** |
+| ノード作成（単一 tx 償却） | < 1 µs ※インメモリ操作目標 | **~14 µs/op**（~70K ops/s） |
+| ノード作成 + プロパティ設定（同上） | < 2 µs | **~22 µs/op** |
+| リレーション作成（同上） | — | **~30 µs/op**（~34K ops/s） |
 | 単発 durable commit（1 op = 1 commit、単一スレッド） | — | **~1.0 ms/commit**（WAL flush 律速） |
-| `EnumerateRelationships`（隣接 10 件、隣接ブロック） | < 1.5 µs | **~1.1 µs** |
-| 1-hop scan（degree 100、AdjacencyBlockStore） | < 0.5 µs | **~1.4 µs**（~14 ns/edge） |
-| 1-hop scan（degree 100、linked-list / 索引なし） | — | **~230 µs**（~2.3 µs/edge、MVCC 可視性込み） |
-| BFS 2-hop（ハブ degree 100、leaf 10,000、隣接ブロック） | < 5 ms | **~0.14 ms** |
-| 1-hop クエリ（`g.Node().Out()`、degree 100、隣接ブロック） | クエリラッパ < 5% | **~8 µs/query**（~78 ns/edge、生隣接の ~5.6×） |
+| 1-hop scan（degree 100、AdjacencyBlockStore） | < 0.5 µs | **~0.35 µs**（~3.5 ns/edge） |
+| 1-hop scan（degree 100、linked-list / 索引なし） | — | **~11 µs**（~0.11 µs/edge、MVCC 可視性込み） |
+| BFS 2-hop（ハブ degree 100、leaf 10,000、隣接ブロック） | < 5 ms | **~0.037 ms** |
+| 1-hop クエリ（`g.Node().Out()`、degree 100、隣接ブロック） | クエリラッパ < 5% | **~4.2 µs/query**（~42 ns/edge、生隣接の ~12×） |
 | BulkLoader（10 万 edge） | 通常 TX 比 5× 以上高速 | 通常 TX（batch 1000）比 **~11.8×** |
 
-> **読み取りは隣接インデックスの有無で 100× 以上変わる。** `BeginBulkLoad(buildAdjacencyIndex: true)`
-> で隣接ブロックを構築すると 1-hop が ~14 ns/edge になり、索引なしの linked-list 経路
-> （~2.3 µs/edge、MVCC 可視性チェック込み）より degree 100 で **~160×** 速い。読み取り主体の
+> **読み取りは隣接インデックスの有無で 30× 以上変わる。** `BeginBulkLoad(buildAdjacencyIndex: true)`
+> で隣接ブロックを構築すると 1-hop が ~3.5 ns/edge になり、索引なしの linked-list 経路
+> （~0.11 µs/edge、MVCC 可視性チェック込み）より degree 100 で **~31×** 速い。読み取り主体の
 > ワークロードでは隣接インデックスを構築すること。
+>
+> **バッファプールの checksum 検証は disk→frame ロード時のみ行う（pin ごとには再計算しない）。**
+> 常駐フレームの内容は disk 破損に晒されず、書込は `UnpinDirty` で CRC を更新し `FrameLock` が
+> read/write pin を排他するため、pin ごとの全 8KB CRC32 は冗長だった。これを撤去し torn write / bit rot の
+> ロード時検出は維持（crash contract / chaos テストで担保）。この 1 点で linked-list 1-hop が
+> **~2.3 → ~0.11 µs/edge（~20×）**、隣接ブロック・2-hop・書き込みも軒並み高速化した。
 >
 > **書き込みは単発 durable commit が ~1 ms（WAL flush 律速）。** 大量書き込みは 1 tx にまとめる
 > （償却 ~17 µs/node）か BulkLoader を使う。並行 commit では group commit
 > （`GraphDatabaseOptions.GroupCommitWindow`）でスループットが桁違いに上がる
 > （64-thread で window=0 比 ~28×、別計測 FT-27）。
 >
-> **クエリ DSL（`g.Node().Out()` 等）の 1-hop（degree 100）は ~8 µs/query（~78 ns/edge、生の隣接
-> アクセスの ~5.6×）。** プラン構築 + 物理オペレータ生成は ~0.4 µs と僅少。結果行ごとの NodeId 世代
+> **クエリ DSL（`g.Node().Out()` 等）の 1-hop（degree 100）は ~4.2 µs/query（~42 ns/edge、生の隣接
+> アクセスの ~12×）。** プラン構築 + 物理オペレータ生成は ~0.4 µs と僅少。結果行ごとの NodeId 世代
 > スタンプ（識別子の往復一貫性のための version 解決）は、スロット再利用（vacuum 回収）が無い間は
-> version sidecar 読み取りを省く高速パスで処理する。これにより 1-hop クエリは ~62 → ~8 µs/query
-> （**~7.7×**）に短縮した。
+> version sidecar 読み取りを省く高速パスで処理する。これで 1-hop クエリは ~62 → ~8 µs/query（**~7.7×**）に
+> 短縮し、さらに checksum-at-load（上記）で隣接ブロック pin が安くなり ~8 → ~4.2 µs/query になった。
 
 **PW-18 (複雑/ネストクエリ regression sentinel)**: `HasLabel + Has + Out + Has + Where(sub) + Order + Limit` の 7 step チェーンが 10K Person / AvgDegree=8 で ~367 ms、`Union(3 branches)` は単一 Out の 2.7× (16 → 44 ms)、`As/Select<T>` carry-column は no-alias 比 ±3% 以内。詳細: `benchmarks/Quiver.Benchmarks/{FilterChainExpand,BranchedTraversal,AsSelectProjection,MergeWorkload,OptimizerPlanRegression}Benchmarks.cs`。
 

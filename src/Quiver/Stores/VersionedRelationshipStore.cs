@@ -146,10 +146,17 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         // (物理最新, in-place 更新) から読む。これにより rel 自身が reader に不可視でも chain pointer
         // を返せ、RelationshipEnumerator が不可視 rel を skip して次へ進める (旧 RelationshipStore と
         // 同じセマンティクス。chain は物理一本で visibility は xmin/xmax で判定)。
-        if (!_heap.TryReadHeadRaw(seq, out var payload, out _, out _))
+        //
+        // Task B (B2): head を **1 回の pin** で読み (alloc-free stackalloc)、可視性も head の
+        // xmin/xmax から即判定する。head 可視 = 最頻ケース (単一版 / 可視 head) はここで確定し、
+        // 旧実装の TryReadVisible 2 回目 pin + 破棄 ToArray を省く。head 不可視 & 多版の稀ケースのみ
+        // 版チェーン走査へフォールバック。可視性セマンティクスは厳密に不変 (下記 3 分岐は
+        // 「チェーンに可視版があるか」と完全等価)。
+        Span<byte> span = stackalloc byte[PayloadSize];
+        int len = _heap.TryReadHeadInto(seq, span, out long xmin, out long xmax, out bool hasOlderVersion);
+        if (len == 0)
             return NotInUse(relId);
 
-        var span = payload.AsSpan();
         var src = new NodeId(RecordHelpers.ReadInt48(span[OffSource..]));
         var tgt = new NodeId(RecordHelpers.ReadInt48(span[OffTarget..]));
         var type = new RelationshipTypeId(BinaryPrimitives.ReadInt16LittleEndian(span[OffType..]));
@@ -159,9 +166,19 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         var tgtNext = new RelationshipId(RecordHelpers.ReadInt48(span[OffTgtNext..]));
         var firstProp = new PropertyId(RecordHelpers.ReadInt48(span[OffFirstProp..]));
 
-        // InUse は可視性で判定する: 版チェーンに reader から見える版があるか。
-        bool inUse = (span[OffFlags] & FlagInUse) != 0
-            && _heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _);
+        // InUse = (slot 有効) かつ「版チェーンに reader から見える版がある」。
+        //   head 可視                       → 可視 (TryReadVisible が head で即 true を返すのと等価)
+        //   head 不可視 & 単一版            → 不可視 (チェーンに他の版が無い)
+        //   head 不可視 & 多版              → 版チェーン走査 (旧経路と同一: 最初の可視版を探す)
+        bool inUse;
+        if ((span[OffFlags] & FlagInUse) == 0)
+            inUse = false;
+        else if (AmbientVisible(xmin, xmax))
+            inUse = true;
+        else if (!hasOlderVersion)
+            inUse = false;
+        else
+            inUse = _heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _);
 
         if (inUse) MvccContext.RecordRead(EntityKind.Relationship, seq);
         return new RelationshipReadHandle(relId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstProp);
