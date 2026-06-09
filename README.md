@@ -341,9 +341,9 @@ AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch で計測した
 
 | 操作 | 設計目標 | 実測 (2026-06-09) |
 |---|---|---|
-| ノード作成（単一 tx 償却） | < 1 µs ※インメモリ操作目標 | **~14 µs/op**（~70K ops/s） |
-| ノード作成 + プロパティ設定（同上） | < 2 µs | **~22 µs/op** |
-| リレーション作成（同上） | — | **~30 µs/op**（~34K ops/s） |
+| ノード作成（単一 tx 償却） | < 1 µs ※インメモリ操作目標 | **~3.5–4 µs/op**（~250K ops/s） |
+| ノード作成 + プロパティ設定（同上） | < 2 µs | **~6 µs/op** |
+| リレーション作成（同上） | — | **~7 µs/op**（~140K ops/s） |
 | 単発 durable commit（1 op = 1 commit、単一スレッド） | — | **~1.0 ms/commit**（WAL flush 律速） |
 | 1-hop scan（degree 100、AdjacencyBlockStore） | < 0.5 µs | **~0.35 µs**（~3.5 ns/edge） |
 | 1-hop scan（degree 100、linked-list / 索引なし） | — | **~11 µs**（~0.11 µs/edge、MVCC 可視性込み） |
@@ -363,9 +363,15 @@ AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch で計測した
 > **~2.3 → ~0.11 µs/edge（~20×）**、隣接ブロック・2-hop・書き込みも軒並み高速化した。
 >
 > **書き込みは単発 durable commit が ~1 ms（WAL flush 律速）。** 大量書き込みは 1 tx にまとめる
-> （償却 ~17 µs/node）か BulkLoader を使う。並行 commit では group commit
+> （償却 ~3.5–4 µs/node）か BulkLoader を使う。並行 commit では group commit
 > （`GraphDatabaseOptions.GroupCommitWindow`）でスループットが桁違いに上がる
 > （64-thread で window=0 比 ~28×、別計測 FT-27）。
+>
+> **WAL page-image の Encode（trim+RLE）は commit 時にページ毎 1 回だけ行う（書込ごとには行わない）。**
+> トランザクション内で同一ページを繰り返し書いても WAL に出るのは最終状態 1 件（latest-wins coalesce）
+> なので、中間状態の Encode は無駄だった。これを `FlushPending`（commit）へ遅延し、ホットページ反復書込
+> （version sidecar / record heap）の増幅を解消。recovery 形式は不変で、単一 tx 償却の書込が **~4×**
+> 高速化した（ノード作成 ~14 → ~3.5–4 µs/op）。
 >
 > **クエリ DSL（`g.Node().Out()` 等）の 1-hop（degree 100）は ~4.2 µs/query（~42 ns/edge、生の隣接
 > アクセスの ~12×）。** プラン構築 + 物理オペレータ生成は ~0.4 µs と僅少。結果行ごとの NodeId 世代

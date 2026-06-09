@@ -202,4 +202,13 @@ A/B/C は別 commit。**C のみ spike 結果を提示してから本実装の�
   kill criterion ≤0.8 を 7× マージンで達成。read/write/2-hop/query 全般に波及 (write も ~1.2×、
   2-hop 3.7×、wrapper 1.75×)。全スイート緑 (crash/chaos/公開API 含む) → **develop 採用**。
   B1 opt-in (CompactAdjacency) は当面不要。`docs/benchmarks/2026-06-09_TaskB_ReadPathChecksumAtLoad.md`
-- [ ] C0 spike → 採否（≥85%）→（採用時）本実装 + format V8 + commit  ← **次**: format bump、spike 結果を提示してから本実装承認
+- [x] C0 spike + format-stable 修正 — **仮説修正（再）**: sidecar 増幅の主因は co-locate で消える
+  「別ページ pin」ではなく、`WalPageContext.LogPageImage` が **UnpinDirty ごとに WAL page-image を
+  Encode (trim+RLE, 半埋め 8KB で ~5µs)** していたこと (`_pending` は latest-wins coalesce 済みなので
+  中間 Encode は無駄)。format-stable 修正 = `_pending` を生 bytes 化し Encode を `FlushPending` (commit)
+  でページ毎 1 回に。結果 **write ~4×** (CreateNode 14.2→3.5µs, CreateRel 29.5→6.7µs)、recovery 形式不変、
+  全スイート緑 (crash/chaos 含) → **develop 採用**。
+  **co-locate (format V8) は DEFER**: kill criterion「retention ≥85%」は未達 (CreateNode ~72%、ただし
+  deferred-encode が分母も下げるため比は不変) だが、絶対 write は計画目標 ~12µs を大幅に下回り実害解消。
+  残 ~0.9µs/create のための format bump + recovery 改修はリスク/効果不見合 (ユーザ判断)。
+  `docs/benchmarks/2026-06-09_TaskC_DeferredWalEncode.md`

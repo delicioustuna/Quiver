@@ -98,13 +98,16 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     private readonly IWriteAheadLog _wal = wal;
     private readonly TransactionId _txId = txId;
 
-    // (fileKind, pageId) → エンコード済み PageImage ペイロード。
-    // 案C: 1 トランザクション中に同一ページを何度触っても、コミット時に最新版 1 件だけを
-    // WAL に書く。これにより FlushMeta() 等によるホットページの再ログ増幅を解消する。
+    // (fileKind, pageId) → 最新の **生ページ bytes** (latest-wins)。
+    // 案C: 1 トランザクション中に同一ページを何度触っても、コミット時に最新版 1 件だけを WAL に書く。
+    // これにより FlushMeta() 等によるホットページの再ログ増幅を解消する。
     // FT-29: FlushPending では Append ではなく WAL の coalesce バッファへ投入することで、
-    // 並行 tx 間でも latest-wins de-dup が効くようにする (同一ページに対する書き込みは
-    // PagedFile のフレーム X-lock で直列化されるが、FlushPending と Append(Commit) の間に
-    // 別 tx が同一ページを上書きするケースに対応)。
+    // 並行 tx 間でも latest-wins de-dup が効くようにする。
+    // Task C (format-stable): WAL ペイロードへの Encode (trim+RLE, 半埋め 8KB で ~5µs) は
+    // 以前 UnpinDirty ごとに走っていた (同一ページを N 回書くと N 回 Encode) ため、ホットページ
+    // 反復書込 (sidecar / heap) で増幅していた。値を生 bytes で持ち、Encode は FlushPending で
+    // ページごとに 1 回だけ行う。バッファはページ毎 1 枚を再利用し per-write の alloc も無くす。
+    // recovery 形式は不変 (FlushPending で従来と同じ v3 payload を出す)。
     private readonly Dictionary<(byte FileKind, long PageId), byte[]> _pending = new();
 
     // FT-15 / FT-23: (fileKind, pageId) → エンコード済み before-image (CLR ペイロード)。
@@ -137,9 +140,11 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     public long LogPageImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
     {
         var key = (fileKind, pageId);
-        // FT-29: trim 後の payload はページ毎に長さが変わるので、buffer の再利用ではなく
-        // 毎回 Encode → 新規 byte[] を割り当てる。sparse page では allocation も小さい (gen0 で安価)。
-        _pending[key] = WalPageImageCodec.Encode(fileKind, pageId, pageBytes);
+        // Task C: 生ページ bytes を latest-wins で保持 (Encode は FlushPending で 1 回)。
+        // ページ毎に 1 枚のバッファを再利用し、per-write の Encode (RLE) と alloc を回避する。
+        if (!_pending.TryGetValue(key, out var buf) || buf.Length != pageBytes.Length)
+            _pending[key] = buf = new byte[pageBytes.Length];
+        pageBytes.CopyTo(buf);
         return -1L;
     }
 
@@ -184,8 +189,13 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     public void FlushPending()
     {
         if (_pending.Count == 0) return;
+        // Task C: ここで初めて生 bytes を WAL ペイロード (v3 trim+RLE) へ Encode する。
+        // 同一ページを tx 内で何度書いても Encode はページごとに 1 回 (= 反復書込の増幅解消)。
         foreach (var kv in _pending)
-            _wal.BufferPageImage(_txId, kv.Key.FileKind, kv.Key.PageId, kv.Value);
+        {
+            byte[] payload = WalPageImageCodec.Encode(kv.Key.FileKind, kv.Key.PageId, kv.Value);
+            _wal.BufferPageImage(_txId, kv.Key.FileKind, kv.Key.PageId, payload);
+        }
         _pending.Clear();
     }
 
