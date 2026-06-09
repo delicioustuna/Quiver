@@ -13,10 +13,9 @@
   </PropertyGroup>
 
   <!-- DOC-2: API 安定性ポリシー (docs/api-stability.md)。SemVer の正本となるバージョンを一元管理する。
-       1.0 GA 前は -rc。MAJOR.MINOR.PATCH の意味は docs/api-stability.md §1 を参照。 -->
+       0.x 系は pre-1.0 で安定性の保証対象外。MAJOR.MINOR.PATCH の意味は docs/api-stability.md §1 を参照。 -->
   <PropertyGroup>
-    <VersionPrefix>1.0.0</VersionPrefix>
-    <VersionSuffix>rc.1</VersionSuffix>
+    <VersionPrefix>0.1.0</VersionPrefix>
   </PropertyGroup>
 
   <!-- DOC-2: NuGet パッケージ生成 (dotnet pack) 時に直前リリースとの public API 差分を検出し、
