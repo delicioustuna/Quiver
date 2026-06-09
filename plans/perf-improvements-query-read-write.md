@@ -191,6 +191,9 @@ A/B/C は別 commit。**C のみ spike 結果を提示してから本実装の�
 
 - [x] A0 spike（配分計測）— **仮説反転**: 真因は per-row 世代 stamping (sidecar read) 88%、plan cache 不要
 - [x] A-main 実装 + 計測（7.7×）+ 回帰テスト + README/bench → **develop 採用** (merge 8e8e0a8)
-- [ ] A-sub: streaming cursor の per-row `TupleSlot[]`/`QueryRow` 確保をバッファ再利用へ（残 ~78 ns/edge）
-- [ ] B1 spike → B2 実装 → B1 opt-in → commit
+- [x] A-sub: streaming cursor バッファ再利用 — **仮説反転（再）**: per-row 確保はボトルネックでなく寄与 ~3 ns/edge。
+  allocated 6,584→1,848 B/query (−72%, per-row ゼロ化) は達成だが `≤50 ns/edge` は**未達**（72–73.5 ns/edge）。
+  残 ~60 ns/edge は operator/volcano/MVCC 反復コスト＝**タスク B 領分**。アロケーション削減（正確・ゼロリスク・
+  結果件数比例で効き GC 圧減）の価値でユーザ判断 **develop 採用**。`docs/benchmarks/2026-06-09_TaskA-sub_CursorBufferReuse.md`
+- [ ] B1 spike → B2 実装 → B1 opt-in → commit  ← **次**: 残 ~60 ns/edge（MVCC 可視性 / operator 反復）の実体はここ
 - [ ] C0 spike → 採否（≥85%）→（採用時）本実装 + format V8 + commit

@@ -24,6 +24,12 @@ internal sealed class PhysicalOperatorCursor : IQueryCursor
     private readonly IPhysicalOperator _plan;
     private readonly Quiver.Storage.Records.INodeStore _nodes;
     private QueryRow _current;
+    // A-sub: per-row 確保を避けるため slots / byteData バッファを 1 度確保して再利用する。
+    // IQueryCursor.Current は「次の MoveNext までのみ有効」契約 (TraversalCursor が即座に
+    // 値型へ射影してコピーアウトする) ため、行をまたいだバッファ上書きは安全。
+    // ※ materialize 経路 (GraphTransaction.Execute) は各行を保持するので別実装 (プールしない)。
+    private TupleSlot[]? _slots;
+    private byte[]?[]? _byteData;
 
     internal PhysicalOperatorCursor(IPhysicalOperator plan, Quiver.Storage.Records.INodeStore nodes)
     {
@@ -37,14 +43,26 @@ internal sealed class PhysicalOperatorCursor : IQueryCursor
     {
         if (!_plan.MoveNext()) return false;
         var cur = _plan.Current;
-        var slots = new TupleSlot[cur.ColumnCount];
+        int n = cur.ColumnCount;
+        var slots = _slots;
+        if (slots is null || slots.Length != n)
+            slots = _slots = new TupleSlot[n];
+
         byte[]?[]? byteData = null;
-        for (int i = 0; i < cur.ColumnCount; i++)
+        for (int i = 0; i < n; i++)
         {
             slots[i] = cur[i];
             if (slots[i].Type is TupleSlotType.Utf8String or TupleSlotType.Bytes)
             {
-                byteData ??= new byte[]?[cur.ColumnCount];
+                if (byteData is null)
+                {
+                    byteData = _byteData;
+                    if (byteData is null || byteData.Length != n)
+                        byteData = _byteData = new byte[]?[n];
+                    // この行に string/bytes 列がある以上、再利用バッファを一旦クリアして
+                    // 前行の残骸 (例: OPTIONAL で今行は Null になった列) を残さない。
+                    Array.Clear(byteData, 0, n);
+                }
                 byteData[i] = _plan.GetBytes(i).ToArray();
             }
         }
