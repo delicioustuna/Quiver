@@ -1260,6 +1260,61 @@ namespace Quiver.Telemetry
         public static readonly System.Diagnostics.Metrics.Histogram<double> WalFlushDurationMs;
     }
 }
+namespace Quiver.Text
+{
+    public interface ITextNormalizer
+    {
+        Quiver.Text.NormalizedText Normalize(System.ReadOnlySpan<char> input);
+    }
+    public interface ITokenSink
+    {
+        void Accept(System.ReadOnlySpan<char> token);
+    }
+    public interface ITokenizer
+    {
+        string TokenizerId { get; }
+        void Tokenize(System.ReadOnlySpan<char> text, Quiver.Text.ITokenSink sink);
+    }
+    public sealed class JapaneseAwareNormalizer : Quiver.Text.ITextNormalizer
+    {
+        public JapaneseAwareNormalizer() { }
+        public Quiver.Text.NormalizationFlags DefaultFlags { get; init; }
+        public Quiver.Text.NormalizedText Normalize(System.ReadOnlySpan<char> input) { }
+    }
+    public sealed class MinimalNormalizer : Quiver.Text.ITextNormalizer
+    {
+        public MinimalNormalizer() { }
+        public Quiver.Text.NormalizationFlags DefaultFlags { get; init; }
+        public Quiver.Text.NormalizedText Normalize(System.ReadOnlySpan<char> input) { }
+    }
+    public sealed class MixedBigramTokenizer : Quiver.Text.ITokenizer
+    {
+        public const string DefaultTokenizerId = "mixed-bigram-v1";
+        public MixedBigramTokenizer(Quiver.Text.ITextNormalizer? normalizer = null) { }
+        public string TokenizerId { get; }
+        public void Tokenize(System.ReadOnlySpan<char> text, Quiver.Text.ITokenSink sink) { }
+    }
+    [System.Flags]
+    public enum NormalizationFlags
+    {
+        None = 0,
+        UnicodeNFC = 1,
+        UnicodeNFKC = 2,
+        LowerCaseAscii = 4,
+        StripControlChars = 8,
+        CollapseWhitespace = 16,
+        NormalizeDashes = 32,
+    }
+    public sealed class NormalizedText
+    {
+        public NormalizedText() { }
+        public required Quiver.Text.NormalizationFlags Applied { get; init; }
+        public required bool IsLossy { get; init; }
+        public required int NormalizedLengthChars { get; init; }
+        public required int OriginalLengthChars { get; init; }
+        public required string Text { get; init; }
+    }
+}
 namespace Quiver.Transactions
 {
     public enum CheckpointPolicy

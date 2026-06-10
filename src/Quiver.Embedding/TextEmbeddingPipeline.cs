@@ -4,6 +4,7 @@ using System.Threading.Channels;
 using Quiver.Core;
 using Quiver.Embedding.Providers;
 using Quiver.Embedding.Text;
+using Quiver.Text;
 using Quiver.Transactions;
 
 namespace Quiver.Embedding;

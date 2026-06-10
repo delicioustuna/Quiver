@@ -1,22 +1,25 @@
 using System.Globalization;
 using System.Text;
 
-namespace Quiver.Embedding.Text;
+namespace Quiver.Text;
 
 /// <summary>
 /// Default-on normalizer for Japanese-heavy corpora: NFKC + ASCII lowercase +
 /// strip controls + collapse whitespace. NFKC turns half-width katakana,
 /// full-width digits, ㈱ etc. into their canonical compositions which is
-/// usually the right tradeoff for embedding-source text.
+/// usually the right tradeoff for both embedding-source text and full-text
+/// indexing. Flags can be overridden via <see cref="DefaultFlags"/>.
 /// </summary>
 public sealed class JapaneseAwareNormalizer : ITextNormalizer
 {
+    /// <summary>Transformations applied by this normalizer.</summary>
     public NormalizationFlags DefaultFlags { get; init; } =
         NormalizationFlags.UnicodeNFKC
         | NormalizationFlags.LowerCaseAscii
         | NormalizationFlags.StripControlChars
         | NormalizationFlags.CollapseWhitespace;
 
+    /// <inheritdoc/>
     public NormalizedText Normalize(ReadOnlySpan<char> input)
         => NormalizerCore.Apply(input, DefaultFlags);
 }
@@ -24,13 +27,15 @@ public sealed class JapaneseAwareNormalizer : ITextNormalizer
 /// <summary>
 /// Loss-averse normalizer: NFC + strip controls only. Use when downstream
 /// consumers require the original form (e.g. provider that handles its own
-/// case-folding) or for full-text indexing.
+/// case-folding).
 /// </summary>
 public sealed class MinimalNormalizer : ITextNormalizer
 {
+    /// <summary>Transformations applied by this normalizer.</summary>
     public NormalizationFlags DefaultFlags { get; init; } =
         NormalizationFlags.UnicodeNFC | NormalizationFlags.StripControlChars;
 
+    /// <inheritdoc/>
     public NormalizedText Normalize(ReadOnlySpan<char> input)
         => NormalizerCore.Apply(input, DefaultFlags);
 }

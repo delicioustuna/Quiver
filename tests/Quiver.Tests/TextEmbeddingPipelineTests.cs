@@ -3,6 +3,7 @@ using Quiver.Core;
 using Quiver.Embedding;
 using Quiver.Embedding.Providers;
 using Quiver.Embedding.Text;
+using Quiver.Text;
 using Xunit;
 
 namespace Quiver.Tests;
