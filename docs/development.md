@@ -16,6 +16,7 @@ README はライブラリ利用者向けの最小限に絞っているため、�
 | `Quiver.Client.Attributes` | `[Node]` / `[Relationship]` / `[Property]` / `[Indexed]` 属性（名前空間は `Quiver.Api`） |
 | `Quiver.SourceGen` | Roslyn `IIncrementalGenerator`（CRUD / `FindBy*` / 型保存トラバーサル糖衣を生成） |
 | `Quiver.Embedding` | ベクトル / 埋め込みパイプライン（KNN・ハイブリッド検索） |
+| `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ・取込・hybrid 検索 + graph expansion）。**開発中** ([design/14](design/14_rag_layer.md)) |
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` 連携（DI 登録） |
 | `Quiver.OpenTelemetry` | OpenTelemetry エクスポート |
 | `Quiver.Storage.Sqlite` | SQLite カタログ / バックエンド |
@@ -43,6 +44,7 @@ Quiver.Core                    ← 共通型・例外・抽象インタフェー
 ```
 Quiver.Client.Attributes ─┐
 Quiver.SourceGen ─────────┴─► Quiver ─┬─► Quiver.Embedding
+                                      ├─► Quiver.Rag (開発中)
                                       ├─► Quiver.Hosting
                                       ├─► Quiver.OpenTelemetry
                                       └─► Quiver.Storage.Sqlite
@@ -276,6 +278,9 @@ Gremlin / Cypher 互換の対応状況は [docs/design/gremlin_cypher_compat.md]
 | [09_graph_api.md](design/09_graph_api.md) | 公開 CRUD API |
 | [10_embedding_pipeline.md](design/10_embedding_pipeline.md) | 埋め込み / ベクトル検索パイプライン |
 | [11_rearchitecture_master_plan.md](design/11_rearchitecture_master_plan.md) | 抜本再設計マスタープラン |
+| [12_rag_backend_direction.md](design/12_rag_backend_direction.md) | ローカル RAG バックエンド方向性（ポジショニング・非目標の正本） |
+| [13_fulltext_search.md](design/13_fulltext_search.md) | 全文検索 / ハイブリッド検索（転置インデックス + BM25 + RRF） |
+| [14_rag_layer.md](design/14_rag_layer.md) | Quiver.Rag レイヤ（Document/Chunk スキーマ・取込・検索） |
 
 ## Versioning / API 安定性
 
