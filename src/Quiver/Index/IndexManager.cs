@@ -1,8 +1,10 @@
 using System.Buffers.Binary;
 using System.Text;
 using Quiver.Core;
+using Quiver.Index.FullText;
 using Quiver.Storage;
 using Quiver.Storage.Wal;
+using Quiver.Text;
 
 namespace Quiver.Index;
 
@@ -33,8 +35,9 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     internal const byte IndexTenantRangeEnd = 0xFF;
 
     // カタログ header (テナント論理 page 1) body レイアウト。
-    private const int CatalogBlobLenOffset = 0;   // int32: 直列化ブロブ長
-    private const int CatalogEntryCountOffset = 4; // int32: 索引件数
+    private const int CatalogBlobLenOffset = 0;   // int32: 直列化ブロブ長 (secondary + FT 両セクション合計)
+    private const int CatalogEntryCountOffset = 4; // int32: secondary 索引件数
+    private const int CatalogFtCountOffset = 8;    // int32: FTS-2 全文索引件数
 
     private readonly SingleFileContainer _container;
     private readonly bool _ownsContainer;
@@ -53,6 +56,12 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     private readonly Dictionary<(string Label, string PropertyKey), string> _bindings = new();
     private readonly Dictionary<string, (string Label, string PropertyKey)> _bindingByName
         = new(StringComparer.Ordinal);
+
+    // FTS-2: 全文索引 (postings + norms の 2 テナント)。secondary 索引 (_indexes) とは別管理。
+    // orphan sweep が tf/docLen を entityId と誤認しないよう _indexes には載せない。
+    private readonly Dictionary<string, FullTextIndex> _ftIndexes = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Label, string PropertyKey), string> _ftBindings = new();
+    private readonly TokenizerRegistry _tokenizers = TokenizerRegistry.CreateDefault();
 
     /// <summary>本番経路: factory が共有 container を渡す。container の所有権は移らない。</summary>
     public IndexManager(SingleFileContainer container) : this(container, ownsContainer: false) { }
@@ -93,7 +102,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     /// </summary>
     public void FlushAll()
     {
-        if (_indexes.Count > 0) _container.Flush();
+        if (_indexes.Count > 0 || _ftIndexes.Count > 0) _container.Flush();
     }
 
     /// <summary>
@@ -293,6 +302,91 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     }
 
     // ------------------------------------------------------------------
+    // FTS-2: 全文索引 (postings + norms)
+    // ------------------------------------------------------------------
+
+    public FullTextIndex CreateFullTextIndex(string name, string label, string propertyKey, string tokenizerId)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentException.ThrowIfNullOrEmpty(label);
+        ArgumentException.ThrowIfNullOrEmpty(propertyKey);
+        ArgumentException.ThrowIfNullOrEmpty(tokenizerId);
+
+        if (_ftIndexes.TryGetValue(name, out var existing))
+        {
+            if (!string.Equals(existing.TokenizerId, tokenizerId, StringComparison.Ordinal))
+                throw new ConstraintException(
+                    $"Full-text index '{name}' already exists with tokenizer '{existing.TokenizerId}'; " +
+                    $"cannot recreate it with '{tokenizerId}'.");
+            return existing;
+        }
+        if (_indexes.ContainsKey(name))
+            throw new ConstraintException($"'{name}' already exists as a non-full-text index.");
+
+        byte postingsTenant = AllocateTenantId(); _usedTenantIds.Add(postingsTenant);
+        byte normsTenant = AllocateTenantId(); _usedTenantIds.Add(normsTenant);
+        var ft = MaterializeFullText(name, label, propertyKey, tokenizerId, postingsTenant, normsTenant);
+        PersistCatalog();
+        return ft;
+    }
+
+    public bool TryGetFullTextIndex(string name, out FullTextIndex index)
+        => _ftIndexes.TryGetValue(name, out index!);
+
+    public bool TryGetFullTextIndexByLabelKey(string label, string propertyKey, out FullTextIndex index)
+    {
+        if (_ftBindings.TryGetValue((label, propertyKey), out var name)
+            && _ftIndexes.TryGetValue(name, out index!))
+            return true;
+        index = null!;
+        return false;
+    }
+
+    public IEnumerable<(string Name, string Label, string PropertyKey, string TokenizerId)> ListFullTextIndexes()
+    {
+        foreach (var ft in _ftIndexes.Values)
+            yield return (ft.Name, ft.Label, ft.PropertyKey, ft.TokenizerId);
+    }
+
+    public bool DropFullTextIndex(string name)
+    {
+        if (!_ftIndexes.Remove(name, out var ft)) return false;
+        ft.Dispose();
+        _ftBindings.Remove((ft.Label, ft.PropertyKey));
+        // テナント論理ページをグローバル free list へ回収する。
+        if (_indexFiles.Remove(name + ":postings", out var pTenant)) pTenant.Truncate(1);
+        if (_indexFiles.Remove(name + ":norms", out var nTenant)) nTenant.Truncate(1);
+        _usedTenantIds.Remove(ft.PostingsTenantId);
+        _usedTenantIds.Remove(ft.NormsTenantId);
+        PersistCatalog();
+        return true;
+    }
+
+    public ITokenizer ResolveTokenizer(string tokenizerId) => _tokenizers.Resolve(tokenizerId);
+
+    /// <summary>カスタムトークナイザ (例: mixed-bigram-v2) を登録する経路。</summary>
+    internal void RegisterTokenizer(ITokenizer tokenizer) => _tokenizers.Register(tokenizer);
+
+    private FullTextIndex MaterializeFullText(
+        string name, string label, string propertyKey, string tokenizerId,
+        byte postingsTenant, byte normsTenant)
+    {
+        var pTenant = _container.OpenTenant(postingsTenant, PageKind.Header);
+        var nTenant = _container.OpenTenant(normsTenant, PageKind.Header);
+        var postings = new BTreeIndex<byte[]>(pTenant, new BytesKeyCodec(), name + ":postings", IndexKeyKind.Bytes);
+        var norms = new BTreeIndex<long>(nTenant, new Int64KeyCodec(), name + ":norms", IndexKeyKind.Int64);
+        var ft = new FullTextIndex(name, label, propertyKey, tokenizerId, postingsTenant, normsTenant, postings, norms);
+        _ftIndexes[name] = ft;
+        _ftBindings[(label, propertyKey)] = name;
+        // backing テナントを page-count 観測 / drop 時 truncate 用に登録する。
+        _indexFiles[name + ":postings"] = pTenant;
+        _indexFiles[name + ":norms"] = nTenant;
+        _usedTenantIds.Add(postingsTenant);
+        _usedTenantIds.Add(normsTenant);
+        return ft;
+    }
+
+    // ------------------------------------------------------------------
     // 索引カタログ I/O (専用テナント上のブロブ)
     // ------------------------------------------------------------------
 
@@ -301,15 +395,16 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         long pageCount = _catalogTenant.PageCount;
         if (pageCount < 2) return; // header 未作成 = 索引ゼロ
 
-        int blobLen, entryCount;
+        int blobLen, entryCount, ftCount;
         var hh = _catalogTenant.PinForRead(new PageId(1));
         try
         {
             blobLen = BinaryPrimitives.ReadInt32LittleEndian(hh.Data[CatalogBlobLenOffset..]);
             entryCount = BinaryPrimitives.ReadInt32LittleEndian(hh.Data[CatalogEntryCountOffset..]);
+            ftCount = BinaryPrimitives.ReadInt32LittleEndian(hh.Data[CatalogFtCountOffset..]);
         }
         finally { hh.Dispose(); }
-        if (blobLen <= 0 || entryCount <= 0) return;
+        if (blobLen <= 0) return;
 
         byte[] blob = new byte[blobLen];
         int off = 0;
@@ -340,6 +435,35 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             _usedTenantIds.Add(tenantId);
             MaterializeIndex(indexName, tenantId, typeFlags);
         }
+
+        // FTS-2: 全文索引レコードセクション (secondary の直後)。
+        for (int i = 0; i < ftCount; i++)
+        {
+            byte postingsTenant = blob[pos]; pos += 1;
+            byte normsTenant = blob[pos]; pos += 1;
+            string label = ReadString(blob, ref pos);
+            string propKey = ReadString(blob, ref pos);
+            string tokenizerId = ReadString(blob, ref pos);
+            string name = ReadString(blob, ref pos);
+            MaterializeFullText(name, label, propKey, tokenizerId, postingsTenant, normsTenant);
+        }
+    }
+
+    private static string ReadString(byte[] blob, ref int pos)
+    {
+        int len = BinaryPrimitives.ReadUInt16LittleEndian(blob.AsSpan(pos)); pos += 2;
+        string s = Encoding.UTF8.GetString(blob, pos, len); pos += len;
+        return s;
+    }
+
+    private static void WriteString(List<byte> dest, string s)
+    {
+        var bytes = Encoding.UTF8.GetBytes(s);
+        Span<byte> lenBuf = stackalloc byte[2];
+        BinaryPrimitives.WriteUInt16LittleEndian(lenBuf, (ushort)bytes.Length);
+        dest.Add(lenBuf[0]);
+        dest.Add(lenBuf[1]);
+        dest.AddRange(bytes);
     }
 
     private void MaterializeIndex(string name, byte tenantId, PropertyTypeFlags typeFlags)
@@ -361,26 +485,34 @@ internal sealed class IndexManager : IIndexManager, IDisposable
 
     private void PersistCatalog()
     {
-        // 1. カタログを直列化する: tenantId(1) typeFlags(8) nameLen(2) nameBytes(可変)。
-        var entries = new List<(byte TenantId, ulong TypeFlags, byte[] Name)>(_indexTenantIds.Count);
-        int totalLen = 0;
+        // 1. カタログを直列化する。
+        //    secondary セクション (索引件数=entryCount): tenantId(1) typeFlags(8) nameLen(2) nameBytes。
+        //    FTS-2 全文索引セクション (件数=ftCount): postingsTenant(1) normsTenant(1)
+        //       label(len+utf8) propKey(len+utf8) tokenizerId(len+utf8) name(len+utf8)。
+        var blobList = new List<byte>();
+        Span<byte> u64 = stackalloc byte[8];
+        int entryCount = 0;
         foreach (var (name, tenantId) in _indexTenantIds)
         {
-            var nameBytes = Encoding.UTF8.GetBytes(name);
             ulong tf = (ulong)(_indexTypes.TryGetValue(name, out var f) ? f : PropertyTypeFlags.None);
-            entries.Add((tenantId, tf, nameBytes));
-            totalLen += 1 + 8 + 2 + nameBytes.Length;
+            blobList.Add(tenantId);
+            BinaryPrimitives.WriteUInt64LittleEndian(u64, tf);
+            for (int i = 0; i < 8; i++) blobList.Add(u64[i]);
+            WriteString(blobList, name);
+            entryCount++;
         }
-
-        byte[] blob = new byte[totalLen];
-        int p = 0;
-        foreach (var (tenantId, tf, nameBytes) in entries)
+        int ftCount = 0;
+        foreach (var ft in _ftIndexes.Values)
         {
-            blob[p] = tenantId; p += 1;
-            BinaryPrimitives.WriteUInt64LittleEndian(blob.AsSpan(p), tf); p += 8;
-            BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(p), (ushort)nameBytes.Length); p += 2;
-            nameBytes.CopyTo(blob.AsSpan(p)); p += nameBytes.Length;
+            blobList.Add(ft.PostingsTenantId);
+            blobList.Add(ft.NormsTenantId);
+            WriteString(blobList, ft.Label);
+            WriteString(blobList, ft.PropertyKey);
+            WriteString(blobList, ft.TokenizerId);
+            WriteString(blobList, ft.Name);
+            ftCount++;
         }
+        byte[] blob = blobList.ToArray();
 
         // 2. 必要なテナント論理ページを確保する (header = 論理 1, data = 論理 2..)。
         int dataPages = (blob.Length + PagedFile.BodySize - 1) / PagedFile.BodySize;
@@ -391,9 +523,10 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         var wh = _catalogTenant.PinForWrite(new PageId(1));
         try
         {
-            wh.Data[..(CatalogEntryCountOffset + 4)].Clear();
+            wh.Data[..(CatalogFtCountOffset + 4)].Clear();
             BinaryPrimitives.WriteInt32LittleEndian(wh.Data[CatalogBlobLenOffset..], blob.Length);
-            BinaryPrimitives.WriteInt32LittleEndian(wh.Data[CatalogEntryCountOffset..], entries.Count);
+            BinaryPrimitives.WriteInt32LittleEndian(wh.Data[CatalogEntryCountOffset..], entryCount);
+            BinaryPrimitives.WriteInt32LittleEndian(wh.Data[CatalogFtCountOffset..], ftCount);
         }
         finally { wh.Dispose(); }
 
@@ -425,10 +558,14 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     {
         foreach (var idx in _indexes.Values.OfType<IDisposable>())
             idx.Dispose();
+        foreach (var ft in _ftIndexes.Values)
+            ft.Dispose();
         _indexes.Clear();
         _indexTypes.Clear();
         _indexFiles.Clear();
         _indexTenantIds.Clear();
+        _ftIndexes.Clear();
+        _ftBindings.Clear();
         _usedTenantIds.Clear();
         if (_ownsContainer) _container.Dispose();
     }

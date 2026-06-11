@@ -80,6 +80,20 @@ internal sealed class SchemaApi : ISchemaApi
         return result;
     }
 
+    public void CreateFullTextIndex(string indexName, string label, string propertyKey, FullTextIndexOptions? options = null)
+    {
+        options ??= new FullTextIndexOptions();
+        _indexManager.CreateFullTextIndex(indexName, label, propertyKey, options.TokenizerId);
+    }
+
+    public IReadOnlyList<FullTextIndexInfo> ListFullTextIndexes()
+    {
+        var result = new List<FullTextIndexInfo>();
+        foreach (var (name, label, propKey, tokenizerId) in _indexManager.ListFullTextIndexes())
+            result.Add(new FullTextIndexInfo(name, label, propKey, tokenizerId));
+        return result;
+    }
+
     // PW-18 follow-up: IndexKind は IIndexManager の表現外なので SchemaApi 側で保持する。
     private readonly Dictionary<string, IndexKind> _indexKinds = new(StringComparer.Ordinal);
 

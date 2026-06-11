@@ -48,6 +48,17 @@ public interface ISchemaApi
     IReadOnlyList<IndexInfo> ListIndexes();
 
     /// <summary>
+    /// FTS-2: 全文検索索引を作成する。<paramref name="label"/> / <paramref name="propertyKey"/> に
+    /// 一致する文字列プロパティ書き込みが同一 Tx 内で転置インデックス (postings/norms) に維持される。
+    /// <paramref name="options"/> でトークナイザ ID 等を指定する (既定は <c>mixed-bigram-v1</c>)。
+    /// binary backend のみ対応 (SQLite backend は <see cref="NotSupportedException"/>)。
+    /// </summary>
+    void CreateFullTextIndex(string indexName, string label, string propertyKey, FullTextIndexOptions? options = null);
+
+    /// <summary>FTS-2: 登録済み全文索引の一覧を返す。</summary>
+    IReadOnlyList<FullTextIndexInfo> ListFullTextIndexes();
+
+    /// <summary>
     /// ラベル名を <paramref name="oldName"/> から <paramref name="newName"/> へ変更する。
     /// ラベル ID は維持されるため、既存ノードのラベル所属関係は変更されない (テキスト表記のみ更新)。
     /// 旧名が無く新名が既にある場合は冪等な no-op として <c>true</c>。旧名も新名も無い場合は <c>false</c>。

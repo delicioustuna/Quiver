@@ -58,8 +58,17 @@ internal static class FormatVersion
     /// </summary>
     public const byte V7VectorInFile = 7;
 
+    /// <summary>
+    /// v8: FTS-2 全文検索索引。転置インデックス (postings: byte[] 複合キー (term,entityId)->tf) と
+    /// 文書長 (norms: entityId->docLen) を新規 container テナントとして同居させ、索引カタログに
+    /// 全文索引レコード (postings/norms tenant + label + propertyKey + tokenizerId) を追加する。
+    /// 旧 v7 はカタログレイアウトが非互換 (FT レコードセクションが無い) のため open 時に reject。
+    /// develop 段階のためマイグレーションは提供しない。
+    /// </summary>
+    public const byte V8FullText = 8;
+
     /// <summary>現行 (= 新規 DB を作成するときに書き込むバージョン)。</summary>
-    public const byte Current = V7VectorInFile;
+    public const byte Current = V8FullText;
 }
 
 /// <summary>

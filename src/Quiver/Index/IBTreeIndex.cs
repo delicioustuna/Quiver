@@ -1,4 +1,7 @@
-﻿namespace Quiver.Index;
+﻿using Quiver.Index.FullText;
+using Quiver.Text;
+
+namespace Quiver.Index;
 
 internal interface IBTreeIndex<TKey> : IDisposable, IBTreeIndexFlushable
 {
@@ -126,6 +129,43 @@ internal interface IIndexManager
     /// 既定実装は no-op。
     /// </summary>
     int RemoveOrphans(IEnumerable<(string IndexName, byte[] RawKey, long Value)> orphans) => 0;
+
+    // ---- FTS-2: full-text indexes (postings + norms tenants) ----
+
+    /// <summary>
+    /// FTS-2: 全文索引 (postings + norms の 2 テナント) を作成する。既存なら既存を返す。
+    /// 既定実装は <see cref="NotSupportedException"/> (binary backend のみ対応)。
+    /// </summary>
+    FullTextIndex CreateFullTextIndex(string name, string label, string propertyKey, string tokenizerId)
+        => throw new NotSupportedException("Full-text indexes are not supported by this index manager.");
+
+    /// <summary>FTS-2: 名前で全文索引を引く。既定実装は false。</summary>
+    bool TryGetFullTextIndex(string name, out FullTextIndex index)
+    {
+        index = null!;
+        return false;
+    }
+
+    /// <summary>
+    /// FTS-2: (label, propertyKey) に bound された全文索引を引く (透過維持フックの探索用)。
+    /// 既定実装は false。
+    /// </summary>
+    bool TryGetFullTextIndexByLabelKey(string label, string propertyKey, out FullTextIndex index)
+    {
+        index = null!;
+        return false;
+    }
+
+    /// <summary>FTS-2: 登録済み全文索引のメタを列挙する。既定実装は空。</summary>
+    IEnumerable<(string Name, string Label, string PropertyKey, string TokenizerId)> ListFullTextIndexes()
+        => Array.Empty<(string, string, string, string)>();
+
+    /// <summary>FTS-2: 全文索引を削除する。既定実装は false。</summary>
+    bool DropFullTextIndex(string name) => false;
+
+    /// <summary>FTS-2: tokenizerId からトークナイザを解決する (catalog 記録値を registry 経由で)。</summary>
+    ITokenizer ResolveTokenizer(string tokenizerId)
+        => throw new NotSupportedException("This index manager has no tokenizer registry.");
 }
 
 internal interface IBulkLoadable<TKey>

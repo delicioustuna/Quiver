@@ -134,6 +134,12 @@ internal sealed class SqliteSchemaApi : ISchemaApi
         return list;
     }
 
+    public void CreateFullTextIndex(string indexName, string label, string propertyKey, FullTextIndexOptions? options = null)
+        => throw new NotSupportedException(
+            "Full-text indexes (FTS-2) are only supported by the binary backend in the current MVP.");
+
+    public IReadOnlyList<FullTextIndexInfo> ListFullTextIndexes() => Array.Empty<FullTextIndexInfo>();
+
     public bool RenameLabel(string oldName, string newName) => RenameToken("labels", oldName, newName, _labelCache);
     public bool RenamePropertyKey(string oldName, string newName) => RenameToken("property_keys", oldName, newName, _propKeyCache);
     public bool RenameRelationshipType(string oldName, string newName) => RenameToken("relationship_types", oldName, newName, _relTypeCache);

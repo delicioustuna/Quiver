@@ -398,6 +398,21 @@ namespace Quiver
         public long TotalDegree { get; }
         public long TotalNodes { get; }
     }
+    public sealed class FullTextIndexInfo : System.IEquatable<Quiver.FullTextIndexInfo>
+    {
+        public FullTextIndexInfo(string Name, string Label, string PropertyKey, string TokenizerId) { }
+        public string Label { get; init; }
+        public string Name { get; init; }
+        public string PropertyKey { get; init; }
+        public string TokenizerId { get; init; }
+    }
+    public sealed class FullTextIndexOptions : System.IEquatable<Quiver.FullTextIndexOptions>
+    {
+        public FullTextIndexOptions() { }
+        public double B { get; init; }
+        public double K1 { get; init; }
+        public string TokenizerId { get; init; }
+    }
     public sealed class GraphDatabase : System.IDisposable
     {
         public Quiver.IDiagnosticsApi Diagnostics { get; }
@@ -549,6 +564,7 @@ namespace Quiver
     }
     public interface ISchemaApi
     {
+        void CreateFullTextIndex(string indexName, string label, string propertyKey, Quiver.FullTextIndexOptions? options = null);
         void CreateIndex(string indexName, string label, string propertyKey, Quiver.IndexKind kind);
         void DropIndex(string indexName);
         string? GetLabelName(Quiver.Core.LabelId id);
@@ -556,6 +572,7 @@ namespace Quiver
         Quiver.Core.PropertyKeyId GetOrCreatePropertyKey(string name);
         Quiver.Core.RelationshipTypeId GetOrCreateRelationshipType(string name);
         bool IndexExists(string indexName);
+        System.Collections.Generic.IReadOnlyList<Quiver.FullTextIndexInfo> ListFullTextIndexes();
         System.Collections.Generic.IReadOnlyList<Quiver.IndexInfo> ListIndexes();
         bool RenameIndex(string oldName, string newName);
         bool RenameLabel(string oldName, string newName);
@@ -1275,6 +1292,12 @@ namespace Quiver.Text
         string TokenizerId { get; }
         void Tokenize(System.ReadOnlySpan<char> text, Quiver.Text.ITokenSink sink);
     }
+    public interface ITokenizerRegistry
+    {
+        void Register(Quiver.Text.ITokenizer tokenizer);
+        Quiver.Text.ITokenizer Resolve(string tokenizerId);
+        bool TryResolve(string tokenizerId, out Quiver.Text.ITokenizer tokenizer);
+    }
     public sealed class JapaneseAwareNormalizer : Quiver.Text.ITextNormalizer
     {
         public JapaneseAwareNormalizer() { }
@@ -1313,6 +1336,14 @@ namespace Quiver.Text
         public required int NormalizedLengthChars { get; init; }
         public required int OriginalLengthChars { get; init; }
         public required string Text { get; init; }
+    }
+    public sealed class TokenizerRegistry : Quiver.Text.ITokenizerRegistry
+    {
+        public TokenizerRegistry(bool registerDefaults = true) { }
+        public void Register(Quiver.Text.ITokenizer tokenizer) { }
+        public Quiver.Text.ITokenizer Resolve(string tokenizerId) { }
+        public bool TryResolve(string tokenizerId, out Quiver.Text.ITokenizer tokenizer) { }
+        public static Quiver.Text.TokenizerRegistry CreateDefault() { }
     }
 }
 namespace Quiver.Transactions
