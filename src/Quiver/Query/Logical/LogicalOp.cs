@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Quiver;
 using Quiver.Core;
 using Quiver.Query.Physical;
@@ -137,6 +138,29 @@ internal sealed record FullTextScanOp(
     string IndexName,
     string QueryText,
     int K) : LogicalOp
+{
+    public override int CurrentEntityColumn => 0;
+    public override int PredictedOutputColumnCount => 1;
+}
+
+/// <summary>融合戦略。Phase 1 は RRF (Reciprocal Rank Fusion) のみ。enum は将来拡張用。</summary>
+internal enum FusionStrategy
+{
+    /// <summary>Reciprocal Rank Fusion: <c>Σ_i 1/(k0 + rank_i(d))</c> (k0=60)。rank のみで score 配管不要。</summary>
+    Rrf,
+}
+
+/// <summary>
+/// FTS-5: ランク融合起点。各 <see cref="Children"/> は ranked top-k を産む leaf 検索
+/// (<see cref="FullTextScanOp"/> / <see cref="KnnOp"/>) で、それらの順位を <see cref="Strategy"/>
+/// (Phase 1 は RRF) で融合し上位 <see cref="K"/> 件を放出する。RRF は rank のみで計算できるため
+/// 既存の「score 非公開」設計 (KnnOp / FullTextScanOp と同方針) を変えずに融合できる
+/// (design 13 §7.2)。DSL (<c>g.HybridSearch</c>) は子を常に <c>Candidate=null</c> で生成する。
+/// </summary>
+internal sealed record FusionOp(
+    ImmutableArray<LogicalOp> Children,
+    int K,
+    FusionStrategy Strategy) : LogicalOp
 {
     public override int CurrentEntityColumn => 0;
     public override int PredictedOutputColumnCount => 1;

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Quiver.Api.Internal;
 using Quiver.Api.Match;
 using Quiver.Core;
@@ -208,6 +209,36 @@ public sealed class GraphTraversalSource
     public GraphTraversal<NodeId> Search(string indexName, string queryText, int k)
     {
         var plan = new FullTextScanOp(null, indexName, queryText, k);
+        return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
+    }
+
+    /// <summary>
+    /// FTS-5: BM25 全文検索と KNN ベクトル検索の上位 <paramref name="k"/> 件を
+    /// RRF (Reciprocal Rank Fusion) で融合したハイブリッド検索を起点にトラバーサルを開始する。
+    /// 各検索が独立に上位 <paramref name="k"/> 件を関連度順に求め、両ランキングの順位
+    /// (<c>Σ 1/(60 + rank)</c>) を合算して融合上位 <paramref name="k"/> 件を放出する。
+    /// 続けて <c>.Out(...)</c> 等のトラバーサルステップを接続できる。
+    /// </summary>
+    /// <remarks>
+    /// RRF は順位のみで計算でき score 配管を要さないため、BM25 / KNN いずれの leaf も
+    /// 既存の「score 非公開」設計のまま融合できる (design 13 §7.2)。両方に上位で現れる
+    /// 文書ほど押し上がり、片方にしか現れない文書もそのランクで残る。可視性は各 leaf 側で
+    /// 既にフィルタ済み。weighted-sum 融合は非目標 (距離スケール調整が必要なため)。
+    /// </remarks>
+    /// <param name="textIndex">対象の全文索引名。</param>
+    /// <param name="queryText">全文検索クエリ文字列。</param>
+    /// <param name="vectorIndex">対象のベクトル索引名。</param>
+    /// <param name="queryVector">問い合わせベクトル。</param>
+    /// <param name="k">融合後に取得する上位件数。</param>
+    public GraphTraversal<NodeId> HybridSearch(
+        string textIndex, string queryText,
+        string vectorIndex, ReadOnlySpan<float> queryVector, int k)
+    {
+        int dim = _tx.AsInternal().Access.TryGetVectorIndexSpec(vectorIndex, out var spec) ? spec.Dimensions : 0;
+        var children = ImmutableArray.Create<LogicalOp>(
+            new FullTextScanOp(null, textIndex, queryText, k),
+            new KnnOp(null, vectorIndex, queryVector.ToArray(), k, dim));
+        var plan = new FusionOp(children, k, FusionStrategy.Rrf);
         return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 

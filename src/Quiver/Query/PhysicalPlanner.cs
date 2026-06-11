@@ -27,6 +27,7 @@ internal static class PhysicalPlanner
         PathOp p                  => PlanPath(p, schema),
         KnnOp k                   => PlanKnn(k, schema),
         FullTextScanOp ft         => PlanFullTextScan(ft, schema),
+        FusionOp fu               => PlanFusion(fu, schema),
         PropertyLookupOp pl       => new PropertyLookupOperator(
                                         Plan(pl.Source, schema), pl.Source.CurrentEntityColumn,
                                         schema.GetOrCreatePropertyKey(pl.Key), pl.Key,
@@ -85,6 +86,22 @@ internal static class PhysicalPlanner
         if (ft.Candidate is not null)
             throw new NotSupportedException("Graph-first full-text scan (candidate-side) lands in FTS-4.");
         return new FullTextScanOperator(ft.IndexName, ft.QueryText, ft.K);
+    }
+
+    private static IPhysicalOperator PlanFusion(FusionOp fu, ISchemaApi schema)
+    {
+        // FTS-5: Phase 1 は RRF のみ。enum 拡張時に他戦略の物理化をここへ足す。
+        if (fu.Strategy != FusionStrategy.Rrf)
+            throw new NotSupportedException($"Fusion strategy {fu.Strategy} は未対応 (Phase 1 は RRF のみ)。");
+
+        var children = new IPhysicalOperator[fu.Children.Length];
+        var columns = new int[fu.Children.Length];
+        for (int i = 0; i < fu.Children.Length; i++)
+        {
+            children[i] = Plan(fu.Children[i], schema);
+            columns[i] = fu.Children[i].CurrentEntityColumn;
+        }
+        return new FusionOperator(children, columns, fu.K);
     }
 
     private static IPhysicalOperator PlanSort(SortOp so, ISchemaApi schema)

@@ -28,6 +28,7 @@ namespace Quiver.Api
         public Quiver.Api.RelationshipBuilder AddRelationship(string type) { }
         public void Delete<T>(Quiver.Core.NodeId id)
             where T : Quiver.Api.IGraphNode<T> { }
+        public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> HybridSearch(string textIndex, string queryText, string vectorIndex, System.ReadOnlySpan<float> queryVector, int k) { }
         public Quiver.Core.NodeId Insert<T>(T entity)
             where T : Quiver.Api.IGraphNode<T> { }
         public Quiver.Core.NodeId InsertIndexed<T>(T entity)
