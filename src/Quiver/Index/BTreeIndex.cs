@@ -936,10 +936,25 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         return buf;
     }
 
-    /// <summary>FTS-2: abort の before-image undo 後にヘッダから root/entryCount/height を読み直す。</summary>
+    /// <summary>
+    /// FTS-2: abort の before-image undo 後にヘッダから root/entryCount/height を読み直す。
+    /// ただし索引が <b>aborted tx 内で新規作成</b>されたケースでは、rollback で backing テナントが
+    /// tx 開始前へ巻き戻り、ヘッダは stale before-image (root が範囲外の値) になり得る。その場合は
+    /// in-memory 状態を維持する (zombie 索引だが seek は空を返し、次回 reopen でカタログから消える)。
+    /// 妥当なヘッダ (root が実データページ範囲内) のときだけ反映する。
+    /// </summary>
     public void ReloadFromHeader()
     {
-        if (_file.PageCount > 1) LoadHeader();
+        if (_file.PageCount <= 1) return;
+        using var h = _file.PinForRead(HeaderPageId);
+        long root = BinaryPrimitives.ReadInt64LittleEndian(h.Data);
+        long entryCount = BinaryPrimitives.ReadInt64LittleEndian(h.Data[8..]);
+        int height = BinaryPrimitives.ReadInt32LittleEndian(h.Data[16..]);
+        // root は常に実データページ (>= 2; page 1 はヘッダ)。範囲外 (-1 等) は stale before-image。
+        if (root < 2 || root >= _file.PageCount || entryCount < 0 || height < 0) return;
+        _root = new PageId(root);
+        _entryCount = entryCount;
+        _height = height;
     }
 
     private void LoadHeader()
