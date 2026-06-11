@@ -163,6 +163,7 @@ internal static class LogicalOptimizer
         DedupOp x                => x with { Source = f(x.Source) },
         BranchOp x               => x with { Source = f(x.Source) },
         KnnOp x                  => x.Candidate is null ? x : x with { Candidate = f(x.Candidate) },
+        FullTextScanOp x         => x.Candidate is null ? x : x with { Candidate = f(x.Candidate) },
         _                        => n, // 葉: ScanOp / NodeSeedOp / CorrelatedInputOp
     };
 }

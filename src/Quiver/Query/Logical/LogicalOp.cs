@@ -127,6 +127,21 @@ internal sealed record KnnOp(
     public override int PredictedOutputColumnCount => 1;
 }
 
+/// <summary>
+/// FTS-3: BM25 全文検索起点。<see cref="Candidate"/>=null で text-first (BM25 top-k を直接放出)、
+/// <see cref="Candidate"/>!=null で graph-first (候補集合内 BM25、FTS-4)。DSL (<c>g.Search</c>) は
+/// 常に <see cref="Candidate"/>=null で生成する。KnnOp と相似形。
+/// </summary>
+internal sealed record FullTextScanOp(
+    LogicalOp? Candidate,
+    string IndexName,
+    string QueryText,
+    int K) : LogicalOp
+{
+    public override int CurrentEntityColumn => 0;
+    public override int PredictedOutputColumnCount => 1;
+}
+
 /// <summary>プロパティ値を末尾列へマテリアライズする (<c>Values</c> / 集約 row path / sort key)。</summary>
 internal sealed record PropertyLookupOp(LogicalOp Source, string Key, EntityKind Kind) : LogicalOp
 {

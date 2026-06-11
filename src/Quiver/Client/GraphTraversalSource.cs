@@ -191,6 +191,26 @@ public sealed class GraphTraversalSource
         return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 
+    /// <summary>
+    /// FTS-3: 全文索引に対する BM25 検索を起点にトラバーサルを開始する (<c>g.Knn</c> と対称)。
+    /// クエリは索引構築時と同一のトークナイザ (catalog 記録の TokenizerId) で分割され、
+    /// term-at-a-time BM25 で上位 <paramref name="k"/> 件を関連度降順に放出する。続けて
+    /// <c>.Out(...)</c> 等のトラバーサルステップを接続できる。
+    /// </summary>
+    /// <remarks>
+    /// 関連度スコア自体は伝播しない (KNN と同じ MVP 方針)。可視性は世代照合で
+    /// フィルタされる (削除/再利用された slot を指す postings は除外)。
+    /// graph-first 経路 (<c>.FilterByText</c> / pushdown) は FTS-4。
+    /// </remarks>
+    /// <param name="indexName">対象の全文索引名。</param>
+    /// <param name="queryText">検索クエリ文字列。</param>
+    /// <param name="k">取得する上位件数。</param>
+    public GraphTraversal<NodeId> Search(string indexName, string queryText, int k)
+    {
+        var plan = new FullTextScanOp(null, indexName, queryText, k);
+        return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
+    }
+
     // ── 重み付き最短経路 (Dijkstra / A*) ───────────────────────────────────────
 
     /// <summary>

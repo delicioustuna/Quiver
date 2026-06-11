@@ -47,6 +47,22 @@ internal sealed class FullTextIndex : IDisposable
     public long DocumentCount => _norms.EntryCount;
 
     /// <summary>
+    /// FTS-3 BM25 statistics: document count N and the summed document length
+    /// (avgdl = total / N). Computed by scanning norms once — an approximation that
+    /// is fine for BM25 (design 13 section 6); FTS-4 moves N/avgdl into GraphStats.
+    /// </summary>
+    public (long DocCount, long TotalTokens) NormsSummary()
+    {
+        long count = 0, total = 0;
+        foreach (var kv in _norms.EnumerateRawEntries())
+        {
+            count++;
+            total += kv.Value;
+        }
+        return (count, total);
+    }
+
+    /// <summary>
     /// Tokenize <paramref name="text"/> and write its postings (per-term tf,
     /// saturated to u16) and norm (docLen). Caller resolves <paramref name="tokenizer"/>
     /// from <see cref="TokenizerId"/> so index- and query-time tokenization match.

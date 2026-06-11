@@ -26,6 +26,7 @@ internal static class PhysicalPlanner
         VarLenExpandOp v          => PlanVarLenExpand(v, schema),
         PathOp p                  => PlanPath(p, schema),
         KnnOp k                   => PlanKnn(k, schema),
+        FullTextScanOp ft         => PlanFullTextScan(ft, schema),
         PropertyLookupOp pl       => new PropertyLookupOperator(
                                         Plan(pl.Source, schema), pl.Source.CurrentEntityColumn,
                                         schema.GetOrCreatePropertyKey(pl.Key), pl.Key,
@@ -76,6 +77,14 @@ internal static class PhysicalPlanner
             return new KnnNodeSourceOperator(k.IndexName, k.Query, k.K);
         return new FilteredKnnNodeSourceOperator(
             Plan(k.Candidate, schema), k.Candidate.CurrentEntityColumn, k.IndexName, k.Query, k.K);
+    }
+
+    private static IPhysicalOperator PlanFullTextScan(FullTextScanOp ft, ISchemaApi schema)
+    {
+        // FTS-3: text-first のみ。graph-first (Candidate!=null + .FilterByText / pushdown) は FTS-4。
+        if (ft.Candidate is not null)
+            throw new NotSupportedException("Graph-first full-text scan (candidate-side) lands in FTS-4.");
+        return new FullTextScanOperator(ft.IndexName, ft.QueryText, ft.K);
     }
 
     private static IPhysicalOperator PlanSort(SortOp so, ISchemaApi schema)
