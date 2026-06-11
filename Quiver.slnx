@@ -7,6 +7,7 @@
     <Project Path="src/Quiver.Embedding/Quiver.Embedding.csproj" />
     <Project Path="src/Quiver.Hosting/Quiver.Hosting.csproj" />
     <Project Path="src/Quiver.OpenTelemetry/Quiver.OpenTelemetry.csproj" />
+    <Project Path="src/Quiver.Rag/Quiver.Rag.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/Quiver.Benchmarks/Quiver.Benchmarks.csproj" />
@@ -42,5 +43,6 @@
     <Project Path="tests/Quiver.PropertyTests/Quiver.PropertyTests.csproj" />
     <Project Path="tests/Quiver.FuzzTests/Quiver.FuzzTests.csproj" />
     <Project Path="tests/Quiver.PublicApi.Tests/Quiver.PublicApi.Tests.csproj" />
+    <Project Path="tests/Quiver.Rag.Tests/Quiver.Rag.Tests.csproj" />
   </Folder>
 </Solution>

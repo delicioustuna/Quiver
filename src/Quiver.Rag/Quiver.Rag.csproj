@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 依存はコア Quiver のみ (14_rag_layer.md §2)。Quiver.Embedding には依存しない。 -->
+    <ProjectReference Include="..\Quiver\Quiver.csproj" />
+  </ItemGroup>
+</Project>
