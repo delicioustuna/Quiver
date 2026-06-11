@@ -1,4 +1,5 @@
 using Quiver.Core;
+using Quiver.Query.Physical;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
 
@@ -234,6 +235,19 @@ public sealed class GraphStats
     public long TotalRelationships { get; private init; }
 
     /// <summary>
+    /// FTS-4: 全文索引ごとの BM25 コーパス統計 (N / avgdl) スナップショット。索引名でキーする。
+    /// <c>g.Search</c> / <c>.FilterByText</c> が operator へ N/avgdl を渡し、クエリ毎の O(N) norms
+    /// 走査を省く (design 13 §6: BM25 は統計鮮度に頑健なので定期収集・近似で足りる)。internal 専用
+    /// (<see cref="Bm25CorpusStats"/> が internal、公開サーフェスは増やさない)。
+    /// </summary>
+    internal IReadOnlyDictionary<string, Bm25CorpusStats> FullTextCorpora { get; private init; }
+        = new Dictionary<string, Bm25CorpusStats>(StringComparer.Ordinal);
+
+    /// <summary>FTS-4: 指定全文索引のコーパス統計 (未収集は null)。</summary>
+    internal Bm25CorpusStats? FullTextCorpus(string indexName)
+        => FullTextCorpora.TryGetValue(indexName, out var c) ? c : null;
+
+    /// <summary>
     /// 観測対象 backend が <c>NodeByLabelScan</c> を O(|L|) で提供できるか。
     /// バイナリ backend で <c>LabelNodeIndex</c> sidecar が接続されているとき <c>true</c>。
     /// <c>InlineGraphAccessMethods</c> 経路 / ANN bypass 等 sidecar 無し backend では <c>false</c>。
@@ -328,6 +342,7 @@ public sealed class GraphStats
             PropertyKeys          = PropertyKeys,
             TotalNodes            = TotalNodes,
             TotalRelationships    = TotalRelationships,
+            FullTextCorpora       = FullTextCorpora,
             HasFastLabelIndex     = hasFastLabelIndex,
         };
     }
@@ -462,6 +477,17 @@ public sealed class GraphStats
             pks.SetNullOrMissingCount(missing < 0 ? 0 : missing);
         }
 
+        // FTS-4: snapshot per-full-text-index BM25 corpus stats (N, avgdl). One norms
+        // scan per index here replaces an O(N) scan per query in the scan operators.
+        var ftCorpora = new Dictionary<string, Bm25CorpusStats>(StringComparer.Ordinal);
+        foreach (var (name, _, _, _) in tx.Indexes.ListFullTextIndexes())
+        {
+            if (!tx.Indexes.TryGetFullTextIndex(name, out var ft)) continue;
+            var (docCount, totalTokens) = ft.NormsSummary();
+            double avgdl = docCount > 0 ? (double)totalTokens / docCount : 0.0;
+            ftCorpora[name] = new Bm25CorpusStats(docCount, avgdl);
+        }
+
         return new GraphStats
         {
             LabelCardinality      = labelCard,
@@ -476,6 +502,7 @@ public sealed class GraphStats
             PropertyKeys          = propertyKeys,
             TotalNodes            = totalNodes,
             TotalRelationships    = totalRels,
+            FullTextCorpora       = ftCorpora,
             HasFastLabelIndex     = tx.Access.HasFastLabelIndex,
         };
     }

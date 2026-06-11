@@ -440,6 +440,24 @@ public sealed class GraphTraversal<T>
         return Rebase<NodeId>(filtered, row => row.GetNodeId(0), 0);
     }
 
+    /// <summary>
+    /// FTS-4 graph-first 全文検索 (<c>.FilterByKnn</c> の BM25 版)。上流の各ノードを candidate set として
+    /// その中だけで BM25 top-k を求める。通常は <c>g.Search(...).HasLabel(...).Has(...)</c> チェーンが
+    /// LogicalOptimizer の FullTextPushdown で自動的にこの形へ倒れるため、本メソッドは明示的に
+    /// graph-first を選びたいときのエスケープハッチ。df / idf は全 postings から取るので候補ドキュメントの
+    /// スコアは text-first と一致し、top-k だけが候補限定後に切られる (post-filter の k starvation を回避)。
+    /// </summary>
+    /// <param name="indexName">対象の全文索引名。</param>
+    /// <param name="queryText">検索クエリ文字列。</param>
+    /// <param name="k">取得する上位件数。</param>
+    public GraphTraversal<NodeId> FilterByText(string indexName, string queryText, int k)
+    {
+        // Candidate を上流 plan に固定した graph-first FullTextScanOp。Candidate != null のため
+        // optimizer は押し下げ判定をスキップし、そのまま FilteredFullTextScan に物理化される。
+        var filtered = new FullTextScanOp(_plan, indexName, queryText, k, _stats?.FullTextCorpus(indexName));
+        return Rebase<NodeId>(filtered, row => row.GetNodeId(0), 0);
+    }
+
     // ── GC-3: 並び替え ───────────────────────────────────────
 
     /// <summary>プロパティ <paramref name="key"/> の昇順でソートする。</summary>

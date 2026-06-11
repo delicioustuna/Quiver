@@ -129,15 +129,19 @@ internal sealed record KnnOp(
 }
 
 /// <summary>
-/// FTS-3: BM25 全文検索起点。<see cref="Candidate"/>=null で text-first (BM25 top-k を直接放出)、
-/// <see cref="Candidate"/>!=null で graph-first (候補集合内 BM25、FTS-4)。DSL (<c>g.Search</c>) は
-/// 常に <see cref="Candidate"/>=null で生成する。KnnOp と相似形。
+/// FTS-3/4: BM25 全文検索起点。<see cref="Candidate"/>=null で text-first (BM25 top-k を直接放出)、
+/// <see cref="Candidate"/>!=null で graph-first (候補集合内 BM25)。DSL <c>g.Search</c> は常に
+/// <see cref="Candidate"/>=null で生成し <c>LogicalOptimizer</c> の FullTextPushdown rule が候補を確定する。
+/// <c>.FilterByText</c> は <see cref="Candidate"/> を直接据えた graph-first を生成する。KnnOp と相似形。
+/// <see cref="Corpus"/> は GraphStats から拾った N/avgdl スナップショット (FTS-4)。null なら
+/// operator が norms 索引から概算する。push-down rewrite を跨いで保持される。
 /// </summary>
 internal sealed record FullTextScanOp(
     LogicalOp? Candidate,
     string IndexName,
     string QueryText,
-    int K) : LogicalOp
+    int K,
+    Bm25CorpusStats? Corpus = null) : LogicalOp
 {
     public override int CurrentEntityColumn => 0;
     public override int PredictedOutputColumnCount => 1;

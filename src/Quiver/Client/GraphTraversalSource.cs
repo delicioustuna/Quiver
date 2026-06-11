@@ -208,7 +208,8 @@ public sealed class GraphTraversalSource
     /// <param name="k">取得する上位件数。</param>
     public GraphTraversal<NodeId> Search(string indexName, string queryText, int k)
     {
-        var plan = new FullTextScanOp(null, indexName, queryText, k);
+        // FTS-4: stats があれば N/avgdl スナップショットを op に焼き込み、operator のクエリ毎 norms 走査を省く。
+        var plan = new FullTextScanOp(null, indexName, queryText, k, _stats?.FullTextCorpus(indexName));
         return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 
@@ -236,7 +237,7 @@ public sealed class GraphTraversalSource
     {
         int dim = _tx.AsInternal().Access.TryGetVectorIndexSpec(vectorIndex, out var spec) ? spec.Dimensions : 0;
         var children = ImmutableArray.Create<LogicalOp>(
-            new FullTextScanOp(null, textIndex, queryText, k),
+            new FullTextScanOp(null, textIndex, queryText, k, _stats?.FullTextCorpus(textIndex)),
             new KnnOp(null, vectorIndex, queryVector.ToArray(), k, dim));
         var plan = new FusionOp(children, k, FusionStrategy.Rrf);
         return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);

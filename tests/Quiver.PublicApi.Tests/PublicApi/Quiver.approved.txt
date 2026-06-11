@@ -70,6 +70,7 @@ namespace Quiver.Api
         public long Count() { }
         public Quiver.Api.GraphTraversal<T> Dedup() { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> FilterByKnn(string indexName, System.ReadOnlySpan<float> query, int k) { }
+        public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> FilterByText(string indexName, string queryText, int k) { }
         public System.Collections.Generic.List<T> Fold() { }
         public System.Collections.Generic.Dictionary<string, long> GroupCount(string key) { }
         public Quiver.Api.GraphTraversal<T> Has(string key) { }

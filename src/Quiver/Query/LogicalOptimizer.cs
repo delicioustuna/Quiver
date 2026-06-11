@@ -18,6 +18,9 @@ namespace Quiver.Query.Optimizer;
 ///   <item><b>KnnLimitPushdown</b>: <c>Limit(n, &lt;filters&gt;(Knn(null,K)))</c> → K を <c>min(K,n)</c> に縮め Limit を除去。</item>
 ///   <item><b>KnnPushdown</b>: <c>&lt;filters&gt;(Knn(null))</c> (filter 1 つ以上) を、構造ヒント + GraphStats から
 ///   graph-first (<c>Knn(Candidate=&lt;filters&gt;(Scan))</c>) か vector-first (filter を post-filter に据置) に確定。</item>
+///   <item><b>FullTextPushdown</b> (FTS-4): <c>&lt;filters&gt;(FullTextScan(null))</c> を KnnPushdown と同型で
+///   graph-first (<c>FullTextScan(Candidate=&lt;filters&gt;(Scan))</c>) か text-first に確定。閾値は単一定数
+///   <see cref="TextFirstLabelFraction"/> (dim 概念が無いため)。<c>Limit</c> による K 縮小も対称に行う。</item>
 ///   <item><b>LabelScanRewrite</b>: <c>Filter(LabelPredicate@col0, Scan(Node,null))</c> → <c>Scan(Node,label)</c>
 ///   (AllNodesScan→NodeByLabelScan)。graph-first 候補 + Match 由来プランの両方に効く idempotent rule。</item>
 /// </list>
@@ -56,10 +59,19 @@ internal static class LogicalOptimizer
         return FastLabelIndexThresholds[^1].Threshold;
     }
 
-    /// <summary>論理プランを最適化する。<paramref name="stats"/> が null なら KNN は構造ヒントのみで判定。</summary>
+    /// <summary>
+    /// FTS-4: 構造ヒントが graph-first を示唆していても、label cardinality / TotalNodes が
+    /// この値以上なら全文検索を text-first に据え置く保守閾値。BM25 graph-first は df のため
+    /// postings を全走査するので、候補集合が十分小さい (低選択率ラベル) ときだけ得をする。KNN と違い
+    /// dim 概念が無いため単一定数 (legacy KnnPushdown と同値)。FTS-6 でベンチ実測して調整余地あり。
+    /// </summary>
+    internal const double TextFirstLabelFraction = 0.30;
+
+    /// <summary>論理プランを最適化する。<paramref name="stats"/> が null なら KNN / 全文は構造ヒントのみで判定。</summary>
     public static LogicalOp Optimize(LogicalOp plan, GraphStats? stats, ISchemaApi schema)
     {
         var p = RewriteKnn(plan, stats, schema);
+        p = RewriteFullText(p, stats, schema);
         p = LabelScanRewrite(p, schema);
         return p;
     }
@@ -135,6 +147,60 @@ internal static class LogicalOptimizer
         for (int i = filters.Count - 1; i >= 0; i--)
             result = new FilterOp(result, filters[i]);
         return result;
+    }
+
+    // ── FullTextLimitPushdown + FullTextPushdown (FTS-4、KnnPushdown と同型) ──────
+
+    private static LogicalOp RewriteFullText(LogicalOp n, GraphStats? stats, ISchemaApi schema)
+    {
+        // FullTextLimitPushdown: Limit(skip=0) が <filters>(FullTextScan(null,K)) の直上なら K を縮め Limit を除去。
+        if (n is LimitOp { Skip: 0 } lim
+            && TryCollectFullTextStack(lim.Source, out var lf, out var lft) && lft!.Candidate is null)
+        {
+            int newK = lim.Limit >= lft.K ? lft.K : (int)lim.Limit;
+            var shrunk = newK == lft.K ? lft : lft with { K = newK };
+            return RewriteFullText(RebuildStack(lf, shrunk), stats, schema);
+        }
+
+        // FullTextPushdown: <filters>(FullTextScan(null)) で filter が 1 つ以上あるなら graph-first / text-first を確定。
+        if (TryCollectFullTextStack(n, out var filters, out var ft) && filters.Count > 0 && ft!.Candidate is null)
+            return PushdownFullText(filters, ft, stats, schema);
+
+        return RewriteChildren(n, c => RewriteFullText(c, stats, schema));
+    }
+
+    private static LogicalOp PushdownFullText(
+        List<Func<ISchemaApi, IPredicate>> filters, FullTextScanOp ft, GraphStats? stats, ISchemaApi schema)
+    {
+        // stats があり label cardinality が閾値以上なら text-first に据え置く (filter は post-filter のまま)。
+        if (stats is not null && ShouldStayTextFirst(filters, stats, schema))
+            return RebuildStack(filters, ft);
+
+        // graph-first: filter を node scan の上に積み直し、label filter を label scan へ畳む。
+        LogicalOp candidate = LabelScanRewrite(RebuildStack(filters, new ScanOp(EntityKind.Node, null)), schema);
+        return ft with { Candidate = candidate };
+    }
+
+    private static bool ShouldStayTextFirst(
+        List<Func<ISchemaApi, IPredicate>> filters, GraphStats stats, ISchemaApi schema)
+    {
+        if (stats.TotalNodes <= 0) return false;
+        if (FindLabel(filters, schema) is not LabelId lid) return false;
+        long card = stats.EstimateCardinality(lid);
+        if (card <= 0) return false;
+        return (double)card / stats.TotalNodes >= TextFirstLabelFraction;
+    }
+
+    /// <summary>FilterOp を剥がしながら底の <see cref="FullTextScanOp"/> まで辿る。filter は outer→inner 順で返す。</summary>
+    private static bool TryCollectFullTextStack(
+        LogicalOp n, out List<Func<ISchemaApi, IPredicate>> filters, out FullTextScanOp? ft)
+    {
+        filters = new List<Func<ISchemaApi, IPredicate>>();
+        var cur = n;
+        while (cur is FilterOp f) { filters.Add(f.PredicateFactory); cur = f.Source; }
+        if (cur is FullTextScanOp s) { ft = s; return true; }
+        ft = null;
+        return false;
     }
 
     // ── LabelScanRewrite ────────────────────────────────────────────────────────

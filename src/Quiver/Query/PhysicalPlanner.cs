@@ -82,10 +82,12 @@ internal static class PhysicalPlanner
 
     private static IPhysicalOperator PlanFullTextScan(FullTextScanOp ft, ISchemaApi schema)
     {
-        // FTS-3: text-first のみ。graph-first (Candidate!=null + .FilterByText / pushdown) は FTS-4。
-        if (ft.Candidate is not null)
-            throw new NotSupportedException("Graph-first full-text scan (candidate-side) lands in FTS-4.");
-        return new FullTextScanOperator(ft.IndexName, ft.QueryText, ft.K);
+        // FTS-3 text-first (Candidate=null) / FTS-4 graph-first (Candidate!=null = 候補集合内 BM25)。
+        if (ft.Candidate is null)
+            return new FullTextScanOperator(ft.IndexName, ft.QueryText, ft.K, ft.Corpus);
+        return new FilteredFullTextScanOperator(
+            Plan(ft.Candidate, schema), ft.Candidate.CurrentEntityColumn,
+            ft.IndexName, ft.QueryText, ft.K, ft.Corpus);
     }
 
     private static IPhysicalOperator PlanFusion(FusionOp fu, ISchemaApi schema)
