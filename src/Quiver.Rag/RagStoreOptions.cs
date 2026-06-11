@@ -30,4 +30,7 @@ public sealed record RagStoreOptions
     /// バックエンド (SQLite) では作成がスキップされ <see cref="RagStore.FullTextEnabled"/> が <c>false</c> になる。
     /// </summary>
     public bool EnableFullTextIndex { get; init; } = true;
+
+    /// <summary>チャンキング設定 (RAG-2)。取込時に Blocks をこの設定でチャンク化する。</summary>
+    public ChunkingOptions Chunking { get; init; } = new();
 }
