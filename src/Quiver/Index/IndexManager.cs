@@ -139,18 +139,58 @@ internal sealed class IndexManager : IIndexManager, IDisposable
                     output.Add((name, kv.Key, kv.Value));
             }
         }
+
+        // FTS-2: 全文索引 (postings/norms) は entityId を key 側に持つので専用走査。
+        // postings は key 末尾 8B、norms は key(Int64) が packed entityId。orphan は lane を
+        // タグ付けして emit し、RemoveOrphans が postings/norms へ振り分ける。
+        var int64 = new Int64KeyCodec();
+        foreach (var ft in _ftIndexes.Values)
+        {
+            indexCount++;
+            foreach (var kv in ft.EnumeratePostingsRaw())
+            {
+                entryCount++;
+                if (!isLive(PostingsKey.DecodeEntityId(kv.Key)))
+                    output.Add((ft.Name + FtLaneSep + PostingsLaneTag, kv.Key, kv.Value));
+            }
+            indexCount++;
+            foreach (var kv in ft.EnumerateNormsRaw())
+            {
+                entryCount++;
+                if (!isLive(int64.Decode(kv.Key)))
+                    output.Add((ft.Name + FtLaneSep + NormsLaneTag, kv.Key, kv.Value));
+            }
+        }
         return (indexCount, entryCount);
     }
 
+    // FTS-2: orphan の IndexName に埋める lane タグ。index 名に現れない制御文字で区切る。
+    internal const char FtLaneSep = '';
+    internal const string PostingsLaneTag = "postings";
+    internal const string NormsLaneTag = "norms";
+
     /// <summary>
     /// FT-22: 与えた orphan 一覧を索引から削除する。索引名で <see cref="_indexes"/> を引き、
-    /// <see cref="IBTreeIndexFlushable.DeleteRawEntry"/> で生キー削除する。
+    /// <see cref="IBTreeIndexFlushable.DeleteRawEntry"/> で生キー削除する。FTS-2: lane タグ付き名は
+    /// 全文索引の postings/norms へ振り分ける。
     /// </summary>
     public int RemoveOrphans(IEnumerable<(string IndexName, byte[] RawKey, long Value)> orphans)
     {
         int removed = 0;
         foreach (var (name, key, value) in orphans)
         {
+            int sep = name.IndexOf(FtLaneSep);
+            if (sep >= 0)
+            {
+                var ftName = name[..sep];
+                var lane = name[(sep + 1)..];
+                if (_ftIndexes.TryGetValue(ftName, out var ft))
+                {
+                    bool ok = lane == PostingsLaneTag ? ft.DeletePostingsRaw(key, value) : ft.DeleteNormsRaw(key, value);
+                    if (ok) removed++;
+                }
+                continue;
+            }
             if (!_indexes.TryGetValue(name, out var idxObj)) continue;
             if (idxObj is not IBTreeIndexFlushable flushable) continue;
             if (flushable.DeleteRawEntry(key, value)) removed++;

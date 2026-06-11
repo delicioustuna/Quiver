@@ -60,9 +60,16 @@
 
 ## 進捗
 
-- 増分 1-2 ✅ (commit 70446d2): 永続化層 + API + V8 bump。
-- 増分 3 ✅: 透過維持 (SetProperty/DeleteNode フック + before-image 再 tokenize + rollback 整合)。
+- 増分 1-2 ✅ (commit 2d50162): 永続化層 + API + V8 bump。
+- 増分 3 ✅ (commit c4b0039): 透過維持 (SetProperty/DeleteNode フック + before-image 再 tokenize + rollback 整合)。
   付随修正: abort の before-image undo 後に全 B+Tree 索引の in-memory ヘッダ (root/entryCount/height)
   を読み直す `IIndexManager.ReloadAll` を `ReloadStoreMeta` に追加 (既存 secondary 索引の潜在
   EntryCount 陳腐化 / split-during-abort 不整合も同時に解消)。
-- 増分 4 (orphan sweep) 未。
+- 増分 4 ✅: postings-aware orphan sweep。`IndexManager.CollectOrphans`/`RemoveOrphans` を全文索引
+  lane に拡張 (postings は key 末尾8B、norms は Int64 key から entityId をデコードして `isLive` 判定、
+  lane タグ U+0001 で postings/norms へ振り分け)。`DiagnosticsApi.ToPublicOrphans` も FT lane の
+  EntityId を key からデコード + lane タグを表示名から除去。`CheckIndexConsistency`/`RepairIndexes`
+  経路にそのまま乗る。SQLite は CreateFullTextIndex=NotSupported / ListFullTextIndexes=空 (決定B)。
+  テスト: dead entity の postings/norms を sweep が除去・live doc 不変 (Tests) + SQLite NotSupported (Sqlite.Tests 2)。
+
+**FTS-2 全増分 (1-4) 実装完了。** read-your-own-writes の完全 DoD (g.Search) は FTS-3 で。

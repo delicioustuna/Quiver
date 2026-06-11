@@ -1,6 +1,7 @@
 using Quiver.Core;
 using Quiver.Telemetry;
 using Quiver.Index;
+using Quiver.Index.FullText;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
 
@@ -157,9 +158,26 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     /// <summary>raw orphan (packed 値) を公開 <see cref="OrphanIndexEntry"/> (unpacked NodeId.Value) へ変換。</summary>
     private static List<OrphanIndexEntry> ToPublicOrphans(List<(string IndexName, byte[] RawKey, long Value)> raw)
     {
+        var int64 = new Int64KeyCodec();
         var list = new List<OrphanIndexEntry>(raw.Count);
         foreach (var (name, key, value) in raw)
-            list.Add(new OrphanIndexEntry(name, key, EntityRef.Sequence(value)));
+        {
+            int sep = name.IndexOf(IndexManager.FtLaneSep);
+            if (sep >= 0)
+            {
+                // FTS-2: 全文索引 lane。EntityId は value (tf/docLen) ではなく key 側に入っている
+                // (postings=末尾8B の packed ref / norms=Int64 key の packed ref)。表示名は lane タグを外す。
+                var lane = name[(sep + 1)..];
+                long packed = lane == IndexManager.PostingsLaneTag
+                    ? PostingsKey.DecodeEntityId(key)
+                    : int64.Decode(key);
+                list.Add(new OrphanIndexEntry(name[..sep], key, EntityRef.Sequence(packed)));
+            }
+            else
+            {
+                list.Add(new OrphanIndexEntry(name, key, EntityRef.Sequence(value)));
+            }
+        }
         return list;
     }
 

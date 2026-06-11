@@ -122,6 +122,15 @@ internal sealed class FullTextIndex : IDisposable
         _norms.ReloadFromHeader();
     }
 
+    // ---- orphan sweep support (design 13 section 4) ----
+    // postings は entityId を key 末尾 8B に、norms は entityId を key (Int64) に持つため、
+    // 値ベースの汎用 sweep ではなく key からの entityId デコードが要る。
+
+    internal IEnumerable<KeyValuePair<byte[], long>> EnumeratePostingsRaw() => _postings.EnumerateRawEntries();
+    internal IEnumerable<KeyValuePair<byte[], long>> EnumerateNormsRaw() => _norms.EnumerateRawEntries();
+    internal bool DeletePostingsRaw(ReadOnlySpan<byte> rawKey, long value) => _postings.DeleteRawEntry(rawKey, value);
+    internal bool DeleteNormsRaw(ReadOnlySpan<byte> rawKey, long value) => _norms.DeleteRawEntry(rawKey, value);
+
     public void Dispose()
     {
         _postings.Dispose();
