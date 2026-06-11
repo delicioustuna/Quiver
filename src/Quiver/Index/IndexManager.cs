@@ -106,6 +106,18 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     }
 
     /// <summary>
+    /// FTS-2: abort の before-image undo がヘッダページを戻した後、全 B+Tree 索引
+    /// (secondary + 全文 postings/norms) の in-memory ヘッダキャッシュを読み直す。
+    /// </summary>
+    public void ReloadAll()
+    {
+        foreach (var idx in _indexes.Values)
+            if (idx is IBTreeIndexFlushable f) f.ReloadFromHeader();
+        foreach (var ft in _ftIndexes.Values)
+            ft.ReloadFromHeader();
+    }
+
+    /// <summary>
     /// FT-22: 全 B+Tree 索引を走査し、<paramref name="isLive"/> が <c>false</c> を返した
     /// 値 (NodeId.Value 互換 long) を持つ orphan エントリを <paramref name="output"/> に集める。
     /// 戻り値は (走査索引本数, 走査エントリ総数)。<see cref="RemoveOrphans"/> で実削除する。
@@ -363,6 +375,15 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     }
 
     public ITokenizer ResolveTokenizer(string tokenizerId) => _tokenizers.Resolve(tokenizerId);
+
+    public bool HasAnyFullTextIndex => _ftIndexes.Count > 0;
+
+    public void MaintainFullText(FullTextIndex index, long entityId, string? oldText, string? newText)
+    {
+        var tok = _tokenizers.Resolve(index.TokenizerId);
+        if (oldText is not null) index.RemoveDocument(entityId, tok, oldText);
+        if (newText is not null) index.AddDocument(entityId, tok, newText);
+    }
 
     /// <summary>カスタムトークナイザ (例: mixed-bigram-v2) を登録する経路。</summary>
     internal void RegisterTokenizer(ITokenizer tokenizer) => _tokenizers.Register(tokenizer);

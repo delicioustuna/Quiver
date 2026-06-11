@@ -60,4 +60,9 @@
 
 ## 進捗
 
-- 増分 1-2 ✅ (checkpoint commit)。増分 3 (透過維持) 着手中、増分 4 (orphan sweep) 未。
+- 増分 1-2 ✅ (commit 70446d2): 永続化層 + API + V8 bump。
+- 増分 3 ✅: 透過維持 (SetProperty/DeleteNode フック + before-image 再 tokenize + rollback 整合)。
+  付随修正: abort の before-image undo 後に全 B+Tree 索引の in-memory ヘッダ (root/entryCount/height)
+  を読み直す `IIndexManager.ReloadAll` を `ReloadStoreMeta` に追加 (既存 secondary 索引の潜在
+  EntryCount 陳腐化 / split-during-abort 不整合も同時に解消)。
+- 増分 4 (orphan sweep) 未。

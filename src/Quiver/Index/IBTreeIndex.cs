@@ -43,6 +43,14 @@ internal interface IBTreeIndexFlushable
     /// </summary>
     /// <returns>削除に成功したら <c>true</c>、ペアが見つからなければ <c>false</c>。</returns>
     bool DeleteRawEntry(ReadOnlySpan<byte> rawKey, long value);
+
+    /// <summary>
+    /// FTS-2: abort / partial rollback の before-image undo がヘッダページを tx 開始前へ戻した後、
+    /// B+Tree の in-memory キャッシュ (root / entryCount / height) をヘッダから読み直す。
+    /// これを呼ばないと、rollback したページ変更に対して EntryCount が陳腐化し、
+    /// 索引 split を含む tx の abort では root/height 不整合で破損し得る。
+    /// </summary>
+    void ReloadFromHeader();
 }
 
 internal readonly ref struct KeyValueEntry
@@ -163,9 +171,28 @@ internal interface IIndexManager
     /// <summary>FTS-2: 全文索引を削除する。既定実装は false。</summary>
     bool DropFullTextIndex(string name) => false;
 
+    /// <summary>
+    /// FTS-2: abort の before-image undo 後に、全 B+Tree 索引 (secondary + 全文) の in-memory
+    /// ヘッダキャッシュを読み直す。<c>ReloadStoreMeta</c> から呼ばれる。既定は no-op。
+    /// </summary>
+    void ReloadAll() { }
+
     /// <summary>FTS-2: tokenizerId からトークナイザを解決する (catalog 記録値を registry 経由で)。</summary>
     ITokenizer ResolveTokenizer(string tokenizerId)
         => throw new NotSupportedException("This index manager has no tokenizer registry.");
+
+    /// <summary>
+    /// FTS-2: 全文索引が 1 つでも存在するか。透過維持フックの fast-path
+    /// (FT 索引がゼロなら SetProperty はノード読取を省略して素通り)。既定は false。
+    /// </summary>
+    bool HasAnyFullTextIndex => false;
+
+    /// <summary>
+    /// FTS-2 透過維持: <paramref name="oldText"/> (before-image) の postings/norms を削除し、
+    /// <paramref name="newText"/> を tokenize して挿入する。いずれも null ならその側はスキップ。
+    /// 同一 Tx 内で呼ばれ、B+Tree 操作は WAL/ARIES で保護される。既定は no-op。
+    /// </summary>
+    void MaintainFullText(FullTextIndex index, long entityId, string? oldText, string? newText) { }
 }
 
 internal interface IBulkLoadable<TKey>

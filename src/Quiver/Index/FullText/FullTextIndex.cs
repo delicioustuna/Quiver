@@ -115,6 +115,13 @@ internal sealed class FullTextIndex : IDisposable
         return false;
     }
 
+    /// <summary>FTS-2: abort の before-image undo 後に postings/norms のヘッダキャッシュを読み直す。</summary>
+    public void ReloadFromHeader()
+    {
+        _postings.ReloadFromHeader();
+        _norms.ReloadFromHeader();
+    }
+
     public void Dispose()
     {
         _postings.Dispose();

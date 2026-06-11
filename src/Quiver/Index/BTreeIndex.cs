@@ -936,6 +936,12 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         return buf;
     }
 
+    /// <summary>FTS-2: abort の before-image undo 後にヘッダから root/entryCount/height を読み直す。</summary>
+    public void ReloadFromHeader()
+    {
+        if (_file.PageCount > 1) LoadHeader();
+    }
+
     private void LoadHeader()
     {
         using var h = _file.PinForRead(HeaderPageId);

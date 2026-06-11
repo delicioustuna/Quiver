@@ -1,0 +1,158 @@
+using FluentAssertions;
+using Quiver.Core;
+using Quiver.Index.FullText;
+using Quiver.Storage.Records;
+using Xunit;
+
+namespace Quiver.Tests;
+
+/// <summary>
+/// FTS-2 (increment 3): transparent full-text maintenance on the SetProperty /
+/// DeleteNode write path — insert, update (before-image removal), delete, and
+/// rollback all keep postings/norms consistent in the same transaction.
+/// </summary>
+public sealed class FullTextMaintenanceTests : IDisposable
+{
+    private readonly string _dir;
+    private readonly string _path;
+
+    public FullTextMaintenanceTests()
+    {
+        _dir = Path.Combine(Path.GetTempPath(), "quiver_fts2_maint_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_dir);
+        _path = Path.Combine(_dir, "graph.quiver");
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
+    }
+
+    private static FullTextIndex Ft(GraphDatabase db, string name)
+    {
+        ((SchemaApi)db.Schema).IndexManager.TryGetFullTextIndex(name, out var ft).Should().BeTrue();
+        return ft;
+    }
+
+    [Fact]
+    public void SetProperty_on_indexed_label_writes_postings()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+
+        NodeId node;
+        using (var tx = db.BeginTransaction())
+        {
+            node = tx.CreateNode("Doc");
+            tx.SetProperty(node, "body", PropertyValue.FromString("hello world"));
+            tx.Commit();
+        }
+
+        var ft = Ft(db, "idx_body");
+        ft.DocumentCount.Should().Be(1);
+        var hello = ft.GetPostings("hello");
+        hello.Should().ContainSingle();
+        EntityRef.Sequence(hello[0].EntityId).Should().Be(node.Sequence);
+    }
+
+    [Fact]
+    public void Read_your_own_writes_within_the_same_transaction()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+        var ft = Ft(db, "idx_body");
+
+        using var tx = db.BeginTransaction();
+        var n = tx.CreateNode("Doc");
+        tx.SetProperty(n, "body", PropertyValue.FromString("inflight content"));
+        // Postings are visible before commit (same-Tx read-your-own-writes).
+        ft.GetPostings("inflight").Should().ContainSingle();
+        tx.Commit();
+    }
+
+    [Fact]
+    public void Updating_property_removes_old_terms_via_before_image()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+
+        NodeId node;
+        using (var tx = db.BeginTransaction())
+        {
+            node = tx.CreateNode("Doc");
+            tx.SetProperty(node, "body", PropertyValue.FromString("hello world"));
+            tx.Commit();
+        }
+        using (var tx = db.BeginTransaction())
+        {
+            tx.SetProperty(node, "body", PropertyValue.FromString("goodbye world"));
+            tx.Commit();
+        }
+
+        var ft = Ft(db, "idx_body");
+        ft.GetPostings("hello").Should().BeEmpty();
+        ft.GetPostings("goodbye").Should().ContainSingle();
+        ft.GetPostings("world").Should().ContainSingle();
+        ft.DocumentCount.Should().Be(1); // norm replaced, not duplicated
+    }
+
+    [Fact]
+    public void Rollback_leaves_no_postings()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+
+        using (var tx = db.BeginTransaction())
+        {
+            var n = tx.CreateNode("Doc");
+            tx.SetProperty(n, "body", PropertyValue.FromString("transient text"));
+            tx.Rollback();
+        }
+
+        var ft = Ft(db, "idx_body");
+        ft.GetPostings("transient").Should().BeEmpty();
+        ft.DocumentCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void DeleteNode_removes_postings()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+
+        NodeId node;
+        using (var tx = db.BeginTransaction())
+        {
+            node = tx.CreateNode("Doc");
+            tx.SetProperty(node, "body", PropertyValue.FromString("hello world"));
+            tx.Commit();
+        }
+        using (var tx = db.BeginTransaction())
+        {
+            tx.DeleteNode(node);
+            tx.Commit();
+        }
+
+        var ft = Ft(db, "idx_body");
+        ft.GetPostings("hello").Should().BeEmpty();
+        ft.DocumentCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void Writes_to_unbound_keys_are_not_indexed()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+
+        using (var tx = db.BeginTransaction())
+        {
+            var n = tx.CreateNode("Doc");
+            tx.SetProperty(n, "title", PropertyValue.FromString("not indexed")); // 'title' is unbound
+            tx.Commit();
+        }
+
+        var ft = Ft(db, "idx_body");
+        ft.GetPostings("not").Should().BeEmpty();
+        ft.DocumentCount.Should().Be(0);
+    }
+}

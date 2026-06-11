@@ -194,6 +194,10 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             // ARCH-6: ベクトル payload / catalog ページも container WAL 対象。abort の before-image
             // undo でページが tx 開始前へ戻るので、in-memory の catalog / payload meta を読み直す。
             vectors.ReloadAll();
+            // FTS-2: B+Tree 索引 (secondary + 全文 postings/norms) の in-memory ヘッダキャッシュ
+            // (root / entryCount / height) も abort で戻ったページから読み直す。これが無いと
+            // EntryCount が陳腐化し、索引 split を含む tx の abort で root/height が不整合になる。
+            indexManager.ReloadAll();
         }
 
         var access = new BinaryGraphAccessMethods(vectors);

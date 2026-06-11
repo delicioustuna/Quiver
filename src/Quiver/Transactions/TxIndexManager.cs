@@ -53,6 +53,14 @@ internal sealed class TxIndexManager : IIndexManager
 
     public ITokenizer ResolveTokenizer(string tokenizerId) => _inner.ResolveTokenizer(tokenizerId);
 
+    public bool HasAnyFullTextIndex => _inner.HasAnyFullTextIndex;
+
+    public void MaintainFullText(FullTextIndex index, long entityId, string? oldText, string? newText)
+    {
+        AcquireLock();
+        _inner.MaintainFullText(index, entityId, oldText, newText);
+    }
+
     private void AcquireLock()
     {
         if (!_locks.TryAcquire(GlobalIndexLockKey, _txId, LockMode.Exclusive, _timeout))

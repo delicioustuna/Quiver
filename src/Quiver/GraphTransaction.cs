@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using Quiver.Core;
+using Quiver.Index.FullText;
 using Quiver.Telemetry;
 using Quiver.Logical;
 using Quiver.Query.Physical;
@@ -111,6 +112,10 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         foreach (var rid in toDelete)
             DeleteRelationship(rid);
 
+        // FTS-2 透過維持: ノードの string プロパティを bound 全文索引から除去する (Free の前に読む)。
+        if (_inner.Indexes.HasAnyFullTextIndex)
+            RemoveNodeFromFullTextIndexes(nodeId);
+
         _inner.Nodes.Free(nodeId);
         // ARCH-5c Phase 5c: ノード削除に伴い、その kind の全列で seq を論理削除する。
         _columns?.OnDeleteEntity(Core.EntityKind.Node, nodeId.Sequence, _inner.Id.Value);
@@ -212,6 +217,55 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     private long PackNode(NodeId nodeId)
         => EntityRef.Pack(EntityKind.Node, nodeId.Sequence, _inner.Nodes.CurrentGeneration(nodeId.Sequence));
 
+    // FTS-2: ノードの (label, key) に bound された全文索引を引く。FT 索引がゼロなら fast-path で null。
+    private FullTextIndex? ResolveFullTextIndex(NodeId nodeId, string key)
+    {
+        if (!_inner.Indexes.HasAnyFullTextIndex) return null;
+        var node = _inner.Nodes.Read(nodeId);
+        if (!node.InUse || !node.Label.IsValid) return null;
+        var labelName = _labelTokens.GetName(node.Label);
+        if (string.IsNullOrEmpty(labelName)) return null;
+        return _inner.Indexes.TryGetFullTextIndexByLabelKey(labelName, key, out var ft) ? ft : null;
+    }
+
+    // FTS-2: ノードの現在の string プロパティ値 (before-image) を読む。非 string / 未設定なら null。
+    private string? ReadNodeStringProperty(NodeId nodeId, PropertyKeyId keyId)
+    {
+        var e = _inner.Nodes.EnumerateProperties(nodeId, _inner.Properties);
+        while (e.MoveNext())
+        {
+            if (e.Current.KeyId != keyId) continue;
+            var v = e.Current.Value;
+            return v.Type == PropertyValueType.String
+                ? System.Text.Encoding.UTF8.GetString(v.Utf8StringValue) : null;
+        }
+        return null;
+    }
+
+    // FTS-2: ノード削除時に、その string プロパティを bound 全文索引から除去する。
+    private void RemoveNodeFromFullTextIndexes(NodeId nodeId)
+    {
+        var node = _inner.Nodes.Read(nodeId);
+        if (!node.InUse || !node.Label.IsValid) return;
+        var labelName = _labelTokens.GetName(node.Label);
+        if (string.IsNullOrEmpty(labelName)) return;
+        long entityId = PackNode(nodeId);
+        // span は MoveNext で無効化されるため、文字列を先に materialize してから除去する。
+        var docs = new List<(FullTextIndex Ft, string Text)>();
+        var e = _inner.Nodes.EnumerateProperties(nodeId, _inner.Properties);
+        while (e.MoveNext())
+        {
+            var v = e.Current.Value;
+            if (v.Type != PropertyValueType.String) continue;
+            var keyName = _propKeyTokens.GetName(e.Current.KeyId);
+            if (string.IsNullOrEmpty(keyName)) continue;
+            if (_inner.Indexes.TryGetFullTextIndexByLabelKey(labelName, keyName, out var ft))
+                docs.Add((ft, System.Text.Encoding.UTF8.GetString(v.Utf8StringValue)));
+        }
+        foreach (var (ft, text) in docs)
+            _inner.Indexes.MaintainFullText(ft, entityId, text, null);
+    }
+
     // ========== リレーション操作 ==========
 
     public RelationshipId CreateRelationship(NodeId source, NodeId target, string type)
@@ -264,6 +318,10 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public void SetProperty(NodeId nodeId, string key, in PropertyValue value)
     {
         var keyId = _propKeyTokens.GetOrCreate(key);
+        // FTS-2 透過維持: この (label, key) に全文索引が bound されているときだけ before-image を読む。
+        // 非索引キーの書き込みは HasAnyFullTextIndex の bool チェックのみで素通り。
+        var ft = ResolveFullTextIndex(nodeId, key);
+        string? oldText = ft is null ? null : ReadNodeStringProperty(nodeId, keyId);
         // BA-7: SetNodeProperty がチェーンを変更する前にキャプチャする — value は
         // ref struct のため、ヒープコピーは LogicalPropertyValue に閉じ込める。
         if (_logicalSink != null)
@@ -274,6 +332,13 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         SetNodeProperty(nodeId, keyId, in value);
         // ARCH-5c Phase 5c: 列化済み key なら同 tx で列を維持する。
         _columns?.OnSetProperty(Core.EntityKind.Node, nodeId.Sequence, keyId, in value, _inner.Id.Value);
+        if (ft is not null)
+        {
+            string? newText = value.Type == PropertyValueType.String
+                ? System.Text.Encoding.UTF8.GetString(value.Utf8StringValue) : null;
+            if (oldText is not null || newText is not null)
+                _inner.Indexes.MaintainFullText(ft, PackNode(nodeId), oldText, newText);
+        }
     }
 
     public void SetProperty(RelationshipId relId, string key, in PropertyValue value)
