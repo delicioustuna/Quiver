@@ -156,11 +156,11 @@ internal sealed class HnswIndex
     /// </summary>
     public void Delete(long seq)
     {
-        if (!_nodes.Remove(seq)) return;
+        if (!_nodes.Remove(seq, out var removed)) return;
         _count = Math.Max(0, _count - 1);
 
         // 全ノードの隣接から seq への back-ref を除去する (近傍は非対称になりうるため全走査)。
-        var touched = new List<long>();
+        var touched = new HashSet<long>();
         foreach (var (otherSeq, other) in _nodes)
         {
             bool changed = false;
@@ -178,6 +178,10 @@ internal sealed class HnswIndex
             if (changed) touched.Add(otherSeq);
         }
 
+        // VEC-13: グラフ修復。削除ノードの近傍同士を層ごとに張り直し、ナビゲーション経路の穴を塞ぐ。
+        // 再取込で削除が常態化してもグラフが断片化せず、Rebuild を待たずに recall を保てる。
+        HealNeighborhood(removed, touched);
+
         // entry の付け替え (最高 level の残存ノード)。
         if (_entry == seq)
         {
@@ -191,8 +195,38 @@ internal sealed class HnswIndex
         _tombstones++;
         SaveMeta();
 
-        // 削除が生存ノードを上回り、かつ一定数たまったらグラフを再構築して劣化を回収する。
+        // 削除が生存ノードを上回り、かつ一定数たまったらグラフを再構築して劣化 (とレコード領域) を回収する。
         if (_tombstones >= 16 && _tombstones > _count) Rebuild();
+    }
+
+    /// <summary>
+    /// 削除ノード <paramref name="removed"/> の各層の近傍同士を相互リンクして局所的な穴を塞ぐ。
+    /// 既存リンクは重複追加せず、上限超過は <see cref="AddNeighbor"/> の prune で最近接を保持する。
+    /// 触れたノードは <paramref name="touched"/> に積み、呼び出し側で永続化する。
+    /// </summary>
+    private void HealNeighborhood(Node removed, HashSet<long> touched)
+    {
+        for (int lc = 0; lc < removed.Layers.Length; lc++)
+        {
+            var nbrs = removed.Layers[lc];
+            if (nbrs.Length < 2) continue; // 近傍 1 個では結ぶ相手がいない
+            for (int i = 0; i < nbrs.Length; i++)
+            {
+                long a = nbrs[i];
+                if (!_nodes.TryGetValue(a, out var an) || lc > an.Level) continue;
+                bool linked = false;
+                for (int j = 0; j < nbrs.Length; j++)
+                {
+                    if (i == j) continue;
+                    long b = nbrs[j];
+                    if (a == b || !_nodes.ContainsKey(b)) continue;
+                    if (Array.IndexOf(an.Layers[lc], b) >= 0) continue; // 既に隣接
+                    AddNeighbor(a, lc, b);
+                    linked = true;
+                }
+                if (linked) touched.Add(a);
+            }
+        }
     }
 
     /// <summary>

@@ -149,4 +149,67 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
         // 削除済みの seq は一切返らない。
         ids.Should().OnlyContain(id => id < 50);
     }
+
+    [Fact]
+    public void Recall_stays_high_under_repeated_reingestion_churn_without_rebuild()
+    {
+        // VEC-13: 頻繁な再取込 (削除→挿入の繰り返し) でグラフが断片化しないことを検証する。
+        // tombstone が生存数を超えない構成 (Stable=300, 累計削除=200) にして自動 Rebuild を発火させず、
+        // 削除時の近傍修復 (HealNeighborhood) だけで安定集合の self-query recall が保たれることを確かめる。
+        const int Dim = 32, Stable = 300, Churn = 10, Cycles = 20, K = 10;
+        var rng = new Random(777);
+
+        using var db = GraphDatabase.Open(_path);
+        db.Vectors.CreateVectorIndex(new VectorIndexSpec(
+            IndexName, EntityKind.Node, db.Schema.GetOrCreatePropertyKey("t"),
+            Dim, DistanceMetric.Cosine, "test", null));
+
+        // 安定集合: 一度入れたら消さない。
+        var stableIds = new List<long>();
+        var stableVecs = new List<float[]>();
+        using (var tx = db.BeginTransaction())
+        {
+            for (int i = 0; i < Stable; i++)
+            {
+                var n = tx.CreateNode("Doc");
+                var v = RandomVec(rng, Dim);
+                stableIds.Add(n.Value);
+                stableVecs.Add(v);
+                db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, v);
+            }
+            tx.Commit();
+        }
+
+        // churn: 毎サイクル Churn 件を作って即削除 (再取込で seq が増え tombstone が溜まる)。
+        for (int c = 0; c < Cycles; c++)
+        {
+            var churnIds = new List<long>();
+            using (var tx = db.BeginTransaction())
+            {
+                for (int i = 0; i < Churn; i++)
+                {
+                    var n = tx.CreateNode("Doc");
+                    churnIds.Add(n.Value);
+                    db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, RandomVec(rng, Dim));
+                }
+                tx.Commit();
+            }
+            using (var tx = db.BeginTransaction())
+            {
+                foreach (var id in churnIds)
+                    tx.RemoveVector(EntityKind.Node, id, IndexName);
+                tx.Commit();
+            }
+        }
+
+        // 安定集合の各ベクトルで self-query → 自分が top-K に出る割合 (recall) を測る。
+        int found = 0;
+        for (int i = 0; i < Stable; i++)
+        {
+            var (ids, _) = Knn(db, stableVecs[i], K);
+            if (ids.Contains(EntityRef.Sequence(stableIds[i]))) found++;
+        }
+        double recall = (double)found / Stable;
+        recall.Should().BeGreaterThan(0.95, "近傍修復で churn 後も高 recall を保つ (断片化していない)");
+    }
 }
