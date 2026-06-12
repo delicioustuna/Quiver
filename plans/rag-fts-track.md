@@ -48,8 +48,24 @@
 | RAG-3 | 取込/再取込 | RAG-2 | P0 |
 | RAG-4 | RagSearcher (hybrid + expansion) | RAG-3 + FTS-5 | P0 |
 | RAG-5 | サンプル + cookbook + 契約検証 | RAG-4 | P1 |
+| FTS-7 | 取込 WAL 増幅圧縮 (BulkLoader postings 経路 / tx 内バッファリング) | FTS-6 | P1 (GA 前必須) |
+| FTS-8 | 検索 postings 枝刈り (WAND / block-max + 近似 df) | FTS-6 | P1 (GA 前必須) |
 
 並列性: FTS-1〜3 と RAG-1〜3 は独立 (RAG-3 まではベクトルのみで動作確認可)。合流点は RAG-4。
+FTS-7 / FTS-8 は互いに独立、FTS-6 完了後ならいつでも着手可。
+
+## GA 前性能後続 (FTS-6 実測起点、2026-06-13 起票)
+
+FTS-1〜6 / RAG-1〜5 は完了。FTS-6 の実測で正当性・耐久性は MVP 要件を満たしたが、
+性能 2 項目が目標未達と判明し (実測の正本は design 13 §9.1)、性能のみの後続として正式起票した:
+
+| ID | 実測 → 目標 | 根因 | アプローチ |
+|---|---|---|---|
+| FTS-7 | 取込 WAL 増幅 ~33×/chunk → ≤5× | postings/norms B+Tree の page-image WAL 粒度 (チャンク当たり数百キーのランダム挿入) | 内訳分解計測を先行 → BulkLoader 経路の postings ソート済み一括構築 / tx 内 postings バッファリング (commit 前ソート一括適用 + FT-29 coalescing)。差分ログ化は両案未達時のみ |
+| FTS-8 | 検索 p50 @100k = 267ms → <10ms | term-at-a-time BM25 の全 postings 走査 (走査長 ∝ N、動的枝刈り無し) | WAND (必要時のみ block-max) + df を GraphStats 収集時の近似 snapshot へ移行 + B+Tree Seek を skip pointer として利用。text-first/graph-first の per-doc スコア一致規約 (FTS-4) は維持 |
+
+いずれも「実測先行 (kill criteria 数値固定) → 手段選択」の順を厳守。
+実装手順の詳細は `.claude/skills/quiver-implement/tasks/fts.md` の FTS-7 / FTS-8 節。
 
 ## 既存 backlog への影響 (roadmap 反映済み)
 
