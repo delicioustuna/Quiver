@@ -31,8 +31,17 @@ public static class RagSchema
     public const string PropMetadataJson = "metadataJson";
 
     // ── Chunk プロパティキー ──
-    /// <summary>チャンク本文 (全文索引対象)。ベクトル索引の埋め込み元でもある。</summary>
+    /// <summary>
+    /// チャンク本文 (原文スライス)。<c>charStart</c>/<c>charEnd</c> はこの値上の半開区間で、
+    /// graph expansion の連結元になる。全文索引の対象は見出し語を含む <see cref="PropSearchText"/> の方。
+    /// </summary>
     public const string PropText = "text";
+    /// <summary>
+    /// 全文索引 (BM25) の対象テキスト。見出しパスを本文の前に連結したもの (見出しが空なら本文と同一)。
+    /// 見出し語を BM25 で引けるようにしつつ、<see cref="PropText"/> のスライス不変条件を保つために別持ちする
+    /// (本文を二重に持つストレージコストとのトレードオフ)。
+    /// </summary>
+    public const string PropSearchText = "searchText";
     /// <summary>文書内のチャンク順序 (0 起点)。</summary>
     public const string PropOrdinal = "ordinal";
     /// <summary>見出しパス ("1.2 概要 &gt; 1.2.1 背景" 形式)。</summary>

@@ -239,6 +239,68 @@ public sealed class ChunkerTests
         string.Concat(chunks.Select(c => c.Text)).Should().Be(text);
     }
 
+    // ── 単語境界尊重分割 (RAG-2 backlog) ──
+
+    /// <summary>cut 位置 b が語の途中でない (文書端 or 前後いずれかが空白) ことを表す。</summary>
+    private static bool IsCleanBoundary(string s, int b)
+        => b == 0 || b == s.Length || char.IsWhiteSpace(s[b - 1]) || char.IsWhiteSpace(s[b]);
+
+    [Fact]
+    public void Long_paragraph_with_spaces_splits_on_word_boundaries()
+    {
+        // 9 文字語 × 30 を半角空白で連結。窓 50 に語は収まるので常に語境界で切れるはず。
+        var words = Enumerable.Range(0, 30).Select(i => new string((char)('a' + i % 26), 9));
+        string text = string.Join(' ', words);
+        var opts = new ChunkingOptions { TargetSize = 50, Overlap = 10 };
+
+        var chunks = Chunker.Chunk(new[] { Para(text) }, opts);
+
+        chunks.Should().HaveCountGreaterThan(1);
+        foreach (var c in chunks)
+        {
+            IsCleanBoundary(text, c.CharStart).Should().BeTrue("チャンク先頭が語の途中であってはいけない");
+            IsCleanBoundary(text, c.CharEnd).Should().BeTrue("チャンク末尾が語の途中であってはいけない");
+            c.Text.Should().Be(text.Substring(c.CharStart, c.CharEnd - c.CharStart));
+        }
+
+        // 語境界で切っても全文は被覆される (オーバーラップ除去で原文復元)。
+        Reconstruct(chunks).Should().Be(text);
+    }
+
+    [Fact]
+    public void Word_longer_than_window_falls_back_to_hard_split_without_loss()
+    {
+        // 窓より長い 1 語 (空白なし) は語境界が無いので char 窓へフォールバックし、欠落なく被覆する。
+        string longWord = new string('z', 120);
+        string text = "ok " + longWord + " end";
+        var opts = new ChunkingOptions { TargetSize = 40, Overlap = 0 };
+
+        var chunks = Chunker.Chunk(new[] { Para(text) }, opts);
+
+        chunks.Should().HaveCountGreaterThan(1);
+        chunks.Should().OnlyContain(c => c.Text.Length <= 40);
+        // overlap=0 なので単純連結で原文復元 (長語を割っても内容は失われない)。
+        string.Concat(chunks.Select(c => c.Text)).Should().Be(text);
+    }
+
+    [Fact]
+    public void Force_split_table_respects_word_boundaries_when_spaces_present()
+    {
+        var words = Enumerable.Range(0, 20).Select(i => new string((char)('a' + i % 26), 7));
+        string table = string.Join(' ', words);
+        var opts = new ChunkingOptions { TargetSize = 1000, Overlap = 0, MaxChunkSize = 40 };
+
+        var chunks = Chunker.Chunk(new[] { new IngestedBlock(BlockKind.Table, table) }, opts);
+
+        chunks.Should().HaveCountGreaterThan(1);
+        foreach (var c in chunks)
+        {
+            IsCleanBoundary(table, c.CharStart).Should().BeTrue();
+            IsCleanBoundary(table, c.CharEnd).Should().BeTrue();
+        }
+        string.Concat(chunks.Select(c => c.Text)).Should().Be(table); // overlap=0 で被覆
+    }
+
     [Fact]
     public void Invalid_options_throw()
     {

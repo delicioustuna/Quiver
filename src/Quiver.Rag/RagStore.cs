@@ -64,11 +64,11 @@ public sealed class RagStore
     /// <remarks>
     /// 埋め込み生成 (<paramref name="embedder"/>) はトランザクションを開く前に実行されるため、embedder が
     /// 失敗しても DB は無変更。差し替えは単一 Tx 性にクラッシュ安全性を委ね、追加機構は持たない
-    /// (取込中 kill → 旧版が無傷 or 新版が完全、中間状態は残らない)。埋め込み入力には見出しパスを
-    /// 前置する (検索時の文脈付与) が、格納する <c>text</c> プロパティと全文索引は生のチャンク本文のまま
-    /// なので、見出し語は BM25 では引けない点に注意 (14_rag_layer.md の設計判断)。
-    /// MVP 注意: HNSW の再リンクは最適化途上のため、頻繁な再取込は ANN グラフを劣化させ得る
-    /// (roadmap のベクトル索引再構築で対処)。
+    /// (取込中 kill → 旧版が無傷 or 新版が完全、中間状態は残らない)。埋め込み入力・全文索引対象には
+    /// 見出しパスを前置する (<c>searchText</c> プロパティ) ので、KNN は文脈を、BM25 は見出し語を引ける。
+    /// 格納する <c>text</c> プロパティは生のチャンク本文のままで <c>charStart</c>/<c>charEnd</c> のスライス
+    /// 不変条件を保つ。HNSW は削除/上書きで再リンクされ (RemoveVector/SetVector)、頻繁な再取込でも
+    /// 物理削除 + 自動再構築でグラフ劣化を回収する。
     /// <para>
     /// <b>制限</b>: <c>contentHash</c> は <see cref="IngestedDocument.Blocks"/> のみから算出する。
     /// Blocks を変えずに <see cref="IngestedDocument.Title"/> / <see cref="IngestedDocument.Metadata"/>
@@ -189,6 +189,9 @@ public sealed class RagStore
             var d = drafts[i];
             var chunkId = tx.CreateNode(RagSchema.ChunkLabel);
             tx.SetProperty(chunkId, RagSchema.PropText, PropertyValue.FromString(d.Text));
+            // 全文索引対象は見出し語を含む searchText。SetProperty で透過維持フックが postings を追従する。
+            tx.SetProperty(chunkId, RagSchema.PropSearchText,
+                PropertyValue.FromString(ComposeSearchText(d.HeadingPath, d.Text)));
             tx.SetProperty(chunkId, RagSchema.PropOrdinal, PropertyValue.FromInt32(d.Ordinal));
             tx.SetProperty(chunkId, RagSchema.PropHeadingPath, PropertyValue.FromString(d.HeadingPath));
             if (d.Page.HasValue)
@@ -213,12 +216,16 @@ public sealed class RagStore
     {
         var inputs = new string[drafts.Count];
         for (int i = 0; i < drafts.Count; i++)
-        {
-            var d = drafts[i];
-            inputs[i] = string.IsNullOrEmpty(d.HeadingPath) ? d.Text : d.HeadingPath + "\n" + d.Text;
-        }
+            inputs[i] = ComposeSearchText(drafts[i].HeadingPath, drafts[i].Text);
         return inputs;
     }
+
+    /// <summary>
+    /// 検索・埋め込みに流すテキストを組み立てる。見出しパスがあれば本文の前へ前置し、KNN は文脈を、
+    /// BM25 は見出し語を引けるようにする。見出しが空なら本文そのもの。
+    /// </summary>
+    internal static string ComposeSearchText(string headingPath, string text)
+        => string.IsNullOrEmpty(headingPath) ? text : headingPath + "\n" + text;
 
     /// <summary>既存文書のハッシュ一致を読み取り専用 Tx で確認する (embed 前の早期 no-op 判定)。</summary>
     private bool TryGetUnchanged(string sourceId, string contentHash, out UpsertResult result)
@@ -373,7 +380,8 @@ public sealed class RagStore
         schema.GetOrCreatePropertyKey(RagSchema.PropContentHash);
         schema.GetOrCreatePropertyKey(RagSchema.PropIngestedAt);
         schema.GetOrCreatePropertyKey(RagSchema.PropMetadataJson);
-        var textKey = schema.GetOrCreatePropertyKey(RagSchema.PropText);
+        schema.GetOrCreatePropertyKey(RagSchema.PropText);
+        var searchTextKey = schema.GetOrCreatePropertyKey(RagSchema.PropSearchText);
         schema.GetOrCreatePropertyKey(RagSchema.PropOrdinal);
         schema.GetOrCreatePropertyKey(RagSchema.PropHeadingPath);
         schema.GetOrCreatePropertyKey(RagSchema.PropPage);
@@ -387,8 +395,9 @@ public sealed class RagStore
                 RagSchema.DocSourceIndex, RagSchema.DocumentLabel, RagSchema.PropSourceId,
                 IndexKind.StringEquality);
 
-        // Chunk 埋め込みベクトル索引。埋め込み元は Chunk.text。既存があれば次元・距離尺度が
-        // options と一致することを照合する (reopen 時の取り違えを SetVector/検索まで遅延させない)。
+        // Chunk 埋め込みベクトル索引。埋め込み元は Chunk.searchText (見出しパス + 本文 = 埋め込み入力と一致)。
+        // 既存があれば次元・距離尺度が options と一致することを照合する (reopen 時の取り違えを
+        // SetVector/検索まで遅延させない)。
         if (_db.Vectors.TryGetIndex(_options.VectorIndexName, out var existingVector))
         {
             if (existingVector.Dimensions != _options.EmbeddingDimensions)
@@ -405,13 +414,13 @@ public sealed class RagStore
             _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
                 Name: _options.VectorIndexName,
                 EntityKind: EntityKind.Node,
-                SourcePropertyKeyId: textKey,
+                SourcePropertyKeyId: searchTextKey,
                 Dimensions: _options.EmbeddingDimensions,
                 Metric: _options.VectorMetric,
                 ProviderId: _options.VectorProviderId));
         }
 
-        // Chunk.text 全文索引。作成は EnableFullTextIndex で制御するが、FullTextEnabled は
+        // Chunk.searchText 全文索引。作成は EnableFullTextIndex で制御するが、FullTextEnabled は
         // 「索引が実在し利用可能か」を表すため、既存索引があれば設定に関わらず true にする。
         // バックエンド非対応 (SQLite) のときは CreateFullTextIndex が NotSupportedException を
         // 投げるので graceful degrade する。
@@ -429,8 +438,9 @@ public sealed class RagStore
             }
             if (!exists && _options.EnableFullTextIndex)
             {
+                // 見出し語も BM25 で引けるよう searchText (= 見出しパス + 本文) を索引対象にする。
                 schema.CreateFullTextIndex(
-                    RagSchema.ChunkTextIndex, RagSchema.ChunkLabel, RagSchema.PropText);
+                    RagSchema.ChunkTextIndex, RagSchema.ChunkLabel, RagSchema.PropSearchText);
                 exists = true;
             }
             FullTextEnabled = exists;

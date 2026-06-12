@@ -16,13 +16,28 @@ public sealed record RagSearchOptions
     public bool IncludeDocument { get; init; } = true;
 
     /// <summary>
+    /// 文書メタデータの等値制約 (キー → 期待値)。<c>null</c>/空でなければ、<b>検索前</b>に全エントリが
+    /// 一致する文書のチャンクだけを母集団に絞ってから BM25 / KNN を実行する (candidate-side push-down)。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="MetadataFilter"/> の後段フィルタと違い、検索の母集団そのものを制約するため
+    /// <b>recall hole が起きない</b> (フィルタが大半を弾いても、条件を満たす文書が存在する限り上位
+    /// <see cref="K"/> 件を返せる)。比較対象は <see cref="RagMetadata.Metadata"/> (metadataJson) のキーで、
+    /// 全キーが AND 条件。<see cref="MetadataFilter"/> と併用した場合は push-down 後にさらに後段適用される。
+    /// 一致文書の解決にラベルスキャン 1 回 + チャンク列挙が要るため、文書数が極端に多い場合は
+    /// 個別 property への昇格 (索引化) を検討すること。
+    /// </remarks>
+    public IReadOnlyDictionary<string, string>? MetadataEquals { get; init; }
+
+    /// <summary>
     /// 文書メタデータに対する述語。<c>null</c> でなければ、これが <c>false</c> を返した文書の
     /// ヒットを結果から除外する。
     /// </summary>
     /// <remarks>
     /// これは<b>後段フィルタ</b>である (上位 <see cref="K"/> 件を取得してから除外する)。フィルタが
     /// 大半を弾くワークロードでは、条件を満たす文書が存在しても結果が 0 件になり得る (recall hole)。
-    /// 将来は candidate-side push-down (<c>FilterByText</c>/<c>KnnSearchFiltered</c>) へ寄せられる。
+    /// 等値制約で十分なら <see cref="MetadataEquals"/> を使うと push-down され recall hole を避けられる。
+    /// 範囲条件・複雑な述語など <see cref="MetadataEquals"/> で表せないものに本フィルタを使う。
     /// </remarks>
     public Func<RagMetadata, bool>? MetadataFilter { get; init; }
 }

@@ -74,7 +74,39 @@ public static class Chunker
         int AvoidSplit(int b)
             => (b > 0 && b < source.Length && char.IsLowSurrogate(source[b])) ? b - 1 : b;
 
-        // [s, e) を window=TargetSize / overlap=Overlap で分割して出力する。
+        // 末尾 hi を (lo, hi] の範囲で語境界 (空白の直後) へ後退させ、語の途中で切るのを避ける。
+        // 既に境界 (hi が空白の前後)、または窓内に空白が無い (語が窓より長い・CJK・記号列) ときは hi を保つ。
+        // 空白が無いケースでは従来の char 窓と同一挙動に倒れる。
+        int RoundEndToWord(int lo, int hi)
+        {
+            if (hi <= lo || hi >= source.Length) return hi;
+            if (char.IsWhiteSpace(source[hi]) || char.IsWhiteSpace(source[hi - 1])) return hi;
+            int w = hi - 1;
+            while (w > lo && !char.IsWhiteSpace(source[w])) w--;
+            return w > lo ? w + 1 : hi; // 空白の直後で切る (左チャンクは空白で終わる)。無ければ hi。
+        }
+
+        // 次チャンク開始 start を [start, limit) の最初の語頭 (空白の直後) へ前進させる。
+        // オーバーラップを語単位にし、前進方向に丸めるので実オーバーラップは設定値以下に保たれる。
+        // 既に語頭、または境界が無いときは start を保つ。
+        int RoundStartToWord(int start, int limit)
+        {
+            if (start <= 0 || char.IsWhiteSpace(source[start - 1])) return start;
+            int w = start;
+            while (w < limit && !char.IsWhiteSpace(source[w])) w++;
+            return w < limit ? w + 1 : start; // 空白の直後 = 次の語頭。無ければ start。
+        }
+
+        // 切り出し末尾 hardHi を「語境界 → サロゲート保護」の順で丸める。丸めて lo 以下へ潰れる
+        // 病的ケース (窓 1 でペア収容不能等) は hardHi をそのまま使う。呼び出し側は hardHi < e を保証する。
+        int RoundCut(int lo, int hardHi)
+        {
+            int hi = AvoidSplit(RoundEndToWord(lo, hardHi));
+            return hi > lo ? hi : hardHi;
+        }
+
+        // [s, e) を window=TargetSize / overlap=Overlap で分割して出力する。語境界を尊重し、
+        // 空白が無い区間では従来の char 窓に倒れる (CJK / 長大語 / 記号列はそのまま窓分割)。
         void SplitRange(int s, int e, string heading, int? page)
         {
             int window = options.TargetSize;
@@ -82,12 +114,12 @@ public static class Chunker
             int p = s;
             while (true)
             {
-                int hi = Math.Min(p + window, e);
-                int rounded = AvoidSplit(hi);
-                if (rounded > p) hi = rounded; // window が 1 でペアを収容できない病的ケースは丸めない
+                int hardHi = Math.Min(p + window, e);
+                int hi = hardHi < e ? RoundCut(p, hardHi) : hardHi;
                 Emit(p, hi, heading, page);
                 if (hi >= e) break;
-                int next = AvoidSplit(hi - overlap);
+                int rawNext = hi - overlap;
+                int next = rawNext > p ? AvoidSplit(RoundStartToWord(rawNext, hi)) : hi;
                 p = next > p ? next : hi; // overlap >= window への安全弁 (通常 Validate で排除)
             }
         }
@@ -117,12 +149,11 @@ public static class Chunker
                         int p = s;
                         while (true)
                         {
-                            int hi = Math.Min(p + options.MaxChunkSize, e);
-                            int rounded = AvoidSplit(hi);
-                            if (rounded > p) hi = rounded;
+                            int hardHi = Math.Min(p + options.MaxChunkSize, e);
+                            int hi = hardHi < e ? RoundCut(p, hardHi) : hardHi; // 強制分割でも語境界尊重
                             Emit(p, hi, CurrentHeading(), block.Page);
                             if (hi >= e) break;
-                            p = hi;
+                            p = hi; // overlap 無し: 次は語境界で切った末尾から連続
                         }
                     }
                     else

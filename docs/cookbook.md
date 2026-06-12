@@ -304,7 +304,8 @@ IReadOnlyList<RagHit> hits = searcher.Search(
     {
         K = 10,
         NeighborExpansion = 1,                          // NEXT_CHUNK 前後 1 件を連結
-        MetadataFilter = m => m.Metadata.GetValueOrDefault("category") == "guide",
+        // 等値メタデータは MetadataEquals で渡すと検索前に母集団を絞り込む (push-down)。
+        MetadataEquals = new Dictionary<string, string> { ["category"] = "guide" },
     });
 
 foreach (var h in hits)
@@ -327,12 +328,13 @@ store.DeleteDocument("docs/intro.md");
   「新版が完全」のどちらかで、中間状態は残らない。クラッシュ安全性はこの原子性に委ねている。
 - **埋め込みはトランザクションの外で先に実行される。** `IChunkEmbedder` が失敗しても DB は無変更。
   `Dimensions` は `RagStoreOptions.EmbeddingDimensions` と一致している必要がある。
-- **見出し語は埋め込み入力に前置されるが、`text` プロパティと全文索引は生の本文のまま。**
-  そのため見出しの語は KNN では文脈として効くが BM25 では直接引けない。
-- **`MetadataFilter` は後段フィルタ** (上位 K 件取得後に除外)。フィルタが大半を弾くワークロードでは
-  該当文書があっても 0 件になり得る。
-- **頻繁な再取込時はベクトル索引の再構築を検討する。** HNSW の再リンク最適化は途上のため、
-  削除/上書きが累積すると ANN グラフが劣化し得る (roadmap)。
+- **見出し語は BM25 でも引ける。** 見出しパスを前置した `searchText` を全文索引の対象にしているため、
+  本文に出てこない見出しの語も検索でヒットする (`text` プロパティは原文スライスのまま保たれる)。
+- **メタデータの絞り込みは 2 系統。** 等値条件は `MetadataEquals` (検索前に母集団を絞る candidate-side
+  push-down → recall hole が起きない)。範囲条件など複雑な述語は `MetadataFilter` (後段フィルタ。上位 K 件
+  取得後に除外するため、フィルタが大半を弾くと該当文書があっても 0 件になり得る)。
+- **頻繁な再取込でも ANN グラフは劣化しにくい。** 削除/上書きで HNSW を再リンクし (近傍修復 + 物理削除)、
+  削除が累積すると自動再構築する。長期間きわめて高頻度の churn を続ける場合のみ手動再構築を検討する。
 - 全文索引を提供しないバックエンド (SQLite) では `RagStore.FullTextEnabled == false` となり、
   検索は KNN のみで動作する。
 

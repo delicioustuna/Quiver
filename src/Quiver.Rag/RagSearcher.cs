@@ -44,15 +44,8 @@ public sealed class RagSearcher
         var g = tx.G(db.Schema);
 
         // 1) ランク順のチャンク NodeId を取得 (score は伝播しないので順位 = relevance)。
-        List<NodeId> ranked;
-        if (hasText && hasVector)
-            ranked = g.HybridSearch(
-                RagSchema.ChunkTextIndex, queryText!, _store.VectorIndexName, queryVector, options.K).ToList();
-        else if (hasVector)
-            ranked = g.Knn(_store.VectorIndexName, queryVector, options.K).ToList();
-        else
-            ranked = g.Search(RagSchema.ChunkTextIndex, queryText!, options.K).ToList();
-
+        //    MetadataEquals があれば一致文書のチャンクに母集団を絞ってから検索する (push-down)。
+        List<NodeId> ranked = RankHits(tx, g, queryText, queryVector, hasText, hasVector, options);
         if (ranked.Count == 0) return Array.Empty<RagHit>();
 
         // 2) 各ヒットを展開し、MetadataFilter で文書単位に絞る。
@@ -81,6 +74,105 @@ public sealed class RagSearcher
 
         // 3) 文書単位で隣接ヒットをマージし、ランク順に整列して返す。
         return MergeHits(tx, expanded, options);
+    }
+
+    // ── ランク取得 (global / candidate-side push-down) ──
+
+    /// <summary>
+    /// ランク順のチャンク NodeId を取得する。<see cref="RagSearchOptions.MetadataEquals"/> があれば
+    /// 一致文書のチャンクへ母集団を絞った candidate-side 検索 (graph-first) に切替え、無ければ
+    /// 通常の text-first / vector-first / hybrid 検索を行う。
+    /// </summary>
+    private List<NodeId> RankHits(
+        IGraphTransaction tx, GraphTraversalSource g,
+        string queryText, float[]? queryVector, bool hasText, bool hasVector, RagSearchOptions options)
+    {
+        if (options.MetadataEquals is not { Count: > 0 } equals)
+        {
+            // push-down なし: エンジン DSL の global 検索へ薄く写像。
+            if (hasText && hasVector)
+                return g.HybridSearch(
+                    RagSchema.ChunkTextIndex, queryText, _store.VectorIndexName, queryVector!, options.K).ToList();
+            if (hasVector)
+                return g.Knn(_store.VectorIndexName, queryVector!, options.K).ToList();
+            return g.Search(RagSchema.ChunkTextIndex, queryText, options.K).ToList();
+        }
+
+        // メタデータ一致文書のチャンクだけを母集団にする (recall hole を避ける)。
+        var cands = CollectCandidateChunks(tx, g, equals);
+        if (cands.Length == 0) return new List<NodeId>();
+
+        if (hasText && hasVector)
+        {
+            // candidate 制約付き hybrid: 各チャンネルを母集団内で求め RRF で融合する。
+            var textRanked = g.Nodes(cands).FilterByText(RagSchema.ChunkTextIndex, queryText, options.K).ToList();
+            var vecRanked = g.Nodes(cands).FilterByKnn(_store.VectorIndexName, queryVector!, options.K).ToList();
+            return RrfFuse(textRanked, vecRanked, options.K);
+        }
+        if (hasVector)
+            return g.Nodes(cands).FilterByKnn(_store.VectorIndexName, queryVector!, options.K).ToList();
+        return g.Nodes(cands).FilterByText(RagSchema.ChunkTextIndex, queryText, options.K).ToList();
+    }
+
+    /// <summary>
+    /// <paramref name="equals"/> の全キーが一致する Document のチャンク NodeId を集める。
+    /// Document ラベルスキャン (LabelNodeIndex があれば O(|Document|)) 1 回 + 各文書の HAS_CHUNK 列挙。
+    /// </summary>
+    private static NodeId[] CollectCandidateChunks(
+        IGraphTransaction tx, GraphTraversalSource g, IReadOnlyDictionary<string, string> equals)
+    {
+        var cands = new List<NodeId>();
+        foreach (var docId in g.Nodes().HasLabel(RagSchema.DocumentLabel).ToList())
+        {
+            if (!tx.NodeExists(docId)) continue;
+            if (!MatchesMetadataEquals(tx, docId, equals)) continue;
+            var e = tx.EnumerateRelationships(docId, Direction.Outgoing, RagSchema.HasChunkType);
+            while (e.MoveNext())
+                if (tx.NodeExists(e.Current.Target)) cands.Add(e.Current.Target);
+        }
+        return cands.ToArray();
+    }
+
+    /// <summary>文書の metadataJson が <paramref name="equals"/> の全キーを期待値で満たすか (AND)。</summary>
+    private static bool MatchesMetadataEquals(
+        IGraphTransaction tx, NodeId docId, IReadOnlyDictionary<string, string> equals)
+    {
+        var meta = ParseMetadataJson(ReadStringOrEmpty(tx, docId, RagSchema.PropMetadataJson));
+        foreach (var kv in equals)
+            if (!meta.TryGetValue(kv.Key, out var v) || v != kv.Value) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// 2 つのランク列を RRF (<c>Σ 1/(60 + rank)</c>, rank は 1 始まり) で融合し上位 <paramref name="k"/> 件を返す。
+    /// candidate 制約付き hybrid 用。エンジン <c>FusionOperator</c> の RRF と同値だが、candidate-bearing な
+    /// <c>g.HybridSearch</c> の DSL が無いため Rag 層で同じ定数 (k0=60) を用いて融合する。
+    /// 同一チャンクは sequence 空間で名寄せし、同点は sequence 昇順で決定的に整列する。
+    /// </summary>
+    private static List<NodeId> RrfFuse(List<NodeId> textRanked, List<NodeId> vecRanked, int k)
+    {
+        const int K0 = 60;
+        var score = new Dictionary<long, double>();
+        var rep = new Dictionary<long, NodeId>();
+
+        void Accumulate(List<NodeId> ranked)
+        {
+            for (int i = 0; i < ranked.Count; i++)
+            {
+                long key = EntityRef.Sequence(ranked[i].Value);
+                score[key] = (score.TryGetValue(key, out var s) ? s : 0d) + 1d / (K0 + i + 1);
+                rep[key] = ranked[i]; // 生存 NodeId を代表に保持 (どちらのチャンネルも downstream 読取可)
+            }
+        }
+
+        Accumulate(vecRanked);
+        Accumulate(textRanked); // text を後勝ちにし代表 NodeId を text チャンネル側へ寄せる
+
+        return score
+            .OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key)
+            .Take(k)
+            .Select(kv => rep[kv.Key])
+            .ToList();
     }
 
     // ── 内部表現 ──

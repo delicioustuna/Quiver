@@ -80,6 +80,29 @@ public sealed class RagSearchTests : IDisposable
     }
 
     [Fact]
+    public async Task Bm25_finds_chunk_by_heading_word_absent_from_body()
+    {
+        using var db = GraphDatabase.Open(_path);
+        var store = NewStore(db);
+        // 固有語 "Quetzal" は見出しにだけ置き、本文には含めない。
+        var doc = new IngestedDocument("d1", "title-d1", new Dictionary<string, string>(),
+            new[]
+            {
+                new IngestedBlock(BlockKind.Heading, "Quetzal", HeadingLevel: 1),
+                new IngestedBlock(BlockKind.Paragraph, "the body mentions only cats and dogs here"),
+            });
+        await store.UpsertDocumentAsync(doc, new FakeEmbedder());
+
+        var searcher = new RagSearcher(store);
+        var hits = searcher.Search("Quetzal", null, new RagSearchOptions { NeighborExpansion = 0 });
+
+        hits.Should().NotBeEmpty();
+        // 本文 (text) に "Quetzal" は無いが headingPath 経由で searchText に載り BM25 が引き当てる。
+        hits[0].ChunkText.Should().NotContain("Quetzal");
+        hits[0].HeadingPath.Should().Contain("Quetzal");
+    }
+
+    [Fact]
     public async Task Knn_finds_chunk_nearest_to_query_vector()
     {
         using var db = GraphDatabase.Open(_path);
@@ -185,6 +208,108 @@ public sealed class RagSearchTests : IDisposable
 
         hits.Should().HaveCount(1);
         hits[0].Document.SourceId.Should().Be("pub");
+    }
+
+    [Fact]
+    public async Task Metadata_equals_pushdown_excludes_non_matching_documents()
+    {
+        using var db = GraphDatabase.Open(_path);
+        var store = NewStore(db);
+        var searcher = new RagSearcher(store);
+
+        await store.UpsertDocumentAsync(
+            Doc("pub", new Dictionary<string, string> { ["acl"] = "public" }, "shared Zphobos public note text"),
+            new FakeEmbedder());
+        await store.UpsertDocumentAsync(
+            Doc("sec", new Dictionary<string, string> { ["acl"] = "secret" }, "secret Zphobos hidden note text"),
+            new FakeEmbedder());
+
+        var hits = searcher.Search("Zphobos", null, new RagSearchOptions
+        {
+            NeighborExpansion = 0,
+            MetadataEquals = new Dictionary<string, string> { ["acl"] = "public" },
+        });
+
+        hits.Should().HaveCount(1);
+        hits[0].Document.SourceId.Should().Be("pub");
+    }
+
+    [Fact]
+    public async Task Metadata_equals_pushdown_avoids_recall_hole()
+    {
+        using var db = GraphDatabase.Open(_path);
+        var store = NewStore(db);
+        var searcher = new RagSearcher(store);
+
+        // "Zphobos" を 8 件の secret 文書に、1 件だけ public 文書に入れる。
+        for (int i = 0; i < 8; i++)
+            await store.UpsertDocumentAsync(
+                Doc($"sec{i}", new Dictionary<string, string> { ["acl"] = "secret" },
+                    $"secret Zphobos document number {i} body"),
+                new FakeEmbedder());
+        await store.UpsertDocumentAsync(
+            Doc("pub", new Dictionary<string, string> { ["acl"] = "public" }, "public Zphobos rare allowed note"),
+            new FakeEmbedder());
+
+        // K=1。後段フィルタなら top-1 が secret になり public が落ちる (recall hole)。
+        // push-down なら public のチャンクだけが母集団なので必ず見つかる。
+        var hits = searcher.Search("Zphobos", null, new RagSearchOptions
+        {
+            K = 1,
+            NeighborExpansion = 0,
+            MetadataEquals = new Dictionary<string, string> { ["acl"] = "public" },
+        });
+
+        hits.Should().HaveCount(1);
+        hits[0].Document.SourceId.Should().Be("pub");
+    }
+
+    [Fact]
+    public async Task Metadata_equals_pushdown_returns_empty_when_no_document_matches()
+    {
+        using var db = GraphDatabase.Open(_path);
+        var store = NewStore(db);
+        await store.UpsertDocumentAsync(
+            Doc("d1", new Dictionary<string, string> { ["acl"] = "secret" }, "secret Zphobos note text body"),
+            new FakeEmbedder());
+
+        var searcher = new RagSearcher(store);
+        var hits = searcher.Search("Zphobos", null, new RagSearchOptions
+        {
+            MetadataEquals = new Dictionary<string, string> { ["acl"] = "public" }, // 一致文書なし
+        });
+
+        hits.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Metadata_equals_pushdown_works_for_hybrid()
+    {
+        using var db = GraphDatabase.Open(_path);
+        var store = NewStore(db);
+        await store.UpsertDocumentAsync(
+            Doc("pub", new Dictionary<string, string> { ["acl"] = "public" },
+                "alpha Zphobos first block textx",
+                "bravo banana second block texts"),
+            new FakeEmbedder());
+        await store.UpsertDocumentAsync(
+            Doc("sec", new Dictionary<string, string> { ["acl"] = "secret" },
+                "secret Zphobos first block textx",
+                "bravo banana hidden block texts"),
+            new FakeEmbedder());
+
+        var q = Embed("bravo banana second block texts", Dim);
+        var searcher = new RagSearcher(store);
+        var hits = searcher.Search("Zphobos", q, new RagSearchOptions
+        {
+            NeighborExpansion = 0,
+            K = 10,
+            MetadataEquals = new Dictionary<string, string> { ["acl"] = "public" },
+        });
+
+        hits.Should().NotBeEmpty();
+        hits.Should().OnlyContain(h => h.Document.SourceId == "pub"); // secret は母集団から除外
+        hits.Select(h => h.ChunkText).Should().Contain(t => t.Contains("Zphobos"));
     }
 
     [Fact]
