@@ -69,6 +69,13 @@ public sealed class RagStore
     /// なので、見出し語は BM25 では引けない点に注意 (14_rag_layer.md の設計判断)。
     /// MVP 注意: HNSW の再リンクは最適化途上のため、頻繁な再取込は ANN グラフを劣化させ得る
     /// (roadmap のベクトル索引再構築で対処)。
+    /// <para>
+    /// <b>制限</b>: <c>contentHash</c> は <see cref="IngestedDocument.Blocks"/> のみから算出する。
+    /// Blocks を変えずに <see cref="IngestedDocument.Title"/> / <see cref="IngestedDocument.Metadata"/>
+    /// だけ変更して再取込しても no-op となり、既存の title / metadata が保持される
+    /// (再チャンク・再埋め込みを避けるための割り切り)。メタだけ更新したい場合は Blocks に変化を与えるか
+    /// 個別 API を別途用意すること。
+    /// </para>
     /// </remarks>
     /// <param name="doc">取込対象の正規化文書。</param>
     /// <param name="embedder">チャンク埋め込み生成器。<see cref="IChunkEmbedder.Dimensions"/> は
@@ -259,11 +266,13 @@ public sealed class RagStore
         return n;
     }
 
-    /// <summary>Chunk のベクトル・接続関係・ノードを削除する。</summary>
+    // DeleteNode はノードに接続する全リレーションを自身でカスケード削除する
+    // (GraphTransaction.DeleteNode)。そのためここでは vector の除去とノード削除のみ行う。
+
+    /// <summary>Chunk のベクトルとノード (接続関係はカスケード) を削除する。</summary>
     private void DeleteChunk(IGraphTransaction tx, NodeId chunkId)
     {
         tx.RemoveVector(EntityKind.Node, chunkId.Value, _options.VectorIndexName);
-        DeleteIncidentRelationships(tx, chunkId);
         tx.DeleteNode(chunkId);
     }
 
@@ -272,16 +281,7 @@ public sealed class RagStore
     {
         foreach (var chunkId in CollectChunks(tx, docId))
             DeleteChunk(tx, chunkId);
-        DeleteIncidentRelationships(tx, docId);
         tx.DeleteNode(docId);
-    }
-
-    private static void DeleteIncidentRelationships(IGraphTransaction tx, NodeId nodeId)
-    {
-        var rels = new List<RelationshipId>();
-        var e = tx.EnumerateRelationships(nodeId, Direction.Both);
-        while (e.MoveNext()) rels.Add(e.Current.Id);
-        foreach (var r in rels) tx.DeleteRelationship(r);
     }
 
     private static bool TryReadString(IGraphTransaction tx, NodeId nodeId, string key, out string value)

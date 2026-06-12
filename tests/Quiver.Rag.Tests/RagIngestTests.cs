@@ -129,6 +129,14 @@ public sealed class RagIngestTests : IDisposable
         return next;
     }
 
+    private static string DocTitle(GraphDatabase db, string sourceId)
+    {
+        using var tx = db.BeginReadOnlyTransaction();
+        var (docId, found) = FindDoc(tx, sourceId);
+        if (!found) return "";
+        return Encoding.UTF8.GetString(tx.GetProperty(docId, RagSchema.PropTitle).Utf8StringValue);
+    }
+
     private static int KnnHitCount(GraphDatabase db, string indexName, int k)
     {
         var q = new float[Dim];
@@ -230,6 +238,42 @@ public sealed class RagIngestTests : IDisposable
         // 旧版が完全に残っている (中間状態なし)。
         ChunkTextsOrdered(db, "d1").Should().Equal("alpha", "bravo");
         KnnHitCount(db, store.VectorIndexName, 100).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Title_only_change_is_noop_and_keeps_old_title()
+    {
+        using var db = GraphDatabase.Open(_path);
+        var store = NewStore(db);
+        var blocks = new[] { new IngestedBlock(BlockKind.Paragraph, "same body text") };
+        var meta = new Dictionary<string, string>();
+
+        await store.UpsertDocumentAsync(
+            new IngestedDocument("d1", "Original Title", meta, blocks), new FakeEmbedder(Dim));
+
+        // Blocks 不変・title だけ変更 → contentHash 一致で no-op (設計どおり title は更新されない)。
+        var r = await store.UpsertDocumentAsync(
+            new IngestedDocument("d1", "Changed Title", meta, blocks), new FakeEmbedder(Dim));
+
+        r.Unchanged.Should().BeTrue();
+        DocTitle(db, "d1").Should().Be("Original Title");
+    }
+
+    [Fact]
+    public async Task Replace_nonempty_document_with_empty_clears_chunks()
+    {
+        using var db = GraphDatabase.Open(_path);
+        var store = NewStore(db);
+        await store.UpsertDocumentAsync(Doc("d1", "alpha", "bravo"), new FakeEmbedder(Dim));
+        ChunkTextsOrdered(db, "d1").Should().HaveCount(2);
+
+        var empty = new IngestedDocument("d1", "Empty", new Dictionary<string, string>(), Array.Empty<IngestedBlock>());
+        var r = await store.UpsertDocumentAsync(empty, new FakeEmbedder(Dim));
+
+        r.Unchanged.Should().BeFalse();
+        r.ChunkCount.Should().Be(0);
+        ChunkTextsOrdered(db, "d1").Should().BeEmpty();
+        KnnHitCount(db, store.VectorIndexName, 100).Should().Be(0);
     }
 
     [Fact]
