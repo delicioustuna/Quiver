@@ -1,0 +1,29 @@
+{
+  "sourceId": "pdftools/report-2026.pdf",
+  "title": "Annual Report 2026",
+  "metadata": {
+    "author": "Finance Team",
+    "lang": "en"
+  },
+  "blocks": [
+    {
+      "kind": "Heading",
+      "text": "Executive Summary",
+      "headingLevel": 1,
+      "page": 1
+    },
+    {
+      "kind": "Paragraph",
+      "text": "Revenue grew 12% year over year.",
+      "page": 1
+    },
+    {
+      "kind": "Table",
+      "text": "Q1 100 | Q2 120 | Q3 130 | Q4 150"
+    },
+    {
+      "kind": "Code",
+      "text": "SELECT SUM(amount) FROM revenue;"
+    }
+  ]
+}

@@ -27,10 +27,13 @@ Fluent なグラフトラバーサルを提供します。アンマネージド�
 
 ## 主なユースケース: ローカル RAG バックエンド
 
-ベクトル検索（KNN）・グラフ走査（ヒットしたチャンクの前後文脈や親文書への連結）・メタデータ
-フィルタを 1 ファイル・1 プロセス・外部依存なしで組み合わせられるため、ローカル RAG
-（検索拡張生成）のバックエンドに適しています。BM25 全文検索とのハイブリッド検索、および
-RAG 用スキーマ層（`Quiver.Rag`: 文書取込・チャンク管理・検索 API）は開発中です。
+ベクトル検索（KNN）・BM25 全文検索とのハイブリッド検索・グラフ走査（ヒットしたチャンクの
+前後文脈や親文書への連結）・メタデータフィルタを 1 ファイル・1 プロセス・外部依存なしで
+組み合わせられるため、ローカル RAG（検索拡張生成）のバックエンドに適しています。
+
+RAG 用スキーマ層 [`Quiver.Rag`](src/Quiver.Rag/)（文書取込・チャンキング・再取込・hybrid 検索 +
+graph expansion）を同梱しています。利用例は [`samples/Quiver.Samples.Rag`](samples/Quiver.Samples.Rag/)、
+レシピは [cookbook の「ローカル RAG」](docs/cookbook.md) を参照してください。
 
 ## クイックスタート
 
@@ -155,6 +158,7 @@ AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch による参考
 | [`Quiver.Samples.Hosting`](samples/Quiver.Samples.Hosting/) | `Microsoft.Extensions.Hosting` 連携（DI） |
 | [`Quiver.Samples.Observability`](samples/Quiver.Samples.Observability/) | OpenTelemetry による計測 |
 | [`Quiver.Samples.Migration`](samples/Quiver.Samples.Migration/) | スキーマ / データマイグレーション |
+| [`Quiver.Samples.Rag`](samples/Quiver.Samples.Rag/) | `Quiver.Rag` で文書取込 → hybrid 検索 → graph expansion |
 
 ## ライセンス
 

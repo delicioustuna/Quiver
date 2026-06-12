@@ -259,3 +259,80 @@ dotnet-counters monitor -p <pid> --counters Quiver-EventSource
 本機能の overhead は実質ゼロ。OpenTelemetry 経由でメトリクスを送りたい場合は
 `Quiver.OpenTelemetry` パッケージの `AddQuiverInstrumentation()` を使う (OB-1)。
 
+---
+
+## 10. ローカル RAG (Quiver.Rag)
+
+別アセンブリ `Quiver.Rag` は、文書 → チャンク格納・取込/再取込・ハイブリッド検索 +
+graph expansion の定型を 1 API で提供する。エンジン本体 (`Quiver`) のみに依存し、埋め込み生成は
+呼び出し側が `IChunkEmbedder` を注入する。サンプルは
+[`samples/Quiver.Samples.Rag`](../samples/Quiver.Samples.Rag/)。
+
+```csharp
+using Quiver;
+using Quiver.Rag;
+
+using var db = GraphDatabase.Open("rag.quiver");
+
+// 索引 (sourceId / ベクトル / 全文) はコンストラクタで冪等作成される。
+var store = new RagStore(db, new RagStoreOptions
+{
+    EmbeddingDimensions = embedder.Dimensions,            // 注入する埋め込み器と一致させる
+    Chunking = new ChunkingOptions { TargetSize = 800, Overlap = 100 },
+});
+
+// 取込: 取込側 (PdfTools 等) が読み順復元・正規化したブロック列を渡す。
+var doc = new IngestedDocument(
+    SourceId: "docs/intro.md",
+    Title: "はじめに",
+    Metadata: new Dictionary<string, string> { ["category"] = "guide" },
+    Blocks: new[]
+    {
+        new IngestedBlock(BlockKind.Heading, "概要", HeadingLevel: 1),
+        new IngestedBlock(BlockKind.Paragraph, "本文の段落 ..."),
+    });
+
+var result = await store.UpsertDocumentAsync(doc, embedder);
+// result.Unchanged == true なら contentHash 一致の no-op (再取込はべき等)。
+
+// 検索: queryText + queryVector の両方で RRF ハイブリッド、片方だけでも可。
+var searcher = new RagSearcher(store);
+IReadOnlyList<RagHit> hits = searcher.Search(
+    queryText: "Zphobos",
+    queryVector: await EmbedQueryAsync("周辺の文脈"),   // null なら BM25 のみ
+    new RagSearchOptions
+    {
+        K = 10,
+        NeighborExpansion = 1,                          // NEXT_CHUNK 前後 1 件を連結
+        MetadataFilter = m => m.Metadata.GetValueOrDefault("category") == "guide",
+    });
+
+foreach (var h in hits)
+    Console.WriteLine($"#{h.Rank} 〈{h.Document.Title}〉{h.HeadingPath}: {h.ChunkText}");
+
+// 文書差し替え (内容変更時) と削除。どちらも単一トランザクションで原子的。
+await store.UpsertDocumentAsync(updatedDoc, embedder);  // 旧チャンクを消して入れ直す
+store.DeleteDocument("docs/intro.md");
+```
+
+> 取込側 (PdfTools 等) が `IngestedDocument` を JSON でやり取りする場合は、契約の正本
+> `IngestedDocumentJson.Serialize` / `.Deserialize` を参照する (camelCase / `BlockKind` は文字列 /
+> null フィールド省略、source-gen で NativeAOT 安全)。境界の JSON 規約が両側で一致し続ける。
+
+**運用上の注意:**
+
+- **再取込のべき等性は `contentHash`（Blocks のハッシュ）で判定する。** Blocks を変えずに
+  `Title` / `Metadata` だけ変更しても no-op になり既存値が保たれる (再チャンク・再埋め込み回避)。
+- **差し替え・削除は単一トランザクション。** 取込中にプロセスが落ちても「旧版が無傷」か
+  「新版が完全」のどちらかで、中間状態は残らない。クラッシュ安全性はこの原子性に委ねている。
+- **埋め込みはトランザクションの外で先に実行される。** `IChunkEmbedder` が失敗しても DB は無変更。
+  `Dimensions` は `RagStoreOptions.EmbeddingDimensions` と一致している必要がある。
+- **見出し語は埋め込み入力に前置されるが、`text` プロパティと全文索引は生の本文のまま。**
+  そのため見出しの語は KNN では文脈として効くが BM25 では直接引けない。
+- **`MetadataFilter` は後段フィルタ** (上位 K 件取得後に除外)。フィルタが大半を弾くワークロードでは
+  該当文書があっても 0 件になり得る。
+- **頻繁な再取込時はベクトル索引の再構築を検討する。** HNSW の再リンク最適化は途上のため、
+  削除/上書きが累積すると ANN グラフが劣化し得る (roadmap)。
+- 全文索引を提供しないバックエンド (SQLite) では `RagStore.FullTextEnabled == false` となり、
+  検索は KNN のみで動作する。
+

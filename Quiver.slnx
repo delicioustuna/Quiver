@@ -25,6 +25,7 @@
     <Project Path="samples/Quiver.Samples.Hosting/Quiver.Samples.Hosting.csproj" />
     <Project Path="samples/Quiver.Samples.Observability/Quiver.Samples.Observability.csproj" />
     <Project Path="samples/Quiver.Samples.Migration/Quiver.Samples.Migration.csproj" />
+    <Project Path="samples/Quiver.Samples.Rag/Quiver.Samples.Rag.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Quiver.Storage.Tests/Quiver.Storage.Tests.csproj" />
