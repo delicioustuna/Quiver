@@ -56,6 +56,15 @@ if (args.Length >= 1 && args[0] == "--ft29-coalesce")
     return Ft29PageImageCoalesceRunner.Run();
 }
 
+// FTS-6: full-text search p50 + ingest amplification + WAL bytes/chunk standalone runner.
+// Usage: -- --fts6 [chunkCount] [queryCount]   (defaults: 100000 chunks, 500 queries)
+if (args.Length >= 1 && args[0] == "--fts6")
+{
+    int chunkCount = args.Length >= 2 && int.TryParse(args[1], out var c) ? c : 100_000;
+    int queryCount = args.Length >= 3 && int.TryParse(args[2], out var q) ? q : 500;
+    return Fts6SearchRunner.Run(chunkCount, queryCount);
+}
+
 // 基本性能 (README 性能目標) standalone runner
 if (args.Length >= 1 && args[0] == "--basic-perf")
 {
