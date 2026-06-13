@@ -65,6 +65,24 @@ if (args.Length >= 1 && args[0] == "--fts6")
     return Fts6SearchRunner.Run(chunkCount, queryCount);
 }
 
+// FTS-7 手順1: 取込 WAL 増幅の内訳分解 (postings/norms BTree vs 本体 / before-after / pages-per-tx)。
+// Usage: -- --fts7 [chunks] [batchSize]   (defaults: 5000 chunks, batch 200 — FTS-6 増幅サンプルと同条件)
+if (args.Length >= 1 && args[0] == "--fts7")
+{
+    int chunks = args.Length >= 2 && int.TryParse(args[1], out var fc) ? fc : 5_000;
+    int batch = args.Length >= 3 && int.TryParse(args[2], out var fb) ? fb : 200;
+    return Fts7BreakdownRunner.Run(chunks, batch);
+}
+
+// FTS-7 手順2: logical postings WAL の spike ゲート (ARIES 変更なしで見込み増幅を算出)。
+// Usage: -- --fts7-spike [chunks] [batchSize]   (defaults: 5000 chunks, batch 200)
+if (args.Length >= 1 && args[0] == "--fts7-spike")
+{
+    int chunks = args.Length >= 2 && int.TryParse(args[1], out var sc) ? sc : 5_000;
+    int batch = args.Length >= 3 && int.TryParse(args[2], out var sb) ? sb : 200;
+    return Fts7BreakdownRunner.RunSpike(chunks, batch);
+}
+
 // 基本性能 (README 性能目標) standalone runner
 if (args.Length >= 1 && args[0] == "--basic-perf")
 {
