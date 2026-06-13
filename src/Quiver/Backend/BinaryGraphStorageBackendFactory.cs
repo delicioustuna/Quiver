@@ -106,6 +106,11 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // ここで container から開き直すだけで永続済み索引を materialize できる。
         var indexManager = new IndexManager(container);
 
+        // FTS-7 (design 13 §10.4): recovery 論理相。物理相 (recovery.Recover 上) が FtStructureImage で
+        // FT 木の構造を復元済みで、IndexManager が 2a 後のヘッダから live FullTextIndex を構築した今、
+        // committed tx の FtLeafMutation を再実行 (2b) + loser tx の逆操作 undo (Pass 3) を適用する。
+        recovery.RecoverLogical(indexManager);
+
         // ARCH-4 増分6: 隣接ビュー (bulk load 済みのときのみ存在) を container テナントから開く。
         // PW-14 epoch (base hwm + tombstones) も EpochTenant に同居。V1/V2 種別は DataTenant の
         // 記述子で判別する。recovery + ReloadAll 後なのでテナントページは復元済み。
@@ -213,7 +218,10 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
 
         // FT-15: in-process undo handler — restores captured before-images and
         // re-syncs store metadata on abort / commit failure.
-        var undoHandler = new AbortUndoHandler(fileRegistry, ReloadStoreMeta);
+        // FTS-7 (design 13 §10.6): leaf 論理 undo の適用器も渡す (postings/norms の Suppressed leaf を
+        // abort 時に逆操作で取り消す)。
+        var undoHandler = new AbortUndoHandler(fileRegistry, ReloadStoreMeta,
+            (tenant, isUpsert, key, value) => indexManager.ApplyFtLeafUndo(tenant, isUpsert, key, value));
 
         var txManager = new TransactionManager(
             wal, nodeStore, relStore, propStore, indexManager, adjStore, access,

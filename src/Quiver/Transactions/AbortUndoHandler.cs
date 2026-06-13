@@ -20,17 +20,40 @@ internal sealed class AbortUndoHandler
 {
     private readonly IReadOnlyDictionary<byte, IPagedFile> _files;
     private readonly Action _reloadStoreMeta;
+    // FTS-7 (design 13 §10.6): leaf 論理 undo の適用器 (tenant, isUpsert, key, value) → index manager。
+    private readonly Action<byte, bool, byte[], long>? _applyFtUndo;
 
     /// <param name="files">fileKind → 所有 <see cref="IPagedFile"/> のレジストリ。</param>
     /// <param name="reloadStoreMeta">
     /// before-image 復元後にストアのインメモリメタ (hwm 等) を再同期するコールバック。
     /// </param>
+    /// <param name="applyFtUndo">
+    /// FTS-7: leaf 論理 undo の適用器。postings/norms の Suppressed leaf は page before-image を
+    /// 持たないため、abort 時に逆操作 (Upsert↔Delete) で FT 索引から取り消す。null = FT 非対応 backend。
+    /// </param>
     public AbortUndoHandler(
         IReadOnlyDictionary<byte, IPagedFile> files,
-        Action reloadStoreMeta)
+        Action reloadStoreMeta,
+        Action<byte, bool, byte[], long>? applyFtUndo = null)
     {
         _files = files;
         _reloadStoreMeta = reloadStoreMeta;
+        _applyFtUndo = applyFtUndo;
+    }
+
+    /// <summary>
+    /// FTS-7 (design 13 §10.6): tx が発行した leaf 論理ミューテーションを **逆順 (LIFO)** に逆操作して
+    /// FT 索引から取り消す。page before-image 復元 (<see cref="Undo"/>) と独立 (FT leaf は別ページ)。
+    /// FT 索引のヘッダキャッシュ再同期は <see cref="Undo"/> 内の reloadStoreMeta が担う。
+    /// </summary>
+    public void UndoFtLogical(IReadOnlyList<Quiver.Storage.Wal.FtUndoEntry> ftUndoLog)
+    {
+        if (_applyFtUndo is null || ftUndoLog.Count == 0) return;
+        for (int i = ftUndoLog.Count - 1; i >= 0; i--)
+        {
+            var e = ftUndoLog[i];
+            _applyFtUndo(e.Tenant, e.IsUpsert, e.Key, e.Value);
+        }
     }
 
     /// <summary>

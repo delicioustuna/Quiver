@@ -184,7 +184,9 @@ internal sealed class PagedFile : IPagedFile
         return new PageReadHandle(this, pageId, ReadFrameSpan(frame));
     }
 
-    public PageWriteHandle PinForWrite(PageId pageId)
+    public PageWriteHandle PinForWrite(PageId pageId) => PinForWrite(pageId, WalJournalMode.Full);
+
+    public PageWriteHandle PinForWrite(PageId pageId, WalJournalMode mode)
     {
         int frame = GetOrLoadFrame(pageId);
         // FT-26: ハンドル生存中、他スレッドからの読み書きを排他する。
@@ -196,8 +198,14 @@ internal sealed class PagedFile : IPagedFile
             // FT-15: この書き込みトランザクション内で本ページを初めて pin する時点の内容を
             // before-image として捕捉する。caller がまだ変更していないこの瞬間が唯一の機会。
             // frame は pin 済みなので evict されず、span は安定している。
+            // FTS-7 (design 13 §10.3): journaling モードを記録し、有効モードが Full のときのみ CLR を捕捉する
+            //   (RedoOnly/Suppressed の FT ページは before-image を出さない)。
             if (_walFileKind is byte fileKind)
-                WalPageContext.CaptureBeforeImage(fileKind, pageId.Value, raw);
+            {
+                var eff = WalPageContext.SetJournalMode(fileKind, pageId.Value, mode);
+                if (eff == WalJournalMode.Full)
+                    WalPageContext.CaptureBeforeImage(fileKind, pageId.Value, raw);
+            }
             return new PageWriteHandle(this, pageId, raw);
         }
         catch

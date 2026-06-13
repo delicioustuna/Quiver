@@ -14,7 +14,18 @@ internal enum WalRecordType : byte
     // FT-17: B+Tree インデックスへの 1 件の論理ミューテーション (Insert / Delete)。
     // 索引ファイルは WAL ページロギング対象外なので、abort / crash でエントリを
     // 巻き戻すために論理 undo レコードを別途持つ。ペイロードは IndexMutationCodec。
+    // FT-19 で索引が page-WAL 化され予約値として残置 (新規には現れない)。
     IndexMutation = 13,
+    // FTS-7: postings/norms B+Tree leaf への state-setting 論理ミューテーション
+    // (Upsert key=value / Delete key)。leaf 更新のページイメージ (CLR + PageImage) を本レコードへ
+    // 置換し取込 WAL 増幅を圧縮する (design 13 §10)。SMO (split/merge) は従来の page-WAL を維持。
+    // 冪等 state-setting で、redo は再実行 (Pass 2b)、undo は逆操作。ペイロードは FtLeafMutationCodec。
+    FtLeafMutation = 17,
+    // FTS-7: postings/norms B+Tree の SMO (split/merge/root 変更) で書き換わった構造ページの
+    // after-image (design 13 §10.4 R1)。nested top action として **commit/abort を問わず無条件に redo し、
+    // 決して undo しない**。ペイロード形式は PageImage と共通 (WalPageImageCodec)。recovery の
+    // presume-committed 推定には一切寄与させない (PageImage のみが FlushPending マーカ)。
+    FtStructureImage = 18,
     // FT-21: チェックポイント atomicity の Begin/End sentinel。
     // CheckpointBegin はチェックポイント開始 (dirty page flush 前)、
     // CheckpointEnd は全 page + index fsync 完了後に書く。recovery は

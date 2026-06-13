@@ -220,9 +220,16 @@ internal sealed class Transaction : ITransaction
     private void RollBackInPlace()
     {
         if (_undoHandler == null) return;
+        // FTS-7 (design 13 §10.6): **順序が重要**。先に leaf 論理 undo (逆操作) を当てて Suppressed leaf
+        // (page before-image を持たない) からキーを除去する。その後 before-image undo が Full の header
+        // ページを pre-tx CLR へ戻し ReloadFromHeader で root/height/entryCount を権威的に再同期するので、
+        // 論理 undo が触った entryCount は最終的に header CLR の値 (= pre-tx) で上書きされ二重計上しない。
+        // (逆順だと header が先に 0 へ戻った後 DeleteRawEntry が更に減らし entryCount=-1 になる。)
+        // 論理 undo は post-tx 構造を辿るので Suppressed leaf のキーを正しく見つけられる。
+        _undoHandler.UndoFtLogical(WalPageContext.CurrentFtUndoLog);
         var beforeImages = WalPageContext.CurrentBeforeImagePayloads;
-        if (beforeImages.Count == 0) return;
-        _undoHandler.Undo(beforeImages);
+        if (beforeImages.Count > 0)
+            _undoHandler.Undo(beforeImages);
     }
 
     // ==================== FT-33: SSN commit protocol ====================

@@ -67,8 +67,17 @@ internal static class FormatVersion
     /// </summary>
     public const byte V8FullText = 8;
 
+    /// <summary>
+    /// v9: FTS-7 logical postings WAL。postings/norms B+Tree の leaf 更新を WAL のページイメージから
+    /// 論理レコード (<see cref="Quiver.Storage.Wal.WalRecordType.FtLeafMutation"/>) へ置換し、取込 WAL 増幅を
+    /// 圧縮する (design 13 §9.2/§10)。ファイル本体レイアウトは v8 と同一だが、crash 後に残った旧形式 WAL を
+    /// 新コードが誤読する事故を防ぐため、新レコード型の導入に合わせてバージョンを bump し旧 DB は reject する。
+    /// develop 段階のためマイグレーションは提供しない。
+    /// </summary>
+    public const byte V9FtLogicalWal = 9;
+
     /// <summary>現行 (= 新規 DB を作成するときに書き込むバージョン)。</summary>
-    public const byte Current = V8FullText;
+    public const byte Current = V9FtLogicalWal;
 }
 
 /// <summary>

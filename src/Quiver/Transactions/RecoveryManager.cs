@@ -14,6 +14,17 @@ internal sealed class RecoveryManager : IRecoveryManager
     private readonly Dictionary<byte, IPagedFile> _fileRegistry;
     private readonly CommittedTxRegistry? _committedRegistry;
 
+    // FTS-7 (design 13 §10.4): 物理相 Recover() が計算した tx 分類 / redo 起点 LSN を保持し、
+    // 論理相 RecoverLogical() が FtLeafMutation の redo/undo 判定に再利用する。
+    // 重要: 論理相は物理層と同じ **presume-committed** (= committed ∪ (PageImage ∧ ¬Abort)) を使う。
+    // 厳格 committed (Commit レコード必須) で分類すると、torn-commit (FlushPending 完了後 Commit レコード
+    // 前に crash) した FT 取込 tx が「Pass 0/物理層では committed・可視」なのに論理相だけ loser 扱いで
+    // postings を消し、可視文書が検索不能になる (レビュー指摘の CRITICAL)。
+    private HashSet<long> _committedTxs = new();
+    private HashSet<long> _txsWithPageImage = new();
+    private HashSet<long> _abortedTxs = new();
+    private long _recoverCheckpointLsn;
+
     public RecoveryManager(IPageManager pageManager, IWriteAheadLog wal)
         : this(pageManager, wal, []) { }
 
@@ -114,12 +125,21 @@ internal sealed class RecoveryManager : IRecoveryManager
             }
         }
 
-        // Pass 2 (redo): コミット済みトランザクションの PageImage (after-image) を replay する。
+        // FTS-7: 論理相 (RecoverLogical) 用に tx 分類 / redo 起点を保持する (presume-committed 計算に使う)。
+        _committedTxs = committedTxs;
+        _txsWithPageImage = txsWithPageImage;
+        _abortedTxs = abortedTxs;
+        _recoverCheckpointLsn = checkpointLsn;
+
+        // Pass 2a (物理 redo): コミット済みトランザクションの PageImage (after-image) を replay する。
         // FT-19: 索引 PagedFile も EnableWalLogging により PageImage 経路を共有するため、
         // ここで fileRegistry に登録された索引ファイルにも自動的に redo が適用される。
         // OP-5: FileTruncate も同じパスで replay する。LSN 順に処理することで
         // 「先行 LSN の PageImage で必要なら一度拡張 → 後続 LSN の FileTruncate で再縮減」
         // が再現される (= 物理操作の冪等再生)。
+        // FTS-7 (design 13 §10.4 R1): FtStructureImage (postings/norms の SMO 構造ページ) は nested
+        // top action として **commit/abort を問わず無条件に redo** する (committed フィルタを通さない)。
+        // FtLeafMutation がキーの redo/undo を担い、FtStructureImage が構造を担う責務分離。
         using (var reader = _wal.OpenReader(checkpointLsn))
         {
             while (reader.TryReadNext(out var record))
@@ -128,6 +148,10 @@ internal sealed class RecoveryManager : IRecoveryManager
                     committedTxs.Contains(record.TransactionId.Value))
                 {
                     ApplyPagePayload(record);
+                }
+                else if (record.Type == WalRecordType.FtStructureImage)
+                {
+                    ApplyPagePayload(record); // 無条件 (nested top action)
                 }
                 else if (record.Type == WalRecordType.FileTruncate)
                 {
@@ -161,6 +185,61 @@ internal sealed class RecoveryManager : IRecoveryManager
         }
 
         return lastLsn;
+    }
+
+    /// <summary>
+    /// FTS-7 (design 13 §10.4): recovery 論理相。物理相 <see cref="Recover"/> が FtStructureImage で
+    /// FT 木の構造を復元し、IndexManager が 2a 後のヘッダから live `FullTextIndex` を構築した**後**に
+    /// 呼ぶ。Pass 2b (committed tx の `FtLeafMutation` を LSN 順に再実行 = state-setting last-write-wins) +
+    /// Pass 3 論理 undo (Commit を持たない全 tx = abort 含む loser の `FtLeafMutation` を逆操作、LIFO) を行う。
+    /// </summary>
+    public void RecoverLogical(IIndexManager indexManager)
+    {
+        // presume-committed = 物理層 (Pass 0 / 物理 Pass 3 の skip 条件) と同一意味論。
+        //   committed (Commit レコード有) ∪ (PageImage 有 ∧ Abort 無) = torn-commit を committed 扱い。
+        // torn-commit した FT 取込 tx の body+postings は FlushPending で durable なので、これを redo 対象
+        // (= 取りこぼさない) かつ undo 対象外 (= 消さない) にする。明示 Abort 済み tx は presume-committed で
+        // 無いので undo される (in-process abort の leaf inverse は durable でなく、inverse は冪等で安全)。
+        bool PresumeCommitted(long tx)
+            => _committedTxs.Contains(tx) || (_txsWithPageImage.Contains(tx) && !_abortedTxs.Contains(tx));
+
+        // Pass 2b (論理 redo): presume-committed tx の FtLeafMutation を LSN 順に再実行する。
+        using (var reader = _wal.OpenReader(_recoverCheckpointLsn))
+        {
+            while (reader.TryReadNext(out var record))
+            {
+                if (record.Type != WalRecordType.FtLeafMutation) continue;
+                if (!PresumeCommitted(record.TransactionId.Value)) continue;
+                if (FtLeafMutationCodec.TryDecode(
+                        record.Payload.Span, out var op, out byte tenant, out var key, out long value))
+                {
+                    indexManager.ApplyFtLeafRedo(tenant, op == FtLeafMutationCodec.Op.Upsert, key, value);
+                }
+            }
+        }
+
+        // Pass 3 (論理 undo): presume-committed で無い真の loser tx (明示 Abort 済み + 宙ぶらりん) の
+        // FtLeafMutation を逆操作で取り消す。逆順 (LIFO)。inverse も state-setting で冪等なので二重 undo 安全。
+        var losers = new List<(byte Tenant, bool IsUpsert, byte[] Key, long Value)>();
+        using (var reader = _wal.OpenReader(_recoverCheckpointLsn))
+        {
+            while (reader.TryReadNext(out var record))
+            {
+                if (record.Type != WalRecordType.FtLeafMutation) continue;
+                if (PresumeCommitted(record.TransactionId.Value)) continue;
+                if (FtLeafMutationCodec.TryDecode(
+                        record.Payload.Span, out var op, out byte tenant, out var key, out long value))
+                {
+                    losers.Add((tenant, op == FtLeafMutationCodec.Op.Upsert, key.ToArray(), value));
+                }
+            }
+        }
+        for (int i = losers.Count - 1; i >= 0; i--)
+            indexManager.ApplyFtLeafUndo(losers[i].Tenant, losers[i].IsUpsert, losers[i].Key, losers[i].Value);
+
+        // 再実行/逆操作はバッファプール経由 (WAL OFF)。durable 化して次回 recovery の起点を確定する
+        // (再 crash しても WAL 再生で冪等に再構築できるので必須ではないが、二度手間を避ける)。
+        indexManager.FlushAll();
     }
 
     // FT-21: WAL を 1 回スキャンして、recovery の redo 起点となる LSN を求める。

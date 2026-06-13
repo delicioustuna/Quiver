@@ -31,6 +31,65 @@ public static class Fts7BreakdownRunner
 {
     private const string Index = "idx_body";
 
+    /// <summary>
+    /// FTS-7 手順6: <b>steady-state</b> 増幅。base チャンクで木を育ててから incr チャンクを追加し、
+    /// その追加分だけの WAL 増分を計測する (= 構築済みインデックスへの増分 upsert = 実 RAG ユースケース。
+    /// from-empty の木成長 split コストを切り離す)。base/incr とも checkpoint OFF・同一 db。
+    /// </summary>
+    public static int RunSteady(int baseChunks, int incrChunks, int batch)
+    {
+        Console.WriteLine("=== FTS-7 手順6: steady-state incremental amplification ===");
+        Console.WriteLine($"base={baseChunks:N0}, incr={incrChunks:N0}, batch={batch}, checkpoint=OFF (target ≤ 5×)");
+        Console.WriteLine();
+        var vocab = new ZipfVocabulary(Math.Clamp((baseChunks + incrChunks) / 2, 4_000, 60_000));
+
+        long ftDelta = MeasureIncrementWal(vocab, baseChunks, incrChunks, batch, withIndex: true);
+        long plainDelta = MeasureIncrementWal(vocab, baseChunks, incrChunks, batch, withIndex: false);
+        double amp = plainDelta > 0 ? ftDelta / (double)plainDelta : double.NaN;
+        Console.WriteLine($"incr WAL with FT:   {ftDelta,14:N0} bytes  ({ftDelta / (double)incrChunks,9:F1} /chunk)");
+        Console.WriteLine($"incr WAL plain:     {plainDelta,14:N0} bytes  ({plainDelta / (double)incrChunks,9:F1} /chunk)");
+        Console.WriteLine($"steady amplification:{amp,13:F2}×   (target ≤ 5×)");
+        Console.WriteLine($"csv-steady,{baseChunks},{incrChunks},{batch},{ftDelta},{plainDelta},{amp:F2}");
+        return 0;
+    }
+
+    // base 取込後の WAL サイズを基準に、incr 取込で増えた WAL バイトを返す。
+    private static long MeasureIncrementWal(ZipfVocabulary vocab, int baseChunks, int incrChunks, int batch, bool withIndex)
+    {
+        var dir = BenchTempDir.Create(withIndex ? "fts7_steady_ft" : "fts7_steady_plain");
+        try
+        {
+            using var db = GraphDatabase.Open(
+                System.IO.Path.Combine(dir, "graph.quiver"),
+                new GraphDatabaseOptions { CheckpointThresholdBytes = long.MaxValue });
+            if (withIndex) db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+            string walPath = System.IO.Path.Combine(dir, "graph.quiver-wal");
+            var rng = new Random(11);
+            IngestRange(db, vocab, rng, baseChunks, batch);
+            long before = WalBytes(walPath);
+            IngestRange(db, vocab, rng, incrChunks, batch);
+            return WalBytes(walPath) - before;
+        }
+        finally { BenchTempDir.Delete(dir); }
+    }
+
+    private static void IngestRange(GraphDatabase db, ZipfVocabulary vocab, Random rng, int count, int batch)
+    {
+        int written = 0;
+        while (written < count)
+        {
+            int b = Math.Min(batch, count - written);
+            using var tx = db.BeginTransaction();
+            for (int i = 0; i < b; i++)
+            {
+                var n = tx.CreateNode("Doc");
+                tx.SetProperty(n, "body", PropertyValue.FromString(MakeChunk(vocab, rng)));
+            }
+            tx.Commit();
+            written += b;
+        }
+    }
+
     public static int Run(int chunks, int batchSize)
     {
         Console.WriteLine("=== FTS-7 手順1: ingest WAL amplification breakdown ===");

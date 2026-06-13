@@ -2,6 +2,7 @@
 using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Storage;
+using Quiver.Storage.Wal;
 
 namespace Quiver.Index;
 
@@ -43,13 +44,31 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     private long _entryCount;
     private int _height;
 
-    internal BTreeIndex(IPagedFile file, IKeyCodec<TKey> codec, string name, IndexKeyKind kind)
+    // FTS-7 (design 13 §10.3, 実装で簡素化 — 下記): logical-leaf モード。postings/norms の 2 本のみ true。
+    // leaf in-place 更新 = Suppressed (page-image 抑止 → FtLeafMutation 論理レコードで覆う) = 増幅圧縮の本体。
+    // 構造ページ (split/merge/internal/root/header) = **Full のまま** (通常 page-WAL: eager CLR + coalesced
+    // after-image)。当初案の RedoOnly/FtStructureImage (nested top action) は、eager 書込が大 tx 内で
+    // ホット internal ページを touch ごとに再ログし WAL を爆発させる (batch=1000 で 224×) ため棄却。
+    // 構造を Full に戻しても正当: abort 時、構造ページの CLR が tree 構造を (split した leaf は
+    // post-in-place 状態へ) 戻し、leaf 論理 inverse がキーを除去するので、両者の合成で pre-tx に収束する。
+    // STEAL 安全は eager CLR が、爆発回避は FT-29 coalesce (latest-wins/page/tx) が担う。
+    private readonly bool _logicalLeaf;
+    private readonly byte _logicalTenantId;
+    private readonly WalJournalMode _leafMode;
+    private readonly WalJournalMode _structMode;
+
+    internal BTreeIndex(IPagedFile file, IKeyCodec<TKey> codec, string name, IndexKeyKind kind,
+        bool logicalLeaf = false, byte logicalTenantId = 0)
     {
         // FT-20: name / kind は呼び出し側互換のため受け取るが、もう保持しない。
         // FT-17 の IndexUndoContext.Record 経路 (論理 undo) は AbortUndoHandler の
         // 物理 before-image undo (FT-19) に統合済みなので不要。
         _ = name; _ = kind;
         _file = file; _codec = codec;
+        _logicalLeaf = logicalLeaf;
+        _logicalTenantId = logicalTenantId;
+        _leafMode = logicalLeaf ? WalJournalMode.Suppressed : WalJournalMode.Full;
+        _structMode = WalJournalMode.Full; // 構造は常に Full page-WAL (上記参照)。
         if (_file.PageCount <= 1)
         {
             _file.AllocatePage(PageKind.Header);
@@ -67,11 +86,16 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     public void Insert(in TKey key, long value)
     {
         byte[] kb = Encode(key);
+        // FTS-7: logical-leaf モードでは、leaf 更新前に state-setting 論理レコードを eager 発行する
+        // (WAL-ahead; recovery 中は WalPageContext.Current が null なので no-op)。normal op はキー不在への
+        // 挿入だが、redo の冪等性 (二重適用 no-op) は Upsert 意味の再実行 (UpsertRaw) で担保する (§10.2)。
+        if (_logicalLeaf)
+            WalPageContext.LogFtLeafMutation(FtLeafMutationCodec.Op.Upsert, _logicalTenantId, kb, value);
         var split = InsertDown(_root, kb, value, 0);
         if (split.HasValue)
         {
             PageId newRoot = _file.AllocatePage(PageKind.BTreeInternal);
-            var ph = _file.PinForWrite(newRoot);
+            var ph = _file.PinForWrite(newRoot, _structMode);
             ph.Data.Clear();
             BinaryPrimitives.WriteInt32LittleEndian(ph.Data, 1);
             BinaryPrimitives.WriteInt64LittleEndian(ph.Data[4..], _root.Value);
@@ -86,6 +110,9 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     public bool Delete(in TKey key, long value)
     {
         byte[] kb = Encode(key);
+        // FTS-7: logical-leaf モードでは削除前に論理レコードを eager 発行 (value=削除する旧値 → undo 再挿入用)。
+        if (_logicalLeaf)
+            WalPageContext.LogFtLeafMutation(FtLeafMutationCodec.Op.Delete, _logicalTenantId, kb, value);
         bool ok = DeleteDown(_root, kb, value, 0);
         if (!ok) return false;
         _entryCount--;
@@ -208,6 +235,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     /// </summary>
     public bool DeleteRawEntry(ReadOnlySpan<byte> rawKey, long value)
     {
+        // FTS-7: 生キー版は WAL emit しない pure apply (orphan repair = 再 orphan で無害 / recovery = Current null)。
         byte[] kb = rawKey.ToArray();
         bool ok = DeleteDown(_root, kb, value, 0);
         if (!ok) return false;
@@ -221,6 +249,55 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
             _root = onlyChild; _height--;
         }
         FlushHeader();
+        return true;
+    }
+
+    /// <summary>
+    /// FTS-7 (design 13 §10.4): 生キーの **idempotent set** (recovery Pass 2b redo / Pass 3 undo 用)。
+    /// 存在すれば値を上書き、無ければ挿入する (state-setting なので二重適用が no-op)。WAL は emit しない
+    /// pure apply (recovery 中は WalPageContext.Current が null で page-WAL も出ない)。
+    /// </summary>
+    public void UpsertRaw(ReadOnlySpan<byte> rawKey, long value)
+    {
+        byte[] kb = rawKey.ToArray();
+        if (TryUpdateValueRaw(kb, value)) return; // 既存キー → in-place 上書き (冪等)
+        var split = InsertDown(_root, kb, value, 0);
+        if (split.HasValue)
+        {
+            PageId newRoot = _file.AllocatePage(PageKind.BTreeInternal);
+            var ph = _file.PinForWrite(newRoot, _structMode);
+            ph.Data.Clear();
+            BinaryPrimitives.WriteInt32LittleEndian(ph.Data, 1);
+            BinaryPrimitives.WriteInt64LittleEndian(ph.Data[4..], _root.Value);
+            int p = BL.InternalHdr;
+            WriteSep(ph.Data, ref p, split.Value.median, split.Value.right);
+            ph.Dispose();
+            _root = newRoot; _height++;
+        }
+        _entryCount++;
+        FlushHeader();
+    }
+
+    // FTS-7: 生キー kb のエントリが存在すればその値を in-place で上書きし true。無ければ false。
+    private bool TryUpdateValueRaw(byte[] kb, long value)
+    {
+        PageId leaf = FindLeaf(kb);
+        int valOff = -1;
+        {
+            using var rh = _file.PinForRead(leaf);
+            ReadOnlySpan<byte> body = rh.Data;
+            int count = BinaryPrimitives.ReadInt32LittleEndian(body);
+            int pos = BL.LeafHdr;
+            for (int i = 0; i < count; i++)
+            {
+                int klen = BinaryPrimitives.ReadInt16LittleEndian(body[pos..]);
+                if (body.Slice(pos + 2, klen).SequenceEqual(kb)) { valOff = pos + 2 + klen; break; }
+                pos += 2 + klen + 8;
+            }
+        }
+        if (valOff < 0) return false;
+        using var wh = _file.PinForWrite(leaf, _leafMode);
+        BinaryPrimitives.WriteInt64LittleEndian(wh.Data[valOff..], value);
         return true;
     }
 
@@ -278,7 +355,8 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         // その場で新エントリを書き込む — スクラッチバッファ無し、エントリ毎の byte[] コピー無し。
         if (oldUsed + newEntrySize <= BL.Body)
         {
-            using var wh = _file.PinForWrite(pid);
+            // FTS-7: leaf in-place 挿入 — logical-leaf モードでは Suppressed (page-image 抑止)。
+            using var wh = _file.PinForWrite(pid, _leafMode);
             Span<byte> body = wh.Data;
             int trailing = oldUsed - insOff;
             if (trailing > 0)
@@ -304,8 +382,8 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
             int srcPos = BL.LeafHdr;
 
-            // 左ページ: インデックス [0, half) を担当
-            using (var lph = _file.PinForWrite(pid))
+            // 左ページ: インデックス [0, half) を担当 (FTS-7: SMO 構造ページ = _structMode)
+            using (var lph = _file.PinForWrite(pid, _structMode))
             {
                 Span<byte> lbody = lph.Data;
                 lbody[..BL.Body].Clear();
@@ -329,8 +407,8 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
                 medianBytes = scratch.AsSpan(srcPos + 2, mklen).ToArray();
             }
 
-            // 右ページ: インデックス [half, newCount) を担当
-            using (var rph = _file.PinForWrite(rPid))
+            // 右ページ: インデックス [half, newCount) を担当 (FTS-7: SMO 構造ページ = _structMode)
+            using (var rph = _file.PinForWrite(rPid, _structMode))
             {
                 Span<byte> rbody = rph.Data;
                 rbody[..BL.Body].Clear();
@@ -344,7 +422,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
             if (oldNext >= 0)
             {
-                using var nph = _file.PinForWrite(new PageId(oldNext));
+                using var nph = _file.PinForWrite(new PageId(oldNext), _structMode);
                 BinaryPrimitives.WriteInt64LittleEndian(nph.Data[12..], rPid.Value);
             }
             return (medianBytes, rPid);
@@ -410,9 +488,10 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         }
 
         // Fast path: no split — shift trailing separators right and write the new one in place.
+        // FTS-7: セパレータ挿入は構造変更 (子 split に由来) = _structMode。
         if (oldUsed + newEntrySize <= BL.Body)
         {
-            using var wh = _file.PinForWrite(pid);
+            using var wh = _file.PinForWrite(pid, _structMode);
             Span<byte> body = wh.Data;
             int trailing = oldUsed - insOff;
             if (trailing > 0)
@@ -437,8 +516,8 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
             int srcPos = BL.InternalHdr;
 
-            // 左ページ: 新インデックス [0, half) → ソース pid 上に残す。
-            using (var lph = _file.PinForWrite(pid))
+            // 左ページ: 新インデックス [0, half) → ソース pid 上に残す。(FTS-7: _structMode)
+            using (var lph = _file.PinForWrite(pid, _structMode))
             {
                 Span<byte> lbody = lph.Data;
                 lbody[..BL.Body].Clear();
@@ -467,7 +546,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
             // 右ページ: 新インデックス [half+1, newCount)。
             PageId rPid = _file.AllocatePage(PageKind.BTreeInternal);
-            using (var rph = _file.PinForWrite(rPid))
+            using (var rph = _file.PinForWrite(rPid, _structMode))
             {
                 Span<byte> rbody = rph.Data;
                 rbody[..BL.Body].Clear();
@@ -563,7 +642,8 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
         if (delOff < 0) return false;
 
-        using var wh = _file.PinForWrite(pid);
+        // FTS-7: leaf in-place 削除 — logical-leaf モードでは Suppressed (page-image 抑止)。
+        using var wh = _file.PinForWrite(pid, _leafMode);
         Span<byte> wbody = wh.Data;
         int trailing = oldUsed - (delOff + delSize);
         if (trailing > 0)
@@ -646,7 +726,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         EncodeLeaf(leftPid, le, rnext, lprev);
         if (rnext >= 0)
         {
-            using var nh = _file.PinForWrite(new PageId(rnext));
+            using var nh = _file.PinForWrite(new PageId(rnext), _structMode);
             BinaryPrimitives.WriteInt64LittleEndian(nh.Data[12..], leftPid.Value);
         }
         _file.FreePage(rightPid);
@@ -756,7 +836,8 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
     private void EncodeLeaf(PageId pid, List<KeyValuePair<byte[], long>> entries, long next, long prev)
     {
-        using var h = _file.PinForWrite(pid);
+        // FTS-7: merge/borrow による leaf 全書き換えは構造変更 = _structMode。
+        using var h = _file.PinForWrite(pid, _structMode);
         Span<byte> body = h.Data;
         body[..BL.Body].Clear();
         BinaryPrimitives.WriteInt32LittleEndian(body, entries.Count);
@@ -793,7 +874,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
     private void EncodeInternal(PageId pid, long firstChild, List<KeyValuePair<byte[], long>> seps)
     {
-        using var h = _file.PinForWrite(pid);
+        using var h = _file.PinForWrite(pid, _structMode);
         Span<byte> body = h.Data;
         body[..BL.Body].Clear();
         BinaryPrimitives.WriteInt32LittleEndian(body, seps.Count);
@@ -922,7 +1003,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
     private void InitLeafPage(PageId pid)
     {
-        var ph = _file.PinForWrite(pid);
+        var ph = _file.PinForWrite(pid, _structMode);
         ph.Data[..BL.Body].Clear();
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[4..], -1L);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[12..], -1L);
@@ -965,9 +1046,16 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         _height = BinaryPrimitives.ReadInt32LittleEndian(h.Data[16..]);
     }
 
+    // FTS-7: header (root@0 / entryCount@8 / height@16) は常に Full page-WAL (_structMode=Full)。
+    // FT-29 coalesce で 1 tx あたり CLR 1 + after-image 1 に畳まれるため毎 insert 呼んでも増幅は無視可。
+    // root/height は完全に redo/undo される。entryCount は **abort では正確** (Transaction.RollBackInPlace の
+    // 順序 = 論理 undo → before-image undo が header CLR で pre-tx へ確定) だが、**crash recovery では
+    // hint** に留まる (物理相 2a が header の committed entryCount を復元し、論理相 2b の再実行が同じキーを
+    // 再 insert して二重計上しうる; checkpoint タイミング依存で over/under 双方向に drift)。DocumentCount =
+    // BM25 の N は §6 で統計の鮮度に頑健と既定済みで、権威ある件数は GraphStats 収集 / scan / RepairIndexes。
     private void FlushHeader()
     {
-        var ph = _file.PinForWrite(HeaderPageId);
+        var ph = _file.PinForWrite(HeaderPageId, _structMode);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data, _root.Value);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[8..], _entryCount);
         BinaryPrimitives.WriteInt32LittleEndian(ph.Data[16..], _height);

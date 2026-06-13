@@ -108,6 +108,17 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     // ARCH-4 増分8: *.quiver の親ディレクトリ (operational metadata = migrations.history の保存先)。
     public string DataDirectory => Path.GetDirectoryName(_containerPath) is { Length: > 0 } d ? d : ".";
 
+    /// <summary>
+    /// テスト専用 (FTS-7 torn-commit crash 再現): 全データページ + B+Tree 索引を fsync する
+    /// (WAL truncate なし)。これにより未 checkpoint の committed データ (Suppressed FT leaf 含む) を
+    /// disk へ落とし、Commit レコードだけ欠けた torn-commit の「body 保持」状態を決定論的に作れる。
+    /// </summary>
+    internal void FlushDataPagesForTest()
+    {
+        _pageManager.FlushAll();
+        _indexManager.FlushAll();
+    }
+
     // ARCH-5c Phase 5b/5c: opt-in 列。catalog はテナント 16、各列テナントは 64+ (ColumnCatalog 採番)。
     // 5c で startup eager 化 (factory が構築して注入)。write 経路 (GraphTransaction) と abort hook
     // (ReloadStoreMeta → ReloadColumns) の両方から参照される。

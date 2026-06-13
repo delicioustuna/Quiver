@@ -29,6 +29,28 @@ internal static class WalPageContext
         => Current is { } ctx ? ctx.LogPageImage(fileKind, pageId, pageBytes) : -1L;
 
     /// <summary>
+    /// FTS-7 (design 13 §10.3): 本 tx で当該ページの journaling モードを記録 (escalation = 強い方が勝つ)。
+    /// 書き込み tx 未アクティブ時は no-op。返り値は escalation 後の有効モード (未アクティブ時は Full)。
+    /// </summary>
+    public static WalJournalMode SetJournalMode(byte fileKind, long pageId, WalJournalMode mode)
+        => Current is { } ctx ? ctx.SetJournalMode(fileKind, pageId, mode) : WalJournalMode.Full;
+
+    /// <summary>
+    /// FTS-7 (design 13 §10.2): postings/norms leaf への state-setting 論理ミューテーションを eager に WAL へ
+    /// 追記する。書き込み tx 未アクティブ時 (= recovery 中の再実行など) は no-op で -1 を返す
+    /// (recovery は WAL を再帰発火しない)。
+    /// </summary>
+    public static long LogFtLeafMutation(FtLeafMutationCodec.Op op, byte indexTenantId, ReadOnlySpan<byte> key, long value)
+        => Current is { } ctx ? ctx.LogFtLeafMutation(op, indexTenantId, key, value) : -1L;
+
+    /// <summary>
+    /// FTS-7 (design 13 §10.6): 現在の書き込み tx が発行した leaf 論理ミューテーションの undo ログ。
+    /// in-process abort が逆順に逆操作を当てるために使う。コンテキスト未設定時は空。
+    /// </summary>
+    public static IReadOnlyList<FtUndoEntry> CurrentFtUndoLog
+        => Current?.FtUndoLog ?? Array.Empty<FtUndoEntry>();
+
+    /// <summary>
     /// FT-15: あるページが本トランザクション内で初めて書き込み用に pin された時点の
     /// 内容 (before-image) を記録する。書き込みトランザクション未アクティブ時は no-op。
     /// 同一ページの 2 回目以降の pin は無視される (各 savepoint バケットの初回タッチのみ保持)。
@@ -110,6 +132,11 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     // recovery 形式は不変 (FlushPending で従来と同じ v3 payload を出す)。
     private readonly Dictionary<(byte FileKind, long PageId), byte[]> _pending = new();
 
+    // FTS-7 (design 13 §10.3): per-page WAL journaling モード。Suppressed/RedoOnly のページのみ記録し、
+    // 未登録は既定 Full。escalation は強い方 (数値大) が勝つ。CaptureBeforeImage / LogPageImage の
+    // 両発火点がこれを参照する単一チョークポイント。
+    private readonly Dictionary<(byte FileKind, long PageId), WalJournalMode> _journalMode = new();
+
     // FT-15 / FT-23: (fileKind, pageId) → エンコード済み before-image (CLR ペイロード)。
     // ページが「そのバケットで最初に」ダーティ化される直前の内容を 1 枚だけ保持する。
     // 値は CompensationLogRecord ペイロードそのものなので、WAL 追記とインプロセス
@@ -140,12 +167,68 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     public long LogPageImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
     {
         var key = (fileKind, pageId);
-        // Task C: 生ページ bytes を latest-wins で保持 (Encode は FlushPending で 1 回)。
+        // FTS-7 (design 13 §10.3): journaling モードで分岐。
+        var mode = _journalMode.TryGetValue(key, out var m) ? m : WalJournalMode.Full;
+        if (mode == WalJournalMode.Suppressed)
+            return -1L; // 論理レコード (FtLeafMutation) で覆う leaf — after-image を出さない。
+        if (mode == WalJournalMode.RedoOnly)
+        {
+            // M2/R1: SMO 構造ページは split 完了時 (= この UnpinDirty) に eager 追記し coalesce 対象外にする。
+            // FtStructureImage は commit/abort を問わず無条件に redo され決して undo されない (nested top action)
+            // ので、split した tx が abort しても構造記録が WAL に残り redo される (PageImage は committed
+            // フィルタで abort 時 redo されないため使えない; design 13 §10.4 R1)。
+            byte[] payload = WalPageImageCodec.Encode(fileKind, pageId, pageBytes);
+            _wal.Append(WalRecordType.FtStructureImage, _txId, payload);
+            return -1L;
+        }
+        // Full: Task C — 生ページ bytes を latest-wins で保持 (Encode は FlushPending で 1 回)。
         // ページ毎に 1 枚のバッファを再利用し、per-write の Encode (RLE) と alloc を回避する。
         if (!_pending.TryGetValue(key, out var buf) || buf.Length != pageBytes.Length)
             _pending[key] = buf = new byte[pageBytes.Length];
         pageBytes.CopyTo(buf);
         return -1L;
+    }
+
+    // FTS-7 (design 13 §10.6): in-process abort の論理 undo バケット。tx 内で発行した leaf 論理
+    // ミューテーションを順に記録し、abort 時に逆順 (LIFO) で逆操作を当てて FT 索引から取り消す
+    // (page before-image を持たない Suppressed leaf を巻き戻す手段。FT-17 の「abort で索引エントリ除去」
+    // 保証を維持し ID 再利用エイリアスを防ぐ)。
+    // ⚠ 既知バグ (MVP 制限): flat list なので savepoint への partial rollback (RollbackTo) では
+    // FT ops を巻き戻さない。RollbackTo 後もエンティティは **生きたまま** 古いテキストに戻るので、
+    // savepoint 以降に書いた term の stale postings が **自己修復せず永久に残る** (= 生エンティティへの
+    // false-positive 検索ヒット; 可視性チェックを通過し orphan sweep も死エンティティしか掃除しないため
+    // 回収されない)。トリガーは FT 維持 tx 内の savepoint に限定。恒久修正は undo ログを before-image stack
+    // と同型に savepoint バケット化すること (後続)。
+    private readonly List<FtUndoEntry> _ftUndoLog = new();
+
+    /// <summary>FTS-7: tx が発行した leaf 論理ミューテーションの undo ログ (発行順)。</summary>
+    public IReadOnlyList<FtUndoEntry> FtUndoLog => _ftUndoLog;
+
+    /// <summary>FTS-7: leaf 論理ミューテーションを eager に WAL へ追記し、abort 用 undo ログにも記録する。</summary>
+    public long LogFtLeafMutation(FtLeafMutationCodec.Op op, byte indexTenantId, ReadOnlySpan<byte> key, long value)
+    {
+        byte[] payload = FtLeafMutationCodec.Encode(op, indexTenantId, key, value);
+        long lsn = _wal.Append(WalRecordType.FtLeafMutation, _txId, payload);
+        _ftUndoLog.Add(new FtUndoEntry(indexTenantId, op == FtLeafMutationCodec.Op.Upsert, key.ToArray(), value));
+        return lsn;
+    }
+
+    /// <summary>
+    /// FTS-7: 当該ページの journaling モードを記録 (escalation = 強い方が勝つ)。返り値は escalation 後の有効モード。
+    /// Full (既定) のページは記録せず、Suppressed/RedoOnly のみ dict に持つ (未登録 = Full)。
+    /// </summary>
+    public WalJournalMode SetJournalMode(byte fileKind, long pageId, WalJournalMode mode)
+    {
+        var key = (fileKind, pageId);
+        if (_journalMode.TryGetValue(key, out var cur))
+        {
+            var eff = (WalJournalMode)Math.Max((byte)cur, (byte)mode);
+            _journalMode[key] = eff;
+            return eff;
+        }
+        if (mode == WalJournalMode.Full) return WalJournalMode.Full; // 既定は記録不要
+        _journalMode[key] = mode;
+        return mode;
     }
 
     /// <summary>
@@ -274,3 +357,9 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     public void OverwritePendingFromBeforeImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
         => LogPageImage(fileKind, pageId, pageBytes);
 }
+
+/// <summary>
+/// FTS-7 (design 13 §10.6): in-process abort で巻き戻す leaf 論理ミューテーション 1 件。
+/// abort は逆操作を当てる (IsUpsert なら delete、delete なら旧 Value で再挿入)。
+/// </summary>
+internal readonly record struct FtUndoEntry(byte Tenant, bool IsUpsert, byte[] Key, long Value);

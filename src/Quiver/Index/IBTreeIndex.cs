@@ -45,6 +45,12 @@ internal interface IBTreeIndexFlushable
     bool DeleteRawEntry(ReadOnlySpan<byte> rawKey, long value);
 
     /// <summary>
+    /// FTS-7 (design 13 §10.4): 生キーの idempotent set (recovery Pass 2b redo / Pass 3 undo 用)。
+    /// 存在すれば値を上書き、無ければ挿入 (state-setting で二重適用が no-op)。WAL emit しない pure apply。
+    /// </summary>
+    void UpsertRaw(ReadOnlySpan<byte> rawKey, long value);
+
+    /// <summary>
     /// FTS-2: abort / partial rollback の before-image undo がヘッダページを tx 開始前へ戻した後、
     /// B+Tree の in-memory キャッシュ (root / entryCount / height) をヘッダから読み直す。
     /// これを呼ばないと、rollback したページ変更に対して EntryCount が陳腐化し、
@@ -193,6 +199,16 @@ internal interface IIndexManager
     /// 同一 Tx 内で呼ばれ、B+Tree 操作は WAL/ARIES で保護される。既定は no-op。
     /// </summary>
     void MaintainFullText(FullTextIndex index, long entityId, string? oldText, string? newText) { }
+
+    /// <summary>
+    /// FTS-7 (design 13 §10.4): recovery 論理相の redo — indexTenantId の postings/norms へ
+    /// state-setting leaf ミューテーションを再適用する (isUpsert ? UpsertRaw : DeleteRawEntry)。
+    /// abort の論理 undo (逆操作) でも同経路を使う。既定 no-op (SQLite backend は FT 非対応)。
+    /// </summary>
+    void ApplyFtLeafRedo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value) { }
+
+    /// <summary>FTS-7: 論理 undo — leaf ミューテーションの逆操作を適用する。既定 no-op。</summary>
+    void ApplyFtLeafUndo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value) { }
 }
 
 internal interface IBulkLoadable<TKey>

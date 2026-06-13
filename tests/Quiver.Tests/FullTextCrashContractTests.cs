@@ -1,7 +1,9 @@
+using System.Buffers.Binary;
 using FluentAssertions;
 using Quiver.Api;
 using Quiver.Core;
 using Quiver.Storage.Records;
+using Quiver.Storage.Wal;
 using Xunit;
 
 namespace Quiver.Tests;
@@ -217,5 +219,70 @@ public sealed class FullTextCrashContractTests : IDisposable
         using var reopened = Open();
         Search(reopened, "oldterm1111").Should().BeEmpty("the superseded term's posting was removed at update time");
         Search(reopened, "newterm2222").Should().ContainSingle().Which.Should().Be(doc);
+    }
+
+    // ===== (f) FTS-7: torn commit — Commit record lost after body PageImages + FtLeafMutation =====
+
+    /// <summary>
+    /// FTS-7 (design 13 §10.4, レビュー CRITICAL): torn commit — FlushPending が body PageImage と eager
+    /// FtLeafMutation を WAL へ書き終えた後、Commit レコードの前に crash。論理相 (RecoverLogical) は物理層と
+    /// 同じ **presume-committed** (PageImage ∧ ¬Abort) で分類しなければならない。厳格 committed で分類した
+    /// 修正前は、torn-commit した FT 取込 tx を loser 扱いして postings だけ消していた。
+    ///
+    /// 本テストの不変条件: torn-commit 後 recovery で例外を出さず、FT 検索結果がノード可視性と **整合**する
+    /// (可視なら検索可 / 不可視なら検索不可)。決定論的注入: committed データを flush で disk へ落とし、WAL 末尾の
+    /// Commit レコードを truncate。なお本エンジンの torn-commit body は Pass 2a (厳格 redo) では復元されず
+    /// (= ノードは不可視になりがち) だが、本テストは「postings 単独で消えて整合が崩れる」修正前の不整合が
+    /// 起きないことを検証する (presume-committed で body/postings が同じ運命をたどる)。
+    /// </summary>
+    [Fact]
+    public void TornCommit_fulltext_recovery_keeps_postings_consistent_with_node()
+    {
+        var db = OpenAndCreateIndex();
+        NodeId baseDoc = Ingest(db, "durable base baseword0001");
+        NodeId torn = Ingest(db, "tornword7777 committed content");
+        // committed データ (node/property + Suppressed FT leaf) を disk へ flush し torn-commit の前提を作る。
+        ((BinaryGraphStorageBackend)db.BackendInternal).FlushDataPagesForTest();
+        // 未コミットの writer を 1 つ開いたまま kill すると WAL がクリーン削除されず torn 注入できる。
+        var keepWalAlive = db.BeginTransaction();
+        keepWalAlive.CreateNode("Doc");
+        Kill(db);
+
+        // 末尾 (= torn doc) の Commit レコードを 1 件削る (これより後ろの未コミット tx 記録も落ちるが無害)。
+        // 残るのは torn doc の body PageImage + FtLeafMutation = torn-commit 窓。
+        TruncateTrailingCommitRecord(_path + "-wal");
+
+        using var reopened = Open();
+        // 不変条件: 「torn doc がノードとして可視」⇔「torn doc が検索可能」(presume-committed の body/postings
+        // が同じ運命をたどる)。修正前は body は presume-committed 側で残るのに postings だけ loser undo で消え、
+        // 「可視ノードなのに検索不能」という不整合 (= false の左辺・空の右辺) を生んでいた。
+        bool nodeVisible;
+        using (var rtx = reopened.BeginReadOnlyTransaction())
+            nodeVisible = rtx.NodeExists(torn);
+        bool searchable = Search(reopened, "tornword7777").Contains(torn);
+        searchable.Should().Be(nodeVisible,
+            "torn-commit recovery must keep FT postings consistent with node visibility (presume-committed)");
+        // committed prefix (base doc) は無傷。
+        Search(reopened, "baseword0001").Should().ContainSingle().Which.Should().Be(baseDoc);
+    }
+
+    // WAL 末尾の Commit レコードを 1 件削って torn commit を作る。レコード形式:
+    // [length:4][lsn:8][txId:8][type:1][crc:4][payload] (WriteAheadLog.EncodeRecord)。
+    private static void TruncateTrailingCommitRecord(string walPath)
+    {
+        byte[] bytes = File.ReadAllBytes(walPath);
+        const int headerSize = 25;
+        long lastCommit = -1;
+        int pos = 0;
+        while (pos + headerSize <= bytes.Length)
+        {
+            int len = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(pos));
+            if (len < headerSize || pos + len > bytes.Length) break;
+            if ((WalRecordType)bytes[pos + 20] == WalRecordType.Commit) lastCommit = pos;
+            pos += len;
+        }
+        if (lastCommit < 0) throw new InvalidOperationException("no Commit record in WAL to truncate");
+        using var fs = new FileStream(walPath, FileMode.Open, FileAccess.Write, FileShare.None);
+        fs.SetLength(lastCommit);
     }
 }

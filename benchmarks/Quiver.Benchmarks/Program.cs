@@ -83,6 +83,16 @@ if (args.Length >= 1 && args[0] == "--fts7-spike")
     return Fts7BreakdownRunner.RunSpike(chunks, batch);
 }
 
+// FTS-7 手順6: steady-state 増分増幅 (構築済み index への増分 upsert = 実 RAG ユースケース)。
+// Usage: -- --fts7-steady [base] [incr] [batch]   (defaults: 50000 base, 5000 incr, batch 200)
+if (args.Length >= 1 && args[0] == "--fts7-steady")
+{
+    int baseChunks = args.Length >= 2 && int.TryParse(args[1], out var stb) ? stb : 50_000;
+    int incr = args.Length >= 3 && int.TryParse(args[2], out var sti) ? sti : 5_000;
+    int batch = args.Length >= 4 && int.TryParse(args[3], out var stba) ? stba : 200;
+    return Fts7BreakdownRunner.RunSteady(baseChunks, incr, batch);
+}
+
 // 基本性能 (README 性能目標) standalone runner
 if (args.Length >= 1 && args[0] == "--basic-perf")
 {
