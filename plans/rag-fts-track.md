@@ -61,7 +61,7 @@ FTS-1〜6 / RAG-1〜5 は完了。FTS-6 の実測で正当性・耐久性は MVP
 
 | ID | 実測 → 目標 | 根因 | アプローチ |
 |---|---|---|---|
-| FTS-7 | 取込 WAL 増幅 ~33×/chunk → ≤5× (全 tx 形状) | postings/norms B+Tree の page-image WAL 粒度。leaf が page-logging の 99.1%、CLR+PageImage でページ×tx 2 本 (FT-15/29 で畳み切り済み)。tx 形状依存: batch=10/200/1000 → 78.9×/26.6×/7.5× | **logical postings WAL** (2026-06-13 承認): leaf 更新を論理レコード (~25–40B/キー) 化 + logical CLR undo、SMO は page-WAL 維持。本実装前に spike ゲート (kill criteria: batch=200 ≤5× 見込み、机上 ~3.5–5.5×)。案A (tx 内ソート一括適用) は実測棄却 — ソートは touch leaf 集合を変えず FT-29 が coalesce 済み。案B (BulkLoader) は到達後の任意補完。実測詳細は design 13 §9.2 |
+| FTS-7 | 取込 WAL 増幅 ~33×/chunk → ≤5× (全 tx 形状) | postings/norms B+Tree の page-image WAL 粒度。leaf が page-logging の 99.1%、CLR+PageImage でページ×tx 2 本 (FT-15/29 で畳み切り済み)。tx 形状依存: batch=10/200/1000 → 78.9×/26.6×/7.5× | **logical postings WAL** (2026-06-13 承認): leaf 更新を論理レコード (~25–40B/キー) 化 + logical CLR undo、SMO は page-WAL 維持。spike ゲート達成 (commit e8d0777): projected 2.36×/3.70×/3.91× (batch=10/200/1000)、辞書化不要。案A (tx 内ソート一括適用) は実測棄却 — ソートは touch leaf 集合を変えず FT-29 が coalesce 済み。案B (BulkLoader) は到達後の任意補完。実測詳細は design 13 §9.2/§9.2.1 |
 | FTS-8 | 検索 p50 @100k = 267ms → <10ms | term-at-a-time BM25 の全 postings 走査 (走査長 ∝ N、動的枝刈り無し) | WAND (必要時のみ block-max) + df を GraphStats 収集時の近似 snapshot へ移行 + B+Tree Seek を skip pointer として利用。text-first/graph-first の per-doc スコア一致規約 (FTS-4) は維持 |
 
 いずれも「実測先行 (kill criteria 数値固定) → 手段選択」の順を厳守。
