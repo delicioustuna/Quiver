@@ -10,6 +10,15 @@ internal interface IBTreeIndex<TKey> : IDisposable, IBTreeIndexFlushable
     BTreeValueEnumerator Seek(in TKey key);
     BTreeRangeEnumerator Range(in TKey from, bool fromInclusive, in TKey to, bool toInclusive);
     BTreeRangeEnumerator FullScan();
+
+    /// <summary>
+    /// FTS-8: forward-only seekable cursor over the raw byte range
+    /// <c>[fromKey, toKeyInclusive]</c>. Unlike <see cref="Range"/> (a leaf-linked
+    /// <c>ref struct</c>) this is a heap object so WAND can hold an array of per-term
+    /// cursors, and its <see cref="BTreeRawCursor.SeekTo"/> jumps via the tree root
+    /// (O(log N)) — the skip-pointer substitute the design calls for (13 §7.5).
+    /// </summary>
+    BTreeRawCursor OpenScanCursor(byte[] fromKey, byte[] toKeyInclusive);
     int Height { get; }
     long EntryCount { get; }
     IEnumerable<long> SeekValues(TKey key);

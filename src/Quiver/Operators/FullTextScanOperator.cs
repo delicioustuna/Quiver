@@ -54,11 +54,24 @@ internal sealed class FullTextScanOperator : IPhysicalOperator
         var tokenizer = tx.Indexes.ResolveTokenizer(ft.TokenizerId);
 
         var (n, avgdl) = Bm25Scorer.ResolveCorpus(ft, _corpus);
-        var ranked = Bm25Scorer.Rank(ft, tokenizer, _queryText, n, avgdl, candidateSequences: null);
+
+        // FTS-8: when per-term snapshot stats are present, use WAND document-at-a-time
+        // pruning (skips high-df postings, exact top-k). RankWand filters liveness inline
+        // so its k-bounded heap holds top-k live docs. It returns null if a query term is
+        // unknown to the snapshot (unbounded) — then fall back to the full term-at-a-time
+        // scan, which also re-uses the snapshot df so both paths agree on idf (design 13 §7.5).
+        var nodes = tx.Nodes;
+        var termStats = _corpus?.Terms;
+        List<long>? ranked = termStats is not null
+            ? Bm25Scorer.RankWand(ft, tokenizer, _queryText, n, avgdl, termStats, _k,
+                isLive: packed => IndexValueResolver.IsLiveNode(packed, nodes))
+            : null;
+        ranked ??= Bm25Scorer.Rank(ft, tokenizer, _queryText, n, avgdl, candidateSequences: null, termStats);
 
         // Resolve to live node ids (generation match, preserving rank order) and take k.
-        // Dead / slot-reused entries are dropped, so the resolve happens before Take(k).
-        _results = IndexValueResolver.ResolveLiveNodeIds(ranked, tx.Nodes).Take(_k).ToArray();
+        // Dead / slot-reused entries are dropped, so the resolve happens before Take(k)
+        // (a no-op for the already-live WAND output, the real filter for the full scan).
+        _results = IndexValueResolver.ResolveLiveNodeIds(ranked, nodes).Take(_k).ToArray();
         _pos = -1;
     }
 

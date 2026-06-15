@@ -81,7 +81,10 @@ internal sealed class FilteredFullTextScanOperator : IPhysicalOperator
         }
 
         var (n, avgdl) = Bm25Scorer.ResolveCorpus(ft, _corpus);
-        var ranked = Bm25Scorer.Rank(ft, tokenizer, _queryText, n, avgdl, candidates);
+        // FTS-8: use the snapshot df (when present) so a candidate's per-doc score matches
+        // the text-first WAND path exactly (design 13 §7.5 parity). Graph-first stays a
+        // candidate-bounded full scan — WAND targets the unbounded text-first cost.
+        var ranked = Bm25Scorer.Rank(ft, tokenizer, _queryText, n, avgdl, candidates, _corpus?.Terms);
 
         _results = IndexValueResolver.ResolveLiveNodeIds(ranked, tx.Nodes).Take(_k).ToArray();
         _pos = -1;

@@ -125,8 +125,12 @@ public static class Fts6SearchRunner
         GraphDatabase db, ZipfVocabulary vocab, int queryCount, int seed)
     {
         var rng = new Random(seed);
+        // FTS-8: collect stats so the per-term (df, maxTf) snapshot is available and the
+        // text-first operator takes the WAND pruning path (G(schema) without stats stays on
+        // the full term-at-a-time scan — the FTS-6 baseline).
+        var stats = db.CollectStats();
         using var rtx = db.BeginReadOnlyTransaction();
-        var g = rtx.G(db.Schema);
+        var g = rtx.G(db.Schema, stats);
 
         // Warmup so the buffer pool is resident before timing (design §9 premise).
         for (int i = 0; i < Math.Min(20, queryCount); i++)

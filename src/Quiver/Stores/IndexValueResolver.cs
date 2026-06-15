@@ -11,6 +11,15 @@ namespace Quiver.Storage.Records;
 internal static class IndexValueResolver
 {
     /// <summary>
+    /// パック値が「現在生きている Node」を指すか (Kind が Node かつ slot 世代一致)。
+    /// FTS-8 の WAND は top-k を確定する前に dead/再利用エントリを弾く必要があるため、
+    /// スコアリングループ内でこの述語を使う (resolve 後 Take(k) と同じ可視性規約)。
+    /// </summary>
+    public static bool IsLiveNode(long packed, INodeStore nodes)
+        => EntityRef.UnpackKind(packed) == EntityKind.Node
+           && nodes.CurrentGeneration(EntityRef.Sequence(packed)) == EntityRef.Generation(packed);
+
+    /// <summary>
     /// パック値の列挙を世代照合しつつ局所 ID (<c>NodeId.Value</c>) へ unpack する。
     /// Kind が Node でないエントリ、世代不一致エントリは除外する。
     /// </summary>
@@ -18,10 +27,8 @@ internal static class IndexValueResolver
     {
         foreach (var packed in packedValues)
         {
-            if (EntityRef.UnpackKind(packed) != EntityKind.Node) continue;
-            long seq = EntityRef.Sequence(packed);
-            if (nodes.CurrentGeneration(seq) == EntityRef.Generation(packed))
-                yield return seq;
+            if (!IsLiveNode(packed, nodes)) continue;
+            yield return EntityRef.Sequence(packed);
         }
     }
 

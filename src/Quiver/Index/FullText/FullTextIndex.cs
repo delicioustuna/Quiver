@@ -119,6 +119,49 @@ internal sealed class FullTextIndex : IDisposable
         return result;
     }
 
+    /// <summary>
+    /// FTS-8: per-term statistics for WAND pruning (design 13 §7.5). Scans postings once
+    /// for <c>term → (df, maxTf)</c> and norms once for <c>(minDocLen, N, totalTokens)</c>.
+    /// Called only at <see cref="Quiver.GraphStats"/> collection time (not per query), so
+    /// the snapshot drives both BM25 N/avgdl and the per-term upper bounds. df is the
+    /// posting count for the term; maxTf the largest tf observed (its score numerator cap).
+    /// </summary>
+    internal (Dictionary<string, (int Df, int MaxTf)> Terms, int MinDocLen, long DocCount, long TotalTokens) CollectTermStats()
+    {
+        var terms = new Dictionary<string, (int Df, int MaxTf)>(StringComparer.Ordinal);
+        foreach (var kv in _postings.EnumerateRawEntries())
+        {
+            string term = PostingsKey.DecodeTerm(kv.Key);
+            int tf = (int)kv.Value;
+            if (terms.TryGetValue(term, out var cur))
+                terms[term] = (cur.Df + 1, Math.Max(cur.MaxTf, tf));
+            else
+                terms[term] = (1, tf);
+        }
+
+        long count = 0, total = 0;
+        int minDocLen = int.MaxValue;
+        foreach (var kv in _norms.EnumerateRawEntries())
+        {
+            count++;
+            total += kv.Value;
+            if (kv.Value < minDocLen) minDocLen = (int)kv.Value;
+        }
+        if (count == 0) minDocLen = 0;
+        return (terms, minDocLen, count, total);
+    }
+
+    /// <summary>
+    /// FTS-8: open a forward-only seekable cursor over a term's postings (entityId
+    /// ascending), for WAND document-at-a-time scoring. <see cref="PostingsCursor.SeekTo"/>
+    /// skips to a pivot entityId via a B+Tree root descent.
+    /// </summary>
+    internal PostingsCursor OpenPostingsCursor(ReadOnlySpan<byte> termUtf8)
+    {
+        var (lower, upper) = PostingsKey.TermRange(termUtf8);
+        return new PostingsCursor(_postings.OpenScanCursor(lower, upper), termUtf8.ToArray());
+    }
+
     /// <summary>Document length (token count) for <paramref name="entityId"/>, if indexed.</summary>
     public bool TryGetDocLength(long entityId, out int docLen)
     {
@@ -192,5 +235,49 @@ internal sealed class FullTextIndex : IDisposable
             string s = token.ToString();
             Tf[s] = Tf.TryGetValue(s, out var c) ? c + 1 : 1;
         }
+    }
+}
+
+/// <summary>
+/// FTS-8: a single term's postings cursor for WAND. Wraps a raw B+Tree cursor over the
+/// term's <c>(term, entityId)</c> key range, surfacing the decoded entityId and tf and a
+/// <see cref="SeekTo"/> that skips to a pivot entityId (design 13 §7.5). Cursors advance
+/// in entityId order, which is exactly the composite-key order, so a multi-term merge is
+/// free of any explicit sort of the postings themselves.
+/// </summary>
+internal sealed class PostingsCursor
+{
+    private readonly BTreeRawCursor _raw;
+    private readonly byte[] _termUtf8;
+
+    internal PostingsCursor(BTreeRawCursor raw, byte[] termUtf8)
+    {
+        _raw = raw;
+        _termUtf8 = termUtf8;
+    }
+
+    public bool Exhausted => _raw.Exhausted;
+    public long CurrentEid { get; private set; }
+    public int CurrentTf { get; private set; }
+
+    public bool MoveNext()
+    {
+        if (!_raw.MoveNext()) return false;
+        Decode();
+        return true;
+    }
+
+    /// <summary>Skip forward to the first posting whose entityId is &gt;= <paramref name="eid"/>.</summary>
+    public bool SeekTo(long eid)
+    {
+        if (!_raw.SeekTo(PostingsKey.Encode(_termUtf8, eid))) return false;
+        Decode();
+        return true;
+    }
+
+    private void Decode()
+    {
+        CurrentEid = PostingsKey.DecodeEntityId(_raw.CurrentKey);
+        CurrentTf = (int)_raw.CurrentValue;
     }
 }

@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Text;
 
 namespace Quiver.Index.FullText;
 
@@ -42,6 +43,13 @@ internal static class PostingsKey
         lower.AsSpan(LenPrefix + termUtf8.Length).Fill(0x00);
         upper.AsSpan(LenPrefix + termUtf8.Length).Fill(0xFF);
         return (lower, upper);
+    }
+
+    /// <summary>Recover the term (UTF-8 decoded) from a postings key's length-prefixed prefix.</summary>
+    public static string DecodeTerm(ReadOnlySpan<byte> key)
+    {
+        int termLen = BinaryPrimitives.ReadUInt16BigEndian(key);
+        return Encoding.UTF8.GetString(key.Slice(LenPrefix, termLen));
     }
 
     /// <summary>Recover the entityId from a postings key (its trailing 8 bytes).</summary>

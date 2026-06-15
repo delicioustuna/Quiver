@@ -477,15 +477,16 @@ public sealed class GraphStats
             pks.SetNullOrMissingCount(missing < 0 ? 0 : missing);
         }
 
-        // FTS-4: snapshot per-full-text-index BM25 corpus stats (N, avgdl). One norms
-        // scan per index here replaces an O(N) scan per query in the scan operators.
+        // FTS-4/8: snapshot per-full-text-index BM25 corpus stats. One postings + one
+        // norms scan per index here replaces an O(N) scan per query in the scan operators
+        // and supplies the per-term (df, maxTf) + minDocLen WAND needs (design 13 §7.5).
         var ftCorpora = new Dictionary<string, Bm25CorpusStats>(StringComparer.Ordinal);
         foreach (var (name, _, _, _) in tx.Indexes.ListFullTextIndexes())
         {
             if (!tx.Indexes.TryGetFullTextIndex(name, out var ft)) continue;
-            var (docCount, totalTokens) = ft.NormsSummary();
+            var (terms, minDocLen, docCount, totalTokens) = ft.CollectTermStats();
             double avgdl = docCount > 0 ? (double)totalTokens / docCount : 0.0;
-            ftCorpora[name] = new Bm25CorpusStats(docCount, avgdl);
+            ftCorpora[name] = new Bm25CorpusStats(docCount, avgdl, new Bm25TermStats(terms, minDocLen));
         }
 
         return new GraphStats
