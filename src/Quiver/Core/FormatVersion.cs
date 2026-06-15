@@ -76,8 +76,18 @@ internal static class FormatVersion
     /// </summary>
     public const byte V9FtLogicalWal = 9;
 
+    /// <summary>
+    /// v10: FTS-9 logical SMO。postings/norms B+Tree の split/merge 構造ページも WAL のページイメージから
+    /// physiological 論理レコード (<see cref="Quiver.Storage.Wal.WalRecordType.FtStructureMutation"/>) へ置換し、
+    /// recovery を page-targeted redo + pageLSN gating で行う (design 13 §11)。これに合わせて
+    /// <see cref="Quiver.Storage.Wal.WalRecordType.FtLeafMutation"/> ペイロードに target leafPageId(8B) を追加した。
+    /// ファイル本体レイアウトは v9 と同一だが、crash 後に残った旧形式 WAL を新コードが誤読する事故を防ぐため
+    /// バージョンを bump し旧 DB (とその crash WAL) は reject する。develop 段階のためマイグレーションは提供しない。
+    /// </summary>
+    public const byte V10FtLogicalSmo = 10;
+
     /// <summary>現行 (= 新規 DB を作成するときに書き込むバージョン)。</summary>
-    public const byte Current = V9FtLogicalWal;
+    public const byte Current = V10FtLogicalSmo;
 }
 
 /// <summary>

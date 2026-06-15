@@ -40,8 +40,8 @@ internal static class WalPageContext
     /// 追記する。書き込み tx 未アクティブ時 (= recovery 中の再実行など) は no-op で -1 を返す
     /// (recovery は WAL を再帰発火しない)。
     /// </summary>
-    public static long LogFtLeafMutation(FtLeafMutationCodec.Op op, byte indexTenantId, ReadOnlySpan<byte> key, long value)
-        => Current is { } ctx ? ctx.LogFtLeafMutation(op, indexTenantId, key, value) : -1L;
+    public static long LogFtLeafMutation(FtLeafMutationCodec.Op op, byte indexTenantId, long leafPageId, ReadOnlySpan<byte> key, long value)
+        => Current is { } ctx ? ctx.LogFtLeafMutation(op, indexTenantId, leafPageId, key, value) : -1L;
 
     /// <summary>
     /// FTS-7 (design 13 §10.6): 現在の書き込み tx が発行した leaf 論理ミューテーションの undo ログ。
@@ -204,10 +204,14 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     /// <summary>FTS-7: tx が発行した leaf 論理ミューテーションの undo ログ (発行順)。</summary>
     public IReadOnlyList<FtUndoEntry> FtUndoLog => _ftUndoLog;
 
-    /// <summary>FTS-7: leaf 論理ミューテーションを eager に WAL へ追記し、abort 用 undo ログにも記録する。</summary>
-    public long LogFtLeafMutation(FtLeafMutationCodec.Op op, byte indexTenantId, ReadOnlySpan<byte> key, long value)
+    /// <summary>
+    /// FTS-7/FTS-9: leaf 論理ミューテーションを eager に WAL へ追記し、abort 用 undo ログにも記録する。
+    /// 返り値の LSN は呼び出し側 (BTreeIndex) が当該 leaf ページの pageLSN として stamp し、recovery の
+    /// page-targeted redo gating (design 13 §11.3) に使う。
+    /// </summary>
+    public long LogFtLeafMutation(FtLeafMutationCodec.Op op, byte indexTenantId, long leafPageId, ReadOnlySpan<byte> key, long value)
     {
-        byte[] payload = FtLeafMutationCodec.Encode(op, indexTenantId, key, value);
+        byte[] payload = FtLeafMutationCodec.Encode(op, indexTenantId, leafPageId, key, value);
         long lsn = _wal.Append(WalRecordType.FtLeafMutation, _txId, payload);
         _ftUndoLog.Add(new FtUndoEntry(indexTenantId, op == FtLeafMutationCodec.Op.Upsert, key.ToArray(), value));
         return lsn;

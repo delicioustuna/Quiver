@@ -237,6 +237,113 @@ public static class Fts7BreakdownRunner
         Console.WriteLine();
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // FTS-9 手順0: logical SMO の増幅天井 spike (ARIES 変更なしで projected を算出)
+    // ════════════════════════════════════════════════════════════════════════
+    //
+    // FTS-7 は leaf を論理化済み (Suppressed) だが split/merge の構造ページ (BTreeLeaf 分配後 + BTreeInternal)
+    // を Full page-WAL のまま残した (= 残差増幅; design 13 §9.2.2 decision D)。FTS-9 (logical SMO) は
+    // この構造 page-image も論理化し、recovery で page-targeted に再構築する (§10.11)。
+    //
+    // projection: 現 FTS-7 WAL から **FT B+Tree 構造 page-logging を全て除去** し、代わりに
+    //   - FtStructureMutation: SMO 1 回 = ~56B (parent/left/right pageId + splitIdx + sep + root/height)
+    //   - FtLeafMutation に target leafPageId(8B) を追加するため 1 レコードあたり +8B
+    // を加える。proj9 = walWithFt − btreeStructureBytes + smoEvents·56 + ftLeafMutationCount·8。
+    //
+    // ⚠ §9.2.2 の教訓 (spike が実測に 2–4× refute された) 通り、本 spike は「バイト天井が ≤5× か」だけを
+    // 確認する。FTS-9 の真の難所はバイトではなく **STEAL torn-structure 下の recovery 正当性** (§10.11) で、
+    // それは spike では測れない (= 本 spike PASS は実装 GO の十分条件ではない)。
+    public static int RunSpike9(int chunks, int batchSize)
+    {
+        Console.WriteLine("=== FTS-9 手順0: logical SMO amplification ceiling spike ===");
+        Console.WriteLine($"chunks={chunks:N0}, batchSize={batchSize}, checkpoint=OFF");
+        Console.WriteLine("確認事項: バイト天井 ≤5× か (真の難所 = recovery 正当性は design 13 §10.11、spike 対象外)");
+        Console.WriteLine();
+        foreach (int batch in new[] { 10, batchSize, 1000 }.Distinct().OrderBy(x => x))
+            Spike9One(chunks, batch);
+        return 0;
+    }
+
+    private const int PerSmoBytes = 1 + 1 + 8 + 8 + 8 + 2 + 2 + 14 + 8 + 4; // ~56B 物理 SMO 論理レコード見積り
+
+    private static void Spike9One(int chunks, int batch)
+    {
+        var vocab = new ZipfVocabulary(Math.Clamp(chunks / 2, 4_000, 60_000));
+        long walPlain = MeasureWalSimple(vocab, chunks, batch, withIndex: false);
+
+        var dir = BenchTempDir.Create("fts9_spike");
+        long walWithFt, btreeStructureBytes, bodyBytes, ftLeafCount, ftLeafBytes;
+        int distinctLeafPages, distinctInternalPages;
+        try
+        {
+            using var db = GraphDatabase.Open(
+                System.IO.Path.Combine(dir, "graph.quiver"),
+                new GraphDatabaseOptions { CheckpointThresholdBytes = long.MaxValue });
+            db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+            Ingest(db, vocab, chunks, batch);
+            string walPath = System.IO.Path.Combine(dir, "graph.quiver-wal");
+            walWithFt = WalBytes(walPath);
+            ClassifyForFts9(walPath, out btreeStructureBytes, out bodyBytes,
+                            out ftLeafCount, out ftLeafBytes, out distinctLeafPages, out distinctInternalPages);
+        }
+        finally { BenchTempDir.Delete(dir); }
+
+        // SMO イベント数の見積り: 各 split は新規ページ 1 枚を割り当てる → distinct BTree ページ数 ≈ SMO 数 + 初期 leaf。
+        long smoEvents = Math.Max(0, distinctLeafPages - 1) + distinctInternalPages;
+        long smoPayload = smoEvents * PerSmoBytes;
+        long leafPageIdDelta = ftLeafCount * 8;
+        long proj9 = walWithFt - btreeStructureBytes + smoPayload + leafPageIdDelta;
+
+        double ampNow = walPlain > 0 ? walWithFt / (double)walPlain : double.NaN;
+        double amp9 = walPlain > 0 ? proj9 / (double)walPlain : double.NaN;
+
+        Console.WriteLine($"── batch={batch} ─────────────────────────────────────────");
+        Console.WriteLine($"walPlain={walPlain:N0}B  walWithFt(FTS-7)={walWithFt:N0}B  now={ampNow:F2}×");
+        Console.WriteLine($"FT B+Tree structure page-logging (除去対象)={btreeStructureBytes:N0}B  body(据置)={bodyBytes:N0}B");
+        Console.WriteLine($"FtLeafMutation: {ftLeafCount:N0} recs, {ftLeafBytes:N0}B (+pageId delta={leafPageIdDelta:N0}B)");
+        Console.WriteLine($"SMO events≈{smoEvents:N0} (leaf pages={distinctLeafPages:N0}, internal={distinctInternalPages:N0}) → logical SMO payload={smoPayload:N0}B ({smoPayload / (double)chunks:F0}/chunk)");
+        Console.WriteLine($"projected FTS-9 WAL={proj9:N0}B  →  amp9={amp9:F2}×   (target ≤5×)");
+        string verdict = amp9 <= 5.0 ? "PASS (byte ceiling ≤5×)" : "FAIL (>5× — re-examine SMO logical encoding)";
+        Console.WriteLine($"verdict: {verdict}");
+        Console.WriteLine($"csv-spike9,{chunks},{batch},{walPlain},{walWithFt},{ampNow:F2},{btreeStructureBytes},{smoEvents},{smoPayload},{leafPageIdDelta},{proj9},{amp9:F2}");
+        Console.WriteLine();
+    }
+
+    /// <summary>
+    /// FTS-9 spike 用 WAL 1 パス分類。FT B+Tree (BTreeLeaf+BTreeInternal) の page-logging バイト
+    /// (= FTS-7 では全て SMO 構造、非 split leaf は Suppressed なので page-image を出さない) と
+    /// body page-logging、FtLeafMutation の件数/バイト、distinct BTree ページ数を集計する。
+    /// </summary>
+    private static void ClassifyForFts9(string walPath, out long btreeStructureBytes, out long bodyBytes,
+        out long ftLeafCount, out long ftLeafBytes, out int distinctLeafPages, out int distinctInternalPages)
+    {
+        btreeStructureBytes = bodyBytes = ftLeafCount = ftLeafBytes = 0;
+        var leafPages = new HashSet<long>();
+        var internalPages = new HashSet<long>();
+
+        using var reader = new WalReader(walPath, 0L);
+        while (reader.TryReadNext(out var rec))
+        {
+            if (rec.Type == WalRecordType.FtLeafMutation)
+            {
+                ftLeafCount++;
+                ftLeafBytes += rec.Payload.Length;
+                continue;
+            }
+            if (rec.Type != WalRecordType.PageImage && rec.Type != WalRecordType.CompensationLogRecord)
+                continue;
+            int len = rec.Payload.Length;
+            if (!WalPageImageCodec.TryDecode(rec.Payload.Span, out _, out long pageId, out var pageBytes))
+                continue;
+            PageKind kind = PageHeader.ReadKind(pageBytes);
+            if (kind == PageKind.BTreeLeaf) { btreeStructureBytes += len; leafPages.Add(pageId); }
+            else if (kind == PageKind.BTreeInternal) { btreeStructureBytes += len; internalPages.Add(pageId); }
+            else bodyBytes += len;
+        }
+        distinctLeafPages = leafPages.Count;
+        distinctInternalPages = internalPages.Count;
+    }
+
     /// <summary>
     /// WAL を 1 パスし、leaf (BTreeLeaf) page-image を「初出ページ (split/新規割当 → residual SMO)」と
     /// 「既存ページ更新 (logical-eligible)」に分類する。internal / body は据え置き集計。
