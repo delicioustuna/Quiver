@@ -50,7 +50,7 @@
 | RAG-5 | サンプル + cookbook + 契約検証 | RAG-4 | P1 |
 | FTS-7 | 取込 WAL 増幅圧縮 (leaf logical postings WAL) ✅ | FTS-6 | P1 (GA 前必須) |
 | FTS-8 | 検索 postings 枝刈り (WAND / block-max + 近似 df) ✅ | FTS-6 | P1 (GA 前必須) |
-| FTS-9 | logical SMO (split/merge 論理化で全 tx 形状 ≤5×) **未/繰延** | FTS-7 | P2 |
+| FTS-9 | logical SMO (split/merge 論理化で全 tx 形状 ≤5×) **停止 (やらない、2026-06-15)** | FTS-7 | P2 |
 
 並列性: FTS-1〜3 と RAG-1〜3 は独立 (RAG-3 まではベクトルのみで動作確認可)。合流点は RAG-4。
 FTS-7 / FTS-8 は互いに独立、FTS-6 完了後ならいつでも着手可。FTS-9 は FTS-7 の残差クロージャ (繰延)。
@@ -84,5 +84,10 @@ split 構造 page-WAL の logical 化 = **FTS-9 (logical SMO)** として正式�
 - FTS crash contract 100-iteration 両 backend PASS、`WAL bytes/chunk` sentinel 登録
 - 13 番文書 §9 の性能目標 (検索 p50 < 10ms @10万チャンク、取込増幅 5× 以内) の実測値が文書に記録されている
   - 検索 p50: **7.77ms @100k** 達成 (FTS-8)。取込増幅: 実 RAG 増分経路 (per-doc upsert batch=10) = **4.70×** で達成、
-    バルク/バッチ (batch=200/1000) は **~11×** で未達 → **FTS-9 (logical SMO) へ繰延** (2026-06-15、P2)。
-    実ワークロード (RAG 取込) 上は GA ブロッカー充足の判断。
+    バルク/バッチ (batch=200/1000) は **~11×** で未達。実ワークロード (RAG 取込) 上は GA ブロッカー充足の判断。
+  - **FTS-9 (logical SMO) は停止 (やらない、2026-06-15)**。手順0/1 着手後に実測で「正当な設計 (self-contained split) は
+    bulk 5.26/5.55× = ≤5× 未達」と判明 → 撤回 (commit `ec1e79a` で `e3cca21` を revert、delete-undo 修正のみ `46ba2ba` で保持)。
+    bulk ≤5× は製品要件でなく自己課題目標で、GA は per-doc 取込で既達。詳細根拠は design 13 §11.7。
+    **将来 bulk ≤5× が実需化したら第一候補は logical-SMO ではなく案B BulkLoader** (sequential fill で split が逐次・
+    before-image=Free → 構造 WAL 問題が原理的に消え、recovery 書き直しを回避して from-empty bulk を改善)。
+    厳密な全形状 ≤5× が要る場合のみ option-2 (FT ページ NO-STEAL、projected ~1.9×、buffer-pool 退避の再設計を伴う)。
