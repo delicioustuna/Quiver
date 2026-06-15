@@ -110,9 +110,8 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     public bool Delete(in TKey key, long value)
     {
         byte[] kb = Encode(key);
-        // FTS-7: logical-leaf モードでは削除前に論理レコードを eager 発行 (value=削除する旧値 → undo 再挿入用)。
-        if (_logicalLeaf)
-            WalPageContext.LogFtLeafMutation(FtLeafMutationCodec.Op.Delete, _logicalTenantId, kb, value);
+        // FTS-7: logical-leaf の Delete 論理レコードは LeafDelete 内で「キーが実在する場合のみ」eager 発行する
+        // (存在しないキーを log すると、その undo = 旧値再挿入で実在しなかったキーを生んでしまうため)。
         bool ok = DeleteDown(_root, kb, value, 0);
         if (!ok) return false;
         _entryCount--;
@@ -644,6 +643,11 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         }
 
         if (delOff < 0) return false;
+
+        // FTS-7: キー実在を確認した後に Delete 論理レコードを eager 発行 (value=削除する旧値 → undo 再挿入用)。
+        // 存在しないキーを log しない = abort/crash undo での誤った再挿入を防ぐ。
+        if (_logicalLeaf)
+            WalPageContext.LogFtLeafMutation(FtLeafMutationCodec.Op.Delete, _logicalTenantId, key, value);
 
         // FTS-7: leaf in-place 削除 — logical-leaf モードでは Suppressed (page-image 抑止)。
         using var wh = _file.PinForWrite(pid, _leafMode);
