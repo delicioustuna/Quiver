@@ -86,8 +86,11 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     public void Insert(in TKey key, long value)
     {
         byte[] kb = Encode(key);
-        // FTS-9 (design 13 §11.3): logical-leaf モードの state-setting 論理レコード (FtLeafMutation) は
-        // LeafInsert/LeafDelete 内で発行する (target leaf PageId を payload に載せ pageLSN を stamp するため)。
+        // FTS-7: logical-leaf モードでは、leaf 更新前に state-setting 論理レコードを eager 発行する
+        // (WAL-ahead; recovery 中は WalPageContext.Current が null なので no-op)。normal op はキー不在への
+        // 挿入だが、redo の冪等性 (二重適用 no-op) は Upsert 意味の再実行 (UpsertRaw) で担保する (§10.2)。
+        if (_logicalLeaf)
+            WalPageContext.LogFtLeafMutation(FtLeafMutationCodec.Op.Upsert, _logicalTenantId, kb, value);
         var split = InsertDown(_root, kb, value, 0);
         if (split.HasValue)
         {
@@ -107,8 +110,9 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     public bool Delete(in TKey key, long value)
     {
         byte[] kb = Encode(key);
-        // FTS-9: 論理レコード (Delete) は LeafDelete 内で「キーが実在する場合のみ」eager 発行する
-        // (target leaf PageId を載せ、存在しないキーの誤 undo 再挿入を防ぐ)。
+        // FTS-7: logical-leaf モードでは削除前に論理レコードを eager 発行 (value=削除する旧値 → undo 再挿入用)。
+        if (_logicalLeaf)
+            WalPageContext.LogFtLeafMutation(FtLeafMutationCodec.Op.Delete, _logicalTenantId, kb, value);
         bool ok = DeleteDown(_root, kb, value, 0);
         if (!ok) return false;
         _entryCount--;
@@ -318,15 +322,6 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
     private (byte[] median, PageId right)? LeafInsert(PageId pid, byte[] key, long value)
     {
-        // FTS-9 (design 13 §11.3): logical-leaf モードでは、leaf 更新前に state-setting 論理レコードを
-        // eager 発行する (WAL-ahead; recovery 中は WalPageContext.Current が null なので no-op)。
-        // leafPageId=pid (= descent が見つけた leaf) を載せ、返り値 LSN を当該 leaf の pageLSN に stamp する。
-        // split が起きると key は分配で右ページへ移りうるが、SMO の論理 redo がその移動を担うので
-        // leafPageId は pre-split leaf で正しい。
-        long ftLsn = _logicalLeaf
-            ? WalPageContext.LogFtLeafMutation(FtLeafMutationCodec.Op.Upsert, _logicalTenantId, pid.Value, key, value)
-            : -1L;
-
         // Phase 1 (read-only scan): locate insertion offset and detect whether the new entry fits.
         int count;
         int insOff;        // byte offset within body where the new entry should be written
@@ -364,22 +359,15 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         if (oldUsed + newEntrySize <= BL.Body)
         {
             // FTS-7: leaf in-place 挿入 — logical-leaf モードでは Suppressed (page-image 抑止)。
-            // FTS-9: 当該 leaf に FtLeafMutation の LSN を pageLSN として stamp する (page-targeted redo gating)。
-            // using var だと wh.Lsn を設定できない (readonly) ため手動 try/finally で dispose する。
-            var wh = _file.PinForWrite(pid, _leafMode);
-            if (ftLsn >= 0) wh.Lsn = ftLsn;
-            try
-            {
-                Span<byte> body = wh.Data;
-                int trailing = oldUsed - insOff;
-                if (trailing > 0)
-                    body.Slice(insOff, trailing).CopyTo(body.Slice(insOff + newEntrySize, trailing));
-                BinaryPrimitives.WriteInt16LittleEndian(body[insOff..], (short)key.Length);
-                key.AsSpan().CopyTo(body[(insOff + 2)..]);
-                BinaryPrimitives.WriteInt64LittleEndian(body[(insOff + 2 + key.Length)..], value);
-                BinaryPrimitives.WriteInt32LittleEndian(body, count + 1);
-            }
-            finally { wh.Dispose(); }
+            using var wh = _file.PinForWrite(pid, _leafMode);
+            Span<byte> body = wh.Data;
+            int trailing = oldUsed - insOff;
+            if (trailing > 0)
+                body.Slice(insOff, trailing).CopyTo(body.Slice(insOff + newEntrySize, trailing));
+            BinaryPrimitives.WriteInt16LittleEndian(body[insOff..], (short)key.Length);
+            key.AsSpan().CopyTo(body[(insOff + 2)..]);
+            BinaryPrimitives.WriteInt64LittleEndian(body[(insOff + 2 + key.Length)..], value);
+            BinaryPrimitives.WriteInt32LittleEndian(body, count + 1);
             return null;
         }
 
@@ -657,26 +645,14 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
         if (delOff < 0) return false;
 
-        // FTS-9 (design 13 §11.3): キー実在を確認した後に Delete 論理レコードを eager 発行する
-        // (value=削除する旧値 → undo 再挿入用)。存在しないキーを log しないので誤 undo を防ぐ。
-        long ftLsn = _logicalLeaf
-            ? WalPageContext.LogFtLeafMutation(FtLeafMutationCodec.Op.Delete, _logicalTenantId, pid.Value, key, value)
-            : -1L;
-
         // FTS-7: leaf in-place 削除 — logical-leaf モードでは Suppressed (page-image 抑止)。
-        // FTS-9: 当該 leaf に FtLeafMutation の LSN を pageLSN として stamp する。
-        var wh = _file.PinForWrite(pid, _leafMode);
-        if (ftLsn >= 0) wh.Lsn = ftLsn;
-        try
-        {
-            Span<byte> wbody = wh.Data;
-            int trailing = oldUsed - (delOff + delSize);
-            if (trailing > 0)
-                wbody.Slice(delOff + delSize, trailing).CopyTo(wbody.Slice(delOff, trailing));
-            wbody.Slice(oldUsed - delSize, delSize).Clear();
-            BinaryPrimitives.WriteInt32LittleEndian(wbody, count - 1);
-        }
-        finally { wh.Dispose(); }
+        using var wh = _file.PinForWrite(pid, _leafMode);
+        Span<byte> wbody = wh.Data;
+        int trailing = oldUsed - (delOff + delSize);
+        if (trailing > 0)
+            wbody.Slice(delOff + delSize, trailing).CopyTo(wbody.Slice(delOff, trailing));
+        wbody.Slice(oldUsed - delSize, delSize).Clear();
+        BinaryPrimitives.WriteInt32LittleEndian(wbody, count - 1);
         return true;
     }
 

@@ -83,15 +83,6 @@ if (args.Length >= 1 && args[0] == "--fts7-spike")
     return Fts7BreakdownRunner.RunSpike(chunks, batch);
 }
 
-// FTS-9 手順0: logical SMO の増幅天井 spike (ARIES 変更なしで projected を算出)。
-// Usage: -- --fts9-spike [chunks] [batchSize]   (defaults: 5000 chunks, batch 200)
-if (args.Length >= 1 && args[0] == "--fts9-spike")
-{
-    int chunks = args.Length >= 2 && int.TryParse(args[1], out var s9c) ? s9c : 5_000;
-    int batch = args.Length >= 3 && int.TryParse(args[2], out var s9b) ? s9b : 200;
-    return Fts7BreakdownRunner.RunSpike9(chunks, batch);
-}
-
 // FTS-7 手順6: steady-state 増分増幅 (構築済み index への増分 upsert = 実 RAG ユースケース)。
 // Usage: -- --fts7-steady [base] [incr] [batch]   (defaults: 50000 base, 5000 incr, batch 200)
 if (args.Length >= 1 && args[0] == "--fts7-steady")

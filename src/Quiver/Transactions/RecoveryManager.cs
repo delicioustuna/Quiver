@@ -211,7 +211,7 @@ internal sealed class RecoveryManager : IRecoveryManager
                 if (record.Type != WalRecordType.FtLeafMutation) continue;
                 if (!PresumeCommitted(record.TransactionId.Value)) continue;
                 if (FtLeafMutationCodec.TryDecode(
-                        record.Payload.Span, out var op, out byte tenant, out _, out var key, out long value))
+                        record.Payload.Span, out var op, out byte tenant, out var key, out long value))
                 {
                     indexManager.ApplyFtLeafRedo(tenant, op == FtLeafMutationCodec.Op.Upsert, key, value);
                 }
@@ -228,7 +228,7 @@ internal sealed class RecoveryManager : IRecoveryManager
                 if (record.Type != WalRecordType.FtLeafMutation) continue;
                 if (PresumeCommitted(record.TransactionId.Value)) continue;
                 if (FtLeafMutationCodec.TryDecode(
-                        record.Payload.Span, out var op, out byte tenant, out _, out var key, out long value))
+                        record.Payload.Span, out var op, out byte tenant, out var key, out long value))
                 {
                     losers.Add((tenant, op == FtLeafMutationCodec.Op.Upsert, key.ToArray(), value));
                 }
