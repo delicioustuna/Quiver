@@ -10,7 +10,7 @@
 
 ### 単一プロセス embedded
 
-Quiver は SQLite に近い「ライブラリとしての DB」。アプリと同じプロセス内で動く。
+Quiver は「ライブラリとしての DB」。アプリと同じプロセス内で動く。
 
 - **サーバープロセスは無い**。ネットワークポートも listen しない。リモートから直接接続する手段は無い。
   外部公開したいなら、アプリ側で HTTP/gRPC API を立てて Quiver をその裏に置く
@@ -87,10 +87,7 @@ Quiver は SQLite に近い「ライブラリとしての DB」。アプリと�
 
 ### バックエンド差異
 
-- **バイナリバックエンド** が主力で、`CreateSnapshot` / `Vacuum` / `CompactAdjacency` 等の運用 API は
-  これを前提とする。
-- **SQLite バックエンド** は MVP (BA-5)。一部の運用 API (`CreateSnapshot` 等) は `NotSupportedException`。
-  バックアップは SQLite 標準手段を使う。
+- **バイナリバックエンド** が唯一の組み込みバックエンドで、`CreateSnapshot` / `Vacuum` / `CompactAdjacency` 等の運用 API はこれを前提とする。
 
 ### 索引
 

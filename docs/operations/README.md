@@ -18,4 +18,4 @@
 
 これらの章は実装済み機能 (OP-1 snapshot / OP-3 vacuum / FT-22 index repair / FT-27 group commit /
 FT-28 adaptive checkpoint / FT-20 WAL 増幅実測) を前提にしている。各機能の設計詳細は
-[docs/design/](../design/) を参照。
+[docs/spec/](../spec/) を参照。

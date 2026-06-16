@@ -11,11 +11,8 @@ internal sealed class MigrationContext : IMigrationContext
 
     // OP-4 (fix A): スキーマミューテーションを <see cref="Transaction"/> の rollback と整合させるための
     // 逆操作キュー。各 schema mutation を行うたびにその逆操作を append し、OnRolledBack で
-    // 逆順 (LIFO) に再生する。binary backend の TokenStore / IndexManager は ARIES tx に乗らないが、
+    // 逆順 (LIFO) に再生する。TokenStore / IndexManager は ARIES tx に乗らないが、
     // この hook で論理的な巻き戻しを実現する。
-    // SQLite backend の場合、schema mutation は同 tx 内の SQL なので native に rollback される。
-    // その場合本キューの逆操作 (Schema.RenameLabel(new, old) 等) は冪等な no-op として吸収される
-    // (rollback 済みの DB 状態には new も old も存在せず、Rename はそのまま false を返す)。
     private readonly List<Action> _undoActions = [];
     private bool _hooksRegistered;
 

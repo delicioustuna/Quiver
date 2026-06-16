@@ -9,8 +9,8 @@ namespace Quiver.Transactions;
 /// <remarks>
 /// セマンティクス:
 /// <list type="bullet">
-/// <item><see cref="OnCommitted"/> は WAL フラッシュ (SQLite バックエンドでは SQLite commit) が
-/// 正常に返ったあとにのみ発火する。コミットが失敗した場合は <see cref="OnRolledBack"/> ハンドラのみが走る。</item>
+/// <item><see cref="OnCommitted"/> は WAL フラッシュが正常に返ったあとにのみ発火する。
+/// コミットが失敗した場合は <see cref="OnRolledBack"/> ハンドラのみが走る。</item>
 /// <item>ハンドラは登録順に実行される。あるハンドラで例外が発生してもキャッチして無視するため、
 /// 後続ハンドラは引き続き実行され、トランザクションの結果には影響しない。</item>
 /// <item>トランザクションが既に終了 (Committed / Aborted) した後に登録されたハンドラは、
@@ -23,7 +23,7 @@ namespace Quiver.Transactions;
 public interface ICommitHookRegistrar
 {
     /// <summary>
-    /// トランザクションがコミット (WAL フラッシュ / SQLite commit 完了) した後に発火する
+    /// トランザクションがコミット (WAL フラッシュ完了) した後に発火する
     /// コールバックを登録する。
     /// </summary>
     void OnCommitted(Action callback);

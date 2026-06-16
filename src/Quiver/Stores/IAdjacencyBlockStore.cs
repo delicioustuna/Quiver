@@ -29,7 +29,7 @@ internal interface IAdjacencyBlockStore
     AdjacencyCursor OpenCursor(NodeId nodeId, Direction direction, RelationshipTypeId? typeFilter);
 
     /// <summary>
-    /// PW-14 / codex_advice_3 7.6 節。ベース隣接ビューの世代カウンタ (単調増加)。
+    /// PW-14: ベース隣接ビューの世代カウンタ (単調増加)。
     /// compact 時にインクリメントされる。永続化されたベースを持たないストアは 0 を返す。
     /// </summary>
     long Epoch => 0;

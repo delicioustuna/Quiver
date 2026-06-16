@@ -9,7 +9,7 @@ namespace Quiver.Rag;
 /// <summary>
 /// ハイブリッド検索 (BM25 + KNN を RRF 融合) と graph expansion (隣接チャンク連結・親文書付与) を
 /// 1 API で返す検索器。クエリ実行はエンジン DSL (<c>g.HybridSearch</c> / <c>g.Knn</c> / <c>g.Search</c>) への
-/// 薄い写像に徹し、融合ロジックは持たない (14_rag_layer.md §5)。
+/// 薄い写像に徹し、融合ロジックは持たない。
 /// </summary>
 public sealed class RagSearcher
 {

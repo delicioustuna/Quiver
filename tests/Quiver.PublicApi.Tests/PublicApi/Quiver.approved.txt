@@ -5,8 +5,6 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Index.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Operators.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.PropertyTests")]
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Storage.Sqlite")]
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Storage.Sqlite.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Storage.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Stores.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Tests")]

@@ -156,7 +156,7 @@ public sealed class GraphTraversalSource
     /// <summary>
     /// ベクトル類似度上位 k 件をスキャン起点とするトラバーサル。
     /// 類似度の降順でノード ID を放出し、<c>.HasLabel(...)</c> や <c>.Out(...)</c> を
-    /// 続けて KNN とグラフトラバーサルを組み合わせられる (codex_advice_3.md 6.4 節)。
+    /// 続けて KNN とグラフトラバーサルを組み合わせられる。
     /// </summary>
     /// <remarks>
     /// 類似度スコア自体は伝播しない。生スコアが必要な場合は
@@ -222,7 +222,7 @@ public sealed class GraphTraversalSource
     /// </summary>
     /// <remarks>
     /// RRF は順位のみで計算でき score 配管を要さないため、BM25 / KNN いずれの leaf も
-    /// 既存の「score 非公開」設計のまま融合できる (design 13 §7.2)。両方に上位で現れる
+    /// 既存の「score 非公開」設計のまま融合できる。両方に上位で現れる
     /// 文書ほど押し上がり、片方にしか現れない文書もそのランクで残る。可視性は各 leaf 側で
     /// 既にフィルタ済み。weighted-sum 融合は非目標 (距離スケール調整が必要なため)。
     /// </remarks>

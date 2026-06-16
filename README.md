@@ -142,7 +142,7 @@ AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch による参考
 - [Cookbook](docs/cookbook.md) — よく使う典型レシピ集
 - [運用ガイド (Operations)](docs/operations/README.md) — quickstart / backup・restore / performance tuning / recovery
 - [開発者向けドキュメント](docs/development.md) — アーキテクチャ / 依存関係 / ストレージ仕様 / 性能詳細 / バージョニング
-- [設計ドキュメント](docs/design/) — ストレージ・WAL・トランザクション・物理演算子などの詳細設計
+- [仕様ドキュメント](docs/spec/) — ストレージ・WAL・トランザクション・クエリ・ベクトル・全文検索の仕様
 
 ## サンプル
 

@@ -22,7 +22,7 @@ public enum EmbeddingTaskState : byte
 }
 
 /// <summary>
-/// 埋め込みジョブの識別子。<c>embedding_tasks</c> SQLite 主キーと同じ構成で、
+/// 埋め込みジョブの識別子。
 /// record struct とすることで割り当て無しに辞書キー / upsert フィルタとして使える。
 /// </summary>
 public readonly record struct EmbeddingTaskKey(
@@ -53,7 +53,7 @@ public sealed record EmbeddingTaskRecord(
 /// ベクトルインデックスと埋め込みタスクライフサイクルの永続メタデータ。カタログは
 /// <see cref="VectorIndexSpec"/> 定義とエンティティ別タスクレコードを保持する。
 /// 実際のベクトル payload と ANN インデックスは別の場所 (バイナリサイドカー / 将来の ANN バックエンド) に
-/// 持つ — 詳細は codex_advice_3.md 6.5 節。
+/// 持つ。
 /// </summary>
 public interface IVectorCatalog
 {
@@ -80,7 +80,7 @@ public interface IVectorCatalog
 
     /// <summary>
     /// タスクレコードを挿入または置換する。同一性は
-    /// <c>(EntityKind, EntityId, IndexName, ProviderId)</c> タプル — SQLite 主キーと同じ。
+    /// <c>(EntityKind, EntityId, IndexName, ProviderId)</c> タプル。
     /// </summary>
     void UpsertTask(EmbeddingTaskRecord record);
 

@@ -51,7 +51,7 @@ public interface ISchemaApi
     /// FTS-2: 全文検索索引を作成する。<paramref name="label"/> / <paramref name="propertyKey"/> に
     /// 一致する文字列プロパティ書き込みが同一 Tx 内で転置インデックス (postings/norms) に維持される。
     /// <paramref name="options"/> でトークナイザ ID 等を指定する (既定は <c>mixed-bigram-v1</c>)。
-    /// binary backend のみ対応 (SQLite backend は <see cref="NotSupportedException"/>)。
+    /// binary backend のみ対応。
     /// </summary>
     void CreateFullTextIndex(string indexName, string label, string propertyKey, FullTextIndexOptions? options = null);
 

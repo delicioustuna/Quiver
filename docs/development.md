@@ -3,7 +3,7 @@
 README はライブラリ利用者向けの最小限に絞っているため、内部アーキテクチャ・依存関係・
 ストレージ仕様・ビルド/テスト手順・開発状況・バージョニング規約・詳細な性能計測は本ファイルに集約する。
 
-- 設計仕様の詳細: [docs/design/](design/)
+- 設計仕様 (as-built): [docs/spec/](spec/)
 - ロードマップ / タスク状況: [docs/roadmap.md](roadmap.md)
 - API 安定性ポリシー: [docs/api-stability.md](api-stability.md)
 - 運用ガイド: [docs/operations/README.md](operations/README.md)
@@ -19,7 +19,6 @@ README はライブラリ利用者向けの最小限に絞っているため、�
 | `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ・取込・hybrid 検索 + graph expansion）。**開発中** ([design/14](design/14_rag_layer.md)) |
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` 連携（DI 登録） |
 | `Quiver.OpenTelemetry` | OpenTelemetry エクスポート |
-| `Quiver.Storage.Sqlite` | SQLite カタログ / バックエンド |
 
 ## アーキテクチャ
 
@@ -46,8 +45,7 @@ Quiver.Client.Attributes ─┐
 Quiver.SourceGen ─────────┴─► Quiver ─┬─► Quiver.Embedding
                                       ├─► Quiver.Rag (開発中)
                                       ├─► Quiver.Hosting
-                                      ├─► Quiver.OpenTelemetry
-                                      └─► Quiver.Storage.Sqlite
+                                      └─► Quiver.OpenTelemetry
 ```
 
 ### ストレージ仕様
@@ -259,7 +257,7 @@ carry-column は no-alias 比 ±3% 以内。詳細:
 完了。Feature（FT）・Perf（PW）・Gremlin/Cypher Compat（GC）・Backend Abstraction（BA）・
 Vector/Embedding（VEC）の各系列が進行中。残タスク（PW-8/9/10 ほか）も roadmap 参照。
 
-Gremlin / Cypher 互換の対応状況は [docs/design/gremlin_cypher_compat.md](design/gremlin_cypher_compat.md)。
+Gremlin / Cypher 互換の対応状況は [docs/spec/05_query.md](spec/05_query.md)。
 基本探索・比較述語・CRUD・集約・可変長パス・`as/select` は対応済み。
 
 ## 設計ドキュメント

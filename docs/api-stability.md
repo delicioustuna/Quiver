@@ -54,7 +54,7 @@ Quiver は [Semantic Versioning 2.0.0](https://semver.org/lang/ja/) (`MAJOR.MINO
 - すべての `internal` 型・メンバー (`InternalsVisibleTo` 経由で見えるものを含む)
 - `Quiver.SourceGen` (Roslyn generator。生成 **コード** の出力安定性は別途 generator 側で管理)
 - `Quiver.Storage` / `Quiver.Stores` / `Quiver.Index` / `Quiver.Codec` / `Quiver.Wal` / `Quiver.Transactions` / `Quiver.Operators` — これらは実装詳細レイヤーであり、直接参照は非推奨。`Quiver` ファサード経由で使うこと
-- `Quiver.Storage.Sqlite` / `Quiver.Embedding` / `Quiver.Hosting` / `Quiver.OpenTelemetry` — optional add-on パッケージ。独自に versioning するが、安定化は GA 後に順次
+- `Quiver.Embedding` / `Quiver.Hosting` / `Quiver.OpenTelemetry` — optional add-on パッケージ。独自に versioning するが、安定化は GA 後に順次
 - `[Experimental]` 属性付きのすべての API (§5 参照)
 
 > 直接の実装レイヤー参照を防ぐため、実装アセンブリの public surface は最小化していくが、現時点では参照可能なものも残っている。**ファサード (`Quiver` / `Quiver.Client`) 以外への直接依存は将来予告なく壊れうる** ことを前提にすること。

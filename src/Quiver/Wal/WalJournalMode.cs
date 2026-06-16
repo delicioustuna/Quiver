@@ -1,7 +1,7 @@
 namespace Quiver.Storage.Wal;
 
 /// <summary>
-/// FTS-7 (design 13 §10.3): ページ単位の WAL journaling モード。<see cref="PinForWrite"/> 時に
+/// FTS-7: ページ単位の WAL journaling モード。<see cref="PinForWrite"/> 時に
 /// 指定し、<see cref="WalPageContext"/> が per-tx に記録して before-image (pin 時) と
 /// after-image (UnpinDirty 時) の両発火点で参照する単一チョークポイントを構成する。
 ///
@@ -17,7 +17,7 @@ internal enum WalJournalMode : byte
 
     /// <summary>
     /// SMO (split/merge) の構造ページ: after-image (PageImage) のみを **eager** に追記し
-    /// (commit 時 coalesce に乗せない; design 13 §10.3 M2)、before-image (CLR) は出さない
+    /// (commit 時 coalesce に乗せない)、before-image (CLR) は出さない
     /// (nested top action = redo-only)。
     /// </summary>
     RedoOnly = 1,

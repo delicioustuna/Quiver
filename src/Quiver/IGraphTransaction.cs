@@ -136,8 +136,7 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// このトランザクション境界の内側でベクトルを set / 上書きする。書き込みは
     /// グラフ変更と同じ container WAL に乗り、<see cref="Commit"/> で原子確定、
     /// <see cref="Rollback"/> / クラッシュで巻き戻る (グラフ変更と原子整合)。
-    /// バインドキーは <paramref name="entityId"/> の Sequence。永続化に対応しないバックエンド
-    /// (SQLite MVP) では <see cref="NotSupportedException"/>。
+    /// バインドキーは <paramref name="entityId"/> の Sequence。
     /// </summary>
     void SetVector(EntityKind kind, long entityId, string indexName, ReadOnlySpan<float> vector)
         => throw new NotSupportedException("This backend does not support transaction-scoped SetVector.");

@@ -8,7 +8,7 @@ namespace Quiver;
 /// 「トランザクションマネージャ / access methods / バルクロード ケイパビリティ」を担う。
 /// これらは内部実装型 (<see cref="ITransactionManager"/> / <see cref="IGraphAccessMethods"/> /
 /// <see cref="BulkLoadCapabilities"/>) を露出するため API 利用者には見せない。
-/// 各バックエンド (binary / SQLite) はこの内部 SPI を実装し、<see cref="GraphDatabase"/> が駆動する。
+/// バックエンドはこの内部 SPI を実装し、<see cref="GraphDatabase"/> が駆動する。
 /// </summary>
 internal interface IGraphStorageBackendInternal : IGraphStorageBackend
 {
@@ -24,7 +24,7 @@ internal interface IGraphStorageBackendInternal : IGraphStorageBackend
     /// <summary>
     /// ARCH-4 増分8: このバックエンドのデータが置かれているディレクトリ。
     /// migration history (<c>migrations.history</c>) など operational metadata の保存先解決に使う。
-    /// binary backend は <c>*.quiver</c> の親ディレクトリ、SQLite backend はデータディレクトリそのもの。
+    /// binary backend は <c>*.quiver</c> の親ディレクトリ。
     /// </summary>
     string DataDirectory { get; }
 }

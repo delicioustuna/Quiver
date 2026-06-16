@@ -6,7 +6,7 @@ using Quiver.Text;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// FTS-8: per-term corpus statistics for WAND pruning (design 13 §7.5). Holds the
+/// FTS-8: per-term corpus statistics for WAND pruning. Holds the
 /// snapshot <c>term → (df, maxTf)</c> table plus the corpus minimum document length, all
 /// computed once at <see cref="Quiver.GraphStats"/> collection time. df drives idf and
 /// (with maxTf and minDocLen) the per-term BM25 score upper bound; minDocLen makes that
@@ -40,7 +40,7 @@ internal sealed class Bm25TermStats
 /// FTS-4: corpus-level BM25 statistics — document count N and average document
 /// length — snapshotted from <see cref="Quiver.GraphStats"/>. When carried on a
 /// <c>FullTextScanOp</c> the operator uses these instead of re-scanning the norms
-/// index on every query (design 13 §6: BM25 is robust to stat staleness, so a
+/// index on every query (BM25 is robust to stat staleness, so a
 /// periodically-collected approximation is fine).
 /// <para>
 /// FTS-8: when <see cref="Terms"/> is non-null the operator can use WAND document-at-a-time
@@ -56,16 +56,16 @@ internal readonly record struct Bm25CorpusStats(
 /// (<see cref="FullTextScanOperator"/>) and graph-first
 /// (<see cref="FilteredFullTextScanOperator"/>) operators, so a candidate
 /// document scores identically on either path — that is what makes the graph-first
-/// rewrite rank-equivalent to text-first + post-filter (design 13 §7.1).
+/// rewrite rank-equivalent to text-first + post-filter.
 /// FTS-8 adds <see cref="RankWand"/>, an exact-top-k WAND variant used by the
 /// text-first path when per-term snapshot stats are available.
 /// </summary>
 internal static class Bm25Scorer
 {
-    /// <summary>BM25 term-frequency saturation parameter (design 13 §6 default).</summary>
+    /// <summary>BM25 term-frequency saturation parameter (standard default).</summary>
     public const double K1 = 1.2;
 
-    /// <summary>BM25 document-length normalization parameter (design 13 §6 default).</summary>
+    /// <summary>BM25 document-length normalization parameter (standard default).</summary>
     public const double B = 0.75;
 
     /// <summary>
@@ -79,7 +79,7 @@ internal static class Bm25Scorer
     /// (<see cref="EntityRef.Sequence"/>) because pipeline node ids are sequence-space
     /// while postings keys are packed. df / idf are computed over the <em>full</em>
     /// postings list (or, when <paramref name="termStats"/> is supplied, from the
-    /// snapshot df so this path stays score-consistent with the WAND path — design 13 §7.5).
+    /// snapshot df so this path stays score-consistent with the WAND path).
     /// </para>
     /// </summary>
     public static List<long> Rank(
@@ -119,8 +119,8 @@ internal static class Bm25Scorer
     }
 
     /// <summary>
-    /// FTS-8: exact top-<paramref name="k"/> BM25 via WAND document-at-a-time pruning
-    /// (design 13 §7.5). Uses per-term snapshot df + upper bounds to skip postings of
+    /// FTS-8: exact top-<paramref name="k"/> BM25 via WAND document-at-a-time pruning.
+    /// Uses per-term snapshot df + upper bounds to skip postings of
     /// high-df terms once they cannot beat the current k-th best score, advancing lagging
     /// cursors with B+Tree <c>SeekTo</c>. Returns the ranked packed entityIds, or
     /// <c>null</c> when a query term is absent from <paramref name="termStats"/> (unbounded

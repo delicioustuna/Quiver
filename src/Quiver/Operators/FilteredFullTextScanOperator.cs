@@ -13,7 +13,7 @@ namespace Quiver.Query.Physical;
 /// <c>.FilterByText(...)</c>.
 /// </summary>
 /// <remarks>
-/// design 13 section 7.1. Pairs with <see cref="FilteredKnnNodeSourceOperator"/>
+/// Pairs with <see cref="FilteredKnnNodeSourceOperator"/>
 /// (vector graph-first). The shared <see cref="Bm25Scorer"/> computes df / idf over
 /// the full postings list, so a candidate document's score is identical to the
 /// text-first path; only the cut to top-k differs (it is taken <em>after</em>
@@ -82,7 +82,7 @@ internal sealed class FilteredFullTextScanOperator : IPhysicalOperator
 
         var (n, avgdl) = Bm25Scorer.ResolveCorpus(ft, _corpus);
         // FTS-8: use the snapshot df (when present) so a candidate's per-doc score matches
-        // the text-first WAND path exactly (design 13 §7.5 parity). Graph-first stays a
+        // the text-first WAND path exactly (spec: 07_fulltext.md#wand parity). Graph-first stays a
         // candidate-bounded full scan — WAND targets the unbounded text-first cost.
         var ranked = Bm25Scorer.Rank(ft, tokenizer, _queryText, n, avgdl, candidates, _corpus?.Terms);
 

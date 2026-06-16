@@ -58,8 +58,6 @@ db.CreateSnapshot(@"C:\backup\graph", new SnapshotOptions
 
 ### 注意
 
-- `CreateSnapshot` は **バイナリバックエンド専用**。SQLite バックエンドでは `NotSupportedException`
-  (SQLite 側は SQLite 標準のバックアップ手段を使う)。
 - target ディレクトリは空であること (または存在しないこと) を推奨。
 
 ---
@@ -201,7 +199,6 @@ Get-ChildItem "D:\backup" -Directory -Filter "graph-*" |
 | 24/7 稼働、停止できない | **A: `CreateSnapshot`** |
 | 夜間メンテナンスウィンドウがある | A または B (B はシンプル) |
 | format を跨ぐ移行 / 別ストアへ移植 | C: 論理エクスポート |
-| SQLite バックエンド | SQLite 標準のバックアップ (A は非対応) |
 
 ---
 

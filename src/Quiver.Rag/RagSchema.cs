@@ -2,7 +2,7 @@ namespace Quiver.Rag;
 
 /// <summary>
 /// Quiver.Rag が使うグラフスキーマの正準名 (ラベル / 関係型 / プロパティキー / 索引名)。
-/// 14_rag_layer.md §3 のスキーマ表に対応する。利用側がノードを直接問い合わせる際にも参照できるよう公開する。
+/// RAG スキーマ表に対応する。利用側がノードを直接問い合わせる際にも参照できるよう公開する。
 /// </summary>
 public static class RagSchema
 {

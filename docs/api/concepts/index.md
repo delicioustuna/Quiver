@@ -7,4 +7,4 @@ Quiver の主要な概念。
 - [Traversal](traversal.md) — Gremlin 風トラバーサル DSL
 - [MERGE / UPSERT](merge.md) — Cypher の <c>MERGE</c> 相当の挙動
 - [KNN (Vector Search)](knn.md) — ベクトル類似度検索とグラフトラバーサルの結合
-- [Backends](backends.md) — バイナリ / SQLite バックエンドの選択
+- [Backends](backends.md) — ストレージバックエンドの選択

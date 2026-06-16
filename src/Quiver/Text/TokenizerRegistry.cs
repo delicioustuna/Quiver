@@ -5,7 +5,7 @@ namespace Quiver.Text;
 /// recorded in a full-text index's catalog entry. Query-time and index-time code
 /// must both resolve through a registry rather than hardcoding a tokenizer, so a
 /// future <c>mixed-bigram-v2</c> can be added as a pure-additive option without
-/// forcing existing indexes to rebuild (design 13 §5).
+/// forcing existing indexes to rebuild.
 /// </summary>
 public interface ITokenizerRegistry
 {

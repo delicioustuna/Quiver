@@ -1,5 +1,3 @@
-using Microsoft.Data.Sqlite;
-
 namespace Quiver.Backend.Tests.Faults;
 
 /// <summary>
@@ -12,10 +10,7 @@ namespace Quiver.Backend.Tests.Faults;
 ///   1. Calling <c>Dispose</c> so OS file handles are released. This is the
 ///      same shutdown path we'd see on a graceful process exit; backends that
 ///      rely on Dispose for durability flushes are already broken.
-///   2. Clearing the SQLite native connection pool so any pooled
-///      <c>sqlite3*</c> handles are dropped (Microsoft.Data.Sqlite keeps an
-///      internal cache even with <c>Pooling=false</c>).
-///   3. Forcing two GC cycles so any finalizer-backed handles unwind before
+///   2. Forcing two GC cycles so any finalizer-backed handles unwind before
 ///      the caller reopens the directory.
 ///
 /// The contract under test: any data made durable before this call (i.e.
@@ -30,8 +25,6 @@ internal static class KillProcessSimulator
         var b = backend;
         backend = null;
         try { b?.Dispose(); } catch { /* kill — losing the in-flight close is the point */ }
-
-        SqliteConnection.ClearAllPools();
 
         for (int i = 0; i < 2; i++)
         {

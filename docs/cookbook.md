@@ -335,6 +335,6 @@ store.DeleteDocument("docs/intro.md");
   取得後に除外するため、フィルタが大半を弾くと該当文書があっても 0 件になり得る)。
 - **頻繁な再取込でも ANN グラフは劣化しにくい。** 削除/上書きで HNSW を再リンクし (近傍修復 + 物理削除)、
   削除が累積すると自動再構築する。長期間きわめて高頻度の churn を続ける場合のみ手動再構築を検討する。
-- 全文索引を提供しないバックエンド (SQLite) では `RagStore.FullTextEnabled == false` となり、
+- 全文索引が未作成の場合 `RagStore.FullTextEnabled == false` となり、
   検索は KNN のみで動作する。
 

@@ -198,7 +198,7 @@ internal sealed class PagedFile : IPagedFile
             // FT-15: この書き込みトランザクション内で本ページを初めて pin する時点の内容を
             // before-image として捕捉する。caller がまだ変更していないこの瞬間が唯一の機会。
             // frame は pin 済みなので evict されず、span は安定している。
-            // FTS-7 (design 13 §10.3): journaling モードを記録し、有効モードが Full のときのみ CLR を捕捉する
+            // FTS-7: journaling モードを記録し (spec: 07_fulltext.md#ft-journaling)、有効モードが Full のときのみ CLR を捕捉する
             //   (RedoOnly/Suppressed の FT ページは before-image を出さない)。
             if (_walFileKind is byte fileKind)
             {

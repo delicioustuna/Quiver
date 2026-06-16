@@ -6,7 +6,7 @@ namespace Quiver.Backend.Tests.Faults;
 /// write; we model that by zero-filling or truncating the final
 /// <c>tailBytes</c> bytes of a target file.
 ///
-/// Used against WAL segments (binary backend) or SQLite <c>-wal</c> files.
+/// Used against WAL segments (binary backend).
 /// Recovery is expected to either skip the torn record or surface a
 /// <see cref="Quiver.Core.CorruptionException"/>-shaped error; silent
 /// corruption is a contract violation.

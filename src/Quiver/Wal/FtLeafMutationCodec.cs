@@ -3,19 +3,19 @@ using System.Buffers.Binary;
 namespace Quiver.Storage.Wal;
 
 /// <summary>
-/// FTS-7: <see cref="WalRecordType.FtLeafMutation"/> のペイロード codec (design 13 §10.2)。
+/// FTS-7: <see cref="WalRecordType.FtLeafMutation"/> のペイロード codec。
 /// postings/norms B+Tree leaf への 1 件の <b>state-setting</b> 論理ミューテーションを表す。
 ///
 /// ペイロード形式:
 /// <code>
 ///   [op:1] [indexTenantId:1] [keyLen:2 LE] [keyBytes:keyLen] [value:8 LE]
 ///     op            = 1: Upsert / 2: Delete
-///     indexTenantId = postings or norms の tenant byte (logical FT 索引の識別; §10.8)
+///     indexTenantId = postings or norms の tenant byte (logical FT 索引の識別)
 ///     keyBytes      = postings: PostingsKey (term+entityId) / norms: entityId(8B BE)
 ///     value         = Upsert: 新 tf / docLen   Delete: 削除した旧 tf / docLen (undo 再挿入用)
 /// </code>
 ///
-/// 冪等性 (design 13 §10.2 不変条件): redo は「set key=value」「delete key」の state-setting で
+/// 冪等性 (不変条件): redo は「set key=value」「delete key」の state-setting で
 /// 二重適用が no-op。1 レコードで redo と undo の双方を賄う (Upsert↔Delete、value に旧値を載せる)。
 /// </summary>
 internal static class FtLeafMutationCodec

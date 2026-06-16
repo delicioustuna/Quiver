@@ -8,15 +8,10 @@ using Xunit;
 namespace Quiver.Backend.Tests;
 
 /// <summary>
-/// BA-9 — backend-agnostic crash / durability contract suite. Subclassed once
-/// per backend (binary, SQLite) so the same scenarios run against every
-/// <see cref="IGraphStorageBackend"/> implementation, the same way
-/// <see cref="GraphStorageBackendContractTests"/> applies to the functional
-/// surface.
-///
-/// Definition of Done (docs/design/06_wal.md / 07_transaction_recovery.md):
-/// the 100-iteration repeated kill / recover loop must stay flake-free for
-/// both backends.
+/// BA-9 — crash / durability contract suite. Subclassed per backend so
+/// the same scenarios run against every <see cref="IGraphStorageBackend"/>
+/// implementation, the same way <see cref="GraphStorageBackendContractTests"/>
+/// applies to the functional surface.
 /// </summary>
 public abstract class GraphStorageBackendCrashContractTests : IDisposable
 {
@@ -42,10 +37,6 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     /// <summary>Database directory under test. Exposed to subclasses for backend-specific file paths.</summary>
     protected string DatabaseDirectory => _dir;
 
-    /// <summary>
-    /// ARCH-4 増分8: factory.Open に渡すパス。SQLite はディレクトリ (既定)、binary backend は
-    /// <c>&lt;dir&gt;/graph.quiver</c> ファイルパス (サブクラスが override)。
-    /// </summary>
     protected virtual string DatabasePath => _dir;
 
     protected IGraphStorageBackend Open()
@@ -76,11 +67,9 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
 
     // ===== (b) Kill during write — database remains openable =====
     //
-    // FT-15: both backends now enforce strict rollback of uncommitted writes.
-    // The binary backend logs page before-images as CompensationLogRecords and
-    // RecoveryManager runs an ARIES-style undo pass for transactions that
-    // crashed without a Commit record. SQLite-backed transactions roll back to
-    // the BEGIN IMMEDIATE checkpoint. A kill mid-write must leave no trace of
+    // FT-15: the binary backend logs page before-images as CompensationLogRecords
+    // and RecoveryManager runs an ARIES-style undo pass for transactions that
+    // crashed without a Commit record. A kill mid-write must leave no trace of
     // the uncommitted node after reopen.
 
     [Fact]
@@ -103,10 +92,9 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     }
 
     /// <summary>
-    /// FT-15: uncommitted-mid-write data must NOT survive a kill on either
-    /// backend (binary: ARIES undo pass over CompensationLogRecords; SQLite:
-    /// BEGIN IMMEDIATE rollback). Strict for all backends — override only if a
-    /// future backend genuinely cannot meet the strict-rollback contract.
+    /// FT-15: uncommitted-mid-write data must NOT survive a kill.
+    /// Override only if a future backend genuinely cannot meet the
+    /// strict-rollback contract.
     /// </summary>
     protected virtual void AssertUncommittedKillState(
         IGraphTransaction tx, NodeId uncommittedNode)
@@ -213,7 +201,6 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
             rtx.Rollback();
         }
         catch (CorruptionException) { /* acceptable: surfaced corruption is fine */ }
-        catch (Microsoft.Data.Sqlite.SqliteException) { /* acceptable for SQLite */ }
         catch (StorageException) { /* acceptable */ }
         finally
         {
@@ -223,8 +210,7 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
 
     /// <summary>
     /// Inject a torn write at the tail of whichever file is the durability
-    /// boundary for the backend under test. Binary backend: most recent WAL
-    /// segment. SQLite backend: the <c>-wal</c> sidecar file.
+    /// boundary for the backend under test (e.g. the most recent WAL segment).
     /// </summary>
     protected abstract void InjectTornWriteAtTail();
 
@@ -260,12 +246,11 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
         }
         catch (CorruptionException) { /* acceptable */ }
         catch (StorageException) { /* acceptable */ }
-        catch (Microsoft.Data.Sqlite.SqliteException) { /* acceptable */ }
     }
 
     /// <summary>
     /// Flip a bit in the backend's primary checksummed structure (WAL record
-    /// header for binary, SQLite <c>-wal</c> frame for SQLite).
+    /// header for binary backend).
     /// </summary>
     protected abstract void InjectChecksumCorruption();
 
@@ -297,7 +282,6 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
         }
         catch (StorageException) { /* acceptable: fail-safe */ }
         catch (CorruptionException) { /* acceptable */ }
-        catch (Microsoft.Data.Sqlite.SqliteException) { /* acceptable */ }
         finally
         {
             reopened?.Dispose();
@@ -305,9 +289,9 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     }
 
     /// <summary>
-    /// Delete a backend-specific sidecar file (binary: <c>adj.epoch</c> /
-    /// <c>*.idxmeta</c>; SQLite: <c>-shm</c>). Implementations should pick a
-    /// file whose loss is recoverable or fail-safely detectable.
+    /// Delete a backend-specific sidecar file (binary: <c>adj.epoch</c>).
+    /// Implementations should pick a file whose loss is recoverable or
+    /// fail-safely detectable.
     /// </summary>
     protected abstract void DeleteSidecarFiles();
 }

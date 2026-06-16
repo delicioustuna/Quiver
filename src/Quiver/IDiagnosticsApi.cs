@@ -18,8 +18,7 @@ public interface IDiagnosticsApi
     /// 「base store の delete だけ commit され index entry の削除が未到達」「DeleteNode が
     /// 索引エントリを自動削除しない設計上の前提」などで orphan は依然として生じうるため、
     /// 運用者が任意のタイミングで状態を観測できる経路を提供する。
-    /// 既定実装は健全 (orphan 0) を返す — 走査機能を持たない backend (例: SQLite) は
-    /// PRAGMA integrity_check が論理的役割を担う。
+    /// 既定実装は健全 (orphan 0) を返す。
     /// </summary>
     IndexConsistencyReport CheckIndexConsistency() => new(0, 0, 0, Array.Empty<OrphanIndexEntry>(), 0);
 

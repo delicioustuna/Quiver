@@ -12,7 +12,7 @@ namespace Quiver.Query.Physical;
 /// <see cref="AllNodesScanOperator"/>.
 /// </summary>
 /// <remarks>
-/// codex_advice_3.md §6.4. Pairs with <see cref="KnnNodeSourceOperator"/>
+/// Pairs with <see cref="KnnNodeSourceOperator"/>
 /// (vector-first); the <c>QueryOptimizer.ChooseKnnStrategy</c> decides which
 /// arm to build. Like the unfiltered operator, score is intentionally not
 /// surfaced in the tuple stream; callers can hold a reference to the access

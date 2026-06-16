@@ -9,7 +9,7 @@ namespace Quiver.Query.Physical;
 /// with Reciprocal Rank Fusion and emits the top-<c>k</c> in fused order.
 /// </summary>
 /// <remarks>
-/// design 13 §7.2/§7.3. RRF score is <c>Σ_i 1/(k0 + rank_i(d))</c> with k0=60 and
+/// RRF score is <c>Σ_i 1/(k0 + rank_i(d))</c> with k0=60 and
 /// rank 1-based within each child stream — it depends only on rank, so the existing
 /// "score is not surfaced" policy of the KNN / BM25 leaves is preserved (no score
 /// plumbing). Each child is drained fully on <see cref="Open"/> (k is a few dozen, so

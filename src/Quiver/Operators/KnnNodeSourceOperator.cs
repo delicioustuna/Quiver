@@ -11,7 +11,7 @@ namespace Quiver.Query.Physical;
 /// label / property / expand stages on top.
 /// </summary>
 /// <remarks>
-/// codex_advice_3.md §6.4. Score is intentionally not surfaced in this MVP;
+/// Score is intentionally not surfaced in this MVP;
 /// users who need it call <c>db.Vectors.KnnSearch</c> directly. Indexes bound
 /// to <see cref="EntityKind.Relationship"/> are rejected — relationship-KNN
 /// will land as a sibling operator when there is demand.

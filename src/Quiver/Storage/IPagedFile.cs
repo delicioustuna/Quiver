@@ -33,7 +33,7 @@ internal interface IPagedFile : IDisposable
     PageWriteHandle PinForWrite(PageId pageId);
 
     /// <summary>
-    /// FTS-7 (design 13 §10.3): 指定の WAL journaling モードで書き込み用にページを pin する。
+    /// FTS-7: 指定の WAL journaling モードで書き込み用にページを pin する。
     /// WAL を持たない実装は <paramref name="mode"/> を無視してよい (既定は mode を無視して通常 pin)。
     /// </summary>
     PageWriteHandle PinForWrite(PageId pageId, WalJournalMode mode) => PinForWrite(pageId);

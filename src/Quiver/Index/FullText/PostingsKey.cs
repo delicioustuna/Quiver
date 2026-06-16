@@ -4,7 +4,7 @@ using System.Text;
 namespace Quiver.Index.FullText;
 
 /// <summary>
-/// Encodes the postings B+Tree composite key (design 13 §3):
+/// Encodes the postings B+Tree composite key:
 /// <c>termLen(2B BE) ‖ term_utf8 ‖ entityId(8B BE sign-flipped)</c>.
 /// <para>
 /// The 2-byte length prefix keeps a term's postings contiguous and prevents

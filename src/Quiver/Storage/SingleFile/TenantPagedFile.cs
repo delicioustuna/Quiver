@@ -94,7 +94,7 @@ internal sealed class TenantPagedFile : IPagedFile
 
     public PageReadHandle PinForRead(PageId pageId) => _physical.PinForRead(Translate(pageId));
     public PageWriteHandle PinForWrite(PageId pageId) => _physical.PinForWrite(Translate(pageId));
-    // FTS-7 (design 13 §10.3): journaling モードを物理層へ転送する (mode は物理 pageId でキーされる)。
+    // FTS-7: journaling モードを物理層へ転送する (spec: 07_fulltext.md#ft-journaling, mode は物理 pageId でキーされる)。
     public PageWriteHandle PinForWrite(PageId pageId, WalJournalMode mode) => _physical.PinForWrite(Translate(pageId), mode);
     // Unpin / UnpinDirty は PagedFile では明示的インターフェイス実装なのでインターフェイス経由で呼ぶ。
     public void Unpin(PageId pageId) => ((IPagedFile)_physical).Unpin(Translate(pageId));

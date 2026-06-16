@@ -3,7 +3,6 @@
     <Project Path="src/Quiver/Quiver.csproj" />
     <Project Path="src/Quiver.Client.Attributes/Quiver.Client.Attributes.csproj" />
     <Project Path="src/Quiver.SourceGen/Quiver.SourceGen.csproj" />
-    <Project Path="src/Quiver.Storage.Sqlite/Quiver.Storage.Sqlite.csproj" />
     <Project Path="src/Quiver.Embedding/Quiver.Embedding.csproj" />
     <Project Path="src/Quiver.Hosting/Quiver.Hosting.csproj" />
     <Project Path="src/Quiver.OpenTelemetry/Quiver.OpenTelemetry.csproj" />
@@ -39,7 +38,6 @@
     <Project Path="tests/Quiver.Client.Tests/Quiver.Client.Tests.csproj" />
     <Project Path="tests/Quiver.SourceGen.Tests/Quiver.SourceGen.Tests.csproj" />
     <Project Path="tests/Quiver.Backend.Tests/Quiver.Backend.Tests.csproj" />
-    <Project Path="tests/Quiver.Storage.Sqlite.Tests/Quiver.Storage.Sqlite.Tests.csproj" />
     <Project Path="tests/Quiver.Hosting.Tests/Quiver.Hosting.Tests.csproj" />
     <Project Path="tests/Quiver.PropertyTests/Quiver.PropertyTests.csproj" />
     <Project Path="tests/Quiver.FuzzTests/Quiver.FuzzTests.csproj" />

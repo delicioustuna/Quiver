@@ -6,7 +6,7 @@ internal enum ExpandOutputMode
     NeighborAndRel = 2,
     Full = 3,
     /// <summary>
-    /// BA-6 / codex_advice_3 §7.2: emit (rel, neighbor, weight) where the
+    /// BA-6: emit (rel, neighbor, weight) where the
     /// weight is read from the V2 adjacency view's inline payload lane. The
     /// weight slot is typed according to the active <c>PayloadLaneSpec.Kind</c>
     /// (Int64 → <see cref="TupleSlotType.Int64"/>, Double →

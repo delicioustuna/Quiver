@@ -1,3 +1,0 @@
-using System.Runtime.CompilerServices;
-[assembly: InternalsVisibleTo("Quiver.Backend.Tests")]
-[assembly: InternalsVisibleTo("Quiver.Storage.Sqlite.Tests")]

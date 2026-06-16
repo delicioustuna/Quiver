@@ -211,7 +211,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     }
 
     /// <summary>
-    /// PW-14 / codex_advice_3 §7.6. Rebuild the immutable base adjacency view
+    /// PW-14: Rebuild the immutable base adjacency view
     /// from the current relationship store, drop tombstones, and bump the
     /// epoch. After this call all live edges are served from base and the
     /// delta walk yields nothing until new relationships are created.

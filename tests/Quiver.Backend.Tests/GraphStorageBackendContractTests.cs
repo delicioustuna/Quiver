@@ -29,10 +29,6 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     /// <summary>ARCH-4: テストディレクトリ。fault 注入やファイルパス解決でサブクラスが参照する。</summary>
     protected string DatabaseDirectory => _dir;
 
-    /// <summary>
-    /// ARCH-4 増分8: factory.Open に渡すパス。SQLite はディレクトリ (既定)、binary backend は
-    /// <c>&lt;dir&gt;/graph.quiver</c> ファイルパス (サブクラスが override)。
-    /// </summary>
     protected virtual string DatabasePath => _dir;
 
     public void Dispose()
@@ -43,8 +39,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     }
 
     /// <summary>
-    /// Factory under test. Each concrete subclass returns its own backend factory
-    /// (binary, SQLite, in-memory, etc.).
+    /// Factory under test. Each concrete subclass returns its own backend factory.
     /// </summary>
     protected abstract IGraphStorageBackendFactory CreateFactory();
 

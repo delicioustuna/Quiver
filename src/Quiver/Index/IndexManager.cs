@@ -425,7 +425,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         if (newText is not null) index.AddDocument(entityId, tok, newText);
     }
 
-    // FTS-7 (design 13 §10.4): recovery 論理相 / abort 論理 undo の振り分け。indexTenantId から
+    // FTS-7: recovery 論理相 / abort 論理 undo の振り分け (spec: 07_fulltext.md#ft-recovery)。indexTenantId から
     // 該当 FullTextIndex (postings or norms tenant 一致) を引いて raw apply する。
     public void ApplyFtLeafRedo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value)
     {
@@ -454,8 +454,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     {
         var pTenant = _container.OpenTenant(postingsTenant, PageKind.Header);
         var nTenant = _container.OpenTenant(normsTenant, PageKind.Header);
-        // FTS-7 (design 13 §10): postings/norms は logical-leaf モードで開く (leaf 更新 = FtLeafMutation 論理レコード、
-        // SMO = FtStructureImage)。logicalTenantId は recovery が tenant→tree を引くキー (§10.8)。
+        // FTS-7: postings/norms は logical-leaf モードで開く (spec: 07_fulltext.md#logical-wal,
+        // leaf 更新 = FtLeafMutation 論理レコード、SMO = FtStructureImage)。logicalTenantId は recovery が tenant→tree を引くキー。
         var postings = new BTreeIndex<byte[]>(pTenant, new BytesKeyCodec(), name + ":postings", IndexKeyKind.Bytes,
             logicalLeaf: true, logicalTenantId: postingsTenant);
         var norms = new BTreeIndex<long>(nTenant, new Int64KeyCodec(), name + ":norms", IndexKeyKind.Int64,

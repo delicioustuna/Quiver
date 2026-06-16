@@ -44,7 +44,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     private long _entryCount;
     private int _height;
 
-    // FTS-7 (design 13 §10.3, 実装で簡素化 — 下記): logical-leaf モード。postings/norms の 2 本のみ true。
+    // FTS-7 (spec: 07_fulltext.md#ft-journaling, 実装で簡素化 — 下記): logical-leaf モード。postings/norms の 2 本のみ true。
     // leaf in-place 更新 = Suppressed (page-image 抑止 → FtLeafMutation 論理レコードで覆う) = 増幅圧縮の本体。
     // 構造ページ (split/merge/internal/root/header) = **Full のまま** (通常 page-WAL: eager CLR + coalesced
     // after-image)。当初案の RedoOnly/FtStructureImage (nested top action) は、eager 書込が大 tx 内で
@@ -88,7 +88,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         byte[] kb = Encode(key);
         // FTS-7: logical-leaf モードでは、leaf 更新前に state-setting 論理レコードを eager 発行する
         // (WAL-ahead; recovery 中は WalPageContext.Current が null なので no-op)。normal op はキー不在への
-        // 挿入だが、redo の冪等性 (二重適用 no-op) は Upsert 意味の再実行 (UpsertRaw) で担保する (§10.2)。
+        // 挿入だが、redo の冪等性 (二重適用 no-op) は Upsert 意味の再実行 (UpsertRaw) で担保する。
         if (_logicalLeaf)
             WalPageContext.LogFtLeafMutation(FtLeafMutationCodec.Op.Upsert, _logicalTenantId, kb, value);
         var split = InsertDown(_root, kb, value, 0);
@@ -255,7 +255,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     }
 
     /// <summary>
-    /// FTS-7 (design 13 §10.4): 生キーの **idempotent set** (recovery Pass 2b redo / Pass 3 undo 用)。
+    /// FTS-7: 生キーの **idempotent set** (recovery Pass 2b redo / Pass 3 undo 用)。
     /// 存在すれば値を上書き、無ければ挿入する (state-setting なので二重適用が no-op)。WAL は emit しない
     /// pure apply (recovery 中は WalPageContext.Current が null で page-WAL も出ない)。
     /// </summary>
@@ -1059,7 +1059,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     // 順序 = 論理 undo → before-image undo が header CLR で pre-tx へ確定) だが、**crash recovery では
     // hint** に留まる (物理相 2a が header の committed entryCount を復元し、論理相 2b の再実行が同じキーを
     // 再 insert して二重計上しうる; checkpoint タイミング依存で over/under 双方向に drift)。DocumentCount =
-    // BM25 の N は §6 で統計の鮮度に頑健と既定済みで、権威ある件数は GraphStats 収集 / scan / RepairIndexes。
+    // BM25 の N は統計の鮮度に頑健 (spec: 07_fulltext.md#bm25) と既定済みで、権威ある件数は GraphStats 収集 / scan / RepairIndexes。
     private void FlushHeader()
     {
         var ph = _file.PinForWrite(HeaderPageId, _structMode);
@@ -1197,7 +1197,7 @@ internal ref struct BTreeRangeEnumerator
 
 /// <summary>
 /// FTS-8: a forward-only, seekable cursor over a raw byte key range, used by WAND
-/// document-at-a-time scoring (13 §7.5). It walks the leaf-link chain like
+/// document-at-a-time scoring. It walks the leaf-link chain like
 /// <see cref="BTreeRangeEnumerator"/> but is a heap object (so cursors can live in an
 /// array) and supports <see cref="SeekTo"/>, which descends from the root in
 /// O(log N) when the target is beyond the loaded leaf (the skip-pointer substitute),

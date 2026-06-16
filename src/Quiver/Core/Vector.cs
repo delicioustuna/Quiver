@@ -1,6 +1,6 @@
 namespace Quiver.Core;
 
-// EntityKind is defined in EntityId.cs. Vector code (codex_advice_3.md §6.2)
+// EntityKind is defined in EntityId.cs. Vector code (spec: 06_vector.md#vector-index)
 // only uses Node / Relationship; Property is reserved for diagnostics / catalog and is
 // rejected by IVectorStore implementations.
 
@@ -66,7 +66,7 @@ public abstract class VectorSearchCursor : IDisposable
 /// <summary>
 /// float ベクトルの格納と KNN 実行を担う最小のコア契約。テキスト処理 / プロバイダ呼び出し /
 /// リトライ / タスクログは意図的に除外され、それらは <c>Quiver.Embedding</c> にある
-/// (codex_advice_3.md §6.3)。
+/// 。
 /// </summary>
 public interface IVectorStore
 {
@@ -111,7 +111,7 @@ public interface IVectorStore
     /// を Q 回呼ぶフォールバック。in-memory backend は単一 snapshot 上で
     /// 「Q 個のクエリ × N 件のコーパス」を gather-then-score でまとめて評価する。
     /// </summary>
-    /// <remarks>codex_advice_3.md §6.4。返却順序は入力 <paramref name="queries"/> と一致する。</remarks>
+    /// <remarks>返却順序は入力 <paramref name="queries"/> と一致する。</remarks>
     IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
         string indexName,
         IReadOnlyList<ReadOnlyMemory<float>> queries,

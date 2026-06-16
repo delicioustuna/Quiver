@@ -5,7 +5,7 @@ namespace Quiver.Embedding.Providers;
 /// <summary>
 /// テキストから float ベクトルを生成する処理の抽象。プロバイダ固有の状態
 /// (HTTP クライアント、ローカルモデルハンドルなど) は実装側が保持し、
-/// ヘルパパイプラインはこれらの呼び出しだけを見る。詳細は 10_embedding_pipeline.md 3.1 節を参照。
+/// ヘルパパイプラインはこれらの呼び出しだけを見る。
 /// </summary>
 public interface IEmbeddingProvider : IAsyncDisposable
 {

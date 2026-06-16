@@ -7,7 +7,7 @@ namespace Quiver;
 /// <summary>
 /// ARCH-2: backend 非依存の内部トランザクション契約。公開 <see cref="IGraphTransaction"/> から
 /// 外した「物理プラン実行 / access methods / 隣接ブロック」を担い、エンジン内部と
-/// backend 衛星 (binary / SQLite) の双方が実装する。API 利用者には露出しない。
+/// backend 衛星が実装する。API 利用者には露出しない。
 /// </summary>
 internal interface IGraphTransactionInternal : IGraphTransaction
 {
@@ -50,7 +50,7 @@ internal readonly record struct ColumnAggregate(
 /// </summary>
 internal static class GraphTransactionInternalExtensions
 {
-    /// <summary>公開ハンドルを内部契約へキャストする。実装は binary / SQLite の双方が満たす。</summary>
+    /// <summary>公開ハンドルを内部契約へキャストする。</summary>
     internal static IGraphTransactionInternal AsInternal(this IGraphTransaction tx)
         => (IGraphTransactionInternal)tx;
 

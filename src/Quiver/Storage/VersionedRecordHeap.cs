@@ -21,7 +21,7 @@ namespace Quiver.Storage;
 /// <para>更新は新 version を別 slot へ書き、旧 head に xmax をスタンプし、map を新 head へ
 /// repoint する (append-at-head の版チェーン)。snapshot reader は head から
 /// <c>nextVersionPtr</c> を辿り最初に可視な version を返す。これにより xmin/xmax を
-/// レコードへ再内包した統一 MVCC レコードモデル (docs/design/11 §6.3) を実現する。</para>
+/// レコードへ再内包した統一 MVCC レコードモデルを実現する。</para>
 ///
 /// <para>backend へは未配線 (Phase 2 で NodeStore を本ヒープへ載せ替える)。可視性は
 /// <see cref="VersionVisible"/> デリゲートで注入し、本骨格は MvccContext に依存しない

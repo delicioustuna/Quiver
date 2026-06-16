@@ -13,8 +13,7 @@ public readonly partial record struct EntityRef(EntityKind Kind, long Id);
 
 /// <summary>
 /// <c>Quiver.Embedding</c> ヘルパが直接 <c>Quiver.GraphDatabase</c> に依存せずに済むための薄い抽象。
-/// アダプタを介することで、ヘルパはエンジン内部実装から疎結合に保たれる
-/// — 詳細は codex_advice_3.md 6.6 節 / 6.8 節。
+/// アダプタを介することで、ヘルパはエンジン内部実装から疎結合に保たれる。
 /// </summary>
 /// <remarks>
 /// エンジンはベクトルストア・ベクトルカタログ、およびスキャン / バックフィル経路 (Z') 用の

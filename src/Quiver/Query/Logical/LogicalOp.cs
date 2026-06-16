@@ -159,7 +159,7 @@ internal enum FusionStrategy
 /// (<see cref="FullTextScanOp"/> / <see cref="KnnOp"/>) で、それらの順位を <see cref="Strategy"/>
 /// (Phase 1 は RRF) で融合し上位 <see cref="K"/> 件を放出する。RRF は rank のみで計算できるため
 /// 既存の「score 非公開」設計 (KnnOp / FullTextScanOp と同方針) を変えずに融合できる
-/// (design 13 §7.2)。DSL (<c>g.HybridSearch</c>) は子を常に <c>Candidate=null</c> で生成する。
+/// 。DSL (<c>g.HybridSearch</c>) は子を常に <c>Candidate=null</c> で生成する。
 /// </summary>
 internal sealed record FusionOp(
     ImmutableArray<LogicalOp> Children,

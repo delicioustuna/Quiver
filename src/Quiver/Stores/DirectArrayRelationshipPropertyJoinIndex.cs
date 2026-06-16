@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// FT-12 / codex_advice_3 §7.3 — implementation (a). Dense direct array
+/// FT-12 — implementation (a). Dense direct array
 /// indexed by <see cref="RelationshipId"/>. Allocates one
 /// <see cref="long"/> + one presence bit per relationship slot, so memory
 /// is ~9 bytes per slot regardless of population; suitable when relationship

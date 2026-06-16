@@ -10,7 +10,7 @@ namespace Quiver.Query.Physical;
 /// filter / expand chain exactly like <see cref="KnnNodeSourceOperator"/>.
 /// </summary>
 /// <remarks>
-/// design 13 section 6/7. Term-at-a-time BM25 via the shared <see cref="Bm25Scorer"/>:
+/// Term-at-a-time BM25 via the shared <see cref="Bm25Scorer"/>:
 /// tokenize the query with the index's recorded tokenizer, range-scan each term's
 /// postings, accumulate per doc (df counted during the scan, idf applied per term),
 /// then emit the top-k. Score is intentionally not surfaced (same MVP policy as KNN).
@@ -59,7 +59,7 @@ internal sealed class FullTextScanOperator : IPhysicalOperator
         // pruning (skips high-df postings, exact top-k). RankWand filters liveness inline
         // so its k-bounded heap holds top-k live docs. It returns null if a query term is
         // unknown to the snapshot (unbounded) — then fall back to the full term-at-a-time
-        // scan, which also re-uses the snapshot df so both paths agree on idf (design 13 §7.5).
+        // scan, which also re-uses the snapshot df so both paths agree on idf (spec: 07_fulltext.md#wand).
         var nodes = tx.Nodes;
         var termStats = _corpus?.Terms;
         List<long>? ranked = termStats is not null

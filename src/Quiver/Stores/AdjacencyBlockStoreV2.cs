@@ -6,7 +6,7 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// BA-6 / codex_advice_3 7.2 節。インライン payload lane (エッジ重み) を持つ
+/// BA-6: インライン payload lane (エッジ重み) を持つ
 /// 読み取り最適化済みの隣接ビュー。重み付きトラバーサル / SSSP / top-k 近傍などの
 /// hot path スカラ重みでプロパティチェーンへのジョインを避けられる。
 ///

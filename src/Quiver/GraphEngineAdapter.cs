@@ -8,7 +8,7 @@ namespace Quiver;
 /// <summary>
 /// <see cref="GraphDatabase"/> と呼び出し側から渡される <see cref="IVectorStore"/> /
 /// <see cref="IVectorCatalog"/> を、<c>Quiver.Embedding</c> が依存する <see cref="IGraphEngine"/>
-/// 抽象に橋渡しするアダプタ (VEC-4 / codex_advice_3.md 6.6 節)。
+/// 抽象に橋渡しするアダプタ (VEC-4)。
 /// ヘルパからエンジン内部実装を隠蔽しつつ、エンティティ走査と source-text プロパティ読み出しを公開する。
 /// </summary>
 /// <remarks>

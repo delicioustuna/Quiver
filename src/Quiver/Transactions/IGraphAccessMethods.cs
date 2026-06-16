@@ -4,7 +4,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Transactions;
 
 /// <summary>
-/// バックエンドの access methods コントラクト (BA-3、codex_advice_3.md 1 節)。
+/// バックエンドの access methods コントラクト (BA-3)。
 /// オペレータは <see cref="ITransaction.Nodes"/> / <see cref="ITransaction.Relationships"/> /
 /// <see cref="ITransaction.AdjacencyBlocks"/> を直接叩く代わりに、scan / seek / expand を
 /// このインタフェースを経由してルーティングする。これにより各バックエンドは独自の access path
@@ -77,7 +77,7 @@ internal interface IGraphAccessMethods
     /// query スパンは内部でコピーするので、呼び出し側が呼び出し以降も保持する必要はない。
     /// </summary>
     /// <remarks>
-    /// codex_advice_3.md 6.4 節。Cosine / Dot では類似度降順、Euclidean では距離昇順 (内部で
+    /// Cosine / Dot では類似度降順、Euclidean では距離昇順 (内部で
     /// 符号反転して "高いほど近い" スコアに揃える) で結果を返す。
     /// ベクトルストアを持たないバックエンドは <see cref="NotSupportedException"/> を投げる。
     /// </remarks>
@@ -110,7 +110,7 @@ internal interface IGraphAccessMethods
     /// バックエンドはベクトルインデックス側にフィルタを push down してよい。
     /// </summary>
     /// <remarks>
-    /// codex_advice_3.md 6.4 節。スコア順序は維持され、類似度降順で返る。
+    /// スコア順序は維持され、類似度降順で返る。
     /// <paramref name="candidates"/> の <see cref="EntityCandidateSet.Kind"/> がインデックスの
     /// <see cref="EntityKind"/> と異なる場合は常に一致無しになる — これは構成誤りで、
     /// オペレータ層が顕在化させる責務であり、本契約違反ではない。

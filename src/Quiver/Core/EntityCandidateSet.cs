@@ -9,7 +9,7 @@ namespace Quiver.Core;
 /// <remarks>
 /// 現状は <see cref="HashSet{T}"/> 裏付け。<c>FrontierSet</c> 系のビットマップバリアントは、
 /// dense なノード ID パターンで効果が出るようになった段階で追加するのが妥当 — フィルタ付き KNN の
-/// 初期の正しさ経路 (codex_advice_3.md 6.4 節) では不要。
+/// 初期の正しさ経路では不要。
 /// </remarks>
 public sealed class EntityCandidateSet
 {

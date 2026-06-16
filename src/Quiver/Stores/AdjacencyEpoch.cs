@@ -5,7 +5,7 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// PW-14 / codex_advice_3 §7.6. Persistent metadata for the immutable base
+/// PW-14: Persistent metadata for the immutable base
 /// adjacency view: the relationship-id watermark separating base from delta,
 /// a monotonic compact epoch, and the set of base relationships deleted since
 /// the base was last built (tombstones).

@@ -54,7 +54,7 @@ public enum PayloadKind : byte
 /// <see cref="AdjacencyBlockStoreV2"/> に付随する任意の payload lane の設定。
 /// <see cref="PropertyKeyId"/> はどのリレーションシッププロパティを inline するかを示し、
 /// <see cref="DefaultRaw"/> はそのキーの値を持たない (または型が異なる) エッジに代入する生の
-/// 64bit 値。既定値ポリシーはビュー構築時に固定される (codex_advice_3.md §7.2)。
+/// 64bit 値。既定値ポリシーはビュー構築時に固定される。
 /// </summary>
 public readonly struct PayloadLaneSpec
 {

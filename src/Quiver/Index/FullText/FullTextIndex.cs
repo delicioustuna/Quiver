@@ -4,7 +4,7 @@ using Quiver.Text;
 namespace Quiver.Index.FullText;
 
 /// <summary>
-/// A logical full-text index (design 13 section 3): a pair of B+Tree tenants — a
+/// A logical full-text index: a pair of B+Tree tenants — a
 /// postings index (<c>byte[]</c> composite key <c>(term, entityId)</c> -> tf) and
 /// a norms index (<c>long</c> key entityId -> docLen) — plus the metadata needed
 /// to maintain and query it (label, property key, tokenizer id).
@@ -49,7 +49,7 @@ internal sealed class FullTextIndex : IDisposable
     /// <summary>
     /// FTS-3 BM25 statistics: document count N and the summed document length
     /// (avgdl = total / N). Computed by scanning norms once — an approximation that
-    /// is fine for BM25 (design 13 section 6); FTS-4 moves N/avgdl into GraphStats.
+    /// is fine for BM25; FTS-4 moves N/avgdl into GraphStats.
     /// </summary>
     public (long DocCount, long TotalTokens) NormsSummary()
     {
@@ -120,7 +120,7 @@ internal sealed class FullTextIndex : IDisposable
     }
 
     /// <summary>
-    /// FTS-8: per-term statistics for WAND pruning (design 13 §7.5). Scans postings once
+    /// FTS-8: per-term statistics for WAND pruning. Scans postings once
     /// for <c>term → (df, maxTf)</c> and norms once for <c>(minDocLen, N, totalTokens)</c>.
     /// Called only at <see cref="Quiver.GraphStats"/> collection time (not per query), so
     /// the snapshot drives both BM25 N/avgdl and the per-term upper bounds. df is the
@@ -181,11 +181,11 @@ internal sealed class FullTextIndex : IDisposable
         _norms.ReloadFromHeader();
     }
 
-    // ---- orphan sweep support (design 13 section 4) ----
+    // ---- orphan sweep support (spec: 07_fulltext.md#architecture) ----
     // postings は entityId を key 末尾 8B に、norms は entityId を key (Int64) に持つため、
     // 値ベースの汎用 sweep ではなく key からの entityId デコードが要る。
 
-    // ---- FTS-7: recovery 論理相 (design 13 §10.4) ----
+    // ---- FTS-7: recovery 論理相 (spec: 07_fulltext.md#ft-recovery) ----
     // indexTenantId で postings / norms のどちらかへ raw apply を振り分ける。redo は state-setting
     // (Upsert→UpsertRaw / Delete→DeleteRawEntry)、undo はその逆操作。いずれも冪等で二重適用安全。
 
@@ -241,7 +241,7 @@ internal sealed class FullTextIndex : IDisposable
 /// <summary>
 /// FTS-8: a single term's postings cursor for WAND. Wraps a raw B+Tree cursor over the
 /// term's <c>(term, entityId)</c> key range, surfacing the decoded entityId and tf and a
-/// <see cref="SeekTo"/> that skips to a pivot entityId (design 13 §7.5). Cursors advance
+/// <see cref="SeekTo"/> that skips to a pivot entityId. Cursors advance
 /// in entityId order, which is exactly the composite-key order, so a multi-term merge is
 /// free of any explicit sort of the postings themselves.
 /// </summary>

@@ -1,7 +1,7 @@
 namespace Quiver.Text;
 
 /// <summary>
-/// Mixed bigram/word tokenizer (FTS-1, design 13 §5). Normalizes the input
+/// Mixed bigram/word tokenizer (FTS-1). Normalizes the input
 /// (NFKC + ASCII lowercase) then segments it by Unicode script:
 /// <list type="bullet">
 /// <item>CJK runs (kana / kanji / hangul) are split into overlapping
@@ -12,7 +12,7 @@ namespace Quiver.Text;
 /// <item>Everything else (whitespace, punctuation, symbols, emoji) acts as a
 /// separator and produces no token.</item>
 /// </list>
-/// No morphological analysis (out of scope per design 12 §4): bigram imprecision
+/// No morphological analysis (out of scope): bigram imprecision
 /// is tolerated because the vector side and RRF fusion compensate in the RAG use case.
 /// </summary>
 public sealed class MixedBigramTokenizer : ITokenizer
@@ -48,7 +48,7 @@ public sealed class MixedBigramTokenizer : ITokenizer
         ArgumentNullException.ThrowIfNull(sink);
         if (text.IsEmpty) return;
 
-        // Normalize first, then segment (design 13 §5: normalize then split).
+        // Normalize first, then segment (spec: 07_fulltext.md#tokenizer).
         string normalized = _normalizer.Normalize(text).Text;
         ReadOnlySpan<char> s = normalized.AsSpan();
         int n = s.Length;

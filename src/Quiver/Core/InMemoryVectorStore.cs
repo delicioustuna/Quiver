@@ -11,9 +11,9 @@ namespace Quiver.Core;
 /// binary backend はベクトルと HNSW ANN 索引を
 /// <see cref="Quiver.Storage.Records.PersistentVectorStore"/> +
 /// <see cref="Quiver.Storage.Records.HnswIndex"/> で in-file に永続化する。
-/// この in-memory ストアは (a) SQLite MVP backend (ベクトル永続化は対象外)、
-/// (b) 単体テスト / smoke サンプル / fixtures、(c) 永続ストアが満たすべき契約挙動の
-/// 基準、のために残している。docs/design/11 §6.3 参照。</para>
+/// この in-memory ストアは (a) 単体テスト / smoke サンプル / fixtures、
+/// (b) 永続ストアが満たすべき契約挙動の
+/// 基準、のために残している。</para>
 /// </summary>
 public sealed class InMemoryVectorStore : IVectorStore
 {

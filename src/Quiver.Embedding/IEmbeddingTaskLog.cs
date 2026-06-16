@@ -5,8 +5,7 @@ namespace Quiver.Embedding;
 /// <summary>
 /// Idempotency log keyed by <see cref="EmbeddingTaskKey"/>. The pipeline
 /// consults <see cref="GetInfoAsync"/> before invoking the provider so that
-/// a successful run with the same content hash is a no-op. See
-/// 10_embedding_pipeline.md §3.7.
+/// a successful run with the same content hash is a no-op.
 /// </summary>
 public interface IEmbeddingTaskLog
 {

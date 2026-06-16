@@ -237,7 +237,7 @@ public sealed class GraphStats
     /// <summary>
     /// FTS-4: 全文索引ごとの BM25 コーパス統計 (N / avgdl) スナップショット。索引名でキーする。
     /// <c>g.Search</c> / <c>.FilterByText</c> が operator へ N/avgdl を渡し、クエリ毎の O(N) norms
-    /// 走査を省く (design 13 §6: BM25 は統計鮮度に頑健なので定期収集・近似で足りる)。internal 専用
+    /// 走査を省く (BM25 は統計鮮度に頑健なので定期収集・近似で足りる)。internal 専用
     /// (<see cref="Bm25CorpusStats"/> が internal、公開サーフェスは増やさない)。
     /// </summary>
     internal IReadOnlyDictionary<string, Bm25CorpusStats> FullTextCorpora { get; private init; }
@@ -479,7 +479,7 @@ public sealed class GraphStats
 
         // FTS-4/8: snapshot per-full-text-index BM25 corpus stats. One postings + one
         // norms scan per index here replaces an O(N) scan per query in the scan operators
-        // and supplies the per-term (df, maxTf) + minDocLen WAND needs (design 13 §7.5).
+        // and supplies the per-term (df, maxTf) + minDocLen WAND needs (spec: 07_fulltext.md#wand).
         var ftCorpora = new Dictionary<string, Bm25CorpusStats>(StringComparer.Ordinal);
         foreach (var (name, _, _, _) in tx.Indexes.ListFullTextIndexes())
         {

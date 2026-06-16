@@ -5,8 +5,8 @@ namespace Quiver.Logical;
 /// <summary>
 /// Receives the logical mutation stream of a
 /// committed transaction. The sink fires exactly once per successful commit,
-/// after the underlying physical durability boundary (binary backend: WAL flush;
-/// SQLite backend: <c>COMMIT</c>) has returned successfully. Rolled-back
+/// after the underlying physical durability boundary (WAL flush)
+/// has returned successfully. Rolled-back
 /// transactions are not delivered.
 /// </summary>
 /// <remarks>

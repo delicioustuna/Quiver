@@ -5,8 +5,8 @@ using Quiver.Transactions;
 namespace Quiver;
 
 /// <summary>
-/// Quiver ストレージエンジンのバックエンド側コントラクト。各バックエンド
-/// (バイナリ、SQLite 等) がこのインタフェースを実装することで、
+/// Quiver ストレージエンジンのバックエンド側コントラクト。バックエンドが
+/// このインタフェースを実装することで、
 /// <see cref="GraphDatabase"/> は薄いファサードに留まり、ストレージレイアウトを
 /// ファクトリレベルで差し替え可能にする。
 /// </summary>
@@ -25,7 +25,7 @@ public interface IGraphStorageBackend : IDisposable
     /// <summary>
     /// <see cref="IGraphAccessMethods.KnnSearch"/> が利用するベクトルストア。
     /// ユーザにも <c>CreateVectorIndex</c> / <c>SetVector</c> 用に公開される。
-    /// ベクトルの永続化に未対応のバックエンド (バイナリ、SQLite MVP) ではインメモリストアが既定。
+    /// ベクトルの永続化に未対応のバックエンドではインメモリストアが既定。
     /// </summary>
     IVectorStore Vectors { get; }
 

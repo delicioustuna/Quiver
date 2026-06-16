@@ -6,7 +6,7 @@ namespace Quiver.Query.Physical;
 /// PW-12: <see cref="BitmapFilterOperator"/> が利用するバッチ単位の最小選択ビットマップ。
 /// 呼び出し側が所有する <see cref="ulong"/> ワードの <see cref="Span{T}"/> と論理ビット数
 /// (<c>≤ words.Length * 64</c>) をラップする。
-/// codex_advice_3.md 7.4 節の通り、行指向ページでも小さなビットマップを介在させることで
+/// 行指向ページでも小さなビットマップを介在させることで
 /// 複数述語を選択度順に評価でき、既に失格となった行を再度走査せずに済む。
 /// </summary>
 internal ref struct PageSelectionBitmap

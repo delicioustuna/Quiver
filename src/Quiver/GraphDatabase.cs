@@ -11,8 +11,8 @@ namespace Quiver;
 /// バルクロード・スナップショットビュー構築・統計収集の窓口を提供する。
 /// </summary>
 /// <remarks>
-/// 内部では <see cref="IGraphStorageBackend"/> を介してバイナリ / SQLite など複数の
-/// ストレージバックエンドを切り替え可能。通常は <see cref="Open"/> で生成し、用が済んだら
+/// 内部では <see cref="IGraphStorageBackend"/> を介してストレージバックエンドを
+/// 切り替え可能。通常は <see cref="Open"/> で生成し、用が済んだら
 /// <see cref="Dispose"/> で破棄する。
 /// </remarks>
 public sealed class GraphDatabase : IDisposable
@@ -27,7 +27,7 @@ public sealed class GraphDatabase : IDisposable
         string path,
         AutoVacuumWorker? autoVacuumWorker = null)
     {
-        // ARCH-2: 内部 SPI へキャスト (binary / SQLite の双方が IGraphStorageBackendInternal を実装)。
+        // ARCH-2: 内部 SPI へキャスト。
         _backend = (IGraphStorageBackendInternal)backend;
         _path = path;
         _autoVacuumWorker = autoVacuumWorker;
@@ -313,8 +313,7 @@ public sealed class GraphDatabase : IDisposable
         => new Migrations.MigrationHistory(MigrationDirectory).Entries;
 
     // ARCH-4 増分8: migrations.history はバックエンドのデータディレクトリに置く (operational metadata)。
-    // binary は *.quiver の親、SQLite はデータディレクトリそのもの。_path から直接 GetDirectoryName すると
-    // SQLite (パス = ディレクトリ) で親に逸れるため、backend の DataDirectory を正本とする。
+    // backend の DataDirectory を正本とする。
     private string MigrationDirectory => _backend.DataDirectory;
 
     /// <summary>
@@ -425,7 +424,7 @@ public sealed class GraphDatabaseOptions
     /// <c>SetProperty</c> など) をバックエンドが記録し、コミットが永続化された後に
     /// このシンクへバッチで引き渡す。バイナリバックエンドはクラッシュリカバリ向けに
     /// PageImage WAL を引き続き利用する — 論理ストリームはオプションの 2 系統目で、
-    /// SQLite バックエンド連携・デバッグ / 監査ログ転送・マイグレーション・将来の
+    /// デバッグ / 監査ログ転送・マイグレーション・将来の
     /// レプリケーション用途を想定。ロールバックされたトランザクションは届かない。
     /// </summary>
     public ILogicalMutationSink? LogicalMutationSink { get; set; }

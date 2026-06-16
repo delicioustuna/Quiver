@@ -26,8 +26,7 @@ public sealed record RagStoreOptions
     /// <summary>
     /// Chunk.text 全文索引 (<see cref="RagSchema.ChunkTextIndex"/>) を<b>作成する</b>か。既定 <c>true</c>。
     /// これは作成可否のみを制御する。既存の索引はこの値が <c>false</c> でも維持・利用され
-    /// (<see cref="RagStore.FullTextEnabled"/> は <c>true</c> のまま)、全文索引を提供しない
-    /// バックエンド (SQLite) では作成がスキップされ <see cref="RagStore.FullTextEnabled"/> が <c>false</c> になる。
+    /// (<see cref="RagStore.FullTextEnabled"/> は <c>true</c> のまま)。
     /// </summary>
     public bool EnableFullTextIndex { get; init; } = true;
 

@@ -73,7 +73,7 @@ public sealed class BulkLoader : IDisposable
     /// <summary>
     /// inline payload lane を設定し、<see cref="Commit"/> で指定したリレーションシッププロパティを
     /// エッジエントリ毎に inline 格納した <c>AdjacencyBlockStoreV2</c> を構築させる
-    /// (codex_advice_3 §7.2)。以後の <see cref="AppendRelationshipPayload"/> で lane を埋め、
+    /// 。以後の <see cref="AppendRelationshipPayload"/> で lane を埋め、
     /// 値の無いエッジには <c>spec.DefaultRaw</c> が入る。
     /// </summary>
     public void WithPayloadLane(PayloadLaneSpec spec)
