@@ -204,6 +204,37 @@ public sealed class FullTextWandTests : IDisposable
     }
 
     [Fact]
+    public void Wand_does_not_drop_docs_when_snapshot_maxTf_is_stale()
+    {
+        // 監査 #3 (WAND staleness, spec: 07_fulltext.md#wand): WAND の per-term 上限が snapshot の
+        // maxTf/minDocLen に依存していると、snapshot 後に高 tf 文書が増えたとき上限が過小評価され、
+        // WAND が「どの残り文書も theta を超えられない」と誤判定して高スコア文書を取りこぼす
+        // (exact top-k 違反)。漸近上限 idf*(K1+1) は tf/docLen に依らない真の上限なので解消する。
+        AddDoc("wandterm");                       // seed: tf=1 → snapshot maxTf=1, minDocLen=1
+        var stale = _db.CollectStats();           // この時点の (df,maxTf,minDocLen,n,avgdl) を凍結
+
+        // snapshot 後に高 tf 文書を追加する (WAND が読むのはライブ postings)。
+        AddDoc("wandterm wandterm");                                          // tf=2
+        AddDoc(string.Join(' ', Enumerable.Repeat("wandterm", 5)));          // tf=5
+        AddDoc(string.Join(' ', Enumerable.Repeat("wandterm", 10)));         // tf=10
+
+        var corpus = stale.FullTextCorpus(Index)!.Value;
+        var ft = Ft();
+        var tokenizer = ((SchemaApi)_db.Schema).IndexManager.ResolveTokenizer(ft.TokenizerId);
+
+        // 同一 (stale) stats 基準での exact 全走査と WAND を比較する。
+        var exact = Bm25Scorer.Rank(
+            ft, tokenizer, "wandterm", corpus.DocumentCount, corpus.AverageDocLength,
+            candidateSequences: null, termStats: corpus.Terms).Take(2).ToList();
+        var wand = Bm25Scorer.RankWand(
+            ft, tokenizer, "wandterm", corpus.DocumentCount, corpus.AverageDocLength, corpus.Terms!, k: 2)!;
+
+        wand.Should().Equal(exact,
+            "WAND must return the same exact top-k as the full scan under the same stats basis " +
+            "even when the snapshot maxTf/minDocLen are stale relative to the live postings (audit #3)");
+    }
+
+    [Fact]
     public void Wand_liveness_filter_drops_dead_doc_and_fills_from_next_live()
     {
         // Directly exercise RankWand's inline liveness filter (the isLive==false branch):

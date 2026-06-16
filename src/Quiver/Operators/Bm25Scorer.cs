@@ -8,9 +8,13 @@ namespace Quiver.Query.Physical;
 /// <summary>
 /// FTS-8: per-term corpus statistics for WAND pruning. Holds the
 /// snapshot <c>term → (df, maxTf)</c> table plus the corpus minimum document length, all
-/// computed once at <see cref="Quiver.GraphStats"/> collection time. df drives idf and
-/// (with maxTf and minDocLen) the per-term BM25 score upper bound; minDocLen makes that
-/// bound a true upper bound (the smallest length normalization denominator).
+/// computed once at <see cref="Quiver.GraphStats"/> collection time. df drives idf (and the
+/// per-term WAND upper bound).
+/// <para>
+/// 監査 #3: WAND の per-term 上限はもはや maxTf / minDocLen を使わない (snapshot がライブ index に
+/// 対して stale だと過小評価され top-k を取りこぼすため)。代わりに tf/docLen に依らない漸近上限
+/// <c>idf*(K1+1)</c> を使う。maxTf / minDocLen は将来の block-max WAND 等のために収集を残す。
+/// </para>
 /// </summary>
 internal sealed class Bm25TermStats
 {
@@ -140,16 +144,20 @@ internal static class Bm25Scorer
         tokenizer.Tokenize(queryText, sink);
         if (sink.Terms.Count == 0) return new List<long>();
 
-        double normMin = 1.0 - B + (avgdl > 0 ? B * termStats.MinDocLen / avgdl : 0.0);
         var cursors = new List<WandTerm>(sink.Terms.Count);
         foreach (var term in sink.Terms)
         {
-            if (!termStats.TryGet(term, out int df, out int maxTf))
+            if (!termStats.TryGet(term, out int df, out _))
                 return null; // unknown term: cannot bound safely → fall back to full scan
             if (df <= 0) continue;
             double idf = Math.Log(1.0 + (n - df + 0.5) / (df + 0.5));
-            double denom = maxTf + K1 * normMin;
-            double ub = denom > 0 ? idf * (maxTf * (K1 + 1.0)) / denom : 0.0;
+            // 監査 #3 (WAND staleness, spec: 07_fulltext.md#wand): per-term の上限は BM25 項寄与の
+            // 漸近上限 idf*(K1+1) を使う。寄与 idf*(tf*(K1+1))/(tf + K1*lenNorm) は tf について単調増加で
+            // tf→∞ で idf*(K1+1) に収束し、lenNorm≥0 なので任意の tf/docLen に対し ≤ idf*(K1+1)。
+            // これは snapshot の maxTf/minDocLen に依存しないため、snapshot 後にライブ index へ高 tf /
+            // 短文書が増えても上限が過小評価されず、WAND は full-scan と厳密一致する (top-k の取りこぼし無し)。
+            // maxTf/minDocLen ベースのより緊い上限は staleness で不正となり得たため不採用。
+            double ub = idf * (K1 + 1.0);
             var cur = ft.OpenPostingsCursor(Encoding.UTF8.GetBytes(term));
             if (cur.MoveNext()) cursors.Add(new WandTerm(idf, ub, cur));
         }
