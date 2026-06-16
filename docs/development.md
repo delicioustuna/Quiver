@@ -292,3 +292,60 @@ MAJOR は breaking change、MINOR は後方互換な機能追加、PATCH はバ�
 public API surface は [tests/Quiver.PublicApi.Tests/](../tests/Quiver.PublicApi.Tests/) の approval test
 （`PublicApiGenerator`）で機械的に固定されており、意図しない breaking change は CI で検出される。
 詳細は [docs/api-stability.md](api-stability.md) を参照。
+
+## NuGet パッケージ化
+
+### 公開パッケージ
+
+`dotnet pack Quiver.slnx` で以下 5 つのライブラリが NuGet パッケージ (`.nupkg` + symbol `.snupkg`) になる。
+テスト / ベンチ / サンプル / sandbox は `IsPackable=false`（[Directory.Build.props](../Directory.Build.props) の既定）で除外される。
+
+| パッケージ | 内容 | 依存 |
+|---|---|---|
+| `Quiver` | コアエンジン（属性 + Source Generator を**同梱**） | System.IO.Hashing, Microsoft.Extensions.Logging.Abstractions |
+| `Quiver.Embedding` | ベクトル埋め込みパイプライン拡張 | `Quiver` |
+| `Quiver.Hosting` | `Microsoft.Extensions.Hosting` / DI 統合 | `Quiver`, Microsoft.Extensions.* |
+| `Quiver.OpenTelemetry` | OpenTelemetry 計装登録 | `Quiver`, OpenTelemetry(.Api) |
+| `Quiver.Rag` | ローカル RAG スキーマ層 | `Quiver` |
+
+`Quiver.Client.Attributes`（属性）と `Quiver.SourceGen`（Roslyn generator）は**単体公開しない**。
+両者は `Quiver` パッケージへ同梱される（[src/Quiver/Quiver.csproj](../src/Quiver/Quiver.csproj) の pack target）:
+
+- `Quiver.Client.Attributes.dll` → `lib/net10.0/`（利用者が `[Node]` 等をコンパイル/実行時に参照するため）
+- `Quiver.SourceGen.dll` → `analyzers/dotnet/cs/`（利用者ビルド時に CRUD/トラバーサルを生成する analyzer）
+
+これにより利用者は `Quiver` パッケージ 1 つの参照で属性 + 生成器まで揃う。両 `ProjectReference` は
+`PrivateAssets="all"` を付けてパッケージ依存に昇格させていない（同梱 DLL とパッケージ依存の二重定義を避ける）。
+
+### 共通メタデータ / 設定
+
+パッケージ共通のメタデータ（Authors / ライセンス `MIT` / `RepositoryUrl` / `PackageReadmeFile` /
+`PackageIcon` 等）は [Directory.Build.props](../Directory.Build.props) に一元化。README（リポジトリルートの
+[README.md](../README.md)）とアイコン（`icon.png`）の同梱は [Directory.Build.targets](../Directory.Build.targets) で
+`IsPackable=true` のプロジェクトにだけ取り込む（props は csproj 本文より前に評価され `IsPackable` が
+未確定なため、targets 側で行う）。Source Link / 決定論ビルド / symbol package (`snupkg`) も props で有効。
+
+### バージョン指定
+
+バージョンの正本は `Directory.Build.props` の `VersionPrefix`（現在 `0.1.0`）。pre-release は
+`-p:VersionSuffix=rc.1`（→ `0.1.0-rc.1`）で付与する。リリース時は git タグから明示指定もできる
+（`dotnet pack -p:Version=0.1.0`）。`EnablePackageValidation` で pack 時に public API 差分を検証する
+（baseline は最初の GA `1.0.0` 公開後に `PackageValidationBaselineVersion` で設定）。
+
+### ローカルでの pack と公開
+
+```bash
+# 全パッケージを artifacts/nupkg に出力
+dotnet pack Quiver.slnx -c Release -o artifacts/nupkg
+
+# 中身確認 (例)
+#   lib/net10.0/Quiver.dll, lib/net10.0/Quiver.Client.Attributes.dll
+#   analyzers/dotnet/cs/Quiver.SourceGen.dll, README.md, icon.png
+
+# nuget.org へ公開 (API キーが必要。*.nupkg を push すると *.snupkg も自動送出)
+dotnet nuget push "artifacts/nupkg/*.nupkg" --api-key <KEY> --source https://api.nuget.org/v3/index.json --skip-duplicate
+```
+
+CI では [.github/workflows/release.yml](../.github/workflows/release.yml) が `v*` タグ push を契機に
+pack → `nuget.org` へ push する（API キーは GitHub secret `NUGET_API_KEY`）。手動実行
+（`workflow_dispatch`）では artifact 生成のみ。

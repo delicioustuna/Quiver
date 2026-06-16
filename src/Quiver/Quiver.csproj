@@ -11,6 +11,20 @@
          テスト / ベンチ / サンプルは引き続き全体抑制のまま。 -->
     <NoWarn>1573;1574;1734;0419;QUIVER001</NoWarn>
   </PropertyGroup>
+
+  <!-- PKG-1: NuGet メインパッケージ。属性アセンブリ (Quiver.Client.Attributes) と
+       Source Generator (Quiver.SourceGen) を本パッケージに同梱し、利用者は Quiver 参照だけで
+       [Node]/[Relationship] 属性と CRUD/トラバーサル生成が使えるようにする。 -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Quiver</PackageId>
+    <Description>Pure C# の組み込み (in-process) グラフ + ベクトル + 全文検索データベースエンジン。ノード/リレーションシップをプロパティ付きで単一ファイルに永続化し、型安全な CRUD・Fluent トラバーサル・WAL クラッシュリカバリ・B+Tree インデックス・KNN ベクトル検索を提供する。属性ベースの Source Generator を同梱。NativeAOT 対応、アンマネージド依存なし。ローカル RAG バックエンドに最適。</Description>
+    <PackageTags>$(PackageTags);vector-search;knn;full-text-search;rag;nativeaot;source-generator;traversal;wal;embedded-database</PackageTags>
+    <!-- 同梱する analyzer/attributes は明示パックする。pack 時の依存欠落警告 (NU5128) を避ける。 -->
+    <SuppressDependenciesWhenPacking>false</SuppressDependenciesWhenPacking>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);_QuiverAddBundledLibAssemblies</TargetsForTfmSpecificBuildOutput>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_QuiverAddBundledAnalyzer</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
   <!-- Phase 0 (ARCH-1): 旧 Quiver.Core / Codec / Wal / Storage / Stores / Index /
        Transactions / Operators / Client を本プロジェクトへ統合 (単一アセンブリ)。
        各サブ領域はフォルダ (Core/ Codec/ Wal/ Storage/ Stores/ Index/ Transactions/
@@ -20,10 +34,35 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
   </ItemGroup>
   <ItemGroup>
-    <!-- 型付きエンティティ属性。将来本体へ吸収予定だが現状は別アセンブリ参照を維持。 -->
-    <ProjectReference Include="..\Quiver.Client.Attributes\Quiver.Client.Attributes.csproj" />
-    <!-- source generator は自アセンブリに生成できない Roslyn 制約のため別プロジェクト維持。 -->
+    <!-- 型付きエンティティ属性。将来本体へ吸収予定だが現状は別アセンブリ参照を維持。
+         PrivateAssets=all: パッケージ依存にせず、DLL を Quiver パッケージの lib に同梱する (下の target)。 -->
+    <ProjectReference Include="..\Quiver.Client.Attributes\Quiver.Client.Attributes.csproj"
+                      PrivateAssets="all" />
+    <!-- source generator は自アセンブリに生成できない Roslyn 制約のため別プロジェクト維持。
+         PrivateAssets=all: パッケージ依存にせず、DLL を analyzers/dotnet/cs に同梱する (下の target)。 -->
     <ProjectReference Include="..\Quiver.SourceGen\Quiver.SourceGen.csproj"
-                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false"
+                      PrivateAssets="all" />
   </ItemGroup>
+
+  <!-- PKG-1: 属性アセンブリ (Quiver.Client.Attributes.dll / .xml) を lib/<tfm> に同梱する。
+       利用者コードは [Node] 等の属性をコンパイル/実行時に参照するため lib に置く。 -->
+  <Target Name="_QuiverAddBundledLibAssemblies">
+    <ItemGroup>
+      <BuildOutputInPackage Include="$(OutputPath)Quiver.Client.Attributes.dll" />
+      <BuildOutputInPackage Include="$(OutputPath)Quiver.Client.Attributes.xml"
+                            Condition="Exists('$(OutputPath)Quiver.Client.Attributes.xml')" />
+    </ItemGroup>
+  </Target>
+
+  <!-- PKG-1: Source Generator DLL を analyzers/dotnet/cs に同梱する。
+       @(Analyzer) には自前の Quiver.SourceGen.dll に加え SDK 組み込みの NetAnalyzers も入る
+       (どちらも NuGetPackageId が空)。同梱したいのは自前の generator だけなのでファイル名で限定する。 -->
+  <Target Name="_QuiverAddBundledAnalyzer" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="@(Analyzer)" Condition="'%(Filename)' == 'Quiver.SourceGen'">
+        <PackagePath>analyzers/dotnet/cs/%(Filename)%(Extension)</PackagePath>
+      </TfmSpecificPackageFile>
+    </ItemGroup>
+  </Target>
 </Project>

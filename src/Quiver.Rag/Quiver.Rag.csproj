@@ -5,6 +5,10 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
+    <IsPackable>true</IsPackable>
+    <PackageId>Quiver.Rag</PackageId>
+    <Description>Quiver 上のローカル RAG スキーマ層。文書取込・チャンキング・再取込・ハイブリッド検索 (ベクトル + BM25 全文検索) + グラフ展開を提供し、外部依存なし・単一ファイルでローカル RAG バックエンドを構築できる。</Description>
+    <PackageTags>$(PackageTags);rag;retrieval-augmented-generation;vector-search;full-text-search;bm25;chunking;hybrid-search</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <!-- 依存はコア Quiver のみ (14_rag_layer.md §2)。Quiver.Embedding には依存しない。 -->

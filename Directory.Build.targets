@@ -1,0 +1,12 @@
+<Project>
+  <!-- PKG-1: NuGet パッケージへ同梱する README / アイコンを取り込む。
+       Directory.Build.props ではなく targets 側で行う理由: README/icon の取り込みは
+       各 csproj が設定する <IsPackable> の最終値で分岐したい。props は csproj 本文より前に
+       import されるため IsPackable がまだ既定値 (false) のままになる。targets は csproj 本文の
+       後に import されるので、ここなら opt-in した packable=true を正しく見られる。 -->
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" PackagePath="\" Visible="false"
+          Condition="Exists('$(MSBuildThisFileDirectory)icon.png')" />
+  </ItemGroup>
+</Project>

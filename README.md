@@ -68,6 +68,9 @@ public partial class Knows
 ```
 
 ```csharp
+using Quiver;          // GraphDatabase
+using Quiver.Api;      // 生成された CRUD / トラバーサル API
+
 using var db = GraphDatabase.Open("./mygraph");
 using var tx = db.BeginTransaction();
 

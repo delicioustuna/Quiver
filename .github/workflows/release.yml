@@ -1,0 +1,68 @@
+name: Release (NuGet)
+
+# PKG-1: バージョンタグ (v1.2.3 / v1.2.3-rc.1) push で NuGet パッケージを pack し nuget.org へ公開する。
+# 正当性 (build + test) は ci.yml が main/develop の各 push/PR で担保済み。タグは検証済みコミットを指す前提で、
+# このワークフローは pack + push に専念する。手動実行 (workflow_dispatch) ではタグ無しで artifact 生成だけ行う。
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  pack-publish:
+    name: pack & publish
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # SourceLink / deterministic build に履歴が要る
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Derive version from tag
+        id: ver
+        shell: pwsh
+        run: |
+          $ref = "${{ github.ref }}"
+          if ($ref -like 'refs/tags/v*') {
+            $v = $ref -replace '^refs/tags/v',''
+            "version=$v"          | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "version_arg=-p:Version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Host "Releasing version $v"
+          } else {
+            # 手動実行: Directory.Build.props の VersionPrefix を使う
+            "version_arg=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Host "No tag; using VersionPrefix from Directory.Build.props"
+          }
+
+      - name: Restore
+        run: dotnet restore Quiver.slnx
+
+      - name: Pack
+        run: dotnet pack Quiver.slnx --configuration Release --no-restore ${{ steps.ver.outputs.version_arg }} -o artifacts/nupkg
+
+      - name: Upload packages (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: artifacts/nupkg/*
+
+      - name: Push to nuget.org
+        if: startsWith(github.ref, 'refs/tags/v') && env.NUGET_API_KEY != ''
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        shell: pwsh
+        # *.nupkg を push すると同フォルダの *.snupkg (symbol) も自動で送られる。
+        run: dotnet nuget push "artifacts/nupkg/*.nupkg" --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json --skip-duplicate

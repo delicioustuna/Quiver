@@ -5,6 +5,10 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
+    <IsPackable>true</IsPackable>
+    <PackageId>Quiver.Embedding</PackageId>
+    <Description>Quiver グラフデータベースのベクトル埋め込みパイプライン拡張。embedding 生成のアダプタ層と、KNN とグラフトラバーサルを組み合わせたハイブリッド検索を提供する。</Description>
+    <PackageTags>$(PackageTags);vector-search;knn;embedding;rag;hybrid-search</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Quiver\Quiver.csproj" />

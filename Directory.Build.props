@@ -16,6 +16,7 @@
        0.x 系は pre-1.0 で安定性の保証対象外。MAJOR.MINOR.PATCH の意味は docs/api-stability.md §1 を参照。 -->
   <PropertyGroup>
     <VersionPrefix>0.1.0</VersionPrefix>
+    <!-- pre-release を付ける場合はビルド時に -p:VersionSuffix=rc.1 等で指定する (例: 0.1.0-rc.1)。 -->
   </PropertyGroup>
 
   <!-- DOC-2: NuGet パッケージ生成 (dotnet pack) 時に直前リリースとの public API 差分を検出し、
@@ -23,5 +24,47 @@
        PackageValidationBaselineVersion は最初の GA (1.0.0) 公開後に設定する。 -->
   <PropertyGroup>
     <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+  <!-- PKG-1: NuGet パッケージ化の準備。
+       既定では packable=false にして、テスト / ベンチ / サンプル / sandbox を誤って pack しない。
+       公開対象の src ライブラリ (Quiver / Quiver.Embedding / Quiver.Hosting / Quiver.OpenTelemetry /
+       Quiver.Rag) だけが自分の csproj で <IsPackable>true</IsPackable> を宣言して opt-in する。
+       Quiver.Client.Attributes / Quiver.SourceGen は単体公開せず Quiver パッケージへ同梱する (=packable のまま false)。 -->
+  <PropertyGroup>
+    <IsPackable Condition="'$(IsPackable)' == ''">false</IsPackable>
+  </PropertyGroup>
+
+  <!-- PKG-1: 全パッケージ共通のメタデータ。個別の PackageId / Description / PackageTags は各 csproj で指定する。 -->
+  <PropertyGroup>
+    <Authors>delicioustuna</Authors>
+    <Company>delicioustuna</Company>
+    <Product>Quiver</Product>
+    <Copyright>Copyright © 2026 delicioustuna</Copyright>
+    <PackageProjectUrl>https://github.com/delicioustuna/Quiver</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/delicioustuna/Quiver</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>See https://github.com/delicioustuna/Quiver/releases</PackageReleaseNotes>
+    <!-- 共通タグ。各パッケージはこれに固有タグを足す ($(PackageTags) を継承)。 -->
+    <PackageTags>graph;database;embedded;graph-database;dotnet;csharp</PackageTags>
+  </PropertyGroup>
+
+  <!-- icon.png があれば全パッケージのアイコンに使う (リポジトリルートに配置)。 -->
+  <PropertyGroup Condition="Exists('$(MSBuildThisFileDirectory)icon.png')">
+    <PackageIcon>icon.png</PackageIcon>
+  </PropertyGroup>
+
+  <!-- PKG-1: 再現可能ビルド + Source Link + symbol package。SourceLink は .NET SDK に同梱されているため
+       追加 PackageReference は不要 (PublishRepositoryUrl + EmbedUntrackedSources で有効化)。 -->
+  <PropertyGroup>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <Deterministic>true</Deterministic>
+    <!-- CI 上では決定論ビルドを有効化 (ローカルでは off にしてパス埋め込みを許容)。 -->
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
 </Project>

@@ -4,7 +4,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Description>OpenTelemetry instrumentation registration for Quiver graph database.</Description>
+    <IsPackable>true</IsPackable>
+    <PackageId>Quiver.OpenTelemetry</PackageId>
+    <Description>Quiver グラフデータベースの OpenTelemetry 計装登録。Quiver が発行する traces / metrics を OpenTelemetry に接続する拡張で、実 exporter (Console / Prometheus / Jaeger 等) はアプリ側で選択する。</Description>
+    <PackageTags>$(PackageTags);opentelemetry;observability;tracing;metrics;telemetry</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Quiver\Quiver.csproj" />

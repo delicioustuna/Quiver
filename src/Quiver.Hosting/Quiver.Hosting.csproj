@@ -4,6 +4,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
+    <IsPackable>true</IsPackable>
+    <PackageId>Quiver.Hosting</PackageId>
+    <Description>Quiver グラフデータベースと Microsoft.Extensions.Hosting / DependencyInjection の統合。Options バインディング・DI 登録・ロギング連携で、汎用ホスト上のアプリに Quiver を組み込めるようにする。</Description>
+    <PackageTags>$(PackageTags);dependency-injection;hosting;microsoft-extensions;options</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Quiver\Quiver.csproj" />
