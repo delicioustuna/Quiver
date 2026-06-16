@@ -46,7 +46,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         neighbors.Should().BeEquivalentTo(new[] { 1L, 2L });
         tx.AsInternal().AdjacencyBlocks!.BaseRelHwm.Should().Be(2,
             "BulkLoader wrote 2 rels so the watermark sits at id 2");
-        tx.AsInternal().AdjacencyBlocks.Epoch.Should().Be(1);
+        tx.AsInternal().AdjacencyBlocks!.Epoch.Should().Be(1);
     }
 
     [Fact]
@@ -164,7 +164,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         txAfter.AsInternal().AdjacencyBlocks!.Epoch.Should().Be(epochBefore + 1);
         // After compact, BaseRelHwm must cover every live rel id — there are
         // 4 ids in [0..3] so hwm = 4.
-        txAfter.AsInternal().AdjacencyBlocks.BaseRelHwm.Should().Be(4);
+        txAfter.AsInternal().AdjacencyBlocks!.BaseRelHwm.Should().Be(4);
         ExpandOut(txAfter, new NodeId(0))
             .Should().BeEquivalentTo(new[] { 1L, 2L, 3L, 4L });
     }

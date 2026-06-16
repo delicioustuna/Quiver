@@ -192,7 +192,11 @@ public sealed class SsnScenarioTests
             // 2 本目の書き込みは相手のロック待ちでブロックするため並行に走らせる。
             var f1 = t1.RunAsync(() => a.SetProperty(y, "v", PropertyValue.FromInt32(1)));
             var f2 = t2.RunAsync(() => b.SetProperty(x, "v", PropertyValue.FromInt32(1)));
-            var we1 = f1.Result; var we2 = f2.Result; // deadlock 犠牲者は SetProperty で throw
+            // a/b はスレッド束縛 TX (TxThread) なので、2 本目の書き込み結果はそのスレッドの
+            // 完了を同期待ちして取得する (deadlock 犠牲者は SetProperty で throw)。意図的ブロッキング。
+#pragma warning disable xUnit1031 // 並行 deadlock シナリオの結果同期。async 化は interleaving を崩す
+            var we1 = f1.Result; var we2 = f2.Result;
+#pragma warning restore xUnit1031
             var e1 = we1 ?? t1.Try(() => a.Commit());
             var e2 = we2 ?? t2.Try(() => b.Commit());
             Aborted(e1, e2).Should().BeGreaterThanOrEqualTo(1,

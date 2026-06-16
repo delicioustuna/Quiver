@@ -49,11 +49,13 @@ public static class Program
         var baseline = LoadReport(args.Baseline);
         var current  = LoadReport(args.Current);
 
-        var byName = baseline.Benchmarks.ToDictionary(b => b.FullName, b => b.Statistics);
+        // LoadReport は読み込み時に Benchmarks を非 null 化し、各 FullName も補完する。
+        // その事後条件はモデルの nullable 注釈には現れないため、利用側で非 null を明示する。
+        var byName = baseline.Benchmarks!.ToDictionary(b => b.FullName!, b => b.Statistics);
         int regressions = 0, comparisons = 0, missingBaseline = 0;
-        foreach (var bench in current.Benchmarks)
+        foreach (var bench in current.Benchmarks!)
         {
-            if (!byName.TryGetValue(bench.FullName, out var oldStats))
+            if (!byName.TryGetValue(bench.FullName!, out var oldStats))
             {
                 missingBaseline++;
                 Console.WriteLine($"  [skip] no baseline   {bench.FullName}  cur={Fmt(bench.Statistics.Mean)}");
@@ -95,7 +97,7 @@ public static class Program
         foreach (var path in Directory.EnumerateFiles(args.MergeDir, "*-report-full.json", SearchOption.AllDirectories))
         {
             var report = LoadReport(path);
-            merged.AddRange(report.Benchmarks);
+            merged.AddRange(report.Benchmarks!);   // LoadReport が非 null 化済み
         }
         merged.Sort((a, b) => string.CompareOrdinal(a.FullName, b.FullName));
 

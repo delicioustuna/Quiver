@@ -154,7 +154,9 @@ public sealed class SnapshotTests : IDisposable
         finally
         {
             stop.Set();
+#pragma warning disable xUnit1031 // 意図的ブロッキング: バックグラウンド writer スレッドの join (cleanup)
             writer.Wait(TimeSpan.FromSeconds(5));
+#pragma warning restore xUnit1031
         }
 
         using var target = GraphDatabase.Open(System.IO.Path.Combine(_snapDir, "graph.quiver"));
