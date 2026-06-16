@@ -203,7 +203,7 @@ internal sealed class RecoveryManager : IRecoveryManager
         bool PresumeCommitted(long tx)
             => _committedTxs.Contains(tx) || (_txsWithPageImage.Contains(tx) && !_abortedTxs.Contains(tx));
 
-        // 監査 #1 (spec: 08_known_limits.md#recovery-clobber): Pass 2b が再適用した presume-committed
+        // 監査 #1 (recovery clobber, spec: 02_wal_recovery.md#two-phase-recovery): Pass 2b が再適用した presume-committed
         // キーの集合。FtLeafMutation は state-setting last-write-wins なので、これらのキーの権威ある値は
         // Pass 2b で確定している。Pass 3 の loser 論理 undo が同じキーへ逆操作を当てると、committed 値を
         // 旧値で上書き (clobber) してしまう (loser Delete の undo = UpsertRaw(key, 旧値) は無条件上書き)。

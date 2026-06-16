@@ -263,7 +263,7 @@ public sealed class FullTextCrashContractTests : IDisposable
     // ===== (g) 監査 #1: loser 論理 undo は committed キーを clobber してはならない =====
 
     /// <summary>
-    /// 監査 #1 (spec: 08_known_limits.md#recovery-clobber): recovery Pass 3 の loser 論理 undo は、
+    /// 監査 #1 (recovery clobber, spec: 02_wal_recovery.md#two-phase-recovery): recovery Pass 3 の loser 論理 undo は、
     /// その後コミットされた tx が同じ postings キーへ加えた変更を上書き (clobber) してはならない。
     ///
     /// FtLeafMutation は state-setting で、Delete レコードは undo 再挿入用に旧値を載せる
@@ -314,7 +314,7 @@ public sealed class FullTextCrashContractTests : IDisposable
     // ===== (h) 監査 #2: RollbackTo(savepoint) は FT 論理変更を巻き戻す (in-process) =====
 
     /// <summary>
-    /// 監査 #2 (spec: 08_known_limits.md#ft-savepoint): savepoint への部分ロールバックは、
+    /// 監査 #2 (FT savepoint undo, spec: 03_mvcc.md#ft-logical-undo): savepoint への部分ロールバックは、
     /// savepoint 以降に発行された FT leaf 論理ミューテーションも巻き戻さねばならない。
     ///
     /// シナリオ (単一 tx 内):

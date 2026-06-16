@@ -67,11 +67,19 @@ Dispose without Commit triggers implicit abort.
 captures a before-image into the current bucket. `RollbackTo` restores before-images from
 buckets newer than the target savepoint.
 
-### Limitation: FT Savepoint {#ft-savepoint-limitation}
+### Full-Text Logical Undo {#ft-logical-undo}
 
-The FT logical undo log (`_ftUndoLog`) is a flat `List<FtUndoEntry>` rather than
-savepoint-bucketed. `RollbackTo` does NOT undo FT leaf mutations -- only full abort does.
-This is a known limitation (see [08_known_limits.md](08_known_limits.md#ft-savepoint)).
+Full-text postings / norms leaves use logical (not page-image) WAL, so their undo is logical
+too. The FT logical undo log (`_ftUndoStack`) is bucketed by savepoint level, parallel to
+`_beforeImageStack`:
+
+- **Full abort** replays every bucket's inverse (LIFO) against the live FT trees.
+- **`RollbackTo(savepoint)`** replays only the buckets `>= level`, and additionally writes
+  each inverse as a **compensating `FtLeafMutation`** to the WAL. Because FT leaf mutations
+  are logged eagerly, the savepoint-discarded forward records are already in the committing
+  transaction's WAL; the compensators make recovery's redo (Pass 2b) converge to the
+  rolled-back state. Compensators are not themselves placed on the undo stack, so a later
+  full abort does not double-revert them.
 
 ## Read-Only Transactions {#read-only}
 
