@@ -20,7 +20,7 @@ internal sealed class AbortUndoHandler
 {
     private readonly IReadOnlyDictionary<byte, IPagedFile> _files;
     private readonly Action _reloadStoreMeta;
-    // FTS-7 (design 13 §10.6): leaf 論理 undo の適用器 (tenant, isUpsert, key, value) → index manager。
+    // FTS-7: leaf 論理 undo の適用器 (spec: 07_fulltext.md#logical-wal, tenant, isUpsert, key, value) → index manager。
     private readonly Action<byte, bool, byte[], long>? _applyFtUndo;
 
     /// <param name="files">fileKind → 所有 <see cref="IPagedFile"/> のレジストリ。</param>
@@ -42,7 +42,7 @@ internal sealed class AbortUndoHandler
     }
 
     /// <summary>
-    /// FTS-7 (design 13 §10.6): tx が発行した leaf 論理ミューテーションを **逆順 (LIFO)** に逆操作して
+    /// FTS-7: tx が発行した leaf 論理ミューテーションを **逆順 (LIFO)** に逆操作して
     /// FT 索引から取り消す。page before-image 復元 (<see cref="Undo"/>) と独立 (FT leaf は別ページ)。
     /// FT 索引のヘッダキャッシュ再同期は <see cref="Undo"/> 内の reloadStoreMeta が担う。
     /// </summary>
@@ -52,6 +52,29 @@ internal sealed class AbortUndoHandler
         for (int i = ftUndoLog.Count - 1; i >= 0; i--)
         {
             var e = ftUndoLog[i];
+            _applyFtUndo(e.Tenant, e.IsUpsert, e.Key, e.Value);
+        }
+    }
+
+    /// <summary>
+    /// 監査 #2: <see cref="ITransaction.RollbackTo"/> の partial rollback 用 FT 論理 undo。
+    /// <see cref="UndoFtLogical"/> (full abort) と異なり、各逆操作を **補償 FtLeafMutation** として
+    /// WAL にも追記する。FtLeafMutation は eager 追記なので破棄分は commit した tx の WAL に残る。
+    /// 補償を追記することで recovery Pass 2b が forward→補償で正しい (ロールバック後の) 状態へ収束する
+    /// (補償が無いと crash 後に破棄分が Pass 2b で蘇る)。逆順 (LIFO) に適用する。
+    /// </summary>
+    public void UndoFtLogicalPartial(IReadOnlyList<Quiver.Storage.Wal.FtUndoEntry> ftUndoLog)
+    {
+        if (_applyFtUndo is null || ftUndoLog.Count == 0) return;
+        for (int i = ftUndoLog.Count - 1; i >= 0; i--)
+        {
+            var e = ftUndoLog[i];
+            // WAL 補償: forward Upsert → 補償 Delete / forward Delete → 補償 Upsert(旧値)。
+            var inverseOp = e.IsUpsert
+                ? Quiver.Storage.Wal.FtLeafMutationCodec.Op.Delete
+                : Quiver.Storage.Wal.FtLeafMutationCodec.Op.Upsert;
+            WalPageContext.LogFtLeafCompensation(inverseOp, e.Tenant, e.Key, e.Value);
+            // live tree: 逆操作を適用 (undo Upsert=delete / undo Delete=旧値で再挿入)。
             _applyFtUndo(e.Tenant, e.IsUpsert, e.Key, e.Value);
         }
     }

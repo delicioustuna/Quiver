@@ -14,7 +14,7 @@ internal sealed class RecoveryManager : IRecoveryManager
     private readonly Dictionary<byte, IPagedFile> _fileRegistry;
     private readonly CommittedTxRegistry? _committedRegistry;
 
-    // FTS-7 (design 13 §10.4): 物理相 Recover() が計算した tx 分類 / redo 起点 LSN を保持し、
+    // FTS-7: 物理相 Recover() が計算した tx 分類 / redo 起点 LSN を保持し (spec: 07_fulltext.md#ft-recovery)、
     // 論理相 RecoverLogical() が FtLeafMutation の redo/undo 判定に再利用する。
     // 重要: 論理相は物理層と同じ **presume-committed** (= committed ∪ (PageImage ∧ ¬Abort)) を使う。
     // 厳格 committed (Commit レコード必須) で分類すると、torn-commit (FlushPending 完了後 Commit レコード
@@ -137,7 +137,7 @@ internal sealed class RecoveryManager : IRecoveryManager
         // OP-5: FileTruncate も同じパスで replay する。LSN 順に処理することで
         // 「先行 LSN の PageImage で必要なら一度拡張 → 後続 LSN の FileTruncate で再縮減」
         // が再現される (= 物理操作の冪等再生)。
-        // FTS-7 (design 13 §10.4 R1): FtStructureImage (postings/norms の SMO 構造ページ) は nested
+        // FTS-7: FtStructureImage (postings/norms の SMO 構造ページ) は nested
         // top action として **commit/abort を問わず無条件に redo** する (committed フィルタを通さない)。
         // FtLeafMutation がキーの redo/undo を担い、FtStructureImage が構造を担う責務分離。
         using (var reader = _wal.OpenReader(checkpointLsn))
@@ -188,7 +188,7 @@ internal sealed class RecoveryManager : IRecoveryManager
     }
 
     /// <summary>
-    /// FTS-7 (design 13 §10.4): recovery 論理相。物理相 <see cref="Recover"/> が FtStructureImage で
+    /// FTS-7: recovery 論理相。物理相 <see cref="Recover"/> が FtStructureImage で
     /// FT 木の構造を復元し、IndexManager が 2a 後のヘッダから live `FullTextIndex` を構築した**後**に
     /// 呼ぶ。Pass 2b (committed tx の `FtLeafMutation` を LSN 順に再実行 = state-setting last-write-wins) +
     /// Pass 3 論理 undo (Commit を持たない全 tx = abort 含む loser の `FtLeafMutation` を逆操作、LIFO) を行う。
@@ -203,6 +203,15 @@ internal sealed class RecoveryManager : IRecoveryManager
         bool PresumeCommitted(long tx)
             => _committedTxs.Contains(tx) || (_txsWithPageImage.Contains(tx) && !_abortedTxs.Contains(tx));
 
+        // 監査 #1 (spec: 08_known_limits.md#recovery-clobber): Pass 2b が再適用した presume-committed
+        // キーの集合。FtLeafMutation は state-setting last-write-wins なので、これらのキーの権威ある値は
+        // Pass 2b で確定している。Pass 3 の loser 論理 undo が同じキーへ逆操作を当てると、committed 値を
+        // 旧値で上書き (clobber) してしまう (loser Delete の undo = UpsertRaw(key, 旧値) は無条件上書き)。
+        // よって committed キーは undo 対象から除外する。キーは (tenant, keyBytes) で一意。
+        var committedKeys = new HashSet<string>();
+        static string KeyId(byte tenant, ReadOnlySpan<byte> key)
+            => $"{tenant}:{Convert.ToHexString(key)}";
+
         // Pass 2b (論理 redo): presume-committed tx の FtLeafMutation を LSN 順に再実行する。
         using (var reader = _wal.OpenReader(_recoverCheckpointLsn))
         {
@@ -213,6 +222,7 @@ internal sealed class RecoveryManager : IRecoveryManager
                 if (FtLeafMutationCodec.TryDecode(
                         record.Payload.Span, out var op, out byte tenant, out var key, out long value))
                 {
+                    committedKeys.Add(KeyId(tenant, key));
                     indexManager.ApplyFtLeafRedo(tenant, op == FtLeafMutationCodec.Op.Upsert, key, value);
                 }
             }
@@ -220,6 +230,7 @@ internal sealed class RecoveryManager : IRecoveryManager
 
         // Pass 3 (論理 undo): presume-committed で無い真の loser tx (明示 Abort 済み + 宙ぶらりん) の
         // FtLeafMutation を逆操作で取り消す。逆順 (LIFO)。inverse も state-setting で冪等なので二重 undo 安全。
+        // 監査 #1: ただし Pass 2b が確立した committed キーは skip する (committed 値の clobber 防止)。
         var losers = new List<(byte Tenant, bool IsUpsert, byte[] Key, long Value)>();
         using (var reader = _wal.OpenReader(_recoverCheckpointLsn))
         {
@@ -230,6 +241,7 @@ internal sealed class RecoveryManager : IRecoveryManager
                 if (FtLeafMutationCodec.TryDecode(
                         record.Payload.Span, out var op, out byte tenant, out var key, out long value))
                 {
+                    if (committedKeys.Contains(KeyId(tenant, key))) continue; // 監査 #1: committed 値を保護
                     losers.Add((tenant, op == FtLeafMutationCodec.Op.Upsert, key.ToArray(), value));
                 }
             }

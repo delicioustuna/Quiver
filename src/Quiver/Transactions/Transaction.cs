@@ -220,7 +220,7 @@ internal sealed class Transaction : ITransaction
     private void RollBackInPlace()
     {
         if (_undoHandler == null) return;
-        // FTS-7 (design 13 §10.6): **順序が重要**。先に leaf 論理 undo (逆操作) を当てて Suppressed leaf
+        // FTS-7: **順序が重要** (spec: 07_fulltext.md#logical-wal)。先に leaf 論理 undo (逆操作) を当てて Suppressed leaf
         // (page before-image を持たない) からキーを除去する。その後 before-image undo が Full の header
         // ページを pre-tx CLR へ戻し ReloadFromHeader で root/height/entryCount を権威的に再同期するので、
         // 論理 undo が触った entryCount は最終的に header CLR の値 (= pre-tx) で上書きされ二重計上しない。
@@ -370,9 +370,16 @@ internal sealed class Transaction : ITransaction
         // Sn より新しい全ての savepoint も解放する)。Sn 自身は消費しない。
         _savepoints.RemoveRange(index + 1, _savepoints.Count - index - 1);
 
+        // 監査 #2: FT 論理 undo を先に当てる (full abort の RollBackInPlace と同順)。Suppressed leaf は
+        // page before-image を持たないため、savepoint 以降の FT mutation はこの論理 undo + WAL 補償でのみ
+        // 巻き戻る。両スタック (FT / before-image) を揃って [level..] 巻き戻すため両方を呼ぶ。
+        var ftUndo = WalPageContext.RollbackFtToSavepoint(level);
         var beforeImages = WalPageContext.RollbackToSavepoint(level);
-        if (_undoHandler != null && beforeImages.Count > 0)
-            _undoHandler.UndoPartial(beforeImages);
+        if (_undoHandler != null)
+        {
+            if (ftUndo.Count > 0) _undoHandler.UndoFtLogicalPartial(ftUndo);
+            if (beforeImages.Count > 0) _undoHandler.UndoPartial(beforeImages);
+        }
     }
 
     public void ReleaseSavepoint(SavepointId savepoint)

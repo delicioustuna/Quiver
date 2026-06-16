@@ -17,12 +17,6 @@ namespace Quiver.Tests;
 /// rolled back. Because postings / norms are ordinary B+Trees (design 13 §3/§4),
 /// recovery reuses the existing ARIES page-WAL machinery (FT-17/18/19).
 ///
-/// Backend scope: full-text indexes are a binary-backend feature; the SQLite
-/// backend reports <c>CreateFullTextIndex</c> as NotSupported (FTS-2 decision B,
-/// covered by Quiver.Storage.Sqlite.Tests). The "両 backend" crash requirement
-/// therefore resolves to "binary backend runs the full FT crash loop; SQLite's
-/// contract is the NotSupported guard". This suite is the binary half.
-///
 /// Kill model: as in BA-9's KillProcessSimulator, on Windows a true process kill
 /// can't reopen its own exclusive file handle, so a kill is approximated by
 /// dropping the handle (Dispose) + forcing finalizers, then reopening the file.
@@ -264,6 +258,196 @@ public sealed class FullTextCrashContractTests : IDisposable
             "torn-commit recovery must keep FT postings consistent with node visibility (presume-committed)");
         // committed prefix (base doc) は無傷。
         Search(reopened, "baseword0001").Should().ContainSingle().Which.Should().Be(baseDoc);
+    }
+
+    // ===== (g) 監査 #1: loser 論理 undo は committed キーを clobber してはならない =====
+
+    /// <summary>
+    /// 監査 #1 (spec: 08_known_limits.md#recovery-clobber): recovery Pass 3 の loser 論理 undo は、
+    /// その後コミットされた tx が同じ postings キーへ加えた変更を上書き (clobber) してはならない。
+    ///
+    /// FtLeafMutation は state-setting で、Delete レコードは undo 再挿入用に旧値を載せる
+    /// (<see cref="FtLeafMutationCodec"/>)。よって loser の <c>Delete(K)</c> を Pass 3 が逆適用すると
+    /// <c>UpsertRaw(K, 旧値)</c> を無条件実行し、Pass 2b が確立した committed 値を旧値で上書きする。
+    ///
+    /// シナリオ (単一ライタ):
+    ///   tx1: E1="alice"            commit  ((alice,E1) postings)
+    ///   tx2: E1="bob"  → Rollback  (aborted loser; WAL に Delete(alice,E1) が eager 記録される)
+    ///   tx3: E1="charlie"          commit  (Delete(alice,E1) + Upsert(charlie,E1))
+    ///   kill → recover
+    /// committed 最終状態は E1="charlie" なので "alice" は検索ヒットしてはならない。修正前は Pass 3 が
+    /// tx2 の Delete(alice,E1) を UpsertRaw で逆適用し "alice" を復活させ、committed の削除を clobber する。
+    /// </summary>
+    [Fact]
+    public void AbortedTx_logical_undo_must_not_clobber_committed_key_after_recovery()
+    {
+        var db = OpenAndCreateIndex();
+        NodeId e1 = Ingest(db, "alice");
+
+        // tx2: "alice" posting を削除する更新 → ロールバック (in-process で "alice" を復元)。
+        // ただし eager FtLeafMutation Delete(alice,E1) は WAL に残り、recovery で loser undo 対象になる。
+        using (var tx2 = db.BeginTransaction())
+        {
+            tx2.SetProperty(e1, "body", PropertyValue.FromString("bob"));
+            tx2.Rollback();
+        }
+
+        // tx3: "charlie" へ更新して commit。committed 最終状態は alice 無し / charlie 有り。
+        using (var tx3 = db.BeginTransaction())
+        {
+            tx3.SetProperty(e1, "body", PropertyValue.FromString("charlie"));
+            tx3.Commit();
+        }
+
+        // 未コミット writer を開いたまま kill して checkpoint truncate を防ぎ、recovery で論理相を必ず通す。
+        var keepWalAlive = db.BeginTransaction();
+        keepWalAlive.CreateNode("Doc");
+        Kill(db);
+
+        using var reopened = Open();
+        Search(reopened, "charlie").Should().ContainSingle().Which.Should().Be(e1,
+            "committed final state E1=\"charlie\" must be searchable after recovery");
+        Search(reopened, "alice").Should().BeEmpty(
+            "aborted tx's logical undo must not resurrect a key the committed state removed (audit #1 clobber)");
+    }
+
+    // ===== (h) 監査 #2: RollbackTo(savepoint) は FT 論理変更を巻き戻す (in-process) =====
+
+    /// <summary>
+    /// 監査 #2 (spec: 08_known_limits.md#ft-savepoint): savepoint への部分ロールバックは、
+    /// savepoint 以降に発行された FT leaf 論理ミューテーションも巻き戻さねばならない。
+    ///
+    /// シナリオ (単一 tx 内):
+    ///   tx1: E1="alice"                 commit  (alice→E1)
+    ///   tx2: sp=Savepoint()
+    ///        E1="bob"   (alice posting 削除 / bob posting 挿入)
+    ///        RollbackTo(sp)   ← page (E1.body) は "alice" に戻る
+    ///        commit
+    /// committed 最終状態は E1="alice" なので "alice" がヒットし "bob" はヒットしてはならない。
+    /// 修正前は RollbackTo が FT 論理 undo を呼ばず、postings が bob→E1 のまま commit され、
+    /// 生きている E1 への false-positive ("bob") + 取りこぼし ("alice") が発生する。
+    /// </summary>
+    [Fact]
+    public void RollbackToSavepoint_undoes_fulltext_mutations_in_process()
+    {
+        var db = OpenAndCreateIndex();
+        NodeId e1 = Ingest(db, "alice");
+
+        using (var tx = db.BeginTransaction())
+        {
+            var sp = tx.Savepoint();
+            tx.SetProperty(e1, "body", PropertyValue.FromString("bob"));
+            tx.RollbackTo(sp);
+            tx.Commit();
+        }
+
+        Search(db, "alice").Should().ContainSingle().Which.Should().Be(e1,
+            "RollbackTo restored E1.body=\"alice\" so the alice posting must be present");
+        Search(db, "bob").Should().BeEmpty(
+            "RollbackTo must undo the savepoint's FT mutations (audit #2): the bob posting was rolled back");
+        db.Dispose();
+    }
+
+    // ===== (i) 監査 #2: 上記が crash 後も保たれる (WAL 補償レコード) =====
+
+    /// <summary>
+    /// 監査 #2 (crash 経路): FtLeafMutation は eager に WAL へ追記されるため、savepoint で破棄された
+    /// 変更も commit した tx の WAL に残る。RollbackTo は逆操作を **補償 FtLeafMutation** として WAL へ
+    /// 追記し、recovery Pass 2b が forward→補償で正しい (ロールバック後の) 状態へ収束しなければならない。
+    /// in-process 巻き戻しだけでは crash 後に破棄分が Pass 2b で蘇る。
+    /// </summary>
+    [Fact]
+    public void RollbackToSavepoint_fulltext_undo_survives_kill()
+    {
+        var db = OpenAndCreateIndex();
+        NodeId e1 = Ingest(db, "alice");
+
+        using (var tx = db.BeginTransaction())
+        {
+            var sp = tx.Savepoint();
+            tx.SetProperty(e1, "body", PropertyValue.FromString("bob"));
+            tx.RollbackTo(sp);
+            tx.Commit();
+        }
+
+        // checkpoint truncate を防いで recovery の論理相を必ず通す。
+        var keepWalAlive = db.BeginTransaction();
+        keepWalAlive.CreateNode("Doc");
+        Kill(db);
+
+        using var reopened = Open();
+        Search(reopened, "alice").Should().ContainSingle().Which.Should().Be(e1,
+            "committed final state E1=\"alice\" must be searchable after recovery");
+        Search(reopened, "bob").Should().BeEmpty(
+            "rolled-back FT mutation must not resurface after recovery (audit #2 WAL compensator)");
+    }
+
+    // ===== (j) 監査 #2: rollback 後に full abort しても二重破壊しない =====
+
+    /// <summary>
+    /// 監査 #2 (相互作用): savepoint 以降の FT mutation を RollbackTo で巻き戻した後、tx 全体を abort する。
+    /// RollbackTo の補償レコードは undo スタックに積まないため、full abort は savepoint 以前の mutation のみ
+    /// 巻き戻す (補償を再 undo して蘇らせない)。最終的に tx 開始前の committed 状態に戻る。
+    ///   tx1: E1="alice"               commit
+    ///   tx2: sp=Savepoint(); E1="bob"; RollbackTo(sp); E1="charlie"; Rollback() (full abort)
+    /// 期待: E1 は committed の "alice" のまま (charlie も bob も無し)。kill を挟んでも同じ。
+    /// </summary>
+    [Fact]
+    public void RollbackToSavepoint_then_full_abort_restores_committed_state()
+    {
+        var db = OpenAndCreateIndex();
+        NodeId e1 = Ingest(db, "alice");
+
+        var tx = db.BeginTransaction();
+        var sp = tx.Savepoint();
+        tx.SetProperty(e1, "body", PropertyValue.FromString("bob"));
+        tx.RollbackTo(sp);
+        tx.SetProperty(e1, "body", PropertyValue.FromString("charlie"));
+        tx.Rollback(); // full abort
+
+        // 未コミット writer で WAL を残し、recovery 経路も通す。
+        var keepWalAlive = db.BeginTransaction();
+        keepWalAlive.CreateNode("Doc");
+        Kill(db);
+
+        using var reopened = Open();
+        Search(reopened, "alice").Should().ContainSingle().Which.Should().Be(e1,
+            "aborting the whole tx restores the committed E1=\"alice\"");
+        Search(reopened, "bob").Should().BeEmpty("savepoint-discarded term must not survive");
+        Search(reopened, "charlie").Should().BeEmpty("aborted post-savepoint term must not survive");
+    }
+
+    // ===== (k) 監査 #2: nested savepoint + ReleaseSavepoint =====
+
+    /// <summary>
+    /// 監査 #2 (nested + release): 2 段 savepoint。内側を Release して外側へマージ後、外側へ RollbackTo すると
+    /// マージされた内側分も巻き戻る (Release は savepoint を消費するが変更は親バケットに残るため)。
+    ///   tx1: E1="alice" commit
+    ///   tx2: sp1; E1="bob"; sp2; E1="carol"; Release(sp2); RollbackTo(sp1); commit
+    /// 期待: committed の "alice" に戻る (bob/carol は sp1 以降なので全て巻き戻る)。
+    /// </summary>
+    [Fact]
+    public void NestedSavepoint_release_then_rollback_undoes_merged_fulltext()
+    {
+        var db = OpenAndCreateIndex();
+        NodeId e1 = Ingest(db, "alice");
+
+        using (var tx = db.BeginTransaction())
+        {
+            var sp1 = tx.Savepoint();
+            tx.SetProperty(e1, "body", PropertyValue.FromString("bob"));
+            var sp2 = tx.Savepoint();
+            tx.SetProperty(e1, "body", PropertyValue.FromString("carol"));
+            tx.ReleaseSavepoint(sp2);
+            tx.RollbackTo(sp1);
+            tx.Commit();
+        }
+
+        Search(db, "alice").Should().ContainSingle().Which.Should().Be(e1,
+            "RollbackTo(sp1) rolls back everything after sp1, including the released sp2 work");
+        Search(db, "bob").Should().BeEmpty();
+        Search(db, "carol").Should().BeEmpty();
+        db.Dispose();
     }
 
     // WAL 末尾の Commit レコードを 1 件削って torn commit を作る。レコード形式:

@@ -29,14 +29,14 @@ internal static class WalPageContext
         => Current is { } ctx ? ctx.LogPageImage(fileKind, pageId, pageBytes) : -1L;
 
     /// <summary>
-    /// FTS-7 (design 13 §10.3): 本 tx で当該ページの journaling モードを記録 (escalation = 強い方が勝つ)。
+    /// FTS-7: 本 tx で当該ページの journaling モードを記録 (escalation = 強い方が勝つ)。
     /// 書き込み tx 未アクティブ時は no-op。返り値は escalation 後の有効モード (未アクティブ時は Full)。
     /// </summary>
     public static WalJournalMode SetJournalMode(byte fileKind, long pageId, WalJournalMode mode)
         => Current is { } ctx ? ctx.SetJournalMode(fileKind, pageId, mode) : WalJournalMode.Full;
 
     /// <summary>
-    /// FTS-7 (design 13 §10.2): postings/norms leaf への state-setting 論理ミューテーションを eager に WAL へ
+    /// FTS-7: postings/norms leaf への state-setting 論理ミューテーションを eager に WAL へ
     /// 追記する。書き込み tx 未アクティブ時 (= recovery 中の再実行など) は no-op で -1 を返す
     /// (recovery は WAL を再帰発火しない)。
     /// </summary>
@@ -44,8 +44,18 @@ internal static class WalPageContext
         => Current is { } ctx ? ctx.LogFtLeafMutation(op, indexTenantId, key, value) : -1L;
 
     /// <summary>
-    /// FTS-7 (design 13 §10.6): 現在の書き込み tx が発行した leaf 論理ミューテーションの undo ログ。
-    /// in-process abort が逆順に逆操作を当てるために使う。コンテキスト未設定時は空。
+    /// 監査 #2: RollbackTo(savepoint) で破棄された FT leaf 論理ミューテーションの **補償** (= 逆操作) を
+    /// WAL へ追記する。FtLeafMutation は eager 追記なので破棄分も commit した tx の WAL に残る。補償を
+    /// 追記しておくと、recovery Pass 2b が forward→補償の順で再生し、ロールバック後の正しい状態へ収束する。
+    /// <see cref="LogFtLeafMutation"/> と異なり undo スタックには積まない (補償自体は in-process undo 対象外。
+    /// 積むと full-abort-after-rollback で補償が再 undo され二重に巻き戻る)。書き込み tx 未アクティブ時は no-op。
+    /// </summary>
+    public static long LogFtLeafCompensation(FtLeafMutationCodec.Op op, byte indexTenantId, ReadOnlySpan<byte> key, long value)
+        => Current is { } ctx ? ctx.LogFtLeafCompensation(op, indexTenantId, key, value) : -1L;
+
+    /// <summary>
+    /// FTS-7: 現在の書き込み tx が発行した leaf 論理ミューテーションの undo ログ (全 savepoint バケットを
+    /// 発行順に平坦化)。in-process abort が逆順に逆操作を当てるために使う。コンテキスト未設定時は空。
     /// </summary>
     public static IReadOnlyList<FtUndoEntry> CurrentFtUndoLog
         => Current?.FtUndoLog ?? Array.Empty<FtUndoEntry>();
@@ -97,6 +107,15 @@ internal static class WalPageContext
         => Current?.RollbackToSavepoint(level) ?? Array.Empty<byte[]>();
 
     /// <summary>
+    /// 監査 #2: 指定 savepoint レベル以降 (両端含む) のバケットに蓄積された FT leaf 論理 undo
+    /// エントリを **発行順** で返し、FT undo スタックから除去する (RollbackTo は savepoint を消費
+    /// しないので同レベルへ空バケットを push し直す)。呼び出し側はこれを逆順 (LIFO) に逆適用 + 補償
+    /// ログする。<see cref="RollbackToSavepoint"/> (page before-image) と対で呼んで両スタックを揃える。
+    /// </summary>
+    public static IReadOnlyList<FtUndoEntry> RollbackFtToSavepoint(int level)
+        => Current?.RollbackFtToSavepoint(level) ?? Array.Empty<FtUndoEntry>();
+
+    /// <summary>
     /// FT-23: 指定 savepoint バケットを親バケットへマージし、スタックから除去する。
     /// 親バケットが既に同一ページの before-image を持っている場合は親側 (= 古い) を維持。
     /// </summary>
@@ -132,7 +151,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     // recovery 形式は不変 (FlushPending で従来と同じ v3 payload を出す)。
     private readonly Dictionary<(byte FileKind, long PageId), byte[]> _pending = new();
 
-    // FTS-7 (design 13 §10.3): per-page WAL journaling モード。Suppressed/RedoOnly のページのみ記録し、
+    // FTS-7: per-page WAL journaling モード (spec: 07_fulltext.md#ft-journaling)。Suppressed/RedoOnly のページのみ記録し、
     // 未登録は既定 Full。escalation は強い方 (数値大) が勝つ。CaptureBeforeImage / LogPageImage の
     // 両発火点がこれを参照する単一チョークポイント。
     private readonly Dictionary<(byte FileKind, long PageId), WalJournalMode> _journalMode = new();
@@ -167,7 +186,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     public long LogPageImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
     {
         var key = (fileKind, pageId);
-        // FTS-7 (design 13 §10.3): journaling モードで分岐。
+        // FTS-7: journaling モードで分岐 (spec: 07_fulltext.md#ft-journaling)。
         var mode = _journalMode.TryGetValue(key, out var m) ? m : WalJournalMode.Full;
         if (mode == WalJournalMode.Suppressed)
             return -1L; // 論理レコード (FtLeafMutation) で覆う leaf — after-image を出さない。
@@ -176,7 +195,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
             // M2/R1: SMO 構造ページは split 完了時 (= この UnpinDirty) に eager 追記し coalesce 対象外にする。
             // FtStructureImage は commit/abort を問わず無条件に redo され決して undo されない (nested top action)
             // ので、split した tx が abort しても構造記録が WAL に残り redo される (PageImage は committed
-            // フィルタで abort 時 redo されないため使えない; design 13 §10.4 R1)。
+            // フィルタで abort 時 redo されないため使えない; spec: 07_fulltext.md#ft-recovery)。
             byte[] payload = WalPageImageCodec.Encode(fileKind, pageId, pageBytes);
             _wal.Append(WalRecordType.FtStructureImage, _txId, payload);
             return -1L;
@@ -189,28 +208,45 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
         return -1L;
     }
 
-    // FTS-7 (design 13 §10.6): in-process abort の論理 undo バケット。tx 内で発行した leaf 論理
+    // FTS-7: in-process abort の論理 undo バケット (spec: 07_fulltext.md#logical-wal)。tx 内で発行した leaf 論理
     // ミューテーションを順に記録し、abort 時に逆順 (LIFO) で逆操作を当てて FT 索引から取り消す
     // (page before-image を持たない Suppressed leaf を巻き戻す手段。FT-17 の「abort で索引エントリ除去」
     // 保証を維持し ID 再利用エイリアスを防ぐ)。
-    // ⚠ 既知バグ (MVP 制限): flat list なので savepoint への partial rollback (RollbackTo) では
-    // FT ops を巻き戻さない。RollbackTo 後もエンティティは **生きたまま** 古いテキストに戻るので、
-    // savepoint 以降に書いた term の stale postings が **自己修復せず永久に残る** (= 生エンティティへの
-    // false-positive 検索ヒット; 可視性チェックを通過し orphan sweep も死エンティティしか掃除しないため
-    // 回収されない)。トリガーは FT 維持 tx 内の savepoint に限定。恒久修正は undo ログを before-image stack
-    // と同型に savepoint バケット化すること (後続)。
-    private readonly List<FtUndoEntry> _ftUndoLog = new();
+    // 監査 #2: before-image stack と同型に savepoint バケット化してある。RollbackTo(level) は
+    // [level..top] バケットを逆適用し WAL 補償レコードを追記する (= partial rollback でも FT を巻き戻す)。
+    //   - stack[0]   : tx 開始時の root バケット (Savepoint なしの tx と同等)。
+    //   - PushSavepoint() ごとに新規バケットを追加 (_beforeImageStack と歩調を合わせる)。
+    private readonly List<List<FtUndoEntry>> _ftUndoStack = new() { new List<FtUndoEntry>() };
 
-    /// <summary>FTS-7: tx が発行した leaf 論理ミューテーションの undo ログ (発行順)。</summary>
-    public IReadOnlyList<FtUndoEntry> FtUndoLog => _ftUndoLog;
+    /// <summary>FTS-7: tx が発行した leaf 論理ミューテーションの undo ログ (全バケットを発行順に平坦化)。</summary>
+    public IReadOnlyList<FtUndoEntry> FtUndoLog
+    {
+        get
+        {
+            if (_ftUndoStack.Count == 1) return _ftUndoStack[0];
+            var all = new List<FtUndoEntry>();
+            for (int i = 0; i < _ftUndoStack.Count; i++) all.AddRange(_ftUndoStack[i]);
+            return all;
+        }
+    }
 
-    /// <summary>FTS-7: leaf 論理ミューテーションを eager に WAL へ追記し、abort 用 undo ログにも記録する。</summary>
+    /// <summary>FTS-7: leaf 論理ミューテーションを eager に WAL へ追記し、abort 用 undo ログ (最上位バケット) にも記録する。</summary>
     public long LogFtLeafMutation(FtLeafMutationCodec.Op op, byte indexTenantId, ReadOnlySpan<byte> key, long value)
     {
         byte[] payload = FtLeafMutationCodec.Encode(op, indexTenantId, key, value);
         long lsn = _wal.Append(WalRecordType.FtLeafMutation, _txId, payload);
-        _ftUndoLog.Add(new FtUndoEntry(indexTenantId, op == FtLeafMutationCodec.Op.Upsert, key.ToArray(), value));
+        _ftUndoStack[^1].Add(new FtUndoEntry(indexTenantId, op == FtLeafMutationCodec.Op.Upsert, key.ToArray(), value));
         return lsn;
+    }
+
+    /// <summary>
+    /// 監査 #2: RollbackTo で破棄した FT mutation の補償 (逆操作) を WAL へ追記する。
+    /// <see cref="LogFtLeafMutation"/> と異なり undo スタックには積まない (補償は in-process undo 対象外)。
+    /// </summary>
+    public long LogFtLeafCompensation(FtLeafMutationCodec.Op op, byte indexTenantId, ReadOnlySpan<byte> key, long value)
+    {
+        byte[] payload = FtLeafMutationCodec.Encode(op, indexTenantId, key, value);
+        return _wal.Append(WalRecordType.FtLeafMutation, _txId, payload);
     }
 
     /// <summary>
@@ -304,7 +340,26 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     public int PushSavepoint()
     {
         _beforeImageStack.Add(new Dictionary<(byte FileKind, long PageId), byte[]>());
+        _ftUndoStack.Add(new List<FtUndoEntry>()); // 監査 #2: FT undo バケットも揃えて push
         return _beforeImageStack.Count - 1;
+    }
+
+    /// <summary>
+    /// 監査 #2: <paramref name="level"/> 以降 (両端含む) の FT undo バケットを発行順に集約して返し、
+    /// スタックから除去する。RollbackTo は savepoint を消費しないので同レベルへ空バケットを push し直す
+    /// (<see cref="RollbackToSavepoint"/> と歩調を合わせる)。
+    /// </summary>
+    public IReadOnlyList<FtUndoEntry> RollbackFtToSavepoint(int level)
+    {
+        if (level <= 0 || level >= _ftUndoStack.Count)
+            return Array.Empty<FtUndoEntry>();
+
+        var collected = new List<FtUndoEntry>();
+        for (int i = level; i < _ftUndoStack.Count; i++)
+            collected.AddRange(_ftUndoStack[i]);
+        _ftUndoStack.RemoveRange(level, _ftUndoStack.Count - level);
+        _ftUndoStack.Add(new List<FtUndoEntry>()); // savepoint は消費しないので空バケットを再 push
+        return collected;
     }
 
     /// <summary>
@@ -346,6 +401,13 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
             if (!parent.ContainsKey(kv.Key)) parent[kv.Key] = kv.Value;
         }
         _beforeImageStack.RemoveAt(level);
+
+        // 監査 #2: FT undo バケットも親へマージする (発行順を保つため末尾へ append)。
+        if (level < _ftUndoStack.Count)
+        {
+            _ftUndoStack[level - 1].AddRange(_ftUndoStack[level]);
+            _ftUndoStack.RemoveAt(level);
+        }
         // RollbackTo と異なり、Release した savepoint は消費される。
     }
 
@@ -359,7 +421,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
 }
 
 /// <summary>
-/// FTS-7 (design 13 §10.6): in-process abort で巻き戻す leaf 論理ミューテーション 1 件。
+/// FTS-7: in-process abort で巻き戻す leaf 論理ミューテーション 1 件。
 /// abort は逆操作を当てる (IsUpsert なら delete、delete なら旧 Value で再挿入)。
 /// </summary>
 internal readonly record struct FtUndoEntry(byte Tenant, bool IsUpsert, byte[] Key, long Value);
