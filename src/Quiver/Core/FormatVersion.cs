@@ -1,88 +1,25 @@
 namespace Quiver.Core;
 
 /// <summary>
-/// FT-26: ストアファイルのフォーマットバージョン。MVCC 対応 (v2) は record header に
-/// xmin / xmax 8B 各を追加するため、旧 v1 とはバイト配置が非互換 (record サイズが拡大)。
-/// develop 段階のためマイグレーションは提供せず、open 時に v1 を検出したら例外。
+/// ストアファイルのフォーマットバージョン。
+///
+/// v1 は Quiver 1.0 のベースライン format。未リリース期間中に重ねた format 履歴
+/// (pre-MVCC → MVCC → sidecar → 単一ファイル → columnar → vector → 全文 → logical WAL) は
+/// クリーンブレイクで畳み、現実装を v1 として再宣言した。
+/// 自動マイグレーションは提供しないため、旧 format の DB は open 時に reject される。
 /// </summary>
 internal static class FormatVersion
 {
-    /// <summary>v1: FT-15 までのレイアウト (xmin/xmax 無し)。FT-26 より開けない。</summary>
+    /// <summary>v1: Quiver 1.0 ベースライン format。</summary>
     public const byte V1 = 1;
 
-    /// <summary>v2: FT-26 MVCC レイアウト。record header に xmin/xmax を持つ。FT-32 より開けない。</summary>
-    public const byte V2Mvcc = 2;
-
-    /// <summary>
-    /// v3: FT-32 MVCC sidecar レイアウト。record から xmin/xmax を撤去し、EntityKind 別の
-    /// sidecar (<see cref="Quiver.Wal.WalFileKind.NodeVersionMeta"/> 等) に移管した。record が縮み
-    /// (Node 31→15B / Rel 64→48B / Prop 57→41B)、cache line residency が改善する。v2 とはバイト配置が
-    /// 非互換 (record サイズが縮小し、xmin/xmax が別ファイルに移る)。ARCH-3 より開けない。
-    /// </summary>
-    public const byte V3MvccSidecar = 3;
-
-    /// <summary>
-    /// v4: ARCH-3 索引 Generation レイアウト。EntityVersionMeta sidecar に slot incarnation を表す
-    /// Generation レーンを追加し (entry 32→40B)、B+Tree 索引の値レーンを
-    /// <see cref="EntityRef"/> (Kind/Generation/Sequence) でパックする。slot 再利用に伴う stale
-    /// 索引エントリ (ABA) を解決時の世代照合で弾けるようにする。v3 とは sidecar entry サイズが
-    /// 非互換。
-    /// </summary>
-    public const byte V4IndexGeneration = 4;
-
-    /// <summary>
-    /// v5: ARCH-4 単一ファイル化。コア store / version sidecar / token / 索引 / 隣接ブロック / epoch を
-    /// すべて単一 <c>*.quiver</c> コンテナ (<see cref="Quiver.Storage.SingleFileContainer"/>) のテナント
-    /// として同居させ、WAL を単一サイドカー <c>*.quiver-wal</c> へ一本化、クリーン終了で WAL を削除する。
-    /// コンテナのカタログ root に committed TxId 高水位フィールドを追加 (記述子オフセット変更) しており、
-    /// v4 (索引 / adjacency / token / WAL がサイドカー群、カタログ記述子 offset 16) とは
-    /// レイアウト非互換。develop 段階のためマイグレーションは提供しない。
-    /// </summary>
-    public const byte V5SingleFile = 5;
-
-    /// <summary>
-    /// v6: ARCH-5c property 再設計 Phase 2。ノードストアを固定サイズ record 配列から
-    /// slotted ヒープ (<see cref="Quiver.Storage.VersionedRecordHeap"/>) + 論理 ID 間接層
-    /// (<see cref="Quiver.Storage.ItemPointerMap"/>) へ移行する。ノードテナントのページ
-    /// レイアウトが非互換 (固定 15B record/page → version ヘッダ付き可変長 slotted record)。
-    /// develop 段階のためマイグレーションは提供しない (旧 v5 DB は open 時に reject)。
-    /// </summary>
-    public const byte V6PropertyRedesign = 6;
-
-    /// <summary>
-    /// v7: ARCH-6 ベクトル / ANN の in-file 永続化。ベクトル payload (<see cref="Quiver.Storage.Records.VectorPayloadStore"/>) と
-    /// HNSW ANN 索引 (<see cref="Quiver.Storage.Records.HnswIndex"/>) を新規 container テナント
-    /// (catalog=17 / payload=200+ / HNSW) として同居させ、<c>SetVector</c> をトランザクション境界へ
-    /// 取り込む。ベクトルは従来 in-memory・非永続だったため新テナントの追加でカタログ記述子が増える。
-    /// develop 段階のためマイグレーションは提供しない (旧 v6 DB は open 時に reject)。
-    /// </summary>
-    public const byte V7VectorInFile = 7;
-
-    /// <summary>
-    /// v8: FTS-2 全文検索索引。転置インデックス (postings: byte[] 複合キー (term,entityId)->tf) と
-    /// 文書長 (norms: entityId->docLen) を新規 container テナントとして同居させ、索引カタログに
-    /// 全文索引レコード (postings/norms tenant + label + propertyKey + tokenizerId) を追加する。
-    /// 旧 v7 はカタログレイアウトが非互換 (FT レコードセクションが無い) のため open 時に reject。
-    /// develop 段階のためマイグレーションは提供しない。
-    /// </summary>
-    public const byte V8FullText = 8;
-
-    /// <summary>
-    /// v9: FTS-7 logical postings WAL。postings/norms B+Tree の leaf 更新を WAL のページイメージから
-    /// 論理レコード (<see cref="Quiver.Storage.Wal.WalRecordType.FtLeafMutation"/>) へ置換し、取込 WAL 増幅を
-    /// 圧縮する (design 13 §9.2/§10)。ファイル本体レイアウトは v8 と同一だが、crash 後に残った旧形式 WAL を
-    /// 新コードが誤読する事故を防ぐため、新レコード型の導入に合わせてバージョンを bump し旧 DB は reject する。
-    /// develop 段階のためマイグレーションは提供しない。
-    /// </summary>
-    public const byte V9FtLogicalWal = 9;
-
     /// <summary>現行 (= 新規 DB を作成するときに書き込むバージョン)。</summary>
-    public const byte Current = V9FtLogicalWal;
+    public const byte Current = V1;
 }
 
 /// <summary>
 /// 期待しないフォーマットバージョンの DB を open したときに throw する。
-/// 未リリース段階では自動マイグレーションを提供しないため、旧 DB は新規作成し直す必要がある。
+/// 自動マイグレーションは提供しないため、旧 format の DB は新規作成し直す必要がある。
 /// </summary>
 public sealed class FormatVersionMismatchException : GraphDbException
 {
@@ -96,7 +33,7 @@ public sealed class FormatVersionMismatchException : GraphDbException
     /// <summary>ファイル種別 / 検出バージョン / 期待バージョンを指定して例外を生成する。</summary>
     public FormatVersionMismatchException(string fileKind, byte found, byte expected)
         : base($"Format version mismatch on {fileKind}: file is v{found}, this build requires v{expected}. " +
-               "Pre-release breaking change (FT-26 MVCC). Recreate the database from source data.")
+               "This Quiver build does not migrate older on-disk formats; recreate the database from source data.")
     {
         FileKind = fileKind;
         Found = found;

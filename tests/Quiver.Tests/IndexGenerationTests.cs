@@ -251,24 +251,23 @@ public sealed class IndexGenerationTests : IDisposable
     // ---- Format version gate ----
 
     [Fact]
-    public void FormatVersion_current_is_v9()
+    public void FormatVersion_current_is_v1()
     {
-        // ARCH-4 増分8: 単一ファイル化で V4→V5。
-        // ARCH-5c Phase 2: ノードストアの slotted ヒープ化で V5→V6 へ bump。
-        // ARCH-6: ベクトル / HNSW の in-file 永続化で V6→V7 へ bump。
-        // FTS-2: 全文索引 (postings/norms + カタログ拡張) で V7→V8 へ bump。
-        // FTS-7: logical postings WAL (FtLeafMutation / FtStructureImage) 導入で旧 crash WAL の
-        // 誤読を防ぐため V8→V9 へ bump (本体レイアウトは不変)。
-        FormatVersion.Current.Should().Be(FormatVersion.V9FtLogicalWal);
+        // 未リリース期間中に重ねた format 履歴 (pre-MVCC → MVCC → sidecar → 単一ファイル →
+        // columnar → vector → 全文 → logical WAL) はクリーンブレイクで畳み、現実装を v1 として再宣言した。
+        FormatVersion.Current.Should().Be(FormatVersion.V1);
     }
 
+    // 旧 format バイトを持つ store は open 時に reject される (クリーンブレイク; 自動マイグレーション無し)。
+    private const byte LegacyFormatVersion = 3;
+
     [Fact]
-    public void Opening_pre_v4_store_throws_FormatVersionMismatch()
+    public void Opening_store_with_legacy_format_version_throws_FormatVersionMismatch()
     {
         Directory.CreateDirectory(_dir);
         var path = Path.Combine(_dir, "nodes.db");
 
-        // V4 で 1 ノード書く。
+        // 現行 (v1) で 1 ノード書く。
         using (IPagedFile pf = new PagedFile(path))
         {
             var store = new NodeStore(pf);
@@ -276,11 +275,11 @@ public sealed class IndexGenerationTests : IDisposable
         }
 
         // ヘッダの format version バイト (page 1, body offset 31 = NodeStore.MetaFormatVersion) を
-        // 旧 V3 に書き換える。
+        // 旧 format に書き換える。
         using (IPagedFile pf = new PagedFile(path))
         {
             var ph = pf.PinForWrite(new PageId(1));
-            ph.Data[31] = FormatVersion.V3MvccSidecar;
+            ph.Data[31] = LegacyFormatVersion;
             pf.UnpinDirty(new PageId(1), 0);
         }
 
@@ -289,7 +288,7 @@ public sealed class IndexGenerationTests : IDisposable
         {
             Action reopen = () => new NodeStore(pf);
             reopen.Should().Throw<FormatVersionMismatchException>()
-                .Which.Found.Should().Be(FormatVersion.V3MvccSidecar);
+                .Which.Found.Should().Be(LegacyFormatVersion);
         }
     }
 }
