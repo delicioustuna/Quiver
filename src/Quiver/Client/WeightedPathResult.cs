@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Api;
 
 /// <summary>
-/// 重み付き最短経路 (<see cref="GraphTraversalSource.WeightedShortestPath(NodeId, NodeId, string, Quiver.Stores.Direction, string?, double)"/> /
+/// 重み付き最短経路 (<see cref="GraphTraversalSource.WeightedShortestPath(NodeId, NodeId, string, Quiver.Storage.Records.Direction, string?, double)"/> /
 /// <see cref="GraphTraversalSource.WeightedShortestPathAStar"/>) の結果。
 /// </summary>
 /// <param name="Found">経路が見つかったか。</param>

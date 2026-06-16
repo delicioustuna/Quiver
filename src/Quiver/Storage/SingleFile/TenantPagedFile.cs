@@ -12,7 +12,7 @@ namespace Quiver.Storage;
 /// 論理ページ ID は per-tenant page table で物理ページ ID に写像し、pin / alloc / free / unpin は
 /// 共有 <see cref="PagedFile"/> に物理 ID で委譲する。論理 page 0 は予約 (ストアは触らない)。
 ///
-/// page table エントリの符号化 (in-memory & 永続とも同じ):
+/// page table エントリの符号化 (in-memory &amp; 永続とも同じ):
 ///   <list type="bullet">
 ///     <item><c>&gt;= 0</c>: 割当済み物理ページ ID</item>
 ///     <item><c>== -1</c>: 未割当 (unmapped)</item>
