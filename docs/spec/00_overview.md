@@ -1,37 +1,37 @@
-# Quiver: System Overview
+# Quiver: システム概要
 
-> as-built specification (v1 baseline, 2026-06-16)
+> as-built 仕様 (v1 baseline, 2026-06-16)
 
-## Positioning {#positioning}
+## ポジショニング {#positioning}
 
-Quiver is a **pure C# embedded (in-process) graph + vector + full-text search database engine** targeting .NET.
-The comparison axis is SQLite / LiteDB / KuzuDB-class embedded DBs, not server-scale or distributed graph systems.
+Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベクトル + 全文検索データベースエンジン** である。
+比較軸は SQLite / LiteDB / KuzuDB 系の組み込み DB であり、サーバ規模や分散グラフシステムは物差しにしない。
 
-## Primary Use Case {#use-case}
+## 主要ユースケース {#use-case}
 
-**Local RAG backend** -- but the engine itself is general-purpose; the RAG-specific API lives in `Quiver.Rag`.
+**ローカル RAG バックエンド** -- ただしエンジン自体は汎用である。RAG 固有の API は `Quiver.Rag` に置く。
 
-## Zero-Dependency Thesis {#zero-dep}
+## ゼロ依存テーゼ {#zero-dep}
 
-Only LLM model driving is external. All other components (storage, WAL, recovery, indexing, vector search,
-full-text search, query engine) are implemented from scratch in managed C# with zero third-party dependencies.
+外部に依存するのは LLM モデルの駆動のみ。それ以外のコンポーネント（ストレージ、WAL、リカバリ、インデックス、
+ベクトル検索、全文検索、クエリエンジン）はすべてサードパーティ依存ゼロのマネージド C# でフルスクラッチ実装する。
 
 **Trusted Computing Base (TCB):**
 
-| Component | Trust Basis |
+| コンポーネント | 信頼の根拠 |
 |---|---|
-| .NET BCL | Platform runtime |
-| Claude | Implementer (all code authored by AI under human review) |
-| LLM provider | Runtime dependency (embedding / generation, via `Quiver.Embedding`) |
+| .NET BCL | プラットフォームランタイム |
+| Claude | 実装者（全コードは人間のレビュー下で AI が記述） |
+| LLM プロバイダ | ランタイム依存（埋め込み / 生成、`Quiver.Embedding` 経由） |
 
-Managed C# eliminates the memory-safety vulnerability class that affects C/C++ storage engines.
-Tests serve as security controls -- they are the primary verification mechanism.
+マネージド C# は、C/C++ ストレージエンジンが抱えるメモリ安全性の脆弱性クラスを排除する。
+テストはセキュリティ統制として機能し、主要な検証メカニズムである。
 
-## Architecture Layers {#layers}
+## アーキテクチャレイヤ {#layers}
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  Quiver.Rag / Quiver.Embedding / Quiver.Hosting │  Optional add-ons
+│  Quiver.Rag / Quiver.Embedding / Quiver.Hosting │  オプションのアドオン
 ├─────────────────────────────────────────────────┤
 │  GraphDatabase (facade)                         │
 │  ├─ ISchemaApi (labels, indexes, FT indexes)    │
@@ -59,31 +59,31 @@ Tests serve as security controls -- they are the primary verification mechanism.
 └─────────────────────────────────────────────────┘
 ```
 
-## Assemblies {#assemblies}
+## アセンブリ {#assemblies}
 
-| Assembly | Role |
+| アセンブリ | 役割 |
 |---|---|
-| `Quiver` | Engine core (single assembly, all subsystems) |
-| `Quiver.Client.Attributes` | Source-generator attributes |
-| `Quiver.SourceGen` | Roslyn source generator for typed graph models |
-| `Quiver.Embedding` | Vector / embedding pipeline (KNN, hybrid search) |
-| `Quiver.Rag` | Local RAG layer (Document/Chunk schema, ingest, hybrid search + graph expansion) |
-| `Quiver.Hosting` | `Microsoft.Extensions.Hosting` integration (DI) |
-| `Quiver.OpenTelemetry` | OpenTelemetry export |
+| `Quiver` | エンジン中核（単一アセンブリ、全サブシステム） |
+| `Quiver.Client.Attributes` | ソースジェネレータ用の属性 |
+| `Quiver.SourceGen` | 型付きグラフモデル向け Roslyn ソースジェネレータ |
+| `Quiver.Embedding` | ベクトル / 埋め込みパイプライン（KNN、ハイブリッド検索） |
+| `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ、取り込み、ハイブリッド検索 + グラフ展開） |
+| `Quiver.Hosting` | `Microsoft.Extensions.Hosting` 連携（DI） |
+| `Quiver.OpenTelemetry` | OpenTelemetry エクスポート |
 
-## File Layout {#file-layout}
+## ファイルレイアウト {#file-layout}
 
-At rest, a Quiver database is a **single file** `*.quiver`. During operation, a WAL sidecar
-`*.quiver-wal` exists alongside it. On clean shutdown the WAL is empty or absent.
+静止時、Quiver データベースは **単一ファイル** `*.quiver` である。稼働中は WAL サイドカー
+`*.quiver-wal` が並んで存在する。クリーンシャットダウン時には WAL は空になるか存在しない。
 
-## Format Version {#format-version}
+## フォーマットバージョン {#format-version}
 
-`FormatVersion.Current = V1 = 1`. No automatic migration; opening a database with a different
-format version throws `FormatVersionMismatchException`.
+`FormatVersion.Current = V1 = 1`。自動マイグレーションは行わない。異なるフォーマットバージョンの
+データベースを開くと `FormatVersionMismatchException` をスローする。
 
-## Non-Goals {#non-goals}
+## 非目標 {#non-goals}
 
-- Server process / network protocol
-- Distributed / sharded deployment
-- SQL query language
-- Automatic schema migration for on-disk format changes (pre-1.0)
+- サーバプロセス / ネットワークプロトコル
+- 分散 / シャーディング構成
+- SQL クエリ言語
+- オンディスクフォーマット変更に対する自動スキーママイグレーション（1.0 以前）

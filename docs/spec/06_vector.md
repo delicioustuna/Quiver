@@ -1,97 +1,97 @@
-# Vector Search
+# ベクトル検索
 
-> as-built specification (v1 baseline)
+> as-built 仕様 (v1 baseline)
 
-## Vector Index Specification {#vector-index}
+## ベクトルインデックス仕様 {#vector-index}
 
-A vector index is defined by:
+ベクトルインデックスは以下で定義される:
 
-| Field | Type | Description |
+| フィールド | 型 | 説明 |
 |---|---|---|
-| Name | string | Unique identifier |
-| Dimensions | int | Vector dimensionality (positive) |
-| EntityKind | enum | `Node` or `Relationship` |
-| Metric | enum | `Euclidean`, `Cosine`, or `Dot` |
+| Name | string | 一意な識別子 |
+| Dimensions | int | ベクトルの次元数（正の値） |
+| EntityKind | enum | `Node` または `Relationship` |
+| Metric | enum | `Euclidean`, `Cosine`, または `Dot` |
 
 ## PersistentVectorStore {#persistent-store}
 
-`PersistentVectorStore` (`src/Quiver/Storage/Records/PersistentVectorStore.cs`) manages
-in-file vector storage as a container tenant within the `*.quiver` file.
+`PersistentVectorStore` (`src/Quiver/Storage/Records/PersistentVectorStore.cs`) は、`*.quiver`
+ファイル内のコンテナテナントとして in-file のベクトルストレージを管理する。
 
-- **Binding key**: entity `Sequence` (the slot-local part of EntityRef)
-- **Generation check**: stale bindings (generation mismatch) are filtered during KNN read
-- **Per-index tenants**: catalog + payload + HNSW graph
+- **バインディングキー**: エンティティの `Sequence`（EntityRef の slot-local 部分）
+- **Generation チェック**: 古いバインディング（generation 不一致）は KNN 読み取り時にフィルタされる
+- **インデックスごとのテナント**: catalog + payload + HNSW グラフ
 
-## HNSW Index {#hnsw}
+## HNSW インデックス {#hnsw}
 
-`HnswIndex` (`src/Quiver/Storage/Records/HnswIndex.cs`) implements the Hierarchical
-Navigable Small World graph for approximate nearest neighbor search.
+`HnswIndex` (`src/Quiver/Storage/Records/HnswIndex.cs`) は、近似最近傍探索のための
+Hierarchical Navigable Small World グラフを実装する。
 
-### Parameters {#hnsw-params}
+### パラメータ {#hnsw-params}
 
-| Parameter | Value |
+| パラメータ | 値 |
 |---|---|
-| M (max neighbors per layer) | 16 |
-| Mmax0 (max neighbors at layer 0) | 32 |
+| M（レイヤあたり最大近傍数） | 16 |
+| Mmax0（レイヤ 0 での最大近傍数） | 32 |
 | EfConstruction | 200 |
 | MaxLayers | 8 |
 
-### On-Disk Layout {#hnsw-layout}
+### オンディスクレイアウト {#hnsw-layout}
 
-**Header page** (page 1):
+**ヘッダページ** (page 1):
 
-| Field | Type |
+| フィールド | 型 |
 |---|---|
 | EntryPoint | int64 |
 | MaxLevel | int32 |
 | Count | int64 |
 | MaxSeq | int64 |
-| FormatVersion | byte (at offset 31) |
+| FormatVersion | byte (オフセット 31) |
 
-**Node records** (fixed 1,164 bytes each):
+**Node レコード**（各 1,164 バイト固定）:
 
-| Offset | Size | Field |
+| オフセット | サイズ | フィールド |
 |---|---|---|
-| 0 | 1 | Present flag |
+| 0 | 1 | Present フラグ |
 | 1 | 1 | Level |
-| 2 | 4 | Padding |
-| 4 | 12 | Neighbor counts (8 x int8, per layer) |
-| 12+ | varies | Neighbor arrays: (Mmax0 + (MaxLayers-1) x M) x int64 = 144 entries |
+| 2 | 4 | パディング |
+| 4 | 12 | 近傍カウント (8 x int8、レイヤごと) |
+| 12+ | 可変 | 近傍配列: (Mmax0 + (MaxLayers-1) x M) x int64 = 144 エントリ |
 
-### Operations {#hnsw-ops}
+### 操作 {#hnsw-ops}
 
-- **Insert**: assigns level via exponential decay, links to nearest neighbors at each layer
-- **Search (KNN)**: greedy traversal from entry point, refining through layers; top-k heap
-  with presence check and generation filter
-- **Delete**: marks node as absent; re-links neighbors on deletion
-- **Rebuild**: automatic when tombstone count exceeds live node count
+- **Insert**: 指数減衰でレベルを割り当て、各レイヤで最近傍にリンクする
+- **Search (KNN)**: エントリポイントから貪欲に走査し、レイヤを通じて精緻化する。presence チェックと
+  generation フィルタ付きの top-k ヒープを用いる
+- **Delete**: ノードを absent としてマークし、削除時に近傍を再リンクする
+- **Rebuild**: tombstone 数がライブノード数を超えると自動で実行
 
-### Limitations {#hnsw-limits}
+### 制限 {#hnsw-limits}
 
-- Overwrite of existing sequence updates payload only; HNSW graph topology is not re-linked
-- Re-linking and physical deletion are deferred to rebuild
+- 既存 sequence の上書きは payload のみを更新する。HNSW グラフのトポロジは再リンクされない
+- 再リンクと物理削除は rebuild まで遅延される
 
-## Distance Metrics {#distance}
+## 距離メトリクス {#distance}
 
-`VectorScorer` (`src/Quiver/Core/VectorScorer.cs`) computes vector similarity using
-SIMD-accelerated `Vector<float>` operations:
+`VectorScorer` (`src/Quiver/Core/VectorScorer.cs`) は、SIMD 加速された `Vector<float>` 演算で
+ベクトル類似度を計算する:
 
-| Metric | Formula | Convention |
+| メトリクス | 数式 | 規約 |
 |---|---|---|
-| Dot | `sum(a[i] * b[i])` | Higher = more similar |
-| Cosine | `dot / (norm_a * norm_b)` | Higher = more similar |
-| Euclidean | `-sum((a[i] - b[i])^2)` | Negated; higher = more similar |
+| Dot | `sum(a[i] * b[i])` | 大きいほど類似 |
+| Cosine | `dot / (norm_a * norm_b)` | 大きいほど類似 |
+| Euclidean | `-sum((a[i] - b[i])^2)` | 符号反転。大きいほど類似 |
 
-All metrics follow the convention: **higher score = more similar**. Euclidean distance
-is negated so that the same max-heap can be used for all metrics.
+すべてのメトリクスは **スコアが大きいほど類似** という規約に従う。Euclidean 距離は符号反転されており、
+すべてのメトリクスで同一の max-heap を使えるようにしている。
 
-## Transaction Integration {#tx-integration}
+## トランザクション統合 {#tx-integration}
 
-`tx.SetVector(kind, entityId, indexName, vector)` writes a vector within the current
-transaction. The write rides the same container WAL as graph mutations, so commit and
-rollback are atomic with the rest of the transaction.
+`tx.SetVector(kind, entityId, indexName, vector)` は現在のトランザクション内でベクトルを書き込む。
+この書き込みはグラフの mutation と同じコンテナ WAL に相乗りするため、コミットとロールバックは
+トランザクションの他の部分とアトミックである。
 
-## KNN Search {#knn-search}
+## KNN 検索 {#knn-search}
 
 ```csharp
 var results = tx.KnnSearch("vec_idx", queryVector, k: 10);

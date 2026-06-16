@@ -1,69 +1,64 @@
-# Known Limits
+# 既知の限界
 
-> as-built specification (v1 baseline)
+> as-built 仕様 (v1 baseline)
 
-This documents the engine's current known limitations. Defects found and fixed during the
-v1 consolidation audit are not tracked here — they are covered by regression tests and git
-history.
+本書はエンジンの現時点での既知の限界を記す。v1 統合監査で発見・修正された欠陥はここでは追跡しない
+— それらは回帰テストと git 履歴でカバーされる。
 
-## Concurrency, Threading & Safe Use {#concurrency}
+## 並行性・スレッディング・安全な利用 {#concurrency}
 
-The engine runs **one write transaction at a time alongside any number of concurrent readers**.
-The rules below are the supported contract; following them keeps the database correct and
-crash-safe.
+エンジンは **書き込みトランザクションを 1 度に 1 つだけ、任意数の並行リーダと並走させて** 動作する。
+以下のルールがサポートされるコントラクトであり、これに従えばデータベースは正しく、かつクラッシュ安全に保たれる。
 
-### Process & threading rules {#threading}
+### プロセスとスレッディングのルール {#threading}
 
-- **One process per database.** A `*.quiver` file is opened with an exclusive OS file lock
-  (`FileShare.None`); a second process cannot open it. There is no multi-process or networked
-  access — put your own service in front if you need that.
-- **Share one `GraphDatabase` per database, across threads.** The instance is thread-safe; open
-  it once and reuse it for the process lifetime. Do not open the same file twice in one process.
-- **A transaction is single-threaded and thread-affine.** A transaction — and any cursor or
-  enumerator obtained from it — must be created and used entirely on one thread. Its write and
-  MVCC contexts are thread-local (`[ThreadStatic]`), so handing a live transaction to another
-  thread (via `Task.Run`, an `await` continuation that resumes on a different thread,
-  `Parallel.For`, etc.) is unsupported and can silently skip WAL logging. Begin, use, and
-  commit/dispose a transaction in one synchronous scope on one thread; do not `await` between
-  `Begin` and `Commit`.
+- **データベースごとに 1 プロセス。** `*.quiver` ファイルは排他 OS ファイルロック (`FileShare.None`) で
+  開かれる。2 つ目のプロセスはこれを開けない。マルチプロセスやネットワークアクセスは存在しない —
+  それが必要なら自前のサービスを前段に置くこと。
+- **データベースごとに 1 つの `GraphDatabase` をスレッド間で共有する。** インスタンスはスレッドセーフ。
+  一度開いてプロセスのライフタイムを通じて再利用すること。同一プロセス内で同じファイルを 2 度開かないこと。
+- **トランザクションはシングルスレッドかつスレッドアフィンである。** トランザクション — およびそこから
+  取得したカーソルや列挙子 — は、すべて 1 つのスレッド上で作成・使用しなければならない。その write 文脈と
+  MVCC 文脈はスレッドローカル (`[ThreadStatic]`) であるため、生きたトランザクションを別スレッドに
+  渡すこと（`Task.Run`、別スレッドで再開する `await` 継続、`Parallel.For` など）はサポートされず、
+  WAL ロギングを暗黙にスキップしうる。トランザクションは 1 つのスレッド上の 1 つの同期スコープ内で
+  開始・使用・commit/dispose すること。`Begin` と `Commit` の間で `await` しないこと。
 
-### One writer; readers are concurrent {#one-writer}
+### ライタは 1 つ、リーダは並行 {#one-writer}
 
-- **Only one write transaction may be in flight at a time.** The engine does *not* reject a
-  second concurrent writer at `BeginTransaction()` — it is the application's responsibility to
-  serialize writes (see [serializing writes](#write-serialization)). All secondary-index and
-  full-text mutations are additionally funnelled through a single global index lock, so no two
-  transactions ever mutate an index / postings concurrently regardless of locking mode.
-- **Readers never block, and are never blocked.** `BeginReadOnlyTransaction()` takes a
-  consistent committed snapshot as of its start (snapshot isolation) and, by default, acquires
-  no locks. Any number of readers run in parallel, on their own threads, concurrently with the
-  single writer. A reader does not observe writes committed after it began — open a new reader
-  to see newer state.
+- **書き込みトランザクションは 1 度に 1 つだけ進行できる。** エンジンは 2 つ目の並行ライタを
+  `BeginTransaction()` で *拒否しない* — 書き込みの直列化はアプリケーションの責任である
+  （[書き込みの直列化](#write-serialization) を参照）。さらに、すべての二次インデックスと全文の
+  mutation は単一のグローバルインデックスロックに集約されるため、ロックモードに関わらず、2 つの
+  トランザクションがインデックス / postings を同時に mutation することは決してない。
+- **リーダはブロックせず、ブロックもされない。** `BeginReadOnlyTransaction()` は開始時の一貫した
+  コミット済みスナップショットを取得し（snapshot isolation）、デフォルトではロックを取得しない。
+  任意数のリーダがそれぞれのスレッド上で、単一のライタと並行して並列に動作する。リーダは自身の開始後に
+  コミットされた書き込みを観測しない — より新しい状態を見るには新しいリーダを開くこと。
 
-### Keep transactions short {#short-transactions}
+### トランザクションは短く保つ {#short-transactions}
 
-Checkpointing, `Vacuum()`, and WAL truncation run only when **no** transaction is active
-(`ActiveCount == 0`), and the oldest open transaction pins the WAL truncation horizon. A
-transaction left open — **read or write** — therefore blocks WAL truncation and space
-reclamation, so the WAL file grows for as long as it is held. Open a transaction, do the work,
-then commit or dispose promptly. Never hold a transaction open across user think-time, UI
-events, or network calls.
+チェックポイント、`Vacuum()`、WAL の切り詰めは、**アクティブなトランザクションが無い**とき
+(`ActiveCount == 0`) にのみ実行される。そして最も古いオープン中のトランザクションが WAL 切り詰めの
+境界をピン留めする。開いたままのトランザクションは — **読み書きを問わず** — したがって WAL 切り詰めと
+領域回収をブロックし、保持されている間 WAL ファイルが増大し続ける。トランザクションを開き、作業を行い、
+速やかに commit または dispose すること。ユーザの思考時間・UI イベント・ネットワーク呼び出しをまたいで
+トランザクションを開いたままにしないこと。
 
-### Commit & durability {#commit-durability}
+### コミットと永続性 {#commit-durability}
 
-`Commit()` returns only after the WAL has been fsync'd; once it returns, the data survives a
-process kill or power loss (recovery replays it on reopen — see
-[02_wal_recovery.md](02_wal_recovery.md)). A transaction disposed without `Commit()` (including
-when an exception unwinds the `using` scope) is rolled back. Partly-applied transactions are
-never visible.
+`Commit()` は WAL が fsync された後にのみ返る。返った後は、データはプロセスの kill や電源喪失を生き延びる
+（再オープン時にリカバリが再生する — [02_wal_recovery.md](02_wal_recovery.md) を参照）。`Commit()` なしで
+dispose されたトランザクション（例外が `using` スコープを巻き戻す場合も含む）はロールバックされる。
+部分適用されたトランザクションが可視になることは決してない。
 
-### Retrying on contention {#retry}
+### 競合時のリトライ {#retry}
 
-If you do drive writes from several threads, lock contention aborts the losing transaction with
-`DeadlockException`, `TransactionException` (lock-wait timeout), or — under
-`IsolationLevel.Serializable` — `SerializabilityException`. These are *transient*: the aborted
-transaction made no durable change, so retry the **whole** transaction (never a partial one)
-with a small bounded backoff:
+複数スレッドから書き込みを駆動する場合、ロック競合は敗者トランザクションを `DeadlockException`、
+`TransactionException`（ロック待ちタイムアウト）、または — `IsolationLevel.Serializable` 下では —
+`SerializabilityException` でアボートする。これらは *一時的* である: アボートされたトランザクションは
+永続的な変更を何も行っていないため、小さな有界バックオフを挟んで **トランザクション全体** を
+リトライすること（部分的にではなく）:
 
 ```csharp
 T WithRetry<T>(Func<T> runTxn, int maxAttempts = 5)
@@ -81,11 +76,11 @@ T WithRetry<T>(Func<T> runTxn, int maxAttempts = 5)
 }
 ```
 
-### Serializing writes (recommended) {#write-serialization}
+### 書き込みの直列化（推奨） {#write-serialization}
 
-Because the supported shape is single-writer, funnel all writes through one writer. Two patterns:
+サポートされる形は単一ライタであるため、すべての書き込みを 1 つのライタに集約すること。2 つのパターン:
 
-1. **A write gate** — guard every write transaction with a `SemaphoreSlim(1, 1)` (or a `lock`):
+1. **書き込みゲート** — すべての書き込みトランザクションを `SemaphoreSlim(1, 1)`（または `lock`）でガードする:
 
    ```csharp
    private static readonly SemaphoreSlim WriteGate = new(1, 1);
@@ -103,49 +98,48 @@ Because the supported shape is single-writer, funnel all writes through one writ
    }
    ```
 
-2. **A dedicated writer thread** — push write jobs onto a queue (e.g.
-   `System.Threading.Channels.Channel<T>`) drained by one background thread that begins,
-   executes, and commits each transaction on that thread. This also gives natural batching.
+2. **専用のライタスレッド** — 書き込みジョブをキュー（例: `System.Threading.Channels.Channel<T>`）に
+   積み、1 つのバックグラウンドスレッドがそれを drain して、各トランザクションをそのスレッド上で
+   開始・実行・commit する。これは自然なバッチングももたらす。
 
-Reads need no gate: open `BeginReadOnlyTransaction()` on any thread and run them concurrently
-with each other and with the writer.
+読み取りにゲートは不要: `BeginReadOnlyTransaction()` を任意のスレッドで開き、互いに、そしてライタと
+並行して実行すること。
 
-Supporting validated concurrent writers (and finer-grained index locking) is future work.
+検証済みの並行ライタ（およびよりきめ細かいインデックスロック）のサポートは将来の課題である。
 
-## BM25 corpus statistics are snapshot-based {#bm25-stats}
+## BM25 コーパス統計はスナップショットベース {#bm25-stats}
 
-When a `GraphStats` snapshot is supplied to `Search`, BM25 scoring takes the corpus document
-count `N`, average document length `avgdl`, and per-term `df` from that snapshot instead of
-re-scanning the norms / postings on every query (the FTS-4 optimization). A snapshot reused
-after the index changes is therefore approximate — `avgdl` / `df` may lag the live index and
-shift BM25 scores slightly. This is an accepted tradeoff: BM25 is robust to corpus-stat
-staleness, and `avgdl` scales every document's length normalization uniformly.
+`GraphStats` スナップショットが `Search` に与えられると、BM25 スコアリングはコーパス文書数 `N`、
+平均文書長 `avgdl`、term ごとの `df` をそのスナップショットから取得し、クエリのたびに norms / postings を
+再スキャンしない（FTS-4 最適化）。したがって、インデックス変更後に再利用されたスナップショットは近似的で
+ある — `avgdl` / `df` がライブインデックスから遅延し、BM25 スコアをわずかにずらしうる。これは許容された
+トレードオフである: BM25 はコーパス統計の陳腐化に頑健であり、`avgdl` はすべての文書の長さ正規化を
+一様にスケールする。
 
-It affects scoring only. WAND top-k pruning uses a staleness-independent per-term upper bound
-(`idf * (K1 + 1)`), so it never drops a document relative to the exact full scan, and both
-query paths use the same snapshot basis, so they stay mutually consistent.
+これはスコアリングにのみ影響する。WAND top-k 枝刈りは陳腐化に依存しない term ごとの上限
+(`idf * (K1 + 1)`) を用いるため、厳密な全スキャンと比べて文書を取りこぼすことは決してない。また両方の
+クエリパスが同一のスナップショット基準を用いるため、互いに整合し続ける。
 
-## HNSW Overwrite {#hnsw-overwrite}
+## HNSW の上書き {#hnsw-overwrite}
 
-`HnswIndex.Insert(seq)` for an existing sequence updates the vector payload but does
-not re-link the HNSW graph topology. The old graph links remain, pointing to the new
-vector. This may reduce search quality when vectors change significantly.
+既存 sequence に対する `HnswIndex.Insert(seq)` は、ベクトル payload を更新するが HNSW グラフの
+トポロジを再リンクしない。古いグラフリンクは新しいベクトルを指したまま残る。これはベクトルが大きく
+変化したときに検索品質を低下させうる。
 
-Mitigation: automatic rebuild when tombstone count exceeds live count.
+緩和策: tombstone 数がライブ数を超えたときの自動 rebuild。
 
-## No Automatic Migration {#no-migration}
+## 自動マイグレーションなし {#no-migration}
 
-Opening a database with a different `FormatVersion` throws `FormatVersionMismatchException`.
-There is no automatic migration path. Databases must be recreated from source data.
+異なる `FormatVersion` のデータベースを開くと `FormatVersionMismatchException` をスローする。
+自動マイグレーションのパスは存在しない。データベースはソースデータから作り直す必要がある。
 
-## In-Process Only {#in-process}
+## In-Process のみ {#in-process}
 
-Quiver runs in the application process. There is no server mode, network protocol,
-or inter-process access. The `*.quiver` file is opened with exclusive file lock
-(`FileShare.None`).
+Quiver はアプリケーションプロセス内で動作する。サーバモード・ネットワークプロトコル・プロセス間
+アクセスは存在しない。`*.quiver` ファイルは排他ファイルロック (`FileShare.None`) で開かれる。
 
-## Checkpoint WAL Truncation {#wal-truncation}
+## チェックポイントによる WAL 切り詰め {#wal-truncation}
 
-WAL truncation only occurs after a complete checkpoint (Begin + End). If the application
-runs for extended periods without a checkpoint (e.g., very large long-running transactions),
-the WAL file grows unboundedly.
+WAL の切り詰めは、完全なチェックポイント (Begin + End) の後にのみ発生する。アプリケーションが
+チェックポイントなしで長時間動作する場合（例: 非常に大きく長時間実行されるトランザクション）、
+WAL ファイルは際限なく増大する。

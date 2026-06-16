@@ -1,20 +1,19 @@
-# Query Engine
+# クエリエンジン
 
-> as-built specification (v1 baseline)
+> as-built 仕様 (v1 baseline)
 
-## Architecture {#architecture}
+## アーキテクチャ {#architecture}
 
-The query engine follows a **Volcano / iterator** model. Logical plans are optimized
-and compiled into physical operator trees. Each operator implements `GetNext()` to
-pull the next result row.
+クエリエンジンは **Volcano / iterator** モデルに従う。論理プランは最適化され、物理オペレータツリーへ
+コンパイルされる。各オペレータは `GetNext()` を実装し、次の結果行を pull する。
 
 ## GraphKernel {#graph-kernel}
 
-`GraphKernel` (`src/Quiver/Operators/GraphKernel.cs`) provides the core graph traversal
-abstraction. It wraps `IGraphAccessMethods.Expand()` so the same algorithm shell works
-across different storage access paths.
+`GraphKernel` (`src/Quiver/Operators/GraphKernel.cs`) は、コアとなるグラフ走査の抽象を提供する。
+`IGraphAccessMethods.Expand()` をラップすることで、異なるストレージアクセスパスをまたいで
+同一のアルゴリズム本体が動作する。
 
-### Kernel Contract {#kernel-contract}
+### Kernel コントラクト {#kernel-contract}
 
 ```csharp
 interface IGraphKernel<TState>
@@ -26,58 +25,58 @@ interface IGraphKernel<TState>
 }
 ```
 
-## Physical Operators {#physical-operators}
+## 物理オペレータ {#physical-operators}
 
-### Scan Operators {#scan-ops}
+### スキャンオペレータ {#scan-ops}
 
-| Operator | Description |
+| オペレータ | 説明 |
 |---|---|
-| `AllNodesScanOperator` | Sequential scan of all live nodes |
-| `NodeByLabelScanOperator` | Filter by label during scan |
-| `AllRelationshipsScanOperator` | Sequential scan of all relationships |
+| `AllNodesScanOperator` | 全ライブノードのシーケンシャルスキャン |
+| `NodeByLabelScanOperator` | スキャン中にラベルでフィルタ |
+| `AllRelationshipsScanOperator` | 全リレーションシップのシーケンシャルスキャン |
 
-### Expand / Traversal {#expand-ops}
+### Expand / 走査 {#expand-ops}
 
-| Operator | Description |
+| オペレータ | 説明 |
 |---|---|
-| `ExpandOperator` | Single-hop expansion |
-| `VariableLengthExpandOperator` | Multi-hop with min/max depth |
-| `BfsOperator` | Breadth-first traversal |
-| `ShortestPathOperator` | Unweighted shortest path (BFS) |
-| `WeightedShortestPathOperator` | Dijkstra-based weighted shortest path |
-| `BidirectionalExpandOperator` | Bidirectional BFS for path finding |
-| `RelationshipScanExpandOperator` | Expand via relationship scan |
-| `RelationshipEndpointOperator` | Resolve relationship endpoints |
+| `ExpandOperator` | 単一ホップ展開 |
+| `VariableLengthExpandOperator` | min/max depth 付きのマルチホップ |
+| `BfsOperator` | 幅優先走査 |
+| `ShortestPathOperator` | 重みなし最短経路 (BFS) |
+| `WeightedShortestPathOperator` | Dijkstra ベースの重み付き最短経路 |
+| `BidirectionalExpandOperator` | 経路探索のための双方向 BFS |
+| `RelationshipScanExpandOperator` | リレーションシップスキャンによる展開 |
+| `RelationshipEndpointOperator` | リレーションシップのエンドポイントを解決 |
 
-### Filter / Set {#filter-ops}
+### フィルタ / 集合 {#filter-ops}
 
-| Operator | Description |
+| オペレータ | 説明 |
 |---|---|
-| `FilterOperator` | Predicate-based row filter |
-| `BitmapFilterOperator` | Bitmap-accelerated filter |
-| `UnionOperator` | Set union of two operator outputs |
-| `CoalesceOperator` | First non-empty result from ordered sources |
+| `FilterOperator` | 述語ベースの行フィルタ |
+| `BitmapFilterOperator` | ビットマップで高速化したフィルタ |
+| `UnionOperator` | 2 つのオペレータ出力の集合和 |
+| `CoalesceOperator` | 順序付きソースから最初の非空結果 |
 
-### Aggregation / Projection {#agg-ops}
+### 集約 / 射影 {#agg-ops}
 
-| Operator | Description |
+| オペレータ | 説明 |
 |---|---|
-| `ProjectOperator` | Column projection / transformation |
-| `SortOperator` | In-memory sort |
-| `LimitOperator` | Row count limit |
+| `ProjectOperator` | 列の射影 / 変換 |
+| `SortOperator` | インメモリソート |
+| `LimitOperator` | 行数制限 |
 
-### Full-Text / Vector {#fts-vec-ops}
+### 全文 / ベクトル {#fts-vec-ops}
 
-| Operator | Description |
+| オペレータ | 説明 |
 |---|---|
-| `FullTextScanOperator` | BM25-scored full-text search |
-| `FilteredFullTextScanOperator` | Full-text search with predicate filter |
-| `KnnNodeSourceOperator` | K-nearest-neighbor vector search |
-| `FilteredKnnNodeSourceOperator` | KNN with predicate filter |
+| `FullTextScanOperator` | BM25 スコア付き全文検索 |
+| `FilteredFullTextScanOperator` | 述語フィルタ付き全文検索 |
+| `KnnNodeSourceOperator` | K 近傍ベクトル検索 |
+| `FilteredKnnNodeSourceOperator` | 述語フィルタ付き KNN |
 
 ## Traversal DSL {#traversal-dsl}
 
-`GraphTraversalSource` (`Quiver.Api`) provides a Gremlin-style fluent traversal API:
+`GraphTraversalSource` (`Quiver.Api`) は Gremlin 風の流暢な走査 API を提供する:
 
 ```csharp
 var g = tx.G(schema);
@@ -86,8 +85,7 @@ g.V("Person").Has("name", "Alice")
  .Values<string>("name");
 ```
 
-## Match Pattern {#match}
+## Match パターン {#match}
 
-`Match` compiles Cypher-like pattern expressions into physical operator trees.
-Patterns specify node labels, relationship types, and property predicates that
-are optimized into index seeks and expand operations.
+`Match` は Cypher 風のパターン式を物理オペレータツリーへコンパイルする。パターンはノードラベル、
+リレーションシップ型、プロパティ述語を指定し、それらはインデックスシークと expand 操作へ最適化される。

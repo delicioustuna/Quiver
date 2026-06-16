@@ -1,40 +1,40 @@
-# Full-Text Search
+# 全文検索
 
-> as-built specification (v1 baseline)
+> as-built 仕様 (v1 baseline)
 
-## Architecture {#architecture}
+## アーキテクチャ {#architecture}
 
-Each full-text index consists of two B+Trees sharing a container tenant:
+各全文インデックスは、コンテナテナントを共有する 2 つの B+Tree から構成される:
 
-| B+Tree | Key | Value | Purpose |
+| B+Tree | キー | 値 | 目的 |
 |---|---|---|---|
-| **Postings** | `(term, entityId)` composite | `tf` (uint16, saturated) | Inverted index |
-| **Norms** | `entityId` (int64) | `docLen` (document length) | BM25 length normalization |
+| **Postings** | `(term, entityId)` 複合 | `tf` (uint16, 飽和) | 転置インデックス |
+| **Norms** | `entityId` (int64) | `docLen`（文書長） | BM25 の長さ正規化 |
 
-## Tokenizer {#tokenizer}
+## トークナイザ {#tokenizer}
 
-`MixedBigramTokenizer` (default, id = `mixed-bigram-v1`):
-- CJK characters: bigram decomposition
-- Latin/ASCII: whitespace-delimited, lowercased
-- Mixed: seamless transition between CJK bigrams and Latin tokens
+`MixedBigramTokenizer`（デフォルト、id = `mixed-bigram-v1`）:
+- CJK 文字: bigram 分解
+- Latin/ASCII: 空白区切り、小文字化
+- 混在: CJK の bigram と Latin トークンをシームレスに切り替え
 
-## Postings Key Encoding {#postings-key}
+## Postings キーエンコーディング {#postings-key}
 
-`PostingsKey.Encode(termUtf8, entityId)` produces a byte[] key for the B+Tree:
-- Term bytes (variable length) followed by entity ID (int64 big-endian)
-- `PostingsKey.TermRange(termUtf8)` returns `(lower, upper)` bounds for prefix scan
-  over all entities matching a term
+`PostingsKey.Encode(termUtf8, entityId)` は B+Tree 用の byte[] キーを生成する:
+- term バイト列（可変長）の後にエンティティ ID (int64 big-endian) を続ける
+- `PostingsKey.TermRange(termUtf8)` は、ある term に一致する全エンティティを prefix スキャンするための
+  `(lower, upper)` 境界を返す
 
-## BM25 Scoring {#bm25}
+## BM25 スコアリング {#bm25}
 
-Okapi BM25 with standard parameters:
+標準パラメータの Okapi BM25:
 
-| Parameter | Value |
+| パラメータ | 値 |
 |---|---|
 | k1 | 1.2 |
 | b | 0.75 |
 
-### Formulas {#bm25-formulas}
+### 数式 {#bm25-formulas}
 
 ```
 IDF(term) = log(1 + (N - df + 0.5) / (df + 0.5))
@@ -42,80 +42,74 @@ IDF(term) = log(1 + (N - df + 0.5) / (df + 0.5))
 Score(term, doc) = IDF × (tf × (k1 + 1)) / (tf + k1 × (1 - b + b × docLen / avgdl))
 ```
 
-Where:
-- `N` = total document count
-- `df` = document frequency (number of docs containing the term)
-- `tf` = term frequency in the document
-- `docLen` = document length (from norms)
-- `avgdl` = average document length
+ここで:
+- `N` = 総文書数
+- `df` = 文書頻度（その term を含む文書数）
+- `tf` = 文書内での term 頻度
+- `docLen` = 文書長（norms から取得）
+- `avgdl` = 平均文書長
 
-### Corpus Statistics {#corpus-stats}
+### コーパス統計 {#corpus-stats}
 
-`Bm25CorpusStats`: DocumentCount, AverageDocLength, per-term stats (optional).
-`Bm25TermStats`: `{term -> (df, maxTf)}`, MinDocLen.
+`Bm25CorpusStats`: DocumentCount, AverageDocLength, term ごとの統計（任意）。
+`Bm25TermStats`: `{term -> (df, maxTf)}`, MinDocLen。
 
 ## WAND Top-K {#wand}
 
-`Bm25Scorer.RankWand()` implements the Weighted AND (WAND) algorithm for efficient
-top-k retrieval:
+`Bm25Scorer.RankWand()` は、効率的な top-k 取得のための Weighted AND (WAND) アルゴリズムを実装する:
 
-1. For each query term, compute an **upper bound** on its contribution:
+1. 各クエリ term について、その寄与の **上限** を計算する:
    `ub = IDF × (maxTf × (k1 + 1)) / (maxTf + k1 × normMin)`
-2. Sort term cursors by current document ID
-3. **Pivot**: find the first document where cumulative upper bounds of aligned
-   cursors exceed `theta` (the k-th best score seen so far)
-4. If a full evaluation of the pivot document yields a score > theta, insert
-   into the top-k heap
-5. Advance lagging cursors via `SeekTo` to skip non-candidate documents
+2. term カーソルを現在の文書 ID でソートする
+3. **Pivot**: 整列したカーソルの累積上限が `theta`（これまでに見た k 番目に良いスコア）を
+   超える最初の文書を探す
+4. その pivot 文書を完全評価したスコアが theta を超えれば、top-k ヒープに挿入する
+5. 候補でない文書をスキップするため、`SeekTo` で遅れているカーソルを前進させる
 
 ## Reciprocal Rank Fusion (RRF) {#rrf}
 
-When combining full-text and vector search results (hybrid search), RRF merges
-ranked lists:
+全文検索とベクトル検索の結果を組み合わせる（ハイブリッド検索）際、RRF はランク付きリストをマージする:
 
 ```
 RRF_score(doc) = sum(1 / (k + rank_i(doc)))
 ```
 
-where `k` is a smoothing constant (default 60) and `rank_i` is the document's
-position in result list `i`.
+ここで `k` は平滑化定数（デフォルト 60）であり、`rank_i` は結果リスト `i` における文書の順位である。
 
-## Logical WAL {#logical-wal}
+## 論理 WAL {#logical-wal}
 
-Full-text postings and norms use **logical WAL records** (`FtLeafMutation`) instead
-of page-image logging for leaf updates. This dramatically reduces WAL amplification
-for high-volume text ingestion.
+全文 postings と norms は、リーフ更新に page-image ログではなく **論理 WAL レコード**
+(`FtLeafMutation`) を用いる。これにより、大量のテキスト取り込み時の WAL 増幅を劇的に削減する。
 
-### Record Types {#ft-wal-records}
+### レコード種別 {#ft-wal-records}
 
-| WAL Type | Value | Purpose |
+| WAL 種別 | 値 | 目的 |
 |---|---|---|
-| `FtLeafMutation` | 17 | State-setting leaf mutation (Upsert or Delete) |
-| `FtStructureImage` | 18 | Structure page (split/merge/root) after-image |
+| `FtLeafMutation` | 17 | state-setting なリーフ mutation（Upsert または Delete） |
+| `FtStructureImage` | 18 | 構造ページ（split/merge/root）の after-image |
 
-### Journaling Modes {#ft-journaling}
+### ジャーナリングモード {#ft-journaling}
 
-| Mode | Leaf | Structure (SMO) |
+| モード | リーフ | 構造 (SMO) |
 |---|---|---|
-| **Suppressed** | No page-image; FtLeafMutation only | N/A |
-| **RedoOnly** | N/A | Eager PageImage, nested top action (no undo) |
-| **Full** | Standard page-image + CLR | Standard page-image + CLR |
+| **Suppressed** | page-image なし。FtLeafMutation のみ | N/A |
+| **RedoOnly** | N/A | eager な PageImage、nested top action（undo なし） |
+| **Full** | 標準の page-image + CLR | 標準の page-image + CLR |
 
-Leaf updates use Suppressed mode: only FtLeafMutation records are logged.
-Structure modifications (split, merge, root changes) use RedoOnly mode: after-images
-are written as `FtStructureImage` records, which are unconditionally redone during
-recovery and never undone (nested top action semantics).
+リーフ更新は Suppressed モードを用いる: FtLeafMutation レコードのみがログされる。
+構造変更（split, merge, root の変更）は RedoOnly モードを用いる: after-image が `FtStructureImage`
+レコードとして書き込まれ、リカバリ中に無条件で redo され、undo されることはない（nested top action のセマンティクス）。
 
-### Recovery {#ft-recovery}
+### リカバリ {#ft-recovery}
 
-During recovery:
-- **Pass 2a**: `FtStructureImage` records are unconditionally redone (nested top action)
-- **Pass 2b**: `FtLeafMutation` records of committed transactions are redone via
-  `ApplyFtLeafRedo` (state-setting, idempotent)
-- **Pass 3**: `FtLeafMutation` records of loser transactions are undone via
-  inverse operation (Upsert becomes Delete, Delete becomes Upsert with saved value)
+リカバリ中:
+- **Pass 2a**: `FtStructureImage` レコードは無条件に redo される（nested top action）
+- **Pass 2b**: コミット済みトランザクションの `FtLeafMutation` レコードは `ApplyFtLeafRedo` で
+  redo される（state-setting、冪等）
+- **Pass 3**: loser トランザクションの `FtLeafMutation` レコードは逆操作で undo される
+  （Upsert は Delete に、Delete は保存値での Upsert になる）
 
-### WAL Amplification {#wal-amplification}
+### WAL 増幅 {#wal-amplification}
 
-Logical WAL reduces postings WAL amplification from ~50-100x (page-image per leaf touch)
-to ~5x (logical mutation per posting). Measured at batch=10: 4.70x.
+論理 WAL は postings の WAL 増幅を ~50-100x（リーフに触れるたびの page-image）から
+~5x（posting ごとの論理 mutation）へ削減する。batch=10 での実測値: 4.70x。

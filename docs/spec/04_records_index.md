@@ -1,117 +1,116 @@
-# Records & Indexes
+# レコード & インデックス
 
-> as-built specification (v1 baseline)
+> as-built 仕様 (v1 baseline)
 
-## Slotted Page Model {#slotted-pages}
+## Slotted ページモデル {#slotted-pages}
 
-All record stores use a slotted-page layout within 8,160-byte page bodies (`PagedFile.BodySize`).
-Records are fixed-size per store; slot index = record offset within page.
+すべてのレコードストアは、8,160 バイトのページボディ (`PagedFile.BodySize`) 内で slotted-page
+レイアウトを用いる。レコードはストアごとに固定サイズであり、slot index = ページ内のレコードオフセット。
 
-## Node Store {#node-store}
+## Node ストア {#node-store}
 
-`NodeStore` (`src/Quiver/Storage/Records/NodeStore.cs`).
+`NodeStore` (`src/Quiver/Storage/Records/NodeStore.cs`)。
 
-**Node record** (15 bytes):
+**Node レコード** (15 バイト):
 
-| Offset | Size | Field |
+| オフセット | サイズ | フィールド |
 |---|---|---|
 | 0 | 1 | Flags (alive, deleted) |
-| 1 | 6 | FirstRelId (first adjacency-list relationship) |
-| 7 | 6 | FirstPropId (first property chain entry) |
+| 1 | 6 | FirstRelId（隣接リスト先頭のリレーションシップ） |
+| 7 | 6 | FirstPropId（プロパティチェーンの先頭エントリ） |
 | 13 | 2 | LabelId |
 
-- **544 records per page** (8160 / 15)
-- Version metadata (xmin/xmax) stored in a separate MVCC sidecar (`EntityVersionMeta`)
-- Slot reuse via vacuum free list (`OP-3`); logical delete during active tx
+- **1 ページあたり 544 レコード** (8160 / 15)
+- バージョンメタデータ (xmin/xmax) は別の MVCC サイドカー (`EntityVersionMeta`) に格納
+- vacuum フリーリストによる slot 再利用 (`OP-3`)。アクティブ tx 中は論理削除
 
-## Relationship Store {#rel-store}
+## Relationship ストア {#rel-store}
 
-Relationships are stored in an adjacency-list structure. Each relationship record links
-to next/prev relationships for both source and target nodes, forming a doubly-linked list
-per node endpoint.
+リレーションシップは隣接リスト構造で格納される。各リレーションシップレコードは、source と target の
+両ノードについて next/prev のリレーションシップにリンクし、ノードのエンドポイントごとに双方向連結リストを形成する。
 
-## Property Store {#property-store}
+## Property ストア {#property-store}
 
-`PropertyStore` (`src/Quiver/Storage/Records/PropertyStore.cs`).
+`PropertyStore` (`src/Quiver/Storage/Records/PropertyStore.cs`)。
 
-**Property record** (41 bytes):
+**Property レコード** (41 バイト):
 
-| Offset | Size | Field |
+| オフセット | サイズ | フィールド |
 |---|---|---|
 | 0 | 1 | Flags |
-| 1 | 4 | KeyId (interned property key) |
+| 1 | 4 | KeyId（インターンされたプロパティキー） |
 | 5 | 1 | ValueType |
-| 6 | 24 | InlineValue (up to 24 bytes inline) |
-| 30 | 5 | SpilloverId (for values > 24 bytes) |
-| 35 | 6 | NextPropId (property chain) |
+| 6 | 24 | InlineValue（最大 24 バイトをインライン） |
+| 30 | 5 | SpilloverId（24 バイト超の値用） |
+| 35 | 6 | NextPropId（プロパティチェーン） |
 
-- **199 records per page** (8160 / 41)
-- Inline capacity: 24 bytes. Larger values spill to overflow pages.
-- MVCC version metadata via `PropertyVersionMeta` sidecar
-- Columnar layout with alloc-free read path and version chains
+- **1 ページあたり 199 レコード** (8160 / 41)
+- インライン容量: 24 バイト。これより大きい値はオーバーフローページにスピルする。
+- MVCC バージョンメタデータは `PropertyVersionMeta` サイドカー経由
+- alloc-free な読み取りパスとバージョンチェーンを持つ列指向レイアウト
 
-## EntityRef (ID Packing) {#entity-ref}
+## EntityRef (ID パッキング) {#entity-ref}
 
-`EntityRef` (`src/Quiver/Core/Ids.cs`) packs entity identity into a single `long`:
+`EntityRef` (`src/Quiver/Core/Ids.cs`) は、エンティティの同一性を単一の `long` にパックする:
 
 ```
-Bit layout (MSB → LSB):
+ビットレイアウト (MSB → LSB):
 [63..60]  EntityKind   (4 bits; Node=0, Relationship=1)
 [59..44]  Generation   (16 bits; 0..65535)
-[43..0]   Sequence     (44 bits; slot-local ID; 0..17.6 trillion)
+[43..0]   Sequence     (44 bits; slot-local ID; 0..17.6 兆)
 ```
 
-| Constant | Value |
+| 定数 | 値 |
 |---|---|
 | `SequenceMask` | `0xFFF_FFFF_FFFF` (44 bits) |
 | `MaxGeneration` | 65,535 |
 
 - `PackLocal(seq, gen)` = `(gen << 44) | (seq & SequenceMask)`
-- Generation increments on slot reuse after vacuum; prevents ABA aliasing
-- Generation overflow (> 65535): slot is permanently retired
+- Generation は vacuum 後の slot 再利用時にインクリメントされ、ABA エイリアシングを防ぐ
+- Generation オーバーフロー (> 65535): その slot は恒久的に退役する
 
-## B+Tree Index {#btree}
+## B+Tree インデックス {#btree}
 
-`BTreeIndex` (`src/Quiver/Index/BTreeIndex.cs`) implements a disk-resident B+Tree.
+`BTreeIndex` (`src/Quiver/Index/BTreeIndex.cs`) はディスク常駐の B+Tree を実装する。
 
-### Leaf Page Layout {#btree-leaf}
+### リーフページレイアウト {#btree-leaf}
 
-| Offset | Size | Field |
+| オフセット | サイズ | フィールド |
 |---|---|---|
 | 0 | 4 | EntryCount (int32) |
-| 4 | 8 | NextLeaf (int64, -1 = none) |
+| 4 | 8 | NextLeaf (int64, -1 = なし) |
 | 12 | 8 | PrevLeaf (int64) |
-| 20+ | var | Entries: KeyLen(int16) + Key(variable) + Value(int64) |
+| 20+ | 可変 | Entries: KeyLen(int16) + Key(可変) + Value(int64) |
 
-### Internal Page Layout {#btree-internal}
+### 内部ページレイアウト {#btree-internal}
 
-| Offset | Size | Field |
+| オフセット | サイズ | フィールド |
 |---|---|---|
 | 0 | 4 | KeyCount (int32) |
 | 4 | 8 | FirstChildPageId (int64) |
-| 12+ | var | Keys: KeyLen(int16) + Key(variable) + ChildPageId(int64) |
+| 12+ | 可変 | Keys: KeyLen(int16) + Key(可変) + ChildPageId(int64) |
 
-### Key Codec {#key-codec}
+### キーコーデック {#key-codec}
 
-`KeyCodec` encodes typed property values into comparable byte sequences for B+Tree ordering:
+`KeyCodec` は、型付きプロパティ値を B+Tree の順序付けのために比較可能なバイト列へエンコードする:
 
-- **StringEquality**: UTF-8 bytes
-- **Int64Equality**: big-endian int64 with sign-flip for correct sort order
+- **StringEquality**: UTF-8 バイト列
+- **Int64Equality**: 正しいソート順のために符号ビットを反転した big-endian int64
 
-### Index Kinds {#index-kinds}
+### インデックス種別 {#index-kinds}
 
-| Kind | Key Type | Lookup |
+| 種別 | キー型 | ルックアップ |
 |---|---|---|
-| `StringEquality` | string | Exact match via SeekIndex |
-| `Int64Equality` | int64 | Exact match via SeekIndex |
-| Range indexes | int64 | Range scan via RangeIndex |
+| `StringEquality` | string | SeekIndex による完全一致 |
+| `Int64Equality` | int64 | SeekIndex による完全一致 |
+| Range indexes | int64 | RangeIndex による範囲スキャン |
 
-### Journaling Modes {#btree-journal}
+### ジャーナリングモード {#btree-journal}
 
-B+Tree indexes operate in different WAL journaling modes depending on type:
+B+Tree インデックスは型に応じて異なる WAL ジャーナリングモードで動作する:
 
-| Mode | Page WAL | CLR | Usage |
+| モード | ページ WAL | CLR | 用途 |
 |---|---|---|---|
-| `Full` | PageImage + coalesce | Before-image captured | Standard indexes |
-| `Suppressed` | No PageImage | No CLR | FT postings/norms leaf (logical WAL only) |
-| `RedoOnly` | Eager PageImage | No undo | FT structure pages (nested top action) |
+| `Full` | PageImage + coalesce | before-image を取得 | 標準インデックス |
+| `Suppressed` | PageImage なし | CLR なし | FT postings/norms リーフ（論理 WAL のみ） |
+| `RedoOnly` | eager な PageImage | undo なし | FT 構造ページ（nested top action） |

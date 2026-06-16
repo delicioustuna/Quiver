@@ -1,14 +1,14 @@
-# MVCC & Transactions
+# MVCC & トランザクション
 
-> as-built specification (v1 baseline)
+> as-built 仕様 (v1 baseline)
 
-## Isolation Level {#isolation}
+## 分離レベル {#isolation}
 
-Quiver supports **snapshot isolation**. Each transaction sees a consistent snapshot of the
-database as of its start LSN (`SnapshotLsn`). Writers do not block readers; concurrent
-readers see their own consistent snapshot.
+Quiver は **snapshot isolation** をサポートする。各トランザクションは、その開始時の LSN
+(`SnapshotLsn`) 時点におけるデータベースの一貫したスナップショットを見る。ライタはリーダを
+ブロックせず、並行するリーダはそれぞれ自分の一貫したスナップショットを見る。
 
-## Transaction Lifecycle {#lifecycle}
+## トランザクションのライフサイクル {#lifecycle}
 
 ```
 Active → Preparing → Committed
@@ -16,72 +16,70 @@ Active → Preparing → Committed
   └──────────────→ Aborted
 ```
 
-| State | Value | Meaning |
+| 状態 | 値 | 意味 |
 |---|---|---|
-| `Active` | 1 | In progress, reads and writes allowed |
-| `Preparing` | 2 | Commit preparation phase |
-| `Committed` | 3 | Durably committed (WAL flushed) |
-| `Aborted` | 4 | Rolled back (explicitly or on Dispose without Commit) |
+| `Active` | 1 | 進行中、読み書き可能 |
+| `Preparing` | 2 | コミット準備フェーズ |
+| `Committed` | 3 | 永続的にコミット済み（WAL フラッシュ済み） |
+| `Aborted` | 4 | ロールバック済み（明示的、または Commit なしの Dispose 時） |
 
-## Transaction ID {#tx-id}
+## トランザクション ID {#tx-id}
 
-`TransactionId` is a monotonically increasing identifier. The `CommittedTxRegistry` tracks
-which transaction IDs have committed, enabling visibility decisions.
+`TransactionId` は単調増加する識別子である。`CommittedTxRegistry` は、どのトランザクション ID が
+コミット済みかを追跡し、可視性の判断を可能にする。
 
-## Snapshot State {#snapshot}
+## スナップショット状態 {#snapshot}
 
-`SnapshotState` captures the set of committed transactions visible to a given transaction.
-Column-scan aggregations use this directly for visibility checks without going through
-the operator pipeline.
+`SnapshotState` は、あるトランザクションから見えるコミット済みトランザクションの集合を捕捉する。
+列スキャン集約はこれを直接用いて、オペレータパイプラインを介さずに可視性チェックを行う。
 
-## Commit {#commit}
+## コミット {#commit}
 
-1. Write `Commit` record to WAL
-2. Flush WAL to disk (synchronous)
-3. Fire `OnCommitted` hooks
-4. Trigger checkpoint if threshold reached and no active transactions
+1. `Commit` レコードを WAL に書き込む
+2. WAL をディスクにフラッシュ（同期）
+3. `OnCommitted` フックを発火
+4. しきい値到達かつアクティブトランザクションが無い場合、チェックポイントを起動
 
-## Abort / Rollback {#abort}
+## アボート / ロールバック {#abort}
 
-`AbortUndoHandler` processes undo:
+`AbortUndoHandler` が undo を処理する:
 
-1. **Physical undo**: restore before-images from the `_beforeImageStack` in LIFO order
-   (page-level undo via CLR records)
-2. **Logical undo**: `UndoFtLogical` reverses FT leaf mutations in LIFO order
-3. Write `Abort` record to WAL
-4. Fire `OnRolledBack` hooks
+1. **物理 undo**: `_beforeImageStack` から before-image を LIFO 順で復元する
+   （CLR レコードによるページ単位の undo）
+2. **論理 undo**: `UndoFtLogical` が FT リーフ mutation を LIFO 順で巻き戻す
+3. `Abort` レコードを WAL に書き込む
+4. `OnRolledBack` フックを発火
 
-Dispose without Commit triggers implicit abort.
+Commit なしの Dispose は暗黙のアボートを引き起こす。
 
-## Savepoints {#savepoints}
+## セーブポイント {#savepoints}
 
-`SavepointId` identifies a savepoint within a transaction. Savepoints follow SQL semantics:
+`SavepointId` はトランザクション内のセーブポイントを識別する。セーブポイントは SQL のセマンティクスに従う:
 
-- `Savepoint(name?)` → creates a savepoint, returns `SavepointId`
-- `RollbackTo(SavepointId)` → undoes changes after the savepoint, invalidates inner savepoints
-- `ReleaseSavepoint(SavepointId)` → consumes the savepoint, merges changes into parent scope
+- `Savepoint(name?)` → セーブポイントを作成し、`SavepointId` を返す
+- `RollbackTo(SavepointId)` → セーブポイント以降の変更を undo し、内側のセーブポイントを無効化する
+- `ReleaseSavepoint(SavepointId)` → セーブポイントを消費し、変更を親スコープにマージする
 
-### Before-Image Stack {#before-image-stack}
+### Before-Image スタック {#before-image-stack}
 
-`WalPageContext` maintains a `_beforeImageStack` of per-savepoint buckets. Each `PinForWrite`
-captures a before-image into the current bucket. `RollbackTo` restores before-images from
-buckets newer than the target savepoint.
+`WalPageContext` は、セーブポイントごとのバケットからなる `_beforeImageStack` を保持する。各
+`PinForWrite` は現在のバケットに before-image を取得する。`RollbackTo` は対象セーブポイントより
+新しいバケットから before-image を復元する。
 
-### Full-Text Logical Undo {#ft-logical-undo}
+### 全文の論理 Undo {#ft-logical-undo}
 
-Full-text postings / norms leaves use logical (not page-image) WAL, so their undo is logical
-too. The FT logical undo log (`_ftUndoStack`) is bucketed by savepoint level, parallel to
-`_beforeImageStack`:
+全文 postings / norms のリーフは（page-image ではなく）論理 WAL を用いるため、その undo も論理的である。
+FT 論理 undo ログ (`_ftUndoStack`) は `_beforeImageStack` と並行して、セーブポイントレベルごとに
+バケット化される:
 
-- **Full abort** replays every bucket's inverse (LIFO) against the live FT trees.
-- **`RollbackTo(savepoint)`** replays only the buckets `>= level`, and additionally writes
-  each inverse as a **compensating `FtLeafMutation`** to the WAL. Because FT leaf mutations
-  are logged eagerly, the savepoint-discarded forward records are already in the committing
-  transaction's WAL; the compensators make recovery's redo (Pass 2b) converge to the
-  rolled-back state. Compensators are not themselves placed on the undo stack, so a later
-  full abort does not double-revert them.
+- **完全アボート** は全バケットの逆操作を（LIFO で）ライブ FT ツリーに再生する。
+- **`RollbackTo(savepoint)`** は `>= level` のバケットのみを再生し、加えて各逆操作を
+  **補償用の `FtLeafMutation`** として WAL に書き込む。FT リーフ mutation は eager にログされるため、
+  セーブポイントで破棄された前向きレコードはコミット中のトランザクションの WAL に既に存在する。
+  補償レコードはリカバリの redo (Pass 2b) をロールバック後の状態に収束させる。補償レコード自体は
+  undo スタックに積まれないため、後の完全アボートで二重に巻き戻されることはない。
 
-## Read-Only Transactions {#read-only}
+## 読み取り専用トランザクション {#read-only}
 
-Read-only transactions acquire a snapshot but do not write to the WAL or acquire write locks.
-They use `IsolationLevel.SnapshotIsolation` with `readOnly: true`.
+読み取り専用トランザクションはスナップショットを取得するが、WAL への書き込みや write ロックの取得は
+行わない。`IsolationLevel.SnapshotIsolation` を `readOnly: true` で用いる。

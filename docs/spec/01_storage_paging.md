@@ -1,66 +1,66 @@
-# Storage & Paging
+# ストレージ & ページング
 
-> as-built specification (v1 baseline)
+> as-built 仕様 (v1 baseline)
 
-## Page Format {#page-format}
+## ページフォーマット {#page-format}
 
-- **Page size**: 8,192 bytes (`PagedFile.PageSizeConst`)
-- **Page header**: `PageHeader.Size` bytes at offset 0 (PageId, PageKind, LSN, CRC32C checksum)
-- **Body**: `BodySize = PageSize - HeaderSize` bytes
+- **ページサイズ**: 8,192 バイト (`PagedFile.PageSizeConst`)
+- **ページヘッダ**: オフセット 0 から `PageHeader.Size` バイト（PageId, PageKind, LSN, CRC32C チェックサム）
+- **ボディ**: `BodySize = PageSize - HeaderSize` バイト
 
 ## PagedFile {#paged-file}
 
-`PagedFile` (`src/Quiver/Storage/PagedFile.cs`) implements `IPagedFile` using memory-mapped files
-with a Clock-algorithm buffer pool.
+`PagedFile` (`src/Quiver/Storage/PagedFile.cs`) は、メモリマップトファイルと Clock アルゴリズムの
+バッファプールを用いて `IPagedFile` を実装する。
 
-### Buffer Pool {#buffer-pool}
+### バッファプール {#buffer-pool}
 
-- Default capacity: 256 frames (`DefaultPoolCapacity`)
-- Eviction: **Clock (second-chance)** algorithm scans frames by `_clockHand`
-- **STEAL policy**: dirty (uncommitted) pages can be evicted to the data file (`EvictFrame`
-  writes the frame to the MMF). This is safe because the WAL logs before-images (CLR) for
-  undo on crash recovery.
+- デフォルト容量: 256 フレーム (`DefaultPoolCapacity`)
+- 退避: `_clockHand` でフレームを走査する **Clock (second-chance)** アルゴリズム
+- **STEAL ポリシー**: dirty（未コミット）ページもデータファイルへ退避できる（`EvictFrame` が
+  フレームを MMF に書き出す）。WAL がクラッシュリカバリ時の undo 用に before-image (CLR) を
+  ログするため、これは安全である。
 
-### Pin / Unpin Protocol {#pin-unpin}
+### Pin / Unpin プロトコル {#pin-unpin}
 
-| Operation | Lock | Effect |
+| 操作 | ロック | 効果 |
 |---|---|---|
-| `PinForRead(PageId)` | Frame read lock | Returns `ReadOnlySpan<byte>`, increments pin count |
-| `PinForWrite(PageId)` | Frame write lock | Returns `PageWriteHandle`, captures CLR before-image if WAL enabled |
-| `Unpin(PageId)` | Releases read lock | Decrements pin count |
-| `UnpinDirty(PageId, lsn)` | Releases write lock | Updates header LSN+checksum, logs PageImage to WAL, marks dirty |
+| `PinForRead(PageId)` | フレーム read ロック | `ReadOnlySpan<byte>` を返し、pin カウントを増やす |
+| `PinForWrite(PageId)` | フレーム write ロック | `PageWriteHandle` を返し、WAL 有効時は CLR before-image を取得する |
+| `Unpin(PageId)` | read ロックを解放 | pin カウントを減らす |
+| `UnpinDirty(PageId, lsn)` | write ロックを解放 | ヘッダの LSN+チェックサムを更新し、PageImage を WAL にログ、dirty マーク |
 
-### Page Allocation {#page-allocation}
+### ページアロケーション {#page-allocation}
 
-- **Meta page** (PageId 0): stores free-list head (int64) and logical page count (int64)
-- Free pages form a linked list (next-pointer in body[0..7])
-- Allocation prefers free-list reuse; falls back to file-end extension
-- File grows in 64 MB increments (`GrowthBytes`)
-- Allocation bypasses the WAL (writes directly via `MmfWritePageAndSync` with LSN=0)
+- **Meta ページ** (PageId 0): フリーリストのヘッド (int64) と論理ページ数 (int64) を格納
+- 空きページは連結リストを形成する（body[0..7] に next ポインタ）
+- アロケーションはフリーリストの再利用を優先し、なければファイル末尾を拡張する
+- ファイルは 64 MB 単位で拡張する (`GrowthBytes`)
+- アロケーションは WAL をバイパスする（`MmfWritePageAndSync` で LSN=0 として直接書き込む）
 
-### Memory-Mapped File {#mmf}
+### メモリマップトファイル {#mmf}
 
-`MemoryMappedFile` + `MemoryMappedViewAccessor` provide the backing storage.
-File extension triggers unmap/remap (`EnsureFileSizeAndRemapLocked`).
+`MemoryMappedFile` + `MemoryMappedViewAccessor` がバッキングストレージを提供する。
+ファイル拡張は unmap/remap を引き起こす (`EnsureFileSizeAndRemapLocked`)。
 
-## Single-File Container {#single-file}
+## 単一ファイルコンテナ {#single-file}
 
-`TenantPagedFile` multiplexes multiple logical stores (nodes, relationships, properties,
-indexes, vectors, FT postings, FT norms, catalog) into a single `*.quiver` file.
-Each tenant is identified by a `fileKind` byte assigned by the catalog.
+`TenantPagedFile` は、複数の論理ストア（nodes, relationships, properties, indexes, vectors,
+FT postings, FT norms, catalog）を単一の `*.quiver` ファイルに多重化する。
+各テナントはカタログが割り当てる `fileKind` バイトで識別される。
 
-### Catalog {#catalog}
+### カタログ {#catalog}
 
-The catalog tenant stores the mapping from logical store names (e.g., index names, FT index
-names) to their `fileKind` byte. It is itself a tenant within the container and is recovered
-during the WAL recovery phase.
+カタログテナントは、論理ストア名（インデックス名、FT インデックス名など）から
+その `fileKind` バイトへのマッピングを保持する。カタログ自体もコンテナ内のテナントであり、
+WAL リカバリフェーズ中に復旧される。
 
-## WAL Sidecar {#wal-sidecar}
+## WAL サイドカー {#wal-sidecar}
 
-The WAL lives in a single sidecar file `*.quiver-wal`. Checkpointing flushes dirty pages
-and indexes to the data file, then truncates the WAL.
+WAL は単一のサイドカーファイル `*.quiver-wal` に存在する。チェックポイントは dirty ページと
+インデックスをデータファイルにフラッシュし、その後 WAL を切り詰める。
 
-## Checksum {#checksum}
+## チェックサム {#checksum}
 
-Every page carries a CRC32C checksum in its header. On read, the checksum is validated;
-mismatches raise `CorruptionException`.
+すべてのページはヘッダに CRC32C チェックサムを持つ。読み取り時にチェックサムを検証し、
+不一致なら `CorruptionException` を発生させる。
