@@ -158,6 +158,12 @@ namespace Quiver.Api
         T Current { get; }
         bool MoveNext();
     }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class IndexedAttribute : System.Attribute
+    {
+        public IndexedAttribute(string? indexName = null) { }
+        public string? IndexName { get; }
+    }
     public static class IsExtensions
     {
         public static Quiver.Api.GraphTraversal<long> Is(this Quiver.Api.GraphTraversal<long> traversal, long value) { }
@@ -183,6 +189,12 @@ namespace Quiver.Api
         Double = 5,
         String = 6,
         Bytes = 7,
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class)]
+    public sealed class NodeAttribute : System.Attribute
+    {
+        public NodeAttribute(string? label = null) { }
+        public string? Label { get; }
     }
     public sealed class NodeBuilder
     {
@@ -236,11 +248,23 @@ namespace Quiver.Api
         And = 13,
         Or = 14,
     }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class PropertyAttribute : System.Attribute
+    {
+        public PropertyAttribute(string? key = null) { }
+        public string? Key { get; }
+    }
     public sealed class PropertyPredicate
     {
         public Quiver.Api.PredicateKind Kind { get; }
         public long LongFrom { get; }
         public long LongTo { get; }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
+    public sealed class RelationshipAttribute<TSource, TTarget> : System.Attribute
+    {
+        public RelationshipAttribute(string? type = null) { }
+        public string? Type { get; }
     }
     public sealed class RelationshipBuilder
     {

@@ -63,9 +63,8 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 
 | アセンブリ | 役割 |
 |---|---|
-| `Quiver` | エンジン中核（単一アセンブリ、全サブシステム） |
-| `Quiver.Client.Attributes` | ソースジェネレータ用の属性 |
-| `Quiver.SourceGen` | 型付きグラフモデル向け Roslyn ソースジェネレータ |
+| `Quiver` | エンジン中核（単一アセンブリ、全サブシステム）+ 型付き属性（`Quiver.Api`） |
+| `Quiver.SourceGen` | 型付きグラフモデル向け Roslyn ソースジェネレータ（`Quiver` に analyzer として同梱） |
 | `Quiver.Embedding` | ベクトル / 埋め込みパイプライン（KNN、ハイブリッド検索） |
 | `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ、取り込み、ハイブリッド検索 + グラフ展開） |
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` 連携（DI） |

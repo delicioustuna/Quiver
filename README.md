@@ -37,7 +37,9 @@ graph expansion）を同梱しています。利用例は [`samples/Quiver.Sampl
 
 ## クイックスタート
 
-`Quiver` パッケージを参照すると、属性と Source Generator も同梱されます。
+`Quiver` パッケージを参照すると、属性と Source Generator も同梱されます。`ImplicitUsings` が
+有効なプロジェクト（新規テンプレート既定）では `Quiver` / `Quiver.Api` の `using` も自動で入るため、
+下記の `using` を省略できます（ドロップイン）。
 
 ### 型安全な CRUD（Source Generator）
 

@@ -30,7 +30,7 @@
        既定では packable=false にして、テスト / ベンチ / サンプル / sandbox を誤って pack しない。
        公開対象の src ライブラリ (Quiver / Quiver.Embedding / Quiver.Hosting / Quiver.OpenTelemetry /
        Quiver.Rag) だけが自分の csproj で <IsPackable>true</IsPackable> を宣言して opt-in する。
-       Quiver.Client.Attributes / Quiver.SourceGen は単体公開せず Quiver パッケージへ同梱する (=packable のまま false)。 -->
+       Quiver.SourceGen は単体公開せず Quiver パッケージへ analyzer として同梱する (=packable のまま false)。 -->
   <PropertyGroup>
     <IsPackable Condition="'$(IsPackable)' == ''">false</IsPackable>
     <!-- ソリューション一括 pack (dotnet pack Quiver.slnx) 時、IsPackable=false の

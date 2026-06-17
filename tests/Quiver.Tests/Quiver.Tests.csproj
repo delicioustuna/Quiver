@@ -19,9 +19,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Quiver\Quiver.csproj" />
     <ProjectReference Include="..\..\src\Quiver.Embedding\Quiver.Embedding.csproj" />
-    <!-- Quiver は属性/生成器を PrivateAssets=all で同梱するため transitive には流れない。
-         [Node] 等を使うテストは Samples.SourceGen 等と同様に直接参照する。 -->
-    <ProjectReference Include="..\..\src\Quiver.Client.Attributes\Quiver.Client.Attributes.csproj" />
+    <!-- 属性は Quiver 本体に含まれる。生成器 (analyzer) は Quiver が PrivateAssets=all で
+         同梱するため transitive には流れないので、[Node] 等を使うテストは直接参照する。 -->
     <ProjectReference Include="..\..\src\Quiver.SourceGen\Quiver.SourceGen.csproj"
                       OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>

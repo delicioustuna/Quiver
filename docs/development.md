@@ -12,9 +12,8 @@ README はライブラリ利用者向けの最小限に絞っているため、�
 
 | パッケージ | 役割 |
 |---|---|
-| `Quiver` | エンジン中核 + 公開ファサード。`Quiver.Client.Attributes` と `Quiver.SourceGen` を同梱するので、これ 1 つの参照で型安全 CRUD まで使える |
-| `Quiver.Client.Attributes` | `[Node]` / `[Relationship]` / `[Property]` / `[Indexed]` 属性（名前空間は `Quiver.Api`） |
-| `Quiver.SourceGen` | Roslyn `IIncrementalGenerator`（CRUD / `FindBy*` / 型保存トラバーサル糖衣を生成） |
+| `Quiver` | エンジン中核 + 公開ファサード。型付き属性（`[Node]` / `[Relationship]` / `[Property]` / `[Indexed]`、namespace `Quiver.Api`）を本体に内包し、`Quiver.SourceGen` を analyzer として同梱。これ 1 つの参照で型安全 CRUD まで使える |
+| `Quiver.SourceGen` | Roslyn `IIncrementalGenerator`（CRUD / `FindBy*` / 型保存トラバーサル糖衣を生成）。単体公開せず `Quiver` に同梱する内部プロジェクト |
 | `Quiver.Embedding` | ベクトル / 埋め込みパイプライン（KNN・ハイブリッド検索） |
 | `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ・取込・hybrid 検索 + graph expansion）。**開発中** ([design/14](design/14_rag_layer.md)) |
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` 連携（DI 登録） |
@@ -41,11 +40,10 @@ Quiver.Core                    ← 共通型・例外・抽象インタフェー
 ### 依存関係（パッケージ）
 
 ```
-Quiver.Client.Attributes ─┐
-Quiver.SourceGen ─────────┴─► Quiver ─┬─► Quiver.Embedding
-                                      ├─► Quiver.Rag (開発中)
-                                      ├─► Quiver.Hosting
-                                      └─► Quiver.OpenTelemetry
+Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
+                                            ├─► Quiver.Rag (開発中)
+                                            ├─► Quiver.Hosting
+                                            └─► Quiver.OpenTelemetry
 ```
 
 ### ストレージ仕様
@@ -302,20 +300,29 @@ public API surface は [tests/Quiver.PublicApi.Tests/](../tests/Quiver.PublicApi
 
 | パッケージ | 内容 | 依存 |
 |---|---|---|
-| `Quiver` | コアエンジン（属性 + Source Generator を**同梱**） | System.IO.Hashing, Microsoft.Extensions.Logging.Abstractions |
+| `Quiver` | コアエンジン（型付き属性は本体に内包 + Source Generator を**同梱**） | System.IO.Hashing, Microsoft.Extensions.Logging.Abstractions |
 | `Quiver.Embedding` | ベクトル埋め込みパイプライン拡張 | `Quiver` |
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` / DI 統合 | `Quiver`, Microsoft.Extensions.* |
 | `Quiver.OpenTelemetry` | OpenTelemetry 計装登録 | `Quiver`, OpenTelemetry(.Api) |
 | `Quiver.Rag` | ローカル RAG スキーマ層 | `Quiver` |
 
-`Quiver.Client.Attributes`（属性）と `Quiver.SourceGen`（Roslyn generator）は**単体公開しない**。
-両者は `Quiver` パッケージへ同梱される（[src/Quiver/Quiver.csproj](../src/Quiver/Quiver.csproj) の pack target）:
+型付きエンティティ属性（`[Node]` / `[Relationship]` / `[Property]` / `[Indexed]`、namespace `Quiver.Api`）は
+**`Quiver` 本体アセンブリに内包**している（[src/Quiver/Client/NodeAttribute.cs](../src/Quiver/Client/NodeAttribute.cs)・
+[RelationshipAttribute.cs](../src/Quiver/Client/RelationshipAttribute.cs)）。`Quiver.SourceGen`（Roslyn generator）は
+**単体公開せず** `Quiver` パッケージへ analyzer として同梱する（`analyzers/dotnet/cs/Quiver.SourceGen.dll`、
+[src/Quiver/Quiver.csproj](../src/Quiver/Quiver.csproj) の `_QuiverAddBundledAnalyzer` target）。生成器は属性を
+**完全修飾名の文字列**で照合する（`GraphNodeGenerator.NodeAttributeFqn = "Quiver.Api.NodeAttribute"` 等）ため、
+属性アセンブリへの参照は不要。SourceGen の `ProjectReference` は `PrivateAssets="all"` でパッケージ依存に昇格させない。
 
-- `Quiver.Client.Attributes.dll` → `lib/net10.0/`（利用者が `[Node]` 等をコンパイル/実行時に参照するため）
-- `Quiver.SourceGen.dll` → `analyzers/dotnet/cs/`（利用者ビルド時に CRUD/トラバーサルを生成する analyzer）
+結果、利用者は `Quiver` パッケージ 1 つの参照で属性 + 生成器まで揃う。さらに `Quiver` は
+[build/Quiver.props](../src/Quiver/build/Quiver.props) を `build/`・`buildTransitive/` に同梱し、`ImplicitUsings`
+有効なプロジェクトには `Quiver` / `Quiver.Api` の global using を自動注入する（`using` 文ゼロのドロップイン。
+不要なら利用者側で `<Using Remove="Quiver.Api" />` で opt-out 可）。
 
-これにより利用者は `Quiver` パッケージ 1 つの参照で属性 + 生成器まで揃う。両 `ProjectReference` は
-`PrivateAssets="all"` を付けてパッケージ依存に昇格させていない（同梱 DLL とパッケージ依存の二重定義を避ける）。
+> リポジトリ内のテスト/サンプルは `Quiver` を `ProjectReference` するが、analyzer は `PrivateAssets="all"` で
+> transitive には流れない。そのため `[Node]` 等を使うプロジェクトは `Quiver.SourceGen` を analyzer として
+> 直接参照する（`Quiver.Tests` / `Quiver.Client.Tests` / `Samples.SourceGen` / `QuiverSandbox` / `SourceGen.Tests`）。
+> 属性型は `Quiver` 本体から供給されるので、属性アセンブリの直接参照は不要。
 
 ### 共通メタデータ / 設定
 
@@ -339,8 +346,10 @@ public API surface は [tests/Quiver.PublicApi.Tests/](../tests/Quiver.PublicApi
 dotnet pack Quiver.slnx -c Release -o artifacts/nupkg
 
 # 中身確認 (例)
-#   lib/net10.0/Quiver.dll, lib/net10.0/Quiver.Client.Attributes.dll
-#   analyzers/dotnet/cs/Quiver.SourceGen.dll, README.md, icon.png
+#   lib/net10.0/Quiver.dll (属性込み)
+#   analyzers/dotnet/cs/Quiver.SourceGen.dll
+#   build/Quiver.props, buildTransitive/Quiver.props (global using)
+#   README.md, icon.png
 
 # nuget.org へ公開 (API キーが必要。*.nupkg を push すると *.snupkg も自動送出)
 dotnet nuget push "artifacts/nupkg/*.nupkg" --api-key <KEY> --source https://api.nuget.org/v3/index.json --skip-duplicate

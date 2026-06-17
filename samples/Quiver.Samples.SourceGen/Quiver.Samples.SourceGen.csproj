@@ -10,7 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Quiver\Quiver.csproj" />
-    <ProjectReference Include="..\..\src\Quiver.Client.Attributes\Quiver.Client.Attributes.csproj" />
+    <!-- 属性は Quiver 本体に含まれる。生成器 (analyzer) のみ直接参照する。 -->
     <ProjectReference Include="..\..\src\Quiver.SourceGen\Quiver.SourceGen.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />
