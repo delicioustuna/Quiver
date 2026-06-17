@@ -94,7 +94,10 @@ finally
 }
 
 // 決定的なダミー埋め込み器。文字ヒストグラムを正規化しただけの素朴なベクトル。
-// 実運用では Quiver.Embedding の TextEmbeddingPipeline 等を IChunkEmbedder に橋渡しする。
+// 実運用では使う埋め込みモデル (OpenAI API / ローカル ONNX 等) に対して IChunkEmbedder を直接実装する。
+// Quiver.Embedding の IEmbeddingProvider を持っているなら texts をループして
+// EmbedAsync(EmbeddingRequest(text, Document)) の Vector を集める薄いアダプタで橋渡しできる
+// (詳細は docs/cookbook.md「ローカル RAG」§埋め込み器)。
 sealed class HashEmbedder(int dim) : IChunkEmbedder
 {
     public int Dimensions { get; } = dim;

@@ -2,8 +2,10 @@ namespace Quiver.Rag;
 
 /// <summary>
 /// チャンクテキストを埋め込みベクトルへ変換する呼び出し側注入点。埋め込み生成はエンジン外原則
-/// のため、Quiver.Rag はこの契約を呼ぶだけで実体を持たない。
-/// <c>Quiver.Embedding</c> の <c>TextEmbeddingPipeline</c> を繋ぐアダプタは利用アプリ側 or サンプルで合成する。
+/// のため、Quiver.Rag はこの契約を呼ぶだけで実体を持たない。通常は使う埋め込みモデル
+/// (OpenAI API / ローカル ONNX 等) に対して本契約を直接実装する (<c>Quiver.Embedding</c> への依存は不要)。
+/// <c>Quiver.Embedding</c> の <c>IEmbeddingProvider</c> を流用する場合は texts をループして
+/// <c>EmbedAsync(EmbeddingRequest(text, Document))</c> の結果を集める薄いアダプタを利用アプリ側で合成する。
 /// </summary>
 public interface IChunkEmbedder
 {
