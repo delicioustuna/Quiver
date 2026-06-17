@@ -31,7 +31,7 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  Quiver.Rag / Quiver.Embedding / Quiver.Hosting │  オプションのアドオン
+│  Quiver.Rag / Quiver.Hosting / Quiver.OpenTelemetry │  オプションのアドオン (Quiver.Embedding は incubating・非公開)
 ├─────────────────────────────────────────────────┤
 │  GraphDatabase (facade)                         │
 │  ├─ ISchemaApi (labels, indexes, FT indexes)    │

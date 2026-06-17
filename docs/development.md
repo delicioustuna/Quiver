@@ -14,7 +14,7 @@ README はライブラリ利用者向けの最小限に絞っているため、�
 |---|---|
 | `Quiver` | エンジン中核 + 公開ファサード。型付き属性（`[Node]` / `[Relationship]` / `[Property]` / `[Indexed]`、namespace `Quiver.Api`）を本体に内包し、`Quiver.SourceGen` を analyzer として同梱。これ 1 つの参照で型安全 CRUD まで使える |
 | `Quiver.SourceGen` | Roslyn `IIncrementalGenerator`（CRUD / `FindBy*` / 型保存トラバーサル糖衣を生成）。単体公開せず `Quiver` に同梱する内部プロジェクト |
-| `Quiver.Embedding` | ベクトル / 埋め込みパイプライン（KNN・ハイブリッド検索） |
+| `Quiver.Embedding` | テキスト埋め込みパイプライン（VEC-4）。**incubating: NuGet 非公開**（`IsPackable=false`。「NuGet パッケージ化」§incubating 参照） |
 | `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ・取込・hybrid 検索 + graph expansion）。**開発中** ([design/14](design/14_rag_layer.md)) |
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` 連携（DI 登録） |
 | `Quiver.OpenTelemetry` | OpenTelemetry エクスポート |
@@ -295,16 +295,23 @@ public API surface は [tests/Quiver.PublicApi.Tests/](../tests/Quiver.PublicApi
 
 ### 公開パッケージ
 
-`dotnet pack Quiver.slnx` で以下 5 つのライブラリが NuGet パッケージ (`.nupkg` + symbol `.snupkg`) になる。
+`dotnet pack Quiver.slnx` で以下 4 つのライブラリが NuGet パッケージ (`.nupkg` + symbol `.snupkg`) になる。
 テスト / ベンチ / サンプル / sandbox は `IsPackable=false`（[Directory.Build.props](../Directory.Build.props) の既定）で除外される。
 
 | パッケージ | 内容 | 依存 |
 |---|---|---|
 | `Quiver` | コアエンジン（型付き属性は本体に内包 + Source Generator を**同梱**） | System.IO.Hashing, Microsoft.Extensions.Logging.Abstractions |
-| `Quiver.Embedding` | ベクトル埋め込みパイプライン拡張 | `Quiver` |
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` / DI 統合 | `Quiver`, Microsoft.Extensions.* |
 | `Quiver.OpenTelemetry` | OpenTelemetry 計装登録 | `Quiver`, OpenTelemetry(.Api) |
 | `Quiver.Rag` | ローカル RAG スキーマ層 | `Quiver` |
+
+#### incubating（非公開）
+
+`Quiver.Embedding`（テキスト埋め込みパイプライン、VEC-4）は**現状 NuGet 公開しない**（`IsPackable=false`、
+リポジトリには残しビルド/テスト対象）。理由: ①具体プロバイダ未同梱で単体では動かない（`IEmbeddingProvider` を
+利用者が実装する必要がある）②実消費者が単体テストのみ ③主用途の `Quiver.Rag` はチャンク埋め込みを
+`IChunkEmbedder` のインライン注入で行い本パイプラインを使わない。参照プロバイダ実装・サンプル・実消費者
+（例: RAG の遅延/バックグラウンド埋め込みモード）が揃った時点で `IsPackable=true` にして公開へ昇格する。
 
 型付きエンティティ属性（`[Node]` / `[Relationship]` / `[Property]` / `[Indexed]`、namespace `Quiver.Api`）は
 **`Quiver` 本体アセンブリに内包**している（[src/Quiver/Client/NodeAttribute.cs](../src/Quiver/Client/NodeAttribute.cs)・

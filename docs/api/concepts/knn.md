@@ -58,4 +58,4 @@ var candidates = g.Nodes().HasLabel("Person")
 
 ## 埋め込みパイプライン
 
-`Quiver.Embedding` の `TextEmbeddingPipeline` を用いると、`OnCommitted` フックでテキストプロパティから自動的に埋め込みを生成・登録できる。
+`Quiver.Embedding`（**incubating: 現状 NuGet 非公開**。リポジトリ内アセンブリとして利用可）の `TextEmbeddingPipeline` を用いると、`OnCommitted` フックでテキストプロパティから自動的に埋め込みを生成・登録できる。

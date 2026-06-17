@@ -5,10 +5,10 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <IsPackable>true</IsPackable>
-    <PackageId>Quiver.Embedding</PackageId>
-    <Description>Quiver グラフデータベースのベクトル埋め込みパイプライン拡張。embedding 生成のアダプタ層と、KNN とグラフトラバーサルを組み合わせたハイブリッド検索を提供する。</Description>
-    <PackageTags>$(PackageTags);vector-search;knn;embedding;rag;hybrid-search</PackageTags>
+    <!-- PKG-3: incubating。NuGet 公開はしない (IsPackable は Directory.Build.props 既定の false のまま)。
+         理由: 具体プロバイダ未同梱で単体では動かない / 実消費者がテストのみ / 主用途 RAG が未使用 (docs/development.md
+         「NuGet パッケージ化」参照)。参照プロバイダ実装・サンプル・実消費者が揃ったら IsPackable=true で公開へ昇格する。
+         コード/テストはリポジトリに残し、ビルド対象には含める。 -->
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Quiver\Quiver.csproj" />
