@@ -22,7 +22,7 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 |---|---|
 | .NET BCL | プラットフォームランタイム |
 | Claude | 実装者（全コードは人間のレビュー下で AI が記述） |
-| LLM プロバイダ | ランタイム依存（埋め込み / 生成、`Quiver.Embedding` 経由） |
+| LLM プロバイダ | ランタイム依存（埋め込み / 生成） |
 
 マネージド C# は、C/C++ ストレージエンジンが抱えるメモリ安全性の脆弱性クラスを排除する。
 テストはセキュリティ統制として機能し、主要な検証メカニズムである。
@@ -31,7 +31,7 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  Quiver.Rag / Quiver.Hosting / Quiver.OpenTelemetry │  オプションのアドオン (Quiver.Embedding は incubating・非公開)
+│  Quiver.Rag / Quiver.Hosting / Quiver.OpenTelemetry │  オプションのアドオン
 ├─────────────────────────────────────────────────┤
 │  GraphDatabase (facade)                         │
 │  ├─ ISchemaApi (labels, indexes, FT indexes)    │
@@ -65,7 +65,6 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 |---|---|
 | `Quiver` | エンジン中核（単一アセンブリ、全サブシステム）+ 型付き属性（`Quiver.Api`） |
 | `Quiver.SourceGen` | 型付きグラフモデル向け Roslyn ソースジェネレータ（`Quiver` に analyzer として同梱） |
-| `Quiver.Embedding` | ベクトル / 埋め込みパイプライン（KNN、ハイブリッド検索） |
 | `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ、取り込み、ハイブリッド検索 + グラフ展開） |
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` 連携（DI） |
 | `Quiver.OpenTelemetry` | OpenTelemetry エクスポート |

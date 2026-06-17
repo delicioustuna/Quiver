@@ -56,6 +56,5 @@ var candidates = g.Nodes().HasLabel("Person")
                   .ToList();
 ```
 
-## 埋め込みパイプライン
-
-`Quiver.Embedding`（**incubating: 現状 NuGet 非公開**。リポジトリ内アセンブリとして利用可）の `TextEmbeddingPipeline` を用いると、`OnCommitted` フックでテキストプロパティから自動的に埋め込みを生成・登録できる。
+> 埋め込みベクトルの生成は利用者側の責務。`tx.SetVector(...)` に渡す `float[]` を任意の
+> 埋め込みモデル（OpenAI API / ローカル ONNX 等）で用意する。

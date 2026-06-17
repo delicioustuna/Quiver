@@ -270,8 +270,8 @@ graph expansion の定型を 1 API で提供する。エンジン本体 (`Quiver
 
 ### 埋め込み器 (`IChunkEmbedder`) の用意
 
-**通常は使う埋め込みモデル (OpenAI API / ローカル ONNX 等) に対して `IChunkEmbedder` を直接実装する**
-（バッチ texts → `float[][]` を返すだけ。`Quiver.Embedding` への依存は不要）。
+**使う埋め込みモデル (OpenAI API / ローカル ONNX 等) に対して `IChunkEmbedder` を直接実装する**
+（バッチ texts → `float[][]` を返すだけ）。埋め込み生成はエンジン外原則で、RAG はこの契約を呼ぶだけ。
 
 ```csharp
 sealed class MyEmbedder(MyModel model) : IChunkEmbedder
@@ -282,30 +282,6 @@ sealed class MyEmbedder(MyModel model) : IChunkEmbedder
         => await model.EmbedBatchAsync(texts, ct);   // お使いの埋め込み呼び出し
 }
 ```
-
-> **`Quiver.Embedding` は RAG の前提ではない。** あれは「エンジンのノード vector をキュー + リトライ +
-> post-commit フックで**非同期・永続的にバックグラウンド埋め込み**する」別シナリオ向けの optional
-> パッケージで、RAG のチャンク埋め込み (同期的に生ベクトルを受け取って格納) とは用途が異なる。
-> すでに `Quiver.Embedding` の `IEmbeddingProvider` を持っているならこう橋渡しできる（薄いアダプタ）:
->
-> ```csharp
-> sealed class ProviderChunkEmbedder(IEmbeddingProvider p) : IChunkEmbedder
-> {
->     public int Dimensions => p.Dimensions;
->     public async ValueTask<float[][]> EmbedAsync(
->         IReadOnlyList<string> texts, CancellationToken ct = default)
->     {
->         var vectors = new float[texts.Count][];
->         for (int i = 0; i < texts.Count; i++)
->         {
->             // 文書埋め込みなので Purpose=Document (Query と区別するプロバイダのため)。
->             var r = await p.EmbedAsync(new EmbeddingRequest(texts[i], EmbeddingPurpose.Document), ct);
->             vectors[i] = r.Vector.ToArray();
->         }
->         return vectors;
->     }
-> }
-> ```
 
 ```csharp
 using Quiver;
