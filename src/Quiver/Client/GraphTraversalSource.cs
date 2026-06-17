@@ -78,6 +78,18 @@ public sealed class GraphTraversalSource
     public (NodeId Id, bool Created) MergeNode(string label, string matchKey, in Storage.Records.PropertyValue matchValue)
         => _tx.MergeNode(label, matchKey, in matchValue);
 
+    /// <summary>
+    /// Cypher の <c>MERGE (a)-[:type]-&gt;(b)</c> に相当するエッジ upsert 糖衣。
+    /// <see cref="IGraphTransaction.MergeRelationship"/> のラッパで、<c>Created</c> フラグで
+    /// 新規作成 / 既存ヒットを分岐できる (<see cref="MergeNode"/> と対称)。
+    /// </summary>
+    /// <param name="source">始点ノード。</param>
+    /// <param name="target">終点ノード。</param>
+    /// <param name="type">リレーションシップ型名。</param>
+    /// <returns>マッチした or 作成されたリレーションシップ ID と、新規作成だったかを表すフラグの組。</returns>
+    public (RelationshipId Id, bool Created) MergeRelationship(NodeId source, NodeId target, string type)
+        => _tx.MergeRelationship(source, target, type);
+
     // ── エンティティ操作糖衣 (IGraphNode<T> ベース) ─────────────────────────
 
     /// <summary><see cref="IGraphNode{T}"/> 実装型を用いた型安全な Insert。</summary>
@@ -193,7 +205,7 @@ public sealed class GraphTraversalSource
     }
 
     /// <summary>
-    /// FTS-3: 全文索引に対する BM25 検索を起点にトラバーサルを開始する (<c>g.Knn</c> と対称)。
+    /// 全文索引に対する BM25 検索を起点にトラバーサルを開始する (<c>g.Knn</c> と対称)。
     /// クエリは索引構築時と同一のトークナイザ (catalog 記録の TokenizerId) で分割され、
     /// term-at-a-time BM25 で上位 <paramref name="k"/> 件を関連度降順に放出する。続けて
     /// <c>.Out(...)</c> 等のトラバーサルステップを接続できる。
@@ -201,7 +213,7 @@ public sealed class GraphTraversalSource
     /// <remarks>
     /// 関連度スコア自体は伝播しない (KNN と同じ MVP 方針)。可視性は世代照合で
     /// フィルタされる (削除/再利用された slot を指す postings は除外)。
-    /// graph-first 経路 (<c>.FilterByText</c> / pushdown) は FTS-4。
+    /// graph-first 経路は <c>.FilterByText</c> (pushdown) 側で扱う。
     /// </remarks>
     /// <param name="indexName">対象の全文索引名。</param>
     /// <param name="queryText">検索クエリ文字列。</param>
@@ -214,7 +226,7 @@ public sealed class GraphTraversalSource
     }
 
     /// <summary>
-    /// FTS-5: BM25 全文検索と KNN ベクトル検索の上位 <paramref name="k"/> 件を
+    /// BM25 全文検索と KNN ベクトル検索の上位 <paramref name="k"/> 件を
     /// RRF (Reciprocal Rank Fusion) で融合したハイブリッド検索を起点にトラバーサルを開始する。
     /// 各検索が独立に上位 <paramref name="k"/> 件を関連度順に求め、両ランキングの順位
     /// (<c>Σ 1/(60 + rank)</c>) を合算して融合上位 <paramref name="k"/> 件を放出する。

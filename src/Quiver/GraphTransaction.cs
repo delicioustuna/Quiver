@@ -286,6 +286,24 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         return relId;
     }
 
+    public (RelationshipId Id, bool Created) MergeRelationship(NodeId source, NodeId target, string type)
+    {
+        // 型トークンが未観測なら、その型のエッジは存在し得ない → 走査せず直接作成。
+        // (公開 EnumerateRelationships は型未知のとき全隣接へフォールバックするため、ここでは
+        //  store の typed + Outgoing 列挙を直接使い、別型エッジを target 一致で誤マッチしないようにする。)
+        if (_relTypeTokens.TryGet(type, out var typeId))
+        {
+            var e = _inner.Relationships.EnumerateNeighbors(source, _inner.Nodes, typeId, Direction.Outgoing);
+            while (e.MoveNext())
+            {
+                // Outgoing 列挙では Current.Source == source が保証されるので Target だけ照合する。
+                if (e.Current.Target == target)
+                    return (e.Current.Id, false);
+            }
+        }
+        return (CreateRelationship(source, target, type), true);
+    }
+
     public void DeleteRelationship(RelationshipId relId)
     {
         FreeRelationshipProperties(relId);

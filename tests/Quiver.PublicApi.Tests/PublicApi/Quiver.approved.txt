@@ -39,6 +39,10 @@ namespace Quiver.Api
                 "Id",
                 "Created"})]
         public System.ValueTuple<Quiver.Core.NodeId, bool> MergeNode(string label, string matchKey, in Quiver.Storage.Records.PropertyValue matchValue) { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Id",
+                "Created"})]
+        public System.ValueTuple<Quiver.Core.RelationshipId, bool> MergeRelationship(Quiver.Core.NodeId source, Quiver.Core.NodeId target, string type) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Node(Quiver.Core.NodeId nodeId) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Nodes() { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Nodes(params Quiver.Core.NodeId[] nodeIds) { }
@@ -574,6 +578,10 @@ namespace Quiver
                 "Id",
                 "Created"})]
         System.ValueTuple<Quiver.Core.NodeId, bool> MergeNode(string label, string matchKey, in Quiver.Storage.Records.PropertyValue matchValue);
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Id",
+                "Created"})]
+        System.ValueTuple<Quiver.Core.RelationshipId, bool> MergeRelationship(Quiver.Core.NodeId source, Quiver.Core.NodeId target, string type);
         bool NodeExists(Quiver.Core.NodeId nodeId);
         Quiver.NodeIdEnumerator RangeIndex(string indexName, in Quiver.Storage.Records.PropertyValue from, bool fromInclusive, in Quiver.Storage.Records.PropertyValue to, bool toInclusive);
         void ReleaseSavepoint(Quiver.Transactions.SavepointId savepoint);

@@ -71,6 +71,19 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// <summary>型 ID 指定版の <see cref="CreateRelationship(NodeId, NodeId, string)"/>。</summary>
     RelationshipId CreateRelationship(NodeId source, NodeId target, RelationshipTypeId typeId);
 
+    /// <summary>
+    /// エッジ版 MERGE / UPSERT — <paramref name="source"/> から <paramref name="target"/> へ向かう
+    /// <paramref name="type"/> 型のリレーションシップが既に存在すればその ID を返し、無ければ新規作成して
+    /// その ID を返す。<c>Created</c> でどちらの経路かを判別できる (<see cref="MergeNode"/> と対称)。
+    /// 同一 (source, target, type) のエッジが複数あるときは最初にヒットしたものを採用する。
+    /// </summary>
+    /// <remarks>
+    /// 存在判定は <paramref name="source"/> の外向き隣接を走査するため計算量は O(source の out-degree)。
+    /// 高 fan-out ノードで多用する場合はコストに留意すること (エッジ存在インデックスは持たない)。
+    /// read-your-writes により、同一トランザクション内で直前に作成したエッジも検出される。
+    /// </remarks>
+    (RelationshipId Id, bool Created) MergeRelationship(NodeId source, NodeId target, string type);
+
     /// <summary>指定 ID のリレーションシップを削除する。</summary>
     void DeleteRelationship(RelationshipId relId);
 
