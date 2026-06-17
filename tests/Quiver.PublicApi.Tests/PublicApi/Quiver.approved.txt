@@ -304,6 +304,53 @@ namespace Quiver.Api
         public Quiver.Api.SubTraversal Out<TRel>()
             where TRel : Quiver.Api.IGraphRelationship<TRel> { }
     }
+    public static class TypedGraphTraversalWriteExtensions
+    {
+        public static long AddEdge<TSource, TRel, TTarget>(this Quiver.Api.TypedGraphTraversal<TSource> sources, Quiver.Api.TypedGraphTraversal<TTarget> targets)
+            where TSource : Quiver.Api.IGraphNode<TSource>
+            where TRel : Quiver.Api.IGraphRelationship<TRel, TSource, TTarget>
+            where TTarget : Quiver.Api.IGraphNode<TTarget> { }
+        public static long AddEdge<TSource, TRel, TTarget>(this Quiver.Api.TypedGraphTraversal<TSource> sources, System.Func<TSource, Quiver.Api.TypedGraphTraversal<TTarget>> targets)
+            where TSource : Quiver.Api.IGraphNode<TSource>
+            where TRel : Quiver.Api.IGraphRelationship<TRel, TSource, TTarget>
+            where TTarget : Quiver.Api.IGraphNode<TTarget> { }
+        public static long AddEdge<TSource, TRel, TTarget>(this Quiver.Api.TypedGraphTraversal<TSource> sources, Quiver.Api.TypedGraphTraversal<TTarget> targets, System.Func<TSource, TTarget, TRel> edge)
+            where TSource : Quiver.Api.IGraphNode<TSource>
+            where TRel : Quiver.Api.IGraphRelationship<TRel, TSource, TTarget>
+            where TTarget : Quiver.Api.IGraphNode<TTarget> { }
+        public static long AddEdge<TSource, TRel, TTarget>(this Quiver.Api.TypedGraphTraversal<TSource> sources, System.Func<TSource, Quiver.Api.TypedGraphTraversal<TTarget>> targets, System.Func<TSource, TTarget, TRel> edge)
+            where TSource : Quiver.Api.IGraphNode<TSource>
+            where TRel : Quiver.Api.IGraphRelationship<TRel, TSource, TTarget>
+            where TTarget : Quiver.Api.IGraphNode<TTarget> { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Created",
+                "Matched"})]
+        public static System.ValueTuple<long, long> MergeEdge<TSource, TRel, TTarget>(this Quiver.Api.TypedGraphTraversal<TSource> sources, Quiver.Api.TypedGraphTraversal<TTarget> targets)
+            where TSource : Quiver.Api.IGraphNode<TSource>
+            where TRel : Quiver.Api.IGraphRelationship<TRel, TSource, TTarget>
+            where TTarget : Quiver.Api.IGraphNode<TTarget> { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Created",
+                "Matched"})]
+        public static System.ValueTuple<long, long> MergeEdge<TSource, TRel, TTarget>(this Quiver.Api.TypedGraphTraversal<TSource> sources, System.Func<TSource, Quiver.Api.TypedGraphTraversal<TTarget>> targets)
+            where TSource : Quiver.Api.IGraphNode<TSource>
+            where TRel : Quiver.Api.IGraphRelationship<TRel, TSource, TTarget>
+            where TTarget : Quiver.Api.IGraphNode<TTarget> { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Created",
+                "Matched"})]
+        public static System.ValueTuple<long, long> MergeEdge<TSource, TRel, TTarget>(this Quiver.Api.TypedGraphTraversal<TSource> sources, Quiver.Api.TypedGraphTraversal<TTarget> targets, System.Func<TSource, TTarget, TRel> edge)
+            where TSource : Quiver.Api.IGraphNode<TSource>
+            where TRel : Quiver.Api.IGraphRelationship<TRel, TSource, TTarget>
+            where TTarget : Quiver.Api.IGraphNode<TTarget> { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Created",
+                "Matched"})]
+        public static System.ValueTuple<long, long> MergeEdge<TSource, TRel, TTarget>(this Quiver.Api.TypedGraphTraversal<TSource> sources, System.Func<TSource, Quiver.Api.TypedGraphTraversal<TTarget>> targets, System.Func<TSource, TTarget, TRel> edge)
+            where TSource : Quiver.Api.IGraphNode<TSource>
+            where TRel : Quiver.Api.IGraphRelationship<TRel, TSource, TTarget>
+            where TTarget : Quiver.Api.IGraphNode<TTarget> { }
+    }
     public sealed class TypedGraphTraversal<T>
         where T : Quiver.Api.IGraphNode<T>
     {

@@ -160,6 +160,14 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     /// <summary>結果件数を返す終端ステップ。</summary>
     public long Count() => _inner.Count();
 
+    // ── 集合 write シンク (AddEdge / MergeEdge) 向け internal アクセサ ───────────
+    // 拡張は別クラスのため private フィールドへ届かない。ID のみで足りる経路は
+    // エンティティ復元を避けるため ToListWithIds とは別に ID 列だけを返す。
+
+    internal IGraphTransaction Transaction => _tx;
+
+    internal List<NodeId> MaterializeIds() => _inner.ToList();
+
     // ── ヘルパー ─────────────────────────────────────────────────────────────
 
     private static string MemberName<TProp>(Expression<Func<T, TProp>> expr)
