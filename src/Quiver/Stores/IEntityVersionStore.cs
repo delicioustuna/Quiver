@@ -1,14 +1,14 @@
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// FT-31: <see cref="EntityVersionMeta"/> を <c>EntityId.LocalId</c> をキーに格納する sidecar の抽象。
+/// <see cref="EntityVersionMeta"/> を <c>EntityId.LocalId</c> をキーに格納する sidecar の抽象。
 ///
 /// <para>Quiver の MVCC + SSN メタデータは EntityKind ごとに 1 ファイル
 /// (<see cref="Quiver.Wal.WalFileKind.NodeVersionMeta"/> / <see cref="Quiver.Wal.WalFileKind.RelationshipVersionMeta"/>
 /// / <see cref="Quiver.Wal.WalFileKind.PropertyVersionMeta"/>) で保持する。本 interface はその物理層を抽象化。</para>
 ///
-/// <para>FT-31 時点ではどこからも呼ばれていない (テストのみ)。FT-32 で各 store の
-/// visibility access path を sidecar 経由に切り替え、FT-33 で SSN protocol が Pstamp/Sstamp の
+/// <para>現時点ではどこからも呼ばれていない (テストのみ)。将来的に各 store の
+/// visibility access path を sidecar 経由に切り替え、その後 SSN protocol が Pstamp/Sstamp の
 /// post-commit 更新で使い始める。</para>
 /// </summary>
 internal interface IEntityVersionStore : IDisposable
@@ -31,13 +31,13 @@ internal interface IEntityVersionStore : IDisposable
     void UpdateSstamp(long localId, long sstamp);
 
     /// <summary>
-    /// FT-33: SSN の大域 commit-stamp 高水位を耐久メタ (sidecar ヘッダ) に書き込む。
+    /// SSN の大域 commit-stamp 高水位を耐久メタ (sidecar ヘッダ) に書き込む。
     /// commit と同一の page-WAL 単位で永続化され、再起動跨ぎで commit-stamp クロックを単調連続に保つ
     /// (= 旧/新 stamp 空間の混在による false-abort ストームを防ぐ)。
     /// </summary>
     void WriteCommitStampHighWater(long value);
 
-    /// <summary>FT-33: 永続化済みの commit-stamp 高水位を読み出す。未書き込みなら 0。</summary>
+    /// <summary>永続化済みの commit-stamp 高水位を読み出す。未書き込みなら 0。</summary>
     long ReadCommitStampHighWater();
 
     /// <summary>

@@ -29,14 +29,14 @@ internal static class WalPageContext
         => Current is { } ctx ? ctx.LogPageImage(fileKind, pageId, pageBytes) : -1L;
 
     /// <summary>
-    /// FTS-7: 本 tx で当該ページの journaling モードを記録 (escalation = 強い方が勝つ)。
+    /// 本 tx で当該ページの journaling モードを記録 (escalation = 強い方が勝つ)。
     /// 書き込み tx 未アクティブ時は no-op。返り値は escalation 後の有効モード (未アクティブ時は Full)。
     /// </summary>
     public static WalJournalMode SetJournalMode(byte fileKind, long pageId, WalJournalMode mode)
         => Current is { } ctx ? ctx.SetJournalMode(fileKind, pageId, mode) : WalJournalMode.Full;
 
     /// <summary>
-    /// FTS-7: postings/norms leaf への state-setting 論理ミューテーションを eager に WAL へ
+    /// postings/norms leaf への state-setting 論理ミューテーションを eager に WAL へ
     /// 追記する。書き込み tx 未アクティブ時 (= recovery 中の再実行など) は no-op で -1 を返す
     /// (recovery は WAL を再帰発火しない)。
     /// </summary>
@@ -54,14 +54,14 @@ internal static class WalPageContext
         => Current is { } ctx ? ctx.LogFtLeafCompensation(op, indexTenantId, key, value) : -1L;
 
     /// <summary>
-    /// FTS-7: 現在の書き込み tx が発行した leaf 論理ミューテーションの undo ログ (全 savepoint バケットを
+    /// 現在の書き込み tx が発行した leaf 論理ミューテーションの undo ログ (全 savepoint バケットを
     /// 発行順に平坦化)。in-process abort が逆順に逆操作を当てるために使う。コンテキスト未設定時は空。
     /// </summary>
     public static IReadOnlyList<FtUndoEntry> CurrentFtUndoLog
         => Current?.FtUndoLog ?? Array.Empty<FtUndoEntry>();
 
     /// <summary>
-    /// FT-15: あるページが本トランザクション内で初めて書き込み用に pin された時点の
+    /// あるページが本トランザクション内で初めて書き込み用に pin された時点の
     /// 内容 (before-image) を記録する。書き込みトランザクション未アクティブ時は no-op。
     /// 同一ページの 2 回目以降の pin は無視される (各 savepoint バケットの初回タッチのみ保持)。
     /// </summary>
@@ -69,7 +69,7 @@ internal static class WalPageContext
         => Current?.CaptureBeforeImage(fileKind, pageId, pageBytes);
 
     /// <summary>
-    /// FT-15: 現在の書き込みトランザクションがキャプチャした before-image (CLR ペイロード)
+    /// 現在の書き込みトランザクションがキャプチャした before-image (CLR ペイロード)
     /// を列挙する。インプロセス abort (= 全 savepoint バケットの巻き戻し) で使う。
     /// 同一ページが複数バケットに現れる場合、最も古い (= tx 開始前 = pre-tx) 状態を 1 件だけ返す。
     /// コンテキスト未設定時は空。
@@ -88,7 +88,7 @@ internal static class WalPageContext
     // ──────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// FT-23: 新規 savepoint バケットをスタックに push する。返り値はスタック深度
+    /// 新規 savepoint バケットをスタックに push する。返り値はスタック深度
     /// (0-based; 最初の savepoint なら 1)。後続の before-image はこのバケットに
     /// 蓄積され、<see cref="RollbackToSavepoint"/> で巻き戻し対象になる。
     /// アクティブな書き込みコンテキストが無いときは -1 を返す。
@@ -97,7 +97,7 @@ internal static class WalPageContext
         => Current?.PushSavepoint() ?? -1;
 
     /// <summary>
-    /// FT-23: 指定 savepoint レベル以降 (そのレベル自体を含む) のバケットを 1 つに集約して
+    /// 指定 savepoint レベル以降 (そのレベル自体を含む) のバケットを 1 つに集約して
     /// 返し、スタックから除去する。同一ページが複数バケットに現れる場合は最も古い
     /// (= savepoint 直前の状態) を採用 — RollbackTo はその状態へ page を戻すため。
     /// 集約後に、同レベルに新規空バケットを push し直して savepoint を「有効なまま」維持する
@@ -116,21 +116,21 @@ internal static class WalPageContext
         => Current?.RollbackFtToSavepoint(level) ?? Array.Empty<FtUndoEntry>();
 
     /// <summary>
-    /// FT-23: 指定 savepoint バケットを親バケットへマージし、スタックから除去する。
+    /// 指定 savepoint バケットを親バケットへマージし、スタックから除去する。
     /// 親バケットが既に同一ページの before-image を持っている場合は親側 (= 古い) を維持。
     /// </summary>
     public static void ReleaseSavepoint(int level)
         => Current?.ReleaseSavepoint(level);
 
     /// <summary>
-    /// FT-23: 巻き戻し後に <c>_pending</c> (after-image バッファ) を保守する補助。
+    /// 巻き戻し後に <c>_pending</c> (after-image バッファ) を保守する補助。
     /// 与えられたページについて _pending エントリを「巻き戻した内容」で上書きする。
     /// 後続コミット時の WAL PageImage が正しい (rollback 後の) ページ状態を反映する。
     /// </summary>
     public static void OverwritePendingFromBeforeImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
         => Current?.OverwritePendingFromBeforeImage(fileKind, pageId, pageBytes);
 
-    /// <summary>FT-23 (テスト用): 現在の savepoint スタック深度。バケット数を返す。</summary>
+    /// <summary>現在の savepoint スタック深度。バケット数を返す。</summary>
     internal static int CurrentDepth => Current?.Depth ?? 0;
 }
 
@@ -174,12 +174,12 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     private readonly List<Dictionary<(byte FileKind, long PageId), byte[]>> _beforeImageStack
         = new() { new Dictionary<(byte FileKind, long PageId), byte[]>() };
 
-    /// <summary>FT-23: 現在の savepoint スタック深度 (root バケット込みのバケット数)。</summary>
+    /// <summary>現在の savepoint スタック深度 (root バケット込みのバケット数)。</summary>
     public int Depth => _beforeImageStack.Count;
 
     /// <summary>
     /// PageImage をトランザクションバッファに記録 (または上書き) する。
-    /// FT-29: ペイロードは <see cref="WalPageImageCodec.Encode"/> 経由で v2 形式 (末尾ゼロ trim) に。
+    /// ペイロードは <see cref="WalPageImageCodec.Encode"/> 経由で v2 形式 (末尾ゼロ trim) に。
     /// 同一ページの 2 回目以降の書き込みは新しい trimmed payload で置き換える
     /// (intra-tx coalesce: latest-wins)。
     /// </summary>
@@ -218,7 +218,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     //   - PushSavepoint() ごとに新規バケットを追加 (_beforeImageStack と歩調を合わせる)。
     private readonly List<List<FtUndoEntry>> _ftUndoStack = new() { new List<FtUndoEntry>() };
 
-    /// <summary>FTS-7: tx が発行した leaf 論理ミューテーションの undo ログ (全バケットを発行順に平坦化)。</summary>
+    /// <summary>tx が発行した leaf 論理ミューテーションの undo ログ (全バケットを発行順に平坦化)。</summary>
     public IReadOnlyList<FtUndoEntry> FtUndoLog
     {
         get
@@ -230,7 +230,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
         }
     }
 
-    /// <summary>FTS-7: leaf 論理ミューテーションを eager に WAL へ追記し、abort 用 undo ログ (最上位バケット) にも記録する。</summary>
+    /// <summary>leaf 論理ミューテーションを eager に WAL へ追記し、abort 用 undo ログ (最上位バケット) にも記録する。</summary>
     public long LogFtLeafMutation(FtLeafMutationCodec.Op op, byte indexTenantId, ReadOnlySpan<byte> key, long value)
     {
         byte[] payload = FtLeafMutationCodec.Encode(op, indexTenantId, key, value);
@@ -250,7 +250,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     }
 
     /// <summary>
-    /// FTS-7: 当該ページの journaling モードを記録 (escalation = 強い方が勝つ)。返り値は escalation 後の有効モード。
+    /// 当該ページの journaling モードを記録 (escalation = 強い方が勝つ)。返り値は escalation 後の有効モード。
     /// Full (既定) のページは記録せず、Suppressed/RedoOnly のみ dict に持つ (未登録 = Full)。
     /// </summary>
     public WalJournalMode SetJournalMode(byte fileKind, long pageId, WalJournalMode mode)
@@ -268,7 +268,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     }
 
     /// <summary>
-    /// FT-15 / FT-23: ページの before-image を「現在のバケット (= スタック top)」で初回タッチ
+    /// ページの before-image を「現在のバケット (= スタック top)」で初回タッチ
     /// 時に 1 度だけ捕捉する。捕捉した内容は
     /// (1) インプロセス abort / RollbackTo の巻き戻し用にバケットへバッファされ、
     /// (2) <see cref="WalRecordType.CompensationLogRecord"/> として、本 tx 内で初めて当該ページが
@@ -299,7 +299,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
 
     /// <summary>
     /// バッファした PageImage をすべて WAL の共有 coalesce バッファへ投入し、ローカルの
-    /// per-tx バッファをクリアする。FT-29: 実際の WAL 追記は次の Commit / CheckpointBegin /
+    /// per-tx バッファをクリアする。実際の WAL 追記は次の Commit / CheckpointBegin /
     /// CheckpointEnd / Abort 出力時にまとめて行われる。同一 (fileKind, pageId) は WAL レベルで
     /// latest-wins de-dup される。
     /// アボート時は呼ばれず、バッファは <see cref="WalPageContext.End"/> による
@@ -319,7 +319,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     }
 
     /// <summary>
-    /// FT-23: tx 全体の before-image を「同一ページに対しては最も古いバケットの値が勝つ」
+    /// tx 全体の before-image を「同一ページに対しては最も古いバケットの値が勝つ」
     /// 集約で返す。<c>Abort</c> はこの集約を使うことで、tx 開始前の状態へ正しく戻す。
     /// </summary>
     public IReadOnlyCollection<byte[]> GetAllBeforeImagesOldestWins()
@@ -363,7 +363,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     }
 
     /// <summary>
-    /// FT-23: <paramref name="level"/> 以降 (両端含む) のバケットを集約して返し、スタックから除去。
+    /// <paramref name="level"/> 以降 (両端含む) のバケットを集約して返し、スタックから除去。
     /// 同一ページが複数バケットに現れる場合は最も古いバケットの値 (= savepoint 直前の状態) を採用。
     /// 集約後、SQL 標準準拠で同レベルに新規空バケットを push し直す
     /// (ROLLBACK TO は savepoint を消費しないため、同じ id で再度 RollbackTo できる)。
@@ -388,7 +388,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     }
 
     /// <summary>
-    /// FT-23: 指定 savepoint バケットを親バケットへマージし、スタックから除去する。
+    /// 指定 savepoint バケットを親バケットへマージし、スタックから除去する。
     /// 親に同キーが既にあれば古い親側を維持 (oldest-wins)。
     /// </summary>
     public void ReleaseSavepoint(int level)
@@ -412,7 +412,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     }
 
     /// <summary>
-    /// FT-23: <see cref="LogPageImage"/> を経由せず _pending を直接更新する。
+    /// <see cref="LogPageImage"/> を経由せず _pending を直接更新する。
     /// rollback で <c>WritePageForRecovery</c> によりページが復元された後、後続コミット時の
     /// PageImage が「rollback 後の状態」を WAL に永続化するために呼ぶ。
     /// </summary>
@@ -421,7 +421,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
 }
 
 /// <summary>
-/// FTS-7: in-process abort で巻き戻す leaf 論理ミューテーション 1 件。
+/// in-process abort で巻き戻す leaf 論理ミューテーション 1 件。
 /// abort は逆操作を当てる (IsUpsert なら delete、delete なら旧 Value で再挿入)。
 /// </summary>
 internal readonly record struct FtUndoEntry(byte Tenant, bool IsUpsert, byte[] Key, long Value);

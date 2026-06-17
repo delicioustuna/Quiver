@@ -4,7 +4,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// GC-1: resolves a relationship-id column into a node-id column by looking
+/// resolves a relationship-id column into a node-id column by looking
 /// up the requested endpoint (source / target / "other" relative to the
 /// inbound traversal direction). Implements Gremlin's <c>.outV()</c> /
 /// <c>.inV()</c> / <c>.otherV()</c> steps when chained after

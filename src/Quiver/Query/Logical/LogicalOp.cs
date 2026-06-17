@@ -7,14 +7,14 @@ using Quiver.Storage.Records;
 namespace Quiver.Query.Logical;
 
 /// <summary>
-/// ARCH-7: 単一論理プラン代数 (LogicalPlan IR) のノード基底。
+/// 単一論理プラン代数 (LogicalPlan IR) のノード基底。
 /// fluent DSL / Match / 将来の Cypher・Gremlin parser はすべて <see cref="LogicalOp"/> ツリーへ
 /// lower し、<c>LogicalOptimizer</c> が rule + cost で書き換え、<c>PhysicalPlanner</c> が
 /// <see cref="IPhysicalOperator"/> へ落とす。実行は現行 pull 型を踏襲する。
 /// </summary>
 /// <remarks>
 /// 各ノードは <see cref="CurrentEntityColumn"/> / <see cref="PredictedOutputColumnCount"/> の
-/// 論理シェイプメタデータを持つ。これは GC-6 の as/select エイリアスと carry 列計算を DSL 側で
+/// 論理シェイプメタデータを持つ。これは as/select エイリアスと carry 列計算を DSL 側で
 /// 継続するためで、旧 <c>IOperatorBuilder</c> が担っていた役割をそのまま引き継ぐ。
 /// </remarks>
 internal abstract record LogicalOp
@@ -129,11 +129,11 @@ internal sealed record KnnOp(
 }
 
 /// <summary>
-/// FTS-3/4: BM25 全文検索起点。<see cref="Candidate"/>=null で text-first (BM25 top-k を直接放出)、
+/// BM25 全文検索起点。<see cref="Candidate"/>=null で text-first (BM25 top-k を直接放出)、
 /// <see cref="Candidate"/>!=null で graph-first (候補集合内 BM25)。DSL <c>g.Search</c> は常に
 /// <see cref="Candidate"/>=null で生成し <c>LogicalOptimizer</c> の FullTextPushdown rule が候補を確定する。
 /// <c>.FilterByText</c> は <see cref="Candidate"/> を直接据えた graph-first を生成する。KnnOp と相似形。
-/// <see cref="Corpus"/> は GraphStats から拾った N/avgdl スナップショット (FTS-4)。null なら
+/// <see cref="Corpus"/> は GraphStats から拾った N/avgdl スナップショット。null なら
 /// operator が norms 索引から概算する。push-down rewrite を跨いで保持される。
 /// </summary>
 internal sealed record FullTextScanOp(
@@ -155,7 +155,7 @@ internal enum FusionStrategy
 }
 
 /// <summary>
-/// FTS-5: ランク融合起点。各 <see cref="Children"/> は ranked top-k を産む leaf 検索
+/// ランク融合起点。各 <see cref="Children"/> は ranked top-k を産む leaf 検索
 /// (<see cref="FullTextScanOp"/> / <see cref="KnnOp"/>) で、それらの順位を <see cref="Strategy"/>
 /// (Phase 1 は RRF) で融合し上位 <see cref="K"/> 件を放出する。RRF は rank のみで計算できるため
 /// 既存の「score 非公開」設計 (KnnOp / FullTextScanOp と同方針) を変えずに融合できる

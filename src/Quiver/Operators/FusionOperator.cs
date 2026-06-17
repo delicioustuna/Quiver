@@ -4,7 +4,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// FTS-5 operator: fuses the ranked NodeId streams of two or more child operators
+/// operator: fuses the ranked NodeId streams of two or more child operators
 /// (typically <see cref="FullTextScanOperator"/> BM25 + <see cref="KnnNodeSourceOperator"/>)
 /// with Reciprocal Rank Fusion and emits the top-<c>k</c> in fused order.
 /// </summary>
@@ -19,7 +19,7 @@ namespace Quiver.Query.Physical;
 /// <para>
 /// Precondition: every child must emit ids in the same packed <see cref="NodeId"/> space
 /// so the per-child accumulators key on the same entity. The current children (text-first
-/// BM25 + vector-first KNN) satisfy this; a future graph-first child (FTS-4 family) must
+/// BM25 + vector-first KNN) satisfy this; a future graph-first child (family) must
 /// keep emitting node ids in that space rather than candidate-local handles.
 /// </para>
 /// </remarks>

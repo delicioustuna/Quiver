@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// FT-12 — implementation (a). Dense direct array
+/// implementation (a). Dense direct array
 /// indexed by <see cref="RelationshipId"/>. Allocates one
 /// <see cref="long"/> + one presence bit per relationship slot, so memory
 /// is ~9 bytes per slot regardless of population; suitable when relationship
@@ -20,7 +20,7 @@ namespace Quiver.Storage.Records;
 /// Type mismatches are treated as missing — a relationship whose property
 /// value for <see cref="IRelationshipPropertyJoinIndex.KeyId"/> has a
 /// different <see cref="PropertyValueType"/> than the index was built
-/// against is skipped, matching the predicate-false convention from BA-8.
+/// against is skipped, matching the type-mismatch predicate-false convention.
 /// </remarks>
 internal sealed class DirectArrayRelationshipPropertyJoinIndex : IRelationshipPropertyJoinIndex
 {

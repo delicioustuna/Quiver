@@ -4,7 +4,7 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// ARCH-5c Phase 3/4: entity version payload 内の inline property 領域の符号化/復号。
+/// entity version payload 内の inline property 領域の符号化/復号。
 /// <see cref="VersionedNodeStore"/> / <see cref="VersionedRelationshipStore"/> (set/remove/scan) と
 /// <see cref="PropertyEnumerator"/> (列挙) で共用する。
 ///

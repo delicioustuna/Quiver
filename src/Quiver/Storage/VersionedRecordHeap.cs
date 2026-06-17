@@ -6,7 +6,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Storage;
 
 /// <summary>
-/// ARCH-5c Phase 1 骨格: MVCC 版チェーン付きの可変長レコードを slotted ページ
+/// Phase 1 骨格: MVCC 版チェーン付きの可変長レコードを slotted ページ
 /// (<see cref="SlottedPage"/>) に格納するヒープ。論理 ID (Sequence) は
 /// <see cref="ItemPointerMap"/> 経由で head version の物理位置へ解決する。
 ///
@@ -147,7 +147,7 @@ internal sealed class VersionedRecordHeap
     }
 
     /// <summary>
-    /// ARCH-5c Phase 6: 最初に可視な version の payload を <paramref name="dest"/> へコピーする
+    /// 最初に可視な version の payload を <paramref name="dest"/> へコピーする
     /// (byte[] を割り当てない alloc-free 経路。inline property の scalar read で使う)。
     /// 戻り値 = payload 長。戻り値 &gt; <c>dest.Length</c> のときは収まらず dest 未変更 (呼出側は
     /// 割当版 <see cref="TryReadVisible(long, VersionVisible, out byte[])"/> へフォールバック)。
@@ -235,7 +235,7 @@ internal sealed class VersionedRecordHeap
     public ItemPointer GetHead(long seq) => _map.Get(seq);
 
     /// <summary>
-    /// ARCH-5c Phase 3: head version の payload を新しい内容へ更新する。head が同一 tx の
+    /// head version の payload を新しい内容へ更新する。head が同一 tx の
     /// 未コミット版 (xmin==currentTxId, xmax==0) なら **in-place 置換** (版を増やさず intra-tx
     /// bloat を避ける)、それ以外 (可視な committed 版) なら **copy-on-write** で新版を prepend する。
     /// inline property の set/remove で使う。未登録 seq は新規 Insert。
@@ -287,7 +287,7 @@ internal sealed class VersionedRecordHeap
     }
 
     /// <summary>
-    /// ARCH-5c Phase 3d: head を残し、版チェーン上の dead な非 head 版 (property 更新の
+    /// head を残し、版チェーン上の dead な非 head 版 (property 更新の
     /// copy-on-write で生じた旧版) を回収する。<paramref name="reclaimable"/> が true を返す版を
     /// tombstone し、生存版を再リンクする。head (最新版) は常に保持。回収数を返す。
     /// </summary>
@@ -383,7 +383,7 @@ internal sealed class VersionedRecordHeap
             foreach (var pg in touched) FreePageIfEmpty(pg);
     }
 
-    /// <summary>FT-15 / recovery 用: ヘッダから append page を読み直す。</summary>
+    /// <summary>recovery 用: ヘッダから append page を読み直す。</summary>
     public void ReloadMeta() => LoadHeader();
 
     // --- private ---
@@ -454,7 +454,7 @@ internal sealed class VersionedRecordHeap
     }
 
     /// <summary>
-    /// ARCH-5c Phase 6: live スロットが 0 になった heap データページを free list へ回収する。
+    /// live スロットが 0 になった heap データページを free list へ回収する。
     /// 現在の append 先ページは除外する (継続して追記するため)。vacuum (Remove/PruneDeadVersions)
     /// から、スロット削除後に touch したページに対して呼ぶ。
     /// </summary>
@@ -508,7 +508,7 @@ internal sealed class VersionedRecordHeap
 }
 
 /// <summary>
-/// ARCH-5c: 版の可視性判定デリゲート。<see cref="VersionedRecordHeap"/> を MvccContext から
+/// 版の可視性判定デリゲート。<see cref="VersionedRecordHeap"/> を MvccContext から
 /// 切り離し、Phase 2 配線時に <see cref="Quiver.Core.Visibility"/> を注入できるようにする。
 /// </summary>
 internal delegate bool VersionVisible(long xmin, long xmax);

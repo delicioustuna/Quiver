@@ -4,7 +4,7 @@ using Quiver.Storage.Wal;
 namespace Quiver;
 
 /// <summary>
-/// ARCH-6: <c>db.Vectors</c> 経由のミューテーションを autocommit tx で包む <see cref="IVectorStore"/>
+/// <c>db.Vectors</c> 経由のミューテーションを autocommit tx で包む <see cref="IVectorStore"/>
 /// ラッパ (binary backend 専用)。
 ///
 /// <para>スレッドに書き込み tx が既にアクティブ (<c>WalPageContext.Current != null</c>) なら、その tx へ

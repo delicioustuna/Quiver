@@ -6,7 +6,7 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// ARCH-6 (6d): 1 つのベクトルインデックスの HNSW (Hierarchical Navigable Small World) ANN 索引。
+/// 1 つのベクトルインデックスの HNSW (Hierarchical Navigable Small World) ANN 索引。
 /// グラフ構造を container テナントのページに永続化し (再起動跨ぎで再現)、in-memory 隣接キャッシュ
 /// (open 時にページから rebuild) を read 経路に使う。書き込みはページ write-through で、container の
 /// 単一物理 PagedFile を経由するため、アクティブ tx の WalPageContext 下なら WAL/ARIES に乗り
@@ -140,7 +140,7 @@ internal sealed class HnswIndex
     }
 
     /// <summary>
-    /// ARCH-6 ①: overwrite 時の再リンク。既存 seq はグラフから外して新ベクトルで挿入し直す。
+    /// overwrite 時の再リンク。既存 seq はグラフから外して新ベクトルで挿入し直す。
     /// payload は呼び出し側が事前に更新済みの前提。新規 seq は単純 <see cref="Insert"/>。
     /// </summary>
     public void Upsert(long seq)
@@ -150,7 +150,7 @@ internal sealed class HnswIndex
     }
 
     /// <summary>
-    /// ARCH-6 ②: seq をグラフから物理削除する。全近傍の隣接リストから seq を除去し、entry なら
+    /// seq をグラフから物理削除する。全近傍の隣接リストから seq を除去し、entry なら
     /// 付け替える。removed レコードは present=0 で永続化。削除が蓄積したら <see cref="Rebuild"/> で回収。
     /// グラフに無い seq は no-op。
     /// </summary>
@@ -230,7 +230,7 @@ internal sealed class HnswIndex
     }
 
     /// <summary>
-    /// ARCH-6 ②: payload の present な seq だけから HNSW を全再構築する (削除蓄積でグラフが
+    /// payload の present な seq だけから HNSW を全再構築する (削除蓄積でグラフが
     /// 劣化したとき)。旧レコード領域を一掃してから昇順に挿入し直す。
     /// </summary>
     public void Rebuild()
@@ -256,7 +256,7 @@ internal sealed class HnswIndex
     /// <summary>
     /// query に最も近い top-k を (seq, score) で返す。score は <see cref="VectorMetrics.Score"/>
     /// (高いほど近い)。グラフが空なら空配列。removed/absent な payload は除外する。
-    /// <paramref name="isLive"/> は世代照合 (ARCH-6c) — false の候補は除外する。
+    /// <paramref name="isLive"/> は世代照合— false の候補は除外する。
     /// </summary>
     public VectorSearchResult[] Search(
         ReadOnlySpan<float> query, int k, EntityKind kind, Func<long, ushort, bool> isLive,

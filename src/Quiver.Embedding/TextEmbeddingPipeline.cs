@@ -10,7 +10,7 @@ using Quiver.Transactions;
 namespace Quiver.Embedding;
 
 /// <summary>
-/// VEC-4 helper. Orchestrates the
+/// helper. Orchestrates the
 /// <c>normalize → emoji policy → truncate → hash → dedup → embed → SetVector
 /// → MarkCompleted</c> flow on top of an <see cref="IGraphEngine"/> adapter,
 /// without taking any compile-time dependency on engine internals.
@@ -121,7 +121,7 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
     }
 
     /// <summary>
-    /// post-commit フック (VEC-3) を登録し、トランザクションの WAL コミットが永続化された後に
+    /// post-commit フックを登録し、トランザクションの WAL コミットが永続化された後に
     /// <see cref="EnqueueAsync(EntityRef, string, string, CancellationToken)"/> を呼び出す。
     /// テキストは登録時にキャプチャするため、フックスレッドで該当プロパティを再読み出しする必要は無い。
     /// </summary>

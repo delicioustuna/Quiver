@@ -5,7 +5,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Storage;
 
 /// <summary>
-/// ARCH-5c: 論理 ID (Sequence) → head version の物理位置 (<see cref="ItemPointer"/>) を引く
+/// 論理 ID (Sequence) → head version の物理位置 (<see cref="ItemPointer"/>) を引く
 /// dense 間接層。adjacency / 索引が保持する Sequence キーはこの map 経由で物理位置へ解決する
 /// ため、レコードが版更新で別 slot へ移動しても外部キーのバイトは不変に保てる。
 ///
@@ -24,7 +24,7 @@ namespace Quiver.Storage;
 ///         <c>-(nextFreeSeq + 2)</c> で符号化 (terminal = -1)。</item>
 /// </list>
 /// vacuum が回収した seq は free list へ積まれ、<see cref="PopFreeSeq"/> が再利用する。これにより
-/// 旧 NodeStore の slot 再利用 + 世代カウンタ (ARCH-3/5b) と同じ ABA 検出を維持する。
+/// 旧 NodeStore の slot 再利用 + 世代カウンタと同じ ABA 検出を維持する。
 /// </summary>
 internal sealed class ItemPointerMap
 {
@@ -106,7 +106,7 @@ internal sealed class ItemPointerMap
         SaveMeta();
     }
 
-    /// <summary>FT-15 / recovery 用: ヘッダから hwm / freeHead を読み直す。</summary>
+    /// <summary>recovery 用: ヘッダから hwm / freeHead を読み直す。</summary>
     public void ReloadMeta() => LoadMeta();
 
     private static long EncodeFreeLink(long nextFreeSeq) => nextFreeSeq < 0 ? -1L : -(nextFreeSeq + 2);

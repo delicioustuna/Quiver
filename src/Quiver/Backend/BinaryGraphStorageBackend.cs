@@ -109,7 +109,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     public string DataDirectory => Path.GetDirectoryName(_containerPath) is { Length: > 0 } d ? d : ".";
 
     /// <summary>
-    /// テスト専用 (FTS-7 torn-commit crash 再現): 全データページ + B+Tree 索引を fsync する
+    /// テスト専用 (torn-commit crash 再現): 全データページ + B+Tree 索引を fsync する
     /// (WAL truncate なし)。これにより未 checkpoint の committed データ (Suppressed FT leaf 含む) を
     /// disk へ落とし、Commit レコードだけ欠けた torn-commit の「body 保持」状態を決定論的に作れる。
     /// </summary>
@@ -211,7 +211,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     }
 
     /// <summary>
-    /// PW-14: Rebuild the immutable base adjacency view
+    /// Rebuild the immutable base adjacency view
     /// from the current relationship store, drop tombstones, and bump the
     /// epoch. After this call all live edges are served from base and the
     /// delta walk yields nothing until new relationships are created.
@@ -277,7 +277,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     }
 
     /// <summary>
-    /// OP-1: ライブスナップショット。
+    /// ライブスナップショット。
     ///
     /// 流れ:
     ///  1. ベストエフォートで <see cref="TransactionManager.RequestCheckpoint"/> を起動し、
@@ -298,7 +298,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     /// target の recovery 後 LSN は snapshot WAL 末尾 LSN まで進む。
     /// </summary>
     /// <summary>
-    /// OP-3: ノードストアの dead version 物理回収 + committed registry の prune。
+    /// ノードストアの dead version 物理回収 + committed registry の prune。
     /// アクティブトランザクションが残っているときは安全側で何もせず Skip 報告する。
     /// </summary>
     public VacuumReport Vacuum(VacuumOptions? options = null)

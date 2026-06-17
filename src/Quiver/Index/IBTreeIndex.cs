@@ -12,7 +12,7 @@ internal interface IBTreeIndex<TKey> : IDisposable, IBTreeIndexFlushable
     BTreeRangeEnumerator FullScan();
 
     /// <summary>
-    /// FTS-8: forward-only seekable cursor over the raw byte range
+    /// forward-only seekable cursor over the raw byte range
     /// <c>[fromKey, toKeyInclusive]</c>. Unlike <see cref="Range"/> (a leaf-linked
     /// <c>ref struct</c>) this is a heap object so WAND can hold an array of per-term
     /// cursors, and its <see cref="BTreeRawCursor.SeekTo"/> jumps via the tree root
@@ -27,10 +27,10 @@ internal interface IBTreeIndex<TKey> : IDisposable, IBTreeIndexFlushable
 }
 
 /// <summary>
-/// FT-18: 型パラメータに依存しない、索引の永続化フラッシュ用インタフェース。
+/// 型パラメータに依存しない、索引の永続化フラッシュ用インタフェース。
 /// <see cref="Checkpointer"/> が型を意識せずに <see cref="IIndexManager.FlushAll"/>
 /// 経由で全索引を fsync するために使う。
-/// FT-22 では orphan GC が型を意識せず全索引を走査するため、生キー / 生エントリ操作も
+/// orphan GC も型を意識せず全索引を走査するため、生キー / 生エントリ操作も
 /// この non-generic 経路に乗せる。
 /// </summary>
 internal interface IBTreeIndexFlushable
@@ -39,14 +39,14 @@ internal interface IBTreeIndexFlushable
     void Flush();
 
     /// <summary>
-    /// FT-22: 索引内の全 (生キー, 値) ペアを leaf 順に列挙する。
+    /// 索引内の全 (生キー, 値) ペアを leaf 順に列挙する。
     /// 値は <see cref="Quiver.Core.NodeId.Value"/> など long を想定。
     /// orphan 検出は呼び出し側 (IndexManager.ValidateAll) で行う。
     /// </summary>
     IEnumerable<KeyValuePair<byte[], long>> EnumerateRawEntries();
 
     /// <summary>
-    /// FT-22: 与えた (生キー, 値) ペアが索引に存在すれば削除する。
+    /// 与えた (生キー, 値) ペアが索引に存在すれば削除する。
     /// orphan repair で <see cref="EnumerateRawEntries"/> から拾った生キーを
     /// そのまま使えるよう、コーデック経由のエンコードをスキップする経路。
     /// </summary>
@@ -54,13 +54,13 @@ internal interface IBTreeIndexFlushable
     bool DeleteRawEntry(ReadOnlySpan<byte> rawKey, long value);
 
     /// <summary>
-    /// FTS-7: 生キーの idempotent set (recovery Pass 2b redo / Pass 3 undo 用)。
+    /// 生キーの idempotent set (recovery Pass 2b redo / Pass 3 undo 用)。
     /// 存在すれば値を上書き、無ければ挿入 (state-setting で二重適用が no-op)。WAL emit しない pure apply。
     /// </summary>
     void UpsertRaw(ReadOnlySpan<byte> rawKey, long value);
 
     /// <summary>
-    /// FTS-2: abort / partial rollback の before-image undo がヘッダページを tx 開始前へ戻した後、
+    /// abort / partial rollback の before-image undo がヘッダページを tx 開始前へ戻した後、
     /// B+Tree の in-memory キャッシュ (root / entryCount / height) をヘッダから読み直す。
     /// これを呼ばないと、rollback したページ変更に対して EntryCount が陳腐化し、
     /// 索引 split を含む tx の abort では root/height 不整合で破損し得る。
@@ -93,7 +93,7 @@ internal interface IIndexManager
     IEnumerable<string> ListIndexes();
 
     /// <summary>
-    /// OP-4 / ARCH-4: 索引を <paramref name="oldName"/> から <paramref name="newName"/> へリネームする。
+    /// 索引を <paramref name="oldName"/> から <paramref name="newName"/> へリネームする。
     /// 索引はテナント ID で識別されるため、テナント / B+Tree 実体・ページ・WAL 意味はすべて不変で、
     /// カタログ上の name キーと (label, propertyKey) バインディングだけが追従する。
     /// 旧名が見つからない場合は <c>false</c> を返す (冪等)。
@@ -103,14 +103,14 @@ internal interface IIndexManager
         => throw new NotSupportedException("RenameIndex is not supported by this index manager.");
 
     /// <summary>
-    /// PW-18 follow-up: スキーマ層から呼ばれ、(label, propertyKey) → indexName の対応を
+    /// スキーマ層から呼ばれ、(label, propertyKey) → indexName の対応を
     /// 登録する。これにより MergeNode が業務キー検索で自動的にインデックスを利用できる。
     /// 既定実装は no-op (バインディングを保持しないバックエンドはフルスキャン経路に落ちる)。
     /// </summary>
     void RegisterIndexBinding(string indexName, string label, string propertyKey) { }
 
     /// <summary>
-    /// PW-18 follow-up: (label, propertyKey) に登録されたインデックス名を返す。
+    /// (label, propertyKey) に登録されたインデックス名を返す。
     /// バインディングが無い場合は <c>false</c> を返す (既定実装)。
     /// </summary>
     bool TryGetIndexName(string label, string propertyKey, out string indexName)
@@ -120,7 +120,7 @@ internal interface IIndexManager
     }
 
     /// <summary>
-    /// PW-18 follow-up: 登録済みインデックスのバインディングを列挙する
+    /// 登録済みインデックスのバインディングを列挙する
     /// (<see cref="ListIndexes"/> の補助。SchemaApi.ListIndexes のメタデータ復元に使う)。
     /// 既定実装は空シーケンス。
     /// </summary>
@@ -128,7 +128,7 @@ internal interface IIndexManager
         => Array.Empty<(string, string, string)>();
 
     /// <summary>
-    /// FT-18: 管理下の全索引ファイルのバッファプールダーティページを fsync する。
+    /// 管理下の全索引ファイルのバッファプールダーティページを fsync する。
     /// <see cref="Quiver.Transactions.Checkpointer"/> がチェックポイント時にデータファイル
     /// と並べて呼ぶ。これにより WAL truncate 後も索引内容が durable に残り、復旧時の
     /// 冪等 redo の起点として有効な状態が保証される。既定実装は no-op。
@@ -136,7 +136,7 @@ internal interface IIndexManager
     void FlushAll() { }
 
     /// <summary>
-    /// FT-22: 全 B+Tree 索引を走査し、<paramref name="isLive"/> が <c>false</c> を返した
+    /// 全 B+Tree 索引を走査し、<paramref name="isLive"/> が <c>false</c> を返した
     /// 値 (NodeId.Value 互換) を持つエントリを orphan として収集する。
     /// 戻り値の <c>EntryCount</c> は走査総数、<c>IndexCount</c> は走査対象の索引数。
     /// 既定実装は何もせず (0, 0) を返す。
@@ -147,7 +147,7 @@ internal interface IIndexManager
         => (0, 0);
 
     /// <summary>
-    /// FT-22: <see cref="CollectOrphans"/> で得た一覧を実際に索引から削除する。
+    /// <see cref="CollectOrphans"/> で得た一覧を実際に索引から削除する。
     /// 削除に成功した件数を返す。索引が dispose 済み等で見つからないエントリはスキップ。
     /// 既定実装は no-op。
     /// </summary>
@@ -156,13 +156,13 @@ internal interface IIndexManager
     // ---- FTS-2: full-text indexes (postings + norms tenants) ----
 
     /// <summary>
-    /// FTS-2: 全文索引 (postings + norms の 2 テナント) を作成する。既存なら既存を返す。
+    /// 全文索引 (postings + norms の 2 テナント) を作成する。既存なら既存を返す。
     /// 既定実装は <see cref="NotSupportedException"/> (binary backend のみ対応)。
     /// </summary>
     FullTextIndex CreateFullTextIndex(string name, string label, string propertyKey, string tokenizerId)
         => throw new NotSupportedException("Full-text indexes are not supported by this index manager.");
 
-    /// <summary>FTS-2: 名前で全文索引を引く。既定実装は false。</summary>
+    /// <summary>名前で全文索引を引く。既定実装は false。</summary>
     bool TryGetFullTextIndex(string name, out FullTextIndex index)
     {
         index = null!;
@@ -170,7 +170,7 @@ internal interface IIndexManager
     }
 
     /// <summary>
-    /// FTS-2: (label, propertyKey) に bound された全文索引を引く (透過維持フックの探索用)。
+    /// (label, propertyKey) に bound された全文索引を引く (透過維持フックの探索用)。
     /// 既定実装は false。
     /// </summary>
     bool TryGetFullTextIndexByLabelKey(string label, string propertyKey, out FullTextIndex index)
@@ -179,44 +179,44 @@ internal interface IIndexManager
         return false;
     }
 
-    /// <summary>FTS-2: 登録済み全文索引のメタを列挙する。既定実装は空。</summary>
+    /// <summary>登録済み全文索引のメタを列挙する。既定実装は空。</summary>
     IEnumerable<(string Name, string Label, string PropertyKey, string TokenizerId)> ListFullTextIndexes()
         => Array.Empty<(string, string, string, string)>();
 
-    /// <summary>FTS-2: 全文索引を削除する。既定実装は false。</summary>
+    /// <summary>全文索引を削除する。既定実装は false。</summary>
     bool DropFullTextIndex(string name) => false;
 
     /// <summary>
-    /// FTS-2: abort の before-image undo 後に、全 B+Tree 索引 (secondary + 全文) の in-memory
+    /// abort の before-image undo 後に、全 B+Tree 索引 (secondary + 全文) の in-memory
     /// ヘッダキャッシュを読み直す。<c>ReloadStoreMeta</c> から呼ばれる。既定は no-op。
     /// </summary>
     void ReloadAll() { }
 
-    /// <summary>FTS-2: tokenizerId からトークナイザを解決する (catalog 記録値を registry 経由で)。</summary>
+    /// <summary>tokenizerId からトークナイザを解決する (catalog 記録値を registry 経由で)。</summary>
     ITokenizer ResolveTokenizer(string tokenizerId)
         => throw new NotSupportedException("This index manager has no tokenizer registry.");
 
     /// <summary>
-    /// FTS-2: 全文索引が 1 つでも存在するか。透過維持フックの fast-path
+    /// 全文索引が 1 つでも存在するか。透過維持フックの fast-path
     /// (FT 索引がゼロなら SetProperty はノード読取を省略して素通り)。既定は false。
     /// </summary>
     bool HasAnyFullTextIndex => false;
 
     /// <summary>
-    /// FTS-2 透過維持: <paramref name="oldText"/> (before-image) の postings/norms を削除し、
+    /// 透過維持: <paramref name="oldText"/> (before-image) の postings/norms を削除し、
     /// <paramref name="newText"/> を tokenize して挿入する。いずれも null ならその側はスキップ。
     /// 同一 Tx 内で呼ばれ、B+Tree 操作は WAL/ARIES で保護される。既定は no-op。
     /// </summary>
     void MaintainFullText(FullTextIndex index, long entityId, string? oldText, string? newText) { }
 
     /// <summary>
-    /// FTS-7: recovery 論理相の redo — indexTenantId の postings/norms へ
+    /// recovery 論理相の redo — indexTenantId の postings/norms へ
     /// state-setting leaf ミューテーションを再適用する (isUpsert ? UpsertRaw : DeleteRawEntry)。
     /// abort の論理 undo (逆操作) でも同経路を使う。既定 no-op。
     /// </summary>
     void ApplyFtLeafRedo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value) { }
 
-    /// <summary>FTS-7: 論理 undo — leaf ミューテーションの逆操作を適用する。既定 no-op。</summary>
+    /// <summary>論理 undo — leaf ミューテーションの逆操作を適用する。既定 no-op。</summary>
     void ApplyFtLeafUndo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value) { }
 }
 

@@ -1,7 +1,7 @@
 namespace Quiver.Storage;
 
 /// <summary>
-/// ARCH-5c: slotted ヒープ上のレコードの物理位置 (pageId, slot)。
+/// slotted ヒープ上のレコードの物理位置 (pageId, slot)。
 /// 論理 ID (Sequence) → 物理位置の間接層 (<see cref="ItemPointerMap"/>) と版チェーンの
 /// <c>nextVersionPtr</c> で用いる。
 ///

@@ -1,7 +1,7 @@
 namespace Quiver.Text;
 
 /// <summary>
-/// Mixed bigram/word tokenizer (FTS-1). Normalizes the input
+/// Mixed bigram/word tokenizer. Normalizes the input
 /// (NFKC + ASCII lowercase) then segments it by Unicode script:
 /// <list type="bullet">
 /// <item>CJK runs (kana / kanji / hangul) are split into overlapping

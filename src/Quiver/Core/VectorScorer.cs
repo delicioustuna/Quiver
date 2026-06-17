@@ -6,7 +6,7 @@ namespace Quiver.Core;
 /// <summary>
 /// SIMD-vectorized distance/similarity primitives for <see cref="InMemoryVectorStore"/>.
 /// Uses BCL in-box <see cref="Vector{T}"/> over <c>float</c>; no extra package
-/// dependency is taken (VEC-7). Lane width follows <see cref="Vector{T}.Count"/>
+/// dependency is taken. Lane width follows <see cref="Vector{T}.Count"/>
 /// (AVX2=8, AVX-512=16, scalar fallback=1) at runtime.
 ///
 /// All methods preserve the "HIGHER = more similar" convention for the caller:
@@ -113,7 +113,7 @@ internal static class VectorScorer
 
 /// <summary>
 /// Scalar baseline kept for parity tests / benchmarks. Production code path
-/// uses <see cref="VectorScorer"/> exclusively (VEC-7).
+/// uses <see cref="VectorScorer"/> exclusively.
 /// </summary>
 internal static class ScalarVectorScorer
 {

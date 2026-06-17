@@ -235,7 +235,7 @@ public sealed class GraphStats
     public long TotalRelationships { get; private init; }
 
     /// <summary>
-    /// FTS-4: 全文索引ごとの BM25 コーパス統計 (N / avgdl) スナップショット。索引名でキーする。
+    /// 全文索引ごとの BM25 コーパス統計 (N / avgdl) スナップショット。索引名でキーする。
     /// <c>g.Search</c> / <c>.FilterByText</c> が operator へ N/avgdl を渡し、クエリ毎の O(N) norms
     /// 走査を省く (BM25 は統計鮮度に頑健なので定期収集・近似で足りる)。internal 専用
     /// (<see cref="Bm25CorpusStats"/> が internal、公開サーフェスは増やさない)。
@@ -243,7 +243,7 @@ public sealed class GraphStats
     internal IReadOnlyDictionary<string, Bm25CorpusStats> FullTextCorpora { get; private init; }
         = new Dictionary<string, Bm25CorpusStats>(StringComparer.Ordinal);
 
-    /// <summary>FTS-4: 指定全文索引のコーパス統計 (未収集は null)。</summary>
+    /// <summary>指定全文索引のコーパス統計 (未収集は null)。</summary>
     internal Bm25CorpusStats? FullTextCorpus(string indexName)
         => FullTextCorpora.TryGetValue(indexName, out var c) ? c : null;
 

@@ -16,7 +16,7 @@ internal interface IRelationshipStore
 
     /// <summary>
     /// 生存中のすべての <see cref="RelationshipId"/> をストア順 (id 0 → hwm-1) で列挙する。
-    /// PW-17 の <c>RelationshipScanExpandOperator</c> が大規模 frontier 展開で利用する経路で、
+    /// の <c>RelationshipScanExpandOperator</c> が大規模 frontier 展開で利用する経路で、
     /// ノード毎リンクリストを多数辿るより順次スキャンの方が安価なケース向け。
     /// </summary>
     IEnumerable<RelationshipId> Scan();

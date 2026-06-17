@@ -5,7 +5,7 @@ using Quiver.Storage.Records;
 namespace Quiver;
 
 /// <summary>
-/// ARCH-5b: 結果行をマテリアライズする際に、NodeId 列へ現 slot 世代 (incarnation) を load する。
+/// 結果行をマテリアライズする際に、NodeId 列へ現 slot 世代 (incarnation) を load する。
 /// 内部クエリパイプラインは Sequence 空間 (gen=0) で動かして hot path のコストを避けつつ、
 /// 利用者に返す NodeId の <c>Value</c> を <c>CreateNode</c>/<c>Allocate</c> が返した id と一致させる
 /// (round-trip 一貫 + 世代付きで往復検証が効く)。リレーションシップは世代を持たないので素通し。

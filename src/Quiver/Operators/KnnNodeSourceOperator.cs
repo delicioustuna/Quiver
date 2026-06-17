@@ -4,7 +4,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// VEC-5 leaf operator: streams the top-<c>k</c> node ids from a vector index
+/// leaf operator: streams the top-<c>k</c> node ids from a vector index
 /// in descending similarity order. Acts as a scan source so it composes with
 /// the existing <see cref="FilterOperator"/> / <see cref="ExpandOperator"/>
 /// chain — callers wire it as the first stage of a traversal, then apply

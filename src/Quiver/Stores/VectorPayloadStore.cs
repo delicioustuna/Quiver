@@ -6,7 +6,7 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// ARCH-6: 1 つのベクトルインデックスの payload を container テナントへ永続化する固定次元ストア。
+/// 1 つのベクトルインデックスの payload を container テナントへ永続化する固定次元ストア。
 /// Sequence をキーに <c>[gen:u16 | present:u8 | reserved:u8 | float×dim]</c> のレコードを保持する。
 /// レコードはページ本体 (<see cref="RecordPageMapping.PageBodySize"/> = 8160B) を跨いで論理連続
 /// バイト列として striping され、任意次元で隙間なくパックされる。
@@ -16,7 +16,7 @@ namespace Quiver.Storage.Records;
 /// 含まれる。tx コンテキスト外の書き込みは buffer pool に乗り checkpoint / close で永続化される
 /// (crash-atomic ではない — autocommit 経路は呼び出し側が tx で包む)。</para>
 ///
-/// <para><c>gen</c> はバインド先エンティティの世代 (ARCH-6c)。slot 再利用で別ノードに化けた
+/// <para><c>gen</c> はバインド先エンティティの世代。slot 再利用で別ノードに化けた
 /// stale binding を KNN read 時に世代照合で弾くために保持する。</para>
 /// </summary>
 internal sealed class VectorPayloadStore
@@ -109,7 +109,7 @@ internal sealed class VectorPayloadStore
         return true;
     }
 
-    /// <summary>FT-15 / recovery 用: ヘッダから hwm を読み直す (abort の before-image undo 後)。</summary>
+    /// <summary>recovery 用: ヘッダから hwm を読み直す (abort の before-image undo 後)。</summary>
     public void ReloadMeta() => LoadMeta();
 
     // --- private: 論理バイト配列 (page 2+ を striping) ---

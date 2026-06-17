@@ -30,6 +30,6 @@ public sealed record RagStoreOptions
     /// </summary>
     public bool EnableFullTextIndex { get; init; } = true;
 
-    /// <summary>チャンキング設定 (RAG-2)。取込時に Blocks をこの設定でチャンク化する。</summary>
+    /// <summary>チャンキング設定。取込時に Blocks をこの設定でチャンク化する。</summary>
     public ChunkingOptions Chunking { get; init; } = new();
 }

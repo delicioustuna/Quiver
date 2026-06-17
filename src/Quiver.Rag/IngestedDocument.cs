@@ -16,7 +16,7 @@ public sealed record IngestedDocument(
     IReadOnlyList<IngestedBlock> Blocks);
 
 /// <summary>
-/// 取込側が読み順復元・正規化まで済ませた 1 ブロック。チャンカー (RAG-2) はこの境界を尊重して
+/// 取込側が読み順復元・正規化まで済ませた 1 ブロック。チャンカーはこの境界を尊重して
 /// チャンク化する (ブロック跨ぎ分割を避ける)。
 /// </summary>
 /// <param name="Kind">ブロック種別。<see cref="BlockKind.Heading"/> のとき <see cref="HeadingLevel"/> が見出しレベル。</param>

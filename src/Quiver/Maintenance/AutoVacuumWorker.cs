@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace Quiver.Maintenance;
 
 /// <summary>
-/// OP-7: <see cref="GraphDatabaseOptions.AutoVacuum"/> が有効なときに、周期的に
+/// <see cref="GraphDatabaseOptions.AutoVacuum"/> が有効なときに、周期的に
 /// <see cref="IVacuum.Run"/> を起動する低頻度バックグラウンドワーカー。
 /// </summary>
 /// <remarks>

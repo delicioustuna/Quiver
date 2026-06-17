@@ -4,7 +4,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// GC-1: implements Gremlin's <c>.label()</c> step. Reads the node label per
+/// implements Gremlin's <c>.label</c> step. Reads the node label per
 /// row and appends a UTF-8 string column carrying the label name resolved
 /// via a caller-supplied lookup (typically <c>ISchemaApi.GetLabelName</c>).
 /// </summary>

@@ -5,7 +5,7 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// ARCH-5c Phase 5 (5b): 列化登録 (opt-in) の永続カタログ。どの <c>(EntityKind, propertyKeyId)</c>
+/// 列化登録 (opt-in) の永続カタログ。どの <c>(EntityKind, propertyKeyId)</c>
 /// が列セグメントを持つか、およびその列が使う container テナント ID を保持する。
 /// 単一ヘッダページ (テナント) に packed 格納する: <c>[count:i32 | nextTenantId:i32 | … | entries]</c>。
 /// entry = <c>[kind:1 | keyId:4 | tenantId:1]</c> = 6B。opt-in 用途では数〜数十件で十分なので 1 ページに収める。

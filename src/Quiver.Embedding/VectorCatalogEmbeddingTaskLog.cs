@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Embedding;
 
 /// <summary>
-/// Bridges <see cref="IEmbeddingTaskLog"/> onto the VEC-2
+/// Bridges <see cref="IEmbeddingTaskLog"/> onto the
 /// <see cref="IVectorCatalog"/> so a single durable store backs both index
 /// metadata and per-entity task state. The catalog implementation is
 /// authoritative for concurrency / persistence — this wrapper is a thin

@@ -117,15 +117,15 @@ internal sealed class TransactionManager : ITransactionManager
     }
 
     /// <summary>
-    /// FT-26: backend factory から recovery 経路で WAL を走査して構築済みの registry を注入する経路。
+    /// backend factory から recovery 経路で WAL を走査して構築済みの registry を注入する経路。
     /// </summary>
     internal CommittedTxRegistry CommittedRegistry => _committed;
 
-    /// <summary>FT-33: Serializable commit を直列化するゲート (Transaction から参照)。</summary>
+    /// <summary>Serializable commit を直列化するゲート (Transaction から参照)。</summary>
     internal object SsnCommitGate => _ssnCommitGate;
 
     /// <summary>
-    /// FT-33: 指定 tx の commit stamp c(T) を返す。未採番なら大域クロックから 1 つ採番する
+    /// 指定 tx の commit stamp c(T) を返す。未採番なら大域クロックから 1 つ採番する
     /// (冪等)。Serializable tx は SSN 検証時にこれを呼んで c(T) を確定させ、その後の OnCommit
     /// 経由の再呼び出しでは同じ値を返す。
     /// </summary>
@@ -137,20 +137,20 @@ internal sealed class TransactionManager : ITransactionManager
     }
 
     /// <summary>
-    /// FT-34: 大域クロックから新しい候補 commit stamp を 1 つ採番する (単調)。SSN の commit stamp
+    /// 大域クロックから新しい候補 commit stamp を 1 つ採番する (単調)。SSN の commit stamp
     /// は最終的に <c>cstamp(T) = π(T)</c> (候補で上限を取った値) になるため、候補採番と確定 (
     /// <see cref="SetCommitStamp"/>) を分離する。候補値は restart 連続性用の高水位としても使う。
     /// </summary>
     internal long NextCommitStamp() => Interlocked.Increment(ref _commitStamp);
 
     /// <summary>
-    /// FT-34: Serializable tx の最終 commit stamp (= π(T)) を確定して登録する。後続 tx の
+    /// Serializable tx の最終 commit stamp (= π(T)) を確定して登録する。後続 tx の
     /// <see cref="CommitStampOf"/> はこの値を返し、SSN の η/π 伝播が推移的に効く。
     /// </summary>
     internal void SetCommitStamp(long txIdValue, long cstamp) => _txCstamp[txIdValue] = cstamp;
 
     /// <summary>
-    /// FT-34: 現在の commit-stamp クロック値 (スナップショット下限)。Serializable tx が Begin 時に
+    /// 現在の commit-stamp クロック値 (スナップショット下限)。Serializable tx が Begin 時に
     /// 捕捉し、読んだバージョンの overwriter cstamp (v.sstamp) を π に反映するかの判定に使う:
     /// <c>v.sstamp &gt; snapshotClock</c> のときだけ「自分が読んだのは上書き前の版」= rw-antidependency
     /// として π を下げる。これにより既に commit 済みの上書き後の版を読むだけの retry が
@@ -159,7 +159,7 @@ internal sealed class TransactionManager : ITransactionManager
     internal long CurrentCommitStampClock => Volatile.Read(ref _commitStamp);
 
     /// <summary>
-    /// FT-33 (④): 再起動時に永続化済みの commit-stamp 高水位までクロックを巻き上げる。
+    /// 再起動時に永続化済みの commit-stamp 高水位までクロックを巻き上げる。
     /// これにより新規 commit stamp は過去に永続化されたどの version stamp よりも大きくなり、
     /// 旧/新 stamp 空間の混在 (= 再起動後の false-abort ストーム) を防ぐ。既に進んでいれば no-op。
     /// </summary>
@@ -175,7 +175,7 @@ internal sealed class TransactionManager : ITransactionManager
     }
 
     /// <summary>
-    /// FT-33: creator TxId の commit stamp を返す。未知 (= recovery 前のプロセスで commit された
+    /// creator TxId の commit stamp を返す。未知 (= recovery 前のプロセスで commit された
     /// バージョン等) は 0 (= 太古の committed) として扱う。SSN の read-side η 下限として安全側。
     /// </summary>
     internal long CommitStampOf(long creatorTxIdValue)
@@ -185,7 +185,7 @@ internal sealed class TransactionManager : ITransactionManager
     }
 
     /// <summary>
-    /// FT-26: recovery で観測した最大 TxId + 1 まで _nextTxId を巻き上げる。
+    /// recovery で観測した最大 TxId + 1 まで _nextTxId を巻き上げる。
     /// 既に進んでいる場合は no-op。
     /// </summary>
     internal void AdvanceNextTxIdAtLeast(long minimum)
@@ -200,18 +200,18 @@ internal sealed class TransactionManager : ITransactionManager
     }
 
     /// <summary>
-    /// ARCH-4 増分7: 次に採番される TxId。クリーン終了時に container へ committed TxId 高水位
+    /// 次に採番される TxId。クリーン終了時に container へ committed TxId 高水位
     /// として永続化し、WAL 削除後の reopen で visibility horizon / 採番起点を復元する。
     /// </summary>
     internal long PeekNextTxId() => Volatile.Read(ref _nextTxId);
 
-    /// <summary>FT-25: テスト / 診断用。null のときは検出器無効。</summary>
+    /// <summary>テスト / 診断用。null のときは検出器無効。</summary>
     internal DeadlockDetector? DeadlockDetector => _deadlockDetector;
 
     public int ActiveCount => _active.Count;
 
     /// <summary>
-    /// OP-3: vacuum 用 visibility horizon。「これ未満の TxId が刻まれた dead version は
+    /// vacuum 用 visibility horizon。「これ未満の TxId が刻まれた dead version は
     /// 物理回収しても誰のスナップショットも壊さない」境界を返す。
     ///
     /// 計算: 現在 active な tx の <see cref="Transaction.Id"/> 最小値。active が 0 件なら
@@ -279,7 +279,7 @@ internal sealed class TransactionManager : ITransactionManager
     }
 
     /// <summary>
-    /// FT-28: Adaptive ポリシーを有効化する。<paramref name="controller"/> は per-tx の
+    /// Adaptive ポリシーを有効化する。<paramref name="controller"/> は per-tx の
     /// WAL byte delta を観測して内部 threshold を更新し、<see cref="MaybeCheckpoint"/> は
     /// 固定値ではなく controller の現在値を使う。<c>null</c> を渡すと Fixed 挙動に戻す
     /// (ホットスワップ可)。
@@ -291,7 +291,7 @@ internal sealed class TransactionManager : ITransactionManager
     }
 
     /// <summary>
-    /// FT-28: ホットスワップ用。既存の checkpointer 配線は維持したまま threshold (Fixed) を
+    /// ホットスワップ用。既存の checkpointer 配線は維持したまま threshold (Fixed) を
     /// 差し替える。Adaptive と Fixed の切り替えは <see cref="SetAdaptiveController"/> と
     /// 併用する (Fixed に戻す場合は <c>SetAdaptiveController(null)</c> + 本メソッドで新しい
     /// 固定値を渡す)。
@@ -302,7 +302,7 @@ internal sealed class TransactionManager : ITransactionManager
     }
 
     /// <summary>
-    /// FT-28: 現在採用中のチェックポイント threshold (バイト単位)。Adaptive のときは
+    /// 現在採用中のチェックポイント threshold (バイト単位)。Adaptive のときは
     /// controller の最新値を返す。Adaptive controller が warmup 中 (サンプル不足) のときは
     /// initial threshold をそのまま返す。
     /// </summary>
@@ -399,14 +399,14 @@ internal sealed class TransactionManager : ITransactionManager
     }
 
     /// <summary>
-    /// PW-14: swap the active adjacency store reference. Called by the backend
+    /// swap the active adjacency store reference. Called by the backend
     /// after a compact rebuild — only safe while <see cref="ActiveCount"/> is 0
     /// since transactions snapshot the reference at <see cref="Begin"/>.
     /// </summary>
     internal void SwapAdjacencyStore(IAdjacencyBlockStore? next) => _adjStore = next;
 
     /// <summary>
-    /// OP-1: <see cref="GraphDatabase.CreateSnapshot"/> の前段で呼ばれ、ベストエフォートで
+    /// <see cref="GraphDatabase.CreateSnapshot"/> の前段で呼ばれ、ベストエフォートで
     /// シャープチェックポイントを 1 回起動する。アクティブトランザクションが居る場合は
     /// (シャープチェックポイントの不変条件を破らないよう) スキップする。スキップしても
     /// snapshot 自体は WAL から redo / undo して target を整合させるため correctness には

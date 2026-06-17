@@ -3,13 +3,13 @@ using System.Buffers.Binary;
 namespace Quiver.Storage.Wal;
 
 /// <summary>
-/// FT-15: <see cref="WalRecordType.PageImage"/> と
+/// <see cref="WalRecordType.PageImage"/> と
 /// <see cref="WalRecordType.CompensationLogRecord"/> が共有するページペイロードの
 /// エンコード / デコード。両者は「どのファイルのどのページの 8KB バイト列か」という
 /// 同一フォーマットを使う (前者は after-image, 後者は before-image)。
 ///
-/// FT-29: ページ末尾の連続ゼロを trim する v2 フォーマットを追加。
-/// FT-29b: trim 後の payload を「literal + byte-run」chunk へ符号化する v3 を追加。
+/// ページ末尾の連続ゼロを trim する v2 フォーマットを追加。
+/// trim 後の payload を「literal + byte-run」chunk へ符号化する v3 を追加。
 /// NodeStore record (31B のうち FF×12 と 00×8 で計 20B が同一バイト run) や
 /// PageHeader 直後のページタイプ特有のゼロ run を縮める。
 ///
@@ -37,14 +37,14 @@ internal static class WalPageImageCodec
     public const int FullPageBytes = 8192;
 
     /// <summary>
-    /// FT-29: trim で消してはいけない最低保持バイト数。PageHeader (32B) は CRC や magic を持つので
+    /// trim で消してはいけない最低保持バイト数。PageHeader (32B) は CRC や magic を持つので
     /// 完全ゼロ判定でも 0 にしない (= 32B 残す)。これにより「未初期化フラグの page」を recovery で
     /// 区別したい場合や、将来 PageHeader.Validate の早期失敗で原因切り分けに使う場合に役立つ。
     /// </summary>
     public const int MinKeptBytes = 32;
 
     /// <summary>
-    /// FT-29b: RLE chunk 化で「run」と認識する最小連続バイト数。
+    /// RLE chunk 化で「run」と認識する最小連続バイト数。
     /// 損益分岐分析: literal chunk を split して run を挟むコスト = 2 chunk header (4B) + run chunk (3B) -
     /// run bytes。break-even は 7 バイトなので、確実に得をする 8 を採用する。
     /// NodeStore record パターンの FF×12 / 00×8 は両方 trigger される (12B run で 5B 節約、8B run で 1B 節約)。
@@ -182,7 +182,7 @@ internal static class WalPageImageCodec
     }
 
     /// <summary>
-    /// v2 (trim 単独) を書く。FT-29 で導入した形式。v3 (RLE) が問題ある場合の fallback として残す。
+    /// v2 (trim 単独) を書く。v3 (RLE) が問題ある場合の fallback として残す旧形式。
     /// </summary>
     public static byte[] EncodeV2(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
     {

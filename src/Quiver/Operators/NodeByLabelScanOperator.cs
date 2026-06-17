@@ -7,7 +7,7 @@ namespace Quiver.Query.Physical;
 /// 単一ラベルに属する <see cref="NodeId"/> を列挙するスキャンオペレータ。
 /// </summary>
 /// <remarks>
-/// VEC-11: 内部で <see cref="IGraphAccessMethods.ScanNodes"/> 経由のアクセスパスに委譲する。
+/// 内部で <see cref="IGraphAccessMethods.ScanNodes"/> 経由のアクセスパスに委譲する。
 /// バイナリ backend は <c>LabelNodeIndex</c> sidecar を持つため O(|L|) lookup になり、
 /// <c>InlineGraphAccessMethods</c> (backend 不在の単体テスト等) は従来の O(N) スキャン
 /// + ラベルフィルタにフォールバックする (legacy fallback)。

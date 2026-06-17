@@ -3,7 +3,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// GC-4: Gremlin の <c>.union(t1, t2, …)</c> / Cypher の <c>UNION ALL</c> 相当。
+/// Gremlin の <c>.union(t1, t2, …)</c> / Cypher の <c>UNION ALL</c> 相当。
 /// 各入力行に対し、新しくバインドされた <see cref="CorrelatedInputOperator"/> を用いて
 /// すべての分岐を再オープンし、各分岐の行を順番に放出する。
 /// すべての分岐は単一列 NodeId のタプルを返す必要があり、出力スキーマも単一 NodeId 列となる。

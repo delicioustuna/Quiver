@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 namespace Quiver.Hosting;
 
 /// <summary>
-/// OP-2: <see cref="IServiceCollection"/> に Quiver の <see cref="GraphDatabase"/> シングルトンを
+/// <see cref="IServiceCollection"/> に Quiver の <see cref="GraphDatabase"/> シングルトンを
 /// 登録するヘルパ。<c>Microsoft.Extensions.Configuration</c> 経由で appsettings.json / 環境変数から
 /// 設定を読み取り、ASP.NET Core / .NET Generic Host の DI コンテナと統合する。
 /// </summary>

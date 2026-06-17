@@ -19,7 +19,7 @@ internal interface IWriteAheadLog : IDisposable
     void FlushTo(long lsn);
 
     /// <summary>
-    /// FT-29: PageImage を WAL レベルの共有 coalesce バッファへ投入する。
+    /// PageImage を WAL レベルの共有 coalesce バッファへ投入する。
     /// 実際の WAL 追記は次の Commit / CheckpointBegin / CheckpointEnd / Abort 出力時にまとめて
     /// 行われる。同一 (fileKind, pageId) は latest-wins で de-dup される。
     /// 既定実装は <c>Append(WalRecordType.PageImage, ...)</c> へフォールバックして coalesce 無効化と等価。
@@ -30,34 +30,34 @@ internal interface IWriteAheadLog : IDisposable
     }
 
     /// <summary>
-    /// FT-29: <paramref name="tx"/> が coalesce バッファに残しているエントリをすべて除去する。
+    /// <paramref name="tx"/> が coalesce バッファに残しているエントリをすべて除去する。
     /// abort 経路から呼ばれ、ロールバックされた tx の PageImage が後続の drain で
     /// WAL へ漏れるのを防ぐ。既定実装は no-op。
     /// </summary>
     void EvictCoalescedPageImagesFor(TransactionId tx) { }
 
     /// <summary>
-    /// 旧 1 段チェックポイントレコード (FT-21 以前)。新規パスは
+    /// 旧 1 段チェックポイントレコード。新規パスは
     /// <see cref="WriteCheckpointBegin"/> / <see cref="WriteCheckpointEnd"/> を使う。
     /// 既存 DB との互換のため残す。
     /// </summary>
     long WriteCheckpoint(long oldestActiveLsn, long lastFlushedDataLsn);
 
     /// <summary>
-    /// FT-21: チェックポイント開始 sentinel。dirty page flush の前に書いて fsync する。
+    /// チェックポイント開始 sentinel。dirty page flush の前に書いて fsync する。
     /// 戻り値はこのレコードの LSN で、ペアとなる <see cref="WriteCheckpointEnd"/> に渡す。
     /// </summary>
     long WriteCheckpointBegin(long oldestActiveLsn, int dirtyPageCount);
 
     /// <summary>
-    /// FT-21: チェックポイント完了 sentinel。全 page + index の fsync が完了してから書く。
+    /// チェックポイント完了 sentinel。全 page + index の fsync が完了してから書く。
     /// <paramref name="beginLsn"/> は対応する <see cref="WriteCheckpointBegin"/> の戻り値。
     /// recovery はこの End レコードを持つチェックポイントだけを「完了済み」と認識する。
     /// </summary>
     long WriteCheckpointEnd(long beginLsn);
 
     /// <summary>
-    /// OP-5: 指定 fileKind のページファイルを <paramref name="newPageCount"/> へ物理 truncate
+    /// 指定 fileKind のページファイルを <paramref name="newPageCount"/> へ物理 truncate
     /// したことを WAL に記録する。書き込み直後に <see cref="FlushTo"/> で durable 化することで、
     /// 「WAL の FileTruncate より物理 truncate が先行した状態」を crash でも recovery 側が
     /// 再現できる (= 物理操作の冪等再生)。呼び出し側は本メソッドが返ってから

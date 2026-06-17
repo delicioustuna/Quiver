@@ -14,7 +14,7 @@ internal interface ITokenStore<TToken> where TToken : struct
     IEnumerable<TToken> All();
 
     /// <summary>
-    /// OP-4: トークン ID を保持したまま名前を <paramref name="oldName"/> から
+    /// トークン ID を保持したまま名前を <paramref name="oldName"/> から
     /// <paramref name="newName"/> へ変更する。<paramref name="oldName"/> が未登録なら
     /// 何もせず <c>false</c> を返す (冪等)。<paramref name="newName"/> が別の ID に
     /// 既に割り当てられているときは <see cref="InvalidOperationException"/>。
@@ -30,7 +30,7 @@ internal interface ITokenStore<TToken> where TToken : struct
 // -----------------------------------------------------------------------
 
 /// <summary>
-/// ARCH-4: トークンの永続化方式を抽象化する。<see cref="FileTokenPersistence"/> は従来の
+/// トークンの永続化方式を抽象化する。<see cref="FileTokenPersistence"/> は従来の
 /// <c>*.tok</c> サイドカーファイル、<see cref="PagedTokenPersistence"/> は単一ファイルコンテナの
 /// テナント (<see cref="IPagedFile"/>) に格納する。
 /// </summary>
@@ -57,7 +57,7 @@ internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposabl
     }
 
     /// <summary>
-    /// ARCH-4: in-memory 辞書を永続化層 (ディスク) から読み直す。トークンページがコンテナの
+    /// in-memory 辞書を永続化層 (ディスク) から読み直す。トークンページがコンテナの
     /// WAL ロギング対象になったため、abort (CLR undo) でディスク側はトランザクション開始前へ
     /// 戻る。その際 in-memory 辞書も戻さないと「メモリにはあるがディスクには無い」トークンが生じ、
     /// 後続 commit が再永続化をスキップして reopen 時にトークンが消える。abort 後に本メソッドを
@@ -84,7 +84,7 @@ internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposabl
 
     protected TokenStoreBase(string filePath) : this(new FileTokenPersistence(filePath)) { }
 
-    /// <summary>ARCH-4: 単一ファイルコンテナのテナント上にトークンを格納する。</summary>
+    /// <summary>単一ファイルコンテナのテナント上にトークンを格納する。</summary>
     protected TokenStoreBase(IPagedFile file) : this(new PagedTokenPersistence(file)) { }
 
     public TToken GetOrCreate(ReadOnlySpan<char> name)
@@ -114,7 +114,7 @@ internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposabl
     public IEnumerable<TToken> All() => _byId.Keys.Select(MakeToken);
 
     /// <summary>
-    /// OP-4: 名前 → ID マップの差し替えとファイルの全書き換えで rename を実装する。
+    /// 名前 → ID マップの差し替えとファイルの全書き換えで rename を実装する。
     /// 旧名が無ければ no-op (冪等)。新名が別 ID に占有されていれば例外。トークンファイルは
     /// 通常 1KB 未満で、tx 境界外の schema rename 用途のため atomic な writefile + replace
     /// で十分整合する (open 中の他プロセスからの並行読みは FileShare.Read で許容)。
@@ -200,7 +200,7 @@ internal sealed class FileTokenPersistence : ITokenPersistence
 }
 
 /// <summary>
-/// ARCH-4: 単一ファイルコンテナのテナント (<see cref="IPagedFile"/>) 裏付け。トークン辞書は小さい
+/// 単一ファイルコンテナのテナント (<see cref="IPagedFile"/>) 裏付け。トークン辞書は小さい
 /// (通常 1 ページ) ので、変更ごとに全フレームを直列化してページ連鎖へ書き戻す (rewrite-all)。
 /// レイアウト: 論理 page1 = ヘッダ <c>[frameCount:4][blobLen:8]</c>、論理 page2.. = 直列化ブロブ。
 /// 物理ページなので WAL / recovery / checkpoint がそのまま効く。

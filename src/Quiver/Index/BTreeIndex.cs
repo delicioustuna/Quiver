@@ -202,11 +202,11 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 
     public void Dispose() => _file.Dispose();
 
-    /// <summary>FT-18: 本索引のバッファプールダーティページを fsync する。</summary>
+    /// <summary>本索引のバッファプールダーティページを fsync する。</summary>
     public void Flush() => _file.Flush();
 
     /// <summary>
-    /// FT-22: leaf 連結リストを左端から末尾まで歩いて全 (生キー, 値) ペアを列挙する。
+    /// leaf 連結リストを左端から末尾まで歩いて全 (生キー, 値) ペアを列挙する。
     /// orphan GC は型を意識せずに走査するため、生キーは byte[] のまま渡す。
     /// </summary>
     public IEnumerable<KeyValuePair<byte[], long>> EnumerateRawEntries()
@@ -230,7 +230,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     }
 
     /// <summary>
-    /// FT-22: 生キー版の <see cref="Delete"/>。orphan repair が
+    /// 生キー版の <see cref="Delete"/>。orphan repair が
     /// <see cref="EnumerateRawEntries"/> から拾った生キーをそのまま削除に使うため、
     /// コーデックの Encode を経由しない。内部は通常の <see cref="Delete"/> と同じく
     /// <c>DeleteDown</c> → エントリカウント減 → root collapse → ヘッダフラッシュ。
@@ -255,7 +255,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     }
 
     /// <summary>
-    /// FTS-7: 生キーの **idempotent set** (recovery Pass 2b redo / Pass 3 undo 用)。
+    /// 生キーの **idempotent set** (recovery Pass 2b redo / Pass 3 undo 用)。
     /// 存在すれば値を上書き、無ければ挿入する (state-setting なので二重適用が no-op)。WAL は emit しない
     /// pure apply (recovery 中は WalPageContext.Current が null で page-WAL も出ない)。
     /// </summary>
@@ -1025,7 +1025,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     }
 
     /// <summary>
-    /// FTS-2: abort の before-image undo 後にヘッダから root/entryCount/height を読み直す。
+    /// abort の before-image undo 後にヘッダから root/entryCount/height を読み直す。
     /// ただし索引が <b>aborted tx 内で新規作成</b>されたケースでは、rollback で backing テナントが
     /// tx 開始前へ巻き戻り、ヘッダは stale before-image (root が範囲外の値) になり得る。その場合は
     /// in-memory 状態を維持する (zombie 索引だが seek は空を返し、次回 reopen でカタログから消える)。
@@ -1196,7 +1196,7 @@ internal ref struct BTreeRangeEnumerator
 }
 
 /// <summary>
-/// FTS-8: a forward-only, seekable cursor over a raw byte key range, used by WAND
+/// a forward-only, seekable cursor over a raw byte key range, used by WAND
 /// document-at-a-time scoring. It walks the leaf-link chain like
 /// <see cref="BTreeRangeEnumerator"/> but is a heap object (so cursors can live in an
 /// array) and supports <see cref="SeekTo"/>, which descends from the root in

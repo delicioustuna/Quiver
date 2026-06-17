@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 namespace Quiver.Storage.Wal;
 
 /// <summary>
-/// FTS-7: <see cref="WalRecordType.FtLeafMutation"/> のペイロード codec。
+/// <see cref="WalRecordType.FtLeafMutation"/> のペイロード codec。
 /// postings/norms B+Tree leaf への 1 件の <b>state-setting</b> 論理ミューテーションを表す。
 ///
 /// ペイロード形式:

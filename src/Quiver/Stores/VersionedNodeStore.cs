@@ -5,7 +5,7 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// ARCH-5c Phase 2: <see cref="VersionedRecordHeap"/> + <see cref="ItemPointerMap"/> 上に実装した
+/// <see cref="VersionedRecordHeap"/> + <see cref="ItemPointerMap"/> 上に実装した
 /// ノードストア。旧 <c>NodeStore</c> の置き換えで、論理 ID (Sequence) を map 経由で物理位置へ
 /// 解決する。固定サイズ record 配列をやめ可変長 slotted record にすることで、Phase 3 の
 /// property inline 化の土台になる。
@@ -23,7 +23,7 @@ namespace Quiver.Storage.Records;
 /// commit-stamp 高水位は従来どおり <see cref="IEntityVersionStore"/> sidecar で管理する
 /// (SSN の依存を変えないため)。xmin/xmax の record 再内包と sidecar 廃止は版チェーンが要る
 /// Phase 3 へ後ろ倒し。Sequence は vacuum 回収後に再利用する (ItemPointerMap の free list)。
-/// slot 再利用に伴う stale 参照は ARCH-3/5b の世代カウンタ照合 + MVCC visibility で弾く
+/// slot 再利用に伴う stale 参照は世代カウンタ照合 + MVCC visibility で弾く
 /// (旧 NodeStore と同セマンティクス)。</para>
 /// </summary>
 internal sealed class VersionedNodeStore : INodeStore
@@ -291,7 +291,7 @@ internal sealed class VersionedNodeStore : INodeStore
     internal void UpdateFirstRelIdRaw(NodeId nodeId, RelationshipId newFirstRelId)
         => UpdateFirstRelId(nodeId, newFirstRelId);
 
-    /// <summary>OP-3 vacuum: 可視性フィルタ無しの head version raw 読み取り。範囲外 / 未登録は default。</summary>
+    /// <summary>vacuum: 可視性フィルタ無しの head version raw 読み取り。範囲外 / 未登録は default。</summary>
     internal RawNodeRecord ReadRaw(long id)
     {
         if (id < 0 || id >= _map.Hwm) return default;
@@ -315,20 +315,20 @@ internal sealed class VersionedNodeStore : INodeStore
     /// <summary>採番済み Sequence 数 (= 最大 seq + 1)。</summary>
     internal long Hwm => _map.Hwm;
 
-    /// <summary>OP-3 / テスト用。free list は持たない (monotonic seq)。</summary>
+    /// <summary>テスト用。free list は持たない (monotonic seq)。</summary>
     internal long FreeHead => -1;
 
     /// <summary>
-    /// OP-5: heap モデルは物理 truncate での縮小をしない (slot が散在するため)。現ページ数を返し、
+    /// heap モデルは物理 truncate での縮小をしない (slot が散在するため)。現ページ数を返し、
     /// vacuum の truncate を no-op にする。
     /// </summary>
     internal long ComputeRequiredPageCount() => _file.PageCount;
 
-    /// <summary>OP-5: 内部 heap PagedFile。</summary>
+    /// <summary>内部 heap PagedFile。</summary>
     internal IPagedFile UnderlyingFile => _file;
 
     /// <summary>
-    /// OP-3 vacuum: horizon 未満で xmax がコミット済みの dead ノードを heap から物理回収する
+    /// vacuum: horizon 未満で xmax がコミット済みの dead ノードを heap から物理回収する
     /// (全 version slot を tombstone + map エントリ null 化)。inUseCount は <see cref="Free"/> で
     /// 既に減算済みなので触らない。
     /// </summary>
@@ -380,7 +380,7 @@ internal sealed class VersionedNodeStore : INodeStore
         _labelIndex?.Invalidate();
     }
 
-    /// <summary>FT-15 / recovery 用: map メタを読み直し inUse を再計算する。</summary>
+    /// <summary>recovery 用: map メタを読み直し inUse を再計算する。</summary>
     internal void ReloadMeta()
     {
         _map.ReloadMeta();

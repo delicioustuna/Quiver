@@ -14,7 +14,7 @@ namespace Quiver.Query.Physical;
 /// Parallel.ForEach — useful for batch workloads such as vector embedding
 /// generation where many independent source nodes are processed at once.
 ///
-/// PW-13: per-hop expansion is delegated to <see cref="OneHopExpansion"/>
+/// per-hop expansion is delegated to <see cref="OneHopExpansion"/>
 /// driven by a private <see cref="IGraphKernel{TState}"/> implementation,
 /// so the cursor / visited-set logic is shared with
 /// <see cref="VariableLengthExpandOperator"/>, <see cref="ShortestPathOperator"/>
@@ -120,7 +120,7 @@ internal sealed class BfsOperator : IPhysicalOperator
     }
 
     /// <summary>
-    /// PW-13: BFS kernel that pushes unseen neighbours into the shared
+    /// BFS kernel that pushes unseen neighbours into the shared
     /// <see cref="FrontierKernelState"/>. Stops descending past
     /// <c>maxDepth</c>; the operator emits the actual rows.
     /// </summary>
@@ -150,7 +150,7 @@ internal sealed class BfsOperator : IPhysicalOperator
 }
 
 /// <summary>
-/// PW-13: Shared BFS state for the family of frontier-driven operators
+/// Shared BFS state for the family of frontier-driven operators
 /// (<see cref="BfsOperator"/>, <see cref="VariableLengthExpandOperator"/>,
 /// <see cref="ParallelBfsOperator"/>). Held by-value in the operator and
 /// passed by <c>ref</c> to each kernel call so that Queue / HashSet

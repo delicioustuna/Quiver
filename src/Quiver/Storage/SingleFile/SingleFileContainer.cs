@@ -5,7 +5,7 @@ using Quiver.Storage.Wal;
 namespace Quiver.Storage;
 
 /// <summary>
-/// ARCH-4: 単一物理ファイル <c>*.quiver</c> 上に複数の「テナント」(= 各ストアの論理ページ空間) を
+/// 単一物理ファイル <c>*.quiver</c> 上に複数の「テナント」(= 各ストアの論理ページ空間) を
 /// 同居させるコンテナ。物理層は既存 <see cref="PagedFile"/> をそのまま 1 個だけ再利用し
 /// (Clock buffer pool / MMF / WAL logging / ARIES recovery / truncate)、その上に
 /// <b>カタログ (テナント記述子)</b> と各テナントの <b>論理→物理 page table</b> を載せる。
@@ -53,7 +53,7 @@ internal sealed class SingleFileContainer : IDisposable
     internal PagedFile Physical => _physical;
 
     /// <summary>
-    /// ARCH-4 増分7: 永続化されている committed TxId 高水位。クリーン終了で WAL を削除しても、
+    /// 永続化されている committed TxId 高水位。クリーン終了で WAL を削除しても、
     /// reopen 時に「これ未満の TxId は committed」と presume して MVCC visibility を維持し、
     /// 次 TxId 採番をここから継続するために factory が参照する。0 = 未設定 (WAL から復元)。
     /// </summary>
@@ -63,7 +63,7 @@ internal sealed class SingleFileContainer : IDisposable
     }
 
     /// <summary>
-    /// ARCH-4 増分7: クリーン終了時に backend が呼び、終了時点の次採番 TxId をカタログ root へ
+    /// クリーン終了時に backend が呼び、終了時点の次採番 TxId をカタログ root へ
     /// 書き込む。実際の durable 化は呼び出し側の <c>FlushAll</c> に委ねる (本メソッドは buffer pool 更新)。
     /// </summary>
     public void SetCommittedHighWaterTxId(long value)
@@ -111,7 +111,7 @@ internal sealed class SingleFileContainer : IDisposable
     /// 既存なら同一インスタンスを返し、未存在なら新規記述子を作って永続化する。
     /// </summary>
     /// <summary>
-    /// ARCH-4 増分6: テナント <paramref name="tenantId"/> がカタログに既存か (= 過去に一度
+    /// テナント <paramref name="tenantId"/> がカタログに既存か (= 過去に一度
     /// open / 永続化されたか) を、新規作成せずに判定する。adjacency のように「bulk load 済みなら
     /// 開く / 無ければスキップ」を判断する factory 経路で使う。
     /// </summary>

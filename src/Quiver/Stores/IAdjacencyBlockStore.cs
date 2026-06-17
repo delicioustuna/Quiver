@@ -29,13 +29,13 @@ internal interface IAdjacencyBlockStore
     AdjacencyCursor OpenCursor(NodeId nodeId, Direction direction, RelationshipTypeId? typeFilter);
 
     /// <summary>
-    /// PW-14: ベース隣接ビューの世代カウンタ (単調増加)。
+    /// ベース隣接ビューの世代カウンタ (単調増加)。
     /// compact 時にインクリメントされる。永続化されたベースを持たないストアは 0 を返す。
     /// </summary>
     long Epoch => 0;
 
     /// <summary>
-    /// PW-14: ベース構築時点のリレーション ID 高水位。
+    /// ベース構築時点のリレーション ID 高水位。
     /// id &lt; <see cref="BaseRelHwm"/> のリレーションシップは不変ベースビューに含まれ、
     /// id &gt;= はバルクロード後の delta レコードでリレーションシップリンクリストに置かれる。
     /// 0 はベースが存在しないことを示す。
@@ -43,13 +43,13 @@ internal interface IAdjacencyBlockStore
     long BaseRelHwm => 0;
 
     /// <summary>
-    /// PW-14: <paramref name="relId"/> がベースビューに属しつつビュー構築後に削除済みの場合に true を返す。
+    /// <paramref name="relId"/> がベースビューに属しつつビュー構築後に削除済みの場合に true を返す。
     /// expand カーソルはこのエントリをスキップするため、ベースを再構築せずに削除が反映される。
     /// </summary>
     bool IsTombstoned(RelationshipId relId) => false;
 
     /// <summary>
-    /// PW-14: ベースのリレーションシップを削除済みとしてマークする。
+    /// ベースのリレーションシップを削除済みとしてマークする。
     /// <c>relId.Value &gt;= <see cref="BaseRelHwm"/></c> のときは no-op となる — delta の削除は
     /// <c>RelationshipStore.Delete</c> が既に行うリンクリストのアンリンクのみで足りる。
     /// </summary>
@@ -75,7 +75,7 @@ internal abstract class AdjacencyCursor : IDisposable
     public abstract RelationshipTypeId Type { get; }
 
     /// <summary>
-    /// BA-6: payload lane を持つ <see cref="AdjacencyBlockStoreV2"/> 上でカーソルが開かれているときの、
+    /// payload lane を持つ <see cref="AdjacencyBlockStoreV2"/> 上でカーソルが開かれているときの、
     /// 現在エントリの生 64 ビット payload。V1 カーソルや payload lane 無しで構築された V2 カーソルでは 0 を返す。
     /// ストアの <see cref="PayloadKind"/> が <see cref="PayloadKind.Double"/> の場合は、
     /// <see cref="BitConverter.Int64BitsToDouble"/> で <c>double</c> として再解釈する。
@@ -98,7 +98,7 @@ internal abstract class AdjacencyCursor : IDisposable
 }
 
 /// <summary>
-/// BA-6: インライン payload lane (エッジ重み等のスカラ) を持つ隣接ストアのオプション拡張コントラクト。
+/// インライン payload lane (エッジ重み等のスカラ) を持つ隣接ストアのオプション拡張コントラクト。
 /// オペレータは <c>tx.AdjacencyBlocks as IAdjacencyPayloadView</c> で能力検査し、
 /// プロパティチェーンを経由せず <see cref="Quiver.Operators.ExpandOutputMode.NeighborAndWeight"/> 射影を選べる。
 /// </summary>

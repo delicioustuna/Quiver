@@ -8,8 +8,8 @@ using Quiver.Query.Physical;
 namespace Quiver.Query.Optimizer;
 
 /// <summary>
-/// ARCH-7: 論理プランに rule + cost ベースの書き換えを施す optimizer。terminal で lower 直後に
-/// 1 度実行する。旧 <c>PendingKnnBuilder</c> に埋まっていた KNN 押し下げ判断 (VEC-9/10/12) を
+/// 論理プランに rule + cost ベースの書き換えを施す optimizer。terminal で lower 直後に
+/// 1 度実行する。旧 <c>PendingKnnBuilder</c> に埋まっていた KNN 押し下げ判断を
 /// ここへ集約した (表層 DSL からは KNN 特別扱いが消える)。
 /// </summary>
 /// <remarks>
@@ -18,7 +18,7 @@ namespace Quiver.Query.Optimizer;
 ///   <item><b>KnnLimitPushdown</b>: <c>Limit(n, &lt;filters&gt;(Knn(null,K)))</c> → K を <c>min(K,n)</c> に縮め Limit を除去。</item>
 ///   <item><b>KnnPushdown</b>: <c>&lt;filters&gt;(Knn(null))</c> (filter 1 つ以上) を、構造ヒント + GraphStats から
 ///   graph-first (<c>Knn(Candidate=&lt;filters&gt;(Scan))</c>) か vector-first (filter を post-filter に据置) に確定。</item>
-///   <item><b>FullTextPushdown</b> (FTS-4): <c>&lt;filters&gt;(FullTextScan(null))</c> を KnnPushdown と同型で
+/// <item><b>FullTextPushdown</b>: <c>&lt;filters&gt;(FullTextScan(null))</c> を KnnPushdown と同型で
 ///   graph-first (<c>FullTextScan(Candidate=&lt;filters&gt;(Scan))</c>) か text-first に確定。閾値は単一定数
 ///   <see cref="TextFirstLabelFraction"/> (dim 概念が無いため)。<c>Limit</c> による K 縮小も対称に行う。</item>
 ///   <item><b>LabelScanRewrite</b>: <c>Filter(LabelPredicate@col0, Scan(Node,null))</c> → <c>Scan(Node,label)</c>
@@ -28,13 +28,13 @@ namespace Quiver.Query.Optimizer;
 internal static class LogicalOptimizer
 {
     /// <summary>
-    /// VEC-10: 構造ヒントが graph-first を示唆していても、label cardinality / TotalNodes が
+    /// 構造ヒントが graph-first を示唆していても、label cardinality / TotalNodes が
     /// この値以上なら vector-first にフォールバックする (sidecar 不在 backend で使う legacy 単一閾値)。
     /// </summary>
     internal const double VectorFirstLabelFraction = 0.30;
 
     /// <summary>
-    /// VEC-12: <see cref="GraphStats.HasFastLabelIndex"/> = true 経路で参照する dim → fraction 上限の
+    /// <see cref="GraphStats.HasFastLabelIndex"/> = true 経路で参照する dim → fraction 上限の
     /// 昇順 piecewise table。出典は <c>KnnPushdownThresholdSweepBenchmarks</c> の dim×sel 実測
     /// ([docs/benchmarks/2026-05-20_VEC-12_after.md])。各 dim の crossover に安全マージン 0.05 を引いた値。
     /// </summary>
@@ -47,7 +47,7 @@ internal static class LogicalOptimizer
     };
 
     /// <summary>
-    /// VEC-12: <paramref name="dim"/> に対応する閾値を線形検索で引く。<paramref name="dim"/> &lt;= 0
+    /// <paramref name="dim"/> に対応する閾値を線形検索で引く。<paramref name="dim"/> &lt;= 0
     /// (spec 未解決) のときは最終バケット (最も寛容) を返し「不明なら vector-first フォールバックを
     /// 起きにくくする」保守側に倒す。
     /// </summary>
@@ -60,10 +60,10 @@ internal static class LogicalOptimizer
     }
 
     /// <summary>
-    /// FTS-4: 構造ヒントが graph-first を示唆していても、label cardinality / TotalNodes が
+    /// 構造ヒントが graph-first を示唆していても、label cardinality / TotalNodes が
     /// この値以上なら全文検索を text-first に据え置く保守閾値。BM25 graph-first は df のため
     /// postings を全走査するので、候補集合が十分小さい (低選択率ラベル) ときだけ得をする。KNN と違い
-    /// dim 概念が無いため単一定数 (legacy KnnPushdown と同値)。FTS-6 でベンチ実測して調整余地あり。
+    /// dim 概念が無いため単一定数 (legacy KnnPushdown と同値)。ベンチ実測で調整する余地がある。
     /// </summary>
     internal const double TextFirstLabelFraction = 0.30;
 

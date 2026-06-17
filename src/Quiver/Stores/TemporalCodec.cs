@@ -3,8 +3,8 @@ using System;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// FT-35 (増分2): 日時系 CLR 型と物理 Int64 (long) の正準・順序保存コーデック。
-/// 格納・<c>Load</c>・クエリ述語構築 (GC-7 <c>ExpressionPredicate</c> / <c>TypedGraphTraversal.Has</c>)
+/// 日時系 CLR 型と物理 Int64 (long) の正準・順序保存コーデック。
+/// 格納・<c>Load</c>・クエリ述語構築 (<c>ExpressionPredicate</c> / <c>TypedGraphTraversal.Has</c>)
 /// がすべて本クラスを共有し、範囲比較の一貫性を保証する (plan の「単一コーデック」原則)。
 ///
 /// <para><b>TimeZone 契約 (重要)</b>: DB はファイルとして別マシンに可搬であるべきなので、

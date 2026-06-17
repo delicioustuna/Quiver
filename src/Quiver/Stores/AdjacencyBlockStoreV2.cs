@@ -6,7 +6,7 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// BA-6: インライン payload lane (エッジ重み) を持つ
+/// インライン payload lane (エッジ重み) を持つ
 /// 読み取り最適化済みの隣接ビュー。重み付きトラバーサル / SSSP / top-k 近傍などの
 /// hot path スカラ重みでプロパティチェーンへのジョインを避けられる。
 ///
@@ -17,7 +17,7 @@ namespace Quiver.Storage.Records;
 ///   1 ページあたり最大エントリ数 = (8160 − 16) / 22 = 370。
 ///
 /// V1 (AdjacencyBlockStore) と排他 — バルクロード時の <see cref="BulkLoader.WithPayloadLane"/> で
-/// V2 をオプトインする。ARCH-4 増分6 以降、V1/V2 とも graph.quiver 内の同一テナント
+/// V2 をオプトインする。V1/V2 とも graph.quiver 内の同一テナント
 /// (<see cref="AdjacencyContainer.DataTenant"/>) に格納され、種別は DataTenant の記述子で判別する。
 /// </summary>
 internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPayloadView, IDisposable

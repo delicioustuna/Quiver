@@ -264,7 +264,7 @@ internal sealed class PagedFile : IPagedFile
     }
 
     /// <summary>
-    /// FT-18: WAL 参照のみ配線する (fileKind は付けない)。物理 PageImage / before-image
+    /// WAL 参照のみ配線する (fileKind は付けない)。物理 PageImage / before-image
     /// は出さないが、buffer-pool eviction やフラッシュ前に WAL を write-ahead でフラッシュする
     /// ので、ページが OS-MMF に到達する前に対応する論理ログ (IndexMutation 等) が durable に
     /// なっていることを保証できる。B+Tree インデックスファイル用 — 物理ロギングのコスト
@@ -317,7 +317,7 @@ internal sealed class PagedFile : IPagedFile
     }
 
     /// <summary>
-    /// OP-5: ページファイルを <paramref name="newPageCount"/> へ物理 truncate する。
+    /// ページファイルを <paramref name="newPageCount"/> へ物理 truncate する。
     /// 現在のページ数より大きい値を渡すと no-op (拡張は行わない)。バッファプール上で
     /// PageId >= newPageCount のフレームを drop、MMF を unmap、<c>SetLength</c>、remap、
     /// メタページの PageCount を書き戻して fsync する。

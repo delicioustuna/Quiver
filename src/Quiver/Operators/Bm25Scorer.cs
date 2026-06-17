@@ -6,7 +6,7 @@ using Quiver.Text;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// FTS-8: per-term corpus statistics for WAND pruning. Holds the
+/// per-term corpus statistics for WAND pruning. Holds the
 /// snapshot <c>term → (df, maxTf)</c> table plus the corpus minimum document length, all
 /// computed once at <see cref="Quiver.GraphStats"/> collection time. df drives idf (and the
 /// per-term WAND upper bound).
@@ -41,13 +41,13 @@ internal sealed class Bm25TermStats
 }
 
 /// <summary>
-/// FTS-4: corpus-level BM25 statistics — document count N and average document
+/// corpus-level BM25 statistics — document count N and average document
 /// length — snapshotted from <see cref="Quiver.GraphStats"/>. When carried on a
 /// <c>FullTextScanOp</c> the operator uses these instead of re-scanning the norms
 /// index on every query (BM25 is robust to stat staleness, so a
 /// periodically-collected approximation is fine).
 /// <para>
-/// FTS-8: when <see cref="Terms"/> is non-null the operator can use WAND document-at-a-time
+/// when <see cref="Terms"/> is non-null the operator can use WAND document-at-a-time
 /// pruning (per-term upper bounds from the snapshot) instead of the full term-at-a-time
 /// scan; otherwise it falls back to the full scan with exact df.
 /// </para>
@@ -56,12 +56,12 @@ internal readonly record struct Bm25CorpusStats(
     long DocumentCount, double AverageDocLength, Bm25TermStats? Terms = null);
 
 /// <summary>
-/// FTS-4: shared term-at-a-time BM25 accumulator used by both the text-first
+/// shared term-at-a-time BM25 accumulator used by both the text-first
 /// (<see cref="FullTextScanOperator"/>) and graph-first
 /// (<see cref="FilteredFullTextScanOperator"/>) operators, so a candidate
 /// document scores identically on either path — that is what makes the graph-first
 /// rewrite rank-equivalent to text-first + post-filter.
-/// FTS-8 adds <see cref="RankWand"/>, an exact-top-k WAND variant used by the
+/// adds <see cref="RankWand"/>, an exact-top-k WAND variant used by the
 /// text-first path when per-term snapshot stats are available.
 /// </summary>
 internal static class Bm25Scorer
@@ -123,7 +123,7 @@ internal static class Bm25Scorer
     }
 
     /// <summary>
-    /// FTS-8: exact top-<paramref name="k"/> BM25 via WAND document-at-a-time pruning.
+    /// exact top-<paramref name="k"/> BM25 via WAND document-at-a-time pruning.
     /// Uses per-term snapshot df + upper bounds to skip postings of
     /// high-df terms once they cannot beat the current k-th best score, advancing lagging
     /// cursors with B+Tree <c>SeekTo</c>. Returns the ranked packed entityIds, or
@@ -212,8 +212,8 @@ internal static class Bm25Scorer
 
     /// <summary>
     /// Resolve N / avgdl: use the carried <paramref name="corpus"/> snapshot when it
-    /// has documents (FTS-4 GraphStats path, avoids the O(N) norms scan), otherwise
-    /// fall back to a one-shot norms summary (FTS-3 behaviour).
+    /// has documents (GraphStats path, avoids the O(N) norms scan), otherwise
+    /// fall back to a one-shot norms summary (behaviour).
     /// </summary>
     public static (long N, double Avgdl) ResolveCorpus(FullTextIndex ft, Bm25CorpusStats? corpus)
     {

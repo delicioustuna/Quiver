@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// VEC-11: ラベル → 生存中 <see cref="NodeId"/> 集合の in-memory inverted index。
+/// ラベル → 生存中 <see cref="NodeId"/> 集合の in-memory inverted index。
 /// バイナリ backend で <c>NodeByLabelScanOperator</c> の O(N) 走査を
 /// O(|L|) lookup に置き換えるための sidecar。
 /// 永続化はしない: backend open 時に <see cref="Rebuild"/> で一度だけ
@@ -101,7 +101,7 @@ internal sealed class LabelNodeIndex
         => _byLabel.TryGetValue(label.Value, out var s) ? s.Count : 0;
 
     /// <summary>
-    /// FT-22: 現在 index に載っている (label, nodeId) ペアを列挙する。
+    /// 現在 index に載っている (label, nodeId) ペアを列挙する。
     /// 未構築時は空。orphan 検出側で <see cref="INodeStore.Read"/> を引いて
     /// <c>InUse</c> を確認する用途を想定。
     /// </summary>

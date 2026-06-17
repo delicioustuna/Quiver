@@ -1,7 +1,7 @@
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// FT-31: MVCC + SSN (Wang et al. DaMoN'15) のメタデータを sidecar PagedFile に格納するための
+/// MVCC + SSN (Wang et al. DaMoN'15) のメタデータを sidecar PagedFile に格納するための
 /// 1 エントリ。EntityId.LocalId をキーとして <see cref="IEntityVersionStore"/> から read / write される。
 ///
 /// <para>フィールド (40 バイト固定、リトルエンディアン):</para>
@@ -10,13 +10,13 @@ namespace Quiver.Storage.Records;
 ///   <item><c>Xmax</c> (8B): TransactionId.Value。0 = 未削除。</item>
 ///   <item><c>Pstamp</c> (8B): η(V)、最新の reader cstamp。SSN 用、未使用時は 0。</item>
 ///   <item><c>Sstamp</c> (8B): π(V)、上書き tx の cstamp。SSN 用、未上書き時は <see cref="long.MaxValue"/>。</item>
-///   <item><c>Generation</c> (8B): ARCH-3 slot incarnation。Allocate で発番、Free→vacuum→再 Allocate で +1。
+///   <item><c>Generation</c> (8B): slot incarnation。Allocate で発番、Free→vacuum→再 Allocate で +1。
 ///     索引値の <see cref="Quiver.Core.EntityRef"/> 世代照合に使う。MVCC version とは別概念。</item>
 /// </list>
 ///
-/// <para>FT-31 時点では sidecar は配線されていない (record 内の Xmin/Xmax が引き続き正)。
-/// FT-32 で record から Xmin/Xmax を撤去し sidecar 経由 access へ移行、FT-33 で SSN protocol が
-/// Pstamp/Sstamp を使い始める。ARCH-3 で Generation レーンを追加した。</para>
+/// <para>現時点では sidecar は配線されていない (record 内の Xmin/Xmax が引き続き正)。
+/// 将来的に record から Xmin/Xmax を撤去して sidecar 経由 access へ移行し、その後 SSN protocol が
+/// Pstamp/Sstamp を使い始める。Generation レーンは slot incarnation のために追加済み。</para>
 /// </summary>
 internal readonly record struct EntityVersionMeta(long Xmin, long Xmax, long Pstamp, long Sstamp, long Generation = 0)
 {

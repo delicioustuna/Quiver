@@ -14,7 +14,7 @@ internal interface INodeStore
     long InUseCount { get; }
 
     /// <summary>
-    /// ARCH-3: slot <paramref name="localId"/> の現在の世代 (incarnation)。範囲外 / 負は -1。
+    /// slot <paramref name="localId"/> の現在の世代 (incarnation)。範囲外 / 負は -1。
     /// 索引値 (<see cref="Quiver.Core.EntityRef"/>) の世代照合に使う。
     /// </summary>
     int CurrentGeneration(long localId);
@@ -56,10 +56,10 @@ internal readonly ref struct NodeReadHandle
     public PropertyId FirstPropertyId => _firstPropId;
     public LabelId Label => _label;
 
-    /// <summary>FT-26/FT-32: record を生成したトランザクション ID (sidecar 由来)。</summary>
+    /// <summary>record を生成したトランザクション ID (sidecar 由来)。</summary>
     public long Xmin => _xmin;
 
-    /// <summary>FT-26/FT-32: record を論理削除したトランザクション ID (sidecar 由来、0 = 生存)。</summary>
+    /// <summary>record を論理削除したトランザクション ID (sidecar 由来、0 = 生存)。</summary>
     public long Xmax => _xmax;
 
     internal NodeReadHandle(NodeId id, bool inUse, RelationshipId firstRelId, PropertyId firstPropId, LabelId label, long xmin = 0, long xmax = 0)

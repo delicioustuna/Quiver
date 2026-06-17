@@ -18,7 +18,7 @@ public interface IChunkEmbedder
     /// <summary>
     /// 複数チャンクのテキストをまとめて埋め込みへ変換する。返却配列は <paramref name="texts"/> と同じ件数・
     /// 同じ順序で、各ベクトルは <see cref="Dimensions"/> 次元であること。トランザクション外で先に呼ばれ、
-    /// 失敗時は DB を変更しない (RAG-3)。
+    /// 失敗時は DB を変更しない。
     /// </summary>
     /// <param name="texts">埋め込み対象のチャンクテキスト列。</param>
     /// <param name="ct">キャンセルトークン。</param>

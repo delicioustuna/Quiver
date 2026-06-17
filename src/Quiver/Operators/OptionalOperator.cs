@@ -3,7 +3,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// GC-4: Gremlin の <c>.optional(t)</c> / Cypher の <c>OPTIONAL MATCH</c> 相当。
+/// Gremlin の <c>.optional(t)</c> / Cypher の <c>OPTIONAL MATCH</c> 相当。
 /// 各入力行に対し、新しくバインドされた <see cref="CorrelatedInputOperator"/> を用いて
 /// 分岐を評価する。分岐が少なくとも 1 行を生成すればそれを排出し、生成しなければ入力行の
 /// エンティティ列を 1 回だけそのまま放出する — これにより左側の行がドロップされず、

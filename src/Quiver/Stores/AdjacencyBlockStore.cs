@@ -17,7 +17,7 @@ namespace Quiver.Storage.Records;
 ///   エントリ: TypeId(2) | RelId(6) | NeighborId(6) = 14 バイト。
 ///   1 ページあたり最大エントリ数 = (8160 − 16) / 14 = 581。
 ///
-/// ARCH-4 増分6: 旧来の adj.db / adj_idx.dat サイドカーは廃止され、データ・索引とも
+/// 旧来の adj.db / adj_idx.dat サイドカーは廃止され、データ・索引とも
 /// graph.quiver 内のテナント (IPagedFile) に同居する。
 /// </summary>
 internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
@@ -202,7 +202,7 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
 
     /// <summary>
     /// 隣接インデックスをゼロから構築する。BulkLoader.Commit / CompactAdjacency が要求したときに呼ばれる。
-    /// ARCH-4 増分6: 既存の <paramref name="dataFile"/> / <paramref name="indexFile"/> テナントを
+    /// 既存の <paramref name="dataFile"/> / <paramref name="indexFile"/> テナントを
     /// 一旦 truncate して作り直す (graph.quiver に同居)。
     /// </summary>
     internal static void Build(

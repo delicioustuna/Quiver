@@ -6,7 +6,7 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// ARCH-6: 永続ベクトルインデックスのカタログ。各 <see cref="VectorIndexSpec"/> と、その index が
+/// 永続ベクトルインデックスのカタログ。各 <see cref="VectorIndexSpec"/> と、その index が
 /// 使う container テナント (payload / HNSW) の割当を保持し、単一ヘッダページ (固定テナント) に
 /// packed 格納する。再起動を跨いで index 定義と payload テナントの対応を復元するために用いる。
 ///
@@ -163,5 +163,5 @@ internal sealed class VectorIndexCatalog
     }
 }
 
-/// <summary>ARCH-6: ベクトルカタログの 1 エントリ — spec とテナント割当。</summary>
+/// <summary>ベクトルカタログの 1 エントリ — spec とテナント割当。</summary>
 internal readonly record struct VectorCatalogEntry(VectorIndexSpec Spec, byte PayloadTenant, byte HnswTenant);

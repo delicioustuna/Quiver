@@ -5,7 +5,7 @@ using Quiver.Core;
 namespace Quiver.Storage.Wal;
 
 /// <summary>
-/// ARCH-4 増分7: 単一ファイル WAL のシーケンシャルリーダ。先頭から順に読み、
+/// 単一ファイル WAL のシーケンシャルリーダ。先頭から順に読み、
 /// <see cref="WalRecordType.EndOfSegment"/> マーカ (旧形式の残骸) と LSN &lt; startLsn の
 /// レコードはスキップする。
 /// </summary>

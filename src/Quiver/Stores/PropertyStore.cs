@@ -214,7 +214,7 @@ internal sealed class PropertyStore : IPropertyStore
     internal void BulkFlushMeta() => FlushMeta();
 
     /// <summary>
-    /// OP-3 vacuum: ノードストアと協調してプロパティ chain を整理し、dead version を
+    /// vacuum: ノードストアと協調してプロパティ chain を整理し、dead version を
     /// 物理回収する。実行手順:
     /// <list type="number">
     ///   <item>各ノード slot を raw 走査。</item>
@@ -420,21 +420,21 @@ internal sealed class PropertyStore : IPropertyStore
         _hwm = newHwm;
     }
 
-    /// <summary>OP-3 / テスト用。現在の HWM スロット数 (free 含む)。</summary>
+    /// <summary>テスト用。現在の HWM スロット数 (free 含む)。</summary>
     internal long Hwm => _hwm;
 
-    /// <summary>OP-3 / テスト用。free list 先頭 (-1 で空)。</summary>
+    /// <summary>テスト用。free list 先頭 (-1 で空)。</summary>
     internal long FreeHead => _freeHead;
 
-    /// <summary>OP-5: 現在の <c>_hwm</c> を保持するのに必要な最小ページ数 (meta + header + record pages)。</summary>
+    /// <summary>現在の <c>_hwm</c> を保持するのに必要な最小ページ数 (meta + header + record pages)。</summary>
     internal long ComputeRequiredPageCount()
         => _hwm == 0 ? 2L : ((_hwm - 1) / RecordsPerPage) + 3L;
 
-    /// <summary>OP-5: 内部 PagedFile への参照 (vacuum/truncate 経路で使用)。</summary>
+    /// <summary>内部 PagedFile への参照 (vacuum/truncate 経路で使用)。</summary>
     internal IPagedFile UnderlyingFile => _file;
 
     /// <summary>
-    /// FT-15: ヘッダページからインメモリのメタ (hwm / freeHead) を読み直す。
+    /// ヘッダページからインメモリのメタ (hwm / freeHead) を読み直す。
     /// 内部の BlobStore のメタも同時に同期する。abort の before-image 巻き戻し後、
     /// およびクラッシュ recovery 後に呼ばれる。
     /// </summary>

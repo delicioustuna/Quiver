@@ -1,7 +1,7 @@
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// FT-32: <see cref="IEntityVersionStore"/> の in-memory 実装。
+/// <see cref="IEntityVersionStore"/> の in-memory 実装。
 ///
 /// <para>durable な WAL 連動が不要な経路 (store の単体テスト / ベンチ / tx 外の bulk 操作) で、
 /// 各 store がサイドカーを明示注入されなかった場合の既定として使う。本番経路 (binary backend) は

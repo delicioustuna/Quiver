@@ -9,11 +9,11 @@ namespace Quiver;
 /// <summary>
 /// Binary-backend expand cursor.
 ///
-/// PW-8: When the source has an adjacency block, the cursor walks the block
+/// When the source has an adjacency block, the cursor walks the block
 /// chain via <see cref="IAdjacencyBlockStore.OpenCursor"/>, which never falls
 /// back mid-iteration regardless of degree.
 ///
-/// PW-14: A block covers only the immutable <em>base</em> view captured at
+/// A block covers only the immutable <em>base</em> view captured at
 /// bulk-load / compact time. Relationships created after that point live in
 /// the relationship linked list as <em>delta</em>. After exhausting the
 /// adjacency block (skipping tombstoned base entries) the cursor continues

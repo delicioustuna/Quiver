@@ -23,7 +23,7 @@ internal sealed class SchemaApi : ISchemaApi
         _indexManager = indexManager;
     }
 
-    /// <summary>FTS-2 テスト用: 全文索引の postings/norms を直接検査するための内部アクセサ。</summary>
+    /// <summary>テスト用: 全文索引の postings/norms を直接検査するための内部アクセサ。</summary>
     internal IIndexManager IndexManager => _indexManager;
 
     public LabelId GetOrCreateLabel(string name) => _labels.GetOrCreate(name);

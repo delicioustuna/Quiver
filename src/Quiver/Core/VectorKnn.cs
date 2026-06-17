@@ -1,7 +1,7 @@
 namespace Quiver.Core;
 
 /// <summary>
-/// ARCH-6: KNN スコアリングの共有ヘルパ。<see cref="InMemoryVectorStore"/> (test fixture) と
+/// KNN スコアリングの共有ヘルパ。<see cref="InMemoryVectorStore"/> (test fixture) と
 /// <see cref="Quiver.Storage.Records.PersistentVectorStore"/> (本番) が同一の bounded top-k /
 /// 決定的順序 / metric 解釈を共有するために切り出した。
 /// </summary>
@@ -9,7 +9,7 @@ internal static class VectorMetrics
 {
     /// <summary>
     /// HIGHER = より類似になる値を返す (単一 max-heap で全 metric を扱える)。Euclidean は
-    /// -distance を返す。VEC-7: <see cref="VectorScorer"/> (SIMD) へ委譲する。
+    /// -distance を返す。実際の計算は <see cref="VectorScorer"/> (SIMD) へ委譲する。
     /// </summary>
     public static float Score(DistanceMetric metric, ReadOnlySpan<float> q, ReadOnlySpan<float> v)
         => metric switch
@@ -22,7 +22,7 @@ internal static class VectorMetrics
 }
 
 /// <summary>
-/// ARCH-6: サイズ k の bounded max-heap。Score 上位 k 件を保持する (min-heap で root = 現 top-k の最悪)。
+/// サイズ k の bounded max-heap。Score 上位 k 件を保持する (min-heap で root = 現 top-k の最悪)。
 /// Offer は O(log k)、最終抽出は O(k log k)。<see cref="ToSortedArray"/> は score 降順 / 同点は
 /// EntityId 昇順の決定的順序 (gather / scan / batch 経路が一致する)。
 /// </summary>
@@ -84,7 +84,7 @@ internal sealed class VectorKnnHeap(int capacity)
     }
 }
 
-/// <summary>ARCH-6: 事前ソート済み <see cref="VectorSearchResult"/> 配列を 1 件ずつ返すカーソル。</summary>
+/// <summary>事前ソート済み <see cref="VectorSearchResult"/> 配列を 1 件ずつ返すカーソル。</summary>
 internal sealed class SortedVectorCursor(VectorSearchResult[] sorted) : VectorSearchCursor
 {
     private int _i = -1;

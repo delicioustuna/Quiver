@@ -9,7 +9,7 @@ using Quiver.Storage.Wal;
 namespace Quiver.Maintenance;
 
 /// <summary>
-/// OP-3 vacuum 実体。<see cref="BinaryGraphStorageBackend"/> から直接組み立てる。
+/// vacuum 実体。<see cref="BinaryGraphStorageBackend"/> から直接組み立てる。
 /// </summary>
 /// <remarks>
 /// スコープ:

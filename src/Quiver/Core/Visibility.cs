@@ -1,7 +1,7 @@
 namespace Quiver.Core;
 
 /// <summary>
-/// FT-26: MVCC レコードの可視性判定。
+/// MVCC レコードの可視性判定。
 ///
 /// <para>判定ロジック (Postgres SI に準拠):</para>
 /// <code>

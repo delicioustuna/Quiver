@@ -14,7 +14,7 @@ internal sealed class PageManager : IPageManager
     }
 
     /// <summary>
-    /// ARCH-4: 外部 (SingleFileContainer) が生成済みの <see cref="IPagedFile"/> を管理下に取り込み、
+    /// 外部 (SingleFileContainer) が生成済みの <see cref="IPagedFile"/> を管理下に取り込み、
     /// <see cref="FlushAll"/> / <see cref="Files"/> / <see cref="Dispose"/> の対象にする。
     /// 単一ファイルコンテナの物理ファイルを checkpoint / snapshot 経路に乗せるのに使う。
     /// </summary>
@@ -41,7 +41,7 @@ internal sealed class PageManager : IPageManager
 
     /// <summary>
     /// Detach <paramref name="file"/> from manager-owned lifecycle. The caller
-    /// becomes responsible for disposal. PW-14 uses this when compact reopens
+    /// becomes responsible for disposal. Adjacency compaction uses this when it reopens
     /// the adjacency data file with fresh contents — the old handle is dropped
     /// before <see cref="PagedFile"/>'s exclusive lock blocks reuse of the path.
     /// </summary>

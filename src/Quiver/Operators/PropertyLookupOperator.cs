@@ -29,7 +29,7 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
     }
 
     /// <summary>
-    /// BA-8 overload. When <paramref name="expectedTypes"/> is narrower than
+    /// overload. When <paramref name="expectedTypes"/> is narrower than
     /// <see cref="PropertyTypeFlags.Scalar"/>, values of other types are skipped
     /// without materializing string / bytes payloads.
     /// </summary>
@@ -43,7 +43,7 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
     {
     }
 
-    /// <summary>ARCH-5c Phase 5d: entity kind を指定する overload (Relationship のとき rel プロパティを読む)。</summary>
+    /// <summary>entity kind を指定する overload (Relationship のとき rel プロパティを読む)。</summary>
     public PropertyLookupOperator(
         IPhysicalOperator source,
         int entityIdColumn,

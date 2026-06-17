@@ -5,12 +5,12 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// PW-14: Persistent metadata for the immutable base
+/// Persistent metadata for the immutable base
 /// adjacency view: the relationship-id watermark separating base from delta,
 /// a monotonic compact epoch, and the set of base relationships deleted since
 /// the base was last built (tombstones).
 ///
-/// ARCH-4 増分6: 旧来は <c>adj.epoch</c> サイドカーファイルに置かれていたが、
+/// 旧来は <c>adj.epoch</c> サイドカーファイルに置かれていたが、
 /// 単一ファイル化のため <see cref="SingleFileContainer"/> 内の専用テナント
 /// (<see cref="AdjacencyContainer.EpochTenant"/>) のページへ移した。物理ページは container の
 /// 単一 WAL fileKind に乗るため、tombstone 書き込みは tx 内なら WAL に記録され recovery / abort で
@@ -84,7 +84,7 @@ internal sealed class AdjacencyEpoch
     }
 
     /// <summary>
-    /// ARCH-4 増分6: abort / recovery がテナントページをディスク内容へ戻した後、in-memory の
+    /// abort / recovery がテナントページをディスク内容へ戻した後、in-memory の
     /// epoch / baseRelHwm / tombstone をテナントから読み直す。<see cref="BinaryGraphStorageBackendFactory"/>
     /// の ReloadStoreMeta から呼ばれる。
     /// </summary>

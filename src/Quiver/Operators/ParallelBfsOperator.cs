@@ -6,7 +6,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// PW-7: Parallel BFS implementation. Used internally by BfsOperator when
+/// Parallel BFS implementation. Used internally by BfsOperator when
 /// maxParallelism != 1. Not part of the public API.
 ///
 /// Collects all source nodes from upstream, then runs independent BFS from each
@@ -22,7 +22,7 @@ namespace Quiver.Query.Physical;
 ///
 /// Schema: (startNode NodeId, endNode NodeId, depth Int64).
 ///
-/// PW-13: per-task BFS reuses <see cref="OneHopExpansion"/> with a private
+/// per-task BFS reuses <see cref="OneHopExpansion"/> with a private
 /// <see cref="ParallelKernel"/>. Each task owns an isolated
 /// <see cref="FrontierKernelState"/>, so no kernel state crosses task
 /// boundaries.
@@ -141,7 +141,7 @@ internal sealed class ParallelBfsOperator : IPhysicalOperator
     public void Dispose() => _source.Dispose();
 
     /// <summary>
-    /// PW-13: stateless BFS kernel shared by every parallel worker. Frontier /
+    /// stateless BFS kernel shared by every parallel worker. Frontier /
     /// visited live in the worker-local <see cref="FrontierKernelState"/> the
     /// task factory hands in, so no kernel field is mutated concurrently.
     /// </summary>

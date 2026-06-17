@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Transactions;
 
 /// <summary>
-/// FT-33: SSN (Serial Safety Net, Wang et al. DaMoN'15) の per-transaction read/write set。
+/// SSN (Serial Safety Net, Wang et al. DaMoN'15) の per-transaction read/write set。
 /// <see cref="IsolationLevel.Serializable"/> のトランザクションでのみ生成される。
 ///
 /// <para>read-set は <see cref="ISsnReadSink"/> 実装として下層ストアの物理読み取り点

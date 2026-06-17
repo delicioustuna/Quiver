@@ -6,7 +6,7 @@ using Quiver.Transactions;
 
 namespace Quiver.Api.Internal;
 
-/// <summary>GC-8: 述語が読むエンティティの種別 (ノード / リレーションシップ)。</summary>
+/// <summary>述語が読むエンティティの種別 (ノード / リレーションシップ)。</summary>
 internal enum PredicateEntity
 {
     /// <summary>ノードプロパティ (<see cref="ITransaction.Nodes"/>)。</summary>
@@ -16,7 +16,7 @@ internal enum PredicateEntity
 }
 
 /// <summary>
-/// GC-8: <see cref="PredicateEntity"/> に応じて正しいストアからプロパティを列挙する。
+/// <see cref="PredicateEntity"/> に応じて正しいストアからプロパティを列挙する。
 /// ノード専用だった述語をエッジプロパティ (<c>OutRelationships().Has(...)</c> /
 /// <c>.Knows(e =&gt; ...)</c>) でも機能させるための共通経路。両ストアの
 /// <c>EnumerateProperties</c> は同じ <see cref="PropertyEnumerator"/> を返すため分岐 1 箇所で済む。
@@ -35,9 +35,9 @@ internal sealed class LabelPredicate : IPredicate
     private readonly LabelId _labelId;
     internal LabelPredicate(LabelId labelId, int column = 0) { _labelId = labelId; _column = column; }
 
-    /// <summary>ARCH-7: optimizer の LabelScanRewrite / KNN cost-fallback がラベルを introspect するための公開。</summary>
+    /// <summary>optimizer の LabelScanRewrite / KNN cost-fallback がラベルを introspect するための公開。</summary>
     internal LabelId Label => _labelId;
-    /// <summary>ARCH-7: 述語が参照するタプル列番号 (col 0 のみ scan へ畳める)。</summary>
+    /// <summary>述語が参照するタプル列番号 (col 0 のみ scan へ畳める)。</summary>
     internal int Column => _column;
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
@@ -174,7 +174,7 @@ internal sealed class PropertyDoublePredicate : IPredicate
 }
 
 /// <summary>
-/// FT-35: 浮動小数点プロパティ (Double に格納) に対する範囲・比較述語。格納ビットを
+/// 浮動小数点プロパティ (Double に格納) に対する範囲・比較述語。格納ビットを
 /// double に復号して double として比較する (順序保存エンコード不要 — filter は走査するため)。
 /// 整数プロパティ (Int32/Int64) も double に widen して受け入れ、混在比較を許容する。
 /// </summary>
@@ -225,10 +225,10 @@ internal sealed class PropertyDoubleRangePredicate : IPredicate
 }
 
 /// <summary>
-/// GC-1: existence test for a property key on a node. Used by
+/// Existence test for a property key on a node. Used by
 /// <c>.Has(key)</c> (mustExist=true) and <c>.HasNot(key)</c> (mustExist=false).
-/// The mustExist flag inlines negation so GC-1 does not need to wait on
-/// GC-2's NegatedPredicate.
+/// The mustExist flag inlines negation so this predicate does not need a
+/// separate NegatedPredicate wrapper.
 /// </summary>
 internal sealed class PropertyExistsPredicate : IPredicate
 {
@@ -258,7 +258,7 @@ internal sealed class PropertyExistsPredicate : IPredicate
     }
 }
 
-/// <summary>GC-1: <c>P.Without(...)</c> — string property must not match any listed value.</summary>
+/// <summary><c>P.Without(...)</c> — string property must not match any listed value.</summary>
 internal sealed class PropertyWithoutStringPredicate : IPredicate
 {
     internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
@@ -289,7 +289,7 @@ internal sealed class PropertyWithoutStringPredicate : IPredicate
 }
 
 /// <summary>
-/// GC-2: builds an <see cref="IPredicate"/> for a single <c>(column, keyId)</c>
+/// builds an <see cref="IPredicate"/> for a single <c>(column, keyId)</c>
 /// pair from a public-facing <see cref="PropertyPredicate"/>. Centralises the
 /// dispatch so <see cref="GraphTraversal{T}"/> and <see cref="SubTraversal"/>
 /// share one truth table for every <see cref="PredicateKind"/>.
@@ -342,7 +342,7 @@ internal static class PredicateDispatch
 }
 
 /// <summary>
-/// GC-2: shared base for string predicates that load a single string property
+/// shared base for string predicates that load a single string property
 /// and test it against a fixed comparand. Encapsulates the "find the property,
 /// reject non-string types, decode UTF-8" boilerplate so the prefix/suffix/
 /// contains/regex variants only differ in the final match test.
@@ -376,7 +376,7 @@ internal abstract class StringPropertyPredicateBase : IPredicate
     protected abstract bool Match(string value);
 }
 
-/// <summary>GC-2: Cypher <c>STARTS WITH</c> / Gremlin <c>TextP.startingWith</c>.</summary>
+/// <summary>Cypher <c>STARTS WITH</c> / Gremlin <c>TextP.startingWith</c>.</summary>
 internal sealed class StringPrefixPredicate : StringPropertyPredicateBase
 {
     private readonly string _prefix;
@@ -384,7 +384,7 @@ internal sealed class StringPrefixPredicate : StringPropertyPredicateBase
     protected override bool Match(string value) => value.StartsWith(_prefix, StringComparison.Ordinal);
 }
 
-/// <summary>GC-2: Cypher <c>ENDS WITH</c> / Gremlin <c>TextP.endingWith</c>.</summary>
+/// <summary>Cypher <c>ENDS WITH</c> / Gremlin <c>TextP.endingWith</c>.</summary>
 internal sealed class StringSuffixPredicate : StringPropertyPredicateBase
 {
     private readonly string _suffix;
@@ -392,7 +392,7 @@ internal sealed class StringSuffixPredicate : StringPropertyPredicateBase
     protected override bool Match(string value) => value.EndsWith(_suffix, StringComparison.Ordinal);
 }
 
-/// <summary>GC-2: Cypher <c>CONTAINS</c> / Gremlin <c>TextP.containing</c>.</summary>
+/// <summary>Cypher <c>CONTAINS</c> / Gremlin <c>TextP.containing</c>.</summary>
 internal sealed class StringContainsPredicate : StringPropertyPredicateBase
 {
     private readonly string _needle;
@@ -400,7 +400,7 @@ internal sealed class StringContainsPredicate : StringPropertyPredicateBase
     protected override bool Match(string value) => value.Contains(_needle, StringComparison.Ordinal);
 }
 
-/// <summary>GC-2: Cypher <c>=~</c> regex match. The Regex is compiled once at
+/// <summary>Cypher <c>=~</c> regex match. The Regex is compiled once at
 /// construction and reused per row.</summary>
 internal sealed class RegexPropertyPredicate : StringPropertyPredicateBase
 {
@@ -409,7 +409,7 @@ internal sealed class RegexPropertyPredicate : StringPropertyPredicateBase
     protected override bool Match(string value) => _regex.IsMatch(value);
 }
 
-/// <summary>GC-2: <c>NOT (predicate)</c> — inverts any IPredicate.</summary>
+/// <summary><c>NOT (predicate)</c> — inverts any IPredicate.</summary>
 internal sealed class NegatedPredicate : IPredicate
 {
     private readonly IPredicate _inner;
@@ -417,7 +417,7 @@ internal sealed class NegatedPredicate : IPredicate
     public bool Evaluate(in TupleRef tuple, ITransaction tx) => !_inner.Evaluate(in tuple, tx);
 }
 
-/// <summary>GC-2: short-circuiting AND across multiple IPredicates.</summary>
+/// <summary>short-circuiting AND across multiple IPredicates.</summary>
 internal sealed class AndPredicate : IPredicate
 {
     private readonly IPredicate[] _inners;
@@ -430,7 +430,7 @@ internal sealed class AndPredicate : IPredicate
     }
 }
 
-/// <summary>GC-2: short-circuiting OR across multiple IPredicates.</summary>
+/// <summary>short-circuiting OR across multiple IPredicates.</summary>
 internal sealed class OrPredicate : IPredicate
 {
     private readonly IPredicate[] _inners;

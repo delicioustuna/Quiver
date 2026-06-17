@@ -38,7 +38,7 @@ public sealed class RagStore
         EnsureSchema();
     }
 
-    /// <summary>ラップしているグラフ DB。検索 (RAG-4) や直接問い合わせで利用する。</summary>
+    /// <summary>ラップしているグラフ DB。検索や直接問い合わせで利用する。</summary>
     public GraphDatabase Database => _db;
 
     /// <summary>このストアの構成。</summary>

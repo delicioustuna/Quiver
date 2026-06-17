@@ -9,7 +9,7 @@ using Quiver.Text;
 namespace Quiver.Index;
 
 /// <summary>
-/// ARCH-4 増分5: 各 B+Tree 索引とその索引カタログ (name → tenantId / PropertyTypeFlags) を
+/// 各 B+Tree 索引とその索引カタログ (name → tenantId / PropertyTypeFlags) を
 /// <see cref="SingleFileContainer"/> 内のテナントとして格納する索引マネージャ。
 ///
 /// 旧実装は索引ごとに <c>*.idx</c> ファイルを別途 new し、<c>.fileKinds</c> (FileKindCatalog) と
@@ -75,7 +75,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     }
 
     /// <summary>
-    /// ARCH-4 増分5: テスト / ベンチ用。<paramref name="directory"/> 直下に
+    /// テスト / ベンチ用。<paramref name="directory"/> 直下に
     /// <c>graph.quiver</c> コンテナを作成 (または開いて) その上に索引テナントを載せた
     /// 単独所有の <see cref="IndexManager"/> を返す。返した IndexManager の
     /// <see cref="Dispose"/> でコンテナも閉じる。本番経路は
@@ -95,10 +95,10 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     public IBTreeIndex<byte[]> CreateBytesIndex(string name)  => GetOrCreate(name, new BytesKeyCodec(),  PropertyTypeFlags.Bytes,  IndexKeyKind.Bytes);
 
     /// <summary>
-    /// FT-18: 全索引のバッファプールダーティページを fsync する。
+    /// 全索引のバッファプールダーティページを fsync する。
     /// <see cref="Quiver.Transactions.Checkpointer"/> がチェックポイント時に呼び、
     /// 索引内容を checkpointLsn 時点で durable にして WAL truncate を安全にする。
-    /// ARCH-4: 全索引は単一 container 上のテナントなので 1 回の flush で足りる。
+    /// 全索引は単一 container 上のテナントなので 1 回の flush で足りる。
     /// </summary>
     public void FlushAll()
     {
@@ -106,7 +106,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     }
 
     /// <summary>
-    /// FTS-2: abort の before-image undo がヘッダページを戻した後、全 B+Tree 索引
+    /// abort の before-image undo がヘッダページを戻した後、全 B+Tree 索引
     /// (secondary + 全文 postings/norms) の in-memory ヘッダキャッシュを読み直す。
     /// </summary>
     public void ReloadAll()
@@ -118,7 +118,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     }
 
     /// <summary>
-    /// FT-22: 全 B+Tree 索引を走査し、<paramref name="isLive"/> が <c>false</c> を返した
+    /// 全 B+Tree 索引を走査し、<paramref name="isLive"/> が <c>false</c> を返した
     /// 値 (NodeId.Value 互換 long) を持つ orphan エントリを <paramref name="output"/> に集める。
     /// 戻り値は (走査索引本数, 走査エントリ総数)。<see cref="RemoveOrphans"/> で実削除する。
     /// </summary>
@@ -170,8 +170,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     internal const string NormsLaneTag = "norms";
 
     /// <summary>
-    /// FT-22: 与えた orphan 一覧を索引から削除する。索引名で <see cref="_indexes"/> を引き、
-    /// <see cref="IBTreeIndexFlushable.DeleteRawEntry"/> で生キー削除する。FTS-2: lane タグ付き名は
+    /// 与えた orphan 一覧を索引から削除する。索引名で <see cref="_indexes"/> を引き、
+    /// <see cref="IBTreeIndexFlushable.DeleteRawEntry"/> で生キー削除する。lane タグ付き名は
     /// 全文索引の postings/norms へ振り分ける。
     /// </summary>
     public int RemoveOrphans(IEnumerable<(string IndexName, byte[] RawKey, long Value)> orphans)
@@ -229,7 +229,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     public IEnumerable<string> ListIndexes() => _indexes.Keys;
 
     /// <summary>
-    /// OP-4 / ARCH-4: 索引名を <paramref name="oldName"/> から <paramref name="newName"/> へ変更する。
+    /// 索引名を <paramref name="oldName"/> から <paramref name="newName"/> へ変更する。
     /// 索引はテナント ID で識別されるため、リネームは <b>カタログ上の name キーの付け替えだけ</b>で済む
     /// (テナント / B+Tree 実体・ページ・WAL 意味はすべて不変)。旧実装と異なり物理 rename も
     /// PagedFile の再 open も不要なので、呼び出し側が保持する <see cref="IBTreeIndex{TKey}"/> 参照は
@@ -268,14 +268,14 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     }
 
     /// <summary>
-    /// OP-1 / ARCH-4: 旧実装では索引ごとの <c>*.idx</c> PagedFile を snapshot へ列挙していたが、
+    /// 旧実装では索引ごとの <c>*.idx</c> PagedFile を snapshot へ列挙していたが、
     /// 索引は <c>graph.quiver</c> に同居するようになったため、snapshot の page-by-page コピーは
     /// container 物理ファイル (pageManager 経由) が一括カバーする。よって本プロパティは空を返す。
     /// </summary>
     public IEnumerable<IPagedFile> IndexFiles => Array.Empty<IPagedFile>();
 
     /// <summary>
-    /// ARCH-4 (テスト用): 指定索引の backing テナントの論理ページ数を返す。
+    /// 指定索引の backing テナントの論理ページ数を返す。
     /// free-list 回収・再利用の観測に使う (未知の索引名なら 0)。
     /// </summary>
     internal long GetIndexTenantPageCount(string name)
@@ -308,7 +308,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     }
 
     /// <summary>
-    /// BA-8: returns the <see cref="PropertyTypeFlags"/> the index was first
+    /// returns the <see cref="PropertyTypeFlags"/> the index was first
     /// registered with, or <see cref="PropertyTypeFlags.None"/> if the index
     /// has not been created yet.
     /// </summary>

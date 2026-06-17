@@ -9,7 +9,7 @@ namespace Quiver.Query.Physical;
 /// emits (source, target, distance). Pairs with no path within maxDistance are skipped.
 /// BFS runs to completion inside MoveNext() for each pair.
 ///
-/// PW-13: per-hop expansion is delegated to <see cref="OneHopExpansion"/> via
+/// per-hop expansion is delegated to <see cref="OneHopExpansion"/> via
 /// <see cref="ShortestPathKernel"/>; the kernel returns <c>false</c> from
 /// <see cref="IGraphKernel{TState}.VisitNeighbor"/> when the target is reached
 /// so the outer loop short-circuits without finishing the current frontier.
@@ -102,7 +102,7 @@ internal sealed class ShortestPathOperator : IPhysicalOperator
     public void Dispose() => _source.Dispose();
 
     /// <summary>
-    /// PW-13: per-pair BFS state for <see cref="ShortestPathOperator"/>.
+    /// per-pair BFS state for <see cref="ShortestPathOperator"/>.
     /// <see cref="Target"/> is reset by the operator before each call to
     /// <see cref="ShortestPathKernel.Initialize"/>; the kernel uses it to
     /// detect early termination and writes the matching distance into

@@ -5,7 +5,7 @@ namespace Quiver;
 /// <summary>
 /// Options for <see cref="ISchemaApi.CreateFullTextIndex"/>. The tokenizer id is
 /// recorded in the catalog so query-time tokenization matches index-time
-/// tokenization. BM25 parameters are carried here for the search operator (FTS-3).
+/// tokenization. BM25 parameters are carried here for the search operator.
 /// </summary>
 public sealed record FullTextIndexOptions
 {

@@ -5,7 +5,7 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// ARCH-4 増分6: 隣接ブロックストア (V1 / V2) + その node→firstPageId 索引 + epoch メタを、
+/// 隣接ブロックストア (V1 / V2) + その node→firstPageId 索引 + epoch メタを、
 /// 旧来の <c>adj.db</c> / <c>adj_idx.dat</c> / <c>adj_v2.*</c> / <c>adj.epoch</c> サイドカー群から
 /// 単一 <c>graph.quiver</c> コンテナ内のテナントへ移すための共有レイアウトヘルパ。
 ///
@@ -27,7 +27,7 @@ internal static class AdjacencyContainer
     private static readonly Dictionary<long, long> EmptyWeights = new();
 
     /// <summary>
-    /// ARCH-4 増分6: bulk load 後に隣接ビューを container テナントへ構築し epoch を初期化する。
+    /// bulk load 後に隣接ビューを container テナントへ構築し epoch を初期化する。
     /// <paramref name="spec"/> 指定時は V2 (payload lane)、無指定なら V1。bulk load は WAL を介さない
     /// ため、構築したページを durable にするよう最後に container を flush する。
     /// </summary>

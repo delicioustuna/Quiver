@@ -5,7 +5,7 @@ using Quiver.Transactions;
 namespace Quiver;
 
 /// <summary>
-/// ARCH-2: backend 非依存の内部トランザクション契約。公開 <see cref="IGraphTransaction"/> から
+/// backend 非依存の内部トランザクション契約。公開 <see cref="IGraphTransaction"/> から
 /// 外した「物理プラン実行 / access methods / 隣接ブロック」を担い、エンジン内部と
 /// backend 衛星が実装する。API 利用者には露出しない。
 /// </summary>
@@ -24,7 +24,7 @@ internal interface IGraphTransactionInternal : IGraphTransaction
     IQueryCursor ExecuteCursor(IPhysicalOperator plan);
 
     /// <summary>
-    /// ARCH-5c Phase 5d: <paramref name="kind"/> の全件 (full scan) を対象とする集約で、
+    /// <paramref name="kind"/> の全件 (full scan) を対象とする集約で、
     /// <paramref name="key"/> が列化済みなら列スキャンで count/sum/min/max を直接集計する。
     /// 列が無い / mixed / backend 非対応なら false を返し、呼び出し側が row path フォールバックする。
     /// </summary>
@@ -32,7 +32,7 @@ internal interface IGraphTransactionInternal : IGraphTransaction
 }
 
 /// <summary>
-/// ARCH-5c Phase 5d: 列スキャン集約の結果。<see cref="Sum"/>/<see cref="Min"/>/<see cref="Max"/> は
+/// 列スキャン集約の結果。<see cref="Sum"/>/<see cref="Min"/>/<see cref="Max"/> は
 /// 数値 (double)、<see cref="LongSum"/> は整数型の厳密 long 合計 (SumLong 用)。
 /// <see cref="ValueType"/> は列の scalar 型 (SumLong 可否判定などに使う)。
 /// </summary>
@@ -45,7 +45,7 @@ internal readonly record struct ColumnAggregate(
     Storage.Records.PropertyValueType ValueType);
 
 /// <summary>
-/// ARCH-2: 旧 <see cref="IGraphTransaction"/> の物理実行 API を internal 拡張として温存し、
+/// 旧 <see cref="IGraphTransaction"/> の物理実行 API を internal 拡張として温存し、
 /// 既存の呼び出し側 (DSL / テスト) を無改変で内部経路へ橋渡しする。
 /// </summary>
 internal static class GraphTransactionInternalExtensions

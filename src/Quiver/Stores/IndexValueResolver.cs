@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// ARCH-3: B+Tree 索引が返す世代付きパック値 (<see cref="EntityRef"/>) を <c>NodeId.Value</c> へ
+/// B+Tree 索引が返す世代付きパック値 (<see cref="EntityRef"/>) を <c>NodeId.Value</c> へ
 /// 解決する共通経路。slot が free→vacuum→再 Allocate で別ノードに再利用されている (ABA) 場合、
 /// パック値の世代と「現在の slot 世代」(<see cref="INodeStore.CurrentGeneration"/>) が食い違うため
 /// stale エントリを skip する。MVCC 可視性は適用しない (索引の従来挙動を保持し、世代不一致のみ弾く)。
@@ -12,7 +12,7 @@ internal static class IndexValueResolver
 {
     /// <summary>
     /// パック値が「現在生きている Node」を指すか (Kind が Node かつ slot 世代一致)。
-    /// FTS-8 の WAND は top-k を確定する前に dead/再利用エントリを弾く必要があるため、
+    /// の WAND は top-k を確定する前に dead/再利用エントリを弾く必要があるため、
     /// スコアリングループ内でこの述語を使う (resolve 後 Take(k) と同じ可視性規約)。
     /// </summary>
     public static bool IsLiveNode(long packed, INodeStore nodes)

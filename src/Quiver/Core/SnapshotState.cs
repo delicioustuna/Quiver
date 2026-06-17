@@ -1,7 +1,7 @@
 namespace Quiver.Core;
 
 /// <summary>
-/// FT-26: トランザクション開始時にキャプチャされるスナップショット。MVCC visibility 判定の入力。
+/// トランザクション開始時にキャプチャされるスナップショット。MVCC visibility 判定の入力。
 ///
 /// <para>
 /// LSN ベースの semi-MVCC ではなく、TxId と「自身開始時にアクティブだった TxId 集合」の

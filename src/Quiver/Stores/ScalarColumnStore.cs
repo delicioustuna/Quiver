@@ -5,7 +5,7 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// ARCH-5c Phase 5 (5a): 1 つの scalar key に対する **永続 MVCC 列セグメント**。spike
+/// 1 つの scalar key に対する **永続 MVCC 列セグメント**。spike
 /// (`MvccScalarColumn`) で 3 gating kill criteria を満たした設計を production 化したもの。
 /// 指示書 `plans/arch5c-phase5-columnar-impl.md`。
 ///
@@ -205,7 +205,7 @@ internal sealed class ScalarColumnStore
         return removed;
     }
 
-    /// <summary>FT-15 / recovery 用: head ページから cache と hwm を読み直す。</summary>
+    /// <summary>recovery 用: head ページから cache と hwm を読み直す。</summary>
     public void ReloadFromPages()
     {
         LoadMeta();

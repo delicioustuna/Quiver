@@ -188,7 +188,7 @@ internal sealed class RecoveryManager : IRecoveryManager
     }
 
     /// <summary>
-    /// FTS-7: recovery 論理相。物理相 <see cref="Recover"/> が FtStructureImage で
+    /// recovery 論理相。物理相 <see cref="Recover"/> が FtStructureImage で
     /// FT 木の構造を復元し、IndexManager が 2a 後のヘッダから live `FullTextIndex` を構築した**後**に
     /// 呼ぶ。Pass 2b (committed tx の `FtLeafMutation` を LSN 順に再実行 = state-setting last-write-wins) +
     /// Pass 3 論理 undo (Commit を持たない全 tx = abort 含む loser の `FtLeafMutation` を逆操作、LIFO) を行う。
@@ -297,7 +297,7 @@ internal sealed class RecoveryManager : IRecoveryManager
     }
 
     /// <summary>
-    /// OP-5: FileTruncate レコードの redo。ペイロードは <c>[fileKind:1][newPageCount:8]</c>。
+    /// FileTruncate レコードの redo。ペイロードは <c>[fileKind:1][newPageCount:8]</c>。
     /// fileKind が fileRegistry に存在しない / IPagedFile.Truncate が NotSupported を返した
     /// 場合は黙って skip (索引等の未対応 backend でも recovery が止まらないように)。
     /// </summary>

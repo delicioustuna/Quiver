@@ -10,7 +10,7 @@ internal sealed class BulkLoadCapabilities
 {
     /// <summary>
     /// バイナリバックエンド向けのバルクロード開始関数。bool 引数で
-    /// <see cref="BulkLoader.Commit"/> が隣接ブロックビュー (ARCH-4 以降は graph.quiver 内テナント)
+    /// <see cref="BulkLoader.Commit"/> が隣接ブロックビュー (graph.quiver 内テナント)
     /// を併せて構築するかを指定する。アクティブなバックエンドがバイナリバックエンドでない場合は null。
     /// </summary>
     public Func<bool, BulkLoader>? BeginBinaryBulkLoad { get; init; }
@@ -19,7 +19,7 @@ internal sealed class BulkLoadCapabilities
     public bool SupportsBinaryBulkLoad => BeginBinaryBulkLoad is not null;
 
     /// <summary>
-    /// PW-9: 1000 万エッジ超のインポートに適したストリーミングバイナリバルクロード開始関数。
+    /// 1000 万エッジ超のインポートに適したストリーミングバイナリバルクロード開始関数。
     /// バックエンドは追記中にリレーションシップレコードを一時ファイルへストリーミングし、
     /// コミット時に dense <c>long[]</c> 配列でチェーンポインタを計算する
     /// <see cref="StreamingBulkLoader"/> を提供する必要がある。bool 引数で隣接インデックスを構築するかを指定する。

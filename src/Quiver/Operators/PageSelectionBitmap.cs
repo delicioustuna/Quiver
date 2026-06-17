@@ -3,7 +3,7 @@ using System.Numerics;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// PW-12: <see cref="BitmapFilterOperator"/> が利用するバッチ単位の最小選択ビットマップ。
+/// <see cref="BitmapFilterOperator"/> が利用するバッチ単位の最小選択ビットマップ。
 /// 呼び出し側が所有する <see cref="ulong"/> ワードの <see cref="Span{T}"/> と論理ビット数
 /// (<c>≤ words.Length * 64</c>) をラップする。
 /// 行指向ページでも小さなビットマップを介在させることで

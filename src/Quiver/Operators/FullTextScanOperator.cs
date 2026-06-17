@@ -5,7 +5,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// FTS-3 leaf operator: streams the top-<c>k</c> node ids from a full-text index
+/// leaf operator: streams the top-<c>k</c> node ids from a full-text index
 /// in descending BM25 relevance order, so it composes with the existing
 /// filter / expand chain exactly like <see cref="KnnNodeSourceOperator"/>.
 /// </summary>
@@ -17,7 +17,7 @@ namespace Quiver.Query.Physical;
 /// Visibility uses the same generation-match regime as the secondary-index seek path
 /// (<see cref="IndexValueResolver"/>): false-positive postings whose slot was reused
 /// are dropped. N/avgdl come from the carried <see cref="Bm25CorpusStats"/> when the
-/// DSL had GraphStats (FTS-4); otherwise they are approximated from the norms index.
+/// DSL had GraphStats; otherwise they are approximated from the norms index.
 /// k1=1.2 / b=0.75 (design defaults).
 /// </remarks>
 internal sealed class FullTextScanOperator : IPhysicalOperator

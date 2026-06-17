@@ -5,14 +5,14 @@ using Quiver.Storage.Wal;
 namespace Quiver.Transactions;
 
 /// <summary>
-/// FT-15 Tier1: 進行中トランザクションが abort / コミット失敗したときに、キャプチャ済みの
+/// 進行中トランザクションが abort / コミット失敗したときに、キャプチャ済みの
 /// before-image を所有データファイルへ書き戻し、ページバックされたストアメタを再ロードする。
 ///
 /// バイナリバックエンドの ACID Atomicity を本物にするための「インプロセス undo」担当。
 /// クラッシュ中の未コミットデータ漏れは <see cref="RecoveryManager"/> の undo パス
 /// (CompensationLogRecord の再適用) が塞ぐ — 本クラスはその対になる即時版。
 ///
-/// FT-23: <see cref="UndoPartial"/> を追加し、savepoint への部分ロールバックでも
+/// <see cref="UndoPartial"/> を追加し、savepoint への部分ロールバックでも
 /// 同じ復元ロジックを再利用できるようにした。partial rollback は durable にしない
 /// (commit 前のサブステップなので flush 不要) ことが abort との違い。
 /// </summary>
@@ -28,7 +28,7 @@ internal sealed class AbortUndoHandler
     /// before-image 復元後にストアのインメモリメタ (hwm 等) を再同期するコールバック。
     /// </param>
     /// <param name="applyFtUndo">
-    /// FTS-7: leaf 論理 undo の適用器。postings/norms の Suppressed leaf は page before-image を
+    /// leaf 論理 undo の適用器。postings/norms の Suppressed leaf は page before-image を
     /// 持たないため、abort 時に逆操作 (Upsert↔Delete) で FT 索引から取り消す。null = FT 非対応 backend。
     /// </param>
     public AbortUndoHandler(
@@ -42,7 +42,7 @@ internal sealed class AbortUndoHandler
     }
 
     /// <summary>
-    /// FTS-7: tx が発行した leaf 論理ミューテーションを **逆順 (LIFO)** に逆操作して
+    /// tx が発行した leaf 論理ミューテーションを **逆順 (LIFO)** に逆操作して
     /// FT 索引から取り消す。page before-image 復元 (<see cref="Undo"/>) と独立 (FT leaf は別ページ)。
     /// FT 索引のヘッダキャッシュ再同期は <see cref="Undo"/> 内の reloadStoreMeta が担う。
     /// </summary>
@@ -88,7 +88,7 @@ internal sealed class AbortUndoHandler
         => UndoCore(beforeImagePayloads, flushAfter: true, updatePending: false);
 
     /// <summary>
-    /// FT-23: <see cref="ITransaction.RollbackTo"/> の partial rollback 用。
+    /// <see cref="ITransaction.RollbackTo"/> の partial rollback 用。
     /// before-image をデータファイル + バッファプールへ復元し、ストアメタを再ロードする。
     /// abort と異なり <c>flushAfter: false</c> でフラッシュしない (commit 前のサブステップ
     /// であり durable 化は最終 commit に委ねる)。また、各復元ページの内容を

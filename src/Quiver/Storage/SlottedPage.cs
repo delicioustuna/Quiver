@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 namespace Quiver.Storage;
 
 /// <summary>
-/// ARCH-5c: 可変長レコードを格納する slotted ページのビュー。
+/// 可変長レコードを格納する slotted ページのビュー。
 /// 8KB ページ本体 (<see cref="PageHeader"/> 後の <see cref="PageWriteHandle.Data"/> Span) に
 /// 対して直接読み書きする ref struct。版チェーン付きレコード (<c>VersionedRecordHeap</c>) と
 /// 可変長 overflow ページの両方の土台になる。
@@ -144,7 +144,7 @@ internal ref struct SlottedPage
     }
 
     /// <summary>
-    /// live スロット (off != 0) が 1 つも無いか。ARCH-5c Phase 6: vacuum が空になった heap
+    /// live スロット (off != 0) が 1 つも無いか。vacuum が空になった heap
     /// ページを free-page list へ回収する判定に使う (全 version が tombstone 済みのページ)。
     /// </summary>
     public bool HasNoLiveSlots()
@@ -247,7 +247,7 @@ internal readonly ref struct ReadOnlySlottedPage
         return true;
     }
 
-    /// <summary>live スロット (off != 0) が 1 つも無いか。ARCH-5c Phase 6 の free-page 判定 (読取側)。</summary>
+    /// <summary>live スロット (off != 0) が 1 つも無いか。free-page 判定 (読取側)。</summary>
     public bool HasNoLiveSlots()
     {
         int sc = SlotCount;

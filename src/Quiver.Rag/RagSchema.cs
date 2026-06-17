@@ -58,6 +58,6 @@ public static class RagSchema
     public const string DocSourceIndex = "idx_rag_doc_source";
     /// <summary>Chunk 埋め込みベクトル索引の既定名 (<see cref="RagStoreOptions.VectorIndexName"/> で上書き可)。</summary>
     public const string ChunkVectorIndex = "rag_chunk_embedding";
-    /// <summary>Chunk.text 全文索引名 (FTS-2)。</summary>
+    /// <summary>Chunk.text 全文索引名。</summary>
     public const string ChunkTextIndex = "idx_rag_chunk_text";
 }

@@ -1,7 +1,7 @@
 namespace Quiver.Storage.Wal;
 
 /// <summary>
-/// FTS-7: ページ単位の WAL journaling モード。<see cref="PinForWrite"/> 時に
+/// ページ単位の WAL journaling モード。<see cref="PinForWrite"/> 時に
 /// 指定し、<see cref="WalPageContext"/> が per-tx に記録して before-image (pin 時) と
 /// after-image (UnpinDirty 時) の両発火点で参照する単一チョークポイントを構成する。
 ///

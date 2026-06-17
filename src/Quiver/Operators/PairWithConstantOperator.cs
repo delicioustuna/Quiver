@@ -4,7 +4,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// GC-4: helper for <c>.ShortestPathTo(target)</c>. Wraps an upstream operator and
+/// helper for <c>.ShortestPathTo(target)</c>. Wraps an upstream operator and
 /// pairs every emitted row's NodeId at <paramref name="sourceColumn"/> with a constant
 /// NodeId, producing a fresh 2-column tuple <c>(source, target)</c> that the
 /// <see cref="ShortestPathOperator"/> can consume.

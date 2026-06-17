@@ -15,7 +15,7 @@ internal interface IPagedFile : IDisposable
     long PageCount { get; }
 
     /// <summary>
-    /// OP-1: 本ファイルの実体パス。<see cref="GraphDatabase.CreateSnapshot"/> が
+    /// 本ファイルの実体パス。<see cref="GraphDatabase.CreateSnapshot"/> が
     /// page-by-page コピーの対象ファイル名を解決するために参照する。既定実装は空文字列。
     /// </summary>
     string Path => string.Empty;
@@ -33,7 +33,7 @@ internal interface IPagedFile : IDisposable
     PageWriteHandle PinForWrite(PageId pageId);
 
     /// <summary>
-    /// FTS-7: 指定の WAL journaling モードで書き込み用にページを pin する。
+    /// 指定の WAL journaling モードで書き込み用にページを pin する。
     /// WAL を持たない実装は <paramref name="mode"/> を無視してよい (既定は mode を無視して通常 pin)。
     /// </summary>
     PageWriteHandle PinForWrite(PageId pageId, WalJournalMode mode) => PinForWrite(pageId);
@@ -49,13 +49,13 @@ internal interface IPagedFile : IDisposable
 
     /// <summary>
     /// 指定の fileKind バイトで、本ファイルを WAL ページイメージロギング対象として登録する。
-    /// FT-15: <paramref name="wal"/> はダーティページをデータファイルへ書き出す前に
+    /// <paramref name="wal"/> はダーティページをデータファイルへ書き出す前に
     /// WAL を先行フラッシュ (write-ahead) するために使う。
     /// </summary>
     void EnableWalLogging(byte fileKind, IWriteAheadLog wal);
 
     /// <summary>
-    /// FT-18: WAL 参照のみ配線する (物理 PageImage / before-image は出さない)。
+    /// WAL 参照のみ配線する (物理 PageImage / before-image は出さない)。
     /// buffer-pool eviction や flush の直前に WAL を write-ahead でフラッシュすることで、
     /// ページが OS-MMF に到達する前に対応する論理ログ (例: IndexMutation) が durable に
     /// なっていることを保証する。索引ファイル用の軽量配線。
@@ -69,7 +69,7 @@ internal interface IPagedFile : IDisposable
     void WritePageForRecovery(PageId pageId, ReadOnlySpan<byte> pageBytes);
 
     /// <summary>
-    /// OP-5: ページファイルを <paramref name="newPageCount"/> へ物理 truncate する。
+    /// ページファイルを <paramref name="newPageCount"/> へ物理 truncate する。
     /// バッファプール上で newPageCount 以上のページキャッシュを drop し、MMF を unmap、
     /// <c>SetLength</c> 後に remap、メタページの PageCount を新しい値で書き戻す。
     /// 呼び出し側は事前に <see cref="WalRecordType.FileTruncate"/> を WAL に書いて durable 化し、

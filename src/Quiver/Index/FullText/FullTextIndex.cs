@@ -10,10 +10,9 @@ namespace Quiver.Index.FullText;
 /// to maintain and query it (label, property key, tokenizer id).
 /// <para>
 /// Postings and norms are ordinary B+Tree tenants, so transactional maintenance,
-/// abort/crash rollback (index ARIES, FT-17/19), buffer pool, and WAL are all
+/// abort/crash rollback (index ARIES), buffer pool, and WAL are all
 /// inherited for free. Orphan sweep needs a dedicated path because the entityId
-/// lives in the postings <i>key</i> and the norms <i>key</i>, not in the value
-/// (lands in FTS-2 increment 4).
+/// lives in the postings <i>key</i> and the norms <i>key</i>, not in the value.
 /// </para>
 /// </summary>
 internal sealed class FullTextIndex : IDisposable
@@ -47,9 +46,9 @@ internal sealed class FullTextIndex : IDisposable
     public long DocumentCount => _norms.EntryCount;
 
     /// <summary>
-    /// FTS-3 BM25 statistics: document count N and the summed document length
+    /// BM25 statistics: document count N and the summed document length
     /// (avgdl = total / N). Computed by scanning norms once — an approximation that
-    /// is fine for BM25; FTS-4 moves N/avgdl into GraphStats.
+    /// is fine for BM25. The corpus-level N/avgdl also live in GraphStats.
     /// </summary>
     public (long DocCount, long TotalTokens) NormsSummary()
     {
@@ -120,7 +119,7 @@ internal sealed class FullTextIndex : IDisposable
     }
 
     /// <summary>
-    /// FTS-8: per-term statistics for WAND pruning. Scans postings once
+    /// per-term statistics for WAND pruning. Scans postings once
     /// for <c>term → (df, maxTf)</c> and norms once for <c>(minDocLen, N, totalTokens)</c>.
     /// Called only at <see cref="Quiver.GraphStats"/> collection time (not per query), so
     /// the snapshot drives both BM25 N/avgdl and the per-term upper bounds. df is the
@@ -152,7 +151,7 @@ internal sealed class FullTextIndex : IDisposable
     }
 
     /// <summary>
-    /// FTS-8: open a forward-only seekable cursor over a term's postings (entityId
+    /// open a forward-only seekable cursor over a term's postings (entityId
     /// ascending), for WAND document-at-a-time scoring. <see cref="PostingsCursor.SeekTo"/>
     /// skips to a pivot entityId via a B+Tree root descent.
     /// </summary>
@@ -174,7 +173,7 @@ internal sealed class FullTextIndex : IDisposable
         return false;
     }
 
-    /// <summary>FTS-2: abort の before-image undo 後に postings/norms のヘッダキャッシュを読み直す。</summary>
+    /// <summary>abort の before-image undo 後に postings/norms のヘッダキャッシュを読み直す。</summary>
     public void ReloadFromHeader()
     {
         _postings.ReloadFromHeader();
@@ -189,7 +188,7 @@ internal sealed class FullTextIndex : IDisposable
     // indexTenantId で postings / norms のどちらかへ raw apply を振り分ける。redo は state-setting
     // (Upsert→UpsertRaw / Delete→DeleteRawEntry)、undo はその逆操作。いずれも冪等で二重適用安全。
 
-    /// <summary>FTS-7: Pass 2b redo — committed tx の leaf 論理ミューテーションを再適用する。</summary>
+    /// <summary>Pass 2b redo — committed tx の leaf 論理ミューテーションを再適用する。</summary>
     internal void ApplyLeafRedo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value)
     {
         var tree = TreeForTenant(tenantId);
@@ -197,7 +196,7 @@ internal sealed class FullTextIndex : IDisposable
         else tree.DeleteRawEntry(key, value);
     }
 
-    /// <summary>FTS-7: Pass 3 undo — Commit を持たない tx の leaf 論理ミューテーションを逆適用する。</summary>
+    /// <summary>Pass 3 undo — Commit を持たない tx の leaf 論理ミューテーションを逆適用する。</summary>
     internal void ApplyLeafUndo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value)
     {
         var tree = TreeForTenant(tenantId);
@@ -239,7 +238,7 @@ internal sealed class FullTextIndex : IDisposable
 }
 
 /// <summary>
-/// FTS-8: a single term's postings cursor for WAND. Wraps a raw B+Tree cursor over the
+/// a single term's postings cursor for WAND. Wraps a raw B+Tree cursor over the
 /// term's <c>(term, entityId)</c> key range, surfacing the decoded entityId and tf and a
 /// <see cref="SeekTo"/> that skips to a pivot entityId. Cursors advance
 /// in entityId order, which is exactly the composite-key order, so a multi-term merge is

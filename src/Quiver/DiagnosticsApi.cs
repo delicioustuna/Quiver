@@ -87,8 +87,8 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     public ConsistencyReport CheckConsistency() => new(true, []);
 
     /// <summary>
-    /// FT-22: 全 B+Tree 索引を走査し、解放済みノード ID を指す orphan エントリを検出する。
-    /// VEC-11 の <c>LabelNodeIndex</c> も同じ live 判定で覆い、orphan 件数を返却する。
+    /// 全 B+Tree 索引を走査し、解放済みノード ID を指す orphan エントリを検出する。
+    /// の <c>LabelNodeIndex</c> も同じ live 判定で覆い、orphan 件数を返却する。
     /// </summary>
     public IndexConsistencyReport CheckIndexConsistency()
     {
@@ -108,14 +108,14 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     }
 
     /// <summary>
-    /// FT-22: orphan を実削除する。<see cref="IndexRepairMode.DryRun"/> 時は
+    /// orphan を実削除する。<see cref="IndexRepairMode.DryRun"/> 時は
     /// 検出した orphan 一覧のみ返す。<see cref="IndexRepairMode.Apply"/> 時は
     /// <see cref="IndexManager.RemoveOrphans"/> で生キー削除し、<c>LabelNodeIndex</c> は
     /// orphan が 1 件でもあれば <c>Invalidate()</c> して次回 lookup での再構築に委ねる
     /// (in-memory index なので部分削除より rebuild の方が簡潔)。
     /// </summary>
     /// <remarks>
-    /// ARCH-3: 削除は索引に格納された raw な packed 値 (<see cref="EntityRef"/>) で行う必要がある
+    /// 削除は索引に格納された raw な packed 値 (<see cref="EntityRef"/>) で行う必要がある
     /// (<c>DeleteRawEntry</c> は値の完全一致で消すため)。公開 <see cref="OrphanIndexEntry.EntityId"/> は
     /// unpacked な NodeId.Value なので、削除には内部 raw リストを使う。
     /// </remarks>

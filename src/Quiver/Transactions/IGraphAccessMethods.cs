@@ -4,7 +4,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Transactions;
 
 /// <summary>
-/// バックエンドの access methods コントラクト (BA-3)。
+/// バックエンドの access methods コントラクト。
 /// オペレータは <see cref="ITransaction.Nodes"/> / <see cref="ITransaction.Relationships"/> /
 /// <see cref="ITransaction.AdjacencyBlocks"/> を直接叩く代わりに、scan / seek / expand を
 /// このインタフェースを経由してルーティングする。これにより各バックエンドは独自の access path
@@ -16,18 +16,18 @@ internal interface IGraphAccessMethods
     IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null);
 
     /// <summary>
-    /// VEC-12: ラベル絞り込みが O(|L|) で走るかを backend が申告する capability。
-    /// バイナリ backend は VEC-11 で導入した <c>LabelNodeIndex</c> sidecar が接続されているとき <c>true</c>。
+    /// ラベル絞り込みが O(|L|) で走るかを backend が申告する capability。
+    /// バイナリ backend は <c>LabelNodeIndex</c> sidecar が接続されているとき <c>true</c>。
     /// <c>InlineGraphAccessMethods</c> / 単体テストや ANN bypass 等 sidecar の無い backend では <c>false</c>。
     /// optimizer (PendingKnnBuilder の push-down 閾値) が graph-first / vector-first の選択に用いる。
     /// </summary>
     bool HasFastLabelIndex => false;
 
     /// <summary>
-    /// VEC-12: 登録済みベクトルインデックスの <see cref="VectorIndexSpec"/> を取得する。
+    /// 登録済みベクトルインデックスの <see cref="VectorIndexSpec"/> を取得する。
     /// PendingKnnBuilder が dim を取得して dim-aware piecewise threshold を引くのに使う。
     /// 既定実装は <c>false</c> — ベクトルメタを expose しない backend では dim awareness を無効化し、
-    /// VEC-10 と同じ単一閾値経路にフォールバックする。
+    /// 単一閾値経路にフォールバックする。
     /// </summary>
     bool TryGetVectorIndexSpec(string indexName, out VectorIndexSpec spec)
     {
@@ -72,7 +72,7 @@ internal interface IGraphAccessMethods
     long AdjacencyFallbackCount { get; }
 
     /// <summary>
-    /// VEC-5: KNN access path。バックエンドの <see cref="IVectorStore"/> に委譲し、
+    /// KNN access path。バックエンドの <see cref="IVectorStore"/> に委譲し、
     /// オペレータがベクトル検索をファーストクラスのスキャンソースとして扱えるようにする。
     /// query スパンは内部でコピーするので、呼び出し側が呼び出し以降も保持する必要はない。
     /// </summary>
@@ -86,7 +86,7 @@ internal interface IGraphAccessMethods
             "このバックエンドは KnnSearch を実装していません。access methods に IVectorStore を接続してください。");
 
     /// <summary>
-    /// VEC-8: 同一インデックスに対する複数クエリを 1 回の呼び出しで投げる access path。
+    /// 同一インデックスに対する複数クエリを 1 回の呼び出しで投げる access path。
     /// 既定実装は <see cref="KnnSearch"/> を Q 回呼ぶフォールバック。in-memory backend は
     /// 単一 snapshot で Q×N をスコアリングするオーバーライドを提供する。
     /// </summary>
@@ -103,7 +103,7 @@ internal interface IGraphAccessMethods
     }
 
     /// <summary>
-    /// VEC-6: フィルタ付き KNN。<paramref name="candidates"/> のメンバーに限定して
+    /// フィルタ付き KNN。<paramref name="candidates"/> のメンバーに限定して
     /// 上位 <paramref name="k"/> 件のベクトルを返す。既定実装は <see cref="KnnSearch"/> を
     /// オーバーサンプリング (k → 2k → 4k …) してポストフィルタを掛け、k 件揃うか
     /// オーバーサンプル上限に達するまで繰り返す。ANN 構造がサポートしていれば、
@@ -123,7 +123,7 @@ internal interface IGraphAccessMethods
         => KnnSearchFilteredOversample(this, indexName, query, k, candidates);
 
     /// <summary>
-    /// VEC-6 既定実装の共有ヘルパ。VEC-8 でクラス側 override が高速経路を選んだあと、
+    /// 既定実装の共有ヘルパ。クラス側 override が高速経路を選んだあと、
     /// fallback 経路 (非 InMemory backend) でも同じオーバーサンプル挙動を呼べるよう抽出した。
     /// </summary>
     internal static VectorSearchCursor KnnSearchFilteredOversample(
@@ -196,7 +196,7 @@ internal abstract class ExpandCursor : IDisposable
     public abstract RelationshipId Relationship { get; }
 
     /// <summary>
-    /// BA-6: 現在エッジの生 64 ビット payload (典型的にはエッジ重み)。V2 隣接ビュー裏付けの
+    /// 現在エッジの生 64 ビット payload (典型的にはエッジ重み)。V2 隣接ビュー裏付けの
     /// カーソルは inline payload lane を転送する。それ以外のカーソルは 0 を返す。
     /// 有効な payload 種別が Double のときは <see cref="BitConverter.Int64BitsToDouble"/> で
     /// <see cref="double"/> として再解釈する。

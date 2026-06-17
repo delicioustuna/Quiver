@@ -4,7 +4,7 @@ using Quiver.Storage;
 
 namespace Quiver.Storage.Records;
 
-/// <summary>OP-3 vacuum: 可視性フィルタを通さない raw ノードレコード。</summary>
+/// <summary>vacuum: 可視性フィルタを通さない raw ノードレコード。</summary>
 internal struct RawNodeRecord
 {
     public bool InUse;
@@ -263,12 +263,12 @@ internal sealed class NodeStore : INodeStore
     }
 
     /// <summary>
-    /// ARCH-3: slot <paramref name="localId"/> の現在の世代 (incarnation) を返す。索引値
+    /// slot <paramref name="localId"/> の現在の世代 (incarnation) を返す。索引値
     /// (<see cref="EntityRef"/>) の世代照合で stale 参照を弾くのに使う。範囲外 / 負は -1。
     /// MVCC 可視性は適用せず sidecar の世代だけを読む (= 索引の非可視フィルタ挙動を維持しつつ
     /// slot 再利用のみ検出する)。物理 free な slot も sidecar には旧世代が残るが、その slot を
     /// 指す古い索引エントリは「同世代」で一致し得る — 呼び出し側の後続 Read が InUse=false で
-    /// 弾くため、現挙動 (FT-30 defensive read) と等価。
+    /// 弾くため、現挙動 (defensive read) と等価。
     /// </summary>
     public int CurrentGeneration(long localId)
     {
@@ -304,7 +304,7 @@ internal sealed class NodeStore : INodeStore
     }
 
     /// <summary>
-    /// OP-3 vacuum: <paramref name="horizonTxId"/> 未満で xmax がコミット済みな dead version を
+    /// vacuum: <paramref name="horizonTxId"/> 未満で xmax がコミット済みな dead version を
     /// 物理回収し、slot を free list に投入する。inUseCount は <see cref="Free"/> 時に既に
     /// 減算されているので触らない。<paramref name="committed"/> は xmax のコミット判定に使う
     /// registry。末尾の連続 free slot が hwm を下げられる場合は hwm も縮める。
@@ -393,24 +393,24 @@ internal sealed class NodeStore : INodeStore
         _hwm = newHwm;
     }
 
-    /// <summary>OP-3 / テスト用。現在の HWM スロット数 (free 含む)。</summary>
+    /// <summary>テスト用。現在の HWM スロット数 (free 含む)。</summary>
     internal long Hwm => _hwm;
 
     /// <summary>
-    /// OP-5: 現在の <c>_hwm</c> を保持するのに必要な最小ページ数 (meta=0 + header=1 + record pages)。
+    /// 現在の <c>_hwm</c> を保持するのに必要な最小ページ数 (meta=0 + header=1 + record pages)。
     /// <c>_hwm=0</c> でも meta/header の 2 ページは残す。
     /// </summary>
     internal long ComputeRequiredPageCount()
         => _hwm == 0 ? 2L : ((_hwm - 1) / RecordsPerPage) + 3L;
 
-    /// <summary>OP-5: 内部 PagedFile への参照 (vacuum/truncate 経路で使用)。</summary>
+    /// <summary>内部 PagedFile への参照 (vacuum/truncate 経路で使用)。</summary>
     internal IPagedFile UnderlyingFile => _file;
 
-    /// <summary>OP-3 / テスト用。free list 先頭 (-1 で空)。</summary>
+    /// <summary>テスト用。free list 先頭 (-1 で空)。</summary>
     internal long FreeHead => _freeHead;
 
     /// <summary>
-    /// OP-3 vacuum: 可視性フィルタを通さない raw 読み取り。<paramref name="id"/> 範囲外は
+    /// vacuum: 可視性フィルタを通さない raw 読み取り。<paramref name="id"/> 範囲外は
     /// InUse=false の値を返す。
     /// </summary>
     internal RawNodeRecord ReadRaw(long id)
@@ -431,7 +431,7 @@ internal sealed class NodeStore : INodeStore
         };
     }
 
-    /// <summary>OP-3 vacuum: ノードの FirstPropId を書き換える。chain 整理用。</summary>
+    /// <summary>vacuum: ノードの FirstPropId を書き換える。chain 整理用。</summary>
     internal void UpdateFirstPropId(NodeId nodeId, PropertyId newFirstPropId)
     {
         var (pageId, off) = Location(nodeId.Sequence);
@@ -440,10 +440,10 @@ internal sealed class NodeStore : INodeStore
         _file.UnpinDirty(pageId, 0);
     }
 
-    /// <summary>OP-3 vacuum: ノードの FirstRelId raw 取得。<see cref="GetFirstRelId"/> の internal エイリアス。</summary>
+    /// <summary>vacuum: ノードの FirstRelId raw 取得。<see cref="GetFirstRelId"/> の internal エイリアス。</summary>
     internal RelationshipId GetFirstRelIdRaw(NodeId nodeId) => GetFirstRelId(nodeId);
 
-    /// <summary>OP-3 vacuum: ノードの FirstRelId 書き換え。<see cref="UpdateFirstRelId"/> の internal エイリアス。</summary>
+    /// <summary>vacuum: ノードの FirstRelId 書き換え。<see cref="UpdateFirstRelId"/> の internal エイリアス。</summary>
     internal void UpdateFirstRelIdRaw(NodeId nodeId, RelationshipId newFirstRelId)
         => UpdateFirstRelId(nodeId, newFirstRelId);
 

@@ -4,7 +4,7 @@ namespace Quiver.Query.Physical;
 
 /// <summary>
 /// Membership set of <see cref="NodeId"/>s used as the probe side of
-/// <see cref="RelationshipScanExpandOperator"/> (PW-17). Two backing strategies:
+/// <see cref="RelationshipScanExpandOperator"/>. Two backing strategies:
 /// a dense bitmap when ids cluster near 0, or a <see cref="HashSet{T}"/> when
 /// the id space is sparse. The chosen strategy is opaque to callers.
 /// </summary>

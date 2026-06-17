@@ -4,7 +4,7 @@ using Quiver.Transactions;
 namespace Quiver;
 
 /// <summary>
-/// ARCH-2: バックエンドの内部 SPI。公開 <see cref="IGraphStorageBackend"/> から外した
+/// バックエンドの内部 SPI。公開 <see cref="IGraphStorageBackend"/> から外した
 /// 「トランザクションマネージャ / access methods / バルクロード ケイパビリティ」を担う。
 /// これらは内部実装型 (<see cref="ITransactionManager"/> / <see cref="IGraphAccessMethods"/> /
 /// <see cref="BulkLoadCapabilities"/>) を露出するため API 利用者には見せない。
@@ -15,14 +15,14 @@ internal interface IGraphStorageBackendInternal : IGraphStorageBackend
     /// <summary>このバックエンドのトランザクションマネージャ。</summary>
     ITransactionManager Transactions { get; }
 
-    /// <summary>access methods 抽象 (BA-3)。スキャン / シーク / KNN などの物理アクセス経路を提供する。</summary>
+    /// <summary>access methods 抽象。スキャン / シーク / KNN などの物理アクセス経路を提供する。</summary>
     IGraphAccessMethods Access { get; }
 
     /// <summary>バルクロード関連の機能ケイパビリティ。</summary>
     BulkLoadCapabilities BulkLoad { get; }
 
     /// <summary>
-    /// ARCH-4 増分8: このバックエンドのデータが置かれているディレクトリ。
+    /// このバックエンドのデータが置かれているディレクトリ。
     /// migration history (<c>migrations.history</c>) など operational metadata の保存先解決に使う。
     /// binary backend は <c>*.quiver</c> の親ディレクトリ。
     /// </summary>

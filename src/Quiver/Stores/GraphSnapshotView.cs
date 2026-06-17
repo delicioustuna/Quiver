@@ -4,7 +4,7 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// PW-15: トランザクションのリレーションシップストアから
+/// トランザクションのリレーションシップストアから
 /// CSR (outgoing) と CSC (incoming) 配列をマテリアライズする <see cref="IGraphSnapshotView"/> の既定実装。
 /// 同一スナップショットを多数のトラバーサルで使い回すアルゴリズム向けに設計され、1 回の O(N+E) 構築を
 /// 多数の走査で償却する。

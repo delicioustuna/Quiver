@@ -1,7 +1,7 @@
 namespace Quiver.Core;
 
 /// <summary>
-/// FT-33: SSN (Serializable) の read-set を物理読み取り点で収集するための sink。
+/// SSN (Serializable) の read-set を物理読み取り点で収集するための sink。
 /// <c>Quiver.Transactions.SsnContext</c> が実装し、Serializable tx の間だけ
 /// <see cref="MvccContext"/> に登録される。下層ストアの <c>Read</c> / <c>Scan</c> /
 /// 隣接走査が「可視レコードを 1 件観測した」タイミングで <see cref="OnVisibleRead"/> を呼ぶ。
@@ -17,7 +17,7 @@ internal interface ISsnReadSink
 }
 
 /// <summary>
-/// FT-26: MVCC アンビエントコンテキスト。<c>Quiver.Storage.Wal.WalPageContext</c> と対で
+/// MVCC アンビエントコンテキスト。<c>Quiver.Storage.Wal.WalPageContext</c> と対で
 /// スレッドローカルにトランザクションの可視性スナップショット (TxId / ActiveAtBegin / committed registry)
 /// を持つ。下層ストア (NodeStore / RelationshipStore / PropertyStore) はこれを参照して
 /// record の xmin / xmax を埋め、可視性判定を行う。
@@ -39,7 +39,7 @@ internal static class MvccContext
 
     /// <summary>
     /// このスレッドで MVCC トランザクションコンテキストを開始する。
-    /// <paramref name="readSink"/> は FT-33 SSN の read-set 収集先 (Serializable 時のみ非 null)。
+    /// <paramref name="readSink"/> は SSN の read-set 収集先 (Serializable 時のみ非 null)。
     /// </summary>
     public static void Begin(TransactionId selfTxId, in SnapshotState snapshot, CommittedTxRegistry committed,
         ISsnReadSink? readSink = null)
@@ -49,7 +49,7 @@ internal static class MvccContext
     public static void End() => _current = null;
 
     /// <summary>
-    /// FT-33: 下層ストアが可視レコードを 1 件読み取ったときに呼ぶ。SSN read-sink が
+    /// 下層ストアが可視レコードを 1 件読み取ったときに呼ぶ。SSN read-sink が
     /// 登録されていなければ (= Serializable 以外) 何もしない (ほぼゼロコスト)。
     /// </summary>
     public static void RecordRead(EntityKind kind, long localId)

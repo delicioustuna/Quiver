@@ -27,7 +27,7 @@ internal interface IEdgeWeightProvider
 /// リレーションシップのプロパティチェーンを走査して重みを取得する既定の
 /// <see cref="IEdgeWeightProvider"/>。セットアップ不要でどのバックエンドでも動くが、
 /// エッジあたり O(P) (P = そのエッジのプロパティ数)。大規模ホットパスでは
-/// <see cref="PayloadLaneWeightProvider"/> や FT-12 join index 版に差し替えるとよい。
+/// <see cref="PayloadLaneWeightProvider"/> や join index 版に差し替えるとよい。
 /// </summary>
 internal sealed class PropertyChainWeightProvider : IEdgeWeightProvider
 {
@@ -70,7 +70,7 @@ internal sealed class PropertyChainWeightProvider : IEdgeWeightProvider
 }
 
 /// <summary>
-/// BA-6 payload lane (<see cref="ExpandCursor.WeightRaw"/>) をそのままエッジ重みとして
+/// payload lane (<see cref="ExpandCursor.WeightRaw"/>) をそのままエッジ重みとして
 /// 使う <see cref="IEdgeWeightProvider"/>。bulk load 時に
 /// <c>PayloadLaneSpec.ForDouble</c> で構築したグラフ向けの、プロパティ参照不要な経路。
 /// payload lane を持たないグラフでは全エッジ重み 0.0 になる点に注意。

@@ -9,7 +9,7 @@ namespace Quiver.Query.Physical;
 /// within [minHops, maxHops] hops. BFS with visited-set to prevent cycles.
 /// Start node is emitted when minHops == 0.
 ///
-/// PW-13: per-hop expansion is delegated to <see cref="OneHopExpansion"/> via
+/// per-hop expansion is delegated to <see cref="OneHopExpansion"/> via
 /// a private <see cref="IGraphKernel{TState}"/>; frontier / visited bookkeeping
 /// is shared with <see cref="BfsOperator"/> through <see cref="FrontierKernelState"/>.
 /// </summary>

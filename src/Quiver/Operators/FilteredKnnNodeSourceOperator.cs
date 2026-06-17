@@ -4,7 +4,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// VEC-6 leaf-ish operator: drains an upstream NodeId-producing operator into
+/// leaf-ish operator: drains an upstream NodeId-producing operator into
 /// an <see cref="EntityCandidateSet"/>, then asks
 /// <see cref="IGraphAccessMethods.KnnSearchFiltered"/> for the top-<c>k</c>
 /// vectors that fall inside that set. Acts as the graph-first arm — the

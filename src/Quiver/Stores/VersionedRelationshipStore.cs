@@ -4,7 +4,7 @@ using Quiver.Storage;
 
 namespace Quiver.Storage.Records;
 
-/// <summary>OP-3 vacuum: 可視性フィルタを通さない raw リレーションレコード (heap head 由来)。</summary>
+/// <summary>vacuum: 可視性フィルタを通さない raw リレーションレコード (heap head 由来)。</summary>
 internal struct RawRelRecord
 {
     public bool InUse;
@@ -21,7 +21,7 @@ internal struct RawRelRecord
 }
 
 /// <summary>
-/// ARCH-5c Phase 4: <see cref="VersionedRecordHeap"/> + <see cref="ItemPointerMap"/> 上に実装した
+/// <see cref="VersionedRecordHeap"/> + <see cref="ItemPointerMap"/> 上に実装した
 /// リレーションシップストア。<see cref="VersionedNodeStore"/> と同型で、固定 48B record 配列を
 /// やめ可変長 slotted record にすることで Phase 4c の property inline 化の土台になる。
 ///
@@ -46,7 +46,7 @@ internal struct RawRelRecord
 /// Phase 3a と同じ統一レコードモデル)。<see cref="IEntityVersionStore"/> sidecar は Generation +
 /// SSN (Pstamp/Sstamp) + commit 高水位のみを保持する。Sequence は vacuum 回収後に
 /// <see cref="ItemPointerMap"/> の free list で再利用し、再利用ごとに世代を bump する
-/// (ARCH-3/5b ABA 検出維持)。</para>
+/// (ABA 検出維持)。</para>
 /// </summary>
 internal sealed class VersionedRelationshipStore : IRelationshipStore
 {
@@ -321,7 +321,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         _inUseCount = inUseCount;
     }
 
-    /// <summary>FT-15 / recovery 用: map / heap メタを読み直し inUse を再計算する。</summary>
+    /// <summary>recovery 用: map / heap メタを読み直し inUse を再計算する。</summary>
     internal void ReloadMeta()
     {
         _map.ReloadMeta();
@@ -333,7 +333,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     internal long Hwm => _map.Hwm;
 
     /// <summary>
-    /// ARCH-6: seq の現世代を返す (ベクトル binding の slot 再利用検出用)。範囲外は -1。
+    /// seq の現世代を返す (ベクトル binding の slot 再利用検出用)。範囲外は -1。
     /// <see cref="VersionedNodeStore.CurrentGeneration"/> と同形。
     /// </summary>
     public int CurrentGeneration(long localId)
@@ -343,16 +343,16 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         return gen > int.MaxValue ? int.MaxValue : (int)gen;
     }
 
-    /// <summary>OP-3 / テスト用。free list は ItemPointerMap が持つ。</summary>
+    /// <summary>テスト用。free list は ItemPointerMap が持つ。</summary>
     internal long FreeHead => _map.FreeHead;
 
-    /// <summary>OP-5: heap モデルは物理 truncate での縮小をしない (slot 散在)。現ページ数を返す。</summary>
+    /// <summary>heap モデルは物理 truncate での縮小をしない (slot 散在)。現ページ数を返す。</summary>
     internal long ComputeRequiredPageCount() => _file.PageCount;
 
-    /// <summary>OP-5: 内部 heap PagedFile。</summary>
+    /// <summary>内部 heap PagedFile。</summary>
     internal IPagedFile UnderlyingFile => _file;
 
-    /// <summary>OP-3 vacuum: 可視性フィルタ無しの head version raw 読み取り。範囲外 / 未登録は default。</summary>
+    /// <summary>vacuum: 可視性フィルタ無しの head version raw 読み取り。範囲外 / 未登録は default。</summary>
     internal RawRelRecord ReadRaw(long seq)
     {
         if (seq < 0 || seq >= _map.Hwm) return default;
@@ -375,7 +375,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     }
 
     /// <summary>
-    /// OP-3 vacuum: ノードストアと協調して双方向 chain を再構築し、dead version を物理回収する。
+    /// vacuum: ノードストアと協調して双方向 chain を再構築し、dead version を物理回収する。
     /// 手順は旧 <c>RelationshipStore.VacuumDeadVersions</c> と同じ (heap 上で実施)。
     /// 呼び出し前提: アクティブトランザクション 0 件、ノード vacuum **前**。
     /// </summary>

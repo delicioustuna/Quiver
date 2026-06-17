@@ -5,7 +5,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// PW-13: BFS 系アルゴリズム (<see cref="BfsOperator"/>、
+/// BFS 系アルゴリズム (<see cref="BfsOperator"/>、
 /// <see cref="VariableLengthExpandOperator"/>、<see cref="ShortestPathOperator"/>、
 /// <see cref="ParallelBfsOperator"/>) が、近傍訪問ロジックを共有しつつ各オペレータが
 /// 独自の状態形状 (frontier キュー、visited セット、距離マップなど) を保持できるようにする
@@ -53,7 +53,7 @@ internal interface IGraphKernel<TState>
 }
 
 /// <summary>
-/// PW-13: Single-hop expansion primitive shared by
+/// Single-hop expansion primitive shared by
 /// BFS-style operators. Wraps <see cref="IGraphAccessMethods.Expand"/> so the
 /// kernel never touches the underlying cursor; that lets the same algorithm
 /// shell run over the binary backend's adjacency-block / linked-list path

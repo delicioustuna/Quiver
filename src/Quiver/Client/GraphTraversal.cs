@@ -441,7 +441,7 @@ public sealed class GraphTraversal<T>
     }
 
     /// <summary>
-    /// FTS-4 graph-first 全文検索 (<c>.FilterByKnn</c> の BM25 版)。上流の各ノードを candidate set として
+    /// graph-first 全文検索 (<c>.FilterByKnn</c> の BM25 版)。上流の各ノードを candidate set として
     /// その中だけで BM25 top-k を求める。通常は <c>g.Search(...).HasLabel(...).Has(...)</c> チェーンが
     /// LogicalOptimizer の FullTextPushdown で自動的にこの形へ倒れるため、本メソッドは明示的に
     /// graph-first を選びたいときのエスケープハッチ。df / idf は全 postings から取るので候補ドキュメントの

@@ -5,7 +5,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// PW-17: One-hop expansion that scans the relationship store sequentially and
+/// One-hop expansion that scans the relationship store sequentially and
 /// probes each record against a pre-built <see cref="FrontierSet"/> of source
 /// nodes. Wins over the per-node linked-list / adjacency-block path when the
 /// frontier is large relative to total edges, because chasing N independent

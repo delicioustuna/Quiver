@@ -7,12 +7,12 @@ using Quiver.Storage.Wal;
 namespace Quiver.Transactions;
 
 /// <summary>
-/// FT-21: チェックポイントの atomicity を保証するための Begin/End sentinel 方式。
+/// チェックポイントの atomicity を保証するための Begin/End sentinel 方式。
 ///
 /// 手順:
 ///   1. <see cref="IWriteAheadLog.WriteCheckpointBegin"/> を書き fsync する (begin sentinel)。
 ///   2. 全データファイルのダーティページをディスクへフラッシュ (fsync) する。
-///   3. 全索引ファイルのダーティページも fsync する (FT-18)。
+/// 3. 全索引ファイルのダーティページも fsync する。
 ///   4. <see cref="IWriteAheadLog.WriteCheckpointEnd"/> を書き fsync する (end sentinel)。
 ///   5. Begin より前の WAL セグメントを truncate (削除) する。
 ///
@@ -50,7 +50,7 @@ internal sealed class Checkpointer(
     private readonly IIndexManager? _indexManager = indexManager;
 
     /// <summary>
-    /// FT-21 テスト用: チェックポイントの各 phase 完了後にフックを呼ぶ。テストはここで
+    /// テスト用: チェックポイントの各 phase 完了後にフックを呼ぶ。テストはここで
     /// 例外を投げることで「phase X 完了直後に kill された」状況を模擬する。Release ビルドの
     /// 本番経路では null。
     /// </summary>
@@ -103,7 +103,7 @@ internal sealed class Checkpointer(
 }
 
 /// <summary>
-/// FT-21 テスト用: チェックポイントの phase 識別子。<see cref="Checkpointer.PhaseInjector"/>
+/// テスト用: チェックポイントの phase 識別子。<see cref="Checkpointer.PhaseInjector"/>
 /// 経由でテストが kill point を選ぶのに使う。
 /// </summary>
 internal enum CheckpointPhase

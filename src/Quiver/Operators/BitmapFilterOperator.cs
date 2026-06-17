@@ -3,7 +3,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// PW-12: Batch filter that evaluates multiple predicates against a fixed-size
+/// Batch filter that evaluates multiple predicates against a fixed-size
 /// row buffer using a <see cref="PageSelectionBitmap"/>. Predicates are evaluated
 /// in caller-supplied order; later predicates only see rows still set in the
 /// bitmap, so when the caller (or <c>QueryOptimizer</c>) orders by

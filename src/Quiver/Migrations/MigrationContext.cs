@@ -24,7 +24,7 @@ internal sealed class MigrationContext : IMigrationContext
     }
 
     /// <summary>
-    /// OP-4 (fix A): 初回の schema mutation 時に tx の OnRolledBack に逆操作再生フックを登録する。
+    /// 初回の schema mutation 時に tx の OnRolledBack に逆操作再生フックを登録する。
     /// 多重登録を避けるため idempotent。
     /// </summary>
     private void EnsureRollbackHook()

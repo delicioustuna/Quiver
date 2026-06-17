@@ -5,7 +5,7 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// ARCH-6: container テナントへベクトル payload を永続化する <see cref="IVectorStore"/>。
+/// container テナントへベクトル payload を永続化する <see cref="IVectorStore"/>。
 /// <see cref="InMemoryVectorStore"/> を置き換え、再起動を跨いで KNN を再現する。
 ///
 /// <para>各 index は <see cref="VectorIndexCatalog"/> に登録され、専用の payload テナント
@@ -266,7 +266,7 @@ internal sealed class PersistentVectorStore : IVectorStore
         }
     }
 
-    /// <summary>ARCH-6c: (kind, seq) の現世代を ushort に丸めて返す。resolver 無し / 範囲外は 0。</summary>
+    /// <summary>(kind, seq) の現世代を ushort に丸めて返す。resolver 無し / 範囲外は 0。</summary>
     private ushort ResolveGen(EntityKind kind, long seq)
     {
         if (_currentGeneration is null) return 0;
@@ -275,7 +275,7 @@ internal sealed class PersistentVectorStore : IVectorStore
     }
 
     /// <summary>
-    /// ARCH-6c: payload に焼かれた世代 <paramref name="storedGen"/> が現在の slot 世代と一致するか。
+    /// payload に焼かれた世代 <paramref name="storedGen"/> が現在の slot 世代と一致するか。
     /// 不一致なら slot が再利用され別エンティティに化けた stale binding なので KNN から除外する。
     /// resolver 無し (テスト / 旧経路) は常に live 扱い。
     /// </summary>

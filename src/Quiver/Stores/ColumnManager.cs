@@ -4,7 +4,7 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// ARCH-5c Phase 5 (5b): opt-in 列の管理。<see cref="ColumnCatalog"/> の登録を読み、各列の
+/// opt-in 列の管理。<see cref="ColumnCatalog"/> の登録を読み、各列の
 /// <see cref="ScalarColumnStore"/> (container テナント) を開く。<c>CreateColumn</c> はテナントを
 /// 割り当て、現データから列を構築 (1 パス scan) し登録を永続化する。
 ///

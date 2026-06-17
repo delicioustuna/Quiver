@@ -8,7 +8,7 @@ using Quiver.Telemetry;
 namespace Quiver.Storage.Wal;
 
 /// <summary>
-/// ARCH-4 増分7: 単一ファイル WAL。旧来の <c>wal/</c> セグメント群 (<c>wal.NNNNNNNN.log</c>) を
+/// 単一ファイル WAL。旧来の <c>wal/</c> セグメント群 (<c>wal.NNNNNNNN.log</c>) を
 /// 1 本のサイドカーファイル (例: <c>graph.quiver-wal</c>) に統合する。
 /// <list type="bullet">
 ///   <item><see cref="Truncate"/> はセグメント削除の代わりにファイルをコンパクション
@@ -17,7 +17,7 @@ namespace Quiver.Storage.Wal;
 ///   <item><see cref="MarkDeleteOnDispose"/> されたクリーン終了では Dispose 時にファイルを削除する。
 ///     全データは graph.quiver へ durable 済みなので、静止時はサイドカーが消えて本体のみが残る。</item>
 /// </list>
-/// レコードフォーマット / 案C コアレス / FT-27 group commit / FT-29 PageImage coalesce は据え置き。
+/// レコードフォーマット / 案C コアレス / group commit / PageImage coalesce は据え置き。
 /// </summary>
 internal sealed class WriteAheadLog : IWriteAheadLog
 {
@@ -57,16 +57,16 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     public long FlushedLsn => Volatile.Read(ref _flushedLsn);
     public long BytesWritten => Volatile.Read(ref _bytesWritten);
 
-    /// <summary>FT-27: バックグラウンドフラッシュループが実際に fsync を起動した回数。</summary>
+    /// <summary>バックグラウンドフラッシュループが実際に fsync を起動した回数。</summary>
     public long FlushBatchCount => Volatile.Read(ref _flushBatchCount);
 
-    /// <summary>FT-27: <see cref="FlushTo"/> 経由でフラッシュ要求された累計回数。</summary>
+    /// <summary><see cref="FlushTo"/> 経由でフラッシュ要求された累計回数。</summary>
     public long FlushRequestCount => Volatile.Read(ref _flushRequestCount);
 
-    /// <summary>FT-29: cross-tx de-dup ヒット数。</summary>
+    /// <summary>cross-tx de-dup ヒット数。</summary>
     public long CoalescedPageImageCount => Volatile.Read(ref _coalescedPageImageCount);
 
-    /// <summary>FT-29: coalesce バッファから drain された PageImage 件数の累計。</summary>
+    /// <summary>coalesce バッファから drain された PageImage 件数の累計。</summary>
     public long DrainedPageImageCount => Volatile.Read(ref _drainedPageImageCount);
 
     public WriteAheadLog(string path)
@@ -95,7 +95,7 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     }
 
     /// <summary>
-    /// ARCH-4 増分7: クリーン終了の最終 flush 後に backend が呼ぶ。全データが graph.quiver へ
+    /// クリーン終了の最終 flush 後に backend が呼ぶ。全データが graph.quiver へ
     /// durable 化された後なので、Dispose で WAL ファイルを削除して静止時を単一ファイルにする。
     /// </summary>
     public void MarkDeleteOnDispose() => _deleteOnDispose = true;
@@ -147,7 +147,7 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     }
 
     /// <summary>
-    /// FT-29: PageImage を共有 coalesce バッファへ投入する (詳細は旧実装と同一)。
+    /// PageImage を共有 coalesce バッファへ投入する (詳細は旧実装と同一)。
     /// </summary>
     public void BufferPageImage(TransactionId tx, byte fileKind, long pageId, byte[] payload)
     {
@@ -176,7 +176,7 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         }
     }
 
-    /// <summary>FT-29: <paramref name="tx"/> が coalesce バッファに残しているエントリをすべて除去する。</summary>
+    /// <summary><paramref name="tx"/> が coalesce バッファに残しているエントリをすべて除去する。</summary>
     public void EvictCoalescedPageImagesFor(TransactionId tx)
     {
         lock (_writeLock)
@@ -277,7 +277,7 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     }
 
     /// <summary>
-    /// ARCH-4 増分7: 単一ファイルをコンパクションする。<paramref name="uptoLsn"/> 以下の LSN を持つ
+    /// 単一ファイルをコンパクションする。<paramref name="uptoLsn"/> 以下の LSN を持つ
     /// 先頭レコード群を捨て、LSN &gt; uptoLsn の live tail を前詰めする。すべて捨てられる場合は
     /// ファイルを空にする。crash 安全のため tail を temp ファイルへ書いてから atomic rename する。
     /// </summary>

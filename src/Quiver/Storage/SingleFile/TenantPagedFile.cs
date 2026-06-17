@@ -5,7 +5,7 @@ using Quiver.Storage.Wal;
 namespace Quiver.Storage;
 
 /// <summary>
-/// ARCH-4: <see cref="SingleFileContainer"/> 内の 1 テナント (= 1 ストアの論理ページ空間) を
+/// <see cref="SingleFileContainer"/> 内の 1 テナント (= 1 ストアの論理ページ空間) を
 /// <see cref="IPagedFile"/> として見せる薄い変換シム。各ストア (NodeStore など) は自分が
 /// <c>page 0,1,2..</c> を所有していると思い込んだまま無改修で動く。
 ///
@@ -111,7 +111,7 @@ internal sealed class TenantPagedFile : IPagedFile
         => _physical.WritePageForRecovery(Translate(pageId), pageBytes);
 
     /// <summary>
-    /// OP-5 vacuum: テナント論理空間を <paramref name="newPageCount"/> 論理ページへ縮小し、除去
+    /// vacuum: テナント論理空間を <paramref name="newPageCount"/> 論理ページへ縮小し、除去
     /// される論理ページの物理ページをグローバル free list へ返却する (= 物理ページ再利用での回収)。
     /// 物理ファイル自体は縮まないが、解放ページは他テナントへ再割当できる。
     ///

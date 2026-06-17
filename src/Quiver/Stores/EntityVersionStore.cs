@@ -5,7 +5,7 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// FT-31: <see cref="IEntityVersionStore"/> の PagedFile 実装。
+/// <see cref="IEntityVersionStore"/> の PagedFile 実装。
 ///
 /// <para>レイアウト (page = 8192B、PageHeader = 32B、body = 8160B、entry = 32B):</para>
 /// <list type="bullet">
@@ -19,8 +19,8 @@ namespace Quiver.Storage.Records;
 /// <see cref="Quiver.Wal.WalFileKind.RelationshipVersionMeta"/> /
 /// <see cref="Quiver.Wal.WalFileKind.PropertyVersionMeta"/> でそれぞれ生成する想定。</para>
 ///
-/// <para>FT-31 時点ではこの store は backend factory から配線されていない (デッドコード相当)。
-/// FT-32 で各 store の MVCC access path に紐付ける。</para>
+/// <para>現時点ではこの store は backend factory から配線されていない (デッドコード相当)。
+/// 将来的に各 store の MVCC access path に紐付ける。</para>
 /// </summary>
 internal sealed class EntityVersionStore : IEntityVersionStore
 {

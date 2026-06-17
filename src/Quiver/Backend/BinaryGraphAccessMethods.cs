@@ -12,7 +12,7 @@ namespace Quiver;
 /// and exposes a fallback counter so diagnostics can surface how often the
 /// adjacency fast path was unavailable (i.e. the node had no adjacency block
 /// at index-build time, typically because it was created after a bulk load).
-/// PW-8: now that <see cref="IAdjacencyBlockStore.OpenCursor"/> walks the full
+/// now that <see cref="IAdjacencyBlockStore.OpenCursor"/> walks the full
 /// page chain, the cursor never abandons the fast path mid-iteration — so this
 /// counter only fires on the "no block at all" path.
 /// </summary>
@@ -32,7 +32,7 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     }
 
     /// <summary>
-    /// VEC-11: factory が NodeStore に attach した後の index を共有する。
+    /// factory が NodeStore に attach した後の index を共有する。
     /// 接続前 (open 直後 / unit テスト) は <see cref="ScanByLabelSlow"/> にフォールバックする。
     /// </summary>
     internal void AttachLabelIndex(LabelNodeIndex labelIndex) => _labelIndex = labelIndex;
@@ -40,7 +40,7 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     public long AdjacencyFallbackCount => Interlocked.Read(ref FallbackCountInternal);
 
     /// <summary>
-    /// VEC-12: <c>LabelNodeIndex</c> sidecar が接続されているときに <c>true</c>。
+    /// <c>LabelNodeIndex</c> sidecar が接続されているときに <c>true</c>。
     /// factory が <see cref="AttachLabelIndex"/> を呼ぶ前 (open 直後 / 単体テスト) は <c>false</c>。
     /// </summary>
     public bool HasFastLabelIndex => _labelIndex is not null;

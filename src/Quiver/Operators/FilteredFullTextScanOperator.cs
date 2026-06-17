@@ -5,7 +5,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// FTS-4 graph-first counterpart of <see cref="FullTextScanOperator"/>: drains an
+/// graph-first counterpart of <see cref="FullTextScanOperator"/>: drains an
 /// upstream NodeId-producing operator into a candidate set, then runs BM25 over
 /// only those candidates and emits the top-<c>k</c> in descending relevance order.
 /// The upstream is usually a label / property filter on a node scan — the candidate

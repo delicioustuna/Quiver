@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 namespace Quiver.Core;
 
 /// <summary>
-/// FT-26: MVCC visibility 判定で「ある TxId はコミット済みか?」を引くためのレジストリ。
+/// MVCC visibility 判定で「ある TxId はコミット済みか?」を引くためのレジストリ。
 ///
 /// <para>状態モデル:</para>
 /// <list type="bullet">
@@ -15,7 +15,7 @@ namespace Quiver.Core;
 /// <para>
 /// visibility horizon (= 最古アクティブ tx の TxId) を下回ったコミット済みエントリは、
 /// もう誰のスナップショットにも掛からないので prune できる (今はリストに残すが、
-/// vacuum 経路 OP-3 でメモリ削減を行う)。
+/// vacuum 経路でメモリ削減を行う)。
 /// </para>
 ///
 /// <para>
@@ -42,10 +42,10 @@ internal sealed class CommittedTxRegistry
     }
 
     /// <summary>
-    /// FT-26: 「この値以下の TxId は WAL に無くとも presumed-committed として扱う」境界。
+    /// 「この値以下の TxId は WAL に無くとも presumed-committed として扱う」境界。
     ///
     /// <para>
-    /// 根拠: FT-21 の checkpoint atomicity により、checkpoint は active tx が 0 の瞬間にしか
+    /// 根拠: checkpoint の atomicity により、checkpoint は active tx が 0 の瞬間にしか
     /// 打たれない。よって checkpoint 後の data file に残っている xmin は (a) Bootstrap,
     /// (b) 既コミット tx, (c) abort され before-image で巻き戻されたなら record そのものが
     /// 存在しない、のいずれか。WAL truncate で消えた古い commit レコードは復元できないが、
@@ -65,7 +65,7 @@ internal sealed class CommittedTxRegistry
     }
 
     /// <summary>
-    /// FT-26: recovery で観測された最大 TxId。TransactionManager の _nextTxId の起点をここから
+    /// recovery で観測された最大 TxId。TransactionManager の _nextTxId の起点をここから
     /// 進めることで、再起動後の新規 tx が過去 commit 済み id と衝突しないようにする。
     /// </summary>
     public long MaxObservedTxId => Volatile.Read(ref _maxObservedTxId);
@@ -90,7 +90,7 @@ internal sealed class CommittedTxRegistry
     /// visibility 判定の hot path で呼ばれる。
     ///
     /// <para>
-    /// FT-26: <c>txId &lt;= RecoveryHorizon</c> は registry に居なくとも presumed-committed。
+    /// <c>txId &lt;= RecoveryHorizon</c> は registry に居なくとも presumed-committed。
     /// これにより WAL truncate で commit レコードが消えた古い tx も visible に保てる。
     /// </para>
     /// </summary>
@@ -104,7 +104,7 @@ internal sealed class CommittedTxRegistry
     public int Count => _committed.Count;
 
     /// <summary>
-    /// FT-26 vacuum 連携 (OP-3) で、visibility horizon を下回ったエントリを取り除くフック。
+    /// vacuum 連携で、visibility horizon を下回ったエントリを取り除くフック。
     /// Bootstrap TxId は保護する。
     /// </summary>
     public int PruneBelow(long horizonTxId)

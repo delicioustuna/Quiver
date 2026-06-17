@@ -5,13 +5,13 @@ using Quiver.Telemetry;
 namespace Quiver.Transactions;
 
 /// <summary>
-/// FT-24: shared/exclusive ロックマネージャ + FIFO wait queue。
+/// shared/exclusive ロックマネージャ + FIFO wait queue。
 /// </summary>
 /// <remarks>
 /// データ構造: entityId → <see cref="LockEntry"/>。各エントリは exclusive owner (高々 1)、
 /// shared owner 集合、待機キューを持つ。同一 tx 内の再入: exclusive 保有中は any mode、
-/// shared 保有中の単独 reader は exclusive へ無待機昇格、他 reader 居れば wait (FT-25 で
-/// 検出予定の deadlock 経路)。待機キューは FIFO で、head の連続する shared 待機者は同時に
+/// shared 保有中の単独 reader は exclusive へ無待機昇格、他 reader 居れば wait
+/// (deadlock 検出器が拾う経路)。待機キューは FIFO で、head の連続する shared 待機者は同時に
 /// 起こす (shared バースト)。タイムアウトは <see cref="ITransaction"/> 経由で渡される。
 /// </remarks>
 internal sealed class LockManager
@@ -158,7 +158,7 @@ internal sealed class LockManager
     }
 
     /// <summary>
-    /// FT-25: wait-for edges (waiter → holder) を <paramref name="edges"/> に追記する。
+    /// wait-for edges (waiter → holder) を <paramref name="edges"/> に追記する。
     /// self-edge (例: S→X upgrade 待機で自身が shared owner) は除外する。
     /// </summary>
     internal void SnapshotWaitEdges(List<(TransactionId Waiter, TransactionId Holder)> edges)
@@ -185,7 +185,7 @@ internal sealed class LockManager
     }
 
     /// <summary>
-    /// FT-25: <paramref name="victim"/> の waiter を印付けて起こす。見つからなければ false。
+    /// <paramref name="victim"/> の waiter を印付けて起こす。見つからなければ false。
     /// 同じ tx が複数 lock entry で待っている可能性は無い (1 tx は同時に 1 つの Wait しか持たない)。
     /// </summary>
     internal bool TryAbortWaiter(TransactionId victim)

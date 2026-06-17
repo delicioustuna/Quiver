@@ -3,7 +3,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// GC-3: blocking sort. Drains the entire input on <see cref="Open"/>, captures
+/// blocking sort. Drains the entire input on <see cref="Open"/>, captures
 /// each row's slots and any UTF-8 / bytes payloads, then sorts by a single
 /// column. Subsequent <see cref="MoveNext"/> calls stream the materialized
 /// rows in sorted order.

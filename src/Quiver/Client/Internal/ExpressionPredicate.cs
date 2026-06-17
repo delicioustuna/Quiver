@@ -3,7 +3,7 @@ using System.Linq.Expressions;
 namespace Quiver.Api.Internal;
 
 /// <summary>
-/// GC-7: C# 式ツリー (<c>p =&gt; p.Age &gt; 20 &amp;&amp; p.Name.StartsWith("A")</c>) を
+/// C# 式ツリー (<c>p =&gt; p.Age &gt; 20 &amp;&amp; p.Name.StartsWith("A")</c>) を
 /// 既存の <see cref="PropertyPredicate"/> ベースのフィルタ (<see cref="GraphTraversal{T}.Has(string, PropertyPredicate)"/>)
 /// へ変換する内部トランスレータ。ノード述語 (<c>TypedGraphTraversal&lt;T&gt;.Where</c>) と
 /// エッジ述語 (生成糖衣の <c>{Rel}(e =&gt; ...)</c>) で共有する。
@@ -196,7 +196,7 @@ internal static class ExpressionPredicate
         _ => t, // Equal / NotEqual は対称
     };
 
-    /// <summary>FT-35: 日時系 CLR 型を格納と同じ正準 long へ変換する (TemporalCodec 共有)。</summary>
+    /// <summary>日時系 CLR 型を格納と同じ正準 long へ変換する (TemporalCodec 共有)。</summary>
     private static bool TryTemporalToLong(Type t, object? value, out long result)
     {
         if (t == typeof(DateTime))       { result = Quiver.Storage.Records.TemporalCodec.ToUtcTicks((DateTime)value!); return true; }

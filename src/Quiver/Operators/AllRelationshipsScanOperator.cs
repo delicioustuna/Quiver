@@ -4,7 +4,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// ARCH-5c Phase 5d: 全リレーションシップを seq 順に放出するスキャンソース
+/// 全リレーションシップを seq 順に放出するスキャンソース
 /// (<c>g.Relationships()</c> の起点)。列スキャン集約が適用できない場合の row path
 /// フォールバックや <c>.ToList()</c> のために用いる。
 /// </summary>

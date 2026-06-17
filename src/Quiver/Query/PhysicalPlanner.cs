@@ -7,7 +7,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Query.Optimizer;
 
 /// <summary>
-/// ARCH-7: 論理プラン (<see cref="LogicalOp"/>) を物理オペレータ (<see cref="IPhysicalOperator"/>) へ
+/// 論理プラン (<see cref="LogicalOp"/>) を物理オペレータ (<see cref="IPhysicalOperator"/>) へ
 /// 落とす physical planner。旧 <c>IOperatorBuilder.Build</c> 群の本体を 1 箇所の選択表に集約したもの。
 /// 実行エンジンは現行 pull 型を踏襲し、本クラスは「どの物理オペレータを選ぶか」だけを担う。
 /// </summary>
