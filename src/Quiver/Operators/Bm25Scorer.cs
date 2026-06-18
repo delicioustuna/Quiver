@@ -105,7 +105,51 @@ internal static class Bm25Scorer
         long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats = null)
     {
         if (queryTerms.Count == 0) return new List<long>();
+        return SortByScore(AccumulateScores(ft, queryTerms, n, avgdl, candidateSequences, termStats));
+    }
 
+    /// <summary>
+    /// Rank documents for a Boolean FTS query (AND/OR/NOT). Scores all positive terms
+    /// (Required + Optional) with standard BM25, then post-filters: documents must
+    /// match ALL Required clauses and must NOT match any Excluded clause. Each clause
+    /// matches a document if the document contains at least one of the clause's terms
+    /// (relevant for prefix-expanded clauses like <c>quiv*</c>).
+    /// </summary>
+    public static List<long> RankBoolean(
+        FullTextIndex ft, ParsedFtsQuery query,
+        long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats = null)
+    {
+        var allPositive = query.AllPositiveTerms();
+        if (allPositive.Count == 0) return new List<long>();
+
+        var scores = AccumulateScores(ft, allPositive, n, avgdl, candidateSequences, termStats);
+
+        foreach (var clause in query.Clauses)
+        {
+            if (clause.Mode != FtsClauseMode.Required || clause.Terms.Count == 0) continue;
+            var clauseEids = CollectPostingEids(ft, clause.Terms);
+            var toRemove = new List<long>();
+            foreach (var eid in scores.Keys)
+                if (!clauseEids.Contains(eid))
+                    toRemove.Add(eid);
+            foreach (var eid in toRemove) scores.Remove(eid);
+        }
+
+        foreach (var clause in query.Clauses)
+        {
+            if (clause.Mode != FtsClauseMode.Excluded || clause.Terms.Count == 0) continue;
+            var excludeEids = CollectPostingEids(ft, clause.Terms);
+            foreach (var eid in excludeEids)
+                scores.Remove(eid);
+        }
+
+        return SortByScore(scores);
+    }
+
+    private static Dictionary<long, double> AccumulateScores(
+        FullTextIndex ft, IReadOnlySet<string> queryTerms,
+        long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats)
+    {
         var scores = new Dictionary<long, double>();
         var docLenCache = new Dictionary<long, int>();
         foreach (var term in queryTerms)
@@ -128,8 +172,16 @@ internal static class Bm25Scorer
                 scores[eid] = scores.TryGetValue(eid, out var prev) ? prev + contrib : contrib;
             }
         }
+        return scores;
+    }
 
-        return SortByScore(scores);
+    private static HashSet<long> CollectPostingEids(FullTextIndex ft, IReadOnlySet<string> terms)
+    {
+        var eids = new HashSet<long>();
+        foreach (var term in terms)
+            foreach (var (eid, _) in ft.GetPostings(term))
+                eids.Add(eid);
+        return eids;
     }
 
     /// <summary>

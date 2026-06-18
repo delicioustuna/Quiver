@@ -60,7 +60,12 @@ internal sealed class FullTextScanOperator : IPhysicalOperator
         var termStats = _corpus?.Terms;
         List<long>? ranked;
 
-        if (FtsQueryParser.ContainsWildcard(_queryText))
+        if (FtsQueryParser.ContainsBooleanOps(_queryText))
+        {
+            var parsed = FtsQueryParser.ParseBooleanAndExpand(_queryText, tokenizer, ft);
+            ranked = Bm25Scorer.RankBoolean(ft, parsed, n, avgdl, candidateSequences: null, termStats);
+        }
+        else if (FtsQueryParser.ContainsWildcard(_queryText))
         {
             var terms = FtsQueryParser.ParseAndExpand(_queryText, tokenizer, ft);
             ranked = termStats is not null
