@@ -89,7 +89,7 @@ internal sealed class FilteredFullTextScanOperator : IPhysicalOperator
             var parsed = FtsQueryParser.ParseBooleanAndExpand(_queryText, tokenizer, ft);
             ranked = Bm25Scorer.RankBoolean(ft, parsed, n, avgdl, candidates, _corpus?.Terms);
         }
-        else if (FtsQueryParser.ContainsWildcard(_queryText))
+        else if (FtsQueryParser.ContainsWildcard(_queryText) || FtsQueryParser.ContainsFuzzy(_queryText))
         {
             var terms = FtsQueryParser.ParseAndExpand(_queryText, tokenizer, ft);
             ranked = Bm25Scorer.RankTerms(ft, terms, n, avgdl, candidates, _corpus?.Terms);

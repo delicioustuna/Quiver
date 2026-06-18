@@ -4,19 +4,19 @@ using Quiver.Text;
 namespace Quiver.Index.FullText;
 
 /// <summary>
-/// Pre-processes a full-text query string, splitting it into exact terms and
-/// prefix terms (trailing <c>*</c>), with support for Boolean operators
-/// (<c>AND</c>, <c>OR</c>, <c>NOT</c>). Prefix terms are normalized through the
-/// index's tokenizer so that <c>"Quiv*"</c> matches indexed terms starting
-/// with <c>"quiv"</c>. The expanded term set is then fed to the BM25 scorer.
+/// Pre-processes a full-text query string, splitting it into exact terms,
+/// prefix terms (trailing <c>*</c>), and fuzzy terms (trailing <c>~N</c>),
+/// with support for Boolean operators (<c>AND</c>, <c>OR</c>, <c>NOT</c>).
+/// Prefix terms are expanded against the index's B+Tree; fuzzy terms are
+/// expanded via Levenshtein edit distance. The expanded term set is then
+/// fed to the BM25 scorer.
 /// </summary>
 internal static class FtsQueryParser
 {
     /// <summary>
     /// Parse <paramref name="queryText"/> and resolve all terms (expanding prefixes
-    /// against the <paramref name="index"/>). Returns the complete set of terms to
-    /// score. Each prefix expands to zero or more indexed terms; exact segments are
-    /// tokenized normally.
+    /// and fuzzy terms against the <paramref name="index"/>). Returns the complete
+    /// set of terms to score.
     /// </summary>
     public static HashSet<string> ParseAndExpand(
         string queryText, ITokenizer tokenizer, FullTextIndex index)
@@ -34,11 +34,28 @@ internal static class FtsQueryParser
             int start = i;
             while (i < span.Length && char.IsLetterOrDigit(span[i]))
                 i++;
+            int wordEnd = i;
 
             bool isPrefix = i < span.Length && span[i] == '*';
             if (isPrefix) i++;
 
-            var word = span[start..(isPrefix ? i - 1 : i)];
+            int fuzzyDist = 0;
+            if (!isPrefix && i < span.Length && span[i] == '~')
+            {
+                i++;
+                if (i < span.Length && char.IsAsciiDigit(span[i]))
+                {
+                    fuzzyDist = span[i] - '0';
+                    i++;
+                }
+                else
+                {
+                    fuzzyDist = 1;
+                }
+                if (fuzzyDist > 2) fuzzyDist = 2;
+            }
+
+            var word = span[start..wordEnd];
             if (word.IsEmpty) continue;
 
             if (isPrefix)
@@ -49,6 +66,17 @@ internal static class FtsQueryParser
                 {
                     byte[] prefixUtf8 = Encoding.UTF8.GetBytes(sink.Token);
                     foreach (var expanded in index.ExpandPrefix(prefixUtf8))
+                        result.Add(expanded);
+                }
+            }
+            else if (fuzzyDist > 0)
+            {
+                var sink = new SingleTokenSink();
+                tokenizer.Tokenize(word, sink);
+                if (sink.Token is not null)
+                {
+                    byte[] termUtf8 = Encoding.UTF8.GetBytes(sink.Token);
+                    foreach (var expanded in index.ExpandFuzzy(termUtf8, fuzzyDist))
                         result.Add(expanded);
                 }
             }
@@ -67,6 +95,18 @@ internal static class FtsQueryParser
     /// </summary>
     public static bool ContainsWildcard(string queryText)
         => queryText.Contains('*');
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="queryText"/> contains at least one
+    /// fuzzy modifier (<c>~</c> preceded by a letter or digit).
+    /// </summary>
+    public static bool ContainsFuzzy(string queryText)
+    {
+        for (int i = 1; i < queryText.Length; i++)
+            if (queryText[i] == '~' && char.IsLetterOrDigit(queryText[i - 1]))
+                return true;
+        return false;
+    }
 
     /// <summary>
     /// Returns <c>true</c> when <paramref name="queryText"/> contains at least one
@@ -95,8 +135,8 @@ internal static class FtsQueryParser
 
     /// <summary>
     /// Parse a Boolean query (<c>AND</c>/<c>OR</c>/<c>NOT</c>) and expand all terms
-    /// (including prefix wildcards) against the index. Returns a structured result
-    /// with clause-level Required/Optional/Excluded grouping.
+    /// (including prefix wildcards and fuzzy terms) against the index. Returns a
+    /// structured result with clause-level Required/Optional/Excluded grouping.
     /// </summary>
     public static ParsedFtsQuery ParseBooleanAndExpand(
         string queryText, ITokenizer tokenizer, FullTextIndex index)
@@ -111,7 +151,7 @@ internal static class FtsQueryParser
 
         for (int t = 0; t < rawTokens.Count; t++)
         {
-            var (text, isPrefix, kind) = rawTokens[t];
+            var (text, isPrefix, fuzzyDist, kind) = rawTokens[t];
 
             if (kind == RawTokenKind.And)
             {
@@ -131,7 +171,7 @@ internal static class FtsQueryParser
                 continue;
             }
 
-            var terms = ExpandSingleWord(text, isPrefix, tokenizer, index);
+            var terms = ExpandSingleWord(text, isPrefix, fuzzyDist, tokenizer, index);
             clauses.Add(new FtsClause(terms, nextMode));
             lastTermIdx = clauses.Count - 1;
             nextMode = FtsClauseMode.Optional;
@@ -141,7 +181,7 @@ internal static class FtsQueryParser
     }
 
     private static HashSet<string> ExpandSingleWord(
-        string word, bool isPrefix, ITokenizer tokenizer, FullTextIndex index)
+        string word, bool isPrefix, int fuzzyDistance, ITokenizer tokenizer, FullTextIndex index)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         if (isPrefix)
@@ -155,6 +195,17 @@ internal static class FtsQueryParser
                     result.Add(expanded);
             }
         }
+        else if (fuzzyDistance > 0)
+        {
+            var sink = new SingleTokenSink();
+            tokenizer.Tokenize(word, sink);
+            if (sink.Token is not null)
+            {
+                byte[] termUtf8 = Encoding.UTF8.GetBytes(sink.Token);
+                foreach (var expanded in index.ExpandFuzzy(termUtf8, fuzzyDistance))
+                    result.Add(expanded);
+            }
+        }
         else
         {
             tokenizer.Tokenize(word, new CollectingSink(result));
@@ -164,9 +215,9 @@ internal static class FtsQueryParser
 
     private enum RawTokenKind { Term, And, Or, Not }
 
-    private static List<(string Text, bool IsPrefix, RawTokenKind Kind)> Tokenize(ReadOnlySpan<char> span)
+    private static List<(string Text, bool IsPrefix, int FuzzyDistance, RawTokenKind Kind)> Tokenize(ReadOnlySpan<char> span)
     {
-        var tokens = new List<(string, bool, RawTokenKind)>();
+        var tokens = new List<(string, bool, int, RawTokenKind)>();
         int i = 0;
         while (i < span.Length)
         {
@@ -177,22 +228,39 @@ internal static class FtsQueryParser
             int start = i;
             while (i < span.Length && char.IsLetterOrDigit(span[i]))
                 i++;
+            int wordEnd = i;
 
             bool isPrefix = i < span.Length && span[i] == '*';
             if (isPrefix) i++;
 
-            var word = span[start..(isPrefix ? i - 1 : i)];
+            int fuzzyDist = 0;
+            if (!isPrefix && i < span.Length && span[i] == '~')
+            {
+                i++;
+                if (i < span.Length && char.IsAsciiDigit(span[i]))
+                {
+                    fuzzyDist = span[i] - '0';
+                    i++;
+                }
+                else
+                {
+                    fuzzyDist = 1;
+                }
+                if (fuzzyDist > 2) fuzzyDist = 2;
+            }
+
+            var word = span[start..wordEnd];
             if (word.IsEmpty) continue;
 
             string wordStr = word.ToString();
-            if (!isPrefix)
+            if (!isPrefix && fuzzyDist == 0)
             {
-                if (wordStr is "AND") { tokens.Add(("", false, RawTokenKind.And)); continue; }
-                if (wordStr is "OR") { tokens.Add(("", false, RawTokenKind.Or)); continue; }
-                if (wordStr is "NOT") { tokens.Add(("", false, RawTokenKind.Not)); continue; }
+                if (wordStr is "AND") { tokens.Add(("", false, 0, RawTokenKind.And)); continue; }
+                if (wordStr is "OR") { tokens.Add(("", false, 0, RawTokenKind.Or)); continue; }
+                if (wordStr is "NOT") { tokens.Add(("", false, 0, RawTokenKind.Not)); continue; }
             }
 
-            tokens.Add((wordStr, isPrefix, RawTokenKind.Term));
+            tokens.Add((wordStr, isPrefix, fuzzyDist, RawTokenKind.Term));
         }
         return tokens;
     }
@@ -235,7 +303,7 @@ internal readonly struct FtsClause(HashSet<string> terms, FtsClauseMode mode)
 /// <summary>
 /// Result of parsing a Boolean FTS query. Contains clauses grouped by
 /// Required/Optional/Excluded mode. All terms within each clause are
-/// already expanded (prefix wildcards resolved against the index).
+/// already expanded (prefix wildcards and fuzzy terms resolved against the index).
 /// </summary>
 internal readonly struct ParsedFtsQuery(IReadOnlyList<FtsClause> clauses)
 {

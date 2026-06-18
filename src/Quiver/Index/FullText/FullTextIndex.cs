@@ -119,6 +119,46 @@ internal sealed class FullTextIndex : IDisposable
     }
 
     /// <summary>
+    /// Collect all distinct indexed terms within Levenshtein edit distance
+    /// <paramref name="maxEditDistance"/> of the normalized <paramref name="termUtf8"/>.
+    /// Scans per-length ranges in the postings B+Tree, filtering by character-level
+    /// edit distance. The byte-length scan window accounts for multi-byte UTF-8.
+    /// </summary>
+    internal HashSet<string> ExpandFuzzy(ReadOnlySpan<byte> termUtf8, int maxEditDistance)
+    {
+        var terms = new HashSet<string>(StringComparer.Ordinal);
+        string queryTerm = Encoding.UTF8.GetString(termUtf8);
+        int termByteLen = termUtf8.Length;
+        if (termByteLen == 0 || maxEditDistance <= 0) return terms;
+
+        int minLen = Math.Max(1, termByteLen - maxEditDistance * 4);
+        int maxLen = termByteLen + maxEditDistance * 4;
+        const int maxTermLen = 256;
+
+        int emptyStreak = 0;
+        for (int len = minLen; len <= Math.Min(maxLen, maxTermLen) && emptyStreak < 32; len++)
+        {
+            var (lower, upper) = PostingsKey.PrefixRange(Array.Empty<byte>(), len);
+            var e = _postings.Range(lower, true, upper, true);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            bool found = false;
+            while (e.MoveNext())
+            {
+                string candidate = PostingsKey.DecodeTerm(e.Current.KeyBytes);
+                if (seen.Add(candidate))
+                {
+                    found = true;
+                    if (LevenshteinDistance(queryTerm, candidate) <= maxEditDistance)
+                        terms.Add(candidate);
+                }
+            }
+            if (found) emptyStreak = 0;
+            else emptyStreak++;
+        }
+        return terms;
+    }
+
+    /// <summary>
     /// Collect all distinct indexed terms that start with <paramref name="prefixUtf8"/>.
     /// Scans per-length ranges in the postings B+Tree (terms of different lengths
     /// are not contiguous due to the 2-byte length prefix in the composite key).
@@ -250,6 +290,30 @@ internal sealed class FullTextIndex : IDisposable
     {
         _postings.Dispose();
         _norms.Dispose();
+    }
+
+    internal static int LevenshteinDistance(string s, string t)
+    {
+        int sLen = s.Length, tLen = t.Length;
+        if (sLen == 0) return tLen;
+        if (tLen == 0) return sLen;
+
+        var prev = new int[tLen + 1];
+        for (int j = 0; j <= tLen; j++) prev[j] = j;
+
+        for (int i = 1; i <= sLen; i++)
+        {
+            int prevDiag = prev[0];
+            prev[0] = i;
+            for (int j = 1; j <= tLen; j++)
+            {
+                int temp = prev[j];
+                int cost = s[i - 1] == t[j - 1] ? 0 : 1;
+                prev[j] = Math.Min(Math.Min(prev[j] + 1, prev[j - 1] + 1), prevDiag + cost);
+                prevDiag = temp;
+            }
+        }
+        return prev[tLen];
     }
 
     private sealed class TfSink : ITokenSink
