@@ -196,6 +196,9 @@ internal interface IIndexManager
     ITokenizer ResolveTokenizer(string tokenizerId)
         => throw new NotSupportedException("This index manager has no tokenizer registry.");
 
+    /// <summary>カスタムトークナイザ (フィルタ付きパイプライン等) を registry に登録する。</summary>
+    void RegisterTokenizer(ITokenizer tokenizer) { }
+
     /// <summary>
     /// 全文索引が 1 つでも存在するか。透過維持フックの fast-path
     /// (FT 索引がゼロなら SetProperty はノード読取を省略して素通り)。既定は false。

@@ -445,8 +445,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         return false;
     }
 
-    /// <summary>カスタムトークナイザ (例: mixed-bigram-v2) を登録する経路。</summary>
-    internal void RegisterTokenizer(ITokenizer tokenizer) => _tokenizers.Register(tokenizer);
+    public void RegisterTokenizer(ITokenizer tokenizer) => _tokenizers.Register(tokenizer);
 
     private FullTextIndex MaterializeFullText(
         string name, string label, string propertyKey, string tokenizerId,

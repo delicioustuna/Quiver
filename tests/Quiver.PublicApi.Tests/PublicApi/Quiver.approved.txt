@@ -486,6 +486,7 @@ namespace Quiver
     {
         public FullTextIndexOptions() { }
         public double B { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Text.ITokenFilter> Filters { get; init; }
         public double K1 { get; init; }
         public string TokenizerId { get; init; }
     }
@@ -1360,9 +1361,20 @@ namespace Quiver.Telemetry
 }
 namespace Quiver.Text
 {
+    public sealed class FilteredTokenizer : Quiver.Text.ITokenizer
+    {
+        public FilteredTokenizer(Quiver.Text.ITokenizer inner, params Quiver.Text.ITokenFilter[] filters) { }
+        public string TokenizerId { get; }
+        public void Tokenize(System.ReadOnlySpan<char> text, Quiver.Text.ITokenSink sink) { }
+    }
     public interface ITextNormalizer
     {
         Quiver.Text.NormalizedText Normalize(System.ReadOnlySpan<char> input);
+    }
+    public interface ITokenFilter
+    {
+        string FilterId { get; }
+        void Apply(System.ReadOnlySpan<char> token, Quiver.Text.ITokenSink downstream);
     }
     public interface ITokenSink
     {
@@ -1384,6 +1396,12 @@ namespace Quiver.Text
         public JapaneseAwareNormalizer() { }
         public Quiver.Text.NormalizationFlags DefaultFlags { get; init; }
         public Quiver.Text.NormalizedText Normalize(System.ReadOnlySpan<char> input) { }
+    }
+    public sealed class LowercaseFilter : Quiver.Text.ITokenFilter
+    {
+        public LowercaseFilter() { }
+        public string FilterId { get; }
+        public void Apply(System.ReadOnlySpan<char> token, Quiver.Text.ITokenSink downstream) { }
     }
     public sealed class MinimalNormalizer : Quiver.Text.ITextNormalizer
     {
@@ -1417,6 +1435,12 @@ namespace Quiver.Text
         public required int NormalizedLengthChars { get; init; }
         public required int OriginalLengthChars { get; init; }
         public required string Text { get; init; }
+    }
+    public sealed class StopWordFilter : Quiver.Text.ITokenFilter
+    {
+        public StopWordFilter(System.Collections.Generic.IEnumerable<string> stopWords) { }
+        public string FilterId { get; }
+        public void Apply(System.ReadOnlySpan<char> token, Quiver.Text.ITokenSink downstream) { }
     }
     public sealed class TokenizerRegistry : Quiver.Text.ITokenizerRegistry
     {

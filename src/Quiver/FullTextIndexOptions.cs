@@ -12,6 +12,14 @@ public sealed record FullTextIndexOptions
     /// <summary>Tokenizer id, resolved through the tokenizer registry. Default: <c>mixed-bigram-v1</c>.</summary>
     public string TokenizerId { get; init; } = MixedBigramTokenizer.DefaultTokenizerId;
 
+    /// <summary>
+    /// Token filters applied after the tokenizer, in order. When non-empty, the
+    /// effective tokenizer id becomes <c>"{TokenizerId}+{filter1}+{filter2}+…"</c>
+    /// and is registered automatically so query-time resolution rebuilds the
+    /// exact same pipeline.
+    /// </summary>
+    public IReadOnlyList<ITokenFilter> Filters { get; init; } = [];
+
     /// <summary>BM25 term-frequency saturation parameter k1 (default 1.2).</summary>
     public double K1 { get; init; } = 1.2;
 

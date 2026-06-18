@@ -86,7 +86,15 @@ internal sealed class SchemaApi : ISchemaApi
     public void CreateFullTextIndex(string indexName, string label, string propertyKey, FullTextIndexOptions? options = null)
     {
         options ??= new FullTextIndexOptions();
-        _indexManager.CreateFullTextIndex(indexName, label, propertyKey, options.TokenizerId);
+        var tokenizerId = options.TokenizerId;
+        if (options.Filters.Count > 0)
+        {
+            var baseTokenizer = _indexManager.ResolveTokenizer(tokenizerId);
+            var filtered = new Text.FilteredTokenizer(baseTokenizer, [.. options.Filters]);
+            tokenizerId = filtered.TokenizerId;
+            _indexManager.RegisterTokenizer(filtered);
+        }
+        _indexManager.CreateFullTextIndex(indexName, label, propertyKey, tokenizerId);
     }
 
     public IReadOnlyList<FullTextIndexInfo> ListFullTextIndexes()

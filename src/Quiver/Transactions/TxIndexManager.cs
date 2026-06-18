@@ -52,6 +52,7 @@ internal sealed class TxIndexManager : IIndexManager
     public bool DropFullTextIndex(string name) { AcquireLock(); return _inner.DropFullTextIndex(name); }
 
     public ITokenizer ResolveTokenizer(string tokenizerId) => _inner.ResolveTokenizer(tokenizerId);
+    public void RegisterTokenizer(ITokenizer tokenizer) => _inner.RegisterTokenizer(tokenizer);
 
     public bool HasAnyFullTextIndex => _inner.HasAnyFullTextIndex;
 
