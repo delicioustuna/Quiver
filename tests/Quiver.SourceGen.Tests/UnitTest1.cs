@@ -139,5 +139,8 @@ public class GraphRelationshipGeneratorTests
         generatedSource.Should().Contain("public static Knows Load(");
         generatedSource.Should().Contain("public static void Update(");
         generatedSource.Should().Contain("public static void Delete(");
+        // WS-4: write sink sugar
+        generatedSource.Should().Contain("public static long AddKnows(");
+        generatedSource.Should().Contain("public static (long Created, long Matched) MergeKnows(");
     }
 }

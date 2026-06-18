@@ -95,6 +95,33 @@ internal static class GraphRelationshipEmitter
         sb.AppendLine($"    /// <summary>{model.RelType} エッジを式ツリー述語で絞り込んでから {model.TargetFqn} 型を保存して辿る。</summary>");
         sb.AppendLine($"    public static Quiver.Api.TypedGraphTraversal<{model.TargetFqn}> {model.ClassName}(this Quiver.Api.TypedGraphTraversal<{model.SourceFqn}> source, System.Linq.Expressions.Expression<System.Func<{model.ClassName}, bool>> edgeFilter)");
         sb.AppendLine($"        => source.OutWhere<{model.ClassName}, {model.TargetFqn}>(edgeFilter);");
+        sb.AppendLine();
+
+        // WS-4: Write sink sugar — Add{Rel} / Merge{Rel} を生やす。
+        // プロパティ付き版はラムダから TRel を推論できるため不要。ここでは propless 版のみ。
+        var s = model.SourceFqn;
+        var t = model.TargetFqn;
+        var r = model.ClassName;
+
+        sb.AppendLine($"    /// <summary>{s} と {t} の直積に {model.RelType} 辺を生成する。</summary>");
+        sb.AppendLine($"    public static long Add{r}(this Quiver.Api.TypedGraphTraversal<{s}> sources, Quiver.Api.TypedGraphTraversal<{t}> targets)");
+        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.AddEdge<{s}, {r}, {t}>(sources, targets);");
+        sb.AppendLine();
+
+        sb.AppendLine($"    /// <summary>始点ごとに終点を求め {model.RelType} 辺を生成する (相関版)。</summary>");
+        sb.AppendLine($"    public static long Add{r}(this Quiver.Api.TypedGraphTraversal<{s}> sources, System.Func<{s}, Quiver.Api.TypedGraphTraversal<{t}>> targets)");
+        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.AddEdge<{s}, {r}, {t}>(sources, targets);");
+        sb.AppendLine();
+
+        sb.AppendLine($"    /// <summary>{s} と {t} の直積で {model.RelType} 辺を upsert する。</summary>");
+        sb.AppendLine($"    public static (long Created, long Matched) Merge{r}(this Quiver.Api.TypedGraphTraversal<{s}> sources, Quiver.Api.TypedGraphTraversal<{t}> targets)");
+        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.MergeEdge<{s}, {r}, {t}>(sources, targets);");
+        sb.AppendLine();
+
+        sb.AppendLine($"    /// <summary>始点ごとに終点を求め {model.RelType} 辺を upsert する (相関版)。</summary>");
+        sb.AppendLine($"    public static (long Created, long Matched) Merge{r}(this Quiver.Api.TypedGraphTraversal<{s}> sources, System.Func<{s}, Quiver.Api.TypedGraphTraversal<{t}>> targets)");
+        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.MergeEdge<{s}, {r}, {t}>(sources, targets);");
+
         sb.AppendLine("}");
         return sb.ToString();
     }
