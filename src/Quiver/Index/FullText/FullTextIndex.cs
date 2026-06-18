@@ -119,6 +119,35 @@ internal sealed class FullTextIndex : IDisposable
     }
 
     /// <summary>
+    /// Collect all distinct indexed terms that start with <paramref name="prefixUtf8"/>.
+    /// Scans per-length ranges in the postings B+Tree (terms of different lengths
+    /// are not contiguous due to the 2-byte length prefix in the composite key).
+    /// </summary>
+    internal HashSet<string> ExpandPrefix(ReadOnlySpan<byte> prefixUtf8)
+    {
+        var terms = new HashSet<string>(StringComparer.Ordinal);
+        int prefixLen = prefixUtf8.Length;
+        if (prefixLen == 0) return terms;
+
+        const int maxTermLen = 256;
+        int emptyStreak = 0;
+        for (int len = prefixLen; len <= maxTermLen && emptyStreak < 32; len++)
+        {
+            var (lower, upper) = PostingsKey.PrefixRange(prefixUtf8, len);
+            var e = _postings.Range(lower, true, upper, true);
+            bool found = false;
+            while (e.MoveNext())
+            {
+                found = true;
+                terms.Add(PostingsKey.DecodeTerm(e.Current.KeyBytes));
+            }
+            if (found) emptyStreak = 0;
+            else emptyStreak++;
+        }
+        return terms;
+    }
+
+    /// <summary>
     /// per-term statistics for WAND pruning. Scans postings once
     /// for <c>term → (df, maxTf)</c> and norms once for <c>(minDocLen, N, totalTokens)</c>.
     /// Called only at <see cref="Quiver.GraphStats"/> collection time (not per query), so

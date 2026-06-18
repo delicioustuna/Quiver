@@ -93,14 +93,24 @@ internal static class Bm25Scorer
         var sink = new TermSink();
         tokenizer.Tokenize(queryText, sink);
         if (sink.Terms.Count == 0) return new List<long>();
+        return RankTerms(ft, sink.Terms, n, avgdl, candidateSequences, termStats);
+    }
+
+    /// <summary>
+    /// Rank documents for a pre-expanded set of query terms (used when the query
+    /// contains prefix wildcards that have already been expanded against the index).
+    /// </summary>
+    public static List<long> RankTerms(
+        FullTextIndex ft, IReadOnlySet<string> queryTerms,
+        long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats = null)
+    {
+        if (queryTerms.Count == 0) return new List<long>();
 
         var scores = new Dictionary<long, double>();
         var docLenCache = new Dictionary<long, int>();
-        foreach (var term in sink.Terms)
+        foreach (var term in queryTerms)
         {
             var postings = ft.GetPostings(term);
-            // Use the snapshot df when present so both query paths agree on idf; otherwise
-            // count from the materialized postings (exact df, FTS-3 behaviour).
             int df = termStats is not null && termStats.TryGet(term, out var sdf, out _) ? sdf : postings.Count;
             if (df == 0) continue;
             double idf = Math.Log(1.0 + (n - df + 0.5) / (df + 0.5));
@@ -142,10 +152,22 @@ internal static class Bm25Scorer
     {
         var sink = new TermSink();
         tokenizer.Tokenize(queryText, sink);
-        if (sink.Terms.Count == 0) return new List<long>();
+        return RankWandTerms(ft, sink.Terms, n, avgdl, termStats, k, isLive);
+    }
 
-        var cursors = new List<WandTerm>(sink.Terms.Count);
-        foreach (var term in sink.Terms)
+    /// <summary>
+    /// WAND variant that accepts a pre-expanded term set (for prefix wildcard queries).
+    /// Returns <c>null</c> when any term is absent from the snapshot (caller falls back
+    /// to <see cref="RankTerms"/>).
+    /// </summary>
+    public static List<long>? RankWandTerms(
+        FullTextIndex ft, IReadOnlySet<string> queryTerms,
+        long n, double avgdl, Bm25TermStats termStats, int k, Func<long, bool>? isLive = null)
+    {
+        if (queryTerms.Count == 0) return new List<long>();
+
+        var cursors = new List<WandTerm>(queryTerms.Count);
+        foreach (var term in queryTerms)
         {
             if (!termStats.TryGet(term, out int df, out _))
                 return null; // unknown term: cannot bound safely → fall back to full scan

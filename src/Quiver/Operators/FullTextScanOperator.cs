@@ -1,4 +1,5 @@
 using Quiver.Core;
+using Quiver.Index.FullText;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
 
@@ -55,22 +56,28 @@ internal sealed class FullTextScanOperator : IPhysicalOperator
 
         var (n, avgdl) = Bm25Scorer.ResolveCorpus(ft, _corpus);
 
-        // FTS-8: when per-term snapshot stats are present, use WAND document-at-a-time
-        // pruning (skips high-df postings, exact top-k). RankWand filters liveness inline
-        // so its k-bounded heap holds top-k live docs. It returns null if a query term is
-        // unknown to the snapshot (unbounded) — then fall back to the full term-at-a-time
-        // scan, which also re-uses the snapshot df so both paths agree on idf (spec: 07_fulltext.md#wand).
         var nodes = tx.Nodes;
         var termStats = _corpus?.Terms;
-        List<long>? ranked = termStats is not null
-            ? Bm25Scorer.RankWand(ft, tokenizer, _queryText, n, avgdl, termStats, _k,
-                isLive: packed => IndexValueResolver.IsLiveNode(packed, nodes))
-            : null;
-        ranked ??= Bm25Scorer.Rank(ft, tokenizer, _queryText, n, avgdl, candidateSequences: null, termStats);
+        List<long>? ranked;
 
-        // Resolve to live node ids (generation match, preserving rank order) and take k.
-        // Dead / slot-reused entries are dropped, so the resolve happens before Take(k)
-        // (a no-op for the already-live WAND output, the real filter for the full scan).
+        if (FtsQueryParser.ContainsWildcard(_queryText))
+        {
+            var terms = FtsQueryParser.ParseAndExpand(_queryText, tokenizer, ft);
+            ranked = termStats is not null
+                ? Bm25Scorer.RankWandTerms(ft, terms, n, avgdl, termStats, _k,
+                    isLive: packed => IndexValueResolver.IsLiveNode(packed, nodes))
+                : null;
+            ranked ??= Bm25Scorer.RankTerms(ft, terms, n, avgdl, candidateSequences: null, termStats);
+        }
+        else
+        {
+            ranked = termStats is not null
+                ? Bm25Scorer.RankWand(ft, tokenizer, _queryText, n, avgdl, termStats, _k,
+                    isLive: packed => IndexValueResolver.IsLiveNode(packed, nodes))
+                : null;
+            ranked ??= Bm25Scorer.Rank(ft, tokenizer, _queryText, n, avgdl, candidateSequences: null, termStats);
+        }
+
         _results = IndexValueResolver.ResolveLiveNodeIds(ranked, nodes).Take(_k).ToArray();
         _pos = -1;
     }

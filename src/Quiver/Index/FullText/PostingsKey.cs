@@ -45,6 +45,30 @@ internal static class PostingsKey
         return (lower, upper);
     }
 
+    /// <summary>
+    /// Inclusive lower/upper byte bounds for all postings of terms with exactly
+    /// <paramref name="termLen"/> UTF-8 bytes that start with <paramref name="prefixUtf8"/>.
+    /// Called once per candidate length during prefix expansion.
+    /// </summary>
+    public static (byte[] Lower, byte[] Upper) PrefixRange(ReadOnlySpan<byte> prefixUtf8, int termLen)
+    {
+        if (termLen < prefixUtf8.Length)
+            throw new ArgumentOutOfRangeException(nameof(termLen),
+                "Term length must be >= prefix length.");
+
+        var lower = new byte[LenPrefix + termLen + EntityIdSize];
+        BinaryPrimitives.WriteUInt16BigEndian(lower, (ushort)termLen);
+        prefixUtf8.CopyTo(lower.AsSpan(LenPrefix));
+        // suffix + entityId already 0x00
+
+        var upper = new byte[LenPrefix + termLen + EntityIdSize];
+        BinaryPrimitives.WriteUInt16BigEndian(upper, (ushort)termLen);
+        prefixUtf8.CopyTo(upper.AsSpan(LenPrefix));
+        upper.AsSpan(LenPrefix + prefixUtf8.Length).Fill(0xFF);
+
+        return (lower, upper);
+    }
+
     /// <summary>Recover the term (UTF-8 decoded) from a postings key's length-prefixed prefix.</summary>
     public static string DecodeTerm(ReadOnlySpan<byte> key)
     {

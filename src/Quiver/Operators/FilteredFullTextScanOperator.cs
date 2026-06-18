@@ -1,4 +1,5 @@
 using Quiver.Core;
+using Quiver.Index.FullText;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
 
@@ -81,10 +82,17 @@ internal sealed class FilteredFullTextScanOperator : IPhysicalOperator
         }
 
         var (n, avgdl) = Bm25Scorer.ResolveCorpus(ft, _corpus);
-        // FTS-8: use the snapshot df (when present) so a candidate's per-doc score matches
-        // the text-first WAND path exactly (spec: 07_fulltext.md#wand parity). Graph-first stays a
-        // candidate-bounded full scan — WAND targets the unbounded text-first cost.
-        var ranked = Bm25Scorer.Rank(ft, tokenizer, _queryText, n, avgdl, candidates, _corpus?.Terms);
+
+        List<long> ranked;
+        if (FtsQueryParser.ContainsWildcard(_queryText))
+        {
+            var terms = FtsQueryParser.ParseAndExpand(_queryText, tokenizer, ft);
+            ranked = Bm25Scorer.RankTerms(ft, terms, n, avgdl, candidates, _corpus?.Terms);
+        }
+        else
+        {
+            ranked = Bm25Scorer.Rank(ft, tokenizer, _queryText, n, avgdl, candidates, _corpus?.Terms);
+        }
 
         _results = IndexValueResolver.ResolveLiveNodeIds(ranked, tx.Nodes).Take(_k).ToArray();
         _pos = -1;
