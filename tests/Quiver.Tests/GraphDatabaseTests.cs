@@ -943,4 +943,95 @@ public sealed class GraphDatabaseTests : IDisposable
         results.Should().HaveCount(5);
         rtx.Rollback();
     }
+
+    // ===== EnforceExclusiveWriter =====
+
+    [Fact]
+    public void EnforceExclusiveWriter_blocks_second_writer()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var db = GraphDatabase.Open(
+                Path.Combine(dir, "g.quiver"),
+                new GraphDatabaseOptions { EnforceExclusiveWriter = true });
+
+            using var tx1 = db.BeginTransaction();
+            var act = () => db.BeginTransaction();
+            act.Should().Throw<InvalidOperationException>();
+            tx1.Commit();
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void EnforceExclusiveWriter_allows_after_commit()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var db = GraphDatabase.Open(
+                Path.Combine(dir, "g.quiver"),
+                new GraphDatabaseOptions { EnforceExclusiveWriter = true });
+
+            using (var tx1 = db.BeginTransaction()) { tx1.Commit(); }
+            using var tx2 = db.BeginTransaction();
+            tx2.CreateNode("A");
+            tx2.Commit();
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void EnforceExclusiveWriter_allows_after_rollback()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var db = GraphDatabase.Open(
+                Path.Combine(dir, "g.quiver"),
+                new GraphDatabaseOptions { EnforceExclusiveWriter = true });
+
+            using (var tx1 = db.BeginTransaction()) { tx1.Rollback(); }
+            using var tx2 = db.BeginTransaction();
+            tx2.CreateNode("A");
+            tx2.Commit();
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void EnforceExclusiveWriter_allows_after_dispose_without_commit()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var db = GraphDatabase.Open(
+                Path.Combine(dir, "g.quiver"),
+                new GraphDatabaseOptions { EnforceExclusiveWriter = true });
+
+            using (db.BeginTransaction()) { /* dispose without commit/rollback */ }
+            using var tx2 = db.BeginTransaction();
+            tx2.CreateNode("A");
+            tx2.Commit();
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void EnforceExclusiveWriter_does_not_block_readonly()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var db = GraphDatabase.Open(
+                Path.Combine(dir, "g.quiver"),
+                new GraphDatabaseOptions { EnforceExclusiveWriter = true });
+
+            using var tx1 = db.BeginTransaction();
+            using var ro = db.BeginReadOnlyTransaction();
+            tx1.Commit();
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
 }

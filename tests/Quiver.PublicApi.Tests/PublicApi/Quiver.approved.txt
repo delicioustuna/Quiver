@@ -529,6 +529,7 @@ namespace Quiver
         public long CheckpointThresholdBytes { get; set; }
         public System.TimeSpan? DeadlockDetectionInterval { get; set; }
         public bool EnableChecksums { get; set; }
+        public bool EnforceExclusiveWriter { get; set; }
         public System.TimeSpan GroupCommitWindow { get; set; }
         public System.TimeSpan LockTimeout { get; set; }
         public Quiver.Transactions.LockingMode LockingMode { get; set; }

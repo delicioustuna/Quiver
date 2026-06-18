@@ -21,16 +21,20 @@ public sealed class GraphDatabase : IDisposable
     private readonly string _path;
     // OP-7: AutoVacuum が有効なときのみ非 null。Dispose で停止する。
     private readonly AutoVacuumWorker? _autoVacuumWorker;
+    private readonly bool _enforceExclusiveWriter;
+    private int _activeWriterCount;
 
     private GraphDatabase(
         IGraphStorageBackend backend,
         string path,
-        AutoVacuumWorker? autoVacuumWorker = null)
+        AutoVacuumWorker? autoVacuumWorker = null,
+        bool enforceExclusiveWriter = false)
     {
         // ARCH-2: 内部 SPI へキャスト。
         _backend = (IGraphStorageBackendInternal)backend;
         _path = path;
         _autoVacuumWorker = autoVacuumWorker;
+        _enforceExclusiveWriter = enforceExclusiveWriter;
     }
 
     /// <summary><see cref="Open"/> に渡したデータベースファイルのパス (<c>*.quiver</c>)。</summary>
@@ -62,7 +66,7 @@ public sealed class GraphDatabase : IDisposable
         if (options.AutoVacuum && options.AutoVacuumInterval > TimeSpan.Zero)
             worker = new AutoVacuumWorker(() => backend.Vacuum(), options.AutoVacuumInterval);
 
-        return new GraphDatabase(backend, filePath, worker);
+        return new GraphDatabase(backend, filePath, worker, options.EnforceExclusiveWriter);
     }
 
     private static IGraphStorageBackendFactory CreateDefaultFactory(BackendKind kind) => kind switch
@@ -111,7 +115,22 @@ public sealed class GraphDatabase : IDisposable
     /// <param name="level">分離レベル (既定: スナップショット分離)。</param>
     public IGraphTransaction BeginTransaction(
         IsolationLevel level = IsolationLevel.SnapshotIsolation)
-        => _backend.BeginGraphTransaction(level, readOnly: false);
+    {
+        if (_enforceExclusiveWriter)
+        {
+            if (Interlocked.CompareExchange(ref _activeWriterCount, 1, 0) != 0)
+                throw new InvalidOperationException(
+                    "別の書き込みトランザクションがアクティブです。EnforceExclusiveWriter が有効な場合、同時に開ける書き込みトランザクションは 1 つだけです。");
+            IGraphTransaction tx;
+            try { tx = _backend.BeginGraphTransaction(level, readOnly: false); }
+            catch { Interlocked.Decrement(ref _activeWriterCount); throw; }
+            Action release = () => Interlocked.Decrement(ref _activeWriterCount);
+            tx.OnCommitted(release);
+            tx.OnRolledBack(release);
+            return tx;
+        }
+        return _backend.BeginGraphTransaction(level, readOnly: false);
+    }
 
     /// <summary>
     /// 読み取り専用としてマークしたスナップショット分離トランザクションを開く。
@@ -462,6 +481,13 @@ public sealed class GraphDatabaseOptions
     /// 他スレッドを阻害しない)。
     /// </summary>
     public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.Zero;
+
+    /// <summary>
+    /// <c>true</c> のとき、<see cref="GraphDatabase.BeginTransaction"/> で既にアクティブな
+    /// 書き込みトランザクションが存在する場合に <see cref="InvalidOperationException"/> をスローする。
+    /// 既定 <c>false</c> (複数 writer を許容する既存挙動)。
+    /// </summary>
+    public bool EnforceExclusiveWriter { get; set; }
 
     /// <summary>
     /// <c>true</c> のとき、バックエンドが提供するバックグラウンドワーカーで
