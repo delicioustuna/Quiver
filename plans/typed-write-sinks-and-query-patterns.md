@@ -45,8 +45,8 @@
   「Person→Use→Tool」をコンパイル時強制できる。`new Use{...}` を返すラムダから `TRel/TTarget` も型推論される。
 - **既存 `IGraphRelationship<TSelf>.Insert(tx, NodeId, NodeId, TSelf)` は raw のまま温存。** シンクの内部実装が呼ぶ。
   単一 raw `NodeId` ペアの端点型チェックは原理的に不可 (untyped) なので**非目標**とし、安全性は集合シンク層で提供。
-- **`MergeEdge` の存在チェックは `EnumerateRelationships(from, Outgoing, type)` の O(out-degree)。**
-  低 fan-out では問題ないが、直積 MergeEdge は |B|×deg。コストを文書化し、エッジ存在インデックスは非目標。
+- **`MergeRelationship` の存在チェックは `EnumerateRelationships(from, Outgoing, type)` の O(out-degree)。**
+  低 fan-out では問題ないが、直積 MergeRelationship は |B|×deg。コストを文書化し、エッジ存在インデックスは非目標。
 - **シンクは materialize-first なので read-your-writes 下でも安全。** `ToListWithIds()`
   ([TypedGraphTraversal.cs:154](../src/Quiver/Client/TypedGraphTraversal.cs#L154)) で両側 id を確定してから書く。
   カーソル生存中の書き込み (案 A) は採らないので write-during-cursor spike は不要。
@@ -63,14 +63,14 @@
 (RelationshipId Id, bool Created) g.MergeRelationship(NodeId from, NodeId to, string type);  // GraphTraversalSource 糖衣
 
 // WS-2: 型安全な集合終端シンク (TypedGraphTraversal<TSource> 拡張)
-long AddEdge<TSource,TRel,TTarget>(
+long AddRelationship<TSource,TRel,TTarget>(
     this TypedGraphTraversal<TSource> sources,
     TypedGraphTraversal<TTarget> targets,
     Func<TSource,TTarget,TRel> edge)
   where TSource:IGraphNode<TSource> where TTarget:IGraphNode<TTarget>
   where TRel:IGraphRelationship<TRel,TSource,TTarget>;            // 直積で生成、戻り=生成本数
 
-(long Created,long Matched) MergeEdge<...>( ... 同上 ... );        // 直積で upsert
+(long Created,long Matched) MergeRelationship<...>( ... 同上 ... );        // 直積で upsert
 // プロパティ無し版 (where TRel:new()) と、相関版 (targets: Func<TSource,TypedGraphTraversal<TTarget>>) を overload で
 ```
 
@@ -79,7 +79,7 @@ long AddEdge<TSource,TRel,TTarget>(
 using var tx = db.BeginTransaction();
 var g = tx.G(db.Schema);
 long n = g.Nodes<Person>().Where(p => p.Name.StartsWith("B"))
-          .AddEdge(g.Nodes<Tool>().Where(t => t.Name.StartsWith("C")),
+          .AddRelationship(g.Nodes<Tool>().Where(t => t.Name.StartsWith("C")),
                    (p,t) => new Use { Note = "auto" });
 tx.Commit();
 ```
@@ -89,27 +89,27 @@ tx.Commit();
 | ID | 内容 | 依存 | 優先 |
 |---|---|---|---|
 | WS-1 | `MergeRelationship(from,to,type)` → `(RelationshipId,bool Created)`。`IGraphTransaction` + `GraphTransaction` 実装 (存在チェックは `EnumerateRelationships` の degree 走査) + `GraphTraversalSource` 糖衣。approved.txt 更新。 | — | P0 |
-| WS-2 | 型安全集合シンク `AddEdge` / `MergeEdge` (+プロパティ無し版 +相関版) を `Quiver.Api` 拡張で。内部は materialize→ループ。approved.txt 更新。 | WS-1 | P0 |
-| WS-3 | 振る舞いテスト: AddEdge 直積本数 / MergeEdge 冪等性 / 端点型制約 (正常系コンパイル) / materialize-first が source==target ラベルでも無限ループしない退行テスト。 | WS-1,2 | P0 |
+| WS-2 | 型安全集合シンク `AddRelationship` / `MergeRelationship` (+プロパティ無し版 +相関版) を `Quiver.Api` 拡張で。内部は materialize→ループ。approved.txt 更新。 | WS-1 | P0 |
+| WS-3 | 振る舞いテスト: AddRelationship 直積本数 / MergeRelationship 冪等性 / 端点型制約 (正常系コンパイル) / materialize-first が source==target ラベルでも無限ループしない退行テスト。 | WS-1,2 | P0 |
 | WS-4 | (任意) SourceGen 糖衣: `Use.Merge(tx,from,to,e)` と `people.AddUse(tools,e=>...)` を `{Rel}TraversalExtensions` に追加 + SourceGen テスト。 | WS-2 | P2 |
-| QP-1 | サンプル `samples/Quiver.Samples.QueryPatterns`: 型安全 Where/StartsWith・Coalesce・Optional・Union・As/Select・存在条件つき書き込み (MergeNode/MergeRelationship + C# if)・発端の直積 AddEdge を 1 本に。 | WS-2 | P1 |
+| QP-1 | サンプル `samples/Quiver.Samples.QueryPatterns`: 型安全 Where/StartsWith・Coalesce・Optional・Union・As/Select・存在条件つき書き込み (MergeNode/MergeRelationship + C# if)・発端の直積 AddRelationship を 1 本に。 | WS-2 | P1 |
 | QP-2 | `docs/cookbook.md` に「工夫された読み取りクエリ」節 + 書き込みシンク節を追記。coalesce ブランチでの変異 (upsert) は非対応である旨と代替を明記 (利用者の混乱回避)。 | QP-1 | P1 |
-| QP-3 | (任意) 軽量 sentinel: MergeEdge 存在チェックの degree 依存コストを 1 点計測し cookbook に注記。 | WS-1 | P2 |
+| QP-3 | (任意) 軽量 sentinel: MergeRelationship 存在チェックの degree 依存コストを 1 点計測し cookbook に注記。 | WS-1 | P2 |
 
 並列性: WS-1 着手後 WS-2/WS-3 は連続。QP-1/QP-2 は WS-2 完了後。WS-4/QP-3 は任意で後回し可。
 
 ## 検証 (empirical: 推論で断定しない点)
 
-- **Halloween 退行テスト (WS-3)**: source と target が同一ラベル (例 Person→Person) の AddEdge で、
+- **Halloween 退行テスト (WS-3)**: source と target が同一ラベル (例 Person→Person) の AddRelationship で、
   materialize-first が効かず naive 実装なら無限増殖する形を回帰として固定。
-- **read-your-writes 整合 (WS-3)**: 同一 tx で AddEdge 後に再 `ToList()` して期待件数を確認。
-- **MergeEdge コスト (QP-3, 任意)**: out-degree を変えた 1 点計測。bench 化はせず cookbook 注記に留める。
+- **read-your-writes 整合 (WS-3)**: 同一 tx で AddRelationship 後に再 `ToList()` して期待件数を確認。
+- **MergeRelationship コスト (QP-3, 任意)**: out-degree を変えた 1 点計測。bench 化はせず cookbook 注記に留める。
 
 ## 非目標 (明示)
 
 - 融合ストリーミング変異オペレータ (中間 `addE`)、ストリーミング変異、複数ライタ前提 write。
 - typed `NodeId<TNode>` ラッパ (全 traversal 終端に波及するため過大)。単一 raw ペアの端点型チェックは提供しない。
-- エッジ存在インデックス (MergeEdge は degree 走査で実装)。
+- エッジ存在インデックス (MergeRelationship は degree 走査で実装)。
 - Coalesce/Optional ブランチへの変異ステップ追加 (決定事項 1 と同根で不可)。
 
 ## 未実施 (トラック開始を決めたら行う)

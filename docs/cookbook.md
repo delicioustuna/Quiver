@@ -409,7 +409,7 @@ var result = g.Nodes<Person>()
 
 ---
 
-## 12. 型安全な集合 write シンク (AddEdge / MergeEdge)
+## 12. 型安全な集合 write シンク (AddRelationship / MergeRelationship)
 
 `TypedGraphTraversal<TSource>` の拡張メソッドで、始点集合と終点集合の直積に対して
 辺を一括生成 / upsert する。端点の型整合は `IGraphRelationship<TRel,TSource,TTarget>`
@@ -420,12 +420,12 @@ var result = g.Nodes<Person>()
 > Gremlin の `coalesce(V().has(...), addV(...))` パターンは成立しない。
 > 代替として `MergeNode` / `MergeRelationship` + C# `if` を使う (§2 / §6 参照)。
 
-### AddEdge — 直積で常に辺を生成
+### AddRelationship — 直積で常に辺を生成
 
 ```csharp
 // B で始まる Person × C で始まる Tool に Use 辺を張る (プロパティ付き)。
 long n = g.Nodes<Person>().Where(p => p.Name.StartsWith("B"))
-    .AddEdge(g.Nodes<Tool>().Where(t => t.Name.StartsWith("C")),
+    .AddRelationship(g.Nodes<Tool>().Where(t => t.Name.StartsWith("C")),
              (p, t) => new Use { Note = $"{p.Name}→{t.Name}" });
 // → Bob × {Cutter, Compiler} = 2 本
 ```
@@ -436,12 +436,12 @@ long n = g.Nodes<Person>().Where(p => p.Name.StartsWith("B"))
 long n = g.Nodes<Person>().AddUse(g.Nodes<Tool>());
 ```
 
-### MergeEdge — 冪等 upsert
+### MergeRelationship — 冪等 upsert
 
 ```csharp
 // 2 回目は全て既存ヒット (Matched)。プロパティは ON CREATE のみ書かれる。
 var (created, matched) = g.Nodes<Person>()
-    .MergeEdge(g.Nodes<Tool>(),
+    .MergeRelationship(g.Nodes<Tool>(),
                (p, t) => new Use { Note = "auto" });
 ```
 
@@ -450,14 +450,14 @@ var (created, matched) = g.Nodes<Person>()
 ```csharp
 // 各 Person の頭文字で始まる Tool だけに辺を張る。
 long n = g.Nodes<Person>()
-    .AddEdge(p => g.Nodes<Tool>().Where(t => t.Name.StartsWith(p.Name[..1])),
+    .AddRelationship(p => g.Nodes<Tool>().Where(t => t.Name.StartsWith(p.Name[..1])),
              (p, t) => new Use { Note = p.Name });
 ```
 
-### MergeEdge のコスト
+### MergeRelationship のコスト
 
-`MergeEdge` の存在判定は `MergeRelationship` の O(out-degree) 走査を内部で使う。
-低 fan-out では問題ないが、高 fan-out ノードで大量の直積 MergeEdge を回すと
+`MergeRelationship` の存在判定は `MergeRelationship` の O(out-degree) 走査を内部で使う。
+低 fan-out では問題ないが、高 fan-out ノードで大量の直積 MergeRelationship を回すと
 |sources| × |targets| × avg(out-degree) の走査になる。エッジ存在インデックスは
 現時点で非目標であり、高 fan-out での大量 upsert にはコストを意識すること。
 

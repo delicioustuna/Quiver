@@ -105,22 +105,22 @@ internal static class GraphRelationshipEmitter
 
         sb.AppendLine($"    /// <summary>{s} と {t} の直積に {model.RelType} 辺を生成する。</summary>");
         sb.AppendLine($"    public static long Add{r}(this Quiver.Api.TypedGraphTraversal<{s}> sources, Quiver.Api.TypedGraphTraversal<{t}> targets)");
-        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.AddEdge<{s}, {r}, {t}>(sources, targets);");
+        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.AddRelationship<{s}, {r}, {t}>(sources, targets);");
         sb.AppendLine();
 
         sb.AppendLine($"    /// <summary>始点ごとに終点を求め {model.RelType} 辺を生成する (相関版)。</summary>");
         sb.AppendLine($"    public static long Add{r}(this Quiver.Api.TypedGraphTraversal<{s}> sources, System.Func<{s}, Quiver.Api.TypedGraphTraversal<{t}>> targets)");
-        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.AddEdge<{s}, {r}, {t}>(sources, targets);");
+        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.AddRelationship<{s}, {r}, {t}>(sources, targets);");
         sb.AppendLine();
 
         sb.AppendLine($"    /// <summary>{s} と {t} の直積で {model.RelType} 辺を upsert する。</summary>");
         sb.AppendLine($"    public static (long Created, long Matched) Merge{r}(this Quiver.Api.TypedGraphTraversal<{s}> sources, Quiver.Api.TypedGraphTraversal<{t}> targets)");
-        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.MergeEdge<{s}, {r}, {t}>(sources, targets);");
+        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.MergeRelationship<{s}, {r}, {t}>(sources, targets);");
         sb.AppendLine();
 
         sb.AppendLine($"    /// <summary>始点ごとに終点を求め {model.RelType} 辺を upsert する (相関版)。</summary>");
         sb.AppendLine($"    public static (long Created, long Matched) Merge{r}(this Quiver.Api.TypedGraphTraversal<{s}> sources, System.Func<{s}, Quiver.Api.TypedGraphTraversal<{t}>> targets)");
-        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.MergeEdge<{s}, {r}, {t}>(sources, targets);");
+        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.MergeRelationship<{s}, {r}, {t}>(sources, targets);");
 
         sb.AppendLine("}");
         return sb.ToString();

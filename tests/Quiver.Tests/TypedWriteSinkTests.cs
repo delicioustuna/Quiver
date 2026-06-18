@@ -8,8 +8,8 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// 型安全集合 write シンク <c>AddEdge</c> / <c>MergeEdge</c> の振る舞い検証。
-/// 直積本数・プロパティ書き込み・MergeEdge 冪等性 (ON CREATE SET)・端点型制約の正常系・
+/// 型安全集合 write シンク <c>AddRelationship</c> / <c>MergeRelationship</c> の振る舞い検証。
+/// 直積本数・プロパティ書き込み・MergeRelationship 冪等性 (ON CREATE SET)・端点型制約の正常系・
 /// 同一ラベル (Person→Person) で materialize-first が無限増殖しないこと・read-your-writes 整合をカバーする。
 /// </summary>
 public sealed class TypedWriteSinkTests : IDisposable
@@ -99,10 +99,10 @@ public sealed class TypedWriteSinkTests : IDisposable
         public static void Delete(IGraphTransaction tx, RelationshipId id) => tx.DeleteRelationship(id);
     }
 
-    // ── AddEdge: 直積本数 ───────────────────────────────────────────────────────
+    // ── AddRelationship: 直積本数 ───────────────────────────────────────────────────────
 
     [Fact]
-    public void AddEdge_creates_full_cartesian_product()
+    public void AddRelationship_creates_full_cartesian_product()
     {
         using var tx = _db.BeginTransaction();
         var g = tx.G(_db.Schema);
@@ -110,7 +110,7 @@ public sealed class TypedWriteSinkTests : IDisposable
         for (int j = 0; j < 4; j++) ToolN.Insert(tx, new ToolN { Name = "T" + j });
 
         long created = g.Nodes<PersonN>()
-            .AddEdge(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = $"{p.Name}->{t.Name}" });
+            .AddRelationship(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = $"{p.Name}->{t.Name}" });
 
         created.Should().Be(12);   // 3 × 4
         g.Nodes<PersonN>().OutRelationships<UseRel>().Count().Should().Be(12);
@@ -118,7 +118,7 @@ public sealed class TypedWriteSinkTests : IDisposable
     }
 
     [Fact]
-    public void AddEdge_respects_Where_on_both_sides()
+    public void AddRelationship_respects_Where_on_both_sides()
     {
         using var tx = _db.BeginTransaction();
         var g = tx.G(_db.Schema);
@@ -127,7 +127,7 @@ public sealed class TypedWriteSinkTests : IDisposable
 
         // B で始まる Person (2) × C で始まる Tool (2) = 4。
         long created = g.Nodes<PersonN>().Where(p => p.Name.StartsWith("B"))
-            .AddEdge(g.Nodes<ToolN>().Where(t => t.Name.StartsWith("C")),
+            .AddRelationship(g.Nodes<ToolN>().Where(t => t.Name.StartsWith("C")),
                      (p, t) => new UseRel { Note = "auto" });
 
         created.Should().Be(4);
@@ -136,14 +136,14 @@ public sealed class TypedWriteSinkTests : IDisposable
     }
 
     [Fact]
-    public void AddEdge_writes_edge_properties()
+    public void AddRelationship_writes_edge_properties()
     {
         using var tx = _db.BeginTransaction();
         var g = tx.G(_db.Schema);
         var alice = PersonN.Insert(tx, new PersonN { Name = "Alice" });
         ToolN.Insert(tx, new ToolN { Name = "Hammer" });
 
-        g.Nodes<PersonN>().AddEdge(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = $"{p.Name}:{t.Name}" });
+        g.Nodes<PersonN>().AddRelationship(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = $"{p.Name}:{t.Name}" });
 
         var relId = g.Node(alice).OutRelationships<UseRel>().ToList().Single();
         UseRel.Load(tx, relId).Note.Should().Be("Alice:Hammer");
@@ -151,14 +151,14 @@ public sealed class TypedWriteSinkTests : IDisposable
     }
 
     [Fact]
-    public void AddEdge_propless_creates_edges_without_properties()
+    public void AddRelationship_propless_creates_edges_without_properties()
     {
         using var tx = _db.BeginTransaction();
         var g = tx.G(_db.Schema);
         for (int i = 0; i < 2; i++) PersonN.Insert(tx, new PersonN { Name = "P" + i });
         for (int j = 0; j < 3; j++) ToolN.Insert(tx, new ToolN { Name = "T" + j });
 
-        long created = g.Nodes<PersonN>().AddEdge<PersonN, UseRel, ToolN>(g.Nodes<ToolN>());
+        long created = g.Nodes<PersonN>().AddRelationship<PersonN, UseRel, ToolN>(g.Nodes<ToolN>());
 
         created.Should().Be(6);
         g.Nodes<PersonN>().OutRelationships<UseRel>().Count().Should().Be(6);
@@ -166,7 +166,7 @@ public sealed class TypedWriteSinkTests : IDisposable
     }
 
     [Fact]
-    public void AddEdge_correlated_evaluates_targets_per_source()
+    public void AddRelationship_correlated_evaluates_targets_per_source()
     {
         using var tx = _db.BeginTransaction();
         var g = tx.G(_db.Schema);
@@ -176,7 +176,7 @@ public sealed class TypedWriteSinkTests : IDisposable
 
         // 各 Person について、名前の頭文字で始まる Tool だけに辺を張る相関版。
         long created = g.Nodes<PersonN>()
-            .AddEdge(p => g.Nodes<ToolN>().Where(t => t.Name.StartsWith(p.Name.Substring(0, 1))),
+            .AddRelationship(p => g.Nodes<ToolN>().Where(t => t.Name.StartsWith(p.Name.Substring(0, 1))),
                      (p, t) => new UseRel { Note = p.Name });
 
         // Bob → (B で始まる Tool は無し = 0) / Carol → (Cutter, Compiler = 2)
@@ -185,18 +185,18 @@ public sealed class TypedWriteSinkTests : IDisposable
         tx.Commit();
     }
 
-    // ── MergeEdge: 冪等性 / ON CREATE SET ──────────────────────────────────────
+    // ── MergeRelationship: 冪等性 / ON CREATE SET ──────────────────────────────────────
 
     [Fact]
-    public void MergeEdge_is_idempotent()
+    public void MergeRelationship_is_idempotent()
     {
         using var tx = _db.BeginTransaction();
         var g = tx.G(_db.Schema);
         for (int i = 0; i < 2; i++) PersonN.Insert(tx, new PersonN { Name = "P" + i });
         for (int j = 0; j < 3; j++) ToolN.Insert(tx, new ToolN { Name = "T" + j });
 
-        var first  = g.Nodes<PersonN>().MergeEdge(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = "x" });
-        var second = g.Nodes<PersonN>().MergeEdge(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = "x" });
+        var first  = g.Nodes<PersonN>().MergeRelationship(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = "x" });
+        var second = g.Nodes<PersonN>().MergeRelationship(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = "x" });
 
         first.Should().Be((6L, 0L));    // 全て新規
         second.Should().Be((0L, 6L));   // 全て既存ヒット
@@ -205,15 +205,15 @@ public sealed class TypedWriteSinkTests : IDisposable
     }
 
     [Fact]
-    public void MergeEdge_sets_properties_on_create_only()
+    public void MergeRelationship_sets_properties_on_create_only()
     {
         using var tx = _db.BeginTransaction();
         var g = tx.G(_db.Schema);
         var alice = PersonN.Insert(tx, new PersonN { Name = "Alice" });
         ToolN.Insert(tx, new ToolN { Name = "Hammer" });
 
-        g.Nodes<PersonN>().MergeEdge(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = "first" });
-        var second = g.Nodes<PersonN>().MergeEdge(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = "second" });
+        g.Nodes<PersonN>().MergeRelationship(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = "first" });
+        var second = g.Nodes<PersonN>().MergeRelationship(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = "second" });
 
         second.Should().Be((0L, 1L));
         var relId = g.Node(alice).OutRelationships<UseRel>().ToList().Single();
@@ -222,15 +222,15 @@ public sealed class TypedWriteSinkTests : IDisposable
     }
 
     [Fact]
-    public void MergeEdge_propless_is_idempotent()
+    public void MergeRelationship_propless_is_idempotent()
     {
         using var tx = _db.BeginTransaction();
         var g = tx.G(_db.Schema);
         for (int i = 0; i < 2; i++) PersonN.Insert(tx, new PersonN { Name = "P" + i });
         for (int j = 0; j < 2; j++) ToolN.Insert(tx, new ToolN { Name = "T" + j });
 
-        var first  = g.Nodes<PersonN>().MergeEdge<PersonN, UseRel, ToolN>(g.Nodes<ToolN>());
-        var second = g.Nodes<PersonN>().MergeEdge<PersonN, UseRel, ToolN>(g.Nodes<ToolN>());
+        var first  = g.Nodes<PersonN>().MergeRelationship<PersonN, UseRel, ToolN>(g.Nodes<ToolN>());
+        var second = g.Nodes<PersonN>().MergeRelationship<PersonN, UseRel, ToolN>(g.Nodes<ToolN>());
 
         first.Should().Be((4L, 0L));
         second.Should().Be((0L, 4L));
@@ -240,7 +240,7 @@ public sealed class TypedWriteSinkTests : IDisposable
     // ── Halloween 退行: source == target ラベル ────────────────────────────────
 
     [Fact]
-    public void SameLabel_AddEdge_is_bounded_and_terminates()
+    public void SameLabel_AddRelationship_is_bounded_and_terminates()
     {
         // materialize-first: 両端を先に確定するため、辺を書いても始点/終点集合は増えない。
         // naive な遅延実装なら read-your-writes で増殖し得る形を N×N に固定して退行を防ぐ。
@@ -250,7 +250,7 @@ public sealed class TypedWriteSinkTests : IDisposable
         for (int i = 0; i < n; i++) PersonN.Insert(tx, new PersonN { Name = "P" + i });
 
         long created = g.Nodes<PersonN>()
-            .AddEdge(g.Nodes<PersonN>(), (a, b) => new FriendRel());
+            .AddRelationship(g.Nodes<PersonN>(), (a, b) => new FriendRel());
 
         created.Should().Be(n * n);   // 自己ペアを含む完全直積。無限増殖しない。
         g.Nodes<PersonN>().OutRelationships<FriendRel>().Count().Should().Be(n * n);
@@ -258,7 +258,7 @@ public sealed class TypedWriteSinkTests : IDisposable
     }
 
     [Fact]
-    public void SameLabel_correlated_AddEdge_does_not_feed_back()
+    public void SameLabel_correlated_AddRelationship_does_not_feed_back()
     {
         // 相関版で終点が「既存 FRIEND 辺の先」を辿る形。始点リストを先に確定するため、
         // ループ中に書いた辺が始点集合を増やすことはなく有限で停止する。
@@ -268,7 +268,7 @@ public sealed class TypedWriteSinkTests : IDisposable
         for (int i = 0; i < n; i++) PersonN.Insert(tx, new PersonN { Name = "P" + i });
 
         long created = g.Nodes<PersonN>()
-            .AddEdge<PersonN, FriendRel, PersonN>(p => g.Nodes<PersonN>());
+            .AddRelationship<PersonN, FriendRel, PersonN>(p => g.Nodes<PersonN>());
 
         created.Should().Be(n * n);
         tx.Commit();
@@ -277,14 +277,14 @@ public sealed class TypedWriteSinkTests : IDisposable
     // ── read-your-writes 整合 ──────────────────────────────────────────────────
 
     [Fact]
-    public void AddEdge_results_visible_within_same_tx()
+    public void AddRelationship_results_visible_within_same_tx()
     {
         using var tx = _db.BeginTransaction();
         var g = tx.G(_db.Schema);
         var alice = PersonN.Insert(tx, new PersonN { Name = "Alice" });
         for (int j = 0; j < 3; j++) ToolN.Insert(tx, new ToolN { Name = "T" + j });
 
-        g.Nodes<PersonN>().AddEdge(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = "x" });
+        g.Nodes<PersonN>().AddRelationship(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = "x" });
 
         // 同一 tx 内で直後に辿って 3 件見える (read-your-writes)。
         g.Node(alice).Out<UseRel>().ToList().Should().HaveCount(3);
@@ -297,14 +297,14 @@ public sealed class TypedWriteSinkTests : IDisposable
     public void EndpointTypeConstraint_valid_direction_compiles()
     {
         // Person → USE → Tool は IGraphRelationship<UseRel, PersonN, ToolN> 制約を満たすので通る。
-        // 誤った向き (例 g.Nodes<ToolN>().AddEdge(g.Nodes<PersonN>(), (t,p) => new UseRel{...})) は
+        // 誤った向き (例 g.Nodes<ToolN>().AddRelationship(g.Nodes<PersonN>(), (t,p) => new UseRel{...})) は
         // コンパイルエラーになる (制約 TSource=ToolN が IGraphRelationship<UseRel,ToolN,...> を満たさない)。
         using var tx = _db.BeginTransaction();
         var g = tx.G(_db.Schema);
         PersonN.Insert(tx, new PersonN { Name = "Alice" });
         ToolN.Insert(tx, new ToolN { Name = "Hammer" });
 
-        long created = g.Nodes<PersonN>().AddEdge(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = "ok" });
+        long created = g.Nodes<PersonN>().AddRelationship(g.Nodes<ToolN>(), (p, t) => new UseRel { Note = "ok" });
 
         created.Should().Be(1);
         tx.Commit();

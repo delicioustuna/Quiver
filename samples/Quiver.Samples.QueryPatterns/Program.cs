@@ -8,7 +8,7 @@
 // 4. Union (複数分岐連結)
 // 5. As / Select (タプル射影)
 // 6. 存在条件つき書き込み (MergeNode / MergeRelationship + C# if)
-// 7. 直積 AddEdge (発端シナリオ: B-Person → C-Tool に Use を張る)
+// 7. 直積 AddRelationship (発端シナリオ: B-Person → C-Tool に Use を張る)
 
 using Quiver;
 using Quiver.Api;
@@ -138,22 +138,22 @@ try
         tx.Commit();
     }
 
-    // ── 7. 直積 AddEdge (発端シナリオ) ──────────────────────────────────────
-    Console.WriteLine("\n── 7. B-Person → C-Tool に Use を直積 AddEdge ──");
+    // ── 7. 直積 AddRelationship (発端シナリオ) ──────────────────────────────────────
+    Console.WriteLine("\n── 7. B-Person → C-Tool に Use を直積 AddRelationship ──");
     using (var tx = db.BeginTransaction())
     {
         var g = tx.G(db.Schema);
         long n = g.Nodes<Person>().Where(p => p.Name.StartsWith("B"))
-            .AddEdge(g.Nodes<Tool>().Where(t => t.Name.StartsWith("C")),
+            .AddRelationship(g.Nodes<Tool>().Where(t => t.Name.StartsWith("C")),
                      (p, t) => new Use { Note = $"{p.Name}→{t.Name}" });
         Console.WriteLine($"  生成辺数: {n}");
         // → Bob × (Cutter, Compiler) = 2
 
-        // MergeEdge で冪等性を確認
+        // MergeRelationship で冪等性を確認
         var (created, matched) = g.Nodes<Person>().Where(p => p.Name.StartsWith("B"))
-            .MergeEdge(g.Nodes<Tool>().Where(t => t.Name.StartsWith("C")),
+            .MergeRelationship(g.Nodes<Tool>().Where(t => t.Name.StartsWith("C")),
                        (p, t) => new Use { Note = "overwrite" });
-        Console.WriteLine($"  MergeEdge: created={created}, matched={matched}");
+        Console.WriteLine($"  MergeRelationship: created={created}, matched={matched}");
         // → created=0, matched=2
 
         tx.Commit();
