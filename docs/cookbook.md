@@ -456,8 +456,19 @@ long n = g.Nodes<Person>()
 
 ### MergeRelationship のコスト
 
-`MergeRelationship` の存在判定は `MergeRelationship` の O(out-degree) 走査を内部で使う。
-低 fan-out では問題ないが、高 fan-out ノードで大量の直積 MergeRelationship を回すと
-|sources| × |targets| × avg(out-degree) の走査になる。エッジ存在インデックスは
-現時点で非目標であり、高 fan-out での大量 upsert にはコストを意識すること。
+`MergeRelationship` の存在判定は始点ノードの同一型 outgoing edge を線形スキャン
+する (**O(out-degree)**)。実測で **~116 ns/edge** の勾配 + ~2.5µs の固定コスト。
+
+| 同一型 out-degree | 1 回の hit | 1 回の miss (scan + create) |
+|---:|---:|---:|
+| 10 | ~2µs | ~18µs |
+| 100 | ~12µs | ~28µs |
+| 1,000 | ~116µs | ~136µs |
+
+低 fan-out (degree < 50) では 1 回数µs で実用上問題にならない。
+**degree 1,000 を超える高 fan-out ノードで大量の直積 MergeRelationship を回す場合は
+コストが顕在化する** (10×10 直積 × degree 1,000 ≈ 12ms)。その場合は
+`AddRelationship` (存在チェックなし、~6µs/call で degree 非依存) を使うか、
+アプリ層で重複制御すること。エッジ存在インデックスは現時点で非目標。
+詳細: [QP-3 計測レポート](benchmarks/2026-06-18_QP-3_MergeRelationshipCost.md)。
 

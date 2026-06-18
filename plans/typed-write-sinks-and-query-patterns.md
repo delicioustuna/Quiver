@@ -94,7 +94,7 @@ tx.Commit();
 | WS-4 | (任意) SourceGen 糖衣: `Use.Merge(tx,from,to,e)` と `people.AddUse(tools,e=>...)` を `{Rel}TraversalExtensions` に追加 + SourceGen テスト。 | WS-2 | P2 |
 | QP-1 | サンプル `samples/Quiver.Samples.QueryPatterns`: 型安全 Where/StartsWith・Coalesce・Optional・Union・As/Select・存在条件つき書き込み (MergeNode/MergeRelationship + C# if)・発端の直積 AddRelationship を 1 本に。 | WS-2 | P1 |
 | QP-2 | `docs/cookbook.md` に「工夫された読み取りクエリ」節 + 書き込みシンク節を追記。coalesce ブランチでの変異 (upsert) は非対応である旨と代替を明記 (利用者の混乱回避)。 | QP-1 | P1 |
-| QP-3 | (任意) 軽量 sentinel: MergeRelationship 存在チェックの degree 依存コストを 1 点計測し cookbook に注記。 | WS-1 | P2 |
+| QP-3 | ✅ MergeRelationship degree 依存コスト計測 → cookbook 注記 + [計測レポート](../docs/benchmarks/2026-06-18_QP-3_MergeRelationshipCost.md)。hit ~116ns/edge 勾配。 | WS-1 | P2 |
 
 並列性: WS-1 着手後 WS-2/WS-3 は連続。QP-1/QP-2 は WS-2 完了後。WS-4/QP-3 は任意で後回し可。
 

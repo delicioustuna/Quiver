@@ -93,6 +93,12 @@ if (args.Length >= 1 && args[0] == "--fts7-steady")
     return Fts7BreakdownRunner.RunSteady(baseChunks, incr, batch);
 }
 
+// QP-3: MergeRelationship degree cost standalone runner
+if (args.Length >= 1 && args[0] == "--qp3-merge-cost")
+{
+    return MergeRelationshipCostRunner.Run();
+}
+
 // 基本性能 (README 性能目標) standalone runner
 if (args.Length >= 1 && args[0] == "--basic-perf")
 {
