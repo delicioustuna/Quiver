@@ -353,3 +353,111 @@ store.DeleteDocument("docs/intro.md");
 - 全文索引が未作成の場合 `RagStore.FullTextEnabled == false` となり、
   検索は KNN のみで動作する。
 
+---
+
+## 11. 工夫された読み取りクエリ
+
+`Coalesce` / `Optional` / `Union` / `As` + `Select` を組み合わせた典型パターン。
+実行可能なサンプルは [`samples/Quiver.Samples.QueryPatterns`](../samples/Quiver.Samples.QueryPatterns/)。
+
+### Coalesce — 最初にマッチした分岐だけ
+
+```csharp
+// KNOWS 先があればその先を、無ければ自分自身を返す。
+var names = g.Nodes().HasLabel("Person")
+    .Coalesce(s => s.Out("KNOWS"), s => s)
+    .Values("name").ToList();
+```
+
+### Optional — マッチしなければ元のまま
+
+```csharp
+// Cypher の OPTIONAL MATCH 相当。Out("KNOWS") が空なら元ノードをそのまま通す。
+var names = g.Nodes().HasLabel("Person")
+    .Optional(s => s.Out("KNOWS"))
+    .Dedup().Values("name").ToList();
+```
+
+### Union — 複数分岐をすべて連結
+
+```csharp
+// KNOWS 先と USE 先を両方放出する。
+var names = g.Nodes().HasLabel("Person").Has("name", "Alice")
+    .Union(s => s.Out("KNOWS"), s => s.Out("USE"))
+    .Values("name").ToList();
+```
+
+### As / Select — タプル射影
+
+```csharp
+// (Person)→KNOWS→(Person) のペアを射影で取り出す。
+var pairs = g.Nodes().HasLabel("Person").As("src")
+    .Out("KNOWS").As("dst")
+    .Select(t => (
+        Src: Encoding.UTF8.GetString(tx.GetProperty(t.Node("src"), "name").Utf8StringValue),
+        Dst: Encoding.UTF8.GetString(tx.GetProperty(t.Node("dst"), "name").Utf8StringValue)));
+```
+
+### 型安全 Where (式ツリー)
+
+```csharp
+// LINQ ライクな式ツリー。&&、比較、StartsWith/EndsWith/Contains に対応。
+var result = g.Nodes<Person>()
+    .Where(p => p.Age > 26 && p.Name.StartsWith("C"))
+    .ToList();
+```
+
+---
+
+## 12. 型安全な集合 write シンク (AddEdge / MergeEdge)
+
+`TypedGraphTraversal<TSource>` の拡張メソッドで、始点集合と終点集合の直積に対して
+辺を一括生成 / upsert する。端点の型整合は `IGraphRelationship<TRel,TSource,TTarget>`
+制約でコンパイル時に強制される。
+
+> **Coalesce / Optional ブランチ内での変異 (upsert) は非対応。**
+> Quiver のブランチは読み取り専用で、`fold` / `unfold` / `constant` も非対応のため、
+> Gremlin の `coalesce(V().has(...), addV(...))` パターンは成立しない。
+> 代替として `MergeNode` / `MergeRelationship` + C# `if` を使う (§2 / §6 参照)。
+
+### AddEdge — 直積で常に辺を生成
+
+```csharp
+// B で始まる Person × C で始まる Tool に Use 辺を張る (プロパティ付き)。
+long n = g.Nodes<Person>().Where(p => p.Name.StartsWith("B"))
+    .AddEdge(g.Nodes<Tool>().Where(t => t.Name.StartsWith("C")),
+             (p, t) => new Use { Note = $"{p.Name}→{t.Name}" });
+// → Bob × {Cutter, Compiler} = 2 本
+```
+
+プロパティ無し版は SourceGen 糖衣で型引数を省ける:
+
+```csharp
+long n = g.Nodes<Person>().AddUse(g.Nodes<Tool>());
+```
+
+### MergeEdge — 冪等 upsert
+
+```csharp
+// 2 回目は全て既存ヒット (Matched)。プロパティは ON CREATE のみ書かれる。
+var (created, matched) = g.Nodes<Person>()
+    .MergeEdge(g.Nodes<Tool>(),
+               (p, t) => new Use { Note = "auto" });
+```
+
+### 相関版 — 始点ごとに終点を決める
+
+```csharp
+// 各 Person の頭文字で始まる Tool だけに辺を張る。
+long n = g.Nodes<Person>()
+    .AddEdge(p => g.Nodes<Tool>().Where(t => t.Name.StartsWith(p.Name[..1])),
+             (p, t) => new Use { Note = p.Name });
+```
+
+### MergeEdge のコスト
+
+`MergeEdge` の存在判定は `MergeRelationship` の O(out-degree) 走査を内部で使う。
+低 fan-out では問題ないが、高 fan-out ノードで大量の直積 MergeEdge を回すと
+|sources| × |targets| × avg(out-degree) の走査になる。エッジ存在インデックスは
+現時点で非目標であり、高 fan-out での大量 upsert にはコストを意識すること。
+
