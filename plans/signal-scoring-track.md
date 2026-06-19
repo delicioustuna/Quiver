@@ -46,7 +46,7 @@
 |---|---|---|---|
 | SIG-1 | `TryGetVector` 読み戻し API (access methods + tx 公開) | — | 未着手 |
 | SIG-2 | `IDyadicOperator` / `IMonadicOperator` / 組み込み演算子 (Dot/Cosine/Euclidean) | — | **完了** (2026-06-18) |
-| SIG-3 | `PropertyValueType.FloatArray` + SourceGenerator `float[]` ルーティング + `Values<float[]>` | — | 未着手 |
+| SIG-3 | `PropertyValueType.FloatArray` + SourceGenerator `float[]` ルーティング + `Values<float[]>` | — | **完了** (2026-06-19, commit `0a07257`) |
 | SIG-4 | `ApplyDyadicOp` 論理 IR + `ApplyDyadicOperator` 物理 + gather/score 2 相 + DSL | SIG-1, SIG-3 | 未着手 |
 | SIG-5 | `GraphTraversal<float[]>` (Bytes スロット搬送) — トラバーサル版 b | SIG-3 | 未着手 |
 | SIG-6 | `VectorIndexKind.FlatOnly` + `VectorIndexSpec.IndexKind` | — | 未着手 |
