@@ -386,6 +386,7 @@ namespace Quiver.Api
                 "Id",
                 "Entity"})]
         public System.Collections.Generic.List<System.ValueTuple<Quiver.Core.NodeId, T>> ToListWithIds() { }
+        public Quiver.Api.GraphTraversal<float[]> Values(System.Linq.Expressions.Expression<System.Func<T, float[]>> selector) { }
         public Quiver.Api.GraphTraversal<string> Values(string key) { }
         public Quiver.Api.GraphTraversal<string> Values<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>> selector) { }
         public Quiver.Api.TypedGraphTraversal<T> Where(System.Linq.Expressions.Expression<System.Func<T, bool>> predicate) { }
@@ -775,11 +776,21 @@ namespace Quiver.Core
     {
         public CorruptionException(string message, System.Exception? inner = null) { }
     }
+    public readonly struct CosineSimilarityOp : Quiver.Core.IDyadicOperator<float>
+    {
+        public float Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b) { }
+        public float Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b, System.ReadOnlySpan<System.Range> regions) { }
+    }
     public enum DistanceMetric : byte
     {
         Cosine = 1,
         Dot = 2,
         Euclidean = 3,
+    }
+    public readonly struct DotProductOp : Quiver.Core.IDyadicOperator<float>
+    {
+        public float Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b) { }
+        public float Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b, System.ReadOnlySpan<System.Range> regions) { }
     }
     public readonly struct EmbeddingTaskKey : System.IEquatable<Quiver.Core.EmbeddingTaskKey>
     {
@@ -843,6 +854,11 @@ namespace Quiver.Core
         public static long Sequence(long packed) { }
         public static Quiver.Core.EntityKind UnpackKind(long packed) { }
     }
+    public readonly struct EuclideanDistanceOp : Quiver.Core.IDyadicOperator<float>
+    {
+        public float Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b) { }
+        public float Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b, System.ReadOnlySpan<System.Range> regions) { }
+    }
     public sealed class FormatVersionMismatchException : Quiver.Core.GraphDbException
     {
         public FormatVersionMismatchException(string fileKind, byte found, byte expected) { }
@@ -855,6 +871,11 @@ namespace Quiver.Core
         protected GraphDbException(string message) { }
         protected GraphDbException(string message, System.Exception inner) { }
     }
+    public interface IDyadicOperator<TResult>
+    {
+        TResult Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b);
+        TResult Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b, System.ReadOnlySpan<System.Range> regions);
+    }
     public interface IGraphEngine
     {
         Quiver.Core.IVectorCatalog Catalog { get; }
@@ -865,6 +886,11 @@ namespace Quiver.Core
     {
         System.Collections.Generic.IEnumerable<Quiver.Core.EntityRef> EnumerateEntities(Quiver.Core.EntityKind kind);
         bool TryReadStringProperty(Quiver.Core.EntityRef entity, string propertyKey, out string text);
+    }
+    public interface IMonadicOperator<TResult>
+    {
+        TResult Invoke(System.ReadOnlySpan<float> a);
+        TResult Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<System.Range> regions);
     }
     public interface IVectorCatalog
     {
@@ -959,6 +985,7 @@ namespace Quiver.Core
         Double = 16ul,
         String = 32ul,
         Bytes = 64ul,
+        FloatArray = 128ul,
         BoolArray = 131072ul,
         Int32Array = 262144ul,
         Int64Array = 524288ul,
@@ -969,7 +996,7 @@ namespace Quiver.Core
         Scalar = 126ul,
         NumericArray = 1835008ul,
         Array = 8257536ul,
-        Variable = 8257632ul,
+        Variable = 8257760ul,
         Comparable = 60ul,
     }
     public readonly struct RelationshipId : System.IEquatable<Quiver.Core.RelationshipId>
@@ -1262,6 +1289,7 @@ namespace Quiver.Storage.Records
         public System.DateTime DateTimeValue { get; }
         public double DoubleValue { get; }
         public int EncodedSize { get; }
+        public System.ReadOnlySpan<float> FloatArrayValue { get; }
         public int Int32Value { get; }
         public long Int64Value { get; }
         public System.TimeOnly TimeOnlyValue { get; }
@@ -1274,6 +1302,7 @@ namespace Quiver.Storage.Records
         public static Quiver.Storage.Records.PropertyValue FromDateTime(System.DateTime v) { }
         public static Quiver.Storage.Records.PropertyValue FromDateTimeOffset(System.DateTimeOffset v) { }
         public static Quiver.Storage.Records.PropertyValue FromDouble(double v) { }
+        public static Quiver.Storage.Records.PropertyValue FromFloatArray(System.ReadOnlySpan<float> v) { }
         public static Quiver.Storage.Records.PropertyValue FromInt32(int v) { }
         public static Quiver.Storage.Records.PropertyValue FromInt64(long v) { }
         public static Quiver.Storage.Records.PropertyValue FromString(System.ReadOnlySpan<char> v) { }
@@ -1293,6 +1322,7 @@ namespace Quiver.Storage.Records
         Double = 4,
         String = 5,
         Bytes = 6,
+        FloatArray = 7,
     }
     public static class PropertyValueTypeExtensions
     {

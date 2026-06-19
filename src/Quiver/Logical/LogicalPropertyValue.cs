@@ -34,7 +34,8 @@ public readonly struct LogicalPropertyValue
         PropertyValueType.Int64  => new(PropertyValueType.Int64,  value.Int64Value, null),
         PropertyValueType.Double => new(PropertyValueType.Double, BitConverter.DoubleToInt64Bits(value.DoubleValue), null),
         PropertyValueType.String => new(PropertyValueType.String, 0, value.Utf8StringValue.ToArray()),
-        PropertyValueType.Bytes  => new(PropertyValueType.Bytes,  0, value.BytesValue.ToArray()),
+        PropertyValueType.Bytes      => new(PropertyValueType.Bytes,      0, value.BytesValue.ToArray()),
+        PropertyValueType.FloatArray => new(PropertyValueType.FloatArray, 0, System.Runtime.InteropServices.MemoryMarshal.AsBytes(value.FloatArrayValue).ToArray()),
         _ => default,
     };
 
@@ -45,12 +46,13 @@ public readonly struct LogicalPropertyValue
     /// </summary>
     public PropertyValue ToPropertyValue() => Type switch
     {
-        PropertyValueType.Bool   => PropertyValue.FromBool(Scalar != 0),
-        PropertyValueType.Int32  => PropertyValue.FromInt32((int)Scalar),
-        PropertyValueType.Int64  => PropertyValue.FromInt64(Scalar),
-        PropertyValueType.Double => PropertyValue.FromDouble(BitConverter.Int64BitsToDouble(Scalar)),
-        PropertyValueType.String => PropertyValue.FromUtf8(Bytes ?? []),
-        PropertyValueType.Bytes  => PropertyValue.FromBytes(Bytes ?? []),
+        PropertyValueType.Bool       => PropertyValue.FromBool(Scalar != 0),
+        PropertyValueType.Int32      => PropertyValue.FromInt32((int)Scalar),
+        PropertyValueType.Int64      => PropertyValue.FromInt64(Scalar),
+        PropertyValueType.Double     => PropertyValue.FromDouble(BitConverter.Int64BitsToDouble(Scalar)),
+        PropertyValueType.String     => PropertyValue.FromUtf8(Bytes ?? []),
+        PropertyValueType.Bytes      => PropertyValue.FromBytes(Bytes ?? []),
+        PropertyValueType.FloatArray => PropertyValue.FromFloatArray(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>((Bytes ?? []).AsSpan())),
         _ => default,
     };
 }

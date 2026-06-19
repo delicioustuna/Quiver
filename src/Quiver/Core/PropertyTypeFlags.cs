@@ -28,6 +28,8 @@ public enum PropertyTypeFlags : ulong
     String      = 1UL << 5,
     /// <summary>任意バイト列。</summary>
     Bytes       = 1UL << 6,
+    /// <summary>単精度浮動小数点配列 (<see cref="float"/>[]）。</summary>
+    FloatArray  = 1UL << 7,
 
     // Array 系ビット — スカラレーンと 1 対 1 対応で、将来の LPG 配列プロパティ用に予約 (埋め込みベクトルではない)。
 
@@ -54,8 +56,8 @@ public enum PropertyTypeFlags : ulong
     NumericArray    = Int32Array | Int64Array | DoubleArray,
     /// <summary>配列全般。</summary>
     Array           = BoolArray | Int32Array | Int64Array | DoubleArray | StringArray | BytesArray,
-    /// <summary>可変長型 (文字列 / バイト列 / 配列)。</summary>
-    Variable        = String | Bytes | Array,
+    /// <summary>可変長型 (文字列 / バイト列 / float 配列 / LPG 配列)。</summary>
+    Variable        = String | Bytes | FloatArray | Array,
     /// <summary>順序比較可能型 (数値 / 文字列)。</summary>
     Comparable      = Numeric | String,
 }

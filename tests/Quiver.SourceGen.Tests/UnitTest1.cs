@@ -70,6 +70,53 @@ public class GraphNodeGeneratorTests
         generatedSource.Should().Contain("public static void Update(");
         generatedSource.Should().Contain("public static void Delete(");
     }
+
+    [Fact]
+    public void Generator_emits_FloatArray_property_accessors()
+    {
+        var attributeRef = typeof(Quiver.Api.NodeAttribute).Assembly.Location;
+        var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
+
+        var source = """
+            using Quiver.Api;
+            namespace MyApp;
+
+            [Node("Sensor")]
+            public partial class Sensor
+            {
+                [Property]
+                public string Site { get; set; } = "";
+
+                [Property]
+                public float[] Waveform { get; set; }
+            }
+            """;
+
+        var tree = CSharpSyntaxTree.ParseText(source);
+        var references = new[]
+        {
+            MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
+            MetadataReference.CreateFromFile(attributeRef),
+            MetadataReference.CreateFromFile(engineRef),
+        };
+
+        var compilation = CSharpCompilation.Create("TestAssembly",
+            syntaxTrees: [tree],
+            references: references,
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var generator = new GraphNodeGenerator();
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
+        driver = driver.RunGenerators(compilation);
+
+        var result = driver.GetRunResult();
+        var generated = result.GeneratedTrees;
+        generated.Should().NotBeEmpty();
+
+        var generatedSource = generated[0].ToString();
+        generatedSource.Should().Contain("PropertyValue.FromFloatArray(entity.Waveform)");
+        generatedSource.Should().Contain("FloatArrayValue.ToArray()");
+    }
 }
 
 public class GraphRelationshipGeneratorTests

@@ -144,6 +144,10 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     public GraphTraversal<string> Values<TProp>(Expression<Func<T, TProp>> selector)
         => _inner.Values(MemberName(selector));
 
+    /// <summary>式ツリーで指定した <see cref="float"/>[] プロパティ値を取り出す。</summary>
+    public GraphTraversal<float[]> Values(Expression<Func<T, float[]>> selector)
+        => _inner.ValuesFloatArray(MemberName(selector));
+
     // ── 終端 ─────────────────────────────────────────────────────────────────
 
     /// <summary>結果ノードを <typeparamref name="T"/> インスタンスに復元してリストで返す。</summary>

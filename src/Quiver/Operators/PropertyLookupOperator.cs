@@ -123,6 +123,12 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
                 _buffer![srcCols] = new TupleSlot
                     { Type = TupleSlotType.Bytes, BytesOffset = 0, BytesLength = _currentBytes.Length };
             }
+            else if (val.Type == PropertyValueType.FloatArray)
+            {
+                _currentBytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes(val.FloatArrayValue).ToArray();
+                _buffer![srcCols] = new TupleSlot
+                    { Type = TupleSlotType.Bytes, BytesOffset = 0, BytesLength = _currentBytes.Length };
+            }
             else
             {
                 _buffer![srcCols] = PropertyValueToSlot(val);

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Quiver.Core;
 
 namespace Quiver.Storage.Records;
@@ -25,6 +26,8 @@ public enum PropertyValueType : byte
     String = 5,
     /// <summary>任意のバイト列。</summary>
     Bytes = 6,
+    /// <summary>単精度浮動小数点配列 (<see cref="float"/>[]）。内部表現はバイト列 (<see cref="System.Runtime.InteropServices.MemoryMarshal"/> 経由)。</summary>
+    FloatArray = 7,
 }
 
 /// <summary>
@@ -56,6 +59,8 @@ public readonly ref struct PropertyValue
     public ReadOnlySpan<byte> Utf8StringValue => _span;
     /// <summary>生のバイト列値 (<see cref="PropertyValueType.Bytes"/> 用)。</summary>
     public ReadOnlySpan<byte> BytesValue => _span;
+    /// <summary>単精度浮動小数点配列として解釈した値 (<see cref="PropertyValueType.FloatArray"/> 用)。</summary>
+    public ReadOnlySpan<float> FloatArrayValue => MemoryMarshal.Cast<byte, float>(_span);
 
     /// <summary><see cref="bool"/> から <see cref="PropertyValue"/> を生成する。</summary>
     public static PropertyValue FromBool(bool v) => new(PropertyValueType.Bool, v ? 1L : 0L);
@@ -77,6 +82,8 @@ public readonly ref struct PropertyValue
     public static PropertyValue FromUtf8(ReadOnlySpan<byte> v) => new(PropertyValueType.String, 0, v);
     /// <summary>任意のバイト列を <see cref="PropertyValueType.Bytes"/> 値として包む。</summary>
     public static PropertyValue FromBytes(ReadOnlySpan<byte> v) => new(PropertyValueType.Bytes, 0, v);
+    /// <summary>単精度浮動小数点配列を <see cref="PropertyValueType.FloatArray"/> 値として包む。</summary>
+    public static PropertyValue FromFloatArray(ReadOnlySpan<float> v) => new(PropertyValueType.FloatArray, 0, MemoryMarshal.AsBytes(v));
 
     // 日時系 — 物理は Int64。正準化は TemporalCodec に集約 (TimeZone 契約はそこ参照)。
     /// <summary><see cref="DateTime"/> を UTC ticks に正準化して格納する。</summary>

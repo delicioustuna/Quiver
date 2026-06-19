@@ -20,6 +20,7 @@ internal static class GraphNodeEmitter
         ["DateOnly"]       = ("PropertyValue.FromDateOnly(entity.{0})", "tx.GetProperty(id, \"{1}\").DateOnlyValue"),
         ["TimeOnly"]       = ("PropertyValue.FromTimeOnly(entity.{0})", "tx.GetProperty(id, \"{1}\").TimeOnlyValue"),
         ["TimeSpan"]       = ("PropertyValue.FromTimeSpan(entity.{0})", "tx.GetProperty(id, \"{1}\").TimeSpanValue"),
+        ["float[]"]        = ("PropertyValue.FromFloatArray(entity.{0})", "tx.GetProperty(id, \"{1}\").FloatArrayValue.ToArray()"),
     };
 
     private static readonly Dictionary<string, string> _indexCallMap = new()

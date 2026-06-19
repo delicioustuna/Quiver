@@ -77,7 +77,7 @@ internal sealed class PropertyStore : IPropertyStore
         Span<byte> rec = ph.Data.Slice(woff, RecordSize);
         rec.Clear();
 
-        bool spillover = value.Type is PropertyValueType.String or PropertyValueType.Bytes
+        bool spillover = value.Type is PropertyValueType.String or PropertyValueType.Bytes or PropertyValueType.FloatArray
             && value.EncodedSize > InlineCapacity;
 
         byte flags = FlagInUse;
@@ -89,9 +89,13 @@ internal sealed class PropertyStore : IPropertyStore
 
         if (spillover)
         {
-            long blobId = _blobs.Write(value.Type == PropertyValueType.String
-                ? value.Utf8StringValue
-                : value.BytesValue);
+            var blobSpan = value.Type switch
+            {
+                PropertyValueType.String => value.Utf8StringValue,
+                PropertyValueType.FloatArray => System.Runtime.InteropServices.MemoryMarshal.AsBytes(value.FloatArrayValue),
+                _ => value.BytesValue,
+            };
+            long blobId = _blobs.Write(blobSpan);
             RecordHelpers.WriteInt40(rec[30..], blobId);
         }
         else
@@ -140,9 +144,12 @@ internal sealed class PropertyStore : IPropertyStore
             long len = _blobs.GetLength(blobId);
             byte[] buf = new byte[len];
             _blobs.Read(blobId, buf);
-            value = vtype == PropertyValueType.String
-                ? PropertyValue.FromUtf8(buf)
-                : PropertyValue.FromBytes(buf);
+            value = vtype switch
+            {
+                PropertyValueType.String => PropertyValue.FromUtf8(buf),
+                PropertyValueType.FloatArray => PropertyValue.FromFloatArray(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(buf.AsSpan())),
+                _ => PropertyValue.FromBytes(buf),
+            };
         }
         else
         {
@@ -175,7 +182,7 @@ internal sealed class PropertyStore : IPropertyStore
         Span<byte> rec = ph.Data.Slice(woff, RecordSize);
         rec.Clear();
 
-        bool spillover = type is PropertyValueType.String or PropertyValueType.Bytes
+        bool spillover = type is PropertyValueType.String or PropertyValueType.Bytes or PropertyValueType.FloatArray
             && (data?.Length ?? 0) > InlineCapacity;
 
         byte flags = FlagInUse;
@@ -200,6 +207,7 @@ internal sealed class PropertyStore : IPropertyStore
                 PropertyValueType.Double => PropertyValue.FromDouble(BitConverter.Int64BitsToDouble(scalar)),
                 PropertyValueType.String => PropertyValue.FromUtf8((data ?? Array.Empty<byte>()).AsSpan()),
                 PropertyValueType.Bytes  => PropertyValue.FromBytes((data ?? Array.Empty<byte>()).AsSpan()),
+                PropertyValueType.FloatArray => PropertyValue.FromFloatArray(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>((data ?? Array.Empty<byte>()).AsSpan())),
                 _ => throw new Quiver.Core.CorruptionException($"Unknown property type {type}")
             };
             WriteInline(rec[6..], pv);
@@ -476,6 +484,13 @@ internal sealed class PropertyStore : IPropertyStore
                 span.CopyTo(inline[1..]);
                 break;
             }
+            case PropertyValueType.FloatArray:
+            {
+                var span = System.Runtime.InteropServices.MemoryMarshal.AsBytes(v.FloatArrayValue);
+                inline[0] = (byte)span.Length;
+                span.CopyTo(inline[1..]);
+                break;
+            }
         }
     }
 
@@ -489,6 +504,8 @@ internal sealed class PropertyStore : IPropertyStore
                 BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(inline))),
             PropertyValueType.String => PropertyValue.FromUtf8(CopyInlineBytes(inline)),
             PropertyValueType.Bytes => PropertyValue.FromBytes(CopyInlineBytes(inline)),
+            PropertyValueType.FloatArray => PropertyValue.FromFloatArray(
+                System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(CopyInlineBytes(inline))),
             _ => throw new Quiver.Core.CorruptionException($"Unknown property value type {vtype}"),
         };
 

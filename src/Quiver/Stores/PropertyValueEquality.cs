@@ -26,7 +26,8 @@ public static class PropertyValueEqualityHelper
         {
             PropertyValueType.Double => a.Int64Value == b.Int64Value, // raw bits
             PropertyValueType.String => a.Utf8StringValue.SequenceEqual(b.Utf8StringValue),
-            PropertyValueType.Bytes  => a.BytesValue.SequenceEqual(b.BytesValue),
+            PropertyValueType.Bytes      => a.BytesValue.SequenceEqual(b.BytesValue),
+            PropertyValueType.FloatArray => a.FloatArrayValue.SequenceEqual(b.FloatArrayValue),
             _ => false,
         };
     }

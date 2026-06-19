@@ -104,4 +104,27 @@ public class PropertyStoreTests : IDisposable
         while (en.MoveNext()) keys.Add(en.Current.KeyId.Value);
         keys.Should().BeEquivalentTo(new[] { 1 }, "削除した key=2 は visibility で skip される");
     }
+
+    [Fact]
+    public void Create_and_read_FloatArray_inline()
+    {
+        float[] data = [1.0f, 2.0f, 3.0f];
+        var val = PropertyValue.FromFloatArray(data);
+        var id = _store.Create(new PropertyKeyId(10), val, PropertyId.Invalid);
+        using var h = _store.Read(id);
+        h.Value.Type.Should().Be(PropertyValueType.FloatArray);
+        h.Value.FloatArrayValue.ToArray().Should().Equal(data);
+    }
+
+    [Fact]
+    public void Create_and_read_FloatArray_spillover()
+    {
+        var data = new float[256];
+        for (int i = 0; i < data.Length; i++) data[i] = i * 0.5f;
+        var val = PropertyValue.FromFloatArray(data);
+        var id = _store.Create(new PropertyKeyId(11), val, PropertyId.Invalid);
+        using var h = _store.Read(id);
+        h.Value.Type.Should().Be(PropertyValueType.FloatArray);
+        h.Value.FloatArrayValue.ToArray().Should().Equal(data);
+    }
 }

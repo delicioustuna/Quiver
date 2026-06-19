@@ -7,19 +7,16 @@ namespace Quiver.Storage.Records;
 /// </summary>
 public static class PropertyValueTypeExtensions
 {
-    // PropertyValueType values are 1..6 (no zero, no gaps). We size the table to 8
-    // so the JIT can elide bounds checks for the (uint)type < table.Length compare,
-    // and we keep the unused slots at 0 so an out-of-range or zero input yields None.
     private static readonly PropertyTypeFlags[] s_table =
     [
-        PropertyTypeFlags.None,    // 0 (unused)
-        PropertyTypeFlags.Bool,    // 1
-        PropertyTypeFlags.Int32,   // 2
-        PropertyTypeFlags.Int64,   // 3
-        PropertyTypeFlags.Double,  // 4
-        PropertyTypeFlags.String,  // 5
-        PropertyTypeFlags.Bytes,   // 6
-        PropertyTypeFlags.None,    // 7 (reserved)
+        PropertyTypeFlags.None,       // 0 (unused)
+        PropertyTypeFlags.Bool,       // 1
+        PropertyTypeFlags.Int32,      // 2
+        PropertyTypeFlags.Int64,      // 3
+        PropertyTypeFlags.Double,     // 4
+        PropertyTypeFlags.String,     // 5
+        PropertyTypeFlags.Bytes,      // 6
+        PropertyTypeFlags.FloatArray, // 7
     ];
 
     /// <summary>プロパティ値型を対応する <see cref="PropertyTypeFlags"/> ビットへ変換する。</summary>

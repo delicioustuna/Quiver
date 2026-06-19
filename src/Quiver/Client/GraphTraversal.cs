@@ -744,6 +744,16 @@ public sealed class GraphTraversal<T>
         return Chain(lookup, row => row.GetString(propCol), _entityColumn);
     }
 
+    /// <summary>プロパティ <paramref name="key"/> の <see cref="float"/>[] 値を取り出す。</summary>
+    internal GraphTraversal<float[]> ValuesFloatArray(string key)
+    {
+        var lookup = new PropertyLookupOp(_plan, key, EntityKind.Node);
+        int propCol = lookup.PredictedOutputColumnCount - 1;
+        return Chain(lookup, row =>
+            System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(row.GetBytes(propCol).AsSpan()).ToArray(),
+            _entityColumn);
+    }
+
     // ── GC-6: as / select — タプルスキーマ拡張 ──────────────────────────
 
     /// <summary>

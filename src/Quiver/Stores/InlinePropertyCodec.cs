@@ -96,6 +96,7 @@ internal static class InlinePropertyCodec
         PropertyValueType.Double => PropertyValue.FromDouble(BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(val))),
         PropertyValueType.String => PropertyValue.FromUtf8(val),
         PropertyValueType.Bytes => PropertyValue.FromBytes(val),
+        PropertyValueType.FloatArray => PropertyValue.FromFloatArray(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(val)),
         _ => throw new CorruptionException($"unknown inline property type {type}"),
     };
 
@@ -109,6 +110,7 @@ internal static class InlinePropertyCodec
             case PropertyValueType.Double: BinaryPrimitives.WriteInt64LittleEndian(dst, BitConverter.DoubleToInt64Bits(v.DoubleValue)); break;
             case PropertyValueType.String: v.Utf8StringValue.CopyTo(dst); break;
             case PropertyValueType.Bytes: v.BytesValue.CopyTo(dst); break;
+            case PropertyValueType.FloatArray: System.Runtime.InteropServices.MemoryMarshal.AsBytes(v.FloatArrayValue).CopyTo(dst); break;
         }
     }
 
