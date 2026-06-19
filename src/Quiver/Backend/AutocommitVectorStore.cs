@@ -51,6 +51,9 @@ internal sealed class AutocommitVectorStore(IVectorStore underlying, Func<IGraph
 
     public bool TryGetIndex(string name, out VectorIndexSpec spec) => _underlying.TryGetIndex(name, out spec);
 
+    public bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
+        => _underlying.TryGetVector(kind, entityId, indexName, destination);
+
     public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
         => _underlying.KnnSearch(indexName, query, k);
 

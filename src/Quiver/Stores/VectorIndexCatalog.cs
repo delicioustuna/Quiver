@@ -108,7 +108,8 @@ internal sealed class VectorIndexCatalog
             string? norm = ReadString(body, ref pos);
             byte payloadTenant = body[pos++];
             byte hnswTenant = body[pos++];
-            var spec = new VectorIndexSpec(name, kind, new PropertyKeyId(srcKeyId), dim, metric, provider, norm);
+            var indexKind = (VectorIndexKind)body[pos++];
+            var spec = new VectorIndexSpec(name, kind, new PropertyKeyId(srcKeyId), dim, metric, provider, norm, indexKind);
             _entries.Add(new VectorCatalogEntry(spec, payloadTenant, hnswTenant));
         }
     }
@@ -130,6 +131,7 @@ internal sealed class VectorIndexCatalog
             WriteString(body, ref pos, e.Spec.NormalizationProfile);
             body[pos++] = e.PayloadTenant;
             body[pos++] = e.HnswTenant;
+            body[pos++] = (byte)e.Spec.IndexKind;
             if (pos > RecordPageMapping.PageBodySize)
                 throw new StorageException(
                     $"Vector index catalog overflow ({_entries.Count} indexes). Chained pages not yet implemented.");

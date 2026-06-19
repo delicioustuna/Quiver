@@ -1045,11 +1045,17 @@ namespace Quiver.Core
     {
         public VectorException(string message, System.Exception? inner = null) { }
     }
+    public enum VectorIndexKind : byte
+    {
+        HnswFlat = 0,
+        FlatOnly = 1,
+    }
     public sealed class VectorIndexSpec : System.IEquatable<Quiver.Core.VectorIndexSpec>
     {
-        public VectorIndexSpec(string Name, Quiver.Core.EntityKind EntityKind, Quiver.Core.PropertyKeyId SourcePropertyKeyId, int Dimensions, Quiver.Core.DistanceMetric Metric, string ProviderId, string? NormalizationProfile = null) { }
+        public VectorIndexSpec(string Name, Quiver.Core.EntityKind EntityKind, Quiver.Core.PropertyKeyId SourcePropertyKeyId, int Dimensions, Quiver.Core.DistanceMetric Metric, string ProviderId, string? NormalizationProfile = null, Quiver.Core.VectorIndexKind IndexKind = 0) { }
         public int Dimensions { get; init; }
         public Quiver.Core.EntityKind EntityKind { get; init; }
+        public Quiver.Core.VectorIndexKind IndexKind { get; init; }
         public Quiver.Core.DistanceMetric Metric { get; init; }
         public string Name { get; init; }
         public string? NormalizationProfile { get; init; }

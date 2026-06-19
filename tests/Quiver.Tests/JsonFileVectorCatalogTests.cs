@@ -182,4 +182,17 @@ public sealed class JsonFileVectorCatalogTests : IDisposable
         catalog.ListTasks("b").Should().ContainSingle().Which.EntityId.Should().Be(2);
         catalog.ListTasks().Should().HaveCount(2);
     }
+
+    [Fact]
+    public void FlatOnly_IndexKind_persists_across_reopen()
+    {
+        var spec = new VectorIndexSpec(
+            "signal", EntityKind.Node, new PropertyKeyId(1), 256,
+            DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly);
+        new JsonFileVectorCatalog(_path).CreateIndex(spec);
+
+        var loaded = new JsonFileVectorCatalog(_path);
+        loaded.TryGetIndex("signal", out var got).Should().BeTrue();
+        got.IndexKind.Should().Be(VectorIndexKind.FlatOnly);
+    }
 }

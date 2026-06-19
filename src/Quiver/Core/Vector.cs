@@ -19,6 +19,20 @@ public enum DistanceMetric : byte
 }
 
 /// <summary>
+/// ベクトルインデックスの構造種別。<see cref="HnswFlat"/> は HNSW ANN グラフ + payload を保持し
+/// KNN 検索 (vector-first / graph-first) の両方に使える。<see cref="FlatOnly"/> は payload のみ
+/// 保持し HNSW を構築しない — <c>ApplyDyadic</c> (brute-force graph-first) 専用。
+/// </summary>
+public enum VectorIndexKind : byte
+{
+    /// <summary>HNSW ANN グラフ + payload (既定)。KNN / ApplyDyadic 両対応。</summary>
+    HnswFlat = 0,
+    /// <summary>payload のみ。HNSW を構築せず <c>SetVector</c> の upsert コストを削減する。
+    /// vector-first <c>KnnSearch</c> は <see cref="VectorException"/> を投げる。</summary>
+    FlatOnly = 1,
+}
+
+/// <summary>
 /// ベクトルインデックスの宣言的仕様。インデックス作成時に確定し backend カタログに永続化される。
 /// <see cref="SourcePropertyKeyId"/> は埋め込み元となる値を持つプロパティを指す — プロバイダ /
 /// 正規化の扱いは <c>Quiver.Embedding</c> 側にある。
@@ -37,7 +51,8 @@ public sealed record VectorIndexSpec(
     int Dimensions,
     DistanceMetric Metric,
     string ProviderId,
-    string? NormalizationProfile = null);
+    string? NormalizationProfile = null,
+    VectorIndexKind IndexKind = VectorIndexKind.HnswFlat);
 
 /// <summary>KNN 検索の 1 行: どのエンティティがマッチしたかと、その類似度スコア。</summary>
 /// <param name="EntityKind">マッチしたエンティティの種別。</param>

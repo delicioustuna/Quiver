@@ -158,7 +158,8 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
                     i.Dimensions,
                     i.Metric,
                     i.ProviderId,
-                    i.NormalizationProfile);
+                    i.NormalizationProfile,
+                    i.IndexKind);
         }
 
         if (doc.Tasks is not null)
@@ -183,7 +184,7 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
             Indexes = _indexes.Values
                 .Select(s => new IndexDto(
                     s.Name, s.EntityKind, s.SourcePropertyKeyId.Value,
-                    s.Dimensions, s.Metric, s.ProviderId, s.NormalizationProfile))
+                    s.Dimensions, s.Metric, s.ProviderId, s.NormalizationProfile, s.IndexKind))
                 .ToArray(),
             Tasks = _tasks.Values
                 .Select(t => new TaskDto(
@@ -216,7 +217,8 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
         int Dimensions,
         DistanceMetric Metric,
         string ProviderId,
-        string? NormalizationProfile);
+        string? NormalizationProfile,
+        VectorIndexKind IndexKind = VectorIndexKind.HnswFlat);
 
     private sealed record TaskDto(
         EntityKind EntityKind,

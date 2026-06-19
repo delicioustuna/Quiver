@@ -101,4 +101,60 @@ public sealed class PersistentVectorStoreTests : IDisposable
             got.Should().NotContain(EntityRef.Sequence(drop));
         }
     }
+
+    [Fact]
+    public void FlatOnly_SetVector_and_TryGetVector_survive_reopen()
+    {
+        long nid;
+        using (var db = GraphDatabase.Open(_path))
+        {
+            var keyId = db.Schema.GetOrCreatePropertyKey("waveform");
+            db.Vectors.CreateVectorIndex(new VectorIndexSpec(
+                IndexName, EntityKind.Node, keyId, Dim, DistanceMetric.Cosine, "test", null,
+                VectorIndexKind.FlatOnly));
+
+            using var tx = db.BeginTransaction();
+            var n = tx.CreateNode("Sensor");
+            nid = n.Value;
+            db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, [1f, 2f, 3f, 4f]);
+            tx.Commit();
+        }
+
+        using (var db = GraphDatabase.Open(_path))
+        {
+            db.Vectors.TryGetIndex(IndexName, out var spec).Should().BeTrue();
+            spec.IndexKind.Should().Be(VectorIndexKind.FlatOnly);
+
+            var buf = new float[Dim];
+            db.Vectors.TryGetVector(EntityKind.Node, EntityRef.Sequence(nid), IndexName, buf).Should().BeTrue();
+            buf.Should().Equal(1f, 2f, 3f, 4f);
+        }
+    }
+
+    [Fact]
+    public void FlatOnly_KnnSearch_throws()
+    {
+        using var db = GraphDatabase.Open(_path);
+        var keyId = db.Schema.GetOrCreatePropertyKey("waveform");
+        db.Vectors.CreateVectorIndex(new VectorIndexSpec(
+            IndexName, EntityKind.Node, keyId, Dim, DistanceMetric.Cosine, "test", null,
+            VectorIndexKind.FlatOnly));
+
+        var act = () => db.Vectors.KnnSearch(IndexName, new float[Dim], 1);
+        act.Should().Throw<VectorException>().WithMessage("*FlatOnly*");
+    }
+
+    [Fact]
+    public void FlatOnly_KnnSearchBatch_throws()
+    {
+        using var db = GraphDatabase.Open(_path);
+        var keyId = db.Schema.GetOrCreatePropertyKey("waveform");
+        db.Vectors.CreateVectorIndex(new VectorIndexSpec(
+            IndexName, EntityKind.Node, keyId, Dim, DistanceMetric.Cosine, "test", null,
+            VectorIndexKind.FlatOnly));
+
+        var queries = new ReadOnlyMemory<float>[] { new float[Dim] };
+        var act = () => db.Vectors.KnnSearchBatch(IndexName, queries, 1);
+        act.Should().Throw<VectorException>().WithMessage("*FlatOnly*");
+    }
 }

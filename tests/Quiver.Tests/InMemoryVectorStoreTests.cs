@@ -250,6 +250,102 @@ public sealed class InMemoryVectorStoreTests
         }
     }
 
+    [Fact]
+    public void FlatOnly_SetVector_and_TryGetVector_work()
+    {
+        var store = new InMemoryVectorStore();
+        var spec = new VectorIndexSpec(
+            IndexName, EntityKind.Node, new PropertyKeyId(1), 4,
+            DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly);
+        store.CreateVectorIndex(spec);
+
+        float[] vec = [1f, 2f, 3f, 4f];
+        store.SetVector(EntityKind.Node, 1, IndexName, vec);
+
+        var buf = new float[4];
+        store.TryGetVector(EntityKind.Node, 1, IndexName, buf).Should().BeTrue();
+        buf.Should().Equal(vec);
+    }
+
+    [Fact]
+    public void FlatOnly_KnnSearch_throws()
+    {
+        var store = new InMemoryVectorStore();
+        var spec = new VectorIndexSpec(
+            IndexName, EntityKind.Node, new PropertyKeyId(1), 4,
+            DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly);
+        store.CreateVectorIndex(spec);
+        store.SetVector(EntityKind.Node, 1, IndexName, [1f, 0f, 0f, 0f]);
+
+        var act = () => store.KnnSearch(IndexName, new float[] { 1f, 0f, 0f, 0f }, 1);
+        act.Should().Throw<VectorException>().WithMessage("*FlatOnly*");
+    }
+
+    [Fact]
+    public void FlatOnly_KnnSearchBatch_throws()
+    {
+        var store = new InMemoryVectorStore();
+        var spec = new VectorIndexSpec(
+            IndexName, EntityKind.Node, new PropertyKeyId(1), 4,
+            DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly);
+        store.CreateVectorIndex(spec);
+        store.SetVector(EntityKind.Node, 1, IndexName, [1f, 0f, 0f, 0f]);
+
+        var queries = new ReadOnlyMemory<float>[] { new float[] { 1f, 0f, 0f, 0f } };
+        var act = () => store.KnnSearchBatch(IndexName, queries, 1);
+        act.Should().Throw<VectorException>().WithMessage("*FlatOnly*");
+    }
+
+    [Fact]
+    public void FlatOnly_KnnSearchFiltered_works()
+    {
+        var store = new InMemoryVectorStore();
+        var spec = new VectorIndexSpec(
+            IndexName, EntityKind.Node, new PropertyKeyId(1), 4,
+            DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly);
+        store.CreateVectorIndex(spec);
+
+        store.SetVector(EntityKind.Node, 1, IndexName, [1f, 0f, 0f, 0f]);
+        store.SetVector(EntityKind.Node, 2, IndexName, [0f, 1f, 0f, 0f]);
+        store.SetVector(EntityKind.Node, 3, IndexName, [0f, 0f, 1f, 0f]);
+
+        var candidates = new EntityCandidateSet(EntityKind.Node, [1, 2]);
+        using var cursor = store.KnnSearchFiltered(IndexName, new float[] { 1f, 0f, 0f, 0f }, 2, candidates);
+        var results = Drain(cursor);
+        results.Should().HaveCount(2);
+        results[0].EntityId.Should().Be(1);
+    }
+
+    [Fact]
+    public void FlatOnly_RemoveVector_works()
+    {
+        var store = new InMemoryVectorStore();
+        var spec = new VectorIndexSpec(
+            IndexName, EntityKind.Node, new PropertyKeyId(1), 4,
+            DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly);
+        store.CreateVectorIndex(spec);
+
+        store.SetVector(EntityKind.Node, 1, IndexName, [1f, 0f, 0f, 0f]);
+        var buf = new float[4];
+        store.TryGetVector(EntityKind.Node, 1, IndexName, buf).Should().BeTrue();
+
+        store.RemoveVector(EntityKind.Node, 1, IndexName);
+        store.TryGetVector(EntityKind.Node, 1, IndexName, buf).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryGetIndex_returns_IndexKind()
+    {
+        var store = new InMemoryVectorStore();
+        var spec = new VectorIndexSpec(
+            IndexName, EntityKind.Node, new PropertyKeyId(1), 4,
+            DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly);
+        store.CreateVectorIndex(spec);
+
+        store.TryGetIndex(IndexName, out var got).Should().BeTrue();
+        got.IndexKind.Should().Be(VectorIndexKind.FlatOnly);
+    }
+
     private static List<VectorSearchResult> Drain(VectorSearchCursor cursor)
     {
         var list = new List<VectorSearchResult>();

@@ -119,7 +119,8 @@ public sealed class InMemoryVectorStore : IVectorStore
         }
     }
 
-    /// <summary>クエリベクトルに対する上位 <paramref name="k"/> 件の近傍を全件スキャンで検索する。</summary>
+    /// <summary>クエリベクトルに対する上位 <paramref name="k"/> 件の近傍を全件スキャンで検索する。
+    /// <see cref="VectorIndexKind.FlatOnly"/> インデックスでは <see cref="VectorException"/> を投げる。</summary>
     public VectorSearchCursor KnnSearch(
         string indexName,
         ReadOnlySpan<float> query,
@@ -129,6 +130,10 @@ public sealed class InMemoryVectorStore : IVectorStore
             throw new VectorException($"KnnSearch requires positive k (was {k}).");
 
         var idx = GetIndex(indexName);
+        if (idx.Spec.IndexKind == VectorIndexKind.FlatOnly)
+            throw new VectorException(
+                $"Vector index '{indexName}' is FlatOnly and does not support vector-first KnnSearch. " +
+                "Use ApplyDyadic for brute-force scoring.");
         if (query.Length != idx.Spec.Dimensions)
             throw new VectorException(
                 $"Vector index '{indexName}' expects {idx.Spec.Dimensions} dimensions, got {query.Length}.");
@@ -237,9 +242,7 @@ public sealed class InMemoryVectorStore : IVectorStore
 
     /// <summary>
     /// 同一インデックスに対する複数クエリを単一 snapshot 上で評価する。
-    /// outer = queries (Q), inner = corpus (N) でクエリベクトルを L1/L2 に滞留させ、
-    /// ロックは snapshot 取得時の 1 回だけ。クエリごとに独立した <see cref="BoundedMaxHeap"/>
-    /// を持つ。次元不一致はループ前に検出する。
+    /// <see cref="VectorIndexKind.FlatOnly"/> インデックスでは <see cref="VectorException"/> を投げる。
     /// </summary>
     public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
         string indexName,
@@ -253,6 +256,10 @@ public sealed class InMemoryVectorStore : IVectorStore
             return Array.Empty<VectorSearchCursor>();
 
         var idx = GetIndex(indexName);
+        if (idx.Spec.IndexKind == VectorIndexKind.FlatOnly)
+            throw new VectorException(
+                $"Vector index '{indexName}' is FlatOnly and does not support vector-first KnnSearchBatch. " +
+                "Use ApplyDyadic for brute-force scoring.");
         for (int q = 0; q < queries.Count; q++)
         {
             if (queries[q].Length != idx.Spec.Dimensions)
