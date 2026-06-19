@@ -280,9 +280,8 @@ public sealed class GraphTraversal<T>
     /// サブトラバーサル条件でフィルタされた要素のみを通す。(WHERE NOT EXISTS)
     /// </summary>
     /// <param name="innerTraversal">外側の現在エンティティを起点とする内部トラバーサル</param>
-    /// <summary>
-    // (Cypher の <c>WHERE NOT EXISTS{...}</c> 相当)
-    // 例: <c>.Not(t =&gt; t.Out("KNOWS"))</c> — KNOWS エッジを持たないノードのみを通す。
+    // Cypher の WHERE NOT EXISTS{...} 相当。
+    // 例: .Not(t => t.Out("KNOWS")) — KNOWS エッジを持たないノードのみを通す。
     public GraphTraversal<T> Not(Func<SubTraversal, SubTraversal> innerTraversal)
     {
         var capturedInner = innerTraversal;

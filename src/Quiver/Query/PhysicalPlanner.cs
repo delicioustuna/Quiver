@@ -32,7 +32,7 @@ internal static class PhysicalPlanner
         PropertyLookupOp pl       => new PropertyLookupOperator(
                                         Plan(pl.Source, schema), pl.Source.CurrentEntityColumn,
                                         schema.GetOrCreatePropertyKey(pl.Key), pl.Key,
-                                        PropertyTypeFlags.Scalar, pl.Kind),
+                                        PropertyTypeFlags.Scalar | PropertyTypeFlags.FloatArray, pl.Kind),
         LabelNameLookupOp ln      => new LabelNameLookupOperator(
                                         Plan(ln.Source, schema), ln.NodeColumn, schema.GetLabelName),
         RelationshipEndpointOp re => new RelationshipEndpointOperator(
@@ -121,11 +121,21 @@ internal static class PhysicalPlanner
 
     private static IPhysicalOperator PlanApplyDyadic(ApplyDyadicOp ad, ISchemaApi schema)
     {
+        IPhysicalOperator? bSource = null;
+        int bFloatColumn = 0;
+        if (ad.BPlan is not null)
+        {
+            bSource = Plan(ad.BPlan, schema);
+            bFloatColumn = ad.BPlan.PredictedOutputColumnCount - 1;
+        }
+
         return new ApplyDyadicOperator(
             Plan(ad.Source, schema),
             ad.Source.CurrentEntityColumn,
             ad.IndexName,
-            ad.BVector ?? throw new InvalidOperationException("ApplyDyadicOp.BVector must not be null (BPlan path is SIG-5)."),
+            ad.BVector,
+            bSource,
+            bFloatColumn,
             ad.Regions,
             ad.K,
             ad.Scorer,

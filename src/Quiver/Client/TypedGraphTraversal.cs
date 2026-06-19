@@ -193,6 +193,42 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
         return new TypedGraphTraversal<T>(_inner.ApplyDyadicInternal(op), _tx, _schema);
     }
 
+    /// <summary>
+    /// 上流の候補ノードに対しダイアディック演算子でスコアリングする。
+    /// このオーバーロードは <paramref name="b"/> をトラバーサルで受け取り、
+    /// クエリ Open 時に 1 回だけ評価する (uncorrelated sub-query)。
+    /// </summary>
+    /// <typeparam name="TOp">
+    /// <see cref="IDyadicOperator{TResult}"/> を実装する <see langword="struct"/>。
+    /// </typeparam>
+    /// <param name="selector">候補ノードから <c>float[]</c> プロパティを取得するアクセサ式。</param>
+    /// <param name="b">参照ベクトルを返すトラバーサル (Open 時に 1 回だけ評価)。</param>
+    /// <param name="regions">演算対象の部分領域。<c>null</c> で全域。</param>
+    /// <param name="k">返す上位件数。</param>
+    public TypedGraphTraversal<T> ApplyDyadic<TOp>(
+        Expression<Func<T, float[]>> selector,
+        GraphTraversal<float[]> b,
+        Range[]? regions = null,
+        int k = int.MaxValue)
+        where TOp : struct, IDyadicOperator<float>
+    {
+        ArgumentNullException.ThrowIfNull(b);
+        if (k <= 0) throw new ArgumentOutOfRangeException(nameof(k), k, "k must be positive.");
+
+        var propertyName = MemberName(selector);
+        var op = new ApplyDyadicOp(
+            _inner._plan,
+            typeof(TOp),
+            propertyName,
+            propertyName,
+            null,
+            b._plan,
+            regions?.ToArray(),
+            k,
+            CreateDyadicScorer<TOp>());
+        return new TypedGraphTraversal<T>(_inner.ApplyDyadicInternal(op), _tx, _schema);
+    }
+
     private static DyadicScoreFunc CreateDyadicScorer<TOp>() where TOp : struct, IDyadicOperator<float>
     {
         return (a, b, regions) =>

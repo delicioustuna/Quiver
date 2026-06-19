@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.InteropServices;
 using Quiver.Core;
 using Quiver.Query.Logical;
 using Quiver.Transactions;
@@ -18,7 +19,9 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
     private readonly IPhysicalOperator _source;
     private readonly int _sourceNodeColumn;
     private readonly string _indexName;
-    private readonly float[] _bVector;
+    private readonly float[]? _bVectorStatic;
+    private readonly IPhysicalOperator? _bSource;
+    private readonly int _bFloatColumn;
     private readonly Range[]? _regions;
     private readonly int _k;
     private readonly DyadicScoreFunc _scorer;
@@ -34,7 +37,9 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
         IPhysicalOperator source,
         int sourceNodeColumn,
         string indexName,
-        float[] bVector,
+        float[]? bVectorStatic,
+        IPhysicalOperator? bSource,
+        int bFloatColumn,
         Range[]? regions,
         int k,
         DyadicScoreFunc scorer,
@@ -43,7 +48,9 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
         _source = source ?? throw new ArgumentNullException(nameof(source));
         _sourceNodeColumn = sourceNodeColumn;
         _indexName = indexName;
-        _bVector = bVector;
+        _bVectorStatic = bVectorStatic;
+        _bSource = bSource;
+        _bFloatColumn = bFloatColumn;
         _regions = regions;
         _k = k;
         _scorer = scorer;
@@ -56,6 +63,21 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
 
     public void Open(ITransaction tx)
     {
+        float[] bVector;
+        if (_bSource != null)
+        {
+            _bSource.Open(tx);
+            if (!_bSource.MoveNext())
+                throw new VectorException("Traversal 'b' produced no results.");
+            var bytesSpan = _bSource.GetBytes(_bFloatColumn);
+            bVector = MemoryMarshal.Cast<byte, float>(bytesSpan).ToArray();
+            _bSource.Dispose();
+        }
+        else
+        {
+            bVector = _bVectorStatic!;
+        }
+
         _source.Open(tx);
 
         var candidateIds = new List<long>();
@@ -76,7 +98,7 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
 
         int dim = spec.Dimensions;
         ReadOnlySpan<Range> regionSpan = _regions.AsSpan();
-        ReadOnlySpan<float> bSpan = _bVector;
+        ReadOnlySpan<float> bSpan = bVector;
 
         var heap = new VectorKnnHeap(_k);
         int total = candidateIds.Count;

@@ -354,6 +354,10 @@ namespace Quiver.Api
     public sealed class TypedGraphTraversal<T>
         where T : Quiver.Api.IGraphNode<T>
     {
+        public Quiver.Api.TypedGraphTraversal<T> ApplyDyadic<TOp>(System.Linq.Expressions.Expression<System.Func<T, float[]>> selector, Quiver.Api.GraphTraversal<float[]> b, System.Range[]? regions = null, int k = 2147483647)
+            where TOp :  struct, Quiver.Core.IDyadicOperator<float> { }
+        public Quiver.Api.TypedGraphTraversal<T> ApplyDyadic<TOp>(System.Linq.Expressions.Expression<System.Func<T, float[]>> selector, float[] b, System.Range[]? regions = null, int k = 2147483647)
+            where TOp :  struct, Quiver.Core.IDyadicOperator<float> { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Both(string? type = null) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Both<TRel>()
             where TRel : Quiver.Api.IGraphRelationship<TRel> { }
@@ -644,6 +648,7 @@ namespace Quiver
         void SetProperty(Quiver.Core.NodeId nodeId, string key, in Quiver.Storage.Records.PropertyValue value);
         void SetProperty(Quiver.Core.RelationshipId relId, string key, in Quiver.Storage.Records.PropertyValue value);
         void SetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.ReadOnlySpan<float> vector);
+        bool TryGetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.Span<float> destination);
     }
     public interface ISchemaApi
     {
@@ -912,6 +917,7 @@ namespace Quiver.Core
         void RemoveVector(Quiver.Core.EntityKind kind, long entityId, string indexName);
         void SetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.ReadOnlySpan<float> vector);
         bool TryGetIndex(string name, out Quiver.Core.VectorIndexSpec spec);
+        bool TryGetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.Span<float> destination);
     }
     public sealed class InMemoryVectorStore : Quiver.Core.IVectorStore
     {
@@ -924,6 +930,7 @@ namespace Quiver.Core
         public void RemoveVector(Quiver.Core.EntityKind kind, long entityId, string indexName) { }
         public void SetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.ReadOnlySpan<float> vector) { }
         public bool TryGetIndex(string name, out Quiver.Core.VectorIndexSpec spec) { }
+        public bool TryGetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.Span<float> destination) { }
     }
     public sealed class JsonFileVectorCatalog : Quiver.Core.IVectorCatalog
     {
