@@ -174,7 +174,9 @@ internal sealed record FusionOp(
 /// ダイアディック演算子によるスコアリング。上流の候補ノードのベクトルプロパティ <see cref="PropertyName"/>
 /// を <see cref="IDyadicOperator{TResult}.Invoke"/> で <see cref="BVector"/> (or <see cref="BPlan"/> の
 /// 評価結果) とスコアリングし、上位 <see cref="K"/> 件をスコア降順で放出する。
-/// 常に graph-first brute — 索引加速は不可 (任意関数は距離公理を満たさない)。
+/// <see cref="Oversample"/> が <c>null</c> なら全候補を brute-force スコアリングする。
+/// 正の整数が指定された場合は HNSW で <c>K × Oversample</c> 件をプリフィルタし、
+/// その結果のみをカスタム演算子でリランクする (近似)。
 /// </summary>
 internal sealed record ApplyDyadicOp(
     LogicalOp Source,
@@ -185,7 +187,8 @@ internal sealed record ApplyDyadicOp(
     LogicalOp? BPlan,
     Range[]? Regions,
     int K,
-    DyadicScoreFunc Scorer) : LogicalOp
+    DyadicScoreFunc Scorer,
+    int? Oversample = null) : LogicalOp
 {
     public override int CurrentEntityColumn => 0;
     public override int PredictedOutputColumnCount => 1;

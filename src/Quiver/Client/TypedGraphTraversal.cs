@@ -156,8 +156,10 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     /// 格納ベクトル (a) と <paramref name="b"/> を <typeparamref name="TOp"/> で評価し、
     /// スコア降順で上位 <paramref name="k"/> 件を放出する。
     /// <para>
-    /// 索引加速は不可 (任意関数は距離公理を満たさない)。常に graph-first brute で走査する。
-    /// gather/score 2 相分離によりユーザーコードはストアロック外で実行される。
+    /// <paramref name="oversample"/> が <c>null</c> (既定) なら全候補を brute-force スコアリングする。
+    /// 正の整数を指定すると、インデックスの組み込み距離で HNSW から <c>k × oversample</c> 件を
+    /// プリフィルタし、その結果のみをカスタム演算子でリランクする (近似)。
+    /// <see cref="VectorIndexKind.FlatOnly"/> のインデックスでは oversample は使用できない。
     /// </para>
     /// </summary>
     /// <typeparam name="TOp">
@@ -169,15 +171,18 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     /// <param name="b">スコアリング対象のクエリベクトル。</param>
     /// <param name="regions">演算対象の部分領域。<c>null</c> で全域。</param>
     /// <param name="k">返す上位件数。</param>
+    /// <param name="oversample">HNSW プリフィルタの倍率。<c>null</c> で brute-force。</param>
     public TypedGraphTraversal<T> ApplyDyadic<TOp>(
         Expression<Func<T, float[]>> selector,
         float[] b,
         Range[]? regions = null,
-        int k = int.MaxValue)
+        int k = int.MaxValue,
+        int? oversample = null)
         where TOp : struct, IDyadicOperator<float>
     {
         ArgumentNullException.ThrowIfNull(b);
         if (k <= 0) throw new ArgumentOutOfRangeException(nameof(k), k, "k must be positive.");
+        if (oversample is <= 0) throw new ArgumentOutOfRangeException(nameof(oversample), oversample, "oversample must be positive.");
 
         var propertyName = MemberName(selector);
         var op = new ApplyDyadicOp(
@@ -189,7 +194,8 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
             null,
             regions?.ToArray(),
             k,
-            CreateDyadicScorer<TOp>());
+            CreateDyadicScorer<TOp>(),
+            oversample);
         return new TypedGraphTraversal<T>(_inner.ApplyDyadicInternal(op), _tx, _schema);
     }
 
@@ -205,15 +211,18 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     /// <param name="b">参照ベクトルを返すトラバーサル (Open 時に 1 回だけ評価)。</param>
     /// <param name="regions">演算対象の部分領域。<c>null</c> で全域。</param>
     /// <param name="k">返す上位件数。</param>
+    /// <param name="oversample">HNSW プリフィルタの倍率。<c>null</c> で brute-force。</param>
     public TypedGraphTraversal<T> ApplyDyadic<TOp>(
         Expression<Func<T, float[]>> selector,
         GraphTraversal<float[]> b,
         Range[]? regions = null,
-        int k = int.MaxValue)
+        int k = int.MaxValue,
+        int? oversample = null)
         where TOp : struct, IDyadicOperator<float>
     {
         ArgumentNullException.ThrowIfNull(b);
         if (k <= 0) throw new ArgumentOutOfRangeException(nameof(k), k, "k must be positive.");
+        if (oversample is <= 0) throw new ArgumentOutOfRangeException(nameof(oversample), oversample, "oversample must be positive.");
 
         var propertyName = MemberName(selector);
         var op = new ApplyDyadicOp(
@@ -225,7 +234,8 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
             b._plan,
             regions?.ToArray(),
             k,
-            CreateDyadicScorer<TOp>());
+            CreateDyadicScorer<TOp>(),
+            oversample);
         return new TypedGraphTraversal<T>(_inner.ApplyDyadicInternal(op), _tx, _schema);
     }
 

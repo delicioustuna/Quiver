@@ -354,9 +354,9 @@ namespace Quiver.Api
     public sealed class TypedGraphTraversal<T>
         where T : Quiver.Api.IGraphNode<T>
     {
-        public Quiver.Api.TypedGraphTraversal<T> ApplyDyadic<TOp>(System.Linq.Expressions.Expression<System.Func<T, float[]>> selector, Quiver.Api.GraphTraversal<float[]> b, System.Range[]? regions = null, int k = 2147483647)
+        public Quiver.Api.TypedGraphTraversal<T> ApplyDyadic<TOp>(System.Linq.Expressions.Expression<System.Func<T, float[]>> selector, Quiver.Api.GraphTraversal<float[]> b, System.Range[]? regions = null, int k = 2147483647, int? oversample = default)
             where TOp :  struct, Quiver.Core.IDyadicOperator<float> { }
-        public Quiver.Api.TypedGraphTraversal<T> ApplyDyadic<TOp>(System.Linq.Expressions.Expression<System.Func<T, float[]>> selector, float[] b, System.Range[]? regions = null, int k = 2147483647)
+        public Quiver.Api.TypedGraphTraversal<T> ApplyDyadic<TOp>(System.Linq.Expressions.Expression<System.Func<T, float[]>> selector, float[] b, System.Range[]? regions = null, int k = 2147483647, int? oversample = default)
             where TOp :  struct, Quiver.Core.IDyadicOperator<float> { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Both(string? type = null) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Both<TRel>()

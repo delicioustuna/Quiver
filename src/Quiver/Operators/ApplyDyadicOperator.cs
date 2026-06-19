@@ -7,12 +7,18 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// Graph-first brute-force dyadic scoring operator. Drains the upstream source
-/// into a candidate list, gathers stored vectors in chunks via
+/// Graph-first dyadic scoring operator. Drains the upstream source into a candidate
+/// list, gathers stored vectors in chunks via
 /// <see cref="IGraphAccessMethods.TryGetVector"/>, then scores each against <c>b</c>
 /// using a <see cref="DyadicScoreFunc"/> delegate captured at DSL build time.
 /// Gather and score are separated into two phases so that user-supplied operator
 /// code never runs while a store lock is held.
+/// <para>
+/// When <see cref="_oversample"/> is set and the index is <see cref="VectorIndexKind.HnswFlat"/>,
+/// a two-stage pipeline is used: HNSW pre-filters <c>k × oversample</c> candidates
+/// using the index's built-in metric, then the custom operator re-ranks only those
+/// candidates. This trades exactness for speed on large candidate sets.
+/// </para>
 /// </summary>
 internal sealed class ApplyDyadicOperator : IPhysicalOperator
 {
@@ -26,6 +32,7 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
     private readonly int _k;
     private readonly DyadicScoreFunc _scorer;
     private readonly Type _operatorType;
+    private readonly int? _oversample;
 
     private VectorSearchResult[]? _results;
     private int _resultIndex = -1;
@@ -43,7 +50,8 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
         Range[]? regions,
         int k,
         DyadicScoreFunc scorer,
-        Type operatorType)
+        Type operatorType,
+        int? oversample = null)
     {
         _source = source ?? throw new ArgumentNullException(nameof(source));
         _sourceNodeColumn = sourceNodeColumn;
@@ -55,6 +63,7 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
         _k = k;
         _scorer = scorer;
         _operatorType = operatorType;
+        _oversample = oversample;
     }
 
     public TupleSchema Schema { get; } = new([new ColumnDefinition("nodeId", TupleSlotType.NodeId)]);
@@ -96,6 +105,56 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
         if (!tx.Access.TryGetVectorIndexSpec(_indexName, out var spec))
             throw new VectorException($"Vector index '{_indexName}' does not exist.");
 
+        if (_oversample is not null)
+        {
+            _results = OpenOversample(tx, bVector, candidateIds, spec);
+            return;
+        }
+
+        _results = ScoreCandidates(tx, bVector, candidateIds, spec);
+    }
+
+    /// <summary>
+    /// HNSW oversample → custom rerank path. Narrows the candidate set via
+    /// <see cref="IGraphAccessMethods.KnnSearchFiltered"/> using the index's
+    /// built-in metric, then re-scores only the narrowed candidates with the
+    /// custom operator.
+    /// </summary>
+    private VectorSearchResult[] OpenOversample(
+        ITransaction tx,
+        float[] bVector,
+        List<long> upstreamIds,
+        VectorIndexSpec spec)
+    {
+        if (spec.IndexKind == VectorIndexKind.FlatOnly)
+            throw new VectorException(
+                $"Vector index '{_indexName}' is FlatOnly and does not support HNSW oversample. " +
+                "Remove the oversample parameter or use a HnswFlat index.");
+
+        int hnswK = checked(_k * _oversample!.Value);
+        var candidates = new EntityCandidateSet(EntityKind.Node, upstreamIds);
+
+        var narrowedIds = new List<long>();
+        using (var cursor = tx.Access.KnnSearchFiltered(_indexName, bVector, hnswK, candidates))
+        {
+            while (cursor.MoveNext())
+                narrowedIds.Add(cursor.Current.EntityId);
+        }
+
+        if (narrowedIds.Count == 0) return [];
+        return ScoreCandidates(tx, bVector, narrowedIds, spec);
+    }
+
+    /// <summary>
+    /// Gather vectors in chunks and score with the custom operator (shared by both
+    /// brute-force and oversample paths).
+    /// </summary>
+    private VectorSearchResult[] ScoreCandidates(
+        ITransaction tx,
+        float[] bVector,
+        List<long> candidateIds,
+        VectorIndexSpec spec)
+    {
         int dim = spec.Dimensions;
         ReadOnlySpan<Range> regionSpan = _regions.AsSpan();
         ReadOnlySpan<float> bSpan = bVector;
@@ -145,7 +204,7 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
             ArrayPool<long>.Shared.Return(gatherIds);
         }
 
-        _results = heap.ToSortedArray();
+        return heap.ToSortedArray();
     }
 
     public bool MoveNext()

@@ -139,7 +139,8 @@ internal static class PhysicalPlanner
             ad.Regions,
             ad.K,
             ad.Scorer,
-            ad.OperatorType);
+            ad.OperatorType,
+            ad.Oversample);
     }
 
     private static IPhysicalOperator PlanBranch(BranchOp b, ISchemaApi schema)
