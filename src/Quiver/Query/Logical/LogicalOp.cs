@@ -170,6 +170,33 @@ internal sealed record FusionOp(
     public override int PredictedOutputColumnCount => 1;
 }
 
+/// <summary>
+/// ダイアディック演算子によるスコアリング。上流の候補ノードのベクトルプロパティ <see cref="PropertyName"/>
+/// を <see cref="IDyadicOperator{TResult}.Invoke"/> で <see cref="BVector"/> (or <see cref="BPlan"/> の
+/// 評価結果) とスコアリングし、上位 <see cref="K"/> 件をスコア降順で放出する。
+/// 常に graph-first brute — 索引加速は不可 (任意関数は距離公理を満たさない)。
+/// </summary>
+internal sealed record ApplyDyadicOp(
+    LogicalOp Source,
+    Type OperatorType,
+    string PropertyName,
+    string IndexName,
+    float[]? BVector,
+    LogicalOp? BPlan,
+    Range[]? Regions,
+    int K,
+    DyadicScoreFunc Scorer) : LogicalOp
+{
+    public override int CurrentEntityColumn => 0;
+    public override int PredictedOutputColumnCount => 1;
+}
+
+/// <summary>
+/// DSL 構築時にジェネリック型情報を捕捉し、物理層でスコアリングに使うデリゲート。
+/// <see cref="ApplyDyadicOp"/> が <c>System.Type</c> と併せて保持する。
+/// </summary>
+internal delegate float DyadicScoreFunc(ReadOnlySpan<float> a, ReadOnlySpan<float> b, ReadOnlySpan<Range> regions);
+
 /// <summary>プロパティ値を末尾列へマテリアライズする (<c>Values</c> / 集約 row path / sort key)。</summary>
 internal sealed record PropertyLookupOp(LogicalOp Source, string Key, EntityKind Kind) : LogicalOp
 {

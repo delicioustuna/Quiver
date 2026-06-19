@@ -476,6 +476,13 @@ public sealed class GraphTraversal<T>
     }
 
     /// <summary>
+    /// graph-first dyadic scoring。上流の候補ノードからベクトルを gather し、
+    /// ユーザー定義演算子でスコアリングして上位 k 件を放出する。
+    /// </summary>
+    internal GraphTraversal<NodeId> ApplyDyadicInternal(ApplyDyadicOp op)
+        => Rebase<NodeId>(op, static row => row.GetNodeId(0), 0);
+
+    /// <summary>
     /// graph-first 全文検索 (<c>.FilterByKnn</c> の BM25 版)。上流の各ノードを candidate set として
     /// その中だけで BM25 top-k を求める。通常は <c>g.Search(...).HasLabel(...).Has(...)</c> チェーンが
     /// LogicalOptimizer の FullTextPushdown で自動的にこの形へ倒れるため、本メソッドは明示的に

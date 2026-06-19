@@ -102,6 +102,23 @@ public sealed class InMemoryVectorStore : IVectorStore
         }
     }
 
+    /// <inheritdoc/>
+    public bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
+    {
+        var idx = GetIndex(indexName);
+        if (kind != idx.Spec.EntityKind) return false;
+        if (destination.Length < idx.Spec.Dimensions) return false;
+
+        long seq = EntityRef.Sequence(entityId);
+        lock (_gate)
+        {
+            if (!idx.Vectors.TryGetValue(new VectorKey(kind, seq), out var vec))
+                return false;
+            vec.AsSpan().CopyTo(destination);
+            return true;
+        }
+    }
+
     /// <summary>クエリベクトルに対する上位 <paramref name="k"/> 件の近傍を全件スキャンで検索する。</summary>
     public VectorSearchCursor KnnSearch(
         string indexName,

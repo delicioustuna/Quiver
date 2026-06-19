@@ -229,6 +229,7 @@ internal static class LogicalOptimizer
         SortOp x                 => x with { Source = f(x.Source) },
         DedupOp x                => x with { Source = f(x.Source) },
         BranchOp x               => x with { Source = f(x.Source) },
+        ApplyDyadicOp x          => x with { Source = f(x.Source) },
         KnnOp x                  => x.Candidate is null ? x : x with { Candidate = f(x.Candidate) },
         FullTextScanOp x         => x.Candidate is null ? x : x with { Candidate = f(x.Candidate) },
         FusionOp x               => x with { Children = ImmutableArray.CreateRange(x.Children, f) },

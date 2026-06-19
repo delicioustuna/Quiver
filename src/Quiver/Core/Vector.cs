@@ -98,6 +98,14 @@ public interface IVectorStore
     /// <summary>指定エンティティのベクトルをインデックスから除去する。</summary>
     void RemoveVector(EntityKind kind, long entityId, string indexName);
 
+    /// <summary>
+    /// 指定エンティティの格納ベクトルを <paramref name="destination"/> へ読み出す。
+    /// alloc-free — 呼び出し側がインデックスの次元数以上のバッファを用意する。
+    /// 未設定 / 削除済み / 世代不一致 (slot 再利用による stale binding) は <c>false</c>。
+    /// </summary>
+    bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
+        => false;
+
     /// <summary>クエリベクトルに対する上位 <paramref name="k"/> 件の近傍を検索する。</summary>
     VectorSearchCursor KnnSearch(
         string indexName,

@@ -28,6 +28,7 @@ internal static class PhysicalPlanner
         KnnOp k                   => PlanKnn(k, schema),
         FullTextScanOp ft         => PlanFullTextScan(ft, schema),
         FusionOp fu               => PlanFusion(fu, schema),
+        ApplyDyadicOp ad          => PlanApplyDyadic(ad, schema),
         PropertyLookupOp pl       => new PropertyLookupOperator(
                                         Plan(pl.Source, schema), pl.Source.CurrentEntityColumn,
                                         schema.GetOrCreatePropertyKey(pl.Key), pl.Key,
@@ -116,6 +117,19 @@ internal static class PhysicalPlanner
             return new SortOperator(withProp, so.SortColumn, so.Descending);
         }
         return new SortOperator(Plan(so.Source, schema), so.SortColumn, so.Descending);
+    }
+
+    private static IPhysicalOperator PlanApplyDyadic(ApplyDyadicOp ad, ISchemaApi schema)
+    {
+        return new ApplyDyadicOperator(
+            Plan(ad.Source, schema),
+            ad.Source.CurrentEntityColumn,
+            ad.IndexName,
+            ad.BVector ?? throw new InvalidOperationException("ApplyDyadicOp.BVector must not be null (BPlan path is SIG-5)."),
+            ad.Regions,
+            ad.K,
+            ad.Scorer,
+            ad.OperatorType);
     }
 
     private static IPhysicalOperator PlanBranch(BranchOp b, ISchemaApi schema)

@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using Quiver.Api.Internal;
 using Quiver.Core;
+using Quiver.Query.Logical;
 
 namespace Quiver.Api;
 
@@ -147,6 +148,59 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     /// <summary>式ツリーで指定した <see cref="float"/>[] プロパティ値を取り出す。</summary>
     public GraphTraversal<float[]> Values(Expression<Func<T, float[]>> selector)
         => _inner.ValuesFloatArray(MemberName(selector));
+
+    // ── SIG-4: ダイアディック演算子ステップ ──────────────────────────────────
+
+    /// <summary>
+    /// 上流の候補ノードに対し、<paramref name="selector"/> で指定した <c>float[]</c> プロパティの
+    /// 格納ベクトル (a) と <paramref name="b"/> を <typeparamref name="TOp"/> で評価し、
+    /// スコア降順で上位 <paramref name="k"/> 件を放出する。
+    /// <para>
+    /// 索引加速は不可 (任意関数は距離公理を満たさない)。常に graph-first brute で走査する。
+    /// gather/score 2 相分離によりユーザーコードはストアロック外で実行される。
+    /// </para>
+    /// </summary>
+    /// <typeparam name="TOp">
+    /// <see cref="IDyadicOperator{TResult}"/> を実装する <see langword="struct"/>。
+    /// <see cref="DotProductOp"/> / <see cref="CosineSimilarityOp"/> / <see cref="EuclideanDistanceOp"/>
+    /// またはユーザー定義型。
+    /// </typeparam>
+    /// <param name="selector">候補ノードから <c>float[]</c> プロパティを取得するアクセサ式。</param>
+    /// <param name="b">スコアリング対象のクエリベクトル。</param>
+    /// <param name="regions">演算対象の部分領域。<c>null</c> で全域。</param>
+    /// <param name="k">返す上位件数。</param>
+    public TypedGraphTraversal<T> ApplyDyadic<TOp>(
+        Expression<Func<T, float[]>> selector,
+        float[] b,
+        Range[]? regions = null,
+        int k = int.MaxValue)
+        where TOp : struct, IDyadicOperator<float>
+    {
+        ArgumentNullException.ThrowIfNull(b);
+        if (k <= 0) throw new ArgumentOutOfRangeException(nameof(k), k, "k must be positive.");
+
+        var propertyName = MemberName(selector);
+        var op = new ApplyDyadicOp(
+            _inner._plan,
+            typeof(TOp),
+            propertyName,
+            propertyName,
+            b.ToArray(),
+            null,
+            regions?.ToArray(),
+            k,
+            CreateDyadicScorer<TOp>());
+        return new TypedGraphTraversal<T>(_inner.ApplyDyadicInternal(op), _tx, _schema);
+    }
+
+    private static DyadicScoreFunc CreateDyadicScorer<TOp>() where TOp : struct, IDyadicOperator<float>
+    {
+        return (a, b, regions) =>
+        {
+            TOp op = default;
+            return op.Invoke(a, b, regions);
+        };
+    }
 
     // ── 終端 ─────────────────────────────────────────────────────────────────
 

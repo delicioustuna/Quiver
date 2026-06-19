@@ -717,6 +717,12 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         _vectors.RemoveVector(kind, entityId, indexName);
     }
 
+    public bool TryGetVector(Core.EntityKind kind, long entityId, string indexName, Span<float> destination)
+    {
+        if (_vectors is null) return false;
+        return _vectors.TryGetVector(kind, entityId, indexName, destination);
+    }
+
     public void Commit() => _inner.Commit();
     public void Rollback() => _inner.Abort();
     public void Dispose() => _inner.Dispose();

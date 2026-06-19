@@ -133,6 +133,22 @@ internal sealed class PersistentVectorStore : IVectorStore
         }
     }
 
+    /// <inheritdoc/>
+    public bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
+    {
+        IndexHandle h = GetIndex(indexName);
+        if (kind != h.Spec.EntityKind) return false;
+        if (destination.Length < h.Spec.Dimensions) return false;
+
+        long seq = EntityRef.Sequence(entityId);
+        lock (_gate)
+        {
+            if (!h.Payload.TryGet(seq, destination, out var gen))
+                return false;
+            return IsLive(kind, seq, gen);
+        }
+    }
+
     public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
     {
         if (k <= 0) throw new VectorException($"KnnSearch requires positive k (was {k}).");

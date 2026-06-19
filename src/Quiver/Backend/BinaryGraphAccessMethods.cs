@@ -49,6 +49,10 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     public bool TryGetVectorIndexSpec(string indexName, out VectorIndexSpec spec)
         => _vectors.TryGetIndex(indexName, out spec);
 
+    /// <inheritdoc/>
+    public bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
+        => _vectors.TryGetVector(kind, entityId, indexName, destination);
+
     public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
         => _vectors.KnnSearch(indexName, query, k);
 

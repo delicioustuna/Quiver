@@ -161,6 +161,15 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     void RemoveVector(EntityKind kind, long entityId, string indexName)
         => throw new NotSupportedException("This backend does not support transaction-scoped RemoveVector.");
 
+    /// <summary>
+    /// 指定エンティティの格納ベクトルを <paramref name="destination"/> へ読み出す。
+    /// alloc-free — 呼び出し側がインデックスの次元数以上のバッファを用意する。
+    /// 未設定 / 削除済み / 世代不一致 (slot 再利用による stale binding) は <c>false</c>。
+    /// SourceGenerator の <c>float[]</c> プロパティ Load でも内部利用される。
+    /// </summary>
+    bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
+        => throw new NotSupportedException("This backend does not support TryGetVector.");
+
     // ARCH-2: 物理プラン実行 (Execute/ExecuteCursor)、access methods (Access)、隣接ブロック
     // (AdjacencyBlocks) は内部実装型を露出するため公開面から除外し、internal な
     // IGraphTransactionInternal へ移設した (利用者は g.V() ベースの DSL を使う)。

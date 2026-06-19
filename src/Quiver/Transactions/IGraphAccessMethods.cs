@@ -72,6 +72,14 @@ internal interface IGraphAccessMethods
     long AdjacencyFallbackCount { get; }
 
     /// <summary>
+    /// 指定エンティティの格納ベクトルを <paramref name="destination"/> へ読み出す。
+    /// alloc-free — 呼び出し側がインデックスの次元数以上のバッファを用意する。
+    /// 未設定 / 削除済み / 世代不一致は <c>false</c>。
+    /// </summary>
+    bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
+        => false;
+
+    /// <summary>
     /// KNN access path。バックエンドの <see cref="IVectorStore"/> に委譲し、
     /// オペレータがベクトル検索をファーストクラスのスキャンソースとして扱えるようにする。
     /// query スパンは内部でコピーするので、呼び出し側が呼び出し以降も保持する必要はない。
