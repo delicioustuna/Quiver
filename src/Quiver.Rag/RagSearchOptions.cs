@@ -3,7 +3,7 @@ namespace Quiver.Rag;
 /// <summary><see cref="RagSearcher.Search"/> の動作を制御するオプション。</summary>
 public sealed record RagSearchOptions
 {
-    /// <summary>取得する上位件数 (融合後)。既定 10。</summary>
+    /// <summary>取得する上位件数 (融合後)。既定値は 10。</summary>
     public int K { get; init; } = 10;
 
     /// <summary>
@@ -16,8 +16,8 @@ public sealed record RagSearchOptions
     public bool IncludeDocument { get; init; } = true;
 
     /// <summary>
-    /// 文書メタデータの等値制約 (キー → 期待値)。<c>null</c>/空でなければ、<b>検索前</b>に全エントリが
-    /// 一致する文書のチャンクだけを母集団に絞ってから BM25 / KNN を実行する (candidate-side push-down)。
+    /// 文書メタデータの等値制約 (キー → 期待値)。 <c>null</c>/空でなければ、
+    /// <b>検索前</b>に全エントリが一致する文書のチャンクだけを母集団に絞ってから BM25 / KNN を実行する (candidate-side push-down)。
     /// </summary>
     /// <remarks>
     /// <see cref="MetadataFilter"/> の後段フィルタと違い、検索の母集団そのものを制約するため
@@ -30,12 +30,11 @@ public sealed record RagSearchOptions
     public IReadOnlyDictionary<string, string>? MetadataEquals { get; init; }
 
     /// <summary>
-    /// 文書メタデータに対する述語。<c>null</c> でなければ、これが <c>false</c> を返した文書の
-    /// ヒットを結果から除外する。
+    /// 文書メタデータに対する述語。<c>null</c> でなければ、これが <c>false</c> を返した文書のヒットを結果から除外する。
     /// </summary>
     /// <remarks>
-    /// これは<b>後段フィルタ</b>である (上位 <see cref="K"/> 件を取得してから除外する)。フィルタが
-    /// 大半を弾くワークロードでは、条件を満たす文書が存在しても結果が 0 件になり得る (recall hole)。
+    /// これは<b>後段フィルタ</b>である (上位 <see cref="K"/> 件を取得してから除外する)。
+    /// フィルタが大半を弾くワークロードでは、条件を満たす文書が存在しても結果が 0 件になり得る (recall hole)。
     /// 等値制約で十分なら <see cref="MetadataEquals"/> を使うと push-down され recall hole を避けられる。
     /// 範囲条件・複雑な述語など <see cref="MetadataEquals"/> で表せないものに本フィルタを使う。
     /// </remarks>

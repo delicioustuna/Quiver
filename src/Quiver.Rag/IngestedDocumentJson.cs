@@ -9,8 +9,8 @@ namespace Quiver.Rag;
 /// </summary>
 /// <remarks>
 /// source-generated <see cref="JsonSerializerContext"/> を使うため NativeAOT / trim 安全
-/// (反射ベースのシリアライズを持ち込まない)。取込側はこの <see cref="Serialize"/> /
-/// <see cref="Deserialize"/> (または <see cref="Options"/>) を参照することで規約のドリフトを防げる。
+/// (反射ベースのシリアライズを持ち込まない)。
+/// 取込側はこの <see cref="Serialize"/> / <see cref="Deserialize"/> (または <see cref="Options"/>) を参照することで規約のドリフトを防げる。
 /// </remarks>
 public static class IngestedDocumentJson
 {

@@ -7,9 +7,8 @@ using Quiver.Storage.Records;
 namespace Quiver.Rag;
 
 /// <summary>
-/// ハイブリッド検索 (BM25 + KNN を RRF 融合) と graph expansion (隣接チャンク連結・親文書付与) を
-/// 1 API で返す検索器。クエリ実行はエンジン DSL (<c>g.HybridSearch</c> / <c>g.Knn</c> / <c>g.Search</c>) への
-/// 薄い写像に徹し、融合ロジックは持たない。
+/// ハイブリッド検索 (BM25 + KNN を RRF 融合) と graph expansion (隣接チャンク連結・親文書付与) を 1 API で返す検索器。
+/// クエリ実行はエンジン DSL (<c>g.HybridSearch</c> / <c>g.Knn</c> / <c>g.Search</c>) への薄い写像に徹し、融合ロジックは持たない。
 /// </summary>
 public sealed class RagSearcher
 {
@@ -23,8 +22,8 @@ public sealed class RagSearcher
 
     /// <summary>
     /// ハイブリッド検索を実行し、隣接連結済みの上位ヒットを返す。
-    /// <paramref name="queryVector"/> が null/空なら BM25 のみ、<paramref name="queryText"/> が空 (または
-    /// 全文索引無効) なら KNN のみ、両方あれば RRF 融合。両方とも使えないときは空を返す。
+    /// <paramref name="queryVector"/> が null/空なら BM25 のみ、<paramref name="queryText"/> が空
+    /// (または全文索引無効) なら KNN のみ、両方あれば RRF 融合。両方とも使えないときは空を返す。
     /// </summary>
     /// <param name="queryText">全文検索クエリ (空可)。</param>
     /// <param name="queryVector">問い合わせベクトル (null 可)。次元は索引と一致していること。</param>
@@ -145,8 +144,8 @@ public sealed class RagSearcher
 
     /// <summary>
     /// 2 つのランク列を RRF (<c>Σ 1/(60 + rank)</c>, rank は 1 始まり) で融合し上位 <paramref name="k"/> 件を返す。
-    /// candidate 制約付き hybrid 用。エンジン <c>FusionOperator</c> の RRF と同値だが、candidate-bearing な
-    /// <c>g.HybridSearch</c> の DSL が無いため Rag 層で同じ定数 (k0=60) を用いて融合する。
+    /// candidate 制約付き hybrid 用。エンジン <c>FusionOperator</c> の RRF と同値だが、
+    /// candidate-bearing な <c>g.HybridSearch</c> の DSL が無いため Rag 層で同じ定数 (k0=60) を用いて融合する。
     /// 同一チャンクは sequence 空間で名寄せし、同点は sequence 昇順で決定的に整列する。
     /// </summary>
     private static List<NodeId> RrfFuse(List<NodeId> textRanked, List<NodeId> vecRanked, int k)
@@ -291,8 +290,8 @@ public sealed class RagSearcher
     }
 
     /// <summary>
-    /// ordinal 昇順のチャンク列を 1 本の本文へ連結する。チャンカーのオーバーラップは
-    /// CharStart/CharEnd オフセットで除去し、ブロック区切りのギャップには区切りを補う。
+    /// ordinal 昇順のチャンク列を 1 本の本文へ連結する。
+    /// チャンカーのオーバーラップは CharStart/CharEnd オフセットで除去し、ブロック区切りのギャップには区切りを補う。
     /// </summary>
     private static string ConcatChunks(List<ChunkInfo> chunks)
     {
