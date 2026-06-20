@@ -366,6 +366,7 @@ namespace Quiver.Api
             where TRel : Quiver.Api.IGraphRelationship<TRel> { }
         public long Count() { }
         public T? First() { }
+        public Quiver.Api.TypedGraphTraversal<T> Has<TElem>(System.Linq.Expressions.Expression<System.Func<T, System.Collections.Generic.List<TElem>>> selector, TElem value) { }
         public Quiver.Api.TypedGraphTraversal<T> Has<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>> selector, Quiver.Api.PropertyPredicate pred) { }
         public Quiver.Api.TypedGraphTraversal<T> Has<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>> selector, TProp value) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> In(string? type = null) { }
@@ -392,6 +393,7 @@ namespace Quiver.Api
         public System.Collections.Generic.List<System.ValueTuple<Quiver.Core.NodeId, T>> ToListWithIds() { }
         public Quiver.Api.GraphTraversal<float[]> Values(System.Linq.Expressions.Expression<System.Func<T, float[]>> selector) { }
         public Quiver.Api.GraphTraversal<string> Values(string key) { }
+        public Quiver.Api.GraphTraversal<System.Collections.Generic.List<TElem>> Values<TElem>(System.Linq.Expressions.Expression<System.Func<T, System.Collections.Generic.List<TElem>>> selector) { }
         public Quiver.Api.GraphTraversal<string> Values<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>> selector) { }
         public Quiver.Api.TypedGraphTraversal<T> Where(System.Linq.Expressions.Expression<System.Func<T, bool>> predicate) { }
     }

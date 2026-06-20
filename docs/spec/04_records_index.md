@@ -69,6 +69,21 @@
 - Generation は vacuum 後の slot 再利用時にインクリメントされ、ABA エイリアシングを防ぐ
 - Generation オーバーフロー (> 65535): その slot は恒久的に退役する
 
+## マルチバリュープロパティ {#multi-value}
+
+`PropertyCardinality` (`Single=0`, `Set=1`) を `PropertyKeyId` ごとに永続化し、
+同一キーに複数のスカラー値を持てるようにする。ストレージフォーマット変更なし —
+PropertyStore チェーンが MVCC で同一 KeyId の複数エントリを既に許容しているため、
+API / スキーマ層のみの拡張。
+
+- **`AddPropertyValue`**: 既存エントリに xmax スタンプせずに新エントリを prepend (重複時はスキップ)
+- **`RemovePropertyValue`**: 同一 key+value の visible エントリに xmax スタンプ
+- **`GetPropertyValues`**: 同一 keyId の全 visible エントリを `PropertyValuesEnumerator` で列挙
+- **B+Tree インデックス**: 要素単位。`Has("tags", "sensor")` は既存 B+Tree ルックアップで包含クエリとして動作
+- **Cardinality 制約**: `SetProperty` を Set キーに呼ぶと例外、`AddPropertyValue` を Single キーに呼ぶと例外
+- **SourceGenerator**: `List<T>` / `IList<T>` / `IReadOnlyList<T>` を検出し Set cardinality で CRUD を emit
+- **型付きトラバーサル**: `Has(s => s.Tags, "outdoor")` で包含フィルタ、`Values(s => s.Tags)` でノードごとの値リスト取得
+
 ## B+Tree インデックス {#btree}
 
 `BTreeIndex` (`src/Quiver/Index/BTreeIndex.cs`) はディスク常駐の B+Tree を実装する。

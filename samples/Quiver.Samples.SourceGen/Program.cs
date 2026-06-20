@@ -95,6 +95,22 @@ try
         Console.WriteLine($"  Alice が 2024-01 に知った: {recentlyKnown.Count} 件");
         foreach (var p in recentlyKnown)
             Console.WriteLine($"    {p.Name}, age={p.Age}");
+
+        // ── 6. MV-5: 型付き多値プロパティ (List<T>) の包含クエリ + 値取得 ──
+        var devs = g.Nodes<Person>()
+                    .Has(p => p.Tags, "dev")     // ← List<string> の包含チェック (B+Tree 利用)
+                    .ToList();
+        Console.WriteLine();
+        Console.WriteLine($"  Has(Tags, \"dev\"): {devs.Count} 件");
+        foreach (var p in devs)
+            Console.WriteLine($"    {p.Name}, tags=[{string.Join(", ", p.Tags)}]");
+
+        var allTags = g.Nodes<Person>()
+                       .Values(p => p.Tags)      // ← 各ノードの全タグを List<string> で取得
+                       .ToList();
+        Console.WriteLine($"  Values(Tags): {allTags.Count} ノード分");
+        foreach (var tags in allTags)
+            Console.WriteLine($"    [{string.Join(", ", tags)}]");
     }
 }
 finally

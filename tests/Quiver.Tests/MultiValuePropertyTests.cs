@@ -399,6 +399,114 @@ public sealed class MultiValuePropertyTests : IDisposable
         }
     }
 
+    // ── MV-5: TypedGraphTraversal Has/Values for List<T> ────────
+
+    [Fact]
+    public void TypedTraversal_Has_containment_filters_by_element()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.EnsureIndexes<MvSensor>();
+
+        using (var tx = db.BeginTransaction())
+        {
+            var g = tx.G(db.Schema);
+            g.InsertIndexed(new MvSensor { Site = "A", Tags = ["outdoor", "v2"] });
+            g.InsertIndexed(new MvSensor { Site = "B", Tags = ["indoor", "v2"] });
+            g.InsertIndexed(new MvSensor { Site = "C", Tags = ["outdoor"] });
+            tx.Commit();
+        }
+
+        using var ro = db.BeginReadOnlyTransaction();
+        var g2 = ro.G(db.Schema);
+
+        // "outdoor" → A, C
+        var outdoor = g2.Nodes<MvSensor>()
+                        .Has(s => s.Tags, "outdoor")
+                        .ToList();
+        outdoor.Select(s => s.Site).Should().BeEquivalentTo("A", "C");
+
+        // "v2" → A, B
+        var v2 = g2.Nodes<MvSensor>()
+                   .Has(s => s.Tags, "v2")
+                   .ToList();
+        v2.Select(s => s.Site).Should().BeEquivalentTo("A", "B");
+
+        // "nonexistent" → empty
+        g2.Nodes<MvSensor>()
+          .Has(s => s.Tags, "nonexistent")
+          .ToList()
+          .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TypedTraversal_Values_returns_list_per_node()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.EnsureIndexes<MvSensor>();
+
+        using (var tx = db.BeginTransaction())
+        {
+            var g = tx.G(db.Schema);
+            g.InsertIndexed(new MvSensor { Site = "A", Tags = ["outdoor", "v2"] });
+            g.InsertIndexed(new MvSensor { Site = "B", Tags = ["indoor"] });
+            tx.Commit();
+        }
+
+        using var ro = db.BeginReadOnlyTransaction();
+        var allTags = ro.G(db.Schema)
+                        .Nodes<MvSensor>()
+                        .Values(s => s.Tags)
+                        .ToList();
+
+        allTags.Should().HaveCount(2);
+        allTags.SelectMany(t => t).Should().BeEquivalentTo("outdoor", "v2", "indoor");
+    }
+
+    [Fact]
+    public void TypedTraversal_Has_containment_chains_with_Where()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.EnsureIndexes<MvSensor>();
+
+        using (var tx = db.BeginTransaction())
+        {
+            var g = tx.G(db.Schema);
+            g.InsertIndexed(new MvSensor { Site = "A", Floor = 1, Tags = ["outdoor"] });
+            g.InsertIndexed(new MvSensor { Site = "B", Floor = 2, Tags = ["outdoor"] });
+            tx.Commit();
+        }
+
+        using var ro = db.BeginReadOnlyTransaction();
+        var result = ro.G(db.Schema)
+                       .Nodes<MvSensor>()
+                       .Has(s => s.Tags, "outdoor")
+                       .Where(s => s.Floor > 1)
+                       .ToList();
+        result.Should().ContainSingle().Which.Site.Should().Be("B");
+    }
+
+    [Fact]
+    public void TypedTraversal_Values_empty_tags_returns_empty_list()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.EnsureIndexes<MvSensor>();
+
+        using (var tx = db.BeginTransaction())
+        {
+            var g = tx.G(db.Schema);
+            g.InsertIndexed(new MvSensor { Site = "A", Tags = [] });
+            tx.Commit();
+        }
+
+        using var ro = db.BeginReadOnlyTransaction();
+        var allTags = ro.G(db.Schema)
+                        .Nodes<MvSensor>()
+                        .Values(s => s.Tags)
+                        .ToList();
+
+        allTags.Should().ContainSingle().Which.Should().BeEmpty();
+    }
+
     // ── Helper ─────────────────────────────────────────────────────
 
     private static List<string> Collect(PropertyValuesEnumerator enumerator)
@@ -416,4 +524,18 @@ public sealed class MultiValuePropertyTests : IDisposable
             result.Add(enumerator.Current);
         return result;
     }
+}
+
+[Node("MvSensor")]
+internal partial class MvSensor
+{
+    [Indexed("idx_mvsensor_site")]
+    [Property]
+    public string Site { get; set; } = "";
+
+    [Property]
+    public int Floor { get; set; }
+
+    [Property]
+    public List<string> Tags { get; set; } = [];
 }

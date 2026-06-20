@@ -59,6 +59,32 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     }
 
     /// <summary>
+    /// <see cref="List{T}"/> 型 (Set cardinality) プロパティに対する包含フィルタ。
+    /// <paramref name="value"/> を含む要素のみを通す。B+Tree インデックスが存在すれば利用される。
+    /// </summary>
+    /// <typeparam name="TElem">リストの要素型。</typeparam>
+    /// <param name="selector">プロパティへのアクセサ式 (例: <c>p =&gt; p.Tags</c>)。</param>
+    /// <param name="value">包含チェックする値。</param>
+    public TypedGraphTraversal<T> Has<TElem>(Expression<Func<T, List<TElem>>> selector, TElem value)
+    {
+        var key = MemberName(selector);
+        GraphTraversal<NodeId> next;
+        if (typeof(TElem) == typeof(string))
+            next = _inner.Has(key, (string)(object)value!);
+        else if (typeof(TElem) == typeof(int))
+            next = _inner.Has(key, (int)(object)value!);
+        else if (typeof(TElem) == typeof(long))
+            next = _inner.Has(key, (long)(object)value!);
+        else if (typeof(TElem) == typeof(double))
+            next = _inner.Has(key, (double)(object)value!);
+        else if (typeof(TElem) == typeof(bool))
+            next = _inner.Has(key, (bool)(object)value!);
+        else
+            throw new NotSupportedException($"Has<List<{typeof(TElem).Name}>> is not supported.");
+        return new TypedGraphTraversal<T>(next, _tx, _schema);
+    }
+
+    /// <summary>
     /// C# 式ツリーによる述語フィルタ (LINQ ライク)。比較 (<c>&gt; &gt;= &lt; &lt;= == !=</c>)、
     /// <c>&amp;&amp;</c> (暗黙 AND)、同一キーの <c>||</c>、<c>StartsWith/EndsWith/Contains</c>、否定 <c>!</c> に対応する。
     /// 例: <c>.Where(p =&gt; p.Age &gt; 20 &amp;&amp; p.Name.StartsWith("A"))</c>。
@@ -148,6 +174,50 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     /// <summary>式ツリーで指定した <see cref="float"/>[] プロパティ値を取り出す。</summary>
     public GraphTraversal<float[]> Values(Expression<Func<T, float[]>> selector)
         => _inner.ValuesFloatArray(MemberName(selector));
+
+    /// <summary>
+    /// Set cardinality プロパティの全値を <see cref="List{TElem}"/> として取り出す。
+    /// 各ノードに対し <see cref="IGraphTransaction.GetPropertyValues(NodeId, string)"/> を呼び、
+    /// 要素を collect して返す。
+    /// </summary>
+    /// <typeparam name="TElem">リストの要素型。</typeparam>
+    /// <param name="selector">プロパティへのアクセサ式 (例: <c>p =&gt; p.Tags</c>)。</param>
+    public GraphTraversal<List<TElem>> Values<TElem>(Expression<Func<T, List<TElem>>> selector)
+    {
+        var key = MemberName(selector);
+        var tx = _tx;
+        var entityCol = _inner._entityColumn;
+        return new GraphTraversal<List<TElem>>(
+            tx, _inner._schema, _inner._plan,
+            row =>
+            {
+                var nodeId = row.GetNodeId(entityCol);
+                var list = new List<TElem>();
+                var e = tx.GetPropertyValues(nodeId, key);
+                while (e.MoveNext())
+                {
+                    TElem val;
+                    if (typeof(TElem) == typeof(string))
+                        val = (TElem)(object)System.Text.Encoding.UTF8.GetString(e.Current.Utf8StringValue);
+                    else if (typeof(TElem) == typeof(int))
+                        val = (TElem)(object)e.Current.Int32Value;
+                    else if (typeof(TElem) == typeof(long))
+                        val = (TElem)(object)e.Current.Int64Value;
+                    else if (typeof(TElem) == typeof(double))
+                        val = (TElem)(object)e.Current.DoubleValue;
+                    else if (typeof(TElem) == typeof(bool))
+                        val = (TElem)(object)e.Current.BoolValue;
+                    else
+                        throw new NotSupportedException($"Values<List<{typeof(TElem).Name}>> is not supported.");
+                    list.Add(val);
+                }
+                e.Dispose();
+                return list;
+            },
+            entityCol,
+            _inner._aliases,
+            _inner._stats);
+    }
 
     // ── SIG-4: ダイアディック演算子ステップ ──────────────────────────────────
 

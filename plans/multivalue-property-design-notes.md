@@ -180,19 +180,22 @@ SourceGenerator は C# 型から推論:
 
 | ID | 内容 | 依存 | 状態 |
 |---|---|---|---|
-| MV-1 | `PropertyCardinality` enum + スキーマカタログ永続化 | — | 未着手 |
-| MV-2 | `AddPropertyValue` / `RemovePropertyValue` / `GetPropertyValues` API | MV-1 | 未着手 |
-| MV-3 | B+Tree インデックス対応 (要素単位インデックス + 包含クエリ) | MV-1, MV-2 | 未着手 |
-| MV-4 | SourceGenerator `List<T>` 対応 | MV-2, SIG-3 後 | 未着手 |
-| MV-5 | TypedGraphTraversal + サンプル + ドキュメント | MV-1〜4 | 未着手 |
+| MV-1 | `PropertyCardinality` enum + スキーマカタログ永続化 | — | ✅ |
+| MV-2 | `AddPropertyValue` / `RemovePropertyValue` / `GetPropertyValues` API | MV-1 | ✅ |
+| MV-3 | B+Tree インデックス対応 (要素単位インデックス + 包含クエリ) | MV-1, MV-2 | ✅ |
+| MV-4 | SourceGenerator `List<T>` 対応 | MV-2, SIG-3 後 | ✅ |
+| MV-5 | TypedGraphTraversal + サンプル + ドキュメント | MV-1〜4 | ✅ |
 
 並列性: MV-1 は独立着手可。MV-2 → MV-3 は逐次。MV-4 は SIG-3 完了後。
 詳細手順: `.claude/skills/quiver-implement/tasks/multivalue.md`
 
-## 未決定事項
+## 解決済み事項
 
-1. `Has()` のセマンティクス: 単一値キーの「等価」と Set キーの「包含」を
-   同じ `Has()` で扱うか、`HasAny()` 等を分けるか
-2. Set の要素数上限: 安全弁として上限を設けるか
-3. 重複検知のコスト: `AddPropertyValue` 時にチェーン走査で同一 key+value を検査。
-   要素数が多いと O(N)。B+Tree インデックスがあればそちらで高速検知可能
+1. **`Has()` のセマンティクス**: 同じ `Has()` で扱う (MV-5 で確定)。
+   型付き `Has(s => s.Tags, "outdoor")` は `List<TElem>` 専用オーバーロードが
+   コンパイル時に解決し、内部では既存の untyped `Has(key, value)` に委譲する。
+   B+Tree は要素単位でインデックスされているため、包含と等価の区別は不要。
+2. **Set の要素数上限**: 設けない。PropertyStore チェーン走査が O(N) だが、
+   タグ用途では N が小さい前提。大量要素はグラフ構造 (エッジベース) が推奨。
+3. **重複検知のコスト**: チェーン走査で O(N)。B+Tree インデックスでの高速検知は
+   将来の最適化として残す。現状の Set セマンティクスでは N ≤ 数十を想定。
