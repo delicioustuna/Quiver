@@ -9,8 +9,8 @@ namespace Quiver.Rag;
 public sealed record RagStoreOptions
 {
     /// <summary>
-    /// 埋め込みベクトルの次元数。ベクトル索引作成時に固定されるため、後で注入する
-    /// <see cref="IChunkEmbedder.Dimensions"/> と必ず一致させること。
+    /// 埋め込みベクトルの次元数。ベクトル索引作成時に固定されるため、
+    /// 後で注入する <see cref="IChunkEmbedder.Dimensions"/> と必ず一致させること。
     /// </summary>
     public required int EmbeddingDimensions { get; init; }
 
