@@ -137,7 +137,7 @@ internal sealed class QueryOptimizer
     private const double RowAggregateCostPerRow = 50.0;
 
     /// <summary>
-    /// Phase 5d: full-scan 集約で列スキャンと row path のどちらが安いかを判定する。
+    /// full-scan 集約で列スキャンと row path のどちらが安いかを判定する。
     /// 列コスト = (head entries + delta versions) × <see cref="ColumnScanCostPerEntry"/>、
     /// row コスト = 推定行数 × <see cref="RowAggregateCostPerRow"/>。delta が肥大して列が不利になる
     /// 状況 (compaction 前) でのみ row へ倒れる。compaction (5e) で delta は horizon 未満に保たれる。
