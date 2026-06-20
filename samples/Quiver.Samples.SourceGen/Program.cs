@@ -19,18 +19,20 @@ try
     {
         var g = tx.G(db.Schema);
 
-        var aliceId = g.InsertIndexed(new Person { Name = "Alice", Age = 30, Height = 1.65f, CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc) });
-        var bobId   = g.InsertIndexed(new Person { Name = "Bob",   Age = 25, Height = 1.80f, CreatedAt = new DateTime(2024, 6, 1, 0, 0, 0, DateTimeKind.Utc) });
+        var aliceId = g.InsertIndexed(new Person { Name = "Alice", Age = 30, Height = 1.65f, CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Tags = ["dev", "senior"] });
+        var bobId   = g.InsertIndexed(new Person { Name = "Bob",   Age = 25, Height = 1.80f, CreatedAt = new DateTime(2024, 6, 1, 0, 0, 0, DateTimeKind.Utc), Tags = ["dev", "junior"] });
         Console.WriteLine($"  Insert: Alice={aliceId.Value}, Bob={bobId.Value}");
 
         Knows.Insert(tx, aliceId, bobId, new Knows { Since = "2024-01" });
 
         var loaded = g.Load<Person>(aliceId);
-        Console.WriteLine($"  Load: Name={loaded.Name}, Age={loaded.Age}");
+        Console.WriteLine($"  Load: Name={loaded.Name}, Age={loaded.Age}, Tags=[{string.Join(", ", loaded.Tags)}]");
 
         loaded.Age = 31;
+        loaded.Tags = ["dev", "lead"];
         g.Update(aliceId, loaded);
-        Console.WriteLine($"  Update 後: Age={g.Load<Person>(aliceId).Age}");
+        var afterUpdate = g.Load<Person>(aliceId);
+        Console.WriteLine($"  Update 後: Age={afterUpdate.Age}, Tags=[{string.Join(", ", afterUpdate.Tags)}]");
 
         var found = Person.FindByName(tx, "Alice");
         Console.WriteLine($"  FindByName(\"Alice\"): {found.Count} 件, Age={found[0].Entity.Age}");

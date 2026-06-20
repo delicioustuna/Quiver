@@ -117,6 +117,62 @@ public class GraphNodeGeneratorTests
         generatedSource.Should().Contain("PropertyValue.FromFloatArray(entity.Waveform)");
         generatedSource.Should().Contain("FloatArrayValue.ToArray()");
     }
+
+    [Fact]
+    public void Generator_emits_MultiValue_List_property()
+    {
+        var attributeRef = typeof(Quiver.Api.NodeAttribute).Assembly.Location;
+        var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
+
+        var source = """
+            using System.Collections.Generic;
+            using Quiver.Api;
+            namespace MyApp;
+
+            [Node("Sensor")]
+            public partial class Sensor
+            {
+                [Property]
+                public string Site { get; set; } = "";
+
+                [Property]
+                public List<string> Tags { get; set; } = new();
+            }
+            """;
+
+        var tree = CSharpSyntaxTree.ParseText(source);
+        var references = new[]
+        {
+            MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(System.Collections.Generic.List<>).Assembly.Location),
+            MetadataReference.CreateFromFile(attributeRef),
+            MetadataReference.CreateFromFile(engineRef),
+        };
+
+        var compilation = CSharpCompilation.Create("TestAssembly",
+            syntaxTrees: [tree],
+            references: references,
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var generator = new GraphNodeGenerator();
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
+        driver = driver.RunGenerators(compilation);
+
+        var result = driver.GetRunResult();
+        var generated = result.GeneratedTrees;
+        generated.Should().NotBeEmpty();
+
+        var src = generated[0].ToString();
+        // Insert: foreach + AddPropertyValue
+        src.Should().Contain("tx.AddPropertyValue(id, \"Tags\", PropertyValue.FromString(__v))");
+        // Load: GetPropertyValues + collect
+        src.Should().Contain("tx.GetPropertyValues(id, \"Tags\")");
+        src.Should().Contain("List<string>");
+        // Update: diff-based RemovePropertyValue
+        src.Should().Contain("tx.RemovePropertyValue(id, \"Tags\",");
+        // Scalar prop still uses SetProperty
+        src.Should().Contain("tx.SetProperty(id, \"Site\",");
+    }
 }
 
 public class GraphRelationshipGeneratorTests

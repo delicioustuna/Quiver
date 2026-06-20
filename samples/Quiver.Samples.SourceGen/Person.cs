@@ -21,6 +21,9 @@ public partial class Person
     // FT-35 増分2: DateTime は UTC Ticks に正準化して格納 (TimeZone はマシン非依存)。
     [Property]
     public DateTime CreatedAt { get; set; }
+
+    [Property]
+    public List<string> Tags { get; set; } = [];
 }
 
 [Relationship<Person, Person>("KNOWS")]

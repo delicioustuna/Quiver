@@ -84,12 +84,26 @@ public sealed class GraphNodeGenerator : IIncrementalGenerator
                 continue;
 
             var typeName = prop.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+            bool isMultiValued = false;
+
+            if (prop.Type is INamedTypeSymbol { IsGenericType: true } namedType
+                && namedType.TypeArguments.Length == 1
+                && namedType.OriginalDefinition.ContainingNamespace is { } ns
+                && ns.ToDisplayString() == "System.Collections.Generic"
+                && namedType.OriginalDefinition.Name is "List" or "IList" or "IReadOnlyList")
+            {
+                isMultiValued = true;
+                typeName = namedType.TypeArguments[0]
+                    .ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+            }
+
             model.Properties.Add(new PropertyModel
             {
                 PropertyName = prop.Name,
                 GraphKey = graphKey,
                 CSharpType = typeName,
                 IndexName = indexName,
+                IsMultiValued = isMultiValued,
             });
         }
 

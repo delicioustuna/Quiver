@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 
 namespace Quiver.SourceGen;
 
@@ -14,13 +14,46 @@ internal static class GraphNodeEmitter
         ["float"]   = ("PropertyValue.FromDouble((double)entity.{0})", "(float)tx.GetProperty(id, \"{1}\").DoubleValue"),
         ["Half"]    = ("PropertyValue.FromDouble((double)entity.{0})", "(System.Half)tx.GetProperty(id, \"{1}\").DoubleValue"),
         ["bool"]    = ("PropertyValue.FromBool(entity.{0})", "tx.GetProperty(id, \"{1}\").BoolValue"),
-        // FT-35 (増分2): 日時系は Int64 (Ticks/DayNumber) に正準化して格納。TimeZone 契約は TemporalCodec。
         ["DateTime"]       = ("PropertyValue.FromDateTime(entity.{0})", "tx.GetProperty(id, \"{1}\").DateTimeValue"),
         ["DateTimeOffset"] = ("PropertyValue.FromDateTimeOffset(entity.{0})", "tx.GetProperty(id, \"{1}\").DateTimeOffsetValue"),
         ["DateOnly"]       = ("PropertyValue.FromDateOnly(entity.{0})", "tx.GetProperty(id, \"{1}\").DateOnlyValue"),
         ["TimeOnly"]       = ("PropertyValue.FromTimeOnly(entity.{0})", "tx.GetProperty(id, \"{1}\").TimeOnlyValue"),
         ["TimeSpan"]       = ("PropertyValue.FromTimeSpan(entity.{0})", "tx.GetProperty(id, \"{1}\").TimeSpanValue"),
         ["float[]"]        = ("PropertyValue.FromFloatArray(entity.{0})", "tx.GetProperty(id, \"{1}\").FloatArrayValue.ToArray()"),
+    };
+
+    // Multi-value: PropertyValue.From*(loopVar) per element type
+    private static readonly Dictionary<string, string> _mvWriteExpr = new()
+    {
+        ["string"]  = "PropertyValue.FromString(__v)",
+        ["int"]     = "PropertyValue.FromInt32(__v)",
+        ["long"]    = "PropertyValue.FromInt64(__v)",
+        ["double"]  = "PropertyValue.FromDouble(__v)",
+        ["float"]   = "PropertyValue.FromDouble((double)__v)",
+        ["Half"]    = "PropertyValue.FromDouble((double)__v)",
+        ["bool"]    = "PropertyValue.FromBool(__v)",
+        ["DateTime"]       = "PropertyValue.FromDateTime(__v)",
+        ["DateTimeOffset"] = "PropertyValue.FromDateTimeOffset(__v)",
+        ["DateOnly"]       = "PropertyValue.FromDateOnly(__v)",
+        ["TimeOnly"]       = "PropertyValue.FromTimeOnly(__v)",
+        ["TimeSpan"]       = "PropertyValue.FromTimeSpan(__v)",
+    };
+
+    // Multi-value: enumerator.Current -> CLR type
+    private static readonly Dictionary<string, string> _mvReadExpr = new()
+    {
+        ["string"]  = "System.Text.Encoding.UTF8.GetString(__e.Current.Utf8StringValue)",
+        ["int"]     = "__e.Current.Int32Value",
+        ["long"]    = "__e.Current.Int64Value",
+        ["double"]  = "__e.Current.DoubleValue",
+        ["float"]   = "(float)__e.Current.DoubleValue",
+        ["Half"]    = "(System.Half)__e.Current.DoubleValue",
+        ["bool"]    = "__e.Current.BoolValue",
+        ["DateTime"]       = "__e.Current.DateTimeValue",
+        ["DateTimeOffset"] = "__e.Current.DateTimeOffsetValue",
+        ["DateOnly"]       = "__e.Current.DateOnlyValue",
+        ["TimeOnly"]       = "__e.Current.TimeOnlyValue",
+        ["TimeSpan"]       = "__e.Current.TimeSpanValue",
     };
 
     private static readonly Dictionary<string, string> _indexCallMap = new()
@@ -32,8 +65,6 @@ internal static class GraphNodeEmitter
         ["double"]  = "tx.IndexInsert(\"{0}\", entity.{1}, id);",
     };
 
-    // ARCH-2: 生成コードは公開 API のみを使う。索引シークは tx.SeekIndex(name, PropertyValue)
-    // (NodeIndexSeekOperator / LiteralProvider / tx.Execute は internal 化したため不可)。
     private static readonly Dictionary<string, string> _seekCallMap = new()
     {
         ["string"]  = "Quiver.Storage.Records.PropertyValue.FromString(value)",
@@ -43,8 +74,6 @@ internal static class GraphNodeEmitter
         ["double"]  = "Quiver.Storage.Records.PropertyValue.FromDouble(value)",
     };
 
-    // PW-18 follow-up: C# 型から既定の IndexKind を推論するマップ。
-    // [Indexed] がここに無い型に付いた場合、EnsureIndexes / CreateIndex 経路は対象外。
     private static readonly Dictionary<string, string> _indexKindMap = new()
     {
         ["string"]  = "Quiver.IndexKind.StringEquality",
@@ -73,9 +102,8 @@ internal static class GraphNodeEmitter
         }
 
         var indexedProps = model.Properties.FindAll(p => p.IndexName != null);
-        bool hasIndexed  = indexedProps.Count > 0;
+        var multiValueProps = model.Properties.FindAll(p => p.IsMultiValued);
 
-        // IGraphNode<T> 実装宣言。PW-18 follow-up: スキーマ宣言用に IGraphNodeSchema<T> も実装する。
         sb.AppendLine($"partial class {model.ClassName} : Quiver.Api.IGraphNode<{model.ClassName}>, Quiver.IGraphNodeSchema<{model.ClassName}>");
         sb.AppendLine("{");
         sb.AppendLine($"    public static string GraphLabel => \"{model.Label}\";");
@@ -86,12 +114,17 @@ internal static class GraphNodeEmitter
         sb.AppendLine("    {");
         sb.AppendLine($"        var id = tx.CreateNode(\"{model.Label}\");");
         foreach (var prop in model.Properties)
-            EmitSetProperty(sb, prop);
+        {
+            if (prop.IsMultiValued)
+                EmitInsertMultiValue(sb, prop);
+            else
+                EmitSetProperty(sb, prop);
+        }
         sb.AppendLine("        return id;");
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // InsertIndexed — always generated (falls back to Insert when no indexed props)
+        // InsertIndexed
         sb.AppendLine($"    public static Quiver.Core.NodeId InsertIndexed(IGraphTransaction tx, {model.ClassName} entity)");
         sb.AppendLine("    {");
         sb.AppendLine("        var id = Insert(tx, entity);");
@@ -107,29 +140,51 @@ internal static class GraphNodeEmitter
         // Load
         sb.AppendLine($"    public static {model.ClassName} Load(IGraphTransaction tx, Quiver.Core.NodeId id)");
         sb.AppendLine("    {");
-        sb.AppendLine($"        return new {model.ClassName}");
-        sb.AppendLine("        {");
-        foreach (var prop in model.Properties)
+        if (multiValueProps.Count > 0)
         {
-            if (_typeMap.TryGetValue(prop.CSharpType, out var map))
-                sb.AppendLine($"            {prop.PropertyName} = {string.Format(map.read, prop.PropertyName, prop.GraphKey)},");
+            sb.AppendLine($"        var __entity = new {model.ClassName}");
+            sb.AppendLine("        {");
+            foreach (var prop in model.Properties)
+            {
+                if (!prop.IsMultiValued && _typeMap.TryGetValue(prop.CSharpType, out var map))
+                    sb.AppendLine($"            {prop.PropertyName} = {string.Format(map.read, prop.PropertyName, prop.GraphKey)},");
+            }
+            sb.AppendLine("        };");
+            foreach (var prop in multiValueProps)
+                EmitLoadMultiValue(sb, prop);
+            sb.AppendLine("        return __entity;");
         }
-        sb.AppendLine("        };");
+        else
+        {
+            sb.AppendLine($"        return new {model.ClassName}");
+            sb.AppendLine("        {");
+            foreach (var prop in model.Properties)
+            {
+                if (_typeMap.TryGetValue(prop.CSharpType, out var map))
+                    sb.AppendLine($"            {prop.PropertyName} = {string.Format(map.read, prop.PropertyName, prop.GraphKey)},");
+            }
+            sb.AppendLine("        };");
+        }
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // Update (formerly Save)
+        // Update
         sb.AppendLine($"    public static void Update(IGraphTransaction tx, Quiver.Core.NodeId id, {model.ClassName} entity)");
         sb.AppendLine("    {");
         foreach (var prop in model.Properties)
-            EmitSetProperty(sb, prop);
+        {
+            if (prop.IsMultiValued)
+                EmitUpdateMultiValue(sb, prop);
+            else
+                EmitSetProperty(sb, prop);
+        }
         sb.AppendLine("    }");
         sb.AppendLine();
 
         // Delete
         sb.AppendLine($"    public static void Delete(IGraphTransaction tx, Quiver.Core.NodeId id) => tx.DeleteNode(id);");
 
-        // PW-18 follow-up: EnsureIndexes — [Indexed] 付き全プロパティ分の CreateIndex を発行
+        // EnsureIndexes
         sb.AppendLine();
         sb.AppendLine("    public static void EnsureIndexes(Quiver.ISchemaApi schema)");
         sb.AppendLine("    {");
@@ -141,7 +196,7 @@ internal static class GraphNodeEmitter
         }
         sb.AppendLine("    }");
 
-        // PW-18 follow-up: EnsureIndex(propertyName, kindOverride?) — 単一プロパティ用 (冪等)
+        // EnsureIndex (single property)
         sb.AppendLine();
         sb.AppendLine("    public static void EnsureIndex(Quiver.ISchemaApi schema, string propertyName, Quiver.IndexKind? kindOverride)");
         sb.AppendLine("    {");
@@ -160,7 +215,7 @@ internal static class GraphNodeEmitter
         sb.AppendLine("        }");
         sb.AppendLine("    }");
 
-        // FindBy* — one method per [Indexed] property
+        // FindBy*
         foreach (var prop in indexedProps)
         {
             if (!_seekCallMap.TryGetValue(prop.CSharpType, out var seekExpr)) continue;
@@ -189,5 +244,51 @@ internal static class GraphNodeEmitter
         if (!_typeMap.TryGetValue(prop.CSharpType, out var map)) return;
         var writeExpr = string.Format(map.write, prop.PropertyName, prop.GraphKey);
         sb.AppendLine($"        tx.SetProperty(id, \"{prop.GraphKey}\", {writeExpr});");
+    }
+
+    private static void EmitInsertMultiValue(StringBuilder sb, PropertyModel prop)
+    {
+        if (!_mvWriteExpr.TryGetValue(prop.CSharpType, out var writeExpr)) return;
+        sb.AppendLine($"        if (entity.{prop.PropertyName} != null)");
+        sb.AppendLine("        {");
+        sb.AppendLine($"            foreach (var __v in entity.{prop.PropertyName})");
+        sb.AppendLine($"                tx.AddPropertyValue(id, \"{prop.GraphKey}\", {writeExpr});");
+        sb.AppendLine("        }");
+    }
+
+    private static void EmitLoadMultiValue(StringBuilder sb, PropertyModel prop)
+    {
+        if (!_mvReadExpr.TryGetValue(prop.CSharpType, out var readExpr)) return;
+        sb.AppendLine("        {");
+        sb.AppendLine($"            var __list = new System.Collections.Generic.List<{prop.CSharpType}>();");
+        sb.AppendLine($"            var __e = tx.GetPropertyValues(id, \"{prop.GraphKey}\");");
+        sb.AppendLine("            while (__e.MoveNext())");
+        sb.AppendLine($"                __list.Add({readExpr});");
+        sb.AppendLine("            __e.Dispose();");
+        sb.AppendLine($"            __entity.{prop.PropertyName} = __list;");
+        sb.AppendLine("        }");
+    }
+
+    private static void EmitUpdateMultiValue(StringBuilder sb, PropertyModel prop)
+    {
+        if (!_mvWriteExpr.TryGetValue(prop.CSharpType, out var writeExpr)) return;
+        if (!_mvReadExpr.TryGetValue(prop.CSharpType, out var readExpr)) return;
+        sb.AppendLine("        {");
+        sb.AppendLine($"            var __old = new System.Collections.Generic.HashSet<{prop.CSharpType}>();");
+        sb.AppendLine($"            var __e = tx.GetPropertyValues(id, \"{prop.GraphKey}\");");
+        sb.AppendLine("            while (__e.MoveNext())");
+        sb.AppendLine($"                __old.Add({readExpr});");
+        sb.AppendLine("            __e.Dispose();");
+        sb.AppendLine($"            if (entity.{prop.PropertyName} != null)");
+        sb.AppendLine("            {");
+        sb.AppendLine($"                foreach (var __v in entity.{prop.PropertyName})");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    if (!__old.Remove(__v))");
+        sb.AppendLine($"                        tx.AddPropertyValue(id, \"{prop.GraphKey}\", {writeExpr});");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine($"            foreach (var __v in __old)");
+        sb.AppendLine($"                tx.RemovePropertyValue(id, \"{prop.GraphKey}\", {writeExpr});");
+        sb.AppendLine("        }");
     }
 }

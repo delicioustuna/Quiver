@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 
 namespace Quiver.SourceGen;
 
@@ -14,12 +14,43 @@ internal static class GraphRelationshipEmitter
         ["float"]   = ("PropertyValue.FromDouble((double)entity.{0})", "(float)tx.GetProperty(id, \"{1}\").DoubleValue"),
         ["Half"]    = ("PropertyValue.FromDouble((double)entity.{0})", "(System.Half)tx.GetProperty(id, \"{1}\").DoubleValue"),
         ["bool"]    = ("PropertyValue.FromBool(entity.{0})", "tx.GetProperty(id, \"{1}\").BoolValue"),
-        // FT-35 (増分2): 日時系は Int64 (Ticks/DayNumber) に正準化して格納。TimeZone 契約は TemporalCodec。
         ["DateTime"]       = ("PropertyValue.FromDateTime(entity.{0})", "tx.GetProperty(id, \"{1}\").DateTimeValue"),
         ["DateTimeOffset"] = ("PropertyValue.FromDateTimeOffset(entity.{0})", "tx.GetProperty(id, \"{1}\").DateTimeOffsetValue"),
         ["DateOnly"]       = ("PropertyValue.FromDateOnly(entity.{0})", "tx.GetProperty(id, \"{1}\").DateOnlyValue"),
         ["TimeOnly"]       = ("PropertyValue.FromTimeOnly(entity.{0})", "tx.GetProperty(id, \"{1}\").TimeOnlyValue"),
         ["TimeSpan"]       = ("PropertyValue.FromTimeSpan(entity.{0})", "tx.GetProperty(id, \"{1}\").TimeSpanValue"),
+    };
+
+    private static readonly Dictionary<string, string> _mvWriteExpr = new()
+    {
+        ["string"]  = "PropertyValue.FromString(__v)",
+        ["int"]     = "PropertyValue.FromInt32(__v)",
+        ["long"]    = "PropertyValue.FromInt64(__v)",
+        ["double"]  = "PropertyValue.FromDouble(__v)",
+        ["float"]   = "PropertyValue.FromDouble((double)__v)",
+        ["Half"]    = "PropertyValue.FromDouble((double)__v)",
+        ["bool"]    = "PropertyValue.FromBool(__v)",
+        ["DateTime"]       = "PropertyValue.FromDateTime(__v)",
+        ["DateTimeOffset"] = "PropertyValue.FromDateTimeOffset(__v)",
+        ["DateOnly"]       = "PropertyValue.FromDateOnly(__v)",
+        ["TimeOnly"]       = "PropertyValue.FromTimeOnly(__v)",
+        ["TimeSpan"]       = "PropertyValue.FromTimeSpan(__v)",
+    };
+
+    private static readonly Dictionary<string, string> _mvReadExpr = new()
+    {
+        ["string"]  = "System.Text.Encoding.UTF8.GetString(__e.Current.Utf8StringValue)",
+        ["int"]     = "__e.Current.Int32Value",
+        ["long"]    = "__e.Current.Int64Value",
+        ["double"]  = "__e.Current.DoubleValue",
+        ["float"]   = "(float)__e.Current.DoubleValue",
+        ["Half"]    = "(System.Half)__e.Current.DoubleValue",
+        ["bool"]    = "__e.Current.BoolValue",
+        ["DateTime"]       = "__e.Current.DateTimeValue",
+        ["DateTimeOffset"] = "__e.Current.DateTimeOffsetValue",
+        ["DateOnly"]       = "__e.Current.DateOnlyValue",
+        ["TimeOnly"]       = "__e.Current.TimeOnlyValue",
+        ["TimeSpan"]       = "__e.Current.TimeSpanValue",
     };
 
     public static string Emit(GraphRelationshipModel model)
@@ -40,6 +71,8 @@ internal static class GraphRelationshipEmitter
             sb.AppendLine();
         }
 
+        var multiValueProps = model.Properties.FindAll(p => p.IsMultiValued);
+
         sb.AppendLine($"partial class {model.ClassName} : Quiver.Api.IGraphRelationship<{model.ClassName}, {model.SourceFqn}, {model.TargetFqn}>");
         sb.AppendLine("{");
         sb.AppendLine($"    public static string GraphType => \"{model.RelType}\";");
@@ -50,7 +83,12 @@ internal static class GraphRelationshipEmitter
         sb.AppendLine("    {");
         sb.AppendLine($"        var id = tx.CreateRelationship(from, to, \"{model.RelType}\");");
         foreach (var prop in model.Properties)
-            EmitSetProperty(sb, prop);
+        {
+            if (prop.IsMultiValued)
+                EmitInsertMultiValue(sb, prop);
+            else
+                EmitSetProperty(sb, prop);
+        }
         sb.AppendLine("        return id;");
         sb.AppendLine("    }");
         sb.AppendLine();
@@ -58,14 +96,31 @@ internal static class GraphRelationshipEmitter
         // Load
         sb.AppendLine($"    public static {model.ClassName} Load(IGraphTransaction tx, Quiver.Core.RelationshipId id)");
         sb.AppendLine("    {");
-        sb.AppendLine($"        return new {model.ClassName}");
-        sb.AppendLine("        {");
-        foreach (var prop in model.Properties)
+        if (multiValueProps.Count > 0)
         {
-            if (_typeMap.TryGetValue(prop.CSharpType, out var map))
-                sb.AppendLine($"            {prop.PropertyName} = {string.Format(map.read, prop.PropertyName, prop.GraphKey)},");
+            sb.AppendLine($"        var __entity = new {model.ClassName}");
+            sb.AppendLine("        {");
+            foreach (var prop in model.Properties)
+            {
+                if (!prop.IsMultiValued && _typeMap.TryGetValue(prop.CSharpType, out var map))
+                    sb.AppendLine($"            {prop.PropertyName} = {string.Format(map.read, prop.PropertyName, prop.GraphKey)},");
+            }
+            sb.AppendLine("        };");
+            foreach (var prop in multiValueProps)
+                EmitLoadMultiValue(sb, prop);
+            sb.AppendLine("        return __entity;");
         }
-        sb.AppendLine("        };");
+        else
+        {
+            sb.AppendLine($"        return new {model.ClassName}");
+            sb.AppendLine("        {");
+            foreach (var prop in model.Properties)
+            {
+                if (_typeMap.TryGetValue(prop.CSharpType, out var map))
+                    sb.AppendLine($"            {prop.PropertyName} = {string.Format(map.read, prop.PropertyName, prop.GraphKey)},");
+            }
+            sb.AppendLine("        };");
+        }
         sb.AppendLine("    }");
         sb.AppendLine();
 
@@ -73,7 +128,12 @@ internal static class GraphRelationshipEmitter
         sb.AppendLine($"    public static void Update(IGraphTransaction tx, Quiver.Core.RelationshipId id, {model.ClassName} entity)");
         sb.AppendLine("    {");
         foreach (var prop in model.Properties)
-            EmitSetProperty(sb, prop);
+        {
+            if (prop.IsMultiValued)
+                EmitUpdateMultiValue(sb, prop);
+            else
+                EmitSetProperty(sb, prop);
+        }
         sb.AppendLine("    }");
         sb.AppendLine();
 
@@ -83,8 +143,7 @@ internal static class GraphRelationshipEmitter
         sb.AppendLine("}");
         sb.AppendLine();
 
-        // Hop 型保存トラバーサル糖衣 (ARCH-8): g.Nodes<Source>().<RelType>() が
-        // TypedGraphTraversal<Target> を返す。型安全な Out<TRel, TTarget>() を被せる薄い拡張。
+        // Hop 型保存トラバーサル糖衣 (ARCH-8)
         sb.AppendLine($"/// <summary>{model.ClassName} (型保存トラバーサル糖衣) — SourceGenerator 生成。</summary>");
         sb.AppendLine($"public static class {model.ClassName}TraversalExtensions");
         sb.AppendLine("{");
@@ -97,8 +156,7 @@ internal static class GraphRelationshipEmitter
         sb.AppendLine($"        => source.OutWhere<{model.ClassName}, {model.TargetFqn}>(edgeFilter);");
         sb.AppendLine();
 
-        // WS-4: Write sink sugar — Add{Rel} / Merge{Rel} を生やす。
-        // プロパティ付き版はラムダから TRel を推論できるため不要。ここでは propless 版のみ。
+        // WS-4: Write sink sugar
         var s = model.SourceFqn;
         var t = model.TargetFqn;
         var r = model.ClassName;
@@ -131,5 +189,51 @@ internal static class GraphRelationshipEmitter
         if (!_typeMap.TryGetValue(prop.CSharpType, out var map)) return;
         var writeExpr = string.Format(map.write, prop.PropertyName, prop.GraphKey);
         sb.AppendLine($"        tx.SetProperty(id, \"{prop.GraphKey}\", {writeExpr});");
+    }
+
+    private static void EmitInsertMultiValue(StringBuilder sb, PropertyModel prop)
+    {
+        if (!_mvWriteExpr.TryGetValue(prop.CSharpType, out var writeExpr)) return;
+        sb.AppendLine($"        if (entity.{prop.PropertyName} != null)");
+        sb.AppendLine("        {");
+        sb.AppendLine($"            foreach (var __v in entity.{prop.PropertyName})");
+        sb.AppendLine($"                tx.AddPropertyValue(id, \"{prop.GraphKey}\", {writeExpr});");
+        sb.AppendLine("        }");
+    }
+
+    private static void EmitLoadMultiValue(StringBuilder sb, PropertyModel prop)
+    {
+        if (!_mvReadExpr.TryGetValue(prop.CSharpType, out var readExpr)) return;
+        sb.AppendLine("        {");
+        sb.AppendLine($"            var __list = new System.Collections.Generic.List<{prop.CSharpType}>();");
+        sb.AppendLine($"            var __e = tx.GetPropertyValues(id, \"{prop.GraphKey}\");");
+        sb.AppendLine("            while (__e.MoveNext())");
+        sb.AppendLine($"                __list.Add({readExpr});");
+        sb.AppendLine("            __e.Dispose();");
+        sb.AppendLine($"            __entity.{prop.PropertyName} = __list;");
+        sb.AppendLine("        }");
+    }
+
+    private static void EmitUpdateMultiValue(StringBuilder sb, PropertyModel prop)
+    {
+        if (!_mvWriteExpr.TryGetValue(prop.CSharpType, out var writeExpr)) return;
+        if (!_mvReadExpr.TryGetValue(prop.CSharpType, out var readExpr)) return;
+        sb.AppendLine("        {");
+        sb.AppendLine($"            var __old = new System.Collections.Generic.HashSet<{prop.CSharpType}>();");
+        sb.AppendLine($"            var __e = tx.GetPropertyValues(id, \"{prop.GraphKey}\");");
+        sb.AppendLine("            while (__e.MoveNext())");
+        sb.AppendLine($"                __old.Add({readExpr});");
+        sb.AppendLine("            __e.Dispose();");
+        sb.AppendLine($"            if (entity.{prop.PropertyName} != null)");
+        sb.AppendLine("            {");
+        sb.AppendLine($"                foreach (var __v in entity.{prop.PropertyName})");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    if (!__old.Remove(__v))");
+        sb.AppendLine($"                        tx.AddPropertyValue(id, \"{prop.GraphKey}\", {writeExpr});");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine($"            foreach (var __v in __old)");
+        sb.AppendLine($"                tx.RemovePropertyValue(id, \"{prop.GraphKey}\", {writeExpr});");
+        sb.AppendLine("        }");
     }
 }
