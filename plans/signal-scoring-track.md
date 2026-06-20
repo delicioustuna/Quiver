@@ -48,10 +48,10 @@
 | SIG-2 | `IDyadicOperator` / `IMonadicOperator` / 組み込み演算子 (Dot/Cosine/Euclidean) | — | **完了** (2026-06-18) |
 | SIG-3 | `PropertyValueType.FloatArray` + SourceGenerator `float[]` ルーティング + `Values<float[]>` | — | **完了** (2026-06-19, commit `0a07257`) |
 | SIG-4 | `ApplyDyadicOp` 論理 IR + `ApplyDyadicOperator` 物理 + gather/score 2 相 + DSL | SIG-1, SIG-3 | **完了** (2026-06-19) |
-| SIG-5 | `GraphTraversal<float[]>` (Bytes スロット搬送) — トラバーサル版 b | SIG-3 | 未着手 |
+| SIG-5 | `GraphTraversal<float[]>` (Bytes スロット搬送) — トラバーサル版 b | SIG-3 | **完了** (2026-06-20, commit `49277b2`) |
 | SIG-6 | `VectorIndexKind.FlatOnly` + `VectorIndexSpec.IndexKind` | — | **完了** (2026-06-20, commit `3e049ce`) |
 | SIG-7 | HNSW オーバーサンプル → カスタム rerank (P2) | SIG-4 | **完了** (2026-06-20) |
-| SIG-8 | サンプル + ベンチ sentinel + ドキュメント | SIG-4, SIG-5 | 未着手 |
+| SIG-8 | サンプル + ベンチ sentinel + ドキュメント | SIG-4, SIG-5 | **完了** (2026-06-20) |
 
 並列性: SIG-1, SIG-3, SIG-6 は独立並行可。SIG-2 は完了済み。
 
