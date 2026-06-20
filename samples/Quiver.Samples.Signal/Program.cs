@@ -1,7 +1,7 @@
-// Quiver.Samples.Signal — ApplyDyadic (custom dyadic scoring on stored waveforms).
+// Quiver.Samples.Signal — ApplyDyadic による float[] の演算処理。
 //
-// Demonstrates: template waveform → graph filter → CosineSimilarityOp ranking
-// → metadata retrieval. Also shows region-restricted scoring and traversal-based b.
+// デモの流れ: テンプレート波形 → トラバーサルによるフィルタ → CosineSimilarityOp によるランキング
+// → メタデータ取得. 演算範囲指定およびサブトラバーサル引数のサンプルも記載する。
 //
 // Run: dotnet run --project samples/Quiver.Samples.Signal
 

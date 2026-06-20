@@ -12,7 +12,6 @@
 
 using Quiver;
 using Quiver.Api;
-using Quiver.Core;
 using Quiver.Samples.QueryPatterns;
 
 string dir = Path.Combine(Path.GetTempPath(), "quiver_qp_" + Guid.NewGuid().ToString("N")[..8]);

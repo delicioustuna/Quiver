@@ -4,7 +4,6 @@
 
 using Quiver;
 using Quiver.Api;
-using Quiver.Core;
 using Quiver.Samples.SourceGen;
 
 string dir = Path.Combine(Path.GetTempPath(), "quiver_sourcegen_" + Guid.NewGuid().ToString("N")[..8]);
@@ -53,7 +52,7 @@ try
         foreach (var p in adults)
             Console.WriteLine($"    {p.Name}, age={p.Age}");
 
-        // ── 3. Hop 型保存トラバーサル (ARCH-8): .Knows() が TypedGraphTraversal<Person> を保つ ──
+        // ── 3. Hop 型保存トラバーサル: .Knows() が TypedGraphTraversal<Person> を保つ ──
         var known = g.Nodes<Person>()
                      .Has(p => p.Name, "Alice")
                      .Knows()                 // ← Person -KNOWS-> Person、型保存のまま
@@ -63,7 +62,7 @@ try
         foreach (var p in known)
             Console.WriteLine($"    {p.Name}, age={p.Age}");
 
-        // ── 4. GC-7: 式ツリー述語 (.Where) — LINQ ライクなノード絞り込み ──
+        // ── 4. 式ツリー述語 (.Where) — LINQ ライクなノード絞り込み ──
         var lambdaFiltered = g.Nodes<Person>()
                               .Where(p => p.Age > 20 && p.Name.StartsWith("A"))
                               .ToList();
@@ -71,7 +70,7 @@ try
         foreach (var p in lambdaFiltered)
             Console.WriteLine($"    {p.Name}, age={p.Age}");
 
-        // ── FT-35: 浮動小数点 (float) の範囲述語 ──
+        // ── 浮動小数点 (float) の範囲述語 ──
         var tall = g.Nodes<Person>()
                     .Where(p => p.Height > 1.7f)   // float メンバの範囲比較
                     .ToList();
@@ -79,7 +78,7 @@ try
         foreach (var p in tall)
             Console.WriteLine($"    {p.Name}, height={p.Height}");
 
-        // ── FT-35 増分2: DateTime の範囲述語 (TimeZone 正準化) ──
+        // ── DateTime の範囲述語 (TimeZone 正準化) ──
         var afterMarch = g.Nodes<Person>()
                           .Where(p => p.CreatedAt > new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc))
                           .ToList();
@@ -87,7 +86,7 @@ try
         foreach (var p in afterMarch)
             Console.WriteLine($"    {p.Name}, created={p.CreatedAt:yyyy-MM-dd}");
 
-        // ── 5. GC-8: エッジ述語付き型保存ホップ (.Knows(e => ...)) ──
+        // ── 5. エッジ述語付き型保存ホップ (.Knows(e => ...)) ──
         var recentlyKnown = g.Nodes<Person>()
                              .Where(p => p.Name == "Alice")
                              .Knows(e => e.Since == "2024-01")  // ← エッジ Knows.Since で絞り込み (型保存)
@@ -96,7 +95,7 @@ try
         foreach (var p in recentlyKnown)
             Console.WriteLine($"    {p.Name}, age={p.Age}");
 
-        // ── 6. MV-5: 型付き多値プロパティ (List<T>) の包含クエリ + 値取得 ──
+        // ── 6. 型付き多値プロパティ (List<T>) の包含クエリ + 値取得 ──
         var devs = g.Nodes<Person>()
                     .Has(p => p.Tags, "dev")     // ← List<string> の包含チェック (B+Tree 利用)
                     .ToList();

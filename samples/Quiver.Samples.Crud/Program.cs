@@ -3,7 +3,6 @@
 // 実行: dotnet run --project samples/Quiver.Samples.Crud
 
 using Quiver;
-using Quiver.Core;
 using Quiver.Storage.Records;
 
 string dir = Path.Combine(Path.GetTempPath(), "quiver_crud_" + Guid.NewGuid().ToString("N")[..8]);

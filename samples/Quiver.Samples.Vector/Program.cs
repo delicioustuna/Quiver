@@ -38,8 +38,8 @@ try
         tx.Commit();
     }
 
-    // ── 1. VEC-5: KNN を起点とするトラバーサル ──
-    Console.WriteLine("── 1. VEC-5: g.Knn(query, k=2) ──");
+    // ── 1. KNN を起点とするトラバーサル ──
+    Console.WriteLine("── 1. g.Knn(query, k=2) ──");
     using (var tx = db.BeginReadOnlyTransaction())
     {
         var g = tx.G(db.Schema);
@@ -49,9 +49,9 @@ try
         Console.WriteLine($"  上位 2 件: {string.Join(", ", top2Names)}");
     }
 
-    // ── 2. VEC-6: graph-first hybrid (フィルタしてから KNN) ──
+    // ── 2. グラフファーストな複合検索 (フィルタしてから KNN) ──
     Console.WriteLine();
-    Console.WriteLine("── 2. VEC-6: graph-first hybrid ──");
+    Console.WriteLine("── 2. graph-first hybrid ──");
     using (var tx = db.BeginReadOnlyTransaction())
     {
         var g = tx.G(db.Schema);

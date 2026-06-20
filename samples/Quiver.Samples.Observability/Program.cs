@@ -11,7 +11,6 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Quiver;
-using Quiver.Core;
 using Quiver.OpenTelemetry;
 using Quiver.Storage.Records;
 
@@ -20,13 +19,13 @@ var resource = ResourceBuilder.CreateDefault()
 
 using var tracerProvider = Sdk.CreateTracerProviderBuilder()
     .SetResourceBuilder(resource)
-    .AddQuiverInstrumentation()       // OB-1: 4 つの ActivitySource を登録。
+    .AddQuiverInstrumentation()       // 4 つの ActivitySource を登録。
     .AddConsoleExporter()
     .Build();
 
 using var meterProvider = Sdk.CreateMeterProviderBuilder()
     .SetResourceBuilder(resource)
-    .AddQuiverInstrumentation()       // OB-1: "Quiver" Meter を登録。
+    .AddQuiverInstrumentation()       // "Quiver" Meter を登録。
     .AddConsoleExporter((_, readerOpts) =>
         readerOpts.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = 1000)
     .Build();

@@ -48,7 +48,7 @@ app.MapGet("/nodes/{id:long}", (long id, GraphDatabase db) =>
 {
     using var tx = db.BeginReadOnlyTransaction();
     var nid = new NodeId(id);
-    // FT-30: HWM 超 / 負 ID は Core 側で safe-return される (例外なし)。
+    // HWM 超 / 負 ID は安全にreturn される。
     if (!tx.NodeExists(nid))
         return Results.NotFound();
     var name = tx.HasProperty(nid, "name")
@@ -99,7 +99,7 @@ app.MapPost("/relationships", (CreateRelationshipRequest? req, GraphDatabase db)
 app.MapGet("/relationships/{id:long}", (long id, GraphDatabase db) =>
 {
     using var tx = db.BeginReadOnlyTransaction();
-    // FT-30: GraphTransaction には RelationshipExists が無いので Stats / NodeExists 系のみ。
+    // GraphTransaction には RelationshipExists が無いので Stats / NodeExists 系のみ。
     // ここではノードと同じ HWM 安全契約を期待するが、現状の IGraphTransaction には
     // RelationshipExists API が無いので存在チェックは sample 範囲では省略する。
     // (将来 API 追加時にここを補強する)
@@ -119,6 +119,6 @@ internal sealed record CreateNodeRequest(string Label, string? Name);
 internal sealed record SetPropertyRequest(string Key, string? Value);
 internal sealed record CreateRelationshipRequest(long Source, long Target, string Type);
 
-// FT-30: Quiver.Hosting.Tests から WebApplicationFactory<Program> で起動するために
+// Quiver.Hosting.Tests から WebApplicationFactory<Program> で起動するために
 // 暗黙の Program クラスを public partial として公開する。
 public partial class Program { }

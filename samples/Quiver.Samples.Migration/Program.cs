@@ -1,9 +1,8 @@
-// OP-4 sample: スキーママイグレーションのデモ。
+// Quiver.Samples.Migration— スキーママイグレーションのデモ。
 // v1 → v2 で `User` ラベルを `Person` にリネームし、email 索引を追加する。
 
 using Quiver;
 using Quiver.Api;
-using Quiver.Core;
 using Quiver.Migrations;
 using Quiver.Storage.Records;
 

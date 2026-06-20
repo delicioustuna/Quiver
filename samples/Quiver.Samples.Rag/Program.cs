@@ -1,5 +1,5 @@
-// Quiver.Samples.Rag — RAG-5。Quiver.Rag による文書取込 → ハイブリッド検索 → graph expansion を
-// end-to-end で走らせる。埋め込みはダミー実装 (実運用では Quiver.Embedding 等のアダプタを注入)。
+// Quiver.Samples.Rag — Quiver.Rag による文書取込 → ハイブリッド検索 → graph expansion を
+// end-to-end で走らせる。埋め込みはダミー実装。
 //
 // 実行: dotnet run --project samples/Quiver.Samples.Rag
 
@@ -95,8 +95,6 @@ finally
 
 // 決定的なダミー埋め込み器。文字ヒストグラムを正規化しただけの素朴なベクトル。
 // 実運用では使う埋め込みモデル (OpenAI API / ローカル ONNX 等) に対して IChunkEmbedder を直接実装する。
-// Quiver.Embedding の IEmbeddingProvider を持っているなら texts をループして
-// EmbedAsync(EmbeddingRequest(text, Document)) の Vector を集める薄いアダプタで橋渡しできる
 // (詳細は docs/cookbook.md「ローカル RAG」§埋め込み器)。
 sealed class HashEmbedder(int dim) : IChunkEmbedder
 {
