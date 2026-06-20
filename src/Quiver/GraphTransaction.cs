@@ -212,6 +212,37 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         }
     }
 
+    private void RemoveFromIndex(string indexName, in PropertyValue value, NodeId nodeId)
+    {
+        long packed = PackNode(nodeId);
+        switch (value.Type)
+        {
+            case PropertyValueType.Bool:
+            case PropertyValueType.Int32:
+            case PropertyValueType.Int64:
+                _inner.Indexes.CreateInt64Index(indexName).Delete(value.Int64Value, packed);
+                break;
+            case PropertyValueType.Double:
+                _inner.Indexes.CreateDoubleIndex(indexName).Delete(value.DoubleValue, packed);
+                break;
+            case PropertyValueType.String:
+            {
+                var s = System.Text.Encoding.UTF8.GetString(value.Utf8StringValue);
+                _inner.Indexes.CreateStringIndex(indexName).Delete(s, packed);
+                break;
+            }
+        }
+    }
+
+    private bool TryResolveSecondaryIndex(NodeId nodeId, string key, out string indexName)
+    {
+        var node = _inner.Nodes.Read(nodeId);
+        if (!node.InUse || !node.Label.IsValid) { indexName = string.Empty; return false; }
+        var labelName = _labelTokens.GetName(node.Label);
+        if (string.IsNullOrEmpty(labelName)) { indexName = string.Empty; return false; }
+        return _inner.Indexes.TryGetIndexName(labelName, key, out indexName);
+    }
+
     // ARCH-3: 索引の値レーンに (Kind=Node, Sequence=nodeId, Generation=現世代) をパックする。
     // 解決時に現 slot 世代と照合して slot 再利用 (ABA) の stale 参照を弾けるようにする。
     private long PackNode(NodeId nodeId)
@@ -582,6 +613,9 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         var wh = _inner.Nodes.Write(nodeId);
         wh.FirstPropertyId = newPropId;
         wh.Dispose();
+
+        if (TryResolveSecondaryIndex(nodeId, key, out var indexName))
+            InsertIntoIndex(indexName, in value, nodeId);
     }
 
     public void AddPropertyValue(RelationshipId relId, string key, in PropertyValue value)
@@ -621,6 +655,9 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                 var wh = _inner.Nodes.Write(nodeId);
                 wh.FirstPropertyId = newFirst;
                 wh.Dispose();
+
+                if (TryResolveSecondaryIndex(nodeId, key, out var indexName))
+                    RemoveFromIndex(indexName, in value, nodeId);
                 return;
             }
         }

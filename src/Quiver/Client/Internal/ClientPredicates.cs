@@ -68,8 +68,9 @@ internal sealed class PropertyEqStringPredicate : IPredicate
         {
             var prop = en.Current;
             if (prop.KeyId != _keyId) continue;
-            if (prop.Value.Type != PropertyValueType.String) return false;
-            return System.Text.Encoding.UTF8.GetString(prop.Value.Utf8StringValue) == _value;
+            if (prop.Value.Type != PropertyValueType.String) continue;
+            if (System.Text.Encoding.UTF8.GetString(prop.Value.Utf8StringValue) == _value)
+                return true;
         }
         return false;
     }
@@ -95,16 +96,13 @@ internal sealed class PropertyInt64Predicate : IPredicate
         {
             var prop = en.Current;
             if (prop.KeyId != _keyId) continue;
-            // BA-8: reject non-integer values without decoding.
-            // (The previous fallback to Int64Value returned scrambled bits for
-            // Double / Bool / String, so Gt(30) on a Double property would lie.)
             var flags = prop.Value.Type.ToFlags();
             if ((flags & (PropertyTypeFlags.Int32 | PropertyTypeFlags.Int64)) == PropertyTypeFlags.None)
-                return false;
+                continue;
             long v = prop.Value.Type == PropertyValueType.Int32
                 ? prop.Value.Int32Value
                 : prop.Value.Int64Value;
-            return _pred.Kind switch
+            bool match = _pred.Kind switch
             {
                 PredicateKind.Eq      => v == _pred.LongFrom,
                 PredicateKind.Gt      => v >  _pred.LongFrom,
@@ -114,6 +112,7 @@ internal sealed class PropertyInt64Predicate : IPredicate
                 PredicateKind.Between => v >= _pred.LongFrom && v < _pred.LongTo,
                 _                     => false,
             };
+            if (match) return true;
         }
         return false;
     }
@@ -139,8 +138,9 @@ internal sealed class PropertyWithinStringPredicate : IPredicate
         {
             var prop = en.Current;
             if (prop.KeyId != _keyId) continue;
-            if (prop.Value.Type != PropertyValueType.String) return false;
-            return _values.Contains(System.Text.Encoding.UTF8.GetString(prop.Value.Utf8StringValue));
+            if (prop.Value.Type != PropertyValueType.String) continue;
+            if (_values.Contains(System.Text.Encoding.UTF8.GetString(prop.Value.Utf8StringValue)))
+                return true;
         }
         return false;
     }
@@ -166,8 +166,9 @@ internal sealed class PropertyDoublePredicate : IPredicate
         {
             var prop = en.Current;
             if (prop.KeyId != _keyId) continue;
-            if (prop.Value.Type != PropertyValueType.Double) return false;
-            return BitConverter.DoubleToInt64Bits(prop.Value.DoubleValue) == _encodedValue;
+            if (prop.Value.Type != PropertyValueType.Double) continue;
+            if (BitConverter.DoubleToInt64Bits(prop.Value.DoubleValue) == _encodedValue)
+                return true;
         }
         return false;
     }
@@ -207,9 +208,9 @@ internal sealed class PropertyDoubleRangePredicate : IPredicate
                 case PropertyValueType.Double: v = prop.Value.DoubleValue; break;
                 case PropertyValueType.Int64:  v = prop.Value.Int64Value;  break;
                 case PropertyValueType.Int32:  v = prop.Value.Int32Value;  break;
-                default: return false;
+                default: continue;
             }
-            return _kind switch
+            bool match = _kind switch
             {
                 PredicateKind.Eq      => v == _from,
                 PredicateKind.Gt      => v >  _from,
@@ -219,6 +220,7 @@ internal sealed class PropertyDoubleRangePredicate : IPredicate
                 PredicateKind.Between => v >= _from && v < _to,
                 _                     => false,
             };
+            if (match) return true;
         }
         return false;
     }
@@ -279,11 +281,10 @@ internal sealed class PropertyWithoutStringPredicate : IPredicate
         {
             var prop = en.Current;
             if (prop.KeyId != _keyId) continue;
-            if (prop.Value.Type != PropertyValueType.String) return true;
-            return !_values.Contains(System.Text.Encoding.UTF8.GetString(prop.Value.Utf8StringValue));
+            if (prop.Value.Type != PropertyValueType.String) continue;
+            if (_values.Contains(System.Text.Encoding.UTF8.GetString(prop.Value.Utf8StringValue)))
+                return false;
         }
-        // Missing property: caller's choice; we follow the Gremlin convention
-        // that "without X" includes elements that don't have the key at all.
         return true;
     }
 }
@@ -366,9 +367,9 @@ internal abstract class StringPropertyPredicateBase : IPredicate
         {
             var prop = en.Current;
             if (prop.KeyId != _keyId) continue;
-            if (prop.Value.Type != PropertyValueType.String) return false;
+            if (prop.Value.Type != PropertyValueType.String) continue;
             var s = System.Text.Encoding.UTF8.GetString(prop.Value.Utf8StringValue);
-            return Match(s);
+            if (Match(s)) return true;
         }
         return false;
     }
@@ -463,8 +464,9 @@ internal sealed class PropertyBoolPredicate : IPredicate
         {
             var prop = en.Current;
             if (prop.KeyId != _keyId) continue;
-            if (prop.Value.Type != PropertyValueType.Bool) return false;
-            return (prop.Value.BoolValue ? 1L : 0L) == _scalar;
+            if (prop.Value.Type != PropertyValueType.Bool) continue;
+            if ((prop.Value.BoolValue ? 1L : 0L) == _scalar)
+                return true;
         }
         return false;
     }

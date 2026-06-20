@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Quiver.Api;
 using Quiver.Core;
 using Quiver.Storage.Records;
 using Xunit;
@@ -289,6 +290,115 @@ public sealed class MultiValuePropertyTests : IDisposable
             .Should().Be(PropertyCardinality.Set);
     }
 
+    // ── B+Tree index for Set cardinality (MV-3) ─────────────────
+
+    [Fact]
+    public void Indexed_set_property_elements_found_by_SeekIndex()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        db.Schema.CreateIndex("idx_tags", "Sensor", "tags", IndexKind.StringEquality);
+
+        using var tx = db.BeginTransaction();
+        var n1 = tx.CreateNode("Sensor");
+        tx.AddPropertyValue(n1, "tags", PropertyValue.FromString("outdoor"));
+        tx.AddPropertyValue(n1, "tags", PropertyValue.FromString("v2"));
+        var n2 = tx.CreateNode("Sensor");
+        tx.AddPropertyValue(n2, "tags", PropertyValue.FromString("indoor"));
+        tx.AddPropertyValue(n2, "tags", PropertyValue.FromString("v2"));
+        tx.Commit();
+
+        using var ro = db.BeginReadOnlyTransaction();
+        // "outdoor" → only n1
+        var outdoor = CollectNodes(ro.SeekIndex("idx_tags", PropertyValue.FromString("outdoor")));
+        outdoor.Should().ContainSingle().Which.Should().Be(n1);
+        // "v2" → both n1 and n2
+        var v2 = CollectNodes(ro.SeekIndex("idx_tags", PropertyValue.FromString("v2")));
+        v2.Should().HaveCount(2);
+        v2.Should().Contain(n1);
+        v2.Should().Contain(n2);
+        // "indoor" → only n2
+        var indoor = CollectNodes(ro.SeekIndex("idx_tags", PropertyValue.FromString("indoor")));
+        indoor.Should().ContainSingle().Which.Should().Be(n2);
+    }
+
+    [Fact]
+    public void RemovePropertyValue_removes_from_index()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        db.Schema.CreateIndex("idx_tags", "Sensor", "tags", IndexKind.StringEquality);
+
+        NodeId n;
+        using (var tx = db.BeginTransaction())
+        {
+            n = tx.CreateNode("Sensor");
+            tx.AddPropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
+            tx.AddPropertyValue(n, "tags", PropertyValue.FromString("v2"));
+            tx.Commit();
+        }
+
+        using (var tx2 = db.BeginTransaction())
+        {
+            tx2.RemovePropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
+            tx2.Commit();
+        }
+
+        using var ro = db.BeginReadOnlyTransaction();
+        var outdoor = CollectNodes(ro.SeekIndex("idx_tags", PropertyValue.FromString("outdoor")));
+        outdoor.Should().BeEmpty();
+        var v2 = CollectNodes(ro.SeekIndex("idx_tags", PropertyValue.FromString("v2")));
+        v2.Should().ContainSingle().Which.Should().Be(n);
+    }
+
+    [Fact]
+    public void Has_traversal_uses_index_for_set_property()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        db.Schema.CreateIndex("idx_tags", "Sensor", "tags", IndexKind.StringEquality);
+
+        using var tx = db.BeginTransaction();
+        var n1 = tx.CreateNode("Sensor");
+        tx.SetProperty(n1, "name", PropertyValue.FromString("sensor-1"));
+        tx.AddPropertyValue(n1, "tags", PropertyValue.FromString("outdoor"));
+        tx.AddPropertyValue(n1, "tags", PropertyValue.FromString("v2"));
+        var n2 = tx.CreateNode("Sensor");
+        tx.SetProperty(n2, "name", PropertyValue.FromString("sensor-2"));
+        tx.AddPropertyValue(n2, "tags", PropertyValue.FromString("indoor"));
+        tx.Commit();
+
+        using var ro = db.BeginReadOnlyTransaction();
+        var g = ro.G(db.Schema);
+        var hits = g.Nodes().HasLabel("Sensor").Has("tags", "outdoor").ToList();
+        hits.Should().ContainSingle().Which.Should().Be(n1);
+    }
+
+    [Fact]
+    public void Index_persists_across_reopen()
+    {
+        NodeId n;
+        using (var db = GraphDatabase.Open(_path))
+        {
+            db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+            db.Schema.CreateIndex("idx_tags", "Sensor", "tags", IndexKind.StringEquality);
+            using var tx = db.BeginTransaction();
+            n = tx.CreateNode("Sensor");
+            tx.AddPropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
+            tx.AddPropertyValue(n, "tags", PropertyValue.FromString("v2"));
+            tx.Commit();
+        }
+
+        using (var db = GraphDatabase.Open(_path))
+        {
+            using var ro = db.BeginReadOnlyTransaction();
+            var outdoor = CollectNodes(ro.SeekIndex("idx_tags", PropertyValue.FromString("outdoor")));
+            outdoor.Should().ContainSingle().Which.Should().Be(n);
+            var v2 = CollectNodes(ro.SeekIndex("idx_tags", PropertyValue.FromString("v2")));
+            v2.Should().ContainSingle().Which.Should().Be(n);
+        }
+    }
+
     // ── Helper ─────────────────────────────────────────────────────
 
     private static List<string> Collect(PropertyValuesEnumerator enumerator)
@@ -296,6 +406,14 @@ public sealed class MultiValuePropertyTests : IDisposable
         var result = new List<string>();
         while (enumerator.MoveNext())
             result.Add(System.Text.Encoding.UTF8.GetString(enumerator.Current.Utf8StringValue));
+        return result;
+    }
+
+    private static List<NodeId> CollectNodes(NodeIdEnumerator enumerator)
+    {
+        var result = new List<NodeId>();
+        while (enumerator.MoveNext())
+            result.Add(enumerator.Current);
         return result;
     }
 }
