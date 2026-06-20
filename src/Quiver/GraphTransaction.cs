@@ -14,7 +14,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     private readonly ITransaction _inner;
     private readonly ITokenStore<LabelId> _labelTokens;
     private readonly ITokenStore<RelationshipTypeId> _relTypeTokens;
-    private readonly ITokenStore<PropertyKeyId> _propKeyTokens;
+    private readonly PropertyKeyTokenStore _propKeyTokens;
     // BA-7: null でない場合、公開ミューテーションをすべてバッファし、下層トランザクションが
     // 永続化コミットされた後にバッチをシンクへ引き渡す。
     private readonly ILogicalMutationSink? _logicalSink;
@@ -29,7 +29,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         ITransaction inner,
         ITokenStore<LabelId> labelTokens,
         ITokenStore<RelationshipTypeId> relTypeTokens,
-        ITokenStore<PropertyKeyId> propKeyTokens,
+        PropertyKeyTokenStore propKeyTokens,
         bool isReadOnly = false,
         ILogicalMutationSink? logicalSink = null,
         Storage.Records.ColumnManager? columns = null,
@@ -336,6 +336,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public void SetProperty(NodeId nodeId, string key, in PropertyValue value)
     {
         var keyId = _propKeyTokens.GetOrCreate(key);
+        if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
+            throw new InvalidOperationException($"Use AddPropertyValue for Set-cardinality property '{key}'.");
         // FTS-2 透過維持: この (label, key) に全文索引が bound されているときだけ before-image を読む。
         // 非索引キーの書き込みは HasAnyFullTextIndex の bool チェックのみで素通り。
         var ft = ResolveFullTextIndex(nodeId, key);
@@ -362,6 +364,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public void SetProperty(RelationshipId relId, string key, in PropertyValue value)
     {
         var keyId = _propKeyTokens.GetOrCreate(key);
+        if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
+            throw new InvalidOperationException($"Use AddPropertyValue for Set-cardinality property '{key}'.");
         if (_logicalSink != null)
         {
             var captured = LogicalPropertyValue.Capture(in value);
@@ -509,6 +513,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public PropertyValue GetProperty(NodeId nodeId, string key)
     {
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
+        if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
+            throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
         // ARCH-5c Phase 3: inline を先に引き、無ければ overflow チェーンを walk。
         if (_inner.Nodes.TryGetInlineProperty(nodeId, keyId, out var inlineVal)) return inlineVal;
         var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
@@ -524,6 +530,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public PropertyValue GetProperty(RelationshipId relId, string key)
     {
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
+        if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
+            throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
         // ARCH-5c Phase 4: inline を先に引き、無ければ overflow チェーンを walk。
         if (_inner.Relationships.TryGetInlineProperty(relId, keyId, out var inlineVal)) return inlineVal;
         var firstPropId = _inner.Relationships.Read(relId).FirstPropertyId;
@@ -552,6 +560,112 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public PropertyEnumerator EnumerateProperties(NodeId nodeId)
         // ARCH-5c Phase 3: inline (visible 版) + overflow チェーンを結合して列挙。
         => _inner.Nodes.EnumerateProperties(nodeId, _inner.Properties);
+
+    // ========== マルチバリュープロパティ操作 (Set cardinality) ==========
+
+    public void AddPropertyValue(NodeId nodeId, string key, in PropertyValue value)
+    {
+        var keyId = _propKeyTokens.GetOrCreate(key, PropertyCardinality.Set);
+
+        // 重複チェック: 同一 key+value の visible エントリがあればスキップ (Set セマンティクス)
+        var propEnum = _inner.Nodes.EnumerateProperties(nodeId, _inner.Properties);
+        while (propEnum.MoveNext())
+        {
+            if (propEnum.Current.KeyId == keyId
+                && PropertyValueEqualityHelper.AreEqual(propEnum.Current.Value, in value))
+                return;
+        }
+
+        // overflow チェーンの head に prepend (既存 same-key エントリは削除しない)
+        var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
+        var newPropId = _inner.Properties.Create(keyId, in value, firstPropId);
+        var wh = _inner.Nodes.Write(nodeId);
+        wh.FirstPropertyId = newPropId;
+        wh.Dispose();
+    }
+
+    public void AddPropertyValue(RelationshipId relId, string key, in PropertyValue value)
+    {
+        var keyId = _propKeyTokens.GetOrCreate(key, PropertyCardinality.Set);
+
+        var propEnum = _inner.Relationships.EnumerateProperties(relId, _inner.Properties);
+        while (propEnum.MoveNext())
+        {
+            if (propEnum.Current.KeyId == keyId
+                && PropertyValueEqualityHelper.AreEqual(propEnum.Current.Value, in value))
+                return;
+        }
+
+        var firstPropId = _inner.Relationships.Read(relId).FirstPropertyId;
+        var newPropId = _inner.Properties.Create(keyId, in value, firstPropId);
+        var wh = _inner.Relationships.Write(relId);
+        wh.FirstPropertyId = newPropId;
+        wh.Dispose();
+    }
+
+    public void RemovePropertyValue(NodeId nodeId, string key, in PropertyValue value)
+    {
+        if (!_propKeyTokens.TryGet(key, out var keyId)) return;
+        if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
+            throw new InvalidOperationException($"Use RemoveProperty for Single-cardinality property '{key}'.");
+
+        var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
+        var propEnum = _inner.Properties.Enumerate(firstPropId);
+        while (propEnum.MoveNext())
+        {
+            if (propEnum.Current.KeyId == keyId
+                && propEnum.Current.InUse
+                && PropertyValueEqualityHelper.AreEqual(propEnum.Current.Value, in value))
+            {
+                var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
+                var wh = _inner.Nodes.Write(nodeId);
+                wh.FirstPropertyId = newFirst;
+                wh.Dispose();
+                return;
+            }
+        }
+    }
+
+    public void RemovePropertyValue(RelationshipId relId, string key, in PropertyValue value)
+    {
+        if (!_propKeyTokens.TryGet(key, out var keyId)) return;
+        if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
+            throw new InvalidOperationException($"Use RemoveProperty for Single-cardinality property '{key}'.");
+
+        var firstPropId = _inner.Relationships.Read(relId).FirstPropertyId;
+        var propEnum = _inner.Properties.Enumerate(firstPropId);
+        while (propEnum.MoveNext())
+        {
+            if (propEnum.Current.KeyId == keyId
+                && propEnum.Current.InUse
+                && PropertyValueEqualityHelper.AreEqual(propEnum.Current.Value, in value))
+            {
+                var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
+                var wh = _inner.Relationships.Write(relId);
+                wh.FirstPropertyId = newFirst;
+                wh.Dispose();
+                return;
+            }
+        }
+    }
+
+    public PropertyValuesEnumerator GetPropertyValues(NodeId nodeId, string key)
+    {
+        if (!_propKeyTokens.TryGet(key, out var keyId))
+            return new PropertyValuesEnumerator(
+                new PropertyEnumerator(null!, PropertyId.Invalid), default);
+        return new PropertyValuesEnumerator(
+            _inner.Nodes.EnumerateProperties(nodeId, _inner.Properties), keyId);
+    }
+
+    public PropertyValuesEnumerator GetPropertyValues(RelationshipId relId, string key)
+    {
+        if (!_propKeyTokens.TryGet(key, out var keyId))
+            return new PropertyValuesEnumerator(
+                new PropertyEnumerator(null!, PropertyId.Invalid), default);
+        return new PropertyValuesEnumerator(
+            _inner.Relationships.EnumerateProperties(relId, _inner.Properties), keyId);
+    }
 
     // ========== トラバーサル ==========
 

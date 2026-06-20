@@ -215,3 +215,37 @@ public ref struct PropertyEnumerator
     /// <summary>イテレータを破棄する (現状は no-op)。</summary>
     public void Dispose() { }
 }
+
+/// <summary>
+/// 特定キーのプロパティ値のみを列挙する前方イテレータ (Set cardinality 用)。
+/// <see cref="PropertyEnumerator"/> をラップし、指定 <see cref="PropertyKeyId"/> に一致する
+/// エントリだけを返す。
+/// </summary>
+public ref struct PropertyValuesEnumerator
+{
+    private PropertyEnumerator _inner;
+    private readonly PropertyKeyId _keyId;
+
+    internal PropertyValuesEnumerator(PropertyEnumerator inner, PropertyKeyId keyId)
+    {
+        _inner = inner;
+        _keyId = keyId;
+    }
+
+    /// <summary>次の一致するプロパティ値へ進む。</summary>
+    public bool MoveNext()
+    {
+        while (_inner.MoveNext())
+        {
+            if (_inner.Current.KeyId == _keyId)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>直近の <see cref="MoveNext"/> で取得した値。</summary>
+    public PropertyValue Current => _inner.Current.Value;
+
+    /// <summary>内部イテレータを破棄する。</summary>
+    public void Dispose() => _inner.Dispose();
+}

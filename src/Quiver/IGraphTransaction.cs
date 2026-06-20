@@ -107,6 +107,34 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// <summary>ノードが指定キーのプロパティを保持しているかを返す。</summary>
     bool HasProperty(NodeId nodeId, string key);
 
+    // ── マルチバリュープロパティ操作 (Set cardinality) ──────────────────
+
+    /// <summary>
+    /// Set cardinality プロパティに値を追加する。同一 key+value が既に存在すればスキップ (冪等)。
+    /// Single cardinality キーに対して呼ぶと <see cref="InvalidOperationException"/>。
+    /// </summary>
+    void AddPropertyValue(NodeId nodeId, string key, in PropertyValue value);
+
+    /// <inheritdoc cref="AddPropertyValue(NodeId, string, in PropertyValue)"/>
+    void AddPropertyValue(RelationshipId relId, string key, in PropertyValue value);
+
+    /// <summary>
+    /// Set cardinality プロパティから特定の値を除去する。一致する値が無ければ no-op (冪等)。
+    /// Single cardinality キーに対して呼ぶと <see cref="InvalidOperationException"/>。
+    /// </summary>
+    void RemovePropertyValue(NodeId nodeId, string key, in PropertyValue value);
+
+    /// <inheritdoc cref="RemovePropertyValue(NodeId, string, in PropertyValue)"/>
+    void RemovePropertyValue(RelationshipId relId, string key, in PropertyValue value);
+
+    /// <summary>
+    /// Set cardinality プロパティの全値を列挙する。
+    /// </summary>
+    PropertyValuesEnumerator GetPropertyValues(NodeId nodeId, string key);
+
+    /// <inheritdoc cref="GetPropertyValues(NodeId, string)"/>
+    PropertyValuesEnumerator GetPropertyValues(RelationshipId relId, string key);
+
     /// <summary>ノードに付与された全プロパティを列挙する。</summary>
     PropertyEnumerator EnumerateProperties(NodeId nodeId);
 

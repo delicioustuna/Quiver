@@ -133,8 +133,6 @@ internal readonly record struct PageId(long Value)
     public bool IsValid => Value >= 0;
 }
 
-/// <summary>トランザクションの識別子 (単調増加する long)。</summary>
-/// <param name="Value">トランザクション ID。</param>
 /// <summary>
 /// プロパティキーの多重度。<see cref="Single"/> (既定) は 1 キー = 1 値、
 /// <see cref="Set"/> は 1 キー = N 値 (重複なし・順序なし)。
@@ -147,6 +145,8 @@ public enum PropertyCardinality : byte
     Set = 1,
 }
 
+/// <summary>トランザクションの識別子 (単調増加する long)。</summary>
+/// <param name="Value">トランザクション ID。</param>
 public readonly record struct TransactionId(long Value)
 {
     /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>

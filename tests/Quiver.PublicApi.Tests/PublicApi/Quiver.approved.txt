@@ -613,6 +613,8 @@ namespace Quiver
         Quiver.Core.TransactionId Id { get; }
         bool IsReadOnly { get; }
         Quiver.Transactions.TransactionState State { get; }
+        void AddPropertyValue(Quiver.Core.NodeId nodeId, string key, in Quiver.Storage.Records.PropertyValue value);
+        void AddPropertyValue(Quiver.Core.RelationshipId relId, string key, in Quiver.Storage.Records.PropertyValue value);
         void Commit();
         Quiver.Core.NodeId CreateNode(Quiver.Core.LabelId labelId);
         Quiver.Core.NodeId CreateNode(string label);
@@ -624,6 +626,8 @@ namespace Quiver
         Quiver.Storage.Records.RelationshipEnumerator EnumerateRelationships(Quiver.Core.NodeId nodeId, Quiver.Storage.Records.Direction direction = 3, string? typeFilter = null);
         Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.NodeId nodeId, string key);
         Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.RelationshipId relId, string key);
+        Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.NodeId nodeId, string key);
+        Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.RelationshipId relId, string key);
         bool HasProperty(Quiver.Core.NodeId nodeId, string key);
         void IndexInsert(string indexName, double key, Quiver.Core.NodeId nodeId);
         void IndexInsert(string indexName, long key, Quiver.Core.NodeId nodeId);
@@ -640,6 +644,8 @@ namespace Quiver
         Quiver.NodeIdEnumerator RangeIndex(string indexName, in Quiver.Storage.Records.PropertyValue from, bool fromInclusive, in Quiver.Storage.Records.PropertyValue to, bool toInclusive);
         void ReleaseSavepoint(Quiver.Transactions.SavepointId savepoint);
         void RemoveProperty(Quiver.Core.NodeId nodeId, string key);
+        void RemovePropertyValue(Quiver.Core.NodeId nodeId, string key, in Quiver.Storage.Records.PropertyValue value);
+        void RemovePropertyValue(Quiver.Core.RelationshipId relId, string key, in Quiver.Storage.Records.PropertyValue value);
         void RemoveVector(Quiver.Core.EntityKind kind, long entityId, string indexName);
         void Rollback();
         void RollbackTo(Quiver.Transactions.SavepointId savepoint);
@@ -1348,6 +1354,12 @@ namespace Quiver.Storage.Records
     {
         public static bool IsCompatibleWith(this Quiver.Storage.Records.PropertyValueType type, Quiver.Core.PropertyTypeFlags mask) { }
         public static Quiver.Core.PropertyTypeFlags ToFlags(this Quiver.Storage.Records.PropertyValueType type) { }
+    }
+    public ref struct PropertyValuesEnumerator
+    {
+        public Quiver.Storage.Records.PropertyValue Current { get; }
+        public void Dispose() { }
+        public bool MoveNext() { }
     }
     public ref struct RelationshipEnumerator
     {
