@@ -8,13 +8,13 @@ internal sealed class SchemaApi : ISchemaApi
 {
     private readonly ITokenStore<LabelId> _labels;
     private readonly ITokenStore<RelationshipTypeId> _relTypes;
-    private readonly ITokenStore<PropertyKeyId> _propKeys;
+    private readonly PropertyKeyTokenStore _propKeys;
     private readonly IIndexManager _indexManager;
 
     internal SchemaApi(
         ITokenStore<LabelId> labels,
         ITokenStore<RelationshipTypeId> relTypes,
-        ITokenStore<PropertyKeyId> propKeys,
+        PropertyKeyTokenStore propKeys,
         IIndexManager indexManager)
     {
         _labels = labels;
@@ -29,6 +29,8 @@ internal sealed class SchemaApi : ISchemaApi
     public LabelId GetOrCreateLabel(string name) => _labels.GetOrCreate(name);
     public RelationshipTypeId GetOrCreateRelationshipType(string name) => _relTypes.GetOrCreate(name);
     public PropertyKeyId GetOrCreatePropertyKey(string name) => _propKeys.GetOrCreate(name);
+    public PropertyKeyId GetOrCreatePropertyKey(string name, PropertyCardinality cardinality) => _propKeys.GetOrCreate(name, cardinality);
+    public PropertyCardinality GetPropertyKeyCardinality(PropertyKeyId id) => _propKeys.GetCardinality(id);
 
     public string? GetLabelName(LabelId id) => id.IsValid ? _labels.GetName(id) : null;
 

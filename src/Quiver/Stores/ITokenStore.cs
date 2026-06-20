@@ -37,10 +37,10 @@ internal interface ITokenStore<TToken> where TToken : struct
 internal interface ITokenPersistence : IDisposable
 {
     /// <summary>永続化済みの全フレームを id 昇順で列挙する。</summary>
-    IEnumerable<(int Id, byte[] Utf8)> Load();
+    IEnumerable<(int Id, byte[] Utf8, byte Flags)> Load();
 
     /// <summary>現在の全フレーム (<paramref name="byId"/>) を丸ごと書き戻す。</summary>
-    void Persist(IReadOnlyDictionary<int, byte[]> byId);
+    void Persist(IReadOnlyDictionary<int, byte[]> byId, IReadOnlyDictionary<int, byte> flags);
 }
 
 internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposable where TToken : struct
@@ -48,6 +48,7 @@ internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposabl
     private readonly ITokenPersistence _persistence;
     protected readonly Dictionary<string, TToken> _byName = new(StringComparer.Ordinal);
     protected readonly Dictionary<int, byte[]> _byId = new();
+    protected readonly Dictionary<int, byte> _frameFlags = new();
     private int _nextId;
 
     protected TokenStoreBase(ITokenPersistence persistence)
@@ -67,17 +68,19 @@ internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposabl
     {
         _byName.Clear();
         _byId.Clear();
+        _frameFlags.Clear();
         _nextId = 0;
         LoadFromPersistence();
     }
 
     private void LoadFromPersistence()
     {
-        foreach (var (id, utf8) in _persistence.Load())
+        foreach (var (id, utf8, flags) in _persistence.Load())
         {
             string name = Encoding.UTF8.GetString(utf8);
             _byName[name] = MakeToken(id);
             _byId[id] = utf8;
+            if (flags != 0) _frameFlags[id] = flags;
             if (id >= _nextId) _nextId = id + 1;
         }
     }
@@ -92,13 +95,18 @@ internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposabl
         string key = name.ToString();
         if (_byName.TryGetValue(key, out TToken existing))
             return existing;
+        return CreateToken(key);
+    }
 
+    protected TToken CreateToken(string name, byte flags = 0)
+    {
         int id = _nextId++;
         TToken token = MakeToken(id);
-        byte[] utf8 = Encoding.UTF8.GetBytes(key);
-        _byName[key] = token;
+        byte[] utf8 = Encoding.UTF8.GetBytes(name);
+        _byName[name] = token;
         _byId[id] = utf8;
-        _persistence.Persist(_byId);
+        if (flags != 0) _frameFlags[id] = flags;
+        _persistence.Persist(_byId, _frameFlags);
         return token;
     }
 
@@ -144,7 +152,7 @@ internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposabl
         _byName[newName] = token;
         _byId[id] = Encoding.UTF8.GetBytes(newName);
 
-        _persistence.Persist(_byId);
+        _persistence.Persist(_byId, _frameFlags);
         return true;
     }
 
@@ -163,7 +171,7 @@ internal sealed class FileTokenPersistence : ITokenPersistence
 
     public FileTokenPersistence(string filePath) => _filePath = filePath;
 
-    public IEnumerable<(int Id, byte[] Utf8)> Load()
+    public IEnumerable<(int Id, byte[] Utf8, byte Flags)> Load()
     {
         if (!File.Exists(_filePath)) yield break;
         using var fs = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -173,13 +181,13 @@ internal sealed class FileTokenPersistence : ITokenPersistence
             int id = reader.ReadInt32();
             int nameLen = reader.ReadUInt16();
             byte[] utf8 = reader.ReadBytes(nameLen);
-            yield return (id, utf8);
+            byte flags = reader.ReadByte();
+            yield return (id, utf8, flags);
         }
     }
 
-    public void Persist(IReadOnlyDictionary<int, byte[]> byId)
+    public void Persist(IReadOnlyDictionary<int, byte[]> byId, IReadOnlyDictionary<int, byte> flags)
     {
-        // atomic rewrite: tmp に全フレームを書いて fsync → replace。
         string dir = Path.GetDirectoryName(_filePath) ?? ".";
         string tmpPath = Path.Combine(dir, Path.GetFileName(_filePath) + ".tmp");
         using (var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
@@ -190,6 +198,7 @@ internal sealed class FileTokenPersistence : ITokenPersistence
                 writer.Write(id);
                 writer.Write((ushort)utf8.Length);
                 writer.Write(utf8);
+                writer.Write(flags.TryGetValue(id, out var f) ? f : (byte)0);
             }
             fs.Flush(flushToDisk: true);
         }
@@ -216,7 +225,7 @@ internal sealed class PagedTokenPersistence : ITokenPersistence
 
     public PagedTokenPersistence(IPagedFile file) => _file = file;
 
-    public IEnumerable<(int Id, byte[] Utf8)> Load()
+    public IEnumerable<(int Id, byte[] Utf8, byte Flags)> Load()
     {
         if (_file.PageCount <= 1) yield break; // ヘッダ未確立 = 空
         int frameCount;
@@ -246,15 +255,15 @@ internal sealed class PagedTokenPersistence : ITokenPersistence
             int id = BinaryPrimitives.ReadInt32LittleEndian(blob.AsSpan(pos)); pos += 4;
             int nameLen = BinaryPrimitives.ReadUInt16LittleEndian(blob.AsSpan(pos)); pos += 2;
             byte[] utf8 = blob.AsSpan(pos, nameLen).ToArray(); pos += nameLen;
-            yield return (id, utf8);
+            byte flags = blob[pos]; pos += 1;
+            yield return (id, utf8, flags);
         }
     }
 
-    public void Persist(IReadOnlyDictionary<int, byte[]> byId)
+    public void Persist(IReadOnlyDictionary<int, byte[]> byId, IReadOnlyDictionary<int, byte> flags)
     {
-        // 直列化
         int byteLen = 0;
-        foreach (var kv in byId) byteLen += 4 + 2 + kv.Value.Length;
+        foreach (var kv in byId) byteLen += 4 + 2 + kv.Value.Length + 1;
         byte[] blob = new byte[byteLen];
         int pos = 0;
         foreach (var (id, utf8) in byId.OrderBy(kv => kv.Key))
@@ -262,6 +271,7 @@ internal sealed class PagedTokenPersistence : ITokenPersistence
             BinaryPrimitives.WriteInt32LittleEndian(blob.AsSpan(pos), id); pos += 4;
             BinaryPrimitives.WriteUInt16LittleEndian(blob.AsSpan(pos), (ushort)utf8.Length); pos += 2;
             utf8.CopyTo(blob.AsSpan(pos)); pos += utf8.Length;
+            blob[pos] = flags.TryGetValue(id, out var f) ? f : (byte)0; pos += 1;
         }
 
         int dataPages = byteLen == 0 ? 0 : (byteLen + BodySize - 1) / BodySize;
@@ -317,4 +327,25 @@ internal sealed class PropertyKeyTokenStore : TokenStoreBase<PropertyKeyId>
     public PropertyKeyTokenStore(IPagedFile file) : base(file) { }
     protected override PropertyKeyId MakeToken(int id) => new(id);
     protected override int GetId(PropertyKeyId token) => token.Value;
+
+    /// <summary>
+    /// cardinality を指定してプロパティキーを取得または作成する。
+    /// 既存キーで cardinality が一致すればそのまま返す (冪等)。不一致なら例外。
+    /// </summary>
+    public PropertyKeyId GetOrCreate(string name, PropertyCardinality cardinality)
+    {
+        if (_byName.TryGetValue(name, out PropertyKeyId existing))
+        {
+            var current = GetCardinality(existing);
+            if (current != cardinality)
+                throw new InvalidOperationException(
+                    $"Property key '{name}' already exists with cardinality {current}, cannot change to {cardinality}.");
+            return existing;
+        }
+        return CreateToken(name, (byte)cardinality);
+    }
+
+    /// <summary>指定キーの cardinality を返す。未登録キーは <see cref="PropertyCardinality.Single"/> (既定)。</summary>
+    public PropertyCardinality GetCardinality(PropertyKeyId id)
+        => _frameFlags.TryGetValue(id.Value, out var f) ? (PropertyCardinality)f : PropertyCardinality.Single;
 }

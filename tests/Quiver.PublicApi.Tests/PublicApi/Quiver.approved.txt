@@ -658,7 +658,9 @@ namespace Quiver
         string? GetLabelName(Quiver.Core.LabelId id);
         Quiver.Core.LabelId GetOrCreateLabel(string name);
         Quiver.Core.PropertyKeyId GetOrCreatePropertyKey(string name);
+        Quiver.Core.PropertyKeyId GetOrCreatePropertyKey(string name, Quiver.Core.PropertyCardinality cardinality);
         Quiver.Core.RelationshipTypeId GetOrCreateRelationshipType(string name);
+        Quiver.Core.PropertyCardinality GetPropertyKeyCardinality(Quiver.Core.PropertyKeyId id);
         bool IndexExists(string indexName);
         System.Collections.Generic.IReadOnlyList<Quiver.FullTextIndexInfo> ListFullTextIndexes();
         System.Collections.Generic.IReadOnlyList<Quiver.IndexInfo> ListIndexes();
@@ -962,6 +964,11 @@ namespace Quiver.Core
         public bool Equals(Quiver.Core.NodeId other) { }
         public override int GetHashCode() { }
         public static Quiver.Core.NodeId Create(long sequence, int generation) { }
+    }
+    public enum PropertyCardinality : byte
+    {
+        Single = 0,
+        Set = 1,
     }
     public readonly struct PropertyId : System.IEquatable<Quiver.Core.PropertyId>
     {

@@ -14,8 +14,17 @@ public interface ISchemaApi
     /// <summary>リレーションシップ型名を ID に解決する (未登録の場合は新規発行)。</summary>
     RelationshipTypeId GetOrCreateRelationshipType(string name);
 
-    /// <summary>プロパティキー名を ID に解決する (未登録の場合は新規発行)。</summary>
+    /// <summary>プロパティキー名を ID に解決する (未登録の場合は <see cref="PropertyCardinality.Single"/> で新規発行)。</summary>
     PropertyKeyId GetOrCreatePropertyKey(string name);
+
+    /// <summary>
+    /// プロパティキー名を ID に解決する (未登録の場合は指定 cardinality で新規発行)。
+    /// 既存キーで cardinality が一致すればそのまま返す。不一致なら <see cref="InvalidOperationException"/>。
+    /// </summary>
+    PropertyKeyId GetOrCreatePropertyKey(string name, PropertyCardinality cardinality);
+
+    /// <summary>指定キーの多重度を返す。未登録キーは <see cref="PropertyCardinality.Single"/>。</summary>
+    PropertyCardinality GetPropertyKeyCardinality(PropertyKeyId id);
 
     /// <summary>
     /// ラベル ID から名前へ逆引きする。未登録 ID では <c>null</c> を返す。
