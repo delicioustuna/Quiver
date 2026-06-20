@@ -347,6 +347,20 @@ public sealed class GraphStats
         };
     }
 
+    /// <summary>
+    /// テスト用に最小限の統計スナップショットを構築する。
+    /// </summary>
+    internal static GraphStats ForTest(
+        long totalNodes,
+        IReadOnlyDictionary<LabelId, long> labelCardinality,
+        bool hasFastLabelIndex = false)
+        => new()
+        {
+            TotalNodes = totalNodes,
+            LabelCardinality = labelCardinality,
+            HasFastLabelIndex = hasFastLabelIndex,
+        };
+
     // ITransaction は内部型のため Collect(ITransaction ...) は internal。
     // 公開経路は GraphDatabase.CollectStats()。
     internal static GraphStats Collect(ITransaction tx) => Collect(tx, PowerNodeDegreeThreshold);
