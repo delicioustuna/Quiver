@@ -5,7 +5,7 @@ using Quiver.Telemetry;
 namespace Quiver.OpenTelemetry;
 
 /// <summary>
-/// OB-1: Quiver の <see cref="System.Diagnostics.ActivitySource"/> / <see cref="System.Diagnostics.Metrics.Meter"/>
+/// Quiver の <see cref="System.Diagnostics.ActivitySource"/> / <see cref="System.Diagnostics.Metrics.Meter"/>
 /// を OpenTelemetry の TracerProvider / MeterProvider に登録するためのヘルパ。
 /// </summary>
 /// <example>
