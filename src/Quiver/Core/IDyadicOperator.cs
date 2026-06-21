@@ -1,42 +1,41 @@
 namespace Quiver.Core;
 
+// readonly struct 実装でジェネリック特殊化による zero-overhead ディスパッチ、
+// ref struct 実装でスクラッチバッファ保持が可能。
 /// <summary>
-/// Two-input operator over float signal spans. The input element type is always
-/// <see cref="float"/> (the storage type of Quiver vectors); <typeparamref name="TResult"/>
-/// determines the output type (scalar score, transformed span, etc.).
-/// <para>
-/// Implementations may be <see langword="readonly"/> <see langword="struct"/> for zero-overhead
-/// dispatch via generic specialization, or <see langword="ref"/> <see langword="struct"/> when
-/// scratch buffers (<see cref="Span{T}"/> fields) are required.
-/// </para>
+/// float 信号スパンに対する二入力演算子。
 /// </summary>
-/// <typeparam name="TResult">Computed result type.</typeparam>
+/// <remarks>
+/// 入力要素型は常に <see cref="float"/> (Quiver ベクトルの格納型)。
+/// <typeparamref name="TResult"/> が出力型 (スカラスコア、変換スパン等) を決定する。
+/// </remarks>
+/// <typeparam name="TResult">演算結果の型。</typeparam>
 public interface IDyadicOperator<TResult>
 {
-    /// <summary>Computes a result from two signal spans, restricted to <paramref name="regions"/>.</summary>
-    /// <param name="a">First input signal.</param>
-    /// <param name="b">Second input signal.</param>
+    /// <summary>二つの信号スパンから <paramref name="regions"/> の範囲で結果を計算する。</summary>
+    /// <param name="a">第 1 入力信号。</param>
+    /// <param name="b">第 2 入力信号。</param>
     /// <param name="regions">
-    /// Sub-ranges of the input spans to evaluate. The operator decides how to combine
-    /// per-region results (additive, weighted, etc.). An empty span means "full extent".
+    /// 評価対象のサブ範囲。各リージョンの結果の合成方法 (加算、重み付け等) は実装が決定する。
+    /// 空スパンは「全範囲」を意味する。
     /// </param>
     TResult Invoke(ReadOnlySpan<float> a, ReadOnlySpan<float> b, ReadOnlySpan<Range> regions);
 
-    /// <summary>Computes a result from two signal spans over their full extent.</summary>
+    /// <summary>二つの信号スパンの全範囲から結果を計算する。</summary>
     TResult Invoke(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
         => Invoke(a, b, ReadOnlySpan<Range>.Empty);
 }
 
 /// <summary>
-/// Single-input operator over a float signal span.
+/// float 信号スパンに対する単入力演算子。
 /// </summary>
-/// <typeparam name="TResult">Computed result type.</typeparam>
+/// <typeparam name="TResult">演算結果の型。</typeparam>
 public interface IMonadicOperator<TResult>
 {
-    /// <summary>Computes a result from a single signal span, restricted to <paramref name="regions"/>.</summary>
+    /// <summary>単一信号スパンから <paramref name="regions"/> の範囲で結果を計算する。</summary>
     TResult Invoke(ReadOnlySpan<float> a, ReadOnlySpan<Range> regions);
 
-    /// <summary>Computes a result from a single signal span over its full extent.</summary>
+    /// <summary>単一信号スパンの全範囲から結果を計算する。</summary>
     TResult Invoke(ReadOnlySpan<float> a)
         => Invoke(a, ReadOnlySpan<Range>.Empty);
 }

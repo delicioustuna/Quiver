@@ -3,22 +3,24 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// Reference graph-algorithm kernels that operate against an
-/// <see cref="IGraphSnapshotView"/>. These exist to validate the snapshot
-/// API surface — they intentionally do the simplest correct thing rather
-/// than chasing the lowest-allocation variant.
+/// <see cref="IGraphSnapshotView"/> 上で動作するリファレンスグラフアルゴリズム群。
 /// </summary>
+/// <remarks>
+/// スナップショット API の検証を主目的とし、最小割り当てではなく正しさ優先の実装。
+/// </remarks>
 public static class GraphAlgorithms
 {
     /// <summary>
-    /// Iterative PageRank over the snapshot's outgoing-edge view. Uses the
-    /// standard damping formulation with a uniform teleport vector. Dangling
-    /// nodes redistribute their rank uniformly to all nodes each iteration.
+    /// スナップショットの出辺ビューで反復 PageRank を計算する。
     /// </summary>
-    /// <param name="view">Snapshot to read from.</param>
-    /// <param name="damping">Damping factor, typically 0.85.</param>
-    /// <param name="iterations">Number of fixed-point iterations.</param>
-    /// <returns>A <c>double[NodeCount]</c> with one rank per node id.</returns>
+    /// <remarks>
+    /// 一様テレポートベクトルを用いた標準減衰定式化。dangling ノード (出次数 0) は
+    /// 各反復でランクを全ノードに一様に再分配する。
+    /// </remarks>
+    /// <param name="view">読み取り対象のスナップショット。</param>
+    /// <param name="damping">減衰係数 (典型値 0.85)。</param>
+    /// <param name="iterations">固定小数点反復回数。</param>
+    /// <returns>ノード ID をインデックスとする <c>double[NodeCount]</c> のランク配列。</returns>
     public static double[] PageRank(IGraphSnapshotView view, double damping = 0.85, int iterations = 20)
     {
         long n = view.NodeCount;

@@ -3,49 +3,37 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// SID-style join index from
-/// <see cref="RelationshipId"/> to a scalar property value. Built once and
-/// kept alongside a snapshot so weighted traversals, edge filters, and
-/// algorithm kernels can resolve <c>edge.weight</c> without walking the
-/// per-relationship property chain on every lookup.
+/// <see cref="RelationshipId"/> からスカラプロパティ値への SID 風ジョインインデックス。
 /// </summary>
 /// <remarks>
-/// Scope is intentionally narrow: this index targets hot paths that already
-/// hold a <see cref="RelationshipId"/> and want a scalar property in O(1).
-/// It is not a general replacement for
-/// <see cref="IPropertyStore.Enumerate"/> — string / bytes / array values
-/// are out of scope, and <see cref="PropertyLookupOperator"/>'s full
-/// surface still goes through the chain.
-///
-/// The cursor-based read path (<see cref="AdjacencyCursor.WeightRaw"/> from
-/// an <see cref="IAdjacencyPayloadView"/>) already serves the
-/// "iterate-while-reading-weight" case. This index complements it for the
-/// "I have a relationship id, give me the value" case which the payload
-/// lane (keyed by node) cannot answer in O(1).
+/// 一度構築してスナップショットと共に保持することで、重み付きトラバーサル・エッジフィルタ・
+/// アルゴリズムカーネルが lookup 毎にプロパティチェーンを辿らずに O(1) で値を取得できる。
+/// 対象は <see cref="RelationshipId"/> を既に保持しているホットパスに限定し、
+/// string / bytes / array は範囲外。
 /// </remarks>
 public interface IRelationshipPropertyJoinIndex
 {
     /// <summary>
-    /// Look up the scalar value for <paramref name="relationshipId"/> /
-    /// <paramref name="keyId"/>. Returns false when the index has no entry
-    /// (relationship out of range, property absent, or key not covered by
-    /// this index instance). On true, <paramref name="type"/> is the
-    /// observed scalar type and <paramref name="scalarBits"/> is the raw
-    /// bit pattern — reinterpret via <see cref="BitConverter.Int64BitsToDouble"/>
-    /// for <see cref="PropertyValueType.Double"/>.
+    /// <paramref name="relationshipId"/> / <paramref name="keyId"/> のスカラ値を引く。
     /// </summary>
+    /// <returns>
+    /// エントリが無い場合 (範囲外、プロパティ未設定、キー非対応) は <c>false</c>。
+    /// <c>true</c> のとき <paramref name="type"/> は観測されたスカラ型、
+    /// <paramref name="scalarBits"/> は生ビットパターン
+    /// (<see cref="PropertyValueType.Double"/> なら <see cref="BitConverter.Int64BitsToDouble"/> で再解釈)。
+    /// </returns>
     bool TryGetScalar(
         RelationshipId relationshipId,
         PropertyKeyId keyId,
         out PropertyValueType type,
         out long scalarBits);
 
-    /// <summary>The property key this index was built for.</summary>
+    /// <summary>このインデックスが対象とするプロパティキー。</summary>
     PropertyKeyId KeyId { get; }
 
-    /// <summary>The scalar type covered by this index.</summary>
+    /// <summary>このインデックスが対象とするスカラ型。</summary>
     PropertyValueType ValueType { get; }
 
-    /// <summary>Number of relationships with a recorded value.</summary>
+    /// <summary>値が記録されたリレーションシップの件数。</summary>
     long EntryCount { get; }
 }

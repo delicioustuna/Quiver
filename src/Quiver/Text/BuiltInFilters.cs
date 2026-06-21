@@ -1,11 +1,12 @@
 namespace Quiver.Text;
 
 /// <summary>
-/// Lowercases ASCII A–Z in each token. Useful for tokenizers that do not
-/// apply their own case folding (the built-in <see cref="MixedBigramTokenizer"/>
-/// already normalizes via NFKC + ASCII lowercase, so this filter is redundant
-/// when paired with it — it exists for custom tokenizer pipelines).
+/// 各トークンの ASCII A–Z を小文字化する。独自のケースフォールディングを行わないトークナイザ向け。
 /// </summary>
+/// <remarks>
+/// 組み込みの <see cref="MixedBigramTokenizer"/> は NFKC + ASCII 小文字化を内蔵するため、
+/// そのトークナイザと組み合わせた場合このフィルタは冗長。カスタムパイプライン用途。
+/// </remarks>
 public sealed class LowercaseFilter : ITokenFilter
 {
     /// <inheritdoc/>
@@ -39,15 +40,17 @@ public sealed class LowercaseFilter : ITokenFilter
 }
 
 /// <summary>
-/// Drops tokens that appear in a stop-word set. Stop words are matched
-/// after any upstream filters (e.g. lowercase) have been applied, so the
-/// set should contain lowercased forms.
+/// ストップワードセットに含まれるトークンを除去するフィルタ。
 /// </summary>
+/// <remarks>
+/// マッチングは上流フィルタ (例: 小文字化) 適用後に行われるため、
+/// セットには小文字化済みの形を含めること。
+/// </remarks>
 public sealed class StopWordFilter : ITokenFilter
 {
     private readonly HashSet<string> _stopWords;
 
-    /// <summary>Create a stop-word filter from an explicit word set.</summary>
+    /// <summary>明示的な単語セットからストップワードフィルタを生成する。</summary>
     public StopWordFilter(IEnumerable<string> stopWords)
     {
         ArgumentNullException.ThrowIfNull(stopWords);

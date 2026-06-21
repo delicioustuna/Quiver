@@ -4,7 +4,7 @@ using System.Diagnostics.Tracing;
 namespace Quiver.Telemetry;
 
 /// <summary>
-/// OB-2: <c>dotnet-counters monitor -n &lt;pid&gt; --counters Quiver-EventSource</c> で
+/// <c>dotnet-counters monitor -n &lt;pid&gt; --counters Quiver-EventSource</c> で
 /// バッファプール / WAL / トランザクション / ロック / 索引 / vacuum の主要メトリクスを
 /// in-box (追加 NuGet 不要) でリアルタイム観測するための <see cref="EventSource"/>。
 /// </summary>

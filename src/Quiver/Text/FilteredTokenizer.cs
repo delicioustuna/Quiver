@@ -1,22 +1,20 @@
 namespace Quiver.Text;
 
 /// <summary>
-/// Wraps an <see cref="ITokenizer"/> with an ordered chain of
-/// <see cref="ITokenFilter"/> stages. The pipeline is
-/// <c>Tokenizer → Filter[0] → Filter[1] → … → Sink</c>.
-/// Implements <see cref="ITokenizer"/> so existing code that calls
-/// <c>tokenizer.Tokenize()</c> works transparently.
+/// <see cref="ITokenizer"/> を <see cref="ITokenFilter"/> の順序付きチェーンで包むラッパ。
+/// パイプラインは <c>Tokenizer → Filter[0] → Filter[1] → … → Sink</c>。
+/// <see cref="ITokenizer"/> を実装するため既存コードから透過的に利用できる。
 /// </summary>
 public sealed class FilteredTokenizer : ITokenizer
 {
     private readonly ITokenizer _inner;
     private readonly ITokenFilter[] _filters;
 
-    /// <summary>Create a filtered tokenizer.</summary>
-    /// <param name="inner">Base tokenizer that produces the initial token stream.</param>
+    /// <summary>フィルタ付きトークナイザを生成する。</summary>
+    /// <param name="inner">初期トークンストリームを生成するベーストークナイザ。</param>
     /// <param name="filters">
-    /// Ordered filter chain. Each filter receives tokens from the previous stage
-    /// and forwards results to the next. An empty array means no filtering (pass-through).
+    /// 順序付きフィルタチェーン。各フィルタは前段のトークンを受け取り次段へ転送する。
+    /// 空配列はフィルタなし (素通し)。
     /// </param>
     public FilteredTokenizer(ITokenizer inner, params ITokenFilter[] filters)
     {
@@ -27,9 +25,9 @@ public sealed class FilteredTokenizer : ITokenizer
     }
 
     /// <summary>
-    /// Composite id: base tokenizer id plus each filter id, joined by <c>'+'</c>.
-    /// Example: <c>"mixed-bigram-v1+lowercase-v1+stopwords-en-v1"</c>. Persisted in the
-    /// catalog so query-time resolution rebuilds the exact same pipeline.
+    /// ベーストークナイザ ID と各フィルタ ID を <c>'+'</c> で連結した複合 ID
+    /// (例: <c>"mixed-bigram-v1+lowercase-v1+stopwords-en-v1"</c>)。
+    /// カタログに永続化され、検索時に同一パイプラインが再構築される。
     /// </summary>
     public string TokenizerId
     {

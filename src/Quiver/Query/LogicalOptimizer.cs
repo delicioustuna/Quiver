@@ -35,8 +35,7 @@ internal static class LogicalOptimizer
 
     /// <summary>
     /// <see cref="GraphStats.HasFastLabelIndex"/> = true 経路で参照する dim → fraction 上限の
-    /// 昇順 piecewise table。出典は <c>KnnPushdownThresholdSweepBenchmarks</c> の dim×sel 実測
-    /// ([docs/benchmarks/2026-05-20_VEC-12_after.md])。各 dim の crossover に安全マージン 0.05 を引いた値。
+    /// 昇順 piecewise table。各 dim の crossover に安全マージン 0.05 を引いた値。
     /// </summary>
     private static readonly (int MaxDim, double Threshold)[] FastLabelIndexThresholds =
     {

@@ -1,9 +1,7 @@
 namespace Quiver.Core;
 
 /// <summary>
-/// Dot product operator. When <c>regions</c> are specified, returns the sum of
-/// per-region dot products (dot product is additive over disjoint spans).
-/// The full-span path delegates to SIMD-vectorized <see cref="VectorScorer"/>.
+/// 内積演算子。リージョン指定時は各リージョンの内積の合計を返す (内積は互いに素なスパンに対して加法的)。
 /// </summary>
 public readonly struct DotProductOp : IDyadicOperator<float>
 {
@@ -28,10 +26,8 @@ public readonly struct DotProductOp : IDyadicOperator<float>
 }
 
 /// <summary>
-/// Cosine similarity operator. When <c>regions</c> are specified, dot product and norms
-/// are accumulated across all regions before computing the final similarity — this gives
-/// the cosine of the vectors projected onto the union of the specified dimensions.
-/// The full-span path delegates to SIMD-vectorized <see cref="VectorScorer"/>.
+/// コサイン類似度演算子。リージョン指定時は全リージョンの内積とノルムを累積してから
+/// 最終類似度を計算する (指定次元の和集合への射影のコサイン)。
 /// </summary>
 public readonly struct CosineSimilarityOp : IDyadicOperator<float>
 {
@@ -65,9 +61,7 @@ public readonly struct CosineSimilarityOp : IDyadicOperator<float>
 }
 
 /// <summary>
-/// Euclidean distance operator. When <c>regions</c> are specified, squared differences
-/// are accumulated across all regions before taking a single square root.
-/// The full-span path delegates to SIMD-vectorized <see cref="VectorScorer"/>.
+/// ユークリッド距離演算子。リージョン指定時は全リージョンの二乗差を累積してから平方根を取る。
 /// </summary>
 public readonly struct EuclideanDistanceOp : IDyadicOperator<float>
 {

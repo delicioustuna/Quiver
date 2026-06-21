@@ -17,7 +17,7 @@ internal sealed class DeadlockDetector : IDisposable
     private int _disposed;
 
     /// <summary>
-    /// 検出して犠牲者を中断した累計回数。<see cref="Quiver.IDiagnosticsApi"/> のメトリクスに公開予定 (OB-2)。
+    /// 検出して犠牲者を中断した累計回数。<see cref="Quiver.IDiagnosticsApi"/> のメトリクスに公開予定。
     /// </summary>
     public long DetectedCount => Interlocked.Read(ref _detectedCount);
 

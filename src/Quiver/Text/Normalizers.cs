@@ -4,15 +4,15 @@ using System.Text;
 namespace Quiver.Text;
 
 /// <summary>
-/// Default-on normalizer for Japanese-heavy corpora: NFKC + ASCII lowercase +
-/// strip controls + collapse whitespace. NFKC turns half-width katakana,
-/// full-width digits, ㈱ etc. into their canonical compositions which is
-/// usually the right tradeoff for both embedding-source text and full-text
-/// indexing. Flags can be overridden via <see cref="DefaultFlags"/>.
+/// 日本語主体コーパス向けの既定ノーマライザ。NFKC + ASCII 小文字化 + 制御文字除去 + 空白折り畳み。
 /// </summary>
+/// <remarks>
+/// NFKC は半角カタカナ、全角数字、㈱ 等を正準合成に変換する。埋め込み元テキストと
+/// 全文索引の両方で適切なトレードオフとなる。<see cref="DefaultFlags"/> で変換セットを上書き可。
+/// </remarks>
 public sealed class JapaneseAwareNormalizer : ITextNormalizer
 {
-    /// <summary>Transformations applied by this normalizer.</summary>
+    /// <summary>このノーマライザが適用する変換セット。</summary>
     public NormalizationFlags DefaultFlags { get; init; } =
         NormalizationFlags.UnicodeNFKC
         | NormalizationFlags.LowerCaseAscii
@@ -25,13 +25,12 @@ public sealed class JapaneseAwareNormalizer : ITextNormalizer
 }
 
 /// <summary>
-/// Loss-averse normalizer: NFC + strip controls only. Use when downstream
-/// consumers require the original form (e.g. provider that handles its own
-/// case-folding).
+/// 低損失ノーマライザ。NFC + 制御文字除去のみ。
+/// 後段が独自のケースフォールディングを行う場合など、元の形を保持したいときに使う。
 /// </summary>
 public sealed class MinimalNormalizer : ITextNormalizer
 {
-    /// <summary>Transformations applied by this normalizer.</summary>
+    /// <summary>このノーマライザが適用する変換セット。</summary>
     public NormalizationFlags DefaultFlags { get; init; } =
         NormalizationFlags.UnicodeNFC | NormalizationFlags.StripControlChars;
 

@@ -8,29 +8,16 @@ using Quiver.Storage.Records;
 namespace Quiver.Api;
 
 /// <summary>
-/// <see cref="GraphTraversalSource"/> から派生するグラフトラバーサルチェーン
+/// Gremlin 風のグラフトラバーサルチェーン。<see cref="GraphTraversalSource"/> から派生し、
+/// <c>HasLabel</c> / <c>Has</c> / <c>Out</c> / <c>Where</c> / <c>Limit</c> / <c>OrderBy</c>
+/// などのステップをチェーンして終端 (<see cref="ToList"/> / <see cref="Next"/> /
+/// <see cref="AsCursor"/> 等) で実行する。
 /// </summary>
-/// <typeparam name="T">現在のチェーンが放出する要素の型</typeparam>
+/// <typeparam name="T">現在のチェーンが放出する要素の型 (典型的には <see cref="NodeId"/> や <see cref="RelationshipId"/>)。</typeparam>
 /// <remarks>
-/// <see cref="ToList"/> / <see cref="Next"/> / <see cref="AsCursor"/> などで閉じる。
+/// インスタンスは不変。各ステップは新しいインスタンスを返すため、中間結果を変数に保持して
+/// 分岐させても副作用は発生しない。所属トランザクションの境界を越えて利用しないこと。
 /// </remarks>
-// <summary>
-// Gremlin 風のグラフトラバーサルチェーン。
-// <see cref="GraphTraversalSource"/> から派生し、<c>HasLabel</c> / <c>Has</c> /
-// <c>Out</c> / <c>OutRelationships</c> / <c>Where</c> / <c>Limit</c> / <c>OrderBy</c>
-// などのステップをチェーンして最終的に <see cref="ToList"/> / <see cref="Next"/> /
-// <see cref="AsCursor"/> などの終端で実行する。
-// </summary>
-// <typeparam name="T">現在のチェーンが放出する要素の型 (典型的には <see cref="NodeId"/> や <see cref="RelationshipId"/>)。</typeparam>
-// <remarks>
-// インスタンスは不変。チェーンの各ステップは新しい <see cref="GraphTraversal{T}"/> を返すため、
-// 中間結果を変数に保持して分岐させても副作用は発生しない。所属トランザクションの境界を
-// 越えて利用しないこと。
-// <para>
-// 各ステップは <see cref="LogicalOp"/> (論理プラン IR) を構築するだけで、KNN 押し下げ等の
-// 最適化は終端で <see cref="LogicalOptimizer"/> に委譲する (旧 <c>PendingKnnBuilder</c> の DSL 埋め込みは撤去)。
-// </para>
-// </remarks>
 public sealed class GraphTraversal<T>
 {
     internal readonly IGraphTransaction _tx;

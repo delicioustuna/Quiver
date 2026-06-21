@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Quiver.Telemetry;
 
 /// <summary>
-/// OB-3: 構造化ログのエントリポイント。
+/// 構造化ログのエントリポイント。
 /// ホット path に <c>logger.BeginScope</c> + <see cref="LoggerMessageAttribute"/> による
 /// allocation-free ログを通すための薄いファサード。
 /// </summary>

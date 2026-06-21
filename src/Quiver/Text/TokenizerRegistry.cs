@@ -1,40 +1,41 @@
 namespace Quiver.Text;
 
 /// <summary>
-/// Resolves an <see cref="ITokenizer"/> from the <see cref="ITokenizer.TokenizerId"/>
-/// recorded in a full-text index's catalog entry. Query-time and index-time code
-/// must both resolve through a registry rather than hardcoding a tokenizer, so a
-/// future <c>mixed-bigram-v2</c> can be added as a pure-additive option without
-/// forcing existing indexes to rebuild.
+/// 全文索引カタログに記録された <see cref="ITokenizer.TokenizerId"/> から
+/// <see cref="ITokenizer"/> を解決するレジストリ。
 /// </summary>
+/// <remarks>
+/// 検索時とインデックス構築時の両方がレジストリ経由でトークナイザを解決するため、
+/// 将来 <c>mixed-bigram-v2</c> を純加算的に追加しても既存インデックスの再構築は不要。
+/// </remarks>
 public interface ITokenizerRegistry
 {
-    /// <summary>Resolve a tokenizer by id, throwing if none is registered.</summary>
+    /// <summary>ID でトークナイザを解決する。未登録の場合は例外をスローする。</summary>
     ITokenizer Resolve(string tokenizerId);
 
-    /// <summary>Resolve a tokenizer by id; returns false if none is registered.</summary>
+    /// <summary>ID でトークナイザを解決する。未登録なら <c>false</c>。</summary>
     bool TryResolve(string tokenizerId, out ITokenizer tokenizer);
 
-    /// <summary>Register (or replace) a tokenizer under its <see cref="ITokenizer.TokenizerId"/>.</summary>
+    /// <summary><see cref="ITokenizer.TokenizerId"/> でトークナイザを登録 (または上書き) する。</summary>
     void Register(ITokenizer tokenizer);
 }
 
 /// <summary>
-/// Default <see cref="ITokenizerRegistry"/>. A fresh instance registers the
-/// built-in <see cref="MixedBigramTokenizer"/> (<c>mixed-bigram-v1</c>) unless
-/// constructed with <c>registerDefaults: false</c>.
+/// 既定の <see cref="ITokenizerRegistry"/> 実装。
+/// 新規インスタンスは組み込みの <see cref="MixedBigramTokenizer"/> (<c>mixed-bigram-v1</c>)
+/// を自動登録する (<c>registerDefaults: false</c> で抑制可)。
 /// </summary>
 public sealed class TokenizerRegistry : ITokenizerRegistry
 {
     private readonly Dictionary<string, ITokenizer> _byId = new(StringComparer.Ordinal);
 
-    /// <summary>Create a registry, optionally pre-registering the built-in tokenizers.</summary>
+    /// <summary>レジストリを生成する。既定で組み込みトークナイザを事前登録する。</summary>
     public TokenizerRegistry(bool registerDefaults = true)
     {
         if (registerDefaults) Register(new MixedBigramTokenizer());
     }
 
-    /// <summary>Create a registry pre-loaded with the built-in tokenizers.</summary>
+    /// <summary>組み込みトークナイザを事前登録したレジストリを生成する。</summary>
     public static TokenizerRegistry CreateDefault() => new(registerDefaults: true);
 
     /// <inheritdoc/>

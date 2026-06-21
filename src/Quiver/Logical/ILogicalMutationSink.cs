@@ -3,33 +3,25 @@ using Quiver.Core;
 namespace Quiver.Logical;
 
 /// <summary>
-/// Receives the logical mutation stream of a
-/// committed transaction. The sink fires exactly once per successful commit,
-/// after the underlying physical durability boundary (WAL flush)
-/// has returned successfully. Rolled-back
-/// transactions are not delivered.
+/// コミット済みトランザクションの論理ミューテーションストリームを受信するシンク。
+/// 成功したコミットごとに物理的な永続化境界 (WAL フラッシュ) 完了後に一度だけ発火する。
+/// ロールバックされたトランザクションは配信されない。
 /// </summary>
 /// <remarks>
 /// <para>
-/// Implementations must be thread-safe — although Quiver currently writes
-/// from a single thread, multiple concurrent read-only transactions exist and
-/// future write parallelism is permitted by the contract. Long / blocking
-/// work should be queued out-of-band; the publisher does not pin the
-/// transaction beyond the hand-off.
+/// 実装はスレッドセーフであること。長時間 / ブロッキングな処理は帯域外にキューすること
+/// (パブリッシャはハンドオフ後にトランザクションを保持しない)。
 /// </para>
 /// <para>
-/// Exceptions raised by the sink are swallowed: a faulty audit sink must not
-/// be allowed to mask a successful commit. Sinks that need at-least-once
-/// delivery should persist before returning and use their own reconciliation
-/// at startup.
+/// シンクが投げた例外は飲み込まれる (不良シンクが成功したコミットを隠蔽してはならない)。
+/// at-least-once 配信が必要なシンクは返却前に永続化し、起動時に自前で reconciliation を行うこと。
 /// </para>
 /// </remarks>
 public interface ILogicalMutationSink
 {
     /// <summary>
-    /// Invoked once per committed transaction with the ordered list of
-    /// mutations that produced the new state. The list is owned by the sink
-    /// after the call and may be retained.
+    /// コミット済みトランザクションの順序付きミューテーション一覧とともに呼び出される。
+    /// リストの所有権は呼び出し後にシンクへ移る (保持可能)。
     /// </summary>
     void OnCommitted(TransactionId transactionId, IReadOnlyList<LogicalMutation> mutations);
 }

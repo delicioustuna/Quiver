@@ -160,7 +160,7 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// <summary><see cref="double"/> キーで指定ノードをインデックスに登録する。</summary>
     void IndexInsert(string indexName, double key, NodeId nodeId);
 
-    // ── インデックスシーク (FT-8 公開 API) ──────────────────────
+    // ── インデックスシーク ──────────────────────────────────
 
     /// <summary>等値シーク。物理プラン経由の利用も可能。</summary>
     NodeIdEnumerator SeekIndex(string indexName, in PropertyValue key);
@@ -171,7 +171,7 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
         in PropertyValue from, bool fromInclusive,
         in PropertyValue to, bool toInclusive);
 
-    // ── ARCH-6: ベクトル (tx 配下) ────────────────────────────────
+    // ── ベクトル (tx 配下) ──────────────────────────────────────
 
     /// <summary>
     /// このトランザクション境界の内側でベクトルを set / 上書きする。書き込みは
@@ -208,7 +208,7 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// <summary>トランザクションをロールバックする。</summary>
     void Rollback();
 
-    // ── FT-23: Savepoint / nested undo ────────────────────────────────
+    // ── Savepoint / nested undo ─────────────────────────────────────
 
     /// <summary>
     /// トランザクション内に savepoint を作成し識別子を返す。

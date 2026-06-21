@@ -1,35 +1,31 @@
 namespace Quiver.Text;
 
 /// <summary>
-/// Mixed bigram/word tokenizer. Normalizes the input
-/// (NFKC + ASCII lowercase) then segments it by Unicode script:
-/// <list type="bullet">
-/// <item>CJK runs (kana / kanji / hangul) are split into overlapping
-/// <b>bigrams</b>; an isolated single CJK character is emitted as a unigram so
-/// it remains searchable.</item>
-/// <item>Latin / digit runs are emitted whole as a single <b>word</b> token,
-/// delimited by any non-letter-or-digit character.</item>
-/// <item>Everything else (whitespace, punctuation, symbols, emoji) acts as a
-/// separator and produces no token.</item>
-/// </list>
-/// No morphological analysis (out of scope): bigram imprecision
-/// is tolerated because the vector side and RRF fusion compensate in the RAG use case.
+/// バイグラム / ワード混合トークナイザ。入力を NFKC + ASCII 小文字化で正規化し、
+/// Unicode スクリプトごとに分割する。
 /// </summary>
+/// <remarks>
+/// <list type="bullet">
+/// <item>CJK 連続 (かな / 漢字 / ハングル) は重なり<b>バイグラム</b>に分割する。
+/// 孤立 CJK 1 文字は検索可能性のためユニグラムとして放出する。</item>
+/// <item>ラテン / 数字の連続は単一の<b>ワード</b>トークンとして放出する。
+/// 区切りは非英数字文字。</item>
+/// <item>その他 (空白、句読点、記号、絵文字) はセパレータとして機能しトークンを生成しない。</item>
+/// </list>
+/// 形態素解析は行わない。バイグラムの不正確さはベクトル側と RRF 融合が RAG ユースケースで補償する。
+/// </remarks>
 public sealed class MixedBigramTokenizer : ITokenizer
 {
-    /// <summary>Default tokenizer id recorded in the full-text index catalog.</summary>
+    /// <summary>全文索引カタログに記録される既定のトークナイザ ID。</summary>
     public const string DefaultTokenizerId = "mixed-bigram-v1";
 
     private readonly ITextNormalizer _normalizer;
 
-    /// <summary>
-    /// Create a tokenizer. The default normalizer applies NFKC + ASCII
-    /// lowercase (no whitespace collapsing — segmentation handles separators).
-    /// </summary>
+    /// <summary>トークナイザを生成する。既定のノーマライザは NFKC + ASCII 小文字化を適用する。</summary>
     /// <param name="normalizer">
-    /// Normalizer applied before segmentation. When null, a NFKC + ASCII
-    /// lowercase normalizer is used. The same normalization must be used at
-    /// index and query time, which is what <see cref="TokenizerId"/> pins down.
+    /// 分割前に適用するノーマライザ。<c>null</c> のとき NFKC + ASCII 小文字化ノーマライザを使う。
+    /// インデックス構築時と検索時で同一の正規化を使う必要がある
+    /// (<see cref="TokenizerId"/> がこれを保証する)。
     /// </param>
     public MixedBigramTokenizer(ITextNormalizer? normalizer = null)
     {

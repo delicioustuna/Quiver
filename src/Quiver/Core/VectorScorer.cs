@@ -3,18 +3,10 @@ using System.Runtime.InteropServices;
 
 namespace Quiver.Core;
 
-/// <summary>
-/// SIMD-vectorized distance/similarity primitives for <see cref="InMemoryVectorStore"/>.
-/// Uses BCL in-box <see cref="Vector{T}"/> over <c>float</c>; no extra package
-/// dependency is taken. Lane width follows <see cref="Vector{T}.Count"/>
-/// (AVX2=8, AVX-512=16, scalar fallback=1) at runtime.
-///
-/// All methods preserve the "HIGHER = more similar" convention for the caller:
-/// <see cref="Cosine"/> and <see cref="Dot"/> return similarity directly,
-/// <see cref="Euclidean"/> returns the raw distance (callers should negate when
-/// using it as a heap score, matching the prior <see cref="InMemoryVectorStore"/>
-/// behaviour).
-/// </summary>
+// SIMD 距離/類似度プリミティブ。BCL の Vector<T> (float) を使用し追加依存なし。
+// レーン幅はランタイムの Vector<float>.Count に従う (AVX2=8, AVX-512=16, scalar=1)。
+// 規約: Cosine/Dot は類似度 (大きいほど類似) を直接返す。Euclidean は生距離を返す
+// (ヒープスコアとして使う場合は呼び出し側で符号反転する)。
 internal static class VectorScorer
 {
     public static float Dot(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
@@ -111,10 +103,7 @@ internal static class VectorScorer
     }
 }
 
-/// <summary>
-/// Scalar baseline kept for parity tests / benchmarks. Production code path
-/// uses <see cref="VectorScorer"/> exclusively.
-/// </summary>
+// パリティテスト / ベンチマーク用のスカラ基準実装。本番経路は VectorScorer を使う。
 internal static class ScalarVectorScorer
 {
     public static float Dot(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
