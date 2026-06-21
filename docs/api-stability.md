@@ -169,7 +169,41 @@ Get-ChildItem tests/Quiver.PublicApi.Tests/PublicApi/*.received.txt | ForEach-Ob
 
 ---
 
-## 7. サポートポリシー (GA 後)
+## 7. 1.x 互換性ポリシー {#1x-compat}
+
+1.0.0 GA 以降、1.x 系列では以下の互換性を保証する:
+
+### 7.1 API 互換性
+
+- public API の **breaking change は 1.x 内では行わない**。追加のみ。
+- `[Obsolete]` の付与は MINOR で行うが、削除は 2.0 まで持ち越す（§3 参照）。
+- `[Experimental]` 付き API は例外として MINOR でも変更しうる（§5 参照）。
+
+### 7.2 オンディスクフォーマット互換性
+
+- **1.x 内では `FormatVersion` を bump しない。** 1.0 で作成した DB ファイルは 1.x の全バージョンで
+  そのまま開ける。
+- 新機能が追加フィールドを必要とする場合は、既存レイアウトの予約領域またはオプショナルな拡張ページを
+  使い、旧バイナリでも読み飛ばせる形で追加する。
+- WAL フォーマットの後方互換も同様に維持する。新しい WAL レコードタイプを追加する場合、旧バージョンの
+  recovery は未知のレコードタイプを安全にスキップできるよう length-prefix を保持する。
+
+### 7.3 挙動の安定性
+
+- デフォルトの `CheckpointPolicy`、`VacuumPolicy`、`GroupCommitWindow` 等のチューニングパラメータの
+  デフォルト値は 1.x 内で変更しない。パフォーマンス改善のためにデフォルトを変えたい場合は新しい
+  オプション値として追加し、既存アプリの挙動を変えない。
+- BM25 スコアリングアルゴリズム（k1=1.2, b=0.75）は 1.x 内で変更しない。
+
+### 7.4 依存関係
+
+- Quiver コアアセンブリは 1.x 内で外部 NuGet 依存を追加しない（ゼロ依存を維持）。
+- `Quiver.Rag` / `Quiver.Hosting` / `Quiver.OpenTelemetry` 等の add-on は最小限の依存を持ちうるが、
+  MINOR 内での依存の追加・メジャーバージョンアップは行わない。
+
+---
+
+## 8. サポートポリシー (GA 後)
 
 - **最新 MAJOR の最新 MINOR** を常にサポートする。
 - セキュリティ修正は最新 MAJOR の現行 MINOR に対して PATCH で提供する。
