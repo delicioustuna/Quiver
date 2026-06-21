@@ -9,22 +9,22 @@
 
 ## 鉄則: 大量挿入は必ず 1 トランザクションに詰める
 
-**bulk パス (まとめて 1 tx) は ~100 B/entry、per-tx パターン (1 件 1 commit) は約 100 倍遅い。**
+**bulk パス (まとめて 1 tx) は ~69 B/entry、per-tx パターン (1 件 1 commit) は約 100 倍遅い。**
 
 これは Quiver で最も効く一手であり、他のどのノブよりも先に守るべき。
 根拠は [索引付き書き込みの WAL 増幅](../benchmark-results.md#索引付き書き込みの-wal-増幅):
 
 | パス | EntryCount | WAL bytes/entry | wall time | スループット |
 |---|---:|---:|---:|---:|
-| **bulk (single tx)** | 100,000 | **103.5 B** | 1,022 ms | **~100k inserts/sec** |
-| per-tx (1 insert/tx) | 100,000 | 252 B | 107,728 ms | ~935 inserts/sec |
-| per-tx (1 insert/tx) | 1,000 | **65,964 B** | 1,200 ms | (極端な WAL 増幅) |
+| **bulk (single tx)** | 100,000 | **69 B** | 963 ms | **~104k inserts/sec** |
+| per-tx (1 insert/tx) | 100,000 | 397 B | 112,897 ms | ~886 inserts/sec |
+| per-tx (1 insert/tx) | 1,000 | **27,108 B** | 1,227 ms | (極端な WAL 増幅) |
 
 なぜこうなるか:
 
 - 各 commit は変更したページ (NodeStore ページ + 索引ページ + meta ページ) の **PageImage** を WAL に書く。
 - bulk パスでは同一ページへの複数変更が **1 つの PageImage に coalesce** されるので、
-  entry 数に対してほぼフラットな ~100 B/entry に収まる。
+  entry 数に対してほぼフラットな ~69 B/entry に収まる。
 - per-tx パスでは毎 commit ごとに同じページの PageImage を丸ごと書き直すため、小規模では entry あたり
   数十 KB に増幅する。大規模では checkpoint truncation が効いて絶対値は頭打ちになるが、それでも遅い。
 

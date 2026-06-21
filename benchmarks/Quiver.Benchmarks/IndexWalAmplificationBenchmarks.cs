@@ -115,14 +115,9 @@ public class IndexWalAmplificationBenchmarks
 
     private long WalBytes()
     {
-        var walDir = Path.Combine(_dbPath, "wal");
-        if (!Directory.Exists(walDir)) return 0;
-        long total = 0;
-        foreach (var f in Directory.EnumerateFiles(walDir))
-        {
-            try { total += new FileInfo(f).Length; } catch { }
-        }
-        return total;
+        var walFile = Path.Combine(_dbPath, "graph.quiver-wal");
+        if (!File.Exists(walFile)) return 0;
+        try { return new FileInfo(walFile).Length; } catch { return 0; }
     }
 }
 
@@ -206,10 +201,9 @@ public static class IndexWalAmplificationStandalone
             sw.Stop();
 
             long walBytes = 0;
-            var walDir = Path.Combine(dbPath, "wal");
-            if (Directory.Exists(walDir))
-                foreach (var f in Directory.EnumerateFiles(walDir))
-                    try { walBytes += new FileInfo(f).Length; } catch { }
+            var walFile = Path.Combine(dbPath, "graph.quiver-wal");
+            if (File.Exists(walFile))
+                try { walBytes = new FileInfo(walFile).Length; } catch { }
 
             return new Result(scenario, entryCount, walBytes, sw.Elapsed.TotalMilliseconds);
         }
