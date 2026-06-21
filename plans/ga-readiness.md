@@ -84,10 +84,10 @@ GA リリースに向けた品質評価で 12 タスクを起票。
 
 ## Wave 3: ドキュメント整備
 
-### GA-12: known_limits CRITICAL 項目の周知強化
+### GA-12: known_limits CRITICAL 項目の周知強化 ✅
 - **概要**: 08_known_limits.md の CRITICAL 4 件に設計根拠・緩和策・将来方針を追記。README Limitations セクション追加。1.x 互換ポリシー明文化
 - **対象**: `docs/spec/08_known_limits.md`, `README.md`, `docs/api-stability.md`
-- **実行**: `/quiver-implement GA-12 known_limits ドキュメント整備`
+- **完了**: commit `38e03d1` (2026-06-21)
 
 ---
 
