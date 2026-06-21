@@ -1,6 +1,6 @@
 # 03. MERGE / UPSERT
 
-Cypher の `MERGE` 相当を使い、重複作成を避けつつ ON CREATE / ON MATCH の分岐を書く。完全コードは [`samples/Quiver.Samples.Match`](https://github.com/anthropics/quiver/tree/main/samples/Quiver.Samples.Match)。
+Cypher の `MERGE` 相当を使い、重複作成を避けつつ ON CREATE / ON MATCH の分岐を書く。完全コードは [`samples/Quiver.Samples.Match`](https://github.com/delicioustuna/Quiver/tree/main/samples/Quiver.Samples.Match)。
 
 ```csharp
 using var db = GraphDatabase.Open("./mygraph");

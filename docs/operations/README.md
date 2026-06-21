@@ -16,6 +16,6 @@
 > per-tx (1 件 1 commit) パターンは bulk パスより **約 100 倍遅い**。
 > 根拠と詳細は [03_performance_tuning.md](03_performance_tuning.md) 冒頭。
 
-これらの章は実装済み機能 (OP-1 snapshot / OP-3 vacuum / FT-22 index repair / FT-27 group commit /
-FT-28 adaptive checkpoint / FT-20 WAL 増幅実測) を前提にしている。各機能の設計詳細は
-[docs/spec/](../spec/) を参照。
+これらの章は実装済み機能 (ライブスナップショット、vacuum、索引修復、グループコミット、
+適応チェックポイント) を前提にしている。
+各機能の設計詳細は [docs/spec/](../spec/) を参照。

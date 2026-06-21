@@ -34,7 +34,7 @@ foreach (var hit in hits)
     Console.WriteLine($"{hit.EntityId}: {hit.Score}");
 ```
 
-## トラバーサルとの結合 (VEC-5)
+## トラバーサルとの結合
 
 KNN スキャンをトラバーサル起点にする:
 
@@ -45,7 +45,7 @@ var top10Friends = g.Knn("person_bio_v1", queryVec, k: 10)
                     .ToList();
 ```
 
-## graph-first ハイブリッド (VEC-6)
+## graph-first ハイブリッド
 
 グラフフィルタを先に評価し、その結果集合に対してのみ KNN を行うパターン。
 

@@ -28,5 +28,5 @@ using var db = GraphDatabase.Open(
 ## バックエンドのケイパビリティ
 
 - `IGraphStorageBackend.Vectors` — ベクトルストア (binary backend は永続化対応)
-- `IGraphStorageBackend.Access` — `IGraphAccessMethods` 抽象を経由した access path (BA-3)
+- `IGraphStorageBackend.Access` — `IGraphAccessMethods` 抽象を経由した access path
 - `IGraphStorageBackend.BulkLoad` — `BulkLoadCapabilities` で利用可能なバルクロード経路を表す

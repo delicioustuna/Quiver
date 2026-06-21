@@ -18,9 +18,10 @@ using (var tx = db.BeginTransaction())
 
 既定はスナップショット分離 (`IsolationLevel.SnapshotIsolation`)。読み取り専用トランザクションは `BeginReadOnlyTransaction()` で開始する。並列トラバーサル系オペレータ (`ParallelBfsOperator` など) は読み取り専用トランザクションでのみ実行可能。
 
-## コミットフック (VEC-3)
+## コミットフック
 
-`IGraphTransaction.OnCommitted` / `OnRolledBack` でコミット後・ロールバック後のコールバックを登録できる。コミットフックはストレージへの永続化が完了した後に実行される。
+`IGraphTransaction.OnCommitted` / `OnRolledBack` でコミット後/ロールバック後のコールバックを登録できる。
+コミットフックはストレージへの永続化が完了した後に実行される。
 
 ```csharp
 tx.OnCommitted(() => Console.WriteLine("永続化済み"));

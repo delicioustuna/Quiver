@@ -48,7 +48,7 @@ var hops = g.Node(s).ShortestPathTo(t, type: "ROAD").TryNext();
 
 冪等な書き込みパターン。同じキーで何度実行しても重複ノードを増やさない。
 
-> `MergeNode` は `(label, matchKey)` のインデックスが登録されていれば O(log n) シークを使い、無ければラベル内全スキャンに落ちる (ノード数次第で秒オーダー、PW-18 参照)。MERGE を多用する業務キーには事前に `Schema.CreateIndex` を呼んでおく。
+> `MergeNode` は `(label, matchKey)` のインデックスが登録されていれば O(log n) シークを使い、無ければラベル内全スキャンに落ちる (ノード数次第で秒オーダー)。MERGE を多用する業務キーには事前に `Schema.CreateIndex` を呼んでおく。
 
 ```csharp
 // データベース起動直後に一度だけ
@@ -172,7 +172,7 @@ var found = Person.FindByName(tx, "Alice");
 
 ## 7. WAL クラッシュリカバリの確認
 
-WAL PageImage replay (FT-9) によりコミット済みデータはクラッシュ後も完全復元される。
+WAL の PageImage replay によりコミット済みデータはクラッシュ後も完全復元される。
 
 ```csharp
 NodeId savedId;
@@ -215,11 +215,11 @@ if (!report.IsConsistent)
 
 ---
 
-## 9. dotnet-counters でリアルタイム観測 (OB-2)
+## 9. dotnet-counters でリアルタイム観測
 
-`Quiver-EventSource` は in-box (追加 NuGet 不要) で公開される `EventSource`。
-別ターミナルから `dotnet-counters` を当てるだけで、buffer-pool / WAL / トランザクション /
-ロック / 索引 / vacuum の主要メトリクスを 1 秒粒度で観測できる。
+`Quiver-EventSource` は追加 NuGet 不要で公開される `EventSource`。
+別ターミナルから `dotnet-counters` を当てるだけで、buffer-pool、WAL、トランザクション、
+ロック、索引、vacuum の主要メトリクスを 1 秒粒度で観測できる。
 
 ```pwsh
 # 1) インストール (初回のみ)
@@ -244,26 +244,26 @@ dotnet-counters monitor -p <pid> --counters Quiver-EventSource
 | `buffer-pool-size-bytes` | gauge | 全 PagedFile のバッファプール総バイト数 |
 | `wal-bytes-per-sec` | rate | WAL 追記スループット |
 | `wal-pending-flush-count` | gauge | fsync 待ちの FlushTo 件数 |
-| `current-checkpoint-threshold-bytes` | gauge | Fixed / Adaptive 現在値 (FT-28) |
+| `current-checkpoint-threshold-bytes` | gauge | Fixed / Adaptive 現在値 |
 | `active-tx-count` | gauge | アクティブな transaction 数 |
 | `tx-commit-per-sec` | rate | コミットスループット |
 | `tx-abort-per-sec` | rate | アボートスループット |
-| `tx-deadlock-victim-count` | rate | DeadlockDetector が中断した犠牲者 / 秒 (FT-25) |
+| `tx-deadlock-victim-count` | rate | DeadlockDetector が中断した犠牲者 / 秒 |
 | `lock-wait-avg-ms` | gauge | 平均ロック取得待ち (ms) |
 | `lock-contention-count` | gauge | 累計コンテンション件数 |
-| `index-orphan-count` | gauge | `CheckIndexConsistency()` 最新観測の orphan 件数 (FT-22) |
-| `vacuum-progress-percent` | gauge | vacuum 実行中の進捗 (0 = 非実行) (OP-3) |
+| `index-orphan-count` | gauge | `CheckIndexConsistency()` 最新観測の orphan 件数 |
+| `vacuum-progress-percent` | gauge | vacuum 実行中の進捗 (0 = 非実行) |
 | `crash-recovery-count` | rate | crash recovery 起動回数 (通常 0) |
 
 `Quiver-EventSource` を有効化しない限り PollingCounter は生成されないので、
 本機能の overhead は実質ゼロ。OpenTelemetry 経由でメトリクスを送りたい場合は
-`Quiver.OpenTelemetry` パッケージの `AddQuiverInstrumentation()` を使う (OB-1)。
+`Quiver.OpenTelemetry` パッケージの `AddQuiverInstrumentation()` を使う。
 
 ---
 
 ## 10. ローカル RAG (Quiver.Rag)
 
-別アセンブリ `Quiver.Rag` は、文書 → チャンク格納・取込/再取込・ハイブリッド検索 +
+別アセンブリ `Quiver.Rag` は、文書からチャンクへの格納、取込/再取込、ハイブリッド検索、
 graph expansion の定型を 1 API で提供する。エンジン本体 (`Quiver`) のみに依存し、埋め込み生成は
 呼び出し側が `IChunkEmbedder` を注入する。サンプルは
 [`samples/Quiver.Samples.Rag`](../samples/Quiver.Samples.Rag/)。
@@ -470,5 +470,5 @@ long n = g.Nodes<Person>()
 コストが顕在化する** (10×10 直積 × degree 1,000 ≈ 12ms)。その場合は
 `AddRelationship` (存在チェックなし、~6µs/call で degree 非依存) を使うか、
 アプリ層で重複制御すること。エッジ存在インデックスは現時点で非目標。
-詳細: [QP-3 計測レポート](benchmarks/2026-06-18_QP-3_MergeRelationshipCost.md)。
+詳細: [MergeRelationship の degree 依存コスト](benchmark-results.md#mergerelationship-の-degree-依存コスト)。
 

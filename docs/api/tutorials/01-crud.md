@@ -2,7 +2,7 @@
 
 ノードとリレーションシップの基本的な作成・読み出し・更新・削除を一通り体験する。
 
-完全なコードは [`samples/Quiver.Samples.Crud`](https://github.com/anthropics/quiver/tree/main/samples/Quiver.Samples.Crud) 参照。
+完全なコードは [`samples/Quiver.Samples.Crud`](https://github.com/delicioustuna/Quiver/tree/main/samples/Quiver.Samples.Crud) 参照。
 
 ```csharp
 using var db = GraphDatabase.Open("./mygraph");

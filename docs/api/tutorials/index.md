@@ -8,4 +8,4 @@
 - [04. SourceGenerator で型付き CRUD](04-sourcegen.md)
 - [05. KNN ベクトル検索](05-knn.md)
 
-各チュートリアルは [`samples/` プロジェクト](https://github.com/anthropics/quiver/tree/main/samples) と対応しており、`dotnet run --project samples/Quiver.Samples.X` で完走できます。
+各チュートリアルは [`samples/` プロジェクト](https://github.com/delicioustuna/Quiver/tree/main/samples) と対応しており、`dotnet run --project samples/Quiver.Samples.X` で完走できます。

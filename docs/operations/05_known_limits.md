@@ -19,9 +19,10 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
   同一プロセス内では `GraphDatabase` を singleton 共有し、複数スレッドから使う (インスタンスはスレッドセーフ)。
 - **並行モデルは「単一ライタ + 並行リーダ」**。読み取りはスナップショット分離でロックフリーに並行でき、
   書き込み中でも読める。書き込みは 1 度に 1 tx を前提とするため、複数スレッドから書く場合はアプリ側で
-  直列化する (`SemaphoreSlim(1,1)` ゲート、または専用ライタスレッド + キュー)。トランザクションはスレッド
-  親和で、生成したスレッドで使い切る (別スレッドへ渡さない)。tx は短く保つ — 開いたままだと checkpoint /
-  `Vacuum` / WAL 切り詰めが止まり WAL が肥大する。並行性・スレッド・安全な使い方の規約とリトライ実装例は
+  直列化する (`SemaphoreSlim(1,1)` ゲート、または専用ライタスレッド + キュー)。
+  トランザクションはスレッド親和で、生成したスレッドで使い切る (別スレッドへ渡さない)。
+  tx は短く保つ。開いたままだと checkpoint、`Vacuum`、WAL 切り詰めが止まり WAL が肥大する。
+  並行性とスレッドの規約、リトライ実装例は
   [docs/spec/08_known_limits.md#concurrency](../spec/08_known_limits.md#concurrency) に集約。
 
 ### レプリケーション無し
@@ -29,7 +30,7 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
 - **組み込みのレプリケーション / HA / 自動フェイルオーバーは無い**。
 - 冗長化は運用側で組む: 定期スナップショット ([02_backup_restore.md](02_backup_restore.md)) +
   別ストレージ保管 + 障害時の手動/自動切り替え。
-- `LogicalMutationSink` (BA-7) で論理ミューテーションストリームを取り出せるので、将来的な
+- `LogicalMutationSink` で論理ミューテーションストリームを取り出せるので、将来的な
   レプリケーションや監査ログ転送の足がかりにはできるが、**完成したレプリケーション機能ではない**。
 
 ### 認証 / 認可 / 暗号化 無し
@@ -59,7 +60,7 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
 
 ### 書き込みスループット
 
-- bulk パス (1 tx にまとめる) で **~100k inserts/sec** 程度 ([FT-20 実測](../benchmarks/2026-05-24_FT-20_IndexWalAmplification.md))。
+- bulk パス (1 tx にまとめる) で **~100k inserts/sec** 程度 ([WAL 増幅計測](../benchmark-results.md#索引付き書き込みの-wal-増幅))。
 - per-tx (1 件 1 commit) は約 100 倍遅い。必ず [03_performance_tuning.md](03_performance_tuning.md) の鉄則に従う。
 
 ### メモリ
@@ -70,7 +71,7 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
 ### ディスク
 
 - MVCC により更新/削除は dead version を残すので、論理データ量より物理ファイルは大きくなりがち。
-  `Vacuum()` (OP-3/5) で回収・truncate する ([04_recovery_troubleshoot.md](04_recovery_troubleshoot.md))。
+  `Vacuum()` で回収、truncate する ([04_recovery_troubleshoot.md](04_recovery_troubleshoot.md))。
 - WAL は checkpoint 設定次第で増減する。recovery 時間とのトレードオフ。
 
 ---
@@ -79,27 +80,28 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
 
 ### トランザクション / 分離レベル
 
-- 既定は SnapshotIsolation。Serializable (SSN) は基盤実装が進行中 (FT-31〜34) で、
-  本ドキュメント時点では full Serializable は未提供。Write skew を厳密に排除したいワークロードは
-  アプリ側で対策するか、提供開始を待つこと。
+- 既定は SnapshotIsolation。
+  Serializable (SSN) は実験的 API (`[Experimental("QUIVER001")]`) として提供されている。
+  Write skew を厳密に排除したいワークロードでの利用を想定するが、安定性保証の対象外である
+  ([api-stability.md §5](../api-stability.md) 参照)。
 - ロック競合が多い場合は `DeadlockDetectionInterval` を設定しないと `LockTimeout` でしか抜けられない
   ([03_performance_tuning.md](03_performance_tuning.md))。
 
 ### vacuum はアクティブ tx 0 が前提
 
 - `Vacuum()` はアクティブトランザクションがあると `Skipped = true` で何もしない。常時書き込みがある
-  ワークロードでは回収機会が来ないことがある。AutoVacuum ワーカー (OP-7) や低トラフィック時間帯の
-  明示実行を計画する。
+  ワークロードでは回収機会が来ないことがある。
+  AutoVacuum ワーカーや低トラフィック時間帯の明示実行を計画する。
 
 ### バックエンド差異
 
-- **バイナリバックエンド** が唯一の組み込みバックエンドで、`CreateSnapshot` / `Vacuum` / `CompactAdjacency` 等の運用 API はこれを前提とする。
+- **バイナリバックエンド** が唯一の組み込みバックエンドで、`CreateSnapshot`、`Vacuum`、`CompactAdjacency` 等の運用 API はこれを前提とする。
 
 ### 索引
 
 - 索引は明示的に作る必要がある (自動索引は無い)。検索/MERGE する列に `Schema.CreateIndex`。
 - 索引数を増やすほど書き込みコスト (WAL 増幅) が上がる。必要な列に絞る。
-- abort/crash 後に稀に orphan が残ることがある → `CheckIndexConsistency` / `RepairIndexes` で対処
+- abort/crash 後に稀に orphan が残ることがある。`CheckIndexConsistency`、`RepairIndexes` で対処
   ([04_recovery_troubleshoot.md](04_recovery_troubleshoot.md))。
 
 ### プラットフォーム

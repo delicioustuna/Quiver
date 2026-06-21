@@ -17,8 +17,7 @@ NuGet では `Quiver` パッケージ 1 つに依存すればよい。DB は「�
 
 ```csharp
 using Quiver;
-using Quiver.Core;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 
 // DB ディレクトリを開く (無ければ新規作成)。using で必ず Dispose する。
 using var db = GraphDatabase.Open(@"C:\data\myapp-graph");
@@ -86,7 +85,7 @@ db.Schema.CreateIndex(
 ## 3. appsettings.json + DI で開く (ASP.NET Core / Generic Host)
 
 `Quiver.Hosting` パッケージを足すと、`IConfiguration` から設定を bind して DI コンテナに
-`GraphDatabase` を singleton 登録できる (OP-2)。
+`GraphDatabase` を singleton 登録できる。
 
 `appsettings.json`:
 
@@ -158,9 +157,9 @@ builder.Services.AddQuiver(
 |---|---|---|
 | `BufferPoolSize` | 256 MB | working set がメモリに乗るか。乗らないと毎回ディスク I/O。 |
 | `CheckpointThresholdBytes` | 64 MB | 大きいほど書き込みは速いが recovery 時間が伸びる。 |
-| `CheckpointPolicy` | `Fixed` | `Adaptive` にすると `TargetRecoveryTime` から自動調整 (FT-28)。 |
-| `GroupCommitWindow` | 0 (無効) | 多並列 commit のワークロードで fsync 回数を削減 (FT-27)。 |
-| `LockingMode` | `ExclusiveOnly` | read 並列を上げたいなら `ReaderWriter` (FT-24)。 |
+| `CheckpointPolicy` | `Fixed` | `Adaptive` にすると `TargetRecoveryTime` から自動調整。 |
+| `GroupCommitWindow` | 0 (無効) | 多並列 commit のワークロードで fsync 回数を削減。 |
+| `LockingMode` | `ExclusiveOnly` | read 並列を上げたいなら `ReaderWriter`。 |
 | `EnableChecksums` | `true` | 本番は **true 維持**。torn write を検出できる。 |
 
 ---

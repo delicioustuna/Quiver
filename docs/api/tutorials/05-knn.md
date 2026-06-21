@@ -1,6 +1,7 @@
 # 05. KNN ベクトル検索
 
-VEC-5 / VEC-6 のベクトル検索とグラフトラバーサルを結合する。完全コードは [`samples/Quiver.Samples.Vector`](https://github.com/anthropics/quiver/tree/main/samples/Quiver.Samples.Vector)。
+ベクトル検索とグラフトラバーサルを結合する。
+完全コードは [`samples/Quiver.Samples.Vector`](https://github.com/delicioustuna/Quiver/tree/main/samples/Quiver.Samples.Vector)。
 
 ```csharp
 using var db = GraphDatabase.Open("./mygraph");
@@ -22,7 +23,7 @@ using (var tx = db.BeginTransaction())
     tx.Commit();
 }
 
-// KNN を起点としたトラバーサル (VEC-5)
+// KNN を起点としたトラバーサル
 using (var tx = db.BeginReadOnlyTransaction())
 {
     var g = tx.G(db.Schema);
@@ -33,7 +34,7 @@ using (var tx = db.BeginReadOnlyTransaction())
                      .ToList();
 }
 
-// graph-first ハイブリッド (VEC-6)
+// graph-first ハイブリッド
 using (var tx = db.BeginReadOnlyTransaction())
 {
     var g = tx.G(db.Schema);

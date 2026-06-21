@@ -23,7 +23,7 @@ else
 
 ## パフォーマンス: インデックスを事前に作成すること
 
-`MergeNode` は **`(label, matchKey)` にインデックスが登録されていればそれを自動で利用し、無ければラベル内の全ノードをスキャンする**。後者は O(N) で、ラベル内ノード数が増えると秒オーダーになり得る (PW-18 ベースラインで NodeCount=10000 のとき ~11 秒)。
+`MergeNode` は **`(label, matchKey)` にインデックスが登録されていればそれを自動で利用し、無ければラベル内の全ノードをスキャンする**。後者は O(N) で、ラベル内ノード数が増えると秒オーダーになり得る (NodeCount=10000 のとき ~11 秒)。
 
 業務キーで MERGE を多用する場合は、データベース起動直後に一度だけインデックスを作成する:
 
@@ -49,7 +49,7 @@ db.Schema.CreateIndex(
 | `Double` | ビット完全一致 |
 | `Bool` / `Int32` / `Int64` | スカラ等値 (符号拡張あり) |
 
-## GC-5: トラバーサルソース経由の糖衣構文
+## トラバーサルソース経由の糖衣構文
 
 ```csharp
 var (id, created) = g.MergeNode("Person", "email", PropertyValue.FromString("alice@example.com"));

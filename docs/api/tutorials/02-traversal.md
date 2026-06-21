@@ -1,6 +1,6 @@
 # 02. 多段トラバーサル
 
-Gremlin 風の DSL で多段トラバーサルを行う。完全コードは [`samples/Quiver.Samples.Traversal`](https://github.com/anthropics/quiver/tree/main/samples/Quiver.Samples.Traversal)。
+Gremlin 風の DSL で多段トラバーサルを行う。完全コードは [`samples/Quiver.Samples.Traversal`](https://github.com/delicioustuna/Quiver/tree/main/samples/Quiver.Samples.Traversal)。
 
 ```csharp
 var g = tx.G(db.Schema);

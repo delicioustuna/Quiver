@@ -1,6 +1,6 @@
 # 04. SourceGenerator で型付き CRUD
 
-`[Node]` / `[Property]` / `[Indexed]` / `[Relationship]` を付与すると、Roslyn SourceGenerator が型安全な CRUD メソッドを自動生成する。完全コードは [`samples/Quiver.Samples.SourceGen`](https://github.com/anthropics/quiver/tree/main/samples/Quiver.Samples.SourceGen)。
+`[Node]` / `[Property]` / `[Indexed]` / `[Relationship]` を付与すると、Roslyn SourceGenerator が型安全な CRUD メソッドを自動生成する。完全コードは [`samples/Quiver.Samples.SourceGen`](https://github.com/delicioustuna/Quiver/tree/main/samples/Quiver.Samples.SourceGen)。
 
 ```csharp
 [Node]

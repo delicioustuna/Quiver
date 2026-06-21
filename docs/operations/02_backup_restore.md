@@ -23,7 +23,7 @@
 
 ## A. ライブスナップショット (推奨) — `CreateSnapshot`
 
-書き込みを止めずに、整合したコピーを別ディレクトリに作る (OP-1)。本番で最も使うべき方法。
+書き込みを止めずに、整合したコピーを別ディレクトリに作る。本番で最も使うべき方法。
 
 ```csharp
 using var db = GraphDatabase.Open(@"C:\data\graph");

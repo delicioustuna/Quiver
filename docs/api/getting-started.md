@@ -19,7 +19,7 @@ dotnet build Quiver.slnx
 
 ```csharp
 using Quiver;
-using Quiver.Stores;
+using Quiver.Storage.Records;
 
 using var db = GraphDatabase.Open("./mygraph");
 using var tx = db.BeginTransaction();
@@ -35,6 +35,6 @@ tx.Commit();
 
 ## 次のステップ
 
-- [Concepts](concepts/index.md) — モデル・トランザクション・トラバーサルの概念
+- [Concepts](concepts/index.md) — モデル、トランザクション、トラバーサルの概念
 - [Tutorials](tutorials/index.md) — 段階的に動かして学ぶ
-- [API Reference](../api/Quiver.html) — 全公開 API
+- [API Reference](../api/Quiver.html) — 全公開 API リファレンス

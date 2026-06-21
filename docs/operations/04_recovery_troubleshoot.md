@@ -12,8 +12,8 @@ Quiver は **ARIES ベースの WAL (Write-Ahead Log)** で durability を担保
 
 - **commit 済みのデータは、プロセスを `kill` で落としても再オープンで完全に復元される** (redo)。
 - **commit していない in-flight な変更は再オープンで取り消される** (補償レコードによる undo / strict rollback)。
-- 索引 (B+Tree) も page-WAL の対象 (FT-19 ARIES 統一) なので、データと索引が **同じ時点** に揃って復旧する。
-- checkpoint には Begin/End sentinel があり (FT-21)、checkpoint 中にクラッシュしても WAL truncate の
+- 索引 (B+Tree) も page-WAL の対象なので、データと索引が **同じ時点** に揃って復旧する。
+- checkpoint には Begin/End sentinel があり、checkpoint 中にクラッシュしても WAL truncate の
   順序が壊れない。
 
 つまり「再オープンすれば、最後に成功した commit の直後の整合状態に戻る」のが基本契約。
@@ -23,7 +23,7 @@ Quiver は **ARIES ベースの WAL (Write-Ahead Log)** で durability を担保
 using var db = GraphDatabase.Open(dir);   // ← ここで WAL replay (recovery) が実行される
 ```
 
-復旧が走った回数は `dotnet-counters` の `crash-recovery-count` で観測できる (OB-2)。通常運用では 0。
+復旧が走った回数は `dotnet-counters` の `crash-recovery-count` で観測できる。通常運用では 0。
 非ゼロが増えていれば、どこかでプロセスが異常終了している兆候。
 
 ---
@@ -50,11 +50,11 @@ using var db = GraphDatabase.Open(dir);   // ← ここで WAL replay (recovery)
 
 1. **元のディレクトリを退避** (`graph` → `graph.broken`)。上書きしない。
 2. 直近の正常なバックアップから復元する ([02_backup_restore.md](02_backup_restore.md))。
-3. バックアップが無い場合、`graph.broken` を保全したまま Anthropic/開発側に WAL とエラーを共有して調査。
+3. バックアップが無い場合、`graph.broken` を保全したまま開発側に WAL とエラーを共有して調査。
 4. 再発する場合はストレージ (ディスク / ボリューム) の健全性を疑う。`EnableChecksums = true` を
    維持していれば腐敗を早期に検出できているということ — 無効化しないこと。
 
-> 読み取り API は HWM (high-water mark) 安全化済み (FT-30)。範囲外/負の ID を `NodeExists` /
+> 読み取り API は HWM (high-water mark) 安全化済み。範囲外/負の ID を `NodeExists` /
 > `HasProperty` に渡しても `CorruptionException` ではなく安全に false 返しになる。
 > 起動時の `CorruptionException` は「データファイル自体の破損」であり、これとは別物。
 
@@ -74,7 +74,7 @@ foreach (var o in report.Orphans)
     Console.WriteLine($"  {o.IndexName}: entityId={o.EntityId}");
 ```
 
-**修復** — `RepairIndexes()` (FT-22):
+**修復** — `RepairIndexes()`:
 
 ```csharp
 // まず DryRun で「何を消すか」を確認 (ファイルは触らない)
@@ -86,7 +86,7 @@ Console.WriteLine($"除去した orphan = {applied.RemovedCount}, " +
                   $"labelIndex 再構築 = {applied.LabelIndexInvalidated}");
 ```
 
-- `Apply` は B+Tree の orphan を生キー削除し、`LabelNodeIndex` (VEC-11) は orphan があれば invalidate して
+- `Apply` は B+Tree の orphan を生キー削除し、`LabelNodeIndex` は orphan があれば invalidate して
   次回 lookup で再構築する。
 - **起動時に自動修復したい** 場合は `GraphDatabaseOptions.AutoRepairOrphansOnRecovery = true` を設定すると、
   open 完了直後に `RepairIndexes(Apply)` が自動実行される (既定 false)。常に整合を優先したい運用向け。
@@ -94,7 +94,7 @@ Console.WriteLine($"除去した orphan = {applied.RemovedCount}, " +
 ### D. ディスク使用量が想定より大きい / 削除したのに減らない
 
 **原因**: MVCC では削除/更新は即座に物理削除せず dead version として残す。これを物理回収するのが
-**vacuum** (OP-3)。
+**vacuum**。
 
 **対処** — `Vacuum()`:
 
@@ -114,8 +114,8 @@ else
 
 - vacuum は **アクティブトランザクションが 0 のときだけ** 実行される (古い snapshot がまだ dead version を
   見ているかもしれないため)。`Skipped = true` で返ったら、書き込みが落ち着いたタイミングで再実行する。
-- 物理 truncate (ページファイル縮小) は OP-5 で対応済み (`TruncatedPages` に削減ページ数が出る)。
-- 自動で回したい場合は AutoVacuum ワーカー (OP-7, `VacuumPolicy.Auto`) を有効にする。バックグラウンドで
+- 物理 truncate (ページファイル縮小) にも対応済み (`TruncatedPages` に削減ページ数が出る)。
+- 自動で回したい場合は AutoVacuum ワーカー (`VacuumPolicy.Auto`) を有効にする。バックグラウンドで
   周期実行される。
 
 ### E. 「DB が開けない / 既にロックされている」
@@ -134,7 +134,7 @@ else
 ## ログの読み方
 
 `GraphDatabaseOptions.LoggerFactory` (または Hosting の DI) で `ILoggerFactory` を渡すと、
-recovery / checkpoint / lock / vacuum の構造化ログが出る (OB-3)。
+recovery、checkpoint、lock、vacuum の構造化ログが出る。
 
 - **起動時**: recovery が「何 LSN から何 LSN まで replay したか」「undo した tx 数」を出す。
   毎回 recovery が走る (= 直前に異常終了している) なら正常終了経路を見直す。

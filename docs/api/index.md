@@ -11,7 +11,7 @@ Pure C# で実装するグラフデータベースエンジン Quiver のドキ�
 
 ## サンプルコード
 
-リポジトリの [`samples/`](https://github.com/anthropics/quiver/tree/main/samples) に CRUD・Traversal・Match・SourceGen・Vector の各シナリオを示すサンプルプロジェクトがあります。
+リポジトリの [`samples/`](https://github.com/delicioustuna/Quiver/tree/main/samples) に CRUD、Traversal、Match、SourceGen、Vector の各シナリオを示すサンプルプロジェクトがあります。
 
 ```bash
 dotnet run --project samples/Quiver.Samples.Crud
@@ -31,4 +31,4 @@ docfx serve docs/api/_site
 
 ## ライセンス
 
-(未定)
+[MIT License](../../LICENSE)

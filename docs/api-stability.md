@@ -41,23 +41,23 @@ Quiver は [Semantic Versioning 2.0.0](https://semver.org/lang/ja/) (`MAJOR.MINO
 
 ## 2. public API の定義 (安定性の対象範囲)
 
-安定性を保証する **public API surface** は以下のアセンブリの `public` 型・メンバーに限る:
+安定性を保証する **public API surface** は `Quiver` アセンブリ内の以下の名前空間の `public` 型・メンバーに限る:
 
-| アセンブリ | 対象 | 備考 |
+| 名前空間 | 対象 | 備考 |
 |---|---|---|
 | `Quiver` | ✅ 対象 | 公開ファサード (`GraphDatabase`, `GraphTransaction`, options 等) |
-| `Quiver.Client` | ✅ 対象 | Gremlin ライク API / Match DSL / `[Node]` 等の属性 |
-| `Quiver.Core` | ✅ 対象 | 共通 ID 型・例外型・`PropertyValue` 等の基礎型 |
+| `Quiver.Api` | ✅ 対象 | Gremlin ライク API、Match DSL、`[Node]` 等の属性 |
+| `Quiver.Core` | ✅ 対象 | 共通 ID 型、例外型、`EntityId` 等の基礎型 |
 
 以下は **安定性の対象外**。SemVer に関係なく MINOR/PATCH でも変更しうる:
 
 - すべての `internal` 型・メンバー (`InternalsVisibleTo` 経由で見えるものを含む)
 - `Quiver.SourceGen` (Roslyn generator。生成 **コード** の出力安定性は別途 generator 側で管理)
-- `Quiver.Storage` / `Quiver.Stores` / `Quiver.Index` / `Quiver.Codec` / `Quiver.Wal` / `Quiver.Transactions` / `Quiver.Operators` — これらは実装詳細レイヤーであり、直接参照は非推奨。`Quiver` ファサード経由で使うこと
+- `Quiver.Storage.*` / `Quiver.Query.*` / `Quiver.Index` 等の実装詳細名前空間。`Quiver` / `Quiver.Api` ファサード経由で使うこと
 - `Quiver.Hosting` / `Quiver.OpenTelemetry` — optional add-on パッケージ。独自に versioning するが、安定化は GA 後に順次
 - `[Experimental]` 属性付きのすべての API (§5 参照)
 
-> 直接の実装レイヤー参照を防ぐため、実装アセンブリの public surface は最小化していくが、現時点では参照可能なものも残っている。**ファサード (`Quiver` / `Quiver.Client`) 以外への直接依存は将来予告なく壊れうる** ことを前提にすること。
+> 実装詳細名前空間の public surface は最小化していくが、現時点では参照可能なものも残っている。**ファサード (`Quiver` / `Quiver.Api`) 以外への直接依存は将来予告なく壊れうる** ことを前提にすること。
 
 このリストは [`tests/Quiver.PublicApi.Tests/`](../tests/Quiver.PublicApi.Tests/) の approval test で機械的に固定される (§6)。
 
@@ -103,7 +103,7 @@ API を削除する場合、いきなり消さず以下の段階を踏む:
 まだ安定化していない API には `[System.Diagnostics.CodeAnalysis.Experimental("QUIVERxxx")]` 属性を付ける。
 
 ```csharp
-// SSN ベースの Serializable 分離は評価中 (FT-33)。利用すると QUIVER001 診断が出る。
+// SSN ベースの Serializable 分離は評価中。利用すると QUIVER001 診断が出る。
 public enum IsolationLevel : byte
 {
     ReadCommitted = 1,
@@ -132,7 +132,7 @@ using var tx = db.BeginTransaction(IsolationLevel.Serializable);
 
 | ID | 対象 | 状態 |
 |---|---|---|
-| `QUIVER001` | SSN ベースの Serializable 分離 (`IsolationLevel.Serializable` / `SerializabilityException`、FT-33) | 評価中 |
+| `QUIVER001` | SSN ベースの Serializable 分離 (`IsolationLevel.Serializable` / `SerializabilityException`) | 評価中 |
 
 ---
 
@@ -142,7 +142,7 @@ using var tx = db.BeginTransaction(IsolationLevel.Serializable);
 
 ### 6.1 public API approval test
 
-[`tests/Quiver.PublicApi.Tests/`](../tests/Quiver.PublicApi.Tests/) で [`PublicApiGenerator`](https://github.com/PublicApiGenerator/PublicApiGenerator) を使い、対象アセンブリ (`Quiver` / `Quiver.Client` / `Quiver.Core`) の public surface をテキスト化し、checked-in の baseline (`PublicApi/*.approved.txt`) と比較する。
+[`tests/Quiver.PublicApi.Tests/`](../tests/Quiver.PublicApi.Tests/) で [`PublicApiGenerator`](https://github.com/PublicApiGenerator/PublicApiGenerator) を使い、`Quiver` アセンブリの public surface をテキスト化し、checked-in の baseline (`PublicApi/*.approved.txt`) と比較する。
 
 - public API に差分が出ると test が **fail** し、`*.received.txt` を出力する。
 - 意図した変更なら `*.received.txt` を `*.approved.txt` に上書きコミットする = **明示承認**。これにより「気づかないうちの breaking change」を PR diff として可視化する。
