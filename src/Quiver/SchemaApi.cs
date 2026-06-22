@@ -124,4 +124,13 @@ internal sealed class SchemaApi : ISchemaApi
         }
         return ok;
     }
+
+    public IReadOnlyList<string> ListLabels()
+        => _labels.All().Select(_labels.GetName).ToList();
+
+    public IReadOnlyList<string> ListRelationshipTypes()
+        => _relTypes.All().Select(_relTypes.GetName).ToList();
+
+    public IReadOnlyList<string> ListPropertyKeys()
+        => _propKeys.All().Select(_propKeys.GetName).ToList();
 }

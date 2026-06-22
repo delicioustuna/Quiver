@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Quiver\Quiver.csproj" />
+    <ProjectReference Include="..\..\src\Quiver.Hosting\Quiver.Hosting.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.*" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.*" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.*" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.*" />
+    <PackageReference Include="Avalonia.AvaloniaEdit" Version="12.*" />
+    <PackageReference Include="R3" Version="1.*" />
+    <PackageReference Include="R3Extensions.Avalonia" Version="1.*" />
+    <PackageReference Include="ObservableCollections" Version="3.*" />
+    <PackageReference Include="ObservableCollections.R3" Version="3.*" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.*" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.*" />
+  </ItemGroup>
+</Project>

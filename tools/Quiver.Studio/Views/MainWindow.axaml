@@ -1,0 +1,18 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Quiver.Studio.ViewModels"
+        x:Class="Quiver.Studio.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="{Binding Title}"
+        Width="1280" Height="800">
+    <DockPanel>
+        <TextBlock DockPanel.Dock="Bottom"
+                   Padding="8,4"
+                   FontSize="12"
+                   Text="Ready" />
+
+        <TextBlock HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   Text="Quiver Studio" />
+    </DockPanel>
+</Window>

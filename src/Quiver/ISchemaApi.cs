@@ -87,6 +87,15 @@ public interface ISchemaApi
     /// 整合性は不変)、物理ファイル rename は発生しない。
     /// </summary>
     bool RenameIndex(string oldName, string newName);
+
+    /// <summary>登録済みラベル名の一覧を返す。</summary>
+    IReadOnlyList<string> ListLabels();
+
+    /// <summary>登録済みリレーションシップ型名の一覧を返す。</summary>
+    IReadOnlyList<string> ListRelationshipTypes();
+
+    /// <summary>登録済みプロパティキー名の一覧を返す。</summary>
+    IReadOnlyList<string> ListPropertyKeys();
 }
 
 /// <summary>インデックス種別。プロパティ型と検索モード (等値 / 範囲) で分かれる。</summary>
