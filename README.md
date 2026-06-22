@@ -151,15 +151,16 @@ Quiver は組み込み用途に最適化されたエンジンであり、以下�
 
 ## ドキュメント
 
-> ドキュメント・サンプルは順次整備中です。
+> ドキュメント、サンプルは順次整備中です。
 
 - [Getting Started](docs/api/getting-started.md)
-- [Concepts](docs/api/concepts/index.md) — Node/Relationship, Transaction, Traversal, MERGE, KNN, Backends
+- [Concepts](docs/api/concepts/index.md)（Node/Relationship, Transaction, Traversal, MERGE, KNN, Backends）
 - [Tutorials](docs/api/tutorials/index.md)
-- [Cookbook](docs/cookbook.md) — よく使う典型レシピ集
-- [運用ガイド (Operations)](docs/operations/README.md) — quickstart, backup/restore, performance tuning, recovery
-- [開発者向けドキュメント](docs/development.md) — アーキテクチャ、依存関係、ストレージ仕様、性能詳細、バージョニング
-- [仕様ドキュメント](docs/spec/) — ストレージ、WAL、トランザクション、クエリ、ベクトル、全文検索の仕様
+- [Cookbook](docs/cookbook.md)（典型ユースケースのレシピ集）
+- [運用ガイド](docs/operations/README.md)（quickstart, backup/restore, performance tuning, recovery）
+- [用語辞書](docs/glossary.md)（API に登場する概念の定義）
+- [アーキテクチャ概要](docs/architecture.md)（全体構成、データフロー、運用上の注意）
+- [アーキテクチャ図](docs/architecture-diagrams.md)（Mermaid 図集）
 
 ## サンプル
 
