@@ -72,7 +72,9 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | **Postings** | term から文書 ID へのマッピング。転置インデックスの本体 |
 | **Norms** | 文書長の正規化値。BM25 の長さ正規化に使用する |
 | **WAND (Weighted AND)** | Top-k 検索の早期終了アルゴリズム。term ごとの寄与上限を用いて候補をスキップする |
-| **MixedBigramTokenizer** | Quiver のデフォルトトークナイザ。CJK 文字は bigram 分解し、Latin 文字は空白区切りで小文字化する |
+| **MixedBigramTokenizer** | Quiver のデフォルトトークナイザ。CJK 文字は bigram 分解し、Latin 文字は空白区切りで小文字化する。2 つのモードを持つ（下記参照） |
+| **ユニグラム併用モード** | デフォルト（`mixed-bigram-unigram-v1`）。CJK ランのバイグラムに加えて各文字のユニグラムも放出する。1 文字の CJK 検索クエリが隣接文字に関わらずヒットする |
+| **バイグラム専用モード** | `mixed-bigram-v1`。CJK はバイグラムのみ。インデックスサイズが小さい代わりに 1 文字検索はプレフィクス展開（`粉*`）で代替する。`FullTextIndexOptions.TokenizerId` で明示指定する |
 | **RRF (Reciprocal Rank Fusion)** | 複数のランク付きリストをマージするスコア融合手法。全文検索とベクトル検索のハイブリッド結合に使用する |
 
 ## ベクトル検索
