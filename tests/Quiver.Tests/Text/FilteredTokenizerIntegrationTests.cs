@@ -63,6 +63,6 @@ public sealed class FilteredTokenizerIntegrationTests : IDisposable
 
         var indexes = _db.Schema.ListFullTextIndexes();
         indexes.Should().ContainSingle(i => i.Name == "idx2");
-        indexes[0].TokenizerId.Should().Be("mixed-bigram-v1+lowercase-v1+stopwords-v1");
+        indexes[0].TokenizerId.Should().Be("mixed-bigram-unigram-v1+lowercase-v1+stopwords-v1");
     }
 }

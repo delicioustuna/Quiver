@@ -159,10 +159,13 @@ public sealed class FullTextWandTests : IDisposable
     [Fact]
     public void Wand_japanese_bigram_query()
     {
-        var tokyo = AddDoc("東京都");   // bigrams 東京, 京都
-        AddDoc("京都府");               // bigrams 京都, 都府
+        var tokyo = AddDoc("東京都");   // bigrams 東京, 京都 + unigrams 東, 京, 都
+        AddDoc("京都府");               // bigrams 京都, 都府 + unigrams 京, 都, 府
 
-        SearchWand("東京", k: 10).Should().ContainSingle().Which.Should().Be(tokyo);
+        // "東京" → tokens 東京, 東, 京 → both docs match via unigram "京"; tokyo ranks first.
+        var wandResult = SearchWand("東京", k: 10);
+        wandResult.Should().HaveCount(2);
+        wandResult[0].Should().Be(tokyo);
         SearchWand("京都", k: 10).Should().Equal(SearchFullScan("京都", k: 10));
     }
 

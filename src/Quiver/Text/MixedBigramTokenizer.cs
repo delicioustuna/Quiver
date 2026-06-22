@@ -8,27 +8,41 @@ namespace Quiver.Text;
 /// <list type="bullet">
 /// <item>CJK 連続 (かな / 漢字 / ハングル) は重なり<b>バイグラム</b>に分割する。
 /// 孤立 CJK 1 文字は検索可能性のためユニグラムとして放出する。</item>
+/// <item><paramref name="emitUnigrams"/> が <c>true</c> のとき、CJK 連続 2 文字以上のランでも
+/// 各文字の<b>補足ユニグラム</b>をバイグラムと並行して放出する。
+/// これにより 1 文字の CJK 検索クエリが隣接文字に関わらずヒットする。</item>
 /// <item>ラテン / 数字の連続は単一の<b>ワード</b>トークンとして放出する。
 /// 区切りは非英数字文字。</item>
 /// <item>その他 (空白、句読点、記号、絵文字) はセパレータとして機能しトークンを生成しない。</item>
 /// </list>
 /// 形態素解析は行わない。バイグラムの不正確さはベクトル側と RRF 融合が RAG ユースケースで補償する。
 /// </remarks>
-public sealed class MixedBigramTokenizer : ITokenizer
+public sealed class MixedBigramTokenizer : ITokenizer, INormTokenCounter
 {
-    /// <summary>全文索引カタログに記録される既定のトークナイザ ID。</summary>
+    /// <summary>全文索引カタログに記録されるバイグラム専用トークナイザ ID。</summary>
     public const string DefaultTokenizerId = "mixed-bigram-v1";
 
+    /// <summary>CJK ユニグラム併用モードのトークナイザ ID。</summary>
+    public const string UnigramTokenizerId = "mixed-bigram-unigram-v1";
+
     private readonly ITextNormalizer _normalizer;
+    private readonly bool _emitUnigrams;
+    private readonly string _tokenizerId;
 
     /// <summary>トークナイザを生成する。既定のノーマライザは NFKC + ASCII 小文字化を適用する。</summary>
+    /// <param name="emitUnigrams">
+    /// <c>true</c> のとき、CJK 連続 2 文字以上のランで各文字の補足ユニグラムも放出する。
+    /// 既定は <c>false</c> (バイグラムのみ)。
+    /// </param>
     /// <param name="normalizer">
     /// 分割前に適用するノーマライザ。<c>null</c> のとき NFKC + ASCII 小文字化ノーマライザを使う。
     /// インデックス構築時と検索時で同一の正規化を使う必要がある
     /// (<see cref="TokenizerId"/> がこれを保証する)。
     /// </param>
-    public MixedBigramTokenizer(ITextNormalizer? normalizer = null)
+    public MixedBigramTokenizer(bool emitUnigrams = false, ITextNormalizer? normalizer = null)
     {
+        _emitUnigrams = emitUnigrams;
+        _tokenizerId = emitUnigrams ? UnigramTokenizerId : DefaultTokenizerId;
         _normalizer = normalizer ?? new JapaneseAwareNormalizer
         {
             DefaultFlags = NormalizationFlags.UnicodeNFKC | NormalizationFlags.LowerCaseAscii,
@@ -36,7 +50,7 @@ public sealed class MixedBigramTokenizer : ITokenizer
     }
 
     /// <inheritdoc/>
-    public string TokenizerId => DefaultTokenizerId;
+    public string TokenizerId => _tokenizerId;
 
     /// <inheritdoc/>
     public void Tokenize(ReadOnlySpan<char> text, ITokenSink sink)
@@ -68,11 +82,44 @@ public sealed class MixedBigramTokenizer : ITokenizer
             if (cls == CharClass.Word)
                 sink.Accept(run);
             else
-                EmitBigrams(run, sink);
+                EmitBigrams(run, sink, _emitUnigrams);
         }
     }
 
-    private static void EmitBigrams(ReadOnlySpan<char> run, ITokenSink sink)
+    /// <summary>
+    /// BM25 norms 用の文書長を返す。補足ユニグラムを除外し、バイグラム専用モードと
+    /// 同等のトークン数を返すため、ユニグラム併用で BM25 パラメータが崩れない。
+    /// </summary>
+    int INormTokenCounter.CountNormTokens(ReadOnlySpan<char> text)
+    {
+        if (text.IsEmpty) return 0;
+
+        string normalized = _normalizer.Normalize(text).Text;
+        ReadOnlySpan<char> s = normalized.AsSpan();
+        int n = s.Length;
+        int count = 0;
+
+        int i = 0;
+        while (i < n)
+        {
+            CharClass cls = Classify(s[i]);
+            if (cls == CharClass.Other) { i++; continue; }
+
+            int start = i;
+            i++;
+            while (i < n && Classify(s[i]) == cls) i++;
+            int runLen = i - start;
+
+            if (cls == CharClass.Word)
+                count++;
+            else
+                count += runLen == 1 ? 1 : runLen - 1; // bigrams or isolated unigram
+        }
+
+        return count;
+    }
+
+    private static void EmitBigrams(ReadOnlySpan<char> run, ITokenSink sink, bool emitUnigrams)
     {
         if (run.Length == 1)
         {
@@ -82,6 +129,12 @@ public sealed class MixedBigramTokenizer : ITokenizer
 
         for (int j = 0; j + 1 < run.Length; j++)
             sink.Accept(run.Slice(j, 2));
+
+        if (emitUnigrams)
+        {
+            for (int j = 0; j < run.Length; j++)
+                sink.Accept(run.Slice(j, 1));
+        }
     }
 
     private enum CharClass : byte { Cjk, Word, Other }
@@ -96,7 +149,7 @@ public sealed class MixedBigramTokenizer : ITokenizer
     // BMP CJK scripts. Supplementary-plane ideographs (CJK Ext B+, U+20000 and
     // up) arrive as surrogate pairs and fall through to Other; treating them as
     // CJK would require surrogate-aware bigram slicing, deferred past the MVP.
-    private static bool IsCjk(char c)
+    internal static bool IsCjk(char c)
     {
         int v = c;
         return

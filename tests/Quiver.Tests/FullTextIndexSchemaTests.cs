@@ -31,7 +31,7 @@ public sealed class FullTextIndexSchemaTests : IDisposable
         db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
 
         db.Schema.ListFullTextIndexes().Should().ContainSingle()
-            .Which.Should().Be(new FullTextIndexInfo("idx_body", "Doc", "body", "mixed-bigram-v1"));
+            .Which.Should().Be(new FullTextIndexInfo("idx_body", "Doc", "body", "mixed-bigram-unigram-v1"));
     }
 
     [Fact]

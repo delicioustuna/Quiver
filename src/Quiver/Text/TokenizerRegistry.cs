@@ -32,7 +32,11 @@ public sealed class TokenizerRegistry : ITokenizerRegistry
     /// <summary>レジストリを生成する。既定で組み込みトークナイザを事前登録する。</summary>
     public TokenizerRegistry(bool registerDefaults = true)
     {
-        if (registerDefaults) Register(new MixedBigramTokenizer());
+        if (registerDefaults)
+        {
+            Register(new MixedBigramTokenizer(emitUnigrams: false));
+            Register(new MixedBigramTokenizer(emitUnigrams: true));
+        }
     }
 
     /// <summary>組み込みトークナイザを事前登録したレジストリを生成する。</summary>

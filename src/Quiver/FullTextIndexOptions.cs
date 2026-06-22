@@ -11,8 +11,8 @@ namespace Quiver;
 /// </remarks>
 public sealed record FullTextIndexOptions
 {
-    /// <summary>トークナイザ ID。トークナイザレジストリで解決される。既定: <c>mixed-bigram-v1</c>。</summary>
-    public string TokenizerId { get; init; } = MixedBigramTokenizer.DefaultTokenizerId;
+    /// <summary>トークナイザ ID。トークナイザレジストリで解決される。既定: <c>mixed-bigram-unigram-v1</c>。</summary>
+    public string TokenizerId { get; init; } = MixedBigramTokenizer.UnigramTokenizerId;
 
     /// <summary>
     /// トークナイザの後段に順序付きで適用するトークンフィルタ。

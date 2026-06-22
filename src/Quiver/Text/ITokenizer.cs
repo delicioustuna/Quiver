@@ -32,3 +32,13 @@ public interface ITokenSink
     /// <summary>放出された 1 タームを受け取る。</summary>
     void Accept(ReadOnlySpan<char> token);
 }
+
+/// <summary>
+/// BM25 norms 用の文書長を、補足トークン（ユニグラム併用モードの CJK 補足ユニグラム等）を
+/// 除外して算出する。<see cref="ITokenizer.Tokenize"/> が放出する全トークン数ではなく、
+/// スコアリングの長さ正規化に適した「基底トークン数」を返す。
+/// </summary>
+internal interface INormTokenCounter
+{
+    int CountNormTokens(ReadOnlySpan<char> text);
+}

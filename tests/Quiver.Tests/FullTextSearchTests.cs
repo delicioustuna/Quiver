@@ -100,11 +100,14 @@ public sealed class FullTextSearchTests : IDisposable
     [Fact]
     public void Japanese_bigram_query_matches_indexed_bigrams()
     {
-        var tokyo = AddDoc("東京都");   // bigrams 東京, 京都
-        AddDoc("京都府");               // bigrams 京都, 都府
+        var tokyo = AddDoc("東京都");   // bigrams 東京, 京都 + unigrams 東, 京, 都
+        AddDoc("京都府");               // bigrams 京都, 都府 + unigrams 京, 都, 府
 
-        // Query "東京" → bigram 東京 → only the first doc has it.
-        Search("東京", k: 10).Should().ContainSingle().Which.Should().Be(tokyo);
+        // Query "東京" → bigrams 東京 + unigrams 東, 京.
+        // Both docs match via unigram "京", but tokyo ranks first (3 term matches vs 1).
+        var result = Search("東京", k: 10);
+        result.Should().HaveCount(2);
+        result[0].Should().Be(tokyo);
         // Query "京都" → bigram 京都 → both docs contain it.
         Search("京都", k: 10).Should().HaveCount(2);
     }

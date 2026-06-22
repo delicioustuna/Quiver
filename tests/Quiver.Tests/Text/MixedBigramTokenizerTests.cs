@@ -107,6 +107,85 @@ public sealed class MixedBigramTokenizerTests
     }
 
     [Fact]
+    public void Unigram_tokenizer_id_is_stable()
+    {
+        new MixedBigramTokenizer(emitUnigrams: true).TokenizerId
+            .Should().Be("mixed-bigram-unigram-v1");
+        MixedBigramTokenizer.UnigramTokenizerId
+            .Should().Be("mixed-bigram-unigram-v1");
+    }
+
+    // ---- unigram mode tests ----
+
+    [Fact]
+    public void Unigram_mode_emits_bigrams_and_unigrams_for_cjk_run()
+    {
+        var tok = new MixedBigramTokenizer(emitUnigrams: true);
+        Tokenize("粉体", tok).Should().Equal("粉体", "粉", "体");
+        Tokenize("東京都", tok).Should().Equal("東京", "京都", "東", "京", "都");
+    }
+
+    [Fact]
+    public void Unigram_mode_isolated_cjk_still_single_unigram()
+    {
+        var tok = new MixedBigramTokenizer(emitUnigrams: true);
+        Tokenize("猫", tok).Should().Equal("猫");
+        Tokenize("a 猫 b", tok).Should().Equal("a", "猫", "b");
+    }
+
+    [Fact]
+    public void Unigram_mode_mixed_script()
+    {
+        var tok = new MixedBigramTokenizer(emitUnigrams: true);
+        // "アメリカの米料理" → all CJK (の is hiragana), single run of 8 chars
+        Tokenize("アメリカの米料理", tok).Should().Equal(
+            "アメ", "メリ", "リカ", "カの", "の米", "米料", "料理",
+            "ア", "メ", "リ", "カ", "の", "米", "料", "理");
+    }
+
+    [Fact]
+    public void Unigram_mode_word_tokens_unchanged()
+    {
+        var tok = new MixedBigramTokenizer(emitUnigrams: true);
+        Tokenize("Hello World", tok).Should().Equal("hello", "world");
+    }
+
+    [Fact]
+    public void Unigram_mode_single_char_search_finds_embedded_char()
+    {
+        var tok = new MixedBigramTokenizer(emitUnigrams: true);
+        var tokens = Tokenize("粉体工学", tok);
+        tokens.Should().Contain("粉");
+        tokens.Should().Contain("体");
+        tokens.Should().Contain("工");
+        tokens.Should().Contain("学");
+    }
+
+    [Fact]
+    public void Unigram_mode_norm_count_excludes_supplements()
+    {
+        var tok = new MixedBigramTokenizer(emitUnigrams: true);
+        var counter = (INormTokenCounter)tok;
+        // "粉体工学" → 3 bigrams (no supplements in norm count)
+        counter.CountNormTokens("粉体工学".AsSpan()).Should().Be(3);
+        // "猫" → 1 isolated unigram
+        counter.CountNormTokens("猫".AsSpan()).Should().Be(1);
+        // "Hello 世界" → 1 word + 1 bigram = 2
+        counter.CountNormTokens("Hello 世界".AsSpan()).Should().Be(2);
+        // "アメリカの米" → CJK run of 6 → 5 bigrams
+        counter.CountNormTokens("アメリカの米".AsSpan()).Should().Be(5);
+    }
+
+    [Fact]
+    public void Bigram_mode_norm_count_equals_total_tokens()
+    {
+        var tok = new MixedBigramTokenizer(emitUnigrams: false);
+        var counter = (INormTokenCounter)tok;
+        counter.CountNormTokens("粉体工学".AsSpan()).Should().Be(3);
+        counter.CountNormTokens("Hello World".AsSpan()).Should().Be(2);
+    }
+
+    [Fact]
     public void Tokenize_rejects_null_sink()
     {
         var tok = new MixedBigramTokenizer();

@@ -5,7 +5,7 @@ namespace Quiver.Text;
 /// パイプラインは <c>Tokenizer → Filter[0] → Filter[1] → … → Sink</c>。
 /// <see cref="ITokenizer"/> を実装するため既存コードから透過的に利用できる。
 /// </summary>
-public sealed class FilteredTokenizer : ITokenizer
+public sealed class FilteredTokenizer : ITokenizer, INormTokenCounter
 {
     private readonly ITokenizer _inner;
     private readonly ITokenFilter[] _filters;
@@ -56,6 +56,9 @@ public sealed class FilteredTokenizer : ITokenizer
             chain = new FilterSinkAdapter(_filters[i], chain);
         _inner.Tokenize(text, chain);
     }
+
+    int INormTokenCounter.CountNormTokens(ReadOnlySpan<char> text)
+        => _inner is INormTokenCounter counter ? counter.CountNormTokens(text) : -1;
 
     private sealed class FilterSinkAdapter(ITokenFilter filter, ITokenSink downstream) : ITokenSink
     {

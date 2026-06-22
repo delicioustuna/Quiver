@@ -13,10 +13,41 @@
 
 ## トークナイザ {#tokenizer}
 
-`MixedBigramTokenizer`（デフォルト、id = `mixed-bigram-v1`）:
-- CJK 文字: bigram 分解
-- Latin/ASCII: 空白区切り、小文字化
-- 混在: CJK の bigram と Latin トークンをシームレスに切り替え
+`MixedBigramTokenizer` は 2 つのモードを持つ。インデックス作成時に `TokenizerId` で選択する。
+
+### ユニグラム併用モード (デフォルト) {#tokenizer-unigram}
+
+id = `mixed-bigram-unigram-v1`（`FullTextIndexOptions` の既定値）
+
+CJK 連続 2 文字以上のランで、バイグラムに加えて各文字の**補足ユニグラム**を放出する。
+1 文字の CJK 検索クエリが、隣接文字に関わらずヒットする。
+
+| 入力 | 放出トークン |
+|---|---|
+| `粉体工学` | バイグラム: `粉体` `体工` `工学`、ユニグラム: `粉` `体` `工` `学` |
+| `猫`（孤立 CJK 1 文字） | ユニグラム: `猫` |
+| `Hello` | ワード: `hello` |
+
+**Norms 計算**: 補足ユニグラムは `docLen` に含めない（バイグラム + ワード + 孤立ユニグラムのみ）。
+これにより BM25 の長さ正規化パラメータ (k1, b) がバイグラム専用モードと同一のチューニングで機能する。
+
+**Fuzzy 展開制限**: CJK ユニグラム同士の置換展開を禁止する。全 CJK 文字が相互に
+Levenshtein 距離 1 となり N² 爆発するため。
+
+### バイグラム専用モード {#tokenizer-bigram}
+
+id = `mixed-bigram-v1`
+
+CJK 連続は重なりバイグラムのみ。孤立 CJK 1 文字はユニグラムとして放出する。
+補足ユニグラムは生成しないため、インデックスサイズが小さく CJK 頻出文字の
+postings 肥大がない。1 文字検索は `粉*`（プレフィクス展開）で代替する。
+
+### 共通仕様
+
+- 入力は NFKC + ASCII 小文字化で正規化
+- Latin/ASCII: 空白区切り、小文字化したワードトークン
+- CJK / Latin の混在: Unicode スクリプト境界でシームレスに切り替え
+- `TokenizerRegistry` に両バリアントが自動登録される
 
 ## Postings キーエンコーディング {#postings-key}
 

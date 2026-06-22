@@ -1,5 +1,6 @@
 using System.Text;
 using Quiver.Text;
+using static Quiver.Text.MixedBigramTokenizer;
 
 namespace Quiver.Index.FullText;
 
@@ -76,7 +77,12 @@ internal sealed class FullTextIndex : IDisposable
             byte[] key = PostingsKey.Encode(Encoding.UTF8.GetBytes(term), entityId);
             _postings.Insert(key, Math.Min(tf, ushort.MaxValue));
         }
-        _norms.Insert(entityId, sink.Total);
+
+        int docLen = tokenizer is INormTokenCounter counter
+            ? counter.CountNormTokens(text)
+            : sink.Total;
+        if (docLen < 0) docLen = sink.Total;
+        _norms.Insert(entityId, docLen);
     }
 
     /// <summary>
@@ -131,6 +137,8 @@ internal sealed class FullTextIndex : IDisposable
         int termByteLen = termUtf8.Length;
         if (termByteLen == 0 || maxEditDistance <= 0) return terms;
 
+        bool queryIsCjkUnigram = queryTerm.Length == 1 && IsCjk(queryTerm[0]);
+
         int minLen = Math.Max(1, termByteLen - maxEditDistance * 4);
         int maxLen = termByteLen + maxEditDistance * 4;
         const int maxTermLen = 256;
@@ -148,6 +156,14 @@ internal sealed class FullTextIndex : IDisposable
                 if (seen.Add(candidate))
                 {
                     found = true;
+
+                    // CJK ユニグラム同士の置換展開を禁止 (全 CJK 文字が相互に
+                    // edit distance 1 となり N² 爆発するため)。
+                    if (queryIsCjkUnigram
+                        && candidate.Length == 1 && IsCjk(candidate[0])
+                        && candidate[0] != queryTerm[0])
+                        continue;
+
                     if (LevenshteinDistance(queryTerm, candidate) <= maxEditDistance)
                         terms.Add(candidate);
                 }
