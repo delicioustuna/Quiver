@@ -19,10 +19,10 @@
             <Panel>
                 <TextBlock FontSize="12"
                            Text="Ready"
-                           IsVisible="{Binding !IsConnected.CurrentValue}" />
+                           IsVisible="{Binding !IsConnected}" />
                 <TextBlock FontSize="12"
-                           Text="{Binding FilePath.CurrentValue}"
-                           IsVisible="{Binding IsConnected.CurrentValue}" />
+                           Text="{Binding FilePath}"
+                           IsVisible="{Binding IsConnected}" />
             </Panel>
         </Border>
 
@@ -44,7 +44,7 @@
 
                         <!-- Disconnected state -->
                         <StackPanel Spacing="6"
-                                    IsVisible="{Binding !IsConnected.CurrentValue}">
+                                    IsVisible="{Binding !IsConnected}">
                             <Button Content="Open Database..."
                                     HorizontalAlignment="Stretch"
                                     Click="OnOpenDatabaseClick" />
@@ -52,38 +52,38 @@
 
                         <!-- Connected state -->
                         <StackPanel Spacing="6"
-                                    IsVisible="{Binding IsConnected.CurrentValue}">
-                            <TextBlock Text="{Binding FilePath.CurrentValue}"
+                                    IsVisible="{Binding IsConnected}">
+                            <TextBlock Text="{Binding FilePath}"
                                        FontSize="11"
                                        TextTrimming="CharacterEllipsis"
-                                       ToolTip.Tip="{Binding FilePath.CurrentValue}"
+                                       ToolTip.Tip="{Binding FilePath}"
                                        Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
 
                             <!-- Stats -->
                             <Border Background="{DynamicResource SystemControlBackgroundChromeLowBrush}"
                                     CornerRadius="4"
                                     Padding="8,6"
-                                    IsVisible="{Binding Statistics.CurrentValue, Converter={x:Static ObjectConverters.IsNotNull}}">
+                                    IsVisible="{Binding Statistics, Converter={x:Static ObjectConverters.IsNotNull}}">
                                 <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
                                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Nodes" FontSize="11" />
                                     <TextBlock Grid.Row="0" Grid.Column="1" FontSize="11"
-                                               Text="{Binding Statistics.CurrentValue.NodeCount, StringFormat='{}{0:N0}'}" />
+                                               Text="{Binding Statistics.NodeCount, StringFormat='{}{0:N0}'}" />
 
                                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Relationships" FontSize="11" />
                                     <TextBlock Grid.Row="1" Grid.Column="1" FontSize="11"
-                                               Text="{Binding Statistics.CurrentValue.RelationshipCount, StringFormat='{}{0:N0}'}" />
+                                               Text="{Binding Statistics.RelationshipCount, StringFormat='{}{0:N0}'}" />
 
                                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Properties" FontSize="11" />
                                     <TextBlock Grid.Row="2" Grid.Column="1" FontSize="11"
-                                               Text="{Binding Statistics.CurrentValue.PropertyCount, StringFormat='{}{0:N0}'}" />
+                                               Text="{Binding Statistics.PropertyCount, StringFormat='{}{0:N0}'}" />
 
                                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Data File" FontSize="11" />
                                     <TextBlock Grid.Row="3" Grid.Column="1" FontSize="11"
-                                               Text="{Binding Statistics.CurrentValue.DataFileSize, Converter={StaticResource FileSizeConverter}}" />
+                                               Text="{Binding Statistics.DataFileSize, Converter={StaticResource FileSizeConverter}}" />
 
                                     <TextBlock Grid.Row="4" Grid.Column="0" Text="WAL" FontSize="11" />
                                     <TextBlock Grid.Row="4" Grid.Column="1" FontSize="11"
-                                               Text="{Binding Statistics.CurrentValue.WalFileSize, Converter={StaticResource FileSizeConverter}}" />
+                                               Text="{Binding Statistics.WalFileSize, Converter={StaticResource FileSizeConverter}}" />
                                 </Grid>
                             </Border>
 
@@ -104,7 +104,7 @@
 
                     <TreeView ItemsSource="{Binding SchemaBrowser.RootNodes}"
                               Margin="4,0"
-                              IsVisible="{Binding IsConnected.CurrentValue}">
+                              IsVisible="{Binding IsConnected}">
                         <TreeView.ItemTemplate>
                             <TreeDataTemplate ItemsSource="{Binding Children}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
@@ -130,7 +130,7 @@
                                HorizontalAlignment="Center"
                                Margin="12,20"
                                Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
-                               IsVisible="{Binding !IsConnected.CurrentValue}" />
+                               IsVisible="{Binding !IsConnected}" />
                 </DockPanel>
             </DockPanel>
         </Border>
