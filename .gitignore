@@ -6,6 +6,10 @@
 # dotenv files
 .env
 
+# Generated sample databases
+*.quiver
+*.quiver-wal
+
 # User-specific files
 *.rsuser
 *.suo
