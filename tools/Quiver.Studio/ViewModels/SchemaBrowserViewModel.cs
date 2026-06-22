@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Avalonia.Threading;
 using Quiver.Studio.Services;
 using R3;
 
@@ -15,12 +16,13 @@ public sealed class SchemaBrowserViewModel : IDisposable
     {
         _db = db;
         _subscription = _db.IsOpen.Subscribe(isOpen =>
-        {
-            if (isOpen)
-                Refresh();
-            else
-                RootNodes.Clear();
-        });
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (isOpen)
+                    Refresh();
+                else
+                    RootNodes.Clear();
+            }));
     }
 
     public void Refresh()

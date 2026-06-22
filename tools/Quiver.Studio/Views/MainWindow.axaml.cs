@@ -62,9 +62,4 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnCloseDatabaseClick(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainWindowViewModel vm)
-            vm.CloseDatabase();
-    }
 }

@@ -88,4 +88,7 @@ internal sealed class StubSchemaApi : ISchemaApi
     public bool RenamePropertyKey(string oldName, string newName) => false;
     public bool RenameRelationshipType(string oldName, string newName) => false;
     public bool RenameIndex(string oldName, string newName) => false;
+    public IReadOnlyList<string> ListLabels() => _labels.Keys.ToList();
+    public IReadOnlyList<string> ListRelationshipTypes() => _relTypes.Keys.ToList();
+    public IReadOnlyList<string> ListPropertyKeys() => _propKeys.Keys.ToList();
 }

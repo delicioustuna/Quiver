@@ -89,7 +89,7 @@
 
                             <Button Content="Close"
                                     HorizontalAlignment="Stretch"
-                                    Click="OnCloseDatabaseClick" />
+                                    Command="{Binding CloseDatabaseCommand}" />
                         </StackPanel>
                     </StackPanel>
                 </Border>

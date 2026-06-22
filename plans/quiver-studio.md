@@ -1,0 +1,131 @@
+# Quiver Studio — Avalonia UI デスクトップアプリ実装プラン
+
+承認日: 2026-06-22。クロスプラットフォーム GUI ツール (LiteDB Studio ライク + グラフ可視化)。
+
+## Context
+
+Quiver エンジンに対して、GUI クエリ操作 + NodeNetwork 的なインタラクティブグラフ可視化を行えるクロスプラットフォームデスクトップアプリを提供する。
+
+## 技術スタック
+
+- **UI**: Avalonia 12.x + FluentTheme
+- **バインディング**: R3 (`ReactiveProperty<T>`) + CommunityToolkit.Mvvm (`[ObservableProperty]` / `[RelayCommand]`) + `Dispatcher.UIThread` (R3 → Subscribe → Dispatcher.Post → generated INPC)
+- **コレクション**: ObservableCollections (Phase 1c DataGrid 以降で使用)
+- **DI/ホスト**: Microsoft.Extensions.Hosting (Generic Host)
+- **エディタ**: Avalonia.AvaloniaEdit 12.x
+- **グラフ描画**: SkiaSharp (Avalonia 12 同梱 Skia)
+- **クエリ実行**: Microsoft.CodeAnalysis.CSharp.Scripting (Roslyn)
+- **プロジェクト参照**: `Quiver.csproj` のみ (Quiver.Hosting は不使用 — 動的接続のため)
+
+## プロジェクト構造
+
+`tools/Quiver.Studio/` (WinExe, net10.0, IsPackable=false)。`Quiver.slnx` の `/tools/` フォルダに所属。
+
+```
+tools/Quiver.Studio/
+  Program.cs                     # Generic Host + Avalonia + 3 層例外ハンドリング
+  App.axaml / App.axaml.cs       # FluentTheme, DI ServiceProvider
+  ViewModels/
+    MainWindowViewModel.cs       # シェル (INPC + R3 Subscribe)
+    SchemaBrowserViewModel.cs    # ラベル/RelType/PropKey/Index/FTS/Vector ツリー
+    QueryEditorViewModel.cs      # AvaloniaEdit + Roslyn 実行
+    ResultsViewModel.cs          # DataGrid 動的列表示
+    GraphCanvasViewModel.cs      # VisualNode/Edge + カメラ + 選択
+    PropertyInspectorViewModel.cs
+  Views/
+    MainWindow.axaml             # DockPanel: 左サイドバー (接続+スキーマ) + 中央 + 下部
+    QueryEditor.axaml            # AvaloniaEdit コントロール
+    ResultsView.axaml            # DataGrid
+    GraphCanvas.axaml            # SkiaSharp キャンバス
+    PropertyInspector.axaml      # KeyValue リスト
+  Models/
+    VisualNode.cs / VisualEdge.cs / SchemaTreeNode.cs
+  Services/
+    DatabaseService.cs           # GraphDatabase ライフサイクル + ReactiveProperty
+    QueryExecutionService.cs     # Roslyn CSharpScript 実行ブリッジ
+    GraphLayoutService.cs        # Fruchterman-Reingold 力指向レイアウト
+  Converters/
+    FileSizeConverter.cs
+  Rendering/
+    GraphRenderer.cs / HitTestHelper.cs / CameraTransform.cs
+```
+
+## 設計判断
+
+### クエリ実行: Roslyn C# Scripting
+ScriptGlobals (`db`, `tx`, `g`, `schema`) を事前バインドし、ユーザは Quiver API をそのまま C# で書く。既定は読み取り専用 tx。
+
+### グラフ可視化: SkiaSharp + Fruchterman-Reingold
+力指向レイアウト (300 iterations, >500 ノードで Barnes-Hut)。パン/ズーム/ノードドラッグ。
+
+### VM パターン: R3 ReactiveProperty → CommunityToolkit.Mvvm
+DatabaseService が `ReactiveProperty<T>` を公開。VM は `Subscribe` + `Dispatcher.UIThread.Post()` で CommunityToolkit.Mvvm の `[ObservableProperty]` フィールドへ転写。XAML は標準 `{Binding}` で動作。R3Extensions.Avalonia は Avalonia 12 非対応のため不使用。
+
+### 例外ハンドリング (3 層)
+1. `AppDomain.CurrentDomain.UnhandledException` — 致命的例外
+2. `TaskScheduler.UnobservedTaskException` — 未観測 Task
+3. `R3.ObservableSystem.RegisterUnhandledExceptionHandler` — R3 サブスクリプション
+
+## 実装フェーズ + 進捗
+
+### Phase 0a: ISchemaApi 列挙 API 追加 ✅
+`ListLabels()` / `ListRelationshipTypes()` / `ListPropertyKeys()` を ISchemaApi + SchemaApi に追加。commit c7a945c。
+
+### Phase 0b: スケルトン ✅
+プロジェクト作成、Generic Host + Avalonia 12 統合、3 層例外ハンドリング。commit c7a945c。
+
+### Phase 1a: DB 接続パネル + スキーマブラウザ ✅
+- DatabaseService (Open/Close/IsOpen/FilePath/Statistics の ReactiveProperty 公開) ✅
+- MainWindow 左サイドバー (接続パネル + 統計 + スキーマ TreeView) ✅
+- SchemaBrowserViewModel + SchemaTreeNode ✅
+- ファイルダイアログ (StorageProvider) + エラーダイアログ ✅
+- FileSizeConverter ✅
+- R3Extensions.Avalonia 除去 + CommunityToolkit.Mvvm 導入 + Dispatcher UIスレッド安全化 ✅
+- **残**: MRU (最近使ったファイル) リスト永続化 → Phase 1f へ繰り延べ
+
+### Phase 1b: クエリエディタ + Roslyn 実行
+- AvaloniaEdit 統合 (C# シンタックスハイライト)
+- QueryExecutionService (Roslyn CSharpScript + ScriptGlobals)
+- 結果の実体化 (List→tabular 変換)
+- エラー表示 (コンパイルエラー/実行時例外)
+- F5 ショートカット
+
+### Phase 1c: 結果ビュー
+- DataGrid 動的列生成 (ObservableCollections)
+- 行選択→PropertyInspector 連携
+- CSV/JSON コピー
+
+### Phase 1d: グラフキャンバス
+- VisualNode / VisualEdge モデル
+- GraphLayoutService (Fruchterman-Reingold)
+- GraphRenderer (SkiaSharp: ノード=色付き円+ラベル、エッジ=矢印+型名)
+- CameraTransform (パン/ズーム) + HitTestHelper
+- ノードドラッグ
+- クエリ結果からの NodeId/RelationshipId 抽出→グラフ構築
+
+### Phase 1e: プロパティインスペクタ
+- 選択エンティティの全プロパティ表示
+- PropertyValue ref struct → Dictionary 実体化
+
+### Phase 1f: ステータスバー + 仕上げ
+- 接続状態、実行時間、ノード/エッジ数、ズーム率
+- キーボードショートカット (F5, Ctrl+O, Ctrl+N)
+- Dark/Light テーマ切替
+
+### Phase 2 (将来)
+- インタラクティブグラフ編集 (ノード/Rel の GUI 追加/削除)
+- ベクトル検索結果の距離スコア可視化
+- 全文検索パネル
+- クエリ履歴の永続化
+- Roslyn IntelliSense (コード補完)
+- 階層レイアウト (Sugiyama) トグル
+- グラフの SVG/PNG エクスポート
+
+## 検証方法
+
+1. `dotnet build Quiver.slnx` で全プロジェクトビルド成功
+2. `dotnet run --project tools/Quiver.Studio` でウィンドウ起動
+3. サンプル DB を開いてスキーマツリー表示確認
+4. クエリ実行→結果表示→グラフ可視化の E2E 動作
+5. ノードクリック→プロパティインスペクタ表示
+6. パン/ズーム/ノードドラッグの操作性
