@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Quiver.Studio.ViewModels"
         xmlns:conv="using:Quiver.Studio.Converters"
+        xmlns:ae="https://github.com/avaloniaui/avaloniaedit"
         x:Class="Quiver.Studio.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding Title}"
@@ -11,7 +12,7 @@
         <conv:FileSizeConverter x:Key="FileSizeConverter" />
     </Window.Resources>
 
-    <DockPanel>
+<DockPanel>
         <!-- Status Bar -->
         <Border DockPanel.Dock="Bottom"
                 Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
@@ -20,9 +21,15 @@
                 <TextBlock FontSize="12"
                            Text="Ready"
                            IsVisible="{Binding !IsConnected}" />
-                <TextBlock FontSize="12"
-                           Text="{Binding FilePath}"
-                           IsVisible="{Binding IsConnected}" />
+                <StackPanel Orientation="Horizontal"
+                            Spacing="16"
+                            IsVisible="{Binding IsConnected}">
+                    <TextBlock FontSize="12"
+                               Text="{Binding FilePath}" />
+                    <TextBlock FontSize="12"
+                               Text="{Binding QueryEditor.StatusText}"
+                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                </StackPanel>
             </Panel>
         </Border>
 
@@ -135,13 +142,57 @@
             </DockPanel>
         </Border>
 
-        <!-- Main Content Area (placeholder) -->
-        <Border>
-            <TextBlock HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
-                       FontSize="16"
-                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
-                       Text="Open a database to get started" />
-        </Border>
+        <!-- Main Content Area -->
+        <Grid RowDefinitions="*,4,*">
+            <!-- Query Editor -->
+            <DockPanel Grid.Row="0">
+                <!-- Toolbar -->
+                <Border DockPanel.Dock="Top"
+                        Padding="8,4"
+                        BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                        BorderThickness="0,0,0,1">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="▶ Execute (F5)"
+                                Click="OnExecuteClick"
+                                IsEnabled="{Binding IsConnected}"
+                                Padding="12,4" />
+                    </StackPanel>
+                </Border>
+
+                <!-- AvaloniaEdit editor -->
+                <ae:TextEditor x:Name="QueryTextEditor"
+                               FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                               FontSize="13"
+                               ShowLineNumbers="True"
+                               IsVisible="{Binding IsConnected}" />
+            </DockPanel>
+
+            <!-- Splitter -->
+            <GridSplitter Grid.Row="1"
+                          ResizeDirection="Rows"
+                          Background="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
+
+            <!-- Output -->
+            <Border Grid.Row="2">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top"
+                            Padding="8,4"
+                            BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                            BorderThickness="0,0,0,1">
+                        <TextBlock Text="Output"
+                                   FontWeight="SemiBold"
+                                   FontSize="12" />
+                    </Border>
+
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto">
+                        <TextBlock Text="{Binding QueryEditor.Output}"
+                                   FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                                   FontSize="12"
+                                   Padding="8"
+                                   TextWrapping="NoWrap" />
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Grid>
     </DockPanel>
 </Window>

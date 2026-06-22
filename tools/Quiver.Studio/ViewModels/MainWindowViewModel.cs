@@ -24,10 +24,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public SchemaBrowserViewModel SchemaBrowser { get; }
 
-    public MainWindowViewModel(DatabaseService databaseService)
+    public QueryEditorViewModel QueryEditor { get; }
+
+    public MainWindowViewModel(DatabaseService databaseService, QueryExecutionService queryService)
     {
         _db = databaseService;
         SchemaBrowser = new SchemaBrowserViewModel(_db);
+        QueryEditor = new QueryEditorViewModel(queryService);
 
         _subscriptions = Disposable.Combine(
             _db.IsOpen.Subscribe(v => Dispatcher.UIThread.Post(() => IsConnected = v)),

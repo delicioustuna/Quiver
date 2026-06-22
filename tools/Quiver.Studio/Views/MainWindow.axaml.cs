@@ -1,7 +1,10 @@
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using AvaloniaEdit.TextMate;
 using Quiver.Studio.ViewModels;
+using TextMateSharp.Grammars;
 
 namespace Quiver.Studio.Views;
 
@@ -10,6 +13,21 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        SetupEditor();
+    }
+
+    private void SetupEditor()
+    {
+        var registryOptions = new RegistryOptions(ThemeName.DarkPlus);
+        var installation = QueryTextEditor.InstallTextMate(registryOptions);
+        installation.SetGrammar(registryOptions.GetScopeByLanguageId("csharp"));
+
+        QueryTextEditor.Text = """
+            // Globals: db, tx (read-only), g, schema
+            // Press F5 to execute
+
+            db.Diagnostics.GetStatistics()
+            """;
     }
 
     private async void OnOpenDatabaseClick(object? sender, RoutedEventArgs e)
@@ -62,4 +80,27 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OnExecuteClick(object? sender, RoutedEventArgs e)
+    {
+        await ExecuteQueryAsync();
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.Key == Key.F5)
+        {
+            _ = ExecuteQueryAsync();
+            e.Handled = true;
+            return;
+        }
+        base.OnKeyDown(e);
+    }
+
+    private async Task ExecuteQueryAsync()
+    {
+        if (DataContext is not MainWindowViewModel vm) return;
+        var code = QueryTextEditor.Text;
+        if (string.IsNullOrWhiteSpace(code)) return;
+        await vm.QueryEditor.ExecuteAsync(code);
+    }
 }

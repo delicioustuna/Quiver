@@ -83,12 +83,13 @@ DatabaseService が `ReactiveProperty<T>` を公開。VM は `Subscribe` + `Disp
 - R3Extensions.Avalonia 除去 + CommunityToolkit.Mvvm 導入 + Dispatcher UIスレッド安全化 ✅
 - **残**: MRU (最近使ったファイル) リスト永続化 → Phase 1f へ繰り延べ
 
-### Phase 1b: クエリエディタ + Roslyn 実行
-- AvaloniaEdit 統合 (C# シンタックスハイライト)
-- QueryExecutionService (Roslyn CSharpScript + ScriptGlobals)
-- 結果の実体化 (List→tabular 変換)
-- エラー表示 (コンパイルエラー/実行時例外)
-- F5 ショートカット
+### Phase 1b: クエリエディタ + Roslyn 実行 ✅
+- AvaloniaEdit 統合 (TextMate C# シンタックスハイライト) ✅
+- QueryExecutionService (Roslyn CSharpScript + ScriptGlobals: db/tx/g/schema) ✅
+- 結果の実体化 (scalar/tabular/enumerable→QueryResult) ✅
+- エラー表示 (コンパイルエラー/実行時例外→Output パネル) ✅
+- F5 ショートカット + Execute ボタン ✅
+- 出力は Phase 1c の DataGrid 導入まで text table 形式
 
 ### Phase 1c: 結果ビュー
 - DataGrid 動的列生成 (ObservableCollections)
