@@ -11,6 +11,7 @@ namespace Quiver.Studio.ViewModels;
 public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private readonly DatabaseService _db;
+    private readonly SettingsService _settings;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly IDisposable _subscriptions;
 
@@ -27,6 +28,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(ThemeLabel))]
     private bool _isDarkTheme;
 
+    [ObservableProperty]
+    private IReadOnlyList<RecentFileEntry> _recentFiles = [];
+
+    [ObservableProperty]
+    private int _queryModeIndex;
+
     public string Title => "Quiver Studio";
 
     public string ThemeLabel => IsDarkTheme ? "Light" : "Dark";
@@ -41,27 +48,51 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public PropertyInspectorViewModel PropertyInspector { get; }
 
+    public FullTextSearchViewModel FullTextSearch { get; }
+
+    public bool IsTraversalMode => QueryModeIndex == 0;
+    public bool IsFullTextMode => QueryModeIndex == 1;
+
     public MainWindowViewModel(
         DatabaseService databaseService,
         QueryExecutionService queryService,
         GraphLayoutService layoutService,
+        SugiyamaLayoutService hierarchyLayoutService,
+        SettingsService settingsService,
         ILogger<MainWindowViewModel> logger)
     {
         _db = databaseService;
+        _settings = settingsService;
         _logger = logger;
+
+        IsDarkTheme = string.Equals(settingsService.Settings.Theme, "Dark", StringComparison.OrdinalIgnoreCase);
+        RecentFiles = settingsService.Settings.RecentFiles;
+
         SchemaBrowser = new SchemaBrowserViewModel(_db);
-        QueryEditor = new QueryEditorViewModel(queryService);
-        GraphCanvas = new GraphCanvasViewModel(databaseService, layoutService, logger);
+        QueryEditor = new QueryEditorViewModel(queryService, settingsService, databaseService);
+        GraphCanvas = new GraphCanvasViewModel(databaseService, layoutService, hierarchyLayoutService, logger);
         PropertyInspector = new PropertyInspectorViewModel(databaseService);
+        FullTextSearch = new FullTextSearchViewModel(databaseService);
 
         QueryEditor.ResultReady += OnResultReady;
+        FullTextSearch.ResultReady += OnResultReady;
         GraphCanvas.PropertyChanged += OnGraphCanvasPropertyChanged;
         Results.PropertyChanged += OnResultsSelectionChanged;
 
         _subscriptions = Disposable.Combine(
-            _db.IsOpen.Subscribe(v => Dispatcher.UIThread.Post(() => IsConnected = v)),
+            _db.IsOpen.Subscribe(v => Dispatcher.UIThread.Post(() =>
+            {
+                IsConnected = v;
+                if (v) FullTextSearch.RefreshIndexes();
+            })),
             _db.FilePath.Subscribe(v => Dispatcher.UIThread.Post(() => FilePath = v)),
             _db.Statistics.Subscribe(v => Dispatcher.UIThread.Post(() => Statistics = v)));
+    }
+
+    partial void OnQueryModeIndexChanged(int value)
+    {
+        OnPropertyChanged(nameof(IsTraversalMode));
+        OnPropertyChanged(nameof(IsFullTextMode));
     }
 
     private void OnResultReady(QueryResult result)
@@ -126,7 +157,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         PropertyInspector.Clear();
     }
 
-    public void OpenDatabase(string filePath) => _db.Open(filePath);
+    public void OpenDatabase(string filePath)
+    {
+        _db.Open(filePath);
+        _settings.AddRecentFile(filePath);
+        RecentFiles = _settings.Settings.RecentFiles;
+    }
 
     [RelayCommand]
     private void CloseDatabase()
@@ -136,10 +172,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         GraphCanvas.BuildFromResult(QueryResult.Empty(TimeSpan.Zero));
         QueryEditor.Reset();
         PropertyInspector.Clear();
+        FullTextSearch.Clear();
     }
 
     [RelayCommand]
-    private void ToggleTheme() => IsDarkTheme = !IsDarkTheme;
+    private void ToggleTheme()
+    {
+        IsDarkTheme = !IsDarkTheme;
+        _settings.Settings.Theme = IsDarkTheme ? "Dark" : "Light";
+        _settings.MarkDirty();
+    }
 
     public void Dispose()
     {

@@ -66,22 +66,40 @@ tools/Quiver.Studio/
     ResultsViewModel.cs          # DataGrid 動的列表示
     GraphCanvasViewModel.cs      # VisualNode/Edge + カメラ + 選択
     PropertyInspectorViewModel.cs
+    FullTextSearchViewModel.cs   # [Phase 2] FTS パネル
+    QueryHistoryViewModel.cs     # [Phase 2] 履歴パネル
   Views/
     MainWindow.axaml             # DockPanel: 左サイドバー (接続+スキーマ) + 中央 + 下部
     QueryEditor.axaml            # AvaloniaEdit コントロール
     ResultsView.axaml            # DataGrid
     GraphCanvas.axaml            # SkiaSharp キャンバス
+    GraphCanvasPanel.cs          # カスタム描画 Control
     PropertyInspector.axaml      # KeyValue リスト
+    FullTextSearchPanel.axaml    # [Phase 2] FTS パネル
+    QueryHistoryPanel.axaml      # [Phase 2] 履歴パネル
+    AddNodeDialog.axaml          # [Phase 2] ノード追加ダイアログ
+    AddRelationshipDialog.axaml  # [Phase 2] Rel 追加ダイアログ
   Models/
     VisualNode.cs / VisualEdge.cs / SchemaTreeNode.cs
+    QueryResult.cs / ScriptGlobals.cs
+    StudioSettings.cs            # [Phase 2] 永続化 POCO
+    FtsResultRow.cs              # [Phase 2] FTS 結果行
+    RoslynCompletionData.cs      # [Phase 2] ICompletionData 実装
   Services/
     DatabaseService.cs           # GraphDatabase ライフサイクル + ReactiveProperty
     QueryExecutionService.cs     # Roslyn CSharpScript 実行ブリッジ
     GraphLayoutService.cs        # Fruchterman-Reingold 力指向レイアウト
+    SettingsService.cs           # [Phase 2] JSON 永続化
+    SugiyamaLayoutService.cs     # [Phase 2] 階層レイアウト
+    GraphEditingService.cs       # [Phase 2] Write tx ラッパー
+    IntellisenseService.cs       # [Phase 2] Roslyn 補完
   Converters/
     FileSizeConverter.cs
   Rendering/
     GraphRenderer.cs / HitTestHelper.cs / CameraTransform.cs
+  Export/
+    SvgExporter.cs               # [Phase 2] SVG 生成
+    PngExporter.cs               # [Phase 2] PNG 生成
 ```
 
 ## 設計判断
@@ -153,25 +171,350 @@ DatabaseService が `ReactiveProperty<T>` を公開。VM は `Subscribe` + `Disp
 - ノード: EnumerateProperties で全プロパティ列挙 + KeyId→名前逆引き ✅
 - リレーションシップ: ListPropertyKeys + GetProperty/GetPropertyValues で全キー走査 ✅
 
-### Phase 1f: ステータスバー + 仕上げ
-- 接続状態、実行時間、ノード/エッジ数、ズーム率
-- キーボードショートカット (F5, Ctrl+O, Ctrl+N)
-- Dark/Light テーマ切替
+### Phase 1f: ステータスバー + 仕上げ ✅
+- ステータスバー: 接続状態・クエリステータス・グラフ統計・ズーム率 ✅
+- キーボードショートカット (F5, Ctrl+O, Ctrl+W) ✅
+- Dark/Light テーマ切替 (FluentTheme + TextMate + グラフキャンバス連動) ✅
+- エッジ (リレーションシップ) クリック選択 + ハイライト + PropertyInspector 連携 ✅
+- DB 切断時の全パネルクリア ✅
 
-### Phase 2 (将来)
-- インタラクティブグラフ編集 (ノード/Rel の GUI 追加/削除)
-- ベクトル検索結果の距離スコア可視化
-- 全文検索パネル
-- クエリ履歴の永続化
-- Roslyn IntelliSense (コード補完)
-- 階層レイアウト (Sugiyama) トグル
-- グラフの SVG/PNG エクスポート
+### Phase 2: 操作・分析ツール化
+
+Studio を「閲覧ツール」から「操作・分析ツール」に引き上げる。
+
+#### 実装順序と依存関係
+
+```
+Phase 2a (基盤 — 独立、先行して安定化)
+  2a.1 セッション永続化 ← 2b.1 が依存
+  2a.2 全文検索パネル   (独立)
+  2a.3 Sugiyama レイアウト (独立)
+
+Phase 2b (2a 基盤の上に構築)
+  2b.1 クエリ履歴 UI   ← 2a.1 SettingsService に依存
+  2b.2 グラフ編集       (最も侵襲的、2a 安定後に着手)
+  2b.3 ベクトルスコア可視化 (独立、中程度の複雑さ)
+
+Phase 2c (高複雑度 / 独立)
+  2c.1 Roslyn IntelliSense (最高複雑度)
+  2c.2 SVG/PNG エクスポート (独立)
+```
+
+#### Phase 2a.1: セッション永続化基盤
+
+JSON ファイルで設定・MRU・クエリ履歴を永続化。SQLite 依存なし。
+
+**保存先**: `%LOCALAPPDATA%/QuiverStudio/settings.json`
+
+**データモデル**:
+```csharp
+// Models/StudioSettings.cs
+public sealed class StudioSettings
+{
+    public int Version { get; set; } = 1;
+    public string Theme { get; set; } = "Light";
+    public string? LastOpenedPath { get; set; }
+    public WindowStateData? WindowState { get; set; }
+    public List<RecentFileEntry> RecentFiles { get; set; } = [];   // 最大 20 件 FIFO
+    public List<QueryHistoryEntry> QueryHistory { get; set; } = []; // 最大 200 件 FIFO
+    public int MaxHistoryEntries { get; set; } = 200;
+}
+
+public sealed class RecentFileEntry
+{
+    public required string Path { get; set; }
+    public DateTime LastOpened { get; set; }
+}
+
+public sealed class QueryHistoryEntry
+{
+    public required string Code { get; set; }
+    public DateTime Timestamp { get; set; }
+    public double DurationMs { get; set; }
+    public bool WasError { get; set; }
+    public string? DbPath { get; set; }
+}
+
+public sealed class WindowStateData
+{
+    public int X { get; set; }
+    public int Y { get; set; }
+    public int Width { get; set; } = 1280;
+    public int Height { get; set; } = 800;
+    public bool IsMaximized { get; set; }
+}
+```
+
+**SettingsService 設計**: Singleton。System.Text.Json で読み書き。500ms Timer デバウンス保存。`Window.Closing` で `SaveImmediate()`。
+
+**新規ファイル**: `Models/StudioSettings.cs`, `Services/SettingsService.cs`
+**変更ファイル**: `Program.cs` (DI), `MainWindowViewModel.cs` (MRU・テーマ永続化), `QueryEditorViewModel.cs` (履歴記録), `MainWindow.axaml.cs` (ウィンドウ状態保存/復元)
+
+#### Phase 2a.2: 全文検索パネル
+
+FTS インデックスを選択してテキスト検索し、結果をグラフキャンバスに表示。
+
+**配置**: 下部 TabControl 新タブ「Search」(Results/Graph/Output と並列)。
+
+**ViewModel**:
+```csharp
+// ViewModels/FullTextSearchViewModel.cs
+public partial class FullTextSearchViewModel : ObservableObject
+{
+    [ObservableProperty] IReadOnlyList<FullTextIndexInfo> indexes;
+    [ObservableProperty] FullTextIndexInfo? selectedIndex;
+    [ObservableProperty] string queryText = "";
+    [ObservableProperty] int maxResults = 20;
+    [ObservableProperty] IReadOnlyList<FtsResultRow> results;
+    [ObservableProperty] bool isSearching;
+
+    [RelayCommand] async Task SearchAsync();
+    public event Action<List<NodeId>>? SearchResultReady;
+}
+```
+
+**API**: `g.Search(indexName, queryText, k).ToList()` → NodeId リスト。スコアは非伝播 (MVP)。
+結果行クリック → PropertyInspector 連携 (既存パターン流用)。
+
+**新規**: `ViewModels/FullTextSearchViewModel.cs`, `Views/FullTextSearchPanel.axaml` + `.axaml.cs`, `Models/FtsResultRow.cs`
+**変更**: `MainWindowViewModel.cs`, `MainWindow.axaml`, `GraphCanvasViewModel.cs` (`BuildFromNodeIds` 追加)
+
+#### Phase 2a.3: Sugiyama 階層レイアウト
+
+力指向と階層レイアウトのトグル切替。自前実装 (外部ライブラリ依存回避)。
+
+**アルゴリズム** (推定 250 行):
+1. サイクル除去 — DFS で back edge 検出・一時反転
+2. レイヤー割り当て — Longest-path layering
+3. 交差最小化 — Barycenter ヒューリスティック (2–3 パス)
+4. 座標割り当て — レイヤー間隔 120px、レイヤー内間隔 80px、中央揃え
+
+```csharp
+// Services/SugiyamaLayoutService.cs — Singleton
+public sealed class SugiyamaLayoutService
+{
+    public void Layout(IReadOnlyList<VisualNode> nodes, IReadOnlyList<VisualEdge> edges);
+    // FindComponents + 各コンポーネントに 4 step + PackComponents
+}
+```
+
+**UI**: グラフキャンバス上部トグルボタン「Force」/「Hierarchy」。
+ピン制約は Sugiyama では無視 (階層配置は全位置を制御)。切替時は即時再レイアウト。
+
+**新規**: `Services/SugiyamaLayoutService.cs`
+**変更**: `Program.cs` (DI), `GraphCanvasViewModel.cs` (`IsHierarchicalLayout` トグル), `Views/GraphCanvas.axaml` (トグルボタン)
+
+#### Phase 2b.1: クエリ履歴 UI
+
+過去のクエリを一覧表示、ダブルクリックでエディタに再ロード。2a.1 `SettingsService` に依存。
+
+**配置**: 下部 TabControl 新タブ「History」。
+
+```csharp
+// ViewModels/QueryHistoryViewModel.cs
+public partial class QueryHistoryViewModel : ObservableObject
+{
+    [ObservableProperty] ObservableCollection<QueryHistoryEntry> entries;
+    [ObservableProperty] string filterText = "";
+
+    [RelayCommand] void LoadEntry(QueryHistoryEntry entry);
+    [RelayCommand] void ClearHistory();
+    [RelayCommand] void DeleteEntry(QueryHistoryEntry entry);
+
+    public event Action<string>? LoadRequested;
+}
+```
+
+**UI**: ListBox — タイムスタンプ、コード先頭 100 文字、実行時間、エラーフラグ。最新が上。テキストフィルタ。
+
+**新規**: `ViewModels/QueryHistoryViewModel.cs`, `Views/QueryHistoryPanel.axaml` + `.axaml.cs`
+**変更**: `MainWindowViewModel.cs`, `MainWindow.axaml`, `MainWindow.axaml.cs` (LoadRequested → TextEditor)
+
+#### Phase 2b.2: インタラクティブグラフ編集
+
+キャンバス上でノード/リレーションシップの GUI 追加・削除。
+
+**トランザクションモデル**: 既存 `QueryExecutionService` (読み取り専用 tx) とは**別経路**の `GraphEditingService` を新設。操作ごとに write tx → 即 commit (auto-commit per operation)。
+
+```csharp
+// Services/GraphEditingService.cs — Singleton
+public sealed class GraphEditingService
+{
+    // 各メソッド: BeginTransaction → 操作 → Commit (失敗時 Rollback)
+    // 成功後 DatabaseService.RefreshStatistics()
+    public NodeId CreateNode(string label, IReadOnlyList<(string key, string value)>? properties = null);
+    public void DeleteNode(NodeId id);
+    public RelationshipId CreateRelationship(NodeId source, NodeId target, string type);
+    public void DeleteRelationship(RelationshipId id);
+    public void SetProperty(NodeId id, string key, string value);
+    public void RemoveProperty(NodeId id, string key);
+}
+```
+
+**操作フロー**:
+- 右クリック コンテキストメニュー:
+  - キャンバス空白 → 「Add Node...」
+  - ノード上 → 「Delete Node」「Add Relationship from here...」「Edit Properties...」
+  - エッジ上 → 「Delete Relationship」
+- リレーション作成: ソース選択 → `IsLinkMode = true` → ソースからカーソルへ破線描画 → ターゲットクリック → RelType ダイアログ → 作成。ESC キャンセル。
+- 編集後: Nodes/Edges リストに直接追加 → レイアウト再実行 → GraphChanged
+
+**HitTestHelper 拡張**: エッジ hit test 追加 (点-線分距離、tolerance 6px)。
+
+**新規**: `Services/GraphEditingService.cs`, `Views/AddNodeDialog.axaml` + `.axaml.cs`, `Views/AddRelationshipDialog.axaml` + `.axaml.cs`
+**変更**: `Program.cs`, `GraphCanvasViewModel.cs` (編集コマンド・LinkMode), `GraphCanvasPanel.cs` (右クリック・コンテキストメニュー), `GraphRenderer.cs` (LinkMode 破線), `HitTestHelper.cs` (エッジ hit test), `VisualEdge.cs` (`IsSelected`), `MainWindowViewModel.cs`
+
+#### Phase 2b.3: ベクトル検索スコア可視化
+
+ベクトル検索結果にスコアを付けてグラフ上で視覚表現。
+
+**API 制約**:
+- `g.Knn()` → `GraphTraversal<NodeId>` (スコア非伝播)。スコア取得は `db.Vectors.KnnSearch()` 直接呼び出しのみ。
+- `VectorSearchResult` = `readonly record struct(EntityKind, long EntityId, float Score)`
+
+**スコア捕捉**: `MaterializeEnumerable` で `VectorSearchResult` 型を検出し、NodeId + Score を抽出。
+
+```csharp
+// QueryExecutionService.cs に分岐追加
+if (firstNonNull is VectorSearchResult)
+{
+    // nodeIds + scores 抽出 → QueryResult に VectorScores を付与
+}
+```
+
+**QueryResult 拡張**: `IReadOnlyDictionary<long, float>? VectorScores`
+**VisualNode 拡張**: `float? VectorScore`, `float? NormalizedScore` (0.0–1.0 min-max)
+
+**描画**: スコアがある場合:
+1. 不透明度: `0.3 + 0.7 × normalizedScore`
+2. 半径: `baseRadius × (0.7 + 0.6 × normalizedScore)`
+3. スコアバッジ: ノード下部に 9px で表示 (例: "0.92")
+
+**変更**: `QueryExecutionService.cs`, `QueryResult.cs`, `VisualNode.cs`, `GraphCanvasViewModel.cs`, `GraphRenderer.cs`
+
+#### Phase 2c.1: Roslyn IntelliSense
+
+クエリエディタでドット補完と Ctrl+Space 補完。
+
+**NuGet 追加**: `Microsoft.CodeAnalysis.CSharp.Features 4.*`
+
+**アーキテクチャ**:
+```csharp
+// Services/IntellisenseService.cs — Singleton
+public sealed class IntellisenseService : IDisposable
+{
+    private AdhocWorkspace _workspace;
+    private ProjectId _projectId;
+
+    public async Task<IReadOnlyList<CompletionEntry>> GetCompletionsAsync(
+        string code, int caretPosition, CancellationToken ct);
+}
+```
+
+**コードラッピング**: ユーザコードを ScriptGlobals メンバーがアクセス可能な形にラップ:
+```csharp
+using System; using System.Linq; using System.Collections.Generic;
+using Quiver; using Quiver.Core; using Quiver.Api;
+using Quiver.Transactions; using Quiver.Storage.Records;
+
+public static GraphDatabase db => default!;
+public static IGraphTransaction tx => default!;
+public static GraphTraversalSource g => default!;
+public static ISchemaApi schema => default!;
+
+{userCode}
+```
+
+preamble 長をオフセットとして保持し、Roslyn の補完位置を調整。
+
+**AvaloniaEdit 統合**: `TextArea.TextEntered` ('.' で補完トリガー) + `TextArea.KeyDown` (Ctrl+Space) → `CompletionWindow` に `ICompletionData` 実装を渡す。
+
+**パフォーマンス**: Workspace は起動時に 1 回構築、DB 変更時に再構築。150ms デバウンス ('.' は即時)。バックグラウンドスレッド + CancellationToken。
+
+**新規**: `Services/IntellisenseService.cs`, `Models/RoslynCompletionData.cs`
+**変更**: `Quiver.Studio.csproj`, `Program.cs`, `MainWindow.axaml.cs` (CompletionWindow)
+
+#### Phase 2c.2: SVG/PNG エクスポート
+
+グラフキャンバスの内容をファイルに書き出す。
+
+**SVG**: 自前 XML 生成。ワールド座標で出力 (カメラ変換なし)。viewBox を bounding box + 40px margin で設定。`<defs>` に arrowhead marker、`<line>` + `<circle>` + `<text>` で描画。
+
+```csharp
+// Export/SvgExporter.cs
+public static class SvgExporter
+{
+    public static string Export(
+        IReadOnlyList<VisualNode> nodes, IReadOnlyList<VisualEdge> edges, bool isDarkTheme);
+}
+```
+
+**PNG**: Avalonia `RenderTargetBitmap` + `GraphRenderer.Render()` でオフスクリーン描画。2x スケール。
+
+```csharp
+// Export/PngExporter.cs
+public static class PngExporter
+{
+    public static async Task ExportAsync(
+        IReadOnlyList<VisualNode> nodes, IReadOnlyList<VisualEdge> edges,
+        GraphRenderer renderer, string outputPath, bool isDarkTheme, double scale = 2.0);
+}
+```
+
+**UI**: グラフタブ上部ツールバーに「Export SVG」「Export PNG」。SaveFileDialog。
+
+**新規**: `Export/SvgExporter.cs`, `Export/PngExporter.cs`
+**変更**: `GraphCanvasViewModel.cs` (エクスポートコマンド), `Views/GraphCanvas.axaml` (ボタン)
+
+### Phase 2 設計判断サマリ
+
+| 判断 | 選択 | 理由 |
+|------|------|------|
+| 永続化形式 | JSON (System.Text.Json) | データ量小、SQLite 依存不要、デバッグ容易 |
+| Sugiyama | 自前実装 | 外部ライブラリ依存回避 (Quiver.csproj のみ制約)、250 行程度 |
+| グラフ編集 tx | 操作ごと auto-commit | 長時間 write tx によるエンジンブロック回避 |
+| 編集 UI | 右クリック コンテキストメニュー | フローティングツールバーより侵襲性低い |
+| ベクトルスコア取得 | MaterializeEnumerable で VectorSearchResult 型検出 | g.Knn() はスコア非伝播 |
+| IntelliSense | AdhocWorkspace + CompletionService | 最もロバストな Roslyn 補完パス |
+| SVG 生成 | 自前 XML | 外部ライブラリ不要、DOM は単純 |
+| PNG 生成 | RenderTargetBitmap | Avalonia 標準 API |
+
+### Phase 2 新規ファイル一覧
+
+| # | パス | 役割 |
+|---|------|------|
+| 1 | `Models/StudioSettings.cs` | 永続化 POCO |
+| 2 | `Services/SettingsService.cs` | JSON 読み書き + デバウンス保存 |
+| 3 | `ViewModels/FullTextSearchViewModel.cs` | FTS パネル VM |
+| 4 | `Models/FtsResultRow.cs` | FTS 結果行 |
+| 5 | `Views/FullTextSearchPanel.axaml` + `.axaml.cs` | FTS パネル UI |
+| 6 | `Services/SugiyamaLayoutService.cs` | 階層レイアウトアルゴリズム |
+| 7 | `ViewModels/QueryHistoryViewModel.cs` | 履歴パネル VM |
+| 8 | `Views/QueryHistoryPanel.axaml` + `.axaml.cs` | 履歴パネル UI |
+| 9 | `Services/GraphEditingService.cs` | Write tx ラッパー |
+| 10 | `Views/AddNodeDialog.axaml` + `.axaml.cs` | ノード追加ダイアログ |
+| 11 | `Views/AddRelationshipDialog.axaml` + `.axaml.cs` | Rel 追加ダイアログ |
+| 12 | `Services/IntellisenseService.cs` | Roslyn 補完エンジン |
+| 13 | `Models/RoslynCompletionData.cs` | ICompletionData 実装 |
+| 14 | `Export/SvgExporter.cs` | SVG 生成 |
+| 15 | `Export/PngExporter.cs` | PNG 生成 |
 
 ## 検証方法
 
+### Phase 1 検証
 1. `dotnet build Quiver.slnx` で全プロジェクトビルド成功
 2. `dotnet run --project tools/Quiver.Studio` でウィンドウ起動
 3. サンプル DB を開いてスキーマツリー表示確認
 4. クエリ実行→結果表示→グラフ可視化の E2E 動作
-5. ノードクリック→プロパティインスペクタ表示
+5. ノード/エッジクリック→プロパティインスペクタ表示
 6. パン/ズーム/ノードドラッグの操作性
+
+### Phase 2 検証
+- **2a.1 永続化**: DB 開閉 → 再起動 → MRU 表示。テーマ/ウィンドウ状態の復元。
+- **2a.2 全文検索**: FTS DB → Search タブ → インデックス選択 → テキスト検索 → グラフ表示。結果行 → PropertyInspector。
+- **2a.3 Sugiyama**: グラフ表示 → Hierarchy トグル → レイヤー状配置 → Force に戻る。
+- **2b.1 履歴**: クエリ実行 → History タブ → エントリ確認 → ダブルクリックでエディタ反映 → 再起動後も残存。
+- **2b.2 編集**: 空白右クリック → Add Node → 出現。ノード右クリック → Delete/Add Rel。エッジ右クリック → Delete。PropertyInspector 確認。
+- **2b.3 スコア**: `db.Vectors.KnnSearch(...)` 実行 → グラフでサイズ/不透明度変化 → スコアバッジ表示。
+- **2c.1 IntelliSense**: `g.` → 補完ウィンドウ。`tx.` → メソッド一覧。Ctrl+Space。
+- **2c.2 エクスポート**: Export SVG → ブラウザ確認。Export PNG → 画像ビューア確認。

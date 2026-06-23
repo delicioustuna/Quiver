@@ -9,6 +9,8 @@ namespace Quiver.Studio.ViewModels;
 public sealed partial class QueryEditorViewModel : ObservableObject
 {
     private readonly QueryExecutionService _queryService;
+    private readonly SettingsService? _settingsService;
+    private readonly DatabaseService? _databaseService;
 
     [ObservableProperty]
     private string _output = "";
@@ -26,9 +28,13 @@ public sealed partial class QueryEditorViewModel : ObservableObject
 
     public event Action<QueryResult>? ResultReady;
 
-    public QueryEditorViewModel(QueryExecutionService queryService)
+    public QueryEditorViewModel(QueryExecutionService queryService,
+        SettingsService? settingsService = null,
+        DatabaseService? databaseService = null)
     {
         _queryService = queryService;
+        _settingsService = settingsService;
+        _databaseService = databaseService;
     }
 
     public void Reset()
@@ -54,6 +60,12 @@ public sealed partial class QueryEditorViewModel : ObservableObject
 
             LastResult = result;
             ResultReady?.Invoke(result);
+
+            _settingsService?.AddQueryHistory(
+                code,
+                result.Elapsed.TotalMilliseconds,
+                result.IsError,
+                _databaseService?.FilePath.CurrentValue);
 
             if (result.IsError)
             {

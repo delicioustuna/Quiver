@@ -6,6 +6,8 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using AvaloniaEdit.TextMate;
+using Microsoft.Extensions.DependencyInjection;
+using Quiver.Studio.Services;
 using Quiver.Studio.ViewModels;
 using TextMateSharp.Grammars;
 
@@ -14,6 +16,7 @@ namespace Quiver.Studio.Views;
 public partial class MainWindow : Window
 {
     private TextMate.Installation? _textMateInstallation;
+    private SettingsService? _settingsService;
 
     public MainWindow()
     {
@@ -33,8 +36,56 @@ public partial class MainWindow : Window
                 vm.Results.TopLevel = this;
                 vm.Results.PropertyChanged += OnResultsPropertyChanged;
                 vm.PropertyChanged += OnViewModelPropertyChanged;
+
+                ApplyTextMateTheme(vm.IsDarkTheme);
+                if (Application.Current is not null && vm.IsDarkTheme)
+                    Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
             }
         };
+    }
+
+    public void Initialize(SettingsService settingsService)
+    {
+        _settingsService = settingsService;
+        RestoreWindowState();
+    }
+
+    private void RestoreWindowState()
+    {
+        var ws = _settingsService?.Settings.WindowState;
+        if (ws is null) return;
+
+        if (ws.IsMaximized)
+        {
+            WindowState = WindowState.Maximized;
+        }
+        else
+        {
+            Width = ws.Width;
+            Height = ws.Height;
+            Position = new PixelPoint(ws.X, ws.Y);
+        }
+    }
+
+    private void SaveWindowState()
+    {
+        if (_settingsService is null) return;
+
+        _settingsService.Settings.WindowState = new Models.WindowStateData
+        {
+            X = Position.X,
+            Y = Position.Y,
+            Width = (int)ClientSize.Width,
+            Height = (int)ClientSize.Height,
+            IsMaximized = WindowState == WindowState.Maximized,
+        };
+        _settingsService.SaveImmediate();
+    }
+
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        SaveWindowState();
+        base.OnClosing(e);
     }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -177,8 +228,16 @@ public partial class MainWindow : Window
     private async Task ExecuteQueryAsync()
     {
         if (DataContext is not MainWindowViewModel vm) return;
-        var code = QueryTextEditor.Text;
-        if (string.IsNullOrWhiteSpace(code)) return;
-        await vm.QueryEditor.ExecuteAsync(code);
+
+        if (vm.IsFullTextMode)
+        {
+            await vm.FullTextSearch.ExecuteAsync();
+        }
+        else
+        {
+            var code = QueryTextEditor.Text;
+            if (string.IsNullOrWhiteSpace(code)) return;
+            await vm.QueryEditor.ExecuteAsync(code);
+        }
     }
 }

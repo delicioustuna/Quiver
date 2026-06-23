@@ -10,7 +10,8 @@ namespace Quiver.Studio.ViewModels;
 public sealed partial class GraphCanvasViewModel : ObservableObject
 {
     private readonly DatabaseService _db;
-    private readonly GraphLayoutService _layout;
+    private readonly GraphLayoutService _forceLayout;
+    private readonly SugiyamaLayoutService _hierarchyLayout;
     private readonly ILogger _logger;
 
     [ObservableProperty]
@@ -31,17 +32,42 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
     [ObservableProperty]
     private double _zoomLevel = 1.0;
 
+    [ObservableProperty]
+    private bool _isHierarchicalLayout;
+
     public List<VisualNode> Nodes { get; } = [];
     public List<VisualEdge> Edges { get; } = [];
     public GraphRenderer Renderer { get; } = new();
 
     public event Action? GraphChanged;
 
-    public GraphCanvasViewModel(DatabaseService databaseService, GraphLayoutService layoutService, ILogger logger)
+    public GraphCanvasViewModel(
+        DatabaseService databaseService,
+        GraphLayoutService layoutService,
+        SugiyamaLayoutService hierarchyLayoutService,
+        ILogger logger)
     {
         _db = databaseService;
-        _layout = layoutService;
+        _forceLayout = layoutService;
+        _hierarchyLayout = hierarchyLayoutService;
         _logger = logger;
+    }
+
+    partial void OnIsHierarchicalLayoutChanged(bool value)
+    {
+        if (Nodes.Count > 0)
+        {
+            ApplyLayout();
+            GraphChanged?.Invoke();
+        }
+    }
+
+    private void ApplyLayout()
+    {
+        if (IsHierarchicalLayout)
+            _hierarchyLayout.Layout(Nodes, Edges);
+        else
+            _forceLayout.Layout(Nodes, Edges);
     }
 
     public void BuildFromResult(QueryResult result)
@@ -96,7 +122,7 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
 
         if (Nodes.Count > 0)
         {
-            _layout.Layout(Nodes, Edges);
+            ApplyLayout();
             HasGraph = true;
         }
         else

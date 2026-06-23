@@ -1,0 +1,48 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Quiver.Studio.ViewModels"
+             x:Class="Quiver.Studio.Views.FullTextSearchPanel"
+             x:DataType="vm:FullTextSearchViewModel">
+    <Grid RowDefinitions="Auto,*" Margin="8">
+        <!-- FTS parameters -->
+        <Grid Grid.Row="0"
+              ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto"
+              RowSpacing="6" ColumnSpacing="8">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Index" VerticalAlignment="Center" FontSize="12" />
+            <ComboBox Grid.Row="0" Grid.Column="1"
+                      ItemsSource="{Binding Indexes}"
+                      SelectedItem="{Binding SelectedIndex}"
+                      HorizontalAlignment="Stretch"
+                      FontSize="12">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding Name}" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Query" VerticalAlignment="Center" FontSize="12" />
+            <TextBox Grid.Row="1" Grid.Column="1"
+                     Text="{Binding QueryText}"
+                     PlaceholderText="Search text..."
+                     FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                     FontSize="13" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Top K" VerticalAlignment="Center" FontSize="12" />
+            <NumericUpDown Grid.Row="2" Grid.Column="1"
+                           Value="{Binding MaxResults}"
+                           Minimum="1" Maximum="1000"
+                           Width="100" FontSize="12"
+                           HorizontalAlignment="Left" />
+        </Grid>
+
+        <!-- Placeholder for remaining space -->
+        <TextBlock Grid.Row="1"
+                   Text="{Binding StatusText}"
+                   FontSize="12"
+                   VerticalAlignment="Bottom"
+                   HorizontalAlignment="Left"
+                   Margin="0,8"
+                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+    </Grid>
+</UserControl>

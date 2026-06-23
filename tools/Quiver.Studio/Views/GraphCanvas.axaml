@@ -6,6 +6,23 @@
              x:DataType="vm:GraphCanvasViewModel">
     <Panel>
         <views:GraphCanvasPanel x:Name="CanvasPanel" />
+
+        <!-- Layout toggle -->
+        <StackPanel Orientation="Horizontal"
+                    Spacing="4"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Margin="0,4,8,0"
+                    IsHitTestVisible="True"
+                    IsVisible="{Binding HasGraph}">
+            <ToggleButton Content="Force"
+                          IsChecked="{Binding !IsHierarchicalLayout}"
+                          FontSize="11" Padding="8,2" />
+            <ToggleButton Content="Hierarchy"
+                          IsChecked="{Binding IsHierarchicalLayout}"
+                          FontSize="11" Padding="8,2" />
+        </StackPanel>
+
         <TextBlock Text="Execute a query returning nodes to see the graph"
                    HorizontalAlignment="Center"
                    VerticalAlignment="Center"

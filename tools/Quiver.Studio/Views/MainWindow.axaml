@@ -203,12 +203,17 @@
         <Grid RowDefinitions="*,4,*">
             <!-- Query Editor -->
             <DockPanel Grid.Row="0">
-                <!-- Toolbar -->
+                <!-- Toolbar: mode tabs + execute -->
                 <Border DockPanel.Dock="Top"
                         Padding="8,4"
                         BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
                         BorderThickness="0,0,0,1">
                     <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TabStrip SelectedIndex="{Binding QueryModeIndex}"
+                                  FontSize="12">
+                            <TabStripItem Content="Traversal" />
+                            <TabStripItem Content="FullText" />
+                        </TabStrip>
                         <Button Content="▶ Execute (F5)"
                                 Click="OnExecuteClick"
                                 IsEnabled="{Binding IsConnected}"
@@ -216,12 +221,16 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Query editor (XAML namespace test) -->
+                <!-- Traversal: C# code editor -->
                 <ae:TextEditor x:Name="QueryTextEditor"
                                FontFamily="Cascadia Code,Consolas,Courier New,monospace"
                                FontSize="13"
                                ShowLineNumbers="True"
-                               IsVisible="{Binding IsConnected}" />
+                               IsVisible="{Binding IsTraversalMode}" />
+
+                <!-- FullText: FTS parameter panel -->
+                <views:FullTextSearchPanel DataContext="{Binding FullTextSearch}"
+                                           IsVisible="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).IsFullTextMode}" />
             </DockPanel>
 
             <!-- Splitter -->

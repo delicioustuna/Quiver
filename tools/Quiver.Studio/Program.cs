@@ -40,9 +40,11 @@ internal static class Program
 
     private static void ConfigureServices(HostBuilderContext context, IServiceCollection services)
     {
+        services.AddSingleton<SettingsService>();
         services.AddSingleton<DatabaseService>();
         services.AddSingleton<QueryExecutionService>();
         services.AddSingleton<GraphLayoutService>();
+        services.AddSingleton<SugiyamaLayoutService>();
         services.AddTransient<MainWindowViewModel>();
     }
 
