@@ -17,10 +17,21 @@ Quiver エンジンに対して、GUI クエリ操作 + NodeNetwork 的なイン
 - **クエリ実行**: Microsoft.CodeAnalysis.CSharp.Scripting (Roslyn)
 - **プロジェクト参照**: `Quiver.csproj` のみ (Quiver.Hosting は不使用 — 動的接続のため)
 
-## Avalonia 12 開発 注意事項 (実地で踏んだ罠)
+## Avalonia 12 開発 注意事項
 
-### 1. 外部コントロールは App.axaml に StyleInclude が必須
-Avalonia 12 の外部コントロール (FluentTheme に同梱されないもの) は、`App.axaml` に StyleInclude を明示登録しないと **テンプレート無しで描画され、表示されない・入力不能になる**。NuGet パッケージを追加しただけでは動かない。
+### デバッグ方法論: 真因の特定と変更の分離
+
+外部コントロール (AvaloniaEdit, DataGrid) の「表示されない」問題で、真因が StyleInclude 未登録の 1 点だったにもかかわらず、特定に至るまでに XAML 名前空間変更・コードビハインド生成・ExpandoObject→string[] 切替・TwoWay→OneWay 等の変更を積み重ねた。結果、真因でない変更が「必要な対処」として誤記録された。
+
+**教訓:**
+- **「動かない」に対して複数の変更を同時に試さない。** 1 つ変えて検証し、効果がなければ戻す。積み重ねると、どの変更が効いたか分からなくなる。
+- **真因を発見した後、それまでの回避策を 1 つずつ外して再検証する。** 真因修正で不要になった変更を残すと、誤った制約としてプランや記憶に定着する。
+- **推論で「これが原因だろう」と結論しない。** 公式ドキュメントやコミュニティの情報を先に収集し、既知の問題か確認してから対処する。
+
+### 確認済みの注意点
+
+#### 1. 外部コントロールは App.axaml に StyleInclude が必須
+Avalonia 12 の外部コントロール (FluentTheme に同梱されないもの) は、`App.axaml` に StyleInclude を明示登録しないと **テンプレート無しで描画され、表示されない・入力不能になる**。NuGet パッケージを追加しただけでは動かない。症状は多岐にわたる (描画されない、入力不能、データが空) ため、外部コントロールの不具合を疑う前にまず StyleInclude の登録を確認すること。
 ```xml
 <Application.Styles>
     <FluentTheme />
@@ -30,13 +41,13 @@ Avalonia 12 の外部コントロール (FluentTheme に同梱されないもの
 ```
 **新しい外部コントロール NuGet を追加したら、必ず DLL 内のテーマ XAML リソースパスを確認して StyleInclude を追加すること。**
 
-### 2. TextMate テーマは LightPlus を使う
+#### 2. TextMate テーマは LightPlus を使う
 TextMateSharp の無印 `Light` は文字列・型名・メソッド名のスコープが不足。`LightPlus` (VS Code デフォルト拡張版) で全要素が色分けされる。
 
-### 3. DataGrid で ExpandoObject は使えない
-Avalonia DataGrid は ExpandoObject のプロパティバインディングを解決できない — 列ヘッダーと行枠は表示されるがセル値が空になる ([#18209](https://github.com/AvaloniaUI/Avalonia/discussions/18209))。動的行は `string[]` + ordinal インデクサ `[0]`, `[1]` で代替する。`string[]` インデクサへの TwoWay (デフォルト) バインディングは問題ない。
+#### 3. DataGrid で ExpandoObject は使えない
+Avalonia DataGrid は ExpandoObject のプロパティバインディングを解決できない — 列ヘッダーと行枠は表示されるがセル値が空になる ([#18209](https://github.com/AvaloniaUI/Avalonia/discussions/18209))。動的行は `string[]` + ordinal インデクサ `[0]`, `[1]` で代替する。この問題は StyleInclude 登録後に再検証して確定したもの。
 
-### 4. R3Extensions.Avalonia は Avalonia 12 非対応
+#### 4. R3Extensions.Avalonia は Avalonia 12 非対応
 `ReactiveProperty<T>` → `Subscribe` + `Dispatcher.UIThread.Post()` → CommunityToolkit.Mvvm `[ObservableProperty]` への転写で代替。
 
 ## プロジェクト構造
