@@ -1,6 +1,7 @@
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using Quiver.Studio.Models;
 using Quiver.Studio.Services;
 using R3;
@@ -10,6 +11,7 @@ namespace Quiver.Studio.ViewModels;
 public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private readonly DatabaseService _db;
+    private readonly ILogger<MainWindowViewModel> _logger;
     private readonly IDisposable _subscriptions;
 
     [ObservableProperty]
@@ -29,11 +31,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public ResultsViewModel Results { get; } = new();
 
-    public MainWindowViewModel(DatabaseService databaseService, QueryExecutionService queryService)
+    public GraphCanvasViewModel GraphCanvas { get; }
+
+    public MainWindowViewModel(
+        DatabaseService databaseService,
+        QueryExecutionService queryService,
+        GraphLayoutService layoutService,
+        ILogger<MainWindowViewModel> logger)
     {
         _db = databaseService;
+        _logger = logger;
         SchemaBrowser = new SchemaBrowserViewModel(_db);
         QueryEditor = new QueryEditorViewModel(queryService);
+        GraphCanvas = new GraphCanvasViewModel(databaseService, layoutService, logger);
 
         QueryEditor.ResultReady += OnResultReady;
 
@@ -45,10 +55,27 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OnResultReady(QueryResult result)
     {
-        if (result.IsTabular)
-            Results.LoadResult(result);
-        else
+        if (result.IsError)
+        {
+            _logger.LogWarning("クエリエラー: {Error}", result.Error);
             Results.Clear();
+            GraphCanvas.BuildFromResult(result);
+            return;
+        }
+
+        try
+        {
+            if (result.IsTabular)
+                Results.LoadResult(result);
+            else
+                Results.Clear();
+
+            GraphCanvas.BuildFromResult(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "クエリ結果処理で例外");
+        }
     }
 
     public void OpenDatabase(string filePath) => _db.Open(filePath);

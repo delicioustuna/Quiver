@@ -17,7 +17,8 @@ public partial class MainWindow : Window
 
         QueryTextEditor.Text = "// Globals: db, tx (read-only), g, schema\n"
                              + "// Press F5 to execute\n\n"
-                             + "db.Diagnostics.GetStatistics()";
+                             + "// Graph view: queries returning NodeId trigger the Graph tab\n"
+                             + "g.Nodes().ToList()";
 
         try
         {

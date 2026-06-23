@@ -54,11 +54,13 @@ public sealed class QueryExecutionService
         {
             sw.Stop();
             var errors = string.Join(Environment.NewLine, ex.Diagnostics.Select(d => d.ToString()));
+            _logger.LogWarning("コンパイルエラー: {Errors}", errors);
             return QueryResult.FromError(errors, sw.Elapsed);
         }
         catch (Exception ex)
         {
             sw.Stop();
+            _logger.LogError(ex, "クエリ実行時例外");
             return QueryResult.FromError(ex.ToString(), sw.Elapsed);
         }
     }
@@ -91,8 +93,11 @@ public sealed class QueryExecutionService
         if (result is string s)
             return QueryResult.Scalar(s, elapsed);
 
-        if (result is NodeId or RelationshipId)
-            return QueryResult.Scalar(result.ToString()!, elapsed);
+        if (result is NodeId nid)
+            return QueryResult.Scalar(result.ToString()!, elapsed, nodeIds: [nid]);
+
+        if (result is RelationshipId rid)
+            return QueryResult.Scalar(result.ToString()!, elapsed, relIds: [rid]);
 
         if (IsPrimitive(result))
             return QueryResult.Scalar(result.ToString() ?? "", elapsed);
@@ -112,6 +117,9 @@ public sealed class QueryExecutionService
         if (items.Count == 0)
             return QueryResult.Empty(elapsed);
 
+        var nodeIds = new List<NodeId>();
+        var relIds = new List<RelationshipId>();
+
         var firstNonNull = items.FirstOrDefault(x => x is not null);
         if (firstNonNull is null)
             return QueryResult.Tabular(["Value"],
@@ -121,8 +129,14 @@ public sealed class QueryExecutionService
 
         if (IsPrimitive(firstNonNull) || firstNonNull is string || firstNonNull is NodeId || firstNonNull is RelationshipId)
         {
+            foreach (var item in items)
+            {
+                if (item is NodeId nid) nodeIds.Add(nid);
+                else if (item is RelationshipId rid) relIds.Add(rid);
+            }
             return QueryResult.Tabular(["Value"],
-                items.Select(x => (IReadOnlyList<object?>)[x?.ToString()]).ToList(), elapsed);
+                items.Select(x => (IReadOnlyList<object?>)[x?.ToString()]).ToList(), elapsed,
+                nodeIds, relIds);
         }
 
         var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
@@ -139,12 +153,18 @@ public sealed class QueryExecutionService
                 return (IReadOnlyList<object?>)new object?[columns.Count];
             return (IReadOnlyList<object?>)props.Select(p =>
             {
-                try { return p.GetValue(item); }
+                try
+                {
+                    var val = p.GetValue(item);
+                    if (val is NodeId nid) nodeIds.Add(nid);
+                    else if (val is RelationshipId rid) relIds.Add(rid);
+                    return val;
+                }
                 catch { return null; }
             }).ToArray();
         }).ToList();
 
-        return QueryResult.Tabular(columns, rows, elapsed);
+        return QueryResult.Tabular(columns, rows, elapsed, nodeIds, relIds);
     }
 
     private static QueryResult MaterializeObject(object result, TimeSpan elapsed)

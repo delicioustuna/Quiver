@@ -1,3 +1,5 @@
+using Quiver.Core;
+
 namespace Quiver.Studio.Models;
 
 public sealed class QueryResult
@@ -7,33 +9,44 @@ public sealed class QueryResult
     public string? ScalarText { get; }
     public string? Error { get; }
     public TimeSpan Elapsed { get; }
+    public IReadOnlyList<NodeId> ExtractedNodeIds { get; }
+    public IReadOnlyList<RelationshipId> ExtractedRelationshipIds { get; }
 
     public bool IsError => Error is not null;
     public bool IsScalar => ScalarText is not null;
     public bool IsTabular => Columns.Count > 0;
+    public bool HasGraphData => ExtractedNodeIds.Count > 0 || ExtractedRelationshipIds.Count > 0;
 
     private QueryResult(
         IReadOnlyList<string> columns,
         IReadOnlyList<IReadOnlyList<object?>> rows,
         string? scalarText,
         string? error,
-        TimeSpan elapsed)
+        TimeSpan elapsed,
+        IReadOnlyList<NodeId>? nodeIds = null,
+        IReadOnlyList<RelationshipId>? relIds = null)
     {
         Columns = columns;
         Rows = rows;
         ScalarText = scalarText;
         Error = error;
         Elapsed = elapsed;
+        ExtractedNodeIds = nodeIds ?? [];
+        ExtractedRelationshipIds = relIds ?? [];
     }
 
     public static QueryResult Tabular(
         IReadOnlyList<string> columns,
         IReadOnlyList<IReadOnlyList<object?>> rows,
-        TimeSpan elapsed)
-        => new(columns, rows, null, null, elapsed);
+        TimeSpan elapsed,
+        IReadOnlyList<NodeId>? nodeIds = null,
+        IReadOnlyList<RelationshipId>? relIds = null)
+        => new(columns, rows, null, null, elapsed, nodeIds, relIds);
 
-    public static QueryResult Scalar(string text, TimeSpan elapsed)
-        => new([], [], text, null, elapsed);
+    public static QueryResult Scalar(string text, TimeSpan elapsed,
+        IReadOnlyList<NodeId>? nodeIds = null,
+        IReadOnlyList<RelationshipId>? relIds = null)
+        => new([], [], text, null, elapsed, nodeIds, relIds);
 
     public static QueryResult Empty(TimeSpan elapsed)
         => new([], [], null, null, elapsed);

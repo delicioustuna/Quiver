@@ -12,7 +12,23 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        var host = Host.CreateDefaultBuilder(args)
+        if (args.Length > 0 && args[0] == "--diag-layout")
+        {
+            var dbPath = args.Length > 1 ? args[1]
+                : Path.Combine(AppContext.BaseDirectory, "sample.quiver");
+            DiagLayout.Run(dbPath);
+            return;
+        }
+
+        var logPath = Path.Combine(AppContext.BaseDirectory, "studio.log");
+
+        using var host = Host.CreateDefaultBuilder(args)
+            .ConfigureLogging(logging =>
+            {
+                logging.ClearProviders();
+                logging.AddProvider(new FileLoggerProvider(logPath));
+                logging.SetMinimumLevel(LogLevel.Debug);
+            })
             .ConfigureServices(ConfigureServices)
             .Build();
 

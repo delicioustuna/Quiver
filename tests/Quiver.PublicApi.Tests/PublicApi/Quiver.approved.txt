@@ -626,10 +626,12 @@ namespace Quiver
         void DeleteRelationship(Quiver.Core.RelationshipId relId);
         Quiver.Storage.Records.PropertyEnumerator EnumerateProperties(Quiver.Core.NodeId nodeId);
         Quiver.Storage.Records.RelationshipEnumerator EnumerateRelationships(Quiver.Core.NodeId nodeId, Quiver.Storage.Records.Direction direction = 3, string? typeFilter = null);
+        string? GetNodeLabel(Quiver.Core.NodeId nodeId);
         Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.NodeId nodeId, string key);
         Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.RelationshipId relId, string key);
         Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.NodeId nodeId, string key);
         Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.RelationshipId relId, string key);
+        string? GetRelationshipTypeName(Quiver.Core.RelationshipTypeId typeId);
         bool HasProperty(Quiver.Core.NodeId nodeId, string key);
         void IndexInsert(string indexName, double key, Quiver.Core.NodeId nodeId);
         void IndexInsert(string indexName, long key, Quiver.Core.NodeId nodeId);
@@ -672,6 +674,9 @@ namespace Quiver
         bool IndexExists(string indexName);
         System.Collections.Generic.IReadOnlyList<Quiver.FullTextIndexInfo> ListFullTextIndexes();
         System.Collections.Generic.IReadOnlyList<Quiver.IndexInfo> ListIndexes();
+        System.Collections.Generic.IReadOnlyList<string> ListLabels();
+        System.Collections.Generic.IReadOnlyList<string> ListPropertyKeys();
+        System.Collections.Generic.IReadOnlyList<string> ListRelationshipTypes();
         bool RenameIndex(string oldName, string newName);
         bool RenameLabel(string oldName, string newName);
         bool RenamePropertyKey(string oldName, string newName);
@@ -1476,7 +1481,8 @@ namespace Quiver.Text
     public sealed class MixedBigramTokenizer : Quiver.Text.ITokenizer
     {
         public const string DefaultTokenizerId = "mixed-bigram-v1";
-        public MixedBigramTokenizer(Quiver.Text.ITextNormalizer? normalizer = null) { }
+        public const string UnigramTokenizerId = "mixed-bigram-unigram-v1";
+        public MixedBigramTokenizer(bool emitUnigrams = false, Quiver.Text.ITextNormalizer? normalizer = null) { }
         public string TokenizerId { get; }
         public void Tokenize(System.ReadOnlySpan<char> text, Quiver.Text.ITokenSink sink) { }
     }

@@ -3,6 +3,7 @@
         xmlns:vm="using:Quiver.Studio.ViewModels"
         xmlns:conv="using:Quiver.Studio.Converters"
         xmlns:ae="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+        xmlns:views="using:Quiver.Studio.Views"
         x:Class="Quiver.Studio.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding Title}"
@@ -29,6 +30,16 @@
                     <TextBlock FontSize="12"
                                Text="{Binding QueryEditor.StatusText}"
                                Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                    <TextBlock FontSize="12"
+                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                               IsVisible="{Binding GraphCanvas.HasGraph}">
+                        <TextBlock.Text>
+                            <MultiBinding StringFormat="Graph: {0} nodes, {1} edges">
+                                <Binding Path="GraphCanvas.NodeCount" />
+                                <Binding Path="GraphCanvas.EdgeCount" />
+                            </MultiBinding>
+                        </TextBlock.Text>
+                    </TextBlock>
                 </StackPanel>
             </Panel>
         </Border>
@@ -213,6 +224,11 @@
                                        FontSize="12"
                                        IsVisible="{Binding !Results.HasRows}" />
                         </DockPanel>
+                    </TabItem>
+
+                    <!-- Graph tab -->
+                    <TabItem Header="Graph">
+                        <views:GraphCanvas DataContext="{Binding GraphCanvas}" />
                     </TabItem>
 
                     <!-- Output tab (text) -->

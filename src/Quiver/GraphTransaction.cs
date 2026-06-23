@@ -126,6 +126,16 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public bool NodeExists(NodeId nodeId)
         => _inner.Nodes.Read(nodeId).InUse;
 
+    public string? GetNodeLabel(NodeId nodeId)
+    {
+        var node = _inner.Nodes.Read(nodeId);
+        if (!node.InUse || !node.Label.IsValid) return null;
+        return _labelTokens.GetName(node.Label);
+    }
+
+    public string? GetRelationshipTypeName(RelationshipTypeId typeId)
+        => typeId.IsValid ? _relTypeTokens.GetName(typeId) : null;
+
     // ========== MERGE (GC-5) ==========
 
     // PW-18 follow-up: 「インデックス未登録」を初回 MergeNode 呼び出し時に一度だけ警告する。

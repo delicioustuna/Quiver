@@ -43,6 +43,9 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// <summary>指定 ID のノードが存在するかを返す。</summary>
     bool NodeExists(NodeId nodeId);
 
+    /// <summary>指定ノードのラベル名を返す。ノードが存在しない場合は <c>null</c>。</summary>
+    string? GetNodeLabel(NodeId nodeId);
+
     /// <summary>
     /// Cypher の <c>MERGE (n:label {matchKey: matchValue})</c> 相当 —
     /// <paramref name="label"/> を持ち、<paramref name="matchKey"/> が
@@ -62,6 +65,9 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// <c>System.Diagnostics.Trace.TraceWarning</c> が出力される (サイレント劣化検出用)。
     /// </remarks>
     (NodeId Id, bool Created) MergeNode(string label, string matchKey, in PropertyValue matchValue);
+
+    /// <summary>リレーションシップ型 ID から型名を返す。未登録 ID では <c>null</c>。</summary>
+    string? GetRelationshipTypeName(RelationshipTypeId typeId);
 
     // ── リレーション操作 ──────────────────────────────────────
 
