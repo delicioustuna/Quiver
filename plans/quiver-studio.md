@@ -30,16 +30,10 @@ Avalonia 12 の外部コントロール (FluentTheme に同梱されないもの
 ```
 **新しい外部コントロール NuGet を追加したら、必ず DLL 内のテーマ XAML リソースパスを確認して StyleInclude を追加すること。**
 
-### 2. AvaloniaEdit は XAML 名前空間経由ではなくコードビハインド生成
-`xmlns:ae="..."` + `<ae:TextEditor>` で宣言すると描画されない。コードビハインドで `new TextEditor()` → `Border.Child` に差し込む方式が確実。TextMate テーマは `LightPlus` (無印 `Light` はスコープ不足)。
+### 2. TextMate テーマは LightPlus を使う
+TextMateSharp の無印 `Light` は文字列・型名・メソッド名のスコープが不足。`LightPlus` (VS Code デフォルト拡張版) で全要素が色分けされる。
 
-### 3. DataGrid の動的列は OneWay バインディング必須
-`DataGridTextColumn` はデフォルト TwoWay。配列インデクサ `[i]` にバインドすると書き戻しで null 化する既知バグがある ([#14620](https://github.com/AvaloniaUI/Avalonia/issues/14620))。`Mode = BindingMode.OneWay` を明示すること。
-
-### 4. ExpandoObject は DataGrid で使えない
-Avalonia の DataGrid は ExpandoObject のバインディングを解決できない ([#18209](https://github.com/AvaloniaUI/Avalonia/discussions/18209))。動的行は `string[]` + ordinal インデクサ `[0]`, `[1]` で代替する。
-
-### 5. R3Extensions.Avalonia は Avalonia 12 非対応
+### 3. R3Extensions.Avalonia は Avalonia 12 非対応
 `ReactiveProperty<T>` → `Subscribe` + `Dispatcher.UIThread.Post()` → CommunityToolkit.Mvvm `[ObservableProperty]` への転写で代替。
 
 ## プロジェクト構造
