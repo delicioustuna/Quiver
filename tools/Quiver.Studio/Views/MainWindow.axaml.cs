@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -42,6 +43,30 @@ public partial class MainWindow : Window
         }
 
         EditorHost.Child = _editor;
+
+        DataContextChanged += (_, _) =>
+        {
+            if (DataContext is MainWindowViewModel vm)
+            {
+                vm.Results.TopLevel = this;
+                vm.Results.PropertyChanged += OnResultsPropertyChanged;
+            }
+        };
+    }
+
+    private void RebuildResultColumns()
+    {
+        if (DataContext is not MainWindowViewModel vm) return;
+
+        ResultsGrid.Columns.Clear();
+        for (var i = 0; i < vm.Results.Columns.Count; i++)
+        {
+            ResultsGrid.Columns.Add(new DataGridTextColumn
+            {
+                Header = vm.Results.Columns[i],
+                Binding = new Binding($"[{i}]") { Mode = BindingMode.OneWay },
+            });
+        }
     }
 
     private async void OnOpenDatabaseClick(object? sender, RoutedEventArgs e)
@@ -108,6 +133,12 @@ public partial class MainWindow : Window
             return;
         }
         base.OnKeyDown(e);
+    }
+
+    private void OnResultsPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ResultsViewModel.Columns))
+            RebuildResultColumns();
     }
 
     private async Task ExecuteQueryAsync()

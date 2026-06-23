@@ -17,6 +17,31 @@ Quiver エンジンに対して、GUI クエリ操作 + NodeNetwork 的なイン
 - **クエリ実行**: Microsoft.CodeAnalysis.CSharp.Scripting (Roslyn)
 - **プロジェクト参照**: `Quiver.csproj` のみ (Quiver.Hosting は不使用 — 動的接続のため)
 
+## Avalonia 12 開発 注意事項 (実地で踏んだ罠)
+
+### 1. 外部コントロールは App.axaml に StyleInclude が必須
+Avalonia 12 の外部コントロール (FluentTheme に同梱されないもの) は、`App.axaml` に StyleInclude を明示登録しないと **テンプレート無しで描画され、表示されない・入力不能になる**。NuGet パッケージを追加しただけでは動かない。
+```xml
+<Application.Styles>
+    <FluentTheme />
+    <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
+    <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
+</Application.Styles>
+```
+**新しい外部コントロール NuGet を追加したら、必ず DLL 内のテーマ XAML リソースパスを確認して StyleInclude を追加すること。**
+
+### 2. AvaloniaEdit は XAML 名前空間経由ではなくコードビハインド生成
+`xmlns:ae="..."` + `<ae:TextEditor>` で宣言すると描画されない。コードビハインドで `new TextEditor()` → `Border.Child` に差し込む方式が確実。TextMate テーマは `LightPlus` (無印 `Light` はスコープ不足)。
+
+### 3. DataGrid の動的列は OneWay バインディング必須
+`DataGridTextColumn` はデフォルト TwoWay。配列インデクサ `[i]` にバインドすると書き戻しで null 化する既知バグがある ([#14620](https://github.com/AvaloniaUI/Avalonia/issues/14620))。`Mode = BindingMode.OneWay` を明示すること。
+
+### 4. ExpandoObject は DataGrid で使えない
+Avalonia の DataGrid は ExpandoObject のバインディングを解決できない ([#18209](https://github.com/AvaloniaUI/Avalonia/discussions/18209))。動的行は `string[]` + ordinal インデクサ `[0]`, `[1]` で代替する。
+
+### 5. R3Extensions.Avalonia は Avalonia 12 非対応
+`ReactiveProperty<T>` → `Subscribe` + `Dispatcher.UIThread.Post()` → CommunityToolkit.Mvvm `[ObservableProperty]` への転写で代替。
+
 ## プロジェクト構造
 
 `tools/Quiver.Studio/` (WinExe, net10.0, IsPackable=false)。`Quiver.slnx` の `/tools/` フォルダに所属。
@@ -85,16 +110,22 @@ DatabaseService が `ReactiveProperty<T>` を公開。VM は `Subscribe` + `Disp
 
 ### Phase 1b: クエリエディタ + Roslyn 実行 ✅
 - AvaloniaEdit 統合 (TextMate C# シンタックスハイライト) ✅
+  - App.axaml に StyleInclude 必須 (`avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml`)
+  - TextEditor はコードビハインド生成方式 (XAML 名前空間経由だと描画不能)
+  - テーマ: LightPlus (Light は型名・文字列・メソッドのスコープ不足)
 - QueryExecutionService (Roslyn CSharpScript + ScriptGlobals: db/tx/g/schema) ✅
 - 結果の実体化 (scalar/tabular/enumerable→QueryResult) ✅
 - エラー表示 (コンパイルエラー/実行時例外→Output パネル) ✅
 - F5 ショートカット + Execute ボタン ✅
 - 出力は Phase 1c の DataGrid 導入まで text table 形式
 
-### Phase 1c: 結果ビュー
-- DataGrid 動的列生成 (ObservableCollections)
-- 行選択→PropertyInspector 連携
-- CSV/JSON コピー
+### Phase 1c: 結果ビュー ✅
+- DataGrid 動的列生成 (string[] 行 + ordinal インデクサ + OneWay バインディング) ✅
+  - ExpandoObject は Avalonia DataGrid 非対応のため不使用 (注意事項 §4)
+  - DataGrid StyleInclude 登録必須 (注意事項 §1)
+- Results/Output タブ切替 ✅
+- CSV/JSON コピー ✅
+- 行選択→PropertyInspector 連携 → Phase 1e へ繰り延べ
 
 ### Phase 1d: グラフキャンバス
 - VisualNode / VisualEdge モデル

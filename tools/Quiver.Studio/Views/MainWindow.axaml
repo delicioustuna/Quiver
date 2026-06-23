@@ -168,26 +168,60 @@
                           ResizeDirection="Rows"
                           Background="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
 
-            <!-- Output -->
+            <!-- Results / Output -->
             <Border Grid.Row="2">
-                <DockPanel>
-                    <Border DockPanel.Dock="Top"
-                            Padding="8,4"
-                            BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
-                            BorderThickness="0,0,0,1">
-                        <TextBlock Text="Output"
-                                   FontWeight="SemiBold"
-                                   FontSize="12" />
-                    </Border>
+                <TabControl>
+                    <!-- Results tab (DataGrid) -->
+                    <TabItem Header="Results">
+                        <DockPanel>
+                            <Border DockPanel.Dock="Top"
+                                    Padding="8,4"
+                                    BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                                    BorderThickness="0,0,0,1"
+                                    IsVisible="{Binding Results.HasRows}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Content="Copy CSV"
+                                            Command="{Binding Results.CopyCsvCommand}"
+                                            Padding="8,2"
+                                            FontSize="11" />
+                                    <Button Content="Copy JSON"
+                                            Command="{Binding Results.CopyJsonCommand}"
+                                            Padding="8,2"
+                                            FontSize="11" />
+                                </StackPanel>
+                            </Border>
 
-                    <ScrollViewer HorizontalScrollBarVisibility="Auto">
-                        <TextBlock Text="{Binding QueryEditor.Output}"
-                                   FontFamily="Cascadia Code,Consolas,Courier New,monospace"
-                                   FontSize="12"
-                                   Padding="8"
-                                   TextWrapping="NoWrap" />
-                    </ScrollViewer>
-                </DockPanel>
+                            <DataGrid x:Name="ResultsGrid"
+                                      ItemsSource="{Binding Results.Rows}"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      CanUserSortColumns="True"
+                                      CanUserResizeColumns="True"
+                                      GridLinesVisibility="All"
+                                      FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                                      FontSize="12"
+                                      IsVisible="{Binding Results.HasRows}" />
+
+                            <TextBlock Text="Execute a query to see results"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                       FontSize="12"
+                                       IsVisible="{Binding !Results.HasRows}" />
+                        </DockPanel>
+                    </TabItem>
+
+                    <!-- Output tab (text) -->
+                    <TabItem Header="Output">
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto">
+                            <TextBlock Text="{Binding QueryEditor.Output}"
+                                       FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                                       FontSize="12"
+                                       Padding="8"
+                                       TextWrapping="NoWrap" />
+                        </ScrollViewer>
+                    </TabItem>
+                </TabControl>
             </Border>
         </Grid>
     </DockPanel>

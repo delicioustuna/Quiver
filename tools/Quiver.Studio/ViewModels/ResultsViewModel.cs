@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Dynamic;
 using System.Text;
 using System.Text.Json;
 using Avalonia.Input.Platform;
@@ -38,18 +37,17 @@ public sealed partial class ResultsViewModel : ObservableObject
             return;
         }
 
-        Columns = result.Columns;
-        var expandoRows = new List<ExpandoObject>(result.Rows.Count);
+        var rows = new List<string[]>(result.Rows.Count);
         foreach (var row in result.Rows)
         {
-            var expando = new ExpandoObject();
-            var dict = (IDictionary<string, object?>)expando;
-            for (var i = 0; i < result.Columns.Count; i++)
-                dict[result.Columns[i]] = i < row.Count ? row[i]?.ToString() ?? "" : "";
-            expandoRows.Add(expando);
+            var cells = new string[result.Columns.Count];
+            for (var i = 0; i < cells.Length; i++)
+                cells[i] = i < row.Count ? row[i]?.ToString() ?? "" : "";
+            rows.Add(cells);
         }
-        Rows = expandoRows;
-        HasRows = expandoRows.Count > 0;
+        Rows = rows;
+        Columns = result.Columns;
+        HasRows = rows.Count > 0;
         SelectedItem = null;
     }
 

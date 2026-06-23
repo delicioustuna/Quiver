@@ -24,6 +24,8 @@ public sealed partial class QueryEditorViewModel : ObservableObject
 
     public QueryResult? LastResult { get; private set; }
 
+    public event Action<QueryResult>? ResultReady;
+
     public QueryEditorViewModel(QueryExecutionService queryService)
     {
         _queryService = queryService;
@@ -43,6 +45,7 @@ public sealed partial class QueryEditorViewModel : ObservableObject
             Dispatcher.UIThread.VerifyAccess();
 
             LastResult = result;
+            ResultReady?.Invoke(result);
 
             if (result.IsError)
             {
