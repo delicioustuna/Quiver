@@ -1,7 +1,9 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using AvaloniaEdit;
 using AvaloniaEdit.TextMate;
 using Quiver.Studio.ViewModels;
 using TextMateSharp.Grammars;
@@ -10,24 +12,36 @@ namespace Quiver.Studio.Views;
 
 public partial class MainWindow : Window
 {
+    private readonly TextEditor _editor;
+
     public MainWindow()
     {
         InitializeComponent();
-        SetupEditor();
-    }
 
-    private void SetupEditor()
-    {
-        var registryOptions = new RegistryOptions(ThemeName.DarkPlus);
-        var installation = QueryTextEditor.InstallTextMate(registryOptions);
-        installation.SetGrammar(registryOptions.GetScopeByLanguageId("csharp"));
+        _editor = new TextEditor
+        {
+            FontFamily = new FontFamily("Cascadia Code,Consolas,Courier New,monospace"),
+            FontSize = 13,
+            ShowLineNumbers = true,
+            Text = "// Globals: db, tx (read-only), g, schema\n"
+                 + "// Press F5 to execute\n\n"
+                 + "db.Diagnostics.GetStatistics()",
+        };
 
-        QueryTextEditor.Text = """
-            // Globals: db, tx (read-only), g, schema
-            // Press F5 to execute
+        try
+        {
+            var registryOptions = new RegistryOptions(ThemeName.LightPlus);
+            var installation = _editor.InstallTextMate(registryOptions);
+            installation.SetGrammar(
+                registryOptions.GetScopeByLanguageId(
+                    registryOptions.GetLanguageByExtension(".cs").Id));
+        }
+        catch
+        {
+            // TextMate unavailable — plain text editing still works
+        }
 
-            db.Diagnostics.GetStatistics()
-            """;
+        EditorHost.Child = _editor;
     }
 
     private async void OnOpenDatabaseClick(object? sender, RoutedEventArgs e)
@@ -99,7 +113,7 @@ public partial class MainWindow : Window
     private async Task ExecuteQueryAsync()
     {
         if (DataContext is not MainWindowViewModel vm) return;
-        var code = QueryTextEditor.Text;
+        var code = _editor.Text;
         if (string.IsNullOrWhiteSpace(code)) return;
         await vm.QueryEditor.ExecuteAsync(code);
     }

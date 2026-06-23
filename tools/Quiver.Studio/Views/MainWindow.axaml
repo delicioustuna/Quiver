@@ -2,7 +2,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Quiver.Studio.ViewModels"
         xmlns:conv="using:Quiver.Studio.Converters"
-        xmlns:ae="https://github.com/avaloniaui/avaloniaedit"
         x:Class="Quiver.Studio.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding Title}"
@@ -159,12 +158,9 @@
                     </StackPanel>
                 </Border>
 
-                <!-- AvaloniaEdit editor -->
-                <ae:TextEditor x:Name="QueryTextEditor"
-                               FontFamily="Cascadia Code,Consolas,Courier New,monospace"
-                               FontSize="13"
-                               ShowLineNumbers="True"
-                               IsVisible="{Binding IsConnected}" />
+                <!-- Query editor (populated in code-behind) -->
+                <Border x:Name="EditorHost"
+                        IsVisible="{Binding IsConnected}" />
             </DockPanel>
 
             <!-- Splitter -->
