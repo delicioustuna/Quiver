@@ -33,7 +33,10 @@ Avalonia 12 の外部コントロール (FluentTheme に同梱されないもの
 ### 2. TextMate テーマは LightPlus を使う
 TextMateSharp の無印 `Light` は文字列・型名・メソッド名のスコープが不足。`LightPlus` (VS Code デフォルト拡張版) で全要素が色分けされる。
 
-### 3. R3Extensions.Avalonia は Avalonia 12 非対応
+### 3. DataGrid で ExpandoObject は使えない
+Avalonia DataGrid は ExpandoObject のプロパティバインディングを解決できない — 列ヘッダーと行枠は表示されるがセル値が空になる ([#18209](https://github.com/AvaloniaUI/Avalonia/discussions/18209))。動的行は `string[]` + ordinal インデクサ `[0]`, `[1]` で代替する。`string[]` インデクサへの TwoWay (デフォルト) バインディングは問題ない。
+
+### 4. R3Extensions.Avalonia は Avalonia 12 非対応
 `ReactiveProperty<T>` → `Subscribe` + `Dispatcher.UIThread.Post()` → CommunityToolkit.Mvvm `[ObservableProperty]` への転写で代替。
 
 ## プロジェクト構造
@@ -114,8 +117,8 @@ DatabaseService が `ReactiveProperty<T>` を公開。VM は `Subscribe` + `Disp
 - 出力は Phase 1c の DataGrid 導入まで text table 形式
 
 ### Phase 1c: 結果ビュー ✅
-- DataGrid 動的列生成 (string[] 行 + ordinal インデクサ + OneWay バインディング) ✅
-  - ExpandoObject は Avalonia DataGrid 非対応のため不使用 (注意事項 §4)
+- DataGrid 動的列生成 (string[] 行 + ordinal インデクサ) ✅
+  - ExpandoObject は Avalonia DataGrid 非対応 (注意事項 §3)
   - DataGrid StyleInclude 登録必須 (注意事項 §1)
 - Results/Output タブ切替 ✅
 - CSV/JSON コピー ✅

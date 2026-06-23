@@ -2,9 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Media;
 using Avalonia.Platform.Storage;
-using AvaloniaEdit;
 using AvaloniaEdit.TextMate;
 using Quiver.Studio.ViewModels;
 using TextMateSharp.Grammars;
@@ -13,36 +11,25 @@ namespace Quiver.Studio.Views;
 
 public partial class MainWindow : Window
 {
-    private readonly TextEditor _editor;
-
     public MainWindow()
     {
         InitializeComponent();
 
-        _editor = new TextEditor
-        {
-            FontFamily = new FontFamily("Cascadia Code,Consolas,Courier New,monospace"),
-            FontSize = 13,
-            ShowLineNumbers = true,
-            Text = "// Globals: db, tx (read-only), g, schema\n"
-                 + "// Press F5 to execute\n\n"
-                 + "db.Diagnostics.GetStatistics()",
-        };
+        QueryTextEditor.Text = "// Globals: db, tx (read-only), g, schema\n"
+                             + "// Press F5 to execute\n\n"
+                             + "db.Diagnostics.GetStatistics()";
 
         try
         {
             var registryOptions = new RegistryOptions(ThemeName.LightPlus);
-            var installation = _editor.InstallTextMate(registryOptions);
+            var installation = QueryTextEditor.InstallTextMate(registryOptions);
             installation.SetGrammar(
                 registryOptions.GetScopeByLanguageId(
                     registryOptions.GetLanguageByExtension(".cs").Id));
         }
         catch
         {
-            // TextMate unavailable — plain text editing still works
         }
-
-        EditorHost.Child = _editor;
 
         DataContextChanged += (_, _) =>
         {
@@ -52,6 +39,12 @@ public partial class MainWindow : Window
                 vm.Results.PropertyChanged += OnResultsPropertyChanged;
             }
         };
+    }
+
+    private void OnResultsPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ResultsViewModel.Columns))
+            RebuildResultColumns();
     }
 
     private void RebuildResultColumns()
@@ -64,7 +57,7 @@ public partial class MainWindow : Window
             ResultsGrid.Columns.Add(new DataGridTextColumn
             {
                 Header = vm.Results.Columns[i],
-                Binding = new Binding($"[{i}]") { Mode = BindingMode.OneWay },
+                Binding = new Binding($"[{i}]"),
             });
         }
     }
@@ -135,16 +128,10 @@ public partial class MainWindow : Window
         base.OnKeyDown(e);
     }
 
-    private void OnResultsPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(ResultsViewModel.Columns))
-            RebuildResultColumns();
-    }
-
     private async Task ExecuteQueryAsync()
     {
         if (DataContext is not MainWindowViewModel vm) return;
-        var code = _editor.Text;
+        var code = QueryTextEditor.Text;
         if (string.IsNullOrWhiteSpace(code)) return;
         await vm.QueryEditor.ExecuteAsync(code);
     }
