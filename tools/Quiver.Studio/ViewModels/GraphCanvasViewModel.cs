@@ -20,10 +20,16 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
     private VisualNode? _selectedNode;
 
     [ObservableProperty]
+    private VisualEdge? _selectedEdge;
+
+    [ObservableProperty]
     private int _nodeCount;
 
     [ObservableProperty]
     private int _edgeCount;
+
+    [ObservableProperty]
+    private double _zoomLevel = 1.0;
 
     public List<VisualNode> Nodes { get; } = [];
     public List<VisualEdge> Edges { get; } = [];
@@ -105,12 +111,27 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
     {
         if (SelectedNode is not null)
             SelectedNode.IsSelected = false;
+        if (SelectedEdge is not null)
+            SelectedEdge.IsSelected = false;
 
         SelectedNode = node;
+        SelectedEdge = null;
 
         if (node is not null)
             node.IsSelected = true;
+    }
 
-        GraphChanged?.Invoke();
+    public void SelectEdge(VisualEdge? edge)
+    {
+        if (SelectedNode is not null)
+            SelectedNode.IsSelected = false;
+        if (SelectedEdge is not null)
+            SelectedEdge.IsSelected = false;
+
+        SelectedNode = null;
+        SelectedEdge = edge;
+
+        if (edge is not null)
+            edge.IsSelected = true;
     }
 }

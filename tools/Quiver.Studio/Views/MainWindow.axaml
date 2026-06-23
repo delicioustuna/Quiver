@@ -18,30 +18,60 @@
         <Border DockPanel.Dock="Bottom"
                 Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
                 Padding="8,4">
-            <Panel>
-                <TextBlock FontSize="12"
-                           Text="Ready"
-                           IsVisible="{Binding !IsConnected}" />
-                <StackPanel Orientation="Horizontal"
-                            Spacing="16"
-                            IsVisible="{Binding IsConnected}">
-                    <TextBlock FontSize="12"
-                               Text="{Binding FilePath}" />
-                    <TextBlock FontSize="12"
-                               Text="{Binding QueryEditor.StatusText}"
-                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+            <Grid ColumnDefinitions="*,Auto">
+                <!-- Left: connection + query status -->
+                <StackPanel Grid.Column="0"
+                            Orientation="Horizontal"
+                            Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="4"
+                                IsVisible="{Binding !IsConnected}">
+                        <TextBlock FontSize="12" Text="Disconnected"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="12"
+                                IsVisible="{Binding IsConnected}">
+                        <TextBlock FontSize="12"
+                                   Text="{Binding FilePath}"
+                                   TextTrimming="CharacterEllipsis"
+                                   MaxWidth="400" />
+                        <TextBlock FontSize="12" Text="|"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
+                        <TextBlock FontSize="12"
+                                   Text="{Binding QueryEditor.StatusText}"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                        <TextBlock FontSize="12" Text="|"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                                   IsVisible="{Binding GraphCanvas.HasGraph}" />
+                        <TextBlock FontSize="12"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                   IsVisible="{Binding GraphCanvas.HasGraph}">
+                            <TextBlock.Text>
+                                <MultiBinding StringFormat="Graph: {0} nodes, {1} edges">
+                                    <Binding Path="GraphCanvas.NodeCount" />
+                                    <Binding Path="GraphCanvas.EdgeCount" />
+                                </MultiBinding>
+                            </TextBlock.Text>
+                        </TextBlock>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Right: zoom + theme -->
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="12">
                     <TextBlock FontSize="12"
                                Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
-                               IsVisible="{Binding GraphCanvas.HasGraph}">
-                        <TextBlock.Text>
-                            <MultiBinding StringFormat="Graph: {0} nodes, {1} edges">
-                                <Binding Path="GraphCanvas.NodeCount" />
-                                <Binding Path="GraphCanvas.EdgeCount" />
-                            </MultiBinding>
-                        </TextBlock.Text>
-                    </TextBlock>
+                               IsVisible="{Binding GraphCanvas.HasGraph}"
+                               Text="{Binding GraphCanvas.ZoomLevel, StringFormat='Zoom: {0:P0}'}" />
+                    <TextBlock FontSize="12" Text="|"
+                               Foreground="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
+                    <Button Content="{Binding ThemeLabel}"
+                            Command="{Binding ToggleThemeCommand}"
+                            FontSize="11"
+                            Padding="6,1"
+                            VerticalAlignment="Center" />
                 </StackPanel>
-            </Panel>
+            </Grid>
         </Border>
 
         <!-- Left Sidebar -->

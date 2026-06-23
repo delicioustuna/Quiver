@@ -31,6 +31,14 @@ public sealed partial class QueryEditorViewModel : ObservableObject
         _queryService = queryService;
     }
 
+    public void Reset()
+    {
+        Output = "";
+        HasError = false;
+        StatusText = "Ready";
+        LastResult = null;
+    }
+
     public async Task ExecuteAsync(string code)
     {
         if (IsExecuting || !_queryService.CanExecute) return;

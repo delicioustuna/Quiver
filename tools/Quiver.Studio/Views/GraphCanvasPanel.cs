@@ -2,6 +2,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Styling;
+using Avalonia.Threading;
 using Quiver.Studio.Models;
 using Quiver.Studio.Rendering;
 using Quiver.Studio.ViewModels;
@@ -21,6 +23,7 @@ public sealed class GraphCanvasPanel : Control
     {
         ClipToBounds = true;
         Focusable = true;
+        ActualThemeVariantChanged += (_, _) => InvalidateVisual();
     }
 
     public void Attach(GraphCanvasViewModel vm)
@@ -38,13 +41,19 @@ public sealed class GraphCanvasPanel : Control
         InvalidateVisual();
     }
 
+    private void SyncZoomLevel()
+    {
+        if (_vm is null) return;
+        var zoom = _vm.Renderer.Camera.Zoom;
+        Dispatcher.UIThread.Post(() => { if (_vm is not null) _vm.ZoomLevel = zoom; });
+    }
+
     protected override Size ArrangeOverride(Size finalSize)
     {
         var result = base.ArrangeOverride(finalSize);
         if (result != _lastSize)
         {
             _lastSize = result;
-            _needsFit = true;
             InvalidateVisual();
         }
         return result;
@@ -52,14 +61,18 @@ public sealed class GraphCanvasPanel : Control
 
     public override void Render(DrawingContext context)
     {
-        context.DrawRectangle(Brushes.White, null, new Rect(Bounds.Size));
+        var isDark = ActualThemeVariant == ThemeVariant.Dark;
+        var bg = isDark ? Brushes.Black : Brushes.White;
+        context.DrawRectangle(bg, null, new Rect(Bounds.Size));
 
         if (_vm is not { HasGraph: true }) return;
+        _vm.Renderer.IsDarkTheme = isDark;
 
         if (_needsFit && Bounds.Width > 0 && Bounds.Height > 0)
         {
             _vm.Renderer.Camera.FitToContent(_vm.Nodes, Bounds.Width, Bounds.Height);
             _needsFit = false;
+            SyncZoomLevel();
         }
 
         _vm.Renderer.Render(context, _vm.Nodes, _vm.Edges);
@@ -75,17 +88,25 @@ public sealed class GraphCanvasPanel : Control
 
         if (props.IsLeftButtonPressed)
         {
-            var hit = HitTestHelper.HitTestNode(_vm.Nodes, _vm.Renderer.Camera, pos.X, pos.Y);
-            if (hit is not null)
+            var hitNode = HitTestHelper.HitTestNode(_vm.Nodes, _vm.Renderer.Camera, pos.X, pos.Y);
+            if (hitNode is not null)
             {
-                _dragNode = hit;
-                _vm.SelectNode(hit);
+                _dragNode = hitNode;
+                _vm.SelectNode(hitNode);
                 e.Pointer.Capture(this);
             }
             else
             {
-                _vm.SelectNode(null);
-                _isPanning = true;
+                var hitEdge = HitTestHelper.HitTestEdge(_vm.Edges, _vm.Renderer.Camera, pos.X, pos.Y);
+                if (hitEdge is not null)
+                {
+                    _vm.SelectEdge(hitEdge);
+                }
+                else
+                {
+                    _vm.SelectNode(null);
+                    _isPanning = true;
+                }
                 e.Pointer.Capture(this);
             }
             _lastPointer = pos;
@@ -143,6 +164,7 @@ public sealed class GraphCanvasPanel : Control
         var pos = e.GetPosition(this);
         var factor = e.Delta.Y > 0 ? 1.15 : 1 / 1.15;
         _vm.Renderer.Camera.ZoomAt(factor, pos.X, pos.Y);
+        SyncZoomLevel();
         InvalidateVisual();
     }
 }

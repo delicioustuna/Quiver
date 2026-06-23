@@ -9,6 +9,8 @@ public sealed class VisualEdge
     public VisualNode Target { get; }
     public string RelationshipType { get; }
 
+    public bool IsSelected { get; set; }
+
     public VisualEdge(RelationshipId id, VisualNode source, VisualNode target, string relationshipType)
     {
         Id = id;

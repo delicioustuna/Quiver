@@ -1,8 +1,10 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Styling;
 using AvaloniaEdit.TextMate;
 using Quiver.Studio.ViewModels;
 using TextMateSharp.Grammars;
@@ -11,6 +13,8 @@ namespace Quiver.Studio.Views;
 
 public partial class MainWindow : Window
 {
+    private TextMate.Installation? _textMateInstallation;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -20,17 +24,7 @@ public partial class MainWindow : Window
                              + "// Graph view: queries returning NodeId trigger the Graph tab\n"
                              + "g.Nodes().ToList()";
 
-        try
-        {
-            var registryOptions = new RegistryOptions(ThemeName.LightPlus);
-            var installation = QueryTextEditor.InstallTextMate(registryOptions);
-            installation.SetGrammar(
-                registryOptions.GetScopeByLanguageId(
-                    registryOptions.GetLanguageByExtension(".cs").Id));
-        }
-        catch
-        {
-        }
+        ApplyTextMateTheme(isDark: false);
 
         DataContextChanged += (_, _) =>
         {
@@ -38,8 +32,37 @@ public partial class MainWindow : Window
             {
                 vm.Results.TopLevel = this;
                 vm.Results.PropertyChanged += OnResultsPropertyChanged;
+                vm.PropertyChanged += OnViewModelPropertyChanged;
             }
         };
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(MainWindowViewModel.IsDarkTheme)) return;
+        if (DataContext is not MainWindowViewModel vm) return;
+
+        var variant = vm.IsDarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
+        if (Application.Current is not null)
+            Application.Current.RequestedThemeVariant = variant;
+
+        ApplyTextMateTheme(vm.IsDarkTheme);
+    }
+
+    private void ApplyTextMateTheme(bool isDark)
+    {
+        try
+        {
+            _textMateInstallation?.Dispose();
+            var registryOptions = new RegistryOptions(isDark ? ThemeName.DarkPlus : ThemeName.LightPlus);
+            _textMateInstallation = QueryTextEditor.InstallTextMate(registryOptions);
+            _textMateInstallation.SetGrammar(
+                registryOptions.GetScopeByLanguageId(
+                    registryOptions.GetLanguageByExtension(".cs").Id));
+        }
+        catch
+        {
+        }
     }
 
     private void OnResultsPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -64,6 +87,11 @@ public partial class MainWindow : Window
     }
 
     private async void OnOpenDatabaseClick(object? sender, RoutedEventArgs e)
+    {
+        await OpenDatabaseAsync();
+    }
+
+    private async Task OpenDatabaseAsync()
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
@@ -126,6 +154,23 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
+
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            switch (e.Key)
+            {
+                case Key.O:
+                    _ = OpenDatabaseAsync();
+                    e.Handled = true;
+                    return;
+                case Key.W:
+                    if (DataContext is MainWindowViewModel vm && vm.IsConnected)
+                        vm.CloseDatabaseCommand.Execute(null);
+                    e.Handled = true;
+                    return;
+            }
+        }
+
         base.OnKeyDown(e);
     }
 

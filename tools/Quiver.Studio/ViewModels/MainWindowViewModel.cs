@@ -23,7 +23,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private DatabaseStatistics? _statistics;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ThemeLabel))]
+    private bool _isDarkTheme;
+
     public string Title => "Quiver Studio";
+
+    public string ThemeLabel => IsDarkTheme ? "Light" : "Dark";
 
     public SchemaBrowserViewModel SchemaBrowser { get; }
 
@@ -85,12 +91,20 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OnGraphCanvasPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(GraphCanvasViewModel.SelectedNode)) return;
-
-        if (GraphCanvas.SelectedNode is { } node)
-            PropertyInspector.InspectNode(node);
-        else
-            PropertyInspector.Clear();
+        if (e.PropertyName == nameof(GraphCanvasViewModel.SelectedNode))
+        {
+            if (GraphCanvas.SelectedNode is { } node)
+                PropertyInspector.InspectNode(node);
+            else if (GraphCanvas.SelectedEdge is null)
+                PropertyInspector.Clear();
+        }
+        else if (e.PropertyName == nameof(GraphCanvasViewModel.SelectedEdge))
+        {
+            if (GraphCanvas.SelectedEdge is { } edge)
+                PropertyInspector.InspectEdge(edge);
+            else if (GraphCanvas.SelectedNode is null)
+                PropertyInspector.Clear();
+        }
     }
 
     private void OnResultsSelectionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -115,7 +129,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public void OpenDatabase(string filePath) => _db.Open(filePath);
 
     [RelayCommand]
-    private void CloseDatabase() => _db.Close();
+    private void CloseDatabase()
+    {
+        _db.Close();
+        Results.Clear();
+        GraphCanvas.BuildFromResult(QueryResult.Empty(TimeSpan.Zero));
+        QueryEditor.Reset();
+        PropertyInspector.Clear();
+    }
+
+    [RelayCommand]
+    private void ToggleTheme() => IsDarkTheme = !IsDarkTheme;
 
     public void Dispose()
     {

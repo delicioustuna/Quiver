@@ -30,4 +30,52 @@ public static class HitTestHelper
 
         return best;
     }
+
+    private const double EdgeHitTolerance = 5.0;
+
+    public static VisualEdge? HitTestEdge(
+        IReadOnlyList<VisualEdge> edges,
+        CameraTransform camera,
+        double screenX,
+        double screenY)
+    {
+        var world = camera.ScreenToWorld(screenX, screenY);
+        var tolerance = EdgeHitTolerance / camera.Zoom;
+        VisualEdge? best = null;
+        var bestDist = double.MaxValue;
+
+        foreach (var edge in edges)
+        {
+            var dist = PointToSegmentDistance(
+                world.X, world.Y,
+                edge.Source.X, edge.Source.Y,
+                edge.Target.X, edge.Target.Y);
+
+            if (dist <= tolerance && dist < bestDist)
+            {
+                best = edge;
+                bestDist = dist;
+            }
+        }
+
+        return best;
+    }
+
+    private static double PointToSegmentDistance(
+        double px, double py,
+        double ax, double ay,
+        double bx, double by)
+    {
+        var dx = bx - ax;
+        var dy = by - ay;
+        var len2 = dx * dx + dy * dy;
+
+        if (len2 < 1e-12)
+            return Math.Sqrt((px - ax) * (px - ax) + (py - ay) * (py - ay));
+
+        var t = Math.Clamp(((px - ax) * dx + (py - ay) * dy) / len2, 0, 1);
+        var projX = ax + t * dx;
+        var projY = ay + t * dy;
+        return Math.Sqrt((px - projX) * (px - projX) + (py - projY) * (py - projY));
+    }
 }

@@ -14,6 +14,7 @@ public sealed class GraphRenderer
     private const double ArrowSize = 8;
 
     public CameraTransform Camera { get; } = new();
+    public bool IsDarkTheme { get; set; }
 
     public void Render(DrawingContext ctx, IReadOnlyList<VisualNode> nodes, IReadOnlyList<VisualEdge> edges)
     {
@@ -42,7 +43,8 @@ public sealed class GraphRenderer
         var p1 = new Point(s.X + nx * sourceR, s.Y + ny * sourceR);
         var p2 = new Point(t.X - nx * targetR, t.Y - ny * targetR);
 
-        ctx.DrawLine(EdgePen, p1, p2);
+        var pen = edge.IsSelected ? SelectedPen : EdgePen;
+        ctx.DrawLine(pen, p1, p2);
 
         var arrowLen = ArrowSize * Camera.Zoom;
         var arrowBase = new Point(p2.X - nx * arrowLen, p2.Y - ny * arrowLen);
@@ -57,7 +59,8 @@ public sealed class GraphRenderer
             sgCtx.LineTo(new Point(arrowBase.X - perpX, arrowBase.Y - perpY));
             sgCtx.EndFigure(true);
         }
-        ctx.DrawGeometry(Brushes.Gray, null, geometry);
+        var arrowBrush = edge.IsSelected ? Brushes.DodgerBlue : Brushes.Gray;
+        ctx.DrawGeometry(arrowBrush, null, geometry);
 
         if (!string.IsNullOrEmpty(edge.RelationshipType))
         {
@@ -83,7 +86,8 @@ public sealed class GraphRenderer
         ctx.DrawEllipse(brush, node.IsSelected ? SelectedPen : null, center, r, r);
 
         var fontSize = Math.Max(9, 11 * Camera.Zoom);
-        var text = new FormattedText(
+
+        var innerText = new FormattedText(
             node.Label,
             System.Globalization.CultureInfo.InvariantCulture,
             FlowDirection.LeftToRight,
@@ -91,9 +95,21 @@ public sealed class GraphRenderer
             fontSize,
             Brushes.White);
 
-        if (text.Width < r * 2 - 4)
-            ctx.DrawText(text, new Point(center.X - text.Width / 2, center.Y - text.Height / 2));
+        if (innerText.Width < r * 2 - 4)
+        {
+            ctx.DrawText(innerText, new Point(center.X - innerText.Width / 2, center.Y - innerText.Height / 2));
+        }
         else
-            ctx.DrawText(text, new Point(center.X - text.Width / 2, center.Y + r + 2));
+        {
+            var outerBrush = IsDarkTheme ? Brushes.White : Brushes.Black;
+            var outerText = new FormattedText(
+                node.Label,
+                System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight,
+                LabelTypeface,
+                fontSize,
+                outerBrush);
+            ctx.DrawText(outerText, new Point(center.X - outerText.Width / 2, center.Y + r + 2));
+        }
     }
 }
