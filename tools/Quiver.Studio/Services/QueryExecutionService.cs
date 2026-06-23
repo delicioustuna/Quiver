@@ -24,6 +24,23 @@ public sealed class QueryExecutionService
 
     public bool CanExecute => _databaseService.CurrentDatabase is not null;
 
+    public void Warmup()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                _scriptOptions ??= CreateScriptOptions();
+                await CSharpScript.EvaluateAsync("0", _scriptOptions);
+                _logger.LogInformation("Roslyn ウォームアップ完了");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Roslyn ウォームアップ失敗 (初回クエリ時に再試行)");
+            }
+        });
+    }
+
     public async Task<QueryResult> ExecuteAsync(string code, CancellationToken ct = default)
     {
         var db = _databaseService.CurrentDatabase;

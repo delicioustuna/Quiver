@@ -144,9 +144,14 @@ DatabaseService が `ReactiveProperty<T>` を公開。VM は `Subscribe` + `Disp
 - ノードドラッグ
 - クエリ結果からの NodeId/RelationshipId 抽出→グラフ構築
 
-### Phase 1e: プロパティインスペクタ
-- 選択エンティティの全プロパティ表示
-- PropertyValue ref struct → Dictionary 実体化
+### Phase 1e: プロパティインスペクタ ✅
+- PropertyInspectorViewModel (InspectNode/InspectEdge/Clear) ✅
+- PropertyValue ref struct → string 実体化 (全型対応: Bool/Int32/Int64/Double/String/Bytes/FloatArray) ✅
+- グラフキャンバス ノード選択 → PropertyInspector 更新 ✅
+- DataGrid 行選択 → NodeId 抽出 → PropertyInspector 更新 ✅
+- 右サイドバー表示 (選択時のみ表示) ✅
+- ノード: EnumerateProperties で全プロパティ列挙 + KeyId→名前逆引き ✅
+- リレーションシップ: ListPropertyKeys + GetProperty/GetPropertyValues で全キー走査 ✅
 
 ### Phase 1f: ステータスバー + 仕上げ
 - 接続状態、実行時間、ノード/エッジ数、ズーム率

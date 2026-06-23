@@ -4,6 +4,7 @@ using System.Text.Json;
 using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Quiver.Core;
 using Quiver.Studio.Models;
 
 namespace Quiver.Studio.ViewModels;
@@ -92,6 +93,21 @@ public sealed partial class ResultsViewModel : ObservableObject
         }
         var json = JsonSerializer.Serialize(list, new JsonSerializerOptions { WriteIndented = true });
         TopLevel?.Clipboard?.SetTextAsync(json);
+    }
+
+    public NodeId? GetSelectedNodeId()
+    {
+        if (_currentResult is null || SelectedItem is not string[] cells) return null;
+        var rows = _currentResult.Rows;
+        var stringRows = (List<string[]>)Rows;
+        var idx = stringRows.IndexOf(cells);
+        if (idx < 0 || idx >= rows.Count) return null;
+        var row = rows[idx];
+        foreach (var val in row)
+        {
+            if (val is NodeId nid) return nid;
+        }
+        return null;
     }
 
     internal Avalonia.Controls.TopLevel? TopLevel { get; set; }

@@ -33,6 +33,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public GraphCanvasViewModel GraphCanvas { get; }
 
+    public PropertyInspectorViewModel PropertyInspector { get; }
+
     public MainWindowViewModel(
         DatabaseService databaseService,
         QueryExecutionService queryService,
@@ -44,8 +46,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         SchemaBrowser = new SchemaBrowserViewModel(_db);
         QueryEditor = new QueryEditorViewModel(queryService);
         GraphCanvas = new GraphCanvasViewModel(databaseService, layoutService, logger);
+        PropertyInspector = new PropertyInspectorViewModel(databaseService);
 
         QueryEditor.ResultReady += OnResultReady;
+        GraphCanvas.PropertyChanged += OnGraphCanvasPropertyChanged;
+        Results.PropertyChanged += OnResultsSelectionChanged;
 
         _subscriptions = Disposable.Combine(
             _db.IsOpen.Subscribe(v => Dispatcher.UIThread.Post(() => IsConnected = v)),
@@ -76,6 +81,35 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _logger.LogError(ex, "クエリ結果処理で例外");
         }
+    }
+
+    private void OnGraphCanvasPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(GraphCanvasViewModel.SelectedNode)) return;
+
+        if (GraphCanvas.SelectedNode is { } node)
+            PropertyInspector.InspectNode(node);
+        else
+            PropertyInspector.Clear();
+    }
+
+    private void OnResultsSelectionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(ResultsViewModel.SelectedItem)) return;
+
+        var nid = Results.GetSelectedNodeId();
+        if (nid is { } id && _db.CurrentDatabase is not null)
+        {
+            using var tx = _db.CurrentDatabase.BeginReadOnlyTransaction();
+            if (tx.NodeExists(id))
+            {
+                var label = tx.GetNodeLabel(id) ?? $"({id.Sequence})";
+                var vn = new Models.VisualNode(id, label);
+                PropertyInspector.InspectNode(vn);
+                return;
+            }
+        }
+        PropertyInspector.Clear();
     }
 
     public void OpenDatabase(string filePath) => _db.Open(filePath);

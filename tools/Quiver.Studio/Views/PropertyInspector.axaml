@@ -1,0 +1,42 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Quiver.Studio.ViewModels"
+             x:Class="Quiver.Studio.Views.PropertyInspector"
+             x:DataType="vm:PropertyInspectorViewModel">
+    <DockPanel>
+        <TextBlock DockPanel.Dock="Top"
+                   Text="{Binding Header}"
+                   FontWeight="SemiBold"
+                   FontSize="12"
+                   Padding="8,6"
+                   TextTrimming="CharacterEllipsis"
+                   ToolTip.Tip="{Binding Header}"
+                   IsVisible="{Binding HasSelection}" />
+
+        <DataGrid ItemsSource="{Binding Properties}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  CanUserResizeColumns="True"
+                  GridLinesVisibility="Horizontal"
+                  HeadersVisibility="Column"
+                  FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                  FontSize="12"
+                  IsVisible="{Binding HasSelection}">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Property"
+                                    Binding="{Binding Key}"
+                                    Width="Auto" />
+                <DataGridTextColumn Header="Value"
+                                    Binding="{Binding Value}"
+                                    Width="*" />
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <TextBlock Text="Select a node or relationship"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                   FontSize="12"
+                   IsVisible="{Binding !HasSelection}" />
+    </DockPanel>
+</UserControl>

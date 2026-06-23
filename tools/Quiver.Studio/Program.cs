@@ -33,6 +33,7 @@ internal static class Program
             .Build();
 
         SetupGlobalExceptionHandlers(host.Services);
+        host.Services.GetRequiredService<QueryExecutionService>().Warmup();
 
         BuildAvaloniaApp(host.Services).StartWithClassicDesktopLifetime(args);
     }

@@ -153,6 +153,22 @@
             </DockPanel>
         </Border>
 
+        <!-- Right Sidebar: Property Inspector -->
+        <Border DockPanel.Dock="Right"
+                Width="260"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                BorderThickness="1,0,0,0"
+                IsVisible="{Binding PropertyInspector.HasSelection}">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top"
+                           Text="Properties"
+                           FontWeight="SemiBold"
+                           FontSize="14"
+                           Margin="12,10,12,6" />
+                <views:PropertyInspector DataContext="{Binding PropertyInspector}" />
+            </DockPanel>
+        </Border>
+
         <!-- Main Content Area -->
         <Grid RowDefinitions="*,4,*">
             <!-- Query Editor -->
@@ -208,6 +224,7 @@
 
                             <DataGrid x:Name="ResultsGrid"
                                       ItemsSource="{Binding Results.Rows}"
+                                      SelectedItem="{Binding Results.SelectedItem}"
                                       AutoGenerateColumns="False"
                                       IsReadOnly="True"
                                       CanUserSortColumns="True"
