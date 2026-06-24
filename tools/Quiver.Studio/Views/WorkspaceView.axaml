@@ -3,6 +3,7 @@
              xmlns:vm="using:Quiver.Studio.ViewModels"
              xmlns:views="using:Quiver.Studio.Views"
              xmlns:ae="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             xmlns:i="clr-namespace:FluentIcons.Avalonia;assembly=FluentIcons.Avalonia"
              x:Class="Quiver.Studio.Views.WorkspaceView"
              x:DataType="vm:MainWindowViewModel">
 
@@ -17,13 +18,38 @@
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <TabStrip SelectedIndex="{Binding QueryModeIndex}"
                               FontSize="12">
-                        <TabStripItem Content="Traversal" />
-                        <TabStripItem Content="FullText" />
+                        <TabStripItem>
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <i:SymbolIcon Symbol="Code" 
+                                      FontSize="16" 
+                                      VerticalAlignment="Center" />
+                                <TextBlock Text="クエリ" 
+                                      VerticalAlignment="Center" />
+                            </StackPanel>
+                        </TabStripItem>
+                        <TabStripItem>
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <i:SymbolIcon Symbol="SearchSquare" 
+                                      FontSize="16" 
+                                      VerticalAlignment="Center" />
+                                <TextBlock Text="全文検索" 
+                                      VerticalAlignment="Center" />
+                            </StackPanel>
+                        </TabStripItem>
                     </TabStrip>
-                    <Button Content="▶ Execute (F5)"
-                            Click="OnExecuteClick"
+
+                    <Button Click="OnExecuteClick"
                             IsEnabled="{Binding IsConnected}"
-                            Padding="12,4" />
+                            Padding="12,4"
+                            VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <i:SymbolIcon Symbol="Play" 
+                                  FontSize="16" 
+                                  VerticalAlignment="Center" />
+                            <TextBlock Text="実行 (F5)" 
+                                  VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </Border>
 
@@ -48,7 +74,7 @@
         <Border Grid.Row="2">
             <TabControl>
                 <!-- Results tab (DataGrid) -->
-                <TabItem Header="Results">
+                <TabItem Header="結果">
                     <DockPanel>
                         <Border DockPanel.Dock="Top"
                                 Padding="8,4"
@@ -56,14 +82,28 @@
                                 BorderThickness="0,0,0,1"
                                 IsVisible="{Binding Results.HasRows}">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Button Content="Copy CSV"
-                                        Command="{Binding Results.CopyCsvCommand}"
+                                <Button Command="{Binding Results.CopyCsvCommand}"
                                         Padding="8,2"
-                                        FontSize="11" />
-                                <Button Content="Copy JSON"
-                                        Command="{Binding Results.CopyJsonCommand}"
+                                        FontSize="11">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <i:SymbolIcon Symbol="DocumentCsv" 
+                                              FontSize="16" 
+                                              VerticalAlignment="Center" />
+                                        <TextBlock Text="コピー" 
+                                              VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Command="{Binding Results.CopyJsonCommand}"
                                         Padding="8,2"
-                                        FontSize="11" />
+                                        FontSize="11" >
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <i:SymbolIcon Symbol="Braces" 
+                                              FontSize="16" 
+                                              VerticalAlignment="Center" />
+                                        <TextBlock Text="コピー" 
+                                              VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
                             </StackPanel>
                         </Border>
 
@@ -89,12 +129,12 @@
                 </TabItem>
 
                 <!-- Graph tab -->
-                <TabItem Header="Graph">
+                <TabItem Header="グラフ">
                     <views:GraphCanvas DataContext="{Binding GraphCanvas}" />
                 </TabItem>
 
                 <!-- Output tab (text) -->
-                <TabItem Header="Output">
+                <TabItem Header="出力">
                     <ScrollViewer HorizontalScrollBarVisibility="Auto">
                         <TextBlock Text="{Binding QueryEditor.Output}"
                                    FontFamily="Cascadia Code,Consolas,Courier New,monospace"
@@ -105,7 +145,7 @@
                 </TabItem>
 
                 <!-- History tab -->
-                <TabItem Header="History">
+                <TabItem Header="履歴">
                     <views:QueryHistoryPanel DataContext="{Binding QueryHistory}" />
                 </TabItem>
             </TabControl>

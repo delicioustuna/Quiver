@@ -23,16 +23,16 @@
                   FontSize="12"
                   IsVisible="{Binding HasSelection}">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Property"
+                <DataGridTextColumn Header="項目"
                                     Binding="{Binding Key}"
                                     Width="Auto" />
-                <DataGridTextColumn Header="Value"
+                <DataGridTextColumn Header="値"
                                     Binding="{Binding Value}"
                                     Width="*" />
             </DataGrid.Columns>
         </DataGrid>
 
-        <TextBlock Text="Select a node or relationship"
+        <TextBlock Text="グラフ要素を選択してください"
                    HorizontalAlignment="Center"
                    VerticalAlignment="Center"
                    Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
