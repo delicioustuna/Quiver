@@ -2,7 +2,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Quiver.Studio.ViewModels"
         xmlns:conv="using:Quiver.Studio.Converters"
-        xmlns:ae="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
         xmlns:views="using:Quiver.Studio.Views"
         x:Class="Quiver.Studio.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
@@ -55,7 +54,7 @@
                     </StackPanel>
                 </StackPanel>
 
-                <!-- Right: zoom + theme -->
+                <!-- Right: zoom + theme + settings -->
                 <StackPanel Grid.Column="1"
                             Orientation="Horizontal"
                             Spacing="12">
@@ -70,235 +69,158 @@
                             FontSize="11"
                             Padding="6,1"
                             VerticalAlignment="Center" />
+                    <TextBlock FontSize="12" Text="|"
+                               Foreground="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
+                    <Button Click="OnSettingsClick"
+                            FontSize="11"
+                            Padding="6,1"
+                            VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="&#x2699;" FontSize="14" VerticalAlignment="Center" />
+                            <TextBlock Text="Settings" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- Left Sidebar -->
-        <Border DockPanel.Dock="Left"
-                Width="300"
-                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
-                BorderThickness="0,0,1,0">
-            <DockPanel>
-                <!-- Connection Panel -->
-                <Border DockPanel.Dock="Top"
-                        Padding="12"
+        <!-- Page container: Workspace or Settings -->
+        <Panel>
+            <!-- Workspace (sidebar + content) -->
+            <DockPanel IsVisible="{Binding !IsSettingsOpen}">
+                <!-- Left Sidebar -->
+                <Border DockPanel.Dock="Left"
+                        Width="300"
                         BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
-                        BorderThickness="0,0,0,1">
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="Connection"
-                                   FontWeight="SemiBold"
-                                   FontSize="14" />
+                        BorderThickness="0,0,1,0">
+                    <DockPanel>
+                        <!-- Connection Panel -->
+                        <Border DockPanel.Dock="Top"
+                                Padding="12"
+                                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                                BorderThickness="0,0,0,1">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="Connection"
+                                           FontWeight="SemiBold"
+                                           FontSize="14" />
 
-                        <!-- Disconnected state -->
-                        <StackPanel Spacing="6"
-                                    IsVisible="{Binding !IsConnected}">
-                            <Button Content="Open Database..."
-                                    HorizontalAlignment="Stretch"
-                                    Click="OnOpenDatabaseClick" />
-                        </StackPanel>
+                                <!-- Disconnected state -->
+                                <StackPanel Spacing="6"
+                                            IsVisible="{Binding !IsConnected}">
+                                    <Button Content="Open Database..."
+                                            HorizontalAlignment="Stretch"
+                                            Click="OnOpenDatabaseClick" />
+                                </StackPanel>
 
-                        <!-- Connected state -->
-                        <StackPanel Spacing="6"
-                                    IsVisible="{Binding IsConnected}">
-                            <TextBlock Text="{Binding FilePath}"
-                                       FontSize="11"
-                                       TextTrimming="CharacterEllipsis"
-                                       ToolTip.Tip="{Binding FilePath}"
-                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
-
-                            <!-- Stats -->
-                            <Border Background="{DynamicResource SystemControlBackgroundChromeLowBrush}"
-                                    CornerRadius="4"
-                                    Padding="8,6"
-                                    IsVisible="{Binding Statistics, Converter={x:Static ObjectConverters.IsNotNull}}">
-                                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Nodes" FontSize="11" />
-                                    <TextBlock Grid.Row="0" Grid.Column="1" FontSize="11"
-                                               Text="{Binding Statistics.NodeCount, StringFormat='{}{0:N0}'}" />
-
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Relationships" FontSize="11" />
-                                    <TextBlock Grid.Row="1" Grid.Column="1" FontSize="11"
-                                               Text="{Binding Statistics.RelationshipCount, StringFormat='{}{0:N0}'}" />
-
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Properties" FontSize="11" />
-                                    <TextBlock Grid.Row="2" Grid.Column="1" FontSize="11"
-                                               Text="{Binding Statistics.PropertyCount, StringFormat='{}{0:N0}'}" />
-
-                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Data File" FontSize="11" />
-                                    <TextBlock Grid.Row="3" Grid.Column="1" FontSize="11"
-                                               Text="{Binding Statistics.DataFileSize, Converter={StaticResource FileSizeConverter}}" />
-
-                                    <TextBlock Grid.Row="4" Grid.Column="0" Text="WAL" FontSize="11" />
-                                    <TextBlock Grid.Row="4" Grid.Column="1" FontSize="11"
-                                               Text="{Binding Statistics.WalFileSize, Converter={StaticResource FileSizeConverter}}" />
-                                </Grid>
-                            </Border>
-
-                            <Button Content="Close"
-                                    HorizontalAlignment="Stretch"
-                                    Command="{Binding CloseDatabaseCommand}" />
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
-
-                <!-- Schema Browser -->
-                <DockPanel Margin="0">
-                    <TextBlock DockPanel.Dock="Top"
-                               Text="Schema"
-                               FontWeight="SemiBold"
-                               FontSize="14"
-                               Margin="12,10,12,6" />
-
-                    <TreeView ItemsSource="{Binding SchemaBrowser.RootNodes}"
-                              Margin="4,0"
-                              IsVisible="{Binding IsConnected}">
-                        <TreeView.ItemTemplate>
-                            <TreeDataTemplate ItemsSource="{Binding Children}">
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <TextBlock Text="{Binding Icon}"
-                                               FontSize="12"
-                                               VerticalAlignment="Center"
-                                               Width="16"
-                                               TextAlignment="Center" />
-                                    <TextBlock Text="{Binding Title}"
-                                               VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding Detail}"
+                                <!-- Connected state -->
+                                <StackPanel Spacing="6"
+                                            IsVisible="{Binding IsConnected}">
+                                    <TextBlock Text="{Binding FilePath}"
                                                FontSize="11"
-                                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
-                                               VerticalAlignment="Center"
-                                               IsVisible="{Binding Detail, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip.Tip="{Binding FilePath}"
+                                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+
+                                    <!-- Stats -->
+                                    <Border Background="{DynamicResource SystemControlBackgroundChromeLowBrush}"
+                                            CornerRadius="4"
+                                            Padding="8,6"
+                                            IsVisible="{Binding Statistics, Converter={x:Static ObjectConverters.IsNotNull}}">
+                                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Nodes" FontSize="11" />
+                                            <TextBlock Grid.Row="0" Grid.Column="1" FontSize="11"
+                                                       Text="{Binding Statistics.NodeCount, StringFormat='{}{0:N0}'}" />
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Relationships" FontSize="11" />
+                                            <TextBlock Grid.Row="1" Grid.Column="1" FontSize="11"
+                                                       Text="{Binding Statistics.RelationshipCount, StringFormat='{}{0:N0}'}" />
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Properties" FontSize="11" />
+                                            <TextBlock Grid.Row="2" Grid.Column="1" FontSize="11"
+                                                       Text="{Binding Statistics.PropertyCount, StringFormat='{}{0:N0}'}" />
+
+                                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Data File" FontSize="11" />
+                                            <TextBlock Grid.Row="3" Grid.Column="1" FontSize="11"
+                                                       Text="{Binding Statistics.DataFileSize, Converter={StaticResource FileSizeConverter}}" />
+
+                                            <TextBlock Grid.Row="4" Grid.Column="0" Text="WAL" FontSize="11" />
+                                            <TextBlock Grid.Row="4" Grid.Column="1" FontSize="11"
+                                                       Text="{Binding Statistics.WalFileSize, Converter={StaticResource FileSizeConverter}}" />
+                                        </Grid>
+                                    </Border>
+
+                                    <Button Content="Close"
+                                            HorizontalAlignment="Stretch"
+                                            Command="{Binding CloseDatabaseCommand}" />
                                 </StackPanel>
-                            </TreeDataTemplate>
-                        </TreeView.ItemTemplate>
-                    </TreeView>
+                            </StackPanel>
+                        </Border>
 
-                    <TextBlock Text="Open a database to browse schema"
-                               FontSize="12"
-                               HorizontalAlignment="Center"
-                               Margin="12,20"
-                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
-                               IsVisible="{Binding !IsConnected}" />
-                </DockPanel>
-            </DockPanel>
-        </Border>
+                        <!-- Schema Browser -->
+                        <DockPanel Margin="0">
+                            <TextBlock DockPanel.Dock="Top"
+                                       Text="Schema"
+                                       FontWeight="SemiBold"
+                                       FontSize="14"
+                                       Margin="12,10,12,6" />
 
-        <!-- Right Sidebar: Property Inspector -->
-        <Border DockPanel.Dock="Right"
-                Width="260"
-                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
-                BorderThickness="1,0,0,0"
-                IsVisible="{Binding PropertyInspector.HasSelection}">
-            <DockPanel>
-                <TextBlock DockPanel.Dock="Top"
-                           Text="Properties"
-                           FontWeight="SemiBold"
-                           FontSize="14"
-                           Margin="12,10,12,6" />
-                <views:PropertyInspector DataContext="{Binding PropertyInspector}" />
-            </DockPanel>
-        </Border>
+                            <TreeView ItemsSource="{Binding SchemaBrowser.RootNodes}"
+                                      Margin="4,0"
+                                      IsVisible="{Binding IsConnected}">
+                                <TreeView.ItemTemplate>
+                                    <TreeDataTemplate ItemsSource="{Binding Children}">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="{Binding Icon}"
+                                                       FontSize="12"
+                                                       VerticalAlignment="Center"
+                                                       Width="16"
+                                                       TextAlignment="Center" />
+                                            <TextBlock Text="{Binding Title}"
+                                                       VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding Detail}"
+                                                       FontSize="11"
+                                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                                       VerticalAlignment="Center"
+                                                       IsVisible="{Binding Detail, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                        </StackPanel>
+                                    </TreeDataTemplate>
+                                </TreeView.ItemTemplate>
+                            </TreeView>
 
-        <!-- Main Content Area -->
-        <Grid RowDefinitions="*,4,*">
-            <!-- Query Editor -->
-            <DockPanel Grid.Row="0">
-                <!-- Toolbar: mode tabs + execute -->
-                <Border DockPanel.Dock="Top"
-                        Padding="8,4"
-                        BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
-                        BorderThickness="0,0,0,1">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <TabStrip SelectedIndex="{Binding QueryModeIndex}"
-                                  FontSize="12">
-                            <TabStripItem Content="Traversal" />
-                            <TabStripItem Content="FullText" />
-                        </TabStrip>
-                        <Button Content="▶ Execute (F5)"
-                                Click="OnExecuteClick"
-                                IsEnabled="{Binding IsConnected}"
-                                Padding="12,4" />
-                    </StackPanel>
+                            <TextBlock Text="Open a database to browse schema"
+                                       FontSize="12"
+                                       HorizontalAlignment="Center"
+                                       Margin="12,20"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                       IsVisible="{Binding !IsConnected}" />
+                        </DockPanel>
+                    </DockPanel>
                 </Border>
 
-                <!-- Traversal: C# code editor -->
-                <ae:TextEditor x:Name="QueryTextEditor"
-                               FontFamily="Cascadia Code,Consolas,Courier New,monospace"
-                               FontSize="13"
-                               ShowLineNumbers="True"
-                               IsVisible="{Binding IsTraversalMode}" />
+                <!-- Right Sidebar: Property Inspector -->
+                <Border DockPanel.Dock="Right"
+                        Width="260"
+                        BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                        BorderThickness="1,0,0,0"
+                        IsVisible="{Binding PropertyInspector.HasSelection}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top"
+                                   Text="Properties"
+                                   FontWeight="SemiBold"
+                                   FontSize="14"
+                                   Margin="12,10,12,6" />
+                        <views:PropertyInspector DataContext="{Binding PropertyInspector}" />
+                    </DockPanel>
+                </Border>
 
-                <!-- FullText: FTS parameter panel -->
-                <views:FullTextSearchPanel DataContext="{Binding FullTextSearch}"
-                                           IsVisible="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).IsFullTextMode}" />
+                <!-- Main Content -->
+                <views:WorkspaceView x:Name="Workspace" />
             </DockPanel>
 
-            <!-- Splitter -->
-            <GridSplitter Grid.Row="1"
-                          ResizeDirection="Rows"
-                          Background="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
-
-            <!-- Results / Output -->
-            <Border Grid.Row="2">
-                <TabControl>
-                    <!-- Results tab (DataGrid) -->
-                    <TabItem Header="Results">
-                        <DockPanel>
-                            <Border DockPanel.Dock="Top"
-                                    Padding="8,4"
-                                    BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
-                                    BorderThickness="0,0,0,1"
-                                    IsVisible="{Binding Results.HasRows}">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Button Content="Copy CSV"
-                                            Command="{Binding Results.CopyCsvCommand}"
-                                            Padding="8,2"
-                                            FontSize="11" />
-                                    <Button Content="Copy JSON"
-                                            Command="{Binding Results.CopyJsonCommand}"
-                                            Padding="8,2"
-                                            FontSize="11" />
-                                </StackPanel>
-                            </Border>
-
-                            <DataGrid x:Name="ResultsGrid"
-                                      ItemsSource="{Binding Results.Rows}"
-                                      SelectedItem="{Binding Results.SelectedItem}"
-                                      AutoGenerateColumns="False"
-                                      IsReadOnly="True"
-                                      CanUserSortColumns="True"
-                                      CanUserResizeColumns="True"
-                                      GridLinesVisibility="All"
-                                      FontFamily="Cascadia Code,Consolas,Courier New,monospace"
-                                      FontSize="12"
-                                      IsVisible="{Binding Results.HasRows}" />
-
-                            <TextBlock Text="Execute a query to see results"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center"
-                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
-                                       FontSize="12"
-                                       IsVisible="{Binding !Results.HasRows}" />
-                        </DockPanel>
-                    </TabItem>
-
-                    <!-- Graph tab -->
-                    <TabItem Header="Graph">
-                        <views:GraphCanvas DataContext="{Binding GraphCanvas}" />
-                    </TabItem>
-
-                    <!-- Output tab (text) -->
-                    <TabItem Header="Output">
-                        <ScrollViewer HorizontalScrollBarVisibility="Auto">
-                            <TextBlock Text="{Binding QueryEditor.Output}"
-                                       FontFamily="Cascadia Code,Consolas,Courier New,monospace"
-                                       FontSize="12"
-                                       Padding="8"
-                                       TextWrapping="NoWrap" />
-                        </ScrollViewer>
-                    </TabItem>
-                </TabControl>
-            </Border>
-        </Grid>
+            <!-- Settings Page (overlays workspace) -->
+            <views:SettingsPage x:Name="SettingsView"
+                                DataContext="{Binding GraphSettings}"
+                                IsVisible="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).IsSettingsOpen}" />
+        </Panel>
     </DockPanel>
 </Window>

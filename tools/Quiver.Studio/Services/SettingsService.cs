@@ -52,7 +52,7 @@ public sealed class SettingsService : IDisposable
         lock (_lock)
         {
             _settings.RecentFiles.RemoveAll(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase));
-            _settings.RecentFiles.Insert(0, new RecentFileEntry { Path = path, LastOpened = DateTime.UtcNow });
+            _settings.RecentFiles.Insert(0, new RecentFileEntry { Path = path, LastOpened = DateTime.Now });
             if (_settings.RecentFiles.Count > 20)
                 _settings.RecentFiles.RemoveRange(20, _settings.RecentFiles.Count - 20);
             _settings.LastOpenedPath = path;
@@ -67,7 +67,7 @@ public sealed class SettingsService : IDisposable
             _settings.QueryHistory.Insert(0, new QueryHistoryEntry
             {
                 Code = code,
-                Timestamp = DateTime.UtcNow,
+                Timestamp = DateTime.Now,
                 DurationMs = durationMs,
                 WasError = wasError,
                 DbPath = dbPath,

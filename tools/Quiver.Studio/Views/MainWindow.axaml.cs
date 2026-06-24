@@ -1,33 +1,27 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
-using AvaloniaEdit.TextMate;
-using Microsoft.Extensions.DependencyInjection;
 using Quiver.Studio.Services;
 using Quiver.Studio.ViewModels;
-using TextMateSharp.Grammars;
 
 namespace Quiver.Studio.Views;
 
 public partial class MainWindow : Window
 {
-    private TextMate.Installation? _textMateInstallation;
     private SettingsService? _settingsService;
 
     public MainWindow()
     {
         InitializeComponent();
 
-        QueryTextEditor.Text = "// Globals: db, tx (read-only), g, schema\n"
-                             + "// Press F5 to execute\n\n"
-                             + "// Graph view: queries returning NodeId trigger the Graph tab\n"
-                             + "g.Nodes().ToList()";
-
-        ApplyTextMateTheme(isDark: false);
+        SettingsView.CloseRequested += () =>
+        {
+            if (DataContext is MainWindowViewModel vm)
+                vm.IsSettingsOpen = false;
+        };
 
         DataContextChanged += (_, _) =>
         {
@@ -36,12 +30,15 @@ public partial class MainWindow : Window
                 vm.Results.TopLevel = this;
                 vm.Results.PropertyChanged += OnResultsPropertyChanged;
                 vm.PropertyChanged += OnViewModelPropertyChanged;
+                vm.QueryHistory.LoadRequested += OnHistoryLoadRequested;
 
-                ApplyTextMateTheme(vm.IsDarkTheme);
+                Workspace.ApplyTextMateTheme(vm.IsDarkTheme);
                 if (Application.Current is not null && vm.IsDarkTheme)
                     Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
             }
         };
+
+        Workspace.ExecuteRequested += () => _ = ExecuteQueryAsync();
     }
 
     public void Initialize(SettingsService settingsService)
@@ -97,49 +94,29 @@ public partial class MainWindow : Window
         if (Application.Current is not null)
             Application.Current.RequestedThemeVariant = variant;
 
-        ApplyTextMateTheme(vm.IsDarkTheme);
-    }
-
-    private void ApplyTextMateTheme(bool isDark)
-    {
-        try
-        {
-            _textMateInstallation?.Dispose();
-            var registryOptions = new RegistryOptions(isDark ? ThemeName.DarkPlus : ThemeName.LightPlus);
-            _textMateInstallation = QueryTextEditor.InstallTextMate(registryOptions);
-            _textMateInstallation.SetGrammar(
-                registryOptions.GetScopeByLanguageId(
-                    registryOptions.GetLanguageByExtension(".cs").Id));
-        }
-        catch
-        {
-        }
+        Workspace.ApplyTextMateTheme(vm.IsDarkTheme);
     }
 
     private void OnResultsPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(ResultsViewModel.Columns))
-            RebuildResultColumns();
+            Workspace.RebuildResultColumns();
     }
 
-    private void RebuildResultColumns()
+    private void OnHistoryLoadRequested(string code)
     {
-        if (DataContext is not MainWindowViewModel vm) return;
-
-        ResultsGrid.Columns.Clear();
-        for (var i = 0; i < vm.Results.Columns.Count; i++)
-        {
-            ResultsGrid.Columns.Add(new DataGridTextColumn
-            {
-                Header = vm.Results.Columns[i],
-                Binding = new Binding($"[{i}]"),
-            });
-        }
+        Workspace.SetQueryText(code);
     }
 
     private async void OnOpenDatabaseClick(object? sender, RoutedEventArgs e)
     {
         await OpenDatabaseAsync();
+    }
+
+    private void OnSettingsClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            vm.IsSettingsOpen = !vm.IsSettingsOpen;
     }
 
     private async Task OpenDatabaseAsync()
@@ -176,7 +153,7 @@ public partial class MainWindow : Window
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Content = new StackPanel
                 {
-                    Margin = new Avalonia.Thickness(16),
+                    Margin = new Thickness(16),
                     Spacing = 12,
                     Children =
                     {
@@ -219,6 +196,11 @@ public partial class MainWindow : Window
                         vm.CloseDatabaseCommand.Execute(null);
                     e.Handled = true;
                     return;
+                case Key.OemComma:
+                    if (DataContext is MainWindowViewModel vm2)
+                        vm2.IsSettingsOpen = !vm2.IsSettingsOpen;
+                    e.Handled = true;
+                    return;
             }
         }
 
@@ -235,7 +217,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            var code = QueryTextEditor.Text;
+            var code = Workspace.GetQueryText();
             if (string.IsNullOrWhiteSpace(code)) return;
             await vm.QueryEditor.ExecuteAsync(code);
         }

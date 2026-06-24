@@ -2,15 +2,21 @@ using Quiver;
 using Quiver.Api;
 using Quiver.Core;
 
-var mode = args.Length > 0 && args[0] == "--hierarchical" ? "hierarchical" : "movie";
-var pathArg = mode == "hierarchical" && args.Length > 1 ? args[1]
-    : args.Length > 0 && args[0] != "--hierarchical" ? args[0]
-    : null;
+var mode = args.Length > 0 ? args[0] : "movie";
+var pathArg = args.Length > 1 ? args[1] : null;
 
-if (mode == "hierarchical")
-    GenerateHierarchical(pathArg ?? Path.Combine(AppContext.BaseDirectory, "sample2.quiver"));
-else
-    GenerateMovie(pathArg ?? Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "sample", "movie.quiver"));
+switch (mode)
+{
+    case "--hierarchical":
+        GenerateHierarchical(pathArg ?? Path.Combine(AppContext.BaseDirectory, "sample2.quiver"));
+        break;
+    case "--vector":
+        GenerateVector(pathArg ?? Path.Combine(AppContext.BaseDirectory, "sample3.quiver"));
+        break;
+    default:
+        GenerateMovie(pathArg ?? Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "sample", "movie.quiver"));
+        break;
+}
 
 static void PrepareFile(string outputPath)
 {
@@ -97,6 +103,77 @@ static void GenerateMovie(string outputPath)
     }
 
     PrintStats(db);
+}
+
+static void GenerateVector(string outputPath)
+{
+    PrepareFile(outputPath);
+    using var db = GraphDatabase.Open(outputPath);
+
+    db.Schema.CreateIndex("idx_doc_title", "Document", "title", IndexKind.StringEquality);
+    db.Vectors.CreateVectorIndex(new VectorIndexSpec(
+        "vec_doc", EntityKind.Node, default, 8, DistanceMetric.Cosine, "sample"));
+
+    var rng = new Random(42);
+
+    using (var tx = db.BeginTransaction())
+    {
+        var g = tx.G(db.Schema);
+
+        var topics = new[]
+        {
+            ("Intro to Graph Databases",     "database",   new float[] { 0.9f, 0.8f, 0.1f, 0.2f, 0.0f, 0.1f, 0.3f, 0.1f }),
+            ("Property Graph Model",         "database",   new float[] { 0.85f, 0.7f, 0.15f, 0.25f, 0.05f, 0.1f, 0.2f, 0.15f }),
+            ("SQL vs Graph Queries",         "database",   new float[] { 0.7f, 0.6f, 0.3f, 0.2f, 0.1f, 0.05f, 0.25f, 0.1f }),
+            ("Vector Similarity Search",     "vector",     new float[] { 0.1f, 0.2f, 0.9f, 0.85f, 0.1f, 0.05f, 0.1f, 0.3f }),
+            ("HNSW Algorithm Explained",     "vector",     new float[] { 0.15f, 0.1f, 0.85f, 0.9f, 0.05f, 0.1f, 0.15f, 0.25f }),
+            ("Embeddings for RAG",           "vector",     new float[] { 0.2f, 0.3f, 0.8f, 0.7f, 0.15f, 0.1f, 0.2f, 0.35f }),
+            ("Full-Text Search Internals",   "search",     new float[] { 0.3f, 0.4f, 0.2f, 0.1f, 0.8f, 0.7f, 0.1f, 0.05f }),
+            ("BM25 Scoring",                 "search",     new float[] { 0.25f, 0.35f, 0.15f, 0.1f, 0.85f, 0.75f, 0.15f, 0.1f }),
+            ("Transaction Isolation",        "internals",  new float[] { 0.5f, 0.3f, 0.1f, 0.1f, 0.1f, 0.1f, 0.9f, 0.8f }),
+            ("WAL and Recovery",             "internals",  new float[] { 0.4f, 0.25f, 0.15f, 0.05f, 0.1f, 0.15f, 0.85f, 0.9f }),
+            ("Query Optimization",           "query",      new float[] { 0.6f, 0.5f, 0.2f, 0.1f, 0.3f, 0.2f, 0.4f, 0.3f }),
+            ("Index Design Patterns",        "database",   new float[] { 0.75f, 0.65f, 0.25f, 0.15f, 0.4f, 0.3f, 0.3f, 0.2f }),
+        };
+
+        var topicNode = g.AddNode("Topic").P("name", "Database Engineering").Next();
+        var nodeIds = new List<(NodeId id, string topic)>();
+
+        foreach (var (title, topic, vec) in topics)
+        {
+            var docId = g.AddNode("Document")
+                .P("title", title)
+                .P("topic", topic)
+                .P("wordCount", (long)(rng.Next(500, 3000)))
+                .Next();
+
+            tx.SetVector(EntityKind.Node, docId.Sequence, "vec_doc", vec);
+            tx.IndexInsert("idx_doc_title", title, docId);
+            nodeIds.Add((docId, topic));
+
+            g.AddRelationship("BELONGS_TO").From(docId).To(topicNode).Next();
+        }
+
+        // cross-references between related docs
+        for (var i = 0; i < nodeIds.Count; i++)
+        {
+            for (var j = i + 1; j < nodeIds.Count; j++)
+            {
+                if (nodeIds[i].topic == nodeIds[j].topic)
+                {
+                    g.AddRelationship("REFERENCES").From(nodeIds[i].id).To(nodeIds[j].id).Next();
+                }
+            }
+        }
+
+        tx.Commit();
+    }
+
+    PrintStats(db);
+    Console.WriteLine("  Vector Indexes: 1 (vec_doc)");
+    Console.WriteLine();
+    Console.WriteLine("Test query in Studio:");
+    Console.WriteLine("  db.Vectors.KnnSearch(\"vec_doc\", new float[] { 0.1f, 0.2f, 0.9f, 0.85f, 0.1f, 0.05f, 0.1f, 0.3f }, 8)");
 }
 
 static void GenerateHierarchical(string outputPath)

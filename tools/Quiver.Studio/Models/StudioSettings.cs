@@ -9,6 +9,7 @@ public sealed class StudioSettings
     public List<RecentFileEntry> RecentFiles { get; set; } = [];
     public List<QueryHistoryEntry> QueryHistory { get; set; } = [];
     public int MaxHistoryEntries { get; set; } = 200;
+    public GraphVisualSettings GraphVisual { get; set; } = new();
 }
 
 public sealed class RecentFileEntry

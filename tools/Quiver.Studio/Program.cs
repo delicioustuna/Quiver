@@ -45,6 +45,7 @@ internal static class Program
         services.AddSingleton<QueryExecutionService>();
         services.AddSingleton<GraphLayoutService>();
         services.AddSingleton<SugiyamaLayoutService>();
+        services.AddSingleton<GraphEditingService>();
         services.AddTransient<MainWindowViewModel>();
     }
 

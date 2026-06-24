@@ -11,6 +11,7 @@ namespace Quiver.Studio.ViewModels;
 public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private readonly DatabaseService _db;
+    private readonly GraphEditingService _editingService;
     private readonly SettingsService _settings;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly IDisposable _subscriptions;
@@ -34,6 +35,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private int _queryModeIndex;
 
+    [ObservableProperty]
+    private bool _isSettingsOpen;
+
     public string Title => "Quiver Studio";
 
     public string ThemeLabel => IsDarkTheme ? "Light" : "Dark";
@@ -50,6 +54,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public FullTextSearchViewModel FullTextSearch { get; }
 
+    public QueryHistoryViewModel QueryHistory { get; }
+
+    public GraphSettingsViewModel GraphSettings { get; }
+
     public bool IsTraversalMode => QueryModeIndex == 0;
     public bool IsFullTextMode => QueryModeIndex == 1;
 
@@ -58,10 +66,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         QueryExecutionService queryService,
         GraphLayoutService layoutService,
         SugiyamaLayoutService hierarchyLayoutService,
+        GraphEditingService editingService,
         SettingsService settingsService,
         ILogger<MainWindowViewModel> logger)
     {
         _db = databaseService;
+        _editingService = editingService;
         _settings = settingsService;
         _logger = logger;
 
@@ -70,13 +80,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         SchemaBrowser = new SchemaBrowserViewModel(_db);
         QueryEditor = new QueryEditorViewModel(queryService, settingsService, databaseService);
-        GraphCanvas = new GraphCanvasViewModel(databaseService, layoutService, hierarchyLayoutService, logger);
+        GraphCanvas = new GraphCanvasViewModel(databaseService, layoutService, hierarchyLayoutService, editingService, logger);
         PropertyInspector = new PropertyInspectorViewModel(databaseService);
         FullTextSearch = new FullTextSearchViewModel(databaseService);
+        QueryHistory = new QueryHistoryViewModel(settingsService);
+        GraphSettings = new GraphSettingsViewModel(settingsService, GraphCanvas);
+
+        GraphCanvas.Renderer.VisualSettings = settingsService.Settings.GraphVisual;
 
         QueryEditor.ResultReady += OnResultReady;
         FullTextSearch.ResultReady += OnResultReady;
         GraphCanvas.PropertyChanged += OnGraphCanvasPropertyChanged;
+        GraphCanvas.LinkCompleted += OnLinkCompleted;
+        GraphCanvas.AddNodeRequested += OnAddNodeRequested;
         Results.PropertyChanged += OnResultsSelectionChanged;
 
         _subscriptions = Disposable.Combine(
@@ -97,6 +113,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OnResultReady(QueryResult result)
     {
+        QueryHistory.Refresh();
+
         if (result.IsError)
         {
             _logger.LogWarning("クエリエラー: {Error}", result.Error);
@@ -181,6 +199,55 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         IsDarkTheme = !IsDarkTheme;
         _settings.Settings.Theme = IsDarkTheme ? "Dark" : "Light";
         _settings.MarkDirty();
+    }
+
+    private async Task OnLinkCompleted(VisualNode source, VisualNode target)
+    {
+        try
+        {
+            var existingTypes = _db.CurrentDatabase?.Schema.ListRelationshipTypes() ?? [];
+            var dialog = new Views.AddRelationshipDialog(existingTypes);
+            var owner = Avalonia.Application.Current?.ApplicationLifetime
+                is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                ? desktop.MainWindow : null;
+            var result = owner is not null ? await dialog.ShowDialog<object?>(owner) : null;
+            if (result is not true || dialog.ResultType is null) return;
+
+            var rid = _editingService.CreateRelationship(source.Id, target.Id, dialog.ResultType);
+            GraphCanvas.AddEdgeToGraph(rid, source, target, dialog.ResultType);
+            SchemaBrowser.Refresh();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "リレーションシップ作成失敗");
+        }
+    }
+
+    private async Task OnAddNodeRequested()
+    {
+        await AddNodeAtPositionAsync(GraphCanvas.LastContextWorldX, GraphCanvas.LastContextWorldY);
+    }
+
+    public async Task AddNodeAtPositionAsync(double worldX, double worldY)
+    {
+        try
+        {
+            var existingLabels = _db.CurrentDatabase?.Schema.ListLabels() ?? [];
+            var dialog = new Views.AddNodeDialog(existingLabels);
+            var owner = Avalonia.Application.Current?.ApplicationLifetime
+                is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                ? desktop.MainWindow : null;
+            var result = owner is not null ? await dialog.ShowDialog<object?>(owner) : null;
+            if (result is not true || dialog.ResultLabel is null) return;
+
+            var nid = _editingService.CreateNode(dialog.ResultLabel);
+            GraphCanvas.AddNodeToGraph(nid, dialog.ResultLabel, worldX, worldY);
+            SchemaBrowser.Refresh();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ノード作成失敗");
+        }
     }
 
     public void Dispose()

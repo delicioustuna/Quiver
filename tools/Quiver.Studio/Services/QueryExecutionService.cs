@@ -119,10 +119,39 @@ public sealed class QueryExecutionService
         if (IsPrimitive(result))
             return QueryResult.Scalar(result.ToString() ?? "", elapsed);
 
+        if (result is VectorSearchCursor cursor)
+            return MaterializeVectorCursor(cursor, elapsed);
+
         if (result is IEnumerable enumerable)
             return MaterializeEnumerable(enumerable, elapsed);
 
         return MaterializeObject(result, elapsed);
+    }
+
+    private static QueryResult MaterializeVectorCursor(VectorSearchCursor cursor, TimeSpan elapsed)
+    {
+        var nodeIds = new List<NodeId>();
+        var scores = new Dictionary<long, float>();
+        var rows = new List<IReadOnlyList<object?>>();
+
+        using (cursor)
+        {
+            while (cursor.MoveNext())
+            {
+                var hit = cursor.Current;
+                if (hit.EntityKind == EntityKind.Node)
+                    nodeIds.Add(new NodeId(hit.EntityId));
+                scores[hit.EntityId] = hit.Score;
+                rows.Add([hit.EntityKind.ToString(), hit.EntityId, hit.Score]);
+            }
+        }
+
+        if (rows.Count == 0)
+            return QueryResult.Empty(elapsed);
+
+        return QueryResult.Tabular(
+            ["EntityKind", "EntityId", "Score"], rows, elapsed,
+            nodeIds, [], scores);
     }
 
     private static QueryResult MaterializeEnumerable(IEnumerable enumerable, TimeSpan elapsed)
@@ -141,6 +170,30 @@ public sealed class QueryExecutionService
         if (firstNonNull is null)
             return QueryResult.Tabular(["Value"],
                 items.Select(x => (IReadOnlyList<object?>)[x]).ToList(), elapsed);
+
+        if (firstNonNull is VectorSearchResult)
+        {
+            var scores = new Dictionary<long, float>();
+            foreach (var item in items)
+            {
+                if (item is VectorSearchResult vsr)
+                {
+                    if (vsr.EntityKind == EntityKind.Node)
+                        nodeIds.Add(new NodeId(vsr.EntityId));
+                    scores[vsr.EntityId] = vsr.Score;
+                }
+            }
+
+            var vsrColumns = new List<string> { "EntityKind", "EntityId", "Score" };
+            var vsrRows = items.Select(x =>
+            {
+                if (x is VectorSearchResult r)
+                    return (IReadOnlyList<object?>)[r.EntityKind.ToString(), r.EntityId, r.Score];
+                return (IReadOnlyList<object?>)[null, null, null];
+            }).ToList();
+
+            return QueryResult.Tabular(vsrColumns, vsrRows, elapsed, nodeIds, relIds, scores);
+        }
 
         var type = firstNonNull.GetType();
 

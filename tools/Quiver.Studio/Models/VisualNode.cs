@@ -22,6 +22,8 @@ public sealed class VisualNode
     public bool IsSelected { get; set; }
     public bool IsPinned { get; set; }
     public double Radius { get; set; } = 20;
+    public float? VectorScore { get; set; }
+    public float? NormalizedScore { get; set; }
 
     public Point Position
     {

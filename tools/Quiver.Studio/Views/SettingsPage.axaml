@@ -1,0 +1,192 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Quiver.Studio.ViewModels"
+             xmlns:views="using:Quiver.Studio.Views"
+             x:Class="Quiver.Studio.Views.SettingsPage"
+             x:DataType="vm:GraphSettingsViewModel">
+
+    <DockPanel Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
+        <!-- Header -->
+        <Border DockPanel.Dock="Top"
+                Padding="20,14"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                BorderThickness="0,0,0,1">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="Settings"
+                           FontSize="20" FontWeight="SemiBold" />
+                <Button Grid.Column="1"
+                        Content="Close"
+                        Click="OnCloseClick"
+                        Padding="16,6"
+                        VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+
+        <!-- Two-column layout: nav + content -->
+        <Grid ColumnDefinitions="180,*">
+            <!-- Left nav -->
+            <Border Grid.Column="0"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                    BorderThickness="0,0,1,0">
+                <ListBox x:Name="NavList"
+                         SelectedIndex="0"
+                         Padding="8,12"
+                         Background="Transparent">
+                    <ListBoxItem Content="Score Visualization" FontSize="13" Padding="10,6" />
+                    <ListBoxItem Content="Contour" FontSize="13" Padding="10,6" />
+                    <ListBoxItem Content="Node &amp; Relationship" FontSize="13" Padding="10,6" />
+                </ListBox>
+            </Border>
+
+            <!-- Right content -->
+            <ScrollViewer Grid.Column="1"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Padding="28,20">
+
+                <StackPanel Spacing="28">
+
+                    <!-- ===== Section: Score Visualization ===== -->
+                    <StackPanel Spacing="10"
+                                IsVisible="{Binding #NavList.SelectedIndex,
+                                            Converter={x:Static ObjectConverters.IsNotNull},
+                                            FallbackValue=True}">
+                        <TextBlock Text="Score Visualization"
+                                   FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="How vector search scores are represented on nodes."
+                                   FontSize="12"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+
+                        <StackPanel Spacing="4" Margin="0,6,0,0">
+                            <TextBlock Text="Display Mode" FontSize="12" FontWeight="Medium" />
+                            <ComboBox ItemsSource="{Binding ScoreVizModes}"
+                                      SelectedIndex="{Binding ScoreVizModeIndex}"
+                                      HorizontalAlignment="Stretch"
+                                      MaxWidth="300"
+                                      FontSize="12" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- ===== Section: Contour ===== -->
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Contour Map"
+                                   FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="Score-to-color mapping with discrete bands. Relative mode auto-scales from data; Absolute mode uses a fixed range."
+                                   FontSize="12" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+
+                        <!-- Mode -->
+                        <StackPanel Spacing="4" Margin="0,6,0,0">
+                            <TextBlock Text="Evaluation Mode" FontSize="12" FontWeight="Medium" />
+                            <ComboBox ItemsSource="{Binding ContourModes}"
+                                      SelectedIndex="{Binding ContourModeIndex}"
+                                      HorizontalAlignment="Stretch"
+                                      MaxWidth="300"
+                                      FontSize="12" />
+                        </StackPanel>
+
+                        <!-- Absolute range (visible only in Absolute mode) -->
+                        <StackPanel Spacing="4" IsVisible="{Binding IsAbsoluteMode}">
+                            <TextBlock Text="Score Range" FontSize="12" FontWeight="Medium" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Min" FontSize="10"
+                                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                                    <NumericUpDown Value="{Binding AbsoluteMin}"
+                                                   Increment="0.05" FormatString="F2"
+                                                   Width="120" FontSize="12" />
+                                </StackPanel>
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Max" FontSize="10"
+                                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                                    <NumericUpDown Value="{Binding AbsoluteMax}"
+                                                   Increment="0.05" FormatString="F2"
+                                                   Width="120" FontSize="12" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Palette -->
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Color Palette" FontSize="12" FontWeight="Medium" />
+                            <ComboBox ItemsSource="{Binding PaletteNames}"
+                                      SelectedIndex="{Binding PaletteModeIndex}"
+                                      HorizontalAlignment="Stretch"
+                                      MaxWidth="300"
+                                      FontSize="12" />
+                        </StackPanel>
+
+                        <!-- Steps -->
+                        <StackPanel Spacing="4">
+                            <TextBlock FontSize="12" FontWeight="Medium">
+                                <TextBlock.Text>
+                                    <MultiBinding StringFormat="Discrete Steps: {0}">
+                                        <Binding Path="PaletteSteps" />
+                                    </MultiBinding>
+                                </TextBlock.Text>
+                            </TextBlock>
+                            <NumericUpDown Value="{Binding PaletteSteps}"
+                                           Minimum="2" Maximum="20" Increment="1"
+                                           FormatString="0"
+                                           MaxWidth="300"
+                                           HorizontalAlignment="Left"
+                                           FontSize="12" />
+                        </StackPanel>
+
+                        <!-- Custom colors -->
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Custom Palette (comma-separated #RRGGBB)" FontSize="11"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                            <TextBox Text="{Binding CustomColors}"
+                                     PlaceholderText="#440154, #31688E, #FDE725"
+                                     FontSize="11"
+                                     TextWrapping="Wrap"
+                                     AcceptsReturn="False"
+                                     MaxWidth="400"
+                                     HorizontalAlignment="Left"
+                                     MaxHeight="60" />
+                        </StackPanel>
+
+                        <!-- Contour preview -->
+                        <StackPanel Spacing="4" Margin="0,4,0,0">
+                            <TextBlock Text="Preview" FontSize="12" FontWeight="Medium" />
+                            <views:ContourPreview Contour="{Binding ContourPreview}"
+                                                  Height="52"
+                                                  HorizontalAlignment="Stretch" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- ===== Section: Node & Relationship ===== -->
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Node &amp; Relationship"
+                                   FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="Visual appearance of graph elements."
+                                   FontSize="12"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+
+                        <StackPanel Spacing="4" Margin="0,6,0,0">
+                            <TextBlock Text="Node Shape" FontSize="12" FontWeight="Medium" />
+                            <ComboBox ItemsSource="{Binding NodeShapes}"
+                                      SelectedIndex="{Binding NodeShapeIndex}"
+                                      HorizontalAlignment="Stretch"
+                                      MaxWidth="300"
+                                      FontSize="12" />
+                        </StackPanel>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Relationship Style" FontSize="12" FontWeight="Medium" />
+                            <ComboBox ItemsSource="{Binding RelationshipStyles}"
+                                      SelectedIndex="{Binding EdgeStyleIndex}"
+                                      HorizontalAlignment="Stretch"
+                                      MaxWidth="300"
+                                      FontSize="12" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Bottom padding for scroll clearance -->
+                    <Panel Height="40" />
+
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </DockPanel>
+</UserControl>

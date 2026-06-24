@@ -11,6 +11,7 @@ public sealed class QueryResult
     public TimeSpan Elapsed { get; }
     public IReadOnlyList<NodeId> ExtractedNodeIds { get; }
     public IReadOnlyList<RelationshipId> ExtractedRelationshipIds { get; }
+    public IReadOnlyDictionary<long, float>? VectorScores { get; }
 
     public bool IsError => Error is not null;
     public bool IsScalar => ScalarText is not null;
@@ -24,7 +25,8 @@ public sealed class QueryResult
         string? error,
         TimeSpan elapsed,
         IReadOnlyList<NodeId>? nodeIds = null,
-        IReadOnlyList<RelationshipId>? relIds = null)
+        IReadOnlyList<RelationshipId>? relIds = null,
+        IReadOnlyDictionary<long, float>? vectorScores = null)
     {
         Columns = columns;
         Rows = rows;
@@ -33,6 +35,7 @@ public sealed class QueryResult
         Elapsed = elapsed;
         ExtractedNodeIds = nodeIds ?? [];
         ExtractedRelationshipIds = relIds ?? [];
+        VectorScores = vectorScores;
     }
 
     public static QueryResult Tabular(
@@ -40,8 +43,9 @@ public sealed class QueryResult
         IReadOnlyList<IReadOnlyList<object?>> rows,
         TimeSpan elapsed,
         IReadOnlyList<NodeId>? nodeIds = null,
-        IReadOnlyList<RelationshipId>? relIds = null)
-        => new(columns, rows, null, null, elapsed, nodeIds, relIds);
+        IReadOnlyList<RelationshipId>? relIds = null,
+        IReadOnlyDictionary<long, float>? vectorScores = null)
+        => new(columns, rows, null, null, elapsed, nodeIds, relIds, vectorScores);
 
     public static QueryResult Scalar(string text, TimeSpan elapsed,
         IReadOnlyList<NodeId>? nodeIds = null,

@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Microsoft.Extensions.Logging;
 using Quiver.Studio.Models;
 using Quiver.Studio.Rendering;
 using Quiver.Studio.ViewModels;
@@ -18,6 +19,8 @@ public sealed class GraphCanvasPanel : Control
     private bool _isPanning;
     private bool _needsFit = true;
     private Size _lastSize;
+
+    private static readonly IPen LinkDashPen = new Pen(Brushes.DodgerBlue, 2, new DashStyle([4, 4], 0));
 
     public GraphCanvasPanel()
     {
@@ -76,15 +79,62 @@ public sealed class GraphCanvasPanel : Control
         }
 
         _vm.Renderer.Render(context, _vm.Nodes, _vm.Edges);
+
+        if (_vm.IsLinkMode && _vm.LinkSource is { } src)
+        {
+            var from = _vm.Renderer.Camera.WorldToScreen(src.X, src.Y);
+            var to = new Point(_vm.LinkCursorX, _vm.LinkCursorY);
+            context.DrawLine(LinkDashPen, from, to);
+        }
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
-        if (_vm is not { HasGraph: true }) return;
+        if (_vm is null) return;
 
         var pos = e.GetPosition(this);
         var props = e.GetCurrentPoint(this).Properties;
+
+        if (_vm.IsLinkMode && props.IsLeftButtonPressed)
+        {
+            var hitNode = _vm.HasGraph
+                ? HitTestHelper.HitTestNode(_vm.Nodes, _vm.Renderer.Camera, pos.X, pos.Y)
+                : null;
+            if (hitNode is not null)
+                _ = _vm.CompleteLinkAsync(hitNode);
+            else
+                _vm.CancelLinkMode();
+            InvalidateVisual();
+            return;
+        }
+
+        if (!_vm.HasGraph) return;
+
+        if (props.IsRightButtonPressed)
+        {
+            var hitNode = HitTestHelper.HitTestNode(_vm.Nodes, _vm.Renderer.Camera, pos.X, pos.Y);
+            if (hitNode is not null)
+            {
+                _vm.SelectNode(hitNode);
+                ShowNodeContextMenu(hitNode, pos);
+            }
+            else
+            {
+                var hitEdge = HitTestHelper.HitTestEdge(_vm.Edges, _vm.Renderer.Camera, pos.X, pos.Y);
+                if (hitEdge is not null)
+                {
+                    _vm.SelectEdge(hitEdge);
+                    ShowEdgeContextMenu(hitEdge, pos);
+                }
+                else
+                {
+                    ShowCanvasContextMenu(pos);
+                }
+            }
+            InvalidateVisual();
+            return;
+        }
 
         if (props.IsLeftButtonPressed)
         {
@@ -123,9 +173,19 @@ public sealed class GraphCanvasPanel : Control
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
-        if (_vm is not { HasGraph: true }) return;
+        if (_vm is null) return;
 
         var pos = e.GetPosition(this);
+
+        if (_vm.IsLinkMode)
+        {
+            _vm.LinkCursorX = pos.X;
+            _vm.LinkCursorY = pos.Y;
+            InvalidateVisual();
+            return;
+        }
+
+        if (!_vm.HasGraph) return;
 
         if (_dragNode is not null)
         {
@@ -166,5 +226,82 @@ public sealed class GraphCanvasPanel : Control
         _vm.Renderer.Camera.ZoomAt(factor, pos.X, pos.Y);
         SyncZoomLevel();
         InvalidateVisual();
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape && _vm is { IsLinkMode: true })
+        {
+            _vm.CancelLinkMode();
+            InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
+        base.OnKeyDown(e);
+    }
+
+    private void ShowCanvasContextMenu(Point screenPos)
+    {
+        if (_vm is null) return;
+        var world = _vm.Renderer.Camera.ScreenToWorld(screenPos.X, screenPos.Y);
+        _vm.LastContextWorldX = world.X;
+        _vm.LastContextWorldY = world.Y;
+
+        var menu = new ContextMenu();
+        var addNode = new MenuItem { Header = "Add Node..." };
+        addNode.Click += async (_, _) =>
+        {
+            await _vm.InvokeAddNodeRequested();
+        };
+        menu.Items.Add(addNode);
+        menu.Open(this);
+    }
+
+    private void ShowNodeContextMenu(VisualNode node, Point screenPos)
+    {
+        var menu = new ContextMenu();
+
+        var addRel = new MenuItem { Header = "Add Relationship from here..." };
+        addRel.Click += (_, _) => _vm?.BeginLinkMode(node);
+        menu.Items.Add(addRel);
+
+        var deleteNode = new MenuItem { Header = "Delete Node" };
+        deleteNode.Click += async (_, _) =>
+        {
+            if (_vm is null) return;
+            try
+            {
+                _vm._editingService?.DeleteNode(node.Id);
+                _vm.RemoveNodeFromGraph(node);
+            }
+            catch (Exception ex)
+            {
+                _vm._logger.LogError(ex, "ノード削除失敗");
+            }
+        };
+        menu.Items.Add(deleteNode);
+
+        menu.Open(this);
+    }
+
+    private void ShowEdgeContextMenu(VisualEdge edge, Point screenPos)
+    {
+        var menu = new ContextMenu();
+        var deleteRel = new MenuItem { Header = "Delete Relationship" };
+        deleteRel.Click += async (_, _) =>
+        {
+            if (_vm is null) return;
+            try
+            {
+                _vm._editingService?.DeleteRelationship(edge.Id);
+                _vm.RemoveEdgeFromGraph(edge);
+            }
+            catch (Exception ex)
+            {
+                _vm._logger.LogError(ex, "リレーションシップ削除失敗");
+            }
+        };
+        menu.Items.Add(deleteRel);
+        menu.Open(this);
     }
 }
