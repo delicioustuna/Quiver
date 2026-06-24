@@ -7,8 +7,11 @@ using Quiver.Studio.ViewModels;
 
 namespace Quiver.Studio;
 
-internal static class Program
+public static class Program
 {
+    // Avalonia デザイナを表示するために実行時の ServiceProvider を保持する静的プロパティ
+    public static IServiceProvider? ServiceProvider { get; private set; }
+
     [STAThread]
     public static void Main(string[] args)
     {
@@ -35,7 +38,11 @@ internal static class Program
         SetupGlobalExceptionHandlers(host.Services);
         host.Services.GetRequiredService<QueryExecutionService>().Warmup();
 
-        BuildAvaloniaApp(host.Services).StartWithClassicDesktopLifetime(args);
+        // 実行時のサービスプロバイダを格納
+        ServiceProvider = host.Services;
+
+        // 引数なしで呼び出すように変更
+        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
     private static void ConfigureServices(HostBuilderContext context, IServiceCollection services)
@@ -49,8 +56,9 @@ internal static class Program
         services.AddTransient<MainWindowViewModel>();
     }
 
-    private static AppBuilder BuildAvaloniaApp(IServiceProvider services)
-        => AppBuilder.Configure(() => new App(services))
+    // プレビューアが認識できるように public static かつ引数なしにする
+    private static AppBuilder BuildAvaloniaApp()
+        => AppBuilder.Configure(() => new App(ServiceProvider)) // 静的プロパティを渡す
             .UsePlatformDetect()
             .WithInterFont()
             .LogToTrace();
