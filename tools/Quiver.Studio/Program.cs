@@ -37,6 +37,7 @@ public static class Program
 
         SetupGlobalExceptionHandlers(host.Services);
         host.Services.GetRequiredService<QueryExecutionService>().Warmup();
+        _ = host.Services.GetRequiredService<IntellisenseService>().InitializeAsync();
 
         // 実行時のサービスプロバイダを格納
         ServiceProvider = host.Services;
@@ -53,6 +54,7 @@ public static class Program
         services.AddSingleton<GraphLayoutService>();
         services.AddSingleton<SugiyamaLayoutService>();
         services.AddSingleton<GraphEditingService>();
+        services.AddSingleton<IntellisenseService>();
         services.AddTransient<MainWindowViewModel>();
     }
 

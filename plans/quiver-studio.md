@@ -68,23 +68,26 @@ tools/Quiver.Studio/
     PropertyInspectorViewModel.cs
     FullTextSearchViewModel.cs   # [Phase 2] FTS パネル
     QueryHistoryViewModel.cs     # [Phase 2] 履歴パネル
+    GraphSettingsViewModel.cs    # [Phase 2] コンター/形状設定 VM
   Views/
-    MainWindow.axaml             # DockPanel: 左サイドバー (接続+スキーマ) + 中央 + 下部
-    QueryEditor.axaml            # AvaloniaEdit コントロール
-    ResultsView.axaml            # DataGrid
+    MainWindow.axaml             # DockPanel: ステータスバー + ページ切替 (Workspace/Settings)
+    WorkspaceView.axaml          # [Phase 2] エディタ+結果パネル (MainWindow から抽出)
+    SettingsPage.axaml           # [Phase 2] VS Code 風設定ページ
     GraphCanvas.axaml            # SkiaSharp キャンバス
     GraphCanvasPanel.cs          # カスタム描画 Control
     PropertyInspector.axaml      # KeyValue リスト
+    ContourPreview.cs            # [Phase 2] コンタープレビュー Control
     FullTextSearchPanel.axaml    # [Phase 2] FTS パネル
     QueryHistoryPanel.axaml      # [Phase 2] 履歴パネル
-    AddNodeDialog.axaml          # [Phase 2] ノード追加ダイアログ
-    AddRelationshipDialog.axaml  # [Phase 2] Rel 追加ダイアログ
+    AddNodeDialog.axaml          # [Phase 2] ノード追加ダイアログ (AutoCompleteBox)
+    AddRelationshipDialog.axaml  # [Phase 2] Rel 追加ダイアログ (AutoCompleteBox)
   Models/
     VisualNode.cs / VisualEdge.cs / SchemaTreeNode.cs
     QueryResult.cs / ScriptGlobals.cs
     StudioSettings.cs            # [Phase 2] 永続化 POCO
+    GraphVisualSettings.cs       # [Phase 2] コンター/形状設定モデル
     FtsResultRow.cs              # [Phase 2] FTS 結果行
-    RoslynCompletionData.cs      # [Phase 2] ICompletionData 実装
+    RoslynCompletionData.cs      # [Phase 2c] ICompletionData 実装
   Services/
     DatabaseService.cs           # GraphDatabase ライフサイクル + ReactiveProperty
     QueryExecutionService.cs     # Roslyn CSharpScript 実行ブリッジ
@@ -92,14 +95,15 @@ tools/Quiver.Studio/
     SettingsService.cs           # [Phase 2] JSON 永続化
     SugiyamaLayoutService.cs     # [Phase 2] 階層レイアウト
     GraphEditingService.cs       # [Phase 2] Write tx ラッパー
-    IntellisenseService.cs       # [Phase 2] Roslyn 補完
+    IntellisenseService.cs       # [Phase 2c] Roslyn 補完
   Converters/
     FileSizeConverter.cs
   Rendering/
     GraphRenderer.cs / HitTestHelper.cs / CameraTransform.cs
+    ContourMap.cs                # [Phase 2] コンターマップ (score→color 変換)
   Export/
-    SvgExporter.cs               # [Phase 2] SVG 生成
-    PngExporter.cs               # [Phase 2] PNG 生成
+    SvgExporter.cs               # [Phase 2c] SVG 生成
+    PngExporter.cs               # [Phase 2c] PNG 生成
 ```
 
 ## 設計判断
@@ -185,15 +189,16 @@ Studio を「閲覧ツール」から「操作・分析ツール」に引き上�
 #### 実装順序と依存関係
 
 ```
-Phase 2a (基盤 — 独立、先行して安定化)
-  2a.1 セッション永続化 ← 2b.1 が依存
-  2a.2 全文検索パネル   (独立)
-  2a.3 Sugiyama レイアウト (独立)
+Phase 2a (基盤 — 独立、先行して安定化) ✅
+  2a.1 セッション永続化 ← 2b.1 が依存         ✅
+  2a.2 全文検索パネル   (独立)                  ✅
+  2a.3 Sugiyama レイアウト (独立)               ✅
 
-Phase 2b (2a 基盤の上に構築)
-  2b.1 クエリ履歴 UI   ← 2a.1 SettingsService に依存
-  2b.2 グラフ編集       (最も侵襲的、2a 安定後に着手)
-  2b.3 ベクトルスコア可視化 (独立、中程度の複雑さ)
+Phase 2b (2a 基盤の上に構築) ✅
+  2b.1 クエリ履歴 UI   ← 2a.1 SettingsService に依存  ✅
+  2b.2 グラフ編集       (最も侵襲的、2a 安定後に着手)  ✅
+  2b.3 ベクトルスコア可視化 (独立、中程度の複雑さ)      ✅
+  2b.4 設定ページ + コンターマップ + ページナビゲーション ✅ (追加)
 
 Phase 2c (高複雑度 / 独立)
   2c.1 Roslyn IntelliSense (最高複雑度)
@@ -304,93 +309,54 @@ public sealed class SugiyamaLayoutService
 **新規**: `Services/SugiyamaLayoutService.cs`
 **変更**: `Program.cs` (DI), `GraphCanvasViewModel.cs` (`IsHierarchicalLayout` トグル), `Views/GraphCanvas.axaml` (トグルボタン)
 
-#### Phase 2b.1: クエリ履歴 UI
+#### Phase 2b.1: クエリ履歴 UI ✅
 
-過去のクエリを一覧表示、ダブルクリックでエディタに再ロード。2a.1 `SettingsService` に依存。
+過去のクエリを一覧表示、ダブルクリックでエディタに再ロード。2a.1 `SettingsService` に依存。commit d55c0e3。
 
 **配置**: 下部 TabControl 新タブ「History」。
+**UI**: ListBox — タイムスタンプ (ローカル時刻)、コード先頭 2 行、実行時間、エラーフラグ。最新が上。テキストフィルタ。
 
-```csharp
-// ViewModels/QueryHistoryViewModel.cs
-public partial class QueryHistoryViewModel : ObservableObject
-{
-    [ObservableProperty] ObservableCollection<QueryHistoryEntry> entries;
-    [ObservableProperty] string filterText = "";
+#### Phase 2b.2: インタラクティブグラフ編集 ✅
 
-    [RelayCommand] void LoadEntry(QueryHistoryEntry entry);
-    [RelayCommand] void ClearHistory();
-    [RelayCommand] void DeleteEntry(QueryHistoryEntry entry);
+キャンバス上でノード/リレーションシップの GUI 追加・削除。commit d55c0e3。
 
-    public event Action<string>? LoadRequested;
-}
-```
+- 右クリック コンテキストメニュー (空白→Add Node / ノード上→Delete+Add Rel / エッジ上→Delete)
+- リンクモード (ソース→ターゲット破線 + ESC キャンセル)
+- AddNode/AddRelationshipDialog: AutoCompleteBox で既存ラベル/タイプ選択 or 新規入力
+- DeleteNode はリレーションシップのカスケード削除を実行
 
-**UI**: ListBox — タイムスタンプ、コード先頭 100 文字、実行時間、エラーフラグ。最新が上。テキストフィルタ。
+#### Phase 2b.3: ベクトル検索スコア可視化 ✅
 
-**新規**: `ViewModels/QueryHistoryViewModel.cs`, `Views/QueryHistoryPanel.axaml` + `.axaml.cs`
-**変更**: `MainWindowViewModel.cs`, `MainWindow.axaml`, `MainWindow.axaml.cs` (LoadRequested → TextEditor)
+ベクトル検索結果にスコアを付けてグラフ上で視覚表現。commit d55c0e3。
 
-#### Phase 2b.2: インタラクティブグラフ編集
+- `VectorSearchCursor` を `MaterializeResult` で直接ハンドリング (IEnumerable 非実装のため)
+- SampleDbGen `--vector` モードで sample3.quiver 生成 (12 ドキュメント + 8 次元ベクトルインデックス)
 
-キャンバス上でノード/リレーションシップの GUI 追加・削除。
+#### Phase 2b.4: 設定ページ + コンターマップ + ページナビゲーション ✅
 
-**トランザクションモデル**: 既存 `QueryExecutionService` (読み取り専用 tx) とは**別経路**の `GraphEditingService` を新設。操作ごとに write tx → 即 commit (auto-commit per operation)。
+Phase 2b.3 のスコア可視化を汎用コンターマップに発展。commit d55c0e3。
 
-```csharp
-// Services/GraphEditingService.cs — Singleton
-public sealed class GraphEditingService
-{
-    // 各メソッド: BeginTransaction → 操作 → Commit (失敗時 Rollback)
-    // 成功後 DatabaseService.RefreshStatistics()
-    public NodeId CreateNode(string label, IReadOnlyList<(string key, string value)>? properties = null);
-    public void DeleteNode(NodeId id);
-    public RelationshipId CreateRelationship(NodeId source, NodeId target, string type);
-    public void DeleteRelationship(RelationshipId id);
-    public void SetProperty(NodeId id, string key, string value);
-    public void RemoveProperty(NodeId id, string key);
-}
-```
+**ページナビゲーション**: MainWindow をページ切替構造に改修。
+- `WorkspaceView` 抽出 (エディタ+結果パネルを独立 UserControl 化)
+- `SettingsPage` (VS Code 風独立ページ: 左ナビ + 右コンテンツ)
+- ステータスバー歯車ボタン + `Ctrl+,` で Workspace ⇄ Settings 切替
 
-**操作フロー**:
-- 右クリック コンテキストメニュー:
-  - キャンバス空白 → 「Add Node...」
-  - ノード上 → 「Delete Node」「Add Relationship from here...」「Edit Properties...」
-  - エッジ上 → 「Delete Relationship」
-- リレーション作成: ソース選択 → `IsLinkMode = true` → ソースからカーソルへ破線描画 → ターゲットクリック → RelType ダイアログ → 作成。ESC キャンセル。
-- 編集後: Nodes/Edges リストに直接追加 → レイアウト再実行 → GraphChanged
+**コンターマップ** (`Rendering/ContourMap.cs`):
+- `ContourMode.Relative` — データの min-max から自動正規化
+- `ContourMode.Absolute` — ユーザ定義の固定レンジ (min/max 指定)
+- 離散 N 分割 (2〜20 ステップ、デフォルト 5)
+- CVD 対応 4 プリセット (Viridis, Cividis, Inferno, Blue-Orange) + Custom
 
-**HitTestHelper 拡張**: エッジ hit test 追加 (点-線分距離、tolerance 6px)。
+**コンタープレビュー** (`Views/ContourPreview.cs`):
+- カスタム Control で N バンドを水平カラーバーとして描画
+- 閾値ラベル付き (相対: 0%〜100%, 絶対: 実スコア値)
 
-**新規**: `Services/GraphEditingService.cs`, `Views/AddNodeDialog.axaml` + `.axaml.cs`, `Views/AddRelationshipDialog.axaml` + `.axaml.cs`
-**変更**: `Program.cs`, `GraphCanvasViewModel.cs` (編集コマンド・LinkMode), `GraphCanvasPanel.cs` (右クリック・コンテキストメニュー), `GraphRenderer.cs` (LinkMode 破線), `HitTestHelper.cs` (エッジ hit test), `VisualEdge.cs` (`IsSelected`), `MainWindowViewModel.cs`
+**スコア可視化モード**: Color only / Color+Size / Size only を選択可能
 
-#### Phase 2b.3: ベクトル検索スコア可視化
+**ノード形状**: Circle / Square / Rounded Rect
+**リレーションシップスタイル**: Straight / Bezier / Polyline
 
-ベクトル検索結果にスコアを付けてグラフ上で視覚表現。
-
-**API 制約**:
-- `g.Knn()` → `GraphTraversal<NodeId>` (スコア非伝播)。スコア取得は `db.Vectors.KnnSearch()` 直接呼び出しのみ。
-- `VectorSearchResult` = `readonly record struct(EntityKind, long EntityId, float Score)`
-
-**スコア捕捉**: `MaterializeEnumerable` で `VectorSearchResult` 型を検出し、NodeId + Score を抽出。
-
-```csharp
-// QueryExecutionService.cs に分岐追加
-if (firstNonNull is VectorSearchResult)
-{
-    // nodeIds + scores 抽出 → QueryResult に VectorScores を付与
-}
-```
-
-**QueryResult 拡張**: `IReadOnlyDictionary<long, float>? VectorScores`
-**VisualNode 拡張**: `float? VectorScore`, `float? NormalizedScore` (0.0–1.0 min-max)
-
-**描画**: スコアがある場合:
-1. 不透明度: `0.3 + 0.7 × normalizedScore`
-2. 半径: `baseRadius × (0.7 + 0.6 × normalizedScore)`
-3. スコアバッジ: ノード下部に 9px で表示 (例: "0.92")
-
-**変更**: `QueryExecutionService.cs`, `QueryResult.cs`, `VisualNode.cs`, `GraphCanvasViewModel.cs`, `GraphRenderer.cs`
+全設定は JSON 永続化 (`settings.json` の `graphVisual` セクション)。
 
 #### Phase 2c.1: Roslyn IntelliSense
 
@@ -481,23 +447,29 @@ public static class PngExporter
 
 ### Phase 2 新規ファイル一覧
 
-| # | パス | 役割 |
-|---|------|------|
-| 1 | `Models/StudioSettings.cs` | 永続化 POCO |
-| 2 | `Services/SettingsService.cs` | JSON 読み書き + デバウンス保存 |
-| 3 | `ViewModels/FullTextSearchViewModel.cs` | FTS パネル VM |
-| 4 | `Models/FtsResultRow.cs` | FTS 結果行 |
-| 5 | `Views/FullTextSearchPanel.axaml` + `.axaml.cs` | FTS パネル UI |
-| 6 | `Services/SugiyamaLayoutService.cs` | 階層レイアウトアルゴリズム |
-| 7 | `ViewModels/QueryHistoryViewModel.cs` | 履歴パネル VM |
-| 8 | `Views/QueryHistoryPanel.axaml` + `.axaml.cs` | 履歴パネル UI |
-| 9 | `Services/GraphEditingService.cs` | Write tx ラッパー |
-| 10 | `Views/AddNodeDialog.axaml` + `.axaml.cs` | ノード追加ダイアログ |
-| 11 | `Views/AddRelationshipDialog.axaml` + `.axaml.cs` | Rel 追加ダイアログ |
-| 12 | `Services/IntellisenseService.cs` | Roslyn 補完エンジン |
-| 13 | `Models/RoslynCompletionData.cs` | ICompletionData 実装 |
-| 14 | `Export/SvgExporter.cs` | SVG 生成 |
-| 15 | `Export/PngExporter.cs` | PNG 生成 |
+| # | パス | Phase | 状態 |
+|---|------|-------|------|
+| 1 | `Models/StudioSettings.cs` | 2a.1 | ✅ |
+| 2 | `Services/SettingsService.cs` | 2a.1 | ✅ |
+| 3 | `ViewModels/FullTextSearchViewModel.cs` | 2a.2 | ✅ |
+| 4 | `Models/FtsResultRow.cs` | 2a.2 | ✅ |
+| 5 | `Views/FullTextSearchPanel.axaml` + `.axaml.cs` | 2a.2 | ✅ |
+| 6 | `Services/SugiyamaLayoutService.cs` | 2a.3 | ✅ |
+| 7 | `ViewModels/QueryHistoryViewModel.cs` | 2b.1 | ✅ |
+| 8 | `Views/QueryHistoryPanel.axaml` + `.axaml.cs` | 2b.1 | ✅ |
+| 9 | `Services/GraphEditingService.cs` | 2b.2 | ✅ |
+| 10 | `Views/AddNodeDialog.axaml` + `.axaml.cs` | 2b.2 | ✅ |
+| 11 | `Views/AddRelationshipDialog.axaml` + `.axaml.cs` | 2b.2 | ✅ |
+| 12 | `Models/GraphVisualSettings.cs` | 2b.4 | ✅ |
+| 13 | `Rendering/ContourMap.cs` | 2b.4 | ✅ |
+| 14 | `Views/ContourPreview.cs` | 2b.4 | ✅ |
+| 15 | `ViewModels/GraphSettingsViewModel.cs` | 2b.4 | ✅ |
+| 16 | `Views/SettingsPage.axaml` + `.axaml.cs` | 2b.4 | ✅ |
+| 17 | `Views/WorkspaceView.axaml` + `.axaml.cs` | 2b.4 | ✅ |
+| 18 | `Services/IntellisenseService.cs` | 2c.1 | |
+| 19 | `Models/RoslynCompletionData.cs` | 2c.1 | |
+| 20 | `Export/SvgExporter.cs` | 2c.2 | |
+| 21 | `Export/PngExporter.cs` | 2c.2 | |
 
 ## 検証方法
 

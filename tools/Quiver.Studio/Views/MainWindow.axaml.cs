@@ -41,9 +41,10 @@ public partial class MainWindow : Window
         Workspace.ExecuteRequested += () => _ = ExecuteQueryAsync();
     }
 
-    public void Initialize(SettingsService settingsService)
+    public void Initialize(SettingsService settingsService, IntellisenseService intellisenseService)
     {
         _settingsService = settingsService;
+        Workspace.SetIntellisenseService(intellisenseService);
         RestoreWindowState();
     }
 

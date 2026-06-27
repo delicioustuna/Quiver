@@ -5,6 +5,8 @@
         xmlns:views="using:Quiver.Studio.Views"
         x:Class="Quiver.Studio.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
+        ExtendClientAreaToDecorationsHint="True"
+        WindowDecorations="BorderOnly"
         Title="{Binding Title}"
         Width="1280" Height="800">
 

@@ -267,4 +267,25 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
     }
 
     public VisualNode? FindNodeById(NodeId id) => Nodes.Find(n => n.Id == id);
+
+    public string ExportSvg()
+        => Export.SvgExporter.Export(Nodes, Edges, Renderer.IsDarkTheme);
+
+    public void ExportPng(string outputPath)
+        => Export.PngExporter.Export(Nodes, Edges, Renderer.IsDarkTheme, Renderer.VisualSettings, outputPath);
+
+    public event Func<string, Task>? ExportSvgRequested;
+    public event Func<string, Task>? ExportPngRequested;
+
+    internal async Task InvokeExportSvgAsync()
+    {
+        if (ExportSvgRequested is not null)
+            await ExportSvgRequested.Invoke("svg");
+    }
+
+    internal async Task InvokeExportPngAsync()
+    {
+        if (ExportPngRequested is not null)
+            await ExportPngRequested.Invoke("png");
+    }
 }

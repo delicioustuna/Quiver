@@ -8,7 +8,7 @@
     <Panel>
         <views:GraphCanvasPanel x:Name="CanvasPanel" />
 
-        <!-- Layout toggle -->
+        <!-- Layout toggle + export -->
         <StackPanel Orientation="Horizontal"
                     Spacing="4"
                     HorizontalAlignment="Right"
@@ -19,17 +19,34 @@
             <ToggleButton IsChecked="{Binding !IsHierarchicalLayout}"
                           FontSize="11" Padding="8,2">
                 <i:SymbolIcon Symbol="IoT"
-                              FontSize="16" 
+                              FontSize="16"
                               VerticalAlignment="Center"
                               ToolTip.Tip="分散レイアウト" />
             </ToggleButton>
             <ToggleButton IsChecked="{Binding IsHierarchicalLayout}"
                           FontSize="11" Padding="8,2">
                 <i:SymbolIcon Symbol="Org"
-                              FontSize="16" 
-                              VerticalAlignment="Center" 
+                              FontSize="16"
+                              VerticalAlignment="Center"
                               ToolTip.Tip="階層レイアウト" />
             </ToggleButton>
+
+            <Border Width="1" Background="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" Margin="4,2"/>
+
+            <Button x:Name="ExportSvgButton" Click="OnExportSvgClick"
+                    FontSize="11" Padding="8,2"
+                    ToolTip.Tip="SVG エクスポート">
+                <i:SymbolIcon Symbol="ArrowDownload"
+                              FontSize="16"
+                              VerticalAlignment="Center" />
+            </Button>
+            <Button x:Name="ExportPngButton" Click="OnExportPngClick"
+                    FontSize="11" Padding="8,2"
+                    ToolTip.Tip="PNG エクスポート">
+                <i:SymbolIcon Symbol="Image"
+                              FontSize="16"
+                              VerticalAlignment="Center" />
+            </Button>
         </StackPanel>
 
         <TextBlock Text="クエリを実行してノードを返すとグラフが表示されます"

@@ -46,7 +46,9 @@ public partial class App : Application
             {
                 DataContext = _services!.GetRequiredService<MainWindowViewModel>(),
             };
-            mainWindow.Initialize(_services!.GetRequiredService<SettingsService>());
+            mainWindow.Initialize(
+                _services!.GetRequiredService<SettingsService>(),
+                _services!.GetRequiredService<IntellisenseService>());
             desktop.MainWindow = mainWindow;
         }
 
