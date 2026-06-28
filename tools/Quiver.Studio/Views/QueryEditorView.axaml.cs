@@ -1,8 +1,8 @@
 using Avalonia.Controls;
-using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Styling;
+using Avalonia.VisualTree;
 using AvaloniaEdit.CodeCompletion;
 using AvaloniaEdit.TextMate;
 using Quiver.Studio.Models;
@@ -12,20 +12,19 @@ using TextMateSharp.Grammars;
 
 namespace Quiver.Studio.Views;
 
-public partial class WorkspaceView : UserControl
+public partial class QueryEditorView : UserControl
 {
     private TextMate.Installation? _textMateInstallation;
     private IntellisenseService? _intellisenseService;
     private CompletionWindow? _completionWindow;
     private CancellationTokenSource? _completionCts;
 
-    public WorkspaceView()
+    public QueryEditorView()
     {
         InitializeComponent();
 
         QueryTextEditor.Text = "// Globals: db, tx (read-only), g, schema\n"
                              + "// Press F5 to execute\n\n"
-                             + "// Graph view: queries returning NodeId trigger the Graph tab\n"
                              + "g.Nodes().ToList()";
 
         ApplyTextMateTheme(isDark: false);
@@ -36,15 +35,18 @@ public partial class WorkspaceView : UserControl
 
         QueryTextEditor.TextArea.TextEntered += OnTextEntered;
         QueryTextEditor.TextArea.KeyDown += OnEditorKeyDown;
+
+        Loaded += (_, _) =>
+        {
+            this.FindAncestorOfType<MainWindow>()?.RegisterQueryEditor(this);
+        };
     }
 
-    public void SetIntellisenseService(IntellisenseService service)
-    {
+    public void SetIntellisenseService(IntellisenseService service) =>
         _intellisenseService = service;
-    }
 
-    public void SetQueryText(string text) => QueryTextEditor.Text = text;
     public string GetQueryText() => QueryTextEditor.Text;
+    public void SetQueryText(string text) => QueryTextEditor.Text = text;
 
     public void ApplyTextMateTheme(bool isDark)
     {
@@ -62,27 +64,10 @@ public partial class WorkspaceView : UserControl
         }
     }
 
-    public void RebuildResultColumns()
-    {
-        if (DataContext is not MainWindowViewModel vm) return;
-
-        ResultsGrid.Columns.Clear();
-        for (var i = 0; i < vm.Results.Columns.Count; i++)
-        {
-            ResultsGrid.Columns.Add(new DataGridTextColumn
-            {
-                Header = vm.Results.Columns[i],
-                Binding = new Binding($"[{i}]"),
-            });
-        }
-    }
-
-    private void OnExecuteClick(object? sender, RoutedEventArgs e)
-    {
-        ExecuteRequested?.Invoke();
-    }
-
     public event Action? ExecuteRequested;
+
+    private void OnExecuteClick(object? sender, RoutedEventArgs e) =>
+        ExecuteRequested?.Invoke();
 
     private void OnTextEntered(object? sender, TextInputEventArgs e)
     {

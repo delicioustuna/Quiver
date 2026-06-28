@@ -46,85 +46,111 @@
       </xsd:complexType>
     </xsd:element>
   </xsd:schema>
-  <resheader name="resmimetype">
-    <value>text/microsoft-resx</value>
-  </resheader>
-  <resheader name="version">
-    <value>2.0</value>
-  </resheader>
-  <resheader name="reader">
-    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
-  </resheader>
-  <resheader name="writer">
-    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
-  </resheader>
-  <data name="AppTitle" xml:space="preserve">
-    <value>Quiver Studio</value>
-  </data>
-  <data name="File" xml:space="preserve">
-    <value>File</value>
-  </data>
-  <data name="Open" xml:space="preserve">
-    <value>Open</value>
-  </data>
-  <data name="Save" xml:space="preserve">
-    <value>Save</value>
-  </data>
-  <data name="Exit" xml:space="preserve">
-    <value>Exit</value>
-  </data>
-  <data name="Query" xml:space="preserve">
-    <value>Query</value>
-  </data>
-  <data name="Execute" xml:space="preserve">
-    <value>Execute</value>
-  </data>
-  <data name="Clear" xml:space="preserve">
-    <value>Clear</value>
-  </data>
-  <data name="View" xml:space="preserve">
-    <value>View</value>
-  </data>
-  <data name="Results" xml:space="preserve">
-    <value>Results</value>
-  </data>
-  <data name="Schema" xml:space="preserve">
-    <value>Schema</value>
-  </data>
-  <data name="Properties" xml:space="preserve">
-    <value>Properties</value>
-  </data>
-  <data name="Search" xml:space="preserve">
-    <value>Search</value>
-  </data>
-  <data name="History" xml:space="preserve">
-    <value>History</value>
-  </data>
-  <data name="AddNode" xml:space="preserve">
-    <value>Add Node</value>
-  </data>
-  <data name="AddRelationship" xml:space="preserve">
-    <value>Add Relationship</value>
-  </data>
-  <data name="Delete" xml:space="preserve">
-    <value>Delete</value>
-  </data>
-  <data name="NodeLabel" xml:space="preserve">
-    <value>Node Label</value>
-  </data>
-  <data name="RelationshipType" xml:space="preserve">
-    <value>Relationship Type</value>
-  </data>
-  <data name="From" xml:space="preserve">
-    <value>From</value>
-  </data>
-  <data name="To" xml:space="preserve">
-    <value>To</value>
-  </data>
-  <data name="OK" xml:space="preserve">
-    <value>OK</value>
-  </data>
-  <data name="Cancel" xml:space="preserve">
-    <value>Cancel</value>
-  </data>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+
+  <!-- App -->
+  <data name="AppTitle" xml:space="preserve"><value>Quiver Studio</value></data>
+
+  <!-- Menu: File -->
+  <data name="Menu_File" xml:space="preserve"><value>File</value></data>
+  <data name="Menu_OpenDatabase" xml:space="preserve"><value>Open Database...</value></data>
+  <data name="Menu_CloseDatabase" xml:space="preserve"><value>Close Database</value></data>
+  <data name="Menu_RecentFiles" xml:space="preserve"><value>Recent Files</value></data>
+  <data name="Menu_Exit" xml:space="preserve"><value>Exit</value></data>
+
+  <!-- Menu: View -->
+  <data name="Menu_View" xml:space="preserve"><value>View</value></data>
+
+  <!-- Menu: Query -->
+  <data name="Menu_Query" xml:space="preserve"><value>Query</value></data>
+  <data name="Menu_Execute" xml:space="preserve"><value>Execute</value></data>
+  <data name="Menu_Clear" xml:space="preserve"><value>Clear</value></data>
+
+  <!-- Panel titles -->
+  <data name="Panel_Schema" xml:space="preserve"><value>Schema</value></data>
+  <data name="Panel_Statistics" xml:space="preserve"><value>Statistics</value></data>
+  <data name="Panel_QueryEditor" xml:space="preserve"><value>Query</value></data>
+  <data name="Panel_FullTextSearch" xml:space="preserve"><value>Full-Text Search</value></data>
+  <data name="Panel_Settings" xml:space="preserve"><value>Settings</value></data>
+  <data name="Panel_Properties" xml:space="preserve"><value>Properties</value></data>
+  <data name="Panel_Results" xml:space="preserve"><value>Results</value></data>
+  <data name="Panel_Graph" xml:space="preserve"><value>Graph</value></data>
+  <data name="Panel_Output" xml:space="preserve"><value>Output</value></data>
+  <data name="Panel_History" xml:space="preserve"><value>History</value></data>
+
+  <!-- Connection -->
+  <data name="Connection" xml:space="preserve"><value>Connection</value></data>
+  <data name="Disconnected" xml:space="preserve"><value>Disconnected</value></data>
+  <data name="OpenDatabasePrompt" xml:space="preserve"><value>Open a database to browse schema</value></data>
+  <data name="Close" xml:space="preserve"><value>Close</value></data>
+
+  <!-- Schema -->
+  <data name="Schema" xml:space="preserve"><value>Schema</value></data>
+
+  <!-- Stats labels -->
+  <data name="Stats_Nodes" xml:space="preserve"><value>Nodes</value></data>
+  <data name="Stats_Relationships" xml:space="preserve"><value>Relationships</value></data>
+  <data name="Stats_Properties" xml:space="preserve"><value>Properties</value></data>
+  <data name="Stats_DataFile" xml:space="preserve"><value>Data File</value></data>
+  <data name="Stats_WAL" xml:space="preserve"><value>WAL</value></data>
+
+  <!-- Query Editor -->
+  <data name="ExecuteF5" xml:space="preserve"><value>Execute (F5)</value></data>
+  <data name="QueryEditorPlaceholder" xml:space="preserve"><value>Execute a query to see results</value></data>
+  <data name="GraphPlaceholder" xml:space="preserve"><value>Execute a query returning nodes to display a graph</value></data>
+
+  <!-- Results -->
+  <data name="CopyCsv" xml:space="preserve"><value>CSV Copy</value></data>
+  <data name="CopyJson" xml:space="preserve"><value>JSON Copy</value></data>
+
+  <!-- Status bar -->
+  <data name="Status_Zoom" xml:space="preserve"><value>Zoom: {0:P0}</value></data>
+  <data name="Status_GraphInfo" xml:space="preserve"><value>Graph: {0} nodes, {1} edges</value></data>
+
+  <!-- Dialogs -->
+  <data name="AddNode" xml:space="preserve"><value>Add Node</value></data>
+  <data name="AddRelationship" xml:space="preserve"><value>Add Relationship</value></data>
+  <data name="Delete" xml:space="preserve"><value>Delete</value></data>
+  <data name="NodeLabel" xml:space="preserve"><value>Node Label</value></data>
+  <data name="RelationshipType" xml:space="preserve"><value>Relationship Type</value></data>
+  <data name="OK" xml:space="preserve"><value>OK</value></data>
+  <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Error" xml:space="preserve"><value>Error</value></data>
+  <data name="ErrorOpenDatabase" xml:space="preserve"><value>Failed to open database:</value></data>
+
+  <!-- Settings -->
+  <data name="Settings_ScoreVisualization" xml:space="preserve"><value>Score Visualization</value></data>
+  <data name="Settings_ScoreVizDesc" xml:space="preserve"><value>How vector search scores are represented on nodes.</value></data>
+  <data name="Settings_DisplayMode" xml:space="preserve"><value>Display Mode</value></data>
+  <data name="Settings_ContourMap" xml:space="preserve"><value>Contour Map</value></data>
+  <data name="Settings_ContourDesc" xml:space="preserve"><value>Score-to-color mapping with discrete bands.</value></data>
+  <data name="Settings_EvaluationMode" xml:space="preserve"><value>Evaluation Mode</value></data>
+  <data name="Settings_ScoreRange" xml:space="preserve"><value>Score Range</value></data>
+  <data name="Settings_Min" xml:space="preserve"><value>Min</value></data>
+  <data name="Settings_Max" xml:space="preserve"><value>Max</value></data>
+  <data name="Settings_ColorPalette" xml:space="preserve"><value>Color Palette</value></data>
+  <data name="Settings_DiscreteSteps" xml:space="preserve"><value>Discrete Steps: {0}</value></data>
+  <data name="Settings_CustomPalette" xml:space="preserve"><value>Custom Palette (comma-separated #RRGGBB)</value></data>
+  <data name="Settings_Preview" xml:space="preserve"><value>Preview</value></data>
+  <data name="Settings_NodeRelationship" xml:space="preserve"><value>Node &amp; Relationship</value></data>
+  <data name="Settings_NodeRelDesc" xml:space="preserve"><value>Visual appearance of graph elements.</value></data>
+  <data name="Settings_NodeShape" xml:space="preserve"><value>Node Shape</value></data>
+  <data name="Settings_RelationshipStyle" xml:space="preserve"><value>Relationship Style</value></data>
+  <data name="Settings_Language" xml:space="preserve"><value>Language</value></data>
+  <data name="Settings_LanguageDesc" xml:space="preserve"><value>Display language for the application.</value></data>
+  <data name="Settings_LanguageAuto" xml:space="preserve"><value>Auto (System)</value></data>
+  <data name="Settings_RestartRequired" xml:space="preserve"><value>Restart required to apply language change.</value></data>
+
+  <!-- Layout toggle -->
+  <data name="Layout_Force" xml:space="preserve"><value>Force Layout</value></data>
+  <data name="Layout_Hierarchy" xml:space="preserve"><value>Hierarchy Layout</value></data>
+  <data name="Export_SVG" xml:space="preserve"><value>Export SVG</value></data>
+  <data name="Export_PNG" xml:space="preserve"><value>Export PNG</value></data>
+
+  <!-- Theme -->
+  <data name="Theme_Light" xml:space="preserve"><value>Light</value></data>
+  <data name="Theme_Dark" xml:space="preserve"><value>Dark</value></data>
 </root>

@@ -1,7 +1,9 @@
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Dock.Model.Controls;
 using Microsoft.Extensions.Logging;
+using Quiver.Studio.Docking;
 using Quiver.Studio.Models;
 using Quiver.Studio.Services;
 using R3;
@@ -33,10 +35,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private IReadOnlyList<RecentFileEntry> _recentFiles = [];
 
     [ObservableProperty]
-    private int _queryModeIndex;
+    private IRootDock? _dockLayout;
 
-    [ObservableProperty]
-    private bool _isSettingsOpen;
+    public StudioDockFactory? DockFactory { get; set; }
 
     public string Title => "Quiver Studio";
 
@@ -57,9 +58,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public QueryHistoryViewModel QueryHistory { get; }
 
     public GraphSettingsViewModel GraphSettings { get; }
-
-    public bool IsTraversalMode => QueryModeIndex == 0;
-    public bool IsFullTextMode => QueryModeIndex == 1;
 
     public MainWindowViewModel(
         DatabaseService databaseService,
@@ -103,12 +101,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             })),
             _db.FilePath.Subscribe(v => Dispatcher.UIThread.Post(() => FilePath = v)),
             _db.Statistics.Subscribe(v => Dispatcher.UIThread.Post(() => Statistics = v)));
-    }
-
-    partial void OnQueryModeIndexChanged(int value)
-    {
-        OnPropertyChanged(nameof(IsTraversalMode));
-        OnPropertyChanged(nameof(IsFullTextMode));
     }
 
     private void OnResultReady(QueryResult result)

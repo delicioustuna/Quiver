@@ -21,6 +21,7 @@
     <PackageReference Include="AvaloniaEdit.TextMate" Version="12.*" />
     <PackageReference Include="Dock.Avalonia" Version="12.0.0.2" />
     <PackageReference Include="Dock.Avalonia.Themes.Fluent" Version="12.0.0.2" />
+    <PackageReference Include="Dock.Model.Inpc" Version="12.0.0.2" />
     <PackageReference Include="FluentIcons.Avalonia" Version="2.1.330" />
     <PackageReference Include="TextMateSharp.Grammars" Version="2.*" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />

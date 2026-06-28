@@ -1,9 +1,169 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:themes="using:Dock.Avalonia.Themes.Fluent"
+             xmlns:conv="using:Quiver.Studio.Converters"
+             xmlns:dock="using:Quiver.Studio.Docking"
+             xmlns:dockInpc="using:Dock.Model.Inpc.Controls"
+             xmlns:views="using:Quiver.Studio.Views"
+             xmlns:res="using:Quiver.Studio.Resources"
              x:Class="Quiver.Studio.App">
     <Application.Styles>
         <FluentTheme />
+        <themes:DockFluentTheme DensityStyle="Compact" />
         <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
         <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
     </Application.Styles>
+
+    <Application.Resources>
+        <conv:FileSizeConverter x:Key="FileSizeConverter" />
+    </Application.Resources>
+
+    <Application.DataTemplates>
+
+        <!--
+            Dock.Avalonia renders dockable content via DeferredContentControl Content="{Binding}",
+            which sets the dockable object itself (Document/Tool) as content. Since Dock.Model.Inpc's
+            Document/Tool don't implement IDocumentContent/IToolContent, the theme's built-in templates
+            won't match — so we bridge: match the INPC type, then delegate to Context where the actual
+            view-model wrapper lives. The per-context DataTemplates below take over from there.
+            These must be at Application level (not Window) so floating/detached windows can resolve them.
+        -->
+        <DataTemplate DataType="{x:Type dockInpc:Document}">
+            <ContentControl Content="{Binding Context}" />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type dockInpc:Tool}">
+            <ContentControl Content="{Binding Context}" />
+        </DataTemplate>
+
+        <!-- Schema Browser -->
+        <DataTemplate DataType="{x:Type dock:SchemaToolModel}">
+            <DockPanel>
+                <TreeView ItemsSource="{Binding ViewModel.RootNodes}"
+                          Margin="4,0"
+                          IsVisible="{Binding !!ViewModel.RootNodes.Count}">
+                    <TreeView.ItemTemplate>
+                        <TreeDataTemplate ItemsSource="{Binding Children}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="{Binding Icon}"
+                                           FontSize="12"
+                                           VerticalAlignment="Center"
+                                           Width="16"
+                                           TextAlignment="Center" />
+                                <TextBlock Text="{Binding Title}"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding Detail}"
+                                           FontSize="11"
+                                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                           VerticalAlignment="Center"
+                                           IsVisible="{Binding Detail, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                            </StackPanel>
+                        </TreeDataTemplate>
+                    </TreeView.ItemTemplate>
+                </TreeView>
+
+                <TextBlock Text="{x:Static res:Strings.OpenDatabasePrompt}"
+                           FontSize="12"
+                           HorizontalAlignment="Center"
+                           Margin="12,20"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                           IsVisible="{Binding !ViewModel.RootNodes.Count}" />
+            </DockPanel>
+        </DataTemplate>
+
+        <!-- Statistics -->
+        <DataTemplate DataType="{x:Type dock:StatsToolModel}">
+            <ScrollViewer Padding="8">
+                <StackPanel Spacing="8">
+                    <StackPanel Spacing="6"
+                                IsVisible="{Binding ViewModel.IsConnected}">
+                        <TextBlock Text="{Binding ViewModel.FilePath}"
+                                   FontSize="11"
+                                   TextTrimming="CharacterEllipsis"
+                                   ToolTip.Tip="{Binding ViewModel.FilePath}"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+
+                        <Border Background="{DynamicResource SystemControlBackgroundChromeLowBrush}"
+                                CornerRadius="4"
+                                Padding="8,6"
+                                IsVisible="{Binding ViewModel.Statistics, Converter={x:Static ObjectConverters.IsNotNull}}">
+                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{x:Static res:Strings.Stats_Nodes}" FontSize="11" />
+                                <TextBlock Grid.Row="0" Grid.Column="1" FontSize="11"
+                                           Text="{Binding ViewModel.Statistics.NodeCount, StringFormat='{}{0:N0}'}" />
+
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="{x:Static res:Strings.Stats_Relationships}" FontSize="11" />
+                                <TextBlock Grid.Row="1" Grid.Column="1" FontSize="11"
+                                           Text="{Binding ViewModel.Statistics.RelationshipCount, StringFormat='{}{0:N0}'}" />
+
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="{x:Static res:Strings.Stats_Properties}" FontSize="11" />
+                                <TextBlock Grid.Row="2" Grid.Column="1" FontSize="11"
+                                           Text="{Binding ViewModel.Statistics.PropertyCount, StringFormat='{}{0:N0}'}" />
+
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="{x:Static res:Strings.Stats_DataFile}" FontSize="11" />
+                                <TextBlock Grid.Row="3" Grid.Column="1" FontSize="11"
+                                           Text="{Binding ViewModel.Statistics.DataFileSize, Converter={StaticResource FileSizeConverter}}" />
+
+                                <TextBlock Grid.Row="4" Grid.Column="0" Text="{x:Static res:Strings.Stats_WAL}" FontSize="11" />
+                                <TextBlock Grid.Row="4" Grid.Column="1" FontSize="11"
+                                           Text="{Binding ViewModel.Statistics.WalFileSize, Converter={StaticResource FileSizeConverter}}" />
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+
+                    <TextBlock Text="{x:Static res:Strings.Disconnected}"
+                               FontSize="12"
+                               HorizontalAlignment="Center"
+                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                               IsVisible="{Binding !ViewModel.IsConnected}" />
+                </StackPanel>
+            </ScrollViewer>
+        </DataTemplate>
+
+        <!-- Query Editor -->
+        <DataTemplate DataType="{x:Type dock:QueryEditorDocModel}">
+            <views:QueryEditorView DataContext="{Binding ViewModel}" />
+        </DataTemplate>
+
+        <!-- Full-text Search -->
+        <DataTemplate DataType="{x:Type dock:FtsDocModel}">
+            <views:FullTextSearchPanel DataContext="{Binding ViewModel}" />
+        </DataTemplate>
+
+        <!-- Settings -->
+        <DataTemplate DataType="{x:Type dock:SettingsDocModel}">
+            <views:SettingsPage DataContext="{Binding ViewModel}" />
+        </DataTemplate>
+
+        <!-- Results DataGrid -->
+        <DataTemplate DataType="{x:Type dock:ResultsToolModel}">
+            <views:ResultsView DataContext="{Binding ViewModel}" />
+        </DataTemplate>
+
+        <!-- Graph Canvas -->
+        <DataTemplate DataType="{x:Type dock:GraphToolModel}">
+            <views:GraphCanvas DataContext="{Binding ViewModel}" />
+        </DataTemplate>
+
+        <!-- Output Log -->
+        <DataTemplate DataType="{x:Type dock:OutputToolModel}">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto">
+                <TextBlock Text="{Binding ViewModel.Output}"
+                           FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                           FontSize="12"
+                           Padding="8"
+                           TextWrapping="NoWrap" />
+            </ScrollViewer>
+        </DataTemplate>
+
+        <!-- Query History -->
+        <DataTemplate DataType="{x:Type dock:HistoryToolModel}">
+            <views:QueryHistoryPanel DataContext="{Binding ViewModel}" />
+        </DataTemplate>
+
+        <!-- Property Inspector -->
+        <DataTemplate DataType="{x:Type dock:PropertiesToolModel}">
+            <views:PropertyInspector DataContext="{Binding ViewModel}" />
+        </DataTemplate>
+
+    </Application.DataTemplates>
 </Application>

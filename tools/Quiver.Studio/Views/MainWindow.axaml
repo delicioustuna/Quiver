@@ -1,34 +1,94 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Quiver.Studio.ViewModels"
-        xmlns:conv="using:Quiver.Studio.Converters"
-        xmlns:views="using:Quiver.Studio.Views"
+        xmlns:dockCtrl="using:Dock.Avalonia.Controls"
+        xmlns:res="using:Quiver.Studio.Resources"
         x:Class="Quiver.Studio.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        ExtendClientAreaToDecorationsHint="True"
-        WindowDecorations="BorderOnly"
         Title="{Binding Title}"
         Width="1280" Height="800">
 
-    <Window.Resources>
-        <conv:FileSizeConverter x:Key="FileSizeConverter" />
-    </Window.Resources>
+    <DockPanel>
+        <!-- Menu Bar -->
+        <Menu DockPanel.Dock="Top">
+            <!-- File -->
+            <MenuItem Header="{x:Static res:Strings.Menu_File}">
+                <MenuItem Header="{x:Static res:Strings.Menu_OpenDatabase}"
+                          Click="OnOpenDatabaseClick"
+                          InputGesture="Ctrl+O" />
+                <MenuItem Header="{x:Static res:Strings.Menu_CloseDatabase}"
+                          Command="{Binding CloseDatabaseCommand}"
+                          InputGesture="Ctrl+W" />
+                <Separator />
+                <MenuItem Header="{x:Static res:Strings.Menu_RecentFiles}"
+                          x:Name="RecentFilesMenu" />
+                <Separator />
+                <MenuItem Header="{x:Static res:Strings.Menu_Exit}"
+                          Click="OnExitClick" />
+            </MenuItem>
 
-<DockPanel>
+            <!-- View -->
+            <MenuItem Header="{x:Static res:Strings.Menu_View}"
+                      SubmenuOpened="OnViewMenuOpened">
+                <MenuItem Header="{x:Static res:Strings.Panel_Schema}"
+                          Click="OnTogglePanelClick"
+                          Tag="schema"
+                          Icon="{x:Null}" />
+                <MenuItem Header="{x:Static res:Strings.Panel_Statistics}"
+                          Click="OnTogglePanelClick"
+                          Tag="stats"
+                          Icon="{x:Null}" />
+                <MenuItem Header="{x:Static res:Strings.Panel_Properties}"
+                          Click="OnTogglePanelClick"
+                          Tag="properties"
+                          Icon="{x:Null}" />
+                <Separator />
+                <MenuItem Header="{x:Static res:Strings.Panel_QueryEditor}"
+                          Click="OnTogglePanelClick"
+                          Tag="queryEditor"
+                          Icon="{x:Null}" />
+                <MenuItem Header="{x:Static res:Strings.Panel_FullTextSearch}"
+                          Click="OnTogglePanelClick"
+                          Tag="fts"
+                          Icon="{x:Null}" />
+                <Separator />
+                <MenuItem Header="{x:Static res:Strings.Panel_Results}"
+                          Click="OnTogglePanelClick"
+                          Tag="results"
+                          Icon="{x:Null}" />
+                <MenuItem Header="{x:Static res:Strings.Panel_Graph}"
+                          Click="OnTogglePanelClick"
+                          Tag="graph"
+                          Icon="{x:Null}" />
+                <MenuItem Header="{x:Static res:Strings.Panel_Output}"
+                          Click="OnTogglePanelClick"
+                          Tag="output"
+                          Icon="{x:Null}" />
+                <MenuItem Header="{x:Static res:Strings.Panel_History}"
+                          Click="OnTogglePanelClick"
+                          Tag="history"
+                          Icon="{x:Null}" />
+            </MenuItem>
+
+            <!-- Query -->
+            <MenuItem Header="{x:Static res:Strings.Menu_Query}">
+                <MenuItem Header="{x:Static res:Strings.Menu_Execute}"
+                          Click="OnExecuteClick"
+                          InputGesture="F5" />
+            </MenuItem>
+        </Menu>
+
         <!-- Status Bar -->
         <Border DockPanel.Dock="Bottom"
                 Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
                 Padding="8,4">
             <Grid ColumnDefinitions="*,Auto">
-                <!-- Left: connection + query status -->
                 <StackPanel Grid.Column="0"
                             Orientation="Horizontal"
                             Spacing="12">
-                    <StackPanel Orientation="Horizontal" Spacing="4"
-                                IsVisible="{Binding !IsConnected}">
-                        <TextBlock FontSize="12" Text="Disconnected"
-                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
-                    </StackPanel>
+                    <TextBlock FontSize="12" Text="{x:Static res:Strings.Disconnected}"
+                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                               IsVisible="{Binding !IsConnected}" />
                     <StackPanel Orientation="Horizontal" Spacing="12"
                                 IsVisible="{Binding IsConnected}">
                         <TextBlock FontSize="12"
@@ -56,7 +116,6 @@
                     </StackPanel>
                 </StackPanel>
 
-                <!-- Right: zoom + theme + settings -->
                 <StackPanel Grid.Column="1"
                             Orientation="Horizontal"
                             Spacing="12">
@@ -71,158 +130,12 @@
                             FontSize="11"
                             Padding="6,1"
                             VerticalAlignment="Center" />
-                    <TextBlock FontSize="12" Text="|"
-                               Foreground="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
-                    <Button Click="OnSettingsClick"
-                            FontSize="11"
-                            Padding="6,1"
-                            VerticalAlignment="Center">
-                        <StackPanel Orientation="Horizontal" Spacing="4">
-                            <TextBlock Text="&#x2699;" FontSize="14" VerticalAlignment="Center" />
-                            <TextBlock Text="Settings" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- Page container: Workspace or Settings -->
-        <Panel>
-            <!-- Workspace (sidebar + content) -->
-            <DockPanel IsVisible="{Binding !IsSettingsOpen}">
-                <!-- Left Sidebar -->
-                <Border DockPanel.Dock="Left"
-                        Width="300"
-                        BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
-                        BorderThickness="0,0,1,0">
-                    <DockPanel>
-                        <!-- Connection Panel -->
-                        <Border DockPanel.Dock="Top"
-                                Padding="12"
-                                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
-                                BorderThickness="0,0,0,1">
-                            <StackPanel Spacing="8">
-                                <TextBlock Text="Connection"
-                                           FontWeight="SemiBold"
-                                           FontSize="14" />
-
-                                <!-- Disconnected state -->
-                                <StackPanel Spacing="6"
-                                            IsVisible="{Binding !IsConnected}">
-                                    <Button Content="Open Database..."
-                                            HorizontalAlignment="Stretch"
-                                            Click="OnOpenDatabaseClick" />
-                                </StackPanel>
-
-                                <!-- Connected state -->
-                                <StackPanel Spacing="6"
-                                            IsVisible="{Binding IsConnected}">
-                                    <TextBlock Text="{Binding FilePath}"
-                                               FontSize="11"
-                                               TextTrimming="CharacterEllipsis"
-                                               ToolTip.Tip="{Binding FilePath}"
-                                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
-
-                                    <!-- Stats -->
-                                    <Border Background="{DynamicResource SystemControlBackgroundChromeLowBrush}"
-                                            CornerRadius="4"
-                                            Padding="8,6"
-                                            IsVisible="{Binding Statistics, Converter={x:Static ObjectConverters.IsNotNull}}">
-                                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
-                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Nodes" FontSize="11" />
-                                            <TextBlock Grid.Row="0" Grid.Column="1" FontSize="11"
-                                                       Text="{Binding Statistics.NodeCount, StringFormat='{}{0:N0}'}" />
-
-                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Relationships" FontSize="11" />
-                                            <TextBlock Grid.Row="1" Grid.Column="1" FontSize="11"
-                                                       Text="{Binding Statistics.RelationshipCount, StringFormat='{}{0:N0}'}" />
-
-                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Properties" FontSize="11" />
-                                            <TextBlock Grid.Row="2" Grid.Column="1" FontSize="11"
-                                                       Text="{Binding Statistics.PropertyCount, StringFormat='{}{0:N0}'}" />
-
-                                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Data File" FontSize="11" />
-                                            <TextBlock Grid.Row="3" Grid.Column="1" FontSize="11"
-                                                       Text="{Binding Statistics.DataFileSize, Converter={StaticResource FileSizeConverter}}" />
-
-                                            <TextBlock Grid.Row="4" Grid.Column="0" Text="WAL" FontSize="11" />
-                                            <TextBlock Grid.Row="4" Grid.Column="1" FontSize="11"
-                                                       Text="{Binding Statistics.WalFileSize, Converter={StaticResource FileSizeConverter}}" />
-                                        </Grid>
-                                    </Border>
-
-                                    <Button Content="Close"
-                                            HorizontalAlignment="Stretch"
-                                            Command="{Binding CloseDatabaseCommand}" />
-                                </StackPanel>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- Schema Browser -->
-                        <DockPanel Margin="0">
-                            <TextBlock DockPanel.Dock="Top"
-                                       Text="Schema"
-                                       FontWeight="SemiBold"
-                                       FontSize="14"
-                                       Margin="12,10,12,6" />
-
-                            <TreeView ItemsSource="{Binding SchemaBrowser.RootNodes}"
-                                      Margin="4,0"
-                                      IsVisible="{Binding IsConnected}">
-                                <TreeView.ItemTemplate>
-                                    <TreeDataTemplate ItemsSource="{Binding Children}">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <TextBlock Text="{Binding Icon}"
-                                                       FontSize="12"
-                                                       VerticalAlignment="Center"
-                                                       Width="16"
-                                                       TextAlignment="Center" />
-                                            <TextBlock Text="{Binding Title}"
-                                                       VerticalAlignment="Center" />
-                                            <TextBlock Text="{Binding Detail}"
-                                                       FontSize="11"
-                                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
-                                                       VerticalAlignment="Center"
-                                                       IsVisible="{Binding Detail, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                                        </StackPanel>
-                                    </TreeDataTemplate>
-                                </TreeView.ItemTemplate>
-                            </TreeView>
-
-                            <TextBlock Text="Open a database to browse schema"
-                                       FontSize="12"
-                                       HorizontalAlignment="Center"
-                                       Margin="12,20"
-                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
-                                       IsVisible="{Binding !IsConnected}" />
-                        </DockPanel>
-                    </DockPanel>
-                </Border>
-
-                <!-- Right Sidebar: Property Inspector -->
-                <Border DockPanel.Dock="Right"
-                        Width="260"
-                        BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
-                        BorderThickness="1,0,0,0"
-                        IsVisible="{Binding PropertyInspector.HasSelection}">
-                    <DockPanel>
-                        <TextBlock DockPanel.Dock="Top"
-                                   Text="Properties"
-                                   FontWeight="SemiBold"
-                                   FontSize="14"
-                                   Margin="12,10,12,6" />
-                        <views:PropertyInspector DataContext="{Binding PropertyInspector}" />
-                    </DockPanel>
-                </Border>
-
-                <!-- Main Content -->
-                <views:WorkspaceView x:Name="Workspace" />
-            </DockPanel>
-
-            <!-- Settings Page (overlays workspace) -->
-            <views:SettingsPage x:Name="SettingsView"
-                                DataContext="{Binding GraphSettings}"
-                                IsVisible="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).IsSettingsOpen}" />
-        </Panel>
+        <!-- Dock Area -->
+        <dockCtrl:DockControl x:Name="DockControl"
+                              Layout="{Binding DockLayout}" />
     </DockPanel>
 </Window>

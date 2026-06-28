@@ -4,6 +4,8 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
+using Quiver.Studio.Docking;
+using Quiver.Studio.Models;
 using Quiver.Studio.Services;
 using Quiver.Studio.ViewModels;
 
@@ -12,112 +14,169 @@ namespace Quiver.Studio.Views;
 public partial class MainWindow : Window
 {
     private SettingsService? _settingsService;
+    private IntellisenseService? _intellisenseService;
+    private StudioDockFactory? _dockFactory;
+    private QueryEditorView? _queryEditor;
 
     public MainWindow()
     {
         InitializeComponent();
 
-        SettingsView.CloseRequested += () =>
-        {
-            if (DataContext is MainWindowViewModel vm)
-                vm.IsSettingsOpen = false;
-        };
-
         DataContextChanged += (_, _) =>
         {
-            if (DataContext is MainWindowViewModel vm)
-            {
-                vm.Results.TopLevel = this;
-                vm.Results.PropertyChanged += OnResultsPropertyChanged;
-                vm.PropertyChanged += OnViewModelPropertyChanged;
-                vm.QueryHistory.LoadRequested += OnHistoryLoadRequested;
+            if (DataContext is not MainWindowViewModel vm) return;
 
-                Workspace.ApplyTextMateTheme(vm.IsDarkTheme);
-                if (Application.Current is not null && vm.IsDarkTheme)
-                    Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
-            }
+            vm.Results.TopLevel = this;
+            vm.PropertyChanged += OnViewModelPropertyChanged;
+            vm.QueryHistory.LoadRequested += OnHistoryLoadRequested;
+
+            // Order matters: Factory before Layout, InitLayout before binding.
+            // DockControl.Layout fires Initialize() which requires Factory to be set.
+            _dockFactory = new StudioDockFactory();
+            var layout = _dockFactory.CreateLayout(vm);
+            _dockFactory.InitLayout(layout);
+
+            DockControl.Factory = _dockFactory;
+            vm.DockFactory = _dockFactory;
+            vm.DockLayout = layout;
+
+            RebuildRecentFilesMenu();
+
+            if (Application.Current is not null && vm.IsDarkTheme)
+                Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
         };
-
-        Workspace.ExecuteRequested += () => _ = ExecuteQueryAsync();
     }
 
     public void Initialize(SettingsService settingsService, IntellisenseService intellisenseService)
     {
         _settingsService = settingsService;
-        Workspace.SetIntellisenseService(intellisenseService);
+        _intellisenseService = intellisenseService;
         RestoreWindowState();
     }
 
-    private void RestoreWindowState()
+    public void RegisterQueryEditor(QueryEditorView editor)
     {
-        var ws = _settingsService?.Settings.WindowState;
-        if (ws is null) return;
-
-        if (ws.IsMaximized)
-        {
-            WindowState = WindowState.Maximized;
-        }
-        else
-        {
-            Width = ws.Width;
-            Height = ws.Height;
-            Position = new PixelPoint(ws.X, ws.Y);
-        }
-    }
-
-    private void SaveWindowState()
-    {
-        if (_settingsService is null) return;
-
-        _settingsService.Settings.WindowState = new Models.WindowStateData
-        {
-            X = Position.X,
-            Y = Position.Y,
-            Width = (int)ClientSize.Width,
-            Height = (int)ClientSize.Height,
-            IsMaximized = WindowState == WindowState.Maximized,
-        };
-        _settingsService.SaveImmediate();
-    }
-
-    protected override void OnClosing(WindowClosingEventArgs e)
-    {
-        SaveWindowState();
-        base.OnClosing(e);
+        _queryEditor = editor;
+        if (_intellisenseService is not null)
+            editor.SetIntellisenseService(_intellisenseService);
+        editor.ExecuteRequested += () => _ = ExecuteQueryAsync();
     }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(MainWindowViewModel.IsDarkTheme)) return;
-        if (DataContext is not MainWindowViewModel vm) return;
+        switch (e.PropertyName)
+        {
+            case nameof(MainWindowViewModel.IsDarkTheme):
+                if (DataContext is MainWindowViewModel vm)
+                {
+                    var variant = vm.IsDarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
+                    if (Application.Current is not null)
+                        Application.Current.RequestedThemeVariant = variant;
+                }
+                break;
 
-        var variant = vm.IsDarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
-        if (Application.Current is not null)
-            Application.Current.RequestedThemeVariant = variant;
-
-        Workspace.ApplyTextMateTheme(vm.IsDarkTheme);
+            case nameof(MainWindowViewModel.RecentFiles):
+                RebuildRecentFilesMenu();
+                break;
+        }
     }
 
-    private void OnResultsPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    private void RebuildRecentFilesMenu()
     {
-        if (e.PropertyName == nameof(ResultsViewModel.Columns))
-            Workspace.RebuildResultColumns();
+        if (DataContext is not MainWindowViewModel vm) return;
+
+        RecentFilesMenu.Items.Clear();
+        foreach (var entry in vm.RecentFiles)
+        {
+            var item = new MenuItem { Header = entry.Path, Tag = entry.Path };
+            item.Click += OnRecentFileItemClick;
+            RecentFilesMenu.Items.Add(item);
+        }
+    }
+
+    private void OnRecentFileItemClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string path } && DataContext is MainWindowViewModel vm)
+        {
+            try { vm.OpenDatabase(path); }
+            catch { }
+        }
+    }
+
+    private void OnViewMenuOpened(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem viewMenu || _dockFactory is null) return;
+
+        foreach (var item in viewMenu.Items.OfType<MenuItem>())
+        {
+            if (item.Tag is string panelId)
+            {
+                var visible = _dockFactory.IsPanelVisible(panelId);
+                item.Icon = visible
+                    ? new TextBlock { Text = "✓", FontSize = 14 }
+                    : null;
+            }
+        }
     }
 
     private void OnHistoryLoadRequested(string code)
     {
-        Workspace.SetQueryText(code);
+        _queryEditor?.SetQueryText(code);
     }
 
-    private async void OnOpenDatabaseClick(object? sender, RoutedEventArgs e)
-    {
+    private async void OnOpenDatabaseClick(object? sender, RoutedEventArgs e) =>
         await OpenDatabaseAsync();
+
+    private void OnExitClick(object? sender, RoutedEventArgs e) => Close();
+
+    private void OnTogglePanelClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string panelId })
+            _dockFactory?.TogglePanel(panelId);
     }
 
-    private void OnSettingsClick(object? sender, RoutedEventArgs e)
+    private async void OnExecuteClick(object? sender, RoutedEventArgs e) =>
+        await ExecuteQueryAsync();
+
+    protected override void OnKeyDown(KeyEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm)
-            vm.IsSettingsOpen = !vm.IsSettingsOpen;
+        if (e.Key == Key.F5)
+        {
+            _ = ExecuteQueryAsync();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            switch (e.Key)
+            {
+                case Key.O:
+                    _ = OpenDatabaseAsync();
+                    e.Handled = true;
+                    return;
+                case Key.W:
+                    if (DataContext is MainWindowViewModel vm && vm.IsConnected)
+                        vm.CloseDatabaseCommand.Execute(null);
+                    e.Handled = true;
+                    return;
+                case Key.OemComma:
+                    _dockFactory?.TogglePanel("settings");
+                    e.Handled = true;
+                    return;
+            }
+        }
+
+        base.OnKeyDown(e);
+    }
+
+    private async Task ExecuteQueryAsync()
+    {
+        if (DataContext is not MainWindowViewModel vm) return;
+
+        var code = _queryEditor?.GetQueryText();
+        if (!string.IsNullOrWhiteSpace(code))
+            await vm.QueryEditor.ExecuteAsync(code);
     }
 
     private async Task OpenDatabaseAsync()
@@ -148,7 +207,7 @@ public partial class MainWindow : Window
         {
             var dialog = new Window
             {
-                Title = "Error",
+                Title = Studio.Resources.Strings.Error,
                 Width = 400,
                 Height = 160,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -160,7 +219,7 @@ public partial class MainWindow : Window
                     {
                         new TextBlock
                         {
-                            Text = $"Failed to open database:\n{ex.Message}",
+                            Text = $"{Studio.Resources.Strings.ErrorOpenDatabase}\n{ex.Message}",
                             TextWrapping = Avalonia.Media.TextWrapping.Wrap,
                         },
                     },
@@ -170,57 +229,41 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OnExecuteClick(object? sender, RoutedEventArgs e)
+    protected override void OnClosing(WindowClosingEventArgs e)
     {
-        await ExecuteQueryAsync();
+        SaveWindowState();
+        base.OnClosing(e);
     }
 
-    protected override void OnKeyDown(KeyEventArgs e)
+    private void RestoreWindowState()
     {
-        if (e.Key == Key.F5)
+        var ws = _settingsService?.Settings.WindowState;
+        if (ws is null) return;
+
+        if (ws.IsMaximized)
         {
-            _ = ExecuteQueryAsync();
-            e.Handled = true;
-            return;
-        }
-
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
-        {
-            switch (e.Key)
-            {
-                case Key.O:
-                    _ = OpenDatabaseAsync();
-                    e.Handled = true;
-                    return;
-                case Key.W:
-                    if (DataContext is MainWindowViewModel vm && vm.IsConnected)
-                        vm.CloseDatabaseCommand.Execute(null);
-                    e.Handled = true;
-                    return;
-                case Key.OemComma:
-                    if (DataContext is MainWindowViewModel vm2)
-                        vm2.IsSettingsOpen = !vm2.IsSettingsOpen;
-                    e.Handled = true;
-                    return;
-            }
-        }
-
-        base.OnKeyDown(e);
-    }
-
-    private async Task ExecuteQueryAsync()
-    {
-        if (DataContext is not MainWindowViewModel vm) return;
-
-        if (vm.IsFullTextMode)
-        {
-            await vm.FullTextSearch.ExecuteAsync();
+            WindowState = WindowState.Maximized;
         }
         else
         {
-            var code = Workspace.GetQueryText();
-            if (string.IsNullOrWhiteSpace(code)) return;
-            await vm.QueryEditor.ExecuteAsync(code);
+            Width = ws.Width;
+            Height = ws.Height;
+            Position = new PixelPoint(ws.X, ws.Y);
         }
+    }
+
+    private void SaveWindowState()
+    {
+        if (_settingsService is null) return;
+
+        _settingsService.Settings.WindowState = new WindowStateData
+        {
+            X = Position.X,
+            Y = Position.Y,
+            Width = (int)ClientSize.Width,
+            Height = (int)ClientSize.Height,
+            IsMaximized = WindowState == WindowState.Maximized,
+        };
+        _settingsService.SaveImmediate();
     }
 }

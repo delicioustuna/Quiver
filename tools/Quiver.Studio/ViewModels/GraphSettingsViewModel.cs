@@ -25,6 +25,9 @@ public sealed partial class GraphSettingsViewModel : ObservableObject
     [ObservableProperty] private int _nodeShapeIndex;
     [ObservableProperty] private int _edgeStyleIndex;
 
+    // --- Language ---
+    [ObservableProperty] private int _languageIndex;
+
     // --- Preview binding ---
     [ObservableProperty] private ContourSettings? _contourPreview;
 
@@ -34,6 +37,7 @@ public sealed partial class GraphSettingsViewModel : ObservableObject
     public string[] PaletteDescriptions { get; }
     public string[] NodeShapes { get; } = ["Circle", "Square", "Rounded Rect"];
     public string[] RelationshipStyles { get; } = ["Straight", "Bezier", "Polyline"];
+    public string[] Languages { get; } = ["Auto", "English", "日本語"];
 
     public bool IsAbsoluteMode => ContourModeIndex == 1;
 
@@ -77,6 +81,13 @@ public sealed partial class GraphSettingsViewModel : ObservableObject
         var idx = Array.IndexOf(PaletteNames, c.PaletteName);
         PaletteModeIndex = idx >= 0 ? idx : 0;
 
+        LanguageIndex = _settings.Settings.Language switch
+        {
+            "en" => 1,
+            "ja" => 2,
+            _ => 0,
+        };
+
         _loading = false;
         RefreshPreview();
     }
@@ -96,6 +107,18 @@ public sealed partial class GraphSettingsViewModel : ObservableObject
     partial void OnAbsoluteMaxChanged(double value) => Apply();
     partial void OnNodeShapeIndexChanged(int value) => Apply();
     partial void OnEdgeStyleIndexChanged(int value) => Apply();
+
+    partial void OnLanguageIndexChanged(int value)
+    {
+        if (_loading) return;
+        _settings.Settings.Language = value switch
+        {
+            1 => "en",
+            2 => "ja",
+            _ => "auto",
+        };
+        _settings.MarkDirty();
+    }
 
     private void Apply()
     {

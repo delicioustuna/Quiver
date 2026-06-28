@@ -1,7 +1,9 @@
+using System.Globalization;
 using Avalonia;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Quiver.Studio.Resources;
 using Quiver.Studio.Services;
 using Quiver.Studio.ViewModels;
 
@@ -36,6 +38,16 @@ public static class Program
             .Build();
 
         SetupGlobalExceptionHandlers(host.Services);
+
+        var settingsService = host.Services.GetRequiredService<SettingsService>();
+        var lang = settingsService.Settings.Language;
+        if (lang is not "auto")
+        {
+            var culture = new CultureInfo(lang);
+            Strings.Culture = culture;
+            Thread.CurrentThread.CurrentUICulture = culture;
+        }
+
         host.Services.GetRequiredService<QueryExecutionService>().Warmup();
         _ = host.Services.GetRequiredService<IntellisenseService>().InitializeAsync();
 
