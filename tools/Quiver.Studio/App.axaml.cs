@@ -49,7 +49,8 @@ public partial class App : Application
             mainWindow.Initialize(
                 _services!.GetRequiredService<SettingsService>(),
                 _services!.GetRequiredService<IntellisenseService>(),
-                _services!.GetRequiredService<QueryExecutionService>());
+                _services!.GetRequiredService<QueryExecutionService>(),
+                _services!.GetRequiredService<ApiDocumentationService>());
             desktop.MainWindow = mainWindow;
         }
 

@@ -45,6 +45,8 @@ public static class Program
         services.AddSingleton<SugiyamaLayoutService>();
         services.AddSingleton<GraphEditingService>();
         services.AddSingleton<IntellisenseService>();
+        services.AddSingleton<SchemaInspectionService>();
+        services.AddSingleton<ApiDocumentationService>();
         services.AddTransient<MainWindowViewModel>();
 
         using var sp = services.BuildServiceProvider();

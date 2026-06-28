@@ -85,6 +85,11 @@
                               Click="OnTogglePanelClick"
                               Tag="history"
                               Icon="{x:Null}" />
+                    <Separator />
+                    <MenuItem Header="{x:Static res:Strings.Panel_ApiDoc}"
+                              Click="OnTogglePanelClick"
+                              Tag="apiDoc"
+                              Icon="{x:Null}" />
                 </MenuItem>
 
                 <!-- Query -->

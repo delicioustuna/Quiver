@@ -114,4 +114,8 @@ internal static class Strings
     // Theme
     public static string Theme_Light => ResourceManager.GetString(nameof(Theme_Light), Culture)!;
     public static string Theme_Dark => ResourceManager.GetString(nameof(Theme_Dark), Culture)!;
+
+    // API Documentation
+    public static string Panel_ApiDoc => ResourceManager.GetString(nameof(Panel_ApiDoc), Culture)!;
+    public static string Menu_ShowApiDoc => ResourceManager.GetString(nameof(Menu_ShowApiDoc), Culture)!;
 }

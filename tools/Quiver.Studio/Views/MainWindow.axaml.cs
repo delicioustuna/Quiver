@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private SettingsService? _settingsService;
     private IntellisenseService? _intellisenseService;
     private QueryExecutionService? _queryExecutionService;
+    private ApiDocumentationService? _apiDocService;
     private StudioDockFactory? _dockFactory;
     private QueryEditorView? _queryEditor;
 
@@ -97,11 +98,13 @@ public partial class MainWindow : Window
     public void Initialize(
         SettingsService settingsService,
         IntellisenseService intellisenseService,
-        QueryExecutionService queryExecutionService)
+        QueryExecutionService queryExecutionService,
+        ApiDocumentationService apiDocService)
     {
         _settingsService = settingsService;
         _intellisenseService = intellisenseService;
         _queryExecutionService = queryExecutionService;
+        _apiDocService = apiDocService;
         RestoreWindowState();
     }
 
@@ -122,6 +125,13 @@ public partial class MainWindow : Window
         if (_intellisenseService is not null)
             await _intellisenseService.InitializeAsync();
 
+        vm.InitializationStatus = "API ドキュメント構築中…";
+        if (_apiDocService is not null)
+        {
+            await _apiDocService.InitializeAsync();
+            vm.ApiDocumentation.Refresh();
+        }
+
         vm.InitializationStatus = null;
     }
 
@@ -131,6 +141,17 @@ public partial class MainWindow : Window
         if (_intellisenseService is not null)
             editor.SetIntellisenseService(_intellisenseService);
         editor.ExecuteRequested += () => _ = ExecuteQueryAsync();
+        editor.ShowApiDocRequested += OnShowApiDocRequested;
+    }
+
+    private void OnShowApiDocRequested(string docId)
+    {
+        if (DataContext is not MainWindowViewModel vm) return;
+
+        if (_dockFactory is not null && !_dockFactory.IsPanelVisible("apiDoc"))
+            _dockFactory.TogglePanel("apiDoc");
+
+        vm.ApiDocumentation.NavigateToDocId(docId);
     }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

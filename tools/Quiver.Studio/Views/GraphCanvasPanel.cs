@@ -17,8 +17,14 @@ public sealed class GraphCanvasPanel : Control
     private VisualNode? _dragNode;
     private Point _lastPointer;
     private bool _isPanning;
+    private bool _isMinimapDragging;
     private bool _needsFit = true;
     private Size _lastSize;
+
+    private const double MinimapWidth = 160;
+    private const double MinimapHeight = 110;
+    private const double MinimapMargin = 8;
+    private const double MinimapPadding = 6;
 
     private static readonly IPen LinkDashPen = new Pen(Brushes.DodgerBlue, 2, new DashStyle([4, 4], 0));
 
@@ -27,6 +33,12 @@ public sealed class GraphCanvasPanel : Control
         ClipToBounds = true;
         Focusable = true;
         ActualThemeVariantChanged += (_, _) => InvalidateVisual();
+    }
+
+    public void FitToScreen()
+    {
+        _needsFit = true;
+        InvalidateVisual();
     }
 
     public void Attach(GraphCanvasViewModel vm)
@@ -86,6 +98,127 @@ public sealed class GraphCanvasPanel : Control
             var to = new Point(_vm.LinkCursorX, _vm.LinkCursorY);
             context.DrawLine(LinkDashPen, from, to);
         }
+
+        DrawMinimap(context);
+    }
+
+    private void DrawMinimap(DrawingContext ctx)
+    {
+        if (_vm is not { HasGraph: true } || _vm.Nodes.Count == 0) return;
+        if (Bounds.Width < MinimapWidth * 2 || Bounds.Height < MinimapHeight * 2) return;
+
+        var mapRect = GetMinimapRect();
+        var isDark = ActualThemeVariant == ThemeVariant.Dark;
+        var bgBrush = isDark
+            ? new SolidColorBrush(Color.FromArgb(180, 30, 30, 30))
+            : new SolidColorBrush(Color.FromArgb(180, 245, 245, 245));
+        var borderPen = new Pen(isDark ? Brushes.Gray : Brushes.Silver, 1);
+        ctx.DrawRectangle(bgBrush, borderPen, mapRect, 4, 4);
+
+        ComputeWorldBounds(out var wMinX, out var wMinY, out var wMaxX, out var wMaxY);
+        var wW = wMaxX - wMinX;
+        var wH = wMaxY - wMinY;
+        if (wW < 1) wW = 1;
+        if (wH < 1) wH = 1;
+
+        var innerX = mapRect.X + MinimapPadding;
+        var innerY = mapRect.Y + MinimapPadding;
+        var innerW = mapRect.Width - MinimapPadding * 2;
+        var innerH = mapRect.Height - MinimapPadding * 2;
+        var scale = Math.Min(innerW / wW, innerH / wH);
+
+        var drawW = wW * scale;
+        var drawH = wH * scale;
+        var ox = innerX + (innerW - drawW) / 2;
+        var oy = innerY + (innerH - drawH) / 2;
+
+        foreach (var node in _vm.Nodes)
+        {
+            var nx = ox + (node.X - wMinX) * scale;
+            var ny = oy + (node.Y - wMinY) * scale;
+            var dotR = Math.Max(2, node.Radius * scale * 0.5);
+            var brush = new SolidColorBrush(node.Color);
+            ctx.DrawEllipse(brush, null, new Point(nx, ny), dotR, dotR);
+        }
+
+        var camera = _vm.Renderer.Camera;
+        var vpTL = camera.ScreenToWorld(0, 0);
+        var vpBR = camera.ScreenToWorld(Bounds.Width, Bounds.Height);
+
+        var vx = ox + (vpTL.X - wMinX) * scale;
+        var vy = oy + (vpTL.Y - wMinY) * scale;
+        var vw = (vpBR.X - vpTL.X) * scale;
+        var vh = (vpBR.Y - vpTL.Y) * scale;
+
+        vx = Math.Max(vx, ox);
+        vy = Math.Max(vy, oy);
+        if (vx + vw > ox + drawW) vw = ox + drawW - vx;
+        if (vy + vh > oy + drawH) vh = oy + drawH - vy;
+
+        if (vw > 0 && vh > 0)
+        {
+            var vpBrush = isDark
+                ? new SolidColorBrush(Color.FromArgb(50, 100, 180, 255))
+                : new SolidColorBrush(Color.FromArgb(50, 30, 100, 220));
+            var vpPen = new Pen(Brushes.DodgerBlue, 1);
+            ctx.DrawRectangle(vpBrush, vpPen, new Rect(vx, vy, vw, vh), 2, 2);
+        }
+    }
+
+    private Rect GetMinimapRect()
+    {
+        var x = Bounds.Width - MinimapWidth - MinimapMargin;
+        var y = Bounds.Height - MinimapHeight - MinimapMargin;
+        return new Rect(x, y, MinimapWidth, MinimapHeight);
+    }
+
+    private void ComputeWorldBounds(out double minX, out double minY, out double maxX, out double maxY)
+    {
+        minX = double.MaxValue; minY = double.MaxValue;
+        maxX = double.MinValue; maxY = double.MinValue;
+        foreach (var n in _vm!.Nodes)
+        {
+            var r = n.Radius;
+            if (n.X - r < minX) minX = n.X - r;
+            if (n.Y - r < minY) minY = n.Y - r;
+            if (n.X + r > maxX) maxX = n.X + r;
+            if (n.Y + r > maxY) maxY = n.Y + r;
+        }
+    }
+
+    private bool TryMinimapPan(double screenX, double screenY)
+    {
+        if (_vm is not { HasGraph: true } || _vm.Nodes.Count == 0) return false;
+
+        var mapRect = GetMinimapRect();
+        if (!mapRect.Contains(new Point(screenX, screenY))) return false;
+
+        ComputeWorldBounds(out var wMinX, out var wMinY, out var wMaxX, out var wMaxY);
+        var wW = wMaxX - wMinX;
+        var wH = wMaxY - wMinY;
+        if (wW < 1) wW = 1;
+        if (wH < 1) wH = 1;
+
+        var innerX = mapRect.X + MinimapPadding;
+        var innerY = mapRect.Y + MinimapPadding;
+        var innerW = mapRect.Width - MinimapPadding * 2;
+        var innerH = mapRect.Height - MinimapPadding * 2;
+        var scale = Math.Min(innerW / wW, innerH / wH);
+
+        var drawW = wW * scale;
+        var drawH = wH * scale;
+        var ox = innerX + (innerW - drawW) / 2;
+        var oy = innerY + (innerH - drawH) / 2;
+
+        var worldX = wMinX + (screenX - ox) / scale;
+        var worldY = wMinY + (screenY - oy) / scale;
+
+        var camera = _vm.Renderer.Camera;
+        camera.OffsetX = Bounds.Width / 2 - worldX * camera.Zoom;
+        camera.OffsetY = Bounds.Height / 2 - worldY * camera.Zoom;
+
+        InvalidateVisual();
+        return true;
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -138,6 +271,13 @@ public sealed class GraphCanvasPanel : Control
 
         if (props.IsLeftButtonPressed)
         {
+            if (TryMinimapPan(pos.X, pos.Y))
+            {
+                _isMinimapDragging = true;
+                e.Pointer.Capture(this);
+                return;
+            }
+
             var hitNode = HitTestHelper.HitTestNode(_vm.Nodes, _vm.Renderer.Camera, pos.X, pos.Y);
             if (hitNode is not null)
             {
@@ -185,6 +325,12 @@ public sealed class GraphCanvasPanel : Control
             return;
         }
 
+        if (_isMinimapDragging)
+        {
+            TryMinimapPan(pos.X, pos.Y);
+            return;
+        }
+
         if (!_vm.HasGraph) return;
 
         if (_dragNode is not null)
@@ -213,6 +359,7 @@ public sealed class GraphCanvasPanel : Control
         base.OnPointerReleased(e);
         _dragNode = null;
         _isPanning = false;
+        _isMinimapDragging = false;
         e.Pointer.Capture(null);
     }
 

@@ -1,0 +1,140 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Quiver.Studio.ViewModels"
+             xmlns:svc="using:Quiver.Studio.Services"
+             x:Class="Quiver.Studio.Views.ApiDocumentationPanel"
+             x:DataType="vm:ApiDocumentationViewModel">
+
+    <Grid ColumnDefinitions="300,Auto,*">
+        <!-- Left: TreeView -->
+        <DockPanel Grid.Column="0">
+            <TextBox DockPanel.Dock="Top"
+                     Watermark="Filter..."
+                     Text="{Binding FilterText}"
+                     Margin="4" />
+
+            <TreeView ItemsSource="{Binding RootNodes}"
+                      SelectedItem="{Binding SelectedNode}"
+                      Margin="4,0">
+                <TreeView.ItemTemplate>
+                    <TreeDataTemplate ItemsSource="{Binding Children}">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="{Binding Icon}"
+                                       FontSize="12"
+                                       VerticalAlignment="Center"
+                                       Width="16"
+                                       TextAlignment="Center" />
+                            <TextBlock Text="{Binding Title}"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding Detail}"
+                                       FontSize="11"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                       VerticalAlignment="Center"
+                                       MaxWidth="300"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </TreeDataTemplate>
+                </TreeView.ItemTemplate>
+            </TreeView>
+        </DockPanel>
+
+        <!-- Splitter -->
+        <GridSplitter Grid.Column="1"
+                      Width="4"
+                      ResizeBehavior="PreviousAndNext" />
+
+        <!-- Right: Detail -->
+        <ScrollViewer Grid.Column="2" Padding="12,8">
+            <StackPanel Spacing="8"
+                        IsVisible="{Binding DetailTitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                <!-- Title -->
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Border Background="{DynamicResource SystemControlBackgroundBaseLowBrush}"
+                            CornerRadius="4"
+                            Padding="6,2"
+                            IsVisible="{Binding DetailKind, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                        <TextBlock Text="{Binding DetailKind}"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                    </Border>
+                    <TextBlock Text="{Binding DetailTitle}"
+                               FontWeight="Bold"
+                               FontSize="16" />
+                </StackPanel>
+
+                <!-- Signature -->
+                <Border Background="{DynamicResource SystemControlBackgroundChromeLowBrush}"
+                        CornerRadius="4"
+                        Padding="8,6"
+                        IsVisible="{Binding DetailSignature, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <TextBlock Text="{Binding DetailSignature}"
+                               FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                               FontSize="12"
+                               TextWrapping="Wrap" />
+                </Border>
+
+                <!-- Summary -->
+                <StackPanel Spacing="4"
+                            IsVisible="{Binding DetailSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <TextBlock Text="Summary"
+                               FontWeight="SemiBold"
+                               FontSize="13"
+                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                    <TextBlock Text="{Binding DetailSummary}"
+                               TextWrapping="Wrap"
+                               FontSize="13" />
+                </StackPanel>
+
+                <!-- Parameters -->
+                <StackPanel Spacing="4"
+                            IsVisible="{Binding !!DetailParameters.Count}">
+                    <TextBlock Text="Parameters"
+                               FontWeight="SemiBold"
+                               FontSize="13"
+                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                    <ItemsControl ItemsSource="{Binding DetailParameters}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="svc:ApiParamDoc">
+                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,2">
+                                    <TextBlock Text="{Binding Name}"
+                                               FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                                               FontSize="12"
+                                               Foreground="{DynamicResource SystemControlHighlightAccentBrush}"
+                                               VerticalAlignment="Top" />
+                                    <TextBlock Text="{Binding Description}"
+                                               TextWrapping="Wrap"
+                                               FontSize="12" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- Returns -->
+                <StackPanel Spacing="4"
+                            IsVisible="{Binding DetailReturns, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <TextBlock Text="Returns"
+                               FontWeight="SemiBold"
+                               FontSize="13"
+                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                    <TextBlock Text="{Binding DetailReturns}"
+                               TextWrapping="Wrap"
+                               FontSize="13" />
+                </StackPanel>
+
+                <!-- Remarks -->
+                <StackPanel Spacing="4"
+                            IsVisible="{Binding DetailRemarks, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <TextBlock Text="Remarks"
+                               FontWeight="SemiBold"
+                               FontSize="13"
+                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                    <TextBlock Text="{Binding DetailRemarks}"
+                               TextWrapping="Wrap"
+                               FontSize="13"
+                               Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

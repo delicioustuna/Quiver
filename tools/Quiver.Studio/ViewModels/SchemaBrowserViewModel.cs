@@ -8,13 +8,15 @@ namespace Quiver.Studio.ViewModels;
 public sealed class SchemaBrowserViewModel : IDisposable
 {
     private readonly DatabaseService _db;
+    private readonly SchemaInspectionService _inspection;
     private readonly IDisposable _subscription;
 
     public ObservableCollection<SchemaTreeNode> RootNodes { get; } = [];
 
-    public SchemaBrowserViewModel(DatabaseService db)
+    public SchemaBrowserViewModel(DatabaseService db, SchemaInspectionService inspection)
     {
         _db = db;
+        _inspection = inspection;
         _subscription = _db.IsOpen.Subscribe(isOpen =>
             Dispatcher.UIThread.Post(() =>
             {
@@ -32,16 +34,35 @@ public sealed class SchemaBrowserViewModel : IDisposable
         if (database is null) return;
 
         var schema = database.Schema;
+        var inspection = _inspection.Inspect();
 
         var labels = schema.ListLabels();
         RootNodes.Add(SchemaTreeNode.Folder(
             $"Labels ({labels.Count})", "•",
-            labels.Select(l => SchemaTreeNode.Leaf(l, "○"))));
+            labels.Select(l =>
+            {
+                var props = inspection?.LabelProperties.GetValueOrDefault(l);
+                if (props is { Count: > 0 })
+                {
+                    return SchemaTreeNode.Folder(l, "○",
+                        props.Select(p => SchemaTreeNode.Leaf(p.Name, "∙", p.InferredType)));
+                }
+                return SchemaTreeNode.Leaf(l, "○");
+            })));
 
         var relTypes = schema.ListRelationshipTypes();
         RootNodes.Add(SchemaTreeNode.Folder(
             $"Relationship Types ({relTypes.Count})", "→",
-            relTypes.Select(r => SchemaTreeNode.Leaf(r, "→"))));
+            relTypes.Select(r =>
+            {
+                var props = inspection?.RelTypeProperties.GetValueOrDefault(r);
+                if (props is { Count: > 0 })
+                {
+                    return SchemaTreeNode.Folder(r, "→",
+                        props.Select(p => SchemaTreeNode.Leaf(p.Name, "∙", p.InferredType)));
+                }
+                return SchemaTreeNode.Leaf(r, "→");
+            })));
 
         var propKeys = schema.ListPropertyKeys();
         RootNodes.Add(SchemaTreeNode.Folder(

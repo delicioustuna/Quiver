@@ -162,6 +162,15 @@ public sealed class StudioDockFactory : InpcFactory
                 bottomToolDock);
         });
 
+        var apiDocTool = this.Document(d =>
+        {
+            d.Id = "apiDoc";
+            d.Title = Strings.Panel_ApiDoc;
+            d.Context = new ApiDocToolModel(vm.ApiDocumentation);
+            d.CanClose = true;
+            d.CanFloat = true;
+        });
+
         var settingsDoc = this.Document(d =>
         {
             d.Id = "settings";
@@ -212,6 +221,7 @@ public sealed class StudioDockFactory : InpcFactory
         _panelRegistry["output"] = (outputTool, bottomToolDock);
         _panelRegistry["history"] = (historyTool, bottomToolDock);
         _panelRegistry["properties"] = (propertiesTool, rightToolDock);
+        _panelRegistry["apiDoc"] = (apiDocTool, documentDock);
         _panelRegistry["settings"] = (settingsDoc, documentDock);
 
         return _rootDock;

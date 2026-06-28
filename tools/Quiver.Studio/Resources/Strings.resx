@@ -153,4 +153,8 @@
   <!-- Theme -->
   <data name="Theme_Light" xml:space="preserve"><value>Light</value></data>
   <data name="Theme_Dark" xml:space="preserve"><value>Dark</value></data>
+
+  <!-- API Documentation -->
+  <data name="Panel_ApiDoc" xml:space="preserve"><value>API Documentation</value></data>
+  <data name="Menu_ShowApiDoc" xml:space="preserve"><value>Show API Documentation</value></data>
 </root>

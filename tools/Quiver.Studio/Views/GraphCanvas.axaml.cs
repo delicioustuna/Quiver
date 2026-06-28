@@ -18,6 +18,11 @@ public partial class GraphCanvas : UserControl
         };
     }
 
+    private void OnFitClick(object? sender, RoutedEventArgs e)
+    {
+        CanvasPanel.FitToScreen();
+    }
+
     private async void OnExportSvgClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not GraphCanvasViewModel vm) return;

@@ -19,6 +19,8 @@ public partial class QueryEditorView : UserControl
     private CompletionWindow? _completionWindow;
     private CancellationTokenSource? _completionCts;
 
+    public event Action<string>? ShowApiDocRequested;
+
     public QueryEditorView()
     {
         InitializeComponent();
@@ -82,6 +84,23 @@ public partial class QueryEditorView : UserControl
             _ = ShowCompletionAsync(immediate: true);
             e.Handled = true;
         }
+        else if (e.Key == Key.F1)
+        {
+            _ = LookupApiDocAsync();
+            e.Handled = true;
+        }
+    }
+
+    private async Task LookupApiDocAsync()
+    {
+        if (_intellisenseService is null) return;
+
+        var code = QueryTextEditor.Text;
+        var caretOffset = QueryTextEditor.CaretOffset;
+
+        var docId = await _intellisenseService.GetDocIdAtPositionAsync(code, caretOffset, CancellationToken.None);
+        if (docId is not null)
+            ShowApiDocRequested?.Invoke(docId);
     }
 
     private async Task ShowCompletionAsync(bool immediate)

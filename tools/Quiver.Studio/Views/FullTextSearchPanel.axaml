@@ -4,13 +4,13 @@
              xmlns:i="clr-namespace:FluentIcons.Avalonia;assembly=FluentIcons.Avalonia"
              x:Class="Quiver.Studio.Views.FullTextSearchPanel"
              x:DataType="vm:FullTextSearchViewModel">
-    <Grid RowDefinitions="Auto,*" Margin="8">
+    <Grid RowDefinitions="Auto,Auto,*" Margin="8">
         <!-- FTS parameters -->
         <Grid Grid.Row="0"
               ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto"
               RowSpacing="6" ColumnSpacing="8">
-            <TextBlock Grid.Row="0" Grid.Column="0" 
-                       Text="対象インデックス" 
+            <TextBlock Grid.Row="0" Grid.Column="0"
+                       Text="対象インデックス"
                        VerticalAlignment="Center" FontSize="12" />
             <ComboBox Grid.Row="0" Grid.Column="1"
                       ItemsSource="{Binding Indexes}"
@@ -24,8 +24,8 @@
                 </ComboBox.ItemTemplate>
             </ComboBox>
 
-            <TextBlock Grid.Row="1" Grid.Column="0" 
-                       Text="クエリ" 
+            <TextBlock Grid.Row="1" Grid.Column="0"
+                       Text="クエリ"
                        VerticalAlignment="Center" FontSize="12" />
             <TextBox Grid.Row="1" Grid.Column="1"
                      Text="{Binding QueryText}"
@@ -33,8 +33,8 @@
                      FontFamily="Cascadia Code,Consolas,Courier New,monospace"
                      FontSize="13" />
 
-            <TextBlock Grid.Row="2" Grid.Column="0" 
-                       Text="Top K" 
+            <TextBlock Grid.Row="2" Grid.Column="0"
+                       Text="Top K"
                        VerticalAlignment="Center" FontSize="12" />
             <NumericUpDown Grid.Row="2" Grid.Column="1"
                            Value="{Binding MaxResults}"
@@ -43,13 +43,17 @@
                            HorizontalAlignment="Left" />
         </Grid>
 
-        <!-- Placeholder for remaining space -->
-        <TextBlock Grid.Row="1"
-                   Text="{Binding StatusText}"
-                   FontSize="12"
-                   VerticalAlignment="Bottom"
-                   HorizontalAlignment="Left"
-                   Margin="0,8"
-                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+        <!-- Execute + Status -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+            <Button Click="OnExecuteClick"
+                    IsEnabled="{Binding !IsExecuting}"
+                    Padding="12,4">
+                <TextBlock Text="検索 (Enter)" VerticalAlignment="Center" />
+            </Button>
+            <TextBlock Text="{Binding StatusText}"
+                       FontSize="12"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+        </StackPanel>
     </Grid>
 </UserControl>

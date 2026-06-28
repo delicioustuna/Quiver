@@ -266,6 +266,59 @@ public sealed class IntellisenseService : IDisposable
         }
     }
 
+    public async Task<string?> GetDocIdAtPositionAsync(string code, int caretPosition, CancellationToken ct)
+    {
+        if (_metadataReferences is null)
+            return null;
+
+        try
+        {
+            return await Task.Run(() =>
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var wrappedCode = Preamble + code + "\n}}";
+                var adjustedPosition = Preamble.Length + caretPosition;
+
+                if (adjustedPosition < 0 || adjustedPosition > wrappedCode.Length)
+                    return null;
+
+                var tree = CSharpSyntaxTree.ParseText(wrappedCode, _parseOptions);
+                var compilation = CSharpCompilation.Create("Query",
+                    [tree],
+                    _metadataReferences,
+                    new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+                        .WithNullableContextOptions(NullableContextOptions.Enable));
+
+                var model = compilation.GetSemanticModel(tree);
+                var root = tree.GetRoot(ct);
+
+                var token = root.FindToken(adjustedPosition);
+                var node = token.Parent;
+
+                while (node is not null)
+                {
+                    var symbolInfo = model.GetSymbolInfo(node, ct);
+                    var symbol = symbolInfo.Symbol ?? symbolInfo.CandidateSymbols.FirstOrDefault();
+                    if (symbol is not null)
+                        return symbol.GetDocumentationCommentId();
+                    node = node.Parent;
+                }
+
+                return null;
+            }, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "DocId 取得失敗");
+            return null;
+        }
+    }
+
     public void Dispose()
     {
     }

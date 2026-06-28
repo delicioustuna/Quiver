@@ -32,6 +32,16 @@
 
             <Border Width="1" Background="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" Margin="4,2"/>
 
+            <Button x:Name="FitButton" Click="OnFitClick"
+                    FontSize="11" Padding="8,2"
+                    ToolTip.Tip="画面にフィット">
+                <PathIcon Data="{StaticResource ArrowMaximizeIcon}"
+                         Width="16" Height="16"
+                         VerticalAlignment="Center" />
+            </Button>
+
+            <Border Width="1" Background="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" Margin="4,2"/>
+
             <Button x:Name="ExportSvgButton" Click="OnExportSvgClick"
                     FontSize="11" Padding="8,2"
                     ToolTip.Tip="SVG エクスポート">

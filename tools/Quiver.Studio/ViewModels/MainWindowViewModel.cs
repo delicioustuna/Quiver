@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Dock.Model.Controls;
 using Microsoft.Extensions.Logging;
+using Quiver.Core;
 using Quiver.Studio.Docking;
 using Quiver.Studio.Models;
 using Quiver.Studio.Services;
@@ -62,12 +63,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public GraphSettingsViewModel GraphSettings { get; }
 
+    public ApiDocumentationViewModel ApiDocumentation { get; }
+
     public MainWindowViewModel(
         DatabaseService databaseService,
         QueryExecutionService queryService,
         GraphLayoutService layoutService,
         SugiyamaLayoutService hierarchyLayoutService,
         GraphEditingService editingService,
+        SchemaInspectionService schemaInspectionService,
+        ApiDocumentationService apiDocumentationService,
         SettingsService settingsService,
         ILogger<MainWindowViewModel> logger)
     {
@@ -79,13 +84,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         IsDarkTheme = string.Equals(settingsService.Settings.Theme, "Dark", StringComparison.OrdinalIgnoreCase);
         RecentFiles = settingsService.Settings.RecentFiles;
 
-        SchemaBrowser = new SchemaBrowserViewModel(_db);
+        SchemaBrowser = new SchemaBrowserViewModel(_db, schemaInspectionService);
         QueryEditor = new QueryEditorViewModel(queryService, settingsService, databaseService);
         GraphCanvas = new GraphCanvasViewModel(databaseService, layoutService, hierarchyLayoutService, editingService, logger);
-        PropertyInspector = new PropertyInspectorViewModel(databaseService);
+        PropertyInspector = new PropertyInspectorViewModel(databaseService, editingService, logger);
         FullTextSearch = new FullTextSearchViewModel(databaseService);
         QueryHistory = new QueryHistoryViewModel(settingsService);
         GraphSettings = new GraphSettingsViewModel(settingsService, GraphCanvas);
+        ApiDocumentation = new ApiDocumentationViewModel(apiDocumentationService);
 
         GraphCanvas.Renderer.VisualSettings = settingsService.Settings.GraphVisual;
 
@@ -95,6 +101,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         GraphCanvas.LinkCompleted += OnLinkCompleted;
         GraphCanvas.AddNodeRequested += OnAddNodeRequested;
         Results.PropertyChanged += OnResultsSelectionChanged;
+
+        PropertyInspector.NodeCreated += OnInlineNodeCreated;
+        PropertyInspector.RelationshipCreated += OnInlineRelationshipCreated;
+        PropertyInspector.CreationCancelled += OnCreationCancelled;
 
         _subscriptions = Disposable.Combine(
             _db.IsOpen.Subscribe(v => Dispatcher.UIThread.Post(() =>
@@ -196,53 +206,38 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _settings.MarkDirty();
     }
 
-    private async Task OnLinkCompleted(VisualNode source, VisualNode target)
+    private Task OnLinkCompleted(VisualNode source, VisualNode target)
     {
-        try
-        {
-            var existingTypes = _db.CurrentDatabase?.Schema.ListRelationshipTypes() ?? [];
-            var dialog = new Views.AddRelationshipDialog(existingTypes);
-            var owner = Avalonia.Application.Current?.ApplicationLifetime
-                is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
-                ? desktop.MainWindow : null;
-            var result = owner is not null ? await dialog.ShowDialog<object?>(owner) : null;
-            if (result is not true || dialog.ResultType is null) return;
-
-            var rid = _editingService.CreateRelationship(source.Id, target.Id, dialog.ResultType);
-            GraphCanvas.AddEdgeToGraph(rid, source, target, dialog.ResultType);
-            SchemaBrowser.Refresh();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "リレーションシップ作成失敗");
-        }
+        PropertyInspector.BeginCreateRelationship(source, target);
+        return Task.CompletedTask;
     }
 
-    private async Task OnAddNodeRequested()
+    private Task OnAddNodeRequested()
     {
-        await AddNodeAtPositionAsync(GraphCanvas.LastContextWorldX, GraphCanvas.LastContextWorldY);
+        AddNodeAtPosition(GraphCanvas.LastContextWorldX, GraphCanvas.LastContextWorldY);
+        return Task.CompletedTask;
     }
 
-    public async Task AddNodeAtPositionAsync(double worldX, double worldY)
+    public void AddNodeAtPosition(double worldX, double worldY)
     {
-        try
-        {
-            var existingLabels = _db.CurrentDatabase?.Schema.ListLabels() ?? [];
-            var dialog = new Views.AddNodeDialog(existingLabels);
-            var owner = Avalonia.Application.Current?.ApplicationLifetime
-                is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
-                ? desktop.MainWindow : null;
-            var result = owner is not null ? await dialog.ShowDialog<object?>(owner) : null;
-            if (result is not true || dialog.ResultLabel is null) return;
+        PropertyInspector.BeginCreateNode(worldX, worldY);
+    }
 
-            var nid = _editingService.CreateNode(dialog.ResultLabel);
-            GraphCanvas.AddNodeToGraph(nid, dialog.ResultLabel, worldX, worldY);
-            SchemaBrowser.Refresh();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "ノード作成失敗");
-        }
+    private void OnInlineNodeCreated(NodeId nid, string label, double worldX, double worldY)
+    {
+        GraphCanvas.AddNodeToGraph(nid, label, worldX, worldY);
+        SchemaBrowser.Refresh();
+    }
+
+    private void OnInlineRelationshipCreated(RelationshipId rid, VisualNode source, VisualNode target, string type)
+    {
+        GraphCanvas.AddEdgeToGraph(rid, source, target, type);
+        SchemaBrowser.Refresh();
+    }
+
+    private void OnCreationCancelled()
+    {
+        GraphCanvas.CancelLinkMode();
     }
 
     public void Dispose()

@@ -51,3 +51,8 @@ public sealed class PropertiesToolModel(PropertyInspectorViewModel viewModel)
 {
     public PropertyInspectorViewModel ViewModel { get; } = viewModel;
 }
+
+public sealed class ApiDocToolModel(ApiDocumentationViewModel viewModel)
+{
+    public ApiDocumentationViewModel ViewModel { get; } = viewModel;
+}

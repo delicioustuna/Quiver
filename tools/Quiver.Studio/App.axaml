@@ -190,5 +190,10 @@
             <views:PropertyInspector DataContext="{Binding ViewModel}" />
         </DataTemplate>
 
+        <!-- API Documentation -->
+        <DataTemplate DataType="{x:Type dock:ApiDocToolModel}">
+            <views:ApiDocumentationPanel DataContext="{Binding ViewModel}" />
+        </DataTemplate>
+
     </Application.DataTemplates>
 </Application>

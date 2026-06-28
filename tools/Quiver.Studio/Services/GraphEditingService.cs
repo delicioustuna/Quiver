@@ -89,4 +89,13 @@ public sealed class GraphEditingService
         tx.Commit();
         _logger.LogInformation("プロパティ削除: Node {Id} {Key}", id, key);
     }
+
+    public void SetRelationshipProperty(RelationshipId id, string key, string value)
+    {
+        var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
+        using var tx = db.BeginTransaction();
+        tx.SetProperty(id, key, PropertyValue.FromString(value));
+        tx.Commit();
+        _logger.LogInformation("プロパティ設定: Relationship {Id} {Key}={Value}", id, key, value);
+    }
 }

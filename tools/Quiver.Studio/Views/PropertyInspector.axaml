@@ -13,24 +13,150 @@
                    ToolTip.Tip="{Binding Header}"
                    IsVisible="{Binding HasSelection}" />
 
-        <DataGrid ItemsSource="{Binding Properties}"
-                  AutoGenerateColumns="False"
-                  IsReadOnly="True"
-                  CanUserResizeColumns="True"
-                  GridLinesVisibility="Horizontal"
-                  HeadersVisibility="Column"
-                  FontFamily="Cascadia Code,Consolas,Courier New,monospace"
-                  FontSize="12"
-                  IsVisible="{Binding HasSelection}">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="項目"
-                                    Binding="{Binding Key}"
-                                    Width="Auto" />
-                <DataGridTextColumn Header="値"
-                                    Binding="{Binding Value}"
-                                    Width="*" />
-            </DataGrid.Columns>
-        </DataGrid>
+        <!-- ===== Create Node mode ===== -->
+        <ScrollViewer IsVisible="{Binding IsCreateNode}">
+            <StackPanel Margin="8,4" Spacing="8">
+                <TextBlock Text="ラベル" FontSize="11"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                <AutoCompleteBox Text="{Binding CreateLabel, Mode=TwoWay}"
+                                 ItemsSource="{Binding LabelSuggestions}"
+                                 FilterMode="Contains"
+                                 FontSize="13" />
+
+                <TextBlock Text="プロパティ" FontSize="11" Margin="0,8,0,0"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+
+                <ItemsControl ItemsSource="{Binding CreateProperties}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:EditablePropertyEntry">
+                            <DockPanel Margin="0,2">
+                                <Button DockPanel.Dock="Right"
+                                        Content="✕" FontSize="10" Padding="4,2"
+                                        Command="{Binding $parent[UserControl].((vm:PropertyInspectorViewModel)DataContext).RemoveCreatePropertyCommand}"
+                                        CommandParameter="{Binding}" />
+                                <TextBlock Text="{Binding Key}" Width="80" FontSize="12"
+                                           VerticalAlignment="Center"
+                                           FontFamily="Cascadia Code,Consolas,monospace" />
+                                <TextBlock Text="{Binding Value}" FontSize="12"
+                                           VerticalAlignment="Center" Margin="4,0"
+                                           FontFamily="Cascadia Code,Consolas,monospace" />
+                            </DockPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="＋" FontSize="11" Padding="6,2"
+                            Command="{Binding AddCreatePropertyCommand}" Margin="4,0,0,0" />
+                    <TextBox Text="{Binding CreateNewValue, Mode=TwoWay}"
+                             PlaceholderText="値" FontSize="12" Margin="4,0,0,0" />
+                    <TextBox Text="{Binding CreateNewKey, Mode=TwoWay}"
+                             PlaceholderText="キー" FontSize="12" Width="80" />
+                </DockPanel>
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+                    <Button Content="キャンセル" Padding="12,4"
+                            Command="{Binding CancelCreateCommand}" />
+                    <Button Content="作成" Padding="12,4" Classes="accent"
+                            Command="{Binding ConfirmCreateCommand}" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- ===== Create Relationship mode ===== -->
+        <ScrollViewer IsVisible="{Binding IsCreateRel}">
+            <StackPanel Margin="8,4" Spacing="8">
+                <TextBlock Text="リレーションシップ型" FontSize="11"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                <AutoCompleteBox Text="{Binding CreateRelType, Mode=TwoWay}"
+                                 ItemsSource="{Binding RelTypeSuggestions}"
+                                 FilterMode="Contains"
+                                 FontSize="13" />
+
+                <TextBlock Text="プロパティ" FontSize="11" Margin="0,8,0,0"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+
+                <ItemsControl ItemsSource="{Binding CreateProperties}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:EditablePropertyEntry">
+                            <DockPanel Margin="0,2">
+                                <Button DockPanel.Dock="Right"
+                                        Content="✕" FontSize="10" Padding="4,2"
+                                        Command="{Binding $parent[UserControl].((vm:PropertyInspectorViewModel)DataContext).RemoveCreatePropertyCommand}"
+                                        CommandParameter="{Binding}" />
+                                <TextBlock Text="{Binding Key}" Width="80" FontSize="12"
+                                           VerticalAlignment="Center"
+                                           FontFamily="Cascadia Code,Consolas,monospace" />
+                                <TextBlock Text="{Binding Value}" FontSize="12"
+                                           VerticalAlignment="Center" Margin="4,0"
+                                           FontFamily="Cascadia Code,Consolas,monospace" />
+                            </DockPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="＋" FontSize="11" Padding="6,2"
+                            Command="{Binding AddCreatePropertyCommand}" Margin="4,0,0,0" />
+                    <TextBox Text="{Binding CreateNewValue, Mode=TwoWay}"
+                             PlaceholderText="値" FontSize="12" Margin="4,0,0,0" />
+                    <TextBox Text="{Binding CreateNewKey, Mode=TwoWay}"
+                             PlaceholderText="キー" FontSize="12" Width="80" />
+                </DockPanel>
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+                    <Button Content="キャンセル" Padding="12,4"
+                            Command="{Binding CancelCreateCommand}" />
+                    <Button Content="作成" Padding="12,4" Classes="accent"
+                            Command="{Binding ConfirmCreateCommand}" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- ===== Edit mode (Node/Edge selected) ===== -->
+        <DockPanel IsVisible="{Binding IsEditing}">
+            <StackPanel DockPanel.Dock="Bottom" Margin="8,4" Spacing="4">
+                <TextBlock Text="プロパティを追加" FontSize="11"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="＋" FontSize="11" Padding="6,2"
+                            Command="{Binding AddPropertyCommand}" Margin="4,0,0,0" />
+                    <TextBox Text="{Binding NewPropertyValue, Mode=TwoWay}"
+                             PlaceholderText="値" FontSize="12" Margin="4,0,0,0" />
+                    <TextBox Text="{Binding NewPropertyKey, Mode=TwoWay}"
+                             PlaceholderText="キー" FontSize="12" Width="80" />
+                </DockPanel>
+            </StackPanel>
+
+            <DataGrid ItemsSource="{Binding Properties}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      CanUserResizeColumns="True"
+                      GridLinesVisibility="Horizontal"
+                      HeadersVisibility="Column"
+                      FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                      FontSize="12">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="項目"
+                                        Binding="{Binding Key}"
+                                        Width="Auto" />
+                    <DataGridTextColumn Header="値"
+                                        Binding="{Binding Value}"
+                                        Width="*" />
+                    <DataGridTemplateColumn Header="" Width="30">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate x:DataType="vm:EditablePropertyEntry">
+                                <Button Content="✕" FontSize="9" Padding="2"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Command="{Binding $parent[UserControl].((vm:PropertyInspectorViewModel)DataContext).RemovePropertyCommand}"
+                                        CommandParameter="{Binding}" />
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </DockPanel>
 
         <TextBlock Text="グラフ要素を選択してください"
                    HorizontalAlignment="Center"
