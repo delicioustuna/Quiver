@@ -12,6 +12,18 @@
         <themes:DockFluentTheme DensityStyle="Compact" />
         <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
         <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
+
+        <!-- Window chrome button hover -->
+        <Style Selector="Button#MinimizeButton:pointerover /template/ ContentPresenter,
+                          Button#MaximizeButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+        </Style>
+        <Style Selector="Button#CloseButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#E81123" />
+        </Style>
+        <Style Selector="Button#CloseButton:pointerover PathIcon">
+            <Setter Property="Foreground" Value="White" />
+        </Style>
     </Application.Styles>
 
     <Application.Resources>

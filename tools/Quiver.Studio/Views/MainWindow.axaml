@@ -6,77 +6,148 @@
         x:Class="Quiver.Studio.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding Title}"
-        Width="1280" Height="800">
+        Width="1280" Height="800"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaTitleBarHeightHint="38"
+        SystemDecorations="BorderOnly">
 
     <DockPanel>
-        <!-- Menu Bar -->
-        <Menu DockPanel.Dock="Top">
-            <!-- File -->
-            <MenuItem Header="{x:Static res:Strings.Menu_File}">
-                <MenuItem Header="{x:Static res:Strings.Menu_OpenDatabase}"
-                          Click="OnOpenDatabaseClick"
-                          InputGesture="Ctrl+O" />
-                <MenuItem Header="{x:Static res:Strings.Menu_CloseDatabase}"
-                          Command="{Binding CloseDatabaseCommand}"
-                          InputGesture="Ctrl+W" />
-                <Separator />
-                <MenuItem Header="{x:Static res:Strings.Menu_RecentFiles}"
-                          x:Name="RecentFilesMenu" />
-                <Separator />
-                <MenuItem Header="{x:Static res:Strings.Menu_Exit}"
-                          Click="OnExitClick" />
-            </MenuItem>
+        <!-- Custom Title Bar -->
+        <Grid DockPanel.Dock="Top"
+              Height="38"
+              Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+              IsHitTestVisible="True"
+              x:Name="TitleBar">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-            <!-- View -->
-            <MenuItem Header="{x:Static res:Strings.Menu_View}"
-                      SubmenuOpened="OnViewMenuOpened">
-                <MenuItem Header="{x:Static res:Strings.Panel_Schema}"
-                          Click="OnTogglePanelClick"
-                          Tag="schema"
-                          Icon="{x:Null}" />
-                <MenuItem Header="{x:Static res:Strings.Panel_Statistics}"
-                          Click="OnTogglePanelClick"
-                          Tag="stats"
-                          Icon="{x:Null}" />
-                <MenuItem Header="{x:Static res:Strings.Panel_Properties}"
-                          Click="OnTogglePanelClick"
-                          Tag="properties"
-                          Icon="{x:Null}" />
-                <Separator />
-                <MenuItem Header="{x:Static res:Strings.Panel_QueryEditor}"
-                          Click="OnTogglePanelClick"
-                          Tag="queryEditor"
-                          Icon="{x:Null}" />
-                <MenuItem Header="{x:Static res:Strings.Panel_FullTextSearch}"
-                          Click="OnTogglePanelClick"
-                          Tag="fts"
-                          Icon="{x:Null}" />
-                <Separator />
-                <MenuItem Header="{x:Static res:Strings.Panel_Results}"
-                          Click="OnTogglePanelClick"
-                          Tag="results"
-                          Icon="{x:Null}" />
-                <MenuItem Header="{x:Static res:Strings.Panel_Graph}"
-                          Click="OnTogglePanelClick"
-                          Tag="graph"
-                          Icon="{x:Null}" />
-                <MenuItem Header="{x:Static res:Strings.Panel_Output}"
-                          Click="OnTogglePanelClick"
-                          Tag="output"
-                          Icon="{x:Null}" />
-                <MenuItem Header="{x:Static res:Strings.Panel_History}"
-                          Click="OnTogglePanelClick"
-                          Tag="history"
-                          Icon="{x:Null}" />
-            </MenuItem>
+            <!-- Menu (left) -->
+            <Menu Grid.Column="0"
+                  VerticalAlignment="Center"
+                  Margin="4,0,0,0">
+                <!-- File -->
+                <MenuItem Header="{x:Static res:Strings.Menu_File}">
+                    <MenuItem Header="{x:Static res:Strings.Menu_OpenDatabase}"
+                              Click="OnOpenDatabaseClick"
+                              InputGesture="Ctrl+O" />
+                    <MenuItem Header="{x:Static res:Strings.Menu_CloseDatabase}"
+                              Command="{Binding CloseDatabaseCommand}"
+                              InputGesture="Ctrl+W" />
+                    <Separator />
+                    <MenuItem Header="{x:Static res:Strings.Menu_RecentFiles}"
+                              x:Name="RecentFilesMenu" />
+                    <Separator />
+                    <MenuItem Header="{x:Static res:Strings.Menu_Exit}"
+                              Click="OnExitClick" />
+                </MenuItem>
 
-            <!-- Query -->
-            <MenuItem Header="{x:Static res:Strings.Menu_Query}">
-                <MenuItem Header="{x:Static res:Strings.Menu_Execute}"
-                          Click="OnExecuteClick"
-                          InputGesture="F5" />
-            </MenuItem>
-        </Menu>
+                <!-- View -->
+                <MenuItem Header="{x:Static res:Strings.Menu_View}"
+                          SubmenuOpened="OnViewMenuOpened">
+                    <MenuItem Header="{x:Static res:Strings.Panel_Schema}"
+                              Click="OnTogglePanelClick"
+                              Tag="schema"
+                              Icon="{x:Null}" />
+                    <MenuItem Header="{x:Static res:Strings.Panel_Statistics}"
+                              Click="OnTogglePanelClick"
+                              Tag="stats"
+                              Icon="{x:Null}" />
+                    <MenuItem Header="{x:Static res:Strings.Panel_Properties}"
+                              Click="OnTogglePanelClick"
+                              Tag="properties"
+                              Icon="{x:Null}" />
+                    <Separator />
+                    <MenuItem Header="{x:Static res:Strings.Panel_QueryEditor}"
+                              Click="OnTogglePanelClick"
+                              Tag="queryEditor"
+                              Icon="{x:Null}" />
+                    <MenuItem Header="{x:Static res:Strings.Panel_FullTextSearch}"
+                              Click="OnTogglePanelClick"
+                              Tag="fts"
+                              Icon="{x:Null}" />
+                    <Separator />
+                    <MenuItem Header="{x:Static res:Strings.Panel_Results}"
+                              Click="OnTogglePanelClick"
+                              Tag="results"
+                              Icon="{x:Null}" />
+                    <MenuItem Header="{x:Static res:Strings.Panel_Graph}"
+                              Click="OnTogglePanelClick"
+                              Tag="graph"
+                              Icon="{x:Null}" />
+                    <MenuItem Header="{x:Static res:Strings.Panel_Output}"
+                              Click="OnTogglePanelClick"
+                              Tag="output"
+                              Icon="{x:Null}" />
+                    <MenuItem Header="{x:Static res:Strings.Panel_History}"
+                              Click="OnTogglePanelClick"
+                              Tag="history"
+                              Icon="{x:Null}" />
+                </MenuItem>
+
+                <!-- Query -->
+                <MenuItem Header="{x:Static res:Strings.Menu_Query}">
+                    <MenuItem Header="{x:Static res:Strings.Menu_Execute}"
+                              Click="OnExecuteClick"
+                              InputGesture="F5" />
+                </MenuItem>
+            </Menu>
+
+            <!-- Title (center) -->
+            <TextBlock Grid.Column="1"
+                       Text="{Binding Title}"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       FontSize="12"
+                       IsHitTestVisible="False" />
+
+            <!-- Window Buttons (right) -->
+            <StackPanel Grid.Column="2"
+                        Orientation="Horizontal"
+                        VerticalAlignment="Stretch"
+                        Margin="0,0,0,0">
+                <Button x:Name="MinimizeButton"
+                        Click="OnMinimizeClick"
+                        Width="46" Height="38"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        CornerRadius="0"
+                        VerticalContentAlignment="Center"
+                        HorizontalContentAlignment="Center">
+                    <PathIcon Width="10" Height="10"
+                              Data="M0,5 L10,5"
+                              Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+                </Button>
+                <Button x:Name="MaximizeButton"
+                        Click="OnMaximizeClick"
+                        Width="46" Height="38"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        CornerRadius="0"
+                        VerticalContentAlignment="Center"
+                        HorizontalContentAlignment="Center">
+                    <PathIcon Width="10" Height="10"
+                              x:Name="MaximizeIcon"
+                              Data="M0,0 L10,0 L10,10 L0,10 Z"
+                              Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+                </Button>
+                <Button x:Name="CloseButton"
+                        Click="OnCloseClick"
+                        Width="46" Height="38"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        CornerRadius="0"
+                        VerticalContentAlignment="Center"
+                        HorizontalContentAlignment="Center"
+                        Classes="close">
+                    <PathIcon Width="10" Height="10"
+                              Data="M0,0 L10,10 M10,0 L0,10"
+                              Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+                </Button>
+            </StackPanel>
+        </Grid>
 
         <!-- Status Bar -->
         <Border DockPanel.Dock="Bottom"

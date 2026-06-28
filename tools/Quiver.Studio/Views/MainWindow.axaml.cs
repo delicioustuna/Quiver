@@ -45,6 +45,39 @@ public partial class MainWindow : Window
             if (Application.Current is not null && vm.IsDarkTheme)
                 Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
         };
+
+        TitleBar.PointerPressed += OnTitleBarPointerPressed;
+        TitleBar.DoubleTapped += OnTitleBarDoubleTapped;
+    }
+
+    private void OnTitleBarPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            BeginMoveDrag(e);
+    }
+
+    private void OnTitleBarDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        WindowState = WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
+    }
+
+    private void OnMinimizeClick(object? sender, RoutedEventArgs e)
+    {
+        WindowState = WindowState.Minimized;
+    }
+
+    private void OnMaximizeClick(object? sender, RoutedEventArgs e)
+    {
+        WindowState = WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
+    }
+
+    private void OnCloseClick(object? sender, RoutedEventArgs e)
+    {
+        Close();
     }
 
     public void Initialize(SettingsService settingsService, IntellisenseService intellisenseService)
