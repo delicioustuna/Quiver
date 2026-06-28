@@ -454,6 +454,135 @@ long n = g.Nodes<Person>()
              (p, t) => new Use { Note = p.Name });
 ```
 
+---
+
+## 13. ユーザー定義 DSL (ドメイン固有トラバーサル)
+
+拡張メソッドで既存のトラバーサルステップを合成し、ドメイン固有の語彙でクエリを書けるようにする。
+SourceGenerator が生成する型保存ホップ糖衣 (§6) とシームレスに混在させられる。
+
+### スキーマ定義 (前提)
+
+```csharp
+[Node]
+public partial class Person
+{
+    [Property] public string Name { get; set; } = "";
+    [Property] public int Age { get; set; }
+    [Property] public string Role { get; set; } = "";
+}
+
+[Node]
+public partial class Post
+{
+    [Property] public string Title { get; set; } = "";
+    [Property] public long CreatedAt { get; set; }
+    [Property] public bool Featured { get; set; }
+}
+
+[Relationship<Person, Post>("WROTE")]
+public partial class Wrote
+{
+    [Property] public string Note { get; set; } = "";
+}
+```
+
+SourceGenerator は `Wrote` から以下の糖衣を自動生成する:
+
+```csharp
+// 自動生成 (Wrote.GraphRel.g.cs)
+public static class WroteTraversalExtensions
+{
+    public static TypedGraphTraversal<Post> Wrote(this TypedGraphTraversal<Person> source)
+        => source.Out<Wrote, Post>();
+
+    public static TypedGraphTraversal<Post> Wrote(this TypedGraphTraversal<Person> source,
+        Expression<Func<Wrote, bool>> edgeFilter)
+        => source.OutWhere<Wrote, Post>(edgeFilter);
+
+    // AddWrote, MergeWrote ...
+}
+```
+
+### DSL の定義
+
+`TypedGraphTraversal<T>` への拡張メソッドで型保存、`GraphTraversalSource` への拡張メソッドで起点を追加する。
+
+```csharp
+public static class BlogDsl
+{
+    // ── 起点 ──
+    public static TypedGraphTraversal<Person> Authors(this GraphTraversalSource g)
+        => g.Nodes<Person>().Where(p => p.Role == "author");
+
+    // ── Person フィルタ ──
+    public static TypedGraphTraversal<Person> Adults(this TypedGraphTraversal<Person> t)
+        => t.Where(p => p.Age >= 18);
+
+    // ── Post フィルタ ──
+    public static TypedGraphTraversal<Post> Featured(this TypedGraphTraversal<Post> t)
+        => t.Has(p => p.Featured, true);
+
+    public static TypedGraphTraversal<Post> Since(this TypedGraphTraversal<Post> t, long unixSeconds)
+        => t.Has(p => p.CreatedAt, P.Gte(unixSeconds));
+}
+```
+
+### SourceGenerator 糖衣との混在チェーン
+
+ユーザー定義 DSL も SourceGenerator 生成の糖衣も同じ `TypedGraphTraversal<T>` 上の拡張メソッドなので、自由に混ぜて書ける。
+
+```csharp
+// SourceGenerator: .Wrote()
+// ユーザー DSL:    .Authors(), .Adults(), .Featured(), .Since()
+var hits = g.Authors()
+    .Adults()
+    .Wrote()
+    .Featured()
+    .Since(cutoff)
+    .ToList();   // List<Post>
+
+// エッジ述語付き生成メソッドとの組み合わせ
+var drafts = g.Nodes<Person>()
+    .Adults()
+    .Wrote(e => e.Note.Contains("draft"))
+    .Since(cutoff)
+    .ToList();
+```
+
+### 型なしトラバーサルとの境界
+
+`TypedGraphTraversal<T>` から `.Out(string)` 等で `GraphTraversal<NodeId>` に降格すると、`TypedGraphTraversal<T>` 用の DSL メソッドは使えなくなる。型付きホップで辿れるなら常にそちらを使う。
+
+```csharp
+// NG: .Out("WROTE") は GraphTraversal<NodeId> を返すため .Featured() が見えない
+g.Nodes<Person>().Adults()
+    .Out("WROTE")    // → GraphTraversal<NodeId>
+    .Featured();     // ❌ コンパイルエラー
+
+// OK: SourceGenerator の .Wrote() は TypedGraphTraversal<Post> を返す
+g.Nodes<Person>().Adults()
+    .Wrote()         // → TypedGraphTraversal<Post>
+    .Featured();     // ✅
+```
+
+`GraphTraversal<NodeId>` (型なし) 用の DSL を書くこともできるが、ドメイン固有の型安全性は失われる:
+
+```csharp
+// 型なし DSL も定義可能 (ラベル名の文字列指定)
+public static class UntypedBlogDsl
+{
+    public static GraphTraversal<NodeId> People(this GraphTraversalSource g)
+        => g.Nodes().HasLabel("Person");
+
+    public static GraphTraversal<NodeId> Adults(this GraphTraversal<NodeId> t)
+        => t.Has("Age", P.Gte(18L));
+}
+
+// 型なし DSL 同士のチェーンは問題ない
+var names = g.People().Adults().Out("WROTE").Values("Title").ToList();
+```
+
 ### MergeRelationship のコスト
 
 `MergeRelationship` の存在判定は始点ノードの同一型 outgoing edge を線形スキャン
