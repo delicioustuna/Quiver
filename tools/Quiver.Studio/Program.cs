@@ -25,6 +25,10 @@ public static class Program
             return;
         }
 
+        using var mutex = new Mutex(true, "Quiver.Studio.SingleInstance", out var createdNew);
+        if (!createdNew)
+            return;
+
         var logPath = Path.Combine(AppContext.BaseDirectory, "studio.log");
 
         using var host = Host.CreateDefaultBuilder(args)
