@@ -3,6 +3,7 @@
         xmlns:vm="using:Quiver.Studio.ViewModels"
         xmlns:dockCtrl="using:Dock.Avalonia.Controls"
         xmlns:res="using:Quiver.Studio.Resources"
+        xmlns:i="clr-namespace:FluentIcons.Avalonia;assembly=FluentIcons.Avalonia"
         x:Class="Quiver.Studio.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding Title}"
@@ -116,9 +117,9 @@
                         CornerRadius="0"
                         VerticalContentAlignment="Center"
                         HorizontalContentAlignment="Center">
-                    <PathIcon Width="10" Height="10"
-                              Data="M0,5 L10,5"
-                              Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+                     <i:SymbolIcon Symbol="ArrowMinimize"
+                                   FontSize="16"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
                 </Button>
                 <Button x:Name="MaximizeButton"
                         Click="OnMaximizeClick"
@@ -128,10 +129,9 @@
                         CornerRadius="0"
                         VerticalContentAlignment="Center"
                         HorizontalContentAlignment="Center">
-                    <PathIcon Width="10" Height="10"
-                              x:Name="MaximizeIcon"
-                              Data="M0,0 L10,0 L10,10 L0,10 Z"
-                              Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+                     <i:SymbolIcon Symbol="ArrowMaximize"
+                                   FontSize="16"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
                 </Button>
                 <Button x:Name="CloseButton"
                         Click="OnCloseClick"
@@ -142,9 +142,9 @@
                         VerticalContentAlignment="Center"
                         HorizontalContentAlignment="Center"
                         Classes="close">
-                    <PathIcon Width="10" Height="10"
-                              Data="M0,0 L10,10 M10,0 L0,10"
-                              Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+                    <i:SymbolIcon Symbol="Dismiss"
+                                  FontSize="16"
+                                  Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
                 </Button>
             </StackPanel>
         </Grid>

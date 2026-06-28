@@ -50,14 +50,27 @@ public partial class MainWindow : Window
         TitleBar.DoubleTapped += OnTitleBarDoubleTapped;
     }
 
+    private static bool IsMenuSource(object? source)
+    {
+        for (var c = source as Control; c is not null; c = c.Parent as Control)
+        {
+            if (c is Menu or MenuItem)
+                return true;
+        }
+        return false;
+    }
+
     private void OnTitleBarPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
-            BeginMoveDrag(e);
+        if (IsMenuSource(e.Source) || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            return;
+        BeginMoveDrag(e);
     }
 
     private void OnTitleBarDoubleTapped(object? sender, TappedEventArgs e)
     {
+        if (IsMenuSource(e.Source))
+            return;
         WindowState = WindowState == WindowState.Maximized
             ? WindowState.Normal
             : WindowState.Maximized;
