@@ -9,7 +9,7 @@
         <!-- Left: TreeView -->
         <DockPanel Grid.Column="0">
             <TextBox DockPanel.Dock="Top"
-                     Watermark="Filter..."
+                     PlaceholderText="Filter..."
                      Text="{Binding FilterText}"
                      Margin="4" />
 

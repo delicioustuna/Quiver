@@ -12,6 +12,7 @@ public sealed class IntellisenseService : IDisposable
     private IReadOnlyList<MetadataReference>? _metadataReferences;
     private CSharpParseOptions? _parseOptions;
     private Dictionary<string, string>? _xmlDocs;
+    private Dictionary<string, XElement>? _xmlDocElements;
 
     private static readonly string[] Usings =
     [
@@ -40,7 +41,7 @@ public sealed class IntellisenseService : IDisposable
             {
                 _metadataReferences = CollectMetadataReferences();
                 _parseOptions = new CSharpParseOptions(LanguageVersion.Latest);
-                _xmlDocs = LoadXmlDocs();
+                (_xmlDocs, _xmlDocElements) = LoadXmlDocs();
                 _logger.LogInformation("IntelliSense 初期化完了");
             }
             catch (Exception ex)
@@ -236,35 +237,126 @@ public sealed class IntellisenseService : IDisposable
         return sb.ToString();
     }
 
-    private static Dictionary<string, string>? LoadXmlDocs()
+    private static (Dictionary<string, string>?, Dictionary<string, XElement>?) LoadXmlDocs()
     {
         var dllPath = typeof(GraphDatabase).Assembly.Location;
         if (string.IsNullOrEmpty(dllPath))
-            return null;
+            return (null, null);
 
         var xmlPath = Path.ChangeExtension(dllPath, ".xml");
         if (!File.Exists(xmlPath))
-            return null;
+            return (null, null);
 
         try
         {
-            var dict = new Dictionary<string, string>();
+            var summaries = new Dictionary<string, string>();
+            var elements = new Dictionary<string, XElement>();
             var doc = XDocument.Load(xmlPath);
             foreach (var member in doc.Descendants("member"))
             {
                 var name = member.Attribute("name")?.Value;
+                if (name is null) continue;
+                elements[name] = member;
                 var summary = member.Element("summary")?.Value;
-                if (name is null || summary is null) continue;
-                dict[name] = string.Join(' ',
-                    summary.Split(default(char[]), StringSplitOptions.RemoveEmptyEntries));
+                if (summary is not null)
+                    summaries[name] = string.Join(' ',
+                        summary.Split(default(char[]), StringSplitOptions.RemoveEmptyEntries));
             }
-            return dict;
+            return (summaries, elements);
         }
         catch
         {
+            return (null, null);
+        }
+    }
+
+    public async Task<HoverInfo?> GetHoverInfoAsync(string code, int position, CancellationToken ct)
+    {
+        if (_metadataReferences is null)
+            return null;
+
+        try
+        {
+            return await Task.Run(() =>
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var wrappedCode = Preamble + code + "\n}}";
+                var adjustedPosition = Preamble.Length + position;
+
+                if (adjustedPosition < 0 || adjustedPosition > wrappedCode.Length)
+                    return null;
+
+                var tree = CSharpSyntaxTree.ParseText(wrappedCode, _parseOptions);
+                var compilation = CSharpCompilation.Create("Query",
+                    [tree],
+                    _metadataReferences,
+                    new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+                        .WithNullableContextOptions(NullableContextOptions.Enable));
+
+                var model = compilation.GetSemanticModel(tree);
+                var root = tree.GetRoot(ct);
+
+                var token = root.FindToken(adjustedPosition);
+                var node = token.Parent;
+
+                while (node is not null)
+                {
+                    var symbolInfo = model.GetSymbolInfo(node, ct);
+                    var symbol = symbolInfo.Symbol ?? symbolInfo.CandidateSymbols.FirstOrDefault();
+                    if (symbol is not null)
+                        return BuildHoverInfo(symbol);
+
+                    var typeInfo = model.GetTypeInfo(node, ct);
+                    if (typeInfo.Type is not null and not IErrorTypeSymbol)
+                        return BuildHoverInfo(typeInfo.Type);
+
+                    node = node.Parent;
+                }
+
+                return null;
+            }, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "ホバー情報取得失敗");
             return null;
         }
     }
+
+    private HoverInfo? BuildHoverInfo(ISymbol symbol)
+    {
+        var signature = symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+        var docId = symbol.GetDocumentationCommentId();
+
+        string? summary = null;
+        var parameters = new List<(string Name, string Description)>();
+        string? returns = null;
+
+        if (docId is not null && _xmlDocElements is not null &&
+            _xmlDocElements.TryGetValue(docId, out var element))
+        {
+            var summaryEl = element.Element("summary");
+            if (summaryEl is not null)
+                summary = CleanXml(summaryEl);
+
+            foreach (var param in element.Elements("param"))
+            {
+                var name = param.Attribute("name")?.Value ?? "";
+                parameters.Add((name, CleanXml(param)));
+            }
+
+            var returnsEl = element.Element("returns");
+            if (returnsEl is not null)
+                returns = CleanXml(returnsEl);
+        }
+
+        return new HoverInfo(signature, summary, parameters, returns);
+    }
+
+    private static string CleanXml(XElement element) =>
+        string.Join(' ', element.Value.Split(default(char[]), StringSplitOptions.RemoveEmptyEntries));
 
     public async Task<string?> GetDocIdAtPositionAsync(string code, int caretPosition, CancellationToken ct)
     {
@@ -350,3 +442,9 @@ public enum CompletionGlyph
     Local,
     Constant,
 }
+
+public sealed record HoverInfo(
+    string Signature,
+    string? Summary,
+    IReadOnlyList<(string Name, string Description)> Parameters,
+    string? Returns);
