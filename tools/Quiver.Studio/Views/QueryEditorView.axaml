@@ -2,7 +2,6 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Quiver.Studio.ViewModels"
              xmlns:ae="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
-             xmlns:i="clr-namespace:FluentIcons.Avalonia;assembly=FluentIcons.Avalonia"
              xmlns:res="using:Quiver.Studio.Resources"
              x:Class="Quiver.Studio.Views.QueryEditorView"
              x:DataType="vm:QueryEditorViewModel">
@@ -18,9 +17,9 @@
                         Padding="12,4"
                         VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <i:SymbolIcon Symbol="Play"
-                              FontSize="16"
-                              VerticalAlignment="Center" />
+                        <PathIcon Data="{StaticResource PlayIcon}"
+                                 Width="16" Height="16"
+                                 VerticalAlignment="Center" />
                         <TextBlock Text="{x:Static res:Strings.ExecuteF5}"
                               VerticalAlignment="Center" />
                     </StackPanel>

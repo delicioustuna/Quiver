@@ -1,10 +1,7 @@
-using System.Collections.Immutable;
-using System.Composition.Hosting;
+using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Completion;
 using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.Host.Mef;
-using Microsoft.CodeAnalysis.Text;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.Extensions.Logging;
 
 namespace Quiver.Studio.Services;
@@ -12,8 +9,9 @@ namespace Quiver.Studio.Services;
 public sealed class IntellisenseService : IDisposable
 {
     private readonly ILogger<IntellisenseService> _logger;
-    private AdhocWorkspace? _workspace;
-    private ProjectId? _projectId;
+    private IReadOnlyList<MetadataReference>? _metadataReferences;
+    private CSharpParseOptions? _parseOptions;
+    private Dictionary<string, string>? _xmlDocs;
 
     private static readonly string[] Usings =
     [
@@ -40,12 +38,14 @@ public sealed class IntellisenseService : IDisposable
         {
             try
             {
-                BuildWorkspace();
-                _logger.LogInformation("IntelliSense ワークスペース構築完了");
+                _metadataReferences = CollectMetadataReferences();
+                _parseOptions = new CSharpParseOptions(LanguageVersion.Latest);
+                _xmlDocs = LoadXmlDocs();
+                _logger.LogInformation("IntelliSense 初期化完了");
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "IntelliSense ワークスペース構築失敗");
+                _logger.LogWarning(ex, "IntelliSense 初期化失敗");
             }
         });
     }
@@ -53,57 +53,47 @@ public sealed class IntellisenseService : IDisposable
     public async Task<IReadOnlyList<CompletionEntry>> GetCompletionsAsync(
         string code, int caretPosition, CancellationToken ct)
     {
-        if (_workspace is null || _projectId is null)
-            return [];
-
-        var wrappedCode = Preamble + code + "\n}}";
-        var adjustedPosition = Preamble.Length + caretPosition;
-
-        if (adjustedPosition < 0 || adjustedPosition > wrappedCode.Length)
-            return [];
-
-        var documentId = DocumentId.CreateNewId(_projectId);
-        var solution = _workspace.CurrentSolution.AddDocument(
-            documentId, "__Query__.cs", SourceText.From(wrappedCode));
-        var document = solution.GetDocument(documentId);
-        if (document is null)
+        if (_metadataReferences is null)
             return [];
 
         try
         {
-            var completionService = CompletionService.GetService(document);
-            if (completionService is null)
-                return [];
-
-            var completions = await completionService.GetCompletionsAsync(
-                document, adjustedPosition, cancellationToken: ct);
-            if (completions is null)
-                return [];
-
-            var results = new List<CompletionEntry>(completions.ItemsList.Count);
-            foreach (var item in completions.ItemsList)
+            return await Task.Run(() =>
             {
                 ct.ThrowIfCancellationRequested();
 
-                var capturedItem = item;
-                var capturedDoc = document;
-                var capturedSvc = completionService;
+                var wrappedCode = Preamble + code + "\n}}";
+                var adjustedPosition = Preamble.Length + caretPosition;
 
-                results.Add(new CompletionEntry(
-                    item.DisplayText,
-                    item.FilterText,
-                    item.SortText,
-                    GetGlyphKind(item.Tags),
-                    async descCt =>
-                    {
-                        var desc = await capturedSvc.GetDescriptionAsync(
-                            capturedDoc, capturedItem, descCt);
-                        if (desc is null) return null;
-                        return string.Join("", desc.TaggedParts.Select(p => p.Text));
-                    }));
-            }
+                if (adjustedPosition < 0 || adjustedPosition > wrappedCode.Length)
+                    return (IReadOnlyList<CompletionEntry>)[];
 
-            return results;
+                var tree = CSharpSyntaxTree.ParseText(wrappedCode, _parseOptions);
+                var compilation = CSharpCompilation.Create("Query",
+                    [tree],
+                    _metadataReferences,
+                    new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+                        .WithNullableContextOptions(NullableContextOptions.Enable));
+
+                var model = compilation.GetSemanticModel(tree);
+                var root = tree.GetRoot(ct);
+
+                if (IsDotCompletion(root, adjustedPosition, out var exprBeforeDot))
+                {
+                    var typeInfo = model.GetTypeInfo(exprBeforeDot!, ct);
+                    var type = typeInfo.Type;
+                    if (type is null or IErrorTypeSymbol)
+                        return (IReadOnlyList<CompletionEntry>)[];
+
+                    var members = model.LookupSymbols(adjustedPosition, type);
+                    return BuildEntries(members.Where(s => s.CanBeReferencedByName));
+                }
+                else
+                {
+                    var symbols = model.LookupSymbols(adjustedPosition);
+                    return BuildEntries(symbols.Where(s => s.CanBeReferencedByName));
+                }
+            }, ct);
         }
         catch (OperationCanceledException)
         {
@@ -116,33 +106,88 @@ public sealed class IntellisenseService : IDisposable
         }
     }
 
-    private void BuildWorkspace()
+    private static bool IsDotCompletion(
+        SyntaxNode root, int position, out ExpressionSyntax? expression)
     {
-        var assemblies = MefHostServices.DefaultAssemblies;
-        var compositionContext = new ContainerConfiguration()
-            .WithAssemblies(assemblies)
-            .CreateContainer();
-        var hostServices = MefHostServices.Create(compositionContext);
+        expression = null;
+        if (position <= 0)
+            return false;
 
-        _workspace?.Dispose();
-        _workspace = new AdhocWorkspace(hostServices);
+        var tokenBefore = root.FindToken(position - 1);
+        if (tokenBefore.IsKind(SyntaxKind.DotToken) &&
+            tokenBefore.Parent is MemberAccessExpressionSyntax memberAccess)
+        {
+            expression = memberAccess.Expression;
+            return true;
+        }
 
-        _projectId = ProjectId.CreateNewId();
+        var current = root.FindToken(position);
+        if (current.Parent is IdentifierNameSyntax { Parent: MemberAccessExpressionSyntax parentAccess } &&
+            parentAccess.OperatorToken.Span.Start < position)
+        {
+            expression = parentAccess.Expression;
+            return true;
+        }
 
-        var metadataReferences = CollectMetadataReferences();
+        return false;
+    }
 
-        var projectInfo = ProjectInfo.Create(
-            _projectId,
-            VersionStamp.Default,
-            "QuiverQuery",
-            "QuiverQuery",
-            LanguageNames.CSharp,
-            compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
-                .WithNullableContextOptions(NullableContextOptions.Enable),
-            parseOptions: new CSharpParseOptions(LanguageVersion.Latest),
-            metadataReferences: metadataReferences);
+    private IReadOnlyList<CompletionEntry> BuildEntries(IEnumerable<ISymbol> symbols)
+    {
+        var seen = new HashSet<string>();
+        var results = new List<CompletionEntry>();
 
-        _workspace.AddProject(projectInfo);
+        foreach (var symbol in symbols)
+        {
+            var displayText = symbol.Name;
+            if (!seen.Add(displayText))
+                continue;
+
+            var glyph = GetGlyph(symbol);
+            var docId = symbol.GetDocumentationCommentId();
+
+            results.Add(new CompletionEntry(
+                displayText,
+                displayText,
+                displayText,
+                glyph,
+                docId is not null ? _ => Task.FromResult(GetXmlDocSummary(docId)) : null));
+        }
+
+        results.Sort((a, b) =>
+            string.Compare(a.DisplayText, b.DisplayText, StringComparison.OrdinalIgnoreCase));
+        return results;
+    }
+
+    private static CompletionGlyph GetGlyph(ISymbol symbol) => symbol.Kind switch
+    {
+        SymbolKind.Method => symbol is IMethodSymbol { IsExtensionMethod: true }
+            ? CompletionGlyph.ExtensionMethod
+            : CompletionGlyph.Method,
+        SymbolKind.Property => CompletionGlyph.Property,
+        SymbolKind.Field => symbol is IFieldSymbol { IsConst: true }
+            ? CompletionGlyph.Constant
+            : CompletionGlyph.Field,
+        SymbolKind.Event => CompletionGlyph.Event,
+        SymbolKind.NamedType when symbol is INamedTypeSymbol nts => nts.TypeKind switch
+        {
+            TypeKind.Class => CompletionGlyph.Class,
+            TypeKind.Struct => CompletionGlyph.Struct,
+            TypeKind.Interface => CompletionGlyph.Interface,
+            TypeKind.Enum => CompletionGlyph.Enum,
+            TypeKind.Delegate => CompletionGlyph.Delegate,
+            _ => CompletionGlyph.Class,
+        },
+        SymbolKind.Namespace => CompletionGlyph.Namespace,
+        SymbolKind.Local or SymbolKind.Parameter => CompletionGlyph.Local,
+        _ => CompletionGlyph.Other,
+    };
+
+    private string? GetXmlDocSummary(string docId)
+    {
+        if (_xmlDocs is not null && _xmlDocs.TryGetValue(docId, out var summary))
+            return summary;
+        return null;
     }
 
     private static List<MetadataReference> CollectMetadataReferences()
@@ -156,19 +201,13 @@ public sealed class IntellisenseService : IDisposable
                 continue;
             if (!seen.Add(asm.Location))
                 continue;
-            try
-            {
-                refs.Add(MetadataReference.CreateFromFile(asm.Location));
-            }
-            catch
-            {
-            }
+            try { refs.Add(MetadataReference.CreateFromFile(asm.Location)); }
+            catch { /* skip inaccessible assemblies */ }
         }
 
         AddReferenceIfMissing(refs, seen, typeof(object));
         AddReferenceIfMissing(refs, seen, typeof(Enumerable));
         AddReferenceIfMissing(refs, seen, typeof(GraphDatabase));
-
         return refs;
     }
 
@@ -197,35 +236,38 @@ public sealed class IntellisenseService : IDisposable
         return sb.ToString();
     }
 
-    private static CompletionGlyph GetGlyphKind(ImmutableArray<string> tags)
+    private static Dictionary<string, string>? LoadXmlDocs()
     {
-        foreach (var tag in tags)
+        var dllPath = typeof(GraphDatabase).Assembly.Location;
+        if (string.IsNullOrEmpty(dllPath))
+            return null;
+
+        var xmlPath = Path.ChangeExtension(dllPath, ".xml");
+        if (!File.Exists(xmlPath))
+            return null;
+
+        try
         {
-            switch (tag)
+            var dict = new Dictionary<string, string>();
+            var doc = XDocument.Load(xmlPath);
+            foreach (var member in doc.Descendants("member"))
             {
-                case "Method": return CompletionGlyph.Method;
-                case "Property": return CompletionGlyph.Property;
-                case "Field": return CompletionGlyph.Field;
-                case "Event": return CompletionGlyph.Event;
-                case "Class": return CompletionGlyph.Class;
-                case "Struct": case "Structure": return CompletionGlyph.Struct;
-                case "Interface": return CompletionGlyph.Interface;
-                case "Enum": return CompletionGlyph.Enum;
-                case "EnumMember": return CompletionGlyph.EnumMember;
-                case "Delegate": return CompletionGlyph.Delegate;
-                case "Namespace": return CompletionGlyph.Namespace;
-                case "Keyword": return CompletionGlyph.Keyword;
-                case "Local": case "Parameter": return CompletionGlyph.Local;
-                case "Constant": return CompletionGlyph.Constant;
-                case "ExtensionMethod": return CompletionGlyph.ExtensionMethod;
+                var name = member.Attribute("name")?.Value;
+                var summary = member.Element("summary")?.Value;
+                if (name is null || summary is null) continue;
+                dict[name] = string.Join(' ',
+                    summary.Split(default(char[]), StringSplitOptions.RemoveEmptyEntries));
             }
+            return dict;
         }
-        return CompletionGlyph.Other;
+        catch
+        {
+            return null;
+        }
     }
 
     public void Dispose()
     {
-        _workspace?.Dispose();
     }
 }
 

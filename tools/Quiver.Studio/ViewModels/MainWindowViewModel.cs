@@ -37,6 +37,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private IRootDock? _dockLayout;
 
+    [ObservableProperty]
+    private string? _initializationStatus;
+
     public StudioDockFactory? DockFactory { get; set; }
 
     public string Title => "Quiver Studio";

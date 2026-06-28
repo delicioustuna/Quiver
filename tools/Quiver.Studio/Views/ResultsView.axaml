@@ -1,7 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Quiver.Studio.ViewModels"
-             xmlns:i="clr-namespace:FluentIcons.Avalonia;assembly=FluentIcons.Avalonia"
              xmlns:res="using:Quiver.Studio.Resources"
              x:Class="Quiver.Studio.Views.ResultsView"
              x:DataType="vm:ResultsViewModel">
@@ -17,9 +16,9 @@
                         Padding="8,2"
                         FontSize="11">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <i:SymbolIcon Symbol="DocumentCsv"
-                              FontSize="16"
-                              VerticalAlignment="Center" />
+                        <PathIcon Data="{StaticResource DocumentTextIcon}"
+                                 Width="16" Height="16"
+                                 VerticalAlignment="Center" />
                         <TextBlock Text="{x:Static res:Strings.CopyCsv}"
                               VerticalAlignment="Center" />
                     </StackPanel>
@@ -28,9 +27,9 @@
                         Padding="8,2"
                         FontSize="11">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <i:SymbolIcon Symbol="Braces"
-                              FontSize="16"
-                              VerticalAlignment="Center" />
+                        <PathIcon Data="{StaticResource BracesIcon}"
+                                 Width="16" Height="16"
+                                 VerticalAlignment="Center" />
                         <TextBlock Text="{x:Static res:Strings.CopyJson}"
                               VerticalAlignment="Center" />
                     </StackPanel>

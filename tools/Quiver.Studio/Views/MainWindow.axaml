@@ -3,7 +3,6 @@
         xmlns:vm="using:Quiver.Studio.ViewModels"
         xmlns:dockCtrl="using:Dock.Avalonia.Controls"
         xmlns:res="using:Quiver.Studio.Resources"
-        xmlns:i="clr-namespace:FluentIcons.Avalonia;assembly=FluentIcons.Avalonia"
         x:Class="Quiver.Studio.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding Title}"
@@ -117,9 +116,9 @@
                         CornerRadius="0"
                         VerticalContentAlignment="Center"
                         HorizontalContentAlignment="Center">
-                     <i:SymbolIcon Symbol="ArrowMinimize"
-                                   FontSize="16"
-                                   Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+                     <PathIcon Data="{StaticResource ArrowMinimizeIcon}"
+                              Width="16" Height="16"
+                              Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
                 </Button>
                 <Button x:Name="MaximizeButton"
                         Click="OnMaximizeClick"
@@ -129,9 +128,9 @@
                         CornerRadius="0"
                         VerticalContentAlignment="Center"
                         HorizontalContentAlignment="Center">
-                     <i:SymbolIcon Symbol="ArrowMaximize"
-                                   FontSize="16"
-                                   Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+                     <PathIcon Data="{StaticResource ArrowMaximizeIcon}"
+                              Width="16" Height="16"
+                              Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
                 </Button>
                 <Button x:Name="CloseButton"
                         Click="OnCloseClick"
@@ -142,9 +141,9 @@
                         VerticalContentAlignment="Center"
                         HorizontalContentAlignment="Center"
                         Classes="close">
-                    <i:SymbolIcon Symbol="Dismiss"
-                                  FontSize="16"
-                                  Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+                    <PathIcon Data="{StaticResource DismissIcon}"
+                             Width="16" Height="16"
+                             Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
                 </Button>
             </StackPanel>
         </Grid>
@@ -190,6 +189,13 @@
                 <StackPanel Grid.Column="1"
                             Orientation="Horizontal"
                             Spacing="12">
+                    <TextBlock FontSize="12"
+                               Foreground="Orange"
+                               IsVisible="{Binding InitializationStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                               Text="{Binding InitializationStatus}" />
+                    <TextBlock FontSize="12" Text="|"
+                               Foreground="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                               IsVisible="{Binding InitializationStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                     <TextBlock FontSize="12"
                                Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                                IsVisible="{Binding GraphCanvas.HasGraph}"

@@ -15,6 +15,7 @@ public partial class MainWindow : Window
 {
     private SettingsService? _settingsService;
     private IntellisenseService? _intellisenseService;
+    private QueryExecutionService? _queryExecutionService;
     private StudioDockFactory? _dockFactory;
     private QueryEditorView? _queryEditor;
 
@@ -93,11 +94,35 @@ public partial class MainWindow : Window
         Close();
     }
 
-    public void Initialize(SettingsService settingsService, IntellisenseService intellisenseService)
+    public void Initialize(
+        SettingsService settingsService,
+        IntellisenseService intellisenseService,
+        QueryExecutionService queryExecutionService)
     {
         _settingsService = settingsService;
         _intellisenseService = intellisenseService;
+        _queryExecutionService = queryExecutionService;
         RestoreWindowState();
+    }
+
+    protected override void OnOpened(EventArgs e)
+    {
+        base.OnOpened(e);
+        _ = WarmupServicesAsync();
+    }
+
+    private async Task WarmupServicesAsync()
+    {
+        if (DataContext is not MainWindowViewModel vm) return;
+
+        vm.InitializationStatus = "Roslyn エンジン初期化中…";
+        _queryExecutionService?.Warmup();
+
+        vm.InitializationStatus = "IntelliSense 初期化中…";
+        if (_intellisenseService is not null)
+            await _intellisenseService.InitializeAsync();
+
+        vm.InitializationStatus = null;
     }
 
     public void RegisterQueryEditor(QueryEditorView editor)

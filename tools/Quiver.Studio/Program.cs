@@ -1,7 +1,6 @@
 using System.Globalization;
 using Avalonia;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Quiver.Studio.Resources;
 using Quiver.Studio.Services;
@@ -11,7 +10,6 @@ namespace Quiver.Studio;
 
 public static class Program
 {
-    // Avalonia デザイナを表示するために実行時の ServiceProvider を保持する静的プロパティ
     public static IServiceProvider? ServiceProvider { get; private set; }
 
     [STAThread]
@@ -31,39 +29,15 @@ public static class Program
 
         var logPath = Path.Combine(AppContext.BaseDirectory, "studio.log");
 
-        using var host = Host.CreateDefaultBuilder(args)
-            .ConfigureLogging(logging =>
-            {
-                logging.ClearProviders();
-                logging.AddProvider(new FileLoggerProvider(logPath));
-                logging.SetMinimumLevel(LogLevel.Debug);
-            })
-            .ConfigureServices(ConfigureServices)
-            .Build();
+        var services = new ServiceCollection();
 
-        SetupGlobalExceptionHandlers(host.Services);
-
-        var settingsService = host.Services.GetRequiredService<SettingsService>();
-        var lang = settingsService.Settings.Language;
-        if (lang is not "auto")
+        services.AddLogging(builder =>
         {
-            var culture = new CultureInfo(lang);
-            Strings.Culture = culture;
-            Thread.CurrentThread.CurrentUICulture = culture;
-        }
+            builder.ClearProviders();
+            builder.AddProvider(new FileLoggerProvider(logPath));
+            builder.SetMinimumLevel(LogLevel.Debug);
+        });
 
-        host.Services.GetRequiredService<QueryExecutionService>().Warmup();
-        _ = host.Services.GetRequiredService<IntellisenseService>().InitializeAsync();
-
-        // 実行時のサービスプロバイダを格納
-        ServiceProvider = host.Services;
-
-        // 引数なしで呼び出すように変更
-        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
-    }
-
-    private static void ConfigureServices(HostBuilderContext context, IServiceCollection services)
-    {
         services.AddSingleton<SettingsService>();
         services.AddSingleton<DatabaseService>();
         services.AddSingleton<QueryExecutionService>();
@@ -72,11 +46,27 @@ public static class Program
         services.AddSingleton<GraphEditingService>();
         services.AddSingleton<IntellisenseService>();
         services.AddTransient<MainWindowViewModel>();
+
+        using var sp = services.BuildServiceProvider();
+
+        SetupGlobalExceptionHandlers(sp);
+
+        var settingsService = sp.GetRequiredService<SettingsService>();
+        var lang = settingsService.Settings.Language;
+        if (lang is not "auto")
+        {
+            var culture = new CultureInfo(lang);
+            Strings.Culture = culture;
+            Thread.CurrentThread.CurrentUICulture = culture;
+        }
+
+        ServiceProvider = sp;
+
+        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
-    // プレビューアが認識できるように public static かつ引数なしにする
     private static AppBuilder BuildAvaloniaApp()
-        => AppBuilder.Configure(() => new App(ServiceProvider)) // 静的プロパティを渡す
+        => AppBuilder.Configure(() => new App(ServiceProvider))
             .UsePlatformDetect()
             .WithInterFont()
             .LogToTrace();

@@ -22,13 +22,11 @@
     <PackageReference Include="Dock.Avalonia" Version="12.0.0.2" />
     <PackageReference Include="Dock.Avalonia.Themes.Fluent" Version="12.0.0.2" />
     <PackageReference Include="Dock.Model.Inpc" Version="12.0.0.2" />
-    <PackageReference Include="FluentIcons.Avalonia" Version="2.1.330" />
     <PackageReference Include="TextMateSharp.Grammars" Version="2.*" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
     <PackageReference Include="R3" Version="1.*" />
-    <PackageReference Include="ObservableCollections" Version="3.*" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.*" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="5.3.0" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" Version="5.3.0" />
   </ItemGroup>
 </Project>

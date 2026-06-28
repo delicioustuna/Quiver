@@ -2,7 +2,6 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Quiver.Studio.ViewModels"
              xmlns:m="using:Quiver.Studio.Models"
-             xmlns:i="clr-namespace:FluentIcons.Avalonia;assembly=FluentIcons.Avalonia"
              x:Class="Quiver.Studio.Views.QueryHistoryPanel"
              x:DataType="vm:QueryHistoryViewModel">
     <DockPanel>
@@ -22,9 +21,9 @@
                         FontSize="11"
                         Margin="4,0,0,0">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                        <i:SymbolIcon Symbol="Eraser" 
-                                FontSize="16" 
-                                VerticalAlignment="Center" />
+                        <PathIcon Data="{StaticResource EraserIcon}"
+                                 Width="16" Height="16"
+                                 VerticalAlignment="Center" />
                         <TextBlock Text="全て削除" 
                                 VerticalAlignment="Center" />
                     </StackPanel>
@@ -65,9 +64,9 @@
                                 FontSize="10"
                                 Padding="4,1"
                                 VerticalAlignment="Top">
-                            <i:SymbolIcon Symbol="Dismiss" 
-                                FontSize="16" 
-                                VerticalAlignment="Center" />
+                            <PathIcon Data="{StaticResource DismissIcon}"
+                                     Width="16" Height="16"
+                                     VerticalAlignment="Center" />
                         </Button>
                     </Grid>
                 </DataTemplate>

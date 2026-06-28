@@ -2,7 +2,6 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Quiver.Studio.ViewModels"
              xmlns:views="using:Quiver.Studio.Views"
-             xmlns:i="clr-namespace:FluentIcons.Avalonia;assembly=FluentIcons.Avalonia"
              x:Class="Quiver.Studio.Views.GraphCanvas"
              x:DataType="vm:GraphCanvasViewModel">
     <Panel>
@@ -18,17 +17,17 @@
                     IsVisible="{Binding HasGraph}">
             <ToggleButton IsChecked="{Binding !IsHierarchicalLayout}"
                           FontSize="11" Padding="8,2">
-                <i:SymbolIcon Symbol="IoT"
-                              FontSize="16"
-                              VerticalAlignment="Center"
-                              ToolTip.Tip="分散レイアウト" />
+                <PathIcon Data="{StaticResource ConnectedIcon}"
+                         Width="16" Height="16"
+                         VerticalAlignment="Center"
+                         ToolTip.Tip="分散レイアウト" />
             </ToggleButton>
             <ToggleButton IsChecked="{Binding IsHierarchicalLayout}"
                           FontSize="11" Padding="8,2">
-                <i:SymbolIcon Symbol="Org"
-                              FontSize="16"
-                              VerticalAlignment="Center"
-                              ToolTip.Tip="階層レイアウト" />
+                <PathIcon Data="{StaticResource OrganizationIcon}"
+                         Width="16" Height="16"
+                         VerticalAlignment="Center"
+                         ToolTip.Tip="階層レイアウト" />
             </ToggleButton>
 
             <Border Width="1" Background="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" Margin="4,2"/>
@@ -36,16 +35,16 @@
             <Button x:Name="ExportSvgButton" Click="OnExportSvgClick"
                     FontSize="11" Padding="8,2"
                     ToolTip.Tip="SVG エクスポート">
-                <i:SymbolIcon Symbol="ArrowDownload"
-                              FontSize="16"
-                              VerticalAlignment="Center" />
+                <PathIcon Data="{StaticResource ArrowDownloadIcon}"
+                         Width="16" Height="16"
+                         VerticalAlignment="Center" />
             </Button>
             <Button x:Name="ExportPngButton" Click="OnExportPngClick"
                     FontSize="11" Padding="8,2"
                     ToolTip.Tip="PNG エクスポート">
-                <i:SymbolIcon Symbol="Image"
-                              FontSize="16"
-                              VerticalAlignment="Center" />
+                <PathIcon Data="{StaticResource ImageIcon}"
+                         Width="16" Height="16"
+                         VerticalAlignment="Center" />
             </Button>
         </StackPanel>
 
