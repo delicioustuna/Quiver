@@ -39,9 +39,9 @@ internal sealed class PagedFile : IPagedFile
     private int _clockHand;
     private bool _disposed;
     private byte? _walFileKind;
-    // FT-15: WAL を先行フラッシュ (write-ahead) するために保持する。EnableWalLogging で配線。
+    // WAL を先行フラッシュ (write-ahead) するために保持する。EnableWalLogging で配線。
     private IWriteAheadLog? _wal;
-    // OB-2: dotnet-counters の buffer-pool-size-bytes gauge へ提供する provider 登録ハンドル。
+    // dotnet-counters の buffer-pool-size-bytes gauge へ提供する provider 登録ハンドル。
     private readonly IDisposable _bufferPoolSizeRegistration;
 
     int IPagedFile.PageSize => PageSizeConst;
@@ -57,7 +57,7 @@ internal sealed class PagedFile : IPagedFile
         for (int i = 0; i < poolCapacity; i++)
             _frames[i] = new PoolFrame();
 
-        // OB-2: 本 PagedFile が保有するバッファプールサイズを EventCounters の gauge に登録する。
+        // 本 PagedFile が保有するバッファプールサイズを EventCounters の gauge に登録する。
         // 複数 PagedFile (data + index 等) が並存しても合算されて 1 つのメトリクスとして出る。
         long bufferPoolBytes = (long)_poolCapacity * PageSizeConst;
         _bufferPoolSizeRegistration =
@@ -178,8 +178,8 @@ internal sealed class PagedFile : IPagedFile
     public PageReadHandle PinForRead(PageId pageId)
     {
         int frame = GetOrLoadFrame(pageId);
-        // FT-26: ハンドル生存中、他スレッドからの書き込みからバッファを保護する。
-        // Task B: 検証はロード時に済んでいるので pin ごとの再検証はしない (上記 GetOrLoadFrame 参照)。
+        // ハンドル生存中、他スレッドからの書き込みからバッファを保護する。
+        // 検証はロード時に済んでいるので pin ごとの再検証はしない (上記 GetOrLoadFrame 参照)。
         _frames[frame].FrameLock.EnterReadLock();
         return new PageReadHandle(this, pageId, ReadFrameSpan(frame));
     }
@@ -189,16 +189,16 @@ internal sealed class PagedFile : IPagedFile
     public PageWriteHandle PinForWrite(PageId pageId, WalJournalMode mode)
     {
         int frame = GetOrLoadFrame(pageId);
-        // FT-26: ハンドル生存中、他スレッドからの読み書きを排他する。
+        // ハンドル生存中、他スレッドからの読み書きを排他する。
         _frames[frame].FrameLock.EnterWriteLock();
         try
         {
             Span<byte> raw = ReadFrameSpan(frame);
-            // Task B: 検証はロード時に済んでいるので pin ごとの再検証はしない (GetOrLoadFrame 参照)。
-            // FT-15: この書き込みトランザクション内で本ページを初めて pin する時点の内容を
+            // 検証はロード時に済んでいるので pin ごとの再検証はしない (GetOrLoadFrame 参照)。
+            // この書き込みトランザクション内で本ページを初めて pin する時点の内容を
             // before-image として捕捉する。caller がまだ変更していないこの瞬間が唯一の機会。
             // frame は pin 済みなので evict されず、span は安定している。
-            // FTS-7: journaling モードを記録し (spec: 07_fulltext.md#ft-journaling)、有効モードが Full のときのみ CLR を捕捉する
+            // journaling モードを記録し、有効モードが Full のときのみ CLR を捕捉する
             //   (RedoOnly/Suppressed の FT ページは before-image を出さない)。
             if (_walFileKind is byte fileKind)
             {
@@ -397,30 +397,30 @@ internal sealed class PagedFile : IPagedFile
             {
                 _frames[existing].Referenced = true;
                 Interlocked.Increment(ref _frames[existing].PinCount);
-                // OB-1: バッファプールヒット計上 (lock 内で counter add は軽量)。
+                // バッファプールヒット計上 (lock 内で counter add は軽量)。
                 QuiverTelemetry.BufferPoolHits.Add(1);
                 QuiverEventSource.Log.BufferPoolHit();
                 return existing;
             }
 
             int victim = FindVictim();
-            // OB-2: 既存ページを追い出してから新規ロードする場合のみ eviction としてカウント。
+            // 既存ページを追い出してから新規ロードする場合のみ eviction としてカウント。
             // 起動直後の空フレーム埋めはミスにはなるが eviction ではない。
             bool wasEviction = _frames[victim].PageId.IsValid;
             EvictFrame(victim);
 
             _frames[victim].PageId = pageId;
             MmfReadPage(pageId, _frames[victim].Buffer);
-            // Task B: checksum / magic / pageId の検証は disk→frame ロード時 (= ここ) のみ行う。
+            // checksum / magic / pageId の検証は disk→frame ロード時 (= ここ) のみ行う。
             // 常駐フレームの pin ごとに全ページ CRC を再計算するのは冗長 (RAM 上の内容は disk 破損に
             // 晒されず、書込は UnpinDirty で checksum を更新し FrameLock が read/write pin を排他する)。
-            // 破損ページの早期検出はロード時で十分 (StorageTests.CorruptMagic / crash contract が担保)。
+            // 破損ページの早期検出はロード時で十分。
             PageHeader.Validate(ReadFrameSpan(victim), pageId);
             _frames[victim].Referenced = true;
             _frames[victim].IsDirty = false;
             _pageToFrame[pageId] = victim;
             Interlocked.Increment(ref _frames[victim].PinCount);
-            // OB-1: バッファプールミス (eviction + page-in 発生)。
+            // バッファプールミス (eviction + page-in 発生)。
             QuiverTelemetry.BufferPoolMisses.Add(1);
             QuiverEventSource.Log.BufferPoolMiss();
             if (wasEviction) QuiverEventSource.Log.BufferPoolEviction();
@@ -456,7 +456,7 @@ internal sealed class PagedFile : IPagedFile
         {
             if (f.IsDirty)
             {
-                // FT-15: steal ポリシー下では未コミットトランザクションのダーティページが
+                // steal ポリシー下では未コミットトランザクションのダーティページが
                 // ここでデータファイルへ漏れうる。クラッシュ時に巻き戻せるよう、ページを
                 // データファイルへ書く前にその before-image (CLR) が WAL に durable で
                 // あることを保証する (write-ahead 順序)。
@@ -469,7 +469,7 @@ internal sealed class PagedFile : IPagedFile
         }
     }
 
-    // FT-15: ダーティページをデータファイルへ書き出す前に WAL を末尾まで先行フラッシュする。
+    // ダーティページをデータファイルへ書き出す前に WAL を末尾まで先行フラッシュする。
     // FlushTo は flushedLsn が既に追いついていれば no-op なので、同一フラッシュ波の中で
     // 余計な fsync は発生しない。
     private void FlushWalBeforeDataWrite()
@@ -513,7 +513,7 @@ internal sealed class PagedFile : IPagedFile
         {
             if (_frames[i].IsDirty && _frames[i].PageId.IsValid) { anyDirty = true; break; }
         }
-        // FT-15: データページを書き出す前に WAL を先行フラッシュする (checkpoint / Flush /
+        // データページを書き出す前に WAL を先行フラッシュする (checkpoint / Flush /
         // ファイル拡張時の remap 経路も含む write-ahead 順序)。
         if (anyDirty) FlushWalBeforeDataWrite();
 
@@ -606,7 +606,7 @@ internal sealed class PagedFile : IPagedFile
         _viewAccessor?.Dispose();
         _mmf?.Dispose();
         _fileStream.Dispose();
-        // OB-2: dotnet-counters の gauge プロバイダから抜ける。
+        // dotnet-counters の gauge プロバイダから抜ける。
         _bufferPoolSizeRegistration.Dispose();
     }
 
@@ -617,10 +617,10 @@ internal sealed class PagedFile : IPagedFile
         public bool Referenced;
         public bool IsDirty;
         public readonly byte[] Buffer = new byte[PageSizeConst];
-        // FT-26: per-frame RW lock — Pin{Read|Write} 中の他スレッドからのページバッファ
-        // 並行アクセスを排他する。NodeStore.Allocate などで「同一ページ上の異なるレコード」を
-        // 別 tx (= 別スレッド) が同時更新するケースをサポート (Postgres SI 風)。
-        // SupportsRecursion: NodeStore は同 tx 内で同一ページに対し PinForRead → PinForWrite を
+        // per-frame RW lock — Pin{Read|Write} 中の他スレッドからのページバッファ
+        // 並行アクセスを排他する。同一ページ上の異なるレコードを別 tx (= 別スレッド) が
+        // 同時更新するケースをサポート (Postgres SI 風)。
+        // SupportsRecursion: 同 tx 内で同一ページに対し PinForRead → PinForWrite を
         // 連続させる経路 (例: header ページ更新) があるため、recursion を許可する。
         public readonly ReaderWriterLockSlim FrameLock = new(LockRecursionPolicy.SupportsRecursion);
     }

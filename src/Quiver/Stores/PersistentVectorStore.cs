@@ -20,7 +20,7 @@ internal sealed class PersistentVectorStore : IVectorStore
 {
     private readonly SingleFileContainer _container;
     private readonly byte _catalogTenantId;
-    // ARCH-6c: (kind, sequence) → 現世代を引く resolver。slot 再利用で別エンティティに化けた
+    // (kind, sequence) → 現世代を引く resolver。slot 再利用で別エンティティに化けた
     // stale binding を KNN read 時に弾くために使う。null = 旧経路 / テスト (世代照合なし)。
     private readonly Func<EntityKind, long, int>? _currentGeneration;
     private readonly Lock _gate = new();
@@ -113,8 +113,8 @@ internal sealed class PersistentVectorStore : IVectorStore
         if (vector.Length != h.Spec.Dimensions)
             throw new VectorException(
                 $"Vector index '{indexName}' expects {h.Spec.Dimensions} dimensions, got {vector.Length}.");
-        // ARCH-5b: binding キーは slot Sequence へ正規化 (node.Value (gen 付き packed) を渡されうる)。
-        // ARCH-6c: 現世代を payload に焼き込み、slot 再利用で別エンティティに化けた stale binding を
+        // binding キーは slot Sequence へ正規化 (node.Value (gen 付き packed) を渡されうる)。
+        // 現世代を payload に焼き込み、slot 再利用で別エンティティに化けた stale binding を
         // KNN read 時に弾けるようにする。resolver 無し (テスト) は 0。
         long seq = EntityRef.Sequence(entityId);
         ushort gen = ResolveGen(kind, seq);

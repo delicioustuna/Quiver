@@ -6,7 +6,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Storage;
 
 /// <summary>
-/// Phase 1 骨格: MVCC 版チェーン付きの可変長レコードを slotted ページ
+/// MVCC 版チェーン付きの可変長レコードを slotted ページ
 /// (<see cref="SlottedPage"/>) に格納するヒープ。論理 ID (Sequence) は
 /// <see cref="ItemPointerMap"/> 経由で head version の物理位置へ解決する。
 ///
@@ -23,8 +23,7 @@ namespace Quiver.Storage;
 /// <c>nextVersionPtr</c> を辿り最初に可視な version を返す。これにより xmin/xmax を
 /// レコードへ再内包した統一 MVCC レコードモデルを実現する。</para>
 ///
-/// <para>backend へは未配線 (Phase 2 で NodeStore を本ヒープへ載せ替える)。可視性は
-/// <see cref="VersionVisible"/> デリゲートで注入し、本骨格は MvccContext に依存しない
+/// <para>可視性は <see cref="VersionVisible"/> デリゲートで注入し、MvccContext に依存しない
 /// (単体テスト容易性のため)。</para>
 /// </summary>
 internal sealed class VersionedRecordHeap
@@ -45,7 +44,7 @@ internal sealed class VersionedRecordHeap
 
     private static readonly PageId HeaderPageId = new(1);
     private const int MetaAppendPage = 0;      // int64
-    private const int MetaFreePageHead = 8;    // int64 (ARCH-5c Phase 6: 空きページ free list 先頭、0 = 空)
+    private const int MetaFreePageHead = 8;    // int64 (空きページ free list 先頭、0 = 空)
     private const int MetaFormatVersion = 31;  // byte
 
     private readonly IPagedFile _file;
@@ -204,7 +203,7 @@ internal sealed class VersionedRecordHeap
     }
 
     /// <summary>
-    /// B2 (Task B): head version を <b>1 回の pin</b> で読む alloc-free 経路。<paramref name="dest"/> へ
+    /// head version を <b>1 回の pin</b> で読む alloc-free 経路。<paramref name="dest"/> へ
     /// payload 先頭をコピー (収まる分だけ) し、head の xmin/xmax と「より古い版が続くか」
     /// (<paramref name="hasOlderVersion"/>) を返す。戻り値 = payload 全長 (0 = エントリ無し)。
     ///
@@ -346,7 +345,7 @@ internal sealed class VersionedRecordHeap
             if (sp.TryGetMutable(kept[j].Slot, out var rec))
                 BinaryPrimitives.WriteInt64LittleEndian(rec[OffNext..], next.Pack());
         }
-        // ARCH-5c Phase 6: tombstone で空になったページを free list へ回収する。
+        // tombstone で空になったページを free list へ回収する。
         if (touched != null)
             foreach (var pg in touched) FreePageIfEmpty(pg);
         return removed;
@@ -377,7 +376,7 @@ internal sealed class VersionedRecordHeap
             ptr = next;
         }
         _map.Set(seq, ItemPointer.Null);
-        // ARCH-5c Phase 6: 空になったページを free list へ回収する (チェーン walk 後にまとめて、
+        // 空になったページを free list へ回収する (チェーン walk 後にまとめて、
         // 同一ページの多重 free を避ける)。
         if (touched != null)
             foreach (var pg in touched) FreePageIfEmpty(pg);
@@ -392,7 +391,7 @@ internal sealed class VersionedRecordHeap
     {
         if (payload.Length > MaxPayloadSize)
             throw new ArgumentException(
-                $"payload {payload.Length}B exceeds max {MaxPayloadSize}B (overflow ページは Phase 3)", nameof(payload));
+                $"payload {payload.Length}B exceeds max {MaxPayloadSize}B", nameof(payload));
 
         int total = VersionHeaderSize + payload.Length;
         byte[] buf = ArrayPool<byte>.Shared.Rent(total);
@@ -422,7 +421,7 @@ internal sealed class VersionedRecordHeap
                 return new ItemPointer(_appendPage, slot);
         }
 
-        // ARCH-5c Phase 6: 末尾ページが満杯なら、まず vacuum 回収済みの空きページを再利用する
+        // 末尾ページが満杯なら、まず vacuum 回収済みの空きページを再利用する
         // (free list が空のときだけ物理ページを新規割り当て)。これで churn 下の物理成長を抑える。
         PageId pid = PopFreePageOrAllocate();
         int newSlot;
@@ -509,6 +508,6 @@ internal sealed class VersionedRecordHeap
 
 /// <summary>
 /// 版の可視性判定デリゲート。<see cref="VersionedRecordHeap"/> を MvccContext から
-/// 切り離し、Phase 2 配線時に <see cref="Quiver.Core.Visibility"/> を注入できるようにする。
+/// 切り離し、<see cref="Quiver.Core.Visibility"/> を注入できるようにする。
 /// </summary>
 internal delegate bool VersionVisible(long xmin, long xmax);

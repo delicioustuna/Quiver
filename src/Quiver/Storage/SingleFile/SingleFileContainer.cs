@@ -28,7 +28,7 @@ internal sealed class SingleFileContainer : IDisposable
     // カタログ root body レイアウト
     private const int CatalogNextOffset = 0;          // int64: 次カタログページ物理 ID (-1 = なし)
     private const int CatalogCountOffset = 8;          // int64: 記述子件数
-    // ARCH-4 増分7: クリーン終了で WAL を削除しても MVCC visibility / TxId 採番を継続できるよう、
+    // クリーン終了で WAL を削除しても MVCC visibility / TxId 採番を継続できるよう、
     // 「これ未満の TxId は committed と presume してよい」高水位 (= 終了時の次 TxId) を root に保持する。
     private const int CommittedHighWaterOffset = 16;   // int64: committed TxId 高水位 (= 次採番 TxId)
     private const int CatalogDescriptorsOffset = 24;   // 以降 DescriptorSize バイトずつ
@@ -46,7 +46,7 @@ internal sealed class SingleFileContainer : IDisposable
     private readonly Dictionary<byte, TenantPagedFile> _tenants = new();
     private readonly object _gate = new();
     private bool _disposed;
-    // ARCH-4 増分7: committed TxId 高水位 (= 最終クリーン終了時の次採番 TxId)。0 = 未設定。
+    // committed TxId 高水位 (= 最終クリーン終了時の次採番 TxId)。0 = 未設定。
     private long _committedHighWaterTxId;
 
     public string Path => _physical.Path;
@@ -232,7 +232,7 @@ internal sealed class SingleFileContainer : IDisposable
                 var body = rh.Data;
                 long next = BinaryPrimitives.ReadInt64LittleEndian(body[CatalogNextOffset..]);
                 long count = BinaryPrimitives.ReadInt64LittleEndian(body[CatalogCountOffset..]);
-                // ARCH-4 増分7: committed TxId 高水位は root ページ (page 1) にのみ持つ。
+                // committed TxId 高水位は root ページ (page 1) にのみ持つ。
                 if (catalogPage == CatalogRootPageId.Value)
                     _committedHighWaterTxId = BinaryPrimitives.ReadInt64LittleEndian(body[CommittedHighWaterOffset..]);
                 int offset = CatalogDescriptorsOffset;

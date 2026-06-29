@@ -4,8 +4,8 @@ using Quiver.Storage;
 
 namespace Quiver.Storage.Records;
 
-// Blob page body (8160 bytes):
-//  0 NextPageId(8) | 8 TotalLen(8, first page only) | 16 Data(8144)
+// blob ページ本体 (8160 バイト):
+//  0 NextPageId(8) | 8 TotalLen(8, 先頭ページのみ) | 16 Data(8144)
 internal sealed class BlobStore
 {
     private const int DataOffset = 16;
@@ -44,7 +44,7 @@ internal sealed class BlobStore
             long pid = AllocBlobPage();
             if (firstPageId < 0) firstPageId = pid;
 
-            // Link previous page to this one
+            // 前のページをこのページにリンクする
             if (prevPageId >= 0)
             {
                 var prev = _file.PinForWrite(new PageId(prevPageId));
@@ -90,7 +90,7 @@ internal sealed class BlobStore
             ReadOnlySpan<byte> data = h.Data[DataOffset..];
             int remaining = destination.Length - totalRead;
             int toCopy = Math.Min(data.Length, remaining);
-            // Don't read past total length
+            // 全体長を超えて読み出さない
             if (totalLen > 0)
                 toCopy = (int)Math.Min(toCopy, totalLen - totalRead);
             data[..toCopy].CopyTo(destination[totalRead..]);

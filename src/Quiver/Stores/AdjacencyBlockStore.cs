@@ -41,7 +41,7 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
 
     public long Epoch => _epoch?.Epoch ?? 0;
     public long BaseRelHwm => _epoch?.BaseRelHwm ?? 0;
-    // ARCH-5b: tombstone epoch のキーは Sequence (packed Value ではない)。
+    // tombstone epoch のキーは Sequence (packed Value ではない)。
     public bool IsTombstoned(RelationshipId relId) => _epoch?.IsTombstoned(relId.Sequence) ?? false;
     public void Tombstone(RelationshipId relId) => _epoch?.Tombstone(relId.Sequence);
 
@@ -91,8 +91,8 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
     private sealed class BlockChainCursor : AdjacencyCursor
     {
         // ページ本体は 8160 バイトで、PageReadHandle は ref struct のため、MoveNext 間で状態を
-        // 保持するには訪問したページをヒープバッファにコピーする必要がある。バッファは共有 ArrayPool から
-        // レンタルし、カーソルごとの ~8KB アロケーションを回避する — Dispose で返却される。
+        // 保持するにはヒープバッファへコピーする必要がある。バッファは共有 ArrayPool からレンタルし、
+        // カーソルごとの ~8KB アロケーションを回避する — Dispose で返却される。
         private byte[] _body;
         private readonly IPagedFile _dataFile;
         private readonly Direction _direction;
@@ -246,7 +246,7 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
     // ──────────────────────────── private ────────────────────────────
 
     private long GetBlockPageId(NodeId nodeId)
-        => AdjacencyContainer.ReadIndexEntry(_indexFile, _idxEntryCount, nodeId.Sequence); // ARCH-5b: index キーは Sequence
+        => AdjacencyContainer.ReadIndexEntry(_indexFile, _idxEntryCount, nodeId.Sequence); // index キーは Sequence
 
     private static int CopyEntries(
         ReadOnlySpan<byte> span, RelationshipTypeId? typeFilter,

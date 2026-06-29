@@ -4,23 +4,19 @@ using Quiver.Transactions;
 
 namespace Quiver;
 
-// ExpandCursor is now defined in Quiver.Transactions (BA-3); this class extends it.
+// ExpandCursor は Quiver.Transactions に定義されている。本クラスはその拡張。
 
 /// <summary>
-/// Binary-backend expand cursor.
+/// バイナリバックエンド用の expand cursor。
 ///
-/// When the source has an adjacency block, the cursor walks the block
-/// chain via <see cref="IAdjacencyBlockStore.OpenCursor"/>, which never falls
-/// back mid-iteration regardless of degree.
+/// ソースノードに隣接ブロックがある場合、<see cref="IAdjacencyBlockStore.OpenCursor"/> で
+/// ブロックチェーンを走査する。次数にかかわらず途中で fallback しない。
 ///
-/// A block covers only the immutable <em>base</em> view captured at
-/// bulk-load / compact time. Relationships created after that point live in
-/// the relationship linked list as <em>delta</em>. After exhausting the
-/// adjacency block (skipping tombstoned base entries) the cursor continues
-/// through the linked list, filtering out anything with
-/// <c>relId &lt; BaseRelHwm</c> — those were already emitted from the base
-/// view, and crucially the chain is monotonically descending so we can break
-/// as soon as we cross that boundary.
+/// ブロックは bulk load / compact 時点のイミュータブルな <em>base</em> ビューのみを覆う。
+/// それ以降に作成されたリレーションシップは <em>delta</em> としてリンクリストに存在する。
+/// 隣接ブロックを使い切った後 (tombstone 済み base エントリをスキップしつつ)、リンクリストを
+/// 辿って delta を走査する。<c>relId &lt; BaseRelHwm</c> のエントリは base から既に出力済みなので
+/// フィルタし、チェーンは ID 降順なのでその境界を超えた時点で打ち切れる。
 /// </summary>
 internal sealed class BinaryExpandCursor : ExpandCursor
 {
@@ -64,8 +60,8 @@ internal sealed class BinaryExpandCursor : ExpandCursor
     {
         if (!_opened) { Open(); _opened = true; }
 
-        // Phase 1: base view via adjacency block. Tombstones get filtered here
-        // so deletes of base relationships are invisible to readers.
+        // Phase 1: 隣接ブロック経由の base ビュー走査。tombstone をここでフィルタし、
+        // base リレーションシップの削除を読み手から不可視にする。
         if (_adjActive)
         {
             var adj = _tx.AdjacencyBlocks!;
@@ -80,20 +76,19 @@ internal sealed class BinaryExpandCursor : ExpandCursor
             _adjActive = false; // fall through to phase 2
         }
 
-        // Phase 2: delta walk over the relationship linked list. Skip base
-        // entries (already emitted) by comparing against the watermark. The
-        // chain is strictly descending by id (newest at head), so once we
-        // cross into base ids every remaining entry is also base — break.
+        // Phase 2: リレーションシップリンクリストの delta 走査。watermark との比較で
+        // base エントリ (既に出力済み) をスキップする。チェーンは ID 降順 (最新が先頭) なので、
+        // base 領域に入った時点で残りもすべて base — そこで打ち切る。
         while (_nextRelId.IsValid)
         {
-            if (_baseRelHwm > 0 && _nextRelId.Sequence < _baseRelHwm) // ARCH-5b: hwm 比較は Sequence
+            if (_baseRelHwm > 0 && _nextRelId.Sequence < _baseRelHwm) // hwm 比較は Sequence
                 return false;
 
             var rel = _tx.Relationships.Read(_nextRelId);
             var thisRel = _nextRelId;
             _nextRelId = rel.Source == _source ? rel.SourceNext : rel.TargetNext;
 
-            // FT-26: MVCC visibility 判定で invisible になった record はスキップ。
+            // MVCC visibility 判定で invisible になった record はスキップ。
             if (!rel.InUse) continue;
 
             bool typeOk = !_typeFilter.HasValue || rel.Type == _typeFilter.Value;
@@ -121,8 +116,8 @@ internal sealed class BinaryExpandCursor : ExpandCursor
             _adjCursor = adj.OpenCursor(_source, _direction, _typeFilter);
             _adjActive = true;
             _baseRelHwm = adj.BaseRelHwm;
-            // PW-14: prime the delta walk too — after the base phase we'll
-            // resume from the linked-list head and skip ids < BaseRelHwm.
+            // delta 走査も準備する — base フェーズ終了後にリンクリスト先頭から再開し、
+            // id < BaseRelHwm のエントリをスキップする。
             _nextRelId = _tx.Nodes.Read(_source).FirstRelationshipId;
             return;
         }

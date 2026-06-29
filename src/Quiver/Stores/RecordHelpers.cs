@@ -25,7 +25,7 @@ internal static class RecordHelpers
         ulong lo = BinaryPrimitives.ReadUInt32LittleEndian(src);
         ulong hi = src[4];
         ulong raw = lo | (hi << 32);
-        // Sign-extend bit 39: upper 24 bits become 1 if negative
+        // bit 39 を符号拡張: 負の場合は上位 24 bit を 1 にする
         return (raw & 0x80_0000_0000UL) != 0
             ? (long)(raw | 0xFFFF_FF00_0000_0000UL)
             : (long)raw;

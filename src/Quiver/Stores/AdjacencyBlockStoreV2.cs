@@ -46,7 +46,7 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
 
     public long Epoch => _epoch?.Epoch ?? 0;
     public long BaseRelHwm => _epoch?.BaseRelHwm ?? 0;
-    // ARCH-5b: tombstone epoch のキーは Sequence (packed Value ではない)。
+    // tombstone epoch のキーは Sequence (packed Value ではない)。
     public bool IsTombstoned(RelationshipId relId) => _epoch?.IsTombstoned(relId.Sequence) ?? false;
     public void Tombstone(RelationshipId relId) => _epoch?.Tombstone(relId.Sequence);
 
@@ -94,10 +94,9 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
     }
 
     /// <summary>
-    /// V2-specific read that also copies the payload lane. Returns the count
-    /// written. <paramref name="buffer"/> length cap mirrors
-    /// <see cref="ReadEdges"/> — callers should drop to <see cref="OpenCursor"/>
-    /// when the return value equals <c>buffer.Length</c>.
+    /// payload lane もコピーする V2 固有の読み取り。書き込み件数を返す。
+    /// <paramref name="buffer"/> 長の上限は <see cref="ReadEdges"/> と同じ —
+    /// 戻り値が <c>buffer.Length</c> と等しい場合は <see cref="OpenCursor"/> へ降格すべき。
     /// </summary>
     public int ReadEdgesWithPayload(
         NodeId nodeId, Direction direction, RelationshipTypeId? typeFilter,
@@ -293,7 +292,7 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
     // ──────────────────────────── private ────────────────────────────
 
     private long GetBlockPageId(NodeId nodeId)
-        => AdjacencyContainer.ReadIndexEntry(_indexFile, _idxEntryCount, nodeId.Sequence); // ARCH-5b: index キーは Sequence
+        => AdjacencyContainer.ReadIndexEntry(_indexFile, _idxEntryCount, nodeId.Sequence); // index キーは Sequence
 
     private static int CopyEntries(
         ReadOnlySpan<byte> span, RelationshipTypeId? typeFilter,

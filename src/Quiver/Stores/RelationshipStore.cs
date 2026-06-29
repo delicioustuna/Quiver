@@ -4,7 +4,7 @@ using Quiver.Storage;
 
 namespace Quiver.Storage.Records;
 
-// FT-32 v3 (MVCC sidecar) record layout (48 バイト):
+// v3 (MVCC sidecar) record レイアウト (48 バイト):
 //  0 Flags(1) | 1 Source(6) | 7 Target(6) | 13 TypeId(2) |
 // 15 SrcPrev(6) | 21 SrcNext(6) | 27 TgtPrev(6) | 33 TgtNext(6) | 39 FirstPropId(6) | 45 Pad(3)
 //
@@ -14,7 +14,7 @@ namespace Quiver.Storage.Records;
 //   Delete (論理): sidecar.UpdateXmax(id, MvccContext.CurrentTxId)
 //     チェーン (SrcPrev/SrcNext/TgtPrev/TgtNext) は unlink せず、slot も free list に戻さない。
 //     これにより snapshot reader (xmax コミット以前にスナップショットを取った tx) が
-//     依然として元の record を辿れる。物理回収は vacuum (OP-3) 担当。
+//     依然として元の record を辿れる。物理回収は vacuum 担当。
 internal sealed class RelationshipStore : IRelationshipStore
 {
     public const int RecordSize = 48;
@@ -24,7 +24,7 @@ internal sealed class RelationshipStore : IRelationshipStore
     private const int MetaFreeHead = 0;       // int64
     private const int MetaHwm = 8;            // int64
     private const int MetaInUse = 16;         // int64
-    private const int MetaFormatVersion = 31; // byte (FT-26)
+    private const int MetaFormatVersion = 31; // byte
 
     private static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 170
 
@@ -57,7 +57,7 @@ internal sealed class RelationshipStore : IRelationshipStore
 
     public RelationshipId Create(INodeStore nodeStore, NodeId source, NodeId target, RelationshipTypeId type)
     {
-        // FT-26 MVCC: 論理削除に伴う slot 非再利用で free list は空のまま hwm 単調増加 (vacuum 完了後のみ free 投入)。
+        // MVCC: 論理削除に伴う slot 非再利用で free list は空のまま hwm 単調増加 (vacuum 完了後のみ free 投入)。
         long id;
         if (_freeHead >= 0)
         {
@@ -86,7 +86,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         Span<byte> rec = ph.Data.Slice(woff, RecordSize);
         rec.Clear();
         rec[0] = FlagInUse;
-        // ARCH-5b: オンディスク Int48 は Sequence (sentinel -1 は Sequence がそのまま返す)。
+        // オンディスク Int48 は Sequence (sentinel -1 は Sequence がそのまま返す)。
         RecordHelpers.WriteInt48(rec[1..], source.Sequence);
         RecordHelpers.WriteInt48(rec[7..], target.Sequence);
         BinaryPrimitives.WriteInt16LittleEndian(rec[13..], (short)type.Value);
@@ -96,7 +96,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         RecordHelpers.WriteInt48(rec[33..], tgtHead.Sequence);
         RecordHelpers.WriteInt48(rec[39..], PropertyId.Invalid.Sequence);
         _file.UnpinDirty(wpid, 0);
-        // FT-32: xmin/xmax は sidecar に書く。
+        // xmin/xmax は sidecar に書く。
         _versions.Write(id, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue));
 
         // 旧 head の物理 SrcPrev/TgtPrev を新 rel に向ける。MVCC でも prev pointer は
@@ -127,12 +127,12 @@ internal sealed class RelationshipStore : IRelationshipStore
 
     public void Delete(INodeStore nodeStore, RelationshipId relId)
     {
-        // FT-26 MVCC: 論理削除のみ — xmax をスタンプ、チェーンや slot は維持する。
+        // MVCC: 論理削除のみ — xmax をスタンプ、チェーンや slot は維持する。
         // 物理回収 + chain 整理 + free list 投入は vacuum (OP-3) で行う。
         // 関連: nodeStore.firstRelId は更新しない (snapshot reader が辿れるよう head 維持)。
         _ = nodeStore;
-        // FT-32: 論理削除は sidecar の xmax をスタンプするだけ。record 本体は触らない。
-        _versions.UpdateXmax(relId.Sequence, MvccContext.CurrentTxId.Value); // ARCH-5b: version キーは Sequence
+        // 論理削除は sidecar の xmax をスタンプするだけ。record 本体は触らない。
+        _versions.UpdateXmax(relId.Sequence, MvccContext.CurrentTxId.Value); // version キーは Sequence
 
         _inUseCount--;
         FlushMeta();
@@ -140,8 +140,8 @@ internal sealed class RelationshipStore : IRelationshipStore
 
     public RelationshipReadHandle Read(RelationshipId relId)
     {
-        // FT-30: HWM 超 / 負 ID は "存在しない" 扱い。NodeStore.Read と同じ理由。
-        // ARCH-5b: slot 演算 / version キーは Sequence (packed Value ではない)。
+        // HWM 超 / 負 ID は "存在しない" 扱い。NodeStore.Read と同じ理由。
+        // slot 演算 / version キーは Sequence (packed Value ではない)。
         long seq = relId.Sequence;
         if (seq < 0 || seq >= _hwm)
             return new RelationshipReadHandle(
@@ -161,14 +161,14 @@ internal sealed class RelationshipStore : IRelationshipStore
         var tgtPrev = new RelationshipId(RecordHelpers.ReadInt48(rec[27..]));
         var tgtNext = new RelationshipId(RecordHelpers.ReadInt48(rec[33..]));
         var firstPropId = new PropertyId(RecordHelpers.ReadInt48(rec[39..]));
-        // FT-32: xmin/xmax は sidecar から。物理 free スロットは sidecar を引かない。
+        // xmin/xmax は sidecar から。物理 free スロットは sidecar を引かない。
         if (inUse)
         {
             var meta = _versions.Read(seq);
             if (!Visibility.IsVisibleAmbient(meta.Xmin, meta.Xmax))
                 inUse = false;
         }
-        // FT-33: 可視な relationship を観測したら SSN read-set に記録する (Serializable 時のみ)。
+        // 可視な relationship を観測したら SSN read-set に記録する (Serializable 時のみ)。
         // traversal の RelationshipEnumerator もこの Read を通るので隣接走査が一律捕捉される。
         if (inUse) MvccContext.RecordRead(EntityKind.Relationship, seq);
         return new RelationshipReadHandle(relId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstPropId);
@@ -176,7 +176,7 @@ internal sealed class RelationshipStore : IRelationshipStore
 
     public RelationshipWriteHandle Write(RelationshipId relId)
     {
-        var (pageId, off) = Location(relId.Sequence); // ARCH-5b: slot は Sequence
+        var (pageId, off) = Location(relId.Sequence); // slot は Sequence
         var ph = _file.PinForWrite(pageId);
         return new RelationshipWriteHandle(_file, pageId, ph.Data.Slice(off, RecordSize));
     }
@@ -214,14 +214,14 @@ internal sealed class RelationshipStore : IRelationshipStore
             var meta = _versions.Read(id);
             if (Visibility.IsVisibleAmbient(meta.Xmin, meta.Xmax))
             {
-                // FT-33: scan で観測した可視 relationship も SSN read-set に記録する。
+                // scan で観測した可視 relationship も SSN read-set に記録する。
                 MvccContext.RecordRead(EntityKind.Relationship, id);
                 yield return new RelationshipId(id);
             }
         }
     }
 
-    // ARCH-5c Phase 4: 旧 RelationshipStore は inline property 非対応。すべて false を返し、property は
+    // 旧 RelationshipStore は inline property 非対応。すべて false を返し、property は
     // overflow チェーン (PropertyStore) に委ねる (graceful degrade)。production では未配線。
     public bool TryGetInlineProperty(RelationshipId relId, PropertyKeyId keyId, out PropertyValue value) { value = default; return false; }
     public bool HasInlineProperty(RelationshipId relId, PropertyKeyId keyId) => false;
@@ -250,7 +250,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         RecordHelpers.WriteInt48(rec[33..], tgtNext);
         RecordHelpers.WriteInt48(rec[39..], -1L);
         _file.UnpinDirty(wpid, 0);
-        // FT-26/FT-32: bulk load は MvccContext が無いので Bootstrap を xmin に (sidecar)。
+        // bulk load は MvccContext が無いので Bootstrap を xmin に (sidecar)。
         _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue));
     }
 
@@ -305,7 +305,7 @@ internal sealed class RelationshipStore : IRelationshipStore
             ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
             bool inUse = (rec[0] & FlagInUse) != 0;
             if (!inUse) continue;
-            long xmax = _versions.Read(id).Xmax; // FT-32: xmax は sidecar から
+            long xmax = _versions.Read(id).Xmax; // xmax は sidecar から
             bool dead = xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax);
             if (dead) reclaimSet.Add(id);
         }
@@ -333,7 +333,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         long guard = _hwm + 1;
         while (cur.IsValid && guard-- > 0)
         {
-            var (pageId, off) = Location(cur.Sequence); // ARCH-5b: slot は Sequence
+            var (pageId, off) = Location(cur.Sequence); // slot は Sequence
             bool nodeIsSource;
             bool dead;
             RelationshipId nextOnThisSide;
@@ -348,7 +348,7 @@ internal sealed class RelationshipStore : IRelationshipStore
                 bool nodeIsTarget = tgt == node.Sequence;
                 if (!nodeIsSource && !nodeIsTarget)
                 {
-                    // chain 整合性が崩れている (FT-15/17 のリカバリで起きうる) → ここで打ち切る
+                    // chain 整合性が崩れている (WAL リカバリで起きうる) → ここで打ち切る
                     break;
                 }
                 nextOnThisSide = nodeIsSource
@@ -360,7 +360,7 @@ internal sealed class RelationshipStore : IRelationshipStore
                 }
                 else
                 {
-                    long xmax = _versions.Read(cur.Sequence).Xmax; // FT-32: xmax は sidecar から
+                    long xmax = _versions.Read(cur.Sequence).Xmax; // xmax は sidecar から
                     dead = xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax);
                 }
             }

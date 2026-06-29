@@ -14,7 +14,7 @@ internal sealed class InMemoryEntityVersionStore : IEntityVersionStore
 {
     private EntityVersionMeta[] _entries = new EntityVersionMeta[256];
     private long _count; // 書き込み済み上限 (= 最大 localId + 1)
-    private long _commitStampHighWater; // FT-33: in-memory なので耐久性はないが API 整合のため保持
+    private long _commitStampHighWater; // in-memory なので耐久性はないが API 整合のため保持
     private bool _anyReuse;
 
     /// <inheritdoc/>

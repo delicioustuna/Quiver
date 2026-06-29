@@ -3,10 +3,9 @@ namespace Quiver.Storage.Records;
 /// <summary>
 /// MERGE 時の値比較。2 つの <see cref="PropertyValue"/> は Cypher の意味で「同じスカラ」を
 /// 表すときに一致する:
-/// Bool/Int32/Int64 are interchangeable (all carry an integer scalar), Double
-/// matches Double bit-exact (NaN never matches NaN, consistent with Cypher),
-/// and String / Bytes match by byte-sequence equality. Type mismatch across
-/// the numeric and non-numeric families is always a miss.
+/// Bool/Int32/Int64 は相互互換 (すべて整数スカラを保持)。Double は bit-exact で比較
+/// (NaN 同士は一致しない — Cypher 準拠)。String / Bytes はバイト列一致で比較する。
+/// 数値系と非数値系の型不一致は常にミス。
 /// </summary>
 public static class PropertyValueEqualityHelper
 {

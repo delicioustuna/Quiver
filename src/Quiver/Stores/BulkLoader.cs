@@ -3,26 +3,25 @@
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// Append-only bulk loader for initial data import.
-/// Bypasses WAL and per-record meta flushes; does a single Commit() flush.
-/// Assumes all provided IDs are fresh (no conflicts with existing records).
-/// Self-loops are supported but TgtPrev/TgtNext mirror SrcPrev/SrcNext.
+/// 初期データインポート用の append-only bulk loader。
+/// WAL とレコード単位のメタフラッシュをバイパスし、<see cref="Commit"/> で一括フラッシュする。
+/// 提供される ID はすべて新規 (既存レコードと衝突しない) であることを前提とする。
+/// Self-loop はサポートするが、TgtPrev/TgtNext は SrcPrev/SrcNext をミラーする。
 /// </summary>
 public sealed class BulkLoader : IDisposable
 {
     private readonly VersionedNodeStore _nodeStore;
     private readonly VersionedRelationshipStore _relStore;
     private readonly PropertyStore _propStore;
-    // ARCH-4 増分6: 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
+    // 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
     private readonly Quiver.Storage.SingleFileContainer? _container;
 
     private readonly List<PendingNode> _nodes = new();
     private readonly List<PendingRel> _rels = new();
     private readonly Dictionary<long, List<PendingProp>> _propsByNode = new();
-    // BA-6: collects raw payload values per relationship for the V2 payload
-    // lane. Keyed by (RelationshipId, PropertyKeyId) so the same loader can
-    // serve multiple potential payload keys, but only the one named by
-    // WithPayloadLane is actually inlined.
+    // リレーションシップごとの V2 payload lane 用 raw 値を収集する。
+    // (RelationshipId, PropertyKeyId) でキーイングしているため同一ローダが複数の payload キー
+    // 候補を受けられるが、実際に inline されるのは WithPayloadLane で指定されたもののみ。
     private readonly Dictionary<(long RelId, int KeyId), long> _relPayloads = new();
     private PayloadLaneSpec? _payloadSpec;
     private bool _committed;
@@ -44,7 +43,7 @@ public sealed class BulkLoader : IDisposable
     public void AppendNode(NodeId id, LabelId label)
     {
         ThrowIfCommitted();
-        // ARCH-5b: 物理 slot は Sequence (利用側が gen 付き id を渡しても正しく正規化)。
+        // 物理 slot は Sequence (利用側が gen 付き id を渡しても正しく正規化)。
         _nodes.Add(new PendingNode(id.Sequence, label.Value));
     }
 
@@ -124,19 +123,17 @@ public sealed class BulkLoader : IDisposable
         _nodeStore.BulkSetHeaders(hwm, _nodes.Count);
     }
 
-    // PW-9: single-pass dense-array pointer computation. Replaces the prior two-pass
+    // 単一パス dense-array ポインタ計算。従来の 2 パス
     // Dictionary<long, List<(long, bool)>> + Dictionary<long, (long, long, long, long)>
-    // approach (which allocated ~700+ MB at 10M edges). Algorithm:
+    // 方式 (10M エッジで ~700+ MB 割り当て) を置き換える。アルゴリズム:
     //
-    //   For each rel r in RelId ascending order, the chain at every touched node
-    //   interleaves rels where the node is src and rels where it is tgt. We track
-    //   the most recently seen rel per node and which side it sat on; when a new
-    //   rel touches the same node we (1) point its Next field at the prior tail
-    //   and (2) patch the prior tail's Prev field on the appropriate side.
-    //   FirstRelId for each node = the final lastByNode[node] (highest RelId).
+    //   RelId 昇順で各 rel r について、各接触ノードのチェーンは src 側と tgt 側の rel を
+    //   交互配置する。ノードごとに直近の rel と側を追跡し、同一ノードに新しい rel が来たら
+    //   (1) Next フィールドを前の末尾に向け、(2) 前の末尾の Prev フィールドを適切な側で
+    //   パッチする。各ノードの FirstRelId は最終的な lastByNode[node] (最大 RelId)。
     //
-    // Self-loops: only the src side is recorded in the chain. At write time the
-    // tgt-side fields mirror src — matches the prior implementation's semantics.
+    // Self-loop: src 側のみをチェーンに記録する。書き込み時 tgt 側のフィールドは src を
+    // ミラーする — 従来の実装と同じセマンティクス。
     private void CommitRelationships()
     {
         if (_rels.Count == 0)
@@ -153,9 +150,9 @@ public sealed class BulkLoader : IDisposable
             if (r.Tgt >= nodeHwm) nodeHwm = r.Tgt + 1;
         }
 
-        // Rels must be processed in RelId ascending order so chain pointers are
-        // patched in the right direction. Callers typically append sequentially,
-        // making this sort a near-noop, but we sort defensively.
+        // チェーンポインタを正しい方向にパッチするため、RelId 昇順で処理する必要がある。
+        // 呼び出し側は通常シーケンシャルに append するのでソートはほぼ no-op だが、
+        // 防御的にソートする。
         _rels.Sort((a, b) => a.Id.CompareTo(b.Id));
 
         var srcPrev = new long[relHwm];
@@ -222,12 +219,12 @@ public sealed class BulkLoader : IDisposable
     {
         foreach (var (nodeId, props) in _propsByNode)
         {
-            // Build chain tail-to-head; the last written property becomes the head.
+            // tail-to-head でチェーンを構築する。最後に書き込まれたプロパティが head になる。
             long nextPropId = -1L;
             foreach (var prop in props)
             {
                 var propId = _propStore.BulkCreate(prop.KeyId, prop.Type, prop.Scalar, prop.Data, nextPropId);
-                nextPropId = propId.Sequence; // ARCH-5b: Int48 NextPropId は Sequence
+                nextPropId = propId.Sequence; // Int48 NextPropId は Sequence
             }
             _nodeStore.BulkUpdateFirstProp(nodeId, nextPropId);
         }
@@ -243,9 +240,8 @@ public sealed class BulkLoader : IDisposable
         Dictionary<long, long>? weights = null;
         if (_payloadSpec is { } spec)
         {
-            // BA-6: V2 build. Filter payloads to the configured key; raw values pass
-            // through (double<->long reinterpretation is the caller's responsibility
-            // via AppendRelationshipPayload).
+            // V2 ビルド。設定されたキーに payload をフィルタする。raw 値はそのまま渡される
+            // (double<->long の再解釈は AppendRelationshipPayload 経由で呼び出し側の責任)。
             weights = new Dictionary<long, long>(_relPayloads.Count);
             foreach (var ((relId, keyId), raw) in _relPayloads)
             {
@@ -254,7 +250,7 @@ public sealed class BulkLoader : IDisposable
             }
         }
 
-        // PW-14: relHwm を base watermark として記録し、post-bulk-load の delta
+        // relHwm を base watermark として記録し、post-bulk-load の delta
         // (id >= relHwm) を読み取り時に base ビューへ二重計上せず merge できるようにする。
         AdjacencyContainer.Build(container, relData, nodeHwm, relHwm, _payloadSpec, weights);
     }

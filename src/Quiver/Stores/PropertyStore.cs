@@ -4,7 +4,7 @@ using Quiver.Storage;
 
 namespace Quiver.Storage.Records;
 
-// FT-32 v3 (MVCC sidecar) property record layout (41 バイト):
+// v3 (MVCC sidecar) property record レイアウト (41 バイト):
 //  0 Flags(1) | 1 KeyId(4) | 5 ValueType(1) | 6 InlineValue(24) |
 // 30 SpilloverId(5) | 35 NextPropId(6)
 //
@@ -25,7 +25,7 @@ internal sealed class PropertyStore : IPropertyStore
     private static readonly PageId HeaderPageId = new(1);
     private const int MetaFreeHead = 0;
     private const int MetaHwm = 8;
-    private const int MetaFormatVersion = 31; // byte (FT-26)
+    private const int MetaFormatVersion = 31; // byte
 
     private static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize; // 199
 
@@ -57,7 +57,7 @@ internal sealed class PropertyStore : IPropertyStore
 
     public PropertyId Create(PropertyKeyId keyId, in PropertyValue value, PropertyId currentFirst)
     {
-        // FT-26 MVCC: 論理削除に伴う slot 非再利用で free list は空のまま hwm 単調増加。
+        // MVCC: 論理削除に伴う slot 非再利用で free list は空のまま hwm 単調増加。
         long id;
         if (_freeHead >= 0)
         {
@@ -85,7 +85,7 @@ internal sealed class PropertyStore : IPropertyStore
         rec[0] = flags;
         BinaryPrimitives.WriteInt32LittleEndian(rec[1..], keyId.Value);
         rec[5] = (byte)value.Type;
-        RecordHelpers.WriteInt48(rec[35..], currentFirst.Sequence); // NextPropId = old head (ARCH-5b: Sequence)
+        RecordHelpers.WriteInt48(rec[35..], currentFirst.Sequence); // NextPropId = old head (Sequence)
 
         if (spillover)
         {
@@ -104,7 +104,7 @@ internal sealed class PropertyStore : IPropertyStore
         }
 
         _file.UnpinDirty(wpid, 0);
-        // FT-32: xmin/xmax は sidecar に書く。
+        // xmin/xmax は sidecar に書く。
         _versions.Write(id, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue));
         FlushMeta();
         return new PropertyId(id);
@@ -112,19 +112,19 @@ internal sealed class PropertyStore : IPropertyStore
 
     public PropertyId Delete(PropertyId propId, PropertyId currentFirst)
     {
-        // FT-26 MVCC: 論理削除のみ — xmax をスタンプ、チェーン unlink / free list 投入 / blob 解放はしない。
+        // MVCC: 論理削除のみ — xmax をスタンプ、チェーン unlink / free list 投入 / blob 解放はしない。
         // currentFirst (= chain head) は変更されないのでそのまま返す (snapshot reader が辿れる)。
-        // 物理回収 (blob 含む) は vacuum (OP-3) 担当。
-        // FT-32: 論理削除は sidecar の xmax をスタンプするだけ。record 本体は触らない。
-        _versions.UpdateXmax(propId.Sequence, MvccContext.CurrentTxId.Value); // ARCH-5b: version キーは Sequence
+        // 物理回収 (blob 含む) は vacuum 担当。
+        // 論理削除は sidecar の xmax をスタンプするだけ。record 本体は触らない。
+        _versions.UpdateXmax(propId.Sequence, MvccContext.CurrentTxId.Value); // version キーは Sequence
 
         return currentFirst;
     }
 
     public PropertyReadHandle Read(PropertyId propId)
     {
-        // FT-30: HWM 超 / 負 ID は "存在しない" 扱い。NodeStore.Read と同じ理由。
-        // ARCH-5b: slot 演算 / version キーは Sequence (packed Value ではない)。
+        // HWM 超 / 負 ID は "存在しない" 扱い。NodeStore.Read と同じ理由。
+        // slot 演算 / version キーは Sequence (packed Value ではない)。
         long seq = propId.Sequence;
         if (seq < 0 || seq >= _hwm)
             return new PropertyReadHandle(propId, default, PropertyId.Invalid, default, inUse: false);
@@ -156,8 +156,8 @@ internal sealed class PropertyStore : IPropertyStore
             value = ReadInline(rec[6..], vtype);
         }
 
-        // FT-32: xmin/xmax は sidecar から。physical free は sidecar を引かない。
-        // FT-26: MVCC visibility をフィルタする。invisible は InUse=false に縮退。
+        // xmin/xmax は sidecar から。physical free は sidecar を引かない。
+        // MVCC visibility をフィルタする。invisible は InUse=false に縮退。
         if (inUse)
         {
             var meta = _versions.Read(seq);
@@ -214,7 +214,7 @@ internal sealed class PropertyStore : IPropertyStore
         }
 
         _file.UnpinDirty(wpid, 0);
-        // FT-26/FT-32: bulk load は MvccContext が無いので Bootstrap を xmin に (sidecar)。
+        // bulk load は MvccContext が無いので Bootstrap を xmin に (sidecar)。
         _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue));
         return new PropertyId(id);
     }
@@ -290,7 +290,7 @@ internal sealed class PropertyStore : IPropertyStore
         long guard = _hwm + 1;
         while (cur.IsValid && guard-- > 0)
         {
-            var (pageId, off) = Location(cur.Sequence); // ARCH-5b: slot は Sequence
+            var (pageId, off) = Location(cur.Sequence); // slot は Sequence
             PropertyId next;
             bool dead;
             using (var h = _file.PinForRead(pageId))
@@ -305,7 +305,7 @@ internal sealed class PropertyStore : IPropertyStore
                 }
                 else
                 {
-                    long xmax = _versions.Read(cur.Sequence).Xmax; // FT-32: xmax は sidecar から
+                    long xmax = _versions.Read(cur.Sequence).Xmax; // xmax は sidecar から
                     dead = xmax != 0 && xmax < horizonTxId && committed.IsCommitted(xmax);
                 }
             }
@@ -381,7 +381,7 @@ internal sealed class PropertyStore : IPropertyStore
         RecordHelpers.WriteInt48(rec2[35..], _freeHead);
         _file.UnpinDirty(pageId, 0);
 
-        _freeHead = id.Sequence; // ARCH-5b: free list は Sequence
+        _freeHead = id.Sequence; // free list は Sequence
         return next;
     }
 

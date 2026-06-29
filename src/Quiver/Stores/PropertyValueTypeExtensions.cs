@@ -27,7 +27,7 @@ public static class PropertyValueTypeExtensions
     }
 
     /// <summary>
-    /// Returns true when <paramref name="value"/> is one of the bits set in <paramref name="mask"/>.
+    /// <paramref name="type"/> が <paramref name="mask"/> に含まれるビットのいずれかに該当する場合 <c>true</c> を返す。
     /// </summary>
     public static bool IsCompatibleWith(this PropertyValueType type, PropertyTypeFlags mask)
         => (type.ToFlags() & mask) != PropertyTypeFlags.None;

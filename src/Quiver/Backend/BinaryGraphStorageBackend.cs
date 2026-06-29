@@ -12,7 +12,7 @@ namespace Quiver;
 internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 {
     private readonly IVectorStore _vectors;
-    // ARCH-6: db.Vectors の公開面。tx 外のミューテーションを autocommit tx で包む
+    // db.Vectors の公開面。tx 外のミューテーションを autocommit tx で包む
     // (tx 内の呼び出しは ambient WalPageContext を検出して join する)。生の _vectors は
     // access methods / tx 配下 SetVector の委譲先として内部で使い続ける。
     private IVectorStore? _vectorsFacade;
@@ -25,18 +25,18 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     private readonly RelationshipTypeTokenStore _relTypeTokens;
     private readonly PropertyKeyTokenStore _propKeyTokens;
     private readonly IndexManager _indexManager;
-    // BA-6: holds either AdjacencyBlockStore (V1) or AdjacencyBlockStoreV2.
-    // PW-14: mutable so CompactAdjacency can swap in a freshly rebuilt store.
-    // ARCH-4 増分6: 隣接データは container 内テナントに同居するため、別 PagedFile の所有は不要。
+    // AdjacencyBlockStore (V1) または AdjacencyBlockStoreV2 を保持。
+    // CompactAdjacency が再構築したストアを差し替えるため mutable。
+    // 隣接データは container 内テナントに同居するため、別 PagedFile の所有は不要。
     private IAdjacencyBlockStore? _adjStore;
-    // ARCH-4 増分6: bulk load / CompactAdjacency が隣接テナントを構築するために保持する。
+    // bulk load / CompactAdjacency が隣接テナントを構築するために保持する。
     private readonly SingleFileContainer _container;
     private readonly TransactionManager _txManager;
     private readonly SchemaApi _schema;
     private readonly DiagnosticsApi _diagnostics;
     private readonly IGraphAccessMethods _access;
     private readonly BulkLoadCapabilities _bulkLoad;
-    // ARCH-4 増分8: 単一コンテナ (*.quiver) のフルパス。WAL サイドカー = _containerPath + "-wal"。
+    // 単一コンテナ (*.quiver) のフルパス。WAL サイドカー = _containerPath + "-wal"。
     private readonly string _containerPath;
     private readonly ILogicalMutationSink? _logicalSink;
 
@@ -82,9 +82,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _columnManager = columnManager;
 
         _schema = new SchemaApi(_labelTokens, _relTypeTokens, _propKeyTokens, _indexManager);
-        // FT-22: index manager と label index を DiagnosticsApi に渡して
+        // index manager と label index を DiagnosticsApi に渡して
         // CheckIndexConsistency / RepairIndexes が機能するようにする。
-        // FT-28: TransactionManager を渡し、CurrentCheckpointThresholdBytes /
+        // TransactionManager を渡し、CurrentCheckpointThresholdBytes /
         // SetCheckpointPolicy をホットスワップ経路として公開する。Adaptive 用パラメタは
         // factory で既知の options 値を持つので、後段で AttachAdaptiveDefaults により上書き可能。
         _diagnostics = new DiagnosticsApi(
@@ -105,7 +105,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         };
     }
 
-    // ARCH-4 増分8: *.quiver の親ディレクトリ (operational metadata = migrations.history の保存先)。
+    // *.quiver の親ディレクトリ (operational metadata = migrations.history の保存先)。
     public string DataDirectory => Path.GetDirectoryName(_containerPath) is { Length: > 0 } d ? d : ".";
 
     /// <summary>
@@ -119,22 +119,22 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _indexManager.FlushAll();
     }
 
-    // ARCH-5c Phase 5b/5c: opt-in 列。catalog はテナント 16、各列テナントは 64+ (ColumnCatalog 採番)。
-    // 5c で startup eager 化 (factory が構築して注入)。write 経路 (GraphTransaction) と abort hook
+    // opt-in 列。catalog はテナント 16、各列テナントは 64+ (ColumnCatalog 採番)。
+    // startup で eager に構築 (factory が注入)。write 経路 (GraphTransaction) と abort hook
     // (ReloadStoreMeta → ReloadColumns) の両方から参照される。
     private readonly ColumnManager _columnManager;
 
-    /// <summary>Phase 5c: write 経路 (列維持) のため GraphTransaction へ渡す列マネージャ。</summary>
+    /// <summary>write 経路 (列維持) のため GraphTransaction へ渡す列マネージャ。</summary>
     internal ColumnManager Columns => _columnManager;
 
     internal bool CreateColumn(EntityKind kind, int keyId)
     {
-        // ARCH-5c Phase 5g: opt-in 列の DDL はアクティブ tx 無しを要求する。CreateColumn は
+        // opt-in 列の DDL はアクティブ tx 無しを要求する。CreateColumn は
         // 現コミット済みデータから列を 1 パス構築するため、構築を跨ぐ並行 writer がいると列が
         // 取りこぼし、列スキャン集約が row path と乖離しうる。CompactAdjacency と同じ契約で塞ぐ。
         if (_txManager.ActiveCount > 0)
             throw new InvalidOperationException("CreateColumn requires no active transactions.");
-        // ARCH-5c Phase 5g: 構築 (列データ / 列テナント page-table / catalog ページの書き込み) を
+        // 構築 (列データ / 列テナント page-table / catalog ページの書き込み) を
         // WAL 文脈下で行い commit する。これにより crash recovery / CreateSnapshot (online backup) が
         // 列ページを redo / 複製できる。tx 外で書くと clean Dispose のフラッシュ依存になり、
         // 未チェックポイント crash や snapshot で列が失われる。
@@ -148,7 +148,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         return RunColumnDdl(() => _columnManager.DropColumn(kind, keyId));
     }
 
-    // ARCH-5c Phase 5g: 列 DDL の page 書き込みを WAL ログ + commit して durable 化する共通ラッパ。
+    // 列 DDL の page 書き込みを WAL ログ + commit して durable 化する共通ラッパ。
     private bool RunColumnDdl(Func<bool> ddl)
     {
         var tx = _txManager.Begin(IsolationLevel.SnapshotIsolation);
@@ -169,8 +169,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         => _columnManager.TryGetColumn(kind, keyId, out column);
 
     /// <summary>
-    /// Phase 5b 検証用 (interim): 列の可視値合計。read 経路が無い 5b で登録/構築/永続を確認するため。
-    /// 5d で optimizer/operator 経由の本 read 経路に置き換わる。
+    /// 検証用 (interim): 列の可視値合計。列の登録/構築/永続を確認するために使用する。
+    /// optimizer/operator 経由の本 read 経路に置き換わる予定。
     /// </summary>
     internal long ColumnProjectSumForTest(EntityKind kind, int keyId)
     {
@@ -198,28 +198,25 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         return new GraphTransaction(
             inner, _labelTokens, _relTypeTokens, _propKeyTokens,
             readOnly,
-            // BA-7: skip the recorder entirely for read-only transactions and
-            // when no sink is configured so the hot path stays allocation-free.
+            // read-only tx と sink 未設定時はレコーダを完全にスキップし、ホットパスを allocation-free に保つ。
             readOnly ? null : _logicalSink,
-            // ARCH-5c Phase 5c/5d: 列マネージャは read/write 双方へ渡す。write hook は
+            // 列マネージャは read/write 双方へ渡す。write hook は
             // mutation メソッドからのみ呼ばれるので read-only tx では起動せず、read 集約
             // (TryColumnAggregate) は read-only tx でも列スキャンを使える。
             _columnManager,
-            // ARCH-6: tx 配下 SetVector/RemoveVector の委譲先 (生のストア)。read-only tx でも
+            // tx 配下 SetVector/RemoveVector の委譲先 (生のストア)。read-only tx でも
             // 渡すが、メソッド側で IsReadOnly ガードする。
             _vectors);
     }
 
     /// <summary>
-    /// Rebuild the immutable base adjacency view
-    /// from the current relationship store, drop tombstones, and bump the
-    /// epoch. After this call all live edges are served from base and the
-    /// delta walk yields nothing until new relationships are created.
+    /// イミュータブルな base 隣接ビューを現在のリレーションシップストアから再構築し、
+    /// tombstone を除去して epoch を進める。呼び出し後、すべての生存エッジは base から供給され、
+    /// 新しいリレーションシップが作成されるまで delta 走査は何も返さない。
     ///
-    /// Currently only supports the V1 store (no payload lane). When a V2
-    /// store is active the call throws — V2 compact needs to re-read inline
-    /// payloads from the property store and is deferred. Caller must ensure
-    /// no transactions are active.
+    /// 現在は V1 ストア (payload lane なし) のみ対応。V2 ストアがアクティブな場合は
+    /// 例外を投げる (V2 compact はプロパティストアから inline payload を再読する必要があり未実装)。
+    /// 呼び出し元はアクティブなトランザクションが無いことを保証すること。
     /// </summary>
     public void CompactAdjacency()
     {
@@ -230,21 +227,21 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             throw new NotSupportedException(
                 "CompactAdjacency for V2 (payload lane) is not yet implemented.");
 
-        // Snapshot live rels (id, src, tgt, type) before tearing down the
-        // current adj files — IRelationshipStore.Scan yields ids in store
-        // order, and reading each pulls src/tgt/type from the active page.
+        // 現在の adj ファイルを壊す前に生存 rels (id, src, tgt, type) をスナップショットする。
+        // IRelationshipStore.Scan はストア順で id を返し、各読み出しがアクティブページから
+        // src/tgt/type を取得する。
         var live = new List<(long Id, long Src, long Tgt, int TypeId)>();
         long maxId = -1;
         foreach (var relId in _relStore.Scan())
         {
             var r = _relStore.Read(relId);
-            // ARCH-5b: 隣接ビルドへ渡す id は Sequence (packed Value ではない)。
+            // 隣接ビルドへ渡す id は Sequence (packed Value ではない)。
             live.Add((relId.Sequence, r.Source.Sequence, r.Target.Sequence, r.Type.Value));
             if (relId.Sequence > maxId) maxId = relId.Sequence;
         }
-        long newBaseHwm = maxId + 1; // 0 when there are no rels — matches "no base"
+        long newBaseHwm = maxId + 1; // リレーションシップが無ければ 0 — "no base" と一致
 
-        // ARCH-4 増分6: 隣接データは container 内テナントに同居する。Build は対象テナントを
+        // 隣接データは container 内テナントに同居する。Build は対象テナントを
         // truncate して作り直すため、旧 PagedFile を pageManager から drop する必要はない。
         if (_adjStore is AdjacencyBlockStore old) old.Dispose();
         _txManager.SwapAdjacencyStore(null);
@@ -263,9 +260,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         var adjIdx = _container.OpenTenant(AdjacencyContainer.IndexTenant, PageKind.Header);
         AdjacencyBlockStore.Build(adjData, adjIdx, live, nodeHwm);
 
-        // Reset epoch metadata and reopen. ResetAfterCompact bumps the epoch
-        // counter (so observers can detect the rebuild) and drops tombstones
-        // since the new base view contains only live edges.
+        // epoch メタデータをリセットして再オープン。ResetAfterCompact は epoch カウンタを
+        // 進め (オブザーバが再構築を検出可能にする)、tombstone を破棄する
+        // (新しい base ビューは生存エッジのみを含むため)。
         var epochTenant = _container.OpenTenant(AdjacencyContainer.EpochTenant, PageKind.Header);
         AdjacencyEpoch newEpoch = AdjacencyEpoch.Open(epochTenant);
         newEpoch.ResetAfterCompact(newBaseHwm);
@@ -303,7 +300,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     /// </summary>
     public VacuumReport Vacuum(VacuumOptions? options = null)
     {
-        // OP-5: WAL を渡して、dead version 回収後の末尾連続 free page を物理 truncate する。
+        // WAL を渡して、dead version 回収後の末尾連続 free page を物理 truncate する。
         // WAL の FileTruncate レコード経由で crash recovery に対する冪等再生を保証する。
         var vac = new Vacuum(
             _nodeStore, _relStore, _propStore,
@@ -316,7 +313,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         ArgumentException.ThrowIfNullOrEmpty(targetFilePath);
         options ??= new SnapshotOptions();
 
-        // ARCH-4 増分8: snapshot ターゲットも単一ファイル (*.quiver)。親ディレクトリを用意する。
+        // snapshot ターゲットも単一ファイル (*.quiver)。親ディレクトリを用意する。
         var parentDir = Path.GetDirectoryName(targetFilePath);
         if (!string.IsNullOrEmpty(parentDir)) Directory.CreateDirectory(parentDir);
 
@@ -328,7 +325,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         //    (索引はコンテナに同居するため常に含まれる)。
         CopyPagedFile(_container.Physical, targetFilePath);
 
-        // 2. ARCH-4 増分7/8: WAL を末尾までフラッシュしてから単一サイドカー *.quiver-wal を複製。
+        // 2. WAL を末尾までフラッシュしてから単一サイドカー *.quiver-wal を複製。
         //    Drain で出される PageImage 等もここで durable になる。target を開くと recovery が
         //    この WAL を replay して整合する。
         _wal.FlushTo(_wal.CurrentLsn);
@@ -372,18 +369,18 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
     public void Dispose()
     {
-        // ARCH-4 増分7: 二重 Dispose ガード。クリーン終了処理は _physical 等へアクセスするため
+        // 二重 Dispose ガード。クリーン終了処理は _physical 等へアクセスするため
         // 冪等でないので、2 回目以降は no-op にする (テストが db を二重 Dispose する経路がある)。
         if (_disposed) return;
         _disposed = true;
 
-        // ARCH-4 増分7: クリーン終了。アクティブ tx が無ければ全データを graph.quiver へ
+        // クリーン終了。アクティブ tx が無ければ全データを graph.quiver へ
         // durable 化し、WAL サイドカーを削除対象にする (静止時は graph.quiver のみ)。
         // ActiveCount==0 なので未コミットデータは存在せず、flush 後の graph.quiver は完全。
         bool cleanShutdown = _txManager.ActiveCount == 0;
         if (cleanShutdown)
         {
-            // ARCH-4 増分7: committed TxId 高水位を container へ永続化してから flush する。
+            // committed TxId 高水位を container へ永続化してから flush する。
             // WAL 削除後の reopen で MVCC visibility horizon と次 TxId 採番を復元するため。
             _container.SetCommittedHighWaterTxId(_txManager.PeekNextTxId());
             _pageManager.FlushAll();   // 全データページを fsync (container.Physical を含む)
@@ -397,9 +394,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _labelTokens.Dispose();
         _relTypeTokens.Dispose();
         _propKeyTokens.Dispose();
-        // FT-15: flush the data files BEFORE disposing the WAL. PagedFile.Flush()
-        // now does WAL-before-data (write-ahead) ordering, so the WAL must still
-        // be alive while the page manager flushes its dirty frames to disk.
+        // WAL を dispose する前にデータファイルを flush する。PagedFile.Flush() は
+        // write-ahead 順序 (WAL→データ) に従うため、page manager がダーティフレームを
+        // ディスクへ flush する間は WAL がまだ生きている必要がある。
         _pageManager.Dispose();
         _wal.Dispose();
     }

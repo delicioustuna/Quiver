@@ -19,7 +19,7 @@ internal interface INodeStore
     /// </summary>
     int CurrentGeneration(long localId);
 
-    // ARCH-5c Phase 3: node 粒度の inline property。小さい値は node record へ inline 格納し
+    // ノード粒度の inline property。小さい値は node record へ inline 格納し
     // get/has/set/remove を O(small) 化する。inline 不可な値 (大きい string/bytes) は false を返し、
     // 呼出側 (GraphTransaction) が overflow チェーン (PropertyStore) へ回す。inline を持たない実装
     // (旧 NodeStore / Stub) は false を返して全 property を overflow に委ねる (graceful degrade)。
@@ -71,7 +71,7 @@ internal readonly ref struct NodeReadHandle
     public void Dispose() { }
 }
 
-// FT-32 v3 layout: Flags(0,1) FirstRelId(1,6) FirstPropId(7,6) LabelId(13,2) — 15 bytes
+// v3 レイアウト: Flags(0,1) FirstRelId(1,6) FirstPropId(7,6) LabelId(13,2) — 15 bytes
 // (Xmin/Xmax は NodeVersionMeta sidecar に移管)
 internal ref struct NodeWriteHandle
 {
@@ -87,13 +87,13 @@ internal ref struct NodeWriteHandle
     public RelationshipId FirstRelationshipId
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[1..]));
-        set => RecordHelpers.WriteInt48(_rec[1..], value.Sequence); // ARCH-5b: Int48 は Sequence
+        set => RecordHelpers.WriteInt48(_rec[1..], value.Sequence); // Int48 は Sequence
     }
 
     public PropertyId FirstPropertyId
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[7..]));
-        set => RecordHelpers.WriteInt48(_rec[7..], value.Sequence); // ARCH-5b: Int48 は Sequence
+        set => RecordHelpers.WriteInt48(_rec[7..], value.Sequence); // Int48 は Sequence
     }
 
     public LabelId Label

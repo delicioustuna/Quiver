@@ -87,7 +87,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
 
     public RelationshipId Create(INodeStore nodeStore, NodeId source, NodeId target, RelationshipTypeId type)
     {
-        // 旧 RelationshipStore と同じく rel は Sequence 空間 (gen=0) で払い出す (ARCH-5b は rel に
+        // 旧 RelationshipStore と同じく rel は Sequence 空間 (gen=0) で払い出す (rel に
         // 世代を surface しない。adjacency / chain pointer も Sequence 格納)。vacuum 回収済み seq は
         // map free list から再利用する。
         long seq = _map.PopFreeSeq();
@@ -221,20 +221,20 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         }
     }
 
-    // ===== ARCH-5c Phase 4: inline property storage (rel 粒度 copy-on-write) =====
+    // ===== inline property storage (rel 粒度 copy-on-write) =====
     // 符号化は InlinePropertyCodec (RelFixedSize=45) に集約。node 側と同じ copy-on-write 機構。
 
     public bool TryGetInlineProperty(RelationshipId relId, PropertyKeyId keyId, out PropertyValue value)
     {
         value = default;
         long seq = relId.Sequence;
-        // ARCH-5c Phase 6: alloc-free 経路。可視版 payload を stackalloc バッファへコピーして scan する
+        // alloc-free 経路。可視版 payload を stackalloc バッファへコピーして scan する
         // (per-read の byte[] 割当を回避)。scalar は値コピーなので buffer 上 decode で安全、String/Bytes
         // のみ安定 byte[] へコピーする。payload が buffer 超過なら割当版へフォールバック。
         Span<byte> buf = stackalloc byte[InlineReadBuffer];
         int len = _heap.TryReadVisibleInto(seq, AmbientVisible, buf, out _, out _);
         if (len == 0) return false;
-        // FT-33: property read = rel read。可視版を観測したので SSN read-set に記録する。
+        // property read = rel read。可視版を観測したので SSN read-set に記録する。
         MvccContext.RecordRead(EntityKind.Relationship, seq);
         if (len <= buf.Length)
         {
@@ -289,7 +289,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     {
         if (!_heap.TryReadVisible(relId.Sequence, AmbientVisible, out var payload, out _, out _))
             return new PropertyEnumerator(overflowStore, PropertyId.Invalid);
-        MvccContext.RecordRead(EntityKind.Relationship, relId.Sequence); // FT-33: property 列挙 = rel read
+        MvccContext.RecordRead(EntityKind.Relationship, relId.Sequence); // property 列挙 = rel read
         var firstProp = new PropertyId(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProp)));
         return new PropertyEnumerator(payload, overflowStore, firstProp, InlinePropertyCodec.RelFixedSize);
     }

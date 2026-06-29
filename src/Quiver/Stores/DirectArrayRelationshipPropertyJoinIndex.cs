@@ -3,24 +3,19 @@ using Quiver.Core;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// implementation (a). Dense direct array
-/// indexed by <see cref="RelationshipId"/>. Allocates one
-/// <see cref="long"/> + one presence bit per relationship slot, so memory
-/// is ~9 bytes per slot regardless of population; suitable when relationship
-/// ids are dense (the bulk-load / append-only case) and the indexed key
-/// covers most edges.
+/// 実装 (a): <see cref="RelationshipId"/> をインデックスとする dense 直接配列。
+/// リレーションシップ slot あたり <see cref="long"/> 1 個 + presence ビット 1 個を確保するため、
+/// 占有率に関わらずメモリは slot あたり約 9 バイト。リレーションシップ ID が密な場合
+/// (bulk-load / append-only ケース) でインデックス対象キーが大半のエッジをカバーする場合に適する。
 /// </summary>
 /// <remarks>
-/// Sparse populations (key set on a small fraction of relationships) still
-/// pay the slot cost. A future variant could fall back to a
-/// <see cref="Dictionary{TKey, TValue}"/> when entry count drops below a
-/// threshold; for now the dense form is the only one shipped because
-/// weighted-traversal workloads tend to be "all edges have a weight."
+/// 疎な場合 (リレーションシップの一部のみにキーが設定) でも slot コストは発生する。エントリ数が
+/// 閾値を下回った場合に <see cref="Dictionary{TKey, TValue}"/> へフォールバックする変種は将来課題。
+/// 現状は dense 形式のみ — 重み付きトラバーサルでは「全エッジが重みを持つ」のが典型パターンのため。
 ///
-/// Type mismatches are treated as missing — a relationship whose property
-/// value for <see cref="IRelationshipPropertyJoinIndex.KeyId"/> has a
-/// different <see cref="PropertyValueType"/> than the index was built
-/// against is skipped, matching the type-mismatch predicate-false convention.
+/// 型不一致は欠落扱い — <see cref="IRelationshipPropertyJoinIndex.KeyId"/> のプロパティ値が
+/// インデックス構築時と異なる <see cref="PropertyValueType"/> を持つリレーションシップはスキップされ、
+/// 型不一致 = 述語 false の慣習に従う。
 /// </remarks>
 internal sealed class DirectArrayRelationshipPropertyJoinIndex : IRelationshipPropertyJoinIndex
 {
@@ -54,7 +49,7 @@ internal sealed class DirectArrayRelationshipPropertyJoinIndex : IRelationshipPr
         type = default;
         scalarBits = 0;
         if (keyId != _keyId) return false;
-        long id = relationshipId.Sequence; // ARCH-5b: dense 配列 index は Sequence
+        long id = relationshipId.Sequence; // dense 配列 index は Sequence
         if ((ulong)id >= (ulong)_bits.LongLength) return false;
         int word = (int)(id >> 6);
         ulong mask = 1UL << (int)(id & 63);
@@ -90,11 +85,11 @@ internal sealed class DirectArrayRelationshipPropertyJoinIndex : IRelationshipPr
                 nameof(expectedType));
         }
 
-        // Slot count: highest live relId + 1. Scan once to discover hwm so
-        // we can right-size the arrays before the value-collecting pass.
+        // slot 数: 最大の live relId + 1。HWM を発見するために一度走査し、
+        // 値収集パスの前に配列を適切なサイズに確保する。
         long hwm = 0;
         foreach (var relId in relStore.Scan())
-            if (relId.Sequence + 1 > hwm) hwm = relId.Sequence + 1; // ARCH-5b: 配列サイズは Sequence
+            if (relId.Sequence + 1 > hwm) hwm = relId.Sequence + 1; // 配列サイズは Sequence
 
         if (hwm > int.MaxValue)
         {
@@ -108,7 +103,7 @@ internal sealed class DirectArrayRelationshipPropertyJoinIndex : IRelationshipPr
 
         foreach (var relId in relStore.Scan())
         {
-            // ARCH-5c Phase 4: scalar 値は rel record へ inline されるため、join index も
+            // scalar 値は rel record へ inline されるため、join index も
             // inline + overflow を結合列挙する (join index 対象型はすべて inline 対象)。
             var pe = relStore.EnumerateProperties(relId, propStore);
             while (pe.MoveNext())
@@ -124,7 +119,7 @@ internal sealed class DirectArrayRelationshipPropertyJoinIndex : IRelationshipPr
                     PropertyValueType.Double => BitConverter.DoubleToInt64Bits(cur.Value.DoubleValue),
                     _ => 0L,
                 };
-                int idx = (int)relId.Sequence; // ARCH-5b: dense 配列 index は Sequence
+                int idx = (int)relId.Sequence; // dense 配列 index は Sequence
                 bits[idx] = raw;
                 presence[idx >> 6] |= 1UL << (idx & 63);
                 entryCount++;

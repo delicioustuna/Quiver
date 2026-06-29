@@ -31,7 +31,7 @@ public sealed class StreamingBulkLoader : IDisposable
     private readonly VersionedNodeStore _nodeStore;
     private readonly VersionedRelationshipStore _relStore;
     private readonly PropertyStore _propStore;
-    // ARCH-4 増分6: 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
+    // 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
     private readonly Quiver.Storage.SingleFileContainer? _container;
 
     private const int RelRecordSize = 28; // Id(8) + Src(8) + Tgt(8) + TypeId(4)
@@ -75,7 +75,7 @@ public sealed class StreamingBulkLoader : IDisposable
     public void AppendNode(NodeId id, LabelId label)
     {
         ThrowIfCommitted();
-        // ARCH-5b: 物理 slot は Sequence (利用側が gen 付き id を渡しても正しく正規化)。
+        // 物理 slot は Sequence (利用側が gen 付き id を渡しても正しく正規化)。
         _nodes.Add(new PendingNode(id.Sequence, label.Value));
         if (id.Sequence > _maxNodeId) _maxNodeId = id.Sequence;
     }
@@ -115,7 +115,7 @@ public sealed class StreamingBulkLoader : IDisposable
         else if (value.Type is PropertyValueType.Bytes)
             data = value.BytesValue.ToArray();
 
-        if (!_propsByNode.TryGetValue(nodeId.Sequence, out var props)) // ARCH-5b: key は Sequence
+        if (!_propsByNode.TryGetValue(nodeId.Sequence, out var props)) // key は Sequence
             _propsByNode[nodeId.Sequence] = props = new();
         props.Add(new PendingProp(key.Value, value.Type, value.Int64Value, data));
     }
@@ -133,7 +133,7 @@ public sealed class StreamingBulkLoader : IDisposable
     public void AppendRelationshipPayload(RelationshipId relId, PropertyKeyId key, long rawValue)
     {
         ThrowIfCommitted();
-        _relPayloads[(relId.Sequence, key.Value)] = rawValue; // ARCH-5b: rel key は Sequence
+        _relPayloads[(relId.Sequence, key.Value)] = rawValue; // rel key は Sequence
     }
 
     /// <summary>溜めたノード / リレーションシップ / プロパティをストアへ書き出し確定する。</summary>
@@ -192,10 +192,10 @@ public sealed class StreamingBulkLoader : IDisposable
         var lastByNode = new long[nodeHwm]; Array.Fill(lastByNode, -1L);
         var lastSide   = new byte[nodeHwm]; // 0 = was src at this node, 1 = was tgt
 
-        // Pass 1: compute pointers via single forward scan. Algorithm matches the in-memory
-        // BulkLoader (see BulkLoader.CommitRelationships) — chain at every node interleaves
-        // rels regardless of side; the field that gets the pointer depends on which side
-        // the rel sits on for that particular node.
+        // パス 1: 単一前方走査でポインタを計算する。アルゴリズムは in-memory BulkLoader
+        // (BulkLoader.CommitRelationships 参照) と同一 — 各ノードのチェーンは側に関係なく
+        // リレーションシップを交互配置する。ポインタが書き込まれるフィールドは、そのノードでの
+        // リレーションシップの側 (src/tgt) に依存する。
         var buf = new byte[RelRecordSize];
         _relTemp.Position = 0;
         for (long i = 0; i < _relCount; i++)
@@ -229,7 +229,7 @@ public sealed class StreamingBulkLoader : IDisposable
             }
         }
 
-        // Pass 2: stream rels again, applying pointers via dense lookup.
+        // パス 2: リレーションシップを再度ストリームし、dense lookup でポインタを適用する。
         long hwm = 0;
         _relTemp.Position = 0;
         for (long i = 0; i < _relCount; i++)
@@ -266,7 +266,7 @@ public sealed class StreamingBulkLoader : IDisposable
             foreach (var prop in props)
             {
                 var propId = _propStore.BulkCreate(prop.KeyId, prop.Type, prop.Scalar, prop.Data, nextPropId);
-                nextPropId = propId.Sequence; // ARCH-5b: Int48 NextPropId は Sequence
+                nextPropId = propId.Sequence; // Int48 NextPropId は Sequence
             }
             _nodeStore.BulkUpdateFirstProp(nodeId, nextPropId);
         }
@@ -275,8 +275,8 @@ public sealed class StreamingBulkLoader : IDisposable
 
     private void BuildAdjacencyIndexStreaming(Quiver.Storage.SingleFileContainer container)
     {
-        // Materialize rels into a compact list for AdjacencyContainer.Build.
-        // Full streaming adj-build (chunk-sort by src/tgt) is a future task — see PW-9 notes.
+        // AdjacencyContainer.Build 用にリレーションシップをコンパクトリストへ実体化する。
+        // 完全ストリーミング隣接構築 (src/tgt による chunk-sort) は将来課題。
         var relData = new List<(long Id, long Src, long Tgt, int TypeId)>((int)Math.Min(_relCount, int.MaxValue));
         var buf = new byte[RelRecordSize];
         _relTemp.Position = 0;

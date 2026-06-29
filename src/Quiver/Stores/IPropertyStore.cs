@@ -164,7 +164,7 @@ public ref struct PropertyEnumerator
     private PropertyReadHandle _current;
     private bool _chainStarted;
 
-    // ARCH-5c Phase 3/4: entity の inline property 領域を chain より先に列挙する (chain-only は空)。
+    // entity の inline property 領域を chain より先に列挙する (chain-only は空)。
     private readonly ReadOnlySpan<byte> _inline;
     private readonly int _inlineCount;
     private int _inlineIndex;

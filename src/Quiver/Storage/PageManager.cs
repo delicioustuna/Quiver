@@ -40,10 +40,9 @@ internal sealed class PageManager : IPageManager
     }
 
     /// <summary>
-    /// Detach <paramref name="file"/> from manager-owned lifecycle. The caller
-    /// becomes responsible for disposal. Adjacency compaction uses this when it reopens
-    /// the adjacency data file with fresh contents — the old handle is dropped
-    /// before <see cref="PagedFile"/>'s exclusive lock blocks reuse of the path.
+    /// <paramref name="file"/> を管理下から切り離す。以降の破棄は呼び出し側の責任になる。
+    /// adjacency compaction がデータファイルを新しい内容で再オープンする際に、
+    /// <see cref="PagedFile"/> の排他ロックがパスの再利用をブロックする前に旧ハンドルを除去するために使う。
     /// </summary>
     public void Drop(IPagedFile file)
     {

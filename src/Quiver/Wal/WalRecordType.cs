@@ -7,26 +7,26 @@ internal enum WalRecordType : byte
     Abort = 3,
     PageImage = 10,
     PageDelta = 11,
-    // FT-15: あるページがトランザクション内で初めて変更される直前の内容 (before-image)。
+    // あるページがトランザクション内で初めて変更される直前の内容 (before-image)。
     // クラッシュ recovery の undo パスが、コミットも abort もしていないトランザクションの
     // 変更を巻き戻すために使う。ペイロード形式は PageImage と共通 (WalPageImageCodec)。
     CompensationLogRecord = 12,
-    // FT-17: B+Tree インデックスへの 1 件の論理ミューテーション (Insert / Delete)。
+    // B+Tree インデックスへの 1 件の論理ミューテーション (Insert / Delete)。
     // 索引ファイルは WAL ページロギング対象外なので、abort / crash でエントリを
     // 巻き戻すために論理 undo レコードを別途持つ。ペイロードは IndexMutationCodec。
-    // FT-19 で索引が page-WAL 化され予約値として残置 (新規には現れない)。
+    // 索引が page-WAL 化され予約値として残置 (新規には現れない)。
     IndexMutation = 13,
-    // FTS-7: postings/norms B+Tree leaf への state-setting 論理ミューテーション
+    // postings/norms B+Tree leaf への state-setting 論理ミューテーション
     // (Upsert key=value / Delete key)。leaf 更新のページイメージ (CLR + PageImage) を本レコードへ
-    // 置換し取込 WAL 増幅を圧縮する (spec: 07_fulltext.md#logical-wal)。SMO (split/merge) は従来の page-WAL を維持。
+    // 置換し取込 WAL 増幅を圧縮する。SMO (split/merge) は従来の page-WAL を維持。
     // 冪等 state-setting で、redo は再実行 (Pass 2b)、undo は逆操作。ペイロードは FtLeafMutationCodec。
     FtLeafMutation = 17,
-    // FTS-7: postings/norms B+Tree の SMO (split/merge/root 変更) で書き換わった構造ページの
-    // after-image (spec: 07_fulltext.md#ft-recovery)。nested top action として **commit/abort を問わず無条件に redo し、
+    // postings/norms B+Tree の SMO (split/merge/root 変更) で書き換わった構造ページの
+    // after-image。nested top action として **commit/abort を問わず無条件に redo し、
     // 決して undo しない**。ペイロード形式は PageImage と共通 (WalPageImageCodec)。recovery の
     // presume-committed 推定には一切寄与させない (PageImage のみが FlushPending マーカ)。
     FtStructureImage = 18,
-    // FT-21: チェックポイント atomicity の Begin/End sentinel。
+    // チェックポイント atomicity の Begin/End sentinel。
     // CheckpointBegin はチェックポイント開始 (dirty page flush 前)、
     // CheckpointEnd は全 page + index fsync 完了後に書く。recovery は
     // 「Begin と対になる End を持つチェックポイント」だけを「完了済み」と認識し、
@@ -42,7 +42,7 @@ internal enum WalRecordType : byte
     // 大きな PageId を生成しうるので、recovery 側は LSN 順に処理することで「truncate →
     // 拡張」を再現する (truncate より後の WAL record が再びファイルを必要なサイズへ拡張)。
     FileTruncate = 16,
-    // 旧型式 (FT-21 以前)。「page fsync → log fsync → truncate」を 1 レコードで表現していた。
+    // 旧型式。「page fsync → log fsync → truncate」を 1 レコードで表現していた。
     // 既存 DB との互換のため recovery 側で読み飛ばし起点として認識する。新規には書かない。
     Checkpoint = 100,
     EndOfSegment = 0xFE,

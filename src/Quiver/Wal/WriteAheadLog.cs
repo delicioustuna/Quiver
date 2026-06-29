@@ -30,13 +30,13 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     private readonly object _writeLock = new();
     private readonly Channel<FlushRequest> _flushChannel;
     private readonly Task _flushTask;
-    // FT-27: group commit window を Stopwatch tick に変換して保持 (0 = 無効)。
+    // group commit window を Stopwatch tick に変換して保持 (0 = 無効)。
     private readonly long _groupCommitWindowTicks;
-    // FT-27: 観測用カウンタ。
+    // 観測用カウンタ。
     private long _flushBatchCount;
     private long _flushRequestCount;
 
-    // FT-29: 複数 tx の PageImage を Commit/CheckpointBegin/CheckpointEnd の直前にまとめて
+    // 複数 tx の PageImage を Commit/CheckpointBegin/CheckpointEnd の直前にまとめて
     // drain する共有 coalesce バッファ。`(fileKind, pageId)` ごとに「最後に書いた tx」の
     // payload を 1 件だけ保持し、同一ページに対する重複 PageImage 出力を抑制する。
     private readonly Dictionary<(byte FileKind, long PageId), CoalescedPageImage> _coalescedPageImages = new();
@@ -50,7 +50,7 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     private readonly byte[] _buffer = new byte[WriteBufferSize];
     private int _bufPos;
     private bool _disposed;
-    // ARCH-4 増分7: クリーン終了時に WAL ファイルを削除するフラグ。backend が最終 flush 後に立てる。
+    // クリーン終了時に WAL ファイルを削除するフラグ。backend が最終 flush 後に立てる。
     private bool _deleteOnDispose;
 
     public long CurrentLsn => Volatile.Read(ref _nextLsn) - 1;
@@ -109,7 +109,7 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
-            // FT-29: Commit / Checkpoint sentinel / Abort の直前で coalesce バッファを drain。
+            // Commit / Checkpoint sentinel / Abort の直前で coalesce バッファを drain。
             if (type == WalRecordType.Commit ||
                 type == WalRecordType.CheckpointBegin ||
                 type == WalRecordType.CheckpointEnd ||
@@ -325,7 +325,7 @@ internal sealed class WriteAheadLog : IWriteAheadLog
             return;
         }
 
-        // FT-29: Dispose 完了前に coalesce バッファを最終 drain する。
+        // Dispose 完了前に coalesce バッファを最終 drain する。
         lock (_writeLock)
         {
             DrainCoalesceBufferLocked();
@@ -452,7 +452,7 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         var pending = new List<FlushRequest>();
         while (await _flushChannel.Reader.WaitToReadAsync())
         {
-            // FT-27: group commit window。
+            // group commit window。
             if (_groupCommitWindowTicks > 0 && !_disposed)
             {
                 long deadline = Stopwatch.GetTimestamp() + _groupCommitWindowTicks;

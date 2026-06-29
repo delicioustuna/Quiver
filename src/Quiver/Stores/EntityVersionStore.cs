@@ -31,10 +31,10 @@ internal sealed class EntityVersionStore : IEntityVersionStore
     public static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize;
 
     private static readonly PageId HeaderPageId = new(1);
-    private const int MetaCommitStampHighWater = 0; // int64 (FT-33: SSN commit-stamp 高水位)
+    private const int MetaCommitStampHighWater = 0; // int64 (SSN commit-stamp 高水位)
     private const int MetaAnyReuse = 8; // byte: 世代再利用が一度でも起きたか (stamping 高速パスのゲート)
-    private const int MetaFormatVersion = 31; // byte (FT-26 NodeStore と同 offset)
-    // ARCH-3: entry が 32→40B に拡張され Generation レーンを持つため sidecar 版を 1→2 に上げる。
+    private const int MetaFormatVersion = 31; // byte (NodeStore と同 offset)
+    // entry が 32→40B に拡張され Generation レーンを持つため sidecar 版を 1→2 に上げる。
     // gen-stamp-fastpath: ヘッダに MetaAnyReuse を追加したため 2→3。
     internal const byte SidecarFormatVersion = 3;
 
@@ -43,7 +43,7 @@ internal sealed class EntityVersionStore : IEntityVersionStore
     private const int OffsetXmax = 8;
     private const int OffsetPstamp = 16;
     private const int OffsetSstamp = 24;
-    private const int OffsetGeneration = 32; // ARCH-3
+    private const int OffsetGeneration = 32;
 
     private readonly IPagedFile _file;
     private bool _disposed;
@@ -98,7 +98,7 @@ internal sealed class EntityVersionStore : IEntityVersionStore
         long generation = BinaryPrimitives.ReadInt64LittleEndian(rec[OffsetGeneration..]);
         // 0 埋め page (= 未書き込み slot) は Unset として正規化:
         // 全フィールド 0 のとき Sstamp を long.MaxValue に翻訳する。
-        // ARCH-3: Generation は xmin と対で書かれる (Allocate) ため、xmin=0 の slot は世代も 0。
+        // Generation は xmin と対で書かれる (Allocate) ため、xmin=0 の slot は世代も 0。
         if (xmin == 0 && xmax == 0 && pstamp == 0 && sstamp == 0)
             return EntityVersionMeta.Unset;
         return new EntityVersionMeta(xmin, xmax, pstamp, sstamp, generation);

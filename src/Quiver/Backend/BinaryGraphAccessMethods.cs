@@ -7,23 +7,20 @@ using Quiver.Transactions;
 namespace Quiver;
 
 /// <summary>
-/// Binary backend's <see cref="IGraphAccessMethods"/> implementation. Delegates
-/// the linked-list vs adjacency-block choice to <see cref="BinaryExpandCursor"/>
-/// and exposes a fallback counter so diagnostics can surface how often the
-/// adjacency fast path was unavailable (i.e. the node had no adjacency block
-/// at index-build time, typically because it was created after a bulk load).
-/// now that <see cref="IAdjacencyBlockStore.OpenCursor"/> walks the full
-/// page chain, the cursor never abandons the fast path mid-iteration — so this
-/// counter only fires on the "no block at all" path.
+/// バイナリバックエンドの <see cref="IGraphAccessMethods"/> 実装。リンクリストと隣接ブロックの
+/// 選択を <see cref="BinaryExpandCursor"/> に委譲し、隣接 fast path が使えなかった頻度
+/// (= インデックス構築時にブロックが無かったノード、典型的には bulk load 後に作られたもの)
+/// を診断用カウンタとして公開する。<see cref="IAdjacencyBlockStore.OpenCursor"/> が
+/// ページチェーン全体を走査するため、cursor が走査途中で fast path を放棄することはない。
+/// カウンタは「ブロックが全く無い」経路でのみ発火する。
 /// </summary>
 internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
 {
-    // Accessed via Interlocked from BinaryExpandCursor.
+    // BinaryExpandCursor から Interlocked 経由でアクセスされる。
     internal long FallbackCountInternal;
 
     private readonly IVectorStore _vectors;
-    // VEC-11: optional label inverted index. When wired, label-filtered
-    // ScanNodes/LabelScan switches from full Scan() to O(|L|) lookup.
+    // ラベル転置索引 (任意)。接続時はラベル付き ScanNodes/LabelScan が全件 Scan() から O(|L|) lookup に切り替わる。
     private LabelNodeIndex? _labelIndex;
 
     internal BinaryGraphAccessMethods(IVectorStore vectors)
@@ -56,7 +53,7 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
         => _vectors.KnnSearch(indexName, query, k);
 
-    // VEC-8: in-memory backend では gather-then-score / 単一 snapshot バッチで短絡。
+    // in-memory backend では gather-then-score / 単一 snapshot バッチで短絡。
     public VectorSearchCursor KnnSearchFiltered(
         string indexName,
         ReadOnlySpan<float> query,
@@ -65,7 +62,7 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     {
         if (_vectors is InMemoryVectorStore inMem)
             return inMem.KnnSearchFiltered(indexName, query, k, candidates);
-        // ARCH-6: 永続ストアも gather-then-score / scan+post-filter を直接持つ。
+        // 永続ストアも gather-then-score / scan+post-filter を直接持つ。
         if (_vectors is Storage.Records.PersistentVectorStore persistent)
             return persistent.KnnSearchFiltered(indexName, query, k, candidates);
         return IGraphAccessMethods.KnnSearchFilteredOversample(this, indexName, query, k, candidates);
@@ -84,10 +81,9 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     public IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null)
     {
         if (!label.HasValue) return tx.Nodes.Scan();
-        // VEC-11: O(|L|) sidecar lookup when wired. Until the factory attaches
-        // the index, fall back to the legacy O(N) scan-and-filter path so
-        // standalone TransactionManager constructions (e.g. backend-less tests)
-        // still work.
+        // sidecar 接続済みなら O(|L|) lookup。factory が index を attach するまでは
+        // 旧来の O(N) scan-and-filter にフォールバックし、スタンドアロンの
+        // TransactionManager 構築 (backend なしのテスト等) でも動作する。
         if (_labelIndex is { } idx)
             return idx.Lookup(tx.Nodes, label.Value);
         return ScanByLabelSlow(tx, label.Value);
@@ -104,7 +100,7 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
 
     public IEnumerable<NodeId> SeekNodesByIndex(ITransaction tx, string indexName, PropertyValue key)
     {
-        // PropertyValue is a ref struct, so we cannot hold it across a yield.
+        // PropertyValue は ref struct なので yield を跨いで保持できない。
         IEnumerable<long> ids = key.Type switch
         {
             PropertyValueType.Int32 or PropertyValueType.Int64 or PropertyValueType.Bool =>
@@ -116,7 +112,7 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
                     .SeekValues(Encoding.UTF8.GetString(key.Utf8StringValue)),
             _ => [],
         };
-        // ARCH-3: パック値を世代照合しつつ NodeId へ unpack し、slot 再利用の stale 参照を弾く。
+        // パック値を世代照合しつつ NodeId へ unpack し、slot 再利用の stale 参照を弾く。
         return IndexValueResolver.ResolveLiveNodeIds(ids, tx.Nodes);
     }
 
@@ -133,8 +129,8 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
         Direction direction,
         RelationshipTypeId? typeFilter)
     {
-        // Without GraphStats wired in (BA-4), use a cheap O(degree) probe via
-        // the adjacency block when present, otherwise walk the chain.
+        // GraphStats 未接続のため、隣接ブロックがあれば安価な O(degree) プローブを使い、
+        // なければチェーンを走査する。
         var adj = tx.AdjacencyBlocks;
         if (adj != null && adj.HasBlock(source))
         {

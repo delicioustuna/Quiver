@@ -178,7 +178,7 @@ internal sealed class HnswIndex
             if (changed) touched.Add(otherSeq);
         }
 
-        // VEC-13: グラフ修復。削除ノードの近傍同士を層ごとに張り直し、ナビゲーション経路の穴を塞ぐ。
+        // グラフ修復。削除ノードの近傍同士を層ごとに張り直し、ナビゲーション経路の穴を塞ぐ。
         // 再取込で削除が常態化してもグラフが断片化せず、Rebuild を待たずに recall を保てる。
         HealNeighborhood(removed, touched);
 

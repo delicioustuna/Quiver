@@ -13,7 +13,7 @@ public interface IGraphStorageBackend : IDisposable
     // <see cref="GraphDatabase"/> は薄いファサードに留まり、ストレージレイアウトを
     // ファクトリレベルで差し替え可能にする。
 
-    // ARCH-2: Transactions (ITransactionManager) / Access (IGraphAccessMethods) /
+    // Transactions (ITransactionManager) / Access (IGraphAccessMethods) /
     // BulkLoad (BulkLoadCapabilities) は内部実装型を露出するため公開面から外し、
     // internal な IGraphStorageBackendInternal へ移設した。
 

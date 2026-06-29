@@ -3,8 +3,8 @@
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// On-disk: TypeId(2) | RelId(6) | NeighborId(6) = 14 bytes.
-/// In-memory: natural-width fields.
+/// オンディスク: TypeId(2) | RelId(6) | NeighborId(6) = 14 バイト。
+/// インメモリ: 自然幅フィールド。
 /// </summary>
 internal readonly struct AdjacencyEntry
 {

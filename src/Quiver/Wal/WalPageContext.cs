@@ -84,7 +84,7 @@ internal static class WalPageContext
     public static void FlushPending() => Current?.FlushPending();
 
     // ──────────────────────────────────────────────────────────────────────
-    // FT-23: Savepoint / nested undo
+    // Savepoint / nested undo
     // ──────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -142,7 +142,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     // (fileKind, pageId) → 最新の **生ページ bytes** (latest-wins)。
     // 案C: 1 トランザクション中に同一ページを何度触っても、コミット時に最新版 1 件だけを WAL に書く。
     // これにより FlushMeta() 等によるホットページの再ログ増幅を解消する。
-    // FT-29: FlushPending では Append ではなく WAL の coalesce バッファへ投入することで、
+    // FlushPending では Append ではなく WAL の coalesce バッファへ投入することで、
     // 並行 tx 間でも latest-wins de-dup が効くようにする。
     // Task C (format-stable): WAL ペイロードへの Encode (trim+RLE, 半埋め 8KB で ~5µs) は
     // 以前 UnpinDirty ごとに走っていた (同一ページを N 回書くと N 回 Encode) ため、ホットページ
@@ -151,17 +151,17 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     // recovery 形式は不変 (FlushPending で従来と同じ v3 payload を出す)。
     private readonly Dictionary<(byte FileKind, long PageId), byte[]> _pending = new();
 
-    // FTS-7: per-page WAL journaling モード (spec: 07_fulltext.md#ft-journaling)。Suppressed/RedoOnly のページのみ記録し、
+    // per-page WAL journaling モード。Suppressed/RedoOnly のページのみ記録し、
     // 未登録は既定 Full。escalation は強い方 (数値大) が勝つ。CaptureBeforeImage / LogPageImage の
     // 両発火点がこれを参照する単一チョークポイント。
     private readonly Dictionary<(byte FileKind, long PageId), WalJournalMode> _journalMode = new();
 
-    // FT-15 / FT-23: (fileKind, pageId) → エンコード済み before-image (CLR ペイロード)。
+    // (fileKind, pageId) → エンコード済み before-image (CLR ペイロード)。
     // ページが「そのバケットで最初に」ダーティ化される直前の内容を 1 枚だけ保持する。
     // 値は CompensationLogRecord ペイロードそのものなので、WAL 追記とインプロセス
     // abort/rollback 巻き戻しで同じバッファを共有できる。
     //
-    // FT-23: 単一 dict ではなく「バケットのスタック」になった。
+    // 単一 dict ではなく「バケットのスタック」になった。
     //   - stack[0]                : tx 開始時に push される root バケット (Savepoint なしの tx と同等)。
     //   - stack[0..n]             : Savepoint() ごとに新規バケットが追加される。
     //   - RollbackTo(SP_n)        : 上から SP_n 自身までを巻き戻し、SP_n 位置に空バケットを push し直す。
@@ -186,7 +186,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     public long LogPageImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
     {
         var key = (fileKind, pageId);
-        // FTS-7: journaling モードで分岐 (spec: 07_fulltext.md#ft-journaling)。
+        // journaling モードで分岐。
         var mode = _journalMode.TryGetValue(key, out var m) ? m : WalJournalMode.Full;
         if (mode == WalJournalMode.Suppressed)
             return -1L; // 論理レコード (FtLeafMutation) で覆う leaf — after-image を出さない。
@@ -208,9 +208,9 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
         return -1L;
     }
 
-    // FTS-7: in-process abort の論理 undo バケット (spec: 07_fulltext.md#logical-wal)。tx 内で発行した leaf 論理
+    // in-process abort の論理 undo バケット。tx 内で発行した leaf 論理
     // ミューテーションを順に記録し、abort 時に逆順 (LIFO) で逆操作を当てて FT 索引から取り消す
-    // (page before-image を持たない Suppressed leaf を巻き戻す手段。FT-17 の「abort で索引エントリ除去」
+    // (page before-image を持たない Suppressed leaf を巻き戻す手段。「abort で索引エントリ除去」
     // 保証を維持し ID 再利用エイリアスを防ぐ)。
     // 監査 #2: before-image stack と同型に savepoint バケット化してある。RollbackTo(level) は
     // [level..top] バケットを逆適用し WAL 補償レコードを追記する (= partial rollback でも FT を巻き戻す)。

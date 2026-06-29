@@ -5,10 +5,9 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// Persistent metadata for the immutable base
-/// adjacency view: the relationship-id watermark separating base from delta,
-/// a monotonic compact epoch, and the set of base relationships deleted since
-/// the base was last built (tombstones).
+/// 不変の base 隣接ビューの永続メタデータ: base と delta を分離する relationship-id watermark、
+/// 単調増加する compact epoch、および最後のビルド以降に削除された base リレーションシップの集合
+/// (tombstone)。
 ///
 /// 旧来は <c>adj.epoch</c> サイドカーファイルに置かれていたが、
 /// 単一ファイル化のため <see cref="SingleFileContainer"/> 内の専用テナント
@@ -54,9 +53,8 @@ internal sealed class AdjacencyEpoch
     }
 
     /// <summary>
-    /// Mark <paramref name="relId"/> as deleted. No-op when the id is outside
-    /// the base range — delta deletes are absorbed by the relationship store's
-    /// own linked-list unlink and don't need a tombstone.
+    /// <paramref name="relId"/> を削除済みとしてマークする。base 範囲外の id は no-op —
+    /// delta の削除はリレーションシップストア自身のリンクリスト解除で吸収され、tombstone は不要。
     /// </summary>
     public void Tombstone(long relId)
     {

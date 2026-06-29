@@ -38,7 +38,7 @@ internal sealed class VersionedNodeStore : INodeStore
     // Phase 6 alloc-free read: 典型 inline payload を収める stackalloc 量。超過は割当版へフォールバック。
     private const int InlineReadBuffer = 256;
 
-    // ARCH-5c Phase 3: inline property の符号化は InlinePropertyCodec に集約 (PropertyEnumerator と共用)。
+    // inline property の符号化は InlinePropertyCodec に集約 (PropertyEnumerator と共用)。
 
     private static readonly int HdrSize = VersionedRecordHeap.VersionHeaderSize;
 
@@ -70,7 +70,7 @@ internal sealed class VersionedNodeStore : INodeStore
 
     public NodeId Allocate(LabelId labelId)
     {
-        // ARCH-3/5b: vacuum 回収済み seq を free list から再利用する。世代が上限に達した seq は
+        // vacuum 回収済み seq を free list から再利用する。世代が上限に達した seq は
         // 永久退役 (ABA 回避)。空なら hwm から新規採番。
         long seq = -1;
         while (true)
@@ -136,7 +136,7 @@ internal sealed class VersionedNodeStore : INodeStore
         var label = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(span[OffLabel..]));
 
         bool inUse = true;
-        // ARCH-5b: 世代付き NodeId は現世代 (sidecar) と照合。gen=0 (内部パイプライン) はスキップ。
+        // 世代付き NodeId は現世代 (sidecar) と照合。gen=0 (内部パイプライン) はスキップ。
         int carriedGen = nodeId.Generation;
         if (carriedGen != 0 && carriedGen != (int)_versions.Read(seq).Generation)
             inUse = false;
@@ -171,7 +171,7 @@ internal sealed class VersionedNodeStore : INodeStore
             if (_heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _))
             {
                 MvccContext.RecordRead(EntityKind.Node, seq);
-                // ARCH-5b: パイプラインは Sequence 空間 (gen=0)。世代は利用者境界で stamp。
+                // パイプラインは Sequence 空間 (gen=0)。世代は利用者境界で stamp。
                 yield return new NodeId(seq);
             }
         }
@@ -187,19 +187,19 @@ internal sealed class VersionedNodeStore : INodeStore
         return gen > int.MaxValue ? int.MaxValue : (int)gen;
     }
 
-    // ===== ARCH-5c Phase 3: inline property storage (node 粒度 copy-on-write) =====
+    // ===== inline property storage (node 粒度 copy-on-write) =====
     // 符号化は InlinePropertyCodec に集約。読み取りは visible 版を引き、書き込みは copy-on-write。
 
     public bool TryGetInlineProperty(NodeId nodeId, PropertyKeyId keyId, out PropertyValue value)
     {
         value = default;
         long seq = nodeId.Sequence;
-        // ARCH-5c Phase 6: alloc-free 経路 (rel と同型)。可視版 payload を stackalloc へコピーして scan。
+        // alloc-free 経路 (rel と同型)。可視版 payload を stackalloc へコピーして scan。
         // scalar は値コピーで安全、String/Bytes のみ安定 byte[] へ。超過は割当版へフォールバック。
         Span<byte> buf = stackalloc byte[InlineReadBuffer];
         int len = _heap.TryReadVisibleInto(seq, AmbientVisible, buf, out _, out _);
         if (len == 0) return false;
-        // FT-33: property read = node read。可視版を観測したので SSN read-set に記録する
+        // property read = node read。可視版を観測したので SSN read-set に記録する
         // (write skew 検出のため。inline hit で早期 return しても捕捉漏れしない)。
         MvccContext.RecordRead(EntityKind.Node, seq);
         if (len <= buf.Length)
@@ -263,7 +263,7 @@ internal sealed class VersionedNodeStore : INodeStore
     {
         if (!_heap.TryReadVisible(nodeId.Sequence, AmbientVisible, out var payload, out _, out _))
             return new PropertyEnumerator(overflowStore, PropertyId.Invalid);
-        MvccContext.RecordRead(EntityKind.Node, nodeId.Sequence); // FT-33: property 列挙 = node read
+        MvccContext.RecordRead(EntityKind.Node, nodeId.Sequence); // property 列挙 = node read
         var firstProp = new PropertyId(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProp)));
         return new PropertyEnumerator(payload, overflowStore, firstProp, InlinePropertyCodec.NodeFixedSize);
     }
@@ -366,7 +366,7 @@ internal sealed class VersionedNodeStore : INodeStore
         BinaryPrimitives.WriteInt16LittleEndian(payload[OffLabel..], (short)labelId);
         payload[InlinePropertyCodec.OffInlineCount(InlinePropertyCodec.NodeFixedSize)] = 0;
         _heap.Insert(id, payload, TransactionId.Bootstrap.Value);
-        // FT-26/FT-32: bulk load は tx 外。Bootstrap を xmin に、Generation=1 (新規 slot)。
+        // bulk load は tx 外。Bootstrap を xmin に、Generation=1 (新規 slot)。
         _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue, 1));
     }
 

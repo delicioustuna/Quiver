@@ -21,7 +21,7 @@ internal interface IRelationshipStore
     /// </summary>
     IEnumerable<RelationshipId> Scan();
 
-    // ARCH-5c Phase 4: relationship 粒度の inline property。node (INodeStore) と同型。
+    // リレーションシップ粒度の inline property。node (INodeStore) と同型。
     // 小さい値は rel record version へ inline 格納し get/has/set/remove を O(small) 化する。
     // inline 不可な値は false を返し、呼出側 (GraphTransaction) が overflow チェーンへ回す。
     // inline を持たない実装 (旧 RelationshipStore) は false を返して overflow に委ねる (graceful degrade)。
@@ -107,7 +107,7 @@ internal ref struct RelationshipWriteHandle
         _file = file; _pageId = pageId; _rec = rec;
     }
 
-    // ARCH-5b: オンディスク Int48 は Sequence (sentinel -1 は Sequence がそのまま返す)。
+    // オンディスク Int48 は Sequence (sentinel -1 は Sequence がそのまま返す)。
     public NodeId Source
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[1..]));

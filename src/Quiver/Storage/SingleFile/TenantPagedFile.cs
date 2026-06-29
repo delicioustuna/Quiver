@@ -94,7 +94,7 @@ internal sealed class TenantPagedFile : IPagedFile
 
     public PageReadHandle PinForRead(PageId pageId) => _physical.PinForRead(Translate(pageId));
     public PageWriteHandle PinForWrite(PageId pageId) => _physical.PinForWrite(Translate(pageId));
-    // FTS-7: journaling モードを物理層へ転送する (spec: 07_fulltext.md#ft-journaling, mode は物理 pageId でキーされる)。
+    // journaling モードを物理層へ転送する (mode は物理 pageId でキーされる)。
     public PageWriteHandle PinForWrite(PageId pageId, WalJournalMode mode) => _physical.PinForWrite(Translate(pageId), mode);
     // Unpin / UnpinDirty は PagedFile では明示的インターフェイス実装なのでインターフェイス経由で呼ぶ。
     public void Unpin(PageId pageId) => ((IPagedFile)_physical).Unpin(Translate(pageId));
@@ -102,7 +102,7 @@ internal sealed class TenantPagedFile : IPagedFile
 
     public void Flush() => _physical.Flush();
 
-    // ARCH-4 増分1: WAL は container 物理層で 1 fileKind に一本化する (増分2 で配線)。
+    // WAL は container 物理層で 1 fileKind に一本化する。
     // テナント単位の per-file WAL は行わないため、ここでは何もしない。
     public void EnableWalLogging(byte fileKind, IWriteAheadLog wal) { }
     public void EnableWalFlushOnly(IWriteAheadLog wal) { }
