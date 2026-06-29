@@ -103,6 +103,9 @@ public interface IVectorStore
         return false;
     }
 
+    /// <summary>登録済みベクトルインデックスの一覧を返す。</summary>
+    IReadOnlyList<VectorIndexSpec> ListVectorIndexes() => [];
+
     /// <summary>指定エンティティのベクトルを設定 (上書き) する。</summary>
     void SetVector(
         EntityKind kind,

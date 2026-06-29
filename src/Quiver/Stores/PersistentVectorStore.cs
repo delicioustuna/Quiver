@@ -88,6 +88,11 @@ internal sealed class PersistentVectorStore : IVectorStore
         }
     }
 
+    public IReadOnlyList<VectorIndexSpec> ListVectorIndexes()
+    {
+        lock (_gate) { return _indexes.Values.Select(h => h.Spec).ToList(); }
+    }
+
     public bool TryGetIndex(string name, out VectorIndexSpec spec)
     {
         spec = default!;

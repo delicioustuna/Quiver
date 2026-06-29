@@ -50,6 +50,11 @@ public sealed class InMemoryVectorStore : IVectorStore
         }
     }
 
+    public IReadOnlyList<VectorIndexSpec> ListVectorIndexes()
+    {
+        lock (_gate) { return _indexes.Values.Select(i => i.Spec).ToList(); }
+    }
+
     /// <summary>登録済み index の spec を返す。未登録は <c>false</c>。</summary>
     public bool TryGetIndex(string name, out VectorIndexSpec spec)
     {

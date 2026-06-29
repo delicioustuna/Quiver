@@ -49,6 +49,8 @@ internal sealed class AutocommitVectorStore(IVectorStore underlying, Func<IGraph
         tx.Commit();
     }
 
+    public IReadOnlyList<VectorIndexSpec> ListVectorIndexes() => _underlying.ListVectorIndexes();
+
     public bool TryGetIndex(string name, out VectorIndexSpec spec) => _underlying.TryGetIndex(name, out spec);
 
     public bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
