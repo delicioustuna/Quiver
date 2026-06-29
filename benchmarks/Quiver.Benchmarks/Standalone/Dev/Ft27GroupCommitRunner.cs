@@ -2,7 +2,9 @@ using System.Diagnostics;
 using Quiver.Core;
 using Quiver.Storage.Wal;
 
-namespace Quiver.Benchmarks.Standalone;
+// 起動方法: Program.cs に以下を追加
+//   if (args[0] == "--ft27-groupcommit") return Quiver.Benchmarks.Standalone.Dev.Ft27GroupCommitRunner.Run();
+namespace Quiver.Benchmarks.Standalone.Dev;
 
 /// <summary>
 /// FT-27: WAL group commit batching の throughput 改善を BDN 無しで短時間計測するランナー。

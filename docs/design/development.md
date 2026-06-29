@@ -3,10 +3,10 @@
 README はライブラリ利用者向けの最小限に絞っているため、内部アーキテクチャ・依存関係・
 ストレージ仕様・ビルド/テスト手順・開発状況・バージョニング規約・詳細な性能計測は本ファイルに集約する。
 
-- 設計仕様 (as-built): [docs/spec/](spec/)
-- ロードマップ / タスク状況: [docs/roadmap.md](roadmap.md)
-- API 安定性ポリシー: [docs/api-stability.md](api-stability.md)
-- 運用ガイド: [docs/operations/README.md](operations/README.md)
+- 設計仕様 (as-built): [docs/spec/](../spec/)
+- ロードマップ / タスク状況: [docs/design/roadmap.md](roadmap.md)
+- API 安定性ポリシー: [docs/api-stability.md](../api-stability.md)
+- 運用ガイド: [docs/operations/README.md](../operations/README.md)
 
 ## パッケージ構成
 
@@ -15,7 +15,7 @@ README はライブラリ利用者向けの最小限に絞っているため、�
 | `Quiver` | エンジン中核 + 公開ファサード。型付き属性（`[Node]` / `[Relationship]` / `[Property]` / `[Indexed]`、namespace `Quiver.Api`）を本体に内包し、`Quiver.SourceGen` を analyzer として同梱。これ 1 つの参照で型安全 CRUD まで使える |
 | `Quiver.SourceGen` | Roslyn `IIncrementalGenerator`（CRUD / `FindBy*` / 型保存トラバーサル糖衣を生成）。単体公開せず `Quiver` に同梱する内部プロジェクト |
 | `Quiver.Embedding` | テキスト埋め込みパイプライン（VEC-4）。**incubating: NuGet 非公開**（`IsPackable=false`。「NuGet パッケージ化」§incubating 参照） |
-| `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ・取込・hybrid 検索 + graph expansion）。**開発中** ([design/14](design/14_rag_layer.md)) |
+| `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ・取込・hybrid 検索 + graph expansion）。**開発中** ([design/14](14_rag_layer.md)) |
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` 連携（DI 登録） |
 | `Quiver.OpenTelemetry` | OpenTelemetry エクスポート |
 
@@ -191,7 +191,7 @@ foreach (var name in g.Nodes().HasLabel("Person").Values("Name").AsEnumerable())
 ## 性能（詳細計測）
 
 `benchmarks/Quiver.Benchmarks` の BenchmarkDotNet ベンチ、および standalone runner
-`--basic-perf`（[BasicPerfRunner.cs](../benchmarks/Quiver.Benchmarks/Standalone/BasicPerfRunner.cs)、
+`--basic-perf`（[BasicPerfRunner.cs](../../benchmarks/Quiver.Benchmarks/Standalone/BasicPerfRunner.cs)、
 `dotnet run --project benchmarks/Quiver.Benchmarks -c Release -- --basic-perf`）で計測。
 基本計測値は AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch（2026-06-09）。
 
@@ -250,53 +250,53 @@ carry-column は no-alias 比 ±3% 以内。詳細:
 
 ## 開発状況
 
-完了済みマイルストーンと進行中タスクの一覧は [docs/roadmap.md](roadmap.md) を正本とする。
+完了済みマイルストーンと進行中タスクの一覧は [docs/design/roadmap.md](roadmap.md) を正本とする。
 概略: Wave 1–5（Storage / Codec / WAL → Stores / Index → Transactions → Operators / Engine → Client 層）
 完了。Feature（FT）・Perf（PW）・Gremlin/Cypher Compat（GC）・Backend Abstraction（BA）・
 Vector/Embedding（VEC）の各系列が進行中。残タスク（PW-8/9/10 ほか）も roadmap 参照。
 
-Gremlin / Cypher 互換の対応状況は [docs/spec/05_query.md](spec/05_query.md)。
+Gremlin / Cypher 互換の対応状況は [docs/spec/05_query.md](../spec/05_query.md)。
 基本探索・比較述語・CRUD・集約・可変長パス・`as/select` は対応済み。
 
 ## 設計ドキュメント
 
 | ファイル | 内容 |
 |---|---|
-| [00_conventions.md](design/00_conventions.md) | 共通規約（命名・性能指針・テスト規約） |
-| [01_storage_paging.md](design/01_storage_paging.md) | ページ管理・バッファプール |
-| [02_record_codec.md](design/02_record_codec.md) | バイト列直接操作プリミティブ |
-| [03_fixed_record_stores.md](design/03_fixed_record_stores.md) | Node / Relationship ストア |
-| [04_property_token_stores.md](design/04_property_token_stores.md) | Property / Token ストア |
-| [05_btree_index.md](design/05_btree_index.md) | B+Tree インデックス |
-| [06_wal.md](design/06_wal.md) | Write-Ahead Log |
-| [07_transaction_recovery.md](design/07_transaction_recovery.md) | トランザクション・リカバリ |
-| [08_physical_operators.md](design/08_physical_operators.md) | Volcano 型物理演算子 |
-| [09_graph_api.md](design/09_graph_api.md) | 公開 CRUD API |
-| [10_embedding_pipeline.md](design/10_embedding_pipeline.md) | 埋め込み / ベクトル検索パイプライン |
-| [11_rearchitecture_master_plan.md](design/11_rearchitecture_master_plan.md) | 抜本再設計マスタープラン |
-| [12_rag_backend_direction.md](design/12_rag_backend_direction.md) | ローカル RAG バックエンド方向性（ポジショニング・非目標の正本） |
-| [13_fulltext_search.md](design/13_fulltext_search.md) | 全文検索 / ハイブリッド検索（転置インデックス + BM25 + RRF） |
-| [14_rag_layer.md](design/14_rag_layer.md) | Quiver.Rag レイヤ（Document/Chunk スキーマ・取込・検索） |
+| [00_conventions.md](00_conventions.md) | 共通規約（命名・性能指針・テスト規約） |
+| [01_storage_paging.md](01_storage_paging.md) | ページ管理・バッファプール |
+| [02_record_codec.md](02_record_codec.md) | バイト列直接操作プリミティブ |
+| [03_fixed_record_stores.md](03_fixed_record_stores.md) | Node / Relationship ストア |
+| [04_property_token_stores.md](04_property_token_stores.md) | Property / Token ストア |
+| [05_btree_index.md](05_btree_index.md) | B+Tree インデックス |
+| [06_wal.md](06_wal.md) | Write-Ahead Log |
+| [07_transaction_recovery.md](07_transaction_recovery.md) | トランザクション・リカバリ |
+| [08_physical_operators.md](08_physical_operators.md) | Volcano 型物理演算子 |
+| [09_graph_api.md](09_graph_api.md) | 公開 CRUD API |
+| [10_embedding_pipeline.md](10_embedding_pipeline.md) | 埋め込み / ベクトル検索パイプライン |
+| [11_rearchitecture_master_plan.md](11_rearchitecture_master_plan.md) | 抜本再設計マスタープラン |
+| [12_rag_backend_direction.md](12_rag_backend_direction.md) | ローカル RAG バックエンド方向性（ポジショニング・非目標の正本） |
+| [13_fulltext_search.md](13_fulltext_search.md) | 全文検索 / ハイブリッド検索（転置インデックス + BM25 + RRF） |
+| [14_rag_layer.md](14_rag_layer.md) | Quiver.Rag レイヤ（Document/Chunk スキーマ・取込・検索） |
 
 ## Versioning / API 安定性
 
 Quiver は [Semantic Versioning](https://semver.org/lang/ja/)（`MAJOR.MINOR.PATCH`）に従う。
 MAJOR は breaking change、MINOR は後方互換な機能追加、PATCH はバグ修正のみ。`1.0.0` 未満（`0.x`）は
-安定性の保証対象外。バージョンの正本は [Directory.Build.props](../Directory.Build.props) の `VersionPrefix`。
+安定性の保証対象外。バージョンの正本は [Directory.Build.props](../../Directory.Build.props) の `VersionPrefix`。
 
 安定性を保証する public API は `Quiver` / `Quiver.Api` / `Quiver.Core` の public 型に限る。非推奨化は
 最低 1 MINOR の `[Obsolete]` 告知期間を置いてから次の MAJOR で削除する。
 
-public API surface は [tests/Quiver.PublicApi.Tests/](../tests/Quiver.PublicApi.Tests/) の approval test
+public API surface は [tests/Quiver.PublicApi.Tests/](../../tests/Quiver.PublicApi.Tests/) の approval test
 （`PublicApiGenerator`）で機械的に固定されており、意図しない breaking change は CI で検出される。
-詳細は [docs/api-stability.md](api-stability.md) を参照。
+詳細は [docs/api-stability.md](../api-stability.md) を参照。
 
 ## NuGet パッケージ化
 
 ### 公開パッケージ
 
 `dotnet pack Quiver.slnx` で以下 4 つのライブラリが NuGet パッケージ (`.nupkg` + symbol `.snupkg`) になる。
-テスト / ベンチ / サンプル / sandbox は `IsPackable=false`（[Directory.Build.props](../Directory.Build.props) の既定）で除外される。
+テスト / ベンチ / サンプル / sandbox は `IsPackable=false`（[Directory.Build.props](../../Directory.Build.props) の既定）で除外される。
 
 | パッケージ | 内容 | 依存 |
 |---|---|---|
@@ -314,15 +314,15 @@ public API surface は [tests/Quiver.PublicApi.Tests/](../tests/Quiver.PublicApi
 （例: RAG の遅延/バックグラウンド埋め込みモード）が揃った時点で `IsPackable=true` にして公開へ昇格する。
 
 型付きエンティティ属性（`[Node]` / `[Relationship]` / `[Property]` / `[Indexed]`、namespace `Quiver.Api`）は
-**`Quiver` 本体アセンブリに内包**している（[src/Quiver/Client/NodeAttribute.cs](../src/Quiver/Client/NodeAttribute.cs)・
-[RelationshipAttribute.cs](../src/Quiver/Client/RelationshipAttribute.cs)）。`Quiver.SourceGen`（Roslyn generator）は
+**`Quiver` 本体アセンブリに内包**している（[src/Quiver/Client/NodeAttribute.cs](../../src/Quiver/Client/NodeAttribute.cs)・
+[RelationshipAttribute.cs](../../src/Quiver/Client/RelationshipAttribute.cs)）。`Quiver.SourceGen`（Roslyn generator）は
 **単体公開せず** `Quiver` パッケージへ analyzer として同梱する（`analyzers/dotnet/cs/Quiver.SourceGen.dll`、
-[src/Quiver/Quiver.csproj](../src/Quiver/Quiver.csproj) の `_QuiverAddBundledAnalyzer` target）。生成器は属性を
+[src/Quiver/Quiver.csproj](../../src/Quiver/Quiver.csproj) の `_QuiverAddBundledAnalyzer` target）。生成器は属性を
 **完全修飾名の文字列**で照合する（`GraphNodeGenerator.NodeAttributeFqn = "Quiver.Api.NodeAttribute"` 等）ため、
 属性アセンブリへの参照は不要。SourceGen の `ProjectReference` は `PrivateAssets="all"` でパッケージ依存に昇格させない。
 
 結果、利用者は `Quiver` パッケージ 1 つの参照で属性 + 生成器まで揃う。さらに `Quiver` は
-[build/Quiver.props](../src/Quiver/build/Quiver.props) を `build/`・`buildTransitive/` に同梱し、`ImplicitUsings`
+[build/Quiver.props](../../src/Quiver/build/Quiver.props) を `build/`・`buildTransitive/` に同梱し、`ImplicitUsings`
 有効なプロジェクトには `Quiver` / `Quiver.Api` の global using を自動注入する（`using` 文ゼロのドロップイン。
 不要なら利用者側で `<Using Remove="Quiver.Api" />` で opt-out 可）。
 
@@ -334,8 +334,8 @@ public API surface は [tests/Quiver.PublicApi.Tests/](../tests/Quiver.PublicApi
 ### 共通メタデータ / 設定
 
 パッケージ共通のメタデータ（Authors / ライセンス `MIT` / `RepositoryUrl` / `PackageReadmeFile` /
-`PackageIcon` 等）は [Directory.Build.props](../Directory.Build.props) に一元化。README（リポジトリルートの
-[README.md](../README.md)）とアイコン（`icon.png`）の同梱は [Directory.Build.targets](../Directory.Build.targets) で
+`PackageIcon` 等）は [Directory.Build.props](../../Directory.Build.props) に一元化。README（リポジトリルートの
+[README.md](../../README.md)）とアイコン（`icon.png`）の同梱は [Directory.Build.targets](../../Directory.Build.targets) で
 `IsPackable=true` のプロジェクトにだけ取り込む（props は csproj 本文より前に評価され `IsPackable` が
 未確定なため、targets 側で行う）。Source Link / 決定論ビルド / symbol package (`snupkg`) も props で有効。
 
@@ -362,6 +362,6 @@ dotnet pack Quiver.slnx -c Release -o artifacts/nupkg
 dotnet nuget push "artifacts/nupkg/*.nupkg" --api-key <KEY> --source https://api.nuget.org/v3/index.json --skip-duplicate
 ```
 
-CI では [.github/workflows/release.yml](../.github/workflows/release.yml) が `v*` タグ push を契機に
+CI では [.github/workflows/release.yml](../../.github/workflows/release.yml) が `v*` タグ push を契機に
 pack → `nuget.org` へ push する（API キーは GitHub secret `NUGET_API_KEY`）。手動実行
 （`workflow_dispatch`）では artifact 生成のみ。

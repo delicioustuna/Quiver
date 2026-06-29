@@ -1,4 +1,6 @@
-namespace Quiver.Benchmarks.Standalone;
+// 起動方法: Program.cs に以下を追加
+//   if (args[0] == "--ft29-coalesce") return Quiver.Benchmarks.Standalone.Dev.Ft29PageImageCoalesceRunner.Run();
+namespace Quiver.Benchmarks.Standalone.Dev;
 
 /// <summary>
 /// FT-29: Per-tx PageImage coalescing の効果を測る standalone runner。

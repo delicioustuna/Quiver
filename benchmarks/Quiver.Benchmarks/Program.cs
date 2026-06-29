@@ -20,40 +20,10 @@ BenchTempDir.SweepRoot();
 Console.CancelKeyPress         += (_, _) => BenchTempDir.SweepRoot();
 AppDomain.CurrentDomain.ProcessExit += (_, _) => BenchTempDir.SweepRoot();
 
-// FT-20: standalone runner (BDN を経由せず短時間で参考値計測)
-if (args.Length >= 1 && args[0] == "--ft20-wal")
-{
-    return FT20WalAmplificationRunner.Run();
-}
-
-// FT-24: lock contention (shared vs exclusive) standalone runner
-if (args.Length >= 1 && args[0] == "--ft24-lock")
-{
-    return LockContentionRunner.Run();
-}
-
 // FT-25: deadlock detection latency / CPU overhead standalone runner
 if (args.Length >= 1 && args[0] == "--ft25-deadlock")
 {
     return DeadlockDetectionRunner.Run();
-}
-
-// FT-26: MVCC single-tx write throughput standalone runner
-if (args.Length >= 1 && args[0] == "--ft26-mvcc")
-{
-    return Ft26MvccThroughputRunner.Run();
-}
-
-// FT-27: WAL group commit throughput standalone runner
-if (args.Length >= 1 && args[0] == "--ft27-groupcommit")
-{
-    return Ft27GroupCommitRunner.Run();
-}
-
-// FT-29: Per-tx PageImage coalescing standalone runner
-if (args.Length >= 1 && args[0] == "--ft29-coalesce")
-{
-    return Ft29PageImageCoalesceRunner.Run();
 }
 
 // FTS-6: full-text search p50 + ingest amplification + WAL bytes/chunk standalone runner.
@@ -63,34 +33,6 @@ if (args.Length >= 1 && args[0] == "--fts6")
     int chunkCount = args.Length >= 2 && int.TryParse(args[1], out var c) ? c : 100_000;
     int queryCount = args.Length >= 3 && int.TryParse(args[2], out var q) ? q : 500;
     return Fts6SearchRunner.Run(chunkCount, queryCount);
-}
-
-// FTS-7 手順1: 取込 WAL 増幅の内訳分解 (postings/norms BTree vs 本体 / before-after / pages-per-tx)。
-// Usage: -- --fts7 [chunks] [batchSize]   (defaults: 5000 chunks, batch 200 — FTS-6 増幅サンプルと同条件)
-if (args.Length >= 1 && args[0] == "--fts7")
-{
-    int chunks = args.Length >= 2 && int.TryParse(args[1], out var fc) ? fc : 5_000;
-    int batch = args.Length >= 3 && int.TryParse(args[2], out var fb) ? fb : 200;
-    return Fts7BreakdownRunner.Run(chunks, batch);
-}
-
-// FTS-7 手順2: logical postings WAL の spike ゲート (ARIES 変更なしで見込み増幅を算出)。
-// Usage: -- --fts7-spike [chunks] [batchSize]   (defaults: 5000 chunks, batch 200)
-if (args.Length >= 1 && args[0] == "--fts7-spike")
-{
-    int chunks = args.Length >= 2 && int.TryParse(args[1], out var sc) ? sc : 5_000;
-    int batch = args.Length >= 3 && int.TryParse(args[2], out var sb) ? sb : 200;
-    return Fts7BreakdownRunner.RunSpike(chunks, batch);
-}
-
-// FTS-7 手順6: steady-state 増分増幅 (構築済み index への増分 upsert = 実 RAG ユースケース)。
-// Usage: -- --fts7-steady [base] [incr] [batch]   (defaults: 50000 base, 5000 incr, batch 200)
-if (args.Length >= 1 && args[0] == "--fts7-steady")
-{
-    int baseChunks = args.Length >= 2 && int.TryParse(args[1], out var stb) ? stb : 50_000;
-    int incr = args.Length >= 3 && int.TryParse(args[2], out var sti) ? sti : 5_000;
-    int batch = args.Length >= 4 && int.TryParse(args[3], out var stba) ? stba : 200;
-    return Fts7BreakdownRunner.RunSteady(baseChunks, incr, batch);
 }
 
 // QP-3: MergeRelationship degree cost standalone runner
@@ -103,18 +45,6 @@ if (args.Length >= 1 && args[0] == "--qp3-merge-cost")
 if (args.Length >= 1 && args[0] == "--basic-perf")
 {
     return BasicPerfRunner.Run();
-}
-
-// タスク A Spike A0: クエリ compile コスト配分
-if (args.Length >= 1 && args[0] == "--spike-a")
-{
-    return SpikeAPlanCompileRunner.Run();
-}
-
-// タスク B Spike B1: 非bulk 読取 (linked-list) per-edge コスト配分
-if (args.Length >= 1 && args[0] == "--spike-b")
-{
-    return SpikeBReadPathRunner.Run();
 }
 
 // TS-6: JsonExporter.Full は <ResultsDir>/<Class>-report-full.json を出す。

@@ -1,3 +1,5 @@
+// 起動方法: Program.cs に以下を追加
+//   if (args[0] == "--spike-a") return Quiver.Benchmarks.Standalone.Dev.SpikeAPlanCompileRunner.Run();
 using System.Diagnostics;
 using Quiver;
 using Quiver.Api;
@@ -7,7 +9,7 @@ using Quiver.Query.Optimizer;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
 
-namespace Quiver.Benchmarks.Standalone;
+namespace Quiver.Benchmarks.Standalone.Dev;
 
 /// <summary>
 /// タスク A の Spike A0: クエリ DSL のクエリごと固定費 (~60µs) が

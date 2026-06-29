@@ -1,3 +1,7 @@
+// 起動方法: Program.cs に以下を追加
+//   if (args[0] == "--fts7") return Quiver.Benchmarks.Standalone.Dev.Fts7BreakdownRunner.Run(chunks, batch);
+//   if (args[0] == "--fts7-spike") return Quiver.Benchmarks.Standalone.Dev.Fts7BreakdownRunner.RunSpike(chunks, batch);
+//   if (args[0] == "--fts7-steady") return Quiver.Benchmarks.Standalone.Dev.Fts7BreakdownRunner.RunSteady(baseChunks, incr, batch);
 using System.Diagnostics;
 using System.Text;
 using Quiver;
@@ -7,7 +11,7 @@ using Quiver.Storage.Records;    // PropertyValue
 using Quiver.Storage.Wal;        // WalReader, WalRecordType, WalPageImageCodec
 using Quiver.Text;               // MixedBigramTokenizer, ITokenSink
 
-namespace Quiver.Benchmarks.Standalone;
+namespace Quiver.Benchmarks.Standalone.Dev;
 
 /// <summary>
 /// FTS-7 手順1: 取込 WAL 増幅の <b>内訳分解計測 (実測先行 / kill criteria 固定)</b>。

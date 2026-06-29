@@ -1,3 +1,5 @@
+// 起動方法: Program.cs に以下を追加
+//   if (args[0] == "--spike-b") return Quiver.Benchmarks.Standalone.Dev.SpikeBReadPathRunner.Run();
 using System.Diagnostics;
 using Quiver;
 using Quiver.Api;
@@ -5,7 +7,7 @@ using Quiver.Core;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
 
-namespace Quiver.Benchmarks.Standalone;
+namespace Quiver.Benchmarks.Standalone.Dev;
 
 /// <summary>
 /// タスク B の Spike B1: 非bulk 読取経路 (リレーションシップ linked-list) の per-edge コスト配分。

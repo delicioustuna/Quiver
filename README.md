@@ -118,12 +118,12 @@ var recent = g.Nodes<Person>()
 ```
 
 > 文字列キー指定のローレベル / 型なしトラバーサル、Match DSL（宣言的パターンマッチ）、
-> `tx.CreateNode` などの低レイヤ API は [docs/development.md](docs/development.md#ローレベル--型なし-api) を参照。
+> `tx.CreateNode` などの低レイヤ API は [docs/development.md](docs/design/development.md#ローレベル--型なし-api) を参照。
 
 ## 性能（基本計測）
 
 AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch による参考計測値（2026-06-09）。
-計測条件・詳細・追加ベンチは [docs/development.md](docs/development.md#性能詳細計測) を参照。
+計測条件・詳細・追加ベンチは [docs/development.md](docs/design/development.md#性能詳細計測) を参照。
 
 | 操作 | 実測 (2026-06-09) |
 |---|---|

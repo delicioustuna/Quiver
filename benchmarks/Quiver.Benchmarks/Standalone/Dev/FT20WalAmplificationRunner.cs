@@ -1,4 +1,6 @@
-namespace Quiver.Benchmarks.Standalone;
+// 起動方法: Program.cs に以下を追加
+//   if (args[0] == "--ft20-wal") return Quiver.Benchmarks.Standalone.Dev.FT20WalAmplificationRunner.Run();
+namespace Quiver.Benchmarks.Standalone.Dev;
 
 /// <summary>
 /// FT-20: BenchmarkDotNet を経由せず短時間で WAL 増幅の参考値を取るランナー。

@@ -3,7 +3,9 @@ using Quiver.Core;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
 
-namespace Quiver.Benchmarks.Standalone;
+// 起動方法: Program.cs に以下を追加
+//   if (args[0] == "--ft24-lock") return Quiver.Benchmarks.Standalone.Dev.LockContentionRunner.Run();
+namespace Quiver.Benchmarks.Standalone.Dev;
 
 /// <summary>
 /// FT-24: shared/exclusive lock の contention 特性を BDN 無しで短時間計測するランナー。

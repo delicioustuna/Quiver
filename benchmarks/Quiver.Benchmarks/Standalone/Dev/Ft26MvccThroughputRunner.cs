@@ -3,7 +3,9 @@ using Quiver;
 using Quiver.Core;
 using Quiver.Storage.Records;
 
-namespace Quiver.Benchmarks.Standalone;
+// 起動方法: Program.cs に以下を追加
+//   if (args[0] == "--ft26-mvcc") return Quiver.Benchmarks.Standalone.Dev.Ft26MvccThroughputRunner.Run();
+namespace Quiver.Benchmarks.Standalone.Dev;
 
 /// <summary>
 /// FT-26: MVCC 有効時の single-tx 書き込みスループット絶対値を計測するランナー。
