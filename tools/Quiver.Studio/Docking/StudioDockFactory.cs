@@ -8,22 +8,22 @@ using InpcFactory = Dock.Model.Inpc.Factory;
 namespace Quiver.Studio.Docking;
 
 /// <summary>
-/// Builds the dock layout using Dock.Model.Inpc types and FluentExtensions.
+/// Dock.Model.Inpc の型と FluentExtensions を使ってドックレイアウトを構築する。
 /// <para>
-/// Key design constraints for Dock.Avalonia v12 + Dock.Model.Inpc:
+/// Dock.Avalonia v12 と Dock.Model.Inpc を組み合わせる際の制約:
 /// <list type="bullet">
-///   <item>Base class must be <c>Dock.Model.Inpc.Factory</c> (not <c>FactoryBase</c>)
-///         — provides INPC-aware Create* methods and avoids StackOverflow from
-///         missing PropertyChanged on container properties.</item>
-///   <item><c>RootDock.ActiveDockable</c> must point to the top-level
-///         <c>ProportionalDock</c> (the full layout), not a child dock.
-///         <c>RootDockControl</c> only renders <c>ActiveDockable</c>.</item>
-///   <item>View content flows through <c>IDockable.Context</c> — set a wrapper
-///         model (e.g. <c>SchemaToolModel</c>) as Context, then bridge via
-///         DataTemplate in App.axaml: <c>Document/Tool → ContentControl
-///         Content="{Binding Context}" → per-model DataTemplate</c>.</item>
-///   <item><c>DockControl.Factory</c> must be assigned before
-///         <c>DockControl.Layout</c>, and <c>InitLayout</c> called explicitly.</item>
+///   <item>基底クラスには <c>FactoryBase</c> ではなく <c>Dock.Model.Inpc.Factory</c> を使う。
+///         INPC 対応の Create* メソッドが提供され、コンテナプロパティの PropertyChanged 欠落による
+///         StackOverflow を避けられる。</item>
+///   <item><c>RootDock.ActiveDockable</c> は子ドックではなく、レイアウト全体を表す最上位の
+///         <c>ProportionalDock</c> を指す必要がある。
+///         <c>RootDockControl</c> は <c>ActiveDockable</c> だけを描画する。</item>
+///   <item>ビューの内容は <c>IDockable.Context</c> 経由で渡す。Context に
+///         <c>SchemaToolModel</c> などのラッパーモデルを設定し、App.axaml の DataTemplate で
+///         <c>Document/Tool → ContentControl Content="{Binding Context}" →
+///         モデル別 DataTemplate</c> と接続する。</item>
+///   <item><c>DockControl.Layout</c> より先に <c>DockControl.Factory</c> を設定し、
+///         <c>InitLayout</c> を明示的に呼び出す。</item>
 /// </list>
 /// </para>
 /// </summary>
@@ -200,9 +200,8 @@ public sealed class StudioDockFactory : InpcFactory
                 rightToolDock);
         });
 
-        // ActiveDockable must be mainLayout (the ProportionalDock containing all panels).
-        // RootDockControl renders only ActiveDockable — setting a child dock here
-        // would hide the rest of the layout.
+        // RootDockControl は ActiveDockable だけを描画するため、全パネルを含む
+        // ProportionalDock の mainLayout を指定する。子ドックを指定すると残りが非表示になる。
         _rootDock = this.RootDock(r =>
         {
             r.Id = "root";

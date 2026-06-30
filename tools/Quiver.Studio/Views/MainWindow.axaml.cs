@@ -32,8 +32,8 @@ public partial class MainWindow : Window
             vm.PropertyChanged += OnViewModelPropertyChanged;
             vm.QueryHistory.LoadRequested += OnHistoryLoadRequested;
 
-            // Order matters: Factory before Layout, InitLayout before binding.
-            // DockControl.Layout fires Initialize() which requires Factory to be set.
+            // DockControl.Layout の設定時に Initialize() が走るため、Factory、InitLayout、
+            // バインディングの順序を崩してはならない。
             _dockFactory = new StudioDockFactory();
             var layout = _dockFactory.CreateLayout(vm);
             _dockFactory.InitLayout(layout);

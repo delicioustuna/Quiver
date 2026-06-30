@@ -154,7 +154,7 @@ static void GenerateVector(string outputPath)
             g.AddRelationship("BELONGS_TO").From(docId).To(topicNode).Next();
         }
 
-        // cross-references between related docs
+        // 関連文書間の相互参照
         for (var i = 0; i < nodeIds.Count; i++)
         {
             for (var j = i + 1; j < nodeIds.Count; j++)
@@ -189,10 +189,10 @@ static void GenerateHierarchical(string outputPath)
     {
         var g = tx.G(db.Schema);
 
-        // --- Company (root) ---
+        // --- 会社 (ルート) ---
         var company = g.AddNode("Company").P("name", "Quiver Corp").P("founded", 2024L).Next();
 
-        // --- Departments (layer 1) ---
+        // --- 部門 (第 1 層) ---
         var eng = g.AddNode("Department").P("name", "Engineering").P("headcount", 8L).Next();
         var prod = g.AddNode("Department").P("name", "Product").P("headcount", 3L).Next();
         var design = g.AddNode("Department").P("name", "Design").P("headcount", 2L).Next();
@@ -201,7 +201,7 @@ static void GenerateHierarchical(string outputPath)
         g.AddRelationship("HAS_DEPT").From(company).To(prod).Next();
         g.AddRelationship("HAS_DEPT").From(company).To(design).Next();
 
-        // --- Teams under Engineering (layer 2) ---
+        // --- 開発部門配下のチーム (第 2 層) ---
         var frontend = g.AddNode("Team").P("name", "Frontend").P("tech", "TypeScript").Next();
         var backend = g.AddNode("Team").P("name", "Backend").P("tech", "C#").Next();
         var infra = g.AddNode("Team").P("name", "Infrastructure").P("tech", "Terraform").Next();
@@ -210,7 +210,7 @@ static void GenerateHierarchical(string outputPath)
         g.AddRelationship("HAS_TEAM").From(eng).To(backend).Next();
         g.AddRelationship("HAS_TEAM").From(eng).To(infra).Next();
 
-        // --- People (layer 3) ---
+        // --- 従業員 (第 3 層) ---
         var alice = g.AddNode("Person").P("name", "Alice").P("role", "Frontend Lead").P("bio", "Alice leads the frontend team and specializes in React and TypeScript").Next();
         var bob = g.AddNode("Person").P("name", "Bob").P("role", "Frontend Dev").P("bio", "Bob is a frontend developer focused on accessibility and design systems").Next();
         var carol = g.AddNode("Person").P("name", "Carol").P("role", "Backend Lead").P("bio", "Carol architects backend services and manages the API layer").Next();
@@ -223,7 +223,7 @@ static void GenerateHierarchical(string outputPath)
         var judy = g.AddNode("Person").P("name", "Judy").P("role", "Designer").P("bio", "Judy creates user interfaces and maintains the design system").Next();
         var ken = g.AddNode("Person").P("name", "Ken").P("role", "UX Researcher").P("bio", "Ken conducts user research and usability testing").Next();
 
-        // HAS_MEMBER: team/dept → person (parent→child direction for Sugiyama)
+        // HAS_MEMBER: チームまたは部門 → 従業員 (Sugiyama 用の親 → 子方向)
         g.AddRelationship("HAS_MEMBER").From(frontend).To(alice).Next();
         g.AddRelationship("HAS_MEMBER").From(frontend).To(bob).Next();
         g.AddRelationship("HAS_MEMBER").From(backend).To(carol).Next();
@@ -236,7 +236,7 @@ static void GenerateHierarchical(string outputPath)
         g.AddRelationship("HAS_MEMBER").From(design).To(judy).Next();
         g.AddRelationship("HAS_MEMBER").From(design).To(ken).Next();
 
-        // MANAGES: manager → subordinate (parent→child)
+        // MANAGES: 管理者 → 部下 (親 → 子)
         g.AddRelationship("MANAGES").From(alice).To(bob).Next();
         g.AddRelationship("MANAGES").From(carol).To(dave).Next();
         g.AddRelationship("MANAGES").From(carol).To(eve).Next();
@@ -244,16 +244,16 @@ static void GenerateHierarchical(string outputPath)
         g.AddRelationship("MANAGES").From(judy).To(ken).Next();
         g.AddRelationship("MANAGES").From(heidi).To(ivan).Next();
 
-        // COLLABORATES: cross-team links
+        // COLLABORATES: チーム間のリンク
         g.AddRelationship("COLLABORATES").From(alice).To(judy).P("project", "Design System").Next();
         g.AddRelationship("COLLABORATES").From(carol).To(heidi).P("project", "API Roadmap").Next();
         g.AddRelationship("COLLABORATES").From(frank).To(carol).P("project", "Deploy Pipeline").Next();
 
-        // MENTORS: skip-level connections
+        // MENTORS: 階層をまたぐ接続
         g.AddRelationship("MENTORS").From(carol).To(bob).Next();
         g.AddRelationship("MENTORS").From(frank).To(eve).Next();
 
-        // Index entries
+        // インデックスエントリ
         (string name, NodeId id)[] depts = [("Engineering", eng), ("Product", prod), ("Design", design)];
         foreach (var (name, id) in depts)
             tx.IndexInsert("idx_dept_name", name, id);

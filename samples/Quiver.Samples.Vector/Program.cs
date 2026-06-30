@@ -1,4 +1,4 @@
-// Quiver.Samples.Vector — VEC-5 (KNN as traversal source) と VEC-6 (graph-first hybrid)。
+// Quiver.Samples.Vector — KNN を起点とするトラバーサルと graph-first ハイブリッド検索。
 //
 // 実行: dotnet run --project samples/Quiver.Samples.Vector
 

@@ -3,12 +3,10 @@ using Quiver.Core;
 namespace Quiver.Embedding;
 
 /// <summary>
-/// Bridges <see cref="IEmbeddingTaskLog"/> onto the
-/// <see cref="IVectorCatalog"/> so a single durable store backs both index
-/// metadata and per-entity task state. The catalog implementation is
-/// authoritative for concurrency / persistence — this wrapper is a thin
-/// translation layer that lifts catalog records into the helper-facing
-/// <see cref="EmbeddingTaskInfo"/> shape.
+/// <see cref="IEmbeddingTaskLog"/> を <see cref="IVectorCatalog"/> に接続し、
+/// インデックスメタデータとエンティティ単位のタスク状態を同じ永続ストアに格納する。
+/// 並行性と永続化はカタログ実装が担い、このラッパーはカタログレコードを
+/// <see cref="EmbeddingTaskInfo"/> に変換するだけの薄い層として機能する。
 /// </summary>
 public sealed class VectorCatalogEmbeddingTaskLog(IVectorCatalog catalog) : IEmbeddingTaskLog
 {

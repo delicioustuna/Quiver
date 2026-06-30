@@ -5,9 +5,9 @@ using Quiver.Embedding.Providers;
 namespace Quiver.Embedding.Text;
 
 /// <summary>
-/// Cap text so the provider's input limit isn't exceeded. The caller picks
-/// the counting mode (matching <c>EmbeddingInputLimits</c>) and the policy
-/// (which end gets sacrificed).
+/// プロバイダの入力上限を超えないようテキストを切り詰める。
+/// 呼び出し側が <c>EmbeddingInputLimits</c> に対応する計数方法と、
+/// どの部分を切り捨てるかを表すポリシーを指定する。
 /// </summary>
 public interface ITextTruncator
 {
@@ -15,9 +15,9 @@ public interface ITextTruncator
 }
 
 /// <summary>
-/// Grapheme-cluster-aware default truncator. Uses <see cref="StringInfo"/>'s
-/// UAX #29 enumerator so ZWJ sequences (👨‍👩‍👧‍👦), regional-indicator pairs
-/// (🇯🇵), and skin-tone modifiers (👍🏽) stay intact.
+/// 書記素クラスタを考慮する既定の切り詰め実装。
+/// <see cref="StringInfo"/> の UAX #29 列挙子を使い、ZWJ シーケンス (👨‍👩‍👧‍👦)、
+/// 地域識別子の組 (🇯🇵)、肌色修飾子 (👍🏽) を分割しない。
 /// </summary>
 public sealed class GraphemeTextTruncator : ITextTruncator
 {
@@ -46,7 +46,7 @@ public sealed class GraphemeTextTruncator : ITextTruncator
         LengthCountingMode.Utf16CodeUnits => s.Length,
         LengthCountingMode.Runes => RuneCount(s),
         LengthCountingMode.Graphemes => GraphemeCount(s),
-        // Tokens has no in-process estimator — fall back to UTF-8 byte count.
+        // Tokens はプロセス内で見積もれないため、UTF-8 バイト数へフォールバックする。
         _ => Encoding.UTF8.GetByteCount(s),
     };
 
@@ -67,7 +67,7 @@ public sealed class GraphemeTextTruncator : ITextTruncator
 
     private static string TruncateTail(string input, int maxLength, LengthCountingMode mode)
     {
-        // Iterate graphemes; stop when adding the next one would exceed maxLength.
+        // 書記素単位で走査し、次の要素を加えると maxLength を超える時点で止める。
         var e = StringInfo.GetTextElementEnumerator(input);
         var sb = new StringBuilder();
         while (e.MoveNext())
@@ -82,8 +82,7 @@ public sealed class GraphemeTextTruncator : ITextTruncator
 
     private static string TruncateHead(string input, int maxLength, LengthCountingMode mode)
     {
-        // Collect grapheme list, then walk from the end, prepending until the
-        // accumulated string would exceed maxLength.
+        // 書記素を収集して末尾から走査し、maxLength を超えない範囲で前方へ追加する。
         var graphemes = new List<string>();
         var e = StringInfo.GetTextElementEnumerator(input);
         while (e.MoveNext()) graphemes.Add((string)e.Current);

@@ -1,4 +1,4 @@
-// Dock model types (Document, Tool, RootDock, ProportionalDock, ToolDock, DocumentDock, etc.)
-// come from the Dock.Model.Inpc NuGet package. Custom model classes were removed because
-// plain auto-properties without PropertyChanged caused StackOverflow in the Dock.Avalonia
-// rendering pipeline. See StudioDockFactory for the layout, App.axaml for DataTemplates.
+// Document、Tool、RootDock、ProportionalDock、ToolDock、DocumentDock などのドックモデル型は
+// Dock.Model.Inpc NuGet パッケージから取得する。PropertyChanged を通知しない単純な自動プロパティを持つ
+// 独自モデルは Dock.Avalonia の描画パイプラインで StackOverflow を起こすため使用しない。
+// レイアウトは StudioDockFactory、DataTemplate は App.axaml を参照。

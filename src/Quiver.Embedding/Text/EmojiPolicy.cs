@@ -42,7 +42,7 @@ public sealed class EmojiPolicy
 
     // ヒューリスティック: 先頭 rune が emoji 系コードポイントである grapheme を「絵文字クラスタ」と見なす。
     // 既定ポリシー用途には十分。完全な UAX #51 準拠には NeoSmart.Unicode のテーブルが必要で、
-    // VEC-4 のスコープ外。
+    // 絵文字を除去するポリシーは提供しない。
     private static bool IsEmojiCluster(string grapheme)
     {
         foreach (var rune in grapheme.EnumerateRunes())

@@ -3,9 +3,9 @@ using Quiver.Core;
 namespace Quiver.Embedding;
 
 /// <summary>
-/// Idempotency log keyed by <see cref="EmbeddingTaskKey"/>. The pipeline
-/// consults <see cref="GetInfoAsync"/> before invoking the provider so that
-/// a successful run with the same content hash is a no-op.
+/// <see cref="EmbeddingTaskKey"/> をキーとする冪等性ログ。
+/// パイプラインはプロバイダの呼び出し前に <see cref="GetInfoAsync"/> を参照し、
+/// 同じコンテンツハッシュで完了済みなら何もしない。
 /// </summary>
 public interface IEmbeddingTaskLog
 {

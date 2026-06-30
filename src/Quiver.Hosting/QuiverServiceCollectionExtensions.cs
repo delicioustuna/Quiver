@@ -76,7 +76,7 @@ public static class QuiverServiceCollectionExtensions
             var loggerFactory = sp.GetService<ILoggerFactory>();
             var dbOpts = opts.ToGraphDatabaseOptions(loggerFactory);
             postConfigure?.Invoke(dbOpts);
-            // ARCH-4 増分8: Quiver は単一ファイル (*.quiver)。DataDirectory 配下の graph.quiver を開く。
+            // Quiver は単一ファイル (*.quiver) のため、DataDirectory 配下の graph.quiver を開く。
             return GraphDatabase.Open(
                 System.IO.Path.Combine(opts.DataDirectory, "graph.quiver"), dbOpts);
         });

@@ -3,10 +3,10 @@
 // 実行: dotnet run --project samples/Quiver.Samples.QueryPatterns
 //
 // 1. 型安全 Where / StartsWith
-// 2. Coalesce (先頭マッチ分岐)
-// 3. Optional (OPTIONAL MATCH)
-// 4. Union (複数分岐連結)
-// 5. As / Select (タプル射影)
+// 2. Coalesce (最初に一致した分岐)
+// 3. Optional (任意一致、OPTIONAL MATCH)
+// 4. Union (複数分岐の連結)
+// 5. As / Select (タプルへの射影)
 // 6. 存在条件つき書き込み (MergeNode / MergeRelationship + C# if)
 // 7. 直積 AddRelationship (発端シナリオ: B-Person → C-Tool に Use を張る)
 
@@ -55,7 +55,7 @@ try
         // → Carol, age=35
     }
 
-    // ── 2. Coalesce ─────────────────────────────────────────────────────────
+    // ── 2. 最初に一致した分岐を返す Coalesce ───────────────────────────────
     Console.WriteLine("\n── 2. Coalesce (KNOWS があればその先、なければ自身) ──");
     using (var tx = db.BeginReadOnlyTransaction())
     {
@@ -70,7 +70,7 @@ try
             Console.WriteLine($"  {n}");
     }
 
-    // ── 3. Optional ─────────────────────────────────────────────────────────
+    // ── 3. 一致しなくても元の行を残す Optional ─────────────────────────────
     Console.WriteLine("\n── 3. Optional (KNOWS 先があればそちら、なければ元のまま) ──");
     using (var tx = db.BeginReadOnlyTransaction())
     {
@@ -84,7 +84,7 @@ try
             Console.WriteLine($"  {n}");
     }
 
-    // ── 4. Union ─────────────────────────────────────────────────────────────
+    // ── 4. 複数分岐を連結する Union ─────────────────────────────────────────
     Console.WriteLine("\n── 4. Union (KNOWS 先 + USE 先を連結) ──");
     using (var tx = db.BeginReadOnlyTransaction())
     {
@@ -98,7 +98,7 @@ try
         // → Bob, Carol, Cutter
     }
 
-    // ── 5. As / Select ──────────────────────────────────────────────────────
+    // ── 5. ラベル付けと射影を行う As / Select ──────────────────────────────
     Console.WriteLine("\n── 5. As / Select (Person→KNOWS→Person のペア) ──");
     using (var tx = db.BeginReadOnlyTransaction())
     {

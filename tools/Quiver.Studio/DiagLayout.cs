@@ -43,7 +43,7 @@ internal static class DiagLayout
         Console.WriteLine($"Nodes: {nodes.Count}, Edges: {edges.Count}");
         Console.WriteLine();
 
-        // Degree analysis
+        // 次数の分析
         var degree = new Dictionary<string, int>();
         foreach (var n in nodes) degree[n.Label + "#" + n.Id.Sequence] = 0;
         foreach (var e in edges)
@@ -56,7 +56,7 @@ internal static class DiagLayout
             Console.WriteLine($"  {k}: degree={v}");
         Console.WriteLine();
 
-        // Run layout
+        // レイアウトの実行
         var layout = new GraphLayoutService();
         layout.Layout(nodes, edges);
 
@@ -73,7 +73,7 @@ internal static class DiagLayout
             Console.WriteLine($"  {n.Label,-8} #{n.Id.Sequence,-3} ({n.X:F1}, {n.Y:F1})");
         Console.WriteLine();
 
-        // Edge lengths
+        // エッジ長の集計
         Console.WriteLine("--- Edge Lengths ---");
         var lengths = edges.Select(e =>
         {
@@ -84,7 +84,7 @@ internal static class DiagLayout
         Console.WriteLine($"  min={lengths[0]:F1}  median={lengths[lengths.Count / 2]:F1}  max={lengths[^1]:F1}");
         Console.WriteLine($"  IdealEdgeLength=100");
 
-        // Simulated FitToContent for 1400x700 viewport
+        // 1400x700 ビューポートで FitToContent を模擬する。
         var viewW = 1400.0;
         var viewH = 700.0;
         var margin = 40.0;

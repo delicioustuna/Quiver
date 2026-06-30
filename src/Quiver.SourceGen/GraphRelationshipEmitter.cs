@@ -78,7 +78,7 @@ internal static class GraphRelationshipEmitter
         sb.AppendLine($"    public static string GraphType => \"{model.RelType}\";");
         sb.AppendLine();
 
-        // Insert
+        // 挿入
         sb.AppendLine($"    public static Quiver.Core.RelationshipId Insert(IGraphTransaction tx, Quiver.Core.NodeId from, Quiver.Core.NodeId to, {model.ClassName} entity)");
         sb.AppendLine("    {");
         sb.AppendLine($"        var id = tx.CreateRelationship(from, to, \"{model.RelType}\");");
@@ -93,7 +93,7 @@ internal static class GraphRelationshipEmitter
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // Load
+        // 読み込み
         sb.AppendLine($"    public static {model.ClassName} Load(IGraphTransaction tx, Quiver.Core.RelationshipId id)");
         sb.AppendLine("    {");
         if (multiValueProps.Count > 0)
@@ -124,7 +124,7 @@ internal static class GraphRelationshipEmitter
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // Update
+        // 更新
         sb.AppendLine($"    public static void Update(IGraphTransaction tx, Quiver.Core.RelationshipId id, {model.ClassName} entity)");
         sb.AppendLine("    {");
         foreach (var prop in model.Properties)
@@ -137,13 +137,13 @@ internal static class GraphRelationshipEmitter
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // Delete
+        // 削除
         sb.AppendLine($"    public static void Delete(IGraphTransaction tx, Quiver.Core.RelationshipId id) => tx.DeleteRelationship(id);");
 
         sb.AppendLine("}");
         sb.AppendLine();
 
-        // Hop 型保存トラバーサル糖衣 (ARCH-8)
+        // ホップ後の型を保存するトラバーサル糖衣
         sb.AppendLine($"/// <summary>{model.ClassName} (型保存トラバーサル糖衣) — SourceGenerator 生成。</summary>");
         sb.AppendLine($"public static class {model.ClassName}TraversalExtensions");
         sb.AppendLine("{");
@@ -156,7 +156,7 @@ internal static class GraphRelationshipEmitter
         sb.AppendLine($"        => source.OutWhere<{model.ClassName}, {model.TargetFqn}>(edgeFilter);");
         sb.AppendLine();
 
-        // WS-4: Write sink sugar
+        // 書き込み終端の糖衣
         var s = model.SourceFqn;
         var t = model.TargetFqn;
         var r = model.ClassName;

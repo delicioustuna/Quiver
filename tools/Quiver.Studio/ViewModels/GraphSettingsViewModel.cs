@@ -10,10 +10,10 @@ public sealed partial class GraphSettingsViewModel : ObservableObject
     private readonly GraphCanvasViewModel _canvas;
     private bool _loading;
 
-    // --- Score visualization ---
+    // --- スコアの可視化 ---
     [ObservableProperty] private int _scoreVizModeIndex;
 
-    // --- Contour ---
+    // --- 輪郭 ---
     [ObservableProperty] private int _contourModeIndex;
     [ObservableProperty] private int _paletteModeIndex;
     [ObservableProperty] private int _paletteSteps;
@@ -21,14 +21,14 @@ public sealed partial class GraphSettingsViewModel : ObservableObject
     [ObservableProperty] private double _absoluteMin;
     [ObservableProperty] private double _absoluteMax = 1.0;
 
-    // --- Shape ---
+    // --- 形状 ---
     [ObservableProperty] private int _nodeShapeIndex;
     [ObservableProperty] private int _edgeStyleIndex;
 
-    // --- Language ---
+    // --- 言語 ---
     [ObservableProperty] private int _languageIndex;
 
-    // --- Preview binding ---
+    // --- プレビューのバインディング ---
     [ObservableProperty] private ContourSettings? _contourPreview;
 
     public string[] ScoreVizModes { get; } = ["Color only", "Color + Size", "Size only"];

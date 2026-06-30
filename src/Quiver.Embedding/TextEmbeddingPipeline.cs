@@ -10,21 +10,21 @@ using Quiver.Transactions;
 namespace Quiver.Embedding;
 
 /// <summary>
-/// helper. Orchestrates the
+/// テキストからベクトルを生成して保存するパイプライン。
 /// <c>normalize → emoji policy → truncate → hash → dedup → embed → SetVector
-/// → MarkCompleted</c> flow on top of an <see cref="IGraphEngine"/> adapter,
-/// without taking any compile-time dependency on engine internals.
+/// → MarkCompleted</c> の処理を <see cref="IGraphEngine"/> アダプタ上で組み立て、
+/// エンジン内部へのコンパイル時依存を持たない。
 /// </summary>
 /// <remarks>
-/// Three entry points:
+/// 入口は次の 3 つ。
 /// <list type="bullet">
-/// <item><see cref="EnqueueAsync(EntityRef, string, string, CancellationToken)"/> — direct enqueue. Used by scanners or manual backfill.</item>
-/// <item><see cref="EnqueueOnCommit"/> — register a post-commit hook on a transaction so enqueue fires only after WAL fsync (Y').</item>
-/// <item><see cref="ScanAndEnqueueAsync"/> — startup / migration walk to pick up stale or never-seen entities (Z').</item>
+/// <item><see cref="EnqueueAsync(EntityRef, string, string, CancellationToken)"/> — 直接キューへ追加する。スキャンや手動バックフィルで使用する。</item>
+/// <item><see cref="EnqueueOnCommit"/> — トランザクションに post-commit フックを登録し、WAL の fsync 後にだけキューへ追加する。</item>
+/// <item><see cref="ScanAndEnqueueAsync"/> — 起動時やマイグレーション時に走査し、古いエンティティや未処理のエンティティを拾う。</item>
 /// </list>
-/// A single background worker drains the channel; concurrency is capped by
-/// the provider's <see cref="IEmbeddingProvider.MaxConcurrency"/>. Cancellation
-/// of <see cref="RunAsync"/> drains the worker but does not throw.
+/// 1 つのバックグラウンドワーカーがチャネルを消費し、並行数はプロバイダの
+/// <see cref="IEmbeddingProvider.MaxConcurrency"/> で制限する。
+/// <see cref="RunAsync"/> をキャンセルすると、ワーカーは例外を送出せずに終了する。
 /// </remarks>
 public sealed class TextEmbeddingPipeline : IAsyncDisposable
 {
@@ -63,7 +63,7 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
             {
                 BackpressureMode.DropOldest => BoundedChannelFullMode.DropOldest,
                 BackpressureMode.DropNewest => BoundedChannelFullMode.DropNewest,
-                BackpressureMode.ThrowOnFull => BoundedChannelFullMode.Wait, // surfaced manually below
+                BackpressureMode.ThrowOnFull => BoundedChannelFullMode.Wait, // 下で明示的に例外化する
                 _ => BoundedChannelFullMode.Wait,
             },
             SingleReader = true,
@@ -76,8 +76,8 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
     public int PendingTasks => Volatile.Read(ref _pending);
 
     /// <summary>
-    /// Normalize / truncate / hash / dedup-check the input, then drop a job
-    /// onto the worker queue. No provider call is made on this thread.
+    /// 入力を正規化、切り詰め、ハッシュ化して重複を確認し、ワーカーキューへ追加する。
+    /// このスレッドではプロバイダを呼び出さない。
     /// </summary>
     public async ValueTask EnqueueAsync(
         EntityRef entity,
@@ -93,7 +93,7 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
 
         var info = await _taskLog.GetInfoAsync(key, ct).ConfigureAwait(false);
         if (info.State == EmbeddingTaskState.Completed && info.LastContentHash == prepared.ContentHash)
-            return; // idempotent: same text, already done.
+            return; // 同じテキストで完了済みなら冪等に終了する。
 
         Interlocked.Increment(ref _pending);
         try
@@ -158,9 +158,9 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
     }
 
     /// <summary>
-    /// Z' pattern: walk the engine for the configured kind, read the source
-    /// property, and enqueue anything whose task log entry is missing,
-    /// failed, or whose content hash no longer matches the live text.
+    /// 設定された種類のエンティティを走査して元プロパティを読み取り、
+    /// タスクログが無いもの、失敗したもの、またはコンテンツハッシュが現在のテキストと
+    /// 一致しないものをキューへ追加する。
     /// </summary>
     public async Task ScanAndEnqueueAsync(EmbeddingScanSpec spec, CancellationToken ct)
     {
@@ -187,7 +187,7 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
         }
     }
 
-    /// <summary>Block until the queue is empty. Used by migration tooling.</summary>
+    /// <summary>キューが空になるまで待機する。マイグレーションツールから使用する。</summary>
     public async Task WhenDrainedAsync(CancellationToken ct)
     {
         while (Volatile.Read(ref _pending) > 0)
@@ -197,7 +197,7 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
         }
     }
 
-    /// <summary>Drive the worker loop. Returns when <paramref name="ct"/> fires.</summary>
+    /// <summary>ワーカーループを実行し、<paramref name="ct"/> がキャンセルされると終了する。</summary>
     public async Task RunAsync(CancellationToken ct)
     {
         try
@@ -216,7 +216,7 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException) { /* normal shutdown */ }
+        catch (OperationCanceledException) { /* 通常のシャットダウン */ }
     }
 
     private async Task ProcessAsync(QueueItem item, CancellationToken ct)

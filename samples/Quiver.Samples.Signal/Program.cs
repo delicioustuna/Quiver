@@ -3,7 +3,7 @@
 // デモの流れ: テンプレート波形 → トラバーサルによるフィルタ → CosineSimilarityOp によるランキング
 // → メタデータ取得. 演算範囲指定およびサブトラバーサル引数のサンプルも記載する。
 //
-// Run: dotnet run --project samples/Quiver.Samples.Signal
+// 実行: dotnet run --project samples/Quiver.Samples.Signal
 
 using Quiver;
 using Quiver.Api;
@@ -15,7 +15,7 @@ try
 {
     using var db = GraphDatabase.Open(Path.Combine(dir, "graph.quiver"));
 
-    // ── Index definition (FlatOnly — HNSW not needed for custom scoring) ──
+    // ── インデックス定義 (カスタムスコアリングでは HNSW が不要なため FlatOnly) ──
     const string indexName = "Waveform";
     const int dim = 8;
     var waveformKey = db.Schema.GetOrCreatePropertyKey("Waveform");
@@ -28,7 +28,7 @@ try
         ProviderId: "sample-static",
         IndexKind: VectorIndexKind.FlatOnly));
 
-    // ── Populate sensors with synthetic waveforms ──
+    // ── 合成波形を持つセンサーを投入 ──
     using (var tx = db.BeginTransaction())
     {
         var sensors = new (string Site, string Id, float[] Wave)[]
@@ -48,7 +48,7 @@ try
             db.Vectors.SetVector(EntityKind.Node, nid.Value, indexName, wave);
         }
 
-        // Template (reference pattern) stored as a float[] property
+        // 基準パターンとなるテンプレートを float[] プロパティとして保存する。
         var tmpl = tx.CreateNode("Template");
         tx.SetProperty(tmpl, "Name", PropertyValue.FromString("bell-curve"));
         tx.SetProperty(tmpl, "Pattern",
@@ -57,7 +57,7 @@ try
         tx.Commit();
     }
 
-    // ── 1. Basic ApplyDyadic: rank Tokyo sensors by cosine similarity ──
+    // ── 1. 基本の ApplyDyadic: 東京のセンサーをコサイン類似度で順位付け ──
     Console.WriteLine("── 1. ApplyDyadic (static b, Tokyo sensors only) ──");
     float[] query = [0.9f, 0.8f, 0.1f, 0.0f, 0.0f, 0.1f, 0.8f, 0.9f];
 
@@ -73,7 +73,7 @@ try
             Console.WriteLine($"  {sensor.SensorId}  site={sensor.Site}");
     }
 
-    // ── 2. Region-restricted scoring (first 4 dimensions only) ──
+    // ── 2. 範囲を限定したスコアリング (先頭 4 次元のみ) ──
     Console.WriteLine();
     Console.WriteLine("── 2. Region-restricted scoring (dims 0..4) ──");
     using (var tx = db.BeginReadOnlyTransaction())
@@ -91,7 +91,7 @@ try
             Console.WriteLine($"  {sensor.SensorId}  site={sensor.Site}");
     }
 
-    // ── 3. Traversal-based b (reference vector from graph) ──
+    // ── 3. トラバーサルで b を指定 (グラフ内の参照ベクトル) ──
     Console.WriteLine();
     Console.WriteLine("── 3. Traversal b (Template 'bell-curve' as reference) ──");
     using (var tx = db.BeginReadOnlyTransaction())
@@ -110,7 +110,7 @@ try
             Console.WriteLine($"  {sensor.SensorId}  site={sensor.Site}");
     }
 
-    // ── 4. Dot product on all sensors ──
+    // ── 4. 全センサーに対する内積 ──
     Console.WriteLine();
     Console.WriteLine("── 4. DotProductOp (all sensors) ──");
     using (var tx = db.BeginReadOnlyTransaction())
@@ -133,7 +133,7 @@ finally
         Directory.Delete(dir, recursive: true);
 }
 
-// ── Hand-coded IGraphNode types (no SourceGenerator needed for the sample) ──
+// ── 手書きの IGraphNode 型 (サンプルでは Source Generator を使わない) ──
 
 sealed class SensorNode : IGraphNode<SensorNode>
 {

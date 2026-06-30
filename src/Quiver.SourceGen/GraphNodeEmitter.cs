@@ -22,7 +22,7 @@ internal static class GraphNodeEmitter
         ["float[]"]        = ("PropertyValue.FromFloatArray(entity.{0})", "tx.GetProperty(id, \"{1}\").FloatArrayValue.ToArray()"),
     };
 
-    // Multi-value: PropertyValue.From*(loopVar) per element type
+    // 複数値: 要素型ごとの PropertyValue.From*(loopVar)
     private static readonly Dictionary<string, string> _mvWriteExpr = new()
     {
         ["string"]  = "PropertyValue.FromString(__v)",
@@ -39,7 +39,7 @@ internal static class GraphNodeEmitter
         ["TimeSpan"]       = "PropertyValue.FromTimeSpan(__v)",
     };
 
-    // Multi-value: enumerator.Current -> CLR type
+    // 複数値: enumerator.Current から CLR 型への変換
     private static readonly Dictionary<string, string> _mvReadExpr = new()
     {
         ["string"]  = "System.Text.Encoding.UTF8.GetString(__e.Current.Utf8StringValue)",
@@ -109,7 +109,7 @@ internal static class GraphNodeEmitter
         sb.AppendLine($"    public static string GraphLabel => \"{model.Label}\";");
         sb.AppendLine();
 
-        // Insert
+        // 挿入
         sb.AppendLine($"    public static Quiver.Core.NodeId Insert(IGraphTransaction tx, {model.ClassName} entity)");
         sb.AppendLine("    {");
         sb.AppendLine($"        var id = tx.CreateNode(\"{model.Label}\");");
@@ -124,7 +124,7 @@ internal static class GraphNodeEmitter
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // InsertIndexed
+        // インデックス付き挿入
         sb.AppendLine($"    public static Quiver.Core.NodeId InsertIndexed(IGraphTransaction tx, {model.ClassName} entity)");
         sb.AppendLine("    {");
         sb.AppendLine("        var id = Insert(tx, entity);");
@@ -137,7 +137,7 @@ internal static class GraphNodeEmitter
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // Load
+        // 読み込み
         sb.AppendLine($"    public static {model.ClassName} Load(IGraphTransaction tx, Quiver.Core.NodeId id)");
         sb.AppendLine("    {");
         if (multiValueProps.Count > 0)
@@ -168,7 +168,7 @@ internal static class GraphNodeEmitter
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // Update
+        // 更新
         sb.AppendLine($"    public static void Update(IGraphTransaction tx, Quiver.Core.NodeId id, {model.ClassName} entity)");
         sb.AppendLine("    {");
         foreach (var prop in model.Properties)
@@ -181,10 +181,10 @@ internal static class GraphNodeEmitter
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // Delete
+        // 削除
         sb.AppendLine($"    public static void Delete(IGraphTransaction tx, Quiver.Core.NodeId id) => tx.DeleteNode(id);");
 
-        // EnsureIndexes
+        // 全インデックスの作成保証
         sb.AppendLine();
         sb.AppendLine("    public static void EnsureIndexes(Quiver.ISchemaApi schema)");
         sb.AppendLine("    {");
@@ -196,7 +196,7 @@ internal static class GraphNodeEmitter
         }
         sb.AppendLine("    }");
 
-        // EnsureIndex (single property)
+        // 単一プロパティのインデックス作成保証
         sb.AppendLine();
         sb.AppendLine("    public static void EnsureIndex(Quiver.ISchemaApi schema, string propertyName, Quiver.IndexKind? kindOverride)");
         sb.AppendLine("    {");
@@ -215,7 +215,7 @@ internal static class GraphNodeEmitter
         sb.AppendLine("        }");
         sb.AppendLine("    }");
 
-        // FindBy*
+        // FindBy* 検索
         foreach (var prop in indexedProps)
         {
             if (!_seekCallMap.TryGetValue(prop.CSharpType, out var seekExpr)) continue;

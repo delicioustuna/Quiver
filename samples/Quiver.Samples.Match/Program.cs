@@ -25,7 +25,7 @@ try
         tx.Commit();
     }
 
-    // ── Match DSL ──
+    // ── パターン照合を記述する Match DSL ──
     Console.WriteLine("── 1. Match DSL: (n:Person)-[:KNOWS]->(m:Person) WHERE n.age > 25 ──");
     using (var tx = db.BeginReadOnlyTransaction())
     {
