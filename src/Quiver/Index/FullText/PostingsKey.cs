@@ -4,14 +4,13 @@ using System.Text;
 namespace Quiver.Index.FullText;
 
 /// <summary>
-/// Encodes the postings B+Tree composite key:
-/// <c>termLen(2B BE) ‖ term_utf8 ‖ entityId(8B BE sign-flipped)</c>.
+/// postings B+Tree の複合キーをエンコードする:
+/// <c>termLen(2B BE) ‖ term_utf8 ‖ entityId(8B BE sign-flipped)</c>。
 /// <para>
-/// The 2-byte length prefix keeps a term's postings contiguous and prevents
-/// prefix collisions ("ab" vs "abc") during a term range scan: without it,
-/// <c>"abc"+entityId</c> would fall inside the byte range of term <c>"ab"</c>.
-/// The trailing entityId uses the same order-preserving big-endian sign-flip as
-/// <see cref="Int64KeyCodec"/> so the entityId can be recovered for orphan sweep.
+/// 2 バイトの長さプレフィックスにより、同一タームの postings が連続し、
+/// term range scan 中のプレフィックス衝突 ("ab" vs "abc") を防ぐ。
+/// 末尾の entityId は <see cref="Int64KeyCodec"/> と同じ order-preserving big-endian
+/// sign-flip を使い、orphan sweep で entityId を復元できるようにする。
 /// </para>
 /// </summary>
 internal static class PostingsKey
@@ -19,7 +18,7 @@ internal static class PostingsKey
     private const int LenPrefix = 2;
     private const int EntityIdSize = 8;
 
-    /// <summary>Encode <c>(term, entityId)</c> into a fresh key buffer.</summary>
+    /// <summary><c>(term, entityId)</c> を新しいキーバッファにエンコードする。</summary>
     public static byte[] Encode(ReadOnlySpan<byte> termUtf8, long entityId)
     {
         if (termUtf8.Length > ushort.MaxValue)
@@ -33,8 +32,8 @@ internal static class PostingsKey
     }
 
     /// <summary>
-    /// Inclusive lower/upper byte bounds for a term's full postings list, for use
-    /// with <c>IBTreeIndex&lt;byte[]&gt;.Range(lower, true, upper, true)</c>.
+    /// タームの全 postings に対する inclusive な lower/upper バイト境界。
+    /// <c>IBTreeIndex&lt;byte[]&gt;.Range(lower, true, upper, true)</c> で使用する。
     /// </summary>
     public static (byte[] Lower, byte[] Upper) TermRange(ReadOnlySpan<byte> termUtf8)
     {
@@ -46,9 +45,9 @@ internal static class PostingsKey
     }
 
     /// <summary>
-    /// Inclusive lower/upper byte bounds for all postings of terms with exactly
-    /// <paramref name="termLen"/> UTF-8 bytes that start with <paramref name="prefixUtf8"/>.
-    /// Called once per candidate length during prefix expansion.
+    /// <paramref name="prefixUtf8"/> で始まる UTF-8 バイト長 <paramref name="termLen"/> のタームの
+    /// 全 postings に対する inclusive な lower/upper バイト境界。
+    /// prefix 展開で候補長ごとに 1 回呼ばれる。
     /// </summary>
     public static (byte[] Lower, byte[] Upper) PrefixRange(ReadOnlySpan<byte> prefixUtf8, int termLen)
     {
@@ -69,14 +68,14 @@ internal static class PostingsKey
         return (lower, upper);
     }
 
-    /// <summary>Recover the term (UTF-8 decoded) from a postings key's length-prefixed prefix.</summary>
+    /// <summary>postings キーの長さプレフィックスからターム (UTF-8 デコード) を復元する。</summary>
     public static string DecodeTerm(ReadOnlySpan<byte> key)
     {
         int termLen = BinaryPrimitives.ReadUInt16BigEndian(key);
         return Encoding.UTF8.GetString(key.Slice(LenPrefix, termLen));
     }
 
-    /// <summary>Recover the entityId from a postings key (its trailing 8 bytes).</summary>
+    /// <summary>postings キーの末尾 8 バイトから entityId を復元する。</summary>
     public static long DecodeEntityId(ReadOnlySpan<byte> key)
     {
         if (key.Length < LenPrefix + EntityIdSize)

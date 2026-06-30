@@ -4,6 +4,9 @@ using Quiver.Transactions;
 
 namespace Quiver.Query.Physical;
 
+/// <summary>
+/// B-tree インデックスに対して等値検索を行い、合致するノードを列挙するオペレータ。
+/// </summary>
 internal sealed class NodeIndexSeekOperator : IPhysicalOperator
 {
     private readonly string _indexName;

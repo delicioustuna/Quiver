@@ -5,14 +5,15 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// Variable-length path expansion: emits (startNode, endNode) for each node reachable
-/// within [minHops, maxHops] hops. BFS with visited-set to prevent cycles.
-/// Start node is emitted when minHops == 0.
-///
-/// per-hop expansion is delegated to <see cref="OneHopExpansion"/> via
-/// a private <see cref="IGraphKernel{TState}"/>; frontier / visited bookkeeping
-/// is shared with <see cref="BfsOperator"/> through <see cref="FrontierKernelState"/>.
+/// 可変長パス展開。[minHops, maxHops] ホップ以内に到達可能な各ノードについて
+/// <c>(startNode, endNode)</c> を放出する。BFS + visited-set でサイクルを防止し、
+/// minHops == 0 なら起点ノードも放出する。
 /// </summary>
+/// <remarks>
+/// 1 ホップ展開は <see cref="OneHopExpansion"/> 経由でプライベートな
+/// <see cref="IGraphKernel{TState}"/> に委譲する。frontier / visited の管理は
+/// <see cref="BfsOperator"/> と <see cref="FrontierKernelState"/> を通じて共通化している。
+/// </remarks>
 internal sealed class VariableLengthExpandOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
@@ -68,7 +69,7 @@ internal sealed class VariableLengthExpandOperator : IPhysicalOperator
     {
         while (true)
         {
-            // Drain current BFS frontier.
+            // 現在の BFS frontier を排出する。
             while (_state.Frontier is { Count: > 0 } frontier)
             {
                 var (node, depth) = frontier.Dequeue();
@@ -103,7 +104,7 @@ internal sealed class VariableLengthExpandOperator : IPhysicalOperator
             s.Frontier.Clear();
             s.Visited ??= new HashSet<long>();
             s.Visited.Clear();
-            s.Visited.Add(source.Sequence); // ARCH-5b: 内部 dedup は slot 同一性 (Sequence)
+            s.Visited.Add(source.Sequence); // 内部 dedup は slot 同一性 (Sequence) で判定する
             s.Frontier.Enqueue((source, 0));
         }
 

@@ -47,7 +47,7 @@ internal sealed class PropertyChainWeightProvider : IEdgeWeightProvider
     /// <inheritdoc/>
     public double GetWeight(ITransaction tx, RelationshipId relationshipId, long weightRaw)
     {
-        // ARCH-5c Phase 4: rel weight も inline + overflow を結合列挙する。
+        // rel weight も inline + overflow を結合列挙する。
         var e = tx.Relationships.EnumerateProperties(relationshipId, tx.Properties);
         while (e.MoveNext())
         {

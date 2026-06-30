@@ -2,6 +2,9 @@
 
 namespace Quiver.Query.Physical;
 
+/// <summary>
+/// 単一述語で上流タプルをフィルタする演算子。述語を満たす行のみ通過させる。
+/// </summary>
 internal sealed class FilterOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;

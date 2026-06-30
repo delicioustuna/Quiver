@@ -4,19 +4,15 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// leaf-ish operator: drains an upstream NodeId-producing operator into
-/// an <see cref="EntityCandidateSet"/>, then asks
-/// <see cref="IGraphAccessMethods.KnnSearchFiltered"/> for the top-<c>k</c>
-/// vectors that fall inside that set. Acts as the graph-first arm — the
-/// upstream operator usually a label or property filter on
-/// <see cref="AllNodesScanOperator"/>.
+/// 上流の NodeId 生成演算子を <see cref="EntityCandidateSet"/> に排出し、
+/// <see cref="IGraphAccessMethods.KnnSearchFiltered"/> でそのセット内の
+/// top-<c>k</c> ベクトルを取得する graph-first KNN 演算子。
+/// 上流は通常 <see cref="AllNodesScanOperator"/> にラベル / プロパティフィルタを適用したもの。
 /// </summary>
 /// <remarks>
-/// Pairs with <see cref="KnnNodeSourceOperator"/>
-/// (vector-first); the <c>QueryOptimizer.ChooseKnnStrategy</c> decides which
-/// arm to build. Like the unfiltered operator, score is intentionally not
-/// surfaced in the tuple stream; callers can hold a reference to the access
-/// method directly when raw scores are needed.
+/// <see cref="KnnNodeSourceOperator"/> (vector-first) と対をなし、
+/// <c>QueryOptimizer.ChooseKnnStrategy</c> がどちらを構築するか決定する。
+/// フィルタなし版と同様、スコアはタプルストリームに意図的に非公開。
 /// </remarks>
 internal sealed class FilteredKnnNodeSourceOperator : IPhysicalOperator
 {

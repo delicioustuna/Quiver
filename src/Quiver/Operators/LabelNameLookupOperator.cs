@@ -4,15 +4,13 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// implements Gremlin's <c>.label</c> step. Reads the node label per
-/// row and appends a UTF-8 string column carrying the label name resolved
-/// via a caller-supplied lookup (typically <c>ISchemaApi.GetLabelName</c>).
+/// Gremlin の <c>.label()</c> ステップを実装する。各行のノードラベルを読み取り、
+/// 呼び出し側が渡す lookup (通常 <c>ISchemaApi.GetLabelName</c>) でラベル名を解決して
+/// UTF-8 文字列列を末尾に付加する。
 /// </summary>
 /// <remarks>
-/// Mirrors <see cref="PropertyLookupOperator"/>'s shape so it composes the
-/// same way with downstream filters / projections. The lookup callback
-/// returns null when the LabelId is unknown — the operator emits an empty
-/// string in that case rather than failing the whole stream.
+/// <see cref="PropertyLookupOperator"/> と同じ形状なので、後段のフィルタ / プロジェクションと
+/// 同様に合成できる。LabelId が未知の場合は空文字列を放出する (ストリーム全体を失敗させない)。
 /// </remarks>
 internal sealed class LabelNameLookupOperator : IPhysicalOperator
 {

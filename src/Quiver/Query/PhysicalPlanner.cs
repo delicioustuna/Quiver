@@ -83,7 +83,7 @@ internal static class PhysicalPlanner
 
     private static IPhysicalOperator PlanFullTextScan(FullTextScanOp ft, ISchemaApi schema)
     {
-        // FTS-3 text-first (Candidate=null) / FTS-4 graph-first (Candidate!=null = 候補集合内 BM25)。
+        // text-first (Candidate=null) / graph-first (Candidate!=null = 候補集合内 BM25)。
         if (ft.Candidate is null)
             return new FullTextScanOperator(ft.IndexName, ft.QueryText, ft.K, ft.Corpus);
         return new FilteredFullTextScanOperator(
@@ -93,7 +93,7 @@ internal static class PhysicalPlanner
 
     private static IPhysicalOperator PlanFusion(FusionOp fu, ISchemaApi schema)
     {
-        // FTS-5: Phase 1 は RRF のみ。enum 拡張時に他戦略の物理化をここへ足す。
+        // Phase 1 は RRF のみ。enum 拡張時に他戦略の物理化をここへ足す。
         if (fu.Strategy != FusionStrategy.Rrf)
             throw new NotSupportedException($"Fusion strategy {fu.Strategy} は未対応 (Phase 1 は RRF のみ)。");
 

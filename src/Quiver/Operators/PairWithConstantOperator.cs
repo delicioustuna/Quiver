@@ -4,10 +4,9 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// helper for <c>.ShortestPathTo(target)</c>. Wraps an upstream operator and
-/// pairs every emitted row's NodeId at <paramref name="sourceColumn"/> with a constant
-/// NodeId, producing a fresh 2-column tuple <c>(source, target)</c> that the
-/// <see cref="ShortestPathOperator"/> can consume.
+/// <c>.ShortestPathTo(target)</c> 用のヘルパー。上流オペレータの各行の NodeId に定数
+/// NodeId を組み合わせ、<see cref="ShortestPathOperator"/> が消費する 2 列タプル
+/// <c>(source, target)</c> を生成する。
 /// </summary>
 internal sealed class PairWithConstantOperator : IPhysicalOperator
 {
@@ -24,7 +23,7 @@ internal sealed class PairWithConstantOperator : IPhysicalOperator
     {
         _source = source;
         _sourceColumn = sourceColumn;
-        _constantValue = constant.Sequence; // ARCH-5b: seed の gen を剥がしてパイプラインを Sequence 空間に保つ
+        _constantValue = constant.Sequence; // seed の gen を剥がしてパイプラインを Sequence 空間に保つ
     }
 
     public TupleSchema Schema => s_schema;

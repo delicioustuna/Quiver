@@ -4,6 +4,11 @@ using Quiver.Transactions;
 
 namespace Quiver.Query.Physical;
 
+/// <summary>
+/// B-tree インデックスに対して範囲スキャンを行い、合致するノードを列挙するオペレータ。
+/// Int64 / Double / UTF-8 String の各型を <see cref="ITupleProvider"/> から取得して
+/// 型に応じた RangeValues を呼び出す。
+/// </summary>
 internal sealed class NodeIndexRangeScanOperator : IPhysicalOperator
 {
     private readonly string _indexName;
@@ -70,7 +75,7 @@ internal sealed class NodeIndexRangeScanOperator : IPhysicalOperator
                 nodeIds = [];
                 break;
         }
-        // ARCH-3: 索引値はパック済み (Kind/Generation/Sequence)。世代照合しつつ
+        // 索引値はパック済み (Kind/Generation/Sequence)。世代照合しつつ
         // NodeId.Value へ unpack し、slot 再利用 (ABA) の stale 参照を弾く。
         _enumerator = IndexValueResolver.ResolveLiveNodeSequences(nodeIds, tx.Nodes).GetEnumerator();
     }

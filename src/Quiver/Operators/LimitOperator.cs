@@ -2,6 +2,9 @@
 
 namespace Quiver.Query.Physical;
 
+/// <summary>
+/// 上流から最大 <c>limit</c> 行を通過させ、先頭 <c>skip</c> 行はスキップするオペレータ。
+/// </summary>
 internal sealed class LimitOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;

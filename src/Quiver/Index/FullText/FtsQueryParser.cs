@@ -4,19 +4,17 @@ using Quiver.Text;
 namespace Quiver.Index.FullText;
 
 /// <summary>
-/// Pre-processes a full-text query string, splitting it into exact terms,
-/// prefix terms (trailing <c>*</c>), and fuzzy terms (trailing <c>~N</c>),
-/// with support for Boolean operators (<c>AND</c>, <c>OR</c>, <c>NOT</c>).
-/// Prefix terms are expanded against the index's B+Tree; fuzzy terms are
-/// expanded via Levenshtein edit distance. The expanded term set is then
-/// fed to the BM25 scorer.
+/// 全文検索クエリ文字列を前処理し、完全一致ターム・prefix ターム (末尾 <c>*</c>)・
+/// fuzzy ターム (末尾 <c>~N</c>) に分割する。Boolean 演算子 (<c>AND</c>, <c>OR</c>,
+/// <c>NOT</c>) にも対応する。prefix タームは索引の B+Tree に対して展開し、
+/// fuzzy タームは Levenshtein 編集距離で展開する。展開後のターム集合が BM25
+/// スコアラに渡される。
 /// </summary>
 internal static class FtsQueryParser
 {
     /// <summary>
-    /// Parse <paramref name="queryText"/> and resolve all terms (expanding prefixes
-    /// and fuzzy terms against the <paramref name="index"/>). Returns the complete
-    /// set of terms to score.
+    /// <paramref name="queryText"/> をパースし、全タームを解決する (prefix ターム・fuzzy タームを
+    /// <paramref name="index"/> に対して展開)。スコアリング対象のターム集合を返す。
     /// </summary>
     public static HashSet<string> ParseAndExpand(
         string queryText, ITokenizer tokenizer, FullTextIndex index)
@@ -90,15 +88,14 @@ internal static class FtsQueryParser
     }
 
     /// <summary>
-    /// Returns <c>true</c> when <paramref name="queryText"/> contains at least one
-    /// prefix wildcard (<c>*</c>), so callers can fast-path the common exact-only case.
+    /// <paramref name="queryText"/> に prefix ワイルドカード (<c>*</c>) が 1 つでも含まれていれば
+    /// <c>true</c>。呼び出し側が完全一致のみの common case を fast-path するために使う。
     /// </summary>
     public static bool ContainsWildcard(string queryText)
         => queryText.Contains('*');
 
     /// <summary>
-    /// Returns <c>true</c> when <paramref name="queryText"/> contains at least one
-    /// fuzzy modifier (<c>~</c> preceded by a letter or digit).
+    /// <paramref name="queryText"/> に fuzzy 修飾子 (英数字の後に <c>~</c>) が 1 つでも含まれていれば <c>true</c>。
     /// </summary>
     public static bool ContainsFuzzy(string queryText)
     {
@@ -109,8 +106,8 @@ internal static class FtsQueryParser
     }
 
     /// <summary>
-    /// Returns <c>true</c> when <paramref name="queryText"/> contains at least one
-    /// Boolean operator (<c>AND</c>, <c>OR</c>, <c>NOT</c> — uppercase only, Lucene convention).
+    /// <paramref name="queryText"/> に Boolean 演算子 (<c>AND</c>, <c>OR</c>, <c>NOT</c> — 大文字のみ、Lucene 慣例) が
+    /// 1 つでも含まれていれば <c>true</c>。
     /// </summary>
     public static bool ContainsBooleanOps(string queryText)
     {
@@ -134,9 +131,9 @@ internal static class FtsQueryParser
     }
 
     /// <summary>
-    /// Parse a Boolean query (<c>AND</c>/<c>OR</c>/<c>NOT</c>) and expand all terms
-    /// (including prefix wildcards and fuzzy terms) against the index. Returns a
-    /// structured result with clause-level Required/Optional/Excluded grouping.
+    /// Boolean クエリ (<c>AND</c>/<c>OR</c>/<c>NOT</c>) をパースし、全タームを索引に対して
+    /// 展開する (prefix ワイルドカード・fuzzy ターム含む)。clause 単位の
+    /// Required/Optional/Excluded グルーピングを持つ構造化結果を返す。
     /// </summary>
     public static ParsedFtsQuery ParseBooleanAndExpand(
         string queryText, ITokenizer tokenizer, FullTextIndex index)
@@ -277,20 +274,20 @@ internal static class FtsQueryParser
     }
 }
 
-/// <summary>Mode for a single clause in a Boolean FTS query.</summary>
+/// <summary>Boolean 全文検索クエリにおける clause のモード。</summary>
 internal enum FtsClauseMode
 {
-    /// <summary>Document MUST contain at least one term from this clause (AND).</summary>
+    /// <summary>ドキュメントはこの clause のタームを 1 つ以上含む必要がある (AND)。</summary>
     Required,
-    /// <summary>Document MAY contain terms from this clause — they contribute to scoring (OR / default).</summary>
+    /// <summary>ドキュメントはこの clause のタームを含んでもよい — スコアリングに寄与する (OR / 既定)。</summary>
     Optional,
-    /// <summary>Document MUST NOT contain any term from this clause (NOT).</summary>
+    /// <summary>ドキュメントはこの clause のタームを含んではならない (NOT)。</summary>
     Excluded,
 }
 
 /// <summary>
-/// A single clause in a parsed Boolean FTS query. Holds the expanded term set
-/// and the clause mode (required/optional/excluded).
+/// パース済み Boolean 全文検索クエリの単一 clause。展開済みターム集合と
+/// clause モード (required/optional/excluded) を保持する。
 /// </summary>
 internal readonly struct FtsClause(HashSet<string> terms, FtsClauseMode mode)
 {
@@ -301,15 +298,15 @@ internal readonly struct FtsClause(HashSet<string> terms, FtsClauseMode mode)
 }
 
 /// <summary>
-/// Result of parsing a Boolean FTS query. Contains clauses grouped by
-/// Required/Optional/Excluded mode. All terms within each clause are
-/// already expanded (prefix wildcards and fuzzy terms resolved against the index).
+/// Boolean 全文検索クエリのパース結果。Required/Optional/Excluded モードで
+/// グルーピングされた clause を持つ。各 clause 内のタームは全て展開済み
+/// (prefix ワイルドカード・fuzzy タームは索引に対して解決済み)。
 /// </summary>
 internal readonly struct ParsedFtsQuery(IReadOnlyList<FtsClause> clauses)
 {
     public IReadOnlyList<FtsClause> Clauses { get; } = clauses;
 
-    /// <summary>Union of all positive (Required + Optional) terms for BM25 scoring.</summary>
+    /// <summary>BM25 スコアリング用の全 positive ターム (Required + Optional) の和集合。</summary>
     public HashSet<string> AllPositiveTerms()
     {
         var result = new HashSet<string>(StringComparer.Ordinal);

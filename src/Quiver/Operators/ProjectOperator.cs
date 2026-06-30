@@ -2,6 +2,9 @@
 
 namespace Quiver.Query.Physical;
 
+/// <summary>
+/// 上流の各行に対して <see cref="ProjectionSpec"/> の計算式を適用し、新しいスキーマの行を生成するオペレータ。
+/// </summary>
 internal sealed class ProjectOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;

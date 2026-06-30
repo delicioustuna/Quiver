@@ -3,6 +3,10 @@ using Quiver.Transactions;
 
 namespace Quiver.Query.Physical;
 
+/// <summary>
+/// 全ノードをスキャンし NodeId を 1 行ずつ放出するソース演算子。
+/// オプションのラベルフィルタ付き。
+/// </summary>
 internal sealed class AllNodesScanOperator : IPhysicalOperator
 {
     private readonly LabelId? _filterLabel;

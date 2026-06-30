@@ -12,11 +12,10 @@ internal interface IBTreeIndex<TKey> : IDisposable, IBTreeIndexFlushable
     BTreeRangeEnumerator FullScan();
 
     /// <summary>
-    /// forward-only seekable cursor over the raw byte range
-    /// <c>[fromKey, toKeyInclusive]</c>. Unlike <see cref="Range"/> (a leaf-linked
-    /// <c>ref struct</c>) this is a heap object so WAND can hold an array of per-term
-    /// cursors, and its <see cref="BTreeRawCursor.SeekTo"/> jumps via the tree root
-    /// (O(log N)) — the skip-pointer substitute for WAND pivoting.
+    /// 生バイト範囲 <c>[fromKey, toKeyInclusive]</c> に対する forward-only seekable cursor。
+    /// <see cref="Range"/> (leaf リンクの <c>ref struct</c>) と異なりヒープオブジェクトなので
+    /// WAND がタームごとの cursor 配列を保持でき、<see cref="BTreeRawCursor.SeekTo"/> は
+    /// tree root 経由の O(log N) ジャンプ (WAND pivoting の skip-pointer 代替) を行う。
     /// </summary>
     BTreeRawCursor OpenScanCursor(byte[] fromKey, byte[] toKeyInclusive);
     int Height { get; }
@@ -153,7 +152,7 @@ internal interface IIndexManager
     /// </summary>
     int RemoveOrphans(IEnumerable<(string IndexName, byte[] RawKey, long Value)> orphans) => 0;
 
-    // ---- FTS-2: full-text indexes (postings + norms tenants) ----
+    // ---- 全文索引 (postings + norms テナント) ----
 
     /// <summary>
     /// 全文索引 (postings + norms の 2 テナント) を作成する。既存なら既存を返す。
@@ -213,7 +212,7 @@ internal interface IIndexManager
     void MaintainFullText(FullTextIndex index, long entityId, string? oldText, string? newText) { }
 
     /// <summary>
-    /// recovery 論理相の redo — indexTenantId の postings/norms へ
+    /// recovery 論理相の redo。indexTenantId の postings/norms へ
     /// state-setting leaf ミューテーションを再適用する (isUpsert ? UpsertRaw : DeleteRawEntry)。
     /// abort の論理 undo (逆操作) でも同経路を使う。既定 no-op。
     /// </summary>

@@ -8,7 +8,7 @@ internal sealed class Int32KeyCodec : IKeyCodec<int>
     public int GetEncodedSize(in int key) => 4;
     public void Encode(in int key, Span<byte> dest)
     {
-        // Flip sign bit for correct unsigned lexicographic order
+        // 符号ビットを反転して unsigned 辞書順を正しくする
         BinaryPrimitives.WriteUInt32BigEndian(dest, (uint)key ^ 0x8000_0000u);
     }
     public int Decode(ReadOnlySpan<byte> src)
@@ -33,7 +33,7 @@ internal sealed class DoubleKeyCodec : IKeyCodec<double>
     public int GetEncodedSize(in double key) => 8;
     public void Encode(in double key, Span<byte> dest)
     {
-        // IEEE 754 bit pattern: flip sign bit always; flip all bits if negative
+        // IEEE 754 ビットパターン: 符号ビットは常に反転、負数なら全ビット反転
         ulong bits = (ulong)BitConverter.DoubleToInt64Bits(key);
         ulong encoded = ((long)bits < 0) ? ~bits : bits ^ 0x8000_0000_0000_0000uL;
         BinaryPrimitives.WriteUInt64BigEndian(dest, encoded);

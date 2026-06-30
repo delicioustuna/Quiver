@@ -58,7 +58,7 @@ public sealed class MixedBigramTokenizer : ITokenizer, INormTokenCounter
         ArgumentNullException.ThrowIfNull(sink);
         if (text.IsEmpty) return;
 
-        // Normalize first, then segment (spec: 07_fulltext.md#tokenizer).
+        // 正規化してから分割する。
         string normalized = _normalizer.Normalize(text).Text;
         ReadOnlySpan<char> s = normalized.AsSpan();
         int n = s.Length;
@@ -73,7 +73,7 @@ public sealed class MixedBigramTokenizer : ITokenizer, INormTokenCounter
                 continue;
             }
 
-            // Extend the run while the script class stays the same.
+            // スクリプト分類が同じ間はランを延伸する。
             int start = i;
             i++;
             while (i < n && Classify(s[i]) == cls) i++;
@@ -123,7 +123,7 @@ public sealed class MixedBigramTokenizer : ITokenizer, INormTokenCounter
     {
         if (run.Length == 1)
         {
-            sink.Accept(run); // isolated CJK char -> unigram (still searchable)
+            sink.Accept(run); // 孤立 CJK 文字 → ユニグラム (検索可能性を維持)
             return;
         }
 
@@ -146,19 +146,18 @@ public sealed class MixedBigramTokenizer : ITokenizer, INormTokenCounter
         return CharClass.Other;
     }
 
-    // BMP CJK scripts. Supplementary-plane ideographs (CJK Ext B+, U+20000 and
-    // up) arrive as surrogate pairs and fall through to Other; treating them as
-    // CJK would require surrogate-aware bigram slicing, deferred past the MVP.
+    // BMP の CJK スクリプト。補助面漢字 (CJK 拡張B 以降、U+20000〜) はサロゲートペアで到着し
+    // Other に落ちる。CJK として扱うにはサロゲート対応のバイグラム分割が必要で、MVP 後に対応予定。
     internal static bool IsCjk(char c)
     {
         int v = c;
         return
-            (v >= 0x3005 && v <= 0x3007)   // 々 (iteration mark), 〆, 〇 — bind to adjacent kanji
-         || (v >= 0x3040 && v <= 0x30FF)   // Hiragana + Katakana
-         || (v >= 0x31F0 && v <= 0x31FF)   // Katakana phonetic extensions
-         || (v >= 0x3400 && v <= 0x4DBF)   // CJK Unified Ideographs Extension A
-         || (v >= 0x4E00 && v <= 0x9FFF)   // CJK Unified Ideographs
-         || (v >= 0xF900 && v <= 0xFAFF)   // CJK Compatibility Ideographs
-         || (v >= 0xAC00 && v <= 0xD7A3);  // Hangul syllables
+            (v >= 0x3005 && v <= 0x3007)   // 々 (踊り字), 〆, 〇 — 隣接漢字に結合
+         || (v >= 0x3040 && v <= 0x30FF)   // 平仮名 + 片仮名
+         || (v >= 0x31F0 && v <= 0x31FF)   // 片仮名拡張
+         || (v >= 0x3400 && v <= 0x4DBF)   // CJK 統合漢字拡張A
+         || (v >= 0x4E00 && v <= 0x9FFF)   // CJK 統合漢字
+         || (v >= 0xF900 && v <= 0xFAFF)   // CJK 互換漢字
+         || (v >= 0xAC00 && v <= 0xD7A3);  // ハングル音節
     }
 }

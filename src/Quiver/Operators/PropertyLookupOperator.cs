@@ -4,6 +4,10 @@ using Quiver.Transactions;
 
 namespace Quiver.Query.Physical;
 
+/// <summary>
+/// 上流のエンティティ ID 列からプロパティ値を読み取り、末尾に 1 列付加するオペレータ。
+/// ノードとリレーションシップの両方に対応する。
+/// </summary>
 internal sealed class PropertyLookupOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
@@ -11,7 +15,7 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
     private readonly PropertyKeyId _keyId;
     private readonly string _outputColumnName;
     private readonly PropertyTypeFlags _expectedTypes;
-    // ARCH-5c Phase 5d: entity 列が Node か Relationship か。Relationship のときは rel ストアの
+    // entity 列が Node か Relationship か。Relationship のときは rel ストアの
     // 結合プロパティ列挙子を使う (g.Relationships() の row path フォールバック用)。
     private readonly EntityKind _entityKind;
     private ITransaction? _tx;
@@ -29,9 +33,9 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
     }
 
     /// <summary>
-    /// overload. When <paramref name="expectedTypes"/> is narrower than
-    /// <see cref="PropertyTypeFlags.Scalar"/>, values of other types are skipped
-    /// without materializing string / bytes payloads.
+    /// 期待する型を指定する overload。<paramref name="expectedTypes"/> が
+    /// <see cref="PropertyTypeFlags.Scalar"/> より狭い場合、対象外の型は
+    /// string / bytes ペイロードを実体化せずスキップする。
     /// </summary>
     public PropertyLookupOperator(
         IPhysicalOperator source,
@@ -86,15 +90,15 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
         var cur = _source.Current;
         int srcCols = _source.Schema.Columns.Count;
 
-        // Copy source slots
+        // ソーススロットをコピー
         for (int i = 0; i < srcCols; i++)
             _buffer![i] = cur[i];
 
-        // Look up property value
+        // プロパティ値を検索
         _currentBytes = null;
         _buffer![srcCols] = default; // Null by default
 
-        // ARCH-5c Phase 3/5d: inline + overflow チェーンを結合して走査する。entity kind により
+        // inline + overflow チェーンを結合して走査する。entity kind により
         // node / relationship のどちらのストアを引くか切り替える。
         long localId = cur[_entityIdColumn].LongValue;
         var propEnum = _entityKind == EntityKind.Relationship
@@ -106,8 +110,7 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
             if (prop.KeyId != _keyId) continue;
 
             var val = prop.Value;
-            // BA-8: reject values whose type is not in the expected set BEFORE
-            // copying string / bytes payloads. Output stays Null in that case.
+            // 期待する型集合に含まれない値は string / bytes コピー前に拒否する。出力は Null のまま。
             if ((val.Type.ToFlags() & _expectedTypes) == PropertyTypeFlags.None)
                 break;
 

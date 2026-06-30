@@ -53,21 +53,19 @@ internal interface IGraphKernel<TState>
 }
 
 /// <summary>
-/// Single-hop expansion primitive shared by
-/// BFS-style operators. Wraps <see cref="IGraphAccessMethods.Expand"/> so the
-/// kernel never touches the underlying cursor; that lets the same algorithm
-/// shell run over the binary backend's adjacency-block / linked-list path
-/// or a future CSR snapshot view without changes to the kernel.
+/// BFS 系オペレータが共有する 1 ホップ展開プリミティブ。
+/// <see cref="IGraphAccessMethods.Expand"/> をラップしてカーネルが基盤カーソルに
+/// 触れないようにし、同一アルゴリズムシェルが隣接ブロック / リンクリスト経路でも
+/// 将来の CSR スナップショットビューでもカーネル変更なしで動作する。
 /// </summary>
 internal static class OneHopExpansion
 {
     /// <summary>
-    /// Walk all edges incident to <paramref name="source"/> in
-    /// <paramref name="direction"/> (optionally filtered by
-    /// <paramref name="typeFilter"/>) and call
-    /// <see cref="IGraphKernel{TState}.VisitNeighbor"/> for each neighbour.
-    /// Returns <c>false</c> when the kernel asked to stop early; callers may
-    /// use this signal to short-circuit the outer frontier loop (shortest path).
+    /// <paramref name="source"/> に接する全エッジを <paramref name="direction"/> 方向に走査し
+    /// (オプションで <paramref name="typeFilter"/> 適用)、各近傍に対して
+    /// <see cref="IGraphKernel{TState}.VisitNeighbor"/> を呼ぶ。
+    /// カーネルが早期停止を要求した場合は <c>false</c> を返す
+    /// (最短経路で外側 frontier ループを短絡するために使える)。
     /// </summary>
     public static bool Expand<TState>(
         ITransaction tx,

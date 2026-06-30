@@ -5,15 +5,14 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// BFS-based shortest path. For each (sourceNode, targetNode) pair from the input,
-/// emits (source, target, distance). Pairs with no path within maxDistance are skipped.
-/// BFS runs to completion inside MoveNext() for each pair.
-///
-/// per-hop expansion is delegated to <see cref="OneHopExpansion"/> via
-/// <see cref="ShortestPathKernel"/>; the kernel returns <c>false</c> from
-/// <see cref="IGraphKernel{TState}.VisitNeighbor"/> when the target is reached
-/// so the outer loop short-circuits without finishing the current frontier.
+/// BFS ベースの最短経路オペレータ。入力の各 <c>(source, target)</c> ペアについて
+/// <c>(source, target, distance)</c> を放出する。maxDistance 以内に経路が無いペアはスキップする。
 /// </summary>
+/// <remarks>
+/// 1 ホップ展開は <see cref="OneHopExpansion"/> 経由で <see cref="ShortestPathKernel"/> に委譲する。
+/// カーネルはターゲット到達時に <see cref="IGraphKernel{TState}.VisitNeighbor"/> から <c>false</c>
+/// を返し、現在の frontier を完走せずに外側ループを短絡させる。
+/// </remarks>
 internal sealed class ShortestPathOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
@@ -102,11 +101,10 @@ internal sealed class ShortestPathOperator : IPhysicalOperator
     public void Dispose() => _source.Dispose();
 
     /// <summary>
-    /// per-pair BFS state for <see cref="ShortestPathOperator"/>.
-    /// <see cref="Target"/> is reset by the operator before each call to
-    /// <see cref="ShortestPathKernel.Initialize"/>; the kernel uses it to
-    /// detect early termination and writes the matching distance into
-    /// <see cref="FoundDistance"/>.
+    /// <see cref="ShortestPathOperator"/> のペアごとの BFS 状態。
+    /// <see cref="Target"/> はオペレータが <see cref="ShortestPathKernel.Initialize"/>
+    /// 呼び出し前にリセットし、カーネルが早期終了の検出と
+    /// <see cref="FoundDistance"/> への距離書き込みに使う。
     /// </summary>
     internal struct ShortestPathState
     {
@@ -124,7 +122,7 @@ internal sealed class ShortestPathOperator : IPhysicalOperator
             s.Queue.Clear();
             s.Dist ??= new Dictionary<long, long>();
             s.Dist.Clear();
-            s.Dist[source.Sequence] = 0; // ARCH-5b: 距離マップのキーは slot 同一性 (Sequence)
+            s.Dist[source.Sequence] = 0; // 距離マップのキーは slot 同一性 (Sequence)
             s.Queue.Enqueue((source, 0));
             s.FoundDistance = -1;
         }

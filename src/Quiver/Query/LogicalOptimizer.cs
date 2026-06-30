@@ -148,7 +148,7 @@ internal static class LogicalOptimizer
         return result;
     }
 
-    // ── FullTextLimitPushdown + FullTextPushdown (FTS-4、KnnPushdown と同型) ──────
+    // ── FullTextLimitPushdown + FullTextPushdown (KnnPushdown と同型) ──────
 
     private static LogicalOp RewriteFullText(LogicalOp n, GraphStats? stats, ISchemaApi schema)
     {

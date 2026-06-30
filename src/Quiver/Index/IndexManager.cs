@@ -37,7 +37,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     // カタログ header (テナント論理 page 1) body レイアウト。
     private const int CatalogBlobLenOffset = 0;   // int32: 直列化ブロブ長 (secondary + FT 両セクション合計)
     private const int CatalogEntryCountOffset = 4; // int32: secondary 索引件数
-    private const int CatalogFtCountOffset = 8;    // int32: FTS-2 全文索引件数
+    private const int CatalogFtCountOffset = 8;    // int32: 全文索引件数
 
     private readonly SingleFileContainer _container;
     private readonly bool _ownsContainer;
@@ -51,13 +51,13 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     private readonly Dictionary<string, IPagedFile> _indexFiles = new(StringComparer.Ordinal);
     private readonly HashSet<byte> _usedTenantIds = [];
 
-    // PW-18 follow-up: (label, propertyKey) → indexName のバインディング。
+    // (label, propertyKey) → indexName のバインディング。
     // SchemaApi.CreateIndex から登録され、MergeNode の自動インデックス選択に使われる。
     private readonly Dictionary<(string Label, string PropertyKey), string> _bindings = new();
     private readonly Dictionary<string, (string Label, string PropertyKey)> _bindingByName
         = new(StringComparer.Ordinal);
 
-    // FTS-2: 全文索引 (postings + norms の 2 テナント)。secondary 索引 (_indexes) とは別管理。
+    // 全文索引 (postings + norms の 2 テナント)。secondary 索引 (_indexes) とは別管理。
     // orphan sweep が tf/docLen を entityId と誤認しないよう _indexes には載せない。
     private readonly Dictionary<string, FullTextIndex> _ftIndexes = new(StringComparer.Ordinal);
     private readonly Dictionary<(string Label, string PropertyKey), string> _ftBindings = new();
@@ -140,7 +140,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             }
         }
 
-        // FTS-2: 全文索引 (postings/norms) は entityId を key 側に持つので専用走査。
+        // 全文索引 (postings/norms) は entityId を key 側に持つので専用走査。
         // postings は key 末尾 8B、norms は key(Int64) が packed entityId。orphan は lane を
         // タグ付けして emit し、RemoveOrphans が postings/norms へ振り分ける。
         var int64 = new Int64KeyCodec();
@@ -164,7 +164,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         return (indexCount, entryCount);
     }
 
-    // FTS-2: orphan の IndexName に埋める lane タグ。index 名に現れない制御文字で区切る。
+    // orphan の IndexName に埋める lane タグ。index 名に現れない制御文字で区切る。
     internal const char FtLaneSep = '';
     internal const string PostingsLaneTag = "postings";
     internal const string NormsLaneTag = "norms";
@@ -205,7 +205,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         (idx as IDisposable)?.Dispose();
         _indexes.Remove(name);
         _indexTypes.Remove(name);
-        // ARCH-4: 索引テナントの論理ページをグローバル free list へ回収する
+        // 索引テナントの論理ページをグローバル free list へ回収する
         // (graph.quiver 自体は縮まないが、解放ページは他テナントへ再割当できる)。
         if (_indexFiles.TryGetValue(name, out var tenant))
         {
@@ -308,9 +308,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     }
 
     /// <summary>
-    /// returns the <see cref="PropertyTypeFlags"/> the index was first
-    /// registered with, or <see cref="PropertyTypeFlags.None"/> if the index
-    /// has not been created yet.
+    /// 索引が最初に登録された際の <see cref="PropertyTypeFlags"/> を返す。
+    /// 未作成の場合は <see cref="PropertyTypeFlags.None"/>。
     /// </summary>
     public PropertyTypeFlags GetIndexTypeFlags(string name)
         => _indexTypes.TryGetValue(name, out var f) ? f : PropertyTypeFlags.None;
@@ -320,10 +319,9 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     {
         if (_indexes.TryGetValue(name, out var existing))
         {
-            // BA-8: an index tenant is single-type. Re-opening with a different key
-            // type would corrupt the B+ tree, so fail fast instead of silently
-            // mixing numeric and string entries. The persisted catalog reloads the
-            // recorded type on restart, so this check also covers cross-restart reuse.
+            // 索引テナントは単一型。異なるキー型で再オープンすると B+Tree が壊れるため、
+            // 数値と文字列エントリの混在を黙認せず即座に失敗させる。永続カタログが
+            // 再起動時に記録済みの型を読み込むため、このチェックは再起動をまたぐ再利用もカバーする。
             if (_indexTypes.TryGetValue(name, out var stored) && stored != typeFlag)
                 throw new ConstraintException(
                     $"Index '{name}' was created as {stored}; cannot reopen it as {typeFlag}.");
@@ -354,7 +352,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     }
 
     // ------------------------------------------------------------------
-    // FTS-2: 全文索引 (postings + norms)
+    // 全文索引 (postings + norms)
     // ------------------------------------------------------------------
 
     public FullTextIndex CreateFullTextIndex(string name, string label, string propertyKey, string tokenizerId)
@@ -425,7 +423,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         if (newText is not null) index.AddDocument(entityId, tok, newText);
     }
 
-    // FTS-7: recovery 論理相 / abort 論理 undo の振り分け (spec: 07_fulltext.md#ft-recovery)。indexTenantId から
+    // recovery 論理相 / abort 論理 undo の振り分け。indexTenantId から
     // 該当 FullTextIndex (postings or norms tenant 一致) を引いて raw apply する。
     public void ApplyFtLeafRedo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value)
     {
@@ -453,8 +451,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     {
         var pTenant = _container.OpenTenant(postingsTenant, PageKind.Header);
         var nTenant = _container.OpenTenant(normsTenant, PageKind.Header);
-        // FTS-7: postings/norms は logical-leaf モードで開く (spec: 07_fulltext.md#logical-wal,
-        // leaf 更新 = FtLeafMutation 論理レコード、SMO = FtStructureImage)。logicalTenantId は recovery が tenant→tree を引くキー。
+        // postings/norms は logical-leaf モードで開く
+        // (leaf 更新 = FtLeafMutation 論理レコード、SMO = FtStructureImage)。logicalTenantId は recovery が tenant→tree を引くキー。
         var postings = new BTreeIndex<byte[]>(pTenant, new BytesKeyCodec(), name + ":postings", IndexKeyKind.Bytes,
             logicalLeaf: true, logicalTenantId: postingsTenant);
         var norms = new BTreeIndex<long>(nTenant, new Int64KeyCodec(), name + ":norms", IndexKeyKind.Int64,
@@ -520,7 +518,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             MaterializeIndex(indexName, tenantId, typeFlags);
         }
 
-        // FTS-2: 全文索引レコードセクション (secondary の直後)。
+        // 全文索引レコードセクション (secondary の直後)。
         for (int i = 0; i < ftCount; i++)
         {
             byte postingsTenant = blob[pos]; pos += 1;
@@ -571,7 +569,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     {
         // 1. カタログを直列化する。
         //    secondary セクション (索引件数=entryCount): tenantId(1) typeFlags(8) nameLen(2) nameBytes。
-        //    FTS-2 全文索引セクション (件数=ftCount): postingsTenant(1) normsTenant(1)
+        //    全文索引セクション (件数=ftCount): postingsTenant(1) normsTenant(1)
         //       label(len+utf8) propKey(len+utf8) tokenizerId(len+utf8) name(len+utf8)。
         var blobList = new List<byte>();
         Span<byte> u64 = stackalloc byte[8];

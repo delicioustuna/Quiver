@@ -157,7 +157,7 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
         {
             if (!_state.Settled!.Add(node)) continue;   // 既に確定済の重複エントリ
             ExpandedNodeCount++;
-            if (node == tgt.Sequence) break;            // 確定 = 最短重み距離 (ARCH-5b: slot 同一性)
+            if (node == tgt.Sequence) break;            // 確定 = 最短重み距離 (slot 同一性)
             OneHopExpansion.Expand(_tx!, new NodeId(node), _dir, _typeFilter, depth: 0, _kernel, ref _state);
         }
 
@@ -175,7 +175,7 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
 
     private byte[] ReconstructPath(NodeId src, NodeId tgt)
     {
-        // ARCH-5b: 内部の距離/前任マップは slot 同一性 (Sequence) でキーされる。
+        // 内部の距離/前任マップは slot 同一性 (Sequence) でキーされる。
         var nodes = new List<long> { tgt.Sequence };
         var rels = new List<long>();
         long cur = tgt.Sequence;
@@ -288,7 +288,7 @@ internal sealed class WeightedShortestPathKernel(
         (s.Settled ??= []).Clear();
         (s.Pq ??= new PriorityQueue<long, double>()).Clear();
 
-        // ARCH-5b: PQ / Dist / Pred / Settled は slot 同一性 (Sequence) でキーされる。
+        // PQ / Dist / Pred / Settled は slot 同一性 (Sequence) でキーされる。
         s.Dist[source.Sequence] = 0.0;
         s.Pq.Enqueue(source.Sequence, Heuristic(source));
     }

@@ -5,15 +5,14 @@ using static Quiver.Text.MixedBigramTokenizer;
 namespace Quiver.Index.FullText;
 
 /// <summary>
-/// A logical full-text index: a pair of B+Tree tenants — a
-/// postings index (<c>byte[]</c> composite key <c>(term, entityId)</c> -> tf) and
-/// a norms index (<c>long</c> key entityId -> docLen) — plus the metadata needed
-/// to maintain and query it (label, property key, tokenizer id).
+/// 論理的な全文索引: postings 索引 (<c>byte[]</c> 複合キー <c>(term, entityId)</c> -> tf) と
+/// norms 索引 (<c>long</c> キー entityId -> docLen) の B+Tree テナントペア、
+/// および維持・検索に必要なメタデータ (label, property key, tokenizer id)。
 /// <para>
-/// Postings and norms are ordinary B+Tree tenants, so transactional maintenance,
-/// abort/crash rollback (index ARIES), buffer pool, and WAL are all
-/// inherited for free. Orphan sweep needs a dedicated path because the entityId
-/// lives in the postings <i>key</i> and the norms <i>key</i>, not in the value.
+/// postings/norms は通常の B+Tree テナントなので、トランザクション維持、
+/// abort/crash rollback (index ARIES)、buffer pool、WAL はすべて継承される。
+/// orphan sweep は entityId が値ではなく postings/norms の<i>キー</i>に入っているため
+/// 専用経路が必要。
 /// </para>
 /// </summary>
 internal sealed class FullTextIndex : IDisposable
@@ -43,13 +42,13 @@ internal sealed class FullTextIndex : IDisposable
     public byte PostingsTenantId { get; }
     public byte NormsTenantId { get; }
 
-    /// <summary>Number of documents (N for BM25); = norms entry count.</summary>
+    /// <summary>ドキュメント数 (BM25 の N)。norms のエントリ数と等しい。</summary>
     public long DocumentCount => _norms.EntryCount;
 
     /// <summary>
-    /// BM25 statistics: document count N and the summed document length
-    /// (avgdl = total / N). Computed by scanning norms once — an approximation that
-    /// is fine for BM25. The corpus-level N/avgdl also live in GraphStats.
+    /// BM25 統計: ドキュメント数 N と合計ドキュメント長 (avgdl = total / N)。
+    /// norms を 1 回スキャンして算出する近似値で、BM25 には十分。
+    /// corpus レベルの N/avgdl は GraphStats にも保持される。
     /// </summary>
     public (long DocCount, long TotalTokens) NormsSummary()
     {
@@ -63,9 +62,10 @@ internal sealed class FullTextIndex : IDisposable
     }
 
     /// <summary>
-    /// Tokenize <paramref name="text"/> and write its postings (per-term tf,
-    /// saturated to u16) and norm (docLen). Caller resolves <paramref name="tokenizer"/>
-    /// from <see cref="TokenizerId"/> so index- and query-time tokenization match.
+    /// <paramref name="text"/> をトークナイズし、postings (ターム単位の tf、u16 飽和) と
+    /// norm (docLen) を書き込む。呼び出し側が <see cref="TokenizerId"/> から
+    /// <paramref name="tokenizer"/> を解決することで、インデックス時とクエリ時の
+    /// トークナイゼーションが一致する。
     /// </summary>
     public void AddDocument(long entityId, ITokenizer tokenizer, ReadOnlySpan<char> text)
     {
@@ -86,9 +86,9 @@ internal sealed class FullTextIndex : IDisposable
     }
 
     /// <summary>
-    /// Remove every postings entry and the norm produced by <paramref name="text"/>
-    /// for <paramref name="entityId"/>. The (term, entityId) key is unique, so each
-    /// term's entry is looked up and deleted by its current value (robust to tf drift).
+    /// <paramref name="entityId"/> について <paramref name="text"/> が生成した全 postings エントリ
+    /// と norm を削除する。(term, entityId) キーは一意なので、各タームのエントリは
+    /// 現在の値で検索・削除する (tf のドリフトに頑健)。
     /// </summary>
     public void RemoveDocument(long entityId, ITokenizer tokenizer, ReadOnlySpan<char> text)
     {
@@ -106,11 +106,11 @@ internal sealed class FullTextIndex : IDisposable
             _norms.Delete(entityId, docLen);
     }
 
-    /// <summary>All postings for <paramref name="term"/> as (entityId, tf), via prefix range scan.</summary>
+    /// <summary><paramref name="term"/> の全 postings を (entityId, tf) として返す。prefix range scan による。</summary>
     public List<(long EntityId, int Tf)> GetPostings(string term)
         => GetPostings(Encoding.UTF8.GetBytes(term));
 
-    /// <summary>All postings for a UTF-8 term as (entityId, tf), via prefix range scan.</summary>
+    /// <summary>UTF-8 タームの全 postings を (entityId, tf) として返す。prefix range scan による。</summary>
     public List<(long EntityId, int Tf)> GetPostings(ReadOnlySpan<byte> termUtf8)
     {
         var (lower, upper) = PostingsKey.TermRange(termUtf8);
@@ -125,10 +125,10 @@ internal sealed class FullTextIndex : IDisposable
     }
 
     /// <summary>
-    /// Collect all distinct indexed terms within Levenshtein edit distance
-    /// <paramref name="maxEditDistance"/> of the normalized <paramref name="termUtf8"/>.
-    /// Scans per-length ranges in the postings B+Tree, filtering by character-level
-    /// edit distance. The byte-length scan window accounts for multi-byte UTF-8.
+    /// 正規化済み <paramref name="termUtf8"/> から Levenshtein 編集距離
+    /// <paramref name="maxEditDistance"/> 以内の全索引タームを収集する。
+    /// postings B+Tree をバイト長ごとに range scan し、文字レベルの編集距離でフィルタする。
+    /// マルチバイト UTF-8 を考慮したバイト長の走査窓を使う。
     /// </summary>
     internal HashSet<string> ExpandFuzzy(ReadOnlySpan<byte> termUtf8, int maxEditDistance)
     {
@@ -175,9 +175,9 @@ internal sealed class FullTextIndex : IDisposable
     }
 
     /// <summary>
-    /// Collect all distinct indexed terms that start with <paramref name="prefixUtf8"/>.
-    /// Scans per-length ranges in the postings B+Tree (terms of different lengths
-    /// are not contiguous due to the 2-byte length prefix in the composite key).
+    /// <paramref name="prefixUtf8"/> で始まる全索引タームを収集する。
+    /// postings B+Tree をバイト長ごとに range scan する (複合キーの 2 バイト長プレフィックスにより
+    /// 異なる長さのタームは連続しないため)。
     /// </summary>
     internal HashSet<string> ExpandPrefix(ReadOnlySpan<byte> prefixUtf8)
     {
@@ -204,11 +204,11 @@ internal sealed class FullTextIndex : IDisposable
     }
 
     /// <summary>
-    /// per-term statistics for WAND pruning. Scans postings once
-    /// for <c>term → (df, maxTf)</c> and norms once for <c>(minDocLen, N, totalTokens)</c>.
-    /// Called only at <see cref="Quiver.GraphStats"/> collection time (not per query), so
-    /// the snapshot drives both BM25 N/avgdl and the per-term upper bounds. df is the
-    /// posting count for the term; maxTf the largest tf observed (its score numerator cap).
+    /// WAND 枝刈り用のタームごと統計。postings を 1 回走査して
+    /// <c>term → (df, maxTf)</c>、norms を 1 回走査して <c>(minDocLen, N, totalTokens)</c> を得る。
+    /// <see cref="Quiver.GraphStats"/> 収集時のみ呼ばれ (クエリごとではない)、
+    /// スナップショットが BM25 の N/avgdl とタームごと上界の両方を駆動する。
+    /// df はタームの posting 数、maxTf は観測最大 tf (スコア分子の上限)。
     /// </summary>
     internal (Dictionary<string, (int Df, int MaxTf)> Terms, int MinDocLen, long DocCount, long TotalTokens) CollectTermStats()
     {
@@ -236,9 +236,9 @@ internal sealed class FullTextIndex : IDisposable
     }
 
     /// <summary>
-    /// open a forward-only seekable cursor over a term's postings (entityId
-    /// ascending), for WAND document-at-a-time scoring. <see cref="PostingsCursor.SeekTo"/>
-    /// skips to a pivot entityId via a B+Tree root descent.
+    /// タームの postings に対する forward-only seekable cursor (entityId 昇順) を開く。
+    /// WAND の document-at-a-time スコアリング用。<see cref="PostingsCursor.SeekTo"/> で
+    /// B+Tree root 降下により pivot entityId へスキップする。
     /// </summary>
     internal PostingsCursor OpenPostingsCursor(ReadOnlySpan<byte> termUtf8)
     {
@@ -246,7 +246,7 @@ internal sealed class FullTextIndex : IDisposable
         return new PostingsCursor(_postings.OpenScanCursor(lower, upper), termUtf8.ToArray());
     }
 
-    /// <summary>Document length (token count) for <paramref name="entityId"/>, if indexed.</summary>
+    /// <summary><paramref name="entityId"/> のドキュメント長 (トークン数)。索引済みの場合のみ有効。</summary>
     public bool TryGetDocLength(long entityId, out int docLen)
     {
         foreach (var v in _norms.SeekValues(entityId))
@@ -265,11 +265,11 @@ internal sealed class FullTextIndex : IDisposable
         _norms.ReloadFromHeader();
     }
 
-    // ---- orphan sweep support (spec: 07_fulltext.md#architecture) ----
+    // ---- orphan sweep support ----
     // postings は entityId を key 末尾 8B に、norms は entityId を key (Int64) に持つため、
     // 値ベースの汎用 sweep ではなく key からの entityId デコードが要る。
 
-    // ---- FTS-7: recovery 論理相 (spec: 07_fulltext.md#ft-recovery) ----
+    // ---- recovery 論理相 ----
     // indexTenantId で postings / norms のどちらかへ raw apply を振り分ける。redo は state-setting
     // (Upsert→UpsertRaw / Delete→DeleteRawEntry)、undo はその逆操作。いずれも冪等で二重適用安全。
 
@@ -347,11 +347,10 @@ internal sealed class FullTextIndex : IDisposable
 }
 
 /// <summary>
-/// a single term's postings cursor for WAND. Wraps a raw B+Tree cursor over the
-/// term's <c>(term, entityId)</c> key range, surfacing the decoded entityId and tf and a
-/// <see cref="SeekTo"/> that skips to a pivot entityId. Cursors advance
-/// in entityId order, which is exactly the composite-key order, so a multi-term merge is
-/// free of any explicit sort of the postings themselves.
+/// WAND 用の単一タームの postings cursor。タームの <c>(term, entityId)</c> キー範囲に
+/// 対する raw B+Tree cursor をラップし、デコード済み entityId と tf、および pivot
+/// entityId へスキップする <see cref="SeekTo"/> を提供する。cursor は entityId 順
+/// (= 複合キー順) に進むため、マルチターム merge で postings 自体の明示的ソートは不要。
 /// </summary>
 internal sealed class PostingsCursor
 {
@@ -375,7 +374,7 @@ internal sealed class PostingsCursor
         return true;
     }
 
-    /// <summary>Skip forward to the first posting whose entityId is &gt;= <paramref name="eid"/>.</summary>
+    /// <summary>entityId が <paramref name="eid"/> 以上の最初の posting まで前方スキップする。</summary>
     public bool SeekTo(long eid)
     {
         if (!_raw.SeekTo(PostingsKey.Encode(_termUtf8, eid))) return false;

@@ -3,24 +3,23 @@ using Quiver.Core;
 namespace Quiver.Logical;
 
 /// <summary>
-/// Helper that re-applies a captured <see cref="LogicalMutation"/> stream
-/// against a fresh <see cref="IGraphTransaction"/>. Node and relationship ids
-/// are remapped on the fly because the target database assigns its own ids —
-/// callers can supply pre-seeded maps to chain multiple replay passes.
+/// キャプチャ済みの <see cref="LogicalMutation"/> ストリームを別の
+/// <see cref="IGraphTransaction"/> に再適用するヘルパー。ターゲット DB が独自の ID を
+/// 割り当てるため、ノード・リレーションシップ ID はオンザフライで再マッピングする。
+/// 事前シード済みマップを渡すことで複数回の再生パスを連結できる。
 /// </summary>
 public static class LogicalMutationReplay
 {
     /// <summary>
-    /// Apply <paramref name="mutations"/> in order. The transaction is the
-    /// caller's responsibility — it must be writable, and the caller commits
-    /// (or rolls back) when replay finishes so multiple batches can be folded
-    /// into one outer transaction.
+    /// <paramref name="mutations"/> を順に適用する。トランザクションの管理は呼び出し側の責務で、
+    /// 書き込み可能な状態で渡し、再生完了後に commit (または rollback) する。
+    /// これにより複数バッチを 1 つの外側トランザクションにまとめられる。
     /// </summary>
-    /// <param name="tx">Target transaction.</param>
-    /// <param name="mutations">Mutation stream, typically from a
-    /// <see cref="ILogicalMutationSink"/>.</param>
-    /// <param name="nodeMap">Optional source-id → target-id node map. Mutated.</param>
-    /// <param name="relationshipMap">Optional source-id → target-id relationship map. Mutated.</param>
+    /// <param name="tx">ターゲットトランザクション。</param>
+    /// <param name="mutations">ミューテーションストリーム。通常は
+    /// <see cref="ILogicalMutationSink"/> から取得する。</param>
+    /// <param name="nodeMap">ソース ID → ターゲット ID のノードマップ (省略可)。呼び出し側で変更される。</param>
+    /// <param name="relationshipMap">ソース ID → ターゲット ID のリレーションシップマップ (省略可)。呼び出し側で変更される。</param>
     public static void Apply(
         IGraphTransaction tx,
         IEnumerable<LogicalMutation> mutations,

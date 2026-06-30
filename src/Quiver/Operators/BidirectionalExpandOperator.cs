@@ -81,7 +81,7 @@ internal sealed class BidirectionalExpandOperator : IPhysicalOperator
         if (src == tgt) return 0;
 
         // fwdDist[v] = src から v への BFS 距離、bwdDist[v] = tgt から v への BFS 距離 (後方)。
-        // ARCH-5b: 距離マップのキーは slot 同一性 (Sequence)。
+        // 距離マップのキーは slot 同一性 (Sequence)。
         var fwdDist = new Dictionary<long, long> { [src.Sequence] = 0 };
         var bwdDist = new Dictionary<long, long> { [tgt.Sequence] = 0 };
         var fwdFrontier = new List<NodeId> { src };

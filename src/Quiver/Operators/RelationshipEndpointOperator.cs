@@ -4,19 +4,15 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// resolves a relationship-id column into a node-id column by looking
-/// up the requested endpoint (source / target / "other" relative to the
-/// inbound traversal direction). Implements Gremlin's <c>.outV()</c> /
-/// <c>.inV()</c> / <c>.otherV()</c> steps when chained after
-/// <c>.OutRelationships()</c> / <c>.InRelationships()</c> / <c>.BothRelationships()</c>.
+/// リレーションシップ ID 列を、要求されたエンドポイント (source / target / other) の
+/// ノード ID 列に解決するオペレータ。<c>.OutRelationships()</c> / <c>.InRelationships()</c> /
+/// <c>.BothRelationships()</c> の後段で Gremlin の <c>.outV()</c> / <c>.inV()</c> /
+/// <c>.otherV()</c> ステップを実装する。
 /// </summary>
 /// <remarks>
-/// For <see cref="RelationshipEndpoint.Other"/> we don't know which side of
-/// the edge the caller came from at runtime, so the operator returns
-/// <c>Target</c> when the relationship originates from the rel's source
-/// chain — matching the BothE walk pattern. Callers wanting a strict
-/// "other than X" relative to a known node should use the typed
-/// <see cref="ExpandOperator"/> output mode instead.
+/// <see cref="RelationshipEndpoint.Other"/> ではランタイムにどちら側から来たか不明なため、
+/// BothE 走査パターンに合わせて <c>Target</c> を返す。既知のノードに対する厳密な
+/// "other" が必要な場合は <see cref="ExpandOperator"/> の出力モードを使う。
 /// </remarks>
 internal sealed class RelationshipEndpointOperator : IPhysicalOperator
 {
@@ -52,8 +48,8 @@ internal sealed class RelationshipEndpointOperator : IPhysicalOperator
         {
             RelationshipEndpoint.Source => rel.Source.Value,
             RelationshipEndpoint.Target => rel.Target.Value,
-            // "Other" without a context node is ambiguous; default to target
-            // since OutE/BothE chains usually want "the far side from source".
+            // コンテキストノードなしの "Other" は曖昧。OutE/BothE チェーンが通常
+            // "source の反対側" を求めるため target をデフォルトにする。
             _ => rel.Target.Value,
         };
         _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = endpointId };

@@ -3,16 +3,15 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// blocking sort. Drains the entire input on <see cref="Open"/>, captures
-/// each row's slots and any UTF-8 / bytes payloads, then sorts by a single
-/// column. Subsequent <see cref="MoveNext"/> calls stream the materialized
-/// rows in sorted order.
-///
-/// Memory: O(rows) — every input row is held in managed memory. Callers that
-/// only need top-N should stack <see cref="LimitOperator"/> above this; we
-/// don't fuse limit + sort yet because the gain is small relative to the
-/// terminal materialization the rest of the engine already does.
+/// ブロッキングソート。<see cref="Open"/> で入力を全行排出し、各行のスロットと UTF-8 / bytes
+/// ペイロードを保持してから単一列でソートする。以降の <see cref="MoveNext"/> はソート済み行を
+/// ストリーミングする。
 /// </summary>
+/// <remarks>
+/// メモリ: O(rows) — 全入力行をマネージドメモリに保持する。top-N だけ必要な場合は
+/// 上段に <see cref="LimitOperator"/> を積む。limit + sort の融合は未実装だが、
+/// エンジンの終端物質化に対して効果が小さいため後回し。
+/// </remarks>
 internal sealed class SortOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
@@ -93,9 +92,8 @@ internal sealed class SortOperator : IPhysicalOperator
         var sa = a.Slots[col];
         var sb = b.Slots[col];
 
-        // Null sorts to the end regardless of direction reversal (callers can
-        // flip via descending). Treating Null specially keeps the comparison
-        // total: missing properties become a single coherent bucket.
+        // Null は方向反転に関わらず末尾にソートする。Null を特別扱いすることで
+        // 比較が全順序になり、欠損プロパティが一つの一貫したバケットに収まる。
         bool aNull = sa.Type == TupleSlotType.Null;
         bool bNull = sb.Type == TupleSlotType.Null;
         if (aNull && bNull) return 0;
@@ -106,7 +104,7 @@ internal sealed class SortOperator : IPhysicalOperator
         {
             TupleSlotType.Double => sa.DoubleValue.CompareTo(sb.DoubleValue),
             TupleSlotType.Utf8String or TupleSlotType.Bytes => CompareBytes(a.Bytes?[col], b.Bytes?[col]),
-            // NodeId / RelationshipId / Int64 / Bool all use LongValue.
+            // NodeId / RelationshipId / Int64 / Bool はすべて LongValue を使う。
             _ => sa.LongValue.CompareTo(sb.LongValue),
         };
     }

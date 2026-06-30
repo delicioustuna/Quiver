@@ -5,20 +5,20 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// BFS traversal. For each source node, emits (startNode, endNode, depth)
-/// for every reachable node up to maxDepth. Start node itself is not emitted.
-/// Depth column is Int64 for use with FrontierLimitOperator.
-///
-/// By default runs sequentially (maxParallelism = 1). Pass maxParallelism = -1
-/// or a positive value greater than 1 to enable parallel execution via
-/// Parallel.ForEach — useful for batch workloads such as vector embedding
-/// generation where many independent source nodes are processed at once.
-///
-/// per-hop expansion is delegated to <see cref="OneHopExpansion"/>
-/// driven by a private <see cref="IGraphKernel{TState}"/> implementation,
-/// so the cursor / visited-set logic is shared with
-/// <see cref="VariableLengthExpandOperator"/>, <see cref="ShortestPathOperator"/>
-/// and <see cref="ParallelBfsOperator"/>.
+/// BFS 走査演算子。各ソースノードについて maxDepth 以内の到達可能ノードごとに
+/// (startNode, endNode, depth) を放出する。起点自身は放出しない。
+/// depth 列は <see cref="FrontierLimitOperator"/> との連携のため Int64。
+/// <para>
+/// 既定は逐次実行 (maxParallelism = 1)。-1 または 2 以上を渡すと
+/// Parallel.ForEach による並列実行に切り替わる (ベクトル埋め込み生成など、
+/// 独立したソースノードを大量に処理するバッチ向け)。
+/// </para>
+/// <para>
+/// 1 ホップ展開は <see cref="OneHopExpansion"/> + 内部 <see cref="IGraphKernel{TState}"/>
+/// に委譲し、カーソル / visited セットのロジックを
+/// <see cref="VariableLengthExpandOperator"/>・<see cref="ShortestPathOperator"/>・
+/// <see cref="ParallelBfsOperator"/> と共有する。
+/// </para>
 /// </summary>
 internal sealed class BfsOperator : IPhysicalOperator
 {
@@ -43,9 +43,8 @@ internal sealed class BfsOperator : IPhysicalOperator
         new ColumnDefinition("depth",     TupleSlotType.Int64)]);
 
     /// <param name="maxParallelism">
-    /// 1 (default) = sequential. -1 = use all available cores. Any other positive
-    /// value caps the degree of parallelism. Parallel mode is intended for batch
-    /// workloads (e.g. embedding generation) with many independent source nodes.
+    /// 1 (既定) = 逐次。-1 = 全コア使用。それ以外の正値は並列度の上限。
+    /// 並列モードは独立したソースノードが多いバッチ処理 (埋め込み生成等) 向け。
     /// </param>
     public BfsOperator(
         IPhysicalOperator source,
@@ -120,9 +119,8 @@ internal sealed class BfsOperator : IPhysicalOperator
     }
 
     /// <summary>
-    /// BFS kernel that pushes unseen neighbours into the shared
-    /// <see cref="FrontierKernelState"/>. Stops descending past
-    /// <c>maxDepth</c>; the operator emits the actual rows.
+    /// 未訪問の近傍を共有 <see cref="FrontierKernelState"/> に積む BFS カーネル。
+    /// <c>maxDepth</c> を超えたら下降停止; 行の放出はオペレータ側が担う。
     /// </summary>
     private sealed class BfsKernel(int maxDepth) : IGraphKernel<FrontierKernelState>
     {
@@ -132,7 +130,7 @@ internal sealed class BfsOperator : IPhysicalOperator
             s.Frontier.Clear();
             s.Visited ??= new HashSet<long>();
             s.Visited.Clear();
-            s.Visited.Add(source.Sequence); // ARCH-5b: 内部 dedup は slot 同一性 (Sequence) で
+            s.Visited.Add(source.Sequence); // 内部 dedup は slot 同一性 (Sequence) で判定する
             s.Frontier.Enqueue((source, 0));
         }
 
@@ -150,12 +148,10 @@ internal sealed class BfsOperator : IPhysicalOperator
 }
 
 /// <summary>
-/// Shared BFS state for the family of frontier-driven operators
-/// (<see cref="BfsOperator"/>, <see cref="VariableLengthExpandOperator"/>,
-/// <see cref="ParallelBfsOperator"/>). Held by-value in the operator and
-/// passed by <c>ref</c> to each kernel call so that Queue / HashSet
-/// references can be reused across source nodes (their internal buffers
-/// survive Clear).
+/// frontier 駆動オペレータ群 (<see cref="BfsOperator"/>・
+/// <see cref="VariableLengthExpandOperator"/>・<see cref="ParallelBfsOperator"/>)
+/// の共有 BFS 状態。オペレータ内に by-value で保持し、各カーネル呼び出しに
+/// <c>ref</c> で渡す。Queue / HashSet の内部バッファは Clear 後も再利用される。
 /// </summary>
 internal struct FrontierKernelState
 {

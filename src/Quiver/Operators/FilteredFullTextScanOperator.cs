@@ -6,21 +6,17 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// graph-first counterpart of <see cref="FullTextScanOperator"/>: drains an
-/// upstream NodeId-producing operator into a candidate set, then runs BM25 over
-/// only those candidates and emits the top-<c>k</c> in descending relevance order.
-/// The upstream is usually a label / property filter on a node scan — the candidate
-/// side of a <c>g.Search(...).HasLabel(...)</c> push-down or an explicit
-/// <c>.FilterByText(...)</c>.
+/// <see cref="FullTextScanOperator"/> の graph-first 対応版。上流の NodeId 生成演算子を
+/// 候補セットに排出し、その候補のみに BM25 を適用して top-<c>k</c> を関連度降順で放出する。
+/// 上流は通常ラベル / プロパティフィルタ付きノードスキャン
+/// (<c>g.Search(...).HasLabel(...)</c> のプッシュダウンや <c>.FilterByText(...)</c>)。
 /// </summary>
 /// <remarks>
-/// Pairs with <see cref="FilteredKnnNodeSourceOperator"/>
-/// (vector graph-first). The shared <see cref="Bm25Scorer"/> computes df / idf over
-/// the full postings list, so a candidate document's score is identical to the
-/// text-first path; only the cut to top-k differs (it is taken <em>after</em>
-/// restricting to candidates, which avoids the "k starvation" of text-first +
-/// post-filter). Candidate ids are sequence-space (pipeline convention); the scorer
-/// matches them against the posting sequence. Score is intentionally not surfaced.
+/// <see cref="FilteredKnnNodeSourceOperator"/> (ベクトル graph-first) と対をなす。
+/// 共有 <see cref="Bm25Scorer"/> が全 posting リストで df / idf を計算するため、候補文書の
+/// スコアは text-first 経路と同一。top-k の切り出しのみ異なり、候補に限定した後に行うため
+/// text-first + post-filter の "k starvation" を回避する。候補 ID は sequence 空間
+/// (パイプライン規約); スコアは意図的に非公開。
 /// </remarks>
 internal sealed class FilteredFullTextScanOperator : IPhysicalOperator
 {
@@ -61,8 +57,8 @@ internal sealed class FilteredFullTextScanOperator : IPhysicalOperator
 
     public void Open(ITransaction tx)
     {
-        // Validate the index up-front so a missing index throws symmetrically with the
-        // text-first operator, regardless of candidate count (and before the drain).
+        // インデックスの存在を先行検証し、候補数に関わらず text-first 演算子と
+        // 対称的に例外を投げる (drain の前に検証する)。
         if (!tx.Indexes.TryGetFullTextIndex(_indexName, out var ft))
             throw new ConstraintException($"Full-text index '{_indexName}' does not exist.");
         var tokenizer = tx.Indexes.ResolveTokenizer(ft.TokenizerId);

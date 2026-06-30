@@ -5,24 +5,19 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// One-hop expansion that scans the relationship store sequentially and
-/// probes each record against a pre-built <see cref="FrontierSet"/> of source
-/// nodes. Wins over the per-node linked-list / adjacency-block path when the
-/// frontier is large relative to total edges, because chasing N independent
-/// linked lists destroys page locality whereas the sequential scan touches each
-/// relationship page exactly once.
+/// リレーションシップストアを逐次スキャンし、事前構築した <see cref="FrontierSet"/> で
+/// ソースノードに突合する 1 ホップ展開オペレータ。frontier がエッジ総数に対して大きい場合に
+/// ノードごとのリンクリスト / 隣接ブロック走査より有利になる — N 本の独立リストを辿ると
+/// ページ局所性が崩壊するのに対し、逐次スキャンは各ページを 1 度だけ参照する。
 /// </summary>
 /// <remarks>
 /// <para>
-/// Output schema matches <see cref="ExpandOperator"/> for the chosen
-/// <see cref="ExpandOutputMode"/>, so the operator is drop-in compatible with
-/// downstream <c>Filter</c> / <c>Project</c> nodes.
+/// 出力スキーマは選択した <see cref="ExpandOutputMode"/> に応じて
+/// <see cref="ExpandOperator"/> と一致するため、後段の Filter / Project にそのまま置換可能。
 /// </para>
 /// <para>
-/// The source operator is fully drained in <see cref="Open"/> to build the
-/// frontier set; this is the same trade-off the algorithm itself makes — the
-/// scan only pays off when the frontier is large, and building the set is O(N)
-/// regardless.
+/// ソースオペレータは <see cref="Open"/> で完全に排出して frontier set を構築する。
+/// スキャンは frontier が大きいときにのみ有効であり、set 構築は O(N) なので同じトレードオフ。
 /// </para>
 /// </remarks>
 internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
@@ -74,13 +69,13 @@ internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
         _tx = tx;
         _source.Open(tx);
 
-        // Drain source into a frontier set. We collect ids twice (list + set)
-        // only to decide bitmap vs hashset; the list is dropped after Build.
+        // ソースを排出して frontier set を構築する。bitmap vs hashset の判定のため
+        // id を list にも集めるが、Build 後 list は不要。
         var ids = new List<long>(64);
         long max = -1;
         while (_source.MoveNext())
         {
-            // ARCH-5b: frontier は slot 同一性 (Sequence) でキーする。probe 側 (rel.Source/Target)
+            // frontier は slot 同一性 (Sequence) でキーする。probe 側 (rel.Source/Target)
             // も Sequence なので、seed が gen 付きで届いても整合する。
             long v = EntityRef.Sequence(_source.Current[_sourceNodeColumn].LongValue);
             ids.Add(v);
@@ -100,9 +95,8 @@ internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
 
             if (_typeFilter.HasValue && rel.Type != _typeFilter.Value) continue;
 
-            // PW-17 stat: every relationship the scan inspects is counted as a
-            // logical read. Caller can compare against the per-node path's
-            // RowsProduced to see scan locality wins.
+            // スキャンが検査した全リレーションシップを論理読み取りとして計上する。
+            // ノードごとのパスの RowsProduced と比較してスキャン局所性の効果を評価できる。
             var s = Statistics;
             s.RelationshipScanRecords++;
 

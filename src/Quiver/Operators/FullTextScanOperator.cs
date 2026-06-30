@@ -6,20 +6,17 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// leaf operator: streams the top-<c>k</c> node ids from a full-text index
-/// in descending BM25 relevance order, so it composes with the existing
-/// filter / expand chain exactly like <see cref="KnnNodeSourceOperator"/>.
+/// 全文検索インデックスから BM25 関連度降順で top-<c>k</c> ノード ID を放出するリーフ演算子。
+/// <see cref="KnnNodeSourceOperator"/> と同様にフィルタ / 展開チェーンと合成できる。
 /// </summary>
 /// <remarks>
-/// Term-at-a-time BM25 via the shared <see cref="Bm25Scorer"/>:
-/// tokenize the query with the index's recorded tokenizer, range-scan each term's
-/// postings, accumulate per doc (df counted during the scan, idf applied per term),
-/// then emit the top-k. Score is intentionally not surfaced (same MVP policy as KNN).
-/// Visibility uses the same generation-match regime as the secondary-index seek path
-/// (<see cref="IndexValueResolver"/>): false-positive postings whose slot was reused
-/// are dropped. N/avgdl come from the carried <see cref="Bm25CorpusStats"/> when the
-/// DSL had GraphStats; otherwise they are approximated from the norms index.
-/// k1=1.2 / b=0.75 (design defaults).
+/// 共有 <see cref="Bm25Scorer"/> による term-at-a-time BM25: インデックス記録済みトークナイザで
+/// クエリをトークン化し、各語の posting を range-scan して文書ごとに累積 (df はスキャン中に計数、
+/// idf は語ごとに適用)、top-k を放出する。スコアは意図的に非公開 (KNN と同じ方針)。
+/// 可視性は二次インデックス seek 経路 (<see cref="IndexValueResolver"/>) と同じ世代照合を用い、
+/// slot 再利用された false-positive posting を除外する。N/avgdl は DSL に GraphStats があれば
+/// <see cref="Bm25CorpusStats"/> から、なければ norms インデックスから近似する。
+/// k1=1.2 / b=0.75 (設計既定値)。
 /// </remarks>
 internal sealed class FullTextScanOperator : IPhysicalOperator
 {

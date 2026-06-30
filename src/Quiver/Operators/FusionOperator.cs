@@ -4,23 +4,18 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// operator: fuses the ranked NodeId streams of two or more child operators
-/// (typically <see cref="FullTextScanOperator"/> BM25 + <see cref="KnnNodeSourceOperator"/>)
-/// with Reciprocal Rank Fusion and emits the top-<c>k</c> in fused order.
+/// 2 つ以上の子演算子 (通常 <see cref="FullTextScanOperator"/> BM25 +
+/// <see cref="KnnNodeSourceOperator"/>) のランク済み NodeId ストリームを
+/// Reciprocal Rank Fusion で融合し、top-<c>k</c> を融合順で放出する演算子。
 /// </summary>
 /// <remarks>
-/// RRF score is <c>Σ_i 1/(k0 + rank_i(d))</c> with k0=60 and
-/// rank 1-based within each child stream — it depends only on rank, so the existing
-/// "score is not surfaced" policy of the KNN / BM25 leaves is preserved (no score
-/// plumbing). Each child is drained fully on <see cref="Open"/> (k is a few dozen, so
-/// memory is a non-issue); ties on the fused score break by ascending entity id for a
-/// deterministic order. Visibility is already enforced by the children, so the fused
-/// ids are emitted as-is.
+/// RRF スコアは <c>Σ_i 1/(k0 + rank_i(d))</c>、k0=60、rank は各子ストリーム内で 1-based。
+/// ランクのみに依存するため KNN / BM25 リーフの「スコア非公開」方針をそのまま維持する。
+/// 各子は <see cref="Open"/> で完全に drain される (k は数十件なのでメモリは問題にならない)。
+/// 融合スコアの同点は entity id 昇順で決定論的に解決する。可視性は子が既に保証済み。
 /// <para>
-/// Precondition: every child must emit ids in the same packed <see cref="NodeId"/> space
-/// so the per-child accumulators key on the same entity. The current children (text-first
-/// BM25 + vector-first KNN) satisfy this; a future graph-first child (family) must
-/// keep emitting node ids in that space rather than candidate-local handles.
+/// 前提条件: 全子が同一の packed <see cref="NodeId"/> 空間で ID を放出すること。
+/// 現行の子 (text-first BM25 + vector-first KNN) はこれを満たす。
 /// </para>
 /// </remarks>
 internal sealed class FusionOperator : IPhysicalOperator
@@ -55,9 +50,8 @@ internal sealed class FusionOperator : IPhysicalOperator
 
     public void Open(ITransaction tx)
     {
-        // RRF accumulation: for each child, walk its ranked stream and add 1/(k0 + rank)
-        // (rank 1-based) to the entity's running score. A doc that places well in more
-        // than one child is boosted; a doc seen in only one child still ranks on its own.
+        // RRF 累積: 各子のランク済みストリームを走査し、entity の累積スコアに
+        // 1/(k0 + rank) (rank 1-based) を加算する。複数の子で上位に入る文書がブーストされる。
         var scores = new Dictionary<long, double>();
         for (int c = 0; c < _children.Length; c++)
         {

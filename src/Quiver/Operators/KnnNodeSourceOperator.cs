@@ -4,17 +4,14 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// leaf operator: streams the top-<c>k</c> node ids from a vector index
-/// in descending similarity order. Acts as a scan source so it composes with
-/// the existing <see cref="FilterOperator"/> / <see cref="ExpandOperator"/>
-/// chain — callers wire it as the first stage of a traversal, then apply
-/// label / property / expand stages on top.
+/// ベクトルインデックスから類似度降順で上位 <c>k</c> 件の NodeId を列挙するリーフオペレータ。
+/// スキャンソースとして動作し、後段の <see cref="FilterOperator"/> / <see cref="ExpandOperator"/>
+/// チェーンと合成できる。
 /// </summary>
 /// <remarks>
-/// Score is intentionally not surfaced in this MVP;
-/// users who need it call <c>db.Vectors.KnnSearch</c> directly. Indexes bound
-/// to <see cref="EntityKind.Relationship"/> are rejected — relationship-KNN
-/// will land as a sibling operator when there is demand.
+/// スコアは現時点では公開しない。必要な場合は <c>db.Vectors.KnnSearch</c> を直接呼ぶ。
+/// <see cref="EntityKind.Relationship"/> にバインドされたインデックスは拒否する —
+/// relationship-KNN は需要が生じた時点で兄弟オペレータとして追加する。
 /// </remarks>
 internal sealed class KnnNodeSourceOperator : IPhysicalOperator
 {
@@ -49,9 +46,8 @@ internal sealed class KnnNodeSourceOperator : IPhysicalOperator
         while (_cursor!.MoveNext())
         {
             var hit = _cursor.Current;
-            // Skip non-Node results so a mistakenly-typed index doesn't poison
-            // the traversal — but if every result is non-Node we want to surface
-            // that with an empty stream rather than throw.
+            // Node 以外の結果はスキップする。誤った型のインデックスが走査を汚染しないための防御で、
+            // 全件 Node 以外の場合は例外ではなく空ストリームを返す。
             if (hit.EntityKind != EntityKind.Node) continue;
             _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = hit.EntityId };
             var s = Statistics;

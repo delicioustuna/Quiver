@@ -7,17 +7,14 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// Graph-first dyadic scoring operator. Drains the upstream source into a candidate
-/// list, gathers stored vectors in chunks via
-/// <see cref="IGraphAccessMethods.TryGetVector"/>, then scores each against <c>b</c>
-/// using a <see cref="DyadicScoreFunc"/> delegate captured at DSL build time.
-/// Gather and score are separated into two phases so that user-supplied operator
-/// code never runs while a store lock is held.
+/// graph-first ダイアディックスコアリング演算子。上流ソースを候補リストに排出し、
+/// <see cref="IGraphAccessMethods.TryGetVector"/> でベクトルをチャンク単位に収集した後、
+/// DSL 構築時にキャプチャした <see cref="DyadicScoreFunc"/> で各候補を <c>b</c> に対しスコアリングする。
+/// gather と score を 2 フェーズに分離し、ユーザ提供の演算子コードがストアロック保持中に走らないようにする。
 /// <para>
-/// When <see cref="_oversample"/> is set and the index is <see cref="VectorIndexKind.HnswFlat"/>,
-/// a two-stage pipeline is used: HNSW pre-filters <c>k × oversample</c> candidates
-/// using the index's built-in metric, then the custom operator re-ranks only those
-/// candidates. This trades exactness for speed on large candidate sets.
+/// <see cref="_oversample"/> が設定済みかつインデックスが <see cref="VectorIndexKind.HnswFlat"/> の場合、
+/// HNSW がインデックス組み込みメトリクスで <c>k × oversample</c> 件を事前フィルタし、
+/// カスタム演算子がその候補のみを再ランクする 2 段パイプラインを使用する。
 /// </para>
 /// </summary>
 internal sealed class ApplyDyadicOperator : IPhysicalOperator
@@ -115,10 +112,9 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
     }
 
     /// <summary>
-    /// HNSW oversample → custom rerank path. Narrows the candidate set via
-    /// <see cref="IGraphAccessMethods.KnnSearchFiltered"/> using the index's
-    /// built-in metric, then re-scores only the narrowed candidates with the
-    /// custom operator.
+    /// HNSW oversample → カスタム rerank 経路。インデックス組み込みメトリクスで
+    /// <see cref="IGraphAccessMethods.KnnSearchFiltered"/> により候補を絞り込み、
+    /// 絞り込み後の候補のみをカスタム演算子で再スコアリングする。
     /// </summary>
     private VectorSearchResult[] OpenOversample(
         ITransaction tx,
@@ -146,8 +142,8 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
     }
 
     /// <summary>
-    /// Gather vectors in chunks and score with the custom operator (shared by both
-    /// brute-force and oversample paths).
+    /// ベクトルをチャンク単位に収集しカスタム演算子でスコアリングする
+    /// (brute-force / oversample 両経路で共用)。
     /// </summary>
     private VectorSearchResult[] ScoreCandidates(
         ITransaction tx,
@@ -173,7 +169,7 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
                 int end = Math.Min(pos + chunk, total);
                 int gathered = 0;
 
-                // Phase 1: gather — each TryGetVector call briefly acquires the store lock
+                // Phase 1: gather — TryGetVector 呼び出しごとにストアロックを短時間取得する
                 for (int i = pos; i < end; i++)
                 {
                     var dest = gatherBuf.AsSpan(gathered * dim, dim);
@@ -184,7 +180,7 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
                     }
                 }
 
-                // Phase 2: score — user operator code, no store lock held
+                // Phase 2: score — ユーザ演算子コードを実行 (ストアロック非保持)
                 for (int i = 0; i < gathered; i++)
                 {
                     ReadOnlySpan<float> aSpan = gatherBuf.AsSpan(i * dim, dim);

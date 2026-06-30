@@ -3,16 +3,10 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// Batch filter that evaluates multiple predicates against a fixed-size
-/// row buffer using a <see cref="PageSelectionBitmap"/>. Predicates are evaluated
-/// in caller-supplied order; later predicates only see rows still set in the
-/// bitmap, so when the caller (or <c>QueryOptimizer</c>) orders by
-/// most-selective-first the total <c>PredicateEvaluations</c> count is
-/// strictly lower than the naive <c>predicates.Count * rowsIn</c>.
-///
-/// Row-oriented pages are fine — the bitmap doesn't need PAX. When a future
-/// adjacency / property column view goes column-oriented the same scan shape
-/// keeps working without operator changes.
+/// <see cref="PageSelectionBitmap"/> を用いて固定サイズ行バッファに対し複数述語を
+/// バッチ評価するフィルタ演算子。述語は呼び出し元指定順に評価され、後続の述語は
+/// ビットマップに残った行のみを見る。選択率の高い順に並べれば
+/// <c>PredicateEvaluations</c> は <c>predicates.Count × rowsIn</c> より厳密に少なくなる。
 /// </summary>
 internal sealed class BitmapFilterOperator : IPhysicalOperator
 {
@@ -84,7 +78,7 @@ internal sealed class BitmapFilterOperator : IPhysicalOperator
 
             if (_sourceExhausted) return false;
 
-            // Refill batch.
+            // バッチを再充填する。
             _batchCount = 0;
             _outputIdx = -1;
             while (_batchCount < _batchSize)
@@ -97,7 +91,7 @@ internal sealed class BitmapFilterOperator : IPhysicalOperator
             }
             if (_batchCount == 0) return false;
 
-            // Init bitmap to all rows live, then knock out failures pass-by-pass.
+            // 全行を生存に初期化し、述語パスごとに不合格行を落とす。
             var bitmap = new PageSelectionBitmap(_bitmapWords!, _batchCount);
             bitmap.SetAll();
 

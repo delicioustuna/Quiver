@@ -6,27 +6,22 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// Parallel BFS implementation. Used internally by BfsOperator when
-/// maxParallelism != 1. Not part of the public API.
-///
-/// Collects all source nodes from upstream, then runs independent BFS from each
-/// source simultaneously using Parallel.ForEach. Each parallel task owns private
-/// state (frontier queue, visited HashSet, expand cursor), so no
-/// synchronization is needed during traversal — only result collection uses a
-/// ConcurrentBag.
-///
-/// The underlying stores are safe to read concurrently: TxNodeStore.Read() and
-/// TxRelationshipStore.Read() delegate directly to the inner stores without write
-/// locks, and PagedFile.PinForRead() serializes briefly on _poolLock only to
-/// load/pin the frame, then releases before data is copied.
-///
-/// Schema: (startNode NodeId, endNode NodeId, depth Int64).
-///
-/// per-task BFS reuses <see cref="OneHopExpansion"/> with a private
-/// <see cref="ParallelKernel"/>. Each task owns an isolated
-/// <see cref="FrontierKernelState"/>, so no kernel state crosses task
-/// boundaries.
+/// 並列 BFS 実装。<see cref="BfsOperator"/> が maxParallelism != 1 のとき使用する。
+/// 上流のソースノードをすべて収集後、<see cref="Parallel.ForEach"/> で各ソースから
+/// 独立 BFS を同時実行する。各タスクは専用の状態 (frontier キュー・visited HashSet) を
+/// 所有するため、走査中の同期は不要 — 結果の集約のみ <see cref="ConcurrentBag{T}"/> を使う。
 /// </summary>
+/// <remarks>
+/// <para>
+/// 下層ストアは並行読み取り安全: TxNodeStore.Read() / TxRelationshipStore.Read() は
+/// 内部ストアへ直接委譲し、PagedFile.PinForRead() は _poolLock 上で短時間だけ直列化する。
+/// </para>
+/// <para>
+/// スキーマ: <c>(startNode NodeId, endNode NodeId, depth Int64)</c>。
+/// タスクごとの BFS は <see cref="OneHopExpansion"/> と専用の <see cref="ParallelKernel"/> を使い、
+/// 各タスクが独立した <see cref="FrontierKernelState"/> を持つ。
+/// </para>
+/// </remarks>
 internal sealed class ParallelBfsOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
@@ -47,8 +42,7 @@ internal sealed class ParallelBfsOperator : IPhysicalOperator
         new ColumnDefinition("depth",     TupleSlotType.Int64)]);
 
     /// <param name="maxParallelism">
-    /// Maximum degree of parallelism passed to Parallel.ForEach.
-    /// -1 (default) lets the runtime choose based on available cores.
+    /// Parallel.ForEach に渡す最大並列度。-1 (既定) ならランタイムが利用可能コア数に基づき決定する。
     /// </param>
     public ParallelBfsOperator(
         IPhysicalOperator source,
@@ -98,7 +92,7 @@ internal sealed class ParallelBfsOperator : IPhysicalOperator
 
     private void RunParallel()
     {
-        // Drain upstream sequentially to gather all source nodes.
+        // 上流を逐次的に排出してソースノードを収集する。
         var sources = new List<NodeId>();
         while (_source.MoveNext())
             sources.Add(new NodeId(_source.Current[_srcCol].LongValue));
@@ -113,9 +107,8 @@ internal sealed class ParallelBfsOperator : IPhysicalOperator
         Parallel.ForEach(
             sources,
             new ParallelOptions { MaxDegreeOfParallelism = _maxParallelism },
-            // Per-task state factory: each worker thread owns its own frontier /
-            // visited buffers and recycles them across the source nodes that the
-            // partitioner hands to it.
+            // タスクごとの状態ファクトリ: 各ワーカスレッドが専用の frontier / visited バッファを
+            // 所有し、パーティショナが割り当てたソースノード間で再利用する。
             () => new FrontierKernelState(),
             (source, _, state) =>
             {
@@ -141,9 +134,9 @@ internal sealed class ParallelBfsOperator : IPhysicalOperator
     public void Dispose() => _source.Dispose();
 
     /// <summary>
-    /// stateless BFS kernel shared by every parallel worker. Frontier /
-    /// visited live in the worker-local <see cref="FrontierKernelState"/> the
-    /// task factory hands in, so no kernel field is mutated concurrently.
+    /// 全並列ワーカが共有するステートレス BFS カーネル。frontier / visited は
+    /// タスクファクトリが渡すワーカローカルの <see cref="FrontierKernelState"/> に保持されるため、
+    /// カーネルのフィールドは並行で変更されない。
     /// </summary>
     private sealed class ParallelKernel(int maxDepth) : IGraphKernel<FrontierKernelState>
     {
@@ -153,7 +146,7 @@ internal sealed class ParallelBfsOperator : IPhysicalOperator
             s.Frontier.Clear();
             s.Visited ??= new HashSet<long>();
             s.Visited.Clear();
-            s.Visited.Add(source.Sequence); // ARCH-5b: 内部 dedup は slot 同一性 (Sequence)
+            s.Visited.Add(source.Sequence); // 内部 dedup は slot 同一性 (Sequence) で判定する
             s.Frontier.Enqueue((source, 0));
         }
 

@@ -6,16 +6,15 @@ using Quiver.Text;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// per-term corpus statistics for WAND pruning. Holds the
-/// snapshot <c>term → (df, maxTf)</c> table plus the corpus minimum document length, all
-/// computed once at <see cref="Quiver.GraphStats"/> collection time. df drives idf (and the
-/// per-term WAND upper bound).
-/// <para>
-/// 監査 #3: WAND の per-term 上限はもはや maxTf / minDocLen を使わない (snapshot がライブ index に
+/// WAND 枝刈り用の per-term コーパス統計。<see cref="Quiver.GraphStats"/> 収集時に
+/// 計算した <c>term → (df, maxTf)</c> テーブルとコーパス最短文書長のスナップショットを保持する。
+/// df が idf (および per-term WAND 上限) を駆動する。
+/// </summary>
+/// <remarks>
+/// WAND の per-term 上限はもはや maxTf / minDocLen を使わない (スナップショットがライブ index に
 /// 対して stale だと過小評価され top-k を取りこぼすため)。代わりに tf/docLen に依らない漸近上限
 /// <c>idf*(K1+1)</c> を使う。maxTf / minDocLen は将来の block-max WAND 等のために収集を残す。
-/// </para>
-/// </summary>
+/// </remarks>
 internal sealed class Bm25TermStats
 {
     private readonly Dictionary<string, (int Df, int MaxTf)> _terms;
@@ -26,13 +25,13 @@ internal sealed class Bm25TermStats
         MinDocLen = minDocLen;
     }
 
-    /// <summary>Smallest document length in the corpus (token count); 0 if empty.</summary>
+    /// <summary>コーパス中の最短文書長 (トークン数)。空の場合は 0。</summary>
     public int MinDocLen { get; }
 
-    /// <summary>Number of distinct terms tracked.</summary>
+    /// <summary>追跡中のユニーク語数。</summary>
     public int TermCount => _terms.Count;
 
-    /// <summary>Document frequency / max term frequency for <paramref name="term"/>.</summary>
+    /// <summary><paramref name="term"/> の文書頻度と最大語頻度を返す。</summary>
     public bool TryGet(string term, out int df, out int maxTf)
     {
         if (_terms.TryGetValue(term, out var v)) { df = v.Df; maxTf = v.MaxTf; return true; }
@@ -41,49 +40,43 @@ internal sealed class Bm25TermStats
 }
 
 /// <summary>
-/// corpus-level BM25 statistics — document count N and average document
-/// length — snapshotted from <see cref="Quiver.GraphStats"/>. When carried on a
-/// <c>FullTextScanOp</c> the operator uses these instead of re-scanning the norms
-/// index on every query (BM25 is robust to stat staleness, so a
-/// periodically-collected approximation is fine).
+/// コーパスレベルの BM25 統計 (文書数 N、平均文書長)。
+/// <see cref="Quiver.GraphStats"/> からスナップショットし、クエリごとに norms インデックスを
+/// 再走査する代わりに使用する (BM25 は統計の古さに頑健なため、定期収集の近似で十分)。
 /// <para>
-/// when <see cref="Terms"/> is non-null the operator can use WAND document-at-a-time
-/// pruning (per-term upper bounds from the snapshot) instead of the full term-at-a-time
-/// scan; otherwise it falls back to the full scan with exact df.
+/// <see cref="Terms"/> が non-null の場合、full term-at-a-time スキャンの代わりに
+/// WAND document-at-a-time 枝刈り (スナップショットからの per-term 上限) を使用できる。
 /// </para>
 /// </summary>
 internal readonly record struct Bm25CorpusStats(
     long DocumentCount, double AverageDocLength, Bm25TermStats? Terms = null);
 
 /// <summary>
-/// shared term-at-a-time BM25 accumulator used by both the text-first
-/// (<see cref="FullTextScanOperator"/>) and graph-first
-/// (<see cref="FilteredFullTextScanOperator"/>) operators, so a candidate
-/// document scores identically on either path — that is what makes the graph-first
-/// rewrite rank-equivalent to text-first + post-filter.
-/// adds <see cref="RankWand"/>, an exact-top-k WAND variant used by the
-/// text-first path when per-term snapshot stats are available.
+/// text-first (<see cref="FullTextScanOperator"/>) と graph-first
+/// (<see cref="FilteredFullTextScanOperator"/>) の両経路で共有する
+/// term-at-a-time BM25 アキュムレータ。どちらの経路でも同一文書が同一スコアを得る
+/// ことで、graph-first リライトが text-first + post-filter とランク等価になる。
+/// per-term スナップショット統計が利用可能な場合に text-first 経路が使う
+/// exact-top-k WAND (<see cref="RankWand"/>) も提供する。
 /// </summary>
 internal static class Bm25Scorer
 {
-    /// <summary>BM25 term-frequency saturation parameter (standard default).</summary>
+    /// <summary>BM25 語頻度飽和パラメータ (標準既定値)。</summary>
     public const double K1 = 1.2;
 
-    /// <summary>BM25 document-length normalization parameter (standard default).</summary>
+    /// <summary>BM25 文書長正規化パラメータ (標準既定値)。</summary>
     public const double B = 0.75;
 
     /// <summary>
-    /// Rank documents for <paramref name="queryText"/> by descending BM25 score
-    /// (ties broken by ascending packed entityId for determinism). The returned ids
-    /// are the raw packed entityIds (generation + sequence); the caller resolves
-    /// them to live <c>NodeId</c>s.
+    /// <paramref name="queryText"/> に対し BM25 スコア降順で文書をランキングする
+    /// (同スコアは packed entityId 昇順で決定論的に解決)。返却 ID は生の packed entityId
+    /// (generation + sequence); 呼び出し元がライブ <c>NodeId</c> に解決する。
     /// <para>
-    /// <paramref name="candidateSequences"/> non-null restricts accumulation to that
-    /// set (graph-first). Membership is tested on the posting's <em>sequence</em>
-    /// (<see cref="EntityRef.Sequence"/>) because pipeline node ids are sequence-space
-    /// while postings keys are packed. df / idf are computed over the <em>full</em>
-    /// postings list (or, when <paramref name="termStats"/> is supplied, from the
-    /// snapshot df so this path stays score-consistent with the WAND path).
+    /// <paramref name="candidateSequences"/> が non-null の場合、そのセットに限定して
+    /// 累積する (graph-first)。パイプライン上の NodeId は sequence 空間だが posting キーは
+    /// packed のため、posting の <see cref="EntityRef.Sequence"/> で照合する。
+    /// df / idf は全 posting リスト (または <paramref name="termStats"/> 提供時は
+    /// スナップショット df) から計算し、WAND 経路とスコアを一致させる。
     /// </para>
     /// </summary>
     public static List<long> Rank(
@@ -97,8 +90,8 @@ internal static class Bm25Scorer
     }
 
     /// <summary>
-    /// Rank documents for a pre-expanded set of query terms (used when the query
-    /// contains prefix wildcards that have already been expanded against the index).
+    /// 事前展開済みのクエリ語セットで文書をランキングする
+    /// (プレフィックスワイルドカードをインデックスに対して展開済みの場合に使用)。
     /// </summary>
     public static List<long> RankTerms(
         FullTextIndex ft, IReadOnlySet<string> queryTerms,
@@ -109,11 +102,10 @@ internal static class Bm25Scorer
     }
 
     /// <summary>
-    /// Rank documents for a Boolean FTS query (AND/OR/NOT). Scores all positive terms
-    /// (Required + Optional) with standard BM25, then post-filters: documents must
-    /// match ALL Required clauses and must NOT match any Excluded clause. Each clause
-    /// matches a document if the document contains at least one of the clause's terms
-    /// (relevant for prefix-expanded clauses like <c>quiv*</c>).
+    /// Boolean FTS クエリ (AND/OR/NOT) で文書をランキングする。全正語 (Required + Optional) を
+    /// 標準 BM25 でスコアリング後、Required 節は全一致・Excluded 節は全除外でポストフィルタする。
+    /// 各節は文書がその節の語を 1 つでも含めば一致とみなす
+    /// (<c>quiv*</c> のようなプレフィックス展開節で有用)。
     /// </summary>
     public static List<long> RankBoolean(
         FullTextIndex ft, ParsedFtsQuery query,
@@ -185,17 +177,15 @@ internal static class Bm25Scorer
     }
 
     /// <summary>
-    /// exact top-<paramref name="k"/> BM25 via WAND document-at-a-time pruning.
-    /// Uses per-term snapshot df + upper bounds to skip postings of
-    /// high-df terms once they cannot beat the current k-th best score, advancing lagging
-    /// cursors with B+Tree <c>SeekTo</c>. Returns the ranked packed entityIds, or
-    /// <c>null</c> when a query term is absent from <paramref name="termStats"/> (unbounded
-    /// → caller falls back to <see cref="Rank"/> for safety).
+    /// WAND document-at-a-time 枝刈りによる exact top-<paramref name="k"/> BM25。
+    /// per-term スナップショット df + 上限を使い、k 番目のスコアを超えられない高 df 語の
+    /// posting をスキップし、遅れたカーソルを B+Tree <c>SeekTo</c> で前進させる。
+    /// ランク済み packed entityId を返す。クエリ語が <paramref name="termStats"/> に無い場合は
+    /// <c>null</c> を返し、呼び出し元が <see cref="Rank"/> にフォールバックする。
     /// <para>
-    /// <paramref name="isLive"/> (when supplied) drops dead / slot-reused postings before
-    /// they enter the heap, so the heap holds the top-k <em>live</em> documents — the same
-    /// "resolve, then take k" visibility the full-scan operator applies (the heap is bounded
-    /// to k, so post-hoc filtering could shrink the result below k).
+    /// <paramref name="isLive"/> 指定時は dead / slot 再利用の posting を heap 投入前に
+    /// 除外し、heap が top-k の <em>ライブ</em> 文書を保持する (heap は k 上限のため、
+    /// 事後フィルタでは結果が k 未満に縮む可能性がある)。
     /// </para>
     /// </summary>
     public static List<long>? RankWand(
@@ -208,9 +198,9 @@ internal static class Bm25Scorer
     }
 
     /// <summary>
-    /// WAND variant that accepts a pre-expanded term set (for prefix wildcard queries).
-    /// Returns <c>null</c> when any term is absent from the snapshot (caller falls back
-    /// to <see cref="RankTerms"/>).
+    /// 事前展開済み語セットを受け取る WAND 変種 (プレフィックスワイルドカードクエリ用)。
+    /// スナップショットに含まれない語がある場合は <c>null</c> を返す
+    /// (呼び出し元が <see cref="RankTerms"/> にフォールバック)。
     /// </summary>
     public static List<long>? RankWandTerms(
         FullTextIndex ft, IReadOnlySet<string> queryTerms,
@@ -225,12 +215,11 @@ internal static class Bm25Scorer
                 return null; // unknown term: cannot bound safely → fall back to full scan
             if (df <= 0) continue;
             double idf = Math.Log(1.0 + (n - df + 0.5) / (df + 0.5));
-            // 監査 #3 (WAND staleness, spec: 07_fulltext.md#wand): per-term の上限は BM25 項寄与の
-            // 漸近上限 idf*(K1+1) を使う。寄与 idf*(tf*(K1+1))/(tf + K1*lenNorm) は tf について単調増加で
-            // tf→∞ で idf*(K1+1) に収束し、lenNorm≥0 なので任意の tf/docLen に対し ≤ idf*(K1+1)。
-            // これは snapshot の maxTf/minDocLen に依存しないため、snapshot 後にライブ index へ高 tf /
-            // 短文書が増えても上限が過小評価されず、WAND は full-scan と厳密一致する (top-k の取りこぼし無し)。
-            // maxTf/minDocLen ベースのより緊い上限は staleness で不正となり得たため不採用。
+            // per-term の上限は BM25 項寄与の漸近上限 idf*(K1+1) を使う。
+            // 寄与 idf*(tf*(K1+1))/(tf + K1*lenNorm) は tf について単調増加で tf→∞ で
+            // idf*(K1+1) に収束し、lenNorm≥0 なので任意の tf/docLen に対し ≤ idf*(K1+1)。
+            // snapshot の maxTf/minDocLen に依存しないため、snapshot 後にライブ index へ
+            // 高 tf / 短文書が増えても上限が過小評価されず top-k を取りこぼさない。
             double ub = idf * (K1 + 1.0);
             var cur = ft.OpenPostingsCursor(Encoding.UTF8.GetBytes(term));
             if (cur.MoveNext()) cursors.Add(new WandTerm(idf, ub, cur));
@@ -247,7 +236,7 @@ internal static class Bm25Scorer
             cursors.Sort(static (a, b) => a.Cursor.CurrentEid.CompareTo(b.Cursor.CurrentEid));
             double theta = heap.IsFull ? heap.MinScore : double.NegativeInfinity;
 
-            // pivot = smallest index whose cumulative upper bound exceeds theta.
+            // pivot = 累積上限が theta を超える最小インデックス。
             double cum = 0;
             int pivot = -1;
             for (int i = 0; i < cursors.Count; i++)
@@ -255,7 +244,7 @@ internal static class Bm25Scorer
                 cum += cursors[i].Ub;
                 if (cum > theta) { pivot = i; break; }
             }
-            if (pivot < 0) break; // no remaining document can beat the k-th best score
+            if (pivot < 0) break; // 残りの文書は k 番目のスコアを超えられない
 
             long pivotEid = cursors[pivot].Cursor.CurrentEid;
             if (cursors[0].Cursor.CurrentEid == pivotEid)
@@ -276,7 +265,7 @@ internal static class Bm25Scorer
             }
             else
             {
-                // Advance the smallest (lagging) cursor up to the pivot document.
+                // 最小 (遅延) カーソルを pivot 文書まで前進させる。
                 cursors[0].Cursor.SeekTo(pivotEid);
             }
         }
@@ -285,9 +274,9 @@ internal static class Bm25Scorer
     }
 
     /// <summary>
-    /// Resolve N / avgdl: use the carried <paramref name="corpus"/> snapshot when it
-    /// has documents (GraphStats path, avoids the O(N) norms scan), otherwise
-    /// fall back to a one-shot norms summary (behaviour).
+    /// N / avgdl を解決する。<paramref name="corpus"/> スナップショットに文書があれば
+    /// それを使い (GraphStats 経路、O(N) norms スキャンを回避)、
+    /// なければ norms summary へのフォールバック。
     /// </summary>
     public static (long N, double Avgdl) ResolveCorpus(FullTextIndex ft, Bm25CorpusStats? corpus)
     {
@@ -325,9 +314,9 @@ internal static class Bm25Scorer
     }
 
     /// <summary>
-    /// Bounded top-k by (score desc, entityId asc) — the same total order as
-    /// <see cref="SortByScore"/>. <see cref="MinScore"/> is WAND's threshold θ once full.
-    /// k is tiny (tens), so the worst-entry search is a linear scan.
+    /// (score desc, entityId asc) の全順序で上位 k 件を保持する。
+    /// <see cref="SortByScore"/> と同じ順序。満杯時の <see cref="MinScore"/> が WAND の閾値 θ。
+    /// k は小さい (数十) のでワーストエントリ探索はリニアスキャン。
     /// </summary>
     private sealed class BoundedTopK
     {
@@ -338,7 +327,7 @@ internal static class Bm25Scorer
 
         public bool IsFull => _items.Count >= _k;
 
-        /// <summary>Lowest score currently retained (the k-th best); valid only when full.</summary>
+        /// <summary>現在保持中の最低スコア (k 番目)。満杯時のみ有効。</summary>
         public double MinScore { get; private set; }
 
         public void Offer(long eid, double score)
@@ -349,8 +338,8 @@ internal static class Bm25Scorer
                 if (_items.Count == _k) RecomputeMin();
                 return;
             }
-            // Find the worst retained entry: lowest score, breaking ties by largest eid
-            // (so equal-score entries keep the smaller eid, matching SortByScore).
+            // 保持中の最悪エントリを探す: 最低スコア、同スコアでは最大 eid
+            // (同スコアでは小さい eid を残し SortByScore と一致させる)。
             int worst = 0;
             for (int i = 1; i < _items.Count; i++)
             {

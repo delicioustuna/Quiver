@@ -71,24 +71,22 @@ internal struct OperatorStatistics
     public long PageReadsPhysical;
 
     /// <summary>
-    /// Number of expansions that took the adjacency-block fast path.
-    /// Compare against <see cref="RelationshipScanRecords"/> and the global
-    /// <c>IGraphAccessMethods.AdjacencyFallbackCount</c> to attribute plan choice.
+    /// 隣接ブロック高速パスで展開された回数。
+    /// <see cref="RelationshipScanRecords"/> やグローバルの
+    /// <c>IGraphAccessMethods.AdjacencyFallbackCount</c> と比較してプラン選択を評価する。
     /// </summary>
     public long AdjacencyBlockHits;
 
     /// <summary>
-    /// Number of relationship records inspected by
-    /// <see cref="RelationshipScanExpandOperator"/> (live records only — deleted
-    /// rows are skipped by <c>IRelationshipStore.Scan</c>).
+    /// <see cref="RelationshipScanExpandOperator"/> が走査したリレーションシップレコード数
+    /// (生存レコードのみ — 削除済み行は <c>IRelationshipStore.Scan</c> がスキップ)。
     /// </summary>
     public long RelationshipScanRecords;
 
     /// <summary>
-    /// Number of <see cref="IPredicate.Evaluate"/> calls made by
-    /// <see cref="BitmapFilterOperator"/>. With predicates ordered most-selective
-    /// first this is lower than <c>predicates.Count * rowsIn</c> because each
-    /// later predicate only sees rows still surviving in the page bitmap.
+    /// <see cref="BitmapFilterOperator"/> が実行した <see cref="IPredicate.Evaluate"/> 呼び出し回数。
+    /// 述語を選択度順に並べると、後続の述語はページビットマップに残った行だけを評価するため
+    /// <c>predicates.Count * rowsIn</c> より少なくなる。
     /// </summary>
     public long PredicateEvaluations;
 }

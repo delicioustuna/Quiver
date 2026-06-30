@@ -4,6 +4,10 @@ using Quiver.Transactions;
 
 namespace Quiver.Query.Physical;
 
+/// <summary>
+/// ソースノードの隣接エッジを走査し、出力モードに応じて近傍ノード・リレーションシップ・
+/// 重みを放出する 1 ホップ展開演算子。
+/// </summary>
 internal sealed class ExpandOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
@@ -11,9 +15,8 @@ internal sealed class ExpandOperator : IPhysicalOperator
     private readonly Direction _direction;
     private readonly RelationshipTypeId? _typeFilter;
     private readonly ExpandOutputMode _outputMode;
-    // GC-6: when non-null, copy these upstream column values into the tail of
-    // the output tuple per emitted edge. Same set of indices each call —
-    // allocated once in ctor.
+    // non-null のとき、上流の列値を出力タプルの末尾にコピーする。
+    // インデックスセットは毎回同一なのでコンストラクタで 1 度だけ確保する。
     private readonly int[]? _carryColumns;
     private readonly int _baseColumnCount;
     private ITransaction? _tx;
@@ -99,10 +102,9 @@ internal sealed class ExpandOperator : IPhysicalOperator
         _currentSourceNode = NodeId.Invalid;
         _cursor = null;
 
-        // BA-6: when emitting weights, type the slot to match the V2 payload
-        // lane's kind. If the underlying store has no payload lane the slot
-        // stays Int64 and will carry zero — the operator contract documents
-        // this fallback so callers can branch on schema rather than data.
+        // 重み出力時、スロット型を payload lane の Kind に合わせる。
+        // payload lane が無い場合はスロットは Int64 のままゼロを保持する
+        // (呼び出し元はデータではなくスキーマで分岐できる)。
         if (_outputMode == ExpandOutputMode.NeighborAndWeight
             && tx.AdjacencyBlocks is IAdjacencyPayloadView pl
             && pl.PayloadSpec.Kind == PayloadKind.Double)
@@ -135,11 +137,10 @@ internal sealed class ExpandOperator : IPhysicalOperator
             _currentSourceNode = new NodeId(_source.Current[_sourceNodeColumn].LongValue);
             _cursor = _tx!.Access.Expand(_tx, _currentSourceNode, _direction, _typeFilter);
 
-            // PW-17 attribution: count this expansion as an adjacency-block hit
-            // when the source node actually has a block. Diverging from
-            // AdjacencyFallbackCount (which only fires on "no block at all"),
-            // this gives the optimizer a per-operator hit count to compare
-            // against RelationshipScanRecords when picking ExpandStrategy.
+            // ソースノードに隣接ブロックがある場合のみヒットとして計上する。
+            // AdjacencyFallbackCount (ブロック不在時のみ発火) とは異なり、
+            // オプティマイザが ExpandStrategy 選択時に RelationshipScanRecords と
+            // 比較するための per-operator ヒット数を提供する。
             if (_tx!.AdjacencyBlocks?.HasBlock(_currentSourceNode) == true)
             {
                 var s = Statistics;
@@ -172,9 +173,8 @@ internal sealed class ExpandOperator : IPhysicalOperator
                 break;
         }
 
-        // GC-6: copy carried upstream columns into the tail. _source.Current is
-        // still pointing at the row that produced _cursor, so the slots remain
-        // valid here (byte data is also accessible via _source.GetBytes).
+        // carry 対象の上流列をタプル末尾にコピーする。_source.Current は
+        // _cursor を生成した行をまだ指しているのでスロットは有効。
         if (_carryColumns != null)
         {
             var src = _source.Current;
@@ -183,8 +183,8 @@ internal sealed class ExpandOperator : IPhysicalOperator
         }
     }
 
-    // GC-6: byte payload (Utf8String / Bytes) for carry columns has to come
-    // from the upstream operator because we don't snapshot it locally.
+    // carry 列のバイトペイロード (Utf8String / Bytes) はローカルにスナップショット
+    // しないため、上流オペレータから取得する必要がある。
     public ReadOnlySpan<byte> GetBytes(int column)
     {
         if (_carryColumns != null && column >= _baseColumnCount)
