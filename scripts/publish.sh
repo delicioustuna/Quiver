@@ -64,7 +64,7 @@ log "Checking out '$TARGET_BRANCH'..."
 git checkout "$TARGET_BRANCH"
 
 log "Merging '$SOURCE_BRANCH' into '$TARGET_BRANCH' (--no-commit)..."
-if ! git merge "$SOURCE_BRANCH" --no-commit --no-edit; then
+if ! git merge "$SOURCE_BRANCH" --no-ff --no-commit --no-edit; then
     echo ""
     die "Merge conflict detected. Resolve manually, then re-run this script.
   To abort: git merge --abort && git checkout $SOURCE_BRANCH"
@@ -98,6 +98,13 @@ fi
 
 log "Committing to '$TARGET_BRANCH'..."
 git commit -m "Publish: sync from $SOURCE_BRANCH"
+
+log "Cleaning up excluded files from disk before switching back..."
+for path in "${EXCLUDE_PATHS[@]}"; do
+    if [[ -e "$path" ]]; then
+        rm -rf "$path"
+    fi
+done
 
 log "Switching back to '$SOURCE_BRANCH'..."
 git checkout "$SOURCE_BRANCH"
