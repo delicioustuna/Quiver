@@ -1,10 +1,11 @@
 # Contributing to Quiver
 
-Quiver へのコントリビューションを歓迎します。
+個人利用プロジェクトのためコントリビューションは想定していませんが、
+もし作成する場合は以下のフォーマットに従ってくれると嬉しいです。
 
 ## 前提条件
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download) 以降が必要です。
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) 以降
 
 ## ビルド
 
@@ -23,11 +24,8 @@ dotnet test Quiver.slnx
 - **main** — 安定ブランチ（リリース対象）
 - **develop** — 開発ブランチ
 
-Pull Request は `develop` ブランチをベースに作成してください。
-
 ## コーディング規約
 
-- 既存コードのスタイルに従ってください
 - `dotnet build` が警告なしで通ることを確認してください
 - 新機能にはテストを追加してください
 - NativeAOT 互換性を維持してください（リフレクション不使用）
