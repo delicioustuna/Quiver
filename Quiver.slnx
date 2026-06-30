@@ -11,10 +11,6 @@
     <Project Path="benchmarks/Quiver.Benchmarks/Quiver.Benchmarks.csproj" />
     <Project Path="benchmarks/Quiver.Benchmarks.RegressionCheck/Quiver.Benchmarks.RegressionCheck.csproj" />
   </Folder>
-  <Folder Name="/sandbox/">
-    <Project Path="sandbox/QuiverSandbox/QuiverSandbox.csproj" />
-    <Project Path="sandbox/RagSandbox/RagSandbox.csproj" />
-  </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/Quiver.Studio/Quiver.Studio.csproj" />
     <Project Path="tools/Quiver.SampleDbGen/Quiver.SampleDbGen.csproj" />
