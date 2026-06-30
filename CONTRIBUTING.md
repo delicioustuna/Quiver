@@ -4,7 +4,7 @@ Quiver へのコントリビューションを歓迎します。
 
 ## 前提条件
 
-- [.NET 9 SDK](https://dotnet.microsoft.com/download) 以降
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) 以降が必要です。
 
 ## ビルド
 
