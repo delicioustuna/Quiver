@@ -68,14 +68,14 @@ main ブランチを公開用に維持し、develop からの同期時にこれ�
 
 ### 実装タスク
 
-- [ ] `scripts/publish.sh` を作成
+- [x] `scripts/publish.sh` を作成
   - マージコンフリクト時は中断して手動解決を促す
   - `--dry-run` オプションで差分プレビューのみ実行
   - 除外リストはスクリプト冒頭の配列で管理 (追加しやすく)
-- [ ] `Quiver.slnx` から sandbox を除去する sed/処理を組み込む
+- [x] `Quiver.slnx` から sandbox を除去する sed/処理を組み込む
   - 公開側 slnx に sandbox の ProjectReference が残らないこと
   - develop 側 slnx は変更しない
-- [ ] `scripts/` を除外リストに含める (自己除外)
+- [x] `scripts/` を除外リストに含める (自己除外)
 
 ### 除外リスト (スクリプト内の定義)
 
@@ -115,24 +115,23 @@ develop 側では残す。publish スクリプトがマージ後・コミット�
 - [x] `samples/` — 複数サンプルプロジェクト
 
 ### 確認・対応が必要なもの
-- [ ] **CONTRIBUTING.md** — 存在するか？ なければ作成
+- [x] **CONTRIBUTING.md** — 作成済み
   - ビルド手順 (`dotnet build`)
   - テスト実行 (`dotnet test`)
   - ブランチ戦略 (main は安定、PR は develop ベース)
   - コーディング規約 (簡潔に)
-- [ ] **README.md の点検**
-  - CI バッジが公開リポジトリの URL を指しているか
-  - NuGet バッジ (パッケージ公開後)
-  - 「Getting Started」がサンプルを正しく参照しているか
-- [ ] **CI ワークフローの点検**
-  - `ci.yml`: sandbox プロジェクトに依存していないか
-  - `bench.yml`: ベンチマーク CI が公開リポジトリで動くか
-  - `release.yml`: NuGet publish の secrets 設定
-  - `aot.yml`: AOT 検証が外部 PR でも動くか
-- [ ] **docfx.json の点検**
-  - ドキュメント生成が sandbox/plans を参照していないか
-- [ ] **Directory.Build.props の点検**
-  - PackageId, Authors, RepositoryUrl 等が公開用になっているか
+- [x] **README.md の点検** — OK
+  - CI バッジが公開リポジトリの URL を指している (`delicioustuna/Quiver`)
+  - NuGet バッジ (パッケージ公開後に追加)
+  - 「Getting Started」がサンプルを正しく参照している
+- [x] **CI ワークフローの点検** — OK
+  - `ci.yml`: sandbox 依存なし、main/develop 両ブランチ対応
+  - `bench.yml`: nightly + workflow_dispatch
+  - `release.yml`: タグ push トリガ、secrets は GitHub 設定後に追加
+  - `aot.yml`: main/develop + PR 対応
+- [x] **docfx.json の点検** — sandbox/plans 参照なし (旧プロジェクト名の残存は別途対応)
+- [x] **Directory.Build.props の点検** — OK
+  - Authors, RepositoryUrl, PackageLicenseExpression 等すべて公開用に設定済み
 
 ---
 
@@ -145,10 +144,10 @@ publish スクリプトで main へ初回同期する。
 ### 初回 publish の手順
 
 ```
-1. develop で全コメント整理を完了 & コミット
-2. scripts/publish.sh を作成 & テスト (--dry-run)
-3. main ブランチを作成 (または既存 main をリセット)
-4. publish.sh を実行
-5. main の内容を目視確認
-6. GitHub にリポジトリを作成 & push
+1. develop で全コメント整理を完了 & コミット          ✅ 済
+2. scripts/publish.sh を作成 & テスト (--dry-run)      ✅ 済
+3. main ブランチを作成 (または既存 main をリセット)    ✅ 済 (既存 main を使用)
+4. publish.sh を実行                                   ✅ 済 (commit 1469f1c)
+5. main の内容を目視確認                               ✅ 済 (ビルド+テスト OK)
+6. GitHub にリポジトリを作成 & push                    ⬜ 未実施
 ```
