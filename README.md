@@ -3,57 +3,27 @@
 [![CI](https://github.com/delicioustuna/Quiver/actions/workflows/ci.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/ci.yml)
 [![AOT publish smoke](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml)
 
-Quiver は Pure C# で実装された、組み込み（in-process）のグラフデータベースエンジンです。
-ノードとリレーションシップをプロパティ付きで単一ファイルに永続化し、型安全な CRUD と
-Fluent なグラフトラバーサルを提供します。アンマネージド依存はなく、Windows / Linux / macOS
-（x64, ARM64）で動作し、NativeAOT に対応します。
-
-現在のバージョン: **v0.1.0**（pre-release。`0.x` のため公開 API はまだ安定保証の対象外です）
-
-## 特徴
-
-- **Pure C#** — アンマネージド依存なし。Windows / Linux / macOS（x64, ARM64）で動作
-- **組み込み + 単一ファイル** — 静止時は `*.quiver` 1 ファイル。サーバープロセス不要
-- **型安全 API** — Source Generator が `[Node]` / `[Relationship]` モデルから CRUD と型保存トラバーサルを生成
-- **NativeAOT 対応** — 単一バイナリとして配布可能。リフレクション不使用
-- **ゼロアロケーションホットパス** — `Span<T>` / `ref struct` でヒープ確保を排除
-- **WAL + クラッシュリカバリ** — Write-Ahead Log の page-image replay でコミット済みデータを完全復元
-- **B+Tree インデックス** — 完全一致・範囲検索
-- **隣接ブロックストレージ** — ページ連続配置による高速な隣接リスト走査
-- **クエリ最適化** — ヒストグラム統計 + ルールベース Optimizer でスキャン順序を自動選択
-- **ストリーミング** — `AsCursor()` / `AsEnumerable()` で大量結果をメモリを抑えて逐次処理
-- **グラフアルゴリズム** — 重み付き最短経路（Dijkstra / A*）・BFS・可変長トラバーサル・パターンマッチ
-- **ベクトル検索** — KNN とグラフトラバーサル・BM25 全文検索を組み合わせたハイブリッド検索（コアに内蔵）
-
-## 主なユースケース: ローカル RAG バックエンド
-
-ベクトル検索（KNN）・BM25 全文検索とのハイブリッド検索・グラフ走査（ヒットしたチャンクの
-前後文脈や親文書への連結）・メタデータフィルタを 1 ファイル・1 プロセス・外部依存なしで
-組み合わせられるため、ローカル RAG（検索拡張生成）のバックエンドに適しています。
-
-RAG 用スキーマ層 [`Quiver.Rag`](src/Quiver.Rag/)（文書取込・チャンキング・再取込・hybrid 検索 +
-graph expansion）を同梱しています。利用例は [`samples/Quiver.Samples.Rag`](samples/Quiver.Samples.Rag/)、
-レシピは [cookbook の「ローカル RAG」](docs/cookbook.md) を参照してください。
+Quiver は組み込みのグラフデータベース + ベクトル検索 + 全文検索の統合エンジンです。
+ノードとリレーションシップをプロパティ付きで単一ファイルに永続化し、Source Generator による型安全な CRUD と
+Fluent な API　によるグラフトラバーサルが実行可能です。 
+純 C# によるアンマネージド依存のない実装のため、NativeAOT に対応します。
 
 ## クイックスタート
 
-`Quiver` パッケージを参照すると、属性と Source Generator も同梱されます。`ImplicitUsings` が
-有効なプロジェクト（新規テンプレート既定）では `Quiver` / `Quiver.Api` の `using` も自動で入るため、
-下記の `using` を省略できます（ドロップイン）。
-
-### 型安全な CRUD（Source Generator）
-
-`[Node]` / `[Relationship]` 属性を付けた `partial` クラスを定義すると、CRUD と
-`FindBy{Property}` メソッドが生成されます。ラベル・インデックス名は省略可（クラス名・
-プロパティ名から自動生成。リネーム耐性が必要なら明示指定）。
+```csharp
+var g = tx.G(db.Schema);
+var known = g.Nodes<Person>()
+             .Has(p => p.Name, "Alice")
+             .Knows()
+             .Has(p => p.Age, P.Lt(30L))
+             .ToList();
+```
 
 ```csharp
-using Quiver.Api;
-
-[Node]                       // label = "Person"
-public partial class Person
+[Node]
+public partial class Person // Source Generator を使う場合 partial 指定が必須です。
 {
-    [Indexed]                // indexName = "idx_person_name"
+    [Indexed]
     [Property]
     public string Name { get; set; } = "";
 
@@ -61,7 +31,7 @@ public partial class Person
     public int Age { get; set; }
 }
 
-[Relationship<Person, Person>("KNOWS")]
+[Relationship<Person, Person>]
 public partial class Knows
 {
     [Property]
@@ -69,63 +39,35 @@ public partial class Knows
 }
 ```
 
-```csharp
-using Quiver;          // GraphDatabase
-using Quiver.Api;      // 生成された CRUD / トラバーサル API
-
-using var db = GraphDatabase.Open("./mygraph");
-using var tx = db.BeginTransaction();
-
-var aliceId = Person.InsertIndexed(tx, new Person { Name = "Alice", Age = 30 });
-var bobId   = Person.InsertIndexed(tx, new Person { Name = "Bob",   Age = 25 });
-
-// インデックス検索（生成された FindBy* メソッド）
-var found = Person.FindByName(tx, "Alice");        // → List<(NodeId, Person)>
-var alice = Person.Load(tx, aliceId);
-
-// リレーションシップ（プロパティ付き）
-var relId = Knows.Insert(tx, aliceId, bobId, new Knows { Since = "2024-01" });
-
-Person.Update(tx, aliceId, alice with { Age = 31 });
-tx.Commit();
-```
-
-### Fluent Traversal API（グラフトラバーサル）
-
-メソッドチェーンでグラフを辿ります。`[Relationship]` から生成される型保存糖衣
-（リレーション型名そのもののメソッド）を使うと、ホップ間で要素型を保ったまま辿れます。
-
-```csharp
-var g = tx.G(db.Schema);
-
-// 型付きトラバーサル: Knows() が Person 型を保ったまま終点へ辿る
-var known = g.Nodes<Person>()
-             .Has(p => p.Name, "Alice")
-             .Knows()                       // Person -KNOWS-> Person（型を保持）
-             .Has(p => p.Age, P.Lt(30L))
-             .ToList();                      // → List<Person>（自動ロード）
-
-// LINQ ライクな式ツリー述語（比較 / && / 同一キー || / StartsWith など）
-var adults = g.Nodes<Person>()
-              .Where(p => p.Age > 25 && p.Name.StartsWith("A"))
-              .ToList();
-
-// エッジ（リレーションシップ）プロパティでの絞り込み
-var recent = g.Nodes<Person>()
-              .Where(p => p.Name == "Alice")
-              .Knows(e => e.Since == "2024-01")   // Knows エッジの Since で絞り込み
-              .ToList();
-```
+* `Quiver` パッケージを参照すると、属性と Source Generator も同梱されます。
+* `ImplicitUsings` が有効なプロジェクト（新規テンプレート既定）では `Quiver` / `Quiver.Api` の `using` も自動で入るため、 `using` を省略できます（ドロップイン）。
+* 個人利用が目的のため公開バージョンは v0.1.0 (pre-release) としています。
 
 > 文字列キー指定のローレベル / 型なしトラバーサル、Match DSL（宣言的パターンマッチ）、
 > `tx.CreateNode` などの低レイヤ API は [docs/development.md](docs/design/development.md#ローレベル--型なし-api) を参照。
 
-## 性能（基本計測）
+## 特徴
 
-AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch による参考計測値（2026-06-09）。
-計測条件・詳細・追加ベンチは [docs/development.md](docs/design/development.md#性能詳細計測) を参照。
+- 純C#
+- サーバープロセス不要
+- Source Generatorによる型安全なAPI生成
+- NativeAOT 対応
+- KNN（ベクトル検索）とグラフトラバーサル・BM25 全文検索を組み合わせたハイブリッド検索
 
-| 操作 | 実測 (2026-06-09) |
+## ユースケース: ローカル RAG バックエンド
+
+ベクトル検索（KNN）・BM25 全文検索とのハイブリッド検索・グラフ走査（ヒットしたチャンクの
+前後文脈や親文書への連結）・メタデータフィルタを 1 ファイル・1 プロセス・外部依存なしで
+組み合わせられるため、ローカル RAG（検索拡張生成）のバックエンドに適しています。
+
+> RAG 用スキーマ層 [`Quiver.Rag`](src/Quiver.Rag/)（文書取込・チャンキング・再取込・hybrid 検索 + 
+> graph expansion）を同梱しています。利用例は [`samples/Quiver.Samples.Rag`](samples/Quiver.Samples.Rag/)、
+> レシピは [cookbook の「ローカル RAG」](docs/cookbook.md) を参照してください。
+
+
+## ベンチマーク（参考値）
+
+| 操作 | 実測 |
 |---|---|
 | ノード作成（単一 tx 償却） | ~3.5–4 µs/op（~250K ops/s） |
 | ノード作成 + プロパティ設定（同上） | ~6 µs/op |
@@ -136,6 +78,9 @@ AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch による参考
 | BFS 2-hop（ハブ degree 100、leaf 10,000、隣接ブロック） | ~0.037 ms |
 | 1-hop クエリ（`g.Node().Out()`、degree 100、隣接ブロック） | ~4.2 µs/query（~42 ns/edge） |
 | BulkLoader（10 万 edge） | 通常 TX（batch 1000）比 ~11.8× |
+
+> AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch による参考計測値。
+> 計測条件・詳細・追加ベンチは [docs/development.md](docs/design/development.md#性能詳細計測) を参照。
 
 ## 制限事項 (Limitations)
 
@@ -149,22 +94,22 @@ Quiver は組み込み用途に最適化されたエンジンであり、以下�
 | **自動マイグレーションなし** | フォーマットバージョン不一致で例外スロー。in-place 自動変換パスは存在しない | ソースデータから再構築。1.x 内ではフォーマット固定 |
 | **HNSW 上書き** | ベクトル上書き時にグラフトポロジを再リンクしない（検索品質がわずかに劣化しうる） | tombstone 超過で自動 rebuild。頻繁更新時はノード削除→再作成 |
 
-## ドキュメント
+## その他の資料
 
-> ドキュメント、サンプルは順次整備中です。
+### 詳細ドキュメント
 
-- [Getting Started](docs/api/getting-started.md)
-- [Concepts](docs/api/concepts/index.md)（Node/Relationship, Transaction, Traversal, MERGE, KNN, Backends）
-- [Tutorials](docs/api/tutorials/index.md)
-- [Cookbook](docs/cookbook.md)（典型ユースケースのレシピ集）
-- [運用ガイド](docs/operations/README.md)（quickstart, backup/restore, performance tuning, recovery）
-- [用語辞書](docs/glossary.md)（API に登場する概念の定義）
-- [アーキテクチャ概要](docs/architecture.md)（全体構成、データフロー、運用上の注意）
-- [アーキテクチャ図](docs/architecture-diagrams.md)（Mermaid 図集）
+| 資料 | 説明 |
+|---|---|
+| [Getting Started](docs/api/getting-started.md) | まずはここから |
+| [Concepts](docs/api/concepts/index.md) | Node/Relationship, Transaction, Traversal, MERGE, KNN, Backends など |
+| [Tutorials](docs/api/tutorials/index.md) | チュートリアル |
+| [Cookbook](docs/cookbook.md)| 典型ユースケースのレシピ集 |
+| [運用ガイド](docs/operations/README.md)| quickstart, backup/restore, performance tuning, recoveryなど |
+| [用語辞書](docs/glossary.md) | API に登場する概念の定義・用語集 |
+| [アーキテクチャ概要](docs/architecture.md) | 全体構成、データフロー、運用上の注意 |
+| [アーキテクチャ図](docs/architecture-diagrams.md)| Mermaid による本プロジェクトの構成図集 |
 
-## サンプル
-
-[`samples/`](samples/) 配下に機能別の独立サンプルプロジェクトがある。`dotnet run --project samples/<name>` で完走する。
+### 実装サンプル
 
 | サンプル | 内容 |
 |---|---|
@@ -180,4 +125,4 @@ Quiver は組み込み用途に最適化されたエンジンであり、以下�
 
 ## ライセンス
 
-[MIT License](LICENSE)
+[MIT License](LICENSE) です。
