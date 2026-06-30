@@ -8,10 +8,9 @@ using Xunit;
 namespace Quiver.Backend.Tests;
 
 /// <summary>
-/// BA-9 binary backend crash contract: runs the shared
-/// <see cref="GraphStorageBackendCrashContractTests"/> suite plus three
-/// binary-specific scenarios (WAL segment roll, RecoveryManager edge cases,
-/// adjacency block sidecar loss).
+/// binary backend のクラッシュ契約テスト。
+/// 共通の <see cref="GraphStorageBackendCrashContractTests"/> に加え、WAL segment roll、
+/// RecoveryManager の境界条件、隣接ブロック sidecar 消失という固有シナリオを検証する。
 /// </summary>
 public sealed class BinaryGraphStorageBackendCrashContractTests
     : GraphStorageBackendCrashContractTests
@@ -19,15 +18,15 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     protected override IGraphStorageBackendFactory CreateFactory()
         => new BinaryGraphStorageBackendFactory();
 
-    // ARCH-4 増分8: binary backend は単一ファイル *.quiver。コンテナは <dir>/graph.quiver、
+    // binary backend は単一ファイル *.quiver。コンテナは <dir>/graph.quiver、
     // WAL は <dir>/graph.quiver-wal。fault injector の LatestWalSegment / sidecar 削除はこの前提。
     protected override string DatabasePath
         => System.IO.Path.Combine(DatabaseDirectory, "graph.quiver");
 
     protected override void InjectTornWriteAtTail()
     {
-        // Most recent WAL segment is the durability boundary. Zero-fill the
-        // last 16 bytes so the trailing record's CRC32C never validates.
+        // 最新 WAL segment が永続化境界。末尾 16 バイトをゼロ埋めし、
+        // 末尾レコードの CRC32C が必ず不一致になるようにする。
         var seg = LatestWalSegment();
         if (seg is null) return;
         TornWriteInjector.ZeroFillTail(seg, tailBytes: 16);
@@ -38,25 +37,24 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         var seg = LatestWalSegment();
         if (seg is null) return;
         // WAL header: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32C(4) = 25 B.
-        // Flip a bit in the Type byte of the first record so its CRC fails on replay.
+        // 先頭レコードの Type バイトを 1 ビット反転し、replay 時に CRC を不一致にする。
         ChecksumCorruptor.FlipBitAt(seg, offset: 20, bitInByte: 0);
     }
 
     protected override void DeleteSidecarFiles()
     {
-        // adj.epoch is rebuilt from the adjacency store on next open; deleting
-        // it should be tolerated. If absent (no bulk load happened) this is a no-op.
+        // adj.epoch は次回 open 時に隣接ストアから再構築されるため削除を許容する。
+        // bulk load 未実行でファイルがなければ no-op。
         var epoch = Path.Combine(DatabaseDirectory, "adj.epoch");
         SidecarFileDeleter.TryDelete(epoch);
     }
 
-    // ===== Binary-specific scenarios =====
+    // ===== binary backend 固有シナリオ =====
 
     /// <summary>
-    /// FT-15 Tier2: a transaction explicitly rolled back in-process, then
-    /// followed by a process kill, must leave no uncommitted data. The abort
-    /// flushes its before-image restore durably before the kill, and recovery
-    /// keeps earlier committed work intact.
+    /// プロセス内で明示的に rollback した後に kill しても未コミットデータが残らないことを検証する。
+    /// abort は before-image の復元を kill 前に永続化し、recovery は先行する
+    /// コミット済み処理を維持する。
     /// </summary>
     [Fact]
     public void AbortThenKill_leaves_no_uncommitted_data()
@@ -89,17 +87,17 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
-    /// FT-17 索引整合性: a B+Tree index entry inserted by an uncommitted transaction
-    /// must be undone by recovery after a kill, while a committed index entry must
-    /// survive. The binary backend logs index mutations as WalRecordType.IndexMutation
-    /// and RecoveryManager replays the inverse for crashed transactions.
+    /// 未コミットトランザクションが挿入した B+Tree エントリは kill 後の recovery で取り消され、
+    /// コミット済みエントリは残ることを検証する。binary backend はインデックス変更を
+    /// WalRecordType.IndexMutation として記録し、RecoveryManager はクラッシュした
+    /// トランザクションに逆操作を replay する。
     /// </summary>
     [Fact]
     public void IndexEntry_from_uncommitted_tx_is_undone_after_kill()
     {
         IGraphStorageBackend? backend = Open();
 
-        // Committed baseline index entry.
+        // 比較基準となるインデックスエントリをコミットする。
         using (var tx = backend.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: false))
         {
@@ -108,12 +106,12 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             tx.Commit();
         }
 
-        // Uncommitted transaction inserts an index entry, then the process dies.
+        // インデックスエントリを未コミットのままプロセスを kill する。
         var dirtyTx = backend.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: false);
         var doomed = dirtyTx.CreateNode("Person");
         dirtyTx.IndexInsert("idx_name", "doomed", doomed);
-        // NOTE: no Commit.
+        // 意図的に Commit しない。
 
         KillProcessSimulator.SimulateKill(ref backend);
 
@@ -134,10 +132,9 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
-    /// Open with a small WAL segment size so that a few commits force a
-    /// segment roll, then simulate a kill and confirm everything still
-    /// recovers. Probes the boundary code that closes one segment and opens
-    /// the next.
+    /// 小さな WAL segment size で数回の commit ごとに segment roll を発生させ、
+    /// kill 後も全データを復旧できることを検証する。
+    /// segment を閉じて次を開く境界処理を対象とする。
     /// </summary>
     [Fact]
     public void KillAcrossWalSegmentRoll_recovers()
@@ -148,7 +145,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         try
         {
             var factory = new BinaryGraphStorageBackendFactory();
-            // Tiny segments — every other commit will roll.
+            // ほぼ 2 commit ごとに roll する小さな segment を使う。
             var opts = new GraphDatabaseOptions { WalSegmentSize = 64 * 1024 };
 
             var ids = new List<NodeId>();
@@ -158,7 +155,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
                 using (var tx = backend.BeginGraphTransaction(
                     IsolationLevel.SnapshotIsolation, readOnly: false))
                 {
-                    // 1 KB payload so segment fills relatively quickly.
+                    // segment を早く満たすため 1 KB の payload を使う。
                     var node = tx.CreateNode("Big");
                     tx.SetProperty(node, "blob",
                         PropertyValue.FromString(new string('x', 1024)));
@@ -182,8 +179,8 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
-    /// Open an empty directory (no WAL, no data files) — the binary backend
-    /// must boot cleanly with an empty RecoveryManager pass.
+    /// WAL もデータファイルもない空ディレクトリを開き、
+    /// RecoveryManager の空の処理で正常に起動できることを検証する。
     /// </summary>
     [Fact]
     public void EmptyDirectory_recovers_with_empty_FileRegistry_pass()
@@ -208,10 +205,9 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
-    /// Truncate the adjacency block index sidecar to 0 bytes after a commit.
-    /// adj_idx.dat is only written by BulkLoader, so if absent the factory
-    /// gracefully skips the V1 path. The committed node store remains
-    /// readable.
+    /// commit 後に隣接ブロックインデックス sidecar を 0 バイトへ切り詰める。
+    /// adj_idx.dat は BulkLoader だけが書くため、存在しなければ factory は V1 経路を
+    /// 安全にスキップする。コミット済みノードストアは引き続き読み取れる。
     /// </summary>
     [Fact]
     public void AdjacencyIndexSidecar_truncated_backend_falls_back_safely()
@@ -228,9 +224,9 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
 
         var adjIdx = Path.Combine(DatabaseDirectory, "adj_idx.dat");
         if (File.Exists(adjIdx))
-            TornWriteInjector.TruncateTail(adjIdx, int.MaxValue); // truncate to 0
+            TornWriteInjector.TruncateTail(adjIdx, int.MaxValue); // 0 バイトまで切り詰める
 
-        // Either succeeds (linked-list fallback) or fails with StorageException.
+        // linked-list fallback で成功するか、StorageException で安全に失敗する。
         IGraphStorageBackend? reopened = null;
         try
         {
@@ -240,8 +236,8 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             rtx.NodeExists(persisted).Should().BeTrue();
             rtx.Rollback();
         }
-        catch (StorageException) { /* acceptable: fail-safe */ }
-        catch (CorruptionException) { /* acceptable */ }
+        catch (StorageException) { /* fail-safe なら許容する */ }
+        catch (CorruptionException) { /* 許容する */ }
         finally
         {
             reopened?.Dispose();
@@ -249,11 +245,10 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
-    /// FT-18 (gap 1 redo): a B+Tree index entry inserted by a committed transaction
-    /// must survive a process kill that occurs <strong>before</strong> the index
-    /// file was Dispose-flushed. The IndexMutation WAL record was made durable at
-    /// commit-FlushTo, and recovery's new index redo pass replays it forward
-    /// idempotently so the entry reappears in the index file.
+    /// コミット済み B+Tree エントリが、インデックスファイルの Dispose-flush
+    /// <strong>前</strong>の kill 後も残ることを検証する。IndexMutation WAL レコードは
+    /// commit の FlushTo で永続化され、recovery の index redo パスが冪等に forward replay
+    /// することでエントリを復元する。
     /// </summary>
     [Fact]
     public void CommittedIndexEntry_survives_kill_via_redo()
@@ -268,7 +263,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             tx.Commit();
         }
 
-        // Kill without Dispose — the .idx file may not have been fsync'd.
+        // Dispose せず kill するため、.idx ファイルは fsync 前の可能性がある。
         KillProcessSimulator.SimulateKill(ref backend);
 
         using var reopened = Open();
@@ -285,12 +280,11 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
-    /// FT-18 (truncation safety): once a checkpoint fires, its WAL prefix
-    /// (including the IndexMutation records) is truncated. Without
-    /// <see cref="Quiver.Index.IIndexManager.FlushAll"/>, the index file would
-    /// not be durable and a subsequent kill would lose the committed entry
-    /// permanently. With FT-18 the checkpoint fsyncs the index, so the entry
-    /// survives even after WAL truncation + kill.
+    /// checkpoint 後に IndexMutation を含む WAL prefix が切り詰められても、
+    /// コミット済みエントリが残ることを検証する。
+    /// <see cref="Quiver.Index.IIndexManager.FlushAll"/> がなければ index file は永続化されず、
+    /// 後続 kill でエントリを失う。checkpoint が index を fsync するため、
+    /// WAL truncation と kill の後もエントリが残る。
     /// </summary>
     [Fact]
     public void CommittedIndexEntry_survives_checkpoint_then_kill()
@@ -301,7 +295,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         try
         {
             var factory = new BinaryGraphStorageBackendFactory();
-            // Tiny threshold so the second commit forces a checkpoint.
+            // 2 回目の commit で checkpoint を強制する小さな閾値を使う。
             var opts = new GraphDatabaseOptions { CheckpointThresholdBytes = 1 };
 
             NodeId committed;
@@ -313,9 +307,9 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
                 tx.IndexInsert("idx_name", "checkpointed", committed);
                 tx.Commit();
             }
-            // Second commit triggers MaybeCheckpoint (ActiveCount == 0,
-            // BytesWritten >= threshold). The checkpoint flushes the index
-            // and then truncates the WAL prefix containing the IndexMutation.
+            // 2 回目の commit が MaybeCheckpoint (ActiveCount == 0、
+            // BytesWritten >= threshold) を起動する。checkpoint は index を flush してから、
+            // IndexMutation を含む WAL prefix を切り詰める。
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
@@ -342,13 +336,10 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
-    /// FT-18 (idempotent index undo): pre-FT-18, recovery skipped aborted
-    /// transactions entirely for index undo on the assumption that in-process
-    /// abort was already durable. But the in-process inverse runs through the
-    /// buffer pool (not direct fsync), so under steal it could be lost.
-    /// FT-18 re-applies the inverse on recovery via check-before-apply, so
-    /// after abort + kill the prior committed state is intact, the aborted
-    /// insert is gone, and no duplicates are introduced by double-undo.
+    /// index undo の冪等性を検証する。プロセス内 abort の逆操作は直接 fsync せず
+    /// buffer pool を通るため、steal 下では失われる可能性がある。
+    /// recovery は check-before-apply で逆操作を再適用する。abort + kill 後も先行する
+    /// コミット済み状態を維持し、abort された insert を除去し、二重 undo でも重複を作らない。
     /// </summary>
     [Fact]
     public void AbortedIndexInsert_then_kill_leaves_no_residual_entry()
@@ -391,10 +382,10 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
-    /// FT-19: 大量 insert で B+Tree split を多発させた tx を commit → kill。
+    /// 大量 insert で B+Tree split を多発させた tx を commit → kill。
     /// 物理 PageImage WAL ロギングにより、split で touched された全ページが PageImage 経由で
     /// 再生されるので、partial-disk-arrival シナリオでも recovery 後に B+Tree が構造的に整合し、
-    /// 全エントリが可視に戻る。FT-18 までの論理 redo では出せなかった保証。
+    /// 全エントリが可視に戻る。論理 redo だけでは提供できない保証。
     /// </summary>
     [Fact]
     public void IndexHeavySplitWorkload_then_kill_recovers_all_entries()
@@ -434,7 +425,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
-    /// FT-19: 複数索引を同一 tx 内で更新 → kill。各索引は別 fileKind を catalog で
+    /// 複数索引を同一 tx 内で更新 → kill。各索引は別 fileKind を catalog で
     /// 割り当てられているので、全 fileKind の PageImage 系統が独立に redo されるはず。
     /// </summary>
     [Fact]
@@ -481,7 +472,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
-    /// FT-19 / ARCH-4 増分5: 索引作成 → kill → 再 open で索引カタログから復元される。
+    /// 索引作成 → kill → 再 open で索引カタログから復元される。
     /// 旧実装の indexes/.fileKinds サイドカーは廃止され、索引カタログ (name → tenantId /
     /// PropertyTypeFlags) は graph.quiver 内の専用テナントに同居する。よってファイル存在の
     /// 代わりに「kill 後に索引が再 materialize され、コミット済みエントリが引ける」ことで
@@ -500,7 +491,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             tx.Commit();
         }
 
-        // ARCH-4: 索引は graph.quiver に同居するため、独立した .idx / .fileKinds は作られない。
+        // 索引は graph.quiver に同居するため、独立した .idx / .fileKinds は作られない。
         File.Exists(Path.Combine(DatabaseDirectory, "indexes", ".fileKinds")).Should().BeFalse(
             "ARCH-4 では索引カタログは graph.quiver 内テナントに同居し別ファイルを作らない");
 
@@ -518,10 +509,10 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         rtx.Rollback();
     }
 
-    // ===== FT-21: Checkpoint atomicity (Begin/End sentinel) kill points =====
+    // ===== checkpoint atomicity (Begin/End sentinel) の kill point =====
 
     /// <summary>
-    /// FT-21 共通ヘルパ: 与えた phase で kill 例外を投げるよう injector を仕込み、
+    /// 与えた phase で kill 例外を投げるよう injector を仕込み、
     /// 「checkpoint を必ず誘発する commit」を 1 回実行 → 例外を捕捉 → kill simulate →
     /// 再 open → コミット済みデータが全て読めることを assert する。
     ///
@@ -580,7 +571,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
                 preserved.Add(killTx.CreateNode("PreKill"));
                 killTx.SetProperty(preserved[2], "marker", PropertyValue.FromInt64(33L));
                 try { killTx.Commit(); }
-                catch (InvalidOperationException) { /* expected: simulated kill */ }
+                catch (InvalidOperationException) { /* 想定した模擬 kill */ }
             }
             finally
             {
@@ -617,7 +608,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
-    /// FT-21 case 1 (Begin 直後 kill): Begin sentinel だけが WAL に乗った状態で死亡。
+    /// case 1 (Begin 直後 kill): Begin sentinel だけが WAL に乗った状態で死亡。
     /// data file は flush されていない (一部 PageImage 経由でしか整合しない)。
     /// recovery は End が無いと検知して前回 checkpoint からやり直し、PageImage redo で
     /// 全コミット済みデータが復活する。
@@ -627,7 +618,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         => RunCheckpointKillScenario(CheckpointPhase.AfterBegin);
 
     /// <summary>
-    /// FT-21 case 2 (page fsync 半分の代替): Begin 後の data flush が完了する前に
+    /// case 2 (page fsync 半分の代替): Begin 後の data flush が完了する前に
     /// 死亡するシナリオを <see cref="CheckpointPhase.AfterBegin"/> で再実行する
     /// (完了する前という意味では AfterBegin と等価で、partial flush 中に死ぬのは
     /// AfterBegin より「悪くない」ので、AfterBegin が問題なければこちらも安全)。
@@ -644,7 +635,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
-    /// FT-21 case 3 (全 page fsync 直後 kill): data file は完全に durable だが
+    /// case 3 (全 page fsync 直後 kill): data file は完全に durable だが
     /// index flush も End も走っていない。recovery は依然として End 不在を検知し
     /// 前回 checkpoint からやり直す (安全側のオーバーヘッドだけで integrity OK)。
     /// </summary>
@@ -653,7 +644,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         => RunCheckpointKillScenario(CheckpointPhase.AfterDataFlush);
 
     /// <summary>
-    /// FT-21 case 4 (End 直前 kill): data + index 両方 fsync 済みだが End sentinel
+    /// case 4 (End 直前 kill): data + index 両方 fsync 済みだが End sentinel
     /// 未書込み。WAL 上は CheckpointBegin のみ。recovery は前回 checkpoint からやり直す。
     /// </summary>
     [Fact]
@@ -661,7 +652,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         => RunCheckpointKillScenario(CheckpointPhase.AfterIndexFlush);
 
     /// <summary>
-    /// FT-21 case 5 (End 直後 kill): End sentinel まで書き終えているが truncate
+    /// case 5 (End 直後 kill): End sentinel まで書き終えているが truncate
     /// 未実行。recovery は最新 End から起動して、過去 WAL segment が残っていても
     /// 整合に影響しない (idempotent redo)。
     /// </summary>
@@ -670,7 +661,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         => RunCheckpointKillScenario(CheckpointPhase.AfterEnd);
 
     /// <summary>
-    /// FT-21 case 6 (truncate 途中の代替): truncate 完了直後に kill。完全に成功した
+    /// case 6 (truncate 途中の代替): truncate 完了直後に kill。完全に成功した
     /// checkpoint を kill で締めた状態。truncate 途中の partial deletion は OS の
     /// unlink 単位の atomicity に依存するので、ここでは「全 unlink 成功直後に死亡」
     /// で代替する (truncate 中に死んだ場合の残骸 segment は次回 recovery でも old
@@ -683,7 +674,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
 
     private string? LatestWalSegment()
     {
-        // ARCH-4 増分7: WAL は単一サイドカー graph.quiver-wal。
+        // WAL は単一サイドカー graph.quiver-wal。
         var walPath = Path.Combine(DatabaseDirectory, "graph.quiver-wal");
         return File.Exists(walPath) ? walPath : null;
     }

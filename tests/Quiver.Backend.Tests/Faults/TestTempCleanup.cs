@@ -1,7 +1,7 @@
 namespace Quiver.Backend.Tests.Faults;
 
 /// <summary>
-/// ARCH-4 増分8: crash/chaos テストの temp ディレクトリ後片付けを堅牢化するヘルパ。
+/// crash/chaos テストの temp ディレクトリ後片付けを堅牢化するヘルパ。
 ///
 /// kill シミュレーション後はバックエンドが Dispose されず、MMF / FileStream の OS ハンドルが
 /// SafeHandle の finalizer 解放を待つ状態になることがある。この間に <c>Directory.Delete</c> を
@@ -32,6 +32,6 @@ internal static class TestTempCleanup
         }
 
         // 最終試行 (それでも失敗するなら諦める — テスト失敗にはしない)。
-        try { Directory.Delete(dir, recursive: true); } catch { /* give up */ }
+        try { Directory.Delete(dir, recursive: true); } catch { /* 失敗を許容する */ }
     }
 }

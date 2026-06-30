@@ -1,22 +1,19 @@
 namespace Quiver.Backend.Tests.Faults;
 
 /// <summary>
-/// BA-9 fault injector: models an OS-level process kill of the host process.
+/// host process の OS レベル kill をモデル化する fault injector。
 ///
-/// On Windows true process-kill is unfriendly inside the xUnit runner (file
-/// handles are inherited by the test process and an exclusive FileStream lock
-/// can't be reopened by the same process unless the handle is released first).
-/// We therefore approximate kill by:
-///   1. Calling <c>Dispose</c> so OS file handles are released. This is the
-///      same shutdown path we'd see on a graceful process exit; backends that
-///      rely on Dispose for durability flushes are already broken.
-///   2. Forcing two GC cycles so any finalizer-backed handles unwind before
-///      the caller reopens the directory.
+/// Windows の xUnit runner 内で実際に process kill すると、テストプロセスに引き継がれた
+/// file handle が解放されるまで同じプロセスから排他的 FileStream lock を再取得できない。
+/// そこで次の手順で kill を近似する:
+///   1. <c>Dispose</c> を呼んで OS file handle を解放する。これは正常終了と同じ shutdown 経路だが、
+///      Dispose 時の flush に永続性を依存する backend はそもそも契約違反となる。
+///   2. 呼び出し側がディレクトリを reopen する前に、GC を 2 周実行して
+///      finalizer 管理の handle を解放する。
 ///
-/// The contract under test: any data made durable before this call (i.e.
-/// anything that returned successfully from <see cref="IGraphTransaction.Commit"/>)
-/// MUST still be recoverable when the directory is reopened. Anything
-/// uncommitted MUST NOT be visible after reopen.
+/// この呼び出し前に永続化されたデータ、すなわち
+/// <see cref="IGraphTransaction.Commit"/> が成功したデータは reopen 後も復旧できなければならない。
+/// 未コミットデータは reopen 後に見えてはならない。
 /// </summary>
 internal static class KillProcessSimulator
 {
@@ -24,7 +21,7 @@ internal static class KillProcessSimulator
     {
         var b = backend;
         backend = null;
-        try { b?.Dispose(); } catch { /* kill — losing the in-flight close is the point */ }
+        try { b?.Dispose(); } catch { /* 処理中の close を失う状況も kill の再現対象 */ }
 
         for (int i = 0; i < 2; i++)
         {

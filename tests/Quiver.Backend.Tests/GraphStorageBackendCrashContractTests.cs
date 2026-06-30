@@ -8,10 +8,9 @@ using Xunit;
 namespace Quiver.Backend.Tests;
 
 /// <summary>
-/// BA-9 — crash / durability contract suite. Subclassed per backend so
-/// the same scenarios run against every <see cref="IGraphStorageBackend"/>
-/// implementation, the same way <see cref="GraphStorageBackendContractTests"/>
-/// applies to the functional surface.
+/// クラッシュと永続性の契約テスト。
+/// <see cref="GraphStorageBackendContractTests"/> が機能面を検証するのと同様に、
+/// 各 backend のサブクラスで同じシナリオを実行する。
 /// </summary>
 public abstract class GraphStorageBackendCrashContractTests : IDisposable
 {
@@ -28,13 +27,13 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
 
     public void Dispose()
     {
-        // ARCH-4 増分8: torn-shutdown 後はハンドル解放を待ってから確実に削除する (%TEMP% リーク抑制)。
+        // torn shutdown 後はハンドル解放を待ってから確実に削除し、%TEMP% のリークを抑える。
         Faults.TestTempCleanup.DeleteDirectoryRobust(_dir);
     }
 
     protected abstract IGraphStorageBackendFactory CreateFactory();
 
-    /// <summary>Database directory under test. Exposed to subclasses for backend-specific file paths.</summary>
+    /// <summary>テスト対象 DB のディレクトリ。backend 固有のパス解決用にサブクラスへ公開する。</summary>
     protected string DatabaseDirectory => _dir;
 
     protected virtual string DatabasePath => _dir;
@@ -42,7 +41,7 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     protected IGraphStorageBackend Open()
         => _factory.Open(DatabasePath, new GraphDatabaseOptions());
 
-    // ===== (a) Commit -> kill -> reopen recovers committed data =====
+    // ===== (a) Commit → kill → reopen でコミット済みデータを復旧 =====
 
     [Fact]
     public void Commit_then_kill_then_reopen_recovers_committed_data()
@@ -65,12 +64,12 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
         rtx.Rollback();
     }
 
-    // ===== (b) Kill during write — database remains openable =====
+    // ===== (b) 書き込み中の kill 後も DB を再度開ける =====
     //
-    // FT-15: the binary backend logs page before-images as CompensationLogRecords
-    // and RecoveryManager runs an ARIES-style undo pass for transactions that
-    // crashed without a Commit record. A kill mid-write must leave no trace of
-    // the uncommitted node after reopen.
+    // binary backend はページの before-image を CompensationLogRecord として記録し、
+    // RecoveryManager は Commit レコードなしでクラッシュしたトランザクションに
+    // ARIES 方式の undo パスを実行する。書き込み途中の kill 後に reopen しても、
+    // 未コミットノードの痕跡が残ってはならない。
 
     [Fact]
     public void KillDuringWrite_database_reopens_cleanly()
@@ -79,29 +78,28 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
         var tx = backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false);
         var doomed = tx.CreateNode("Doomed");
         tx.SetProperty(doomed, "ephemeral", PropertyValue.FromInt64(999L));
-        // NOTE: NO Commit().
+        // 意図的に Commit しない。
 
         KillProcessSimulator.SimulateKill(ref backend);
 
         using var reopened = Open();
         using var rtx = reopened.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: true);
-        // Must not throw — backend is usable again.
+        // 例外なく backend を再利用できなければならない。
         AssertUncommittedKillState(rtx, doomed);
         rtx.Rollback();
     }
 
     /// <summary>
-    /// FT-15: uncommitted-mid-write data must NOT survive a kill.
-    /// Override only if a future backend genuinely cannot meet the
-    /// strict-rollback contract.
+    /// 書き込み途中の未コミットデータが kill 後に残らないことを検証する。
+    /// 将来の backend が strict rollback 契約を本質的に満たせない場合に限り override する。
     /// </summary>
     protected virtual void AssertUncommittedKillState(
         IGraphTransaction tx, NodeId uncommittedNode)
         => tx.NodeExists(uncommittedNode).Should().BeFalse(
             "uncommitted writes must not survive a kill (strict rollback contract)");
 
-    // ===== (c) Kill mid-mixed-workload preserves committed prefix =====
+    // ===== (c) 混合ワークロード途中の kill でもコミット済み prefix を維持 =====
 
     [Fact]
     public void KillDuringMixedWorkload_committed_writes_survive()
@@ -114,7 +112,7 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
             tx.Commit();
         }
 
-        // Start a second tx and leave it uncommitted before the simulated kill.
+        // 2 本目のトランザクションを未コミットのまま模擬 kill する。
         var dirtyTx = backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false);
         var dirty = dirtyTx.CreateNode("Dirty");
 
@@ -128,7 +126,7 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
         rtx.Rollback();
     }
 
-    // ===== (d) 100-iteration repeated kill -> recover loop =====
+    // ===== (d) kill → recover を 100 回反復 =====
 
     [Fact]
     public void RepeatedKillRecover_100_iterations_no_corruption()
@@ -139,7 +137,7 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
         for (int i = 0; i < Iterations; i++)
         {
             IGraphStorageBackend? backend = Open();
-            // Verify everything written so far is still there.
+            // それまでに書き込んだ全データが残っていることを確認する。
             using (var rtx = backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: true))
             {
                 foreach (var id in ids)
@@ -172,8 +170,8 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
         ftx.Rollback();
     }
 
-    // ===== (e) Torn last write -> either skipped or recovered =====
-    // Backend-specific implementation (different file layouts).
+    // ===== (e) 最後の torn write をスキップまたは復旧 =====
+    // ファイル配置が異なるため、注入処理は backend ごとに実装する。
 
     [Fact]
     public void TornLastWrite_skipped_or_recovered()
@@ -189,19 +187,19 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
         KillProcessSimulator.SimulateKill(ref backend);
         InjectTornWriteAtTail();
 
-        // Reopen must succeed — the torn tail either replays cleanly or is ignored.
-        // If the backend cannot recover, it must throw a recognisable error type, not silently corrupt.
+        // torn tail は正常に replay されるか無視され、reopen は成功しなければならない。
+        // 復旧不能なら、黙って破損させず識別可能な例外を送出する。
         IGraphStorageBackend? reopened = null;
         try
         {
             reopened = Open();
             using var rtx = reopened.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: true);
-            // The pre-torn committed state must still be there.
+            // torn write より前のコミット済み状態は残っていなければならない。
             rtx.NodeExists(pre).Should().BeTrue("committed-before-tear data must survive");
             rtx.Rollback();
         }
-        catch (CorruptionException) { /* acceptable: surfaced corruption is fine */ }
-        catch (StorageException) { /* acceptable */ }
+        catch (CorruptionException) { /* 破損を明示する挙動は許容する */ }
+        catch (StorageException) { /* 許容する */ }
         finally
         {
             reopened?.Dispose();
@@ -209,13 +207,13 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     }
 
     /// <summary>
-    /// Inject a torn write at the tail of whichever file is the durability
-    /// boundary for the backend under test (e.g. the most recent WAL segment).
+    /// 対象 backend の永続化境界となるファイル末尾
+    /// (例: 最新の WAL セグメント) に torn write を注入する。
     /// </summary>
     protected abstract void InjectTornWriteAtTail();
 
-    // ===== (f) Checksum corruption -> detected and reported (backend-specific) =====
-    // Provided as a hook so each backend picks the right file / exception type.
+    // ===== (f) チェックサム破損を検出して報告 (backend 固有) =====
+    // 各 backend が適切なファイルと例外型を選べるよう hook として提供する。
 
     [Fact]
     public void Checksum_mismatch_detected_and_reported()
@@ -230,31 +228,30 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
         KillProcessSimulator.SimulateKill(ref backend);
         InjectChecksumCorruption();
 
-        // Reopen / first read must either (a) detect corruption and throw, or
-        // (b) silently skip the corrupted record (binary WAL with truncated /
-        // bad-checksum tail is treated as end-of-log). Both are acceptable
-        // contract responses; silently *trusting* corrupt data is not.
+        // reopen または最初の読み取りでは、(a) 破損を検出して例外を送出するか、
+        // (b) 破損レコードをスキップする必要がある。binary WAL では切り詰めまたは
+        // checksum 不一致の tail をログ終端として扱う。どちらも契約上許容するが、
+        // 破損データを黙って信頼してはならない。
         try
         {
             using var reopened = Open();
             using var rtx = reopened.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: true);
-            // If we got here, recovery decided the torn record was unrecoverable
-            // and skipped it — that's fine. Just make sure the backend is at
-            // least usable for new work.
+            // ここに到達した場合、復旧処理は torn record を復旧不能としてスキップしている。
+            // 少なくとも backend が新しい処理に利用できることを確認する。
             rtx.Rollback();
         }
-        catch (CorruptionException) { /* acceptable */ }
-        catch (StorageException) { /* acceptable */ }
+        catch (CorruptionException) { /* 許容する */ }
+        catch (StorageException) { /* 許容する */ }
     }
 
     /// <summary>
-    /// Flip a bit in the backend's primary checksummed structure (WAL record
-    /// header for binary backend).
+    /// backend の主要なチェックサム対象構造
+    /// (binary backend では WAL レコードヘッダー) の 1 ビットを反転する。
     /// </summary>
     protected abstract void InjectChecksumCorruption();
 
-    // ===== (g) Sidecar deletion -> rebuild or fail safely (backend-specific) =====
+    // ===== (g) sidecar 削除後に再構築または安全に失敗 (backend 固有) =====
 
     [Fact]
     public void SidecarDeleted_backend_rebuilds_or_fails_safely()
@@ -276,12 +273,12 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
             reopened = Open();
             using var rtx = reopened.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: true);
-            // If sidecars were optional rebuild-targets the primary node must still be readable.
+            // sidecar が再構築可能な任意データなら、主ノードは引き続き読み取れる必要がある。
             rtx.NodeExists(stable).Should().BeTrue();
             rtx.Rollback();
         }
-        catch (StorageException) { /* acceptable: fail-safe */ }
-        catch (CorruptionException) { /* acceptable */ }
+        catch (StorageException) { /* fail-safe なら許容する */ }
+        catch (CorruptionException) { /* 許容する */ }
         finally
         {
             reopened?.Dispose();
@@ -289,9 +286,8 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     }
 
     /// <summary>
-    /// Delete a backend-specific sidecar file (binary: <c>adj.epoch</c>).
-    /// Implementations should pick a file whose loss is recoverable or
-    /// fail-safely detectable.
+    /// backend 固有の sidecar ファイル (binary では <c>adj.epoch</c>) を削除する。
+    /// 実装は、消失から復旧できるか安全に検出できるファイルを選ぶ。
     /// </summary>
     protected abstract void DeleteSidecarFiles();
 }

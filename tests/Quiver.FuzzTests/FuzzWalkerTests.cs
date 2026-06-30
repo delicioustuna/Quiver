@@ -5,7 +5,7 @@ using Xunit;
 namespace Quiver.FuzzTests;
 
 /// <summary>
-/// TS-5 fuzz target を inline seed + filesystem corpus + regression 入力で総当たり実行する。
+/// fuzz target を inline seed + filesystem corpus + regression 入力で総当たり実行する。
 /// `[Trait("Category", "Fuzz")]` で日常 run から外し、`dotnet test --filter Category=Fuzz`
 /// または CI nightly で回す。
 ///
@@ -53,7 +53,7 @@ public class FuzzWalkerTests
         ex.Should().BeNull("TryReadVarInt64 は truncated / 過長で false を返すだけで例外を投げてはならない");
     }
 
-    // ---- WAL record / segment file --------------------------------------------
+    // ---- WAL レコード / segment ファイル --------------------------------------
 
     public static IEnumerable<object[]> WalRecordInputs()
     {

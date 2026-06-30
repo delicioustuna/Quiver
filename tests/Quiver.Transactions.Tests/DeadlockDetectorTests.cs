@@ -5,7 +5,7 @@ using Xunit;
 namespace Quiver.Transactions.Tests;
 
 /// <summary>
-/// FT-25: wait-for graph + Tarjan SCC ベースの DeadlockDetector の挙動検証。
+/// wait-for graph + Tarjan SCC ベースの DeadlockDetector の挙動検証。
 /// </summary>
 public class DeadlockDetectorTests
 {
@@ -41,7 +41,7 @@ public class DeadlockDetectorTests
 
         t1.Start(); t2.Start();
         ready.Wait();
-        // 両 thread が Wait に入るまで少し待つ (FT-25 detector の前提条件)。
+        // detector の前提を満たすため、両 thread が Wait に入るまで少し待つ。
         Thread.Sleep(100);
 
         using var detector = new DeadlockDetector(new[] { lm }, TimeSpan.FromHours(1));

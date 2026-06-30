@@ -133,7 +133,7 @@ public class TransactionManagerTests : IDisposable
         tx.Level.Should().Be(IsolationLevel.ReadCommitted);
     }
 
-    // ---- Commit hook tests (VEC-3) ----
+    // ---- Commit hook テスト ----
 
     [Fact]
     public void OnCommitted_fires_after_commit_in_registration_order()
@@ -235,7 +235,7 @@ public class TransactionManagerTests : IDisposable
         fired.Should().BeTrue();
     }
 
-    // ---- Lock manager tests ----
+    // ---- lock manager テスト ----
 
     [Fact]
     public void Lock_acquired_twice_by_same_tx_succeeds()
@@ -275,7 +275,7 @@ public class TransactionManagerTests : IDisposable
         lm.TryAcquire(3L, other).Should().BeTrue();
     }
 
-    // ---- Stubs ----
+    // ---- テスト用実装 ----
 
     private sealed class StubNodeStore : INodeStore
     {

@@ -1,7 +1,7 @@
 namespace Quiver.Backend.Tests.Chaos;
 
 /// <summary>
-/// TS-4: 1 つの chaos シナリオ定義。<see cref="Seed"/> から workload を生成し、
+/// 1 つの chaos シナリオ定義。<see cref="Seed"/> から workload を生成し、
 /// <see cref="Fault"/> を注入し、kill → 再 open → consistency check を実行する。
 ///
 /// 同じ scenario は (seed, fault, txCount) が同じなら毎回完全に同じ workload / 同じ

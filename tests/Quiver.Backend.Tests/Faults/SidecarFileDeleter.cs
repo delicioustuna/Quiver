@@ -1,10 +1,9 @@
 namespace Quiver.Backend.Tests.Faults;
 
 /// <summary>
-/// BA-9 fault injector: deletes a sidecar / metadata file from the database
-/// directory. The backend must either rebuild the missing file from primary
-/// data or fail-fast with a clear error — silent corruption (using stale or
-/// partial state) is a contract violation.
+/// DB ディレクトリから sidecar / metadata ファイルを削除する fault injector。
+/// backend は欠損ファイルを primary data から再構築するか、明確なエラーで fail-fast する。
+/// stale または不完全な状態を使う暗黙の破損は契約違反となる。
 /// </summary>
 internal static class SidecarFileDeleter
 {

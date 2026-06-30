@@ -38,7 +38,7 @@ public sealed class TypedTraversalTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    // ── Nodes<T>() typed scan ────────────────────────────────────────
+    // ── Nodes<T>() 型付き scan ──────────────────────────────────────
 
     [Fact]
     public void Nodes_typed_returns_all_of_type()
@@ -50,7 +50,7 @@ public sealed class TypedTraversalTests : IDisposable
         all.Should().OnlyContain(p => !string.IsNullOrEmpty(p.Name));
     }
 
-    // ── Has<TProp> expression-based filter ───────────────────────────
+    // ── Has<TProp> 式ベースの filter ────────────────────────────────
 
     [Fact]
     public void Has_expression_string_filters()
@@ -86,7 +86,7 @@ public sealed class TypedTraversalTests : IDisposable
         result.Select(p => p.Name).Should().BeEquivalentTo("Alice", "Carol");
     }
 
-    // ── Where expression-based filter ────────────────────────────────
+    // ── Where 式ベースの filter ─────────────────────────────────────
 
     [Fact]
     public void Where_expression_filters()
@@ -99,7 +99,7 @@ public sealed class TypedTraversalTests : IDisposable
         result.Should().ContainSingle().Which.Name.Should().Be("Alice");
     }
 
-    // ── Values (expression selector) ─────────────────────────────────
+    // ── Values (式 selector) ─────────────────────────────────────────
 
     [Fact]
     public void Values_expression_extracts_property()
@@ -112,7 +112,7 @@ public sealed class TypedTraversalTests : IDisposable
         names.Should().BeEquivalentTo("Alice", "Bob", "Carol");
     }
 
-    // ── Out / In / Both (untyped downgrade) ──────────────────────────
+    // ── Out / In / Both (型なしへの downgrade) ──────────────────────
 
     [Fact]
     public void Out_untyped_from_typed_traversal()
@@ -176,7 +176,7 @@ public sealed class TypedTraversalTests : IDisposable
         rels.Should().ContainSingle();
     }
 
-    // ── Terminals ────────────────────────────────────────────────────
+    // ── 終端操作 ─────────────────────────────────────────────────────
 
     [Fact]
     public void First_returns_first_entity()
@@ -215,7 +215,7 @@ public sealed class TypedTraversalTests : IDisposable
         pairs.Should().OnlyContain(p => p.Id.IsValid && p.Entity.Name != null);
     }
 
-    // ── Chaining typed filters ───────────────────────────────────────
+    // ── 型付き filter の連結 ─────────────────────────────────────────
 
     [Fact]
     public void Multiple_Has_chains_as_implicit_AND()
@@ -241,7 +241,7 @@ public sealed class TypedTraversalTests : IDisposable
         result.Should().ContainSingle().Which.Name.Should().Be("Alice");
     }
 
-    // ── Minimal IGraphNode type ──────────────────────────────────────
+    // ── 最小 IGraphNode 型 ───────────────────────────────────────────
 
     private sealed class PersonModel : IGraphNode<PersonModel>
     {

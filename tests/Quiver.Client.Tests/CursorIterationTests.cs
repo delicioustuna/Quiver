@@ -92,7 +92,7 @@ public sealed class CursorIterationTests : IDisposable
         var cursor = g.Nodes().HasLabel("Item").AsCursor();
         cursor.MoveNext();
         cursor.Dispose();
-        // No exception expected — double dispose should be safe
+        // 二重 dispose は安全で、例外を投げない
         cursor.Dispose();
     }
 
@@ -104,10 +104,10 @@ public sealed class CursorIterationTests : IDisposable
 
         using var cursor = g.Nodes().HasLabel("Item").AsCursor();
         cursor.MoveNext(); // advance partially
-        // Dispose via using — should release cleanly
+        // using 経由の Dispose で正常に解放する
     }
 
-    // ── Cursor with empty result set ─────────────────────────────────
+    // ── 空結果の cursor ──────────────────────────────────────────────
 
     [Fact]
     public void Empty_cursor_never_advances()
@@ -119,7 +119,7 @@ public sealed class CursorIterationTests : IDisposable
         cursor.MoveNext().Should().BeFalse();
     }
 
-    // ── Cursor with Limit ────────────────────────────────────────────
+    // ── Limit 付き cursor ────────────────────────────────────────────
 
     [Fact]
     public void Cursor_respects_limit()
@@ -135,7 +135,7 @@ public sealed class CursorIterationTests : IDisposable
         count.Should().Be(3);
     }
 
-    // ── Cursor with chained filters ──────────────────────────────────
+    // ── filter chain 付き cursor ─────────────────────────────────────
 
     [Fact]
     public void Cursor_with_HasLabel_and_Has_filter()
@@ -149,7 +149,7 @@ public sealed class CursorIterationTests : IDisposable
         cursor.MoveNext().Should().BeFalse(); // only one match
     }
 
-    // ── Cursor consistency with ToList ────────────────────────────────
+    // ── cursor と ToList の一貫性 ────────────────────────────────────
 
     [Fact]
     public void Cursor_produces_same_results_as_ToList()
@@ -175,8 +175,8 @@ public sealed class CursorIterationTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        // Self-join on Items is trivially empty since there are no relationships here
-        // Use the Nodes cursor as stand-in
+        // relationship がないため Item の self-join は自明に空となる。
+        // 代わりに Nodes cursor を使う。
         using var cursor = g.Nodes().HasLabel("Item").Id().AsCursor();
         var ids = new List<long>();
         while (cursor.MoveNext())

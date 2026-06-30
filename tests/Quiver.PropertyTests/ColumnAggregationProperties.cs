@@ -10,7 +10,7 @@ using Quiver.Storage.Records;
 namespace Quiver.PropertyTests;
 
 /// <summary>
-/// ARCH-5c Phase 5 (5g): 列スキャン集約の property-based 検証。任意の整数値列に対して
+/// 列スキャン集約の property-based 検証。任意の整数値列に対して
 /// 「列スキャン集約 == row path 集約 == 素朴な合計/最大/最小」が常に成り立つことを確認する
 /// (列==行の不変条件)。各ケースは独立した一時 DB で実行する。
 /// </summary>

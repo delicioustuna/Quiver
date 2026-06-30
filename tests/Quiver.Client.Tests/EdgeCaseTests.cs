@@ -27,7 +27,7 @@ public sealed class EdgeCaseTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    // ── Empty graph ──────────────────────────────────────────────────
+    // ── 空グラフ ─────────────────────────────────────────────────────
 
     [Fact]
     public void Nodes_on_empty_graph_returns_empty()
@@ -61,7 +61,7 @@ public sealed class EdgeCaseTests : IDisposable
         g.Nodes().HasNext().Should().BeFalse();
     }
 
-    // ── Nonexistent label / property ─────────────────────────────────
+    // ── 存在しない label / property ─────────────────────────────────
 
     [Fact]
     public void HasLabel_nonexistent_label_returns_empty()
@@ -101,7 +101,7 @@ public sealed class EdgeCaseTests : IDisposable
         values.Should().ContainSingle().Which.Should().BeEmpty();
     }
 
-    // ── Aggregation on empty results ─────────────────────────────────
+    // ── 空結果への集約 ───────────────────────────────────────────────
 
     [Fact]
     public void Sum_on_empty_returns_zero()
@@ -143,7 +143,7 @@ public sealed class EdgeCaseTests : IDisposable
         g.Nodes().HasLabel("Ghost").GroupCount("Name").Should().BeEmpty();
     }
 
-    // ── Argument validation ──────────────────────────────────────────
+    // ── 引数検証 ─────────────────────────────────────────────────────
 
     [Fact]
     public void And_empty_traversals_throws()
@@ -231,7 +231,7 @@ public sealed class EdgeCaseTests : IDisposable
         SeedSingleNode();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        // to < from is invalid
+        // to < from は不正
         var act = () => g.Nodes().Range(5, 3);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
@@ -246,7 +246,7 @@ public sealed class EdgeCaseTests : IDisposable
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
-    // ── Limit edge cases ─────────────────────────────────────────────
+    // ── Limit の境界条件 ─────────────────────────────────────────────
 
     [Fact]
     public void Limit_zero_returns_empty()
@@ -268,7 +268,7 @@ public sealed class EdgeCaseTests : IDisposable
         limited.Should().HaveCount(all.Count);
     }
 
-    // ── Single-node graph edge cases ─────────────────────────────────
+    // ── 単一ノードグラフの境界条件 ─────────────────────────────────
 
     [Fact]
     public void Out_on_isolated_node_returns_empty()
@@ -300,7 +300,7 @@ public sealed class EdgeCaseTests : IDisposable
         g.Node(node).Both().ToList().Should().BeEmpty();
     }
 
-    // ── P factory edge cases ─────────────────────────────────────────
+    // ── P factory の境界条件 ─────────────────────────────────────────
 
     [Fact]
     public void P_StartsWith_null_throws()
@@ -351,7 +351,7 @@ public sealed class EdgeCaseTests : IDisposable
         act.Should().Throw<ArgumentException>();
     }
 
-    // ── Helper ────────────────────────────────────────────────────────
+    // ── ヘルパー ─────────────────────────────────────────────────────
 
     private void SeedSingleNode()
     {

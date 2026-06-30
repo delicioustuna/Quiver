@@ -5,7 +5,7 @@ using Xunit;
 namespace Quiver.Transactions.Tests;
 
 /// <summary>
-/// FT-26: <see cref="Visibility.IsVisible"/> 述語の単体テスト。
+/// <see cref="Visibility.IsVisible"/> 述語の単体テスト。
 /// snapshot / committed registry / self TxId の各組み合わせで Postgres SI 風の判定が出ることを確認する。
 /// </summary>
 public class VisibilityTests
@@ -118,7 +118,7 @@ public class VisibilityTests
     [Fact]
     public void Bootstrap_xmin_visible_via_registry_default()
     {
-        // FT-26: CommittedTxRegistry は ctor で Bootstrap を committed として登録する。
+        // CommittedTxRegistry は ctor で Bootstrap を committed として登録する。
         var snap = MakeSnapshot();
         var reg = new CommittedTxRegistry();
         Visibility.IsVisible(xmin: TransactionId.Bootstrap.Value, xmax: 0, in snap, Self, reg)

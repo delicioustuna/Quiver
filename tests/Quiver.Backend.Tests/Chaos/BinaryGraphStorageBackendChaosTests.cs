@@ -4,8 +4,8 @@ using Xunit;
 namespace Quiver.Backend.Tests.Chaos;
 
 /// <summary>
-/// TS-4: 100+ chaos scenarios against the binary backend. Marked
-/// <c>[Trait("Category","Chaos")]</c> so日常 <c>dotnet test</c> から除外可能
+/// binary backend に対する 100 件以上の chaos scenario。
+/// <c>[Trait("Category","Chaos")]</c> により、日常の <c>dotnet test</c> から除外可能
 /// (<c>--filter "Category!=Chaos"</c>) で、CI nightly では含める運用。
 ///
 /// 1 シナリオ = (seed, txCount, FaultKind)。failure 時は <see cref="ChaosTraceWriter"/>
@@ -16,8 +16,8 @@ public sealed class BinaryGraphStorageBackendChaosTests
 {
     public static IEnumerable<object[]> Scenarios()
     {
-        // 12 seeds × 10 fault kinds = 120 scenarios. tx count varies per seed so workload
-        // mixes are not all identical even for the same fault kind.
+        // 12 seed × 10 fault 種別 = 120 scenario。seed ごとに tx 数も変え、
+        // 同じ fault 種別でも workload の組み合わせが一様にならないようにする。
         FaultKind[] faults =
         [
             FaultKind.KillOnly,

@@ -7,8 +7,8 @@ using Xunit;
 namespace Quiver.Index.Tests;
 
 /// <summary>
-/// FTS-2 (increment 1-2): postings composite-key codec, and the FullTextIndex
-/// postings/norms storage + catalog persistence via IndexManager.
+/// postings の複合キー codec と、FullTextIndex の postings/norms ストレージ、
+/// IndexManager による catalog 永続化を検証する。
 /// </summary>
 public sealed class FullTextIndexTests : IDisposable
 {
@@ -45,13 +45,13 @@ public sealed class FullTextIndexTests : IDisposable
         var abc = PostingsKey.Encode(Encoding.UTF8.GetBytes("abc"), 5);
         var (lower, upper) = PostingsKey.TermRange(Encoding.UTF8.GetBytes("ab"));
 
-        // "ab" entry is inside [lower, upper]; "abc" entry is outside (length prefix prevents collision).
+        // "ab" は [lower, upper] 内、"abc" は長さ prefix により衝突せず範囲外となる。
         ab.AsSpan().SequenceCompareTo(lower).Should().BeGreaterThanOrEqualTo(0);
         ab.AsSpan().SequenceCompareTo(upper).Should().BeLessThanOrEqualTo(0);
         abc.AsSpan().SequenceCompareTo(upper).Should().BeGreaterThan(0);
     }
 
-    // ---- FullTextIndex storage ----
+    // ---- FullTextIndex ストレージ ----
 
     private static ITokenizer Tok => new MixedBigramTokenizer();
 
@@ -102,7 +102,7 @@ public sealed class FullTextIndexTests : IDisposable
         dl.Should().Be(2);
     }
 
-    // ---- catalog persistence ----
+    // ---- catalog の永続化 ----
 
     [Fact]
     public void FullText_index_and_postings_survive_reopen()

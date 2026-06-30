@@ -1,10 +1,10 @@
 namespace Quiver.Backend.Tests.Faults;
 
 /// <summary>
-/// BA-9 fault injector: flips a single bit at a given offset (default: a few
-/// bytes in from the start of the file, where the WAL / page CRC32C lives).
-/// Recovery is expected to detect the mismatch and reject the record / page
-/// — never accept a corrupted page as valid.
+/// 指定 offset の 1 ビットを反転する fault injector。
+/// 通常は WAL / page の CRC32C があるファイル先頭付近を対象とする。
+/// recovery は不一致を検出してレコードまたはページを拒否し、
+/// 破損ページを有効なものとして受け入れてはならない。
 /// </summary>
 internal static class ChecksumCorruptor
 {

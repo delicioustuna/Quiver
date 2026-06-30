@@ -7,23 +7,22 @@ using Xunit;
 namespace Quiver.Backend.Tests;
 
 /// <summary>
-/// Runs the BA-2 backend contract suite against the default binary backend.
+/// 既定の binary backend に共通 backend 契約テストを適用する。
 /// </summary>
 public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackendContractTests
 {
     protected override IGraphStorageBackendFactory CreateFactory()
         => new BinaryGraphStorageBackendFactory();
 
-    // ARCH-4 増分8: binary backend は単一ファイル <dir>/graph.quiver を開く。
+    // binary backend は単一ファイル <dir>/graph.quiver を開く。
     protected override string DatabasePath
         => System.IO.Path.Combine(DatabaseDirectory, "graph.quiver");
 
     /// <summary>
-    /// FT-15 Tier1: rollback must roll back page-backed store metadata (the node
-    /// store high-water mark), so the slot freed by the aborted CreateNode is
-    /// reused by the next committed transaction. This is a binary-specific
-    /// guarantee — id assignment is backend-defined — so it lives here rather
-    /// than in the shared contract suite.
+    /// rollback がページベースストアのメタデータ (ノードストアの high-water mark) も
+    /// 巻き戻し、abort された CreateNode の slot を次のコミット済みトランザクションが
+    /// 再利用することを検証する。ID 割り当ては backend ごとの仕様なので、
+    /// この保証は共通契約ではなく binary 固有テストに置く。
     /// </summary>
     [Fact]
     public void Rollback_rolls_back_store_high_water_mark()
@@ -62,8 +61,8 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
     }
 
     /// <summary>
-    /// FT-17: an index entry inserted by a rolled-back transaction must not be
-    /// visible to <c>SeekIndex</c> afterwards.
+    /// rollback されたトランザクションが挿入したインデックスエントリが、
+    /// その後の <c>SeekIndex</c> から見えないことを検証する。
     /// </summary>
     [Fact]
     public void IndexInsert_rolled_back_is_not_visible()
@@ -89,9 +88,8 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
     }
 
     /// <summary>
-    /// FT-17 課題2 (最も危険): rollback restores the node store high-water mark so
-    /// the freed slot is reused. If the rolled-back index entry survived, it would
-    /// now silently alias a different, valid node. Verify the entry is gone.
+    /// rollback でノードストアの high-water mark が戻り、解放 slot が再利用されても、
+    /// rollback 済みインデックスエントリが別の有効なノードを誤って指さないことを検証する。
     /// </summary>
     [Fact]
     public void Rollback_prevents_stale_index_entry_aliasing()
@@ -111,7 +109,7 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
-                // Reuses the slot freed by the rolled-back node (FT-15).
+                // rollback されたノードが解放した slot を再利用する。
                 reused = tx.CreateNode("Person");
                 tx.Commit();
             }
@@ -130,9 +128,9 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
     }
 
     /// <summary>
-    /// FT-17 課題3: with a registered index, <c>MergeNode</c> uses an index seek to
-    /// decide create-vs-find. A rolled-back merge must leave no stale index entry,
-    /// otherwise the next merge of the same key would wrongly find a ghost.
+    /// インデックス登録済みの <c>MergeNode</c> は、インデックス検索で create と find を
+    /// 判定する。rollback された merge が stale entry を残さず、同じキーの次の merge が
+    /// ghost を誤検出しないことを検証する。
     /// </summary>
     [Fact]
     public void MergeNode_with_index_upsert_is_correct_across_rollback()
@@ -142,7 +140,7 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
             backend.Schema.CreateIndex(
                 "idx_person_email", "Person", "email", IndexKind.StringEquality);
 
-            // A merge that creates a node + index entry, then rolls back.
+            // ノードとインデックスエントリを作成する merge を rollback する。
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
@@ -152,7 +150,7 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
                 tx.Rollback();
             }
 
-            // The rolled-back merge left no stale index entry, so this must CREATE.
+            // stale entry が残っていないため、ここでは新規作成される。
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
@@ -163,7 +161,7 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
                 tx.Commit();
             }
 
-            // Now committed — a later merge of the same key must FIND it.
+            // コミット後は、同じキーの merge が既存ノードを見つける。
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
@@ -176,8 +174,8 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
         });
     }
 
-    // Opens a fresh binary backend in a unique temp directory, runs the body,
-    // and cleans up — keeps each FT-17 test self-contained.
+    // 一意な一時ディレクトリで新しい binary backend を開いて処理を実行し、
+    // 後片付けすることで各テストを独立させる。
     private static void RunInTempBackend(Action<IGraphStorageBackend> body)
     {
         var dir = Path.Combine(

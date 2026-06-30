@@ -7,10 +7,9 @@ using Xunit;
 namespace Quiver.Transactions.Tests;
 
 /// <summary>
-/// FT-31: <see cref="EntityVersionStore"/> の最小契約テスト。
+/// <see cref="EntityVersionStore"/> の最小契約テスト。
 ///
-/// <para>本タスク (FT-31) では sidecar は backend factory から配線されていないため、
-/// 単体での Open → Read/Write round-trip と境界ケースのみを検証する。FT-32 で配線後は
+/// <para>sidecar を単体で Open し、Read/Write round-trip と境界ケースを検証する。
 /// MVCC visibility 経由の integration test が主検証になる。</para>
 /// </summary>
 public sealed class EntityVersionStoreTests : IDisposable
@@ -91,7 +90,7 @@ public sealed class EntityVersionStoreTests : IDisposable
     {
         using var store = CreateStore();
 
-        // ARCH-3: entry 32→40B で RecordsPerPage = 8160/40 = 204。rpp 番目は別 page に乗る
+        // entry 32→40B で RecordsPerPage = 8160/40 = 204。rpp 番目は別 page に乗る
         int rpp = EntityVersionStore.RecordsPerPage;
         rpp.Should().Be(204);
 
@@ -108,14 +107,14 @@ public sealed class EntityVersionStoreTests : IDisposable
     [Fact]
     public void Reopen_preserves_written_entries()
     {
-        // 1st open: write entries
+        // 1 回目の open: エントリを書き込む
         using (var store = CreateStore())
         {
             store.Write(0, new EntityVersionMeta(1, 0, 0, long.MaxValue));
             store.Write(500, new EntityVersionMeta(2, 3, 4, 5));
         }
 
-        // 2nd open: read back
+        // 2 回目の open: 読み戻す
         using var reopened = CreateStore();
         reopened.Read(0).Should().Be(new EntityVersionMeta(1, 0, 0, long.MaxValue));
         reopened.Read(500).Should().Be(new EntityVersionMeta(2, 3, 4, 5));

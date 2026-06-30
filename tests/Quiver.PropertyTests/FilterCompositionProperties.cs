@@ -10,7 +10,7 @@ using Xunit;
 namespace Quiver.PropertyTests;
 
 /// <summary>
-/// TS-3 Property 4: <see cref="FilterOperator"/> 合成の relational identity。
+/// <see cref="FilterOperator"/> 合成の関係代数上の恒等性を検証する。
 ///
 /// 検証する不変量 (関係代数の filter 公理):
 ///   F1. <c>σ_p ∘ σ_q (R) ≡ σ_q ∘ σ_p (R)</c>  (filter 合成は可換)

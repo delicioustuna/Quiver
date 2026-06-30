@@ -4,7 +4,7 @@ using Xunit;
 namespace Quiver.Rag.Tests;
 
 /// <summary>
-/// RAG-4: RagSearcher。14_rag_layer.md §6 の 3 シナリオ (固有名詞→BM25 / 言い換え→KNN /
+/// RagSearcher の 3 シナリオ (固有名詞→BM25 / 言い換え→KNN /
 /// expansion 連結) + 隣接ヒットのマージ + MetadataFilter を検証する。
 /// </summary>
 /// <remarks>

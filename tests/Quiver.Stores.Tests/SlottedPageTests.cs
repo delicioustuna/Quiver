@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Quiver.Storage.Records.Tests;
 
-/// <summary>ARCH-5c Phase 1: slotted ページプリミティブの単体テスト。</summary>
+/// <summary>slotted ページプリミティブの単体テスト。</summary>
 public class SlottedPageTests
 {
     private const int BodySize = 8160; // PageBodySize (8192 - 32B header)

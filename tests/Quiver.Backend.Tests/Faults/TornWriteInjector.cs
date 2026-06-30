@@ -1,15 +1,14 @@
 namespace Quiver.Backend.Tests.Faults;
 
 /// <summary>
-/// BA-9 fault injector: simulates a torn write at the tail of a file. After a
-/// (simulated) crash the OS may have flushed only part of the most recent
-/// write; we model that by zero-filling or truncating the final
-/// <c>tailBytes</c> bytes of a target file.
+/// ファイル末尾の torn write を模擬する fault injector。
+/// クラッシュ時に OS が直近の書き込みの一部しか flush しなかった状態を、
+/// 対象ファイル末尾 <c>tailBytes</c> のゼロ埋めまたは切り詰めでモデル化する。
 ///
-/// Used against WAL segments (binary backend).
-/// Recovery is expected to either skip the torn record or surface a
-/// <see cref="Quiver.Core.CorruptionException"/>-shaped error; silent
-/// corruption is a contract violation.
+/// binary backend の WAL segment に対して使用する。
+/// recovery は torn record をスキップするか
+/// <see cref="Quiver.Core.CorruptionException"/> 系のエラーを明示する。
+/// 暗黙の破損は契約違反となる。
 /// </summary>
 internal static class TornWriteInjector
 {

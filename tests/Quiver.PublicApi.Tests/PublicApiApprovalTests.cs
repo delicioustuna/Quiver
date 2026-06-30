@@ -7,9 +7,9 @@ using Xunit;
 namespace Quiver.PublicApi.Tests;
 
 /// <summary>
-/// DOC-2: 安定性保証の対象アセンブリ (docs/api-stability.md §2) の public API surface を
+/// 安定性保証の対象アセンブリ (docs/api-stability.md §2) の public API surface を
 /// テキスト化し、checked-in の baseline (<c>PublicApi/&lt;Assembly&gt;.approved.txt</c>) と比較する
-/// approval test。
+/// 承認テスト。
 ///
 /// public API に差分が出ると test が fail し、<c>&lt;Assembly&gt;.received.txt</c> を出力する。
 /// 意図した変更なら received を approved に上書きコミットすることで「明示承認」とする
@@ -19,7 +19,7 @@ public sealed class PublicApiApprovalTests
 {
     public static IEnumerable<object[]> StableAssemblies()
     {
-        // ARCH-1 (Phase 0): 旧 Quiver / Quiver.Api / Quiver.Core は単一 'Quiver' アセンブリに
+        // 旧 Quiver / Quiver.Api / Quiver.Core は単一 'Quiver' アセンブリに
         // 統合されたため、安定性の対象は 1 アセンブリのみ (3 つの typeof はすべて同一 Assembly を指す)。
         yield return new object[] { typeof(global::Quiver.GraphDatabase).Assembly };
     }

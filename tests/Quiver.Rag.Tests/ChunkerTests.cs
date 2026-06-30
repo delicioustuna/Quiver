@@ -4,7 +4,7 @@ using Xunit;
 namespace Quiver.Rag.Tests;
 
 /// <summary>
-/// RAG-2: Chunker の純粋ロジック検証。見出し階層 / 段落分割 + オーバーラップ / Table・Code 非分割 /
+/// Chunker の純粋ロジック検証。見出し階層 / 段落分割 + オーバーラップ / Table・Code 非分割 /
 /// 空文書 / charStart-End 整合、および「連結すると (オーバーラップ除き) 原文復元」property をカバーする。
 /// </summary>
 public sealed class ChunkerTests
@@ -239,7 +239,7 @@ public sealed class ChunkerTests
         string.Concat(chunks.Select(c => c.Text)).Should().Be(text);
     }
 
-    // ── 単語境界尊重分割 (RAG-2 backlog) ──
+    // ── 単語境界を尊重する分割 ──
 
     /// <summary>cut 位置 b が語の途中でない (文書端 or 前後いずれかが空白) ことを表す。</summary>
     private static bool IsCleanBoundary(string s, int b)

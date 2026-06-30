@@ -98,7 +98,7 @@ public class RecoveryManagerTests : IDisposable
         string dstPath = Path.Combine(dataDir, "dst.db");
         try
         {
-            // Phase 1: write a page through the WAL-logging path to produce valid PageImage records.
+            // フェーズ 1: WAL logging 経路でページを書き、有効な PageImage レコードを生成する。
             PageId dataPage;
             {
                 IPagedFile srcFile = new PagedFile(srcPath);
@@ -117,13 +117,13 @@ public class RecoveryManagerTests : IDisposable
                 srcFile.Dispose();
             }
 
-            // Phase 2: recover into a fresh destination file.
+            // フェーズ 2: 新しい宛先ファイルへ復旧する。
             using IPagedFile dstFile = new PagedFile(dstPath);
             var registry = new Dictionary<byte, IPagedFile> { { 1, dstFile } };
             var recovery = new RecoveryManager(new NullPageManager(), _wal, registry);
             recovery.Recover();
 
-            // Phase 3: verify the sentinel is in the recovered page.
+            // フェーズ 3: 復旧したページ内の sentinel を確認する。
             var rh = dstFile.PinForRead(dataPage);
             byte[] body = rh.Data[..9].ToArray();
             dstFile.Unpin(dataPage);
@@ -145,7 +145,7 @@ public class RecoveryManagerTests : IDisposable
         string dstPath = Path.Combine(dataDir, "dst.db");
         try
         {
-            // Phase 1: write a page but ABORT the transaction.
+            // フェーズ 1: ページを書き込むがトランザクションを ABORT する。
             PageId dataPage;
             {
                 IPagedFile srcFile = new PagedFile(srcPath);
@@ -166,14 +166,14 @@ public class RecoveryManagerTests : IDisposable
                 srcFile.Dispose();
             }
 
-            // Phase 2: recover into a fresh destination file.
+            // フェーズ 2: 新しい宛先ファイルへ復旧する。
             using IPagedFile dstFile = new PagedFile(dstPath);
             var registry = new Dictionary<byte, IPagedFile> { { 1, dstFile } };
             var recovery = new RecoveryManager(new NullPageManager(), _wal, registry);
             recovery.Recover();
 
-            // Phase 3: the aborted page should NOT be replayed.
-            // dst file only has page 0 (meta). dataPage (page 1) was never applied.
+            // フェーズ 3: abort されたページが replay されないことを確認する。
+            // dst file には page 0 (meta) だけがあり、dataPage (page 1) は適用されない。
             dstFile.PageCount.Should().Be(1, "aborted PageImage must not be written to the recovery target");
         }
         finally

@@ -5,7 +5,7 @@ using Xunit;
 namespace Quiver.Transactions.Tests;
 
 /// <summary>
-/// FT-24: Reader-Writer lock + wait queue + 同 tx 再入/昇格の単体テスト。
+/// Reader-Writer lock + wait queue + 同 tx 再入/昇格の単体テスト。
 /// </summary>
 public class LockManagerSharedLockTests
 {
@@ -89,7 +89,7 @@ public class LockManagerSharedLockTests
         lm.TryAcquire(42, r, LockMode.Shared, Short).Should().BeTrue();
 
         var waitTask = Task.Run(() => lm.TryAcquire(42, w, LockMode.Exclusive, Long));
-        // TS-7: 固定 Task.Delay は threadpool 飽和時に writer がまだ起動しておらず flaky になるため、
+        // 固定 Task.Delay は threadpool 飽和時に writer がまだ起動しておらず flaky になるため、
         // writer が実際に wait queue へ並ぶまで決定的に待つ。
         WaitUntilEnqueued(lm, w);
         waitTask.IsCompleted.Should().BeFalse("writer should be queued behind shared reader");
@@ -111,7 +111,7 @@ public class LockManagerSharedLockTests
         lm.TryAcquire(42, r1, LockMode.Shared, Short).Should().BeTrue();
 
         var writerTask = Task.Run(() => lm.TryAcquire(42, w, LockMode.Exclusive, Long));
-        // TS-7: 固定 Task.Delay(50) だと、フル並列 (16 アセンブリ) でプロセスが CPU を奪われ writer の
+        // 固定 Task.Delay(50) だと、フル並列 (16 アセンブリ) でプロセスが CPU を奪われ writer の
         // Task.Run がまだ起動していない隙に後続 reader が FIFO をすり抜けて grant され、BeFalse が
         // 偽陽性で落ちていた。writer が確実に enqueue されるまで決定的に待ってから後続 reader を出す。
         WaitUntilEnqueued(lm, w);
@@ -139,7 +139,7 @@ public class LockManagerSharedLockTests
         var t1 = Task.Run(() => lm.TryAcquire(42, r1, LockMode.Shared, Long));
         var t2 = Task.Run(() => lm.TryAcquire(42, r2, LockMode.Shared, Long));
         var t3 = Task.Run(() => lm.TryAcquire(42, r3, LockMode.Shared, Long));
-        // TS-7: burst wake の意図 (queue 済みの shared 群を一斉に起こす) を検証するため、3 reader が
+        // burst wake の意図 (queue 済みの shared 群を一斉に起こす) を検証するため、3 reader が
         // 確実に enqueue されてから w を release する。固定 Task.Delay だと飽和時に未 enqueue のまま
         // release され、テストの意図が形骸化する (結果は true でも burst を検証できていない)。
         WaitUntilEnqueued(lm, r1);
@@ -153,7 +153,7 @@ public class LockManagerSharedLockTests
     }
 
     /// <summary>
-    /// TS-7: <paramref name="waiter"/> が <see cref="LockManager"/> の wait queue に並ぶまで決定的に待つ。
+    /// <paramref name="waiter"/> が <see cref="LockManager"/> の wait queue に並ぶまで決定的に待つ。
     /// 固定スリープ依存だと CPU/threadpool 飽和時に <see cref="Task.Run"/> がまだ起動しておらず、
     /// 順序前提のアサーションが偽陽性で落ちる。LockManager 自身の待機エッジ状態を観測して同期する。
     /// </summary>

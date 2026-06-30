@@ -7,7 +7,7 @@ using Xunit;
 namespace Quiver.Rag.Tests;
 
 /// <summary>
-/// RAG-3: 取込/再取込パイプライン。べき等性 (contentHash) / 文書差し替え / embedder 失敗時の無変更 /
+/// 取込/再取込パイプライン。べき等性 (contentHash) / 文書差し替え / embedder 失敗時の無変更 /
 /// 単一 Tx 原子性 / NEXT_CHUNK 連結 / DeleteDocument を検証する。
 /// </summary>
 public sealed class RagIngestTests : IDisposable

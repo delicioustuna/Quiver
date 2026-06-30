@@ -115,10 +115,10 @@ public class WalTests : IDisposable
             wal.FlushTo(lsn);
         }
 
-        // ARCH-4 増分7: 単一ファイル WAL のチェックサムバイトを破損させる。
+        // 単一ファイル WAL のチェックサムバイトを破損させる。
         string walFile = Path.Combine(_dir, "wal");
         byte[] bytes = File.ReadAllBytes(walFile);
-        // Flip the checksum (bytes 21..24 of the record)
+        // checksum を反転する (レコードの 21..24 バイト)
         bytes[21] ^= 0xFF;
         File.WriteAllBytes(walFile, bytes);
 
@@ -153,7 +153,7 @@ public class WalTests : IDisposable
     [Fact]
     public void Truncate_CompactsSingleFile_DroppingOldPrefix()
     {
-        // ARCH-4 増分7: 単一ファイル WAL の Truncate はセグメント削除ではなく
+        // 単一ファイル WAL の Truncate はセグメント削除ではなく
         // prefix を捨てて live tail を前詰めするコンパクション。
         string walFile = Path.Combine(_dir, "wal");
         using var wal = new WriteAheadLog(walFile);
@@ -216,7 +216,7 @@ public class WalTests : IDisposable
     }
 
     // ------------------------------------------------------------------------
-    // FT-27: WAL group commit batching
+    // WAL group commit のバッチ処理
     // ------------------------------------------------------------------------
 
     [Fact]
@@ -297,7 +297,7 @@ public class WalTests : IDisposable
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // FT-29: Per-tx PageImage coalescing (WAL-level cross-tx shared buffer)
+    // トランザクション単位の PageImage 結合 (WAL レベルのトランザクション間共有バッファ)
     // ─────────────────────────────────────────────────────────────────────
 
     private static byte[] MakePageImagePayload(byte fileKind, long pageId, byte fill, int pageSize = 64)
@@ -506,7 +506,7 @@ public class WalTests : IDisposable
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // FT-29: WalPageImageCodec v2 (trim) codec-level tests
+    // WalPageImageCodec v2 (trim) の codec レベルテスト
     // ─────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -535,7 +535,7 @@ public class WalTests : IDisposable
     public void Codec_v1_StillDecodes_BackwardCompat()
     {
         // 旧 v1 形式 (8192 バイト全保持) を手動構築して TryDecode が復元できることを確認。
-        // pre-FT-29 DB に残る WAL レコードを安全に読み出せる互換性保証。
+        // 旧形式の DB に残る WAL レコードを安全に読み出せる互換性保証。
         var v1Payload = new byte[WalPageImageCodec.HeaderLength + WalPageImageCodec.FullPageBytes];
         v1Payload[0] = 1; // version=1
         v1Payload[1] = 7; // fileKind
@@ -595,7 +595,7 @@ public class WalTests : IDisposable
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // FT-29b: v3 RLE chunk encoding
+    // v3 RLE chunk 符号化
     // ─────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -611,7 +611,7 @@ public class WalTests : IDisposable
         page[off + 13] = 0x01;
         page[off + 14] = 0x00;
         for (int i = 15; i <= 22; i++) page[off + i] = (byte)(i - 14); // Xmin varint
-        // bytes 23-30 are zero (Xmax)
+        // 23～30 バイトはゼロ (Xmax)
         // bytes 32+31=63 以降は zero。
 
         var encoded = WalPageImageCodec.Encode(fileKind: 1, pageId: 5, page);

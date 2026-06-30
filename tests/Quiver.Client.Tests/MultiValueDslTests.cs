@@ -29,7 +29,7 @@ public sealed class MultiValueDslTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    // ── AddPropertyValue builds multi-value set via DSL ──────────────
+    // ── DSL で multi-value set を作る AddPropertyValue ──────────────
 
     [Fact]
     public void AddPropertyValue_string_builds_set()
@@ -83,7 +83,7 @@ public sealed class MultiValueDslTests : IDisposable
         values.Should().BeEmpty();
     }
 
-    // ── Has traversal with Set cardinality (containment query) ───────
+    // ── Set cardinality の Has traversal (包含 query) ───────────────
 
     [Fact]
     public void Has_containment_query_finds_nodes_with_matching_value()
@@ -138,7 +138,7 @@ public sealed class MultiValueDslTests : IDisposable
         g.Nodes().HasLabel("Item").Has("tags", "nonexistent").ToList().Should().BeEmpty();
     }
 
-    // ── Has containment chains with other filters ─────────────────────
+    // ── Has 包含と他の filter の chain ───────────────────────────────
 
     [Fact]
     public void Has_containment_chains_with_HasLabel()
@@ -183,7 +183,7 @@ public sealed class MultiValueDslTests : IDisposable
         result.Should().ContainSingle().Which.Should().Be(n1);
     }
 
-    // ── TypedGraphTraversal Has<TElem> for List<T> ────────────────────
+    // ── List<T> 用 TypedGraphTraversal Has<TElem> ────────────────────
 
     [Fact]
     public void TypedTraversal_Has_List_string_containment()
@@ -262,7 +262,7 @@ public sealed class MultiValueDslTests : IDisposable
         tags.Should().ContainSingle().Which.Should().BeEmpty();
     }
 
-    // ── TypedGraphTraversal Has containment chains with Where ─────────
+    // ── TypedGraphTraversal の Has 包含と Where の chain ─────────────
 
     [Fact]
     public void TypedTraversal_Has_List_chains_with_Where_expression()
@@ -289,7 +289,7 @@ public sealed class MultiValueDslTests : IDisposable
         result.Should().ContainSingle().Which.Label.Should().Be("B");
     }
 
-    // ── TypedGraphTraversal Has with different element types ──────────
+    // ── 異なる要素型を使う TypedGraphTraversal Has ──────────────────
 
     [Fact]
     public void TypedTraversal_Has_List_int_containment()
@@ -314,7 +314,7 @@ public sealed class MultiValueDslTests : IDisposable
         notFound.Should().BeEmpty();
     }
 
-    // ── Cardinality enforcement DSL layer ─────────────────────────────
+    // ── cardinality を強制する DSL layer ─────────────────────────────
 
     [Fact]
     public void SetProperty_on_Set_cardinality_key_throws()
@@ -340,7 +340,7 @@ public sealed class MultiValueDslTests : IDisposable
         act.Should().Throw<InvalidOperationException>();
     }
 
-    // ── Duplicate add is idempotent (set semantics) ──────────────────
+    // ── 重複 add の冪等性 (set semantics) ────────────────────────────
 
     [Fact]
     public void AddPropertyValue_duplicate_is_idempotent()
@@ -360,7 +360,7 @@ public sealed class MultiValueDslTests : IDisposable
         values.Should().HaveCount(2);
     }
 
-    // ── RemovePropertyValue nonexistent is no-op ─────────────────────
+    // ── 存在しない値への RemovePropertyValue は no-op ──────────────
 
     [Fact]
     public void RemovePropertyValue_nonexistent_value_is_noop()
@@ -379,7 +379,7 @@ public sealed class MultiValueDslTests : IDisposable
         values.Should().ContainSingle().Which.Should().Be("x");
     }
 
-    // ── GetPropertyValues unknown key returns empty ───────────────────
+    // ── 未知 key の GetPropertyValues は空を返す ────────────────────
 
     [Fact]
     public void GetPropertyValues_unknown_key_returns_empty()
@@ -391,7 +391,7 @@ public sealed class MultiValueDslTests : IDisposable
         values.Should().BeEmpty();
     }
 
-    // ── Helper ────────────────────────────────────────────────────────
+    // ── ヘルパー ─────────────────────────────────────────────────────
 
     private static List<string> CollectStrings(PropertyValuesEnumerator enumerator)
     {

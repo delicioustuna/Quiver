@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Backend.Tests.Chaos;
 
 /// <summary>
-/// TS-4: seed 駆動で再現可能なワークロードを生成する。
+/// seed 駆動で再現可能なワークロードを生成する。
 ///
 /// 1 シナリオ = 複数 tx。各 tx は 1〜4 個の <see cref="WorkloadOp"/> (CreateNode +
 /// 0..N 個の SetProperty / IndexInsert) を含み、最後に Commit or Rollback で締める。

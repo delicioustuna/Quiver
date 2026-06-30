@@ -7,9 +7,9 @@ using Xunit;
 namespace Quiver.Backend.Tests;
 
 /// <summary>
-/// Backend contract tests (BA-2). Subclass for each backend factory and override
-/// <see cref="CreateFactory"/>; the same test surface is exercised against every
-/// implementation of <see cref="IGraphStorageBackend"/>.
+/// backend の共通契約テスト。各 backend factory のサブクラスで
+/// <see cref="CreateFactory"/> を override し、すべての
+/// <see cref="IGraphStorageBackend"/> 実装に同じテストを適用する。
 /// </summary>
 public abstract class GraphStorageBackendContractTests : IDisposable
 {
@@ -26,7 +26,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         _backend = _factory.Open(DatabasePath, new GraphDatabaseOptions());
     }
 
-    /// <summary>ARCH-4: テストディレクトリ。fault 注入やファイルパス解決でサブクラスが参照する。</summary>
+    /// <summary>テストディレクトリ。fault 注入やファイルパス解決でサブクラスが参照する。</summary>
     protected string DatabaseDirectory => _dir;
 
     protected virtual string DatabasePath => _dir;
@@ -39,7 +39,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     }
 
     /// <summary>
-    /// Factory under test. Each concrete subclass returns its own backend factory.
+    /// テスト対象の factory。具象サブクラスは対応する backend factory を返す。
     /// </summary>
     protected abstract IGraphStorageBackendFactory CreateFactory();
 
@@ -55,7 +55,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         _backend = _factory.Open(DatabasePath, new GraphDatabaseOptions());
     }
 
-    // ===== Node CRUD =====
+    // ===== ノード CRUD =====
 
     [Fact]
     public void CreateNode_then_NodeExists_returns_true()
@@ -86,7 +86,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         tx.Commit();
     }
 
-    // ===== Relationship CRUD =====
+    // ===== リレーションシップ CRUD =====
 
     [Fact]
     public void CreateRelationship_then_enumerate_finds_neighbor()
@@ -134,7 +134,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         tx.Commit();
     }
 
-    // ===== Property CRUD =====
+    // ===== プロパティ CRUD =====
 
     [Fact]
     public void SetProperty_then_GetProperty_returns_value()
@@ -170,7 +170,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         tx.Commit();
     }
 
-    // ===== FT-30: defensive read API (HWM safe) =====
+    // ===== HWM 境界を安全に扱う防御的読み取り API =====
 
     [Fact]
     public void NodeExists_returns_false_for_id_past_hwm()
@@ -245,7 +245,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         tx.Commit();
     }
 
-    // ===== Index seek =====
+    // ===== インデックス検索 =====
 
     [Fact]
     public void IndexInsert_string_then_SeekIndex_finds_node()
@@ -293,7 +293,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         tx.Rollback();
     }
 
-    // ===== 1-hop expansion =====
+    // ===== 1-hop 展開 =====
 
     [Fact]
     public void OneHop_enumerates_outgoing_and_incoming_edges()
@@ -323,7 +323,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     [Fact]
     public void OneHop_type_filter_with_outgoing_direction_returns_matching_edges_only()
     {
-        // Direction is honored by EnumerateRelationships when typeFilter is supplied.
+        // typeFilter 指定時も EnumerateRelationships は Direction を尊重する。
         using var tx = BeginWrite();
         var alice = tx.CreateNode("Person");
         var bob   = tx.CreateNode("Person");
@@ -340,7 +340,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         tx.Commit();
     }
 
-    // ===== MERGE / UPSERT (GC-5) =====
+    // ===== MERGE / UPSERT =====
 
     [Fact]
     public void MergeNode_creates_when_no_match_exists()
@@ -430,9 +430,9 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     [Fact]
     public void Rollback_transitions_state_to_aborted_and_releases_tx()
     {
-        // FT-15: rollback undoes the transaction's writes, releases locks and
-        // ends the tx lifecycle. New transactions can be opened immediately
-        // afterwards on the same backend, and the discarded node is invisible.
+        // rollback は書き込みを取り消して lock を解放し、トランザクションを終了する。
+        // 直後に同じ backend で新しいトランザクションを開始でき、
+        // 破棄されたノードはそのトランザクションから見えない。
         NodeId discarded;
         var tx = BeginWrite();
         discarded = tx.CreateNode("Discarded");
@@ -452,7 +452,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     [Fact]
     public void Rollback_discards_node_property_and_relationship_writes()
     {
-        // FT-15 Tier1: every kind of write in an aborted transaction must vanish.
+        // abort されたトランザクションのあらゆる書き込みは消失しなければならない。
         NodeId a, b;
         using (var tx = BeginWrite())
         {
@@ -472,13 +472,13 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     [Fact]
     public void Dispose_without_commit_discards_writes()
     {
-        // FT-15 Tier1: letting a write transaction Dispose without Commit aborts
-        // it — the undo must run, not just lock release.
+        // 書き込みトランザクションを Commit せず Dispose すると abort する。
+        // lock 解放だけでなく undo も実行されなければならない。
         NodeId discarded;
         using (var tx = BeginWrite())
         {
             discarded = tx.CreateNode("Discarded");
-            // Intentionally no Commit / no Rollback.
+            // 意図的に Commit も Rollback もしない。
         }
 
         using var rtx = BeginRead();
@@ -490,9 +490,8 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     [Fact]
     public void Rollback_preserves_previously_committed_data()
     {
-        // FT-15 Tier1: an aborted transaction must not damage data that an
-        // earlier transaction committed, including reverting in-flight mutations
-        // of committed records back to their committed value.
+        // abort されたトランザクションは、先行トランザクションのコミット済みデータを
+        // 損傷してはならない。コミット済みレコードへの処理中の変更も元の値へ戻す。
         NodeId keeper;
         using (var tx = BeginWrite())
         {
@@ -534,7 +533,7 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         rtx.Rollback();
     }
 
-    // ===== FT-23: Savepoint / nested undo =====
+    // ===== Savepoint / ネストした undo =====
 
     [Fact]
     public void Savepoint_RollbackTo_discards_changes_after_savepoint_only()

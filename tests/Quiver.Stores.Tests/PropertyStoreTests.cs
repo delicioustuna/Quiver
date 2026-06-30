@@ -89,7 +89,7 @@ public class PropertyStoreTests : IDisposable
     [Fact]
     public void Delete_returns_unchanged_head_and_skips_invisible_in_enumerate()
     {
-        // FT-26 MVCC: Delete はチェーンを unlink せず xmax をスタンプするだけ。
+        // MVCC では Delete はチェーンを unlink せず xmax をスタンプするだけ。
         // 戻り値は currentFirst のまま (snapshot reader が辿れるよう head 維持)。
         // 新規 reader からは Enumerate が invisible (= xmax committed) を skip するので
         // first だけが見える。

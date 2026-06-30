@@ -5,7 +5,7 @@ using Xunit;
 namespace Quiver.Rag.Tests;
 
 /// <summary>
-/// RAG-1: RagStore 初期化の冪等性。コンストラクタが索引を冪等作成し、複数回 / reopen を跨いでも
+/// RagStore 初期化の冪等性。コンストラクタが索引を冪等作成し、複数回 / reopen を跨いでも
 /// 安全であることを検証する。
 /// </summary>
 public sealed class RagStoreInitializationTests : IDisposable

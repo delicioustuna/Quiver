@@ -7,7 +7,7 @@ using Quiver.Transactions;
 namespace Quiver.Backend.Tests.Chaos;
 
 /// <summary>
-/// TS-4: chaos シナリオを 1 件実行する runner。シナリオ毎に専用の temp ディレクトリで
+/// chaos シナリオを 1 件実行する runner。シナリオ毎に専用の temp ディレクトリで
 /// fresh backend を起動し、決定的に workload を流し、fault を注入し、kill 後に
 /// 再 open して consistency check を回す。トレースは shape:
 /// <code>
@@ -66,14 +66,14 @@ internal sealed class ChaosScenarioRunner
                 or FaultKind.CheckpointKillAfterEnd
                 or FaultKind.CheckpointKillAfterTruncate;
 
-            // ---- Phase 1: workload + fault injection during run ----
+            // ---- フェーズ 1: workload 実行中の fault injection ----
             var open = isCheckpointFault ? _openWithCheckpointSensitive : _open;
             IGraphStorageBackend? backend = open(dir);
             var workload = WorkloadGenerator.Generate(scenario.Seed, scenario.TxCount);
 
             try
             {
-                // Aborted before last tx: in AbortThenKill the final tx is forced to Rollback.
+                // AbortThenKill では最後の tx を強制的に Rollback してから kill する。
                 for (int i = 0; i < workload.Count; i++)
                 {
                     var wtx = workload[i];
@@ -81,8 +81,8 @@ internal sealed class ChaosScenarioRunner
                     RunOneTx(backend!, wtx, oracle, trace, forceRollback);
                 }
 
-                // For checkpoint fault, fire by running one more tiny commit while the
-                // PhaseInjector is armed. The kill exception propagates from Commit().
+                // checkpoint fault では PhaseInjector を有効にして小さな commit を追加実行する。
+                // kill 例外は Commit から伝播する。
                 if (isCheckpointFault)
                 {
                     var phase = CheckpointPhaseFor(scenario.Fault);
@@ -92,12 +92,12 @@ internal sealed class ChaosScenarioRunner
                     {
                         using var tx = backend!.BeginGraphTransaction(
                             IsolationLevel.SnapshotIsolation, readOnly: false);
-                        // small payload so threshold=1 immediately fires checkpoint at commit
+                        // threshold=1 で commit 時に即 checkpoint する小さな payload を使う。
                         tx.CreateNode("Sentinel");
                         try { tx.Commit(); }
-                        catch (InvalidOperationException) { /* simulated kill */ }
+                        catch (InvalidOperationException) { /* 模擬 kill */ }
                     }
-                    catch (InvalidOperationException) { /* simulated kill at scope */ }
+                    catch (InvalidOperationException) { /* scope での模擬 kill */ }
                 }
             }
             catch (Exception ex)
@@ -105,7 +105,7 @@ internal sealed class ChaosScenarioRunner
                 trace.AppendLine($"  WORKLOAD ABORTED: {ex.GetType().Name}: {ex.Message}");
             }
 
-            // ---- Phase 2: simulate process kill + post-kill file-level injection ----
+            // ---- フェーズ 2: process kill と kill 後のファイルレベル障害注入 ----
             trace.AppendLine("  KILL");
             KillProcessSimulator.SimulateKill(ref backend);
 
@@ -125,7 +125,7 @@ internal sealed class ChaosScenarioRunner
                     break;
             }
 
-            // ---- Phase 3: reopen + consistency check ----
+            // ---- フェーズ 3: reopen と consistency check ----
             try
             {
                 using var reopened = open(dir);
@@ -152,7 +152,7 @@ internal sealed class ChaosScenarioRunner
         }
         finally
         {
-            // ARCH-4 増分8: kill 後ハンドル解放を待ってから確実に削除し %TEMP% リークを抑える。
+            // kill 後ハンドル解放を待ってから確実に削除し、%TEMP% リークを抑える。
             Quiver.Backend.Tests.Faults.TestTempCleanup.DeleteDirectoryRobust(dir);
         }
     }

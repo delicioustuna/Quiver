@@ -4,7 +4,7 @@ using Quiver.Transactions;
 namespace Quiver.Backend.Tests.Chaos;
 
 /// <summary>
-/// TS-4: binary backend 用の <see cref="IFaultInjector"/> 実装。
+/// binary backend 用の <see cref="IFaultInjector"/> 実装。
 /// 既存の <see cref="TornWriteInjector"/> / <see cref="ChecksumCorruptor"/> /
 /// <see cref="SidecarFileDeleter"/> をシナリオ runner から呼べる形にラップする。
 /// </summary>
@@ -52,7 +52,7 @@ internal sealed class BinaryBackendFaultInjector(string databaseDirectory) : IFa
 
     private string? LatestWalSegment()
     {
-        // ARCH-4 増分7: WAL は単一サイドカー graph.quiver-wal。
+        // WAL は単一サイドカー graph.quiver-wal。
         var walPath = Path.Combine(_dir, "graph.quiver-wal");
         return File.Exists(walPath) ? walPath : null;
     }

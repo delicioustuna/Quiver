@@ -9,7 +9,7 @@ using Xunit;
 namespace Quiver.Storage.Records.Tests;
 
 /// <summary>
-/// ARCH-5c Phase 2: VersionedNodeStore (heap+map+sidecar 上の INodeStore drop-in) の単体テスト。
+/// VersionedNodeStore (heap+map+sidecar 上の INodeStore drop-in) の単体テスト。
 /// MVCC コンテキスト無し (= Bootstrap / committed registry null) で実行する。
 /// MVCC / generation は永続 EntityVersionStore sidecar に載せ、reopen でも保持する。
 /// </summary>
@@ -197,7 +197,7 @@ public class VersionedNodeStoreTests : IDisposable
         live.Should().Equal(a.Sequence);
     }
 
-    // ===== ARCH-5c Phase 3: inline property =====
+    // ===== インラインプロパティ =====
 
     [Fact]
     public void Inline_property_scalar_roundtrip()

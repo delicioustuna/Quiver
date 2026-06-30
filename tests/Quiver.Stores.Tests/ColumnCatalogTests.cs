@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Quiver.Storage.Records.Tests;
 
-/// <summary>ARCH-5c Phase 5 (5b): ColumnCatalog (列化登録の永続レジストリ) の単体テスト。</summary>
+/// <summary>ColumnCatalog (列化登録の永続レジストリ) の単体テスト。</summary>
 public class ColumnCatalogTests : IDisposable
 {
     private readonly string _path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());

@@ -163,14 +163,14 @@ public class GraphNodeGeneratorTests
         generated.Should().NotBeEmpty();
 
         var src = generated[0].ToString();
-        // Insert: foreach + AddPropertyValue
+        // Insert: foreach + AddPropertyValue で追加
         src.Should().Contain("tx.AddPropertyValue(id, \"Tags\", PropertyValue.FromString(__v))");
-        // Load: GetPropertyValues + collect
+        // Load: GetPropertyValues + 収集
         src.Should().Contain("tx.GetPropertyValues(id, \"Tags\")");
         src.Should().Contain("List<string>");
-        // Update: diff-based RemovePropertyValue
+        // Update: 差分ベースの RemovePropertyValue
         src.Should().Contain("tx.RemovePropertyValue(id, \"Tags\",");
-        // Scalar prop still uses SetProperty
+        // scalar property は引き続き SetProperty を使う
         src.Should().Contain("tx.SetProperty(id, \"Site\",");
     }
 }
@@ -242,7 +242,7 @@ public class GraphRelationshipGeneratorTests
         generatedSource.Should().Contain("public static Knows Load(");
         generatedSource.Should().Contain("public static void Update(");
         generatedSource.Should().Contain("public static void Delete(");
-        // WS-4: write sink sugar
+        // write sink の糖衣構文
         generatedSource.Should().Contain("public static long AddKnows(");
         generatedSource.Should().Contain("public static (long Created, long Matched) MergeKnows(");
     }

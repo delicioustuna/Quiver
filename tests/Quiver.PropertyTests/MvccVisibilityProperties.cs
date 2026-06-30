@@ -8,7 +8,7 @@ using Xunit;
 namespace Quiver.PropertyTests;
 
 /// <summary>
-/// TS-3 Property 3: <see cref="Visibility.IsVisible"/> が Postgres SI の各公理を満たすことを確認する。
+/// <see cref="Visibility.IsVisible"/> が PostgreSQL の Snapshot Isolation の各公理を満たすことを確認する。
 ///
 /// 公理 (snapshot S, self T, registry R に対して):
 ///   A1. <c>xmin == 0</c> ⇒ 不可視 (空きスロット)

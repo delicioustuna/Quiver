@@ -5,8 +5,8 @@ using Quiver.Text;
 namespace Quiver.PropertyTests;
 
 /// <summary>
-/// FTS-1 (design 13 §9): property-based coverage of <see cref="MixedBigramTokenizer"/>
-/// and the NFKC + ASCII-lowercase normalizer it uses.
+/// <see cref="MixedBigramTokenizer"/> と、それが使用する
+/// NFKC + ASCII 小文字化 normalizer を property-based testing で検証する。
 ///
 /// 検証する不変量:
 ///   (A) 正規化冪等性: normalize(normalize(s)) == normalize(s)
@@ -83,7 +83,7 @@ public class TokenizerProperties
         if (n == 1)
             return tokens[0].Length == 1 && tokens[0] == run; // isolated char → unigram
 
-        // n >= 2: overlapping bigrams.
+        // n >= 2 では重なり合う bigram になる。
         for (int i = 0; i < tokens.Count; i++)
             if (tokens[i].Length != 2) return false;
         for (int i = 0; i + 1 < tokens.Count; i++)
@@ -95,10 +95,9 @@ public class TokenizerProperties
         return rebuilt.ToString() == run;
     }
 
-    // Map an arbitrary int onto an NFKC-stable BMP CJK code point: core Hiragana
-    // (U+3042..U+3093) or common Kanji (U+4E00..U+9FAF). These ranges have no
-    // compatibility decomposition, so normalization is identity and run length
-    // is preserved.
+    // 任意の int を NFKC で安定した BMP CJK code point、すなわち基本ひらがな
+    // (U+3042..U+3093) または一般的な漢字 (U+4E00..U+9FAF) へ写像する。
+    // これらの範囲には互換分解がないため、正規化は恒等写像となり run length が保たれる。
     private static char MapToCjk(int x)
     {
         uint u = (uint)x;

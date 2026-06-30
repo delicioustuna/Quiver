@@ -46,7 +46,7 @@ public sealed class MatchPatternTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    // ── GraphPattern construction ────────────────────────────────────
+    // ── GraphPattern 構築 ────────────────────────────────────────────
 
     [Fact]
     public void Node_creates_pattern_with_variable()
@@ -82,7 +82,7 @@ public sealed class MatchPatternTests : IDisposable
         pattern.Should().NotBeNull();
     }
 
-    // ── Match query execution ────────────────────────────────────────
+    // ── Match query 実行 ─────────────────────────────────────────────
 
     [Fact]
     public void Match_returns_matching_pairs()
@@ -288,7 +288,7 @@ public sealed class MatchPatternTests : IDisposable
         results.Should().ContainSingle().Which.Name.Should().Be("Bob");
     }
 
-    // ── MatchContextRow accessor types ───────────────────────────────
+    // ── MatchContextRow accessor 型 ──────────────────────────────────
 
     [Fact]
     public void MatchContextRow_Get_long_returns_correct_value()
@@ -307,7 +307,7 @@ public sealed class MatchPatternTests : IDisposable
         ages.Should().ContainSingle().Which.Should().Be(30L);
     }
 
-    // ── Minimal IGraphNode type ──────────────────────────────────────
+    // ── 最小 IGraphNode 型 ───────────────────────────────────────────
 
     private sealed class PersonNode : IGraphNode<PersonNode>
     {

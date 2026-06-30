@@ -7,7 +7,7 @@ using Xunit;
 namespace Quiver.Storage.Records.Tests;
 
 /// <summary>
-/// ARCH-5c Phase 1: ItemPointerMap + VersionedRecordHeap 骨格の単体テスト。
+/// ItemPointerMap + VersionedRecordHeap 骨格の単体テスト。
 /// 可視性は SI を模した述語を注入して検証する (MvccContext 非依存)。
 /// </summary>
 public class VersionedRecordHeapTests : IDisposable
@@ -165,7 +165,7 @@ public class VersionedRecordHeapTests : IDisposable
         _heap.Insert(seq: 0, Bytes("v0"), xmin: 1);
         _heap.AppendVersion(seq: 0, Bytes("v1"), xmin: 2); // v0.xmax=2
         _heap.AppendVersion(seq: 0, Bytes("v2"), xmin: 3); // v1.xmax=3
-        // chain: v2(head, xmax=0) -> v1(xmax=3) -> v0(xmax=2)
+        // チェーン: v2(head, xmax=0) → v1(xmax=3) → v0(xmax=2)
 
         int removed = _heap.PruneDeadVersions(0, (_, xmax) => xmax != 0 && xmax <= 10);
         removed.Should().Be(2); // v0, v1 を回収、head v2 は保持

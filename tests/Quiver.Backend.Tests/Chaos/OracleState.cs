@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Backend.Tests.Chaos;
 
 /// <summary>
-/// TS-4: workload を実行した結果として「recovery 後に存在すべき」ノード集合を追跡する。
+/// workload を実行した結果として「recovery 後に存在すべき」ノード集合を追跡する。
 ///
 /// 1 tx 単位で <see cref="BeginTx"/> → ops 実行で <see cref="RecordCreate"/> → <see cref="CommitTx"/>
 /// または <see cref="RollbackTx"/> でまとめる。Rollback されると当該 tx の create は破棄される。

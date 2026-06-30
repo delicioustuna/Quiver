@@ -167,7 +167,7 @@ public sealed class GraphTraversalChainTests : IDisposable
         result.Should().ContainSingle(); // Alice(30)
     }
 
-    // ── Has / HasNot (existence checks) ──────────────────────────────
+    // ── Has / HasNot (存在確認) ──────────────────────────────────────
 
     [Fact]
     public void Has_key_existence_check()
@@ -212,7 +212,7 @@ public sealed class GraphTraversalChainTests : IDisposable
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        // Alice -> KNOWS -> Bob
+        // Alice → KNOWS → Bob
         var alice = g.Nodes().HasLabel("Person").Has("Name", "Alice").Next();
         var neighbors = g.Node(alice).Out("KNOWS").ToList();
         neighbors.Should().ContainSingle();
@@ -223,7 +223,7 @@ public sealed class GraphTraversalChainTests : IDisposable
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        // Bob <- KNOWS <- Alice
+        // Bob ← KNOWS ← Alice
         var bob = g.Nodes().HasLabel("Person").Has("Name", "Bob").Next();
         var predecessors = g.Node(bob).In("KNOWS").ToList();
         predecessors.Should().ContainSingle();
@@ -234,7 +234,7 @@ public sealed class GraphTraversalChainTests : IDisposable
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        // Bob has KNOWS from Alice and KNOWS to Carol
+        // Bob には Alice からの KNOWS と Carol への KNOWS がある
         var bob = g.Nodes().HasLabel("Person").Has("Name", "Bob").Next();
         var both = g.Node(bob).Both("KNOWS").ToList();
         both.Should().HaveCount(2);
@@ -245,7 +245,7 @@ public sealed class GraphTraversalChainTests : IDisposable
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        // Alice has KNOWS -> Bob and WORKS_AT -> Acme
+        // Alice には Bob への KNOWS と Acme への WORKS_AT がある
         var alice = g.Nodes().HasLabel("Person").Has("Name", "Alice").Next();
         var all = g.Node(alice).Out().ToList();
         all.Should().HaveCount(2);
@@ -284,14 +284,14 @@ public sealed class GraphTraversalChainTests : IDisposable
         target.Should().ContainSingle().Which.Should().Be(bob);
     }
 
-    // ── Where (subtraversal) ─────────────────────────────────────────
+    // ── Where (sub-traversal) ────────────────────────────────────────
 
     [Fact]
     public void Where_filters_by_subtraversal()
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        // Persons who have any outgoing KNOWS edge
+        // outgoing KNOWS edge を持つ Person
         var result = g.Nodes().HasLabel("Person")
             .Where(t => t.Out("KNOWS"))
             .ToList();
@@ -303,21 +303,21 @@ public sealed class GraphTraversalChainTests : IDisposable
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        // Persons who do NOT have outgoing KNOWS edge
+        // outgoing KNOWS edge を持たない Person
         var result = g.Nodes().HasLabel("Person")
             .Not(t => t.Out("KNOWS"))
             .ToList();
         result.Should().ContainSingle(); // Carol
     }
 
-    // ── And / Or (subtraversal composition) ──────────────────────────
+    // ── And / Or (sub-traversal 合成) ────────────────────────────────
 
     [Fact]
     public void And_requires_all_subtraversals()
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        // Persons who have outgoing KNOWS AND outgoing WORKS_AT
+        // outgoing KNOWS と outgoing WORKS_AT の両方を持つ Person
         var result = g.Nodes().HasLabel("Person")
             .And(
                 t => t.Out("KNOWS"),
@@ -331,7 +331,7 @@ public sealed class GraphTraversalChainTests : IDisposable
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        // Persons who have outgoing KNOWS OR outgoing WORKS_AT
+        // outgoing KNOWS または outgoing WORKS_AT を持つ Person
         var result = g.Nodes().HasLabel("Person")
             .Or(
                 t => t.Out("KNOWS"),
@@ -340,14 +340,14 @@ public sealed class GraphTraversalChainTests : IDisposable
         result.Should().HaveCount(2); // Alice, Bob
     }
 
-    // ── Chaining multiple steps ──────────────────────────────────────
+    // ── 複数 step の chain ───────────────────────────────────────────
 
     [Fact]
     public void Multi_step_chain_out_out()
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        // Alice -> KNOWS -> Bob -> KNOWS -> Carol
+        // Alice → KNOWS → Bob → KNOWS → Carol
         var alice = g.Nodes().HasLabel("Person").Has("Name", "Alice").Next();
         var twoHop = g.Node(alice).Out("KNOWS").Out("KNOWS").ToList();
         twoHop.Should().ContainSingle();
@@ -456,7 +456,7 @@ public sealed class GraphTraversalChainTests : IDisposable
         result.Should().Be(default(NodeId));
     }
 
-    // ── Label / Id steps ─────────────────────────────────────────────
+    // ── Label / Id step ──────────────────────────────────────────────
 
     [Fact]
     public void Label_returns_label_names()
@@ -514,8 +514,8 @@ public sealed class GraphTraversalChainTests : IDisposable
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        // Alice.Out(KNOWS) = Bob; Bob.Out(KNOWS) = Carol;
-        // Both together produce unique nodes
+        // Alice.Out(KNOWS) = Bob、Bob.Out(KNOWS) = Carol。
+        // 両方を合わせても一意なノードを返す。
         var alice = g.Nodes().HasLabel("Person").Has("Name", "Alice").Next();
         var result = g.Node(alice).Out("KNOWS").Both("KNOWS").Dedup().ToList();
         result.Should().OnlyHaveUniqueItems();
@@ -585,7 +585,7 @@ public sealed class GraphTraversalChainTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
         var alice = g.Nodes().HasLabel("Person").Has("Name", "Alice").Next();
-        // Alice -KNOWS-> Bob -KNOWS-> Carol (2 hops)
+        // Alice -KNOWS→ Bob -KNOWS→ Carol (2 hop)
         var result = g.Node(alice).Repeat(s => s.Out("KNOWS"), times: 2).ToList();
         result.Should().ContainSingle(); // Carol
     }
@@ -609,7 +609,7 @@ public sealed class GraphTraversalChainTests : IDisposable
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
-    // ── Aggregation (Sum/Max/Min/Mean/GroupCount) ─────────────────────
+    // ── 集約 (Sum/Max/Min/Mean/GroupCount) ───────────────────────────
 
     [Fact]
     public void Sum_aggregates_numeric_property()
@@ -654,7 +654,7 @@ public sealed class GraphTraversalChainTests : IDisposable
         counts["Alice"].Should().Be(1);
     }
 
-    // ── P predicates (text) ──────────────────────────────────────────
+    // ── P predicate (text) ───────────────────────────────────────────
 
     [Fact]
     public void P_StartsWith_filters_correctly()
@@ -784,7 +784,7 @@ public sealed class GraphTraversalChainTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
         var carol = g.Nodes().HasLabel("Person").Has("Name", "Carol").Next();
-        // Carol has no KNOWS edges but this is still valid
+        // Carol に KNOWS edge はないが、この結果も有効
         var result = g.Node(carol).Coalesce(
             t => t.Out("KNOWS"),    // empty for Carol
             t => t.In("KNOWS")     // Bob -> Carol

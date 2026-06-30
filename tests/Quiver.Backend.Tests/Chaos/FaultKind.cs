@@ -1,7 +1,7 @@
 namespace Quiver.Backend.Tests.Chaos;
 
 /// <summary>
-/// TS-4: chaos scenario が注入する障害の種別。<see cref="ChaosScenario"/> から
+/// chaos scenario が注入する障害の種別。<see cref="ChaosScenario"/> から
 /// <see cref="IFaultInjector"/> 経由で適用される。
 ///
 /// 全ての fault は「アクティブな書き込みが進行している途中で OS / プロセスが落ちる」
@@ -13,7 +13,7 @@ public enum FaultKind
     /// <summary>workload 実行中の何らかの時点で <see cref="Faults.KillProcessSimulator"/> を発火。</summary>
     KillOnly,
 
-    /// <summary>kill 後、最終 WAL セグメント末尾 16 バイトを zero-fill (FT-15 の torn-write モデル)。</summary>
+    /// <summary>kill 後、最終 WAL セグメント末尾 16 バイトを zero-fill する torn-write モデル。</summary>
     KillThenTornWalTail,
 
     /// <summary>kill 後、最終 WAL セグメントの先頭レコードヘッダの 1 bit を flip (checksum mismatch)。</summary>

@@ -8,7 +8,7 @@ using Xunit;
 namespace Quiver.Transactions.Tests;
 
 /// <summary>
-/// ARCH-4 増分2b: 単一ファイルコンテナ上で WAL ロギング + crash recovery が成立することを検証する。
+/// 単一ファイルコンテナ上で WAL ロギング + crash recovery が成立することを検証する。
 /// option B — 全テナントを 1 つの dataFileKind で WAL に載せ、recovery は物理ページ単位で動く
 /// (カタログ / page-table も物理ページなので committed tx のページイメージとして透過的に redo される)。
 ///

@@ -9,7 +9,7 @@ using Xunit;
 namespace Quiver.Storage.Records.Tests;
 
 /// <summary>
-/// ARCH-5c Phase 5 (5a): ScalarColumnStore (永続 MVCC 列セグメント基盤) の単体テスト。
+/// ScalarColumnStore (永続 MVCC 列セグメント基盤) の単体テスト。
 /// spike の MVCC ロジック検証 + head ページ永続 (reopen) を確認する。
 /// </summary>
 public class ScalarColumnStoreTests : IDisposable

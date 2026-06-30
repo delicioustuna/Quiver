@@ -1,7 +1,7 @@
 namespace Quiver.Backend.Tests.Chaos;
 
 /// <summary>
-/// TS-4: chaos verification 失敗時に <c>chaos-trace.log</c> を artifact 化するための薄いライタ。
+/// chaos verification 失敗時に <c>chaos-trace.log</c> を artifact 化するための薄いライタ。
 /// 同名ファイルが既にあれば append し、ファイル先頭に scenario ヘッダを書く。
 ///
 /// 既定パスは <c>%TEMP%/quiver-chaos-trace.log</c>。CI ジョブはこのファイルを artifact

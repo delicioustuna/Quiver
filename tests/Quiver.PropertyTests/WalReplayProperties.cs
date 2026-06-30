@@ -9,7 +9,7 @@ using Xunit;
 namespace Quiver.PropertyTests;
 
 /// <summary>
-/// TS-3 Property 1: WAL の append/read round-trip と replay 冪等性。
+/// WAL の append/read round-trip と replay の冪等性を検証する。
 ///
 /// 検証する不変量:
 ///   (a) ランダムな (txId, type, payload) 列を append → read で完全復元できる
@@ -25,7 +25,7 @@ public class WalReplayProperties
     /// </summary>
     public sealed record WalOp(byte TypeRaw, long TxId, byte[] Payload)
     {
-        // ARCH-2: WalRecordType は internal 化したため公開 record 上では internal で露出する。
+        // WalRecordType は internal 化したため、公開 record 上では internal として露出する。
         internal WalRecordType Type => (WalRecordType)TypeRaw;
     }
 

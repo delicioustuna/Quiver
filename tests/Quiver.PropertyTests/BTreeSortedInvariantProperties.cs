@@ -8,7 +8,7 @@ using Xunit;
 namespace Quiver.PropertyTests;
 
 /// <summary>
-/// TS-3 Property 2: B+Tree インデックスの sorted invariant とエントリ数整合性。
+/// B+Tree インデックスのソート不変条件とエントリ数整合性を任意の入力列で検証する。
 ///
 /// 検証する不変量:
 ///   (a) 任意の Insert / Delete 列を適用後、FullScan は昇順を保つ

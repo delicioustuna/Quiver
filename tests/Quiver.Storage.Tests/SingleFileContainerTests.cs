@@ -7,7 +7,7 @@ using FluentAssertions;
 namespace Quiver.Storage.Tests;
 
 /// <summary>
-/// ARCH-4 増分1: 単一ファイルコンテナ + テナント変換シムの page レベル検証。
+/// 単一ファイルコンテナ + テナント変換シムの page レベル検証。
 /// ストアを載せる前に、論理↔物理 page table・テナント分離・単一ファイル永続・論理 free 再利用・
 /// page-table 連鎖 + reopen を確認する。
 /// </summary>

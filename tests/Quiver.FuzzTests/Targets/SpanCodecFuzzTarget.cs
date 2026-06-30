@@ -3,7 +3,7 @@ using Quiver.Codec;
 namespace Quiver.FuzzTests.Targets;
 
 /// <summary>
-/// TS-5: <see cref="SpanCodec.TryReadVarInt64"/> および
+/// <see cref="SpanCodec.TryReadVarInt64"/> および
 /// <see cref="SpanCodec.ReadUtf8Bytes"/> 経路の VarInt 長プレフィックス
 /// を任意バイト列で叩く。
 ///

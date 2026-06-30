@@ -1,9 +1,9 @@
-// FT-30: Quiver.Samples.Hosting (ASP.NET Core minimal API) を WebApplicationFactory<Program>
+// Quiver.Samples.Hosting (ASP.NET Core minimal API) を WebApplicationFactory<Program>
 // 経由で in-process に立ち上げ、HTTP API の網羅的なラフネス (異常系 / 境界系 / 永続化) 検査を
 // 自動化する。
 //
 // 主目的:
-//   1. defensive read API (FT-30): GET /nodes/{id} が HWM 超 / 負 ID で 404 を返し例外を露出しない。
+//   1. defensive read API: GET /nodes/{id} が HWM 超 / 負 ID で 404 を返し例外を露出しない。
 //   2. POST/GET の round-trip 整合性 (label / property)。
 //   3. 不正リクエスト (空 body / 必須フィールド欠落) の 400 マッピング。
 //   4. リレーションシップ作成 + 不在端点での 404。
@@ -52,7 +52,7 @@ public sealed class QuiverHostingApiTests : IDisposable
         }
     }
 
-    // ===== 1. defensive read API (FT-30 中核) =====
+    // ===== 1. 防御的読み取り API =====
 
     [Fact]
     public async Task GET_nonexistent_node_returns_404_without_exception()
@@ -218,7 +218,7 @@ public sealed class QuiverHostingApiTests : IDisposable
         body!.Name.Should().Be("bob");
     }
 
-    // ===== 7. stats endpoint =====
+    // ===== 7. 統計 endpoint =====
 
     [Fact]
     public async Task GET_stats_reflects_created_node_count()
@@ -233,7 +233,7 @@ public sealed class QuiverHostingApiTests : IDisposable
         after!.NodeCount.Should().Be(baseline + 5);
     }
 
-    // ===== 8. concurrent GET (no exceptions) =====
+    // ===== 8. 並行 GET (例外なし) =====
 
     [Fact]
     public async Task Concurrent_GETs_for_mix_of_existing_and_ghost_IDs_never_throw_500()
@@ -269,7 +269,7 @@ public sealed class QuiverHostingApiTests : IDisposable
         json.Should().Contain("/nodes");
     }
 
-    // ----- helpers -----
+    // ----- ヘルパー -----
 
     private async Task<long> CreateNode(string label, string? name = null)
     {

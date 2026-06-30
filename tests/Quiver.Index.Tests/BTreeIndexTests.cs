@@ -8,7 +8,7 @@ namespace Quiver.Index.Tests;
 public class BTreeIndexTests : IDisposable
 {
     private readonly string _dir;
-    // ARCH-4: 索引は graph.quiver コンテナ上のテナント。各テストが作る standalone
+    // 索引は graph.quiver コンテナ上のテナント。各テストが作る standalone
     // IndexManager を追跡し、テスト終了時にまとめて Dispose してから dir を消す
     // (Dispose しないと container の MMF がロックされ Directory.Delete が失敗する)。
     private readonly List<IndexManager> _managers = new();
@@ -135,7 +135,7 @@ public class BTreeIndexTests : IDisposable
     }
 
     // -----------------------------------------------------------------------
-    // OP-6: under-filled ページの merge / redistribute
+    // 使用率の低いページの merge / redistribute
     // -----------------------------------------------------------------------
 
     [Fact]
@@ -177,7 +177,7 @@ public class BTreeIndexTests : IDisposable
         // peak + 5 を上限にして「再利用が起きている」ことを判定する。
         afterReinsert.Should().BeLessThan(peak + 5,
             "freed pages should be reused instead of extending the file");
-        // free list 投入では PageCount 自体は縮まない (物理 truncate は OP-5 担当)。
+        // free list 投入では PageCount 自体は縮まない (物理 truncate は別処理が担う)。
         afterDelete.Should().Be(peak);
     }
 

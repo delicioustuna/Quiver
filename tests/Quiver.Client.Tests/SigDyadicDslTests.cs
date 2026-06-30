@@ -45,7 +45,7 @@ public sealed class SigDyadicDslTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    // ── ApplyDyadic with literal vector b ─────────────────────────────
+    // ── literal vector b を使う ApplyDyadic ──────────────────────────
 
     [Fact]
     public void ApplyDyadic_DotProduct_chains_and_returns_results()
@@ -86,7 +86,7 @@ public sealed class SigDyadicDslTests : IDisposable
         hits.Should().HaveCountLessOrEqualTo(3);
     }
 
-    // ── ApplyDyadic with Has filter chain ─────────────────────────────
+    // ── Has filter chain を使う ApplyDyadic ──────────────────────────
 
     [Fact]
     public void ApplyDyadic_chains_after_Has_filter()
@@ -102,7 +102,7 @@ public sealed class SigDyadicDslTests : IDisposable
         hits.Should().HaveCountLessOrEqualTo(1);
     }
 
-    // ── ApplyDyadic with regions ──────────────────────────────────────
+    // ── region を使う ApplyDyadic ────────────────────────────────────
 
     [Fact]
     public void ApplyDyadic_with_regions_restricts_scoring()
@@ -121,7 +121,7 @@ public sealed class SigDyadicDslTests : IDisposable
         hits.Should().HaveCountLessOrEqualTo(3);
     }
 
-    // ── ApplyDyadic parameter validation ──────────────────────────────
+    // ── ApplyDyadic の引数検証 ───────────────────────────────────────
 
     [Fact]
     public void ApplyDyadic_null_b_throws()
@@ -171,7 +171,7 @@ public sealed class SigDyadicDslTests : IDisposable
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
-    // ── ApplyDyadic with traversal-based b (uncorrelated sub-query) ───
+    // ── traversal ベースの b を使う ApplyDyadic (非相関 sub-query) ──
 
     [Fact]
     public void ApplyDyadic_with_traversal_b_chains_correctly()
@@ -179,7 +179,7 @@ public sealed class SigDyadicDslTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        // Use another node's embedding as the query vector
+        // 別ノードの embedding を query vector として使う
         var refTraversal = g.Nodes<SignalNode>()
             .Has(s => s.Site, "S0")
             .Values(s => s.Embedding);
@@ -220,7 +220,7 @@ public sealed class SigDyadicDslTests : IDisposable
         vectors[0].Should().HaveCount(Dim);
     }
 
-    // ── ApplyDyadic result chains further ─────────────────────────────
+    // ── ApplyDyadic 結果の追加 chain ─────────────────────────────────
 
     [Fact]
     public void ApplyDyadic_result_supports_Count()
@@ -249,7 +249,7 @@ public sealed class SigDyadicDslTests : IDisposable
         first.Should().NotBeNull();
     }
 
-    // ── Minimal IGraphNode type ──────────────────────────────────────
+    // ── 最小 IGraphNode 型 ───────────────────────────────────────────
 
     private sealed class SignalNode : IGraphNode<SignalNode>
     {

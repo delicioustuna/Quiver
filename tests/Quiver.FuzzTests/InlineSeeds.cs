@@ -26,7 +26,7 @@ internal static class InlineSeeds
         [24, 0, 0, 0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 1, 0,0,0,0],
         // length が MaxPayloadSize 超過
         [0xFF, 0xFF, 0xFF, 0x7F],
-        // random byte string
+        // ランダムなバイト列
         [0x13, 0x37, 0xCA, 0xFE, 0xBA, 0xBE, 0xDE, 0xAD, 0xBE, 0xEF],
     ];
 
@@ -37,17 +37,17 @@ internal static class InlineSeeds
         [2],
         [3],
         [99],
-        // v1 short header
+        // v1 の短いヘッダー
         new byte[WalPageImageCodecLayout.HeaderLengthV1],
-        // v2 header w/ usedLen overflow (> 8192)
+        // usedLen が overflow する v2 ヘッダー (> 8192)
         BuildV2Header(usedLen: 0xFFFF, fileKind: 1, pageId: 0),
-        // v2 header w/ usedLen == 8192 but no payload
+        // usedLen == 8192 だが payload がない v2 ヘッダー
         BuildV2Header(usedLen: 8192, fileKind: 1, pageId: 0),
-        // v3 with truncated chunk
+        // chunk が切り詰められた v3
         BuildV3Truncated(),
-        // v3 with unknown chunk type
+        // 未知の chunk type を持つ v3
         BuildV3UnknownChunk(),
-        // v3 declared usedLen 100 but a single literal claims 200 bytes
+        // usedLen は 100 だが単一 literal が 200 バイトを宣言する v3
         BuildV3LiteralOverrun(),
     ];
 
@@ -79,8 +79,8 @@ internal static class InlineSeeds
 
     private static byte[] BuildV3Truncated()
     {
-        // version=3, fileKind=1, pageId=0, usedLen=64, then a single literal chunk header
-        // claiming length 64 but no bytes follow.
+        // version=3、fileKind=1、pageId=0、usedLen=64 に続いて、
+        // 長さ 64 を宣言する単一 literal chunk header があるが、後続バイトはない。
         var buf = new byte[WalPageImageCodecLayout.HeaderLengthV2 + 2];
         buf[0] = 3;
         buf[1] = 1;
@@ -105,7 +105,7 @@ internal static class InlineSeeds
         buf[0] = 3;
         System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(10), 100);
         buf[12] = 0x00;
-        // varint = 200 (2 byte)
+        // varint = 200 (2 バイト)
         buf[13] = 0xC8;
         buf[14] = 0x01;
         return buf;

@@ -11,7 +11,7 @@ using Xunit;
 namespace Quiver.Storage.Records.Tests;
 
 /// <summary>
-/// ARCH-5c Phase 4: VersionedRelationshipStore (heap+map+sidecar 上の IRelationshipStore drop-in)
+/// VersionedRelationshipStore (heap+map+sidecar 上の IRelationshipStore drop-in)
 /// の単体テスト。MVCC コンテキスト無し (Bootstrap / committed registry) で実行する。ノード側も
 /// VersionedNodeStore を組で使い、heap fast-path (GetFirstRelId / UpdateFirstRelId) を通す。
 /// </summary>
@@ -221,7 +221,7 @@ public class VersionedRelationshipStoreTests : IDisposable
         hd.InUse.Should().BeFalse();
     }
 
-    // ===== ARCH-5c Phase 4: inline property =====
+    // ===== インラインプロパティ =====
 
     private RelationshipId NewRel()
     {

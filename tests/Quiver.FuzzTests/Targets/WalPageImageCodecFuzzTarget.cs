@@ -3,7 +3,7 @@ using Quiver.Storage.Wal;
 namespace Quiver.FuzzTests.Targets;
 
 /// <summary>
-/// TS-5: <see cref="WalPageImageCodec.TryDecode"/> を任意バイト列で叩く。
+/// <see cref="WalPageImageCodec.TryDecode"/> を任意バイト列で叩く。
 /// 契約: いかなる入力に対しても <c>false</c> を返すか正常 decode するだけで、
 /// 例外で抜けてはならない (v1/v2/v3 header / chunk varint / usedLen の境界)。
 /// </summary>

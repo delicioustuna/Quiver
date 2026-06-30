@@ -8,7 +8,7 @@ using Xunit;
 namespace Quiver.Storage.Records.Tests;
 
 /// <summary>
-/// ARCH-4 増分2a: 実ストア (NodeStore / RelationshipStore / EntityVersionStore sidecar) を
+/// 実ストア (NodeStore / RelationshipStore / EntityVersionStore sidecar) を
 /// <see cref="SingleFileContainer"/> のテナント上で無改修のまま動かせることを検証する。
 /// header ページ (論理 page1) / レコードページ (論理 page2+) / <c>EnsurePage</c> による論理空間
 /// 拡張 / MVCC sidecar / reopen 時のメタ読み戻し + format チェックを、単一ファイル内で確認する。

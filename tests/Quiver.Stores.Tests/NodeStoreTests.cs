@@ -55,8 +55,8 @@ public class NodeStoreTests : IDisposable
     [Fact]
     public void Free_marks_logically_deleted_and_does_not_recycle_until_vacuum()
     {
-        // FT-26 MVCC: Free は xmax をスタンプするだけで、record / slot は維持する
-        // (snapshot reader が古い version を辿れるため)。物理回収は vacuum (OP-3) 経路担当。
+        // MVCC では Free は xmax をスタンプするだけで、record / slot は維持する
+        // (snapshot reader が古い version を辿れるため)。物理回収は vacuum が担う。
         var id1 = _store.Allocate(new LabelId(1));
         _store.Free(id1);
         _store.InUseCount.Should().Be(0);
@@ -76,7 +76,7 @@ public class NodeStoreTests : IDisposable
         var c = _store.Allocate(new LabelId(3));
         _store.Free(b);
         var ids = _store.Scan().ToList();
-        // ARCH-5b: scan は Sequence 空間 id を返す (世代は利用者境界で load)。slot 同一性で照合。
+        // scan は Sequence 空間 id を返す (世代は利用者境界で load)。slot 同一性で照合する。
         ids.Select(n => n.Sequence).Should().BeEquivalentTo(new[] { a.Sequence, c.Sequence });
     }
 

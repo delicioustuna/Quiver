@@ -3,7 +3,7 @@ using Quiver.Transactions;
 namespace Quiver.Backend.Tests.Chaos;
 
 /// <summary>
-/// TS-4: chaos runner が利用する障害注入の薄い抽象。backend は自身のファイルレイアウトに
+/// chaos runner が利用する障害注入の薄い抽象。backend は自身のファイルレイアウトに
 /// 合った torn-write / checksum / sidecar 削除を提供する。
 ///
 /// 個々の注入 API は実体ファイルが存在しない場合は no-op (workload が WAL を 1 度も

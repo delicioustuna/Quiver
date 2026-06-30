@@ -5,7 +5,7 @@ using Xunit;
 namespace Quiver.Rag.Tests;
 
 /// <summary>
-/// RAG-5: 取込側 (PdfTools 等) との契約固定。契約の正本は <see cref="IngestedDocumentJson"/>
+/// 取込側 (PdfTools 等) との契約固定。契約の正本は <see cref="IngestedDocumentJson"/>
 /// (Quiver.Rag 本体)。この approval test はフィクスチャがその正本どおりに復元でき、往復が無損失で、
 /// シリアライズ規約 (camelCase / 文字列 enum / null 省略) が守られていることを監視する。
 /// </summary>

@@ -7,7 +7,7 @@ using Xunit;
 namespace Quiver.Storage.Records.Tests;
 
 /// <summary>
-/// ARCH-4 増分3: トークンストアを単一ファイルコンテナのテナント (IPagedFile) 上で永続化できる
+/// トークンストアを単一ファイルコンテナのテナント (IPagedFile) 上で永続化できる
 /// ことを検証する (PagedTokenPersistence)。従来の <c>*.tok</c> ファイルを単一ファイルへ吸収する。
 /// </summary>
 public class PagedTokenStoreTests : IDisposable

@@ -5,9 +5,9 @@ using Xunit;
 namespace Quiver.Index.Tests;
 
 /// <summary>
-/// BA-8: an index file is single-type. Mixing numeric and string entries in the
-/// same B+ tree would corrupt the on-disk format, so <see cref="IndexManager"/>
-/// must reject the second registration both in-process and across restarts.
+/// 1 つのインデックスファイルは単一型だけを格納する。同じ B+Tree に数値と文字列を混在させると
+/// オンディスク形式が破損するため、<see cref="IndexManager"/> はプロセス内でも再起動後でも
+/// 2 種類目の登録を拒否しなければならない。
 /// </summary>
 public sealed class IndexManagerTypeSafetyTests : IDisposable
 {
@@ -91,7 +91,7 @@ public sealed class IndexManagerTypeSafetyTests : IDisposable
         mgr.DropIndex("by_name").Should().BeTrue();
         mgr.GetIndexTypeFlags("by_name").Should().Be(PropertyTypeFlags.None);
 
-        // Now the index name is free to be created as a different type.
+        // 削除後は同名インデックスを別の型で作成できる。
         _ = mgr.CreateInt64Index("by_name");
         mgr.GetIndexTypeFlags("by_name").Should().Be(PropertyTypeFlags.Int64);
     }

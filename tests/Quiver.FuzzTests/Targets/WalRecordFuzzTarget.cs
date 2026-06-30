@@ -3,7 +3,7 @@ using Quiver.Storage.Wal;
 namespace Quiver.FuzzTests.Targets;
 
 /// <summary>
-/// TS-5 / ARCH-4 増分7: 単一ファイル WAL の parse 経路を任意バイト列で叩く。
+/// 単一ファイル WAL の parse 経路を任意バイト列で叩く。
 /// <see cref="WriteAheadLog"/> コンストラクタ (RebuildState) と
 /// <see cref="WriteAheadLog.OpenReader"/>.TryReadNext を一巡させる。
 ///
