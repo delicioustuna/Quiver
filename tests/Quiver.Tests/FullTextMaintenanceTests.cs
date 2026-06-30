@@ -7,9 +7,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FTS-2 (increment 3): transparent full-text maintenance on the SetProperty /
-/// DeleteNode write path — insert, update (before-image removal), delete, and
-/// rollback all keep postings/norms consistent in the same transaction.
+/// SetProperty / DeleteNode の書き込み経路に統合された全文インデックス保守を検証する。
+/// 挿入、更新時の更新前イメージ削除、削除、ロールバックのすべてで、
+/// 同一トランザクション内の Postings と Norms が整合することを確認する。
 /// </summary>
 public sealed class FullTextMaintenanceTests : IDisposable
 {

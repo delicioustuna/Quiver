@@ -9,19 +9,16 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FTS-6 durability contract for the full-text lane, at the engine level
-/// (<see cref="GraphDatabase"/> / <c>g.Search</c>). Mirrors the BA-9
-/// crash-contract style (commit -> simulated kill -> reopen -> recovery) but for
-/// the inverted index: after a kill the live search result must equal the
-/// committed document set — committed postings survive, uncommitted ones are
-/// rolled back. Because postings / norms are ordinary B+Trees (design 13 §3/§4),
-/// recovery reuses the existing ARIES page-WAL machinery (FT-17/18/19).
+/// 全文インデックスの永続性契約を <see cref="GraphDatabase"/> と
+/// <c>g.Search</c> のエンジンレベルで検証する。
+/// コミット、プロセス停止の模擬、再オープン、リカバリーの順に実行し、
+/// 検索結果がコミット済み文書集合と一致することを確認する。
+/// Postings と Norms は通常の B+Tree なので、既存の ARIES ページ WAL で復旧する。
 ///
-/// Kill model: as in BA-9's KillProcessSimulator, on Windows a true process kill
-/// can't reopen its own exclusive file handle, so a kill is approximated by
-/// dropping the handle (Dispose) + forcing finalizers, then reopening the file.
-/// Anything that returned from <see cref="IGraphTransaction.Commit"/> must be
-/// recovered; anything uncommitted must not resurface.
+/// Windows では停止した同一プロセスが排他的ファイルハンドルを再利用できないため、
+/// ハンドルの破棄とファイナライザーの強制実行でプロセス停止を模擬してから再オープンする。
+/// <see cref="IGraphTransaction.Commit"/> が完了した変更は復旧し、
+/// 未コミットの変更は復活しないことを確認する。
 /// </summary>
 public sealed class FullTextCrashContractTests : IDisposable
 {
@@ -48,9 +45,9 @@ public sealed class FullTextCrashContractTests : IDisposable
     private GraphDatabase Open() => GraphDatabase.Open(_path);
 
     /// <summary>
-    /// Open a fresh database and create the full-text index. Only used for the very
-    /// first open in a scenario; reopen uses <see cref="Open"/> which re-materializes
-    /// the index from the catalog (FTS-2).
+    /// 新しいデータベースを開いて全文インデックスを作成する。
+    /// シナリオの初回だけ使用し、再オープン時は <see cref="Open"/> が
+    /// カタログからインデックスを再構築する。
     /// </summary>
     private GraphDatabase OpenAndCreateIndex()
     {
@@ -59,10 +56,10 @@ public sealed class FullTextCrashContractTests : IDisposable
         return db;
     }
 
-    /// <summary>Simulated process kill: drop the handle without a graceful, fully-flushed shutdown path and force finalizers so the file can be reopened.</summary>
+    /// <summary>正常終了時の完全なフラッシュを行わずにハンドルを破棄し、ファイナライザーを実行してプロセス停止を模擬する。</summary>
     private static void Kill(GraphDatabase db)
     {
-        try { db.Dispose(); } catch { /* the lost in-flight close is the point of a kill */ }
+        try { db.Dispose(); } catch { /* 終了途中の処理が失われる状況を再現する。 */ }
         GcSettle();
     }
 
@@ -215,10 +212,10 @@ public sealed class FullTextCrashContractTests : IDisposable
         Search(reopened, "newterm2222").Should().ContainSingle().Which.Should().Be(doc);
     }
 
-    // ===== (f) FTS-7: torn commit — Commit record lost after body PageImages + FtLeafMutation =====
+    // ===== コミットレコードだけが失われた不完全コミット =====
 
     /// <summary>
-    /// FTS-7 (design 13 §10.4, レビュー CRITICAL): torn commit — FlushPending が body PageImage と eager
+    /// 不完全コミット: FlushPending が本体の PageImage と先行する
     /// FtLeafMutation を WAL へ書き終えた後、Commit レコードの前に crash。論理相 (RecoverLogical) は物理層と
     /// 同じ **presume-committed** (PageImage ∧ ¬Abort) で分類しなければならない。厳格 committed で分類した
     /// 修正前は、torn-commit した FT 取込 tx を loser 扱いして postings だけ消していた。

@@ -5,9 +5,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// ARCH-6 (6a): ベクトル payload / index catalog が単一ファイルに永続化され、close → reopen を
-/// 跨いで KNN 検索が再現することを検証する。SetVector を write tx の内側で呼ぶと、その page 書き込みは
-/// container の WAL に乗ってグラフ変更と一緒に commit される (ambient WalPageContext)。
+/// ベクトルペイロードとインデックスカタログが単一ファイルに永続化され、
+/// 再オープン後も KNN 検索を再現できることを検証する。
+/// 書き込みトランザクション内の <c>SetVector</c> によるページ変更は
+/// コンテナの WAL に記録され、グラフ変更と同時にコミットされる。
 /// </summary>
 public sealed class PersistentVectorStoreTests : IDisposable
 {

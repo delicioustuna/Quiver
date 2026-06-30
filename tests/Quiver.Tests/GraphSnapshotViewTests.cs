@@ -6,9 +6,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// PW-15 / codex_advice_3 §7.7: CSR/CSC snapshot view. Validates correctness
-/// of the materialised neighbour spans, parity with the live transaction
-/// state, and the PageRank kernel that consumes the view.
+/// CSR / CSC スナップショットビューを検証する。
+/// 具現化した隣接スパンの正しさ、現在のトランザクション状態との同値性、
+/// ビューを利用する PageRank カーネルを対象とする。
 /// </summary>
 public sealed class GraphSnapshotViewTests : IDisposable
 {

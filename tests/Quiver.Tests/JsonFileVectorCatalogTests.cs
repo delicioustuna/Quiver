@@ -5,11 +5,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// VEC-2 persistence contract for <see cref="JsonFileVectorCatalog"/>. Each
-/// test starts in a fresh tempdir, mutates the catalog through one instance,
-/// then opens a second instance pointed at the same file to assert that the
-/// state survived disposal — that's the real "restart" guarantee for the
-/// binary backend (codex_advice_3.md §6.5).
+/// <see cref="JsonFileVectorCatalog"/> の永続化契約を検証する。
+/// 各テストは新しい一時ディレクトリでカタログを変更した後、
+/// 同じファイルを指す別インスタンスを開き、破棄後も状態が残ることを確認する。
+/// これによりバイナリバックエンドの再起動時の永続性を再現する。
 /// </summary>
 public sealed class JsonFileVectorCatalogTests : IDisposable
 {

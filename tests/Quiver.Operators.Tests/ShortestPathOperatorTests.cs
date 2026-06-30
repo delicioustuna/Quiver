@@ -16,8 +16,8 @@ public class ShortestPathOperatorTests
         using var tx = fx.Db.BeginTransaction();
         using var op = new ShortestPathOperator(
             new FixedNodeListOperator(), 0, 0, Direction.Both, null);
-        // Empty PairSource — but we used FixedNodeListOperator which has only 1 column.
-        // For empty input the operator must just yield no rows.
+        // PairSource は空だが、入力には 1 列だけの FixedNodeListOperator を使っている。
+        // 空入力では行を生成せずに終了する。
         using var result = tx.Execute(op);
         result.Rows().Should().BeEmpty();
         tx.Rollback();

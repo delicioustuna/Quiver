@@ -8,12 +8,11 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// PW-14 / codex_advice_3 §7.6: immutable base view + mutable delta. Covers
-/// the merge cursor, tombstone filtering, and compact rebuild.
+/// 不変の基底ビューと可変差分からなる隣接エポックについて、
+/// マージカーソル、墓石の除外、圧縮再構築を検証する。
 ///
-/// The tests use the binary backend with <c>BeginBulkLoad(buildAdjacencyIndex:
-/// true)</c> to materialise a base view, then exercise post-bulk-load creates
-/// and deletes that exercise the delta path.
+/// バイナリバックエンドで <c>BeginBulkLoad(buildAdjacencyIndex: true)</c> を使って基底ビューを作り、
+/// 一括読み込み後の作成と削除によって差分経路を実行する。
 /// </summary>
 public sealed class AdjacencyEpochTests : IDisposable
 {
@@ -208,7 +207,7 @@ public sealed class AdjacencyEpochTests : IDisposable
 
     // ────────────────────── AdjacencyEpoch unit-level ────────────────────────
 
-    // ARCH-4 増分6: epoch は専用テナント (IPagedFile) に保存される。同一 container 上で
+    // エポックは専用テナント (IPagedFile) に保存される。同じコンテナ上で
     // Open し直すと、ページに書かれた内容 (buffer pool 経由) からメタを再構築できる。
     private Quiver.Storage.SingleFileContainer NewContainer()
     {
@@ -294,7 +293,7 @@ public sealed class AdjacencyEpochTests : IDisposable
     {
         // Going through Execute(ExpandOperator(...)) exercises the binary
         // backend's merged expand cursor (base via adjacency block, then delta
-        // via linked list), which is exactly the path PW-14 changed.
+        // 連結リスト経由で辿り、差分マージの対象経路を通す。
         var op = new ExpandOperator(
             new SingleNodeSource(source),
             sourceNodeColumn: 0,
@@ -302,7 +301,7 @@ public sealed class AdjacencyEpochTests : IDisposable
             typeFilter: null,
             ExpandOutputMode.NeighborOnly);
         var result = tx.Execute(op);
-        // ARCH-5b: 隣接の slot 番号 (Sequence) を検証する。Value は世代を含む。
+        // 隣接のスロット番号 (Sequence) を検証する。Value は世代を含む。
         return result.Rows().Select(r => r.GetNodeId(0).Sequence).ToList();
     }
 

@@ -8,9 +8,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// ARCH-5c Phase 5 (5g): hardening。opt-in 列 DDL の並行性契約 (アクティブ tx 無しを要求) と、
-/// 列データの crash recovery (CreateSnapshot のターゲットは WAL redo で開くため、列 head ページの
-/// redo を実地に通す) を検証する。
+/// オプトイン列 DDL の並行性契約と、列データのクラッシュリカバリーを検証する。
+/// DDL はアクティブなトランザクションが無いことを要求する。
+/// <c>CreateSnapshot</c> の出力を WAL redo で開き、列の先頭ページの再実行も通す。
 /// </summary>
 public sealed class ColumnHardeningTests : IDisposable
 {

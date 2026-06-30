@@ -5,9 +5,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// ARCH-6 (6c): ベクトル binding の世代照合。SetVector はバインド先の現世代を payload に焼き込み、
-/// KNN read は現在の slot 世代と照合する。slot が解放→再利用され別エンティティに化けた場合
-/// (= 世代 bump)、旧ベクトルは stale として KNN から除外される。
+/// ベクトルバインディングの世代照合を検証する。
+/// <c>SetVector</c> は対象の現在世代をペイロードへ記録し、
+/// KNN 読み取り時に現在のスロット世代と照合する。
+/// スロットが別エンティティに再利用された場合、古いベクトルは KNN 結果から除外される。
 /// </summary>
 public sealed class VectorGenerationBindingTests : IDisposable
 {

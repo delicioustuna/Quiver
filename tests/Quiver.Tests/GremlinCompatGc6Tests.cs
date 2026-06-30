@@ -7,11 +7,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// GC-6 coverage: <c>.As(label)</c> / <c>.Select(label)</c> tuple-schema
-/// extension. Verifies that aliases survive single-hop expansion (Out / In /
-/// OutE), multi-hop chains, and intermediate filtering — and that the typed
-/// projection variant (<c>Select&lt;T&gt;(Func&lt;MatchTuple, T&gt;)</c>)
-/// reads carried columns correctly.
+/// <c>.As(label)</c> / <c>.Select(label)</c> によるタプルスキーマ拡張を検証する。
+/// 1 ホップ展開 (Out / In / OutE)、複数ホップ、途中のフィルターを経ても別名が維持され、
+/// 型付き射影 <c>Select&lt;T&gt;(Func&lt;MatchTuple, T&gt;)</c> が
+/// 引き継いだ列を正しく読むことを確認する。
 /// </summary>
 public sealed class GremlinCompatGc6Tests : IDisposable
 {

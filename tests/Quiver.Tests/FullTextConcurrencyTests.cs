@@ -9,22 +9,17 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FTS-6 concurrency contract for the full-text lane, held to the engine's actual
-/// concurrency model: <b>single writer + many concurrent readers</b> (design
-/// 07_transaction_recovery.md — Phase-1 single-writer; the FT-25 deadlock bench
-/// records "single-writer / N-reader" as the supported shape). Two or more write
-/// transactions mutating the <em>same</em> postings B+Tree at once is outside that
-/// contract, so multi-threaded ingest is funnelled through an application-level
-/// write gate — the documented-safe way to ingest from many threads against a
-/// single-writer embedded engine. Readers run lock-free and concurrently.
+/// 全文インデックスの並行性契約を、単一ライターと複数の並行リーダーという
+/// エンジンの実際のモデルに沿って検証する。
+/// 同じ Postings B+Tree を複数の書き込みトランザクションが同時に変更する操作は契約外なので、
+/// 複数スレッドからの取り込みはアプリケーション側の書き込みゲートで直列化する。
+/// リーダーはロックなしで並行実行する。
 ///
-/// The bar is the TS-7 three-bucket discipline: partition every observed thread
-/// fault into (1) <b>transient</b> contention (lock timeout / serialization abort:
-/// tolerated), (2) <b>empty/partial reads</b> (a search racing ahead of a commit:
-/// tolerated, asserted only for well-formed ids), and (3) <b>unexpected</b>
-/// (anything else — a missing-index ConstraintException, corruption, a null: these
-/// fail). After ingest drains, the committed set must be fully and exactly
-/// searchable, proving postings maintenance stayed coherent while readers raced it.
+/// スレッドで観測した結果は、一時的な競合、コミット前の空または部分的な読み取り、
+/// 予期しない障害の 3 種類に分類する。
+/// 前二者は許容し、それ以外の例外、破損、null は失敗とする。
+/// 取り込み完了後はコミット済み集合を過不足なく検索できることを確認し、
+/// リーダーとの競合中も Postings の保守が整合していたことを保証する。
 /// </summary>
 [Collection("concurrency-stress")]
 public sealed class FullTextConcurrencyTests : IDisposable
@@ -39,10 +34,9 @@ public sealed class FullTextConcurrencyTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fts6_conc_" + Guid.NewGuid().ToString("N"));
         _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), new GraphDatabaseOptions
         {
-            // TS-7: under full-parallel CI the internal commit lock can exceed the
-            // default 5s and surface as a spurious "Lock timeout" TransactionException.
-            // Widen it so starvation doesn't masquerade as a correctness fault; the
-            // classifier still tolerates a genuine timeout as transient.
+            // CI の全面並列実行では内部コミットロックの待機が既定の 5 秒を超えることがある。
+            // スターベーションを正しさの障害と誤認しないよう待機時間を広げる。
+            // 実際のタイムアウトは分類器が一時的な競合として扱う。
             LockTimeout = TimeSpan.FromSeconds(30),
         });
         _db.Schema.CreateFullTextIndex(Index, "Doc", "body");
@@ -84,7 +78,7 @@ public sealed class FullTextConcurrencyTests : IDisposable
                     string marker = $"w{w}d{i:D3}";
                     // Single-writer contract: serialize the write transaction. Many
                     // threads may *submit* ingest, but only one mutates the shared
-                    // postings index at a time (design 07, Phase-1 single-writer).
+                    // 一度に 1 つの Postings インデックスだけを書き換える。
                     lock (_writeGate)
                     {
                         using var tx = _db.BeginTransaction();

@@ -7,8 +7,8 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// GC-3 coverage: numeric aggregation (Sum/Max/Min/Mean), blocking sort
-/// (Order / OrderBy / OrderByDescending), grouping (GroupCount), and Fold.
+/// 数値集約 (Sum、Max、Min、Mean)、ブロッキングソート
+/// (Order、OrderBy、OrderByDescending)、グループ化 (GroupCount)、Fold を検証する。
 /// </summary>
 public sealed class GremlinCompatGc3Tests : IDisposable
 {
@@ -166,7 +166,7 @@ public sealed class GremlinCompatGc3Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        // Top-3 oldest: ages 90, 80, 70 -> P9, P8, P7
+        // 年齢の高い上位 3 件は 90、80、70 の P9、P8、P7。
         var top3 = g.Nodes().HasLabel("Person").OrderByDescending("age").Limit(3).Values("name").ToList();
         top3.Should().Equal("P9", "P8", "P7");
     }

@@ -8,9 +8,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// ARCH-5c Phase 5 (5f): breadth 検証。全 scalar 型 (Int32/Int64/Double/Bool) + 多 key +
-/// node/rel 同時を列で扱えること、数値型は列スキャン集約が row path と同値、Bool は数値集約で
-/// row path にフォールバック (値自体は保持) することを確認する。
+/// Int32、Int64、Double、Bool の各スカラー型、複数キー、
+/// ノードとリレーションシップの列を同時に扱えることを検証する。
+/// 数値型の列スキャン集約が行経路と同値であることと、
+/// Bool の数値集約が値を保持したまま行経路へフォールバックすることを確認する。
 /// </summary>
 public sealed class ColumnBreadthTests : IDisposable
 {

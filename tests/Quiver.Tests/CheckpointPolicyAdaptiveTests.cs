@@ -6,7 +6,7 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FT-28: <see cref="CheckpointPolicy.Adaptive"/> の DB 統合テスト。
+/// <see cref="CheckpointPolicy.Adaptive"/> のデータベース統合を検証する。
 /// per-tx パスのワークロードで Adaptive が threshold を縮めて WAL 絶対値を抑えること、
 /// Fixed (既定) は旧挙動と完全一致すること、ホットスワップが効くことを確認する。
 /// </summary>
@@ -71,10 +71,10 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
     public void Adaptive_policy_shrinks_threshold_under_per_tx_amplification()
     {
         // 各 tx で 100 ノード作成して per-tx WAL 数 KB 以上を強制する。
-        // FT-29 (PageImage trim) 後は sparse page では trim が効くため、
+        // PageImage の切り詰めは疎なページで効果が大きいため、
         // 単一 node tx は数百バイト/tx と非常に小さくなる (Adaptive はむしろ threshold を
         // 拡大する方向に動く)。本テストの「Adaptive が threshold を縮める」挙動を確かめるには
-        // FT-29 でも trim 効果が限定的になる「ページ充填率の高い workload」を流す必要がある。
+        // 効果が限定的なページ充填率の高いワークロードを流す必要がある。
         var opts = new GraphDatabaseOptions
         {
             WalSegmentSize = 256 * 1024,
@@ -90,7 +90,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
 
         // warmup 完了まで commit を流す (warmup 閾値 = max(16, window/64) = 16)。
         // 各 tx で 1000 ノードを作成し、複数ページを大きく dirty 化することで
-        // FT-29 trim + FT-29b RLE 効果後でも per-tx ≥ 16KB を確保する (マージン込み)。
+        // 切り詰めと RLE 圧縮後もトランザクションごとに 16 KB 以上を確保する。
         // Adaptive モデル: recommended = 5s × 50MB/s × 1KB / avg。
         // 16MB threshold 以下にするには avg ≥ 16KB が必要 → trim+RLE 後 ~18 B/node × 1000 = 18KB。
         for (int i = 0; i < 32; i++)
@@ -127,7 +127,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
             using var tx = db.BeginTransaction();
             // 1 tx で大量のノード作成 → 64KB 超の WAL bytes/tx を確保し min 値 (4MB) に
             // clamp させる。recommended = 250MB × 1024 / amp なので amp > 64 KB で min に張り付く。
-            // FT-29 trim + FT-29b RLE 後でも 5000 nodes ≈ 90 KB を見込んで clamp 強制。
+            // 切り詰めと RLE 圧縮後も 5000 ノードで約 90 KB を見込み、上限への丸めを強制する。
             for (int j = 0; j < 5000; j++) tx.CreateNode("Person");
             tx.Commit();
         }
@@ -154,7 +154,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
         // ホットスワップ: Adaptive に切替。
         db.Diagnostics.SetCheckpointPolicy(CheckpointPolicy.Adaptive, fixedThresholdBytes: 32 * 1024 * 1024);
 
-        // warmup 完了まで commit を流す。FT-29b RLE 後でも threshold 縮小を観測するため
+        // ウォームアップ完了までコミットし、RLE 圧縮後も閾値の縮小を観測できるようにする。
         // 400 nodes/tx で per-tx を ~8 KB 以上に押し上げる。
         for (int i = 0; i < 32; i++)
         {

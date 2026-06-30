@@ -8,9 +8,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// ARCH-5c Phase 5 (5e): vacuum が列の超過 delta 版 (上書きで退避された旧版) を merge することを検証。
-/// 上書きを重ねて delta を積み、vacuum で horizon 未満の commit 済み版が回収され、かつ集約結果は
-/// 不変であることを確認する。
+/// Vacuum が列の余剰差分版、すなわち上書きで退避された旧版をマージすることを検証する。
+/// 上書きで差分を蓄積し、可視性ホライズンより古いコミット済み版が回収されても
+/// 集約結果が変わらないことを確認する。
 /// </summary>
 public sealed class ColumnCompactionTests : IDisposable
 {

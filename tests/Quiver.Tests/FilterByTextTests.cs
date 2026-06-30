@@ -9,11 +9,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FTS-4 coverage: the graph-first full-text path. Exercises the
-/// <c>.FilterByText(...)</c> DSL, the optimizer's FullTextPushdown rewrite
-/// (<c>g.Search(...).HasLabel/Has(...)</c> → graph-first <see cref="FullTextScanOp"/>
-/// with <c>Candidate != null</c>), the statistics-aware text-first fallback, and the
-/// BM25 corpus snapshot collected into <see cref="GraphStats"/>.
+/// graph-first の全文検索経路を検証する。
+/// <c>.FilterByText(...)</c> DSL、オプティマイザーによる FullTextPushdown、
+/// 統計に基づく text-first へのフォールバック、
+/// <see cref="GraphStats"/> に収集される BM25 コーパススナップショットを対象とする。
 /// </summary>
 public sealed class FilterByTextTests : IDisposable
 {
@@ -51,14 +50,13 @@ public sealed class FilterByTextTests : IDisposable
         tx.Commit();
     }
 
-    // ── result equivalence ──────────────────────────────────────────────────────
+    // ── 結果の同値性 ───────────────────────────────────────────────────────────
 
     [Fact]
     public void Graph_first_ranking_matches_text_first_when_no_divergence()
     {
-        // Only Doc nodes are indexed (index is bound to Doc/body), so the global BM25
-        // ranking IS the Doc ranking. Graph-first over the Doc candidate set must return
-        // the identical sequence (completion condition: "結果が text-first と一致, 順位含む").
+        // インデックスは Doc/body に結び付くため、全体の BM25 順位が Doc の順位になる。
+        // Doc 候補集合に対する graph-first も同じ順序を返す必要がある。
         AddDoc("quiver");                 // tf=1
         AddDoc("quiver quiver");          // tf=2
         AddDoc("quiver quiver quiver");   // tf=3  → strict BM25 order, no ties
@@ -94,7 +92,7 @@ public sealed class FilterByTextTests : IDisposable
     public void Has_subfilter_pushdown_returns_full_k_when_text_first_would_starve()
     {
         // 5 high-tf English Docs (lang=en) + 2 low-tf Docs (lang=ja), all matching "quiver".
-        // text-first top-2 = 2 en Docs, then Has(lang=ja) drops both → 0.
+        // text-first の上位 2 件は英語文書なので、Has(lang=ja) で両方を除外すると 0 件になる。
         // Push-down filters lang=ja first → 2 ja Docs survive (no k starvation).
         for (int i = 0; i < 5; i++) AddDoc("quiver quiver", lang: "en");
         for (int i = 0; i < 2; i++) AddDoc("quiver", lang: "ja");

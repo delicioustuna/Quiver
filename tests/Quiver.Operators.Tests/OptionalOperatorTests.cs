@@ -9,7 +9,7 @@ namespace Quiver.Query.Physical.Tests;
 
 public class OptionalOperatorTests
 {
-    /// <summary>Branch that emits the probe value n times (n configurable).</summary>
+    /// <summary>入力値を指定回数出力する分岐。</summary>
     private sealed class ProbeBranch : IPhysicalOperator
     {
         private readonly CorrelatedInputOperator _probe;
@@ -76,7 +76,7 @@ public class OptionalOperatorTests
     public void Mixed_inputs_combine_branch_and_fallthrough()
     {
         var src = new FixedNodeListOperator(new NodeId(1), new NodeId(2), new NodeId(3));
-        // Branch emits the probe value once per row → 1,2,3 unchanged.
+        // 分岐は各行を一度ずつ出力するため、1、2、3 は変化しない。
         var probe = new CorrelatedInputOperator();
         using var op = new OptionalOperator(src, 0, probe, new ProbeBranch(probe, 1));
         op.Open(null!);

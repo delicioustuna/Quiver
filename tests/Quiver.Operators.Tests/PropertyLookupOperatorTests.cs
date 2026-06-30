@@ -79,7 +79,7 @@ public class PropertyLookupOperatorTests
         });
         var key = fx.Db.Schema.GetOrCreatePropertyKey("name");
         using var tx2 = fx.Db.BeginTransaction();
-        // String value, but we ask only for Int — output stays null.
+        // 文字列値に対して Int だけを要求するため、出力は null のままになる。
         using var result = tx2.Execute(new PropertyLookupOperator(
             new FixedNodeListOperator(n), 0, key, "name",
             PropertyTypeFlags.Int64));

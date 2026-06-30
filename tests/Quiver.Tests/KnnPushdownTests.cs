@@ -8,13 +8,12 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// VEC-9 coverage: post-filter push-down rewrite that converts
+/// 後置フィルターをプッシュダウンし、
 /// <c>g.Knn(...).HasLabel(...).Has(...).ToList()</c> into a graph-first
-/// <see cref="KnnOp"/> (Candidate != null) plan via <c>LogicalOptimizer</c>.
-/// Verifies result equivalence with the manual
-/// <c>g.Nodes().HasLabel(...).FilterByKnn(...)</c> form, the "k starvation"
-/// bug fix, the Limit-driven K shrink optimization, and the fall-back to
-/// vector-first when no selectivity hint exists.
+/// <see cref="KnnOp"/> (Candidate != null) の graph-first プランへ書き換える処理を検証する。
+/// <c>g.Nodes().HasLabel(...).FilterByKnn(...)</c> との結果の同値性、
+/// フィルター後に k 件を満たせない回帰、Limit による K の縮小、
+/// 選択性ヒントが無い場合の vector-first へのフォールバックを確認する。
 /// </summary>
 public sealed class KnnPushdownTests : IDisposable
 {
@@ -83,7 +82,7 @@ public sealed class KnnPushdownTests : IDisposable
     public void Knn_HasLabel_pushdown_returns_full_k_when_postfilter_starves()
     {
         // 2 Doc + 50 Article, all sharing the same query direction. Post-filter
-        // semantics would pull top-2 from all 52 (= 2 Articles), then HasLabel
+        // 先に全 52 件から上位 2 件を取ると Article だけになり、その後の HasLabel で
         // drops both → 0 results. Push-down filters labels first → 2 Docs.
         using (var tx = _db.BeginTransaction())
         {

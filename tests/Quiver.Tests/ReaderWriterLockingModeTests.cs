@@ -8,17 +8,17 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// TS-7: 内部で多数スレッドを起こす並行ストレステストを同一 collection に入れて相互に直列化し、
-/// アセンブリ内のピーク並行スレッド数を下げる (フル並列 16 アセンブリ + chaos 実行時の CPU
-/// 過剰購読由来 flaky を抑える)。collection 同士は引き続き並列なので、他の ~440 テストの
-/// 実行時間には影響しない。
+/// 内部で多数のスレッドを起動する並行ストレステストを同じコレクションで直列化し、
+/// アセンブリ内のピークスレッド数を抑える。
+/// 多数のテストアセンブリとカオステストを並列実行した際の CPU 過剰購読による不安定化を避ける。
+/// コレクション間は並列のままなので、他のテストの実行時間には影響しない。
 /// </summary>
 [CollectionDefinition("concurrency-stress")]
 public sealed class ConcurrencyStressCollection { }
 
 /// <summary>
-/// FT-24: <see cref="GraphDatabaseOptions.LockingMode"/> = <see cref="LockingMode.ReaderWriter"/>
-/// 時の挙動を database レベルで確認する。
+/// <see cref="GraphDatabaseOptions.LockingMode"/> に <see cref="LockingMode.ReaderWriter"/>
+/// を指定したときの挙動をデータベース単位で確認する。
 /// </summary>
 [Collection("concurrency-stress")]
 public sealed class ReaderWriterLockingModeTests : IDisposable
@@ -40,7 +40,7 @@ public sealed class ReaderWriterLockingModeTests : IDisposable
         {
             LockingMode = LockingMode.ReaderWriter,
             // 既定 500ms は writer_blocks_concurrent_reader が「短時間で fail する」ことに依存する。
-            // 他のテストは override で寛大化できる (TS-7)。
+            // 他のテストはオーバーライドで待機時間を広げられる。
             LockTimeout = lockTimeout ?? TimeSpan.FromMilliseconds(500),
         });
 
@@ -77,7 +77,7 @@ public sealed class ReaderWriterLockingModeTests : IDisposable
     [Fact]
     public void ReaderWriter_concurrent_readers_do_not_block_each_other()
     {
-        // TS-7: フル並列 (16 アセンブリ + chaos) 実行時の CPU 過剰購読下で、reader 同士は本来
+        // 多数のアセンブリとカオステストを並列実行した際の CPU 過剰購読下でも、リーダー同士は
         // shared lock でブロックしないのに 500ms timeout が spurious に発火していた。reader が
         // 実際に待つことは無いので、寛大な timeout (30s) にしても正常系の所要時間は変わらず、
         // starvation 由来の偽陽性だけを排除できる。失敗時は原因を 3 バケットに分類して報告する:

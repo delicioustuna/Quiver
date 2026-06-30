@@ -6,15 +6,11 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// VEC-6 coverage: filtered KNN (graph-first) and the optimizer's
-/// vector-first / graph-first strategy choice. Verifies:
-/// (a) <c>g.Nodes().HasLabel(L).FilterByKnn(...)</c> returns the correct
-///     intersection of label set ∩ top-k,
-/// (b) <c>QueryOptimizer.ChooseKnnStrategy</c> picks graph-first for a small
-///     frontier and vector-first for a large frontier,
-/// (c) the underlying oversample loop in
-///     <c>IGraphAccessMethods.KnnSearchFiltered</c> still finds the matches
-///     even when they sit deep in the index ranking.
+/// graph-first のフィルター付き KNN と、オプティマイザーによる
+/// vector-first / graph-first 戦略の選択を検証する。
+/// <c>FilterByKnn</c> がラベル集合と上位 k 件の正しい積集合を返すこと、
+/// 小さいフロンティアでは graph-first、大きいフロンティアでは vector-first を選ぶこと、
+/// 対象がインデックス順位の深い位置にあっても候補追加取得で発見できることを確認する。
 /// </summary>
 public sealed class FilteredKnnTests : IDisposable
 {
@@ -140,7 +136,7 @@ public sealed class FilteredKnnTests : IDisposable
         result.Select(n => n.Value).Should().BeEquivalentTo(docIds);
     }
 
-    // ARCH-2: KnnStrategy は internal 化したため [Theory] の公開シグネチャでは int に投影する。
+    // KnnStrategy は internal のため、[Theory] の公開シグネチャでは int に投影する。
     [Theory]
     [InlineData(8L,       100,  10,    (int)KnnStrategy.GraphFirst)]   // tiny candidate set
     [InlineData(100L,    1_000, 50,    (int)KnnStrategy.GraphFirst)]   // 10% of index

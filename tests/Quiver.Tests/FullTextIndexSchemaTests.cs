@@ -4,8 +4,8 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FTS-2 (increment 2): the public ISchemaApi.CreateFullTextIndex surface and
-/// its catalog persistence across reopen (binary backend).
+/// 公開 API <c>ISchemaApi.CreateFullTextIndex</c> と、
+/// バイナリバックエンドを再オープンした後のカタログ永続化を検証する。
 /// </summary>
 public sealed class FullTextIndexSchemaTests : IDisposable
 {

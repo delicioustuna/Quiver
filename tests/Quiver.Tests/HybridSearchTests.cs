@@ -7,10 +7,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FTS-5 end-to-end: <c>g.HybridSearch(...)</c> fuses BM25 + KNN top-k with RRF
-/// (k0=60). The per-channel rankings below are forced by the synthetic data
-/// (tf/doc-length for BM25, cosine for KNN); the fused order is hand-computed
-/// from those ranks, so the asserts pin RRF behaviour rather than raw scores.
+/// <c>g.HybridSearch(...)</c> が BM25 と KNN の上位 k 件を
+/// RRF (k0=60) で融合する処理をエンドツーエンドに検証する。
+/// 合成データで各検索経路の順位を固定し、その順位から融合結果を手計算することで、
+/// 生のスコアではなく RRF の振る舞いを確認する。
 /// </summary>
 public sealed class HybridSearchTests : IDisposable
 {
@@ -66,7 +66,7 @@ public sealed class HybridSearchTests : IDisposable
         // KNN  ranking (cos to [1,0,0,0]): Y(1.0) > A(0.8) > B(0.6) > X(0.0).
         // With k=3 each channel emits 3: BM25=[X,A,B], KNN=[Y,A,B].
         // RRF(k0=60): A=1/62+1/62=.03226, B=1/63+1/63=.03175, X=1/61=.01639, Y=1/61=.01639.
-        // → A and B (consensus, rank-2/3 in BOTH) beat X and Y (rank-1 in ONE channel only).
+        // 両方で 2 位と 3 位の A、B は、片方だけで 1 位の X、Y より高くなる。
         var x = AddDoc("alpha alpha", new float[] { 0f, 1f, 0f, 0f });        // text-strong, vector-orthogonal
         var a = AddDoc("alpha", new float[] { 0.8f, 0.6f, 0f, 0f });          // both, mid
         var b = AddDoc("alpha beta gamma", new float[] { 0.6f, 0.8f, 0f, 0f }); // both, lower
@@ -78,7 +78,7 @@ public sealed class HybridSearchTests : IDisposable
         result[0].Should().Be(a, "A is ranked high in both channels (RRF consensus winner)");
         result[1].Should().Be(b, "B is the next consensus doc");
         // X and Y each top exactly one channel and tie on RRF; only the higher
-        // (ascending-id tiebreak → X, created first) fits in the final top-3.
+        // ID 昇順の同点解消で、先に作成した X が最終上位 3 件に入る。
         result[2].Should().Be(x);
         result.Should().NotContain(y);
     }

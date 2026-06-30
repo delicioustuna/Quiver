@@ -7,11 +7,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FTS-2 (increment 4): the orphan sweep safety net. Postings/norms whose entityId
-/// (decoded from the key, not the value) points at a non-live node are detected by
-/// CheckIndexConsistency and removed by RepairIndexes — without touching live docs.
-/// Transactional maintenance already keeps things consistent; this is the belt-and-
-/// suspenders path (design 13 section 4).
+/// 全文インデックスの孤立エントリを走査する安全網を検証する。
+/// キーから復号した EntityId が存在しないノードを指す Postings と Norms を
+/// <c>CheckIndexConsistency</c> が検出し、<c>RepairIndexes</c> が
+/// 有効な文書を変更せずに削除することを確認する。
 /// </summary>
 public sealed class FullTextOrphanSweepTests : IDisposable
 {

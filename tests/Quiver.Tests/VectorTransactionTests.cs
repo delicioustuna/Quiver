@@ -5,8 +5,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// ARCH-6 (6b): SetVector の tx 統合。tx 配下のベクトル書き込みはグラフ変更と同じ container WAL に
-/// 乗り、commit で原子確定 / abort で巻き戻る。db.Vectors の tx 外呼び出しは autocommit で永続化される。
+/// <c>SetVector</c> とトランザクションの統合を検証する。
+/// トランザクション内のベクトル書き込みはグラフ変更と同じコンテナ WAL に記録され、
+/// コミット時に原子的に確定し、中断時に巻き戻る。
+/// <c>db.Vectors</c> をトランザクション外から呼ぶ場合は自動コミットで永続化される。
 /// </summary>
 public sealed class VectorTransactionTests : IDisposable
 {

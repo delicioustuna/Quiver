@@ -7,8 +7,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FTS-3 end-to-end: <c>g.Search(...)</c> as a BM25 top-k traversal source.
-/// Rankings below are hand-computed with k1=1.2, b=0.75 (design 13 §6 defaults).
+/// BM25 上位 k 件を返すトラバーサル起点 <c>g.Search(...)</c> を
+/// エンドツーエンドに検証する。
+/// 期待順位は既定値 k1=1.2、b=0.75 を使って手計算する。
 /// </summary>
 public sealed class FullTextSearchTests : IDisposable
 {

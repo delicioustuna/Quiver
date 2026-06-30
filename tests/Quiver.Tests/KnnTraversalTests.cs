@@ -7,11 +7,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// VEC-5 end-to-end coverage for <c>g.Knn(...)</c> as a traversal source:
-/// vector search composes with the existing label / property / expand
-/// pipeline. The reference store is flat-scan (InMemoryVectorStore) — score
-/// ordering and dimension/k checks live in InMemoryVectorStoreTests; here we
-/// only verify the traversal composition.
+/// トラバーサル起点としての <c>g.Knn(...)</c> をエンドツーエンドに検証する。
+/// ベクトル検索を既存のラベル、プロパティ、展開パイプラインと合成できることを確認する。
+/// 参照ストアには全走査の <c>InMemoryVectorStore</c> を使い、
+/// スコア順位や次元数および k の検査ではなく、トラバーサル合成だけを対象とする。
 /// </summary>
 public sealed class KnnTraversalTests : IDisposable
 {

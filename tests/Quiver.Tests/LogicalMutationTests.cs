@@ -7,9 +7,8 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// BA-7 / codex_advice_3 §8. Verifies that the logical mutation stream
-/// records the public mutation surface, fires only on commit, and can be
-/// replayed against a fresh database to reproduce the original state.
+/// 論理変更ストリームが公開された変更操作を記録し、コミット時だけ通知されることを検証する。
+/// また、新しいデータベースへ再生して元の状態を再現できることを確認する。
 /// </summary>
 public sealed class LogicalMutationTests : IDisposable
 {

@@ -9,7 +9,7 @@ namespace Quiver.Query.Physical.Tests;
 
 public class CoalesceOperatorTests
 {
-    /// <summary>Branch that emits the probe value <paramref name="multiplier"/> times.</summary>
+    /// <summary>入力値を <paramref name="multiplier"/> 回出力する分岐。</summary>
     private sealed class ProbeBranch : IPhysicalOperator
     {
         private readonly CorrelatedInputOperator _probe;

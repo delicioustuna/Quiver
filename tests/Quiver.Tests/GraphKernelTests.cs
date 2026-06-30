@@ -7,11 +7,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// PW-13: end-to-end coverage of <see cref="IGraphKernel{TState}"/> +
-/// <see cref="OneHopExpansion"/> through the operators that were ported to
-/// the kernel shell — <see cref="BfsOperator"/>,
-/// <see cref="VariableLengthExpandOperator"/>, <see cref="ShortestPathOperator"/>
-/// and the parallel BFS path.
+/// <see cref="IGraphKernel{TState}"/> と <see cref="OneHopExpansion"/> を
+/// 利用する演算子をエンドツーエンドに検証する。
+/// <see cref="BfsOperator"/>、<see cref="VariableLengthExpandOperator"/>、
+/// <see cref="ShortestPathOperator"/>、並列 BFS 経路を対象とする。
 /// </summary>
 public sealed class GraphKernelTests : IDisposable
 {
@@ -208,7 +207,7 @@ public sealed class GraphKernelTests : IDisposable
     public void ParallelBfs_matches_sequential_BFS_for_multiple_sources()
     {
         using var tx = _db.BeginTransaction();
-        // Two disjoint chains so worker tasks never observe each other's frontier.
+        // ワーカー同士が相手のフロンティアを参照しないよう、独立した 2 本のチェーンを使う。
         var a = tx.CreateNode("X");
         var b = tx.CreateNode("X");
         var c = tx.CreateNode("X");

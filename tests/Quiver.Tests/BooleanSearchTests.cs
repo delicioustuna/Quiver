@@ -7,9 +7,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// GA-3 coverage: FTS Boolean query support (AND/OR/NOT).
-/// Exercises the recursive-descent query parser, Boolean filtering in the BM25 scorer,
-/// and integration with both text-first and graph-first operator paths.
+/// 全文検索の論理クエリ (AND、OR、NOT) を検証する。
+/// 再帰下降パーサー、BM25 スコアラーの論理フィルター、
+/// text-first と graph-first の両演算子経路との統合を対象とする。
 /// </summary>
 public sealed class BooleanSearchTests : IDisposable
 {

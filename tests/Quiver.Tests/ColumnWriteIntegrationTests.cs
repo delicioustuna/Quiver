@@ -7,14 +7,15 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// ARCH-5c Phase 5 (5c): write 経路統合の end-to-end 検証。列化済み key への
+/// 列の書き込み経路を統合したエンドツーエンドテスト。列化済みキーへの
 /// <see cref="IGraphTransaction.SetProperty(RelationshipId, string, in PropertyValue)"/> /
-/// RemoveProperty / DeleteNode / DeleteRelationship が同 tx で列を維持し、abort では
-/// 列が巻き戻ること、commit が reopen を跨いで永続することを確認する。
-/// read 経路 (5d) 未配線のため projection は interim アクセサ (ColumnProjectSumForTest)。
+/// RemoveProperty / DeleteNode / DeleteRelationship が同じトランザクションで列を維持し、
+/// 中断時には列が巻き戻り、コミット時には再オープン後も永続することを確認する。
+/// 射影結果はテスト用アクセサ <c>ColumnProjectSumForTest</c> で確認する。
 ///
-/// 注: 列は opt-in。tx が列を維持するのは「tx 開始時点で列が登録済み」のときに限る
-/// (CreateColumn は write tx 外で行う DDL 的操作)。各テストは CreateColumn → 以後の tx で write。
+/// 列はオプトインであり、トランザクション開始時点で登録済みの場合だけ維持される。
+/// <c>CreateColumn</c> は書き込みトランザクション外で行う DDL 操作なので、
+/// 各テストは列を作成してから後続トランザクションで書き込む。
 /// </summary>
 public sealed class ColumnWriteIntegrationTests : IDisposable
 {

@@ -5,8 +5,8 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// OP-7 AutoVacuum background worker: 周期起動・逐次実行ガード・例外握り潰し・
-/// Dispose 停止と、<see cref="GraphDatabase"/> open/dispose への配線を確認する。
+/// 自動 Vacuum ワーカーの周期起動、逐次実行ガード、例外処理、破棄時の停止と、
+/// <see cref="GraphDatabase"/> のオープンおよび破棄との連携を確認する。
 /// </summary>
 public sealed class AutoVacuumWorkerTests : IDisposable
 {

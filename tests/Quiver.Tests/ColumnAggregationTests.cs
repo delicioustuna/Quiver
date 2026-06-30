@@ -8,10 +8,11 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// ARCH-5c Phase 5 (5d): read/optimizer 統合の end-to-end 検証。full-scan 集約
-/// (g.Nodes()/g.Relationships() の Sum/SumLong/Mean/Max/Min) が列化済み key で列スキャンを
-/// 使い、かつ row path と同値であることを「列あり → DropColumn → 列なし(row path)」の
-/// 結果一致で確認する。filter 付き入力は row path にフォールバックする。
+/// 読み取りとオプティマイザーを統合した列集約のエンドツーエンドテスト。
+/// 全走査集約 (<c>g.Nodes()</c> / <c>g.Relationships()</c> の
+/// Sum、SumLong、Mean、Max、Min) が列化済みキーでは列スキャンを使い、
+/// 行経路と同じ結果になることを列の削除前後で確認する。
+/// フィルター付き入力は行経路へフォールバックする。
 /// </summary>
 public sealed class ColumnAggregationTests : IDisposable
 {

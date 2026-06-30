@@ -8,13 +8,13 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FT-34: SSN (Serial Safety Net, Wang et al. DaMoN'15) の canonical シナリオ検証スイート。
-/// 論文 §2-3 の代表的アノマリを再現し、SSN (rw 系) + lock/deadlock (ww 系) の組合せで
-/// 直列化可能な結果 (= 少なくとも一方が abort) になることを確認する。
+/// SSN (Serial Safety Net, Wang et al. DaMoN'15) の代表的なシナリオを検証する。
+/// 論文 §2–3 の異常を再現し、SSN による読み書き競合の検出とロックによる書き書き競合の
+/// 検出を組み合わせて、少なくとも一方を中断し直列化可能な結果になることを確認する。
 ///
-/// <para>各 tx は専用スレッド (<see cref="TxThread"/>) で実行し、テストスレッドが
-/// begin/read/write/commit の大域順序を同期的に制御する (WalPageContext / MvccContext が
-/// thread-static なため書き込む tx は別スレッドが必須)。</para>
+/// <para>各トランザクションは専用スレッド (<see cref="TxThread"/>) で実行し、
+/// テストスレッドが開始、読み取り、書き込み、コミットの全体順序を同期的に制御する。
+/// WalPageContext と MvccContext がスレッド固有なので、書き込みは別スレッドで行う。</para>
 /// </summary>
 [Collection("ssn-scenarios")]
 public sealed class SsnScenarioTests
@@ -258,7 +258,7 @@ public sealed class SsnScenarioTests
 }
 
 /// <summary>
-/// FT-34: 1 トランザクションを専用スレッドに固定して同期的にステップ実行するヘルパ。
+/// 1 トランザクションを専用スレッドに固定し、各ステップを同期的に実行するヘルパー。
 /// WalPageContext / MvccContext が thread-static なため、書き込みを行う複数 tx は
 /// それぞれ別スレッドで動かす必要がある。<see cref="Do"/> は呼び出し元をブロックして
 /// アクションを所有スレッドで実行し、テストスレッドが大域順序を制御できるようにする。

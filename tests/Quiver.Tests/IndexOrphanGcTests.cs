@@ -7,11 +7,11 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FT-22 Index orphan GC: <see cref="IDiagnosticsApi.CheckIndexConsistency"/> /
+/// インデックスの孤立エントリ回収における <see cref="IDiagnosticsApi.CheckIndexConsistency"/> /
 /// <see cref="IDiagnosticsApi.RepairIndexes"/> の挙動を確認する。
-/// orphan は「<c>tx.IndexInsert</c> したノードを <c>tx.DeleteNode</c> で削除した状態」で
-/// 自然に発生する (現状の DeleteNode は索引エントリを自動削除しない設計のため、
-/// recovery 中の torn-write シナリオでなくとも同じ状態を再現できる)。
+/// 孤立エントリは <c>tx.IndexInsert</c> したノードを <c>tx.DeleteNode</c> で削除して作る。
+/// DeleteNode はインデックスエントリを自動削除しないため、
+/// リカバリー中の不完全書き込みを使わずに同じ状態を再現できる。
 /// </summary>
 public sealed class IndexOrphanGcTests : IDisposable
 {

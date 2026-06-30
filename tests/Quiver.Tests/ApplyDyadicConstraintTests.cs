@@ -7,9 +7,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// Constraint enforcement matrix tests (design doc §4.5):
-/// NaN score prohibition, exception containment, and gather/score
-/// phase separation (concurrent write non-blocking).
+/// 二項演算の制約を検証する。
+/// NaN スコアの禁止、演算子例外の封じ込め、候補収集と採点の分離による
+/// 並行書き込みの非ブロッキング性を確認する。
 /// </summary>
 public sealed class ApplyDyadicConstraintTests : IDisposable
 {
@@ -46,7 +46,7 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    /// <summary>§4.5 row 4: NaN score → VectorException with operator type name.</summary>
+    /// <summary>NaN スコアでは演算子の型名を含む <c>VectorException</c> を送出する。</summary>
     [Fact]
     public void NaN_score_throws_VectorException()
     {
@@ -62,7 +62,7 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
             .WithMessage("*NaNOp*");
     }
 
-    /// <summary>§4.5 row 5: operator exception → query abort, tx state unaffected.</summary>
+    /// <summary>演算子例外でクエリだけを中断し、トランザクション状態は維持する。</summary>
     [Fact]
     public void Operator_exception_aborts_query_without_affecting_tx()
     {
@@ -76,12 +76,12 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
         act.Should().Throw<Exception>()
             .WithMessage("*deliberate*");
 
-        // Transaction is still usable after the query exception
+        // クエリ例外後もトランザクションを使用できる。
         var count = g.Nodes().HasLabel("Sensor").Count();
         count.Should().Be(5);
     }
 
-    /// <summary>§4.5 row 3: gather/score separation — concurrent SetVector doesn't deadlock.</summary>
+    /// <summary>候補収集と採点を分離し、並行する SetVector とデッドロックしない。</summary>
     [Fact]
     public async Task Concurrent_write_during_scoring_does_not_deadlock()
     {
@@ -100,7 +100,7 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
             }
         }, cts.Token);
 
-        // Reader: run ApplyDyadic scoring concurrently
+        // リーダー側で ApplyDyadic の採点を並行実行する。
         using (var rtx = _db.BeginReadOnlyTransaction())
         {
             var g = rtx.G(_db.Schema);
@@ -114,7 +114,7 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
         await writerTask.WaitAsync(TimeSpan.FromSeconds(10));
     }
 
-    /// <summary>±Infinity scores are permitted (order is well-defined).</summary>
+    /// <summary>順序を定義できる正負の無限大スコアは許可する。</summary>
     [Fact]
     public void Infinity_score_is_permitted()
     {
@@ -128,7 +128,7 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
         hits.Should().HaveCount(3);
     }
 
-    // ── Custom operators for constraint testing ──
+    // ── 制約テスト用のカスタム演算子 ──
 
     private readonly struct NaNOp : IDyadicOperator<float>
     {
@@ -165,7 +165,7 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
             => float.PositiveInfinity;
     }
 
-    // ── Minimal IGraphNode types ──
+    // ── 最小構成の IGraphNode 型 ──
 
     private sealed class SensorNode : IGraphNode<SensorNode>
     {

@@ -5,9 +5,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// VEC-7 parity tests: <see cref="VectorScorer"/> (SIMD) must agree with
-/// <see cref="ScalarVectorScorer"/> within a small relative tolerance across
-/// dimensions that span sub-lane, exact-lane, and many-lane regimes.
+/// SIMD 版 <see cref="VectorScorer"/> が <see cref="ScalarVectorScorer"/> と
+/// 小さな相対許容誤差の範囲で一致することを検証する。
+/// SIMD レーン未満、レーンと同数、複数レーンにまたがる各次元数を対象とする。
 /// </summary>
 public sealed class VectorScorerTests
 {

@@ -17,7 +17,7 @@ public class BidirectionalExpandOperatorTests
         using var op = new BidirectionalExpandOperator(
             new FixedNodeListOperator(), 0, 0, Direction.Outgoing, null);
         Action act = () => tx.Execute(op);
-        // Either yields empty or rejects 1-column input; whichever it does, must not throw NRE.
+        // 空結果または 1 列入力の拒否のどちらでもよいが、NullReferenceException は発生させない。
         try { act(); } catch (ArgumentException) { /* acceptable */ }
         tx.Rollback();
     }

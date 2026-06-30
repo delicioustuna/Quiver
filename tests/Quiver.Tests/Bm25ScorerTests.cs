@@ -8,10 +8,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// Validates BM25 scoring behaviour with known corpora: parameter defaults,
-/// term-frequency saturation, inverse document frequency, document-length
-/// normalization, multi-term additive scoring, and edge cases (empty
-/// document, single-document corpus, unmatched term).
+/// 既知のコーパスを使って BM25 の採点を検証する。
+/// 既定パラメーター、語頻度の飽和、逆文書頻度、文書長の正規化、複数語の加算、
+/// 空文書、単一文書コーパス、不一致語の境界条件を対象とする。
 /// </summary>
 public sealed class Bm25ScorerTests : IDisposable
 {

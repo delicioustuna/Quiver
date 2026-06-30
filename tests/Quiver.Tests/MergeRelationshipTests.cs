@@ -7,9 +7,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// WS-1: エッジ upsert プリミティブ <c>MergeRelationship</c> のカバレッジ。
+/// リレーションシップの upsert 操作 <c>MergeRelationship</c> を検証する。
 /// <c>MergeNode</c> と対称な「既存があれば返す / 無ければ作る」セマンティクスと、
-/// (source, target, type) の取り違えで別エッジが誤マッチしないことを検証する。
+/// (source, target, type) の取り違えで別のリレーションシップが誤一致しないことを確認する。
 /// </summary>
 public sealed class MergeRelationshipTests : IDisposable
 {

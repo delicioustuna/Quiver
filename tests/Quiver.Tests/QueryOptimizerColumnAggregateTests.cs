@@ -5,8 +5,8 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// ARCH-5c Phase 5d: <see cref="QueryOptimizer.ShouldUseColumnAggregate"/> のコスト判定。
-/// 列 dense スキャン (head + delta) と row path (推定行数) のコスト比較を検証する。
+/// <see cref="QueryOptimizer.ShouldUseColumnAggregate"/> のコスト判定を検証する。
+/// 列の密走査 (先頭版と差分) と行経路 (推定行数) のコストを比較する。
 /// </summary>
 public sealed class QueryOptimizerColumnAggregateTests
 {

@@ -6,9 +6,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// OP-3 Vacuum: dead version 物理回収 + free list 投入 + 末尾 hwm 縮減 +
-/// committed registry prune の挙動を確認する。FT-26 MVCC で論理削除された
-/// ノードが <see cref="GraphDatabase.Vacuum"/> 経由で物理スロットに戻ることを保証する。
+/// Vacuum による不要版の物理回収、フリーリストへの登録、末尾の高水位標縮小、
+/// コミット済みレジストリの整理を確認する。
+/// MVCC で論理削除されたノードが <see cref="GraphDatabase.Vacuum"/> によって
+/// 再利用可能な物理スロットへ戻ることを検証する。
 /// </summary>
 public sealed class VacuumTests : IDisposable
 {
@@ -243,7 +244,7 @@ public sealed class VacuumTests : IDisposable
     {
         using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        // ARCH-5c Phase 3: 小さい値は node record へ inline 化されチェーンに乗らない。本テストは
+        // 小さい値はノードレコードへインライン化されチェーンに乗らないため、このテストでは
         // overflow チェーン vacuum (PropertyStore.VacuumDeadVersions) を検証する意図なので、
         // 255B を超える大きい文字列 (= overflow チェーン行き) を使う。
         static string Big(string s) => new string('x', 300) + s;
@@ -280,7 +281,7 @@ public sealed class VacuumTests : IDisposable
     {
         using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        // ARCH-5c Phase 3: overflow チェーン上のプロパティ回収を検証するため大きい文字列を使う
+        // オーバーフローチェーン上のプロパティ回収を検証するため、大きい文字列を使う。
         // (小さい値は inline 化され node version に同梱で消えるため chain には乗らない)。
         static string Big(string s) => new string('x', 300) + s;
 
@@ -330,10 +331,10 @@ public sealed class VacuumTests : IDisposable
         read.NodeExists(new Core.NodeId(aliveId)).Should().BeTrue();
     }
 
-    // ---------- OP-5: 物理 truncate + WAL FileTruncate ----------
+    // ---------- 物理切り詰めと WAL FileTruncate ----------
 
     /// <summary>
-    /// OP-5 / ARCH-4: 1000 ノード作成 → 全削除 → vacuum でテナントページが回収されること。
+    /// 1000 ノードを作成してすべて削除し、Vacuum でテナントページが回収されることを確認する。
     /// 単一ファイルコンテナでは物理 OS truncate ではなく、末尾の不要ページをグローバル free list へ
     /// 返却し他テナントが再利用できる形で回収する (graph.quiver は MMF 事前確保のため縮まない)。
     /// よって回収量は <see cref="VacuumReport.TruncatedPages"/> (回収した論理ページ数) で確認し、
@@ -361,9 +362,9 @@ public sealed class VacuumTests : IDisposable
         var report = db.Vacuum();
         report.Skipped.Should().BeFalse();
         report.ReclaimedNodes.Should().Be(1000);
-        // ARCH-5c Phase 2: ノードは slotted ヒープ + ItemPointerMap free list に移行した。vacuum は
+        // ノードはスロット付きヒープと ItemPointerMap フリーリストを使う。Vacuum は
         // dead version を tombstone + seq を free list へ戻す (論理回収 + seq 再利用)。tombstone ページの
-        // 物理回収 (グローバル free list 返却 / truncate) は Phase 6 へ後ろ倒し (props/rels は従来どおり)。
+        // ここでは物理回収を行わず、プロパティとリレーションシップだけ従来どおり回収する。
         // よってここでは「再作成が free list の seq を再利用し全件読める」ことを検証する。
         var refilled = new List<long>();
         using (var tx = db.BeginTransaction())
@@ -383,7 +384,7 @@ public sealed class VacuumTests : IDisposable
     }
 
     /// <summary>
-    /// OP-5: Vacuum の物理 truncate 後に DB を再 open しても整合性が保たれ、
+    /// Vacuum で物理的に切り詰めた後にデータベースを再オープンしても整合性が保たれ、
     /// 残った live データが読めること。truncate 操作は WAL FileTruncate で durable 化されている。
     /// </summary>
     [Fact]
@@ -398,7 +399,7 @@ public sealed class VacuumTests : IDisposable
             {
                 aliveId = tx.CreateNode("Person").Value;
                 tx.SetProperty(new Core.NodeId(aliveId), "name", Storage.Records.PropertyValue.FromInt32(42));
-                // FT-32: NodeStore record が 31→15B に縮み records/page が 263→544 に増えたため、
+                // NodeStore のレコード縮小で 1 ページ当たりの件数が増えたため、
                 // 末尾 free page を truncate させるには alive ノード (id 0) の居る page を超えて
                 // 複数 record page に跨る数の deleted ノードが必要。1200 で page 2〜4 に跨る。
                 for (int i = 0; i < 1200; i++)
@@ -411,8 +412,8 @@ public sealed class VacuumTests : IDisposable
                     tx.DeleteNode(new Core.NodeId(id));
                 tx.Commit();
             }
-            // ARCH-5c Phase 2: ノード heap は dead version を回収する (ReclaimedNodes) が、tombstone
-            // ページの物理 truncate は Phase 6 へ後ろ倒し。ここでは dead version 回収 + 再 open 整合性を検証。
+            // ノードヒープは不要版を回収するが、墓石ページの
+            // 物理的な切り詰めは行わない。ここでは不要版の回収と再オープン後の整合性を検証する。
             db.Vacuum().ReclaimedNodes.Should().BeGreaterThan(0);
         }
 
@@ -424,7 +425,7 @@ public sealed class VacuumTests : IDisposable
     }
 
     /// <summary>
-    /// OP-5: vacuum で truncate された範囲は新規 AllocatePage で再拡張されて埋まる。
+    /// Vacuum で切り詰めた範囲が、新しい <c>AllocatePage</c> によって再拡張されることを確認する。
     /// truncate 後に同じ程度の新規ノードを作成して全部書けること。
     /// </summary>
     [Fact]

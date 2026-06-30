@@ -10,12 +10,14 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// VEC-10 coverage: statistics-aware fallback in <see cref="LogicalOptimizer"/> の KnnPushdown rule。
-/// 構造ヒントが graph-first を示唆していても label cardinality / TotalNodes が
+/// <see cref="LogicalOptimizer"/> の KNN プッシュダウンにおける統計ベースの
+/// フォールバックを検証する。
+/// 構造ヒントが graph-first を示していても、ラベルのカーディナリティと総ノード数の比率が
 /// <see cref="LogicalOptimizer.VectorFirstLabelFraction"/> (既定 30%) 以上のときは vector-first にフォールバックする。
-/// stats を渡さない場合 (g.G(schema) 経由) は VEC-9 と同じ構造ヒントのみで graph-first を選ぶ。
+/// 統計を渡さない場合は構造ヒントだけで graph-first を選ぶ。
 /// <para>
-/// ARCH-7: graph-first = <see cref="KnnOp"/> (Candidate != null) / vector-first = 先頭が <see cref="FilterOp"/>。
+/// graph-first は Candidate を持つ <see cref="KnnOp"/>、
+/// vector-first は先頭の <see cref="FilterOp"/> で表される。
 /// </para>
 /// </summary>
 public sealed class KnnPushdownStatsAwareTests : IDisposable
@@ -63,8 +65,8 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     /// <summary>
     /// 50 Doc + 50 Other (Doc cardinality = 50%) で <c>Knn().HasLabel("Doc")</c> をリライトすると、
     /// stats を注入したケースで vector-first にフォールバックする。
-    /// VEC-11 後 backend は <see cref="GraphStats.HasFastLabelIndex"/> = <c>true</c> を立てるため、
-    /// dim = 4 (テスト用小次元) の dim-aware piecewise table の最小バケット閾値 0.30 を使う。
+    /// バックエンドは <see cref="GraphStats.HasFastLabelIndex"/> = <c>true</c> を立てるため、
+    /// dim = 4 の次元数対応テーブルにおける最小バケット閾値 0.30 を使う。
     /// 50% &gt;= 0.30 で fallback 発火、vector-first (先頭 FilterOp) になる。
     /// </summary>
     [Fact]
@@ -95,7 +97,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     }
 
     /// <summary>
-    /// 同じ構造でも stats を渡さない (g.G(schema)) と VEC-9 の構造ヒントのみで判定するため
+    /// 同じ構造でも統計を渡さない <c>g.G(schema)</c> では構造ヒントだけで判定するため、
     /// graph-first を選ぶ。後方互換性の確認。
     /// </summary>
     [Fact]
@@ -122,7 +124,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
 
     /// <summary>
     /// 5 Doc + 95 Other (Doc cardinality = 5%) では label cardinality が 30% を下回るため、
-    /// stats を渡しても graph-first を維持する (VEC-9 と同じ振る舞い)。
+    /// 統計を渡しても graph-first を維持する。
     /// </summary>
     [Fact]
     public void LowLabelCardinality_keeps_graph_first_with_stats()
@@ -198,7 +200,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     /// <summary>
     /// vector-first フォールバックでも k starvation を起こさないこと。
     /// Doc cardinality を高く (例: 60%) しつつ、k を全 Doc が候補に入る十分大きな値にすれば
-    /// post-filter でも結果は揃う。これは VEC-10 の保守的閾値 (30%) が現実的に妥当なことを示す。
+    /// 後置フィルターでも結果は一致し、保守的な閾値 30% が現実的に妥当であることを示す。
     /// </summary>
     [Fact]
     public void Vector_first_fallback_returns_some_docs_when_k_large_enough()
@@ -301,7 +303,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     }
 
     /// <summary>
-    /// VEC-12: dim=768 / sel=40% / HasFastLabelIndex=true のとき、dim-aware piecewise table が
+    /// dim=768、選択率 40%、高速ラベルインデックスありのとき、次元数対応テーブルが
     /// 0.47 を返す (dim ≤ 1024) ため 0.40 &lt; 0.47 で graph-first を維持する。
     /// </summary>
     [Fact]
@@ -323,7 +325,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     }
 
     /// <summary>
-    /// VEC-12: 同じ dim=768 / sel=40% でも <see cref="GraphStats.HasFastLabelIndex"/> が false の
+    /// 同じ dim=768、選択率 40% でも <see cref="GraphStats.HasFastLabelIndex"/> が false の
     /// backend では legacy 30% 単一閾値を引くため vector-first にフォールバックする。下位互換性確認。
     /// </summary>
     [Fact]
@@ -345,7 +347,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     }
 
     /// <summary>
-    /// VEC-12: 同じ sel=45% でも dim=128 と dim=3072 で fallback 発火が分岐すること。
+    /// 同じ選択率 45% でも dim=128 と dim=3072 でフォールバックの発生が分かれること。
     /// dim=128 → 閾値 0.30 (dim ≤ 512) → 45% &gt;= 0.30 → fallback
     /// dim=3072 → 閾値 0.80 (dim &gt; 2048) → 45% &lt; 0.80 → graph-first 維持
     /// </summary>

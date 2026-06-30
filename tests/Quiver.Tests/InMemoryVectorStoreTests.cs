@@ -5,9 +5,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// VEC-1 contract tests for <see cref="InMemoryVectorStore"/>. Covers:
-///   (a) hand-calculated KNN agreement for a 100-vector corpus across all metrics,
-///   (b) dimension/entity-kind mismatch raises <see cref="VectorException"/>.
+/// <see cref="InMemoryVectorStore"/> の契約を検証する。
+/// 100 ベクトルのコーパスについて全距離尺度の KNN 結果が手計算と一致すること、
+/// 次元数またはエンティティ種別の不一致で <see cref="VectorException"/> が発生することを確認する。
 /// </summary>
 public sealed class InMemoryVectorStoreTests
 {

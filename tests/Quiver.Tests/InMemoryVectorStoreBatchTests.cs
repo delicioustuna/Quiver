@@ -5,10 +5,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// VEC-8 contract tests for <see cref="InMemoryVectorStore.KnnSearchFiltered"/>
-/// (gather-then-score) and <see cref="InMemoryVectorStore.KnnSearchBatch"/>
-/// (single-snapshot Q×N). Validates parity with the default oversample-and-filter
-/// path and with per-query <see cref="InMemoryVectorStore.KnnSearch"/>.
+/// <see cref="InMemoryVectorStore.KnnSearchFiltered"/> の候補収集後採点と、
+/// <see cref="InMemoryVectorStore.KnnSearchBatch"/> の単一スナップショット Q×N 処理を検証する。
+/// 既定の候補追加取得後フィルター経路、およびクエリ単位の
+/// <see cref="InMemoryVectorStore.KnnSearch"/> と結果が一致することを確認する。
 /// </summary>
 public sealed class InMemoryVectorStoreBatchTests
 {

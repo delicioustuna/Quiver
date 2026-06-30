@@ -5,9 +5,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// ARCH-6 (6d): 永続 HNSW ANN 索引。グラフはページに永続化され再起動を跨いで再現する。
-/// 検索は ANN 化され、brute-force (KnnSearchBatch = flat scan) に対し高い recall を持つ。
-/// グラフ書き込みは container WAL に乗るので abort で巻き戻る。
+/// 永続 HNSW 近似最近傍インデックスを検証する。
+/// グラフがページへ永続化され、再起動後も再現することを確認する。
+/// 検索は全走査と比較して高い再現率を持ち、
+/// グラフ書き込みはコンテナの WAL に記録されるため中断時に巻き戻る。
 /// </summary>
 public sealed class VectorHnswTests : IDisposable
 {

@@ -7,11 +7,11 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// PW-9: verifies StreamingBulkLoader produces the same on-disk database as the
-/// in-memory <see cref="BulkLoader"/>. Both loaders use the same dense pointer
-/// algorithm; the only difference is that StreamingBulkLoader sources rels from
-/// a temp file instead of a heap list, so the resulting RelationshipStore /
-/// NodeStore / FirstRelId chain must match byte-for-byte.
+/// <c>StreamingBulkLoader</c> がメモリ内 <see cref="BulkLoader"/> と
+/// 同じオンディスクデータベースを生成することを検証する。
+/// 両者は同じ密ポインターアルゴリズムを使い、リレーションシップの入力元だけが
+/// 一時ファイルとヒープ上のリストで異なるため、RelationshipStore、NodeStore、
+/// FirstRelId チェーンがバイト単位で一致することを確認する。
 /// </summary>
 public sealed class StreamingBulkLoaderTests : IDisposable
 {
@@ -197,7 +197,7 @@ public sealed class StreamingBulkLoaderTests : IDisposable
         }
     }
 
-    // ARCH-4: 全コア store は単一ファイル graph.quiver に同居する。bulk load は決定的かつ
+    // すべてのコアストアは単一ファイル graph.quiver に同居する。一括読み込みは決定的で、
     // WAL 非対象 (LSN=0) なので、streaming / in-memory の graph.quiver はバイト一致するはず。
     private static void AssertNodeStoreBytesEqual(string dirA, string dirB)
         => AssertFileBytesEqual(Path.Combine(dirA, "graph.quiver"), Path.Combine(dirB, "graph.quiver"));

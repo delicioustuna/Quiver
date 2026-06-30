@@ -26,7 +26,7 @@ public sealed class WalBloatRegressionTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    // ARCH-4 増分7: WAL は単一サイドカー graph.quiver-wal。クリーン終了で削除されるため、
+    // WAL は単一のサイドカーファイル graph.quiver-wal であり、正常終了時に削除されるため、
     // 「構築中に肥大しないこと」は DB を開いている間の peak サイズで測る。
     private string WalPath => Path.Combine(_dir, "graph.quiver-wal");
     private long _peakWalBytes;
@@ -103,7 +103,7 @@ public sealed class WalBloatRegressionTests : IDisposable
         walBytes.Should().BeLessThan(256L * 1024 * 1024,
             "WAL が数百 MB を超えて肥大してはならない");
 
-        // ARCH-4 増分7: クリーン終了で WAL サイドカーは削除され静止時は graph.quiver のみ。
+        // 正常終了時に WAL サイドカーは削除され、静止時には graph.quiver だけが残る。
         File.Exists(WalPath).Should().BeFalse(
             "クリーン終了後は WAL サイドカーが削除されているはず");
 
@@ -124,7 +124,7 @@ public sealed class WalBloatRegressionTests : IDisposable
         const int avgDegree = 8;
         long edges = BuildGraph(options, nodeCount, avgDegree, batchSize: 8_000);
 
-        // ARCH-4 増分7: 単一ファイル WAL。checkpoint のコンパクションで prefix が前詰めされ、
+        // 単一ファイル WAL はチェックポイント時の圧縮で先頭の不要部分を詰め、
         // 構築中の peak でも数 MB に収まるはず (旧挙動なら 40k エッジで数十 MB+)。
         _peakWalBytes.Should().BeLessThan(8L * 1024 * 1024,
             "checkpoint のコンパクションで WAL の peak は数 MB に収まるはず");

@@ -7,8 +7,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// ARCH-5c Phase 5 (5b): opt-in 列の登録 + 初期構築 + 永続を GraphDatabase 経由で end-to-end 検証。
-/// read 経路 (5d) 未配線のため projection は interim アクセサ (ColumnProjectSumForTest) で確認する。
+/// オプトイン列の登録、初期構築、永続化を <c>GraphDatabase</c> 経由で
+/// エンドツーエンドに検証する。
+/// 射影結果はテスト用アクセサ <c>ColumnProjectSumForTest</c> で確認する。
 /// </summary>
 public sealed class ColumnRegistrationTests : IDisposable
 {

@@ -8,9 +8,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// GA-2 coverage: FTS prefix query support (<c>g.Search("idx", "quiv*", k)</c>).
-/// Exercises wildcard detection, prefix expansion against the postings B+Tree,
-/// and BM25 scoring across expanded terms on both the text-first and graph-first paths.
+/// 全文検索の前方一致クエリ (<c>g.Search("idx", "quiv*", k)</c>) を検証する。
+/// ワイルドカード検出、Postings B+Tree に対する接頭辞展開、展開語の BM25 採点を
+/// text-first と graph-first の両経路で確認する。
 /// </summary>
 public sealed class PrefixSearchTests : IDisposable
 {

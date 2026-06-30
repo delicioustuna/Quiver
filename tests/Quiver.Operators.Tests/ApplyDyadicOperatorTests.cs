@@ -10,16 +10,16 @@ using Xunit;
 namespace Quiver.Query.Physical.Tests;
 
 /// <summary>
-/// Isolated tests for <see cref="ApplyDyadicOperator"/>: validates the
-/// gather/score pipeline using built-in dyadic operators (Dot, Cosine, Euclidean)
-/// and direct Open/MoveNext driving without the DSL traversal layer.
+/// <see cref="ApplyDyadicOperator"/> を単体で検証する。
+/// DSL のトラバーサル層を介さず Open / MoveNext を直接呼び、
+/// 組み込み二項演算子 (内積、コサイン、ユークリッド距離) の候補収集と採点を確認する。
 /// </summary>
 public sealed class ApplyDyadicOperatorTests
 {
     private const string VecIndex = "vec_idx";
     private const int Dim = 4;
 
-    /// <summary>Wraps a struct operator into a <see cref="DyadicScoreFunc"/> delegate.</summary>
+    /// <summary>構造体の演算子を <see cref="DyadicScoreFunc"/> デリゲートで包む。</summary>
     private static DyadicScoreFunc WrapScorer<T>(T op) where T : struct, IDyadicOperator<float>
         => (a, b, r) => op.Invoke(a, b, r);
 
@@ -69,7 +69,7 @@ public sealed class ApplyDyadicOperatorTests
 
         using var tx = fx.Db.BeginTransaction();
         var n = fx.Db.BeginReadOnlyTransaction();
-        // Get a valid node id from the graph
+        // グラフから有効なノード ID を取得する。
         var source = new AllNodesScanOperator();
         var op = new ApplyDyadicOperator(
             source, 0, "nonexistent_index", [1f, 0f, 0f, 0f], null, 0,
@@ -115,7 +115,7 @@ public sealed class ApplyDyadicOperatorTests
             seedVectors: (db, nodeIds) =>
             {
                 Array.Copy(nodeIds, ids, 3);
-                // Vectors with varying dot product against [1,0,0,0]:
+                // [1,0,0,0] に対する内積が異なるベクトルを用意する。
                 // node0: dot=0.5, node1: dot=1.0, node2: dot=0.3
                 db.Vectors.SetVector(EntityKind.Node, nodeIds[0].Value, VecIndex,
                     [0.5f, 0f, 0f, 0f]);
@@ -134,7 +134,7 @@ public sealed class ApplyDyadicOperatorTests
 
         var results = OperatorCollect.Collect(op);
         results.Should().HaveCount(3);
-        // Highest dot product should come first (descending score order)
+        // スコアの降順なので、内積が最大のものを先頭にする。
         results[0].Should().Be(ids[1].Value, "node1 has dot=1.0");
         results[1].Should().Be(ids[0].Value, "node0 has dot=0.5");
         results[2].Should().Be(ids[2].Value, "node2 has dot=0.3");
@@ -150,10 +150,10 @@ public sealed class ApplyDyadicOperatorTests
             seedVectors: (db, nodeIds) =>
             {
                 Array.Copy(nodeIds, ids, 2);
-                // node0: identical direction to query → cosine=1.0
+                // node0 はクエリと同じ方向なのでコサイン類似度は 1.0。
                 db.Vectors.SetVector(EntityKind.Node, nodeIds[0].Value, VecIndex,
                     [1f, 0f, 0f, 0f]);
-                // node1: orthogonal to query → cosine=0.0
+                // node1 はクエリと直交するのでコサイン類似度は 0.0。
                 db.Vectors.SetVector(EntityKind.Node, nodeIds[1].Value, VecIndex,
                     [0f, 1f, 0f, 0f]);
             });
@@ -180,10 +180,10 @@ public sealed class ApplyDyadicOperatorTests
             seedVectors: (db, nodeIds) =>
             {
                 Array.Copy(nodeIds, ids, 2);
-                // node0: close to query → small euclidean distance
+                // node0 はクエリに近いためユークリッド距離が小さい。
                 db.Vectors.SetVector(EntityKind.Node, nodeIds[0].Value, VecIndex,
                     [1f, 0f, 0f, 0f]);
-                // node1: far from query → large euclidean distance
+                // node1 はクエリから遠いためユークリッド距離が大きい。
                 db.Vectors.SetVector(EntityKind.Node, nodeIds[1].Value, VecIndex,
                     [0f, 0f, 0f, 1f]);
             });
@@ -197,8 +197,8 @@ public sealed class ApplyDyadicOperatorTests
 
         var results = OperatorCollect.Collect(op);
         results.Should().HaveCount(2);
-        // Note: VectorKnnHeap sorts by descending score. For Euclidean distance,
-        // farther = higher score value, so farther node comes first.
+        // VectorKnnHeap はスコア降順に並べる。
+        // ユークリッド距離は遠いほど値が大きいため、遠いノードが先頭になる。
         results[0].Should().Be(ids[1].Value, "farther node has higher Euclidean distance score");
         op.Dispose();
         tx.Rollback();
@@ -288,8 +288,9 @@ public sealed class ApplyDyadicOperatorTests
     }
 
     /// <summary>
-    /// Creates a fixture with <paramref name="nodeCount"/> nodes and a FlatOnly vector index.
-    /// An optional <paramref name="seedVectors"/> callback sets vectors after the nodes are committed.
+    /// <paramref name="nodeCount"/> 個のノードと FlatOnly ベクトルインデックスを持つ
+    /// フィクスチャを作成する。
+    /// <paramref name="seedVectors"/> を指定した場合は、ノードのコミット後にベクトルを設定する。
     /// </summary>
     private static OperatorTestFixture CreateFixtureWithVectors(
         int nodeCount,
@@ -315,7 +316,7 @@ public sealed class ApplyDyadicOperatorTests
         return fx;
     }
 
-    /// <summary>Marker type for NaN score exception message verification.</summary>
+    /// <summary>NaN スコアの例外メッセージを検証するためのマーカー型。</summary>
     private readonly struct NaNTestOp : IDyadicOperator<float>
     {
         public float Invoke(ReadOnlySpan<float> a, ReadOnlySpan<float> b, ReadOnlySpan<Range> regions)

@@ -5,8 +5,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// ARCH-6 follow-up (① overwrite 再リンク / ② HNSW 物理削除 + 再構築):
-/// SetVector の上書きは HNSW を新ベクトルへ張り直し、RemoveVector はグラフからノードを物理削除する。
+/// HNSW の上書き時の再リンク、物理削除、再構築を検証する。
+/// <c>SetVector</c> は HNSW を新しいベクトルへ張り直し、
+/// <c>RemoveVector</c> はグラフからノードを物理削除する。
 /// 削除が蓄積するとグラフは自動再構築される。
 /// </summary>
 public sealed class VectorHnswMaintenanceTests : IDisposable
@@ -153,7 +154,7 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
     [Fact]
     public void Recall_stays_high_under_repeated_reingestion_churn_without_rebuild()
     {
-        // VEC-13: 頻繁な再取込 (削除→挿入の繰り返し) でグラフが断片化しないことを検証する。
+        // 頻繁な再取り込み、すなわち削除と挿入の繰り返しでグラフが断片化しないことを検証する。
         // tombstone が生存数を超えない構成 (Stable=300, 累計削除=200) にして自動 Rebuild を発火させず、
         // 削除時の近傍修復 (HealNeighborhood) だけで安定集合の self-query recall が保たれることを確かめる。
         const int Dim = 32, Stable = 300, Churn = 10, Cycles = 20, K = 10;

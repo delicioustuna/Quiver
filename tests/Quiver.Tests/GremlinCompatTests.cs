@@ -7,9 +7,8 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// GC-1 coverage: low-difficulty Gremlin/Cypher API surface on
-/// <see cref="GraphTraversal{T}"/>. Each new step gets a focused test so the
-/// regression surface stays narrow.
+/// <see cref="GraphTraversal{T}"/> が提供する基本的な Gremlin / Cypher 互換 API を検証する。
+/// 各ステップを個別のテストで扱い、回帰時の影響範囲を絞る。
 /// </summary>
 public sealed class GremlinCompatTests : IDisposable
 {

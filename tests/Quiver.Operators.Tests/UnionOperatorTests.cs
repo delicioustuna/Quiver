@@ -10,9 +10,8 @@ namespace Quiver.Query.Physical.Tests;
 public class UnionOperatorTests
 {
     /// <summary>
-    /// A branch that consumes a CorrelatedInputOperator and emits the bound
-    /// value <see cref="_multiplier"/> times — used to verify that Union
-    /// rebinds the probe for each source row and concatenates branch outputs.
+    /// CorrelatedInputOperator を受け取り、束縛値を <see cref="_multiplier"/> 回出力する分岐。
+    /// Union が入力行ごとに値を再束縛し、分岐の出力を連結することを検証する。
     /// </summary>
     private sealed class RepeatProbeBranch : IPhysicalOperator
     {

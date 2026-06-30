@@ -6,11 +6,12 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical.Tests.Support;
 
 /// <summary>
-/// TS-2: shared DB-backed fixture for operator unit tests. Each fixture opens
-/// a fresh on-disk DB under %TEMP%; the directory is removed on Dispose so the
-/// test sandbox does not accumulate. Tests that need only a no-graph schema
-/// can use <see cref="OpenEmpty"/>; tests that need a seeded graph can pass
-/// a seed delegate to <see cref="Open(Action{IGraphTransaction})"/>.
+/// 演算子のユニットテストで共有するデータベース付きフィクスチャ。
+/// 各インスタンスは %TEMP% 配下に新しいオンディスクデータベースを開き、
+/// 破棄時にディレクトリを削除する。
+/// グラフが不要なテストは <see cref="OpenEmpty"/> を使い、
+/// 初期データが必要なテストは <see cref="Open(Action{IGraphTransaction})"/> に
+/// シード処理を渡す。
 /// </summary>
 internal sealed class OperatorTestFixture : IDisposable
 {
@@ -53,8 +54,8 @@ internal sealed class OperatorTestFixture : IDisposable
 }
 
 /// <summary>
-/// Minimal source operator producing a fixed sequence of NodeId rows.
-/// Used by mock-only tests that don't need a transaction context.
+/// NodeId 行の固定列を生成する最小の入力演算子。
+/// トランザクションコンテキストが不要なモックテストで使用する。
 /// </summary>
 internal sealed class FixedNodeListOperator : IPhysicalOperator
 {
@@ -81,7 +82,7 @@ internal sealed class FixedNodeListOperator : IPhysicalOperator
 }
 
 /// <summary>
-/// Source operator producing (nodeId, depth) rows — used by FrontierLimit tests.
+/// (nodeId, depth) 行を生成する入力演算子。FrontierLimit のテストで使用する。
 /// </summary>
 internal sealed class DepthTaggedSourceOperator : IPhysicalOperator
 {
@@ -113,9 +114,8 @@ internal sealed class DepthTaggedSourceOperator : IPhysicalOperator
 }
 
 /// <summary>
-/// Source operator emitting a single (source, target) pair — used by
-/// shortest-path / bidirectional-expand style operators that consume
-/// two NodeId columns.
+/// (source, target) の組を 1 件出力する入力演算子。
+/// NodeId 2 列を受け取る最短経路および双方向展開演算子で使用する。
 /// </summary>
 internal sealed class PairSourceOperator : IPhysicalOperator
 {
@@ -148,7 +148,7 @@ internal sealed class PairSourceOperator : IPhysicalOperator
 }
 
 /// <summary>
-/// Source operator emitting a sequence of relationship-id rows — used by
+/// リレーションシップ ID 行の列を出力する入力演算子。
 /// <see cref="RelationshipEndpointOperator"/> tests which take a rel column.
 /// </summary>
 internal sealed class FixedRelationshipListOperator : IPhysicalOperator

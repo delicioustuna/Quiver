@@ -290,7 +290,7 @@ public sealed class MultiValuePropertyTests : IDisposable
             .Should().Be(PropertyCardinality.Set);
     }
 
-    // ── B+Tree index for Set cardinality (MV-3) ─────────────────
+    // ── Set カーディナリティの B+Tree インデックス ────────────
 
     [Fact]
     public void Indexed_set_property_elements_found_by_SeekIndex()
@@ -399,7 +399,7 @@ public sealed class MultiValuePropertyTests : IDisposable
         }
     }
 
-    // ── MV-5: TypedGraphTraversal Has/Values for List<T> ────────
+    // ── List<T> に対する TypedGraphTraversal の Has / Values ───
 
     [Fact]
     public void TypedTraversal_Has_containment_filters_by_element()

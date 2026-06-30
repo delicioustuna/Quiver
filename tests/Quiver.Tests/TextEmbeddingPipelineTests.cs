@@ -9,10 +9,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// VEC-4 end-to-end coverage for <see cref="TextEmbeddingPipeline"/>: text →
-/// post-commit hook → provider → vector store, with ScanAndEnqueueAsync as
-/// the Z' fallback. The provider is a deterministic mock so tests stay
-/// hermetic.
+/// <see cref="TextEmbeddingPipeline"/> のテキスト入力、コミット後フック、
+/// プロバイダー、ベクトルストアまでをエンドツーエンドに検証する。
+/// <c>ScanAndEnqueueAsync</c> による取りこぼし回収も対象とする。
+/// テストを外部環境から隔離するため、決定的なモックプロバイダーを使う。
 /// </summary>
 public sealed class TextEmbeddingPipelineTests : IDisposable
 {

@@ -10,12 +10,12 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FTS-8: WAND document-at-a-time pruning (design 13 §7.5). The text-first operator takes
-/// the WAND path only when a GraphStats snapshot is available (<c>G(schema, stats)</c>); the
-/// no-stats form (<c>G(schema)</c>) stays on the full term-at-a-time scan. These tests pin
-/// that WAND returns the <em>same exact top-k</em> as the full scan (the snapshot df equals
-/// the true df on a freshly-collected static corpus), while exercising the pruning path
-/// (rare + common term mixes) and visibility (deleted docs absent).
+/// 文書単位で枝刈りする WAND を検証する。
+/// text-first 演算子は GraphStats のスナップショットがある場合だけ WAND を使い、
+/// 統計が無い場合は語単位の全走査を使う。
+/// 静的コーパスで WAND と全走査の上位 k 件が完全に一致すること、
+/// まれな語と一般的な語の組み合わせで枝刈りが働くこと、
+/// 削除済み文書が見えないことを確認する。
 /// </summary>
 public sealed class FullTextWandTests : IDisposable
 {
@@ -45,14 +45,14 @@ public sealed class FullTextWandTests : IDisposable
         return n;
     }
 
-    /// <summary>Full term-at-a-time scan (no stats → fallback path).</summary>
+    /// <summary>統計を渡さず、語単位の全走査へフォールバックする。</summary>
     private List<NodeId> SearchFullScan(string query, int k)
     {
         using var rtx = _db.BeginReadOnlyTransaction();
         return rtx.G(_db.Schema).Search(Index, query, k).ToList();
     }
 
-    /// <summary>WAND path (stats present → per-term upper-bound pruning).</summary>
+    /// <summary>統計を渡し、語ごとの上限値を使う WAND 経路を選択する。</summary>
     private List<NodeId> SearchWand(string query, int k)
     {
         var stats = _db.CollectStats();

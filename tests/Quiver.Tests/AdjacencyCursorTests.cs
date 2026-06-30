@@ -7,9 +7,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// PW-8: high-degree adjacency cursor must walk the full block chain without
-/// truncating. The contiguous block layout packs ~581 entries per page, so
-/// degrees well above one page exercise the multi-page continuation path.
+/// 高次数ノードの隣接カーソルがブロックチェーンを途中で切らずに走査することを検証する。
+/// 連続ブロック形式は 1 ページに約 581 エントリを格納するため、
+/// それを十分に超える次数で複数ページの継続処理を通す。
 /// </summary>
 public sealed class AdjacencyCursorTests : IDisposable
 {
@@ -55,8 +55,8 @@ public sealed class AdjacencyCursorTests : IDisposable
     [Fact]
     public void OpenCursor_honors_type_filter_across_pages()
     {
-        // Build a hub with two relationship types; cursor with type filter must
-        // skip the non-matching ones across multiple pages.
+        // 2 種類のリレーションシップを持つハブを作り、
+        // 型フィルター付きカーソルが複数ページにまたがって不一致を除外することを確認する。
         const int half = 1_000;
         {
             using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
@@ -66,7 +66,7 @@ public sealed class AdjacencyCursorTests : IDisposable
             for (int i = 1; i <= 2 * half; i++)
             {
                 loader.AppendNode(new NodeId(i), new LabelId(1));
-                // Even i → type 0 (matches filter), odd i → type 1 (skipped).
+                // 偶数は型 0 で一致し、奇数は型 1 なので除外される。
                 short type = (short)(i % 2 == 0 ? 0 : 1);
                 loader.AppendRelationship(new RelationshipId(relId++),
                     new NodeId(0), new NodeId(i), new RelationshipTypeId(type));
@@ -82,7 +82,7 @@ public sealed class AdjacencyCursorTests : IDisposable
         while (cursor.MoveNext())
         {
             cursor.Type.Should().Be(new RelationshipTypeId(0));
-            // Only even neighbour ids are emitted.
+            // 偶数番目の隣接ノードだけが出力される。
             (cursor.Neighbor.Value % 2).Should().Be(0);
             count++;
         }
@@ -97,7 +97,7 @@ public sealed class AdjacencyCursorTests : IDisposable
 
         using var tx = _db.BeginTransaction();
         var adj = tx.AsInternal().AdjacencyBlocks!;
-        // Node id beyond the high watermark has no block.
+        // 高水位標を超えるノード ID にはブロックがない。
         adj.HasBlock(new NodeId(99_999)).Should().BeFalse();
         using var cursor = adj.OpenCursor(new NodeId(99_999), Direction.Outgoing, null);
         cursor.MoveNext().Should().BeFalse();

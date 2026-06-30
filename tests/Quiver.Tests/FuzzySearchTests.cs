@@ -7,9 +7,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// GA-4 coverage: FTS fuzzy query support (<c>g.Search("idx", "quiver~1", k)</c>).
-/// Exercises Levenshtein edit-distance expansion, parser recognition of <c>~N</c>,
-/// and integration with BM25 scoring, Boolean operators, and the graph-first path.
+/// 全文検索のあいまいクエリ (<c>g.Search("idx", "quiver~1", k)</c>) を検証する。
+/// レーベンシュタイン距離による展開、パーサーによる <c>~N</c> の認識、
+/// BM25 採点、論理演算子、graph-first 経路との統合を対象とする。
 /// </summary>
 public sealed class FuzzySearchTests : IDisposable
 {

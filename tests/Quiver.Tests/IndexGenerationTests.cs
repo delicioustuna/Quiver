@@ -7,9 +7,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// ARCH-3: インデックス値レーンへの Generation 導入。slot の物理再利用 (vacuum free list) に伴う
-/// stale 索引エントリ (ABA) が別ノードを誤って返さないこと、orphan GC が世代不一致を回収できること、
-/// フォーマットバージョンが V4 に進み旧フォーマットを拒否することを検証する。
+/// インデックス値に世代を保持する仕組みを検証する。
+/// Vacuum のフリーリストによるスロット再利用後も古いインデックスエントリが
+/// 別ノードを返さないこと、孤立エントリ回収が世代不一致を除去できること、
+/// V4 より古いフォーマットを拒否することを確認する。
 /// </summary>
 public sealed class IndexGenerationTests : IDisposable
 {
@@ -25,7 +26,7 @@ public sealed class IndexGenerationTests : IDisposable
         try { Directory.Delete(_dir, recursive: true); } catch { }
     }
 
-    // ---- EntityRef pack / unpack (ARCH-5b: 旧 GenerationalRef を吸収) ----
+    // ---- EntityRef のパックと展開 ----
 
     [Theory]
     [InlineData(EntityKind.Node, 0L, 0)]
@@ -83,7 +84,7 @@ public sealed class IndexGenerationTests : IDisposable
             tx.IndexInsert("idx_name", "bob", nodeB);
             tx.Commit();
         }
-        // ABA の前提: 同一 slot が再利用されていること (ARCH-5b: slot 同一性は Sequence。
+        // ABA の前提として、同じスロットが再利用されていることを Sequence で確認する。
         // Value は世代を含むため reincarnation では nodeA と nodeB で異なる)。
         nodeB.Sequence.Should().Be(nodeA.Sequence);
         nodeB.Generation.Should().NotBe(nodeA.Generation);
@@ -152,7 +153,7 @@ public sealed class IndexGenerationTests : IDisposable
         rtx.Rollback();
     }
 
-    // ---- ARCH-5b: 世代付き NodeId の外部往復検証 (TryResolve → 不一致で not-found) ----
+    // ---- 世代付き NodeId の外部往復検証 (TryResolve の不一致は not-found) ----
 
     [Fact]
     public void Stale_node_handle_resolves_to_not_found_after_slot_reuse()

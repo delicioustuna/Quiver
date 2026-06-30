@@ -80,7 +80,7 @@ public class ExpandOperatorTests
             tx.CreateRelationship(a, b, "K"); // a -> b
         });
         using var tx2 = fx.Db.BeginTransaction();
-        // Incoming on a should be empty.
+        // a への入力方向のリレーションシップは存在しない。
         using var inResult = tx2.Execute(
             new ExpandOperator(new FixedNodeListOperator(a), 0, Direction.Incoming, null, ExpandOutputMode.NeighborOnly));
         inResult.Rows().Should().BeEmpty();
@@ -178,7 +178,7 @@ public class ExpandOperatorTests
     [Fact]
     public void CarryColumns_appends_upstream_slots_to_output()
     {
-        // GC-6: carryColumns lets us propagate upstream columns into the expanded row.
+        // carryColumns は入力側の列を展開後の行へ引き継ぐ。
         NodeId src = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {

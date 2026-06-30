@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Quiver.Tests;
 
-/// <summary>PW-17: RelationshipScanExpandOperator end-to-end against a real GraphDatabase.</summary>
+/// <summary>実際の <c>GraphDatabase</c> を使って <c>RelationshipScanExpandOperator</c> を検証する。</summary>
 public sealed class RelationshipScanExpandOperatorTests : IDisposable
 {
     private readonly string _dir;

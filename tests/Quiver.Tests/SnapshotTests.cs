@@ -6,10 +6,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// OP-1: <see cref="GraphDatabase.CreateSnapshot"/> のライブスナップショット契約をカバーする。
-///  - quiescent な DB を snapshot → target を Open → データが完全に見える
-///  - 書き込み workload と並行に snapshot → target Open → 整合性 (CheckConsistency) が緑
-///  - 索引も含めて snapshot → target の Has 条件が動く
+/// <see cref="GraphDatabase.CreateSnapshot"/> のライブスナップショット契約を検証する。
+///  - 静止中のデータベースを複製し、出力を開くと全データを参照できる
+///  - 書き込みと並行して複製しても、出力の整合性検査に成功する
+///  - インデックスを含む複製で Has 条件を評価できる
 /// </summary>
 public sealed class SnapshotTests : IDisposable
 {

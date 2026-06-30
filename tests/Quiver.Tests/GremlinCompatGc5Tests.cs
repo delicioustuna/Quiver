@@ -7,10 +7,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// GC-5: MERGE / UPSERT coverage. Beyond the contract surface (which lives in
-/// <c>Quiver.Backend.Tests</c>), these scenarios exercise the
-/// <c>GraphTraversalSource.MergeNode</c> sugar and the ON CREATE SET /
-/// ON MATCH SET branch pattern.
+/// MERGE / UPSERT を検証する。
+/// <c>Quiver.Backend.Tests</c> の契約テストに加え、
+/// <c>GraphTraversalSource.MergeNode</c> の簡略 API と
+/// ON CREATE SET / ON MATCH SET の分岐パターンを対象とする。
 /// </summary>
 public sealed class GremlinCompatGc5Tests : IDisposable
 {

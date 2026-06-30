@@ -9,8 +9,8 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// OB-3: 構造化ログ強化の動作確認。
-/// <see cref="QuiverLog"/> 経由でホット path に流れる log/scope を捕捉用ロガーで集めて検証する。
+/// 構造化ログの動作を確認する。
+/// <see cref="QuiverLog"/> 経由でホットパスに流れるログとスコープを捕捉用ロガーで収集する。
 /// </summary>
 [Collection("StructuredLoggingTests")] // QuiverLog.LoggerFactory はプロセス静的なので直列化する
 public sealed class StructuredLoggingTests : IDisposable
@@ -34,7 +34,7 @@ public sealed class StructuredLoggingTests : IDisposable
 
     public void Dispose()
     {
-        // TS-7: プロセス静的を先に NullLoggerFactory へ戻してから factory を破棄する。逆順だと、
+        // プロセス静的な参照を先に NullLoggerFactory へ戻してからファクトリを破棄する。逆順だと、
         // 並列実行中の他テストが破棄済み factory へログを流し込む窓ができる (cross-test 汚染)。
         QuiverLog.LoggerFactory = NullLoggerFactory.Instance;
         _db.Dispose();
@@ -202,7 +202,7 @@ public sealed class StructuredLoggingTests : IDisposable
 
     private sealed class CapturingLogger(string category, CapturingLoggerProvider owner) : ILogger
     {
-        // TS-7: QuiverLog.LoggerFactory はプロセス静的なので、StructuredLoggingTests が本 logger を
+        // QuiverLog.LoggerFactory はプロセス静的なので、このテストが実ロガーを
         // 全プロセスに設置している間、並列実行中の他テストの hot-path ログも本 logger に流れ込む。
         // 旧実装は AsyncLocal の List を in-place で Add/RemoveAt していたが、AsyncLocal は List の
         // 参照を ExecutionContext 経由で並列ワーカーへ伝播させるため、複数スレッドが同一 List を

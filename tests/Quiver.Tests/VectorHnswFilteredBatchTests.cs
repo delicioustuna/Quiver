@@ -6,9 +6,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// ARCH-6 follow-up (③ KnnSearchFiltered / KnnSearchBatch の HNSW 化):
-/// Batch は各クエリを HNSW で独立に探索し単一 KnnSearch と一致する。低選択率の Filtered は
-/// HNSW 探索 + post-filter で動き、真の brute force に対し高 recall を保つ。
+/// HNSW を使う <c>KnnSearchFiltered</c> と <c>KnnSearchBatch</c> を検証する。
+/// バッチ検索は各クエリを独立に探索し、単一の KnnSearch と一致することを確認する。
+/// 低選択率のフィルター付き検索が HNSW 探索後のフィルターで動作し、
+/// 全走査と比較して高い再現率を保つことも確認する。
 /// </summary>
 public sealed class VectorHnswFilteredBatchTests : IDisposable
 {

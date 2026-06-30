@@ -9,9 +9,8 @@ using Xunit;
 namespace Quiver.Query.Physical.Tests;
 
 /// <summary>
-/// Isolated tests for <see cref="FullTextScanOperator"/>: validates the
-/// Bind/Open/MoveNext contract for BM25 full-text search without involving
-/// the DSL traversal layer.
+/// <see cref="FullTextScanOperator"/> を単体で検証する。
+/// DSL のトラバーサル層を介さず、BM25 全文検索の Bind / Open / MoveNext 契約を確認する。
 /// </summary>
 public sealed class FullTextScanOperatorTests
 {
@@ -128,7 +127,7 @@ public sealed class FullTextScanOperatorTests
         using var result = tx.Execute(new FullTextScanOperator(IndexName, "foo", k: 10));
         var rows = result.Rows().ToList();
         rows.Should().HaveCount(2);
-        // Higher TF should rank first (BM25 favors higher term frequency at equal doc length)
+        // 文書長が等しい場合、BM25 は語頻度の高い文書を上位にする。
         tx.Rollback();
     }
 

@@ -8,12 +8,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// BA-6 / codex_advice_3 §7.2: V2 adjacency view with an inline payload lane
-/// must preserve weights across bulk-load and surface them through the expand
-/// cursor / ExpandOperator's NeighborAndWeight projection. These tests cover
-/// the round-trip plus the multi-page chain (V2's smaller per-entry slot
-/// means ~370 entries per page versus V1's 581, so degrees above ~370 walk
-/// multiple pages).
+/// インラインペイロードレーンを持つ隣接ブロックが、一括読み込みを経ても重みを保持し、
+/// 展開カーソルと <c>ExpandOperator</c> の <c>NeighborAndWeight</c> 射影から取得できることを検証する。
+/// 往復変換に加え、1 ページ約 370 エントリを超える多段ページチェーンも対象とする。
 /// </summary>
 public sealed class AdjacencyBlockStoreV2Tests : IDisposable
 {
@@ -53,7 +50,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         int count = 0;
         while (cursor.MoveNext())
         {
-            // Weight for edge i is 100 + i (set by BuildWithInt64Weights).
+            // i 番目のリレーションシップの重みは 100 + i。
             cursor.WeightRaw.Should().Be(100 + cursor.Neighbor.Value);
             sum += cursor.WeightRaw;
             count++;
@@ -66,7 +63,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
     [Fact]
     public void Double_payload_round_trips_via_bitcast()
     {
-        // Use a double key.
+        // Double 型のキーを使う。
         using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             var key = db.Schema.GetOrCreatePropertyKey("score");
@@ -107,7 +104,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
             loader.AppendNode(new NodeId(2), new LabelId(0));
             loader.AppendRelationship(new RelationshipId(0), new NodeId(0), new NodeId(1), new RelationshipTypeId(0));
             loader.AppendRelationship(new RelationshipId(1), new NodeId(0), new NodeId(2), new RelationshipTypeId(0));
-            // Only edge 0 gets an explicit payload — edge 1 inherits the default.
+            // 先頭だけに明示的なペイロードを設定し、2 件目は既定値を使う。
             loader.AppendRelationshipPayload(new RelationshipId(0), key, 7);
             loader.Commit();
         }
@@ -178,7 +175,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
     {
         BuildWithInt64Weights(3);
 
-        // Close & reopen to ensure meta file persists.
+        // 閉じて再オープンし、メタデータの永続化を確認する。
         _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         _db.Dispose();
         _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
@@ -209,8 +206,8 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
     }
 
     /// <summary>
-    /// Minimal source for unit-testing ExpandOperator without booting the
-    /// rest of the operator stack. Emits exactly one NodeId row.
+    /// 他の演算子スタックを起動せずに ExpandOperator を単体テストするための最小入力。
+    /// NodeId を 1 行だけ出力する。
     /// </summary>
     private sealed class SingleNodeSource : IPhysicalOperator
     {

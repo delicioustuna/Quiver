@@ -8,15 +8,14 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FT-33 SSN (Serial Safety Net) の簡易スモークテスト。正式な canonical シナリオ網羅
-/// (write skew / read-only anomaly / dangerous structure / safe retry) と overhead bench は
-/// FT-34 で別途整備する。本テストは以下を確認する:
+/// SSN (Serial Safety Net) の簡易スモークテスト。
+/// 本テストは以下を確認する:
 /// <list type="bullet">
-///   <item><see cref="IsolationLevel.Serializable"/> で古典的 write skew を起こすと一方が
-///     <see cref="SerializabilityException"/> で abort される。</item>
-///   <item>Serializable を指定しない既定 (SI) では同じ write skew でも両方 commit する。</item>
-///   <item>読み取りが <b>relationship traversal 経由</b> でも read-set に入り、SSN が
-///     rw-antidependency を取りこぼさない (直接 Read に限定されていない)。</item>
+///   <item><see cref="IsolationLevel.Serializable"/> で典型的な write skew を起こすと、
+///     一方が <see cref="SerializabilityException"/> で中断される。</item>
+///   <item>Serializable を指定しない既定のスナップショット分離では両方がコミットする。</item>
+///   <item>リレーションシップのトラバーサルによる読み取りも読み取り集合へ入り、
+///     SSN が読み書き反依存を見落とさない。</item>
 /// </list>
 /// </summary>
 [Collection("concurrency-stress")]
@@ -30,7 +29,7 @@ public sealed class SsnSmokeTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "quiver_ssn_" + Guid.NewGuid().ToString("N"));
         _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), new GraphDatabaseOptions
         {
-            // TS-7: フル並列 + chaos の CPU 過剰購読下では、commit 経路の内部 lock 取得が既定 5s を
+            // 全面並列とカオステストによる CPU 過剰購読下では、コミット経路の内部ロック取得が
             // 超えて spurious な TransactionException("Lock timeout") を投げ、abort 集計を狂わせて
             // いた (SI では 0、Serializable では「SSN による 1 件」を期待する判定が壊れる)。寛大化して
             // starvation 由来の偽陽性を排除する。SSN abort 自体は barrier で snapshot 重複を強制して
@@ -77,7 +76,7 @@ public sealed class SsnSmokeTests : IDisposable
             read2: tx => tx.GetProperty(a, "balance"),
             write2: tx => tx.SetProperty(b, "balance", PropertyValue.FromInt32(40)));
 
-        // TS-7: 失敗時に原因 (lock timeout = starvation か / SerializabilityException = 誤検出か) が
+        // 失敗時にロックタイムアウトによるスターベーションか、直列化例外の誤検出かを
         // 分かるよう例外型とメッセージをダンプする。SI では SSN 検証が走らないため、両方 commit が
         // timing 非依存の正しい挙動。
         ex1.Should().BeNull("SI では write skew でも両方 commit する (T1 が {0} で abort された)", Describe(ex1));
@@ -123,14 +122,14 @@ public sealed class SsnSmokeTests : IDisposable
     [Fact]
     public void Serializable_commit_stamp_clock_survives_restart()
     {
-        // FT-33 (④): commit-stamp クロックは再起動跨ぎで単調連続。これがないと再起動後に
+        // コミットスタンプのクロックは再起動をまたいで単調増加する。そうでなければ再起動後に
         // クロックが 0 に戻り、永続化済みの大きい Pstamp (旧空間) と小さい c(T) (新空間) が
         // 混在して、競合の無い上書きまで false-abort してしまう。
         var dir = Path.Combine(Path.GetTempPath(), "quiver_ssn_restart_" + Guid.NewGuid().ToString("N"));
         try
         {
             NodeId x;
-            // Phase 1: Serializable な read tx を繰り返して X.Pstamp とクロックを進める。
+            // Serializable の読み取りトランザクションを繰り返して X.Pstamp とクロックを進める。
             using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
             {
                 using (var tx = db.BeginTransaction())
@@ -147,7 +146,7 @@ public sealed class SsnSmokeTests : IDisposable
                 }
             }
 
-            // Phase 2: 再 open。競合の無い単独 Serializable tx が X を上書きする。
+            // 再オープンし、競合のない単独の Serializable トランザクションで X を上書きする。
             // クロックが連続していれば c(T) > X.Pstamp となり false-abort しない。
             using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
             {

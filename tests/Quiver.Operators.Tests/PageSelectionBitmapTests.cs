@@ -294,8 +294,7 @@ public sealed class PageSelectionBitmapTests
         Span<ulong> words = stackalloc ulong[3];
         var bm = new PageSelectionBitmap(words, 150);
         bm.Clear();
-        // Manually set specific bits via SetAll + selective clear is complex,
-        // so just test that after SetAll + clearing most, we get the expected sparse set.
+        // SetAll 後に大半をクリアし、期待する疎な集合が得られることを確認する。
         bm.SetAll();
         for (int i = 0; i < 150; i++)
             if (i != 7 && i != 64 && i != 127 && i != 149)

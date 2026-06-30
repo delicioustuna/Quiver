@@ -67,7 +67,7 @@ public class PropertyExistsPredicateTests
     {
         NodeId n = default;
         using var fx = OperatorTestFixture.Open(tx => { n = tx.CreateNode("X"); });
-        // PropertyKeyId.Invalid simulates "this key was never registered".
+        // PropertyKeyId.Invalid で未登録キーを再現する。
         var pred = new PropertyExistsPredicate(0, default, mustExist: true);
         using var tx2 = fx.Db.BeginTransaction();
         using var result = tx2.Execute(new FilterOperator(new FixedNodeListOperator(n), pred));

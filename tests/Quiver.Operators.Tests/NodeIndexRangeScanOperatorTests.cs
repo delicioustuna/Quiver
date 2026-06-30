@@ -68,7 +68,7 @@ public class NodeIndexRangeScanOperatorTests
     [Fact]
     public void Double_range_orders_across_negative_boundary()
     {
-        // FT-35 増分3: 浮動小数点の索引 range シークが負値をまたいで正しく順序づくこと。
+        // 浮動小数点インデックスの範囲シークが負値をまたいでも正しく並ぶことを確認する。
         // DoubleKeyCodec の total-order 変換 (符号ビット反転 + 負値は全ビット反転) を検証する。
         // 素朴な DoubleToInt64Bits 直格納では負値が逆順になりこのテストは落ちる。
         using var fx = OperatorTestFixture.OpenEmpty();

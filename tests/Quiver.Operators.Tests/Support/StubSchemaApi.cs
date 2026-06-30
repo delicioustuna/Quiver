@@ -4,8 +4,8 @@ using Quiver.Core;
 namespace Quiver.Query.Physical.Tests.Support;
 
 /// <summary>
-/// Minimal <see cref="ISchemaApi"/> stub for plan-structure tests. Assigns
-/// sequential IDs so the planner can resolve names without a real database.
+/// プラン構造テスト用の最小 <see cref="ISchemaApi"/> スタブ。
+/// 実データベースなしでプランナーが名前を解決できるよう連番 ID を割り当てる。
 /// </summary>
 internal sealed class StubSchemaApi : ISchemaApi
 {

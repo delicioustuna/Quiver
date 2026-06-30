@@ -402,14 +402,14 @@ public sealed class GraphDatabaseTests : IDisposable
         tx.CreateRelationship(alice, bob, "KNOWS");
 
         var g = tx.G(_db.Schema);
-        // ARCH-8: Out<TRel, TTarget>() は TypedGraphTraversal<PersonNode> を型保存する。
+        // Out<TRel, TTarget>() は TypedGraphTraversal<PersonNode> を型保存する。
         var neighbors = g.Nodes<PersonNode>().Out<KnowsRel, PersonNode>().ToListWithIds();
 
         neighbors.Select(n => n.Id).Should().Contain(bob);
         tx.Rollback();
     }
 
-    // ===== GC-7: 式ツリー述語 (Where / OutWhere) =====
+    // ===== 式ツリー述語 (Where / OutWhere) =====
 
     [Fact]
     public void TypedGraphTraversal_Where_expression_filters_nodes()
@@ -438,7 +438,7 @@ public sealed class GraphDatabaseTests : IDisposable
         KnowsRel.Insert(tx, alice, carol, new KnowsRel { Since = 2024 });
 
         var g = tx.G(_db.Schema);
-        // GC-8: エッジプロパティ Since で絞り込みつつ PersonNode 型を保存して target へ。
+        // リレーションシッププロパティ Since で絞り込みつつ PersonNode 型を保存して対象へ進む。
         var recent = g.Nodes<PersonNode>()
                       .Where(p => p.Name == "Alice")
                       .OutWhere<KnowsRel, PersonNode>(e => e.Since > 2022)
@@ -448,7 +448,7 @@ public sealed class GraphDatabaseTests : IDisposable
         tx.Rollback();
     }
 
-    // ===== FT-35: 浮動小数点の範囲述語 =====
+    // ===== 浮動小数点の範囲述語 =====
 
     [Fact]
     public void Has_double_range_filters_via_predicate()
@@ -472,7 +472,7 @@ public sealed class GraphDatabaseTests : IDisposable
         var bob   = PersonNode.Insert(tx, new PersonNode { Name = "Bob",   Score = 2.5 });
 
         var g = tx.G(_db.Schema);
-        // FT-35: double メンバの式ツリー比較 (整数リテラルでも double 比較に routing)。
+        // double メンバーの式ツリー比較では、整数リテラルも double 比較へ振り分ける。
         var found = g.Nodes<PersonNode>().Where(p => p.Score > 2).ToListWithIds();
 
         found.Select(n => n.Id).Should().Contain(bob).And.NotContain(alice);
@@ -482,7 +482,7 @@ public sealed class GraphDatabaseTests : IDisposable
     [Fact]
     public void DateTime_roundtrip_canonicalizes_to_utc_instant()
     {
-        // FT-35 増分2: Local 入力は UTC 瞬時へ正準化され、復元は Utc Kind。
+        // Local 入力は UTC の瞬時へ正規化し、Utc Kind として復元する。
         var local = new DateTime(2024, 6, 1, 12, 0, 0, DateTimeKind.Local);
         var pv = PropertyValue.FromDateTime(local);
         pv.DateTimeValue.Should().Be(local.ToUniversalTime());
@@ -523,7 +523,7 @@ public sealed class GraphDatabaseTests : IDisposable
         tx.SetProperty(r2, "since", PropertyValue.FromInt64(2024));
 
         var g = tx.G(_db.Schema);
-        // GC-8: エッジトラバーサルの .Has がリレーションシッププロパティを読む (旧: 常に空)。
+        // リレーションシップトラバーサルの .Has はリレーションシッププロパティを読む。
         var rels = g.Node(alice).OutRelationships("KNOWS").Has("since", P.Gt(2022L)).ToList();
 
         rels.Should().ContainSingle().Which.Should().Be(r2);
@@ -696,18 +696,18 @@ public sealed class GraphDatabaseTests : IDisposable
         Directory.CreateDirectory(dir);
         try
         {
-            // Phase 1: create the database so all files exist in pristine state.
+            // 最初にデータベースを作成し、必要なファイルを初期状態で用意する。
             {
                 using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
             }
 
-            // ARCH-4: 単一ファイルコンテナ。全コアデータは graph.quiver 1 ファイル。
+            // 単一ファイルコンテナでは、すべてのコアデータを graph.quiver に格納する。
             byte[] dataSnap = File.ReadAllBytes(Path.Combine(dir, "graph.quiver"));
 
             NodeId aliceId;
 
-            // Phase 2: write data and commit (WAL is flushed; buffer pool may not be).
-            // ARCH-4 増分7: クリーン終了 (ActiveCount==0) では Dispose が FlushAll + WAL 削除を行い
+            // データを書き込んでコミットする。WAL はフラッシュされるが、バッファープールは未反映でもよい。
+            // 正常終了時は Dispose が全ページのフラッシュと WAL の削除を行うため、
             // graph.quiver が確定して WAL が消える。WAL replay 経路を検証するため、未コミットの tx を
             // 1 つ開いたまま Dispose して「クラッシュ (ActiveCount>0 → WAL 非削除)」を模擬する。
             {
@@ -725,7 +725,7 @@ public sealed class GraphDatabaseTests : IDisposable
             // Restore pre-write data file to simulate crash (buffer not written to disk).
             File.WriteAllBytes(Path.Combine(dir, "graph.quiver"), dataSnap);
 
-            // Phase 3: reopen — RecoveryManager replays WAL PageImage records.
+            // 再オープンし、RecoveryManager が WAL の PageImage レコードを再実行する。
             {
                 using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
                 using var tx = db.BeginReadOnlyTransaction();
@@ -739,14 +739,14 @@ public sealed class GraphDatabaseTests : IDisposable
         }
     }
 
-    // ===== BA-3 diagnostics =====
+    // ===== 診断情報 =====
 
     [Fact]
     public void Diagnostics_exposes_adjacency_fallback_count()
     {
         // Without an adjacency block built, the backend always falls into the
         // linked-list path so the counter never increments — but it must at
-        // least be a readable field on DatabaseStatistics for BA-3 callers.
+        // DatabaseStatistics の読み取り可能なフィールドとして公開されることを確認する。
         var stats = _db.Diagnostics.GetStatistics();
         stats.AdjacencyFallbackCount.Should().BeGreaterOrEqualTo(0);
     }
@@ -773,7 +773,7 @@ public sealed class GraphDatabaseTests : IDisposable
         tx.Rollback();
     }
 
-    // ===== PW-11 streaming cursor =====
+    // ===== ストリーミングカーソル =====
 
     [Fact]
     public void GraphTraversal_AsEnumerable_streams_without_full_materialise()
@@ -844,7 +844,7 @@ public sealed class GraphDatabaseTests : IDisposable
         found.Should().ContainSingle().Which.Should().Be("Bob");
     }
 
-    // ===== Phase 2: サブトラバーサル述語 =====
+    // ===== サブトラバーサル述語 =====
 
     [Fact]
     public void Where_out_exists_keeps_only_nodes_with_neighbor()

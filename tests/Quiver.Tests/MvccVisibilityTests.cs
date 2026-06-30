@@ -7,12 +7,13 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FT-26 MVCC: GraphDatabase 経由で snapshot isolation の挙動を確認する end-to-end テスト。
+/// <c>GraphDatabase</c> 経由で MVCC のスナップショット分離を確認する
+/// エンドツーエンドテスト。
 ///
 /// <para>
-/// NodeStore / RelationshipStore / PropertyStore の record header に xmin / xmax が乗り、
-/// Transaction.ctor が <c>MvccContext.Begin</c> を呼び、TransactionManager.OnCommit が
-/// <c>CommittedTxRegistry.MarkCommitted</c> を呼ぶ全経路の結合確認。
+/// NodeStore / RelationshipStore / PropertyStore のレコードヘッダーが xmin / xmax を保持し、
+/// トランザクション開始時に <c>MvccContext.Begin</c>、コミット時に
+/// <c>CommittedTxRegistry.MarkCommitted</c> が呼ばれる一連の経路を確認する。
 /// </para>
 /// </summary>
 public sealed class MvccVisibilityTests : IDisposable
@@ -159,7 +160,7 @@ public sealed class MvccVisibilityTests : IDisposable
     [Fact]
     public void Stress_long_reader_with_interleaved_writers_keeps_consistent_snapshot()
     {
-        // FT-26 完了条件 (single-thread interleave 経路): long reader と writer tx を
+        // 単一スレッドで長時間リーダーとライタートランザクションを交互に進め、
         // 時系列にインターリーブし、reader snapshot が writer commit に揺らがないことを確認。
         var baseNodes = new List<NodeId>();
         using (var tx = _db.BeginTransaction())
@@ -202,7 +203,7 @@ public sealed class MvccVisibilityTests : IDisposable
     [Fact]
     public void Concurrency_stress_multithread_reader_and_writers_do_not_corrupt()
     {
-        // FT-26 DoD「long reader (1000ms スキャン) と concurrent writer が互いをブロックしない、
+        // 1 秒走査する長時間リーダーと並行ライターが互いをブロックせず、
         // reader の結果が consistent snapshot」を真の multi-thread で検証する。
         // per-frame RW lock により PagedFile レベルの torn-read を防ぐ。
         var baseNodes = new List<NodeId>();
@@ -276,7 +277,7 @@ public sealed class MvccVisibilityTests : IDisposable
     [Fact]
     public void Throughput_sanity_mvcc_does_not_regress_excessively()
     {
-        // FT-26 完了条件: 「単一 tx workload で書き込みスループットが MVCC なし比 80% 以上」
+        // 単一トランザクションのワークロードで書き込み性能が極端に低下しないことを
         // MVCC なしの比較は format 互換性のため難しいので、絶対値の妥当性チェックに留める。
         // 1000 ノード createNode + commit が 30 秒以内に終わること (CI で十分余裕のある上限)。
         const int N = 1000;

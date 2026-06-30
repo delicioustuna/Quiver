@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Quiver.Tests;
 
-/// <summary>PW-12: BitmapFilterOperator + PageSelectionBitmap.</summary>
+/// <summary><c>PageSelectionBitmap</c> を使う <c>BitmapFilterOperator</c> を検証する。</summary>
 public sealed class BitmapFilterOperatorTests : IDisposable
 {
     private readonly string _dir;

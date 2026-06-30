@@ -8,8 +8,8 @@ using Xunit;
 namespace Quiver.Tests.Text;
 
 /// <summary>
-/// End-to-end: <see cref="FilteredTokenizer"/> wired through
-/// <see cref="FullTextIndexOptions.Filters"/> into the full-text index pipeline.
+/// <see cref="FilteredTokenizer"/> を <see cref="FullTextIndexOptions.Filters"/> から
+/// 全文インデックス処理へ接続する経路をエンドツーエンドに検証する。
 /// </summary>
 public sealed class FilteredTokenizerIntegrationTests : IDisposable
 {

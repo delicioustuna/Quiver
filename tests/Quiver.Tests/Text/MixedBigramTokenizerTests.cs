@@ -5,8 +5,9 @@ using Xunit;
 namespace Quiver.Tests.Text;
 
 /// <summary>
-/// FTS-1: tokenization rules of <see cref="MixedBigramTokenizer"/> per design 13 §5
-/// (CJK -> overlapping bigrams, Latin/digit -> whole word, everything else -> separator).
+/// <see cref="MixedBigramTokenizer"/> のトークン化規則を検証する。
+/// CJK は重なり合うバイグラム、ラテン文字と数字は単語全体、
+/// それ以外の文字は区切りとして扱う。
 /// </summary>
 public sealed class MixedBigramTokenizerTests
 {
@@ -27,8 +28,7 @@ public sealed class MixedBigramTokenizerTests
     [Fact]
     public void Iteration_mark_binds_to_adjacent_kanji()
     {
-        // 々 (U+3005) is classified as CJK so 佐々木 bigrams across it
-        // instead of splitting into 佐 / 々 / 木.
+        // 々 (U+3005) は CJK として扱い、佐 / 々 / 木 に分割せず「佐々」「々木」にする。
         Tokenize("佐々木").Should().Equal("佐々", "々木");
     }
 
@@ -36,16 +36,16 @@ public sealed class MixedBigramTokenizerTests
     public void English_only_emits_whole_words_lowercased()
     {
         Tokenize("Hello World").Should().Equal("hello", "world");
-        // letters + digits in one run stay a single word token.
+        // 連続する英字と数字は 1 つの単語トークンにする。
         Tokenize("abc123").Should().Equal("abc123");
-        // non-alphanumeric splits words.
+        // 英数字以外の文字は単語を分割する。
         Tokenize("v1.2-rc").Should().Equal("v1", "2", "rc");
     }
 
     [Fact]
     public void Mixed_script_switches_token_kind_at_boundaries()
     {
-        // "QuiverのHNSW実装" -> word, isolated-CJK unigram, word, CJK bigram.
+        // 混在文字列を単語、孤立した CJK ユニグラム、単語、CJK バイグラムへ分ける。
         Tokenize("QuiverのHNSW実装").Should().Equal("quiver", "の", "hnsw", "実装");
     }
 
@@ -53,7 +53,7 @@ public sealed class MixedBigramTokenizerTests
     public void Single_cjk_character_emits_a_unigram()
     {
         Tokenize("猫").Should().Equal("猫");
-        // isolated CJK char surrounded by separators is still a unigram.
+        // 区切り文字に囲まれた孤立 CJK 文字もユニグラムにする。
         Tokenize("a 猫 b").Should().Equal("a", "猫", "b");
     }
 
@@ -62,7 +62,7 @@ public sealed class MixedBigramTokenizerTests
     {
         Tokenize("🎉").Should().BeEmpty();
         Tokenize("!!! @#%").Should().BeEmpty();
-        // emoji acts as a separator between word runs.
+        // 絵文字は単語列の区切りとして扱う。
         Tokenize("foo😀bar").Should().Equal("foo", "bar");
     }
 

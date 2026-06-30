@@ -7,8 +7,8 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// PW-17: QueryOptimizer.SelectExpandPlan three-way dispatch
-/// (AdjacencyBlock / LinkedListChain / RelationshipScan).
+/// <c>QueryOptimizer.SelectExpandPlan</c> が AdjacencyBlock、LinkedListChain、
+/// RelationshipScan の 3 経路を選択する処理を検証する。
 /// </summary>
 public sealed class QueryOptimizerExpandPlanTests : IDisposable
 {

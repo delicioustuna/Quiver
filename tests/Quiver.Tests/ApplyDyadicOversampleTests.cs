@@ -7,8 +7,8 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// SIG-7: HNSW oversample → custom rerank. Tests that the <c>oversample</c>
-/// parameter narrows candidates via HNSW before re-ranking with the custom operator.
+/// HNSW で候補を多めに取得してからカスタム演算子で再順位付けする処理を検証する。
+/// <c>oversample</c> が HNSW の候補数を制御し、その候補だけが再評価されることを確認する。
 /// </summary>
 public sealed class ApplyDyadicOversampleTests : IDisposable
 {
@@ -23,7 +23,7 @@ public sealed class ApplyDyadicOversampleTests : IDisposable
         _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
 
         var keyId = _db.Schema.GetOrCreatePropertyKey(VecIndex);
-        // HnswFlat (default) — supports both KNN and ApplyDyadic
+        // 既定の HnswFlat は KNN と ApplyDyadic の両方を扱う。
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             VecIndex, EntityKind.Node, keyId, Dim,
             DistanceMetric.Cosine, "test", null, VectorIndexKind.HnswFlat));
@@ -38,7 +38,7 @@ public sealed class ApplyDyadicOversampleTests : IDisposable
     [Fact]
     public void Oversample_rerank_returns_correct_top_k()
     {
-        // Create 20 nodes with distinct vectors
+        // 異なるベクトルを持つノードを 20 件作る。
         float[] query = [1f, 0f, 0f, 0f];
         var created = new List<(NodeId Id, float[] Vec)>();
 
@@ -48,7 +48,7 @@ public sealed class ApplyDyadicOversampleTests : IDisposable
             {
                 var nid = tx.CreateNode("Sensor");
                 tx.SetProperty(nid, "Site", PropertyValue.FromString("A"));
-                // Vectors with decreasing alignment to query
+                // クエリとの一致度が順に下がるベクトル。
                 var vec = new float[Dim];
                 vec[0] = 1f - i * 0.05f;
                 vec[1] = i * 0.05f;
@@ -62,17 +62,17 @@ public sealed class ApplyDyadicOversampleTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        // Brute-force (no oversample) — exact result
+        // 候補追加取得を使わない全走査を正解値にする。
         var bruteResult = g.Nodes<SensorNode>().Has(s => s.Site, "A")
             .ApplyDyadic<CosineSimilarityOp>(s => s.Waveform, query, k: 5)
             .ToListWithIds();
 
-        // Oversample — HNSW pre-filters 5*4=20 candidates (all), then reranks
+        // HNSW が 5×4=20 件を候補に絞り、その後に再順位付けする。
         var oversampleResult = g.Nodes<SensorNode>().Has(s => s.Site, "A")
             .ApplyDyadic<CosineSimilarityOp>(s => s.Waveform, query, k: 5, oversample: 4)
             .ToListWithIds();
 
-        // With oversample=4 and only 20 nodes, HNSW gets all of them anyway, so results match
+        // ノードが 20 件だけなので oversample=4 では全件が候補となり、結果が一致する。
         oversampleResult.Should().HaveCount(bruteResult.Count);
         oversampleResult.Select(x => x.Id).Should().Equal(bruteResult.Select(x => x.Id));
     }
@@ -80,7 +80,7 @@ public sealed class ApplyDyadicOversampleTests : IDisposable
     [Fact]
     public void Oversample_narrows_candidates_from_hnsw()
     {
-        // Create 30 nodes — the oversample=2 with k=3 means HNSW returns 6 candidates
+        // 30 ノードを作る。k=3、oversample=2 なら HNSW は 6 候補を返す。
         float[] query = [1f, 0f, 0f, 0f];
 
         using (var tx = _db.BeginTransaction())
@@ -101,7 +101,7 @@ public sealed class ApplyDyadicOversampleTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        // k=3, oversample=2 → HNSW returns 6 candidates → rerank → top 3
+        // 6 候補を再順位付けし、上位 3 件を返す。
         var result = g.Nodes<SensorNode>().Has(s => s.Site, "A")
             .ApplyDyadic<CosineSimilarityOp>(s => s.Waveform, query, k: 3, oversample: 2)
             .ToListWithIds();
@@ -218,7 +218,7 @@ public sealed class ApplyDyadicOversampleTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        // oversample: null (default) — should behave identically to no oversample
+        // oversample が null の既定値は候補追加取得なしと同じ動作になる。
         var bruteResult = g.Nodes<SensorNode>().Has(s => s.Site, "A")
             .ApplyDyadic<CosineSimilarityOp>(s => s.Waveform, query, k: 3)
             .ToListWithIds();
@@ -236,7 +236,7 @@ public sealed class ApplyDyadicOversampleTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        // No matching nodes for label "Sensor" with Site="Z"
+        // ラベル Sensor かつ Site="Z" に一致するノードはない。
         var result = g.Nodes<SensorNode>().Has(s => s.Site, "Z")
             .ApplyDyadic<CosineSimilarityOp>(s => s.Waveform, [1f, 0f, 0f, 0f], k: 5, oversample: 4)
             .ToListWithIds();
@@ -252,7 +252,7 @@ public sealed class ApplyDyadicOversampleTests : IDisposable
         if (norm > 0) for (int i = 0; i < v.Length; i++) v[i] /= norm;
     }
 
-    // ── Hand-coded model types ──────────────────────────────────────────────
+    // ── 手書きのモデル型 ──────────────────────────────────────────────────
 
     private sealed class SensorNode : IGraphNode<SensorNode>
     {

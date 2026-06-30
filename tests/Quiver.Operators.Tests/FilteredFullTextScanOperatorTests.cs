@@ -9,8 +9,8 @@ using Xunit;
 namespace Quiver.Query.Physical.Tests;
 
 /// <summary>
-/// Isolated tests for <see cref="FilteredFullTextScanOperator"/>: validates the
-/// graph-first BM25 path where an upstream candidate set constrains the scoring.
+/// <see cref="FilteredFullTextScanOperator"/> を単体で検証する。
+/// 入力側の候補集合で採点対象を絞る graph-first の BM25 経路を確認する。
 /// </summary>
 public sealed class FilteredFullTextScanOperatorTests
 {
@@ -84,7 +84,7 @@ public sealed class FilteredFullTextScanOperatorTests
             seed.Commit();
         }
 
-        // Upstream produces zero candidates
+        // 入力側が候補を 1 件も生成しない場合。
         using var tx = fx.Db.BeginTransaction();
         var source = new FixedNodeListOperator(); // no nodes
         var op = new FilteredFullTextScanOperator(source, 0, IndexName, "hello", k: 10);

@@ -7,10 +7,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// BA-8 end-to-end: a numeric <see cref="PropertyPredicate"/> applied to a node
-/// whose property is stored under a non-numeric <see cref="PropertyValueType"/>
-/// must return false. Before BA-8, <c>PropertyInt64Predicate</c> reinterpreted
-/// the scalar lane and could lie for <c>Double</c> / <c>Bool</c> values.
+/// 数値用 <see cref="PropertyPredicate"/> を数値以外の
+/// <see cref="PropertyValueType"/> を持つノードへ適用したとき、偽を返すことを検証する。
+/// スカラーレーンを整数として再解釈し、Double や Bool を誤って一致させる回帰を防ぐ。
 /// </summary>
 public sealed class PropertyTypeFlagsRuntimeTests : IDisposable
 {
@@ -34,7 +33,7 @@ public sealed class PropertyTypeFlagsRuntimeTests : IDisposable
     {
         // A "score" stored as Double would previously be reinterpreted as the
         // raw Int64 bit pattern (positive for any non-negative double), so
-        // P.Gt(100) would falsely match. With BA-8 the predicate sees a Double
+        // P.Gt(100) が誤一致しないことを確認する。述語は Double 型を認識し、
         // type flag and returns false without decoding.
         using var tx = _db.BeginTransaction();
         var n = tx.CreateNode("Item");
@@ -52,8 +51,8 @@ public sealed class PropertyTypeFlagsRuntimeTests : IDisposable
     public void Numeric_predicate_rejects_bool_typed_property()
     {
         // Bool stored as 0/1 in the scalar lane. A bare PropertyInt64Predicate
-        // pre-BA-8 returned that scalar and so P.Gt(0) on a `true` value
-        // erroneously matched. BA-8 rejects the type up front.
+        // Bool のスカラー値を整数として解釈すると P.Gt(0) が true に誤一致する。
+        // 型を先に検査して、この入力を拒否する。
         using var tx = _db.BeginTransaction();
         var n = tx.CreateNode("Item");
         tx.SetProperty(n, "active", PropertyValue.FromBool(true));

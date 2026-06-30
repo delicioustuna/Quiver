@@ -275,7 +275,7 @@ public sealed class GraphStatsTests : IDisposable
         _ = opt.ShouldUseBidirectional(label, hopCount: 20);
     }
 
-    // ---- BA-4: direction / type / power node / property-key stats ----
+    // ---- 方向、型、高次数ノード、プロパティキーの統計 ----
 
     [Fact]
     public void CollectStats_records_direction_aware_global_histograms()
@@ -382,7 +382,7 @@ public sealed class GraphStatsTests : IDisposable
         stats.IsLikelyPowerNode(lone).Should().BeFalse();
     }
 
-    // ---- PW-16: dense direct-array degree lookup ----
+    // ---- 密な直接配列による次数検索 ----
 
     [Fact]
     public void NodeDegrees_dense_path_records_every_node()

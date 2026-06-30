@@ -8,9 +8,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// SIG-5: <c>ApplyDyadic</c> with <c>GraphTraversal&lt;float[]&gt;</c> as the b operand.
-/// The traversal is evaluated once at Open time (uncorrelated) and the result
-/// is used as the reference vector for scoring all candidates.
+/// <c>GraphTraversal&lt;float[]&gt;</c> を右オペランドに指定した
+/// <c>ApplyDyadic</c> を検証する。
+/// 非相関のトラバーサルはオープン時に一度だけ評価され、
+/// その結果が全候補を採点する参照ベクトルになる。
 /// </summary>
 public sealed class ApplyDyadicTraversalBTests : IDisposable
 {
@@ -41,7 +42,7 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
     {
         float[] refVec = [0f, 1f, 0f, 0f];
 
-        // Create 3 Sensor nodes with distinct one-hot vectors
+        // 異なる one-hot ベクトルを持つ Sensor ノードを 3 件作る。
         using (var tx = _db.BeginTransaction())
         {
             for (int i = 0; i < 3; i++)
@@ -53,7 +54,7 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
                 _db.Vectors.SetVector(EntityKind.Node, nid.Value, VecIndex, vec);
             }
 
-            // Create a Template node with the reference vector stored as a float[] property
+            // 参照ベクトルを float[] プロパティに持つ Template ノードを作る。
             var tmpl = tx.CreateNode("Template");
             tx.SetProperty(tmpl, "Name", PropertyValue.FromString("ref"));
             tx.SetProperty(tmpl, "Pattern", PropertyValue.FromFloatArray(refVec));
@@ -64,12 +65,12 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        // Static b (baseline)
+        // 固定値 b を基準結果にする。
         var staticResult = g.Nodes<SensorNode>().Has(s => s.Site, "A")
             .ApplyDyadic<CosineSimilarityOp>(s => s.Waveform, refVec, k: 3)
             .ToListWithIds();
 
-        // Traversal b — reads the Template's Pattern property as float[]
+        // トラバーサル b は Template の Pattern を float[] として読む。
         var traversalB = g.Nodes<TemplateNode>()
             .Has(t => t.Name, "ref")
             .Values(t => t.Pattern);
@@ -78,7 +79,7 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
             .ApplyDyadic<CosineSimilarityOp>(s => s.Waveform, traversalB, k: 3)
             .ToListWithIds();
 
-        // Both paths must produce the same ranked order
+        // 両経路の順位が一致することを確認する。
         traversalResult.Should().HaveCount(staticResult.Count);
         var staticIds = staticResult.Select(x => x.Id).ToList();
         var traversalIds = traversalResult.Select(x => x.Id).ToList();
@@ -88,7 +89,7 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
     [Fact]
     public void ApplyDyadic_traversal_b_empty_throws()
     {
-        // Sensor node so the upstream isn't empty
+        // 入力を空にしないため Sensor ノードを作る。
         using (var tx = _db.BeginTransaction())
         {
             var nid = tx.CreateNode("Sensor");
@@ -100,7 +101,7 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        // Traversal b that matches nothing
+        // 何にも一致しないトラバーサル b。
         var emptyB = g.Nodes<TemplateNode>()
             .Has(t => t.Name, "does_not_exist")
             .Values(t => t.Pattern);
@@ -113,7 +114,7 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
             .WithMessage("*no results*");
     }
 
-    // ── Hand-coded model types (no SourceGenerator needed) ────────────────
+    // ── 手書きのモデル型 ────────────────────────────────────────────────
 
     private sealed class SensorNode : IGraphNode<SensorNode>
     {

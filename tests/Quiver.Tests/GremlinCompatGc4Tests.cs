@@ -7,8 +7,8 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// GC-4 coverage: variable-length repeat (.Repeat.Times / .Emit), shortest path
-/// distance, dedup, and per-row branching (.Union / .Coalesce / .Optional).
+/// 可変長反復 (.Repeat.Times / .Emit)、最短経路距離、重複除去、
+/// 行単位の分岐 (.Union / .Coalesce / .Optional) を検証する。
 /// </summary>
 public sealed class GremlinCompatGc4Tests : IDisposable
 {

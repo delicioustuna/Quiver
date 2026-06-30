@@ -7,9 +7,9 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// GC-2 coverage: extended predicates (STARTS WITH / ENDS WITH / CONTAINS /
-/// regex), predicate-level boolean composition (P.Not / P.And / P.Or),
-/// traversal-level And/Or sub-queries, and Cypher IS NULL / IS NOT NULL aliases.
+/// 拡張述語 (STARTS WITH、ENDS WITH、CONTAINS、正規表現)、
+/// 述語単位の論理合成 (P.Not、P.And、P.Or)、トラバーサル単位の And / Or サブクエリ、
+/// Cypher の IS NULL / IS NOT NULL 別名を検証する。
 /// </summary>
 public sealed class GremlinCompatGc2Tests : IDisposable
 {

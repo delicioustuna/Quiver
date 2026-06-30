@@ -7,10 +7,10 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// FT-12 / codex_advice_3 §7.3 — verify the direct-array join index round
-/// trips scalar relationship properties, rejects out-of-scope inputs, and
-/// is materially faster than the property-chain walk on a workload where
-/// every edge has the indexed weight.
+/// 直接配列形式の結合インデックスがリレーションシップのスカラープロパティを往復保持し、
+/// 対象外の入力を拒否することを検証する。
+/// また、全リレーションシップが重みを持つワークロードで、
+/// プロパティチェーン走査より十分に高速であることを確認する。
 /// </summary>
 public sealed class RelationshipPropertyJoinIndexTests : IDisposable
 {
