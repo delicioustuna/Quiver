@@ -124,15 +124,8 @@ fi
 log "Committing to '$TARGET_BRANCH'..."
 git commit -m "Publish: sync from $SOURCE_BRANCH"
 
-log "Cleaning up excluded files from disk before switching back..."
-for path in "${EXCLUDE_PATHS[@]}"; do
-    if [[ -e "$path" ]]; then
-        rm -rf "$path"
-    fi
-done
-
 log "Switching back to '$SOURCE_BRANCH'..."
-git checkout "$SOURCE_BRANCH"
+git checkout -f "$SOURCE_BRANCH"
 
 echo ""
 log "Done. '$TARGET_BRANCH' has been updated."
