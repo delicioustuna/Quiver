@@ -65,9 +65,34 @@ git checkout "$TARGET_BRANCH"
 
 log "Merging '$SOURCE_BRANCH' into '$TARGET_BRANCH' (--no-commit)..."
 if ! git merge "$SOURCE_BRANCH" --no-ff --no-commit --no-edit; then
-    echo ""
-    die "Merge conflict detected. Resolve manually, then re-run this script.
+    log "Merge conflicts detected. Checking if all are in excluded paths..."
+
+    conflict_files=$(git diff --name-only --diff-filter=U)
+    has_real_conflict=false
+    for cf in $conflict_files; do
+        in_exclude=false
+        for path in "${EXCLUDE_PATHS[@]}"; do
+            if [[ "$cf" == "$path"* ]]; then
+                in_exclude=true
+                break
+            fi
+        done
+        if ! $in_exclude; then
+            has_real_conflict=true
+            echo "  CONFLICT (not excluded): $cf"
+        fi
+    done
+
+    if $has_real_conflict; then
+        echo ""
+        die "Merge conflict in non-excluded files. Resolve manually, then re-run.
   To abort: git merge --abort && git checkout $SOURCE_BRANCH"
+    fi
+
+    log "All conflicts are in excluded paths — auto-resolving by deletion."
+    for cf in $conflict_files; do
+        git rm -f "$cf" &>/dev/null || true
+    done
 fi
 
 log "Removing excluded paths from index..."
