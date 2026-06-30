@@ -116,5 +116,5 @@ tx.Commit();
 
 - [ ] `.claude/skills/quiver-implement/` への登録 (SKILL.md タスク表 + `tasks/write-sinks.md` 作成)。
       スキルは empirical tuning 済みのため編集は着手決定後に慎重に。本計画書を参照させる。
-- [ ] `docs/roadmap.md` に WS-1〜4 / QP-1〜3 追記。
+- [ ] `docs/design/roadmap.md` に WS-1〜4 / QP-1〜3 追記。
 - [ ] approved.txt の差分は WS-1/WS-2 各タスク内で更新 (公開 API を増やすため)。

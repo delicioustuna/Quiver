@@ -9,6 +9,7 @@
 # Generated sample databases
 *.quiver
 *.quiver-wal
+quiver-mcp.json
 
 # User-specific files
 *.rsuser

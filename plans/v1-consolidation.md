@@ -10,7 +10,7 @@
 現時点の実装を **正規の v1 ベースライン**として確定する。具体的には 4 系統:
 
 - **A. 正規設計文書の新規作成** — 現状 `docs/design/` は **丸ごと .gitignore 対象** (下記実証)。
-  ソース/`docs/development.md` が untracked な設計文書を参照しており、clone した第三者には dangling になる
+  ソース/`docs/design/development.md` が untracked な設計文書を参照しており、clone した第三者には dangling になる
   (= ユーザ指摘の「Git 対象とそうでない設計文書が混在」)。現実装を基準とした **tracked な正規文書**を起こす。
 - **B. ソース参照の移行** — ソース中の設計文書参照を、新正規文書の該当箇所リンクへ差し替え/降格。
 - **C. SQLite 依存の撤去** — `Quiver.Storage.Sqlite` とその配線・テスト・公開面・docs を除去。
@@ -20,7 +20,7 @@
 
 | 事実 | 値 |
 |---|---|
-| `.gitignore` | `docs/design`, `docs/benchmarks/`, `docs/roadmap.md` を ignore (design 文書は全て untracked) |
+| `.gitignore` | `docs/design`, `docs/benchmarks/`, `docs/design/roadmap.md` を ignore (design 文書は全て untracked) |
 | `git ls-files docs/design/` | 空 (= 14 文書すべて非追跡) |
 | `FormatVersion.Current` | **V9** (FTS-9 の V10 bump は撤去済み)。履歴 V1..V9 が constant として存在 |
 | format 履歴の分岐利用 | **無し** — FormatVersion.cs 外は全て `FormatVersion.Current` のみ参照 (16 箇所、全 store の header gate)。歴史的 constant (V2..V9) を分岐に使うコードは 0 → 畳み込みは低リスク |
@@ -52,7 +52,7 @@
   docs/spec/08_known_limits.md      MVP 制限・既知バグ (本セッション監査の #1〜#5 を集約)
   ```
 - `.gitignore` から `docs/design` の除外を **解除しない** (旧文書は untracked な歴史 scratch として残す)。
-  代わりに `docs/spec/` を新規 tracked 文書とする。`docs/development.md` の設計文書リンクも `docs/spec/` へ向け直す。
+  代わりに `docs/spec/` を新規 tracked 文書とする。`docs/design/development.md` の設計文書リンクも `docs/spec/` へ向け直す。
 - **重要**: `docs/spec/08_known_limits.md` に本セッションで確定した silent-corruption 監査結果を必ず収録
   (特に #1 recovery Pass-3 loser-undo clobber = HIGH、未修正なら「既知・未修正」と明記)。
 
@@ -114,7 +114,7 @@
 - `Quiver.Rag` / `Quiver.Embedding` のコメント言及を更新。
 - **PublicApi approval baseline 再生成** (`tests/Quiver.PublicApi.Tests/PublicApi/Quiver.approved.txt`):
   InternalsVisibleTo 2 行除去 + (D-2 代替案を採る場合) 抽象除去差分。
-- docs 更新: `docs/development.md` (パッケージ表/依存図/backend 節), `docs/api/concepts/backends.md`,
+- docs 更新: `docs/design/development.md` (パッケージ表/依存図/backend 節), `docs/api/concepts/backends.md`,
   `docs/cookbook.md`, `docs/operations/{01,02,05}*`, `docs/api-stability.md` の SQLite 記述を除去。
 
 ---

@@ -58,7 +58,7 @@
 ## 未実施 (トラック開始時に行うこと)
 
 - [ ] `.claude/skills/quiver-implement/` への登録
-- [ ] `docs/roadmap.md` への SIG-1〜8 追記
+- [ ] `docs/design/roadmap.md` への SIG-1〜8 追記
 - [ ] VEC-13 (HNSW 物理削除) / VEC-14 (Filtered HNSW) との順序調整
 
 ## 完了の定義 (トラック全体)
