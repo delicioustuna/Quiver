@@ -11,36 +11,36 @@ namespace Quiver.Telemetry;
 /// <remarks>
 /// 設計指針:
 /// <list type="bullet">
-///   <item>
-///     <para>
-///     <b>process-wide シングルトン</b>。<see cref="Log"/> から各 hot path (PagedFile,
-///     WriteAheadLog, Transaction, LockManager, DeadlockDetector, RecoveryManager,
-///     Vacuum) が直接インクリメント API を呼ぶ。複数 <c>GraphDatabase</c> インスタンスが
-///     同一プロセスに存在しても累計 / レート系メトリクスは合算される。
-///     </para>
-///   </item>
-///   <item>
-///     <para>
-///     <b>gauge 系</b> (ActiveTxCount / CheckpointThresholdBytes / BufferPoolSizeBytes)
-///     はインスタンスごとに値を持つため、<see cref="RegisterActiveTxCountProvider"/> 等で
-///     <see cref="Func{TResult}"/> を登録し、PollingCounter が呼び出し時に全 provider の
-///     合計を返す。<see cref="IDisposable"/> を Dispose() するとプロバイダ解除。
-///     </para>
-///   </item>
-///   <item>
-///     <para>
-///     <b>カウンタ生成タイミング</b>: <see cref="OnEventCommand"/> で
-///     <see cref="EventCommand.Enable"/> 受信時に lazily 生成する。EventSource が
-///     未有効化なら PollingCounter 自体が生成されないので overhead 0。
-///     </para>
-///   </item>
-///   <item>
-///     <para>
-///     <b>計装オーバヘッド</b>: hot path から呼ぶのは <see cref="Interlocked.Increment(ref long)"/>
-///     等のアトミック操作のみ (PollingCounter のコールバックは EventSource 側スレッドが 1Hz で
-///     polling し、hot path をブロックしない)。
-///     </para>
-///   </item>
+///  <item>
+///    <para>
+///    <b>process-wide シングルトン</b>。<see cref="Log"/> から各 hot path (PagedFile,
+///    WriteAheadLog, Transaction, LockManager, DeadlockDetector, RecoveryManager,
+///    Vacuum) が直接インクリメント API を呼ぶ。複数 <c>GraphDatabase</c> インスタンスが
+///    同一プロセスに存在しても累計 / レート系メトリクスは合算される。
+///    </para>
+///  </item>
+///  <item>
+///    <para>
+///    <b>gauge 系</b> (ActiveTxCount / CheckpointThresholdBytes / BufferPoolSizeBytes)
+///    はインスタンスごとに値を持つため、<see cref="RegisterActiveTxCountProvider"/> 等で
+///    <see cref="Func{TResult}"/> を登録し、PollingCounter が呼び出し時に全 provider の
+///    合計を返す。<see cref="IDisposable"/> を Dispose() するとプロバイダ解除。
+///    </para>
+///  </item>
+///  <item>
+///    <para>
+///    <b>カウンタ生成タイミング</b>: <see cref="OnEventCommand"/> で
+///    <see cref="EventCommand.Enable"/> 受信時に lazily 生成する。EventSource が
+///    未有効化なら PollingCounter 自体が生成されないので overhead 0。
+///    </para>
+///  </item>
+///  <item>
+///    <para>
+///    <b>計装オーバヘッド</b>: hot path から呼ぶのは <see cref="Interlocked.Increment(ref long)"/>
+///    等のアトミック操作のみ (PollingCounter のコールバックは EventSource 側スレッドが 1Hz で
+///    polling し、hot path をブロックしない)。
+///    </para>
+///  </item>
 /// </list>
 /// </remarks>
 [EventSource(Name = "Quiver-EventSource")]
@@ -49,7 +49,7 @@ internal sealed class QuiverEventSource : EventSource
     /// <summary>プロセス全体の singleton。各 hot path はここから直接インクリメント API を呼ぶ。</summary>
     public static readonly QuiverEventSource Log = new();
 
-    // -------------------- process-wide atomic counters --------------------
+    // -------------------- プロセス全体の atomic counter --------------------
 
     // BufferPool
     private long _bufferPoolHits;
@@ -60,13 +60,13 @@ internal sealed class QuiverEventSource : EventSource
     private long _walBytesWritten;
     private long _walPendingFlushRequests;
 
-    // Transaction
+    // トランザクション
     private long _txCommitCount;
     private long _txAbortCount;
     private long _deadlockVictimCount;
     private long _crashRecoveryCount;
 
-    // Lock
+    // ロック
     private long _lockWaitTotalMs;
     private long _lockWaitSampleCount;
     private long _lockContentionCount;
@@ -77,13 +77,13 @@ internal sealed class QuiverEventSource : EventSource
     // Vacuum: 0..100, vacuum 非実行時は 0。
     private long _vacuumProgressPercent;
 
-    // -------------------- per-instance gauge providers --------------------
+    // -------------------- インスタンス単位の gauge provider --------------------
 
     private readonly ConcurrentDictionary<object, Func<long>> _activeTxCountProviders = new();
     private readonly ConcurrentDictionary<object, Func<long>> _checkpointThresholdProviders = new();
     private readonly ConcurrentDictionary<object, Func<long>> _bufferPoolSizeBytesProviders = new();
 
-    // -------------------- lazy counter handles --------------------
+    // -------------------- 遅延生成する counter handle --------------------
 
     private PollingCounter? _bufferPoolHitRatioCounter;
     private PollingCounter? _bufferPoolEvictionsCounter;
@@ -115,7 +115,7 @@ internal sealed class QuiverEventSource : EventSource
 
     private void EnsureCountersInitialized()
     {
-        // ------- gauges -------
+        // ------- gauge -------
         _bufferPoolHitRatioCounter ??= new PollingCounter(
             "buffer-pool-hit-ratio", this, GetBufferPoolHitRatio)
         {
@@ -173,7 +173,7 @@ internal sealed class QuiverEventSource : EventSource
             DisplayUnits = "percent",
         };
 
-        // ------- rate counters (cumulative → per-sec) -------
+        // ------- rate counter (累計 → 毎秒) -------
         _walBytesPerSecCounter ??= new IncrementingPollingCounter(
             "wal-bytes-per-sec", this, () => Volatile.Read(ref _walBytesWritten))
         {
@@ -288,7 +288,7 @@ internal sealed class QuiverEventSource : EventSource
         => Register(_bufferPoolSizeBytesProviders, provider);
 
     // ============================================================================
-    // Helpers
+    // ヘルパー
     // ============================================================================
 
     private double GetBufferPoolHitRatio()

@@ -5,16 +5,14 @@ namespace Quiver.Core;
 /// 索引値レーン・ベクトル binding キー・外部往復 ID と、論理 ID 構造体
 /// (<see cref="NodeId"/> / <see cref="RelationshipId"/> / <see cref="PropertyId"/>) の
 /// 内部 <c>Value</c> を、ただ一つの packing 規約に集約する。
-///
 /// <para>レイアウト (上位→下位):</para>
 /// <list type="bullet">
-///   <item>bits [63..60] = <see cref="EntityKind"/> (4bit)。<b>cross-kind 物理形</b>
-///     (<see cref="Pack"/>) でのみ格納する。論理 ID 構造体の <c>Value</c> は kind を C# 型で
-///     表現するため kind ビットを持たない (<see cref="PackLocal"/>)。</item>
-///   <item>bits [59..44] = Generation (16bit)。slot ごとの incarnation。65,536 回再利用まで。</item>
-///   <item>bits [43..0]  = Sequence (44bit)。slot の局所 ID。17.6 兆まで。</item>
+///  <item>bits [63..60] = <see cref="EntityKind"/> (4bit)。<b>cross-kind 物理形</b>
+///    (<see cref="Pack"/>) でのみ格納する。論理 ID 構造体の <c>Value</c> は kind を C# 型で
+///    表現するため kind ビットを持たない (<see cref="PackLocal"/>)。</item>
+///  <item>bits [59..44] = Generation (16bit)。slot ごとの incarnation。65,536 回再利用まで。</item>
+///  <item>bits [43..0]  = Sequence (44bit)。slot の局所 ID。17.6 兆まで。</item>
 /// </list>
-///
 /// <para><see cref="Generation"/> / <see cref="Sequence"/> は下位 60bit だけを見るため、
 /// kind ビットの有無 (cross-kind packed / kind 消去ローカル形) を問わず同じ結果を返す。
 /// Generation は slot incarnation を表し、MVCC version (xmin/xmax/sstamp) とは別概念。</para>

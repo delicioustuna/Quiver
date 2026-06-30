@@ -9,8 +9,8 @@ namespace Quiver.Api.Match;
 
 internal static class MatchCompiler
 {
-    // Returns (plan, variable→column map).
-    // For 2-node-1-edge: Full expand → [source(0), rel(1), neighbor(2)]
+    // (plan, 変数から列へのマップ) を返す。
+    // 2 ノード 1 エッジでは Full expand → [source(0), rel(1), neighbor(2)]。
     internal static (IPhysicalOperator plan, Dictionary<string, int> varToColumn) Compile(
         IGraphTransaction tx,
         ISchemaApi schema,
@@ -28,22 +28,22 @@ internal static class MatchCompiler
 
         if (pattern.Edge == null || pattern.EndNode == null)
         {
-            // Single-node pattern
+            // 単一ノードパターン。
             varToColumn[startNode.Variable] = 0;
         }
         else
         {
-            // 2-node 1-edge pattern; use Full output to keep all three columns
+            // 2 ノード 1 エッジパターン。3 列すべてを残すため Full 出力を使う。
             var edge = pattern.Edge;
             var endNode = pattern.EndNode;
             var direction = edge.Outgoing ? Direction.Outgoing : Direction.Incoming;
 
-            // Full expand: col0=source, col1=rel, col2=neighbor
+            // Full expand の列配置は col0=source, col1=rel, col2=neighbor。
             builder = new ExpandOp(builder, builder.CurrentEntityColumn, direction, edge.Type, ExpandOutputMode.Full, null);
             varToColumn[startNode.Variable] = 0;
             varToColumn[endNode.Variable]   = 2;
 
-            // Filter end node by label
+            // 終端ノードをラベルで絞り込む。
             if (endNode.Label != null)
             {
                 var labelId = schema.GetOrCreateLabel(endNode.Label);
@@ -51,7 +51,7 @@ internal static class MatchCompiler
             }
         }
 
-        // Apply WHERE predicates
+        // WHERE 述語を適用する。
         foreach (var (variable, key, pred) in wherePredicates)
         {
             if (!varToColumn.TryGetValue(variable, out int entityCol))

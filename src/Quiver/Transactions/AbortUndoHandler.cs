@@ -7,11 +7,9 @@ namespace Quiver.Transactions;
 /// <summary>
 /// 進行中トランザクションが abort / コミット失敗したときに、キャプチャ済みの
 /// before-image を所有データファイルへ書き戻し、ページバックされたストアメタを再ロードする。
-///
 /// バイナリバックエンドの ACID Atomicity を本物にするための「インプロセス undo」担当。
 /// クラッシュ中の未コミットデータ漏れは <see cref="RecoveryManager"/> の undo パス
 /// (CompensationLogRecord の再適用) が塞ぐ — 本クラスはその対になる即時版。
-///
 /// <see cref="UndoPartial"/> を追加し、savepoint への部分ロールバックでも
 /// 同じ復元ロジックを再利用できるようにした。partial rollback は durable にしない
 /// (commit 前のサブステップなので flush 不要) ことが abort との違い。
@@ -20,7 +18,7 @@ internal sealed class AbortUndoHandler
 {
     private readonly IReadOnlyDictionary<byte, IPagedFile> _files;
     private readonly Action _reloadStoreMeta;
-    // FTS-7: leaf 論理 undo の適用器 (spec: 07_fulltext.md#logical-wal, tenant, isUpsert, key, value) → index manager。
+    // leaf 論理 undo の適用器 (spec: 07_fulltext.md#logical-wal, tenant, isUpsert, key, value) → index manager。
     private readonly Action<byte, bool, byte[], long>? _applyFtUndo;
 
     /// <param name="files">fileKind → 所有 <see cref="IPagedFile"/> のレジストリ。</param>
@@ -117,7 +115,7 @@ internal sealed class AbortUndoHandler
                 file.WritePageForRecovery(new PageId(pageId), pageBytes);
                 touched.Add(file);
 
-                // FT-23: partial rollback の場合、後続 commit でこのページの PageImage が
+                // partial rollback の場合、後続 commit でこのページの PageImage が
                 // 「rollback 後の内容」になるよう _pending を上書きする。abort 経路では
                 // _pending ごと丸ごと破棄されるので呼ばない。
                 if (updatePending)

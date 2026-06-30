@@ -42,10 +42,10 @@ internal static class Migrator
             // 各マイグレーションを独立した tx で apply。失敗時は tx 全体をロールバック。
             // - データミューテーション (CreateNode/SetProperty/...) は WAL 経由で tx 境界に乗る。
             // - スキーマミューテーション (rename / index add) は MigrationContext の OnRolledBack
-            //   フックで論理的に巻き戻される (fix A)。
+                // フックで論理的に巻き戻される。
             // - History.Append は OnCommitted フックに乗せ、commit が WAL に durable に落ちた
-            //   直後に append される (fix B)。commit 完了後・append 完了前の crash 窓は冪等性
-            //   (history 不在 → 次回 re-run で同じ migration を再適用) で吸収する。
+                // 直後に append される。commit 完了後・append 完了前の crash 窓は冪等性
+            //  (history 不在 → 次回 re-run で同じ migration を再適用) で吸収する。
             using var tx = db.BeginTransaction();
             var ctx = new MigrationContext(tx, db.Schema, migration.Id);
             var entry = new MigrationHistoryEntry(migration.Id, migration.Version, DateTime.UtcNow);

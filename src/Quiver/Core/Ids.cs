@@ -1,14 +1,14 @@
 namespace Quiver.Core;
 
-// ARCH-5b: NodeId / RelationshipId / PropertyId の Value を packed 物理 ID
-// (kind 消去ローカル形 Gen16<<44 | Seq44、kind は型で表現) にする。
-//   - Sequence (slot 局所 ID) は record の page/offset 演算に使う。オンディスクの ID
-//     フィールド (Int48) には Value ではなく Sequence を書く。
-//   - Generation は slot incarnation。Allocate/Read が sidecar 由来の世代を載せて払い出す。
-//     生成 0 (= new XId(seq)) は「世代未指定」で、Value == Sequence の後方互換。
-//   - 同一性 (Equals/GetHashCode) は Sequence ベース: adjacency 由来の gen=0 ID と
-//     Read 由来の gen≥1 ID が「同一ノード」として一致し traversal / frontier / dict が壊れない。
-//     stale 参照検出は equality ではなく Read の明示世代照合 (TryResolve) で行う。
+// NodeId / RelationshipId / PropertyId の Value は packed 物理 ID
+// (kind 消去ローカル形 Gen16<<44 | Seq44、kind は型で表現)。
+//  - Sequence (slot 局所 ID) は record の page/offset 演算に使う。オンディスクの ID
+//    フィールド (Int48) には Value ではなく Sequence を書く。
+//  - Generation は slot incarnation。Allocate/Read が sidecar 由来の世代を載せて払い出す。
+//    生成 0 (= new XId(seq)) は「世代未指定」で、Value == Sequence の後方互換。
+//  - 同一性 (Equals/GetHashCode) は Sequence ベース: adjacency 由来の gen=0 ID と
+//    Read 由来の gen≥1 ID が「同一ノード」として一致し traversal / frontier / dict が壊れない。
+//    stale 参照検出は equality ではなく Read の明示世代照合 (TryResolve) で行う。
 
 /// <summary>ノードの識別子。<paramref name="Value"/> は世代 (上位) と slot 局所 ID (下位) を詰めた packed 値。</summary>
 /// <param name="Value">packed 物理 ID (Generation &lt;&lt; 44 | Sequence)。</param>
@@ -33,7 +33,7 @@ public readonly record struct NodeId(long Value)
     /// <summary>(sequence, generation) から packed な <see cref="NodeId"/> を生成する。</summary>
     public static NodeId Create(long sequence, int generation) => new(EntityRef.PackLocal(sequence, generation));
 
-    // ARCH-5b: 同一性は Sequence (slot) ベース。adjacency 由来 (gen=0) と Read 由来 (gen≥1) の
+    // 同一性は Sequence (slot) ベース。adjacency 由来 (gen=0) と Read 由来 (gen≥1) の
     // 同一ノードを等値とし traversal / frontier / dict を壊さない。stale 検出は TryResolve で行う。
     /// <summary>slot (Sequence) ベースで同一ノードかを判定する (世代差は無視)。</summary>
     public bool Equals(NodeId other) => Sequence == other.Sequence;

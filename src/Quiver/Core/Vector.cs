@@ -1,8 +1,7 @@
 namespace Quiver.Core;
 
-// EntityKind is defined in EntityId.cs. Vector code (spec: 06_vector.md#vector-index)
-// only uses Node / Relationship; Property is reserved for diagnostics / catalog and is
-// rejected by IVectorStore implementations.
+// EntityKind は EntityId.cs で定義。ベクトルコードは Node / Relationship のみを使用し、
+// Property は診断 / カタログ用に予約されている (IVectorStore 実装は拒否する)。
 
 /// <summary>
 /// ベクトルインデックスが用いる距離尺度。インデックス作成時に固定され以後変更できない —

@@ -9,17 +9,17 @@ namespace Quiver.Maintenance;
 /// <remarks>
 /// 設計:
 /// <list type="bullet">
-///   <item><see cref="System.Threading.Timer"/> 駆動。初回も 1 周期後に発火する
-///   (DB open 直後に重い vacuum が走って起動レイテンシを悪化させないため)。</item>
-///   <item>各 tick は <see cref="IVacuum.Run"/> を呼ぶだけ。アクティブ tx があれば
-///   vacuum 自身が <see cref="VacuumReport.Skipped"/> = true で安全に no-op するので、
-///   ワーカー側で tx 数を判定する必要はない。</item>
-///   <item>tick は逐次実行 (re-entrancy ガード)。前回 tick がまだ走っている間に
-///   次の周期が来ても二重起動しない。長時間 vacuum が周期を食い潰しても貯まらない。</item>
-///   <item>vacuum 中の例外はワーカー内で握り潰す。バックグラウンドの失敗で本体 DB を
-///   巻き込まない (<see cref="DeadlockDetector"/> と同じ方針)。</item>
-///   <item><see cref="Dispose"/> は idempotent。進行中 tick の完了を最大
-///   <see cref="StopJoinTimeout"/> まで待ってから戻る。</item>
+///  <item><see cref="System.Threading.Timer"/> 駆動。初回も 1 周期後に発火する
+///  (DB open 直後に重い vacuum が走って起動レイテンシを悪化させないため)。</item>
+///  <item>各 tick は <see cref="IVacuum.Run"/> を呼ぶだけ。アクティブ tx があれば
+///  vacuum 自身が <see cref="VacuumReport.Skipped"/> = true で安全に no-op するので、
+///  ワーカー側で tx 数を判定する必要はない。</item>
+///  <item>tick は逐次実行 (re-entrancy ガード)。前回 tick がまだ走っている間に
+///  次の周期が来ても二重起動しない。長時間 vacuum が周期を食い潰しても貯まらない。</item>
+///  <item>vacuum 中の例外はワーカー内で握り潰す。バックグラウンドの失敗で本体 DB を
+///  巻き込まない (<see cref="DeadlockDetector"/> と同じ方針)。</item>
+///  <item><see cref="Dispose"/> は idempotent。進行中 tick の完了を最大
+///  <see cref="StopJoinTimeout"/> まで待ってから戻る。</item>
 /// </list>
 /// </remarks>
 internal sealed class AutoVacuumWorker : IDisposable

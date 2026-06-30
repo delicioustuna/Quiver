@@ -66,7 +66,7 @@ internal sealed class PhysicalOperatorCursor : IQueryCursor
                 byteData[i] = _plan.GetBytes(i).ToArray();
             }
         }
-        // ARCH-5b: 結果 NodeId 列に現世代を load (round-trip 一貫)。
+        // 結果 NodeId 列に現世代を load (round-trip 一貫)。
         QueryRowMaterializer.StampNodeGenerations(slots, _nodes);
         _current = new QueryRow(slots, byteData);
         return true;

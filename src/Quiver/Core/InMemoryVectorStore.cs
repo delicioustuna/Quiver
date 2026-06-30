@@ -6,7 +6,6 @@ namespace Quiver.Core;
 /// 全件フラットスキャンの参照 <see cref="IVectorStore"/>。全ベクトルをインデックス毎の辞書に
 /// <c>(EntityKind, EntityId)</c> をキーに保持し、<see cref="KnnSearch"/> の度に全ベクトルを
 /// クエリに対してスコアリングする。
-///
 /// <para>これは <b>非永続の参照実装</b> であり、binary backend の既定ではない。
 /// binary backend はベクトルと HNSW ANN 索引を
 /// <see cref="Quiver.Storage.Records.PersistentVectorStore"/> +
@@ -89,10 +88,9 @@ public sealed class InMemoryVectorStore : IVectorStore
         var copy = vector.ToArray();
         lock (_gate)
         {
-            // ARCH-5b: binding キーは slot Sequence。利用者は node.Value (gen 付き packed) を
+            // binding キーは slot Sequence。利用者は node.Value (gen 付き packed) を
             // 渡しうるが、グラフ側 (label index / adjacency / candidate set) は Sequence 空間で
-            // 動くため、ここで slot へ正規化して KNN を整合させる。世代照合による stale binding
-            // 検出 (slot 再利用で旧ベクトルを弾く) は ARCH-6 で導入する。
+            // 動くため、ここで slot へ正規化して KNN を整合させる。
             idx.Vectors[new VectorKey(kind, EntityRef.Sequence(entityId))] = copy;
         }
     }
@@ -103,7 +101,7 @@ public sealed class InMemoryVectorStore : IVectorStore
         var idx = GetIndex(indexName);
         lock (_gate)
         {
-            idx.Vectors.Remove(new VectorKey(kind, EntityRef.Sequence(entityId))); // ARCH-5b: slot key
+            idx.Vectors.Remove(new VectorKey(kind, EntityRef.Sequence(entityId)));
         }
     }
 
@@ -143,7 +141,7 @@ public sealed class InMemoryVectorStore : IVectorStore
             throw new VectorException(
                 $"Vector index '{indexName}' expects {idx.Spec.Dimensions} dimensions, got {query.Length}.");
 
-        // Snapshot under the lock so the search runs against stable data.
+        // ロック下で snapshot を取り、安定したデータに対して検索する。
         KeyValuePair<VectorKey, float[]>[] snapshot;
         DistanceMetric metric;
         lock (_gate)
@@ -314,9 +312,8 @@ public sealed class InMemoryVectorStore : IVectorStore
         }
     }
 
-    // Score returns a value where HIGHER = more similar so a single max-heap
-    // works across all metrics. Euclidean is therefore returned as -distance.
-    // VEC-7: delegates to VectorScorer (SIMD via System.Numerics.Vector<float>).
+    // スコアは「大きいほど類似」で統一し、単一 max-heap で全 metric を扱う。
+    // Euclidean は -distance を返す。VectorScorer (SIMD) に委譲する。
     private static float Score(DistanceMetric metric, ReadOnlySpan<float> q, ReadOnlySpan<float> v)
     {
         return metric switch
@@ -336,8 +333,8 @@ public sealed class InMemoryVectorStore : IVectorStore
         public Dictionary<VectorKey, float[]> Vectors { get; } = new();
     }
 
-    // Bounded max-heap of size k that keeps the top-k by Score. Each Offer is
-    // O(log k); final extraction is O(k log k).
+    // サイズ k の bounded max-heap。Score 上位 k 件を保持する。Offer は O(log k)、
+    // 最終抽出は O(k log k)。
     private sealed class BoundedMaxHeap(int capacity)
     {
         private readonly VectorSearchResult[] _items = new VectorSearchResult[capacity];
@@ -351,8 +348,7 @@ public sealed class InMemoryVectorStore : IVectorStore
                 SiftUpMin(_count - 1);
                 return;
             }
-            // Min-heap: root is the worst of the current top-k. If the new
-            // score beats it, replace + sift down.
+            // min-heap: root は現 top-k の最低スコア。新スコアがそれを上回れば置換 + sift down。
             if (r.Score > _items[0].Score)
             {
                 _items[0] = r;
@@ -364,8 +360,8 @@ public sealed class InMemoryVectorStore : IVectorStore
         {
             var arr = new VectorSearchResult[_count];
             Array.Copy(_items, arr, _count);
-            // VEC-8: deterministic order — score desc, then EntityId asc on ties
-            // so gather / scan / batch paths all agree.
+            // 決定論的順序 — スコア降順、同点時は EntityId 昇順。
+            // gather / scan / batch 全経路で結果が一致する。
             Array.Sort(arr, static (a, b) =>
             {
                 int c = b.Score.CompareTo(a.Score);

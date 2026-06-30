@@ -5,7 +5,7 @@ using Quiver.Text;
 
 namespace Quiver.Transactions;
 
-// Phase 1: index mutations are serialized via a global per-transaction lock.
+// 索引更新はトランザクション単位のグローバルロックで直列化する。
 internal sealed class TxIndexManager : IIndexManager
 {
     private readonly IIndexManager _inner;
@@ -36,7 +36,7 @@ internal sealed class TxIndexManager : IIndexManager
     public IEnumerable<(string IndexName, string Label, string PropertyKey)> ListIndexBindings()
         => _inner.ListIndexBindings();
 
-    // FTS-2: 全文索引。作成/削除は索引ロックを取得、読取は素通し。
+    // 全文索引。作成/削除は索引ロックを取得、読取は素通し。
     public FullTextIndex CreateFullTextIndex(string name, string label, string propertyKey, string tokenizerId)
     { AcquireLock(); return _inner.CreateFullTextIndex(name, label, propertyKey, tokenizerId); }
 

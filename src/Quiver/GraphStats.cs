@@ -11,7 +11,7 @@ namespace Quiver;
 /// </summary>
 public sealed class DegreeHistogram
 {
-    // Bucket upper-bounds: 0, 1, 3, 7, 15, 31, 63, 127, 255, ∞
+    // バケット上限: 0, 1, 3, 7, 15, 31, 63, 127, 255, ∞
     private readonly long[] _counts = new long[10];
 
     /// <summary>記録されたノード数。</summary>
@@ -147,7 +147,7 @@ public sealed class PropertyKeyStats
                 BumpDistinctString(System.Text.Encoding.UTF8.GetString(value.Utf8StringValue));
                 break;
             case PropertyValueType.Bytes:
-                // Bytes distinct tracking is intentionally skipped to bound memory.
+                // メモリ使用量を抑えるため、Bytes の distinct 追跡は意図的に省略する。
                 if (!_distinctSaturated && DistinctEstimate < DistinctTrackingCap)
                     DistinctEstimate++;
                 break;
@@ -298,7 +298,7 @@ public sealed class GraphStats
             return mean;
         }
 
-        // No type filter: use direction-aware global histograms when available.
+        // 型フィルターがなければ、利用可能な方向別グローバルヒストグラムを使う。
         return direction switch
         {
             Direction.Outgoing => GlobalOutDegree.MeanDegree,
@@ -387,7 +387,7 @@ public sealed class GraphStats
         long totalNodes = 0;
         long totalRels  = 0;
 
-        // Per-type counters reused across nodes to avoid Dictionary allocations per node.
+        // ノードごとの Dictionary 割り当てを避けるため、型別カウンターを再利用する。
         var perTypeOut = new Dictionary<RelationshipTypeId, long>();
         var perTypeIn  = new Dictionary<RelationshipTypeId, long>();
 
@@ -430,7 +430,7 @@ public sealed class GraphStats
                     perTypeOut.TryGetValue(rel.Type, out var po);
                     perTypeOut[rel.Type] = po + 1;
 
-                    // ARCH-5c Phase 4: rel の inline + overflow を結合列挙する。
+            // rel の inline + overflow を結合列挙する。
                     var rpe = tx.Relationships.EnumerateProperties(relId, tx.Properties);
                     while (rpe.MoveNext())
                     {
@@ -471,7 +471,7 @@ public sealed class GraphStats
 
             degreeBuilder.Record(nodeId, outDegree, inDegree);
 
-            // Node properties → PropertyKeyStats (ARCH-5c: inline + overflow)
+            // ノードプロパティ → PropertyKeyStats (inline + overflow)
             var propEnum = tx.Nodes.EnumerateProperties(nodeId, tx.Properties);
             while (propEnum.MoveNext())
             {
@@ -482,8 +482,8 @@ public sealed class GraphStats
             }
         }
 
-        // Each entity (node or relationship) holds at most one value per key, so
-        // missing = totalEntities - observedCount.
+        // 各エンティティはキーごとに最大 1 値だけを持つため、
+        // missing = totalEntities - observedCount となる。
         long totalEntities = totalNodes + totalRels;
         foreach (var pks in propertyKeys.Values)
         {
@@ -491,9 +491,9 @@ public sealed class GraphStats
             pks.SetNullOrMissingCount(missing < 0 ? 0 : missing);
         }
 
-        // FTS-4/8: snapshot per-full-text-index BM25 corpus stats. One postings + one
-        // norms scan per index here replaces an O(N) scan per query in the scan operators
-        // and supplies the per-term (df, maxTf) + minDocLen WAND needs (spec: 07_fulltext.md#wand).
+        // 全文索引ごとの BM25 コーパス統計をスナップショットする。
+        // 索引ごとに postings と norms を 1 回ずつ走査し、演算子がクエリごとに行う O(N) 走査を避ける。
+        // 同時に WAND が必要とする語ごとの (df, maxTf) と minDocLen を供給する。
         var ftCorpora = new Dictionary<string, Bm25CorpusStats>(StringComparer.Ordinal);
         foreach (var (name, _, _, _) in tx.Indexes.ListFullTextIndexes())
         {

@@ -34,7 +34,7 @@ internal sealed class SchemaApi : ISchemaApi
 
     public string? GetLabelName(LabelId id) => id.IsValid ? _labels.GetName(id) : null;
 
-    // OP-4: 冪等な rename 判定用。auto-create を回避するため TokenStore.TryGet を直叩き。
+    // 冪等な rename 判定用。auto-create を回避するため TokenStore.TryGet を直叩き。
     public bool TryGetLabelId(string name, out LabelId id) => _labels.TryGet(name, out id);
     public bool TryGetPropertyKeyId(string name, out PropertyKeyId id) => _propKeys.TryGet(name, out id);
     public bool TryGetRelationshipTypeId(string name, out RelationshipTypeId id) => _relTypes.TryGet(name, out id);
@@ -59,7 +59,7 @@ internal sealed class SchemaApi : ISchemaApi
                 _indexManager.CreateStringIndex(indexName);
                 break;
         }
-        // PW-18 follow-up: バインディングを登録し、MergeNode が自動でこのインデックスを
+        // バインディングを登録し、MergeNode が自動でこのインデックスを
         // 引けるようにする。kind は IndexInfo 側のメタデータ復元用に別途記録する。
         _indexManager.RegisterIndexBinding(indexName, label, propertyKey);
         _indexKinds[indexName] = kind;
@@ -107,7 +107,7 @@ internal sealed class SchemaApi : ISchemaApi
         return result;
     }
 
-    // PW-18 follow-up: IndexKind は IIndexManager の表現外なので SchemaApi 側で保持する。
+        // IndexKind は IIndexManager の表現外なので SchemaApi 側で保持する。
     private readonly Dictionary<string, IndexKind> _indexKinds = new(StringComparer.Ordinal);
 
     public bool RenameLabel(string oldName, string newName) => _labels.Rename(oldName, newName);

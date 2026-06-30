@@ -8,7 +8,7 @@ namespace Quiver.Query.Logical;
 
 /// <summary>
 /// 単一論理プラン代数 (LogicalPlan IR) のノード基底。
-/// fluent DSL / Match / 将来の Cypher・Gremlin parser はすべて <see cref="LogicalOp"/> ツリーへ
+/// fluent DSL / Match / 将来のクエリ parser はすべて <see cref="LogicalOp"/> ツリーへ
 /// lower し、<c>LogicalOptimizer</c> が rule + cost で書き換え、<c>PhysicalPlanner</c> が
 /// <see cref="IPhysicalOperator"/> へ落とす。実行は現行 pull 型を踏襲する。
 /// </summary>

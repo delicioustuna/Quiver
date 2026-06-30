@@ -4,7 +4,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// Gremlin の <c>.label()</c> ステップを実装する。各行のノードラベルを読み取り、
+/// 各行のノードラベルを読み取り、
 /// 呼び出し側が渡す lookup (通常 <c>ISchemaApi.GetLabelName</c>) でラベル名を解決して
 /// UTF-8 文字列列を末尾に付加する。
 /// </summary>

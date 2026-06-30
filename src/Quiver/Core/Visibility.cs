@@ -2,24 +2,22 @@ namespace Quiver.Core;
 
 /// <summary>
 /// MVCC レコードの可視性判定。
-///
 /// <para>判定ロジック (Postgres SI に準拠):</para>
 /// <code>
 /// xmin の可視性:
-///   xmin == 0                       → 不可視 (空きスロット / 未初期化)
-///   xmin == self.TxId               → 可視 (自分の write を read-your-writes)
-///   xmin &gt; snapshot.SnapshotTxId    → 不可視 (snapshot 以後の write)
-///   xmin ∈ snapshot.ActiveAtBegin   → 不可視 (snapshot 開始時に並行 active だった)
-///   committed.IsCommitted(xmin)     → 可視
-///   それ以外                        → 不可視 (aborted / 未コミット)
-///
+///  xmin == 0                       → 不可視 (空きスロット / 未初期化)
+///  xmin == self.TxId               → 可視 (自分の write を read-your-writes)
+///  xmin &gt; snapshot.SnapshotTxId    → 不可視 (snapshot 以後の write)
+///  xmin ∈ snapshot.ActiveAtBegin   → 不可視 (snapshot 開始時に並行 active だった)
+///  committed.IsCommitted(xmin)     → 可視
+///  それ以外                        → 不可視 (aborted / 未コミット)
 /// xmax (xmin 可視を満たした上で評価):
-///   xmax == 0                       → 可視 (削除されていない)
-///   xmax == self.TxId               → 不可視 (自分が削除)
-///   xmax &gt; snapshot.SnapshotTxId    → 可視 (snapshot 以後の削除は無視)
-///   xmax ∈ snapshot.ActiveAtBegin   → 可視 (削除はまだコミットされていない)
-///   committed.IsCommitted(xmax)     → 不可視 (snapshot 以前にコミット済み削除)
-///   それ以外                        → 可視 (aborted / 未コミットの削除は無視)
+///  xmax == 0                       → 可視 (削除されていない)
+///  xmax == self.TxId               → 不可視 (自分が削除)
+///  xmax &gt; snapshot.SnapshotTxId    → 可視 (snapshot 以後の削除は無視)
+///  xmax ∈ snapshot.ActiveAtBegin   → 可視 (削除はまだコミットされていない)
+///  committed.IsCommitted(xmax)     → 不可視 (snapshot 以前にコミット済み削除)
+///  それ以外                        → 可視 (aborted / 未コミットの削除は無視)
 /// </code>
 /// </summary>
 internal static class Visibility

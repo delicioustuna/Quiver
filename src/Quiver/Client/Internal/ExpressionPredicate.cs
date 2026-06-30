@@ -7,7 +7,6 @@ namespace Quiver.Api.Internal;
 /// 既存の <see cref="PropertyPredicate"/> ベースのフィルタ (<see cref="GraphTraversal{T}.Has(string, PropertyPredicate)"/>)
 /// へ変換する内部トランスレータ。ノード述語 (<c>TypedGraphTraversal&lt;T&gt;.Where</c>) と
 /// エッジ述語 (生成糖衣の <c>{Rel}(e =&gt; ...)</c>) で共有する。
-///
 /// プロパティ名は CLR メンバ名をグラフキーとして用いる (既存の式ツリー版 <c>Has(selector, value)</c> と同規約)。
 /// 対応外の式は <see cref="NotSupportedException"/> を投げ、利用者は <c>Has(key, P.xxx)</c> を escape hatch にできる。
 /// </summary>
@@ -89,7 +88,7 @@ internal static class ExpressionPredicate
         // メンバが右辺だった場合は演算子の向きを反転 (例: 20 < p.Age → p.Age > 20)。
         if (flipped) op = Flip(op);
 
-        // FT-35: 述語ドメインは「メンバの CLR 型」で決める (リテラル型ではない)。
+        // 述語ドメインは「メンバの CLR 型」で決める (リテラル型ではない)。
         // これにより doubleProp > 2 (整数リテラル) でも double 比較になる。
         var memberType = Nullable.GetUnderlyingType(member.Type) ?? member.Type;
 
@@ -115,7 +114,7 @@ internal static class ExpressionPredicate
         if (memberType == typeof(double) || memberType == typeof(float) || memberType == typeof(Half))
             return (key, DoublePredicate(op, Convert.ToDouble(value), key));
 
-        // FT-35 (増分2): 日時系は格納と同じ TemporalCodec で long 正準化してから比較する。
+        // 日時系は格納時と同じ TemporalCodec で long に正準化してから比較する。
         if (TryTemporalToLong(memberType, value, out long tv))
             return (key, IntegralPredicate(op, tv, key));
 

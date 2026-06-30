@@ -67,8 +67,8 @@ public sealed record OrphanIndexEntry(string IndexName, byte[] RawKey, long Enti
 /// <param name="OrphanCount">そのうち orphan として検出された件数。</param>
 /// <param name="Orphans">orphan エントリの一覧 (再現性のためそのまま <see cref="IDiagnosticsApi.RepairIndexes"/> に渡せる)。</param>
 /// <param name="LabelIndexOrphanCount">in-memory <c>LabelNodeIndex</c> 内で観測された
-///   解放済みノード ID の件数。<c>RepairIndexes(Apply)</c> 時に index を <c>Invalidate()</c> して
-///   次回 lookup で再構築させる。</param>
+    /// 解放済みノード ID の件数。<c>RepairIndexes(Apply)</c> 時に index を <c>Invalidate()</c> して
+///  次回 lookup で再構築させる。</param>
 public sealed record IndexConsistencyReport(
     int IndexCount,
     long EntryCount,

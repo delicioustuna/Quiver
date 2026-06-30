@@ -2,7 +2,6 @@ namespace Quiver.Core;
 
 /// <summary>
 /// ストアファイルのフォーマットバージョン。
-///
 /// v1 は Quiver 1.0 のベースライン format。未リリース期間中に重ねた format 履歴
 /// (pre-MVCC → MVCC → sidecar → 単一ファイル → columnar → vector → 全文 → logical WAL) は
 /// クリーンブレイクで畳み、現実装を v1 として再宣言した。

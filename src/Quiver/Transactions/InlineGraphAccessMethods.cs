@@ -5,12 +5,9 @@ using Quiver.Storage.Records;
 namespace Quiver.Transactions;
 
 /// <summary>
-/// Fallback <see cref="IGraphAccessMethods"/> used when a transaction is
-/// created without an explicit backend access-method implementation (e.g. unit
-/// tests that wire a <see cref="TransactionManager"/> by hand). Performs the
-/// same logic that operators historically did inline — adjacency block fast
-/// path with linked-list fallback. Does not track <see cref="AdjacencyFallbackCount"/>;
-/// real backends should supply their own implementation for that.
+/// トランザクション生成時に明示的なバックエンド実装が指定されなかった場合のフォールバック
+/// <see cref="IGraphAccessMethods"/>。隣接ブロック高速パスとリンクリストフォールバックを
+/// インラインで実行する。<see cref="AdjacencyFallbackCount"/> は追跡しない。
 /// </summary>
 internal sealed class InlineGraphAccessMethods : IGraphAccessMethods
 {
@@ -48,7 +45,7 @@ internal sealed class InlineGraphAccessMethods : IGraphAccessMethods
                     .SeekValues(Encoding.UTF8.GetString(key.Utf8StringValue)),
             _ => [],
         };
-        // ARCH-3: パック値を世代照合しつつ NodeId へ unpack し、slot 再利用の stale 参照を弾く。
+        // パック値を世代照合しつつ NodeId へ unpack し、slot 再利用の stale 参照を弾く。
         return IndexValueResolver.ResolveLiveNodeIds(ids, tx.Nodes);
     }
 

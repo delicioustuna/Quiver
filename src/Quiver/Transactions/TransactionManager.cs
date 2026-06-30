@@ -16,7 +16,7 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly IIndexManager _indexManager;
     private IAdjacencyBlockStore? _adjStore;
     private readonly IGraphAccessMethods _access;
-    // FT-15: abort / コミット失敗時のインプロセス undo を担う。null のときは undo 無し。
+    // abort / コミット失敗時のインプロセス undo を担う。null のときは undo 無し。
     private readonly AbortUndoHandler? _undoHandler;
     private readonly LockManager _nodeLocks = new();
     private readonly LockManager _relLocks = new();
@@ -30,38 +30,38 @@ internal sealed class TransactionManager : ITransactionManager
     private long _lastCheckpointBytes;
     private readonly object _checkpointGate = new();
 
-    // FT-28: Adaptive ポリシー時のみ非 null。OnCommit ごとに per-tx WAL byte delta を
+    // Adaptive ポリシー時のみ非 null。OnCommit ごとに per-tx WAL byte delta を
     // サンプリングして threshold を更新する。
     private AdaptiveCheckpointController? _adaptiveController;
     // 直前 OnCommit 時の _wal.BytesWritten。次回 OnCommit でこれとの差分を tx サンプルとする。
     private long _lastSampledWalBytes;
 
-    // FT-24: ロック戦略 (ExclusiveOnly / ReaderWriter) と timeout を transaction へ流す。
+    // ロック戦略 (ExclusiveOnly / ReaderWriter) と timeout を transaction へ流す。
     private readonly LockingMode _lockingMode;
     private readonly TimeSpan _lockTimeout;
 
-    // FT-25: デッドロック検出器 (null = 無効)。Dispose で停止。
+    // デッドロック検出器 (null = 無効)。Dispose で停止。
     private DeadlockDetector? _deadlockDetector;
 
-    // OB-2: dotnet-counters の active-tx-count / current-checkpoint-threshold-bytes に値を
+    // dotnet-counters の active-tx-count / current-checkpoint-threshold-bytes に値を
     // 流し込む provider 登録ハンドル。Dispose で解除して別インスタンスとの混線を防ぐ。
     private readonly IDisposable _activeTxCountRegistration;
     private readonly IDisposable _checkpointThresholdRegistration;
 
-    // FT-26: MVCC visibility 用。Begin / OnCommit の atomicity を保護するゲート。
+    // MVCC visibility 用。Begin / OnCommit の atomicity を保護するゲート。
     // Begin は (txId 採番 + activeAtBegin 集合のキャプチャ + _active への登録) を、
     // OnCommit は (registry.MarkCommitted + _active からの除去) を 1 ブロックで行う。
     // これにより新規 snapshot が「コミット済みかつ active には残っていない」状態を観測する。
     private readonly object _snapshotGate = new();
     private readonly CommittedTxRegistry _committed;
 
-    // FT-33: SSN 用の version sidecar (Serializable のときのみ Transaction に渡して使う)。
+    // SSN 用の version sidecar (Serializable のときのみ Transaction に渡して使う)。
     private readonly IEntityVersionStore? _nodeVersions;
     private readonly IEntityVersionStore? _relVersions;
-    // FT-33: Serializable commit の pre-commit 検証 + post-commit スタンプ書き戻しを
+    // Serializable commit の pre-commit 検証 + post-commit スタンプ書き戻しを
     // 直列化するゲート。並行 Serializable commit 間で version スタンプの read-modify-write を保護する。
     private readonly object _ssnCommitGate = new();
-    // FT-33: 全 commit に単調な commit stamp c(T) を採番する大域クロック。SSN の π/η は
+    // 全 commit に単調な commit stamp c(T) を採番する大域クロック。SSN の π/η は
     // begin-order TxId ではなくこの commit-order stamp 空間で計算する。Serializable tx は
     // SSN 検証時 (SsnCommitGate 下)、SI/RC tx は OnCommit 時に採番する。
     private long _commitStamp;
@@ -101,7 +101,7 @@ internal sealed class TransactionManager : ITransactionManager
         _committed = committedRegistry ?? new CommittedTxRegistry();
         _nodeVersions = nodeVersions;
         _relVersions = relVersions;
-        // FT-26: _nextTxId は最初の Increment で 1 を返す (= Bootstrap.Value)。
+        // _nextTxId は最初の Increment で 1 を返す (= Bootstrap.Value)。
         // Bootstrap は予約済みなので、最初の "ユーザ" tx が 2 から始まるよう offset しておく。
         _nextTxId = TransactionId.Bootstrap.Value + 1;
         if (deadlockDetectionInterval is { } interval && interval > TimeSpan.Zero)
@@ -109,7 +109,7 @@ internal sealed class TransactionManager : ITransactionManager
             _deadlockDetector = new DeadlockDetector(
                 new[] { _nodeLocks, _relLocks, _indexLocks }, interval);
         }
-        // OB-2: gauge provider 登録 (PollingCounter から sum-of-providers として参照される)。
+        // gauge provider 登録 (PollingCounter から sum-of-providers として参照される)。
         _activeTxCountRegistration =
             QuiverEventSource.Log.RegisterActiveTxCountProvider(() => _active.Count);
         _checkpointThresholdRegistration =
@@ -213,7 +213,6 @@ internal sealed class TransactionManager : ITransactionManager
     /// <summary>
     /// vacuum 用 visibility horizon。「これ未満の TxId が刻まれた dead version は
     /// 物理回収しても誰のスナップショットも壊さない」境界を返す。
-    ///
     /// 計算: 現在 active な tx の <see cref="Transaction.Id"/> 最小値。active が 0 件なら
     /// 次に採番される TxId (= _nextTxId)。戻り値以上の TxId を xmax に持つ dead version は
     /// まだ古い snapshot から参照され得る可能性があるので vacuum は触れてはならない。
@@ -241,7 +240,7 @@ internal sealed class TransactionManager : ITransactionManager
 
     public ITransaction Begin(IsolationLevel level = IsolationLevel.SnapshotIsolation)
     {
-        // FT-26: snapshot (txId 採番 + activeAtBegin 集合キャプチャ + _active 登録) を 1 ブロックで。
+        // snapshot (txId 採番 + activeAtBegin 集合キャプチャ + _active 登録) を 1 ブロックで。
         // _active 登録まで含めないと、Begin 中の自身を他の Begin の activeAtBegin に含めるかどうかが
         // 競合する。MarkCommitted も同じゲートを取るので「コミット直後の tx が見えるかどうか」は
         // ゲート取得順で決まり、Postgres SI 風になる。
@@ -319,7 +318,7 @@ internal sealed class TransactionManager : ITransactionManager
 
     internal void OnCommit(TransactionId txId)
     {
-        // FT-26: MarkCommitted と _active 除去を 1 ブロックで。新規 Begin が
+        // MarkCommitted と _active 除去を 1 ブロックで。新規 Begin が
         // 「コミット済みかつ active 集合に居ない」状態を観測するための atomicity。
         lock (_snapshotGate)
         {
@@ -327,12 +326,12 @@ internal sealed class TransactionManager : ITransactionManager
             _active.TryRemove(txId.Value, out _);
         }
 
-        // FT-33: commit 済み tx に commit stamp を確定させる (SI/RC はここで初採番、
+        // commit 済み tx に commit stamp を確定させる (SI/RC はここで初採番、
         // Serializable は SSN 検証時に採番済みなので冪等 no-op)。Serializable tx が
         // 後で読んだバージョンの creator cstamp を解決できるよう、全 commit を登録する。
         GetOrAssignCommitStamp(txId.Value);
 
-        // FT-28: Adaptive ポリシーが有効なら per-tx WAL delta をサンプルとして controller へ。
+        // Adaptive ポリシーが有効なら per-tx WAL delta をサンプルとして controller へ。
         // _wal.BytesWritten は単調増加。直前 OnCommit との差分が、本 tx が WAL に追記した量
         // (Begin / PageImage / Commit) の合計。並列 commit 経路では別 tx の延べバイト数が
         // 混在しうるが、移動平均で平準化されるため統計的に問題ない。
@@ -350,7 +349,7 @@ internal sealed class TransactionManager : ITransactionManager
 
     internal void OnAbort(TransactionId txId)
     {
-        // FT-26: registry には登録しない (= visibility 判定で aborted = invisible)。
+        // registry には登録しない (= visibility 判定で aborted = invisible)。
         lock (_snapshotGate)
         {
             _active.TryRemove(txId.Value, out _);
@@ -359,7 +358,6 @@ internal sealed class TransactionManager : ITransactionManager
 
     /// <summary>
     /// コミット直後に呼ばれ、チェックポイント契機を満たしていれば同期的に実行する。
-    ///
     /// チェックポイントはアクティブトランザクションが 0 のときにのみ打つ。これにより
     /// 全ダーティページがコミット済み (またはアボード済み — アボートはページを巻き戻さない
     /// 既存仕様) であることが保証され、シャープチェックポイントとして安全に WAL を truncate
@@ -370,7 +368,7 @@ internal sealed class TransactionManager : ITransactionManager
     {
         var checkpointer = _checkpointer;
         if (checkpointer == null) return;
-        // FT-28: 実効 threshold は Fixed 値か、Adaptive controller が warmup 完了後に返す値。
+        // 実効 threshold は Fixed 値か、Adaptive controller が warmup 完了後に返す値。
         long threshold = CurrentCheckpointThresholdBytes;
         if (threshold <= 0) return;
 
@@ -399,9 +397,9 @@ internal sealed class TransactionManager : ITransactionManager
     }
 
     /// <summary>
-    /// swap the active adjacency store reference. Called by the backend
-    /// after a compact rebuild — only safe while <see cref="ActiveCount"/> is 0
-    /// since transactions snapshot the reference at <see cref="Begin"/>.
+    /// 使用中の隣接ストア参照を差し替える。バックエンドが compact rebuild 後に呼ぶ。
+    /// トランザクションは <see cref="Begin"/> 時に参照を固定するため、
+    /// <see cref="ActiveCount"/> が 0 の間だけ安全に実行できる。
     /// </summary>
     internal void SwapAdjacencyStore(IAdjacencyBlockStore? next) => _adjStore = next;
 
@@ -435,7 +433,7 @@ internal sealed class TransactionManager : ITransactionManager
     {
         _deadlockDetector?.Dispose();
         _deadlockDetector = null;
-        // OB-2: gauge provider を解除して別インスタンス / 二重登録による加算ズレを防ぐ。
+        // gauge provider を解除して別インスタンス / 二重登録による加算ズレを防ぐ。
         _activeTxCountRegistration.Dispose();
         _checkpointThresholdRegistration.Dispose();
     }

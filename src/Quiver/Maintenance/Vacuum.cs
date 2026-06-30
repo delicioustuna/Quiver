@@ -14,9 +14,9 @@ namespace Quiver.Maintenance;
 /// <remarks>
 /// スコープ:
 /// <list type="bullet">
-///   <item>リレーションシップ / プロパティ / ノードの dead version を物理回収 (順序保証付き)</item>
-///   <item>各ストアの free list 圧縮 + 末尾 hwm 縮減</item>
-///   <item><see cref="CommittedTxRegistry"/> の visibility horizon を下回ったエントリを prune</item>
+///  <item>リレーションシップ / プロパティ / ノードの dead version を物理回収 (順序保証付き)</item>
+///  <item>各ストアの free list 圧縮 + 末尾 hwm 縮減</item>
+///  <item><see cref="CommittedTxRegistry"/> の visibility horizon を下回ったエントリを prune</item>
 /// </list>
 /// 後続拡張: B+Tree node merge、ページファイル物理 truncate (WAL record 追加が必要)、
 /// AutoVacuum バックグラウンドワーカー。
@@ -29,7 +29,7 @@ internal sealed class Vacuum : IVacuum
     private readonly TransactionManager _txManager;
     private readonly CommittedTxRegistry _committed;
     private readonly IWriteAheadLog? _wal;
-    // ARCH-5c Phase 5e: opt-in 列の delta compaction 対象 (列無し DB では null)。
+    // opt-in 列の delta compaction 対象 (列無し DB では null)。
     private readonly ColumnManager? _columns;
 
     internal Vacuum(
@@ -67,7 +67,7 @@ internal sealed class Vacuum : IVacuum
                 Skipped: true);
         }
 
-        // OB-2: vacuum-progress-percent gauge は phase 単位で 0 → 25 → 50 → 75 → 100 と進む。
+        // vacuum-progress-percent gauge は phase 単位で 0 → 25 → 50 → 75 → 100 と進む。
         // 完了時に 0 へ戻すことで dotnet-counters では「現在実行中か」が判別できる。
         QuiverEventSource.Log.SetVacuumProgress(0);
         try
@@ -76,10 +76,10 @@ internal sealed class Vacuum : IVacuum
             bool dryRun = options.Mode == VacuumMode.DryRun;
 
             // 順序:
-            //   1. Properties (dead ノードの prop chain は node.FirstPropId 経由でしか辿れないので、
-            //      node vacuum 前に処理する必要がある)
-            //   2. Relationships (同じく node の FirstRelId 経由で辿る)
-            //   3. Nodes
+            //  1. Properties (dead ノードの prop chain は node.FirstPropId 経由でしか辿れないので、
+            //     node vacuum 前に処理する必要がある)
+            //  2. Relationships (同じく node の FirstRelId 経由で辿る)
+            // 3. ノード
             // committed registry prune は最後 (visibility 判定に依存する処理が全て終わってから)。
             int reclaimedProps = 0;
             if (!dryRun && (options.Targets & VacuumTarget.Properties) != 0)
@@ -102,7 +102,7 @@ internal sealed class Vacuum : IVacuum
             }
             QuiverEventSource.Log.SetVacuumProgress(75);
 
-            // ARCH-5c Phase 5e: opt-in 列の delta compaction。committed registry の prune より前に
+            // opt-in 列の delta compaction。committed registry の prune より前に
             // 走らせる (Merge は committed.IsCommitted を見るため、prune で presumed-committed 化される前に
             // 判定する必要がある — dead version 回収と同じ順序制約)。targets に依らず常に実行する
             // (in-memory delta の merge は安価で常に有益)。
@@ -125,10 +125,10 @@ internal sealed class Vacuum : IVacuum
                 prunedTxEntries = _committed.PruneBelow(horizon);
             }
 
-            // OP-5: dead version 回収後に末尾の連続 free page を物理 truncate する。
+            // dead version 回収後に末尾の連続 free page を物理 truncate する。
             // 各ストアの hwm から「必要最小ページ数」を計算し、現在の PageCount より小さければ
-            //   1) WAL に FileTruncate を書いて fsync
-            //   2) PagedFile.Truncate で MMF unmap → SetLength → remap → meta page 書き戻し
+            //  1) WAL に FileTruncate を書いて fsync
+            //  2) PagedFile.Truncate で MMF unmap → SetLength → remap → meta page 書き戻し
             // を行う。両者の間で crash した場合は recovery の Pass 2 redo が FileTruncate を
             // 再生して冪等に追いつかせる。WAL 未配線 (= テスト経路など) のときは skip。
             long truncatedPages = 0;
@@ -172,13 +172,13 @@ internal sealed class Vacuum : IVacuum
         if (newPageCount < 1) newPageCount = 1;
         if (newPageCount >= current) return 0;
         // 順序が重要:
-        //   1. WAL に FileTruncate を書いて fsync。これより前に物理 truncate が起きると
-        //      recovery が「pageId が存在しない」と読み損なう可能性があるが、
-        //      実際の Truncate は (2) なので不変条件は維持される。
-        //   2. PagedFile.Truncate で MMF unmap → SetLength → meta page 書き戻し → fsync。
+        //  1. WAL に FileTruncate を書いて fsync。これより前に物理 truncate が起きると
+        //     recovery が「pageId が存在しない」と読み損なう可能性があるが、
+        //     実際の Truncate は (2) なので不変条件は維持される。
+        //  2. PagedFile.Truncate で MMF unmap → SetLength → meta page 書き戻し → fsync。
         // (1) と (2) の間で crash しても、recovery Pass 2 redo が FileTruncate を再生して
         // 物理 file が再 truncate される (PagedFile.Truncate は newPageCount >= 現状 は no-op)。
-        // ARCH-4: TenantPagedFile (単一ファイルコンテナ) の truncate はテナント論理空間の縮小 +
+        // TenantPagedFile (単一ファイルコンテナ) の truncate はテナント論理空間の縮小 +
         // 物理ページのグローバル free list 返却で、自身で flush して durable 化する (物理ファイルは
         // 縮まない)。WAL FileTruncate は per-store 物理ファイルの物理 truncate 冪等再生用なので、
         // テナントに対しては書かない (書くと recovery が fileKind を container.Physical に誤マップして

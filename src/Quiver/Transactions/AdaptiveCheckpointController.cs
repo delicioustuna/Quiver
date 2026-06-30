@@ -18,15 +18,12 @@ public enum CheckpointPolicy
 
 /// <summary>
 /// Adaptive ポリシー時のチェックポイント threshold を計算するコントローラ。
-///
 /// モデル:
-///   <c>recommended = clamp(Min, Max, TargetBytes_RecoveryBound × BaselineBytesPerTx / observed_avg_bytes_per_tx)</c>
-///
+///  <c>recommended = clamp(Min, Max, TargetBytes_RecoveryBound × BaselineBytesPerTx / observed_avg_bytes_per_tx)</c>
 /// ここで <c>TargetBytes_RecoveryBound = TargetRecoveryTime.TotalSeconds × RecoveryBytesPerSecond</c>。
 /// 1 tx の amplification (WAL bytes / tx) が大きいほど threshold を小さくし checkpoint を
 /// 頻繁化する (per-tx パスの WAL 暴走を抑える)。逆に bulk path のように small bytes/tx の
 /// ワークロードでは threshold を緩めて throughput を優先する。
-///
 /// EWMA ではなく単純移動平均 (リングバッファ) を採用しているのは、起動直後の少数サンプル
 /// で threshold が極端な値を取らないようにするため (warmup 期は <see cref="HasEnoughSamples"/>
 /// が <c>false</c> を返し、コール側は initial threshold を維持する)。

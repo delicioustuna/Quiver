@@ -3,7 +3,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// Gremlin の <c>.coalesce(t1, t2, …)</c> 相当。各入力行に対して分岐を順番に試し、
+/// 各入力行に対して分岐を順番に試し、
 /// 最初に行を生成した分岐の残りを使い切ったら、それ以降の分岐はスキップする。
 /// 全分岐が空だった入力行は出力に寄与しない。
 /// すべての分岐は単一列 NodeId のタプルを返す必要がある。

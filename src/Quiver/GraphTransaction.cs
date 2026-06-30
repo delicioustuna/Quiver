@@ -15,13 +15,13 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     private readonly ITokenStore<LabelId> _labelTokens;
     private readonly ITokenStore<RelationshipTypeId> _relTypeTokens;
     private readonly PropertyKeyTokenStore _propKeyTokens;
-    // BA-7: null でない場合、公開ミューテーションをすべてバッファし、下層トランザクションが
+    // null でない場合、公開ミューテーションをすべてバッファし、下層トランザクションが
     // 永続化コミットされた後にバッチをシンクへ引き渡す。
     private readonly ILogicalMutationSink? _logicalSink;
     private List<LogicalMutation>? _logicalBuffer;
-    // ARCH-5c Phase 5c: opt-in 列の write 維持。null = 列無効 (read-only tx 含む)。
+    // opt-in 列の write 維持。null = 列無効 (read-only tx 含む)。
     private readonly Storage.Records.ColumnManager? _columns;
-    // ARCH-6: tx 配下の SetVector/RemoveVector が書く生のベクトルストア。tx スレッドの
+    // tx 配下の SetVector/RemoveVector が書く生のベクトルストア。tx スレッドの
     // ambient WalPageContext 下で書くので、グラフ変更と同じ WAL に乗り原子整合する。
     private readonly Core.IVectorStore? _vectors;
 
@@ -42,7 +42,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         IsReadOnly = isReadOnly;
         _logicalSink = logicalSink;
         _vectors = vectors;
-        // ARCH-5c Phase 5c: 登録済み列があるときだけ列維持を有効化し、ホット path の
+        // 登録済み列があるときだけ列維持を有効化し、ホット path の
         // 余計な hook 登録 / dict lookup を避ける。
         _columns = columns is { HasAnyColumns: true } ? columns : null;
         if (_logicalSink != null)
@@ -75,7 +75,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public TransactionState State => _inner.State;
     public bool IsReadOnly { get; }
 
-    // OP-4: MigrationContext.ForEachNode が Access.ScanNodes に渡す。
+    // MigrationContext.ForEachNode が Access.ScanNodes に渡す。
     internal ITransaction Inner => _inner;
 
     // ========== ノード操作 ==========
@@ -112,12 +112,12 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         foreach (var rid in toDelete)
             DeleteRelationship(rid);
 
-        // FTS-2 透過維持: ノードの string プロパティを bound 全文索引から除去する (Free の前に読む)。
+        // ノードの string プロパティを bound 全文索引から除去する (Free の前に読む)。
         if (_inner.Indexes.HasAnyFullTextIndex)
             RemoveNodeFromFullTextIndexes(nodeId);
 
         _inner.Nodes.Free(nodeId);
-        // ARCH-5c Phase 5c: ノード削除に伴い、その kind の全列で seq を論理削除する。
+        // ノード削除に伴い、その kind の全列で seq を論理削除する。
         _columns?.OnDeleteEntity(Core.EntityKind.Node, nodeId.Sequence, _inner.Id.Value);
         if (_logicalSink != null)
             RecordLogical(LogicalMutation.DeleteNode(nodeId));
@@ -136,9 +136,9 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public string? GetRelationshipTypeName(RelationshipTypeId typeId)
         => typeId.IsValid ? _relTypeTokens.GetName(typeId) : null;
 
-    // ========== MERGE (GC-5) ==========
+    // ========== MERGE ==========
 
-    // PW-18 follow-up: 「インデックス未登録」を初回 MergeNode 呼び出し時に一度だけ警告する。
+    // 「インデックス未登録」を初回 MergeNode 呼び出し時に一度だけ警告する。
     // (label, propertyKey) 単位で重複抑制。プロセス共有で問題ない (誤検出より煩いログ抑制を優先)。
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string, string), byte>
         _mergeFullscanWarned = new();
@@ -147,7 +147,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     {
         var labelId = _labelTokens.GetOrCreate(label);
 
-        // PW-18 follow-up: (label, matchKey) にインデックスが登録されていれば、
+        // (label, matchKey) にインデックスが登録されていれば、
         // SeekNodesByIndex で O(log n) シーク。なければ既存のフルスキャン経路へフォールバック。
         if (_inner.Indexes.TryGetIndexName(label, matchKey, out var indexName))
         {
@@ -174,7 +174,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                 }
                 foreach (var nodeId in _inner.Access.ScanNodes(_inner, labelId))
                 {
-                    // ARCH-5c Phase 3: inline + overflow を結合列挙 (inline のみのノードも拾う)。
+                    // inline + overflow を結合列挙 (inline のみのノードも拾う)。
                     var propEnum = _inner.Nodes.EnumerateProperties(nodeId, _inner.Properties);
                     while (propEnum.MoveNext())
                     {
@@ -191,7 +191,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         var newId = _inner.Nodes.Allocate(labelId);
         var newKeyId = _propKeyTokens.GetOrCreate(matchKey);
         SetNodeProperty(newId, newKeyId, in matchValue);
-        // PW-18 follow-up: インデックスが登録されていれば新規エントリも追加する。
+        // インデックスが登録されていれば新規エントリも追加する。
         // これが無いと「初回 MergeNode は遅い、2 回目以降の MergeNode で同じキーを見つけられない」
         // 状態になり upsert セマンティクスが壊れる。
         if (!string.IsNullOrEmpty(indexName))
@@ -253,12 +253,12 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         return _inner.Indexes.TryGetIndexName(labelName, key, out indexName);
     }
 
-    // ARCH-3: 索引の値レーンに (Kind=Node, Sequence=nodeId, Generation=現世代) をパックする。
+    // 索引の値レーンに (Kind=Node, Sequence=nodeId, Generation=現世代) をパックする。
     // 解決時に現 slot 世代と照合して slot 再利用 (ABA) の stale 参照を弾けるようにする。
     private long PackNode(NodeId nodeId)
         => EntityRef.Pack(EntityKind.Node, nodeId.Sequence, _inner.Nodes.CurrentGeneration(nodeId.Sequence));
 
-    // FTS-2: ノードの (label, key) に bound された全文索引を引く。FT 索引がゼロなら fast-path で null。
+    // ノードの (label, key) に bound された全文索引を引く。FT 索引がゼロなら fast-path で null。
     private FullTextIndex? ResolveFullTextIndex(NodeId nodeId, string key)
     {
         if (!_inner.Indexes.HasAnyFullTextIndex) return null;
@@ -269,7 +269,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         return _inner.Indexes.TryGetFullTextIndexByLabelKey(labelName, key, out var ft) ? ft : null;
     }
 
-    // FTS-2: ノードの現在の string プロパティ値 (before-image) を読む。非 string / 未設定なら null。
+    // ノードの現在の string プロパティ値 (before-image) を読む。非 string / 未設定なら null。
     private string? ReadNodeStringProperty(NodeId nodeId, PropertyKeyId keyId)
     {
         var e = _inner.Nodes.EnumerateProperties(nodeId, _inner.Properties);
@@ -283,7 +283,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         return null;
     }
 
-    // FTS-2: ノード削除時に、その string プロパティを bound 全文索引から除去する。
+    // ノード削除時に、その string プロパティを bound 全文索引から除去する。
     private void RemoveNodeFromFullTextIndexes(NodeId nodeId)
     {
         var node = _inner.Nodes.Read(nodeId);
@@ -331,7 +331,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     {
         // 型トークンが未観測なら、その型のエッジは存在し得ない → 走査せず直接作成。
         // (公開 EnumerateRelationships は型未知のとき全隣接へフォールバックするため、ここでは
-        //  store の typed + Outgoing 列挙を直接使い、別型エッジを target 一致で誤マッチしないようにする。)
+        // store の typed + Outgoing 列挙を直接使い、別型エッジを target 一致で誤マッチしないようにする。)
         if (_relTypeTokens.TryGet(type, out var typeId))
         {
             var e = _inner.Relationships.EnumerateNeighbors(source, _inner.Nodes, typeId, Direction.Outgoing);
@@ -348,12 +348,12 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public void DeleteRelationship(RelationshipId relId)
     {
         FreeRelationshipProperties(relId);
-        // PW-14: この ID が不変ベースビューに含まれる場合、隣接ブロックには依然として
+        // この ID が不変ベースビューに含まれる場合、隣接ブロックには依然として
         // 現れる — 後続の expand カーソルがスキップできるよう tombstone を記録する。
         // delta 側 ID に対してはストアは no-op。
         _inner.AdjacencyBlocks?.Tombstone(relId);
         _inner.Relationships.Delete(_inner.Nodes, relId);
-        // ARCH-5c Phase 5c: リレーション削除に伴い、その kind の全列で seq を論理削除する。
+        // リレーション削除に伴い、その kind の全列で seq を論理削除する。
         _columns?.OnDeleteEntity(Core.EntityKind.Relationship, relId.Sequence, _inner.Id.Value);
         if (_logicalSink != null)
             RecordLogical(LogicalMutation.DeleteRelationship(relId));
@@ -379,11 +379,11 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         var keyId = _propKeyTokens.GetOrCreate(key);
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use AddPropertyValue for Set-cardinality property '{key}'.");
-        // FTS-2 透過維持: この (label, key) に全文索引が bound されているときだけ before-image を読む。
+        // 透過維持: この (label, key) に全文索引が bound されているときだけ before-image を読む。
         // 非索引キーの書き込みは HasAnyFullTextIndex の bool チェックのみで素通り。
         var ft = ResolveFullTextIndex(nodeId, key);
         string? oldText = ft is null ? null : ReadNodeStringProperty(nodeId, keyId);
-        // BA-7: SetNodeProperty がチェーンを変更する前にキャプチャする — value は
+        // SetNodeProperty がチェーンを変更する前にキャプチャする — value は
         // ref struct のため、ヒープコピーは LogicalPropertyValue に閉じ込める。
         if (_logicalSink != null)
         {
@@ -391,7 +391,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
             RecordLogical(LogicalMutation.SetNodeProperty(nodeId, key, in captured));
         }
         SetNodeProperty(nodeId, keyId, in value);
-        // ARCH-5c Phase 5c: 列化済み key なら同 tx で列を維持する。
+        // 列化済み key なら同 tx で列を維持する。
         _columns?.OnSetProperty(Core.EntityKind.Node, nodeId.Sequence, keyId, in value, _inner.Id.Value);
         if (ft is not null)
         {
@@ -413,13 +413,13 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
             RecordLogical(LogicalMutation.SetRelationshipProperty(relId, key, in captured));
         }
         SetRelationshipProperty(relId, keyId, in value);
-        // ARCH-5c Phase 5c: 列化済み key なら同 tx で列を維持する。
+        // 列化済み key なら同 tx で列を維持する。
         _columns?.OnSetProperty(Core.EntityKind.Relationship, relId.Sequence, keyId, in value, _inner.Id.Value);
     }
 
     private void SetRelationshipProperty(RelationshipId relId, PropertyKeyId keyId, in PropertyValue value)
     {
-        // ARCH-5c Phase 4: 小さい値は rel record へ inline (copy-on-write)。
+        // 小さい値は rel record へ inline (copy-on-write)。
         if (InlinePropertyCodec.IsInlineable(value) && _inner.Relationships.SetInlineProperty(relId, keyId, in value))
         {
             // size-class 変更で同 key が overflow に残っていれば除去する。
@@ -470,7 +470,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     private void SetNodeProperty(NodeId nodeId, PropertyKeyId keyId, in PropertyValue value)
     {
-        // ARCH-5c Phase 3: 小さい値は node record へ inline (copy-on-write)。
+        // 小さい値は node record へ inline (copy-on-write)。
         if (InlinePropertyCodec.IsInlineable(value) && _inner.Nodes.SetInlineProperty(nodeId, keyId, in value))
         {
             // size-class 変更で同 key が overflow に残っていれば除去する。
@@ -523,7 +523,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     {
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
 
-        // ARCH-5c Phase 3: inline を先に試し、無ければ overflow チェーンから除去。
+        // inline を先に試し、無ければ overflow チェーンから除去。
         bool removed = _inner.Nodes.RemoveInlineProperty(nodeId, keyId);
         if (!removed)
         {
@@ -544,7 +544,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         }
         if (removed)
         {
-            // ARCH-5c Phase 5c: 列化済み key なら列も論理削除する。
+        // 列化済み key なら列も論理削除する。
             _columns?.OnRemoveProperty(Core.EntityKind.Node, nodeId.Sequence, keyId, _inner.Id.Value);
             if (_logicalSink != null)
                 RecordLogical(LogicalMutation.RemoveNodeProperty(nodeId, key));
@@ -556,7 +556,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
-        // ARCH-5c Phase 3: inline を先に引き、無ければ overflow チェーンを walk。
+        // inline を先に引き、無ければ overflow チェーンを walk。
         if (_inner.Nodes.TryGetInlineProperty(nodeId, keyId, out var inlineVal)) return inlineVal;
         var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
         var propEnum = _inner.Properties.Enumerate(firstPropId);
@@ -573,7 +573,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
-        // ARCH-5c Phase 4: inline を先に引き、無ければ overflow チェーンを walk。
+        // inline を先に引き、無ければ overflow チェーンを walk。
         if (_inner.Relationships.TryGetInlineProperty(relId, keyId, out var inlineVal)) return inlineVal;
         var firstPropId = _inner.Relationships.Read(relId).FirstPropertyId;
         var propEnum = _inner.Properties.Enumerate(firstPropId);
@@ -599,7 +599,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     }
 
     public PropertyEnumerator EnumerateProperties(NodeId nodeId)
-        // ARCH-5c Phase 3: inline (visible 版) + overflow チェーンを結合して列挙。
+        // inline (visible 版) + overflow チェーンを結合して列挙。
         => _inner.Nodes.EnumerateProperties(nodeId, _inner.Properties);
 
     // ========== マルチバリュープロパティ操作 (Set cardinality) ==========
@@ -751,7 +751,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                     System.Text.Encoding.UTF8.GetString(key.Utf8StringValue)),
             _ => [],
         };
-        // ARCH-3: パック値を世代照合しつつ NodeId.Value へ unpack する。
+        // パック値を世代照合しつつ NodeId.Value へ unpack する。
         return new NodeIdEnumerator(IndexValueResolver.ResolveLiveNodeSequences(values, _inner.Nodes));
     }
 
@@ -783,7 +783,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                 values = [];
                 break;
         }
-        // ARCH-3: パック値を世代照合しつつ NodeId.Value へ unpack する。
+        // パック値を世代照合しつつ NodeId.Value へ unpack する。
         return new NodeIdEnumerator(IndexValueResolver.ResolveLiveNodeSequences(values, _inner.Nodes));
     }
 
@@ -791,11 +791,11 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public QueryResult Execute(IPhysicalOperator plan)
     {
-        // OB-1: query 実行全体を span + duration histogram で計測。
+        // query 実行全体を span + duration histogram で計測。
         using var activity = QuiverTelemetry.QueryActivitySource.StartActivity(
             "query.execute", ActivityKind.Internal);
         activity?.SetTag("quiver.tx.id", _inner.Id.Value);
-        // OB-3: tx スコープを通して operator chain のログを一意に追跡可能にする。
+        // tx スコープを通して operator chain のログを一意に追跡可能にする。
         using var logScope = QuiverLog.BeginQueryScope(QuiverLog.QueryLogger, _inner.Id.Value);
         var sw = Stopwatch.StartNew();
         plan.Open(_inner);
@@ -816,7 +816,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                     byteData[i] = plan.GetBytes(i).ToArray();
                 }
             }
-            // ARCH-5b: 結果 NodeId 列に現世代を load (round-trip 一貫)。
+            // 結果 NodeId 列に現世代を load (round-trip 一貫)。
             QueryRowMaterializer.StampNodeGenerations(slots, _inner.Nodes);
             rows.Add(new QueryRow(slots, byteData));
         }
@@ -826,7 +826,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         plan.Dispose();
         QuiverTelemetry.QueryDurationMs.Record(sw.Elapsed.TotalMilliseconds);
         activity?.SetTag("quiver.query.rows", rows.Count);
-        // OB-3: Debug レベルで件数 + 経過時間。N+1 検出や hot operator 推定に有効。
+        // Debug レベルで件数 + 経過時間。N+1 検出や hot operator 推定に有効。
         QuiverLog.QueryExecuted(QuiverLog.QueryLogger, rows.Count, sw.Elapsed.TotalMilliseconds);
         return new QueryResult(schema, stats, rows);
     }
@@ -841,7 +841,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public IGraphAccessMethods Access => _inner.Access;
 
-    // ARCH-5c Phase 5d: full-scan 集約の列スキャン経路。列が無い / mixed / committed registry
+        // full-scan 集約の列スキャン経路。列が無い / mixed / committed registry
     // 無し (旧テスト互換経路) では false を返し、呼び出し側 (GraphTraversal) が row path へ。
     public bool TryColumnAggregate(Core.EntityKind kind, string key, out ColumnAggregate result)
     {
@@ -856,7 +856,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         return true;
     }
 
-    // ========== ARCH-6: ベクトル (tx 配下) ==========
+    // ==========: ベクトル (tx 配下) ==========
 
     public void SetVector(Core.EntityKind kind, long entityId, string indexName, ReadOnlySpan<float> vector)
     {
@@ -888,12 +888,12 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public void Rollback() => _inner.Abort();
     public void Dispose() => _inner.Dispose();
 
-    // FT-23: savepoint / nested undo — 下層トランザクションへ委譲する。
+    // savepoint / nested undo — 下層トランザクションへ委譲する。
     public SavepointId Savepoint(string? name = null) => _inner.Savepoint(name);
     public void RollbackTo(SavepointId savepoint) => _inner.RollbackTo(savepoint);
     public void ReleaseSavepoint(SavepointId savepoint) => _inner.ReleaseSavepoint(savepoint);
 
-    // VEC-3: post-commit / post-rollback フックの登録は下層トランザクションへ委譲する。
+    // post-commit / post-rollback フックの登録は下層トランザクションへ委譲する。
     // ユーザは IGraphTransaction 経由でフックを登録できる。
     public void OnCommitted(Action callback) => _inner.OnCommitted(callback);
     public void OnRolledBack(Action callback) => _inner.OnRolledBack(callback);

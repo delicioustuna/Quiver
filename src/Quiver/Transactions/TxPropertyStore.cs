@@ -3,15 +3,15 @@ using Quiver.Storage.Records;
 
 namespace Quiver.Transactions;
 
-// Property chains are protected by their owning node's lock (acquired via TxNodeStore).
-// This wrapper simply delegates all operations without additional locking.
+// プロパティチェーンは所有ノードのロック (TxNodeStore で取得済み) で保護される。
+// このラッパーは追加ロックなしで全操作を委譲する。
 internal sealed class TxPropertyStore : IPropertyStore
 {
     private readonly IPropertyStore _inner;
     private readonly TransactionId _txId;
     private readonly SnapshotState _snapshot;
     private readonly CommittedTxRegistry? _committed;
-    // FT-33: SSN read-sink。プロパティ操作でも ambient sink を維持し、直後/直前の
+    // SSN read-sink。プロパティ操作でも ambient sink を維持し、直後/直前の
     // traversal 等が sink を失わないようにする (プロパティ自体は node/rel 粒度の read で
     // 既に捕捉されるため、PropertyStore は RecordRead を呼ばない)。
     private readonly ISsnReadSink? _ssn;

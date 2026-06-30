@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace Quiver.Api;
 
 /// <summary>
-/// Gremlin の <c>P</c> に相当するプロパティ述語ファクトリ。
+/// プロパティ述語を構築するファクトリ。
 /// <c>g.Nodes().Has("age", P.Gt(20))</c> のように <see cref="GraphTraversal{T}.Has(string, PropertyPredicate)"/>
 /// に渡して使う。
 /// </summary>
@@ -30,7 +30,7 @@ public static class P
     /// <summary>閉区間 <c>[from, to]</c> の範囲比較。</summary>
     public static PropertyPredicate Between(long from, long to) => new(PredicateKind.Between, from, to, null);
 
-    // ── FT-35: 浮動小数点 (double/float/Half) の比較・範囲述語 ──────────────────
+    // ── 浮動小数点 (double/float/Half) の比較・範囲述語 ──────────────────
 
     private static long D(double v) => BitConverter.DoubleToInt64Bits(v);
 
@@ -57,11 +57,11 @@ public static class P
 
     /// <summary>
     /// <c>P.Without(...)</c> — 文字列プロパティが指定値のいずれにも該当しない場合、
-    /// またはプロパティ自体が存在しない場合に通す (Gremlin の慣例)。
+    /// またはプロパティ自体が存在しない場合に通す。
     /// </summary>
     public static PropertyPredicate Without(params string[] values) => new(PredicateKind.Without, 0, 0, null, values);
 
-    // ── GC-2: テキスト述語 ─────────────────────────────────────────────────
+    // ── テキスト述語 ─────────────────────────────────────────────────
 
     /// <summary>Cypher の <c>STARTS WITH</c> — オーディナル・大文字小文字を区別する前方一致判定。</summary>
     public static PropertyPredicate StartsWith(string prefix) => new(PredicateKind.StartsWith, 0, 0, prefix ?? throw new ArgumentNullException(nameof(prefix)));
@@ -83,7 +83,7 @@ public static class P
         return new PropertyPredicate(PredicateKind.Regex, 0, 0, pattern, compiledRegex: compiled);
     }
 
-    // ── GC-2: 述語レベルの真偽演算 ────────────────────────────────
+    // ── 述語レベルの真偽演算 ────────────────────────────────
 
     /// <summary>
     /// <c>NOT (predicate)</c>。任意の <see cref="PropertyPredicate"/> をラップし、
@@ -170,7 +170,7 @@ public sealed class PropertyPredicate
     internal string? StringValue { get; }
     internal string[]? WithinValues { get; }
 
-    // GC-2: 複合述語のキャリア
+    // 複合述語のキャリア
     internal PropertyPredicate? Inner { get; }
     internal PropertyPredicate[]? InnerArray { get; }
     internal Regex? CompiledRegex { get; }

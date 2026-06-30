@@ -20,27 +20,27 @@ internal sealed class Transaction : ITransaction
     private readonly TxIndexManager _indexes;
     private readonly IAdjacencyBlockStore? _adjStore;
     private readonly IGraphAccessMethods _access;
-    // FT-15: null でない場合、abort / コミット失敗時にキャプチャ済み before-image を
+    // null でない場合、abort / コミット失敗時にキャプチャ済み before-image を
     // データファイルへ書き戻し、ストアメタを再ロードしてインプロセス undo を行う。
-    // FT-19 以降: 索引 PagedFile も EnableWalLogging により before-image capture 対象なので、
-    // 本ハンドラだけで data + index 両方の in-process abort が完結する (FT-20 で IndexUndoLog 撤去)。
+    // 索引 PagedFile も EnableWalLogging により before-image capture 対象なので、
+    // 本ハンドラだけで data + index 両方の in-process abort が完結する ( で IndexUndoLog 撤去)。
     private readonly AbortUndoHandler? _undoHandler;
     private List<Action>? _onCommitted;
     private List<Action>? _onRolledBack;
     private TransactionState _state;
 
-    // FT-23: savepoint 管理。SavepointId.Value (連番) → スタック深度 (= WalPageContext のバケット index)。
+    // savepoint 管理。SavepointId.Value (連番) → スタック深度 (= WalPageContext のバケット index)。
     // RollbackTo で巻き戻しても savepoint 自体は消費しないので、Value は同じレベルで再利用される。
     // ReleaseSavepoint または親 savepoint の Rollback/Release で初めて無効化される。
     private long _nextSavepointId;
     private List<(long Id, int Level)>? _savepoints;
 
-    // FT-33: SSN (Serializable) のときのみ非 null。read/write hook が η/π を更新し、
+    // SSN (Serializable) のときのみ非 null。read/write hook が η/π を更新し、
     // Commit の pre-commit 検証 + post-commit スタンプ書き戻しで使う。
     private readonly SsnContext? _ssn;
     private readonly IEntityVersionStore? _nodeVersions;
     private readonly IEntityVersionStore? _relVersions;
-    // FT-34: Begin 時の commit-stamp クロック (snapshot 下限)。読んだ版の v.sstamp を π に
+    // Begin 時の commit-stamp クロック (snapshot 下限)。読んだ版の v.sstamp を π に
     // 反映するかの判定に使う (詳細は TransactionManager.CurrentCommitStampClock)。
     private readonly long _ssnSnapshotCstamp;
 
@@ -49,7 +49,7 @@ internal sealed class Transaction : ITransaction
     public long SnapshotLsn { get; }
     public TransactionState State => _state;
 
-    // ARCH-5c Phase 5d: 列スキャン集約が直接可視性判定するための snapshot / committed 露出。
+    // 列スキャン集約が直接可視性を判定できるよう snapshot / committed を公開する。
     private readonly SnapshotState _snapshot;
     private readonly CommittedTxRegistry? _committed;
     public SnapshotState Snapshot => _snapshot;
@@ -88,17 +88,17 @@ internal sealed class Transaction : ITransaction
         _undoHandler = undoHandler;
         _state = TransactionState.Active;
         var timeout = lockTimeout ?? TimeSpan.FromSeconds(5);
-        // FT-33: Serializable かつ MVCC コンテキストがあるときのみ SSN を起動する。
+        // Serializable かつ MVCC コンテキストがあるときのみ SSN を起動する。
         // sidecar が無い (旧テスト経路など) 場合は SI と同じ挙動に縮退する。
         _nodeVersions = nodeVersions;
         _relVersions = relVersions;
         _ssn = (level == IsolationLevel.Serializable && committed != null
             && nodeVersions != null && relVersions != null)
             ? new SsnContext() : null;
-        // FT-34: Serializable のときだけ Begin 時点の commit-stamp クロックを捕捉する
+        // Serializable のときだけ Begin 時点の commit-stamp クロックを捕捉する
         // (ctor は TransactionManager.Begin の _snapshotGate 下で走るため一貫した下限)。
         _ssnSnapshotCstamp = _ssn != null ? manager.CurrentCommitStampClock : 0;
-        // FT-26: per-tx ambient コンテキストを Tx wrapper にも持たせ、各操作直前に
+        // per-tx ambient コンテキストを Tx wrapper にも持たせ、各操作直前に
         // MvccContext を再アクティベートする (同一スレッドで複数 tx 操作を交互に
         // 行う場合の thread-static の取り違えを防ぐ)。
         var snap = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
@@ -109,7 +109,7 @@ internal sealed class Transaction : ITransaction
         _properties = new TxPropertyStore(propStore, id, snap, committed, _ssn);
         _indexes = new TxIndexManager(indexManager, indexLocks, id, timeout);
         WalPageContext.Begin(wal, id);
-        // FT-26: MVCC ambient コンテキスト開始 (Tx wrapper を介さない経路のため)。
+        // MVCC ambient コンテキスト開始 (Tx wrapper を介さない経路のため)。
         // null なら旧テスト等の互換経路として MvccContext を起動しない (= Bootstrap fallback)。
         if (committed != null)
         {
@@ -122,17 +122,17 @@ internal sealed class Transaction : ITransaction
         if (_state != TransactionState.Active)
             throw new TransactionException("Cannot commit: transaction is not Active.");
         _state = TransactionState.Preparing;
-        // OB-1: span + duration histogram。AlwaysOnSampler が無い環境 (StartActivity が null) では
+        // span + duration histogram。AlwaysOnSampler が無い環境 (StartActivity が null) では
         // ActivitySource はコストゼロで Stopwatch のみ走る。
         using var activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
             "tx.commit", ActivityKind.Internal);
         activity?.SetTag("quiver.tx.id", Id.Value);
-        // OB-3: tx 境界に構造化スコープを通す。Logger 未設定時は null になり no-op。
+        // tx 境界に構造化スコープを通す。Logger 未設定時は null になり no-op。
         using var logScope = QuiverLog.BeginTxScope(QuiverLog.TransactionLogger, Id.Value, "Commit");
         var sw = Stopwatch.StartNew();
         try
         {
-            // FT-33: Serializable のときは PageImage を WAL へ流す前に SSN の
+            // Serializable のときは PageImage を WAL へ流す前に SSN の
             // exclusion-window 検証を行う。違反なら SerializabilityException を投げ、
             // 下の catch が in-place rollback + Abort を行う。検証を通ったら同じ
             // critical section で post-commit スタンプを sidecar に書き戻し、それも
@@ -146,7 +146,7 @@ internal sealed class Transaction : ITransaction
             long lsn = _wal.Append(WalRecordType.Commit, Id, ReadOnlySpan<byte>.Empty);
             _wal.FlushTo(lsn);
             WalPageContext.End();
-            // FT-26: MVCC ambient コンテキスト終了 (これ以降このスレッドは
+            // MVCC ambient コンテキスト終了 (これ以降このスレッドは
             // ベンチ / bulk loader 等の Bootstrap fallback 経路に戻る)。
             MvccContext.End();
             ReleaseAllLocks();
@@ -160,12 +160,11 @@ internal sealed class Transaction : ITransaction
         }
         catch (Exception ex)
         {
-            // Commit failed mid-way (e.g. WAL flush failure). Surface as rollback
-            // so registered OnRolledBack hooks observe a consistent outcome.
-            // FT-15: roll the page changes back in place before discarding the
-            // context, then mark the transaction aborted on the WAL.
+            // WAL flush 失敗などで Commit が途中失敗した場合は rollback として公開し、
+            // 登録済み OnRolledBack フックから一貫した結果が見えるようにする。
+            // コンテキスト破棄前にページ変更をその場で戻し、WAL 上でも abort を記録する。
             try { RollBackInPlace(); } catch { }
-            // FT-29: drain 前に自分の PageImage を coalesce バッファから除去 (最適化)。
+            // drain 前に自分の PageImage を coalesce バッファから除去 (最適化)。
             try { _wal.EvictCoalescedPageImagesFor(Id); } catch { }
             try { _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty); } catch { }
             try { WalPageContext.End(); } catch { }
@@ -187,19 +186,19 @@ internal sealed class Transaction : ITransaction
     public void Abort()
     {
         if (_state is TransactionState.Committed or TransactionState.Aborted) return;
-        // OB-1: abort span + duration。Commit と同じ ActivitySource を共有。
+        // abort span + duration。Commit と同じ ActivitySource を共有。
         using var activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
             "tx.abort", ActivityKind.Internal);
         activity?.SetTag("quiver.tx.id", Id.Value);
-        // OB-3: 明示 Abort も同じスコープキーを通す。
+        // 明示 Abort も同じスコープキーを通す。
         using var logScope = QuiverLog.BeginTxScope(QuiverLog.TransactionLogger, Id.Value, "Abort");
         var sw = Stopwatch.StartNew();
-        // FT-15: in-process undo — restore captured before-images to the data
-        // files and reload page-backed store metadata, so discarded nodes /
-        // edges / properties are invisible to subsequent transactions. Must run
-        // before WalPageContext.End() drops the per-transaction before-image buffer.
+        // in-process undo では取得済み before-image をデータファイルへ戻し、
+        // ページベースストアのメタデータを再読込する。破棄したノード、エッジ、
+        // プロパティが後続トランザクションから見えないようにするため、
+        // WalPageContext.End() がトランザクション単位の before-image バッファを破棄する前に実行する。
         RollBackInPlace();
-        // FT-29: 共有 coalesce バッファに残った自分の PageImage を破棄してから Abort を書く。
+        // 共有 coalesce バッファに残った自分の PageImage を破棄してから Abort を書く。
         // (Append(Abort) の drain で aborted tx の after-image が WAL に漏れるのを抑制する最適化。
         // 漏れても recovery で abortedTxs により skip されるため correctness には影響しない。)
         _wal.EvictCoalescedPageImagesFor(Id);
@@ -215,12 +214,12 @@ internal sealed class Transaction : ITransaction
         FireHooks(_onRolledBack);
     }
 
-    // FT-15: apply this transaction's captured before-images in place. No-op for
-    // read-only transactions and for backends without an undo handler wired.
+    // このトランザクションで取得した before-image をその場で適用する。
+    // 読み取り専用トランザクションと undo handler のないバックエンドでは何もしない。
     private void RollBackInPlace()
     {
         if (_undoHandler == null) return;
-        // FTS-7: **順序が重要** (spec: 07_fulltext.md#logical-wal)。先に leaf 論理 undo (逆操作) を当てて Suppressed leaf
+        // **順序が重要** (spec: 07_fulltext.md#logical-wal)。先に leaf 論理 undo (逆操作) を当てて Suppressed leaf
         // (page before-image を持たない) からキーを除去する。その後 before-image undo が Full の header
         // ページを pre-tx CLR へ戻し ReloadFromHeader で root/height/entryCount を権威的に再同期するので、
         // 論理 undo が触った entryCount は最終的に header CLR の値 (= pre-tx) で上書きされ二重計上しない。
@@ -232,7 +231,7 @@ internal sealed class Transaction : ITransaction
             _undoHandler.Undo(beforeImages);
     }
 
-    // ==================== FT-33: SSN commit protocol ====================
+    // ==================== SSN コミットプロトコル ====================
 
     /// <summary>
     /// SSN (Wang et al. DaMoN'15) Algorithm 1 の commit 時検証 + post-commit スタンプ書き戻し。
@@ -241,15 +240,12 @@ internal sealed class Transaction : ITransaction
     /// もとに、creator cstamp / reader pstamp / overwriter sstamp を畳み込んで exclusion window
     /// (π(T) &gt; η(T)) を判定する。検証 + 書き戻しは <see cref="TransactionManager.SsnCommitGate"/>
     /// 下で直列化し、並行 Serializable commit 間の version スタンプ read-modify-write を保護する。
-    ///
     /// <para>read 捕捉は <see cref="ISsnReadSink"/> をストアの物理読み取り点 (NodeStore /
     /// RelationshipStore の Read・Scan) に挿しているため、直接 Read だけでなく traversal の隣接走査・
     /// scan・index seek 後のレコード読みも一律 read-set に入る (= rw-antidependency の取りこぼしなし)。</para>
-    ///
     /// <para>仕様上の限界 (設計でスコープ外、index versioning / 別タスク前提): phantom protection は
     /// 対象外 — 述語に新規一致する行や隣接の増加 (= 既存バージョンの読みではない) は検出しない。
     /// lock は SSN と併存し撤去しない (将来別タスク)。</para>
-    ///
     /// <para>実装上の割り切り (いずれも安全側 = false-abort 方向で、missed-anomaly は起こさない):
     /// (1) 競合粒度は Node / Relationship 単位で per-property ではない (同一ノードの別プロパティ同士も
     /// 衝突扱い = over-abort)。(2) early-abort は入れず commit 時に一括判定 (perf 最適化の見送りで
@@ -264,7 +260,7 @@ internal sealed class Transaction : ITransaction
         {
             // 候補 commit stamp (単調)。最終 cstamp(T) は下で π(T) に確定する。
             long candidate = _manager.NextCommitStamp();
-            // FT-33 (④): commit-stamp 高水位を node sidecar ヘッダへ耐久化する。本 tx の
+            // commit-stamp 高水位を node sidecar ヘッダへ耐久化する。本 tx の
             // WalPageContext がまだ生きているので commit と同一 page-WAL 単位で永続化され、
             // 再起動後の Open でこの値からクロックを再開できる (旧/新 stamp 空間の混在を防ぐ)。
             // 候補は gate 下で単調増加するため最新書き込みが最高値。
@@ -300,7 +296,7 @@ internal sealed class Transaction : ITransaction
                 throw new SerializabilityException(Id,
                     $"Transaction {Id.Value} would violate serializability (η={eta} ≥ π={pi}).");
 
-            // FT-34: 最終 commit stamp = π(T)。これを後続 tx が CommitStampOf / version stamp
+            // 最終 commit stamp = π(T)。これを後続 tx が CommitStampOf / version stamp
             // 経由で観測することで η/π 伝播が推移的になり、3-cycle 以上の dangerous structure も
             // 検出できる (fresh counter のままだと推移性が壊れる)。
             long cstamp = pi;
@@ -339,7 +335,7 @@ internal sealed class Transaction : ITransaction
         _ => null,
     };
 
-    // ==================== FT-23: Savepoint ====================
+    // ==================== セーブポイント ====================
 
     public SavepointId Savepoint(string? name = null)
     {
@@ -366,7 +362,7 @@ internal sealed class Transaction : ITransaction
             throw new TransactionException($"Savepoint {savepoint} is not valid in this transaction.");
 
         int level = _savepoints![index].Level;
-        // FT-23: 上位 savepoint も同時に無効化する (PostgreSQL / SQL 標準: ROLLBACK TO Sn は
+        // 上位 savepoint も同時に無効化する (PostgreSQL / SQL 標準: ROLLBACK TO Sn は
         // Sn より新しい全ての savepoint も解放する)。Sn 自身は消費しない。
         _savepoints.RemoveRange(index + 1, _savepoints.Count - index - 1);
 
@@ -451,7 +447,7 @@ internal sealed class Transaction : ITransaction
 
     private static void SafeInvoke(Action callback)
     {
-        // Observer exceptions must not affect the transaction outcome.
+        // オブザーバーの例外でトランザクション結果を変えてはならない。
         try { callback(); } catch { }
     }
 

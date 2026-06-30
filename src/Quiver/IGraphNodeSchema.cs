@@ -45,7 +45,7 @@ public static class GraphDatabaseSchemaExtensions
     /// </summary>
     /// <example>
     /// <code>
-    /// db.EnsureIndexes&lt;Person&gt;();   // 起動時に一度
+    /// db.EnsureIndexes&lt;Person&gt;;   //起動時に一度
     /// </code>
     /// </example>
     public static void EnsureIndexes<T>(this GraphDatabase db) where T : IGraphNodeSchema<T>
@@ -58,8 +58,8 @@ public static class GraphDatabaseSchemaExtensions
     /// </summary>
     /// <example>
     /// <code>
-    /// db.EnsureIndex&lt;Person&gt;(p =&gt; p.Name);                              // 推論 (StringEquality)
-    /// db.EnsureIndex&lt;Person&gt;(p =&gt; p.Name, IndexKind.StringRange);        // 上書き
+    /// db.EnsureIndex&lt;Person&gt;(p =&gt; p.Name);                              //推論 (StringEquality)
+    /// db.EnsureIndex&lt;Person&gt;(p =&gt; p.Name, IndexKind.StringRange);        //上書き
     /// </code>
     /// </example>
     public static void EnsureIndex<T>(

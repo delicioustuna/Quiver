@@ -204,9 +204,9 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
         => throw new NotSupportedException("This backend does not support TryGetVector.");
 
-    // ARCH-2: 物理プラン実行 (Execute/ExecuteCursor)、access methods (Access)、隣接ブロック
+    // 物理プラン実行 (Execute/ExecuteCursor)、access methods (Access)、隣接ブロック
     // (AdjacencyBlocks) は内部実装型を露出するため公開面から除外し、internal な
-    // IGraphTransactionInternal へ移設した (利用者は g.V() ベースの DSL を使う)。
+    // IGraphTransactionInternal へ移設した (利用者は GraphTraversal DSL を使う)。
 
     /// <summary>トランザクションをコミットする。</summary>
     void Commit();
@@ -214,7 +214,7 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// <summary>トランザクションをロールバックする。</summary>
     void Rollback();
 
-    // ── Savepoint / nested undo ─────────────────────────────────────
+    // ── セーブポイント / 入れ子 undo ───────────────────────────────
 
     /// <summary>
     /// トランザクション内に savepoint を作成し識別子を返す。

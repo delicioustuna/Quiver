@@ -29,9 +29,9 @@ internal sealed class LockManager
         DateTime deadline = timeout == Timeout.InfiniteTimeSpan
             ? DateTime.MaxValue
             : DateTime.UtcNow + timeout;
-        // OB-1: lock 取得の wait 時間を測る。即時取得時は near-zero。
+        // lock 取得の wait 時間を測る。即時取得時は near-zero。
         var sw = Stopwatch.StartNew();
-        // OB-2: 一度でも Wait() に入ったかを記録し、contention カウンタに反映する。
+        // 一度でも Wait() に入ったかを記録し、contention カウンタに反映する。
         bool contended = false;
         try
         {
@@ -120,7 +120,7 @@ internal sealed class LockManager
         {
             while (!waiter.Granted)
             {
-                // FT-25: DeadlockDetector が当該 waiter を犠牲者として印付けたら DeadlockException を投げて
+                // DeadlockDetector が当該 waiter を犠牲者として印付けたら DeadlockException を投げて
                 // 上位 (TxNodeStore.Acquire 等の wrapping ではなく user 経路) へ伝播させる。
                 if (waiter.DeadlockAborted)
                     throw new DeadlockException(txId,
@@ -335,7 +335,7 @@ internal sealed class LockManager
         public readonly TransactionId TxId = txId;
         public readonly LockMode Mode = mode;
         public bool Granted;
-        // FT-25: DeadlockDetector が犠牲者として印付けると true。Wait は次回 wake で例外を投げる。
+        // DeadlockDetector が犠牲者として印付けると true。Wait は次回 wake で例外を投げる。
         public bool DeadlockAborted;
     }
 }

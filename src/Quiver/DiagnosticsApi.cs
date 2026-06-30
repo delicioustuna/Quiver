@@ -12,13 +12,13 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     private readonly INodeStore _nodeStore;
     private readonly IRelationshipStore _relStore;
     private readonly IGraphAccessMethods _access;
-    // FT-22: orphan 検出は型を意識せずに全索引を走査する必要があるため
+    // orphan 検出は型を意識せずに全索引を走査する必要があるため
     // IIndexManager の non-generic 経路を直接持つ。
     private readonly IndexManager? _indexManager;
     private readonly LabelNodeIndex? _labelIndex;
-    // FT-28: Adaptive checkpoint controller の現在 threshold と policy 切り替えを公開する経路。
+    // Adaptive checkpoint controller の現在 threshold と policy 切り替えを公開する経路。
     private readonly TransactionManager? _txManager;
-    // FT-28: SetCheckpointPolicy(Adaptive, ...) で新規 controller を構築するための保存値。
+    // SetCheckpointPolicy(Adaptive, ...) で新規 controller を構築するための保存値。
     private readonly TimeSpan _adaptiveTargetRecoveryTime;
     private readonly long _adaptiveMinThresholdBytes;
     private readonly long _adaptiveMaxThresholdBytes;
@@ -95,7 +95,7 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
         var (indexCount, entryCount, rawOrphans, labelOrphans) = ScanOrphans();
         var orphanEntries = ToPublicOrphans(rawOrphans);
 
-        // OB-2: index-orphan-count gauge は CheckIndexConsistency が呼ばれた時点の観測値を保持。
+        // index-orphan-count gauge は CheckIndexConsistency が呼ばれた時点の観測値を保持。
         // B+Tree orphan + LabelIndex orphan の合計。
         QuiverEventSource.Log.SetIndexOrphanCount(orphanEntries.Count + labelOrphans);
 
@@ -165,7 +165,7 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
             int sep = name.IndexOf(IndexManager.FtLaneSep);
             if (sep >= 0)
             {
-                // FTS-2: 全文索引 lane。EntityId は value (tf/docLen) ではなく key 側に入っている
+                // 全文索引 lane。EntityId は value (tf/docLen) ではなく key 側に入っている
                 // (postings=末尾8B の packed ref / norms=Int64 key の packed ref)。表示名は lane タグを外す。
                 var lane = name[(sep + 1)..];
                 long packed = lane == IndexManager.PostingsLaneTag
@@ -183,7 +183,7 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
 
     private bool IsLiveNode(long packedValue)
     {
-        // FT-22 / ARCH-3: B+Tree 索引値は EntityRef でパック済み (Kind/Generation/Sequence)。
+        // /: B+Tree 索引値は EntityRef でパック済み (Kind/Generation/Sequence)。
         // 索引は現状 Node 限定。Node 以外、物理的に解放済み (InUse=false)、または slot が
         // 再利用されて世代が食い違う (ABA) エントリは orphan とみなす。
         if (EntityRef.UnpackKind(packedValue) != EntityKind.Node) return false;

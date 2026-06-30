@@ -80,7 +80,7 @@ internal sealed class GraphEngineAdapter : IGraphEngine
                 return false;
             }
 
-            // ARCH-5c Phase 3/4: node / rel とも inline + overflow を結合列挙する。
+        // node / rel とも inline + overflow を結合列挙する。
             PropertyEnumerator enumerator;
             if (entity.Kind == EntityKind.Node)
             {

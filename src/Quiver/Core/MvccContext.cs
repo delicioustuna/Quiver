@@ -5,7 +5,6 @@ namespace Quiver.Core;
 /// <c>Quiver.Transactions.SsnContext</c> が実装し、Serializable tx の間だけ
 /// <see cref="MvccContext"/> に登録される。下層ストアの <c>Read</c> / <c>Scan</c> /
 /// 隣接走査が「可視レコードを 1 件観測した」タイミングで <see cref="OnVisibleRead"/> を呼ぶ。
-///
 /// <para>これにより直接 Read だけでなく traversal / scan / index seek 経由の読み取りも
 /// もれなく read-set に入り、SSN が rw-antidependency を取りこぼさない。phantom (述語に新規一致する
 /// 行や隣接の増加) は別途 index versioning が必要なため対象外。</para>
@@ -21,12 +20,10 @@ internal interface ISsnReadSink
 /// スレッドローカルにトランザクションの可視性スナップショット (TxId / ActiveAtBegin / committed registry)
 /// を持つ。下層ストア (NodeStore / RelationshipStore / PropertyStore) はこれを参照して
 /// record の xmin / xmax を埋め、可視性判定を行う。
-///
 /// <para>
 /// コンテキスト未設定時は <see cref="TransactionId.Bootstrap"/> として扱う。これにより
 /// ベンチマーク / bulk loader / recovery など tx 外から呼ばれる経路でも一貫した動作になる。
 /// </para>
-///
 /// <para>
 /// 配置: <c>Quiver.Storage.Records</c> から参照される必要があるため <c>Quiver.Core</c> に置く
 /// (Quiver.Transactions は Stores より上位なので循環参照を避ける目的)。

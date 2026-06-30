@@ -2,7 +2,6 @@ namespace Quiver.Core;
 
 /// <summary>
 /// トランザクション開始時にキャプチャされるスナップショット。MVCC visibility 判定の入力。
-///
 /// <para>
 /// LSN ベースの semi-MVCC ではなく、TxId と「自身開始時にアクティブだった TxId 集合」の
 /// 2 つを持つ点が Postgres と同じ。<see cref="SnapshotTxId"/> 以下のコミット済み tx

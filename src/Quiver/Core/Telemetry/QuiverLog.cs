@@ -16,7 +16,6 @@ namespace Quiver.Telemetry;
 /// フォールバックする。ホット path はカテゴリ別の <see cref="ILogger"/> を直接参照し、
 /// <c>NullLogger</c> 経路では <see cref="ILogger.IsEnabled"/> が false を返すため
 /// LoggerMessage 生成コードはすぐに帰る — 計装オーバーヘッドはほぼゼロに保たれる。
-///
 /// 設計判断: <see cref="QuiverTelemetry"/> (ActivitySource / Meter) と同じく
 /// プロセス静的シングルトンに揃えた。マルチ DB 構成でも観測シンクは集約される想定。
 /// </remarks>
@@ -145,7 +144,7 @@ internal static partial class QuiverLog
         public override string ToString() => $"tx={_txId} op={_op}";
     }
 
-    // ----- LoggerMessage source-generated methods (allocation-free) -----
+    // ----- LoggerMessage の Source Generator 生成メソッド (allocation-free) -----
 
     [LoggerMessage(
         EventId = 1,

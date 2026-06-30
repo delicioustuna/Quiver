@@ -128,7 +128,7 @@ internal sealed class QueryOptimizer
         return new ScanPlan(ScanKind.AllNodesScan, null, null, _stats.TotalNodes);
     }
 
-    // ---- ARCH-5c Phase 5d: 列スキャン集約のコスト判定 ----
+    // ---- 列スキャン集約のコスト判定 ----
 
     // 列 dense スキャンの 1 entry あたり概算コスト (in-memory 配列舐め + visibility 判定)。
     private const double ColumnScanCostPerEntry = 1.0;
@@ -166,12 +166,12 @@ internal sealed class QueryOptimizer
 
     // ---- 展開プラン ----
 
-    // PW-17: RelationshipScanExpandOperator が勝つのは frontier がほぼエッジ全体を覆う場合のみ。
+    // RelationshipScanExpandOperator が勝つのは frontier がほぼエッジ全体を覆う場合のみ。
     // ノード毎経路はリンクリスト / 隣接ブロック fast path の恩恵を受け、かつ各ソースの
     // 直接の隣接で停止するのに対し、スキャン経路は常に O(TotalRelationships) のコストを払う。
     // バイナリバックエンド (リンクリスト、隣接ブロックなし) では frontier カバー率約 85% でクロスオーバー、
     // 隣接ブロックあり構成ではクロスオーバーはさらに高くなる。
-    // 詳細は docs/benchmarks/2026-05-15_PW-17_after.md。
+    // 詳細は docs/benchmarks/2026-05-15__after.md。
     private const double RelationshipScanFrontierFraction = 0.85;
 
     /// <summary>
@@ -216,7 +216,7 @@ internal sealed class QueryOptimizer
         return new ExpandPlan(ExpandStrategy.AdjacencyBlock, fanOut);
     }
 
-    // ---- PW-12: 述語順最適化 ----
+    // ----: 述語順最適化 ----
 
     /// <summary>
     /// 述語に紐付くヒント。<paramref name="EstimatedMatchingRows"/> はプランナによる
@@ -272,7 +272,7 @@ internal sealed class QueryOptimizer
         return Math.Pow(meanDegree, hopCount) > BidirectionalFanOutThreshold;
     }
 
-    // ---- VEC-6: KNN ストラテジ選択 ----
+    // ----: KNN ストラテジ選択 ----
 
     /// <summary>
     /// ベクトルインデックス全体に対する候補集合の比率がこの値を下回ると graph-first が有利になる。

@@ -56,7 +56,7 @@ internal sealed class DeadlockDetector : IDisposable
                     if (lm.TryAbortWaiter(victim))
                     {
                         Interlocked.Increment(ref _detectedCount);
-                        // OB-2: dotnet-counters の tx-deadlock-victim-count に反映。
+                        // dotnet-counters の tx-deadlock-victim-count に反映。
                         QuiverEventSource.Log.DeadlockVictim();
                         aborted++;
                         break;

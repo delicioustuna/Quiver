@@ -19,7 +19,7 @@ public sealed class GraphDatabase : IDisposable
 {
     private readonly IGraphStorageBackendInternal _backend;
     private readonly string _path;
-    // OP-7: AutoVacuum が有効なときのみ非 null。Dispose で停止する。
+    // AutoVacuum が有効なときのみ非 null。Dispose で停止する。
     private readonly AutoVacuumWorker? _autoVacuumWorker;
     private readonly bool _enforceExclusiveWriter;
     private int _activeWriterCount;
@@ -30,7 +30,7 @@ public sealed class GraphDatabase : IDisposable
         AutoVacuumWorker? autoVacuumWorker = null,
         bool enforceExclusiveWriter = false)
     {
-        // ARCH-2: 内部 SPI へキャスト。
+        // 内部 SPI へキャスト。
         _backend = (IGraphStorageBackendInternal)backend;
         _path = path;
         _autoVacuumWorker = autoVacuumWorker;
@@ -51,7 +51,7 @@ public sealed class GraphDatabase : IDisposable
     public static GraphDatabase Open(string filePath, GraphDatabaseOptions? options = null)
     {
         options ??= new GraphDatabaseOptions();
-        // OB-3: ホット path 各所が参照する構造化ログのファサードに ILoggerFactory を流し込む。
+        // ホット path 各所が参照する構造化ログのファサードに ILoggerFactory を流し込む。
         // null のときはあえて触らない — 別 DB が事前に設定したロガーを取り消さないことで、
         // テスト並列実行時の汚染や、複数 DB を 1 プロセスで開く運用での意外な reset を避ける
         // (OTel ActivitySource / EventSource は構造上プロセス共有なので、最後勝ち回避はここだけ)。
@@ -60,7 +60,7 @@ public sealed class GraphDatabase : IDisposable
         var factory = options.BackendFactory ?? CreateDefaultFactory(options.Backend);
         var backend = factory.Open(filePath, options);
 
-        // OP-7: AutoVacuum 有効時は周期ワーカーを起動する。各 tick は backend.Vacuum() を
+        // AutoVacuum 有効時は周期ワーカーを起動する。各 tick は backend.Vacuum() を
         // 呼ぶだけで、アクティブ tx があれば vacuum 自身が Skipped で安全に no-op する。
         AutoVacuumWorker? worker = null;
         if (options.AutoVacuum && options.AutoVacuumInterval > TimeSpan.Zero)
@@ -238,14 +238,14 @@ public sealed class GraphDatabase : IDisposable
             tx.Relationships, tx.Properties, keyId, expectedType);
     }
 
-    // ===== ARCH-5c Phase 5b: opt-in 列指向 (CreateColumn / DropColumn) =====
+    // ===== opt-in 列指向 (CreateColumn / DropColumn) =====
 
     private BinaryGraphStorageBackend RequireBinaryForColumns()
         => _backend as BinaryGraphStorageBackend
            ?? throw new NotSupportedException("列指向 (CreateColumn) は binary backend 専用です。");
 
     /// <summary>
-    /// Phase 5b: 指定 <paramref name="kind"/> の scalar プロパティ <paramref name="propertyKey"/> を
+    /// 指定 <paramref name="kind"/> の scalar プロパティ <paramref name="propertyKey"/> を
     /// 列化登録する (opt-in)。現データから列を構築し登録を永続化する。既に列化済みなら false。
     /// <para>5b 時点では登録 + 初期構築まで。以後の write での自動維持は 5c で配線する。</para>
     /// </summary>
@@ -256,7 +256,7 @@ public sealed class GraphDatabase : IDisposable
         return RequireBinaryForColumns().CreateColumn(kind, keyId.Value);
     }
 
-    /// <summary>Phase 5b: 列化登録を解除する。未登録なら false。</summary>
+    /// <summary>列化登録を解除する。未登録なら false。</summary>
     public bool DropColumn(Core.EntityKind kind, string propertyKey)
     {
         ArgumentNullException.ThrowIfNull(propertyKey);
@@ -264,7 +264,7 @@ public sealed class GraphDatabase : IDisposable
         return RequireBinaryForColumns().DropColumn(kind, keyId.Value);
     }
 
-    /// <summary>Phase 5b 検証用 (interim、5d で本 read 経路へ): 列の可視値合計。未登録は -1。</summary>
+    /// <summary>列指向の読み取り経路を検証するため、列の可視値合計を返す。未登録なら -1。</summary>
     internal long ColumnProjectSumForTest(Core.EntityKind kind, string propertyKey)
     {
         if (!_backend.Schema.TryGetPropertyKeyId(propertyKey, out var keyId)) return -1;
@@ -290,13 +290,11 @@ public sealed class GraphDatabase : IDisposable
     /// <summary>
     /// 書き込みを止めずに <paramref name="targetFilePath"/> (<c>*.quiver</c>) へ
     /// ライブスナップショットを取る。target は <see cref="Open"/> で独立した DB として開ける。
-    ///
     /// 内部では (1) ベストエフォートでシャープチェックポイントを起動、(2) 単一コンテナを
     /// page-by-page で複製、(3) WAL を末尾までフラッシュして単一サイドカーを複製、という流れで、
     /// 並行 writer はフレームレベルロックの粒度で短くしか待たない。target を開くと recovery が走り、
     /// snapshot 時点までの commit 群が redo され、中途半端だった in-flight tx は
     /// CompensationLogRecord で undo される。
-    ///
     /// バイナリ以外のバックエンドはサポート対象外 (<see cref="NotSupportedException"/>)。
     /// </summary>
     public void CreateSnapshot(string targetFilePath, SnapshotOptions? options = null)
@@ -306,11 +304,9 @@ public sealed class GraphDatabase : IDisposable
     /// 削除済みエンティティ (MVCC の dead version) を物理回収する vacuum を
     /// 同期的に実行する。アクティブトランザクションがあるときは安全側で何もせず
     /// <see cref="VacuumReport.Skipped"/> = true で返る。
-    ///
     /// 現状の MVP はノードストアのみを対象とする (リレーション / プロパティ / 索引の
     /// 物理回収は後続ステップで拡張)。<see cref="VacuumOptions.Mode"/> に
     /// <see cref="VacuumMode.DryRun"/> を渡せば書き込み無しで実行できる。
-    ///
     /// バイナリ以外のバックエンドはサポート対象外 (<see cref="NotSupportedException"/>)。
     /// </summary>
     public VacuumReport Vacuum(VacuumOptions? options = null)
@@ -331,7 +327,7 @@ public sealed class GraphDatabase : IDisposable
     public IReadOnlyList<Migrations.MigrationHistoryEntry> GetMigrationHistory()
         => new Migrations.MigrationHistory(MigrationDirectory).Entries;
 
-    // ARCH-4 増分8: migrations.history はバックエンドのデータディレクトリに置く (operational metadata)。
+    // 増分8: migrations.history はバックエンドのデータディレクトリに置く (operational metadata)。
     // backend の DataDirectory を正本とする。
     private string MigrationDirectory => _backend.DataDirectory;
 
@@ -472,7 +468,6 @@ public sealed class GraphDatabaseOptions
     /// (各 commit の <c>FlushTo</c> が即座に fsync を起動する旧挙動)。0 より大きい値を指定すると、
     /// 最初の commit が到着した時点でこの window の経過まで spin-wait して後続 commit を貯め、
     /// 累積した全 commit を 1 回の fsync で一括処理する。
-    ///
     /// 効果: 多 commit 並列ワークロードでは fsync 回数が激減し IOPS を節約できる。代償として
     /// 単一 commit のレイテンシが (fsync 自体の時間 + window) まで増える。推奨値は 100µs
     /// 〜 1ms。Windows の <c>Task.Delay</c> 解像度 (~15ms) を回避するため、内部実装は

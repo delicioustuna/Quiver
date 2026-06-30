@@ -4,7 +4,6 @@ namespace Quiver.Core;
 /// 埋め込みパイプラインのヘルパーが利用する軽量な (kind, id) ハンドル。上位アセンブリから
 /// <c>NodeId</c> / <c>RelationshipId</c> を引き込まずに、ノードとリレーションシップで
 /// 同じ列挙 / 参照形状を共有できるようにする。<see cref="Id"/> は slot 局所 ID (Sequence)。
-///
 /// <para>物理 ID の統一パック表現 (Kind4/Gen16/Seq44) の静的 packing メソッド
 /// (<see cref="Pack"/> / <see cref="PackLocal"/> / <see cref="Sequence"/> / <see cref="Generation"/> /
 /// <see cref="UnpackKind"/>) を本型に集約した (旧 <c>GenerationalRef</c> を吸収)。</para>

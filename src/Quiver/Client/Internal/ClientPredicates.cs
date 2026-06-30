@@ -227,10 +227,9 @@ internal sealed class PropertyDoubleRangePredicate : IPredicate
 }
 
 /// <summary>
-/// Existence test for a property key on a node. Used by
-/// <c>.Has(key)</c> (mustExist=true) and <c>.HasNot(key)</c> (mustExist=false).
-/// The mustExist flag inlines negation so this predicate does not need a
-/// separate NegatedPredicate wrapper.
+/// ノードに指定プロパティキーが存在するかを判定する。
+/// <c>.Has(key)</c> では <c>mustExist=true</c>、<c>.HasNot(key)</c> では
+/// <c>mustExist=false</c> として否定を内包し、別の NegatedPredicate を不要にする。
 /// </summary>
 internal sealed class PropertyExistsPredicate : IPredicate
 {
@@ -247,8 +246,8 @@ internal sealed class PropertyExistsPredicate : IPredicate
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        // Unknown property key (token store never observed it) ⇒ definitely
-        // absent. HasNot(key) returns true, Has(key) returns false.
+        // トークンストアが認識していないプロパティキーは確実に存在しない。
+        // この場合 HasNot(key) は true、Has(key) は false を返す。
         if (!_keyId.IsValid) return !_mustExist;
 
         var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
@@ -260,7 +259,7 @@ internal sealed class PropertyExistsPredicate : IPredicate
     }
 }
 
-/// <summary><c>P.Without(...)</c> — string property must not match any listed value.</summary>
+/// <summary><c>P.Without(...)</c> — 文字列プロパティが列挙値のいずれにも一致しないことを判定する。</summary>
 internal sealed class PropertyWithoutStringPredicate : IPredicate
 {
     internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
@@ -290,10 +289,9 @@ internal sealed class PropertyWithoutStringPredicate : IPredicate
 }
 
 /// <summary>
-/// builds an <see cref="IPredicate"/> for a single <c>(column, keyId)</c>
-/// pair from a public-facing <see cref="PropertyPredicate"/>. Centralises the
-/// dispatch so <see cref="GraphTraversal{T}"/> and <see cref="SubTraversal"/>
-/// share one truth table for every <see cref="PredicateKind"/>.
+/// 公開 API の <see cref="PropertyPredicate"/> から単一の <c>(column, keyId)</c> に対する
+/// <see cref="IPredicate"/> を構築する。分岐を集約し、<see cref="GraphTraversal{T}"/> と
+/// <see cref="SubTraversal"/> で全 <see cref="PredicateKind"/> の真理値表を共有する。
 /// </summary>
 internal static class PredicateDispatch
 {
@@ -324,11 +322,11 @@ internal static class PredicateDispatch
                 return new OrPredicate(BuildAll(nodeColumn, keyId, pred.InnerArray, entity));
             case PredicateKind.Eq or PredicateKind.Gt or PredicateKind.Gte
                 or PredicateKind.Lt or PredicateKind.Lte or PredicateKind.Between when pred.IsDouble:
-                // FT-35: 浮動小数点の比較・範囲は double として復号比較する。
+                // 浮動小数点の比較・範囲は double として復号比較する。
                 return new PropertyDoubleRangePredicate(nodeColumn, keyId, pred) { Entity = entity };
             default:
-                // Eq/Gt/Gte/Lt/Lte/Between with numeric comparand fall through
-                // to the int64 predicate, which already enforces type flags.
+                // 数値比較値を持つ Eq/Gt/Gte/Lt/Lte/Between は、型フラグも検証する
+                // int64 述語へフォールスルーする。
                 return new PropertyInt64Predicate(nodeColumn, keyId, pred) { Entity = entity };
         }
     }
@@ -343,10 +341,9 @@ internal static class PredicateDispatch
 }
 
 /// <summary>
-/// shared base for string predicates that load a single string property
-/// and test it against a fixed comparand. Encapsulates the "find the property,
-/// reject non-string types, decode UTF-8" boilerplate so the prefix/suffix/
-/// contains/regex variants only differ in the final match test.
+/// 単一の文字列プロパティを読み、固定した比較値と照合する文字列述語の共通基底。
+/// プロパティ探索、文字列以外の除外、UTF-8 復号を集約し、前方一致・後方一致・
+/// 部分一致・正規表現の各実装が最後の照合処理だけを持つようにする。
 /// </summary>
 internal abstract class StringPropertyPredicateBase : IPredicate
 {
@@ -377,7 +374,7 @@ internal abstract class StringPropertyPredicateBase : IPredicate
     protected abstract bool Match(string value);
 }
 
-/// <summary>Cypher <c>STARTS WITH</c> / Gremlin <c>TextP.startingWith</c>.</summary>
+/// <summary>Cypher の <c>STARTS WITH</c> に対応する前方一致述語。</summary>
 internal sealed class StringPrefixPredicate : StringPropertyPredicateBase
 {
     private readonly string _prefix;
@@ -385,7 +382,7 @@ internal sealed class StringPrefixPredicate : StringPropertyPredicateBase
     protected override bool Match(string value) => value.StartsWith(_prefix, StringComparison.Ordinal);
 }
 
-/// <summary>Cypher <c>ENDS WITH</c> / Gremlin <c>TextP.endingWith</c>.</summary>
+/// <summary>Cypher の <c>ENDS WITH</c> に対応する後方一致述語。</summary>
 internal sealed class StringSuffixPredicate : StringPropertyPredicateBase
 {
     private readonly string _suffix;
@@ -393,7 +390,7 @@ internal sealed class StringSuffixPredicate : StringPropertyPredicateBase
     protected override bool Match(string value) => value.EndsWith(_suffix, StringComparison.Ordinal);
 }
 
-/// <summary>Cypher <c>CONTAINS</c> / Gremlin <c>TextP.containing</c>.</summary>
+/// <summary>Cypher の <c>CONTAINS</c> に対応する部分一致述語。</summary>
 internal sealed class StringContainsPredicate : StringPropertyPredicateBase
 {
     private readonly string _needle;
@@ -401,8 +398,7 @@ internal sealed class StringContainsPredicate : StringPropertyPredicateBase
     protected override bool Match(string value) => value.Contains(_needle, StringComparison.Ordinal);
 }
 
-/// <summary>Cypher <c>=~</c> regex match. The Regex is compiled once at
-/// construction and reused per row.</summary>
+/// <summary>Cypher の <c>=~</c> 正規表現照合。Regex は構築時に一度だけコンパイルし、行ごとに再利用する。</summary>
 internal sealed class RegexPropertyPredicate : StringPropertyPredicateBase
 {
     private readonly Regex _regex;
@@ -410,7 +406,7 @@ internal sealed class RegexPropertyPredicate : StringPropertyPredicateBase
     protected override bool Match(string value) => _regex.IsMatch(value);
 }
 
-/// <summary><c>NOT (predicate)</c> — inverts any IPredicate.</summary>
+/// <summary><c>NOT (predicate)</c> — 任意の IPredicate の結果を反転する。</summary>
 internal sealed class NegatedPredicate : IPredicate
 {
     private readonly IPredicate _inner;
@@ -418,7 +414,7 @@ internal sealed class NegatedPredicate : IPredicate
     public bool Evaluate(in TupleRef tuple, ITransaction tx) => !_inner.Evaluate(in tuple, tx);
 }
 
-/// <summary>short-circuiting AND across multiple IPredicates.</summary>
+/// <summary>複数の IPredicate を短絡評価する AND 述語。</summary>
 internal sealed class AndPredicate : IPredicate
 {
     private readonly IPredicate[] _inners;
@@ -431,7 +427,7 @@ internal sealed class AndPredicate : IPredicate
     }
 }
 
-/// <summary>short-circuiting OR across multiple IPredicates.</summary>
+/// <summary>複数の IPredicate を短絡評価する OR 述語。</summary>
 internal sealed class OrPredicate : IPredicate
 {
     private readonly IPredicate[] _inners;

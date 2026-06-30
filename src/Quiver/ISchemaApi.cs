@@ -28,7 +28,7 @@ public interface ISchemaApi
 
     /// <summary>
     /// ラベル ID から名前へ逆引きする。未登録 ID では <c>null</c> を返す。
-    /// Gremlin の <c>.label()</c> ステップや、ID を元の名前で表示したい診断系で利用する。
+    /// ラベル名の射影や、ID を元の名前で表示したい診断系で利用する。
     /// </summary>
     string? GetLabelName(LabelId id);
 

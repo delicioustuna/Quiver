@@ -11,7 +11,7 @@ public static class TypedGraphTraversalWriteExtensions
     // 設計: 両端を先に materialize してからループ書き込みする (materialize-first)。
     // これにより書き込んだ辺が上流走査へ再投入される Halloween 問題が構造的に起きず、
     // 始点と終点が同一ラベルでも辺生成は有限回で止まる。
-    // プロパティ無し版は new TRel() のデフォルト値を書かないよう CreateRelationship を直接使い、
+        // プロパティ無し版は new TRel() のデフォルト値を書かないよう CreateRelationship を直接使い、
     // ID のみで足りるので MaterializeIds でエンティティ復元を省く。
     // MergeRelationship のプロパティは ON CREATE のみ書く (既存辺は保持。MergeNode と対称)。
 

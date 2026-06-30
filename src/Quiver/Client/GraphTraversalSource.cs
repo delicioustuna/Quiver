@@ -9,7 +9,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Api;
 
 /// <summary>
-/// Gremlin 風のグラフトラバーサルを構築するエントリポイント。
+/// グラフトラバーサルを構築するエントリポイント。
 /// <see cref="GraphTransactionExtensions.G"/> 拡張で取得し、ノード追加・
 /// リレーション追加・スキャン起点・Match DSL・KNN 検索の起点として用いる。
 /// </summary>
@@ -22,9 +22,8 @@ public sealed class GraphTraversalSource
 {
     private readonly IGraphTransaction _tx;
     private readonly ISchemaApi _schema;
-    // VEC-10: 任意で注入された GraphStats。PendingKnnBuilder.Materialize 経由で
-    // graph-first push-down を label cardinality 30% 以上で vector-first フォールバックさせる。
-    // null のときは VEC-9 動作 (構造ヒントのみで判定)。
+    // 任意で注入された GraphStats。KNN push-down 時に label cardinality が高ければ
+    // vector-first フォールバックさせる。null のときは構造ヒントのみで判定する。
     private readonly GraphStats? _stats;
 
     /// <summary>
@@ -109,7 +108,7 @@ public sealed class GraphTraversalSource
 
     // ── スキャン起点 ─────────────────────────────────────────────────────────
 
-    /// <summary>全ノードをスキャン起点とするトラバーサルを生成する (Gremlin の <c>g.V()</c> 相当)。</summary>
+    /// <summary>全ノードをスキャン起点とするトラバーサルを生成する。</summary>
     public GraphTraversal<NodeId> Nodes()
     {
         var plan = new ScanOp(EntityKind.Node, null);
@@ -117,7 +116,7 @@ public sealed class GraphTraversalSource
     }
 
     /// <summary>
-    /// 全リレーションシップをスキャン起点とするトラバーサル (Gremlin の <c>g.E()</c> 相当)。
+    /// 全リレーションシップをスキャン起点とするトラバーサル。
     /// 主用途は全件集約 (<c>Sum</c>/<c>Mean</c>/<c>Max</c>/<c>Min</c>) で、対象プロパティが列化済みなら
     /// 列スキャンで高速集計する (それ以外は row path フォールバック)。<c>ToList()</c> で全 rel ID も取れる。
     /// </summary>
@@ -127,14 +126,14 @@ public sealed class GraphTraversalSource
         return new GraphTraversal<RelationshipId>(_tx, _schema, plan, row => row.GetRelationshipId(0), 0, aliases: null, stats: _stats);
     }
 
-    /// <summary>指定 ID のノード 1 件だけを起点とするトラバーサル (Gremlin の <c>g.V(id)</c> 相当)。</summary>
+    /// <summary>指定 ID のノード 1 件だけを起点とするトラバーサル。</summary>
     public GraphTraversal<NodeId> Node(NodeId nodeId)
     {
         var plan = new NodeSeedOp(new[] { nodeId });
         return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 
-    /// <summary>指定 ID のノード群を起点とするトラバーサル (Gremlin の <c>g.V(ids)</c> 相当)。</summary>
+    /// <summary>指定 ID のノード群を起点とするトラバーサル。</summary>
     public GraphTraversal<NodeId> Nodes(params NodeId[] nodeIds)
     {
         var plan = new NodeSeedOp(nodeIds);
@@ -163,7 +162,7 @@ public sealed class GraphTraversalSource
     /// <param name="pattern">マッチするノード / エッジパターン。</param>
     public MatchQuery Match(GraphPattern pattern) => new(_tx, _schema, pattern);
 
-    // ── VEC-5: KNN スキャン起点 ────────────────────────────────────────────────
+    // ── KNN スキャン起点 ────────────────────────────────────────────────
 
     /// <summary>
     /// ベクトル類似度上位 k 件をスキャン起点とするトラバーサル。
@@ -191,15 +190,14 @@ public sealed class GraphTraversalSource
     /// <param name="k">取得する上位件数。</param>
     public GraphTraversal<NodeId> Knn(string indexName, ReadOnlySpan<float> query, int k)
     {
-        // VEC-9: PendingKnnBuilder で包み、後続の pure-filter / Limit を candidate-side に
-        // 巻き戻せるようにする。filter が積まれなければ terminal で vector-first に materialize される。
-        // VEC-10: _stats を引き継ぎ、Materialize 経路で label cardinality fallback を効かせる。
-        // VEC-12: backend が capability 経路で spec を返せれば dim を解決し、PendingKnnBuilder に
-        //         dim-aware piecewise threshold を引かせる。spec を返さない backend では dim=0 で
-        //         legacy 30% 単一閾値経路に倒れる (HasFastLabelIndex 経路は使われない)。
+        // 後続の pure-filter / Limit を candidate-side に巻き戻せるよう KnnOp で包む。
+        // filter が積まれなければ終端で vector-first に materialize される。
+        // _stats があれば label cardinality fallback を効かせる。
+        // backend が spec を返せれば dim-aware piecewise threshold を使い、返さなければ
+        // dim=0 で単一閾値経路にフォールバックする。
         int dim = _tx.AsInternal().Access.TryGetVectorIndexSpec(indexName, out var spec) ? spec.Dimensions : 0;
-        // ARCH-7: vector-first を既定とする KnnOp(Candidate=null) を積む。後続の pure-filter / Limit は
-        // 終端で LogicalOptimizer の KnnPushdown が candidate-side に巻き戻して graph-first 化を判定する。
+        // vector-first を既定とし、後続 pure-filter / Limit は終端で KnnPushdown が
+        // candidate-side に巻き戻して graph-first 化を判定する。
         var plan = new KnnOp(null, indexName, query.ToArray(), k, dim);
         return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
@@ -220,7 +218,7 @@ public sealed class GraphTraversalSource
     /// <param name="k">取得する上位件数。</param>
     public GraphTraversal<NodeId> Search(string indexName, string queryText, int k)
     {
-        // FTS-4: stats があれば N/avgdl スナップショットを op に焼き込み、operator のクエリ毎 norms 走査を省く。
+        // stats があれば N/avgdl スナップショットを op に焼き込み、クエリ毎の norms 走査を省く。
         var plan = new FullTextScanOp(null, indexName, queryText, k, _stats?.FullTextCorpus(indexName));
         return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }

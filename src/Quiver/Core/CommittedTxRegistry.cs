@@ -4,22 +4,19 @@ namespace Quiver.Core;
 
 /// <summary>
 /// MVCC visibility 判定で「ある TxId はコミット済みか?」を引くためのレジストリ。
-///
 /// <para>状態モデル:</para>
 /// <list type="bullet">
-///   <item><term>Active</term><description>TransactionManager 側で管理 (本クラス管轄外)</description></item>
-///   <item><term>Committed</term><description>本クラスに含まれる</description></item>
-///   <item><term>Aborted / Unknown</term><description>どこにも存在しない (= visibility 判定では「コミットしていない」扱い)</description></item>
+///  <item><term>Active</term><description>TransactionManager 側で管理 (本クラス管轄外)</description></item>
+///  <item><term>Committed</term><description>本クラスに含まれる</description></item>
+///  <item><term>Aborted / Unknown</term><description>どこにも存在しない (= visibility 判定では「コミットしていない」扱い)</description></item>
 /// </list>
-///
 /// <para>
 /// visibility horizon (= 最古アクティブ tx の TxId) を下回ったコミット済みエントリは、
 /// もう誰のスナップショットにも掛からないので prune できる (今はリストに残すが、
 /// vacuum 経路でメモリ削減を行う)。
 /// </para>
-///
 /// <para>
-/// 起動時 (RecoveryManager.Recover 完了直後) に WAL を走査して committed TxId 集合を
+/// 起動時 (RecoveryManager.Recover() 完了直後) に WAL を走査して committed TxId 集合を
 /// 復元する必要がある。recovery で aborted / crashed と判明した TxId は登録しないため
 /// 自然に visibility false になる。なお <see cref="TransactionId.Bootstrap"/> は常に committed として
 /// 起動時に登録しておく必要がある (= ベンチ / bulk-load / recovery 経路の xmin として使われる)。
@@ -35,7 +32,7 @@ internal sealed class CommittedTxRegistry
 
     public CommittedTxRegistry()
     {
-        // FT-26: bootstrap TxId は常に committed 扱い。
+        // bootstrap TxId は常に committed 扱い。
         _committed[TransactionId.Bootstrap.Value] = 0;
         _maxObservedTxId = TransactionId.Bootstrap.Value;
         _recoveryHorizon = TransactionId.Bootstrap.Value; // 既定: Bootstrap のみ presumed-committed
@@ -43,7 +40,6 @@ internal sealed class CommittedTxRegistry
 
     /// <summary>
     /// 「この値以下の TxId は WAL に無くとも presumed-committed として扱う」境界。
-    ///
     /// <para>
     /// 根拠: checkpoint の atomicity により、checkpoint は active tx が 0 の瞬間にしか
     /// 打たれない。よって checkpoint 後の data file に残っている xmin は (a) Bootstrap,
@@ -52,7 +48,6 @@ internal sealed class CommittedTxRegistry
     /// 「truncate された区間 = checkpoint 済み = data file durable」なので、その区間より古い
     /// xmin は visibility 上 committed として扱って良い。
     /// </para>
-    ///
     /// <para>
     /// recovery 経路 (RecoveryManager) で WAL 走査後に「現存する WAL 上の最古 TxId - 1」を
     /// 渡す。新規 DB では Bootstrap 据え置き。
@@ -88,7 +83,6 @@ internal sealed class CommittedTxRegistry
     /// <summary>
     /// 指定された TxId がコミット済みなら true。Active / Aborted / 未登録は false。
     /// visibility 判定の hot path で呼ばれる。
-    ///
     /// <para>
     /// <c>txId &lt;= RecoveryHorizon</c> は registry に居なくとも presumed-committed。
     /// これにより WAL truncate で commit レコードが消えた古い tx も visible に保てる。

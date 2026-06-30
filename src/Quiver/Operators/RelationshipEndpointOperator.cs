@@ -6,12 +6,11 @@ namespace Quiver.Query.Physical;
 /// <summary>
 /// リレーションシップ ID 列を、要求されたエンドポイント (source / target / other) の
 /// ノード ID 列に解決するオペレータ。<c>.OutRelationships()</c> / <c>.InRelationships()</c> /
-/// <c>.BothRelationships()</c> の後段で Gremlin の <c>.outV()</c> / <c>.inV()</c> /
-/// <c>.otherV()</c> ステップを実装する。
+/// <c>.BothRelationships()</c> の後段で各端点を解決する。
 /// </summary>
 /// <remarks>
 /// <see cref="RelationshipEndpoint.Other"/> ではランタイムにどちら側から来たか不明なため、
-/// BothE 走査パターンに合わせて <c>Target</c> を返す。既知のノードに対する厳密な
+/// 双方向走査パターンに合わせて <c>Target</c> を返す。既知のノードに対する厳密な
 /// "other" が必要な場合は <see cref="ExpandOperator"/> の出力モードを使う。
 /// </remarks>
 internal sealed class RelationshipEndpointOperator : IPhysicalOperator

@@ -17,7 +17,7 @@ public static class QuiverTelemetry
     public const string Version = "1.0.0";
 
     // ---------------------------------------------------------------------
-    // ActivitySource (Tracing)
+    // ActivitySource (トレース)
     // ---------------------------------------------------------------------
 
     /// <summary>Transaction の Begin / Commit / Abort を表す span 用。</summary>
@@ -58,7 +58,7 @@ public static class QuiverTelemetry
         new(WalFlushSourceName, Version);
 
     // ---------------------------------------------------------------------
-    // Meter (Metrics)
+    // Meter (メトリクス)
     // ---------------------------------------------------------------------
 
     /// <summary>本ライブラリが公開する <see cref="Meter"/> の名前。</summary>

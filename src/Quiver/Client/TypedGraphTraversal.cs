@@ -37,10 +37,10 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
             int     i => _inner.Has(key, i),
             long    l => _inner.Has(key, l),
             double  d => _inner.Has(key, d),
-            float   f => _inner.Has(key, (double)f),   // FT-35: float は Double に widen 格納
-            Half    h => _inner.Has(key, (double)h),   // FT-35: Half も Double に widen
+            float   f => _inner.Has(key, (double)f),   // float は Double に widen 格納
+            Half    h => _inner.Has(key, (double)h),   // Half も Double に widen
             bool    b => _inner.Has(key, b),
-            // FT-35 (増分2): 日時系は格納と同じ正準 long へ (TemporalCodec 共有)。
+            // 日時系は格納と同じ正準 long へ (TemporalCodec 共有)。
             DateTime dt        => _inner.Has(key, Quiver.Storage.Records.TemporalCodec.ToUtcTicks(dt)),
             DateTimeOffset dto => _inner.Has(key, Quiver.Storage.Records.TemporalCodec.OffsetToUtcTicks(dto)),
             DateOnly d         => _inner.Has(key, Quiver.Storage.Records.TemporalCodec.ToDayNumber(d)),
@@ -219,7 +219,7 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
             _inner._stats);
     }
 
-    // ── SIG-4: ダイアディック演算子ステップ ──────────────────────────────────
+    // ── ダイアディック演算子ステップ ──────────────────────────────────
 
     /// <summary>
     /// 上流の候補ノードに対し、<paramref name="selector"/> で指定した <c>float[]</c> プロパティの

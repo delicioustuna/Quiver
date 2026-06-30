@@ -10,14 +10,12 @@ internal sealed class TxNodeStore : INodeStore
     private readonly TransactionId _txId;
     private readonly LockingMode _mode;
     private readonly TimeSpan _timeout;
-    // FT-26: per-tx MVCC コンテキスト。同一スレッドで複数 tx を交互に操作する場合、
+    // per-tx MVCC コンテキスト。同一スレッドで複数 tx を交互に操作する場合、
     // thread-static MvccContext を呼出側で「使う直前に毎回」設定し直さないと
-    // 別 tx の snapshot で visibility 判定が走ってしまう。Begin / End ペアは
-    // Transaction.ctor / Commit/Abort に既にあるが、それは「自身が走っている間」しか
-    // 効かないので、Tx 操作ごとに ambient を再アクティベートする。
+    // 別 tx の snapshot で visibility 判定が走ってしまう。Tx 操作ごとに ambient を再アクティベートする。
     private readonly SnapshotState _snapshot;
     private readonly CommittedTxRegistry? _committed;
-    // FT-33: SSN (Serializable) のときのみ非 null。read/write hook は read/write set を
+    // SSN (Serializable) のときのみ非 null。read/write hook は read/write set を
     // 収集するだけ。η/π の計算と exclusion window 判定は commit 時に commit-stamp 空間で
     // 一括実行する (Transaction.SsnValidateAndStamp)。
     private readonly SsnContext? _ssn;
@@ -37,7 +35,7 @@ internal sealed class TxNodeStore : INodeStore
     public NodeId Allocate(LabelId labelId)
     {
         ActivateMvccContext();
-        // FT-33: Allocate は新規バージョンの作成 — 誰も読めなかった entity なので
+        // Allocate は新規バージョンの作成 — 誰も読めなかった entity なので
         // r:w / w:w in-edge は存在しない。SSN write set には登録しない。
         return _inner.Allocate(labelId);
     }
@@ -45,20 +43,20 @@ internal sealed class TxNodeStore : INodeStore
     public void Free(NodeId nodeId)
     {
         ActivateMvccContext();
-        // ARCH-5b: lock / SSN キーは Sequence (read-set 側 RecordRead と整合させる)。
+        // lock / SSN キーは Sequence (read-set 側 RecordRead と整合させる)。
         Acquire(nodeId.Sequence, LockMode.Exclusive);
-        // FT-33: 論理削除は既存バージョンの上書きと同じ依存を生む。
+        // 論理削除は既存バージョンの上書きと同じ依存を生む。
         SsnOnWrite(nodeId.Sequence);
         _inner.Free(nodeId);
     }
 
     public NodeReadHandle Read(NodeId nodeId)
     {
-        // FT-24: ReaderWriter モードでは共有ロックを取り、書き込み tx と分離する。
+        // ReaderWriter モードでは共有ロックを取り、書き込み tx と分離する。
         // ExclusiveOnly (既定) は後方互換のため無ロック。
         if (_mode == LockingMode.ReaderWriter)
             Acquire(nodeId.Sequence, LockMode.Shared);
-        // FT-33: read-set は ActivateMvccContext で登録した sink 経由で _inner.Read が記録する
+        // read-set は ActivateMvccContext で登録した sink 経由で _inner.Read が記録する
         // (可視判定後の 1 件のみ)。traversal / scan も同じ _inner.Read を通るので一律捕捉される。
         ActivateMvccContext();
         return _inner.Read(nodeId);
@@ -68,7 +66,7 @@ internal sealed class TxNodeStore : INodeStore
     {
         Acquire(nodeId.Sequence, LockMode.Exclusive);
         ActivateMvccContext();
-        // FT-33: early-abort は _inner.Write のミューテーション前に評価する。
+        // early-abort は _inner.Write のミューテーション前に評価する。
         SsnOnWrite(nodeId.Sequence);
         return _inner.Write(nodeId);
     }
@@ -79,10 +77,10 @@ internal sealed class TxNodeStore : INodeStore
         return _inner.Scan();
     }
 
-    // ARCH-3: 世代照合は raw な sidecar 読み取り (MVCC / lock 不要)。そのまま委譲する。
+    // 世代照合は raw な sidecar 読み取り (MVCC / lock 不要)。そのまま委譲する。
     public int CurrentGeneration(long localId) => _inner.CurrentGeneration(localId);
 
-    // ===== ARCH-5c Phase 3: inline property (read は共有ロック / write は排他ロック + SSN write) =====
+    // ===== inline property (read は共有ロック / write は排他ロック + SSN write) =====
 
     public bool TryGetInlineProperty(NodeId nodeId, PropertyKeyId keyId, out PropertyValue value)
     {
@@ -127,7 +125,7 @@ internal sealed class TxNodeStore : INodeStore
             MvccContext.Begin(_txId, _snapshot, _committed, _ssn);
     }
 
-    // ==================== FT-33: SSN write-set 収集 ====================
+    // ==================== SSN write-set 収集 ====================
     // read-set は MvccContext の sink (SsnContext) 経由でストアの Read/Scan が記録する。
 
     private void SsnOnWrite(long localId)
