@@ -18,9 +18,12 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
 - **1 つの DB ディレクトリは 1 プロセスからのみ開ける**。複数プロセスからの同時オープンは不可。
   同一プロセス内では `GraphDatabase` を singleton 共有し、複数スレッドから使う (インスタンスはスレッドセーフ)。
 - **並行モデルは「単一ライタ + 並行リーダ」**。読み取りはスナップショット分離でロックフリーに並行でき、
-  書き込み中でも読める。書き込みは 1 度に 1 tx を前提とするため、複数スレッドから書く場合はアプリ側で
-  直列化する (`SemaphoreSlim(1,1)` ゲート、または専用ライタスレッド + キュー)。
+  書き込み中でも読める。書き込みは 1 度に 1 tx を前提とする。
+  複数スレッドから書く場合は `EnforceExclusiveWriter = true` と `BeginTransactionAsync()` を組み合わせるか、
+  アプリ側の `SemaphoreSlim(1,1)` ゲート、または専用ライタスレッド + キューで直列化する。
   トランザクションはスレッド親和で、生成したスレッドで使い切る (別スレッドへ渡さない)。
+  `BeginTransactionAsync()` と `CommitAsync()` 等の Quiver が提供する境界は await できるが、
+  その間の CRUD に外部 I/O 等の任意の `await` を挟んではならない。
   tx は短く保つ。開いたままだと checkpoint、`Vacuum`、WAL 切り詰めが止まり WAL が肥大する。
   並行性とスレッドの規約、リトライ実装例は
   [docs/spec/08_known_limits.md#concurrency](../spec/08_known_limits.md#concurrency) に集約。

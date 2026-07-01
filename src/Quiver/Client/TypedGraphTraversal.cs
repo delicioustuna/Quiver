@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Runtime.CompilerServices;
 using Quiver.Api.Internal;
 using Quiver.Core;
 using Quiver.Query.Logical;
@@ -324,15 +325,69 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     public List<T> ToList()
         => _inner.ToList().ConvertAll(id => T.Load(_tx, id));
 
+    /// <summary>結果ノードを同期的に復元し、非同期 API として返す。</summary>
+    public ValueTask<List<T>> ToListAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var results = new List<T>();
+        using var cursor = _inner.AsCursor();
+        while (cursor.MoveNext())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            results.Add(T.Load(_tx, cursor.Current));
+        }
+        return ValueTask.FromResult(results);
+    }
+
     /// <summary>ノード ID とエンティティのペアでリスト化する。</summary>
     public List<(NodeId Id, T Entity)> ToListWithIds()
         => _inner.ToList().ConvertAll(id => (id, T.Load(_tx, id)));
 
+    /// <summary>ノード ID とエンティティのペアを非同期 API として返す。</summary>
+    public ValueTask<List<(NodeId Id, T Entity)>> ToListWithIdsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var results = new List<(NodeId Id, T Entity)>();
+        using var cursor = _inner.AsCursor();
+        while (cursor.MoveNext())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var id = cursor.Current;
+            results.Add((id, T.Load(_tx, id)));
+        }
+        return ValueTask.FromResult(results);
+    }
+
     /// <summary>最初の 1 件をエンティティとして返す。結果が空のときは <see langword="default"/>。</summary>
     public T? First() => _inner.TryNext() is { } id ? T.Load(_tx, id) : default;
 
+    /// <summary>最初の 1 件を非同期 API として返す。</summary>
+    public ValueTask<T?> FirstAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(First());
+    }
+
     /// <summary>結果件数を返す終端ステップ。</summary>
     public long Count() => _inner.Count();
+
+    /// <summary>結果件数を非同期 API として返す。</summary>
+    public ValueTask<long> CountAsync(CancellationToken cancellationToken = default)
+        => _inner.CountAsync(cancellationToken);
+
+    /// <summary>復元した結果ノードを非同期ストリームとして列挙する。</summary>
+    public async IAsyncEnumerable<T> AsAsyncEnumerable(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var cursor = _inner.AsCursor();
+        while (cursor.MoveNext())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return T.Load(_tx, cursor.Current);
+        }
+    }
 
     // ── 集合 write シンク (AddEdge / MergeEdge) 向け internal アクセサ ───────────
     // 拡張は別クラスのため private フィールドへ届かない。ID のみで足りる経路は

@@ -11,10 +11,11 @@ Pure C# で実装するグラフデータベースエンジン Quiver のドキ�
 
 ## サンプルコード
 
-リポジトリの [`samples/`](https://github.com/delicioustuna/Quiver/tree/main/samples) に CRUD、Traversal、Match、SourceGen、Vector の各シナリオを示すサンプルプロジェクトがあります。
+リポジトリの [`samples/`](https://github.com/delicioustuna/Quiver/tree/main/samples) に CRUD、非同期 API、Traversal、Match、SourceGen、Vector の各シナリオを示すサンプルプロジェクトがあります。
 
 ```bash
 dotnet run --project samples/Quiver.Samples.Crud
+dotnet run --project samples/Quiver.Samples.AsyncApi
 dotnet run --project samples/Quiver.Samples.Traversal
 dotnet run --project samples/Quiver.Samples.Match
 dotnet run --project samples/Quiver.Samples.SourceGen

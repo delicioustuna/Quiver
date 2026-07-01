@@ -17,6 +17,7 @@ internal interface IWriteAheadLog : IDisposable
 
     long Append(WalRecordType type, TransactionId tx, ReadOnlySpan<byte> payload);
     void FlushTo(long lsn);
+    ValueTask FlushToAsync(long lsn, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// PageImage を WAL レベルの共有 coalesce バッファへ投入する。

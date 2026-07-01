@@ -885,8 +885,15 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     }
 
     public void Commit() => _inner.Commit();
+    public ValueTask CommitAsync(CancellationToken cancellationToken = default)
+        => _inner.CommitAsync(cancellationToken);
     public void Rollback() => _inner.Abort();
     public void Dispose() => _inner.Dispose();
+    public ValueTask DisposeAsync()
+    {
+        Dispose();
+        return ValueTask.CompletedTask;
+    }
 
     // savepoint / nested undo — 下層トランザクションへ委譲する。
     public SavepointId Savepoint(string? name = null) => _inner.Savepoint(name);

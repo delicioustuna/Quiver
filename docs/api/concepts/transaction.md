@@ -1,6 +1,8 @@
 # Transaction
 
-Quiver の書き込みはすべてトランザクション境界の中で行う。`GraphDatabase.BeginTransaction()` で新規トランザクションを開始し、`Commit()` または `Rollback()` で終了する。
+Quiver の書き込みはすべてトランザクション境界の中で行う。
+同期コードでは `GraphDatabase.BeginTransaction()` で開始し、`Commit()` または `Rollback()` で終了する。
+非同期コードでは `BeginTransactionAsync()` と `CommitAsync()` を境界として使用できる。
 
 ## 基本パターン
 
@@ -14,9 +16,32 @@ using (var tx = db.BeginTransaction())
 }
 ```
 
+## 非同期パターン
+
+`GraphDatabase` と `IGraphTransaction` は `IAsyncDisposable` に対応する。
+`CommitAsync()` は WAL の fsync 完了を非同期に待ち、完了後は同期版の `Commit()` と同じ永続性を保証する。
+
+```csharp
+await using var db = GraphDatabase.Open("./mygraph");
+await using var tx = await db.BeginTransactionAsync();
+
+var n = tx.CreateNode("Person");
+tx.SetProperty(n, "name", PropertyValue.FromString("Alice"));
+
+await tx.CommitAsync();
+```
+
+トランザクション内部の CRUD と traversal は同期処理である。
+`BeginTransactionAsync()` から `CommitAsync()` までの間に、ネットワーク呼び出しや UI 待機等の任意の `await` を挟んではならない。
+許可される await は、Quiver が提供する開始、commit、破棄、結果取得の境界である。
+
+完全な例は [`Quiver.Samples.AsyncApi`](../../../samples/Quiver.Samples.AsyncApi/) を参照。
+
 ## 分離レベル
 
-既定はスナップショット分離 (`IsolationLevel.SnapshotIsolation`)。読み取り専用トランザクションは `BeginReadOnlyTransaction()` で開始する。並列トラバーサル系オペレータ (`ParallelBfsOperator` など) は読み取り専用トランザクションでのみ実行可能。
+既定はスナップショット分離 (`IsolationLevel.SnapshotIsolation`)。
+読み取り専用トランザクションは `BeginReadOnlyTransaction()` または `BeginReadOnlyTransactionAsync()` で開始する。
+並列トラバーサル系オペレータ (`ParallelBfsOperator` など) は読み取り専用トランザクションでのみ実行可能。
 
 ## コミットフック
 

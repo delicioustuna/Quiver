@@ -19,15 +19,19 @@ main ブランチを公開用に維持し、develop からの同期時にこれ�
 | `sandbox/` | 開発実験用 (QuiverSandbox, RagSandbox) | git 追跡済み + sln 登録 |
 | `scripts/publish.sh` | publish スクリプト自体。公開側には不要 | 新規作成 |
 
-### 既に .gitignore で除外済み（対応不要）
+### 既に .gitignore で除外済み（未追跡ファイルのみ対応不要）
 
 | パス | 備考 |
 |------|------|
 | `.claude/`, `CLAUDE.md` | Claude Code 設定 |
-| `docs/design/` | 内部設計メモ (development.md 等) |
+| `docs/design/` | 新規の内部設計メモ。既に追跡済みのファイルには `.gitignore` が効かない |
 | `docs/benchmarks/` | ベンチマーク計測ログ |
 | `*.quiver`, `*.quiver-wal` | 生成 DB ファイル (tools/sample/ 含む) |
 | `BenchmarkDotNet.Artifacts/` | ベンチマーク出力 |
+
+`docs/design/` は publish スクリプトの除外対象ではない。
+追跡済みの `docs/design/development.md` は README から参照される公開用の開発者ガイドとして main に残す。
+`docs/design/16_async_api.md`、`roadmap.md`、`repository-map.md` 等の未追跡・ignore 対象は develop 専用であり、main へ追加しない。
 
 ### 公開するもの（除外しない）
 
@@ -43,6 +47,7 @@ main ブランチを公開用に維持し、develop からの同期時にこれ�
 | `docs/spec/` | エンジン仕様 (as-built) — コントリビュータ必読 |
 | `docs/api/` | API ドキュメント |
 | `docs/operations/` | 運用ガイド |
+| `docs/design/development.md` | 公開用の開発者ガイド。`docs/design/` 配下の例外 |
 | `.github/workflows/` | CI — フォーク先でも動く |
 
 ---

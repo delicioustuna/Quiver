@@ -165,6 +165,35 @@ foreach (var name in g.Nodes().HasLabel("Person").Values("Name").AsEnumerable())
     Console.WriteLine(name);
 ```
 
+### 非同期 API の実装方針
+
+同期 API を正本として維持し、非同期版は待機が発生し得る境界に追加している。
+`GraphDatabase.BeginTransactionAsync()` は `EnforceExclusiveWriter` の排他待ちを非同期化し、`IGraphTransaction.CommitAsync()` は WAL の永続化完了を非同期に待つ。
+`GraphDatabase` と `IGraphTransaction` は `IAsyncDisposable` に対応する。
+
+```csharp
+await using var db = GraphDatabase.Open("./mygraph", new GraphDatabaseOptions
+{
+    EnforceExclusiveWriter = true,
+});
+await using var tx = await db.BeginTransactionAsync();
+
+var alice = tx.CreateNode("Person");
+tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
+
+await tx.CommitAsync();
+```
+
+ページアクセス、B+Tree 走査、CRUD、クエリ実行は mmap 上の同期処理のままである。
+トラバーサルの `ToListAsync()`、`NextAsync()`、`AsAsyncEnumerable()` 等は、同期実行を非同期パイプラインへ接続する終端 API として実装する。
+
+`WalPageContext` と `MvccContext` は `[ThreadStatic]` を使用するため、開始と commit の境界間に外部 I/O 等の任意の `await` を挟んではならない。
+Quiver が提供する `BeginTransactionAsync()`、`CommitAsync()`、非同期終端、`DisposeAsync()` の境界は await できる。
+
+実装は `src/Quiver/GraphDatabase.cs`、`src/Quiver/IGraphTransaction.cs`、`src/Quiver/Client/`、`src/Quiver/Wal/` に分かれる。
+回帰テストは `tests/Quiver.Tests/AsyncApiTests.cs`、利用例は `samples/Quiver.Samples.AsyncApi/` に置く。
+詳細な判断と将来候補は、develop ブランチだけに置く `docs/design/16_async_api.md` を参照。
+
 ### Source Generator 属性リファレンス
 
 | 属性 | 対象 | 引数 | 省略時の挙動 |

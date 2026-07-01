@@ -21,6 +21,7 @@
     <Project Path="tools/Quiver.Mcp/Quiver.Mcp.csproj" />
   </Folder>
   <Folder Name="/samples/">
+    <Project Path="samples/Quiver.Samples.AsyncApi/Quiver.Samples.AsyncApi.csproj" />
     <Project Path="samples/Quiver.Samples.Crud/Quiver.Samples.Crud.csproj" />
     <Project Path="samples/Quiver.Samples.Traversal/Quiver.Samples.Traversal.csproj" />
     <Project Path="samples/Quiver.Samples.Match/Quiver.Samples.Match.csproj" />

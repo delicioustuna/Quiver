@@ -601,3 +601,33 @@ var names = g.People().Adults().Out("WROTE").Values("Title").ToList();
 アプリ層で重複制御すること。エッジ存在インデックスは現時点で非目標。
 詳細: [MergeRelationship の degree 依存コスト](benchmark-results.md#mergerelationship-の-degree-依存コスト)。
 
+---
+
+## 14. 非同期トランザクション境界
+
+ASP.NET Core、UI アプリ、バックグラウンドサービス等では、トランザクション開始時の排他待ちと durable commit の WAL flush を非同期に待てる。
+同期 API はそのまま利用でき、非同期版は追加の選択肢である。
+
+```csharp
+var options = new GraphDatabaseOptions
+{
+    EnforceExclusiveWriter = true,
+};
+
+await using var db = GraphDatabase.Open("./mygraph", options);
+await using var tx = await db.BeginTransactionAsync();
+
+var node = tx.CreateNode("Person");
+tx.SetProperty(node, "name", PropertyValue.FromString("Alice"));
+
+await tx.CommitAsync();
+```
+
+`BeginTransactionAsync()` から `CommitAsync()` までの CRUD と traversal は同期実行する。
+外部 API 呼び出し等の任意の `await` はトランザクションの外へ移す。
+
+読み取り結果を非同期パイプラインへ流す場合は、`ToListAsync()`、`CountAsync()`、`AsAsyncEnumerable()` 等の非同期終端を使用できる。
+これらは mmap 上の同期走査を非同期 API 面へ接続するための境界であり、内部処理をスレッドプールへオフロードしない。
+
+完全な例は [`Quiver.Samples.AsyncApi`](../samples/Quiver.Samples.AsyncApi/) を参照。
+

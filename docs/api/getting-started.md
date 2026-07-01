@@ -33,6 +33,21 @@ tx.CreateRelationship(alice, bob, "KNOWS");
 tx.Commit();
 ```
 
+非同期ホストでは、同期版を置き換えず、トランザクションの開始とコミットだけを非同期境界にできる。
+
+```csharp
+await using var db = GraphDatabase.Open("./mygraph");
+await using var tx = await db.BeginTransactionAsync();
+
+var alice = tx.CreateNode("Person");
+tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
+
+await tx.CommitAsync();
+```
+
+トランザクション内部の CRUD は同期処理であり、開始からコミットまでの間に外部 I/O 等の任意の `await` を挟んではならない。
+詳細は [Transaction](concepts/transaction.md) と [`Quiver.Samples.AsyncApi`](../../samples/Quiver.Samples.AsyncApi/) を参照。
+
 ## 次のステップ
 
 - [Concepts](concepts/index.md) — モデル、トランザクション、トラバーサルの概念

@@ -52,6 +52,7 @@ public partial class Knows
 - サーバープロセス不要
 - Source Generatorによる型安全なAPI生成
 - NativeAOT 対応
+- `ValueTask` と `IAsyncEnumerable<T>` による非同期トランザクション境界・走査終端
 - KNN（ベクトル検索）とグラフトラバーサル・BM25 全文検索を組み合わせたハイブリッド検索
 
 ## ユースケース: ローカル RAG バックエンド
@@ -89,7 +90,7 @@ Quiver は組み込み用途に最適化されたエンジンであり、以下�
 
 | 制限 | 概要 | 緩和策 |
 |---|---|---|
-| **単一ライタ** | 書き込みトランザクションは同時に 1 つのみ。トランザクションはスレッドアフィン | アプリ側で書き込みゲート (`SemaphoreSlim(1,1)`) または専用ライタスレッドを使用 |
+| **単一ライタ** | 書き込みトランザクションは同時に 1 つのみ。トランザクションはスレッドアフィン | `EnforceExclusiveWriter` + `BeginTransactionAsync`、アプリ側の書き込みゲート、または専用ライタスレッドを使用 |
 | **In-Process のみ** | サーバモード・ネットワークアクセスなし。1 プロセスが排他的にファイルを開く | マルチプロセスが必要なら上位に gRPC/HTTP ラッパを配置 |
 | **自動マイグレーションなし** | フォーマットバージョン不一致で例外スロー。in-place 自動変換パスは存在しない | ソースデータから再構築。1.x 内ではフォーマット固定 |
 | **HNSW 上書き** | ベクトル上書き時にグラフトポロジを再リンクしない（検索品質がわずかに劣化しうる） | tombstone 超過で自動 rebuild。頻繁更新時はノード削除→再作成 |
@@ -114,6 +115,7 @@ Quiver は組み込み用途に最適化されたエンジンであり、以下�
 | サンプル | 内容 |
 |---|---|
 | [`Quiver.Samples.Crud`](samples/Quiver.Samples.Crud/) | 基本 CRUD（ノード / リレーション / プロパティ） |
+| [`Quiver.Samples.AsyncApi`](samples/Quiver.Samples.AsyncApi/) | 非同期トランザクション境界、`await using`、非同期 traversal 終端 |
 | [`Quiver.Samples.SourceGen`](samples/Quiver.Samples.SourceGen/) | `[Node]` / `[Relationship]` 属性ベースの型付き CRUD |
 | [`Quiver.Samples.Traversal`](samples/Quiver.Samples.Traversal/) | 多段トラバーサル、フィルタ、可変長 repeat、集約、cursor |
 | [`Quiver.Samples.Match`](samples/Quiver.Samples.Match/) | Match DSL によるパターンマッチと MERGE / UPSERT |

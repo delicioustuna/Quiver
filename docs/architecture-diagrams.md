@@ -147,3 +147,43 @@ flowchart LR
 
     style Emb stroke-dasharray: 5 5
 ```
+
+---
+
+## 6. 非同期トランザクション境界
+
+トランザクション内部のグラフ操作は同期で実行し、開始と commit の境界だけを await する。
+
+```mermaid
+sequenceDiagram
+    participant App as アプリケーション
+    participant DB as GraphDatabase
+    participant Tx as GraphTransaction
+    participant WAL as WriteAheadLog
+
+    App->>DB: BeginTransactionAsync()
+    DB-->>App: IGraphTransaction
+    Note over App,Tx: CRUD と走査は同期実行
+    App->>Tx: CreateNode / SetProperty
+    App->>Tx: CommitAsync()
+    Tx->>WAL: PageImage + Commit record
+    Tx->>WAL: FlushToAsync()
+    WAL-->>Tx: fsync 完了
+    Tx-->>App: commit 完了
+```
+
+---
+
+## 7. 非同期 traversal 終端
+
+query engine と cursor は同期のまま、終端 API が `ValueTask` と `IAsyncEnumerable<T>` を公開する。
+
+```mermaid
+flowchart LR
+    DSL["Traversal DSL"] --> Plan["同期 query plan"]
+    Plan --> Cursor["Traversal cursor"]
+    Cursor --> Task["ToListAsync / CountAsync"]
+    Cursor --> Stream["AsAsyncEnumerable"]
+    Token["CancellationToken"] --> Task
+    Token --> Stream
+```

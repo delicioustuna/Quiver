@@ -50,8 +50,26 @@ using (var tx = db.BeginReadOnlyTransaction())
   → バックエンドの flush/close が行われる。プロセスを `kill` で落としても commit 済みデータは
   WAL replay で復元されるが (→ [04_recovery_troubleshoot.md](04_recovery_troubleshoot.md))、正常終了では必ず Dispose を通す。
 - `tx.Commit()` を呼ばないまま `tx` を Dispose すると **rollback** される。これが既定の安全側挙動。
-- `GraphDatabase` インスタンスは **スレッドセーフ**。複数スレッドから同時に `BeginTransaction` してよい。
-  ただし 1 つの `tx` を複数スレッドで共有してはいけない。
+- `GraphDatabase` インスタンスは複数スレッドから共有でき、読み取りトランザクションは並行実行できる。
+  書き込みは単一ライタなので、`EnforceExclusiveWriter` またはアプリ側のゲートで直列化する。
+  1 つの `tx` を複数スレッドで共有してはいけない。
+
+### 非同期ホストへ組み込む
+
+ASP.NET Core、UI アプリ、バックグラウンドサービスでは、開始と commit の境界を非同期化できる。
+
+```csharp
+await using var db = GraphDatabase.Open(dir);
+await using var tx = await db.BeginTransactionAsync();
+
+var alice = tx.CreateNode("Person");
+tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
+
+await tx.CommitAsync();
+```
+
+CRUD は同期処理なので、トランザクション内部に外部 API 呼び出し等の任意の `await` を挟まない。
+完全な例は [`Quiver.Samples.AsyncApi`](../../samples/Quiver.Samples.AsyncApi/) を参照。
 
 ---
 

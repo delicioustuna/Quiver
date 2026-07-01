@@ -71,22 +71,28 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 
 ## 書き込みの流れ
 
-1. `db.BeginTransaction()` でトランザクションを開始する
+1. `db.BeginTransaction()` または `await db.BeginTransactionAsync()` でトランザクションを開始する
 2. `CreateNode`、`SetProperty` 等で変更を加える。変更はバッファプール上のページに反映される
-3. `tx.Commit()` で WAL に Commit レコードを書き、`fsync` で永続化する
+3. `tx.Commit()` または `await tx.CommitAsync()` で WAL に Commit レコードを書き、`fsync` で永続化する
 4. チェックポイント条件に達すると、dirty ページがデータファイルに書き戻される
 
-`Commit()` が返った時点でデータは永続化されている。
+`Commit()` が返った時点、または `CommitAsync()` が完了した時点でデータは永続化されている。
 プロセスの kill や電源喪失の後でも、再起動時にリカバリが自動実行される。
+
+非同期 API はトランザクションの開始、WAL の fsync 待機、破棄という境界を async パイプラインへ接続する。
+ページ操作、B+Tree 走査、ベクトル検索等のエンジン処理は同期のままである。
 
 ## 読み取りの流れ
 
-1. `db.BeginReadOnlyTransaction()` で開始時点のスナップショットを取得する
+1. `db.BeginReadOnlyTransaction()` または `await db.BeginReadOnlyTransactionAsync()` で開始時点のスナップショットを取得する
 2. スキャンやインデックス検索で読み取る行は、MVCC 可視性チェックを通る
 3. リーダはライタをブロックせず、ライタもリーダをブロックしない
 
 スナップショットは開始時点のものであり、その後にコミットされた書き込みは観測しない。
 より新しい状態を見るには、新しいトランザクションを開く。
+
+`ToListAsync`、`CountAsync` 等は同期 query engine を `ValueTask` で公開する。
+`AsAsyncEnumerable` は cursor を `await foreach` で逐次消費し、各反復でキャンセルを確認する。
 
 ## ハイブリッド検索の流れ（RAG）
 
@@ -119,8 +125,9 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 
 - `GraphDatabase` インスタンスはスレッド間で共有して使い回す（スレッドセーフ）
 - トランザクションは 1 スレッドで開始、使用、commit/dispose する（スレッドアフィン）
-- `Begin` と `Commit` の間で `await` しない
-- 書き込みの直列化はアプリケーション側の責任（`SemaphoreSlim(1,1)` 等）
+- 非同期 API が定義する開始・commit・破棄の境界は await できる
+- CRUD の途中に外部 API や UI 待機等の任意の await を挟まない
+- 書き込みは `EnforceExclusiveWriter` + `BeginTransactionAsync`、`SemaphoreSlim(1,1)`、または専用ライタスレッドで直列化する
 - トランザクションは短く保つ。長時間のオープンは WAL ファイルの増大を招く
 
 ### バックアップ

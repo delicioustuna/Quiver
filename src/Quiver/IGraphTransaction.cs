@@ -10,11 +10,13 @@ namespace Quiver;
 /// 1 つのトランザクション境界として束ねる。
 /// </summary>
 /// <remarks>
-/// <see cref="IDisposable"/> 実装。<see cref="GraphDatabase.BeginTransaction"/> や
-/// <see cref="GraphDatabase.BeginReadOnlyTransaction"/> で取得し、<c>using</c> で
-/// 確実に破棄すること。スレッドセーフではない (シングルスレッドで利用)。
+/// <see cref="IDisposable"/> / <see cref="IAsyncDisposable"/> 実装。
+/// <see cref="GraphDatabase.BeginTransaction"/> または非同期版で取得し、
+/// <c>using</c> / <c>await using</c> で確実に破棄すること。
+/// スレッドセーフではないため、トランザクション内部の操作は同じスレッドで同期実行する。
+/// Quiver が提供する開始、コミット、破棄、結果取得の非同期境界以外に任意の <c>await</c> を挟まないこと。
 /// </remarks>
-public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
+public interface IGraphTransaction : IDisposable, IAsyncDisposable, ICommitHookRegistrar
 {
     /// <summary>トランザクション識別子。</summary>
     TransactionId Id { get; }
@@ -210,6 +212,17 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
 
     /// <summary>トランザクションをコミットする。</summary>
     void Commit();
+
+    /// <summary>
+    /// トランザクションをコミットし、WAL の永続化完了を非同期に待つ。
+    /// トランザクション内のグラフ操作をすべて同期的に完了してから呼び出すこと。
+    /// </summary>
+    /// <param name="cancellationToken">永続化完了の待機を取り消すトークン。</param>
+    /// <remarks>
+    /// キャンセルはコミット処理と WAL flush request の開始前に確認される。
+    /// request の受理後は commit の成否を確定させるため、永続化完了まで待機する。
+    /// </remarks>
+    ValueTask CommitAsync(CancellationToken cancellationToken = default);
 
     /// <summary>トランザクションをロールバックする。</summary>
     void Rollback();

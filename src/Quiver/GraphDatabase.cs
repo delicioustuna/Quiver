@@ -13,16 +13,16 @@ namespace Quiver;
 /// <remarks>
 /// 内部では <see cref="IGraphStorageBackend"/> を介してストレージバックエンドを
 /// 切り替え可能。通常は <see cref="Open"/> で生成し、用が済んだら
-/// <see cref="Dispose"/> で破棄する。
+/// <see cref="Dispose"/> または <see cref="DisposeAsync"/> で破棄する。
 /// </remarks>
-public sealed class GraphDatabase : IDisposable
+public sealed class GraphDatabase : IDisposable, IAsyncDisposable
 {
     private readonly IGraphStorageBackendInternal _backend;
     private readonly string _path;
     // AutoVacuum が有効なときのみ非 null。Dispose で停止する。
     private readonly AutoVacuumWorker? _autoVacuumWorker;
     private readonly bool _enforceExclusiveWriter;
-    private int _activeWriterCount;
+    private readonly SemaphoreSlim _writerSemaphore = new(1, 1);
 
     private GraphDatabase(
         IGraphStorageBackend backend,
@@ -118,18 +118,68 @@ public sealed class GraphDatabase : IDisposable
     {
         if (_enforceExclusiveWriter)
         {
-            if (Interlocked.CompareExchange(ref _activeWriterCount, 1, 0) != 0)
+            if (!_writerSemaphore.Wait(0))
                 throw new InvalidOperationException(
                     "別の書き込みトランザクションがアクティブです。EnforceExclusiveWriter が有効な場合、同時に開ける書き込みトランザクションは 1 つだけです。");
             IGraphTransaction tx;
-            try { tx = _backend.BeginGraphTransaction(level, readOnly: false); }
-            catch { Interlocked.Decrement(ref _activeWriterCount); throw; }
-            Action release = () => Interlocked.Decrement(ref _activeWriterCount);
-            tx.OnCommitted(release);
-            tx.OnRolledBack(release);
-            return tx;
+            try
+            {
+                tx = _backend.BeginGraphTransaction(level, readOnly: false);
+                RegisterWriterRelease(tx);
+                return tx;
+            }
+            catch
+            {
+                _writerSemaphore.Release();
+                throw;
+            }
         }
         return _backend.BeginGraphTransaction(level, readOnly: false);
+    }
+
+    /// <summary>
+    /// 新規グラフトランザクションを開始する。排他ライタが使用中の場合は非同期に待機する。
+    /// </summary>
+    /// <param name="level">分離レベル。</param>
+    /// <param name="cancellationToken">排他ライタの待機を取り消すトークン。</param>
+    /// <remarks>
+    /// <see cref="GraphDatabaseOptions.EnforceExclusiveWriter"/> が無効な場合は同期的に完了する。
+    /// 取得後のトランザクション操作は、<see cref="IGraphTransaction.CommitAsync"/> 等の
+    /// Quiver が提供する境界を除いて同期実行すること。
+    /// </remarks>
+    public ValueTask<IGraphTransaction> BeginTransactionAsync(
+        IsolationLevel level = IsolationLevel.SnapshotIsolation,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_enforceExclusiveWriter)
+            return ValueTask.FromResult(_backend.BeginGraphTransaction(level, readOnly: false));
+        return BeginExclusiveTransactionAsync(level, cancellationToken);
+    }
+
+    private async ValueTask<IGraphTransaction> BeginExclusiveTransactionAsync(
+        IsolationLevel level,
+        CancellationToken cancellationToken)
+    {
+        await _writerSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var tx = _backend.BeginGraphTransaction(level, readOnly: false);
+            RegisterWriterRelease(tx);
+            return tx;
+        }
+        catch
+        {
+            _writerSemaphore.Release();
+            throw;
+        }
+    }
+
+    private void RegisterWriterRelease(IGraphTransaction tx)
+    {
+        Action release = () => _writerSemaphore.Release();
+        tx.OnCommitted(release);
+        tx.OnRolledBack(release);
     }
 
     /// <summary>
@@ -139,6 +189,16 @@ public sealed class GraphDatabase : IDisposable
     /// </summary>
     public IGraphTransaction BeginReadOnlyTransaction()
         => _backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: true);
+
+    /// <summary>読み取り専用のスナップショット分離トランザクションを開始する。</summary>
+    /// <param name="cancellationToken">開始前のキャンセルを通知するトークン。</param>
+    /// <remarks>現在の実装は同期的に完了する。</remarks>
+    public ValueTask<IGraphTransaction> BeginReadOnlyTransactionAsync(
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(BeginReadOnlyTransaction());
+    }
 
     /// <summary>ラベル・プロパティキー・リレーションシップ型・インデックスのスキーマ API。</summary>
     public ISchemaApi Schema => _backend.Schema;
@@ -341,6 +401,13 @@ public sealed class GraphDatabase : IDisposable
         // 破棄済み backend に触れて落ちうる。
         _autoVacuumWorker?.Dispose();
         _backend.Dispose();
+    }
+
+    /// <summary>データベースを非同期破棄する。現在の実装では同期破棄として完了する。</summary>
+    public ValueTask DisposeAsync()
+    {
+        Dispose();
+        return ValueTask.CompletedTask;
     }
 }
 
