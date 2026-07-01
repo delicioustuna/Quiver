@@ -473,6 +473,7 @@ namespace Quiver
     public enum BackendKind
     {
         Binary = 1,
+        InMemory = 2,
     }
     public sealed class ConsistencyReport : System.IEquatable<Quiver.ConsistencyReport>
     {
@@ -544,6 +545,7 @@ namespace Quiver
         public System.Threading.Tasks.Task<Quiver.Migrations.MigrationResult> MigrateAsync(System.Collections.Generic.IEnumerable<Quiver.Migrations.IMigration> migrations, System.Threading.CancellationToken cancellationToken = default) { }
         public Quiver.Storage.Records.IGraphSnapshotView OpenSnapshotView() { }
         public Quiver.Maintenance.VacuumReport Vacuum(Quiver.Maintenance.VacuumOptions? options = null) { }
+        public static Quiver.GraphDatabase CreateInMemory(Quiver.GraphDatabaseOptions? options = null) { }
         public static Quiver.GraphDatabase Open(string filePath, Quiver.GraphDatabaseOptions? options = null) { }
     }
     public sealed class GraphDatabaseOptions

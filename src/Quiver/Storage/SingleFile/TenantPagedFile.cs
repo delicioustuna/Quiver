@@ -10,7 +10,7 @@ namespace Quiver.Storage;
 /// <c>page 0,1,2..</c> を所有していると思い込んだまま無改修で動く。
 ///
 /// 論理ページ ID は per-tenant page table で物理ページ ID に写像し、pin / alloc / free / unpin は
-/// 共有 <see cref="PagedFile"/> に物理 ID で委譲する。論理 page 0 は予約 (ストアは触らない)。
+/// 共有 <see cref="IPagedFile"/> に物理 ID で委譲する。論理 page 0 は予約 (ストアは触らない)。
 ///
 /// page table エントリの符号化 (in-memory &amp; 永続とも同じ):
 ///   <list type="bullet">
@@ -23,7 +23,7 @@ namespace Quiver.Storage;
 internal sealed class TenantPagedFile : IPagedFile
 {
     private readonly SingleFileContainer _container;
-    private readonly PagedFile _physical;
+    private readonly IPagedFile _physical;
     private readonly SingleFileContainer.CatalogEntry _entry;
     private readonly PageKind _defaultKind;
     private readonly object _gate = new();
@@ -36,7 +36,7 @@ internal sealed class TenantPagedFile : IPagedFile
     private static int EntriesPerPage => SingleFileContainer.EntriesPerPageTablePage;
 
     internal TenantPagedFile(
-        SingleFileContainer container, PagedFile physical,
+        SingleFileContainer container, IPagedFile physical,
         SingleFileContainer.CatalogEntry entry, PageKind defaultKind)
     {
         _container = container;

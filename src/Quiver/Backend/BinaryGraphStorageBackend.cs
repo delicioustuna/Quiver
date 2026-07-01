@@ -17,7 +17,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     // access methods / tx 配下 SetVector の委譲先として内部で使い続ける。
     private IVectorStore? _vectorsFacade;
     private readonly PageManager _pageManager;
-    private readonly WriteAheadLog _wal;
+    private readonly IWriteAheadLog _wal;
     private readonly VersionedNodeStore _nodeStore;
     private readonly VersionedRelationshipStore _relStore;
     private readonly PropertyStore _propStore;
@@ -44,7 +44,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         string containerPath,
         SingleFileContainer container,
         PageManager pageManager,
-        WriteAheadLog wal,
+        IWriteAheadLog wal,
         VersionedNodeStore nodeStore,
         VersionedRelationshipStore relStore,
         PropertyStore propStore,
@@ -385,7 +385,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             _container.SetCommittedHighWaterTxId(_txManager.PeekNextTxId());
             _pageManager.FlushAll();   // 全データページを fsync (container.Physical を含む)
             _indexManager.FlushAll();  // 索引も container 上だが念のため
-            _wal.MarkDeleteOnDispose();
+            if (_wal is WriteAheadLog durableWal)
+                durableWal.MarkDeleteOnDispose();
         }
 
         _txManager.Dispose();

@@ -39,9 +39,10 @@ internal sealed class SingleFileContainer : IDisposable
     // page-table ページ body レイアウト
     internal const int PtNextOffset = 0;        // int64: 次 page-table ページ物理 ID (-1 = なし)
     internal const int PtEntriesOffset = 8;     // 以降 int64 物理 ID エントリの配列
-    internal static int EntriesPerPageTablePage => (PagedFile.BodySize - PtEntriesOffset) / 8; // 1019
+    internal static int EntriesPerPageTablePage =>
+        (PagedFile.PageSizeConst - PageHeader.Size - PtEntriesOffset) / 8; // 1019
 
-    private readonly PagedFile _physical;
+    private readonly IPagedFile _physical;
     private readonly Dictionary<byte, CatalogEntry> _catalog = new();
     private readonly Dictionary<byte, TenantPagedFile> _tenants = new();
     private readonly object _gate = new();
@@ -50,7 +51,7 @@ internal sealed class SingleFileContainer : IDisposable
     private long _committedHighWaterTxId;
 
     public string Path => _physical.Path;
-    internal PagedFile Physical => _physical;
+    internal IPagedFile Physical => _physical;
 
     /// <summary>
     /// 永続化されている committed TxId 高水位。クリーン終了で WAL を削除しても、
@@ -82,8 +83,17 @@ internal sealed class SingleFileContainer : IDisposable
     }
 
     public SingleFileContainer(string path, int poolCapacityPages = 256)
+        : this(new PagedFile(path, poolCapacityPages))
     {
-        _physical = new PagedFile(path, poolCapacityPages);
+    }
+
+    /// <summary>
+    /// 指定した物理ページ実装上に単一ファイルコンテナを構築する。
+    /// インメモリ物理層など、ファイルを持たない実装の組み立てに使用する。
+    /// </summary>
+    internal SingleFileContainer(IPagedFile physical)
+    {
+        _physical = physical;
         if (_physical.PageCount <= 1)
         {
             // 新規ファイル: カタログ root を物理 page 1 に確保して初期化する。
@@ -260,7 +270,8 @@ internal sealed class SingleFileContainer : IDisposable
     // 現状は単一カタログページ前提 (記述子 ~313 件まで)。連鎖は将来拡張。
     private void PersistCatalogLocked()
     {
-        if (_catalog.Count * DescriptorSize + CatalogDescriptorsOffset > PagedFile.BodySize)
+        if (_catalog.Count * DescriptorSize + CatalogDescriptorsOffset >
+            PagedFile.PageSizeConst - PageHeader.Size)
             throw new StorageException(
                 $"Catalog descriptor table overflow ({_catalog.Count} tenants). Chained catalog pages not yet implemented.");
 

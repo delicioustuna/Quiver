@@ -31,6 +31,9 @@ public abstract class GraphStorageBackendContractTests : IDisposable
 
     protected virtual string DatabasePath => _dir;
 
+    /// <summary>バックエンドを再オープンしたときにコミット済みデータが残るか。</summary>
+    protected virtual bool SupportsPersistence => true;
+
     public void Dispose()
     {
         _backend.Dispose();
@@ -528,8 +531,16 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         Reopen();
 
         using var rtx = BeginRead();
-        rtx.NodeExists(persisted).Should().BeTrue();
-        rtx.GetProperty(persisted, "ok").Type.Should().Be(PropertyValueType.Bool);
+        if (SupportsPersistence)
+        {
+            rtx.NodeExists(persisted).Should().BeTrue();
+            rtx.GetProperty(persisted, "ok").Type.Should().Be(PropertyValueType.Bool);
+        }
+        else
+        {
+            rtx.NodeExists(persisted).Should().BeFalse(
+                "非永続バックエンドは再オープン時に空の状態へ戻る");
+        }
         rtx.Rollback();
     }
 

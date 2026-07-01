@@ -51,6 +51,11 @@ public sealed class GraphDatabase : IDisposable, IAsyncDisposable
     public static GraphDatabase Open(string filePath, GraphDatabaseOptions? options = null)
     {
         options ??= new GraphDatabaseOptions();
+        if (string.Equals(filePath, ":memory:", StringComparison.Ordinal)
+            && options.BackendFactory is null)
+        {
+            options.Backend = BackendKind.InMemory;
+        }
         // ホット path 各所が参照する構造化ログのファサードに ILoggerFactory を流し込む。
         // null のときはあえて触らない — 別 DB が事前に設定したロガーを取り消さないことで、
         // テスト並列実行時の汚染や、複数 DB を 1 プロセスで開く運用での意外な reset を避ける
@@ -72,8 +77,21 @@ public sealed class GraphDatabase : IDisposable, IAsyncDisposable
     private static IGraphStorageBackendFactory CreateDefaultFactory(BackendKind kind) => kind switch
     {
         BackendKind.Binary => new BinaryGraphStorageBackendFactory(),
+        BackendKind.InMemory => new InMemoryGraphStorageBackendFactory(),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "未知のバックエンド種別です。"),
     };
+
+    /// <summary>
+    /// データをプロセス内 RAM だけに保持する一時データベースを作成する。
+    /// 破棄すると全データが失われ、ファイルシステムへの永続化は行わない。
+    /// </summary>
+    /// <param name="options">起動オプション。バックエンド種別はインメモリへ上書きされる。</param>
+    public static GraphDatabase CreateInMemory(GraphDatabaseOptions? options = null)
+    {
+        options ??= new GraphDatabaseOptions();
+        options.Backend = BackendKind.InMemory;
+        return Open(":memory:", options);
+    }
 
     /// <summary>
     /// 下層バックエンド内部 SPI。embedding adapter など内部経路専用で、公開 API ではない。

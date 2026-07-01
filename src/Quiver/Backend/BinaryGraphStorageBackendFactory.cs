@@ -44,13 +44,6 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
 
     public IGraphStorageBackend Open(string filePath, GraphDatabaseOptions options)
     {
-        // 同スレッドの先行 backend がトランザクション途中で終了している可能性がある
-        // (crash シミュレーション等)。スレッドローカルな WAL page context が残留しうるため
-        // クリーン状態で開始する (実プロセス再起動時と同等)。
-        // MvccContext も同様にスレッドローカルなので念のため初期化。
-        WalPageContext.End();
-        MvccContext.End();
-
         // filePath は単一コンテナ (*.quiver) のフルパス。親ディレクトリを用意する。
         var parentDir = Path.GetDirectoryName(filePath);
         if (!string.IsNullOrEmpty(parentDir)) Directory.CreateDirectory(parentDir);
@@ -68,6 +61,34 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // GraphDatabaseOptions.BufferPoolSize を共有プール容量に実配線する。
         int poolPages = (int)Math.Max(64, options.BufferPoolSize / PagedFile.PageSizeConst);
         var container = new SingleFileContainer(filePath, poolPages);
+        return OpenCore(filePath, options, pageManager, wal, container, recover: true);
+    }
+
+    /// <summary>
+    /// RAM 専用の物理ページ層と WAL を使い、通常バックエンドと同じストア群を組み立てる。
+    /// </summary>
+    internal IGraphStorageBackend OpenInMemory(GraphDatabaseOptions options)
+    {
+        var pageManager = new PageManager();
+        var wal = new NullWriteAheadLog();
+        var container = new SingleFileContainer(new InMemoryPagedFile());
+        var backend = OpenCore(string.Empty, options, pageManager, wal, container, recover: false);
+        return new InMemoryGraphStorageBackend((BinaryGraphStorageBackend)backend);
+    }
+
+    private static IGraphStorageBackend OpenCore(
+        string filePath,
+        GraphDatabaseOptions options,
+        PageManager pageManager,
+        IWriteAheadLog wal,
+        SingleFileContainer container,
+        bool recover)
+    {
+        // 同スレッドの先行 backend がトランザクション途中で終了している可能性がある
+        // (crash シミュレーション等)。スレッドローカルなコンテキストをクリーン状態へ戻す。
+        WalPageContext.End();
+        MvccContext.End();
+
         container.EnableWalLogging(DataFileKind, wal);
         // checkpoint (pageManager.FlushAll) / snapshot 経路に container 物理ファイルを乗せる。
         pageManager.Adopt(container.Physical);
@@ -91,12 +112,17 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
 
         // fileRegistry には data file + materialize 済み索引が既に登録されている。
         // 索引も ARIES page-WAL 対象なので PageImage redo + CLR undo が透過的に走る。
-        var recovery = new RecoveryManager(pageManager, wal, fileRegistry, committedRegistry: committedRegistry);
-        recovery.Recover();
+        RecoveryManager? recovery = null;
+        if (recover)
+        {
+            recovery = new RecoveryManager(
+                pageManager, wal, fileRegistry, committedRegistry: committedRegistry);
+            recovery.Recover();
 
-        // recovery が物理 page1 (カタログ) + page-table + header ページを WAL から復元した。
-        // ここで container の in-memory カタログを正本へ読み直してから、テナントを open する。
-        container.ReloadAll();
+            // recovery が物理 page1 (カタログ) + page-table + header ページを WAL から復元した。
+            // ここで container の in-memory カタログを正本へ読み直してから、テナントを open する。
+            container.ReloadAll();
+        }
 
         // 索引マネージャは recovery + ReloadAll の後に構築する。索引カタログ
         // テナントと各索引テナントの page-table は物理ページとして recovery 済みなので、
@@ -106,7 +132,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // recovery 論理相。物理相 (recovery.Recover 上) が FtStructureImage で
         // FT 木の構造を復元済みで、IndexManager が 2a 後のヘッダから live FullTextIndex を構築した今、
         // committed tx の FtLeafMutation を再実行 (2b) + loser tx の逆操作 undo (Pass 3) を適用する。
-        recovery.RecoverLogical(indexManager);
+        recovery?.RecoverLogical(indexManager);
 
         // 隣接ビュー (bulk load 済みのときのみ存在) を container テナントから開く。
         // epoch (base hwm + tombstones) も EpochTenant に同居。V1/V2 種別は DataTenant の
@@ -250,21 +276,24 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // しきい値超過 + アクティブ TX 0 の時点で全データページを flush し WAL を truncate する。
         // IndexManager も渡し、checkpoint 時に索引ファイルも一緒に fsync する。
         // これが無いと WAL truncate 後にコミット済み索引エントリが恒久消失する。
-        var checkpointer = new Checkpointer(
-            pageManager, wal, () => txManager.OldestActiveLsn, indexManager);
-        txManager.EnableCheckpointing(checkpointer, options.CheckpointThresholdBytes);
-        // Adaptive ポリシー時は controller を作成して TxManager に注入。
-        // controller は warmup 完了までは options.CheckpointThresholdBytes (initial) を返す。
-        if (options.CheckpointPolicy == Quiver.Transactions.CheckpointPolicy.Adaptive
-            && options.CheckpointThresholdBytes > 0)
+        if (recover)
         {
-            var adaptive = new AdaptiveCheckpointController(
-                options.CheckpointThresholdBytes,
-                options.TargetRecoveryTime,
-                options.MinCheckpointThresholdBytes,
-                options.MaxCheckpointThresholdBytes,
-                options.AdaptiveSampleWindow);
-            txManager.SetAdaptiveController(adaptive);
+            var checkpointer = new Checkpointer(
+                pageManager, wal, () => txManager.OldestActiveLsn, indexManager);
+            txManager.EnableCheckpointing(checkpointer, options.CheckpointThresholdBytes);
+            // Adaptive ポリシー時は controller を作成して TxManager に注入。
+            // controller は warmup 完了までは options.CheckpointThresholdBytes (initial) を返す。
+            if (options.CheckpointPolicy == Quiver.Transactions.CheckpointPolicy.Adaptive
+                && options.CheckpointThresholdBytes > 0)
+            {
+                var adaptive = new AdaptiveCheckpointController(
+                    options.CheckpointThresholdBytes,
+                    options.TargetRecoveryTime,
+                    options.MinCheckpointThresholdBytes,
+                    options.MaxCheckpointThresholdBytes,
+                    options.AdaptiveSampleWindow);
+                txManager.SetAdaptiveController(adaptive);
+            }
         }
 
         var backend = new BinaryGraphStorageBackend(

@@ -43,6 +43,17 @@
 `MemoryMappedFile` + `MemoryMappedViewAccessor` がバッキングストレージを提供する。
 ファイル拡張は unmap/remap を引き起こす (`EnsureFileSizeAndRemapLocked`)。
 
+## インメモリ物理層 {#in-memory-paged-file}
+
+`InMemoryPagedFile` は同じ `IPagedFile` 契約を実装し、8 KB ページとページ単位の read/write ロックを
+プロセス内 RAM に保持する。`SingleFileContainer` より上のストア、索引、MVCC、rollback 経路は
+バイナリバックエンドと共通であり、物理層と WAL だけを `InMemoryPagedFile` /
+`NullWriteAheadLog` に差し替える。
+
+`GraphDatabase.CreateInMemory()` または `GraphDatabase.Open(":memory:")` で選択する。
+`Flush()` は no-op で、データファイル、WAL、チェックポイント、リカバリは作成しない。
+インスタンスを破棄すると全ページが失われる。
+
 ## 単一ファイルコンテナ {#single-file}
 
 `TenantPagedFile` は、複数の論理ストア（nodes, relationships, properties, indexes, vectors,
