@@ -430,11 +430,15 @@ public sealed class GraphTraversal<T>
     /// 自動的にこの形に変換される。本メソッドは明示的に graph-first を選びたい (例: 二段 KNN や
     /// 複雑な candidate を作る場合) のエスケープハッチとして残す。詳細セマンティクスはクラスドキュメント参照。
     /// </summary>
-    public GraphTraversal<NodeId> FilterByKnn(string indexName, ReadOnlySpan<float> query, int k)
+    public GraphTraversal<NodeId> FilterByKnn(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
     {
         // Candidate を上流 plan に固定した graph-first KnnOp。Candidate != null のため
         // LogicalOptimizer は押し下げ判定をスキップし、そのまま FilteredKnn に物理化される。
-        var filtered = new KnnOp(_plan, indexName, query.ToArray(), k, Dim: 0);
+        var filtered = new KnnOp(_plan, indexName, query.ToArray(), k, Dim: 0, options);
         return Rebase<NodeId>(filtered, row => row.GetNodeId(0), 0);
     }
 

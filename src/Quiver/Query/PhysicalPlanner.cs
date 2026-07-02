@@ -76,9 +76,10 @@ internal static class PhysicalPlanner
     private static IPhysicalOperator PlanKnn(KnnOp k, ISchemaApi schema)
     {
         if (k.Candidate is null)
-            return new KnnNodeSourceOperator(k.IndexName, k.Query, k.K);
+            return new KnnNodeSourceOperator(k.IndexName, k.Query, k.K, k.Options);
         return new FilteredKnnNodeSourceOperator(
-            Plan(k.Candidate, schema), k.Candidate.CurrentEntityColumn, k.IndexName, k.Query, k.K);
+            Plan(k.Candidate, schema), k.Candidate.CurrentEntityColumn,
+            k.IndexName, k.Query, k.K, k.Options);
     }
 
     private static IPhysicalOperator PlanFullTextScan(FullTextScanOp ft, ISchemaApi schema)

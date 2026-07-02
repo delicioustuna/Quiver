@@ -18,10 +18,15 @@ internal sealed class KnnNodeSourceOperator : IPhysicalOperator
     private readonly string _indexName;
     private readonly float[] _query;
     private readonly int _k;
+    private readonly VectorSearchOptions? _options;
     private VectorSearchCursor? _cursor;
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
 
-    public KnnNodeSourceOperator(string indexName, ReadOnlySpan<float> query, int k)
+    public KnnNodeSourceOperator(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
     {
         if (string.IsNullOrEmpty(indexName))
             throw new ArgumentException("Vector index name must not be empty.", nameof(indexName));
@@ -30,6 +35,7 @@ internal sealed class KnnNodeSourceOperator : IPhysicalOperator
         _indexName = indexName;
         _query = query.ToArray();
         _k = k;
+        _options = options;
     }
 
     public TupleSchema Schema { get; } = new([new ColumnDefinition("nodeId", TupleSlotType.NodeId)]);
@@ -38,7 +44,7 @@ internal sealed class KnnNodeSourceOperator : IPhysicalOperator
 
     public void Open(ITransaction tx)
     {
-        _cursor = tx.Access.KnnSearch(_indexName, _query, _k);
+        _cursor = tx.Access.KnnSearch(_indexName, _query, _k, _options);
     }
 
     public bool MoveNext()

@@ -123,8 +123,10 @@ public sealed class InMemoryVectorStore : IVectorStore
     public VectorSearchCursor KnnSearch(
         string indexName,
         ReadOnlySpan<float> query,
-        int k)
+        int k,
+        VectorSearchOptions? options = null)
     {
+        _ = VectorSearchOptionsValidator.Normalize(options);
         if (k <= 0)
             throw new VectorException($"KnnSearch requires positive k (was {k}).");
 
@@ -172,8 +174,10 @@ public sealed class InMemoryVectorStore : IVectorStore
         string indexName,
         ReadOnlySpan<float> query,
         int k,
-        EntityCandidateSet candidates)
+        EntityCandidateSet candidates,
+        VectorSearchOptions? options = null)
     {
+        _ = VectorSearchOptionsValidator.Normalize(options);
         ArgumentNullException.ThrowIfNull(candidates);
         if (k <= 0)
             throw new VectorException($"KnnSearchFiltered requires positive k (was {k}).");
@@ -246,8 +250,10 @@ public sealed class InMemoryVectorStore : IVectorStore
     public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
         string indexName,
         IReadOnlyList<ReadOnlyMemory<float>> queries,
-        int k)
+        int k,
+        VectorSearchOptions? options = null)
     {
+        _ = VectorSearchOptionsValidator.Normalize(options);
         ArgumentNullException.ThrowIfNull(queries);
         if (k <= 0)
             throw new VectorException($"KnnSearchBatch requires positive k (was {k}).");

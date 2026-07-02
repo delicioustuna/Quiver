@@ -1,6 +1,7 @@
 using Quiver;
 using Quiver.Core;
 using Quiver.Testing;
+using System.Diagnostics;
 
 // VP-5: true recall@10 の二段ゲート。
 //   1) default ゲート — 既定構築パラメタ (M=16/Mmax0=32/efC=200) の品質「劣化」を監視する。
@@ -80,6 +81,9 @@ static bool RunScenario(Scenario scenario)
                 random, VectorRecallCorpus.RecallDimensions))
             .ToArray();
 
+        if (scenario.Name == "default")
+            MeasureEfSearchSweep(db, IndexName, corpus, live, queries);
+
         double before = MeasureRecall(db, IndexName, corpus, live, queries);
         Console.WriteLine(
             $"[{scenario.Name}] before_delete recall@{VectorRecallCorpus.K}={before:F3} " +
@@ -124,14 +128,32 @@ static double MeasureRecall(
     string indexName,
     IReadOnlyList<float[]> corpus,
     IReadOnlyList<bool> live,
-    IReadOnlyList<float[]> queries)
+    IReadOnlyList<float[]> queries,
+    VectorSearchOptions? options = null)
+    => MeasureRecallAndLatency(db, indexName, corpus, live, queries, options).Recall;
+
+static (double Recall, double MeanLatencyMs) MeasureRecallAndLatency(
+    GraphDatabase db,
+    string indexName,
+    IReadOnlyList<float[]> corpus,
+    IReadOnlyList<bool> live,
+    IReadOnlyList<float[]> queries,
+    VectorSearchOptions? options = null)
 {
+    using (var warmup = db.Vectors.KnnSearch(
+        indexName, queries[0], VectorRecallCorpus.K, options))
+        while (warmup.MoveNext()) { }
+
     double total = 0;
+    long elapsedTicks = 0;
     foreach (var query in queries)
     {
         var approximate = new List<long>(VectorRecallCorpus.K);
-        using (var cursor = db.Vectors.KnnSearch(indexName, query, VectorRecallCorpus.K))
+        long started = Stopwatch.GetTimestamp();
+        using (var cursor = db.Vectors.KnnSearch(
+            indexName, query, VectorRecallCorpus.K, options))
             while (cursor.MoveNext()) approximate.Add(cursor.Current.EntityId);
+        elapsedTicks += Stopwatch.GetTimestamp() - started;
 
         var exact = Enumerable.Range(0, corpus.Count)
             .Where(i => live[i])
@@ -143,7 +165,26 @@ static double MeasureRecall(
             .ToHashSet();
         total += approximate.Count(exact.Contains) / (double)VectorRecallCorpus.K;
     }
-    return total / queries.Count;
+    return (
+        total / queries.Count,
+        elapsedTicks * 1000.0 / Stopwatch.Frequency / queries.Count);
+}
+
+static void MeasureEfSearchSweep(
+    GraphDatabase db,
+    string indexName,
+    IReadOnlyList<float[]> corpus,
+    IReadOnlyList<bool> live,
+    IReadOnlyList<float[]> queries)
+{
+    Console.WriteLine("efSearch, recall@10, mean_latency_ms");
+    foreach (int efSearch in new[] { 32, 64, 100, 200 })
+    {
+        var options = new VectorSearchOptions { EfSearch = efSearch };
+        var result = MeasureRecallAndLatency(db, indexName, corpus, live, queries, options);
+        Console.WriteLine(
+            $"{efSearch}, {result.Recall:F3}, {result.MeanLatencyMs:F3}");
+    }
 }
 
 static float Cosine(float[] left, float[] right)

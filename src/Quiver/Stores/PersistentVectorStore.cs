@@ -148,8 +148,13 @@ internal sealed class PersistentVectorStore : IVectorStore
         }
     }
 
-    public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
+    public VectorSearchCursor KnnSearch(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
     {
+        options = VectorSearchOptionsValidator.Normalize(options);
         if (k <= 0) throw new VectorException($"KnnSearch requires positive k (was {k}).");
         IndexHandle h = GetIndex(indexName);
         if (h.Spec.IndexKind == VectorIndexKind.FlatOnly)
@@ -163,7 +168,8 @@ internal sealed class PersistentVectorStore : IVectorStore
         var kind = h.Spec.EntityKind;
         VectorSearchResult[] sorted;
         lock (_gate)
-            sorted = h.Hnsw!.Search(query, k, kind, (seq, gen) => IsLive(kind, seq, gen));
+            sorted = h.Hnsw!.Search(
+                query, k, kind, (seq, gen) => IsLive(kind, seq, gen), options);
         return new SortedVectorCursor(sorted);
     }
 
@@ -212,8 +218,13 @@ internal sealed class PersistentVectorStore : IVectorStore
     /// 大候補 (低選択率) は HNSW 探索 + post-filter (ef オーバーサンプルで k 件を確保)。
     /// </summary>
     public VectorSearchCursor KnnSearchFiltered(
-        string indexName, ReadOnlySpan<float> query, int k, EntityCandidateSet candidates)
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        EntityCandidateSet candidates,
+        VectorSearchOptions? options = null)
     {
+        options = VectorSearchOptionsValidator.Normalize(options);
         ArgumentNullException.ThrowIfNull(candidates);
         if (k <= 0) throw new VectorException($"KnnSearchFiltered requires positive k (was {k}).");
         IndexHandle h = GetIndex(indexName);
@@ -245,14 +256,19 @@ internal sealed class PersistentVectorStore : IVectorStore
             }
             var sorted = h.Hnsw.Search(query, k, kind,
                 (seq, gen) => IsLive(kind, seq, gen),
+                options,
                 seq => candidates.Contains(kind, seq));
             return new SortedVectorCursor(sorted);
         }
     }
 
     public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
-        string indexName, IReadOnlyList<ReadOnlyMemory<float>> queries, int k)
+        string indexName,
+        IReadOnlyList<ReadOnlyMemory<float>> queries,
+        int k,
+        VectorSearchOptions? options = null)
     {
+        options = VectorSearchOptionsValidator.Normalize(options);
         ArgumentNullException.ThrowIfNull(queries);
         if (k <= 0) throw new VectorException($"KnnSearchBatch requires positive k (was {k}).");
         if (queries.Count == 0) return Array.Empty<VectorSearchCursor>();
@@ -275,7 +291,12 @@ internal sealed class PersistentVectorStore : IVectorStore
         {
             for (int q = 0; q < Q; q++)
             {
-                var sorted = h.Hnsw!.Search(queries[q].Span, k, kind, (seq, gen) => IsLive(kind, seq, gen));
+                var sorted = h.Hnsw!.Search(
+                    queries[q].Span,
+                    k,
+                    kind,
+                    (seq, gen) => IsLive(kind, seq, gen),
+                    options);
                 cursors[q] = new SortedVectorCursor(sorted);
             }
         }

@@ -104,6 +104,44 @@ public readonly record struct VectorSearchResult(
     float Score);
 
 /// <summary>
+/// KNN 検索の精度と探索量を制御する実行時オプション。
+/// 永続フォーマットやインデックス構築品質には影響しない。
+/// </summary>
+public sealed class VectorSearchOptions
+{
+    /// <summary>
+    /// HNSW の探索ビーム幅。大きいほど再現率が上がりやすい一方、検索時間と一時メモリが増える。
+    /// 既定値 200 は従来の固定値と同一。
+    /// </summary>
+    public int EfSearch { get; init; } = 200;
+
+    /// <summary>
+    /// フィルタ付き HNSW 検索で <c>k</c> に掛ける候補のオーバーサンプル係数。
+    /// 既定値 8 は従来の固定値と同一。
+    /// </summary>
+    public int FilteredOversampleFactor { get; init; } = 8;
+}
+
+internal static class VectorSearchOptionsValidator
+{
+    private static readonly VectorSearchOptions DefaultOptions = new();
+
+    public static VectorSearchOptions Normalize(VectorSearchOptions? options)
+    {
+        options ??= DefaultOptions;
+        if (options.EfSearch is < 1 or > 1_000_000)
+            throw new VectorException(
+                $"{nameof(VectorSearchOptions.EfSearch)} must be in 1..1000000 " +
+                $"(was {options.EfSearch}).");
+        if (options.FilteredOversampleFactor is < 1 or > 1_024)
+            throw new VectorException(
+                $"{nameof(VectorSearchOptions.FilteredOversampleFactor)} must be in 1..1024 " +
+                $"(was {options.FilteredOversampleFactor}).");
+        return options;
+    }
+}
+
+/// <summary>
 /// KNN 結果を遅延列挙するカーソル。<see cref="MoveNext"/> が <c>false</c> を返すまで呼び続け、
 /// 各回 <see cref="Current"/> を読む。<see cref="Current"/> は連続する <see cref="MoveNext"/>
 /// 呼び出しの間のみ有効。
@@ -168,7 +206,8 @@ public interface IVectorStore
     VectorSearchCursor KnnSearch(
         string indexName,
         ReadOnlySpan<float> query,
-        int k);
+        int k,
+        VectorSearchOptions? options = null);
 
     /// <summary>
     /// 同一インデックスに対する複数クエリを 1 回の呼び出しで投げる。
@@ -181,12 +220,13 @@ public interface IVectorStore
     IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
         string indexName,
         IReadOnlyList<ReadOnlyMemory<float>> queries,
-        int k)
+        int k,
+        VectorSearchOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(queries);
         var arr = new VectorSearchCursor[queries.Count];
         for (int i = 0; i < queries.Count; i++)
-            arr[i] = KnnSearch(indexName, queries[i].Span, k);
+            arr[i] = KnnSearch(indexName, queries[i].Span, k, options);
         return arr;
     }
 }

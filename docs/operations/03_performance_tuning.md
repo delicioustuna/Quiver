@@ -69,6 +69,41 @@ double hitRatio = (double)s.BufferPoolHits / (s.BufferPoolHits + s.BufferPoolMis
 
 ---
 
+## KNN 探索幅 (`VectorSearchOptions`)
+
+HNSW の検索精度とレイテンシは `VectorSearchOptions.EfSearch` で調整できる。
+既定値は従来互換の 200。値を下げると探索候補が減って高速になるが、近傍の取りこぼしが増える。
+
+```csharp
+var searchOptions = new VectorSearchOptions
+{
+    EfSearch = 100,
+    FilteredOversampleFactor = 8,
+};
+
+using var cursor = db.Vectors.KnnSearch("embedding", query, k: 10, searchOptions);
+var batch = db.Vectors.KnnSearchBatch("embedding", queries, k: 10, searchOptions);
+
+var traversal = tx.G(db.Schema)
+    .Knn("embedding", query, k: 10, searchOptions);
+```
+
+固定 corpus（N=10,000、dim=384、cosine、20 queries、M=16、Mmax0=32、efConstruction=200）
+での実測は次のとおり。latency は HNSW カーソル生成と全件列挙だけを warmup 後に計測した平均値。
+
+| EfSearch | recall@10 | 平均 latency |
+|---:|---:|---:|
+| 32 | 0.245 | 0.682 ms |
+| 64 | 0.435 | 0.999 ms |
+| 100 | 0.570 | 1.331 ms |
+| 200（既定） | 0.825 | 2.214 ms |
+
+この corpus では低い `EfSearch` の recall 低下が大きい。精度要件を測らずに既定値を下げないこと。
+`FilteredOversampleFactor` はフィルタ付き HNSW の探索幅を `k × 係数` まで広げる。
+候補集合が小さく exact gather 経路を選ぶ場合、この値は結果や計算量に影響しない。
+
+---
+
 ## WAL とチェックポイント
 
 ### `CheckpointThresholdBytes` (既定 64 MB)
@@ -190,5 +225,6 @@ db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEqu
 | 起動 (recovery) が遅い | `CheckpointThresholdBytes` を下げる / `Adaptive` + `TargetRecoveryTime` |
 | 並列 commit で fsync が頭打ち | `GroupCommitWindow` を 100µs〜1ms |
 | read 並列が出ない | `LockingMode = ReaderWriter` |
+| KNN の latency / recall を調整したい | `VectorSearchOptions.EfSearch` を実測しながら変更 |
 | ロックで詰まる・デッドロック疑い | `DeadlockDetectionInterval = 100ms`、`LockTimeout` 見直し |
 | 特定プロパティ検索が遅い | `Schema.CreateIndex` |

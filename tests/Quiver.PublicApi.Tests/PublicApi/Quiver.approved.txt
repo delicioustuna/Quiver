@@ -31,7 +31,7 @@ namespace Quiver.Api
             where T : Quiver.Api.IGraphNode<T> { }
         public Quiver.Core.NodeId InsertIndexed<T>(T entity)
             where T : Quiver.Api.IGraphNode<T> { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Knn(string indexName, System.ReadOnlySpan<float> query, int k) { }
+        public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Knn(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.VectorSearchOptions? options = null) { }
         public T Load<T>(Quiver.Core.NodeId id)
             where T : Quiver.Api.IGraphNode<T> { }
         public Quiver.Api.Match.MatchQuery Match(Quiver.Api.Match.GraphPattern pattern) { }
@@ -71,7 +71,7 @@ namespace Quiver.Api
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Coalesce(params System.Func<Quiver.Api.SubTraversal, Quiver.Api.SubTraversal>[] branches) { }
         public long Count() { }
         public Quiver.Api.GraphTraversal<T> Dedup() { }
-        public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> FilterByKnn(string indexName, System.ReadOnlySpan<float> query, int k) { }
+        public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> FilterByKnn(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.VectorSearchOptions? options = null) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> FilterByText(string indexName, string queryText, int k) { }
         public System.Collections.Generic.List<T> Fold() { }
         public System.Collections.Generic.Dictionary<string, long> GroupCount(string key) { }
@@ -928,8 +928,8 @@ namespace Quiver.Core
     {
         void CreateVectorIndex(Quiver.Core.VectorIndexSpec spec);
         void DropVectorIndex(string name);
-        Quiver.Core.VectorSearchCursor KnnSearch(string indexName, System.ReadOnlySpan<float> query, int k);
-        System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorSearchCursor> KnnSearchBatch(string indexName, System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>> queries, int k);
+        Quiver.Core.VectorSearchCursor KnnSearch(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.VectorSearchOptions? options = null);
+        System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorSearchCursor> KnnSearchBatch(string indexName, System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>> queries, int k, Quiver.Core.VectorSearchOptions? options = null);
         System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorIndexSpec> ListVectorIndexes();
         void RemoveVector(Quiver.Core.EntityKind kind, long entityId, string indexName);
         void SetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.ReadOnlySpan<float> vector);
@@ -941,9 +941,9 @@ namespace Quiver.Core
         public InMemoryVectorStore() { }
         public void CreateVectorIndex(Quiver.Core.VectorIndexSpec spec) { }
         public void DropVectorIndex(string name) { }
-        public Quiver.Core.VectorSearchCursor KnnSearch(string indexName, System.ReadOnlySpan<float> query, int k) { }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorSearchCursor> KnnSearchBatch(string indexName, System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>> queries, int k) { }
-        public Quiver.Core.VectorSearchCursor KnnSearchFiltered(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.EntityCandidateSet candidates) { }
+        public Quiver.Core.VectorSearchCursor KnnSearch(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.VectorSearchOptions? options = null) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorSearchCursor> KnnSearchBatch(string indexName, System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>> queries, int k, Quiver.Core.VectorSearchOptions? options = null) { }
+        public Quiver.Core.VectorSearchCursor KnnSearchFiltered(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.EntityCandidateSet candidates, Quiver.Core.VectorSearchOptions? options = null) { }
         public System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorIndexSpec> ListVectorIndexes() { }
         public void RemoveVector(Quiver.Core.EntityKind kind, long entityId, string indexName) { }
         public void SetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.ReadOnlySpan<float> vector) { }
@@ -1095,6 +1095,12 @@ namespace Quiver.Core
         public abstract Quiver.Core.VectorSearchResult Current { get; }
         public virtual void Dispose() { }
         public abstract bool MoveNext();
+    }
+    public sealed class VectorSearchOptions
+    {
+        public VectorSearchOptions() { }
+        public int EfSearch { get; init; }
+        public int FilteredOversampleFactor { get; init; }
     }
     public readonly struct VectorSearchResult : System.IEquatable<Quiver.Core.VectorSearchResult>
     {

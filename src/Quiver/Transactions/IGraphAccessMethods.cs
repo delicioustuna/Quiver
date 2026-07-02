@@ -89,7 +89,11 @@ internal interface IGraphAccessMethods
     /// 符号反転して "高いほど近い" スコアに揃える) で結果を返す。
     /// ベクトルストアを持たないバックエンドは <see cref="NotSupportedException"/> を投げる。
     /// </remarks>
-    VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
+    VectorSearchCursor KnnSearch(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
         => throw new NotSupportedException(
             "このバックエンドは KnnSearch を実装していません。access methods に IVectorStore を接続してください。");
 
@@ -101,12 +105,13 @@ internal interface IGraphAccessMethods
     IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
         string indexName,
         IReadOnlyList<ReadOnlyMemory<float>> queries,
-        int k)
+        int k,
+        VectorSearchOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(queries);
         var arr = new VectorSearchCursor[queries.Count];
         for (int i = 0; i < queries.Count; i++)
-            arr[i] = KnnSearch(indexName, queries[i].Span, k);
+            arr[i] = KnnSearch(indexName, queries[i].Span, k, options);
         return arr;
     }
 
@@ -127,8 +132,9 @@ internal interface IGraphAccessMethods
         string indexName,
         ReadOnlySpan<float> query,
         int k,
-        EntityCandidateSet candidates)
-        => KnnSearchFilteredOversample(this, indexName, query, k, candidates);
+        EntityCandidateSet candidates,
+        VectorSearchOptions? options = null)
+        => KnnSearchFilteredOversample(this, indexName, query, k, candidates, options);
 
     /// <summary>
     /// 既定実装の共有ヘルパ。クラス側 override が高速経路を選んだあと、
@@ -139,21 +145,31 @@ internal interface IGraphAccessMethods
         string indexName,
         ReadOnlySpan<float> query,
         int k,
-        EntityCandidateSet candidates)
+        EntityCandidateSet candidates,
+        VectorSearchOptions? options)
     {
+        options = VectorSearchOptionsValidator.Normalize(options);
         ArgumentNullException.ThrowIfNull(candidates);
         if (k <= 0) throw new ArgumentOutOfRangeException(nameof(k), k, "k は正の整数である必要があります。");
 
         if (candidates.Count == 0)
             return EmptyVectorSearchCursor.Instance;
 
-        int oversampleCap = Math.Max(k * 64, candidates.Count * 2);
-        int candidateK = Math.Min(Math.Max(k * 4, k + candidates.Count / 4), oversampleCap);
+        int oversampleCap = (int)Math.Min(
+            int.MaxValue,
+            Math.Max((long)k * options.FilteredOversampleFactor * 8, (long)candidates.Count * 2));
+        int candidateK = Math.Min(
+            (int)Math.Min(
+                int.MaxValue,
+                Math.Max(
+                    (long)k * options.FilteredOversampleFactor,
+                    (long)k + candidates.Count / 4)),
+            oversampleCap);
 
         while (true)
         {
             var hits = new List<VectorSearchResult>(k);
-            using (var cursor = access.KnnSearch(indexName, query, candidateK))
+            using (var cursor = access.KnnSearch(indexName, query, candidateK, options))
             {
                 while (cursor.MoveNext())
                 {

@@ -198,6 +198,11 @@
   3. `KnnSearchBatch` は per-query に read lock を取得 (または read lock 保持で全クエリ — reader 同士は並行なのでどちらでも他 reader を妨げない)。クエリ間の `Parallel.For` 化は read lock 化が入った後の追加候補として記録のみ (このタスクの必須ではない)。
 - **判断ポイント**: HNSW Insert/Delete 中のグラフは中間状態 (双方向リンク片側のみ等) を持つ。read lock 化で見える中間状態が検索の正確性 (欠落・無限ループ) を壊さないことを精査し、保証できなければ「書き込み中は排他・読み取り同士のみ並行」の保守的構成で確定する (読み取り主体の RAG ワークロードには十分効く)。writer は single-writer 契約なので write lock の競合は catalog 側に限られる。
 - **Kill criteria**: 4 スレッド並行 KNN スループット ≥3× (CR-1 計測比)。単一スレッド退行 ±2% 以内。
+- **実測結果 (2026-07-03、DEFER)**: catalog lock + index 単位 `ReaderWriterLockSlim` の spike は、KNN が
+  1/2/4/8 thread = 1,836 / 1,768 / 1,086 / 902 ops/s。4 thread は CR-1 基準 1,615 ops/s の
+  0.67×で kill criteria を満たさなかった。reader 同士の同時進入自体は確認できたが、
+  `VectorPayloadStore.TryGet` の page pin が `PagedFile` global pool lock で競合するため、変更は取り下げた。
+  **VP-4 payload cache または CR-2 optimistic pin 後に再試行する。**
 - **依存関係**: CR-1。VP-4 と同一セッション可。工数: 中 (1.5〜2.5 日)。
 
 ---

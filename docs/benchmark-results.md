@@ -33,6 +33,20 @@ dotnet run -c Release --project benchmarks\Quiver.Benchmarks.RecallCheck
 
 いずれかのゲートが閾値未満なら exit code 1 を返す。通常の unit test へ混ぜるには重いため、専用の品質ゲートとして分離している。
 
+### VP-2 efSearch sweep
+
+上と同じ default corpus の構築直後について、`VectorSearchOptions.EfSearch` だけを変更した結果。
+latency は brute-force ground truth 計算を除外し、HNSW カーソル生成と全件列挙だけを warmup 後に計測した。
+
+| efSearch | recall@10 | mean latency (ms) |
+|---:|---:|---:|
+| 32 | 0.245 | 0.682 |
+| 64 | 0.435 | 0.999 |
+| 100 | 0.570 | 1.331 |
+| 200 | 0.825 | 2.214 |
+
+既定値 200 は変更しない。低 ef はレイテンシを削減できるが、この corpus では recall の損失が大きい。
+
 ## CR-1 並行読み取りスケーリング
 
 同一 DB に対する固定時間（各点 1 秒）の read-only throughput。AMD Ryzen 7 5700X
@@ -47,6 +61,21 @@ dotnet run -c Release --project benchmarks\Quiver.Benchmarks.RecallCheck
 KNN は `PersistentVectorStore._gate` によりほぼ完全に直列化されている。1-hop は
 `PagedFile` の resident pin/unpin も単一 pool lock を通るため、thread 数を増やすほど退行した。
 この表を CR-2 / CR-3 の kill criteria の分母とする。
+
+### CR-3 index 単位 ReaderWriterLockSlim spike
+
+`_gate` を catalog lock と index 単位 `ReaderWriterLockSlim` に分離し、同じハーネスで再測定した。
+機能テストでは同一 index の reader が同時進入し、別 index の writer が停止しないことを確認できたが、
+実測は kill criteria（4 thread ≥3×）を満たさなかった。
+
+| workload | 1 thread ops/s | 2 threads | 4 threads | 8 threads |
+|---|---:|---:|---:|---:|
+| HNSW KNN（CR-3 spike） | 1,836 (1.00×) | 1,768 (0.96×) | 1,086 (0.59×) | 902 (0.49×) |
+
+基準の 4 thread 1,615 ops/s に対して spike は 1,086 ops/s（0.67×）。
+HNSW の距離計算ごとの `VectorPayloadStore.TryGet` が page pin を行い、並行 reader が
+`PagedFile` の global pool lock で競合したためである。ロック変更は採用せず取り下げた。
+CR-3 は VP-4 の payload cache または CR-2 の optimistic pin 後に再試行する。
 
 実行コマンド:
 

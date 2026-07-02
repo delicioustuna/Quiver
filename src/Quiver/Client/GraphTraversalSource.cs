@@ -188,7 +188,12 @@ public sealed class GraphTraversalSource
     /// <param name="indexName">対象のベクトルインデックス名。</param>
     /// <param name="query">問い合わせベクトル。</param>
     /// <param name="k">取得する上位件数。</param>
-    public GraphTraversal<NodeId> Knn(string indexName, ReadOnlySpan<float> query, int k)
+    /// <param name="options">探索精度と探索量を制御する実行時オプション。null は既定値。</param>
+    public GraphTraversal<NodeId> Knn(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
     {
         // 後続の pure-filter / Limit を candidate-side に巻き戻せるよう KnnOp で包む。
         // filter が積まれなければ終端で vector-first に materialize される。
@@ -198,7 +203,7 @@ public sealed class GraphTraversalSource
         int dim = _tx.AsInternal().Access.TryGetVectorIndexSpec(indexName, out var spec) ? spec.Dimensions : 0;
         // vector-first を既定とし、後続 pure-filter / Limit は終端で KnnPushdown が
         // candidate-side に巻き戻して graph-first 化を判定する。
-        var plan = new KnnOp(null, indexName, query.ToArray(), k, dim);
+        var plan = new KnnOp(null, indexName, query.ToArray(), k, dim, options);
         return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 

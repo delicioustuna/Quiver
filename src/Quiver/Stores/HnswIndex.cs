@@ -23,8 +23,6 @@ namespace Quiver.Storage.Records;
 /// </summary>
 internal sealed class HnswIndex
 {
-    // efSearch の公開は VP-2。V2 でも既存の検索品質を保つため、構築時 ef とは分離して固定する。
-    private const int DefaultEfSearch = 200;
     private const int HeaderBytes = 4;       // present1 + level1 + pad2
     private static int Body => RecordPageMapping.PageBodySize;
 
@@ -266,7 +264,11 @@ internal sealed class HnswIndex
     /// <paramref name="isLive"/> は世代照合— false の候補は除外する。
     /// </summary>
     public VectorSearchResult[] Search(
-        ReadOnlySpan<float> query, int k, EntityKind kind, Func<long, ushort, bool> isLive,
+        ReadOnlySpan<float> query,
+        int k,
+        EntityKind kind,
+        Func<long, ushort, bool> isLive,
+        VectorSearchOptions options,
         Func<long, bool>? inFilter = null)
     {
         if (_entry < 0 || k <= 0) return Array.Empty<VectorSearchResult>();
@@ -274,8 +276,8 @@ internal sealed class HnswIndex
         for (int lc = _maxLevel; lc > 0; lc--)
             ep = GreedyDescent(query, ep, lc);
 
-        // ③: フィルタ付き検索は post-filter で k 件に満たなくなりうるため ef をオーバーサンプルする。
-        int ef = inFilter is null ? Math.Max(DefaultEfSearch, k) : Math.Max(DefaultEfSearch, k * 8);
+        // フィルタ付き検索は post-filter で k 件に満たなくなりうるため ef をオーバーサンプルする。
+        int ef = ComputeSearchEf(k, options, inFilter is not null);
         var w = SearchLayer(query, ep, ef, 0);
 
         // 層0の候補を payload で再スコアし、present + 世代照合 (+ フィルタ) を通したものだけ top-k へ。
@@ -294,6 +296,15 @@ internal sealed class HnswIndex
         }
         finally { ArrayPool<float>.Shared.Return(buf); }
         return heap.ToSortedArray();
+    }
+
+    /// <summary>検索種別とオプションから実際の HNSW ビーム幅を求める。</summary>
+    internal static int ComputeSearchEf(int k, VectorSearchOptions options, bool filtered)
+    {
+        long requestedEf = filtered
+            ? (long)k * options.FilteredOversampleFactor
+            : k;
+        return (int)Math.Min(int.MaxValue, Math.Max(options.EfSearch, requestedEf));
     }
 
     /// <summary>abort の before-image undo 後 / clean reopen で呼ばれ、ページから in-memory を再構築する。</summary>

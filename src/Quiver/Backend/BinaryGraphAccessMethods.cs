@@ -50,32 +50,39 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     public bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
         => _vectors.TryGetVector(kind, entityId, indexName, destination);
 
-    public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
-        => _vectors.KnnSearch(indexName, query, k);
+    public VectorSearchCursor KnnSearch(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
+        => _vectors.KnnSearch(indexName, query, k, options);
 
     // in-memory backend では gather-then-score / 単一 snapshot バッチで短絡。
     public VectorSearchCursor KnnSearchFiltered(
         string indexName,
         ReadOnlySpan<float> query,
         int k,
-        EntityCandidateSet candidates)
+        EntityCandidateSet candidates,
+        VectorSearchOptions? options = null)
     {
         if (_vectors is InMemoryVectorStore inMem)
-            return inMem.KnnSearchFiltered(indexName, query, k, candidates);
+            return inMem.KnnSearchFiltered(indexName, query, k, candidates, options);
         // 永続ストアも gather-then-score / scan+post-filter を直接持つ。
         if (_vectors is Storage.Records.PersistentVectorStore persistent)
-            return persistent.KnnSearchFiltered(indexName, query, k, candidates);
-        return IGraphAccessMethods.KnnSearchFilteredOversample(this, indexName, query, k, candidates);
+            return persistent.KnnSearchFiltered(indexName, query, k, candidates, options);
+        return IGraphAccessMethods.KnnSearchFilteredOversample(
+            this, indexName, query, k, candidates, options);
     }
 
     public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
         string indexName,
         IReadOnlyList<ReadOnlyMemory<float>> queries,
-        int k)
+        int k,
+        VectorSearchOptions? options = null)
     {
         if (_vectors is InMemoryVectorStore inMem)
-            return inMem.KnnSearchBatch(indexName, queries, k);
-        return _vectors.KnnSearchBatch(indexName, queries, k);
+            return inMem.KnnSearchBatch(indexName, queries, k, options);
+        return _vectors.KnnSearchBatch(indexName, queries, k, options);
     }
 
     public IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null)

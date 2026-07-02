@@ -122,7 +122,8 @@ internal sealed record KnnOp(
     string IndexName,
     float[] Query,
     int K,
-    int Dim) : LogicalOp
+    int Dim,
+    VectorSearchOptions? Options = null) : LogicalOp
 {
     public override int CurrentEntityColumn => 0;
     public override int PredictedOutputColumnCount => 1;
