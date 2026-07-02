@@ -261,6 +261,7 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
   - **[async-transaction-context-safety.md](async-transaction-context-safety.md) の完了が前提。** P0 未完のまま本ガードだけを入れない (文脈が `[ThreadStatic]` 所有のままでは「逐次 cross-thread = 合法」が成立せず、ガードが安全性を偽装する)。
   - P0 計画が未決定としているカーソル lifetime を推測で決めない。既存契約と破壊テストの結果を判断根拠にする。
   - 並行使用はプログラミングエラーだが、例外型は P0 と `TransactionException` に統一する。REF-10 が再試行しないよう `ConcurrentUse` は必ず non-transient に分類する。
+  - **公開リトライ契約との整合**: 08_known_limits.md §retry の推奨パターンは `TransactionException` を型で一括 catch して再試行するため、non-transient な `ConcurrentUse` を同型で投げると、文書どおりに書かれたユーザコードがプログラミングエラーを maxAttempts 回再試行してしまう。transient 判別を public に露出し (既定: `TransactionException.IsTransient` プロパティ。internal reason code enum は非公開のまま)、§retry の推奨 catch を `IsTransient` フィルタへ改訂する。REF-8 の timeout 例外は `IsTransient = true`。公開面追加は approved.txt 差分レビュー (G-3) を通す。
   - 検出できないケースを偽装しない: ガードが検出するのは**同時実行の交錯**のみ。tx の長時間保持や fire-and-forget 忘れは検出しない。**検出は補助であり契約の代替ではない**ことを 08_known_limits.md に明記。
   - 契約文書の改訂: 08_known_limits.md §threading を「スレッドアフィン」から「**同時に 1 スレッドから 1 操作**。API 境界 (`BeginTransactionAsync` / `CommitAsync` / `DisposeAsync`) 以外の await を tx 内に挟まない」へ書き換える (P0 側と同一タスクで整合させても良い)。
   - opt-out フラグは**設けない** (これを切る正当な理由がない)。
