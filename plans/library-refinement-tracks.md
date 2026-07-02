@@ -427,7 +427,7 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 
 ### REF-14: 運用契約のランタイム診断化 (メトリクス + 警告)
 
-- **目的**: known_limits の運用ルールを「読まなくても気づける」ものにする。文書化済みのフットガン (長寿命 tx の WAL ピン留め、WAL 成長、HNSW tombstone) を ILogger 警告 + `System.Diagnostics.Metrics` で既定露出する。
+- **目的**: known_limits の運用ルールを「読まなくても気づける」ものにする。文書化済みのフットガン (長寿命 tx の WAL ピン留め、WAL 成長、HNSW tombstone) を EventSource イベント + `System.Diagnostics.Metrics` で既定露出する。
 - **対象**: コア各所 (Checkpointer / TransactionManager / HnswIndex / WAL)、[src/Quiver.OpenTelemetry/QuiverInstrumentation.cs](../src/Quiver.OpenTelemetry/QuiverInstrumentation.cs)。
 - **実装手順**:
   1. Meter 名・instrument 名・単位・警告しきい値を文書とテストで固定する。
@@ -436,13 +436,13 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 - **仕様 (計装項目)**:
   | 項目 | 種別 | しきい値/備考 |
   |---|---|---|
-  | 長寿命トランザクション | ILogger Warning (1 回/tx) | 既定 30 秒超 or WAL ピン留め 64MB 超。オプションで調整可 |
+  | 長寿命トランザクション | EventSource Warning (1 回/tx) | 既定 30 秒超 or WAL ピン留め 64MB 超。Hosting は ILogger へ転送。オプションで調整可 |
   | WAL サイズ / 切り詰め契機 | ObservableGauge + Counter | checkpoint 完了時に更新 (ホットパス外) |
   | group commit 効率 | Histogram (batch サイズ) | commit 経路 — **0-alloc 必須、実測で退行 ±2% 以内** |
   | HNSW tombstone 比率 / rebuild 発火 | ObservableGauge + Counter | 既存 auto-rebuild トリガに接続 |
   | checkpoint 所要 / vacuum 回収量 | Histogram / Counter | |
 - **判断ポイント (遵守)**:
-  - コアの計装は **`Meter` + `ILogger` のみ** (どちらも既存依存の範囲内。OpenTelemetry パッケージへの依存をコアに足さない)。Quiver.OpenTelemetry は Meter 名の登録ヘルパを足すだけ。
+  - コアの計装は **`ActivitySource` + `Meter` + `EventSource` のみ** (すべて in-box)。OpenTelemetry / Microsoft.Extensions.Logging への依存をコアに足さない。Quiver.OpenTelemetry は Source / Meter 名を登録し、Quiver.Hosting が EventSource を ILogger へ転送する。
   - **測定はホットパス外で**: gauge は checkpoint / vacuum / rebuild 等の低頻度イベントで更新。トラバーサル反復・per-op 経路に計装を入れない。commit 経路の histogram のみ例外とし、実測 gate (G-5) を通す。
   - 警告ログはレート制限 (同一 tx で 1 回、WAL 警告は指数間隔) — ログ洪水を作らない。
 - **完了条件**: 各項目のユニットテスト (しきい値発火 / 非発火)。commit 経路 before/after 実測。docs/operations/03_performance_tuning.md にメトリクス一覧表を追加。

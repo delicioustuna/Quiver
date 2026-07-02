@@ -29,7 +29,6 @@
        Operators/ Client/) で分離し、名前空間は従来どおり維持する。 -->
   <ItemGroup>
     <PackageReference Include="System.IO.Hashing" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
   </ItemGroup>
   <ItemGroup>
     <!-- source generator は自アセンブリに生成できない Roslyn 制約のため別プロジェクト維持。

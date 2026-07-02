@@ -795,8 +795,6 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         using var activity = QuiverTelemetry.QueryActivitySource.StartActivity(
             "query.execute", ActivityKind.Internal);
         activity?.SetTag("quiver.tx.id", _inner.Id.Value);
-        // tx スコープを通して operator chain のログを一意に追跡可能にする。
-        using var logScope = QuiverLog.BeginQueryScope(QuiverLog.QueryLogger, _inner.Id.Value);
         var sw = Stopwatch.StartNew();
         plan.Open(_inner);
         var rows = new List<QueryRow>();
@@ -826,8 +824,11 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         plan.Dispose();
         QuiverTelemetry.QueryDurationMs.Record(sw.Elapsed.TotalMilliseconds);
         activity?.SetTag("quiver.query.rows", rows.Count);
-        // Debug レベルで件数 + 経過時間。N+1 検出や hot operator 推定に有効。
-        QuiverLog.QueryExecuted(QuiverLog.QueryLogger, rows.Count, sw.Elapsed.TotalMilliseconds);
+        // EventSource で件数 + 経過時間を発行。N+1 検出や hot operator 推定に有効。
+        QuiverEventSource.Log.QueryExecuted(
+            _inner.Id.Value,
+            rows.Count,
+            sw.Elapsed.TotalMilliseconds);
         return new QueryResult(schema, stats, rows);
     }
 

@@ -226,7 +226,7 @@ internal sealed class WriteAheadLog : IWriteAheadLog
             }
             tcs.Task.GetAwaiter().GetResult();
             QuiverTelemetry.WalFlushDurationMs.Record(sw.Elapsed.TotalMilliseconds);
-            QuiverLog.WalFlushed(QuiverLog.WalLogger, lsn, sw.Elapsed.TotalMilliseconds);
+            QuiverEventSource.Log.WalFlushed(lsn, sw.Elapsed.TotalMilliseconds);
         }
         finally
         {

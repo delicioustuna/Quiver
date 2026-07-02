@@ -46,6 +46,8 @@ namespace Quiver.Telemetry;
 [EventSource(Name = "Quiver-EventSource")]
 internal sealed class QuiverEventSource : EventSource
 {
+    internal const string EventSourceName = "Quiver-EventSource";
+
     /// <summary>プロセス全体の singleton。各 hot path はここから直接インクリメント API を呼ぶ。</summary>
     public static readonly QuiverEventSource Log = new();
 
@@ -103,6 +105,70 @@ internal sealed class QuiverEventSource : EventSource
     private IncrementingPollingCounter? _crashRecoveryRateCounter;
 
     private QuiverEventSource() { }
+
+    // ============================================================================
+    // Structured diagnostic events
+    // ============================================================================
+
+    [Event(
+        1,
+        Level = EventLevel.Informational,
+        Message = "tx {0} committed in {1} ms")]
+    public void TxCommitted(long txId, double durationMs)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+            WriteEvent(1, txId, durationMs);
+    }
+
+    [Event(
+        2,
+        Level = EventLevel.Warning,
+        Message = "tx {0} aborted in {1} ms")]
+    public void TxAborted(long txId, double durationMs)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+            WriteEvent(2, txId, durationMs);
+    }
+
+    [Event(
+        3,
+        Level = EventLevel.Error,
+        Message = "tx {0} commit failed: {1} ({2})")]
+    public void TxCommitFailed(long txId, string reason, string exceptionType)
+    {
+        if (IsEnabled(EventLevel.Error, EventKeywords.None))
+            WriteEvent(3, txId, reason ?? "", exceptionType ?? "");
+    }
+
+    [Event(
+        10,
+        Level = EventLevel.Informational,
+        Message = "checkpoint beginLsn={0} completed in {1} ms")]
+    public void CheckpointCompleted(long beginLsn, double durationMs)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+            WriteEvent(10, beginLsn, durationMs);
+    }
+
+    [Event(
+        20,
+        Level = EventLevel.Verbose,
+        Message = "wal flush targetLsn={0} completed in {1} ms")]
+    public void WalFlushed(long targetLsn, double durationMs)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+            WriteEvent(20, targetLsn, durationMs);
+    }
+
+    [Event(
+        30,
+        Level = EventLevel.Verbose,
+        Message = "query executed: tx={0} rows={1} in {2} ms")]
+    public void QueryExecuted(long txId, int rows, double durationMs)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+            WriteEvent(30, txId, rows, durationMs);
+    }
 
     /// <inheritdoc/>
     protected override void OnEventCommand(EventCommandEventArgs command)
@@ -212,42 +278,53 @@ internal sealed class QuiverEventSource : EventSource
     // ============================================================================
 
     /// <summary>BufferPool フレームヒット (1 回 = 1)。</summary>
+    [NonEvent]
     public void BufferPoolHit() => Interlocked.Increment(ref _bufferPoolHits);
 
     /// <summary>BufferPool フレームミス (1 回 = 1)。</summary>
+    [NonEvent]
     public void BufferPoolMiss() => Interlocked.Increment(ref _bufferPoolMisses);
 
     /// <summary>BufferPool eviction (1 回 = 1)。フレーム入れ替えで dirty が書き出された場合に呼ぶ。</summary>
+    [NonEvent]
     public void BufferPoolEviction() => Interlocked.Increment(ref _bufferPoolEvictions);
 
     /// <summary>WAL に書いたバイト数を加算する。</summary>
+    [NonEvent]
     public void WalBytesWritten(long bytes)
     {
         if (bytes > 0) Interlocked.Add(ref _walBytesWritten, bytes);
     }
 
     /// <summary>WAL flush 要求の保留件数を 1 増やす (<see cref="WalFlushRequestCompleted"/> と対で呼ぶ)。</summary>
+    [NonEvent]
     public void WalFlushRequestStarted() => Interlocked.Increment(ref _walPendingFlushRequests);
 
     /// <summary>WAL flush 要求の保留件数を 1 減らす。</summary>
+    [NonEvent]
     public void WalFlushRequestCompleted() => Interlocked.Decrement(ref _walPendingFlushRequests);
 
     /// <summary>トランザクション commit 完了 (1 回 = 1)。</summary>
+    [NonEvent]
     public void TxCommit() => Interlocked.Increment(ref _txCommitCount);
 
     /// <summary>トランザクション abort 完了 (1 回 = 1)。</summary>
+    [NonEvent]
     public void TxAbort() => Interlocked.Increment(ref _txAbortCount);
 
     /// <summary>デッドロック検出器が犠牲者を中断 (1 回 = 1)。</summary>
+    [NonEvent]
     public void DeadlockVictim() => Interlocked.Increment(ref _deadlockVictimCount);
 
     /// <summary>crash recovery が起動した (1 回 = 1)。<see cref="Quiver.Transactions.RecoveryManager.Recover"/> で 1 度呼ぶ。</summary>
+    [NonEvent]
     public void CrashRecovery() => Interlocked.Increment(ref _crashRecoveryCount);
 
     /// <summary>
     /// ロック取得待ち時間 (ms) と「待ちが発生したかどうか」を記録する。
     /// <paramref name="contended"/> = true なら同時にロック競合カウンタも 1 増やす。
     /// </summary>
+    [NonEvent]
     public void RecordLockWait(double waitMs, bool contended)
     {
         long rounded = waitMs <= 0 ? 0 : (long)waitMs;
@@ -260,10 +337,12 @@ internal sealed class QuiverEventSource : EventSource
     /// CheckIndexConsistency が観測した orphan 件数を gauge にセットする。
     /// 値は次回 CheckIndexConsistency 呼び出しまで保持される。
     /// </summary>
+    [NonEvent]
     public void SetIndexOrphanCount(long count)
         => Volatile.Write(ref _indexOrphanLastObserved, count);
 
     /// <summary>Vacuum 進捗 (0..100) を gauge にセットする。vacuum 完了時は 0 に戻すこと。</summary>
+    [NonEvent]
     public void SetVacuumProgress(long percent)
     {
         if (percent < 0) percent = 0;

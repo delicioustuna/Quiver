@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Quiver.Transactions;
 
 namespace Quiver.Hosting;
@@ -12,7 +11,7 @@ namespace Quiver.Hosting;
 /// <remarks>
 /// セクション名は <c>"Quiver"</c> を推奨。環境変数では二重アンダースコア区切り
 /// (例: <c>Quiver__BufferPoolSize=536870912</c>) でオーバーライドできる。
-/// バックエンドファクトリ・logger factory・LogicalMutationSink を差し込みたい場合は
+/// バックエンドファクトリ・LogicalMutationSink を差し込みたい場合は
 /// <see cref="QuiverServiceCollectionExtensions.AddQuiver(Microsoft.Extensions.DependencyInjection.IServiceCollection, Microsoft.Extensions.Configuration.IConfiguration, System.Action{GraphDatabaseOptions}?)"/>
 /// の <c>postConfigure</c> から実体 <see cref="GraphDatabaseOptions"/> を直接編集する。
 /// </remarks>
@@ -68,9 +67,8 @@ public sealed class QuiverConfigurationOptions
 
     /// <summary>
     /// 現在の設定値を <see cref="GraphDatabaseOptions"/> に写像する。
-    /// <paramref name="loggerFactory"/> が non-null なら logger も配線する。
     /// </summary>
-    public GraphDatabaseOptions ToGraphDatabaseOptions(ILoggerFactory? loggerFactory)
+    public GraphDatabaseOptions ToGraphDatabaseOptions()
     {
         return new GraphDatabaseOptions
         {
@@ -89,7 +87,6 @@ public sealed class QuiverConfigurationOptions
             AutoRepairOrphansOnRecovery = AutoRepairOrphansOnRecovery,
             DeadlockDetectionInterval = DeadlockDetectionInterval,
             GroupCommitWindow = GroupCommitWindow,
-            LoggerFactory = loggerFactory,
         };
     }
 }

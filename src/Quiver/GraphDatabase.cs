@@ -2,7 +2,6 @@ using Quiver.Logical;
 using Quiver.Maintenance;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
-using Microsoft.Extensions.Logging;
 
 namespace Quiver;
 
@@ -56,12 +55,6 @@ public sealed class GraphDatabase : IDisposable
         {
             options.Backend = BackendKind.InMemory;
         }
-        // ホット path 各所が参照する構造化ログのファサードに ILoggerFactory を流し込む。
-        // null のときはあえて触らない — 別 DB が事前に設定したロガーを取り消さないことで、
-        // テスト並列実行時の汚染や、複数 DB を 1 プロセスで開く運用での意外な reset を避ける
-        // (OTel ActivitySource / EventSource は構造上プロセス共有なので、最後勝ち回避はここだけ)。
-        if (options.LoggerFactory != null)
-            Quiver.Telemetry.QuiverLog.LoggerFactory = options.LoggerFactory;
         var factory = options.BackendFactory ?? CreateDefaultFactory(options.Backend);
         var backend = factory.Open(filePath, options);
 
@@ -448,9 +441,6 @@ public sealed class GraphDatabaseOptions
 
     /// <summary>ページのチェックサム計算 / 検証を有効にするか。既定 <c>true</c>。</summary>
     public bool EnableChecksums { get; set; } = true;
-
-    /// <summary>ロギング用 <see cref="ILoggerFactory"/>。null のときはログ無し。</summary>
-    public ILoggerFactory? LoggerFactory { get; set; }
 
     /// <summary>
     /// <see cref="BackendFactory"/> が null のときに利用する組み込みバックエンドの種別。

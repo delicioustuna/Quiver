@@ -543,7 +543,6 @@ namespace Quiver
         public System.TimeSpan GroupCommitWindow { get; set; }
         public System.TimeSpan LockTimeout { get; set; }
         public Quiver.Transactions.LockingMode LockingMode { get; set; }
-        public Microsoft.Extensions.Logging.ILoggerFactory? LoggerFactory { get; set; }
         public Quiver.Logical.ILogicalMutationSink? LogicalMutationSink { get; set; }
         public long MaxCheckpointThresholdBytes { get; set; }
         public long MinCheckpointThresholdBytes { get; set; }

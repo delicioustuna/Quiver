@@ -10,7 +10,7 @@ Quiver の全体構成、データの流れ、デプロイモデル、運用上�
 | 区分 | 技術 |
 |---|---|
 | 言語 | C# 13 / .NET 10 |
-| 外部ランタイム依存 | `System.IO.Hashing`（CRC32C）、`Microsoft.Extensions.Logging.Abstractions` |
+| 外部ランタイム依存 | `System.IO.Hashing`（CRC-32） |
 | AOT 対応 | NativeAOT publish（リフレクション不使用） |
 
 ストレージエンジン、WAL、リカバリ、バッファプール、B+Tree、HNSW、全文インデックス、BM25 スコアリング、MVCC、クエリ最適化、Volcano オペレータは、すべてサードパーティ依存ゼロのマネージド C# で実装されている。
@@ -137,5 +137,6 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 
 ## 計測と監視
 
-`Quiver.OpenTelemetry` パッケージで OpenTelemetry の trace と metrics を登録できる。
-`Microsoft.Extensions.Logging.Abstractions` 経由の構造化ログにも対応する。
+core は `ActivitySource`、`Meter`、`EventSource` で trace、metrics、構造化イベントを発行する。
+`Quiver.OpenTelemetry` は trace と metrics を OpenTelemetry へ登録し、
+`Quiver.Hosting` は EventSource イベントを `ILogger` へ転送する。

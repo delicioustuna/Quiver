@@ -300,7 +300,7 @@ public API surface は [tests/Quiver.PublicApi.Tests/](../../tests/Quiver.Public
 
 | パッケージ | 内容 | 依存 |
 |---|---|---|
-| `Quiver` | コアエンジン（型付き属性は本体に内包 + Source Generator を**同梱**） | System.IO.Hashing, Microsoft.Extensions.Logging.Abstractions |
+| `Quiver` | コアエンジン（型付き属性は本体に内包 + Source Generator を**同梱**） | System.IO.Hashing |
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` / DI 統合 | `Quiver`, Microsoft.Extensions.* |
 | `Quiver.OpenTelemetry` | OpenTelemetry 計装登録 | `Quiver`, OpenTelemetry(.Api) |
 | `Quiver.Rag` | ローカル RAG スキーマ層 | `Quiver` |

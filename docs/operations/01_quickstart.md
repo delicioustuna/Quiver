@@ -131,7 +131,10 @@ $env:Quiver__DataDirectory = "D:\prod\graph"
 $env:Quiver__BufferPoolSize = "1073741824"   # 1 GB
 ```
 
-`IConfiguration` でbind できない要素 (バックエンドファクトリ・`ILoggerFactory`・
+`Quiver.Hosting` は core の EventSource イベントをホストの `ILoggerFactory` へ自動転送する。
+追加のロガー設定は不要で、ASP.NET Core / Generic Host の通常の Logging 設定がそのまま使われる。
+
+`IConfiguration` でbind できない要素 (バックエンドファクトリ・
 `LogicalMutationSink` など) を差し込みたい場合は、`AddQuiver` の `postConfigure` デリゲートから
 実体 `GraphDatabaseOptions` を直接編集する:
 
@@ -140,7 +143,6 @@ builder.Services.AddQuiver(
     builder.Configuration.GetSection("Quiver"),
     postConfigure: opts =>
     {
-        opts.LoggerFactory = LoggerFactory.Create(b => b.AddConsole());
         opts.DeadlockDetectionInterval = TimeSpan.FromMilliseconds(100);
     });
 ```
