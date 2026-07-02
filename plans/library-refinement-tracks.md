@@ -1,7 +1,13 @@
 # ライブラリ洗練トラック (REF) — サブエージェント委託用 実装計画書
 
+> **本版は「非同期 tx API (commit `c2ee592`) の撤回」を前提とした修整案 (提案ブランチ)。**
+> 撤回判断が確定するまでは develop 版 (`4587f7e`) が正本。確定した場合に本版で置き換える。
+> 変更点: REF-16 (async 撤回) の新設、REF-8 の同期専用化、REF-9 のスレッドアフィニティ検出への復帰、
+> REF-10 の「唯一の非同期入口」への昇格 (凍結前必須化)、async-transaction-context-safety.md (P0) の停止提案。
+> 撤回判断の根拠は本文の該当節および同計画書の停止注記を参照。
+
 > 起票日: 2026-07-02。起点: develop 計画群 + docs/spec + 公開 API 表面 (approved.txt 843 宣言) の外部レビュー。
-> 本書は **REF-1〜15 の 15 タスク**に分割した実装計画と、各タスクで遵守すべき判断ポイントを定める。
+> 本書は **REF-1〜16 の 16 タスク**に分割した実装計画と、各タスクで遵守すべき判断ポイントを定める。
 > 小タスクは 1 サブエージェントセッションで完結する。工数が 2 日を超える中タスクは、
 > 記載された手順の完了条件を変えず、実装前に独立して build green となる実行単位へ分割して委託する。
 > 承認待ち・外部公開・タグ作成を同一セッションに含めない。判断ポイントの「既定」から逸脱したくなった場合は
@@ -38,25 +44,29 @@ Wave 1 (API 表面確定): REF-2 ──┐
                       REF-3 ── REF-6 ──┤
                       REF-4 ── REF-5 ──┤
                       (typed-write-sinks Phase 1 = 既存計画書) ──┤
-Wave 2 (安全既定):     REF-8 ─────────────────────────────────┤
-                      (async-transaction-context-safety = 既存計画書, P0) ── REF-9 ──┤
+Wave 2 (安全既定):     REF-16 ── REF-8, REF-9 ─────────────────┤
                                                               ▼
                                                     REF-7 (1.0 凍結ゲート)
-Wave 3 (利用体験):     REF-10 ── REF-11      (凍結前推奨、REF-10 は public API 追加のため)
+Wave 3 (利用体験):     REF-10 ── REF-11      (REF-10 は凍結前必須 — 撤回後の唯一の非同期入口)
 Wave 4 (運用・前倒し): REF-12 ── REF-13      (Export→Import。凍結前推奨)
 Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 ```
 
-- **REF-7 (凍結) より前に必ず完了させるもの**: REF-2, REF-3, REF-4, REF-6, REF-8, REF-9 + [async-transaction-context-safety.md](async-transaction-context-safety.md) (P0)
-  (public 表面の縮小・既定挙動の変更は 0.x でしか無料でできない)。REF-5, REF-10, REF-12/13 も凍結前完了が望ましい。
+- **REF-7 (凍結) より前に必ず完了させるもの**: REF-16, REF-2, REF-3, REF-4, REF-6, REF-8, REF-9, REF-10
+  (public 表面の縮小・既定挙動の変更は 0.x でしか無料でできない。REF-10 は撤回後の唯一の非同期入口となるため必須へ格上げ)。
+  REF-5, REF-12/13 も凍結前完了が望ましい。
 - **既存計画との関係**: [ga-readiness.md](ga-readiness.md) の GA-1 は REF-8 に、GA-2〜4 は REF-4/REF-5 に**置換 (supersede)** される。
   GA-5 (ITokenFilter)・GA-6〜11 (テスト拡充) は本書と独立で、いつでも並列実行可。
   [typed-write-sinks-and-query-patterns.md](typed-write-sinks-and-query-patterns.md) は既存計画のまま有効 (public API を増やすため凍結前に Phase 1 を完了させる)。
   [pw19-numeric-range-index-pushdown.md](pw19-numeric-range-index-pushdown.md) は追加的変更のため凍結後でも可だが、GA 前実施を推奨 (性能崖の解消)。
 - **2026-07-02 反映 (develop の新実装との整合)**: 非同期 API (`BeginTransactionAsync` / `CommitAsync` / `DisposeAsync`、commit `c2ee592`) と
   インメモリモード (`GraphDatabase.CreateInMemory`、commit `4009e19`) の導入を受け、REF-2 / REF-8 / REF-9 の前提を改訂した。
-  [async-transaction-context-safety.md](async-transaction-context-safety.md) は **P0 (main 反映前リリースブロッカー)** であり、
-  REF-9 の前提かつ REF-7 の前提条件に含める。
+- **2026-07-02 改訂 (本版 = 撤回前提)**: 非同期 tx API は **REF-16 で撤回**する。理由: (1) 安全化には
+  [async-transaction-context-safety.md](async-transaction-context-safety.md) の文脈 tx 所有化 (write/recovery 最深部の恒久改修) が必須、
+  (2) 安全化後も「await またぎの tx 保持」が自然に書けるようになり、単一 writer + WAL 切り詰めピン留め (§short-transactions) と
+  相性が最悪、(3) 非同期の実利 (呼び出しスレッドの解放) は REF-10 の queue が構造的に安全な形で全て提供する、
+  (4) main 未反映の現時点なら撤回コストがゼロ。これに伴い同計画書 (P0) は**停止提案** (対象 API の消滅により不要化。
+  発見欠陥の記述は再導入検討時の一次資料として保持)。
   [cross-platform-ci-and-release-gates.md](cross-platform-ci-and-release-gates.md) / [benchmark-regression-baseline.md](benchmark-regression-baseline.md) /
   [build-reproducibility-and-coverage.md](build-reproducibility-and-coverage.md) / [embedded-rag-comparative-benchmarks.md](embedded-rag-comparative-benchmarks.md) は
   本トラックと独立・補完 (CI/release gate は REF-7 実行前に整備されていることが望ましい)。
@@ -68,6 +78,10 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 > (3) 直列 writer queue では複数 flush request が同時に存在せず group commit 効果を期待できないこと、の 3 点を検出した。
 > 以下の REF-9 / REF-10 は、カーソル契約を実測・既存挙動から決める、非 transient な reason code 付き
 > `TransactionException` に統一する、group commit の性能主張を削除する、という判断で修正済み。
+>
+> **本版 (撤回前提) での扱い**: Codex 指摘 (1)(2) は非同期 API の撤回により対象が消滅する
+> (REF-9 はスレッドアフィニティ検出へ復帰し、カーソル生存期間の監査も `ConcurrentUse` 例外分類も不要になる)。
+> (3) は非同期の有無と無関係に正しく、REF-10 に反映済みのまま維持する。
 
 ---
 
@@ -201,10 +215,10 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 - **前提条件 (すべて満たすまで着手しない)**:
   - [ ] REF-2 (backend 畳み込み) / REF-6 (承認済み API 降格) 完了
   - [ ] REF-4 (FtsQuery) 完了 — 検索エントリのシグネチャは凍結後に変えられない
+  - [ ] REF-16 (非同期 tx API 撤回) 完了 — 撤回は公開後 MAJOR になるため凍結前が唯一の機会
   - [ ] REF-8 / REF-9 (既定挙動の変更) 完了 — 既定値変更は 0.x でしか無料でできない
-  - [ ] [async-transaction-context-safety.md](async-transaction-context-safety.md) (P0 リリースブロッカー) 完了 — 非同期 API を公開したまま凍結するなら、その安全化が先
   - [ ] typed-write-sinks Phase 1 (`MergeRelationship` + 終端シンク) 完了 (public API 追加のため)
-  - [ ] REF-10 (writer queue API) 完了推奨 (追加的だが v1 の「推奨パターン」として文書と一体化するため)
+  - [ ] REF-10 (writer queue API) 完了**必須** (REF-16 撤回後の唯一の非同期入口であり、v1 の推奨書き込みパターンとして文書と一体化するため)
 - **実装手順**:
   1. 前提条件をコミット・テスト結果・approval 差分で検証し、チェックリストへ根拠を記録する。
   2. `Directory.Build.props` の `VersionPrefix=1.0.0`、approval baseline の v1 契約宣言、[docs/api-stability.md](../docs/api-stability.md) の「0.x は無保証」節、README の pre-release 記述を同一コミットで更新する。
@@ -220,16 +234,34 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 
 ## Wave 2 — 安全機構の default-on 化 (凍結前必須)
 
+### REF-16: 非同期トランザクション API の撤回
+
+- **目的**: commit `c2ee592` で導入した API 境界の非同期 (`BeginTransactionAsync` / `CommitAsync` / `DisposeAsync` / traversal・Match の Async 系 terminal) を公開面から撤回し、非同期の入口を REF-10 の `ExecuteWriteAsync` に一本化する。根拠は「依存グラフと推奨実行順序」の 2026-07-02 改訂項を参照。**main 未反映の今だけ撤回が無料** (公開後は MAJOR)。
+- **対象**: `c2ee592` が触れた公開面 — [src/Quiver/IGraphTransaction.cs](../src/Quiver/IGraphTransaction.cs) (`IAsyncDisposable` / `CommitAsync`)、[src/Quiver/GraphDatabase.cs](../src/Quiver/GraphDatabase.cs) (`BeginTransactionAsync`)、`GraphTraversal` / `TypedGraphTraversal` / `MatchQuery` の Async 系、`samples/Quiver.Samples.AsyncApi/`、`tests/Quiver.Tests/AsyncApiTests.cs`、`Quiver.slnx`、`c2ee592` が更新した docs 一式 (cookbook / getting-started / transaction.md / 08_known_limits ほか)、approved.txt。
+- **実装手順**:
+  1. `git revert c2ee592` を起点に、後続コミット (in-memory 等) との競合を手で解消。公開 async 面・サンプル・文書変更を除去する。
+  2. **残すもの**: `EnforceExclusiveWriter` の `SemaphoreSlim` 排他機構 (REF-8 の素材。同期待機に縮約)。`AsyncApiTests` のうち排他検証として意味が残るケースは同期版に書き換えて移設。
+  3. 08_known_limits.md §threading / §commit-durability / §write-serialization を同期契約 (スレッドアフィン) に戻す。§write-serialization は「書き込みゲート / 専用ライタスレッド (REF-10 で製品化予定)」の 2 パターン構成へ戻す。
+  4. [async-transaction-context-safety.md](async-transaction-context-safety.md) に「**停止 (撤回により対象消滅)**」と根拠を追記してアーカイブ (FTS-9 と同じ流儀)。発見した欠陥 (`await BeginTransactionAsync` 後の継続スレッドで `[ThreadStatic]` 文脈が失われ WAL 記録が silent に欠落) の記述は、再導入検討時の一次資料として**削除しない**。
+  5. approved.txt 再生成 → 差分が Async 系メンバの消滅のみであることを目視確認 (G-3)。
+- **判断ポイント (遵守)**:
+  - 撤回は**公開面のみ**。内部の排他機構・テスト資産は REF-8 が再利用するため温存する。
+  - 「一部だけ残す」(例: `CommitAsync` のみ存続) を**しない**。1 つでも tx 上の async を残すと文脈安全化 (P0) の必要性が復活し、撤回の意味が消える。残したくなったら実装せず報告。
+  - 再導入する場合は 1.0 後の MAJOR 判断であることを docs/api-stability.md に 1 行残す。
+- **完了条件**: 公開面から tx 上の Async 系が消え、全テスト緑。§threading が同期契約に戻り、async-transaction-context-safety.md が停止注記済みで、approved.txt 差分が撤回分のみ。
+- **依存関係**: なし。**REF-8 / REF-9 / REF-7 より先に実施** (両タスクの前提を単純化するため)。
+- **工数**: 小〜中 (1 日)。
+
 ### REF-8: 並行 writer 排他の既定有効化 (GA-1 改訂版)
 
 - **目的**: GA-1 原案は opt-in フラグだったが、**opt-in の安全フラグは必要な人ほど付けない**。誤用時に「WAL ロギングを暗黙にスキップしうる」現状 (08_known_limits.md §one-writer) は黙って壊れる系のフットガンであり、既定で大声で失敗する側に倒す。
-- **現状 (2026-07-02 時点)**: `GraphDatabaseOptions.EnforceExclusiveWriter` は commit `c2ee592` で **opt-in として実装済み** — 有効時、同期 `BeginTransaction()` は競合を即時例外で拒否し、`BeginTransactionAsync()` は `SemaphoreSlim.WaitAsync` で先行ライタの終了を待つ。本タスクはこれを「既定 ON (フラグ除去) + 同期/非同期とも timeout 付き待機」へ統一する改訂。
+- **現状 (2026-07-02 時点、REF-16 後)**: `GraphDatabaseOptions.EnforceExclusiveWriter` は commit `c2ee592` 由来の **opt-in 実装** (有効時、`BeginTransaction()` は競合を即時例外で拒否)。REF-16 で非同期 Begin 経路は消滅済み。本タスクはこれを「既定 ON (フラグ除去) + timeout 付き待機」へ改訂する。
 - **対象**: `GraphDatabaseOptions` ([src/Quiver/GraphDatabase.cs](../src/Quiver/GraphDatabase.cs) 内)、`TransactionManager`、docs/spec/08_known_limits.md §one-writer / §write-serialization。
 - **実装手順**:
-  1. `BeginTransaction()` 時に active writer が存在する場合、**既定で `WriterLockTimeout` (既定 10 秒) までブロックして待機**し、タイムアウトで `TransactionException` (transient、既存リトライ分類に整合)。SQLite の busy_timeout 相当で、既存の「書き込みゲート」パターンをエンジン内に取り込む形。現行の同期=即時 throw / 非同期=無期限待機という非対称は**両者とも timeout 付き待機に統一**する (非同期側は既存 `WaitAsync` 経路に `WriterLockTimeout` + `CancellationToken` を適用)。
+  1. `BeginTransaction()` 時に active writer が存在する場合、**既定で `WriterLockTimeout` (既定 10 秒) までブロックして待機**し、タイムアウトで `TransactionException` (transient、既存リトライ分類に整合)。SQLite の busy_timeout 相当で、既存の「書き込みゲート」パターンをエンジン内に取り込む形。既存の `SemaphoreSlim` 排他機構 (REF-16 で温存) を同期待機に流用する。
   2. `WriterLockTimeout = TimeSpan.Zero` 指定で即時 throw (fail-fast を好むユーザ向け)。
   3. 現行の `EnforceExclusiveWriter` は public API から除去し、排他を常時有効にする。既存テストに排他を迂回する必要があれば internal のテスト専用フックに限定する。
-  4. 同期/非同期 Begin、commit/rollback/dispose 後の解放、読み取り専用 tx との非干渉をテストする。
+  4. 待機成功 / タイムアウト、commit/rollback/dispose 後の解放、読み取り専用 tx との非干渉をテストする。
 - **判断ポイント (遵守)**:
   - **既定はブロック + timeout** (throw ではない)。理由: 既存の推奨パターン (SemaphoreSlim ゲート) と等価な挙動を既定にすることで、正しく使っているアプリの動作が変わらない。即時 throw を既定にすると、たまたま動いていた並行書き込みアプリが全滅する。
   - 待機は **writer 間のみ**。`BeginReadOnlyTransaction()` は一切ブロックしない/されない (現行契約維持)。
@@ -237,38 +269,34 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
   - **公開 opt-out を設けない。** 未検証の並行 writer を許すフラグは「サポート」に見え、再び静かな破損経路を公開する。native concurrent writer は別設計・別タスクで実装する。
   - lock-free 読み取り経路・commit ホットパスにコストを足さない (待機判定は Begin 時のみ)。
 - **完了条件**: 並行 writer テスト (待機成功 / タイムアウト / 自己デッドロック) 緑。public baseline から `EnforceExclusiveWriter` が消え、未検証並行 writer の公開迂回路がない。既存 stress テストが既定値変更で壊れず、08_known_limits.md が「エンジンが常時直列化する」記述に改訂されている。
-- **依存関係**: なし。ga-readiness.md の GA-1 を supersede と追記すること。
+- **依存関係**: REF-16 完了後 (非同期 Begin 経路の消滅を前提に排他を単純化するため)。ga-readiness.md の GA-1 を supersede と追記すること。
 - **工数**: 小〜中 (1〜2 日)。
 
-### REF-9: トランザクションの並行使用検出 (tx 所有文脈ガード)
+### REF-9: トランザクションのスレッドアフィニティ違反検出
 
-> **前提改訂 (2026-07-02)**: 当初案は「スレッド ID 固定 + 越境操作で throw」だったが、非同期 API (commit `c2ee592`) の
-> 導入により前提が変わった。`await BeginTransactionAsync()` の継続は別スレッドで実行されるのが正常系であり、
-> スレッド ID 固定はこの出荷済み API と正面衝突する。[async-transaction-context-safety.md](async-transaction-context-safety.md) (P0) が
-> WAL / MVCC / rollback 文脈を tx 所有へ移し「**逐次利用ならスレッド移動しても安全**」な構造にするため、
-> 本タスクはその上で残る誤用 = **同一 tx への並行操作**を fail-fast で検出するガードに再定義する。
+> **前提改訂 (2026-07-02、本版)**: 非同期 tx API の撤回 (REF-16) により契約は「tx は 1 スレッドの同期スコープ」に
+> 戻るため、本タスクも原案 = **スレッド ID 固定 + 越境操作で throw** に復帰する。`[ThreadStatic]` 文脈と契約が
+> 再び整合するので、tx 所有文脈化・並行使用ガード・カーソル生存期間の監査・`ConcurrentUse` 例外分類
+> (develop 版 REF-9 の内容) はすべて不要になる。
 
-- **目的**: tx 所有文脈化 (P0) 後も残る静かな破損経路は「同一 tx を複数スレッドが**同時に**操作する」ことである (ambient context の設定/復元が交錯する)。これをランタイムで検出し、状態を変更する前に throw する。
-- **対象**: `Transaction` ([src/Quiver/Transactions/Transaction.cs](../src/Quiver/Transactions/Transaction.cs))、`GraphTransaction`、Tx store wrapper、tx から返す列挙子・カーソル、P0 で導入される per-op 文脈スコープ (設定→操作→復元) の獲得点。
+- **目的**: `[ThreadStatic]` MVCC 文脈のため、生きた tx を別スレッドで使うと WAL スキップ等の静かな破損に至りうる。文書 (08_known_limits.md §threading) だけでなく**ランタイムで検出して throw** する。
+- **対象**: `Transaction` ([src/Quiver/Transactions/Transaction.cs](../src/Quiver/Transactions/Transaction.cs))、`GraphTransaction`、Tx store wrapper、tx から返す列挙子・カーソル、tx の public エントリポイント群。
 - **実装手順**:
-  1. tx が所有する **in-use ガード** (`Interlocked.CompareExchange` による単一フラグ) を作り、`Transaction` / `GraphTransaction` / tx 由来カーソルへ同一インスタンスを渡す。
-  2. ガードは public 操作境界で 1 回だけ取得し、その内部で呼ぶ Tx store / index 操作は再取得しない。取得失敗 (= 別操作が進行中) は状態を変更する前に、internal reason code `ConcurrentUse` を持つ**非 transient な `TransactionException`**を投げる。メッセージには「tx は同時に 1 操作のみ」+ known_limits へのリンク文言を含める。
-  3. **カーソル契約を先に監査する**。カーソル停止中に同一 tx の別操作を行っても既存カーソルの状態・snapshot・下層 iterator が壊れないことをテストで証明できる場合だけ `MoveNext` ごとの取得/解放を採用する。証明できない場合はカーソル生成から `Dispose` までガードを保持し、別操作を拒否する。判断結果を 08_known_limits.md に記録する。
-  4. **常時 ON** (Debug 限定にしない)。選択したカーソル粒度に応じた Interlocked コストを `--basic-perf` before/after で測定し、トラバーサル反復の退行が ±2% 以内であることを確認する。
-  5. 別スレッドからの `Dispose` / `DisposeAsync` は、**進行中操作がなければ合法** (P0 で rollback state が tx 所有になるため)。進行中操作と競合した場合は同じ `ConcurrentUse` で throw。
-  6. テスト: `Task.Run` での同時操作 (throw)、`await` 越しの逐次利用 (合法・WAL 欠落なし — crash contract で検証)、選択したカーソル lifetime 契約、逐次 cross-thread の commit/rollback/dispose。
+  1. `Begin` 時に所有 thread ID を捕捉する内部 `TransactionThreadGuard` を作り、`Transaction` と `GraphTransaction`、tx から生成されるカーソルへ同一インスタンスを渡す。
+  2. tx の全 public 操作 (read/write/commit/rollback/dispose、カーソル `MoveNext` 含む) の入口で比較する。不一致なら状態を変更する前に `InvalidOperationException` (メッセージに「tx はスレッドアフィン」+ known_limits へのリンク文言)。
+  3. **常時 ON** (Debug 限定にしない)。1 int 比較は G-5 の定数コスト要件を満たす — ただしトラバーサル反復 (カーソル MoveNext) 経路は `--basic-perf` before/after で退行なし (±2% 以内) を実測確認。
+  4. 別スレッドからの `Dispose` も例外にせず throw する。所有スレッドの `WalPageContext` / `MvccContext` を別スレッドから安全に rollback できないため、暗黙 cleanup は行わない。
+  5. 直接操作、列挙途中、commit/rollback/dispose、`Task.Run` 越しの違反テストと perf 記録を追加する。
 - **判断ポイント (遵守)**:
-  - **[async-transaction-context-safety.md](async-transaction-context-safety.md) の完了が前提。** P0 未完のまま本ガードだけを入れない (文脈が `[ThreadStatic]` 所有のままでは「逐次 cross-thread = 合法」が成立せず、ガードが安全性を偽装する)。
-  - P0 計画が未決定としているカーソル lifetime を推測で決めない。既存契約と破壊テストの結果を判断根拠にする。
-  - 並行使用はプログラミングエラーだが、例外型は P0 と `TransactionException` に統一する。REF-10 が再試行しないよう `ConcurrentUse` は必ず non-transient に分類する。
-  - **公開リトライ契約との整合**: 08_known_limits.md §retry の推奨パターンは `TransactionException` を型で一括 catch して再試行するため、non-transient な `ConcurrentUse` を同型で投げると、文書どおりに書かれたユーザコードがプログラミングエラーを maxAttempts 回再試行してしまう。transient 判別を public に露出し (既定: `TransactionException.IsTransient` プロパティ。internal reason code enum は非公開のまま)、§retry の推奨 catch を `IsTransient` フィルタへ改訂する。REF-8 の timeout 例外は `IsTransient = true`。公開面追加は approved.txt 差分レビュー (G-3) を通す。
-  - 検出できないケースを偽装しない: ガードが検出するのは**同時実行の交錯**のみ。tx の長時間保持や fire-and-forget 忘れは検出しない。**検出は補助であり契約の代替ではない**ことを 08_known_limits.md に明記。
-  - 契約文書の改訂: 08_known_limits.md §threading を「スレッドアフィン」から「**同時に 1 スレッドから 1 操作**。API 境界 (`BeginTransactionAsync` / `CommitAsync` / `DisposeAsync`) 以外の await を tx 内に挟まない」へ書き換える (P0 側と同一タスクで整合させても良い)。
+  - **REF-16 完了が前提。** 非同期 tx API が公開面に残っている間は本ガードを入れない (`await BeginTransactionAsync` の継続スレッドで即 throw し、出荷 API と矛盾するため)。
+  - 検出できないケースを偽装しない: 同一スレッドに戻ってくる `await` は検出不能。**検出は補助であり契約の代替ではない**ことを 08_known_limits.md に明記。
   - opt-out フラグは**設けない** (これを切る正当な理由がない)。
-  - 実測で退行が出ても、安全性を満たさない粒度へ緩和しない。最適化案と測定結果を報告して停止する。
-- **完了条件**: 並行操作が non-transient `TransactionException(ConcurrentUse)` で状態変更前に失敗し、逐次 cross-thread 合法化の回帰テストが緑。カーソル lifetime の採用判断と破壊テスト、perf 実測が記録され、§threading の契約記述が新モデルに改訂されている。
-- **依存関係**: [async-transaction-context-safety.md](async-transaction-context-safety.md) (P0) 完了後。REF-8 とは独立。
-- **工数**: 小〜中 (1〜2 日)。
+  - **別スレッド Dispose を「安全側 rollback」と扱わない。** 現行 rollback は thread-static の before-image / logical undo を参照する。これを可能にするには rollback state の tx 所有化という別設計が必要であり、本タスクへ混ぜない。
+  - 例外は `InvalidOperationException` のまま (プログラミングエラー)。`TransactionException` にしない — §retry の推奨パターンが型で一括 catch して再試行するため、リトライ対象に見せない。
+  - MoveNext 経路の実測で退行が出たら、カーソルのみチェック頻度を下げる案 (取得時のみ検査) を**実装せず報告**。
+- **完了条件**: 違反検出テスト (Task.Run 越し操作・カーソル・Dispose で状態変更前に throw / 同一スレッドは無影響) 緑。全 tx 由来カーソルが guard を保持し、perf 実測が記録されている。
+- **依存関係**: REF-16 完了後。REF-8 と同一セッション可。
+- **工数**: 小 (1 日)。
 
 ---
 
@@ -277,7 +305,7 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 ### REF-10: `ExecuteWrite` / `ExecuteWriteAsync` — 専用ライタスレッドファサード
 
 - **目的**: 08_known_limits.md §write-serialization が推奨する「専用ライタスレッド + Channel」パターンを全ユーザに手書きさせず、**製品 API として本体に同梱**する。MVCC を触らずに async アプリ (ASP.NET / デスクトップ) からの自然な利用感を提供する、費用対効果最大の洗練。
-- **位置づけ (2026-07-02 改訂)**: commit `c2ee592` 以降、§write-serialization には「組み込みの排他ライタ待機 (`EnforceExclusiveWriter` + `BeginTransactionAsync`)」パターンが既にある。本タスクの queue はその上位の推奨形 — begin→work→commit を**単一専用スレッドの同期スコープに閉じ込める**ため、tx 内 await・スレッド移動の問題が構造的に発生せず (async-transaction-context-safety の対策対象外の経路)、排他・冪等リトライ・キャンセル・shutdown を一箇所に集約する。文書では両パターンの使い分けを明記する (既定推奨 = 本 API)。
+- **位置づけ (2026-07-02 改訂、本版)**: 非同期 tx API の撤回 (REF-16) 後、**本 API がライブラリ唯一の非同期入口**となる。begin→work→commit を**単一専用スレッドの同期スコープに閉じ込める**ため、tx 内 await・スレッド移動の問題が構造的に発生せず、排他・冪等リトライ・キャンセル・shutdown を一箇所に集約する。撤回で失われる「呼び出しスレッドを塞がない書き込み」の実利はすべて本 API が代替する。このため凍結前**必須**へ格上げ (REF-7 前提条件)。読み取り側は現契約 (任意のスレッドで `BeginReadOnlyTransaction` 可) で非同期需要を満たせるため、対応不要である旨を文書化する。
 - **対象**: 新規 `src/Quiver/Api/WriterQueue.cs` (名称は実装時に確定可、公開面は `GraphDatabase` の拡張として)、docs/operations、cookbook。
 - **API 形 (確定イメージ)**:
   ```csharp
@@ -407,7 +435,7 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 | 項目 | 判断 |
 |---|---|
 | マルチバリュープロパティ ([multivalue-property-design-notes.md](multivalue-property-design-notes.md)) | **凍結継続。** MVCC チェーンに可視性と多重度の 2 概念を同居させる仕様化コストが高い。グラフ的にはタグ=ノード+エッジが本来の語彙で、`metadataJson` 代替もある。実需が出るまで着手しない。 |
-| CRUD / traversal の非同期 I/O 化 | **やらない。** API 境界の async (`BeginTransactionAsync` / `CommitAsync` / `DisposeAsync` / `ToListAsync` 系) は commit `c2ee592` で導入済みであり、その内部安全化は [async-transaction-context-safety.md](async-transaction-context-safety.md) (P0) が担う。それを超えて tx 内部の store / 索引 / ページ操作を非同期 I/O 化することはしない (同計画書の非目標と同一)。アプリからの自然な async 利用は REF-10 のファサードで提供する。 |
+| tx 上の非同期 API (あらゆる形) | **撤回 (REF-16)。** commit `c2ee592` の API 境界 async は、安全化に write/recovery 最深部の恒久改修 ([async-transaction-context-safety.md](async-transaction-context-safety.md)、停止提案) を要し、安全化後も「await またぎの tx 保持」という WAL ピン留めアンチパターンを誘発するため撤回。アプリからの非同期利用は REF-10 のファサードに一本化し、読み取りは現契約 (任意スレッドで reader を開ける) で足りる。再導入は 1.0 後の MAJOR 判断。 |
 | Quiver Studio | 本トラック対象外。コアの semver / API 安定性ポリシーの適用外であることを docs 側で明文化する (REF-7 の api-stability 改訂に 1 行含める)。GA を Studio の完成度にブロックさせない。 |
 | Quiver.Mcp | 本トラック対象外 (差別化として継続支持)。REF-4 完了後に `traverse` の FTS 起点を `FtsQuery` 組み立てに移行するタスクを別途起票。 |
 | ネイティブ並行 writer / きめ細かい索引ロック | 将来課題のまま (08_known_limits.md 記載どおり)。REF-8 は排他の強制であり並行化ではない。 |
@@ -415,8 +443,8 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 
 ## 完了の定義 (トラック全体)
 
-- REF-2/3/6 により approved.txt が「意図して公開した API のみ」になり、宣言数の縮小が記録されている。
+- REF-16/2/3/6 により approved.txt が「意図して公開した API のみ」になり、宣言数の縮小が記録されている。
 - 誤用 3 態 (並行 writer / スレッド越し tx / 長寿命 tx) がすべて「黙って壊れる」から「throw または警告」に変わっている。
-- `ExecuteWriteAsync` が cookbook / README の推奨書き込みパターンになっている。
+- 非同期の公開面が `ExecuteWriteAsync` に一本化され、cookbook / README の推奨書き込みパターンになっている。
 - export → import の round-trip が CI で緑であり、no-migration 制限の緩和策が公式手順を指している。
 - REF-7 のチェックリストが全て埋まった状態で 1.0.0 が宣言できる (宣言自体はユーザ判断)。

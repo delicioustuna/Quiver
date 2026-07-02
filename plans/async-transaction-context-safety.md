@@ -6,6 +6,14 @@
 
 優先度: P0（main 反映前のリリースブロッカー）
 
+> **停止提案 (2026-07-02、library-refinement-tracks 撤回前提版)**: 非同期 tx API の撤回 (REF-16) により
+> 本計画の対象 API が消滅するため、「停止 (やらない)」とする提案。本計画が要求する文脈の tx 所有化は
+> write/recovery 最深部の恒久改修であり、撤回すれば `[ThreadStatic]` 文脈と「tx = 1 スレッドの同期スコープ」
+> 契約の整合が回復して不要になる。**本書が特定した欠陥の記述 (§背景: `BeginTransactionAsync` の
+> セマフォ待機後、継続スレッドで `[ThreadStatic]` 文脈が失われ WAL 記録が silent に欠落しうる) は、
+> tx 形 async を再導入検討する際の一次資料として削除しない。** 撤回判断が確定した場合、
+> 状態を「停止」、優先度を「—」へ更新する (FTS-9 と同じ流儀)。
+
 ## 背景
 
 `Transaction` は生成時に `WalPageContext.Begin` と `MvccContext.Begin` を呼び、書き込みコンテキストを `[ThreadStatic]` に設定する。
