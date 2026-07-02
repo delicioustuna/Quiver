@@ -29,20 +29,18 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | 用語 | 定義 |
 |---|---|
 | **GraphDatabase** | エンジンのエントリポイント。`GraphDatabase.Open(path)` で `*.quiver` ファイルを開く。スレッドセーフであり、プロセスのライフタイムを通じて 1 インスタンスを共有する |
-| **IGraphTransaction** | 読み書きトランザクションの公開インタフェース。`CreateNode`、`SetProperty`、`Commit`、`CommitAsync` 等を提供し、`IDisposable` と `IAsyncDisposable` の両方に対応する |
-| **Commit / CommitAsync** | WAL を `fsync` した時点で永続化が確定する。どちらも完了後はプロセスの kill や電源喪失を生き延びる。`CommitAsync` は fsync の待機中に呼び出し元スレッドをブロックしない |
-| **非同期トランザクション境界** | `BeginTransactionAsync`、`BeginReadOnlyTransactionAsync`、`CommitAsync`、`DisposeAsync` で開始・commit・破棄を async パイプラインへ接続する API。CRUD や走査そのものを非同期 I/O へ変えるものではない |
+| **IGraphTransaction** | 読み書きトランザクションの公開インタフェース。`CreateNode`、`SetProperty`、`Commit` 等を提供する |
+| **Commit** | WAL を `fsync` した時点で永続化が確定する。返った後はプロセスの kill や電源喪失を生き延びる |
 | **Snapshot Isolation** | Quiver の分離レベル。各トランザクションは開始時の一貫したスナップショットを見る。リーダはライタをブロックせず、ライタもリーダをブロックしない |
 | **Savepoint** | トランザクション内の中間地点。`RollbackTo(SavepointId)` でセーブポイント以降の変更だけを巻き戻せる |
-| **単一ライタ** | 書き込みトランザクションは同時に 1 つだけ進行できる。`EnforceExclusiveWriter` と `BeginTransactionAsync`、またはアプリケーション側のゲートで直列化する |
-| **スレッドアフィン** | トランザクション操作は単一スレッド上で実行する。非同期 API が定義する開始・commit・破棄の境界は await できるが、CRUD の途中に外部 API 等の任意の await を挟んではならない |
+| **単一ライタ** | 書き込みトランザクションは同時に 1 つだけ進行できる。直列化はアプリケーション側の責任 |
+| **スレッドアフィン** | トランザクションは作成したスレッド上でのみ使用可能。`Begin` と `Commit` の間で `await` してはならない |
 
 ## クエリと走査
 
 | 用語 | 定義 |
 |---|---|
 | **Traversal** | Gremlin 風の Fluent API でグラフを辿る操作。`tx.G(db.Schema)` を起点にメソッドチェーンで論理プランを組み立て、終端ステップで実行する |
-| **非同期 traversal 終端** | `ToListAsync`、`CountAsync`、`NextAsync`、`AsAsyncEnumerable` 等。同期 query engine の結果を async パイプラインから扱い、`CancellationToken` による中断と `await foreach` を提供する |
 | **Hop（ホップ）** | トラバーサルにおける 1 段階の隣接ノード移動 |
 | **Expand** | あるノードから隣接リレーションシップを辿って隣接ノードを列挙する操作。`Out()`、`In()`、`Both()` に対応する |
 | **Match DSL** | Cypher の `MATCH` に相当する宣言的パターンマッチ構文。`g.Match(GraphPattern.Node(...).Out(...))` のように使う |

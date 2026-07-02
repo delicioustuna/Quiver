@@ -1,5 +1,4 @@
 ﻿using Quiver.Api.Internal;
-using System.Runtime.CompilerServices;
 using Quiver.Core;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
@@ -47,12 +46,6 @@ public sealed class MatchQuery
         return count;
     }
 
-    /// <summary>マッチした行の件数を非同期 API として返す。</summary>
-    public ValueTask<long> CountAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Count());
-    }
 }
 
 /// <summary>
@@ -91,20 +84,6 @@ public sealed class ReturnClause<TResult>
         return results;
     }
 
-    /// <summary>すべての結果を同期的に具体化し、非同期 API として返す。</summary>
-    public ValueTask<List<TResult>> ToListAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var results = new List<TResult>();
-        using var cursor = AsCursor();
-        while (cursor.MoveNext())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            results.Add(cursor.Current);
-        }
-        return ValueTask.FromResult(results);
-    }
-
     /// <summary>最初の 1 件を返す。結果が空のときは <see langword="default"/>。</summary>
     public TResult? First()
     {
@@ -116,13 +95,6 @@ public sealed class ReturnClause<TResult>
             return _selector(ctx);
         }
         return default;
-    }
-
-    /// <summary>最初の 1 件を非同期 API として返す。</summary>
-    public ValueTask<TResult?> FirstAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(First());
     }
 
     /// <summary>
@@ -148,16 +120,4 @@ public sealed class ReturnClause<TResult>
             yield return _selector(new MatchContext(cursor.Current, _tx, varMap));
     }
 
-    /// <summary>結果を非同期ストリームとして逐次列挙する。</summary>
-    public async IAsyncEnumerable<TResult> AsAsyncEnumerable(
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        using var cursor = AsCursor();
-        while (cursor.MoveNext())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            yield return cursor.Current;
-        }
-    }
 }

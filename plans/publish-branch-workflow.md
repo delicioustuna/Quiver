@@ -31,7 +31,7 @@ main ブランチを公開用に維持し、develop からの同期時にこれ�
 
 `docs/design/` は publish スクリプトの除外対象ではない。
 追跡済みの `docs/design/development.md` は README から参照される公開用の開発者ガイドとして main に残す。
-`docs/design/16_async_api.md`、`roadmap.md`、`repository-map.md` 等の未追跡・ignore 対象は develop 専用であり、main へ追加しない。
+`roadmap.md`、`repository-map.md` 等の未追跡・ignore 対象は develop 専用であり、main へ追加しない。
 
 ### 公開するもの（除外しない）
 

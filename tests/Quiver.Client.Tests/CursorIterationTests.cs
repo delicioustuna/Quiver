@@ -167,6 +167,23 @@ public sealed class CursorIterationTests : IDisposable
         cursorResults.Should().BeEquivalentTo(toListResults);
     }
 
+    [Fact]
+    public void Cursor_iteration_can_observe_cancellation_between_rows()
+    {
+        using var tx = _db.BeginReadOnlyTransaction();
+        using var cursor = tx.G(_db.Schema).Nodes().HasLabel("Item").AsCursor();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Action iterate = () =>
+        {
+            while (cursor.MoveNext())
+                cts.Token.ThrowIfCancellationRequested();
+        };
+
+        iterate.Should().Throw<OperationCanceledException>();
+    }
+
     // ── Match cursor ─────────────────────────────────────────────────
 
     [Fact]

@@ -208,18 +208,8 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     private readonly record struct CoalescedPageImage(TransactionId Tx, byte[] Payload);
 
     public void FlushTo(long lsn)
-        => FlushToAsync(lsn).AsTask().GetAwaiter().GetResult();
-
-    public ValueTask FlushToAsync(long lsn, CancellationToken cancellationToken = default)
     {
-        if (Volatile.Read(ref _flushedLsn) >= lsn)
-            return ValueTask.CompletedTask;
-        cancellationToken.ThrowIfCancellationRequested();
-        return new ValueTask(FlushToCoreAsync(lsn));
-    }
-
-    private async Task FlushToCoreAsync(long lsn)
-    {
+        if (Volatile.Read(ref _flushedLsn) >= lsn) return;
         Interlocked.Increment(ref _flushRequestCount);
         using var activity = QuiverTelemetry.WalFlushActivitySource.StartActivity(
             "wal.flush", ActivityKind.Internal);
@@ -234,7 +224,7 @@ internal sealed class WriteAheadLog : IWriteAheadLog
                 if (Volatile.Read(ref _flushedLsn) >= lsn) return;
                 throw new ObjectDisposedException(nameof(WriteAheadLog));
             }
-            await tcs.Task.ConfigureAwait(false);
+            tcs.Task.GetAwaiter().GetResult();
             QuiverTelemetry.WalFlushDurationMs.Record(sw.Elapsed.TotalMilliseconds);
             QuiverLog.WalFlushed(QuiverLog.WalLogger, lsn, sw.Elapsed.TotalMilliseconds);
         }

@@ -25,8 +25,6 @@ internal sealed class NullWriteAheadLog : IWriteAheadLog
         // 永続化先がないため常に flush 済みとして扱う。
     }
 
-    public ValueTask FlushToAsync(long lsn, CancellationToken cancellationToken = default)
-        => ValueTask.CompletedTask;
 
     public void BufferPageImage(TransactionId tx, byte fileKind, long pageId, byte[] payload)
     {

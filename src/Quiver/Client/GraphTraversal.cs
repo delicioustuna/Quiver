@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using Quiver.Api.Internal;
 using Quiver.Core;
 using Quiver.Query.Logical;
@@ -833,20 +832,6 @@ public sealed class GraphTraversal<T>
         return results;
     }
 
-    /// <summary>すべての結果を同期的に具体化し、非同期 API として返す。</summary>
-    public ValueTask<List<T>> ToListAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var results = new List<T>();
-        using var cursor = AsCursor();
-        while (cursor.MoveNext())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            results.Add(cursor.Current);
-        }
-        return ValueTask.FromResult(results);
-    }
-
     /// <summary>最初の 1 件を返す。結果が空のときは <see cref="InvalidOperationException"/> を投げる。</summary>
     public T Next()
     {
@@ -854,13 +839,6 @@ public sealed class GraphTraversal<T>
         foreach (var row in result.Rows())
             return _projection(row);
         throw new InvalidOperationException("トラバーサルが結果を生成しませんでした。");
-    }
-
-    /// <summary>最初の 1 件を非同期 API として返す。</summary>
-    public ValueTask<T> NextAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Next());
     }
 
     /// <summary>最初の 1 件を返す。結果が空のときは <see langword="default"/> を返す。</summary>
@@ -872,13 +850,6 @@ public sealed class GraphTraversal<T>
         return default;
     }
 
-    /// <summary>最初の 1 件を非同期 API として返す。結果が空なら <see langword="default"/>。</summary>
-    public ValueTask<T?> TryNextAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(TryNext());
-    }
-
     /// <summary>結果の件数だけを数える終端ステップ。</summary>
     public long Count()
     {
@@ -887,20 +858,6 @@ public sealed class GraphTraversal<T>
         foreach (var _ in result.Rows())
             count++;
         return count;
-    }
-
-    /// <summary>結果件数を同期的に数え、非同期 API として返す。</summary>
-    public ValueTask<long> CountAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        long count = 0;
-        using var cursor = AsCursor();
-        while (cursor.MoveNext())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            count++;
-        }
-        return ValueTask.FromResult(count);
     }
 
     /// <summary>
@@ -925,16 +882,4 @@ public sealed class GraphTraversal<T>
             yield return _projection(cursor.Current);
     }
 
-    /// <summary>結果を非同期ストリームとして逐次列挙する。</summary>
-    public async IAsyncEnumerable<T> AsAsyncEnumerable(
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        using var cursor = AsCursor();
-        while (cursor.MoveNext())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            yield return cursor.Current;
-        }
-    }
 }

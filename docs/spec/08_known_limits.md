@@ -21,16 +21,13 @@
   取得したカーソルや列挙子 — は、すべて 1 つのスレッド上で作成・使用しなければならない。その write 文脈と
   MVCC 文脈はスレッドローカル (`[ThreadStatic]`) であるため、生きたトランザクションを別スレッドに
   渡すこと（`Task.Run`、別スレッドで再開する `await` 継続、`Parallel.For` など）はサポートされず、
-  WAL ロギングを暗黙にスキップしうる。`BeginTransactionAsync`、`CommitAsync`、`DisposeAsync` という
-  API 境界は await できるが、CRUD や traversal の途中にネットワーク呼び出し、UI 待機等の任意の await を
-  挟んではならない。トランザクション内部の操作は、開始したスレッド上で連続して完了させること。
+  WAL ロギングを暗黙にスキップしうる。トランザクションは 1 つのスレッド上の 1 つの同期スコープ内で
+  開始・使用・commit/dispose すること。`Begin` と `Commit` の間で `await` しないこと。
 
 ### ライタは 1 つ、リーダは並行 {#one-writer}
 
-- **書き込みトランザクションは 1 度に 1 つだけ進行できる。** 既定では、エンジンは 2 つ目の並行ライタを
-  `BeginTransaction()` で拒否しない。`GraphDatabaseOptions.EnforceExclusiveWriter` を有効にすると、
-  同期版は競合を例外として拒否し、`BeginTransactionAsync()` は先行ライタの終了を非同期に待つ。
-  このオプションを使わない場合、書き込みの直列化はアプリケーションの責任である
+- **書き込みトランザクションは 1 度に 1 つだけ進行できる。** エンジンは 2 つ目の並行ライタを
+  `BeginTransaction()` で *拒否しない* — 書き込みの直列化はアプリケーションの責任である
   （[書き込みの直列化](#write-serialization) を参照）。さらに、すべての二次インデックスと全文の
   mutation は単一のグローバルインデックスロックに集約されるため、ロックモードに関わらず、2 つの
   トランザクションがインデックス / postings を同時に mutation することは決してない。
@@ -50,11 +47,9 @@
 
 ### コミットと永続性 {#commit-durability}
 
-`Commit()` は WAL が fsync された後にのみ返り、`CommitAsync()` も fsync 後にのみ完了する。
-完了後のデータはプロセスの kill や電源喪失を生き延びる
-（再オープン時にリカバリが再生する — [02_wal_recovery.md](02_wal_recovery.md) を参照）。
-`Commit()` または `CommitAsync()` なしで dispose されたトランザクション
-（例外が `using` / `await using` スコープを巻き戻す場合も含む）はロールバックされる。
+`Commit()` は WAL が fsync された後にのみ返る。返った後は、データはプロセスの kill や電源喪失を生き延びる
+（再オープン時にリカバリが再生する — [02_wal_recovery.md](02_wal_recovery.md) を参照）。`Commit()` なしで
+dispose されたトランザクション（例外が `using` スコープを巻き戻す場合も含む）はロールバックされる。
 部分適用されたトランザクションが可視になることは決してない。
 
 この永続性保証は binary backend に適用される。インメモリバックエンド
@@ -88,25 +83,9 @@ T WithRetry<T>(Func<T> runTxn, int maxAttempts = 5)
 
 ### 書き込みの直列化（推奨） {#write-serialization}
 
-サポートされる形は単一ライタであるため、すべての書き込みを 1 つのライタに集約すること。
-3 つのパターンがある:
+サポートされる形は単一ライタであるため、すべての書き込みを 1 つのライタに集約すること。2 つのパターン:
 
-1. **組み込みの排他ライタ待機** — `EnforceExclusiveWriter` と非同期開始を組み合わせる:
-
-   ```csharp
-   await using var db = GraphDatabase.Open(
-       path,
-       new GraphDatabaseOptions { EnforceExclusiveWriter = true });
-
-   async Task WriteAsync(Action<IGraphTransaction> work, CancellationToken ct)
-   {
-       await using var tx = await db.BeginTransactionAsync(cancellationToken: ct);
-       work(tx); // このコールバック内では await しない
-       await tx.CommitAsync(ct);
-   }
-   ```
-
-2. **書き込みゲート** — すべての書き込みトランザクションを `SemaphoreSlim(1, 1)`（または `lock`）でガードする:
+1. **書き込みゲート** — すべての書き込みトランザクションを `SemaphoreSlim(1, 1)`（または `lock`）でガードする:
 
    ```csharp
    private static readonly SemaphoreSlim WriteGate = new(1, 1);
@@ -124,7 +103,7 @@ T WithRetry<T>(Func<T> runTxn, int maxAttempts = 5)
    }
    ```
 
-3. **専用のライタスレッド** — 書き込みジョブをキュー（例: `System.Threading.Channels.Channel<T>`）に
+2. **専用のライタスレッド** — 書き込みジョブをキュー（例: `System.Threading.Channels.Channel<T>`）に
    積み、1 つのバックグラウンドスレッドがそれを drain して、各トランザクションをそのスレッド上で
    開始・実行・commit する。これは自然なバッチングももたらす。
 

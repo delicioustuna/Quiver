@@ -183,82 +183,6 @@ internal sealed class Transaction : ITransaction
         FireHooks(_onCommitted);
     }
 
-    public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (_state != TransactionState.Active)
-            throw new TransactionException("Cannot commit: transaction is not Active.");
-        _state = TransactionState.Preparing;
-        using var activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
-            "tx.commit", ActivityKind.Internal);
-        activity?.SetTag("quiver.tx.id", Id.Value);
-        using var logScope = QuiverLog.BeginTxScope(QuiverLog.TransactionLogger, Id.Value, "CommitAsync");
-        var sw = Stopwatch.StartNew();
-        IReadOnlyList<FtUndoEntry> ftUndo = Array.Empty<FtUndoEntry>();
-        IReadOnlyCollection<byte[]> beforeImages = Array.Empty<byte[]>();
-        bool ambientContextsEnded = false;
-        try
-        {
-            if (_ssn != null) SsnValidateAndStamp();
-
-            // FlushToAsync の await 前に ThreadStatic を解除する必要がある。失敗時の
-            // in-process undo に必要な情報は、解除前にローカルへ退避する。
-            if (_undoHandler != null)
-            {
-                ftUndo = WalPageContext.CurrentFtUndoLog.ToArray();
-                beforeImages = WalPageContext.CurrentBeforeImagePayloads.ToArray();
-            }
-
-            WalPageContext.FlushPending();
-            long lsn = _wal.Append(WalRecordType.Commit, Id, ReadOnlySpan<byte>.Empty);
-            WalPageContext.End();
-            MvccContext.End();
-            ambientContextsEnded = true;
-
-            // 一度 flush request を受理した後は commit の成否が確定するまで待つ。
-            // キャンセルで「WAL 上は commit、公開状態は abort」という曖昧さを作らない。
-            await _wal.FlushToAsync(lsn, cancellationToken).ConfigureAwait(false);
-
-            ReleaseAllLocks();
-            _state = TransactionState.Committed;
-            _manager.OnCommit(Id);
-            QuiverTelemetry.TxCommitCount.Add(1);
-            QuiverTelemetry.TxCommitDurationMs.Record(sw.Elapsed.TotalMilliseconds);
-            QuiverEventSource.Log.TxCommit();
-            QuiverLog.TxCommitted(QuiverLog.TransactionLogger, Id.Value, sw.Elapsed.TotalMilliseconds);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-        }
-        catch (Exception ex)
-        {
-            try
-            {
-                if (ambientContextsEnded)
-                    RollBackCaptured(ftUndo, beforeImages);
-                else
-                    RollBackInPlace();
-            }
-            catch { }
-            try { _wal.EvictCoalescedPageImagesFor(Id); } catch { }
-            try { _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty); } catch { }
-            if (!ambientContextsEnded)
-            {
-                try { WalPageContext.End(); } catch { }
-                try { MvccContext.End(); } catch { }
-            }
-            try { ReleaseAllLocks(); } catch { }
-            _state = TransactionState.Aborted;
-            _manager.OnAbort(Id);
-            QuiverTelemetry.TxAbortCount.Add(1);
-            QuiverTelemetry.TxAbortDurationMs.Record(sw.Elapsed.TotalMilliseconds);
-            QuiverEventSource.Log.TxAbort();
-            QuiverLog.TxCommitFailed(QuiverLog.TransactionLogger, Id.Value, ex.Message, ex);
-            activity?.SetStatus(ActivityStatusCode.Error, "commit failed → rolled back");
-            FireHooks(_onRolledBack);
-            throw;
-        }
-        FireHooks(_onCommitted);
-    }
-
     public void Abort()
     {
         if (_state is TransactionState.Committed or TransactionState.Aborted) return;
@@ -303,16 +227,6 @@ internal sealed class Transaction : ITransaction
         // 論理 undo は post-tx 構造を辿るので Suppressed leaf のキーを正しく見つけられる。
         _undoHandler.UndoFtLogical(WalPageContext.CurrentFtUndoLog);
         var beforeImages = WalPageContext.CurrentBeforeImagePayloads;
-        if (beforeImages.Count > 0)
-            _undoHandler.Undo(beforeImages);
-    }
-
-    private void RollBackCaptured(
-        IReadOnlyList<FtUndoEntry> ftUndo,
-        IReadOnlyCollection<byte[]> beforeImages)
-    {
-        if (_undoHandler == null) return;
-        _undoHandler.UndoFtLogical(ftUndo);
         if (beforeImages.Count > 0)
             _undoHandler.Undo(beforeImages);
     }

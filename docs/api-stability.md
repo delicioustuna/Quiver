@@ -18,6 +18,7 @@ Quiver は [Semantic Versioning 2.0.0](https://semver.org/lang/ja/) (`MAJOR.MINO
 
 - `1.0.0` 未満 (`0.x` / `-rc` / `-preview`) は **安定性の保証対象外**。`0.x` 系では MINOR でも breaking change が入りうる。
 - pre-release タグ (`-rc.1`, `-preview.2` 等) が付くバージョンは feedback 収集目的であり、GA (`1.0.0`) までは API が動く可能性がある。
+- トランザクション上の非同期 API は v1 の契約に含めない。1.0 後に再導入する場合は、次の MAJOR バージョンで契約を再設計する。
 
 ### breaking change の定義
 

@@ -603,31 +603,18 @@ var names = g.People().Adults().Out("WROTE").Values("Title").ToList();
 
 ---
 
-## 14. 非同期トランザクション境界
-
-ASP.NET Core、UI アプリ、バックグラウンドサービス等では、トランザクション開始時の排他待ちと durable commit の WAL flush を非同期に待てる。
-同期 API はそのまま利用でき、非同期版は追加の選択肢である。
+## 14. 同期カーソルのキャンセル
 
 ```csharp
-var options = new GraphDatabaseOptions
+using var cursor = traversal.AsCursor();
+while (cursor.MoveNext())
 {
-    EnforceExclusiveWriter = true,
-};
-
-await using var db = GraphDatabase.Open("./mygraph", options);
-await using var tx = await db.BeginTransactionAsync();
-
-var node = tx.CreateNode("Person");
-tx.SetProperty(node, "name", PropertyValue.FromString("Alice"));
-
-await tx.CommitAsync();
+    cancellationToken.ThrowIfCancellationRequested();
+    Process(cursor.Current);
+}
 ```
 
-`BeginTransactionAsync()` から `CommitAsync()` までの CRUD と traversal は同期実行する。
-外部 API 呼び出し等の任意の `await` はトランザクションの外へ移す。
-
-読み取り結果を非同期パイプラインへ流す場合は、`ToListAsync()`、`CountAsync()`、`AsAsyncEnumerable()` 等の非同期終端を使用できる。
-これらは mmap 上の同期走査を非同期 API 面へ接続するための境界であり、内部処理をスレッドプールへオフロードしない。
-
-完全な例は [`Quiver.Samples.AsyncApi`](../samples/Quiver.Samples.AsyncApi/) を参照。
+長い走査をキャンセル可能にする場合は、`AsCursor()` で同期カーソルを取得し、各反復で
+`CancellationToken.ThrowIfCancellationRequested()` を呼ぶ。カーソルは `using` で必ず破棄する。
+トランザクションはスレッドアフィンなので、列挙を別スレッドへ移したり、列挙中に `await` を挟んだりしない。
 

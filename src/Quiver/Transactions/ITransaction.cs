@@ -26,9 +26,6 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     /// <summary>コミット。WAL のフラッシュ完了まで同期的に待つ。</summary>
     void Commit();
 
-    /// <summary>コミット。WAL のフラッシュ完了を非同期に待つ。</summary>
-    ValueTask CommitAsync(CancellationToken cancellationToken = default);
-
     /// <summary>ロールバック。書き込み済み変更は破棄。</summary>
     void Abort();
 
