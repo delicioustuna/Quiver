@@ -59,6 +59,13 @@ internal sealed class AutocommitVectorStore(IVectorStore underlying, Func<IGraph
     public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
         => _underlying.KnnSearch(indexName, query, k);
 
+    internal VectorSearchCursor KnnSearchExact(
+        string indexName, ReadOnlySpan<float> query, int k)
+        => _underlying is Storage.Records.PersistentVectorStore persistent
+            ? persistent.KnnSearchExact(indexName, query, k)
+            : throw new InvalidOperationException(
+                "Exact persistent KNN baseline is available only for the binary backend.");
+
     public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
         string indexName, IReadOnlyList<ReadOnlyMemory<float>> queries, int k)
         => _underlying.KnnSearchBatch(indexName, queries, k);

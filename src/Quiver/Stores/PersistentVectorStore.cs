@@ -168,6 +168,46 @@ internal sealed class PersistentVectorStore : IVectorStore
     }
 
     /// <summary>
+    /// ベンチマークと recall 検証用の exact top-k。HNSW を一切経由せず、payload の
+    /// <c>[0, Hwm)</c> を全走査して <see cref="VectorKnnHeap"/> で上位 k 件を求める。
+    /// 公開 API には露出させず、近似検索の独立した分母としてのみ使う。
+    /// </summary>
+    internal VectorSearchCursor KnnSearchExact(string indexName, ReadOnlySpan<float> query, int k)
+    {
+        if (k <= 0) throw new VectorException($"KnnSearchExact requires positive k (was {k}).");
+        IndexHandle h = GetIndex(indexName);
+        if (query.Length != h.Spec.Dimensions)
+            throw new VectorException(
+                $"Vector index '{indexName}' expects {h.Spec.Dimensions} dimensions, got {query.Length}.");
+
+        int dim = h.Spec.Dimensions;
+        var kind = h.Spec.EntityKind;
+        var heap = new VectorKnnHeap(k);
+        var buffer = ArrayPool<float>.Shared.Rent(dim);
+        try
+        {
+            lock (_gate)
+            {
+                var vector = buffer.AsSpan(0, dim);
+                for (long seq = 0; seq < h.Payload.Hwm; seq++)
+                {
+                    if (h.Payload.TryGet(seq, vector, out var gen) && IsLive(kind, seq, gen))
+                    {
+                        heap.Offer(new VectorSearchResult(
+                            kind, seq, VectorMetrics.Score(h.Spec.Metric, query, vector)));
+                    }
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(buffer);
+        }
+
+        return new SortedVectorCursor(heap.ToSortedArray());
+    }
+
+    /// <summary>
     /// ③: 候補集合に対する KNN。小候補 (全件の 1/4 以下) は直接 gather + brute (HNSW より速く exact)、
     /// 大候補 (低選択率) は HNSW 探索 + post-filter (ef オーバーサンプルで k 件を確保)。
     /// </summary>

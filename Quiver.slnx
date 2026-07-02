@@ -10,6 +10,7 @@
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/Quiver.Benchmarks/Quiver.Benchmarks.csproj" />
     <Project Path="benchmarks/Quiver.Benchmarks.RegressionCheck/Quiver.Benchmarks.RegressionCheck.csproj" />
+    <Project Path="benchmarks/Quiver.Benchmarks.RecallCheck/Quiver.Benchmarks.RecallCheck.csproj" />
   </Folder>
   <Folder Name="/sandbox/">
     <Project Path="sandbox/QuiverSandbox/QuiverSandbox.csproj" />

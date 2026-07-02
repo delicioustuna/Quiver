@@ -155,6 +155,21 @@ auto-refresh オプションの追加を検討している。
 **将来方針**: 1.x では現行動作を維持する。再リンクコストを局所化する lazy repair（検索時に近傍を
 部分修正する手法）の導入を検討している。
 
+## HNSW 既定パラメタの recall {#hnsw-default-recall}
+
+既定の構築パラメタ (M=16 / Mmax0=32 / efConstruction=200) は、dim=384 / N=10,000 /
+cosine の決定的コーパスに対する true recall@10 が **~0.825** であり、RAG 品質目標の
+0.95 には届かない。0.95 以上が必要な場合は index 作成時に `VectorIndexSpec` の
+`HnswM=32` / `HnswMMax0=64` / `HnswEfConstruction=400` 相当を指定する
+(実測 0.950、30% 削除後 0.985 — [docs/benchmark-results.md](../benchmark-results.md))。
+
+**設計根拠**: 既定値の変更は既存ユーザの構築コスト・メモリを黙って増やすため、
+実測に基づく明示的な判断として行う。二段の回帰ゲート (既定構成の劣化監視 + 高品質構成の
+SLA 監視) を `Quiver.Benchmarks.RecallCheck` に置いている。
+
+**将来方針**: efSearch の公開 (VP-2) の recall/latency 実測を経て、既定パラメタの
+引き上げまたはチューニングガイドへの誘導を判断する。
+
 ## 自動マイグレーションなし {#no-migration}
 
 異なる `FormatVersion` のデータベースを開くと `FormatVersionMismatchException` をスローする。

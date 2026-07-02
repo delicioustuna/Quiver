@@ -8,6 +8,54 @@
 
 ---
 
+## VP-5 HNSW true recall@10
+
+固定 seed のランダムコーパス（N=10,000、dim=384、cosine、20 queries）について、
+brute-force exact top-10 を毎回計算し、HNSW top-10 との平均 overlap を測定した。
+削除後は生存集合だけで ground truth を再計算する。
+
+ゲートは二段構成: **default** は既定構築パラメタの品質「劣化」を監視し (床値 0.80)、
+**sla** は 0.95 以上を満たすと検証済みの高品質構成がその水準を維持することを保証する。
+既定構成が 0.95 に届かない事実は
+[docs/spec/08_known_limits.md#hnsw-default-recall](spec/08_known_limits.md#hnsw-default-recall)
+に判断として記録している。
+
+| 構成 | M/Mmax0/efC | 構築直後 | 30% 削除後（HealNeighborhood 経由） | ゲート閾値 |
+|---|---|---:|---:|---:|
+| default（既定値） | 16/32/200 | 0.825 | 0.865 | ≥ 0.80 |
+| sla（高品質） | 32/64/400 | 0.950 | 0.985 | ≥ 0.95 |
+
+実行コマンド:
+
+```powershell
+dotnet run -c Release --project benchmarks\Quiver.Benchmarks.RecallCheck
+```
+
+いずれかのゲートが閾値未満なら exit code 1 を返す。通常の unit test へ混ぜるには重いため、専用の品質ゲートとして分離している。
+
+## CR-1 並行読み取りスケーリング
+
+同一 DB に対する固定時間（各点 1 秒）の read-only throughput。AMD Ryzen 7 5700X
+（16 logical cores）/ Windows 11 / .NET 10.0.9 / Release。
+
+| workload | 1 thread ops/s | 2 threads | 4 threads | 8 threads |
+|---|---:|---:|---:|---:|
+| 1-hop linked-list scan（degree=128） | 45,989 (1.00×) | 37,796 (0.82×) | 20,338 (0.44×) | 17,849 (0.39×) |
+| HNSW KNN（N=2k、dim=384、k=10） | 1,632 (1.00×) | 1,573 (0.96×) | 1,615 (0.99×) | 1,648 (1.01×) |
+| BM25（N=2k、k=10） | 259 (1.00×) | 297 (1.15×) | 411 (1.58×) | 568 (2.19×) |
+
+KNN は `PersistentVectorStore._gate` によりほぼ完全に直列化されている。1-hop は
+`PagedFile` の resident pin/unpin も単一 pool lock を通るため、thread 数を増やすほど退行した。
+この表を CR-2 / CR-3 の kill criteria の分母とする。
+
+実行コマンド:
+
+```powershell
+dotnet run -c Release --project benchmarks\Quiver.Benchmarks -- --read-scaling
+```
+
+---
+
 ## 索引付き書き込みの WAL 増幅
 
 索引（B+Tree）を持つノードの大量挿入で、書き込みパターンによって WAL サイズとスループットが

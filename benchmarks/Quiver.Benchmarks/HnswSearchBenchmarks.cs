@@ -1,6 +1,7 @@
 using BenchmarkDotNet.Attributes;
 using Quiver;
 using Quiver.Core;
+using Quiver.Testing;
 
 namespace Quiver.Benchmarks;
 
@@ -10,10 +11,10 @@ namespace Quiver.Benchmarks;
 /// (so the persistent <c>PersistentVectorStore</c> + <c>HnswIndex</c> path is measured,
 /// not the in-memory reference store).
 ///
-/// <para><c>HnswSearch</c> = <see cref="Core.IVectorStore.KnnSearch"/> (HNSW graph).
-/// <c>FlatScan</c> = <see cref="Core.IVectorStore.KnnSearchBatch"/> with a single query
-/// (full-corpus scan). HNSW should be markedly faster as N grows while keeping high
-/// recall (verified in VectorHnswTests).</para>
+/// <para><c>HnswSearch</c> = <see cref="Core.IVectorStore.KnnSearch"/> (HNSW graph)。
+/// <c>ExactFlatScan</c> は persistent payload を直接全走査する内部 baseline であり、
+/// HNSW を一切経由しない。HNSW should be markedly faster as N grows while keeping high
+/// recall (verified by the VP-5 recall gate).</para>
 /// </summary>
 [MemoryDiagnoser]
 [ShortRunJob]
@@ -22,19 +23,20 @@ public class HnswSearchBenchmarks
     [Params(10_000)]
     public int N { get; set; }
 
-    private const int Dim = 128;
+    [Params(384, 768)]
+    public int Dim { get; set; }
+
     private const int K = 10;
     private const string IndexName = "hnsw-bench";
 
     private string _dir = null!;
     private GraphDatabase _db = null!;
     private float[] _query = null!;
-    private ReadOnlyMemory<float>[] _batchQuery = null!;
 
     [GlobalSetup]
     public void Setup()
     {
-        var rng = new Random(98765);
+        var rng = new Random(VectorRecallCorpus.Seed);
         _dir = BenchTempDir.Create("hnsw");
         _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
@@ -46,7 +48,7 @@ public class HnswSearchBenchmarks
         {
             for (int i = 0; i < N; i++)
             {
-                for (int d = 0; d < Dim; d++) buf[d] = (float)(rng.NextDouble() * 2.0 - 1.0);
+                VectorRecallCorpus.Fill(rng, buf);
                 var n = tx.CreateNode("Doc");
                 _db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, buf);
             }
@@ -54,8 +56,7 @@ public class HnswSearchBenchmarks
         }
 
         _query = new float[Dim];
-        for (int d = 0; d < Dim; d++) _query[d] = (float)(rng.NextDouble() * 2.0 - 1.0);
-        _batchQuery = new[] { (ReadOnlyMemory<float>)_query.AsMemory() };
+        VectorRecallCorpus.Fill(rng, _query);
     }
 
     [GlobalCleanup]
@@ -66,10 +67,11 @@ public class HnswSearchBenchmarks
     }
 
     [Benchmark(Baseline = true)]
-    public float FlatScan()
+    public float ExactFlatScan()
     {
         float acc = 0f;
-        using var c = _db.Vectors.KnnSearchBatch(IndexName, _batchQuery, K)[0];
+        var store = (AutocommitVectorStore)_db.Vectors;
+        using var c = store.KnnSearchExact(IndexName, _query, K);
         while (c.MoveNext()) acc += c.Current.Score;
         return acc;
     }

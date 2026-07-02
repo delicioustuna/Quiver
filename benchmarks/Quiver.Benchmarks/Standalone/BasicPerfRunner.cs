@@ -42,6 +42,8 @@ public static class BasicPerfRunner
         WrapperOverhead();
         Console.WriteLine();
         BulkVsTx();
+        Console.WriteLine();
+        ReadScalingRunner.Run();
 
         return 0;
     }

@@ -47,6 +47,12 @@ if (args.Length >= 1 && args[0] == "--basic-perf")
     return BasicPerfRunner.Run();
 }
 
+// CR-1: basic-perf に含まれる並行 read scaling の単独再測入口。
+if (args.Length >= 1 && args[0] == "--read-scaling")
+{
+    return ReadScalingRunner.Run();
+}
+
 // TS-6: JsonExporter.Full は <ResultsDir>/<Class>-report-full.json を出す。
 // Quiver.Benchmarks.RegressionCheck はこの形式を読んで baselines/main.json と
 // 比較する。default config の Markdown / CSV exporter は残したまま追加する。
