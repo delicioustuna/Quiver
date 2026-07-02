@@ -56,7 +56,7 @@ Wave 4 (運用・前倒し): REF-12 ── REF-13      (Export→Import。凍結
 Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 ```
 
-- **REF-7 (凍結) より前に必ず完了させるもの**: REF-16, REF-2, REF-3, REF-4, REF-6, REF-8, REF-9, REF-10
+- **REF-7 (凍結) より前に必ず完了させるもの**: ZD-2, VP-3, REF-16, REF-2, REF-3, REF-4, REF-6, REF-8, REF-9, REF-10
   (public 表面の縮小・既定挙動の変更は 0.x でしか無料でできない。REF-10 は撤回後の唯一の非同期書き込み入口となるため必須へ格上げ)。
   REF-5, REF-12/13 も凍結前完了が望ましい。
 - **既存計画との関係**: [ga-readiness.md](ga-readiness.md) の GA-1 は REF-8 に、GA-2〜4 は REF-4/REF-5 に**置換 (supersede)** される。
@@ -230,6 +230,8 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 - **目的**: v1-consolidation §E の「唯一の不可逆ステップ」を、前提条件を検証してから実行する。
 - **対象**: `Directory.Build.props`、全 PublicApi approval baseline、`docs/api-stability.md`、README、リリース前検証記録。
 - **前提条件 (すべて満たすまで着手しない)**:
+  - [x] ZD-2 (Core の Logging.Abstractions 除去 + EventSource / Hosting bridge) 完了 — commit `345b249`
+  - [ ] VP-3 (FormatVersion V2 + 自己記述 vector catalog + per-index HNSW レイアウト) 完了
   - [ ] REF-2 (backend 畳み込み) / REF-6 (承認済み API 降格) 完了
   - [ ] REF-4 (FtsQuery) 完了 — 検索エントリのシグネチャは凍結後に変えられない
   - [ ] REF-16 (非同期 tx API 撤回) 完了 — 撤回は公開後 MAJOR になるため凍結前が唯一の機会

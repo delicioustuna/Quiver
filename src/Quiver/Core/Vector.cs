@@ -43,6 +43,11 @@ public enum VectorIndexKind : byte
 /// <param name="Metric">スコアリングに使う距離尺度。</param>
 /// <param name="ProviderId">埋め込みプロバイダ識別子。</param>
 /// <param name="NormalizationProfile">正規化プロファイル名 (任意)。</param>
+/// <param name="IndexKind">ベクトルインデックスの構造種別。</param>
+/// <param name="HnswM">HNSW のレイヤ 1 以上で保持する最大近傍数。</param>
+/// <param name="HnswMMax0">HNSW のレイヤ 0 で保持する最大近傍数。</param>
+/// <param name="HnswMaxLayers">HNSW が保持できる最大レイヤ数。</param>
+/// <param name="HnswEfConstruction">HNSW 構築時のビーム幅。</param>
 public sealed record VectorIndexSpec(
     string Name,
     EntityKind EntityKind,
@@ -51,7 +56,43 @@ public sealed record VectorIndexSpec(
     DistanceMetric Metric,
     string ProviderId,
     string? NormalizationProfile = null,
-    VectorIndexKind IndexKind = VectorIndexKind.HnswFlat);
+    VectorIndexKind IndexKind = VectorIndexKind.HnswFlat,
+    int HnswM = 16,
+    int HnswMMax0 = 32,
+    int HnswMaxLayers = 8,
+    int HnswEfConstruction = 200);
+
+internal static class VectorIndexSpecValidator
+{
+    public static void Validate(VectorIndexSpec spec)
+    {
+        if (string.IsNullOrEmpty(spec.Name))
+            throw new VectorException("Vector index name must not be empty.");
+        if (spec.Dimensions <= 0)
+            throw new VectorException(
+                $"Vector index '{spec.Name}' must have positive dimensions (was {spec.Dimensions}).");
+        if (spec.HnswM is < 2 or > byte.MaxValue)
+            throw Invalid(spec, nameof(spec.HnswM), spec.HnswM, "2..255");
+        if (spec.HnswMMax0 < spec.HnswM || spec.HnswMMax0 > byte.MaxValue)
+            throw Invalid(spec, nameof(spec.HnswMMax0), spec.HnswMMax0, $"{spec.HnswM}..255");
+        if (spec.HnswMaxLayers is < 1 or > byte.MaxValue)
+            throw Invalid(spec, nameof(spec.HnswMaxLayers), spec.HnswMaxLayers, "1..255");
+        if (spec.HnswEfConstruction < spec.HnswM || spec.HnswEfConstruction > 1_000_000)
+            throw Invalid(
+                spec,
+                nameof(spec.HnswEfConstruction),
+                spec.HnswEfConstruction,
+                $"{spec.HnswM}..1000000");
+    }
+
+    private static VectorException Invalid(
+        VectorIndexSpec spec,
+        string parameter,
+        int value,
+        string expected) =>
+        new(
+            $"Vector index '{spec.Name}' has invalid {parameter}={value}; expected {expected}.");
+}
 
 /// <summary>KNN 検索の 1 行: どのエンティティがマッチしたかと、その類似度スコア。</summary>
 /// <param name="EntityKind">マッチしたエンティティの種別。</param>

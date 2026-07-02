@@ -55,18 +55,14 @@ internal sealed class PersistentVectorStore : IVectorStore
         if (e.Spec.IndexKind == VectorIndexKind.FlatOnly)
             return new IndexHandle(e.Spec, payload, null);
         var hnsw = new HnswIndex(
-            _container.OpenTenant(e.HnswTenant, PageKind.Header), payload, e.Spec.Metric);
+            _container.OpenTenant(e.HnswTenant, PageKind.Header), payload, e.Spec);
         return new IndexHandle(e.Spec, payload, hnsw);
     }
 
     public void CreateVectorIndex(VectorIndexSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
-        if (string.IsNullOrEmpty(spec.Name))
-            throw new VectorException("Vector index name must not be empty.");
-        if (spec.Dimensions <= 0)
-            throw new VectorException(
-                $"Vector index '{spec.Name}' must have positive dimensions (was {spec.Dimensions}).");
+        VectorIndexSpecValidator.Validate(spec);
 
         lock (_gate)
         {

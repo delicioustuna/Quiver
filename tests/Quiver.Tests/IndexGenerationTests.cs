@@ -252,15 +252,14 @@ public sealed class IndexGenerationTests : IDisposable
     // ---- Format version gate ----
 
     [Fact]
-    public void FormatVersion_current_is_v1()
+    public void FormatVersion_current_is_v2()
     {
-        // 未リリース期間中に重ねた format 履歴 (pre-MVCC → MVCC → sidecar → 単一ファイル →
-        // columnar → vector → 全文 → logical WAL) はクリーンブレイクで畳み、現実装を v1 として再宣言した。
-        FormatVersion.Current.Should().Be(FormatVersion.V1);
+        // VP-3 は vector catalog と HNSW レコードを自己記述化する明示的 clean break。
+        FormatVersion.Current.Should().Be(FormatVersion.V2);
     }
 
     // 旧 format バイトを持つ store は open 時に reject される (クリーンブレイク; 自動マイグレーション無し)。
-    private const byte LegacyFormatVersion = 3;
+    private const byte LegacyFormatVersion = FormatVersion.V1;
 
     [Fact]
     public void Opening_store_with_legacy_format_version_throws_FormatVersionMismatch()
@@ -268,7 +267,7 @@ public sealed class IndexGenerationTests : IDisposable
         Directory.CreateDirectory(_dir);
         var path = Path.Combine(_dir, "nodes.db");
 
-        // 現行 (v1) で 1 ノード書く。
+        // 現行 (v2) で 1 ノード書く。
         using (IPagedFile pf = new PagedFile(path))
         {
             var store = new NodeStore(pf);

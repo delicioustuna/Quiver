@@ -14,10 +14,12 @@ namespace Quiver.Storage.Records;
 /// <list type="bullet">
 ///   <item>offset 0: count (i32)</item>
 ///   <item>offset 31: format version (byte)</item>
-///   <item>offset 64+: 可変長エントリ列。各エントリは
-///     <c>[nameLen i32 | name utf8 | kind 1 | srcKeyId 4 | dim 4 | metric 1 |
+///   <item>offset 64+: 可変長エントリ列。各エントリは長さプレフィクスを持ち、
+///     <c>[entryLen i32 | nameLen i32 | name utf8 | kind 1 | srcKeyId 4 | dim 4 | metric 1 |
 ///        providerLen i32 | provider utf8 | normLen i32(−1=null) | norm utf8 |
-///        payloadTenant 1 | hnswTenant 1]</c>。</item>
+///        payloadTenant 1 | hnswTenant 1 | indexKind 1 |
+///        hnswM i32 | hnswMmax0 i32 | hnswMaxLayers i32 | hnswEfConstruction i32]</c>。
+///        未知の末尾フィールドは entryLen により読み飛ばす。</item>
 /// </list>
 /// opt-in 用途では index は数件なので 1 ページ (8160B) に収まる。溢れたら <see cref="StorageException"/>。
 /// payload テナントは <see cref="FirstVectorTenant"/> から 2 つずつ (payload / HNSW) 採番する。
@@ -43,8 +45,6 @@ internal sealed class VectorIndexCatalog
         {
             _file.AllocatePage(PageKind.Header);
             Save();
-            using var ph = _file.PinForWrite(HeaderPageId);
-            ph.Data[OffFormatVersion] = FormatVersion.Current;
         }
         else
         {
@@ -99,18 +99,51 @@ internal sealed class VectorIndexCatalog
         int pos = OffEntries;
         for (int i = 0; i < count; i++)
         {
-            string name = ReadString(body, ref pos)!;
+            EnsureAvailable(body, pos, sizeof(int), "entry length");
+            int entryLength = BinaryPrimitives.ReadInt32LittleEndian(body[pos..]);
+            pos += sizeof(int);
+            int entryEnd;
+            try { entryEnd = checked(pos + entryLength); }
+            catch (OverflowException)
+            {
+                throw new StorageException($"Vector catalog entry {i} has an invalid length.");
+            }
+            if (entryLength < 0 || entryEnd > body.Length)
+                throw new StorageException(
+                    $"Vector catalog entry {i} length {entryLength} exceeds the catalog page.");
+
+            string name = ReadString(body, ref pos, entryEnd)!;
+            EnsureAvailable(body, pos, 10, "fixed vector index fields", entryEnd);
             var kind = (EntityKind)body[pos++];
             int srcKeyId = BinaryPrimitives.ReadInt32LittleEndian(body[pos..]); pos += 4;
             int dim = BinaryPrimitives.ReadInt32LittleEndian(body[pos..]); pos += 4;
             var metric = (DistanceMetric)body[pos++];
-            string provider = ReadString(body, ref pos)!;
-            string? norm = ReadString(body, ref pos);
+            string provider = ReadString(body, ref pos, entryEnd)!;
+            string? norm = ReadString(body, ref pos, entryEnd);
+            EnsureAvailable(body, pos, 19, "vector index layout fields", entryEnd);
             byte payloadTenant = body[pos++];
             byte hnswTenant = body[pos++];
             var indexKind = (VectorIndexKind)body[pos++];
-            var spec = new VectorIndexSpec(name, kind, new PropertyKeyId(srcKeyId), dim, metric, provider, norm, indexKind);
+            int hnswM = BinaryPrimitives.ReadInt32LittleEndian(body[pos..]); pos += 4;
+            int hnswMmax0 = BinaryPrimitives.ReadInt32LittleEndian(body[pos..]); pos += 4;
+            int hnswMaxLayers = BinaryPrimitives.ReadInt32LittleEndian(body[pos..]); pos += 4;
+            int hnswEfConstruction = BinaryPrimitives.ReadInt32LittleEndian(body[pos..]); pos += 4;
+            var spec = new VectorIndexSpec(
+                name,
+                kind,
+                new PropertyKeyId(srcKeyId),
+                dim,
+                metric,
+                provider,
+                norm,
+                indexKind,
+                hnswM,
+                hnswMmax0,
+                hnswMaxLayers,
+                hnswEfConstruction);
+            VectorIndexSpecValidator.Validate(spec);
             _entries.Add(new VectorCatalogEntry(spec, payloadTenant, hnswTenant));
+            pos = entryEnd;
         }
     }
 
@@ -118,10 +151,24 @@ internal sealed class VectorIndexCatalog
     {
         using var ph = _file.PinForWrite(HeaderPageId);
         var body = ph.Data;
+        body[OffEntries..].Clear();
         BinaryPrimitives.WriteInt32LittleEndian(body[OffCount..], _entries.Count);
+        body[OffFormatVersion] = FormatVersion.Current;
         int pos = OffEntries;
         foreach (var e in _entries)
         {
+            int entryLength = EncodedStringSize(e.Spec.Name)
+                + 1 + sizeof(int) + sizeof(int) + 1
+                + EncodedStringSize(e.Spec.ProviderId)
+                + EncodedStringSize(e.Spec.NormalizationProfile)
+                + 3
+                + sizeof(int) * 4;
+            if (entryLength > body.Length - pos - sizeof(int))
+                throw new StorageException(
+                    $"Vector index catalog overflow ({_entries.Count} indexes). Chained pages not yet implemented.");
+
+            BinaryPrimitives.WriteInt32LittleEndian(body[pos..], entryLength);
+            pos += sizeof(int);
             WriteString(body, ref pos, e.Spec.Name);
             body[pos++] = (byte)e.Spec.EntityKind;
             BinaryPrimitives.WriteInt32LittleEndian(body[pos..], e.Spec.SourcePropertyKeyId.Value); pos += 4;
@@ -132,16 +179,19 @@ internal sealed class VectorIndexCatalog
             body[pos++] = e.PayloadTenant;
             body[pos++] = e.HnswTenant;
             body[pos++] = (byte)e.Spec.IndexKind;
-            if (pos > RecordPageMapping.PageBodySize)
-                throw new StorageException(
-                    $"Vector index catalog overflow ({_entries.Count} indexes). Chained pages not yet implemented.");
+            BinaryPrimitives.WriteInt32LittleEndian(body[pos..], e.Spec.HnswM); pos += 4;
+            BinaryPrimitives.WriteInt32LittleEndian(body[pos..], e.Spec.HnswMMax0); pos += 4;
+            BinaryPrimitives.WriteInt32LittleEndian(body[pos..], e.Spec.HnswMaxLayers); pos += 4;
+            BinaryPrimitives.WriteInt32LittleEndian(body[pos..], e.Spec.HnswEfConstruction); pos += 4;
         }
     }
 
-    private static string? ReadString(ReadOnlySpan<byte> body, ref int pos)
+    private static string? ReadString(ReadOnlySpan<byte> body, ref int pos, int entryEnd)
     {
+        EnsureAvailable(body, pos, sizeof(int), "string length", entryEnd);
         int len = BinaryPrimitives.ReadInt32LittleEndian(body[pos..]); pos += 4;
         if (len < 0) return null;
+        EnsureAvailable(body, pos, len, "string bytes", entryEnd);
         string s = Encoding.UTF8.GetString(body.Slice(pos, len));
         pos += len;
         return s;
@@ -154,6 +204,26 @@ internal sealed class VectorIndexCatalog
         BinaryPrimitives.WriteInt32LittleEndian(body[pos..], len); pos += 4;
         Encoding.UTF8.GetBytes(s, body[pos..]);
         pos += len;
+    }
+
+    private static int EncodedStringSize(string? value) =>
+        sizeof(int) + (value is null ? 0 : Encoding.UTF8.GetByteCount(value));
+
+    private static void EnsureAvailable(
+        ReadOnlySpan<byte> body,
+        int pos,
+        int length,
+        string field,
+        int? limit = null)
+    {
+        int end;
+        try { end = checked(pos + length); }
+        catch (OverflowException)
+        {
+            throw new StorageException($"Vector catalog {field} has an invalid length.");
+        }
+        if (length < 0 || pos < 0 || end > (limit ?? body.Length))
+            throw new StorageException($"Vector catalog {field} exceeds its entry boundary.");
     }
 
     private void CheckFormatVersion()

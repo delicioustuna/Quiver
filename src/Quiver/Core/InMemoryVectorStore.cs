@@ -24,11 +24,7 @@ public sealed class InMemoryVectorStore : IVectorStore
     public void CreateVectorIndex(VectorIndexSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
-        if (string.IsNullOrEmpty(spec.Name))
-            throw new VectorException("Vector index name must not be empty.");
-        if (spec.Dimensions <= 0)
-            throw new VectorException(
-                $"Vector index '{spec.Name}' must have positive dimensions (was {spec.Dimensions}).");
+        VectorIndexSpecValidator.Validate(spec);
 
         lock (_gate)
         {

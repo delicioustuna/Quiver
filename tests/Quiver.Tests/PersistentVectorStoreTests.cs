@@ -1,5 +1,7 @@
 using FluentAssertions;
 using Quiver.Core;
+using Quiver.Storage;
+using Quiver.Storage.Records;
 using Xunit;
 
 namespace Quiver.Tests;
@@ -69,6 +71,85 @@ public sealed class PersistentVectorStoreTests : IDisposable
             got.Should().HaveCount(2);
             got[0].Should().Be(EntityRef.Sequence(ids[1]));
         }
+    }
+
+    [Fact]
+    public void Catalog_round_trips_multiple_entries_and_custom_hnsw_layout()
+    {
+        const string secondIndex = "embed-wide";
+        long id;
+        using (var db = GraphDatabase.Open(_path))
+        {
+            var keyId = db.Schema.GetOrCreatePropertyKey("title");
+            db.Vectors.CreateVectorIndex(new VectorIndexSpec(
+                IndexName,
+                EntityKind.Node,
+                keyId,
+                Dim,
+                DistanceMetric.Cosine,
+                "test",
+                HnswM: 4,
+                HnswMMax0: 6,
+                HnswMaxLayers: 3,
+                HnswEfConstruction: 24));
+            db.Vectors.CreateVectorIndex(new VectorIndexSpec(
+                secondIndex,
+                EntityKind.Node,
+                keyId,
+                Dim,
+                DistanceMetric.Dot,
+                "test-2",
+                HnswM: 8,
+                HnswMMax0: 12,
+                HnswMaxLayers: 5,
+                HnswEfConstruction: 40));
+
+            using var tx = db.BeginTransaction();
+            var node = tx.CreateNode("Doc");
+            id = node.Value;
+            db.Vectors.SetVector(
+                EntityKind.Node,
+                node.Value,
+                IndexName,
+                [1f, 0f, 0f, 0f]);
+            tx.Commit();
+        }
+
+        using (var db = GraphDatabase.Open(_path))
+        {
+            db.Vectors.TryGetIndex(IndexName, out var first).Should().BeTrue();
+            first.HnswM.Should().Be(4);
+            first.HnswMMax0.Should().Be(6);
+            first.HnswMaxLayers.Should().Be(3);
+            first.HnswEfConstruction.Should().Be(24);
+
+            db.Vectors.TryGetIndex(secondIndex, out var second).Should().BeTrue();
+            second.HnswM.Should().Be(8);
+            second.HnswMMax0.Should().Be(12);
+            second.HnswMaxLayers.Should().Be(5);
+            second.HnswEfConstruction.Should().Be(40);
+
+            using var cursor = db.Vectors.KnnSearch(IndexName, [1f, 0f, 0f, 0f], 1);
+            cursor.MoveNext().Should().BeTrue();
+            cursor.Current.EntityId.Should().Be(EntityRef.Sequence(id));
+        }
+    }
+
+    [Fact]
+    public void V1_vector_catalog_is_rejected_as_a_clean_break()
+    {
+        using var file = new InMemoryPagedFile();
+        _ = new VectorIndexCatalog(file);
+        var header = file.PinForWrite(new PageId(1));
+        header.Data[31] = FormatVersion.V1;
+        file.UnpinDirty(new PageId(1), 0);
+
+        var reopen = () => new VectorIndexCatalog(file);
+        reopen.Should().Throw<FormatVersionMismatchException>()
+            .Which.Should().Match<FormatVersionMismatchException>(
+                ex => ex.FileKind == "vectorcatalog"
+                    && ex.Found == FormatVersion.V1
+                    && ex.Expected == FormatVersion.V2);
     }
 
     [Fact]

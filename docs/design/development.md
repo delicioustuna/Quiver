@@ -57,6 +57,12 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 | 文字列エンコーディング | UTF-8（長さプレフィックス付き） |
 | 静止時のファイル | `*.quiver` 単一ファイル |
 | 運用中のファイル | `*.quiver` + `*.quiver-wal` |
+| FormatVersion | V2（V1 からの自動移行なし） |
+| ベクトル catalog | entry 長プレフィクス + per-index HNSW レイアウトパラメタ |
+
+FormatVersion V2 では `VectorIndexSpec` の `HnswM` / `HnswMMax0` / `HnswMaxLayers` /
+`HnswEfConstruction` を catalog に永続化する。前 3 値から HNSW node record 幅を index ごとに
+導出する。V1 DB は clean break として open 時に拒否し、ソースデータから再構築する。
 
 ### ID 型
 

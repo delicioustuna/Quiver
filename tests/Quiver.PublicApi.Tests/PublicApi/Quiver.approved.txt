@@ -1075,9 +1075,13 @@ namespace Quiver.Core
     }
     public sealed class VectorIndexSpec : System.IEquatable<Quiver.Core.VectorIndexSpec>
     {
-        public VectorIndexSpec(string Name, Quiver.Core.EntityKind EntityKind, Quiver.Core.PropertyKeyId SourcePropertyKeyId, int Dimensions, Quiver.Core.DistanceMetric Metric, string ProviderId, string? NormalizationProfile = null, Quiver.Core.VectorIndexKind IndexKind = 0) { }
+        public VectorIndexSpec(string Name, Quiver.Core.EntityKind EntityKind, Quiver.Core.PropertyKeyId SourcePropertyKeyId, int Dimensions, Quiver.Core.DistanceMetric Metric, string ProviderId, string? NormalizationProfile = null, Quiver.Core.VectorIndexKind IndexKind = 0, int HnswM = 16, int HnswMMax0 = 32, int HnswMaxLayers = 8, int HnswEfConstruction = 200) { }
         public int Dimensions { get; init; }
         public Quiver.Core.EntityKind EntityKind { get; init; }
+        public int HnswEfConstruction { get; init; }
+        public int HnswM { get; init; }
+        public int HnswMMax0 { get; init; }
+        public int HnswMaxLayers { get; init; }
         public Quiver.Core.VectorIndexKind IndexKind { get; init; }
         public Quiver.Core.DistanceMetric Metric { get; init; }
         public string Name { get; init; }

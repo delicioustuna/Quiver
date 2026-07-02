@@ -1,6 +1,6 @@
 # MVCC & トランザクション
 
-> as-built 仕様 (v1 baseline)
+> as-built 仕様 (on-disk FormatVersion V2)
 
 ## 分離レベル {#isolation}
 
