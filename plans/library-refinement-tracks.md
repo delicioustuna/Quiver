@@ -61,6 +61,14 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
   [build-reproducibility-and-coverage.md](build-reproducibility-and-coverage.md) / [embedded-rag-comparative-benchmarks.md](embedded-rag-comparative-benchmarks.md) は
   本トラックと独立・補完 (CI/release gate は REF-7 実行前に整備されていることが望ましい)。
 
+> **Codex レビューコメント (2026-07-02、commit `bf0b476` 確認後)**:
+> develop の非同期 API / インメモリモードと整合させた REF-2 / REF-8 / REF-9 の改訂は妥当。
+> 追加確認で、(1) P0 計画では未決定のカーソル生存期間を REF-9 が `MoveNext` 単位に先決めしていたこと、
+> (2) 並行使用時の例外型が P0 の `TransactionException` と REF-9 の `InvalidOperationException` で不一致だったこと、
+> (3) 直列 writer queue では複数 flush request が同時に存在せず group commit 効果を期待できないこと、の 3 点を検出した。
+> 以下の REF-9 / REF-10 は、カーソル契約を実測・既存挙動から決める、非 transient な reason code 付き
+> `TransactionException` に統一する、group commit の性能主張を削除する、という判断で修正済み。
+
 ---
 
 ## Wave 0 — 衛生
@@ -244,17 +252,20 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 - **対象**: `Transaction` ([src/Quiver/Transactions/Transaction.cs](../src/Quiver/Transactions/Transaction.cs))、`GraphTransaction`、Tx store wrapper、tx から返す列挙子・カーソル、P0 で導入される per-op 文脈スコープ (設定→操作→復元) の獲得点。
 - **実装手順**:
   1. tx が所有する **in-use ガード** (`Interlocked.CompareExchange` による単一フラグ) を作り、`Transaction` / `GraphTransaction` / tx 由来カーソルへ同一インスタンスを渡す。
-  2. P0 の per-op 文脈スコープ獲得時にガードを取得し、`finally` の文脈復元時に解放する。取得失敗 (= 別操作が進行中) は状態を変更する前に `InvalidOperationException` (メッセージに「tx は同時に 1 操作のみ」+ known_limits へのリンク文言)。カーソルの `MoveNext` は反復ごとに取得/解放。
-  3. **常時 ON** (Debug 限定にしない)。Interlocked 1 回/操作が G-5 の定数コスト要件を満たすこと — トラバーサル反復 (カーソル MoveNext) 経路は `--basic-perf` before/after で退行なし (±2% 以内) を実測確認。
-  4. 別スレッドからの `Dispose` / `DisposeAsync` は、**進行中操作がなければ合法** (P0 で rollback state が tx 所有になるため)。進行中操作と競合した場合はガードにより throw。
-  5. テスト: `Task.Run` での同時操作 (throw)、`await` 越しの逐次利用 (合法・WAL 欠落なし — crash contract で検証)、列挙途中の並行操作、逐次 cross-thread の commit/rollback/dispose。
+  2. ガードは public 操作境界で 1 回だけ取得し、その内部で呼ぶ Tx store / index 操作は再取得しない。取得失敗 (= 別操作が進行中) は状態を変更する前に、internal reason code `ConcurrentUse` を持つ**非 transient な `TransactionException`**を投げる。メッセージには「tx は同時に 1 操作のみ」+ known_limits へのリンク文言を含める。
+  3. **カーソル契約を先に監査する**。カーソル停止中に同一 tx の別操作を行っても既存カーソルの状態・snapshot・下層 iterator が壊れないことをテストで証明できる場合だけ `MoveNext` ごとの取得/解放を採用する。証明できない場合はカーソル生成から `Dispose` までガードを保持し、別操作を拒否する。判断結果を 08_known_limits.md に記録する。
+  4. **常時 ON** (Debug 限定にしない)。選択したカーソル粒度に応じた Interlocked コストを `--basic-perf` before/after で測定し、トラバーサル反復の退行が ±2% 以内であることを確認する。
+  5. 別スレッドからの `Dispose` / `DisposeAsync` は、**進行中操作がなければ合法** (P0 で rollback state が tx 所有になるため)。進行中操作と競合した場合は同じ `ConcurrentUse` で throw。
+  6. テスト: `Task.Run` での同時操作 (throw)、`await` 越しの逐次利用 (合法・WAL 欠落なし — crash contract で検証)、選択したカーソル lifetime 契約、逐次 cross-thread の commit/rollback/dispose。
 - **判断ポイント (遵守)**:
   - **[async-transaction-context-safety.md](async-transaction-context-safety.md) の完了が前提。** P0 未完のまま本ガードだけを入れない (文脈が `[ThreadStatic]` 所有のままでは「逐次 cross-thread = 合法」が成立せず、ガードが安全性を偽装する)。
+  - P0 計画が未決定としているカーソル lifetime を推測で決めない。既存契約と破壊テストの結果を判断根拠にする。
+  - 並行使用はプログラミングエラーだが、例外型は P0 と `TransactionException` に統一する。REF-10 が再試行しないよう `ConcurrentUse` は必ず non-transient に分類する。
   - 検出できないケースを偽装しない: ガードが検出するのは**同時実行の交錯**のみ。tx の長時間保持や fire-and-forget 忘れは検出しない。**検出は補助であり契約の代替ではない**ことを 08_known_limits.md に明記。
   - 契約文書の改訂: 08_known_limits.md §threading を「スレッドアフィン」から「**同時に 1 スレッドから 1 操作**。API 境界 (`BeginTransactionAsync` / `CommitAsync` / `DisposeAsync`) 以外の await を tx 内に挟まない」へ書き換える (P0 側と同一タスクで整合させても良い)。
   - opt-out フラグは**設けない** (これを切る正当な理由がない)。
-  - MoveNext 経路の実測で退行が出たら、カーソルのみチェック頻度を下げる案 (取得時のみ検査) を**実装せず報告**。
-- **完了条件**: 並行操作検出テスト (状態変更前に throw) と逐次 cross-thread 合法化の回帰テストが緑。全 tx 由来カーソルがガードを共有し、perf 実測が記録され、§threading の契約記述が新モデルに改訂されている。
+  - 実測で退行が出ても、安全性を満たさない粒度へ緩和しない。最適化案と測定結果を報告して停止する。
+- **完了条件**: 並行操作が non-transient `TransactionException(ConcurrentUse)` で状態変更前に失敗し、逐次 cross-thread 合法化の回帰テストが緑。カーソル lifetime の採用判断と破壊テスト、perf 実測が記録され、§threading の契約記述が新モデルに改訂されている。
 - **依存関係**: [async-transaction-context-safety.md](async-transaction-context-safety.md) (P0) 完了後。REF-8 とは独立。
 - **工数**: 小〜中 (1〜2 日)。
 
@@ -265,7 +276,7 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 ### REF-10: `ExecuteWrite` / `ExecuteWriteAsync` — 専用ライタスレッドファサード
 
 - **目的**: 08_known_limits.md §write-serialization が推奨する「専用ライタスレッド + Channel」パターンを全ユーザに手書きさせず、**製品 API として本体に同梱**する。MVCC を触らずに async アプリ (ASP.NET / デスクトップ) からの自然な利用感を提供する、費用対効果最大の洗練。
-- **位置づけ (2026-07-02 改訂)**: commit `c2ee592` 以降、§write-serialization には「組み込みの排他ライタ待機 (`EnforceExclusiveWriter` + `BeginTransactionAsync`)」パターンが既にある。本タスクの queue はその上位の推奨形 — begin→work→commit を**単一専用スレッドの同期スコープに閉じ込める**ため、tx 内 await・スレッド移動の問題が構造的に発生せず (async-transaction-context-safety の対策対象外の経路)、冪等リトライと自然なバッチング (group commit) を内蔵する。文書では両パターンの使い分けを明記する (既定推奨 = 本 API)。
+- **位置づけ (2026-07-02 改訂)**: commit `c2ee592` 以降、§write-serialization には「組み込みの排他ライタ待機 (`EnforceExclusiveWriter` + `BeginTransactionAsync`)」パターンが既にある。本タスクの queue はその上位の推奨形 — begin→work→commit を**単一専用スレッドの同期スコープに閉じ込める**ため、tx 内 await・スレッド移動の問題が構造的に発生せず (async-transaction-context-safety の対策対象外の経路)、排他・冪等リトライ・キャンセル・shutdown を一箇所に集約する。文書では両パターンの使い分けを明記する (既定推奨 = 本 API)。
 - **対象**: 新規 `src/Quiver/Api/WriterQueue.cs` (名称は実装時に確定可、公開面は `GraphDatabase` の拡張として)、docs/operations、cookbook。
 - **API 形 (確定イメージ)**:
   ```csharp
@@ -281,12 +292,12 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
   4. Dispose 時: 新規受付を停止 → キューを drain (タイムアウト付き) → スレッド終了。`GraphDatabase.Dispose` に接続。
 - **判断ポイント (遵守)**:
   - **配置は Quiver 本体** (Hosting ではない)。書き込み直列化はコアの利用体験であり、Hosting 未使用のユーザにも必要。Hosting は REF-11 で DI 登録のみ担う。
-  - **自動バッチングを実装しない** (複数ジョブの 1 tx への合成は commit 失敗時の帰属が壊れる)。バッチングは group commit (`GroupCommitWindow`) に任せ、その旨を文書化。
+  - **自動バッチングを実装しない** (複数ジョブの 1 tx への合成は commit 失敗時の帰属が壊れる)。また単一 writer queue は各 commit 完了まで次ジョブへ進まないため、複数 flush request を束ねる group commit 効果も性能根拠にしない。
   - **トランザクション自体の async 化に踏み込まない**。work デリゲートは同期 (`Action`/`Func<T>`)。`Func<IGraphTransaction, Task>` オーバーロードは**提供しない** (tx 内 await の温床になるため。要望があれば報告)。
   - `TransactionException` を型だけで一律リトライしない。リトライ対象は競合・timeout に限定し、ユーザ work が投げた例外はそのまま一度で返す。
   - work 内での `ExecuteWrite*` 再入 (ライタスレッドから自呼び出し) は即時 `InvalidOperationException` (自己デッドロック防止)。
   - REF-8 との関係: キュー経由の書き込みは構造的に直列なので writer lock と競合しない。両者併存の挙動 (キュー外の直接 `BeginTransaction` と混在) をテストで固定。
-- **完了条件**: 正常系 / リトライ / キャンセル / 再入 / Dispose drain / 直接 tx との混在テスト緑。スループット実測 (単発 durable commit 律速 ~1ms/commit に対しキュー経由で group commit が効くこと)。cookbook「書き込みの直列化」節を本 API 前提に書き換え。
+- **完了条件**: 正常系 / リトライ / キャンセル / 再入 / Dispose drain / 直接 tx との混在テスト緑。直接の直列書き込みを baseline として queue の追加 overhead・待ち時間・throughput を実測し、group commit 改善を主張しない。cookbook「書き込みの直列化」節を本 API 前提に書き換える。
 - **セッション分割**: (A) queue lifecycle・同期/非同期 API、(B) retry/cancellation/re-entry/dispose、(C) 統合テスト・性能・文書。各単位を独立コミットする。
 - **依存関係**: REF-8 完了後 (writer lock との相互作用を固定するため)。
 - **工数**: 中 (合計 2〜3 日)。
