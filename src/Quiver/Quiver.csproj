@@ -18,7 +18,7 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Quiver</PackageId>
-    <Description>Pure C# の組み込み (in-process) グラフ + ベクトル + 全文検索データベースエンジン。ノード/リレーションシップをプロパティ付きで単一ファイルに永続化し、型安全な CRUD・Fluent トラバーサル・WAL クラッシュリカバリ・B+Tree インデックス・KNN ベクトル検索を提供する。属性ベースの Source Generator を同梱。NativeAOT 対応、アンマネージド依存なし。ローカル RAG バックエンドに最適。</Description>
+    <Description>依存パッケージゼロの Pure C# 組み込み (in-process) グラフ + ベクトル + 全文検索データベースエンジン。ノード/リレーションシップをプロパティ付きで単一ファイルに永続化し、型安全な CRUD・Fluent トラバーサル・WAL クラッシュリカバリ・B+Tree インデックス・KNN ベクトル検索を提供する。属性ベースの Source Generator を同梱。NativeAOT 対応、アンマネージド依存なし。ローカル RAG バックエンドに最適。</Description>
     <PackageTags>$(PackageTags);vector-search;knn;full-text-search;rag;nativeaot;source-generator;traversal;wal;embedded-database</PackageTags>
     <!-- 同梱する analyzer を明示パックする (下の target)。 -->
     <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_QuiverAddBundledAnalyzer</TargetsForTfmSpecificContentInPackage>
@@ -27,9 +27,6 @@
        Transactions / Operators / Client を本プロジェクトへ統合 (単一アセンブリ)。
        各サブ領域はフォルダ (Core/ Codec/ Wal/ Storage/ Stores/ Index/ Transactions/
        Operators/ Client/) で分離し、名前空間は従来どおり維持する。 -->
-  <ItemGroup>
-    <PackageReference Include="System.IO.Hashing" Version="8.0.0" />
-  </ItemGroup>
   <ItemGroup>
     <!-- source generator は自アセンブリに生成できない Roslyn 制約のため別プロジェクト維持。
          PrivateAssets=all: パッケージ依存にせず、DLL を analyzers/dotnet/cs に同梱する (下の target)。 -->

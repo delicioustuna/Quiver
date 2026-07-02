@@ -36,7 +36,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     {
         var seg = LatestWalSegment();
         if (seg is null) return;
-        // WAL header: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32C(4) = 25 B.
+        // WAL ヘッダ: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32(4) = 25 B。
         // 先頭レコードの Type バイトを 1 ビット反転し、replay 時に CRC を不一致にする。
         ChecksumCorruptor.FlipBitAt(seg, offset: 20, bitInByte: 0);
     }
