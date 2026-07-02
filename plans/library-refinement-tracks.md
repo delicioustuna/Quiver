@@ -5,6 +5,10 @@
 > 変更点: REF-16 (async 撤回) の新設、REF-8 の同期専用化、REF-9 のスレッドアフィニティ検出への復帰、
 > REF-10 の「唯一の非同期入口」への昇格 (凍結前必須化)、async-transaction-context-safety.md (P0) の停止提案。
 > 撤回判断の根拠は本文の該当節および同計画書の停止注記を参照。
+>
+> **本提案ブランチの変更は plans/ の設計書 2 ファイルのみ。** ソリューション実体 (src / tests / samples /
+> docs / slnx / approved.txt) は無変更であり、撤回の実体変更箇所は REF-16 の「撤回対象の実体 (転記)」に
+> 記録して承認後の実行に委ねる。
 
 > 起票日: 2026-07-02。起点: develop 計画群 + docs/spec + 公開 API 表面 (approved.txt 843 宣言) の外部レビュー。
 > 本書は **REF-1〜16 の 16 タスク**に分割した実装計画と、各タスクで遵守すべき判断ポイントを定める。
@@ -237,7 +241,21 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 ### REF-16: 非同期トランザクション API の撤回
 
 - **目的**: commit `c2ee592` で導入した API 境界の非同期 (`BeginTransactionAsync` / `CommitAsync` / `DisposeAsync` / traversal・Match の Async 系 terminal) を公開面から撤回し、非同期の入口を REF-10 の `ExecuteWriteAsync` に一本化する。根拠は「依存グラフと推奨実行順序」の 2026-07-02 改訂項を参照。**main 未反映の今だけ撤回が無料** (公開後は MAJOR)。
-- **対象**: `c2ee592` が触れた公開面 — [src/Quiver/IGraphTransaction.cs](../src/Quiver/IGraphTransaction.cs) (`IAsyncDisposable` / `CommitAsync`)、[src/Quiver/GraphDatabase.cs](../src/Quiver/GraphDatabase.cs) (`BeginTransactionAsync`)、`GraphTraversal` / `TypedGraphTraversal` / `MatchQuery` の Async 系、`samples/Quiver.Samples.AsyncApi/`、`tests/Quiver.Tests/AsyncApiTests.cs`、`Quiver.slnx`、`c2ee592` が更新した docs 一式 (cookbook / getting-started / transaction.md / 08_known_limits ほか)、approved.txt。
+- **対象**: 下記「撤回対象の実体 (転記)」を正とする。**本計画書の承認まで、ソリューション実体 (src / tests / samples / slnx / docs) には一切触れない** — 本節は `c2ee592` の変更内容を設計書へ転記した as-is 記録であり、実体の変更は本タスクの実行時に初めて行う。
+- **撤回対象の実体 (転記: 2026-07-02 時点、`c2ee592` の diff より採録)**:
+  - **公開 API (approved.txt 差分 32 行より)**:
+    | 型 | 撤回するメンバ |
+    |---|---|
+    | `GraphDatabase` | `IAsyncDisposable` 実装 / `DisposeAsync()` / `BeginTransactionAsync(IsolationLevel, CancellationToken)` / `BeginReadOnlyTransactionAsync(CancellationToken)` |
+    | `IGraphTransaction` | `IAsyncDisposable` 継承 / `CommitAsync(CancellationToken)` |
+    | `GraphTraversal<T>` | `AsAsyncEnumerable` / `CountAsync` / `NextAsync` / `ToListAsync` / `TryNextAsync` |
+    | `TypedGraphTraversal<T>` | `AsAsyncEnumerable` / `CountAsync` / `FirstAsync` / `ToListAsync` / `ToListWithIdsAsync` |
+    | `Match.ReturnClause<TResult>` | `AsAsyncEnumerable` / `CountAsync` / `FirstAsync` / `ToListAsync` |
+  - **撤回対象から除外するもの (同コミット同梱だが async と無関係 / 別タスク素材)**:
+    - `IGraphTransaction.ListVectorIndexes()` / `GraphTransaction.ListVectorIndexes()` — `c2ee592` に同梱された無関係の公開 API 追加。**残す** (REF-3 インベントリの通常対象として扱う)。
+    - `GraphDatabaseOptions.EnforceExclusiveWriter` と `SemaphoreSlim` 排他機構 — **残す** (REF-8 の素材。public フラグの除去は REF-8 が実施)。
+  - **内部実装 (公開面の撤回に伴い削除/縮約)**: `Transaction.CommitAsync` 実装 ([src/Quiver/Transactions/Transaction.cs](../src/Quiver/Transactions/Transaction.cs) +86 行)、`ITransaction` (+3) / `GraphTransaction` (+7) の配線、`IWriteAheadLog` / `WriteAheadLog` の async flush 経路 (+1 / +14)、[src/Quiver/GraphDatabase.cs](../src/Quiver/GraphDatabase.cs) の async begin 配線 (+87 のうち semaphore 排他部分は温存)。
+  - **付随物**: `samples/Quiver.Samples.AsyncApi/` (Program.cs + csproj) と `Quiver.slnx` の該当 1 エントリ、`tests/Quiver.Tests/AsyncApiTests.cs` (111 行)、`c2ee592` が更新した docs 13 ファイル (README / docs/api/concepts/transaction.md / docs/api/getting-started.md / docs/api/index.md / architecture-diagrams.md / architecture.md / cookbook.md / docs/design/development.md / glossary.md / operations/01_quickstart.md / operations/05_known_limits.md / docs/spec/08_known_limits.md / plans/publish-branch-workflow.md)。
 - **実装手順**:
   1. `git revert c2ee592` を起点に、後続コミット (in-memory 等) との競合を手で解消。公開 async 面・サンプル・文書変更を除去する。
   2. **残すもの**: `EnforceExclusiveWriter` の `SemaphoreSlim` 排他機構 (REF-8 の素材。同期待機に縮約)。`AsyncApiTests` のうち排他検証として意味が残るケースは同期版に書き換えて移設。
