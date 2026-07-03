@@ -57,10 +57,10 @@ public sealed record VectorIndexSpec(
     string ProviderId,
     string? NormalizationProfile = null,
     VectorIndexKind IndexKind = VectorIndexKind.HnswFlat,
-    int HnswM = 16,
-    int HnswMMax0 = 32,
+    int HnswM = 32,
+    int HnswMMax0 = 64,
     int HnswMaxLayers = 8,
-    int HnswEfConstruction = 200);
+    int HnswEfConstruction = 400);
 
 internal static class VectorIndexSpecValidator
 {

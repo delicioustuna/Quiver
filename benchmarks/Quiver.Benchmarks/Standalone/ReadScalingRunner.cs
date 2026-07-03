@@ -10,13 +10,13 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks.Standalone;
 
 /// <summary>
-/// CR-1: read-only 1-hop / KNN / BM25 の 1, 2, 4, 8 thread scaling を同一 DB、
-/// 同一固定時間で測る。後続 CR-2 / CR-3 の kill criteria に使う実測分母。
+/// read-only 1-hop / KNN / BM25 の 1, 2, 4, 8 thread scaling を同一 DB、
+/// 同一固定時間で測る。並行読み取り改善の効果測定の基準となる実測分母。
 /// </summary>
 public static class ReadScalingRunner
 {
-    private const string VectorIndex = "cr1_vectors";
-    private const string FullTextIndex = "cr1_body";
+    private const string VectorIndex = "read_scaling_vectors";
+    private const string FullTextIndex = "read_scaling_body";
     private const int Dimensions = VectorRecallCorpus.RecallDimensions;
     private const int CorpusCount = 2_000;
     private const int Degree = 128;
@@ -24,12 +24,12 @@ public static class ReadScalingRunner
 
     public static int Run()
     {
-        Console.WriteLine("=== Concurrent read scaling (CR-1) ===");
+        Console.WriteLine("=== Concurrent read scaling ===");
         Console.WriteLine($"machine={Environment.MachineName}, procs={Environment.ProcessorCount}, " +
                           $"runtime={System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}");
         Console.WriteLine("workload, threads, ops/sec, speedup_vs_1t, linear_efficiency");
 
-        string dir = BenchTempDir.Create("cr1_read_scaling");
+        string dir = BenchTempDir.Create("read_scaling");
         try
         {
             using var db = GraphDatabase.Open(Path.Combine(dir, "graph.quiver"));
@@ -55,7 +55,7 @@ public static class ReadScalingRunner
             db.Schema.GetOrCreatePropertyKey("embedding"),
             Dimensions,
             DistanceMetric.Cosine,
-            "CR-1 deterministic corpus"));
+            "deterministic read-scaling corpus"));
 
         var random = new Random(VectorRecallCorpus.Seed);
         var vector = new float[Dimensions];
@@ -171,7 +171,7 @@ public static class ReadScalingRunner
             })
             {
                 IsBackground = true,
-                Name = $"quiver-cr1-{local}",
+                Name = $"quiver-read-scaling-{local}",
             };
             threads[i].Start();
         }

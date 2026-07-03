@@ -196,7 +196,8 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
                 Core.EntityKind.Node => nodeStore.CurrentGeneration(seq),
                 Core.EntityKind.Relationship => relStore.CurrentGeneration(seq),
                 _ => -1,
-            });
+            },
+            options.VectorCacheBudgetBytes);
 
         // abort (CLR undo) 後に container のテナント記述子 / page table と store メタを
         // 再同期するコールバック。AbortUndoHandler が before-image 復元後に呼ぶ。

@@ -23,6 +23,7 @@ internal sealed class PersistentVectorStore : IVectorStore
     // (kind, sequence) → 現世代を引く resolver。slot 再利用で別エンティティに化けた
     // stale binding を KNN read 時に弾くために使う。null = 旧経路 / テスト (世代照合なし)。
     private readonly Func<EntityKind, long, int>? _currentGeneration;
+    private readonly VectorPayloadCacheBudget _cacheBudget;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, IndexHandle> _indexes = new(StringComparer.Ordinal);
     // catalog は遅延生成 (ctor が空テナントへヘッダページを書くのを避け、ベクトルを使わない DB の
@@ -31,11 +32,13 @@ internal sealed class PersistentVectorStore : IVectorStore
 
     public PersistentVectorStore(
         SingleFileContainer container, byte catalogTenantId,
-        Func<EntityKind, long, int>? currentGeneration = null)
+        Func<EntityKind, long, int>? currentGeneration = null,
+        long vectorCacheBudgetBytes = 64L * 1024 * 1024)
     {
         _container = container;
         _catalogTenantId = catalogTenantId;
         _currentGeneration = currentGeneration;
+        _cacheBudget = new VectorPayloadCacheBudget(vectorCacheBudgetBytes);
         // 既存 DB のみ、登録済み index を eager に開く。
         if (_container.HasTenant(catalogTenantId))
         {
@@ -51,7 +54,7 @@ internal sealed class PersistentVectorStore : IVectorStore
     private IndexHandle OpenHandle(VectorCatalogEntry e)
     {
         var payload = new VectorPayloadStore(
-            _container.OpenTenant(e.PayloadTenant, PageKind.Header), e.Spec.Dimensions);
+            _container.OpenTenant(e.PayloadTenant, PageKind.Header), e.Spec.Dimensions, _cacheBudget);
         if (e.Spec.IndexKind == VectorIndexKind.FlatOnly)
             return new IndexHandle(e.Spec, payload, null);
         var hnsw = new HnswIndex(
@@ -78,9 +81,13 @@ internal sealed class PersistentVectorStore : IVectorStore
         ArgumentException.ThrowIfNullOrEmpty(name);
         lock (_gate)
         {
-            if (!_indexes.Remove(name))
+            if (!_indexes.TryGetValue(name, out var handle))
                 throw new VectorException($"Vector index '{name}' does not exist.");
-            Catalog.Unregister(name);
+            using (handle.Write())
+            {
+                _indexes.Remove(name);
+                Catalog.Unregister(name);
+            }
         }
     }
 
@@ -114,7 +121,7 @@ internal sealed class PersistentVectorStore : IVectorStore
         // KNN read 時に弾けるようにする。resolver 無し (テスト) は 0。
         long seq = EntityRef.Sequence(entityId);
         ushort gen = ResolveGen(kind, seq);
-        lock (_gate)
+        using (h.Write())
         {
             h.Payload.Set(seq, gen, vector);
             h.Hnsw?.Upsert(seq);
@@ -125,7 +132,7 @@ internal sealed class PersistentVectorStore : IVectorStore
     {
         IndexHandle h = GetIndex(indexName);
         long seq = EntityRef.Sequence(entityId);
-        lock (_gate)
+        using (h.Write())
         {
             h.Payload.Remove(seq);
             h.Hnsw?.Delete(seq);
@@ -140,7 +147,7 @@ internal sealed class PersistentVectorStore : IVectorStore
         if (destination.Length < h.Spec.Dimensions) return false;
 
         long seq = EntityRef.Sequence(entityId);
-        lock (_gate)
+        using (h.Read())
         {
             if (!h.Payload.TryGet(seq, destination, out var gen))
                 return false;
@@ -167,7 +174,7 @@ internal sealed class PersistentVectorStore : IVectorStore
 
         var kind = h.Spec.EntityKind;
         VectorSearchResult[] sorted;
-        lock (_gate)
+        using (h.Read())
             sorted = h.Hnsw!.Search(
                 query, k, kind, (seq, gen) => IsLive(kind, seq, gen), options);
         return new SortedVectorCursor(sorted);
@@ -192,7 +199,7 @@ internal sealed class PersistentVectorStore : IVectorStore
         var buffer = ArrayPool<float>.Shared.Rent(dim);
         try
         {
-            lock (_gate)
+            using (h.Read())
             {
                 var vector = buffer.AsSpan(0, dim);
                 for (long seq = 0; seq < h.Payload.Hwm; seq++)
@@ -237,7 +244,7 @@ internal sealed class PersistentVectorStore : IVectorStore
         int dim = h.Spec.Dimensions;
         var metric = h.Spec.Metric;
         var kind = h.Spec.EntityKind;
-        lock (_gate)
+        using (h.Read())
         {
             long hwm = h.Payload.Hwm;
             if (h.Hnsw is null || candidates.Count * 4 <= hwm || hwm == 0)
@@ -287,7 +294,7 @@ internal sealed class PersistentVectorStore : IVectorStore
         var kind = h.Spec.EntityKind;
         int Q = queries.Count;
         var cursors = new VectorSearchCursor[Q];
-        lock (_gate)
+        using (h.Read())
         {
             for (int q = 0; q < Q; q++)
             {
@@ -326,8 +333,11 @@ internal sealed class PersistentVectorStore : IVectorStore
                 _indexes.Remove(name);
             foreach (var h in _indexes.Values)
             {
-                h.Payload.ReloadMeta();
-                h.Hnsw?.ReloadFromPages();
+                using (h.Write())
+                {
+                    h.Payload.ReloadMeta();
+                    h.Hnsw?.ReloadFromPages();
+                }
             }
         }
     }
@@ -363,5 +373,38 @@ internal sealed class PersistentVectorStore : IVectorStore
         return cur >= 0 && (ushort)Math.Min(cur, EntityRef.MaxGeneration) == storedGen;
     }
 
-    private sealed record IndexHandle(VectorIndexSpec Spec, VectorPayloadStore Payload, HnswIndex? Hnsw);
+    private sealed class IndexHandle(
+        VectorIndexSpec spec,
+        VectorPayloadStore payload,
+        HnswIndex? hnsw)
+    {
+        private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
+
+        public VectorIndexSpec Spec { get; } = spec;
+        public VectorPayloadStore Payload { get; } = payload;
+        public HnswIndex? Hnsw { get; } = hnsw;
+
+        public LockScope Read() => new(_lock, write: false);
+        public LockScope Write() => new(_lock, write: true);
+    }
+
+    private readonly struct LockScope : IDisposable
+    {
+        private readonly ReaderWriterLockSlim _lock;
+        private readonly bool _write;
+
+        public LockScope(ReaderWriterLockSlim @lock, bool write)
+        {
+            _lock = @lock;
+            _write = write;
+            if (write) @lock.EnterWriteLock();
+            else @lock.EnterReadLock();
+        }
+
+        public void Dispose()
+        {
+            if (_write) _lock.ExitWriteLock();
+            else _lock.ExitReadLock();
+        }
+    }
 }

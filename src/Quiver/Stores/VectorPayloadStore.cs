@@ -35,12 +35,14 @@ internal sealed class VectorPayloadStore
     private readonly IPagedFile _file;
     private readonly int _dim;
     private readonly int _recSize;
+    private readonly VectorPayloadCache _cache;
     private long _hwm;
 
-    public VectorPayloadStore(IPagedFile file, int dim)
+    public VectorPayloadStore(IPagedFile file, int dim, VectorPayloadCacheBudget cacheBudget)
     {
         _file = file;
         if (dim <= 0) throw new VectorException($"vector payload dim must be positive (was {dim}).");
+        _cache = new VectorPayloadCache(dim, cacheBudget);
         if (_file.PageCount <= 1)
         {
             _file.AllocatePage(PageKind.Header);
@@ -83,6 +85,7 @@ internal sealed class VectorPayloadStore
         WriteBytes(start, hdr);
         WriteBytes(start + RecHeaderSize, MemoryMarshal.AsBytes(vector));
         if (seq >= _hwm) { _hwm = seq + 1; SaveMeta(); }
+        _cache.StorePresent(seq, generation, vector);
     }
 
     /// <summary>seq のベクトルを論理削除する (present=0)。hwm は縮めない。</summary>
@@ -93,6 +96,7 @@ internal sealed class VectorPayloadStore
         Span<byte> zero = stackalloc byte[1];
         zero[0] = 0;
         WriteBytes(start + OffPresent, zero);
+        _cache.StoreAbsent(seq);
     }
 
     /// <summary>seq のベクトルを <paramref name="dest"/> へ読み出す。未設定 / 削除済みは false。</summary>
@@ -100,17 +104,54 @@ internal sealed class VectorPayloadStore
     {
         generation = 0;
         if (seq < 0 || seq >= _hwm || dest.Length < _dim) return false;
+        var cached = _cache.TryGet(seq, dest, out generation);
+        if (cached == VectorPayloadCache.Lookup.Present) return true;
+        if (cached == VectorPayloadCache.Lookup.Absent) return false;
+
         long start = seq * (long)_recSize;
         Span<byte> hdr = stackalloc byte[RecHeaderSize];
         ReadBytes(start, hdr);
-        if (hdr[OffPresent] != 1) return false;
+        if (hdr[OffPresent] != 1)
+        {
+            _cache.StoreAbsent(seq);
+            return false;
+        }
         generation = BinaryPrimitives.ReadUInt16LittleEndian(hdr[OffGen..]);
         ReadBytes(start + RecHeaderSize, MemoryMarshal.AsBytes(dest[.._dim]));
+        _cache.StorePresent(seq, generation, dest[.._dim]);
+        return true;
+    }
+
+    /// <summary>
+    /// HNSW distance 計算用。cache hit は slab の span を直接返して vector 全体のコピーを除去し、
+    /// miss だけ <paramref name="scratch"/> へページから読み出す。
+    /// </summary>
+    public bool TryGetForScoring(
+        long seq,
+        float[] scratch,
+        out ReadOnlySpan<float> vector,
+        out ushort generation)
+    {
+        vector = default;
+        generation = 0;
+        if (seq < 0 || seq >= _hwm || scratch.Length < _dim) return false;
+
+        var cached = _cache.TryGetSpan(seq, out vector, out generation);
+        if (cached == VectorPayloadCache.Lookup.Present) return true;
+        if (cached == VectorPayloadCache.Lookup.Absent) return false;
+
+        var destination = scratch.AsSpan(0, _dim);
+        if (!TryGet(seq, destination, out generation)) return false;
+        vector = destination;
         return true;
     }
 
     /// <summary>recovery 用: ヘッダから hwm を読み直す (abort の before-image undo 後)。</summary>
-    public void ReloadMeta() => LoadMeta();
+    public void ReloadMeta()
+    {
+        LoadMeta();
+        _cache.Clear();
+    }
 
     // --- private: 論理バイト配列 (page 2+ を striping) ---
 

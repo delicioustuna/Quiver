@@ -8,22 +8,21 @@
 
 ---
 
-## VP-5 HNSW true recall@10
+## HNSW true recall@10
 
 固定 seed のランダムコーパス（N=10,000、dim=384、cosine、20 queries）について、
 brute-force exact top-10 を毎回計算し、HNSW top-10 との平均 overlap を測定した。
 削除後は生存集合だけで ground truth を再計算する。
 
-ゲートは二段構成: **default** は既定構築パラメタの品質「劣化」を監視し (床値 0.80)、
-**sla** は 0.95 以上を満たすと検証済みの高品質構成がその水準を維持することを保証する。
-既定構成が 0.95 に届かない事実は
+ゲートは二段構成: **legacy** は旧既定を比較基準として監視し (床値 0.80)、
+**default** は新既定が 0.95 以上を維持することを保証する。既定引き上げの判断は
 [docs/spec/08_known_limits.md#hnsw-default-recall](spec/08_known_limits.md#hnsw-default-recall)
 に判断として記録している。
 
-| 構成 | M/Mmax0/efC | 構築直後 | 30% 削除後（HealNeighborhood 経由） | ゲート閾値 |
-|---|---|---:|---:|---:|
-| default（既定値） | 16/32/200 | 0.825 | 0.865 | ≥ 0.80 |
-| sla（高品質） | 32/64/400 | 0.950 | 0.985 | ≥ 0.95 |
+| 構成 | M/Mmax0/efC | 構築時間 | 検索平均 | 構築直後 | 30% 削除後 | ゲート |
+|---|---|---:|---:|---:|---:|---:|
+| legacy（旧既定） | 16/32/200 | 5.95 s | 1.02 ms | 0.825 | 0.865 | ≥ 0.80 |
+| default（新既定） | 32/64/400 | 10.00 s | 1.43 ms | 0.950 | 0.985 | ≥ 0.95 |
 
 実行コマンド:
 
@@ -33,21 +32,43 @@ dotnet run -c Release --project benchmarks\Quiver.Benchmarks.RecallCheck
 
 いずれかのゲートが閾値未満なら exit code 1 を返す。通常の unit test へ混ぜるには重いため、専用の品質ゲートとして分離している。
 
-### VP-2 efSearch sweep
+### efSearch sweep
 
-上と同じ default corpus の構築直後について、`VectorSearchOptions.EfSearch` だけを変更した結果。
+上と同じ legacy 構築グラフについて、`VectorSearchOptions.EfSearch` だけを変更した結果。
 latency は brute-force ground truth 計算を除外し、HNSW カーソル生成と全件列挙だけを warmup 後に計測した。
 
 | efSearch | recall@10 | mean latency (ms) |
 |---:|---:|---:|
-| 32 | 0.245 | 0.682 |
-| 64 | 0.435 | 0.999 |
-| 100 | 0.570 | 1.331 |
-| 200 | 0.825 | 2.214 |
+| 32 | 0.245 | 0.281 |
+| 64 | 0.435 | 0.431 |
+| 100 | 0.570 | 0.649 |
+| 200 | 0.825 | 1.023 |
 
-既定値 200 は変更しない。低 ef はレイテンシを削減できるが、この corpus では recall の損失が大きい。
+payload cache 導入後の再測値。既定値 200 は変更しない。低 ef はレイテンシを削減できるが、
+この corpus では recall の損失が大きい。
 
-## CR-1 並行読み取りスケーリング
+### payload slab cache
+
+同一の persistent HNSW を `VectorCacheBudgetBytes=0` と 64 MiB で開き直し、
+固定 query の warm steady-state を比較した。cache は全 index で予算を共有する約 64 KiB の
+遅延確保 slab で、hit 時は payload page pin と vector の scratch copy を行わない。
+
+| 構築構成 | N | dim | page pin (ms) | slab cache (ms) | 改善 | pin 寄与 |
+|---|---:|---:|---:|---:|---:|---:|
+| legacy 16/32/200 | 10,000 | 768 | 1.916 | 0.758 | 2.53× | 60.4% |
+| legacy 16/32/200 | 20,000 | 768 | 2.553 | 0.924 | 2.76× | 63.8% |
+| default 32/64/400 | 10,000 | 768 | 3.173 | 1.533 | 2.07× | 51.7% |
+
+両条件で top-10 は完全一致。N=100k の正式 kill-criteria 点は、現行 HNSW 構築が
+30 分を超えてタイムアウトしたため未取得だが、規模とともに pin 寄与と speedup が増える傾向を確認した。
+
+実行コマンド:
+
+```powershell
+dotnet run -c Release --project benchmarks\Quiver.Benchmarks -- --payload-cache 20000 768 200
+```
+
+## 並行読み取りスケーリング
 
 同一 DB に対する固定時間（各点 1 秒）の read-only throughput。AMD Ryzen 7 5700X
 （16 logical cores）/ Windows 11 / .NET 10.0.9 / Release。
@@ -60,9 +81,8 @@ latency は brute-force ground truth 計算を除外し、HNSW カーソル生�
 
 KNN は `PersistentVectorStore._gate` によりほぼ完全に直列化されている。1-hop は
 `PagedFile` の resident pin/unpin も単一 pool lock を通るため、thread 数を増やすほど退行した。
-この表を CR-2 / CR-3 の kill criteria の分母とする。
 
-### CR-3 index 単位 ReaderWriterLockSlim spike
+### index 単位 ReaderWriterLockSlim spike
 
 `_gate` を catalog lock と index 単位 `ReaderWriterLockSlim` に分離し、同じハーネスで再測定した。
 機能テストでは同一 index の reader が同時進入し、別 index の writer が停止しないことを確認できたが、
@@ -70,18 +90,67 @@ KNN は `PersistentVectorStore._gate` によりほぼ完全に直列化されて
 
 | workload | 1 thread ops/s | 2 threads | 4 threads | 8 threads |
 |---|---:|---:|---:|---:|
-| HNSW KNN（CR-3 spike） | 1,836 (1.00×) | 1,768 (0.96×) | 1,086 (0.59×) | 902 (0.49×) |
+| HNSW KNN（spike） | 1,836 (1.00×) | 1,768 (0.96×) | 1,086 (0.59×) | 902 (0.49×) |
 
 基準の 4 thread 1,615 ops/s に対して spike は 1,086 ops/s（0.67×）。
 HNSW の距離計算ごとの `VectorPayloadStore.TryGet` が page pin を行い、並行 reader が
 `PagedFile` の global pool lock で競合したためである。ロック変更は採用せず取り下げた。
-CR-3 は VP-4 の payload cache または CR-2 の optimistic pin 後に再試行する。
+payload cache または optimistic read pin の導入後に再試行する。
+
+### 再試行（payload cache 導入後）
+
+payload slab cache 導入後に catalog lock + index 単位 `ReaderWriterLockSlim` を再適用した。
+同じハーネスで 4 thread は 3.48×となり、目標（≥3×）を通過した。
+
+| workload | 1 thread ops/s | 2 threads | 4 threads | 8 threads |
+|---|---:|---:|---:|---:|
+| HNSW KNN（cache + reader lock、新既定） | 4,322 (1.00×) | 8,569 (1.98×) | 15,050 (3.48×) | 21,726 (5.03×) |
+
+旧 spike の 4-thread 1,086 ops/s に対して 13.9×。reader lock の構造ではなく、
+距離計算ごとの payload page pin が global pool lock で競合していたことが実測で確定した。
 
 実行コマンド:
 
 ```powershell
 dotnet run -c Release --project benchmarks\Quiver.Benchmarks -- --read-scaling
 ```
+
+## VectorScorer accumulator spike
+
+既存の単一 accumulator SIMD に対し、Dot/Euclidean は 4-way、Cosine は 2-way から試した。
+数値パリティは相対誤差 1e-5 の既存テストを通過した。
+
+| metric | dim 384 | dim 768 | dim 1536 | 判断 |
+|---|---:|---:|---:|---|
+| Dot 4-way | 1.16× | 1.65× | 1.65× | 384 で 1.3×未達 |
+| Cosine 2-way | 1.09× | 1.17× | 1.22× | 全点 1.3×未達 |
+| Euclidean 4-way | 1.06× | 1.30× | 1.52× | 参考 |
+
+Dot 8-way / Cosine 4-way も再測したが、Cosine はレジスタ圧迫により 0.79〜0.87×へ退行した。
+Dot/Cosine 双方で 1.3×という kill criteria を満たさないため、本番 scorer は現状維持とした。
+
+実行コマンド:
+
+```powershell
+dotnet run -c Release --project benchmarks\Quiver.Benchmarks -- --scorer-accumulator
+```
+
+## optimistic read pin spike
+
+resident hit を global pool lock から外すため、frame generation、CAS pin、
+`PinCount=-1` eviction claim を組み合わせた spike を実施した。強制 eviction stress は通過したが、
+1-hop スケーリングは目標に届かなかった。
+
+| threads | baseline | optimistic pin | optimistic speedup |
+|---:|---:|---:|---:|
+| 1 | 45,989 | 48,690 | 1.00× |
+| 2 | 37,796 | 65,765 | 1.35× |
+| 4 | 20,338 | 52,300 | 1.07× |
+| 8 | 17,849 | 45,263 | 0.93× |
+
+4-thread の絶対 throughput は旧値比 2.57×だが、1-thread 比は 1.07×。
+pool lock の次に同一 resident frame の `ReaderWriterLockSlim` が共有競合となったため、
+optimistic pin は撤回した。frame read の seqlock/snapshot 化を含む別設計が必要。
 
 ---
 

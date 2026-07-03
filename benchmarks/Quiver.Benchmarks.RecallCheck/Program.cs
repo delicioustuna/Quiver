@@ -3,23 +3,20 @@ using Quiver.Core;
 using Quiver.Testing;
 using System.Diagnostics;
 
-// VP-5: true recall@10 の二段ゲート。
-//   1) default ゲート — 既定構築パラメタ (M=16/Mmax0=32/efC=200) の品質「劣化」を監視する。
-//      既定構成の実測は ~0.825 であり 0.95 SLA には届かない (docs/spec/08_known_limits.md
-//      #hnsw-default-recall)。閾値は実測から余裕をとった床値で、改善タスク (VP-2 実測後の
-//      既定見直し等) の分母になる。
-//   2) sla ゲート — recall@10 ≥ 0.95 を満たすと検証済みの高品質構成 (M=32/Mmax0=64/efC=400)
+// true recall@10 の二段ゲート。
+//   1) legacy ゲート — 旧既定 (M=16/Mmax0=32/efC=200) の比較基準を維持する。
+//   2) default ゲート — recall@10 ≥ 0.95 を満たす新既定 (M=32/Mmax0=64/efC=400)
 //      がその水準を維持し続けることを保証する。
 // どちらも brute-force exact top-10 を ground truth とし、30% 削除後は生存集合で再計算する。
 
 var scenarios = new[]
 {
     new Scenario(
-        Name: "default",
+        Name: "legacy",
         HnswM: 16, HnswMMax0: 32, HnswEfConstruction: 200,
         MinimumRecall: 0.80),
     new Scenario(
-        Name: "sla",
+        Name: "default",
         HnswM: 32, HnswMMax0: 64, HnswEfConstruction: 400,
         MinimumRecall: 0.95),
 };
@@ -30,18 +27,18 @@ foreach (var scenario in scenarios)
 
 if (!allPassed)
 {
-    Console.Error.WriteLine("VP-5 FAILED: one or more recall gates fell below their threshold.");
+    Console.Error.WriteLine("RecallCheck FAILED: one or more recall gates fell below their threshold.");
     return 1;
 }
 
-Console.WriteLine("VP-5 PASSED");
+Console.WriteLine("RecallCheck PASSED");
 return 0;
 
 static bool RunScenario(Scenario scenario)
 {
-    const string IndexName = "vp5_recall";
+    const string IndexName = "recall_check";
     string directory = Path.Combine(
-        Path.GetTempPath(), "quiver_vp5_recall_" + Guid.NewGuid().ToString("N"));
+        Path.GetTempPath(), "quiver_recall_check_" + Guid.NewGuid().ToString("N"));
     string path = Path.Combine(directory, "graph.quiver");
 
     try
@@ -58,11 +55,12 @@ static bool RunScenario(Scenario scenario)
             db.Schema.GetOrCreatePropertyKey("embedding"),
             VectorRecallCorpus.RecallDimensions,
             DistanceMetric.Cosine,
-            "VP-5 deterministic corpus",
+            "deterministic recall corpus",
             HnswM: scenario.HnswM,
             HnswMMax0: scenario.HnswMMax0,
             HnswEfConstruction: scenario.HnswEfConstruction));
 
+        var buildStopwatch = Stopwatch.StartNew();
         using (var tx = db.BeginTransaction())
         {
             for (int i = 0; i < VectorRecallCorpus.RecallCount; i++)
@@ -75,18 +73,21 @@ static bool RunScenario(Scenario scenario)
             }
             tx.Commit();
         }
+        buildStopwatch.Stop();
 
         var queries = Enumerable.Range(0, VectorRecallCorpus.QueryCount)
             .Select(_ => VectorRecallCorpus.NextVector(
                 random, VectorRecallCorpus.RecallDimensions))
             .ToArray();
 
-        if (scenario.Name == "default")
+        if (scenario.Name == "legacy")
             MeasureEfSearchSweep(db, IndexName, corpus, live, queries);
 
-        double before = MeasureRecall(db, IndexName, corpus, live, queries);
+        var before = MeasureRecallAndLatency(db, IndexName, corpus, live, queries);
         Console.WriteLine(
-            $"[{scenario.Name}] before_delete recall@{VectorRecallCorpus.K}={before:F3} " +
+            $"[{scenario.Name}] before_delete recall@{VectorRecallCorpus.K}={before.Recall:F3}, " +
+            $"build_ms={buildStopwatch.Elapsed.TotalMilliseconds:F0}, " +
+            $"search_mean_ms={before.MeanLatencyMs:F3} " +
             $"(N={VectorRecallCorpus.RecallCount}, dim={VectorRecallCorpus.RecallDimensions}, " +
             $"M={scenario.HnswM}, Mmax0={scenario.HnswMMax0}, efC={scenario.HnswEfConstruction})");
 
@@ -108,7 +109,7 @@ static bool RunScenario(Scenario scenario)
         Console.WriteLine(
             $"[{scenario.Name}] after_delete_30pct recall@{VectorRecallCorpus.K}={after:F3}");
 
-        bool passed = before >= scenario.MinimumRecall && after >= scenario.MinimumRecall;
+        bool passed = before.Recall >= scenario.MinimumRecall && after >= scenario.MinimumRecall;
         if (!passed)
         {
             Console.Error.WriteLine(

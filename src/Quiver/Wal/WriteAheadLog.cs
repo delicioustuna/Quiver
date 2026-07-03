@@ -16,7 +16,7 @@ namespace Quiver.Storage.Wal;
 ///   <item><see cref="MarkDeleteOnDispose"/> されたクリーン終了では Dispose 時にファイルを削除する。
 ///     全データは graph.quiver へ durable 済みなので、静止時はサイドカーが消えて本体のみが残る。</item>
 /// </list>
-/// レコードフォーマット / 案C コアレス / group commit / PageImage coalesce は据え置き。
+/// レコードフォーマット / コアレス / group commit / PageImage coalesce は据え置き。
 /// </summary>
 internal sealed class WriteAheadLog : IWriteAheadLog
 {

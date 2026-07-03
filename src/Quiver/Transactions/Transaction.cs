@@ -136,7 +136,7 @@ internal sealed class Transaction : ITransaction
             // critical section で post-commit スタンプを sidecar に書き戻し、それも
             // 本 tx の PageImage として WAL に乗せて durable にする。
             if (_ssn != null) SsnValidateAndStamp();
-            // 案C: UnpinDirty はページイメージをトランザクションバッファにコアレスするだけ。
+            // UnpinDirty はページイメージをトランザクションバッファにコアレスするだけ。
             // ここで全 PageImage を WAL へ追記し、その後に Commit レコードを書く。
             // Commit を最後に書くことで、recovery はコミット済みトランザクションの
             // ページイメージのみを replay する。

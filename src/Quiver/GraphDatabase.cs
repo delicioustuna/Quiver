@@ -377,11 +377,17 @@ public sealed class GraphDatabaseOptions
     /// <summary>バッファプールの目標サイズ (バイト単位)。既定 256 MB。</summary>
     public long BufferPoolSize { get; set; } = 256 * 1024 * 1024;
 
+    /// <summary>
+    /// 全 vector index で共有する payload slab cache の上限 (バイト単位)。既定 64 MB。
+    /// 0 以下で無効。予算を超える range は永続ページから読み出すため、検索結果は変わらない。
+    /// </summary>
+    public long VectorCacheBudgetBytes { get; set; } = 64L * 1024 * 1024;
+
     /// <summary>WAL 1 セグメントのサイズ (バイト単位)。既定 64 MB。</summary>
     public int WalSegmentSize { get; set; } = 64 * 1024 * 1024;
 
     /// <summary>
-    /// 案A: チェックポイント契機のしきい値 (バイト単位)。前回チェックポイント以降に
+    /// チェックポイント契機のしきい値 (バイト単位)。前回チェックポイント以降に
     /// WAL がこのバイト数以上成長し、かつアクティブトランザクションが 0 になった時点で、
     /// 全データページをフラッシュして WAL を truncate する。既定 64 MB。
     /// 0 以下を指定するとチェックポイントを行わず、WAL は単調増加する (旧挙動)。

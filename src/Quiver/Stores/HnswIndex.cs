@@ -44,6 +44,7 @@ internal sealed class HnswIndex
     private readonly double _ml;
     private readonly int _countsBytes;
     private readonly int _recordSize;
+    private readonly ThreadLocal<SearchLayerContext> _searchContexts;
 
     // in-memory 隣接 (ページの写し)。Layers[level+1] 個の long[] (層ごとの近傍 seq)。
     private sealed class Node { public int Level; public required long[][] Layers; }
@@ -74,6 +75,8 @@ internal sealed class HnswIndex
         _countsBytes = _maxLayers;
         int neighborSlots = checked(_mmax0 + (_maxLayers - 1) * _m);
         _recordSize = checked(HeaderBytes + _countsBytes + neighborSlots * sizeof(long));
+        _searchContexts = new ThreadLocal<SearchLayerContext>(
+            () => new SearchLayerContext(_dim, _efConstruction));
         if (_file.PageCount <= 1)
         {
             _file.AllocatePage(PageKind.Header);
@@ -285,13 +288,13 @@ internal sealed class HnswIndex
         var buf = ArrayPool<float>.Shared.Rent(_dim);
         try
         {
-            var dest = buf.AsSpan(0, _dim);
             foreach (var c in w)
             {
                 if (inFilter is not null && !inFilter(c.Seq)) continue;
-                if (!_payload.TryGet(c.Seq, dest, out var gen)) continue;
+                if (!_payload.TryGetForScoring(c.Seq, buf, out var vector, out var gen)) continue;
                 if (!isLive(c.Seq, gen)) continue;
-                heap.Offer(new VectorSearchResult(kind, c.Seq, VectorMetrics.Score(_metric, query, dest)));
+                heap.Offer(new VectorSearchResult(
+                    kind, c.Seq, VectorMetrics.Score(_metric, query, vector)));
             }
         }
         finally { ArrayPool<float>.Shared.Return(buf); }
@@ -364,57 +367,115 @@ internal sealed class HnswIndex
 
     private List<Cand> SearchLayer(ReadOnlySpan<float> q, long entry, int ef, int layer)
     {
-        var buf = ArrayPool<float>.Shared.Rent(_dim);
-        try
+        var context = _searchContexts.Value!;
+        context.Reset(ef, _maxSeq, _nodes.Count);
+        var candidates = context.Candidates;
+        var results = context.Results;
+        var list = context.Sorted;
+
+        context.AddVisited(entry);
+        double ed = Dist(q, entry, context.Scratch);
+        candidates.Enqueue(entry, ed);
+        results.Enqueue(entry, -ed);
+
+        while (candidates.Count > 0)
         {
-            var visited = new HashSet<long> { entry };
-            double ed = Dist(q, entry, buf);
-            // candidates: 近い順に展開する min-heap (priority = dist)。
-            var candidates = new PriorityQueue<long, double>();
-            // results: 最遠を peek できる max-heap (priority = -dist)、ef で bound。
-            var results = new PriorityQueue<long, double>();
-            candidates.Enqueue(entry, ed);
-            results.Enqueue(entry, -ed);
+            candidates.TryDequeue(out long c, out double cd);
+            // results の最遠 (= -priority が最小 → priority 最大... PriorityQueue は min-priority を peek)。
+            results.TryPeek(out _, out double negFar);
+            double farthest = -negFar;
+            if (cd > farthest && results.Count >= ef) break;
 
-            while (candidates.Count > 0)
+            if (!_nodes.TryGetValue(c, out var node) || layer > node.Level) continue;
+            foreach (var nb in node.Layers[layer])
             {
-                candidates.TryDequeue(out long c, out double cd);
-                // results の最遠 (= -priority が最小 → priority 最大... PriorityQueue は min-priority を peek)。
-                results.TryPeek(out _, out double negFar);
-                double farthest = -negFar;
-                if (cd > farthest && results.Count >= ef) break;
-
-                if (!_nodes.TryGetValue(c, out var node) || layer > node.Level) continue;
-                foreach (var nb in node.Layers[layer])
+                if (!context.AddVisited(nb)) continue;
+                double d = Dist(q, nb, context.Scratch);
+                results.TryPeek(out _, out double nf);
+                double far = -nf;
+                if (d < far || results.Count < ef)
                 {
-                    if (!visited.Add(nb)) continue;
-                    double d = Dist(q, nb, buf);
-                    results.TryPeek(out _, out double nf);
-                    double far = -nf;
-                    if (d < far || results.Count < ef)
-                    {
-                        candidates.Enqueue(nb, d);
-                        results.Enqueue(nb, -d);
-                        if (results.Count > ef) results.Dequeue(); // 最遠を捨てる
-                    }
+                    candidates.Enqueue(nb, d);
+                    results.Enqueue(nb, -d);
+                    if (results.Count > ef) results.Dequeue(); // 最遠を捨てる
                 }
             }
-
-            // results を近い順に並べて返す。
-            var list = new List<Cand>(results.Count);
-            while (results.Count > 0)
-            {
-                results.TryDequeue(out long s, out double negd);
-                list.Add(new Cand(s, -negd));
-            }
-            list.Sort(static (a, b) =>
-            {
-                int c = a.Dist.CompareTo(b.Dist);
-                return c != 0 ? c : a.Seq.CompareTo(b.Seq);
-            });
-            return list;
         }
-        finally { ArrayPool<float>.Shared.Return(buf); }
+
+        // results を近い順に並べて返す。次の SearchLayer 呼び出しまで有効。
+        while (results.Count > 0)
+        {
+            results.TryDequeue(out long s, out double negd);
+            list.Add(new Cand(s, -negd));
+        }
+        list.Sort(static (a, b) =>
+        {
+            int c = a.Dist.CompareTo(b.Dist);
+            return c != 0 ? c : a.Seq.CompareTo(b.Seq);
+        });
+        return list;
+    }
+
+    private sealed class SearchLayerContext
+    {
+        public SearchLayerContext(int dim, int initialCapacity)
+        {
+            Scratch = new float[dim];
+            Visited = new HashSet<long>(initialCapacity * 4);
+            Candidates = new PriorityQueue<long, double>(initialCapacity);
+            Results = new PriorityQueue<long, double>(initialCapacity);
+            Sorted = new List<Cand>(initialCapacity);
+        }
+
+        public float[] Scratch { get; }
+        public HashSet<long> Visited { get; }
+        public PriorityQueue<long, double> Candidates { get; }
+        public PriorityQueue<long, double> Results { get; }
+        public List<Cand> Sorted { get; }
+
+        private int[]? _denseVisited;
+        private int _visitEpoch;
+        private bool _useDenseVisited;
+
+        public void Reset(int ef, long maxSeq, int nodeCount)
+        {
+            Visited.Clear();
+            _useDenseVisited =
+                maxSeq >= 0 &&
+                maxSeq <= 10_000_000 &&
+                maxSeq <= (long)nodeCount * 4 + 1024;
+            if (_useDenseVisited)
+            {
+                int required = checked((int)maxSeq);
+                if (_denseVisited is null || _denseVisited.Length < required)
+                    _denseVisited = new int[required];
+                if (++_visitEpoch <= 0)
+                {
+                    Array.Clear(_denseVisited);
+                    _visitEpoch = 1;
+                }
+            }
+            else
+            {
+                Visited.EnsureCapacity(ef * 4);
+            }
+            Candidates.Clear();
+            Results.Clear();
+            Sorted.Clear();
+            Candidates.EnsureCapacity(ef);
+            Results.EnsureCapacity(ef);
+            Sorted.EnsureCapacity(ef);
+        }
+
+        public bool AddVisited(long seq)
+        {
+            if (!_useDenseVisited || seq < 0 || seq >= _denseVisited!.Length)
+                return Visited.Add(seq);
+            int index = (int)seq;
+            if (_denseVisited[index] == _visitEpoch) return false;
+            _denseVisited[index] = _visitEpoch;
+            return true;
+        }
     }
 
     // 単純ヒューリスティック: 近い順 m 件を採用。
@@ -444,8 +505,7 @@ internal sealed class HnswIndex
         var nodeVecBuf = ArrayPool<float>.Shared.Rent(_dim);
         try
         {
-            var nodeVec = nodeVecBuf.AsSpan(0, _dim);
-            if (!_payload.TryGet(node, nodeVec, out _)) return;
+            if (!_payload.TryGetForScoring(node, nodeVecBuf, out var nodeVec, out _)) return;
             var pool = new List<long>(cur.Length + 1);
             pool.AddRange(cur);
             pool.Add(newNeighbor);
@@ -471,8 +531,8 @@ internal sealed class HnswIndex
     // dist(query, vec(seq)) = -Score (低いほど近い)。payload 無しは +∞。
     private double Dist(ReadOnlySpan<float> q, long seq, float[] scratch)
     {
-        var v = scratch.AsSpan(0, _dim);
-        if (!_payload.TryGet(seq, v, out _)) return double.PositiveInfinity;
+        if (!_payload.TryGetForScoring(seq, scratch, out var v, out _))
+            return double.PositiveInfinity;
         return -VectorMetrics.Score(_metric, q, v);
     }
 

@@ -78,7 +78,7 @@ public partial class Knows
 | BFS 2-hop（ハブ degree 100、leaf 10,000、隣接ブロック） | ~0.037 ms |
 | 1-hop クエリ（`g.Node().Out()`、degree 100、隣接ブロック） | ~4.2 µs/query（~42 ns/edge） |
 | BulkLoader（10 万 edge） | 通常 TX（batch 1000）比 ~11.8× |
-| HNSW true recall@10（N=10k、dim=384、既定 M=16/efC=200） | 0.825 |
+| HNSW true recall@10（N=10k、dim=384、既定 M=32/efC=400） | 0.950 |
 | HNSW true recall@10（同上、高品質 M=32/efC=400） | 0.950（30% 削除後 0.985） |
 
 > AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch による参考計測値。

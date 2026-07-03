@@ -224,10 +224,10 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
         string ProviderId,
         string? NormalizationProfile,
         VectorIndexKind IndexKind = VectorIndexKind.HnswFlat,
-        int HnswM = 16,
-        int HnswMMax0 = 32,
+        int HnswM = 32,
+        int HnswMMax0 = 64,
         int HnswMaxLayers = 8,
-        int HnswEfConstruction = 200);
+        int HnswEfConstruction = 400);
 
     private sealed record TaskDto(
         EntityKind EntityKind,

@@ -47,10 +47,25 @@ if (args.Length >= 1 && args[0] == "--basic-perf")
     return BasicPerfRunner.Run();
 }
 
-// CR-1: basic-perf に含まれる並行 read scaling の単独再測入口。
+// basic-perf に含まれる並行 read scaling の単独再測入口。
 if (args.Length >= 1 && args[0] == "--read-scaling")
 {
     return ReadScalingRunner.Run();
+}
+
+// payload page pin と slab cache の同一 DB 比較。
+// Usage: -- --payload-cache [N] [dim] [queries]
+if (args.Length >= 1 && args[0] == "--payload-cache")
+{
+    int count = args.Length >= 2 && int.TryParse(args[1], out var n) ? n : 10_000;
+    int dimensions = args.Length >= 3 && int.TryParse(args[2], out var d) ? d : 768;
+    int queryCount = args.Length >= 4 && int.TryParse(args[3], out var q) ? q : 50;
+    return PayloadCacheRunner.Run(count, dimensions, queryCount);
+}
+
+if (args.Length >= 1 && args[0] == "--scorer-accumulator")
+{
+    return ScorerAccumulatorRunner.Run();
 }
 
 // TS-6: JsonExporter.Full は <ResultsDir>/<Class>-report-full.json を出す。

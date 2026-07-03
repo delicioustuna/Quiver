@@ -58,6 +58,35 @@ public sealed class VectorTransactionTests : IDisposable
     }
 
     [Fact]
+    public void Aborted_overwrite_invalidates_payload_cache()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.Vectors.CreateVectorIndex(Spec(db));
+        NodeId node;
+        using (var tx = db.BeginTransaction())
+        {
+            node = tx.CreateNode("Doc");
+            tx.SetVector(EntityKind.Node, node.Value, IndexName, [1f, 0f, 0f, 0f]);
+            tx.Commit();
+        }
+
+        // committed 値を slab に載せてから、同じ seq を未 commit 値で write-through する。
+        var destination = new float[Dim];
+        db.Vectors.TryGetVector(EntityKind.Node, node.Value, IndexName, destination).Should().BeTrue();
+        destination.Should().Equal(1f, 0f, 0f, 0f);
+
+        using (var tx = db.BeginTransaction())
+        {
+            tx.SetVector(EntityKind.Node, node.Value, IndexName, [0f, 1f, 0f, 0f]);
+            tx.Rollback();
+        }
+
+        destination.AsSpan().Clear();
+        db.Vectors.TryGetVector(EntityKind.Node, node.Value, IndexName, destination).Should().BeTrue();
+        destination.Should().Equal(1f, 0f, 0f, 0f);
+    }
+
+    [Fact]
     public void Hybrid_graph_and_vector_commit_is_atomic_across_reopen()
     {
         long id;

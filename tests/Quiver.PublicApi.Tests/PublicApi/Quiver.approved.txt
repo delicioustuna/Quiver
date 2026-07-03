@@ -547,6 +547,7 @@ namespace Quiver
         public long MaxCheckpointThresholdBytes { get; set; }
         public long MinCheckpointThresholdBytes { get; set; }
         public System.TimeSpan TargetRecoveryTime { get; set; }
+        public long VectorCacheBudgetBytes { get; set; }
         public int WalSegmentSize { get; set; }
     }
     public static class GraphDatabaseSchemaExtensions
@@ -1075,7 +1076,7 @@ namespace Quiver.Core
     }
     public sealed class VectorIndexSpec : System.IEquatable<Quiver.Core.VectorIndexSpec>
     {
-        public VectorIndexSpec(string Name, Quiver.Core.EntityKind EntityKind, Quiver.Core.PropertyKeyId SourcePropertyKeyId, int Dimensions, Quiver.Core.DistanceMetric Metric, string ProviderId, string? NormalizationProfile = null, Quiver.Core.VectorIndexKind IndexKind = 0, int HnswM = 16, int HnswMMax0 = 32, int HnswMaxLayers = 8, int HnswEfConstruction = 200) { }
+        public VectorIndexSpec(string Name, Quiver.Core.EntityKind EntityKind, Quiver.Core.PropertyKeyId SourcePropertyKeyId, int Dimensions, Quiver.Core.DistanceMetric Metric, string ProviderId, string? NormalizationProfile = null, Quiver.Core.VectorIndexKind IndexKind = 0, int HnswM = 32, int HnswMMax0 = 64, int HnswMaxLayers = 8, int HnswEfConstruction = 400) { }
         public int Dimensions { get; init; }
         public Quiver.Core.EntityKind EntityKind { get; init; }
         public int HnswEfConstruction { get; init; }

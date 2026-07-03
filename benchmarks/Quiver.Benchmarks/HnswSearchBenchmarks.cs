@@ -14,7 +14,7 @@ namespace Quiver.Benchmarks;
 /// <para><c>HnswSearch</c> = <see cref="Core.IVectorStore.KnnSearch"/> (HNSW graph)。
 /// <c>ExactFlatScan</c> は persistent payload を直接全走査する内部 baseline であり、
 /// HNSW を一切経由しない。HNSW should be markedly faster as N grows while keeping high
-/// recall (verified by the VP-5 recall gate).</para>
+/// recall (verified by the RecallCheck recall gate).</para>
 /// </summary>
 [MemoryDiagnoser]
 [ShortRunJob]

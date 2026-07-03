@@ -254,7 +254,7 @@ public sealed class IndexGenerationTests : IDisposable
     [Fact]
     public void FormatVersion_current_is_v2()
     {
-        // VP-3 は vector catalog と HNSW レコードを自己記述化する明示的 clean break。
+        // FormatVersion V2 は vector catalog と HNSW レコードを自己記述化する明示的 clean break。
         FormatVersion.Current.Should().Be(FormatVersion.V2);
     }
 

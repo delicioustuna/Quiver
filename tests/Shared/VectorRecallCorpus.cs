@@ -1,7 +1,7 @@
 namespace Quiver.Testing;
 
 /// <summary>
-/// VP-4.0 / VP-5 が共有する決定的な RAG 向けベクトルコーパス定義。
+/// recall ゲートと payload cache 計測が共有する決定的な RAG 向けベクトルコーパス定義。
 /// ベンチマークと品質ゲートで seed・分布・クエリ生成を揃える。
 /// </summary>
 internal static class VectorRecallCorpus

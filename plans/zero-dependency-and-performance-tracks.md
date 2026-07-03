@@ -107,6 +107,11 @@
 - **Kill criteria**: 次元 384+ の Dot/Cosine で ≥1.3×。未達なら展開数を振って再測、それでも未達なら**現状維持で報告** (このタスクは「実験」であり成果を前提にしない)。
 - **判断ポイント**: HNSW/flat の順位が既知コーパスで不変であること (タイブレークは seq 順で吸収)。
 - **依存関係**: なし。工数: 小 (0.5 日)。
+- **実測結果 (2026-07-03、現状維持)**: Dot/Euclidean=4-way、Cosine=2-way の最良候補は、
+  dim 384/768/1536 で Dot 1.16×/1.65×/1.65×、Cosine 1.09×/1.17×/1.22×、
+  Euclidean 1.06×/1.30×/1.52×。Dot=8-way / Cosine=4-way も試したが、Cosine は
+  0.79〜0.87×へ悪化した。Dot/Cosine 双方で 1.3×という kill criteria を満たさないため、
+  scorer 本体の変更は撤回した。
 
 ### VP-2: VectorSearchOptions の導入 (efSearch の公開)
 
@@ -146,6 +151,13 @@
 - **Kill criteria**: dim 768 / N 100k / k 10 の KNN レイテンシで**真の flat baseline 比・HNSW 現行比の両方を報告**し、HNSW 現行比 ≥3× 改善。recall 不変 (VP-5 ゲート)。reload 整合テスト緑。
 - **判断ポイント**: キャッシュは読み取り経路の写しであり正本はページのまま (WAL/ARIES 契約に触らない、G-1)。予算なし無条件キャッシュにしない。
 - **依存関係**: VP-4.0、VP-5 が先。CR-2 と独立だが効果は相補的。工数: 中 (spike 0.5 日 + 本実装 2.5 日)。
+- **実測・実装結果 (2026-07-03)**: DB 全 index 共有の 64 MiB 予算、約 64 KiB の遅延確保 slab、
+  second-chance eviction を実装した。cache hit は slab の `ReadOnlySpan<float>` を scorer へ直接渡し、
+  page pin と vector 全体コピーをともに除去する。Set/Remove は write-through、abort/reload は全 slab を
+  invalidation する。旧構築構成の N=10k/20k・dim=768 は 2.53×/2.76×、新既定の N=10k は
+  2.07×で、いずれも top-10 完全一致。N=100k は現行 HNSW
+  構築が 30 分超で timeout し正式点は未取得。単独 3×条件は未確定だが、後続 CR-3 再試行が
+  4-thread 3.48×を達成し、狙った global pool lock 競合の除去は確認できた。
 
 ### VP-5: recall@k 回帰ゲート
 
@@ -161,6 +173,10 @@
   0.80)、(2) **SLA ゲート** = 0.95 以上を満たすと検証済みの高品質構成 (M=32/Mmax0=64/efC=400) の
   維持保証。既定構成の 0.95 未達は 08_known_limits.md #hnsw-default-recall に記録。既定値の
   引き上げは VP-2 の recall/latency 実測後に判断する (それまで VP-5 は既定構成について監視のみ)。
+- **VP-4 後の最終判断 (2026-07-03)**: M=32/Mmax0=64/efC=400 は recall 0.950、
+  構築 10.00 s (旧既定比 +68%)、検索 1.43 ms (+41%)。VP-4 前の旧既定検索 2.21 ms よりは速く、
+  ローカル RAG の既定品質目標 0.95 を満たす利益を優先して高品質構成を新既定へ昇格した。
+  RecallCheck は旧構成を legacy 比較基準、新既定を default 0.95 SLA ゲートとして維持する。
 
 ---
 
@@ -188,6 +204,14 @@
 - **Kill criteria**: CR-1 の 4 スレッド 1-hop スループットが 1 スレッド比 ≥3× (スケーリング比で判定)。単一スレッド退行 ±2% 以内。全テスト緑 (crash contract / chaos / stress 含む)。
 - **判断ポイント**: 「動くが証明できない」lock-free を採用しない。pin プロトコルの正当性 (increment→再検証→decrement の各順序) はコメントで不変条件として明文化し、stress テストを追加する。
 - **依存関係**: CR-1。工数: 中 (spike 1 日 + 本実装 2〜3 日)。
+- **実測結果 (2026-07-03、DEFER)**: `ConcurrentDictionary` directory +
+  frame generation + `PinCount=−1` eviction claim + CAS optimistic pin を実装し、
+  8 frame / 64 page / 8 reader / 160k read の強制 eviction stress は通過した。
+  しかし CR-1 1-hop は 1/2/4/8 thread = 48,690 / 65,765 / 52,300 / 45,263 ops/s、
+  4 thread は 1 thread 比 1.07×で kill criteria の 3×に未達。旧 4-thread 20,338 から
+  絶対値は 2.57×改善したが、pool lock 除去後は同一 resident page の per-frame
+  `ReaderWriterLockSlim` が次の共有競合になった。複雑な pin 状態機械を単独採用する根拠に
+  足りないため変更は撤回。再開条件は frame read の seqlock/snapshot 化を含む独立設計。
 
 ### CR-3: PersistentVectorStore の読み取り並行化 — index 単位ロックへ改訂
 
@@ -203,6 +227,10 @@
   0.67×で kill criteria を満たさなかった。reader 同士の同時進入自体は確認できたが、
   `VectorPayloadStore.TryGet` の page pin が `PagedFile` global pool lock で競合するため、変更は取り下げた。
   **VP-4 payload cache または CR-2 optimistic pin 後に再試行する。**
+- **VP-4 後の再試行 (2026-07-03、採用)**: 同じロック分離を再適用した結果、新既定の KNN は
+  1/2/4/8 thread = 4,322 / 8,569 / 15,050 / 21,726 ops/s。4 thread は 1 thread 比 3.48×で
+  kill criteria を通過した。旧 spike の 4-thread 1,086 ops/s に対して 13.9×。index 単位
+  reader/write lock を採用し、同一 index の writer だけが当該 index の reader と排他する。
 - **依存関係**: CR-1。VP-4 と同一セッション可。工数: 中 (1.5〜2.5 日)。
 
 ---

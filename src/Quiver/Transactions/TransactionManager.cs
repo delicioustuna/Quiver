@@ -24,7 +24,7 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly ConcurrentDictionary<long, Transaction> _active = new();
     private long _nextTxId;
 
-    // 案A: チェックポイント契機。EnableCheckpointing で配線される。
+    // チェックポイント契機。EnableCheckpointing で配線される。
     private Checkpointer? _checkpointer;
     private long _checkpointThresholdBytes;
     private long _lastCheckpointBytes;
@@ -265,7 +265,7 @@ internal sealed class TransactionManager : ITransactionManager
     }
 
     /// <summary>
-    /// 案A: チェックポイント契機を有効化する。<paramref name="thresholdBytes"/> 以上
+    /// チェックポイント契機を有効化する。<paramref name="thresholdBytes"/> 以上
     /// WAL が成長し、かつアクティブトランザクションが 0 になった時点でチェックポイントを打つ。
     /// <paramref name="thresholdBytes"/> が 0 以下のときはチェックポイントを行わない。
     /// </summary>
