@@ -1065,6 +1065,10 @@ namespace Quiver.Core
         public bool IsValid { get; }
         public long Value { get; init; }
     }
+    public enum VectorElementType : byte
+    {
+        Float32 = 0,
+    }
     public sealed class VectorException : Quiver.Core.GraphDbException
     {
         public VectorException(string message, System.Exception? inner = null) { }
@@ -1076,8 +1080,9 @@ namespace Quiver.Core
     }
     public sealed class VectorIndexSpec : System.IEquatable<Quiver.Core.VectorIndexSpec>
     {
-        public VectorIndexSpec(string Name, Quiver.Core.EntityKind EntityKind, Quiver.Core.PropertyKeyId SourcePropertyKeyId, int Dimensions, Quiver.Core.DistanceMetric Metric, string ProviderId, string? NormalizationProfile = null, Quiver.Core.VectorIndexKind IndexKind = 0, int HnswM = 32, int HnswMMax0 = 64, int HnswMaxLayers = 8, int HnswEfConstruction = 400) { }
+        public VectorIndexSpec(string Name, Quiver.Core.EntityKind EntityKind, Quiver.Core.PropertyKeyId SourcePropertyKeyId, int Dimensions, Quiver.Core.DistanceMetric Metric, string ProviderId, string? NormalizationProfile = null, Quiver.Core.VectorIndexKind IndexKind = 0, int HnswM = 32, int HnswMMax0 = 64, int HnswMaxLayers = 8, int HnswEfConstruction = 400, Quiver.Core.VectorElementType ElementType = 0) { }
         public int Dimensions { get; init; }
+        public Quiver.Core.VectorElementType ElementType { get; init; }
         public Quiver.Core.EntityKind EntityKind { get; init; }
         public int HnswEfConstruction { get; init; }
         public int HnswM { get; init; }

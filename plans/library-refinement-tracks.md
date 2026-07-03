@@ -232,6 +232,11 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 - **前提条件 (すべて満たすまで着手しない)**:
   - [x] ZD-2 (Core の Logging.Abstractions 除去 + EventSource / Hosting bridge) 完了 — commit `345b249`
   - [ ] VP-3 (FormatVersion V2 + 自己記述 vector catalog + per-index HNSW レイアウト) 完了
+  - [x] ベクトル要素表現の契約予約 (`VectorElementType`) 完了 — 2026-07-03。量子化埋め込み
+    (int8 等) の将来対応に備え、格納表現を `VectorIndexSpec` / catalog entry / payload ヘッダ
+    (offset 12) に永続化。現在は Float32 のみ許可し、未対応値は作成時・読込時・open 時に
+    `VectorException` で拒否。catalog は末尾フィールド追加 (V2 の長さプレフィクス機構) のため
+    FormatVersion 据え置き。スコアリングカーネルの抽象化は 2 つ目の表現の実装時に行う
   - [ ] REF-2 (backend 畳み込み) / REF-6 (承認済み API 降格) 完了
   - [ ] REF-4 (FtsQuery) 完了 — 検索エントリのシグネチャは凍結後に変えられない
   - [ ] REF-16 (非同期 tx API 撤回) 完了 — 撤回は公開後 MAJOR になるため凍結前が唯一の機会

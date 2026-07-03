@@ -18,8 +18,10 @@ namespace Quiver.Storage.Records;
 ///     <c>[entryLen i32 | nameLen i32 | name utf8 | kind 1 | srcKeyId 4 | dim 4 | metric 1 |
 ///        providerLen i32 | provider utf8 | normLen i32(−1=null) | norm utf8 |
 ///        payloadTenant 1 | hnswTenant 1 | indexKind 1 |
-///        hnswM i32 | hnswMmax0 i32 | hnswMaxLayers i32 | hnswEfConstruction i32]</c>。
-///        未知の末尾フィールドは entryLen により読み飛ばす。</item>
+///        hnswM i32 | hnswMmax0 i32 | hnswMaxLayers i32 | hnswEfConstruction i32 |
+///        elementType 1]</c>。
+///        未知の末尾フィールドは entryLen により読み飛ばす。elementType を欠く短いエントリは
+///        Float32 として読む (フィールド追加前に書かれたエントリ)。</item>
 /// </list>
 /// opt-in 用途では index は数件なので 1 ページ (8160B) に収まる。溢れたら <see cref="StorageException"/>。
 /// payload テナントは <see cref="FirstVectorTenant"/> から 2 つずつ (payload / HNSW) 採番する。
@@ -128,6 +130,12 @@ internal sealed class VectorIndexCatalog
             int hnswMmax0 = BinaryPrimitives.ReadInt32LittleEndian(body[pos..]); pos += 4;
             int hnswMaxLayers = BinaryPrimitives.ReadInt32LittleEndian(body[pos..]); pos += 4;
             int hnswEfConstruction = BinaryPrimitives.ReadInt32LittleEndian(body[pos..]); pos += 4;
+            // elementType は後から追加された末尾フィールド。これを持たない古いエントリは
+            // Float32 (追加前の唯一の表現) として読む。値の妥当性は Validate が検査するため、
+            // 将来の表現で書かれたエントリはここで明確に拒否される (誤読しない)。
+            var elementType = pos < entryEnd
+                ? (VectorElementType)body[pos++]
+                : VectorElementType.Float32;
             var spec = new VectorIndexSpec(
                 name,
                 kind,
@@ -140,7 +148,8 @@ internal sealed class VectorIndexCatalog
                 hnswM,
                 hnswMmax0,
                 hnswMaxLayers,
-                hnswEfConstruction);
+                hnswEfConstruction,
+                elementType);
             VectorIndexSpecValidator.Validate(spec);
             _entries.Add(new VectorCatalogEntry(spec, payloadTenant, hnswTenant));
             pos = entryEnd;
@@ -162,7 +171,8 @@ internal sealed class VectorIndexCatalog
                 + EncodedStringSize(e.Spec.ProviderId)
                 + EncodedStringSize(e.Spec.NormalizationProfile)
                 + 3
-                + sizeof(int) * 4;
+                + sizeof(int) * 4
+                + 1; // elementType
             if (entryLength > body.Length - pos - sizeof(int))
                 throw new StorageException(
                     $"Vector index catalog overflow ({_entries.Count} indexes). Chained pages not yet implemented.");
@@ -183,6 +193,7 @@ internal sealed class VectorIndexCatalog
             BinaryPrimitives.WriteInt32LittleEndian(body[pos..], e.Spec.HnswMMax0); pos += 4;
             BinaryPrimitives.WriteInt32LittleEndian(body[pos..], e.Spec.HnswMaxLayers); pos += 4;
             BinaryPrimitives.WriteInt32LittleEndian(body[pos..], e.Spec.HnswEfConstruction); pos += 4;
+            body[pos++] = (byte)e.Spec.ElementType;
         }
     }
 

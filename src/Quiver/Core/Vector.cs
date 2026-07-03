@@ -17,6 +17,28 @@ public enum DistanceMetric : byte
     Euclidean = 3,
 }
 
+// ElementType は現時点で Float32 のみだが、量子化埋め込み (int8 / binary 等) をモデル側が
+// 直接出力する将来に備え、格納表現をインデックス作成時の契約として今のうちに固定しておく。
+// これにより新しい表現の追加が「既存 DB の再解釈」ではなく「新フィールド値の追加」になり、
+// 旧バージョンのリーダーも未知の表現を明確なエラーで拒否できる。演算経路の抽象化
+// (スコアリングカーネルの切替) は 2 つ目の表現を実装するときに内部リファクタとして導入する。
+
+/// <summary>
+/// ベクトルの要素がインデックス内でどう表現されるか (格納と距離計算の数値型)。
+/// インデックス作成時に固定され、以後変更できない。
+/// </summary>
+/// <remarks>
+/// 現在サポートされるのは <see cref="Float32"/> のみ。このプロパティは、埋め込みモデルが
+/// 量子化ベクトル (8 ビット整数など) を直接出力する場合に将来対応できるよう、
+/// フォーマット契約として予約されている。未対応の値を指定すると
+/// <see cref="VectorException"/> が発生する。
+/// </remarks>
+public enum VectorElementType : byte
+{
+    /// <summary>32 ビット浮動小数点 (IEEE 754 single)。既定。</summary>
+    Float32 = 0,
+}
+
 /// <summary>
 /// ベクトルインデックスの構造種別。<see cref="HnswFlat"/> は HNSW ANN グラフ + payload を保持し
 /// KNN 検索 (vector-first / graph-first) の両方に使える。<see cref="FlatOnly"/> は payload のみ
@@ -48,6 +70,7 @@ public enum VectorIndexKind : byte
 /// <param name="HnswMMax0">HNSW のレイヤ 0 で保持する最大近傍数。</param>
 /// <param name="HnswMaxLayers">HNSW が保持できる最大レイヤ数。</param>
 /// <param name="HnswEfConstruction">HNSW 構築時のビーム幅。</param>
+/// <param name="ElementType">ベクトル要素の格納表現。現在は <see cref="VectorElementType.Float32"/> のみ。</param>
 public sealed record VectorIndexSpec(
     string Name,
     EntityKind EntityKind,
@@ -60,7 +83,8 @@ public sealed record VectorIndexSpec(
     int HnswM = 32,
     int HnswMMax0 = 64,
     int HnswMaxLayers = 8,
-    int HnswEfConstruction = 400);
+    int HnswEfConstruction = 400,
+    VectorElementType ElementType = VectorElementType.Float32);
 
 internal static class VectorIndexSpecValidator
 {
@@ -68,6 +92,12 @@ internal static class VectorIndexSpecValidator
     {
         if (string.IsNullOrEmpty(spec.Name))
             throw new VectorException("Vector index name must not be empty.");
+        // 新しい要素表現の追加時はここの許可リストを広げ、スコアリングカーネル /
+        // payload レコード長 / cache slab の型をあわせて分岐させること。
+        if (spec.ElementType != VectorElementType.Float32)
+            throw new VectorException(
+                $"Vector index '{spec.Name}' has unsupported element type " +
+                $"{spec.ElementType}; this version supports only {VectorElementType.Float32}.");
         if (spec.Dimensions <= 0)
             throw new VectorException(
                 $"Vector index '{spec.Name}' must have positive dimensions (was {spec.Dimensions}).");

@@ -13,10 +13,15 @@
 | EntityKind | enum | `Node` または `Relationship` |
 | Metric | enum | `Euclidean`, `Cosine`, または `Dot` |
 | IndexKind | enum | `HnswFlat` または `FlatOnly` |
-| HnswM | int | レイヤ 1 以上の最大近傍数。既定 16、範囲 2..255 |
-| HnswMMax0 | int | レイヤ 0 の最大近傍数。既定 32、範囲 HnswM..255 |
+| ElementType | enum | 要素の格納表現。現在は `Float32` のみ (将来の量子化表現用の契約予約) |
+| HnswM | int | レイヤ 1 以上の最大近傍数。既定 32、範囲 2..255 |
+| HnswMMax0 | int | レイヤ 0 の最大近傍数。既定 64、範囲 HnswM..255 |
 | HnswMaxLayers | int | 最大レイヤ数。既定 8、範囲 1..255 |
-| HnswEfConstruction | int | 構築時ビーム幅。既定 200、範囲 HnswM..1,000,000 |
+| HnswEfConstruction | int | 構築時ビーム幅。既定 400、範囲 HnswM..1,000,000 |
+
+`ElementType` は payload のレコード幅と距離計算の数値型を決める契約フィールドで、
+index 作成時に固定される。未対応の値は index 作成時・catalog 読込時・payload open 時の
+いずれでも `VectorException` で拒否される (将来の表現で書かれた DB を誤読しない)。
 
 ## PersistentVectorStore {#persistent-store}
 
@@ -36,9 +41,9 @@ Hierarchical Navigable Small World グラフを実装する。
 
 | パラメータ | 既定値 | レイアウトへの影響 |
 |---|---|
-| M（レイヤあたり最大近傍数） | 16 | あり |
-| Mmax0（レイヤ 0 での最大近傍数） | 32 | あり |
-| EfConstruction | 200 | なし（構築品質のみ） |
+| M（レイヤあたり最大近傍数） | 32 | あり |
+| Mmax0（レイヤ 0 での最大近傍数） | 64 | あり |
+| EfConstruction | 400 | なし（構築品質のみ） |
 | MaxLayers | 8 | あり |
 
 これらは `VectorIndexSpec` により index 作成時に確定し、catalog に永続化される。`M`、
@@ -72,9 +77,14 @@ Hierarchical Navigable Small World グラフを実装する。
 ### ベクトルカタログ V2 {#vector-catalog-v2}
 
 catalog の各 entry は `entryLength (int32)` に続いて、index metadata、payload/HNSW tenant、
-`IndexKind`、4 つの HNSW パラメタを保持する。reader は entry 内の既知フィールドを読み、
-未知の末尾を `entryLength` まで読み飛ばせる。V1 の長さ情報なし packed entry は読み取らず、
-DB open 時に `FormatVersionMismatchException` で拒否する。移行処理は提供しない。
+`IndexKind`、4 つの HNSW パラメタ、`ElementType (byte)` を保持する。reader は entry 内の
+既知フィールドを読み、未知の末尾を `entryLength` まで読み飛ばせる。`ElementType` を欠く
+短い entry (フィールド追加前に書かれたもの) は `Float32` として読む。V1 の長さ情報なし
+packed entry は読み取らず、DB open 時に `FormatVersionMismatchException` で拒否する。
+移行処理は提供しない。
+
+payload テナントのヘッダページにも `ElementType` (byte、オフセット 12) を焼き込み、
+open 時に catalog 側の値と照合する。
 
 ### 操作 {#hnsw-ops}
 

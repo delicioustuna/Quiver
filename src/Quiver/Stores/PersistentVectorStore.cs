@@ -54,7 +54,10 @@ internal sealed class PersistentVectorStore : IVectorStore
     private IndexHandle OpenHandle(VectorCatalogEntry e)
     {
         var payload = new VectorPayloadStore(
-            _container.OpenTenant(e.PayloadTenant, PageKind.Header), e.Spec.Dimensions, _cacheBudget);
+            _container.OpenTenant(e.PayloadTenant, PageKind.Header),
+            e.Spec.Dimensions,
+            e.Spec.ElementType,
+            _cacheBudget);
         if (e.Spec.IndexKind == VectorIndexKind.FlatOnly)
             return new IndexHandle(e.Spec, payload, null);
         var hnsw = new HnswIndex(

@@ -163,7 +163,8 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
                     i.HnswM,
                     i.HnswMMax0,
                     i.HnswMaxLayers,
-                    i.HnswEfConstruction);
+                    i.HnswEfConstruction,
+                    i.ElementType);
         }
 
         if (doc.Tasks is not null)
@@ -189,7 +190,7 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
                 .Select(s => new IndexDto(
                     s.Name, s.EntityKind, s.SourcePropertyKeyId.Value,
                     s.Dimensions, s.Metric, s.ProviderId, s.NormalizationProfile, s.IndexKind,
-                    s.HnswM, s.HnswMMax0, s.HnswMaxLayers, s.HnswEfConstruction))
+                    s.HnswM, s.HnswMMax0, s.HnswMaxLayers, s.HnswEfConstruction, s.ElementType))
                 .ToArray(),
             Tasks = _tasks.Values
                 .Select(t => new TaskDto(
@@ -227,7 +228,8 @@ public sealed class JsonFileVectorCatalog : IVectorCatalog
         int HnswM = 32,
         int HnswMMax0 = 64,
         int HnswMaxLayers = 8,
-        int HnswEfConstruction = 400);
+        int HnswEfConstruction = 400,
+        VectorElementType ElementType = VectorElementType.Float32);
 
     private sealed record TaskDto(
         EntityKind EntityKind,

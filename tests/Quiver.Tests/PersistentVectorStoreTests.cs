@@ -136,6 +136,36 @@ public sealed class PersistentVectorStoreTests : IDisposable
     }
 
     [Fact]
+    public void ElementType_defaults_to_float32_and_round_trips()
+    {
+        using (var db = GraphDatabase.Open(_path))
+        {
+            var keyId = db.Schema.GetOrCreatePropertyKey("title");
+            db.Vectors.CreateVectorIndex(new VectorIndexSpec(
+                IndexName, EntityKind.Node, keyId, Dim, DistanceMetric.Cosine, "test"));
+        }
+
+        using (var db = GraphDatabase.Open(_path))
+        {
+            db.Vectors.TryGetIndex(IndexName, out var spec).Should().BeTrue();
+            spec.ElementType.Should().Be(VectorElementType.Float32);
+        }
+    }
+
+    [Fact]
+    public void Unsupported_element_type_is_rejected_at_creation()
+    {
+        using var db = GraphDatabase.Open(_path);
+        var keyId = db.Schema.GetOrCreatePropertyKey("title");
+        var act = () => db.Vectors.CreateVectorIndex(new VectorIndexSpec(
+            IndexName, EntityKind.Node, keyId, Dim, DistanceMetric.Cosine, "test",
+            ElementType: (VectorElementType)7));
+
+        act.Should().Throw<VectorException>()
+            .WithMessage("*unsupported element type*");
+    }
+
+    [Fact]
     public void V1_vector_catalog_is_rejected_as_a_clean_break()
     {
         using var file = new InMemoryPagedFile();
