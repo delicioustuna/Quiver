@@ -3,6 +3,7 @@
 > 起案日: 2026-07-02。develop ブランチで仮説検証イテレーションを回す (ロールバック許容、main が NuGet 公開対象)。
 > 本ファイルはトラックの経緯・決定事項・命名体系・タスク列を記録する親計画書。
 > 実装確定後の as-built 仕様は docs/spec/ に追記する。
+> 実装増分、spike、検証ゲート、完了条件の詳細は `plans/hyperedge-implementation-tasks.md` を正本とする。
 
 ## 経緯と決定事項
 
@@ -107,10 +108,11 @@ RelationshipStore / NodeStore の既存イディオム (固定レコード + Int
   「ノードごとのチェーン」「エッジごとのメンバーチェーン」の 2 本を貫通
   (RelationshipStore の Src/Tgt チェーンと同イディオム)。メンバー集合が作成時確定のため
   NextInEdge チェーンは作成時に一括構築でき、prev ポインタの要否は実装時に判断
-- **NodeStore**: `FirstIncidenceId` フィールド追加 (15 → 21 バイト)
+- **node incidence head**: `NodeStore` へ `FirstIncidenceId` を追加する案と、別テナントへ分離する案を
+  HYP-S1 で比較する。binary ホットパスの p50 回帰を採否基準にする
 - **RoleId**: トークンストアで intern (RelationshipTypeId と同様、独立空間)
 - `EntityKind.Hyperedge` 追加 (internal で Incidence kind の要否も判断)
-- FormatVersion の bump 要否は HYP-1 実装時に判断 (未リリースにつきどちらでも可、マイグレーション無し)
+- FormatVersion は HYP-1a で V3 へ bump する (マイグレーション無し)
 - WAL (PageImage + logical mutation)・recovery・vacuum (slot 再利用 + generation) は既存ストア同様に対応
 
 ## クエリ層 (方針)
@@ -122,15 +124,21 @@ RelationshipStore / NodeStore の既存イディオム (固定レコード + Int
 
 ## タスク列
 
+各 epic の具体的な増分は `plans/hyperedge-implementation-tasks.md` に分割した。
+HYP-S1 は HYP-1 前、HYP-S2 は HYP-5 前に実行する。
+
 | ID | 内容 | 依存 | 状態 |
 |---|---|---|---|
-| HYP-1 | Core ID 型 + `EntityKind.Hyperedge` + HyperedgeStore + IncidenceStore + NodeStore 拡張 + MVCC サイドカー + WAL + recovery テスト | — | 未着手 |
+| HYP-0 | skill / roadmap / 親子計画のタスク配線 | — | 完 (2026-07-03) |
+| HYP-S1 | node incidence head の inline / 別テナント比較 spike | HYP-0 | 未着手 |
+| HYP-1 | Core ID 型 + `EntityKind.Hyperedge` + HyperedgeStore + IncidenceStore + node incidence head + MVCC サイドカー + WAL + recovery テスト | HYP-S1 | 未着手 |
 | HYP-2 | tx API (Create/Delete/GetMembers/GetHyperedges) + logical mutation + プロパティ/削除の可視性テスト | HYP-1 | 未着手 |
 | HYP-3 | 走査オペレータ 3 種 + DSL (`Hyperedges`/`Members`/`OtherMembers`/`AddHyperedge` builder) | HYP-2 | 未着手 |
 | HYP-4 | Match (`HyperedgePattern` 星型パターン + コンパイラ拡張) | HYP-3 | 未着手 |
-| HYP-5 | SourceGenerator (`[Hyperedge]`/`[Role]` + `IGraphHyperedge<TSelf>` + 型付き CRUD/走査糖衣) | HYP-2 | 未着手 |
-| HYP-6 | vacuum + IDiagnosticsApi 整合性チェック + 性能実測 (下記 kill criteria) | HYP-3 | 未着手 |
-| HYP-7 | docs/spec as-built 追記 + development.md + サンプル (RAG n 項ファクト) | HYP-4, HYP-5 | 未着手 |
+| HYP-S2 | SourceGenerator の role binding API spike | HYP-3 | 未着手 |
+| HYP-5 | SourceGenerator (`[Hyperedge]`/`[Role]` + `IGraphHyperedge<TSelf>` + 型付き CRUD/走査糖衣) | HYP-2, HYP-3, HYP-S2 | 未着手 |
+| HYP-6 | vacuum + IDiagnosticsApi 整合性チェック + 性能実測 (下記 kill criteria) | HYP-1, HYP-2, HYP-3 | 未着手 |
+| HYP-7 | docs/spec as-built 追記 + development.md + サンプル (RAG n 項ファクト) | HYP-4, HYP-5, HYP-6 | 未着手 |
 
 並列性: HYP-4 と HYP-5 は独立並行可。
 
@@ -237,10 +245,14 @@ RelationshipStore / NodeStore の既存イディオム (固定レコード + Int
   回答生成時の grounded citation が join なしで取れる。binary KG では出典付与に
   reification が必須になる — hyperedge 化の価値が最も端的に出るユースケース。
 
-## 未実施 (トラック開始時に行うこと)
+## トラック開始時の配線
 
-- [ ] `.claude/skills/quiver-implement/` への HYP 系コンポーネント登録
-- [ ] docs/design/roadmap.md への HYP-1〜7 追記
+以下は作業ツリー上の配線状況を示す。
+HYP-0 の正式な完了状態は、レビュー承認後のコミット時に両 SKILL.md と同期する。
+
+- [x] `.claude/skills/quiver-implement/` への HYP 系コンポーネント登録
+- [x] `.agents/skills/quiver-implement/` への HYP 系コンポーネント登録
+- [x] docs/design/roadmap.md への HYP-1〜7 追記
 - [ ] VEC 系後続 (HNSW 物理削除等) との順序調整
 
 ## 完了の定義 (トラック全体)
