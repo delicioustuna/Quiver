@@ -108,6 +108,26 @@ HYP-4 と HYP-S2 以降は、HYP-3c 完了後に独立して進められる。
 - binary `Read` と binary 1-hop expand の degree は 10、100、1,000 とする。
 - hyperedge head lookup の p50、binary 経路の p50、データサイズ、1 操作あたりの割り当て量を測る。
 
+### 計測プロトコル
+
+- baseline は現行の 15 バイト node fixed payload とし、案 A は同じレコードの末尾へ
+  6 バイト head を加えた 21 バイト payload、案 B は 15 バイト node payload と
+  node sequence で直接引く 6 バイト固定長 sidecar とする。
+- experimental runner は 8 KiB page、24 バイト MVCC header、slotted-page の slot directory、
+  6 バイト `Int48` を製品レイアウトと同じ寸法で再現する。案 B の sidecar は
+  page body に `Int48` を密配置し、未所属 node は `-1` を保持する。
+- node は sequence 全域を deterministic seed で疑似ランダムに読む。incidence 所属 node は
+  同じ seed で一様に選び、head lookup は所属 node だけを対象にする。
+- binary 1-hop は node record から binary head を読み、degree 10、100、1,000 の連続した
+  6 バイト relationship sequence を走査する。hyperedge head は binary 経路では読まない。
+- 各ケースは JIT と working set を warm-up 後、baseline / 案 A / 案 B の開始順を巡回しながら
+  4,096 operation の sample を 31 本採る。各 sample の elapsed time / operation を並べた
+  中央値を p50 とし、同じ loop の前後で thread allocation 差分を取る。
+- データサイズは node heap、node map、案 B の sidecar が占める割当済み page bytes の合計を
+  記録する。計測環境は OS、runtime、CPU、GC mode とともに記録する。
+- 同一ケースの sample p25 と p75 の差が p50 の 5% を超える場合は、プロセスを再起動して
+  3 回計測し、各 run の p50 の中央値で判定する。
+
 ### 採否基準
 
 - 案 A は binary `Read` と binary expand の p50 回帰がともに 3% 以下の場合だけ採用できる。
