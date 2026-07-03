@@ -112,6 +112,17 @@
   Euclidean 1.06×/1.30×/1.52×。Dot=8-way / Cosine=4-way も試したが、Cosine は
   0.79〜0.87×へ悪化した。Dot/Cosine 双方で 1.3×という kill criteria を満たさないため、
   scorer 本体の変更は撤回した。
+- **後続 spike: norm cache による Cosine の Dot 化 (2026-07-03、不採用)**: VP-4 slab に
+  充填時計算の L2 norm レーンを追加し、KNN 経路の Cosine を Dot + 除算へ縮退させて実測した。
+  `sqrt(Dot(v,v))` は fused Cosine の norm 累積と同一 SIMD 構造のため score はビット同一
+  (全構成で top-10 / score 完全一致を確認 — 正しさは成立)。しかし KNN レイテンシは
+  dim 384/768/1536 = 1.03×/1.11×/1.25× (N=10k、warm 1000 query) で kill criteria
+  (dim 384+ ≥1.3×) 未達、slab 充填も dim 768+ で +3〜7%。**ボトルネックは演算密度ではなく
+  ベクトルのメモリトラフィック + グラフ走査**であり、FLOPs 削減系はこの壁の内側 (accumulator
+  spike の頭打ちと同根)。scorer 側の残り手は読むバイト数を減らす量子化 (SQ8 等) だが、
+  精度の定量評価には実埋込分布が必要で合成コーパスに代表性がない。当面は**埋込モデル側の
+  出力次元コントロール (MRL 系) をアプリ層の第一レバー**とする (検索コストは次元にほぼ線形)。
+  詳細と再現手順は docs/benchmark-results.md「Cosine norm cache spike」。
 
 ### VP-2: VectorSearchOptions の導入 (efSearch の公開)
 

@@ -135,6 +135,35 @@ Dot/Cosine 双方で 1.3×という kill criteria を満たさないため、本
 dotnet run -c Release --project benchmarks\Quiver.Benchmarks -- --scorer-accumulator
 ```
 
+## Cosine norm cache spike
+
+accumulator 展開の後続として、payload slab cache の充填時に L2 norm を計算・保存し、
+KNN 経路の Cosine を Dot + 除算へ縮退させる spike を実測した。norm を
+`sqrt(Dot(v,v))` で計算すると fused Cosine の norm 累積と同一の SIMD 構造になるため、
+score はビット同一（全構成で top-10 とスコアの完全一致を確認）。
+
+| dim | fused Cosine | norm+Dot | speedup | slab 充填 (cold) 比 |
+|---:|---:|---:|---:|---:|
+| 384 | 0.685 ms | 0.667 ms | 1.03× | 0.96 |
+| 768 | 1.287 ms | 1.157 ms | 1.11× | 1.03 |
+| 1536 | 2.871 ms | 2.299 ms | 1.25× | 1.07 |
+
+（N=10k、k=10、warm 1000 query、cache 64 MiB 共通）
+
+主対象の dim 384 でほぼ効果がなく、kill criteria（dim 384+ で ≥1.3×）未達のため撤回した。
+KNN 1 クエリのコストは scorer の FLOPs ではなく、ベクトルデータのメモリトラフィックと
+グラフ走査（visited set / PriorityQueue）に支配されており、FLOPs 削減系の最適化は
+この壁の内側にある — accumulator spike の頭打ち（Cosine 1.22×）と同根。
+scorer 側でこの壁を破る残り手は読むバイト数自体を減らす量子化（SQ8 等）だが、
+精度の定量評価には実埋込分布が必要で合成コーパスでは代表性がない。当面は
+埋込モデル側の出力次元コントロール（MRL 系）をアプリ層の第一レバーとする
+（実測でも検索コストは次元にほぼ線形: 384/768/1536 = 0.69/1.29/2.87 ms）。
+
+spike 構成（撤回済み、再現用）: `VectorPayloadCache` の slab に `float[] Norms` レーンを追加し
+`StorePresent` で計算、`TryGetForScoring` が norm を返し、`HnswIndex` の `Dist` / 最終再スコアが
+Cosine を `Dot / (qNorm × norm)` で計算（クエリ norm は Search/Insert 入口で 1 回）。
+internal static フラグで A/B し、standalone runner（`--norm-cosine [N] [dim] [queries]`）で比較した。
+
 ## optimistic read pin spike
 
 resident hit を global pool lock から外すため、frame generation、CAS pin、
