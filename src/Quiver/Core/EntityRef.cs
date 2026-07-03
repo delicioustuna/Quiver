@@ -3,7 +3,8 @@ namespace Quiver.Core;
 /// <summary>
 /// 物理 ID の統一パック表現。旧 <c>GenerationalRef</c> を吸収し、
 /// 索引値レーン・ベクトル binding キー・外部往復 ID と、論理 ID 構造体
-/// (<see cref="NodeId"/> / <see cref="RelationshipId"/> / <see cref="PropertyId"/>) の
+/// (<see cref="NodeId"/> / <see cref="RelationshipId"/> / <see cref="PropertyId"/> /
+/// <see cref="HyperedgeId"/>) の
 /// 内部 <c>Value</c> を、ただ一つの packing 規約に集約する。
 /// <para>レイアウト (上位→下位):</para>
 /// <list type="bullet">

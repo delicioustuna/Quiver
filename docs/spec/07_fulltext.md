@@ -1,6 +1,6 @@
 # 全文検索
 
-> as-built 仕様 (on-disk FormatVersion V2)
+> as-built 仕様 (on-disk FormatVersion V3)
 
 ## アーキテクチャ {#architecture}
 

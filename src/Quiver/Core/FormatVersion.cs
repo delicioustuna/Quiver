@@ -7,6 +7,7 @@ namespace Quiver.Core;
 /// クリーンブレイクで畳み、現実装を v1 として再宣言した。
 /// v2 は vector catalog を長さプレフィクス付きの自己記述エントリへ変更し、HNSW の
 /// on-disk レイアウトパラメタを index ごとに永続化する。
+/// v3 は第一級ハイパーエッジ用の固定テナント、ID kind、type / role token 空間を追加する。
 /// 自動マイグレーションは提供しないため、旧 format の DB は open 時に reject される。
 /// </summary>
 internal static class FormatVersion
@@ -17,8 +18,11 @@ internal static class FormatVersion
     /// <summary>v2: 自己記述 vector catalog と per-index HNSW レイアウト。</summary>
     public const byte V2 = 2;
 
+    /// <summary>v3: 第一級ハイパーエッジの ID / token / tenant 基盤。</summary>
+    public const byte V3 = 3;
+
     /// <summary>現行 (= 新規 DB を作成するときに書き込むバージョン)。</summary>
-    public const byte Current = V2;
+    public const byte Current = V3;
 }
 
 /// <summary>

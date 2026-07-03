@@ -10,7 +10,7 @@ namespace Quiver.Tests;
 /// インデックス値に世代を保持する仕組みを検証する。
 /// Vacuum のフリーリストによるスロット再利用後も古いインデックスエントリが
 /// 別ノードを返さないこと、孤立エントリ回収が世代不一致を除去できること、
-/// V4 より古いフォーマットを拒否することを確認する。
+/// 現行 V3 より古いフォーマットを拒否することを確認する。
 /// </summary>
 public sealed class IndexGenerationTests : IDisposable
 {
@@ -32,6 +32,7 @@ public sealed class IndexGenerationTests : IDisposable
     [InlineData(EntityKind.Node, 0L, 0)]
     [InlineData(EntityKind.Node, 1L, 1)]
     [InlineData(EntityKind.Relationship, 42L, 7)]
+    [InlineData(EntityKind.Hyperedge, 99L, 3)]
     [InlineData(EntityKind.Node, EntityRef.SequenceMask, EntityRef.MaxGeneration)]
     public void EntityRef_roundtrips(EntityKind kind, long seq, int gen)
     {
@@ -252,43 +253,52 @@ public sealed class IndexGenerationTests : IDisposable
     // ---- Format version gate ----
 
     [Fact]
-    public void FormatVersion_current_is_v2()
+    public void FormatVersion_current_is_v3()
     {
-        // FormatVersion V2 は vector catalog と HNSW レコードを自己記述化する明示的 clean break。
-        FormatVersion.Current.Should().Be(FormatVersion.V2);
+        // FormatVersion V3 は第一級 hyperedge の ID / token / tenant 基盤を追加する clean break。
+        FormatVersion.Current.Should().Be(FormatVersion.V3);
     }
 
     // 旧 format バイトを持つ store は open 時に reject される (クリーンブレイク; 自動マイグレーション無し)。
-    private const byte LegacyFormatVersion = FormatVersion.V1;
+    private const byte LegacyFormatVersion = FormatVersion.V2;
 
     [Fact]
     public void Opening_store_with_legacy_format_version_throws_FormatVersionMismatch()
     {
         Directory.CreateDirectory(_dir);
-        var path = Path.Combine(_dir, "nodes.db");
+        var path = Path.Combine(_dir, "graph.quiver");
 
-        // 現行 (v2) で 1 ノード書く。
-        using (IPagedFile pf = new PagedFile(path))
+        // 現行 (v3) の実 DB を作る。
+        using (GraphDatabase.Open(path))
         {
-            var store = new NodeStore(pf);
-            store.Allocate(new LabelId(1));
         }
 
-        // ヘッダの format version バイト (page 1, body offset 31 = NodeStore.MetaFormatVersion) を
-        // 旧 format に書き換える。
-        using (IPagedFile pf = new PagedFile(path))
+        // node heap の format version バイト (logical page 1, body offset 31) を V2 に戻す。
+        using (var container = new SingleFileContainer(path))
         {
-            var ph = pf.PinForWrite(new PageId(1));
-            ph.Data[31] = LegacyFormatVersion;
-            pf.UnpinDirty(new PageId(1), 0);
+            var nodes = container.OpenTenant(
+                BinaryGraphStorageBackendFactory.TenantNodes, PageKind.Header);
+            using (var ph = nodes.PinForWrite(new PageId(1)))
+            {
+                ph.Data[31] = LegacyFormatVersion;
+            }
+            container.Flush();
         }
 
-        // 再 open は拒否される。
-        using (IPagedFile pf = new PagedFile(path))
+        // 実 DB の current node heap 実装による再 open は拒否される。
+        using (var container = new SingleFileContainer(path))
         {
-            Action reopen = () => new NodeStore(pf);
+            var nodes = container.OpenTenant(
+                BinaryGraphStorageBackendFactory.TenantNodes, PageKind.Header);
+            var nodeMapFile = container.OpenTenant(
+                BinaryGraphStorageBackendFactory.TenantNodeMap, PageKind.Header);
+            var nodeMap = new ItemPointerMap(nodeMapFile);
+            Action reopen = () => new VersionedRecordHeap(nodes, nodeMap);
             reopen.Should().Throw<FormatVersionMismatchException>()
-                .Which.Found.Should().Be(LegacyFormatVersion);
+                .Which.Should().Match<FormatVersionMismatchException>(
+                    ex => ex.FileKind == "versionedheap"
+                          && ex.Found == LegacyFormatVersion
+                          && ex.Expected == FormatVersion.V3);
         }
     }
 }

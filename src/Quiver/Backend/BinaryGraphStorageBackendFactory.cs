@@ -21,7 +21,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     private const byte DataFileKind = 0x20;
 
     // カタログ内のテナント ID (WAL fileKind とは別空間。各 store / sidecar / token に 1 つ)。
-    private const byte TenantNodes = 1;
+    internal const byte TenantNodes = 1;
     private const byte TenantRels = 2;
     private const byte TenantProps = 3;
     private const byte TenantBlobs = 4;
@@ -33,7 +33,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     private const byte TenantPropKeyTok = 10;
     // VersionedNodeStore の ItemPointerMap (Sequence→物理位置) テナント。
     // 11/12/13 は AdjacencyContainer (DataTenant/IndexTenant/EpochTenant) が使用済みのため 14。
-    private const byte TenantNodeMap = 14;
+    internal const byte TenantNodeMap = 14;
     // VersionedRelationshipStore の ItemPointerMap テナント。
     private const byte TenantRelMap = 15;
     // opt-in 列の catalog テナント (各列テナントは ColumnCatalog が 64+ で採番)。
@@ -41,6 +41,16 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     // 永続ベクトルインデックスの catalog テナント (各 index の payload/HNSW テナントは
     // VectorIndexCatalog が 200+ で採番)。
     private const byte TenantVectorCatalog = 17;
+    // 第一級ハイパーエッジ。18..24 は固定 tenant で、後続 store 実装でも変更しない。
+    internal const byte TenantHyperedgeHeap = 18;
+    internal const byte TenantHyperedgeMap = 19;
+    internal const byte TenantHyperedgeVersion = 20;
+    internal const byte TenantIncidenceHeap = 21;
+    internal const byte TenantIncidenceMap = 22;
+    internal const byte TenantHyperedgeTypeToken = 23;
+    internal const byte TenantRoleToken = 24;
+    // node sequence 直引きの 6B incidence head sidecar 用 tenant。
+    internal const byte TenantNodeIncidenceHead = 25;
 
     public IGraphStorageBackend Open(string filePath, GraphDatabaseOptions options)
     {
@@ -181,6 +191,20 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var relTypeTokens = new RelationshipTypeTokenStore(container.OpenTenant(TenantRelTypeTok, PageKind.TokenRecord));
         var propKeyTokens = new PropertyKeyTokenStore(container.OpenTenant(TenantPropKeyTok, PageKind.TokenRecord));
 
+        // 現時点では ID 空間と固定 tenant 配置だけを確定する。heap / map / version / head の
+        // レコード実装は未接続だが、descriptor はこの時点で永続化して tenant ID の
+        // 再利用や起動順依存を防ぐ。type / role token は利用可能。
+        _ = container.OpenTenant(TenantHyperedgeHeap, PageKind.Header);
+        _ = container.OpenTenant(TenantHyperedgeMap, PageKind.Header);
+        _ = container.OpenTenant(TenantHyperedgeVersion, PageKind.Header);
+        _ = container.OpenTenant(TenantIncidenceHeap, PageKind.Header);
+        _ = container.OpenTenant(TenantIncidenceMap, PageKind.Header);
+        _ = container.OpenTenant(TenantNodeIncidenceHead, PageKind.Header);
+        var hyperedgeTypeTokens = new HyperedgeTypeTokenStore(
+            container.OpenTenant(TenantHyperedgeTypeToken, PageKind.TokenRecord));
+        var roleTokens = new RoleTokenStore(
+            container.OpenTenant(TenantRoleToken, PageKind.TokenRecord));
+
         // 列マネージャを startup で eager に開く。
         // 登録済み列の head cache を開いておくことで (1) write 経路が列を維持でき、
         // (2) abort の ReloadStoreMeta から列 cache を head ページへ再同期できる。
@@ -213,6 +237,8 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             labelTokens.Reload();
             relTypeTokens.Reload();
             propKeyTokens.Reload();
+            hyperedgeTypeTokens.Reload();
+            roleTokens.Reload();
             // epoch テナントも container WAL 対象。abort で CLR がページを戻すので
             // in-memory の epoch / baseRelHwm / tombstone を読み直してディスクと一致させる。
             adjEpoch?.Reload();
@@ -299,7 +325,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
 
         var backend = new BinaryGraphStorageBackend(
             filePath, container, pageManager, wal, nodeStore, relStore, propStore,
-            labelTokens, relTypeTokens, propKeyTokens, indexManager,
+            labelTokens, relTypeTokens, propKeyTokens, hyperedgeTypeTokens, roleTokens, indexManager,
             adjStore, txManager, access, vectors,
             columnManager,
             labelIndex,

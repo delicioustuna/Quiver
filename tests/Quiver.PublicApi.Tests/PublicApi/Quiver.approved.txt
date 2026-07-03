@@ -858,6 +858,7 @@ namespace Quiver.Core
         Node = 1,
         Relationship = 2,
         Property = 3,
+        Hyperedge = 4,
     }
     public readonly struct EntityRef : System.IEquatable<Quiver.Core.EntityRef>
     {
@@ -892,6 +893,25 @@ namespace Quiver.Core
     {
         protected GraphDbException(string message) { }
         protected GraphDbException(string message, System.Exception inner) { }
+    }
+    public readonly struct HyperedgeId : System.IEquatable<Quiver.Core.HyperedgeId>
+    {
+        public static readonly Quiver.Core.HyperedgeId Invalid;
+        public HyperedgeId(long Value) { }
+        public int Generation { get; }
+        public bool IsValid { get; }
+        public long Sequence { get; }
+        public long Value { get; init; }
+        public bool Equals(Quiver.Core.HyperedgeId other) { }
+        public override int GetHashCode() { }
+        public static Quiver.Core.HyperedgeId Create(long sequence, int generation) { }
+    }
+    public readonly struct HyperedgeTypeId : System.IEquatable<Quiver.Core.HyperedgeTypeId>
+    {
+        public static readonly Quiver.Core.HyperedgeTypeId Invalid;
+        public HyperedgeTypeId(int Value) { }
+        public bool IsValid { get; }
+        public int Value { get; init; }
     }
     public interface IDyadicOperator<TResult>
     {

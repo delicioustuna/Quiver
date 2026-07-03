@@ -1,6 +1,6 @@
 # WAL & リカバリ
 
-> as-built 仕様 (on-disk FormatVersion V2)
+> as-built 仕様 (on-disk FormatVersion V3)
 
 ## Write-Ahead Logging {#wal}
 

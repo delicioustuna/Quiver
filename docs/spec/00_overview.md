@@ -1,6 +1,6 @@
 # Quiver: システム概要
 
-> as-built 仕様 (on-disk FormatVersion V2, 2026-07-03)
+> as-built 仕様 (on-disk FormatVersion V3, 2026-07-03)
 
 ## ポジショニング {#positioning}
 
@@ -76,9 +76,11 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 
 ## フォーマットバージョン {#format-version}
 
-`FormatVersion.Current = V2 = 2`。V2 はベクトルカタログを長さプレフィクス付きにし、HNSW の
-物理レイアウトパラメタを index ごとに永続化した clean break である。自動マイグレーションは行わない。異なるフォーマットバージョンの
-データベースを開くと `FormatVersionMismatchException` をスローする。
+`FormatVersion.Current = V3 = 3`。
+V2 の自己記述 vector catalog / per-index HNSW レイアウトに加え、V3 は第一級ハイパーエッジ用の
+ID kind、type / role token 空間、固定 tenant 18–25 を予約した clean break である。
+自動マイグレーションは行わない。
+異なるフォーマットバージョンのデータベースを開くと `FormatVersionMismatchException` をスローする。
 
 ## 非目標 {#non-goals}
 

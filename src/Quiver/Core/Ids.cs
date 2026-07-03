@@ -68,6 +68,33 @@ public readonly record struct RelationshipId(long Value)
     public override int GetHashCode() => Sequence.GetHashCode();
 }
 
+/// <summary>ハイパーエッジの識別子。<paramref name="Value"/> は世代 + slot 局所 ID の packed 値。</summary>
+/// <param name="Value">packed 物理 ID (Generation &lt;&lt; 44 | Sequence)。</param>
+public readonly record struct HyperedgeId(long Value)
+{
+    /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
+    public static readonly HyperedgeId Invalid = new(-1);
+
+    /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
+    public bool IsValid => Value >= 0;
+
+    /// <summary>slot 局所 ID (下位 44bit)。負値 (Invalid) は sentinel をそのまま返す。</summary>
+    public long Sequence => Value < 0 ? Value : EntityRef.Sequence(Value);
+
+    /// <summary>slot incarnation (bits 44-59)。世代未指定 (= new(seq)) は 0。</summary>
+    public int Generation => Value < 0 ? 0 : EntityRef.Generation(Value);
+
+    /// <summary>(sequence, generation) から packed な <see cref="HyperedgeId"/> を生成する。</summary>
+    public static HyperedgeId Create(long sequence, int generation)
+        => new(EntityRef.PackLocal(sequence, generation));
+
+    /// <summary>slot (Sequence) ベースで同一ハイパーエッジかを判定する (世代差は無視)。</summary>
+    public bool Equals(HyperedgeId other) => Sequence == other.Sequence;
+
+    /// <summary>Sequence ベースのハッシュ値 (<see cref="Equals(HyperedgeId)"/> と整合)。</summary>
+    public override int GetHashCode() => Sequence.GetHashCode();
+}
+
 /// <summary>プロパティレコードの識別子。<paramref name="Value"/> は世代 + slot 局所 ID の packed 値。</summary>
 /// <param name="Value">packed 物理 ID (Generation &lt;&lt; 44 | Sequence)。</param>
 public readonly record struct PropertyId(long Value)
@@ -114,6 +141,32 @@ public readonly record struct RelationshipTypeId(int Value)
 
     /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
     public bool IsValid => Value >= 0;
+}
+
+/// <summary>ハイパーエッジ型の識別子 (トークンストアが払い出す稠密 int)。</summary>
+/// <param name="Value">ハイパーエッジ型トークン ID。</param>
+public readonly record struct HyperedgeTypeId(int Value)
+{
+    /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
+    public static readonly HyperedgeTypeId Invalid = new(-1);
+
+    /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
+    public bool IsValid => Value >= 0;
+}
+
+/// <summary>ハイパーエッジ内のロールを表す内部トークン ID。</summary>
+internal readonly record struct RoleId(int Value)
+{
+    public static readonly RoleId Invalid = new(-1);
+    public bool IsValid => Value >= 0;
+}
+
+/// <summary>incidence レコードの内部 sequence ID。</summary>
+internal readonly record struct IncidenceId(long Value)
+{
+    public static readonly IncidenceId Invalid = new(-1);
+    public bool IsValid => Value >= 0;
+    public long Sequence => Value;
 }
 
 /// <summary>プロパティキーの識別子 (トークンストアが払い出す稠密 int)。</summary>

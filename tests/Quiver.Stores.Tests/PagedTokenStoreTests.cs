@@ -98,4 +98,57 @@ public class PagedTokenStoreTests : IDisposable
             store.TryGet("OldName", out _).Should().BeFalse();
         }
     }
+
+    [Fact]
+    public void Hyperedge_type_and_role_tokens_have_independent_persistent_spaces()
+    {
+        string path = DbFile();
+        HyperedgeTypeId factType;
+        RoleId factRole;
+        using (var c = new SingleFileContainer(path))
+        {
+            using var types = new HyperedgeTypeTokenStore(
+                c.OpenTenant(BinaryGraphStorageBackendFactory.TenantHyperedgeTypeToken, PageKind.TokenRecord));
+            using var roles = new RoleTokenStore(
+                c.OpenTenant(BinaryGraphStorageBackendFactory.TenantRoleToken, PageKind.TokenRecord));
+
+            factType = types.GetOrCreate("Fact");
+            factRole = roles.GetOrCreate("Fact");
+            types.GetOrCreate("Purchase").Value.Should().Be(1);
+            roles.GetOrCreate("buyer").Value.Should().Be(1);
+            factType.Value.Should().Be(0);
+            factRole.Value.Should().Be(0);
+            c.Flush();
+        }
+
+        using (var c = new SingleFileContainer(path))
+        {
+            using var types = new HyperedgeTypeTokenStore(
+                c.OpenTenant(BinaryGraphStorageBackendFactory.TenantHyperedgeTypeToken, PageKind.TokenRecord));
+            using var roles = new RoleTokenStore(
+                c.OpenTenant(BinaryGraphStorageBackendFactory.TenantRoleToken, PageKind.TokenRecord));
+
+            types.TryGet("Fact", out var reopenedType).Should().BeTrue();
+            roles.TryGet("Fact", out var reopenedRole).Should().BeTrue();
+            reopenedType.Should().Be(factType);
+            reopenedRole.Should().Be(factRole);
+            types.TryGet("buyer", out _).Should().BeFalse();
+            roles.TryGet("Purchase", out _).Should().BeFalse();
+        }
+    }
+
+    [Fact]
+    public void Binary_backend_reserves_hyperedge_tenants_18_through_25()
+    {
+        string path = DbFile();
+        using (GraphDatabase.Open(path)) { }
+
+        using var container = new SingleFileContainer(path);
+        for (byte tenant = BinaryGraphStorageBackendFactory.TenantHyperedgeHeap;
+             tenant <= BinaryGraphStorageBackendFactory.TenantNodeIncidenceHead;
+             tenant++)
+        {
+            container.HasTenant(tenant).Should().BeTrue($"tenant {tenant} is a fixed hyperedge tenant");
+        }
+    }
 }

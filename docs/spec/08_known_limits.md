@@ -1,6 +1,6 @@
 # 既知の限界
 
-> as-built 仕様 (on-disk FormatVersion V2)
+> as-built 仕様 (on-disk FormatVersion V3)
 
 本書はエンジンの現時点での既知の限界を記す。v1 統合監査で発見・修正された欠陥はここでは追跡しない
 — それらは回帰テストと git 履歴でカバーされる。
@@ -173,8 +173,8 @@ cosine の決定的コーパスで true recall@10 **0.950**、30% 削除後 **0.
 
 異なる `FormatVersion` のデータベースを開くと `FormatVersionMismatchException` をスローする。
 自動マイグレーションのパスは存在しない。データベースはソースデータから作り直す必要がある。
-現行 V2 はベクトルカタログを自己記述化した clean break であり、V1 catalog との互換 reader は
-意図的に持たない。
+現行 V3 は第一級ハイパーエッジ用 ID / token / tenant 基盤を追加した clean break であり、
+V2 以前との互換 reader は意図的に持たない。
 
 **設計根拠**: オンディスクフォーマットのマイグレーションは、全ページの読み書きとバリデーションが
 必要であり、データ破損リスクが高い。Quiver の主要ユースケース（ローカル RAG）ではソースデータ

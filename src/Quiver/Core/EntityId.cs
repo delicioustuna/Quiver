@@ -3,7 +3,7 @@ namespace Quiver.Core;
 /// <summary>
 /// <see cref="EntityId"/> がどのエンティティ種別を指すかを示すタグ。
 /// ベクトルストア (Node / Relationship を利用) と、
-/// 内部タグ付き ID API (診断 / カタログ用に Property を追加) で共有する。
+/// 内部タグ付き ID API (診断 / カタログ用に Property / Hyperedge を追加) で共有する。
 /// </summary>
 public enum EntityKind : byte
 {
@@ -13,10 +13,13 @@ public enum EntityKind : byte
     Relationship = 2,
     /// <summary>プロパティ。</summary>
     Property = 3,
+    /// <summary>ハイパーエッジ。</summary>
+    Hyperedge = 4,
 }
 
 /// <summary>
-/// <see cref="NodeId"/>、<see cref="RelationshipId"/>、<see cref="PropertyId"/> を統一して扱うための
+/// <see cref="NodeId"/>、<see cref="RelationshipId"/>、<see cref="PropertyId"/>、
+/// <see cref="HyperedgeId"/> を統一して扱うための
 /// 内部タグ付き識別子。診断、オペレータ配線、将来のカタログ用途を想定。
 /// オンディスクフォーマットには含まれない — シリアライズする場合は事前にフォーマットバージョンバイトを導入すること。
 /// </summary>
@@ -36,6 +39,9 @@ internal readonly record struct EntityId(EntityKind Kind, long LocalId)
 
     /// <summary><see cref="PropertyId"/> からタグ付き ID を生成する。</summary>
     public static EntityId FromProperty(PropertyId id) => new(EntityKind.Property, id.Value);
+
+    /// <summary><see cref="HyperedgeId"/> からタグ付き ID を生成する。</summary>
+    public static EntityId FromHyperedge(HyperedgeId id) => new(EntityKind.Hyperedge, id.Value);
 
     /// <summary>ノードとして取り出す。種別不一致なら <see cref="InvalidOperationException"/>。</summary>
     public NodeId AsNode()
@@ -59,6 +65,14 @@ internal readonly record struct EntityId(EntityKind Kind, long LocalId)
         if (Kind != EntityKind.Property)
             throw new InvalidOperationException($"EntityId は {Kind} であり、Property ではありません。");
         return new PropertyId(LocalId);
+    }
+
+    /// <summary>ハイパーエッジとして取り出す。種別不一致なら例外。</summary>
+    public HyperedgeId AsHyperedge()
+    {
+        if (Kind != EntityKind.Hyperedge)
+            throw new InvalidOperationException($"EntityId は {Kind} であり、Hyperedge ではありません。");
+        return new HyperedgeId(LocalId);
     }
 
     /// <summary>

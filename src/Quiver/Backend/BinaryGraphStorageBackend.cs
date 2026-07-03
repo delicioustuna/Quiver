@@ -24,6 +24,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     private readonly LabelTokenStore _labelTokens;
     private readonly RelationshipTypeTokenStore _relTypeTokens;
     private readonly PropertyKeyTokenStore _propKeyTokens;
+    private readonly HyperedgeTypeTokenStore _hyperedgeTypeTokens;
+    private readonly RoleTokenStore _roleTokens;
     private readonly IndexManager _indexManager;
     // AdjacencyBlockStore (V1) または AdjacencyBlockStoreV2 を保持。
     // CompactAdjacency が再構築したストアを差し替えるため mutable。
@@ -51,6 +53,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         LabelTokenStore labelTokens,
         RelationshipTypeTokenStore relTypeTokens,
         PropertyKeyTokenStore propKeyTokens,
+        HyperedgeTypeTokenStore hyperedgeTypeTokens,
+        RoleTokenStore roleTokens,
         IndexManager indexManager,
         IAdjacencyBlockStore? adjStore,
         TransactionManager txManager,
@@ -76,6 +80,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _labelTokens = labelTokens;
         _relTypeTokens = relTypeTokens;
         _propKeyTokens = propKeyTokens;
+        _hyperedgeTypeTokens = hyperedgeTypeTokens;
+        _roleTokens = roleTokens;
         _indexManager = indexManager;
         _adjStore = adjStore;
         _txManager = txManager;
@@ -395,6 +401,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _labelTokens.Dispose();
         _relTypeTokens.Dispose();
         _propKeyTokens.Dispose();
+        _hyperedgeTypeTokens.Dispose();
+        _roleTokens.Dispose();
         // WAL を dispose する前にデータファイルを flush する。PagedFile.Flush() は
         // write-ahead 順序 (WAL→データ) に従うため、page manager がダーティフレームを
         // ディスクへ flush する間は WAL がまだ生きている必要がある。
