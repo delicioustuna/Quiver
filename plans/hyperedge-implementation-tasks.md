@@ -120,8 +120,9 @@ HYP-4 と HYP-S2 以降は、HYP-3c 完了後に独立して進められる。
   同じ seed で一様に選び、head lookup は所属 node だけを対象にする。
 - binary 1-hop は node record から binary head を読み、degree 10、100、1,000 の連続した
   6 バイト relationship sequence を走査する。hyperedge head は binary 経路では読まない。
-- 各ケースは JIT と working set を warm-up 後、baseline / 案 A / 案 B の開始順を巡回しながら
-  4,096 operation の sample を 31 本採る。各 sample の elapsed time / operation を並べた
+- 各ケースは tiered compilation と ReadyToRun を無効化し、JIT と working set を warm-up 後、
+  baseline / 案 A / 案 B の開始順を巡回しながら 32,768 operation の sample を 31 本採る。
+  各 sample の elapsed time / operation を並べた
   中央値を p50 とし、同じ loop の前後で thread allocation 差分を取る。
 - データサイズは node heap、node map、案 B の sidecar が占める割当済み page bytes の合計を
   記録する。計測環境は OS、runtime、CPU、GC mode とともに記録する。
@@ -133,6 +134,48 @@ HYP-4 と HYP-S2 以降は、HYP-3c 完了後に独立して進められる。
 - 案 A は binary `Read` と binary expand の p50 回帰がともに 3% 以下の場合だけ採用できる。
 - 案 B は hyperedge head lookup が案 A の 1.5 倍以内なら採用する。
 - 両方を満たす場合は、binary 経路を変えない案 B を採用する。
+
+### 実測結果 (2026-07-03)
+
+計測環境は Windows 10.0.26200、AMD64 Family 25 Model 33、.NET 10.0.9 x64、
+workstation GC とした。
+`DOTNET_TieredCompilation=0`、`DOTNET_ReadyToRun=0` で Release runner を実行した。
+sample 内 IQR が 5% を超えたため別プロセスで 3 回実行し、各 run の p50 の中央値を採用した。
+
+binary 経路は baseline 15 バイト node payload と案 A の 21 バイト payload を比較した。
+案 B の binary 経路は baseline と同じ 15 バイトレイアウトであり、sidecar を読まない。
+
+| node 数 | 経路 | degree | baseline p50 | 案 A p50 | 回帰 |
+|---:|---|---:|---:|---:|---:|
+| 100,000 | Read | — | 24.463 ns | 24.377 ns | -0.35% |
+| 100,000 | expand | 10 | 96.671 ns | 101.187 ns | **+4.67%** |
+| 100,000 | expand | 100 | 364.761 ns | 370.505 ns | +1.57% |
+| 100,000 | expand | 1,000 | 2,679.578 ns | 2,673.950 ns | -0.21% |
+| 1,000,000 | Read | — | 73.624 ns | 83.948 ns | **+14.02%** |
+| 1,000,000 | expand | 10 | 192.264 ns | 190.741 ns | -0.79% |
+| 1,000,000 | expand | 100 | 439.523 ns | 441.409 ns | +0.43% |
+| 1,000,000 | expand | 1,000 | 2,737.320 ns | 2,748.389 ns | +0.40% |
+
+head lookup は incidence を持つ node だけを対象にした。
+
+| node 数 | incidence 率 | 案 A inline p50 | 案 B sidecar p50 | B / A |
+|---:|---:|---:|---:|---:|
+| 100,000 | 1% | 10.803 ns | 6.024 ns | 0.558x |
+| 100,000 | 10% | 15.231 ns | 6.610 ns | 0.434x |
+| 100,000 | 100% | 15.939 ns | 6.860 ns | 0.430x |
+| 1,000,000 | 1% | 27.292 ns | 7.849 ns | 0.288x |
+| 1,000,000 | 10% | 28.598 ns | 8.240 ns | 0.288x |
+| 1,000,000 | 100% | 29.568 ns | 8.762 ns | 0.296x |
+
+| node 数 | baseline | 案 A inline | 案 B sidecar | A 増加 | B 増加 |
+|---:|---:|---:|---:|---:|---:|
+| 100,000 | 5,275,648 B | 5,873,664 B | 5,898,240 B | +11.34% | +11.80% |
+| 1,000,000 | 52,355,072 B | 58,327,040 B | 58,400,768 B | +11.41% | +11.55% |
+
+全経路の managed allocation は 0 B/op だった。
+案 A は binary expand degree 10 と 1,000,000 node の Read で 3% gate を超えたため不採用とする。
+案 B は全 head lookup で 1.5x gate を満たし、binary payload を変えないため採用する。
+後続実装は固定 tenant 25 の 6 バイト `NodeIncidenceHeadStore` を node sequence 直引きで使用する。
 
 ### 完了条件
 
@@ -712,7 +755,7 @@ HYP-1d、HYP-2c、HYP-3c の三つの仮説を製品 API 経由で再測定す�
 
 | 日付 | Gate | 結果 | 決定 | 根拠 |
 |---|---|---|---|---|
-| 未実施 | HYP-S1 | 未計測 | 未決定 | node incidence head の配置を比較する |
+| 2026-07-03 | HYP-S1 | 案 A は binary p50 3% gate 不合格、案 B は head lookup 0.288–0.558x | **案 B: tenant 25 の 6B sidecar** | binary 15B payload を維持し、全経路 0 B/op |
 | 未実施 | HYP-1d | 未計測 | 未決定 | linked incidence の走査性能を判定する |
 | 未実施 | HYP-2c | 未計測 | 未決定 | WAL 増幅の線形性を判定する |
 | 未実施 | HYP-3c | 未検証 | 未決定 | RAG query の表現力を判定する |

@@ -108,8 +108,8 @@ RelationshipStore / NodeStore の既存イディオム (固定レコード + Int
   「ノードごとのチェーン」「エッジごとのメンバーチェーン」の 2 本を貫通
   (RelationshipStore の Src/Tgt チェーンと同イディオム)。メンバー集合が作成時確定のため
   NextInEdge チェーンは作成時に一括構築でき、prev ポインタの要否は実装時に判断
-- **node incidence head**: `NodeStore` へ `FirstIncidenceId` を追加する案と、別テナントへ分離する案を
-  HYP-S1 で比較する。binary ホットパスの p50 回帰を採否基準にする
+- **node incidence head**: HYP-S1 の実測で、`NodeStore` へ `FirstIncidenceId` を追加する 21B 案は
+  binary p50 の 3% gate を超えたため不採用。固定 tenant 25 の 6B `NodeIncidenceHeadStore` を採用する
 - **RoleId**: トークンストアで intern (RelationshipTypeId と同様、独立空間)
 - `EntityKind.Hyperedge` 追加 (internal で Incidence kind の要否も判断)
 - FormatVersion は HYP-1a で V3 へ bump する (マイグレーション無し)
@@ -130,7 +130,7 @@ HYP-S1 は HYP-1 前、HYP-S2 は HYP-5 前に実行する。
 | ID | 内容 | 依存 | 状態 |
 |---|---|---|---|
 | HYP-0 | skill / roadmap / 親子計画のタスク配線 | — | 完 (2026-07-03) |
-| HYP-S1 | node incidence head の inline / 別テナント比較 spike | HYP-0 | 未着手 |
+| HYP-S1 | node incidence head の inline / 別テナント比較 spike | HYP-0 | 実測済み (案B採用) |
 | HYP-1 | Core ID 型 + `EntityKind.Hyperedge` + HyperedgeStore + IncidenceStore + node incidence head + MVCC サイドカー + WAL + recovery テスト | HYP-S1 | 未着手 |
 | HYP-2 | tx API (Create/Delete/GetMembers/GetHyperedges) + logical mutation + プロパティ/削除の可視性テスト | HYP-1 | 未着手 |
 | HYP-3 | 走査オペレータ 3 種 + DSL (`Hyperedges`/`Members`/`OtherMembers`/`AddHyperedge` builder) | HYP-2 | 未着手 |
