@@ -86,6 +86,49 @@ internal sealed class TxHyperedgeStore : IHyperedgeStore
         return _inner.Scan();
     }
 
+    // inline property の読み書きは header の読み書きと同じ locking / SSN 規約に従う。
+    // 読みは ReaderWriter モードで shared lock、書きは exclusive lock + SSN write。
+
+    public bool TryGetInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId, out PropertyValue value)
+    {
+        if (_mode == LockingMode.ReaderWriter)
+            AcquireHyperedge(hyperedgeId.Sequence, LockMode.Shared);
+        ActivateMvccContext();
+        return _inner.TryGetInlineProperty(hyperedgeId, keyId, out value);
+    }
+
+    public bool HasInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId)
+    {
+        if (_mode == LockingMode.ReaderWriter)
+            AcquireHyperedge(hyperedgeId.Sequence, LockMode.Shared);
+        ActivateMvccContext();
+        return _inner.HasInlineProperty(hyperedgeId, keyId);
+    }
+
+    public bool SetInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId, in PropertyValue value)
+    {
+        AcquireHyperedge(hyperedgeId.Sequence, LockMode.Exclusive);
+        ActivateMvccContext();
+        SsnOnWrite(hyperedgeId.Sequence);
+        return _inner.SetInlineProperty(hyperedgeId, keyId, in value);
+    }
+
+    public bool RemoveInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId)
+    {
+        AcquireHyperedge(hyperedgeId.Sequence, LockMode.Exclusive);
+        ActivateMvccContext();
+        SsnOnWrite(hyperedgeId.Sequence);
+        return _inner.RemoveInlineProperty(hyperedgeId, keyId);
+    }
+
+    public PropertyEnumerator EnumerateProperties(HyperedgeId hyperedgeId, IPropertyStore overflowStore)
+    {
+        if (_mode == LockingMode.ReaderWriter)
+            AcquireHyperedge(hyperedgeId.Sequence, LockMode.Shared);
+        ActivateMvccContext();
+        return _inner.EnumerateProperties(hyperedgeId, overflowStore);
+    }
+
     private void AcquireNodeLocksAscending(ReadOnlySpan<IncidenceMember> members)
     {
         Span<long> sequences = members.Length <= 16

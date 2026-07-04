@@ -937,12 +937,44 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
             resolved[i] = new IncidenceMember(m.NodeId, roleId);
         }
 
-        return _inner.Hyperedges.Create(typeId, resolved, _inner.Incidences, _inner.NodeIncidenceHeads);
+        var hyperedgeId = _inner.Hyperedges.Create(typeId, resolved, _inner.Incidences, _inner.NodeIncidenceHeads);
+
+        // 論理ストリームは自己完結させる — メンバーは型名とロール名 (トークン ID ではなく)
+        // で保持し、別 DB への再生時にターゲット側の ID へ再マッピングできるようにする。
+        if (_logicalSink != null)
+        {
+            var typeName = _hyperedgeTypeTokens.GetName(typeId);
+            var captured = new HyperedgeMember[members.Length];
+            for (int i = 0; i < members.Length; i++)
+                captured[i] = members[i];
+            RecordLogical(LogicalMutation.CreateHyperedge(hyperedgeId, typeName, captured));
+        }
+        return hyperedgeId;
     }
 
     public void DeleteHyperedge(HyperedgeId hyperedgeId)
     {
+        // header の可視性が incidence とプロパティの可視性の正本 — header を論理削除すれば
+        // それらも同スナップショットで不可視になる。overflow プロパティレコードは物理的に残る
+        // ため、slot を回収できるよう先にチェーンを解放してから header をスタンプする。
+        FreeHyperedgeProperties(hyperedgeId);
         _inner.Hyperedges.Delete(hyperedgeId);
+        _columns?.OnDeleteEntity(Core.EntityKind.Hyperedge, hyperedgeId.Sequence, _inner.Id.Value);
+        if (_logicalSink != null)
+            RecordLogical(LogicalMutation.DeleteHyperedge(hyperedgeId));
+    }
+
+    private void FreeHyperedgeProperties(HyperedgeId hyperedgeId)
+    {
+        var firstPropId = _inner.Hyperedges.Read(hyperedgeId).FirstPropertyId;
+        if (!firstPropId.IsValid) return;
+        var toDelete = new List<PropertyId>();
+        var propEnum = _inner.Properties.Enumerate(firstPropId);
+        while (propEnum.MoveNext())
+            toDelete.Add(propEnum.Current.Id);
+        var currentFirst = firstPropId;
+        foreach (var pid in toDelete)
+            currentFirst = _inner.Properties.Delete(pid, currentFirst);
     }
 
     public HyperedgeMemberEnumerator GetMembers(HyperedgeId hyperedgeId, string? role = null)
@@ -978,6 +1010,207 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public string? GetHyperedgeTypeName(HyperedgeTypeId typeId)
         => typeId.IsValid ? _hyperedgeTypeTokens.GetName(typeId) : null;
+
+    // ========== ハイパーエッジプロパティ操作 ==========
+    // node / rel と同じプロパティエンティティとして扱う。header 15 バイト固定領域の後ろへ
+    // inline 符号化し、収まらない値は既存 PropertyStore の overflow チェーンへ回す。
+
+    public void SetProperty(HyperedgeId hyperedgeId, string key, in PropertyValue value)
+    {
+        var keyId = _propKeyTokens.GetOrCreate(key);
+        if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
+            throw new InvalidOperationException($"Use AddPropertyValue for Set-cardinality property '{key}'.");
+        if (_logicalSink != null)
+        {
+            var captured = LogicalPropertyValue.Capture(in value);
+            RecordLogical(LogicalMutation.SetHyperedgeProperty(hyperedgeId, key, in captured));
+        }
+        SetHyperedgeProperty(hyperedgeId, keyId, in value);
+        // 列化済み key なら同 tx で列を維持する (列作成の公開糖衣は後続タスク)。
+        _columns?.OnSetProperty(Core.EntityKind.Hyperedge, hyperedgeId.Sequence, keyId, in value, _inner.Id.Value);
+    }
+
+    private void SetHyperedgeProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId, in PropertyValue value)
+    {
+        // 小さい値は header へ inline (copy-on-write)。
+        if (InlinePropertyCodec.IsInlineable(value) && _inner.Hyperedges.SetInlineProperty(hyperedgeId, keyId, in value))
+        {
+            // size-class 変更で同 key が overflow に残っていれば除去する。
+            RemoveHyperedgeOverflowIfPresent(hyperedgeId, keyId);
+            return;
+        }
+        // inline 不可 / 予算超過 → overflow チェーン。inline 側に旧値があれば除去。
+        _inner.Hyperedges.RemoveInlineProperty(hyperedgeId, keyId);
+        SetHyperedgeOverflow(hyperedgeId, keyId, in value);
+    }
+
+    private void SetHyperedgeOverflow(HyperedgeId hyperedgeId, PropertyKeyId keyId, in PropertyValue value)
+    {
+        var firstPropId = _inner.Hyperedges.Read(hyperedgeId).FirstPropertyId;
+        var newFirst = firstPropId;
+        var propEnum = _inner.Properties.Enumerate(firstPropId);
+        while (propEnum.MoveNext())
+        {
+            if (propEnum.Current.KeyId == keyId)
+            {
+                newFirst = _inner.Properties.Delete(propEnum.Current.Id, newFirst);
+                break;
+            }
+        }
+        var newPropId = _inner.Properties.Create(keyId, in value, newFirst);
+        var wh = _inner.Hyperedges.Write(hyperedgeId);
+        wh.FirstPropertyId = newPropId;
+        wh.Dispose();
+    }
+
+    private void RemoveHyperedgeOverflowIfPresent(HyperedgeId hyperedgeId, PropertyKeyId keyId)
+    {
+        var firstPropId = _inner.Hyperedges.Read(hyperedgeId).FirstPropertyId;
+        if (!firstPropId.IsValid) return;
+        var propEnum = _inner.Properties.Enumerate(firstPropId);
+        while (propEnum.MoveNext())
+        {
+            if (propEnum.Current.KeyId == keyId)
+            {
+                var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
+                var wh = _inner.Hyperedges.Write(hyperedgeId);
+                wh.FirstPropertyId = newFirst;
+                wh.Dispose();
+                return;
+            }
+        }
+    }
+
+    public PropertyValue GetProperty(HyperedgeId hyperedgeId, string key)
+    {
+        if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
+        if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
+            throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
+        // inline を先に引き、無ければ overflow チェーンを walk。
+        if (_inner.Hyperedges.TryGetInlineProperty(hyperedgeId, keyId, out var inlineVal)) return inlineVal;
+        var firstPropId = _inner.Hyperedges.Read(hyperedgeId).FirstPropertyId;
+        var propEnum = _inner.Properties.Enumerate(firstPropId);
+        while (propEnum.MoveNext())
+        {
+            var prop = propEnum.Current;
+            if (prop.KeyId == keyId) return prop.Value;
+        }
+        return default;
+    }
+
+    public bool HasProperty(HyperedgeId hyperedgeId, string key)
+    {
+        if (!_propKeyTokens.TryGet(key, out var keyId)) return false;
+        if (_inner.Hyperedges.HasInlineProperty(hyperedgeId, keyId)) return true;
+        var firstPropId = _inner.Hyperedges.Read(hyperedgeId).FirstPropertyId;
+        var propEnum = _inner.Properties.Enumerate(firstPropId);
+        while (propEnum.MoveNext())
+        {
+            if (propEnum.Current.KeyId == keyId) return true;
+        }
+        return false;
+    }
+
+    public void RemoveProperty(HyperedgeId hyperedgeId, string key)
+    {
+        if (!_propKeyTokens.TryGet(key, out var keyId)) return;
+
+        // inline を先に試し、無ければ overflow チェーンから除去。
+        bool removed = _inner.Hyperedges.RemoveInlineProperty(hyperedgeId, keyId);
+        if (!removed)
+        {
+            var firstPropId = _inner.Hyperedges.Read(hyperedgeId).FirstPropertyId;
+            var propEnum = _inner.Properties.Enumerate(firstPropId);
+            while (propEnum.MoveNext())
+            {
+                if (propEnum.Current.KeyId == keyId)
+                {
+                    var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
+                    var wh = _inner.Hyperedges.Write(hyperedgeId);
+                    wh.FirstPropertyId = newFirst;
+                    wh.Dispose();
+                    removed = true;
+                    break;
+                }
+            }
+        }
+        if (removed)
+        {
+            _columns?.OnRemoveProperty(Core.EntityKind.Hyperedge, hyperedgeId.Sequence, keyId, _inner.Id.Value);
+            if (_logicalSink != null)
+                RecordLogical(LogicalMutation.RemoveHyperedgeProperty(hyperedgeId, key));
+        }
+    }
+
+    public PropertyEnumerator EnumerateProperties(HyperedgeId hyperedgeId)
+        => _inner.Hyperedges.EnumerateProperties(hyperedgeId, _inner.Properties);
+
+    // ── ハイパーエッジのマルチバリュープロパティ (Set cardinality) ──
+
+    public void AddPropertyValue(HyperedgeId hyperedgeId, string key, in PropertyValue value)
+    {
+        var keyId = _propKeyTokens.GetOrCreate(key, PropertyCardinality.Set);
+
+        // 重複チェック: 同一 key+value の visible エントリがあればスキップ (Set セマンティクス)。
+        var scan = _inner.Hyperedges.EnumerateProperties(hyperedgeId, _inner.Properties);
+        while (scan.MoveNext())
+        {
+            if (scan.Current.KeyId == keyId
+                && PropertyValueEqualityHelper.AreEqual(scan.Current.Value, in value))
+                return;
+        }
+
+        // overflow チェーンの head に prepend (既存 same-key エントリは削除しない)。
+        var firstPropId = _inner.Hyperedges.Read(hyperedgeId).FirstPropertyId;
+        var newPropId = _inner.Properties.Create(keyId, in value, firstPropId);
+        var wh = _inner.Hyperedges.Write(hyperedgeId);
+        wh.FirstPropertyId = newPropId;
+        wh.Dispose();
+
+        if (_logicalSink != null)
+        {
+            var captured = LogicalPropertyValue.Capture(in value);
+            RecordLogical(LogicalMutation.AddHyperedgePropertyValue(hyperedgeId, key, in captured));
+        }
+    }
+
+    public void RemovePropertyValue(HyperedgeId hyperedgeId, string key, in PropertyValue value)
+    {
+        if (!_propKeyTokens.TryGet(key, out var keyId)) return;
+        if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
+            throw new InvalidOperationException($"Use RemoveProperty for Single-cardinality property '{key}'.");
+
+        var firstPropId = _inner.Hyperedges.Read(hyperedgeId).FirstPropertyId;
+        var propEnum = _inner.Properties.Enumerate(firstPropId);
+        while (propEnum.MoveNext())
+        {
+            if (propEnum.Current.KeyId == keyId
+                && propEnum.Current.InUse
+                && PropertyValueEqualityHelper.AreEqual(propEnum.Current.Value, in value))
+            {
+                var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
+                var wh = _inner.Hyperedges.Write(hyperedgeId);
+                wh.FirstPropertyId = newFirst;
+                wh.Dispose();
+
+                if (_logicalSink != null)
+                {
+                    var captured = LogicalPropertyValue.Capture(in value);
+                    RecordLogical(LogicalMutation.RemoveHyperedgePropertyValue(hyperedgeId, key, in captured));
+                }
+                return;
+            }
+        }
+    }
+
+    public PropertyValuesEnumerator GetPropertyValues(HyperedgeId hyperedgeId, string key)
+    {
+        if (!_propKeyTokens.TryGet(key, out var keyId))
+            return new PropertyValuesEnumerator(
+                new PropertyEnumerator(null!, PropertyId.Invalid), default);
+        return new PropertyValuesEnumerator(
+            _inner.Hyperedges.EnumerateProperties(hyperedgeId, _inner.Properties), keyId);
+    }
 
     public void Commit() => _inner.Commit();
     public void Rollback() => _inner.Abort();

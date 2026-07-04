@@ -29,6 +29,11 @@ internal sealed class VersionedHyperedgeStore : IHyperedgeStore
     private const int OffFirstIncidence = 3;
     private const int OffFirstProperty = 9;
     private const byte FlagInUse = 0x01;
+    // alloc-free な inline property 読み取りで使う stackalloc 量 (node store と同値)。
+    // 超過した payload は割り当て版へフォールバックする。
+    private const int InlineReadBuffer = 256;
+
+    private static readonly int HdrSize = VersionedRecordHeap.VersionHeaderSize;
 
     private readonly IPagedFile _file;
     private readonly ItemPointerMap _map;
@@ -64,12 +69,15 @@ internal sealed class VersionedHyperedgeStore : IHyperedgeStore
         long generation = _versions.Read(sequence).Generation + 1;
         var hyperedgeId = HyperedgeId.Create(sequence, checked((int)generation));
 
-        Span<byte> payload = stackalloc byte[PayloadSize];
+        // 固定領域 + inline property 領域 (件数 0 で開始)。node / rel store と同じ
+        // 可変長 payload 形式にして inline property の copy-on-write を土台にする。
+        Span<byte> payload = stackalloc byte[InlinePropertyCodec.BaseSize(PayloadSize)];
         payload.Clear();
         payload[OffFlags] = FlagInUse;
         BinaryPrimitives.WriteInt16LittleEndian(payload[OffType..], checked((short)type.Value));
         RecordHelpers.WriteInt48(payload[OffFirstIncidence..], IncidenceId.Invalid.Sequence);
         RecordHelpers.WriteInt48(payload[OffFirstProperty..], PropertyId.Invalid.Sequence);
+        payload[InlinePropertyCodec.OffInlineCount(PayloadSize)] = 0;
 
         _heap.Insert(sequence, payload, MvccContext.CurrentTxId.Value);
         _versions.Write(sequence, new EntityVersionMeta(
@@ -193,7 +201,7 @@ internal sealed class VersionedHyperedgeStore : IHyperedgeStore
         return new HyperedgeWriteHandle(
             _file,
             pageId,
-            record.Slice(VersionedRecordHeap.VersionHeaderSize, PayloadSize));
+            record.Slice(HdrSize, PayloadSize));
     }
 
     public IEnumerable<HyperedgeId> Scan()
@@ -209,6 +217,91 @@ internal sealed class VersionedHyperedgeStore : IHyperedgeStore
             yield return HyperedgeId.Create(sequence, generation);
         }
     }
+
+    // ===== inline property storage (hyperedge 粒度 copy-on-write) =====
+    // node / rel store と同型。header の可視性に従い、書き込みは copy-on-write で
+    // 新 header 版を積む。overflow チェーンは header の FirstPropertyId から辿る
+    // (呼び出し側が Read / Write ハンドル経由で管理する)。
+
+    public bool TryGetInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId, out PropertyValue value)
+    {
+        value = default;
+        long sequence = hyperedgeId.Sequence;
+        // 可視版 payload を stackalloc へコピーして scan する。scalar は値コピーで安全、
+        // String/Bytes のみ安定 byte[] へ写す。超過は割り当て版へフォールバック。
+        Span<byte> buffer = stackalloc byte[InlineReadBuffer];
+        int length = _heap.TryReadVisibleInto(sequence, AmbientVisible, buffer, out _, out _);
+        if (length == 0) return false;
+        // property read も header の read。可視版を観測したので SSN read-set に記録する。
+        MvccContext.RecordRead(EntityKind.Hyperedge, sequence);
+        if (length <= buffer.Length)
+        {
+            if (!InlinePropertyCodec.TryScan(buffer[..length], PayloadSize, keyId.Value, out var type, out var span))
+                return false;
+            value = InlinePropertyCodec.IsScalar(type)
+                ? InlinePropertyCodec.DecodeScalar(type, span)
+                : InlinePropertyCodec.Decode(type, span.ToArray());
+            return true;
+        }
+        if (!_heap.TryReadVisible(sequence, AmbientVisible, out var payload, out _, out _)) return false;
+        if (!InlinePropertyCodec.TryScan(payload, PayloadSize, keyId.Value, out var t2, out var s2)) return false;
+        value = InlinePropertyCodec.Decode(t2, s2);
+        return true;
+    }
+
+    public bool HasInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId)
+    {
+        long sequence = hyperedgeId.Sequence;
+        Span<byte> buffer = stackalloc byte[InlineReadBuffer];
+        int length = _heap.TryReadVisibleInto(sequence, AmbientVisible, buffer, out _, out _);
+        if (length == 0) return false;
+        MvccContext.RecordRead(EntityKind.Hyperedge, sequence);
+        if (length <= buffer.Length)
+            return InlinePropertyCodec.TryScan(buffer[..length], PayloadSize, keyId.Value, out _, out _);
+        if (!_heap.TryReadVisible(sequence, AmbientVisible, out var payload, out _, out _)) return false;
+        return InlinePropertyCodec.TryScan(payload, PayloadSize, keyId.Value, out _, out _);
+    }
+
+    /// <summary>
+    /// inline property を set (replace-or-add)。copy-on-write で新 header 版を作る (同一 tx の
+    /// 未コミット head は in-place)。inline 不可 (大きすぎ / 予算超過) なら false を返し、
+    /// 呼び出し側が overflow チェーンへ回す。
+    /// </summary>
+    public bool SetInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId, in PropertyValue value)
+    {
+        if (!InlinePropertyCodec.IsInlineable(value)) return false;
+        long sequence = hyperedgeId.Sequence;
+        if (!_heap.TryReadVisible(sequence, AmbientVisible, out var current, out _, out _)) return false;
+        byte[] next = InlinePropertyCodec.Build(current, PayloadSize, keyId.Value, in value, remove: false);
+        if (next.Length > VersionedRecordHeap.MaxPayloadSize) return false; // 予算超過 → overflow
+        _heap.AppendOrReplaceHead(sequence, next, MvccContext.CurrentTxId.Value);
+        return true;
+    }
+
+    public bool RemoveInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId)
+    {
+        long sequence = hyperedgeId.Sequence;
+        if (!_heap.TryReadVisible(sequence, AmbientVisible, out var current, out _, out _)) return false;
+        if (!InlinePropertyCodec.TryScan(current, PayloadSize, keyId.Value, out _, out _)) return false;
+        byte[] next = InlinePropertyCodec.Build(current, PayloadSize, keyId.Value, default, remove: true);
+        _heap.AppendOrReplaceHead(sequence, next, MvccContext.CurrentTxId.Value);
+        return true;
+    }
+
+    /// <summary>
+    /// inline property (可視版) + overflow チェーンを結合して列挙する。inline を先に、
+    /// 続いて <paramref name="overflowStore"/> 上の firstProp チェーンを辿る。
+    /// </summary>
+    public PropertyEnumerator EnumerateProperties(HyperedgeId hyperedgeId, IPropertyStore overflowStore)
+    {
+        if (!_heap.TryReadVisible(hyperedgeId.Sequence, AmbientVisible, out var payload, out _, out _))
+            return new PropertyEnumerator(overflowStore, PropertyId.Invalid);
+        MvccContext.RecordRead(EntityKind.Hyperedge, hyperedgeId.Sequence); // property 列挙 = header read
+        var firstProp = new PropertyId(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProperty)));
+        return new PropertyEnumerator(payload, overflowStore, firstProp, PayloadSize);
+    }
+
+    private static bool AmbientVisible(long xmin, long xmax) => Visibility.IsVisibleAmbient(xmin, xmax);
 
     private long NextSequence()
     {

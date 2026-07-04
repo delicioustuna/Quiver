@@ -46,6 +46,26 @@ internal interface IHyperedgeStore
 
     /// <summary>生存 hyperedge 数</summary>
     long InUseCount { get; }
+
+    // ===== inline property (header 15 バイト固定領域の後ろに符号化) =====
+
+    /// <summary>inline property を読む。存在しなければ false。</summary>
+    bool TryGetInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId, out PropertyValue value);
+
+    /// <summary>inline property の存在有無を返す。</summary>
+    bool HasInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId);
+
+    /// <summary>
+    /// inline property を set する。inline に収まらない (大きすぎ / 予算超過) 場合は false を返し、
+    /// 呼び出し側が overflow チェーンへ回す。
+    /// </summary>
+    bool SetInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId, in PropertyValue value);
+
+    /// <summary>inline property を除去する。存在しなければ false。</summary>
+    bool RemoveInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId);
+
+    /// <summary>inline property と overflow チェーンを結合して列挙する。</summary>
+    PropertyEnumerator EnumerateProperties(HyperedgeId hyperedgeId, IPropertyStore overflowStore);
 }
 
 /// <summary>

@@ -17,6 +17,18 @@ internal sealed class NullHyperedgeStore : IHyperedgeStore
     public HyperedgeWriteHandle Write(HyperedgeId hyperedgeId)
         => throw new NotSupportedException("Hyperedge stores are not configured.");
     public IEnumerable<HyperedgeId> Scan() => [];
+
+    public bool TryGetInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId, out PropertyValue value)
+    {
+        value = default;
+        return false;
+    }
+    public bool HasInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId) => false;
+    public bool SetInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId, in PropertyValue value)
+        => throw new NotSupportedException("Hyperedge stores are not configured.");
+    public bool RemoveInlineProperty(HyperedgeId hyperedgeId, PropertyKeyId keyId) => false;
+    public PropertyEnumerator EnumerateProperties(HyperedgeId hyperedgeId, IPropertyStore overflowStore)
+        => new(overflowStore, PropertyId.Invalid);
 }
 
 internal sealed class NullIncidenceStore : IIncidenceStore

@@ -239,6 +239,32 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// <summary>ハイパーエッジ型 ID から型名を返す。未登録 ID では <c>null</c>。</summary>
     string? GetHyperedgeTypeName(HyperedgeTypeId typeId);
 
+    // ── ハイパーエッジプロパティ操作 ──────────────────────────────
+
+    /// <summary>ハイパーエッジにプロパティを設定する (既存値は上書き)。</summary>
+    void SetProperty(HyperedgeId hyperedgeId, string key, in PropertyValue value);
+
+    /// <summary>ハイパーエッジのプロパティ値を取得する。存在しない場合は既定値を返す。</summary>
+    PropertyValue GetProperty(HyperedgeId hyperedgeId, string key);
+
+    /// <summary>ハイパーエッジが指定キーのプロパティを保持しているかを返す。</summary>
+    bool HasProperty(HyperedgeId hyperedgeId, string key);
+
+    /// <summary>ハイパーエッジからプロパティを削除する。</summary>
+    void RemoveProperty(HyperedgeId hyperedgeId, string key);
+
+    /// <summary>ハイパーエッジに付与された全プロパティを列挙する。</summary>
+    PropertyEnumerator EnumerateProperties(HyperedgeId hyperedgeId);
+
+    /// <inheritdoc cref="AddPropertyValue(NodeId, string, in PropertyValue)"/>
+    void AddPropertyValue(HyperedgeId hyperedgeId, string key, in PropertyValue value);
+
+    /// <inheritdoc cref="RemovePropertyValue(NodeId, string, in PropertyValue)"/>
+    void RemovePropertyValue(HyperedgeId hyperedgeId, string key, in PropertyValue value);
+
+    /// <inheritdoc cref="GetPropertyValues(NodeId, string)"/>
+    PropertyValuesEnumerator GetPropertyValues(HyperedgeId hyperedgeId, string key);
+
     // 物理プラン実行 (Execute/ExecuteCursor)、access methods (Access)、隣接ブロック
     // (AdjacencyBlocks) は内部実装型を露出するため公開面から除外し、internal な
     // IGraphTransactionInternal へ移設した (利用者は GraphTraversal DSL を使う)。

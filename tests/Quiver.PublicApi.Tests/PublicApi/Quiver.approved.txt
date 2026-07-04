@@ -584,6 +584,24 @@ namespace Quiver
         public bool TryGetDegree(Quiver.Core.NodeId nodeId, out long outDegree, out long inDegree) { }
         public Quiver.GraphStats WithFastLabelIndex(bool hasFastLabelIndex) { }
     }
+    public ref struct HyperedgeIdEnumerator
+    {
+        public Quiver.Core.HyperedgeId Current { get; }
+        public void Dispose() { }
+        public bool MoveNext() { }
+    }
+    public readonly struct HyperedgeMember : System.IEquatable<Quiver.HyperedgeMember>
+    {
+        public HyperedgeMember(string Role, Quiver.Core.NodeId NodeId) { }
+        public Quiver.Core.NodeId NodeId { get; init; }
+        public string Role { get; init; }
+    }
+    public ref struct HyperedgeMemberEnumerator
+    {
+        public Quiver.HyperedgeMember Current { get; }
+        public void Dispose() { }
+        public bool MoveNext() { }
+    }
     public interface IDiagnosticsApi
     {
         long CurrentCheckpointThresholdBytes { get; }
@@ -617,23 +635,34 @@ namespace Quiver
         Quiver.Core.TransactionId Id { get; }
         bool IsReadOnly { get; }
         Quiver.Transactions.TransactionState State { get; }
+        void AddPropertyValue(Quiver.Core.HyperedgeId hyperedgeId, string key, in Quiver.Storage.Records.PropertyValue value);
         void AddPropertyValue(Quiver.Core.NodeId nodeId, string key, in Quiver.Storage.Records.PropertyValue value);
         void AddPropertyValue(Quiver.Core.RelationshipId relId, string key, in Quiver.Storage.Records.PropertyValue value);
         void Commit();
+        Quiver.Core.HyperedgeId CreateHyperedge(Quiver.Core.HyperedgeTypeId typeId, System.ReadOnlySpan<Quiver.HyperedgeMember> members);
+        Quiver.Core.HyperedgeId CreateHyperedge(string type, System.ReadOnlySpan<Quiver.HyperedgeMember> members);
         Quiver.Core.NodeId CreateNode(Quiver.Core.LabelId labelId);
         Quiver.Core.NodeId CreateNode(string label);
         Quiver.Core.RelationshipId CreateRelationship(Quiver.Core.NodeId source, Quiver.Core.NodeId target, Quiver.Core.RelationshipTypeId typeId);
         Quiver.Core.RelationshipId CreateRelationship(Quiver.Core.NodeId source, Quiver.Core.NodeId target, string type);
+        void DeleteHyperedge(Quiver.Core.HyperedgeId hyperedgeId);
         void DeleteNode(Quiver.Core.NodeId nodeId);
         void DeleteRelationship(Quiver.Core.RelationshipId relId);
+        Quiver.Storage.Records.PropertyEnumerator EnumerateProperties(Quiver.Core.HyperedgeId hyperedgeId);
         Quiver.Storage.Records.PropertyEnumerator EnumerateProperties(Quiver.Core.NodeId nodeId);
         Quiver.Storage.Records.RelationshipEnumerator EnumerateRelationships(Quiver.Core.NodeId nodeId, Quiver.Storage.Records.Direction direction = 3, string? typeFilter = null);
+        string? GetHyperedgeTypeName(Quiver.Core.HyperedgeTypeId typeId);
+        Quiver.HyperedgeIdEnumerator GetHyperedges(Quiver.Core.NodeId nodeId, string? type = null, string? role = null);
+        Quiver.HyperedgeMemberEnumerator GetMembers(Quiver.Core.HyperedgeId hyperedgeId, string? role = null);
         string? GetNodeLabel(Quiver.Core.NodeId nodeId);
+        Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.HyperedgeId hyperedgeId, string key);
         Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.NodeId nodeId, string key);
         Quiver.Storage.Records.PropertyValue GetProperty(Quiver.Core.RelationshipId relId, string key);
+        Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.HyperedgeId hyperedgeId, string key);
         Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.NodeId nodeId, string key);
         Quiver.Storage.Records.PropertyValuesEnumerator GetPropertyValues(Quiver.Core.RelationshipId relId, string key);
         string? GetRelationshipTypeName(Quiver.Core.RelationshipTypeId typeId);
+        bool HasProperty(Quiver.Core.HyperedgeId hyperedgeId, string key);
         bool HasProperty(Quiver.Core.NodeId nodeId, string key);
         void IndexInsert(string indexName, double key, Quiver.Core.NodeId nodeId);
         void IndexInsert(string indexName, long key, Quiver.Core.NodeId nodeId);
@@ -649,7 +678,9 @@ namespace Quiver
         bool NodeExists(Quiver.Core.NodeId nodeId);
         Quiver.NodeIdEnumerator RangeIndex(string indexName, in Quiver.Storage.Records.PropertyValue from, bool fromInclusive, in Quiver.Storage.Records.PropertyValue to, bool toInclusive);
         void ReleaseSavepoint(Quiver.Transactions.SavepointId savepoint);
+        void RemoveProperty(Quiver.Core.HyperedgeId hyperedgeId, string key);
         void RemoveProperty(Quiver.Core.NodeId nodeId, string key);
+        void RemovePropertyValue(Quiver.Core.HyperedgeId hyperedgeId, string key, in Quiver.Storage.Records.PropertyValue value);
         void RemovePropertyValue(Quiver.Core.NodeId nodeId, string key, in Quiver.Storage.Records.PropertyValue value);
         void RemovePropertyValue(Quiver.Core.RelationshipId relId, string key, in Quiver.Storage.Records.PropertyValue value);
         void RemoveVector(Quiver.Core.EntityKind kind, long entityId, string indexName);
@@ -657,6 +688,7 @@ namespace Quiver
         void RollbackTo(Quiver.Transactions.SavepointId savepoint);
         Quiver.Transactions.SavepointId Savepoint(string? name = null);
         Quiver.NodeIdEnumerator SeekIndex(string indexName, in Quiver.Storage.Records.PropertyValue key);
+        void SetProperty(Quiver.Core.HyperedgeId hyperedgeId, string key, in Quiver.Storage.Records.PropertyValue value);
         void SetProperty(Quiver.Core.NodeId nodeId, string key, in Quiver.Storage.Records.PropertyValue value);
         void SetProperty(Quiver.Core.RelationshipId relId, string key, in Quiver.Storage.Records.PropertyValue value);
         void SetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.ReadOnlySpan<float> vector);
@@ -667,7 +699,9 @@ namespace Quiver
         void CreateFullTextIndex(string indexName, string label, string propertyKey, Quiver.FullTextIndexOptions? options = null);
         void CreateIndex(string indexName, string label, string propertyKey, Quiver.IndexKind kind);
         void DropIndex(string indexName);
+        string? GetHyperedgeTypeName(Quiver.Core.HyperedgeTypeId id);
         string? GetLabelName(Quiver.Core.LabelId id);
+        Quiver.Core.HyperedgeTypeId GetOrCreateHyperedgeType(string name);
         Quiver.Core.LabelId GetOrCreateLabel(string name);
         Quiver.Core.PropertyKeyId GetOrCreatePropertyKey(string name);
         Quiver.Core.PropertyKeyId GetOrCreatePropertyKey(string name, Quiver.Core.PropertyCardinality cardinality);
@@ -675,14 +709,17 @@ namespace Quiver
         Quiver.Core.PropertyCardinality GetPropertyKeyCardinality(Quiver.Core.PropertyKeyId id);
         bool IndexExists(string indexName);
         System.Collections.Generic.IReadOnlyList<Quiver.FullTextIndexInfo> ListFullTextIndexes();
+        System.Collections.Generic.IReadOnlyList<string> ListHyperedgeTypes();
         System.Collections.Generic.IReadOnlyList<Quiver.IndexInfo> ListIndexes();
         System.Collections.Generic.IReadOnlyList<string> ListLabels();
         System.Collections.Generic.IReadOnlyList<string> ListPropertyKeys();
         System.Collections.Generic.IReadOnlyList<string> ListRelationshipTypes();
+        System.Collections.Generic.IReadOnlyList<string> ListRoles();
         bool RenameIndex(string oldName, string newName);
         bool RenameLabel(string oldName, string newName);
         bool RenamePropertyKey(string oldName, string newName);
         bool RenameRelationshipType(string oldName, string newName);
+        bool TryGetHyperedgeTypeId(string name, out Quiver.Core.HyperedgeTypeId id);
         bool TryGetLabelId(string name, out Quiver.Core.LabelId id);
         bool TryGetPropertyKeyId(string name, out Quiver.Core.PropertyKeyId id);
         bool TryGetRelationshipTypeId(string name, out Quiver.Core.RelationshipTypeId id);
@@ -1158,18 +1195,26 @@ namespace Quiver.Logical
     }
     public readonly struct LogicalMutation
     {
+        public Quiver.Core.HyperedgeId HyperedgeId { get; }
         public Quiver.Logical.LogicalMutationKind Kind { get; }
+        public System.Collections.Generic.IReadOnlyList<Quiver.HyperedgeMember>? Members { get; }
         public Quiver.Core.NodeId NodeId { get; }
         public string? PropertyKey { get; }
         public Quiver.Logical.LogicalPropertyValue PropertyValue { get; }
         public Quiver.Core.RelationshipId RelationshipId { get; }
         public Quiver.Core.NodeId TargetNodeId { get; }
         public string? TokenName { get; }
+        public static Quiver.Logical.LogicalMutation AddHyperedgePropertyValue(Quiver.Core.HyperedgeId hyperedgeId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
+        public static Quiver.Logical.LogicalMutation CreateHyperedge(Quiver.Core.HyperedgeId hyperedgeId, string type, System.Collections.Generic.IReadOnlyList<Quiver.HyperedgeMember> members) { }
         public static Quiver.Logical.LogicalMutation CreateNode(Quiver.Core.NodeId nodeId, string label) { }
         public static Quiver.Logical.LogicalMutation CreateRelationship(Quiver.Core.RelationshipId relId, Quiver.Core.NodeId source, Quiver.Core.NodeId target, string type) { }
+        public static Quiver.Logical.LogicalMutation DeleteHyperedge(Quiver.Core.HyperedgeId hyperedgeId) { }
         public static Quiver.Logical.LogicalMutation DeleteNode(Quiver.Core.NodeId nodeId) { }
         public static Quiver.Logical.LogicalMutation DeleteRelationship(Quiver.Core.RelationshipId relId) { }
+        public static Quiver.Logical.LogicalMutation RemoveHyperedgeProperty(Quiver.Core.HyperedgeId hyperedgeId, string key) { }
+        public static Quiver.Logical.LogicalMutation RemoveHyperedgePropertyValue(Quiver.Core.HyperedgeId hyperedgeId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation RemoveNodeProperty(Quiver.Core.NodeId nodeId, string key) { }
+        public static Quiver.Logical.LogicalMutation SetHyperedgeProperty(Quiver.Core.HyperedgeId hyperedgeId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation SetNodeProperty(Quiver.Core.NodeId nodeId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation SetRelationshipProperty(Quiver.Core.RelationshipId relId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
     }
@@ -1182,10 +1227,16 @@ namespace Quiver.Logical
         SetNodeProperty = 5,
         SetRelationshipProperty = 6,
         RemoveNodeProperty = 7,
+        CreateHyperedge = 8,
+        DeleteHyperedge = 9,
+        SetHyperedgeProperty = 10,
+        RemoveHyperedgeProperty = 11,
+        AddHyperedgePropertyValue = 12,
+        RemoveHyperedgePropertyValue = 13,
     }
     public static class LogicalMutationReplay
     {
-        public static void Apply(Quiver.IGraphTransaction tx, System.Collections.Generic.IEnumerable<Quiver.Logical.LogicalMutation> mutations, System.Collections.Generic.IDictionary<long, Quiver.Core.NodeId>? nodeMap = null, System.Collections.Generic.IDictionary<long, Quiver.Core.RelationshipId>? relationshipMap = null) { }
+        public static void Apply(Quiver.IGraphTransaction tx, System.Collections.Generic.IEnumerable<Quiver.Logical.LogicalMutation> mutations, System.Collections.Generic.IDictionary<long, Quiver.Core.NodeId>? nodeMap = null, System.Collections.Generic.IDictionary<long, Quiver.Core.RelationshipId>? relationshipMap = null, System.Collections.Generic.IDictionary<long, Quiver.Core.HyperedgeId>? hyperedgeMap = null) { }
     }
     public readonly struct LogicalPropertyValue
     {

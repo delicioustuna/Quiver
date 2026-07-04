@@ -176,6 +176,113 @@ public sealed class LogicalMutationTests : IDisposable
     }
 
     [Fact]
+    public void Hyperedge_mutations_are_captured_in_commit_order()
+    {
+        var sink = new InMemoryLogicalMutationSink();
+        using var db = OpenWithSink(NewDir(), sink);
+
+        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+
+        using (var tx = db.BeginTransaction())
+        {
+            var a = tx.CreateNode("Person");
+            var b = tx.CreateNode("Book");
+            var he = tx.CreateHyperedge("Purchase", [new("Buyer", a), new("Item", b)]);
+            tx.SetProperty(he, "price", PropertyValue.FromInt32(30));
+            tx.AddPropertyValue(he, "tags", PropertyValue.FromString("gift"));
+            tx.RemoveProperty(he, "price");
+            tx.DeleteHyperedge(he);
+            tx.Commit();
+        }
+
+        var kinds = sink.Mutations.Select(m => m.Kind).ToArray();
+        kinds.Should().Equal(
+            LogicalMutationKind.CreateNode,
+            LogicalMutationKind.CreateNode,
+            LogicalMutationKind.CreateHyperedge,
+            LogicalMutationKind.SetHyperedgeProperty,
+            LogicalMutationKind.AddHyperedgePropertyValue,
+            LogicalMutationKind.RemoveHyperedgeProperty,
+            LogicalMutationKind.DeleteHyperedge);
+    }
+
+    [Fact]
+    public void Hyperedge_mutations_are_not_published_on_rollback()
+    {
+        var sink = new InMemoryLogicalMutationSink();
+        using var db = OpenWithSink(NewDir(), sink);
+
+        using (var tx = db.BeginTransaction())
+        {
+            var a = tx.CreateNode("A");
+            var b = tx.CreateNode("B");
+            var he = tx.CreateHyperedge("T", [new("R1", a), new("R2", b)]);
+            tx.SetProperty(he, "k", PropertyValue.FromInt32(1));
+            tx.Rollback();
+        }
+
+        sink.Batches.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Replay_rebuilds_hyperedge_with_members_and_properties()
+    {
+        var sink = new InMemoryLogicalMutationSink();
+        string srcDir = NewDir();
+
+        HyperedgeId srcHe;
+        NodeId srcA, srcB, srcC;
+        using (var src = OpenWithSink(srcDir, sink))
+        {
+            src.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+            using var tx = src.BeginTransaction();
+            srcA = tx.CreateNode("Person");
+            srcB = tx.CreateNode("Book");
+            srcC = tx.CreateNode("Store");
+            srcHe = tx.CreateHyperedge("Purchase",
+                [new("Buyer", srcA), new("Item", srcB), new("Seller", srcC)]);
+            tx.SetProperty(srcHe, "price", PropertyValue.FromInt32(30));
+            tx.AddPropertyValue(srcHe, "tags", PropertyValue.FromString("gift"));
+            tx.AddPropertyValue(srcHe, "tags", PropertyValue.FromString("sale"));
+            tx.Commit();
+        }
+
+        // 別 DB へ再生する。target 側は tags の cardinality を宣言しておく。
+        string targetDir = NewDir();
+        using var target = GraphDatabase.Open(System.IO.Path.Combine(targetDir, "graph.quiver"));
+        target.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        var nodeMap = new Dictionary<long, NodeId>();
+        var heMap = new Dictionary<long, HyperedgeId>();
+        using (var tx = target.BeginTransaction())
+        {
+            LogicalMutationReplay.Apply(tx, sink.Mutations, nodeMap, hyperedgeMap: heMap);
+            tx.Commit();
+        }
+
+        heMap.Should().ContainKey(srcHe.Sequence);
+        var targetHe = heMap[srcHe.Sequence];
+
+        using (var ro = target.BeginReadOnlyTransaction())
+        {
+            // メンバーがターゲット側 ID へ再マッピングされて再構築されていること。
+            var members = new List<HyperedgeMember>();
+            var me = ro.GetMembers(targetHe);
+            while (me.MoveNext()) members.Add(me.Current);
+            members.Should().HaveCount(3);
+            members.Select(m => m.Role).Should().BeEquivalentTo(["Buyer", "Item", "Seller"]);
+            members.Select(m => m.NodeId).Should().OnlyContain(n => nodeMap.ContainsValue(n));
+
+            ro.GetProperty(targetHe, "price").Int32Value.Should().Be(30);
+
+            var tags = new List<string>();
+            var te = ro.GetPropertyValues(targetHe, "tags");
+            while (te.MoveNext())
+                tags.Add(System.Text.Encoding.UTF8.GetString(te.Current.Utf8StringValue));
+            tags.Should().BeEquivalentTo(["gift", "sale"]);
+        }
+    }
+
+    [Fact]
     public void Multiple_committed_transactions_produce_separate_batches()
     {
         var sink = new InMemoryLogicalMutationSink();

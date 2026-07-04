@@ -28,31 +28,45 @@ public readonly struct LogicalMutation
     /// <summary>リレーションシップ ID (CreateRelationship の戻り値 / DeleteRelationship / SetRelationshipProperty)。</summary>
     public RelationshipId RelationshipId { get; }
 
-    /// <summary><see cref="LogicalMutationKind.CreateNode"/> ではラベル名、<see cref="LogicalMutationKind.CreateRelationship"/> ではリレーションシップ型名。</summary>
+    /// <summary>ハイパーエッジ ID (CreateHyperedge の戻り値 / DeleteHyperedge / *HyperedgeProperty)。</summary>
+    public HyperedgeId HyperedgeId { get; }
+
+    /// <summary><see cref="LogicalMutationKind.CreateNode"/> ではラベル名、<see cref="LogicalMutationKind.CreateRelationship"/> ではリレーションシップ型名、<see cref="LogicalMutationKind.CreateHyperedge"/> ではハイパーエッジ型名。</summary>
     public string? TokenName { get; }
 
     /// <summary>*Property ミューテーションのプロパティキー名。</summary>
     public string? PropertyKey { get; }
 
-    /// <summary><see cref="LogicalMutationKind.SetNodeProperty"/> / <see cref="LogicalMutationKind.SetRelationshipProperty"/> のプロパティ値。</summary>
+    /// <summary><see cref="LogicalMutationKind.SetNodeProperty"/> / <see cref="LogicalMutationKind.SetRelationshipProperty"/> / <see cref="LogicalMutationKind.SetHyperedgeProperty"/> 等のプロパティ値。</summary>
     public LogicalPropertyValue PropertyValue { get; }
+
+    /// <summary>
+    /// <see cref="LogicalMutationKind.CreateHyperedge"/> のメンバー列 (ロール名 + ソース側 <see cref="NodeId"/>)。
+    /// 再生時に各メンバーの <see cref="NodeId"/> をターゲット DB の ID へ再マッピングする。
+    /// 他の種別では <c>null</c>。
+    /// </summary>
+    public IReadOnlyList<HyperedgeMember>? Members { get; }
 
     private LogicalMutation(
         LogicalMutationKind kind,
         NodeId nodeId = default,
         NodeId targetNodeId = default,
         RelationshipId relationshipId = default,
+        HyperedgeId hyperedgeId = default,
         string? tokenName = null,
         string? propertyKey = null,
-        LogicalPropertyValue propertyValue = default)
+        LogicalPropertyValue propertyValue = default,
+        IReadOnlyList<HyperedgeMember>? members = null)
     {
         Kind = kind;
         NodeId = nodeId;
         TargetNodeId = targetNodeId;
         RelationshipId = relationshipId;
+        HyperedgeId = hyperedgeId;
         TokenName = tokenName;
         PropertyKey = propertyKey;
         PropertyValue = propertyValue;
+        Members = members;
     }
 
     /// <summary>ノード作成のミューテーションレコードを生成する。</summary>
@@ -86,4 +100,36 @@ public readonly struct LogicalMutation
     /// <summary>ノードプロパティ削除のミューテーションレコードを生成する。</summary>
     public static LogicalMutation RemoveNodeProperty(NodeId nodeId, string key)
         => new(LogicalMutationKind.RemoveNodeProperty, nodeId: nodeId, propertyKey: key);
+
+    /// <summary>
+    /// ハイパーエッジ作成のミューテーションレコードを生成する。
+    /// <paramref name="members"/> はロール名とソース側 <see cref="NodeId"/> を保持し、再生時に再マッピングされる。
+    /// </summary>
+    public static LogicalMutation CreateHyperedge(
+        HyperedgeId hyperedgeId, string type, IReadOnlyList<HyperedgeMember> members)
+        => new(LogicalMutationKind.CreateHyperedge,
+            hyperedgeId: hyperedgeId, tokenName: type, members: members);
+
+    /// <summary>ハイパーエッジ削除のミューテーションレコードを生成する。</summary>
+    public static LogicalMutation DeleteHyperedge(HyperedgeId hyperedgeId)
+        => new(LogicalMutationKind.DeleteHyperedge, hyperedgeId: hyperedgeId);
+
+    /// <summary>ハイパーエッジプロパティ設定のミューテーションレコードを生成する。</summary>
+    public static LogicalMutation SetHyperedgeProperty(HyperedgeId hyperedgeId, string key, in LogicalPropertyValue value)
+        => new(LogicalMutationKind.SetHyperedgeProperty,
+            hyperedgeId: hyperedgeId, propertyKey: key, propertyValue: value);
+
+    /// <summary>ハイパーエッジプロパティ削除のミューテーションレコードを生成する。</summary>
+    public static LogicalMutation RemoveHyperedgeProperty(HyperedgeId hyperedgeId, string key)
+        => new(LogicalMutationKind.RemoveHyperedgeProperty, hyperedgeId: hyperedgeId, propertyKey: key);
+
+    /// <summary>ハイパーエッジのマルチバリュープロパティへの値追加ミューテーションレコードを生成する。</summary>
+    public static LogicalMutation AddHyperedgePropertyValue(HyperedgeId hyperedgeId, string key, in LogicalPropertyValue value)
+        => new(LogicalMutationKind.AddHyperedgePropertyValue,
+            hyperedgeId: hyperedgeId, propertyKey: key, propertyValue: value);
+
+    /// <summary>ハイパーエッジのマルチバリュープロパティからの値除去ミューテーションレコードを生成する。</summary>
+    public static LogicalMutation RemoveHyperedgePropertyValue(HyperedgeId hyperedgeId, string key, in LogicalPropertyValue value)
+        => new(LogicalMutationKind.RemoveHyperedgePropertyValue,
+            hyperedgeId: hyperedgeId, propertyKey: key, propertyValue: value);
 }
