@@ -47,6 +47,12 @@ internal interface IHyperedgeStore
     /// <summary>生存 hyperedge 数</summary>
     long InUseCount { get; }
 
+    /// <summary>
+    /// 採番済み sequence の排他的上限。allocation-free scan が穴を含む ID 空間を
+    /// <see cref="Read"/> で走査するために使う。
+    /// </summary>
+    long SequenceHighWaterMark => 0;
+
     // ===== inline property (header 15 バイト固定領域の後ろに符号化) =====
 
     /// <summary>inline property を読む。存在しなければ false。</summary>

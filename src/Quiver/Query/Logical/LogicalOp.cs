@@ -87,6 +87,36 @@ internal sealed record ExpandOp(
     public override int PredictedOutputColumnCount => BaseColumnCount + (Carry?.Length ?? 0);
 }
 
+/// <summary>
+/// node から参加 hyperedge へ展開する。出力は (sourceNode, hyperedge) + carry。
+/// source node は後続の OtherMembers で除外に使える hidden origin として保持する。
+/// </summary>
+internal sealed record ExpandToHyperedgeOp(
+    LogicalOp Source,
+    int SourceNodeColumn,
+    string? Type,
+    string? Role,
+    int[]? Carry) : LogicalOp
+{
+    public override int CurrentEntityColumn => 1;
+    public override int PredictedOutputColumnCount => 2 + (Carry?.Length ?? 0);
+}
+
+/// <summary>
+/// hyperedge から member node へ展開する。出力は (hyperedge, member) + carry。
+/// <see cref="ExcludeNodeColumn"/> が指定された場合は同じ node を結果から除外する。
+/// </summary>
+internal sealed record ExpandMembersOp(
+    LogicalOp Source,
+    int HyperedgeColumn,
+    string? Role,
+    int? ExcludeNodeColumn,
+    int[]? Carry) : LogicalOp
+{
+    public override int CurrentEntityColumn => 1;
+    public override int PredictedOutputColumnCount => 2 + (Carry?.Length ?? 0);
+}
+
 /// <summary>可変長展開 (<c>Repeat</c>)。(startNode, endNode) を放出し endNode が列 1。</summary>
 internal sealed record VarLenExpandOp(
     LogicalOp Source,

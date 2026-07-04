@@ -4,7 +4,12 @@ using Quiver.Storage.Records;
 
 namespace Quiver;
 
-internal sealed class SchemaApi : ISchemaApi
+internal interface IHyperedgeSchemaResolver
+{
+    bool TryGetRoleId(string name, out RoleId id);
+}
+
+internal sealed class SchemaApi : ISchemaApi, IHyperedgeSchemaResolver
 {
     private readonly ITokenStore<LabelId> _labels;
     private readonly ITokenStore<RelationshipTypeId> _relTypes;
@@ -149,4 +154,6 @@ internal sealed class SchemaApi : ISchemaApi
 
     public IReadOnlyList<string> ListRoles()
         => _roles.All().Select(_roles.GetName).ToList();
+
+    public bool TryGetRoleId(string name, out RoleId id) => _roles.TryGet(name, out id);
 }

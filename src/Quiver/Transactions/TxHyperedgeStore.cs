@@ -44,6 +44,7 @@ internal sealed class TxHyperedgeStore : IHyperedgeStore
     }
 
     public long InUseCount => _inner.InUseCount;
+    public long SequenceHighWaterMark => _inner.SequenceHighWaterMark;
 
     public HyperedgeId Create(
         HyperedgeTypeId type,

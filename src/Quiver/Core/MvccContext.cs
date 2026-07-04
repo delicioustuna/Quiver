@@ -65,7 +65,7 @@ internal static class MvccContext
     public static bool IsActive => _current != null;
 }
 
-internal sealed class MvccTransactionContext
+internal readonly struct MvccTransactionContext
 {
     public TransactionId SelfTxId { get; }
     public SnapshotState Snapshot { get; }

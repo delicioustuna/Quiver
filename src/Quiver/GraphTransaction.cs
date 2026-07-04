@@ -823,7 +823,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                 }
             }
             // 結果 NodeId 列に現世代を load (round-trip 一貫)。
-            QueryRowMaterializer.StampNodeGenerations(slots, _inner.Nodes);
+            QueryRowMaterializer.StampEntityGenerations(slots, _inner.Nodes, _inner.Hyperedges);
             rows.Add(new QueryRow(slots, byteData));
         }
 
@@ -843,7 +843,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public IQueryCursor ExecuteCursor(IPhysicalOperator plan)
     {
         plan.Open(_inner);
-        return new PhysicalOperatorCursor(plan, _inner.Nodes);
+        return new PhysicalOperatorCursor(plan, _inner.Nodes, _inner.Hyperedges);
     }
 
     public IAdjacencyBlockStore? AdjacencyBlocks => _inner.AdjacencyBlocks;

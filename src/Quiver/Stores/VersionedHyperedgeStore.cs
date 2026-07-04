@@ -54,6 +54,7 @@ internal sealed class VersionedHyperedgeStore : IHyperedgeStore
     }
 
     public long InUseCount => _inUseCount;
+    public long SequenceHighWaterMark => _map.Hwm;
 
     public HyperedgeId Create(
         HyperedgeTypeId type,

@@ -12,15 +12,27 @@ namespace Quiver;
 /// </summary>
 internal static class QueryRowMaterializer
 {
-    public static void StampNodeGenerations(TupleSlot[] slots, INodeStore nodes)
+    public static void StampEntityGenerations(
+        TupleSlot[] slots,
+        INodeStore nodes,
+        IHyperedgeStore hyperedges)
     {
         for (int i = 0; i < slots.Length; i++)
         {
-            if (slots[i].Type != TupleSlotType.NodeId) continue;
-            long seq = slots[i].LongValue;
-            if (seq < 0) continue;
-            int gen = nodes.CurrentGeneration(seq);
-            if (gen > 0) slots[i].LongValue = EntityRef.PackLocal(seq, gen);
+            if (slots[i].Type == TupleSlotType.NodeId)
+            {
+                long seq = new NodeId(slots[i].LongValue).Sequence;
+                if (seq < 0) continue;
+                int gen = nodes.CurrentGeneration(seq);
+                if (gen > 0) slots[i].LongValue = EntityRef.PackLocal(seq, gen);
+            }
+            else if (slots[i].Type == TupleSlotType.HyperedgeId)
+            {
+                var id = new HyperedgeId(slots[i].LongValue);
+                if (!id.IsValid || id.Generation > 0) continue;
+                using var header = hyperedges.Read(id);
+                if (header.InUse) slots[i].LongValue = header.Id.Value;
+            }
         }
     }
 }
@@ -79,6 +91,9 @@ internal readonly struct QueryRow
 
     /// <summary>指定列を <see cref="RelationshipId"/> として取り出す。</summary>
     public RelationshipId GetRelationshipId(int column) => new(_slots[column].LongValue);
+
+    /// <summary>指定列を <see cref="HyperedgeId"/> として取り出す。</summary>
+    public HyperedgeId GetHyperedgeId(int column) => new(_slots[column].LongValue);
 
     /// <summary>指定列を <see cref="double"/> として取り出す。</summary>
     public double GetDouble(int column) => _slots[column].DoubleValue;

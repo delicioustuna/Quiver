@@ -23,6 +23,8 @@ internal static class PhysicalPlanner
         CorrelatedInputOp c       => c.Probe,
         FilterOp f                => new FilterOperator(Plan(f.Source, schema), f.PredicateFactory(schema)),
         ExpandOp e                => PlanExpand(e, schema),
+        ExpandToHyperedgeOp eh    => PlanExpandToHyperedge(eh, schema),
+        ExpandMembersOp em        => PlanExpandMembers(em, schema),
         VarLenExpandOp v          => PlanVarLenExpand(v, schema),
         PathOp p                  => PlanPath(p, schema),
         KnnOp k                   => PlanKnn(k, schema),
@@ -46,6 +48,8 @@ internal static class PhysicalPlanner
 
     private static IPhysicalOperator PlanScan(ScanOp s, ISchemaApi schema)
     {
+        if (s.Kind == EntityKind.Hyperedge)
+            return new AllHyperedgesScanOperator();
         if (s.Kind == EntityKind.Relationship)
             return new AllRelationshipsScanOperator();
         if (s.Label is LabelId lid)
@@ -57,6 +61,43 @@ internal static class PhysicalPlanner
     {
         RelationshipTypeId? typeId = e.Type != null ? schema.GetOrCreateRelationshipType(e.Type) : null;
         return new ExpandOperator(Plan(e.Source, schema), e.SourceColumn, e.Direction, typeId, e.Mode, e.Carry);
+    }
+
+    private static IPhysicalOperator PlanExpandToHyperedge(
+        ExpandToHyperedgeOp e,
+        ISchemaApi schema)
+        => new ExpandToHyperedgeOperator(
+            Plan(e.Source, schema),
+            e.SourceNodeColumn,
+            ResolveHyperedgeType(e.Type, schema),
+            ResolveRole(e.Role, schema),
+            e.Carry);
+
+    private static IPhysicalOperator PlanExpandMembers(
+        ExpandMembersOp e,
+        ISchemaApi schema)
+        => new ExpandMembersOperator(
+            Plan(e.Source, schema),
+            e.HyperedgeColumn,
+            ResolveRole(e.Role, schema),
+            e.ExcludeNodeColumn,
+            e.Carry);
+
+    private static HyperedgeTypeId? ResolveHyperedgeType(string? name, ISchemaApi schema)
+    {
+        if (name == null) return null;
+        return schema.TryGetHyperedgeTypeId(name, out var id)
+            ? id
+            : HyperedgeTypeId.Invalid;
+    }
+
+    private static RoleId? ResolveRole(string? name, ISchemaApi schema)
+    {
+        if (name == null) return null;
+        return schema is IHyperedgeSchemaResolver resolver
+            && resolver.TryGetRoleId(name, out var id)
+                ? id
+                : RoleId.Invalid;
     }
 
     private static IPhysicalOperator PlanVarLenExpand(VarLenExpandOp v, ISchemaApi schema)
