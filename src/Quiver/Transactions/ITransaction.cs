@@ -54,6 +54,9 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
 
     INodeStore Nodes { get; }
     IRelationshipStore Relationships { get; }
+    IHyperedgeStore Hyperedges { get; }
+    IIncidenceStore Incidences { get; }
+    INodeIncidenceHeadStore NodeIncidenceHeads { get; }
     IPropertyStore Properties { get; }
     IIndexManager Indexes { get; }
 

@@ -191,15 +191,21 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var relTypeTokens = new RelationshipTypeTokenStore(container.OpenTenant(TenantRelTypeTok, PageKind.TokenRecord));
         var propKeyTokens = new PropertyKeyTokenStore(container.OpenTenant(TenantPropKeyTok, PageKind.TokenRecord));
 
-        // 現時点では ID 空間と固定 tenant 配置だけを確定する。heap / map / version / head の
-        // レコード実装は未接続だが、descriptor はこの時点で永続化して tenant ID の
-        // 再利用や起動順依存を防ぐ。type / role token は利用可能。
-        _ = container.OpenTenant(TenantHyperedgeHeap, PageKind.Header);
-        _ = container.OpenTenant(TenantHyperedgeMap, PageKind.Header);
-        _ = container.OpenTenant(TenantHyperedgeVersion, PageKind.Header);
-        _ = container.OpenTenant(TenantIncidenceHeap, PageKind.Header);
-        _ = container.OpenTenant(TenantIncidenceMap, PageKind.Header);
-        _ = container.OpenTenant(TenantNodeIncidenceHead, PageKind.Header);
+        var hyperedgeHeapFile = container.OpenTenant(TenantHyperedgeHeap, PageKind.Header);
+        var hyperedgeMapFile = container.OpenTenant(TenantHyperedgeMap, PageKind.Header);
+        var hyperedgeVerFile = container.OpenTenant(TenantHyperedgeVersion, PageKind.Header);
+        var hyperedgeVersions = new EntityVersionStore(hyperedgeVerFile);
+        var hyperedgeMap = new ItemPointerMap(hyperedgeMapFile);
+        var hyperedgeStore = new VersionedHyperedgeStore(hyperedgeHeapFile, hyperedgeMap, hyperedgeVersions);
+
+        var incidenceHeapFile = container.OpenTenant(TenantIncidenceHeap, PageKind.Header);
+        var incidenceMapFile = container.OpenTenant(TenantIncidenceMap, PageKind.Header);
+        var incidenceMap = new ItemPointerMap(incidenceMapFile);
+        var incidenceStore = new IncidenceStore(incidenceHeapFile, incidenceMap);
+
+        var nodeIncidenceHeadFile = container.OpenTenant(TenantNodeIncidenceHead, PageKind.Header);
+        var nodeIncidenceHeadStore = new NodeIncidenceHeadStore(nodeIncidenceHeadFile);
+
         var hyperedgeTypeTokens = new HyperedgeTypeTokenStore(
             container.OpenTenant(TenantHyperedgeTypeToken, PageKind.TokenRecord));
         var roleTokens = new RoleTokenStore(
@@ -230,10 +236,9 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             container.ReloadAll();
             nodeStore.ReloadMeta();
             relStore.ReloadMeta();
+            hyperedgeStore.ReloadMeta();
+            incidenceStore.ReloadMeta();
             propStore.ReloadMeta();
-            // トークンページもコンテナの WAL 対象なので、abort で CLR がディスクを
-            // tx 開始前へ戻す。in-memory 辞書も読み直してディスクと一致させないと、後続 commit が
-            // 「メモリにあるがディスクに無い」トークンの再永続化をスキップし reopen で消える。
             labelTokens.Reload();
             relTypeTokens.Reload();
             propKeyTokens.Reload();
@@ -274,8 +279,8 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             wal, nodeStore, relStore, propStore, indexManager, adjStore, access,
             undoHandler, options.LockingMode, options.LockTimeout,
             options.DeadlockDetectionInterval, committedRegistry,
-            // SSN (Serializable) は version sidecar の Pstamp/Sstamp を使う。
-            nodeVersions, relVersions);
+            nodeVersions, relVersions,
+            hyperedgeStore, incidenceStore, nodeIncidenceHeadStore, hyperedgeVersions);
         // recovery で観測した最大 TxId より大きい値から新規 tx を採番するよう、
         // TransactionManager の _nextTxId を巻き上げる。これがないと新規 tx ID が
         // 過去 commit 済み TxId と衝突して registry が同じ entry を 2 回 Mark してしまう。

@@ -12,6 +12,9 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly IWriteAheadLog _wal;
     private readonly INodeStore _nodeStore;
     private readonly IRelationshipStore _relStore;
+    private readonly IHyperedgeStore _hyperedgeStore;
+    private readonly IIncidenceStore _incidenceStore;
+    private readonly INodeIncidenceHeadStore _nodeIncidenceHeadStore;
     private readonly IPropertyStore _propStore;
     private readonly IIndexManager _indexManager;
     private IAdjacencyBlockStore? _adjStore;
@@ -20,6 +23,7 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly AbortUndoHandler? _undoHandler;
     private readonly LockManager _nodeLocks = new();
     private readonly LockManager _relLocks = new();
+    private readonly LockManager _hyperedgeLocks = new();
     private readonly LockManager _indexLocks = new();
     private readonly ConcurrentDictionary<long, Transaction> _active = new();
     private long _nextTxId;
@@ -58,6 +62,7 @@ internal sealed class TransactionManager : ITransactionManager
     // SSN 用の version sidecar (Serializable のときのみ Transaction に渡して使う)。
     private readonly IEntityVersionStore? _nodeVersions;
     private readonly IEntityVersionStore? _relVersions;
+    private readonly IEntityVersionStore? _hyperedgeVersions;
     // Serializable commit の pre-commit 検証 + post-commit スタンプ書き戻しを
     // 直列化するゲート。並行 Serializable commit 間で version スタンプの read-modify-write を保護する。
     private readonly object _ssnCommitGate = new();
@@ -86,11 +91,18 @@ internal sealed class TransactionManager : ITransactionManager
         TimeSpan? deadlockDetectionInterval = null,
         CommittedTxRegistry? committedRegistry = null,
         IEntityVersionStore? nodeVersions = null,
-        IEntityVersionStore? relVersions = null)
+        IEntityVersionStore? relVersions = null,
+        IHyperedgeStore? hyperedgeStore = null,
+        IIncidenceStore? incidenceStore = null,
+        INodeIncidenceHeadStore? nodeIncidenceHeadStore = null,
+        IEntityVersionStore? hyperedgeVersions = null)
     {
         _wal = wal;
         _nodeStore = nodeStore;
         _relStore = relStore;
+        _hyperedgeStore = hyperedgeStore ?? NullHyperedgeStore.Instance;
+        _incidenceStore = incidenceStore ?? NullIncidenceStore.Instance;
+        _nodeIncidenceHeadStore = nodeIncidenceHeadStore ?? NullNodeIncidenceHeadStore.Instance;
         _propStore = propStore;
         _indexManager = indexManager;
         _adjStore = adjStore;
@@ -101,13 +113,14 @@ internal sealed class TransactionManager : ITransactionManager
         _committed = committedRegistry ?? new CommittedTxRegistry();
         _nodeVersions = nodeVersions;
         _relVersions = relVersions;
+        _hyperedgeVersions = hyperedgeVersions;
         // _nextTxId は最初の Increment で 1 を返す (= Bootstrap.Value)。
         // Bootstrap は予約済みなので、最初の "ユーザ" tx が 2 から始まるよう offset しておく。
         _nextTxId = TransactionId.Bootstrap.Value + 1;
         if (deadlockDetectionInterval is { } interval && interval > TimeSpan.Zero)
         {
             _deadlockDetector = new DeadlockDetector(
-                new[] { _nodeLocks, _relLocks, _indexLocks }, interval);
+                new[] { _nodeLocks, _relLocks, _hyperedgeLocks, _indexLocks }, interval);
         }
         // gauge provider 登録 (PollingCounter から sum-of-providers として参照される)。
         _activeTxCountRegistration =
@@ -255,10 +268,12 @@ internal sealed class TransactionManager : ITransactionManager
             snapshot = new SnapshotState(txId, activeAtBegin);
             _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
             tx = new Transaction(txId, level, snapshotLsn,
-                _wal, _nodeLocks, _relLocks, _indexLocks, this,
-                _nodeStore, _relStore, _propStore, _indexManager, _adjStore, _access,
+                _wal, _nodeLocks, _relLocks, _hyperedgeLocks, _indexLocks, this,
+                _nodeStore, _relStore,
+                _hyperedgeStore, _incidenceStore, _nodeIncidenceHeadStore,
+                _propStore, _indexManager, _adjStore, _access,
                 _undoHandler, _lockingMode, _lockTimeout,
-                snapshot, _committed, _nodeVersions, _relVersions);
+                snapshot, _committed, _nodeVersions, _relVersions, _hyperedgeVersions);
             _active[txId.Value] = tx;
         }
         return tx;

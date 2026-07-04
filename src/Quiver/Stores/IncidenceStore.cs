@@ -134,6 +134,13 @@ internal sealed class IncidenceStore : IIncidenceStore
             this, hyperedges, hyperedgeId, header.FirstIncidenceId);
     }
 
+    internal void ReloadMeta()
+    {
+        _map.ReloadMeta();
+        _heap.ReloadMeta();
+        _inUseCount = RecomputeInUse();
+    }
+
     private long RecomputeInUse()
     {
         long count = 0;

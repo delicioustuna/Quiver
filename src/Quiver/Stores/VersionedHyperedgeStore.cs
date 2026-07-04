@@ -224,6 +224,13 @@ internal sealed class VersionedHyperedgeStore : IHyperedgeStore
         }
     }
 
+    internal void ReloadMeta()
+    {
+        _map.ReloadMeta();
+        _heap.ReloadMeta();
+        _inUseCount = RecomputeInUse();
+    }
+
     private long RecomputeInUse()
     {
         long count = 0;

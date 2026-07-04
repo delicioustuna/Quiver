@@ -12,10 +12,14 @@ internal sealed class Transaction : ITransaction
     private readonly IWriteAheadLog _wal;
     private readonly LockManager _nodeLocks;
     private readonly LockManager _relLocks;
+    private readonly LockManager _hyperedgeLocks;
     private readonly LockManager _indexLocks;
     private readonly TransactionManager _manager;
     private readonly TxNodeStore _nodes;
     private readonly TxRelationshipStore _relationships;
+    private readonly TxHyperedgeStore _hyperedges;
+    private readonly IIncidenceStore _incidences;
+    private readonly INodeIncidenceHeadStore _nodeIncidenceHeads;
     private readonly TxPropertyStore _properties;
     private readonly TxIndexManager _indexes;
     private readonly IAdjacencyBlockStore? _adjStore;
@@ -40,6 +44,7 @@ internal sealed class Transaction : ITransaction
     private readonly SsnContext? _ssn;
     private readonly IEntityVersionStore? _nodeVersions;
     private readonly IEntityVersionStore? _relVersions;
+    private readonly IEntityVersionStore? _hyperedgeVersions;
     // Begin 時の commit-stamp クロック (snapshot 下限)。読んだ版の v.sstamp を π に
     // 反映するかの判定に使う (詳細は TransactionManager.CurrentCommitStampClock)。
     private readonly long _ssnSnapshotCstamp;
@@ -57,6 +62,9 @@ internal sealed class Transaction : ITransaction
 
     public INodeStore Nodes => _nodes;
     public IRelationshipStore Relationships => _relationships;
+    public IHyperedgeStore Hyperedges => _hyperedges;
+    public IIncidenceStore Incidences => _incidences;
+    public INodeIncidenceHeadStore NodeIncidenceHeads => _nodeIncidenceHeads;
     public IPropertyStore Properties => _properties;
     public IIndexManager Indexes => _indexes;
     public IAdjacencyBlockStore? AdjacencyBlocks => _adjStore;
@@ -65,9 +73,12 @@ internal sealed class Transaction : ITransaction
     internal Transaction(
         TransactionId id, IsolationLevel level, long snapshotLsn,
         IWriteAheadLog wal,
-        LockManager nodeLocks, LockManager relLocks, LockManager indexLocks,
+        LockManager nodeLocks, LockManager relLocks, LockManager hyperedgeLocks,
+        LockManager indexLocks,
         TransactionManager manager,
         INodeStore nodeStore, IRelationshipStore relStore,
+        IHyperedgeStore hyperedgeStore, IIncidenceStore incidenceStore,
+        INodeIncidenceHeadStore nodeIncidenceHeadStore,
         IPropertyStore propStore, IIndexManager indexManager,
         IAdjacencyBlockStore? adjStore = null,
         IGraphAccessMethods? access = null,
@@ -77,11 +88,13 @@ internal sealed class Transaction : ITransaction
         SnapshotState snapshot = default,
         CommittedTxRegistry? committed = null,
         IEntityVersionStore? nodeVersions = null,
-        IEntityVersionStore? relVersions = null)
+        IEntityVersionStore? relVersions = null,
+        IEntityVersionStore? hyperedgeVersions = null)
     {
         Id = id; Level = level; SnapshotLsn = snapshotLsn;
         _wal = wal;
-        _nodeLocks = nodeLocks; _relLocks = relLocks; _indexLocks = indexLocks;
+        _nodeLocks = nodeLocks; _relLocks = relLocks; _hyperedgeLocks = hyperedgeLocks;
+        _indexLocks = indexLocks;
         _manager = manager;
         _adjStore = adjStore;
         _access = access ?? InlineGraphAccessMethods.Instance;
@@ -92,6 +105,7 @@ internal sealed class Transaction : ITransaction
         // sidecar が無い (旧テスト経路など) 場合は SI と同じ挙動に縮退する。
         _nodeVersions = nodeVersions;
         _relVersions = relVersions;
+        _hyperedgeVersions = hyperedgeVersions;
         _ssn = (level == IsolationLevel.Serializable && committed != null
             && nodeVersions != null && relVersions != null)
             ? new SsnContext() : null;
@@ -106,6 +120,10 @@ internal sealed class Transaction : ITransaction
         _committed = committed;
         _nodes = new TxNodeStore(nodeStore, nodeLocks, id, lockingMode, timeout, snap, committed, _ssn);
         _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes, lockingMode, timeout, snap, committed, _ssn);
+        _hyperedges = new TxHyperedgeStore(hyperedgeStore, incidenceStore, nodeIncidenceHeadStore,
+            hyperedgeLocks, nodeLocks, id, lockingMode, timeout, snap, committed, _ssn);
+        _incidences = incidenceStore;
+        _nodeIncidenceHeads = nodeIncidenceHeadStore;
         _properties = new TxPropertyStore(propStore, id, snap, committed, _ssn);
         _indexes = new TxIndexManager(indexManager, indexLocks, id, timeout);
         WalPageContext.Begin(wal, id);
@@ -331,6 +349,7 @@ internal sealed class Transaction : ITransaction
     {
         EntityKind.Node => _nodeVersions,
         EntityKind.Relationship => _relVersions,
+        EntityKind.Hyperedge => _hyperedgeVersions,
         _ => null,
     };
 
@@ -454,6 +473,7 @@ internal sealed class Transaction : ITransaction
     {
         _nodeLocks.ReleaseAll(Id);
         _relLocks.ReleaseAll(Id);
+        _hyperedgeLocks.ReleaseAll(Id);
         _indexLocks.ReleaseAll(Id);
     }
 }
