@@ -68,6 +68,12 @@ if (args.Length >= 1 && args[0] == "--scorer-accumulator")
     return ScorerAccumulatorRunner.Run();
 }
 
+if (args.Length >= 1 && args[0] == "--incidence-traversal")
+{
+    IncidenceTraversalBenchmarks.Run();
+    return 0;
+}
+
 // TS-6: JsonExporter.Full は <ResultsDir>/<Class>-report-full.json を出す。
 // Quiver.Benchmarks.RegressionCheck はこの形式を読んで baselines/main.json と
 // 比較する。default config の Markdown / CSV exporter は残したまま追加する。

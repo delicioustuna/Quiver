@@ -756,7 +756,7 @@ HYP-1d、HYP-2c、HYP-3c の三つの仮説を製品 API 経由で再測定す�
 | 日付 | Gate | 結果 | 決定 | 根拠 |
 |---|---|---|---|---|
 | 2026-07-03 | HYP-S1 | 案 A は binary p50 3% gate 不合格、案 B は head lookup 0.288–0.558x | **案 B: tenant 25 の 6B sidecar** | binary 15B payload を維持し、全経路 0 B/op |
-| 未実施 | HYP-1d | 未計測 | 未決定 | linked incidence の走査性能を判定する |
+| 2026-07-04 | HYP-1d | degree 10: 5.49x, 100: 2.52x, 1000: 7.97x (alloc 0B) | **HYP-6d 必須化** | 2/3 degree で 3x 超過。managed alloc なし → HYP-3a 前の修正不要 |
 | 未実施 | HYP-2c | 未計測 | 未決定 | WAL 増幅の線形性を判定する |
 | 未実施 | HYP-3c | 未検証 | 未決定 | RAG query の表現力を判定する |
 | 未実施 | HYP-S2 | 未検証 | 未決定 | SourceGenerator の role binding API を選ぶ |
