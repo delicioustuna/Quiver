@@ -20,13 +20,13 @@ BenchTempDir.SweepRoot();
 Console.CancelKeyPress         += (_, _) => BenchTempDir.SweepRoot();
 AppDomain.CurrentDomain.ProcessExit += (_, _) => BenchTempDir.SweepRoot();
 
-// FT-25: deadlock detection latency / CPU overhead standalone runner
+// deadlock detection latency / CPU overhead standalone runner
 if (args.Length >= 1 && args[0] == "--ft25-deadlock")
 {
     return DeadlockDetectionRunner.Run();
 }
 
-// FTS-6: full-text search p50 + ingest amplification + WAL bytes/chunk standalone runner.
+// full-text search p50 + ingest amplification + WAL bytes/chunk standalone runner.
 // Usage: -- --fts6 [chunkCount] [queryCount]   (defaults: 100000 chunks, 500 queries)
 if (args.Length >= 1 && args[0] == "--fts6")
 {
@@ -35,7 +35,7 @@ if (args.Length >= 1 && args[0] == "--fts6")
     return Fts6SearchRunner.Run(chunkCount, queryCount);
 }
 
-// QP-3: MergeRelationship degree cost standalone runner
+// MergeRelationship degree cost standalone runner
 if (args.Length >= 1 && args[0] == "--qp3-merge-cost")
 {
     return MergeRelationshipCostRunner.Run();
@@ -74,7 +74,12 @@ if (args.Length >= 1 && args[0] == "--incidence-traversal")
     return 0;
 }
 
-// TS-6: JsonExporter.Full は <ResultsDir>/<Class>-report-full.json を出す。
+if (args.Length >= 1 && args[0] == "--hyperedge-wal")
+{
+    return HyperedgeWalAmplificationBenchmarks.Run();
+}
+
+// JsonExporter.Full は <ResultsDir>/<Class>-report-full.json を出す。
 // Quiver.Benchmarks.RegressionCheck はこの形式を読んで baselines/main.json と
 // 比較する。default config の Markdown / CSV exporter は残したまま追加する。
 var config = DefaultConfig.Instance.AddExporter(JsonExporter.Full);

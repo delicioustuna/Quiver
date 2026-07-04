@@ -428,6 +428,32 @@ arity `A` の hyperedge 作成 WAL は、binary relationship 1 件の WAL の `(
 - 閾値超過でも PageImage の固定費で説明できる場合は batch 側を主判定とし、単件側の運用上の注意を記録する。
 - batch 側が超線形なら、node head 更新と incidence page 分散を計測してレコード配置を見直す。
 
+### 実測結果（2026-07-04）
+
+`HyperedgeWalAmplificationBenchmarks` を `--hyperedge-wal` で実行した。
+buffer pool と durability は既定値、checkpoint threshold は計測中の truncate を防ぐため 0 とし、token と初回 page allocation を warm-up した直後に明示 checkpoint を実行した。
+以降の WAL file length 差分は自動 checkpoint が無いため `BytesWritten` 差分と一致する。
+
+| tx 内件数 | arity | WAL bytes | bytes/item | binary 比 | 上限 | 判定 |
+|---:|---:|---:|---:|---:|---:|---|
+| 1 | 2 | 1,534 | 1,534.00 | 0.996x | 2.000x | 合格 |
+| 1 | 4 | 1,850 | 1,850.00 | 1.201x | 3.000x | 合格 |
+| 1 | 8 | 2,483 | 2,483.00 | 1.612x | 5.000x | 合格 |
+| 1 | 16 | 3,749 | 3,749.00 | 2.434x | 9.000x | 合格 |
+| 1,000 | 2 | 157,237 | 157.24 | 1.819x | 2.000x | 合格 |
+| 1,000 | 4 | 261,717 | 261.72 | 3.027x | 3.000x | **不合格** |
+| 1,000 | 8 | 470,703 | 470.70 | 5.444x | 5.000x | **不合格** |
+| 1,000 | 16 | 888,670 | 888.67 | 10.279x | 9.000x | **不合格** |
+
+binary relationship は単件 1,540 bytes、1,000 件 86,456 bytes（86.46 bytes/item）だった。
+arity に対する線形回帰は単件、batch とも `R² = 1.000000` であり、page 分散による超線形増幅は観測されなかった。
+batch の近似式は `bytes/item = 52.74 + 52.25 × arity` である。
+
+**決定**：線形性は合格だが、batch の arity 4、8、16 が上限を超えるため HYP-2c の倍率仮説は棄却する。
+上限から許される限界費用は binary の半分である 43.23 bytes/member なので、現状から約 9.02 bytes/member（17.3%）の削減が必要である。
+超線形ではないため page 分散の変更は行わず、再設計箇所を 33-byte incidence payload と node-head / incidence-link 更新の WAL 表現に限定する。
+HYP-6c ではこの未達を性能ゲートとして再測定し、必要なら incidence record 圧縮または logical incidence WAL を比較する。
+
 ## HYP-3a Tuple、Logical IR、物理オペレータ
 
 ### 目的
@@ -757,7 +783,7 @@ HYP-1d、HYP-2c、HYP-3c の三つの仮説を製品 API 経由で再測定す�
 |---|---|---|---|---|
 | 2026-07-03 | HYP-S1 | 案 A は binary p50 3% gate 不合格、案 B は head lookup 0.288–0.558x | **案 B: tenant 25 の 6B sidecar** | binary 15B payload を維持し、全経路 0 B/op |
 | 2026-07-04 | HYP-1d | degree 10: 5.49x, 100: 2.52x, 1000: 7.97x (alloc 0B) | **HYP-6d 必須化** | 2/3 degree で 3x 超過。managed alloc なし → HYP-3a 前の修正不要 |
-| 未実施 | HYP-2c | 未計測 | 未決定 | WAL 増幅の線形性を判定する |
+| 2026-07-04 | HYP-2c | batch `R²=1.000000`、A=2/4/8/16 は 1.819x/3.027x/5.444x/10.279x | **線形性合格、倍率仮説は棄却** | A=4/8/16 が上限超過。incidence 限界費用を約 9.02 B/member 削減する候補を HYP-6c で再評価 |
 | 未実施 | HYP-3c | 未検証 | 未決定 | RAG query の表現力を判定する |
 | 未実施 | HYP-S2 | 未検証 | 未決定 | SourceGenerator の role binding API を選ぶ |
 | 未実施 | HYP-6c | 未計測 | 未決定 | 統合性能ゲートを判定する |
