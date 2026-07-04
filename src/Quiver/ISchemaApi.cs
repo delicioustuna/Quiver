@@ -96,6 +96,23 @@ public interface ISchemaApi
 
     /// <summary>登録済みプロパティキー名の一覧を返す。</summary>
     IReadOnlyList<string> ListPropertyKeys();
+
+    // ── ハイパーエッジ型 / ロール ──────────────────────────────
+
+    /// <summary>ハイパーエッジ型名を ID に解決する (未登録の場合は新規発行)。</summary>
+    HyperedgeTypeId GetOrCreateHyperedgeType(string name);
+
+    /// <summary>ハイパーエッジ型 ID から名前へ逆引きする。未登録 ID では <c>null</c>。</summary>
+    string? GetHyperedgeTypeName(HyperedgeTypeId id);
+
+    /// <summary>自動作成せず、ハイパーエッジ型名から ID を引く。未登録なら <c>false</c>。</summary>
+    bool TryGetHyperedgeTypeId(string name, out HyperedgeTypeId id);
+
+    /// <summary>登録済みハイパーエッジ型名の一覧を返す。</summary>
+    IReadOnlyList<string> ListHyperedgeTypes();
+
+    /// <summary>登録済みロール名の一覧を返す。</summary>
+    IReadOnlyList<string> ListRoles();
 }
 
 /// <summary>インデックス種別。プロパティ型と検索モード (等値 / 範囲) で分かれる。</summary>

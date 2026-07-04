@@ -91,4 +91,10 @@ internal sealed class StubSchemaApi : ISchemaApi
     public IReadOnlyList<string> ListLabels() => _labels.Keys.ToList();
     public IReadOnlyList<string> ListRelationshipTypes() => _relTypes.Keys.ToList();
     public IReadOnlyList<string> ListPropertyKeys() => _propKeys.Keys.ToList();
+
+    public HyperedgeTypeId GetOrCreateHyperedgeType(string name) => HyperedgeTypeId.Invalid;
+    public string? GetHyperedgeTypeName(HyperedgeTypeId id) => null;
+    public bool TryGetHyperedgeTypeId(string name, out HyperedgeTypeId id) { id = default; return false; }
+    public IReadOnlyList<string> ListHyperedgeTypes() => [];
+    public IReadOnlyList<string> ListRoles() => [];
 }

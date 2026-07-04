@@ -9,18 +9,24 @@ internal sealed class SchemaApi : ISchemaApi
     private readonly ITokenStore<LabelId> _labels;
     private readonly ITokenStore<RelationshipTypeId> _relTypes;
     private readonly PropertyKeyTokenStore _propKeys;
+    private readonly ITokenStore<HyperedgeTypeId> _hyperedgeTypes;
+    private readonly ITokenStore<RoleId> _roles;
     private readonly IIndexManager _indexManager;
 
     internal SchemaApi(
         ITokenStore<LabelId> labels,
         ITokenStore<RelationshipTypeId> relTypes,
         PropertyKeyTokenStore propKeys,
-        IIndexManager indexManager)
+        IIndexManager indexManager,
+        ITokenStore<HyperedgeTypeId> hyperedgeTypes,
+        ITokenStore<RoleId> roles)
     {
         _labels = labels;
         _relTypes = relTypes;
         _propKeys = propKeys;
         _indexManager = indexManager;
+        _hyperedgeTypes = hyperedgeTypes;
+        _roles = roles;
     }
 
     /// <summary>テスト用: 全文索引の postings/norms を直接検査するための内部アクセサ。</summary>
@@ -133,4 +139,14 @@ internal sealed class SchemaApi : ISchemaApi
 
     public IReadOnlyList<string> ListPropertyKeys()
         => _propKeys.All().Select(_propKeys.GetName).ToList();
+
+    public HyperedgeTypeId GetOrCreateHyperedgeType(string name) => _hyperedgeTypes.GetOrCreate(name);
+    public string? GetHyperedgeTypeName(HyperedgeTypeId id) => id.IsValid ? _hyperedgeTypes.GetName(id) : null;
+    public bool TryGetHyperedgeTypeId(string name, out HyperedgeTypeId id) => _hyperedgeTypes.TryGet(name, out id);
+
+    public IReadOnlyList<string> ListHyperedgeTypes()
+        => _hyperedgeTypes.All().Select(_hyperedgeTypes.GetName).ToList();
+
+    public IReadOnlyList<string> ListRoles()
+        => _roles.All().Select(_roles.GetName).ToList();
 }

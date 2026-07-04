@@ -87,7 +87,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _txManager = txManager;
         _columnManager = columnManager;
 
-        _schema = new SchemaApi(_labelTokens, _relTypeTokens, _propKeyTokens, _indexManager);
+        _schema = new SchemaApi(_labelTokens, _relTypeTokens, _propKeyTokens, _indexManager,
+            _hyperedgeTypeTokens, _roleTokens);
         // index manager と label index を DiagnosticsApi に渡して
         // CheckIndexConsistency / RepairIndexes が機能するようにする。
         // TransactionManager を渡し、CurrentCheckpointThresholdBytes /
@@ -203,15 +204,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         var inner = _txManager.Begin(level);
         return new GraphTransaction(
             inner, _labelTokens, _relTypeTokens, _propKeyTokens,
+            _hyperedgeTypeTokens, _roleTokens,
             readOnly,
-            // read-only tx と sink 未設定時はレコーダを完全にスキップし、ホットパスを allocation-free に保つ。
             readOnly ? null : _logicalSink,
-            // 列マネージャは read/write 双方へ渡す。write hook は
-            // mutation メソッドからのみ呼ばれるので read-only tx では起動せず、read 集約
-            // (TryColumnAggregate) は read-only tx でも列スキャンを使える。
             _columnManager,
-            // tx 配下 SetVector/RemoveVector の委譲先 (生のストア)。read-only tx でも
-            // 渡すが、メソッド側で IsReadOnly ガードする。
             _vectors);
     }
 

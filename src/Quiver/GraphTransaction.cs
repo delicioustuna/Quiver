@@ -17,12 +17,11 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     private readonly PropertyKeyTokenStore _propKeyTokens;
     // null でない場合、公開ミューテーションをすべてバッファし、下層トランザクションが
     // 永続化コミットされた後にバッチをシンクへ引き渡す。
+    private readonly ITokenStore<HyperedgeTypeId> _hyperedgeTypeTokens;
+    private readonly ITokenStore<RoleId> _roleTokens;
     private readonly ILogicalMutationSink? _logicalSink;
     private List<LogicalMutation>? _logicalBuffer;
-    // opt-in 列の write 維持。null = 列無効 (read-only tx 含む)。
     private readonly Storage.Records.ColumnManager? _columns;
-    // tx 配下の SetVector/RemoveVector が書く生のベクトルストア。tx スレッドの
-    // ambient WalPageContext 下で書くので、グラフ変更と同じ WAL に乗り原子整合する。
     private readonly Core.IVectorStore? _vectors;
 
     internal GraphTransaction(
@@ -30,6 +29,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         ITokenStore<LabelId> labelTokens,
         ITokenStore<RelationshipTypeId> relTypeTokens,
         PropertyKeyTokenStore propKeyTokens,
+        ITokenStore<HyperedgeTypeId> hyperedgeTypeTokens,
+        ITokenStore<RoleId> roleTokens,
         bool isReadOnly = false,
         ILogicalMutationSink? logicalSink = null,
         Storage.Records.ColumnManager? columns = null,
@@ -39,6 +40,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         _labelTokens = labelTokens;
         _relTypeTokens = relTypeTokens;
         _propKeyTokens = propKeyTokens;
+        _hyperedgeTypeTokens = hyperedgeTypeTokens;
+        _roleTokens = roleTokens;
         IsReadOnly = isReadOnly;
         _logicalSink = logicalSink;
         _vectors = vectors;
@@ -99,25 +102,30 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void DeleteNode(NodeId nodeId)
     {
-        // まず関連リレーションシップをすべて収集してから削除する
         var firstRelId = _inner.Nodes.Read(nodeId).FirstRelationshipId;
-        var toDelete = new List<RelationshipId>();
+        var relsToDelete = new List<RelationshipId>();
         var relId = firstRelId;
         while (relId.IsValid)
         {
-            toDelete.Add(relId);
+            relsToDelete.Add(relId);
             var rel = _inner.Relationships.Read(relId);
             relId = rel.Source == nodeId ? rel.SourceNext : rel.TargetNext;
         }
-        foreach (var rid in toDelete)
+        foreach (var rid in relsToDelete)
             DeleteRelationship(rid);
 
-        // ノードの string プロパティを bound 全文索引から除去する (Free の前に読む)。
+        var heToDelete = new HashSet<long>();
+        var incEnum = _inner.Incidences.EnumerateByNode(
+            nodeId, _inner.NodeIncidenceHeads, _inner.Hyperedges);
+        while (incEnum.MoveNext())
+            heToDelete.Add(incEnum.Current.HyperedgeId.Sequence);
+        foreach (var heSeq in heToDelete)
+            DeleteHyperedge(new HyperedgeId(heSeq));
+
         if (_inner.Indexes.HasAnyFullTextIndex)
             RemoveNodeFromFullTextIndexes(nodeId);
 
         _inner.Nodes.Free(nodeId);
-        // ノード削除に伴い、その kind の全列で seq を論理削除する。
         _columns?.OnDeleteEntity(Core.EntityKind.Node, nodeId.Sequence, _inner.Id.Value);
         if (_logicalSink != null)
             RecordLogical(LogicalMutation.DeleteNode(nodeId));
@@ -884,6 +892,92 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         if (_vectors is null) return false;
         return _vectors.TryGetVector(kind, entityId, indexName, destination);
     }
+
+    // ========== ハイパーエッジ操作 ==========
+
+    public HyperedgeId CreateHyperedge(string type, ReadOnlySpan<HyperedgeMember> members)
+    {
+        if (string.IsNullOrWhiteSpace(type))
+            throw new ArgumentException("Hyperedge type must not be null, empty, or whitespace.", nameof(type));
+        var typeId = _hyperedgeTypeTokens.GetOrCreate(type);
+        return CreateHyperedgeCore(typeId, members);
+    }
+
+    public HyperedgeId CreateHyperedge(HyperedgeTypeId typeId, ReadOnlySpan<HyperedgeMember> members)
+    {
+        if (!typeId.IsValid)
+            throw new ArgumentException("Invalid hyperedge type ID.", nameof(typeId));
+        return CreateHyperedgeCore(typeId, members);
+    }
+
+    private HyperedgeId CreateHyperedgeCore(HyperedgeTypeId typeId, ReadOnlySpan<HyperedgeMember> members)
+    {
+        if (members.Length < 2)
+            throw new ArgumentException("A hyperedge requires at least 2 members.", nameof(members));
+
+        Span<IncidenceMember> resolved = members.Length <= 16
+            ? stackalloc IncidenceMember[members.Length]
+            : new IncidenceMember[members.Length];
+
+        var seen = new HashSet<(int, long)>();
+        for (int i = 0; i < members.Length; i++)
+        {
+            var m = members[i];
+            if (string.IsNullOrWhiteSpace(m.Role))
+                throw new ArgumentException($"Member role at index {i} must not be null, empty, or whitespace.", nameof(members));
+
+            var node = _inner.Nodes.Read(m.NodeId);
+            if (!node.InUse)
+                throw new ArgumentException($"Node {m.NodeId} at index {i} does not exist or is not visible.", nameof(members));
+
+            var roleId = _roleTokens.GetOrCreate(m.Role);
+            if (!seen.Add((roleId.Value, m.NodeId.Sequence)))
+                throw new ArgumentException($"Duplicate (Role, NodeId) pair at index {i}: ({m.Role}, {m.NodeId}).", nameof(members));
+
+            resolved[i] = new IncidenceMember(m.NodeId, roleId);
+        }
+
+        return _inner.Hyperedges.Create(typeId, resolved, _inner.Incidences, _inner.NodeIncidenceHeads);
+    }
+
+    public void DeleteHyperedge(HyperedgeId hyperedgeId)
+    {
+        _inner.Hyperedges.Delete(hyperedgeId);
+    }
+
+    public HyperedgeMemberEnumerator GetMembers(HyperedgeId hyperedgeId, string? role = null)
+    {
+        RoleId roleFilter = RoleId.Invalid;
+        if (role != null && _roleTokens.TryGet(role, out var rid))
+            roleFilter = rid;
+        else if (role != null)
+            return default;
+
+        var innerEnum = _inner.Incidences.EnumerateByHyperedge(hyperedgeId, _inner.Hyperedges);
+        return new HyperedgeMemberEnumerator(innerEnum, _roleTokens, roleFilter);
+    }
+
+    public HyperedgeIdEnumerator GetHyperedges(NodeId nodeId, string? type = null, string? role = null)
+    {
+        HyperedgeTypeId typeFilter = HyperedgeTypeId.Invalid;
+        if (type != null && _hyperedgeTypeTokens.TryGet(type, out var tid))
+            typeFilter = tid;
+        else if (type != null)
+            return default;
+
+        RoleId roleFilter = RoleId.Invalid;
+        if (role != null && _roleTokens.TryGet(role, out var rid))
+            roleFilter = rid;
+        else if (role != null)
+            return default;
+
+        var innerEnum = _inner.Incidences.EnumerateByNode(
+            nodeId, _inner.NodeIncidenceHeads, _inner.Hyperedges);
+        return new HyperedgeIdEnumerator(innerEnum, _inner.Hyperedges, typeFilter, roleFilter);
+    }
+
+    public string? GetHyperedgeTypeName(HyperedgeTypeId typeId)
+        => typeId.IsValid ? _hyperedgeTypeTokens.GetName(typeId) : null;
 
     public void Commit() => _inner.Commit();
     public void Rollback() => _inner.Abort();
