@@ -20,6 +20,7 @@ internal static class PhysicalPlanner
         NodeSeedOp n              => n.Ids.Length == 1
                                         ? new SingleNodeOperator(n.Ids[0])
                                         : new MultiNodeOperator(n.Ids),
+        HyperedgeSeedOp h         => new SingleHyperedgeOperator(h.Id),
         CorrelatedInputOp c       => c.Probe,
         FilterOp f                => new FilterOperator(Plan(f.Source, schema), f.PredicateFactory(schema)),
         ExpandOp e                => PlanExpand(e, schema),

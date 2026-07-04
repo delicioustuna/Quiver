@@ -44,6 +44,13 @@ internal sealed record NodeSeedOp(NodeId[] Ids) : LogicalOp
     public override int PredictedOutputColumnCount => 1;
 }
 
+/// <summary>定数ハイパーエッジ起点 (<c>g.Hyperedge(id)</c>)。</summary>
+internal sealed record HyperedgeSeedOp(HyperedgeId Id) : LogicalOp
+{
+    public override int CurrentEntityColumn => 0;
+    public override int PredictedOutputColumnCount => 1;
+}
+
 /// <summary>
 /// 相関サブクエリ / 分岐の probe 起点。物理化時に <see cref="Probe"/> をそのまま用い、
 /// 外側オペレータがバインドする (現 <c>CorrelatedSeedBuilder</c> と同形)。

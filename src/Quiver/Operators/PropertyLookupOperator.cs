@@ -99,11 +99,16 @@ internal sealed class PropertyLookupOperator : IPhysicalOperator
         _buffer![srcCols] = default; // Null by default
 
         // inline + overflow チェーンを結合して走査する。entity kind により
-        // node / relationship のどちらのストアを引くか切り替える。
+        // node / relationship / hyperedge のプロパティストアを切り替える。
         long localId = cur[_entityIdColumn].LongValue;
-        var propEnum = _entityKind == EntityKind.Relationship
-            ? _tx!.Relationships.EnumerateProperties(new RelationshipId(localId), _tx!.Properties)
-            : _tx!.Nodes.EnumerateProperties(new NodeId(localId), _tx!.Properties);
+        var propEnum = _entityKind switch
+        {
+            EntityKind.Relationship =>
+                _tx!.Relationships.EnumerateProperties(new RelationshipId(localId), _tx.Properties),
+            EntityKind.Hyperedge =>
+                _tx!.Hyperedges.EnumerateProperties(new HyperedgeId(localId), _tx.Properties),
+            _ => _tx!.Nodes.EnumerateProperties(new NodeId(localId), _tx.Properties),
+        };
         while (propEnum.MoveNext())
         {
             var prop = propEnum.Current;

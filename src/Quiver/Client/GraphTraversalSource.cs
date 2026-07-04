@@ -66,6 +66,15 @@ public sealed class GraphTraversalSource
     public RelationshipBuilder AddRelationship(string type) => new(_tx, type);
 
     /// <summary>
+    /// ロール付きの複数ノードを一つの関係として扱うハイパーエッジの追加を開始する。
+    /// <c>g.AddHyperedge("Purchase").Member("buyer", buyer).Member("item", item).Next()</c>
+    /// のように、メンバーを 2 件以上指定して使用する。
+    /// </summary>
+    /// <param name="type">作成するハイパーエッジの型名。</param>
+    /// <returns>メンバーとプロパティを蓄積するビルダ。</returns>
+    public HyperedgeBuilder AddHyperedge(string type) => new(_tx, type);
+
+    /// <summary>
     /// Cypher の <c>MERGE (n:label {matchKey: matchValue})</c> に相当する糖衣構文。
     /// <see cref="IGraphTransaction.MergeNode"/> のラッパで、<c>Created</c> フラグを
     /// 用いて ON CREATE SET / ON MATCH SET の分岐を呼び出し側で書ける。
@@ -124,6 +133,32 @@ public sealed class GraphTraversalSource
     {
         var plan = new ScanOp(EntityKind.Relationship, null);
         return new GraphTraversal<RelationshipId>(_tx, _schema, plan, row => row.GetRelationshipId(0), 0, aliases: null, stats: _stats);
+    }
+
+    /// <summary>
+    /// 可視な全ハイパーエッジをスキャン起点とするトラバーサルを生成する。
+    /// ハイパーエッジは、購入の buyer/item やファクトの subject/source のように、
+    /// 役割の異なる複数ノードを一つの関係として束ねるエンティティである。
+    /// </summary>
+    /// <remarks>全件走査は O(H)。後続の <c>Members(role)</c> でロール別に参加ノードへ展開できる。</remarks>
+    public GraphTraversal<HyperedgeId> Hyperedges()
+    {
+        var plan = new ScanOp(EntityKind.Hyperedge, null);
+        return new GraphTraversal<HyperedgeId>(
+            _tx, _schema, plan, row => row.GetHyperedgeId(0), 0, aliases: null, stats: _stats);
+    }
+
+    /// <summary>指定 ID のハイパーエッジ 1 件を起点とするトラバーサルを生成する。</summary>
+    /// <param name="hyperedgeId">起点にするハイパーエッジ ID。</param>
+    /// <remarks>
+    /// この起点には「どのノードから到達したか」という文脈がないため、
+    /// <c>OtherMembers()</c> ではなく <c>Members()</c> を使用する。
+    /// </remarks>
+    public GraphTraversal<HyperedgeId> Hyperedge(HyperedgeId hyperedgeId)
+    {
+        var plan = new HyperedgeSeedOp(hyperedgeId);
+        return new GraphTraversal<HyperedgeId>(
+            _tx, _schema, plan, row => row.GetHyperedgeId(0), 0, aliases: null, stats: _stats);
     }
 
     /// <summary>指定 ID のノード 1 件だけを起点とするトラバーサル。</summary>

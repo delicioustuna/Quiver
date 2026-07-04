@@ -22,11 +22,14 @@ namespace Quiver.Api
     {
         public GraphTraversalSource(Quiver.IGraphTransaction tx, Quiver.ISchemaApi schema) { }
         public GraphTraversalSource(Quiver.IGraphTransaction tx, Quiver.ISchemaApi schema, Quiver.GraphStats? stats) { }
+        public Quiver.Api.HyperedgeBuilder AddHyperedge(string type) { }
         public Quiver.Api.NodeBuilder AddNode(string label) { }
         public Quiver.Api.RelationshipBuilder AddRelationship(string type) { }
         public void Delete<T>(Quiver.Core.NodeId id)
             where T : Quiver.Api.IGraphNode<T> { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> HybridSearch(string textIndex, string queryText, string vectorIndex, System.ReadOnlySpan<float> queryVector, int k) { }
+        public Quiver.Api.GraphTraversal<Quiver.Core.HyperedgeId> Hyperedge(Quiver.Core.HyperedgeId hyperedgeId) { }
+        public Quiver.Api.GraphTraversal<Quiver.Core.HyperedgeId> Hyperedges() { }
         public Quiver.Core.NodeId Insert<T>(T entity)
             where T : Quiver.Api.IGraphNode<T> { }
         public Quiver.Core.NodeId InsertIndexed<T>(T entity)
@@ -85,6 +88,7 @@ namespace Quiver.Api
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> HasLabel(string label) { }
         public bool HasNext() { }
         public Quiver.Api.GraphTraversal<T> HasNot(string key) { }
+        public Quiver.Api.GraphTraversal<Quiver.Core.HyperedgeId> Hyperedges(string? type = null, string? role = null) { }
         public Quiver.Api.GraphTraversal<long> Id() { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> In(string? type = null) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> In<TRel>()
@@ -98,6 +102,7 @@ namespace Quiver.Api
         public Quiver.Api.GraphTraversal<T> Limit(long n) { }
         public double? Max(string key) { }
         public double? Mean(string key) { }
+        public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Members(string? role = null) { }
         public double? Min(string key) { }
         public T Next() { }
         public Quiver.Api.GraphTraversal<T> Not(System.Func<Quiver.Api.SubTraversal, Quiver.Api.SubTraversal> innerTraversal) { }
@@ -106,6 +111,7 @@ namespace Quiver.Api
         public Quiver.Api.GraphTraversal<T> Order(bool descending = false) { }
         public Quiver.Api.GraphTraversal<T> OrderBy(string key) { }
         public Quiver.Api.GraphTraversal<T> OrderByDescending(string key) { }
+        public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> OtherMembers(string? role = null) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> OtherNode() { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Out(string? type = null) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Out<TRel>()
@@ -133,6 +139,16 @@ namespace Quiver.Api
     {
         Euclidean = 0,
         Haversine = 1,
+    }
+    public sealed class HyperedgeBuilder
+    {
+        public Quiver.Api.HyperedgeBuilder Member(string role, Quiver.Core.NodeId nodeId) { }
+        public Quiver.Core.HyperedgeId Next() { }
+        public Quiver.Api.HyperedgeBuilder P(string key, bool value) { }
+        public Quiver.Api.HyperedgeBuilder P(string key, double value) { }
+        public Quiver.Api.HyperedgeBuilder P(string key, int value) { }
+        public Quiver.Api.HyperedgeBuilder P(string key, long value) { }
+        public Quiver.Api.HyperedgeBuilder P(string key, string value) { }
     }
     public interface IGraphNode<TSelf>
         where TSelf : Quiver.Api.IGraphNode<TSelf>

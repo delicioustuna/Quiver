@@ -32,12 +32,15 @@ public sealed class GraphTraversal<T>
     // 任意で注入された GraphStats。KNN push-down 時に label cardinality が高ければ
     // vector-first にフォールバックさせる。null のときは構造ヒントのみで判定する。
     internal readonly GraphStats? _stats;
+    // node -> hyperedge 展開の起点列。公開 alias とは異なり OtherMembers 専用で、
+    // Members による通常展開やタプル形状のリセット時には破棄する。
+    internal readonly int? _hiddenHyperedgeOriginColumn;
 
-    // この列が保持するエンティティ種別。T が RelationshipId なら
-    // エッジトラバーサル (OutRelationships<T>() 等) なので述語をリレーションシップ
-    // プロパティ読みに切り替える。それ以外 (NodeId / string 等) はノード。
+    // この列が保持するエンティティ種別。ID 型に応じて述語が読むプロパティストアを切り替える。
     private static readonly PredicateEntity EntityKindForT =
-        typeof(T) == typeof(RelationshipId) ? PredicateEntity.Relationship : PredicateEntity.Node;
+        typeof(T) == typeof(RelationshipId) ? PredicateEntity.Relationship :
+        typeof(T) == typeof(HyperedgeId) ? PredicateEntity.Hyperedge :
+        PredicateEntity.Node;
 
     internal GraphTraversal(
         IGraphTransaction tx,
@@ -46,17 +49,19 @@ public sealed class GraphTraversal<T>
         Func<QueryRow, T> projection,
         int entityColumn,
         Dictionary<string, int>? aliases = null,
-        GraphStats? stats = null)
+        GraphStats? stats = null,
+        int? hiddenHyperedgeOriginColumn = null)
     {
         _tx = tx; _schema = schema; _plan = plan; _projection = projection;
         _entityColumn = entityColumn;
         _aliases = (aliases is { Count: > 0 }) ? aliases : null;
         _stats = stats;
+        _hiddenHyperedgeOriginColumn = hiddenHyperedgeOriginColumn;
     }
 
     /// <summary>同じエイリアスセットを引き継いだ後続トラバーサルを構築する内部ヘルパ。</summary>
     private GraphTraversal<U> Chain<U>(LogicalOp plan, Func<QueryRow, U> projection, int entityColumn)
-        => new(_tx, _schema, plan, projection, entityColumn, _aliases, _stats);
+        => new(_tx, _schema, plan, projection, entityColumn, _aliases, _stats, _hiddenHyperedgeOriginColumn);
 
     /// <summary>alias を持ち越さない (= タプル形状をリセットする) 新規 traversal を構築する内部ヘルパ。stats だけは引き継ぐ。</summary>
     private GraphTraversal<U> Rebase<U>(LogicalOp plan, Func<QueryRow, U> projection, int entityColumn, Dictionary<string, int>? aliases = null)
@@ -566,9 +571,11 @@ public sealed class GraphTraversal<T>
         return false;
     }
 
-    /// <summary>row path のプロパティ参照対象が rel か node か (g.Relationships() 起点なら rel)。</summary>
+    /// <summary>row path のプロパティ参照対象を現在の ID 型から決定する。</summary>
     private Core.EntityKind RowLookupKind()
-        => _plan is ScanOp { Kind: EntityKind.Relationship } ? Core.EntityKind.Relationship : Core.EntityKind.Node;
+        => typeof(T) == typeof(RelationshipId) ? Core.EntityKind.Relationship :
+           typeof(T) == typeof(HyperedgeId) ? Core.EntityKind.Hyperedge :
+           Core.EntityKind.Node;
 
     private enum AggregateKind { Sum, Max, Min }
 
@@ -748,7 +755,7 @@ public sealed class GraphTraversal<T>
     /// <summary>プロパティ <paramref name="key"/> の文字列値だけを取り出す。</summary>
     public GraphTraversal<string> Values(string key)
     {
-        var lookup = new PropertyLookupOp(_plan, key, EntityKind.Node);
+        var lookup = new PropertyLookupOp(_plan, key, RowLookupKind());
         int propCol = lookup.PredictedOutputColumnCount - 1;
         return Chain(lookup, row => row.GetString(propCol), _entityColumn);
     }
@@ -784,7 +791,9 @@ public sealed class GraphTraversal<T>
             ? new Dictionary<string, int>(capacity: 1)
             : new Dictionary<string, int>(_aliases);
         next[label] = _entityColumn;
-        return new GraphTraversal<T>(_tx, _schema, _plan, _projection, _entityColumn, next, _stats);
+        return new GraphTraversal<T>(
+            _tx, _schema, _plan, _projection, _entityColumn, next, _stats,
+            _hiddenHyperedgeOriginColumn);
     }
 
     /// <summary>
@@ -834,6 +843,85 @@ public sealed class GraphTraversal<T>
         foreach (var row in result.Rows())
             results.Add(_projection(row));
         return results;
+    }
+
+    /// <summary>
+    /// 現在のノードが指定条件で参加するハイパーエッジへ展開する。
+    /// </summary>
+    /// <param name="type">ハイパーエッジ型。null は全型。</param>
+    /// <param name="role">現在のノードが担うロール。null は全ロール。</param>
+    /// <returns>参加ハイパーエッジ ID のトラバーサル。</returns>
+    /// <remarks>
+    /// ノードごとの incidence チェーンを走査するため、計算量は対象ノードの参加数に比例する。
+    /// 展開元ノードは <see cref="OtherMembers"/> が除外に使う内部文脈として保持される。
+    /// </remarks>
+    public GraphTraversal<HyperedgeId> Hyperedges(string? type = null, string? role = null)
+    {
+        int[]? carry = null;
+        Dictionary<string, int>? aliases = null;
+        if (_aliases is not null)
+        {
+            (carry, aliases) = RemapForExpand(baseColumnCount: 2);
+        }
+
+        var expand = new ExpandToHyperedgeOp(_plan, _entityColumn, type, role, carry);
+        return new GraphTraversal<HyperedgeId>(
+            _tx, _schema, expand, row => row.GetHyperedgeId(1), 1,
+            aliases, _stats, hiddenHyperedgeOriginColumn: 0);
+    }
+
+    /// <summary>現在のハイパーエッジを構成するメンバーノードへ展開する。</summary>
+    /// <param name="role">返すメンバーのロール。null は全ロール。</param>
+    /// <returns>メンバーノード ID のトラバーサル。</returns>
+    /// <remarks>
+    /// ハイパーエッジごとの incidence チェーンを走査するため、計算量はアリティに比例する。
+    /// 通常の全メンバー展開なので、以前の node → hyperedge 展開元は結果に含まれ得る。
+    /// </remarks>
+    public GraphTraversal<NodeId> Members(string? role = null)
+        => ExpandHyperedgeMembers(role, excludeOrigin: false);
+
+    /// <summary>
+    /// 現在のハイパーエッジのメンバーから、このハイパーエッジへ到達した起点ノードを除いて返す。
+    /// </summary>
+    /// <param name="role">返すメンバーのロール。null は全ロール。</param>
+    /// <returns>起点以外のメンバーノード ID のトラバーサル。</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <c>g.Hyperedges()</c> や <c>g.Hyperedge(id)</c> のように、展開元ノードを持たない起点から呼び出した場合。
+    /// </exception>
+    /// <remarks>
+    /// <c>g.Node(person).Hyperedges("Meeting").OtherMembers("attendee")</c> のような
+    /// co-membership 走査に使う。起点ノードが複数ロールで参加していても、そのノード ID は全ロールから除外する。
+    /// </remarks>
+    public GraphTraversal<NodeId> OtherMembers(string? role = null)
+    {
+        if (!_hiddenHyperedgeOriginColumn.HasValue)
+        {
+            throw new InvalidOperationException(
+                "OtherMembers() は node traversal の Hyperedges() に続けて使用してください。"
+                + " ハイパーエッジ起点から全メンバーを取得する場合は Members() を使用してください。");
+        }
+        return ExpandHyperedgeMembers(role, excludeOrigin: true);
+    }
+
+    private GraphTraversal<NodeId> ExpandHyperedgeMembers(string? role, bool excludeOrigin)
+    {
+        int[]? carry = null;
+        Dictionary<string, int>? aliases = null;
+        if (_aliases is not null)
+        {
+            (carry, aliases) = RemapForExpand(baseColumnCount: 2);
+        }
+
+        var expand = new ExpandMembersOp(
+            _plan,
+            _entityColumn,
+            role,
+            excludeOrigin ? _hiddenHyperedgeOriginColumn : null,
+            carry);
+        // Members の結果は (hyperedge, member) に形を作り直す。node -> hyperedge の
+        // hidden origin はここで意図的に破棄し、次の Hyperedges が新しい起点を設定する。
+        return new GraphTraversal<NodeId>(
+            _tx, _schema, expand, row => row.GetNodeId(1), 1, aliases, _stats);
     }
 
     /// <summary>最初の 1 件を返す。結果が空のときは <see cref="InvalidOperationException"/> を投げる。</summary>
