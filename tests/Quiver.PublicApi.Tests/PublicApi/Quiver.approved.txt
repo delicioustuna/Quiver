@@ -13,6 +13,13 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("QuiverSandbox")]
 namespace Quiver.Api
 {
+    public readonly struct GraphNodeRef<TNode> : System.IEquatable<Quiver.Api.GraphNodeRef<TNode>>
+        where TNode : Quiver.Api.IGraphNode<TNode>
+    {
+        public GraphNodeRef(Quiver.Core.NodeId NodeId) { }
+        public Quiver.Core.NodeId NodeId { get; init; }
+        public static Quiver.Api.GraphNodeRef<TNode> op_Implicit(Quiver.Core.NodeId nodeId) { }
+    }
     public static class GraphTransactionExtensions
     {
         public static Quiver.Api.GraphTraversalSource G(this Quiver.IGraphTransaction tx, Quiver.ISchemaApi schema) { }
@@ -143,6 +150,12 @@ namespace Quiver.Api
         Euclidean = 0,
         Haversine = 1,
     }
+    [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
+    public sealed class HyperedgeAttribute : System.Attribute
+    {
+        public HyperedgeAttribute(string? type = null) { }
+        public string? Type { get; }
+    }
     public sealed class HyperedgeBuilder
     {
         public Quiver.Api.HyperedgeBuilder Member(string role, Quiver.Core.NodeId nodeId) { }
@@ -152,6 +165,15 @@ namespace Quiver.Api
         public Quiver.Api.HyperedgeBuilder P(string key, int value) { }
         public Quiver.Api.HyperedgeBuilder P(string key, long value) { }
         public Quiver.Api.HyperedgeBuilder P(string key, string value) { }
+    }
+    public interface IGraphHyperedge<TSelf>
+        where TSelf : Quiver.Api.IGraphHyperedge<TSelf>
+    {
+        string GraphType { get; }
+        void Delete(Quiver.IGraphTransaction tx, Quiver.Core.HyperedgeId id);
+        Quiver.Core.HyperedgeId Insert(Quiver.IGraphTransaction tx, TSelf entity);
+        TSelf Load(Quiver.IGraphTransaction tx, Quiver.Core.HyperedgeId id);
+        void Update(Quiver.IGraphTransaction tx, Quiver.Core.HyperedgeId id, TSelf entity);
     }
     public interface IGraphNode<TSelf>
         where TSelf : Quiver.Api.IGraphNode<TSelf>
@@ -308,6 +330,12 @@ namespace Quiver.Api
         public Quiver.Api.RepeatStep Both(string? type = null) { }
         public Quiver.Api.RepeatStep In(string? type = null) { }
         public Quiver.Api.RepeatStep Out(string? type = null) { }
+    }
+    [System.AttributeUsage(System.AttributeTargets.Property)]
+    public sealed class RoleAttribute : System.Attribute
+    {
+        public RoleAttribute(string? role = null) { }
+        public string? Role { get; }
     }
     public sealed class SubTraversal
     {
