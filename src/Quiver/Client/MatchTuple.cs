@@ -34,6 +34,9 @@ public readonly struct MatchTuple
     /// <summary>エイリアスに紐づくスロットを <see cref="RelationshipId"/> として取り出す。</summary>
     public RelationshipId Relationship(string alias) => _row.GetRelationshipId(Column(alias));
 
+    /// <summary>エイリアスに紐づくスロットを <see cref="HyperedgeId"/> として取り出す。</summary>
+    public HyperedgeId Hyperedge(string alias) => _row.GetHyperedgeId(Column(alias));
+
     /// <summary>エイリアスに紐づくスロットを <see cref="long"/> として取り出す。</summary>
     public long Int64(string alias) => _row.GetInt64(Column(alias));
 
@@ -51,6 +54,7 @@ public readonly struct MatchTuple
     {
         TupleSlotType.NodeId => MatchValueType.Node,
         TupleSlotType.RelationshipId => MatchValueType.Relationship,
+        TupleSlotType.HyperedgeId => MatchValueType.Hyperedge,
         TupleSlotType.Bool => MatchValueType.Boolean,
         TupleSlotType.Int64 => MatchValueType.Int64,
         TupleSlotType.Double => MatchValueType.Double,

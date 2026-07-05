@@ -197,6 +197,15 @@ public sealed class GraphTraversalSource
     /// <param name="pattern">マッチするノード / エッジパターン。</param>
     public MatchQuery Match(GraphPattern pattern) => new(_tx, _schema, pattern);
 
+    /// <summary>
+    /// 星型ハイパーエッジパターンで Match DSL クエリを開始する。
+    /// <see cref="GraphPattern.Hyperedge(string, string?)"/> と
+    /// <see cref="HyperedgePattern.Member(string, NodePattern)"/> で構築したパターンを渡すと、
+    /// 一つのハイパーエッジと役割別メンバーが同じ行に束ねられる。
+    /// </summary>
+    /// <param name="pattern">マッチする星型ハイパーエッジパターン。</param>
+    public MatchQuery Match(HyperedgePattern pattern) => new(_tx, _schema, pattern);
+
     // ── KNN スキャン起点 ────────────────────────────────────────────────
 
     /// <summary>

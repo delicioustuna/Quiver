@@ -38,6 +38,7 @@ namespace Quiver.Api
         public T Load<T>(Quiver.Core.NodeId id)
             where T : Quiver.Api.IGraphNode<T> { }
         public Quiver.Api.Match.MatchQuery Match(Quiver.Api.Match.GraphPattern pattern) { }
+        public Quiver.Api.Match.MatchQuery Match(Quiver.Api.Match.HyperedgePattern pattern) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "Id",
                 "Created"})]
@@ -195,6 +196,7 @@ namespace Quiver.Api
     {
         public bool Boolean(string alias) { }
         public double Double(string alias) { }
+        public Quiver.Core.HyperedgeId Hyperedge(string alias) { }
         public long Int64(string alias) { }
         public Quiver.Core.NodeId Node(string alias) { }
         public Quiver.Core.RelationshipId Relationship(string alias) { }
@@ -211,6 +213,7 @@ namespace Quiver.Api
         Double = 5,
         String = 6,
         Bytes = 7,
+        Hyperedge = 8,
     }
     [System.AttributeUsage(System.AttributeTargets.Class)]
     public sealed class NodeAttribute : System.Attribute
@@ -429,13 +432,23 @@ namespace Quiver.Api.Match
 {
     public sealed class GraphPattern
     {
+        public static Quiver.Api.Match.HyperedgePattern Hyperedge(string variable, string? type = null) { }
         public static Quiver.Api.Match.NodePattern Node(string variable, string? label = null) { }
+    }
+    public sealed class HyperedgePattern
+    {
+        public string? Type { get; }
+        public string Variable { get; }
+        public Quiver.Api.Match.HyperedgePattern Member(string role, Quiver.Api.Match.NodePattern node) { }
     }
     public sealed class MatchContext
     {
         public Quiver.Api.Match.MatchContextRow this[string variable] { get; }
+        public Quiver.Core.HyperedgeId Hyperedge(string variable) { }
+        public T HyperedgeGet<T>(string variable, string key) { }
         public T Load<T>(string variable)
             where T : Quiver.Api.IGraphNode<T> { }
+        public Quiver.Core.NodeId Node(string variable) { }
     }
     public readonly struct MatchContextRow
     {

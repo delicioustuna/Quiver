@@ -29,4 +29,7 @@ public enum MatchValueType : byte
 
     /// <summary>バイト列。</summary>
     Bytes = 7,
+
+    /// <summary><see cref="Quiver.Core.HyperedgeId"/>。</summary>
+    Hyperedge = 8,
 }
