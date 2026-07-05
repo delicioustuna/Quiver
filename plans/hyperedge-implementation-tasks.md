@@ -896,6 +896,27 @@ visibility horizon を越えた hyperedge、incidence、property を回収し、
 - active snapshot がある場合は回収しないことを検証する。
 - vacuum 後の reopen と crash recovery を検証する。
 
+### 実装結果 (2026-07-06, commit a1076d0)
+
+- `VacuumTarget.Hyperedges` と `VacuumReport.ReclaimedHyperedges` / `ReclaimedIncidences` を追加。
+  回収は property → incidence → header の順。全 header slot を 1 パス走査し、horizon 未満で
+  commit 済みの xmax を持つ dead header を集め、その overflow property chain を `PropertyStore`
+  経由で解放しつつ hyperedge chain から所属 incidence を node 別に集約する。
+- HYP-2d で `PrevInNode` を廃止済みのため、unlink は計画どおり **node 別 sweep**:
+  影響 node の chain を head から 1 回だけ走査し、running prev で dead incidence を一括 unlink
+  (head 位置なら node incidence head を次の生存へ前進)。合計 O(影響 chain 長)。
+- slot を free list へ返すのは `Run` が active tx 0 を保証した後のみ。header は heap から物理回収し
+  sequence を free list へ返す。再利用時に `NextSequence` が generation を +1 するため、古い
+  hyperedge ID と、`(EntityKind.Hyperedge, sequence)` キーの永続 vector payload は世代照合で弾く
+  (factory の vector 世代 resolver に `Hyperedge` 分岐を追加)。
+- `WalFileKind` は新設せず、既存の `FileTruncate` / `PageImage` 経路のみで crash recovery を担保する。
+  計画の変更先候補から `WalFileKind.cs` は外れた。
+- 設計上の妥協: hyperedge heap は node heap と同じく空 slot の tombstone + free-list 再利用に留め、
+  散在ページの物理 tenant truncate は行わない。
+- テスト: `VacuumTests` 20 件 (node chain 先頭/中間/末尾の dead incidence 回収、ID/vector 世代照合、
+  active snapshot 非回収、reopen、残存 WAL replay による crash recovery)。
+  build 0 errors、Quiver.Tests / Quiver.Stores.Tests / PublicApi 緑。
+
 ## HYP-6b 診断と統計
 
 ### 目的
@@ -920,6 +941,25 @@ visibility horizon を越えた hyperedge、incidence、property を回収し、
 - 正常 DB で issue が 0 件になることを検証する。
 - テスト用 raw mutation で各破損を一種類ずつ作り、対応 issue が出ることを検証する。
 - type count と arity histogram が作成、削除、vacuum 後に一致することを検証する。
+
+### 実装結果 (2026-07-06, commit 12540fa)
+
+- `CheckConsistency` は node chain と hyperedge chain の到達 incidence 集合を独立に構築して照合する。
+  検出項目: live hyperedge の arity < 2、incidence の hyperedge/node/role 参照無効、
+  chain cycle、node/hyperedge どちらか片方から到達不能な live incidence、同一 hyperedge 内の
+  role+node 重複。論理削除済み header 配下の incidence は正常な vacuum 待ちとして扱う。
+  `PrevInNode` 不一致項目は HYP-2d で `PrevInNode` を廃止したため対象外。
+- `DatabaseStatistics` に `HyperedgeCount` (可視数) と `IncidenceCount` を追加。IncidenceCount は
+  物理生存数なので delete 後〜vacuum 前の incidence を含む。
+- `GraphStats` に `TotalHyperedges`、`HyperedgeTypeFrequency`、`HyperedgeArityByType` を追加。
+  arity は区間バケットでなく `ArityHistogram` の**正確な値別分布** (オプティマイザの fan-out 見積り用)。
+  メンバー集合は作成後不変なので header ごとに chain を 1 回走査して型別件数・arity・property を同時収集。
+- public column API (`ColumnManager` / `GraphDatabase.CreateColumn`) が `EntityKind.Hyperedge` を受理。
+- テスト: `HyperedgeDiagnosticsTests` (破損種別ごとに raw mutation で 1 種ずつ注入) +
+  `GraphStatsTests` (作成/削除/vacuum 後の一致) + `ColumnRegistrationTests` (構築/更新/reopen)。
+  診断/統計/列 38 件、hyperedge 回帰 71 件、PublicApi 1 件緑、build 0 errors。
+- 既知の限界: `CheckConsistency` は複数ストアをロックなしで走査するため、同時更新中は一時的な
+  不整合を観測しうる。運用上は書き込み停止時の診断を想定する。
 
 ## HYP-6c 統合性能ゲート
 
