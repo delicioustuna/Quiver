@@ -728,6 +728,44 @@ Chunk 起点の subject + object、Fact property 絞込み後の四 role、同�
 - arity に比例した生成コードで済み、組み合わせ overload を手書きしない。
 - public 型の追加が最少の案を採用する。
 
+### 検証結果と決定 (2026-07-05)
+
+三案の as-generated サンプルと呼び出し側コードを Roslyn インメモリコンパイル
+(実 Quiver アセンブリ参照、正例 = 診断 0 件、負例 = 特定診断 ID) で検証した。
+利用例は arity 2 / arity 4 / 同一 role 複数 member × insert・load・update・delete・
+typed traversal、型系は nullable・`IReadOnlyList<T>`・別 namespace・同名別 namespace を網羅。
+
+| 基準 | 案 A (`GraphNodeRef<TNode>`) | 案 B (NodeId 引数) | 案 C (member builder) |
+|---|---|---|---|
+| 1. 型不一致のコンパイル時検出 | 合 (単一 CS0029 / 同名別 ns CS0029 / リスト要素 CS0266 / 走査推論) | **否** — buyer/item の NodeId 取り違えがエラー 0 件で通ることを実証 | 合 (式の TNode 衝突 CS0411/CS1503) |
+| 2. role 名文字列を再入力しない | 合 (プロパティ代入) | 合 | 合 (式で指定) |
+| 3. object identity 非依存 | 合 (明示 NodeId 保持) | 合 | 合 |
+| 4. arity 比例の生成コード | 合 | 合 | 合 |
+| 5. public 型追加 | **2 型固定** (`GraphNodeRef<TNode>` + factory、統合すれば 1 型) | 0 型 | 1 型 + hyperedge ごとに Builder 型 (線形増加) |
+
+**決定: 案 A を採用。** 案 B は基準 1 を落とし typed API の本義を失うため候補外。
+基準 1〜4 を満たす案 A と案 C の比較では、hyperedge 型数に比例して public 型が増える
+案 C より固定 2 型の案 A が基準 5 に適合する。role プロパティは
+`GraphNodeRef<TNode>` / `IReadOnlyList<GraphNodeRef<TNode>>` (nullable = optional role)、
+load は `GraphNodeRef.To<TNode>(NodeId)` で対称に復元、typed traversal は
+role プロパティ式 selector から `TNode` を推論する。
+
+HYP-5a への引き継ぎ:
+
+- generator は `[Node]` 属性で node 型を判定し、node generator の生成物
+  (`IGraphNode<TSelf>` 実装) への semantic model 依存を持たない。制約
+  `where TNode : IGraphNode<TNode>` は最終コンパイルで両 generator の出力が
+  合流した時点で解決される。
+- member 集合は作成時不変の契約に従い、生成 `Update` は property のみを書き
+  role member を再束縛しない。
+- factory (`GraphNodeRef.To<TNode>`) は非ジェネリック静的クラスに置いたが、
+  public 面最少化のため ctor 直接使用へ畳む余地を HYP-5a で判断する。
+- `HyperedgeMember` は managed 型 (role が `string`) のため `stackalloc` 不可
+  (CS0208)。生成 insert 本体は配列または `List<T>` + `CollectionsMarshal.AsSpan` を使う。
+
+spike コード (`tests/Quiver.SourceGen.Tests/RoleBindingSpike/`、9 テスト全緑) は
+実験ループの契約に従い削除済みで、リポジトリには本決定記録のみを残す。
+
 ## HYP-5a SourceGenerator CRUD
 
 ### 目的
@@ -933,5 +971,5 @@ degree 10 = 固定費支配、degree 1,000 = ページ局所性支配という�
 | 2026-07-04 | HYP-2c | batch `R²=1.000000`、A=2/4/8/16 は 1.819x/3.027x/5.444x/10.279x | **線形性合格、倍率仮説は棄却** | A=4/8/16 が上限超過。限界費用を約 9.02 B/member 削減する是正を HYP-2d へ切り出し、HYP-6c で再測定 |
 | 2026-07-05 | HYP-2d | batch A=2/4/8/16 が 1.241x/1.878x/3.163x/5.711x (上限 2/3/5/9)、単件 −17〜−31%、走査 4.8x/1.7x/5.4x | **案 B (fixed-slot 直接アドレス) 採用、FormatVersion V4** | 限界費用 ≈27.6 B/member (許容 43.23)。走査は改善したが degree 10/1000 が 3x 超のため HYP-6d は継続 |
 | 2026-07-05 | HYP-3c | 固定 4 シナリオを単一 operator tree で取得 | **合格。`Select<TEntity>(alias)` を採用** | hyperedge alias へ型安全に戻る汎用 primitive だけを追加。`HasMember` / RAG 固有糖衣は不要 |
-| 未実施 | HYP-S2 | 未検証 | 未決定 | SourceGenerator の role binding API を選ぶ |
+| 2026-07-05 | HYP-S2 | 案 B は role 取り違えを検出できず基準 1 不合格、案 A/C は全基準合格 (Roslyn 実コンパイル検証) | **案 A: `GraphNodeRef<TNode>` 採用** | public 型追加が固定 2 型で最少 (案 C は hyperedge 数に比例して Builder 型が増える)。詳細は HYP-S2 節の検証結果 |
 | 未実施 | HYP-6c | 未計測 | 未決定 | 統合性能ゲートを判定する |
