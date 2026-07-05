@@ -658,6 +658,17 @@ hyperedge scan と node、hyperedge 間の展開を Volcano pipeline に追加�
 - 書けない形がある場合は、`HasMember` のような汎用 primitive を一つだけ候補に加えて再検証する。
 - RAG 固有名の糖衣は `Quiver.Rag` 以外へ追加しない。
 
+### 実装・検証結果 (2026-07-05)
+
+**合格**。既存の alias は node へしか戻れず、一つの Fact から複数 role を展開できなかったため、
+汎用 primitive `Select<TEntity>(alias)` を追加した。alias の `EntityKind` を保持し、
+`NodeId` / `RelationshipId` / `HyperedgeId` の型不一致は operator tree 構築時に拒否する。
+
+`HyperedgeRagQueryTests` で固定シナリオ四つを検証した。subject 起点の object + source、
+Chunk 起点の subject + object、Fact property 絞込み後の四 role、同一 role の複数 member は、
+いずれも途中の materialize なしに一つの operator tree で取得できる。
+`HasMember` と RAG 固有の糖衣は不要と判断する。
+
 ## HYP-4 Match 星型パターン
 
 ### 目的
@@ -921,6 +932,6 @@ degree 10 = 固定費支配、degree 1,000 = ページ局所性支配という�
 | 2026-07-04 | HYP-1d | degree 10: 5.49x, 100: 2.52x, 1000: 7.97x (alloc 0B) | **HYP-6d 必須化** | 2/3 degree で 3x 超過。managed alloc なし → HYP-3a 前の修正不要 |
 | 2026-07-04 | HYP-2c | batch `R²=1.000000`、A=2/4/8/16 は 1.819x/3.027x/5.444x/10.279x | **線形性合格、倍率仮説は棄却** | A=4/8/16 が上限超過。限界費用を約 9.02 B/member 削減する是正を HYP-2d へ切り出し、HYP-6c で再測定 |
 | 2026-07-05 | HYP-2d | batch A=2/4/8/16 が 1.241x/1.878x/3.163x/5.711x (上限 2/3/5/9)、単件 −17〜−31%、走査 4.8x/1.7x/5.4x | **案 B (fixed-slot 直接アドレス) 採用、FormatVersion V4** | 限界費用 ≈27.6 B/member (許容 43.23)。走査は改善したが degree 10/1000 が 3x 超のため HYP-6d は継続 |
-| 未実施 | HYP-3c | 未検証 | 未決定 | RAG query の表現力を判定する |
+| 2026-07-05 | HYP-3c | 固定 4 シナリオを単一 operator tree で取得 | **合格。`Select<TEntity>(alias)` を採用** | hyperedge alias へ型安全に戻る汎用 primitive だけを追加。`HasMember` / RAG 固有糖衣は不要 |
 | 未実施 | HYP-S2 | 未検証 | 未決定 | SourceGenerator の role binding API を選ぶ |
 | 未実施 | HYP-6c | 未計測 | 未決定 | 統合性能ゲートを判定する |

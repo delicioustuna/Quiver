@@ -123,6 +123,8 @@ namespace Quiver.Api
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Repeat(System.Action<Quiver.Api.RepeatStep> step, int times, bool emit = false) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Select(string label) { }
         public System.Collections.Generic.List<TResult> Select<TResult>(System.Func<Quiver.Api.MatchTuple, TResult> projection) { }
+        public Quiver.Api.GraphTraversal<TEntity> Select<TEntity>(string label)
+            where TEntity :  struct { }
         public Quiver.Api.GraphTraversal<long> ShortestPathTo(Quiver.Core.NodeId target, Quiver.Storage.Records.Direction direction = 1, string? type = null, long maxDistance = 9223372036854775807) { }
         public Quiver.Api.GraphTraversal<T> Skip(long n) { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> SourceNode() { }

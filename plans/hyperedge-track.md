@@ -134,7 +134,7 @@ HYP-S1 は HYP-1 前、HYP-S2 は HYP-5 前に実行する。
 | HYP-1 | Core ID 型 + `EntityKind.Hyperedge` + HyperedgeStore + IncidenceStore + node incidence head + MVCC サイドカー + WAL + recovery テスト | HYP-S1 | 完 (2026-07-04)。1d 走査 spike は 3x 超過 → HYP-6d 必須化 |
 | HYP-2 | tx API (Create/Delete/GetMembers/GetHyperedges) + logical mutation + プロパティ/削除の可視性テスト | HYP-1 | 完 (2026-07-04)。2c WAL spike は倍率仮説棄却 → HYP-2d 新設 |
 | HYP-2d | incidence レイアウト再設計 (WAL 限界費用 17.3% 削減。fixed-slot 直接アドレス化が第一候補) | HYP-2 | 完 (2026-07-05)。WAL 全 arity 合格 (限界費用 ≈27.6 B/member)、FormatVersion V4。走査は改善するも 3x 残 → HYP-6d 継続 |
-| HYP-3 | 走査オペレータ 3 種 + DSL (`Hyperedges`/`Members`/`OtherMembers`/`AddHyperedge` builder) | HYP-2 | 3a/3b 完 (2026-07-04)。残 = 3c (RAG 表現力 spike) |
+| HYP-3 | 走査オペレータ 3 種 + DSL (`Hyperedges`/`Members`/`OtherMembers`/`AddHyperedge` builder) | HYP-2 | 完 (2026-07-05)。3c は `Select<TEntity>(alias)` 追加で RAG 固定 4 シナリオ合格 |
 | HYP-4 | Match (`HyperedgePattern` 星型パターン + コンパイラ拡張) | HYP-3 | 未着手 |
 | HYP-S2 | SourceGenerator の role binding API spike | HYP-3 | 未着手 |
 | HYP-5 | SourceGenerator (`[Hyperedge]`/`[Role]` + `IGraphHyperedge<TSelf>` + 型付き CRUD/走査糖衣) | HYP-2, HYP-3, HYP-S2 | 未着手 |
@@ -159,7 +159,9 @@ HYP-3c / HYP-4 / HYP-S2 と並行可。HYP-6a / HYP-6d は HYP-2d のレイア�
 実測状況 (2026-07-05): HYP-1 後ゲートは不合格 (degree 10/1000 が 5.49x/7.97x) → HYP-6d 必須化。
 HYP-2 後ゲートは線形性合格・倍率不合格 (batch arity 4/8/16) → 是正タスク HYP-2d を新設し、
 **HYP-2d で回収済み** (fixed-slot 直接アドレス化、batch 全 arity 合格、走査も 4.8x/1.7x/5.4x へ
-改善したが 3x 残のため HYP-6d は継続)。HYP-3 後ゲート (HYP-3c) は未実施。
+改善したが 3x 残のため HYP-6d は継続)。HYP-3 後ゲート (HYP-3c) は固定 4 シナリオを
+単一 operator tree で取得して合格。hyperedge alias へ戻る汎用 `Select<TEntity>(alias)` のみ追加し、
+`HasMember` と RAG 固有糖衣は不要と判断した。
 数値と決定の正本は `plans/hyperedge-implementation-tasks.md` の決定記録。
 
 ## API アイデアバックログ (実装判断は都度)
