@@ -797,6 +797,24 @@ HYP-S2 で確定した role binding と hyperedge property の CRUD を生成す
 - 別 namespace、partial class、nullable、single role、multi role を検証する。
 - 生成コードを実 DB に接続した round-trip test を追加する。
 
+### 実装結果 (2026-07-05, commit aaf38f4)
+
+- HYP-S2 から委任された factory の扱いは **`GraphNodeRef.To<TNode>` を廃し ctor へ畳む**と決定。
+  `GraphNodeRef<TNode>` は `readonly record struct` (NodeId ctor + `NodeId` からの implicit
+  変換) となり、public 追加は 1 型で収まった (spike 時の見立て「統合すれば 1 型」を実現)。
+  利用側は `fact.Buyer = personId;` と書け、load は `new GraphNodeRef<TNode>(nodeId)` で復元する。
+- `RoleAttribute` は計画の別ファイル案でなく、既存 Client 属性の同居規約に合わせ
+  `HyperedgeAttribute.cs` へ同居 (物理ファイル分割のみの差異、型と公開サーフェスは計画どおり)。
+- 診断は QVRHE001 (Role+Property 併用) / QVRHE002 (非 GraphNodeRef 型 role) /
+  QVRHE003 (setter 無し) の 3 件。診断を出したメンバーは skip して残りを生成する。
+- generator は role property の宣言型 `GraphNodeRef<TNode>` の構文から node 型を解決し、
+  node generator の生成物への semantic model 依存を持たない。`where TNode : IGraphNode<TNode>`
+  制約が両 generator の出力合流時に解決されることは、両生成器同時実行 + 実 Quiver
+  アセンブリ参照のフルコンパイルテストで実証済み。
+- テスト: generator 8 件 (snapshot / 診断 / 別 namespace / nullable / multi role /
+  CreateHyperedge 一回呼び) + 実 DB round-trip 3 件。SourceGen 14 / Quiver.Tests 838 /
+  PublicApi 1 全緑。
+
 ## HYP-5b 型付き走査
 
 ### 目的
