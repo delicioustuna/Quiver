@@ -17,6 +17,7 @@ internal sealed class ColumnManager
     private readonly byte _catalogTenantId;
     private readonly VersionedRelationshipStore _relStore;
     private readonly VersionedNodeStore _nodeStore;
+    private readonly IHyperedgeStore _hyperedgeStore;
     private readonly PropertyStore _propStore;
     private readonly Dictionary<(EntityKind, int), ScalarColumnStore> _columns = new();
     // catalog は遅延生成 (ColumnCatalog ctor が空テナントにヘッダページを書くため)。
@@ -29,12 +30,14 @@ internal sealed class ColumnManager
         byte catalogTenantId,
         VersionedRelationshipStore relStore,
         VersionedNodeStore nodeStore,
+        IHyperedgeStore hyperedgeStore,
         PropertyStore propStore)
     {
         _container = container;
         _catalogTenantId = catalogTenantId;
         _relStore = relStore;
         _nodeStore = nodeStore;
+        _hyperedgeStore = hyperedgeStore;
         _propStore = propStore;
 
         // 既に catalog テナントが存在する DB のみ、登録済み列を eager に開く
@@ -147,8 +150,9 @@ internal sealed class ColumnManager
     /// <summary>列を登録し、現データから構築する。既存なら no-op で false。</summary>
     public bool CreateColumn(EntityKind kind, int keyId)
     {
-        if (kind is not (EntityKind.Relationship or EntityKind.Node))
-            throw new NotSupportedException($"columnar is only supported for Node / Relationship, got {kind}.");
+        if (kind is not (EntityKind.Relationship or EntityKind.Node or EntityKind.Hyperedge))
+            throw new NotSupportedException(
+                $"columnar is only supported for Node / Relationship / Hyperedge, got {kind}.");
         if (_columns.ContainsKey((kind, keyId))) return false;
 
         byte tenantId = Catalog.Register(kind, keyId);
@@ -175,11 +179,21 @@ internal sealed class ColumnManager
                 if (TryExtractScalar(_relStore.EnumerateProperties(relId, _propStore), key, out long bits, out var type))
                     store.Set(relId.Sequence, bits, TransactionId.Bootstrap.Value, type);
         }
-        else // Node
+        else if (kind == EntityKind.Node)
         {
             foreach (var nodeId in _nodeStore.Scan())
                 if (TryExtractScalar(_nodeStore.EnumerateProperties(nodeId, _propStore), key, out long bits, out var type))
                     store.Set(nodeId.Sequence, bits, TransactionId.Bootstrap.Value, type);
+        }
+        else
+        {
+            foreach (var hyperedgeId in _hyperedgeStore.Scan())
+                if (TryExtractScalar(
+                        _hyperedgeStore.EnumerateProperties(hyperedgeId, _propStore),
+                        key,
+                        out long bits,
+                        out var type))
+                    store.Set(hyperedgeId.Sequence, bits, TransactionId.Bootstrap.Value, type);
         }
     }
 

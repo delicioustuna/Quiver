@@ -532,6 +532,15 @@ namespace Quiver.Api.Match
 }
 namespace Quiver
 {
+    public sealed class ArityHistogram
+    {
+        public ArityHistogram() { }
+        public System.Collections.Generic.IReadOnlyDictionary<int, long> Counts { get; }
+        public int MaxArity { get; }
+        public double MeanArity { get; }
+        public long TotalHyperedges { get; }
+        public long TotalIncidences { get; }
+    }
     public enum BackendKind
     {
         Binary = 1,
@@ -545,11 +554,13 @@ namespace Quiver
     }
     public sealed class DatabaseStatistics : System.IEquatable<Quiver.DatabaseStatistics>
     {
-        public DatabaseStatistics(long NodeCount, long RelationshipCount, long PropertyCount, long DataFileSize, long WalFileSize, long BufferPoolHits, long BufferPoolMisses, long AdjacencyFallbackCount) { }
+        public DatabaseStatistics(long NodeCount, long RelationshipCount, long HyperedgeCount, long IncidenceCount, long PropertyCount, long DataFileSize, long WalFileSize, long BufferPoolHits, long BufferPoolMisses, long AdjacencyFallbackCount) { }
         public long AdjacencyFallbackCount { get; init; }
         public long BufferPoolHits { get; init; }
         public long BufferPoolMisses { get; init; }
         public long DataFileSize { get; init; }
+        public long HyperedgeCount { get; init; }
+        public long IncidenceCount { get; init; }
         public long NodeCount { get; init; }
         public long PropertyCount { get; init; }
         public long RelationshipCount { get; init; }
@@ -650,12 +661,15 @@ namespace Quiver
         public Quiver.DegreeHistogram GlobalInDegree { get; }
         public Quiver.DegreeHistogram GlobalOutDegree { get; }
         public bool HasFastLabelIndex { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.HyperedgeTypeId, Quiver.ArityHistogram> HyperedgeArityByType { get; }
+        public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.HyperedgeTypeId, long> HyperedgeTypeFrequency { get; }
         public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.RelationshipTypeId, Quiver.DegreeHistogram> InDegreeByType { get; }
         public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.LabelId, long> LabelCardinality { get; }
         public Quiver.NodeDegreeLookup NodeDegrees { get; }
         public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.RelationshipTypeId, Quiver.DegreeHistogram> OutDegreeByType { get; }
         public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.NodeId, Quiver.NodeDegreeSummary> PowerNodes { get; }
         public System.Collections.Generic.IReadOnlyDictionary<Quiver.Core.PropertyKeyId, Quiver.PropertyKeyStats> PropertyKeys { get; }
+        public long TotalHyperedges { get; }
         public long TotalNodes { get; }
         public long TotalRelationships { get; }
         public long EstimateCardinality(Quiver.Core.LabelId label) { }

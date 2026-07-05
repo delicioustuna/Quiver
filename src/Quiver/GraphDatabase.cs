@@ -270,7 +270,7 @@ public sealed class GraphDatabase : IDisposable
     /// <summary>
     /// 指定 <paramref name="kind"/> の scalar プロパティ <paramref name="propertyKey"/> を
     /// 列化登録する (opt-in)。現データから列を構築し登録を永続化する。既に列化済みなら false。
-    /// <para>5b 時点では登録 + 初期構築まで。以後の write での自動維持は 5c で配線する。</para>
+    /// ノード、リレーションシップ、ハイパーエッジを対象にできる。
     /// </summary>
     public bool CreateColumn(Core.EntityKind kind, string propertyKey)
     {

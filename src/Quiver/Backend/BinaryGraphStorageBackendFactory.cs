@@ -216,7 +216,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // 登録済み列の head cache を開いておくことで (1) write 経路が列を維持でき、
         // (2) abort の ReloadStoreMeta から列 cache を head ページへ再同期できる。
         var columnManager = new ColumnManager(
-            container, TenantColumnCatalog, relStore, nodeStore, propStore);
+            container, TenantColumnCatalog, relStore, nodeStore, hyperedgeStore, propStore);
 
         // ベクトル payload を container テナントへ永続化するストア。InMemoryVectorStore を置換し、
         // 再起動を跨いで KNN を再現する。書き込みは container WAL に乗るので tx 配下なら原子整合する。

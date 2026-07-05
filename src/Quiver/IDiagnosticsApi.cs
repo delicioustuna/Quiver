@@ -102,6 +102,8 @@ public sealed record IndexRepairReport(
 /// </summary>
 /// <param name="NodeCount">ノード件数。</param>
 /// <param name="RelationshipCount">リレーションシップ件数。</param>
+/// <param name="HyperedgeCount">現在可視なハイパーエッジ件数。</param>
+/// <param name="IncidenceCount">物理的に生存している incidence 件数。論理削除後、vacuum 前のものを含む。</param>
 /// <param name="PropertyCount">プロパティ件数。</param>
 /// <param name="DataFileSize">データファイルの合計サイズ (バイト)。</param>
 /// <param name="WalFileSize">WAL ファイルの合計サイズ (バイト)。</param>
@@ -111,6 +113,8 @@ public sealed record IndexRepairReport(
 public sealed record DatabaseStatistics(
     long NodeCount,
     long RelationshipCount,
+    long HyperedgeCount,
+    long IncidenceCount,
     long PropertyCount,
     long DataFileSize,
     long WalFileSize,

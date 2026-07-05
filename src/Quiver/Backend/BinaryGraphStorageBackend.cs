@@ -95,7 +95,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         // SetCheckpointPolicy をホットスワップ経路として公開する。Adaptive 用パラメタは
         // factory で既知の options 値を持つので、後段で AttachAdaptiveDefaults により上書き可能。
         _diagnostics = new DiagnosticsApi(
-            _nodeStore, _relStore, access, _indexManager, labelIndex, _txManager,
+            _nodeStore, _relStore, access,
+            _txManager.HyperedgeStore, _txManager.IncidenceStore, _txManager.NodeIncidenceHeadStore,
+            _indexManager, labelIndex, _txManager,
             adaptiveTargetRecoveryTime,
             adaptiveMinThresholdBytes,
             adaptiveMaxThresholdBytes,
@@ -194,6 +196,12 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     public ITransactionManager Transactions => _txManager;
     public ISchemaApi Schema => _schema;
     public IDiagnosticsApi Diagnostics => _diagnostics;
+
+    // 整合性テストは公開 API では作れない破損を明示的に注入する必要がある。
+    // ストア実体だけを internal に露出し、通常の利用者が物理レコードを変更する経路にはしない。
+    internal IHyperedgeStore HyperedgeStoreForTest => _txManager.HyperedgeStore;
+    internal IIncidenceStore IncidenceStoreForTest => _txManager.IncidenceStore;
+    internal INodeIncidenceHeadStore NodeIncidenceHeadStoreForTest => _txManager.NodeIncidenceHeadStore;
     public IGraphAccessMethods Access => _access;
     public BulkLoadCapabilities BulkLoad => _bulkLoad;
     public IVectorStore Vectors => _vectorsFacade ??= new AutocommitVectorStore(

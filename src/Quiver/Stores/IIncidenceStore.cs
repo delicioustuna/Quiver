@@ -53,6 +53,12 @@ internal interface IIncidenceStore
 
     /// <summary>生存 incidence 数</summary>
     long InUseCount { get; }
+
+    /// <summary>
+    /// 採番済み sequence の排他的上限。整合性診断が free slot を含む ID 空間を
+    /// <see cref="Read"/> で走査するために使う。
+    /// </summary>
+    long SequenceHighWaterMark => 0;
 }
 
 /// <summary>
@@ -110,6 +116,9 @@ internal readonly ref struct IncidenceReadHandle
 /// </summary>
 internal ref struct IncidenceWriteHandle
 {
+    private const int OffHyperedge = 1;
+    private const int OffNode = 7;
+    private const int OffRole = 13;
     private const int OffNextInNode = 15;
     private const int OffNextInHyperedge = 21;
 
@@ -122,6 +131,24 @@ internal ref struct IncidenceWriteHandle
         _file = file;
         _pageId = pageId;
         _record = record;
+    }
+
+    public HyperedgeId HyperedgeId
+    {
+        readonly get => new(RecordHelpers.ReadInt48(_record[OffHyperedge..]));
+        set => RecordHelpers.WriteInt48(_record[OffHyperedge..], value.Sequence);
+    }
+
+    public NodeId NodeId
+    {
+        readonly get => new(RecordHelpers.ReadInt48(_record[OffNode..]));
+        set => RecordHelpers.WriteInt48(_record[OffNode..], value.Sequence);
+    }
+
+    public RoleId RoleId
+    {
+        readonly get => new(BinaryPrimitives.ReadInt16LittleEndian(_record[OffRole..]));
+        set => BinaryPrimitives.WriteInt16LittleEndian(_record[OffRole..], checked((short)value.Value));
     }
 
     public IncidenceId NextInNode
