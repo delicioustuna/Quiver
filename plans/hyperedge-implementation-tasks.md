@@ -47,18 +47,22 @@ spike は本実装の前提を決めるためのコードであり、そのま�
 HYP-0
   └─ HYP-S1
        └─ HYP-1a → HYP-1b → HYP-1c → HYP-1d
-                                  └─ HYP-2a → HYP-2b → HYP-2c
+                                  └─ HYP-2a → HYP-2b → HYP-2c → HYP-2d
                                                        └─ HYP-3a → HYP-3b → HYP-3c
                                                                     ├─ HYP-4
                                                                     └─ HYP-S2 → HYP-5a → HYP-5b
-       HYP-1c + HYP-2b ────────────────────────────────────────────────→ HYP-6a
+       HYP-1c + HYP-2b + HYP-2d ──────────────────────────────────────→ HYP-6a
        HYP-3c ─────────────────────────────────────────────────────────→ HYP-6b
-       HYP-1d + HYP-2c + HYP-3c ──────────────────────────────────────→ HYP-6c
-       HYP-6c の判定で必要な場合のみ ──────────────────────────────────→ HYP-6d
+       HYP-1d + HYP-2c + HYP-2d + HYP-3c ─────────────────────────────→ HYP-6c
+       HYP-2d (+ HYP-1d 不合格判定で必須化済み) ──────────────────────→ HYP-6d
        HYP-4 + HYP-5b + HYP-6a + HYP-6b + HYP-6c (+ HYP-6d) ─────────→ HYP-7
 ```
 
 HYP-4 と HYP-S2 以降は、HYP-3c 完了後に独立して進められる。
+HYP-2d は storage 層で閉じるため、HYP-3c・HYP-4・HYP-S2 と並行できる。
+HYP-6a と HYP-6d は HYP-2d のレイアウト確定後に着手する。理由は二つ:
+HYP-6d の採否基準にある WAL 条件は base の incidence 書込みが HYP-2c 閾値を超えたままでは
+満たしようがなく (循環)、HYP-6a の unlink 設計は `PrevInNode` の有無に依存するため。
 
 ## 共通完了条件
 
@@ -249,6 +253,9 @@ Flags(1) | HyperedgeId(6) | NodeId(6) | RoleId(2)
 
 `PrevInNode` は vacuum 時の unlink を O(arity) に保つために持つ。
 メンバー集合は不変なので `PrevInHyperedge` は持たない。
+
+> 2026-07-05 追記: この 33 バイト契約は HYP-2c の不合格を受けて HYP-2d で再設計する。
+> HYP-2d 完了後は HYP-2d の決定記録を正とする。
 
 ### 実装
 
@@ -452,7 +459,115 @@ batch の近似式は `bytes/item = 52.74 + 52.25 × arity` である。
 **決定**：線形性は合格だが、batch の arity 4、8、16 が上限を超えるため HYP-2c の倍率仮説は棄却する。
 上限から許される限界費用は binary の半分である 43.23 bytes/member なので、現状から約 9.02 bytes/member（17.3%）の削減が必要である。
 超線形ではないため page 分散の変更は行わず、再設計箇所を 33-byte incidence payload と node-head / incidence-link 更新の WAL 表現に限定する。
-HYP-6c ではこの未達を性能ゲートとして再測定し、必要なら incidence record 圧縮または logical incidence WAL を比較する。
+是正タスクとして HYP-2d (incidence レイアウト再設計) を新設した。レコード圧縮案の比較と採否は HYP-2d で行い、製品 API 経由の再測定は HYP-6c で行う。
+
+## HYP-2d incidence レイアウト再設計 (WAL 増幅の是正)
+
+### 背景と費用分解
+
+HYP-2c で batch 増幅が arity 4/8/16 で上限を超えた
+(限界費用 52.25 B/member、許容 43.23 B/member = binary 86.46 B/item の半分)。
+WAL は `WalPageImageCodec` v3 の full after-image (末尾ゼロ trim + RLE、run ≥ 8B) を
+dirty page ごとに 1 回書く方式なので、batch の限界費用はページ上のレコード実費にほぼ一致する。
+現行の member 1 件あたりの内訳:
+
+- incidence レコード: `VersionedRecordHeap` の version ヘッダ 24B + payload 33B +
+  slot directory ≈ 61B
+- `ItemPointerMap`: 8B/entry (別テナントページ)
+- node head (6B sidecar) と旧 head の `PrevInNode` backlink 書込み: HYP-2c ベンチは
+  16 node を共有するためホットページに乗って償却されるが、実ワークロードでは
+  node が散るぶん cold page image を追加しうる (ベンチが隠している費用)
+
+計 69B/件が RLE (version ヘッダ内 xmax=0 の 8B run 等) で 52.25 B/member まで縮んでいる、
+という整合の取れた分解になる。
+
+削減の設計自由度は次の実装事実に支えられる。
+
+- incidence の可視性は hyperedge header が正本で、incidence 自身の xmin/xmax は
+  可視性判定に使っていない → version ヘッダ 24B は情報として遊んでいる。
+- undo (abort / savepoint) と crash recovery は物理 page image
+  (before-image の CompensationLogRecord) でレイアウト非依存 → ヒープ形式を差し替えても
+  rollback / recovery の機構再設計は不要 (テストによる再検証は必要)。
+- `IncidenceId` は internal で公開されず、参照は常に node head / hyperedge header 経由の
+  chain のみ → 世代照合は hyperedge header 側で完結し、incidence 自身は generation を持たなくてよい。
+
+### 比較案
+
+- **案 A**: `PrevInNode` (6B) 削除のみ (payload 33→27B)。見積は 52.25 × 63/69 ≈ 47.7 B/member で
+  **単独では 43.23 に届かない**。旧 head backlink 書込みの消滅 (実ワークロードの cold page 削減) は
+  価値が大きいが主策にならないため、案 B に包含して評価する。
+- **案 B (第一候補)**: 専用 fixed-slot 直接アドレスストア。`NodeIncidenceHeadStore` と同じ
+  「sequence → page/offset 直引き」イディオムを 27B slot に適用し、version ヘッダ・
+  slot directory・`ItemPointerMap` を全廃する。
+  - slot 契約 (27B、302 slots/page):
+
+    ```text
+    Flags(1) | HyperedgeId(6) | NodeId(6) | RoleId(2) | NextInNode(6) | NextInHyperedge(6)
+    ```
+
+  - 見積: 27〜30 B/member → 全 arity で閾値内に余裕を持って入る。
+  - free list は空 slot の `NextInNode` を free chain に転用し、head をストアの
+    ヘッダページに置く。slot を free へ戻せるのは「全 live chain から unlink 済み +
+    active transaction なし」(HYP-6a 契約) のときのみ。
+  - 副次効果: chain 1 step の間接参照が map lookup + slot directory の 2 段から
+    直接アドレス 1 段になり、HYP-1d で不合格だった走査の固定費側 (degree 10 の 5.49x) にも効く。
+- **案 C (比較対象から除外)**: logical incidence WAL。PageImage 経路の一般性を壊す特殊化で、
+  FTS-9 (logical SMO) を「正当な設計でも複雑度に見合わない」と停止した前例と同型。
+  案 B が不合格の場合のみ再浮上させる。
+
+### 実装 (案 B 採用時)
+
+- `IncidenceStore` の内部を fixed-slot 直接アドレスへ置換する。`IIncidenceStore` 契約と
+  enumerator の意味論 (header 不可視なら skip) は変えない。
+- incidence map テナントは廃止する (テナント番号は欠番のまま詰めない)。
+- `PrevInNode` を落とすため、vacuum の unlink は「dead incidence を node 別にグループ化し、
+  影響 node chain を head から 1 回だけ走査して running prev で一括 unlink する sweep」
+  (合計 O(影響 chain 長)) へ変更する。設計は HYP-6a に引き継ぐ。
+- on-disk レイアウト変更なので `FormatVersion` を V4 へ上げる (クリーンブレイク、読み替えなし)。
+- HYP-1b のレコード契約と HYP-6b の `PrevInNode` 整合性チェック項目は本タスクの決定で置き換える。
+
+### 採否基準
+
+- `HyperedgeWalAmplificationBenchmarks` 再走で、batch (1,000 件/tx) の arity 2/4/8/16 全てが
+  binary 比 `(1 + arity/2)` 倍以内に入る。
+- 単件 tx の WAL bytes が現行実測から +10% を超えて悪化しない。
+- HYP-1d ハーネス再走で走査 p50 を記録する。3 倍以内は合格条件にしない (HYP-6d が控える) が、
+  全 degree で 3 倍以内に入った場合は HYP-6d の中止を判定する。
+- rollback / savepoint / crash recovery テスト (HYP-1c 分) を含む全スイートが緑。
+
+### 実測結果 (2026-07-05)
+
+案 B (27B fixed-slot 直接アドレス、`PrevInNode` 廃止、version ヘッダ / slot directory /
+`ItemPointerMap` 全廃、free chain は空 slot の `NextInNode` 重畳) を実装し再測定した。
+`FormatVersion` は V4、incidence 間接マップのテナント 22 は欠番。
+
+| tx 内件数 | arity | WAL bytes | bytes/item | binary 比 | 上限 | 判定 |
+|---:|---:|---:|---:|---:|---:|---|
+| 1 | 2 | 1,268 | 1,268.00 | 0.823x | 2.000x | 合格 |
+| 1 | 4 | 1,454 | 1,454.00 | 0.944x | 3.000x | 合格 |
+| 1 | 8 | 1,829 | 1,829.00 | 1.188x | 5.000x | 合格 |
+| 1 | 16 | 2,573 | 2,573.00 | 1.671x | 9.000x | 合格 |
+| 1,000 | 2 | 107,258 | 107.26 | 1.241x | 2.000x | 合格 |
+| 1,000 | 4 | 162,334 | 162.33 | 1.878x | 3.000x | 合格 |
+| 1,000 | 8 | 273,346 | 273.35 | 3.163x | 5.000x | 合格 |
+| 1,000 | 16 | 493,543 | 493.54 | 5.711x | 9.000x | 合格 |
+
+binary は単件 1,540 / batch 86.42 bytes/item。線形性 `R² = 0.999997`。
+batch の限界費用は差分フィットで **約 27.6 B/member** (許容 43.23、置換前 52.25) となり、
+設計見積 27〜30 と一致する。単件も全 arity で 17〜31% 減少 (+10% 制限に対し悪化なし)。
+
+走査再測定 (`--incidence-traversal`、arity 4、置換前 = 5.49x / 2.52x / 7.97x):
+
+| degree | binary 比 p50 | alloc |
+|---:|---:|---:|
+| 10 | 4.81–4.94x | 0 B |
+| 100 | 1.65–1.70x | 0 B |
+| 1,000 | 5.39–5.46x | 0 B |
+
+**決定**: WAL の採否基準は全て合格し、案 B を採用する。走査は全 degree で改善したが
+degree 10 と 1,000 が 3 倍を超えたままなので **HYP-6d の中止条件は満たさず、HYP-6d は継続**。
+degree 10 の残差は 2 段展開の固定費、1,000 はページ局所性という仮説が残るため、
+HYP-6d の前段分解計測をそのまま実施する。
 
 ## HYP-3a Tuple、Logical IR、物理オペレータ
 
@@ -670,7 +785,10 @@ visibility horizon を越えた hyperedge、incidence、property を回収し、
 
 - `VacuumTarget.Hyperedges` と report の回収件数を追加する。
 - dead hyperedge の property、incidence、header の順に回収する。
-- incidence を node chain から `PrevInNode` と `NextInNode` で unlink する。
+- incidence の unlink は HYP-2d のレイアウト決定に従う。`PrevInNode` を廃止した場合は、
+  dead incidence を node 別にグループ化し、影響 node chain を head から 1 回だけ走査して
+  running prev で一括 unlink する sweep (合計 O(影響 chain 長)) にする。
+  保持した場合は `PrevInNode` と `NextInNode` で個別 unlink する。
 - hyperedge chain は header ごと消えるため、個別の prev 修復を行わない。
 - incidence slot は vacuum 中に active transaction が無い場合だけ free list へ戻す。
 - hyperedge sequence の再利用時は generation を上げる。
@@ -698,7 +816,7 @@ visibility horizon を越えた hyperedge、incidence、property を回収し、
   - live hyperedge の arity が 2 未満。
   - incidence の hyperedge、node、role が無効。
   - node chain または hyperedge chain の cycle。
-  - `PrevInNode` と `NextInNode` の不一致。
+  - `PrevInNode` と `NextInNode` の不一致 (HYP-2d で `PrevInNode` を保持した場合のみ)。
   - live incidence が node chain または hyperedge chain の片方から到達不能。
   - 同じ hyperedge に同じ role と node の組が重複。
 - public column API が entity kind を受ける場合は `EntityKind.Hyperedge` を許可する。
@@ -714,12 +832,17 @@ visibility horizon を越えた hyperedge、incidence、property を回収し、
 ### 目的
 
 HYP-1d、HYP-2c、HYP-3c の三つの仮説を製品 API 経由で再測定する。
+HYP-2d のレイアウト確定後に実施する。
 
 ### 計測
 
 - `HyperedgeTraversalBenchmarks` で binary 1-hop と role 指定 co-membership を比較する。
 - `HyperedgeWriteBenchmarks` で arity 別 create、delete、property write、WAL bytes を測る。
 - `HyperedgeMatchBenchmarks` で四 role の星型 Match と同等の reified graph pattern を比較する。
+- 高次数カスケード: 1 node が 10^3〜10^4 hyperedge のメンバーである状態の `DeleteNode` を測る
+  (tx 時間、WAL bytes、deadlock を起こさないこと、削除後の `CheckConsistency` が 0 件)。
+  RAG では Chunk や頻出エンティティの node が高次数になる想定で、
+  数値ゲートは置かず実測値と挙動を記録して HYP-7 の known limits へ反映する。
 - 結果を `docs/benchmarks/YYYY-MM-DD_HYP-6c_Hyperedge.md` へ記録し、要点を `docs/design/development.md` へ集約する。
 
 ### 判定
@@ -733,6 +856,19 @@ HYP-1d、HYP-2c、HYP-3c の三つの仮説を製品 API 経由で再測定す�
 ## HYP-6d 物理 co-membership view spike と実装
 
 このタスクは HYP-1d または HYP-6c の走査性能が不合格の場合だけ実行する。
+HYP-1d の不合格 (2026-07-04) により必須化済み。ただし着手は HYP-2d 完了後とする —
+採否基準の WAL 条件は base が HYP-2c 閾値超過のままでは満たせず、
+HYP-2d の直接アドレス化は走査固定費そのものを変えるため。
+HYP-2d 後の再測定で全 degree が 3 倍以内に入った場合は本タスクを中止する。
+
+### 前段の分解計測
+
+案を選ぶ前に、co-membership 1-hop の 2 段 —
+(1) node → incidence chain 走査、(2) hyperedge → member 展開 — の時間内訳を
+degree 10 / 100 / 1,000 で測る。HYP-1d の非単調な形状 (degree 100 のみ合格) は
+degree 10 = 固定費支配、degree 1,000 = ページ局所性支配という仮説であり、
+これを確認してから案を選ぶ。案 A (node ごとの連続配置) が改善するのは 1 段目だけなので、
+2 段目支配なら案 B を第一候補にする。
 
 ### 比較案
 
@@ -783,7 +919,8 @@ HYP-1d、HYP-2c、HYP-3c の三つの仮説を製品 API 経由で再測定す�
 |---|---|---|---|---|
 | 2026-07-03 | HYP-S1 | 案 A は binary p50 3% gate 不合格、案 B は head lookup 0.288–0.558x | **案 B: tenant 25 の 6B sidecar** | binary 15B payload を維持し、全経路 0 B/op |
 | 2026-07-04 | HYP-1d | degree 10: 5.49x, 100: 2.52x, 1000: 7.97x (alloc 0B) | **HYP-6d 必須化** | 2/3 degree で 3x 超過。managed alloc なし → HYP-3a 前の修正不要 |
-| 2026-07-04 | HYP-2c | batch `R²=1.000000`、A=2/4/8/16 は 1.819x/3.027x/5.444x/10.279x | **線形性合格、倍率仮説は棄却** | A=4/8/16 が上限超過。incidence 限界費用を約 9.02 B/member 削減する候補を HYP-6c で再評価 |
+| 2026-07-04 | HYP-2c | batch `R²=1.000000`、A=2/4/8/16 は 1.819x/3.027x/5.444x/10.279x | **線形性合格、倍率仮説は棄却** | A=4/8/16 が上限超過。限界費用を約 9.02 B/member 削減する是正を HYP-2d へ切り出し、HYP-6c で再測定 |
+| 2026-07-05 | HYP-2d | batch A=2/4/8/16 が 1.241x/1.878x/3.163x/5.711x (上限 2/3/5/9)、単件 −17〜−31%、走査 4.8x/1.7x/5.4x | **案 B (fixed-slot 直接アドレス) 採用、FormatVersion V4** | 限界費用 ≈27.6 B/member (許容 43.23)。走査は改善したが degree 10/1000 が 3x 超のため HYP-6d は継続 |
 | 未実施 | HYP-3c | 未検証 | 未決定 | RAG query の表現力を判定する |
 | 未実施 | HYP-S2 | 未検証 | 未決定 | SourceGenerator の role binding API を選ぶ |
 | 未実施 | HYP-6c | 未計測 | 未決定 | 統合性能ゲートを判定する |
