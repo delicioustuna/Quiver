@@ -833,6 +833,33 @@ HYP-S2 で確定した role binding と hyperedge property の CRUD を生成す
 - 誤った node 型への role 展開がコンパイルエラーになることを generator compile test で検証する。
 - typed と untyped の結果集合が一致することを integration test で検証する。
 
+### 実装結果 (2026-07-05, commit b866fa5)
+
+- 公開 API に `TypedGraphHyperedgeTraversal<THyperedge>` と
+  `TypedGraphTraversal<T>.Hyperedges<THyperedge>(string? role = null)` を追加。
+  式ツリー `Has` (等値 / `PropertyPredicate`)、`MembersOf<TNode>` / `OtherMembersOf<TNode>`、
+  型なし降格 (`Members` / `OtherMembers` / `Values`)、終端
+  (`ToList` / `ToListWithIds` / `ToIdList` / `First` / `Count`) を提供。
+- role selector は式木でなく**生成済み名前付き拡張メソッド**で実現 (計画の「role selector 相当」の
+  具体化)。role 名 (`[Role("Attendee")]`) はプロパティ名 (`Attendees`) と異なり得るため、
+  実行時に式木からプロパティ名を取るとロール名を誤る。generator が `GraphHyperedgeModel.Roles`
+  から role 名とハイパーエッジ型をリテラルで畳み込む — relationship 糖衣 (`.Knows()`) と同型。
+- 生成は `{Class}TraversalExtensions` にロールごと 3 メソッド:
+  `{Class}As{Prop}` (node→hyperedge)、`{Prop}` (member 展開)、`Other{Prop}` (起点除外
+  co-membership。計画の明示要求外だが、無いと typed API で role 文字列を再入力する羽目になるため追加)。
+  multi role は node traversal を返し、collection を行に載せない。
+- 実行経路は型なし DSL への 2 段委譲のみで `ExpandToHyperedgeOp` / `ExpandMembersOp` に必ず到達する。
+  別の物理経路・planner 分岐は追加していない。hidden origin 契約も untyped 実装をそのまま通る。
+- internal な `[Hyperedge]` クラスには拡張クラスを internal で emit する
+  (`GraphHyperedgeModel.IsPublic`。public だと CS0050)。
+- 既知の命名エッジケース: role プロパティ名が `Members` / `OtherMembers` / `Values` と同名の場合、
+  インスタンスメソッドが拡張メソッドより優先され untyped 版が呼ばれる (コンパイルエラーにはならない)。
+  実害の薄い命名衝突として未対応。
+- テスト: generator 3 件 (生成 snapshot / call-site 正例フルコンパイル /
+  `Nodes<Place>().FactAsSubject()` が CS1929 になる負例) + 実 DB 統合 5 件
+  (単一・複数・optional・同一 node 型複数 role・property filter で typed = untyped)。
+  SourceGen 17 / Quiver.Tests 843 / Client 216 / PublicApi 1 (approved.txt 更新) 全緑、build 0 errors。
+
 ## HYP-6a Vacuum と物理回収
 
 ### 目的
