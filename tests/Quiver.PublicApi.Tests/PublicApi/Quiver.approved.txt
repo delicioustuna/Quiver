@@ -1354,11 +1354,13 @@ namespace Quiver.Maintenance
     }
     public sealed class VacuumReport : System.IEquatable<Quiver.Maintenance.VacuumReport>
     {
-        public VacuumReport(int ReclaimedNodes, int ReclaimedRelationships, int ReclaimedProperties, int PrunedCommittedTxEntries, long ElapsedMs, long HorizonTxId, bool Skipped, long TruncatedPages = 0, int ReclaimedColumnVersions = 0) { }
+        public VacuumReport(int ReclaimedNodes, int ReclaimedRelationships, int ReclaimedProperties, int PrunedCommittedTxEntries, long ElapsedMs, long HorizonTxId, bool Skipped, long TruncatedPages = 0, int ReclaimedColumnVersions = 0, int ReclaimedHyperedges = 0, int ReclaimedIncidences = 0) { }
         public long ElapsedMs { get; init; }
         public long HorizonTxId { get; init; }
         public int PrunedCommittedTxEntries { get; init; }
         public int ReclaimedColumnVersions { get; init; }
+        public int ReclaimedHyperedges { get; init; }
+        public int ReclaimedIncidences { get; init; }
         public int ReclaimedNodes { get; init; }
         public int ReclaimedProperties { get; init; }
         public int ReclaimedRelationships { get; init; }
@@ -1373,7 +1375,8 @@ namespace Quiver.Maintenance
         Relationships = 2,
         Properties = 4,
         Indexes = 8,
-        All = 15,
+        Hyperedges = 16,
+        All = 31,
     }
 }
 namespace Quiver.Migrations

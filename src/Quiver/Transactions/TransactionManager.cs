@@ -134,6 +134,12 @@ internal sealed class TransactionManager : ITransactionManager
     /// </summary>
     internal CommittedTxRegistry CommittedRegistry => _committed;
 
+    // vacuum が dead hyperedge / incidence を回収するためのストア到達点。backend は
+    // これらを直接保持しないため、transaction 配線に渡した実体をここから参照する。
+    internal IHyperedgeStore HyperedgeStore => _hyperedgeStore;
+    internal IIncidenceStore IncidenceStore => _incidenceStore;
+    internal INodeIncidenceHeadStore NodeIncidenceHeadStore => _nodeIncidenceHeadStore;
+
     /// <summary>Serializable commit を直列化するゲート (Transaction から参照)。</summary>
     internal object SsnCommitGate => _ssnCommitGate;
 

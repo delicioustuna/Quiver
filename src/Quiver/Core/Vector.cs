@@ -1,6 +1,6 @@
 namespace Quiver.Core;
 
-// EntityKind は EntityId.cs で定義。ベクトルコードは Node / Relationship のみを使用し、
+// EntityKind は EntityId.cs で定義。ベクトルコードは Node / Relationship / Hyperedge を使用し、
 // Property は診断 / カタログ用に予約されている (IVectorStore 実装は拒否する)。
 
 /// <summary>

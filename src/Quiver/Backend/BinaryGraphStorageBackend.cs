@@ -304,9 +304,14 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     {
         // WAL を渡して、dead version 回収後の末尾連続 free page を物理 truncate する。
         // WAL の FileTruncate レコード経由で crash recovery に対する冪等再生を保証する。
+        // hyperedge / incidence / node-incidence-head の実体は transaction 配線側が保持するため、
+        // そこから取り出して hyperedge 回収を有効にする (backend は直接参照を持たない)。
         var vac = new Vacuum(
             _nodeStore, _relStore, _propStore,
-            _txManager, _txManager.CommittedRegistry, _wal, _columnManager);
+            _txManager, _txManager.CommittedRegistry, _wal, _columnManager,
+            _txManager.HyperedgeStore as VersionedHyperedgeStore,
+            _txManager.IncidenceStore as IncidenceStore,
+            _txManager.NodeIncidenceHeadStore);
         return vac.Run(options);
     }
 

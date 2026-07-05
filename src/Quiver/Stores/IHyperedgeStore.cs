@@ -48,10 +48,26 @@ internal interface IHyperedgeStore
     long InUseCount { get; }
 
     /// <summary>
+    /// 指定 sequence の現在世代を返す。範囲外または未割り当てなら -1。
+    /// 永続ベクトルなど、sequence だけを保持する参照の世代照合に使う。
+    /// </summary>
+    int CurrentGeneration(long sequence) => -1;
+
+    /// <summary>
     /// 採番済み sequence の排他的上限。allocation-free scan が穴を含む ID 空間を
     /// <see cref="Read"/> で走査するために使う。
     /// </summary>
     long SequenceHighWaterMark => 0;
+
+    /// <summary>
+    /// 可視性を適用せず、割り当て済み header の物理状態を返す。
+    /// 整合性診断が論理削除後か未登録参照かを区別するために使う。
+    /// </summary>
+    bool TryReadRawHeader(long sequence, out RawHyperedgeHeader header)
+    {
+        header = default;
+        return false;
+    }
 
     // ===== inline property (header 15 バイト固定領域の後ろに符号化) =====
 

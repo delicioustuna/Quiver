@@ -226,6 +226,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             {
                 Core.EntityKind.Node => nodeStore.CurrentGeneration(seq),
                 Core.EntityKind.Relationship => relStore.CurrentGeneration(seq),
+                Core.EntityKind.Hyperedge => hyperedgeStore.CurrentGeneration(seq),
                 _ => -1,
             },
             options.VectorCacheBudgetBytes);

@@ -83,6 +83,7 @@ internal sealed class IncidenceStore : IIncidenceStore
     }
 
     public long InUseCount => _inUseCount;
+    public long SequenceHighWaterMark => _hwm;
 
     public IncidenceId Allocate(
         HyperedgeId hyperedgeId,

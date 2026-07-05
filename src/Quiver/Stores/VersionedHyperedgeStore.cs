@@ -4,6 +4,16 @@ using Quiver.Storage;
 
 namespace Quiver.Storage.Records;
 
+/// <summary>vacuum: 可視性フィルタを通さない raw な header 情報 (heap head 由来)。</summary>
+internal struct RawHyperedgeHeader
+{
+    public bool InUse;
+    public IncidenceId FirstIncidence;
+    public PropertyId FirstProperty;
+    public long Xmin;
+    public long Xmax;
+}
+
 /// <summary>
 /// <see cref="VersionedRecordHeap"/> + <see cref="ItemPointerMap"/> 上に実装した
 /// MVCC 対応 hyperedge store。header が hyperedge の可視性の正本になる。
@@ -55,6 +65,14 @@ internal sealed class VersionedHyperedgeStore : IHyperedgeStore
 
     public long InUseCount => _inUseCount;
     public long SequenceHighWaterMark => _map.Hwm;
+
+    public int CurrentGeneration(long sequence)
+    {
+        if (sequence < 0 || sequence >= _map.Hwm)
+            return -1;
+        long generation = _versions.Read(sequence).Generation;
+        return generation <= 0 ? -1 : checked((int)generation);
+    }
 
     public HyperedgeId Create(
         HyperedgeTypeId type,
@@ -316,6 +334,44 @@ internal sealed class VersionedHyperedgeStore : IHyperedgeStore
         _map.ReloadMeta();
         _heap.ReloadMeta();
         _inUseCount = RecomputeInUse();
+    }
+
+    public bool TryReadRawHeader(long sequence, out RawHyperedgeHeader header)
+    {
+        header = default;
+        if (sequence < 0 || sequence >= _map.Hwm)
+            return false;
+        if (!_heap.TryReadHeadRaw(sequence, out var payload, out long xmin, out long xmax))
+            return false;
+
+        var span = payload.AsSpan();
+        header = new RawHyperedgeHeader
+        {
+            InUse = (span[OffFlags] & FlagInUse) != 0,
+            FirstIncidence = new IncidenceId(RecordHelpers.ReadInt48(span[OffFirstIncidence..])),
+            FirstProperty = new PropertyId(RecordHelpers.ReadInt48(span[OffFirstProperty..])),
+            Xmin = xmin,
+            Xmax = xmax,
+        };
+        return true;
+    }
+
+    /// <summary>
+    /// vacuum: live header の inline property 更新 (copy-on-write) で積まれた dead 旧版を prune する。
+    /// </summary>
+    internal void PruneDeadInlineVersions(long sequence, long horizonTxId, CommittedTxRegistry committed)
+        => _heap.PruneDeadVersions(sequence,
+            (_, vx) => vx != 0 && vx < horizonTxId && committed.IsCommitted(vx));
+
+    /// <summary>
+    /// vacuum: dead header を heap から物理回収し、sequence を free list へ返す。世代は sidecar に
+    /// 残るため、再利用時に <see cref="NextSequence"/> が +1 して stale ID を弾く (node / rel と同じ
+    /// 世代照合セマンティクス)。<see cref="InUseCount"/> は削除時に減算済みなので触らない。
+    /// </summary>
+    internal void ReclaimHeader(long sequence)
+    {
+        _heap.Remove(sequence);
+        _map.PushFreeSeq(sequence);
     }
 
     private long RecomputeInUse()
