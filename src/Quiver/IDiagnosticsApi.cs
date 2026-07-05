@@ -9,7 +9,12 @@ public interface IDiagnosticsApi
     /// <summary>現時点の DB 統計を返す。</summary>
     DatabaseStatistics GetStatistics();
 
-    /// <summary>整合性チェックを実行して結果レポートを返す。</summary>
+    /// <summary>
+    /// 整合性チェックを実行して結果レポートを返す。
+    /// ストアの物理構造 (incidence chain 等) をロックなしで走査するため、
+    /// 書き込みと並行して呼ぶと途中状態を一時的な不整合として誤検出しうる
+    /// (レポートのみで修復は行わないため実害はない)。確定診断は書き込み停止時に実行すること。
+    /// </summary>
     ConsistencyReport CheckConsistency();
 
     /// <summary>
