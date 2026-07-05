@@ -96,6 +96,7 @@ public sealed class GraphHyperedgeGenerator : IIncrementalGenerator
                 : classSymbol.ContainingNamespace.ToDisplayString(),
             ClassName = classSymbol.Name,
             HyperedgeType = type,
+            IsPublic = classSymbol.DeclaredAccessibility == Accessibility.Public,
         };
 
         var fqnFormat = SymbolDisplayFormat.FullyQualifiedFormat;

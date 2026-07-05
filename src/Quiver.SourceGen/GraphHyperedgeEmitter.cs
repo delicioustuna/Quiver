@@ -86,7 +86,54 @@ internal static class GraphHyperedgeEmitter
 
         sb.AppendLine($"    public static void Delete(IGraphTransaction tx, Quiver.Core.HyperedgeId id) => tx.DeleteHyperedge(id);");
         sb.AppendLine("}");
+
+        if (model.Roles.Count > 0)
+        {
+            sb.AppendLine();
+            EmitTraversalExtensions(sb, model);
+        }
+
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// ロールごとの型保存トラバーサル糖衣を emit する。ロール名とハイパーエッジ型は
+    /// 生成時にリテラルで畳み込み、実行は型なし DSL と同じ論理オペレータへ委譲する。
+    /// </summary>
+    private static void EmitTraversalExtensions(StringBuilder sb, GraphHyperedgeModel model)
+    {
+        // 拡張クラスはシグネチャに付与クラス型を含むため、アクセシビリティを揃える。
+        var access = model.IsPublic ? "public" : "internal";
+        var he = model.ClassName;
+
+        sb.AppendLine($"/// <summary>{he} (型保存トラバーサル糖衣) — SourceGenerator 生成。</summary>");
+        sb.AppendLine($"{access} static class {he}TraversalExtensions");
+        sb.AppendLine("{");
+        bool first = true;
+        foreach (var role in model.Roles)
+        {
+            if (!first) sb.AppendLine();
+            first = false;
+            var node = role.NodeFqn;
+
+            // node → hyperedge: ノードが当該ロールで参加するハイパーエッジへ展開する。
+            sb.AppendLine($"    /// <summary>現在のノードが {role.RoleName} ロールで参加する {model.HyperedgeType} ハイパーエッジへ展開し、{he} 型を保存する。</summary>");
+            sb.AppendLine($"    public static Quiver.Api.TypedGraphHyperedgeTraversal<{he}> {he}As{role.PropertyName}(this Quiver.Api.TypedGraphTraversal<{node}> source)");
+            sb.AppendLine($"        => source.Hyperedges<{he}>(\"{role.RoleName}\");");
+            sb.AppendLine();
+
+            // hyperedge → members: 複数メンバーロールでも各メンバーを個別の行として放出する。
+            sb.AppendLine($"    /// <summary>{role.RoleName} ロールのメンバーノードへ展開し、ノード型を保存する。複数メンバーは個別の行として放出する。</summary>");
+            sb.AppendLine($"    public static Quiver.Api.TypedGraphTraversal<{node}> {role.PropertyName}(this Quiver.Api.TypedGraphHyperedgeTraversal<{he}> source)");
+            sb.AppendLine($"        => source.MembersOf<{node}>(\"{role.RoleName}\");");
+            sb.AppendLine();
+
+            // co-membership: 到達起点ノードを除いた同ロールのメンバーへ展開する。
+            sb.AppendLine($"    /// <summary>{role.RoleName} ロールのメンバーから、このハイパーエッジへ到達した起点ノードを除いて展開し、ノード型を保存する。</summary>");
+            sb.AppendLine($"    public static Quiver.Api.TypedGraphTraversal<{node}> Other{role.PropertyName}(this Quiver.Api.TypedGraphHyperedgeTraversal<{he}> source)");
+            sb.AppendLine($"        => source.OtherMembersOf<{node}>(\"{role.RoleName}\");");
+        }
+        sb.AppendLine("}");
     }
 
     private static void EmitInsert(StringBuilder sb, GraphHyperedgeModel model)

@@ -6,6 +6,13 @@ internal sealed class GraphHyperedgeModel
     public string ClassName { get; set; } = "";
     public string HyperedgeType { get; set; } = "";
 
+    /// <summary>
+    /// 付与クラスが public 宣言かどうか。トラバーサル糖衣の拡張クラスは
+    /// シグネチャに付与クラス型を含むため、アクセシビリティを揃えて emit する
+    /// (internal クラスへ public 拡張を生成するとアクセシビリティ不整合になる)。
+    /// </summary>
+    public bool IsPublic { get; set; }
+
     public List<RoleModel> Roles { get; } = new();
     public List<PropertyModel> Properties { get; } = new();
 }

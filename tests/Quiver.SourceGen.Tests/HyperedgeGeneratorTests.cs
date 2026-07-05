@@ -236,6 +236,111 @@ public class GraphHyperedgeGeneratorTests
         diagnostics.Value.Should().Contain(d => d.Id == "QVRHE003");
     }
 
+    // ── 型保存トラバーサル糖衣 ───────────────────────────────────────────────
+
+    [Fact]
+    public void Emits_typed_traversal_extensions_per_role()
+    {
+        var source = Header + NodeStub + """
+
+            [Hyperedge("Fact")]
+            public partial class Fact
+            {
+                [Role("Subject")] public GraphNodeRef<Person> Subject { get; set; }
+                [Role("Where")]   public GraphNodeRef<Place> Location { get; set; }
+            }
+            """;
+
+        var (generated, diagnostics, compilation) = Run(source);
+
+        diagnostics.Value.Should().BeEmpty();
+        generated.Should().Contain("public static class FactTraversalExtensions");
+        // node → hyperedge: ロール名リテラルを畳み込み、型なし DSL と同じ経路へ委譲する。
+        generated.Should().Contain(
+            "public static Quiver.Api.TypedGraphHyperedgeTraversal<Fact> FactAsSubject(this Quiver.Api.TypedGraphTraversal<global::Person> source)");
+        generated.Should().Contain("source.Hyperedges<Fact>(\"Subject\")");
+        // hyperedge → member: ロールプロパティ名がメソッド名、[Role] の名がロール文字列。
+        generated.Should().Contain(
+            "public static Quiver.Api.TypedGraphTraversal<global::Place> Location(this Quiver.Api.TypedGraphHyperedgeTraversal<Fact> source)");
+        generated.Should().Contain("source.MembersOf<global::Place>(\"Where\")");
+        // co-membership: 起点ノード除外版。
+        generated.Should().Contain(
+            "public static Quiver.Api.TypedGraphTraversal<global::Person> OtherSubject(this Quiver.Api.TypedGraphHyperedgeTraversal<Fact> source)");
+        generated.Should().Contain("source.OtherMembersOf<global::Person>(\"Subject\")");
+        CompileErrors(compilation).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Typed_traversal_call_sites_compile()
+    {
+        // 単一・複数・nullable 省略可能ロール、同一ノード型の複数ロールを含む
+        // 呼び出しコードが生成糖衣とあわせてコンパイルできることを検証する。
+        var source = Header + NodeStub + """
+
+            [Hyperedge("Fact")]
+            public partial class Fact
+            {
+                [Role("Subject")]  public GraphNodeRef<Person> Subject { get; set; }
+                [Role("Object")]   public GraphNodeRef<Person> Object { get; set; }
+                [Role("Attendee")] public IReadOnlyList<GraphNodeRef<Person>> Attendees { get; set; } = new List<GraphNodeRef<Person>>();
+                [Role("Where")]    public GraphNodeRef<Place>? Location { get; set; }
+                [Property] public string Predicate { get; set; } = "";
+            }
+
+            public static class CallSites
+            {
+                public static void Chains(Quiver.Api.GraphTraversalSource g)
+                {
+                    // 同一ノード型 (Person) の複数ロール: Subject 起点から Object へ。
+                    List<Person> objects = g.Nodes<Person>().FactAsSubject().Object().ToList();
+                    // 複数メンバーロールはノードトラバーサルを返す (コレクションを行に載せない)。
+                    List<Person> attendees = g.Nodes<Person>().FactAsAttendees().Attendees().ToList();
+                    // co-membership: 起点を除いた同ロールメンバー。
+                    List<Person> others = g.Nodes<Person>().FactAsAttendees().OtherAttendees().ToList();
+                    // nullable 省略可能ロールも通常のノードトラバーサルへ戻る。
+                    List<Place> places = g.Nodes<Person>().FactAsSubject().Location().ToList();
+                    // ハイパーエッジプロパティの式ツリーフィルタ。
+                    long n = g.Nodes<Person>().FactAsSubject().Has(f => f.Predicate, "born-in").Count();
+                }
+            }
+            """;
+
+        var (_, diagnostics, compilation) = Run(source);
+
+        diagnostics.Value.Should().BeEmpty();
+        CompileErrors(compilation).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Wrong_node_type_role_expansion_is_compile_error()
+    {
+        // Subject ロールは Person に束縛されているため、Place のトラバーサルから
+        // FactAsSubject を呼ぶコードはコンパイルエラーになる (実行時エラーにしない)。
+        var source = Header + NodeStub + """
+
+            [Hyperedge("Fact")]
+            public partial class Fact
+            {
+                [Role("Subject")] public GraphNodeRef<Person> Subject { get; set; }
+                [Role("Object")]  public GraphNodeRef<Person> Object { get; set; }
+            }
+
+            public static class CallSites
+            {
+                public static void Wrong(Quiver.Api.GraphTraversalSource g)
+                {
+                    g.Nodes<Place>().FactAsSubject();
+                }
+            }
+            """;
+
+        var (_, diagnostics, compilation) = Run(source);
+
+        diagnostics.Value.Should().BeEmpty();
+        // レシーバ型不一致の拡張メソッド解決失敗 (CS1929) を期待する。
+        CompileErrors(compilation).Should().Contain(d => d.Id == "CS1929" || d.Id == "CS1061");
+    }
+
     private static int CountOccurrences(string haystack, string needle)
     {
         int count = 0, i = 0;

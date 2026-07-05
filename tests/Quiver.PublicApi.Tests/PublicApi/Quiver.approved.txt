@@ -353,6 +353,27 @@ namespace Quiver.Api
         public Quiver.Api.SubTraversal Out<TRel>()
             where TRel : Quiver.Api.IGraphRelationship<TRel> { }
     }
+    public sealed class TypedGraphHyperedgeTraversal<THyperedge>
+        where THyperedge : Quiver.Api.IGraphHyperedge<THyperedge>
+    {
+        public long Count() { }
+        public THyperedge? First() { }
+        public Quiver.Api.TypedGraphHyperedgeTraversal<THyperedge> Has<TProp>(System.Linq.Expressions.Expression<System.Func<THyperedge, TProp>> selector, Quiver.Api.PropertyPredicate pred) { }
+        public Quiver.Api.TypedGraphHyperedgeTraversal<THyperedge> Has<TProp>(System.Linq.Expressions.Expression<System.Func<THyperedge, TProp>> selector, TProp value) { }
+        public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> Members(string? role = null) { }
+        public Quiver.Api.TypedGraphTraversal<TNode> MembersOf<TNode>(string role)
+            where TNode : Quiver.Api.IGraphNode<TNode> { }
+        public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> OtherMembers(string? role = null) { }
+        public Quiver.Api.TypedGraphTraversal<TNode> OtherMembersOf<TNode>(string role)
+            where TNode : Quiver.Api.IGraphNode<TNode> { }
+        public System.Collections.Generic.List<Quiver.Core.HyperedgeId> ToIdList() { }
+        public System.Collections.Generic.List<THyperedge> ToList() { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Id",
+                "Entity"})]
+        public System.Collections.Generic.List<System.ValueTuple<Quiver.Core.HyperedgeId, THyperedge>> ToListWithIds() { }
+        public Quiver.Api.GraphTraversal<string> Values(string key) { }
+    }
     public static class TypedGraphTraversalWriteExtensions
     {
         public static long AddRelationship<TSource, TRel, TTarget>(this Quiver.Api.TypedGraphTraversal<TSource> sources, Quiver.Api.TypedGraphTraversal<TTarget> targets)
@@ -418,6 +439,8 @@ namespace Quiver.Api
         public Quiver.Api.TypedGraphTraversal<T> Has<TElem>(System.Linq.Expressions.Expression<System.Func<T, System.Collections.Generic.List<TElem>>> selector, TElem value) { }
         public Quiver.Api.TypedGraphTraversal<T> Has<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>> selector, Quiver.Api.PropertyPredicate pred) { }
         public Quiver.Api.TypedGraphTraversal<T> Has<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>> selector, TProp value) { }
+        public Quiver.Api.TypedGraphHyperedgeTraversal<THyperedge> Hyperedges<THyperedge>(string? role = null)
+            where THyperedge : Quiver.Api.IGraphHyperedge<THyperedge> { }
         public Quiver.Api.GraphTraversal<Quiver.Core.NodeId> In(string? type = null) { }
         public Quiver.Api.TypedGraphTraversal<TSource> In<TRel, TSource>()
             where TRel : Quiver.Api.IGraphRelationship<TRel, TSource, T>
