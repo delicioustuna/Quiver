@@ -37,11 +37,13 @@ internal sealed class NullIncidenceStore : IIncidenceStore
     public long InUseCount => 0;
 
     public IncidenceId Allocate(HyperedgeId hyperedgeId, NodeId nodeId, RoleId roleId,
-        IncidenceId previousInNode, IncidenceId nextInNode, IncidenceId nextInHyperedge)
+        IncidenceId nextInNode, IncidenceId nextInHyperedge)
         => throw new NotSupportedException("Incidence stores are not configured.");
 
     public IncidenceReadHandle Read(IncidenceId incidenceId) => default;
     public IncidenceWriteHandle Write(IncidenceId incidenceId)
+        => throw new NotSupportedException("Incidence stores are not configured.");
+    public void Free(IncidenceId incidenceId)
         => throw new NotSupportedException("Incidence stores are not configured.");
 
     public NodeIncidenceEnumerator EnumerateByNode(NodeId nodeId,

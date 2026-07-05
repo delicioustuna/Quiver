@@ -15,7 +15,6 @@ internal interface IIncidenceStore
         HyperedgeId hyperedgeId,
         NodeId nodeId,
         RoleId roleId,
-        IncidenceId previousInNode,
         IncidenceId nextInNode,
         IncidenceId nextInHyperedge);
 
@@ -28,6 +27,12 @@ internal interface IIncidenceStore
 
     /// <summary>chain ポインタを in-place 更新するハンドルを返す。Dispose で page を dirty 解放する。</summary>
     IncidenceWriteHandle Write(IncidenceId incidenceId);
+
+    /// <summary>
+    /// slot を free chain へ戻して sequence を再利用可能にする。呼び出し側 (vacuum) は
+    /// slot が全 live chain から unlink 済みかつ active transaction が無いことを保証する。
+    /// </summary>
+    void Free(IncidenceId incidenceId);
 
     /// <summary>
     /// node が参加する incidence を列挙する。参照先 hyperedge header が不可視な
@@ -62,7 +67,6 @@ internal readonly ref struct IncidenceReadHandle
         HyperedgeId hyperedgeId,
         NodeId nodeId,
         RoleId roleId,
-        IncidenceId previousInNode,
         IncidenceId nextInNode,
         IncidenceId nextInHyperedge)
     {
@@ -71,7 +75,6 @@ internal readonly ref struct IncidenceReadHandle
         HyperedgeId = hyperedgeId;
         NodeId = nodeId;
         RoleId = roleId;
-        PreviousInNode = previousInNode;
         NextInNode = nextInNode;
         NextInHyperedge = nextInHyperedge;
     }
@@ -91,9 +94,6 @@ internal readonly ref struct IncidenceReadHandle
     /// <summary>この参加の role</summary>
     public RoleId RoleId { get; }
 
-    /// <summary>node chain の前方 (Invalid = chain 先頭)</summary>
-    public IncidenceId PreviousInNode { get; }
-
     /// <summary>node chain の後方 (Invalid = chain 終端)</summary>
     public IncidenceId NextInNode { get; }
 
@@ -104,11 +104,15 @@ internal readonly ref struct IncidenceReadHandle
 }
 
 /// <summary>
-/// incidence の chain ポインタを in-place 更新するハンドル。
-/// Dispose するまで page を pin したままにし、Dispose で dirty 解放する。
+/// incidence の chain ポインタを in-place 更新するハンドル。<paramref name="record"/> は
+/// slot 全体 (27B) を指す。Dispose するまで page を pin したままにし、Dispose で dirty 解放する。
+/// オフセットは slot レイアウト (nextInNode = 15、nextInHyperedge = 21) に対応する。
 /// </summary>
 internal ref struct IncidenceWriteHandle
 {
+    private const int OffNextInNode = 15;
+    private const int OffNextInHyperedge = 21;
+
     private readonly IPagedFile _file;
     private readonly PageId _pageId;
     private Span<byte> _record;
@@ -120,22 +124,16 @@ internal ref struct IncidenceWriteHandle
         _record = record;
     }
 
-    public IncidenceId PreviousInNode
-    {
-        readonly get => new(RecordHelpers.ReadInt48(_record[15..]));
-        set => RecordHelpers.WriteInt48(_record[15..], value.Sequence);
-    }
-
     public IncidenceId NextInNode
     {
-        readonly get => new(RecordHelpers.ReadInt48(_record[21..]));
-        set => RecordHelpers.WriteInt48(_record[21..], value.Sequence);
+        readonly get => new(RecordHelpers.ReadInt48(_record[OffNextInNode..]));
+        set => RecordHelpers.WriteInt48(_record[OffNextInNode..], value.Sequence);
     }
 
     public IncidenceId NextInHyperedge
     {
-        readonly get => new(RecordHelpers.ReadInt48(_record[27..]));
-        set => RecordHelpers.WriteInt48(_record[27..], value.Sequence);
+        readonly get => new(RecordHelpers.ReadInt48(_record[OffNextInHyperedge..]));
+        set => RecordHelpers.WriteInt48(_record[OffNextInHyperedge..], value.Sequence);
     }
 
     public void Dispose() => _file.UnpinDirty(_pageId, 0);

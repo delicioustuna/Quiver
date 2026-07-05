@@ -45,8 +45,11 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     internal const byte TenantHyperedgeHeap = 18;
     internal const byte TenantHyperedgeMap = 19;
     internal const byte TenantHyperedgeVersion = 20;
+    // incidence は fixed-slot 直接アドレスの単一テナント (ヘッダページ + slot ページ)。
+    // 間接マップを持たないため tenant 22 は使わない。番号は詰め直さず欠番のまま残し、
+    // 既存 DB の他テナント番号を動かさない。
     internal const byte TenantIncidenceHeap = 21;
-    internal const byte TenantIncidenceMap = 22;
+    // 22 は旧 incidence 間接マップの欠番。再割り当てしない。
     internal const byte TenantHyperedgeTypeToken = 23;
     internal const byte TenantRoleToken = 24;
     // node sequence 直引きの 6B incidence head sidecar 用 tenant。
@@ -199,9 +202,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var hyperedgeStore = new VersionedHyperedgeStore(hyperedgeHeapFile, hyperedgeMap, hyperedgeVersions);
 
         var incidenceHeapFile = container.OpenTenant(TenantIncidenceHeap, PageKind.Header);
-        var incidenceMapFile = container.OpenTenant(TenantIncidenceMap, PageKind.Header);
-        var incidenceMap = new ItemPointerMap(incidenceMapFile);
-        var incidenceStore = new IncidenceStore(incidenceHeapFile, incidenceMap);
+        var incidenceStore = new IncidenceStore(incidenceHeapFile);
 
         var nodeIncidenceHeadFile = container.OpenTenant(TenantNodeIncidenceHead, PageKind.Header);
         var nodeIncidenceHeadStore = new NodeIncidenceHeadStore(nodeIncidenceHeadFile);

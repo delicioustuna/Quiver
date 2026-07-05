@@ -19,7 +19,6 @@ public sealed class HyperedgeTransactionTests : IDisposable
     private const byte TenantHyperedgeMap = 19;
     private const byte TenantHyperedgeVersion = 20;
     private const byte TenantIncidenceHeap = 21;
-    private const byte TenantIncidenceMap = 22;
     private const byte TenantNodeIncidenceHead = 25;
 
     private readonly string _walDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -53,9 +52,7 @@ public sealed class HyperedgeTransactionTests : IDisposable
         var hyperedgeStore = new VersionedHyperedgeStore(hyperedgeHeapFile, hyperedgeMap, hyperedgeVersions);
 
         var incidenceHeapFile = container.OpenTenant(TenantIncidenceHeap, PageKind.Header);
-        var incidenceMapFile = container.OpenTenant(TenantIncidenceMap, PageKind.Header);
-        var incidenceMap = new ItemPointerMap(incidenceMapFile);
-        var incidenceStore = new IncidenceStore(incidenceHeapFile, incidenceMap);
+        var incidenceStore = new IncidenceStore(incidenceHeapFile);
 
         var nodeHeadFile = container.OpenTenant(TenantNodeIncidenceHead, PageKind.Header);
         var nodeHeadStore = new NodeIncidenceHeadStore(nodeHeadFile);
@@ -312,8 +309,7 @@ public sealed class HyperedgeTransactionTests : IDisposable
         var verFile = container.OpenTenant(TenantHyperedgeVersion, PageKind.Header);
         var store = new VersionedHyperedgeStore(heapFile, new ItemPointerMap(mapFile), new EntityVersionStore(verFile));
         var incHeapFile = container.OpenTenant(TenantIncidenceHeap, PageKind.Header);
-        var incMapFile = container.OpenTenant(TenantIncidenceMap, PageKind.Header);
-        var incStore = new IncidenceStore(incHeapFile, new ItemPointerMap(incMapFile));
+        var incStore = new IncidenceStore(incHeapFile);
         var headFile = container.OpenTenant(TenantNodeIncidenceHead, PageKind.Header);
         var headStore = new NodeIncidenceHeadStore(headFile);
         return (store, incStore, headStore);

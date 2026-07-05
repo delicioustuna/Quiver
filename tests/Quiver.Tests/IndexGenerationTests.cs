@@ -253,14 +253,14 @@ public sealed class IndexGenerationTests : IDisposable
     // ---- Format version gate ----
 
     [Fact]
-    public void FormatVersion_current_is_v3()
+    public void FormatVersion_current_is_v4()
     {
-        // FormatVersion V3 は第一級 hyperedge の ID / token / tenant 基盤を追加する clean break。
-        FormatVersion.Current.Should().Be(FormatVersion.V3);
+        // FormatVersion V4 は incidence を fixed-slot 直接アドレスレイアウトへ変更する clean break。
+        FormatVersion.Current.Should().Be(FormatVersion.V4);
     }
 
     // 旧 format バイトを持つ store は open 時に reject される (クリーンブレイク; 自動マイグレーション無し)。
-    private const byte LegacyFormatVersion = FormatVersion.V2;
+    private const byte LegacyFormatVersion = FormatVersion.V3;
 
     [Fact]
     public void Opening_store_with_legacy_format_version_throws_FormatVersionMismatch()
@@ -298,7 +298,7 @@ public sealed class IndexGenerationTests : IDisposable
                 .Which.Should().Match<FormatVersionMismatchException>(
                     ex => ex.FileKind == "versionedheap"
                           && ex.Found == LegacyFormatVersion
-                          && ex.Expected == FormatVersion.V3);
+                          && ex.Expected == FormatVersion.V4);
         }
     }
 }

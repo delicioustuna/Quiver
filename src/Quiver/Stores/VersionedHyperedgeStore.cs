@@ -91,23 +91,16 @@ internal sealed class VersionedHyperedgeStore : IHyperedgeStore
         for (int index = 0; index < members.Length; index++)
         {
             IncidenceMember member = members[index];
-            // node chain は head insert: 新 incidence を先頭に置き、旧 head の
-            // PreviousInNode を差し替える。hyperedge chain は作成順に末尾へ伸ばす。
+            // node chain は head insert: 新 incidence を先頭に置き、その nextInNode を
+            // 旧 head に向ける。逆リンクは持たないので旧 head 側の書き換えは無い
+            // (unlink は vacuum の chain sweep で行う)。hyperedge chain は作成順に末尾へ伸ばす。
             IncidenceId oldNodeHead = nodeHeads.Get(member.NodeId);
             IncidenceId current = incidenceStore.Allocate(
                 hyperedgeId,
                 member.NodeId,
                 member.RoleId,
-                IncidenceId.Invalid,
                 oldNodeHead,
                 IncidenceId.Invalid);
-
-            if (oldNodeHead.IsValid)
-            {
-                var oldHead = incidenceStore.Write(oldNodeHead);
-                oldHead.PreviousInNode = current;
-                oldHead.Dispose();
-            }
 
             nodeHeads.Set(member.NodeId, current);
 

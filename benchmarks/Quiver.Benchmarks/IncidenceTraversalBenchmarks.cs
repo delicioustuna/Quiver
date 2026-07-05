@@ -46,7 +46,7 @@ public static class IncidenceTraversalBenchmarks
             var nodeStore = new VersionedNodeStore(files[0], new ItemPointerMap(files[1]), labelIndex: null);
             var relStore = new VersionedRelationshipStore(files[2], new ItemPointerMap(files[3]));
             var hyperedgeStore = new VersionedHyperedgeStore(files[4], new ItemPointerMap(files[5]));
-            var incidenceStore = new IncidenceStore(files[6], new ItemPointerMap(files[7]));
+            var incidenceStore = new IncidenceStore(files[6]);
             var nodeHeadStore = new NodeIncidenceHeadStore(files[8]);
 
             NodeId hub = nodeStore.Allocate(new LabelId(1));

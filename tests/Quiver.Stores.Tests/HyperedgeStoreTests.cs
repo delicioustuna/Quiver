@@ -228,8 +228,7 @@ public sealed class HyperedgeStoreTests : IDisposable
             _hyperedgeHeap,
             new ItemPointerMap(_hyperedgeMap),
             new EntityVersionStore(_hyperedgeVersions));
-        _incidences = new IncidenceStore(
-            _incidenceHeap, new ItemPointerMap(_incidenceMap));
+        _incidences = new IncidenceStore(_incidenceHeap);
         _heads = new NodeIncidenceHeadStore(_nodeHeads);
     }
 

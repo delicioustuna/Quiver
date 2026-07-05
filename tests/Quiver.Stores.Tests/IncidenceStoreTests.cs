@@ -31,8 +31,7 @@ public sealed class IncidenceStoreTests : IDisposable
             _files[0],
             new ItemPointerMap(_files[1]),
             new EntityVersionStore(_files[2]));
-        _incidences = new IncidenceStore(
-            _files[3], new ItemPointerMap(_files[4]));
+        _incidences = new IncidenceStore(_files[3]);
         _heads = new NodeIncidenceHeadStore(_files[5]);
     }
 
@@ -66,11 +65,12 @@ public sealed class IncidenceStoreTests : IDisposable
 
     /// <summary>
     /// 同じ node が 2 つ目の hyperedge に参加したとき、新しい incidence が
-    /// node chain の先頭に入り、旧 head の PreviousInNode が新 head を
-    /// 指し直されることを検証する (両端の終端 Invalid も確認)。
+    /// node chain の先頭に入り、その NextInNode が旧 head を指すことを検証する。
+    /// 逆リンクは持たないため旧 head は書き換わらず (NextInNode は終端 Invalid のまま)、
+    /// head insert が旧 head 側の page image を汚さないことを確かめる。
     /// </summary>
     [Fact]
-    public void Node_chain_head_insert_updates_previous_pointer()
+    public void Node_chain_head_insert_points_forward_to_old_head()
     {
         NodeId shared = new(8);
         HyperedgeId first = Create(shared, new NodeId(9), role: 1);
@@ -80,12 +80,10 @@ public sealed class IncidenceStoreTests : IDisposable
 
         using var newRecord = _incidences.Read(newHead);
         newRecord.HyperedgeId.Should().Be(second);
-        newRecord.PreviousInNode.Should().Be(IncidenceId.Invalid);
         newRecord.NextInNode.Should().Be(oldHead);
 
         using var oldRecord = _incidences.Read(oldHead);
         oldRecord.HyperedgeId.Should().Be(first);
-        oldRecord.PreviousInNode.Should().Be(newHead);
         oldRecord.NextInNode.Should().Be(IncidenceId.Invalid);
     }
 
@@ -154,6 +152,75 @@ public sealed class IncidenceStoreTests : IDisposable
 
         count.Should().Be(16);
         allocated.Should().Be(0);
+    }
+
+    /// <summary>
+    /// Free で戻した slot の sequence が次の Allocate で LIFO に再利用され、
+    /// 高水位を伸ばさずに新しいレコードを書けることを検証する。
+    /// </summary>
+    [Fact]
+    public void Freed_slot_sequence_is_reused_by_next_allocate()
+    {
+        IncidenceId first = _incidences.Allocate(
+            new HyperedgeId(1), new NodeId(1), new RoleId(1),
+            IncidenceId.Invalid, IncidenceId.Invalid);
+        IncidenceId second = _incidences.Allocate(
+            new HyperedgeId(1), new NodeId(2), new RoleId(1),
+            IncidenceId.Invalid, IncidenceId.Invalid);
+        long hwmBeforeFree = _incidences.HighWaterMark;
+
+        _incidences.Free(first);
+        _incidences.InUseCount.Should().Be(1);
+        _incidences.FreeHead.Should().Be(first.Sequence);
+
+        IncidenceId reused = _incidences.Allocate(
+            new HyperedgeId(2), new NodeId(3), new RoleId(2),
+            IncidenceId.Invalid, IncidenceId.Invalid);
+
+        reused.Should().Be(first);
+        _incidences.HighWaterMark.Should().Be(hwmBeforeFree);
+        _incidences.FreeHead.Should().Be(IncidenceId.Invalid.Sequence);
+        _incidences.InUseCount.Should().Be(2);
+
+        using var record = _incidences.Read(reused);
+        record.InUse.Should().BeTrue();
+        record.HyperedgeId.Should().Be(new HyperedgeId(2));
+        record.NodeId.Should().Be(new NodeId(3));
+        record.RoleId.Should().Be(new RoleId(2));
+    }
+
+    /// <summary>
+    /// 高水位と free chain 先頭をヘッダページから復元することを検証する。
+    /// 再オープン後も生存 slot が読め、free に積んだ sequence が再利用されることを確かめる。
+    /// </summary>
+    [Fact]
+    public void Reopen_restores_high_water_mark_and_free_chain()
+    {
+        IncidenceId keep = _incidences.Allocate(
+            new HyperedgeId(1), new NodeId(1), new RoleId(1),
+            IncidenceId.Invalid, IncidenceId.Invalid);
+        IncidenceId freed = _incidences.Allocate(
+            new HyperedgeId(1), new NodeId(2), new RoleId(1),
+            IncidenceId.Invalid, IncidenceId.Invalid);
+        _incidences.Free(freed);
+        long hwm = _incidences.HighWaterMark;
+
+        _files[3].Dispose();
+        var reopenedFile = new PagedFile(_paths[3]);
+        _files[3] = reopenedFile;
+        var reopened = new IncidenceStore(reopenedFile);
+
+        reopened.HighWaterMark.Should().Be(hwm);
+        reopened.FreeHead.Should().Be(freed.Sequence);
+        reopened.InUseCount.Should().Be(1);
+        using (var record = reopened.Read(keep))
+            record.InUse.Should().BeTrue();
+
+        IncidenceId reused = reopened.Allocate(
+            new HyperedgeId(2), new NodeId(3), new RoleId(2),
+            IncidenceId.Invalid, IncidenceId.Invalid);
+        reused.Should().Be(freed);
+        reopened.HighWaterMark.Should().Be(hwm);
     }
 
     private HyperedgeId Create(NodeId first, NodeId second, int role)

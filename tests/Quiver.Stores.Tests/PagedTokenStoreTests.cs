@@ -138,16 +138,27 @@ public class PagedTokenStoreTests : IDisposable
     }
 
     [Fact]
-    public void Binary_backend_reserves_hyperedge_tenants_18_through_25()
+    public void Binary_backend_reserves_fixed_hyperedge_tenants()
     {
         string path = DbFile();
         using (GraphDatabase.Open(path)) { }
+
+        // incidence は間接マップを持たない直接アドレスストアなので tenant 22 は欠番。
+        // 番号は詰め直さないため 22 だけを飛ばして 18..25 の在籍を確かめる。
+        const byte vacantIncidenceMapTenant = 22;
 
         using var container = new SingleFileContainer(path);
         for (byte tenant = BinaryGraphStorageBackendFactory.TenantHyperedgeHeap;
              tenant <= BinaryGraphStorageBackendFactory.TenantNodeIncidenceHead;
              tenant++)
         {
+            if (tenant == vacantIncidenceMapTenant)
+            {
+                container.HasTenant(tenant).Should().BeFalse(
+                    $"tenant {tenant} is a vacant slot left after removing the incidence map");
+                continue;
+            }
+
             container.HasTenant(tenant).Should().BeTrue($"tenant {tenant} is a fixed hyperedge tenant");
         }
     }
