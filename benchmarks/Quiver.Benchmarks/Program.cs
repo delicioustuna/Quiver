@@ -79,6 +79,24 @@ if (args.Length >= 1 && args[0] == "--hyperedge-wal")
     return HyperedgeWalAmplificationBenchmarks.Run();
 }
 
+// co-membership 走査 (製品 API) vs binary 1-hop の p50 gate
+if (args.Length >= 1 && args[0] == "--hyperedge-traversal")
+{
+    return HyperedgeTraversalBenchmarks.Run();
+}
+
+// arity 別 create/setProperty/delete 遅延 + create WAL 増幅 + 高次数 DeleteNode カスケード
+if (args.Length >= 1 && args[0] == "--hyperedge-write")
+{
+    return HyperedgeWriteBenchmarks.Run();
+}
+
+// 星型ハイパーエッジ Match vs reified graph pattern の p50 比較
+if (args.Length >= 1 && args[0] == "--hyperedge-match")
+{
+    return HyperedgeMatchBenchmarks.Run();
+}
+
 // JsonExporter.Full は <ResultsDir>/<Class>-report-full.json を出す。
 // Quiver.Benchmarks.RegressionCheck はこの形式を読んで baselines/main.json と
 // 比較する。default config の Markdown / CSV exporter は残したまま追加する。

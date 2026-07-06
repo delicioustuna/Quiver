@@ -138,7 +138,7 @@ HYP-S1 は HYP-1 前、HYP-S2 は HYP-5 前に実行する。
 | HYP-4 | Match (`HyperedgePattern` 星型パターン + コンパイラ拡張) | HYP-3 | 完 (2026-07-05)。星型パターン + `MatchTuple.Hyperedge` |
 | HYP-S2 | SourceGenerator の role binding API spike | HYP-3 | 実測済み (案A採用: `GraphNodeRef<TNode>`。2026-07-05) |
 | HYP-5 | SourceGenerator (`[Hyperedge]`/`[Role]` + `IGraphHyperedge<TSelf>` + 型付き CRUD/走査糖衣) | HYP-2, HYP-3, HYP-S2 | 未着手 |
-| HYP-6 | vacuum + IDiagnosticsApi 整合性チェック + 性能実測 (下記 kill criteria) | HYP-1, HYP-2, HYP-2d, HYP-3 | 6a vacuum・6b 診断/統計 完 (2026-07-06, a1076d0 / 12540fa)。残: 6d 走査改善・6c 性能ゲート |
+| HYP-6 | vacuum + IDiagnosticsApi 整合性チェック + 性能実測 (下記 kill criteria) | HYP-1, HYP-2, HYP-2d, HYP-3 | 6a vacuum・6b 診断/統計・6d co-membership view 完 (a1076d0 / 12540fa / bc065ce)。6c 統合性能ゲートは製品 API 再測定で三ゲート合格 (2026-07-06、走査 ≤2.14x / create WAL ≤5.75x(上限9) / RAG は client materialize 無)。**HYP-6 完了、次は HYP-7** |
 | HYP-7 | docs/spec as-built 追記 + development.md + サンプル (RAG n 項ファクト) | HYP-4, HYP-5, HYP-6 | 未着手 |
 
 並列性: HYP-4 と HYP-5 は独立並行可。HYP-2d は storage 層で閉じるため

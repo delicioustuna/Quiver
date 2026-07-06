@@ -254,6 +254,24 @@ carry-column は no-alias 比 ±3% 以内。詳細:
 40×40: BFS 4.27 ms / Dijkstra 7.79 ms / A* 7.63 ms。詳細:
 `benchmarks/Quiver.Benchmarks/WeightedShortestPathBenchmarks.cs`。
 
+### ハイパーエッジ統合性能（HYP-6c 統合ゲート）
+
+第一級ハイパーエッジの走査・書き込み・Match を製品 API（`GraphDatabase` / DSL / Match）経由で
+再測定した（AMD64 / .NET 10.0.9 / workstation GC）。三ゲート全て合格。詳細:
+[docs/benchmarks/2026-07-06_HYP-6c_Hyperedge.md](../benchmarks/2026-07-06_HYP-6c_Hyperedge.md)。
+runner: `--hyperedge-traversal` / `--hyperedge-write` / `--hyperedge-match`。
+
+- **走査**（`g.Node(hub).Hyperedges("Fact","subject").OtherMembers("object")` の co-membership view
+  vs binary `Out` 1-hop、arity 4）: p50 比 degree 10/100/1000 = 1.15x / 0.95x / 2.14x（ゲート ≤3x 合格）。
+  ビュー未登録のリンクチェーン fallback は 3.59x / 2.80x / 4.57x。
+- **書き込み**（arity 2/4/8/16）: create WAL 増幅 1.249x / 1.890x / 3.182x / 5.746x（ゲート
+  `(1+arity/2)×` = 2/3/5/9 以内、HYP-2d の WAL バイトを製品 API で再現）。作成遅延 48〜220 µs/op、
+  プロパティ書込み ~11〜14 µs/op、削除 ~4〜5 µs/op。
+- **高次数 DeleteNode カスケード**（1 node が 10^3 / 10^4 hyperedge のメンバー）: tx 7.84 ms / 47.69 ms、
+  WAL 61 KB / 608 KB、デッドロック無し、削除後 `CheckConsistency` は 0 件。
+- **Match**: 四役割の星型 Match は等価な reified graph pattern（node + MEMBER relationship の 4-way 結合）の
+  0.71x（facts=1000 で 1.960 ms vs 2.768 ms）。
+
 ## 開発状況
 
 完了済みマイルストーンと進行中タスクの一覧は [docs/design/roadmap.md](roadmap.md) を正本とする。

@@ -1079,4 +1079,4 @@ header / incidence から再構築する。create 差分は durable commit 後�
 | 2026-07-05 | HYP-3c | 固定 4 シナリオを単一 operator tree で取得 | **合格。`Select<TEntity>(alias)` を採用** | hyperedge alias へ型安全に戻る汎用 primitive だけを追加。`HasMember` / RAG 固有糖衣は不要 |
 | 2026-07-05 | HYP-S2 | 案 B は role 取り違えを検出できず基準 1 不合格、案 A/C は全基準合格 (Roslyn 実コンパイル検証) | **案 A: `GraphNodeRef<TNode>` 採用** | public 型追加が固定 2 型で最少 (案 C は hyperedge 数に比例して Builder 型が増える)。詳細は HYP-S2 節の検証結果 |
 | 2026-07-06 | HYP-6d | block / binary p50 は degree 10/100/1,000 で 0.88x/0.33x/1.01x、追加永続 0 B、create WAL 比 1.000 | **案 B: 明示 role pair のメモリ内 co-membership block 採用** | member 展開支配を直接除去し全基準合格。open/vacuum 後 rebuild、commit 後 delta、未設定時 chain fallback |
-| 未実施 | HYP-6c | 未計測 | 未決定 | 統合性能ゲートを判定する |
+| 2026-07-06 | HYP-6c | 走査 view/binary p50 = 1.15x/0.95x/2.14x (degree 10/100/1000)、create WAL = 1.249x/1.890x/3.182x/5.746x (arity 2/4/8/16、上限 2/3/5/9)、RAG 4 役割は client 側 materialize 無しで完走 | **三ゲート合格。HYP-7 着手可** | 製品 API 経由で HYP-1d/2c/3c を再判定。走査は HYP-6d の co-membership view で全次数 3x 以内、WAL は HYP-2d バイトを再現。高次数 DeleteNode (10^3/10^4) は tx 7.84/47.69ms・WAL 61KB/608KB・CheckConsistency 0 件・no deadlock。計測は docs/benchmarks/2026-07-06_HYP-6c_Hyperedge.md |
