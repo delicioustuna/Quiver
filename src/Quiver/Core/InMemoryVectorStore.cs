@@ -45,6 +45,7 @@ public sealed class InMemoryVectorStore : IVectorStore
         }
     }
 
+    /// <summary>登録済みベクトルインデックスの一覧をスナップショットとして返す。</summary>
     public IReadOnlyList<VectorIndexSpec> ListVectorIndexes()
     {
         lock (_gate) { return _indexes.Values.Select(i => i.Spec).ToList(); }
