@@ -546,6 +546,12 @@ namespace Quiver
         Binary = 1,
         InMemory = 2,
     }
+    public readonly struct CoMembershipRolePair : System.IEquatable<Quiver.CoMembershipRolePair>
+    {
+        public CoMembershipRolePair(string OriginRole, string MemberRole) { }
+        public string MemberRole { get; init; }
+        public string OriginRole { get; init; }
+    }
     public sealed class ConsistencyReport : System.IEquatable<Quiver.ConsistencyReport>
     {
         public ConsistencyReport(bool IsConsistent, System.Collections.Generic.IReadOnlyList<string> Issues) { }
@@ -630,6 +636,7 @@ namespace Quiver
         public long BufferPoolSize { get; set; }
         public Quiver.Transactions.CheckpointPolicy CheckpointPolicy { get; set; }
         public long CheckpointThresholdBytes { get; set; }
+        public System.Collections.Generic.List<Quiver.CoMembershipRolePair> CoMembershipRolePairs { get; }
         public System.TimeSpan? DeadlockDetectionInterval { get; set; }
         public bool EnableChecksums { get; set; }
         public bool EnforceExclusiveWriter { get; set; }

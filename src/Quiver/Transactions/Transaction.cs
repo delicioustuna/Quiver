@@ -23,6 +23,7 @@ internal sealed class Transaction : ITransaction
     private readonly TxPropertyStore _properties;
     private readonly TxIndexManager _indexes;
     private readonly IAdjacencyBlockStore? _adjStore;
+    private readonly ICoMembershipBlockStore? _coMembershipStore;
     private readonly IGraphAccessMethods _access;
     // null でない場合、abort / コミット失敗時にキャプチャ済み before-image を
     // データファイルへ書き戻し、ストアメタを再ロードしてインプロセス undo を行う。
@@ -68,6 +69,8 @@ internal sealed class Transaction : ITransaction
     public IPropertyStore Properties => _properties;
     public IIndexManager Indexes => _indexes;
     public IAdjacencyBlockStore? AdjacencyBlocks => _adjStore;
+    public ICoMembershipBlockStore? CoMembershipBlocks
+        => _hyperedges.HasPendingViewAdds ? null : _coMembershipStore;
     public IGraphAccessMethods Access => _access;
 
     internal Transaction(
@@ -89,7 +92,8 @@ internal sealed class Transaction : ITransaction
         CommittedTxRegistry? committed = null,
         IEntityVersionStore? nodeVersions = null,
         IEntityVersionStore? relVersions = null,
-        IEntityVersionStore? hyperedgeVersions = null)
+        IEntityVersionStore? hyperedgeVersions = null,
+        ICoMembershipBlockStore? coMembershipStore = null)
     {
         Id = id; Level = level; SnapshotLsn = snapshotLsn;
         _wal = wal;
@@ -97,6 +101,7 @@ internal sealed class Transaction : ITransaction
         _indexLocks = indexLocks;
         _manager = manager;
         _adjStore = adjStore;
+        _coMembershipStore = coMembershipStore;
         _access = access ?? InlineGraphAccessMethods.Instance;
         _undoHandler = undoHandler;
         _state = TransactionState.Active;
@@ -121,7 +126,8 @@ internal sealed class Transaction : ITransaction
         _nodes = new TxNodeStore(nodeStore, nodeLocks, id, lockingMode, timeout, snap, committed, _ssn);
         _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes, lockingMode, timeout, snap, committed, _ssn);
         _hyperedges = new TxHyperedgeStore(hyperedgeStore, incidenceStore, nodeIncidenceHeadStore,
-            hyperedgeLocks, nodeLocks, id, lockingMode, timeout, snap, committed, _ssn);
+            hyperedgeLocks, nodeLocks, id, lockingMode, timeout, snap, committed, _ssn,
+            coMembershipStore);
         _incidences = incidenceStore;
         _nodeIncidenceHeads = nodeIncidenceHeadStore;
         _properties = new TxPropertyStore(propStore, id, snap, committed, _ssn);
@@ -165,6 +171,9 @@ internal sealed class Transaction : ITransaction
             // MVCC ambient コンテキスト終了 (これ以降このスレッドは
             // ベンチ / bulk loader 等の Bootstrap fallback 経路に戻る)。
             MvccContext.End();
+            // durable commit を観測できる境界より前に導出ビュー差分を公開する。
+            // これ以降に開始する reader は正本とビューを同じ状態で参照できる。
+            _hyperedges.PublishPendingViewAdds();
             ReleaseAllLocks();
             _state = TransactionState.Committed;
             _manager.OnCommit(Id);
@@ -394,6 +403,9 @@ internal sealed class Transaction : ITransaction
             if (ftUndo.Count > 0) _undoHandler.UndoFtLogicalPartial(ftUndo);
             if (beforeImages.Count > 0) _undoHandler.UndoPartial(beforeImages);
         }
+        // savepoint undo 後の正本から、この transaction がまだ保持する create 差分だけを
+        // 再収集する。ID slot が同じ transaction 内で再利用されても古い member を公開しない。
+        _hyperedges.RefreshPendingViewAdds();
     }
 
     public void ReleaseSavepoint(SavepointId savepoint)

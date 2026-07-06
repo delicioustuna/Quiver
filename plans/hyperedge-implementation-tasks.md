@@ -1024,6 +1024,27 @@ degree 10 = 固定費支配、degree 1,000 = ページ局所性支配という�
 - mutation 後の delta、vacuum、rebuild、crash recovery を `AdjacencyBlockStore` と同じ契約で持つ。
 - view が無い DB では linked incidence chain へフォールバックする。
 
+### 実測結果と決定 (2026-07-06)
+
+前段分解では degree 10 / 100 / 1,000 の node chain が 5.2 / 16.2 / 164.1 µs、
+member 展開が 12.0 / 41.7 / 448.0 µs だった。高次数では第 2 段が支配するため、
+node chain だけを連続化する案 A ではなく、明示ロール対だけを物理化する案 B を採用した。
+
+採用実装はプロセス内の連続 block を導出ビューとして持ち、open と vacuum 後に
+header / incidence から再構築する。create 差分は durable commit 後に公開し、
+同一 transaction に未コミット差分がある間は linked incidence chain へフォールバックする。
+このため rollback / savepoint は未コミット block を公開せず、crash recovery 後も
+正本の recovery 完了後にビューを再生成できる。ビュー未設定 DB と未指定ロール対も
+従来 chain を使う。
+
+- block p50 / binary p50: degree 10 = 0.88x、100 = 0.33x、1,000 = 1.01x。
+- managed allocation: chain 計測と block 読み取りはいずれも 0 B/op。
+- 追加永続ストレージ: 0 B。メモリ payload は 16 B / 物理化 member pair
+  (arity 4・一意ロールの基準 workload では base incidence 108 B / hyperedge の 14.8%)。
+- create WAL: arity 4 の単件 / 1,000 件ともビュー無効時比 1.000。
+
+全 degree の 3x、追加ストレージ 2x、create WAL の各基準を満たすため案 B を確定する。
+
 ## HYP-7 as-built 仕様、サンプル、公開面の確定
 
 ### 目的
@@ -1057,4 +1078,5 @@ degree 10 = 固定費支配、degree 1,000 = ページ局所性支配という�
 | 2026-07-05 | HYP-2d | batch A=2/4/8/16 が 1.241x/1.878x/3.163x/5.711x (上限 2/3/5/9)、単件 −17〜−31%、走査 4.8x/1.7x/5.4x | **案 B (fixed-slot 直接アドレス) 採用、FormatVersion V4** | 限界費用 ≈27.6 B/member (許容 43.23)。走査は改善したが degree 10/1000 が 3x 超のため HYP-6d は継続 |
 | 2026-07-05 | HYP-3c | 固定 4 シナリオを単一 operator tree で取得 | **合格。`Select<TEntity>(alias)` を採用** | hyperedge alias へ型安全に戻る汎用 primitive だけを追加。`HasMember` / RAG 固有糖衣は不要 |
 | 2026-07-05 | HYP-S2 | 案 B は role 取り違えを検出できず基準 1 不合格、案 A/C は全基準合格 (Roslyn 実コンパイル検証) | **案 A: `GraphNodeRef<TNode>` 採用** | public 型追加が固定 2 型で最少 (案 C は hyperedge 数に比例して Builder 型が増える)。詳細は HYP-S2 節の検証結果 |
+| 2026-07-06 | HYP-6d | block / binary p50 は degree 10/100/1,000 で 0.88x/0.33x/1.01x、追加永続 0 B、create WAL 比 1.000 | **案 B: 明示 role pair のメモリ内 co-membership block 採用** | member 展開支配を直接除去し全基準合格。open/vacuum 後 rebuild、commit 後 delta、未設定時 chain fallback |
 | 未実施 | HYP-6c | 未計測 | 未決定 | 統合性能ゲートを判定する |

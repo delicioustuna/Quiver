@@ -77,12 +77,38 @@ internal static class PhysicalPlanner
     private static IPhysicalOperator PlanExpandMembers(
         ExpandMembersOp e,
         ISchemaApi schema)
-        => new ExpandMembersOperator(
+    {
+        var fallback = new ExpandMembersOperator(
             Plan(e.Source, schema),
             e.HyperedgeColumn,
             ResolveRole(e.Role, schema),
             e.ExcludeNodeColumn,
             e.Carry);
+
+        // 起点ロールと取得ロールが共に明示された OtherMembers だけが物理ビューの
+        // 一意なキーになる。片方でも未指定なら通常の incidence 展開を維持する。
+        if (e.Source is not ExpandToHyperedgeOp origin
+            || e.ExcludeNodeColumn is null
+            || origin.Role is null
+            || e.Role is null)
+            return fallback;
+
+        RoleId? originRole = ResolveRole(origin.Role, schema);
+        RoleId? memberRole = ResolveRole(e.Role, schema);
+        if (!originRole.HasValue || !originRole.Value.IsValid
+            || !memberRole.HasValue || !memberRole.Value.IsValid)
+            return fallback;
+
+        return new CoMembershipOperator(
+            Plan(origin.Source, schema),
+            fallback,
+            origin.SourceNodeColumn,
+            ResolveHyperedgeType(origin.Type, schema),
+            originRole.Value,
+            memberRole.Value,
+            origin.Carry,
+            e.Carry);
+    }
 
     private static HyperedgeTypeId? ResolveHyperedgeType(string? name, ISchemaApi schema)
     {

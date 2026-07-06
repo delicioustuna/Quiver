@@ -16,6 +16,8 @@ internal sealed class TxHyperedgeStore : IHyperedgeStore
     private readonly SnapshotState _snapshot;
     private readonly CommittedTxRegistry? _committed;
     private readonly SsnContext? _ssn;
+    private readonly ICoMembershipBlockStore? _coMembershipStore;
+    private List<(HyperedgeId HyperedgeId, IncidenceMember[] Members)>? _pendingViewAdds;
 
     internal TxHyperedgeStore(
         IHyperedgeStore inner,
@@ -28,7 +30,8 @@ internal sealed class TxHyperedgeStore : IHyperedgeStore
         TimeSpan timeout,
         SnapshotState snapshot = default,
         CommittedTxRegistry? committed = null,
-        SsnContext? ssn = null)
+        SsnContext? ssn = null,
+        ICoMembershipBlockStore? coMembershipStore = null)
     {
         _inner = inner;
         _incidenceStore = incidenceStore;
@@ -41,6 +44,7 @@ internal sealed class TxHyperedgeStore : IHyperedgeStore
         _snapshot = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
         _committed = committed;
         _ssn = ssn;
+        _coMembershipStore = coMembershipStore;
     }
 
     public long InUseCount => _inner.InUseCount;
@@ -54,7 +58,15 @@ internal sealed class TxHyperedgeStore : IHyperedgeStore
     {
         AcquireNodeLocksAscending(members);
         ActivateMvccContext();
-        return _inner.Create(type, members, _incidenceStore, _nodeHeads);
+        HyperedgeId hyperedgeId = _inner.Create(type, members, _incidenceStore, _nodeHeads);
+        // 導出ビューは commit が durable になってから公開する。同一 transaction 内では
+        // pending がある間だけ通常 chain へフォールバックし、未コミット差分も読み落とさない。
+        if (_coMembershipStore != null)
+        {
+            var captured = members.ToArray();
+            (_pendingViewAdds ??= []).Add((hyperedgeId, captured));
+        }
+        return hyperedgeId;
     }
 
     public void Delete(HyperedgeId hyperedgeId)
@@ -172,5 +184,52 @@ internal sealed class TxHyperedgeStore : IHyperedgeStore
         var id = new EntityId(EntityKind.Hyperedge, localId);
         _ssn.Writes.Add(id);
         _ssn.Reads.Remove(id);
+    }
+
+    internal bool HasPendingViewAdds => _pendingViewAdds is { Count: > 0 };
+
+    internal void PublishPendingViewAdds()
+    {
+        if (_coMembershipStore == null || _pendingViewAdds == null)
+            return;
+        try
+        {
+            foreach (var pending in _pendingViewAdds)
+                _coMembershipStore.Add(pending.HyperedgeId, pending.Members);
+        }
+        catch
+        {
+            // commit は既に durable なので導出ビュー更新の失敗で transaction 結果を
+            // 反転させない。不完全な block を無効化し、次回 rebuild まで chain へ縮退する。
+            _coMembershipStore.Invalidate();
+        }
+        finally
+        {
+            _pendingViewAdds.Clear();
+        }
+    }
+
+    internal void RefreshPendingViewAdds()
+    {
+        if (_coMembershipStore == null)
+            return;
+
+        _pendingViewAdds ??= [];
+        _pendingViewAdds.Clear();
+        foreach (HyperedgeId hyperedgeId in _inner.Scan())
+        {
+            using var header = _inner.Read(hyperedgeId);
+            if (!header.InUse || header.Xmin != _txId.Value)
+                continue;
+
+            var members = new List<IncidenceMember>();
+            var enumerator = _incidenceStore.EnumerateByHyperedge(hyperedgeId, _inner);
+            while (enumerator.MoveNext())
+            {
+                var incidence = enumerator.Current;
+                members.Add(new IncidenceMember(incidence.NodeId, incidence.RoleId));
+            }
+            _pendingViewAdds.Add((hyperedgeId, members.ToArray()));
+        }
     }
 }

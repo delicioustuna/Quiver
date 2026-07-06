@@ -64,6 +64,9 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     // ExpandOperator が高速な隣接スキャンに使い、null のときはリンクリストにフォールバック。
     IAdjacencyBlockStore? AdjacencyBlocks { get; }
 
+    // 明示設定されたロール対の co-membership 導出ビュー。未設定なら null。
+    ICoMembershipBlockStore? CoMembershipBlocks { get; }
+
     // バックエンド提供のアクセスメソッド。オペレータは Nodes/Relationships/AdjacencyBlocks を
     // 直接読まずこちら経由で呼ぶ。バックエンド固有実装が無い場合は InlineGraphAccessMethods.Instance。
     IGraphAccessMethods Access { get; }

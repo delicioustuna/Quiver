@@ -46,6 +46,14 @@ public static class HyperedgeWalAmplificationBenchmarks
 
             double rSquared = LinearRSquared(hyperedges);
             Console.WriteLine($"linearity,itemCount={itemCount},rSquared={rSquared:F6},pass={rSquared >= 0.98}");
+
+            Result withView = MeasureHyperedge(4, itemCount, useCoMembershipView: true);
+            Result withoutView = hyperedges[1];
+            double viewRatio = withView.WalBytes / (double)withoutView.WalBytes;
+            Console.WriteLine(
+                $"coMembershipView,4,{itemCount},{withView.WalBytes},{withView.WalBytesPerItem:F2}," +
+                $"ratioToBase={viewRatio:F3}," +
+                $"pass={viewRatio <= 1.01}");
         }
 
         return 0;
@@ -88,7 +96,10 @@ public static class HyperedgeWalAmplificationBenchmarks
         }
     }
 
-    internal static Result MeasureHyperedge(int arity, int itemCount)
+    internal static Result MeasureHyperedge(
+        int arity,
+        int itemCount,
+        bool useCoMembershipView = false)
     {
         if (Array.IndexOf(Arities, arity) < 0)
             throw new ArgumentOutOfRangeException(nameof(arity));
@@ -99,7 +110,7 @@ public static class HyperedgeWalAmplificationBenchmarks
 
         try
         {
-            using var db = OpenForMeasurement(databasePath);
+            using var db = OpenForMeasurement(databasePath, useCoMembershipView);
             NodeId[] nodes = CreateNodes(db, 16);
             var members = new HyperedgeMember[arity];
             for (int i = 0; i < members.Length; i++)
@@ -166,13 +177,20 @@ public static class HyperedgeWalAmplificationBenchmarks
         return total == 0 ? 1 : 1 - residual / total;
     }
 
-    private static GraphDatabase OpenForMeasurement(string databasePath)
-        => GraphDatabase.Open(databasePath, new GraphDatabaseOptions
+    private static GraphDatabase OpenForMeasurement(
+        string databasePath,
+        bool useCoMembershipView = false)
+    {
+        var options = new GraphDatabaseOptions
         {
             // 計測区間内の自動 checkpoint/truncate を止め、WAL file length の差分を
             // IWriteAheadLog.BytesWritten の差分と一致させる。
             CheckpointThresholdBytes = 0,
-        });
+        };
+        if (useCoMembershipView)
+            options.CoMembershipRolePairs.Add(new("Role0", "Role1"));
+        return GraphDatabase.Open(databasePath, options);
+    }
 
     private static NodeId[] CreateNodes(GraphDatabase db, int count)
     {

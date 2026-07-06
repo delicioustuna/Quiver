@@ -212,6 +212,31 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var roleTokens = new RoleTokenStore(
             container.OpenTenant(TenantRoleToken, PageKind.TokenRecord));
 
+        CoMembershipBlockStore? coMembershipStore = null;
+        if (options.CoMembershipRolePairs.Count > 0)
+        {
+            var resolvedPairs = new HashSet<(RoleId OriginRole, RoleId MemberRole)>();
+            foreach (CoMembershipRolePair pair in options.CoMembershipRolePairs)
+            {
+                if (string.IsNullOrWhiteSpace(pair.OriginRole))
+                    throw new ArgumentException(
+                        "Co-membership origin role must not be null, empty, or whitespace.",
+                        nameof(options));
+                if (string.IsNullOrWhiteSpace(pair.MemberRole))
+                    throw new ArgumentException(
+                        "Co-membership member role must not be null, empty, or whitespace.",
+                        nameof(options));
+                resolvedPairs.Add((
+                    roleTokens.GetOrCreate(pair.OriginRole),
+                    roleTokens.GetOrCreate(pair.MemberRole)));
+            }
+
+            coMembershipStore = new CoMembershipBlockStore(resolvedPairs);
+            // 導出ビューは recovery 済みの正本だけから作る。途中でプロセスが停止しても
+            // 次回 open で同じ再構築を行うため、独自の WAL や永続レイアウトを持たない。
+            coMembershipStore.Rebuild(hyperedgeStore, incidenceStore);
+        }
+
         // 列マネージャを startup で eager に開く。
         // 登録済み列の head cache を開いておくことで (1) write 経路が列を維持でき、
         // (2) abort の ReloadStoreMeta から列 cache を head ページへ再同期できる。
@@ -282,7 +307,8 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             undoHandler, options.LockingMode, options.LockTimeout,
             options.DeadlockDetectionInterval, committedRegistry,
             nodeVersions, relVersions,
-            hyperedgeStore, incidenceStore, nodeIncidenceHeadStore, hyperedgeVersions);
+            hyperedgeStore, incidenceStore, nodeIncidenceHeadStore, hyperedgeVersions,
+            coMembershipStore);
         // recovery で観測した最大 TxId より大きい値から新規 tx を採番するよう、
         // TransactionManager の _nextTxId を巻き上げる。これがないと新規 tx ID が
         // 過去 commit 済み TxId と衝突して registry が同じ entry を 2 回 Mark してしまう。
@@ -335,6 +361,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             labelTokens, relTypeTokens, propKeyTokens, hyperedgeTypeTokens, roleTokens, indexManager,
             adjStore, txManager, access, vectors,
             columnManager,
+            coMembershipStore,
             labelIndex,
             options.LogicalMutationSink,
             options.TargetRecoveryTime,

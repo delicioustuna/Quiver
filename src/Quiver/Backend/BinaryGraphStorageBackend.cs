@@ -31,6 +31,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     // CompactAdjacency が再構築したストアを差し替えるため mutable。
     // 隣接データは container 内テナントに同居するため、別 PagedFile の所有は不要。
     private IAdjacencyBlockStore? _adjStore;
+    private readonly ICoMembershipBlockStore? _coMembershipStore;
     // bulk load / CompactAdjacency が隣接テナントを構築するために保持する。
     private readonly SingleFileContainer _container;
     private readonly TransactionManager _txManager;
@@ -61,6 +62,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         BinaryGraphAccessMethods access,
         IVectorStore vectors,
         ColumnManager columnManager,
+        ICoMembershipBlockStore? coMembershipStore = null,
         LabelNodeIndex? labelIndex = null,
         ILogicalMutationSink? logicalSink = null,
         TimeSpan? adaptiveTargetRecoveryTime = null,
@@ -84,6 +86,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _roleTokens = roleTokens;
         _indexManager = indexManager;
         _adjStore = adjStore;
+        _coMembershipStore = coMembershipStore;
         _txManager = txManager;
         _columnManager = columnManager;
 
@@ -201,6 +204,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     // ストア実体だけを internal に露出し、通常の利用者が物理レコードを変更する経路にはしない。
     internal IHyperedgeStore HyperedgeStoreForTest => _txManager.HyperedgeStore;
     internal IIncidenceStore IncidenceStoreForTest => _txManager.IncidenceStore;
+    internal long CoMembershipReadCountForTest
+        => (_coMembershipStore as CoMembershipBlockStore)?.ReadCount ?? 0;
     internal INodeIncidenceHeadStore NodeIncidenceHeadStoreForTest => _txManager.NodeIncidenceHeadStore;
     public IGraphAccessMethods Access => _access;
     public BulkLoadCapabilities BulkLoad => _bulkLoad;
@@ -320,7 +325,14 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             _txManager.HyperedgeStore as VersionedHyperedgeStore,
             _txManager.IncidenceStore as IncidenceStore,
             _txManager.NodeIncidenceHeadStore);
-        return vac.Run(options);
+        VacuumReport report = vac.Run(options);
+        // vacuum は正本の incidence slot を回収する。導出ビューは active transaction が
+        // 無い同じ境界で作り直し、論理削除や abort 由来の無効 entry をまとめて除去する。
+        if (_txManager.ActiveCount == 0)
+            _coMembershipStore?.Rebuild(
+                _txManager.HyperedgeStore,
+                _txManager.IncidenceStore);
+        return report;
     }
 
     public void CreateSnapshot(string targetFilePath, SnapshotOptions? options = null)

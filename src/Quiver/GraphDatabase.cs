@@ -369,11 +369,29 @@ public sealed class GraphDatabase : IDisposable
 }
 
 /// <summary>
+/// co-membership 走査で物理化する起点ロールと取得ロールの組。
+/// </summary>
+/// <param name="OriginRole">起点ノードがハイパーエッジ内で担うロール名。</param>
+/// <param name="MemberRole">起点から直接取得するメンバーのロール名。</param>
+public readonly record struct CoMembershipRolePair(string OriginRole, string MemberRole);
+
+/// <summary>
 /// <see cref="GraphDatabase.Open"/> に渡す起動オプション。
 /// バッファプール / WAL / ロックタイムアウト / チェックサム有効化 / バックエンド種別などを指定する。
 /// </summary>
 public sealed class GraphDatabaseOptions
 {
+    /// <summary>
+    /// co-membership block として物理化するロール対。
+    /// 空の場合は導出ビューを構築せず、incidence chain 走査へフォールバックする。
+    /// </summary>
+    /// <remarks>
+    /// 各ロール対は起動時に正本の header と incidence から再構築され、以後の
+    /// ハイパーエッジ作成差分も反映される。追加メモリ量と作成コストは、指定した
+    /// ロール対に一致するメンバー組数に比例する。
+    /// </remarks>
+    public List<CoMembershipRolePair> CoMembershipRolePairs { get; } = [];
+
     /// <summary>バッファプールの目標サイズ (バイト単位)。既定 256 MB。</summary>
     public long BufferPoolSize { get; set; } = 256 * 1024 * 1024;
 

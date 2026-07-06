@@ -18,6 +18,7 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly IPropertyStore _propStore;
     private readonly IIndexManager _indexManager;
     private IAdjacencyBlockStore? _adjStore;
+    private readonly ICoMembershipBlockStore? _coMembershipStore;
     private readonly IGraphAccessMethods _access;
     // abort / コミット失敗時のインプロセス undo を担う。null のときは undo 無し。
     private readonly AbortUndoHandler? _undoHandler;
@@ -95,7 +96,8 @@ internal sealed class TransactionManager : ITransactionManager
         IHyperedgeStore? hyperedgeStore = null,
         IIncidenceStore? incidenceStore = null,
         INodeIncidenceHeadStore? nodeIncidenceHeadStore = null,
-        IEntityVersionStore? hyperedgeVersions = null)
+        IEntityVersionStore? hyperedgeVersions = null,
+        ICoMembershipBlockStore? coMembershipStore = null)
     {
         _wal = wal;
         _nodeStore = nodeStore;
@@ -114,6 +116,7 @@ internal sealed class TransactionManager : ITransactionManager
         _nodeVersions = nodeVersions;
         _relVersions = relVersions;
         _hyperedgeVersions = hyperedgeVersions;
+        _coMembershipStore = coMembershipStore;
         // _nextTxId は最初の Increment で 1 を返す (= Bootstrap.Value)。
         // Bootstrap は予約済みなので、最初の "ユーザ" tx が 2 から始まるよう offset しておく。
         _nextTxId = TransactionId.Bootstrap.Value + 1;
@@ -279,7 +282,8 @@ internal sealed class TransactionManager : ITransactionManager
                 _hyperedgeStore, _incidenceStore, _nodeIncidenceHeadStore,
                 _propStore, _indexManager, _adjStore, _access,
                 _undoHandler, _lockingMode, _lockTimeout,
-                snapshot, _committed, _nodeVersions, _relVersions, _hyperedgeVersions);
+                snapshot, _committed, _nodeVersions, _relVersions, _hyperedgeVersions,
+                _coMembershipStore);
             _active[txId.Value] = tx;
         }
         return tx;
