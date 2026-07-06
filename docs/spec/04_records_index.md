@@ -1,6 +1,6 @@
 # レコード & インデックス
 
-> as-built 仕様 (on-disk FormatVersion V3)
+> as-built 仕様 (on-disk FormatVersion V4)
 
 ## Slotted ページモデル {#slotted-pages}
 
@@ -29,6 +29,83 @@
 リレーションシップは隣接リスト構造で格納される。各リレーションシップレコードは、source と target の
 両ノードについて next/prev のリレーションシップにリンクし、ノードのエンドポイントごとに双方向連結リストを形成する。
 
+## Hyperedge ストア {#hyperedge-store}
+
+`VersionedHyperedgeStore` (`src/Quiver/Stores/VersionedHyperedgeStore.cs`)。
+**ハイパーエッジ**は 1 つの型とロール付きメンバー集合（アリティ 2 以上）を持つ第一級エンティティであり、
+リレーションシップとは別の `EntityKind` として格納される。
+header レコードが MVCC 可視性の正本になる。
+
+**Hyperedge header レコード**（固定領域 15 バイト、version ヘッダ 24 バイトの後ろ）:
+
+| オフセット | サイズ | フィールド |
+|---|---|---|
+| 0 | 1 | Flags (in-use) |
+| 1 | 2 | TypeId（インターンされたハイパーエッジ型） |
+| 3 | 6 | FirstIncidenceId（メンバーチェーンの先頭） |
+| 9 | 6 | FirstPropertyId（オーバーフロープロパティチェーンの先頭） |
+
+- `VersionedRecordHeap` + `ItemPointerMap` 上の可変長 payload であり、固定領域の後ろに
+  ノードと同形式の inline property 領域（copy-on-write）が続く。超過分は既存の
+  PropertyStore チェーンを `FirstPropertyId` から辿る
+- xmin/xmax は heap の version ヘッダ、generation と SSN スタンプは `EntityVersionMeta` サイドカーに置く
+- メンバー集合は作成時に確定し、以後変更されない。変更は削除 + 再作成で表現する
+- 同じロールとノードの組は 1 つのハイパーエッジ内で重複できない。
+  同じノードが別ロールで参加すること、同じロールに複数ノードが参加することは許される
+- ハイパーエッジ型名とロール名は、ラベルと同様それぞれ独立したトークンストアで
+  16 bit ID（`HyperedgeTypeId` / internal な RoleId）にインターンされる
+
+## Incidence ストア {#incidence-store}
+
+`IncidenceStore` (`src/Quiver/Stores/IncidenceStore.cs`)。
+**incidence** は「どのノードが、どのロールで、どのハイパーエッジに属すか」を表す node-hyperedge 対
+（内部表現）であり、独立した MVCC エンティティではない。
+可視性は参照先の hyperedge header に従う。
+
+**Incidence slot**（27 バイト固定、1 ページあたり 302 slot）:
+
+| オフセット | サイズ | フィールド |
+|---|---|---|
+| 0 | 1 | Flags (in-use / free) |
+| 1 | 6 | HyperedgeId (Sequence) |
+| 7 | 6 | NodeId (Sequence) |
+| 13 | 2 | RoleId（インターンされたロール） |
+| 15 | 6 | NextInNode（同一ノードの incidence チェーン） |
+| 21 | 6 | NextInHyperedge（同一ハイパーエッジのメンバーチェーン） |
+
+- **fixed-slot 直接アドレス方式**: `sequence → (page = seq / 302 + 2, offset = seq % 302 × 27)` で
+  slot を直引きし、version チェーンも間接ポインタ層（map / slot directory）も持たない。
+  ヘッダページ (page 1) に高水位と free chain 先頭を置く
+- incidence は 2 本のチェーンを貫通する。ノード側は `NextInNode`、ハイパーエッジ側は
+  `NextInHyperedge` を辿る。ノード側チェーンの走査は、参照先 header が不可視の incidence を
+  skip して後続を継続する
+- 逆方向リンク（PrevInNode）は持たない。vacuum の unlink は、dead incidence をノード別に
+  グループ化し、影響ノードのチェーンを head から 1 回だけ走査する sweep
+  （合計 O(影響チェーン長)）で行う
+- free chain は空 slot の `NextInNode` 領域を転用する。slot を free に戻せるのは
+  「全 live チェーンから unlink 済み、かつアクティブトランザクションなし」のときに限る
+
+incidence 自身が xmin/xmax を持たないのは、可視性判定に header だけを使うためである。
+undo（abort / savepoint）とクラッシュリカバリは物理 page image で行われレイアウトに依存しない。
+
+## Node incidence head {#node-incidence-head}
+
+`NodeIncidenceHeadStore` (`src/Quiver/Stores/NodeIncidenceHeadStore.cs`)。
+node sequence を添字に、そのノードのノード側チェーン先頭 incidence（6 バイト Int48）を保持する
+固定長 sidecar。head をノードレコード本体に持たせないのは、ハイパーエッジを使わない
+ワークロードのノード読み取り帯域を増やさないためである（インライン案との実測比較で採用）。
+
+## Hyperedge の vacuum {#hyperedge-vacuum}
+
+`VacuumTarget.Hyperedges` は visibility horizon を越えた dead hyperedge を
+プロパティ → incidence → header の順に回収する。
+
+- incidence の unlink はノード別 sweep（上記）で行い、node incidence head が回収対象を
+  指す場合は次の生存 incidence へ進める
+- header slot は free list へ戻し、sequence 再利用時に generation を進める。
+  古い ID による参照（ベクトル binding を含む）は世代照合で弾く
+- 回収件数は `VacuumReport.ReclaimedHyperedges` / `ReclaimedIncidences` で報告される
+
 ## Property ストア {#property-store}
 
 `PropertyStore` (`src/Quiver/Storage/Records/PropertyStore.cs`)。
@@ -55,7 +132,7 @@
 
 ```
 ビットレイアウト (MSB → LSB):
-[63..60]  EntityKind   (4 bits; Node=0, Relationship=1)
+[63..60]  EntityKind   (4 bits; Node=1, Relationship=2, Property=3, Hyperedge=4)
 [59..44]  Generation   (16 bits; 0..65535)
 [43..0]   Sequence     (44 bits; slot-local ID; 0..17.6 兆)
 ```

@@ -1,6 +1,6 @@
 # ストレージ & ページング
 
-> as-built 仕様 (on-disk FormatVersion V3)
+> as-built 仕様 (on-disk FormatVersion V4)
 
 ## ページフォーマット {#page-format}
 

@@ -1,6 +1,6 @@
 # Quiver: システム概要
 
-> as-built 仕様 (on-disk FormatVersion V3, 2026-07-03)
+> as-built 仕様 (on-disk FormatVersion V4, 2026-07-06)
 
 ## ポジショニング {#positioning}
 
@@ -53,6 +53,7 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 │  ├─ PagedFile (8 KB pages, Clock buffer pool)   │
 │  ├─ SingleFileContainer (*.quiver)              │
 │  ├─ NodeStore / RelationshipStore / PropertyStore│
+│  ├─ HyperedgeStore / IncidenceStore              │
 │  ├─ B+Tree indexes                              │
 │  ├─ FullTextIndex (postings + norms B+Trees)    │
 │  └─ PersistentVectorStore + HNSW                │
@@ -76,9 +77,10 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 
 ## フォーマットバージョン {#format-version}
 
-`FormatVersion.Current = V3 = 3`。
-V2 の自己記述 vector catalog / per-index HNSW レイアウトに加え、V3 は第一級ハイパーエッジ用の
-ID kind、type / role token 空間、固定 tenant 18–25 を予約した clean break である。
+`FormatVersion.Current = V4 = 4`。
+V2 は自己記述 vector catalog / per-index HNSW レイアウト、V3 は第一級ハイパーエッジ用の
+ID kind、type / role token 空間、固定 tenant 18–25 の予約、V4 は incidence の
+fixed-slot 直接アドレスレイアウトを導入した clean break である。
 自動マイグレーションは行わない。
 異なるフォーマットバージョンのデータベースを開くと `FormatVersionMismatchException` をスローする。
 

@@ -57,12 +57,14 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 | 文字列エンコーディング | UTF-8（長さプレフィックス付き） |
 | 静止時のファイル | `*.quiver` 単一ファイル |
 | 運用中のファイル | `*.quiver` + `*.quiver-wal` |
-| FormatVersion | V2（V1 からの自動移行なし） |
+| FormatVersion | V4（旧バージョンからの自動移行なし） |
 | ベクトル catalog | entry 長プレフィクス + per-index HNSW レイアウトパラメタ |
 
-FormatVersion V2 では `VectorIndexSpec` の `HnswM` / `HnswMMax0` / `HnswMaxLayers` /
-`HnswEfConstruction` を catalog に永続化する。前 3 値から HNSW node record 幅を index ごとに
-導出する。V1 DB は clean break として open 時に拒否し、ソースデータから再構築する。
+FormatVersion の履歴: V2 で `VectorIndexSpec` の HNSW レイアウトパラメタを catalog に永続化、
+V3 で第一級ハイパーエッジ用の ID kind / token 空間 / 固定 tenant を追加、
+V4 で incidence を fixed-slot 直接アドレスレイアウトへ再設計した。
+各バージョンは clean break であり、旧バージョンの DB は open 時に拒否して
+ソースデータから再構築する。
 
 ### ID 型
 
@@ -71,6 +73,8 @@ FormatVersion V2 では `VectorIndexSpec` の `HnswM` / `HnswMMax0` / `HnswMaxLa
 ```csharp
 public readonly record struct NodeId(long Value);
 public readonly record struct RelationshipId(long Value);
+public readonly record struct HyperedgeId(long Value);
+public readonly record struct HyperedgeTypeId(int Value);
 public readonly record struct PropertyId(long Value);
 public readonly record struct LabelId(int Value);
 public readonly record struct TransactionId(long Value);
@@ -179,6 +183,8 @@ foreach (var name in g.Nodes().HasLabel("Person").Values("Name").AsEnumerable())
 | `[Relationship]` | クラス | `type` (省略可) | クラス名をリレーションシップ型として使用 |
 | `[Property]` | プロパティ | `key` (省略可) | プロパティ名をグラフキーとして使用 |
 | `[Indexed]` | プロパティ | `indexName` (省略可) | `idx_{label}_{propertyName}` を自動生成。`[Property]` と併用必須 |
+| `[Hyperedge]` | クラス | `type` (省略可) | クラス名をハイパーエッジ型として使用 |
+| `[Role]` | プロパティ | `role` (省略可) | プロパティ名をロール名として使用。型は `GraphNodeRef<TNode>`（複数ロールは `IReadOnlyList<GraphNodeRef<TNode>>`、省略可能ロールは nullable） |
 
 > **注意:** クラス名・プロパティ名を変更すると `[Node]`・`[Indexed]` の自動生成名も変わり、既存
 > インデックスファイルが孤立する。リネームの可能性がある場合は明示指定を推奨。
@@ -193,6 +199,55 @@ foreach (var name in g.Nodes().HasLabel("Person").Values("Name").AsEnumerable())
 `Update(tx, id, entity)` / `Delete(tx, id)` / `FindBy{PropName}(tx, value) → List<(NodeId, T)>`（`[Indexed]` ごと）
 
 **`[Relationship]` クラス** — `Insert(tx, from, to, entity) → RelationshipId` / `Load` / `Update` / `Delete`
+
+**`[Hyperedge]` クラス** — `Insert(tx, entity) → HyperedgeId` / `Load` / `Update`（プロパティのみ。
+メンバー集合は作成時確定） / `Delete`、および型保存トラバーサル糖衣
+`{Class}As{Prop}()` / `{Prop}()` / `Other{Prop}()`（ロールプロパティごと）
+
+## ハイパーエッジ（第一級 n 項リレーション）
+
+利用者向けの契約は [docs/spec/04_records_index.md](../spec/04_records_index.md#hyperedge-store)
+（レコード）、[docs/spec/05_query.md](../spec/05_query.md#hyperedge-ops)（オペレータ / DSL / Match）、
+[docs/spec/08_known_limits.md](../spec/08_known_limits.md#hyperedge-limits)（契約と限界）を正本とする。
+サンプルは [samples/Quiver.Samples.Hyperedges/](../../samples/Quiver.Samples.Hyperedges/)。
+
+### 実装マップ
+
+| レイヤ | 主なファイル |
+|---|---|
+| Core ID / kind | `src/Quiver/Core/Ids.cs`（`HyperedgeId` / `HyperedgeTypeId`）、`src/Quiver/Core/EntityId.cs`（`EntityKind.Hyperedge`） |
+| ストア | `src/Quiver/Stores/VersionedHyperedgeStore.cs`、`IncidenceStore.cs`、`NodeIncidenceHeadStore.cs`、`CoMembershipBlockStore.cs` |
+| トランザクション | `src/Quiver/Transactions/TxHyperedgeStore.cs`（locking / SSN / undo の配線） |
+| 公開 CRUD | `src/Quiver/IGraphTransaction.cs`（`CreateHyperedge` / `DeleteHyperedge` / `GetMembers` / `GetHyperedges` / プロパティ各種）、`ISchemaApi`（型 / ロールの token 管理） |
+| クエリ | `src/Quiver/Operators/`（`AllHyperedgesScan` / `ExpandToHyperedge` / `ExpandMembers` / `CoMembership` の各 operator）、`src/Quiver/Query/PhysicalPlanner.cs` |
+| DSL / Match | `src/Quiver/Client/GraphTraversalSource.cs`、`GraphTraversal.cs`、`Match/GraphPattern.cs`（`HyperedgePattern`） |
+| SourceGen | `src/Quiver.SourceGen/GraphHyperedgeGenerator.cs` / `GraphHyperedgeModel.cs` / `GraphHyperedgeEmitter.cs`、属性は `src/Quiver/Client/HyperedgeAttribute.cs` |
+| 保守 | `src/Quiver/Maintenance/Vacuum.cs`（`VacuumTarget.Hyperedges`）、`DiagnosticsApi.CheckConsistency`、`GraphStats`（型別件数 / アリティ分布） |
+
+### 固定 tenant（SingleFileContainer カタログ）
+
+ハイパーエッジ関連の論理ストアは次の固定 tenant を使う（変更しない）。
+
+| tenant | 用途 |
+|---|---|
+| 18 | hyperedge heap（header + inline property） |
+| 19 | hyperedge の `ItemPointerMap` |
+| 20 | hyperedge の MVCC / generation sidecar |
+| 21 | incidence heap（27B fixed-slot、直接アドレス） |
+| 22 | 欠番（旧 incidence 間接マップ。V4 で不要化、番号は詰めない） |
+| 23 | hyperedge type token |
+| 24 | role token |
+| 25 | node incidence head（6B sidecar） |
+
+### テスト
+
+hyperedge の回帰は `tests/Quiver.Stores.Tests/IncidenceStoreTests.cs`、
+`tests/Quiver.Tests/`（`HyperedgePropertyTests` / `HyperedgeDiagnosticsTests` /
+`HyperedgeGeneratedCrudTests` / `HyperedgeTypedTraversalTests` / `VacuumTests` / `GraphStatsTests` /
+`CoMembershipBlockTests`）、`tests/Quiver.Client.Tests/`（`HyperedgeRagQueryTests` /
+`MatchPatternTests`）、`tests/Quiver.SourceGen.Tests/HyperedgeGeneratorTests.cs` が担う。
+性能ゲートの実測は「ハイパーエッジ統合性能」節と
+[docs/benchmarks/2026-07-06_HYP-6c_Hyperedge.md](../benchmarks/2026-07-06_HYP-6c_Hyperedge.md) を参照。
 
 ## 性能（詳細計測）
 

@@ -33,6 +33,7 @@
     <Project Path="samples/Quiver.Samples.Rag/Quiver.Samples.Rag.csproj" />
     <Project Path="samples/Quiver.Samples.QueryPatterns/Quiver.Samples.QueryPatterns.csproj" />
     <Project Path="samples/Quiver.Samples.Signal/Quiver.Samples.Signal.csproj" />
+    <Project Path="samples/Quiver.Samples.Hyperedges/Quiver.Samples.Hyperedges.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Quiver.Storage.Tests/Quiver.Storage.Tests.csproj" />

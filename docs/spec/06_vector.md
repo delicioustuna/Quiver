@@ -1,6 +1,6 @@
 # ベクトル検索
 
-> as-built 仕様 (on-disk FormatVersion V3)
+> as-built 仕様 (on-disk FormatVersion V4)
 
 ## ベクトルインデックス仕様 {#vector-index}
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | Name | string | 一意な識別子 |
 | Dimensions | int | ベクトルの次元数（正の値） |
-| EntityKind | enum | `Node` または `Relationship` |
+| EntityKind | enum | `Node`、`Relationship`、または `Hyperedge` |
 | Metric | enum | `Euclidean`, `Cosine`, または `Dot` |
 | IndexKind | enum | `HnswFlat` または `FlatOnly` |
 | ElementType | enum | 要素の格納表現。現在は `Float32` のみ (将来の量子化表現用の契約予約) |

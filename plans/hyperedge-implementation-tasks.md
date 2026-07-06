@@ -1068,6 +1068,24 @@ header / incidence から再構築する。create 差分は durable commit 後�
 - `dotnet build Quiver.slnx` と全テストが成功する。
 - `docs/spec/` が実装と一致し、親計画書の未確定表現を残していない。
 
+### 実装結果 (2026-07-07)
+
+- `docs/spec/04_records_index.md` に header (15B + inline property)、incidence (27B fixed-slot
+  直接アドレス、2 本チェーン、free chain 重畳)、node incidence head、hyperedge vacuum、
+  EntityRef の Kind 実値を追記。`05_query.md` にオペレータ 4 種、co-membership 物理ビュー、
+  untyped / typed DSL、Match 星型パターンを追記。`08_known_limits.md` に immutable member、
+  node-only member、順序非保証、変換 API 対象外、高次数 DeleteNode カスケード実測、
+  CheckConsistency の並行制約を追記。全 spec ヘッダを V4 へ統一し、`06_vector.md` の
+  EntityKind に `Hyperedge` を反映 (実装済みの hyperedge ベクトル索引と一致させた)。
+- `docs/design/development.md` へ実装マップ、固定 tenant 表 (18–25、22 欠番)、テスト一覧、
+  属性リファレンス (`[Hyperedge]` / `[Role]`) を追記。用語集 2 本 (docs/glossary.md、
+  docs/design/internals-glossary.md) にも HYP 新出概念を追記 (後者は git 管理外)。
+- `samples/Quiver.Samples.Hyperedges` (新規、slnx 登録) が Quiver.Rag 取込 → 4 ロール Fact 作成
+  (typed Insert + untyped builder) → untyped DSL / Match / typed API の三経路読み戻し →
+  出典 Chunk 本文回収を実行して完走。
+- build 0 errors / 0 warnings、全テスト 16 プロジェクト 2,108 件緑 (PublicApi approval 含む、
+  公開サーフェス変更なし)。CS1591 (XML doc 欠落) なし。
+
 ## 決定記録
 
 | 日付 | Gate | 結果 | 決定 | 根拠 |
