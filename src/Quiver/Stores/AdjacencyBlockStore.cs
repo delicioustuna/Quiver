@@ -209,7 +209,8 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
         IPagedFile dataFile,
         IPagedFile indexFile,
         IReadOnlyList<(long Id, long Src, long Tgt, int TypeId)> rels,
-        long nodeHwm)
+        long nodeHwm,
+        bool writeDescriptor = true)
     {
         dataFile.Truncate(1);
         dataFile.AllocatePage(PageKind.AdjacencyBlock); // logical page 1 = 記述子 placeholder
@@ -239,7 +240,8 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
             firstPageIds[nodeId] = firstPageId;
         }
 
-        AdjacencyContainer.WriteDescriptor(dataFile, AdjacencyContainer.KindV1, null);
+        if (writeDescriptor)
+            AdjacencyContainer.WriteDescriptor(dataFile, AdjacencyContainer.KindV1, null);
         AdjacencyContainer.WriteIndex(indexFile, firstPageIds);
     }
 

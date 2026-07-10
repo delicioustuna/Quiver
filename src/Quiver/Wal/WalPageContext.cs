@@ -3,15 +3,20 @@ using Quiver.Core;
 namespace Quiver.Storage.Wal;
 
 /// <summary>
-/// 書き込みトランザクション中のページイメージロギング用に使われる、スレッドローカルな
+/// 書き込みトランザクション中のページイメージロギング用に使われる、非同期フロー単位の
 /// WAL コンテキスト。書き込みトランザクション開始時にセットし、Commit / Abort 時にクリアする。
 /// </summary>
 internal static class WalPageContext
 {
-    [ThreadStatic]
-    internal static WriteTransactionContext? Current;
+    private static readonly AsyncLocal<WriteTransactionContext?> CurrentSlot = new();
 
-    /// <summary>このスレッドで書き込みトランザクションを開始する。</summary>
+    internal static WriteTransactionContext? Current
+    {
+        get => CurrentSlot.Value;
+        set => CurrentSlot.Value = value;
+    }
+
+    /// <summary>現在の非同期フローで書き込みトランザクションを開始する。</summary>
     public static void Begin(IWriteAheadLog wal, TransactionId txId)
         => Current = new WriteTransactionContext(wal, txId);
 

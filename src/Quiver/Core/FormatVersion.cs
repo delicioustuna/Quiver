@@ -10,6 +10,7 @@ namespace Quiver.Core;
 /// v3 は第一級ハイパーエッジ用の固定テナント、ID kind、type / role token 空間を追加する。
 /// v4 は incidence を 27 バイト fixed-slot 直接アドレスストアへ変更し、version チェーンと
 /// 間接マップを廃止する (incidence 間接マップのテナントは欠番になる)。
+/// v5 は relationship delta の head sidecar と append-only page store を固定 tenant として追加する。
 /// 自動マイグレーションは提供しないため、旧 format の DB は open 時に reject される。
 /// </summary>
 internal static class FormatVersion
@@ -26,8 +27,11 @@ internal static class FormatVersion
     /// <summary>v4: incidence の fixed-slot 直接アドレスレイアウト。</summary>
     public const byte V4 = 4;
 
+    /// <summary>v5: relationship delta head / page store tenant。</summary>
+    public const byte V5 = 5;
+
     /// <summary>現行 (= 新規 DB を作成するときに書き込むバージョン)。</summary>
-    public const byte Current = V4;
+    public const byte Current = V5;
 }
 
 /// <summary>

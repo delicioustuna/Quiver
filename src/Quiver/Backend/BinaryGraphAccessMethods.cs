@@ -20,13 +20,19 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     internal long FallbackCountInternal;
 
     private readonly IVectorStore _vectors;
+    private readonly RelationshipDeltaStore _relationshipDeltas;
     // ラベル転置索引 (任意)。接続時はラベル付き ScanNodes/LabelScan が全件 Scan() から O(|L|) lookup に切り替わる。
     private LabelNodeIndex? _labelIndex;
 
-    internal BinaryGraphAccessMethods(IVectorStore vectors)
+    internal BinaryGraphAccessMethods(
+        IVectorStore vectors,
+        RelationshipDeltaStore? relationshipDeltas = null)
     {
         _vectors = vectors;
+        _relationshipDeltas = relationshipDeltas ?? RelationshipDeltaStore.Shared;
     }
+
+    internal RelationshipDeltaStore RelationshipDeltas => _relationshipDeltas;
 
     /// <summary>
     /// factory が NodeStore に attach した後の index を共有する。
@@ -142,8 +148,12 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
         if (adj != null && adj.HasBlock(source))
         {
             var probe = new AdjacencyEntry[64];
-            int n = adj.ReadEdges(source, direction, typeFilter, probe);
-            return n < probe.Length ? n : probe.Length;
+            int baseCount = adj.ReadEdges(source, direction, typeFilter, probe);
+            int deltaLimit = Math.Max(0, probe.Length - Math.Min(baseCount, probe.Length));
+            int deltaCount = _relationshipDeltas.Count(
+                tx, source, direction, typeFilter, adj.BaseRelHwm, deltaLimit);
+            int total = Math.Min(probe.Length, baseCount + deltaCount);
+            return total;
         }
 
         double count = 0;

@@ -18,5 +18,7 @@ internal enum PageKind : byte
     ItemPointerMap = 11,
     // 固定長 slot を sequence 直引きで密配置する incidence ページ。
     IncidenceRecord = 12,
+    // relationship delta store の append-only ページ。
+    RelationshipDeltaRecord = 13,
     Header = 0xFF,
 }

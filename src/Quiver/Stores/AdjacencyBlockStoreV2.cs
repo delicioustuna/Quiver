@@ -254,7 +254,8 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
         IReadOnlyList<(long Id, long Src, long Tgt, int TypeId)> rels,
         IReadOnlyDictionary<long, long> weightLookup,
         long nodeHwm,
-        PayloadLaneSpec spec)
+        PayloadLaneSpec spec,
+        bool writeDescriptor = true)
     {
         dataFile.Truncate(1);
         dataFile.AllocatePage(PageKind.AdjacencyBlock); // logical page 1 = 記述子 placeholder
@@ -285,7 +286,8 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
             firstPageIds[nodeId] = firstPageId;
         }
 
-        AdjacencyContainer.WriteDescriptor(dataFile, AdjacencyContainer.KindV2, spec);
+        if (writeDescriptor)
+            AdjacencyContainer.WriteDescriptor(dataFile, AdjacencyContainer.KindV2, spec);
         AdjacencyContainer.WriteIndex(indexFile, firstPageIds);
     }
 

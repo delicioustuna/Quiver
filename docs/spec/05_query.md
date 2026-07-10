@@ -1,6 +1,6 @@
 # クエリエンジン
 
-> as-built 仕様 (on-disk FormatVersion V4)
+> as-built 仕様 (on-disk FormatVersion V5)
 
 ## アーキテクチャ {#architecture}
 

@@ -81,10 +81,13 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     // MigrationContext.ForEachNode が Access.ScanNodes に渡す。
     internal ITransaction Inner => _inner;
 
+    private TransactionUsageLease EnterUsage() => _inner.EnterUsage();
+
     // ========== ノード操作 ==========
 
     public NodeId CreateNode(string label)
     {
+        using var usage = EnterUsage();
         var labelId = _labelTokens.GetOrCreate(label);
         var nodeId = _inner.Nodes.Allocate(labelId);
         if (_logicalSink != null)
@@ -94,6 +97,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public NodeId CreateNode(LabelId labelId)
     {
+        using var usage = EnterUsage();
         var nodeId = _inner.Nodes.Allocate(labelId);
         if (_logicalSink != null)
             RecordLogical(LogicalMutation.CreateNode(nodeId, _labelTokens.GetName(labelId)));
@@ -102,6 +106,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void DeleteNode(NodeId nodeId)
     {
+        using var usage = EnterUsage();
         var firstRelId = _inner.Nodes.Read(nodeId).FirstRelationshipId;
         var relsToDelete = new List<RelationshipId>();
         var relId = firstRelId;
@@ -132,10 +137,14 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     }
 
     public bool NodeExists(NodeId nodeId)
-        => _inner.Nodes.Read(nodeId).InUse;
+    {
+        using var usage = EnterUsage();
+        return _inner.Nodes.Read(nodeId).InUse;
+    }
 
     public string? GetNodeLabel(NodeId nodeId)
     {
+        using var usage = EnterUsage();
         var node = _inner.Nodes.Read(nodeId);
         if (!node.InUse || !node.Label.IsValid) return null;
         return _labelTokens.GetName(node.Label);
@@ -153,6 +162,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public (NodeId Id, bool Created) MergeNode(string label, string matchKey, in PropertyValue matchValue)
     {
+        using var usage = EnterUsage();
         var labelId = _labelTokens.GetOrCreate(label);
 
         // (label, matchKey) にインデックスが登録されていれば、
@@ -319,6 +329,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public RelationshipId CreateRelationship(NodeId source, NodeId target, string type)
     {
+        using var usage = EnterUsage();
         var typeId = _relTypeTokens.GetOrCreate(type);
         var relId = _inner.Relationships.Create(_inner.Nodes, source, target, typeId);
         if (_logicalSink != null)
@@ -328,6 +339,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public RelationshipId CreateRelationship(NodeId source, NodeId target, RelationshipTypeId typeId)
     {
+        using var usage = EnterUsage();
         var relId = _inner.Relationships.Create(_inner.Nodes, source, target, typeId);
         if (_logicalSink != null)
             RecordLogical(LogicalMutation.CreateRelationship(
@@ -337,6 +349,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public (RelationshipId Id, bool Created) MergeRelationship(NodeId source, NodeId target, string type)
     {
+        using var usage = EnterUsage();
         // 型トークンが未観測なら、その型のエッジは存在し得ない → 走査せず直接作成。
         // (公開 EnumerateRelationships は型未知のとき全隣接へフォールバックするため、ここでは
         // store の typed + Outgoing 列挙を直接使い、別型エッジを target 一致で誤マッチしないようにする。)
@@ -355,6 +368,9 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void DeleteRelationship(RelationshipId relId)
     {
+        using var usage = EnterUsage();
+        if (!_inner.Relationships.Read(relId).InUse)
+            return;
         FreeRelationshipProperties(relId);
         // この ID が不変ベースビューに含まれる場合、隣接ブロックには依然として
         // 現れる — 後続の expand カーソルがスキップできるよう tombstone を記録する。
@@ -384,6 +400,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void SetProperty(NodeId nodeId, string key, in PropertyValue value)
     {
+        using var usage = EnterUsage();
         var keyId = _propKeyTokens.GetOrCreate(key);
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use AddPropertyValue for Set-cardinality property '{key}'.");
@@ -412,9 +429,12 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void SetProperty(RelationshipId relId, string key, in PropertyValue value)
     {
+        using var usage = EnterUsage();
         var keyId = _propKeyTokens.GetOrCreate(key);
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use AddPropertyValue for Set-cardinality property '{key}'.");
+        if (!_inner.Relationships.Read(relId).InUse)
+            return;
         if (_logicalSink != null)
         {
             var captured = LogicalPropertyValue.Capture(in value);
@@ -529,6 +549,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void RemoveProperty(NodeId nodeId, string key)
     {
+        using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
 
         // inline を先に試し、無ければ overflow チェーンから除去。
@@ -561,6 +582,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public PropertyValue GetProperty(NodeId nodeId, string key)
     {
+        using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
@@ -578,6 +600,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public PropertyValue GetProperty(RelationshipId relId, string key)
     {
+        using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
@@ -595,6 +618,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public bool HasProperty(NodeId nodeId, string key)
     {
+        using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return false;
         if (_inner.Nodes.HasInlineProperty(nodeId, keyId)) return true;
         var firstPropId = _inner.Nodes.Read(nodeId).FirstPropertyId;
@@ -607,13 +631,17 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     }
 
     public PropertyEnumerator EnumerateProperties(NodeId nodeId)
+    {
+        using var usage = EnterUsage();
         // inline (visible 版) + overflow チェーンを結合して列挙。
-        => _inner.Nodes.EnumerateProperties(nodeId, _inner.Properties);
+        return _inner.Nodes.EnumerateProperties(nodeId, _inner.Properties);
+    }
 
     // ========== マルチバリュープロパティ操作 (Set cardinality) ==========
 
     public void AddPropertyValue(NodeId nodeId, string key, in PropertyValue value)
     {
+        using var usage = EnterUsage();
         var keyId = _propKeyTokens.GetOrCreate(key, PropertyCardinality.Set);
 
         // 重複チェック: 同一 key+value の visible エントリがあればスキップ (Set セマンティクス)
@@ -638,7 +666,10 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void AddPropertyValue(RelationshipId relId, string key, in PropertyValue value)
     {
+        using var usage = EnterUsage();
         var keyId = _propKeyTokens.GetOrCreate(key, PropertyCardinality.Set);
+        if (!_inner.Relationships.Read(relId).InUse)
+            return;
 
         var propEnum = _inner.Relationships.EnumerateProperties(relId, _inner.Properties);
         while (propEnum.MoveNext())
@@ -657,6 +688,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void RemovePropertyValue(NodeId nodeId, string key, in PropertyValue value)
     {
+        using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
         if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
             throw new InvalidOperationException($"Use RemoveProperty for Single-cardinality property '{key}'.");
@@ -683,9 +715,12 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void RemovePropertyValue(RelationshipId relId, string key, in PropertyValue value)
     {
+        using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
         if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
             throw new InvalidOperationException($"Use RemoveProperty for Single-cardinality property '{key}'.");
+        if (!_inner.Relationships.Read(relId).InUse)
+            return;
 
         var firstPropId = _inner.Relationships.Read(relId).FirstPropertyId;
         var propEnum = _inner.Properties.Enumerate(firstPropId);
@@ -706,6 +741,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public PropertyValuesEnumerator GetPropertyValues(NodeId nodeId, string key)
     {
+        using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId))
             return new PropertyValuesEnumerator(
                 new PropertyEnumerator(null!, PropertyId.Invalid), default);
@@ -715,6 +751,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public PropertyValuesEnumerator GetPropertyValues(RelationshipId relId, string key)
     {
+        using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId))
             return new PropertyValuesEnumerator(
                 new PropertyEnumerator(null!, PropertyId.Invalid), default);
@@ -729,6 +766,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         Direction direction = Direction.Both,
         string? typeFilter = null)
     {
+        using var usage = EnterUsage();
         if (typeFilter != null && _relTypeTokens.TryGet(typeFilter, out var typeId))
             return _inner.Relationships.EnumerateNeighbors(nodeId, _inner.Nodes, typeId, direction);
 
@@ -738,16 +776,26 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     // ========== インデックス ==========
 
     public void IndexInsert(string indexName, string key, NodeId nodeId)
-        => _inner.Indexes.CreateStringIndex(indexName).Insert(key, PackNode(nodeId));
+    {
+        using var usage = EnterUsage();
+        _inner.Indexes.CreateStringIndex(indexName).Insert(key, PackNode(nodeId));
+    }
 
     public void IndexInsert(string indexName, long key, NodeId nodeId)
-        => _inner.Indexes.CreateInt64Index(indexName).Insert(key, PackNode(nodeId));
+    {
+        using var usage = EnterUsage();
+        _inner.Indexes.CreateInt64Index(indexName).Insert(key, PackNode(nodeId));
+    }
 
     public void IndexInsert(string indexName, double key, NodeId nodeId)
-        => _inner.Indexes.CreateDoubleIndex(indexName).Insert(key, PackNode(nodeId));
+    {
+        using var usage = EnterUsage();
+        _inner.Indexes.CreateDoubleIndex(indexName).Insert(key, PackNode(nodeId));
+    }
 
     public NodeIdEnumerator SeekIndex(string indexName, in PropertyValue key)
     {
+        using var usage = EnterUsage();
         IEnumerable<long> values = key.Type switch
         {
             PropertyValueType.Int32 or PropertyValueType.Int64 or PropertyValueType.Bool =>
@@ -768,6 +816,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         in PropertyValue from, bool fromInclusive,
         in PropertyValue to, bool toInclusive)
     {
+        using var usage = EnterUsage();
         IEnumerable<long> values;
         switch (from.Type)
         {
@@ -799,6 +848,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public QueryResult Execute(IPhysicalOperator plan)
     {
+        using var usage = EnterUsage();
         // query 実行全体を span + duration histogram で計測。
         using var activity = QuiverTelemetry.QueryActivitySource.StartActivity(
             "query.execute", ActivityKind.Internal);
@@ -842,6 +892,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public IQueryCursor ExecuteCursor(IPhysicalOperator plan)
     {
+        using var usage = EnterUsage();
         plan.Open(_inner);
         return new PhysicalOperatorCursor(plan, _inner.Nodes, _inner.Hyperedges);
     }
@@ -854,6 +905,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     // 無し (旧テスト互換経路) では false を返し、呼び出し側 (GraphTraversal) が row path へ。
     public bool TryColumnAggregate(Core.EntityKind kind, string key, out ColumnAggregate result)
     {
+        using var usage = EnterUsage();
         result = default;
         if (_columns == null) return false;
         if (_inner.Committed is not { } committed) return false;
@@ -869,17 +921,19 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void SetVector(Core.EntityKind kind, long entityId, string indexName, ReadOnlySpan<float> vector)
     {
+        using var usage = EnterUsage();
         if (IsReadOnly)
             throw new InvalidOperationException("Cannot SetVector in a read-only transaction.");
         if (_vectors is null)
             throw new NotSupportedException("This backend does not support transaction-scoped SetVector.");
-        // tx スレッドの ambient WalPageContext 下で書く → グラフ変更と同じ WAL に乗り、
+        // tx の ambient WalPageContext 下で書く → グラフ変更と同じ WAL に乗り、
         // commit で原子確定 / abort・crash で CLR undo により巻き戻る。
         _vectors.SetVector(kind, entityId, indexName, vector);
     }
 
     public void RemoveVector(Core.EntityKind kind, long entityId, string indexName)
     {
+        using var usage = EnterUsage();
         if (IsReadOnly)
             throw new InvalidOperationException("Cannot RemoveVector in a read-only transaction.");
         if (_vectors is null)
@@ -889,6 +943,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public bool TryGetVector(Core.EntityKind kind, long entityId, string indexName, Span<float> destination)
     {
+        using var usage = EnterUsage();
         if (_vectors is null) return false;
         return _vectors.TryGetVector(kind, entityId, indexName, destination);
     }
@@ -897,6 +952,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public HyperedgeId CreateHyperedge(string type, ReadOnlySpan<HyperedgeMember> members)
     {
+        using var usage = EnterUsage();
         if (string.IsNullOrWhiteSpace(type))
             throw new ArgumentException("Hyperedge type must not be null, empty, or whitespace.", nameof(type));
         var typeId = _hyperedgeTypeTokens.GetOrCreate(type);
@@ -905,6 +961,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public HyperedgeId CreateHyperedge(HyperedgeTypeId typeId, ReadOnlySpan<HyperedgeMember> members)
     {
+        using var usage = EnterUsage();
         if (!typeId.IsValid)
             throw new ArgumentException("Invalid hyperedge type ID.", nameof(typeId));
         return CreateHyperedgeCore(typeId, members);
@@ -954,6 +1011,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void DeleteHyperedge(HyperedgeId hyperedgeId)
     {
+        using var usage = EnterUsage();
         // header の可視性が incidence とプロパティの可視性の正本 — header を論理削除すれば
         // それらも同スナップショットで不可視になる。overflow プロパティレコードは物理的に残る
         // ため、slot を回収できるよう先にチェーンを解放してから header をスタンプする。
@@ -979,6 +1037,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public HyperedgeMemberEnumerator GetMembers(HyperedgeId hyperedgeId, string? role = null)
     {
+        using var usage = EnterUsage();
         RoleId roleFilter = RoleId.Invalid;
         if (role != null && _roleTokens.TryGet(role, out var rid))
             roleFilter = rid;
@@ -991,6 +1050,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public HyperedgeIdEnumerator GetHyperedges(NodeId nodeId, string? type = null, string? role = null)
     {
+        using var usage = EnterUsage();
         HyperedgeTypeId typeFilter = HyperedgeTypeId.Invalid;
         if (type != null && _hyperedgeTypeTokens.TryGet(type, out var tid))
             typeFilter = tid;
@@ -1017,6 +1077,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void SetProperty(HyperedgeId hyperedgeId, string key, in PropertyValue value)
     {
+        using var usage = EnterUsage();
         var keyId = _propKeyTokens.GetOrCreate(key);
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use AddPropertyValue for Set-cardinality property '{key}'.");
@@ -1083,6 +1144,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public PropertyValue GetProperty(HyperedgeId hyperedgeId, string key)
     {
+        using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
@@ -1100,6 +1162,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public bool HasProperty(HyperedgeId hyperedgeId, string key)
     {
+        using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return false;
         if (_inner.Hyperedges.HasInlineProperty(hyperedgeId, keyId)) return true;
         var firstPropId = _inner.Hyperedges.Read(hyperedgeId).FirstPropertyId;
@@ -1113,6 +1176,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void RemoveProperty(HyperedgeId hyperedgeId, string key)
     {
+        using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
 
         // inline を先に試し、無ければ overflow チェーンから除去。
@@ -1143,12 +1207,16 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     }
 
     public PropertyEnumerator EnumerateProperties(HyperedgeId hyperedgeId)
-        => _inner.Hyperedges.EnumerateProperties(hyperedgeId, _inner.Properties);
+    {
+        using var usage = EnterUsage();
+        return _inner.Hyperedges.EnumerateProperties(hyperedgeId, _inner.Properties);
+    }
 
     // ── ハイパーエッジのマルチバリュープロパティ (Set cardinality) ──
 
     public void AddPropertyValue(HyperedgeId hyperedgeId, string key, in PropertyValue value)
     {
+        using var usage = EnterUsage();
         var keyId = _propKeyTokens.GetOrCreate(key, PropertyCardinality.Set);
 
         // 重複チェック: 同一 key+value の visible エントリがあればスキップ (Set セマンティクス)。
@@ -1176,6 +1244,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void RemovePropertyValue(HyperedgeId hyperedgeId, string key, in PropertyValue value)
     {
+        using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
         if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
             throw new InvalidOperationException($"Use RemoveProperty for Single-cardinality property '{key}'.");
@@ -1205,6 +1274,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public PropertyValuesEnumerator GetPropertyValues(HyperedgeId hyperedgeId, string key)
     {
+        using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId))
             return new PropertyValuesEnumerator(
                 new PropertyEnumerator(null!, PropertyId.Invalid), default);
@@ -1212,17 +1282,54 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
             _inner.Hyperedges.EnumerateProperties(hyperedgeId, _inner.Properties), keyId);
     }
 
-    public void Commit() => _inner.Commit();
-    public void Rollback() => _inner.Abort();
-    public void Dispose() => _inner.Dispose();
+    public void Commit()
+    {
+        using var usage = EnterUsage();
+        _inner.Commit();
+    }
+
+    public void Rollback()
+    {
+        using var usage = EnterUsage();
+        _inner.Abort();
+    }
+
+    public void Dispose()
+    {
+        using var usage = EnterUsage();
+        _inner.Dispose();
+    }
 
     // savepoint / nested undo — 下層トランザクションへ委譲する。
-    public SavepointId Savepoint(string? name = null) => _inner.Savepoint(name);
-    public void RollbackTo(SavepointId savepoint) => _inner.RollbackTo(savepoint);
-    public void ReleaseSavepoint(SavepointId savepoint) => _inner.ReleaseSavepoint(savepoint);
+    public SavepointId Savepoint(string? name = null)
+    {
+        using var usage = EnterUsage();
+        return _inner.Savepoint(name);
+    }
+
+    public void RollbackTo(SavepointId savepoint)
+    {
+        using var usage = EnterUsage();
+        _inner.RollbackTo(savepoint);
+    }
+
+    public void ReleaseSavepoint(SavepointId savepoint)
+    {
+        using var usage = EnterUsage();
+        _inner.ReleaseSavepoint(savepoint);
+    }
 
     // post-commit / post-rollback フックの登録は下層トランザクションへ委譲する。
     // ユーザは IGraphTransaction 経由でフックを登録できる。
-    public void OnCommitted(Action callback) => _inner.OnCommitted(callback);
-    public void OnRolledBack(Action callback) => _inner.OnRolledBack(callback);
+    public void OnCommitted(Action callback)
+    {
+        using var usage = EnterUsage();
+        _inner.OnCommitted(callback);
+    }
+
+    public void OnRolledBack(Action callback)
+    {
+        using var usage = EnterUsage();
+        _inner.OnRolledBack(callback);
+    }
 }

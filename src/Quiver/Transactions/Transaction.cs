@@ -33,6 +33,8 @@ internal sealed class Transaction : ITransaction
     private List<Action>? _onCommitted;
     private List<Action>? _onRolledBack;
     private TransactionState _state;
+    private int _usageOwnerThreadId;
+    private int _usageDepth;
 
     // savepoint 管理。SavepointId.Value (連番) → スタック深度 (= WalPageContext のバケット index)。
     // RollbackTo で巻き戻しても savepoint 自体は消費しないので、Value は同じレベルで再利用される。
@@ -93,7 +95,8 @@ internal sealed class Transaction : ITransaction
         IEntityVersionStore? nodeVersions = null,
         IEntityVersionStore? relVersions = null,
         IEntityVersionStore? hyperedgeVersions = null,
-        ICoMembershipBlockStore? coMembershipStore = null)
+        ICoMembershipBlockStore? coMembershipStore = null,
+        PersistentRelationshipDeltaStore? relationshipDeltas = null)
     {
         Id = id; Level = level; SnapshotLsn = snapshotLsn;
         _wal = wal;
@@ -118,13 +121,15 @@ internal sealed class Transaction : ITransaction
         // (ctor は TransactionManager.Begin の _snapshotGate 下で走るため一貫した下限)。
         _ssnSnapshotCstamp = _ssn != null ? manager.CurrentCommitStampClock : 0;
         // per-tx ambient コンテキストを Tx wrapper にも持たせ、各操作直前に
-        // MvccContext を再アクティベートする (同一スレッドで複数 tx 操作を交互に
-        // 行う場合の thread-static の取り違えを防ぐ)。
+        // MvccContext を再アクティベートする (複数 tx 操作を交互に
+        // 行う場合の ambient context の取り違えを防ぐ)。
         var snap = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
         _snapshot = snap;
         _committed = committed;
         _nodes = new TxNodeStore(nodeStore, nodeLocks, id, lockingMode, timeout, snap, committed, _ssn);
-        _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes, lockingMode, timeout, snap, committed, _ssn);
+        _relationships = new TxRelationshipStore(
+            relStore, relLocks, id, _nodes, lockingMode, timeout, snap, committed, _ssn,
+            relationshipDeltas);
         _hyperedges = new TxHyperedgeStore(hyperedgeStore, incidenceStore, nodeIncidenceHeadStore,
             hyperedgeLocks, nodeLocks, id, lockingMode, timeout, snap, committed, _ssn,
             coMembershipStore);
@@ -141,8 +146,45 @@ internal sealed class Transaction : ITransaction
         }
     }
 
+    public TransactionUsageLease EnterUsage()
+    {
+        int threadId = Environment.CurrentManagedThreadId;
+        int owner = Volatile.Read(ref _usageOwnerThreadId);
+        if (owner == threadId)
+        {
+            _usageDepth++;
+            return new TransactionUsageLease(this);
+        }
+
+        if (Interlocked.CompareExchange(ref _usageOwnerThreadId, threadId, 0) != 0)
+            throw new TransactionException(
+                $"Transaction {Id.Value} is already being used by another thread.");
+
+        _usageDepth = 1;
+        return new TransactionUsageLease(this);
+    }
+
+    internal void ExitUsage()
+    {
+        int threadId = Environment.CurrentManagedThreadId;
+        if (Volatile.Read(ref _usageOwnerThreadId) != threadId)
+            throw new TransactionException(
+                $"Transaction {Id.Value} usage scope ended on a different thread.");
+
+        int depth = _usageDepth - 1;
+        if (depth <= 0)
+        {
+            _usageDepth = 0;
+            Volatile.Write(ref _usageOwnerThreadId, 0);
+            return;
+        }
+
+        _usageDepth = depth;
+    }
+
     public void Commit()
     {
+        using var usage = EnterUsage();
         if (_state != TransactionState.Active)
             throw new TransactionException("Cannot commit: transaction is not Active.");
         _state = TransactionState.Preparing;
@@ -213,6 +255,7 @@ internal sealed class Transaction : ITransaction
 
     public void Abort()
     {
+        using var usage = EnterUsage();
         if (_state is TransactionState.Committed or TransactionState.Aborted) return;
         // abort span + duration。Commit と同じ ActivitySource を共有。
         using var activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
@@ -366,6 +409,7 @@ internal sealed class Transaction : ITransaction
 
     public SavepointId Savepoint(string? name = null)
     {
+        using var usage = EnterUsage();
         if (_state != TransactionState.Active)
             throw new TransactionException("Cannot create savepoint: transaction is not Active.");
         int level = WalPageContext.PushSavepoint();
@@ -382,6 +426,7 @@ internal sealed class Transaction : ITransaction
 
     public void RollbackTo(SavepointId savepoint)
     {
+        using var usage = EnterUsage();
         if (_state != TransactionState.Active)
             throw new TransactionException("Cannot rollback to savepoint: transaction is not Active.");
         int index = FindSavepointIndex(savepoint.Value);
@@ -410,6 +455,7 @@ internal sealed class Transaction : ITransaction
 
     public void ReleaseSavepoint(SavepointId savepoint)
     {
+        using var usage = EnterUsage();
         if (_state != TransactionState.Active)
             throw new TransactionException("Cannot release savepoint: transaction is not Active.");
         int index = FindSavepointIndex(savepoint.Value);
@@ -434,6 +480,7 @@ internal sealed class Transaction : ITransaction
 
     public void Dispose()
     {
+        using var usage = EnterUsage();
         if (_state == TransactionState.Active) Abort();
     }
 

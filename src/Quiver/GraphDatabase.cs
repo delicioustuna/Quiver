@@ -1,3 +1,4 @@
+using Quiver.Core;
 using Quiver.Logical;
 using Quiver.Maintenance;
 using Quiver.Storage.Records;
@@ -20,20 +21,24 @@ public sealed class GraphDatabase : IDisposable
     private readonly string _path;
     // AutoVacuum が有効なときのみ非 null。Dispose で停止する。
     private readonly AutoVacuumWorker? _autoVacuumWorker;
-    private readonly bool _enforceExclusiveWriter;
+    private readonly bool _rejectConcurrentWriters;
+    private readonly TimeSpan _writerGateTimeout;
     private readonly SemaphoreSlim _writerSemaphore = new(1, 1);
+    private Core.IVectorStore? _vectors;
 
     private GraphDatabase(
         IGraphStorageBackend backend,
         string path,
         AutoVacuumWorker? autoVacuumWorker = null,
-        bool enforceExclusiveWriter = false)
+        bool rejectConcurrentWriters = false,
+        TimeSpan? writerGateTimeout = null)
     {
         // 内部 SPI へキャスト。
         _backend = (IGraphStorageBackendInternal)backend;
         _path = path;
         _autoVacuumWorker = autoVacuumWorker;
-        _enforceExclusiveWriter = enforceExclusiveWriter;
+        _rejectConcurrentWriters = rejectConcurrentWriters;
+        _writerGateTimeout = writerGateTimeout ?? TimeSpan.FromSeconds(5);
     }
 
     /// <summary><see cref="Open"/> に渡したデータベースファイルのパス (<c>*.quiver</c>)。</summary>
@@ -64,7 +69,9 @@ public sealed class GraphDatabase : IDisposable
         if (options.AutoVacuum && options.AutoVacuumInterval > TimeSpan.Zero)
             worker = new AutoVacuumWorker(() => backend.Vacuum(), options.AutoVacuumInterval);
 
-        return new GraphDatabase(backend, filePath, worker, options.EnforceExclusiveWriter);
+        return new GraphDatabase(backend, filePath, worker,
+            options.EnforceExclusiveWriter,
+            options.LockTimeout);
     }
 
     private static IGraphStorageBackendFactory CreateDefaultFactory(BackendKind kind) => kind switch
@@ -127,25 +134,33 @@ public sealed class GraphDatabase : IDisposable
     public IGraphTransaction BeginTransaction(
         IsolationLevel level = IsolationLevel.SnapshotIsolation)
     {
-        if (_enforceExclusiveWriter)
+        AcquireWriterGate();
+        try
+        {
+            var tx = _backend.BeginGraphTransaction(level, readOnly: false);
+            RegisterWriterRelease(tx);
+            return tx;
+        }
+        catch
+        {
+            _writerSemaphore.Release();
+            throw;
+        }
+    }
+
+    private void AcquireWriterGate()
+    {
+        if (_rejectConcurrentWriters)
         {
             if (!_writerSemaphore.Wait(0))
-                throw new InvalidOperationException(
-                    "別の書き込みトランザクションがアクティブです。EnforceExclusiveWriter が有効な場合、同時に開ける書き込みトランザクションは 1 つだけです。");
-            IGraphTransaction tx;
-            try
-            {
-                tx = _backend.BeginGraphTransaction(level, readOnly: false);
-                RegisterWriterRelease(tx);
-                return tx;
-            }
-            catch
-            {
-                _writerSemaphore.Release();
-                throw;
-            }
+                throw new TransactionException(
+                    "Another write transaction is already active.");
+            return;
         }
-        return _backend.BeginGraphTransaction(level, readOnly: false);
+
+        if (!_writerSemaphore.Wait(_writerGateTimeout))
+            throw new TransactionException(
+                $"Timed out waiting for the active write transaction to finish after {_writerGateTimeout}.");
     }
 
     private void RegisterWriterRelease(IGraphTransaction tx)
@@ -174,7 +189,8 @@ public sealed class GraphDatabase : IDisposable
     /// <c>SetVector</c> は直接ここから呼ぶ。問い合わせ側のアクセスは
     /// トラバーサルソースの <c>g.Knn(...)</c> 経由。
     /// </summary>
-    public Core.IVectorStore Vectors => _backend.Vectors;
+    public Core.IVectorStore Vectors => _vectors ??= new AutocommitVectorStore(
+        _backend.Vectors, () => BeginTransaction());
 
     /// <summary>
     /// 埋め込みパイプライン (<c>Quiver.Embedding</c>) が消費する
@@ -364,6 +380,7 @@ public sealed class GraphDatabase : IDisposable
         // 破棄済み backend に触れて落ちうる。
         _autoVacuumWorker?.Dispose();
         _backend.Dispose();
+        _writerSemaphore.Dispose();
     }
 
 }
@@ -523,9 +540,9 @@ public sealed class GraphDatabaseOptions
     public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.Zero;
 
     /// <summary>
-    /// <c>true</c> のとき、<see cref="GraphDatabase.BeginTransaction"/> で既にアクティブな
-    /// 書き込みトランザクションが存在する場合に <see cref="InvalidOperationException"/> をスローする。
-    /// 既定 <c>false</c> (複数 writer を許容する既存挙動)。
+    /// <c>true</c> のとき、<see cref="GraphDatabase.BeginTransaction"/> は既にアクティブな
+    /// 書き込みトランザクションが存在する場合に待機せず <see cref="TransactionException"/> をスローする。
+    /// 既定 <c>false</c> では、内部 writer gate で <see cref="LockTimeout"/> まで待機する。
     /// </summary>
     public bool EnforceExclusiveWriter { get; set; }
 

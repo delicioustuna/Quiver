@@ -1,6 +1,6 @@
 # 既知の限界
 
-> as-built 仕様 (on-disk FormatVersion V4)
+> as-built 仕様 (on-disk FormatVersion V5)
 
 本書はエンジンの現時点での既知の限界を記す。v1 統合監査で発見・修正された欠陥はここでは追跡しない
 — それらは回帰テストと git 履歴でカバーされる。
@@ -17,18 +17,19 @@
   それが必要なら自前のサービスを前段に置くこと。
 - **データベースごとに 1 つの `GraphDatabase` をスレッド間で共有する。** インスタンスはスレッドセーフ。
   一度開いてプロセスのライフタイムを通じて再利用すること。同一プロセス内で同じファイルを 2 度開かないこと。
-- **トランザクションはシングルスレッドかつスレッドアフィンである。** トランザクション — およびそこから
-  取得したカーソルや列挙子 — は、すべて 1 つのスレッド上で作成・使用しなければならない。その write 文脈と
-  MVCC 文脈はスレッドローカル (`[ThreadStatic]`) であるため、生きたトランザクションを別スレッドに
-  渡すこと（`Task.Run`、別スレッドで再開する `await` 継続、`Parallel.For` など）はサポートされず、
-  WAL ロギングを暗黙にスキップしうる。トランザクションは 1 つのスレッド上の 1 つの同期スコープ内で
-  開始・使用・commit/dispose すること。`Begin` と `Commit` の間で `await` しないこと。
+- **トランザクションハンドルは同時使用不可である。** write 文脈と MVCC 文脈は非同期フローに保持されるため、
+  `await` の継続や、重ならない `Task.Run` 越しの利用で WAL ロギングが暗黙に欠落することはない。
+  ただし同じ `IGraphTransaction` ハンドルを複数スレッドから同時に使うことは未サポートであり、
+  検出された場合は `TransactionException` をスローする。トランザクションから取得したカーソルや列挙子も、
+  トランザクション有効期間内に 1 つの操作フローで消費すること。
 
 ### ライタは 1 つ、リーダは並行 {#one-writer}
 
-- **書き込みトランザクションは 1 度に 1 つだけ進行できる。** エンジンは 2 つ目の並行ライタを
-  `BeginTransaction()` で *拒否しない* — 書き込みの直列化はアプリケーションの責任である
-  （[書き込みの直列化](#write-serialization) を参照）。さらに、すべての二次インデックスと全文の
+- **書き込みトランザクションは 1 度に 1 つだけ進行できる。** エンジンは内部 writer gate により
+  `BeginTransaction()` を直列化する。2 本目の書き込みトランザクションは既定で先行 writer の終了を
+  `GraphDatabaseOptions.LockTimeout` まで待ち、期限を超えると `TransactionException` をスローする。
+  `GraphDatabaseOptions.EnforceExclusiveWriter` を有効にすると待機せず即時に `TransactionException` をスローする。
+  さらに、すべての二次インデックスと全文の
   mutation は単一のグローバルインデックスロックに集約されるため、ロックモードに関わらず、2 つの
   トランザクションがインデックス / postings を同時に mutation することは決してない。
 - **リーダはブロックせず、ブロックもされない。** `BeginReadOnlyTransaction()` は開始時の一貫した
@@ -59,8 +60,8 @@ rollback 原子性だけを保証し、プロセス終了やデータベース�
 
 ### 競合時のリトライ {#retry}
 
-複数スレッドから書き込みを駆動する場合、ロック競合は敗者トランザクションを `DeadlockException`、
-`TransactionException`（ロック待ちタイムアウト）、または — `IsolationLevel.Serializable` 下では —
+複数スレッドから書き込みを駆動する場合、writer gate / ロック競合は待機中のトランザクションを
+`TransactionException`（writer gate またはロック待ちタイムアウト）、または — `IsolationLevel.Serializable` 下では —
 `SerializabilityException` でアボートする。これらは *一時的* である: アボートされたトランザクションは
 永続的な変更を何も行っていないため、小さな有界バックオフを挟んで **トランザクション全体** を
 リトライすること（部分的にではなく）:
@@ -81,36 +82,16 @@ T WithRetry<T>(Func<T> runTxn, int maxAttempts = 5)
 }
 ```
 
-### 書き込みの直列化（推奨） {#write-serialization}
+### 書き込みの直列化 {#write-serialization}
 
-サポートされる形は単一ライタであるため、すべての書き込みを 1 つのライタに集約すること。2 つのパターン:
-
-1. **書き込みゲート** — すべての書き込みトランザクションを `SemaphoreSlim(1, 1)`（または `lock`）でガードする:
-
-   ```csharp
-   private static readonly SemaphoreSlim WriteGate = new(1, 1);
-
-   async Task WriteAsync(Action<IGraphTransaction> work)
-   {
-       await WriteGate.WaitAsync();
-       try
-       {
-           using var tx = db.BeginTransaction(); // begin + use + commit, all on this thread
-           work(tx);
-           tx.Commit();
-       }
-       finally { WriteGate.Release(); }
-   }
-   ```
-
-2. **専用のライタスレッド** — 書き込みジョブをキュー（例: `System.Threading.Channels.Channel<T>`）に
-   積み、1 つのバックグラウンドスレッドがそれを drain して、各トランザクションをそのスレッド上で
-   開始・実行・commit する。これは自然なバッチングももたらす。
+書き込みゲートはエンジン内に組み込まれているため、アプリケーション側で `BeginTransaction()` を
+さらに `SemaphoreSlim` で囲む必要はない。高頻度の書き込みを扱うアプリケーションでは、専用の
+ライタキューでジョブを集約すると、自然なバッチングとリトライ制御を実装しやすい。
 
 読み取りにゲートは不要: `BeginReadOnlyTransaction()` を任意のスレッドで開き、互いに、そしてライタと
-並行して実行すること。
+並行して実行できる。
 
-検証済みの並行ライタ（およびよりきめ細かいインデックスロック）のサポートは将来の課題である。
+複数の書き込みトランザクションを同時に進行させる機能はサポートしない。
 
 ## ハイパーエッジの契約と限界 {#hyperedge-limits}
 
@@ -219,8 +200,9 @@ cosine の決定的コーパスで true recall@10 **0.950**、30% 削除後 **0.
 
 異なる `FormatVersion` のデータベースを開くと `FormatVersionMismatchException` をスローする。
 自動マイグレーションのパスは存在しない。データベースはソースデータから作り直す必要がある。
-現行 V4 は incidence の fixed-slot 直接アドレスレイアウトを導入した clean break であり
-（V3 は第一級ハイパーエッジ用 ID / token / tenant 基盤）、V3 以前との互換 reader は意図的に持たない。
+現行 V5 は relationship delta の head sidecar と append-only page store 用固定 tenant を導入した
+clean break であり（V4 は incidence の fixed-slot 直接アドレスレイアウト、
+V3 は第一級ハイパーエッジ用 ID / token / tenant 基盤）、V4 以前との互換 reader は意図的に持たない。
 
 **設計根拠**: オンディスクフォーマットのマイグレーションは、全ページの読み書きとバリデーションが
 必要であり、データ破損リスクが高い。Quiver の主要ユースケース（ローカル RAG）ではソースデータ

@@ -54,6 +54,9 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     internal const byte TenantRoleToken = 24;
     // node sequence 直引きの 6B incidence head sidecar 用 tenant。
     internal const byte TenantNodeIncidenceHead = 25;
+    internal const byte TenantRelationshipLocator = 26;
+    internal const byte TenantRelationshipDeltaHead = 27;
+    internal const byte TenantRelationshipDeltaPages = 28;
 
     public IGraphStorageBackend Open(string filePath, GraphDatabaseOptions options)
     {
@@ -98,7 +101,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         bool recover)
     {
         // 同スレッドの先行 backend がトランザクション途中で終了している可能性がある
-        // (crash シミュレーション等)。スレッドローカルなコンテキストをクリーン状態へ戻す。
+        // (crash シミュレーション等)。ambient コンテキストをクリーン状態へ戻す。
         WalPageContext.End();
         MvccContext.End();
 
@@ -180,9 +183,16 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var relFile = container.OpenTenant(TenantRels, PageKind.Header);
         var relMapFile = container.OpenTenant(TenantRelMap, PageKind.Header);
         var relVerFile = container.OpenTenant(TenantRelVer, PageKind.Header);
+        var relLocatorFile = container.OpenTenant(TenantRelationshipLocator, PageKind.Header);
         var relVersions = new EntityVersionStore(relVerFile);
         var relMap = new ItemPointerMap(relMapFile);
-        var relStore = new VersionedRelationshipStore(relFile, relMap, relVersions);
+        var relLocators = new RelationshipLocatorStore(relLocatorFile);
+        var relStore = new VersionedRelationshipStore(relFile, relMap, relVersions, relLocators);
+        var relationshipDeltaHeads = new RelationshipDeltaHeadStore(
+            container.OpenTenant(TenantRelationshipDeltaHead, PageKind.Header));
+        var relationshipDeltas = new PersistentRelationshipDeltaStore(
+            container.OpenTenant(TenantRelationshipDeltaPages, PageKind.RelationshipDeltaRecord),
+            relationshipDeltaHeads);
 
         var propFile = container.OpenTenant(TenantProps, PageKind.Header);
         var blobFile = container.OpenTenant(TenantBlobs, PageKind.Header);
@@ -263,6 +273,8 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             container.ReloadAll();
             nodeStore.ReloadMeta();
             relStore.ReloadMeta();
+            relationshipDeltaHeads.ReloadMeta();
+            relationshipDeltas.ReloadMeta();
             hyperedgeStore.ReloadMeta();
             incidenceStore.ReloadMeta();
             propStore.ReloadMeta();
@@ -287,7 +299,9 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             indexManager.ReloadAll();
         }
 
-        var access = new BinaryGraphAccessMethods(vectors);
+        var access = new BinaryGraphAccessMethods(
+            vectors,
+            new RelationshipDeltaStore(relationshipDeltas));
 
         // LabelId をキーとする in-memory 転置索引。ラベル付き scan が O(N) ではなく O(|L|) で走る。
         // WAL recovery 後の NodeStore.Scan() から遅延構築し、Allocate/Free は store の
@@ -308,7 +322,8 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             options.DeadlockDetectionInterval, committedRegistry,
             nodeVersions, relVersions,
             hyperedgeStore, incidenceStore, nodeIncidenceHeadStore, hyperedgeVersions,
-            coMembershipStore);
+            coMembershipStore,
+            relationshipDeltas);
         // recovery で観測した最大 TxId より大きい値から新規 tx を採番するよう、
         // TransactionManager の _nextTxId を巻き上げる。これがないと新規 tx ID が
         // 過去 commit 済み TxId と衝突して registry が同じ entry を 2 回 Mark してしまう。
@@ -363,6 +378,8 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             columnManager,
             coMembershipStore,
             labelIndex,
+            relationshipDeltaHeads,
+            relationshipDeltas,
             options.LogicalMutationSink,
             options.TargetRecoveryTime,
             options.MinCheckpointThresholdBytes,

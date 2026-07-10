@@ -12,13 +12,20 @@ using Quiver.Benchmarks.Standalone;
 // 上書きもされず単調に蓄積する(実例: %TEMP% に 231 GB)。
 // 起動時にルートを丸ごと掃除しておけば、前回 run で kill された残骸を毎回
 // 確実に回収できる ― これが per-bench cleanup の取りこぼしに対する最後の砦。
-BenchTempDir.SweepRoot();
+bool skipTempSweep = Environment.GetEnvironmentVariable("QUIVER_BENCH_SKIP_SWEEP") == "1";
+if (!skipTempSweep)
+{
+    BenchTempDir.SweepRoot();
+}
 
 // ホストプロセスが Ctrl+C / 正常終了するときにも掃除する。子プロセスは
 // BDN が終了時に kill するので、その後ホスト側で 1 回掃けば全ベンチ分が
 // 片付く(なお取りこぼしても次回起動時の SweepRoot が回収する)。
-Console.CancelKeyPress         += (_, _) => BenchTempDir.SweepRoot();
-AppDomain.CurrentDomain.ProcessExit += (_, _) => BenchTempDir.SweepRoot();
+if (!skipTempSweep)
+{
+    Console.CancelKeyPress += (_, _) => BenchTempDir.SweepRoot();
+    AppDomain.CurrentDomain.ProcessExit += (_, _) => BenchTempDir.SweepRoot();
+}
 
 // deadlock detection latency / CPU overhead standalone runner
 if (args.Length >= 1 && args[0] == "--ft25-deadlock")
@@ -66,6 +73,61 @@ if (args.Length >= 1 && args[0] == "--payload-cache")
 if (args.Length >= 1 && args[0] == "--scorer-accumulator")
 {
     return ScorerAccumulatorRunner.Run();
+}
+
+// clean-slate redesign baseline on the current ARIES-style kernel.
+// Usage: -- --clean-slate-aries-baseline [degree] [traversalIters] [fullTextChunks] [fullTextQueries] [vectorCount] [vectorQueries]
+if (args.Length >= 1 && args[0] == "--clean-slate-aries-baseline")
+{
+    return CleanSlateAriesBaselineRunner.Run(args.Skip(1).ToArray());
+}
+
+// clean-slate CSR relationship spike using adjacency payload lanes as a base segment approximation.
+// Usage: -- --clean-slate-csr-relationship-spike [degree] [iterations]
+if (args.Length >= 1 && args[0] == "--clean-slate-csr-relationship-spike")
+{
+    return CleanSlateCsrRelationshipSpikeRunner.Run(args.Skip(1).ToArray());
+}
+
+// clean-slate CSR relationship persistence spike for locator, delta, deletion, merge, and recovery contracts.
+// Usage: -- --clean-slate-csr-persistence-spike [degree] [pointUpdates] [mergeDeltaCount]
+if (args.Length >= 1 && args[0] == "--clean-slate-csr-persistence-spike")
+{
+    return CleanSlateCsrPersistenceSpikeRunner.Run(args.Skip(1).ToArray());
+}
+
+// clean-slate CSR relationship product-path integration validation.
+// Usage: -- --clean-slate-csr-product-integration [degree] [iterations] [mutationCount]
+if (args.Length >= 1 && args[0] == "--clean-slate-csr-product-integration")
+{
+    return CleanSlateCsrProductIntegrationRunner.Run(args.Skip(1).ToArray());
+}
+
+// clean-slate CSR relationship integrated merge gate.
+// Usage: -- --clean-slate-csr-product-merge-gate [deltaCount] [batchSize] [targetPool]
+if (args.Length >= 1 && args[0] == "--clean-slate-csr-product-merge-gate")
+{
+    return CleanSlateCsrProductIntegrationRunner.RunMergeGate(args.Skip(1).ToArray());
+}
+
+// clean-slate CSR relationship compact process-kill recovery matrix.
+// Usage: -- --clean-slate-csr-compact-recovery-matrix
+if (args.Length >= 1 && args[0] == "--clean-slate-csr-compact-recovery-matrix")
+{
+    return CleanSlateCsrCompactRecoveryMatrixRunner.Run();
+}
+
+// child process entry used by the compact recovery matrix.
+if (args.Length >= 1 && args[0] == "--clean-slate-csr-compact-recovery-child")
+{
+    return CleanSlateCsrCompactRecoveryMatrixRunner.RunChild(args.Skip(1).ToArray());
+}
+
+// clean-slate full-text/vector segment fan-out spike.
+// Usage: -- --clean-slate-segment-spike [fullTextChunks] [fullTextQueries] [vectorCount] [vectorQueries] [segmentCount]
+if (args.Length >= 1 && args[0] == "--clean-slate-segment-spike")
+{
+    return CleanSlateFullTextVectorSegmentSpikeRunner.Run(args.Skip(1).ToArray());
 }
 
 if (args.Length >= 1 && args[0] == "--incidence-traversal")

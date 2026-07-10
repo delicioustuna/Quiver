@@ -1,6 +1,6 @@
 # Quiver: システム概要
 
-> as-built 仕様 (on-disk FormatVersion V4, 2026-07-06)
+> as-built 仕様 (on-disk FormatVersion V5, 2026-07-08)
 
 ## ポジショニング {#positioning}
 
@@ -77,10 +77,11 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 
 ## フォーマットバージョン {#format-version}
 
-`FormatVersion.Current = V4 = 4`。
+`FormatVersion.Current = V5 = 5`。
 V2 は自己記述 vector catalog / per-index HNSW レイアウト、V3 は第一級ハイパーエッジ用の
 ID kind、type / role token 空間、固定 tenant 18–25 の予約、V4 は incidence の
-fixed-slot 直接アドレスレイアウトを導入した clean break である。
+fixed-slot 直接アドレスレイアウト、V5 は relationship delta の head sidecar と
+append-only page store 用固定 tenant 27–28 を導入した clean break である。
 自動マイグレーションは行わない。
 異なるフォーマットバージョンのデータベースを開くと `FormatVersionMismatchException` をスローする。
 

@@ -17,6 +17,7 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly INodeIncidenceHeadStore _nodeIncidenceHeadStore;
     private readonly IPropertyStore _propStore;
     private readonly IIndexManager _indexManager;
+    private readonly PersistentRelationshipDeltaStore? _relationshipDeltas;
     private IAdjacencyBlockStore? _adjStore;
     private readonly ICoMembershipBlockStore? _coMembershipStore;
     private readonly IGraphAccessMethods _access;
@@ -97,7 +98,8 @@ internal sealed class TransactionManager : ITransactionManager
         IIncidenceStore? incidenceStore = null,
         INodeIncidenceHeadStore? nodeIncidenceHeadStore = null,
         IEntityVersionStore? hyperedgeVersions = null,
-        ICoMembershipBlockStore? coMembershipStore = null)
+        ICoMembershipBlockStore? coMembershipStore = null,
+        PersistentRelationshipDeltaStore? relationshipDeltas = null)
     {
         _wal = wal;
         _nodeStore = nodeStore;
@@ -107,6 +109,7 @@ internal sealed class TransactionManager : ITransactionManager
         _nodeIncidenceHeadStore = nodeIncidenceHeadStore ?? NullNodeIncidenceHeadStore.Instance;
         _propStore = propStore;
         _indexManager = indexManager;
+        _relationshipDeltas = relationshipDeltas;
         _adjStore = adjStore;
         _access = access ?? InlineGraphAccessMethods.Instance;
         _undoHandler = undoHandler;
@@ -283,7 +286,7 @@ internal sealed class TransactionManager : ITransactionManager
                 _propStore, _indexManager, _adjStore, _access,
                 _undoHandler, _lockingMode, _lockTimeout,
                 snapshot, _committed, _nodeVersions, _relVersions, _hyperedgeVersions,
-                _coMembershipStore);
+                _coMembershipStore, _relationshipDeltas);
             _active[txId.Value] = tx;
         }
         return tx;

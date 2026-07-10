@@ -17,7 +17,7 @@ internal interface ISsnReadSink
 
 /// <summary>
 /// MVCC アンビエントコンテキスト。<c>Quiver.Storage.Wal.WalPageContext</c> と対で
-/// スレッドローカルにトランザクションの可視性スナップショット (TxId / ActiveAtBegin / committed registry)
+/// 非同期フロー単位にトランザクションの可視性スナップショット (TxId / ActiveAtBegin / committed registry)
 /// を持つ。下層ストア (NodeStore / RelationshipStore / PropertyStore) はこれを参照して
 /// record の xmin / xmax を埋め、可視性判定を行う。
 /// <para>
@@ -31,38 +31,43 @@ internal interface ISsnReadSink
 /// </summary>
 internal static class MvccContext
 {
-    [ThreadStatic]
-    private static MvccTransactionContext? _current;
+    private static readonly AsyncLocal<MvccTransactionContext?> CurrentSlot = new();
+
+    private static MvccTransactionContext? Current
+    {
+        get => CurrentSlot.Value;
+        set => CurrentSlot.Value = value;
+    }
 
     /// <summary>
-    /// このスレッドで MVCC トランザクションコンテキストを開始する。
+    /// 現在の非同期フローで MVCC トランザクションコンテキストを開始する。
     /// <paramref name="readSink"/> は SSN の read-set 収集先 (Serializable 時のみ非 null)。
     /// </summary>
     public static void Begin(TransactionId selfTxId, in SnapshotState snapshot, CommittedTxRegistry committed,
         ISsnReadSink? readSink = null)
-        => _current = new MvccTransactionContext(selfTxId, snapshot, committed, readSink);
+        => Current = new MvccTransactionContext(selfTxId, snapshot, committed, readSink);
 
-    /// <summary>このスレッドのコンテキストを破棄する。</summary>
-    public static void End() => _current = null;
+    /// <summary>現在の非同期フローのコンテキストを破棄する。</summary>
+    public static void End() => Current = null;
 
     /// <summary>
     /// 下層ストアが可視レコードを 1 件読み取ったときに呼ぶ。SSN read-sink が
     /// 登録されていなければ (= Serializable 以外) 何もしない (ほぼゼロコスト)。
     /// </summary>
     public static void RecordRead(EntityKind kind, long localId)
-        => _current?.ReadSink?.OnVisibleRead(kind, localId);
+        => Current?.ReadSink?.OnVisibleRead(kind, localId);
 
     /// <summary>現コンテキストの自身 TxId。未設定なら <see cref="TransactionId.Bootstrap"/>。</summary>
-    public static TransactionId CurrentTxId => _current?.SelfTxId ?? TransactionId.Bootstrap;
+    public static TransactionId CurrentTxId => Current?.SelfTxId ?? TransactionId.Bootstrap;
 
     /// <summary>現コンテキストの snapshot。未設定なら <see cref="SnapshotState.Empty"/>。</summary>
-    public static SnapshotState CurrentSnapshot => _current?.Snapshot ?? SnapshotState.Empty;
+    public static SnapshotState CurrentSnapshot => Current?.Snapshot ?? SnapshotState.Empty;
 
     /// <summary>現コンテキストの committed registry。未設定なら null。</summary>
-    public static CommittedTxRegistry? CurrentCommitted => _current?.Committed;
+    public static CommittedTxRegistry? CurrentCommitted => Current?.Committed;
 
     /// <summary>テスト用: コンテキストが設定されているか。</summary>
-    public static bool IsActive => _current != null;
+    public static bool IsActive => Current != null;
 }
 
 internal readonly struct MvccTransactionContext

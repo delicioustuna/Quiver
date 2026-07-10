@@ -22,7 +22,7 @@ internal sealed class AutocommitVectorStore(IVectorStore underlying, Func<IGraph
 
     private void InTx(Action body)
     {
-        // tx が既にアクティブなら join (二重 tx で thread-static WalPageContext を壊さない)。
+        // tx が既にアクティブなら join (二重 tx で ambient WalPageContext を差し替えない)。
         if (WalPageContext.Current is not null) { body(); return; }
         using var tx = _beginTx();
         body();
@@ -65,10 +65,15 @@ internal sealed class AutocommitVectorStore(IVectorStore underlying, Func<IGraph
 
     internal VectorSearchCursor KnnSearchExact(
         string indexName, ReadOnlySpan<float> query, int k)
-        => _underlying is Storage.Records.PersistentVectorStore persistent
-            ? persistent.KnnSearchExact(indexName, query, k)
-            : throw new InvalidOperationException(
-                "Exact persistent KNN baseline is available only for the binary backend.");
+        => _underlying switch
+        {
+            Storage.Records.PersistentVectorStore persistent =>
+                persistent.KnnSearchExact(indexName, query, k),
+            AutocommitVectorStore nested =>
+                nested.KnnSearchExact(indexName, query, k),
+            _ => throw new InvalidOperationException(
+                "Exact persistent KNN baseline is available only for the binary backend."),
+        };
 
     public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
         string indexName,

@@ -13,17 +13,20 @@ internal sealed class TxRelationshipStore : IRelationshipStore
     private readonly TimeSpan _timeout;
     private readonly SnapshotState _snapshot;
     private readonly CommittedTxRegistry? _committed;
+    private readonly PersistentRelationshipDeltaStore? _deltaStore;
     // SSN (Serializable) のときのみ非 null。read/write set 収集のみ。
     private readonly SsnContext? _ssn;
 
     internal TxRelationshipStore(IRelationshipStore inner, LockManager locks, TransactionId txId, TxNodeStore txNodes, LockingMode mode, TimeSpan timeout,
         SnapshotState snapshot = default, CommittedTxRegistry? committed = null,
-        SsnContext? ssn = null)
+        SsnContext? ssn = null,
+        PersistentRelationshipDeltaStore? deltaStore = null)
     {
         _inner = inner; _locks = locks; _txId = txId; _txNodes = txNodes; _mode = mode; _timeout = timeout;
         _snapshot = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
         _committed = committed;
         _ssn = ssn;
+        _deltaStore = deltaStore;
     }
 
     public long InUseCount => _inner.InUseCount;
@@ -31,7 +34,15 @@ internal sealed class TxRelationshipStore : IRelationshipStore
     public RelationshipId Create(INodeStore _, NodeId source, NodeId target, RelationshipTypeId type)
     {
         ActivateMvccContext();
-        return _inner.Create(_txNodes, source, target, type);
+        RelationshipId relId = _inner.Create(_txNodes, source, target, type);
+        if (_deltaStore != null)
+        {
+            _deltaStore.Append(source, Direction.Outgoing, relId, target, type);
+            if (source != target)
+                _deltaStore.Append(target, Direction.Incoming, relId, source, type);
+        }
+
+        return relId;
     }
 
     public void Delete(INodeStore _, RelationshipId relId)

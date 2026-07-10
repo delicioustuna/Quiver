@@ -57,14 +57,40 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 | 文字列エンコーディング | UTF-8（長さプレフィックス付き） |
 | 静止時のファイル | `*.quiver` 単一ファイル |
 | 運用中のファイル | `*.quiver` + `*.quiver-wal` |
-| FormatVersion | V4（旧バージョンからの自動移行なし） |
+| FormatVersion | V5（旧バージョンからの自動移行なし） |
 | ベクトル catalog | entry 長プレフィクス + per-index HNSW レイアウトパラメタ |
 
 FormatVersion の履歴: V2 で `VectorIndexSpec` の HNSW レイアウトパラメタを catalog に永続化、
 V3 で第一級ハイパーエッジ用の ID kind / token 空間 / 固定 tenant を追加、
-V4 で incidence を fixed-slot 直接アドレスレイアウトへ再設計した。
+V4 で incidence を fixed-slot 直接アドレスレイアウトへ再設計、
+V5 で relationship delta の head sidecar と append-only page store 用固定 tenant を追加した。
 各バージョンは clean break であり、旧バージョンの DB は open 時に拒否して
 ソースデータから再構築する。
+
+### 開発中の FormatVersion 運用（公開バージョンと分離する）
+
+`FormatVersion`（オンディスク format の内部カウンタ）と、利用者に公開する
+SemVer バージョン（`Directory.Build.props` の `VersionPrefix`）は **別物であり、連動させない**。
+開発中に両者を混同しないための運用規約を以下に定める。
+
+- **開発中の `FormatVersion` は自由に bump してよい単調カウンタである。** レイアウトを変える増分は
+  そのつど `FormatVersion.Current` を次の整数へ上げ、旧 format の読み替え・マイグレーションは
+  一切実装しない（未リリース方針。`FormatVersionMismatchException` で fail-fast する）。
+  1 本のトラック内で V3 → V4 のように複数回上がってよく、main へマージするまでに
+  数バージョン進むこと自体は問題としない。**中間バージョンを温存する必要はない。**
+- **公開バージョンは `FormatVersion` の増加回数に追随しない。** `VersionPrefix` は SemVer の
+  意味論（[api-stability.md](../api-stability.md)）だけで上下する。format を 3 回 bump しても、
+  公開 API に breaking が無ければ MINOR/PATCH のままでよい。
+- **GA 直前に pre-release 期の format 履歴を 1 本のベースラインへ畳む。** v1 で実施した前例
+  （pre-MVCC 以降の format 履歴を clean break で畳み、現実装を V1 として再宣言）と同じ手順を
+  次の GA でも踏む。畳み込みは `FormatVersion.cs` の定数整理と履歴コメントの書き直しだけで済み、
+  DB 資産の移行は伴わない（未リリースにつき）。
+- **GA 後（`1.0.0` 以降）は §7.2 の互換規約に従い、1.x 内では `FormatVersion` を bump しない。**
+  すなわち「自由に bump してよい」のは pre-release 期だけの運用である。
+- **計画書・タスク管理での表記。** `plans/` や skill のタスク定義で「FormatVersion V5 へ bump」と
+  書いても、それは開発上の内部カウンタの話であり公開バージョンの宣言ではない。公開バージョンを
+  指すときは SemVer 表記（例: `0.2.0`）を使い、両者を同じ文中で並べるときは
+  「on-disk format V5 / 公開 0.2.0」のように明示して区別する。
 
 ### ID 型
 
@@ -356,6 +382,45 @@ Gremlin / Cypher 互換の対応状況は [docs/spec/05_query.md](../spec/05_que
 | [12_rag_backend_direction.md](12_rag_backend_direction.md) | ローカル RAG バックエンド方向性（ポジショニング・非目標の正本） |
 | [13_fulltext_search.md](13_fulltext_search.md) | 全文検索 / ハイブリッド検索（転置インデックス + BM25 + RRF） |
 | [14_rag_layer.md](14_rag_layer.md) | Quiver.Rag レイヤ（Document/Chunk スキーマ・取込・検索） |
+
+## エージェント運用ガードレール
+
+コーディングエージェント (Claude Code / Codex) が規約を破らないための決定論的バックストップ。
+CLAUDE.md / AGENTS.md の散文だけではエージェント自身の判断に依存し、指示が無視されうる。
+そこで機械的に検査するフックを併用する。設計思想はこの節を正本とする。
+
+### 原則: パターンヒットは signal であって verdict ではない
+
+正規表現の一致はあくまで「候補シグナル」として扱い、ハードブロックはしない。
+
+- **advisory を優先する。** 書き込み前に拒否 (PreToolUse block) すると、誤検知時にエージェントが
+  回避を繰り返して会話が破綻する。書き込み後に助言を返す (PostToolUse) なら、正当なら無視でき、
+  破綻しない。
+- **誤検知の主因はパスで決定論的に消す。** 例外地 (`plans/`・`docs/design/`・エージェント内部
+  ツールの `.claude/`・`.agents/`) を先に除外すれば、意味判断を持ち出す前に大半の誤検知が消える。
+- **検査は変更差分に絞る。** ファイル全体を毎回再検査すると、既存の記号 (`tests/`・`benchmarks/`
+  には大量にある) を再検知して騒がしくなる。その編集が「新規に書いたテキスト」だけを見る。
+- **意味判断が本当に必要になったときだけ LLM 層へ escalation する。** 決定論版がノイズ過多だと
+  実証されたら、小型 LLM に候補の意味 (本当に危険か / 過去の完了報告か / 仮定か / ユーザ質問か)
+  を判定させる 2 層目を足す。その際は prompt injection 対策・secret 秘匿・再帰ガードが必須。
+  現状は決定論の Layer 1 のみで足りており、未導入。
+
+### 実装
+
+正本は `scripts/agent-guardrails/check-track-markers.ps1`（検出ロジックの単一置き場）。
+現在の対象規約は「タスク管理番号 (例 `HYP-7`) や `案A`/`案B` を、`plans/`・`docs/design/` 以外の
+`src` コメント・識別子・公開 docs に残さない」。検出接頭辞の allowlist はスクリプト先頭が正本
+（技術用語 `UTF-8` / `AVX-512` 等を誤検知しないよう明示列挙）。
+
+| 呼び出し口 | 用途 | 挙動 |
+|---|---|---|
+| `-Hook`（`.claude/settings.json` の PostToolUse） | Claude Code | 編集差分のみ検査し advisory 通知 (exit 2)。ブロックしない |
+| `-Scan` | 人間 / CI / Codex の監査 | 対象ルートを一覧監査 (exit 1)。tests/benchmarks は既存ベースラインが多い |
+| `<path>` | 手動 / スクリプト | 指定ファイルを検査 |
+
+両エージェントで同一ロジックを共有する: Claude Code はフックから、Codex / 人間は `-Scan` /
+パス指定から同じスクリプトを呼ぶ。`.claude/settings.json` は追跡外 (ローカル) だが、規約とロジックの
+正本はこの節と追跡されるスクリプトにあるため、参照先は一元化される。
 
 ## Versioning / API 安定性
 

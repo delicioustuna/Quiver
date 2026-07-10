@@ -30,6 +30,11 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     void Abort();
 
     /// <summary>
+    /// 同一トランザクションハンドルの並行使用を検出するための使用スコープを開始する。
+    /// </summary>
+    TransactionUsageLease EnterUsage();
+
+    /// <summary>
     /// トランザクション内に savepoint を作成し、その識別子を返す。
     /// 以後の変更を <see cref="RollbackTo"/> で巻き戻したり、<see cref="ReleaseSavepoint"/> で
     /// 親スコープへマージしたりできる。Nested savepoint をサポート。

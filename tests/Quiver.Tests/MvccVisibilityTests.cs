@@ -46,7 +46,7 @@ public sealed class MvccVisibilityTests : IDisposable
         }
 
         // reader tx を開始 (snapshot 取得時に concurrent writer は active なし)。
-        using var reader = _db.BeginTransaction();
+        using var reader = _db.BeginReadOnlyTransaction();
 
         // writer tx を別に開始して node を追加 (まだ commit しない)。
         var writer = _db.BeginTransaction();
@@ -61,7 +61,7 @@ public sealed class MvccVisibilityTests : IDisposable
         reader.NodeExists(added).Should().BeFalse("writer commit 後も reader snapshot からは見えない (SI)");
 
         // 新規 reader を開けば可視 (writer commit は新規 snapshot の前)。
-        using var freshReader = _db.BeginTransaction();
+        using var freshReader = _db.BeginReadOnlyTransaction();
         freshReader.NodeExists(added).Should().BeTrue("新規 snapshot からは writer commit が見える");
         freshReader.NodeExists(existing).Should().BeTrue();
     }
@@ -73,7 +73,7 @@ public sealed class MvccVisibilityTests : IDisposable
         var ghost = failedTx.CreateNode("Ghost");
         failedTx.Rollback();
 
-        using var observer = _db.BeginTransaction();
+        using var observer = _db.BeginReadOnlyTransaction();
         observer.NodeExists(ghost).Should().BeFalse("abort された tx の write は visible にならない");
     }
 
@@ -92,7 +92,7 @@ public sealed class MvccVisibilityTests : IDisposable
             tx.Commit();
         }
 
-        using var reader = _db.BeginTransaction();
+        using var reader = _db.BeginReadOnlyTransaction();
         int initialCountFromA = CountOutgoing(reader, a);
         initialCountFromA.Should().Be(2);
 
@@ -122,7 +122,7 @@ public sealed class MvccVisibilityTests : IDisposable
         _db.Dispose();
 
         using var reopened = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using var rtx = reopened.BeginTransaction();
+        using var rtx = reopened.BeginReadOnlyTransaction();
         // recovery の CommittedTxRegistry rebuild と horizon により xmin が registry / horizon 経由で visible。
         rtx.NodeExists(pre).Should().BeTrue();
         rtx.GetProperty(pre, "score").Int32Value.Should().Be(42);
@@ -140,7 +140,7 @@ public sealed class MvccVisibilityTests : IDisposable
             tx.Commit();
         }
 
-        using var reader = _db.BeginTransaction();
+        using var reader = _db.BeginReadOnlyTransaction();
         reader.GetProperty(n, "v").Int32Value.Should().Be(100);
 
         using (var writer = _db.BeginTransaction())
@@ -153,7 +153,7 @@ public sealed class MvccVisibilityTests : IDisposable
         reader.GetProperty(n, "v").Int32Value.Should().Be(100,
             "reader snapshot は writer の SetProperty 上書きを見ない (旧 version が enumerate で先にヒット)");
 
-        using var fresh = _db.BeginTransaction();
+        using var fresh = _db.BeginReadOnlyTransaction();
         fresh.GetProperty(n, "v").Int32Value.Should().Be(200);
     }
 
@@ -170,7 +170,7 @@ public sealed class MvccVisibilityTests : IDisposable
             tx.Commit();
         }
 
-        using var longReader = _db.BeginTransaction();
+        using var longReader = _db.BeginReadOnlyTransaction();
         int baselineCount = 0;
         foreach (var nid in baseNodes)
             if (longReader.NodeExists(nid)) baselineCount++;
@@ -193,7 +193,7 @@ public sealed class MvccVisibilityTests : IDisposable
                 $"reader snapshot は writer commit を超えても drift せず、round {round} で {observed} != {baselineCount}");
         }
 
-        using var fresh = _db.BeginTransaction();
+        using var fresh = _db.BeginReadOnlyTransaction();
         int baseFromFresh = 0;
         foreach (var nid in baseNodes)
             if (fresh.NodeExists(nid)) baseFromFresh++;
@@ -242,7 +242,7 @@ public sealed class MvccVisibilityTests : IDisposable
         {
             try
             {
-                using var rtx = _db.BeginTransaction();
+                using var rtx = _db.BeginReadOnlyTransaction();
                 int baselineCount = 0;
                 foreach (var nid in baseNodes)
                     if (rtx.NodeExists(nid)) baselineCount++;
@@ -267,7 +267,7 @@ public sealed class MvccVisibilityTests : IDisposable
         readerErrors.Should().BeEmpty("reader は concurrent write 中も corruption / 例外を起こさない");
         driftErrors.Should().BeEmpty("snapshot は writer commit を観測しない (SI)");
 
-        using var fresh = _db.BeginTransaction();
+        using var fresh = _db.BeginReadOnlyTransaction();
         int baseFromFresh = 0;
         foreach (var nid in baseNodes)
             if (fresh.NodeExists(nid)) baseFromFresh++;
@@ -290,10 +290,10 @@ public sealed class MvccVisibilityTests : IDisposable
         }
         sw.Stop();
         sw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(30),
-            $"FT-26 MVCC オーバヘッド sanity: {N} ノード create+commit が {sw.ElapsedMilliseconds} ms");
+            $"MVCC オーバヘッド sanity: {N} ノード create+commit が {sw.ElapsedMilliseconds} ms");
 
         // verify all visible
-        using var verify = _db.BeginTransaction();
+        using var verify = _db.BeginReadOnlyTransaction();
         int visible = 0;
         for (long id = 0; id < N + 10; id++)
             if (verify.NodeExists(new NodeId(id))) visible++;
