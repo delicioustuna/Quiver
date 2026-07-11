@@ -450,11 +450,24 @@ CLAUDE.md / AGENTS.md の散文だけではエージェント自身の判断に�
 |---|---|---|
 | `-Hook`（`.claude/settings.json` の PostToolUse） | Claude Code | 編集差分のみ検査し advisory 通知 (exit 2)。ブロックしない |
 | `-Scan` | 人間 / CI / Codex の監査 | 対象ルートを一覧監査 (exit 1)。tests/benchmarks は既存ベースラインが多い |
+| `-DiffAgainst <ref>` | Codex / commit 前の監査 | ref から追加された行だけを検査し、既存候補と新規漏出を分離する |
 | `<path>` | 手動 / スクリプト | 指定ファイルを検査 |
 
 両エージェントで同一ロジックを共有する: Claude Code はフックから、Codex / 人間は `-Scan` /
 パス指定から同じスクリプトを呼ぶ。`.claude/settings.json` は追跡外 (ローカル) だが、規約とロジックの
 正本はこの節と追跡されるスクリプトにあるため、参照先は一元化される。
+
+`check-markdown-links.ps1 -Roots <paths...>` は tracked Markdown の相対 link の解決先を検査する。
+
+`check-skill-redirects.ps1` が認める historical redirect は、Claude 側の `SKILL.md` の唯一の行である次の形式だけである。
+
+```text
+<!-- quiver-historical-skill-redirect: ../../../../.agents/skills/quiver-implement/comlpeted/SKILL.md -->
+```
+
+redirect は ClaudeRoot 配下から AgentsRoot 配下の leaf `SKILL.md` への相対 forward-slash path でなければならない。
+
+本文併記、multi-hop、通常の Markdown または YAML、絶対 URI、drive path は redirect として認めない。
 
 ## Versioning / API 安定性
 

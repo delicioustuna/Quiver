@@ -26,6 +26,8 @@
 param(
     [switch]$Hook,
     [switch]$Scan,
+    [string]$DiffAgainst,
+    [switch]$SelfTest,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Paths
 )
@@ -91,6 +93,44 @@ function Get-Prop {
     return $null
 }
 
+function Get-DiffFindings {
+    param([string[]]$Lines)
+
+    $findings = @()
+    $path = ''
+    $lineNumber = 0
+    foreach ($line in $Lines) {
+        if ($line.StartsWith('+++ b/')) {
+            $path = $line.Substring(6)
+            continue
+        }
+        if ($line.StartsWith('@@ ')) {
+            if ($line -match '\+(\d+)') { $lineNumber = [int]$Matches[1] }
+            continue
+        }
+        if ($line.StartsWith('+') -and -not $line.StartsWith('+++')) {
+            if ($path -and $ScanExtensions -contains [IO.Path]::GetExtension($path) -and -not (Test-Excluded $path)) {
+                $text = $line.Substring(1)
+                foreach ($m in $TrackRegex.Matches($text)) { $findings += [pscustomobject]@{ Path = $path; Line = $lineNumber; Marker = $m.Value; Text = $text.Trim() } }
+                foreach ($m in $AnsatzRegex.Matches($text)) { $findings += [pscustomobject]@{ Path = $path; Line = $lineNumber; Marker = $m.Value; Text = $text.Trim() } }
+            }
+            $lineNumber++
+            continue
+        }
+        if (-not $line.StartsWith('-')) { $lineNumber++ }
+    }
+    return $findings
+}
+
+if ($SelfTest) {
+    $clean = @('diff --git a/src/A.cs b/src/A.cs', '+++ b/src/A.cs', '@@ -1 +1 @@', '+var value = 1;')
+    $bad = @('diff --git a/src/A.cs b/src/A.cs', '+++ b/src/A.cs', '@@ -1 +1 @@', '+// HYP-77')
+    $excluded = @('diff --git a/docs/design/a.md b/docs/design/a.md', '+++ b/docs/design/a.md', '@@ -1 +1 @@', '+HYP-77')
+    if (@(Get-DiffFindings $clean).Count -ne 0 -or @(Get-DiffFindings $bad).Count -ne 1 -or @(Get-DiffFindings $excluded).Count -ne 0) { throw 'self-test failed' }
+    Write-Host 'OK: DiffAgainst self-test passed.'
+    exit 0
+}
+
 # --- モード: Hook (Claude Code PostToolUse) ------------------------------------
 if ($Hook) {
     try {
@@ -138,7 +178,17 @@ if ($Hook) {
 
 # --- モード: Scan / Paths (人間 / CI / Codex) ----------------------------------
 $targets = @()
-if ($Scan) {
+if ($DiffAgainst) {
+    $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+    $diff = @(& git -C $repoRoot diff --no-ext-diff --unified=0 --diff-filter=ACMR $DiffAgainst --)
+    if ($LASTEXITCODE -ne 0) { throw "git diff failed for $DiffAgainst" }
+    $findings = @(Get-DiffFindings $diff)
+    foreach ($f in $findings) { Write-Host ("{0}:L{1}: {2}  … {3}" -f $f.Path, $f.Line, $f.Marker, $f.Text) }
+    if ($findings.Count -gt 0) { exit 1 }
+    Write-Host "OK: $DiffAgainst からの追加行に漏れは検出されませんでした。"
+    exit 0
+}
+elseif ($Scan) {
     $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
     $includeGlobs = $ScanExtensions | ForEach-Object { '*' + $_ }
     $collected = New-Object System.Collections.Generic.List[string]
