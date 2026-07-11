@@ -2,8 +2,8 @@
 
 > 効力宣言: 本書と設計正本が食い違う場合は設計正本を優先し、食い違いをユーザへ報告する。
 > 作成日: 2026-07-10
-> 対応する正本のバージョン: 正本が未 commit のため、現在の draft に基づく。bootstrap 後の承認 commit で実 commit hash へ更新する。
-> ステータス: draft
+> 対応する正本のバージョン: `bf8b05b6b073f77848a9fe8aed34eae8e67f3c37`
+> ステータス: 承認済み(2026-07-11)
 
 ## 1. 着手前チェック
 
@@ -67,7 +67,7 @@ mirror 更新はローカル環境設定であり、`git add -f` で追跡しな
 |---|---|---|---|
 | 機能 test | 適用 | Markdown link audit、guardrail self-test、`dotnet build Quiver.slnx -v minimal` | 全コマンド成功、0 errors、0 warnings |
 | crash test | N/A | `git diff redesign-baseline -- src/Quiver/Transactions src/Quiver/Wal src/Quiver/Storage` | durability production code の変更0件 |
-| baseline gate | N/A | `git diff redesign-baseline -- src tests benchmarks` | production、test、benchmark code の性能変更0件。監査 script は除く |
+| baseline gate | N/A | `git diff --exit-code redesign-baseline -- src benchmarks` | production と benchmark code の性能変更0件。`scripts/agent-guardrails`、その正常系・違反系の自己テスト（`tests/` 配下に置く場合を含む）、および docs は監査・検証・文書化だけを変更し、性能比較対象ではない |
 | as-built 更新 | 適用 | `git diff redesign-baseline -- docs/spec docs/design` | current と target の区分、現行実装 map、運用規則が更新済み |
 
 追加条件は次のとおりである。
