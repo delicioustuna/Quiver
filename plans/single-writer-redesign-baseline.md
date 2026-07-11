@@ -5,14 +5,15 @@
 
 ## 1. 測定対象
 
-- commit under test: `ee811d1a3672fb96ad8bebfdeb036099cbaf7540`
-- 測定日: 未測定
-- OS: 未測定
-- CPU: 未測定
-- RAM: 未測定
-- .NET SDK/runtime: 未測定
+- commit under test (production): `ee811d1a3672fb96ad8bebfdeb036099cbaf7540`
+- 実行時 HEAD: `bf8b05b6b073f77848a9fe8aed34eae8e67f3c37` (`src`、`tests`、`benchmarks` は基点 commit と差分なし)
+- 測定日: 2026-07-11 (Asia/Tokyo)
+- OS: Windows 10.0.26200 (`dotnet --info`)。CIM による詳細取得は sandbox のアクセス拒否で不可
+- CPU: runner 報告では logical processors=16。モデル名は CIM のアクセス拒否で未取得
+- RAM: CIM のアクセス拒否で未取得
+- .NET SDK/runtime: SDK 10.0.301 / .NET 10.0.9
 - build configuration: `Release`
-- seed: runner の固定 seed。runner が seed を表示しない場合は、その事実を結果へ記録する
+- seed: 外部 seed 引数は指定しなかった。5 runner の標準出力はいずれも seed を表示しなかった
 
 ## 2. 着工前に実行するコマンド
 
@@ -35,14 +36,15 @@ dotnet run -c Release --project benchmarks/Quiver.Benchmarks.RecallCheck
 
 | workload | 実行コマンド | 結果 | 生出力の保存先 |
 |---|---|---|---|
-| ARIES baseline | 未測定 | 未測定 | 未測定 |
-| basic performance | 未測定 | 未測定 | 未測定 |
-| full-text | 未測定 | 未測定 | 未測定 |
-| hyperedge traversal | 未測定 | 未測定 | 未測定 |
-| vector recall | 未測定 | 未測定 | 未測定 |
+| Release build | `dotnet build Quiver.slnx -c Release -v minimal` | exit 0, 27.28 s, 0 errors, Studio warnings 3 | terminal output only |
+| ARIES baseline | `dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --clean-slate-aries-baseline` | exit 0, 149.9 s; relationship p50 5.6012 ms, update p50 1155.30 us; FT 11.73x / p50 11.128 ms; vector recall@10 0.950 | `docs/benchmarks/2026-07-11_SingleWriterRedesign_CleanSlateAriesRaw.md` |
+| basic performance | `dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --basic-perf` | exit 0, 106.3 s; durable 1.022 ms/commit, BFS 2-hop 0.0385 ms, bulk/tx 5.1x | `docs/benchmarks/2026-07-11_SingleWriterRedesign_BasicPerfRaw.md` |
+| full-text | `dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --fts6` | exit 0, 125.1 s; WAL amplification 11.73x, corpus build 101784 ms, p50 11.174 ms | `docs/benchmarks/2026-07-11_SingleWriterRedesign_Fts6Raw.md` |
+| hyperedge traversal | `dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --hyperedge-traversal` | exit 0, 10.1 s; degree 10/100/1000 view gate all PASS | `docs/benchmarks/2026-07-11_SingleWriterRedesign_HyperedgeTraversalRaw.md` |
+| vector recall | `dotnet run -c Release --project benchmarks/Quiver.Benchmarks.RecallCheck` | exit 0, 90.0 s; legacy 0.825/0.865, default 0.950/0.985 after deletion; PASSED | `docs/benchmarks/2026-07-11_SingleWriterRedesign_RecallCheckRaw.md` |
 
-生出力は `docs/benchmarks/` 配下の測定日付き Markdown へ保存する。
-一時ファイルへの出力だけで済ませない。
+生出力は `docs/benchmarks/` 配下の測定日付き Markdown へ保存した。
+元の一時ログは `C:\Users\srgf_\AppData\Local\Temp\quiver-redesign-baseline-20260711-*.log` にも残している。
 
 ## 4. gate の出所
 
