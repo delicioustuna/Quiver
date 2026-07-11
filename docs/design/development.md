@@ -355,13 +355,47 @@ runner: `--hyperedge-traversal` / `--hyperedge-write` / `--hyperedge-match`。
 
 ## 開発状況
 
-完了済みマイルストーンと進行中タスクの一覧は [docs/design/roadmap.md](roadmap.md) を正本とする。
-概略: Wave 1–5（Storage / Codec / WAL → Stores / Index → Transactions → Operators / Engine → Client 層）
-完了。Feature（FT）・Perf（PW）・Gremlin/Cypher Compat（GC）・Backend Abstraction（BA）・
-Vector/Embedding（VEC）の各系列が進行中。残タスク（PW-8/9/10 ほか）も roadmap 参照。
+現在の実装トラックは [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md) である。
 
-Gremlin / Cypher 互換の対応状況は [docs/spec/05_query.md](../spec/05_query.md)。
-基本探索・比較述語・CRUD・集約・可変長パス・`as/select` は対応済み。
+`docs/spec/` は current as-built を記録する。
+
+target の設計は計画書を正本とし、実装されるまで as-built として記述しない。
+
+過去トラックの完了記録は historical record として残す。
+
+それらは commit hash、当時の API、実測値を説明するが、現行の実装順序や再実装禁止の根拠にはならない。
+
+再設計の disposition が Delete または Rewrite を指定するコードは、過去の完了記録に関わらず対象になる。
+
+### ローカル運用
+
+bootstrap は `develop` で行い、その後の tracked な再設計作業は `redesign/single-writer` の専用 worktree で行う。
+
+専用 worktree は同じ Git repository の履歴、tag、index、remote を共有する。
+
+物理コピーした別ライブラリや、後日の成果物差し替えで並行開発しない。
+
+この作業ではユーザー指示により外部 push と upstream 設定を保留している。
+
+ローカル commit と tag は有効な進行記録だが、remote との同期を意味しない。
+
+外部公開や統合を再開する前に、[実行手順](../../plans/single-writer-redesign-process.md) §6 の remote hash 固定、integration candidate、全 gate の再実行を行う。
+
+`.agents/` と `.claude/` は git 管理外のローカル設定である。
+
+両方の `quiver-implement` mirror は byte-for-byte で一致させ、tracked commit に混ぜない。
+
+専用 worktree には mirror が複製されないため、必要なときはメインツリー側を read-only で参照する。
+
+### Wave gate
+
+各 Wave の統合候補は、機能 test、crash test、baseline gate、as-built 更新を満たす。
+
+crash test と baseline gate を `N/A` とするときは、対象挙動を変更していないことを差分で示す。
+
+solution build、変更した contract の as-built 更新、Wave 固有の機能 test は `N/A` にできない。
+
+性能 gate が未達なら、原因と再設計案を plan の decision log に追記してからユーザー判断を得る。
 
 ## 設計ドキュメント
 
