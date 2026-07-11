@@ -4,7 +4,7 @@ README はライブラリ利用者向けの最小限に絞っているため、�
 ストレージ仕様・ビルド/テスト手順・開発状況・バージョニング規約・詳細な性能計測は本ファイルに集約する。
 
 - 設計仕様 (as-built): [docs/spec/](../spec/)
-- ロードマップ / タスク状況: [docs/design/roadmap.md](roadmap.md)
+- 現行再設計の設計正本: [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md)
 - API 安定性ポリシー: [docs/api-stability.md](../api-stability.md)
 - 運用ガイド: [docs/operations/README.md](../operations/README.md)
 
@@ -379,7 +379,7 @@ bootstrap は `develop` で行い、その後の tracked な再設計作業は `
 
 ローカル commit と tag は有効な進行記録だが、remote との同期を意味しない。
 
-外部公開や統合を再開する前に、[実行手順](../../plans/single-writer-redesign-process.md) §6 の remote hash 固定、integration candidate、全 gate の再実行を行う。
+外部公開や `develop` への統合を再開する前に、[再設計の実行手順](../../plans/single-writer-redesign-process.md) §2〜§6 で定める未実施条件を満たす。
 
 `.agents/` と `.claude/` は git 管理外のローカル設定である。
 

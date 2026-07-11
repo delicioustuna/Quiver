@@ -39,7 +39,7 @@ bootstrap 後の再設計の tracked file は、`redesign/single-writer` の専�
 
 保留は remote と同期済みであることを意味しない。
 
-外部公開や `develop` への統合を再開する前に、実行手順の remote hash 固定、integration candidate、push の条件を改めて満たす。
+外部公開や `develop` への統合を再開する前に、[再設計の実行手順](../../plans/single-writer-redesign-process.md) §2〜§6 で定める未実施条件を満たす。
 
 ## skill mirror と可変状態
 
@@ -51,7 +51,9 @@ mirror の更新は tracked commit に混ぜない。
 
 専用 worktree に mirror は複製されないため、必要なときはメインツリー側を read-only で参照する。
 
-Wave の進行状態、承認済み計画、decision log は tracked な `plans/` に置く。
+Wave の合否と着手対象は git tag で判定する。
+
+承認済み計画と decision log は tracked な `plans/` に置く。
 
 ## Wave の検証
 
