@@ -15,6 +15,7 @@
 - [ ] C-1 の redo-only、WAL record 7種、loser 除外が正本内で一致する。
 - [ ] C-2 の SSN/lock削除 Wave 4、public transaction cutover Wave 6 が正本とreviewで一致する。
 - [ ] C-3 の writer 自己可視性が WriterLease と同じ Wave 4 に割り当てられている。
+- [ ] 正本 §2.3、§5.1、§16 と review C-4 の canonical Invalid、strict factory、raw unpack の規則が一致する。
 - [ ] 本書の正本 version を実 commit hash へ更新し、ユーザがコミット計画を承認した。
 
 見出しの「対応済み」だけで判断せず、各参照先を `rg` で照合する。
@@ -26,7 +27,7 @@
 2. 正本 §2.3 と §5.1。
 3. 正本 §7.1 の identity disposition。
 4. 正本 §8.1 の ID equality 変更。
-5. review C-1〜C-3、M-1、M-5。
+5. review C-1〜C-4、M-1、M-5。
 6. `docs/design/00_conventions.md` の public API、ID、test 規約。
 
 ## 3. コミット計画
@@ -41,7 +42,7 @@
    static helper は `UnpackSequence(long)` / `UnpackGeneration(long)` へ改名し、全 call site を同じ commit で移行する。
    typed ID から EntityRef を作る全 call site は raw constructor を使えず、型別 `From` factory に移行する。
    Pack/PackLocal の bit layout、public enum の underlying value、query/operator の既存 tie-break は変更しない。新しい比較operatorや `IComparable` は追加しない。
-   dictionary、frontier、index key、typed ID factory、`Pack` / `PackLocal` codec round-trip、不正kind/value rejection の same-sequence/different-generation test を追加する。三つの typed Invalid の `default(EntityRef)` への写像、Property/予約/未知 kind の factory/`EntityId` rejection、raw `UnpackKind` の抽出も検証する。
+   dictionary、frontier、index key、typed ID factory、`Pack` / `PackLocal` codec round-trip、不正kind/value rejection の same-sequence/different-generation test を追加する。三つの typed Invalid、`EntityId.Invalid`、`EntityId.FromPacked(0)` の canonical Invalid、Property(3)/予約/未知 kind（例 5、15）の factory/`EntityId` rejection、malformed internal `EntityId.ToPacked`、raw `UnpackKind` の抽出も検証する。
    public `PropertyId` equality/hash は Wave 1 の対象外とし、Wave 3 の削除まで現行 Sequence equalityを維持する。
 2. entity kind を三種類へ限定する。
    `EntityKind.Property`、`EntityId.FromProperty`、`EntityId.AsProperty` と対応 test を削除する。
@@ -81,7 +82,7 @@ if ($stagedPaths.Count -gt 0) { & scripts/agent-guardrails/check-track-markers.p
 追加条件は次のとおりである。
 integration candidate で設定すべき追加条件数は6件である。
 
-- `EntityKind` は Node、Relationship、Hyperedge だけである。
+- `EntityKind` は Node、Relationship、Hyperedge だけであり、予約 raw kind を valid な `EntityRef` または `EntityId` にしない。
 - typed ID equality と hash が Generation を含む。
 - public `PropertyId` は Wave 3 の現行 active contract として残るが、`EntityRef` へ変換できない。
 - transaction/property/index の新旧 public modelを追加していない。

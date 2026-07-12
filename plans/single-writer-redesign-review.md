@@ -33,6 +33,16 @@
 - **失敗シナリオ**: 実装者が規則を字義通り実装すると同一 tx 内 create→read が not found になる。逆に暗黙で例外を入れると、`xmax = writerTxId`(自 tx 内 delete)の扱い、savepoint rollback 後の可視性など、仕様なしの独自判断が増える。
 - **修正案**: §2.2.5 に「writer transaction 自身に対しては `xmin = selfTxId` は committed 扱い、`xmax = selfTxId` は削除済み扱いとする。savepoint rollback で undo された version はこの限りでない」を明文で追加する。
 
+### C-4. EntityRef の invalid と reserved kind の public contract が未定義
+
+> **設計決定済み・実装未対応(2026-07-12)**: 正本 §2.3、§5.1、§16 に canonical Invalid、public factory、raw unpack の境界を追加した。Wave 1 の実装、factory test、PublicApi approval が完了するまで対応済みにはしない。
+
+- **発見日**: 2026-07-12
+- **影響**: Wave 1 commit 1
+- **内容**: `EntityRef.From(NodeId.Invalid)` が invalid sentinel を返すのか例外にするのか、`Create`/`Pack`/`EntityId` の生成と変換が Property、予約、未知 kind をどう扱うのかが未定義だった。実装者が任意の振る舞いを選ぶと、raw packed value の読取りと public entity identity の生成境界が混同される。
+- **対応条件**: typed Invalid、`EntityId.Invalid`、packed値 `0` だけを canonical Invalid とし、public factory と `EntityId` の生成/変換は非0の Property、予約、未知 kind を `ArgumentOutOfRangeException` で拒否する。malformed internal `EntityId.ToPacked` は例外にし、`UnpackKind` は raw 抽出として検証を行わない。
+- **検証**: Wave 1 の factory test と PublicApi approval で typed Invalid、packed値 0、Property/予約/未知 kind、raw unpack、raw constructor 非公開を確認する。
+
 ## Major
 
 ### M-1. Wave 3 のテスト項目が Wave 5 / Wave 9 の成果に暗黙依存する
@@ -86,16 +96,6 @@
 - **該当**: §4.1 Update/Delete step 4 (L168「property、payload、index entry、incidence、entity slot の順」)、§5.5 (L313「property ref が durable なのに payload が無い状態は primary corruption として open/recovery を失敗させる」)
 - **内容**: §5.5 の corruption 規則が「visible な property version」に限定されていない。vacuum の順序は property→payload だが、crash がこの 2 ステップの間に落ちると「reclaim 済み property version(または reclaim commit が durable になる前の状態)が、すでに回収された payload を指す」中間状態が heap 上に残り得る。字義通りに実装すると open/recovery が正常な GC 中間状態を corruption と誤判定し、DB が開けなくなる。また payload より**後**に回収される index entry は必然的に dangling ref 期間を持つが、これが「正常」である旨は §4.5 の revalidation 記述から推測するしかない。
 - **修正案**: §5.5 の規則を「snapshot horizon 上で visible な property version が payload を欠く場合のみ corruption」と限定し、vacuum の property/payload 回収を単一 commit にする(または回収順を payload が最後になるよう定義する)ことを明記する。
-
-### M-7. EntityRef の invalid と reserved kind の public contract が未定義
-
-> **対応済み(2026-07-12)**: 正本 §2.3、§5.1、§16 に typed Invalid、public factory、raw unpack の境界を追加した。Wave 1 は factory/approval test でこの契約を検証する。
-
-- **発見日**: 2026-07-12
-- **影響**: Wave 1 commit 1
-- **内容**: `EntityRef.From(NodeId.Invalid)` が invalid sentinel を返すのか例外にするのか、`Create`/`Pack`/`EntityId` の生成と変換が Property、予約、未知 kind をどう扱うのかが未定義だった。実装者が任意の振る舞いを選ぶと、raw packed value の読取りと public entity identity の生成境界が混同される。
-- **対応条件**: typed Invalid だけを `default(EntityRef)` へ写像し、public factory と `EntityId` の生成/変換は三つの entity kind 以外を `ArgumentOutOfRangeException` で拒否する。`UnpackKind` は raw 抽出として検証を行わない。
-- **検証**: Wave 1 の factory test と PublicApi approval で typed Invalid、Property/予約/未知 kind、raw unpack、raw constructor 非公開を確認する。
 
 ## Minor
 
