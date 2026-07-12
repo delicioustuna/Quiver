@@ -15,7 +15,7 @@ README はライブラリ利用者向けの最小限に絞っているため、�
 | `Quiver` | エンジン中核 + 公開ファサード。型付き属性（`[Node]` / `[Relationship]` / `[Property]` / `[Indexed]`、namespace `Quiver.Api`）を本体に内包し、`Quiver.SourceGen` を analyzer として同梱。これ 1 つの参照で型安全 CRUD まで使える |
 | `Quiver.SourceGen` | Roslyn `IIncrementalGenerator`（CRUD / `FindBy*` / 型保存トラバーサル糖衣を生成）。単体公開せず `Quiver` に同梱する内部プロジェクト |
 | `Quiver.Embedding` | テキスト埋め込みパイプライン（VEC-4）。**incubating: NuGet 非公開**（`IsPackable=false`。「NuGet パッケージ化」§incubating 参照） |
-| `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ・取込・hybrid 検索 + graph expansion）。**開発中** ([design/14](14_rag_layer.md)) |
+| `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ・取込・hybrid 検索 + graph expansion）。**開発中**（過去の設計ノートは historical record。現行の実装順序は再設計計画に従う） |
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` 連携（DI 登録） |
 | `Quiver.OpenTelemetry` | OpenTelemetry エクスポート |
 
@@ -402,20 +402,20 @@ solution build、変更した contract の as-built 更新、Wave 固有の機�
 | ファイル | 内容 |
 |---|---|
 | [00_conventions.md](00_conventions.md) | 共通規約（命名・性能指針・テスト規約） |
-| [01_storage_paging.md](01_storage_paging.md) | ページ管理・バッファプール |
-| [02_record_codec.md](02_record_codec.md) | バイト列直接操作プリミティブ |
-| [03_fixed_record_stores.md](03_fixed_record_stores.md) | Node / Relationship ストア |
-| [04_property_token_stores.md](04_property_token_stores.md) | Property / Token ストア |
-| [05_btree_index.md](05_btree_index.md) | B+Tree インデックス |
-| [06_wal.md](06_wal.md) | Write-Ahead Log |
-| [07_transaction_recovery.md](07_transaction_recovery.md) | トランザクション・リカバリ |
-| [08_physical_operators.md](08_physical_operators.md) | Volcano 型物理演算子 |
-| [09_graph_api.md](09_graph_api.md) | 公開 CRUD API |
-| [10_embedding_pipeline.md](10_embedding_pipeline.md) | 埋め込み / ベクトル検索パイプライン |
-| [11_rearchitecture_master_plan.md](11_rearchitecture_master_plan.md) | 抜本再設計マスタープラン |
-| [12_rag_backend_direction.md](12_rag_backend_direction.md) | ローカル RAG バックエンド方向性（ポジショニング・非目標の正本） |
-| [13_fulltext_search.md](13_fulltext_search.md) | 全文検索 / ハイブリッド検索（転置インデックス + BM25 + RRF） |
-| [14_rag_layer.md](14_rag_layer.md) | Quiver.Rag レイヤ（Document/Chunk スキーマ・取込・検索） |
+| `01_storage_paging.md` | historical record: ページ管理・バッファプール |
+| `02_record_codec.md` | historical record: バイト列直接操作プリミティブ |
+| `03_fixed_record_stores.md` | historical record: Node / Relationship ストア |
+| `04_property_token_stores.md` | historical record: Property / Token ストア |
+| `05_btree_index.md` | historical record: B+Tree インデックス |
+| `06_wal.md` | historical record: Write-Ahead Log |
+| `07_transaction_recovery.md` | historical record: トランザクション・リカバリ |
+| `08_physical_operators.md` | historical record: Volcano 型物理演算子 |
+| `09_graph_api.md` | historical record: 公開 CRUD API |
+| `10_embedding_pipeline.md` | historical record: 埋め込み / ベクトル検索パイプライン |
+| `11_rearchitecture_master_plan.md` | historical record: 抜本再設計マスタープラン |
+| `12_rag_backend_direction.md` | historical record: ローカル RAG バックエンド方向性（ポジショニング・非目標の正本） |
+| `13_fulltext_search.md` | historical record: 全文検索 / ハイブリッド検索（転置インデックス + BM25 + RRF） |
+| `14_rag_layer.md` | historical record: Quiver.Rag レイヤ（Document/Chunk スキーマ・取込・検索） |
 
 ## エージェント運用ガードレール
 

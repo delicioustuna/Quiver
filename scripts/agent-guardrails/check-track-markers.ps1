@@ -123,7 +123,7 @@ function Get-DiffFindings {
 }
 
 if ($SelfTest) {
-    $clean = @('diff --git a/src/A.cs b/src/A.cs', '+++ b/src/A.cs', '@@ -1 +1 @@', '+var value = 1;')
+    $clean = @('diff --git a/src/A.cs b/src/A.cs', '+++ b/src/A.cs', '@@ -1,2 +1 @@', '-// HYP-76', ' // HYP-77', '+var value = 1;')
     $bad = @('diff --git a/src/A.cs b/src/A.cs', '+++ b/src/A.cs', '@@ -1 +1 @@', '+// HYP-77')
     $excluded = @('diff --git a/docs/design/a.md b/docs/design/a.md', '+++ b/docs/design/a.md', '@@ -1 +1 @@', '+HYP-77')
     if (@(Get-DiffFindings $clean).Count -ne 0 -or @(Get-DiffFindings $bad).Count -ne 1 -or @(Get-DiffFindings $excluded).Count -ne 0) { throw 'self-test failed' }
