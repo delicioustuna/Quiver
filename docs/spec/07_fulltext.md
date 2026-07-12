@@ -1,6 +1,10 @@
 # 全文検索
 
 > as-built 仕様 (on-disk FormatVersion V5)
+>
+> **current (as-built)**: 以下は現在実装されている FormatVersion V5 の全文検索契約である。
+> **target (未実装)**: [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md) が将来の設計正本であり、本書の本文はその target を先取りして記述しない。
+> **実装済み境界**: 再設計の production code はまだ実装されていない。`redesign-baseline` は着工前の測定を固定するタグであり、再設計の実装完了を表さない。
 
 ## アーキテクチャ {#architecture}
 
