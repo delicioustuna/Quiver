@@ -2,12 +2,13 @@
 
 > 効力宣言: 本書と設計正本が食い違う場合は設計正本を優先し、食い違いをユーザへ報告する。
 > 作成日: 2026-07-10
-> 対応する正本のバージョン: 正本が未 commit のため、現在の draft に基づく。Wave 0 完了後の承認 commit で実 commit hash へ更新する。
-> ステータス: draft
+> 対応する正本のバージョン: `bf8b05b6b073f77848a9fe8aed34eae8e67f3c37`
+> ステータス: 承認済み(2026-07-12)
 
 ## 1. 着手前チェック
 
 - [ ] `redesign-wave-0` annotated tag が `develop` の Wave 0 merge commit に存在する。
+- [ ] `git merge-base --is-ancestor redesign-wave-0 HEAD` が成功し、topic branch が Wave 0 完了点を含む。
 - [ ] `redesign-baseline` tag と測定済み baseline 文書が存在する。
 - [ ] branch が `redesign/single-writer`、作業場所が専用 worktree である。
 - [ ] session 再開確認を実施し、`HEAD` と前セッションの最終 commit hash が一致する。
@@ -74,7 +75,7 @@ if ($stagedPaths.Count -gt 0) { & scripts/agent-guardrails/check-track-markers.p
 |---|---|---|---|
 | 機能 test | 適用 | solution build、Core、Stores、Operators、PublicApi test | 0 errors、0 warnings、全 test成功 |
 | crash test | N/A | enum underlying value固定test、`git diff redesign-wave-0 -- src/Quiver/Wal src/Quiver/Storage src/Quiver/Transactions` | Node=1、Relationship=2、Hyperedge=4を維持し、WAL、page flush、transaction/recovery behavior の変更0件 |
-| baseline gate | 適用 | baseline と同じ引数の `--clean-slate-aries-baseline` | identityを使う point update と relationship traversal の p50 が redesign baseline 比1.20x以内。生出力を保存 |
+| baseline gate | 適用 | baseline と同じ引数の `--basic-perf` | comparable CRUD、visibility、traversal の各 p50 が redesign baseline 比1.20x以内。生出力を保存 |
 | as-built 更新 | 適用 | `git diff redesign-wave-0 -- docs/spec docs/design/development.md` | Generation 込み equality、三 EntityKind、後続 Wave staging が記載済み |
 
 追加条件は次のとおりである。
