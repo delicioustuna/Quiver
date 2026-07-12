@@ -2,7 +2,7 @@
 
 > 効力宣言: 本書と設計正本が食い違う場合は設計正本を優先し、食い違いをユーザへ報告する。
 > 作成日: 2026-07-10
-> 対応する正本のバージョン: `a72455858a906ab31466308f53b5eeb32cf21ee7`
+> 対応する正本のバージョン: `bba8338b07d89e6adaba10eb8d660debe4e8bc85`
 > ステータス: 承認済み(2026-07-12)
 
 ## 1. 着手前チェック
@@ -17,6 +17,7 @@
 - [ ] C-3 の writer 自己可視性が WriterLease と同じ Wave 4 に割り当てられている。
 - [ ] 正本 §2.3、§5.1、§16 と review C-4 の canonical Invalid、strict factory、raw unpack の規則が一致する。
 - [ ] 正本 §2.3、§5.1、§7.1、§16 と review C-5 の physical Sequence、logical materialization、stale reject/skip、reuse retarget 禁止の規則が一致する。
+- [ ] 正本 §2.3、§5.1、§7.1、§16 と review C-6 の relationship raw entry、reader horizon、rebuild/reset、candidate skip/not-found の規則が一致する。
 - [ ] 本書の正本 version を実 commit hash へ更新し、ユーザがコミット計画を承認した。
 
 見出しの「対応済み」だけで判断せず、各参照先を `rg` で照合する。
@@ -28,7 +29,7 @@
 2. 正本 §2.3 と §5.1。
 3. 正本 §7.1 の identity disposition。
 4. 正本 §8.1 の ID equality 変更。
-5. review C-1〜C-5、M-1、M-5。
+5. review C-1〜C-6、M-1、M-5。
 6. `docs/design/00_conventions.md` の public API、ID、test 規約。
 
 ## 3. コミット計画
@@ -44,7 +45,7 @@
    typed ID から EntityRef を作る全 call site は raw constructor を使えず、型別 `From` factory に移行する。
    physical Sequence は page/record address と internal chain に限定する。logical emit/key、public API、read/scan、query/traversal、index/full-text/vector output は sidecar `CurrentGeneration` で full typed ID を materialize する。Generation `0` は public identity にしない。Generation `> 0` の stale input は reject し、derived stale entry は skip する。relationship/incidence の Sequence は reuse 後の別 entity へ retarget しない。
    Pack/PackLocal の bit layout、public enum の underlying value、query/operator の既存 tie-break は変更しない。新しい比較operatorや `IComparable` は追加しない。
-   dictionary、read/scan、query/traversal、dense/sparse frontier、index key/full-text/vector output、relationship/incidence reuse、typed ID factory、`Pack` / `PackLocal` codec round-trip、不正kind/value rejection の same-sequence/different-generation test を追加する。owner delete と参照 relationship/incidence が同じ logical delete 境界で無効化されること、old snapshot 中は reuse できず旧参照が旧 owner を観測すること、reader 終了と vacuum/reuse 後は旧参照が別 entity へ retarget しないことを確認する。三つの typed Invalid、`EntityId.Invalid`、`EntityId.FromPacked(0)` の canonical Invalid、Property(3)/予約/未知 kind（例 5、15）の factory/`EntityId` rejection、noncanonical local（Node、`-2`、60 bit overflow など）の `EntityId.IsValid` と `ToPacked`、Generation `> 0` stale reject、derived stale skip、raw `UnpackKind` の抽出も検証する。
+   dictionary、read/scan、query/traversal、dense/sparse frontier、index key/full-text/vector output、relationship/incidence reuse、typed ID factory、`Pack` / `PackLocal` codec round-trip、不正kind/value rejection の same-sequence/different-generation test を追加する。materializer、reuse fence、adjacency base/delta、locator、epoch entry が raw relationship Sequence を保持する間の reuse 拒否、reader horizon 後の rebuild/reset と candidate skip/not-found を確認する。owner delete と参照 relationship/incidence が同じ logical delete 境界で無効化されること、old snapshot 中は reuse できず旧参照が旧 owner を観測すること、reader 終了と vacuum/reuse 後は旧参照が別 entity へ retarget しないことを確認する。三つの typed Invalid、`EntityId.Invalid`、`EntityId.FromPacked(0)` の canonical Invalid、Property(3)/予約/未知 kind（例 5、15）の factory/`EntityId` rejection、noncanonical local（Node、`-2`、60 bit overflow など）の `EntityId.IsValid` と `ToPacked`、Generation `> 0` stale reject、derived stale skip、raw `UnpackKind` の抽出も検証する。
    public `PropertyId` equality/hash は Wave 1 の対象外とし、Wave 3 の削除まで現行 Sequence equalityを維持する。
 2. entity kind を三種類へ限定する。
    `EntityKind.Property`、`EntityId.FromProperty`、`EntityId.AsProperty` と対応 test を削除する。
