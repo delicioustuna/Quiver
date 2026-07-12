@@ -53,6 +53,16 @@
 - **対応条件**: physical Sequence は内部 address に限定する。logical emit/key、public API、query/traversal、index output は sidecar `CurrentGeneration` から full typed ID を materialize し、Generation `0` を public identity にしない。Generation `> 0` の stale input は reject、derived stale entry は skip する。owner Sequence は参照 relationship/incidence が当該 read snapshot から論理不可視となり reader horizon を越えるまで再利用せず、owner delete は参照 relationship/incidence を同じ logical delete 境界で無効化する。したがって materialization は同じ live owner だけを表し、relationship/incidence の Sequence は再利用後の別 entity へ retarget しない。
 - **検証**: read/scan、query/traversal、dense/sparse frontier、index/full-text/vector output、owner delete と relationship/incidence、old snapshot 中の reuse 不可と旧参照の旧 owner 観測、reader 終了と vacuum/reuse 後の non-retarget を各 test と PublicApi approval で確認する。
 
+### C-6. Relationship raw entry の reuse fence が未定義
+
+> **設計決定済み・実装未対応(2026-07-13)**: 正本 §2.3、§5.1、§7.1、§15、§16 に raw entry の lifetime と logical materialization boundary を追加した。base/delta/locator/epoch の実装と test が完了するまで対応済みにはしない。
+
+- **発見日**: 2026-07-13
+- **影響**: Wave 1 commit 1
+- **内容**: base、delta、locator、epoch entry が raw relationship Sequence を保持したまま再利用すると、sidecar の新 Generation が旧 entry を新 relationship と誤認させる。
+- **対応条件**: raw Sequence は physical entry にだけ残し、transaction/query/traversal boundary で materialize する。raw entry が残る間は relationship Sequence を再利用せず、reader horizon 後の rebuild/reset で除去してから再利用する。materialization 不能な candidate は skip/not-found にする。
+- **検証**: materializer、reuse fence、adjacency base/delta、locator、epoch entry の test で確認する。
+
 ## Major
 
 ### M-1. Wave 3 のテスト項目が Wave 5 / Wave 9 の成果に暗黙依存する
