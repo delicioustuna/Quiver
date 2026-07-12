@@ -9,7 +9,7 @@
         Width="1280" Height="800"
         ExtendClientAreaToDecorationsHint="True"
         ExtendClientAreaTitleBarHeightHint="38"
-        SystemDecorations="BorderOnly">
+        WindowDecorations="BorderOnly">
 
     <DockPanel>
         <!-- Custom Title Bar -->

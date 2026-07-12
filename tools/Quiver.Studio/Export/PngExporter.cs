@@ -43,7 +43,7 @@ public static class PngExporter
             ctx.DrawRectangle(new SolidColorBrush(bg), null, new Rect(0, 0, pixelW, pixelH));
             renderer.Render(ctx, nodes, edges);
         }
-        bitmap.Save(outputPath);
+        bitmap.Save(outputPath, new PngBitmapEncoderOptions());
     }
 
     private static void ComputeBounds(
