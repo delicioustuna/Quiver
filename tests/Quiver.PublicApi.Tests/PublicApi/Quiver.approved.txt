@@ -997,7 +997,6 @@ namespace Quiver.Core
     {
         Node = 1,
         Relationship = 2,
-        Property = 3,
         Hyperedge = 4,
     }
     public readonly struct EntityRef : System.IEquatable<Quiver.Core.EntityRef>
@@ -1008,14 +1007,20 @@ namespace Quiver.Core
         public const int MaxGeneration = 65535;
         public const int SequenceBits = 44;
         public const long SequenceMask = 17592186044415;
-        public EntityRef(Quiver.Core.EntityKind Kind, long Id) { }
-        public long Id { get; init; }
-        public Quiver.Core.EntityKind Kind { get; init; }
-        public static int Generation(long packed) { }
+        public int Generation { get; }
+        public bool IsValid { get; }
+        public Quiver.Core.EntityKind Kind { get; }
+        public long Sequence { get; }
+        public long Value { get; }
+        public static Quiver.Core.EntityRef Create(Quiver.Core.EntityKind kind, long sequence, int generation) { }
+        public static Quiver.Core.EntityRef From(Quiver.Core.HyperedgeId id) { }
+        public static Quiver.Core.EntityRef From(Quiver.Core.NodeId id) { }
+        public static Quiver.Core.EntityRef From(Quiver.Core.RelationshipId id) { }
         public static long Pack(Quiver.Core.EntityKind kind, long sequence, int generation) { }
         public static long PackLocal(long sequence, int generation) { }
-        public static long Sequence(long packed) { }
+        public static int UnpackGeneration(long packed) { }
         public static Quiver.Core.EntityKind UnpackKind(long packed) { }
+        public static long UnpackSequence(long packed) { }
     }
     public readonly struct EuclideanDistanceOp : Quiver.Core.IDyadicOperator<float>
     {

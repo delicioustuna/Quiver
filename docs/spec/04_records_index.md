@@ -132,11 +132,11 @@ node sequence を添字に、そのノードのノード側チェーン先頭 in
 
 ## EntityRef (ID パッキング) {#entity-ref}
 
-`EntityRef` (`src/Quiver/Core/Ids.cs`) は、エンティティの同一性を単一の `long` にパックする:
+`EntityRef` (`src/Quiver/Core/EntityRef.cs`) は、エンティティの同一性を単一の `long` にパックする。
 
 ```
 ビットレイアウト (MSB → LSB):
-[63..60]  EntityKind   (4 bits; Node=1, Relationship=2, Property=3, Hyperedge=4)
+[63..60]  EntityKind   (4 bits; Node=1, Relationship=2, Reserved=3, Hyperedge=4)
 [59..44]  Generation   (16 bits; 0..65535)
 [43..0]   Sequence     (44 bits; slot-local ID; 0..17.6 兆)
 ```
@@ -149,6 +149,12 @@ node sequence を添字に、そのノードのノード側チェーン先頭 in
 - `PackLocal(seq, gen)` = `(gen << 44) | (seq & SequenceMask)`
 - Generation は vacuum 後の slot 再利用時にインクリメントされ、ABA エイリアシングを防ぐ
 - Generation オーバーフロー (> 65535): その slot は恒久的に退役する
+- `NodeId`、`RelationshipId`、`HyperedgeId`、`EntityRef` の等価性とハッシュは Generation を含む。
+- public な `EntityRef` は typed `From` または検証済み `Create` でだけ生成する。
+  `Node`、`Relationship`、`Hyperedge` 以外の kind と、範囲外の local value は拒否する。
+  `default(EntityRef)` だけが invalid sentinel である。
+- internal `EntityId` の packed 値 `0` は canonical Invalid を表す。
+  予約値、未知 kind、範囲外 local value は `ToPacked` と strict decoder で拒否する。
 
 ## マルチバリュープロパティ {#multi-value}
 

@@ -38,8 +38,8 @@ public sealed class IndexGenerationTests : IDisposable
     {
         long packed = EntityRef.Pack(kind, seq, gen);
         EntityRef.UnpackKind(packed).Should().Be(kind);
-        EntityRef.Sequence(packed).Should().Be(seq);
-        EntityRef.Generation(packed).Should().Be(gen);
+        EntityRef.UnpackSequence(packed).Should().Be(seq);
+        EntityRef.UnpackGeneration(packed).Should().Be(gen);
     }
 
     [Fact]
@@ -50,6 +50,29 @@ public sealed class IndexGenerationTests : IDisposable
 
         Action genOverflow = () => EntityRef.Pack(EntityKind.Node, 0, EntityRef.MaxGeneration + 1);
         genOverflow.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void EntityRef_factories_accept_only_canonical_identity_values()
+    {
+        EntityRef.From(NodeId.Invalid).Should().Be(default(EntityRef));
+        EntityRef.From(RelationshipId.Invalid).Should().Be(default(EntityRef));
+        EntityRef.From(HyperedgeId.Invalid).Should().Be(default(EntityRef));
+        default(EntityRef).IsValid.Should().BeFalse();
+
+        var node = EntityRef.From(NodeId.Create(42, 7));
+        node.IsValid.Should().BeTrue();
+        node.Kind.Should().Be(EntityKind.Node);
+        node.Sequence.Should().Be(42);
+        node.Generation.Should().Be(7);
+
+        Action reserved = () => EntityRef.Create((EntityKind)3, 1, 0);
+        Action unknown = () => EntityRef.Create((EntityKind)5, 1, 0);
+        Action packedReserved = () => EntityRef.Pack((EntityKind)15, 1, 0);
+        reserved.Should().Throw<ArgumentOutOfRangeException>();
+        unknown.Should().Throw<ArgumentOutOfRangeException>();
+        packedReserved.Should().Throw<ArgumentOutOfRangeException>();
+        EntityRef.UnpackKind(3L << EntityRef.KindShift).Should().Be((EntityKind)3);
     }
 
     // ---- ABA: slot reuse must not resurrect a stale index entry ----
@@ -253,10 +276,10 @@ public sealed class IndexGenerationTests : IDisposable
     // ---- Format version gate ----
 
     [Fact]
-    public void FormatVersion_current_is_v4()
+    public void FormatVersion_current_is_v5()
     {
-        // FormatVersion V4 は incidence を fixed-slot 直接アドレスレイアウトへ変更する clean break。
-        FormatVersion.Current.Should().Be(FormatVersion.V4);
+        // FormatVersion V5 は relationship delta の永続 store を追加する clean break。
+        FormatVersion.Current.Should().Be(FormatVersion.V5);
     }
 
     // 旧 format バイトを持つ store は open 時に reject される (クリーンブレイク; 自動マイグレーション無し)。
@@ -298,7 +321,7 @@ public sealed class IndexGenerationTests : IDisposable
                 .Which.Should().Match<FormatVersionMismatchException>(
                     ex => ex.FileKind == "versionedheap"
                           && ex.Found == LegacyFormatVersion
-                          && ex.Expected == FormatVersion.V4);
+                          && ex.Expected == FormatVersion.V5);
         }
     }
 }

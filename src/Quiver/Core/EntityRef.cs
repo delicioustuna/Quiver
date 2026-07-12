@@ -33,7 +33,7 @@ public readonly partial record struct EntityRef
     public long Value { get; }
 
     /// <summary>有効な Node、Relationship、または Hyperedge を表すか。</summary>
-    public bool IsValid => IsSupportedKind(Kind);
+    public bool IsValid => IsSupportedKind(Kind) && Value >= 0;
 
     /// <summary>slot の局所 ID。</summary>
     public long Sequence => IsValid ? UnpackSequence(Value) : -1;

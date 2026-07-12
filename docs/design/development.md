@@ -241,7 +241,7 @@ foreach (var name in g.Nodes().HasLabel("Person").Values("Name").AsEnumerable())
 
 | レイヤ | 主なファイル |
 |---|---|
-| Core ID / kind | `src/Quiver/Core/Ids.cs`（`HyperedgeId` / `HyperedgeTypeId`）、`src/Quiver/Core/EntityId.cs`（`EntityKind.Hyperedge`） |
+| Core ID / kind | `src/Quiver/Core/EntityRef.cs`（kind 付き packed identity）、`src/Quiver/Core/Ids.cs`（typed ID と Generation 込み equality）、`src/Quiver/Core/EntityId.cs`（Node / Relationship / Hyperedge の strict internal tag） |
 | ストア | `src/Quiver/Stores/VersionedHyperedgeStore.cs`、`IncidenceStore.cs`、`NodeIncidenceHeadStore.cs`、`CoMembershipBlockStore.cs` |
 | トランザクション | `src/Quiver/Transactions/TxHyperedgeStore.cs`（locking / SSN / undo の配線） |
 | 公開 CRUD | `src/Quiver/IGraphTransaction.cs`（`CreateHyperedge` / `DeleteHyperedge` / `GetMembers` / `GetHyperedges` / プロパティ各種）、`ISchemaApi`（型 / ロールの token 管理） |

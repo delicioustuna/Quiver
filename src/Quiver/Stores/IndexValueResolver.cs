@@ -20,7 +20,7 @@ internal static class IndexValueResolver
            && nodes.CurrentGeneration(EntityRef.UnpackSequence(packed)) == EntityRef.UnpackGeneration(packed);
 
     /// <summary>
-    /// パック値の列挙を世代照合しつつ局所 ID (<c>NodeId.Value</c>) へ unpack する。
+    /// パック値の列挙を世代照合しつつ local packed <c>NodeId.Value</c> へ unpack する。
     /// Kind が Node でないエントリ、世代不一致エントリは除外する。
     /// </summary>
     public static IEnumerable<long> ResolveLiveNodeSequences(IEnumerable<long> packedValues, INodeStore nodes)
@@ -28,14 +28,16 @@ internal static class IndexValueResolver
         foreach (var packed in packedValues)
         {
             if (!IsLiveNode(packed, nodes)) continue;
-            yield return EntityRef.UnpackSequence(packed);
+            yield return EntityRef.PackLocal(
+                EntityRef.UnpackSequence(packed),
+                EntityRef.UnpackGeneration(packed));
         }
     }
 
     /// <summary>解決済み局所 ID 列挙を <see cref="NodeId"/> でラップする。</summary>
     public static IEnumerable<NodeId> ResolveLiveNodeIds(IEnumerable<long> packedValues, INodeStore nodes)
     {
-        foreach (var seq in ResolveLiveNodeSequences(packedValues, nodes))
-            yield return new NodeId(seq);
+        foreach (var value in ResolveLiveNodeSequences(packedValues, nodes))
+            yield return new NodeId(value);
     }
 }

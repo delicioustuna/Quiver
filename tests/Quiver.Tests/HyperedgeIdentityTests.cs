@@ -14,8 +14,8 @@ public sealed class HyperedgeIdentityTests
         id.IsValid.Should().BeTrue();
         id.Sequence.Should().Be(42);
         id.Generation.Should().Be(7);
-        id.Should().Be(HyperedgeId.Create(42, 8), "entity ID equality is sequence based");
-        id.GetHashCode().Should().Be(HyperedgeId.Create(42, 8).GetHashCode());
+        id.Should().NotBe(HyperedgeId.Create(42, 8), "Generation は entity identity の一部である");
+        id.GetHashCode().Should().NotBe(HyperedgeId.Create(42, 8).GetHashCode());
         HyperedgeId.Invalid.IsValid.Should().BeFalse();
         HyperedgeId.Invalid.Sequence.Should().Be(-1);
     }

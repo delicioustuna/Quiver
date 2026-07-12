@@ -107,7 +107,7 @@ public sealed class VectorTransactionTests : IDisposable
             rtx.NodeExists(new NodeId(id)).Should().BeTrue();
 
             Knn(db, new float[] { 1, 0, 0, 0 }, 10).Should().ContainSingle()
-                .Which.Should().Be(EntityRef.Sequence(id));
+                .Which.Should().Be(EntityRef.UnpackSequence(id));
         }
     }
 
@@ -121,7 +121,7 @@ public sealed class VectorTransactionTests : IDisposable
             // tx を一切張らずに直接 SetVector → autocommit で crash-atomic に永続化される。
             NodeId n;
             using (var tx = db.BeginTransaction()) { n = tx.CreateNode("Doc"); tx.Commit(); }
-            seq = EntityRef.Sequence(n.Value);
+            seq = EntityRef.UnpackSequence(n.Value);
             db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, new float[] { 0, 1, 0, 0 });
         }
 

@@ -30,13 +30,13 @@ public sealed class EntityIdTests
     }
 
     [Fact]
-    public void FromProperty_RoundTrips()
+    public void FromHyperedge_RoundTrips()
     {
-        var prop = new PropertyId(7);
-        var entity = EntityId.FromProperty(prop);
+        var hyperedge = new HyperedgeId(7);
+        var entity = EntityId.FromHyperedge(hyperedge);
 
-        entity.Kind.Should().Be(EntityKind.Property);
-        entity.AsProperty().Should().Be(prop);
+        entity.Kind.Should().Be(EntityKind.Hyperedge);
+        entity.AsHyperedge().Should().Be(hyperedge);
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public sealed class EntityIdTests
             EntityId.FromNode(new NodeId(1)),
             EntityId.FromNode(new NodeId(1_000_000_000L)),
             EntityId.FromRelationship(new RelationshipId(42)),
-            EntityId.FromProperty(new PropertyId(99)),
+            EntityId.FromHyperedge(new HyperedgeId(99)),
         };
 
         foreach (var e in entries)
@@ -93,7 +93,39 @@ public sealed class EntityIdTests
     {
         var entity = new EntityId(EntityKind.Node, (1L << 60));
         var act = () => entity.ToPacked();
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Theory]
+    [InlineData(3UL << 60)]
+    [InlineData(5UL << 60)]
+    [InlineData(15UL << 60)]
+    public void FromPacked_Rejects_reserved_or_unknown_kind(ulong packed)
+    {
+        var act = () => EntityId.FromPacked(packed);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Theory]
+    [InlineData(EntityKind.Node, -2L)]
+    [InlineData(EntityKind.Node, 1L << 60)]
+    [InlineData((EntityKind)3, 1L)]
+    public void Noncanonical_invalid_entity_id_is_not_packable(EntityKind kind, long localId)
+    {
+        var entity = new EntityId(kind, localId);
+
+        entity.IsValid.Should().BeFalse();
+        var act = () => entity.ToPacked();
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void Typed_invalid_ids_normalize_to_canonical_invalid()
+    {
+        EntityId.FromNode(NodeId.Invalid).Should().Be(EntityId.Invalid);
+        EntityId.FromRelationship(RelationshipId.Invalid).Should().Be(EntityId.Invalid);
+        EntityId.FromHyperedge(HyperedgeId.Invalid).Should().Be(EntityId.Invalid);
     }
 
     [Fact]

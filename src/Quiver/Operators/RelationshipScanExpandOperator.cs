@@ -71,15 +71,15 @@ internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
 
         // ソースを排出して frontier set を構築する。bitmap vs hashset の判定のため
         // id を list にも集めるが、Build 後 list は不要。
-        var ids = new List<long>(64);
+        var ids = new List<NodeId>(64);
         long max = -1;
         while (_source.MoveNext())
         {
-            // frontier は slot 同一性 (Sequence) でキーする。probe 側 (rel.Source/Target)
-            // も Sequence なので、seed が gen 付きで届いても整合する。
-            long v = EntityRef.UnpackSequence(_source.Current[_sourceNodeColumn].LongValue);
-            ids.Add(v);
-            if (v > max) max = v;
+            var id = new NodeId(_source.Current[_sourceNodeColumn].LongValue);
+            // Why not Sequence-only: vacuum 後に再利用された slot を seed と誤って突合すると、
+            // stale frontier が現在の別ノードの relationship を展開してしまう。
+            ids.Add(id);
+            if (id.Sequence > max) max = id.Sequence;
         }
         _frontier = FrontierSet.Build(ids, max);
         _scanEnumerator = tx.Relationships.Scan().GetEnumerator();

@@ -69,7 +69,7 @@ public sealed class PersistentVectorStoreTests : IDisposable
             while (cursor.MoveNext()) got.Add(cursor.Current.EntityId);
 
             got.Should().HaveCount(2);
-            got[0].Should().Be(EntityRef.Sequence(ids[1]));
+            got[0].Should().Be(EntityRef.UnpackSequence(ids[1]));
         }
     }
 
@@ -131,7 +131,7 @@ public sealed class PersistentVectorStoreTests : IDisposable
 
             using var cursor = db.Vectors.KnnSearch(IndexName, [1f, 0f, 0f, 0f], 1);
             cursor.MoveNext().Should().BeTrue();
-            cursor.Current.EntityId.Should().Be(EntityRef.Sequence(id));
+            cursor.Current.EntityId.Should().Be(EntityRef.UnpackSequence(id));
         }
     }
 
@@ -209,8 +209,8 @@ public sealed class PersistentVectorStoreTests : IDisposable
             while (cursor.MoveNext()) got.Add(cursor.Current.EntityId);
 
             got.Should().ContainSingle();
-            got[0].Should().Be(EntityRef.Sequence(keep));
-            got.Should().NotContain(EntityRef.Sequence(drop));
+            got[0].Should().Be(EntityRef.UnpackSequence(keep));
+            got.Should().NotContain(EntityRef.UnpackSequence(drop));
         }
     }
 
@@ -238,7 +238,7 @@ public sealed class PersistentVectorStoreTests : IDisposable
             spec.IndexKind.Should().Be(VectorIndexKind.FlatOnly);
 
             var buf = new float[Dim];
-            db.Vectors.TryGetVector(EntityKind.Node, EntityRef.Sequence(nid), IndexName, buf).Should().BeTrue();
+            db.Vectors.TryGetVector(EntityKind.Node, EntityRef.UnpackSequence(nid), IndexName, buf).Should().BeTrue();
             buf.Should().Equal(1f, 2f, 3f, 4f);
         }
     }

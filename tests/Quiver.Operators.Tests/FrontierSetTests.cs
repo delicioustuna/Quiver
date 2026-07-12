@@ -38,6 +38,32 @@ public class FrontierSetTests
     }
 
     [Fact]
+    public void Dense_ids_distinguish_generation()
+    {
+        var first = NodeId.Create(7, 1);
+        var second = NodeId.Create(7, 2);
+        var fs = FrontierSet.Build([first, second]);
+
+        fs.Count.Should().Be(2);
+        fs.Contains(first).Should().BeTrue();
+        fs.Contains(second).Should().BeTrue();
+        fs.Contains(NodeId.Create(7, 3)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Sparse_ids_distinguish_generation()
+    {
+        var first = NodeId.Create(1_000_000, 1);
+        var second = NodeId.Create(1_000_000, 2);
+        var fs = FrontierSet.Build([first, second]);
+
+        fs.Count.Should().Be(2);
+        fs.Contains(first).Should().BeTrue();
+        fs.Contains(second).Should().BeTrue();
+        fs.Contains(NodeId.Create(1_000_000, 3)).Should().BeFalse();
+    }
+
+    [Fact]
     public void Empty_frontier_contains_nothing()
     {
         var fs = FrontierSet.Build([]);
