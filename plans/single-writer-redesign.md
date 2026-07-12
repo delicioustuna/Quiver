@@ -87,7 +87,7 @@ Single Writer 再設計では、これらの旧実装指示を本書で上書き
 - public construction は `From(NodeId)`、`From(RelationshipId)`、`From(HyperedgeId)` と `Create(EntityKind, sequence, generation)` に限定する。`From` に渡した typed ID が Invalid のときだけ `default(EntityRef)` を返す。`EntityId.Invalid` と packed 値 `0` は canonical Invalid である。非0の Property、予約値、未知 kind は `Create`、`Pack`、`EntityId` の生成と packed 値からの変換で `ArgumentOutOfRangeException` を返す。`EntityRef.IsValid` は Kind が Node(1)、Relationship(2)、Hyperedge(4) のいずれかで、かつ Value が非負のときだけ真である。`UnpackKind` は packed bit の raw 抽出であり、生成境界ではないため kind を検証しない。`Create` は三つの有効 kind、sequence/generation 範囲、local Value に kind bit がないことを検証し、不正値を reject する。`default(EntityRef)` だけを invalid sentinel として許す。typed ID からは full `Value` を失わずに変換する。
 - physical record の Sequence は内部 address だけを表す。logical emit/key、public API、query/traversal、index output は sidecar の `CurrentGeneration` で full typed ID を materialize する。Generation `0` の typed ID は内部 physical address に限定し、public identity として emit しない。Generation `> 0` の入力は sidecar と照合して stale を reject し、derived entry の世代不一致は stale として skip する。relationship/incidence が保持する Sequence は slot 再利用後の別 entity へ retarget してはならない。
 - owner Sequence は、参照する relationship/incidence が当該 read snapshot から論理不可視になり、かつ reader horizon を越えるまで再利用しない。owner delete は参照 relationship/incidence を同じ logical delete 境界で無効化する。したがって `CurrentGeneration` による materialization は、同じ live owner だけを表す。
-- relationship の physical raw Sequence は base、delta、locator、epoch entry に残してよいが、transaction/query/traversal の logical boundary でだけ materialize する。これらの raw entry が残る間は relationship Sequence を再利用しない。reader horizon 後に rebuild/reset で raw entry を除去してから再利用し、materialization に失敗した candidate は skip/not-found にする。
+- relationship の physical raw Sequence は base、delta、locator、epoch entry に残してよいが、transaction/query/traversal の logical boundary でだけ materialize する。Wave 1 では relationship Sequence を再利用しない。`Vacuum` は reclaim 済み relationship の storage を回収しても free list へ Sequence を release せず、create は free 候補を無視して high-water mark からだけ割り当てる。このため raw entry が残っていても ABA は起きない。reader horizon、base rebuild、delta/epoch reset、locator rebuild、derived durable の順序を満たす再利用解放は Wave 9 の `RelationshipReuseCoordinator` だけが行う。materialization に失敗した candidate は skip/not-found にする。
 - `EntityKind` は `Node(1)`、`Relationship(2)`、`Hyperedge(4)` だけを持つ。現行の永続 byte と public enum 値を維持し、削除する `Property(3)` の値は予約欠番として再利用しない。
 - typed ID (`NodeId` 等) の equality は packed identity 全体を比較する。現行の Generation を無視する equality は削除する。
 - Generation は slot incarnation であり、`xmin` / `xmax` は logical version visibility である。両者を混同しない。
@@ -263,7 +263,7 @@ cross-kind の catalog/index value だけ `EntityRef` の kind 付き packed 形
 `EntityRef.UnpackKind` は保存済み packed 値の raw kind bit を読むためだけの関数であり、値の生成や有効性を保証しない。対して `EntityId.FromPacked` は public construction 境界なので strict に kind を検証する。
 physical Sequence は page/record の内部 address に限る。logical key、public/query/traversal/index output は sidecar の `CurrentGeneration` を用いて full typed ID を materialize し、Generation `0` を外へ出さない。Generation `> 0` の caller input は sidecar と一致しなければ stale として reject し、derived entry は skip する。relationship/incidence の Sequence 参照は再利用された slot を別 entity として解決してはならない。
 owner Sequence は、参照 relationship/incidence が当該 read snapshot から論理不可視になり reader horizon を越えるまで再利用しない。owner delete はそれらを同じ logical delete 境界で無効化するため、`CurrentGeneration` が materialize するのは同じ live owner だけである。
-relationship raw Sequence は base、delta、locator、epoch entry に内部参照として残す。transaction/query/traversal boundary でだけ logical ID を materialize し、raw entry が残る間は relationship Sequence を再利用しない。reader horizon 後に rebuild/reset で raw entry を除去してから再利用し、materialization できない candidate は skip/not-found にする。
+relationship raw Sequence は base、delta、locator、epoch entry に内部参照として残す。transaction/query/traversal boundary でだけ logical ID を materialize する。Wave 1 の `Vacuum` は reclaim 済み relationship の storage を回収しても Sequence を free list へ release せず、create は free 候補を無視して high-water mark からだけ割り当てる。raw entry が残る間も ABA は起きない。Wave 9 の `RelationshipReuseCoordinator` は reader horizon の通過後に base rebuild、delta/epoch reset、locator rebuild、derived durable を順に完了してから初めて Sequence を free list へ release する。途中の crash は release なしの safe leak とし、reopen 時に coordinator が未完了の再利用解放を再開する。materialization できない candidate は skip/not-found にする。
 
 ### 5.2 entity
 
@@ -368,7 +368,7 @@ record type は `BeginWrite`、`PageImage`、`Commit`、`Abort`、`CheckpointBeg
 |---|---|---|
 | Rewrite | `Core/EntityRef.cs`, `Core/Ids.cs` | Wave 1 で packing と enum 数値を維持したまま typed ID equality/hash を Generation 込みにする。physical Sequence は内部 address に限定し、logical emit/key と public/query/traversal/index output は sidecar `CurrentGeneration` から full ID を materialize する。public `PropertyId` の削除は Wave 3。 |
 | Rewrite | `Core/EntityId.cs` | Wave 1 で `EntityKind.Property` と `FromProperty` を削除する。internal `EntityId` の `EntityRef` 統合は transaction call site と同じ Wave 4。 |
-| Rewrite | relationship base/delta/locator/epoch | raw Sequence を physical entry に限り、transaction/query/traversal boundary で sidecar Generation を materialize する。raw entry の rebuild/reset が reader horizon 後に完了するまで relationship Sequence を再利用しない。 |
+| Rewrite | relationship base/delta/locator/epoch | raw Sequence を physical entry に限り、transaction/query/traversal boundary で sidecar Generation を materialize する。Wave 1 は free release を行わず create を high-water mark 専用にするため、raw entry が残っていても ABA は起きない。reader horizon、base rebuild、delta/epoch reset、locator rebuild、derived durable の完了後に free release する `RelationshipReuseCoordinator` は Wave 9 で導入する。 |
 | Rewrite | `Core/Visibility.cs`, `Core/SnapshotState.cs`, `Core/CommittedTxRegistry.cs` | one-writer snapshot に縮約し、active writer 一つ、committed high-water、aborted gap を扱う。gap は high-water 以下で commit されなかった txId の集合であり、後続 tx の commit 後も aborted version を committed と誤認しないために保持する。vacuum が該当 txId を参照する primary/derived record を除去した後だけ prune できる。 |
 | Keep | `Core/Crc32.cs`, `Core/Exceptions.cs`, `Core/PropertyTypeFlags.cs`, `Core/VectorScorer.cs`, `Core/VectorKnn.cs` | checksum、例外基底、型フィルタ、SIMD scorer は並行性設計に依存しない。 |
 | Move | `Core/Vector.cs` の index definition | `Index/IndexDefinition.cs` へ移し、property target と index kind を分離する。scorer/search result は Core に残す。 |
@@ -539,9 +539,10 @@ transaction contract の分割は次のとおりとする。
 
 - `EntityKind.Property` と `EntityId.FromProperty` を削除する。public `PropertyId`、`PropertyReadHandle`、`PropertyEnumerator` の破壊変更は property store と同じ Wave 3 へ移し、Wave 1では二重 property model を公開しない。
 - ID equality を Generation 込みにする。
+- relationship の raw entry が残る既存 layout では Sequence を再利用しない。`Vacuum` は relationship storage を reclaim しても free release を行わず、create は high-water mark からだけ割り当てる。old raw entry は logical boundary で materialize できなければ skip/not-found とする。再利用解放の coordinator は Wave 9 の責務とする。
 - property、transaction、query/schema、scalar、full-text、vector の新 public 型は実装責務と同じ Wave 3/6/6/6/8/7 で追加し、対応する旧 API を同じ Wave で削除する。Wave 1 では新旧 model を二重公開しない。
 
-**テスト**: ID stale reference、same-sequence/different-generation の dictionary/frontier/index key、public API approval を新 baseline に置換する。
+**テスト**: ID stale reference、same-sequence/different-generation の dictionary/frontier/index key、relationship vacuum 後に free release / reuse しないこと、old raw entry が別 relationship へ retarget しないこと、public API approval を新 baseline に置換する。rebuild/reset 後の relationship reuse は Wave 9 の test とする。
 
 **Build**: `dotnet build Quiver.slnx`。
 
@@ -687,11 +688,12 @@ transaction contract の分割は次のとおりとする。
 **削除/変更/追加**:
 
 - horizon-aware property/payload/index/segment GC を追加する。
+- `RelationshipReuseCoordinator` を追加する。reader horizon の通過後に base rebuild、delta/epoch reset、locator rebuild、derived durable をこの順で完了してから relationship Sequence を free list へ release する。crash で release に達しない場合は safe leak とし、reopen 時に coordinator が未完了の解放を再開する。
 - migration history を DB 内 transactional store へ移す。
 - logical mutation を owner-bound property と vector ref に追従する。
 - lock/deadlock metric と optionsを削除し、writer wait/active snapshot/rebuild metricsへ置換する。
 
-**テスト**: long reader 中 vacuum、vacuum 後の実 slot reuse と Generation 増加、payload/property 同一 commit GC、segment GC、migration rollback/reopen、logical replay、hosting config、OTel/EventSource metric names。
+**テスト**: long reader 中 vacuum、relationship の horizon→base rebuild→delta/epoch reset→locator rebuild→derived durable→free release の順序、各境界での crash/reopen と safe leak 再開、vacuum 後の実 slot reuse と Generation 増加、payload/property 同一 commit GC、segment GC、migration rollback/reopen、logical replay、hosting config、OTel/EventSource metric names。
 
 **Build**: `dotnet build Quiver.slnx`。
 
@@ -890,7 +892,7 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 - baseline の出所と再現コマンドは `plans/single-writer-redesign-baseline.md` に固定する(§10.4)。
 - `EntityId.Invalid` と packed 値 `0` だけを canonical Invalid とし、public identity factory は Node、Relationship、Hyperedge 以外を拒否する(§2.3、§5.1)。
 - physical Sequence は内部 address に限定し、logical emit/key と public/query/traversal/index output は `CurrentGeneration` から full typed ID を materialize する。Generation `0` は外へ出さず、stale input/derived entry は reject/skip する(§2.3、§5.1)。
-- relationship raw Sequence は base/delta/locator/epoch entry に残る間は再利用せず、reader horizon 後の rebuild/reset で除去してから再利用する。logical materialization 不能な candidate は skip/not-found にする(§2.3、§5.1)。
+- Wave 1 の relationship `Vacuum` は reclaim 済み storage を回収しても Sequence を free list へ release せず、create は free 候補を無視して high-water mark からだけ割り当てる。raw base/delta/locator/epoch entry が残っても ABA は起きない。Wave 9 の `RelationshipReuseCoordinator` だけが reader horizon、base rebuild、delta/epoch reset、locator rebuild、derived durable の順に完了して free release する。release 前の crash は safe leak とし、reopen 時に coordinator が再開する(§2.3、§5.1、§7.1、§9 Wave 1/9)。
 
 実装中に新しい選択が必要になった場合は、曖昧な TODO を残さず、選択肢、推奨決定、根拠、検証方法を本書の decision log に追記してからコードを変更する。
 
@@ -904,11 +906,11 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 - **Why not**: Sequence-only equality や public output の Generation `0` を許すと、vacuum 後に再利用された slot が旧 relationship、incidence、derived entry の参照先として見えてしまう。physical record に Generation を重複保存すると既存 layout と recovery/format の変更を前倒しするため、sidecar を materialization source とする。
 - **検証方法**: node、relationship、hyperedge の read/scan、query/traversal、dense/sparse frontier、index/full-text/vector output が current Generation を emit することを確認する。owner delete と参照 relationship/incidence を同じ logical delete 境界で無効化し、old snapshot 中は reuse できず旧参照が旧 owner を見ること、reader 終了と vacuum 後の reuse では旧参照が別 entity へ retarget しないことを確認する。
 
-### 2026-07-13: Relationship raw entry の reuse fence
+### 2026-07-13: Relationship raw entry の reuse fence と Wave 9 移管
 
-- **決定**: relationship raw Sequence は base、delta、locator、epoch entry の physical 参照にだけ使う。transaction/query/traversal の logical boundary が sidecar Generation で typed ID を materialize する。raw entry が残る間は Sequence を再利用せず、reader horizon 後に rebuild/reset が raw entry を除去してから再利用する。materialization 不能な candidate は skip/not-found にする。
-- **Why not**: raw entry が旧 Sequence を持ったまま reuse すると、sidecar の新 Generation が旧 relationship を新 relationship と誤認させる。物理 entry を先に Generation 化すると format/recovery 変更を前倒しするため、lifetime fence と boundary materialization で分離する。
-- **検証方法**: adjacency base/delta、locator、epoch entry が残る間の reuse を拒否し、reader horizon 後の rebuild/reset で除去した後だけ reuse できることを確認する。logical materializer は stale candidate を skip/not-found にする。
+- **決定**: relationship raw Sequence は base、delta、locator、epoch entry の physical 参照にだけ使い、transaction/query/traversal の logical boundary が sidecar Generation で typed ID を materialize する。Wave 1 は relationship Sequence を再利用しない。`Vacuum` は reclaim 済み storage を回収しても free list へ release せず、create は free 候補を無視して high-water mark からだけ割り当てる。raw entry が残っても ABA は起きない。Wave 9 の `RelationshipReuseCoordinator` だけが reader horizon の通過後に base rebuild、delta/epoch reset、locator rebuild、derived durable を順に完了してから free release する。release 前の crash は safe leak とし、reopen 時に coordinator が再開する。materialization 不能な candidate は skip/not-found にする。
+- **Why not**: raw entry が旧 Sequence を持ったまま reuse すると、sidecar の新 Generation が旧 relationship を新 relationship と誤認させる。Wave 1 に raw entry の generation 化、rebuild/reset、crash recovery を前倒しすると identity contract の変更量が maintenance lifecycle まで膨らむ。物理 layout を先に変えず、Wave 1 は no-reuse で ABA を止め、Wave 9 の coordinator へ完全な再利用解放を集約する。
+- **検証方法**: Wave 1 では relationship vacuum 後も free release / reuse がなく old raw entry が別 relationship へ retarget しないことを確認する。Wave 9 では reader horizon、base rebuild、delta/epoch reset、locator rebuild、derived durable、free release の順序と、各境界の crash/reopen が release なしの safe leak から coordinator 再開へ収束することを確認する。logical materializer は stale candidate を skip/not-found にする。
 
 ### 2026-07-12: EntityRef の invalid と kind 境界
 

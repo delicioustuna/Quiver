@@ -55,13 +55,13 @@
 
 ### C-6. Relationship raw entry の reuse fence が未定義
 
-> **設計決定済み・実装未対応(2026-07-13)**: 正本 §2.3、§5.1、§7.1、§15、§16 に raw entry の lifetime と logical materialization boundary を追加した。base/delta/locator/epoch の実装と test が完了するまで対応済みにはしない。
+> **設計決定済み・実装未対応(2026-07-13、Wave 9 移管)**: 正本 §2.3、§5.1、§7.1、§9 Wave 1/9、§15、§16 に raw entry の lifetime、Wave 1 no-reuse、Wave 9 の再利用解放 coordinator を追加した。Wave 1 の no-reuse と materialization、Wave 9 の coordinator と lifecycle test が完了するまで対応済みにはしない。
 
 - **発見日**: 2026-07-13
 - **影響**: Wave 1 commit 1
 - **内容**: base、delta、locator、epoch entry が raw relationship Sequence を保持したまま再利用すると、sidecar の新 Generation が旧 entry を新 relationship と誤認させる。
-- **対応条件**: raw Sequence は physical entry にだけ残し、transaction/query/traversal boundary で materialize する。raw entry が残る間は relationship Sequence を再利用せず、reader horizon 後の rebuild/reset で除去してから再利用する。materialization 不能な candidate は skip/not-found にする。
-- **検証**: materializer、reuse fence、adjacency base/delta、locator、epoch entry の test で確認する。
+- **対応条件**: raw Sequence は physical entry にだけ残し、transaction/query/traversal boundary で materialize する。Wave 1 は reclaim 済み relationship storage を回収しても Sequence を free list へ release せず、create は free 候補を無視して high-water mark からだけ割り当てる。したがって raw entry が残っても ABA は起きない。Wave 9 の `RelationshipReuseCoordinator` が reader horizon、base rebuild、delta/epoch reset、locator rebuild、derived durable の順に完了してから free release する。release 前の crash は safe leak とし、reopen 時に coordinator が再開する。materialization 不能な candidate は skip/not-found にする。
+- **検証**: Wave 1 の materializer/no-reuse/old raw non-retarget test と、Wave 9 の coordinator 順序、各境界 crash/reopen、safe leak 再開、実 reuse test で確認する。
 
 ## Major
 
