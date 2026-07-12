@@ -75,7 +75,7 @@ internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
         long max = -1;
         while (_source.MoveNext())
         {
-            var id = new NodeId(_source.Current[_sourceNodeColumn].LongValue);
+            var id = Materialize(new NodeId(_source.Current[_sourceNodeColumn].LongValue));
             // Why not Sequence-only: vacuum 後に再利用された slot を seed と誤って突合すると、
             // stale frontier が現在の別ノードの relationship を展開してしまう。
             ids.Add(id);
@@ -100,25 +100,27 @@ internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
             var s = Statistics;
             s.RelationshipScanRecords++;
 
+            NodeId relSource = Materialize(rel.Source);
+            NodeId relTarget = Materialize(rel.Target);
             NodeId source, neighbor;
             switch (_direction)
             {
                 case Direction.Outgoing:
-                    if (!_frontier.Contains(rel.Source)) { Statistics = s; continue; }
-                    source = rel.Source; neighbor = rel.Target;
+                    if (!_frontier.Contains(relSource)) { Statistics = s; continue; }
+                    source = relSource; neighbor = relTarget;
                     break;
                 case Direction.Incoming:
-                    if (!_frontier.Contains(rel.Target)) { Statistics = s; continue; }
-                    source = rel.Target; neighbor = rel.Source;
+                    if (!_frontier.Contains(relTarget)) { Statistics = s; continue; }
+                    source = relTarget; neighbor = relSource;
                     break;
                 default: // Both
-                    if (_frontier.Contains(rel.Source))
+                    if (_frontier.Contains(relSource))
                     {
-                        source = rel.Source; neighbor = rel.Target;
+                        source = relSource; neighbor = relTarget;
                     }
-                    else if (_frontier.Contains(rel.Target))
+                    else if (_frontier.Contains(relTarget))
                     {
-                        source = rel.Target; neighbor = rel.Source;
+                        source = relTarget; neighbor = relSource;
                     }
                     else { Statistics = s; continue; }
                     break;
@@ -149,6 +151,12 @@ internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
                 _buffer[2] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = neighbor.Value };
                 break;
         }
+    }
+
+    private NodeId Materialize(NodeId id)
+    {
+        int generation = _tx!.Nodes.CurrentGeneration(id.Sequence);
+        return generation < 0 ? NodeId.Invalid : NodeId.Create(id.Sequence, generation);
     }
 
     public void Dispose()

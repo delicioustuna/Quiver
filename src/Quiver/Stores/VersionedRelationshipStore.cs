@@ -202,7 +202,8 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
             inUse = _heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _);
 
         if (inUse) MvccContext.RecordRead(EntityKind.Relationship, seq);
-        return new RelationshipReadHandle(relId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstProp);
+        var resolvedId = RelationshipId.Create(seq, CurrentGeneration(seq));
+        return new RelationshipReadHandle(resolvedId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstProp);
     }
 
     public RelationshipWriteHandle Write(RelationshipId relId)
@@ -225,11 +226,11 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     }
 
     public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore nodeStore)
-        => new RelationshipEnumerator(this, nodeId, GetFirstRelId(nodeStore, nodeId));
+        => new RelationshipEnumerator(this, nodeStore, nodeId, GetFirstRelId(nodeStore, nodeId));
 
     public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore nodeStore,
         RelationshipTypeId type, Direction direction)
-        => new RelationshipEnumerator(this, nodeId, GetFirstRelId(nodeStore, nodeId), type, direction);
+        => new RelationshipEnumerator(this, nodeStore, nodeId, GetFirstRelId(nodeStore, nodeId), type, direction);
 
     public IEnumerable<RelationshipId> Scan()
     {
@@ -239,7 +240,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
             if (_heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _))
             {
                 MvccContext.RecordRead(EntityKind.Relationship, seq);
-                yield return new RelationshipId(seq);
+                yield return RelationshipId.Create(seq, CurrentGeneration(seq));
             }
         }
     }

@@ -186,7 +186,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         RelationshipId first = nodeStore is VersionedNodeStore ns
             ? ns.GetFirstRelId(nodeId)
             : GetFirstRelIdViaInterface(nodeStore, nodeId);
-        return new RelationshipEnumerator(this, nodeId, first);
+        return new RelationshipEnumerator(this, nodeStore, nodeId, first);
     }
 
     public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore nodeStore,
@@ -195,7 +195,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         RelationshipId first = nodeStore is VersionedNodeStore ns
             ? ns.GetFirstRelId(nodeId)
             : GetFirstRelIdViaInterface(nodeStore, nodeId);
-        return new RelationshipEnumerator(this, nodeId, first, type, direction);
+        return new RelationshipEnumerator(this, nodeStore, nodeId, first, type, direction);
     }
 
     public IEnumerable<RelationshipId> Scan()
