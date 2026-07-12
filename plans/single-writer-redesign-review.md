@@ -50,8 +50,8 @@
 - **発見日**: 2026-07-12
 - **影響**: Wave 1 commit 1
 - **内容**: relationship、incidence、adjacency、locator、delta が Sequence だけを保存する一方、typed ID equality は Generation を含む。Sequence をそのまま typed ID として emit すると Generation `0` が logical output へ漏れ、stale entry と slot reuse を区別できない。
-- **対応条件**: physical Sequence は内部 address に限定する。logical emit/key、public API、query/traversal、index output は sidecar `CurrentGeneration` から full typed ID を materialize し、Generation `0` を public identity にしない。Generation `> 0` の stale input は reject、derived stale entry は skip する。relationship/incidence の Sequence は再利用後の別 entity へ retarget しない。
-- **検証**: read/scan、query/traversal、dense/sparse frontier、index/full-text/vector output、relationship/incidence reuse の各 test と PublicApi approval で確認する。
+- **対応条件**: physical Sequence は内部 address に限定する。logical emit/key、public API、query/traversal、index output は sidecar `CurrentGeneration` から full typed ID を materialize し、Generation `0` を public identity にしない。Generation `> 0` の stale input は reject、derived stale entry は skip する。owner Sequence は参照 relationship/incidence が当該 read snapshot から論理不可視となり reader horizon を越えるまで再利用せず、owner delete は参照 relationship/incidence を同じ logical delete 境界で無効化する。したがって materialization は同じ live owner だけを表し、relationship/incidence の Sequence は再利用後の別 entity へ retarget しない。
+- **検証**: read/scan、query/traversal、dense/sparse frontier、index/full-text/vector output、owner delete と relationship/incidence、old snapshot 中の reuse 不可と旧参照の旧 owner 観測、reader 終了と vacuum/reuse 後の non-retarget を各 test と PublicApi approval で確認する。
 
 ## Major
 

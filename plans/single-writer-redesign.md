@@ -86,6 +86,7 @@ Single Writer 再設計では、これらの旧実装指示を本書で上書き
 - public `EntityRef` の論理形は `(EntityKind Kind, long Value)` とするが、raw constructor は private にする。`Value` は kind を除く `PackLocal(Sequence, Generation)` であり、`Id = Sequence` という旧契約は削除する。`Sequence` と `Generation` を instance property として公開する。既存 static helper は `UnpackSequence(long)` / `UnpackGeneration(long)` へ改名し、member 名を衝突させない。
 - public construction は `From(NodeId)`、`From(RelationshipId)`、`From(HyperedgeId)` と `Create(EntityKind, sequence, generation)` に限定する。`From` に渡した typed ID が Invalid のときだけ `default(EntityRef)` を返す。`EntityId.Invalid` と packed 値 `0` は canonical Invalid である。非0の Property、予約値、未知 kind は `Create`、`Pack`、`EntityId` の生成と packed 値からの変換で `ArgumentOutOfRangeException` を返す。`EntityRef.IsValid` は Kind が Node(1)、Relationship(2)、Hyperedge(4) のいずれかで、かつ Value が非負のときだけ真である。`UnpackKind` は packed bit の raw 抽出であり、生成境界ではないため kind を検証しない。`Create` は三つの有効 kind、sequence/generation 範囲、local Value に kind bit がないことを検証し、不正値を reject する。`default(EntityRef)` だけを invalid sentinel として許す。typed ID からは full `Value` を失わずに変換する。
 - physical record の Sequence は内部 address だけを表す。logical emit/key、public API、query/traversal、index output は sidecar の `CurrentGeneration` で full typed ID を materialize する。Generation `0` の typed ID は内部 physical address に限定し、public identity として emit しない。Generation `> 0` の入力は sidecar と照合して stale を reject し、derived entry の世代不一致は stale として skip する。relationship/incidence が保持する Sequence は slot 再利用後の別 entity へ retarget してはならない。
+- owner Sequence は、参照する relationship/incidence が当該 read snapshot から論理不可視になり、かつ reader horizon を越えるまで再利用しない。owner delete は参照 relationship/incidence を同じ logical delete 境界で無効化する。したがって `CurrentGeneration` による materialization は、同じ live owner だけを表す。
 - `EntityKind` は `Node(1)`、`Relationship(2)`、`Hyperedge(4)` だけを持つ。現行の永続 byte と public enum 値を維持し、削除する `Property(3)` の値は予約欠番として再利用しない。
 - typed ID (`NodeId` 等) の equality は packed identity 全体を比較する。現行の Generation を無視する equality は削除する。
 - Generation は slot incarnation であり、`xmin` / `xmax` は logical version visibility である。両者を混同しない。
@@ -260,6 +261,7 @@ cross-kind の catalog/index value だけ `EntityRef` の kind 付き packed 形
 `EntityId.Invalid`（packed 値 `0`）以外の invalid `EntityId` に対する `ToPacked` は、`0` へ黙って正規化せず `ArgumentOutOfRangeException` を返す。
 `EntityRef.UnpackKind` は保存済み packed 値の raw kind bit を読むためだけの関数であり、値の生成や有効性を保証しない。対して `EntityId.FromPacked` は public construction 境界なので strict に kind を検証する。
 physical Sequence は page/record の内部 address に限る。logical key、public/query/traversal/index output は sidecar の `CurrentGeneration` を用いて full typed ID を materialize し、Generation `0` を外へ出さない。Generation `> 0` の caller input は sidecar と一致しなければ stale として reject し、derived entry は skip する。relationship/incidence の Sequence 参照は再利用された slot を別 entity として解決してはならない。
+owner Sequence は、参照 relationship/incidence が当該 read snapshot から論理不可視になり reader horizon を越えるまで再利用しない。owner delete はそれらを同じ logical delete 境界で無効化するため、`CurrentGeneration` が materialize するのは同じ live owner だけである。
 
 ### 5.2 entity
 
@@ -894,8 +896,9 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 
 - **背景**: physical record、adjacency、incidence、locator、delta は Sequence だけを保存する一方、typed ID の equality は Generation を含む。Sequence を `NodeId` 等へそのまま再構成すると、logical read/query/traversal/index output が Generation `0` を emit し、stale entry と再利用 slot を区別できない。
 - **決定**: physical Sequence は page/record address と内部 chain だけに使う。logical emit/key、public API、query/traversal、index output は各 sidecar の `CurrentGeneration` で full typed ID を materialize する。Generation `0` は内部だけで使い、public identity にしない。Generation `> 0` の入力は sidecar と一致しなければ stale として reject し、derived entry は skip する。relationship/incidence が持つ Sequence は、slot 再利用後の別 entity へ retarget してはならない。
+- **owner lifetime**: owner Sequence は、参照 relationship/incidence が当該 read snapshot から論理不可視となり reader horizon を越えるまで再利用しない。owner delete は参照 relationship/incidence を同じ logical delete 境界で無効化する。ゆえに `CurrentGeneration` による materialization は同じ live owner だけを表す。
 - **Why not**: Sequence-only equality や public output の Generation `0` を許すと、vacuum 後に再利用された slot が旧 relationship、incidence、derived entry の参照先として見えてしまう。physical record に Generation を重複保存すると既存 layout と recovery/format の変更を前倒しするため、sidecar を materialization source とする。
-- **検証方法**: node、relationship、hyperedge の read/scan、query/traversal、dense/sparse frontier、index/full-text/vector output が current Generation を emit することを確認する。Generation `> 0` の stale input は reject、derived stale entry は skip し、relationship/incidence の reuse 後に別 entity へ retarget しないことを実 reuse test で確認する。
+- **検証方法**: node、relationship、hyperedge の read/scan、query/traversal、dense/sparse frontier、index/full-text/vector output が current Generation を emit することを確認する。owner delete と参照 relationship/incidence を同じ logical delete 境界で無効化し、old snapshot 中は reuse できず旧参照が旧 owner を見ること、reader 終了と vacuum 後の reuse では旧参照が別 entity へ retarget しないことを確認する。
 
 ### 2026-07-12: EntityRef の invalid と kind 境界
 
