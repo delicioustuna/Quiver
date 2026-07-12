@@ -102,6 +102,7 @@ function Get-RedirectFindings {
 
 if ($SelfTest) {
     $root = Join-Path ([IO.Path]::GetTempPath()) ('quiver-redirect-' + [guid]::NewGuid())
+    $escaped = $null
     try {
         $agents = Join-Path $root '.agents/skills/quiver-implement/comlpeted'
         $claude = Join-Path $root '.claude/skills/quiver-implement/comlpeted'
