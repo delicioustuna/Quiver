@@ -84,7 +84,7 @@ Single Writer 再設計では、これらの旧実装指示を本書で上書き
 
 - `EntityRef = (EntityKind, Generation, Sequence)` が target architecture の entity identity の唯一の表現である。internal `EntityId` の統合は TransactionManager rewrite と同じ Wave 4 で行う。
 - public `EntityRef` の論理形は `(EntityKind Kind, long Value)` とするが、raw constructor は private にする。`Value` は kind を除く `PackLocal(Sequence, Generation)` であり、`Id = Sequence` という旧契約は削除する。`Sequence` と `Generation` を instance property として公開する。既存 static helper は `UnpackSequence(long)` / `UnpackGeneration(long)` へ改名し、member 名を衝突させない。
-- public construction は `From(NodeId)`、`From(RelationshipId)`、`From(HyperedgeId)` と `Create(EntityKind, sequence, generation)` に限定する。`Create` は三つの有効 kind、sequence/generation 範囲、local Value に kind bit がないことを検証し、不正値を reject する。`default(EntityRef)` だけを invalid sentinel として許す。typed ID からは full `Value` を失わずに変換する。
+- public construction は `From(NodeId)`、`From(RelationshipId)`、`From(HyperedgeId)` と `Create(EntityKind, sequence, generation)` に限定する。`From` に渡した typed ID が Invalid のときだけ `default(EntityRef)` を返す。`Create`、`Pack`、`EntityId` の生成と変換は Property、予約値、未知 kind を `ArgumentOutOfRangeException` で拒否する。`UnpackKind` は packed bit の raw 抽出であり、生成境界ではないため kind を検証しない。`Create` は三つの有効 kind、sequence/generation 範囲、local Value に kind bit がないことを検証し、不正値を reject する。`default(EntityRef)` だけを invalid sentinel として許す。typed ID からは full `Value` を失わずに変換する。
 - `EntityKind` は `Node(1)`、`Relationship(2)`、`Hyperedge(4)` だけを持つ。現行の永続 byte と public enum 値を維持し、削除する `Property(3)` の値は予約欠番として再利用しない。
 - typed ID (`NodeId` 等) の equality は packed identity 全体を比較する。現行の Generation を無視する equality は削除する。
 - Generation は slot incarnation であり、`xmin` / `xmax` は logical version visibility である。両者を混同しない。
@@ -252,6 +252,9 @@ EntityKind = Node(1) | Relationship(2) | Reserved(3) | Hyperedge(4)
 `EntityKind.Property` は Wave 1、public `PropertyId` は property cursor/store rewrite と同じ Wave 3 で削除する。
 `NodeId`、`RelationshipId`、`HyperedgeId` は kind を C# 型で表し、内部値は `(Generation, Sequence)` を持つ。
 cross-kind の catalog/index value だけ `EntityRef` の kind 付き packed 形を使う。
+`EntityRef.From` は typed Invalid を `default(EntityRef)` に写像する唯一の例外である。
+`EntityRef.Create`、`EntityRef.Pack`、`EntityId` の生成と packed 値からの変換は Node、Relationship、Hyperedge 以外を `ArgumentOutOfRangeException` で拒否する。
+`EntityRef.UnpackKind` は保存済み packed 値の raw kind bit を読むためだけの関数であり、値の生成や有効性を保証しない。
 
 ### 5.2 entity
 
@@ -877,6 +880,13 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 実装中に新しい選択が必要になった場合は、曖昧な TODO を残さず、選択肢、推奨決定、根拠、検証方法を本書の decision log に追記してからコードを変更する。
 
 ## 16. decision log
+
+### 2026-07-12: EntityRef の invalid と kind 境界
+
+- **背景**: Wave 1 の identity contract 実装で、typed Invalid を `EntityRef` へ変換する結果と、Property/予約/未知 kind を public factory が受け入れるかが未定義だった。
+- **決定**: `EntityRef.From(NodeId.Invalid)`、`From(RelationshipId.Invalid)`、`From(HyperedgeId.Invalid)` は `default(EntityRef)` を返す。これ以外の public factory は invalid sentinel を作らない。`EntityRef.Create`、`EntityRef.Pack`、`EntityId` の生成と packed 値からの変換は Node、Relationship、Hyperedge だけを受け入れ、Property、予約値、未知 kind を `ArgumentOutOfRangeException` で拒否する。`UnpackKind` は raw 抽出だけを担い、kind の妥当性を検査しない。
+- **Why not**: typed Invalid を例外にすると optional な typed handle を cross-kind の invalid sentinel へ正規化できない。逆に `Create` や `Pack` が予約/未知 kind を通すと、将来の enum 拡張や破損した入力が public entity identity として定着し、kind を型で閉じる契約を失う。
+- **検証方法**: Wave 1 の factory test で三つの typed Invalid が `default(EntityRef)` になること、`Create`、`Pack`、`EntityId` の生成/変換が Property、予約、未知 kind を拒否すること、`UnpackKind` が同じ raw bit を返すことを確認する。PublicApi approval で raw constructor が公開されず、typed `From` と `Create` だけが公開されることを確認する。
 
 ### 2026-07-10: buffer 管理方針(steal/no-steal)の確定
 

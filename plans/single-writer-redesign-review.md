@@ -87,6 +87,16 @@
 - **内容**: §5.5 の corruption 規則が「visible な property version」に限定されていない。vacuum の順序は property→payload だが、crash がこの 2 ステップの間に落ちると「reclaim 済み property version(または reclaim commit が durable になる前の状態)が、すでに回収された payload を指す」中間状態が heap 上に残り得る。字義通りに実装すると open/recovery が正常な GC 中間状態を corruption と誤判定し、DB が開けなくなる。また payload より**後**に回収される index entry は必然的に dangling ref 期間を持つが、これが「正常」である旨は §4.5 の revalidation 記述から推測するしかない。
 - **修正案**: §5.5 の規則を「snapshot horizon 上で visible な property version が payload を欠く場合のみ corruption」と限定し、vacuum の property/payload 回収を単一 commit にする(または回収順を payload が最後になるよう定義する)ことを明記する。
 
+### M-7. EntityRef の invalid と reserved kind の public contract が未定義
+
+> **対応済み(2026-07-12)**: 正本 §2.3、§5.1、§16 に typed Invalid、public factory、raw unpack の境界を追加した。Wave 1 は factory/approval test でこの契約を検証する。
+
+- **発見日**: 2026-07-12
+- **影響**: Wave 1 commit 1
+- **内容**: `EntityRef.From(NodeId.Invalid)` が invalid sentinel を返すのか例外にするのか、`Create`/`Pack`/`EntityId` の生成と変換が Property、予約、未知 kind をどう扱うのかが未定義だった。実装者が任意の振る舞いを選ぶと、raw packed value の読取りと public entity identity の生成境界が混同される。
+- **対応条件**: typed Invalid だけを `default(EntityRef)` へ写像し、public factory と `EntityId` の生成/変換は三つの entity kind 以外を `ArgumentOutOfRangeException` で拒否する。`UnpackKind` は raw 抽出として検証を行わない。
+- **検証**: Wave 1 の factory test と PublicApi approval で typed Invalid、Property/予約/未知 kind、raw unpack、raw constructor 非公開を確認する。
+
 ## Minor
 
 ### m-1. §2.4 と §7.2 の「column cache」齟齬

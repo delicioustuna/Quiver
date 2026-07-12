@@ -37,11 +37,11 @@
 1. typed ID equality を Generation 込みにする。
    `NodeId`、`RelationshipId`、`HyperedgeId`、`EntityRef` の equality と hash を同じ commit で更新する。
    `EntityRef` の raw `(Kind, Value)` constructor を非公開にし、`From(NodeId/RelationshipId/HyperedgeId)` と `Create(kind, sequence, generation)` だけを public construction にする。
-   factory は三つの有効 kind、範囲、kind bit 混入を検証し、不正表現を rejectする。`Value` を Generation 込み `PackLocal` とし、旧 `Id = Sequence` contract を `Sequence` / `Generation` property へ置換する。
+   typed Invalid の `From` は `default(EntityRef)` にだけ写像する。factory は三つの有効 kind、範囲、kind bit 混入を検証し、Property、予約、未知 kind を `ArgumentOutOfRangeException` で拒否する。`UnpackKind` は raw packed bit の抽出だけを担い、生成境界ではない。`Value` を Generation 込み `PackLocal` とし、旧 `Id = Sequence` contract を `Sequence` / `Generation` property へ置換する。
    static helper は `UnpackSequence(long)` / `UnpackGeneration(long)` へ改名し、全 call site を同じ commit で移行する。
    typed ID から EntityRef を作る全 call site は raw constructor を使えず、型別 `From` factory に移行する。
    Pack/PackLocal の bit layout、public enum の underlying value、query/operator の既存 tie-break は変更しない。新しい比較operatorや `IComparable` は追加しない。
-   dictionary、frontier、index key、typed ID factory、`Pack` / `PackLocal` codec round-trip、不正kind/value rejection の same-sequence/different-generation test を追加する。
+   dictionary、frontier、index key、typed ID factory、`Pack` / `PackLocal` codec round-trip、不正kind/value rejection の same-sequence/different-generation test を追加する。三つの typed Invalid の `default(EntityRef)` への写像、Property/予約/未知 kind の factory/`EntityId` rejection、raw `UnpackKind` の抽出も検証する。
    public `PropertyId` equality/hash は Wave 1 の対象外とし、Wave 3 の削除まで現行 Sequence equalityを維持する。
 2. entity kind を三種類へ限定する。
    `EntityKind.Property`、`EntityId.FromProperty`、`EntityId.AsProperty` と対応 test を削除する。
