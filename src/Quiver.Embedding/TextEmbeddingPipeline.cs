@@ -89,7 +89,7 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(sourceText);
 
         var prepared = Prepare(sourceText);
-        var key = new EmbeddingTaskKey(entity.Kind, entity.Id, indexName, _provider.ProviderId);
+        var key = new EmbeddingTaskKey(entity.Kind, entity.Sequence, indexName, _provider.ProviderId);
 
         var info = await _taskLog.GetInfoAsync(key, ct).ConfigureAwait(false);
         if (info.State == EmbeddingTaskState.Completed && info.LastContentHash == prepared.ContentHash)
@@ -221,7 +221,7 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
 
     private async Task ProcessAsync(QueueItem item, CancellationToken ct)
     {
-        var key = new EmbeddingTaskKey(item.Entity.Kind, item.Entity.Id, item.IndexName, _provider.ProviderId);
+        var key = new EmbeddingTaskKey(item.Entity.Kind, item.Entity.Sequence, item.IndexName, _provider.ProviderId);
 
         await _taskLog.MarkInProgressAsync(key, item.Prepared.ContentHash, ct).ConfigureAwait(false);
 
@@ -239,7 +239,7 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
                     throw new InvalidOperationException(
                         $"Provider '{_provider.ProviderId}' returned {result.Vector.Length} dims, expected {_provider.Dimensions}.");
                 }
-                _engine.Vectors.SetVector(item.Entity.Kind, item.Entity.Id, item.IndexName, result.Vector.Span);
+                _engine.Vectors.SetVector(item.Entity.Kind, item.Entity.Sequence, item.IndexName, result.Vector.Span);
                 await _taskLog.MarkCompletedAsync(key, item.Prepared.ContentHash, ct).ConfigureAwait(false);
                 return;
             }

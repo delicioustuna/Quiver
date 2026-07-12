@@ -17,7 +17,7 @@ internal static class IndexValueResolver
     /// </summary>
     public static bool IsLiveNode(long packed, INodeStore nodes)
         => EntityRef.UnpackKind(packed) == EntityKind.Node
-           && nodes.CurrentGeneration(EntityRef.Sequence(packed)) == EntityRef.Generation(packed);
+           && nodes.CurrentGeneration(EntityRef.UnpackSequence(packed)) == EntityRef.UnpackGeneration(packed);
 
     /// <summary>
     /// パック値の列挙を世代照合しつつ局所 ID (<c>NodeId.Value</c>) へ unpack する。
@@ -28,7 +28,7 @@ internal static class IndexValueResolver
         foreach (var packed in packedValues)
         {
             if (!IsLiveNode(packed, nodes)) continue;
-            yield return EntityRef.Sequence(packed);
+            yield return EntityRef.UnpackSequence(packed);
         }
     }
 

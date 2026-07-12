@@ -158,7 +158,7 @@ public sealed class RagSearcher
         {
             for (int i = 0; i < ranked.Count; i++)
             {
-                long key = EntityRef.Sequence(ranked[i].Value);
+                long key = EntityRef.UnpackSequence(ranked[i].Value);
                 score[key] = (score.TryGetValue(key, out var s) ? s : 0d) + 1d / (K0 + i + 1);
                 rep[key] = ranked[i]; // 生存 NodeId を代表に保持 (どちらのチャンネルも downstream 読取可)
             }

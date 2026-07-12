@@ -122,7 +122,7 @@ internal sealed class PersistentVectorStore : IVectorStore
         // binding キーは slot Sequence へ正規化 (node.Value (gen 付き packed) を渡されうる)。
         // 現世代を payload に焼き込み、slot 再利用で別エンティティに化けた stale binding を
         // KNN read 時に弾けるようにする。resolver 無し (テスト) は 0。
-        long seq = EntityRef.Sequence(entityId);
+        long seq = EntityRef.UnpackSequence(entityId);
         ushort gen = ResolveGen(kind, seq);
         using (h.Write())
         {
@@ -134,7 +134,7 @@ internal sealed class PersistentVectorStore : IVectorStore
     public void RemoveVector(EntityKind kind, long entityId, string indexName)
     {
         IndexHandle h = GetIndex(indexName);
-        long seq = EntityRef.Sequence(entityId);
+        long seq = EntityRef.UnpackSequence(entityId);
         using (h.Write())
         {
             h.Payload.Remove(seq);
@@ -149,7 +149,7 @@ internal sealed class PersistentVectorStore : IVectorStore
         if (kind != h.Spec.EntityKind) return false;
         if (destination.Length < h.Spec.Dimensions) return false;
 
-        long seq = EntityRef.Sequence(entityId);
+        long seq = EntityRef.UnpackSequence(entityId);
         using (h.Read())
         {
             if (!h.Payload.TryGet(seq, destination, out var gen))

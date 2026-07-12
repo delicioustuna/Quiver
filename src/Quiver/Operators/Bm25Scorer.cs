@@ -152,7 +152,7 @@ internal static class Bm25Scorer
             double idf = Math.Log(1.0 + (n - df + 0.5) / (df + 0.5));
             foreach (var (eid, tf) in postings)
             {
-                if (candidateSequences is not null && !candidateSequences.Contains(EntityRef.Sequence(eid)))
+                if (candidateSequences is not null && !candidateSequences.Contains(EntityRef.UnpackSequence(eid)))
                     continue;
                 if (!docLenCache.TryGetValue(eid, out var dl))
                 {

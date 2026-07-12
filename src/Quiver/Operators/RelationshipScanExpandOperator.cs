@@ -77,7 +77,7 @@ internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
         {
             // frontier は slot 同一性 (Sequence) でキーする。probe 側 (rel.Source/Target)
             // も Sequence なので、seed が gen 付きで届いても整合する。
-            long v = EntityRef.Sequence(_source.Current[_sourceNodeColumn].LongValue);
+            long v = EntityRef.UnpackSequence(_source.Current[_sourceNodeColumn].LongValue);
             ids.Add(v);
             if (v > max) max = v;
         }

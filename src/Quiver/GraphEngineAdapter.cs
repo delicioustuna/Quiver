@@ -58,11 +58,11 @@ internal sealed class GraphEngineAdapter : IGraphEngine
             {
                 case EntityKind.Node:
                     foreach (var nid in _tx.Nodes.Scan())
-                        yield return new EntityRef(EntityKind.Node, nid.Value);
+                        yield return EntityRef.From(nid);
                     break;
                 case EntityKind.Relationship:
                     foreach (var rid in _tx.Relationships.Scan())
-                        yield return new EntityRef(EntityKind.Relationship, rid.Value);
+                        yield return EntityRef.From(rid);
                     break;
                 default:
                     yield break;
@@ -84,11 +84,11 @@ internal sealed class GraphEngineAdapter : IGraphEngine
             PropertyEnumerator enumerator;
             if (entity.Kind == EntityKind.Node)
             {
-                enumerator = _tx.Nodes.EnumerateProperties(new NodeId(entity.Id), _tx.Properties);
+                enumerator = _tx.Nodes.EnumerateProperties(new NodeId(entity.Value), _tx.Properties);
             }
             else if (entity.Kind == EntityKind.Relationship)
             {
-                enumerator = _tx.Relationships.EnumerateProperties(new RelationshipId(entity.Id), _tx.Properties);
+                enumerator = _tx.Relationships.EnumerateProperties(new RelationshipId(entity.Value), _tx.Properties);
             }
             else
             {

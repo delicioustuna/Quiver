@@ -69,7 +69,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
             node = tx.CreateNode("Page");
             tx.SetProperty(node, SourceProp, Storage.Records.PropertyValue.FromString("hello world"));
             pipeline.EnqueueOnCommit(tx,
-                new EntityRef(EntityKind.Node, node.Value),
+                EntityRef.From(node),
                 IndexName,
                 "hello world");
             tx.Commit();
@@ -100,7 +100,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
             var node = tx.CreateNode("Page");
             tx.SetProperty(node, SourceProp, Storage.Records.PropertyValue.FromString("dropped"));
             pipeline.EnqueueOnCommit(tx,
-                new EntityRef(EntityKind.Node, node.Value),
+                EntityRef.From(node),
                 IndexName,
                 "dropped");
             tx.Rollback();

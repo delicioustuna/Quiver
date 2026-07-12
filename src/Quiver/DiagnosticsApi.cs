@@ -322,11 +322,11 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
                 long packed = lane == IndexManager.PostingsLaneTag
                     ? PostingsKey.DecodeEntityId(key)
                     : int64.Decode(key);
-                list.Add(new OrphanIndexEntry(name[..sep], key, EntityRef.Sequence(packed)));
+                list.Add(new OrphanIndexEntry(name[..sep], key, EntityRef.UnpackSequence(packed)));
             }
             else
             {
-                list.Add(new OrphanIndexEntry(name, key, EntityRef.Sequence(value)));
+                list.Add(new OrphanIndexEntry(name, key, EntityRef.UnpackSequence(value)));
             }
         }
         return list;
@@ -338,9 +338,9 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
         // 索引は現状 Node 限定。Node 以外、物理的に解放済み (InUse=false)、または slot が
         // 再利用されて世代が食い違う (ABA) エントリは orphan とみなす。
         if (EntityRef.UnpackKind(packedValue) != EntityKind.Node) return false;
-        long seq = EntityRef.Sequence(packedValue);
+        long seq = EntityRef.UnpackSequence(packedValue);
         return _nodeStore.Read(new NodeId(seq)).InUse
-            && _nodeStore.CurrentGeneration(seq) == EntityRef.Generation(packedValue);
+            && _nodeStore.CurrentGeneration(seq) == EntityRef.UnpackGeneration(packedValue);
     }
 
     private long CountLabelIndexOrphans()

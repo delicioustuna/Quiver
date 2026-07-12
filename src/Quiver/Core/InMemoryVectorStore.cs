@@ -88,7 +88,7 @@ public sealed class InMemoryVectorStore : IVectorStore
             // binding キーは slot Sequence。利用者は node.Value (gen 付き packed) を
             // 渡しうるが、グラフ側 (label index / adjacency / candidate set) は Sequence 空間で
             // 動くため、ここで slot へ正規化して KNN を整合させる。
-            idx.Vectors[new VectorKey(kind, EntityRef.Sequence(entityId))] = copy;
+            idx.Vectors[new VectorKey(kind, EntityRef.UnpackSequence(entityId))] = copy;
         }
     }
 
@@ -98,7 +98,7 @@ public sealed class InMemoryVectorStore : IVectorStore
         var idx = GetIndex(indexName);
         lock (_gate)
         {
-            idx.Vectors.Remove(new VectorKey(kind, EntityRef.Sequence(entityId)));
+            idx.Vectors.Remove(new VectorKey(kind, EntityRef.UnpackSequence(entityId)));
         }
     }
 
@@ -109,7 +109,7 @@ public sealed class InMemoryVectorStore : IVectorStore
         if (kind != idx.Spec.EntityKind) return false;
         if (destination.Length < idx.Spec.Dimensions) return false;
 
-        long seq = EntityRef.Sequence(entityId);
+        long seq = EntityRef.UnpackSequence(entityId);
         lock (_gate)
         {
             if (!idx.Vectors.TryGetValue(new VectorKey(kind, seq), out var vec))
