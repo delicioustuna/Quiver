@@ -2,7 +2,7 @@
 
 > 効力宣言: 本書と設計正本が食い違う場合は設計正本を優先し、食い違いをユーザへ報告する。
 > 作成日: 2026-07-10
-> 対応する正本のバージョン: `bf8b05b6b073f77848a9fe8aed34eae8e67f3c37`
+> 対応する正本のバージョン: `846ce5b1d84172a0aef2fedd8724c4da6e977187`
 > ステータス: 承認済み(2026-07-12)
 
 ## 1. 着手前チェック
@@ -42,7 +42,7 @@
    static helper は `UnpackSequence(long)` / `UnpackGeneration(long)` へ改名し、全 call site を同じ commit で移行する。
    typed ID から EntityRef を作る全 call site は raw constructor を使えず、型別 `From` factory に移行する。
    Pack/PackLocal の bit layout、public enum の underlying value、query/operator の既存 tie-break は変更しない。新しい比較operatorや `IComparable` は追加しない。
-   dictionary、frontier、index key、typed ID factory、`Pack` / `PackLocal` codec round-trip、不正kind/value rejection の same-sequence/different-generation test を追加する。三つの typed Invalid、`EntityId.Invalid`、`EntityId.FromPacked(0)` の canonical Invalid、Property(3)/予約/未知 kind（例 5、15）の factory/`EntityId` rejection、malformed internal `EntityId.ToPacked`、raw `UnpackKind` の抽出も検証する。
+   dictionary、frontier、index key、typed ID factory、`Pack` / `PackLocal` codec round-trip、不正kind/value rejection の same-sequence/different-generation test を追加する。三つの typed Invalid、`EntityId.Invalid`、`EntityId.FromPacked(0)` の canonical Invalid、Property(3)/予約/未知 kind（例 5、15）の factory/`EntityId` rejection、noncanonical local（Node、`-2`、60 bit overflow など）の `EntityId.IsValid` と `ToPacked`、raw `UnpackKind` の抽出も検証する。
    public `PropertyId` equality/hash は Wave 1 の対象外とし、Wave 3 の削除まで現行 Sequence equalityを維持する。
 2. entity kind を三種類へ限定する。
    `EntityKind.Property`、`EntityId.FromProperty`、`EntityId.AsProperty` と対応 test を削除する。

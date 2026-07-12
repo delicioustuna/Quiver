@@ -255,7 +255,8 @@ cross-kind の catalog/index value だけ `EntityRef` の kind 付き packed 形
 `EntityRef.From` は typed Invalid を `default(EntityRef)` に写像する唯一の例外である。
 `EntityId.Invalid` と packed 値 `0` は canonical Invalid である。
 `EntityRef.Create`、`EntityRef.Pack`、`EntityId` の生成と packed 値からの変換は、非0の Property、予約値、未知 kind を `ArgumentOutOfRangeException` で拒否する。
-内部 `EntityId` が malformed kind を持つとき、`ToPacked` は `0` へ黙って正規化せず `ArgumentOutOfRangeException` を返す。
+`EntityId.IsValid` は Kind が Node(1)、Relationship(2)、Hyperedge(4) のいずれかで、かつ local Value が `0` 以上 `1L << 60` 未満の pack 可能範囲にあるときだけ真である。
+`EntityId.Invalid`（packed 値 `0`）以外の invalid `EntityId` に対する `ToPacked` は、`0` へ黙って正規化せず `ArgumentOutOfRangeException` を返す。
 `EntityRef.UnpackKind` は保存済み packed 値の raw kind bit を読むためだけの関数であり、値の生成や有効性を保証しない。対して `EntityId.FromPacked` は public construction 境界なので strict に kind を検証する。
 
 ### 5.2 entity
@@ -889,9 +890,9 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 ### 2026-07-12: EntityRef の invalid と kind 境界
 
 - **背景**: Wave 1 の identity contract 実装で、typed Invalid を `EntityRef` へ変換する結果と、Property/予約/未知 kind を public factory が受け入れるかが未定義だった。
-- **決定**: `EntityRef.From(NodeId.Invalid)`、`From(RelationshipId.Invalid)`、`From(HyperedgeId.Invalid)` は `default(EntityRef)` を返す。`EntityId.Invalid` と packed 値 `0` は canonical Invalid とする。これ以外の public factory は invalid sentinel を作らない。`EntityRef.Create`、`EntityRef.Pack`、`EntityId` の生成と packed 値からの変換は Node、Relationship、Hyperedge だけを受け入れ、非0の Property、予約値、未知 kind を `ArgumentOutOfRangeException` で拒否する。malformed internal `EntityId` の `ToPacked` は `0` へ黙って正規化せず `ArgumentOutOfRangeException` を返す。`UnpackKind` は raw 抽出だけを担い、`EntityId.FromPacked` は strict な public construction 境界として kind を検証する。
+- **決定**: `EntityRef.From(NodeId.Invalid)`、`From(RelationshipId.Invalid)`、`From(HyperedgeId.Invalid)` は `default(EntityRef)` を返す。`EntityId.Invalid` と packed 値 `0` は canonical Invalid とする。これ以外の public factory は invalid sentinel を作らない。`EntityRef.Create`、`EntityRef.Pack`、`EntityId` の生成と packed 値からの変換は Node、Relationship、Hyperedge だけを受け入れ、非0の Property、予約値、未知 kind を `ArgumentOutOfRangeException` で拒否する。`EntityId.IsValid` は三つの kind と `0` 以上 `1L << 60` 未満の local Value に限って真である。`EntityId.Invalid`（packed 値 `0`）以外の invalid `EntityId` に対する `ToPacked` は、`0` へ黙って正規化せず `ArgumentOutOfRangeException` を返す。`UnpackKind` は raw 抽出だけを担い、`EntityId.FromPacked` は strict な public construction 境界として kind を検証する。
 - **Why not**: typed Invalid を例外にすると optional な typed handle を cross-kind の invalid sentinel へ正規化できない。逆に `Create` や `Pack` が予約/未知 kind を通すと、将来の enum 拡張や破損した入力が public entity identity として定着し、kind を型で閉じる契約を失う。
-- **検証方法**: Wave 1 の factory test で三つの typed Invalid、`EntityId.Invalid`、packed値 `0` が canonical Invalid になること、`Create`、`Pack`、`EntityId` の生成/変換が非0の Property、予約、未知 kind を拒否すること、malformed internal `EntityId.ToPacked` が例外になること、`UnpackKind` が同じ raw bit を返すことを確認する。PublicApi approval で raw constructor が公開されず、typed `From` と `Create` だけが公開されることを確認する。
+- **検証方法**: Wave 1 の factory test で三つの typed Invalid、`EntityId.Invalid`、packed値 `0` が canonical Invalid になること、`Create`、`Pack`、`EntityId` の生成/変換が非0の Property、予約、未知 kind を拒否すること、noncanonical local の `EntityId.IsValid` が偽で `ToPacked` が例外になること、`UnpackKind` が同じ raw bit を返すことを確認する。PublicApi approval で raw constructor が公開されず、typed `From` と `Create` だけが公開されることを確認する。
 
 ### 2026-07-10: buffer 管理方針(steal/no-steal)の確定
 

@@ -40,8 +40,8 @@
 - **発見日**: 2026-07-12
 - **影響**: Wave 1 commit 1
 - **内容**: `EntityRef.From(NodeId.Invalid)` が invalid sentinel を返すのか例外にするのか、`Create`/`Pack`/`EntityId` の生成と変換が Property、予約、未知 kind をどう扱うのかが未定義だった。実装者が任意の振る舞いを選ぶと、raw packed value の読取りと public entity identity の生成境界が混同される。
-- **対応条件**: typed Invalid、`EntityId.Invalid`、packed値 `0` だけを canonical Invalid とし、public factory と `EntityId` の生成/変換は非0の Property、予約、未知 kind を `ArgumentOutOfRangeException` で拒否する。malformed internal `EntityId.ToPacked` は例外にし、`UnpackKind` は raw 抽出として検証を行わない。
-- **検証**: Wave 1 の factory test と PublicApi approval で typed Invalid、packed値 0、Property/予約/未知 kind、raw unpack、raw constructor 非公開を確認する。
+- **対応条件**: typed Invalid、`EntityId.Invalid`、packed値 `0` だけを canonical Invalid とし、public factory と `EntityId` の生成/変換は非0の Property、予約、未知 kind を `ArgumentOutOfRangeException` で拒否する。`EntityId.IsValid` は Node(1)、Relationship(2)、Hyperedge(4) と local pack 可能範囲だけで真にし、canonical Invalid/packed値 `0` 以外の invalid `EntityId.ToPacked` は例外にする。`UnpackKind` は raw 抽出として検証を行わない。
+- **検証**: Wave 1 の factory test と PublicApi approval で typed Invalid、packed値 0、Property/予約/未知 kind、noncanonical local、raw unpack、raw constructor 非公開を確認する。
 
 ## Major
 
