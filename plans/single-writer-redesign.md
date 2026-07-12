@@ -85,6 +85,7 @@ Single Writer 再設計では、これらの旧実装指示を本書で上書き
 - `EntityRef = (EntityKind, Generation, Sequence)` が target architecture の entity identity の唯一の表現である。internal `EntityId` の統合は TransactionManager rewrite と同じ Wave 4 で行う。
 - public `EntityRef` の論理形は `(EntityKind Kind, long Value)` とするが、raw constructor は private にする。`Value` は kind を除く `PackLocal(Sequence, Generation)` であり、`Id = Sequence` という旧契約は削除する。`Sequence` と `Generation` を instance property として公開する。既存 static helper は `UnpackSequence(long)` / `UnpackGeneration(long)` へ改名し、member 名を衝突させない。
 - public construction は `From(NodeId)`、`From(RelationshipId)`、`From(HyperedgeId)` と `Create(EntityKind, sequence, generation)` に限定する。`From` に渡した typed ID が Invalid のときだけ `default(EntityRef)` を返す。`EntityId.Invalid` と packed 値 `0` は canonical Invalid である。非0の Property、予約値、未知 kind は `Create`、`Pack`、`EntityId` の生成と packed 値からの変換で `ArgumentOutOfRangeException` を返す。`EntityRef.IsValid` は Kind が Node(1)、Relationship(2)、Hyperedge(4) のいずれかで、かつ Value が非負のときだけ真である。`UnpackKind` は packed bit の raw 抽出であり、生成境界ではないため kind を検証しない。`Create` は三つの有効 kind、sequence/generation 範囲、local Value に kind bit がないことを検証し、不正値を reject する。`default(EntityRef)` だけを invalid sentinel として許す。typed ID からは full `Value` を失わずに変換する。
+- physical record の Sequence は内部 address だけを表す。logical emit/key、public API、query/traversal、index output は sidecar の `CurrentGeneration` で full typed ID を materialize する。Generation `0` の typed ID は内部 physical address に限定し、public identity として emit しない。Generation `> 0` の入力は sidecar と照合して stale を reject し、derived entry の世代不一致は stale として skip する。relationship/incidence が保持する Sequence は slot 再利用後の別 entity へ retarget してはならない。
 - `EntityKind` は `Node(1)`、`Relationship(2)`、`Hyperedge(4)` だけを持つ。現行の永続 byte と public enum 値を維持し、削除する `Property(3)` の値は予約欠番として再利用しない。
 - typed ID (`NodeId` 等) の equality は packed identity 全体を比較する。現行の Generation を無視する equality は削除する。
 - Generation は slot incarnation であり、`xmin` / `xmax` は logical version visibility である。両者を混同しない。
@@ -258,6 +259,7 @@ cross-kind の catalog/index value だけ `EntityRef` の kind 付き packed 形
 `EntityId.IsValid` は Kind が Node(1)、Relationship(2)、Hyperedge(4) のいずれかで、かつ local Value が `0` 以上 `1L << 60` 未満の pack 可能範囲にあるときだけ真である。
 `EntityId.Invalid`（packed 値 `0`）以外の invalid `EntityId` に対する `ToPacked` は、`0` へ黙って正規化せず `ArgumentOutOfRangeException` を返す。
 `EntityRef.UnpackKind` は保存済み packed 値の raw kind bit を読むためだけの関数であり、値の生成や有効性を保証しない。対して `EntityId.FromPacked` は public construction 境界なので strict に kind を検証する。
+physical Sequence は page/record の内部 address に限る。logical key、public/query/traversal/index output は sidecar の `CurrentGeneration` を用いて full typed ID を materialize し、Generation `0` を外へ出さない。Generation `> 0` の caller input は sidecar と一致しなければ stale として reject し、derived entry は skip する。relationship/incidence の Sequence 参照は再利用された slot を別 entity として解決してはならない。
 
 ### 5.2 entity
 
@@ -360,7 +362,7 @@ record type は `BeginWrite`、`PageImage`、`Commit`、`Abort`、`CheckpointBeg
 
 | disposition | 具体的な型・ファイル | 決定と理由 |
 |---|---|---|
-| Rewrite | `Core/EntityRef.cs`, `Core/Ids.cs` | Wave 1 で packing と enum 数値を維持したまま typed ID equality/hash を Generation 込みにする。public `PropertyId` の削除は Wave 3。 |
+| Rewrite | `Core/EntityRef.cs`, `Core/Ids.cs` | Wave 1 で packing と enum 数値を維持したまま typed ID equality/hash を Generation 込みにする。physical Sequence は内部 address に限定し、logical emit/key と public/query/traversal/index output は sidecar `CurrentGeneration` から full ID を materialize する。public `PropertyId` の削除は Wave 3。 |
 | Rewrite | `Core/EntityId.cs` | Wave 1 で `EntityKind.Property` と `FromProperty` を削除する。internal `EntityId` の `EntityRef` 統合は transaction call site と同じ Wave 4。 |
 | Rewrite | `Core/Visibility.cs`, `Core/SnapshotState.cs`, `Core/CommittedTxRegistry.cs` | one-writer snapshot に縮約し、active writer 一つ、committed high-water、aborted gap を扱う。gap は high-water 以下で commit されなかった txId の集合であり、後続 tx の commit 後も aborted version を committed と誤認しないために保持する。vacuum が該当 txId を参照する primary/derived record を除去した後だけ prune できる。 |
 | Keep | `Core/Crc32.cs`, `Core/Exceptions.cs`, `Core/PropertyTypeFlags.cs`, `Core/VectorScorer.cs`, `Core/VectorKnn.cs` | checksum、例外基底、型フィルタ、SIMD scorer は並行性設計に依存しない。 |
@@ -882,10 +884,18 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 - vector/full-text segment の重い構築は lease 外の read snapshot で行い、manifest publish だけを writer lease 下で行う(§4.5, §4.6)。
 - baseline の出所と再現コマンドは `plans/single-writer-redesign-baseline.md` に固定する(§10.4)。
 - `EntityId.Invalid` と packed 値 `0` だけを canonical Invalid とし、public identity factory は Node、Relationship、Hyperedge 以外を拒否する(§2.3、§5.1)。
+- physical Sequence は内部 address に限定し、logical emit/key と public/query/traversal/index output は `CurrentGeneration` から full typed ID を materialize する。Generation `0` は外へ出さず、stale input/derived entry は reject/skip する(§2.3、§5.1)。
 
 実装中に新しい選択が必要になった場合は、曖昧な TODO を残さず、選択肢、推奨決定、根拠、検証方法を本書の decision log に追記してからコードを変更する。
 
 ## 16. decision log
+
+### 2026-07-12: Generation materialization の境界
+
+- **背景**: physical record、adjacency、incidence、locator、delta は Sequence だけを保存する一方、typed ID の equality は Generation を含む。Sequence を `NodeId` 等へそのまま再構成すると、logical read/query/traversal/index output が Generation `0` を emit し、stale entry と再利用 slot を区別できない。
+- **決定**: physical Sequence は page/record address と内部 chain だけに使う。logical emit/key、public API、query/traversal、index output は各 sidecar の `CurrentGeneration` で full typed ID を materialize する。Generation `0` は内部だけで使い、public identity にしない。Generation `> 0` の入力は sidecar と一致しなければ stale として reject し、derived entry は skip する。relationship/incidence が持つ Sequence は、slot 再利用後の別 entity へ retarget してはならない。
+- **Why not**: Sequence-only equality や public output の Generation `0` を許すと、vacuum 後に再利用された slot が旧 relationship、incidence、derived entry の参照先として見えてしまう。physical record に Generation を重複保存すると既存 layout と recovery/format の変更を前倒しするため、sidecar を materialization source とする。
+- **検証方法**: node、relationship、hyperedge の read/scan、query/traversal、dense/sparse frontier、index/full-text/vector output が current Generation を emit することを確認する。Generation `> 0` の stale input は reject、derived stale entry は skip し、relationship/incidence の reuse 後に別 entity へ retarget しないことを実 reuse test で確認する。
 
 ### 2026-07-12: EntityRef の invalid と kind 境界
 

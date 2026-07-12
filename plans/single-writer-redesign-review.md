@@ -43,6 +43,16 @@
 - **対応条件**: typed Invalid、`EntityId.Invalid`、packed値 `0` だけを canonical Invalid とし、public factory と `EntityId` の生成/変換は非0の Property、予約、未知 kind を `ArgumentOutOfRangeException` で拒否する。`EntityId.IsValid` は Node(1)、Relationship(2)、Hyperedge(4) と local pack 可能範囲だけで真にし、canonical Invalid/packed値 `0` 以外の invalid `EntityId.ToPacked` は例外にする。`UnpackKind` は raw 抽出として検証を行わない。
 - **検証**: Wave 1 の factory test と PublicApi approval で typed Invalid、packed値 0、Property/予約/未知 kind、noncanonical local、raw unpack、raw constructor 非公開を確認する。
 
+### C-5. Generation materialization の source と logical 境界が未定義
+
+> **設計決定済み・実装未対応(2026-07-12)**: 正本 §2.3、§5.1、§7.1、§15、§16 に physical Sequence と logical full ID の境界を追加した。read/query/traversal/index の実装と test が完了するまで対応済みにはしない。
+
+- **発見日**: 2026-07-12
+- **影響**: Wave 1 commit 1
+- **内容**: relationship、incidence、adjacency、locator、delta が Sequence だけを保存する一方、typed ID equality は Generation を含む。Sequence をそのまま typed ID として emit すると Generation `0` が logical output へ漏れ、stale entry と slot reuse を区別できない。
+- **対応条件**: physical Sequence は内部 address に限定する。logical emit/key、public API、query/traversal、index output は sidecar `CurrentGeneration` から full typed ID を materialize し、Generation `0` を public identity にしない。Generation `> 0` の stale input は reject、derived stale entry は skip する。relationship/incidence の Sequence は再利用後の別 entity へ retarget しない。
+- **検証**: read/scan、query/traversal、dense/sparse frontier、index/full-text/vector output、relationship/incidence reuse の各 test と PublicApi approval で確認する。
+
 ## Major
 
 ### M-1. Wave 3 のテスト項目が Wave 5 / Wave 9 の成果に暗黙依存する
