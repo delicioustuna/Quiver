@@ -2,7 +2,7 @@
 
 > 効力宣言: 本書と設計正本が食い違う場合は設計正本を優先し、食い違いをユーザへ報告する。
 > 作成日: 2026-07-10
-> 対応する正本のバージョン: `bba8338b07d89e6adaba10eb8d660debe4e8bc85`
+> 対応する正本のバージョン: `87ab531fe923ffb3a9f54cffacd87cadb416dfab`
 > ステータス: 承認済み(2026-07-12)
 
 ## 1. 着手前チェック
@@ -17,7 +17,7 @@
 - [ ] C-3 の writer 自己可視性が WriterLease と同じ Wave 4 に割り当てられている。
 - [ ] 正本 §2.3、§5.1、§16 と review C-4 の canonical Invalid、strict factory、raw unpack の規則が一致する。
 - [ ] 正本 §2.3、§5.1、§7.1、§16 と review C-5 の physical Sequence、logical materialization、stale reject/skip、reuse retarget 禁止の規則が一致する。
-- [ ] 正本 §2.3、§5.1、§7.1、§16 と review C-6 の relationship raw entry、reader horizon、rebuild/reset、candidate skip/not-found の規則が一致する。
+- [ ] 正本 §2.3、§5.1、§7.1、§9 Wave 1/9、§15、§16 と review C-6 の relationship raw entry、Wave 1 no-reuse、Wave 9 coordinator、candidate skip/not-found の規則が一致する。
 - [ ] 本書の正本 version を実 commit hash へ更新し、ユーザがコミット計画を承認した。
 
 見出しの「対応済み」だけで判断せず、各参照先を `rg` で照合する。
@@ -43,9 +43,9 @@
    typed Invalid の `From` は `default(EntityRef)` にだけ写像する。factory は三つの有効 kind、範囲、kind bit 混入を検証し、Property、予約、未知 kind を `ArgumentOutOfRangeException` で拒否する。`UnpackKind` は raw packed bit の抽出だけを担い、生成境界ではない。`Value` を Generation 込み `PackLocal` とし、旧 `Id = Sequence` contract を `Sequence` / `Generation` property へ置換する。
    static helper は `UnpackSequence(long)` / `UnpackGeneration(long)` へ改名し、全 call site を同じ commit で移行する。
    typed ID から EntityRef を作る全 call site は raw constructor を使えず、型別 `From` factory に移行する。
-   physical Sequence は page/record address と internal chain に限定する。logical emit/key、public API、read/scan、query/traversal、index/full-text/vector output は sidecar `CurrentGeneration` で full typed ID を materialize する。Generation `0` は public identity にしない。Generation `> 0` の stale input は reject し、derived stale entry は skip する。relationship/incidence の Sequence は reuse 後の別 entity へ retarget しない。
+   physical Sequence は page/record address と internal chain に限定する。logical emit/key、public API、read/scan、query/traversal、index/full-text/vector output は sidecar `CurrentGeneration` で full typed ID を materialize する。Generation `0` は public identity にしない。Generation `> 0` の stale input は reject し、derived stale entry は skip する。Wave 1 は relationship Sequence を再利用しない。`Vacuum` は reclaim 済み relationship storage を回収しても free list へ release せず、create は free 候補を無視して high-water mark からだけ割り当てる。raw relationship entry は logical materialization 不能なら skip/not-found とし、別 relationship へ retarget しない。reader horizon、base rebuild、delta/epoch reset、locator rebuild、derived durable、free release を担う `RelationshipReuseCoordinator` は Wave 9 の責務である。
    Pack/PackLocal の bit layout、public enum の underlying value、query/operator の既存 tie-break は変更しない。新しい比較operatorや `IComparable` は追加しない。
-   dictionary、read/scan、query/traversal、dense/sparse frontier、index key/full-text/vector output、relationship/incidence reuse、typed ID factory、`Pack` / `PackLocal` codec round-trip、不正kind/value rejection の same-sequence/different-generation test を追加する。materializer、reuse fence、adjacency base/delta、locator、epoch entry が raw relationship Sequence を保持する間の reuse 拒否、reader horizon 後の rebuild/reset と candidate skip/not-found を確認する。owner delete と参照 relationship/incidence が同じ logical delete 境界で無効化されること、old snapshot 中は reuse できず旧参照が旧 owner を観測すること、reader 終了と vacuum/reuse 後は旧参照が別 entity へ retarget しないことを確認する。三つの typed Invalid、`EntityId.Invalid`、`EntityId.FromPacked(0)` の canonical Invalid、Property(3)/予約/未知 kind（例 5、15）の factory/`EntityId` rejection、noncanonical local（Node、`-2`、60 bit overflow など）の `EntityId.IsValid` と `ToPacked`、Generation `> 0` stale reject、derived stale skip、raw `UnpackKind` の抽出も検証する。
+   dictionary、read/scan、query/traversal、dense/sparse frontier、index key/full-text/vector output、typed ID factory、`Pack` / `PackLocal` codec round-trip、不正kind/value rejection の same-sequence/different-generation test を追加する。materializer、reuse fence、adjacency base/delta、locator、epoch entry が raw relationship Sequence を保持したままでも Wave 1 の `Vacuum` が free release せず、create が high-water mark だけを使い、old raw entry が別 relationship へ retarget しないことを確認する。owner delete と参照 relationship/incidence が同じ logical delete 境界で無効化されること、old snapshot 中に旧参照が旧 owner を観測すること、logical materializer の stale candidate が skip/not-found になることを確認する。reader horizon 後の rebuild/reset、crash/reopen、実 relationship reuse は Wave 9 の coordinator test に移す。三つの typed Invalid、`EntityId.Invalid`、`EntityId.FromPacked(0)` の canonical Invalid、Property(3)/予約/未知 kind（例 5、15）の factory/`EntityId` rejection、noncanonical local（Node、`-2`、60 bit overflow など）の `EntityId.IsValid` と `ToPacked`、Generation `> 0` stale reject、derived stale skip、raw `UnpackKind` の抽出も検証する。
    public `PropertyId` equality/hash は Wave 1 の対象外とし、Wave 3 の削除まで現行 Sequence equalityを維持する。
 2. entity kind を三種類へ限定する。
    `EntityKind.Property`、`EntityId.FromProperty`、`EntityId.AsProperty` と対応 test を削除する。
@@ -86,7 +86,7 @@ if ($stagedPaths.Count -gt 0) { & scripts/agent-guardrails/check-track-markers.p
 integration candidate で設定すべき追加条件数は6件である。
 
 - `EntityKind` は Node、Relationship、Hyperedge だけであり、予約 raw kind を valid な `EntityRef` または `EntityId` にしない。physical Sequence は public identity にしない。
-- typed ID equality と hash が Generation を含み、logical read/query/traversal/index output は current Generation を持つ full typed ID を返す。stale input/derived entry は reject/skip し、owner delete は参照 relationship/incidence を同じ logical delete 境界で無効化する。old snapshot 中の reuse は禁止し、reader 終了と vacuum/reuse 後も旧参照は別 entity へ retarget しない。
+- typed ID equality と hash が Generation を含み、logical read/query/traversal/index output は current Generation を持つ full typed ID を返す。stale input/derived entry は reject/skip し、owner delete は参照 relationship/incidence を同じ logical delete 境界で無効化する。Wave 1 の relationship `Vacuum` は free release を行わず、create は high-water mark からだけ割り当てるため、raw entry が残っても old raw entry は別 relationship へ retarget しない。reader horizon 後の rebuild/reset と実 reuse は Wave 9 の coordinator gate で検証する。
 - public `PropertyId` は Wave 3 の現行 active contract として残るが、`EntityRef` へ変換できない。
 - transaction/property/index の新旧 public modelを追加していない。
 - guardrail 差分監査に新規漏出がない。
