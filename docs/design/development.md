@@ -469,6 +469,28 @@ redirect は ClaudeRoot 配下から AgentsRoot 配下の leaf `SKILL.md` への
 
 本文併記、multi-hop、通常の Markdown または YAML、絶対 URI、drive path は redirect として認めない。
 
+### Wave 0 監査記録
+
+2026-07-12 に `redesign-baseline` を基準として Wave 0 の gate を監査した。
+
+`check-track-markers.ps1 -DiffAgainst redesign-baseline` は新規候補0件で成功した。
+
+full `-Scan` は既存候補184件を検出した。
+これは Wave 10 の cleanup baseline として記録し、Wave 0 の差分 gate とは区別する。
+
+`README.md`、`docs/spec`、`docs/design` の Markdown relative link audit は成功した。
+
+historical docs と `plans/` を含む全 tracked Markdown の監査は既存の欠落26件を検出した。
+この監査は historical debt の記録であり、Wave 0 の hard pass にはしない。
+
+3つの guardrail self-test は成功した。
+`check-skill-redirects.ps1` は local mirror の historical redirect を解決し、Windows の physical AgentsRoot escape を junction fixture で拒否した。
+active `quiver-implement` mirror は SHA-256 で一致した。
+
+focused `tools/Quiver.Studio` build と `dotnet build Quiver.slnx -v minimal` は、ともに0 warnings、0 errorsで成功した。
+
+`git diff redesign-baseline -- src/Quiver/Transactions src/Quiver/Wal src/Quiver/Storage` と `git diff redesign-baseline -- src tests benchmarks` は差分なしだった。
+
 ## Versioning / API 安定性
 
 Quiver は [Semantic Versioning](https://semver.org/lang/ja/)（`MAJOR.MINOR.PATCH`）に従う。
