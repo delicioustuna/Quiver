@@ -253,10 +253,10 @@ public sealed class IndexGenerationTests : IDisposable
     // ---- Format version gate ----
 
     [Fact]
-    public void FormatVersion_current_is_v4()
+    public void FormatVersion_current_is_v5()
     {
-        // FormatVersion V4 は incidence を fixed-slot 直接アドレスレイアウトへ変更する clean break。
-        FormatVersion.Current.Should().Be(FormatVersion.V4);
+        // FormatVersion V5 は relationship delta の永続ストア追加に伴う clean break。
+        FormatVersion.Current.Should().Be(FormatVersion.V5);
     }
 
     // 旧 format バイトを持つ store は open 時に reject される (クリーンブレイク; 自動マイグレーション無し)。
@@ -298,7 +298,7 @@ public sealed class IndexGenerationTests : IDisposable
                 .Which.Should().Match<FormatVersionMismatchException>(
                     ex => ex.FileKind == "versionedheap"
                           && ex.Found == LegacyFormatVersion
-                          && ex.Expected == FormatVersion.V4);
+                          && ex.Expected == FormatVersion.V5);
         }
     }
 }
