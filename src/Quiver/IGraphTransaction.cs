@@ -314,16 +314,19 @@ public ref struct HyperedgeMemberEnumerator
 {
     private HyperedgeIncidenceEnumerator _inner;
     private readonly ITokenStore<RoleId> _roleTokens;
+    private readonly INodeStore _nodes;
     private readonly RoleId _roleFilter;
     private HyperedgeMember _current;
 
     internal HyperedgeMemberEnumerator(
         HyperedgeIncidenceEnumerator inner,
         ITokenStore<RoleId> roleTokens,
+        INodeStore nodes,
         RoleId roleFilter)
     {
         _inner = inner;
         _roleTokens = roleTokens;
+        _nodes = nodes;
         _roleFilter = roleFilter;
         _current = default;
     }
@@ -337,9 +340,12 @@ public ref struct HyperedgeMemberEnumerator
             var inc = _inner.Current;
             if (_roleFilter.IsValid && inc.RoleId != _roleFilter)
                 continue;
+            var materializer = new EntityIdentityMaterializer(_nodes);
+            if (!materializer.TryNode(inc.NodeId, out var member))
+                continue;
             _current = new HyperedgeMember(
                 _roleTokens.GetName(inc.RoleId),
-                inc.NodeId);
+                member);
             return true;
         }
         return false;
@@ -388,13 +394,10 @@ public ref struct HyperedgeIdEnumerator
             var inc = _inner.Current;
             if (_roleFilter.IsValid && inc.RoleId != _roleFilter)
                 continue;
-            var heId = inc.HyperedgeId;
-            if (_typeFilter.IsValid)
-            {
-                using var header = _hyperedges.Read(heId);
-                if (!header.InUse || header.Type != _typeFilter)
-                    continue;
-            }
+            using var header = _hyperedges.Read(inc.HyperedgeId);
+            if (!header.InUse || (_typeFilter.IsValid && header.Type != _typeFilter))
+                continue;
+            var heId = header.Id;
             _seen ??= new HashSet<long>();
             if (!_seen.Add(heId.Sequence))
                 continue;

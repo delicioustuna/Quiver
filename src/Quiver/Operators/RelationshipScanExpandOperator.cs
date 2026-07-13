@@ -75,7 +75,8 @@ internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
         long max = -1;
         while (_source.MoveNext())
         {
-            var id = Materialize(new NodeId(_source.Current[_sourceNodeColumn].LongValue));
+            if (!TryMaterialize(new NodeId(_source.Current[_sourceNodeColumn].LongValue), out var id))
+                continue;
             // Why not Sequence-only: vacuum 後に再利用された slot を seed と誤って突合すると、
             // stale frontier が現在の別ノードの relationship を展開してしまう。
             ids.Add(id);
@@ -100,8 +101,9 @@ internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
             var s = Statistics;
             s.RelationshipScanRecords++;
 
-            NodeId relSource = Materialize(rel.Source);
-            NodeId relTarget = Materialize(rel.Target);
+            if (!TryMaterialize(rel.Source, out NodeId relSource)
+                || !TryMaterialize(rel.Target, out NodeId relTarget))
+                continue;
             NodeId source, neighbor;
             switch (_direction)
             {
@@ -153,10 +155,10 @@ internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
         }
     }
 
-    private NodeId Materialize(NodeId id)
+    private bool TryMaterialize(NodeId id, out NodeId logical)
     {
-        int generation = _tx!.Nodes.CurrentGeneration(id.Sequence);
-        return generation < 0 ? NodeId.Invalid : NodeId.Create(id.Sequence, generation);
+        var materializer = new EntityIdentityMaterializer(_tx!.Nodes);
+        return materializer.TryNode(id, out logical);
     }
 
     public void Dispose()

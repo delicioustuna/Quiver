@@ -219,8 +219,11 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
                 if (incidence.IsLive)
                 {
                     reached.Add(current.Sequence);
-                    if (incidence.NodeId != nodeId)
-                        issues.Add($"Incidence {current.Sequence} is linked from the wrong node chain.");
+                // incidence の node 参照は physical Sequence、node scan は logical full ID。
+                // 診断の chain 整合性は物理 address を検査するため、Generation 込み equality を
+                // 使うと正常な chain を別ノード扱いしてしまう。
+                if (incidence.NodeId.Sequence != nodeId.Sequence)
+                    issues.Add($"Incidence {current.Sequence} is linked from the wrong node chain.");
                 }
                 current = incidence.NextInNode;
             }

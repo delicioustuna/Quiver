@@ -64,8 +64,12 @@ internal sealed class ShortestPathOperator : IPhysicalOperator
     {
         while (_source.MoveNext())
         {
-            var src = new NodeId(_source.Current[_srcCol].LongValue);
-            var tgt = new NodeId(_source.Current[_tgtCol].LongValue);
+            var materializer = new EntityIdentityMaterializer(_tx!.Nodes);
+            if (!materializer.TryNode(new NodeId(_source.Current[_srcCol].LongValue), out var src)
+                || !materializer.TryNode(new NodeId(_source.Current[_tgtCol].LongValue), out var tgt))
+            {
+                continue;
+            }
             long dist = FindShortestPath(src, tgt);
             if (dist < 0) continue;
 

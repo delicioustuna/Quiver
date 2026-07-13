@@ -20,6 +20,7 @@ internal sealed class KnnNodeSourceOperator : IPhysicalOperator
     private readonly int _k;
     private readonly VectorSearchOptions? _options;
     private VectorSearchCursor? _cursor;
+    private ITransaction? _tx;
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
 
     public KnnNodeSourceOperator(
@@ -44,6 +45,7 @@ internal sealed class KnnNodeSourceOperator : IPhysicalOperator
 
     public void Open(ITransaction tx)
     {
+        _tx = tx;
         _cursor = tx.Access.KnnSearch(_indexName, _query, _k, _options);
     }
 
@@ -55,7 +57,14 @@ internal sealed class KnnNodeSourceOperator : IPhysicalOperator
             // Node 以外の結果はスキップする。誤った型のインデックスが走査を汚染しないための防御で、
             // 全件 Node 以外の場合は例外ではなく空ストリームを返す。
             if (hit.EntityKind != EntityKind.Node) continue;
-            _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = hit.EntityId };
+
+            // vector index は physical Sequence を返す。Fusion などの論理演算子へ渡す前に
+            // full NodeId を復元し、無効化済みの candidate は出力しない。
+            var materializer = new EntityIdentityMaterializer(_tx!.Nodes);
+            if (!materializer.TryNode(new NodeId(hit.EntityId), out var logical))
+                continue;
+
+            _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = logical.Value };
             var s = Statistics;
             s.RowsProduced++;
             Statistics = s;
@@ -64,5 +73,9 @@ internal sealed class KnnNodeSourceOperator : IPhysicalOperator
         return false;
     }
 
-    public void Dispose() => _cursor?.Dispose();
+    public void Dispose()
+    {
+        _cursor?.Dispose();
+        _tx = null;
+    }
 }

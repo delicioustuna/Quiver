@@ -35,8 +35,10 @@ public class LabelNodeIndexTests : IDisposable
         var otherA = _store.Allocate(new LabelId(2));
 
         // index は Sequence 空間 id を返す。slot 同一性で照合する。
-        _index.Lookup(_store, new LabelId(1)).Select(n => n.Sequence)
-            .Should().BeEquivalentTo(new[] { docA.Sequence, docB.Sequence });
+        var docs = _index.Lookup(_store, new LabelId(1)).ToArray();
+        docs.Select(n => n.Sequence).Should().BeEquivalentTo(new[] { docA.Sequence, docB.Sequence });
+        docs.Should().OnlyContain(n => n.Generation > 0,
+            "Lookup is a logical API and must not return raw physical sequences");
         _index.Lookup(_store, new LabelId(2)).Select(n => n.Sequence)
             .Should().BeEquivalentTo(new[] { otherA.Sequence });
         _index.Lookup(_store, new LabelId(3)).Should().BeEmpty();

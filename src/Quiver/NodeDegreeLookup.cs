@@ -26,6 +26,7 @@ public sealed class NodeDegreeLookup
         dense: false,
         outDegrees: null,
         inDegrees: null,
+        nodeIds: null,
         powerNodeBits: null,
         denseLength: 0,
         sparseDegrees: null,
@@ -36,6 +37,7 @@ public sealed class NodeDegreeLookup
 
     private readonly long[]? _outDegrees;
     private readonly long[]? _inDegrees;
+    private readonly NodeId[]? _nodeIds;
     private readonly ulong[]? _powerNodeBits;
     private readonly int _denseLength;
     private readonly IReadOnlyDictionary<NodeId, NodeDegreeSummary>? _sparseDegrees;
@@ -63,6 +65,7 @@ public sealed class NodeDegreeLookup
         bool dense,
         long[]? outDegrees,
         long[]? inDegrees,
+        NodeId[]? nodeIds,
         ulong[]? powerNodeBits,
         int denseLength,
         IReadOnlyDictionary<NodeId, NodeDegreeSummary>? sparseDegrees,
@@ -74,6 +77,7 @@ public sealed class NodeDegreeLookup
         IsDense = dense;
         _outDegrees = outDegrees;
         _inDegrees = inDegrees;
+        _nodeIds = nodeIds;
         _powerNodeBits = powerNodeBits;
         _denseLength = denseLength;
         _sparseDegrees = sparseDegrees;
@@ -97,6 +101,13 @@ public sealed class NodeDegreeLookup
         {
             if ((ulong)v < (ulong)_denseLength)
             {
+                NodeId logical = _nodeIds![v];
+                if (nodeId.Generation != 0 && nodeId != logical)
+                {
+                    outDegree = 0;
+                    inDegree = 0;
+                    return false;
+                }
                 outDegree = _outDegrees![v];
                 inDegree = _inDegrees![v];
                 return true;
@@ -152,7 +163,7 @@ public sealed class NodeDegreeLookup
                     bits &= bits - 1;
                     long v = ((long)word << 6) | (uint)bit;
                     if (v >= len) yield break;
-                    yield return new NodeDegreeSummary(new NodeId(v), _outDegrees![v], _inDegrees![v]);
+                    yield return new NodeDegreeSummary(_nodeIds![v], _outDegrees![v], _inDegrees![v]);
                 }
             }
         }
@@ -209,7 +220,7 @@ public sealed class NodeDegreeLookup
             {
                 return new NodeDegreeLookup(
                     dense: false,
-                    outDegrees: null, inDegrees: null, powerNodeBits: null, denseLength: 0,
+                    outDegrees: null, inDegrees: null, nodeIds: null, powerNodeBits: null, denseLength: 0,
                     sparseDegrees: null, sparsePowerNodes: _powerNodes,
                     powerNodeThreshold: _powerNodeThreshold,
                     maxNodeIdObserved: _maxNodeId,
@@ -230,6 +241,7 @@ public sealed class NodeDegreeLookup
                 int len = (int)denseCapacity;
                 var outs = new long[len];
                 var ins = new long[len];
+                var ids = new NodeId[len];
                 int bitWords = (len + 63) >> 6;
                 var bits = new ulong[bitWords == 0 ? 1 : bitWords];
 
@@ -238,6 +250,7 @@ public sealed class NodeDegreeLookup
                     int v = (int)r.NodeId.Sequence; // dense 配列 index は Sequence
                     outs[v] = r.OutDegree;
                     ins[v] = r.InDegree;
+                    ids[v] = r.NodeId;
                     if (r.OutDegree + r.InDegree >= _powerNodeThreshold)
                     {
                         int word = v >> 6;
@@ -248,7 +261,7 @@ public sealed class NodeDegreeLookup
 
                 return new NodeDegreeLookup(
                     dense: true,
-                    outDegrees: outs, inDegrees: ins, powerNodeBits: bits, denseLength: len,
+                    outDegrees: outs, inDegrees: ins, nodeIds: ids, powerNodeBits: bits, denseLength: len,
                     sparseDegrees: null, sparsePowerNodes: _powerNodes,
                     powerNodeThreshold: _powerNodeThreshold,
                     maxNodeIdObserved: _maxNodeId,
@@ -259,7 +272,7 @@ public sealed class NodeDegreeLookup
             // 以前のメモリ挙動に揃える。
             return new NodeDegreeLookup(
                 dense: false,
-                outDegrees: null, inDegrees: null, powerNodeBits: null, denseLength: 0,
+                outDegrees: null, inDegrees: null, nodeIds: null, powerNodeBits: null, denseLength: 0,
                 sparseDegrees: _powerNodes,
                 sparsePowerNodes: _powerNodes,
                 powerNodeThreshold: _powerNodeThreshold,

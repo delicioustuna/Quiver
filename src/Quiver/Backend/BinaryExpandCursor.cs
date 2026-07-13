@@ -67,9 +67,15 @@ internal sealed class BinaryExpandCursor : ExpandCursor
             var adj = _tx.AdjacencyBlocks!;
             while (_adjCursor!.MoveNext())
             {
-                var rid = _adjCursor.Relationship;
+                // adjacency base は physical relationship Sequence だけを持つ。
+                // logical Read / output の前に full ID へ解決する。
+                var physicalRelationship = _adjCursor.Relationship;
+                var materializer = new EntityIdentityMaterializer(
+                    _tx.Nodes, _tx.Relationships, _tx.Hyperedges);
+                if (!materializer.TryRelationship(physicalRelationship, out var rid))
+                    continue;
+
                 var rel = _tx.Relationships.Read(rid);
-                if (!rel.InUse) continue;
                 bool sourceIsEndpoint = rel.Source.Sequence == _source.Sequence;
                 NodeId neighbor = sourceIsEndpoint ? rel.Target : rel.Source;
                 if (adj.IsTombstoned(rid) &&
@@ -118,8 +124,8 @@ internal sealed class BinaryExpandCursor : ExpandCursor
         // fast path が使えなかった頻度を診断で可視化できるよう、カウンタをインクリメントする。
         System.Threading.Interlocked.Increment(ref _owner.FallbackCountInternal);
         _adjActive = false;
-        _deltaCursor = _owner.RelationshipDeltas.OpenCursor(
-            _tx, _source, _direction, _typeFilter, adj?.BaseRelHwm ?? 0);
+        _deltaCursor = _owner.RelationshipDeltas.OpenRowCursor(
+            _tx, _source, _direction, _typeFilter);
     }
 
     public override void Dispose()

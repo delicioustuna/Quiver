@@ -90,7 +90,15 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
         while (_source.MoveNext())
         {
             var slot = _source.Current[_sourceNodeColumn];
-            if (slot.Type == TupleSlotType.NodeId) candidateIds.Add(slot.LongValue);
+            if (slot.Type != TupleSlotType.NodeId)
+                continue;
+
+            // EntityCandidateSet は raw Sequence を受ける互換 adapter。
+            // logical pipeline の full ID は primary Read で検証してから、その直後にだけ
+            // physical vector key へ落とす。stale full ID は新 slot 所有者へ retarget しない。
+            using var node = tx.Nodes.Read(new NodeId(slot.LongValue));
+            if (node.InUse)
+                candidateIds.Add(node.Id.Sequence);
         }
 
         if (candidateIds.Count == 0)

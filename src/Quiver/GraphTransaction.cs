@@ -1047,7 +1047,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
             return default;
 
         var innerEnum = _inner.Incidences.EnumerateByHyperedge(hyperedgeId, _inner.Hyperedges);
-        return new HyperedgeMemberEnumerator(innerEnum, _roleTokens, roleFilter);
+        return new HyperedgeMemberEnumerator(innerEnum, _roleTokens, _inner.Nodes, roleFilter);
     }
 
     public HyperedgeIdEnumerator GetHyperedges(NodeId nodeId, string? type = null, string? role = null)

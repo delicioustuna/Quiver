@@ -443,6 +443,9 @@ public sealed class GraphStats
         {
             var node = tx.Nodes.Read(nodeId);
             if (!node.InUse) continue;
+            var materializer = new EntityIdentityMaterializer(tx.Nodes);
+            if (!materializer.TryNode(nodeId, out var logicalNodeId))
+                continue;
 
             totalNodes++;
             var label = node.Label;
@@ -517,7 +520,7 @@ public sealed class GraphStats
                 h.Record(perTypeIn[typeId]);
             }
 
-            degreeBuilder.Record(nodeId, outDegree, inDegree);
+            degreeBuilder.Record(logicalNodeId, outDegree, inDegree);
 
             // ノードプロパティ → PropertyKeyStats (inline + overflow)
             var propEnum = tx.Nodes.EnumerateProperties(nodeId, tx.Properties);

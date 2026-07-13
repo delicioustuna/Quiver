@@ -31,6 +31,10 @@ internal sealed class TxRelationshipStore : IRelationshipStore
 
     public long InUseCount => _inner.InUseCount;
 
+    // sidecar generation は MVCC / lock を必要としない raw metadata のため、そのまま委譲する。
+    // logical materializer が raw relationship Sequence を full ID に戻す境界で使用する。
+    public int CurrentGeneration(long localId) => _inner.CurrentGeneration(localId);
+
     public RelationshipId Create(INodeStore _, NodeId source, NodeId target, RelationshipTypeId type)
     {
         ActivateMvccContext();

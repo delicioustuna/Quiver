@@ -135,7 +135,17 @@ internal sealed class InlineExpandCursor : ExpandCursor
 
         while (_nextRelId.IsValid)
         {
-            var rel = _tx.Relationships.Read(_nextRelId);
+            int generation = _tx.Relationships.CurrentGeneration(_nextRelId.Sequence);
+            if (generation < 0)
+            {
+                _nextRelId = RelationshipId.Invalid;
+                return false;
+            }
+
+            // node chain は physical Sequence を保持するため、logical Read の直前で
+            // 現行 generation を付与する。
+            var rel = _tx.Relationships.Read(
+                RelationshipId.Create(_nextRelId.Sequence, generation));
             var thisRel = _nextRelId;
             bool sourceIsEndpoint = rel.Source.Sequence == _source.Sequence;
             _nextRelId = sourceIsEndpoint ? rel.SourceNext : rel.TargetNext;
