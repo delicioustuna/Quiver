@@ -65,18 +65,18 @@
 
 ### C-7. `LabelNodeIndex.Lookup` と legacy raw-long candidate の境界が未定義
 
-> **設計決定済み・実装未対応(2026-07-13、integration)**: `Lookup` を full `NodeId` を返す logical API に確定した。Wave 1 は public `EntityCandidateSet` と filtered vector の direct raw-long legacy contract を互換例外として維持するが、query/traversal は full ID の `Read` 検証後の `Sequence` だけを physical lookup に渡す。legacy contract は Wave 7 で削除する。正本 §2.3、§5.1、§8.1、§15、§16 を参照。
+> **設計決定済み・実装未対応(2026-07-13、integration)**: `Lookup` を full `NodeId` を返す logical API に確定した。public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 まで残す physical compatibility surface (`compatibility adapter`) であり、logical identity API ではない。node query/traversal は full typed `NodeId` の primary `Read` 検証直後の `Sequence` だけを physical lookup に渡す。正本 §2.3、§5.1、§8.1、§15、§16 を参照。
 
 - **該当**: §2.3 identity と version、§5.1 ID、§7.2 `LabelNodeIndex`、§8.1、Wave 1 identity migration、Wave 7 vector。
-- **内容**: `LabelNodeIndex.Lookup` の output を physical sequence candidate と logical query/traversal result の双方が共有すると、どちらかが必ず誤る。raw sequence のまま logical pipeline に渡すと generation を失い、vacuum reuse 後に stale slot が別 node を指す。反対に full `NodeId` を返して raw candidate consumer がその packed value を locator、index key、または candidate set に入れると、physical sequence と一致せず empty result になる。public `EntityCandidateSet` と filtered vector の direct raw-long contract は既存利用者との互換境界であり、Wave 1 で破壊しないが、logical identity や query/traversal の入力にはしない。
+- **内容**: `LabelNodeIndex.Lookup` の output を physical sequence candidate と logical query/traversal result の双方が共有すると、どちらかが必ず誤る。raw sequence のまま logical pipeline に渡すと generation を失い、vacuum reuse 後に stale slot が別 node を指す。反対に full `NodeId` を返して raw candidate consumer がその packed value を locator、index key、または candidate set に入れると、physical sequence と一致せず empty result になる。public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 まで残す physical compatibility surface (`compatibility adapter`) であり、logical identity API や query/traversal の入力ではない。
 - **失敗シナリオ**: label lookup 後の `ApplyDyadic` が full identity を raw key として扱い候補を失う。filtered KNN または full-text が raw candidate として packed ID を渡し、完全一致すべき graph-first query が空になる。逆に raw output を採ると、同 sequence の新 generation を old reader/query が別 entity として返す。legacy raw-long を query/traversal へ直接渡すと `Read` 検証を迂回する。
-- **対応条件**: `Lookup` を full `NodeId` の logical API に固定する。logical pipeline は full typed ID を保持し、physical store に入る直前に `Read(fullId)` を成功させた後だけ `Sequence` を使う。physical candidate/output は current generation と primary `Read` で full ID に materialize し、stale candidate を skip する。public `EntityCandidateSet` と filtered vector の direct raw-long legacy contract は Wave 1 で維持するが、互換 adapter 内の physical candidate に限定し、query/traversal へ渡す前に full ID の `Read` で検証した `Sequence` に変換する。raw long の診断表示はこの adapter と別に、表示・計測だけに閉じる。Wave 7 で legacy contract を削除する。
+- **対応条件**: `Lookup` を full `NodeId` の logical API に固定する。logical pipeline は full typed ID を保持し、node query/traversal が physical lookup に渡すのは full typed `NodeId` の primary `Read` 検証直後の `Sequence` だけである。physical candidate/output は current generation と primary `Read` で full ID に materialize し、stale candidate を skip する。public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 まで残す physical compatibility surface (`compatibility adapter`) であり、logical identity API ではない。raw long の診断表示はこの adapter と別に、表示・計測だけに閉じる。
 - **テスト条件**:
   - label lookup は full `NodeId` を返し、same-sequence/different-generation を raw sequence として返さない。
-  - `ApplyDyadic` は label 起点の full ID を validated `Sequence` に変換して physical lookup し、期待する match を返す。
-  - filtered KNN と filtered full-text は graph-first/text-first の双方で full ID を保持し、candidate の物理 lookup 前に検証済み `Sequence` を使う。
+  - `ApplyDyadic` と `ApplyDyadicOversampleTests` は label 起点の full typed `NodeId` を primary `Read` 検証直後の `Sequence` に変換して physical lookup し、期待する match を返す。
+  - filtered KNN と filtered full-text は graph-first/text-first の双方で full ID を保持し、node physical lookup には full typed `NodeId` の primary `Read` 検証直後の `Sequence` を使う。
   - stale label/vector/full-text candidate は materialize 後に skip され、新 generation の entity を返さない。
-  - public direct raw-long legacy candidate は Wave 1 で維持されても query/traversal へ直接流入せず、adapter が validated `Sequence` に限定する。
+  - public direct raw-long contract は Wave 7 まで physical compatibility surface として残っても logical identity API にならず、node query/traversal へ直接流入せず、adapter が primary `Read` 検証直後の `Sequence` に限定する。
   - diagnostic の raw long は表示・計測だけに使われ、query/traversal/transaction の入力へ流入しない。
 
 ## Major
