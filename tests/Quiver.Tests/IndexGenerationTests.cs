@@ -278,7 +278,7 @@ public sealed class IndexGenerationTests : IDisposable
     [Fact]
     public void FormatVersion_current_is_v5()
     {
-        // FormatVersion V5 は relationship delta の永続 store を追加する clean break。
+        // FormatVersion V5 は relationship delta の永続ストア追加に伴う clean break。
         FormatVersion.Current.Should().Be(FormatVersion.V5);
     }
 
