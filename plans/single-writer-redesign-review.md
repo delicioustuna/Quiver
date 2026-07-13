@@ -33,6 +33,21 @@
 - **失敗シナリオ**: 実装者が規則を字義通り実装すると同一 tx 内 create→read が not found になる。逆に暗黙で例外を入れると、`xmax = writerTxId`(自 tx 内 delete)の扱い、savepoint rollback 後の可視性など、仕様なしの独自判断が増える。
 - **修正案**: §2.2.5 に「writer transaction 自身に対しては `xmin = selfTxId` は committed 扱い、`xmax = selfTxId` は削除済み扱いとする。savepoint rollback で undo された version はこの限りでない」を明文で追加する。
 
+### C-5. `LabelNodeIndex.Lookup` の raw/logical shared contract が Generation 境界を壊す
+
+> **対応済み(2026-07-13、doc-only forward-fix)**: `Lookup` を full `NodeId` を返す logical API に確定した。logical pipeline は full typed ID を保持し、physical store 境界で `Read` 検証後だけ `Sequence` を使う。physical candidate は full ID に materialize して stale を skip する。public `EntityCandidateSet` と filtered vector の validated-sequence legacy path は Wave 7 で削除する。正本 §2.3、§5.1、§8.1、§15、§16 を参照。
+
+- **該当**: §2.3 identity と version、§5.1 ID、§7.2 `LabelNodeIndex`、§8.1、Wave 1 identity migration、Wave 7 vector。
+- **内容**: `LabelNodeIndex.Lookup` の output を physical sequence candidate と logical query/traversal result の双方が共有すると、どちらかが必ず誤る。raw sequence のまま logical pipeline に渡すと generation を失い、vacuum reuse 後に stale slot が別 node を指す。反対に full `NodeId` を返して raw candidate consumer がその packed value を locator、index key、または candidate set に入れると、physical sequence と一致せず empty result になる。診断用 raw `long` が通常 pipeline に流入しても同じ問題を作る。
+- **失敗シナリオ**: label lookup 後の `ApplyDyadic` が full identity を raw key として扱い候補を失う。filtered KNN または full-text が raw candidate として packed ID を渡し、完全一致すべき graph-first query が空になる。逆に raw output を採ると、同 sequence の新 generation を old reader/query が別 entity として返す。diagnostic が raw long を通常 operator に渡すと validation を迂回する。
+- **修正案**: `Lookup` を full `NodeId` の logical API に固定する。logical pipeline は full typed ID を保持し、physical store に入る直前に `Read(fullId)` を成功させた後だけ `Sequence` を使う。physical candidate/output は current generation と primary `Read` で full ID に materialize し、stale candidate を skip する。raw long は診断表示だけに閉じる。public `EntityCandidateSet` と filtered vector の legacy path は validated `Sequence` だけを一時許可し、Wave 7 で削除する。
+- **テスト条件**:
+  - label lookup は full `NodeId` を返し、same-sequence/different-generation を raw sequence として返さない。
+  - `ApplyDyadic` は label 起点の full ID を validated `Sequence` に変換して physical lookup し、期待する match を返す。
+  - filtered KNN と filtered full-text は graph-first/text-first の双方で full ID を保持し、candidate の物理 lookup 前に検証済み `Sequence` を使う。
+  - stale label/vector/full-text candidate は materialize 後に skip され、新 generation の entity を返さない。
+  - diagnostic の raw long は表示・計測だけに使われ、query/traversal/transaction の入力へ流入しない。
+
 ## Major
 
 ### M-1. Wave 3 のテスト項目が Wave 5 / Wave 9 の成果に暗黙依存する

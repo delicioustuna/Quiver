@@ -89,6 +89,9 @@ Single Writer 再設計では、これらの旧実装指示を本書で上書き
 - typed ID (`NodeId` 等) の equality は packed identity 全体を比較する。現行の Generation を無視する equality は削除する。
 - Generation は slot incarnation であり、`xmin` / `xmax` は logical version visibility である。両者を混同しない。
 - vacuum 後に sequence を再利用するときだけ Generation を進める。wrap した slot は永久退役する。
+- logical pipeline は full typed ID を保持する。physical store に入る直前だけ full ID を `Read` で検証してから、その `Sequence` を物理 locator、chain、index key に渡す。検証前の sequence から logical ID を再構成してはならない。
+- physical access path の candidate または出力を logical pipeline へ返すときは、current generation と primary `Read` で full typed ID を materialize し、stale candidate を skip する。`LabelNodeIndex.Lookup` は logical API であり full `NodeId` だけを返す。raw `long` は診断表示にだけ使い、traversal、query、transaction の入力に渡さない。
+- public `EntityCandidateSet` と filtered vector の legacy path だけは Wave 7 の削除まで physical sequence を保持できる。ただし full typed ID を `Read` で検証した直後の `Sequence` に限定し、外部入力、logical output、または validation を省いた candidate に使わない。
 - Property、incidence、index entry、vector payload、segment は entity ではない。必要なら内部物理参照を持つが `EntityRef` に詰めない。
 
 ### 2.4 primary data と access path
@@ -252,6 +255,9 @@ EntityKind = Node(1) | Relationship(2) | Reserved(3) | Hyperedge(4)
 `EntityKind.Property` は Wave 1、public `PropertyId` は property cursor/store rewrite と同じ Wave 3 で削除する。
 `NodeId`、`RelationshipId`、`HyperedgeId` は kind を C# 型で表し、内部値は `(Generation, Sequence)` を持つ。
 cross-kind の catalog/index value だけ `EntityRef` の kind 付き packed 形を使う。
+logical operator、traversal、transaction の境界では full typed ID を使う。physical sequence は full ID の `Read` 検証後に locator、adjacency chain、index key へ渡す内部値であり、raw sequence から logical ID を作らない。physical candidate は full ID へ materialize して primary `Read` を通し、stale なものを skip してから logical output にする。`LabelNodeIndex.Lookup` はこの logical contract に従って full `NodeId` を返す。raw `long` を許すのは診断だけである。
+
+public `EntityCandidateSet` と filtered vector の legacy path は、Wave 7 で削除するまでに限る物理境界の例外である。ここでも full typed ID を `Read` で検証した後の `Sequence` だけを保持できる。外部から渡された sequence、または logical output を未検証で再利用してはならない。
 
 ### 5.2 entity
 
@@ -462,6 +468,8 @@ record type は `BeginWrite`、`PageImage`、`Commit`、`Abort`、`CheckpointBeg
 | Generation を無視する ID equality | packed identity 全体の equality |
 | `EntityRef.Id` が Sequence を表す契約 | `EntityRef.Value` は Generation 込み local packed identity。`Sequence` / `Generation` を明示取得 |
 | static `EntityRef.Sequence(long)` / `Generation(long)` | `UnpackSequence(long)` / `UnpackGeneration(long)`。instance property と名前を分離 |
+| `LabelNodeIndex.Lookup` の raw sequence output | logical API として full `NodeId` を返す。physical candidate は current generation と primary `Read` で materialize し、stale candidate を skip する |
+| public `EntityCandidateSet` と filtered vector の raw candidate contract | Wave 7 で削除する temporary legacy path。削除まで full typed ID を `Read` で検証した直後の `Sequence` だけを使う |
 | index info の label 固定 target | `PropertyTarget(OwnerKind, PropertyKeyId)` |
 | thread 固定の transaction handle 使用制限 | thread affinity を廃止し、同じ handle の同時使用だけを `ConcurrentTransactionUseException` にする |
 
@@ -873,6 +881,7 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 - checkpoint は writer lease を取得する sharp checkpoint とし、active writer の終了を待つが reader は待たない(§2.1, §2.5)。
 - vector/full-text segment の重い構築は lease 外の read snapshot で行い、manifest publish だけを writer lease 下で行う(§4.5, §4.6)。
 - baseline の出所と再現コマンドは `plans/single-writer-redesign-baseline.md` に固定する(§10.4)。
+- logical pipeline は full typed ID を保持し、physical sequence は full ID の `Read` 検証後だけに使う。physical candidate は full ID に materialize して stale を skip し、`LabelNodeIndex.Lookup` は logical full-ID API とする。public `EntityCandidateSet` と filtered vector の validated-sequence legacy path は Wave 7 で削除する(§2.3, §5.1, §8.1)。
 
 実装中に新しい選択が必要になった場合は、曖昧な TODO を残さず、選択肢、推奨決定、根拠、検証方法を本書の decision log に追記してからコードを変更する。
 
@@ -927,3 +936,11 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 - **背景**: `plans/single-writer-redesign-review.md` M-6。回収済み version や stale derived entry まで payload 整合性検査の対象にすると、正常な GC 中間状態を corruption と誤判定する。
 - **決定**: corruption 判定は snapshot horizon 上で到達可能な primary property version に限定する。property version とそれだけが参照する payload は同じ write transaction で回収し、derived entry は primary candidate revalidation で無効化できる。
 - **検証方法**: property/payload GC 各 crash boundary、stale index entry、long reader horizon、reopen consistency check を検証する。
+
+### 2026-07-13: logical ID と physical sequence の境界
+
+- **背景**: `plans/single-writer-redesign-review.md` C-5。Generation 込み ID へ移行する途中で `LabelNodeIndex.Lookup` の一つの output contract を、logical query result と physical candidate collection が共有した。raw sequence を logical output にすると stale slot が別 entity を指し得る一方、full ID を raw candidate consumer がそのまま locator/index key として扱うと lookup が空になる。
+- **選択肢**: (a) raw sequence を shared `Lookup` output とし、各 logical consumer が materialize する、(b) full typed ID を shared logical output とし、物理 consumer が検証済み `Sequence` だけを明示的に取り出す、(c) raw/logical の二 API を新設する。
+- **決定**: (b)。`LabelNodeIndex.Lookup` は full `NodeId` を返す logical API とする。logical pipeline は full typed ID を維持し、physical store 境界で `Read` による Generation 検証後だけ `Sequence` を使う。physical candidate/output は current generation と primary `Read` で full ID に materialize し、stale candidate を skip する。raw `long` は診断専用とする。public `EntityCandidateSet` と filtered vector の legacy physical path は validated `Sequence` のみを一時的に許し、Wave 7 で削除する。
+- **根拠**: full identity を logical contract に固定すると、Generation reuse 後の raw sequence が query/traversal result へ alias する経路を一箇所で遮断できる。physical layout の locality は validated `Sequence` を局所的に使うことで維持でき、legacy path の存続範囲も Wave 7 に閉じる。
+- **検証方法**: review C-5 の Label lookup、ApplyDyadic、filtered KNN/full-text、full ID、stale candidate、diagnostic raw-long 条件を満たす focused と full-suite regression を実行する。
