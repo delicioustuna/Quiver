@@ -43,6 +43,21 @@ internal sealed class RelationshipDeltaStore
         return new DeltaCursor(tx, source, direction, typeFilter, baseRelHwm, firstRelId);
     }
 
+    /// <summary>
+    /// 隣接 base が利用できないときの row-path cursor を開く。
+    /// persistent delta は base 以後の追加分だけなので、base 自体が無効な場合は
+    /// node chain を走査する必要がある。
+    /// </summary>
+    public AdjacencyCursor OpenRowCursor(
+        ITransaction tx,
+        NodeId source,
+        Direction direction,
+        RelationshipTypeId? typeFilter)
+    {
+        var firstRelId = tx.Nodes.Read(source).FirstRelationshipId;
+        return new DeltaCursor(tx, source, direction, typeFilter, baseRelHwm: 0, firstRelId);
+    }
+
     public int Count(
         ITransaction tx,
         NodeId source,

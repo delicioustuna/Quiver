@@ -106,8 +106,8 @@ internal sealed class BinaryExpandCursor : ExpandCursor
         // fast path が使えなかった頻度を診断で可視化できるよう、カウンタをインクリメントする。
         System.Threading.Interlocked.Increment(ref _owner.FallbackCountInternal);
         _adjActive = false;
-        _deltaCursor = _owner.RelationshipDeltas.OpenCursor(
-            _tx, _source, _direction, _typeFilter, adj?.BaseRelHwm ?? 0);
+        _deltaCursor = _owner.RelationshipDeltas.OpenRowCursor(
+            _tx, _source, _direction, _typeFilter);
     }
 
     public override void Dispose()
