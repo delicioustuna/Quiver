@@ -179,7 +179,7 @@ public sealed class PersistentVectorStoreTests : IDisposable
             .Which.Should().Match<FormatVersionMismatchException>(
                 ex => ex.FileKind == "vectorcatalog"
                     && ex.Found == FormatVersion.V1
-                    && ex.Expected == FormatVersion.V4);
+                    && ex.Expected == FormatVersion.V5);
     }
 
     [Fact]
