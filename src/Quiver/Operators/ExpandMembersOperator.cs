@@ -83,10 +83,14 @@ internal sealed class ExpandMembersOperator : IPhysicalOperator
                     continue;
                 if (_roleFilter.HasValue && incidence.RoleId != _roleFilter.Value)
                     continue;
-                if (_excludedNode.IsValid && incidence.NodeId == _excludedNode)
+                int generation = _tx!.Nodes.CurrentGeneration(incidence.NodeId.Sequence);
+                if (generation < 0)
+                    continue;
+                var member = NodeId.Create(incidence.NodeId.Sequence, generation);
+                if (_excludedNode.IsValid && member == _excludedNode)
                     continue;
 
-                BuildOutput(incidence.NodeId);
+                BuildOutput(member);
                 var statistics = Statistics;
                 statistics.RowsProduced++;
                 Statistics = statistics;
@@ -102,9 +106,16 @@ internal sealed class ExpandMembersOperator : IPhysicalOperator
                 continue;
 
             _currentHyperedge = header.Id;
-            _excludedNode = _excludeNodeColumn.HasValue
-                ? new NodeId(_source.Current[_excludeNodeColumn.Value].LongValue)
-                : NodeId.Invalid;
+            if (_excludeNodeColumn.HasValue)
+            {
+                using var excluded = _tx.Nodes.Read(
+                    new NodeId(_source.Current[_excludeNodeColumn.Value].LongValue));
+                if (!excluded.InUse)
+                    continue;
+                _excludedNode = excluded.Id;
+            }
+            if (!_excludeNodeColumn.HasValue)
+                _excludedNode = NodeId.Invalid;
             _nextIncidence = header.FirstIncidenceId;
         }
     }

@@ -56,7 +56,12 @@ internal sealed class FilteredKnnNodeSourceOperator : IPhysicalOperator
         while (_source.MoveNext())
         {
             var slot = _source.Current[_sourceNodeColumn];
-            if (slot.Type == TupleSlotType.NodeId) ids.Add(slot.LongValue);
+            if (slot.Type != TupleSlotType.NodeId)
+                continue;
+
+            using var node = tx.Nodes.Read(new NodeId(slot.LongValue));
+            if (node.InUse)
+                ids.Add(node.Id.Sequence);
         }
         var candidates = new EntityCandidateSet(EntityKind.Node, ids);
         _cursor = tx.Access.KnnSearchFiltered(_indexName, _query, _k, candidates, _options);

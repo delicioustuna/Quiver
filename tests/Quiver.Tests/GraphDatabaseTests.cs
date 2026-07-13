@@ -355,7 +355,7 @@ public sealed class GraphDatabaseTests : IDisposable
     }
 
     [Fact]
-    public void Stale_relationship_generation_does_not_resolve_after_sequence_reuse()
+    public void Vacuum_keeps_raw_relationship_sequence_from_retargeting()
     {
         var path = Path.Combine(_dir, "relationship_locator_reuse.quiver");
         using var db = GraphDatabase.Open(path);
@@ -374,7 +374,8 @@ public sealed class GraphDatabaseTests : IDisposable
             tx.Commit();
         }
 
-        var stale = RelationshipId.Create(old.Sequence, 1);
+        var stale = old;
+        var raw = new RelationshipId(old.Sequence);
         using (var tx = db.BeginTransaction())
         {
             tx.DeleteRelationship(old);
@@ -383,21 +384,21 @@ public sealed class GraphDatabaseTests : IDisposable
 
         db.Vacuum().ReclaimedRelationships.Should().Be(1);
 
-        RelationshipId reused;
+        RelationshipId replacement;
         using (var tx = db.BeginTransaction())
         {
-            reused = tx.CreateRelationship(a, c, "LINK");
-            tx.SetProperty(reused, "weight", PropertyValue.FromInt64(2));
+            replacement = tx.CreateRelationship(a, c, "LINK");
+            tx.SetProperty(replacement, "weight", PropertyValue.FromInt64(2));
             tx.Commit();
         }
 
-        reused.Sequence.Should().Be(old.Sequence);
-        var current = RelationshipId.Create(reused.Sequence, 2);
+        replacement.Sequence.Should().BeGreaterThan(old.Sequence);
         db.CompactAdjacency();
 
         using (var tx = db.BeginTransaction())
         {
             tx.GetProperty(stale, "weight").Type.Should().Be(default(PropertyValueType));
+            tx.GetProperty(raw, "weight").Type.Should().Be(default(PropertyValueType));
             tx.SetProperty(stale, "weight", PropertyValue.FromInt64(99));
             tx.DeleteRelationship(stale);
             tx.Commit();
@@ -405,8 +406,7 @@ public sealed class GraphDatabaseTests : IDisposable
 
         using (var tx = db.BeginReadOnlyTransaction())
         {
-            tx.GetProperty(current, "weight").Int64Value.Should().Be(2);
-            tx.GetProperty(new RelationshipId(reused.Sequence), "weight").Int64Value.Should().Be(2);
+            tx.GetProperty(replacement, "weight").Int64Value.Should().Be(2);
 
             var targets = new List<NodeId>();
             var rels = tx.EnumerateRelationships(a, Direction.Outgoing);

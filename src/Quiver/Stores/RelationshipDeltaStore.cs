@@ -99,7 +99,8 @@ internal sealed class RelationshipDeltaStore
 
                 var thisRel = _nextRelId;
                 var rel = _tx.Relationships.Read(thisRel);
-                _nextRelId = rel.Source == _source ? rel.SourceNext : rel.TargetNext;
+                bool sourceIsEndpoint = rel.Source.Sequence == _source.Sequence;
+                _nextRelId = sourceIsEndpoint ? rel.SourceNext : rel.TargetNext;
 
                 if (!rel.InUse)
                     continue;
@@ -107,15 +108,15 @@ internal sealed class RelationshipDeltaStore
                 bool typeOk = !_typeFilter.HasValue || rel.Type == _typeFilter.Value;
                 bool dirOk = _direction switch
                 {
-                    Direction.Outgoing => rel.Source == _source,
-                    Direction.Incoming => rel.Target == _source,
-                    _ => rel.Source == _source || rel.Target == _source,
+                    Direction.Outgoing => rel.Source.Sequence == _source.Sequence,
+                    Direction.Incoming => rel.Target.Sequence == _source.Sequence,
+                    _ => rel.Source.Sequence == _source.Sequence || rel.Target.Sequence == _source.Sequence,
                 };
                 if (!typeOk || !dirOk)
                     continue;
 
-                _neighbor = rel.Source == _source ? rel.Target : rel.Source;
-                _relId = thisRel;
+                _neighbor = sourceIsEndpoint ? rel.Target : rel.Source;
+                _relId = rel.Id;
                 _type = rel.Type;
                 return true;
             }
@@ -173,19 +174,20 @@ internal sealed class RelationshipDeltaStore
 
                     bool dirOk = _direction switch
                     {
-                        Direction.Outgoing => rel.Source == _source,
-                        Direction.Incoming => rel.Target == _source,
-                        _ => rel.Source == _source || rel.Target == _source,
+                        Direction.Outgoing => rel.Source.Sequence == _source.Sequence,
+                        Direction.Incoming => rel.Target.Sequence == _source.Sequence,
+                        _ => rel.Source.Sequence == _source.Sequence || rel.Target.Sequence == _source.Sequence,
                     };
                     if (!dirOk)
                         continue;
 
-                    NodeId expectedNeighbor = rel.Source == _source ? rel.Target : rel.Source;
-                    if (_current.Neighbor != expectedNeighbor || _current.Type != rel.Type)
+                    NodeId expectedNeighbor = rel.Source.Sequence == _source.Sequence ? rel.Target : rel.Source;
+                    if (_current.Neighbor.Sequence != expectedNeighbor.Sequence
+                        || _current.Type != rel.Type)
                         continue;
 
                     _neighbor = expectedNeighbor;
-                    _relId = candidate;
+                    _relId = rel.Id;
                     _type = rel.Type;
                     return true;
                 }

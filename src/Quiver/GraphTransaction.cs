@@ -114,7 +114,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         {
             relsToDelete.Add(relId);
             var rel = _inner.Relationships.Read(relId);
-            relId = rel.Source == nodeId ? rel.SourceNext : rel.TargetNext;
+            relId = rel.Source.Sequence == nodeId.Sequence ? rel.SourceNext : rel.TargetNext;
         }
         foreach (var rid in relsToDelete)
             DeleteRelationship(rid);

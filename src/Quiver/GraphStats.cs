@@ -465,7 +465,7 @@ public sealed class GraphStats
             while (relId.IsValid)
             {
                 var rel = tx.Relationships.Read(relId);
-                bool isSource = rel.Source == nodeId;
+                bool isSource = rel.Source.Sequence == nodeId.Sequence;
                 var nextId = isSource ? rel.SourceNext : rel.TargetNext;
 
                 if (isSource)

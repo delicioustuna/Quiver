@@ -68,15 +68,17 @@ internal sealed class BinaryExpandCursor : ExpandCursor
                 var rid = _adjCursor.Relationship;
                 var rel = _tx.Relationships.Read(rid);
                 if (!rel.InUse) continue;
+                bool sourceIsEndpoint = rel.Source.Sequence == _source.Sequence;
+                NodeId neighbor = sourceIsEndpoint ? rel.Target : rel.Source;
                 if (adj.IsTombstoned(rid) &&
                     (rel.Type != _adjCursor.Type ||
-                     (rel.Source != _source && rel.Target != _source) ||
-                     (rel.Source == _source ? rel.Target : rel.Source) != _adjCursor.Neighbor))
+                      (rel.Source.Sequence != _source.Sequence && rel.Target.Sequence != _source.Sequence) ||
+                      neighbor.Sequence != _adjCursor.Neighbor.Sequence))
                 {
                     continue;
                 }
-                _neighbor = _adjCursor.Neighbor;
-                _relId = rid;
+                _neighbor = neighbor;
+                _relId = rel.Id;
                 return true;
             }
             _adjActive = false; // fall through to phase 2
@@ -84,8 +86,11 @@ internal sealed class BinaryExpandCursor : ExpandCursor
 
         while (_deltaCursor!.MoveNext())
         {
-            _neighbor = _deltaCursor.Neighbor;
-            _relId = _deltaCursor.Relationship;
+            var rel = _tx.Relationships.Read(_deltaCursor.Relationship);
+            if (!rel.InUse)
+                continue;
+            _neighbor = rel.Source.Sequence == _source.Sequence ? rel.Target : rel.Source;
+            _relId = rel.Id;
             return true;
         }
         return false;

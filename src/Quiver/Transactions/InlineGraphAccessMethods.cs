@@ -70,12 +70,12 @@ internal sealed class InlineGraphAccessMethods : IGraphAccessMethods
             bool typeOk = !typeFilter.HasValue || rel.Type == typeFilter.Value;
             bool dirOk = direction switch
             {
-                Direction.Outgoing => rel.Source == source,
-                Direction.Incoming => rel.Target == source,
+                Direction.Outgoing => rel.Source.Sequence == source.Sequence,
+                Direction.Incoming => rel.Target.Sequence == source.Sequence,
                 _ => true,
             };
             if (typeOk && dirOk) count++;
-            relId = rel.Source == source ? rel.SourceNext : rel.TargetNext;
+            relId = rel.Source.Sequence == source.Sequence ? rel.SourceNext : rel.TargetNext;
         }
         return count;
     }
@@ -115,10 +115,13 @@ internal sealed class InlineExpandCursor : ExpandCursor
 
         if (_usingAdj)
         {
-            if (_adjCursor!.MoveNext())
+            while (_adjCursor!.MoveNext())
             {
-                _neighbor = _adjCursor.Neighbor;
-                _relId = _adjCursor.Relationship;
+                var relation = _tx!.Relationships.Read(_adjCursor.Relationship);
+                if (!relation.InUse)
+                    continue;
+                _neighbor = relation.Source.Sequence == _source.Sequence ? relation.Target : relation.Source;
+                _relId = relation.Id;
                 return true;
             }
             return false;
@@ -128,19 +131,23 @@ internal sealed class InlineExpandCursor : ExpandCursor
         {
             var rel = _tx.Relationships.Read(_nextRelId);
             var thisRel = _nextRelId;
-            _nextRelId = rel.Source == _source ? rel.SourceNext : rel.TargetNext;
+            bool sourceIsEndpoint = rel.Source.Sequence == _source.Sequence;
+            _nextRelId = sourceIsEndpoint ? rel.SourceNext : rel.TargetNext;
+
+            if (!rel.InUse)
+                continue;
 
             bool typeOk = !_typeFilter.HasValue || rel.Type == _typeFilter.Value;
             bool dirOk = _direction switch
             {
-                Direction.Outgoing => rel.Source == _source,
-                Direction.Incoming => rel.Target == _source,
+                Direction.Outgoing => rel.Source.Sequence == _source.Sequence,
+                Direction.Incoming => rel.Target.Sequence == _source.Sequence,
                 _ => true,
             };
             if (typeOk && dirOk)
             {
-                _neighbor = rel.Source == _source ? rel.Target : rel.Source;
-                _relId = thisRel;
+                _neighbor = sourceIsEndpoint ? rel.Target : rel.Source;
+                _relId = rel.Id;
                 return true;
             }
         }

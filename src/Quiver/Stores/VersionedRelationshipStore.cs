@@ -44,9 +44,10 @@ internal struct RawRelRecord
 ///
 /// <para><b>MVCC</b>: xmin/xmax は heap version ヘッダに保持する (<see cref="VersionedNodeStore"/>
 /// Phase 3a と同じ統一レコードモデル)。<see cref="IEntityVersionStore"/> sidecar は Generation +
-/// SSN (Pstamp/Sstamp) + commit 高水位のみを保持する。Sequence は vacuum 回収後に
-/// <see cref="ItemPointerMap"/> の free list で再利用し、再利用ごとに世代を bump する
-/// (ABA 検出維持)。</para>
+/// SSN (Pstamp/Sstamp) + commit 高水位のみを保持する。relationship の raw Sequence は
+/// adjacency、delta、locator、epoch entry に残り得るため、再利用解放 coordinator がそれらを
+/// 除去するまで free list へ戻さない。物理ページの回収と logical Sequence の再利用を混同すると、
+/// raw entry が別 relationship を指す ABA になる。</para>
 /// </summary>
 internal sealed class VersionedRelationshipStore : IRelationshipStore
 {
@@ -94,21 +95,12 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
 
     public RelationshipId Create(INodeStore nodeStore, NodeId source, NodeId target, RelationshipTypeId type)
     {
-        // 旧 RelationshipStore と同じく rel は Sequence 空間 (gen=0) で払い出す (rel に
-        // 世代を surface しない。adjacency / chain pointer も Sequence 格納)。vacuum 回収済み seq は
-        // map free list から再利用する。
-        long seq = -1;
-        while (true)
-        {
-            long candidate = _map.PopFreeSeq();
-            if (candidate < 0) break;
-            if (_versions.Read(candidate).Generation >= EntityRef.MaxGeneration) continue;
-            seq = candidate;
-            break;
-        }
-        if (seq < 0) seq = _map.Hwm;
-        var relId = new RelationshipId(seq);
+        // raw adjacency / delta / locator / epoch entry が残る間に slot を再利用すると、
+        // entry の Sequence が別 relationship を指す。再利用解放 coordinator が lifecycle を
+        // 完結させるまでは free 候補を見ず high-water mark からだけ採番する。
+        long seq = _map.Hwm;
         long generation = _versions.Read(seq).Generation + 1;
+        var relId = RelationshipId.Create(seq, checked((int)generation));
 
         RelationshipId srcHead = GetFirstRelId(nodeStore, source);
         RelationshipId tgtHead = GetFirstRelId(nodeStore, target);
@@ -451,11 +443,13 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
                     (_, vx) => vx != 0 && vx < horizonTxId && committed.IsCommitted(vx));
         }
 
-        // Pass 3: reclaim 集合の slot を物理 free。
+        // Pass 3: reclaim 集合の record を物理回収する。
+        // raw derived entry が残るため、ここで map free list へ Sequence を release してはならない。
+        // 再利用解放は base rebuild、delta/epoch reset、locator rebuild、derived durable を完了した
+        // maintenance coordinator だけが担う。
         foreach (var seq in reclaimSet)
         {
             _heap.Remove(seq);
-            _map.PushFreeSeq(seq);
         }
 
         return reclaimSet.Count;

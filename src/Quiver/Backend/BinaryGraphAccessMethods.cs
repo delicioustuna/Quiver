@@ -164,12 +164,12 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
             bool typeOk = !typeFilter.HasValue || rel.Type == typeFilter.Value;
             bool dirOk = direction switch
             {
-                Direction.Outgoing => rel.Source == source,
-                Direction.Incoming => rel.Target == source,
+                Direction.Outgoing => rel.Source.Sequence == source.Sequence,
+                Direction.Incoming => rel.Target.Sequence == source.Sequence,
                 _ => true,
             };
             if (typeOk && dirOk) count++;
-            relId = rel.Source == source ? rel.SourceNext : rel.TargetNext;
+            relId = rel.Source.Sequence == source.Sequence ? rel.SourceNext : rel.TargetNext;
         }
         return count;
     }

@@ -61,7 +61,24 @@ internal sealed class TxRelationshipStore : IRelationshipStore
         // read-set は sink 経由で _inner.Read が記録する (traversal の隣接走査も
         // RelationshipEnumerator が _inner.Read を呼ぶので同経路で捕捉される)。
         ActivateMvccContext();
-        return _inner.Read(relId);
+        var raw = _inner.Read(relId);
+        if (!raw.InUse)
+            return raw;
+
+        var materializer = new EntityIdentityMaterializer(_txNodes);
+        if (!materializer.TryNode(raw.Source, out var source)
+            || !materializer.TryNode(raw.Target, out var target))
+        {
+            return new RelationshipReadHandle(
+                raw.Id, inUse: false, raw.Source, raw.Target, raw.Type,
+                raw.SourcePrev, raw.SourceNext, raw.TargetPrev, raw.TargetNext,
+                raw.FirstPropertyId);
+        }
+
+        return new RelationshipReadHandle(
+            raw.Id, inUse: true, source, target, raw.Type,
+            raw.SourcePrev, raw.SourceNext, raw.TargetPrev, raw.TargetNext,
+            raw.FirstPropertyId);
     }
 
     public RelationshipWriteHandle Write(RelationshipId relId)

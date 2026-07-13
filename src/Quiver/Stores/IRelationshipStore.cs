@@ -220,7 +220,7 @@ public ref struct RelationshipEnumerator
     private RelationshipId NextInChain()
     {
         // _nodeId 側のチェーンを辿る
-        if (_current.Source == _nodeId)
+        if (_current.Source.Sequence == _nodeId.Sequence)
             return _current.SourceNext;
         return _current.TargetNext;
     }
@@ -238,8 +238,8 @@ public ref struct RelationshipEnumerator
         if (!typeOk) return false;
         return _direction switch
         {
-            Direction.Outgoing => _current.Source == _nodeId,
-            Direction.Incoming => _current.Target == _nodeId,
+            Direction.Outgoing => _current.Source.Sequence == _nodeId.Sequence,
+            Direction.Incoming => _current.Target.Sequence == _nodeId.Sequence,
             _ => true,
         };
     }
