@@ -142,6 +142,10 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
         Direction direction,
         RelationshipTypeId? typeFilter)
     {
+        var materializer = new EntityIdentityMaterializer(tx.Nodes);
+        if (!materializer.TryNode(source, out source))
+            return 0;
+
         // GraphStats 未接続のため、隣接ブロックがあれば安価な O(degree) プローブを使い、
         // なければチェーンを走査する。
         var adj = tx.AdjacencyBlocks;

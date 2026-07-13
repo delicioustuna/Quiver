@@ -21,7 +21,7 @@ namespace Quiver;
 internal sealed class BinaryExpandCursor : ExpandCursor
 {
     private readonly ITransaction _tx;
-    private readonly NodeId _source;
+    private NodeId _source;
     private readonly Direction _direction;
     private readonly RelationshipTypeId? _typeFilter;
     private readonly BinaryGraphAccessMethods _owner;
@@ -30,6 +30,7 @@ internal sealed class BinaryExpandCursor : ExpandCursor
     private AdjacencyCursor? _deltaCursor;
     private bool _adjActive;     // phase 1: walking the immutable base view
     private bool _opened;
+    private bool _validSource;
 
     private NodeId _neighbor;
     private RelationshipId _relId;
@@ -57,6 +58,7 @@ internal sealed class BinaryExpandCursor : ExpandCursor
     public override bool MoveNext()
     {
         if (!_opened) { Open(); _opened = true; }
+        if (!_validSource) return false;
 
         // Phase 1: 隣接ブロック経由の base ビュー走査。tombstone をここでフィルタし、
         // base リレーションシップの削除を読み手から不可視にする。
@@ -98,6 +100,11 @@ internal sealed class BinaryExpandCursor : ExpandCursor
 
     private void Open()
     {
+        var materializer = new EntityIdentityMaterializer(_tx.Nodes);
+        if (!materializer.TryNode(_source, out _source))
+            return;
+        _validSource = true;
+
         var adj = _tx.AdjacencyBlocks;
         if (adj != null && adj.HasBlock(_source))
         {

@@ -33,9 +33,8 @@ internal readonly struct EntityIdentityMaterializer
     {
         logical = NodeId.Invalid;
         if (!physical.IsValid) return false;
-        int generation = _nodes.CurrentGeneration(physical.Sequence);
-        if (generation < 0) return false;
-        var candidate = NodeId.Create(physical.Sequence, generation);
+        var candidate = Resolve(physical, _nodes.CurrentGeneration);
+        if (!candidate.IsValid) return false;
         using var read = _nodes.Read(candidate);
         if (!read.InUse) return false;
         logical = read.Id;
@@ -47,9 +46,8 @@ internal readonly struct EntityIdentityMaterializer
         logical = RelationshipId.Invalid;
         if (!physical.IsValid) return false;
         if (_relationships == null) return false;
-        int generation = _relationships.CurrentGeneration(physical.Sequence);
-        if (generation < 0) return false;
-        var candidate = RelationshipId.Create(physical.Sequence, generation);
+        var candidate = Resolve(physical, _relationships.CurrentGeneration);
+        if (!candidate.IsValid) return false;
         using var read = _relationships.Read(candidate);
         if (!read.InUse) return false;
         logical = read.Id;
@@ -61,12 +59,35 @@ internal readonly struct EntityIdentityMaterializer
         logical = HyperedgeId.Invalid;
         if (!physical.IsValid) return false;
         if (_hyperedges == null) return false;
-        int generation = _hyperedges.CurrentGeneration(physical.Sequence);
-        if (generation < 0) return false;
-        var candidate = HyperedgeId.Create(physical.Sequence, generation);
+        var candidate = Resolve(physical, _hyperedges.CurrentGeneration);
+        if (!candidate.IsValid) return false;
         using var read = _hyperedges.Read(candidate);
         if (!read.InUse) return false;
         logical = read.Id;
         return true;
     }
+
+    // Generation 0 は旧来の physical Sequence を表す compatibility input に限る。
+    // 世代付き入力を現世代へ置換すると stale identity が新しい slot 所有者を指すため、
+    // primary Read にそのまま渡して reject させる。
+    private static NodeId Resolve(NodeId id, Func<long, int> currentGeneration)
+        => id.Generation != 0
+            ? id
+            : currentGeneration(id.Sequence) is var generation && generation >= 0
+                ? NodeId.Create(id.Sequence, generation)
+                : NodeId.Invalid;
+
+    private static RelationshipId Resolve(RelationshipId id, Func<long, int> currentGeneration)
+        => id.Generation != 0
+            ? id
+            : currentGeneration(id.Sequence) is var generation && generation >= 0
+                ? RelationshipId.Create(id.Sequence, generation)
+                : RelationshipId.Invalid;
+
+    private static HyperedgeId Resolve(HyperedgeId id, Func<long, int> currentGeneration)
+        => id.Generation != 0
+            ? id
+            : currentGeneration(id.Sequence) is var generation && generation >= 0
+                ? HyperedgeId.Create(id.Sequence, generation)
+                : HyperedgeId.Invalid;
 }

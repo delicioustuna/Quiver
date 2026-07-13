@@ -62,6 +62,10 @@ internal sealed class InlineGraphAccessMethods : IGraphAccessMethods
         Direction direction,
         RelationshipTypeId? typeFilter)
     {
+        var materializer = new EntityIdentityMaterializer(tx.Nodes);
+        if (!materializer.TryNode(source, out source))
+            return 0;
+
         double count = 0;
         var relId = tx.Nodes.Read(source).FirstRelationshipId;
         while (relId.IsValid)
@@ -84,13 +88,14 @@ internal sealed class InlineGraphAccessMethods : IGraphAccessMethods
 internal sealed class InlineExpandCursor : ExpandCursor
 {
     private readonly ITransaction _tx;
-    private readonly NodeId _source;
+    private NodeId _source;
     private readonly Direction _direction;
     private readonly RelationshipTypeId? _typeFilter;
 
     private AdjacencyCursor? _adjCursor;
     private bool _usingAdj;
     private bool _opened;
+    private bool _validSource;
     private RelationshipId _nextRelId;
     private NodeId _neighbor;
     private RelationshipId _relId;
@@ -112,6 +117,7 @@ internal sealed class InlineExpandCursor : ExpandCursor
     public override bool MoveNext()
     {
         if (!_opened) { Open(); _opened = true; }
+        if (!_validSource) return false;
 
         if (_usingAdj)
         {
@@ -156,6 +162,11 @@ internal sealed class InlineExpandCursor : ExpandCursor
 
     private void Open()
     {
+        var materializer = new EntityIdentityMaterializer(_tx.Nodes);
+        if (!materializer.TryNode(_source, out _source))
+            return;
+        _validSource = true;
+
         var adj = _tx.AdjacencyBlocks;
         if (adj != null && adj.HasBlock(_source))
         {
