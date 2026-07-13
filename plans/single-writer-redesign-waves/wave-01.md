@@ -2,7 +2,7 @@
 
 > 効力宣言: 本書と設計正本が食い違う場合は設計正本を優先し、食い違いをユーザへ報告する。
 > 作成日: 2026-07-10
-> 対応する正本のバージョン: 正本が未 commit のため、現在の draft に基づく。Wave 0 完了後の承認 commit で実 commit hash へ更新する。
+> 対応する正本のバージョン: `6892244` (`docs(redesign): define logical identity boundary`)。
 > ステータス: draft
 
 ## 1. 着手前チェック
@@ -14,6 +14,7 @@
 - [ ] C-1 の redo-only、WAL record 7種、loser 除外が正本内で一致する。
 - [ ] C-2 の SSN/lock削除 Wave 4、public transaction cutover Wave 6 が正本とreviewで一致する。
 - [ ] C-3 の writer 自己可視性が WriterLease と同じ Wave 4 に割り当てられている。
+- [ ] C-5 の `LabelNodeIndex.Lookup` が full `NodeId` を返す logical API であり、physical sequence は full ID の `Read` 検証後だけに使うことが正本・review・本書で一致する。
 - [ ] 本書の正本 version を実 commit hash へ更新し、ユーザがコミット計画を承認した。
 
 見出しの「対応済み」だけで判断せず、各参照先を `rg` で照合する。
@@ -25,7 +26,7 @@
 2. 正本 §2.3 と §5.1。
 3. 正本 §7.1 の identity disposition。
 4. 正本 §8.1 の ID equality 変更。
-5. review C-1〜C-3、M-1、M-5。
+5. review C-1〜C-3、C-5、M-1、M-5。
 6. `docs/design/00_conventions.md` の public API、ID、test 規約。
 
 ## 3. コミット計画
@@ -39,6 +40,8 @@
    factory は三つの有効 kind、範囲、kind bit 混入を検証し、不正表現を rejectする。`Value` を Generation 込み `PackLocal` とし、旧 `Id = Sequence` contract を `Sequence` / `Generation` property へ置換する。
    static helper は `UnpackSequence(long)` / `UnpackGeneration(long)` へ改名し、全 call site を同じ commit で移行する。
    typed ID から EntityRef を作る全 call site は raw constructor を使えず、型別 `From` factory に移行する。
+   logical pipeline は full typed ID を保持する。physical store の locator、chain、index key へ渡す sequence は full ID の `Read` 検証後にだけ取り出し、physical candidate は full ID へ materialize して stale を skip する。`LabelNodeIndex.Lookup` は full `NodeId` を返す logical API とし、raw `long` は診断だけに閉じる。
+   public `EntityCandidateSet` と filtered vector の legacy path は validated `Sequence` だけを一時的に使えるが、Wave 7 で削除する。未検証の external sequence や logical output を physical candidate として再利用しない。
    Pack/PackLocal の bit layout、public enum の underlying value、query/operator の既存 tie-break は変更しない。新しい比較operatorや `IComparable` は追加しない。
    dictionary、frontier、index key、typed ID factory、`Pack` / `PackLocal` codec round-trip、不正kind/value rejection の same-sequence/different-generation test を追加する。
    public `PropertyId` equality/hash は Wave 1 の対象外とし、Wave 3 の削除まで現行 Sequence equalityを維持する。
@@ -56,6 +59,9 @@
 dotnet build Quiver.slnx -v minimal
 dotnet test tests/Quiver.Tests/Quiver.Tests.csproj --no-build --filter "FullyQualifiedName~EntityIdTests|FullyQualifiedName~IndexGenerationTests|FullyQualifiedName~HyperedgeIdentityTests"
 dotnet test tests/Quiver.Operators.Tests/Quiver.Operators.Tests.csproj --no-build --filter "FullyQualifiedName~IdentityGenerationRegressionTests"
+dotnet test tests/Quiver.Stores.Tests/Quiver.Stores.Tests.csproj --no-build --filter "FullyQualifiedName~LabelNodeIndexTests"
+dotnet test tests/Quiver.Operators.Tests/Quiver.Operators.Tests.csproj --no-build --filter "FullyQualifiedName~ApplyDyadic"
+dotnet test tests/Quiver.Tests/Quiver.Tests.csproj --no-build --filter "FullyQualifiedName~KnnPushdownTests|FullyQualifiedName~Bm25ScorerTests|FullyQualifiedName~FilterByTextTests"
 dotnet test tests/Quiver.Tests/Quiver.Tests.csproj --no-build
 dotnet test tests/Quiver.Stores.Tests/Quiver.Stores.Tests.csproj --no-build
 dotnet test tests/Quiver.Operators.Tests/Quiver.Operators.Tests.csproj --no-build
@@ -78,7 +84,7 @@ if ($stagedPaths.Count -gt 0) { & scripts/agent-guardrails/check-track-markers.p
 | as-built 更新 | 適用 | `git diff redesign-wave-0 -- docs/spec docs/design/development.md` | Generation 込み equality、三 EntityKind、後続 Wave staging が記載済み |
 
 追加条件は次のとおりである。
-integration candidate で設定すべき追加条件数は6件である。
+integration candidate で設定すべき追加条件数は13件である。
 
 - `EntityKind` は Node、Relationship、Hyperedge だけである。
 - typed ID equality と hash が Generation を含む。
@@ -86,6 +92,13 @@ integration candidate で設定すべき追加条件数は6件である。
 - transaction/property/index の新旧 public modelを追加していない。
 - guardrail 差分監査に新規漏出がない。
 - planned commit がすべて origin へ push 済みで、WIP が残っていない。
+- `LabelNodeIndex.Lookup` は full `NodeId` を返し、raw sequence を logical output に返さない。
+- logical operator と traversal は full typed ID を保持し、physical lookup は `Read` 検証済みの `Sequence` だけを使う。
+- label 起点の `ApplyDyadic` は full ID を validated `Sequence` に変換して physical lookup し、期待する match を返す。
+- filtered KNN は graph-first と vector-first の双方で full ID を保ち、候補の physical lookup 前に validated `Sequence` を使う。
+- filtered full-text は graph-first と text-first の双方で full ID を保ち、候補の physical lookup 前に validated `Sequence` を使う。
+- stale label/vector/full-text candidate は materialize 後に skip され、新 generation の entity を返さない。
+- diagnostic raw `long` は表示・計測だけに使われ、query、traversal、transaction の入力へ流入しない。
 
 gate 結果と topic hash `T` に対するユーザの merge 承認後、process §6 の integration worktree で remote `develop` hash `D` との candidate を作り、本表の全 gate と追加条件を再実行する。
 remote の `D` と `T` を push 直前にも照合し、一致時だけ candidate を `develop` へ push する。
