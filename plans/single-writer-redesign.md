@@ -94,7 +94,7 @@ Single Writer 再設計では、これらの旧実装指示を本書で上書き
 - vacuum 後に sequence を再利用するときだけ Generation を進める。wrap した slot は永久退役する。
 - logical pipeline は full typed ID を保持する。node query/traversal が physical store に入る直前だけ full typed `NodeId` を primary `Read` で検証し、その直後の `Sequence` を物理 locator、chain、index key に渡す。検証前の sequence から logical ID を再構成してはならない。
 - physical access path の candidate または出力を logical pipeline へ返すときは、current generation と primary `Read` で full typed ID を materialize し、stale candidate を skip する。`LabelNodeIndex.Lookup` は logical API であり full `NodeId` だけを返す。diagnostic raw `long` は表示・計測にだけ使い、traversal、query、transaction の入力に渡さない。
-- public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 まで残す physical compatibility surface (`compatibility adapter`) であり、logical identity API ではない。node query/traversal が physical lookup に渡すのは full typed `NodeId` を primary `Read` で検証した直後の `Sequence` だけである。compatibility surface が受けた direct raw long を logical identity、logical output、または未検証の query/traversal input として再利用してはならない。
+- public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 で削除するまでの内部物理ブリッジであり、互換性を保証する public contract ではない。node query/traversal が physical lookup に渡すのは full typed `NodeId` を primary `Read` で検証した直後の `Sequence` だけである。ブリッジが受けた direct raw long を logical identity、logical output、または未検証の query/traversal input として再利用してはならない。
 - Property、incidence、index entry、vector payload、segment は entity ではない。必要なら内部物理参照を持つが `EntityRef` に詰めない。
 
 ### 2.4 primary data と access path
@@ -269,7 +269,10 @@ owner Sequence は、参照 relationship/incidence が当該 read snapshot か�
 relationship raw Sequence は base、delta、locator、epoch entry に内部参照として残す。transaction/query/traversal boundary でだけ logical ID を materialize する。Wave 1 の `Vacuum` は reclaim 済み relationship の storage を回収しても Sequence を free list へ release せず、create は free 候補を無視して high-water mark からだけ割り当てる。raw entry が残る間も ABA は起きない。Wave 9 の `RelationshipReuseCoordinator` は reader horizon の通過後に base rebuild、delta/epoch reset、locator rebuild、derived durable を順に完了してから初めて Sequence を free list へ release する。途中の crash は release なしの safe leak とし、reopen 時に coordinator が未完了の再利用解放を再開する。materialization できない candidate は skip/not-found にする。
 `LabelNodeIndex.Lookup` は full `NodeId` を返す logical API とする。logical operator、traversal、transaction の境界では full typed ID を保持し、node query/traversal が physical locator、adjacency chain、index key へ渡す sequence は full typed `NodeId` を primary `Read` で検証した直後だけに取り出す。physical candidate/output は current generation と primary `Read` で full ID に materialize し、stale candidate を skip してから logical output にする。raw sequence から logical ID を作らない。
 
-public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 まで残す physical compatibility surface (`compatibility adapter`) であり、logical identity API ではない。この raw long は adapter 内の physical candidate にだけ使い、node query/traversal が physical lookup に渡すのは full typed `NodeId` を primary `Read` で検証した直後の `Sequence` だけである。compatibility surface が受けた direct raw long を logical identity、logical output、または未検証の query/traversal input として再利用してはならない。診断用 raw `long` は表示・計測にだけ使い、query、traversal、transaction の入力に渡さない。
+public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 で削除するまでの内部物理ブリッジであり、互換性を保証する public contract ではない。
+この raw long はブリッジ内の physical candidate にだけ使い、node query/traversal が physical lookup に渡すのは full typed `NodeId` を primary `Read` で検証した直後の `Sequence` だけである。
+ブリッジが受けた direct raw long を logical identity、logical output、または未検証の query/traversal input として再利用してはならない。
+診断用 raw `long` は表示と計測にだけ使い、query、traversal、transaction の入力に渡さない。
 
 ### 5.2 entity
 
@@ -349,6 +352,14 @@ VectorPayload = Present | ElementType | Dimensions | ByteLength | ContentChecksu
 - file magic を旧 `*.quiver` と判別できる `QUIVER-SW` family magic に変更する。
 - family 内の最初の `StorageFormatVersion` は 1 とする。旧 `FormatVersion.V1` と同じ値でも magic が違うため誤読しない。
 - 8 KB page、Little Endian、CRC32C、single-file tenant は維持する。
+- 新規ファイルの既定初期確保量は 1 MiB とし、固定 64 MiB の事前確保を廃止する。
+- ファイル長を `L`、初期確保量を `I`、増分上限を `M` とすると、拡張増分は `min(max(L, I), M)` とする。
+- 拡張後の長さは、必要バイト数と `L + 拡張増分` の大きい方を 8 KB 境界へ切り上げる。
+- この規則により、既定値では総容量が 1、2、4、8、16、32、64、128 MiB と増え、その後は 64 MiB ずつ増える。
+- `GraphDatabaseOptions.InitialFileAllocationBytes` の既定値は 1 MiB、`MaximumFileGrowthStepBytes` の既定値は 64 MiB とする。
+- 両 option は 8 KB 以上を受け付け、内部で 8 KB 境界へ切り上げる。
+- allocation option は運用設定であり永続形式へ保存しない。
+- 既存ファイルを開くときは現在の物理長を変更せず、次の拡張時から指定 option を使う。
 - tenant catalog は schema/index definition、primary/derived の区分、rebuild state を明示する形へ rewrite する。
 - 固定 tenant 番号の旧予約は引き継がない。新 catalog から決定的に割り当てる。
 - automatic physical migration は提供しない。source data または logical export から作り直す。
@@ -387,7 +398,7 @@ record type は `BeginWrite`、`PageImage`、`Commit`、`Abort`、`CheckpointBeg
 
 | disposition | 具体的な型・ファイル | 決定と理由 |
 |---|---|---|
-| Keep | `Storage/PagedFile.cs`, `PageManager.cs`, `SingleFile/SingleFileContainer.cs`, `TenantPagedFile.cs`, `PageHeader.cs` | MMF、Clock pool、8 KB page、tenant 多重化、CRC を再利用する。magic/catalog/format check は rewrite する。 |
+| Keep/Rewrite | `Storage/PagedFile.cs`, `PageManager.cs`, `SingleFile/SingleFileContainer.cs`, `TenantPagedFile.cs`, `PageHeader.cs` | MMF、Clock pool、8 KB page、tenant 多重化、CRC を再利用する。magic/catalog/format check と固定 64 MiB 確保を rewrite し、初期 1 MiB から増分上限 64 MiB まで適応成長させる。 |
 | Keep | `Storage/SlottedPage.cs`, `VersionedRecordHeap.cs`, `ItemPointerMap.cs` | page arithmetic と heap primitive は新 format header に追従させて再利用する。 |
 | Rewrite | `Stores/VersionedNodeStore.cs`, `VersionedRelationshipStore.cs`, `VersionedHyperedgeStore.cs` | 現行 binary backend が実際に使う primary store。entity header と Generation/xmin/xmax の正本を一つにし、property head は owner-bound store を指す。 |
 | Delete | `Stores/NodeStore.cs`, `RelationshipStore.cs` | `Versioned*Store` と併存する旧 fixed-slot store。新 backend へ配線せず、旧 unit test とともに削除する。 |
@@ -411,7 +422,7 @@ record type は `BeginWrite`、`PageImage`、`Commit`、`Abort`、`CheckpointBeg
 | Rewrite | `TxNodeStore.cs`, `TxRelationshipStore.cs`, `TxHyperedgeStore.cs`, `TxPropertyStore.cs`, `TxIndexManager.cs` | lock acquire と SSN hook を削除し、snapshot/write-set を明示引数で渡す。 |
 | Keep/Rewrite | `AbortUndoHandler.cs`, `SavepointId.cs`, `Checkpointer.cs`, `AdaptiveCheckpointController.cs` | before-image と savepoint はメモリ内 abort 用に残す。checkpoint は writer lease を取る sharp checkpoint とし、reader を待たず committed dirty page を flush する。 |
 | Delete | `LockManager.cs`, `LockMode.cs`, `DeadlockDetector.cs`, `DeadlockException.cs` | writer が一つで entity lock の待ちグラフが存在しない。 |
-| Delete | `SsnContext.cs`, `SerializabilityException.cs`, `IsolationLevel` | Serializable を提供しない。Wave 4 で SSN、pstamp/sstamp、lock hook を撤去する。public `IsolationLevel` と旧開始 API は facade compatibility として Wave 6 まで残し、public transaction cutover と同じ commit で削除する。 |
+| Delete | `SsnContext.cs`, `SerializabilityException.cs`, `IsolationLevel` | Serializable を提供しない。Wave 4 で SSN、pstamp/sstamp、lock hook を撤去する。旧 public facade は置換先を実装する Wave 6 までの一時配線であり、互換性を保証せず、public transaction cutover と同じ commit で削除する。 |
 | Rewrite | `TransactionUsageLease.cs` | thread id 固定ではなく、同期/async flow を含む同時使用だけを検出する transaction-owned guard にする。 |
 
 ### 7.4 Wal
@@ -470,6 +481,7 @@ record type は `BeginWrite`、`PageImage`、`Commit`、`Abort`、`CheckpointBeg
 | `IGraphTransaction` / `GraphTransaction` の read/write 共用 contract | `IReadTransaction` / `IWriteTransaction` と対応する handle に分割。共通 read surface は `IReadTransaction` に置く |
 | `IsolationLevel`, `ReadCommitted`, `Serializable` | snapshot isolation 固定。enum 自体を削除 |
 | `GraphDatabaseOptions.LockTimeout` | `WriterWaitTimeout` |
+| 新規 DB の固定 64 MiB 確保 | `InitialFileAllocationBytes` と `MaximumFileGrowthStepBytes` による 1 MiB 始動の適応成長 |
 | `LockingMode`, `DeadlockDetectionInterval`, `EnforceExclusiveWriter` | `WriterContentionMode { Wait, FailFast }` |
 | `GroupCommitWindow` | 削除。並行 commit が無いため意味を持たない |
 | `IVectorStore`, `GraphDatabase.Vectors`, `VectorIndexSpec(EntityKind,...)` | `ISchemaApi.CreateIndex(VectorIndexDefinition)` と transaction の vector property API |
@@ -484,7 +496,7 @@ record type は `BeginWrite`、`PageImage`、`Commit`、`Abort`、`CheckpointBeg
 | raw `EntityRef(EntityKind, long)` constructor | 削除。typed `From` と検証済み `Create` だけを public construction にする |
 | `EntityKind.Property` と raw kind 値 `3` | 値 `3` は予約欠番。public entity identity を生成せず、`PropertyId` は Wave 3 の property rewrite まで現行 contract として残す |
 | `LabelNodeIndex.Lookup` の raw sequence output | logical API として full `NodeId` を返す。physical candidate は current generation と primary `Read` で materialize し、stale candidate を skip する |
-| public `EntityCandidateSet` と filtered vector の direct raw-long contract | Wave 7 まで残す physical compatibility surface (`compatibility adapter`) であり、logical identity API ではない。node query/traversal が physical lookup に渡す値は full typed `NodeId` の primary `Read` 検証直後の `Sequence` に限る |
+| public `EntityCandidateSet` と filtered vector の direct raw-long contract | Wave 7 で削除するまでの内部物理ブリッジであり、互換性を保証する public contract ではない。node query/traversal が physical lookup に渡す値は full typed `NodeId` の primary `Read` 検証直後の `Sequence` に限る |
 | index info の label 固定 target | `PropertyTarget(OwnerKind, PropertyKeyId)` |
 | thread 固定の transaction handle 使用制限 | thread affinity を廃止し、同じ handle の同時使用だけを `ConcurrentTransactionUseException` にする |
 
@@ -516,6 +528,26 @@ transaction contract の分割は次のとおりとする。
 - 追加: `WriterBusyException`, `ReadOnlyTransactionException`, `ConcurrentTransactionUseException`, `TransactionTooLargeException`, `StorageFormatMismatchException`, `WalFormatMismatchException`。
 - 維持: `TransactionException`, `StorageException`, `CorruptionException`, format mismatch 系。ただし format mismatch は database と WAL を区別する。
 - option 名の alias、obsolete period、環境変数旧キーの fallback は持たない。`Quiver.Hosting` の bindable options も同時に破壊変更する。
+
+### 8.4 RAG 利用時の public contract
+
+Quiver 0.1.0 をローカル RAG バックエンドとして使用した結果から、再設計後の利用者契約を次のように固定する。
+これらは旧 API の互換要件ではなく、新しい transaction、property、index、RAG surface が満たす結果である。
+
+| 契約 | 完成時の結果 | 実装 Wave |
+|---|---|---|
+| index definition の永続性 | reopen 後も definition と property target の対応が primary metadata から復元され、再度 `CreateIndex` を呼ばなくても一致する property mutation が index commit batch に入る | Wave 6 |
+| mutation 経路に依存しない index maintenance | typed CRUD、fluent mutation、SourceGen、bulk load のどの入口でも、set、update、remove が同じ definition matching を通る | Wave 6、7、8 |
+| seek candidate の可視性 | scalar、full-text、vector、node、relationship、hyperedge の public seek は snapshot と Generation を内部で再検証し、利用者へ stale candidate を返さない | Wave 6、7、8 |
+| relationship と hyperedge の冪等 mutation | relationship は `(source, type, target)`、hyperedge は `(type, role 付き member 集合)` をキーとする merge を提供し、隣接全体の利用者側線形走査を不要にする | Wave 6 |
+| label と type の読み取り | node label、relationship type、hyperedge type を read transaction から取得できる | Wave 6 |
+| index に依存しない vector property | vector property は primary value として単独で読み書きでき、`VectorIndexDefinition` を必要としない | Wave 7 |
+| RAG score の診断 | RAG hit は融合前の BM25 score、vector similarity、融合後 score、融合方式と定数を返す | Wave 9 |
+| candidate push-down | RAG 検索は owner candidate set または predicate を top-k 前に scalar、full-text、vector path へ渡し、後段 filter と oversampling による recall hole を前提にしない | Wave 9 |
+| hyperedge lifecycle | member node の削除は参加 hyperedge 全体を同じ logical delete 境界で削除し、dangling member を残さない。RAG 管理 node の置換は旧 ID への relationship と hyperedge を引き継がず、再アンカー用に旧 ID と新 ID の対応を返す | Wave 3、9 |
+| hyperedge property index | `PropertyTarget` は Hyperedge type scope を持ち、scalar seek も snapshot と Generation を再検証する | Wave 6 |
+
+この契約のテストは、Quiver 0.1.0 側の回避策を再現するのではなく、回避策なしで reopen、mutation、delete、filtered top-k、RAG node 置換が成立することを検証する。
 
 ## 9. 実装ウェーブ
 
@@ -564,14 +596,16 @@ transaction contract の分割は次のとおりとする。
 
 - `QUIVER-SW` database/WAL magic、family version、record checksum を追加する。
 - V1〜V5 constants、legacy WAL records、V1/V2/V3 decoder を削除する。
+- `PagedFile` の固定 64 MiB 確保を廃止し、初期 1 MiB、容量比例の倍増、増分上限 64 MiB の適応成長へ置換する。
+- `GraphDatabaseOptions` から初期確保量と増分上限を `SingleFileContainer` と `PagedFile` へ渡す。
 - `WalWriteSet` を transaction-owned object として追加する。
 - strict Commit winner table と checkpoint pair scanner を実装する。
 
-**テスト**: codec round-trip、truncation、unknown record、checksum corruption、old DB/WAL rejection、fuzz corpus を新 format へ置換する。
+**テスト**: codec round-trip、truncation、unknown record、checksum corruption、old DB/WAL rejection、fuzz corpus を新 format へ置換する。空 DB が既定 1 MiB で作成されること、設定値の page alignment、容量に応じた 1、2、4、8、16、32、64 MiB の増分、64 MiB 増分上限、reopen 後の成長、成長境界の page checksum とデータ保持を検証する。
 
 **Build**: `dotnet build Quiver.slnx`。
 
-**完了条件**: 旧 fixture はすべて mismatch になり、新 WAL の winner/loser 分類が明示 Commit だけで決まる。
+**完了条件**: 旧 fixture はすべて mismatch になり、新 WAL の winner/loser 分類が明示 Commit だけで決まる。空の `.quiver` は固定 64 MiB を占有せず、成長後も必要量を満たしながら増分上限を超えない。
 
 ### Wave 3: primary entity/property/vector payload stores
 
@@ -585,8 +619,9 @@ transaction contract の分割は次のとおりとする。
 - `InlinePropertyCodec` と Property entity chain を削除する。
 - immutable `VectorPayloadStore` と ref validation/orphan scan を実装する。
 - adjacency V1 を削除し、新 `AdjacencySegmentStore` format だけを作る。
+- member node の削除は参加 hyperedge 全体を同じ logical delete 境界で削除し、dangling incidence を残さない。
 
-**テスト**: 各 entity CRUD、property Single/Set snapshot、vector payload boundary、same-sequence/different-generation の stale ref rejection、cross-owner corruption、store-level clean reopen、page checksum。vacuum を経由する実 slot reuse は Wave 9、crash reopen は Wave 5 で検証する。
+**テスト**: 各 entity CRUD、property Single/Set snapshot、vector payload boundary、same-sequence/different-generation の stale ref rejection、cross-owner corruption、store-level clean reopen、page checksum、member node 削除時の hyperedge 全体の論理削除。vacuum を経由する実 slot reuse は Wave 9、crash reopen は Wave 5 で検証する。
 
 **Build**: `dotnet build Quiver.slnx`。
 
@@ -601,7 +636,7 @@ transaction contract の分割は次のとおりとする。
 - `WriterLease` と `SnapshotRegistry` を追加し、facade/backend/manager の三入口を閉じる。
 - internal backend/transaction path を `BeginRead` / `BeginWrite` に分ける。既存 public facade と custom backend SPI はこの internal path へ適応させ、public cutover まで新旧 interface を二重公開しない。
 - visibility を active writer 一つ、`CommittedHighWater`、`AbortedGaps`、writer 自己可視性へ縮約する。WriterLease 導入と同じ commit 系列で切り替え、multi-writer manager と one-writer snapshot の中間状態を作らない。
-- LockManager/DeadlockDetector/SSN と全 hook を削除する。public `IsolationLevel` と旧開始 API は Wave 6 の原子的 public cutover まで facade compatibility として残すが、Serializable 分岐は実行しない。
+- LockManager/DeadlockDetector/SSN と全 hook を削除する。旧 `IsolationLevel` と開始 API は Wave 6 の原子的 public cutover までの一時配線として残すが、互換性を保証せず、Serializable 分岐は実行しない。
 - read transaction は WAL Begin を書かない。
 - savepoint、abort、dispose、faulted commit の lease 解放を一つの state machine に集約する。
 - ambient `MvccContext` / `WalPageContext` を transaction-owned context へ置換する。
@@ -642,10 +677,14 @@ transaction contract の分割は次のとおりとする。
 - `IReadTransaction.Query` / `Schema` と `IWriteTransaction.Mutate` / `EditSchema` を追加し、全 public signature、typed CRUD、SourceGen、custom backend SPI を原子的に切り替える。同じ commit で旧 `IGraphTransaction`、`IsolationLevel`、旧 transaction開始 API を削除する。
 - read-only query の未知 token は catalog を変更せず空候補に解決する。schema token/index の作成は `ISchemaEditor` だけが行い、write transaction の commit/abort に従う。
 - index definition catalog と rebuild state を追加する。
+- reopen 時は永続化された index definition と property target を復元し、利用者による `CreateIndex` の再呼び出しなしで後続 mutation を index commit batch に入れる。
+- typed CRUD、fluent mutation、SourceGen、bulk load の全 property mutation を同じ definition matching と index maintenance に通す。
 - candidate の snapshot/Generation revalidation を全 seek/range path に入れる。
+- relationship は `(source, type, target)`、hyperedge は `(type, role 付き member 集合)` をキーとする merge を `GraphMutationSource` に追加する。
+- read transaction から node label、relationship type、hyperedge type を取得できるようにする。
 - `EntityKind.Property` と旧 vector-special query 分岐を削除する。
 
-**テスト**: public read/write transaction と custom backend contract、read query の未知 token 非 mutation、schema commit/abort、typed/SourceGen mutation、seek/range snapshot、update/delete old reader、rebuild、orphan、planner fallback、traversal result equivalence、PublicApi approval。
+**テスト**: public read/write transaction と custom backend contract、read query の未知 token 非 mutation、schema commit/abort、reopen 後の index 自動 maintenance、typed/fluent/SourceGen/bulk mutation の同値性、seek/range snapshot、node/relationship/hyperedge の stale candidate 除外、relationship/hyperedge merge の冪等性と非線形走査、label/type read、update/delete old reader、rebuild、orphan、planner fallback、traversal result equivalence、PublicApi approval。
 
 **Build**: `dotnet build Quiver.slnx`。
 
@@ -660,12 +699,13 @@ transaction contract の分割は次のとおりとする。
 - `IVectorStore` と EntityKind-based binding を削除する。
 - `VectorIndexDefinition` を追加し、旧 `VectorIndexSpec` / `CreateVectorIndex` と同じ Wave で置換する。
 - `IWriteTransaction.SetVectorProperty`、`IReadTransaction.TryGetVectorProperty`、transaction-scoped `KnnSearch` / `KnnSearchBatch`、schema catalog の `TryGetIndex` / `ListIndexes` を新 public surface とする。filtered KNN は traversal/planner surface に置き、public vector store を再導入しない。
+- vector property の保存と取得は primary property contract であり、vector index の有無に依存させない。
 - `VectorIndexSpec.SourcePropertyKeyId` は自動変換しない。各 repository call site は vector property key を明示し、embedding 元 property は `Quiver.Embedding` の task metadata として別に保持する。
 - flat delta + immutable HNSW segment、snapshot manifest、merge/rebuild を追加する。
 - immutable HNSW の重い構築は read snapshot で lease 外に行い、manifest publish だけを短い writer transaction にする。
 - vector property write と KNN property target API を配線する。
 
-**テスト**: commit atomicity、old/new snapshot、update/delete、same-sequence/different-generation の candidate rejection、segment merge 中の writer wait、source generation change 時のretry、rebuild、recall@10、hybrid candidate validation。
+**テスト**: index を一度も作成しない vector property の round-trip、index drop/rebuild 中の property 保持、commit atomicity、old/new snapshot、update/delete、same-sequence/different-generation の candidate rejection、segment merge 中の writer wait、source generation change 時の retry、rebuild、recall@10、hybrid candidate validation。
 
 **Build**: `dotnet build Quiver.slnx`。
 
@@ -682,6 +722,7 @@ transaction contract の分割は次のとおりとする。
 - immutable delta segment、manifest、snapshot stats、merge/rebuild を追加する。
 - immutable segment の重い構築は read snapshot で lease 外に行い、manifest publish だけを短い writer transaction にする。
 - text property update/delete を segment visibility で表す。
+- public full-text と hybrid result は snapshot と Generation の再検証後だけ返す。
 
 **テスト**: tokenization 回帰、BM25 strict scan一致、old/new snapshot、tombstone、merge 中の writer wait、source generation change 時の retry、crash、rebuild、hybrid same-snapshot。
 
@@ -700,8 +741,12 @@ transaction contract の分割は次のとおりとする。
 - migration history を DB 内 transactional store へ移す。
 - logical mutation を owner-bound property と vector ref に追従する。
 - lock/deadlock metric と optionsを削除し、writer wait/active snapshot/rebuild metricsへ置換する。
+- `RagHit` に BM25 score、vector similarity、融合後 score、融合方式と定数を追加する。
+- RAG candidate set または predicate を top-k 前の scalar、full-text、vector path へ push down する。
+- RAG 管理 node を内容変更で置換した結果は、利用者が relationship と hyperedge を再アンカーできるよう旧 ID と新 ID の対応を返す。
+- RAG の delete/upsert は管理 node の ID を維持しないことと、旧 ID に付いた relationship と hyperedge が連鎖削除されることを利用者契約へ記載する。
 
-**テスト**: long reader 中 vacuum、relationship の horizon→base rebuild→delta/epoch reset→locator rebuild→derived durable→free release の順序、各境界での crash/reopen と safe leak 再開、vacuum 後の実 slot reuse と Generation 増加、payload/property 同一 commit GC、segment GC、migration rollback/reopen、logical replay、hosting config、OTel/EventSource metric names。
+**テスト**: long reader 中 vacuum、relationship の horizon→base rebuild→delta/epoch reset→locator rebuild→derived durable→free release の順序、各境界での crash/reopen と safe leak 再開、vacuum 後の実 slot reuse と Generation 増加、payload/property 同一 commit GC、segment GC、migration rollback/reopen、logical replay、hosting config、OTel/EventSource metric names、RAG score 内訳、top-k 前 candidate push-down の recall、管理 node 置換の旧 ID と新 ID の対応、利用者 relationship/hyperedge の連鎖削除。
 
 **Build**: `dotnet build Quiver.slnx`。
 
@@ -892,6 +937,8 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 - vector payload は primary property value、HNSW は derived access path とする。
 - physical format migration は提供しない。
 - 旧 API の obsolete period は設けない。
+- 新規ファイルは既定 1 MiB で開始し、容量に応じて増分を倍増させ、1 回の増分を 64 MiB 以下にする。初期確保量と増分上限は option で変更できる(§6.1、§8.1、§9 Wave 2)。
+- RAG 利用時の index 永続性、経路非依存 maintenance、candidate 再検証、merge、score 診断、candidate push-down、hyperedge lifecycle は §8.4 の public contract とする。
 - buffer 管理は no-steal / no-force とする(新規確保 page への commit 前 append flush のみ例外)。recovery は redo-only とし、WAL 上の undo record を持たない(§2.5, §4.2, §4.3, §6.2)。
 - SSN/lock/Serializable 分岐は Wave 4 で削除し、public `IsolationLevel` と旧 transaction開始 API は Wave 6 の public transaction/query/schema cutover と同じ commit で削除する(§7.3, §9 Wave 4/6)。
 - writer transaction は自身の未 commit 書き込みに対して自己可視性の例外を持つ(§2.2)。
@@ -901,11 +948,26 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 - `EntityId.Invalid` と packed 値 `0` だけを canonical Invalid とし、public identity factory は Node、Relationship、Hyperedge 以外を拒否する(§2.3、§5.1)。
 - physical Sequence は内部 address に限定し、logical emit/key と public/query/traversal/index output は `CurrentGeneration` から full typed ID を materialize する。Generation `0` は外へ出さず、stale input/derived entry は reject/skip する(§2.3、§5.1)。
 - Wave 1 の relationship `Vacuum` は reclaim 済み storage を回収しても Sequence を free list へ release せず、create は free 候補を無視して high-water mark からだけ割り当てる。raw base/delta/locator/epoch entry が残っても ABA は起きない。Wave 9 の `RelationshipReuseCoordinator` だけが reader horizon、base rebuild、delta/epoch reset、locator rebuild、derived durable の順に完了して free release する。release 前の crash は safe leak とし、reopen 時に coordinator が再開する(§2.3、§5.1、§7.1、§9 Wave 1/9)。
-- `LabelNodeIndex.Lookup` は full `NodeId` を返す logical API とする。logical pipeline は full typed ID を保持し、node query/traversal が physical lookup に渡す sequence は full typed `NodeId` の primary `Read` 検証直後だけに使う。physical candidate は full ID に materialize して stale を skip する。public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 まで残す physical compatibility surface (`compatibility adapter`) であり、logical identity API ではない(§2.3、§5.1、§8.1)。
+- `LabelNodeIndex.Lookup` は full `NodeId` を返す logical API とする。logical pipeline は full typed ID を保持し、node query/traversal が physical lookup に渡す sequence は full typed `NodeId` の primary `Read` 検証直後だけに使う。physical candidate は full ID に materialize して stale を skip する。public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 で削除するまでの内部物理ブリッジであり、互換性を保証する public contract ではない(§2.3、§5.1、§8.1)。
 
 実装中に新しい選択が必要になった場合は、曖昧な TODO を残さず、選択肢、推奨決定、根拠、検証方法を本書の decision log に追記してからコードを変更する。
 
 ## 16. decision log
+
+### 2026-07-15: 小容量 DB の適応ファイル確保
+
+- **背景**：現行 `PagedFile` はメタページ一枚しか必要としない新規 DB でも 64 MiB へ切り上げる。ローカル RAG アプリが複数 DB を持つと、データがない時点でファイル数に比例した固定容量を占有する。
+- **選択肢**：(a) 64 MiB 固定を維持して文書化する、(b) 利用者が固定増分だけを選ぶ、(c) 小さい初期容量から始め、容量に応じて増分を倍増し、増分上限を設ける。
+- **決定**：(c)。既定初期確保量は 1 MiB、増分上限は 64 MiB とする。現在長 `L` に対する増分を `min(max(L, I), M)` とし、必要量を満たす 8 KB 境界へ拡張する。`InitialFileAllocationBytes` と `MaximumFileGrowthStepBytes` で `I` と `M` を変更できる。旧 64 MiB 動作と option alias は残さない。
+- **根拠**：小容量 DB の固定費を 64 分の 1 にしながら、DB が成長すると再マップ間隔も指数的に広がる。大容量域では従来と同じ 64 MiB 増分上限になるため、一件ごとの小刻みな再マップを避けられる。
+- **検証方法**：空 DB の物理長、option の境界値と page alignment、既定容量列、増分上限、reopen 後の拡張、各拡張境界での checksum、既存 page の内容、WAL recovery を検証する。
+
+### 2026-07-15: RAG 実利用から固定する再設計後の契約
+
+- **背景**：Quiver 0.1.0 をローカル RAG バックエンドとして使用すると、reopen 後の index binding、mutation 経路ごとの index maintenance、stale candidate、filtered top-k、RAG score、管理 node の置換に利用者側の回避策が必要だった。
+- **決定**：§8.4 の契約を再設計の完了条件へ含める。既存 Wave が担う index、vector、full-text、RAG、hyperedge の完成状態へ直接組み込み、再設計後の別互換層や回避 API は作らない。
+- **根拠**：index definition と property value が primary data であり、scalar、full-text、vector が derived access path である設計では、maintenance と candidate validation を mutation helper や利用者へ分散させる理由がない。filtered top-k と score 内訳は RAG surface まで配線しなければ、planner の能力が利用者契約にならない。
+- **検証方法**：回避策なしの reopen、全 mutation surface の同値性、snapshot 内だけの seek、index なし vector property、relationship/hyperedge merge、score 内訳、top-k 前 filter、RAG 管理 node 置換後の再アンカーを contract test にする。
 
 ### 2026-07-12: Generation materialization の境界
 
@@ -982,6 +1044,6 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 
 - **背景**: `plans/single-writer-redesign-review.md` C-7。Generation 込み ID へ移行する途中で `LabelNodeIndex.Lookup` の一つの output contract を、logical query result と physical candidate collection が共有した。raw sequence を logical output にすると stale slot が別 entity を指し得る一方、full ID を raw candidate consumer がそのまま locator/index key として扱うと lookup が空になる。
 - **選択肢**: (a) raw sequence を shared `Lookup` output とし、各 logical consumer が materialize する、(b) full typed ID を shared logical output とし、物理 consumer が検証済み `Sequence` だけを明示的に取り出す、(c) raw/logical の二 API を新設する。
-- **決定**: (b)。`LabelNodeIndex.Lookup` は full `NodeId` を返す logical API とする。logical pipeline は full typed ID を維持し、node query/traversal が physical lookup に渡すのは full typed `NodeId` を primary `Read` で検証した直後の `Sequence` だけである。physical candidate/output は current generation と primary `Read` で full ID に materialize し、stale candidate を skip する。diagnostic raw `long` は表示・計測専用とする。public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 まで残す physical compatibility surface (`compatibility adapter`) であり、logical identity API ではない。
-- **根拠**: full identity を logical contract に固定すると、Generation reuse 後の raw sequence が query/traversal result へ alias する経路を一箇所で遮断できる。Wave 1 で public direct raw-long contract を破壊せずとも、adapter を越える node query/traversal を primary `Read` 検証直後の `Sequence` に限定すれば、physical layout の locality と compatibility を保ちながら validation の迂回を止められる。Wave 7 に削除を閉じることで legacy path を恒久化しない。
+- **決定**: (b)。`LabelNodeIndex.Lookup` は full `NodeId` を返す logical API とする。logical pipeline は full typed ID を維持し、node query/traversal が physical lookup に渡すのは full typed `NodeId` を primary `Read` で検証した直後の `Sequence` だけである。physical candidate/output は current generation と primary `Read` で full ID に materialize し、stale candidate を skip する。diagnostic raw `long` は表示と計測専用とする。public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 で削除するまでの内部物理ブリッジであり、互換性を保証する public contract ではない。
+- **根拠**: full identity を logical contract に固定すると、Generation reuse 後の raw sequence が query/traversal result へ alias する経路を一箇所で遮断できる。ブリッジを越える node query/traversal を primary `Read` 検証直後の `Sequence` に限定すれば、physical layout の locality を保ちながら validation の迂回を止められる。Wave 7 に削除を閉じることで旧経路を恒久化しない。
 - **検証方法**: review C-7 の Label lookup、ApplyDyadic と `ApplyDyadicOversampleTests`、filtered KNN/full-text、full ID、stale candidate、public direct raw-long adapter、diagnostic raw-long 条件を満たす focused と full-suite regression を実行する。
