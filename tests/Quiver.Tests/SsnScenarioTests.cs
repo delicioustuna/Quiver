@@ -13,12 +13,14 @@ namespace Quiver.Tests;
 /// 検出を組み合わせて、少なくとも一方を中断し直列化可能な結果になることを確認する。
 ///
 /// <para>各トランザクションは専用スレッド (<see cref="TxThread"/>) で実行し、
-/// テストスレッドが開始、読み取り、書き込み、コミットの全体順序を同期的に制御する。
-/// WalPageContext と MvccContext がスレッド固有なので、書き込みは別スレッドで行う。</para>
+/// テストスレッドが開始、読み取り、書き込み、コミットの全体順序を同期的に制御する。</para>
 /// </summary>
 [Collection("ssn-scenarios")]
 public sealed class SsnScenarioTests
 {
+    private const string PublicWriterGateSkip =
+        "Multiple concurrent public writers are no longer supported; single-writer gate coverage replaces this white-box concurrency scenario.";
+
     private static GraphDatabase Open(string dir)
         => GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions
         {
@@ -33,7 +35,7 @@ public sealed class SsnScenarioTests
     private static int Aborted(params Exception?[] exs) => exs.Count(e => e is not null);
 
     // ─────────────────────────── WriteSkew_RR ───────────────────────────
-    [Fact]
+    [Fact(Skip = PublicWriterGateSkip)]
     [Trait("Category", "Ssn")]
     public void WriteSkew_RR_aborts_one()
     {
@@ -58,7 +60,7 @@ public sealed class SsnScenarioTests
     }
 
     // ─────────────────────────── SafeRetry ───────────────────────────
-    [Fact]
+    [Fact(Skip = PublicWriterGateSkip)]
     [Trait("Category", "Ssn")]
     public void SafeRetry_aborted_tx_commits_on_immediate_retry()
     {
@@ -99,7 +101,7 @@ public sealed class SsnScenarioTests
     }
 
     // ─────────────────────────── DangerousStructure (3-cycle, T3 first) ───
-    [Fact]
+    [Fact(Skip = PublicWriterGateSkip)]
     [Trait("Category", "Ssn")]
     public void DangerousStructure_three_tx_rw_cycle_aborts_one()
     {
@@ -132,7 +134,7 @@ public sealed class SsnScenarioTests
     }
 
     // ─────────────────────────── ReadOnlyAnomaly (Fekete 2004) ───────────
-    [Fact]
+    [Fact(Skip = PublicWriterGateSkip)]
     [Trait("Category", "Ssn")]
     public void ReadOnlyAnomaly_fekete_three_tx_is_serializable()
     {
@@ -173,7 +175,7 @@ public sealed class SsnScenarioTests
     }
 
     // ─────────────────────────── IsolationFailure_WW (lost update / cross) ─
-    [Fact]
+    [Fact(Skip = PublicWriterGateSkip)]
     [Trait("Category", "Ssn")]
     public void IsolationFailure_WW_cross_cycle_aborts_one()
     {
@@ -206,7 +208,7 @@ public sealed class SsnScenarioTests
     }
 
     // ─────────────────────────── AtomicityFailure_WR ─────────────────────
-    [Fact]
+    [Fact(Skip = PublicWriterGateSkip)]
     [Trait("Category", "Ssn")]
     public void AtomicityFailure_WR_cross_aborts_one()
     {
@@ -259,8 +261,7 @@ public sealed class SsnScenarioTests
 
 /// <summary>
 /// 1 トランザクションを専用スレッドに固定し、各ステップを同期的に実行するヘルパー。
-/// WalPageContext / MvccContext が thread-static なため、書き込みを行う複数 tx は
-/// それぞれ別スレッドで動かす必要がある。<see cref="Do"/> は呼び出し元をブロックして
+/// <see cref="Do"/> は呼び出し元をブロックして
 /// アクションを所有スレッドで実行し、テストスレッドが大域順序を制御できるようにする。
 /// </summary>
 internal sealed class TxThread : IDisposable

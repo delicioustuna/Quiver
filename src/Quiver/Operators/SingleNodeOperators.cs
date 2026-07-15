@@ -58,3 +58,41 @@ internal sealed class MultiNodeOperator : IPhysicalOperator
 
     public void Dispose() { }
 }
+
+/// <summary>
+/// 定数ハイパーエッジを起点として 1 行だけ放出する物理オペレータ。
+/// メンバー展開側がスナップショット可視性を検証するため、ここでは ID の受け渡しだけを行う。
+/// </summary>
+internal sealed class SingleHyperedgeOperator : IPhysicalOperator
+{
+    private readonly HyperedgeId _hyperedgeId;
+    private readonly TupleSlot[] _buffer = new TupleSlot[1];
+    private bool _done;
+
+    internal SingleHyperedgeOperator(HyperedgeId hyperedgeId) => _hyperedgeId = hyperedgeId;
+
+    public TupleSchema Schema { get; } =
+        new([new ColumnDefinition("hyperedgeId", TupleSlotType.HyperedgeId)]);
+
+    public OperatorStatistics Statistics { get; private set; }
+    public TupleRef Current => new(_buffer);
+
+    public void Open(ITransaction tx) => _done = false;
+
+    public bool MoveNext()
+    {
+        if (_done) return false;
+        _done = true;
+        _buffer[0] = new TupleSlot
+        {
+            Type = TupleSlotType.HyperedgeId,
+            LongValue = _hyperedgeId.Value,
+        };
+        var statistics = Statistics;
+        statistics.RowsProduced++;
+        Statistics = statistics;
+        return true;
+    }
+
+    public void Dispose() { }
+}

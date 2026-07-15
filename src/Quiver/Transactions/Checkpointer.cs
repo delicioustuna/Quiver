@@ -26,7 +26,7 @@ namespace Quiver.Transactions;
 /// 順序が重要: Begin → page fsync → End → truncate。truncate は必ず End 観測後に発生する。
 /// チェックポイントを「いつ」打つか (契機) は <see cref="TransactionManager"/> が判断する。
 /// 本クラスは「どう」打つか (機構) のみを担当する。
-/// 前提: 案C により、WAL 上の PageImage はコミット時にまとめて追記される。よって
+/// 前提: WAL 上の PageImage はコミット時にまとめて追記される（コアレス方式）。よって
 /// 任意のチェックポイント時点の WAL には「未コミットトランザクションの宙ぶらりんな
 /// PageImage」が存在しない。さらに <see cref="TransactionManager"/> はアクティブ
 /// トランザクションが 0 のときにのみ本チェックポイントを呼ぶため、シャープ
@@ -92,8 +92,8 @@ internal sealed class Checkpointer(
         PhaseInjector?.Invoke(CheckpointPhase.AfterTruncate);
         QuiverTelemetry.CheckpointDurationMs.Record(sw.Elapsed.TotalMilliseconds);
         activity?.SetTag("quiver.checkpoint.begin_lsn", beginLsn);
-        // 構造化ログ。Information は運用上「実際にチェックポイントが完走した」マイルストーンとして残す。
-        QuiverLog.CheckpointCompleted(QuiverLog.CheckpointLogger, beginLsn, sw.Elapsed.TotalMilliseconds);
+        // 運用上「実際にチェックポイントが完走した」マイルストーンとして残す。
+        QuiverEventSource.Log.CheckpointCompleted(beginLsn, sw.Elapsed.TotalMilliseconds);
     }
 }
 

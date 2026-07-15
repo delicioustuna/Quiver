@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
-using System.IO.Hashing;
 using System.Threading.Channels;
 using Quiver.Core;
 using Quiver.Telemetry;
@@ -17,11 +16,11 @@ namespace Quiver.Storage.Wal;
 ///   <item><see cref="MarkDeleteOnDispose"/> されたクリーン終了では Dispose 時にファイルを削除する。
 ///     全データは graph.quiver へ durable 済みなので、静止時はサイドカーが消えて本体のみが残る。</item>
 /// </list>
-/// レコードフォーマット / 案C コアレス / group commit / PageImage coalesce は据え置き。
+/// レコードフォーマット / コアレス / group commit / PageImage coalesce は据え置き。
 /// </summary>
 internal sealed class WriteAheadLog : IWriteAheadLog
 {
-    // ヘッダレイアウト: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32C(4) = 25 バイト
+    // ヘッダレイアウト: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32(4) = 25 バイト
     internal const int HeaderSize = 25;
     private const int WriteBufferSize = 1024 * 1024;
     internal const int MaxPayloadSize = 8 * 1024 * 1024;
@@ -226,7 +225,7 @@ internal sealed class WriteAheadLog : IWriteAheadLog
             }
             tcs.Task.GetAwaiter().GetResult();
             QuiverTelemetry.WalFlushDurationMs.Record(sw.Elapsed.TotalMilliseconds);
-            QuiverLog.WalFlushed(QuiverLog.WalLogger, lsn, sw.Elapsed.TotalMilliseconds);
+            QuiverEventSource.Log.WalFlushed(lsn, sw.Elapsed.TotalMilliseconds);
         }
         finally
         {

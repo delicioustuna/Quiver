@@ -4,7 +4,7 @@ README はライブラリ利用者向けの最小限に絞っているため、�
 ストレージ仕様・ビルド/テスト手順・開発状況・バージョニング規約・詳細な性能計測は本ファイルに集約する。
 
 - 設計仕様 (as-built): [docs/spec/](../spec/)
-- ロードマップ / タスク状況: [docs/design/roadmap.md](roadmap.md)
+- 現行再設計の設計正本: [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md)
 - API 安定性ポリシー: [docs/api-stability.md](../api-stability.md)
 - 運用ガイド: [docs/operations/README.md](../operations/README.md)
 
@@ -15,7 +15,7 @@ README はライブラリ利用者向けの最小限に絞っているため、�
 | `Quiver` | エンジン中核 + 公開ファサード。型付き属性（`[Node]` / `[Relationship]` / `[Property]` / `[Indexed]`、namespace `Quiver.Api`）を本体に内包し、`Quiver.SourceGen` を analyzer として同梱。これ 1 つの参照で型安全 CRUD まで使える |
 | `Quiver.SourceGen` | Roslyn `IIncrementalGenerator`（CRUD / `FindBy*` / 型保存トラバーサル糖衣を生成）。単体公開せず `Quiver` に同梱する内部プロジェクト |
 | `Quiver.Embedding` | テキスト埋め込みパイプライン（VEC-4）。**incubating: NuGet 非公開**（`IsPackable=false`。「NuGet パッケージ化」§incubating 参照） |
-| `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ・取込・hybrid 検索 + graph expansion）。**開発中** ([design/14](14_rag_layer.md)) |
+| `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ・取込・hybrid 検索 + graph expansion）。**開発中**（過去の設計ノートは historical record。現行の実装順序は再設計計画に従う） |
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` 連携（DI 登録） |
 | `Quiver.OpenTelemetry` | OpenTelemetry エクスポート |
 
@@ -57,6 +57,40 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 | 文字列エンコーディング | UTF-8（長さプレフィックス付き） |
 | 静止時のファイル | `*.quiver` 単一ファイル |
 | 運用中のファイル | `*.quiver` + `*.quiver-wal` |
+| FormatVersion | V5（旧バージョンからの自動移行なし） |
+| ベクトル catalog | entry 長プレフィクス + per-index HNSW レイアウトパラメタ |
+
+FormatVersion の履歴: V2 で `VectorIndexSpec` の HNSW レイアウトパラメタを catalog に永続化、
+V3 で第一級ハイパーエッジ用の ID kind / token 空間 / 固定 tenant を追加、
+V4 で incidence を fixed-slot 直接アドレスレイアウトへ再設計、
+V5 で relationship delta の head sidecar と append-only page store 用固定 tenant を追加した。
+各バージョンは clean break であり、旧バージョンの DB は open 時に拒否して
+ソースデータから再構築する。
+
+### 開発中の FormatVersion 運用（公開バージョンと分離する）
+
+`FormatVersion`（オンディスク format の内部カウンタ）と、利用者に公開する
+SemVer バージョン（`Directory.Build.props` の `VersionPrefix`）は **別物であり、連動させない**。
+開発中に両者を混同しないための運用規約を以下に定める。
+
+- **開発中の `FormatVersion` は自由に bump してよい単調カウンタである。** レイアウトを変える増分は
+  そのつど `FormatVersion.Current` を次の整数へ上げ、旧 format の読み替え・マイグレーションは
+  一切実装しない（未リリース方針。`FormatVersionMismatchException` で fail-fast する）。
+  1 本のトラック内で V3 → V4 のように複数回上がってよく、main へマージするまでに
+  数バージョン進むこと自体は問題としない。**中間バージョンを温存する必要はない。**
+- **公開バージョンは `FormatVersion` の増加回数に追随しない。** `VersionPrefix` は SemVer の
+  意味論（[api-stability.md](../api-stability.md)）だけで上下する。format を 3 回 bump しても、
+  公開 API に breaking が無ければ MINOR/PATCH のままでよい。
+- **GA 直前に pre-release 期の format 履歴を 1 本のベースラインへ畳む。** v1 で実施した前例
+  （pre-MVCC 以降の format 履歴を clean break で畳み、現実装を V1 として再宣言）と同じ手順を
+  次の GA でも踏む。畳み込みは `FormatVersion.cs` の定数整理と履歴コメントの書き直しだけで済み、
+  DB 資産の移行は伴わない（未リリースにつき）。
+- **GA 後（`1.0.0` 以降）は §7.2 の互換規約に従い、1.x 内では `FormatVersion` を bump しない。**
+  すなわち「自由に bump してよい」のは pre-release 期だけの運用である。
+- **計画書・タスク管理での表記。** `plans/` や skill のタスク定義で「FormatVersion V5 へ bump」と
+  書いても、それは開発上の内部カウンタの話であり公開バージョンの宣言ではない。公開バージョンを
+  指すときは SemVer 表記（例: `0.2.0`）を使い、両者を同じ文中で並べるときは
+  「on-disk format V5 / 公開 0.2.0」のように明示して区別する。
 
 ### ID 型
 
@@ -65,6 +99,8 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 ```csharp
 public readonly record struct NodeId(long Value);
 public readonly record struct RelationshipId(long Value);
+public readonly record struct HyperedgeId(long Value);
+public readonly record struct HyperedgeTypeId(int Value);
 public readonly record struct PropertyId(long Value);
 public readonly record struct LabelId(int Value);
 public readonly record struct TransactionId(long Value);
@@ -173,6 +209,8 @@ foreach (var name in g.Nodes().HasLabel("Person").Values("Name").AsEnumerable())
 | `[Relationship]` | クラス | `type` (省略可) | クラス名をリレーションシップ型として使用 |
 | `[Property]` | プロパティ | `key` (省略可) | プロパティ名をグラフキーとして使用 |
 | `[Indexed]` | プロパティ | `indexName` (省略可) | `idx_{label}_{propertyName}` を自動生成。`[Property]` と併用必須 |
+| `[Hyperedge]` | クラス | `type` (省略可) | クラス名をハイパーエッジ型として使用 |
+| `[Role]` | プロパティ | `role` (省略可) | プロパティ名をロール名として使用。型は `GraphNodeRef<TNode>`（複数ロールは `IReadOnlyList<GraphNodeRef<TNode>>`、省略可能ロールは nullable） |
 
 > **注意:** クラス名・プロパティ名を変更すると `[Node]`・`[Indexed]` の自動生成名も変わり、既存
 > インデックスファイルが孤立する。リネームの可能性がある場合は明示指定を推奨。
@@ -187,6 +225,55 @@ foreach (var name in g.Nodes().HasLabel("Person").Values("Name").AsEnumerable())
 `Update(tx, id, entity)` / `Delete(tx, id)` / `FindBy{PropName}(tx, value) → List<(NodeId, T)>`（`[Indexed]` ごと）
 
 **`[Relationship]` クラス** — `Insert(tx, from, to, entity) → RelationshipId` / `Load` / `Update` / `Delete`
+
+**`[Hyperedge]` クラス** — `Insert(tx, entity) → HyperedgeId` / `Load` / `Update`（プロパティのみ。
+メンバー集合は作成時確定） / `Delete`、および型保存トラバーサル糖衣
+`{Class}As{Prop}()` / `{Prop}()` / `Other{Prop}()`（ロールプロパティごと）
+
+## ハイパーエッジ（第一級 n 項リレーション）
+
+利用者向けの契約は [docs/spec/04_records_index.md](../spec/04_records_index.md#hyperedge-store)
+（レコード）、[docs/spec/05_query.md](../spec/05_query.md#hyperedge-ops)（オペレータ / DSL / Match）、
+[docs/spec/08_known_limits.md](../spec/08_known_limits.md#hyperedge-limits)（契約と限界）を正本とする。
+サンプルは [samples/Quiver.Samples.Hyperedges/](../../samples/Quiver.Samples.Hyperedges/)。
+
+### 実装マップ
+
+| レイヤ | 主なファイル |
+|---|---|
+| Core ID / kind | `src/Quiver/Core/EntityRef.cs`（kind 付き packed identity）、`src/Quiver/Core/Ids.cs`（typed ID と Generation 込み equality）、`src/Quiver/Core/EntityId.cs`（Node / Relationship / Hyperedge の strict internal tag） |
+| ストア | `src/Quiver/Stores/VersionedHyperedgeStore.cs`、`IncidenceStore.cs`、`NodeIncidenceHeadStore.cs`、`CoMembershipBlockStore.cs` |
+| トランザクション | `src/Quiver/Transactions/TxHyperedgeStore.cs`（locking / SSN / undo の配線） |
+| 公開 CRUD | `src/Quiver/IGraphTransaction.cs`（`CreateHyperedge` / `DeleteHyperedge` / `GetMembers` / `GetHyperedges` / プロパティ各種）、`ISchemaApi`（型 / ロールの token 管理） |
+| クエリ | `src/Quiver/Operators/`（`AllHyperedgesScan` / `ExpandToHyperedge` / `ExpandMembers` / `CoMembership` の各 operator）、`src/Quiver/Query/PhysicalPlanner.cs` |
+| DSL / Match | `src/Quiver/Client/GraphTraversalSource.cs`、`GraphTraversal.cs`、`Match/GraphPattern.cs`（`HyperedgePattern`） |
+| SourceGen | `src/Quiver.SourceGen/GraphHyperedgeGenerator.cs` / `GraphHyperedgeModel.cs` / `GraphHyperedgeEmitter.cs`、属性は `src/Quiver/Client/HyperedgeAttribute.cs` |
+| 保守 | `src/Quiver/Maintenance/Vacuum.cs`（`VacuumTarget.Hyperedges`）、`DiagnosticsApi.CheckConsistency`、`GraphStats`（型別件数 / アリティ分布） |
+
+### 固定 tenant（SingleFileContainer カタログ）
+
+ハイパーエッジ関連の論理ストアは次の固定 tenant を使う（変更しない）。
+
+| tenant | 用途 |
+|---|---|
+| 18 | hyperedge heap（header + inline property） |
+| 19 | hyperedge の `ItemPointerMap` |
+| 20 | hyperedge の MVCC / generation sidecar |
+| 21 | incidence heap（27B fixed-slot、直接アドレス） |
+| 22 | 欠番（旧 incidence 間接マップ。V4 で不要化、番号は詰めない） |
+| 23 | hyperedge type token |
+| 24 | role token |
+| 25 | node incidence head（6B sidecar） |
+
+### テスト
+
+hyperedge の回帰は `tests/Quiver.Stores.Tests/IncidenceStoreTests.cs`、
+`tests/Quiver.Tests/`（`HyperedgePropertyTests` / `HyperedgeDiagnosticsTests` /
+`HyperedgeGeneratedCrudTests` / `HyperedgeTypedTraversalTests` / `VacuumTests` / `GraphStatsTests` /
+`CoMembershipBlockTests`）、`tests/Quiver.Client.Tests/`（`HyperedgeRagQueryTests` /
+`MatchPatternTests`）、`tests/Quiver.SourceGen.Tests/HyperedgeGeneratorTests.cs` が担う。
+性能ゲートの実測は「ハイパーエッジ統合性能」節と
+[docs/benchmarks/2026-07-06_HYP-6c_Hyperedge.md](../benchmarks/2026-07-06_HYP-6c_Hyperedge.md) を参照。
 
 ## 性能（詳細計測）
 
@@ -248,35 +335,161 @@ carry-column は no-alias 比 ±3% 以内。詳細:
 40×40: BFS 4.27 ms / Dijkstra 7.79 ms / A* 7.63 ms。詳細:
 `benchmarks/Quiver.Benchmarks/WeightedShortestPathBenchmarks.cs`。
 
+### ハイパーエッジ統合性能（HYP-6c 統合ゲート）
+
+第一級ハイパーエッジの走査・書き込み・Match を製品 API（`GraphDatabase` / DSL / Match）経由で
+再測定した（AMD64 / .NET 10.0.9 / workstation GC）。三ゲート全て合格。詳細:
+[docs/benchmarks/2026-07-06_HYP-6c_Hyperedge.md](../benchmarks/2026-07-06_HYP-6c_Hyperedge.md)。
+runner: `--hyperedge-traversal` / `--hyperedge-write` / `--hyperedge-match`。
+
+- **走査**（`g.Node(hub).Hyperedges("Fact","subject").OtherMembers("object")` の co-membership view
+  vs binary `Out` 1-hop、arity 4）: p50 比 degree 10/100/1000 = 1.15x / 0.95x / 2.14x（ゲート ≤3x 合格）。
+  ビュー未登録のリンクチェーン fallback は 3.59x / 2.80x / 4.57x。
+- **書き込み**（arity 2/4/8/16）: create WAL 増幅 1.249x / 1.890x / 3.182x / 5.746x（ゲート
+  `(1+arity/2)×` = 2/3/5/9 以内、HYP-2d の WAL バイトを製品 API で再現）。作成遅延 48〜220 µs/op、
+  プロパティ書込み ~11〜14 µs/op、削除 ~4〜5 µs/op。
+- **高次数 DeleteNode カスケード**（1 node が 10^3 / 10^4 hyperedge のメンバー）: tx 7.84 ms / 47.69 ms、
+  WAL 61 KB / 608 KB、デッドロック無し、削除後 `CheckConsistency` は 0 件。
+- **Match**: 四役割の星型 Match は等価な reified graph pattern（node + MEMBER relationship の 4-way 結合）の
+  0.71x（facts=1000 で 1.960 ms vs 2.768 ms）。
+
 ## 開発状況
 
-完了済みマイルストーンと進行中タスクの一覧は [docs/design/roadmap.md](roadmap.md) を正本とする。
-概略: Wave 1–5（Storage / Codec / WAL → Stores / Index → Transactions → Operators / Engine → Client 層）
-完了。Feature（FT）・Perf（PW）・Gremlin/Cypher Compat（GC）・Backend Abstraction（BA）・
-Vector/Embedding（VEC）の各系列が進行中。残タスク（PW-8/9/10 ほか）も roadmap 参照。
+現在の実装トラックは [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md) である。
 
-Gremlin / Cypher 互換の対応状況は [docs/spec/05_query.md](../spec/05_query.md)。
-基本探索・比較述語・CRUD・集約・可変長パス・`as/select` は対応済み。
+`docs/spec/` は current as-built を記録する。
+
+target の設計は計画書を正本とし、実装されるまで as-built として記述しない。
+
+過去トラックの完了記録は historical record として残す。
+
+それらは commit hash、当時の API、実測値を説明するが、現行の実装順序や再実装禁止の根拠にはならない。
+
+再設計の disposition が Delete または Rewrite を指定するコードは、過去の完了記録に関わらず対象になる。
+
+### ローカル運用
+
+bootstrap は `develop` で行い、その後の tracked な再設計作業は `redesign/single-writer` の専用 worktree で行う。
+
+専用 worktree は同じ Git repository の履歴、tag、index、remote を共有する。
+
+物理コピーした別ライブラリや、後日の成果物差し替えで並行開発しない。
+
+この作業ではユーザー指示により外部 push と upstream 設定を保留している。
+
+ローカル commit と tag は有効な進行記録だが、remote との同期を意味しない。
+
+外部公開や `develop` への統合を再開する前に、[再設計の実行手順](../../plans/single-writer-redesign-process.md) §2〜§6 で定める未実施条件を満たす。
+
+`.agents/` と `.claude/` は git 管理外のローカル設定である。
+
+両方の `quiver-implement` mirror は byte-for-byte で一致させ、tracked commit に混ぜない。
+
+専用 worktree には mirror が複製されないため、必要なときはメインツリー側を read-only で参照する。
+
+### Wave gate
+
+各 Wave の統合候補は、機能 test、crash test、baseline gate、as-built 更新を満たす。
+
+crash test と baseline gate を `N/A` とするときは、対象挙動を変更していないことを差分で示す。
+
+solution build、変更した contract の as-built 更新、Wave 固有の機能 test は `N/A` にできない。
+
+性能 gate が未達なら、原因と再設計案を plan の decision log に追記してからユーザー判断を得る。
 
 ## 設計ドキュメント
 
 | ファイル | 内容 |
 |---|---|
 | [00_conventions.md](00_conventions.md) | 共通規約（命名・性能指針・テスト規約） |
-| [01_storage_paging.md](01_storage_paging.md) | ページ管理・バッファプール |
-| [02_record_codec.md](02_record_codec.md) | バイト列直接操作プリミティブ |
-| [03_fixed_record_stores.md](03_fixed_record_stores.md) | Node / Relationship ストア |
-| [04_property_token_stores.md](04_property_token_stores.md) | Property / Token ストア |
-| [05_btree_index.md](05_btree_index.md) | B+Tree インデックス |
-| [06_wal.md](06_wal.md) | Write-Ahead Log |
-| [07_transaction_recovery.md](07_transaction_recovery.md) | トランザクション・リカバリ |
-| [08_physical_operators.md](08_physical_operators.md) | Volcano 型物理演算子 |
-| [09_graph_api.md](09_graph_api.md) | 公開 CRUD API |
-| [10_embedding_pipeline.md](10_embedding_pipeline.md) | 埋め込み / ベクトル検索パイプライン |
-| [11_rearchitecture_master_plan.md](11_rearchitecture_master_plan.md) | 抜本再設計マスタープラン |
-| [12_rag_backend_direction.md](12_rag_backend_direction.md) | ローカル RAG バックエンド方向性（ポジショニング・非目標の正本） |
-| [13_fulltext_search.md](13_fulltext_search.md) | 全文検索 / ハイブリッド検索（転置インデックス + BM25 + RRF） |
-| [14_rag_layer.md](14_rag_layer.md) | Quiver.Rag レイヤ（Document/Chunk スキーマ・取込・検索） |
+| `01_storage_paging.md` | historical record: ページ管理・バッファプール |
+| `02_record_codec.md` | historical record: バイト列直接操作プリミティブ |
+| `03_fixed_record_stores.md` | historical record: Node / Relationship ストア |
+| `04_property_token_stores.md` | historical record: Property / Token ストア |
+| `05_btree_index.md` | historical record: B+Tree インデックス |
+| `06_wal.md` | historical record: Write-Ahead Log |
+| `07_transaction_recovery.md` | historical record: トランザクション・リカバリ |
+| `08_physical_operators.md` | historical record: Volcano 型物理演算子 |
+| `09_graph_api.md` | historical record: 公開 CRUD API |
+| `10_embedding_pipeline.md` | historical record: 埋め込み / ベクトル検索パイプライン |
+| `11_rearchitecture_master_plan.md` | historical record: 抜本再設計マスタープラン |
+| `12_rag_backend_direction.md` | historical record: ローカル RAG バックエンド方向性（ポジショニング・非目標の正本） |
+| `13_fulltext_search.md` | historical record: 全文検索 / ハイブリッド検索（転置インデックス + BM25 + RRF） |
+| `14_rag_layer.md` | historical record: Quiver.Rag レイヤ（Document/Chunk スキーマ・取込・検索） |
+
+## エージェント運用ガードレール
+
+コーディングエージェント (Claude Code / Codex) が規約を破らないための決定論的バックストップ。
+CLAUDE.md / AGENTS.md の散文だけではエージェント自身の判断に依存し、指示が無視されうる。
+そこで機械的に検査するフックを併用する。設計思想はこの節を正本とする。
+
+### 原則: パターンヒットは signal であって verdict ではない
+
+正規表現の一致はあくまで「候補シグナル」として扱い、ハードブロックはしない。
+
+- **advisory を優先する。** 書き込み前に拒否 (PreToolUse block) すると、誤検知時にエージェントが
+  回避を繰り返して会話が破綻する。書き込み後に助言を返す (PostToolUse) なら、正当なら無視でき、
+  破綻しない。
+- **誤検知の主因はパスで決定論的に消す。** 例外地 (`plans/`・`docs/design/`・エージェント内部
+  ツールの `.claude/`・`.agents/`) を先に除外すれば、意味判断を持ち出す前に大半の誤検知が消える。
+- **検査は変更差分に絞る。** ファイル全体を毎回再検査すると、既存の記号 (`tests/`・`benchmarks/`
+  には大量にある) を再検知して騒がしくなる。その編集が「新規に書いたテキスト」だけを見る。
+- **意味判断が本当に必要になったときだけ LLM 層へ escalation する。** 決定論版がノイズ過多だと
+  実証されたら、小型 LLM に候補の意味 (本当に危険か / 過去の完了報告か / 仮定か / ユーザ質問か)
+  を判定させる 2 層目を足す。その際は prompt injection 対策・secret 秘匿・再帰ガードが必須。
+  現状は決定論の Layer 1 のみで足りており、未導入。
+
+### 実装
+
+正本は `scripts/agent-guardrails/check-track-markers.ps1`（検出ロジックの単一置き場）。
+現在の対象規約は「タスク管理番号 (例 `HYP-7`) や `案A`/`案B` を、`plans/`・`docs/design/` 以外の
+`src` コメント・識別子・公開 docs に残さない」。検出接頭辞の allowlist はスクリプト先頭が正本
+（技術用語 `UTF-8` / `AVX-512` 等を誤検知しないよう明示列挙）。
+
+| 呼び出し口 | 用途 | 挙動 |
+|---|---|---|
+| `-Hook`（`.claude/settings.json` の PostToolUse） | Claude Code | 編集差分のみ検査し advisory 通知 (exit 2)。ブロックしない |
+| `-Scan` | 人間 / CI / Codex の監査 | 対象ルートを一覧監査 (exit 1)。tests/benchmarks は既存ベースラインが多い |
+| `-DiffAgainst <ref>` | Codex / commit 前の監査 | ref から追加された行だけを検査し、既存候補と新規漏出を分離する |
+| `<path>` | 手動 / スクリプト | 指定ファイルを検査 |
+
+両エージェントで同一ロジックを共有する: Claude Code はフックから、Codex / 人間は `-Scan` /
+パス指定から同じスクリプトを呼ぶ。`.claude/settings.json` は追跡外 (ローカル) だが、規約とロジックの
+正本はこの節と追跡されるスクリプトにあるため、参照先は一元化される。
+
+`check-markdown-links.ps1 -Roots <paths...>` は tracked Markdown の相対 link の解決先を検査する。
+
+`check-skill-redirects.ps1` が認める historical redirect は、Claude 側の `SKILL.md` の唯一の行である次の形式だけである。
+
+```text
+<!-- quiver-historical-skill-redirect: ../../../../.agents/skills/quiver-implement/comlpeted/SKILL.md -->
+```
+
+redirect は ClaudeRoot 配下から AgentsRoot 配下の leaf `SKILL.md` への相対 forward-slash path でなければならない。
+
+本文併記、multi-hop、通常の Markdown または YAML、絶対 URI、drive path は redirect として認めない。
+
+### Wave 0 監査記録
+
+2026-07-12 に `redesign-baseline` を基準として Wave 0 の gate を監査した。
+
+`check-track-markers.ps1 -DiffAgainst redesign-baseline` は新規候補0件で成功した。
+
+full `-Scan` は既存候補184件を検出した。
+これは Wave 10 の cleanup baseline として記録し、Wave 0 の差分 gate とは区別する。
+
+`README.md`、`docs/spec`、`docs/design` の Markdown relative link audit は成功した。
+
+historical docs と `plans/` を含む全 tracked Markdown の監査は既存の欠落26件を検出した。
+この監査は historical debt の記録であり、Wave 0 の hard pass にはしない。
+
+3つの guardrail self-test は成功した。
+`check-skill-redirects.ps1` は local mirror の historical redirect を解決し、Windows の physical AgentsRoot escape を junction fixture で拒否した。
+active `quiver-implement` mirror は SHA-256 で一致した。
+
+focused `tools/Quiver.Studio` build と `dotnet build Quiver.slnx -v minimal` は、ともに0 warnings、0 errorsで成功した。
+
+`git diff redesign-baseline -- src/Quiver/Transactions src/Quiver/Wal src/Quiver/Storage` と `git diff redesign-baseline -- src tests benchmarks` は差分なしだった。
 
 ## Versioning / API 安定性
 
@@ -300,7 +513,7 @@ public API surface は [tests/Quiver.PublicApi.Tests/](../../tests/Quiver.Public
 
 | パッケージ | 内容 | 依存 |
 |---|---|---|
-| `Quiver` | コアエンジン（型付き属性は本体に内包 + Source Generator を**同梱**） | System.IO.Hashing, Microsoft.Extensions.Logging.Abstractions |
+| `Quiver` | コアエンジン（型付き属性は本体に内包 + Source Generator を**同梱**） | System.IO.Hashing |
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` / DI 統合 | `Quiver`, Microsoft.Extensions.* |
 | `Quiver.OpenTelemetry` | OpenTelemetry 計装登録 | `Quiver`, OpenTelemetry(.Api) |
 | `Quiver.Rag` | ローカル RAG スキーマ層 | `Quiver` |

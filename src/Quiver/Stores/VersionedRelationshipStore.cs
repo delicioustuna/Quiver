@@ -44,9 +44,10 @@ internal struct RawRelRecord
 ///
 /// <para><b>MVCC</b>: xmin/xmax は heap version ヘッダに保持する (<see cref="VersionedNodeStore"/>
 /// Phase 3a と同じ統一レコードモデル)。<see cref="IEntityVersionStore"/> sidecar は Generation +
-/// SSN (Pstamp/Sstamp) + commit 高水位のみを保持する。Sequence は vacuum 回収後に
-/// <see cref="ItemPointerMap"/> の free list で再利用し、再利用ごとに世代を bump する
-/// (ABA 検出維持)。</para>
+/// SSN (Pstamp/Sstamp) + commit 高水位のみを保持する。relationship の raw Sequence は
+/// adjacency、delta、locator、epoch entry に残り得るため、再利用解放 coordinator がそれらを
+/// 除去するまで free list へ戻さない。物理ページの回収と logical Sequence の再利用を混同すると、
+/// raw entry が別 relationship を指す ABA になる。</para>
 /// </summary>
 internal sealed class VersionedRelationshipStore : IRelationshipStore
 {
@@ -72,27 +73,39 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     private readonly ItemPointerMap _map;
     private readonly VersionedRecordHeap _heap;
     private readonly IEntityVersionStore _versions;
+    private readonly RelationshipLocatorStore? _locators;
     private long _inUseCount;
+    // Wave 1 では relationship Sequence を再利用しない。
+    // 既存 sidecar に再利用履歴がなければ全採番済み slot の generation は 1 なので、
+    // logical output ごとの sidecar read を省ける。
+    private bool _anyReuse;
 
-    public VersionedRelationshipStore(IPagedFile heapFile, ItemPointerMap map, IEntityVersionStore? versions = null)
+    public VersionedRelationshipStore(
+        IPagedFile heapFile,
+        ItemPointerMap map,
+        IEntityVersionStore? versions = null,
+        RelationshipLocatorStore? locators = null)
     {
         _file = heapFile;
         _map = map;
         _heap = new VersionedRecordHeap(heapFile, map);
         _versions = versions ?? new InMemoryEntityVersionStore();
+        _locators = locators;
+        BackfillLocators();
         _inUseCount = RecomputeInUse();
+        _anyReuse = _versions.AnyGenerationReuse;
     }
 
     public long InUseCount => _inUseCount;
 
     public RelationshipId Create(INodeStore nodeStore, NodeId source, NodeId target, RelationshipTypeId type)
     {
-        // 旧 RelationshipStore と同じく rel は Sequence 空間 (gen=0) で払い出す (rel に
-        // 世代を surface しない。adjacency / chain pointer も Sequence 格納)。vacuum 回収済み seq は
-        // map free list から再利用する。
-        long seq = _map.PopFreeSeq();
-        if (seq < 0) seq = _map.Hwm;
-        var relId = new RelationshipId(seq);
+        // raw adjacency / delta / locator / epoch entry が残る間に slot を再利用すると、
+        // entry の Sequence が別 relationship を指す。再利用解放 coordinator が lifecycle を
+        // 完結させるまでは free 候補を見ず high-water mark からだけ採番する。
+        long seq = _map.Hwm;
+        long generation = _versions.Read(seq).Generation + 1;
+        var relId = RelationshipId.Create(seq, checked((int)generation));
 
         RelationshipId srcHead = GetFirstRelId(nodeStore, source);
         RelationshipId tgtHead = GetFirstRelId(nodeStore, target);
@@ -110,7 +123,8 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         RecordHelpers.WriteInt48(payload[OffFirstProp..], PropertyId.Invalid.Sequence);
 
         _heap.Insert(seq, payload, MvccContext.CurrentTxId.Value);
-        _versions.Write(seq, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue));
+        _versions.Write(seq, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue, generation));
+        _locators?.WriteLive(seq, checked((int)generation), seq, source, target, type);
         _inUseCount++;
 
         // 旧 head の物理 prev を新 rel に向ける (双方向リンク維持。visibility は xmin/xmax で判定)。
@@ -129,16 +143,20 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         // 論理削除のみ — head version に xmax をスタンプ。chain / slot は維持する
         // (snapshot reader が辿れるよう)。物理回収 + chain 整理は vacuum (OP-3)。
         _ = nodeStore;
-        long seq = relId.Sequence;
+        if (!TryResolveRecordSequence(relId, out long seq, requireLive: true)) return;
         if (!_heap.TryReadHeadRaw(seq, out _, out _, out long xmax)) return;
         if (xmax != 0) return; // 既に論理削除済
         _heap.StampXmax(seq, MvccContext.CurrentTxId.Value);
+        int generation = CurrentGeneration(relId.Sequence);
+        if (generation >= 0)
+            _locators?.WriteDeleted(relId.Sequence, generation);
         _inUseCount--;
     }
 
     public RelationshipReadHandle Read(RelationshipId relId)
     {
-        long seq = relId.Sequence;
+        if (!TryResolveRecordSequence(relId, out long seq))
+            return NotInUse(relId);
         if (seq < 0 || seq >= _map.Hwm)
             return NotInUse(relId);
 
@@ -181,32 +199,35 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
             inUse = _heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _);
 
         if (inUse) MvccContext.RecordRead(EntityKind.Relationship, seq);
-        return new RelationshipReadHandle(relId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstProp);
+        var resolvedId = RelationshipId.Create(seq, CurrentGeneration(seq));
+        return new RelationshipReadHandle(resolvedId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstProp);
     }
 
     public RelationshipWriteHandle Write(RelationshipId relId)
     {
-        var ptr = _heap.GetHead(relId.Sequence);
-        if (ptr.IsNull)
+        if (!TryResolveRecordSequence(relId, out long seq, requireLive: true))
             throw new CorruptionException($"Write on missing relationship seq={relId.Sequence}");
+        var ptr = _heap.GetHead(seq);
+        if (ptr.IsNull)
+            throw new CorruptionException($"Write on missing relationship seq={seq}");
         var pageId = new PageId(ptr.PageId);
         var ph = _file.PinForWrite(pageId);
         var sp = new SlottedPage(ph.Data);
         if (!sp.TryGetMutable(ptr.Slot, out var rec))
         {
             _file.Unpin(pageId);
-            throw new CorruptionException($"missing version slot for relationship seq={relId.Sequence}");
+            throw new CorruptionException($"missing version slot for relationship seq={seq}");
         }
         var fields = rec.Slice(HdrSize, PayloadSize);
         return new RelationshipWriteHandle(_file, pageId, fields);
     }
 
     public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore nodeStore)
-        => new RelationshipEnumerator(this, nodeId, GetFirstRelId(nodeStore, nodeId));
+        => new RelationshipEnumerator(this, nodeStore, nodeId, GetFirstRelId(nodeStore, nodeId));
 
     public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore nodeStore,
         RelationshipTypeId type, Direction direction)
-        => new RelationshipEnumerator(this, nodeId, GetFirstRelId(nodeStore, nodeId), type, direction);
+        => new RelationshipEnumerator(this, nodeStore, nodeId, GetFirstRelId(nodeStore, nodeId), type, direction);
 
     public IEnumerable<RelationshipId> Scan()
     {
@@ -216,7 +237,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
             if (_heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _))
             {
                 MvccContext.RecordRead(EntityKind.Relationship, seq);
-                yield return new RelationshipId(seq);
+                yield return RelationshipId.Create(seq, CurrentGeneration(seq));
             }
         }
     }
@@ -227,7 +248,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     public bool TryGetInlineProperty(RelationshipId relId, PropertyKeyId keyId, out PropertyValue value)
     {
         value = default;
-        long seq = relId.Sequence;
+        if (!TryResolveRecordSequence(relId, out long seq)) return false;
         // alloc-free 経路。可視版 payload を stackalloc バッファへコピーして scan する
         // (per-read の byte[] 割当を回避)。scalar は値コピーなので buffer 上 decode で安全、String/Bytes
         // のみ安定 byte[] へコピーする。payload が buffer 超過なら割当版へフォールバック。
@@ -253,7 +274,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
 
     public bool HasInlineProperty(RelationshipId relId, PropertyKeyId keyId)
     {
-        long seq = relId.Sequence;
+        if (!TryResolveRecordSequence(relId, out long seq)) return false;
         Span<byte> buf = stackalloc byte[InlineReadBuffer];
         int len = _heap.TryReadVisibleInto(seq, AmbientVisible, buf, out _, out _);
         if (len == 0) return false;
@@ -267,7 +288,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     public bool SetInlineProperty(RelationshipId relId, PropertyKeyId keyId, in PropertyValue value)
     {
         if (!InlinePropertyCodec.IsInlineable(value)) return false;
-        long seq = relId.Sequence;
+        if (!TryResolveRecordSequence(relId, out long seq, requireLive: true)) return false;
         if (!_heap.TryReadVisible(seq, AmbientVisible, out var cur, out _, out _)) return false;
         byte[] np = InlinePropertyCodec.Build(cur, InlinePropertyCodec.RelFixedSize, keyId.Value, in value, remove: false);
         if (np.Length > VersionedRecordHeap.MaxPayloadSize) return false; // payload 予算超過 → overflow
@@ -277,7 +298,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
 
     public bool RemoveInlineProperty(RelationshipId relId, PropertyKeyId keyId)
     {
-        long seq = relId.Sequence;
+        if (!TryResolveRecordSequence(relId, out long seq, requireLive: true)) return false;
         if (!_heap.TryReadVisible(seq, AmbientVisible, out var cur, out _, out _)) return false;
         if (!InlinePropertyCodec.TryScan(cur, InlinePropertyCodec.RelFixedSize, keyId.Value, out _, out _)) return false;
         byte[] np = InlinePropertyCodec.Build(cur, InlinePropertyCodec.RelFixedSize, keyId.Value, default, remove: true);
@@ -287,7 +308,8 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
 
     public PropertyEnumerator EnumerateProperties(RelationshipId relId, IPropertyStore overflowStore)
     {
-        if (!_heap.TryReadVisible(relId.Sequence, AmbientVisible, out var payload, out _, out _))
+        if (!TryResolveRecordSequence(relId, out long seq) ||
+            !_heap.TryReadVisible(seq, AmbientVisible, out var payload, out _, out _))
             return new PropertyEnumerator(overflowStore, PropertyId.Invalid);
         MvccContext.RecordRead(EntityKind.Relationship, relId.Sequence); // property 列挙 = rel read
         var firstProp = new PropertyId(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProp)));
@@ -312,6 +334,13 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         RecordHelpers.WriteInt48(payload[OffFirstProp..], -1L);
         _heap.Insert(id, payload, TransactionId.Bootstrap.Value);
         _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue, 1));
+        _locators?.WriteLive(
+            id,
+            1,
+            id,
+            new NodeId(src),
+            new NodeId(tgt),
+            new RelationshipTypeId(typeId));
     }
 
     internal void BulkSetHeaders(long hwm, long inUseCount)
@@ -326,7 +355,10 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     {
         _map.ReloadMeta();
         _heap.ReloadMeta();
+        _locators?.ReloadMeta();
+        BackfillLocators();
         _inUseCount = RecomputeInUse();
+        _anyReuse = _versions.AnyGenerationReuse;
     }
 
     /// <summary>採番済み Sequence 数 (= 最大 seq + 1)。</summary>
@@ -339,6 +371,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     public int CurrentGeneration(long localId)
     {
         if (localId < 0 || localId >= _map.Hwm) return -1;
+        if (!_anyReuse) return 1;
         long gen = _versions.Read(localId).Generation;
         return gen > int.MaxValue ? int.MaxValue : (int)gen;
     }
@@ -417,11 +450,13 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
                     (_, vx) => vx != 0 && vx < horizonTxId && committed.IsCommitted(vx));
         }
 
-        // Pass 3: reclaim 集合の slot を物理 free。
+        // Pass 3: reclaim 集合の record を物理回収する。
+        // raw derived entry が残るため、ここで map free list へ Sequence を release してはならない。
+        // 再利用解放は base rebuild、delta/epoch reset、locator rebuild、derived durable を完了した
+        // maintenance coordinator だけが担う。
         foreach (var seq in reclaimSet)
         {
             _heap.Remove(seq);
-            _map.PushFreeSeq(seq);
         }
 
         return reclaimSet.Count;
@@ -488,6 +523,53 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     // --- private helpers ---
 
     private static bool AmbientVisible(long xmin, long xmax) => Visibility.IsVisibleAmbient(xmin, xmax);
+
+    private bool TryResolveRecordSequence(
+        RelationshipId relId,
+        out long recordSequence,
+        bool requireLive = false)
+    {
+        recordSequence = relId.Sequence;
+        if (_locators == null)
+            return relId.IsValid;
+
+        if (!_locators.TryRead(relId.Sequence, out var locator))
+            return false;
+
+        int carriedGeneration = relId.Generation;
+        if (carriedGeneration != 0 && carriedGeneration != locator.Generation)
+            return false;
+        if (requireLive && !locator.Live)
+            return false;
+        if (locator.RecordSequence < 0)
+            return false;
+        recordSequence = locator.RecordSequence;
+        return true;
+    }
+
+    private void BackfillLocators()
+    {
+        if (_locators == null || _locators.Hwm >= _map.Hwm)
+            return;
+
+        long hwm = _map.Hwm;
+        for (long seq = _locators.Hwm; seq < hwm; seq++)
+        {
+            if (!_heap.TryReadHeadRaw(seq, out var payload, out _, out long xmax))
+                continue;
+
+            int generation = CurrentGeneration(seq);
+            if (generation <= 0) generation = 1;
+            var span = payload.AsSpan();
+            var source = new NodeId(RecordHelpers.ReadInt48(span[OffSource..]));
+            var target = new NodeId(RecordHelpers.ReadInt48(span[OffTarget..]));
+            var type = new RelationshipTypeId(BinaryPrimitives.ReadInt16LittleEndian(span[OffType..]));
+            if (xmax == 0 && (span[OffFlags] & FlagInUse) != 0)
+                _locators.WriteLive(seq, generation, seq, source, target, type);
+            else
+                _locators.WriteDeleted(seq, generation);
+        }
+    }
 
     private static RelationshipReadHandle NotInUse(RelationshipId relId)
         => new RelationshipReadHandle(

@@ -315,6 +315,108 @@ public sealed class GraphDatabaseTests : IDisposable
 
     // ===== 型付き Traversal API =====
 
+    [Fact]
+    public void Relationship_generation_lookup_survives_reopen_and_adjacency_compact()
+    {
+        var path = Path.Combine(_dir, "relationship_locator_reopen.quiver");
+        RelationshipId stamped;
+
+        using (var db = GraphDatabase.Open(path))
+        {
+            using (var tx = db.BeginTransaction())
+            {
+                var a = tx.CreateNode("A");
+                var b = tx.CreateNode("B");
+                var rel = tx.CreateRelationship(a, b, "LINK");
+                stamped = RelationshipId.Create(rel.Sequence, 1);
+                tx.SetProperty(rel, "weight", PropertyValue.FromInt64(10));
+                tx.Commit();
+            }
+
+            db.CompactAdjacency();
+        }
+
+        using (var db = GraphDatabase.Open(path))
+        {
+            using var tx = db.BeginReadOnlyTransaction();
+            var value = tx.GetProperty(stamped, "weight");
+            value.Type.Should().Be(PropertyValueType.Int64);
+            value.Int64Value.Should().Be(10);
+        }
+
+        using (var db = GraphDatabase.Open(path))
+        {
+            db.CompactAdjacency();
+            using var tx = db.BeginReadOnlyTransaction();
+            var value = tx.GetProperty(stamped, "weight");
+            value.Type.Should().Be(PropertyValueType.Int64);
+            value.Int64Value.Should().Be(10);
+        }
+    }
+
+    [Fact]
+    public void Vacuum_keeps_raw_relationship_sequence_from_retargeting()
+    {
+        var path = Path.Combine(_dir, "relationship_locator_reuse.quiver");
+        using var db = GraphDatabase.Open(path);
+
+        NodeId a;
+        NodeId b;
+        NodeId c;
+        RelationshipId old;
+        using (var tx = db.BeginTransaction())
+        {
+            a = tx.CreateNode("A");
+            b = tx.CreateNode("B");
+            c = tx.CreateNode("C");
+            old = tx.CreateRelationship(a, b, "LINK");
+            tx.SetProperty(old, "weight", PropertyValue.FromInt64(1));
+            tx.Commit();
+        }
+
+        var stale = old;
+        var raw = new RelationshipId(old.Sequence);
+        using (var tx = db.BeginTransaction())
+        {
+            tx.DeleteRelationship(old);
+            tx.Commit();
+        }
+
+        db.Vacuum().ReclaimedRelationships.Should().Be(1);
+
+        RelationshipId replacement;
+        using (var tx = db.BeginTransaction())
+        {
+            replacement = tx.CreateRelationship(a, c, "LINK");
+            tx.SetProperty(replacement, "weight", PropertyValue.FromInt64(2));
+            tx.Commit();
+        }
+
+        replacement.Sequence.Should().BeGreaterThan(old.Sequence);
+        db.CompactAdjacency();
+
+        using (var tx = db.BeginTransaction())
+        {
+            tx.GetProperty(stale, "weight").Type.Should().Be(default(PropertyValueType));
+            tx.GetProperty(raw, "weight").Type.Should().Be(default(PropertyValueType));
+            tx.SetProperty(stale, "weight", PropertyValue.FromInt64(99));
+            tx.DeleteRelationship(stale);
+            tx.Commit();
+        }
+
+        using (var tx = db.BeginReadOnlyTransaction())
+        {
+            tx.GetProperty(replacement, "weight").Int64Value.Should().Be(2);
+
+            var targets = new List<NodeId>();
+            var rels = tx.EnumerateRelationships(a, Direction.Outgoing);
+            while (rels.MoveNext())
+                targets.Add(rels.Current.Target);
+
+            targets.Should().ContainSingle().Which.Should().Be(c);
+        }
+    }
+
     private partial class KnowsRel : IGraphRelationship<KnowsRel, PersonNode, PersonNode>
     {
         [Property]
@@ -338,8 +440,8 @@ public sealed class GraphDatabaseTests : IDisposable
     private partial class PersonNode : IGraphNode<PersonNode>
     {
         public string Name { get; set; } = "";
-        public double Score { get; set; }       // FT-35 増分1: 浮動小数点プロパティ
-        public DateTime CreatedAt { get; set; }  // FT-35 増分2: 日時プロパティ
+        public double Score { get; set; }
+        public DateTime CreatedAt { get; set; }
 
         public static string GraphLabel => "Person";
         public static NodeId Insert(IGraphTransaction tx, PersonNode entity)
@@ -958,7 +1060,7 @@ public sealed class GraphDatabaseTests : IDisposable
 
             using var tx1 = db.BeginTransaction();
             var act = () => db.BeginTransaction();
-            act.Should().Throw<InvalidOperationException>();
+            act.Should().Throw<TransactionException>();
             tx1.Commit();
         }
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }

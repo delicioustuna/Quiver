@@ -10,8 +10,8 @@ internal sealed class TxNodeStore : INodeStore
     private readonly TransactionId _txId;
     private readonly LockingMode _mode;
     private readonly TimeSpan _timeout;
-    // per-tx MVCC コンテキスト。同一スレッドで複数 tx を交互に操作する場合、
-    // thread-static MvccContext を呼出側で「使う直前に毎回」設定し直さないと
+    // per-tx MVCC コンテキスト。複数 tx を交互に操作する場合、
+    // ambient MvccContext を呼出側で「使う直前に毎回」設定し直さないと
     // 別 tx の snapshot で visibility 判定が走ってしまう。Tx 操作ごとに ambient を再アクティベートする。
     private readonly SnapshotState _snapshot;
     private readonly CommittedTxRegistry? _committed;

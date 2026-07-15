@@ -23,17 +23,7 @@ namespace Quiver.Storage.Records;
 /// </summary>
 internal sealed class HnswIndex
 {
-    // パラメタ (MVP 既定)。M = 層あたり近傍数、Mmax0 = 層0 の上限、efConstruction/efSearch = ビーム幅。
-    private const int M = 16;
-    private const int Mmax0 = 2 * M;        // 32
-    private const int EfConstruction = 200;
-    private const int MaxLayers = 8;         // level は 0..7 にクランプ
-    private static readonly double ML = 1.0 / Math.Log(M);
-
-    private const int NeighborSlots = Mmax0 + (MaxLayers - 1) * M; // 32 + 112 = 144
     private const int HeaderBytes = 4;       // present1 + level1 + pad2
-    private const int CountsBytes = MaxLayers;
-    private const int RecordSize = HeaderBytes + CountsBytes + NeighborSlots * 8; // 1164
     private static int Body => RecordPageMapping.PageBodySize;
 
     private static readonly PageId HeaderPageId = new(1);
@@ -47,6 +37,14 @@ internal sealed class HnswIndex
     private readonly VectorPayloadStore _payload;
     private readonly DistanceMetric _metric;
     private readonly int _dim;
+    private readonly int _m;
+    private readonly int _mmax0;
+    private readonly int _efConstruction;
+    private readonly int _maxLayers;
+    private readonly double _ml;
+    private readonly int _countsBytes;
+    private readonly int _recordSize;
+    private readonly ThreadLocal<SearchLayerContext> _searchContexts;
 
     // in-memory 隣接 (ページの写し)。Layers[level+1] 個の long[] (層ごとの近傍 seq)。
     private sealed class Node { public int Level; public required long[][] Layers; }
@@ -63,12 +61,22 @@ internal sealed class HnswIndex
     // 決定的構築のための per-index 乱数 (seq を seed に混ぜて再現性を持たせる)。
     private readonly Random _rng = new(0x6D6E7377);
 
-    public HnswIndex(IPagedFile file, VectorPayloadStore payload, DistanceMetric metric)
+    public HnswIndex(IPagedFile file, VectorPayloadStore payload, VectorIndexSpec spec)
     {
         _file = file;
         _payload = payload;
-        _metric = metric;
+        _metric = spec.Metric;
         _dim = payload.Dimensions;
+        _m = spec.HnswM;
+        _mmax0 = spec.HnswMMax0;
+        _efConstruction = spec.HnswEfConstruction;
+        _maxLayers = spec.HnswMaxLayers;
+        _ml = 1.0 / Math.Log(_m);
+        _countsBytes = _maxLayers;
+        int neighborSlots = checked(_mmax0 + (_maxLayers - 1) * _m);
+        _recordSize = checked(HeaderBytes + _countsBytes + neighborSlots * sizeof(long));
+        _searchContexts = new ThreadLocal<SearchLayerContext>(
+            () => new SearchLayerContext(_dim, _efConstruction));
         if (_file.PageCount <= 1)
         {
             _file.AllocatePage(PageKind.Header);
@@ -120,9 +128,9 @@ internal sealed class HnswIndex
             // 挿入層以下で beam search → M 近傍を選び双方向リンク。
             for (int lc = Math.Min(level, curMax); lc >= 0; lc--)
             {
-                var w = SearchLayer(q, ep, EfConstruction, lc);
-                int mm = lc == 0 ? Mmax0 : M;
-                var selected = SelectNeighbors(w, Math.Min(M, mm));
+                var w = SearchLayer(q, ep, _efConstruction, lc);
+                int mm = lc == 0 ? _mmax0 : _m;
+                var selected = SelectNeighbors(w, Math.Min(_m, mm));
                 node.Layers[lc] = selected.ToArray();
                 foreach (var nb in selected)
                 {
@@ -259,7 +267,11 @@ internal sealed class HnswIndex
     /// <paramref name="isLive"/> は世代照合— false の候補は除外する。
     /// </summary>
     public VectorSearchResult[] Search(
-        ReadOnlySpan<float> query, int k, EntityKind kind, Func<long, ushort, bool> isLive,
+        ReadOnlySpan<float> query,
+        int k,
+        EntityKind kind,
+        Func<long, ushort, bool> isLive,
+        VectorSearchOptions options,
         Func<long, bool>? inFilter = null)
     {
         if (_entry < 0 || k <= 0) return Array.Empty<VectorSearchResult>();
@@ -267,8 +279,8 @@ internal sealed class HnswIndex
         for (int lc = _maxLevel; lc > 0; lc--)
             ep = GreedyDescent(query, ep, lc);
 
-        // ③: フィルタ付き検索は post-filter で k 件に満たなくなりうるため ef をオーバーサンプルする。
-        int ef = inFilter is null ? Math.Max(EfConstruction, k) : Math.Max(EfConstruction, k * 8);
+        // フィルタ付き検索は post-filter で k 件に満たなくなりうるため ef をオーバーサンプルする。
+        int ef = ComputeSearchEf(k, options, inFilter is not null);
         var w = SearchLayer(query, ep, ef, 0);
 
         // 層0の候補を payload で再スコアし、present + 世代照合 (+ フィルタ) を通したものだけ top-k へ。
@@ -276,17 +288,26 @@ internal sealed class HnswIndex
         var buf = ArrayPool<float>.Shared.Rent(_dim);
         try
         {
-            var dest = buf.AsSpan(0, _dim);
             foreach (var c in w)
             {
                 if (inFilter is not null && !inFilter(c.Seq)) continue;
-                if (!_payload.TryGet(c.Seq, dest, out var gen)) continue;
+                if (!_payload.TryGetForScoring(c.Seq, buf, out var vector, out var gen)) continue;
                 if (!isLive(c.Seq, gen)) continue;
-                heap.Offer(new VectorSearchResult(kind, c.Seq, VectorMetrics.Score(_metric, query, dest)));
+                heap.Offer(new VectorSearchResult(
+                    kind, c.Seq, VectorMetrics.Score(_metric, query, vector)));
             }
         }
         finally { ArrayPool<float>.Shared.Return(buf); }
         return heap.ToSortedArray();
+    }
+
+    /// <summary>検索種別とオプションから実際の HNSW ビーム幅を求める。</summary>
+    internal static int ComputeSearchEf(int k, VectorSearchOptions options, bool filtered)
+    {
+        long requestedEf = filtered
+            ? (long)k * options.FilteredOversampleFactor
+            : k;
+        return (int)Math.Min(int.MaxValue, Math.Max(options.EfSearch, requestedEf));
     }
 
     /// <summary>abort の before-image undo 後 / clean reopen で呼ばれ、ページから in-memory を再構築する。</summary>
@@ -301,8 +322,8 @@ internal sealed class HnswIndex
 
     private int RandomLevel()
     {
-        int lvl = (int)(-Math.Log(1.0 - _rng.NextDouble()) * ML);
-        return Math.Min(lvl, MaxLayers - 1);
+        int lvl = (int)(-Math.Log(1.0 - _rng.NextDouble()) * _ml);
+        return Math.Min(lvl, _maxLayers - 1);
     }
 
     private static long[][] NewLayers(int level)
@@ -346,57 +367,115 @@ internal sealed class HnswIndex
 
     private List<Cand> SearchLayer(ReadOnlySpan<float> q, long entry, int ef, int layer)
     {
-        var buf = ArrayPool<float>.Shared.Rent(_dim);
-        try
+        var context = _searchContexts.Value!;
+        context.Reset(ef, _maxSeq, _nodes.Count);
+        var candidates = context.Candidates;
+        var results = context.Results;
+        var list = context.Sorted;
+
+        context.AddVisited(entry);
+        double ed = Dist(q, entry, context.Scratch);
+        candidates.Enqueue(entry, ed);
+        results.Enqueue(entry, -ed);
+
+        while (candidates.Count > 0)
         {
-            var visited = new HashSet<long> { entry };
-            double ed = Dist(q, entry, buf);
-            // candidates: 近い順に展開する min-heap (priority = dist)。
-            var candidates = new PriorityQueue<long, double>();
-            // results: 最遠を peek できる max-heap (priority = -dist)、ef で bound。
-            var results = new PriorityQueue<long, double>();
-            candidates.Enqueue(entry, ed);
-            results.Enqueue(entry, -ed);
+            candidates.TryDequeue(out long c, out double cd);
+            // results の最遠 (= -priority が最小 → priority 最大... PriorityQueue は min-priority を peek)。
+            results.TryPeek(out _, out double negFar);
+            double farthest = -negFar;
+            if (cd > farthest && results.Count >= ef) break;
 
-            while (candidates.Count > 0)
+            if (!_nodes.TryGetValue(c, out var node) || layer > node.Level) continue;
+            foreach (var nb in node.Layers[layer])
             {
-                candidates.TryDequeue(out long c, out double cd);
-                // results の最遠 (= -priority が最小 → priority 最大... PriorityQueue は min-priority を peek)。
-                results.TryPeek(out _, out double negFar);
-                double farthest = -negFar;
-                if (cd > farthest && results.Count >= ef) break;
-
-                if (!_nodes.TryGetValue(c, out var node) || layer > node.Level) continue;
-                foreach (var nb in node.Layers[layer])
+                if (!context.AddVisited(nb)) continue;
+                double d = Dist(q, nb, context.Scratch);
+                results.TryPeek(out _, out double nf);
+                double far = -nf;
+                if (d < far || results.Count < ef)
                 {
-                    if (!visited.Add(nb)) continue;
-                    double d = Dist(q, nb, buf);
-                    results.TryPeek(out _, out double nf);
-                    double far = -nf;
-                    if (d < far || results.Count < ef)
-                    {
-                        candidates.Enqueue(nb, d);
-                        results.Enqueue(nb, -d);
-                        if (results.Count > ef) results.Dequeue(); // 最遠を捨てる
-                    }
+                    candidates.Enqueue(nb, d);
+                    results.Enqueue(nb, -d);
+                    if (results.Count > ef) results.Dequeue(); // 最遠を捨てる
                 }
             }
-
-            // results を近い順に並べて返す。
-            var list = new List<Cand>(results.Count);
-            while (results.Count > 0)
-            {
-                results.TryDequeue(out long s, out double negd);
-                list.Add(new Cand(s, -negd));
-            }
-            list.Sort(static (a, b) =>
-            {
-                int c = a.Dist.CompareTo(b.Dist);
-                return c != 0 ? c : a.Seq.CompareTo(b.Seq);
-            });
-            return list;
         }
-        finally { ArrayPool<float>.Shared.Return(buf); }
+
+        // results を近い順に並べて返す。次の SearchLayer 呼び出しまで有効。
+        while (results.Count > 0)
+        {
+            results.TryDequeue(out long s, out double negd);
+            list.Add(new Cand(s, -negd));
+        }
+        list.Sort(static (a, b) =>
+        {
+            int c = a.Dist.CompareTo(b.Dist);
+            return c != 0 ? c : a.Seq.CompareTo(b.Seq);
+        });
+        return list;
+    }
+
+    private sealed class SearchLayerContext
+    {
+        public SearchLayerContext(int dim, int initialCapacity)
+        {
+            Scratch = new float[dim];
+            Visited = new HashSet<long>(initialCapacity * 4);
+            Candidates = new PriorityQueue<long, double>(initialCapacity);
+            Results = new PriorityQueue<long, double>(initialCapacity);
+            Sorted = new List<Cand>(initialCapacity);
+        }
+
+        public float[] Scratch { get; }
+        public HashSet<long> Visited { get; }
+        public PriorityQueue<long, double> Candidates { get; }
+        public PriorityQueue<long, double> Results { get; }
+        public List<Cand> Sorted { get; }
+
+        private int[]? _denseVisited;
+        private int _visitEpoch;
+        private bool _useDenseVisited;
+
+        public void Reset(int ef, long maxSeq, int nodeCount)
+        {
+            Visited.Clear();
+            _useDenseVisited =
+                maxSeq >= 0 &&
+                maxSeq <= 10_000_000 &&
+                maxSeq <= (long)nodeCount * 4 + 1024;
+            if (_useDenseVisited)
+            {
+                int required = checked((int)maxSeq);
+                if (_denseVisited is null || _denseVisited.Length < required)
+                    _denseVisited = new int[required];
+                if (++_visitEpoch <= 0)
+                {
+                    Array.Clear(_denseVisited);
+                    _visitEpoch = 1;
+                }
+            }
+            else
+            {
+                Visited.EnsureCapacity(ef * 4);
+            }
+            Candidates.Clear();
+            Results.Clear();
+            Sorted.Clear();
+            Candidates.EnsureCapacity(ef);
+            Results.EnsureCapacity(ef);
+            Sorted.EnsureCapacity(ef);
+        }
+
+        public bool AddVisited(long seq)
+        {
+            if (!_useDenseVisited || seq < 0 || seq >= _denseVisited!.Length)
+                return Visited.Add(seq);
+            int index = (int)seq;
+            if (_denseVisited[index] == _visitEpoch) return false;
+            _denseVisited[index] = _visitEpoch;
+            return true;
+        }
     }
 
     // 単純ヒューリスティック: 近い順 m 件を採用。
@@ -412,7 +491,7 @@ internal sealed class HnswIndex
     {
         if (!_nodes.TryGetValue(node, out var n) || layer > n.Level) return;
         var cur = n.Layers[layer];
-        int mmax = layer == 0 ? Mmax0 : M;
+        int mmax = layer == 0 ? _mmax0 : _m;
         if (cur.Length < mmax)
         {
             var grown = new long[cur.Length + 1];
@@ -426,8 +505,7 @@ internal sealed class HnswIndex
         var nodeVecBuf = ArrayPool<float>.Shared.Rent(_dim);
         try
         {
-            var nodeVec = nodeVecBuf.AsSpan(0, _dim);
-            if (!_payload.TryGet(node, nodeVec, out _)) return;
+            if (!_payload.TryGetForScoring(node, nodeVecBuf, out var nodeVec, out _)) return;
             var pool = new List<long>(cur.Length + 1);
             pool.AddRange(cur);
             pool.Add(newNeighbor);
@@ -453,8 +531,8 @@ internal sealed class HnswIndex
     // dist(query, vec(seq)) = -Score (低いほど近い)。payload 無しは +∞。
     private double Dist(ReadOnlySpan<float> q, long seq, float[] scratch)
     {
-        var v = scratch.AsSpan(0, _dim);
-        if (!_payload.TryGet(seq, v, out _)) return double.PositiveInfinity;
+        if (!_payload.TryGetForScoring(seq, scratch, out var v, out _))
+            return double.PositiveInfinity;
         return -VectorMetrics.Score(_metric, q, v);
     }
 
@@ -463,54 +541,77 @@ internal sealed class HnswIndex
     private void Persist(long seq)
     {
         if (!_nodes.TryGetValue(seq, out var n)) return;
-        Span<byte> rec = stackalloc byte[RecordSize];
-        rec.Clear();
-        rec[0] = 1;                  // present
-        rec[1] = (byte)n.Level;
-        for (int lc = 0; lc <= n.Level && lc < MaxLayers; lc++)
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(_recordSize);
+        try
         {
-            var arr = n.Layers[lc];
-            rec[HeaderBytes + lc] = (byte)arr.Length; // counts
-            int baseSlot = LayerSlotBase(lc);
-            int off = HeaderBytes + CountsBytes + baseSlot * 8;
-            for (int i = 0; i < arr.Length; i++)
-                BinaryPrimitives.WriteInt64LittleEndian(rec[(off + i * 8)..], arr[i]);
+            Span<byte> rec = buffer.AsSpan(0, _recordSize);
+            rec.Clear();
+            rec[0] = 1;                  // present
+            rec[1] = (byte)n.Level;
+            for (int lc = 0; lc <= n.Level && lc < _maxLayers; lc++)
+            {
+                var arr = n.Layers[lc];
+                rec[HeaderBytes + lc] = checked((byte)arr.Length); // counts
+                int baseSlot = LayerSlotBase(lc);
+                int off = HeaderBytes + _countsBytes + baseSlot * sizeof(long);
+                for (int i = 0; i < arr.Length; i++)
+                    BinaryPrimitives.WriteInt64LittleEndian(rec[(off + i * sizeof(long))..], arr[i]);
+            }
+            WriteBytes(seq * (long)_recordSize, rec);
         }
-        WriteBytes(seq * (long)RecordSize, rec);
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
     }
 
     private void WriteAbsent(long seq)
     {
-        Span<byte> rec = stackalloc byte[RecordSize];
-        rec.Clear(); // present=0
-        WriteBytes(seq * (long)RecordSize, rec);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(_recordSize);
+        try
+        {
+            Span<byte> rec = buffer.AsSpan(0, _recordSize);
+            rec.Clear(); // present=0
+            WriteBytes(seq * (long)_recordSize, rec);
+        }
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
     }
 
     private void RebuildFromPages()
     {
         if (_maxSeq <= 0) return;
-        Span<byte> rec = stackalloc byte[RecordSize];
-        for (long seq = 0; seq < _maxSeq; seq++)
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(_recordSize);
+        try
         {
-            ReadBytes(seq * (long)RecordSize, rec);
-            if (rec[0] != 1) continue;
-            int level = rec[1];
-            var layers = NewLayers(level);
-            for (int lc = 0; lc <= level && lc < MaxLayers; lc++)
+            Span<byte> rec = buffer.AsSpan(0, _recordSize);
+            for (long seq = 0; seq < _maxSeq; seq++)
             {
-                int cnt = rec[HeaderBytes + lc];
-                int baseSlot = LayerSlotBase(lc);
-                int off = HeaderBytes + CountsBytes + baseSlot * 8;
-                var arr = new long[cnt];
-                for (int i = 0; i < cnt; i++)
-                    arr[i] = BinaryPrimitives.ReadInt64LittleEndian(rec[(off + i * 8)..]);
-                layers[lc] = arr;
+                ReadBytes(seq * (long)_recordSize, rec);
+                if (rec[0] != 1) continue;
+                int level = rec[1];
+                if (level >= _maxLayers)
+                    throw new StorageException(
+                        $"HNSW record level {level} exceeds configured max layer {_maxLayers - 1}.");
+                var layers = NewLayers(level);
+                for (int lc = 0; lc <= level; lc++)
+                {
+                    int cnt = rec[HeaderBytes + lc];
+                    int capacity = lc == 0 ? _mmax0 : _m;
+                    if (cnt > capacity)
+                        throw new StorageException(
+                            $"HNSW layer {lc} count {cnt} exceeds configured capacity {capacity}.");
+                    int baseSlot = LayerSlotBase(lc);
+                    int off = HeaderBytes + _countsBytes + baseSlot * sizeof(long);
+                    var arr = new long[cnt];
+                    for (int i = 0; i < cnt; i++)
+                        arr[i] = BinaryPrimitives.ReadInt64LittleEndian(
+                            rec[(off + i * sizeof(long))..]);
+                    layers[lc] = arr;
+                }
+                _nodes[seq] = new Node { Level = level, Layers = layers };
             }
-            _nodes[seq] = new Node { Level = level, Layers = layers };
         }
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
     }
 
-    private static int LayerSlotBase(int layer) => layer == 0 ? 0 : Mmax0 + (layer - 1) * M;
+    private int LayerSlotBase(int layer) => layer == 0 ? 0 : _mmax0 + (layer - 1) * _m;
 
     private void ReadBytes(long logicalStart, Span<byte> dest)
     {

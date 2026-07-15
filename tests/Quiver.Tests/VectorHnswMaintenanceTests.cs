@@ -55,7 +55,7 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
         using (var tx = db.BeginTransaction())
         {
             var na = tx.CreateNode("Doc");
-            a = EntityRef.Sequence(na.Value);
+            a = EntityRef.UnpackSequence(na.Value);
             tx.SetVector(EntityKind.Node, na.Value, IndexName, new float[] { 1, 0, 0, 0 });
             // 何件かダミーを足してグラフを非自明にする。
             for (int i = 0; i < 5; i++)
@@ -94,8 +94,8 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
             using var tx = db.BeginTransaction();
             var a = tx.CreateNode("Doc");
             var b = tx.CreateNode("Doc");
-            keep = EntityRef.Sequence(a.Value);
-            drop = EntityRef.Sequence(b.Value);
+            keep = EntityRef.UnpackSequence(a.Value);
+            drop = EntityRef.UnpackSequence(b.Value);
             tx.SetVector(EntityKind.Node, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
             tx.SetVector(EntityKind.Node, b.Value, IndexName, new float[] { 1, 0, 0, 0 });
             tx.RemoveVector(EntityKind.Node, b.Value, IndexName);
@@ -146,7 +146,7 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
 
         // 残り 50 件 (seq 0..49) のうちクエリ自身が最近傍に出る (cosine 自己類似 = 1)。
         var (ids, _) = Knn(db, vecs[10], K);
-        ids.Should().Contain(EntityRef.Sequence(nodeIds[10]));
+        ids.Should().Contain(EntityRef.UnpackSequence(nodeIds[10]));
         // 削除済みの seq は一切返らない。
         ids.Should().OnlyContain(id => id < 50);
     }
@@ -208,7 +208,7 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
         for (int i = 0; i < Stable; i++)
         {
             var (ids, _) = Knn(db, stableVecs[i], K);
-            if (ids.Contains(EntityRef.Sequence(stableIds[i]))) found++;
+            if (ids.Contains(EntityRef.UnpackSequence(stableIds[i]))) found++;
         }
         double recall = (double)found / Stable;
         recall.Should().BeGreaterThan(0.95, "近傍修復で churn 後も高 recall を保つ (断片化していない)");

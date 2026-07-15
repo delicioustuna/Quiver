@@ -1,6 +1,10 @@
 # 既知の限界
 
-> as-built 仕様 (v1 baseline)
+> as-built 仕様 (on-disk FormatVersion V5)
+>
+> **current (as-built)**: 以下は現在実装されている FormatVersion V5 の既知の限界である。
+> **target (未実装)**: [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md) が将来の設計正本であり、本書の本文はその target を先取りして記述しない。
+> **実装済み境界**: 再設計の production code はまだ実装されていない。`redesign-baseline` は着工前の測定を固定するタグであり、再設計の実装完了を表さない。
 
 本書はエンジンの現時点での既知の限界を記す。v1 統合監査で発見・修正された欠陥はここでは追跡しない
 — それらは回帰テストと git 履歴でカバーされる。
@@ -17,18 +21,19 @@
   それが必要なら自前のサービスを前段に置くこと。
 - **データベースごとに 1 つの `GraphDatabase` をスレッド間で共有する。** インスタンスはスレッドセーフ。
   一度開いてプロセスのライフタイムを通じて再利用すること。同一プロセス内で同じファイルを 2 度開かないこと。
-- **トランザクションはシングルスレッドかつスレッドアフィンである。** トランザクション — およびそこから
-  取得したカーソルや列挙子 — は、すべて 1 つのスレッド上で作成・使用しなければならない。その write 文脈と
-  MVCC 文脈はスレッドローカル (`[ThreadStatic]`) であるため、生きたトランザクションを別スレッドに
-  渡すこと（`Task.Run`、別スレッドで再開する `await` 継続、`Parallel.For` など）はサポートされず、
-  WAL ロギングを暗黙にスキップしうる。トランザクションは 1 つのスレッド上の 1 つの同期スコープ内で
-  開始・使用・commit/dispose すること。`Begin` と `Commit` の間で `await` しないこと。
+- **トランザクションハンドルは同時使用不可である。** write 文脈と MVCC 文脈は非同期フローに保持されるため、
+  `await` の継続や、重ならない `Task.Run` 越しの利用で WAL ロギングが暗黙に欠落することはない。
+  ただし同じ `IGraphTransaction` ハンドルを複数スレッドから同時に使うことは未サポートであり、
+  検出された場合は `TransactionException` をスローする。トランザクションから取得したカーソルや列挙子も、
+  トランザクション有効期間内に 1 つの操作フローで消費すること。
 
 ### ライタは 1 つ、リーダは並行 {#one-writer}
 
-- **書き込みトランザクションは 1 度に 1 つだけ進行できる。** エンジンは 2 つ目の並行ライタを
-  `BeginTransaction()` で *拒否しない* — 書き込みの直列化はアプリケーションの責任である
-  （[書き込みの直列化](#write-serialization) を参照）。さらに、すべての二次インデックスと全文の
+- **書き込みトランザクションは 1 度に 1 つだけ進行できる。** エンジンは内部 writer gate により
+  `BeginTransaction()` を直列化する。2 本目の書き込みトランザクションは既定で先行 writer の終了を
+  `GraphDatabaseOptions.LockTimeout` まで待ち、期限を超えると `TransactionException` をスローする。
+  `GraphDatabaseOptions.EnforceExclusiveWriter` を有効にすると待機せず即時に `TransactionException` をスローする。
+  さらに、すべての二次インデックスと全文の
   mutation は単一のグローバルインデックスロックに集約されるため、ロックモードに関わらず、2 つの
   トランザクションがインデックス / postings を同時に mutation することは決してない。
 - **リーダはブロックせず、ブロックもされない。** `BeginReadOnlyTransaction()` は開始時の一貫した
@@ -59,8 +64,8 @@ rollback 原子性だけを保証し、プロセス終了やデータベース�
 
 ### 競合時のリトライ {#retry}
 
-複数スレッドから書き込みを駆動する場合、ロック競合は敗者トランザクションを `DeadlockException`、
-`TransactionException`（ロック待ちタイムアウト）、または — `IsolationLevel.Serializable` 下では —
+複数スレッドから書き込みを駆動する場合、writer gate / ロック競合は待機中のトランザクションを
+`TransactionException`（writer gate またはロック待ちタイムアウト）、または — `IsolationLevel.Serializable` 下では —
 `SerializabilityException` でアボートする。これらは *一時的* である: アボートされたトランザクションは
 永続的な変更を何も行っていないため、小さな有界バックオフを挟んで **トランザクション全体** を
 リトライすること（部分的にではなく）:
@@ -81,36 +86,62 @@ T WithRetry<T>(Func<T> runTxn, int maxAttempts = 5)
 }
 ```
 
-### 書き込みの直列化（推奨） {#write-serialization}
+### 書き込みの直列化 {#write-serialization}
 
-サポートされる形は単一ライタであるため、すべての書き込みを 1 つのライタに集約すること。2 つのパターン:
-
-1. **書き込みゲート** — すべての書き込みトランザクションを `SemaphoreSlim(1, 1)`（または `lock`）でガードする:
-
-   ```csharp
-   private static readonly SemaphoreSlim WriteGate = new(1, 1);
-
-   async Task WriteAsync(Action<IGraphTransaction> work)
-   {
-       await WriteGate.WaitAsync();
-       try
-       {
-           using var tx = db.BeginTransaction(); // begin + use + commit, all on this thread
-           work(tx);
-           tx.Commit();
-       }
-       finally { WriteGate.Release(); }
-   }
-   ```
-
-2. **専用のライタスレッド** — 書き込みジョブをキュー（例: `System.Threading.Channels.Channel<T>`）に
-   積み、1 つのバックグラウンドスレッドがそれを drain して、各トランザクションをそのスレッド上で
-   開始・実行・commit する。これは自然なバッチングももたらす。
+書き込みゲートはエンジン内に組み込まれているため、アプリケーション側で `BeginTransaction()` を
+さらに `SemaphoreSlim` で囲む必要はない。高頻度の書き込みを扱うアプリケーションでは、専用の
+ライタキューでジョブを集約すると、自然なバッチングとリトライ制御を実装しやすい。
 
 読み取りにゲートは不要: `BeginReadOnlyTransaction()` を任意のスレッドで開き、互いに、そしてライタと
-並行して実行すること。
+並行して実行できる。
 
-検証済みの並行ライタ（およびよりきめ細かいインデックスロック）のサポートは将来の課題である。
+複数の書き込みトランザクションを同時に進行させる機能はサポートしない。
+
+## ハイパーエッジの契約と限界 {#hyperedge-limits}
+
+第一級ハイパーエッジは次の契約で動作する。いずれも v1 の設計判断であり、緩和は実需が出てから検討する。
+
+### メンバー集合は作成時確定 {#hyperedge-immutable-members}
+
+ハイパーエッジのメンバー集合（ロールとノードの組）は `CreateHyperedge` の時点で確定し、
+以後変更できない。変更は削除 + 再作成で表現する。プロパティは作成後も変更できる。
+
+**設計根拠**: メンバー集合が不変であることで、「型 + ロール付きメンバー集合」による同一性が
+well-defined になり、incidence チェーンの構築を作成時の一括処理にでき、
+逆方向リンクの常時維持も不要になる。ストレージとロック設計の大部分がこの前提に立つ。
+
+### メンバーはノードのみ、アリティ 2 以上 {#hyperedge-node-members}
+
+v1 のメンバーは `NodeId` に限る。リレーションシップやハイパーエッジ自身をメンバーにする
+高階の入れ子（RDF-star 的な拡張）はサポートしない。アリティ（メンバー数）は 2 以上を要求し、
+同じロールとノードの組は 1 つのハイパーエッジ内で重複できない。
+
+### メンバーの列挙順序は保証しない {#hyperedge-member-order}
+
+`GetMembers` と DSL の `Members` は、作成時に渡したメンバーの順序を保存しない。
+順序が意味を持つ場合は、ロール名（`first` / `second` など）またはメンバーノードのプロパティで表現する。
+
+### リレーションシップとの相互変換 API は対象外 {#hyperedge-no-conversion}
+
+ハイパーエッジ走査からリレーションシップを生成する API、およびその逆
+（reified パターンからの移行を含む）は v1 では提供しない。必要な場合はアプリケーション側で
+走査結果から明示的に作成する。このとき導出したリレーションシップは元のハイパーエッジと系譜を同期しない
+（元の削除は導出先に波及しない）。冪等な更新は再実行と `MergeRelationship` で行う。
+
+### ノード削除の高次数カスケード {#hyperedge-delete-cascade}
+
+`DeleteNode` は、そのノードが属すすべてのライブハイパーエッジを 1 度ずつカスケード削除する。
+このコストは所属ハイパーエッジ数に比例する。実測（arity 4、AMD Ryzen 7 5700X）では
+1 ノードが 10^3 / 10^4 個のハイパーエッジに属す状態の削除がトランザクション時間
+7.84 ms / 47.69 ms、WAL 61 KB / 608 KB で完走し、デッドロックや整合性違反は生じない。
+RAG の Chunk や頻出エンティティのような高次数ノードを大量に削除するバッチでは、
+トランザクションを分割して WAL 切り詰めの余地を与えること
+（[§short-transactions](#short-transactions) 参照）。
+
+### 整合性チェックは書き込み停止時を想定 {#hyperedge-consistency-check}
+
+`CheckConsistency` は複数ストアをロックなしで走査するため、同時更新中は一時的な不整合を
+観測しうる。診断は書き込みを止めた状態で実行すること。
 
 ## BM25 コーパス統計はスナップショットベース {#bm25-stats}
 
@@ -155,10 +186,27 @@ auto-refresh オプションの追加を検討している。
 **将来方針**: 1.x では現行動作を維持する。再リンクコストを局所化する lazy repair（検索時に近傍を
 部分修正する手法）の導入を検討している。
 
+## HNSW 既定パラメタの品質とコスト {#hnsw-default-recall}
+
+既定の構築パラメタは M=32 / Mmax0=64 / efConstruction=400。dim=384 / N=10,000 /
+cosine の決定的コーパスで true recall@10 **0.950**、30% 削除後 **0.985** を満たす。
+
+旧既定 M=16 / Mmax0=32 / efConstruction=200 は recall 0.825、構築 5.95 秒、
+検索 1.02 ms。新既定は構築 10.00 秒 (+68%)、検索 1.43 ms (+41%) だが、
+ローカル RAG の既定品質目標 0.95 を満たすため、このコストを採用した。
+より軽い構築を優先する利用者は `VectorIndexSpec` で旧値相当を明示できる。
+
+**設計根拠**: efSearch=200 まで広げても旧構築グラフは 0.825 止まりで、検索時パラメタだけでは
+0.95 に届かない。payload cache 導入後は新既定の 1.51 ms も導入前の旧既定 2.21 ms より速い。
+`Quiver.Benchmarks.RecallCheck` は旧構成を比較基準、新既定を 0.95 SLA ゲートとして維持する。
+
 ## 自動マイグレーションなし {#no-migration}
 
 異なる `FormatVersion` のデータベースを開くと `FormatVersionMismatchException` をスローする。
 自動マイグレーションのパスは存在しない。データベースはソースデータから作り直す必要がある。
+現行 V5 は relationship delta の head sidecar と append-only page store 用固定 tenant を導入した
+clean break であり（V4 は incidence の fixed-slot 直接アドレスレイアウト、
+V3 は第一級ハイパーエッジ用 ID / token / tenant 基盤）、V4 以前との互換 reader は意図的に持たない。
 
 **設計根拠**: オンディスクフォーマットのマイグレーションは、全ページの読み書きとバリデーションが
 必要であり、データ破損リスクが高い。Quiver の主要ユースケース（ローカル RAG）ではソースデータ

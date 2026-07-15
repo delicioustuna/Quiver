@@ -72,6 +72,8 @@ internal static class AdjacencyContainer
     /// </summary>
     public static void WriteDescriptor(IPagedFile data, byte kind, PayloadLaneSpec? spec)
     {
+        while (data.PageCount <= 1)
+            data.AllocatePage(PageKind.AdjacencyBlock);
         var wh = data.PinForWrite(new PageId(1));
         try
         {

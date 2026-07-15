@@ -33,9 +33,73 @@ public sealed class GraphStatsTests : IDisposable
 
         stats.TotalNodes.Should().Be(0);
         stats.TotalRelationships.Should().Be(0);
+        stats.TotalHyperedges.Should().Be(0);
         stats.LabelCardinality.Should().BeEmpty();
         stats.EdgeTypeFrequency.Should().BeEmpty();
+        stats.HyperedgeTypeFrequency.Should().BeEmpty();
+        stats.HyperedgeArityByType.Should().BeEmpty();
         stats.GlobalDegreeHistogram.MeanDegree.Should().Be(0.0);
+    }
+
+    [Fact]
+    public void CollectStats_records_hyperedge_type_counts_and_arity_histograms()
+    {
+        using var tx = _db.BeginTransaction();
+        var a = tx.CreateNode("Entity");
+        var b = tx.CreateNode("Entity");
+        var c = tx.CreateNode("Entity");
+        tx.CreateHyperedge("Fact", [new("Subject", a), new("Object", b)]);
+        tx.CreateHyperedge("Fact", [new("Subject", a), new("Object", b), new("Context", c)]);
+        tx.CreateHyperedge("Event", [new("Actor", a), new("Target", c)]);
+        tx.Commit();
+
+        var stats = _db.CollectStats();
+        var fact = _db.Schema.GetOrCreateHyperedgeType("Fact");
+        var eventType = _db.Schema.GetOrCreateHyperedgeType("Event");
+
+        stats.TotalHyperedges.Should().Be(3);
+        stats.HyperedgeTypeFrequency[fact].Should().Be(2);
+        stats.HyperedgeTypeFrequency[eventType].Should().Be(1);
+        stats.HyperedgeArityByType[fact].Counts.Should().ContainKey(2).WhoseValue.Should().Be(1);
+        stats.HyperedgeArityByType[fact].Counts.Should().ContainKey(3).WhoseValue.Should().Be(1);
+        stats.HyperedgeArityByType[fact].MeanArity.Should().Be(2.5);
+        stats.HyperedgeArityByType[eventType].Counts[2].Should().Be(1);
+    }
+
+    [Fact]
+    public void Hyperedge_stats_follow_logical_delete_and_vacuum()
+    {
+        HyperedgeId removed;
+        using (var tx = _db.BeginTransaction())
+        {
+            var a = tx.CreateNode("Entity");
+            var b = tx.CreateNode("Entity");
+            removed = tx.CreateHyperedge("Fact", [new("Subject", a), new("Object", b)]);
+            tx.CreateHyperedge("Fact", [new("Subject", a), new("Object", b)]);
+            tx.Commit();
+        }
+
+        using (var tx = _db.BeginTransaction())
+        {
+            tx.DeleteHyperedge(removed);
+            tx.Commit();
+        }
+
+        var fact = _db.Schema.GetOrCreateHyperedgeType("Fact");
+        var afterDelete = _db.CollectStats();
+        afterDelete.TotalHyperedges.Should().Be(1);
+        afterDelete.HyperedgeTypeFrequency[fact].Should().Be(1);
+        afterDelete.HyperedgeArityByType[fact].Counts[2].Should().Be(1);
+
+        _db.Vacuum(new Maintenance.VacuumOptions
+        {
+            Targets = Maintenance.VacuumTarget.Hyperedges,
+        });
+
+        var afterVacuum = _db.CollectStats();
+        afterVacuum.TotalHyperedges.Should().Be(1);
+        afterVacuum.HyperedgeTypeFrequency[fact].Should().Be(1);
+        afterVacuum.HyperedgeArityByType[fact].Counts[2].Should().Be(1);
     }
 
     [Fact]

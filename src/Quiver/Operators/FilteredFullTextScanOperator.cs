@@ -68,7 +68,12 @@ internal sealed class FilteredFullTextScanOperator : IPhysicalOperator
         while (_source.MoveNext())
         {
             var slot = _source.Current[_sourceNodeColumn];
-            if (slot.Type == TupleSlotType.NodeId) candidates.Add(slot.LongValue);
+            if (slot.Type != TupleSlotType.NodeId)
+                continue;
+
+            using var node = tx.Nodes.Read(new NodeId(slot.LongValue));
+            if (node.InUse)
+                candidates.Add(node.Id.Sequence);
         }
         if (candidates.Count == 0)
         {

@@ -54,7 +54,7 @@ public sealed class RelationshipScanExpandOperatorTests : IDisposable
         var person = _db.Schema.GetOrCreateLabel("Person");
         var alice = tx.CreateNode("Person");
         var bob   = tx.CreateNode("Person");
-        tx.CreateRelationship(alice, bob, "KNOWS");
+        var relationship = tx.CreateRelationship(alice, bob, "KNOWS");
 
         var src = new NodeByLabelScanOperator(person);
         using var scan = new RelationshipScanExpandOperator(
@@ -64,8 +64,85 @@ public sealed class RelationshipScanExpandOperatorTests : IDisposable
         var rows = result.Rows().ToList();
         rows.Should().HaveCount(1);
         rows[0].GetNodeId(0).Should().Be(alice);
+        rows[0].GetRelationshipId(1).Should().Be(relationship);
         rows[0].GetNodeId(2).Should().Be(bob);
         tx.Rollback();
+    }
+
+    [Fact]
+    public void Stale_full_frontier_does_not_expand_reused_node_slot()
+    {
+        NodeId stale;
+        using (var write = _db.BeginTransaction())
+        {
+            stale = write.CreateNode("Person");
+            write.Commit();
+        }
+        using (var write = _db.BeginTransaction())
+        {
+            write.DeleteNode(stale);
+            write.Commit();
+        }
+        _db.Vacuum().ReclaimedNodes.Should().Be(1);
+
+        NodeId replacement;
+        using (var write = _db.BeginTransaction())
+        {
+            replacement = write.CreateNode("Person");
+            var neighbor = write.CreateNode("Person");
+            write.CreateRelationship(replacement, neighbor, "KNOWS");
+            write.Commit();
+        }
+        replacement.Sequence.Should().Be(stale.Sequence);
+        replacement.Generation.Should().NotBe(stale.Generation);
+
+        using var read = _db.BeginReadOnlyTransaction();
+        using var result = read.Execute(new RelationshipScanExpandOperator(
+            new FixedNodeListOperatorForPw17([stale]),
+            sourceNodeColumn: 0,
+            Direction.Outgoing,
+            typeFilter: null,
+            ExpandOutputMode.NeighborOnly));
+
+        result.Rows().Should().BeEmpty(
+            "a stale logical frontier must not retarget the reused physical slot");
+    }
+
+    [Fact]
+    public void Stale_full_source_does_not_enter_binary_adjacency_cursor()
+    {
+        NodeId stale;
+        using (var write = _db.BeginTransaction())
+        {
+            stale = write.CreateNode("Person");
+            write.Commit();
+        }
+        using (var write = _db.BeginTransaction())
+        {
+            write.DeleteNode(stale);
+            write.Commit();
+        }
+        _db.Vacuum().ReclaimedNodes.Should().Be(1);
+
+        using (var write = _db.BeginTransaction())
+        {
+            var replacement = write.CreateNode("Person");
+            var neighbor = write.CreateNode("Person");
+            replacement.Sequence.Should().Be(stale.Sequence);
+            write.CreateRelationship(replacement, neighbor, "KNOWS");
+            write.Commit();
+        }
+
+        using var read = _db.BeginReadOnlyTransaction();
+        using var result = read.Execute(new ExpandOperator(
+            new FixedNodeListOperatorForPw17([stale]),
+            sourceNodeColumn: 0,
+            Direction.Outgoing,
+            typeFilter: null,
+            ExpandOutputMode.NeighborOnly));
+
+        result.Rows().Should().BeEmpty(
+            "the binary cursor must validate a full ID before using its Sequence as an adjacency key");
     }
 
     [Fact]

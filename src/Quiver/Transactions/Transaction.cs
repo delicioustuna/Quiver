@@ -12,13 +12,18 @@ internal sealed class Transaction : ITransaction
     private readonly IWriteAheadLog _wal;
     private readonly LockManager _nodeLocks;
     private readonly LockManager _relLocks;
+    private readonly LockManager _hyperedgeLocks;
     private readonly LockManager _indexLocks;
     private readonly TransactionManager _manager;
     private readonly TxNodeStore _nodes;
     private readonly TxRelationshipStore _relationships;
+    private readonly TxHyperedgeStore _hyperedges;
+    private readonly IIncidenceStore _incidences;
+    private readonly INodeIncidenceHeadStore _nodeIncidenceHeads;
     private readonly TxPropertyStore _properties;
     private readonly TxIndexManager _indexes;
     private readonly IAdjacencyBlockStore? _adjStore;
+    private readonly ICoMembershipBlockStore? _coMembershipStore;
     private readonly IGraphAccessMethods _access;
     // null でない場合、abort / コミット失敗時にキャプチャ済み before-image を
     // データファイルへ書き戻し、ストアメタを再ロードしてインプロセス undo を行う。
@@ -28,6 +33,8 @@ internal sealed class Transaction : ITransaction
     private List<Action>? _onCommitted;
     private List<Action>? _onRolledBack;
     private TransactionState _state;
+    private int _usageOwnerThreadId;
+    private int _usageDepth;
 
     // savepoint 管理。SavepointId.Value (連番) → スタック深度 (= WalPageContext のバケット index)。
     // RollbackTo で巻き戻しても savepoint 自体は消費しないので、Value は同じレベルで再利用される。
@@ -40,6 +47,7 @@ internal sealed class Transaction : ITransaction
     private readonly SsnContext? _ssn;
     private readonly IEntityVersionStore? _nodeVersions;
     private readonly IEntityVersionStore? _relVersions;
+    private readonly IEntityVersionStore? _hyperedgeVersions;
     // Begin 時の commit-stamp クロック (snapshot 下限)。読んだ版の v.sstamp を π に
     // 反映するかの判定に使う (詳細は TransactionManager.CurrentCommitStampClock)。
     private readonly long _ssnSnapshotCstamp;
@@ -57,17 +65,25 @@ internal sealed class Transaction : ITransaction
 
     public INodeStore Nodes => _nodes;
     public IRelationshipStore Relationships => _relationships;
+    public IHyperedgeStore Hyperedges => _hyperedges;
+    public IIncidenceStore Incidences => _incidences;
+    public INodeIncidenceHeadStore NodeIncidenceHeads => _nodeIncidenceHeads;
     public IPropertyStore Properties => _properties;
     public IIndexManager Indexes => _indexes;
     public IAdjacencyBlockStore? AdjacencyBlocks => _adjStore;
+    public ICoMembershipBlockStore? CoMembershipBlocks
+        => _hyperedges.HasPendingViewAdds ? null : _coMembershipStore;
     public IGraphAccessMethods Access => _access;
 
     internal Transaction(
         TransactionId id, IsolationLevel level, long snapshotLsn,
         IWriteAheadLog wal,
-        LockManager nodeLocks, LockManager relLocks, LockManager indexLocks,
+        LockManager nodeLocks, LockManager relLocks, LockManager hyperedgeLocks,
+        LockManager indexLocks,
         TransactionManager manager,
         INodeStore nodeStore, IRelationshipStore relStore,
+        IHyperedgeStore hyperedgeStore, IIncidenceStore incidenceStore,
+        INodeIncidenceHeadStore nodeIncidenceHeadStore,
         IPropertyStore propStore, IIndexManager indexManager,
         IAdjacencyBlockStore? adjStore = null,
         IGraphAccessMethods? access = null,
@@ -77,13 +93,18 @@ internal sealed class Transaction : ITransaction
         SnapshotState snapshot = default,
         CommittedTxRegistry? committed = null,
         IEntityVersionStore? nodeVersions = null,
-        IEntityVersionStore? relVersions = null)
+        IEntityVersionStore? relVersions = null,
+        IEntityVersionStore? hyperedgeVersions = null,
+        ICoMembershipBlockStore? coMembershipStore = null,
+        PersistentRelationshipDeltaStore? relationshipDeltas = null)
     {
         Id = id; Level = level; SnapshotLsn = snapshotLsn;
         _wal = wal;
-        _nodeLocks = nodeLocks; _relLocks = relLocks; _indexLocks = indexLocks;
+        _nodeLocks = nodeLocks; _relLocks = relLocks; _hyperedgeLocks = hyperedgeLocks;
+        _indexLocks = indexLocks;
         _manager = manager;
         _adjStore = adjStore;
+        _coMembershipStore = coMembershipStore;
         _access = access ?? InlineGraphAccessMethods.Instance;
         _undoHandler = undoHandler;
         _state = TransactionState.Active;
@@ -92,6 +113,7 @@ internal sealed class Transaction : ITransaction
         // sidecar が無い (旧テスト経路など) 場合は SI と同じ挙動に縮退する。
         _nodeVersions = nodeVersions;
         _relVersions = relVersions;
+        _hyperedgeVersions = hyperedgeVersions;
         _ssn = (level == IsolationLevel.Serializable && committed != null
             && nodeVersions != null && relVersions != null)
             ? new SsnContext() : null;
@@ -99,13 +121,20 @@ internal sealed class Transaction : ITransaction
         // (ctor は TransactionManager.Begin の _snapshotGate 下で走るため一貫した下限)。
         _ssnSnapshotCstamp = _ssn != null ? manager.CurrentCommitStampClock : 0;
         // per-tx ambient コンテキストを Tx wrapper にも持たせ、各操作直前に
-        // MvccContext を再アクティベートする (同一スレッドで複数 tx 操作を交互に
-        // 行う場合の thread-static の取り違えを防ぐ)。
+        // MvccContext を再アクティベートする (複数 tx 操作を交互に
+        // 行う場合の ambient context の取り違えを防ぐ)。
         var snap = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
         _snapshot = snap;
         _committed = committed;
         _nodes = new TxNodeStore(nodeStore, nodeLocks, id, lockingMode, timeout, snap, committed, _ssn);
-        _relationships = new TxRelationshipStore(relStore, relLocks, id, _nodes, lockingMode, timeout, snap, committed, _ssn);
+        _relationships = new TxRelationshipStore(
+            relStore, relLocks, id, _nodes, lockingMode, timeout, snap, committed, _ssn,
+            relationshipDeltas);
+        _hyperedges = new TxHyperedgeStore(hyperedgeStore, incidenceStore, nodeIncidenceHeadStore,
+            hyperedgeLocks, nodeLocks, id, lockingMode, timeout, snap, committed, _ssn,
+            coMembershipStore);
+        _incidences = incidenceStore;
+        _nodeIncidenceHeads = nodeIncidenceHeadStore;
         _properties = new TxPropertyStore(propStore, id, snap, committed, _ssn);
         _indexes = new TxIndexManager(indexManager, indexLocks, id, timeout);
         WalPageContext.Begin(wal, id);
@@ -117,8 +146,45 @@ internal sealed class Transaction : ITransaction
         }
     }
 
+    public TransactionUsageLease EnterUsage()
+    {
+        int threadId = Environment.CurrentManagedThreadId;
+        int owner = Volatile.Read(ref _usageOwnerThreadId);
+        if (owner == threadId)
+        {
+            _usageDepth++;
+            return new TransactionUsageLease(this);
+        }
+
+        if (Interlocked.CompareExchange(ref _usageOwnerThreadId, threadId, 0) != 0)
+            throw new TransactionException(
+                $"Transaction {Id.Value} is already being used by another thread.");
+
+        _usageDepth = 1;
+        return new TransactionUsageLease(this);
+    }
+
+    internal void ExitUsage()
+    {
+        int threadId = Environment.CurrentManagedThreadId;
+        if (Volatile.Read(ref _usageOwnerThreadId) != threadId)
+            throw new TransactionException(
+                $"Transaction {Id.Value} usage scope ended on a different thread.");
+
+        int depth = _usageDepth - 1;
+        if (depth <= 0)
+        {
+            _usageDepth = 0;
+            Volatile.Write(ref _usageOwnerThreadId, 0);
+            return;
+        }
+
+        _usageDepth = depth;
+    }
+
     public void Commit()
     {
+        using var usage = EnterUsage();
         if (_state != TransactionState.Active)
             throw new TransactionException("Cannot commit: transaction is not Active.");
         _state = TransactionState.Preparing;
@@ -127,8 +193,6 @@ internal sealed class Transaction : ITransaction
         using var activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
             "tx.commit", ActivityKind.Internal);
         activity?.SetTag("quiver.tx.id", Id.Value);
-        // tx 境界に構造化スコープを通す。Logger 未設定時は null になり no-op。
-        using var logScope = QuiverLog.BeginTxScope(QuiverLog.TransactionLogger, Id.Value, "Commit");
         var sw = Stopwatch.StartNew();
         try
         {
@@ -138,7 +202,7 @@ internal sealed class Transaction : ITransaction
             // critical section で post-commit スタンプを sidecar に書き戻し、それも
             // 本 tx の PageImage として WAL に乗せて durable にする。
             if (_ssn != null) SsnValidateAndStamp();
-            // 案C: UnpinDirty はページイメージをトランザクションバッファにコアレスするだけ。
+            // UnpinDirty はページイメージをトランザクションバッファにコアレスするだけ。
             // ここで全 PageImage を WAL へ追記し、その後に Commit レコードを書く。
             // Commit を最後に書くことで、recovery はコミット済みトランザクションの
             // ページイメージのみを replay する。
@@ -149,13 +213,16 @@ internal sealed class Transaction : ITransaction
             // MVCC ambient コンテキスト終了 (これ以降このスレッドは
             // ベンチ / bulk loader 等の Bootstrap fallback 経路に戻る)。
             MvccContext.End();
+            // durable commit を観測できる境界より前に導出ビュー差分を公開する。
+            // これ以降に開始する reader は正本とビューを同じ状態で参照できる。
+            _hyperedges.PublishPendingViewAdds();
             ReleaseAllLocks();
             _state = TransactionState.Committed;
             _manager.OnCommit(Id);
             QuiverTelemetry.TxCommitCount.Add(1);
             QuiverTelemetry.TxCommitDurationMs.Record(sw.Elapsed.TotalMilliseconds);
             QuiverEventSource.Log.TxCommit();
-            QuiverLog.TxCommitted(QuiverLog.TransactionLogger, Id.Value, sw.Elapsed.TotalMilliseconds);
+            QuiverEventSource.Log.TxCommitted(Id.Value, sw.Elapsed.TotalMilliseconds);
             activity?.SetStatus(ActivityStatusCode.Ok);
         }
         catch (Exception ex)
@@ -175,7 +242,10 @@ internal sealed class Transaction : ITransaction
             QuiverTelemetry.TxAbortCount.Add(1);
             QuiverTelemetry.TxAbortDurationMs.Record(sw.Elapsed.TotalMilliseconds);
             QuiverEventSource.Log.TxAbort();
-            QuiverLog.TxCommitFailed(QuiverLog.TransactionLogger, Id.Value, ex.Message, ex);
+            QuiverEventSource.Log.TxCommitFailed(
+                Id.Value,
+                ex.Message,
+                ex.GetType().FullName ?? ex.GetType().Name);
             activity?.SetStatus(ActivityStatusCode.Error, "commit failed → rolled back");
             FireHooks(_onRolledBack);
             throw;
@@ -185,13 +255,12 @@ internal sealed class Transaction : ITransaction
 
     public void Abort()
     {
+        using var usage = EnterUsage();
         if (_state is TransactionState.Committed or TransactionState.Aborted) return;
         // abort span + duration。Commit と同じ ActivitySource を共有。
         using var activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
             "tx.abort", ActivityKind.Internal);
         activity?.SetTag("quiver.tx.id", Id.Value);
-        // 明示 Abort も同じスコープキーを通す。
-        using var logScope = QuiverLog.BeginTxScope(QuiverLog.TransactionLogger, Id.Value, "Abort");
         var sw = Stopwatch.StartNew();
         // in-process undo では取得済み before-image をデータファイルへ戻し、
         // ページベースストアのメタデータを再読込する。破棄したノード、エッジ、
@@ -210,7 +279,7 @@ internal sealed class Transaction : ITransaction
         _manager.OnAbort(Id);
         QuiverTelemetry.TxAbortCount.Add(1);
         QuiverTelemetry.TxAbortDurationMs.Record(sw.Elapsed.TotalMilliseconds);
-        QuiverLog.TxAborted(QuiverLog.TransactionLogger, Id.Value, sw.Elapsed.TotalMilliseconds);
+        QuiverEventSource.Log.TxAborted(Id.Value, sw.Elapsed.TotalMilliseconds);
         FireHooks(_onRolledBack);
     }
 
@@ -332,6 +401,7 @@ internal sealed class Transaction : ITransaction
     {
         EntityKind.Node => _nodeVersions,
         EntityKind.Relationship => _relVersions,
+        EntityKind.Hyperedge => _hyperedgeVersions,
         _ => null,
     };
 
@@ -339,6 +409,7 @@ internal sealed class Transaction : ITransaction
 
     public SavepointId Savepoint(string? name = null)
     {
+        using var usage = EnterUsage();
         if (_state != TransactionState.Active)
             throw new TransactionException("Cannot create savepoint: transaction is not Active.");
         int level = WalPageContext.PushSavepoint();
@@ -355,6 +426,7 @@ internal sealed class Transaction : ITransaction
 
     public void RollbackTo(SavepointId savepoint)
     {
+        using var usage = EnterUsage();
         if (_state != TransactionState.Active)
             throw new TransactionException("Cannot rollback to savepoint: transaction is not Active.");
         int index = FindSavepointIndex(savepoint.Value);
@@ -376,10 +448,14 @@ internal sealed class Transaction : ITransaction
             if (ftUndo.Count > 0) _undoHandler.UndoFtLogicalPartial(ftUndo);
             if (beforeImages.Count > 0) _undoHandler.UndoPartial(beforeImages);
         }
+        // savepoint undo 後の正本から、この transaction がまだ保持する create 差分だけを
+        // 再収集する。ID slot が同じ transaction 内で再利用されても古い member を公開しない。
+        _hyperedges.RefreshPendingViewAdds();
     }
 
     public void ReleaseSavepoint(SavepointId savepoint)
     {
+        using var usage = EnterUsage();
         if (_state != TransactionState.Active)
             throw new TransactionException("Cannot release savepoint: transaction is not Active.");
         int index = FindSavepointIndex(savepoint.Value);
@@ -404,6 +480,7 @@ internal sealed class Transaction : ITransaction
 
     public void Dispose()
     {
+        using var usage = EnterUsage();
         if (_state == TransactionState.Active) Abort();
     }
 
@@ -455,6 +532,7 @@ internal sealed class Transaction : ITransaction
     {
         _nodeLocks.ReleaseAll(Id);
         _relLocks.ReleaseAll(Id);
+        _hyperedgeLocks.ReleaseAll(Id);
         _indexLocks.ReleaseAll(Id);
     }
 }

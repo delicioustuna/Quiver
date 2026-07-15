@@ -50,7 +50,7 @@ public sealed class VectorGenerationBindingTests : IDisposable
         using (var tx = db.BeginTransaction())
         {
             a = tx.CreateNode("Doc");
-            seqA = EntityRef.Sequence(a.Value);
+            seqA = EntityRef.UnpackSequence(a.Value);
             tx.SetVector(EntityKind.Node, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
             tx.Commit();
         }
@@ -64,7 +64,7 @@ public sealed class VectorGenerationBindingTests : IDisposable
         using (var tx = db.BeginTransaction()) { b = tx.CreateNode("Doc"); tx.Commit(); }
 
         // 前提: 同一 Sequence が再利用された (世代だけ違う)。
-        EntityRef.Sequence(b.Value).Should().Be(seqA);
+        EntityRef.UnpackSequence(b.Value).Should().Be(seqA);
 
         // A の旧ベクトルは stale なので KNN から除外される。
         Knn(db, new float[] { 1, 0, 0, 0 }, 10).Should().BeEmpty();
@@ -96,12 +96,12 @@ public sealed class VectorGenerationBindingTests : IDisposable
             tx.SetVector(EntityKind.Node, b.Value, IndexName, new float[] { 0, 1, 0, 0 });
             tx.Commit();
         }
-        EntityRef.Sequence(b.Value).Should().Be(EntityRef.Sequence(a.Value));
+        EntityRef.UnpackSequence(b.Value).Should().Be(EntityRef.UnpackSequence(a.Value));
 
         // 旧クエリ (A 方向) はもうヒットしない。新クエリ (B 方向) は B を返す。
         Knn(db, new float[] { 1, 0, 0, 0 }, 10).Should().ContainSingle()
-            .Which.Should().Be(EntityRef.Sequence(b.Value)); // Dot: B も [0,1,0,0]·[1,0,0,0]=0 だが唯一の live
+            .Which.Should().Be(EntityRef.UnpackSequence(b.Value)); // Dot: B も [0,1,0,0]·[1,0,0,0]=0 だが唯一の live
         Knn(db, new float[] { 0, 1, 0, 0 }, 10).Should().ContainSingle()
-            .Which.Should().Be(EntityRef.Sequence(b.Value));
+            .Which.Should().Be(EntityRef.UnpackSequence(b.Value));
     }
 }

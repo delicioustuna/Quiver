@@ -36,7 +36,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     {
         var seg = LatestWalSegment();
         if (seg is null) return;
-        // WAL header: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32C(4) = 25 B.
+        // WAL ヘッダ: Length(4) + Lsn(8) + TxId(8) + Type(1) + Crc32(4) = 25 B。
         // 先頭レコードの Type バイトを 1 ビット反転し、replay 時に CRC を不一致にする。
         ChecksumCorruptor.FlipBitAt(seg, offset: 20, bitInByte: 0);
     }
@@ -671,6 +671,127 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     [Fact]
     public void Checkpoint_kill_AfterTruncate_reopens_cleanly()
         => RunCheckpointKillScenario(CheckpointPhase.AfterTruncate);
+
+    [Theory]
+    [InlineData(nameof(CompactAdjacencyPhase.AfterDescriptorInvalidated), false)]
+    [InlineData(nameof(CompactAdjacencyPhase.AfterRebuild), false)]
+    [InlineData(nameof(CompactAdjacencyPhase.AfterFinalDescriptorFlushed), true)]
+    public void CompactAdjacency_v2_interrupted_then_reopen_recovers_expected_view(
+        string killAtName,
+        bool expectAdjacencyView)
+    {
+        var killAt = Enum.Parse<CompactAdjacencyPhase>(killAtName);
+        var dir = Path.Combine(
+            Path.GetTempPath(),
+            "quiver_adj_compact_crash_" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(dir, "graph.quiver");
+
+        try
+        {
+            PropertyKeyId weightKey;
+            using (var seed = GraphDatabase.Open(path))
+            {
+                weightKey = seed.Schema.GetOrCreatePropertyKey("weight");
+                using var loader = seed.BeginBulkLoad(buildAdjacencyIndex: true);
+                loader.WithPayloadLane(PayloadLaneSpec.ForInt64(weightKey.Value));
+                loader.AppendNode(new NodeId(0), new LabelId(0));
+                for (int i = 1; i <= 3; i++)
+                {
+                    loader.AppendNode(new NodeId(i), new LabelId(1));
+                    loader.AppendRelationship(
+                        new RelationshipId(i - 1),
+                        new NodeId(0),
+                        new NodeId(i),
+                        new RelationshipTypeId(0));
+                    loader.AppendRelationshipPayload(new RelationshipId(i - 1), weightKey, 100 + i);
+                }
+
+                loader.Commit();
+            }
+
+            NodeId deltaNode;
+            RelationshipId deltaRel;
+            using (var db = GraphDatabase.Open(path))
+            {
+                using (var tx = db.BeginTransaction())
+                {
+                    tx.SetProperty(new RelationshipId(0), "weight", PropertyValue.FromInt64(700));
+                    deltaNode = tx.CreateNode("V");
+                    deltaRel = tx.CreateRelationship(new NodeId(0), deltaNode, "LINK");
+                    tx.SetProperty(deltaRel, "weight", PropertyValue.FromInt64(900));
+                    tx.DeleteRelationship(new RelationshipId(2));
+                    tx.Commit();
+                }
+
+                BinaryGraphStorageBackend.CompactAdjacencyPhaseInjector = phase =>
+                {
+                    if (phase == killAt)
+                        throw new InvalidOperationException("injected compact interruption");
+                };
+
+                Action compact = () => db.CompactAdjacency();
+                compact.Should().Throw<InvalidOperationException>()
+                    .WithMessage("injected compact interruption");
+            }
+
+            using var reopened = GraphDatabase.Open(path);
+            using var read = reopened.BeginReadOnlyTransaction();
+            var adjacency = read.AsInternal().AdjacencyBlocks;
+            if (expectAdjacencyView)
+            {
+                var view = adjacency as IAdjacencyPayloadView;
+                view.Should().NotBeNull(
+                    "final descriptor flush makes the rebuilt V2 view durable");
+                view!.PayloadSpec.PropertyKeyId.Should().Be(weightKey.Value);
+
+                var weights = ReadOutgoingWeights(read, new NodeId(0));
+                weights[1].Should().Be(700);
+                weights[2].Should().Be(102);
+                weights[deltaNode.Sequence].Should().Be(900);
+                weights.Should().NotContainKey(3);
+            }
+            else
+            {
+                adjacency.Should().BeNull(
+                    "descriptor remains invalid until the final compact descriptor is durable");
+            }
+
+            EnumerateOutgoingTargets(read, new NodeId(0))
+                .Should().BeEquivalentTo(new[] { 1L, 2L, deltaNode.Sequence });
+            read.GetProperty(deltaRel, "weight").Int64Value.Should().Be(900);
+            read.Rollback();
+        }
+        finally
+        {
+            BinaryGraphStorageBackend.CompactAdjacencyPhaseInjector = null;
+            Faults.TestTempCleanup.DeleteDirectoryRobust(dir);
+        }
+    }
+
+    private static Dictionary<long, long> ReadOutgoingWeights(IGraphTransaction tx, NodeId source)
+    {
+        var seen = new Dictionary<long, long>();
+        using var cursor = tx.AsInternal().AdjacencyBlocks!.OpenCursor(source, Direction.Outgoing, null);
+        while (cursor.MoveNext())
+        {
+            if (!tx.AsInternal().AdjacencyBlocks!.IsTombstoned(cursor.Relationship))
+                seen[cursor.Neighbor.Sequence] = cursor.WeightRaw;
+        }
+
+        return seen;
+    }
+
+    private static List<long> EnumerateOutgoingTargets(IGraphTransaction tx, NodeId source)
+    {
+        var result = new List<long>();
+        var en = tx.EnumerateRelationships(source, Direction.Outgoing);
+        while (en.MoveNext())
+        {
+            result.Add(en.Current.Target.Sequence);
+        }
+
+        return result;
+    }
 
     private string? LatestWalSegment()
     {

@@ -7,16 +7,20 @@ namespace Quiver.Query.Physical.Tests.Support;
 /// プラン構造テスト用の最小 <see cref="ISchemaApi"/> スタブ。
 /// 実データベースなしでプランナーが名前を解決できるよう連番 ID を割り当てる。
 /// </summary>
-internal sealed class StubSchemaApi : ISchemaApi
+internal sealed class StubSchemaApi : ISchemaApi, IHyperedgeSchemaResolver
 {
     private int _nextLabel = 1;
     private int _nextRelType = 1;
     private int _nextPropKey = 1;
+    private int _nextHyperedgeType = 1;
+    private int _nextRole = 1;
 
     private readonly Dictionary<string, LabelId> _labels = new();
     private readonly Dictionary<LabelId, string> _labelNames = new();
     private readonly Dictionary<string, RelationshipTypeId> _relTypes = new();
     private readonly Dictionary<string, (PropertyKeyId Id, PropertyCardinality Card)> _propKeys = new();
+    private readonly Dictionary<string, HyperedgeTypeId> _hyperedgeTypes = new();
+    private readonly Dictionary<string, RoleId> _roles = new();
 
     public LabelId GetOrCreateLabel(string name)
     {
@@ -91,4 +95,35 @@ internal sealed class StubSchemaApi : ISchemaApi
     public IReadOnlyList<string> ListLabels() => _labels.Keys.ToList();
     public IReadOnlyList<string> ListRelationshipTypes() => _relTypes.Keys.ToList();
     public IReadOnlyList<string> ListPropertyKeys() => _propKeys.Keys.ToList();
+
+    public HyperedgeTypeId GetOrCreateHyperedgeType(string name)
+    {
+        if (!_hyperedgeTypes.TryGetValue(name, out var id))
+        {
+            id = new HyperedgeTypeId(_nextHyperedgeType++);
+            _hyperedgeTypes[name] = id;
+        }
+        return id;
+    }
+
+    public string? GetHyperedgeTypeName(HyperedgeTypeId id)
+        => _hyperedgeTypes.FirstOrDefault(kv => kv.Value == id).Key;
+
+    public bool TryGetHyperedgeTypeId(string name, out HyperedgeTypeId id)
+        => _hyperedgeTypes.TryGetValue(name, out id);
+
+    public IReadOnlyList<string> ListHyperedgeTypes() => _hyperedgeTypes.Keys.ToList();
+    public IReadOnlyList<string> ListRoles() => _roles.Keys.ToList();
+
+    public RoleId GetOrCreateRole(string name)
+    {
+        if (!_roles.TryGetValue(name, out var id))
+        {
+            id = new RoleId(_nextRole++);
+            _roles[name] = id;
+        }
+        return id;
+    }
+
+    public bool TryGetRoleId(string name, out RoleId id) => _roles.TryGetValue(name, out id);
 }

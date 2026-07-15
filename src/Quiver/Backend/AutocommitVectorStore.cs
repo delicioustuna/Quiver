@@ -22,7 +22,7 @@ internal sealed class AutocommitVectorStore(IVectorStore underlying, Func<IGraph
 
     private void InTx(Action body)
     {
-        // tx が既にアクティブなら join (二重 tx で thread-static WalPageContext を壊さない)。
+        // tx が既にアクティブなら join (二重 tx で ambient WalPageContext を差し替えない)。
         if (WalPageContext.Current is not null) { body(); return; }
         using var tx = _beginTx();
         body();
@@ -56,10 +56,29 @@ internal sealed class AutocommitVectorStore(IVectorStore underlying, Func<IGraph
     public bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
         => _underlying.TryGetVector(kind, entityId, indexName, destination);
 
-    public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
-        => _underlying.KnnSearch(indexName, query, k);
+    public VectorSearchCursor KnnSearch(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
+        => _underlying.KnnSearch(indexName, query, k, options);
+
+    internal VectorSearchCursor KnnSearchExact(
+        string indexName, ReadOnlySpan<float> query, int k)
+        => _underlying switch
+        {
+            Storage.Records.PersistentVectorStore persistent =>
+                persistent.KnnSearchExact(indexName, query, k),
+            AutocommitVectorStore nested =>
+                nested.KnnSearchExact(indexName, query, k),
+            _ => throw new InvalidOperationException(
+                "Exact persistent KNN baseline is available only for the binary backend."),
+        };
 
     public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
-        string indexName, IReadOnlyList<ReadOnlyMemory<float>> queries, int k)
-        => _underlying.KnnSearchBatch(indexName, queries, k);
+        string indexName,
+        IReadOnlyList<ReadOnlyMemory<float>> queries,
+        int k,
+        VectorSearchOptions? options = null)
+        => _underlying.KnnSearchBatch(indexName, queries, k, options);
 }

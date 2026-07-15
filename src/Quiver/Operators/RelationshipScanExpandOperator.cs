@@ -71,15 +71,16 @@ internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
 
         // ソースを排出して frontier set を構築する。bitmap vs hashset の判定のため
         // id を list にも集めるが、Build 後 list は不要。
-        var ids = new List<long>(64);
+        var ids = new List<NodeId>(64);
         long max = -1;
         while (_source.MoveNext())
         {
-            // frontier は slot 同一性 (Sequence) でキーする。probe 側 (rel.Source/Target)
-            // も Sequence なので、seed が gen 付きで届いても整合する。
-            long v = EntityRef.Sequence(_source.Current[_sourceNodeColumn].LongValue);
-            ids.Add(v);
-            if (v > max) max = v;
+            if (!TryMaterialize(new NodeId(_source.Current[_sourceNodeColumn].LongValue), out var id))
+                continue;
+            // Why not Sequence-only: vacuum 後に再利用された slot を seed と誤って突合すると、
+            // stale frontier が現在の別ノードの relationship を展開してしまう。
+            ids.Add(id);
+            if (id.Sequence > max) max = id.Sequence;
         }
         _frontier = FrontierSet.Build(ids, max);
         _scanEnumerator = tx.Relationships.Scan().GetEnumerator();
@@ -100,25 +101,28 @@ internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
             var s = Statistics;
             s.RelationshipScanRecords++;
 
+            if (!TryMaterialize(rel.Source, out NodeId relSource)
+                || !TryMaterialize(rel.Target, out NodeId relTarget))
+                continue;
             NodeId source, neighbor;
             switch (_direction)
             {
                 case Direction.Outgoing:
-                    if (!_frontier.Contains(rel.Source)) { Statistics = s; continue; }
-                    source = rel.Source; neighbor = rel.Target;
+                    if (!_frontier.Contains(relSource)) { Statistics = s; continue; }
+                    source = relSource; neighbor = relTarget;
                     break;
                 case Direction.Incoming:
-                    if (!_frontier.Contains(rel.Target)) { Statistics = s; continue; }
-                    source = rel.Target; neighbor = rel.Source;
+                    if (!_frontier.Contains(relTarget)) { Statistics = s; continue; }
+                    source = relTarget; neighbor = relSource;
                     break;
                 default: // Both
-                    if (_frontier.Contains(rel.Source))
+                    if (_frontier.Contains(relSource))
                     {
-                        source = rel.Source; neighbor = rel.Target;
+                        source = relSource; neighbor = relTarget;
                     }
-                    else if (_frontier.Contains(rel.Target))
+                    else if (_frontier.Contains(relTarget))
                     {
-                        source = rel.Target; neighbor = rel.Source;
+                        source = relTarget; neighbor = relSource;
                     }
                     else { Statistics = s; continue; }
                     break;
@@ -149,6 +153,12 @@ internal sealed class RelationshipScanExpandOperator : IPhysicalOperator
                 _buffer[2] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = neighbor.Value };
                 break;
         }
+    }
+
+    private bool TryMaterialize(NodeId id, out NodeId logical)
+    {
+        var materializer = new EntityIdentityMaterializer(_tx!.Nodes);
+        return materializer.TryNode(id, out logical);
     }
 
     public void Dispose()

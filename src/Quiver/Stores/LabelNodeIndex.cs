@@ -88,7 +88,7 @@ internal sealed class LabelNodeIndex
 
         var snapshot = new long[set.Count];
         set.CopyTo(snapshot);
-        return WrapNodeIds(snapshot);
+        return ResolveLiveNodeIds(nodes, snapshot);
     }
 
     /// <summary>
@@ -122,10 +122,20 @@ internal sealed class LabelNodeIndex
         set.Add(nodeIdValue);
     }
 
-    // パイプラインは Sequence 空間 (gen=0)。世代は利用者境界 (QueryRow) で load するため
-    // index は素の Sequence id を返す。
-    private static IEnumerable<NodeId> WrapNodeIds(long[] arr)
+    private static IReadOnlyList<NodeId> ResolveLiveNodeIds(INodeStore nodes, long[] sequences)
     {
-        foreach (var v in arr) yield return new NodeId(v);
+        var resolved = new List<NodeId>(sequences.Length);
+        foreach (long sequence in sequences)
+        {
+            int generation = nodes.CurrentGeneration(sequence);
+            if (generation < 0)
+                continue;
+
+            var candidate = NodeId.Create(sequence, generation);
+            using var node = nodes.Read(candidate);
+            if (node.InUse)
+                resolved.Add(node.Id);
+        }
+        return resolved;
     }
 }

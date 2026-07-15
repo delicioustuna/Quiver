@@ -1,6 +1,10 @@
 # ベクトル検索
 
-> as-built 仕様 (v1 baseline)
+> as-built 仕様 (on-disk FormatVersion V5)
+>
+> **current (as-built)**: 以下は現在実装されている FormatVersion V5 のベクトル検索契約である。
+> **target (未実装)**: [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md) が将来の設計正本であり、本書の本文はその target を先取りして記述しない。
+> **実装済み境界**: 再設計の production code はまだ実装されていない。`redesign-baseline` は着工前の測定を固定するタグであり、再設計の実装完了を表さない。
 
 ## ベクトルインデックス仕様 {#vector-index}
 
@@ -10,12 +14,22 @@
 |---|---|---|
 | Name | string | 一意な識別子 |
 | Dimensions | int | ベクトルの次元数（正の値） |
-| EntityKind | enum | `Node` または `Relationship` |
+| EntityKind | enum | `Node`、`Relationship`、または `Hyperedge` |
 | Metric | enum | `Euclidean`, `Cosine`, または `Dot` |
+| IndexKind | enum | `HnswFlat` または `FlatOnly` |
+| ElementType | enum | 要素の格納表現。現在は `Float32` のみ (将来の量子化表現用の契約予約) |
+| HnswM | int | レイヤ 1 以上の最大近傍数。既定 32、範囲 2..255 |
+| HnswMMax0 | int | レイヤ 0 の最大近傍数。既定 64、範囲 HnswM..255 |
+| HnswMaxLayers | int | 最大レイヤ数。既定 8、範囲 1..255 |
+| HnswEfConstruction | int | 構築時ビーム幅。既定 400、範囲 HnswM..1,000,000 |
+
+`ElementType` は payload のレコード幅と距離計算の数値型を決める契約フィールドで、
+index 作成時に固定される。未対応の値は index 作成時・catalog 読込時・payload open 時の
+いずれでも `VectorException` で拒否される (将来の表現で書かれた DB を誤読しない)。
 
 ## PersistentVectorStore {#persistent-store}
 
-`PersistentVectorStore` (`src/Quiver/Storage/Records/PersistentVectorStore.cs`) は、`*.quiver`
+`PersistentVectorStore` (`src/Quiver/Stores/PersistentVectorStore.cs`) は、`*.quiver`
 ファイル内のコンテナテナントとして in-file のベクトルストレージを管理する。
 
 - **バインディングキー**: エンティティの `Sequence`（EntityRef の slot-local 部分）
@@ -24,17 +38,20 @@
 
 ## HNSW インデックス {#hnsw}
 
-`HnswIndex` (`src/Quiver/Storage/Records/HnswIndex.cs`) は、近似最近傍探索のための
+`HnswIndex` (`src/Quiver/Stores/HnswIndex.cs`) は、近似最近傍探索のための
 Hierarchical Navigable Small World グラフを実装する。
 
 ### パラメータ {#hnsw-params}
 
-| パラメータ | 値 |
+| パラメータ | 既定値 | レイアウトへの影響 |
 |---|---|
-| M（レイヤあたり最大近傍数） | 16 |
-| Mmax0（レイヤ 0 での最大近傍数） | 32 |
-| EfConstruction | 200 |
-| MaxLayers | 8 |
+| M（レイヤあたり最大近傍数） | 32 | あり |
+| Mmax0（レイヤ 0 での最大近傍数） | 64 | あり |
+| EfConstruction | 400 | なし（構築品質のみ） |
+| MaxLayers | 8 | あり |
+
+これらは `VectorIndexSpec` により index 作成時に確定し、catalog に永続化される。`M`、
+`Mmax0`、`MaxLayers` からレコード幅を index ごとに導出する。既存 index の値は変更できない。
 
 ### オンディスクレイアウト {#hnsw-layout}
 
@@ -48,15 +65,30 @@ Hierarchical Navigable Small World グラフを実装する。
 | MaxSeq | int64 |
 | FormatVersion | byte (オフセット 31) |
 
-**Node レコード**（各 1,164 バイト固定）:
+**Node レコード**（index ごとの固定長）:
 
 | オフセット | サイズ | フィールド |
 |---|---|---|
 | 0 | 1 | Present フラグ |
 | 1 | 1 | Level |
-| 2 | 4 | パディング |
-| 4 | 12 | 近傍カウント (8 x int8、レイヤごと) |
-| 12+ | 可変 | 近傍配列: (Mmax0 + (MaxLayers-1) x M) x int64 = 144 エントリ |
+| 2 | 2 | パディング |
+| 4 | MaxLayers | 近傍カウント (レイヤごとに int8) |
+| 4 + MaxLayers | 可変 | 近傍配列: (Mmax0 + (MaxLayers-1) x M) x int64 |
+
+レコードサイズは
+`4 + MaxLayers + (Mmax0 + (MaxLayers - 1) * M) * 8`。既定値では 1,164 バイト。
+
+### ベクトルカタログ V2 {#vector-catalog-v2}
+
+catalog の各 entry は `entryLength (int32)` に続いて、index metadata、payload/HNSW tenant、
+`IndexKind`、4 つの HNSW パラメタ、`ElementType (byte)` を保持する。reader は entry 内の
+既知フィールドを読み、未知の末尾を `entryLength` まで読み飛ばせる。`ElementType` を欠く
+短い entry (フィールド追加前に書かれたもの) は `Float32` として読む。V1 の長さ情報なし
+packed entry は読み取らず、DB open 時に `FormatVersionMismatchException` で拒否する。
+移行処理は提供しない。
+
+payload テナントのヘッダページにも `ElementType` (byte、オフセット 12) を焼き込み、
+open 時に catalog 側の値と照合する。
 
 ### 操作 {#hnsw-ops}
 

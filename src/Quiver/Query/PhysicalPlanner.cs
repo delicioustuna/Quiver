@@ -20,9 +20,12 @@ internal static class PhysicalPlanner
         NodeSeedOp n              => n.Ids.Length == 1
                                         ? new SingleNodeOperator(n.Ids[0])
                                         : new MultiNodeOperator(n.Ids),
+        HyperedgeSeedOp h         => new SingleHyperedgeOperator(h.Id),
         CorrelatedInputOp c       => c.Probe,
         FilterOp f                => new FilterOperator(Plan(f.Source, schema), f.PredicateFactory(schema)),
         ExpandOp e                => PlanExpand(e, schema),
+        ExpandToHyperedgeOp eh    => PlanExpandToHyperedge(eh, schema),
+        ExpandMembersOp em        => PlanExpandMembers(em, schema),
         VarLenExpandOp v          => PlanVarLenExpand(v, schema),
         PathOp p                  => PlanPath(p, schema),
         KnnOp k                   => PlanKnn(k, schema),
@@ -46,6 +49,8 @@ internal static class PhysicalPlanner
 
     private static IPhysicalOperator PlanScan(ScanOp s, ISchemaApi schema)
     {
+        if (s.Kind == EntityKind.Hyperedge)
+            return new AllHyperedgesScanOperator();
         if (s.Kind == EntityKind.Relationship)
             return new AllRelationshipsScanOperator();
         if (s.Label is LabelId lid)
@@ -57,6 +62,69 @@ internal static class PhysicalPlanner
     {
         RelationshipTypeId? typeId = e.Type != null ? schema.GetOrCreateRelationshipType(e.Type) : null;
         return new ExpandOperator(Plan(e.Source, schema), e.SourceColumn, e.Direction, typeId, e.Mode, e.Carry);
+    }
+
+    private static IPhysicalOperator PlanExpandToHyperedge(
+        ExpandToHyperedgeOp e,
+        ISchemaApi schema)
+        => new ExpandToHyperedgeOperator(
+            Plan(e.Source, schema),
+            e.SourceNodeColumn,
+            ResolveHyperedgeType(e.Type, schema),
+            ResolveRole(e.Role, schema),
+            e.Carry);
+
+    private static IPhysicalOperator PlanExpandMembers(
+        ExpandMembersOp e,
+        ISchemaApi schema)
+    {
+        var fallback = new ExpandMembersOperator(
+            Plan(e.Source, schema),
+            e.HyperedgeColumn,
+            ResolveRole(e.Role, schema),
+            e.ExcludeNodeColumn,
+            e.Carry);
+
+        // 起点ロールと取得ロールが共に明示された OtherMembers だけが物理ビューの
+        // 一意なキーになる。片方でも未指定なら通常の incidence 展開を維持する。
+        if (e.Source is not ExpandToHyperedgeOp origin
+            || e.ExcludeNodeColumn is null
+            || origin.Role is null
+            || e.Role is null)
+            return fallback;
+
+        RoleId? originRole = ResolveRole(origin.Role, schema);
+        RoleId? memberRole = ResolveRole(e.Role, schema);
+        if (!originRole.HasValue || !originRole.Value.IsValid
+            || !memberRole.HasValue || !memberRole.Value.IsValid)
+            return fallback;
+
+        return new CoMembershipOperator(
+            Plan(origin.Source, schema),
+            fallback,
+            origin.SourceNodeColumn,
+            ResolveHyperedgeType(origin.Type, schema),
+            originRole.Value,
+            memberRole.Value,
+            origin.Carry,
+            e.Carry);
+    }
+
+    private static HyperedgeTypeId? ResolveHyperedgeType(string? name, ISchemaApi schema)
+    {
+        if (name == null) return null;
+        return schema.TryGetHyperedgeTypeId(name, out var id)
+            ? id
+            : HyperedgeTypeId.Invalid;
+    }
+
+    private static RoleId? ResolveRole(string? name, ISchemaApi schema)
+    {
+        if (name == null) return null;
+        return schema is IHyperedgeSchemaResolver resolver
+            && resolver.TryGetRoleId(name, out var id)
+                ? id
+                : RoleId.Invalid;
     }
 
     private static IPhysicalOperator PlanVarLenExpand(VarLenExpandOp v, ISchemaApi schema)
@@ -76,9 +144,10 @@ internal static class PhysicalPlanner
     private static IPhysicalOperator PlanKnn(KnnOp k, ISchemaApi schema)
     {
         if (k.Candidate is null)
-            return new KnnNodeSourceOperator(k.IndexName, k.Query, k.K);
+            return new KnnNodeSourceOperator(k.IndexName, k.Query, k.K, k.Options);
         return new FilteredKnnNodeSourceOperator(
-            Plan(k.Candidate, schema), k.Candidate.CurrentEntityColumn, k.IndexName, k.Query, k.K);
+            Plan(k.Candidate, schema), k.Candidate.CurrentEntityColumn,
+            k.IndexName, k.Query, k.K, k.Options);
     }
 
     private static IPhysicalOperator PlanFullTextScan(FullTextScanOp ft, ISchemaApi schema)

@@ -11,6 +11,9 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
 {
     private readonly INodeStore _nodeStore;
     private readonly IRelationshipStore _relStore;
+    private readonly IHyperedgeStore _hyperedgeStore;
+    private readonly IIncidenceStore _incidenceStore;
+    private readonly INodeIncidenceHeadStore _nodeIncidenceHeads;
     private readonly IGraphAccessMethods _access;
     // orphan 検出は型を意識せずに全索引を走査する必要があるため
     // IIndexManager の non-generic 経路を直接持つ。
@@ -28,6 +31,9 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
         INodeStore nodeStore,
         IRelationshipStore relStore,
         IGraphAccessMethods access,
+        IHyperedgeStore? hyperedgeStore = null,
+        IIncidenceStore? incidenceStore = null,
+        INodeIncidenceHeadStore? nodeIncidenceHeads = null,
         IndexManager? indexManager = null,
         LabelNodeIndex? labelIndex = null,
         TransactionManager? txManager = null,
@@ -38,6 +44,9 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     {
         _nodeStore = nodeStore;
         _relStore = relStore;
+        _hyperedgeStore = hyperedgeStore ?? NullHyperedgeStore.Instance;
+        _incidenceStore = incidenceStore ?? NullIncidenceStore.Instance;
+        _nodeIncidenceHeads = nodeIncidenceHeads ?? NullNodeIncidenceHeadStore.Instance;
         _access = access;
         _indexManager = indexManager;
         _labelIndex = labelIndex;
@@ -77,6 +86,8 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     public DatabaseStatistics GetStatistics() => new(
         NodeCount: _nodeStore.InUseCount,
         RelationshipCount: _relStore.InUseCount,
+        HyperedgeCount: _hyperedgeStore.InUseCount,
+        IncidenceCount: _incidenceStore.InUseCount,
         PropertyCount: 0,
         DataFileSize: 0,
         WalFileSize: 0,
@@ -84,7 +95,150 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
         BufferPoolMisses: 0,
         AdjacencyFallbackCount: _access.AdjacencyFallbackCount);
 
-    public ConsistencyReport CheckConsistency() => new(true, []);
+    public ConsistencyReport CheckConsistency()
+    {
+        var issues = new List<string>();
+        var liveIncidences = ReadLiveIncidences(issues);
+        var reachedFromHyperedges = CheckHyperedgeChains(liveIncidences, issues);
+        var reachedFromNodes = CheckNodeChains(liveIncidences, issues);
+
+        foreach (var incidence in liveIncidences.Values)
+        {
+            if (!incidence.IsLive) continue;
+            if (!reachedFromHyperedges.Contains(incidence.Id.Sequence))
+                issues.Add($"Incidence {incidence.Id.Sequence} is unreachable from its hyperedge chain.");
+            if (!reachedFromNodes.Contains(incidence.Id.Sequence))
+                issues.Add($"Incidence {incidence.Id.Sequence} is unreachable from its node chain.");
+        }
+
+        return new ConsistencyReport(issues.Count == 0, issues);
+    }
+
+    // incidence は独立した可視性を持たないため、slot の生存と参照先 header の生存を
+    // 分けて検査する。壊れた参照も後段の到達不能検査へ残すことで、一度の走査で根因と影響を示す。
+    private Dictionary<long, IncidenceSnapshot> ReadLiveIncidences(List<string> issues)
+    {
+        var result = new Dictionary<long, IncidenceSnapshot>();
+        for (long sequence = 0; sequence < _incidenceStore.SequenceHighWaterMark; sequence++)
+        {
+            using var handle = _incidenceStore.Read(new IncidenceId(sequence));
+            if (!handle.InUse) continue;
+
+            var incidence = new IncidenceSnapshot(
+                handle.Id,
+                handle.HyperedgeId,
+                handle.NodeId,
+                handle.RoleId,
+                handle.NextInNode,
+                handle.NextInHyperedge,
+                IsLive: false);
+            using var header = _hyperedgeStore.Read(incidence.HyperedgeId);
+            bool hasOwner = incidence.HyperedgeId.IsValid
+                && _hyperedgeStore.TryReadRawHeader(incidence.HyperedgeId.Sequence, out _);
+            if (!hasOwner)
+                issues.Add($"Incidence {sequence} references an invalid hyperedge.");
+            else if (!header.InUse)
+            {
+                result[sequence] = incidence;
+                continue;
+            }
+
+            incidence = incidence with { IsLive = true };
+            result[sequence] = incidence;
+            if (!incidence.NodeId.IsValid || !_nodeStore.Read(incidence.NodeId).InUse)
+                issues.Add($"Incidence {sequence} references an invalid node.");
+            if (!incidence.RoleId.IsValid)
+                issues.Add($"Incidence {sequence} references an invalid role.");
+        }
+        return result;
+    }
+
+    private HashSet<long> CheckHyperedgeChains(
+        IReadOnlyDictionary<long, IncidenceSnapshot> liveIncidences,
+        List<string> issues)
+    {
+        var reached = new HashSet<long>();
+        foreach (HyperedgeId hyperedgeId in _hyperedgeStore.Scan())
+        {
+            using var header = _hyperedgeStore.Read(hyperedgeId);
+            var chain = new HashSet<long>();
+            var members = new HashSet<(long Node, int Role)>();
+            IncidenceId current = header.FirstIncidenceId;
+            int arity = 0;
+
+            while (current.IsValid)
+            {
+                if (!chain.Add(current.Sequence))
+                {
+                    issues.Add($"Hyperedge {hyperedgeId.Sequence} incidence chain contains a cycle.");
+                    break;
+                }
+                if (!liveIncidences.TryGetValue(current.Sequence, out var incidence))
+                {
+                    issues.Add($"Hyperedge {hyperedgeId.Sequence} chain references an unused incidence {current.Sequence}.");
+                    break;
+                }
+
+                reached.Add(current.Sequence);
+                arity++;
+                if (incidence.HyperedgeId.Sequence != hyperedgeId.Sequence)
+                    issues.Add($"Incidence {current.Sequence} is linked from the wrong hyperedge chain.");
+                if (!members.Add((incidence.NodeId.Sequence, incidence.RoleId.Value)))
+                    issues.Add($"Hyperedge {hyperedgeId.Sequence} contains a duplicate role and node pair.");
+                current = incidence.NextInHyperedge;
+            }
+
+            if (arity < 2)
+                issues.Add($"Hyperedge {hyperedgeId.Sequence} has arity {arity}; at least two members are required.");
+        }
+        return reached;
+    }
+
+    private HashSet<long> CheckNodeChains(
+        IReadOnlyDictionary<long, IncidenceSnapshot> liveIncidences,
+        List<string> issues)
+    {
+        var reached = new HashSet<long>();
+        foreach (NodeId nodeId in _nodeStore.Scan())
+        {
+            var chain = new HashSet<long>();
+            IncidenceId current = _nodeIncidenceHeads.Get(nodeId);
+            while (current.IsValid)
+            {
+                if (!chain.Add(current.Sequence))
+                {
+                    issues.Add($"Node {nodeId.Sequence} incidence chain contains a cycle.");
+                    break;
+                }
+                if (!liveIncidences.TryGetValue(current.Sequence, out var incidence))
+                {
+                    issues.Add($"Node {nodeId.Sequence} chain references an unused incidence {current.Sequence}.");
+                    break;
+                }
+
+                if (incidence.IsLive)
+                {
+                    reached.Add(current.Sequence);
+                // incidence の node 参照は physical Sequence、node scan は logical full ID。
+                // 診断の chain 整合性は物理 address を検査するため、Generation 込み equality を
+                // 使うと正常な chain を別ノード扱いしてしまう。
+                if (incidence.NodeId.Sequence != nodeId.Sequence)
+                    issues.Add($"Incidence {current.Sequence} is linked from the wrong node chain.");
+                }
+                current = incidence.NextInNode;
+            }
+        }
+        return reached;
+    }
+
+    private readonly record struct IncidenceSnapshot(
+        IncidenceId Id,
+        HyperedgeId HyperedgeId,
+        NodeId NodeId,
+        RoleId RoleId,
+        IncidenceId NextInNode,
+        IncidenceId NextInHyperedge,
+        bool IsLive);
 
     /// <summary>
     /// 全 B+Tree 索引を走査し、解放済みノード ID を指す orphan エントリを検出する。
@@ -171,11 +325,11 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
                 long packed = lane == IndexManager.PostingsLaneTag
                     ? PostingsKey.DecodeEntityId(key)
                     : int64.Decode(key);
-                list.Add(new OrphanIndexEntry(name[..sep], key, EntityRef.Sequence(packed)));
+                list.Add(new OrphanIndexEntry(name[..sep], key, EntityRef.UnpackSequence(packed)));
             }
             else
             {
-                list.Add(new OrphanIndexEntry(name, key, EntityRef.Sequence(value)));
+                list.Add(new OrphanIndexEntry(name, key, EntityRef.UnpackSequence(value)));
             }
         }
         return list;
@@ -187,9 +341,9 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
         // 索引は現状 Node 限定。Node 以外、物理的に解放済み (InUse=false)、または slot が
         // 再利用されて世代が食い違う (ABA) エントリは orphan とみなす。
         if (EntityRef.UnpackKind(packedValue) != EntityKind.Node) return false;
-        long seq = EntityRef.Sequence(packedValue);
+        long seq = EntityRef.UnpackSequence(packedValue);
         return _nodeStore.Read(new NodeId(seq)).InUse
-            && _nodeStore.CurrentGeneration(seq) == EntityRef.Generation(packedValue);
+            && _nodeStore.CurrentGeneration(seq) == EntityRef.UnpackGeneration(packedValue);
     }
 
     private long CountLabelIndexOrphans()

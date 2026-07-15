@@ -307,6 +307,235 @@ public sealed class MatchPatternTests : IDisposable
         ages.Should().ContainSingle().Which.Should().Be(30L);
     }
 
+    // ── 星型ハイパーエッジパターン ───────────────────────────────────
+
+    // subject/object/source/asOf の 4 role を持つ Fact ハイパーエッジ 2 件を用意する。
+    // 2 件目は object role に 2 メンバー (同一 role 複数メンバー) を持たせる。
+    private (HyperedgeId Verified, HyperedgeId Draft, NodeId Alice, NodeId Bob,
+             NodeId Quiver, NodeId GraphDb, NodeId Chunk, NodeId AsOf) SeedFacts()
+    {
+        using var tx = _db.BeginTransaction();
+        var alice = tx.CreateNode("Entity");
+        tx.SetProperty(alice, "Name", PropertyValue.FromString("Alice"));
+        var bob = tx.CreateNode("Entity");
+        tx.SetProperty(bob, "Name", PropertyValue.FromString("Bob"));
+        var quiver = tx.CreateNode("Entity");
+        tx.SetProperty(quiver, "Name", PropertyValue.FromString("Quiver"));
+        var graphDb = tx.CreateNode("Entity");
+        tx.SetProperty(graphDb, "Name", PropertyValue.FromString("GraphDatabase"));
+        var chunk = tx.CreateNode("Chunk");
+        var asOf = tx.CreateNode("TimePoint");
+
+        var verified = tx.CreateHyperedge("Fact",
+        [
+            new HyperedgeMember("subject", alice),
+            new HyperedgeMember("object", quiver),
+            new HyperedgeMember("source", chunk),
+            new HyperedgeMember("asOf", asOf),
+        ]);
+        tx.SetProperty(verified, "status", PropertyValue.FromString("verified"));
+
+        var draft = tx.CreateHyperedge("Fact",
+        [
+            new HyperedgeMember("subject", bob),
+            new HyperedgeMember("object", quiver),
+            new HyperedgeMember("object", graphDb),
+            new HyperedgeMember("source", chunk),
+            new HyperedgeMember("asOf", asOf),
+        ]);
+        tx.SetProperty(draft, "status", PropertyValue.FromString("draft"));
+        tx.Commit();
+        return (verified, draft, alice, bob, quiver, graphDb, chunk, asOf);
+    }
+
+    [Fact]
+    public void Hyperedge_pattern_binds_two_members_to_same_row()
+    {
+        var seed = SeedFacts();
+        using var tx = _db.BeginReadOnlyTransaction();
+        var g = tx.G(_db.Schema);
+
+        var pattern = GraphPattern.Hyperedge("f", "Fact")
+            .Member("subject", GraphPattern.Node("s"))
+            .Member("object", GraphPattern.Node("o"));
+
+        var rows = g.Match(pattern)
+            .Return(ctx => (Subject: ctx.Node("s"), Object: ctx.Node("o")))
+            .ToList();
+
+        // verified: (Alice, Quiver)。draft: (Bob, Quiver), (Bob, GraphDb)。
+        rows.Should().BeEquivalentTo(new[]
+        {
+            (seed.Alice, seed.Quiver),
+            (seed.Bob, seed.Quiver),
+            (seed.Bob, seed.GraphDb),
+        });
+    }
+
+    [Fact]
+    public void Hyperedge_pattern_binds_four_members_and_hyperedge()
+    {
+        var seed = SeedFacts();
+        using var tx = _db.BeginReadOnlyTransaction();
+        var g = tx.G(_db.Schema);
+
+        var pattern = GraphPattern.Hyperedge("f", "Fact")
+            .Member("subject", GraphPattern.Node("s"))
+            .Member("object", GraphPattern.Node("o"))
+            .Member("source", GraphPattern.Node("src"))
+            .Member("asOf", GraphPattern.Node("t"));
+
+        var rows = g.Match(pattern)
+            .Where("f", "status", P.Eq("verified"))
+            .Return(ctx => (
+                Fact: ctx.Hyperedge("f"),
+                Subject: ctx.Node("s"),
+                Object: ctx.Node("o"),
+                Source: ctx.Node("src"),
+                AsOf: ctx.Node("t")))
+            .ToList();
+
+        rows.Should().ContainSingle().Which.Should().Be(
+            (seed.Verified, seed.Alice, seed.Quiver, seed.Chunk, seed.AsOf));
+    }
+
+    [Fact]
+    public void Hyperedge_pattern_supports_variable_member_count()
+    {
+        var seed = SeedFacts();
+        using var tx = _db.BeginReadOnlyTransaction();
+        var g = tx.G(_db.Schema);
+
+        // 3 メンバー (subject/object/source) の可変個ケース。
+        var pattern = GraphPattern.Hyperedge("f", "Fact")
+            .Member("subject", GraphPattern.Node("s"))
+            .Member("object", GraphPattern.Node("o"))
+            .Member("source", GraphPattern.Node("src"));
+
+        var count = g.Match(pattern).Count();
+
+        // verified: 1 (object=Quiver)。draft: 2 (object=Quiver, GraphDb)。source は各 1。
+        count.Should().Be(3);
+    }
+
+    [Fact]
+    public void Hyperedge_pattern_applies_member_label_filter()
+    {
+        var seed = SeedFacts();
+        using var tx = _db.BeginReadOnlyTransaction();
+        var g = tx.G(_db.Schema);
+
+        // anchor に Chunk ラベルを課すと Fact は source メンバーが Chunk のものだけ残る。
+        var pattern = GraphPattern.Hyperedge("f", "Fact")
+            .Member("source", GraphPattern.Node("src", "Chunk"))
+            .Member("subject", GraphPattern.Node("s", "Entity"));
+
+        var subjects = g.Match(pattern)
+            .Return(ctx => ctx.Node("s"))
+            .ToList();
+
+        subjects.Should().BeEquivalentTo(new[] { seed.Alice, seed.Bob });
+    }
+
+    [Fact]
+    public void Hyperedge_pattern_filters_by_node_and_hyperedge_property()
+    {
+        var seed = SeedFacts();
+        using var tx = _db.BeginReadOnlyTransaction();
+        var g = tx.G(_db.Schema);
+
+        var pattern = GraphPattern.Hyperedge("f", "Fact")
+            .Member("subject", GraphPattern.Node("s"))
+            .Member("object", GraphPattern.Node("o"));
+
+        var rows = g.Match(pattern)
+            .Where("f", "status", P.Eq("draft"))       // hyperedge property
+            .Where("s", "Name", P.Eq("Bob"))            // node property
+            .Return(ctx => ctx.Node("o"))
+            .ToList();
+
+        // draft の subject=Bob。object は Quiver と GraphDb の 2 件。
+        rows.Should().BeEquivalentTo(new[] { seed.Quiver, seed.GraphDb });
+    }
+
+    [Fact]
+    public void Hyperedge_pattern_same_role_multiple_candidates_emits_each()
+    {
+        var seed = SeedFacts();
+        using var tx = _db.BeginReadOnlyTransaction();
+        var g = tx.G(_db.Schema);
+
+        // draft は object role に 2 メンバー。同じ hyperedge 内で組み合わせを放出する。
+        var pattern = GraphPattern.Hyperedge("f", "Fact")
+            .Member("subject", GraphPattern.Node("s", "Entity"))
+            .Member("object", GraphPattern.Node("o"));
+
+        var objects = g.Match(pattern)
+            .Where("s", "Name", P.Eq("Bob"))
+            .Return(ctx => ctx.Node("o"))
+            .ToList();
+
+        objects.Should().BeEquivalentTo(new[] { seed.Quiver, seed.GraphDb });
+    }
+
+    [Fact]
+    public void Hyperedge_pattern_rejects_duplicate_variable()
+    {
+        using var tx = _db.BeginReadOnlyTransaction();
+        var g = tx.G(_db.Schema);
+
+        var pattern = GraphPattern.Hyperedge("f", "Fact")
+            .Member("subject", GraphPattern.Node("x"))
+            .Member("object", GraphPattern.Node("x"));
+
+        Action act = () => g.Match(pattern).Count();
+        act.Should().Throw<InvalidOperationException>().WithMessage("*x*");
+    }
+
+    [Fact]
+    public void Hyperedge_pattern_rejects_variable_colliding_with_hyperedge()
+    {
+        using var tx = _db.BeginReadOnlyTransaction();
+        var g = tx.G(_db.Schema);
+
+        var pattern = GraphPattern.Hyperedge("f", "Fact")
+            .Member("subject", GraphPattern.Node("f"));
+
+        Action act = () => g.Match(pattern).Count();
+        act.Should().Throw<InvalidOperationException>().WithMessage("*f*");
+    }
+
+    [Fact]
+    public void Hyperedge_pattern_rejects_empty_role()
+    {
+        using var tx = _db.BeginReadOnlyTransaction();
+        var g = tx.G(_db.Schema);
+
+        var pattern = GraphPattern.Hyperedge("f", "Fact")
+            .Member("", GraphPattern.Node("s"));
+
+        Action act = () => g.Match(pattern).Count();
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void Hyperedge_pattern_rejects_unknown_where_variable()
+    {
+        var seed = SeedFacts();
+        using var tx = _db.BeginReadOnlyTransaction();
+        var g = tx.G(_db.Schema);
+
+        var pattern = GraphPattern.Hyperedge("f", "Fact")
+            .Member("subject", GraphPattern.Node("s"));
+
+        Action act = () => g.Match(pattern)
+            .Where("ghost", "Name", P.Eq("Alice"))
+            .Return(ctx => ctx.Node("s"))
+            .ToList();
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*ghost*");
+    }
+
     // ── 最小 IGraphNode 型 ───────────────────────────────────────────
 
     private sealed class PersonNode : IGraphNode<PersonNode>

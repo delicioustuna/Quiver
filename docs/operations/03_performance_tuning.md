@@ -69,6 +69,65 @@ double hitRatio = (double)s.BufferPoolHits / (s.BufferPoolHits + s.BufferPoolMis
 
 ---
 
+## Vector payload slab cache (`VectorCacheBudgetBytes`)
+
+既定 64 MB。全 vector index で共有する上限で、HNSW 距離計算時の payload page pin と
+ベクトルコピーを避ける。約 64 KiB の slab を seq range ごとに遅延確保するため、
+削除や世代混在で seq が疎でも単一の巨大配列は確保しない。
+
+```csharp
+var options = new GraphDatabaseOptions
+{
+    VectorCacheBudgetBytes = 128L * 1024 * 1024,
+};
+```
+
+- vector 検索が主要 workload で RAM に余裕があれば、hot vector 集合が収まるまで増やす。
+- 複数 index の合計予算なので、index 数を増やしても指定値を超えて常駐しない。
+- 0 以下で無効。予算超過時は永続ページへフォールバックし、検索結果は変わらない。
+- legacy 構築グラフの N=20k / dim=768 で 2.76×、新既定の N=10k で 2.07×。詳細は
+  [payload slab cache](../benchmark-results.md#payload-slab-cache) を参照。
+
+---
+
+## KNN 探索幅 (`VectorSearchOptions`)
+
+HNSW の検索精度とレイテンシは `VectorSearchOptions.EfSearch` で調整できる。
+既定値は従来互換の 200。値を下げると探索候補が減って高速になるが、近傍の取りこぼしが増える。
+
+```csharp
+var searchOptions = new VectorSearchOptions
+{
+    EfSearch = 100,
+    FilteredOversampleFactor = 8,
+};
+
+using var cursor = db.Vectors.KnnSearch("embedding", query, k: 10, searchOptions);
+var batch = db.Vectors.KnnSearchBatch("embedding", queries, k: 10, searchOptions);
+
+var traversal = tx.G(db.Schema)
+    .Knn("embedding", query, k: 10, searchOptions);
+```
+
+固定 corpus（N=10,000、dim=384、cosine、20 queries、旧構成 M=16、Mmax0=32、efConstruction=200）
+での実測は次のとおり。latency は HNSW カーソル生成と全件列挙だけを warmup 後に計測した平均値。
+
+| EfSearch | recall@10 | 平均 latency |
+|---:|---:|---:|
+| 32 | 0.245 | 0.281 ms |
+| 64 | 0.435 | 0.431 ms |
+| 100 | 0.570 | 0.649 ms |
+| 200（既定） | 0.825 | 1.023 ms |
+
+この sweep は構築品質が低い旧構成で、efSearch だけでは 0.95 に届かないことを示す。
+現行既定は M=32 / Mmax0=64 / efConstruction=400（recall 0.950）。
+latency は payload cache 導入後の値。この corpus では低い `EfSearch` の recall 低下が大きい。
+精度要件を測らずに既定値を下げないこと。
+`FilteredOversampleFactor` はフィルタ付き HNSW の探索幅を `k × 係数` まで広げる。
+候補集合が小さく exact gather 経路を選ぶ場合、この値は結果や計算量に影響しない。
+
+---
+
 ## WAL とチェックポイント
 
 ### `CheckpointThresholdBytes` (既定 64 MB)
@@ -190,5 +249,6 @@ db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEqu
 | 起動 (recovery) が遅い | `CheckpointThresholdBytes` を下げる / `Adaptive` + `TargetRecoveryTime` |
 | 並列 commit で fsync が頭打ち | `GroupCommitWindow` を 100µs〜1ms |
 | read 並列が出ない | `LockingMode = ReaderWriter` |
+| KNN の latency / recall を調整したい | `VectorSearchOptions.EfSearch` を実測しながら変更 |
 | ロックで詰まる・デッドロック疑い | `DeadlockDetectionInterval = 100ms`、`LockTimeout` 見直し |
 | 特定プロパティ検索が遅い | `Schema.CreateIndex` |

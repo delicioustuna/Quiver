@@ -24,11 +24,7 @@ public sealed class InMemoryVectorStore : IVectorStore
     public void CreateVectorIndex(VectorIndexSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
-        if (string.IsNullOrEmpty(spec.Name))
-            throw new VectorException("Vector index name must not be empty.");
-        if (spec.Dimensions <= 0)
-            throw new VectorException(
-                $"Vector index '{spec.Name}' must have positive dimensions (was {spec.Dimensions}).");
+        VectorIndexSpecValidator.Validate(spec);
 
         lock (_gate)
         {
@@ -49,6 +45,7 @@ public sealed class InMemoryVectorStore : IVectorStore
         }
     }
 
+    /// <summary>登録済みベクトルインデックスの一覧をスナップショットとして返す。</summary>
     public IReadOnlyList<VectorIndexSpec> ListVectorIndexes()
     {
         lock (_gate) { return _indexes.Values.Select(i => i.Spec).ToList(); }
@@ -91,7 +88,7 @@ public sealed class InMemoryVectorStore : IVectorStore
             // binding キーは slot Sequence。利用者は node.Value (gen 付き packed) を
             // 渡しうるが、グラフ側 (label index / adjacency / candidate set) は Sequence 空間で
             // 動くため、ここで slot へ正規化して KNN を整合させる。
-            idx.Vectors[new VectorKey(kind, EntityRef.Sequence(entityId))] = copy;
+            idx.Vectors[new VectorKey(kind, EntityRef.UnpackSequence(entityId))] = copy;
         }
     }
 
@@ -101,7 +98,7 @@ public sealed class InMemoryVectorStore : IVectorStore
         var idx = GetIndex(indexName);
         lock (_gate)
         {
-            idx.Vectors.Remove(new VectorKey(kind, EntityRef.Sequence(entityId)));
+            idx.Vectors.Remove(new VectorKey(kind, EntityRef.UnpackSequence(entityId)));
         }
     }
 
@@ -112,7 +109,7 @@ public sealed class InMemoryVectorStore : IVectorStore
         if (kind != idx.Spec.EntityKind) return false;
         if (destination.Length < idx.Spec.Dimensions) return false;
 
-        long seq = EntityRef.Sequence(entityId);
+        long seq = EntityRef.UnpackSequence(entityId);
         lock (_gate)
         {
             if (!idx.Vectors.TryGetValue(new VectorKey(kind, seq), out var vec))
@@ -127,8 +124,10 @@ public sealed class InMemoryVectorStore : IVectorStore
     public VectorSearchCursor KnnSearch(
         string indexName,
         ReadOnlySpan<float> query,
-        int k)
+        int k,
+        VectorSearchOptions? options = null)
     {
+        _ = VectorSearchOptionsValidator.Normalize(options);
         if (k <= 0)
             throw new VectorException($"KnnSearch requires positive k (was {k}).");
 
@@ -176,8 +175,10 @@ public sealed class InMemoryVectorStore : IVectorStore
         string indexName,
         ReadOnlySpan<float> query,
         int k,
-        EntityCandidateSet candidates)
+        EntityCandidateSet candidates,
+        VectorSearchOptions? options = null)
     {
+        _ = VectorSearchOptionsValidator.Normalize(options);
         ArgumentNullException.ThrowIfNull(candidates);
         if (k <= 0)
             throw new VectorException($"KnnSearchFiltered requires positive k (was {k}).");
@@ -250,8 +251,10 @@ public sealed class InMemoryVectorStore : IVectorStore
     public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
         string indexName,
         IReadOnlyList<ReadOnlyMemory<float>> queries,
-        int k)
+        int k,
+        VectorSearchOptions? options = null)
     {
+        _ = VectorSearchOptionsValidator.Normalize(options);
         ArgumentNullException.ThrowIfNull(queries);
         if (k <= 0)
             throw new VectorException($"KnnSearchBatch requires positive k (was {k}).");

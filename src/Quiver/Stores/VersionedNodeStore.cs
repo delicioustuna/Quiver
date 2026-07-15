@@ -142,7 +142,8 @@ internal sealed class VersionedNodeStore : INodeStore
             inUse = false;
 
         if (inUse) MvccContext.RecordRead(EntityKind.Node, seq);
-        return new NodeReadHandle(nodeId, inUse, firstRel, firstProp, label, xmin, xmax);
+        var resolvedId = NodeId.Create(seq, CurrentGeneration(seq));
+        return new NodeReadHandle(resolvedId, inUse, firstRel, firstProp, label, xmin, xmax);
     }
 
     public NodeWriteHandle Write(NodeId nodeId)
@@ -171,8 +172,7 @@ internal sealed class VersionedNodeStore : INodeStore
             if (_heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _))
             {
                 MvccContext.RecordRead(EntityKind.Node, seq);
-                // パイプラインは Sequence 空間 (gen=0)。世代は利用者境界で stamp。
-                yield return new NodeId(seq);
+                yield return NodeId.Create(seq, CurrentGeneration(seq));
             }
         }
     }

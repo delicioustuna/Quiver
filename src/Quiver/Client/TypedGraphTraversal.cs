@@ -146,6 +146,21 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     public GraphTraversal<NodeId> Both<TRel>() where TRel : IGraphRelationship<TRel>
         => _inner.Both<TRel>();
 
+    /// <summary>
+    /// 現在のノードが参加する <typeparamref name="THyperedge"/> 型のハイパーエッジへ展開し、
+    /// 型付きハイパーエッジトラバーサルを返す (ホップ間で型を保存)。
+    /// <paramref name="role"/> を指定すると、現在のノードがそのロールで参加する
+    /// ハイパーエッジだけに絞り込む。
+    /// 通常は SourceGenerator 生成の糖衣 (ロールプロパティ名にちなむ拡張メソッド) を使い、
+    /// 明示形は escape hatch。
+    /// </summary>
+    /// <typeparam name="THyperedge">対象ハイパーエッジ型。</typeparam>
+    /// <param name="role">現在のノードが担うロール名。null は全ロール。</param>
+    public TypedGraphHyperedgeTraversal<THyperedge> Hyperedges<THyperedge>(string? role = null)
+        where THyperedge : IGraphHyperedge<THyperedge>
+        => new TypedGraphHyperedgeTraversal<THyperedge>(
+            _inner.Hyperedges(THyperedge.GraphType, role), _tx, _schema);
+
     /// <summary>外向リレーションシップ自体を放出する。</summary>
     public GraphTraversal<RelationshipId> OutRelationships(string? type = null)  => _inner.OutRelationships(type);
 

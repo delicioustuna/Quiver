@@ -21,17 +21,17 @@ namespace Quiver;
 internal sealed class BinaryExpandCursor : ExpandCursor
 {
     private readonly ITransaction _tx;
-    private readonly NodeId _source;
+    private NodeId _source;
     private readonly Direction _direction;
     private readonly RelationshipTypeId? _typeFilter;
     private readonly BinaryGraphAccessMethods _owner;
 
     private AdjacencyCursor? _adjCursor;
+    private AdjacencyCursor? _deltaCursor;
     private bool _adjActive;     // phase 1: walking the immutable base view
     private bool _opened;
-    private long _baseRelHwm;    // delta-vs-base partition for phase 2
+    private bool _validSource;
 
-    private RelationshipId _nextRelId;
     private NodeId _neighbor;
     private RelationshipId _relId;
 
@@ -47,7 +47,6 @@ internal sealed class BinaryExpandCursor : ExpandCursor
         _direction = direction;
         _typeFilter = typeFilter;
         _owner = owner;
-        _nextRelId = RelationshipId.Invalid;
         _neighbor = NodeId.Invalid;
         _relId = RelationshipId.Invalid;
     }
@@ -59,6 +58,7 @@ internal sealed class BinaryExpandCursor : ExpandCursor
     public override bool MoveNext()
     {
         if (!_opened) { Open(); _opened = true; }
+        if (!_validSource) return false;
 
         // Phase 1: 隣接ブロック経由の base ビュー走査。tombstone をここでフィルタし、
         // base リレーションシップの削除を読み手から不可視にする。
@@ -67,70 +67,75 @@ internal sealed class BinaryExpandCursor : ExpandCursor
             var adj = _tx.AdjacencyBlocks!;
             while (_adjCursor!.MoveNext())
             {
-                var rid = _adjCursor.Relationship;
-                if (adj.IsTombstoned(rid)) continue;
-                _neighbor = _adjCursor.Neighbor;
-                _relId = rid;
+                // adjacency base は physical relationship Sequence だけを持つ。
+                // current Generation を付与して primary Read し、candidate validation と
+                // logical output の materialization を一回の read で完結させる。
+                var physicalRelationship = _adjCursor.Relationship;
+                int generation = _tx.Relationships.CurrentGeneration(physicalRelationship.Sequence);
+                if (generation < 0
+                    || (physicalRelationship.Generation != 0
+                        && physicalRelationship.Generation != generation))
+                    continue;
+
+                var rid = RelationshipId.Create(physicalRelationship.Sequence, generation);
+                using var rel = _tx.Relationships.Read(rid);
+                if (!rel.InUse)
+                    continue;
+                bool sourceIsEndpoint = rel.Source.Sequence == _source.Sequence;
+                NodeId neighbor = sourceIsEndpoint ? rel.Target : rel.Source;
+                if (adj.IsTombstoned(rid) &&
+                    (rel.Type != _adjCursor.Type ||
+                      (rel.Source.Sequence != _source.Sequence && rel.Target.Sequence != _source.Sequence) ||
+                      neighbor.Sequence != _adjCursor.Neighbor.Sequence))
+                {
+                    continue;
+                }
+                _neighbor = neighbor;
+                _relId = rel.Id;
                 return true;
             }
             _adjActive = false; // fall through to phase 2
         }
 
-        // Phase 2: リレーションシップリンクリストの delta 走査。watermark との比較で
-        // base エントリ (既に出力済み) をスキップする。チェーンは ID 降順 (最新が先頭) なので、
-        // base 領域に入った時点で残りもすべて base — そこで打ち切る。
-        while (_nextRelId.IsValid)
+        while (_deltaCursor!.MoveNext())
         {
-            if (_baseRelHwm > 0 && _nextRelId.Sequence < _baseRelHwm) // hwm 比較は Sequence
-                return false;
-
-            var rel = _tx.Relationships.Read(_nextRelId);
-            var thisRel = _nextRelId;
-            _nextRelId = rel.Source == _source ? rel.SourceNext : rel.TargetNext;
-
-            // MVCC visibility 判定で invisible になった record はスキップ。
-            if (!rel.InUse) continue;
-
-            bool typeOk = !_typeFilter.HasValue || rel.Type == _typeFilter.Value;
-            bool dirOk = _direction switch
-            {
-                Direction.Outgoing => rel.Source == _source,
-                Direction.Incoming => rel.Target == _source,
-                _ => true,
-            };
-            if (typeOk && dirOk)
-            {
-                _neighbor = rel.Source == _source ? rel.Target : rel.Source;
-                _relId = thisRel;
-                return true;
-            }
+            var rel = _tx.Relationships.Read(_deltaCursor.Relationship);
+            if (!rel.InUse)
+                continue;
+            _neighbor = rel.Source.Sequence == _source.Sequence ? rel.Target : rel.Source;
+            _relId = rel.Id;
+            return true;
         }
         return false;
     }
 
     private void Open()
     {
+        var materializer = new EntityIdentityMaterializer(_tx.Nodes);
+        if (!materializer.TryNode(_source, out _source))
+            return;
+        _validSource = true;
+
         var adj = _tx.AdjacencyBlocks;
         if (adj != null && adj.HasBlock(_source))
         {
             _adjCursor = adj.OpenCursor(_source, _direction, _typeFilter);
             _adjActive = true;
-            _baseRelHwm = adj.BaseRelHwm;
-            // delta 走査も準備する — base フェーズ終了後にリンクリスト先頭から再開し、
-            // id < BaseRelHwm のエントリをスキップする。
-            _nextRelId = _tx.Nodes.Read(_source).FirstRelationshipId;
+            _deltaCursor = _owner.RelationshipDeltas.OpenCursor(
+                _tx, _source, _direction, _typeFilter, adj.BaseRelHwm);
             return;
         }
         // このソースに対する隣接ブロックが無い — リレーションシップリンクリストを辿る。
         // fast path が使えなかった頻度を診断で可視化できるよう、カウンタをインクリメントする。
         System.Threading.Interlocked.Increment(ref _owner.FallbackCountInternal);
         _adjActive = false;
-        _baseRelHwm = adj?.BaseRelHwm ?? 0;
-        _nextRelId = _tx.Nodes.Read(_source).FirstRelationshipId;
+        _deltaCursor = _owner.RelationshipDeltas.OpenRowCursor(
+            _tx, _source, _direction, _typeFilter);
     }
 
     public override void Dispose()
     {
         _adjCursor?.Dispose();
+        _deltaCursor?.Dispose();
     }
 }

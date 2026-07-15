@@ -266,6 +266,24 @@ internal sealed class PropertyStore : IPropertyStore
         return reclaimed;
     }
 
+    /// <summary>
+    /// vacuum: 指定した overflow chain 全体を物理回収する。node vacuum が辿らない
+    /// hyperedge の overflow プロパティを、その header 回収に合わせて解放するために使う。
+    /// hwm 縮小と meta flush はまとめて <see cref="FinishExternalReclaim"/> で行う。
+    /// </summary>
+    /// <returns>回収したプロパティ版数。</returns>
+    internal int ReclaimOverflowChain(PropertyId head) => ReclaimEntireChain(head);
+
+    /// <summary>
+    /// <see cref="ReclaimOverflowChain"/> による外部回収後に、末尾 free slot の hwm 縮小と
+    /// meta flush を 1 回だけ確定する。
+    /// </summary>
+    internal void FinishExternalReclaim()
+    {
+        ShrinkHwmFromTrailingFreeSlots();
+        FlushMeta();
+    }
+
     private int ReclaimEntireChain(PropertyId head)
     {
         int count = 0;

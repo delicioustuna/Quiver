@@ -6,7 +6,7 @@
 Quiver は組み込みのグラフデータベース + ベクトル検索 + 全文検索の統合エンジンです。
 ノードとリレーションシップをプロパティ付きで単一ファイルに永続化し、Source Generator による型安全な CRUD と
 Fluent な API　によるグラフトラバーサルが実行可能です。 
-純 C# によるアンマネージド依存のない実装のため、NativeAOT に対応します。
+コアパッケージは依存パッケージゼロの純 C# 実装です。アンマネージド依存がなく、NativeAOT に対応します。
 
 ## クイックスタート
 
@@ -51,7 +51,7 @@ public partial class Knows
 - 純C#
 - サーバープロセス不要
 - Source Generatorによる型安全なAPI生成
-- NativeAOT 対応
+- 依存パッケージゼロの純 C# コア、アンマネージド依存なし、NativeAOT 対応
 - KNN（ベクトル検索）とグラフトラバーサル・BM25 全文検索を組み合わせたハイブリッド検索
 
 ## ユースケース: ローカル RAG バックエンド
@@ -78,6 +78,8 @@ public partial class Knows
 | BFS 2-hop（ハブ degree 100、leaf 10,000、隣接ブロック） | ~0.037 ms |
 | 1-hop クエリ（`g.Node().Out()`、degree 100、隣接ブロック） | ~4.2 µs/query（~42 ns/edge） |
 | BulkLoader（10 万 edge） | 通常 TX（batch 1000）比 ~11.8× |
+| HNSW true recall@10（N=10k、dim=384、既定 M=32/efC=400） | 0.950 |
+| HNSW true recall@10（同上、高品質 M=32/efC=400） | 0.950（30% 削除後 0.985） |
 
 > AMD Ryzen 7 5700X / .NET 10 / best-of-N の in-process Stopwatch による参考計測値。
 > 計測条件・詳細・追加ベンチは [docs/development.md](docs/design/development.md#性能詳細計測) を参照。

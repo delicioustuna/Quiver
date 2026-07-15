@@ -12,7 +12,8 @@ namespace Quiver.Storage.Records;
 /// [fixedSize] inlineCount(u8) + entries。entry = <c>[keyId:4][type:1][len:1][value:len]</c>。
 /// len は u8 のため値長 ≤ 255。それを超える string/bytes は inline 不可で overflow チェーン
 /// (PropertyStore) 行き。fixedSize は node=15 (flags/firstRel/firstProp/label) /
-/// rel=45 (flags/source/target/type/4本chain pointer/firstProp)。</para>
+/// rel=45 (flags/source/target/type/4本chain pointer/firstProp) /
+/// hyperedge=15 (flags/type/firstIncidence/firstProp)。</para>
 /// </summary>
 internal static class InlinePropertyCodec
 {
@@ -20,6 +21,8 @@ internal static class InlinePropertyCodec
     public const int NodeFixedSize = 15;
     /// <summary>rel version payload の固定フィールド領域長 (flags/source/target/type/4本chain/firstProp)。</summary>
     public const int RelFixedSize = 45;
+    /// <summary>hyperedge header payload の固定フィールド領域長 (flags/type/firstIncidence/firstProp)。</summary>
+    public const int HyperedgeFixedSize = 15;
     public const int EntryHeader = 6;      // keyId(4) + type(1) + len(1)
     public const int ValueMax = 255;       // len は u8
 

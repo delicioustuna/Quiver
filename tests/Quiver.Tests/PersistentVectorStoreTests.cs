@@ -1,5 +1,7 @@
 using FluentAssertions;
 using Quiver.Core;
+using Quiver.Storage;
+using Quiver.Storage.Records;
 using Xunit;
 
 namespace Quiver.Tests;
@@ -67,8 +69,117 @@ public sealed class PersistentVectorStoreTests : IDisposable
             while (cursor.MoveNext()) got.Add(cursor.Current.EntityId);
 
             got.Should().HaveCount(2);
-            got[0].Should().Be(EntityRef.Sequence(ids[1]));
+            got[0].Should().Be(EntityRef.UnpackSequence(ids[1]));
         }
+    }
+
+    [Fact]
+    public void Catalog_round_trips_multiple_entries_and_custom_hnsw_layout()
+    {
+        const string secondIndex = "embed-wide";
+        long id;
+        using (var db = GraphDatabase.Open(_path))
+        {
+            var keyId = db.Schema.GetOrCreatePropertyKey("title");
+            db.Vectors.CreateVectorIndex(new VectorIndexSpec(
+                IndexName,
+                EntityKind.Node,
+                keyId,
+                Dim,
+                DistanceMetric.Cosine,
+                "test",
+                HnswM: 4,
+                HnswMMax0: 6,
+                HnswMaxLayers: 3,
+                HnswEfConstruction: 24));
+            db.Vectors.CreateVectorIndex(new VectorIndexSpec(
+                secondIndex,
+                EntityKind.Node,
+                keyId,
+                Dim,
+                DistanceMetric.Dot,
+                "test-2",
+                HnswM: 8,
+                HnswMMax0: 12,
+                HnswMaxLayers: 5,
+                HnswEfConstruction: 40));
+
+            using var tx = db.BeginTransaction();
+            var node = tx.CreateNode("Doc");
+            id = node.Value;
+            db.Vectors.SetVector(
+                EntityKind.Node,
+                node.Value,
+                IndexName,
+                [1f, 0f, 0f, 0f]);
+            tx.Commit();
+        }
+
+        using (var db = GraphDatabase.Open(_path))
+        {
+            db.Vectors.TryGetIndex(IndexName, out var first).Should().BeTrue();
+            first.HnswM.Should().Be(4);
+            first.HnswMMax0.Should().Be(6);
+            first.HnswMaxLayers.Should().Be(3);
+            first.HnswEfConstruction.Should().Be(24);
+
+            db.Vectors.TryGetIndex(secondIndex, out var second).Should().BeTrue();
+            second.HnswM.Should().Be(8);
+            second.HnswMMax0.Should().Be(12);
+            second.HnswMaxLayers.Should().Be(5);
+            second.HnswEfConstruction.Should().Be(40);
+
+            using var cursor = db.Vectors.KnnSearch(IndexName, [1f, 0f, 0f, 0f], 1);
+            cursor.MoveNext().Should().BeTrue();
+            cursor.Current.EntityId.Should().Be(EntityRef.UnpackSequence(id));
+        }
+    }
+
+    [Fact]
+    public void ElementType_defaults_to_float32_and_round_trips()
+    {
+        using (var db = GraphDatabase.Open(_path))
+        {
+            var keyId = db.Schema.GetOrCreatePropertyKey("title");
+            db.Vectors.CreateVectorIndex(new VectorIndexSpec(
+                IndexName, EntityKind.Node, keyId, Dim, DistanceMetric.Cosine, "test"));
+        }
+
+        using (var db = GraphDatabase.Open(_path))
+        {
+            db.Vectors.TryGetIndex(IndexName, out var spec).Should().BeTrue();
+            spec.ElementType.Should().Be(VectorElementType.Float32);
+        }
+    }
+
+    [Fact]
+    public void Unsupported_element_type_is_rejected_at_creation()
+    {
+        using var db = GraphDatabase.Open(_path);
+        var keyId = db.Schema.GetOrCreatePropertyKey("title");
+        var act = () => db.Vectors.CreateVectorIndex(new VectorIndexSpec(
+            IndexName, EntityKind.Node, keyId, Dim, DistanceMetric.Cosine, "test",
+            ElementType: (VectorElementType)7));
+
+        act.Should().Throw<VectorException>()
+            .WithMessage("*unsupported element type*");
+    }
+
+    [Fact]
+    public void V1_vector_catalog_is_rejected_as_a_clean_break()
+    {
+        using var file = new InMemoryPagedFile();
+        _ = new VectorIndexCatalog(file);
+        var header = file.PinForWrite(new PageId(1));
+        header.Data[31] = FormatVersion.V1;
+        file.UnpinDirty(new PageId(1), 0);
+
+        var reopen = () => new VectorIndexCatalog(file);
+        reopen.Should().Throw<FormatVersionMismatchException>()
+            .Which.Should().Match<FormatVersionMismatchException>(
+                ex => ex.FileKind == "vectorcatalog"
+                    && ex.Found == FormatVersion.V1
+                    && ex.Expected == FormatVersion.V5);
     }
 
     [Fact]
@@ -98,8 +209,8 @@ public sealed class PersistentVectorStoreTests : IDisposable
             while (cursor.MoveNext()) got.Add(cursor.Current.EntityId);
 
             got.Should().ContainSingle();
-            got[0].Should().Be(EntityRef.Sequence(keep));
-            got.Should().NotContain(EntityRef.Sequence(drop));
+            got[0].Should().Be(EntityRef.UnpackSequence(keep));
+            got.Should().NotContain(EntityRef.UnpackSequence(drop));
         }
     }
 
@@ -127,7 +238,7 @@ public sealed class PersistentVectorStoreTests : IDisposable
             spec.IndexKind.Should().Be(VectorIndexKind.FlatOnly);
 
             var buf = new float[Dim];
-            db.Vectors.TryGetVector(EntityKind.Node, EntityRef.Sequence(nid), IndexName, buf).Should().BeTrue();
+            db.Vectors.TryGetVector(EntityKind.Node, EntityRef.UnpackSequence(nid), IndexName, buf).Should().BeTrue();
             buf.Should().Equal(1f, 2f, 3f, 4f);
         }
     }

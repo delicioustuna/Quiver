@@ -57,21 +57,13 @@ internal sealed class RelationshipStore : IRelationshipStore
 
     public RelationshipId Create(INodeStore nodeStore, NodeId source, NodeId target, RelationshipTypeId type)
     {
-        // MVCC: 論理削除に伴う slot 非再利用で free list は空のまま hwm 単調増加 (vacuum 完了後のみ free 投入)。
-        long id;
-        if (_freeHead >= 0)
-        {
-            id = _freeHead;
-            var (fpid, foff) = Location(id);
-            using var fh = _file.PinForRead(fpid);
-            _freeHead = RecordHelpers.ReadInt48(fh.Data[(foff + 1)..]);
-        }
-        else
-        {
-            id = _hwm++;
-        }
+        // raw adjacency entry が Sequence だけを保持している間は、回収 slot を再利用すると
+        // 旧 entry が新しい relationship へ付け替わる。再利用解放 coordinator が全 derived
+        // entry の再構築を保証するまでは high-water mark からだけ割り当てる。
+        long id = _hwm++;
+        long generation = _versions.Read(id).Generation + 1;
         _inUseCount++;
-        var relId = new RelationshipId(id);
+        var relId = RelationshipId.Create(id, checked((int)generation));
 
         RelationshipId srcHead = nodeStore is VersionedNodeStore ns
             ? ns.GetFirstRelId(source)
@@ -96,8 +88,9 @@ internal sealed class RelationshipStore : IRelationshipStore
         RecordHelpers.WriteInt48(rec[33..], tgtHead.Sequence);
         RecordHelpers.WriteInt48(rec[39..], PropertyId.Invalid.Sequence);
         _file.UnpinDirty(wpid, 0);
-        // xmin/xmax は sidecar に書く。
-        _versions.Write(id, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue));
+        // xmin/xmax と logical identity の Generation は同じ sidecar entry に書く。
+        _versions.Write(id, new EntityVersionMeta(
+            MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue, generation));
 
         // 旧 head の物理 SrcPrev/TgtPrev を新 rel に向ける。MVCC でも prev pointer は
         // 「双方向リンクの維持」のために物理的に更新する (visibility 判定は xmin/xmax で行う)。
@@ -128,7 +121,7 @@ internal sealed class RelationshipStore : IRelationshipStore
     public void Delete(INodeStore nodeStore, RelationshipId relId)
     {
         // MVCC: 論理削除のみ — xmax をスタンプ、チェーンや slot は維持する。
-        // 物理回収 + chain 整理 + free list 投入は vacuum (OP-3) で行う。
+        // 物理回収と chain 整理は vacuum で行うが、再利用解放は行わない。
         // 関連: nodeStore.firstRelId は更新しない (snapshot reader が辿れるよう head 維持)。
         _ = nodeStore;
         // 論理削除は sidecar の xmax をスタンプするだけ。record 本体は触らない。
@@ -153,6 +146,14 @@ internal sealed class RelationshipStore : IRelationshipStore
         using var h = _file.PinForRead(pageId);
         ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
         bool inUse = (rec[0] & FlagInUse) != 0;
+        EntityVersionMeta meta = _versions.Read(seq);
+        if (relId.Generation != 0 && relId.Generation != meta.Generation)
+            return new RelationshipReadHandle(
+                relId, inUse: false, default, default, default,
+                RelationshipId.Invalid, RelationshipId.Invalid,
+                RelationshipId.Invalid, RelationshipId.Invalid,
+                PropertyId.Invalid);
+
         var src = new NodeId(RecordHelpers.ReadInt48(rec[1..]));
         var tgt = new NodeId(RecordHelpers.ReadInt48(rec[7..]));
         var type = new RelationshipTypeId(BinaryPrimitives.ReadInt16LittleEndian(rec[13..]));
@@ -164,14 +165,16 @@ internal sealed class RelationshipStore : IRelationshipStore
         // xmin/xmax は sidecar から。物理 free スロットは sidecar を引かない。
         if (inUse)
         {
-            var meta = _versions.Read(seq);
             if (!Visibility.IsVisibleAmbient(meta.Xmin, meta.Xmax))
                 inUse = false;
         }
         // 可視な relationship を観測したら SSN read-set に記録する (Serializable 時のみ)。
         // traversal の RelationshipEnumerator もこの Read を通るので隣接走査が一律捕捉される。
         if (inUse) MvccContext.RecordRead(EntityKind.Relationship, seq);
-        return new RelationshipReadHandle(relId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstPropId);
+        var resolvedId = meta.Generation > 0
+            ? RelationshipId.Create(seq, checked((int)meta.Generation))
+            : relId;
+        return new RelationshipReadHandle(resolvedId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstPropId);
     }
 
     public RelationshipWriteHandle Write(RelationshipId relId)
@@ -186,7 +189,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         RelationshipId first = nodeStore is VersionedNodeStore ns
             ? ns.GetFirstRelId(nodeId)
             : GetFirstRelIdViaInterface(nodeStore, nodeId);
-        return new RelationshipEnumerator(this, nodeId, first);
+        return new RelationshipEnumerator(this, nodeStore, nodeId, first);
     }
 
     public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore nodeStore,
@@ -195,7 +198,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         RelationshipId first = nodeStore is VersionedNodeStore ns
             ? ns.GetFirstRelId(nodeId)
             : GetFirstRelIdViaInterface(nodeStore, nodeId);
-        return new RelationshipEnumerator(this, nodeId, first, type, direction);
+        return new RelationshipEnumerator(this, nodeStore, nodeId, first, type, direction);
     }
 
     public IEnumerable<RelationshipId> Scan()
@@ -216,9 +219,16 @@ internal sealed class RelationshipStore : IRelationshipStore
             {
                 // scan で観測した可視 relationship も SSN read-set に記録する。
                 MvccContext.RecordRead(EntityKind.Relationship, id);
-                yield return new RelationshipId(id);
+                yield return RelationshipId.Create(id, checked((int)meta.Generation));
             }
         }
+    }
+
+    public int CurrentGeneration(long localId)
+    {
+        if (localId < 0 || localId >= _hwm) return -1;
+        long generation = _versions.Read(localId).Generation;
+        return generation <= 0 ? -1 : checked((int)generation);
     }
 
     // 旧 RelationshipStore は inline property 非対応。すべて false を返し、property は
@@ -251,7 +261,8 @@ internal sealed class RelationshipStore : IRelationshipStore
         RecordHelpers.WriteInt48(rec[39..], -1L);
         _file.UnpinDirty(wpid, 0);
         // bulk load は MvccContext が無いので Bootstrap を xmin に (sidecar)。
-        _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue));
+        _versions.Write(id, new EntityVersionMeta(
+            TransactionId.Bootstrap.Value, 0, 0, long.MaxValue, 1));
     }
 
     internal void BulkSetHeaders(long hwm, long inUseCount)
@@ -270,7 +281,7 @@ internal sealed class RelationshipStore : IRelationshipStore
     ///         dead rel は reclaim 集合に追加。</item>
     ///   <item>残った rel slot を走査し、reclaim 集合に未登録の dead rel (両端 dead ノードに繋がる、など)
     ///         を追加。</item>
-    ///   <item>reclaim 集合の各 slot を物理 free (clear + free list 投入)。</item>
+    ///   <item>reclaim 集合の各 slot を物理回収する。Sequence は再利用可能にしない。</item>
     /// </list>
     /// 呼び出し前提: アクティブトランザクション 0 件、ノード vacuum **前**。
     /// </summary>
@@ -310,13 +321,13 @@ internal sealed class RelationshipStore : IRelationshipStore
             if (dead) reclaimSet.Add(id);
         }
 
-        // Pass 3: reclaim 集合の slot を物理 free。
+        // Pass 3: reclaim 集合の slot を物理回収する。raw adjacency entry の再構築と
+        // durable publish が揃うまでは free list へ release しない。
         foreach (var id in reclaimSet)
             ReclaimSlot(id);
 
         if (reclaimSet.Count > 0)
         {
-            ShrinkHwmFromTrailingFreeSlots();
             FlushMeta();
         }
         return reclaimSet.Count;
@@ -431,51 +442,7 @@ internal sealed class RelationshipStore : IRelationshipStore
         var ph = _file.PinForWrite(pageId);
         Span<byte> rec = ph.Data.Slice(off, RecordSize);
         rec.Clear();
-        // free list ポインタは byte[1..7] (48-bit)。NodeStore と同じ。
-        RecordHelpers.WriteInt48(rec[1..], _freeHead);
         _file.UnpinDirty(pageId, 0);
-        _freeHead = id;
-    }
-
-    private void ShrinkHwmFromTrailingFreeSlots()
-    {
-        long oldHwm = _hwm;
-        long newHwm = oldHwm;
-        while (newHwm > 0)
-        {
-            long candidate = newHwm - 1;
-            var (pageId, off) = Location(candidate);
-            using var h = _file.PinForRead(pageId);
-            bool inUse = (h.Data[off] & FlagInUse) != 0;
-            if (inUse) break;
-            newHwm--;
-        }
-        if (newHwm == oldHwm) return;
-
-        long head = _freeHead;
-        var keep = new List<long>();
-        long guard = oldHwm + 1;
-        while (head >= 0 && guard-- > 0)
-        {
-            if (head < newHwm) keep.Add(head);
-            var (pageId, off) = Location(head);
-            using var h = _file.PinForRead(pageId);
-            long next = RecordHelpers.ReadInt48(h.Data[(off + 1)..]);
-            head = next;
-        }
-        long newHeadFree = -1;
-        for (int i = keep.Count - 1; i >= 0; i--)
-        {
-            long id = keep[i];
-            var (pageId, off) = Location(id);
-            var ph = _file.PinForWrite(pageId);
-            Span<byte> rec = ph.Data.Slice(off, RecordSize);
-            RecordHelpers.WriteInt48(rec[1..], newHeadFree);
-            _file.UnpinDirty(pageId, 0);
-            newHeadFree = id;
-        }
-        _freeHead = newHeadFree;
-        _hwm = newHwm;
     }
 
     /// <summary>テスト用。現在の HWM スロット数 (free 含む)。</summary>

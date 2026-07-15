@@ -66,6 +66,15 @@ public sealed class GraphTraversalSource
     public RelationshipBuilder AddRelationship(string type) => new(_tx, type);
 
     /// <summary>
+    /// ロール付きの複数ノードを一つの関係として扱うハイパーエッジの追加を開始する。
+    /// <c>g.AddHyperedge("Purchase").Member("buyer", buyer).Member("item", item).Next()</c>
+    /// のように、メンバーを 2 件以上指定して使用する。
+    /// </summary>
+    /// <param name="type">作成するハイパーエッジの型名。</param>
+    /// <returns>メンバーとプロパティを蓄積するビルダ。</returns>
+    public HyperedgeBuilder AddHyperedge(string type) => new(_tx, type);
+
+    /// <summary>
     /// Cypher の <c>MERGE (n:label {matchKey: matchValue})</c> に相当する糖衣構文。
     /// <see cref="IGraphTransaction.MergeNode"/> のラッパで、<c>Created</c> フラグを
     /// 用いて ON CREATE SET / ON MATCH SET の分岐を呼び出し側で書ける。
@@ -126,6 +135,32 @@ public sealed class GraphTraversalSource
         return new GraphTraversal<RelationshipId>(_tx, _schema, plan, row => row.GetRelationshipId(0), 0, aliases: null, stats: _stats);
     }
 
+    /// <summary>
+    /// 可視な全ハイパーエッジをスキャン起点とするトラバーサルを生成する。
+    /// ハイパーエッジは、購入の buyer/item やファクトの subject/source のように、
+    /// 役割の異なる複数ノードを一つの関係として束ねるエンティティである。
+    /// </summary>
+    /// <remarks>全件走査は O(H)。後続の <c>Members(role)</c> でロール別に参加ノードへ展開できる。</remarks>
+    public GraphTraversal<HyperedgeId> Hyperedges()
+    {
+        var plan = new ScanOp(EntityKind.Hyperedge, null);
+        return new GraphTraversal<HyperedgeId>(
+            _tx, _schema, plan, row => row.GetHyperedgeId(0), 0, aliases: null, stats: _stats);
+    }
+
+    /// <summary>指定 ID のハイパーエッジ 1 件を起点とするトラバーサルを生成する。</summary>
+    /// <param name="hyperedgeId">起点にするハイパーエッジ ID。</param>
+    /// <remarks>
+    /// この起点には「どのノードから到達したか」という文脈がないため、
+    /// <c>OtherMembers()</c> ではなく <c>Members()</c> を使用する。
+    /// </remarks>
+    public GraphTraversal<HyperedgeId> Hyperedge(HyperedgeId hyperedgeId)
+    {
+        var plan = new HyperedgeSeedOp(hyperedgeId);
+        return new GraphTraversal<HyperedgeId>(
+            _tx, _schema, plan, row => row.GetHyperedgeId(0), 0, aliases: null, stats: _stats);
+    }
+
     /// <summary>指定 ID のノード 1 件だけを起点とするトラバーサル。</summary>
     public GraphTraversal<NodeId> Node(NodeId nodeId)
     {
@@ -162,6 +197,15 @@ public sealed class GraphTraversalSource
     /// <param name="pattern">マッチするノード / エッジパターン。</param>
     public MatchQuery Match(GraphPattern pattern) => new(_tx, _schema, pattern);
 
+    /// <summary>
+    /// 星型ハイパーエッジパターンで Match DSL クエリを開始する。
+    /// <see cref="GraphPattern.Hyperedge(string, string?)"/> と
+    /// <see cref="HyperedgePattern.Member(string, NodePattern)"/> で構築したパターンを渡すと、
+    /// 一つのハイパーエッジと役割別メンバーが同じ行に束ねられる。
+    /// </summary>
+    /// <param name="pattern">マッチする星型ハイパーエッジパターン。</param>
+    public MatchQuery Match(HyperedgePattern pattern) => new(_tx, _schema, pattern);
+
     // ── KNN スキャン起点 ────────────────────────────────────────────────
 
     /// <summary>
@@ -188,7 +232,12 @@ public sealed class GraphTraversalSource
     /// <param name="indexName">対象のベクトルインデックス名。</param>
     /// <param name="query">問い合わせベクトル。</param>
     /// <param name="k">取得する上位件数。</param>
-    public GraphTraversal<NodeId> Knn(string indexName, ReadOnlySpan<float> query, int k)
+    /// <param name="options">探索精度と探索量を制御する実行時オプション。null は既定値。</param>
+    public GraphTraversal<NodeId> Knn(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
     {
         // 後続の pure-filter / Limit を candidate-side に巻き戻せるよう KnnOp で包む。
         // filter が積まれなければ終端で vector-first に materialize される。
@@ -198,7 +247,7 @@ public sealed class GraphTraversalSource
         int dim = _tx.AsInternal().Access.TryGetVectorIndexSpec(indexName, out var spec) ? spec.Dimensions : 0;
         // vector-first を既定とし、後続 pure-filter / Limit は終端で KnnPushdown が
         // candidate-side に巻き戻して graph-first 化を判定する。
-        var plan = new KnnOp(null, indexName, query.ToArray(), k, dim);
+        var plan = new KnnOp(null, indexName, query.ToArray(), k, dim, options);
         return new GraphTraversal<NodeId>(_tx, _schema, plan, row => row.GetNodeId(0), 0, aliases: null, stats: _stats);
     }
 

@@ -10,6 +10,11 @@
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.13.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- 診断 ID のリリース追跡 (RS2008)。生成器が報告する診断を宣言する。 -->
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
   <!-- 属性は完全修飾名の文字列で照合するため (GraphNodeGenerator.NodeAttributeFqn 等)、
        属性アセンブリへの参照は不要。属性型は利用者側の Quiver から供給される。 -->
 </Project>

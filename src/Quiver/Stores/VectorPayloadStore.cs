@@ -28,6 +28,7 @@ internal sealed class VectorPayloadStore
     private static readonly PageId HeaderPageId = new(1);
     private const int MetaHwm = 0;             // i64 採番済み seq 数
     private const int MetaDim = 8;             // i32 次元数
+    private const int MetaElementType = 12;    // byte (VectorElementType)
     private const int MetaFormatVersion = 31;  // byte
 
     private static int Body => RecordPageMapping.PageBodySize; // 8160
@@ -35,12 +36,26 @@ internal sealed class VectorPayloadStore
     private readonly IPagedFile _file;
     private readonly int _dim;
     private readonly int _recSize;
+    private readonly VectorElementType _elementType;
+    private readonly VectorPayloadCache _cache;
     private long _hwm;
 
-    public VectorPayloadStore(IPagedFile file, int dim)
+    public VectorPayloadStore(
+        IPagedFile file,
+        int dim,
+        VectorElementType elementType,
+        VectorPayloadCacheBudget cacheBudget)
     {
         _file = file;
         if (dim <= 0) throw new VectorException($"vector payload dim must be positive (was {dim}).");
+        // レコード長は要素表現に依存する (現在は Float32 固定 = 4B/要素)。表現を追加するときは
+        // ここで per-element サイズを分岐し、Set/TryGet の (de)serialize をあわせて切り替える。
+        if (elementType != VectorElementType.Float32)
+            throw new VectorException(
+                $"vector payload supports only element type {VectorElementType.Float32} " +
+                $"(was {elementType}).");
+        _elementType = elementType;
+        _cache = new VectorPayloadCache(dim, cacheBudget);
         if (_file.PageCount <= 1)
         {
             _file.AllocatePage(PageKind.Header);
@@ -53,13 +68,19 @@ internal sealed class VectorPayloadStore
         {
             CheckFormatVersion();
             int storedDim;
+            byte storedElementType;
             using (var h = _file.PinForRead(HeaderPageId))
             {
                 _hwm = BinaryPrimitives.ReadInt64LittleEndian(h.Data[MetaHwm..]);
                 storedDim = BinaryPrimitives.ReadInt32LittleEndian(h.Data[MetaDim..]);
+                storedElementType = h.Data[MetaElementType];
             }
             if (storedDim != dim)
                 throw new VectorException($"vector payload dim mismatch: stored {storedDim}, requested {dim}.");
+            if (storedElementType != (byte)elementType)
+                throw new VectorException(
+                    $"vector payload element type mismatch: stored {(VectorElementType)storedElementType}, " +
+                    $"requested {elementType}.");
             _dim = dim;
             _recSize = RecHeaderSize + _dim * 4;
         }
@@ -83,6 +104,7 @@ internal sealed class VectorPayloadStore
         WriteBytes(start, hdr);
         WriteBytes(start + RecHeaderSize, MemoryMarshal.AsBytes(vector));
         if (seq >= _hwm) { _hwm = seq + 1; SaveMeta(); }
+        _cache.StorePresent(seq, generation, vector);
     }
 
     /// <summary>seq のベクトルを論理削除する (present=0)。hwm は縮めない。</summary>
@@ -93,6 +115,7 @@ internal sealed class VectorPayloadStore
         Span<byte> zero = stackalloc byte[1];
         zero[0] = 0;
         WriteBytes(start + OffPresent, zero);
+        _cache.StoreAbsent(seq);
     }
 
     /// <summary>seq のベクトルを <paramref name="dest"/> へ読み出す。未設定 / 削除済みは false。</summary>
@@ -100,17 +123,54 @@ internal sealed class VectorPayloadStore
     {
         generation = 0;
         if (seq < 0 || seq >= _hwm || dest.Length < _dim) return false;
+        var cached = _cache.TryGet(seq, dest, out generation);
+        if (cached == VectorPayloadCache.Lookup.Present) return true;
+        if (cached == VectorPayloadCache.Lookup.Absent) return false;
+
         long start = seq * (long)_recSize;
         Span<byte> hdr = stackalloc byte[RecHeaderSize];
         ReadBytes(start, hdr);
-        if (hdr[OffPresent] != 1) return false;
+        if (hdr[OffPresent] != 1)
+        {
+            _cache.StoreAbsent(seq);
+            return false;
+        }
         generation = BinaryPrimitives.ReadUInt16LittleEndian(hdr[OffGen..]);
         ReadBytes(start + RecHeaderSize, MemoryMarshal.AsBytes(dest[.._dim]));
+        _cache.StorePresent(seq, generation, dest[.._dim]);
+        return true;
+    }
+
+    /// <summary>
+    /// HNSW distance 計算用。cache hit は slab の span を直接返して vector 全体のコピーを除去し、
+    /// miss だけ <paramref name="scratch"/> へページから読み出す。
+    /// </summary>
+    public bool TryGetForScoring(
+        long seq,
+        float[] scratch,
+        out ReadOnlySpan<float> vector,
+        out ushort generation)
+    {
+        vector = default;
+        generation = 0;
+        if (seq < 0 || seq >= _hwm || scratch.Length < _dim) return false;
+
+        var cached = _cache.TryGetSpan(seq, out vector, out generation);
+        if (cached == VectorPayloadCache.Lookup.Present) return true;
+        if (cached == VectorPayloadCache.Lookup.Absent) return false;
+
+        var destination = scratch.AsSpan(0, _dim);
+        if (!TryGet(seq, destination, out generation)) return false;
+        vector = destination;
         return true;
     }
 
     /// <summary>recovery 用: ヘッダから hwm を読み直す (abort の before-image undo 後)。</summary>
-    public void ReloadMeta() => LoadMeta();
+    public void ReloadMeta()
+    {
+        LoadMeta();
+        _cache.Clear();
+    }
 
     // --- private: 論理バイト配列 (page 2+ を striping) ---
 
@@ -173,6 +233,7 @@ internal sealed class VectorPayloadStore
         using var ph = _file.PinForWrite(HeaderPageId);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaHwm..], _hwm);
         BinaryPrimitives.WriteInt32LittleEndian(ph.Data[MetaDim..], _dim);
+        ph.Data[MetaElementType] = (byte)_elementType;
         if (initialise)
             ph.Data[MetaFormatVersion] = FormatVersion.Current;
     }

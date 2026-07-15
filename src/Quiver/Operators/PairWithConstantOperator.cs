@@ -12,7 +12,7 @@ internal sealed class PairWithConstantOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
     private readonly int _sourceColumn;
-    private readonly long _constantValue;
+    private readonly NodeId _constant;
     private readonly TupleSlot[] _buffer = new TupleSlot[2];
 
     private static readonly TupleSchema s_schema = new([
@@ -23,7 +23,7 @@ internal sealed class PairWithConstantOperator : IPhysicalOperator
     {
         _source = source;
         _sourceColumn = sourceColumn;
-        _constantValue = constant.Sequence; // seed の gen を剥がしてパイプラインを Sequence 空間に保つ
+        _constant = constant;
     }
 
     public TupleSchema Schema => s_schema;
@@ -36,7 +36,7 @@ internal sealed class PairWithConstantOperator : IPhysicalOperator
     {
         if (!_source.MoveNext()) return false;
         _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _source.Current[_sourceColumn].LongValue };
-        _buffer[1] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _constantValue };
+        _buffer[1] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _constant.Value };
         var s = Statistics; s.RowsProduced++; Statistics = s;
         return true;
     }

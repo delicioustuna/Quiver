@@ -21,6 +21,9 @@ namespace Quiver.Tests;
 [Collection("concurrency-stress")]
 public sealed class SsnSmokeTests : IDisposable
 {
+    private const string PublicWriterGateSkip =
+        "Multiple concurrent public writers are no longer supported; single-writer gate coverage replaces this white-box concurrency scenario.";
+
     private readonly string _dir;
     private readonly GraphDatabase _db;
 
@@ -45,7 +48,7 @@ public sealed class SsnSmokeTests : IDisposable
             Directory.Delete(_dir, recursive: true);
     }
 
-    [Fact]
+    [Fact(Skip = PublicWriterGateSkip)]
     public void Serializable_write_skew_via_direct_read_aborts_one_transaction()
     {
         var (a, b) = SeedTwoAccounts();
@@ -63,7 +66,7 @@ public sealed class SsnSmokeTests : IDisposable
             "SSN は write skew の片方を abort し、もう片方は commit させる");
     }
 
-    [Fact]
+    [Fact(Skip = PublicWriterGateSkip)]
     public void SnapshotIsolation_write_skew_allows_both_commits()
     {
         var (a, b) = SeedTwoAccounts();
@@ -86,7 +89,7 @@ public sealed class SsnSmokeTests : IDisposable
     private static string Describe(Exception? ex)
         => ex is null ? "(none)" : $"{ex.GetType().Name}: {ex.Message}";
 
-    [Fact]
+    [Fact(Skip = PublicWriterGateSkip)]
     public void Serializable_write_skew_via_relationship_traversal_aborts_one_transaction()
     {
         // 読み取りを「直接 Read」ではなく「relationship traversal」で行う write skew。
@@ -187,8 +190,7 @@ public sealed class SsnSmokeTests : IDisposable
 
     /// <summary>
     /// 2 スレッドで対称な交差競合を実行する。各 tx は read → write の順で、相手と交差する
-    /// entity を触る。WalPageContext / MvccContext は thread-static なので書き込む 2 tx は別
-    /// スレッドで動かす。CountdownEvent で (1) 両方 begin 後に read、(2) 両方 read 後に
+    /// entity を触る。CountdownEvent で (1) 両方 begin 後に read、(2) 両方 read 後に
     /// write/commit、の順序を強制して snapshot を確実に重ねる。
     /// </summary>
     private (Exception? t1, Exception? t2) RunCrossSkew(

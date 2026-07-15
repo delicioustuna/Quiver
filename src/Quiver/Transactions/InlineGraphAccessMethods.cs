@@ -62,6 +62,10 @@ internal sealed class InlineGraphAccessMethods : IGraphAccessMethods
         Direction direction,
         RelationshipTypeId? typeFilter)
     {
+        var materializer = new EntityIdentityMaterializer(tx.Nodes);
+        if (!materializer.TryNode(source, out source))
+            return 0;
+
         double count = 0;
         var relId = tx.Nodes.Read(source).FirstRelationshipId;
         while (relId.IsValid)
@@ -70,12 +74,12 @@ internal sealed class InlineGraphAccessMethods : IGraphAccessMethods
             bool typeOk = !typeFilter.HasValue || rel.Type == typeFilter.Value;
             bool dirOk = direction switch
             {
-                Direction.Outgoing => rel.Source == source,
-                Direction.Incoming => rel.Target == source,
+                Direction.Outgoing => rel.Source.Sequence == source.Sequence,
+                Direction.Incoming => rel.Target.Sequence == source.Sequence,
                 _ => true,
             };
             if (typeOk && dirOk) count++;
-            relId = rel.Source == source ? rel.SourceNext : rel.TargetNext;
+            relId = rel.Source.Sequence == source.Sequence ? rel.SourceNext : rel.TargetNext;
         }
         return count;
     }
@@ -84,13 +88,14 @@ internal sealed class InlineGraphAccessMethods : IGraphAccessMethods
 internal sealed class InlineExpandCursor : ExpandCursor
 {
     private readonly ITransaction _tx;
-    private readonly NodeId _source;
+    private NodeId _source;
     private readonly Direction _direction;
     private readonly RelationshipTypeId? _typeFilter;
 
     private AdjacencyCursor? _adjCursor;
     private bool _usingAdj;
     private bool _opened;
+    private bool _validSource;
     private RelationshipId _nextRelId;
     private NodeId _neighbor;
     private RelationshipId _relId;
@@ -112,13 +117,17 @@ internal sealed class InlineExpandCursor : ExpandCursor
     public override bool MoveNext()
     {
         if (!_opened) { Open(); _opened = true; }
+        if (!_validSource) return false;
 
         if (_usingAdj)
         {
-            if (_adjCursor!.MoveNext())
+            while (_adjCursor!.MoveNext())
             {
-                _neighbor = _adjCursor.Neighbor;
-                _relId = _adjCursor.Relationship;
+                var relation = _tx!.Relationships.Read(_adjCursor.Relationship);
+                if (!relation.InUse)
+                    continue;
+                _neighbor = relation.Source.Sequence == _source.Sequence ? relation.Target : relation.Source;
+                _relId = relation.Id;
                 return true;
             }
             return false;
@@ -126,21 +135,35 @@ internal sealed class InlineExpandCursor : ExpandCursor
 
         while (_nextRelId.IsValid)
         {
-            var rel = _tx.Relationships.Read(_nextRelId);
+            int generation = _tx.Relationships.CurrentGeneration(_nextRelId.Sequence);
+            if (generation < 0)
+            {
+                _nextRelId = RelationshipId.Invalid;
+                return false;
+            }
+
+            // node chain は physical Sequence を保持するため、logical Read の直前で
+            // 現行 generation を付与する。
+            var rel = _tx.Relationships.Read(
+                RelationshipId.Create(_nextRelId.Sequence, generation));
             var thisRel = _nextRelId;
-            _nextRelId = rel.Source == _source ? rel.SourceNext : rel.TargetNext;
+            bool sourceIsEndpoint = rel.Source.Sequence == _source.Sequence;
+            _nextRelId = sourceIsEndpoint ? rel.SourceNext : rel.TargetNext;
+
+            if (!rel.InUse)
+                continue;
 
             bool typeOk = !_typeFilter.HasValue || rel.Type == _typeFilter.Value;
             bool dirOk = _direction switch
             {
-                Direction.Outgoing => rel.Source == _source,
-                Direction.Incoming => rel.Target == _source,
+                Direction.Outgoing => rel.Source.Sequence == _source.Sequence,
+                Direction.Incoming => rel.Target.Sequence == _source.Sequence,
                 _ => true,
             };
             if (typeOk && dirOk)
             {
-                _neighbor = rel.Source == _source ? rel.Target : rel.Source;
-                _relId = thisRel;
+                _neighbor = sourceIsEndpoint ? rel.Target : rel.Source;
+                _relId = rel.Id;
                 return true;
             }
         }
@@ -149,6 +172,11 @@ internal sealed class InlineExpandCursor : ExpandCursor
 
     private void Open()
     {
+        var materializer = new EntityIdentityMaterializer(_tx.Nodes);
+        if (!materializer.TryNode(_source, out _source))
+            return;
+        _validSource = true;
+
         var adj = _tx.AdjacencyBlocks;
         if (adj != null && adj.HasBlock(_source))
         {

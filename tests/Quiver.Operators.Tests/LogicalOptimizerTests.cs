@@ -366,6 +366,26 @@ public sealed class LogicalOptimizerTests
             .Which.Label.Should().NotBeNull();
     }
 
+    [Fact]
+    public void Optimizer_rewrites_children_inside_hyperedge_expansions_without_losing_shape()
+    {
+        var scan = new ScanOp(EntityKind.Node, null);
+        var filter = new FilterOp(scan, s => new LabelPredicate(s.GetOrCreateLabel("Inner")));
+        var toHyperedge = new ExpandToHyperedgeOp(filter, 0, null, null, [0]);
+        var members = new ExpandMembersOp(toHyperedge, 1, null, 0, [1]);
+
+        var result = LogicalOptimizer.Optimize(members, null, _schema);
+
+        var memberResult = result.Should().BeOfType<ExpandMembersOp>().Subject;
+        memberResult.CurrentEntityColumn.Should().Be(1);
+        memberResult.PredictedOutputColumnCount.Should().Be(3);
+        var hyperedgeResult = memberResult.Source.Should().BeOfType<ExpandToHyperedgeOp>().Subject;
+        hyperedgeResult.CurrentEntityColumn.Should().Be(1);
+        hyperedgeResult.PredictedOutputColumnCount.Should().Be(3);
+        hyperedgeResult.Source.Should().BeOfType<ScanOp>()
+            .Which.Label.Should().NotBeNull();
+    }
+
     // ── SIG: ApplyDyadicOp child rewrite ────────────────────────────────────────
 
     [Fact]

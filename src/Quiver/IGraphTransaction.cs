@@ -204,6 +204,67 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
         => throw new NotSupportedException("This backend does not support TryGetVector.");
 
+    // ── ハイパーエッジ操作 ──────────────────────────────────────
+
+    /// <summary>
+    /// 指定型と参加メンバーでハイパーエッジを作成し、その ID を返す。
+    /// メンバーは 2 件以上必要。同じ (Role, NodeId) の組の重複は許可しない。
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// arity が 2 未満、role/type が空文字列、同じ (Role, NodeId) の組が重複、
+    /// または参照先ノードが存在しない場合。
+    /// </exception>
+    HyperedgeId CreateHyperedge(string type, ReadOnlySpan<HyperedgeMember> members);
+
+    /// <summary>型 ID 指定版の <see cref="CreateHyperedge(string, ReadOnlySpan{HyperedgeMember})"/>。</summary>
+    HyperedgeId CreateHyperedge(HyperedgeTypeId typeId, ReadOnlySpan<HyperedgeMember> members);
+
+    /// <summary>
+    /// ハイパーエッジを論理削除する。存在しない ID や削除済み ID は no-op。
+    /// </summary>
+    void DeleteHyperedge(HyperedgeId hyperedgeId);
+
+    /// <summary>
+    /// ハイパーエッジのメンバーを列挙する。<paramref name="role"/> を指定すると
+    /// そのロールのメンバーのみに絞り込む。ハイパーエッジが不可視な場合は空列挙を返す。
+    /// </summary>
+    HyperedgeMemberEnumerator GetMembers(HyperedgeId hyperedgeId, string? role = null);
+
+    /// <summary>
+    /// 指定ノードが参加するハイパーエッジを列挙する。型やロールで絞り込み可能。
+    /// 同一ハイパーエッジに複数ロールで参加している場合も重複なく列挙される。
+    /// </summary>
+    HyperedgeIdEnumerator GetHyperedges(NodeId nodeId, string? type = null, string? role = null);
+
+    /// <summary>ハイパーエッジ型 ID から型名を返す。未登録 ID では <c>null</c>。</summary>
+    string? GetHyperedgeTypeName(HyperedgeTypeId typeId);
+
+    // ── ハイパーエッジプロパティ操作 ──────────────────────────────
+
+    /// <summary>ハイパーエッジにプロパティを設定する (既存値は上書き)。</summary>
+    void SetProperty(HyperedgeId hyperedgeId, string key, in PropertyValue value);
+
+    /// <summary>ハイパーエッジのプロパティ値を取得する。存在しない場合は既定値を返す。</summary>
+    PropertyValue GetProperty(HyperedgeId hyperedgeId, string key);
+
+    /// <summary>ハイパーエッジが指定キーのプロパティを保持しているかを返す。</summary>
+    bool HasProperty(HyperedgeId hyperedgeId, string key);
+
+    /// <summary>ハイパーエッジからプロパティを削除する。</summary>
+    void RemoveProperty(HyperedgeId hyperedgeId, string key);
+
+    /// <summary>ハイパーエッジに付与された全プロパティを列挙する。</summary>
+    PropertyEnumerator EnumerateProperties(HyperedgeId hyperedgeId);
+
+    /// <inheritdoc cref="AddPropertyValue(NodeId, string, in PropertyValue)"/>
+    void AddPropertyValue(HyperedgeId hyperedgeId, string key, in PropertyValue value);
+
+    /// <inheritdoc cref="RemovePropertyValue(NodeId, string, in PropertyValue)"/>
+    void RemovePropertyValue(HyperedgeId hyperedgeId, string key, in PropertyValue value);
+
+    /// <inheritdoc cref="GetPropertyValues(NodeId, string)"/>
+    PropertyValuesEnumerator GetPropertyValues(HyperedgeId hyperedgeId, string key);
+
     // 物理プラン実行 (Execute/ExecuteCursor)、access methods (Access)、隣接ブロック
     // (AdjacencyBlocks) は内部実装型を露出するため公開面から除外し、internal な
     // IGraphTransactionInternal へ移設した (利用者は GraphTraversal DSL を使う)。
@@ -240,6 +301,116 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// 解放後は当該 SavepointId は無効。
     /// </summary>
     void ReleaseSavepoint(SavepointId savepoint);
+}
+
+/// <summary>ハイパーエッジを構成する 1 メンバー (ロール名と参加ノードの組)。</summary>
+public readonly record struct HyperedgeMember(string Role, NodeId NodeId);
+
+/// <summary>
+/// ハイパーエッジのメンバーを列挙する ref struct 列挙子。
+/// ロールフィルタ付きの場合は一致するロールのメンバーのみを返す。
+/// </summary>
+public ref struct HyperedgeMemberEnumerator
+{
+    private HyperedgeIncidenceEnumerator _inner;
+    private readonly ITokenStore<RoleId> _roleTokens;
+    private readonly INodeStore _nodes;
+    private readonly RoleId _roleFilter;
+    private HyperedgeMember _current;
+
+    internal HyperedgeMemberEnumerator(
+        HyperedgeIncidenceEnumerator inner,
+        ITokenStore<RoleId> roleTokens,
+        INodeStore nodes,
+        RoleId roleFilter)
+    {
+        _inner = inner;
+        _roleTokens = roleTokens;
+        _nodes = nodes;
+        _roleFilter = roleFilter;
+        _current = default;
+    }
+
+    /// <inheritdoc />
+    public bool MoveNext()
+    {
+        if (_roleTokens is null) return false;
+        while (_inner.MoveNext())
+        {
+            var inc = _inner.Current;
+            if (_roleFilter.IsValid && inc.RoleId != _roleFilter)
+                continue;
+            var materializer = new EntityIdentityMaterializer(_nodes);
+            if (!materializer.TryNode(inc.NodeId, out var member))
+                continue;
+            _current = new HyperedgeMember(
+                _roleTokens.GetName(inc.RoleId),
+                member);
+            return true;
+        }
+        return false;
+    }
+
+    /// <inheritdoc />
+    public HyperedgeMember Current => _current;
+    /// <inheritdoc />
+    public void Dispose() => _inner.Dispose();
+}
+
+/// <summary>
+/// 指定ノードが参加するハイパーエッジ ID を列挙する ref struct 列挙子。
+/// 型・ロールフィルタ付きの場合は一致するもののみを返す。
+/// 同一ハイパーエッジに複数ロールで参加している場合も重複なく列挙する。
+/// </summary>
+public ref struct HyperedgeIdEnumerator
+{
+    private NodeIncidenceEnumerator _inner;
+    private readonly IHyperedgeStore _hyperedges;
+    private readonly HyperedgeTypeId _typeFilter;
+    private readonly RoleId _roleFilter;
+    private HashSet<long>? _seen;
+    private HyperedgeId _current;
+
+    internal HyperedgeIdEnumerator(
+        NodeIncidenceEnumerator inner,
+        IHyperedgeStore hyperedges,
+        HyperedgeTypeId typeFilter,
+        RoleId roleFilter)
+    {
+        _inner = inner;
+        _hyperedges = hyperedges;
+        _typeFilter = typeFilter;
+        _roleFilter = roleFilter;
+        _seen = null;
+        _current = default;
+    }
+
+    /// <inheritdoc />
+    public bool MoveNext()
+    {
+        if (_hyperedges is null) return false;
+        while (_inner.MoveNext())
+        {
+            var inc = _inner.Current;
+            if (_roleFilter.IsValid && inc.RoleId != _roleFilter)
+                continue;
+            using var header = _hyperedges.Read(inc.HyperedgeId);
+            if (!header.InUse || (_typeFilter.IsValid && header.Type != _typeFilter))
+                continue;
+            var heId = header.Id;
+            _seen ??= new HashSet<long>();
+            if (!_seen.Add(heId.Sequence))
+                continue;
+            _current = heId;
+            return true;
+        }
+        return false;
+    }
+
+    /// <inheritdoc />
+    public HyperedgeId Current => _current;
+    /// <inheritdoc />
+    public void Dispose() => _inner.Dispose();
 }
 
 /// <summary><c>long</c> 列挙子を <see cref="NodeId"/> に変換するための薄いラッパ。</summary>

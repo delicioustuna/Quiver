@@ -16,6 +16,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Quiver\Quiver.csproj" />
+    <Compile Include="..\..\tests\Shared\VectorRecallCorpus.cs"
+             Link="Shared\VectorRecallCorpus.cs" />
   </ItemGroup>
 
 </Project>

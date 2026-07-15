@@ -3,15 +3,20 @@ using Quiver.Core;
 namespace Quiver.Storage.Wal;
 
 /// <summary>
-/// 書き込みトランザクション中のページイメージロギング用に使われる、スレッドローカルな
+/// 書き込みトランザクション中のページイメージロギング用に使われる、非同期フロー単位の
 /// WAL コンテキスト。書き込みトランザクション開始時にセットし、Commit / Abort 時にクリアする。
 /// </summary>
 internal static class WalPageContext
 {
-    [ThreadStatic]
-    internal static WriteTransactionContext? Current;
+    private static readonly AsyncLocal<WriteTransactionContext?> CurrentSlot = new();
 
-    /// <summary>このスレッドで書き込みトランザクションを開始する。</summary>
+    internal static WriteTransactionContext? Current
+    {
+        get => CurrentSlot.Value;
+        set => CurrentSlot.Value = value;
+    }
+
+    /// <summary>現在の非同期フローで書き込みトランザクションを開始する。</summary>
     public static void Begin(IWriteAheadLog wal, TransactionId txId)
         => Current = new WriteTransactionContext(wal, txId);
 
@@ -20,7 +25,7 @@ internal static class WalPageContext
 
     /// <summary>
     /// このスレッドで書き込みトランザクションがアクティブな場合、PageImage を
-    /// トランザクションごとのバッファに記録する (案C: コアレス)。同じ (fileKind, pageId)
+    /// トランザクションごとのバッファに記録する。同じ (fileKind, pageId)
     /// を複数回触っても、保持されるのは最新のページ内容 1 件のみ。WAL への実際の追記は
     /// <see cref="FlushPending"/> (コミット時) まで遅延される。
     /// </summary>
@@ -140,7 +145,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     private readonly TransactionId _txId = txId;
 
     // (fileKind, pageId) → 最新の **生ページ bytes** (latest-wins)。
-    // 案C: 1 トランザクション中に同一ページを何度触っても、コミット時に最新版 1 件だけを WAL に書く。
+    // 1 トランザクション中に同一ページを何度触っても、コミット時に最新版 1 件だけを WAL に書く。
     // これにより FlushMeta() 等によるホットページの再ログ増幅を解消する。
     // FlushPending では Append ではなく WAL の coalesce バッファへ投入することで、
     // 並行 tx 間でも latest-wins de-dup が効くようにする。
@@ -275,7 +280,7 @@ internal sealed class WriteTransactionContext(IWriteAheadLog wal, TransactionId 
     ///     触られる場合のみ即時 WAL 追記される (savepoint 越しの 2 度目以降は CLR を出さない —
     ///     recovery の undo は単一 CLR から pre-tx 状態へ戻ることを前提とするため)。
     ///
-    /// 案C の after-image バッファ (<see cref="_pending"/>) と異なり、CLR は遅延せず
+    /// after-image バッファ (<see cref="_pending"/>) と異なり、CLR は遅延せず
     /// 即時追記する: コミットも abort もせずクラッシュしたトランザクションでも、
     /// before-image が WAL に残っていなければ巻き戻せないため。
     /// </summary>

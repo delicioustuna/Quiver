@@ -65,6 +65,40 @@ public readonly record struct NodeDegreeSummary(
 }
 
 /// <summary>
+/// ハイパーエッジのメンバー数ごとの件数分布。
+/// オプティマイザが型ごとの展開 fan-out を見積もるための厳密な arity を保持する。
+/// </summary>
+public sealed class ArityHistogram
+{
+    private readonly SortedDictionary<int, long> _counts = new();
+
+    /// <summary>記録したハイパーエッジ件数。</summary>
+    public long TotalHyperedges { get; private set; }
+
+    /// <summary>全ハイパーエッジの incidence 総数。</summary>
+    public long TotalIncidences { get; private set; }
+
+    /// <summary>観測した最大 arity。空の場合は 0。</summary>
+    public int MaxArity { get; private set; }
+
+    /// <summary>平均 arity。空の場合は 0。</summary>
+    public double MeanArity
+        => TotalHyperedges == 0 ? 0.0 : (double)TotalIncidences / TotalHyperedges;
+
+    /// <summary>arity をキー、ハイパーエッジ件数を値とする分布。</summary>
+    public IReadOnlyDictionary<int, long> Counts => _counts;
+
+    internal void Record(int arity)
+    {
+        TotalHyperedges++;
+        TotalIncidences += arity;
+        if (arity > MaxArity) MaxArity = arity;
+        _counts.TryGetValue(arity, out long count);
+        _counts[arity] = count + 1;
+    }
+}
+
+/// <summary>
 /// プロパティキーごとの統計。<see cref="GraphStats.Collect"/> が収集する。
 /// </summary>
 public sealed class PropertyKeyStats
@@ -193,6 +227,12 @@ public sealed class GraphStats
     /// <summary>リレーションシップ型ごとのエッジ件数。</summary>
     public IReadOnlyDictionary<RelationshipTypeId, long> EdgeTypeFrequency { get; private init; }
         = new Dictionary<RelationshipTypeId, long>();
+    /// <summary>ハイパーエッジ型ごとの件数。</summary>
+    public IReadOnlyDictionary<HyperedgeTypeId, long> HyperedgeTypeFrequency { get; private init; }
+        = new Dictionary<HyperedgeTypeId, long>();
+    /// <summary>ハイパーエッジ型ごとの arity 分布。</summary>
+    public IReadOnlyDictionary<HyperedgeTypeId, ArityHistogram> HyperedgeArityByType { get; private init; }
+        = new Dictionary<HyperedgeTypeId, ArityHistogram>();
 
     /// <summary>全ノードの総次数 (出+入) ヒストグラム。</summary>
     public DegreeHistogram GlobalDegreeHistogram { get; private init; } = new();
@@ -233,6 +273,8 @@ public sealed class GraphStats
     public long TotalNodes { get; private init; }
     /// <summary>収集時点の総リレーションシップ数。</summary>
     public long TotalRelationships { get; private init; }
+    /// <summary>収集時点の総ハイパーエッジ数。</summary>
+    public long TotalHyperedges { get; private init; }
 
     /// <summary>
     /// 全文索引ごとの BM25 コーパス統計 (N / avgdl) スナップショット。索引名でキーする。
@@ -332,6 +374,8 @@ public sealed class GraphStats
         {
             LabelCardinality      = LabelCardinality,
             EdgeTypeFrequency     = EdgeTypeFrequency,
+            HyperedgeTypeFrequency = HyperedgeTypeFrequency,
+            HyperedgeArityByType  = HyperedgeArityByType,
             GlobalDegreeHistogram = GlobalDegreeHistogram,
             GlobalOutDegree       = GlobalOutDegree,
             GlobalInDegree        = GlobalInDegree,
@@ -342,6 +386,7 @@ public sealed class GraphStats
             PropertyKeys          = PropertyKeys,
             TotalNodes            = TotalNodes,
             TotalRelationships    = TotalRelationships,
+            TotalHyperedges       = TotalHyperedges,
             FullTextCorpora       = FullTextCorpora,
             HasFastLabelIndex     = hasFastLabelIndex,
         };
@@ -375,6 +420,8 @@ public sealed class GraphStats
     {
         var labelCard       = new Dictionary<LabelId, long>();
         var edgeFreq        = new Dictionary<RelationshipTypeId, long>();
+        var hyperedgeFreq   = new Dictionary<HyperedgeTypeId, long>();
+        var arityByType     = new Dictionary<HyperedgeTypeId, ArityHistogram>();
         var degreeByLabel   = new Dictionary<LabelId, DegreeHistogram>();
         var outDegreeByType = new Dictionary<RelationshipTypeId, DegreeHistogram>();
         var inDegreeByType  = new Dictionary<RelationshipTypeId, DegreeHistogram>();
@@ -386,6 +433,7 @@ public sealed class GraphStats
 
         long totalNodes = 0;
         long totalRels  = 0;
+        long totalHyperedges = 0;
 
         // ノードごとの Dictionary 割り当てを避けるため、型別カウンターを再利用する。
         var perTypeOut = new Dictionary<RelationshipTypeId, long>();
@@ -395,6 +443,9 @@ public sealed class GraphStats
         {
             var node = tx.Nodes.Read(nodeId);
             if (!node.InUse) continue;
+            var materializer = new EntityIdentityMaterializer(tx.Nodes);
+            if (!materializer.TryNode(nodeId, out var logicalNodeId))
+                continue;
 
             totalNodes++;
             var label = node.Label;
@@ -417,7 +468,7 @@ public sealed class GraphStats
             while (relId.IsValid)
             {
                 var rel = tx.Relationships.Read(relId);
-                bool isSource = rel.Source == nodeId;
+                bool isSource = rel.Source.Sequence == nodeId.Sequence;
                 var nextId = isSource ? rel.SourceNext : rel.TargetNext;
 
                 if (isSource)
@@ -469,7 +520,7 @@ public sealed class GraphStats
                 h.Record(perTypeIn[typeId]);
             }
 
-            degreeBuilder.Record(nodeId, outDegree, inDegree);
+            degreeBuilder.Record(logicalNodeId, outDegree, inDegree);
 
             // ノードプロパティ → PropertyKeyStats (inline + overflow)
             var propEnum = tx.Nodes.EnumerateProperties(nodeId, tx.Properties);
@@ -482,9 +533,38 @@ public sealed class GraphStats
             }
         }
 
+        // メンバー集合は作成後不変なので header ごとに chain を 1 回だけ走査すれば
+        // 型別件数と arity を同時に収集できる。プロパティも同じ走査で統計へ合流させる。
+        foreach (HyperedgeId hyperedgeId in tx.Hyperedges.Scan())
+        {
+            using var header = tx.Hyperedges.Read(hyperedgeId);
+            if (!header.InUse) continue;
+
+            totalHyperedges++;
+            hyperedgeFreq.TryGetValue(header.Type, out long typeCount);
+            hyperedgeFreq[header.Type] = typeCount + 1;
+
+            int arity = 0;
+            var incidence = tx.Incidences.EnumerateByHyperedge(hyperedgeId, tx.Hyperedges);
+            while (incidence.MoveNext()) arity++;
+
+            if (!arityByType.TryGetValue(header.Type, out var histogram))
+                arityByType[header.Type] = histogram = new ArityHistogram();
+            histogram.Record(arity);
+
+            var properties = tx.Hyperedges.EnumerateProperties(hyperedgeId, tx.Properties);
+            while (properties.MoveNext())
+            {
+                var property = properties.Current;
+                if (!propertyKeys.TryGetValue(property.KeyId, out var keyStats))
+                    propertyKeys[property.KeyId] = keyStats = new PropertyKeyStats { KeyId = property.KeyId };
+                keyStats.Observe(property.Value);
+            }
+        }
+
         // 各エンティティはキーごとに最大 1 値だけを持つため、
         // missing = totalEntities - observedCount となる。
-        long totalEntities = totalNodes + totalRels;
+        long totalEntities = totalNodes + totalRels + totalHyperedges;
         foreach (var pks in propertyKeys.Values)
         {
             long missing = totalEntities - pks.Count;
@@ -507,6 +587,8 @@ public sealed class GraphStats
         {
             LabelCardinality      = labelCard,
             EdgeTypeFrequency     = edgeFreq,
+            HyperedgeTypeFrequency = hyperedgeFreq,
+            HyperedgeArityByType  = arityByType,
             GlobalDegreeHistogram = globalHist,
             GlobalOutDegree       = globalOut,
             GlobalInDegree        = globalIn,
@@ -517,6 +599,7 @@ public sealed class GraphStats
             PropertyKeys          = propertyKeys,
             TotalNodes            = totalNodes,
             TotalRelationships    = totalRels,
+            TotalHyperedges       = totalHyperedges,
             FullTextCorpora       = ftCorpora,
             HasFastLabelIndex     = tx.Access.HasFastLabelIndex,
         };

@@ -6,13 +6,15 @@ using Quiver.Transactions;
 
 namespace Quiver.Api.Internal;
 
-/// <summary>述語が読むエンティティの種別 (ノード / リレーションシップ)。</summary>
+/// <summary>述語が読むエンティティの種別。</summary>
 internal enum PredicateEntity
 {
     /// <summary>ノードプロパティ (<see cref="ITransaction.Nodes"/>)。</summary>
     Node,
     /// <summary>リレーションシップ (エッジ) プロパティ (<see cref="ITransaction.Relationships"/>)。</summary>
     Relationship,
+    /// <summary>ハイパーエッジプロパティ (<see cref="ITransaction.Hyperedges"/>)。</summary>
+    Hyperedge,
 }
 
 /// <summary>
@@ -24,9 +26,14 @@ internal enum PredicateEntity
 internal static class EntityProps
 {
     public static PropertyEnumerator Enumerate(ITransaction tx, PredicateEntity entity, long id)
-        => entity == PredicateEntity.Relationship
-            ? tx.Relationships.EnumerateProperties(new RelationshipId(id), tx.Properties)
-            : tx.Nodes.EnumerateProperties(new NodeId(id), tx.Properties);
+        => entity switch
+        {
+            PredicateEntity.Relationship =>
+                tx.Relationships.EnumerateProperties(new RelationshipId(id), tx.Properties),
+            PredicateEntity.Hyperedge =>
+                tx.Hyperedges.EnumerateProperties(new HyperedgeId(id), tx.Properties),
+            _ => tx.Nodes.EnumerateProperties(new NodeId(id), tx.Properties),
+        };
 }
 
 internal sealed class LabelPredicate : IPredicate

@@ -23,6 +23,8 @@ internal sealed class PhysicalOperatorCursor : IQueryCursor
 {
     private readonly IPhysicalOperator _plan;
     private readonly Quiver.Storage.Records.INodeStore _nodes;
+    private readonly Quiver.Storage.Records.IRelationshipStore _relationships;
+    private readonly Quiver.Storage.Records.IHyperedgeStore _hyperedges;
     private QueryRow _current;
     // A-sub: per-row 確保を避けるため slots / byteData バッファを 1 度確保して再利用する。
     // IQueryCursor.Current は「次の MoveNext までのみ有効」契約 (TraversalCursor が即座に
@@ -31,10 +33,16 @@ internal sealed class PhysicalOperatorCursor : IQueryCursor
     private TupleSlot[]? _slots;
     private byte[]?[]? _byteData;
 
-    internal PhysicalOperatorCursor(IPhysicalOperator plan, Quiver.Storage.Records.INodeStore nodes)
+    internal PhysicalOperatorCursor(
+        IPhysicalOperator plan,
+        Quiver.Storage.Records.INodeStore nodes,
+        Quiver.Storage.Records.IRelationshipStore relationships,
+        Quiver.Storage.Records.IHyperedgeStore hyperedges)
     {
         _plan = plan;
         _nodes = nodes;
+        _relationships = relationships;
+        _hyperedges = hyperedges;
     }
 
     public TupleSchema Schema => _plan.Schema;
@@ -67,7 +75,7 @@ internal sealed class PhysicalOperatorCursor : IQueryCursor
             }
         }
         // 結果 NodeId 列に現世代を load (round-trip 一貫)。
-        QueryRowMaterializer.StampNodeGenerations(slots, _nodes);
+        QueryRowMaterializer.StampEntityGenerations(slots, _nodes, _relationships, _hyperedges);
         _current = new QueryRow(slots, byteData);
         return true;
     }

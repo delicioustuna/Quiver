@@ -14,7 +14,12 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | **Relationship（リレーションシップ）** | グラフの有向辺。1 つの型名と両端ノード（Source、Target）、複数のプロパティを持つ。`RelationshipId` で識別される |
 | **Label（ラベル）** | ノードの分類名（例: `"Person"`）。内部では `LabelId` にトークン化される |
 | **Relationship Type** | リレーションシップの分類名（例: `"KNOWS"`）。内部では `RelationshipTypeId` にトークン化される |
-| **Property（プロパティ）** | ノードまたはリレーションシップに付与されるキーバリュー対。値の型は `Bool`、`Int32`、`Int64`、`Double`、`String`、`Bytes`、`FloatArray` |
+| **Property（プロパティ）** | ノード、リレーションシップ、またはハイパーエッジに付与されるキーバリュー対。値の型は `Bool`、`Int32`、`Int64`、`Double`、`String`、`Bytes`、`FloatArray` |
+| **Hyperedge（ハイパーエッジ）** | 2 つ以上の任意個のノードを 1 つの関係として束ねる第一級エンティティ。1 つの型名とロール付きメンバー集合、複数のプロパティを持つ。`HyperedgeId` で識別される。リレーションシップとは別のエンティティ種別 |
+| **Role（ロール）** | ハイパーエッジにおけるメンバーの位置づけ（例: `"buyer"`、`"subject"`）。無向のハイパーエッジでは方向（Out/In）の代わりにロールフィルタが方向の一般化になる |
+| **Member（メンバー）** | ハイパーエッジに属すノード。ロールと `NodeId` の組（`HyperedgeMember`）で表す。メンバー集合は作成時に確定し、以後変更できない（変更は削除 + 再作成） |
+| **Arity（アリティ）** | ハイパーエッジのメンバー数。2 以上を要求する。リレーションシップは数学的にはアリティ 2 のハイパーエッジの特殊化にあたる |
+| **Co-membership** | 同じハイパーエッジに属すノード同士の関係。「起点ノード → 所属ハイパーエッジ → 別ロールのメンバー」の 1 論理ホップで辿る。`GraphDatabaseOptions.CoMembershipRolePairs` にロール対を登録すると物理ビューで高速化される |
 
 ## 識別子
 
@@ -22,7 +27,9 @@ Quiver の API やドキュメントに登場する用語を定義する。
 |---|---|
 | **NodeId** | ノードの識別子（`readonly record struct`）。`Value` は generation と sequence のパック値で、スロット再利用後も一貫性を保つ |
 | **RelationshipId** | リレーションシップの識別子 |
-| **EntityId** | ノードとリレーションシップを統一的に扱うための ID。`EntityId.FromNode(id)` で変換する |
+| **HyperedgeId** | ハイパーエッジの識別子。NodeId と同じ generation + sequence のパック値 |
+| **HyperedgeTypeId** | インターンされたハイパーエッジ型の識別子。ロール名も同様に独立空間でインターンされる |
+| **EntityId** | ノード、リレーションシップ、ハイパーエッジを統一的に扱うための ID。`EntityId.FromNode(id)` で変換する |
 
 ## データベースとトランザクション
 
@@ -47,6 +54,9 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | **P（述語）** | フィルタ述語のファクトリクラス。`P.Eq(v)`、`P.Gt(v)`、`P.Lt(v)`、`P.Between(a,b)`、`P.StartsWith(s)` 等を提供する |
 | **AsCursor / AsEnumerable** | ストリーミング実行の終端ステップ。大量結果をメモリを抑えて逐次処理する |
 | **MERGE** | 既存ノードがあれば取得、なければ新規作成する冪等操作。`tx.MergeNode(label, matchKey, matchValue)` で使う |
+| **Hyperedges / Members / OtherMembers** | ハイパーエッジ走査のトラバーサルステップ。`Hyperedges(type?, role?)` はノードから所属ハイパーエッジへ、`Members(role?)` はメンバーノードへ展開する。`OtherMembers(role?)` は起点ノード自身を除外する co-membership |
+| **HyperedgeBuilder** | `g.AddHyperedge(type)` が返す作成ビルダ。`.Member(role, nodeId)` を複数回呼び、`.P(...)` でプロパティを積み、`.Next()` で確定する |
+| **HyperedgePattern** | Match DSL の星型パターン。`GraphPattern.Hyperedge("f", "Fact").Member("subject", ...)` のように 1 つのハイパーエッジと複数のロール付きメンバーを同じ結果行へ束縛する |
 
 ## Source Generator
 
@@ -56,6 +66,9 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | **[Relationship]** | リレーションシップモデルクラスに付与する属性。`Relationship<TSource, TTarget>` でエンドポイント型を指定する |
 | **[Property]** | グラフプロパティとして永続化するメンバに付与する属性 |
 | **[Indexed]** | B+Tree インデックスを自動作成する属性。`[Property]` と併用すると `FindBy{PropName}` メソッドが生成される |
+| **[Hyperedge]** | ハイパーエッジモデルクラスに付与する属性。`Insert`、`Load`、`Update`（プロパティのみ）、`Delete` と、ロールごとの型保存トラバーサル糖衣が自動生成される |
+| **[Role]** | ハイパーエッジのロールを宣言するプロパティ属性。型は `GraphNodeRef<TNode>`（複数メンバーは `IReadOnlyList<GraphNodeRef<TNode>>`、省略可能ロールは nullable）で参照先ノード型を表す |
+| **GraphNodeRef&lt;TNode&gt;** | ノード CLR 型を保ったまま `NodeId` を保持する参照。`NodeId` からの暗黙変換を持ち、ロールへの型不一致の代入はコンパイルエラーになる |
 
 ## インデックス
 
@@ -104,6 +117,7 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | **IngestedDocument** | 取込契約。`SourceId`（一意キー）、`Title`、`Metadata`、`Blocks`（正規化ブロック列）を持つ |
 | **IChunkEmbedder** | チャンクテキストからベクトル埋め込みを生成するインタフェース。実装はアプリケーション側が注入する |
 | **Graph Expansion** | ヒットしたチャンクから `NEXT_CHUNK`、`HAS_CHUNK` を辿って前後文脈や親文書を復元する機能。ベクトル DB が返せるのはヒット単体だけだが、Quiver はグラフ走査で文脈を復元できる |
+| **n 項ファクト（Fact パターン）** | 主体（subject）、客体（object）、出典（source = Chunk）、時点（asOf）などのロールを持つハイパーエッジで知識を表す利用パターン。出典がファクトのメンバーとして構造的に付随するため、回答生成時の出典引用（grounded citation）を join なしで取れる。実例は `samples/Quiver.Samples.Hyperedges/` |
 
 ## パッケージ
 
@@ -122,7 +136,7 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | **\*.quiver** | Quiver のデータファイル。静止時は単一ファイルにすべてのデータが格納される |
 | **\*.quiver-wal** | WAL（Write-Ahead Log）サイドカー。稼働中にのみ存在し、クリーンシャットダウン後は空か不在になる |
 | **WAL** | データファイルへの書き込みに先立ってログを書くことで、クラッシュリカバリを保証する仕組み |
-| **FormatVersion** | オンディスクフォーマットのバージョン（現在 V1）。不一致時は `FormatVersionMismatchException` がスローされる |
+| **FormatVersion** | オンディスクフォーマットのバージョン（現在 V4）。不一致時は `FormatVersionMismatchException` がスローされる |
 
 ## メンテナンス
 

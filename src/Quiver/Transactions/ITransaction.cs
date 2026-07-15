@@ -30,6 +30,11 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     void Abort();
 
     /// <summary>
+    /// 同一トランザクションハンドルの並行使用を検出するための使用スコープを開始する。
+    /// </summary>
+    TransactionUsageLease EnterUsage();
+
+    /// <summary>
     /// トランザクション内に savepoint を作成し、その識別子を返す。
     /// 以後の変更を <see cref="RollbackTo"/> で巻き戻したり、<see cref="ReleaseSavepoint"/> で
     /// 親スコープへマージしたりできる。Nested savepoint をサポート。
@@ -54,12 +59,18 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
 
     INodeStore Nodes { get; }
     IRelationshipStore Relationships { get; }
+    IHyperedgeStore Hyperedges { get; }
+    IIncidenceStore Incidences { get; }
+    INodeIncidenceHeadStore NodeIncidenceHeads { get; }
     IPropertyStore Properties { get; }
     IIndexManager Indexes { get; }
 
     // BulkLoader が構築する連続隣接インデックス。未構築またはミューテーション後は null。
     // ExpandOperator が高速な隣接スキャンに使い、null のときはリンクリストにフォールバック。
     IAdjacencyBlockStore? AdjacencyBlocks { get; }
+
+    // 明示設定されたロール対の co-membership 導出ビュー。未設定なら null。
+    ICoMembershipBlockStore? CoMembershipBlocks { get; }
 
     // バックエンド提供のアクセスメソッド。オペレータは Nodes/Relationships/AdjacencyBlocks を
     // 直接読まずこちら経由で呼ぶ。バックエンド固有実装が無い場合は InlineGraphAccessMethods.Instance。

@@ -52,7 +52,7 @@ public sealed class FullTextMaintenanceTests : IDisposable
         ft.DocumentCount.Should().Be(1);
         var hello = ft.GetPostings("hello");
         hello.Should().ContainSingle();
-        EntityRef.Sequence(hello[0].EntityId).Should().Be(node.Sequence);
+        EntityRef.UnpackSequence(hello[0].EntityId).Should().Be(node.Sequence);
     }
 
     [Fact]

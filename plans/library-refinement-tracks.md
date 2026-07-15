@@ -56,7 +56,7 @@ Wave 4 (運用・前倒し): REF-12 ── REF-13      (Export→Import。凍結
 Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 ```
 
-- **REF-7 (凍結) より前に必ず完了させるもの**: REF-16, REF-2, REF-3, REF-4, REF-6, REF-8, REF-9, REF-10
+- **REF-7 (凍結) より前に必ず完了させるもの**: ZD-2, VP-3, REF-16, REF-2, REF-3, REF-4, REF-6, REF-8, REF-9, REF-10
   (public 表面の縮小・既定挙動の変更は 0.x でしか無料でできない。REF-10 は撤回後の唯一の非同期書き込み入口となるため必須へ格上げ)。
   REF-5, REF-12/13 も凍結前完了が望ましい。
 - **既存計画との関係**: [ga-readiness.md](ga-readiness.md) の GA-1 は REF-8 に、GA-2〜4 は REF-4/REF-5 に**置換 (supersede)** される。
@@ -230,6 +230,13 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 - **目的**: v1-consolidation §E の「唯一の不可逆ステップ」を、前提条件を検証してから実行する。
 - **対象**: `Directory.Build.props`、全 PublicApi approval baseline、`docs/api-stability.md`、README、リリース前検証記録。
 - **前提条件 (すべて満たすまで着手しない)**:
+  - [x] ZD-2 (Core の Logging.Abstractions 除去 + EventSource / Hosting bridge) 完了 — commit `345b249`
+  - [ ] VP-3 (FormatVersion V2 + 自己記述 vector catalog + per-index HNSW レイアウト) 完了
+  - [x] ベクトル要素表現の契約予約 (`VectorElementType`) 完了 — 2026-07-03。量子化埋め込み
+    (int8 等) の将来対応に備え、格納表現を `VectorIndexSpec` / catalog entry / payload ヘッダ
+    (offset 12) に永続化。現在は Float32 のみ許可し、未対応値は作成時・読込時・open 時に
+    `VectorException` で拒否。catalog は末尾フィールド追加 (V2 の長さプレフィクス機構) のため
+    FormatVersion 据え置き。スコアリングカーネルの抽象化は 2 つ目の表現の実装時に行う
   - [ ] REF-2 (backend 畳み込み) / REF-6 (承認済み API 降格) 完了
   - [ ] REF-4 (FtsQuery) 完了 — 検索エントリのシグネチャは凍結後に変えられない
   - [ ] REF-16 (非同期 tx API 撤回) 完了 — 撤回は公開後 MAJOR になるため凍結前が唯一の機会
@@ -427,7 +434,7 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 
 ### REF-14: 運用契約のランタイム診断化 (メトリクス + 警告)
 
-- **目的**: known_limits の運用ルールを「読まなくても気づける」ものにする。文書化済みのフットガン (長寿命 tx の WAL ピン留め、WAL 成長、HNSW tombstone) を ILogger 警告 + `System.Diagnostics.Metrics` で既定露出する。
+- **目的**: known_limits の運用ルールを「読まなくても気づける」ものにする。文書化済みのフットガン (長寿命 tx の WAL ピン留め、WAL 成長、HNSW tombstone) を EventSource イベント + `System.Diagnostics.Metrics` で既定露出する。
 - **対象**: コア各所 (Checkpointer / TransactionManager / HnswIndex / WAL)、[src/Quiver.OpenTelemetry/QuiverInstrumentation.cs](../src/Quiver.OpenTelemetry/QuiverInstrumentation.cs)。
 - **実装手順**:
   1. Meter 名・instrument 名・単位・警告しきい値を文書とテストで固定する。
@@ -436,13 +443,13 @@ Wave 5 (観測性):       REF-14, REF-15       (追加的 = 凍結後でも可)
 - **仕様 (計装項目)**:
   | 項目 | 種別 | しきい値/備考 |
   |---|---|---|
-  | 長寿命トランザクション | ILogger Warning (1 回/tx) | 既定 30 秒超 or WAL ピン留め 64MB 超。オプションで調整可 |
+  | 長寿命トランザクション | EventSource Warning (1 回/tx) | 既定 30 秒超 or WAL ピン留め 64MB 超。Hosting は ILogger へ転送。オプションで調整可 |
   | WAL サイズ / 切り詰め契機 | ObservableGauge + Counter | checkpoint 完了時に更新 (ホットパス外) |
   | group commit 効率 | Histogram (batch サイズ) | commit 経路 — **0-alloc 必須、実測で退行 ±2% 以内** |
   | HNSW tombstone 比率 / rebuild 発火 | ObservableGauge + Counter | 既存 auto-rebuild トリガに接続 |
   | checkpoint 所要 / vacuum 回収量 | Histogram / Counter | |
 - **判断ポイント (遵守)**:
-  - コアの計装は **`Meter` + `ILogger` のみ** (どちらも既存依存の範囲内。OpenTelemetry パッケージへの依存をコアに足さない)。Quiver.OpenTelemetry は Meter 名の登録ヘルパを足すだけ。
+  - コアの計装は **`ActivitySource` + `Meter` + `EventSource` のみ** (すべて in-box)。OpenTelemetry / Microsoft.Extensions.Logging への依存をコアに足さない。Quiver.OpenTelemetry は Source / Meter 名を登録し、Quiver.Hosting が EventSource を ILogger へ転送する。
   - **測定はホットパス外で**: gauge は checkpoint / vacuum / rebuild 等の低頻度イベントで更新。トラバーサル反復・per-op 経路に計装を入れない。commit 経路の histogram のみ例外とし、実測 gate (G-5) を通す。
   - 警告ログはレート制限 (同一 tx で 1 回、WAL 警告は指数間隔) — ログ洪水を作らない。
 - **完了条件**: 各項目のユニットテスト (しきい値発火 / 非発火)。commit 経路 before/after 実測。docs/operations/03_performance_tuning.md にメトリクス一覧表を追加。

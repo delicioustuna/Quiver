@@ -219,6 +219,8 @@ internal static class LogicalOptimizer
     {
         FilterOp x               => x with { Source = f(x.Source) },
         ExpandOp x               => x with { Source = f(x.Source) },
+        ExpandToHyperedgeOp x    => x with { Source = f(x.Source) },
+        ExpandMembersOp x        => x with { Source = f(x.Source) },
         VarLenExpandOp x         => x with { Source = f(x.Source) },
         PathOp x                 => x with { Source = f(x.Source) },
         PropertyLookupOp x       => x with { Source = f(x.Source) },

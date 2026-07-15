@@ -23,6 +23,7 @@ internal sealed class PersistentVectorStore : IVectorStore
     // (kind, sequence) → 現世代を引く resolver。slot 再利用で別エンティティに化けた
     // stale binding を KNN read 時に弾くために使う。null = 旧経路 / テスト (世代照合なし)。
     private readonly Func<EntityKind, long, int>? _currentGeneration;
+    private readonly VectorPayloadCacheBudget _cacheBudget;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, IndexHandle> _indexes = new(StringComparer.Ordinal);
     // catalog は遅延生成 (ctor が空テナントへヘッダページを書くのを避け、ベクトルを使わない DB の
@@ -31,11 +32,13 @@ internal sealed class PersistentVectorStore : IVectorStore
 
     public PersistentVectorStore(
         SingleFileContainer container, byte catalogTenantId,
-        Func<EntityKind, long, int>? currentGeneration = null)
+        Func<EntityKind, long, int>? currentGeneration = null,
+        long vectorCacheBudgetBytes = 64L * 1024 * 1024)
     {
         _container = container;
         _catalogTenantId = catalogTenantId;
         _currentGeneration = currentGeneration;
+        _cacheBudget = new VectorPayloadCacheBudget(vectorCacheBudgetBytes);
         // 既存 DB のみ、登録済み index を eager に開く。
         if (_container.HasTenant(catalogTenantId))
         {
@@ -51,22 +54,21 @@ internal sealed class PersistentVectorStore : IVectorStore
     private IndexHandle OpenHandle(VectorCatalogEntry e)
     {
         var payload = new VectorPayloadStore(
-            _container.OpenTenant(e.PayloadTenant, PageKind.Header), e.Spec.Dimensions);
+            _container.OpenTenant(e.PayloadTenant, PageKind.Header),
+            e.Spec.Dimensions,
+            e.Spec.ElementType,
+            _cacheBudget);
         if (e.Spec.IndexKind == VectorIndexKind.FlatOnly)
             return new IndexHandle(e.Spec, payload, null);
         var hnsw = new HnswIndex(
-            _container.OpenTenant(e.HnswTenant, PageKind.Header), payload, e.Spec.Metric);
+            _container.OpenTenant(e.HnswTenant, PageKind.Header), payload, e.Spec);
         return new IndexHandle(e.Spec, payload, hnsw);
     }
 
     public void CreateVectorIndex(VectorIndexSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
-        if (string.IsNullOrEmpty(spec.Name))
-            throw new VectorException("Vector index name must not be empty.");
-        if (spec.Dimensions <= 0)
-            throw new VectorException(
-                $"Vector index '{spec.Name}' must have positive dimensions (was {spec.Dimensions}).");
+        VectorIndexSpecValidator.Validate(spec);
 
         lock (_gate)
         {
@@ -82,9 +84,13 @@ internal sealed class PersistentVectorStore : IVectorStore
         ArgumentException.ThrowIfNullOrEmpty(name);
         lock (_gate)
         {
-            if (!_indexes.Remove(name))
+            if (!_indexes.TryGetValue(name, out var handle))
                 throw new VectorException($"Vector index '{name}' does not exist.");
-            Catalog.Unregister(name);
+            using (handle.Write())
+            {
+                _indexes.Remove(name);
+                Catalog.Unregister(name);
+            }
         }
     }
 
@@ -116,9 +122,9 @@ internal sealed class PersistentVectorStore : IVectorStore
         // binding キーは slot Sequence へ正規化 (node.Value (gen 付き packed) を渡されうる)。
         // 現世代を payload に焼き込み、slot 再利用で別エンティティに化けた stale binding を
         // KNN read 時に弾けるようにする。resolver 無し (テスト) は 0。
-        long seq = EntityRef.Sequence(entityId);
+        long seq = EntityRef.UnpackSequence(entityId);
         ushort gen = ResolveGen(kind, seq);
-        lock (_gate)
+        using (h.Write())
         {
             h.Payload.Set(seq, gen, vector);
             h.Hnsw?.Upsert(seq);
@@ -128,8 +134,8 @@ internal sealed class PersistentVectorStore : IVectorStore
     public void RemoveVector(EntityKind kind, long entityId, string indexName)
     {
         IndexHandle h = GetIndex(indexName);
-        long seq = EntityRef.Sequence(entityId);
-        lock (_gate)
+        long seq = EntityRef.UnpackSequence(entityId);
+        using (h.Write())
         {
             h.Payload.Remove(seq);
             h.Hnsw?.Delete(seq);
@@ -143,8 +149,8 @@ internal sealed class PersistentVectorStore : IVectorStore
         if (kind != h.Spec.EntityKind) return false;
         if (destination.Length < h.Spec.Dimensions) return false;
 
-        long seq = EntityRef.Sequence(entityId);
-        lock (_gate)
+        long seq = EntityRef.UnpackSequence(entityId);
+        using (h.Read())
         {
             if (!h.Payload.TryGet(seq, destination, out var gen))
                 return false;
@@ -152,8 +158,13 @@ internal sealed class PersistentVectorStore : IVectorStore
         }
     }
 
-    public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
+    public VectorSearchCursor KnnSearch(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
     {
+        options = VectorSearchOptionsValidator.Normalize(options);
         if (k <= 0) throw new VectorException($"KnnSearch requires positive k (was {k}).");
         IndexHandle h = GetIndex(indexName);
         if (h.Spec.IndexKind == VectorIndexKind.FlatOnly)
@@ -166,9 +177,50 @@ internal sealed class PersistentVectorStore : IVectorStore
 
         var kind = h.Spec.EntityKind;
         VectorSearchResult[] sorted;
-        lock (_gate)
-            sorted = h.Hnsw!.Search(query, k, kind, (seq, gen) => IsLive(kind, seq, gen));
+        using (h.Read())
+            sorted = h.Hnsw!.Search(
+                query, k, kind, (seq, gen) => IsLive(kind, seq, gen), options);
         return new SortedVectorCursor(sorted);
+    }
+
+    /// <summary>
+    /// ベンチマークと recall 検証用の exact top-k。HNSW を一切経由せず、payload の
+    /// <c>[0, Hwm)</c> を全走査して <see cref="VectorKnnHeap"/> で上位 k 件を求める。
+    /// 公開 API には露出させず、近似検索の独立した分母としてのみ使う。
+    /// </summary>
+    internal VectorSearchCursor KnnSearchExact(string indexName, ReadOnlySpan<float> query, int k)
+    {
+        if (k <= 0) throw new VectorException($"KnnSearchExact requires positive k (was {k}).");
+        IndexHandle h = GetIndex(indexName);
+        if (query.Length != h.Spec.Dimensions)
+            throw new VectorException(
+                $"Vector index '{indexName}' expects {h.Spec.Dimensions} dimensions, got {query.Length}.");
+
+        int dim = h.Spec.Dimensions;
+        var kind = h.Spec.EntityKind;
+        var heap = new VectorKnnHeap(k);
+        var buffer = ArrayPool<float>.Shared.Rent(dim);
+        try
+        {
+            using (h.Read())
+            {
+                var vector = buffer.AsSpan(0, dim);
+                for (long seq = 0; seq < h.Payload.Hwm; seq++)
+                {
+                    if (h.Payload.TryGet(seq, vector, out var gen) && IsLive(kind, seq, gen))
+                    {
+                        heap.Offer(new VectorSearchResult(
+                            kind, seq, VectorMetrics.Score(h.Spec.Metric, query, vector)));
+                    }
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(buffer);
+        }
+
+        return new SortedVectorCursor(heap.ToSortedArray());
     }
 
     /// <summary>
@@ -176,8 +228,13 @@ internal sealed class PersistentVectorStore : IVectorStore
     /// 大候補 (低選択率) は HNSW 探索 + post-filter (ef オーバーサンプルで k 件を確保)。
     /// </summary>
     public VectorSearchCursor KnnSearchFiltered(
-        string indexName, ReadOnlySpan<float> query, int k, EntityCandidateSet candidates)
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        EntityCandidateSet candidates,
+        VectorSearchOptions? options = null)
     {
+        options = VectorSearchOptionsValidator.Normalize(options);
         ArgumentNullException.ThrowIfNull(candidates);
         if (k <= 0) throw new VectorException($"KnnSearchFiltered requires positive k (was {k}).");
         IndexHandle h = GetIndex(indexName);
@@ -190,7 +247,7 @@ internal sealed class PersistentVectorStore : IVectorStore
         int dim = h.Spec.Dimensions;
         var metric = h.Spec.Metric;
         var kind = h.Spec.EntityKind;
-        lock (_gate)
+        using (h.Read())
         {
             long hwm = h.Payload.Hwm;
             if (h.Hnsw is null || candidates.Count * 4 <= hwm || hwm == 0)
@@ -209,14 +266,19 @@ internal sealed class PersistentVectorStore : IVectorStore
             }
             var sorted = h.Hnsw.Search(query, k, kind,
                 (seq, gen) => IsLive(kind, seq, gen),
+                options,
                 seq => candidates.Contains(kind, seq));
             return new SortedVectorCursor(sorted);
         }
     }
 
     public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
-        string indexName, IReadOnlyList<ReadOnlyMemory<float>> queries, int k)
+        string indexName,
+        IReadOnlyList<ReadOnlyMemory<float>> queries,
+        int k,
+        VectorSearchOptions? options = null)
     {
+        options = VectorSearchOptionsValidator.Normalize(options);
         ArgumentNullException.ThrowIfNull(queries);
         if (k <= 0) throw new VectorException($"KnnSearchBatch requires positive k (was {k}).");
         if (queries.Count == 0) return Array.Empty<VectorSearchCursor>();
@@ -235,11 +297,16 @@ internal sealed class PersistentVectorStore : IVectorStore
         var kind = h.Spec.EntityKind;
         int Q = queries.Count;
         var cursors = new VectorSearchCursor[Q];
-        lock (_gate)
+        using (h.Read())
         {
             for (int q = 0; q < Q; q++)
             {
-                var sorted = h.Hnsw!.Search(queries[q].Span, k, kind, (seq, gen) => IsLive(kind, seq, gen));
+                var sorted = h.Hnsw!.Search(
+                    queries[q].Span,
+                    k,
+                    kind,
+                    (seq, gen) => IsLive(kind, seq, gen),
+                    options);
                 cursors[q] = new SortedVectorCursor(sorted);
             }
         }
@@ -269,8 +336,11 @@ internal sealed class PersistentVectorStore : IVectorStore
                 _indexes.Remove(name);
             foreach (var h in _indexes.Values)
             {
-                h.Payload.ReloadMeta();
-                h.Hnsw?.ReloadFromPages();
+                using (h.Write())
+                {
+                    h.Payload.ReloadMeta();
+                    h.Hnsw?.ReloadFromPages();
+                }
             }
         }
     }
@@ -306,5 +376,38 @@ internal sealed class PersistentVectorStore : IVectorStore
         return cur >= 0 && (ushort)Math.Min(cur, EntityRef.MaxGeneration) == storedGen;
     }
 
-    private sealed record IndexHandle(VectorIndexSpec Spec, VectorPayloadStore Payload, HnswIndex? Hnsw);
+    private sealed class IndexHandle(
+        VectorIndexSpec spec,
+        VectorPayloadStore payload,
+        HnswIndex? hnsw)
+    {
+        private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
+
+        public VectorIndexSpec Spec { get; } = spec;
+        public VectorPayloadStore Payload { get; } = payload;
+        public HnswIndex? Hnsw { get; } = hnsw;
+
+        public LockScope Read() => new(_lock, write: false);
+        public LockScope Write() => new(_lock, write: true);
+    }
+
+    private readonly struct LockScope : IDisposable
+    {
+        private readonly ReaderWriterLockSlim _lock;
+        private readonly bool _write;
+
+        public LockScope(ReaderWriterLockSlim @lock, bool write)
+        {
+            _lock = @lock;
+            _write = write;
+            if (write) @lock.EnterWriteLock();
+            else @lock.EnterReadLock();
+        }
+
+        public void Dispose()
+        {
+            if (_write) _lock.ExitWriteLock();
+            else _lock.ExitReadLock();
+        }
+    }
 }

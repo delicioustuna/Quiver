@@ -20,4 +20,16 @@ public enum LogicalMutationKind : byte
     SetRelationshipProperty = 6,
     /// <summary>ノードプロパティの削除。</summary>
     RemoveNodeProperty = 7,
+    /// <summary>ハイパーエッジ作成。</summary>
+    CreateHyperedge = 8,
+    /// <summary>ハイパーエッジ削除。</summary>
+    DeleteHyperedge = 9,
+    /// <summary>ハイパーエッジプロパティの設定 (Single cardinality)。</summary>
+    SetHyperedgeProperty = 10,
+    /// <summary>ハイパーエッジプロパティの削除 (Single cardinality)。</summary>
+    RemoveHyperedgeProperty = 11,
+    /// <summary>ハイパーエッジのマルチバリュープロパティへの値追加 (Set cardinality)。</summary>
+    AddHyperedgePropertyValue = 12,
+    /// <summary>ハイパーエッジのマルチバリュープロパティからの値除去 (Set cardinality)。</summary>
+    RemoveHyperedgePropertyValue = 13,
 }

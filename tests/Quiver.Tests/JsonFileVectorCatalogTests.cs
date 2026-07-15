@@ -47,7 +47,13 @@ public sealed class JsonFileVectorCatalogTests : IDisposable
     [Fact]
     public void Created_index_persists_across_reopen()
     {
-        var spec = MakeSpec();
+        var spec = MakeSpec() with
+        {
+            HnswM = 12,
+            HnswMMax0 = 20,
+            HnswMaxLayers = 6,
+            HnswEfConstruction = 160,
+        };
         var first = new JsonFileVectorCatalog(_path);
         first.CreateIndex(spec);
         File.Exists(_path).Should().BeTrue();

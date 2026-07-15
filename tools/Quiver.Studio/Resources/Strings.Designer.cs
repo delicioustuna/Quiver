@@ -1,3 +1,5 @@
+#nullable enable
+
 namespace Quiver.Studio.Resources;
 
 using System.Globalization;

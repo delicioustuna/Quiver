@@ -133,8 +133,9 @@ else
 
 ## ログの読み方
 
-`GraphDatabaseOptions.LoggerFactory` (または Hosting の DI) で `ILoggerFactory` を渡すと、
-recovery、checkpoint、lock、vacuum の構造化ログが出る。
+core は `Quiver-EventSource` から transaction、query、checkpoint、WAL flush の構造化イベントを出す。
+`Quiver.Hosting` 利用時はこれらがホストの `ILoggerFactory` へ自動転送される。
+Hosting を使わない場合は `dotnet-trace` または独自の `EventListener` で購読する。
 
 - **起動時**: recovery が「何 LSN から何 LSN まで replay したか」「undo した tx 数」を出す。
   毎回 recovery が走る (= 直前に異常終了している) なら正常終了経路を見直す。
@@ -198,5 +199,5 @@ open 直後に自動修復させる。
 2. 直近バックアップから復元できるか確認 ([02_backup_restore.md](02_backup_restore.md))。
 3. `CheckIndexConsistency()` で索引整合を確認、必要なら `RepairIndexes(Apply)`。
 4. ディスク使用量問題なら `Vacuum(DryRun)` → `Vacuum()`。
-5. ログ (LoggerFactory) と `dotnet-counters` で recovery 回数・orphan・deadlock を観測。
+5. Hosting の構造化ログまたは `dotnet-trace` と `dotnet-counters` で recovery 回数・orphan・deadlock を観測。
 6. `EnableChecksums` は無効化しない。破損の早期検出を失うだけ。

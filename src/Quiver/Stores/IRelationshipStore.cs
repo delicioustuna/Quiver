@@ -21,6 +21,9 @@ internal interface IRelationshipStore
     /// </summary>
     IEnumerable<RelationshipId> Scan();
 
+    /// <summary>指定 sequence の現在の Generation。範囲外なら -1。</summary>
+    int CurrentGeneration(long localId) => -1;
+
     // リレーションシップ粒度の inline property。node (INodeStore) と同型。
     // 小さい値は rel record version へ inline 格納し get/has/set/remove を O(small) 化する。
     // inline 不可な値は false を返し、呼出側 (GraphTransaction) が overflow チェーンへ回す。
@@ -159,6 +162,7 @@ internal ref struct RelationshipWriteHandle
 public ref struct RelationshipEnumerator
 {
     private readonly IRelationshipStore _store;
+    private readonly INodeStore _nodes;
     private readonly NodeId _nodeId;
     private readonly RelationshipTypeId _filterType;
     private readonly Direction _direction;
@@ -167,16 +171,16 @@ public ref struct RelationshipEnumerator
     private RelationshipReadHandle _current;
     private bool _started;
 
-    internal RelationshipEnumerator(IRelationshipStore store, NodeId nodeId, RelationshipId firstRelId)
+    internal RelationshipEnumerator(IRelationshipStore store, INodeStore nodes, NodeId nodeId, RelationshipId firstRelId)
     {
-        _store = store; _nodeId = nodeId; _currentId = firstRelId;
+        _store = store; _nodes = nodes; _nodeId = nodeId; _currentId = firstRelId;
         _filterType = default; _direction = Direction.Both; _hasFilter = false; _started = false;
     }
 
-    internal RelationshipEnumerator(IRelationshipStore store, NodeId nodeId, RelationshipId firstRelId,
+    internal RelationshipEnumerator(IRelationshipStore store, INodeStore nodes, NodeId nodeId, RelationshipId firstRelId,
         RelationshipTypeId type, Direction direction)
     {
-        _store = store; _nodeId = nodeId; _currentId = firstRelId;
+        _store = store; _nodes = nodes; _nodeId = nodeId; _currentId = firstRelId;
         _filterType = type; _direction = direction; _hasFilter = true; _started = false;
     }
 
@@ -188,7 +192,18 @@ public ref struct RelationshipEnumerator
 
         while (_currentId.IsValid)
         {
-            _current = _store.Read(_currentId);
+            var raw = _store.Read(_currentId);
+            _current = new RelationshipReadHandle(
+                raw.Id,
+                raw.InUse,
+                Materialize(raw.Source),
+                Materialize(raw.Target),
+                raw.Type,
+                raw.SourcePrev,
+                raw.SourceNext,
+                raw.TargetPrev,
+                raw.TargetNext,
+                raw.FirstPropertyId);
             // 論理削除された (= MVCC visibility で invisible な) record は
             // Read が InUse=false を返す。チェーンは維持されているので next に進む。
             if (!_current.InUse)
@@ -205,9 +220,16 @@ public ref struct RelationshipEnumerator
     private RelationshipId NextInChain()
     {
         // _nodeId 側のチェーンを辿る
-        if (_current.Source == _nodeId)
+        if (_current.Source.Sequence == _nodeId.Sequence)
             return _current.SourceNext;
         return _current.TargetNext;
+    }
+
+    private NodeId Materialize(NodeId id)
+    {
+        if (!id.IsValid) return id;
+        int generation = _nodes.CurrentGeneration(id.Sequence);
+        return generation < 0 ? NodeId.Invalid : NodeId.Create(id.Sequence, generation);
     }
 
     private bool Matches()
@@ -216,8 +238,8 @@ public ref struct RelationshipEnumerator
         if (!typeOk) return false;
         return _direction switch
         {
-            Direction.Outgoing => _current.Source == _nodeId,
-            Direction.Incoming => _current.Target == _nodeId,
+            Direction.Outgoing => _current.Source.Sequence == _nodeId.Sequence,
+            Direction.Incoming => _current.Target.Sequence == _nodeId.Sequence,
             _ => true,
         };
     }

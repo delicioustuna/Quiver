@@ -20,13 +20,19 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     internal long FallbackCountInternal;
 
     private readonly IVectorStore _vectors;
+    private readonly RelationshipDeltaStore _relationshipDeltas;
     // ラベル転置索引 (任意)。接続時はラベル付き ScanNodes/LabelScan が全件 Scan() から O(|L|) lookup に切り替わる。
     private LabelNodeIndex? _labelIndex;
 
-    internal BinaryGraphAccessMethods(IVectorStore vectors)
+    internal BinaryGraphAccessMethods(
+        IVectorStore vectors,
+        RelationshipDeltaStore? relationshipDeltas = null)
     {
         _vectors = vectors;
+        _relationshipDeltas = relationshipDeltas ?? RelationshipDeltaStore.Shared;
     }
+
+    internal RelationshipDeltaStore RelationshipDeltas => _relationshipDeltas;
 
     /// <summary>
     /// factory が NodeStore に attach した後の index を共有する。
@@ -50,32 +56,39 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     public bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
         => _vectors.TryGetVector(kind, entityId, indexName, destination);
 
-    public VectorSearchCursor KnnSearch(string indexName, ReadOnlySpan<float> query, int k)
-        => _vectors.KnnSearch(indexName, query, k);
+    public VectorSearchCursor KnnSearch(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
+        => _vectors.KnnSearch(indexName, query, k, options);
 
     // in-memory backend では gather-then-score / 単一 snapshot バッチで短絡。
     public VectorSearchCursor KnnSearchFiltered(
         string indexName,
         ReadOnlySpan<float> query,
         int k,
-        EntityCandidateSet candidates)
+        EntityCandidateSet candidates,
+        VectorSearchOptions? options = null)
     {
         if (_vectors is InMemoryVectorStore inMem)
-            return inMem.KnnSearchFiltered(indexName, query, k, candidates);
+            return inMem.KnnSearchFiltered(indexName, query, k, candidates, options);
         // 永続ストアも gather-then-score / scan+post-filter を直接持つ。
         if (_vectors is Storage.Records.PersistentVectorStore persistent)
-            return persistent.KnnSearchFiltered(indexName, query, k, candidates);
-        return IGraphAccessMethods.KnnSearchFilteredOversample(this, indexName, query, k, candidates);
+            return persistent.KnnSearchFiltered(indexName, query, k, candidates, options);
+        return IGraphAccessMethods.KnnSearchFilteredOversample(
+            this, indexName, query, k, candidates, options);
     }
 
     public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
         string indexName,
         IReadOnlyList<ReadOnlyMemory<float>> queries,
-        int k)
+        int k,
+        VectorSearchOptions? options = null)
     {
         if (_vectors is InMemoryVectorStore inMem)
-            return inMem.KnnSearchBatch(indexName, queries, k);
-        return _vectors.KnnSearchBatch(indexName, queries, k);
+            return inMem.KnnSearchBatch(indexName, queries, k, options);
+        return _vectors.KnnSearchBatch(indexName, queries, k, options);
     }
 
     public IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null)
@@ -129,14 +142,22 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
         Direction direction,
         RelationshipTypeId? typeFilter)
     {
+        var materializer = new EntityIdentityMaterializer(tx.Nodes);
+        if (!materializer.TryNode(source, out source))
+            return 0;
+
         // GraphStats 未接続のため、隣接ブロックがあれば安価な O(degree) プローブを使い、
         // なければチェーンを走査する。
         var adj = tx.AdjacencyBlocks;
         if (adj != null && adj.HasBlock(source))
         {
             var probe = new AdjacencyEntry[64];
-            int n = adj.ReadEdges(source, direction, typeFilter, probe);
-            return n < probe.Length ? n : probe.Length;
+            int baseCount = adj.ReadEdges(source, direction, typeFilter, probe);
+            int deltaLimit = Math.Max(0, probe.Length - Math.Min(baseCount, probe.Length));
+            int deltaCount = _relationshipDeltas.Count(
+                tx, source, direction, typeFilter, adj.BaseRelHwm, deltaLimit);
+            int total = Math.Min(probe.Length, baseCount + deltaCount);
+            return total;
         }
 
         double count = 0;
@@ -147,12 +168,12 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
             bool typeOk = !typeFilter.HasValue || rel.Type == typeFilter.Value;
             bool dirOk = direction switch
             {
-                Direction.Outgoing => rel.Source == source,
-                Direction.Incoming => rel.Target == source,
+                Direction.Outgoing => rel.Source.Sequence == source.Sequence,
+                Direction.Incoming => rel.Target.Sequence == source.Sequence,
                 _ => true,
             };
             if (typeOk && dirOk) count++;
-            relId = rel.Source == source ? rel.SourceNext : rel.TargetNext;
+            relId = rel.Source.Sequence == source.Sequence ? rel.SourceNext : rel.TargetNext;
         }
         return count;
     }

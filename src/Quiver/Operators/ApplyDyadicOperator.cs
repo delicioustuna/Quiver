@@ -32,6 +32,7 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
     private readonly int? _oversample;
 
     private VectorSearchResult[]? _results;
+    private Dictionary<long, long>? _logicalNodeIds;
     private int _resultIndex = -1;
     private readonly TupleSlot[] _buf = new TupleSlot[1];
 
@@ -87,10 +88,21 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
         _source.Open(tx);
 
         var candidateIds = new List<long>();
+        _logicalNodeIds = new Dictionary<long, long>();
         while (_source.MoveNext())
         {
             var slot = _source.Current[_sourceNodeColumn];
-            if (slot.Type == TupleSlotType.NodeId) candidateIds.Add(slot.LongValue);
+            if (slot.Type != TupleSlotType.NodeId)
+                continue;
+
+            // vector key は physical Sequence だが、operator の出力は full logical ID である。
+            // primary Read 直後にだけ Sequence へ落とし、対応する full ID を結果復元用に保持する。
+            using var node = tx.Nodes.Read(new NodeId(slot.LongValue));
+            if (node.InUse)
+            {
+                candidateIds.Add(node.Id.Sequence);
+                _logicalNodeIds[node.Id.Sequence] = node.Id.Value;
+            }
         }
 
         if (candidateIds.Count == 0)
@@ -207,7 +219,10 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
     {
         if (++_resultIndex >= _results!.Length) return false;
         var hit = _results[_resultIndex];
-        _buf[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = hit.EntityId };
+        if (!_logicalNodeIds!.TryGetValue(hit.EntityId, out long logicalNodeId))
+            throw new CorruptionException(
+                $"Vector result {hit.EntityId} was not present in the validated candidate set.");
+        _buf[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = logicalNodeId };
         var s = Statistics;
         s.RowsProduced++;
         Statistics = s;

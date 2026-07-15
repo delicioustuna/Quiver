@@ -10,7 +10,7 @@ namespace Quiver.Tests;
 /// インデックス値に世代を保持する仕組みを検証する。
 /// Vacuum のフリーリストによるスロット再利用後も古いインデックスエントリが
 /// 別ノードを返さないこと、孤立エントリ回収が世代不一致を除去できること、
-/// V4 より古いフォーマットを拒否することを確認する。
+/// 現行 V3 より古いフォーマットを拒否することを確認する。
 /// </summary>
 public sealed class IndexGenerationTests : IDisposable
 {
@@ -32,13 +32,14 @@ public sealed class IndexGenerationTests : IDisposable
     [InlineData(EntityKind.Node, 0L, 0)]
     [InlineData(EntityKind.Node, 1L, 1)]
     [InlineData(EntityKind.Relationship, 42L, 7)]
+    [InlineData(EntityKind.Hyperedge, 99L, 3)]
     [InlineData(EntityKind.Node, EntityRef.SequenceMask, EntityRef.MaxGeneration)]
     public void EntityRef_roundtrips(EntityKind kind, long seq, int gen)
     {
         long packed = EntityRef.Pack(kind, seq, gen);
         EntityRef.UnpackKind(packed).Should().Be(kind);
-        EntityRef.Sequence(packed).Should().Be(seq);
-        EntityRef.Generation(packed).Should().Be(gen);
+        EntityRef.UnpackSequence(packed).Should().Be(seq);
+        EntityRef.UnpackGeneration(packed).Should().Be(gen);
     }
 
     [Fact]
@@ -49,6 +50,29 @@ public sealed class IndexGenerationTests : IDisposable
 
         Action genOverflow = () => EntityRef.Pack(EntityKind.Node, 0, EntityRef.MaxGeneration + 1);
         genOverflow.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void EntityRef_factories_accept_only_canonical_identity_values()
+    {
+        EntityRef.From(NodeId.Invalid).Should().Be(default(EntityRef));
+        EntityRef.From(RelationshipId.Invalid).Should().Be(default(EntityRef));
+        EntityRef.From(HyperedgeId.Invalid).Should().Be(default(EntityRef));
+        default(EntityRef).IsValid.Should().BeFalse();
+
+        var node = EntityRef.From(NodeId.Create(42, 7));
+        node.IsValid.Should().BeTrue();
+        node.Kind.Should().Be(EntityKind.Node);
+        node.Sequence.Should().Be(42);
+        node.Generation.Should().Be(7);
+
+        Action reserved = () => EntityRef.Create((EntityKind)3, 1, 0);
+        Action unknown = () => EntityRef.Create((EntityKind)5, 1, 0);
+        Action packedReserved = () => EntityRef.Pack((EntityKind)15, 1, 0);
+        reserved.Should().Throw<ArgumentOutOfRangeException>();
+        unknown.Should().Throw<ArgumentOutOfRangeException>();
+        packedReserved.Should().Throw<ArgumentOutOfRangeException>();
+        EntityRef.UnpackKind(3L << EntityRef.KindShift).Should().Be((EntityKind)3);
     }
 
     // ---- ABA: slot reuse must not resurrect a stale index entry ----
@@ -252,44 +276,52 @@ public sealed class IndexGenerationTests : IDisposable
     // ---- Format version gate ----
 
     [Fact]
-    public void FormatVersion_current_is_v1()
+    public void FormatVersion_current_is_v5()
     {
-        // 未リリース期間中に重ねた format 履歴 (pre-MVCC → MVCC → sidecar → 単一ファイル →
-        // columnar → vector → 全文 → logical WAL) はクリーンブレイクで畳み、現実装を v1 として再宣言した。
-        FormatVersion.Current.Should().Be(FormatVersion.V1);
+        // FormatVersion V5 は relationship delta の永続ストア追加に伴う clean break。
+        FormatVersion.Current.Should().Be(FormatVersion.V5);
     }
 
     // 旧 format バイトを持つ store は open 時に reject される (クリーンブレイク; 自動マイグレーション無し)。
-    private const byte LegacyFormatVersion = 3;
+    private const byte LegacyFormatVersion = FormatVersion.V3;
 
     [Fact]
     public void Opening_store_with_legacy_format_version_throws_FormatVersionMismatch()
     {
         Directory.CreateDirectory(_dir);
-        var path = Path.Combine(_dir, "nodes.db");
+        var path = Path.Combine(_dir, "graph.quiver");
 
-        // 現行 (v1) で 1 ノード書く。
-        using (IPagedFile pf = new PagedFile(path))
+        // 現行 (v3) の実 DB を作る。
+        using (GraphDatabase.Open(path))
         {
-            var store = new NodeStore(pf);
-            store.Allocate(new LabelId(1));
         }
 
-        // ヘッダの format version バイト (page 1, body offset 31 = NodeStore.MetaFormatVersion) を
-        // 旧 format に書き換える。
-        using (IPagedFile pf = new PagedFile(path))
+        // node heap の format version バイト (logical page 1, body offset 31) を V2 に戻す。
+        using (var container = new SingleFileContainer(path))
         {
-            var ph = pf.PinForWrite(new PageId(1));
-            ph.Data[31] = LegacyFormatVersion;
-            pf.UnpinDirty(new PageId(1), 0);
+            var nodes = container.OpenTenant(
+                BinaryGraphStorageBackendFactory.TenantNodes, PageKind.Header);
+            using (var ph = nodes.PinForWrite(new PageId(1)))
+            {
+                ph.Data[31] = LegacyFormatVersion;
+            }
+            container.Flush();
         }
 
-        // 再 open は拒否される。
-        using (IPagedFile pf = new PagedFile(path))
+        // 実 DB の current node heap 実装による再 open は拒否される。
+        using (var container = new SingleFileContainer(path))
         {
-            Action reopen = () => new NodeStore(pf);
+            var nodes = container.OpenTenant(
+                BinaryGraphStorageBackendFactory.TenantNodes, PageKind.Header);
+            var nodeMapFile = container.OpenTenant(
+                BinaryGraphStorageBackendFactory.TenantNodeMap, PageKind.Header);
+            var nodeMap = new ItemPointerMap(nodeMapFile);
+            Action reopen = () => new VersionedRecordHeap(nodes, nodeMap);
             reopen.Should().Throw<FormatVersionMismatchException>()
-                .Which.Found.Should().Be(LegacyFormatVersion);
+                .Which.Should().Match<FormatVersionMismatchException>(
+                    ex => ex.FileKind == "versionedheap"
+                          && ex.Found == LegacyFormatVersion
+                          && ex.Expected == FormatVersion.V5);
         }
     }
 }

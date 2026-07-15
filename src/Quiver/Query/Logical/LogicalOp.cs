@@ -44,6 +44,13 @@ internal sealed record NodeSeedOp(NodeId[] Ids) : LogicalOp
     public override int PredictedOutputColumnCount => 1;
 }
 
+/// <summary>定数ハイパーエッジ起点 (<c>g.Hyperedge(id)</c>)。</summary>
+internal sealed record HyperedgeSeedOp(HyperedgeId Id) : LogicalOp
+{
+    public override int CurrentEntityColumn => 0;
+    public override int PredictedOutputColumnCount => 1;
+}
+
 /// <summary>
 /// 相関サブクエリ / 分岐の probe 起点。物理化時に <see cref="Probe"/> をそのまま用い、
 /// 外側オペレータがバインドする (現 <c>CorrelatedSeedBuilder</c> と同形)。
@@ -87,6 +94,36 @@ internal sealed record ExpandOp(
     public override int PredictedOutputColumnCount => BaseColumnCount + (Carry?.Length ?? 0);
 }
 
+/// <summary>
+/// node から参加 hyperedge へ展開する。出力は (sourceNode, hyperedge) + carry。
+/// source node は後続の OtherMembers で除外に使える hidden origin として保持する。
+/// </summary>
+internal sealed record ExpandToHyperedgeOp(
+    LogicalOp Source,
+    int SourceNodeColumn,
+    string? Type,
+    string? Role,
+    int[]? Carry) : LogicalOp
+{
+    public override int CurrentEntityColumn => 1;
+    public override int PredictedOutputColumnCount => 2 + (Carry?.Length ?? 0);
+}
+
+/// <summary>
+/// hyperedge から member node へ展開する。出力は (hyperedge, member) + carry。
+/// <see cref="ExcludeNodeColumn"/> が指定された場合は同じ node を結果から除外する。
+/// </summary>
+internal sealed record ExpandMembersOp(
+    LogicalOp Source,
+    int HyperedgeColumn,
+    string? Role,
+    int? ExcludeNodeColumn,
+    int[]? Carry) : LogicalOp
+{
+    public override int CurrentEntityColumn => 1;
+    public override int PredictedOutputColumnCount => 2 + (Carry?.Length ?? 0);
+}
+
 /// <summary>可変長展開 (<c>Repeat</c>)。(startNode, endNode) を放出し endNode が列 1。</summary>
 internal sealed record VarLenExpandOp(
     LogicalOp Source,
@@ -122,7 +159,8 @@ internal sealed record KnnOp(
     string IndexName,
     float[] Query,
     int K,
-    int Dim) : LogicalOp
+    int Dim,
+    VectorSearchOptions? Options = null) : LogicalOp
 {
     public override int CurrentEntityColumn => 0;
     public override int PredictedOutputColumnCount => 1;

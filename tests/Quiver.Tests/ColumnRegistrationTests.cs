@@ -85,4 +85,41 @@ public sealed class ColumnRegistrationTests : IDisposable
             db2.CreateColumn(EntityKind.Relationship, "w").Should().BeTrue();
         }
     }
+
+    [Fact]
+    public void Hyperedge_column_builds_from_data_and_tracks_later_writes()
+    {
+        HyperedgeId first;
+        NodeId a;
+        NodeId b;
+        using (var db = GraphDatabase.Open(_path))
+        {
+            using (var tx = db.BeginTransaction())
+            {
+                a = tx.CreateNode("Entity");
+                b = tx.CreateNode("Entity");
+                first = tx.CreateHyperedge("Fact", [new("Subject", a), new("Object", b)]);
+                tx.SetProperty(first, "confidence", PropertyValue.FromInt64(10));
+                tx.Commit();
+            }
+
+            db.CreateColumn(EntityKind.Hyperedge, "confidence").Should().BeTrue();
+            db.ColumnProjectSumForTest(EntityKind.Hyperedge, "confidence").Should().Be(10);
+
+            using (var tx = db.BeginTransaction())
+            {
+                var second = tx.CreateHyperedge("Fact", [new("Subject", a), new("Object", b)]);
+                tx.SetProperty(second, "confidence", PropertyValue.FromInt64(20));
+                tx.Commit();
+            }
+
+            db.ColumnProjectSumForTest(EntityKind.Hyperedge, "confidence").Should().Be(30);
+        }
+
+        using (var reopened = GraphDatabase.Open(_path))
+        {
+            reopened.CreateColumn(EntityKind.Hyperedge, "confidence").Should().BeFalse();
+            reopened.ColumnProjectSumForTest(EntityKind.Hyperedge, "confidence").Should().Be(30);
+        }
+    }
 }

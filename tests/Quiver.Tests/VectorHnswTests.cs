@@ -126,7 +126,7 @@ public sealed class VectorHnswTests : IDisposable
             var q = vectors[42];
             var top = TopK(db.Vectors.KnnSearch(IndexName, q, K), K);
             // クエリ自身 (seq=42) が最近傍に含まれる (cosine 自己類似 = 1)。
-            top.Should().Contain(EntityRef.Sequence(42));
+            top.Should().Contain(EntityRef.UnpackSequence(42));
         }
     }
 

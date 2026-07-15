@@ -164,7 +164,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         rows.Should().HaveCount(degree);
         foreach (var row in rows)
         {
-            long n = row.GetNodeId(1).Sequence; // ARCH-5b: 重みは slot 番号基準で設定したので Sequence で照合
+            long n = row.GetNodeId(1).Sequence; // 重みは slot 番号基準で設定したので Sequence で照合
             long w = row.GetInt64(2);
             w.Should().Be(100 + n);
         }
@@ -187,6 +187,199 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         view.PayloadSpec.DefaultRaw.Should().Be(0);
     }
 
+    [Fact]
+    public void Compact_preserves_and_refreshes_v2_payloads_through_product_path()
+    {
+        var weightKey = BuildWithInt64Weights(3);
+        RelationshipId deltaRel;
+        NodeId deltaNode;
+
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using (var tx = _db.BeginTransaction())
+        {
+            var updated = PropertyValue.FromInt64(700);
+            tx.SetProperty(new RelationshipId(0), "weight", in updated);
+
+            deltaNode = tx.CreateNode("V");
+            deltaRel = tx.CreateRelationship(new NodeId(0), deltaNode, "LINK");
+            var deltaWeight = PropertyValue.FromInt64(900);
+            tx.SetProperty(deltaRel, "weight", in deltaWeight);
+
+            tx.DeleteRelationship(new RelationshipId(2));
+            tx.Commit();
+        }
+
+        _db.CompactAdjacency();
+
+        using (var tx = _db.BeginTransaction())
+        {
+            var view = tx.AsInternal().AdjacencyBlocks as IAdjacencyPayloadView;
+            view.Should().NotBeNull();
+            view!.PayloadSpec.PropertyKeyId.Should().Be(weightKey.Value);
+            tx.AsInternal().AdjacencyBlocks!.IsTombstoned(new RelationshipId(2)).Should().BeFalse();
+
+            var seen = ReadOutgoingWeights(tx, new NodeId(0));
+            seen.Should().ContainKey(1);
+            seen[1].Should().Be(700);
+            seen.Should().ContainKey(2);
+            seen[2].Should().Be(102, "unchanged bulk payloads must survive compact");
+            seen.Should().ContainKey(deltaNode.Sequence);
+            seen[deltaNode.Sequence].Should().Be(900);
+            seen.Should().NotContainKey(3);
+        }
+
+        _db.Dispose();
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using (var tx = _db.BeginTransaction())
+        {
+            var seen = ReadOutgoingWeights(tx, new NodeId(0));
+            seen[1].Should().Be(700);
+            seen[2].Should().Be(102);
+            seen[deltaNode.Sequence].Should().Be(900);
+            seen.Should().NotContainKey(3);
+        }
+    }
+
+    [Fact]
+    public void Compact_interruption_after_descriptor_invalidation_reopens_on_row_path()
+    {
+        BuildWithInt64Weights(3);
+
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using (var tx = _db.BeginTransaction())
+        {
+            var updated = PropertyValue.FromInt64(700);
+            tx.SetProperty(new RelationshipId(0), "weight", in updated);
+            tx.Commit();
+        }
+
+        BinaryGraphStorageBackend.CompactAdjacencyPhaseInjector = phase =>
+        {
+            if (phase == CompactAdjacencyPhase.AfterDescriptorInvalidated)
+                throw new InvalidOperationException("injected compact interruption");
+        };
+
+        try
+        {
+            Action compact = () => _db.CompactAdjacency();
+            compact.Should().Throw<InvalidOperationException>()
+                .WithMessage("injected compact interruption");
+        }
+        finally
+        {
+            BinaryGraphStorageBackend.CompactAdjacencyPhaseInjector = null;
+        }
+
+        _db.Dispose();
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+
+        using var read = _db.BeginReadOnlyTransaction();
+        read.AsInternal().AdjacencyBlocks.Should().BeNull(
+            "an interrupted compact must not reopen a partial adjacency view");
+
+        ExpandOut(read, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
+        read.GetProperty(new RelationshipId(0), "weight").Int64Value.Should().Be(700);
+    }
+
+    [Fact]
+    public void Compact_interruption_after_rebuild_reopens_on_row_path_without_duplicate_delta()
+    {
+        BuildWithInt64Weights(3);
+
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        NodeId deltaNode;
+        RelationshipId deltaRel;
+        using (var tx = _db.BeginTransaction())
+        {
+            deltaNode = tx.CreateNode("V");
+            deltaRel = tx.CreateRelationship(new NodeId(0), deltaNode, "LINK");
+            tx.SetProperty(deltaRel, "weight", PropertyValue.FromInt64(900));
+            tx.DeleteRelationship(new RelationshipId(2));
+            tx.Commit();
+        }
+
+        BinaryGraphStorageBackend.CompactAdjacencyPhaseInjector = phase =>
+        {
+            if (phase == CompactAdjacencyPhase.AfterRebuild)
+                throw new InvalidOperationException("injected compact interruption");
+        };
+
+        try
+        {
+            Action compact = () => _db.CompactAdjacency();
+            compact.Should().Throw<InvalidOperationException>()
+                .WithMessage("injected compact interruption");
+        }
+        finally
+        {
+            BinaryGraphStorageBackend.CompactAdjacencyPhaseInjector = null;
+        }
+
+        _db.Dispose();
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+
+        using var read = _db.BeginReadOnlyTransaction();
+        read.AsInternal().AdjacencyBlocks.Should().BeNull(
+            "descriptor must remain invalid until compact epoch metadata is ready");
+
+        ExpandOut(read, new NodeId(0))
+            .Should().BeEquivalentTo(new[] { 1L, 2L, deltaNode.Sequence });
+        read.GetProperty(deltaRel, "weight").Int64Value.Should().Be(900);
+    }
+
+    [Fact]
+    public void Compact_interruption_after_final_descriptor_flush_reopens_v2_view_without_duplicate_delta()
+    {
+        var weightKey = BuildWithInt64Weights(3);
+
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        NodeId deltaNode;
+        RelationshipId deltaRel;
+        using (var tx = _db.BeginTransaction())
+        {
+            tx.SetProperty(new RelationshipId(0), "weight", PropertyValue.FromInt64(700));
+            deltaNode = tx.CreateNode("V");
+            deltaRel = tx.CreateRelationship(new NodeId(0), deltaNode, "LINK");
+            tx.SetProperty(deltaRel, "weight", PropertyValue.FromInt64(900));
+            tx.DeleteRelationship(new RelationshipId(2));
+            tx.Commit();
+        }
+
+        BinaryGraphStorageBackend.CompactAdjacencyPhaseInjector = phase =>
+        {
+            if (phase == CompactAdjacencyPhase.AfterFinalDescriptorFlushed)
+                throw new InvalidOperationException("injected compact interruption");
+        };
+
+        try
+        {
+            Action compact = () => _db.CompactAdjacency();
+            compact.Should().Throw<InvalidOperationException>()
+                .WithMessage("injected compact interruption");
+        }
+        finally
+        {
+            BinaryGraphStorageBackend.CompactAdjacencyPhaseInjector = null;
+        }
+
+        _db.Dispose();
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+
+        using var read = _db.BeginReadOnlyTransaction();
+        var view = read.AsInternal().AdjacencyBlocks as IAdjacencyPayloadView;
+        view.Should().NotBeNull("the final descriptor was durably flushed before interruption");
+        view!.PayloadSpec.PropertyKeyId.Should().Be(weightKey.Value);
+
+        ExpandOut(read, new NodeId(0))
+            .Should().BeEquivalentTo(new[] { 1L, 2L, deltaNode.Sequence });
+
+        var seen = ReadOutgoingWeights(read, new NodeId(0));
+        seen[1].Should().Be(700);
+        seen[2].Should().Be(102);
+        seen[deltaNode.Sequence].Should().Be(900);
+        seen.Should().NotContainKey(3);
+    }
+
     private PropertyKeyId BuildWithInt64Weights(int degree)
     {
         using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
@@ -203,6 +396,30 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         }
         loader.Commit();
         return key;
+    }
+
+    private static Dictionary<long, long> ReadOutgoingWeights(IGraphTransaction tx, NodeId source)
+    {
+        var seen = new Dictionary<long, long>();
+        using var cursor = tx.AsInternal().AdjacencyBlocks!.OpenCursor(source, Direction.Outgoing, null);
+        while (cursor.MoveNext())
+        {
+            if (!tx.AsInternal().AdjacencyBlocks!.IsTombstoned(cursor.Relationship))
+                seen[cursor.Neighbor.Sequence] = cursor.WeightRaw;
+        }
+        return seen;
+    }
+
+    private static List<long> ExpandOut(IGraphTransaction tx, NodeId source)
+    {
+        var op = new ExpandOperator(
+            new SingleNodeSource(source),
+            sourceNodeColumn: 0,
+            Direction.Outgoing,
+            typeFilter: null,
+            ExpandOutputMode.NeighborOnly);
+
+        return tx.Execute(op).Rows().Select(r => r.GetNodeId(0).Sequence).ToList();
     }
 
     /// <summary>

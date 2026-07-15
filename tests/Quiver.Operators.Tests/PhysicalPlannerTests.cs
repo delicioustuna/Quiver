@@ -39,6 +39,14 @@ public sealed class PhysicalPlannerTests
         op.Should().BeOfType<AllRelationshipsScanOperator>();
     }
 
+    [Fact]
+    public void ScanOp_hyperedge_produces_AllHyperedgesScanOperator()
+    {
+        var plan = new ScanOp(EntityKind.Hyperedge, null);
+        var op = PhysicalPlanner.Plan(plan, _schema);
+        op.Should().BeOfType<AllHyperedgesScanOperator>();
+    }
+
     // ── NodeSeedOp ──────────────────────────────────────────────────────────────
 
     [Fact]
@@ -86,6 +94,35 @@ public sealed class PhysicalPlannerTests
         var expand = new ExpandOp(scan, 0, Direction.Outgoing, "KNOWS", ExpandOutputMode.Full, null);
         var op = PhysicalPlanner.Plan(expand, _schema);
         op.Should().BeOfType<ExpandOperator>();
+    }
+
+    [Fact]
+    public void ExpandToHyperedgeOp_resolves_filters_and_preserves_shape()
+    {
+        _schema.GetOrCreateHyperedgeType("Fact");
+        _schema.GetOrCreateRole("Subject");
+        var scan = new ScanOp(EntityKind.Node, null);
+        var expand = new ExpandToHyperedgeOp(scan, 0, "Fact", "Subject", [0]);
+
+        var op = PhysicalPlanner.Plan(expand, _schema);
+
+        op.Should().BeOfType<ExpandToHyperedgeOperator>();
+        expand.CurrentEntityColumn.Should().Be(1);
+        expand.PredictedOutputColumnCount.Should().Be(3);
+    }
+
+    [Fact]
+    public void ExpandMembersOp_resolves_role_and_preserves_shape()
+    {
+        _schema.GetOrCreateRole("Object");
+        var scan = new ScanOp(EntityKind.Hyperedge, null);
+        var expand = new ExpandMembersOp(scan, 0, "Object", null, [0]);
+
+        var op = PhysicalPlanner.Plan(expand, _schema);
+
+        op.Should().BeOfType<ExpandMembersOperator>();
+        expand.CurrentEntityColumn.Should().Be(1);
+        expand.PredictedOutputColumnCount.Should().Be(3);
     }
 
     // ── KnnOp ───────────────────────────────────────────────────────────────────

@@ -461,4 +461,385 @@ public sealed class VacuumTests : IDisposable
         foreach (var id in newIds)
             read.NodeExists(new Core.NodeId(id)).Should().BeTrue();
     }
+
+    // ---------- ハイパーエッジの物理回収 ----------
+
+    /// <summary>
+    /// dead ハイパーエッジの overflow プロパティ / incidence / header が
+    /// property → incidence → header の順で回収され、live ハイパーエッジは影響を受けないこと。
+    /// </summary>
+    [Fact]
+    public void Vacuum_reclaims_dead_hyperedges_incidences_and_overflow_properties()
+    {
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+
+        // 小さい値は header へ inline 化されるため、overflow chain の回収を検証するには
+        // 255B を超える値を使う (node property の vacuum テストと同じ理由)。
+        static string Big(string s) => new string('x', 300) + s;
+
+        Core.HyperedgeId dead, alive;
+        Core.NodeId a, b;
+        using (var tx = db.BeginTransaction())
+        {
+            a = tx.CreateNode("Entity");
+            b = tx.CreateNode("Entity");
+            dead = tx.CreateHyperedge("Fact", [new("Subject", a), new("Object", b)]);
+            tx.SetProperty(dead, "note", Storage.Records.PropertyValue.FromString(Big("d")));
+            alive = tx.CreateHyperedge("Fact", [new("Subject", a), new("Object", b)]);
+            tx.SetProperty(alive, "note", Storage.Records.PropertyValue.FromString(Big("a")));
+            tx.Commit();
+        }
+        using (var tx = db.BeginTransaction())
+        {
+            tx.DeleteHyperedge(dead);
+            tx.Commit();
+        }
+
+        var report = db.Vacuum();
+        report.Skipped.Should().BeFalse();
+        report.ReclaimedHyperedges.Should().Be(1);
+        report.ReclaimedIncidences.Should().Be(2);
+        report.ReclaimedProperties.Should().BeGreaterThanOrEqualTo(1,
+            "dead ハイパーエッジの overflow プロパティも回収される");
+
+        using (var read = db.BeginReadOnlyTransaction())
+        {
+            CollectMembers(read.GetMembers(dead)).Should().BeEmpty();
+            CollectMembers(read.GetMembers(alive)).Should().HaveCount(2);
+            System.Text.Encoding.UTF8.GetString(
+                read.GetProperty(alive, "note").Utf8StringValue).Should().Be(Big("a"));
+        }
+        db.Diagnostics.CheckConsistency().IsConsistent.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 1 つの node の incidence chain の先頭・中間・末尾にある dead incidence が
+    /// 1 回の chain sweep で正しく unlink されること。node chain は head insert なので
+    /// 作成が新しいものほど chain の先頭に来る。
+    /// </summary>
+    [Fact]
+    public void Vacuum_unlinks_dead_incidences_at_head_middle_and_tail_of_node_chain()
+    {
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+
+        Core.NodeId hub;
+        var edges = new List<Core.HyperedgeId>();
+        using (var tx = db.BeginTransaction())
+        {
+            hub = tx.CreateNode("Hub");
+            for (int i = 0; i < 5; i++)
+            {
+                var partner = tx.CreateNode("Partner");
+                edges.Add(tx.CreateHyperedge("Link", [new("Hub", hub), new("Partner", partner)]));
+            }
+            tx.Commit();
+        }
+
+        // hub の chain は作成の逆順 [4] (head), [3], [2], [1], [0] (tail)。
+        // 先頭 (edges[4])・中間 (edges[2])・末尾 (edges[0]) を削除する。
+        using (var tx = db.BeginTransaction())
+        {
+            tx.DeleteHyperedge(edges[4]);
+            tx.DeleteHyperedge(edges[2]);
+            tx.DeleteHyperedge(edges[0]);
+            tx.Commit();
+        }
+
+        var report = db.Vacuum();
+        report.ReclaimedHyperedges.Should().Be(3);
+        report.ReclaimedIncidences.Should().Be(6);
+
+        // 生き残った 2 件だけが hub から辿れる。
+        using (var read = db.BeginReadOnlyTransaction())
+        {
+            CollectIds(read.GetHyperedges(hub)).Should().BeEquivalentTo(
+                new[] { edges[1].Sequence, edges[3].Sequence });
+        }
+        db.Diagnostics.CheckConsistency().IsConsistent.Should().BeTrue();
+
+        // sweep 後の chain (head 前進 + 中間の繋ぎ替え) に対して新規作成が正しく head insert される。
+        Core.HyperedgeId added;
+        using (var tx = db.BeginTransaction())
+        {
+            var partner = tx.CreateNode("Partner");
+            added = tx.CreateHyperedge("Link", [new("Hub", hub), new("Partner", partner)]);
+            tx.Commit();
+        }
+        using (var read = db.BeginReadOnlyTransaction())
+        {
+            CollectIds(read.GetHyperedges(hub)).Should().BeEquivalentTo(
+                new[] { edges[1].Sequence, edges[3].Sequence, added.Sequence });
+        }
+        db.Diagnostics.CheckConsistency().IsConsistent.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// vacuum で回収した sequence が再利用されるとき世代が上がり、
+    /// 古い ID が新しい entity を指さないこと。
+    /// </summary>
+    [Fact]
+    public void Stale_hyperedge_id_does_not_resolve_after_sequence_reuse()
+    {
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+
+        Core.HyperedgeId old;
+        Core.NodeId a, b;
+        using (var tx = db.BeginTransaction())
+        {
+            a = tx.CreateNode("Entity");
+            b = tx.CreateNode("Entity");
+            old = tx.CreateHyperedge("Fact", [new("S", a), new("O", b)]);
+            tx.SetProperty(old, "k", Storage.Records.PropertyValue.FromInt32(1));
+            tx.Commit();
+        }
+        old.Generation.Should().Be(1);
+
+        using (var tx = db.BeginTransaction())
+        {
+            tx.DeleteHyperedge(old);
+            tx.Commit();
+        }
+        db.Vacuum().ReclaimedHyperedges.Should().Be(1);
+
+        Core.HyperedgeId reused;
+        using (var tx = db.BeginTransaction())
+        {
+            reused = tx.CreateHyperedge("Fact", [new("S", a), new("O", b)]);
+            tx.SetProperty(reused, "k", Storage.Records.PropertyValue.FromInt32(2));
+            tx.Commit();
+        }
+
+        // 同じ slot を世代 bump 付きで再利用する。
+        reused.Sequence.Should().Be(old.Sequence);
+        reused.Generation.Should().Be(2);
+        reused.Value.Should().NotBe(old.Value);
+
+        // 古い packed ID は ID 解決経路 (header Read) の世代照合で弾かれ、
+        // 新しい entity を観測しない。
+        using (var read = db.BeginReadOnlyTransaction())
+        {
+            CollectMembers(read.GetMembers(old)).Should().BeEmpty();
+            read.GetProperty(reused, "k").Int32Value.Should().Be(2);
+
+            // node からの列挙は同じ sequence の生存 hyperedge を 1 件だけ返す。
+            var fromNode = CollectIds(read.GetHyperedges(a));
+            fromNode.Should().ContainSingle();
+            fromNode[0].Should().Be(reused.Sequence);
+        }
+    }
+
+    /// <summary>
+    /// 回収済み sequence に残るベクトルが、世代の異なる新しいハイパーエッジへ
+    /// 誤って結び付かないこと。
+    /// </summary>
+    [Fact]
+    public void Stale_hyperedge_vector_binding_is_rejected_after_sequence_reuse()
+    {
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        const string indexName = "facts";
+        db.Vectors.CreateVectorIndex(new Core.VectorIndexSpec(
+            indexName,
+            Core.EntityKind.Hyperedge,
+            db.Schema.GetOrCreatePropertyKey("embedding"),
+            2,
+            Core.DistanceMetric.Dot,
+            "test",
+            null));
+
+        Core.NodeId a, b;
+        Core.HyperedgeId old;
+        using (var tx = db.BeginTransaction())
+        {
+            a = tx.CreateNode("Entity");
+            b = tx.CreateNode("Entity");
+            old = tx.CreateHyperedge("Fact", [new("S", a), new("O", b)]);
+            tx.SetVector(Core.EntityKind.Hyperedge, old.Value, indexName, [1f, 0f]);
+            tx.Commit();
+        }
+
+        using (var tx = db.BeginTransaction())
+        {
+            tx.DeleteHyperedge(old);
+            tx.Commit();
+        }
+        db.Vacuum().ReclaimedHyperedges.Should().Be(1);
+
+        Core.HyperedgeId reused;
+        using (var tx = db.BeginTransaction())
+        {
+            reused = tx.CreateHyperedge("Fact", [new("S", a), new("O", b)]);
+            tx.Commit();
+        }
+        reused.Sequence.Should().Be(old.Sequence);
+        reused.Generation.Should().Be(old.Generation + 1);
+
+        Span<float> vector = stackalloc float[2];
+        db.Vectors.TryGetVector(Core.EntityKind.Hyperedge, reused.Value, indexName, vector)
+            .Should().BeFalse("残存 payload の世代は再利用後の entity と一致しない");
+        using var results = db.Vectors.KnnSearch(indexName, [1f, 0f], 10);
+        results.MoveNext().Should().BeFalse();
+    }
+
+    /// <summary>アクティブな snapshot (read-only tx) が居る間はハイパーエッジも回収しないこと。</summary>
+    [Fact]
+    public void Vacuum_does_not_reclaim_hyperedges_while_snapshot_is_active()
+    {
+        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+
+        Core.HyperedgeId heId;
+        using (var tx = db.BeginTransaction())
+        {
+            var a = tx.CreateNode("A");
+            var b = tx.CreateNode("B");
+            heId = tx.CreateHyperedge("T", [new("R1", a), new("R2", b)]);
+            tx.Commit();
+        }
+        using (var tx = db.BeginTransaction())
+        {
+            tx.DeleteHyperedge(heId);
+            tx.Commit();
+        }
+
+        using (var holder = db.BeginReadOnlyTransaction())
+        {
+            var report = db.Vacuum();
+            report.Skipped.Should().BeTrue();
+            report.ReclaimedHyperedges.Should().Be(0);
+            report.ReclaimedIncidences.Should().Be(0);
+        }
+
+        // snapshot が消えれば回収できる。
+        db.Vacuum().ReclaimedHyperedges.Should().Be(1);
+    }
+
+    /// <summary>
+    /// vacuum 後の再オープンで free list / 世代 / incidence chain のメタデータが正しく復元され、
+    /// live データの読み取りと sequence 再利用が継続すること。
+    /// </summary>
+    [Fact]
+    public void Hyperedge_vacuum_survives_reopen()
+    {
+        string path = System.IO.Path.Combine(_dir, "graph.quiver");
+        Core.HyperedgeId dead, alive;
+        Core.NodeId a, b;
+        using (var db = GraphDatabase.Open(path))
+        {
+            using (var tx = db.BeginTransaction())
+            {
+                a = tx.CreateNode("Entity");
+                b = tx.CreateNode("Entity");
+                dead = tx.CreateHyperedge("Fact", [new("S", a), new("O", b)]);
+                alive = tx.CreateHyperedge("Fact", [new("S", a), new("O", b)]);
+                tx.SetProperty(alive, "k", Storage.Records.PropertyValue.FromInt32(7));
+                tx.Commit();
+            }
+            using (var tx = db.BeginTransaction())
+            {
+                tx.DeleteHyperedge(dead);
+                tx.Commit();
+            }
+            db.Vacuum().ReclaimedHyperedges.Should().Be(1);
+        }
+
+        using (var db = GraphDatabase.Open(path))
+        {
+            using (var read = db.BeginReadOnlyTransaction())
+            {
+                CollectMembers(read.GetMembers(alive)).Should().HaveCount(2);
+                read.GetProperty(alive, "k").Int32Value.Should().Be(7);
+                CollectMembers(read.GetMembers(dead)).Should().BeEmpty();
+            }
+
+            // 再オープン後も free list から回収済み sequence を世代 bump 付きで再利用する。
+            Core.HyperedgeId reused;
+            using (var tx = db.BeginTransaction())
+            {
+                reused = tx.CreateHyperedge("Fact", [new("S", a), new("O", b)]);
+                tx.Commit();
+            }
+            reused.Sequence.Should().Be(dead.Sequence);
+            reused.Generation.Should().Be(2);
+            db.Diagnostics.CheckConsistency().IsConsistent.Should().BeTrue();
+        }
+    }
+
+    /// <summary>
+    /// vacuum とその後のコミットを含む状態で正常フラッシュを経ないプロセス停止を模擬し、
+    /// recovery 後もハイパーエッジの生死と chain が整合すること。
+    /// </summary>
+    [Fact]
+    public void Hyperedge_vacuum_state_survives_simulated_crash()
+    {
+        string path = System.IO.Path.Combine(_dir, "graph.quiver");
+        Core.HyperedgeId dead, alive, added;
+        Core.NodeId a, b;
+
+        // まず論理削除までを正常終了し、vacuum 前のデータファイルを
+        // 「クラッシュ時に未フラッシュだったページ」の基準スナップショットにする。
+        using (var db = GraphDatabase.Open(path))
+        {
+            using (var tx = db.BeginTransaction())
+            {
+                a = tx.CreateNode("Entity");
+                b = tx.CreateNode("Entity");
+                dead = tx.CreateHyperedge("Fact", [new("S", a), new("O", b)]);
+                alive = tx.CreateHyperedge("Fact", [new("S", a), new("O", b)]);
+                tx.Commit();
+            }
+            using (var tx = db.BeginTransaction())
+            {
+                tx.DeleteHyperedge(dead);
+                tx.Commit();
+            }
+        }
+        byte[] preVacuumData = File.ReadAllBytes(path);
+
+        {
+            var db = GraphDatabase.Open(path);
+            db.Vacuum().ReclaimedHyperedges.Should().Be(1);
+
+            // vacuum 後に回収 slot を再利用するコミットを積む。未完了 tx を残して
+            // clean shutdown を抑止し、コミット済み WAL を保持する。
+            using (var tx = db.BeginTransaction())
+            {
+                added = tx.CreateHyperedge("Fact", [new("S", a), new("O", b)]);
+                tx.Commit();
+            }
+            _ = db.BeginTransaction();
+            db.Dispose();
+        }
+
+        // データファイルだけを vacuum 前へ戻し、WAL は残す。再オープン時の redo が
+        // vacuum 後にコミットした再利用 entity と incidence chain を復元する。
+        File.WriteAllBytes(path, preVacuumData);
+        using (var db = GraphDatabase.Open(path))
+        {
+            using (var read = db.BeginReadOnlyTransaction())
+            {
+                CollectMembers(read.GetMembers(dead)).Should().BeEmpty();
+                CollectMembers(read.GetMembers(alive)).Should().HaveCount(2);
+                CollectMembers(read.GetMembers(added)).Should().HaveCount(2);
+                CollectIds(read.GetHyperedges(a)).Should().BeEquivalentTo(
+                    new[] { alive.Sequence, added.Sequence });
+            }
+            db.Diagnostics.CheckConsistency().IsConsistent.Should().BeTrue();
+        }
+    }
+
+    // ref struct enumerator は LINQ に乗らないため、素朴に List へ写して検証する。
+    private static List<HyperedgeMember> CollectMembers(HyperedgeMemberEnumerator e)
+    {
+        var list = new List<HyperedgeMember>();
+        while (e.MoveNext()) list.Add(e.Current);
+        return list;
+    }
+
+    // 列挙子が返す ID は sequence のみを保持する (chain record には世代を格納しない) ため、
+    // 同一性の検証は sequence で行う。
+    private static List<long> CollectIds(HyperedgeIdEnumerator e)
+    {
+        var list = new List<long>();
+        while (e.MoveNext()) list.Add(e.Current.Sequence);
+        return list;
+    }
 }

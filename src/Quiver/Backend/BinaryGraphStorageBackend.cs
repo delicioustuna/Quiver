@@ -11,6 +11,8 @@ namespace Quiver;
 
 internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 {
+    internal static Action<CompactAdjacencyPhase>? CompactAdjacencyPhaseInjector;
+
     private readonly IVectorStore _vectors;
     // db.Vectors の公開面。tx 外のミューテーションを autocommit tx で包む
     // (tx 内の呼び出しは ambient WalPageContext を検出して join する)。生の _vectors は
@@ -24,11 +26,14 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     private readonly LabelTokenStore _labelTokens;
     private readonly RelationshipTypeTokenStore _relTypeTokens;
     private readonly PropertyKeyTokenStore _propKeyTokens;
+    private readonly HyperedgeTypeTokenStore _hyperedgeTypeTokens;
+    private readonly RoleTokenStore _roleTokens;
     private readonly IndexManager _indexManager;
     // AdjacencyBlockStore (V1) または AdjacencyBlockStoreV2 を保持。
     // CompactAdjacency が再構築したストアを差し替えるため mutable。
     // 隣接データは container 内テナントに同居するため、別 PagedFile の所有は不要。
     private IAdjacencyBlockStore? _adjStore;
+    private readonly ICoMembershipBlockStore? _coMembershipStore;
     // bulk load / CompactAdjacency が隣接テナントを構築するために保持する。
     private readonly SingleFileContainer _container;
     private readonly TransactionManager _txManager;
@@ -39,6 +44,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     // 単一コンテナ (*.quiver) のフルパス。WAL サイドカー = _containerPath + "-wal"。
     private readonly string _containerPath;
     private readonly ILogicalMutationSink? _logicalSink;
+    private readonly RelationshipDeltaHeadStore? _relationshipDeltaHeads;
+    private readonly PersistentRelationshipDeltaStore? _relationshipDeltas;
 
     internal BinaryGraphStorageBackend(
         string containerPath,
@@ -51,13 +58,18 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         LabelTokenStore labelTokens,
         RelationshipTypeTokenStore relTypeTokens,
         PropertyKeyTokenStore propKeyTokens,
+        HyperedgeTypeTokenStore hyperedgeTypeTokens,
+        RoleTokenStore roleTokens,
         IndexManager indexManager,
         IAdjacencyBlockStore? adjStore,
         TransactionManager txManager,
         BinaryGraphAccessMethods access,
         IVectorStore vectors,
         ColumnManager columnManager,
+        ICoMembershipBlockStore? coMembershipStore = null,
         LabelNodeIndex? labelIndex = null,
+        RelationshipDeltaHeadStore? relationshipDeltaHeads = null,
+        PersistentRelationshipDeltaStore? relationshipDeltas = null,
         ILogicalMutationSink? logicalSink = null,
         TimeSpan? adaptiveTargetRecoveryTime = null,
         long adaptiveMinThresholdBytes = 4L * 1024 * 1024,
@@ -76,19 +88,27 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _labelTokens = labelTokens;
         _relTypeTokens = relTypeTokens;
         _propKeyTokens = propKeyTokens;
+        _hyperedgeTypeTokens = hyperedgeTypeTokens;
+        _roleTokens = roleTokens;
         _indexManager = indexManager;
         _adjStore = adjStore;
+        _coMembershipStore = coMembershipStore;
+        _relationshipDeltaHeads = relationshipDeltaHeads;
+        _relationshipDeltas = relationshipDeltas;
         _txManager = txManager;
         _columnManager = columnManager;
 
-        _schema = new SchemaApi(_labelTokens, _relTypeTokens, _propKeyTokens, _indexManager);
+        _schema = new SchemaApi(_labelTokens, _relTypeTokens, _propKeyTokens, _indexManager,
+            _hyperedgeTypeTokens, _roleTokens);
         // index manager と label index を DiagnosticsApi に渡して
         // CheckIndexConsistency / RepairIndexes が機能するようにする。
         // TransactionManager を渡し、CurrentCheckpointThresholdBytes /
         // SetCheckpointPolicy をホットスワップ経路として公開する。Adaptive 用パラメタは
         // factory で既知の options 値を持つので、後段で AttachAdaptiveDefaults により上書き可能。
         _diagnostics = new DiagnosticsApi(
-            _nodeStore, _relStore, access, _indexManager, labelIndex, _txManager,
+            _nodeStore, _relStore, access,
+            _txManager.HyperedgeStore, _txManager.IncidenceStore, _txManager.NodeIncidenceHeadStore,
+            _indexManager, labelIndex, _txManager,
             adaptiveTargetRecoveryTime,
             adaptiveMinThresholdBytes,
             adaptiveMaxThresholdBytes,
@@ -187,6 +207,14 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     public ITransactionManager Transactions => _txManager;
     public ISchemaApi Schema => _schema;
     public IDiagnosticsApi Diagnostics => _diagnostics;
+
+    // 整合性テストは公開 API では作れない破損を明示的に注入する必要がある。
+    // ストア実体だけを internal に露出し、通常の利用者が物理レコードを変更する経路にはしない。
+    internal IHyperedgeStore HyperedgeStoreForTest => _txManager.HyperedgeStore;
+    internal IIncidenceStore IncidenceStoreForTest => _txManager.IncidenceStore;
+    internal long CoMembershipReadCountForTest
+        => (_coMembershipStore as CoMembershipBlockStore)?.ReadCount ?? 0;
+    internal INodeIncidenceHeadStore NodeIncidenceHeadStoreForTest => _txManager.NodeIncidenceHeadStore;
     public IGraphAccessMethods Access => _access;
     public BulkLoadCapabilities BulkLoad => _bulkLoad;
     public IVectorStore Vectors => _vectorsFacade ??= new AutocommitVectorStore(
@@ -197,15 +225,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         var inner = _txManager.Begin(level);
         return new GraphTransaction(
             inner, _labelTokens, _relTypeTokens, _propKeyTokens,
+            _hyperedgeTypeTokens, _roleTokens,
             readOnly,
-            // read-only tx と sink 未設定時はレコーダを完全にスキップし、ホットパスを allocation-free に保つ。
             readOnly ? null : _logicalSink,
-            // 列マネージャは read/write 双方へ渡す。write hook は
-            // mutation メソッドからのみ呼ばれるので read-only tx では起動せず、read 集約
-            // (TryColumnAggregate) は read-only tx でも列スキャンを使える。
             _columnManager,
-            // tx 配下 SetVector/RemoveVector の委譲先 (生のストア)。read-only tx でも
-            // 渡すが、メソッド側で IsReadOnly ガードする。
             _vectors);
     }
 
@@ -214,8 +237,6 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     /// tombstone を除去して epoch を進める。呼び出し後、すべての生存エッジは base から供給され、
     /// 新しいリレーションシップが作成されるまで delta 走査は何も返さない。
     ///
-    /// 現在は V1 ストア (payload lane なし) のみ対応。V2 ストアがアクティブな場合は
-    /// 例外を投げる (V2 compact はプロパティストアから inline payload を再読する必要があり未実装)。
     /// 呼び出し元はアクティブなトランザクションが無いことを保証すること。
     /// </summary>
     public void CompactAdjacency()
@@ -223,9 +244,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         if (_txManager.ActiveCount > 0)
             throw new InvalidOperationException(
                 "CompactAdjacency requires no active transactions.");
-        if (_adjStore is AdjacencyBlockStoreV2)
-            throw new NotSupportedException(
-                "CompactAdjacency for V2 (payload lane) is not yet implemented.");
+        PayloadLaneSpec? payloadSpec = (_adjStore as IAdjacencyPayloadView)?.PayloadSpec;
 
         // 現在の adj ファイルを壊す前に生存 rels (id, src, tgt, type) をスナップショットする。
         // IRelationshipStore.Scan はストア順で id を返し、各読み出しがアクティブページから
@@ -240,15 +259,18 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             if (relId.Sequence > maxId) maxId = relId.Sequence;
         }
         long newBaseHwm = maxId + 1; // リレーションシップが無ければ 0 — "no base" と一致
+        Dictionary<long, long>? weights = null;
+        if (payloadSpec is { } payload)
+        {
+            weights = CaptureExistingPayloads(live);
+            foreach (var (id, _, _, _) in live)
+            {
+                var relId = new RelationshipId(id);
+                if (TryReadPayload(relId, payload, out long raw))
+                    weights[relId.Sequence] = raw;
+            }
+        }
 
-        // 隣接データは container 内テナントに同居する。Build は対象テナントを
-        // truncate して作り直すため、旧 PagedFile を pageManager から drop する必要はない。
-        if (_adjStore is AdjacencyBlockStore old) old.Dispose();
-        _txManager.SwapAdjacencyStore(null);
-        _adjStore = null;
-
-        // 隣接インデックスをその場で再構築する。Build は論理ノード ID ごとに 1 エントリを持つ前提なので
-        // nodeHwm を要求する。バルクロード後はこれ以外の情報が無いため、観測した src/tgt の最大値 + 1 を使う。
         long nodeHwm = 0;
         foreach (var (_, src, tgt, _) in live)
         {
@@ -258,7 +280,24 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
         var adjData = _container.OpenTenant(AdjacencyContainer.DataTenant, PageKind.AdjacencyBlock);
         var adjIdx = _container.OpenTenant(AdjacencyContainer.IndexTenant, PageKind.Header);
-        AdjacencyBlockStore.Build(adjData, adjIdx, live, nodeHwm);
+
+        // compact は導出ビューの再構築であり、正本は relationship store にある。
+        // 先に descriptor を無効化して durable 化しておくと、以降の crash/reopen は
+        // 部分的な adjacency view を開かず、row path へ安全にフォールバックできる。
+        if (_adjStore is IDisposable old) old.Dispose();
+        _txManager.SwapAdjacencyStore(null);
+        _adjStore = null;
+        AdjacencyContainer.WriteDescriptor(adjData, AdjacencyContainer.KindNone, null);
+        _container.Flush();
+        CompactAdjacencyPhaseInjector?.Invoke(CompactAdjacencyPhase.AfterDescriptorInvalidated);
+
+        // 隣接インデックスをその場で再構築する。Build は論理ノード ID ごとに 1 エントリを持つ前提なので
+        // nodeHwm を要求する。バルクロード後はこれ以外の情報が無いため、観測した src/tgt の最大値 + 1 を使う。
+        if (payloadSpec is { } compactSpec)
+            AdjacencyBlockStoreV2.Build(adjData, adjIdx, live, weights ?? [], nodeHwm, compactSpec, writeDescriptor: false);
+        else
+            AdjacencyBlockStore.Build(adjData, adjIdx, live, nodeHwm, writeDescriptor: false);
+        CompactAdjacencyPhaseInjector?.Invoke(CompactAdjacencyPhase.AfterRebuild);
 
         // epoch メタデータをリセットして再オープン。ResetAfterCompact は epoch カウンタを
         // 進め (オブザーバが再構築を検出可能にする)、tombstone を破棄する
@@ -266,11 +305,95 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         var epochTenant = _container.OpenTenant(AdjacencyContainer.EpochTenant, PageKind.Header);
         AdjacencyEpoch newEpoch = AdjacencyEpoch.Open(epochTenant);
         newEpoch.ResetAfterCompact(newBaseHwm);
+        _relationshipDeltas?.Reset();
+        _relationshipDeltaHeads?.ReloadMeta();
+        _relationshipDeltas?.ReloadMeta();
+        AdjacencyContainer.WriteDescriptor(
+            adjData,
+            payloadSpec is { } ? AdjacencyContainer.KindV2 : AdjacencyContainer.KindV1,
+            payloadSpec);
         // CompactAdjacency は tx 外なので、再構築したページを durable 化する。
         _container.Flush();
-        var newStore = new AdjacencyBlockStore(adjData, adjIdx, newEpoch);
+        CompactAdjacencyPhaseInjector?.Invoke(CompactAdjacencyPhase.AfterFinalDescriptorFlushed);
+        IAdjacencyBlockStore newStore = payloadSpec is { } reopenedSpec
+            ? new AdjacencyBlockStoreV2(adjData, adjIdx, reopenedSpec, newEpoch)
+            : new AdjacencyBlockStore(adjData, adjIdx, newEpoch);
         _adjStore = newStore;
         _txManager.SwapAdjacencyStore(newStore);
+    }
+
+    private bool TryReadPayload(RelationshipId relId, PayloadLaneSpec spec, out long raw)
+    {
+        var keyId = new PropertyKeyId(spec.PropertyKeyId);
+        if (_relStore.TryGetInlineProperty(relId, keyId, out var inlineValue) &&
+            TryEncodePayload(in inlineValue, spec, out raw))
+        {
+            return true;
+        }
+
+        var firstPropId = _relStore.Read(relId).FirstPropertyId;
+        var propEnum = _propStore.Enumerate(firstPropId);
+        while (propEnum.MoveNext())
+        {
+            var prop = propEnum.Current;
+            if (prop.KeyId == keyId &&
+                TryEncodePayload(prop.Value, spec, out raw))
+            {
+                return true;
+            }
+        }
+
+        raw = spec.DefaultRaw;
+        return false;
+    }
+
+    private Dictionary<long, long> CaptureExistingPayloads(
+        IReadOnlyList<(long Id, long Src, long Tgt, int TypeId)> live)
+    {
+        var result = new Dictionary<long, long>();
+        if (_adjStore is not IAdjacencyPayloadView)
+            return result;
+
+        var seenSources = new HashSet<long>();
+        foreach (var (_, src, _, _) in live)
+        {
+            if (!seenSources.Add(src))
+                continue;
+
+            using var cursor = _adjStore.OpenCursor(new NodeId(src), Direction.Outgoing, null);
+            while (cursor.MoveNext())
+            {
+                var relId = cursor.Relationship;
+                if (!_adjStore.IsTombstoned(relId))
+                    result[relId.Sequence] = cursor.WeightRaw;
+            }
+        }
+
+        return result;
+    }
+
+    private static bool TryEncodePayload(in PropertyValue value, PayloadLaneSpec spec, out long raw)
+    {
+        switch (spec.Kind)
+        {
+            case PayloadKind.Int64:
+                if (value.Type is PropertyValueType.Int64 or PropertyValueType.Int32 or PropertyValueType.Bool)
+                {
+                    raw = value.Int64Value;
+                    return true;
+                }
+                break;
+            case PayloadKind.Double:
+                if (value.Type == PropertyValueType.Double)
+                {
+                    raw = BitConverter.DoubleToInt64Bits(value.DoubleValue);
+                    return true;
+                }
+                break;
+        }
+
+        raw = spec.DefaultRaw;
+        return false;
     }
 
     /// <summary>
@@ -302,10 +425,22 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     {
         // WAL を渡して、dead version 回収後の末尾連続 free page を物理 truncate する。
         // WAL の FileTruncate レコード経由で crash recovery に対する冪等再生を保証する。
+        // hyperedge / incidence / node-incidence-head の実体は transaction 配線側が保持するため、
+        // そこから取り出して hyperedge 回収を有効にする (backend は直接参照を持たない)。
         var vac = new Vacuum(
             _nodeStore, _relStore, _propStore,
-            _txManager, _txManager.CommittedRegistry, _wal, _columnManager);
-        return vac.Run(options);
+            _txManager, _txManager.CommittedRegistry, _wal, _columnManager,
+            _txManager.HyperedgeStore as VersionedHyperedgeStore,
+            _txManager.IncidenceStore as IncidenceStore,
+            _txManager.NodeIncidenceHeadStore);
+        VacuumReport report = vac.Run(options);
+        // vacuum は正本の incidence slot を回収する。導出ビューは active transaction が
+        // 無い同じ境界で作り直し、論理削除や abort 由来の無効 entry をまとめて除去する。
+        if (_txManager.ActiveCount == 0)
+            _coMembershipStore?.Rebuild(
+                _txManager.HyperedgeStore,
+                _txManager.IncidenceStore);
+        return report;
     }
 
     public void CreateSnapshot(string targetFilePath, SnapshotOptions? options = null)
@@ -395,10 +530,19 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _labelTokens.Dispose();
         _relTypeTokens.Dispose();
         _propKeyTokens.Dispose();
+        _hyperedgeTypeTokens.Dispose();
+        _roleTokens.Dispose();
         // WAL を dispose する前にデータファイルを flush する。PagedFile.Flush() は
         // write-ahead 順序 (WAL→データ) に従うため、page manager がダーティフレームを
         // ディスクへ flush する間は WAL がまだ生きている必要がある。
         _pageManager.Dispose();
         _wal.Dispose();
     }
+}
+
+internal enum CompactAdjacencyPhase
+{
+    AfterDescriptorInvalidated,
+    AfterRebuild,
+    AfterFinalDescriptorFlushed,
 }

@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.IO.Hashing;
 using Quiver.Core;
 
 namespace Quiver.Storage.Wal;

@@ -119,6 +119,122 @@ public sealed class AdjacencyEpochTests : IDisposable
     }
 
     [Fact]
+    public void Read_only_snapshot_keeps_base_edge_deleted_after_begin()
+    {
+        BulkLoad(nodeCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
+
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var reader = _db.BeginReadOnlyTransaction();
+
+        using (var writer = _db.BeginTransaction())
+        {
+            writer.DeleteRelationship(new RelationshipId(0));
+            writer.Commit();
+        }
+
+        ExpandOut(reader, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L });
+
+        using var nextReader = _db.BeginReadOnlyTransaction();
+        ExpandOut(nextReader, new NodeId(0)).Should().BeEquivalentTo(new[] { 2L });
+    }
+
+    [Fact]
+    public void Read_only_snapshot_does_not_see_delta_insert_committed_after_begin()
+    {
+        BulkLoad(nodeCount: 4, edges: new[] { (0L, 1L), (0L, 2L) });
+
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var reader = _db.BeginReadOnlyTransaction();
+
+        using (var writer = _db.BeginTransaction())
+        {
+            writer.CreateRelationship(new NodeId(0), new NodeId(3), "R");
+            writer.Commit();
+        }
+
+        ExpandOut(reader, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L });
+
+        using var nextReader = _db.BeginReadOnlyTransaction();
+        ExpandOut(nextReader, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
+    }
+
+    [Fact]
+    public void Read_only_snapshot_keeps_existing_delta_when_new_delta_becomes_head()
+    {
+        BulkLoad(nodeCount: 5, edges: new[] { (0L, 1L), (0L, 2L) });
+
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using (var writer = _db.BeginTransaction())
+        {
+            writer.CreateRelationship(new NodeId(0), new NodeId(3), "R");
+            writer.Commit();
+        }
+
+        using var reader = _db.BeginReadOnlyTransaction();
+        using (var writer = _db.BeginTransaction())
+        {
+            writer.CreateRelationship(new NodeId(0), new NodeId(4), "R");
+            writer.Commit();
+        }
+
+        ExpandOut(reader, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
+
+        using var nextReader = _db.BeginReadOnlyTransaction();
+        ExpandOut(nextReader, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L, 4L });
+    }
+
+    [Fact]
+    public void Read_only_snapshot_keeps_delta_edge_deleted_after_begin()
+    {
+        BulkLoad(nodeCount: 4, edges: new[] { (0L, 1L), (0L, 2L) });
+
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        RelationshipId delta;
+        using (var writer = _db.BeginTransaction())
+        {
+            delta = writer.CreateRelationship(new NodeId(0), new NodeId(3), "R");
+            writer.Commit();
+        }
+
+        using var reader = _db.BeginReadOnlyTransaction();
+        using (var writer = _db.BeginTransaction())
+        {
+            writer.DeleteRelationship(delta);
+            writer.Commit();
+        }
+
+        ExpandOut(reader, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
+
+        using var nextReader = _db.BeginReadOnlyTransaction();
+        ExpandOut(nextReader, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L });
+    }
+
+    [Fact]
+    public void Read_only_snapshot_keeps_relationship_property_updated_after_begin()
+    {
+        BulkLoad(nodeCount: 2, edges: new[] { (0L, 1L) });
+
+        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using (var writer = _db.BeginTransaction())
+        {
+            writer.SetProperty(new RelationshipId(0), "weight", PropertyValue.FromInt64(10));
+            writer.Commit();
+        }
+
+        using var reader = _db.BeginReadOnlyTransaction();
+        using (var writer = _db.BeginTransaction())
+        {
+            writer.SetProperty(new RelationshipId(0), "weight", PropertyValue.FromInt64(20));
+            writer.Commit();
+        }
+
+        reader.GetProperty(new RelationshipId(0), "weight").Int64Value.Should().Be(10);
+
+        using var nextReader = _db.BeginReadOnlyTransaction();
+        nextReader.GetProperty(new RelationshipId(0), "weight").Int64Value.Should().Be(20);
+    }
+
+    [Fact]
     public void Tombstones_persist_across_reopen()
     {
         BulkLoad(nodeCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });

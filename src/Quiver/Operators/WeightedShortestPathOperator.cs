@@ -189,10 +189,20 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
         nodes.Reverse();
         rels.Reverse();
 
+        var materializer = new EntityIdentityMaterializer(
+            _tx!.Nodes, _tx.Relationships, _tx.Hyperedges);
         var nodeIds = new NodeId[nodes.Count];
-        for (int i = 0; i < nodes.Count; i++) nodeIds[i] = new NodeId(nodes[i]);
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            if (!materializer.TryNode(new NodeId(nodes[i]), out nodeIds[i]))
+                return [];
+        }
         var relIds = new RelationshipId[rels.Count];
-        for (int i = 0; i < rels.Count; i++) relIds[i] = new RelationshipId(rels[i]);
+        for (int i = 0; i < rels.Count; i++)
+        {
+            if (!materializer.TryRelationship(new RelationshipId(rels[i]), out relIds[i]))
+                return [];
+        }
         return WeightedPathCodec.Encode(nodeIds, relIds);
     }
 

@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace Quiver.Hosting;
@@ -63,6 +63,8 @@ public static class QuiverServiceCollectionExtensions
         IServiceCollection services,
         Action<GraphDatabaseOptions>? postConfigure)
     {
+        services.TryAddSingleton(
+            sp => new QuiverEventLoggerBridge(sp.GetService<Microsoft.Extensions.Logging.ILoggerFactory>()));
         services.AddSingleton<GraphDatabase>(sp =>
         {
             var opts = sp.GetRequiredService<IOptions<QuiverConfigurationOptions>>().Value;
@@ -73,8 +75,9 @@ public static class QuiverServiceCollectionExtensions
                     + "データベースディレクトリの絶対パスを指定してください。");
             }
 
-            var loggerFactory = sp.GetService<ILoggerFactory>();
-            var dbOpts = opts.ToGraphDatabaseOptions(loggerFactory);
+            // DB を開く前に listener を有効化し、起動中の EventSource イベントも ILogger へ流す。
+            _ = sp.GetRequiredService<QuiverEventLoggerBridge>();
+            var dbOpts = opts.ToGraphDatabaseOptions();
             postConfigure?.Invoke(dbOpts);
             // Quiver は単一ファイル (*.quiver) のため、DataDirectory 配下の graph.quiver を開く。
             return GraphDatabase.Open(

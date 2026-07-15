@@ -71,8 +71,9 @@ public class TenantStoreIntegrationTests : IDisposable
             }
             using var hr = rels.Read(r);
             hr.InUse.Should().BeTrue();
-            hr.Source.Should().Be(a);
-            hr.Target.Should().Be(b);
+            hr.Id.Should().Be(r);
+            hr.Source.Sequence.Should().Be(a.Sequence);
+            hr.Target.Sequence.Should().Be(b.Sequence);
             hr.Type.Value.Should().Be(1);
         }
 

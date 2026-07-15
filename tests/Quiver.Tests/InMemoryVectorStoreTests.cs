@@ -23,6 +23,26 @@ public sealed class InMemoryVectorStoreTests
             ProviderId: "test",
             NormalizationProfile: null);
 
+    [Fact]
+    public void CreateVectorIndex_rejects_invalid_hnsw_parameters()
+    {
+        var valid = MakeSpec(4, DistanceMetric.Cosine);
+        VectorIndexSpec[] invalid =
+        [
+            valid with { HnswM = 1 },
+            valid with { HnswMMax0 = 15 },
+            valid with { HnswMaxLayers = 0 },
+            valid with { HnswEfConstruction = 15 },
+        ];
+
+        foreach (var spec in invalid)
+        {
+            var store = new InMemoryVectorStore();
+            var create = () => store.CreateVectorIndex(spec);
+            create.Should().Throw<VectorException>();
+        }
+    }
+
     [Theory]
     [InlineData(DistanceMetric.Cosine)]
     [InlineData(DistanceMetric.Dot)]

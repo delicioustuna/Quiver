@@ -1,6 +1,11 @@
 # Quiver: システム概要
 
-> as-built 仕様 (v1 baseline, 2026-06-16)
+> as-built 仕様 (on-disk FormatVersion V5, 2026-07-08)
+>
+> **current (as-built)**: 以下は現在実装されている FormatVersion V5 の契約である。
+> **target (未実装)**: [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md) が将来の設計正本であり、本書の本文はその target を先取りして記述しない。
+> **実装済み境界**: identity の kind、Generation、packed representation は現行実装の契約である。
+> transaction、WAL、store の再設計は target の段階的な実装対象として残る。
 
 ## ポジショニング {#positioning}
 
@@ -53,6 +58,7 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 │  ├─ PagedFile (8 KB pages, Clock buffer pool)   │
 │  ├─ SingleFileContainer (*.quiver)              │
 │  ├─ NodeStore / RelationshipStore / PropertyStore│
+│  ├─ HyperedgeStore / IncidenceStore              │
 │  ├─ B+Tree indexes                              │
 │  ├─ FullTextIndex (postings + norms B+Trees)    │
 │  └─ PersistentVectorStore + HNSW                │
@@ -76,8 +82,13 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 
 ## フォーマットバージョン {#format-version}
 
-`FormatVersion.Current = V1 = 1`。自動マイグレーションは行わない。異なるフォーマットバージョンの
-データベースを開くと `FormatVersionMismatchException` をスローする。
+`FormatVersion.Current = V5 = 5`。
+V2 は自己記述 vector catalog / per-index HNSW レイアウト、V3 は第一級ハイパーエッジ用の
+ID kind、type / role token 空間、固定 tenant 18–25 の予約、V4 は incidence の
+fixed-slot 直接アドレスレイアウト、V5 は relationship delta の head sidecar と
+append-only page store 用固定 tenant 27–28 を導入した clean break である。
+自動マイグレーションは行わない。
+異なるフォーマットバージョンのデータベースを開くと `FormatVersionMismatchException` をスローする。
 
 ## 非目標 {#non-goals}
 

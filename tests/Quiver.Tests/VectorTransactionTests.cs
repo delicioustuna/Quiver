@@ -58,6 +58,35 @@ public sealed class VectorTransactionTests : IDisposable
     }
 
     [Fact]
+    public void Aborted_overwrite_invalidates_payload_cache()
+    {
+        using var db = GraphDatabase.Open(_path);
+        db.Vectors.CreateVectorIndex(Spec(db));
+        NodeId node;
+        using (var tx = db.BeginTransaction())
+        {
+            node = tx.CreateNode("Doc");
+            tx.SetVector(EntityKind.Node, node.Value, IndexName, [1f, 0f, 0f, 0f]);
+            tx.Commit();
+        }
+
+        // committed 値を slab に載せてから、同じ seq を未 commit 値で write-through する。
+        var destination = new float[Dim];
+        db.Vectors.TryGetVector(EntityKind.Node, node.Value, IndexName, destination).Should().BeTrue();
+        destination.Should().Equal(1f, 0f, 0f, 0f);
+
+        using (var tx = db.BeginTransaction())
+        {
+            tx.SetVector(EntityKind.Node, node.Value, IndexName, [0f, 1f, 0f, 0f]);
+            tx.Rollback();
+        }
+
+        destination.AsSpan().Clear();
+        db.Vectors.TryGetVector(EntityKind.Node, node.Value, IndexName, destination).Should().BeTrue();
+        destination.Should().Equal(1f, 0f, 0f, 0f);
+    }
+
+    [Fact]
     public void Hybrid_graph_and_vector_commit_is_atomic_across_reopen()
     {
         long id;
@@ -78,7 +107,7 @@ public sealed class VectorTransactionTests : IDisposable
             rtx.NodeExists(new NodeId(id)).Should().BeTrue();
 
             Knn(db, new float[] { 1, 0, 0, 0 }, 10).Should().ContainSingle()
-                .Which.Should().Be(EntityRef.Sequence(id));
+                .Which.Should().Be(EntityRef.UnpackSequence(id));
         }
     }
 
@@ -92,7 +121,7 @@ public sealed class VectorTransactionTests : IDisposable
             // tx を一切張らずに直接 SetVector → autocommit で crash-atomic に永続化される。
             NodeId n;
             using (var tx = db.BeginTransaction()) { n = tx.CreateNode("Doc"); tx.Commit(); }
-            seq = EntityRef.Sequence(n.Value);
+            seq = EntityRef.UnpackSequence(n.Value);
             db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, new float[] { 0, 1, 0, 0 });
         }
 

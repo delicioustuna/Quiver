@@ -60,8 +60,10 @@ public enum VacuumTarget
     Properties = 1 << 2,
     /// <summary>索引を対象にする。</summary>
     Indexes = 1 << 3,
+    /// <summary>ハイパーエッジ (と付随する incidence・プロパティ) を対象にする。</summary>
+    Hyperedges = 1 << 4,
     /// <summary>すべてのエンティティ種別を対象にする。</summary>
-    All = Nodes | Relationships | Properties | Indexes,
+    All = Nodes | Relationships | Properties | Indexes | Hyperedges,
 }
 
 /// <summary>
@@ -76,6 +78,8 @@ public enum VacuumTarget
 /// <param name="Skipped">前提 (アクティブ tx 0) を満たせず未実行のとき true。</param>
 /// <param name="TruncatedPages">物理 truncate で nodes/rels/props 3 ストア合計から削減したページ数。</param>
 /// <param name="ReclaimedColumnVersions">列 (opt-in) の delta から merge した超過版数。</param>
+/// <param name="ReclaimedHyperedges">物理回収した dead ハイパーエッジ header 数。</param>
+/// <param name="ReclaimedIncidences">dead ハイパーエッジに付随して回収した incidence 数。</param>
 public sealed record VacuumReport(
     int ReclaimedNodes,
     int ReclaimedRelationships,
@@ -85,4 +89,6 @@ public sealed record VacuumReport(
     long HorizonTxId,
     bool Skipped,
     long TruncatedPages = 0,
-    int ReclaimedColumnVersions = 0);
+    int ReclaimedColumnVersions = 0,
+    int ReclaimedHyperedges = 0,
+    int ReclaimedIncidences = 0);

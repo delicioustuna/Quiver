@@ -41,11 +41,12 @@ internal enum TupleSlotType : byte
     Null = 0,
     NodeId = 1,
     RelationshipId = 2,
-    Bool = 3,
-    Int64 = 4,
-    Double = 5,
-    Utf8String = 6,
-    Bytes = 7,
+    HyperedgeId = 3,
+    Bool = 4,
+    Int64 = 5,
+    Double = 6,
+    Utf8String = 7,
+    Bytes = 8,
 }
 
 internal sealed class TupleSchema

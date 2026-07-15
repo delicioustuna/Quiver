@@ -50,16 +50,23 @@ public class VersionedRelationshipStoreTests : IDisposable
     }
 
     [Fact]
-    public void Create_returns_valid_rel_in_sequence_space()
+    public void Create_returns_current_generation_relationship_id()
     {
         var a = _nodes.Allocate(new LabelId(1));
         var b = _nodes.Allocate(new LabelId(1));
         var rel = _rels.Create(_nodes, a, b, new RelationshipTypeId(0));
         rel.IsValid.Should().BeTrue();
-        // 旧 RelationshipStore と同じく rel は Sequence 空間 (gen=0)。
-        rel.Generation.Should().Be(0);
-        rel.Value.Should().Be(rel.Sequence);
+        rel.Generation.Should().Be(1);
+        rel.Value.Should().NotBe(rel.Sequence);
+        _rels.CurrentGeneration(rel.Sequence).Should().Be(1);
         _rels.InUseCount.Should().Be(1);
+
+        Reopen();
+
+        _rels.CurrentGeneration(rel.Sequence).Should().Be(1);
+        using var reopened = _rels.Read(rel);
+        reopened.InUse.Should().BeTrue();
+        reopened.Id.Should().Be(rel);
     }
 
     [Fact]
@@ -70,8 +77,8 @@ public class VersionedRelationshipStoreTests : IDisposable
         var rel = _rels.Create(_nodes, a, b, new RelationshipTypeId(5));
         using var h = _rels.Read(rel);
         h.InUse.Should().BeTrue();
-        h.Source.Should().Be(a);
-        h.Target.Should().Be(b);
+        h.Source.Sequence.Should().Be(a.Sequence);
+        h.Target.Sequence.Should().Be(b.Sequence);
         h.Type.Value.Should().Be(5);
     }
 
@@ -159,12 +166,12 @@ public class VersionedRelationshipStoreTests : IDisposable
         }
         using var h = _rels.Read(rel);
         h.FirstPropertyId.Value.Should().Be(42);
-        h.Source.Should().Be(a);
-        h.Target.Should().Be(b);
+        h.Source.Sequence.Should().Be(a.Sequence);
+        h.Target.Sequence.Should().Be(b.Sequence);
     }
 
     [Fact]
-    public void Reused_sequence_after_vacuum_is_handed_out_again()
+    public void Vacuum_does_not_release_relationship_sequence_for_reuse()
     {
         var a = _nodes.Allocate(new LabelId(1));
         var b = _nodes.Allocate(new LabelId(1));
@@ -172,9 +179,12 @@ public class VersionedRelationshipStoreTests : IDisposable
         _rels.Delete(_nodes, r1);
         var committed = new CommittedTxRegistry();
         _rels.VacuumDeadVersions(_nodes, long.MaxValue, committed);
-        // 回収後 seq は free list に戻り、次の Create で再利用される。
+        // raw adjacency / delta / locator / epoch entry の lifecycle が完了するまでは
+        // relationship sequence を free list へ戻さない。
+        _rels.FreeHead.Should().Be(-1);
         var r2 = _rels.Create(_nodes, a, b, new RelationshipTypeId(0));
-        r2.Sequence.Should().Be(r1.Sequence);
+        r2.Sequence.Should().BeGreaterThan(r1.Sequence);
+        _rels.Read(r1).InUse.Should().BeFalse();
     }
 
     [Fact]
@@ -267,8 +277,8 @@ public class VersionedRelationshipStoreTests : IDisposable
         _rels.SetInlineProperty(r1, new PropertyKeyId(1), PropertyValue.FromString("weight"));
         using (var h = _rels.Read(r1))
         {
-            h.Source.Should().Be(a);
-            h.Target.Should().Be(b);
+            h.Source.Sequence.Should().Be(a.Sequence);
+            h.Target.Sequence.Should().Be(b.Sequence);
             h.Type.Value.Should().Be(3);
         }
         var neighbors = new List<long>();
