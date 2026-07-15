@@ -1,7 +1,7 @@
 # Single Writer 再設計の実行手順
 
 > 本書は `plans/single-writer-redesign.md` のプロセス正本である。
-> 設計内容は設計正本、Wave 固有のコミット計画は `plans/single-writer-redesign-waves/` を参照する。
+> 設計内容は設計正本、Wave 固有の目標状態と検証計画は `plans/single-writer-redesign-waves/` を参照する。
 > 物理コピーした別ライブラリは作らない。
 
 ## 1. 採用する作業モデル
@@ -117,7 +117,7 @@ branch が `redesign/single-writer` でない場合は編集を開始しない�
 ### 3.2 Wave 指示書の承認
 
 未タグの最小 Wave を着手対象とする。
-対応する `wave-NN.md` の正本 version を `git log -1 --format=%H -- plans/single-writer-redesign.md` が返す commit hash へ更新し、コミット計画と gate 適用表をユーザへ提示する。
+対応する `wave-NN.md` の正本 version を `git log -1 --format=%H -- plans/single-writer-redesign.md` が返す commit hash へ更新し、Wave 完了時の目標状態、影響境界、検証 gate をユーザへ提示する。
 ユーザの着手承認後に `ステータス: 承認済み(YYYY-MM-DD)` へ変え、doc-only commit として push する。
 
 ```powershell
@@ -130,10 +130,23 @@ git push origin redesign/single-writer
 
 draft の指示書、未 commit の正本を参照する指示書、未解決 blocker を持つ指示書ではコードを変更しない。
 
-## 4. Wave 内のコミット
+## 4. Wave 内の実装
 
-通常の計画コミットは、各 commit で solution build と対象 test が成功する順序に分解する。
-追加、call site の移行、旧 contract の削除という順序を基本とし、意図的に壊れた中間 commit を計画しない。
+Wave をファイル別、disposition 別、小タスク別のコミット列へ分解しない。
+まず正本と Wave 指示書が定める対象全体を、完了時のあるべき contract へ作業ツリー上で一括変更する。
+この置換途中では compile error と test failure を許容し、旧・新 contract を同時に成立させるための shim や部分移行用 API は作らない。
+
+一括変更後に solution build を実行し、compiler error を不足 call site の一覧として補修する。
+build 成功後に focused test と Wave 対象 project の test を実行し、失敗から契約漏れと回帰を補修する。
+テストは部分移行の挙動ではなく、最終 contract と再発防止を保証する形へ追加・更新する。
+
+コミット境界は作業項目の数ではなく、次の状態だけに置く。
+
+- Wave の目標状態を一括反映し、solution build と focused test が成功した完成状態。
+- その後に判明した不足を補修し、同じ検証が成功した状態。
+- セッション中断時の退避が必要な WIP 状態。
+
+完成・補修 commit は明示 pathspec で stage し、solution build と対象 test の成功を確認してから作成する。
 
 ```powershell
 git rev-parse HEAD
@@ -155,8 +168,9 @@ full repository の `-Scan` は既存候補を含むため Wave 10 の cleanup g
 ### 4.1 中断用 WIP commit
 
 セッション中断時に未コミット変更を失う可能性がある場合だけ、`wip:` commit を同じ topic branch へ pushしてよい。
-WIP は計画コミットでも Wave 合格点でもない。
-次のセッションは WIP を forward-fix し、build と対象 test が成功する通常 commit を積んでから作業を進める。
+WIP は完成・補修 commit でも Wave 合格点でもない。
+次のセッションは WIP を forward-fix し、Wave の目標状態を一括完成させた build/test 成功 commit で supersede する。
+公開済み WIP 履歴は rebase で消さず、後続 commit と gate 結果によって未完成状態ではないことを示す。
 stash、rebase、force-push、別 worktree へのコピーは使わない。
 
 ## 5. 設計不備が見つかった場合
@@ -190,7 +204,7 @@ stash、rebase、force-push、別 worktree へのコピーは使わない。
 
 - `dotnet build Quiver.slnx -v minimal` が 0 errors かつ 0 warnings。
 - Wave 指示書が定めた test、監査、性能測定が成功している。
-- planned commit に WIP が残っていない。
+- branch tip が WIP ではなく、過去の WIP が後続の build/test 成功 commit で supersede されている。
 - topic branch の commit がすべて origin へ push 済みである。
 - ユーザが gate 結果を確認し、`develop` への merge を明示的に承認している。
 

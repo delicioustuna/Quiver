@@ -2,8 +2,8 @@
 
 > 効力宣言: 本書と設計正本が食い違う場合は設計正本を優先し、食い違いをユーザへ報告する。
 > 作成日: 2026-07-10
-> 対応する正本のバージョン: `afb93ae154df257cd1c063e5af5185a04159b829` (統合 commit I)。
-> ステータス: 承認済み(2026-07-12)。C-7 の設計決定日(2026-07-13)を legacy compatibility 統合として反映。
+> 対応する正本のバージョン: `9c557b62e8ce4e2b79ebfd84910aa92c522ba141`。
+> ステータス: 承認済み(2026-07-12)。C-7 の設計決定日(2026-07-13)と、一括実装方式への変更指示(2026-07-15)を反映。
 
 ## 1. 着手前チェック
 
@@ -19,7 +19,7 @@
 - [ ] 正本 §2.3、§5.1、§7.1、§16 と review C-5 の physical Sequence、logical materialization、stale reject/skip、reuse retarget 禁止の規則が一致する。
 - [ ] 正本 §2.3、§5.1、§7.1、§9 Wave 1/9、§15、§16 と review C-6 の relationship raw entry、Wave 1 no-reuse、Wave 9 coordinator、candidate skip/not-found の規則が一致する。
 - [ ] 正本 §2.3、§5.1、§8.1、§15、§16 と review C-7 の `LabelNodeIndex.Lookup` full ID、Wave 7 までの physical compatibility surface、primary `Read` 検証直後の `Sequence`、logical identity API ではない規則が一致する。
-- [ ] 本書の正本 version を実 commit hash へ更新し、ユーザがコミット計画を承認した。
+- [ ] 本書の正本 version を実 commit hash へ更新し、ユーザが目標状態と検証計画を承認した。
 
 見出しの「対応済み」だけで判断せず、各参照先を `rg` で照合する。
 不一致が一つでもあれば doc-only forward-fix を先に行う。
@@ -33,16 +33,17 @@
 5. review C-1〜C-7、M-1、M-5。
 6. `docs/design/00_conventions.md` の public API、ID、test 規約。
 
-## 3. コミット計画
+## 3. 目標状態と検証計画
 
-各 planned commit は solution build と focused test が成功する状態にする。
-後続 Wave の transaction、property、index definition を先行公開しない。
+次の三領域を個別コミットへ分解せず、Wave 1 のあるべき姿として作業ツリーへ一括反映する。
+一括変更後に solution build と focused test を実行し、compile error、契約漏れ、回帰を不足一覧として補修する。
+後続 Wave の transaction、property、index definition は先行公開しない。
 
 1. typed ID equality を Generation 込みにする。
-   `NodeId`、`RelationshipId`、`HyperedgeId`、`EntityRef` の equality と hash を同じ commit で更新する。
+   `NodeId`、`RelationshipId`、`HyperedgeId`、`EntityRef` の equality と hash を一括して更新する。
    `EntityRef` の raw `(Kind, Value)` constructor を非公開にし、`From(NodeId/RelationshipId/HyperedgeId)` と `Create(kind, sequence, generation)` だけを public construction にする。
    typed Invalid の `From` は `default(EntityRef)` にだけ写像する。factory は三つの有効 kind、範囲、kind bit 混入を検証し、Property、予約、未知 kind を `ArgumentOutOfRangeException` で拒否する。`UnpackKind` は raw packed bit の抽出だけを担い、生成境界ではない。`Value` を Generation 込み `PackLocal` とし、旧 `Id = Sequence` contract を `Sequence` / `Generation` property へ置換する。
-   static helper は `UnpackSequence(long)` / `UnpackGeneration(long)` へ改名し、全 call site を同じ commit で移行する。
+   static helper は `UnpackSequence(long)` / `UnpackGeneration(long)` へ改名し、全 call site を一括して移行する。
    typed ID から EntityRef を作る全 call site は raw constructor を使えず、型別 `From` factory に移行する。
    physical Sequence は page/record address と internal chain に限定する。logical emit/key、public API、read/scan、query/traversal、index/full-text/vector output は sidecar `CurrentGeneration` で full typed ID を materialize する。Generation `0` は public identity にしない。Generation `> 0` の stale input は reject し、derived stale entry は skip する。Wave 1 は relationship Sequence を再利用しない。`Vacuum` は reclaim 済み relationship storage を回収しても free list へ release せず、create は free 候補を無視して high-water mark からだけ割り当てる。raw relationship entry は logical materialization 不能なら skip/not-found とし、別 relationship へ retarget しない。reader horizon、base rebuild、delta/epoch reset、locator rebuild、derived durable、free release を担う `RelationshipReuseCoordinator` は Wave 9 の責務である。
    `LabelNodeIndex.Lookup` は full `NodeId` を返す logical API とする。logical pipeline は full typed ID を保持し、node query/traversal が physical store の locator、chain、index key へ渡す sequence は full typed `NodeId` の primary `Read` 検証直後にだけ取り出す。physical candidate は full ID へ materialize して stale を skip する。public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 まで残す physical compatibility surface (`compatibility adapter`) であり、logical identity API ではない。診断 raw `long` は表示・計測だけに閉じる。
@@ -57,7 +58,7 @@
 3. PublicApi、tests、as-built を更新する。
    identity の旧期待値を置換し、`docs/spec/` と `docs/design/development.md` に Generation 込み equality と後続 Wave の staging を反映する。
 
-各 commit で最低限、次を実行する。
+一括変更後と各補修完了時に最低限、次を実行する。
 
 ```powershell
 dotnet build Quiver.slnx -v minimal
@@ -76,8 +77,8 @@ $stagedPaths = @(git diff --cached --name-only --diff-filter=ACMR)
 if ($stagedPaths.Count -gt 0) { & scripts/agent-guardrails/check-track-markers.ps1 @stagedPaths }
 ```
 
-対象外 project の compile error が出た場合は identity call site を同じ planned commit に含める。
-壊れた中間 commit を予定どおりとして pushしない。
+対象外 project の compile error が出た場合も不足 call site として同じ補修範囲に含める。
+一括変更途中の壊れた状態は完成 commit として pushしない。
 
 ## 4. 完了確認
 
@@ -96,7 +97,7 @@ integration candidate で設定すべき追加条件数は13件である。
 - public `PropertyId` は Wave 3 の現行 active contract として残るが、`EntityRef` へ変換できない。
 - transaction/property/index の新旧 public modelを追加していない。
 - guardrail 差分監査に新規漏出がない。
-- planned commit がすべて origin へ push 済みで、WIP が残っていない。
+- branch tip が完成・補修 commit で、過去の WIP が後続の build/test 成功 commit により supersede され、origin へ push 済みである。
 - `LabelNodeIndex.Lookup` は full `NodeId` を返し、raw sequence を logical output に返さない。
 - logical operator と traversal は full typed ID を保持し、node physical lookup は full typed `NodeId` の primary `Read` 検証直後の `Sequence` だけを使う。
 - label 起点の `ApplyDyadic` と `ApplyDyadicOversampleTests` は full typed `NodeId` を primary `Read` 検証直後の `Sequence` に変換して physical lookup し、期待する match を返す。

@@ -5,7 +5,7 @@
 ## 1. 指示書とは何か / 何でないか
 
 各 `wave-NN.md` は、`plans/single-writer-redesign.md` §9 の該当 Wave 節を**複製したもの**ではない。
-`.agents/skills/quiver-implement/SKILL.md` §2「Wave 実行プロトコル」手順 3(disposition 表をコミット単位に分解した実施計画をユーザに提示し、承認を得る)の**導出結果を永続化する場所**である。
+`.agents/skills/quiver-implement/SKILL.md` §2「Wave 実行プロトコル」手順 3(Wave 完了時のあるべき姿、影響境界、検証 gate をユーザに提示し、承認を得る)の**導出結果を永続化する場所**である。
 
 正本 §9 の「対象/削除変更追加/テスト/Build/完了条件」は転記せず、節番号への参照だけを書く。転記すると正本改訂のたびに二重管理・drift が発生するため。
 
@@ -15,7 +15,7 @@
 
 1. 前 Wave が合格する(`redesign-wave-(N-1)` タグが push される)。Wave 0 は `redesign-baseline` タグを前提とする。
 2. 次の Wave N の指示書 `wave-NN.md` を、本 README のテンプレートに従って新規作成する(既存 draft があれば正本との整合を確認して更新)。
-3. コミット計画(§3 節)をユーザに提示し、承認を得る。
+3. 目標状態と検証計画(§3 節)をユーザに提示し、承認を得る。
 4. 対応する正本の version を実 commit hash に更新する。承認された指示書を `ステータス: 承認済み(日付)` にして、**doc のみの単独コミット**として topic branch へ push する(コード変更と混ぜない)。
 5. 実装に入る。以後、指示書は Wave N の完了までは基本的に不変(正本が forward-fix された場合のみ改訂し、改訂も doc 単独コミット)。
 
@@ -54,14 +54,16 @@ Wave 2 以降の指示書は、対応する Wave の直前になるまで作成�
 3. 関連する設計節(該当する §番号を列挙)
 4. レビューの該当指摘
 
-## 3. コミット計画(承認対象の本体)
+## 3. 目標状態と検証計画(承認対象の本体)
 
-- コミット 1: <disposition グループ名> — 順序の理由 / `wip:` を許容する範囲
-- コミット 2: ...
+- あるべき姿: <Wave 完了時に成立する contract と削除済みであるべき旧構造>
+- 一括変更範囲: <影響する module / public boundary / durable boundary>
+- 補修方法: solution build と focused test の失敗を、どの順で不足一覧へ変換するか
+- 契約保証: <追加・更新する回帰 test と as-built>
 
-設計内容を再定義しない。
-ただし、各 commit を buildable に保つ追加、call site 移行、削除の順序と focused test は具体的に書く。
-設計判断は正本 §7 disposition 表を正とする。
+設計内容を再定義せず、設計判断は正本 §7 disposition 表を正とする。
+ファイル別、小タスク別、disposition 別のコミット列は書かない。
+最初に対象全体をあるべき姿へ一括変更し、その後に build/test で不足を補修する。
 
 ## 4. 本 Wave 固有の落とし穴
 
@@ -79,6 +81,6 @@ Wave 2 以降の指示書は、対応する Wave の直前になるまで作成�
 | baseline gate |  |  |  |
 | as-built 更新 | 適用 |  |  |
 
-- 各 planned code commit は build と focused test が成功する順序にする。中断用 WIP は planned commit 数へ含めない。
+- 完成・補修 commit は build と focused test が成功した状態だけで作る。中断用 WIP は後続の成功 commit で supersede する。
 - タグ付与は SKILL.md §2 手順 5 に従い、ユーザの明示承認後にのみ行う。
 ```
