@@ -67,7 +67,7 @@ internal readonly struct EntityIdentityMaterializer
         return true;
     }
 
-    // Generation 0 は旧来の physical Sequence を表す compatibility input に限る。
+    // Generation 0 は store 内部の physical Sequence を表す入力に限る。
     // 世代付き入力を現世代へ置換すると stale identity が新しい slot 所有者を指すため、
     // primary Read にそのまま渡して reject させる。
     private static NodeId Resolve(NodeId id, Func<long, int> currentGeneration)

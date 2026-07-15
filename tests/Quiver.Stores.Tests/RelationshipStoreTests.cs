@@ -45,9 +45,28 @@ public class RelationshipStoreTests : IDisposable
         var b = _nodes.Allocate(new LabelId(1));
         var rel = _rels.Create(_nodes, a, b, new RelationshipTypeId(5));
         using var h = _rels.Read(rel);
-        h.Source.Should().Be(a);
-        h.Target.Should().Be(b);
+        h.Id.Should().Be(rel);
+        h.Source.Sequence.Should().Be(a.Sequence);
+        h.Target.Sequence.Should().Be(b.Sequence);
         h.Type.Value.Should().Be(5);
+    }
+
+    [Fact]
+    public void Read_materializes_current_generation_and_rejects_stale_identity()
+    {
+        var source = _nodes.Allocate(new LabelId(1));
+        var target = _nodes.Allocate(new LabelId(1));
+        var relationship = _rels.Create(_nodes, source, target, new RelationshipTypeId(5));
+
+        relationship.Generation.Should().Be(1);
+        using (var physicalRead = _rels.Read(new RelationshipId(relationship.Sequence)))
+        {
+            physicalRead.InUse.Should().BeTrue();
+            physicalRead.Id.Should().Be(relationship);
+        }
+
+        using var staleRead = _rels.Read(RelationshipId.Create(relationship.Sequence, generation: 2));
+        staleRead.InUse.Should().BeFalse();
     }
 
     [Fact]

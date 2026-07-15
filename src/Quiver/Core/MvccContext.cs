@@ -45,7 +45,13 @@ internal static class MvccContext
     /// </summary>
     public static void Begin(TransactionId selfTxId, in SnapshotState snapshot, CommittedTxRegistry committed,
         ISsnReadSink? readSink = null)
-        => Current = new MvccTransactionContext(selfTxId, snapshot, committed, readSink);
+    {
+        MvccTransactionContext? current = Current;
+        if (current.HasValue && current.Value.Matches(selfTxId, snapshot, committed, readSink))
+            return;
+
+        Current = new MvccTransactionContext(selfTxId, snapshot, committed, readSink);
+    }
 
     /// <summary>現在の非同期フローのコンテキストを破棄する。</summary>
     public static void End() => Current = null;
@@ -85,4 +91,15 @@ internal readonly struct MvccTransactionContext
         Committed = committed;
         ReadSink = readSink;
     }
+
+    public bool Matches(
+        TransactionId selfTxId,
+        in SnapshotState snapshot,
+        CommittedTxRegistry committed,
+        ISsnReadSink? readSink)
+        => SelfTxId == selfTxId
+            && Snapshot.SnapshotTxId == snapshot.SnapshotTxId
+            && ReferenceEquals(Snapshot.ActiveAtBegin, snapshot.ActiveAtBegin)
+            && ReferenceEquals(Committed, committed)
+            && ReferenceEquals(ReadSink, readSink);
 }

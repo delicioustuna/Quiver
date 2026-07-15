@@ -79,11 +79,11 @@ public sealed class IncidenceStoreTests : IDisposable
         IncidenceId newHead = _heads.Get(shared);
 
         using var newRecord = _incidences.Read(newHead);
-        newRecord.HyperedgeId.Should().Be(second);
+        newRecord.HyperedgeId.Sequence.Should().Be(second.Sequence);
         newRecord.NextInNode.Should().Be(oldHead);
 
         using var oldRecord = _incidences.Read(oldHead);
-        oldRecord.HyperedgeId.Should().Be(first);
+        oldRecord.HyperedgeId.Sequence.Should().Be(first.Sequence);
         oldRecord.NextInNode.Should().Be(IncidenceId.Invalid);
     }
 
@@ -101,12 +101,12 @@ public sealed class IncidenceStoreTests : IDisposable
         HyperedgeId newest = Create(shared, new NodeId(15), role: 3);
         _hyperedges.Delete(middle);
 
-        var actual = new List<HyperedgeId>();
+        var actual = new List<long>();
         var iterator = _incidences.EnumerateByNode(shared, _heads, _hyperedges);
         while (iterator.MoveNext())
-            actual.Add(iterator.Current.HyperedgeId);
+            actual.Add(iterator.Current.HyperedgeId.Sequence);
 
-        actual.Should().Equal(newest, oldest);
+        actual.Should().Equal(newest.Sequence, oldest.Sequence);
     }
 
     /// <summary>

@@ -5,7 +5,7 @@ namespace Quiver.Core;
 //  - Sequence (slot 局所 ID) は record の page/offset 演算に使う。オンディスクの ID
 //    フィールド (Int48) には Value ではなく Sequence を書く。
 //  - Generation は slot incarnation。Allocate/Read が sidecar 由来の世代を載せて払い出す。
-//    生成 0 (= new XId(seq)) は「世代未指定」で、Value == Sequence の後方互換。
+//    Generation 0 (= new XId(seq)) はストア内の物理 Sequence 表現にだけ使う。
 // Why not Sequence-only equality: vacuum 後の slot 再利用で別 entity を同一キーとして扱い、
 // dictionary、frontier、index key が stale reference を現在の entity へ alias してしまう。
 

@@ -158,7 +158,7 @@ public sealed class HyperedgeOperatorTests
             b = tx.CreateNode("N");
         });
 
-        using var snapshot = fx.Db.BeginTransaction();
+        using var snapshot = fx.Db.BeginReadOnlyTransaction();
         using (var writer = fx.Db.BeginTransaction())
         {
             writer.CreateHyperedge("Fact", [new("Subject", a), new("Object", b)]);
