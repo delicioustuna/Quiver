@@ -70,8 +70,8 @@ internal sealed class TxRelationshipStore : IRelationshipStore
             return raw;
 
         var materializer = new EntityIdentityMaterializer(_txNodes);
-        if (!materializer.TryNode(raw.Source, out var source)
-            || !materializer.TryNode(raw.Target, out var target))
+        if (!materializer.TryNodeReferenceFromVisibleOwner(raw.Source, out var source)
+            || !materializer.TryNodeReferenceFromVisibleOwner(raw.Target, out var target))
         {
             return new RelationshipReadHandle(
                 raw.Id, inUse: false, raw.Source, raw.Target, raw.Type,

@@ -68,14 +68,19 @@ internal sealed class BinaryExpandCursor : ExpandCursor
             while (_adjCursor!.MoveNext())
             {
                 // adjacency base は physical relationship Sequence だけを持つ。
-                // logical Read / output の前に full ID へ解決する。
+                // current Generation を付与して primary Read し、candidate validation と
+                // logical output の materialization を一回の read で完結させる。
                 var physicalRelationship = _adjCursor.Relationship;
-                var materializer = new EntityIdentityMaterializer(
-                    _tx.Nodes, _tx.Relationships, _tx.Hyperedges);
-                if (!materializer.TryRelationship(physicalRelationship, out var rid))
+                int generation = _tx.Relationships.CurrentGeneration(physicalRelationship.Sequence);
+                if (generation < 0
+                    || (physicalRelationship.Generation != 0
+                        && physicalRelationship.Generation != generation))
                     continue;
 
-                var rel = _tx.Relationships.Read(rid);
+                var rid = RelationshipId.Create(physicalRelationship.Sequence, generation);
+                using var rel = _tx.Relationships.Read(rid);
+                if (!rel.InUse)
+                    continue;
                 bool sourceIsEndpoint = rel.Source.Sequence == _source.Sequence;
                 NodeId neighbor = sourceIsEndpoint ? rel.Target : rel.Source;
                 if (adj.IsTombstoned(rid) &&

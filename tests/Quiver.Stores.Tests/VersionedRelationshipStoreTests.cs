@@ -58,7 +58,15 @@ public class VersionedRelationshipStoreTests : IDisposable
         rel.IsValid.Should().BeTrue();
         rel.Generation.Should().Be(1);
         rel.Value.Should().NotBe(rel.Sequence);
+        _rels.CurrentGeneration(rel.Sequence).Should().Be(1);
         _rels.InUseCount.Should().Be(1);
+
+        Reopen();
+
+        _rels.CurrentGeneration(rel.Sequence).Should().Be(1);
+        using var reopened = _rels.Read(rel);
+        reopened.InUse.Should().BeTrue();
+        reopened.Id.Should().Be(rel);
     }
 
     [Fact]

@@ -75,6 +75,10 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     private readonly IEntityVersionStore _versions;
     private readonly RelationshipLocatorStore? _locators;
     private long _inUseCount;
+    // Wave 1 では relationship Sequence を再利用しない。
+    // 既存 sidecar に再利用履歴がなければ全採番済み slot の generation は 1 なので、
+    // logical output ごとの sidecar read を省ける。
+    private bool _anyReuse;
 
     public VersionedRelationshipStore(
         IPagedFile heapFile,
@@ -89,6 +93,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         _locators = locators;
         BackfillLocators();
         _inUseCount = RecomputeInUse();
+        _anyReuse = _versions.AnyGenerationReuse;
     }
 
     public long InUseCount => _inUseCount;
@@ -353,6 +358,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
         _locators?.ReloadMeta();
         BackfillLocators();
         _inUseCount = RecomputeInUse();
+        _anyReuse = _versions.AnyGenerationReuse;
     }
 
     /// <summary>採番済み Sequence 数 (= 最大 seq + 1)。</summary>
@@ -365,6 +371,7 @@ internal sealed class VersionedRelationshipStore : IRelationshipStore
     public int CurrentGeneration(long localId)
     {
         if (localId < 0 || localId >= _map.Hwm) return -1;
+        if (!_anyReuse) return 1;
         long gen = _versions.Read(localId).Generation;
         return gen > int.MaxValue ? int.MaxValue : (int)gen;
     }

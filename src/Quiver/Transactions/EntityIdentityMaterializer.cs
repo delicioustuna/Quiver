@@ -41,6 +41,24 @@ internal readonly struct EntityIdentityMaterializer
         return true;
     }
 
+    /// <summary>
+    /// 可視な primary owner-bound record が保持する node Sequence を full identity へ解決する。
+    /// owner delete は参照 relationship/incidence と同じ logical delete 境界で行われ、
+    /// reader horizon を越えるまで owner Sequence は再利用されないため、node 本体の再読は不要である。
+    /// </summary>
+    public bool TryNodeReferenceFromVisibleOwner(NodeId physical, out NodeId logical)
+    {
+        logical = NodeId.Invalid;
+        if (!physical.IsValid) return false;
+
+        int generation = _nodes.CurrentGeneration(physical.Sequence);
+        if (generation < 0 || (physical.Generation != 0 && physical.Generation != generation))
+            return false;
+
+        logical = NodeId.Create(physical.Sequence, generation);
+        return true;
+    }
+
     public bool TryRelationship(RelationshipId physical, out RelationshipId logical)
     {
         logical = RelationshipId.Invalid;
