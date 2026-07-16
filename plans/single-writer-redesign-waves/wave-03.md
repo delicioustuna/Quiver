@@ -2,14 +2,14 @@
 
 > 効力宣言: 本書と設計正本が食い違う場合は設計正本を優先し、食い違いをユーザへ報告する。
 > 作成日: 2026-07-16
-> 対応する正本のバージョン: `3f3d63bcfee2b92c890d3000907cbd1891427d7e`
-> ステータス: 承認済み(2026-07-16)
+> 対応する正本のバージョン: 本書と同じ forward-fix commit に含まれる正本
+> ステータス: 承認済み(2026-07-16、C-8 forward-fix)
 
 ## 1. 着手前チェック
 
 - annotated tag `redesign-wave-2` が存在し、`develop` と `redesign/single-writer` は Wave 2 merge commit `ede8bec370963c98f5d6275e7aeb81c85adb356e` に一致する。
 - branch は `redesign/single-writer`、作業場所は専用 worktree `D:/csharp/Quiver-sw` であり、未コミット変更と `develop` 未マージ commit はない。
-- 正本 §5.2〜§5.5、§7.1〜§7.2、§9 Wave 3、§10.3〜§10.4、§13 と review C-4〜C-6、M-1、M-6 の境界が一致する。
+- 正本 §5.2〜§5.5、§7.1〜§7.3、§9 Wave 3/4、§10.3〜§10.4、§13 と review C-4〜C-6、C-8、M-1、M-6 の境界が一致する。
 - Wave 1 の generation-safe typed ID と Wave 2 の `QUIVER-SW` format、適応 file allocation、strict page/WAL codec が実在し、本 Wave の primary store 置換に利用できる。
 - review M-1 に従い、store-level clean reopen と stale generation rejection だけを本 Wave で扱う。crash reopen は Wave 5、vacuum による実 slot reuse と relationship sequence の release は Wave 9 へ残す。
 - 本書の目標状態と検証計画についてユーザの着手承認を得る。
@@ -20,7 +20,7 @@
 2. 正本 §2.3〜§2.4、§5.2〜§5.5。
 3. 正本 §7.1〜§7.2、§8.1〜§8.2。
 4. 正本 §10.3〜§10.4、§11.2、§13。
-5. review C-4〜C-6、M-1、M-6。
+5. review C-4〜C-6、C-8、M-1、M-6。
 6. `docs/spec/01_storage_paging.md`、`docs/spec/03_mvcc.md`、`docs/spec/04_records_index.md`、`docs/spec/06_vector.md` と `docs/design/00_conventions.md`。
 
 ## 3. 目標状態と検証計画
@@ -37,6 +37,7 @@ Wave 3 は entity、property、payload、incidence、adjacency、tenant catalog 
 
 - 正本の表に残る Node/Relationship/Hyperedge は設計概念の旧表記であり、実装 identifier と public docs は Wave 2 で確定した Vertex/Edge/Nexus を維持する。
 - Wave 4 の `WriterLease`、one-writer snapshot manager、read/write transaction cutoverを前倒ししない。store API は `xmin` / `xmax` と snapshot/self tx の入力を受けられる最終形にするが、既存 facade adapter の全面置換はしない。
+- review C-8 に従い、`EntityVersionMeta` の pstamp/sstamp lane と更新 API は既存 SSN のため一時維持する。Generation の正本だけを一箇所へ固定し、metadata の物理縮約は SSN と call site を削除する Wave 4 へ残す。
 - Wave 5 の winner redo、checkpoint、crash recovery を前倒ししない。reopen gate は clean shutdown に限定し、process kill や torn WAL からの primary state 復元を本 Wave の成功根拠にしない。
 - Wave 9 の vacuum、reader horizon 後の実 slot reuse、relationship free release を前倒ししない。stale ref test は generation の異なる ref/sidecar を直接構成し、別 incarnation へ alias しないことを検証する。
 - owner sequence は参照 incidence/edge が不可視かつ horizon 超過になるまで再利用しない。member vertex delete は同じ logical delete 境界で参加 nexus と incidence を無効化する。
@@ -59,7 +60,7 @@ Wave 3 は entity、property、payload、incidence、adjacency、tenant catalog 
 
 - public `PropertyId` と property ID を露出する public handle/enumerator が PublicApi approval から消えている。
 - `PropertyAddress`、`PropertyVersionRef`、ID 非露出 cursor が owner-bound property contract を表す。
-- entity metadata は `xmin`、`xmax`、Generation に縮まり、pstamp/sstamp lane と property entity identity を持たない。
+- entity metadata は Generation の正本を一箇所だけに持ち、property entity identity を持たない。pstamp/sstamp lane は review C-8 の一時境界として既存 SSN 専用に維持され、新 primary store の identity/visibility 根拠には使わない。
 - Vertex、Edge、Nexus の Generation の正本が一箇所で、same-sequence/different-generation の入力と payload ref を stale として拒否する。
 - Single cardinality の update と Set cardinality の add/remove が property version の追加/終了として表現される。
 - cross-owner chain は silent data leak にならず corruption または not-found として拒否される。

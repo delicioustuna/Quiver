@@ -79,6 +79,17 @@
   - public direct raw-long contract は Wave 7 まで physical compatibility surface として残っても logical identity API にならず、node query/traversal へ直接流入せず、adapter が primary `Read` 検証直後の `Sequence` に限定する。
   - diagnostic の raw long は表示・計測だけに使われ、query/traversal/transaction の入力へ流入しない。
 
+### C-8. EntityVersionMeta の縮約が存続中の SSN call site を破壊する
+
+> **設計決定済み・実装未対応(2026-07-16、Wave 4 移管)**: Wave 3 は entity Generation の正本を一箇所へ固定するが、現行 SSN が使う pstamp/sstamp lane と更新 API は一時維持する。Wave 4 で SSN と全 call site を削除する同じ変更境界に metadata の `(xmin,xmax,generation)` 縮約を移した。正本 §7.2、§7.3、§9 Wave 3/4、§16 を参照。
+
+- **発見日**: 2026-07-16
+- **発見者**: Codex
+- **影響**: Wave 3、Wave 4
+- **内容**: 正本 §7.2 と §9 Wave 3 は `EntityVersionMeta` から pstamp/sstamp lane を除去するよう要求する一方、`Transactions/Transaction.cs` は Wave 4 の SSN 削除まで `Pstamp` / `Sstamp` を commit 判定と post-commit 更新に使用する。Wave 3 で metadata だけを縮約すると production build が成立しない。
+- **対応条件**: Wave 3 では pstamp/sstamp の物理 lane と更新 API を維持し、新 property/entity store が同じ sidecar contract で既存 transaction 層に接続できるようにする。Wave 4 で SSN、lock hook、全 pstamp/sstamp call site を削除したうえで、sidecar record、in-memory store、page arithmetic、test を三 laneへ同時に縮約する。一時 sidecar や互換 shim は作らない。
+- **検証**: Wave 3 の solution build と既存 SSN regression、Generation source の一意性を確認する。Wave 4 では production source の pstamp/sstamp symbol が 0 件、metadata record が `(xmin,xmax,generation)` のみ、reopen と page-boundary test、single-writer/snapshot suite が成功することを確認する。
+
 ## Major
 
 ### M-1. Wave 3 のテスト項目が Wave 5 / Wave 9 の成果に暗黙依存する
