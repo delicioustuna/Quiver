@@ -4,11 +4,21 @@ using Quiver.Storage;
 
 namespace Quiver.Storage.Records;
 
+/// <summary>可視性フィルターを通さない vertex head の物理状態。</summary>
+internal struct RawVertexRecord
+{
+    public bool InUse;
+    public EdgeId FirstEdgeId;
+    public PropertyVersionRef FirstPropertyRef;
+    public LabelId Label;
+    public long Xmin;
+    public long Xmax;
+}
+
 /// <summary>
 /// <see cref="VersionedRecordHeap"/> + <see cref="ItemPointerMap"/> 上に実装した
 /// Vertexストア。旧 <c>VertexStore</c> の置き換えで、論理 ID (Sequence) を map 経由で物理位置へ
-/// 解決する。固定サイズ record 配列をやめ可変長 slotted record にすることで、Phase 3 の
-/// property inline 化の土台になる。
+/// 解決する。固定サイズ record 配列をやめ、versioned slotted record に格納する。
 ///
 /// <para>Vertex payload (15B, 旧 VertexStore record と同形 — version ヘッダ 24B の後ろ):</para>
 /// <code>
@@ -19,10 +29,9 @@ namespace Quiver.Storage.Records;
 /// </code>
 /// 先頭 15B がそのまま <see cref="VertexWriteHandle"/> のレイアウトと一致するので in-place 更新に再利用する。
 ///
-/// <para><b>Phase 2 staging</b>: MVCC (xmin/xmax) / Generation / SSN (Pstamp/Sstamp) /
-/// commit-stamp 高水位は従来どおり <see cref="IEntityVersionStore"/> sidecar で管理する
-/// (SSN の依存を変えないため)。xmin/xmax の record 再内包と sidecar 廃止は版チェーンが要る
-/// Phase 3 へ後ろ倒し。Sequence は vacuum 回収後に再利用する (ItemPointerMap の free list)。
+/// <para>Generation と SSN 用 stamp は <see cref="IEntityVersionStore"/> sidecar で管理する。
+/// xmin/xmax は versioned record header に保持する。
+/// Sequence は vacuum 回収後に再利用する (ItemPointerMap の free list)。
 /// slot 再利用に伴う stale 参照は世代カウンタ照合 + MVCC visibility で弾く
 /// (旧 VertexStore と同セマンティクス)。</para>
 /// </summary>
@@ -35,11 +44,6 @@ internal sealed class VersionedVertexStore : IVertexStore
     private const int OffFirstProp = 7;
     private const int OffLabel = 13;
     private const byte FlagInUse = 0x01;
-    // Phase 6 alloc-free read: 典型 inline payload を収める stackalloc 量。超過は割当版へフォールバック。
-    private const int InlineReadBuffer = 256;
-
-    // inline property の符号化は InlinePropertyCodec に集約 (PropertyEnumerator と共用)。
-
     private static readonly int HdrSize = VersionedRecordHeap.VersionHeaderSize;
 
     private readonly IPagedFile _file;
@@ -92,12 +96,11 @@ internal sealed class VersionedVertexStore : IVertexStore
             _anyReuse = true;
         }
 
-        Span<byte> payload = stackalloc byte[InlinePropertyCodec.BaseSize(InlinePropertyCodec.VertexFixedSize)];
+        Span<byte> payload = stackalloc byte[PayloadSize];
         payload[OffFlags] = FlagInUse;
         RecordHelpers.WriteInt48(payload[OffFirstEdge..], -1L);
         RecordHelpers.WriteInt48(payload[OffFirstProp..], -1L);
         BinaryPrimitives.WriteInt16LittleEndian(payload[OffLabel..], (short)labelId.Value);
-        payload[InlinePropertyCodec.OffInlineCount(InlinePropertyCodec.VertexFixedSize)] = 0; // inline props: 0 件
 
         _heap.Insert(seq, payload, MvccContext.CurrentTxId.Value);
         _versions.Write(seq, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue, generation));
@@ -111,7 +114,7 @@ internal sealed class VersionedVertexStore : IVertexStore
     public void Free(VertexId vertexId)
     {
         long seq = vertexId.Sequence;
-        // Phase 3a: xmin/xmax は heap version へ再内包。論理削除は head version に xmax をスタンプ。
+        // 論理削除は head version に xmax をスタンプする。
         if (!_heap.TryReadHeadRaw(seq, out var payload, out _, out long xmax)) return;
         if (xmax != 0) return; // 既に論理削除済
         var prevLabel = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(OffLabel)));
@@ -124,15 +127,15 @@ internal sealed class VersionedVertexStore : IVertexStore
     {
         long seq = vertexId.Sequence;
         if (seq < 0 || seq >= _map.Hwm)
-            return new VertexReadHandle(vertexId, inUse: false, EdgeId.Invalid, PropertyId.Invalid, default);
+            return new VertexReadHandle(vertexId, inUse: false, EdgeId.Invalid, PropertyVersionRef.Invalid, default);
 
-        // Phase 3a: 可視性は heap version の xmin/xmax で判定する (TryReadVisible が版チェーンを辿る)。
+        // 可視性は heap version の xmin/xmax で判定する (TryReadVisible が版チェーンを辿る)。
         if (!_heap.TryReadVisible(seq, AmbientVisible, out var payload, out long xmin, out long xmax))
-            return new VertexReadHandle(vertexId, inUse: false, EdgeId.Invalid, PropertyId.Invalid, default);
+            return new VertexReadHandle(vertexId, inUse: false, EdgeId.Invalid, PropertyVersionRef.Invalid, default);
 
         var span = payload.AsSpan();
         var firstEdge = new EdgeId(RecordHelpers.ReadInt48(span[OffFirstEdge..]));
-        var firstProp = new PropertyId(RecordHelpers.ReadInt48(span[OffFirstProp..]));
+        var firstProp = new PropertyVersionRef(RecordHelpers.ReadInt48(span[OffFirstProp..]));
         var label = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(span[OffLabel..]));
 
         bool inUse = true;
@@ -168,7 +171,7 @@ internal sealed class VersionedVertexStore : IVertexStore
         long hwm = _map.Hwm;
         for (long seq = 0; seq < hwm; seq++)
         {
-            // Phase 3a: 可視性は heap version で判定 (null head / 不可視は false)。
+            // 可視性は heap version で判定する (null head / 不可視は false)。
             if (_heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _))
             {
                 MvccContext.RecordRead(EntityKind.Vertex, seq);
@@ -187,85 +190,16 @@ internal sealed class VersionedVertexStore : IVertexStore
         return gen > int.MaxValue ? int.MaxValue : (int)gen;
     }
 
-    // ===== inline property storage (vertex 粒度 copy-on-write) =====
-    // 符号化は InlinePropertyCodec に集約。読み取りは visible 版を引き、書き込みは copy-on-write。
-
-    public bool TryGetInlineProperty(VertexId vertexId, PropertyKeyId keyId, out PropertyValue value)
-    {
-        value = default;
-        long seq = vertexId.Sequence;
-        // alloc-free 経路 (edge と同型)。可視版 payload を stackalloc へコピーして scan。
-        // scalar は値コピーで安全、String/Bytes のみ安定 byte[] へ。超過は割当版へフォールバック。
-        Span<byte> buf = stackalloc byte[InlineReadBuffer];
-        int len = _heap.TryReadVisibleInto(seq, AmbientVisible, buf, out _, out _);
-        if (len == 0) return false;
-        // property read = vertex read。可視版を観測したので SSN read-set に記録する
-        // (write skew 検出のため。inline hit で早期 return しても捕捉漏れしない)。
-        MvccContext.RecordRead(EntityKind.Vertex, seq);
-        if (len <= buf.Length)
-        {
-            if (!InlinePropertyCodec.TryScan(buf[..len], InlinePropertyCodec.VertexFixedSize, keyId.Value, out var type, out var span))
-                return false;
-            value = InlinePropertyCodec.IsScalar(type)
-                ? InlinePropertyCodec.DecodeScalar(type, span)
-                : InlinePropertyCodec.Decode(type, span.ToArray());
-            return true;
-        }
-        if (!_heap.TryReadVisible(seq, AmbientVisible, out var payload, out _, out _)) return false;
-        if (!InlinePropertyCodec.TryScan(payload, InlinePropertyCodec.VertexFixedSize, keyId.Value, out var t2, out var s2)) return false;
-        value = InlinePropertyCodec.Decode(t2, s2);
-        return true;
-    }
-
-    public bool HasInlineProperty(VertexId vertexId, PropertyKeyId keyId)
-    {
-        long seq = vertexId.Sequence;
-        Span<byte> buf = stackalloc byte[InlineReadBuffer];
-        int len = _heap.TryReadVisibleInto(seq, AmbientVisible, buf, out _, out _);
-        if (len == 0) return false;
-        MvccContext.RecordRead(EntityKind.Vertex, seq);
-        if (len <= buf.Length)
-            return InlinePropertyCodec.TryScan(buf[..len], InlinePropertyCodec.VertexFixedSize, keyId.Value, out _, out _);
-        if (!_heap.TryReadVisible(seq, AmbientVisible, out var payload, out _, out _)) return false;
-        return InlinePropertyCodec.TryScan(payload, InlinePropertyCodec.VertexFixedSize, keyId.Value, out _, out _);
-    }
-
-    /// <summary>
-    /// inline property を set (replace-or-add)。copy-on-write で新 vertex 版を作る (同一 tx の未コミット
-    /// head は in-place)。inline 不可 (大きすぎ / 予算超過) なら false を返し、呼出側が overflow へ回す。
-    /// </summary>
-    public bool SetInlineProperty(VertexId vertexId, PropertyKeyId keyId, in PropertyValue value)
-    {
-        if (!InlinePropertyCodec.IsInlineable(value)) return false;
-        long seq = vertexId.Sequence;
-        if (!_heap.TryReadVisible(seq, AmbientVisible, out var cur, out _, out _)) return false;
-        byte[] np = InlinePropertyCodec.Build(cur, InlinePropertyCodec.VertexFixedSize, keyId.Value, in value, remove: false);
-        if (np.Length > VersionedRecordHeap.MaxPayloadSize) return false; // payload 予算超過 → overflow
-        _heap.AppendOrReplaceHead(seq, np, MvccContext.CurrentTxId.Value);
-        return true;
-    }
-
-    public bool RemoveInlineProperty(VertexId vertexId, PropertyKeyId keyId)
-    {
-        long seq = vertexId.Sequence;
-        if (!_heap.TryReadVisible(seq, AmbientVisible, out var cur, out _, out _)) return false;
-        if (!InlinePropertyCodec.TryScan(cur, InlinePropertyCodec.VertexFixedSize, keyId.Value, out _, out _)) return false;
-        byte[] np = InlinePropertyCodec.Build(cur, InlinePropertyCodec.VertexFixedSize, keyId.Value, default, remove: true);
-        _heap.AppendOrReplaceHead(seq, np, MvccContext.CurrentTxId.Value);
-        return true;
-    }
-
-    /// <summary>
-    /// inline property (visible 版) + overflow チェーンを結合して列挙する。
-    /// inline を先に、続いて <paramref name="overflowStore"/> 上の firstProp チェーンを辿る。
-    /// </summary>
-    public PropertyEnumerator EnumerateProperties(VertexId vertexId, IPropertyStore overflowStore)
+    public PropertyCursor EnumerateProperties(VertexId vertexId, IPropertyStore overflowStore)
     {
         if (!_heap.TryReadVisible(vertexId.Sequence, AmbientVisible, out var payload, out _, out _))
-            return new PropertyEnumerator(overflowStore, PropertyId.Invalid);
+            return new PropertyCursor(overflowStore, default, PropertyVersionRef.Invalid);
         MvccContext.RecordRead(EntityKind.Vertex, vertexId.Sequence); // property 列挙 = vertex read
-        var firstProp = new PropertyId(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProp)));
-        return new PropertyEnumerator(payload, overflowStore, firstProp, InlinePropertyCodec.VertexFixedSize);
+        var firstProp = new PropertyVersionRef(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProp)));
+        var ownerId = vertexId.Generation == 0
+            ? VertexId.Create(vertexId.Sequence, CurrentGeneration(vertexId.Sequence))
+            : vertexId;
+        return overflowStore.Enumerate(EntityRef.From(ownerId), firstProp);
     }
 
     // --- internal helpers (EdgeStore fast-path / vacuum / bulk 経路用) ---
@@ -273,8 +207,8 @@ internal sealed class VersionedVertexStore : IVertexStore
     internal void UpdateFirstEdgeId(VertexId vertexId, EdgeId newFirstEdgeId)
         => MutateHeadField(vertexId.Sequence, OffFirstEdge, newFirstEdgeId.Sequence);
 
-    internal void UpdateFirstPropId(VertexId vertexId, PropertyId newFirstPropId)
-        => MutateHeadField(vertexId.Sequence, OffFirstProp, newFirstPropId.Sequence);
+    internal void UpdateFirstPropertyRef(VertexId vertexId, PropertyVersionRef newFirstPropertyRef)
+        => MutateHeadField(vertexId.Sequence, OffFirstProp, newFirstPropertyRef.Sequence);
 
     internal EdgeId GetFirstEdgeId(VertexId vertexId)
     {
@@ -295,22 +229,22 @@ internal sealed class VersionedVertexStore : IVertexStore
     internal RawVertexRecord ReadRaw(long id)
     {
         if (id < 0 || id >= _map.Hwm) return default;
-        // Phase 3a: xmin/xmax は heap version から (sidecar ではなく)。
+        // xmin/xmax は sidecar ではなく heap version から読む。
         if (!_heap.TryReadHeadRaw(id, out var payload, out long xmin, out long xmax)) return default;
         var s = payload.AsSpan();
         return new RawVertexRecord
         {
             InUse = (s[OffFlags] & FlagInUse) != 0,
             FirstEdgeId = new EdgeId(RecordHelpers.ReadInt48(s[OffFirstEdge..])),
-            FirstPropId = new PropertyId(RecordHelpers.ReadInt48(s[OffFirstProp..])),
+            FirstPropertyRef = new PropertyVersionRef(RecordHelpers.ReadInt48(s[OffFirstProp..])),
             Label = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(s[OffLabel..])),
             Xmin = xmin,
             Xmax = xmax,
         };
     }
 
-    internal void UpdateFirstPropIdRaw(VertexId vertexId, PropertyId newFirstPropId)
-        => UpdateFirstPropId(vertexId, newFirstPropId);
+    internal void UpdateFirstPropertyRefRaw(VertexId vertexId, PropertyVersionRef newFirstPropertyRef)
+        => UpdateFirstPropertyRef(vertexId, newFirstPropertyRef);
 
     /// <summary>採番済み Sequence 数 (= 最大 seq + 1)。</summary>
     internal long Hwm => _map.Hwm;
@@ -347,7 +281,7 @@ internal sealed class VersionedVertexStore : IVertexStore
             }
             else if (xmax == 0)
             {
-                // Phase 3d: live Vertex — property 更新の copy-on-write で生じた dead 旧版を回収。
+                // 生存 Vertex では property 更新で生じた dead 旧版を回収する。
                 _heap.PruneDeadVersions(seq,
                     (_, vx) => vx != 0 && vx < horizonTxId && committed.IsCommitted(vx));
             }
@@ -359,19 +293,18 @@ internal sealed class VersionedVertexStore : IVertexStore
 
     internal void BulkWrite(long id, int labelId)
     {
-        Span<byte> payload = stackalloc byte[InlinePropertyCodec.BaseSize(InlinePropertyCodec.VertexFixedSize)];
+        Span<byte> payload = stackalloc byte[PayloadSize];
         payload[OffFlags] = FlagInUse;
         RecordHelpers.WriteInt48(payload[OffFirstEdge..], -1L);
         RecordHelpers.WriteInt48(payload[OffFirstProp..], -1L);
         BinaryPrimitives.WriteInt16LittleEndian(payload[OffLabel..], (short)labelId);
-        payload[InlinePropertyCodec.OffInlineCount(InlinePropertyCodec.VertexFixedSize)] = 0;
         _heap.Insert(id, payload, TransactionId.Bootstrap.Value);
         // bulk load は tx 外。Bootstrap を xmin に、Generation=1 (新規 slot)。
         _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue, 1));
     }
 
-    internal void BulkUpdateFirstProp(long id, long firstPropId)
-        => MutateHeadField(id, OffFirstProp, firstPropId);
+    internal void BulkUpdateFirstPropertyRef(long id, long firstPropertyRef)
+        => MutateHeadField(id, OffFirstProp, firstPropertyRef);
 
     internal void BulkSetHeaders(long hwm, long inUseCount)
     {
@@ -409,7 +342,7 @@ internal sealed class VersionedVertexStore : IVertexStore
         long count = 0;
         long hwm = _map.Hwm;
         for (long seq = 0; seq < hwm; seq++)
-            // Phase 3a: live = heap head が存在し xmax==0 (sidecar ではなく heap version 由来)。
+            // live は heap head が存在し xmax==0 の record とする。
             if (_heap.TryReadHeadRaw(seq, out _, out _, out long xmax) && xmax == 0)
                 count++;
         return count;

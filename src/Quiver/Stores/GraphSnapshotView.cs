@@ -13,7 +13,8 @@ namespace Quiver.Storage.Records;
 /// 1 パス目で行サイズを決め、2 パス目でエッジを配置する。配列は
 /// <see cref="ArrayPool{T}.Shared"/> からレンタルし、Dispose で返却する。
 ///
-/// ソースストアが <see cref="IAdjacencyPayloadView"/> を実装している場合のみ weight lane が埋まる。
+/// ソースストアが <see cref="IAdjacencyPayloadView"/> を実装し、payload kind が
+/// <see cref="PayloadKind.None"/> 以外の場合だけ weight lane が埋まる。
 /// それ以外では <see cref="HasWeights"/> は false で <see cref="WeightBitsOut"/> は空を返す。
 /// </summary>
 internal sealed class GraphSnapshotView : IGraphSnapshotView
@@ -58,16 +59,19 @@ internal sealed class GraphSnapshotView : IGraphSnapshotView
     /// 新規に開いたスナップショットトランザクションのコンポーネントを渡す。
     ///
     /// スナップショットはポイントインタイムで、構築後に渡されたストアへの参照は保持しない。
-    /// <paramref name="adj"/> がある場合は渡すことで隣接エポックと inline payload lane (V2 weight) を
+    /// <paramref name="adj"/> がある場合は渡すことで隣接エポックと inline payload lane を
     /// 取り込める。隣接ブロック無しでビルドする場合は null を渡す。
     /// </summary>
     public static GraphSnapshotView Build(
         IVertexStore vertices,
         IEdgeStore edges,
-        IAdjacencyBlockStore? adj)
+        IAdjacencySegmentStore? adj)
     {
         long epoch = adj?.Epoch ?? 0;
         var payloadView = adj as IAdjacencyPayloadView;
+        // AdjacencySegmentStore は payload 無しでも同じ format と capability interface を使う。
+        // interface の有無だけで判定すると PayloadKind.None に架空の weight lane を生やしてしまう。
+        bool hasPayloadLane = payloadView is { PayloadSpec.Kind: not PayloadKind.None };
 
         // パス 1: 全ライブ edge をスナップショットし、見つかった最大Vertex ID を求める。
         var edgeList = new List<(long Src, long Tgt, long EdgeId)>();
@@ -102,7 +106,7 @@ internal sealed class GraphSnapshotView : IGraphSnapshotView
         long[] outEdgeIds = ArrayPool<long>.Shared.Rent((int)Math.Max(1, edgeCount));
         long[] inNeighbors = ArrayPool<long>.Shared.Rent((int)Math.Max(1, edgeCount));
         long[] inEdgeIds = ArrayPool<long>.Shared.Rent((int)Math.Max(1, edgeCount));
-        long[]? outWeights = payloadView != null
+        long[]? outWeights = hasPayloadLane
             ? ArrayPool<long>.Shared.Rent((int)Math.Max(1, edgeCount))
             : null;
 
@@ -132,10 +136,10 @@ internal sealed class GraphSnapshotView : IGraphSnapshotView
             Array.Clear(outCursor, 0, (int)vertexCount);
             Array.Clear(inCursor, 0, (int)vertexCount);
 
-            // payload ビューがある場合、V2 ストアをVertex毎に走査して edgeId → weight マップを
+            // payload lane がある場合、segment をVertex毎に走査して edgeId → weight マップを
             // 事前構築する。ビルド時に一度だけ O(N + E)。
             Dictionary<long, long>? weightByEdge = null;
-            if (payloadView != null && adj != null)
+            if (hasPayloadLane && adj != null)
             {
                 weightByEdge = new Dictionary<long, long>(edgeList.Count);
                 for (long n = 0; n < vertexCount; n++)

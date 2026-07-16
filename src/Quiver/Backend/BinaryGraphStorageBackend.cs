@@ -22,17 +22,17 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     private readonly IWriteAheadLog _wal;
     private readonly VersionedVertexStore _vertexStore;
     private readonly VersionedEdgeStore _edgeStore;
-    private readonly PropertyStore _propStore;
+    private readonly PropertyVersionStore _propStore;
     private readonly LabelTokenStore _labelTokens;
     private readonly EdgeTypeTokenStore _edgeTypeTokens;
     private readonly PropertyKeyTokenStore _propKeyTokens;
     private readonly NexusTypeTokenStore _nexusTypeTokens;
     private readonly RoleTokenStore _roleTokens;
     private readonly IndexManager _indexManager;
-    // AdjacencyBlockStore (V1) または AdjacencyBlockStoreV2 を保持。
+    // immutable adjacency segment view を保持する。
     // CompactAdjacency が再構築したストアを差し替えるため mutable。
     // 隣接データは container 内テナントに同居するため、別 PagedFile の所有は不要。
-    private IAdjacencyBlockStore? _adjStore;
+    private IAdjacencySegmentStore? _adjStore;
     private readonly ICoMembershipBlockStore? _coMembershipStore;
     // bulk load / CompactAdjacency が隣接テナントを構築するために保持する。
     private readonly SingleFileContainer _container;
@@ -54,14 +54,14 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         IWriteAheadLog wal,
         VersionedVertexStore vertexStore,
         VersionedEdgeStore edgeStore,
-        PropertyStore propStore,
+        PropertyVersionStore propStore,
         LabelTokenStore labelTokens,
         EdgeTypeTokenStore edgeTypeTokens,
         PropertyKeyTokenStore propKeyTokens,
         NexusTypeTokenStore nexusTypeTokens,
         RoleTokenStore roleTokens,
         IndexManager indexManager,
-        IAdjacencyBlockStore? adjStore,
+        IAdjacencySegmentStore? adjStore,
         TransactionManager txManager,
         BinaryGraphAccessMethods access,
         IVectorStore vectors,
@@ -244,7 +244,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         if (_txManager.ActiveCount > 0)
             throw new InvalidOperationException(
                 "CompactAdjacency requires no active transactions.");
-        PayloadLaneSpec? payloadSpec = (_adjStore as IAdjacencyPayloadView)?.PayloadSpec;
+        PayloadLaneSpec payloadSpec = (_adjStore as IAdjacencyPayloadView)?.PayloadSpec
+            ?? new PayloadLaneSpec(PayloadKind.None, -1, 0);
 
         // 現在の adj ファイルを壊す前に生存 edges (id, src, tgt, type) をスナップショットする。
         // IEdgeStore.Scan はストア順で id を返し、各読み出しがアクティブページから
@@ -260,13 +261,13 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         }
         long newBaseHwm = maxId + 1; // Edgeが無ければ 0 — "no base" と一致
         Dictionary<long, long>? weights = null;
-        if (payloadSpec is { } payload)
+        if (payloadSpec.Kind != PayloadKind.None)
         {
             weights = CaptureExistingPayloads(live);
             foreach (var (id, _, _, _) in live)
             {
-                var edgeId = new EdgeId(id);
-                if (TryReadPayload(edgeId, payload, out long raw))
+                var edgeId = EdgeId.Create(id, _edgeStore.CurrentGeneration(id));
+                if (TryReadPayload(edgeId, payloadSpec, out long raw))
                     weights[edgeId.Sequence] = raw;
             }
         }
@@ -293,10 +294,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
         // 隣接インデックスをその場で再構築する。Build は論理Vertex ID ごとに 1 エントリを持つ前提なので
         // vertexHwm を要求する。バルクロード後はこれ以外の情報が無いため、観測した src/tgt の最大値 + 1 を使う。
-        if (payloadSpec is { } compactSpec)
-            AdjacencyBlockStoreV2.Build(adjData, adjIdx, live, weights ?? [], vertexHwm, compactSpec, writeDescriptor: false);
-        else
-            AdjacencyBlockStore.Build(adjData, adjIdx, live, vertexHwm, writeDescriptor: false);
+        AdjacencySegmentStore.Build(
+            adjData, adjIdx, live, weights ?? [], vertexHwm, payloadSpec, writeDescriptor: false);
         CompactAdjacencyPhaseInjector?.Invoke(CompactAdjacencyPhase.AfterRebuild);
 
         // epoch メタデータをリセットして再オープン。ResetAfterCompact は epoch カウンタを
@@ -310,14 +309,13 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _edgeDeltas?.ReloadMeta();
         AdjacencyContainer.WriteDescriptor(
             adjData,
-            payloadSpec is { } ? AdjacencyContainer.KindV2 : AdjacencyContainer.KindV1,
+            AdjacencyContainer.KindSegment,
             payloadSpec);
         // CompactAdjacency は tx 外なので、再構築したページを durable 化する。
         _container.Flush();
         CompactAdjacencyPhaseInjector?.Invoke(CompactAdjacencyPhase.AfterFinalDescriptorFlushed);
-        IAdjacencyBlockStore newStore = payloadSpec is { } reopenedSpec
-            ? new AdjacencyBlockStoreV2(adjData, adjIdx, reopenedSpec, newEpoch)
-            : new AdjacencyBlockStore(adjData, adjIdx, newEpoch);
+        IAdjacencySegmentStore newStore = new AdjacencySegmentStore(
+            adjData, adjIdx, payloadSpec, newEpoch);
         _adjStore = newStore;
         _txManager.SwapAdjacencyStore(newStore);
     }
@@ -325,14 +323,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     private bool TryReadPayload(EdgeId edgeId, PayloadLaneSpec spec, out long raw)
     {
         var keyId = new PropertyKeyId(spec.PropertyKeyId);
-        if (_edgeStore.TryGetInlineProperty(edgeId, keyId, out var inlineValue) &&
-            TryEncodePayload(in inlineValue, spec, out raw))
-        {
-            return true;
-        }
-
-        var firstPropId = _edgeStore.Read(edgeId).FirstPropertyId;
-        var propEnum = _propStore.Enumerate(firstPropId);
+        var owner = EntityRef.From(edgeId);
+        var firstPropertyRef = _edgeStore.Read(edgeId).FirstPropertyRef;
+        var propEnum = _propStore.Enumerate(owner, firstPropertyRef);
         while (propEnum.MoveNext())
         {
             var prop = propEnum.Current;

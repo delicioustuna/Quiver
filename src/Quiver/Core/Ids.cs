@@ -1,6 +1,6 @@
 namespace Quiver.Core;
 
-// VertexId / EdgeId / PropertyId の Value は packed 物理 ID
+// VertexId / EdgeId / NexusId の Value は packed 物理 ID
 // (kind 消去ローカル形 Gen16<<44 | Seq44、kind は型で表現)。
 //  - Sequence (slot 局所 ID) は record の page/offset 演算に使う。オンディスクの ID
 //    フィールド (Int48) には Value ではなく Sequence を書く。
@@ -90,32 +90,6 @@ public readonly record struct NexusId(long Value)
 
     /// <summary>Generation を含む packed identity のハッシュ値。</summary>
     public override int GetHashCode() => Value.GetHashCode();
-}
-
-/// <summary>プロパティレコードの識別子。<paramref name="Value"/> は世代 + slot 局所 ID の packed 値。</summary>
-/// <param name="Value">packed 物理 ID (Generation &lt;&lt; 44 | Sequence)。</param>
-public readonly record struct PropertyId(long Value)
-{
-    /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
-    public static readonly PropertyId Invalid = new(-1);
-
-    /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
-    public bool IsValid => Value >= 0;
-
-    /// <summary>slot 局所 ID (下位 44bit)。負値 (Invalid) は sentinel をそのまま返す。</summary>
-    public long Sequence => Value < 0 ? Value : EntityRef.UnpackSequence(Value);
-
-    /// <summary>slot incarnation (bits 44-59)。世代未指定 (= new(seq)) は 0。</summary>
-    public int Generation => Value < 0 ? 0 : EntityRef.UnpackGeneration(Value);
-
-    /// <summary>(sequence, generation) から packed な <see cref="PropertyId"/> を生成する。</summary>
-    public static PropertyId Create(long sequence, int generation) => new(EntityRef.PackLocal(sequence, generation));
-
-    /// <summary>slot (Sequence) ベースで同一プロパティかを判定する (世代差は無視)。</summary>
-    public bool Equals(PropertyId other) => Sequence == other.Sequence;
-
-    /// <summary>Sequence ベースのハッシュ値 (<see cref="Equals(PropertyId)"/> と整合)。</summary>
-    public override int GetHashCode() => Sequence.GetHashCode();
 }
 
 /// <summary>ラベルの識別子 (トークンストアが払い出す稠密 int)。</summary>

@@ -53,7 +53,7 @@ public sealed class NexusStoreTests : IDisposable
         record.InUse.Should().BeTrue();
         record.Type.Should().Be(new NexusTypeId(7));
         record.FirstIncidenceId.IsValid.Should().BeTrue();
-        record.FirstPropertyId.Should().Be(PropertyId.Invalid);
+        record.FirstPropertyRef.Should().Be(PropertyVersionRef.Invalid);
         _nexuses.Scan().Should().Equal(id);
         _nexuses.InUseCount.Should().Be(1);
         _incidences.InUseCount.Should().Be(arity);

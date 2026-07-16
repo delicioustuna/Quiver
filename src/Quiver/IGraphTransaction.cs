@@ -142,7 +142,7 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     PropertyValuesEnumerator GetPropertyValues(EdgeId edgeId, string key);
 
     /// <summary>Vertexに付与された全プロパティを列挙する。</summary>
-    PropertyEnumerator EnumerateProperties(VertexId vertexId);
+    PropertyCursor EnumerateProperties(VertexId vertexId);
 
     // ── トラバーサル ──────────────────────────────────────
 
@@ -254,7 +254,7 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     void RemoveProperty(NexusId nexusId, string key);
 
     /// <summary>Nexusに付与された全プロパティを列挙する。</summary>
-    PropertyEnumerator EnumerateProperties(NexusId nexusId);
+    PropertyCursor EnumerateProperties(NexusId nexusId);
 
     /// <inheritdoc cref="AddPropertyValue(VertexId, string, in PropertyValue)"/>
     void AddPropertyValue(NexusId nexusId, string key, in PropertyValue value);
@@ -266,7 +266,7 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     PropertyValuesEnumerator GetPropertyValues(NexusId nexusId, string key);
 
     // 物理プラン実行 (Execute/ExecuteCursor)、access methods (Access)、隣接ブロック
-    // (AdjacencyBlocks) は内部実装型を露出するため公開面から除外し、internal な
+    // (AdjacencySegments) は内部実装型を露出するため公開面から除外し、internal な
     // IGraphTransactionInternal へ移設した (利用者は GraphTraversal DSL を使う)。
 
     /// <summary>トランザクションをコミットする。</summary>

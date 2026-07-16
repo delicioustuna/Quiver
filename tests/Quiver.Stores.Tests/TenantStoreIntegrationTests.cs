@@ -8,7 +8,7 @@ using Xunit;
 namespace Quiver.Storage.Records.Tests;
 
 /// <summary>
-/// 実ストア (VertexStore / EdgeStore / EntityVersionStore sidecar) を
+/// versioned entity store と EntityVersionStore sidecar を
 /// <see cref="SingleFileContainer"/> のテナント上で無改修のまま動かせることを検証する。
 /// header ページ (論理 page1) / レコードページ (論理 page2+) / <c>EnsurePage</c> による論理空間
 /// 拡張 / MVCC sidecar / reopen 時のメタ読み戻し + format チェックを、単一ファイル内で確認する。
@@ -27,17 +27,20 @@ public class TenantStoreIntegrationTests : IDisposable
 
     private string DbFile() => System.IO.Path.Combine(_tmpDir, "graph.quiver");
 
-    private static (VertexStore vertices, EdgeStore edges) BuildStores(SingleFileContainer c)
+    private static (VersionedVertexStore vertices, VersionedEdgeStore edges) BuildStores(SingleFileContainer c)
     {
         var vertexFile = c.OpenTenant((byte)WalFileKind.Vertices, PageKind.Header);
+        var vertexMapFile = c.OpenTenant(14, PageKind.Header);
         var vertexVerFile = c.OpenTenant((byte)WalFileKind.VertexVersionMeta, PageKind.Header);
         var vertexVersions = new EntityVersionStore(vertexVerFile);
-        var vertices = new VertexStore(vertexFile, labelIndex: null, vertexVersions);
+        var vertices = new VersionedVertexStore(
+            vertexFile, new ItemPointerMap(vertexMapFile), labelIndex: null, vertexVersions);
 
         var edgeFile = c.OpenTenant((byte)WalFileKind.Edges, PageKind.Header);
+        var edgeMapFile = c.OpenTenant(15, PageKind.Header);
         var relVerFile = c.OpenTenant((byte)WalFileKind.EdgeVersionMeta, PageKind.Header);
         var edgeVersions = new EntityVersionStore(relVerFile);
-        var edges = new EdgeStore(edgeFile, edgeVersions);
+        var edges = new VersionedEdgeStore(edgeFile, new ItemPointerMap(edgeMapFile), edgeVersions);
         return (vertices, edges);
     }
 
@@ -89,7 +92,7 @@ public class TenantStoreIntegrationTests : IDisposable
         using var c = new SingleFileContainer(DbFile());
         var (vertices, _) = BuildStores(c);
 
-        int n = VertexStore.RecordsPerPage + 50; // レコードページ境界を確実に跨ぐ
+        const int n = 500;
         var ids = new List<VertexId>(n);
         for (int i = 0; i < n; i++)
             ids.Add(vertices.Allocate(new LabelId((short)(i % 100))));

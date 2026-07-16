@@ -12,14 +12,14 @@ namespace Quiver.Tests;
 /// 展開カーソルと <c>ExpandOperator</c> の <c>NeighborAndWeight</c> 射影から取得できることを検証する。
 /// 往復変換に加え、1 ページ約 370 エントリを超える多段ページチェーンも対象とする。
 /// </summary>
-public sealed class AdjacencyBlockStoreV2Tests : IDisposable
+public sealed class AdjacencySegmentStoreTests : IDisposable
 {
     private readonly string _dir;
     private QuiverDatabase? _db;
 
-    public AdjacencyBlockStoreV2Tests()
+    public AdjacencySegmentStoreTests()
     {
-        _dir = Path.Combine(Path.GetTempPath(), "quiver_adj_v2_" + Guid.NewGuid().ToString("N"));
+        _dir = Path.Combine(Path.GetTempPath(), "quiver_adj_segment_" + Guid.NewGuid().ToString("N"));
     }
 
     public void Dispose()
@@ -30,18 +30,18 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
     }
 
     [Fact]
-    public void Int64_payload_round_trips_through_v2_cursor()
+    public void Int64_payload_round_trips_through_segment_cursor()
     {
         const int degree = 10;
         var weightKey = BuildWithInt64Weights(degree);
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var tx = _db.BeginTransaction();
-        var adj = tx.AsInternal().AdjacencyBlocks;
+        var adj = tx.AsInternal().AdjacencySegments;
         adj.Should().NotBeNull();
 
         var view = adj as IAdjacencyPayloadView;
-        view.Should().NotBeNull("V2 adjacency view was built via WithPayloadLane");
+        view.Should().NotBeNull("the adjacency segment was built with a payload lane");
         view!.PayloadSpec.Kind.Should().Be(PayloadKind.Int64);
         view.PayloadSpec.PropertyKeyId.Should().Be(weightKey.Value);
 
@@ -82,7 +82,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var tx = _db.BeginTransaction();
         var seen = new Dictionary<long, double>();
-        using var cursor = tx.AsInternal().AdjacencyBlocks!.OpenCursor(new VertexId(0), Direction.Outgoing, null);
+        using var cursor = tx.AsInternal().AdjacencySegments!.OpenCursor(new VertexId(0), Direction.Outgoing, null);
         while (cursor.MoveNext())
             seen[cursor.Neighbor.Value] = BitConverter.Int64BitsToDouble(cursor.WeightRaw);
 
@@ -112,7 +112,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var tx = _db.BeginTransaction();
         var seen = new Dictionary<long, long>();
-        using var cursor = tx.AsInternal().AdjacencyBlocks!.OpenCursor(new VertexId(0), Direction.Outgoing, null);
+        using var cursor = tx.AsInternal().AdjacencySegments!.OpenCursor(new VertexId(0), Direction.Outgoing, null);
         while (cursor.MoveNext())
             seen[cursor.Neighbor.Value] = cursor.WeightRaw;
 
@@ -122,8 +122,8 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
 
     [Theory]
     [InlineData(50)]      // single page
-    [InlineData(400)]     // just over one V2 page (~370 per page)
-    [InlineData(2_000)]   // many V2 pages
+    [InlineData(400)]     // just over one segment page (~370 per page)
+    [InlineData(2_000)]   // many segment pages
     public void Weights_preserved_across_multi_page_chain(int degree)
     {
         BuildWithInt64Weights(degree);
@@ -131,7 +131,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
 
         using var tx = _db.BeginTransaction();
         var seen = new Dictionary<long, long>();
-        using var cursor = tx.AsInternal().AdjacencyBlocks!.OpenCursor(new VertexId(0), Direction.Outgoing, null);
+        using var cursor = tx.AsInternal().AdjacencySegments!.OpenCursor(new VertexId(0), Direction.Outgoing, null);
         while (cursor.MoveNext())
             seen[cursor.Neighbor.Value] = cursor.WeightRaw;
 
@@ -181,14 +181,14 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         using var tx = _db.BeginTransaction();
-        var view = tx.AsInternal().AdjacencyBlocks as IAdjacencyPayloadView;
+        var view = tx.AsInternal().AdjacencySegments as IAdjacencyPayloadView;
         view.Should().NotBeNull();
         view!.PayloadSpec.Kind.Should().Be(PayloadKind.Int64);
         view.PayloadSpec.DefaultRaw.Should().Be(0);
     }
 
     [Fact]
-    public void Compact_preserves_and_refreshes_v2_payloads_through_product_path()
+    public void Compact_preserves_and_refreshes_segment_payloads_through_property_path()
     {
         var weightKey = BuildWithInt64Weights(3);
         EdgeId deltaEdge;
@@ -213,10 +213,10 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
 
         using (var tx = _db.BeginTransaction())
         {
-            var view = tx.AsInternal().AdjacencyBlocks as IAdjacencyPayloadView;
+            var view = tx.AsInternal().AdjacencySegments as IAdjacencyPayloadView;
             view.Should().NotBeNull();
             view!.PayloadSpec.PropertyKeyId.Should().Be(weightKey.Value);
-            tx.AsInternal().AdjacencyBlocks!.IsTombstoned(new EdgeId(2)).Should().BeFalse();
+            tx.AsInternal().AdjacencySegments!.IsTombstoned(new EdgeId(2)).Should().BeFalse();
 
             var seen = ReadOutgoingWeights(tx, new VertexId(0));
             seen.Should().ContainKey(1);
@@ -274,7 +274,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         using var read = _db.BeginReadOnlyTransaction();
-        read.AsInternal().AdjacencyBlocks.Should().BeNull(
+        read.AsInternal().AdjacencySegments.Should().BeNull(
             "an interrupted compact must not reopen a partial adjacency view");
 
         ExpandOut(read, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
@@ -319,7 +319,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         using var read = _db.BeginReadOnlyTransaction();
-        read.AsInternal().AdjacencyBlocks.Should().BeNull(
+        read.AsInternal().AdjacencySegments.Should().BeNull(
             "descriptor must remain invalid until compact epoch metadata is ready");
 
         ExpandOut(read, new VertexId(0))
@@ -328,7 +328,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
     }
 
     [Fact]
-    public void Compact_interruption_after_final_descriptor_flush_reopens_v2_view_without_duplicate_delta()
+    public void Compact_interruption_after_final_descriptor_flush_reopens_segment_view_without_duplicate_delta()
     {
         var weightKey = BuildWithInt64Weights(3);
 
@@ -366,7 +366,7 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         using var read = _db.BeginReadOnlyTransaction();
-        var view = read.AsInternal().AdjacencyBlocks as IAdjacencyPayloadView;
+        var view = read.AsInternal().AdjacencySegments as IAdjacencyPayloadView;
         view.Should().NotBeNull("the final descriptor was durably flushed before interruption");
         view!.PayloadSpec.PropertyKeyId.Should().Be(weightKey.Value);
 
@@ -401,10 +401,10 @@ public sealed class AdjacencyBlockStoreV2Tests : IDisposable
     private static Dictionary<long, long> ReadOutgoingWeights(IGraphTransaction tx, VertexId source)
     {
         var seen = new Dictionary<long, long>();
-        using var cursor = tx.AsInternal().AdjacencyBlocks!.OpenCursor(source, Direction.Outgoing, null);
+        using var cursor = tx.AsInternal().AdjacencySegments!.OpenCursor(source, Direction.Outgoing, null);
         while (cursor.MoveNext())
         {
-            if (!tx.AsInternal().AdjacencyBlocks!.IsTombstoned(cursor.Edge))
+            if (!tx.AsInternal().AdjacencySegments!.IsTombstoned(cursor.Edge))
                 seen[cursor.Neighbor.Sequence] = cursor.WeightRaw;
         }
         return seen;

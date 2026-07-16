@@ -19,25 +19,8 @@ internal interface IVertexStore
     /// </summary>
     int CurrentGeneration(long localId);
 
-    // Vertex粒度の inline property。小さい値は vertex record へ inline 格納し
-    // get/has/set/remove を O(small) 化する。inline 不可な値 (大きい string/bytes) は false を返し、
-    // 呼出側 (GraphTransaction) が overflow チェーン (PropertyStore) へ回す。inline を持たない実装
-    // (旧 VertexStore / Stub) は false を返して全 property を overflow に委ねる (graceful degrade)。
-
-    /// <summary>visible 版の inline 領域から property を読む。inline に無ければ false。</summary>
-    bool TryGetInlineProperty(VertexId vertexId, PropertyKeyId keyId, out PropertyValue value);
-
-    /// <summary>visible 版の inline 領域に keyId があるか。</summary>
-    bool HasInlineProperty(VertexId vertexId, PropertyKeyId keyId);
-
-    /// <summary>inline property を set (copy-on-write)。inline 不可 / 予算超過なら false。</summary>
-    bool SetInlineProperty(VertexId vertexId, PropertyKeyId keyId, in PropertyValue value);
-
-    /// <summary>inline property を remove (copy-on-write)。inline に無ければ false。</summary>
-    bool RemoveInlineProperty(VertexId vertexId, PropertyKeyId keyId);
-
-    /// <summary>inline + overflow チェーンを結合した property 列挙子を返す。</summary>
-    PropertyEnumerator EnumerateProperties(VertexId vertexId, IPropertyStore overflowStore);
+    /// <summary>owner-bound property version chain の列挙子を返す。</summary>
+    PropertyCursor EnumerateProperties(VertexId vertexId, IPropertyStore overflowStore);
 }
 
 internal readonly ref struct VertexReadHandle
@@ -45,7 +28,7 @@ internal readonly ref struct VertexReadHandle
     private readonly VertexId _id;
     private readonly bool _inUse;
     private readonly EdgeId _firstEdgeId;
-    private readonly PropertyId _firstPropId;
+    private readonly PropertyVersionRef _firstPropertyRef;
     private readonly LabelId _label;
     private readonly long _xmin;
     private readonly long _xmax;
@@ -53,7 +36,7 @@ internal readonly ref struct VertexReadHandle
     public VertexId Id => _id;
     public bool InUse => _inUse;
     public EdgeId FirstEdgeId => _firstEdgeId;
-    public PropertyId FirstPropertyId => _firstPropId;
+    public PropertyVersionRef FirstPropertyRef => _firstPropertyRef;
     public LabelId Label => _label;
 
     /// <summary>record を生成したトランザクション ID (sidecar 由来)。</summary>
@@ -62,16 +45,16 @@ internal readonly ref struct VertexReadHandle
     /// <summary>record を論理削除したトランザクション ID (sidecar 由来、0 = 生存)。</summary>
     public long Xmax => _xmax;
 
-    internal VertexReadHandle(VertexId id, bool inUse, EdgeId firstEdgeId, PropertyId firstPropId, LabelId label, long xmin = 0, long xmax = 0)
+    internal VertexReadHandle(VertexId id, bool inUse, EdgeId firstEdgeId, PropertyVersionRef firstPropertyRef, LabelId label, long xmin = 0, long xmax = 0)
     {
-        _id = id; _inUse = inUse; _firstEdgeId = firstEdgeId; _firstPropId = firstPropId; _label = label;
+        _id = id; _inUse = inUse; _firstEdgeId = firstEdgeId; _firstPropertyRef = firstPropertyRef; _label = label;
         _xmin = xmin; _xmax = xmax;
     }
 
     public void Dispose() { }
 }
 
-// v3 レイアウト: Flags(0,1) FirstEdgeId(1,6) FirstPropId(7,6) LabelId(13,2) — 15 bytes
+// v3 レイアウト: Flags(0,1) FirstEdgeId(1,6) FirstPropertyRef(7,6) LabelId(13,2) — 15 bytes
 // (Xmin/Xmax は VertexVersionMeta sidecar に移管)
 internal ref struct VertexWriteHandle
 {
@@ -90,7 +73,7 @@ internal ref struct VertexWriteHandle
         set => RecordHelpers.WriteInt48(_rec[1..], value.Sequence); // Int48 は Sequence
     }
 
-    public PropertyId FirstPropertyId
+    public PropertyVersionRef FirstPropertyRef
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[7..]));
         set => RecordHelpers.WriteInt48(_rec[7..], value.Sequence); // Int48 は Sequence

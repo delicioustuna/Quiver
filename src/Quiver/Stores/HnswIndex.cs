@@ -34,7 +34,7 @@ internal sealed class HnswIndex
     private const int MetaFamilyVersion = 31; // byte
 
     private readonly IPagedFile _file;
-    private readonly VectorPayloadStore _payload;
+    private readonly VectorIndexPayloadStore _payload;
     private readonly DistanceMetric _metric;
     private readonly int _dim;
     private readonly int _m;
@@ -61,7 +61,7 @@ internal sealed class HnswIndex
     // 決定的構築のための per-index 乱数 (seq を seed に混ぜて再現性を持たせる)。
     private readonly Random _rng = new(0x6D6E7377);
 
-    public HnswIndex(IPagedFile file, VectorPayloadStore payload, VectorIndexSpec spec)
+    public HnswIndex(IPagedFile file, VectorIndexPayloadStore payload, VectorIndexSpec spec)
     {
         _file = file;
         _payload = payload;

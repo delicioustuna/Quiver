@@ -6,9 +6,7 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// インライン payload lane (エッジ重み) を持つ
-/// 読み取り最適化済みの隣接ビュー。重み付きトラバーサル / SSSP / top-k 近傍などの
-/// hot path スカラ重みでプロパティチェーンへのジョインを避けられる。
+/// 任意の payload lane を持つ読み取り最適化済みの adjacency segment view。
 ///
 /// ブロックページ本体レイアウト (PageBodySize = 8160 バイト):
 ///   OutCount(4) | InCount(4) | NextPageId(8) = 16 バイトのヘッダ
@@ -16,11 +14,9 @@ namespace Quiver.Storage.Records;
 ///   エントリ: TypeId(2) | EdgeId(6) | NeighborId(6) | Payload(8) = 22 バイト。
 ///   1 ページあたり最大エントリ数 = (8160 − 16) / 22 = 370。
 ///
-/// V1 (AdjacencyBlockStore) と排他 — バルクロード時の <see cref="BulkLoader.WithPayloadLane"/> で
-/// V2 をオプトインする。V1/V2 とも graph.quiver 内の同一テナント
-/// (<see cref="AdjacencyContainer.DataTenant"/>) に格納され、種別は DataTenant の記述子で判別する。
+/// payload lane を使わない場合も <see cref="PayloadKind.None"/> として同じ format に格納する。
 /// </summary>
-internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPayloadView, IDisposable
+internal sealed class AdjacencySegmentStore : IAdjacencySegmentStore, IAdjacencyPayloadView, IDisposable
 {
     internal const int BlockHeaderSize = 16;
     internal const int EntrySize = 22; // 2 + 6 + 6 + 8
@@ -34,7 +30,7 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
 
     public PayloadLaneSpec PayloadSpec => _spec;
 
-    internal AdjacencyBlockStoreV2(IPagedFile dataFile, IPagedFile indexFile, PayloadLaneSpec spec,
+    internal AdjacencySegmentStore(IPagedFile dataFile, IPagedFile indexFile, PayloadLaneSpec spec,
         AdjacencyEpoch? epoch = null)
     {
         _dataFile = dataFile;
@@ -50,7 +46,7 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
     public bool IsTombstoned(EdgeId edgeId) => _epoch?.IsTombstoned(edgeId.Sequence) ?? false;
     public void Tombstone(EdgeId edgeId) => _epoch?.Tombstone(edgeId.Sequence);
 
-    // ──────────────────────────── IAdjacencyBlockStore ────────────────────────────
+    // ──────────────────────────── IAdjacencySegmentStore ────────────────────────────
 
     public bool HasBlock(VertexId vertexId) => GetBlockPageId(vertexId) >= 0;
 
@@ -90,17 +86,17 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
     {
         long blockPageId = GetBlockPageId(vertexId);
         if (blockPageId < 0) return AdjacencyCursor.Empty;
-        return new BlockChainCursorV2(_dataFile, blockPageId, direction, typeFilter);
+        return new SegmentCursor(_dataFile, blockPageId, direction, typeFilter);
     }
 
     /// <summary>
-    /// payload lane もコピーする V2 固有の読み取り。書き込み件数を返す。
+    /// payload lane もコピーする読み取り。書き込み件数を返す。
     /// <paramref name="buffer"/> 長の上限は <see cref="ReadEdges"/> と同じ —
     /// 戻り値が <c>buffer.Length</c> と等しい場合は <see cref="OpenCursor"/> へ降格すべき。
     /// </summary>
     public int ReadEdgesWithPayload(
         VertexId vertexId, Direction direction, EdgeTypeId? typeFilter,
-        AdjacencyEntryV2[] buffer)
+        AdjacencySegmentEntry[] buffer)
     {
         long blockPageId = GetBlockPageId(vertexId);
         if (blockPageId < 0) return 0;
@@ -132,7 +128,7 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
         return total;
     }
 
-    private sealed class BlockChainCursorV2 : AdjacencyCursor
+    private sealed class SegmentCursor : AdjacencyCursor
     {
         private byte[] _body;
         private readonly IPagedFile _dataFile;
@@ -152,7 +148,7 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
         private EdgeTypeId _type;
         private long _weightRaw;
 
-        internal BlockChainCursorV2(IPagedFile dataFile, long firstPageId, Direction direction, EdgeTypeId? typeFilter)
+        internal SegmentCursor(IPagedFile dataFile, long firstPageId, Direction direction, EdgeTypeId? typeFilter)
         {
             _dataFile = dataFile;
             _direction = direction;
@@ -243,7 +239,7 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
     // ──────────────────────────── Build ────────────────────────────
 
     /// <summary>
-    /// V2 隣接インデックスをゼロから構築する。<paramref name="weightLookup"/> は
+    /// adjacency segment をゼロから構築する。<paramref name="weightLookup"/> は
     /// Edge ID → 64 ビット生 payload のマップで、呼び出し側はビルド呼び出し前に
     /// 保留中のEdge・プロパティから埋めておく。エントリの無いエッジには
     /// <see cref="PayloadLaneSpec.DefaultRaw"/> が割り当てられる。
@@ -287,7 +283,7 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
         }
 
         if (writeDescriptor)
-            AdjacencyContainer.WriteDescriptor(dataFile, AdjacencyContainer.KindV2, spec);
+            AdjacencyContainer.WriteDescriptor(dataFile, AdjacencyContainer.KindSegment, spec);
         AdjacencyContainer.WriteIndex(indexFile, firstPageIds);
     }
 
@@ -316,7 +312,7 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
 
     private static int CopyEntriesV2(
         ReadOnlySpan<byte> span, EdgeTypeId? typeFilter,
-        AdjacencyEntryV2[] buffer, int offset)
+        AdjacencySegmentEntry[] buffer, int offset)
     {
         int count = span.Length / EntrySize;
         int written = 0;
@@ -328,7 +324,7 @@ internal sealed class AdjacencyBlockStoreV2 : IAdjacencyBlockStore, IAdjacencyPa
             var edgeId = new EdgeId(RecordHelpers.ReadInt48(e[2..]));
             var neighborId = new VertexId(RecordHelpers.ReadInt48(e[8..]));
             long payload = BinaryPrimitives.ReadInt64LittleEndian(e[14..]);
-            buffer[offset + written++] = new AdjacencyEntryV2(typeId, edgeId, neighborId, payload);
+            buffer[offset + written++] = new AdjacencySegmentEntry(typeId, edgeId, neighborId, payload);
         }
         return written;
     }

@@ -1,6 +1,6 @@
 # MVCC とトランザクション
 
-> as-built 仕様（QUIVER-SW family version 1、2026-07-15）
+> as-built 仕様（QUIVER-SW family version 1、2026-07-16）
 
 ## 分離レベル {#isolation}
 
@@ -13,6 +13,17 @@ Quiver は snapshot isolation を提供する。
 グラフ entity は `Vertex`、`Edge`、`Nexus` の三種類である。
 `Property` は独立した entity ではない。
 Property は owner の identity と property key に束縛された versioned value である。
+永続 identity は `PropertyAddress(Owner, Key)` であり、public な property ID は持たない。
+各 owner header は `PropertyVersionRef` の先頭を保持し、列挙 API は ID を公開しない `PropertyCursor` を返す。
+
+Single cardinality の更新は、現在の可視 version に `xmax` を設定して新しい version を chain の先頭へ追加する。
+Set cardinality の追加は既存 version を終了せずに新しい version を追加し、削除は一致する version に `xmax` を設定する。
+property record に保存した owner と読み取り側の owner が一致しない chain は corruption として拒否する。
+
+Vertex、Edge、Nexus の Generation は各 entity version sidecar を正本とする。
+Property version は `xmin`、`xmax`、Generation を 84 バイトの version record に保持する。
+同じ Sequence でも Generation が異なる参照は別 incarnation として扱い、stale な参照を返さない。
+Vertex、Edge、Nexus の `EntityVersionMeta` にある `pstamp` と `sstamp` は現行 SSN 判定のため残っているが、primary identity と可視性の根拠には使わない。
 
 ## ライフサイクル {#lifecycle}
 

@@ -668,8 +668,8 @@ namespace Quiver
         void DeleteNexus(Quiver.Core.NexusId nexusId);
         void DeleteVertex(Quiver.Core.VertexId vertexId);
         Quiver.Storage.Records.EdgeEnumerator EnumerateEdges(Quiver.Core.VertexId vertexId, Quiver.Storage.Records.Direction direction = 3, string? typeFilter = null);
-        Quiver.Storage.Records.PropertyEnumerator EnumerateProperties(Quiver.Core.NexusId nexusId);
-        Quiver.Storage.Records.PropertyEnumerator EnumerateProperties(Quiver.Core.VertexId vertexId);
+        Quiver.Storage.Records.PropertyCursor EnumerateProperties(Quiver.Core.NexusId nexusId);
+        Quiver.Storage.Records.PropertyCursor EnumerateProperties(Quiver.Core.VertexId vertexId);
         string? GetEdgeTypeName(Quiver.Core.EdgeTypeId typeId);
         Quiver.NexusMemberEnumerator GetMembers(Quiver.Core.NexusId nexusId, string? role = null);
         string? GetNexusTypeName(Quiver.Core.NexusTypeId typeId);
@@ -1138,22 +1138,17 @@ namespace Quiver.Core
         public bool IsValid { get; }
         public int Value { get; init; }
     }
+    public readonly struct PropertyAddress : System.IEquatable<Quiver.Core.PropertyAddress>
+    {
+        public PropertyAddress(Quiver.Core.EntityRef Owner, Quiver.Core.PropertyKeyId Key) { }
+        public bool IsValid { get; }
+        public Quiver.Core.PropertyKeyId Key { get; init; }
+        public Quiver.Core.EntityRef Owner { get; init; }
+    }
     public enum PropertyCardinality : byte
     {
         Single = 0,
         Set = 1,
-    }
-    public readonly struct PropertyId : System.IEquatable<Quiver.Core.PropertyId>
-    {
-        public static readonly Quiver.Core.PropertyId Invalid;
-        public PropertyId(long Value) { }
-        public int Generation { get; }
-        public bool IsValid { get; }
-        public long Sequence { get; }
-        public long Value { get; init; }
-        public bool Equals(Quiver.Core.PropertyId other) { }
-        public override int GetHashCode() { }
-        public static Quiver.Core.PropertyId Create(long sequence, int generation) { }
     }
     public readonly struct PropertyKeyId : System.IEquatable<Quiver.Core.PropertyKeyId>
     {
@@ -1469,7 +1464,6 @@ namespace Quiver.Storage.Records
     }
     public readonly ref struct EdgeReadHandle
     {
-        public Quiver.Core.PropertyId FirstPropertyId { get; }
         public Quiver.Core.EdgeId Id { get; }
         public bool InUse { get; }
         public Quiver.Core.VertexId Source { get; }
@@ -1521,20 +1515,17 @@ namespace Quiver.Storage.Records
         public static Quiver.Storage.Records.PayloadLaneSpec ForDouble(int propertyKeyId, double defaultValue = 0) { }
         public static Quiver.Storage.Records.PayloadLaneSpec ForInt64(int propertyKeyId, long defaultValue = 0) { }
     }
-    public ref struct PropertyEnumerator
+    public ref struct PropertyCursor
     {
-        public Quiver.Storage.Records.PropertyReadHandle Current { get; }
+        public Quiver.Storage.Records.PropertyEntry Current { get; }
         public void Dispose() { }
         public bool MoveNext() { }
     }
-    public readonly ref struct PropertyReadHandle
+    public readonly ref struct PropertyEntry
     {
-        public Quiver.Core.PropertyId Id { get; }
-        public bool InUse { get; }
+        public Quiver.Core.PropertyCardinality Cardinality { get; }
         public Quiver.Core.PropertyKeyId KeyId { get; }
-        public Quiver.Core.PropertyId NextPropertyId { get; }
         public Quiver.Storage.Records.PropertyValue Value { get; }
-        public void Dispose() { }
     }
     public readonly ref struct PropertyValue
     {

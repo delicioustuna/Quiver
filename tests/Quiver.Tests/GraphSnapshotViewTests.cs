@@ -117,7 +117,7 @@ public sealed class GraphSnapshotViewTests : IDisposable
     }
 
     [Fact]
-    public void HasWeights_is_false_when_v2_payload_lane_is_absent()
+    public void HasWeights_is_false_when_segment_payload_lane_is_absent()
     {
         BulkLoad(vertexCount: 2, edges: new[] { (0L, 1L) });
 

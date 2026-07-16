@@ -6,7 +6,7 @@ namespace Quiver.Storage.Records;
 /// 連続配置の隣接ブロックストアの読み取りインタフェース。
 /// <c>BulkLoader.Commit(buildAdjacencyIndex: true)</c> で構築され、以降は不変として扱う。
 /// </summary>
-internal interface IAdjacencyBlockStore
+internal interface IAdjacencySegmentStore
 {
     /// <summary>指定Vertexが隣接ブロックを持つ (= インデックス構築時に存在した) 場合に true を返す。</summary>
     bool HasBlock(VertexId vertexId);
@@ -75,8 +75,8 @@ internal abstract class AdjacencyCursor : IDisposable
     public abstract EdgeTypeId Type { get; }
 
     /// <summary>
-    /// payload lane を持つ <see cref="AdjacencyBlockStoreV2"/> 上でカーソルが開かれているときの、
-    /// 現在エントリの生 64 ビット payload。V1 カーソルや payload lane 無しで構築された V2 カーソルでは 0 を返す。
+    /// payload lane を持つ <see cref="AdjacencySegmentStore"/> 上でカーソルが開かれているときの、
+    /// 現在エントリの生 64 ビット payload。payload lane 無しの場合は 0 を返す。
     /// ストアの <see cref="PayloadKind"/> が <see cref="PayloadKind.Double"/> の場合は、
     /// <see cref="BitConverter.Int64BitsToDouble"/> で <c>double</c> として再解釈する。
     /// </summary>
@@ -99,7 +99,7 @@ internal abstract class AdjacencyCursor : IDisposable
 
 /// <summary>
 /// インライン payload lane (エッジ重み等のスカラ) を持つ隣接ストアのオプション拡張コントラクト。
-/// オペレータは <c>tx.AdjacencyBlocks as IAdjacencyPayloadView</c> で能力検査し、
+/// オペレータは <c>tx.AdjacencySegments as IAdjacencyPayloadView</c> で能力検査し、
 /// プロパティチェーンを経由せず <see cref="Quiver.Operators.ExpandOutputMode.NeighborAndWeight"/> 射影を選べる。
 /// </summary>
 internal interface IAdjacencyPayloadView

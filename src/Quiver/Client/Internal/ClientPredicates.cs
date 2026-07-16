@@ -21,11 +21,11 @@ internal enum PredicateEntity
 /// <see cref="PredicateEntity"/> に応じて正しいストアからプロパティを列挙する。
 /// Vertex専用だった述語をエッジプロパティ (<c>OutEdges().Has(...)</c> /
 /// <c>.Knows(e =&gt; ...)</c>) でも機能させるための共通経路。両ストアの
-/// <c>EnumerateProperties</c> は同じ <see cref="PropertyEnumerator"/> を返すため分岐 1 箇所で済む。
+/// <c>EnumerateProperties</c> は同じ <see cref="PropertyCursor"/> を返すため分岐 1 箇所で済む。
 /// </summary>
 internal static class EntityProps
 {
-    public static PropertyEnumerator Enumerate(ITransaction tx, PredicateEntity entity, long id)
+    public static PropertyCursor Enumerate(ITransaction tx, PredicateEntity entity, long id)
         => entity switch
         {
             PredicateEntity.Edge =>

@@ -10,6 +10,4 @@ internal enum WalFileKind : byte
     VertexVersionMeta = 5,
     /// <summary>EdgeStore に対応する MVCC+SSN メタデータ sidecar。</summary>
     EdgeVersionMeta = 6,
-    /// <summary>PropertyStore に対応する MVCC+SSN メタデータ sidecar。</summary>
-    PropertyVersionMeta = 7,
 }

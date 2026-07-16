@@ -167,7 +167,7 @@ public static class CleanSlateCsrEdgeSpikeRunner
 
     private static int CountPredicateMatches(IGraphTransaction read, VertexId hub)
     {
-        var adj = read.AsInternal().AdjacencyBlocks
+        var adj = read.AsInternal().AdjacencySegments
             ?? throw new InvalidOperationException("Adjacency block store was not built.");
 
         int count = 0;

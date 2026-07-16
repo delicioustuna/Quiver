@@ -1,6 +1,6 @@
 # ベクトル検索
 
-> as-built 仕様（QUIVER-SW family version 1、2026-07-15）
+> as-built 仕様（QUIVER-SW family version 1、2026-07-16）
 
 ## ベクトルインデックス仕様 {#vector-index}
 
@@ -23,14 +23,27 @@
 index 作成時に固定される。未対応の値は index 作成時・catalog 読込時・payload open 時の
 いずれでも `VectorException` で拒否される (将来の表現で書かれた DB を誤読しない)。
 
-## PersistentVectorStore {#persistent-store}
+## Primary vector payload {#primary-vector-payload}
+
+`VectorPayloadStore` (`src/Quiver/Stores/VectorPayloadStore.cs`) は `FloatArray` property value の正本を保持する。
+property version は配列本体ではなく immutable `VectorPayloadRef(Sequence, Generation)` を格納する。
+
+metadata record は present flag、`ElementType`、Generation、dimensions、byte length、CRC32C checksum、blob ID を保持する。
+読み取りは ref generation、`Float32`、dimensions と byte length の一致、blob length、checksum を検証する。
+到達可能な property version が参照する payload の欠落または不一致だけを primary corruption とする。
+到達不能な payload は orphan scan で回収候補として列挙し、この時点では削除しない。
+
+## ベクトルインデックスの payload {#persistent-store}
 
 `PersistentVectorStore` (`src/Quiver/Stores/PersistentVectorStore.cs`) は、`*.quiver`
-ファイル内のコンテナテナントとして in-file のベクトルストレージを管理する。
+ファイル内で再構築可能なベクトルインデックスを管理する。
 
 - **バインディングキー**: エンティティの `Sequence`（EntityRef の slot-local 部分）
 - **Generation チェック**: 古いバインディング（generation 不一致）は KNN 読み取り時にフィルタされる
-- **インデックスごとのテナント**: catalog + payload + HNSW グラフ
+- **インデックスごとのテナント**: catalog + `VectorIndexPayloadStore` + HNSW グラフ
+
+`VectorIndexPayloadStore` は検索用の derived copy であり、property value の正本ではない。
+index を削除または再構築しても、`VectorPayloadStore` の primary value は失われない。
 
 ## HNSW インデックス {#hnsw}
 

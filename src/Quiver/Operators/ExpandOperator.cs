@@ -106,7 +106,7 @@ internal sealed class ExpandOperator : IPhysicalOperator
         // payload lane が無い場合はスロットは Int64 のままゼロを保持する
         // (呼び出し元はデータではなくスキーマで分岐できる)。
         if (_outputMode == ExpandOutputMode.NeighborAndWeight
-            && tx.AdjacencyBlocks is IAdjacencyPayloadView pl
+            && tx.AdjacencySegments is IAdjacencyPayloadView pl
             && pl.PayloadSpec.Kind == PayloadKind.Double)
         {
             _weightSlotType = TupleSlotType.Double;
@@ -141,7 +141,7 @@ internal sealed class ExpandOperator : IPhysicalOperator
             // AdjacencyFallbackCount (ブロック不在時のみ発火) とは異なり、
             // オプティマイザが ExpandStrategy 選択時に EdgeScanRecords と
             // 比較するための per-operator ヒット数を提供する。
-            if (_tx!.AdjacencyBlocks?.HasBlock(_currentSourceVertex) == true)
+            if (_tx!.AdjacencySegments?.HasBlock(_currentSourceVertex) == true)
             {
                 var s = Statistics;
                 s.AdjacencyBlockHits++;

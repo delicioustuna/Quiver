@@ -13,7 +13,7 @@ namespace Quiver.Storage.Records;
 /// 安全に読み出せるが、構築後のミューテーションは可視化されない。<see cref="IDisposable.Dispose"/> を
 /// 呼ぶと裏付け配列が <see cref="System.Buffers.ArrayPool{T}"/> に返却される。
 ///
-/// <see cref="Epoch"/> は構築時点の <see cref="IAdjacencyBlockStore.Epoch"/> をそのまま反映する。
+/// <see cref="Epoch"/> は構築時点の <see cref="IAdjacencySegmentStore.Epoch"/> をそのまま反映する。
 /// 呼び出し側はこの値で compact によるキャッシュ済み計算結果の無効化を検出できる。
 /// </summary>
 public interface IGraphSnapshotView : IDisposable

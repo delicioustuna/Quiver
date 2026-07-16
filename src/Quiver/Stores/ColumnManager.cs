@@ -18,7 +18,7 @@ internal sealed class ColumnManager
     private readonly VersionedEdgeStore _edgeStore;
     private readonly VersionedVertexStore _vertexStore;
     private readonly INexusStore _nexusStore;
-    private readonly PropertyStore _propStore;
+    private readonly PropertyVersionStore _propStore;
     private readonly Dictionary<(EntityKind, int), ScalarColumnStore> _columns = new();
     // catalog は遅延生成 (ColumnCatalog ctor が空テナントにヘッダページを書くため)。
     // これにより列を使わない DB は catalog テナントを物理生成せず、既存 DB の on-disk
@@ -31,7 +31,7 @@ internal sealed class ColumnManager
         VersionedEdgeStore edgeStore,
         VersionedVertexStore vertexStore,
         INexusStore nexusStore,
-        PropertyStore propStore)
+        PropertyVersionStore propStore)
     {
         _container = container;
         _catalogTenantId = catalogTenantId;
@@ -63,7 +63,7 @@ internal sealed class ColumnManager
     /// <summary>登録済み列が 1 つ以上あるか (write hook / abort hook の早期 bail に使う)。</summary>
     public bool HasAnyColumns => _columns.Count > 0;
 
-    // ===== Phase 5c: write 経路統合 =====
+    // ===== write 経路 =====
 
     /// <summary>
     /// <see cref="GraphTransaction.SetProperty"/> から呼ばれ、(kind, keyId) が列なら同 tx で
@@ -81,7 +81,7 @@ internal sealed class ColumnManager
     }
 
     /// <summary>
-    /// Phase 5d: (kind, keyId) が列なら可視値で count/sum/min/max/longSum を 1 パス集計する。
+    /// (kind, keyId) が列なら可視値で count/sum/min/max/longSum を 1 パス集計する。
     /// 列が無い / mixed / 未設定なら false (呼び出し側が row path フォールバック)。
     /// <paramref name="valueType"/> は列の scalar 型 (集約側で SumLong 可否などの判定に使う)。
     /// </summary>
@@ -92,7 +92,7 @@ internal sealed class ColumnManager
     {
         count = 0; sum = 0; min = 0; max = 0; longSum = 0; valueType = default;
         if (!_columns.TryGetValue((kind, keyId), out var col)) return false;
-        // Phase 5d: optimizer コストモデルで列スキャン vs row path を判定する。delta 肥大時
+        // optimizer コストモデルで列スキャンと row path を判定する。delta 肥大時
         // (compaction 前) は row へフォールバックして列の point 劣化を避ける。head entries を
         // 行数推定の proxy に使う (full scan は全エンティティ ≒ 列エントリ数を訪れる)。
         if (!Quiver.QueryOptimizer.ShouldUseColumnAggregate(col.Hwm, col.DeltaVersionCount, col.Hwm))
@@ -136,7 +136,7 @@ internal sealed class ColumnManager
     }
 
     /// <summary>
-    /// Phase 5e: vacuum から呼ばれ、全列で visibility <paramref name="horizon"/> 未満かつ commit 済みの
+    /// vacuum から呼ばれ、全列で visibility <paramref name="horizon"/> 未満かつ commit 済みの
     /// 超過 delta 版を merge する (どの snapshot からも不要になった旧版を回収)。回収版数の合計を返す。
     /// </summary>
     public int Compact(long horizon, CommittedTxRegistry committed)
@@ -197,7 +197,7 @@ internal sealed class ColumnManager
         }
     }
 
-    private static bool TryExtractScalar(PropertyEnumerator pe, PropertyKeyId key, out long bits, out PropertyValueType type)
+    private static bool TryExtractScalar(PropertyCursor pe, PropertyKeyId key, out long bits, out PropertyValueType type)
     {
         bits = 0; type = default;
         while (pe.MoveNext())
@@ -213,7 +213,14 @@ internal sealed class ColumnManager
     /// <summary>scalar (Bool/Int32/Int64/Double) を 8B にパックする。非 scalar は false。</summary>
     private static bool TryScalarBits(in PropertyValue value, out long bits)
     {
-        if (!InlinePropertyCodec.IsScalar(value.Type)) { bits = 0; return false; }
+        if (value.Type is not (PropertyValueType.Bool
+            or PropertyValueType.Int32
+            or PropertyValueType.Int64
+            or PropertyValueType.Double))
+        {
+            bits = 0;
+            return false;
+        }
         bits = value.Type switch
         {
             PropertyValueType.Bool => value.BoolValue ? 1L : 0L,

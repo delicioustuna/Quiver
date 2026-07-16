@@ -99,42 +99,7 @@ internal sealed class TxNexusStore : INexusStore
         return _inner.Scan();
     }
 
-    // inline property の読み書きは header の読み書きと同じ locking / SSN 規約に従う。
-    // 読みは ReaderWriter モードで shared lock、書きは exclusive lock + SSN write。
-
-    public bool TryGetInlineProperty(NexusId nexusId, PropertyKeyId keyId, out PropertyValue value)
-    {
-        if (_mode == LockingMode.ReaderWriter)
-            AcquireNexus(nexusId.Sequence, LockMode.Shared);
-        ActivateMvccContext();
-        return _inner.TryGetInlineProperty(nexusId, keyId, out value);
-    }
-
-    public bool HasInlineProperty(NexusId nexusId, PropertyKeyId keyId)
-    {
-        if (_mode == LockingMode.ReaderWriter)
-            AcquireNexus(nexusId.Sequence, LockMode.Shared);
-        ActivateMvccContext();
-        return _inner.HasInlineProperty(nexusId, keyId);
-    }
-
-    public bool SetInlineProperty(NexusId nexusId, PropertyKeyId keyId, in PropertyValue value)
-    {
-        AcquireNexus(nexusId.Sequence, LockMode.Exclusive);
-        ActivateMvccContext();
-        SsnOnWrite(nexusId.Sequence);
-        return _inner.SetInlineProperty(nexusId, keyId, in value);
-    }
-
-    public bool RemoveInlineProperty(NexusId nexusId, PropertyKeyId keyId)
-    {
-        AcquireNexus(nexusId.Sequence, LockMode.Exclusive);
-        ActivateMvccContext();
-        SsnOnWrite(nexusId.Sequence);
-        return _inner.RemoveInlineProperty(nexusId, keyId);
-    }
-
-    public PropertyEnumerator EnumerateProperties(NexusId nexusId, IPropertyStore overflowStore)
+    public PropertyCursor EnumerateProperties(NexusId nexusId, IPropertyStore overflowStore)
     {
         if (_mode == LockingMode.ReaderWriter)
             AcquireNexus(nexusId.Sequence, LockMode.Shared);

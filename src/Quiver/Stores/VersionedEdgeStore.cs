@@ -15,7 +15,7 @@ internal struct RawEdgeRecord
     public EdgeId SrcNext;
     public EdgeId TgtPrev;
     public EdgeId TgtNext;
-    public PropertyId FirstProp;
+    public PropertyVersionRef FirstPropertyRef;
     public long Xmin;
     public long Xmax;
 }
@@ -23,7 +23,7 @@ internal struct RawEdgeRecord
 /// <summary>
 /// <see cref="VersionedRecordHeap"/> + <see cref="ItemPointerMap"/> 上に実装した
 /// Edgeストア。<see cref="VersionedVertexStore"/> と同型で、固定 48B record 配列を
-/// やめ可変長 slotted record にすることで Phase 4c の property inline 化の土台になる。
+/// やめ versioned slotted record に格納する。
 ///
 /// <para>リレーション payload (45B, 旧 <c>EdgeStore</c> record と同形 — version ヘッダ 24B
 /// の後ろ):</para>
@@ -43,7 +43,7 @@ internal struct RawEdgeRecord
 /// **head version の in-place 更新** で書き換える (版を増やさない)。エッジ作成も版を増やさない。
 ///
 /// <para><b>MVCC</b>: xmin/xmax は heap version ヘッダに保持する (<see cref="VersionedVertexStore"/>
-/// Phase 3a と同じ統一レコードモデル)。<see cref="IEntityVersionStore"/> sidecar は Generation +
+/// Vertex と同じ統一レコードモデル)。<see cref="IEntityVersionStore"/> sidecar は Generation +
 /// SSN (Pstamp/Sstamp) + commit 高水位のみを保持する。edge の raw Sequence は
 /// adjacency、delta、locator、epoch entry に残り得るため、再利用解放 coordinator がそれらを
 /// 除去するまで free list へ戻さない。物理ページの回収と logical Sequence の再利用を混同すると、
@@ -63,10 +63,6 @@ internal sealed class VersionedEdgeStore : IEdgeStore
     private const int OffTgtNext = 33;
     private const int OffFirstProp = 39;
     private const byte FlagInUse = 0x01;
-    // Phase 6 alloc-free read: 典型 inline payload (45 固定 + 数 entry) を収める stackalloc 量。
-    // 超過分は割当版へフォールバックする。
-    private const int InlineReadBuffer = 256;
-
     private static readonly int HdrSize = VersionedRecordHeap.VersionHeaderSize;
 
     private readonly IPagedFile _file;
@@ -75,8 +71,8 @@ internal sealed class VersionedEdgeStore : IEdgeStore
     private readonly IEntityVersionStore _versions;
     private readonly EdgeLocatorStore? _locators;
     private long _inUseCount;
-    // Wave 1 では edge Sequence を再利用しない。
-    // 既存 sidecar に再利用履歴がなければ全採番済み slot の generation は 1 なので、
+    // raw adjacency、delta、locator が Sequence を保持する間は edge Sequence を再利用しない。
+    // sidecar に再利用履歴がなければ全採番済み slot の generation は 1 なので、
     // logical output ごとの sidecar read を省ける。
     private bool _anyReuse;
 
@@ -120,7 +116,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore
         RecordHelpers.WriteInt48(payload[OffSrcNext..], srcHead.Sequence);
         RecordHelpers.WriteInt48(payload[OffTgtPrev..], EdgeId.Invalid.Sequence);
         RecordHelpers.WriteInt48(payload[OffTgtNext..], tgtHead.Sequence);
-        RecordHelpers.WriteInt48(payload[OffFirstProp..], PropertyId.Invalid.Sequence);
+        RecordHelpers.WriteInt48(payload[OffFirstProp..], PropertyVersionRef.Invalid.Sequence);
 
         _heap.Insert(seq, payload, MvccContext.CurrentTxId.Value);
         _versions.Write(seq, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue, generation));
@@ -165,7 +161,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore
         // を返せ、EdgeEnumerator が不可視 edge を skip して次へ進める (旧 EdgeStore と
         // 同じセマンティクス。chain は物理一本で visibility は xmin/xmax で判定)。
         //
-        // Task B (B2): head を **1 回の pin** で読み (alloc-free stackalloc)、可視性も head の
+        // head を 1 回の pin で読み、可視性も同じ version header から判定する。
         // xmin/xmax から即判定する。head 可視 = 最頻ケース (単一版 / 可視 head) はここで確定し、
         // 旧実装の TryReadVisible 2 回目 pin + 破棄 ToArray を省く。head 不可視 & 多版の稀ケースのみ
         // 版チェーン走査へフォールバック。可視性セマンティクスは厳密に不変 (下記 3 分岐は
@@ -182,7 +178,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore
         var srcNext = new EdgeId(RecordHelpers.ReadInt48(span[OffSrcNext..]));
         var tgtPrev = new EdgeId(RecordHelpers.ReadInt48(span[OffTgtPrev..]));
         var tgtNext = new EdgeId(RecordHelpers.ReadInt48(span[OffTgtNext..]));
-        var firstProp = new PropertyId(RecordHelpers.ReadInt48(span[OffFirstProp..]));
+        var firstProp = new PropertyVersionRef(RecordHelpers.ReadInt48(span[OffFirstProp..]));
 
         // InUse = (slot 有効) かつ「版チェーンに reader から見える版がある」。
         //   head 可視                       → 可視 (TryReadVisible が head で即 true を返すのと等価)
@@ -242,78 +238,17 @@ internal sealed class VersionedEdgeStore : IEdgeStore
         }
     }
 
-    // ===== inline property storage (edge 粒度 copy-on-write) =====
-    // 符号化は InlinePropertyCodec (RelFixedSize=45) に集約。vertex 側と同じ copy-on-write 機構。
-
-    public bool TryGetInlineProperty(EdgeId edgeId, PropertyKeyId keyId, out PropertyValue value)
-    {
-        value = default;
-        if (!TryResolveRecordSequence(edgeId, out long seq)) return false;
-        // alloc-free 経路。可視版 payload を stackalloc バッファへコピーして scan する
-        // (per-read の byte[] 割当を回避)。scalar は値コピーなので buffer 上 decode で安全、String/Bytes
-        // のみ安定 byte[] へコピーする。payload が buffer 超過なら割当版へフォールバック。
-        Span<byte> buf = stackalloc byte[InlineReadBuffer];
-        int len = _heap.TryReadVisibleInto(seq, AmbientVisible, buf, out _, out _);
-        if (len == 0) return false;
-        // property read = edge read。可視版を観測したので SSN read-set に記録する。
-        MvccContext.RecordRead(EntityKind.Edge, seq);
-        if (len <= buf.Length)
-        {
-            if (!InlinePropertyCodec.TryScan(buf[..len], InlinePropertyCodec.RelFixedSize, keyId.Value, out var type, out var span))
-                return false;
-            value = InlinePropertyCodec.IsScalar(type)
-                ? InlinePropertyCodec.DecodeScalar(type, span)
-                : InlinePropertyCodec.Decode(type, span.ToArray());
-            return true;
-        }
-        if (!_heap.TryReadVisible(seq, AmbientVisible, out var payload, out _, out _)) return false;
-        if (!InlinePropertyCodec.TryScan(payload, InlinePropertyCodec.RelFixedSize, keyId.Value, out var t2, out var s2)) return false;
-        value = InlinePropertyCodec.Decode(t2, s2);
-        return true;
-    }
-
-    public bool HasInlineProperty(EdgeId edgeId, PropertyKeyId keyId)
-    {
-        if (!TryResolveRecordSequence(edgeId, out long seq)) return false;
-        Span<byte> buf = stackalloc byte[InlineReadBuffer];
-        int len = _heap.TryReadVisibleInto(seq, AmbientVisible, buf, out _, out _);
-        if (len == 0) return false;
-        MvccContext.RecordRead(EntityKind.Edge, seq);
-        if (len <= buf.Length)
-            return InlinePropertyCodec.TryScan(buf[..len], InlinePropertyCodec.RelFixedSize, keyId.Value, out _, out _);
-        if (!_heap.TryReadVisible(seq, AmbientVisible, out var payload, out _, out _)) return false;
-        return InlinePropertyCodec.TryScan(payload, InlinePropertyCodec.RelFixedSize, keyId.Value, out _, out _);
-    }
-
-    public bool SetInlineProperty(EdgeId edgeId, PropertyKeyId keyId, in PropertyValue value)
-    {
-        if (!InlinePropertyCodec.IsInlineable(value)) return false;
-        if (!TryResolveRecordSequence(edgeId, out long seq, requireLive: true)) return false;
-        if (!_heap.TryReadVisible(seq, AmbientVisible, out var cur, out _, out _)) return false;
-        byte[] np = InlinePropertyCodec.Build(cur, InlinePropertyCodec.RelFixedSize, keyId.Value, in value, remove: false);
-        if (np.Length > VersionedRecordHeap.MaxPayloadSize) return false; // payload 予算超過 → overflow
-        _heap.AppendOrReplaceHead(seq, np, MvccContext.CurrentTxId.Value);
-        return true;
-    }
-
-    public bool RemoveInlineProperty(EdgeId edgeId, PropertyKeyId keyId)
-    {
-        if (!TryResolveRecordSequence(edgeId, out long seq, requireLive: true)) return false;
-        if (!_heap.TryReadVisible(seq, AmbientVisible, out var cur, out _, out _)) return false;
-        if (!InlinePropertyCodec.TryScan(cur, InlinePropertyCodec.RelFixedSize, keyId.Value, out _, out _)) return false;
-        byte[] np = InlinePropertyCodec.Build(cur, InlinePropertyCodec.RelFixedSize, keyId.Value, default, remove: true);
-        _heap.AppendOrReplaceHead(seq, np, MvccContext.CurrentTxId.Value);
-        return true;
-    }
-
-    public PropertyEnumerator EnumerateProperties(EdgeId edgeId, IPropertyStore overflowStore)
+    public PropertyCursor EnumerateProperties(EdgeId edgeId, IPropertyStore overflowStore)
     {
         if (!TryResolveRecordSequence(edgeId, out long seq) ||
             !_heap.TryReadVisible(seq, AmbientVisible, out var payload, out _, out _))
-            return new PropertyEnumerator(overflowStore, PropertyId.Invalid);
+            return new PropertyCursor(overflowStore, default, PropertyVersionRef.Invalid);
         MvccContext.RecordRead(EntityKind.Edge, edgeId.Sequence); // property 列挙 = edge read
-        var firstProp = new PropertyId(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProp)));
-        return new PropertyEnumerator(payload, overflowStore, firstProp, InlinePropertyCodec.RelFixedSize);
+        var firstProp = new PropertyVersionRef(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProp)));
+        var ownerId = edgeId.Generation == 0
+            ? EdgeId.Create(edgeId.Sequence, CurrentGeneration(edgeId.Sequence))
+            : edgeId;
+        return overflowStore.Enumerate(EntityRef.From(ownerId), firstProp);
     }
 
     // --- internal bulk-load helpers (no MvccContext; heap insert handles paging) ---
@@ -401,7 +336,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore
             SrcNext = new EdgeId(RecordHelpers.ReadInt48(s[OffSrcNext..])),
             TgtPrev = new EdgeId(RecordHelpers.ReadInt48(s[OffTgtPrev..])),
             TgtNext = new EdgeId(RecordHelpers.ReadInt48(s[OffTgtNext..])),
-            FirstProp = new PropertyId(RecordHelpers.ReadInt48(s[OffFirstProp..])),
+            FirstPropertyRef = new PropertyVersionRef(RecordHelpers.ReadInt48(s[OffFirstProp..])),
             Xmin = xmin,
             Xmax = xmax,
         };
@@ -576,7 +511,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore
             edgeId, inUse: false, default, default, default,
             EdgeId.Invalid, EdgeId.Invalid,
             EdgeId.Invalid, EdgeId.Invalid,
-            PropertyId.Invalid);
+            PropertyVersionRef.Invalid);
 
     private static EdgeId GetFirstEdgeId(IVertexStore vertexStore, VertexId vertexId)
     {

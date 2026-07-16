@@ -1,33 +1,42 @@
 # レコード & インデックス
 
-> as-built 仕様（QUIVER-SW family version 1、2026-07-15）
+> as-built 仕様（QUIVER-SW family version 1、2026-07-16）
 
 ## Slotted ページモデル {#slotted-pages}
 
-すべてのレコードストアは、8,160 バイトのページボディ (`PagedFile.BodySize`) 内で slotted-page
-レイアウトを用いる。レコードはストアごとに固定サイズであり、slot index = ページ内のレコードオフセット。
+Vertex、Edge、Nexus は `VersionedRecordHeap` と `ItemPointerMap` を使う slotted-page レイアウトである。
+各 heap record は 24 バイトの version header と store 固有の固定 payload を持つ。
+Property version、incidence、primary vector payload は Sequence から固定 slot を直接計算する。
 
 ## Vertex ストア {#vertex-store}
 
-`VertexStore` (`src/Quiver/Stores/VertexStore.cs`)。
+`VersionedVertexStore` (`src/Quiver/Stores/VersionedVertexStore.cs`)。
 
-**Vertex レコード** (15 バイト):
+**Vertex payload**（15 バイト、version header の後ろ）:
 
 | オフセット | サイズ | フィールド |
 |---|---|---|
-| 0 | 1 | Flags (alive, deleted) |
+| 0 | 1 | Flags (in-use) |
 | 1 | 6 | FirstEdgeId（隣接リスト先頭のEdge） |
-| 7 | 6 | FirstPropId（プロパティチェーンの先頭エントリ） |
+| 7 | 6 | FirstPropertyRef（owner-bound property version chain の先頭 Sequence） |
 | 13 | 2 | LabelId |
 
-- **1 ページあたり 544 レコード** (8160 / 15)
-- バージョンメタデータ (xmin/xmax) は別の MVCC サイドカー (`EntityVersionMeta`) に格納
-- vacuum フリーリストによる slot 再利用 (`OP-3`)。アクティブ tx 中は論理削除
+- xmin/xmax は version header に格納する。
+- Generation と現行 SSN 用 stamp は `EntityVersionMeta` sidecar に格納する。
+- vacuum が reader horizon を越えた record を回収した後、Sequence を再利用すると Generation が増える。
 
 ## Edge ストア {#rel-store}
 
-Edgeは隣接リスト構造で格納される。各Edgeレコードは、source と target の
-両Vertexについて next/prev のEdgeにリンクし、Vertexのエンドポイントごとに双方向連結リストを形成する。
+`VersionedEdgeStore` (`src/Quiver/Stores/VersionedEdgeStore.cs`) は 45 バイト payload を `VersionedRecordHeap` に格納する。
+payload は flags、source、target、type、両端の prev/next、`FirstPropertyRef` で構成する。
+xmin/xmax は version header、Generation と現行 SSN 用 stamp は `EntityVersionMeta` sidecar に置く。
+
+各Edgeは source と target の両Vertexについて prev/next にリンクし、Vertexのエンドポイントごとに双方向連結リストを形成する。
+adjacency、delta、locator が raw Sequence を保持する間は Edge Sequence を再利用しない。
+
+`AdjacencySegmentStore` は linked-list から再構築できる derived view である。
+descriptor version 2 の `KindSegment` だけを受理し、payload lane がない場合も `PayloadKind.None` の同じ segment format を使う。
+旧 adjacency descriptor を読む fallback は持たない。
 
 ## Nexus ストア {#nexus-store}
 
@@ -43,12 +52,10 @@ header レコードが MVCC 可視性の正本になる。
 | 0 | 1 | Flags (in-use) |
 | 1 | 2 | TypeId（インターンされたNexus型） |
 | 3 | 6 | FirstIncidenceId（メンバーチェーンの先頭） |
-| 9 | 6 | FirstPropertyId（オーバーフロープロパティチェーンの先頭） |
+| 9 | 6 | FirstPropertyRef（owner-bound property version chain の先頭 Sequence） |
 
-- `VersionedRecordHeap` + `ItemPointerMap` 上の可変長 payload であり、固定領域の後ろに
-  Vertexと同形式の inline property 領域（copy-on-write）が続く。超過分は既存の
-  PropertyStore チェーンを `FirstPropertyId` から辿る
-- xmin/xmax は heap の version ヘッダ、generation と SSN スタンプは `EntityVersionMeta` サイドカーに置く
+- `VersionedRecordHeap` + `ItemPointerMap` 上の固定 payload であり、inline property 領域は持たない
+- xmin/xmax は heap の version header、Generation と現行 SSN 用 stamp は `EntityVersionMeta` sidecar に置く
 - メンバー集合は作成時に確定し、以後変更されない。変更は削除 + 再作成で表現する
 - 同じロールとVertexの組は 1 つのNexus内で重複できない。
   同じVertexが別ロールで参加すること、同じロールに複数Vertexが参加することは許される
@@ -108,23 +115,36 @@ vertex sequence を添字に、そのVertexのVertex側チェーン先頭 incide
 
 ## Property ストア {#property-store}
 
-`PropertyStore` (`src/Quiver/Storage/Records/PropertyStore.cs`)。
+`PropertyVersionStore` (`src/Quiver/Stores/PropertyVersionStore.cs`) は owner-bound property version を格納する。
+Property は独立 entity ではなく、public `PropertyId` を持たない。
+論理アドレスは `PropertyAddress(Owner: EntityRef, Key: PropertyKeyId)` である。
 
-**Property レコード** (41 バイト):
+**Property version レコード**（84 バイト）:
 
 | オフセット | サイズ | フィールド |
 |---|---|---|
-| 0 | 1 | Flags |
-| 1 | 4 | KeyId（インターンされたプロパティキー） |
-| 5 | 1 | ValueType |
-| 6 | 24 | InlineValue（最大 24 バイトをインライン） |
-| 30 | 5 | SpilloverId（24 バイト超の値用） |
-| 35 | 6 | NextPropId（プロパティチェーン） |
+| 0 | 1 | Flags（in-use、spillover、vector payload） |
+| 1 | 1 | Cardinality |
+| 2 | 1 | ValueType |
+| 3 | 1 | 予約 |
+| 4 | 8 | Owner（kind、Generation、Sequence を含む packed `EntityRef`） |
+| 12 | 4 | KeyId |
+| 16 | 6 | PreviousVersion（同じ address の直前 version） |
+| 22 | 6 | NextOwned（owner chain の次 version） |
+| 28 | 4 | ValueLength |
+| 32 | 24 | InlineValue または payload ref |
+| 56 | 4 | CRC32C checksum |
+| 60 | 8 | xmin |
+| 68 | 8 | xmax |
+| 76 | 8 | Generation |
 
-- **1 ページあたり 199 レコード** (8160 / 41)
-- インライン容量: 24 バイト。これより大きい値はオーバーフローページにスピルする。
-- MVCC バージョンメタデータは `PropertyVersionMeta` サイドカー経由
-- alloc-free な読み取りパスとバージョンチェーンを持つ列指向レイアウト
+- 1 ページあたり 97 レコードである
+- 最大 24 バイトの string と bytes は record 内に格納し、それを超える値は checksum 付き immutable blob を参照する
+- `FloatArray` は `VectorPayloadRef` を格納し、property record へ配列を inline 化しない
+- xmin/xmax と Generation は property version record に格納し、property 専用の `EntityVersionMeta` sidecar は持たない
+- owner が一致しない chain read は `CorruptionException`、Generation が一致しない ref は missing として扱う
+- vacuum は dead version を回収し、HWM 縮小後に有効範囲だけで free-list を再構築する
+- free slot の Generation を保持するため、property page の物理 truncate は payload GC が reader horizon を扱う段階まで遅延する
 
 ## EntityRef (ID パッキング) {#entity-ref}
 
@@ -154,10 +174,8 @@ vertex sequence を添字に、そのVertexのVertex側チェーン先頭 incide
 
 ## マルチバリュープロパティ {#multi-value}
 
-`PropertyCardinality` (`Single=0`, `Set=1`) を `PropertyKeyId` ごとに永続化し、
-同一キーに複数のスカラー値を持てるようにする。ストレージフォーマット変更なし —
-PropertyStore チェーンが MVCC で同一 KeyId の複数エントリを既に許容しているため、
-API / スキーマ層のみの拡張。
+`PropertyCardinality` (`Single=0`, `Set=1`) を property version に永続化する。
+同一 owner と key に複数の値を持つ Set は、同じ owner chain に複数の可視 version を保持する。
 
 - **`AddPropertyValue`**: 既存エントリに xmax スタンプせずに新エントリを prepend (重複時はスキップ)
 - **`RemovePropertyValue`**: 同一 key+value の visible エントリに xmax スタンプ

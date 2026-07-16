@@ -15,8 +15,9 @@ namespace Quiver.Benchmarks.Standalone;
 /// 計測項目 (README の表に対応):
 ///   - 書き込み (single-tx 償却 µs/op): CreateVertex / CreateVertex+SetProperty / CreateEdge
 ///   - durable commit レイテンシ (ms/commit): 1 op = 1 commit を直列で繰り返したときの WAL flush 律速値
-///   - 読み取り (warm ns/op): EnumerateEdges(隣接10件) / 1-hop linked-list / 1-hop AdjacencyBlock
-///   - BFS 2-hop (ハブ degree=100, AdjacencyBlock): 1 探索あたりの ms
+///   - property payload 境界: inline scalar / blob string / primary vector の時間、allocation、file bytes
+///   - 読み取り (warm ns/op): EnumerateEdges(隣接10件) / 1-hop linked-list / 1-hop adjacency segment
+///   - BFS 2-hop (ハブ degree=100, adjacency segment): 1 探索あたりの ms
 ///   - クエリラッパオーバーヘッド (%): raw EnumerateEdges vs g.Vertex().Out() の 1-hop
 ///   - BulkLoader: 100k edge を bulk vs 通常 TX(batch 1000) でロードした比
 ///
@@ -32,6 +33,8 @@ public static class BasicPerfRunner
         Console.WriteLine();
 
         WriteThroughput();
+        Console.WriteLine();
+        PropertyPayloadBoundaries();
         Console.WriteLine();
         DurableCommitLatency();
         Console.WriteLine();
@@ -85,6 +88,52 @@ public static class BasicPerfRunner
             }
             sw.Stop();
             return sw.ElapsedMilliseconds;
+        }
+        finally { BenchTempDir.Delete(dir); }
+    }
+
+    private static void PropertyPayloadBoundaries()
+    {
+        const int N = 5_000;
+        Console.WriteLine("[property payload boundaries]  kind, N, ms, us/op, allocated_B/op, file_B/op");
+        MeasurePayloadBoundary("inline-int64", N, payloadCase: 0);
+        MeasurePayloadBoundary("blob-string-300B", N, payloadCase: 1);
+        MeasurePayloadBoundary("vector-float32x128", N, payloadCase: 2);
+    }
+
+    private static void MeasurePayloadBoundary(string name, int n, int payloadCase)
+    {
+        string dir = BenchTempDir.Create("basic_payload");
+        string path = Path.Combine(dir, "graph.quiver");
+        try
+        {
+            string blobValue = new('x', 300);
+            float[] vectorValue = Enumerable.Range(0, 128).Select(static i => (float)i).ToArray();
+            long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var sw = Stopwatch.StartNew();
+            using (var db = QuiverDatabase.Open(path))
+            using (var tx = db.BeginTransaction())
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    var id = tx.CreateVertex("Payload");
+                    PropertyValue value = payloadCase switch
+                    {
+                        0 => PropertyValue.FromInt64(i),
+                        1 => PropertyValue.FromString(blobValue),
+                        2 => PropertyValue.FromFloatArray(vectorValue),
+                        _ => throw new ArgumentOutOfRangeException(nameof(payloadCase)),
+                    };
+                    tx.SetProperty(id, "value", in value);
+                }
+                tx.Commit();
+            }
+            sw.Stop();
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            long fileBytes = new FileInfo(path).Length;
+            Console.WriteLine(
+                $"  {name}, {n}, {sw.ElapsedMilliseconds}, {sw.Elapsed.TotalMilliseconds * 1000 / n:F3}, " +
+                $"{(double)allocated / n:F1}, {(double)fileBytes / n:F1}");
         }
         finally { BenchTempDir.Delete(dir); }
     }
@@ -143,7 +192,7 @@ public static class BasicPerfRunner
     // ── 読み取り: warm ns/op ─────────────────────────────────────────────────
     private static void ReadMicro()
     {
-        Console.WriteLine("[read, warm]  metric, degree, ns/op (linked / adjblock)");
+        Console.WriteLine("[read, warm]  metric, degree, ns/op (linked / segment)");
         MeasureOneHop(10);
         MeasureOneHop(100);
     }
@@ -168,7 +217,7 @@ public static class BasicPerfRunner
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
             var hub = new VertexId(0);
             using var tx = db.BeginTransaction();
-            var adj = tx.AsInternal().AdjacencyBlocks!;
+            var adj = tx.AsInternal().AdjacencySegments!;
             var buf = new AdjacencyEntry[Math.Max(1024, degree + 16)];
 
             int LinkedScan()
@@ -187,11 +236,11 @@ public static class BasicPerfRunner
         finally { BenchTempDir.Delete(dir); }
     }
 
-    // ── BFS 2-hop (ハブ degree=100, AdjacencyBlock) ──────────────────────────
+    // ── BFS 2-hop (ハブ degree=100, adjacency segment) ───────────────────────
     private static void TwoHop()
     {
         const int Degree = 100;
-        Console.WriteLine("[BFS 2-hop, AdjacencyBlock]  hubDegree, leaves, ms/traversal");
+        Console.WriteLine("[BFS 2-hop, adjacency segment]  hubDegree, leaves, ms/traversal");
         string dir = BenchTempDir.Create("basic_2hop");
         try
         {
@@ -217,7 +266,7 @@ public static class BasicPerfRunner
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
             var hub = new VertexId(0);
             using var tx = db.BeginTransaction();
-            var adj = tx.AsInternal().AdjacencyBlocks!;
+            var adj = tx.AsInternal().AdjacencySegments!;
             var l1 = new AdjacencyEntry[8192];
             var l2 = new AdjacencyEntry[8192];
 
@@ -258,7 +307,7 @@ public static class BasicPerfRunner
             var hub = new VertexId(0);
             using var tx = db.BeginTransaction();
             var g = tx.G(db.Schema);
-            var adj = tx.AsInternal().AdjacencyBlocks!;
+            var adj = tx.AsInternal().AdjacencySegments!;
             var buf = new AdjacencyEntry[Degree + 16];
 
             // 同一の高速アクセス経路 (adjacency block) を、生 API と traversal DSL で叩いて

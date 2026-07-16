@@ -11,7 +11,7 @@ namespace Quiver.Tests;
 /// エンドツーエンドテスト。
 ///
 /// <para>
-/// VertexStore / EdgeStore / PropertyStore のレコードヘッダーが xmin / xmax を保持し、
+/// VertexStore / EdgeStore / PropertyVersionStore のレコードヘッダーが xmin / xmax を保持し、
 /// トランザクション開始時に <c>MvccContext.Begin</c>、コミット時に
 /// <c>CommittedTxRegistry.MarkCommitted</c> が呼ばれる一連の経路を確認する。
 /// </para>

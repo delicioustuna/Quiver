@@ -31,7 +31,7 @@ Quiver.Query.Physical          ← Volcano 型物理演算子
 Quiver.Transactions            ← TransactionManager / LockManager / RecoveryManager
 Quiver.Storage.Wal             ← Write-Ahead Log（group commit）
 Quiver.Index                   ← B+Tree インデックス
-Quiver.Storage.Records         ← Vertex / Edge / Property / Token ストア
+Quiver.Storage.Records         ← Versioned Vertex / Edge / Nexus / owner-bound Property / Payload / Token ストア
 Quiver.Codec                   ← Span<byte> シリアライザ
 Quiver.Storage                 ← ページ管理 + バッファプール（8KB ページ）
 Quiver.Core                    ← 共通型・例外・抽象インタフェース
@@ -59,6 +59,9 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 | 静止時のファイル | `*.quiver` 単一ファイル |
 | 運用中のファイル | `*.quiver` + `*.quiver-wal` |
 | format family | `QUIVER-SW` family version 1（旧 family からの自動移行なし） |
+| primary property | `PropertyAddress` と 84B record の `PropertyVersionStore`。xmin、xmax、Generation は record 内に置き、public property ID と entity inline property は持たない |
+| primary vector payload | 固定 tenant の `VectorPayloadStore`。generation、dimensions、element type、byte length、CRC32C を検証 |
+| adjacency | `AdjacencySegmentStore` の単一 format。payload なしも `PayloadKind.None` で同形式 |
 | ベクトル catalog | entry 長プレフィクス + per-index HNSW レイアウトパラメタ |
 
 `QuiverDatabaseOptions.InitialFileAllocationBytes` と `MaximumFileGrowthStepBytes` で初期確保量と成長上限を変更できる。
@@ -93,7 +96,7 @@ public readonly record struct VertexId(long Value);
 public readonly record struct EdgeId(long Value);
 public readonly record struct NexusId(long Value);
 public readonly record struct NexusTypeId(int Value);
-public readonly record struct PropertyId(long Value);
+public readonly record struct PropertyAddress(EntityRef Owner, PropertyKeyId Key);
 public readonly record struct LabelId(int Value);
 public readonly record struct TransactionId(long Value);
 // ... など
@@ -101,6 +104,7 @@ public readonly record struct TransactionId(long Value);
 
 `-1` は「無効 / null」を意味する予約値。`VertexId.Value` は generation + sequence をパックした値で、
 スロット再利用後も識別子の往復一貫性を保つ。
+Property は entity ID を持たず、public cursor は version ref を公開しない。
 
 ## ビルド
 
@@ -248,7 +252,8 @@ Nexus関連の論理ストアは次の固定 tenant を使う（変更しない�
 
 | tenant | 用途 |
 |---|---|
-| 18 | nexus heap（header + inline property） |
+| 7 | 欠番（旧 property entity sidecar 用。番号は詰めない） |
+| 18 | nexus heap（header + property version chain head） |
 | 19 | nexus の `ItemPointerMap` |
 | 20 | nexus の MVCC / generation sidecar |
 | 21 | incidence heap（27B fixed-slot、直接アドレス） |
@@ -256,6 +261,8 @@ Nexus関連の論理ストアは次の固定 tenant を使う（変更しない�
 | 23 | nexus type token |
 | 24 | role token |
 | 25 | vertex incidence head（6B sidecar） |
+| 29 | primary vector payload metadata |
+| 30 | primary vector payload blob |
 
 ### テスト
 
@@ -280,16 +287,16 @@ nexus の回帰は `tests/Quiver.Stores.Tests/IncidenceStoreTests.cs`、
 | Vertex作成 + プロパティ設定（同上） | < 2 µs | ~6 µs/op |
 | Edge作成（同上） | — | ~7 µs/op（~140K ops/s） |
 | 単発 durable commit（1 op = 1 commit、単一スレッド） | — | ~1.0 ms/commit（WAL flush 律速） |
-| 1-hop scan（degree 100、AdjacencyBlockStore） | < 0.5 µs | ~0.35 µs（~3.5 ns/edge） |
+| 1-hop scan（degree 100、AdjacencySegmentStore） | < 0.5 µs | ~0.35 µs（~3.5 ns/edge） |
 | 1-hop scan（degree 100、linked-list / 索引なし） | — | ~11 µs（~0.11 µs/edge、MVCC 可視性込み） |
-| BFS 2-hop（ハブ degree 100、leaf 10,000、隣接ブロック） | < 5 ms | ~0.037 ms |
-| 1-hop クエリ（`g.Vertex().Out()`、degree 100、隣接ブロック） | クエリラッパ < 5% | ~4.2 µs/query（~42 ns/edge、生隣接の ~12×） |
+| BFS 2-hop（ハブ degree 100、leaf 10,000、adjacency segment） | < 5 ms | ~0.037 ms |
+| 1-hop クエリ（`g.Vertex().Out()`、degree 100、adjacency segment） | クエリラッパ < 5% | ~4.2 µs/query（~42 ns/edge、生隣接の ~12×） |
 | BulkLoader（10 万 edge） | 通常 TX 比 5× 以上高速 | 通常 TX（batch 1000）比 ~11.8× |
 
 ### 計測の要点
 
 - **読み取りは隣接インデックスの有無で 30× 以上変わる。** `BeginBulkLoad(buildAdjacencyIndex: true)`
-  で隣接ブロックを構築すると 1-hop が ~3.5 ns/edge になり、索引なしの linked-list 経路
+  で adjacency segment を構築すると 1-hop が ~3.5 ns/edge になり、索引なしの linked-list 経路
   （~0.11 µs/edge、MVCC 可視性チェック込み）より degree 100 で ~31× 速い。読み取り主体の
   ワークロードでは隣接インデックスを構築すること。
 - **バッファプールの checksum 検証は disk→frame ロード時のみ行う（pin ごとには再計算しない）。**
@@ -309,7 +316,7 @@ nexus の回帰は `tests/Quiver.Stores.Tests/IncidenceStoreTests.cs`、
 - **クエリ DSL の 1-hop（degree 100）は ~4.2 µs/query（~42 ns/edge、生隣接の ~12×）。**
   プラン構築 + 物理オペレータ生成は ~0.4 µs と僅少。結果行ごとの VertexId 世代スタンプは、スロット
   再利用（vacuum 回収）が無い間は version sidecar 読み取りを省く高速パスで処理する。これで 1-hop
-  クエリは ~62 → ~8 µs/query（~7.7×）に短縮し、さらに checksum-at-load で隣接ブロック pin が安くなり
+  クエリは ~62 → ~8 µs/query（~7.7×）に短縮し、さらに checksum-at-load で adjacency segment の pin が安くなり
   ~8 → ~4.2 µs/query になった。
 
 ### PW-18（複雑/ネストクエリ regression sentinel）

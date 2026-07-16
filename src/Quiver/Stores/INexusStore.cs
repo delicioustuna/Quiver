@@ -69,25 +69,8 @@ internal interface INexusStore
         return false;
     }
 
-    // ===== inline property (header 15 バイト固定領域の後ろに符号化) =====
-
-    /// <summary>inline property を読む。存在しなければ false。</summary>
-    bool TryGetInlineProperty(NexusId nexusId, PropertyKeyId keyId, out PropertyValue value);
-
-    /// <summary>inline property の存在有無を返す。</summary>
-    bool HasInlineProperty(NexusId nexusId, PropertyKeyId keyId);
-
-    /// <summary>
-    /// inline property を set する。inline に収まらない (大きすぎ / 予算超過) 場合は false を返し、
-    /// 呼び出し側が overflow チェーンへ回す。
-    /// </summary>
-    bool SetInlineProperty(NexusId nexusId, PropertyKeyId keyId, in PropertyValue value);
-
-    /// <summary>inline property を除去する。存在しなければ false。</summary>
-    bool RemoveInlineProperty(NexusId nexusId, PropertyKeyId keyId);
-
-    /// <summary>inline property と overflow チェーンを結合して列挙する。</summary>
-    PropertyEnumerator EnumerateProperties(NexusId nexusId, IPropertyStore overflowStore);
+    /// <summary>owner-bound property version chain の列挙子を返す。</summary>
+    PropertyCursor EnumerateProperties(NexusId nexusId, IPropertyStore overflowStore);
 }
 
 /// <summary>
@@ -101,7 +84,7 @@ internal readonly ref struct NexusReadHandle
         bool inUse,
         NexusTypeId type,
         IncidenceId firstIncidenceId,
-        PropertyId firstPropertyId,
+        PropertyVersionRef firstPropertyRef,
         long xmin,
         long xmax)
     {
@@ -109,7 +92,7 @@ internal readonly ref struct NexusReadHandle
         InUse = inUse;
         Type = type;
         FirstIncidenceId = firstIncidenceId;
-        FirstPropertyId = firstPropertyId;
+        FirstPropertyRef = firstPropertyRef;
         Xmin = xmin;
         Xmax = xmax;
     }
@@ -127,7 +110,7 @@ internal readonly ref struct NexusReadHandle
     public IncidenceId FirstIncidenceId { get; }
 
     /// <summary>property overflow chain の先頭 (Invalid = property なし)</summary>
-    public PropertyId FirstPropertyId { get; }
+    public PropertyVersionRef FirstPropertyRef { get; }
 
     /// <summary>record を生成したトランザクション ID</summary>
     public long Xmin { get; }
@@ -167,7 +150,7 @@ internal ref struct NexusWriteHandle
         set => RecordHelpers.WriteInt48(_record[3..], value.Sequence);
     }
 
-    public PropertyId FirstPropertyId
+    public PropertyVersionRef FirstPropertyRef
     {
         readonly get => new(RecordHelpers.ReadInt48(_record[9..]));
         set => RecordHelpers.WriteInt48(_record[9..], value.Sequence);

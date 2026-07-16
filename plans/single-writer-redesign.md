@@ -423,7 +423,7 @@ record type は `BeginWrite`、`PageImage`、`Commit`、`Abort`、`CheckpointBeg
 | Keep | `Storage/SlottedPage.cs`, `VersionedRecordHeap.cs`, `ItemPointerMap.cs` | page arithmetic と heap primitive は新 format header に追従させて再利用する。 |
 | Rewrite | `Stores/VersionedNodeStore.cs`, `VersionedRelationshipStore.cs`, `VersionedHyperedgeStore.cs` | 現行 binary backend が実際に使う primary store。entity header と Generation/xmin/xmax の正本を一つにし、property head は owner-bound store を指す。 |
 | Delete | `Stores/NodeStore.cs`, `RelationshipStore.cs` | `Versioned*Store` と併存する旧 fixed-slot store。新 backend へ配線せず、旧 unit test とともに削除する。 |
-| Rewrite | `Stores/PropertyStore.cs`, `IPropertyStore.cs`, `EntityVersionMeta.cs`, `EntityVersionStore.cs` | PropertyId entity modelを削除し、owner を含む property version と `(xmin,xmax,generation)` entity metadata にする。 |
+| Rewrite | `Stores/PropertyStore.cs`, `IPropertyStore.cs`, `EntityVersionMeta.cs`, `EntityVersionStore.cs` | Wave 3 で PropertyId entity modelを削除し、owner を含む property version にする。既存 SSN が参照する `pstamp` / `sstamp` lane は Wave 3 では一時維持し、Wave 4 の SSN 削除と同時に entity metadata を `(xmin,xmax,generation)` へ縮約する。 |
 | Delete | `Stores/InlinePropertyCodec.cs` | entity payload と overflow property の二重モデルをなくし、property version store に一本化する。 |
 | Keep/Rewrite | `Stores/BlobStore.cs` | 大きな bytes/string payload 用に残し、immutable payload ref と checksum を追加する。 |
 | Keep/Rewrite | `Stores/IncidenceStore.cs`, `NodeIncidenceHeadStore.cs` | incidence は非 entity のまま再利用し、hyperedge header visibility と新 format に追従する。 |
@@ -443,7 +443,7 @@ record type は `BeginWrite`、`PageImage`、`Commit`、`Abort`、`CheckpointBeg
 | Rewrite | `TxNodeStore.cs`, `TxRelationshipStore.cs`, `TxHyperedgeStore.cs`, `TxPropertyStore.cs`, `TxIndexManager.cs` | lock acquire と SSN hook を削除し、snapshot/write-set を明示引数で渡す。 |
 | Keep/Rewrite | `AbortUndoHandler.cs`, `SavepointId.cs`, `Checkpointer.cs`, `AdaptiveCheckpointController.cs` | before-image と savepoint はメモリ内 abort 用に残す。checkpoint は writer lease を取る sharp checkpoint とし、reader を待たず committed dirty page を flush する。 |
 | Delete | `LockManager.cs`, `LockMode.cs`, `DeadlockDetector.cs`, `DeadlockException.cs` | writer が一つで entity lock の待ちグラフが存在しない。 |
-| Delete | `SsnContext.cs`, `SerializabilityException.cs`, `IsolationLevel` | Serializable を提供しない。Wave 4 で SSN、pstamp/sstamp、lock hook を撤去する。旧 public facade は置換先を実装する Wave 6 までの一時配線であり、互換性を保証せず、public transaction cutover と同じ commit で削除する。 |
+| Delete | `SsnContext.cs`, `SerializabilityException.cs`, `IsolationLevel` | Serializable を提供しない。Wave 4 で SSN、pstamp/sstamp、lock hook を撤去し、同じ変更境界で `EntityVersionMeta` / `EntityVersionStore` を `(xmin,xmax,generation)` へ縮約する。旧 public facade は置換先を実装する Wave 6 までの一時配線であり、互換性を保証せず、public transaction cutover と同じ commit で削除する。 |
 | Rewrite | `TransactionUsageLease.cs` | thread id 固定ではなく、同期/async flow を含む同時使用だけを検出する transaction-owned guard にする。 |
 
 ### 7.4 Wal
@@ -644,7 +644,7 @@ Quiver 0.1.0 をローカル RAG バックエンドとして使用した結果�
 
 - owner-bound `PropertyVersionStore` と `PropertyVersionRef` を追加する。
 - public `PropertyId`、IDを露出する `PropertyReadHandle` / `PropertyEnumerator` を削除し、owner-bound `PropertyAddress` と ID を露出しない property entry/cursor API へ置換する。
-- entity metadata を xmin/xmax/Generation に縮める。
+- entity metadata は Generation の正本を一箇所に固定する。既存 SSN が参照する pstamp/sstamp lane は一時維持し、metadata の `(xmin,xmax,generation)` への物理縮約は SSN を削除する Wave 4 で行う。
 - `InlinePropertyCodec` と Property entity chain を削除する。
 - immutable `VectorPayloadStore` と ref validation/orphan scan を実装する。
 - adjacency V1 を削除し、新 `AdjacencySegmentStore` format だけを作る。
@@ -666,6 +666,7 @@ Quiver 0.1.0 をローカル RAG バックエンドとして使用した結果�
 - internal backend/transaction path を `BeginRead` / `BeginWrite` に分ける。既存 public facade と custom backend SPI はこの internal path へ適応させ、public cutover まで新旧 interface を二重公開しない。
 - visibility を active writer 一つ、`CommittedHighWater`、`AbortedGaps`、writer 自己可視性へ縮約する。WriterLease 導入と同じ commit 系列で切り替え、multi-writer manager と one-writer snapshot の中間状態を作らない。
 - LockManager/DeadlockDetector/SSN と全 hook を削除する。旧 `IsolationLevel` と開始 API は Wave 6 の原子的 public cutover までの一時配線として残すが、互換性を保証せず、Serializable 分岐は実行しない。
+- SSN の削除と同じ変更境界で `EntityVersionMeta` / `EntityVersionStore` から pstamp/sstamp lane と更新 API を除去し、entity metadata を `(xmin,xmax,generation)` へ縮約する。
 - read transaction は WAL Begin を書かない。
 - savepoint、abort、dispose、faulted commit の lease 解放を一つの state machine に集約する。
 - ambient `MvccContext` / `WalPageContext` を transaction-owned context へ置換する。
@@ -983,6 +984,14 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 実装中に新しい選択が必要になった場合は、曖昧な TODO を残さず、選択肢、推奨決定、根拠、検証方法を本書の decision log に追記してからコードを変更する。
 
 ## 16. decision log
+
+### 2026-07-16: entity metadata 縮約を SSN 削除境界へ集約
+
+- **背景**：Wave 3 は `EntityVersionMeta` を `(xmin,xmax,generation)` へ縮約する一方、現行 `Transaction` は Wave 4 まで同じ sidecar の `Pstamp` / `Sstamp` と更新 API を SSN 判定に使用する。字義どおり Wave 3 で lane を除去すると、Wave 4 の transaction rewrite より先に production build が成立しなくなる。
+- **選択肢**：(a) SSN と transaction manager rewrite を Wave 3 へ前倒しする、(b) pstamp/sstamp だけを別の一時 sidecar へ移す、(c) Wave 3 は既存 lane を一時維持し、Wave 4 の SSN 削除と同じ変更境界で metadata を縮約する。
+- **決定**：(c)。Wave 3 は PropertyId entity model、inline property、primary payload/store layout の置換に限定する。entity Generation の正本は一箇所へ固定するが、pstamp/sstamp の物理 lane と更新 API は現行 SSN のため一時維持する。Wave 4 で SSN、lock hook、pstamp/sstamp の call site と lane を一括削除し、metadata を `(xmin,xmax,generation)` へ縮約する。
+- **Why not**：(a) は store rewrite の Wave に writer ownership と snapshot manager を混ぜ、承認済みの影響境界を壊す。(b) は次 Wave で即削除する永続形式と同期経路を新設する一時 shim であり、clean break の目的に反する。
+- **検証方法**：Wave 3 は owner-bound property と Generation source の一意性を検証し、既存 SSN test と solution build が維持されることを確認する。Wave 4 は production source の `Pstamp` / `Sstamp` / `UpdatePstamp` / `UpdateSstamp` が 0 件であること、`EntityVersionMeta.Size` と page arithmetic が三 lane へ縮約されること、single-writer/snapshot test が成功することを確認する。
 
 ### 2026-07-15: graph domain vocabulary の clean break
 

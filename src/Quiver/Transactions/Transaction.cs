@@ -23,7 +23,7 @@ internal sealed class Transaction : ITransaction
     private readonly IVertexIncidenceHeadStore _vertexIncidenceHeads;
     private readonly TxPropertyStore _properties;
     private readonly TxIndexManager _indexes;
-    private readonly IAdjacencyBlockStore? _adjStore;
+    private readonly IAdjacencySegmentStore? _adjStore;
     private readonly ICoMembershipBlockStore? _coMembershipStore;
     private readonly IGraphAccessMethods _access;
     // null でない場合、abort / コミット失敗時にキャプチャ済み before-image を
@@ -71,7 +71,7 @@ internal sealed class Transaction : ITransaction
     public IVertexIncidenceHeadStore VertexIncidenceHeads => _vertexIncidenceHeads;
     public IPropertyStore Properties => _properties;
     public IIndexManager Indexes => _indexes;
-    public IAdjacencyBlockStore? AdjacencyBlocks => _adjStore;
+    public IAdjacencySegmentStore? AdjacencySegments => _adjStore;
     public ICoMembershipBlockStore? CoMembershipBlocks
         => _nexuses.HasPendingViewAdds ? null : _coMembershipStore;
     public IGraphAccessMethods Access => _access;
@@ -86,7 +86,7 @@ internal sealed class Transaction : ITransaction
         INexusStore nexusStore, IIncidenceStore incidenceStore,
         IVertexIncidenceHeadStore vertexIncidenceHeadStore,
         IPropertyStore propStore, IIndexManager indexManager,
-        IAdjacencyBlockStore? adjStore = null,
+        IAdjacencySegmentStore? adjStore = null,
         IGraphAccessMethods? access = null,
         AbortUndoHandler? undoHandler = null,
         LockingMode lockingMode = LockingMode.ExclusiveOnly,
@@ -210,6 +210,8 @@ internal sealed class Transaction : ITransaction
             // ここで全 PageImage を WAL へ追記し、その後に Commit レコードを書く。
             // Commit を最後に書くことで、recovery はコミット済みトランザクションの
             // ページイメージのみを replay する。
+            // property HWM/free-head は transaction 内でまとめ、commit の page image 確定前に 1 回だけ書く。
+            _properties.FlushMeta();
             _walWriteSet.FlushPending();
             long lsn = _wal.Append(WalRecordType.Commit, Id, ReadOnlySpan<byte>.Empty);
             _wal.FlushTo(lsn);
@@ -433,6 +435,8 @@ internal sealed class Transaction : ITransaction
         using var usage = EnterUsage();
         if (_state != TransactionState.Active)
             throw new TransactionException("Cannot create savepoint: transaction is not Active.");
+        // partial undo が property HWM/free-head をこの境界へ戻せるよう、親 level の page image として確定する。
+        _properties.FlushMeta();
         int level = _walWriteSet.PushSavepoint();
         long id = ++_nextSavepointId;
         (_savepoints ??= new List<(long, int)>()).Add((id, level));
