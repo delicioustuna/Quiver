@@ -81,7 +81,7 @@
 
 ### C-8. EntityVersionMeta の縮約が存続中の SSN call site を破壊する
 
-> **設計決定済み・実装未対応(2026-07-16、Wave 4 移管)**: Wave 3 は entity Generation の正本を一箇所へ固定するが、現行 SSN が使う pstamp/sstamp lane と更新 API は一時維持する。Wave 4 で SSN と全 call site を削除する同じ変更境界に metadata の `(xmin,xmax,generation)` 縮約を移した。正本 §7.2、§7.3、§9 Wave 3/4、§16 を参照。
+> **対応済み(2026-07-17、設計解決)**: Wave 3 は entity Generation の正本を一箇所へ固定するが、現行 SSN が使う pstamp/sstamp lane と更新 API は一時維持する。Wave 4 で SSN と全 call site を削除する同じ変更境界に metadata の `(xmin,xmax,generation)` 縮約を移した。実装完了は Wave 4 gate で検証し、Critical の着手可否を示す本ラベルとは分離する。正本 §7.2、§7.3、§9 Wave 3/4、§16 と `plans/single-writer-redesign-waves/wave-04.md` を参照。
 
 - **発見日**: 2026-07-16
 - **発見者**: Codex
