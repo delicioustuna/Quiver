@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -18,7 +18,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Quiver.SourceGen\Quiver.SourceGen.csproj" />
-    <!-- 属性型 (Quiver.Api.NodeAttribute 等) は Quiver 本体に含まれる。 -->
+    <!-- 属性型 (Quiver.Api.VertexAttribute 等) は Quiver 本体に含まれる。 -->
     <ProjectReference Include="..\..\src\Quiver\Quiver.csproj" />
   </ItemGroup>
   <ItemGroup>

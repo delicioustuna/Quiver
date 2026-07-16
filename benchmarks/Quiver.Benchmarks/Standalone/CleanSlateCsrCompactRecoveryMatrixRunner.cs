@@ -76,7 +76,7 @@ public static class CleanSlateCsrCompactRecoveryMatrixRunner
         var killAt = Enum.Parse<CompactAdjacencyPhase>(args[1]);
         SeedCompactCase(path);
 
-        using var db = GraphDatabase.Open(path);
+        using var db = QuiverDatabase.Open(path);
         BinaryGraphStorageBackend.CompactAdjacencyPhaseInjector = phase =>
         {
             if (phase == killAt)
@@ -120,38 +120,38 @@ public static class CleanSlateCsrCompactRecoveryMatrixRunner
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         PropertyKeyId scoreKey;
-        using (var db = GraphDatabase.Open(path))
+        using (var db = QuiverDatabase.Open(path))
         {
             scoreKey = db.Schema.GetOrCreatePropertyKey(ScoreKey);
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
             loader.WithPayloadLane(PayloadLaneSpec.ForInt64(scoreKey.Value));
-            loader.AppendNode(new NodeId(0), new LabelId(0));
+            loader.AppendVertex(new VertexId(0), new LabelId(0));
             for (int i = 1; i <= 3; i++)
             {
-                loader.AppendNode(new NodeId(i), new LabelId(1));
-                var rel = new RelationshipId(i - 1);
-                loader.AppendRelationship(rel, new NodeId(0), new NodeId(i), new RelationshipTypeId(0));
-                loader.AppendRelationshipPayload(rel, scoreKey, 100 + i);
+                loader.AppendVertex(new VertexId(i), new LabelId(1));
+                var edge = new EdgeId(i - 1);
+                loader.AppendEdge(edge, new VertexId(0), new VertexId(i), new EdgeTypeId(0));
+                loader.AppendEdgePayload(edge, scoreKey, 100 + i);
             }
 
             loader.Commit();
         }
 
-        using (var db = GraphDatabase.Open(path))
+        using (var db = QuiverDatabase.Open(path))
         using (var tx = db.BeginTransaction())
         {
-            tx.SetProperty(new RelationshipId(0), ScoreKey, PropertyValue.FromInt64(700));
-            var deltaNode = tx.CreateNode("V");
-            var deltaRel = tx.CreateRelationship(new NodeId(0), deltaNode, "LINK");
-            tx.SetProperty(deltaRel, ScoreKey, PropertyValue.FromInt64(900));
-            tx.DeleteRelationship(new RelationshipId(2));
+            tx.SetProperty(new EdgeId(0), ScoreKey, PropertyValue.FromInt64(700));
+            var deltaVertex = tx.CreateVertex("V");
+            var deltaEdge = tx.CreateEdge(new VertexId(0), deltaVertex, "LINK");
+            tx.SetProperty(deltaEdge, ScoreKey, PropertyValue.FromInt64(900));
+            tx.DeleteEdge(new EdgeId(2));
             tx.Commit();
         }
     }
 
     private static bool ValidateRecovered(string path, bool expectAdjacencyView)
     {
-        using var db = GraphDatabase.Open(path);
+        using var db = QuiverDatabase.Open(path);
         using var tx = db.BeginReadOnlyTransaction();
         var adjacency = tx.AsInternal().AdjacencyBlocks;
         if (expectAdjacencyView)
@@ -159,7 +159,7 @@ public static class CleanSlateCsrCompactRecoveryMatrixRunner
             if (adjacency is not IAdjacencyPayloadView)
                 return false;
 
-            var weights = ReadOutgoingWeights(tx, new NodeId(0));
+            var weights = ReadOutgoingWeights(tx, new VertexId(0));
             if (!weights.TryGetValue(1, out long first) || first != 700)
                 return false;
             if (!weights.TryGetValue(2, out long second) || second != 102)
@@ -174,14 +174,14 @@ public static class CleanSlateCsrCompactRecoveryMatrixRunner
             return false;
         }
 
-        var targets = EnumerateOutgoingTargets(tx, new NodeId(0));
+        var targets = EnumerateOutgoingTargets(tx, new VertexId(0));
         return targets.Count == 3 &&
                targets.Contains(1) &&
                targets.Contains(2) &&
                targets.Any(static x => x > 3);
     }
 
-    private static Dictionary<long, long> ReadOutgoingWeights(IGraphTransaction tx, NodeId source)
+    private static Dictionary<long, long> ReadOutgoingWeights(IGraphTransaction tx, VertexId source)
     {
         var result = new Dictionary<long, long>();
         var adjacency = tx.AsInternal().AdjacencyBlocks
@@ -190,17 +190,17 @@ public static class CleanSlateCsrCompactRecoveryMatrixRunner
         using var cursor = adjacency.OpenCursor(source, Direction.Outgoing, null);
         while (cursor.MoveNext())
         {
-            if (!adjacency.IsTombstoned(cursor.Relationship))
+            if (!adjacency.IsTombstoned(cursor.Edge))
                 result[cursor.Neighbor.Sequence] = cursor.WeightRaw;
         }
 
         return result;
     }
 
-    private static List<long> EnumerateOutgoingTargets(IGraphTransaction tx, NodeId source)
+    private static List<long> EnumerateOutgoingTargets(IGraphTransaction tx, VertexId source)
     {
         var result = new List<long>();
-        var cursor = tx.EnumerateRelationships(source, Direction.Outgoing);
+        var cursor = tx.EnumerateEdges(source, Direction.Outgoing);
         while (cursor.MoveNext())
             result.Add(cursor.Current.Target.Sequence);
         return result;

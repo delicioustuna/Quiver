@@ -110,9 +110,6 @@ internal sealed class InMemoryPagedFile : IPagedFile
     }
 
     public PageWriteHandle PinForWrite(PageId pageId)
-        => PinForWrite(pageId, WalJournalMode.Full);
-
-    public PageWriteHandle PinForWrite(PageId pageId, WalJournalMode mode)
     {
         byte[] page;
         ReaderWriterLockSlim pageLock;
@@ -129,9 +126,7 @@ internal sealed class InMemoryPagedFile : IPagedFile
         {
             if (_walFileKind is byte fileKind)
             {
-                var effectiveMode = WalPageContext.SetJournalMode(fileKind, pageId.Value, mode);
-                if (effectiveMode == WalJournalMode.Full)
-                    WalPageContext.CaptureBeforeImage(fileKind, pageId.Value, page);
+                WalWriteSetContext.CaptureBeforeImage(fileKind, pageId.Value, page);
             }
 
             return new PageWriteHandle(this, pageId, page);
@@ -154,7 +149,7 @@ internal sealed class InMemoryPagedFile : IPagedFile
             var page = _pages[(int)pageId.Value];
             PageHeader.UpdateLsnAndChecksum(page, lsn);
             if (_walFileKind is byte fileKind)
-                WalPageContext.LogPageImage(fileKind, pageId.Value, page);
+                WalWriteSetContext.LogPageImage(fileKind, pageId.Value, page);
         }
         finally
         {
@@ -172,9 +167,6 @@ internal sealed class InMemoryPagedFile : IPagedFile
         _walFileKind = fileKind;
         _wal = wal;
     }
-
-    public void EnableWalFlushOnly(IWriteAheadLog wal)
-        => _wal = wal;
 
     public void WritePageForRecovery(PageId pageId, ReadOnlySpan<byte> pageBytes)
     {

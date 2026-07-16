@@ -9,8 +9,8 @@ namespace Quiver.Tests;
 /// <summary>
 /// インデックスの孤立エントリ回収における <see cref="IDiagnosticsApi.CheckIndexConsistency"/> /
 /// <see cref="IDiagnosticsApi.RepairIndexes"/> の挙動を確認する。
-/// 孤立エントリは <c>tx.IndexInsert</c> したノードを <c>tx.DeleteNode</c> で削除して作る。
-/// DeleteNode はインデックスエントリを自動削除しないため、
+/// 孤立エントリは <c>tx.IndexInsert</c> したVertexを <c>tx.DeleteVertex</c> で削除して作る。
+/// DeleteVertex はインデックスエントリを自動削除しないため、
 /// リカバリー中の不完全書き込みを使わずに同じ状態を再現できる。
 /// </summary>
 public sealed class IndexOrphanGcTests : IDisposable
@@ -30,14 +30,14 @@ public sealed class IndexOrphanGcTests : IDisposable
     [Fact]
     public void HealthyDatabase_reports_zero_orphans_and_Repair_is_noop()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
 
         using (var tx = db.BeginTransaction())
         {
             for (int i = 0; i < 10; i++)
             {
-                var n = tx.CreateNode("Person");
+                var n = tx.CreateVertex("Person");
                 tx.IndexInsert("idx_name", $"alice-{i}", n);
             }
             tx.Commit();
@@ -58,57 +58,57 @@ public sealed class IndexOrphanGcTests : IDisposable
     }
 
     [Fact]
-    public void DeleteNode_creates_orphan_detected_by_CheckIndexConsistency()
+    public void DeleteVertex_creates_orphan_detected_by_CheckIndexConsistency()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
 
-        NodeId aliveOnly, doomed;
+        VertexId aliveOnly, doomed;
         using (var tx = db.BeginTransaction())
         {
-            aliveOnly = tx.CreateNode("Person");
+            aliveOnly = tx.CreateVertex("Person");
             tx.IndexInsert("idx_name", "alive", aliveOnly);
-            doomed = tx.CreateNode("Person");
+            doomed = tx.CreateVertex("Person");
             tx.IndexInsert("idx_name", "doomed", doomed);
             tx.Commit();
         }
 
         using (var tx = db.BeginTransaction())
         {
-            tx.DeleteNode(doomed);
+            tx.DeleteVertex(doomed);
             tx.Commit();
         }
 
-        // DeleteNode は索引エントリを自動削除しない → orphan 1 件発生
+        // DeleteVertex は索引エントリを自動削除しない → orphan 1 件発生
         var report = db.Diagnostics.CheckIndexConsistency();
         report.EntryCount.Should().Be(2);
         report.OrphanCount.Should().Be(1);
         report.Orphans.Should().ContainSingle()
-            .Which.EntityId.Should().Be(doomed.Sequence); // ARCH-5b: OrphanIndexEntry.EntityId は unpacked seq
+            .Which.EntityId.Should().Be(doomed.Sequence); // OrphanIndexEntry.EntityId は unpacked seq
         report.Orphans[0].IndexName.Should().Be("idx_name");
     }
 
     [Fact]
     public void RepairIndexes_Apply_removes_orphans_then_CheckIndexConsistency_clean()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
 
-        NodeId alive, doomed1, doomed2;
+        VertexId alive, doomed1, doomed2;
         using (var tx = db.BeginTransaction())
         {
-            alive = tx.CreateNode("Person");
+            alive = tx.CreateVertex("Person");
             tx.IndexInsert("idx_name", "alive", alive);
-            doomed1 = tx.CreateNode("Person");
+            doomed1 = tx.CreateVertex("Person");
             tx.IndexInsert("idx_name", "doomed-1", doomed1);
-            doomed2 = tx.CreateNode("Person");
+            doomed2 = tx.CreateVertex("Person");
             tx.IndexInsert("idx_name", "doomed-2", doomed2);
             tx.Commit();
         }
         using (var tx = db.BeginTransaction())
         {
-            tx.DeleteNode(doomed1);
-            tx.DeleteNode(doomed2);
+            tx.DeleteVertex(doomed1);
+            tx.DeleteVertex(doomed2);
             tx.Commit();
         }
 
@@ -120,7 +120,7 @@ public sealed class IndexOrphanGcTests : IDisposable
         after.OrphanCount.Should().Be(0);
         after.EntryCount.Should().Be(1);
 
-        // 生きているノードは依然として索引から引ける
+        // 生きているVertexは依然として索引から引ける
         using var rtx = db.BeginReadOnlyTransaction();
         var cur = rtx.SeekIndex("idx_name", PropertyValue.FromString("alive"));
         cur.MoveNext().Should().BeTrue();
@@ -137,19 +137,19 @@ public sealed class IndexOrphanGcTests : IDisposable
     [Fact]
     public void RepairIndexes_DryRun_reports_orphans_but_does_not_delete()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
 
-        NodeId doomed;
+        VertexId doomed;
         using (var tx = db.BeginTransaction())
         {
-            doomed = tx.CreateNode("Person");
+            doomed = tx.CreateVertex("Person");
             tx.IndexInsert("idx_name", "doomed", doomed);
             tx.Commit();
         }
         using (var tx = db.BeginTransaction())
         {
-            tx.DeleteNode(doomed);
+            tx.DeleteVertex(doomed);
             tx.Commit();
         }
 
@@ -165,25 +165,25 @@ public sealed class IndexOrphanGcTests : IDisposable
     [Fact]
     public void RepairIndexes_handles_multiple_indexes()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
         db.Schema.CreateIndex("idx_age", "Person", "age", IndexKind.Int64Equality);
 
-        NodeId alive, doomed;
+        VertexId alive, doomed;
         using (var tx = db.BeginTransaction())
         {
-            alive = tx.CreateNode("Person");
+            alive = tx.CreateVertex("Person");
             tx.IndexInsert("idx_name", "alive", alive);
             tx.IndexInsert("idx_age", 30L, alive);
 
-            doomed = tx.CreateNode("Person");
+            doomed = tx.CreateVertex("Person");
             tx.IndexInsert("idx_name", "doomed", doomed);
             tx.IndexInsert("idx_age", 99L, doomed);
             tx.Commit();
         }
         using (var tx = db.BeginTransaction())
         {
-            tx.DeleteNode(doomed);
+            tx.DeleteVertex(doomed);
             tx.Commit();
         }
 
@@ -200,32 +200,32 @@ public sealed class IndexOrphanGcTests : IDisposable
     [Fact]
     public void AutoRepairOrphansOnRecovery_cleans_orphan_on_reopen()
     {
-        // orphan を作る (commit 後の DeleteNode)
-        NodeId alive;
-        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
+        // orphan を作る (commit 後の DeleteVertex)
+        VertexId alive;
+        using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
-            NodeId doomed;
+            VertexId doomed;
             using (var tx = db.BeginTransaction())
             {
-                alive = tx.CreateNode("Person");
+                alive = tx.CreateVertex("Person");
                 tx.IndexInsert("idx_name", "alive", alive);
-                doomed = tx.CreateNode("Person");
+                doomed = tx.CreateVertex("Person");
                 tx.IndexInsert("idx_name", "doomed", doomed);
                 tx.Commit();
             }
             using (var tx = db.BeginTransaction())
             {
-                tx.DeleteNode(doomed);
+                tx.DeleteVertex(doomed);
                 tx.Commit();
             }
             db.Diagnostics.CheckIndexConsistency().OrphanCount.Should().Be(1);
         }
 
         // AutoRepairOrphansOnRecovery=true で再 open → orphan が自動除去される
-        using (var db = GraphDatabase.Open(
+        using (var db = QuiverDatabase.Open(
             System.IO.Path.Combine(_dir, "graph.quiver"),
-            new GraphDatabaseOptions { AutoRepairOrphansOnRecovery = true }))
+            new QuiverDatabaseOptions { AutoRepairOrphansOnRecovery = true }))
         {
             db.Diagnostics.CheckIndexConsistency().OrphanCount.Should().Be(0);
 
@@ -242,25 +242,25 @@ public sealed class IndexOrphanGcTests : IDisposable
     [Fact]
     public void AutoRepairOrphansOnRecovery_default_false_keeps_orphan()
     {
-        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
+        using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
-            NodeId doomed;
+            VertexId doomed;
             using (var tx = db.BeginTransaction())
             {
-                doomed = tx.CreateNode("Person");
+                doomed = tx.CreateVertex("Person");
                 tx.IndexInsert("idx_name", "doomed", doomed);
                 tx.Commit();
             }
             using (var tx = db.BeginTransaction())
             {
-                tx.DeleteNode(doomed);
+                tx.DeleteVertex(doomed);
                 tx.Commit();
             }
         }
 
         // 既定 (option 未指定) では orphan は残る
-        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
+        using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             db.Diagnostics.CheckIndexConsistency().OrphanCount.Should().Be(1);
         }
@@ -269,23 +269,23 @@ public sealed class IndexOrphanGcTests : IDisposable
     [Fact]
     public void CheckIndexConsistency_scales_to_large_database()
     {
-        // 完了条件: 100k node + 5 index で CheckIndexConsistency が 5 秒以内。
+        // 完了条件: 100k vertex + 5 index で CheckIndexConsistency が 5 秒以内。
         // BulkLoader は索引には書かないので、Tx 経由で投入する (テスト時間を抑えるため
         // 件数を 10k に削減 — perf 性質は同じで 1 桁スケールで観測する)。
-        const int nodeCount = 10_000;
+        const int vertexCount = 10_000;
         const int indexCount = 5;
 
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         for (int i = 0; i < indexCount; i++)
             db.Schema.CreateIndex($"idx_{i}", "Doc", $"key_{i}", IndexKind.Int64Equality);
 
         using (var tx = db.BeginTransaction())
         {
-            for (int n = 0; n < nodeCount; n++)
+            for (int n = 0; n < vertexCount; n++)
             {
-                var node = tx.CreateNode("Doc");
+                var vertex = tx.CreateVertex("Doc");
                 for (int i = 0; i < indexCount; i++)
-                    tx.IndexInsert($"idx_{i}", (long)n, node);
+                    tx.IndexInsert($"idx_{i}", (long)n, vertex);
             }
             tx.Commit();
         }
@@ -295,7 +295,7 @@ public sealed class IndexOrphanGcTests : IDisposable
         sw.Stop();
 
         report.IndexCount.Should().Be(indexCount);
-        report.EntryCount.Should().Be(nodeCount * (long)indexCount);
+        report.EntryCount.Should().Be(vertexCount * (long)indexCount);
         report.OrphanCount.Should().Be(0);
 
         // 10k × 5 index = 50k entries で 5 秒以内 (100k × 5 = 500k なら 50 秒以内に相当)。

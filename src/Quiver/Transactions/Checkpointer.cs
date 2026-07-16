@@ -73,9 +73,7 @@ internal sealed class Checkpointer(
         _pageManager.FlushAll();
         PhaseInjector?.Invoke(CheckpointPhase.AfterDataFlush);
 
-        // 3.: 索引ファイルも永続化。後続の WAL truncate で IndexMutation レコードが
-        //   捨てられても、ここで .idx に書き出された内容が durable なので復旧時の起点として
-        //   使える。
+        // 3. 索引ページも永続化。索引は同じ page-WAL と単一コンテナに含まれる。
         _indexManager?.FlushAll();
         PhaseInjector?.Invoke(CheckpointPhase.AfterIndexFlush);
 

@@ -7,7 +7,7 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// FT-34: SSN (Serializable) を SI に対して上乗せしたときの per-tx オーバヘッドを測る。
+/// SSN (Serializable) を SI に対して上乗せしたときの per-tx オーバヘッドを測る。
 ///
 /// <para>read-heavy (1000 read/tx) と write-heavy (100 write/tx) を SI / SSN で比較する。
 /// いずれも単一スレッド・無競合 (commit は必ず成功) なので、計測されるのは SSN の
@@ -19,25 +19,25 @@ namespace Quiver.Benchmarks;
 [MemoryDiagnoser]
 public class SsnOverheadBenchmark
 {
-    private const int NodeCount = 1_000;
+    private const int VertexCount = 1_000;
     private const int ReadsPerTx = 1_000;
     private const int WritesPerTx = 100;
 
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private NodeId[] _ids = null!;
+    private VertexId[] _ids = null!;
     private readonly Random _rng = new(42);
 
     [GlobalSetup]
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("ssn_overhead");
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
-        _ids = new NodeId[NodeCount];
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+        _ids = new VertexId[VertexCount];
         using var tx = _db.BeginTransaction();
-        for (int i = 0; i < NodeCount; i++)
+        for (int i = 0; i < VertexCount; i++)
         {
-            _ids[i] = tx.CreateNode("N");
+            _ids[i] = tx.CreateVertex("N");
             tx.SetProperty(_ids[i], "v", PropertyValue.FromInt64(i));
         }
         tx.Commit();
@@ -55,7 +55,7 @@ public class SsnOverheadBenchmark
         using var tx = _db.BeginTransaction(level);
         long sum = 0;
         for (int i = 0; i < ReadsPerTx; i++)
-            sum += tx.GetProperty(_ids[_rng.Next(NodeCount)], "v").Int64Value;
+            sum += tx.GetProperty(_ids[_rng.Next(VertexCount)], "v").Int64Value;
         tx.Commit();
         return sum;
     }
@@ -64,7 +64,7 @@ public class SsnOverheadBenchmark
     {
         using var tx = _db.BeginTransaction(level);
         for (int i = 0; i < WritesPerTx; i++)
-            tx.SetProperty(_ids[_rng.Next(NodeCount)], "v", PropertyValue.FromInt64(i));
+            tx.SetProperty(_ids[_rng.Next(VertexCount)], "v", PropertyValue.FromInt64(i));
         tx.Commit();
     }
 

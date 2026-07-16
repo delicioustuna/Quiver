@@ -6,30 +6,30 @@ namespace Quiver.Logical;
 /// </summary>
 public enum LogicalMutationKind : byte
 {
-    /// <summary>ノード作成。</summary>
-    CreateNode = 1,
-    /// <summary>ノード削除。</summary>
-    DeleteNode = 2,
-    /// <summary>リレーションシップ作成。</summary>
-    CreateRelationship = 3,
-    /// <summary>リレーションシップ削除。</summary>
-    DeleteRelationship = 4,
-    /// <summary>ノードプロパティの設定。</summary>
-    SetNodeProperty = 5,
-    /// <summary>リレーションシッププロパティの設定。</summary>
-    SetRelationshipProperty = 6,
-    /// <summary>ノードプロパティの削除。</summary>
-    RemoveNodeProperty = 7,
-    /// <summary>ハイパーエッジ作成。</summary>
-    CreateHyperedge = 8,
-    /// <summary>ハイパーエッジ削除。</summary>
-    DeleteHyperedge = 9,
-    /// <summary>ハイパーエッジプロパティの設定 (Single cardinality)。</summary>
-    SetHyperedgeProperty = 10,
-    /// <summary>ハイパーエッジプロパティの削除 (Single cardinality)。</summary>
-    RemoveHyperedgeProperty = 11,
-    /// <summary>ハイパーエッジのマルチバリュープロパティへの値追加 (Set cardinality)。</summary>
-    AddHyperedgePropertyValue = 12,
-    /// <summary>ハイパーエッジのマルチバリュープロパティからの値除去 (Set cardinality)。</summary>
-    RemoveHyperedgePropertyValue = 13,
+    /// <summary>Vertex作成。</summary>
+    CreateVertex = 1,
+    /// <summary>Vertex削除。</summary>
+    DeleteVertex = 2,
+    /// <summary>Edge作成。</summary>
+    CreateEdge = 3,
+    /// <summary>Edge削除。</summary>
+    DeleteEdge = 4,
+    /// <summary>Vertexプロパティの設定。</summary>
+    SetVertexProperty = 5,
+    /// <summary>Edgeプロパティの設定。</summary>
+    SetEdgeProperty = 6,
+    /// <summary>Vertexプロパティの削除。</summary>
+    RemoveVertexProperty = 7,
+    /// <summary>Nexus作成。</summary>
+    CreateNexus = 8,
+    /// <summary>Nexus削除。</summary>
+    DeleteNexus = 9,
+    /// <summary>Nexusプロパティの設定 (Single cardinality)。</summary>
+    SetNexusProperty = 10,
+    /// <summary>Nexusプロパティの削除 (Single cardinality)。</summary>
+    RemoveNexusProperty = 11,
+    /// <summary>Nexusのマルチバリュープロパティへの値追加 (Set cardinality)。</summary>
+    AddNexusPropertyValue = 12,
+    /// <summary>Nexusのマルチバリュープロパティからの値除去 (Set cardinality)。</summary>
+    RemoveNexusPropertyValue = 13,
 }

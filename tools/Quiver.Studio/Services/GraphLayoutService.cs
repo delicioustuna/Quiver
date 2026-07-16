@@ -9,19 +9,19 @@ public sealed class GraphLayoutService
     private const double IdealEdgeLength = 100.0;
     private const double ComponentGap = 60.0;
 
-    public void Layout(IReadOnlyList<VisualNode> nodes, IReadOnlyList<VisualEdge> edges, int iterations = 300)
+    public void Layout(IReadOnlyList<VisualVertex> vertices, IReadOnlyList<VisualEdge> edges, int iterations = 300)
     {
-        if (nodes.Count <= 1)
+        if (vertices.Count <= 1)
         {
-            if (nodes.Count == 1) { nodes[0].X = 0; nodes[0].Y = 0; }
+            if (vertices.Count == 1) { vertices[0].X = 0; vertices[0].Y = 0; }
             return;
         }
 
-        var components = FindComponents(nodes, edges);
+        var components = FindComponents(vertices, edges);
         if (components.Count == 1)
         {
-            LayoutComponent(nodes, edges, iterations);
-            CenterGraph(nodes);
+            LayoutComponent(vertices, edges, iterations);
+            CenterGraph(vertices);
             return;
         }
 
@@ -33,27 +33,27 @@ public sealed class GraphLayoutService
         }
 
         PackComponents(components);
-        CenterGraph(nodes);
+        CenterGraph(vertices);
     }
 
-    private static List<List<VisualNode>> FindComponents(IReadOnlyList<VisualNode> nodes, IReadOnlyList<VisualEdge> edges)
+    private static List<List<VisualVertex>> FindComponents(IReadOnlyList<VisualVertex> vertices, IReadOnlyList<VisualEdge> edges)
     {
-        var adj = new Dictionary<VisualNode, List<VisualNode>>();
-        foreach (var n in nodes) adj[n] = [];
+        var adj = new Dictionary<VisualVertex, List<VisualVertex>>();
+        foreach (var n in vertices) adj[n] = [];
         foreach (var e in edges)
         {
             adj[e.Source].Add(e.Target);
             adj[e.Target].Add(e.Source);
         }
 
-        var visited = new HashSet<VisualNode>();
-        var components = new List<List<VisualNode>>();
+        var visited = new HashSet<VisualVertex>();
+        var components = new List<List<VisualVertex>>();
 
-        foreach (var n in nodes)
+        foreach (var n in vertices)
         {
             if (!visited.Add(n)) continue;
-            var comp = new List<VisualNode>();
-            var queue = new Queue<VisualNode>();
+            var comp = new List<VisualVertex>();
+            var queue = new Queue<VisualVertex>();
             queue.Enqueue(n);
             while (queue.Count > 0)
             {
@@ -72,7 +72,7 @@ public sealed class GraphLayoutService
         return components;
     }
 
-    private static void PackComponents(List<List<VisualNode>> components)
+    private static void PackComponents(List<List<VisualVertex>> components)
     {
         var cursorX = 0.0;
 
@@ -86,20 +86,20 @@ public sealed class GraphLayoutService
         }
     }
 
-    private void LayoutComponent(IReadOnlyList<VisualNode> nodes, IReadOnlyList<VisualEdge> edges, int iterations)
+    private void LayoutComponent(IReadOnlyList<VisualVertex> vertices, IReadOnlyList<VisualEdge> edges, int iterations)
     {
-        if (nodes.Count <= 1)
+        if (vertices.Count <= 1)
         {
-            if (nodes.Count == 1) { nodes[0].X = 0; nodes[0].Y = 0; }
+            if (vertices.Count == 1) { vertices[0].X = 0; vertices[0].Y = 0; }
             return;
         }
 
         var k = IdealEdgeLength;
         var k2 = k * k;
 
-        InitializePositions(nodes, k);
+        InitializePositions(vertices, k);
 
-        var useBarnesHut = nodes.Count > BarnesHutThreshold;
+        var useBarnesHut = vertices.Count > BarnesHutThreshold;
         var tMax = k;
 
         for (var iter = 0; iter < iterations; iter++)
@@ -107,38 +107,38 @@ public sealed class GraphLayoutService
             var t = tMax * (1.0 - (double)iter / iterations);
             if (t < 0.01) break;
 
-            var disp = new double[nodes.Count * 2];
+            var disp = new double[vertices.Count * 2];
 
             if (useBarnesHut)
-                ApplyRepulsionBarnesHut(nodes, disp, k2);
+                ApplyRepulsionBarnesHut(vertices, disp, k2);
             else
-                ApplyRepulsionNaive(nodes, disp, k2);
+                ApplyRepulsionNaive(vertices, disp, k2);
 
-            ApplyAttraction(nodes, edges, disp, k);
-            ApplyDisplacements(nodes, disp, t);
+            ApplyAttraction(vertices, edges, disp, k);
+            ApplyDisplacements(vertices, disp, t);
         }
     }
 
-    private static void InitializePositions(IReadOnlyList<VisualNode> nodes, double k)
+    private static void InitializePositions(IReadOnlyList<VisualVertex> vertices, double k)
     {
         var rng = new Random(42);
-        var spread = k * Math.Sqrt(nodes.Count);
-        foreach (var node in nodes)
+        var spread = k * Math.Sqrt(vertices.Count);
+        foreach (var vertex in vertices)
         {
-            if (node.IsPinned) continue;
-            node.X = (rng.NextDouble() - 0.5) * spread;
-            node.Y = (rng.NextDouble() - 0.5) * spread;
+            if (vertex.IsPinned) continue;
+            vertex.X = (rng.NextDouble() - 0.5) * spread;
+            vertex.Y = (rng.NextDouble() - 0.5) * spread;
         }
     }
 
-    private static void ApplyRepulsionNaive(IReadOnlyList<VisualNode> nodes, double[] disp, double k2)
+    private static void ApplyRepulsionNaive(IReadOnlyList<VisualVertex> vertices, double[] disp, double k2)
     {
-        for (var i = 0; i < nodes.Count; i++)
+        for (var i = 0; i < vertices.Count; i++)
         {
-            for (var j = i + 1; j < nodes.Count; j++)
+            for (var j = i + 1; j < vertices.Count; j++)
             {
-                var dx = nodes[i].X - nodes[j].X;
-                var dy = nodes[i].Y - nodes[j].Y;
+                var dx = vertices[i].X - vertices[j].X;
+                var dy = vertices[i].Y - vertices[j].Y;
                 var dist = Math.Sqrt(dx * dx + dy * dy);
                 if (dist < 0.01) { dx = 0.1; dy = 0.1; dist = Math.Sqrt(0.02); }
 
@@ -155,11 +155,11 @@ public sealed class GraphLayoutService
     }
 
     private static void ApplyAttraction(
-        IReadOnlyList<VisualNode> nodes, IReadOnlyList<VisualEdge> edges, double[] disp, double k)
+        IReadOnlyList<VisualVertex> vertices, IReadOnlyList<VisualEdge> edges, double[] disp, double k)
     {
-        var indexOf = new Dictionary<VisualNode, int>(nodes.Count);
-        for (var i = 0; i < nodes.Count; i++)
-            indexOf[nodes[i]] = i;
+        var indexOf = new Dictionary<VisualVertex, int>(vertices.Count);
+        for (var i = 0; i < vertices.Count; i++)
+            indexOf[vertices[i]] = i;
 
         foreach (var edge in edges)
         {
@@ -183,11 +183,11 @@ public sealed class GraphLayoutService
         }
     }
 
-    private static void ApplyDisplacements(IReadOnlyList<VisualNode> nodes, double[] disp, double temperature)
+    private static void ApplyDisplacements(IReadOnlyList<VisualVertex> vertices, double[] disp, double temperature)
     {
-        for (var i = 0; i < nodes.Count; i++)
+        for (var i = 0; i < vertices.Count; i++)
         {
-            if (nodes[i].IsPinned) continue;
+            if (vertices[i].IsPinned) continue;
 
             var dx = disp[i * 2];
             var dy = disp[i * 2 + 1];
@@ -195,27 +195,27 @@ public sealed class GraphLayoutService
             if (magnitude < 0.01) continue;
 
             var capped = Math.Min(magnitude, temperature);
-            nodes[i].X += dx / magnitude * capped;
-            nodes[i].Y += dy / magnitude * capped;
+            vertices[i].X += dx / magnitude * capped;
+            vertices[i].Y += dy / magnitude * capped;
         }
     }
 
-    private static void CenterGraph(IReadOnlyList<VisualNode> nodes)
+    private static void CenterGraph(IReadOnlyList<VisualVertex> vertices)
     {
         var cx = 0.0;
         var cy = 0.0;
-        foreach (var n in nodes) { cx += n.X; cy += n.Y; }
-        cx /= nodes.Count;
-        cy /= nodes.Count;
-        foreach (var n in nodes) { n.X -= cx; n.Y -= cy; }
+        foreach (var n in vertices) { cx += n.X; cy += n.Y; }
+        cx /= vertices.Count;
+        cy /= vertices.Count;
+        foreach (var n in vertices) { n.X -= cx; n.Y -= cy; }
     }
 
-    private static void ApplyRepulsionBarnesHut(IReadOnlyList<VisualNode> nodes, double[] disp, double k2)
+    private static void ApplyRepulsionBarnesHut(IReadOnlyList<VisualVertex> vertices, double[] disp, double k2)
     {
-        var tree = QuadTree.Build(nodes);
-        for (var i = 0; i < nodes.Count; i++)
+        var tree = QuadTree.Build(vertices);
+        for (var i = 0; i < vertices.Count; i++)
         {
-            var (fx, fy) = tree.ComputeForce(nodes[i].X, nodes[i].Y, BarnesHutTheta, k2);
+            var (fx, fy) = tree.ComputeForce(vertices[i].X, vertices[i].Y, BarnesHutTheta, k2);
             disp[i * 2] += fx;
             disp[i * 2 + 1] += fy;
         }
@@ -228,13 +228,13 @@ public sealed class GraphLayoutService
         private QuadTree?[]? _children;
         private bool _isLeaf;
 
-        public static QuadTree Build(IReadOnlyList<VisualNode> nodes)
+        public static QuadTree Build(IReadOnlyList<VisualVertex> vertices)
         {
             var minX = double.MaxValue;
             var minY = double.MaxValue;
             var maxX = double.MinValue;
             var maxY = double.MinValue;
-            foreach (var n in nodes)
+            foreach (var n in vertices)
             {
                 if (n.X < minX) minX = n.X;
                 if (n.Y < minY) minY = n.Y;
@@ -248,7 +248,7 @@ public sealed class GraphLayoutService
                 _minX = minX - pad, _minY = minY - pad,
                 _maxX = maxX + pad, _maxY = maxY + pad
             };
-            foreach (var n in nodes)
+            foreach (var n in vertices)
                 root.Insert(n.X, n.Y);
             return root;
         }

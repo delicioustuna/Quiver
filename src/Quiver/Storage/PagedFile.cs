@@ -1,4 +1,4 @@
-﻿using System.Buffers;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.MemoryMappedFiles;
 using Quiver.Core;
@@ -16,7 +16,8 @@ internal sealed class PagedFile : IPagedFile
     public const int PageSizeConst = 8192;
     public const int BodySize = PageSizeConst - PageHeader.Size;
     private const int DefaultPoolCapacity = 256;
-    private const long GrowthBytes = 64 * 1024 * 1024; // 64 MB 単位で拡張
+    internal const long DefaultInitialFileAllocationBytes = 1L * 1024 * 1024;
+    internal const long DefaultMaximumFileGrowthStepBytes = 64L * 1024 * 1024;
 
     // メタページ (page 0) の body 内オフセット
     private const int MetaOffsetFirstFree = 0;  // int64: Free List 先頭 PageId (-1 = 空)
@@ -25,6 +26,8 @@ internal sealed class PagedFile : IPagedFile
 
     private readonly string _path;
     private readonly int _poolCapacity;
+    private readonly long _initialFileAllocationBytes;
+    private readonly long _maximumFileGrowthStepBytes;
     // _poolLock は buffer pool 操作と MMF アクセス全体を保護する
     private readonly object _poolLock = new();
 
@@ -48,10 +51,21 @@ internal sealed class PagedFile : IPagedFile
     public long PageCount => Volatile.Read(ref _logicalPageCount);
     public string Path => _path;
 
-    public PagedFile(string path, int poolCapacity = DefaultPoolCapacity)
+    public PagedFile(
+        string path,
+        int poolCapacity = DefaultPoolCapacity,
+        long initialFileAllocationBytes = DefaultInitialFileAllocationBytes,
+        long maximumFileGrowthStepBytes = DefaultMaximumFileGrowthStepBytes)
     {
+        if (poolCapacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(poolCapacity));
+
         _path = path;
         _poolCapacity = poolCapacity;
+        _initialFileAllocationBytes = NormalizeAllocationOption(
+            initialFileAllocationBytes, nameof(initialFileAllocationBytes));
+        _maximumFileGrowthStepBytes = NormalizeAllocationOption(
+            maximumFileGrowthStepBytes, nameof(maximumFileGrowthStepBytes));
         _frames = new PoolFrame[poolCapacity];
         _pageToFrame = new Dictionary<PageId, int>(poolCapacity);
         for (int i = 0; i < poolCapacity; i++)
@@ -184,9 +198,7 @@ internal sealed class PagedFile : IPagedFile
         return new PageReadHandle(this, pageId, ReadFrameSpan(frame));
     }
 
-    public PageWriteHandle PinForWrite(PageId pageId) => PinForWrite(pageId, WalJournalMode.Full);
-
-    public PageWriteHandle PinForWrite(PageId pageId, WalJournalMode mode)
+    public PageWriteHandle PinForWrite(PageId pageId)
     {
         int frame = GetOrLoadFrame(pageId);
         // ハンドル生存中、他スレッドからの読み書きを排他する。
@@ -198,13 +210,10 @@ internal sealed class PagedFile : IPagedFile
             // この書き込みトランザクション内で本ページを初めて pin する時点の内容を
             // before-image として捕捉する。caller がまだ変更していないこの瞬間が唯一の機会。
             // frame は pin 済みなので evict されず、span は安定している。
-            // journaling モードを記録し、有効モードが Full のときのみ CLR を捕捉する
-            //   (RedoOnly/Suppressed の FT ページは before-image を出さない)。
+            // before-image は in-process abort/savepoint 用に transaction-owned write set へ捕捉する。
             if (_walFileKind is byte fileKind)
             {
-                var eff = WalPageContext.SetJournalMode(fileKind, pageId.Value, mode);
-                if (eff == WalJournalMode.Full)
-                    WalPageContext.CaptureBeforeImage(fileKind, pageId.Value, raw);
+                WalWriteSetContext.CaptureBeforeImage(fileKind, pageId.Value, raw);
             }
             return new PageWriteHandle(this, pageId, raw);
         }
@@ -247,7 +256,7 @@ internal sealed class PagedFile : IPagedFile
 
             // WAL-first: クラッシュリカバリでコミット済み書き込みを再生できるよう、ページイメージをログに残す。
             if (_walFileKind is byte fileKind)
-                WalPageContext.LogPageImage(fileKind, pageId.Value, _frames[frame].Buffer.AsSpan(0, PageSizeConst));
+                WalWriteSetContext.LogPageImage(fileKind, pageId.Value, _frames[frame].Buffer.AsSpan(0, PageSizeConst));
 
             _frames[frame].IsDirty = true;
             Interlocked.Decrement(ref _frames[frame].PinCount);
@@ -260,18 +269,6 @@ internal sealed class PagedFile : IPagedFile
     public void EnableWalLogging(byte fileKind, IWriteAheadLog wal)
     {
         _walFileKind = fileKind;
-        _wal = wal;
-    }
-
-    /// <summary>
-    /// WAL 参照のみ配線する (fileKind は付けない)。物理 PageImage / before-image
-    /// は出さないが、buffer-pool eviction やフラッシュ前に WAL を write-ahead でフラッシュする
-    /// ので、ページが OS-MMF に到達する前に対応する論理ログ (IndexMutation 等) が durable に
-    /// なっていることを保証できる。B+Tree インデックスファイル用 — 物理ロギングのコスト
-    /// (split 1 回で 3 ページ ×8KB) を回避しつつデータファイルと同じ write-ahead 順序を効かせる。
-    /// </summary>
-    public void EnableWalFlushOnly(IWriteAheadLog wal)
-    {
         _wal = wal;
     }
 
@@ -456,10 +453,8 @@ internal sealed class PagedFile : IPagedFile
         {
             if (f.IsDirty)
             {
-                // steal ポリシー下では未コミットトランザクションのダーティページが
-                // ここでデータファイルへ漏れうる。クラッシュ時に巻き戻せるよう、ページを
-                // データファイルへ書く前にその before-image (CLR) が WAL に durable で
-                // あることを保証する (write-ahead 順序)。
+                // データページより先に、現在 WAL に出力済みのレコードを durable にする。
+                // Single Writer 統合後の no-steal 境界は再設計の後続 wave で完成させる。
                 FlushWalBeforeDataWrite();
                 MmfWritePage(f.PageId, f.Buffer);
             }
@@ -535,22 +530,19 @@ internal sealed class PagedFile : IPagedFile
     // MMF マップ前(コンストラクタ内)に使用。
     private void EnsureRawFileSize(long pageCount)
     {
-        long required = pageCount * PageSizeConst;
+        long required = checked(pageCount * PageSizeConst);
         if (_fileStream.Length < required)
-        {
-            long grown = ((required + GrowthBytes - 1) / GrowthBytes) * GrowthBytes;
-            _fileStream.SetLength(grown);
-        }
+            _fileStream.SetLength(ComputeGrowthTarget(_fileStream.Length, required));
     }
 
     // _poolLock 保持下で呼び出す。ファイル拡張時に MMF を再マップする。
     private void EnsureFileSizeAndRemapLocked(long pageCount)
     {
-        long required = pageCount * PageSizeConst;
+        long required = checked(pageCount * PageSizeConst);
         if (_fileStream.Length < required)
         {
             FlushDirtyFramesLocked();
-            long grown = ((required + GrowthBytes - 1) / GrowthBytes) * GrowthBytes;
+            long grown = ComputeGrowthTarget(_fileStream.Length, required);
             _viewAccessor?.Flush();
             _viewAccessor?.Dispose();
             _mmf?.Dispose();
@@ -559,6 +551,30 @@ internal sealed class PagedFile : IPagedFile
             _fileStream.SetLength(grown);
             MapFile();
         }
+    }
+
+    private long ComputeGrowthTarget(long currentLength, long requiredLength)
+    {
+        long increment = Math.Min(
+            Math.Max(currentLength, _initialFileAllocationBytes),
+            _maximumFileGrowthStepBytes);
+        long adaptiveTarget = checked(currentLength + increment);
+        return AlignToPage(Math.Max(requiredLength, adaptiveTarget));
+    }
+
+    private static long NormalizeAllocationOption(long value, string parameterName)
+    {
+        if (value < PageSizeConst)
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                $"Allocation size must be at least one {PageSizeConst}-byte page.");
+        return AlignToPage(value);
+    }
+
+    private static long AlignToPage(long value)
+    {
+        long remainder = value % PageSizeConst;
+        return remainder == 0 ? value : checked(value + PageSizeConst - remainder);
     }
 
     private void MapFile()

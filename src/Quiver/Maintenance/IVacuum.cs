@@ -4,7 +4,7 @@ namespace Quiver.Maintenance;
 /// 削除済みエンティティの物理回収・free list 圧縮・ファイル truncate を担う。
 /// </summary>
 /// <remarks>
-/// MVP 実装はノードストアのみを対象とする。リレーションシップ / プロパティ / B+Tree 索引の
+/// MVP 実装はVertexストアのみを対象とする。Edge / プロパティ / B+Tree 索引の
 /// 物理回収はチェーン整合性 (双方向リンク / blob 解放 / 索引 merge) の維持が必要なため
 /// 後続のステップで拡張予定。前提として MVCC の <c>xmax</c> スタンプと
 /// visibility horizon が必要。

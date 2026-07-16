@@ -7,7 +7,7 @@ namespace Quiver.Storage;
 /// <summary>
 /// 単一物理ファイル <c>*.quiver</c> 上に複数の「テナント」(= 各ストアの論理ページ空間) を
 /// 同居させるコンテナ。物理層は既存 <see cref="PagedFile"/> をそのまま 1 個だけ再利用し
-/// (Clock buffer pool / MMF / WAL logging / ARIES recovery / truncate)、その上に
+/// (Clock buffer pool / MMF / page-WAL / commit-winner recovery / truncate)、その上に
 /// <b>カタログ (テナント記述子)</b> と各テナントの <b>論理→物理 page table</b> を載せる。
 ///
 /// レイアウト:
@@ -82,8 +82,16 @@ internal sealed class SingleFileContainer : IDisposable
         }
     }
 
-    public SingleFileContainer(string path, int poolCapacityPages = 256)
-        : this(new PagedFile(path, poolCapacityPages))
+    public SingleFileContainer(
+        string path,
+        int poolCapacityPages = 256,
+        long initialFileAllocationBytes = PagedFile.DefaultInitialFileAllocationBytes,
+        long maximumFileGrowthStepBytes = PagedFile.DefaultMaximumFileGrowthStepBytes)
+        : this(new PagedFile(
+            path,
+            poolCapacityPages,
+            initialFileAllocationBytes,
+            maximumFileGrowthStepBytes))
     {
     }
 
@@ -173,13 +181,13 @@ internal sealed class SingleFileContainer : IDisposable
     /// option B: 全テナント (= 物理ページ全体) を単一の <paramref name="dataFileKind"/> で WAL
     /// ロギング対象にする。物理ページ ID は全テナント横断で一意なので、WAL / recovery は純物理
     /// ページ単位で動く。recovery 時は fileRegistry に <c>{ dataFileKind: container.Physical }</c>
-    /// を渡せば PageImage / CLR が物理ページへ透過適用される。
+    /// を渡せば PageImage redo が物理ページへ適用される。
     /// </summary>
     internal void EnableWalLogging(byte dataFileKind, IWriteAheadLog wal)
         => _physical.EnableWalLogging(dataFileKind, wal);
 
     /// <summary>
-    /// recovery / abort (CLR undo) が物理 page1 (カタログ root) と page-table ページを書き戻した
+    /// recovery / abort の before-image 復元が物理 page1 (カタログ root) と page-table ページを書き戻した
     /// 後に、in-memory のテナント記述子 (CatalogEntry) と各 open テナントの page table を
     /// ディスクから再同期する。記述子は <b>in-place 更新</b>するため、open 済みテナントが保持する
     /// CatalogEntry 参照はそのまま有効。
@@ -196,7 +204,7 @@ internal sealed class SingleFileContainer : IDisposable
             }
             else
             {
-                // abort (CLR undo) 後: open 済みテナントの CatalogEntry 参照を保つため in-place 更新。
+                // abort の before-image 復元後は open 済みテナントの CatalogEntry 参照を保つため in-place 更新。
                 LoadCatalog(inPlace: true);
                 foreach (var tenant in _tenants.Values)
                     tenant.ReloadPageTable();

@@ -66,9 +66,9 @@ public sealed class VectorHnswTests : IDisposable
         var rng = new Random(12345);
         var corpus = new List<float[]>(N);
 
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
             Dim, DistanceMetric.Cosine, "test", null));
 
         using (var tx = db.BeginTransaction())
@@ -77,8 +77,8 @@ public sealed class VectorHnswTests : IDisposable
             {
                 var v = RandomVec(rng, Dim);
                 corpus.Add(v);
-                var n = tx.CreateNode("Doc");
-                db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, v);
+                var n = tx.CreateVertex("Doc");
+                db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -104,24 +104,24 @@ public sealed class VectorHnswTests : IDisposable
         var rng = new Random(777);
         var vectors = new List<float[]>();
 
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
         {
             db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-                IndexName, EntityKind.Node, db.Schema.GetOrCreatePropertyKey("t"),
+                IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
                 Dim, DistanceMetric.Cosine, "test", null));
             using var tx = db.BeginTransaction();
             for (int i = 0; i < N; i++)
             {
-                var n = tx.CreateNode("Doc");
+                var n = tx.CreateVertex("Doc");
                 var v = RandomVec(rng, Dim);
                 vectors.Add(v);
-                db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, v);
+                db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
             }
             tx.Commit();
         }
 
         // reopen 後、HNSW グラフがページから再構築され KNN が同じ結果を返す。
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
         {
             var q = vectors[42];
             var top = TopK(db.Vectors.KnnSearch(IndexName, q, K), K);
@@ -134,24 +134,24 @@ public sealed class VectorHnswTests : IDisposable
     public void Hnsw_insert_rolls_back_on_abort()
     {
         const int Dim = 8;
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
             Dim, DistanceMetric.Dot, "test", null));
 
         // committed な 1 件。
         using (var tx = db.BeginTransaction())
         {
-            var n = tx.CreateNode("Doc");
-            db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, new float[] { 1, 0, 0, 0, 0, 0, 0, 0 });
+            var n = tx.CreateVertex("Doc");
+            db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, new float[] { 1, 0, 0, 0, 0, 0, 0, 0 });
             tx.Commit();
         }
 
         // abort する tx で別ベクトルを挿入 → 巻き戻る。
         using (var tx = db.BeginTransaction())
         {
-            var n = tx.CreateNode("Doc");
-            tx.SetVector(EntityKind.Node, n.Value, IndexName, new float[] { 0, 1, 0, 0, 0, 0, 0, 0 });
+            var n = tx.CreateVertex("Doc");
+            tx.SetVector(EntityKind.Vertex, n.Value, IndexName, new float[] { 0, 1, 0, 0, 0, 0, 0, 0 });
             tx.Rollback();
         }
 

@@ -1,15 +1,15 @@
-﻿namespace Quiver.Storage.Wal;
+namespace Quiver.Storage.Wal;
 
 internal enum WalFileKind : byte
 {
-    Nodes         = 1,
-    Relationships = 2,
+    Vertices         = 1,
+    Edges = 2,
     Properties    = 3,
     BlobData      = 4,
-    /// <summary>NodeStore に対応する MVCC+SSN メタデータ sidecar。</summary>
-    NodeVersionMeta = 5,
-    /// <summary>RelationshipStore に対応する MVCC+SSN メタデータ sidecar。</summary>
-    RelationshipVersionMeta = 6,
+    /// <summary>VertexStore に対応する MVCC+SSN メタデータ sidecar。</summary>
+    VertexVersionMeta = 5,
+    /// <summary>EdgeStore に対応する MVCC+SSN メタデータ sidecar。</summary>
+    EdgeVersionMeta = 6,
     /// <summary>PropertyStore に対応する MVCC+SSN メタデータ sidecar。</summary>
     PropertyVersionMeta = 7,
 }

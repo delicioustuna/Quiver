@@ -76,7 +76,7 @@ async Task RunRagDemo(string dir)
     // ── 3. DB + RagStore 作成 ──────────────────────────────────────────
     Console.Write("  DB 作成... ");
     Directory.CreateDirectory(dir);
-    using var db = GraphDatabase.Open(Path.Combine(dir, "rag.quiver"));
+    using var db = QuiverDatabase.Open(Path.Combine(dir, "rag.quiver"));
     var store = new RagStore(db, new RagStoreOptions
     {
         EmbeddingDimensions = dims,

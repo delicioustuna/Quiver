@@ -14,8 +14,8 @@ internal sealed class CoMembershipOperator : IPhysicalOperator
 
     private readonly IPhysicalOperator _source;
     private readonly IPhysicalOperator _fallback;
-    private readonly int _sourceNodeColumn;
-    private readonly HyperedgeTypeId? _typeFilter;
+    private readonly int _sourceVertexColumn;
+    private readonly NexusTypeId? _typeFilter;
     private readonly RoleId _originRole;
     private readonly RoleId _memberRole;
     private readonly int[]? _firstCarry;
@@ -27,14 +27,14 @@ internal sealed class CoMembershipOperator : IPhysicalOperator
     private CoMembershipEntry[] _entries = [];
     private int _entryCount;
     private int _entryIndex;
-    private NodeId _originNode;
+    private VertexId _originVertex;
     private OperatorStatistics _statistics;
 
     internal CoMembershipOperator(
         IPhysicalOperator source,
         IPhysicalOperator fallback,
-        int sourceNodeColumn,
-        HyperedgeTypeId? typeFilter,
+        int sourceVertexColumn,
+        NexusTypeId? typeFilter,
         RoleId originRole,
         RoleId memberRole,
         int[]? firstCarry,
@@ -42,7 +42,7 @@ internal sealed class CoMembershipOperator : IPhysicalOperator
     {
         _source = source;
         _fallback = fallback;
-        _sourceNodeColumn = sourceNodeColumn;
+        _sourceVertexColumn = sourceVertexColumn;
         _typeFilter = typeFilter;
         _originRole = originRole;
         _memberRole = memberRole;
@@ -73,7 +73,7 @@ internal sealed class CoMembershipOperator : IPhysicalOperator
         _entries = [];
         _entryCount = 0;
         _entryIndex = 0;
-        _originNode = NodeId.Invalid;
+        _originVertex = VertexId.Invalid;
     }
 
     public bool MoveNext()
@@ -86,8 +86,8 @@ internal sealed class CoMembershipOperator : IPhysicalOperator
             while (_entryIndex < _entryCount)
             {
                 CoMembershipEntry entry = _entries[_entryIndex++];
-                using var header = _tx!.Hyperedges.Read(entry.HyperedgeId);
-                if (!header.InUse || header.Id != entry.HyperedgeId)
+                using var header = _tx!.Nexuses.Read(entry.NexusId);
+                if (!header.InUse || header.Id != entry.NexusId)
                     continue;
                 if (_typeFilter.HasValue && header.Type != _typeFilter.Value)
                     continue;
@@ -102,9 +102,9 @@ internal sealed class CoMembershipOperator : IPhysicalOperator
             if (!_source.MoveNext())
                 return false;
 
-            _originNode = new NodeId(_source.Current[_sourceNodeColumn].LongValue);
+            _originVertex = new VertexId(_source.Current[_sourceVertexColumn].LongValue);
             _entries = _view.GetEntries(
-                _originNode, _originRole, _memberRole, out _entryCount);
+                _originVertex, _originRole, _memberRole, out _entryCount);
             _entryIndex = 0;
         }
     }
@@ -113,13 +113,13 @@ internal sealed class CoMembershipOperator : IPhysicalOperator
     {
         _buffer[0] = new TupleSlot
         {
-            Type = TupleSlotType.HyperedgeId,
-            LongValue = entry.HyperedgeId.Value,
+            Type = TupleSlotType.NexusId,
+            LongValue = entry.NexusId.Value,
         };
         _buffer[1] = new TupleSlot
         {
-            Type = TupleSlotType.NodeId,
-            LongValue = entry.MemberNodeId.Value,
+            Type = TupleSlotType.VertexId,
+            LongValue = entry.MemberVertexId.Value,
         };
 
         if (_finalCarry is null)
@@ -134,16 +134,16 @@ internal sealed class CoMembershipOperator : IPhysicalOperator
         {
             return new TupleSlot
             {
-                Type = TupleSlotType.NodeId,
-                LongValue = _originNode.Value,
+                Type = TupleSlotType.VertexId,
+                LongValue = _originVertex.Value,
             };
         }
         if (column == 1)
         {
             return new TupleSlot
             {
-                Type = TupleSlotType.HyperedgeId,
-                LongValue = entry.HyperedgeId.Value,
+                Type = TupleSlotType.NexusId,
+                LongValue = entry.NexusId.Value,
             };
         }
 

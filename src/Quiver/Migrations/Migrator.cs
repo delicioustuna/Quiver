@@ -1,14 +1,14 @@
 namespace Quiver.Migrations;
 
 /// <summary>
-/// <see cref="GraphDatabase.MigrateAsync"/> から呼ばれるオーケストレータ。
+/// <see cref="QuiverDatabase.MigrateAsync"/> から呼ばれるオーケストレータ。
 /// 未適用マイグレーションを <see cref="IMigration.Version"/> 昇順 → <see cref="IMigration.Id"/>
 /// Ordinal 昇順で並べ、それぞれ独立した tx で適用する。
 /// </summary>
 internal static class Migrator
 {
     public static async Task<MigrationResult> RunAsync(
-        GraphDatabase db,
+        QuiverDatabase db,
         string dataDirectory,
         IEnumerable<IMigration> migrations,
         CancellationToken cancellationToken)
@@ -40,7 +40,7 @@ internal static class Migrator
             }
 
             // 各マイグレーションを独立した tx で apply。失敗時は tx 全体をロールバック。
-            // - データミューテーション (CreateNode/SetProperty/...) は WAL 経由で tx 境界に乗る。
+            // - データミューテーション (CreateVertex/SetProperty/...) は WAL 経由で tx 境界に乗る。
             // - スキーマミューテーション (rename / index add) は MigrationContext の OnRolledBack
                 // フックで論理的に巻き戻される。
             // - History.Append は OnCommitted フックに乗せ、commit が WAL に durable に落ちた
@@ -85,7 +85,7 @@ internal static class Migrator
 }
 
 /// <summary>
-/// <see cref="GraphDatabase.MigrateAsync"/> の結果。新規適用 / スキップの内訳を返す。
+/// <see cref="QuiverDatabase.MigrateAsync"/> の結果。新規適用 / スキップの内訳を返す。
 /// </summary>
 /// <param name="Applied">この呼び出しで新規適用されたマイグレーション。</param>
 /// <param name="Skipped">既に <see cref="MigrationHistory"/> にあったため skip した ID。</param>

@@ -171,7 +171,7 @@ public ref struct PropertyEnumerator
     private int _inlinePos;
 
     internal PropertyEnumerator(IPropertyStore store, PropertyId firstId)
-        : this(default, store, firstId, InlinePropertyCodec.NodeFixedSize) { }
+        : this(default, store, firstId, InlinePropertyCodec.VertexFixedSize) { }
 
     internal PropertyEnumerator(ReadOnlySpan<byte> inlinePayload, IPropertyStore store, PropertyId firstId, int fixedSize)
     {

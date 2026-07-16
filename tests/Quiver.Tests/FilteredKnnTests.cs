@@ -17,16 +17,16 @@ public sealed class FilteredKnnTests : IDisposable
     private const string IndexName = "doc-embed";
     private const int Dim = 4;
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public FilteredKnnTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_vec6_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         var keyId = _db.Schema.GetOrCreatePropertyKey("title");
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, keyId, Dim,
+            IndexName, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "test", null));
     }
 
@@ -48,20 +48,20 @@ public sealed class FilteredKnnTests : IDisposable
         {
             for (int i = 0; i < 5; i++)
             {
-                var d = tx.CreateNode("Doc");
+                var d = tx.CreateVertex("Doc");
                 docIds[i] = d.Value;
                 var v = new float[Dim];
                 v[i % Dim] = 1f;
-                _db.Vectors.SetVector(EntityKind.Node, d.Value, IndexName, v);
+                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
             }
             for (int i = 0; i < 5; i++)
             {
-                var a = tx.CreateNode("Article");
+                var a = tx.CreateVertex("Article");
                 articleIds[i] = a.Value;
                 var v = new float[Dim];
                 // Articles get an exact match on the query, Docs get less.
                 v[0] = 1f;
-                _db.Vectors.SetVector(EntityKind.Node, a.Value, IndexName, v);
+                _db.Vectors.SetVector(EntityKind.Vertex, a.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -70,7 +70,7 @@ public sealed class FilteredKnnTests : IDisposable
         var g = rtx.G(_db.Schema);
 
         var query = new float[] { 1f, 0f, 0f, 0f };
-        var topDocs = g.Nodes().HasLabel("Doc")
+        var topDocs = g.Vertices().HasLabel("Doc")
             .FilterByKnn(IndexName, query, k: 2)
             .ToList();
 
@@ -86,17 +86,17 @@ public sealed class FilteredKnnTests : IDisposable
     {
         using (var tx = _db.BeginTransaction())
         {
-            var n = tx.CreateNode("Doc");
-            _db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, new float[] { 1, 0, 0, 0 });
+            var n = tx.CreateVertex("Doc");
+            _db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, new float[] { 1, 0, 0, 0 });
             tx.Commit();
         }
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        // No nodes carry the label "Missing" → candidate set is empty →
+        // No vertices carry the label "Missing" → candidate set is empty →
         // KnnSearchFiltered must short-circuit, not throw or return Docs.
-        var result = g.Nodes().HasLabel("Missing")
+        var result = g.Vertices().HasLabel("Missing")
             .FilterByKnn(IndexName, new float[] { 1, 0, 0, 0 }, k: 3)
             .ToList();
 
@@ -106,7 +106,7 @@ public sealed class FilteredKnnTests : IDisposable
     [Fact]
     public void FilterByKnn_recovers_matches_via_oversample()
     {
-        // 50 nodes; only 2 of them carry label "Doc" and they happen to be
+        // 50 vertices; only 2 of them carry label "Doc" and they happen to be
         // the lowest-scoring vectors against the query. The oversample loop
         // must enlarge candidateK until it surfaces them.
         var docIds = new List<long>();
@@ -115,13 +115,13 @@ public sealed class FilteredKnnTests : IDisposable
             for (int i = 0; i < 50; i++)
             {
                 bool isDoc = (i == 48 || i == 49);
-                var n = tx.CreateNode(isDoc ? "Doc" : "Other");
+                var n = tx.CreateVertex(isDoc ? "Doc" : "Other");
                 if (isDoc) docIds.Add(n.Value);
                 var v = new float[Dim];
                 // Score-against-query (1,0,0,0): higher index → lower score.
                 v[0] = (50 - i) / 50f;
                 v[1] = i / 50f;
-                _db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, v);
+                _db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -129,7 +129,7 @@ public sealed class FilteredKnnTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var result = g.Nodes().HasLabel("Doc")
+        var result = g.Vertices().HasLabel("Doc")
             .FilterByKnn(IndexName, new float[] { 1, 0, 0, 0 }, k: 2)
             .ToList();
 

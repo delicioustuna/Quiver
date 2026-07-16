@@ -1,4 +1,4 @@
-﻿using Xunit;
+using Xunit;
 using Quiver.Storage;
 using Quiver.Core;
 using FluentAssertions;
@@ -30,9 +30,9 @@ public class StorageTests : IDisposable
     }
 
     [Fact]
-    public void BodySize_Is8160()
+    public void BodySize_Is8152()
     {
-        PagedFile.BodySize.Should().Be(8160);
+        PagedFile.BodySize.Should().Be(8152);
     }
 
     // ------------------------------------------------------------------
@@ -46,6 +46,66 @@ public class StorageTests : IDisposable
         f.PageCount.Should().Be(1); // メタページのみ
     }
 
+    [Fact]
+    public void NewFile_starts_at_one_mib_and_doubles_without_losing_data()
+    {
+        string path = TmpFile();
+        PageId markerPage;
+
+        using (var file = new PagedFile(path))
+        {
+            new FileInfo(path).Length.Should().Be(1L * 1024 * 1024);
+            markerPage = file.AllocatePage(PageKind.VertexRecord);
+            using (var page = file.PinForWrite(markerPage))
+                page.Data[0] = 0xA5;
+
+            while (new FileInfo(path).Length == 1L * 1024 * 1024)
+                file.AllocatePage(PageKind.VertexRecord);
+
+            new FileInfo(path).Length.Should().Be(2L * 1024 * 1024);
+        }
+
+        using (var reopened = new PagedFile(path))
+        {
+            using (var page = reopened.PinForRead(markerPage))
+                page.Data[0].Should().Be(0xA5);
+
+            while (new FileInfo(path).Length == 2L * 1024 * 1024)
+                reopened.AllocatePage(PageKind.VertexRecord);
+
+            new FileInfo(path).Length.Should().Be(4L * 1024 * 1024);
+            (new FileInfo(path).Length % PagedFile.PageSizeConst).Should().Be(0);
+            using var pageAfterGrowth = reopened.PinForRead(markerPage);
+            pageAfterGrowth.Data[0].Should().Be(0xA5);
+        }
+    }
+
+    [Fact]
+    public void Configured_growth_step_is_aligned_and_capped()
+    {
+        string path = TmpFile();
+        using var file = new PagedFile(
+            path,
+            initialFileAllocationBytes: 2L * PagedFile.PageSizeConst,
+            maximumFileGrowthStepBytes: 4L * PagedFile.PageSizeConst);
+
+        var observedLengths = new List<long> { new FileInfo(path).Length };
+        for (int i = 0; i < 12; i++)
+        {
+            file.AllocatePage(PageKind.VertexRecord);
+            long length = new FileInfo(path).Length;
+            if (length != observedLengths[^1]) observedLengths.Add(length);
+        }
+
+        observedLengths.Should().Equal(
+            2L * PagedFile.PageSizeConst,
+            4L * PagedFile.PageSizeConst,
+            8L * PagedFile.PageSizeConst,
+            12L * PagedFile.PageSizeConst,
+            16L * PagedFile.PageSizeConst);
+        observedLengths.Should().OnlyContain(length => length % PagedFile.PageSizeConst == 0);
+    }
+
     // ------------------------------------------------------------------
     // ページ割り当て
     // ------------------------------------------------------------------
@@ -55,8 +115,8 @@ public class StorageTests : IDisposable
     {
         using var f = new PagedFile(TmpFile());
 
-        var p1 = f.AllocatePage(PageKind.NodeRecord);
-        var p2 = f.AllocatePage(PageKind.NodeRecord);
+        var p1 = f.AllocatePage(PageKind.VertexRecord);
+        var p2 = f.AllocatePage(PageKind.VertexRecord);
 
         p1.Value.Should().Be(1);
         p2.Value.Should().Be(2);
@@ -67,7 +127,7 @@ public class StorageTests : IDisposable
     public void AllocatePage_PageIsReadable_AfterWrite()
     {
         using var f = new PagedFile(TmpFile());
-        var pageId = f.AllocatePage(PageKind.NodeRecord);
+        var pageId = f.AllocatePage(PageKind.VertexRecord);
 
         // 書き込み
         using (var wh = f.PinForWrite(pageId))
@@ -94,7 +154,7 @@ public class StorageTests : IDisposable
 
         using (var f = new PagedFile(path))
         {
-            var pageId = f.AllocatePage(PageKind.NodeRecord);
+            var pageId = f.AllocatePage(PageKind.VertexRecord);
 
             using var wh = f.PinForWrite(pageId);
             wh.Data[0] = 0x42;
@@ -120,12 +180,12 @@ public class StorageTests : IDisposable
     {
         using var f = new PagedFile(TmpFile());
 
-        var p1 = f.AllocatePage(PageKind.NodeRecord);
-        var p2 = f.AllocatePage(PageKind.NodeRecord);
+        var p1 = f.AllocatePage(PageKind.VertexRecord);
+        var p2 = f.AllocatePage(PageKind.VertexRecord);
 
         f.FreePage(p1); // p1 を Free List へ
 
-        var p3 = f.AllocatePage(PageKind.NodeRecord); // p1 が再利用されるはず
+        var p3 = f.AllocatePage(PageKind.VertexRecord); // p1 が再利用されるはず
         p3.Should().Be(p1);
     }
 
@@ -134,16 +194,16 @@ public class StorageTests : IDisposable
     {
         using var f = new PagedFile(TmpFile());
 
-        var p1 = f.AllocatePage(PageKind.NodeRecord);
-        var p2 = f.AllocatePage(PageKind.NodeRecord);
-        var p3 = f.AllocatePage(PageKind.NodeRecord);
+        var p1 = f.AllocatePage(PageKind.VertexRecord);
+        var p2 = f.AllocatePage(PageKind.VertexRecord);
+        var p3 = f.AllocatePage(PageKind.VertexRecord);
 
         f.FreePage(p1);
         f.FreePage(p2); // スタック: p2 → p1
 
         // LIFO 順で再利用
-        var r1 = f.AllocatePage(PageKind.NodeRecord);
-        var r2 = f.AllocatePage(PageKind.NodeRecord);
+        var r1 = f.AllocatePage(PageKind.VertexRecord);
+        var r2 = f.AllocatePage(PageKind.VertexRecord);
         r1.Should().Be(p2);
         r2.Should().Be(p1);
     }
@@ -152,11 +212,11 @@ public class StorageTests : IDisposable
     public void FreeList_DoesNotGrowPageCount()
     {
         using var f = new PagedFile(TmpFile());
-        var p1 = f.AllocatePage(PageKind.NodeRecord);
+        var p1 = f.AllocatePage(PageKind.VertexRecord);
         long countBefore = f.PageCount;
 
         f.FreePage(p1);
-        var p2 = f.AllocatePage(PageKind.NodeRecord);
+        var p2 = f.AllocatePage(PageKind.VertexRecord);
 
         f.PageCount.Should().Be(countBefore); // 再利用なので増えない
     }
@@ -166,13 +226,13 @@ public class StorageTests : IDisposable
     // ------------------------------------------------------------------
 
     [Fact]
-    public void CorruptMagic_ThrowsCorruptionException()
+    public void CorruptMagic_ThrowsStorageFormatMismatchException()
     {
         string path = TmpFile();
         PageId pageId;
 
         using (var f = new PagedFile(path))
-            pageId = f.AllocatePage(PageKind.NodeRecord);
+            pageId = f.AllocatePage(PageKind.VertexRecord);
 
         // ファイルを直接破壊 (Magic 先頭バイトを 0x00 にする)
         using (var fs = new FileStream(path, FileMode.Open, FileAccess.ReadWrite))
@@ -188,11 +248,11 @@ public class StorageTests : IDisposable
         {
             using var handle = f2.PinForRead(pageId);
         }
-        catch (CorruptionException)
+        catch (StorageFormatMismatchException)
         {
             threw = true;
         }
-        threw.Should().BeTrue("corrupt magic should raise CorruptionException");
+        threw.Should().BeTrue("corrupt magic should reject the storage family");
     }
 
     // ------------------------------------------------------------------
@@ -203,7 +263,7 @@ public class StorageTests : IDisposable
     public void PageManager_OpenOrCreate_ReturnsPagedFile()
     {
         using var mgr = new PageManager();
-        using var pf = mgr.OpenOrCreate(TmpFile(), PageKind.NodeRecord);
+        using var pf = mgr.OpenOrCreate(TmpFile(), PageKind.VertexRecord);
 
         pf.PageSize.Should().Be(8192);
     }
@@ -219,7 +279,7 @@ public class StorageTests : IDisposable
         using (var f = new PagedFile(path))
         {
             for (int i = 0; i < 10; i++)
-                f.AllocatePage(PageKind.NodeRecord);
+                f.AllocatePage(PageKind.VertexRecord);
             f.PageCount.Should().Be(11); // meta + 10
             f.Flush();
         }
@@ -244,8 +304,8 @@ public class StorageTests : IDisposable
     public void Truncate_IsNoOp_WhenNewCount_NotLessThanCurrent()
     {
         using var f = new PagedFile(TmpFile());
-        f.AllocatePage(PageKind.NodeRecord);
-        f.AllocatePage(PageKind.NodeRecord);
+        f.AllocatePage(PageKind.VertexRecord);
+        f.AllocatePage(PageKind.VertexRecord);
         f.PageCount.Should().Be(3);
 
         f.Truncate(3); // 同じ
@@ -267,14 +327,14 @@ public class StorageTests : IDisposable
     {
         using var f = new PagedFile(TmpFile());
         for (int i = 0; i < 5; i++)
-            f.AllocatePage(PageKind.NodeRecord);
+            f.AllocatePage(PageKind.VertexRecord);
         f.PageCount.Should().Be(6);
 
         f.Truncate(2);
         f.PageCount.Should().Be(2);
 
         // 縮減後にも新規ページが確保できて読める。
-        var newId = f.AllocatePage(PageKind.NodeRecord);
+        var newId = f.AllocatePage(PageKind.VertexRecord);
         newId.Value.Should().Be(2);
         using (var wh = f.PinForWrite(newId))
         {

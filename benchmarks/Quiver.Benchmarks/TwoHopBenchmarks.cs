@@ -1,4 +1,4 @@
-﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Attributes;
 using Quiver;
 using Quiver.Core;
 using Quiver.Storage.Records;
@@ -16,39 +16,39 @@ public class TwoHopBenchmarks
     [Params(10, 50, 100)]
     public int Degree { get; set; }
 
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private NodeId _hub;
+    private VertexId _hub;
     private IGraphTransaction _readTx = null!;
 
     [GlobalSetup]
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("2hop");
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
 
         const int BatchSize = 2_000;
         int totalMid = Degree;
 
         using (var tx = _db.BeginTransaction())
         {
-            _hub = tx.CreateNode("Hub");
+            _hub = tx.CreateVertex("Hub");
             tx.Commit();
         }
 
-        // hub → mid nodes (可能なら1バッチで)
-        var midNodes = new NodeId[totalMid];
+        // hub → mid vertices (可能なら1バッチで)
+        var midVertices = new VertexId[totalMid];
         using (var tx = _db.BeginTransaction())
         {
             for (int i = 0; i < totalMid; i++)
             {
-                midNodes[i] = tx.CreateNode("Mid");
-                tx.CreateRelationship(_hub, midNodes[i], "EDGE");
+                midVertices[i] = tx.CreateVertex("Mid");
+                tx.CreateEdge(_hub, midVertices[i], "EDGE");
             }
             tx.Commit();
         }
 
-        // mid → leaf nodes (バッチ処理)
+        // mid → leaf vertices (バッチ処理)
         int leafIdx = 0;
         int totalLeaf = totalMid * Degree;
         while (leafIdx < totalLeaf)
@@ -58,8 +58,8 @@ public class TwoHopBenchmarks
             while (leafIdx < end)
             {
                 int midIdx = leafIdx / Degree;
-                var leaf = tx.CreateNode("Leaf");
-                tx.CreateRelationship(midNodes[midIdx], leaf, "EDGE");
+                var leaf = tx.CreateVertex("Leaf");
+                tx.CreateEdge(midVertices[midIdx], leaf, "EDGE");
                 leafIdx++;
             }
             tx.Commit();
@@ -81,11 +81,11 @@ public class TwoHopBenchmarks
     public int TwoHopTraversal()
     {
         int count = 0;
-        var en1 = _readTx.EnumerateRelationships(_hub, Direction.Outgoing);
+        var en1 = _readTx.EnumerateEdges(_hub, Direction.Outgoing);
         while (en1.MoveNext())
         {
             var mid = en1.Current.Target;
-            var en2 = _readTx.EnumerateRelationships(mid, Direction.Outgoing);
+            var en2 = _readTx.EnumerateEdges(mid, Direction.Outgoing);
             while (en2.MoveNext()) count++;
         }
         return count;

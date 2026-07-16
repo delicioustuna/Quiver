@@ -107,7 +107,7 @@ public static class QuiverTelemetry
         Meter.CreateHistogram<double>(
             name: "quiver.lock.wait.duration",
             unit: "ms",
-            description: "Time spent waiting for a node / relationship / index lock。");
+            description: "Time spent waiting for a vertex / edge / index lock。");
 
     /// <summary>WAL に書き込んだバイト数 (累計)。</summary>
     public static readonly Counter<long> WalBytesWritten =

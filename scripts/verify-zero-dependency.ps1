@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$Configuration = "Release"
 )
 
@@ -10,7 +10,7 @@ $outputDirectory = Join-Path $repositoryRoot ".zero-dependency-gate"
 
 # 第 1 ゲート: コアプロジェクト自身に PackageReference がないことを確認する。
 [xml]$project = Get-Content -Raw -Encoding UTF8 -LiteralPath $projectPath
-$packageReferences = @($project.SelectNodes("/Project/ItemGroup/PackageReference"))
+$packageReferences = @($project.SelectVertices("/Project/ItemGroup/PackageReference"))
 if ($packageReferences.Count -ne 0) {
     $names = $packageReferences | ForEach-Object { $_.Include }
     throw "Quiver.csproj に PackageReference があります: $($names -join ', ')"
@@ -52,7 +52,7 @@ try {
             $reader.Dispose()
         }
 
-        $dependencies = @($nuspec.SelectNodes(
+        $dependencies = @($nuspec.SelectVertices(
             "//*[local-name()='dependencies']/*[local-name()='dependency'] | " +
             "//*[local-name()='dependencies']/*[local-name()='group']/*[local-name()='dependency']"))
         if ($dependencies.Count -ne 0) {

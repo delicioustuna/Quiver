@@ -6,7 +6,7 @@ namespace Quiver.Query.Physical;
 /// 各入力行に対して分岐を順番に試し、
 /// 最初に行を生成した分岐の残りを使い切ったら、それ以降の分岐はスキップする。
 /// 全分岐が空だった入力行は出力に寄与しない。
-/// すべての分岐は単一列 NodeId のタプルを返す必要がある。
+/// すべての分岐は単一列 VertexId のタプルを返す必要がある。
 /// </summary>
 internal sealed class CoalesceOperator : IPhysicalOperator
 {
@@ -17,7 +17,7 @@ internal sealed class CoalesceOperator : IPhysicalOperator
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
 
     private static readonly TupleSchema s_schema = new([
-        new ColumnDefinition("coalesce", TupleSlotType.NodeId)]);
+        new ColumnDefinition("coalesce", TupleSlotType.VertexId)]);
 
     private ITransaction? _tx;
     private int _curBranch = -1;

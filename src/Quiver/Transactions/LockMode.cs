@@ -12,7 +12,7 @@ public enum LockMode : byte
 }
 
 /// <summary>
-/// <see cref="Quiver.GraphDatabaseOptions"/> のロック戦略。
+/// <see cref="Quiver.QuiverDatabaseOptions"/> のロック戦略。
 /// <see cref="ExclusiveOnly"/> は読み取りロック無し (現挙動の互換維持)、
 /// <see cref="ReaderWriter"/> は read を <see cref="LockMode.Shared"/> で取り writer と分離する。
 /// </summary>

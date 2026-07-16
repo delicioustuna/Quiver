@@ -7,16 +7,16 @@ namespace Quiver.Storage.Records;
 /// <summary>
 /// <see cref="IEntityVersionStore"/> の PagedFile 実装。
 ///
-/// <para>レイアウト (page = 8192B、PageHeader = 32B、body = 8160B、entry = 32B):</para>
+/// <para>レイアウト (page = 8192B、PageHeader = 40B、body = 8152B、entry = 40B):</para>
 /// <list type="bullet">
 ///   <item>Page 0 = PagedFile メタ (free list / page count)</item>
 ///   <item>Page 1 = sidecar ヘッダ (offset 31 に sidecar 専用 format version sentinel = 1)</item>
-///   <item>Page 2+ = 32B × 255 entries / page。<c>localId</c> → <c>(page = localId/255 + 2, slot = localId%255)</c></item>
+///   <item>Page 2+ = 40B × 203 entries / page。<c>localId</c> からページと slot を算出する。</item>
 /// </list>
 ///
-/// <para>本クラスは EntityKind に依存せず、Node / Relationship / Property 各 sidecar で共通利用される。
-/// 3 EntityKind 分の instance を <see cref="Quiver.Wal.WalFileKind.NodeVersionMeta"/> /
-/// <see cref="Quiver.Wal.WalFileKind.RelationshipVersionMeta"/> /
+/// <para>本クラスは EntityKind に依存せず、Vertex / Edge / Property 各 sidecar で共通利用される。
+/// 3 EntityKind 分の instance を <see cref="Quiver.Wal.WalFileKind.VertexVersionMeta"/> /
+/// <see cref="Quiver.Wal.WalFileKind.EdgeVersionMeta"/> /
 /// <see cref="Quiver.Wal.WalFileKind.PropertyVersionMeta"/> でそれぞれ生成する想定。</para>
 ///
 /// <para>現時点ではこの store は backend factory から配線されていない (デッドコード相当)。
@@ -24,16 +24,16 @@ namespace Quiver.Storage.Records;
 /// </summary>
 internal sealed class EntityVersionStore : IEntityVersionStore
 {
-    /// <summary>1 エントリのサイズ (32 バイト)。</summary>
+    /// <summary>1 エントリのサイズ (40 バイト)。</summary>
     public const int RecordSize = EntityVersionMeta.Size;
 
-    /// <summary>1 ページに格納できるエントリ数 (255)。</summary>
+    /// <summary>1 ページに格納できるエントリ数。</summary>
     public static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize;
 
     private static readonly PageId HeaderPageId = new(1);
     private const int MetaCommitStampHighWater = 0; // int64 (SSN commit-stamp 高水位)
     private const int MetaAnyReuse = 8; // byte: 世代再利用が一度でも起きたか (stamping 高速パスのゲート)
-    private const int MetaFormatVersion = 31; // byte (NodeStore と同 offset)
+    private const int MetaFormatVersion = 31; // byte (VertexStore と同 offset)
     // entry が 32→40B に拡張され Generation レーンを持つため sidecar 版を 1→2 に上げる。
     // gen-stamp-fastpath: ヘッダに MetaAnyReuse を追加したため 2→3。
     internal const byte SidecarFormatVersion = 3;
@@ -176,7 +176,7 @@ internal sealed class EntityVersionStore : IEntityVersionStore
     private void EnsurePage(PageId pageId)
     {
         while (_file.PageCount <= pageId.Value)
-            _file.AllocatePage(PageKind.NodeRecord);
+            _file.AllocatePage(PageKind.VertexRecord);
     }
 
     private void InitHeader()
@@ -191,6 +191,6 @@ internal sealed class EntityVersionStore : IEntityVersionStore
         using var h = _file.PinForRead(HeaderPageId);
         byte v = h.Data[MetaFormatVersion];
         if (v != SidecarFormatVersion)
-            throw new FormatVersionMismatchException("entity-version-meta", v, SidecarFormatVersion);
+            throw new StorageFormatMismatchException("entity-version-meta", v, SidecarFormatVersion);
     }
 }

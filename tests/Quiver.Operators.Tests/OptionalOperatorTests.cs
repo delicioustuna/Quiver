@@ -20,7 +20,7 @@ public class OptionalOperatorTests
         public ProbeBranch(CorrelatedInputOperator probe, int multiplier)
         { _probe = probe; _multiplier = multiplier; }
 
-        public TupleSchema Schema { get; } = new([new ColumnDefinition("optional", TupleSlotType.NodeId)]);
+        public TupleSchema Schema { get; } = new([new ColumnDefinition("optional", TupleSlotType.VertexId)]);
         public OperatorStatistics Statistics => default;
         public TupleRef Current => new(_buffer);
 
@@ -45,7 +45,7 @@ public class OptionalOperatorTests
     [Fact]
     public void Empty_source_returns_empty()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         var probe = new CorrelatedInputOperator();
         using var op = new OptionalOperator(src, 0, probe, new ProbeBranch(probe, 1));
         op.Open(null!);
@@ -55,7 +55,7 @@ public class OptionalOperatorTests
     [Fact]
     public void Branch_emits_passes_branch_rows()
     {
-        var src = new FixedNodeListOperator(new NodeId(11));
+        var src = new FixedVertexListOperator(new VertexId(11));
         var probe = new CorrelatedInputOperator();
         using var op = new OptionalOperator(src, 0, probe, new ProbeBranch(probe, 2));
         op.Open(null!);
@@ -65,7 +65,7 @@ public class OptionalOperatorTests
     [Fact]
     public void Empty_branch_falls_through_with_source_value()
     {
-        var src = new FixedNodeListOperator(new NodeId(99));
+        var src = new FixedVertexListOperator(new VertexId(99));
         var probe = new CorrelatedInputOperator();
         using var op = new OptionalOperator(src, 0, probe, new ProbeBranch(probe, 0));
         op.Open(null!);
@@ -75,7 +75,7 @@ public class OptionalOperatorTests
     [Fact]
     public void Mixed_inputs_combine_branch_and_fallthrough()
     {
-        var src = new FixedNodeListOperator(new NodeId(1), new NodeId(2), new NodeId(3));
+        var src = new FixedVertexListOperator(new VertexId(1), new VertexId(2), new VertexId(3));
         // 分岐は各行を一度ずつ出力するため、1、2、3 は変化しない。
         var probe = new CorrelatedInputOperator();
         using var op = new OptionalOperator(src, 0, probe, new ProbeBranch(probe, 1));

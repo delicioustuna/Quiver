@@ -1,4 +1,4 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using System.Text;
 using Quiver.Core;
 using Quiver.Storage;
@@ -59,7 +59,7 @@ internal abstract class TokenStoreBase<TToken> : ITokenStore<TToken>, IDisposabl
 
     /// <summary>
     /// in-memory 辞書を永続化層 (ディスク) から読み直す。トークンページがコンテナの
-    /// WAL ロギング対象になったため、abort (CLR undo) でディスク側はトランザクション開始前へ
+    /// WAL ロギング対象であり、abort の before-image 復元でディスク側はトランザクション開始前へ
     /// 戻る。その際 in-memory 辞書も戻さないと「メモリにはあるがディスクには無い」トークンが生じ、
     /// 後続 commit が再永続化をスキップして reopen 時にトークンが消える。abort 後に本メソッドを
     /// 呼んで in-memory をディスクと一致させる。
@@ -313,12 +313,12 @@ internal sealed class LabelTokenStore : TokenStoreBase<LabelId>
     protected override int GetId(LabelId token) => token.Value;
 }
 
-internal sealed class RelationshipTypeTokenStore : TokenStoreBase<RelationshipTypeId>
+internal sealed class EdgeTypeTokenStore : TokenStoreBase<EdgeTypeId>
 {
-    public RelationshipTypeTokenStore(string filePath) : base(filePath) { }
-    public RelationshipTypeTokenStore(IPagedFile file) : base(file) { }
-    protected override RelationshipTypeId MakeToken(int id) => new(id);
-    protected override int GetId(RelationshipTypeId token) => token.Value;
+    public EdgeTypeTokenStore(string filePath) : base(filePath) { }
+    public EdgeTypeTokenStore(IPagedFile file) : base(file) { }
+    protected override EdgeTypeId MakeToken(int id) => new(id);
+    protected override int GetId(EdgeTypeId token) => token.Value;
 }
 
 internal sealed class PropertyKeyTokenStore : TokenStoreBase<PropertyKeyId>

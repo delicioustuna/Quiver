@@ -1,7 +1,7 @@
 namespace Quiver;
 
 /// <summary>
-/// <see cref="GraphDatabase.CreateSnapshot"/> の挙動オプション。
+/// <see cref="QuiverDatabase.CreateSnapshot"/> の挙動オプション。
 /// 既定値で「索引・トークン・隣接ブロック・WAL を含む完全なライブスナップショット」になる。
 /// </summary>
 public sealed class SnapshotOptions

@@ -13,8 +13,8 @@
                    ToolTip.Tip="{Binding Header}"
                    IsVisible="{Binding HasSelection}" />
 
-        <!-- ===== Create Node mode ===== -->
-        <ScrollViewer IsVisible="{Binding IsCreateNode}">
+        <!-- ===== Create Vertex mode ===== -->
+        <ScrollViewer IsVisible="{Binding IsCreateVertex}">
             <StackPanel Margin="8,4" Spacing="8">
                 <TextBlock Text="ラベル" FontSize="11"
                            Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
@@ -63,13 +63,13 @@
             </StackPanel>
         </ScrollViewer>
 
-        <!-- ===== Create Relationship mode ===== -->
-        <ScrollViewer IsVisible="{Binding IsCreateRel}">
+        <!-- ===== Create Edge mode ===== -->
+        <ScrollViewer IsVisible="{Binding IsCreateEdge}">
             <StackPanel Margin="8,4" Spacing="8">
-                <TextBlock Text="リレーションシップ型" FontSize="11"
+                <TextBlock Text="Edge 型" FontSize="11"
                            Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
-                <AutoCompleteBox Text="{Binding CreateRelType, Mode=TwoWay}"
-                                 ItemsSource="{Binding RelTypeSuggestions}"
+                <AutoCompleteBox Text="{Binding CreateEdgeType, Mode=TwoWay}"
+                                 ItemsSource="{Binding EdgeTypeSuggestions}"
                                  FilterMode="Contains"
                                  FontSize="13" />
 
@@ -113,7 +113,7 @@
             </StackPanel>
         </ScrollViewer>
 
-        <!-- ===== Edit mode (Node/Edge selected) ===== -->
+        <!-- ===== Edit mode (Vertex/Edge selected) ===== -->
         <DockPanel IsVisible="{Binding IsEditing}">
             <StackPanel DockPanel.Dock="Bottom" Margin="8,4" Spacing="4">
                 <TextBlock Text="プロパティを追加" FontSize="11"

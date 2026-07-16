@@ -1,4 +1,4 @@
-# Quiver Benchmark Baselines (TS-6)
+# Quiver Benchmark Baselines ()
 
 This directory holds the baseline timings used by
 `Quiver.Benchmarks.RegressionCheck` to detect ≥ 20% performance regressions in
@@ -18,7 +18,7 @@ benchmark contributes one entry:
 {
   "Benchmarks": [
     {
-      "FullName": "Quiver.Benchmarks.Operators.NodeByLabelScanOperatorBench.Scan_person",
+      "FullName": "Quiver.Benchmarks.Operators.VertexByLabelScanOperatorBench.Scan_person",
       "Statistics": {
         "Mean": 12345.67,
         "StandardDeviation": 234.5

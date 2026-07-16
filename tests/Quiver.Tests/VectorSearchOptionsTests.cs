@@ -47,9 +47,9 @@ public sealed class VectorSearchOptionsTests : IDisposable
     {
         var store = new InMemoryVectorStore();
         store.CreateVectorIndex(CreateSpec(IndexName));
-        store.SetVector(EntityKind.Node, 1, IndexName, [1f, 0f, 0f, 0f]);
+        store.SetVector(EntityKind.Vertex, 1, IndexName, [1f, 0f, 0f, 0f]);
         var invalid = new VectorSearchOptions { EfSearch = 0 };
-        var candidates = new EntityCandidateSet(EntityKind.Node, [1]);
+        var candidates = new EntityCandidateSet(EntityKind.Vertex, [1]);
 
         Action single = () => store.KnnSearch(IndexName, [1f, 0f, 0f, 0f], 1, invalid);
         Action filtered = () => store.KnnSearchFiltered(
@@ -65,12 +65,12 @@ public sealed class VectorSearchOptionsTests : IDisposable
     [Fact]
     public void Persistent_and_traversal_routes_forward_options()
     {
-        using var db = GraphDatabase.Open(Path.Combine(_directory, "graph.quiver"));
+        using var db = QuiverDatabase.Open(Path.Combine(_directory, "graph.quiver"));
         db.Vectors.CreateVectorIndex(CreateSpec(IndexName));
         using (var tx = db.BeginTransaction())
         {
-            var node = tx.CreateNode("Doc");
-            db.Vectors.SetVector(EntityKind.Node, node.Value, IndexName, [1f, 0f, 0f, 0f]);
+            var vertex = tx.CreateVertex("Doc");
+            db.Vectors.SetVector(EntityKind.Vertex, vertex.Value, IndexName, [1f, 0f, 0f, 0f]);
             tx.Commit();
         }
 
@@ -84,7 +84,7 @@ public sealed class VectorSearchOptionsTests : IDisposable
         var g = read.G(db.Schema);
         Action traversal = () => g.Knn(
             IndexName, [1f, 0f, 0f, 0f], 1, invalid).ToList();
-        Action filteredTraversal = () => g.Nodes()
+        Action filteredTraversal = () => g.Vertices()
             .FilterByKnn(IndexName, [1f, 0f, 0f, 0f], 1, invalid)
             .ToList();
 
@@ -96,7 +96,7 @@ public sealed class VectorSearchOptionsTests : IDisposable
 
     private static VectorIndexSpec CreateSpec(string name) => new(
         name,
-        EntityKind.Node,
+        EntityKind.Vertex,
         new PropertyKeyId(1),
         4,
         DistanceMetric.Cosine,

@@ -15,22 +15,22 @@ internal sealed class InlineGraphAccessMethods : IGraphAccessMethods
 
     public long AdjacencyFallbackCount => 0;
 
-    public IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null)
+    public IEnumerable<VertexId> ScanVertices(ITransaction tx, LabelId? label = null)
     {
-        if (!label.HasValue) return tx.Nodes.Scan();
+        if (!label.HasValue) return tx.Vertices.Scan();
         return ScanByLabel(tx, label.Value);
     }
 
-    private static IEnumerable<NodeId> ScanByLabel(ITransaction tx, LabelId label)
+    private static IEnumerable<VertexId> ScanByLabel(ITransaction tx, LabelId label)
     {
-        foreach (var id in tx.Nodes.Scan())
+        foreach (var id in tx.Vertices.Scan())
         {
-            if (tx.Nodes.Read(id).Label == label)
+            if (tx.Vertices.Read(id).Label == label)
                 yield return id;
         }
     }
 
-    public IEnumerable<NodeId> SeekNodesByIndex(ITransaction tx, string indexName, PropertyValue key)
+    public IEnumerable<VertexId> SeekVerticesByIndex(ITransaction tx, string indexName, PropertyValue key)
     {
         // PropertyValue は ref struct のため、yield を跨いで保持できない。
         // 下層の long 列挙を先にマテリアライズし、それをラップする。
@@ -45,41 +45,41 @@ internal sealed class InlineGraphAccessMethods : IGraphAccessMethods
                     .SeekValues(Encoding.UTF8.GetString(key.Utf8StringValue)),
             _ => [],
         };
-        // パック値を世代照合しつつ NodeId へ unpack し、slot 再利用の stale 参照を弾く。
-        return IndexValueResolver.ResolveLiveNodeIds(ids, tx.Nodes);
+        // パック値を世代照合しつつ VertexId へ unpack し、slot 再利用の stale 参照を弾く。
+        return IndexValueResolver.ResolveLiveVertexIds(ids, tx.Vertices);
     }
 
     public ExpandCursor Expand(
         ITransaction tx,
-        NodeId source,
+        VertexId source,
         Direction direction,
-        RelationshipTypeId? typeFilter)
+        EdgeTypeId? typeFilter)
         => new InlineExpandCursor(tx, source, direction, typeFilter);
 
     public double EstimateExpandCardinality(
         ITransaction tx,
-        NodeId source,
+        VertexId source,
         Direction direction,
-        RelationshipTypeId? typeFilter)
+        EdgeTypeId? typeFilter)
     {
-        var materializer = new EntityIdentityMaterializer(tx.Nodes);
-        if (!materializer.TryNode(source, out source))
+        var materializer = new EntityIdentityMaterializer(tx.Vertices);
+        if (!materializer.TryVertex(source, out source))
             return 0;
 
         double count = 0;
-        var relId = tx.Nodes.Read(source).FirstRelationshipId;
-        while (relId.IsValid)
+        var edgeId = tx.Vertices.Read(source).FirstEdgeId;
+        while (edgeId.IsValid)
         {
-            var rel = tx.Relationships.Read(relId);
-            bool typeOk = !typeFilter.HasValue || rel.Type == typeFilter.Value;
+            var edge = tx.Edges.Read(edgeId);
+            bool typeOk = !typeFilter.HasValue || edge.Type == typeFilter.Value;
             bool dirOk = direction switch
             {
-                Direction.Outgoing => rel.Source.Sequence == source.Sequence,
-                Direction.Incoming => rel.Target.Sequence == source.Sequence,
+                Direction.Outgoing => edge.Source.Sequence == source.Sequence,
+                Direction.Incoming => edge.Target.Sequence == source.Sequence,
                 _ => true,
             };
             if (typeOk && dirOk) count++;
-            relId = rel.Source.Sequence == source.Sequence ? rel.SourceNext : rel.TargetNext;
+            edgeId = edge.Source.Sequence == source.Sequence ? edge.SourceNext : edge.TargetNext;
         }
         return count;
     }
@@ -88,31 +88,31 @@ internal sealed class InlineGraphAccessMethods : IGraphAccessMethods
 internal sealed class InlineExpandCursor : ExpandCursor
 {
     private readonly ITransaction _tx;
-    private NodeId _source;
+    private VertexId _source;
     private readonly Direction _direction;
-    private readonly RelationshipTypeId? _typeFilter;
+    private readonly EdgeTypeId? _typeFilter;
 
     private AdjacencyCursor? _adjCursor;
     private bool _usingAdj;
     private bool _opened;
     private bool _validSource;
-    private RelationshipId _nextRelId;
-    private NodeId _neighbor;
-    private RelationshipId _relId;
+    private EdgeId _nextEdgeId;
+    private VertexId _neighbor;
+    private EdgeId _edgeId;
 
-    internal InlineExpandCursor(ITransaction tx, NodeId source, Direction direction, RelationshipTypeId? typeFilter)
+    internal InlineExpandCursor(ITransaction tx, VertexId source, Direction direction, EdgeTypeId? typeFilter)
     {
         _tx = tx;
         _source = source;
         _direction = direction;
         _typeFilter = typeFilter;
-        _nextRelId = RelationshipId.Invalid;
-        _neighbor = NodeId.Invalid;
-        _relId = RelationshipId.Invalid;
+        _nextEdgeId = EdgeId.Invalid;
+        _neighbor = VertexId.Invalid;
+        _edgeId = EdgeId.Invalid;
     }
 
-    public override NodeId Neighbor => _neighbor;
-    public override RelationshipId Relationship => _relId;
+    public override VertexId Neighbor => _neighbor;
+    public override EdgeId Edge => _edgeId;
 
     public override bool MoveNext()
     {
@@ -123,47 +123,47 @@ internal sealed class InlineExpandCursor : ExpandCursor
         {
             while (_adjCursor!.MoveNext())
             {
-                var relation = _tx!.Relationships.Read(_adjCursor.Relationship);
+                var relation = _tx!.Edges.Read(_adjCursor.Edge);
                 if (!relation.InUse)
                     continue;
                 _neighbor = relation.Source.Sequence == _source.Sequence ? relation.Target : relation.Source;
-                _relId = relation.Id;
+                _edgeId = relation.Id;
                 return true;
             }
             return false;
         }
 
-        while (_nextRelId.IsValid)
+        while (_nextEdgeId.IsValid)
         {
-            int generation = _tx.Relationships.CurrentGeneration(_nextRelId.Sequence);
+            int generation = _tx.Edges.CurrentGeneration(_nextEdgeId.Sequence);
             if (generation < 0)
             {
-                _nextRelId = RelationshipId.Invalid;
+                _nextEdgeId = EdgeId.Invalid;
                 return false;
             }
 
-            // node chain は physical Sequence を保持するため、logical Read の直前で
+            // vertex chain は physical Sequence を保持するため、logical Read の直前で
             // 現行 generation を付与する。
-            var rel = _tx.Relationships.Read(
-                RelationshipId.Create(_nextRelId.Sequence, generation));
-            var thisRel = _nextRelId;
-            bool sourceIsEndpoint = rel.Source.Sequence == _source.Sequence;
-            _nextRelId = sourceIsEndpoint ? rel.SourceNext : rel.TargetNext;
+            var edge = _tx.Edges.Read(
+                EdgeId.Create(_nextEdgeId.Sequence, generation));
+            var thisEdge = _nextEdgeId;
+            bool sourceIsEndpoint = edge.Source.Sequence == _source.Sequence;
+            _nextEdgeId = sourceIsEndpoint ? edge.SourceNext : edge.TargetNext;
 
-            if (!rel.InUse)
+            if (!edge.InUse)
                 continue;
 
-            bool typeOk = !_typeFilter.HasValue || rel.Type == _typeFilter.Value;
+            bool typeOk = !_typeFilter.HasValue || edge.Type == _typeFilter.Value;
             bool dirOk = _direction switch
             {
-                Direction.Outgoing => rel.Source.Sequence == _source.Sequence,
-                Direction.Incoming => rel.Target.Sequence == _source.Sequence,
+                Direction.Outgoing => edge.Source.Sequence == _source.Sequence,
+                Direction.Incoming => edge.Target.Sequence == _source.Sequence,
                 _ => true,
             };
             if (typeOk && dirOk)
             {
-                _neighbor = sourceIsEndpoint ? rel.Target : rel.Source;
-                _relId = rel.Id;
+                _neighbor = sourceIsEndpoint ? edge.Target : edge.Source;
+                _edgeId = edge.Id;
                 return true;
             }
         }
@@ -172,8 +172,8 @@ internal sealed class InlineExpandCursor : ExpandCursor
 
     private void Open()
     {
-        var materializer = new EntityIdentityMaterializer(_tx.Nodes);
-        if (!materializer.TryNode(_source, out _source))
+        var materializer = new EntityIdentityMaterializer(_tx.Vertices);
+        if (!materializer.TryVertex(_source, out _source))
             return;
         _validSource = true;
 
@@ -185,7 +185,7 @@ internal sealed class InlineExpandCursor : ExpandCursor
             return;
         }
         _usingAdj = false;
-        _nextRelId = _tx.Nodes.Read(_source).FirstRelationshipId;
+        _nextEdgeId = _tx.Vertices.Read(_source).FirstEdgeId;
     }
 
     public override void Dispose() => _adjCursor?.Dispose();

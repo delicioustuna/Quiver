@@ -182,8 +182,8 @@
                                    Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                                    IsVisible="{Binding GraphCanvas.HasGraph}">
                             <TextBlock.Text>
-                                <MultiBinding StringFormat="Graph: {0} nodes, {1} edges">
-                                    <Binding Path="GraphCanvas.NodeCount" />
+                                <MultiBinding StringFormat="Graph: {0} vertices, {1} edges">
+                                    <Binding Path="GraphCanvas.VertexCount" />
                                     <Binding Path="GraphCanvas.EdgeCount" />
                                 </MultiBinding>
                             </TextBlock.Text>

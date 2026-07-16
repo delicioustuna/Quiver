@@ -2,7 +2,7 @@
 
 > **いつ読むか** — 挿入が遅い、検索が遅い、メモリやディスクが想定より使われている、と感じたとき。
 > チューニングノブを回す前に、まず最上段の「鉄則」を満たしているか確認すること。
-> 設定ノブは [`GraphDatabaseOptions`](../../src/Quiver/GraphDatabase.cs) / appsettings の
+> 設定ノブは [`QuiverDatabaseOptions`](../../src/Quiver/QuiverDatabase.cs) / appsettings の
 > [`QuiverConfigurationOptions`](../../src/Quiver.Hosting/QuiverConfigurationOptions.cs)。
 
 ---
@@ -22,7 +22,7 @@
 
 なぜこうなるか:
 
-- 各 commit は変更したページ (NodeStore ページ + 索引ページ + meta ページ) の **PageImage** を WAL に書く。
+- 各 commit は変更したページ (VertexStore ページ + 索引ページ + meta ページ) の **PageImage** を WAL に書く。
 - bulk パスでは同一ページへの複数変更が **1 つの PageImage に coalesce** されるので、
   entry 数に対してほぼフラットな ~69 B/entry に収まる。
 - per-tx パスでは毎 commit ごとに同じページの PageImage を丸ごと書き直すため、小規模では entry あたり
@@ -35,7 +35,7 @@
 using (var tx = db.BeginTransaction())
 {
     foreach (var row in rows)
-        tx.SetProperty(tx.CreateNode("Item"), "sku", PropertyValue.FromString(row.Sku));
+        tx.SetProperty(tx.CreateVertex("Item"), "sku", PropertyValue.FromString(row.Sku));
     tx.Commit();
 }
 
@@ -76,7 +76,7 @@ double hitRatio = (double)s.BufferPoolHits / (s.BufferPoolHits + s.BufferPoolMis
 削除や世代混在で seq が疎でも単一の巨大配列は確保しない。
 
 ```csharp
-var options = new GraphDatabaseOptions
+var options = new QuiverDatabaseOptions
 {
     VectorCacheBudgetBytes = 128L * 1024 * 1024,
 };
@@ -146,7 +146,7 @@ latency は payload cache 導入後の値。この corpus では低い `EfSearch
 直近 `AdaptiveSampleWindow` 件 (既定 1000) の bytes/tx 移動平均から、`TargetRecoveryTime` (既定 5 秒) を満たす threshold を周期的に再計算する。
 
 ```csharp
-var opts = new GraphDatabaseOptions
+var opts = new QuiverDatabaseOptions
 {
     CheckpointPolicy = CheckpointPolicy.Adaptive,
     TargetRecoveryTime = TimeSpan.FromSeconds(3),     // 起動を 3 秒以内に抑えたい
@@ -158,19 +158,13 @@ var opts = new GraphDatabaseOptions
 - 「recovery 時間を SLA に収めたい」ときは Adaptive + `TargetRecoveryTime` が素直。
 - ワークロードが安定していて手で測れるなら `Fixed` + 実測値でも良い。
 
-### `WalSegmentSize` (既定 64 MB)
-
-WAL 1 セグメントのサイズ。極端に小さくするとセグメントローテーションが頻発する。通常は既定で良い。
-
----
-
 ## グループコミット (`GroupCommitWindow`, 既定 0 = 無効)
 
 **多数のスレッドが並列に commit する** ワークロード (Web API で各リクエストが小さな tx を commit する等)
 で効く。最初の commit 到着からこの window 経過まで待って後続 commit を貯め、まとめて 1 回の fsync で処理する。
 
 ```csharp
-var opts = new GraphDatabaseOptions
+var opts = new QuiverDatabaseOptions
 {
     GroupCommitWindow = TimeSpan.FromMicroseconds(500)   // 推奨 100µs〜1ms
 };
@@ -192,7 +186,7 @@ var opts = new GraphDatabaseOptions
   read が支配的なワークロードでスループットが上がる。
 
 ```csharp
-var opts = new GraphDatabaseOptions { LockingMode = LockingMode.ReaderWriter };
+var opts = new QuiverDatabaseOptions { LockingMode = LockingMode.ReaderWriter };
 ```
 
 関連ノブ:
@@ -221,8 +215,8 @@ var opts = new GraphDatabaseOptions { LockingMode = LockingMode.ReaderWriter };
 db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEquality);
 ```
 
-- 索引が無いプロパティ等価検索はラベル内全スキャン。ノード数に比例して遅くなる。
-- `MergeNode` も索引が無いと全スキャンに落ちる。業務キーには必ず索引を ([docs/cookbook.md](../cookbook.md) §2)。
+- 索引が無いプロパティ等価検索はラベル内全スキャン。Vertex数に比例して遅くなる。
+- `MergeVertex` も索引が無いと全スキャンに落ちる。業務キーには必ず索引を ([docs/cookbook.md](../cookbook.md) §2)。
 - ただし索引は書き込みコスト (WAL 増幅・更新) を増やす。**検索する列にだけ** 張る。
 
 ---
@@ -231,7 +225,7 @@ db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEqu
 
 推測で回さない。Quiver は観測手段を持っている:
 
-- `db.Diagnostics.GetStatistics()` — ノード/エッジ数、バッファプール hit/miss
+- `db.Diagnostics.GetStatistics()` — Vertex/エッジ数、バッファプール hit/miss
 - `dotnet-counters -n <proc> --counters Quiver-EventSource` — buffer-pool、WAL、tx、lock、index、vacuum を
   1 秒粒度でライブ観測 ([docs/cookbook.md](../cookbook.md) §9)
 - `Quiver.OpenTelemetry` の `AddQuiverInstrumentation()` — OTel でメトリクスとトレースを送る

@@ -28,7 +28,7 @@ public static class IsExtensions
         var filtered = new FilterOp(
             lookup.Source,
             _ => new PropertyEqStringPredicate(sourceCol, keyId, value));
-        var rebuiltLookup = new PropertyLookupOp(filtered, lookup.Key, EntityKind.Node);
+        var rebuiltLookup = new PropertyLookupOp(filtered, lookup.Key, EntityKind.Vertex);
         int valueCol = rebuiltLookup.PredictedOutputColumnCount - 1;
         return new GraphTraversal<string>(
             traversal._tx, traversal._schema, rebuiltLookup,
@@ -50,7 +50,7 @@ public static class IsExtensions
         var filtered = new FilterOp(
             lookup.Source,
             _ => new PropertyInt64Predicate(sourceCol, keyId, pred));
-        var rebuiltLookup = new PropertyLookupOp(filtered, lookup.Key, EntityKind.Node);
+        var rebuiltLookup = new PropertyLookupOp(filtered, lookup.Key, EntityKind.Vertex);
         int valueCol = rebuiltLookup.PredictedOutputColumnCount - 1;
         return new GraphTraversal<long>(
             traversal._tx, traversal._schema, rebuiltLookup,

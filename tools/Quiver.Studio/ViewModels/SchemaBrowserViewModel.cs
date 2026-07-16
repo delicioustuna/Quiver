@@ -50,12 +50,12 @@ public sealed class SchemaBrowserViewModel : IDisposable
                 return SchemaTreeNode.Leaf(l, "○");
             })));
 
-        var relTypes = schema.ListRelationshipTypes();
+        var edgeTypes = schema.ListEdgeTypes();
         RootNodes.Add(SchemaTreeNode.Folder(
-            $"Relationship Types ({relTypes.Count})", "→",
-            relTypes.Select(r =>
+            $"Edge Types ({edgeTypes.Count})", "→",
+            edgeTypes.Select(r =>
             {
-                var props = inspection?.RelTypeProperties.GetValueOrDefault(r);
+                var props = inspection?.EdgeTypeProperties.GetValueOrDefault(r);
                 if (props is { Count: > 0 })
                 {
                     return SchemaTreeNode.Folder(r, "→",

@@ -15,9 +15,9 @@ internal sealed class ColumnManager
 {
     private readonly SingleFileContainer _container;
     private readonly byte _catalogTenantId;
-    private readonly VersionedRelationshipStore _relStore;
-    private readonly VersionedNodeStore _nodeStore;
-    private readonly IHyperedgeStore _hyperedgeStore;
+    private readonly VersionedEdgeStore _edgeStore;
+    private readonly VersionedVertexStore _vertexStore;
+    private readonly INexusStore _nexusStore;
     private readonly PropertyStore _propStore;
     private readonly Dictionary<(EntityKind, int), ScalarColumnStore> _columns = new();
     // catalog は遅延生成 (ColumnCatalog ctor が空テナントにヘッダページを書くため)。
@@ -28,16 +28,16 @@ internal sealed class ColumnManager
     public ColumnManager(
         SingleFileContainer container,
         byte catalogTenantId,
-        VersionedRelationshipStore relStore,
-        VersionedNodeStore nodeStore,
-        IHyperedgeStore hyperedgeStore,
+        VersionedEdgeStore edgeStore,
+        VersionedVertexStore vertexStore,
+        INexusStore nexusStore,
         PropertyStore propStore)
     {
         _container = container;
         _catalogTenantId = catalogTenantId;
-        _relStore = relStore;
-        _nodeStore = nodeStore;
-        _hyperedgeStore = hyperedgeStore;
+        _edgeStore = edgeStore;
+        _vertexStore = vertexStore;
+        _nexusStore = nexusStore;
         _propStore = propStore;
 
         // 既に catalog テナントが存在する DB のみ、登録済み列を eager に開く
@@ -150,9 +150,9 @@ internal sealed class ColumnManager
     /// <summary>列を登録し、現データから構築する。既存なら no-op で false。</summary>
     public bool CreateColumn(EntityKind kind, int keyId)
     {
-        if (kind is not (EntityKind.Relationship or EntityKind.Node or EntityKind.Hyperedge))
+        if (kind is not (EntityKind.Edge or EntityKind.Vertex or EntityKind.Nexus))
             throw new NotSupportedException(
-                $"columnar is only supported for Node / Relationship / Hyperedge, got {kind}.");
+                $"columnar is only supported for Vertex / Edge / Nexus, got {kind}.");
         if (_columns.ContainsKey((kind, keyId))) return false;
 
         byte tenantId = Catalog.Register(kind, keyId);
@@ -173,27 +173,27 @@ internal sealed class ColumnManager
     private void BuildFromData(ScalarColumnStore store, EntityKind kind, int keyId)
     {
         var key = new PropertyKeyId(keyId);
-        if (kind == EntityKind.Relationship)
+        if (kind == EntityKind.Edge)
         {
-            foreach (var relId in _relStore.Scan())
-                if (TryExtractScalar(_relStore.EnumerateProperties(relId, _propStore), key, out long bits, out var type))
-                    store.Set(relId.Sequence, bits, TransactionId.Bootstrap.Value, type);
+            foreach (var edgeId in _edgeStore.Scan())
+                if (TryExtractScalar(_edgeStore.EnumerateProperties(edgeId, _propStore), key, out long bits, out var type))
+                    store.Set(edgeId.Sequence, bits, TransactionId.Bootstrap.Value, type);
         }
-        else if (kind == EntityKind.Node)
+        else if (kind == EntityKind.Vertex)
         {
-            foreach (var nodeId in _nodeStore.Scan())
-                if (TryExtractScalar(_nodeStore.EnumerateProperties(nodeId, _propStore), key, out long bits, out var type))
-                    store.Set(nodeId.Sequence, bits, TransactionId.Bootstrap.Value, type);
+            foreach (var vertexId in _vertexStore.Scan())
+                if (TryExtractScalar(_vertexStore.EnumerateProperties(vertexId, _propStore), key, out long bits, out var type))
+                    store.Set(vertexId.Sequence, bits, TransactionId.Bootstrap.Value, type);
         }
         else
         {
-            foreach (var hyperedgeId in _hyperedgeStore.Scan())
+            foreach (var nexusId in _nexusStore.Scan())
                 if (TryExtractScalar(
-                        _hyperedgeStore.EnumerateProperties(hyperedgeId, _propStore),
+                        _nexusStore.EnumerateProperties(nexusId, _propStore),
                         key,
                         out long bits,
                         out var type))
-                    store.Set(hyperedgeId.Sequence, bits, TransactionId.Bootstrap.Value, type);
+                    store.Set(nexusId.Sequence, bits, TransactionId.Bootstrap.Value, type);
         }
     }
 

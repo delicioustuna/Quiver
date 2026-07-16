@@ -25,7 +25,7 @@ public sealed class ApiDocumentationService
             try
             {
                 var xmlDocs = LoadXmlDocs();
-                _namespaces = BuildTree(typeof(GraphDatabase).Assembly, xmlDocs);
+                _namespaces = BuildTree(typeof(QuiverDatabase).Assembly, xmlDocs);
                 _docIdIndex = BuildDocIdIndex(_namespaces);
                 _logger.LogInformation("API ドキュメント初期化完了: {Count} 名前空間", _namespaces.Count);
             }
@@ -55,7 +55,7 @@ public sealed class ApiDocumentationService
 
     private static Dictionary<string, XElement> LoadXmlDocs()
     {
-        var dllPath = typeof(GraphDatabase).Assembly.Location;
+        var dllPath = typeof(QuiverDatabase).Assembly.Location;
         if (string.IsNullOrEmpty(dllPath))
             return new();
 

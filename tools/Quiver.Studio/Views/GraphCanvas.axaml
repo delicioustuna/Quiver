@@ -58,7 +58,7 @@
             </Button>
         </StackPanel>
 
-        <TextBlock Text="クエリを実行してノードを返すとグラフが表示されます"
+        <TextBlock Text="クエリを実行してVertexを返すとグラフが表示されます"
                    HorizontalAlignment="Center"
                    VerticalAlignment="Center"
                    Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"

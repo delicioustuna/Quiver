@@ -4,7 +4,7 @@ namespace Quiver.Api;
 
 /// <summary>
 /// プロパティ述語を構築するファクトリ。
-/// <c>g.Nodes().Has("age", P.Gt(20))</c> のように <see cref="GraphTraversal{T}.Has(string, PropertyPredicate)"/>
+/// <c>g.Vertices().Has("age", P.Gt(20))</c> のように <see cref="GraphTraversal{T}.Has(string, PropertyPredicate)"/>
 /// に渡して使う。
 /// </summary>
 public static class P
@@ -105,7 +105,7 @@ public static class P
 
     /// <summary>
     /// 同一キーに対する OR 結合 (例: <c>P.Or(P.StartsWith("Al"), P.StartsWith("Bo"))</c>)。
-    /// 異なるキーをまたぐ OR にはトラバーサルレベルの <c>g.Nodes().Or(t1, t2)</c> を使うこと。
+    /// 異なるキーをまたぐ OR にはトラバーサルレベルの <c>g.Vertices().Or(t1, t2)</c> を使うこと。
     /// </summary>
     public static PropertyPredicate Or(params PropertyPredicate[] predicates) => Compound(PredicateKind.Or, predicates);
 

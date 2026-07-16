@@ -3,9 +3,9 @@
 namespace Quiver.Benchmarks.Standalone.Dev;
 
 /// <summary>
-/// FT-29: Per-tx PageImage coalescing の効果を測る standalone runner。
+/// Per-tx PageImage coalescing の効果を測る standalone runner。
 ///
-/// 基準は FT-20 の per-tx 1k 65,964 B/entry (sequential)。FT-29 は WAL レベルで
+/// 基準は  の per-tx 1k 65,964 B/entry (sequential)。 は WAL レベルで
 /// PageImage を「commit 直前まで遅延 + (fileKind, pageId) latest-wins 集約」する
 /// 設計のため、効果が出るのは「複数 tx の FlushPending と Append(Commit) が時間的に
 /// 重なる」並列 workload。本ランナーは bulk / per-tx (sequential 互換) / per-tx-parallel
@@ -17,7 +17,7 @@ public static class Ft29PageImageCoalesceRunner
 {
     public static int Run()
     {
-        Console.WriteLine("=== FT-29: Per-tx PageImage Coalescing ===");
+        Console.WriteLine("=== Per-tx PageImage Coalescing ===");
         Console.WriteLine("scenario, entryCount, walBytes, walBytesPerEntry, wallMs");
 
         int[] sizes = { 1_000, 10_000 };

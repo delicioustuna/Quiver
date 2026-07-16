@@ -13,15 +13,13 @@ namespace Quiver.Storage.Records;
 /// <para>レイアウト (page 1 = ヘッダ):</para>
 /// <list type="bullet">
 ///   <item>offset 0: count (i32)</item>
-///   <item>offset 31: format version (byte)</item>
+///   <item>offset 31: family version (byte)</item>
 ///   <item>offset 64+: 可変長エントリ列。各エントリは長さプレフィクスを持ち、
 ///     <c>[entryLen i32 | nameLen i32 | name utf8 | kind 1 | srcKeyId 4 | dim 4 | metric 1 |
 ///        providerLen i32 | provider utf8 | normLen i32(−1=null) | norm utf8 |
 ///        payloadTenant 1 | hnswTenant 1 | indexKind 1 |
 ///        hnswM i32 | hnswMmax0 i32 | hnswMaxLayers i32 | hnswEfConstruction i32 |
-///        elementType 1]</c>。
-///        未知の末尾フィールドは entryLen により読み飛ばす。elementType を欠く短いエントリは
-///        Float32 として読む (フィールド追加前に書かれたエントリ)。</item>
+///        elementType 1]</c>。</item>
 /// </list>
 /// opt-in 用途では index は数件なので 1 ページ (8160B) に収まる。溢れたら <see cref="StorageException"/>。
 /// payload テナントは <see cref="FirstVectorTenant"/> から 2 つずつ (payload / HNSW) 採番する。
@@ -29,7 +27,7 @@ namespace Quiver.Storage.Records;
 internal sealed class VectorIndexCatalog
 {
     private const int OffCount = 0;            // i32
-    private const int OffFormatVersion = 31;   // byte
+    private const int OffFamilyVersion = 31;   // byte
     private const int OffEntries = 64;
     private static readonly PageId HeaderPageId = new(1);
 
@@ -50,7 +48,7 @@ internal sealed class VectorIndexCatalog
         }
         else
         {
-            CheckFormatVersion();
+            CheckFamilyVersion();
             Load();
         }
     }
@@ -130,12 +128,10 @@ internal sealed class VectorIndexCatalog
             int hnswMmax0 = BinaryPrimitives.ReadInt32LittleEndian(body[pos..]); pos += 4;
             int hnswMaxLayers = BinaryPrimitives.ReadInt32LittleEndian(body[pos..]); pos += 4;
             int hnswEfConstruction = BinaryPrimitives.ReadInt32LittleEndian(body[pos..]); pos += 4;
-            // elementType は後から追加された末尾フィールド。これを持たない古いエントリは
-            // Float32 (追加前の唯一の表現) として読む。値の妥当性は Validate が検査するため、
-            // 将来の表現で書かれたエントリはここで明確に拒否される (誤読しない)。
-            var elementType = pos < entryEnd
-                ? (VectorElementType)body[pos++]
-                : VectorElementType.Float32;
+            EnsureAvailable(body, pos, 1, "vector element type", entryEnd);
+            var elementType = (VectorElementType)body[pos++];
+            if (pos != entryEnd)
+                throw new StorageException($"Vector catalog entry {i} has unknown trailing fields.");
             var spec = new VectorIndexSpec(
                 name,
                 kind,
@@ -162,7 +158,7 @@ internal sealed class VectorIndexCatalog
         var body = ph.Data;
         body[OffEntries..].Clear();
         BinaryPrimitives.WriteInt32LittleEndian(body[OffCount..], _entries.Count);
-        body[OffFormatVersion] = FormatVersion.Current;
+        body[OffFamilyVersion] = StorageFormatVersion.Current;
         int pos = OffEntries;
         foreach (var e in _entries)
         {
@@ -237,12 +233,12 @@ internal sealed class VectorIndexCatalog
             throw new StorageException($"Vector catalog {field} exceeds its entry boundary.");
     }
 
-    private void CheckFormatVersion()
+    private void CheckFamilyVersion()
     {
         using var h = _file.PinForRead(HeaderPageId);
-        byte v = h.Data[OffFormatVersion];
-        if (v != FormatVersion.Current)
-            throw new FormatVersionMismatchException("vectorcatalog", v, FormatVersion.Current);
+        byte v = h.Data[OffFamilyVersion];
+        if (v != StorageFormatVersion.Current)
+            throw new StorageFormatMismatchException("vectorcatalog", v, StorageFormatVersion.Current);
     }
 }
 

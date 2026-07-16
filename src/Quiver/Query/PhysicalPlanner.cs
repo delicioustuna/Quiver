@@ -17,14 +17,14 @@ internal static class PhysicalPlanner
     public static IPhysicalOperator Plan(LogicalOp op, ISchemaApi schema) => op switch
     {
         ScanOp s                  => PlanScan(s, schema),
-        NodeSeedOp n              => n.Ids.Length == 1
-                                        ? new SingleNodeOperator(n.Ids[0])
-                                        : new MultiNodeOperator(n.Ids),
-        HyperedgeSeedOp h         => new SingleHyperedgeOperator(h.Id),
+        VertexSeedOp n              => n.Ids.Length == 1
+                                        ? new SingleVertexOperator(n.Ids[0])
+                                        : new MultiVertexOperator(n.Ids),
+        NexusSeedOp h         => new SingleNexusOperator(h.Id),
         CorrelatedInputOp c       => c.Probe,
         FilterOp f                => new FilterOperator(Plan(f.Source, schema), f.PredicateFactory(schema)),
         ExpandOp e                => PlanExpand(e, schema),
-        ExpandToHyperedgeOp eh    => PlanExpandToHyperedge(eh, schema),
+        ExpandToNexusOp eh    => PlanExpandToNexus(eh, schema),
         ExpandMembersOp em        => PlanExpandMembers(em, schema),
         VarLenExpandOp v          => PlanVarLenExpand(v, schema),
         PathOp p                  => PlanPath(p, schema),
@@ -37,9 +37,9 @@ internal static class PhysicalPlanner
                                         schema.GetOrCreatePropertyKey(pl.Key), pl.Key,
                                         PropertyTypeFlags.Scalar | PropertyTypeFlags.FloatArray, pl.Kind),
         LabelNameLookupOp ln      => new LabelNameLookupOperator(
-                                        Plan(ln.Source, schema), ln.NodeColumn, schema.GetLabelName),
-        RelationshipEndpointOp re => new RelationshipEndpointOperator(
-                                        Plan(re.Source, schema), re.RelColumn, re.Endpoint),
+                                        Plan(ln.Source, schema), ln.VertexColumn, schema.GetLabelName),
+        EdgeEndpointOp re => new EdgeEndpointOperator(
+                                        Plan(re.Source, schema), re.EdgeColumn, re.Endpoint),
         LimitOp l                 => new LimitOperator(Plan(l.Source, schema), l.Limit, l.Skip),
         SortOp so                 => PlanSort(so, schema),
         DedupOp d                 => new PathDedupOperator(Plan(d.Source, schema), d.KeyColumn),
@@ -49,28 +49,28 @@ internal static class PhysicalPlanner
 
     private static IPhysicalOperator PlanScan(ScanOp s, ISchemaApi schema)
     {
-        if (s.Kind == EntityKind.Hyperedge)
-            return new AllHyperedgesScanOperator();
-        if (s.Kind == EntityKind.Relationship)
-            return new AllRelationshipsScanOperator();
+        if (s.Kind == EntityKind.Nexus)
+            return new AllNexusesScanOperator();
+        if (s.Kind == EntityKind.Edge)
+            return new AllEdgesScanOperator();
         if (s.Label is LabelId lid)
-            return new NodeByLabelScanOperator(lid);
-        return new AllNodesScanOperator();
+            return new VertexByLabelScanOperator(lid);
+        return new AllVerticesScanOperator();
     }
 
     private static IPhysicalOperator PlanExpand(ExpandOp e, ISchemaApi schema)
     {
-        RelationshipTypeId? typeId = e.Type != null ? schema.GetOrCreateRelationshipType(e.Type) : null;
+        EdgeTypeId? typeId = e.Type != null ? schema.GetOrCreateEdgeType(e.Type) : null;
         return new ExpandOperator(Plan(e.Source, schema), e.SourceColumn, e.Direction, typeId, e.Mode, e.Carry);
     }
 
-    private static IPhysicalOperator PlanExpandToHyperedge(
-        ExpandToHyperedgeOp e,
+    private static IPhysicalOperator PlanExpandToNexus(
+        ExpandToNexusOp e,
         ISchemaApi schema)
-        => new ExpandToHyperedgeOperator(
+        => new ExpandToNexusOperator(
             Plan(e.Source, schema),
-            e.SourceNodeColumn,
-            ResolveHyperedgeType(e.Type, schema),
+            e.SourceVertexColumn,
+            ResolveNexusType(e.Type, schema),
             ResolveRole(e.Role, schema),
             e.Carry);
 
@@ -80,15 +80,15 @@ internal static class PhysicalPlanner
     {
         var fallback = new ExpandMembersOperator(
             Plan(e.Source, schema),
-            e.HyperedgeColumn,
+            e.NexusColumn,
             ResolveRole(e.Role, schema),
-            e.ExcludeNodeColumn,
+            e.ExcludeVertexColumn,
             e.Carry);
 
         // 起点ロールと取得ロールが共に明示された OtherMembers だけが物理ビューの
         // 一意なキーになる。片方でも未指定なら通常の incidence 展開を維持する。
-        if (e.Source is not ExpandToHyperedgeOp origin
-            || e.ExcludeNodeColumn is null
+        if (e.Source is not ExpandToNexusOp origin
+            || e.ExcludeVertexColumn is null
             || origin.Role is null
             || e.Role is null)
             return fallback;
@@ -102,26 +102,26 @@ internal static class PhysicalPlanner
         return new CoMembershipOperator(
             Plan(origin.Source, schema),
             fallback,
-            origin.SourceNodeColumn,
-            ResolveHyperedgeType(origin.Type, schema),
+            origin.SourceVertexColumn,
+            ResolveNexusType(origin.Type, schema),
             originRole.Value,
             memberRole.Value,
             origin.Carry,
             e.Carry);
     }
 
-    private static HyperedgeTypeId? ResolveHyperedgeType(string? name, ISchemaApi schema)
+    private static NexusTypeId? ResolveNexusType(string? name, ISchemaApi schema)
     {
         if (name == null) return null;
-        return schema.TryGetHyperedgeTypeId(name, out var id)
+        return schema.TryGetNexusTypeId(name, out var id)
             ? id
-            : HyperedgeTypeId.Invalid;
+            : NexusTypeId.Invalid;
     }
 
     private static RoleId? ResolveRole(string? name, ISchemaApi schema)
     {
         if (name == null) return null;
-        return schema is IHyperedgeSchemaResolver resolver
+        return schema is INexusSchemaResolver resolver
             && resolver.TryGetRoleId(name, out var id)
                 ? id
                 : RoleId.Invalid;
@@ -129,14 +129,14 @@ internal static class PhysicalPlanner
 
     private static IPhysicalOperator PlanVarLenExpand(VarLenExpandOp v, ISchemaApi schema)
     {
-        RelationshipTypeId? typeId = v.Type != null ? schema.GetOrCreateRelationshipType(v.Type) : null;
+        EdgeTypeId? typeId = v.Type != null ? schema.GetOrCreateEdgeType(v.Type) : null;
         return new VariableLengthExpandOperator(
             Plan(v.Source, schema), v.Source.CurrentEntityColumn, v.Direction, typeId, v.MinHops, v.MaxHops);
     }
 
     private static IPhysicalOperator PlanPath(PathOp p, ISchemaApi schema)
     {
-        RelationshipTypeId? typeId = p.Type != null ? schema.GetOrCreateRelationshipType(p.Type) : null;
+        EdgeTypeId? typeId = p.Type != null ? schema.GetOrCreateEdgeType(p.Type) : null;
         var pair = new PairWithConstantOperator(Plan(p.Source, schema), p.Source.CurrentEntityColumn, p.Target);
         return new ShortestPathOperator(pair, 0, 1, p.Direction, typeId, p.MaxDistance);
     }
@@ -144,8 +144,8 @@ internal static class PhysicalPlanner
     private static IPhysicalOperator PlanKnn(KnnOp k, ISchemaApi schema)
     {
         if (k.Candidate is null)
-            return new KnnNodeSourceOperator(k.IndexName, k.Query, k.K, k.Options);
-        return new FilteredKnnNodeSourceOperator(
+            return new KnnVertexSourceOperator(k.IndexName, k.Query, k.K, k.Options);
+        return new FilteredKnnVertexSourceOperator(
             Plan(k.Candidate, schema), k.Candidate.CurrentEntityColumn,
             k.IndexName, k.Query, k.K, k.Options);
     }

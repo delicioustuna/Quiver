@@ -1,4 +1,4 @@
-﻿using System.Buffers;
+using System.Buffers;
 using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Storage;
@@ -6,15 +6,15 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// 連続配置の隣接ブロックストア: 各ノードについて TypeId 順にソートされた out-edge と
+/// 連続配置の隣接ブロックストア: 各Vertexについて TypeId 順にソートされた out-edge と
 /// in-edge を <see cref="AdjacencyContainer.DataTenant"/> の連続ページに保持する。並列の
-/// <see cref="AdjacencyContainer.IndexTenant"/> が NodeId → 先頭ブロック論理 PageId
+/// <see cref="AdjacencyContainer.IndexTenant"/> が VertexId → 先頭ブロック論理 PageId
 /// (int64、未索引なら −1) を保持する。
 ///
 /// ブロックページ本体レイアウト (PageBodySize = 8160 バイト):
 ///   OutCount(4) | InCount(4) | NextPageId(8) = 16 バイトのヘッダ
 ///   続いて OutCount 個の out エントリ、その後 InCount 個の in エントリ。
-///   エントリ: TypeId(2) | RelId(6) | NeighborId(6) = 14 バイト。
+///   エントリ: TypeId(2) | EdgeId(6) | NeighborId(6) = 14 バイト。
 ///   1 ページあたり最大エントリ数 = (8160 − 16) / 14 = 581。
 ///
 /// 旧来の adj.db / adj_idx.dat サイドカーは廃止され、データ・索引とも
@@ -40,18 +40,18 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
     }
 
     public long Epoch => _epoch?.Epoch ?? 0;
-    public long BaseRelHwm => _epoch?.BaseRelHwm ?? 0;
+    public long BaseEdgeHwm => _epoch?.BaseEdgeHwm ?? 0;
     // tombstone epoch のキーは Sequence (packed Value ではない)。
-    public bool IsTombstoned(RelationshipId relId) => _epoch?.IsTombstoned(relId.Sequence) ?? false;
-    public void Tombstone(RelationshipId relId) => _epoch?.Tombstone(relId.Sequence);
+    public bool IsTombstoned(EdgeId edgeId) => _epoch?.IsTombstoned(edgeId.Sequence) ?? false;
+    public void Tombstone(EdgeId edgeId) => _epoch?.Tombstone(edgeId.Sequence);
 
     // ──────────────────────────── IAdjacencyBlockStore ────────────────────────────
 
-    public bool HasBlock(NodeId nodeId) => GetBlockPageId(nodeId) >= 0;
+    public bool HasBlock(VertexId vertexId) => GetBlockPageId(vertexId) >= 0;
 
-    public int ReadEdges(NodeId nodeId, Direction direction, RelationshipTypeId? typeFilter, AdjacencyEntry[] buffer)
+    public int ReadEdges(VertexId vertexId, Direction direction, EdgeTypeId? typeFilter, AdjacencyEntry[] buffer)
     {
-        long blockPageId = GetBlockPageId(nodeId);
+        long blockPageId = GetBlockPageId(vertexId);
         if (blockPageId < 0) return 0;
 
         int total = 0;
@@ -81,9 +81,9 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
         return total;
     }
 
-    public AdjacencyCursor OpenCursor(NodeId nodeId, Direction direction, RelationshipTypeId? typeFilter)
+    public AdjacencyCursor OpenCursor(VertexId vertexId, Direction direction, EdgeTypeId? typeFilter)
     {
-        long blockPageId = GetBlockPageId(nodeId);
+        long blockPageId = GetBlockPageId(vertexId);
         if (blockPageId < 0) return AdjacencyCursor.Empty;
         return new BlockChainCursor(_dataFile, blockPageId, direction, typeFilter);
     }
@@ -96,7 +96,7 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
         private byte[] _body;
         private readonly IPagedFile _dataFile;
         private readonly Direction _direction;
-        private readonly RelationshipTypeId? _typeFilter;
+        private readonly EdgeTypeId? _typeFilter;
 
         private long _nextPageId;     // 現在のページを使い切ったときに読み込む次ページ (−1 = なし)
         private int _outCount;
@@ -106,11 +106,11 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
         private bool _pageLoaded;
         private bool _disposed;
 
-        private NodeId _neighbor;
-        private RelationshipId _relId;
-        private RelationshipTypeId _type;
+        private VertexId _neighbor;
+        private EdgeId _edgeId;
+        private EdgeTypeId _type;
 
-        internal BlockChainCursor(IPagedFile dataFile, long firstPageId, Direction direction, RelationshipTypeId? typeFilter)
+        internal BlockChainCursor(IPagedFile dataFile, long firstPageId, Direction direction, EdgeTypeId? typeFilter)
         {
             _dataFile = dataFile;
             _direction = direction;
@@ -128,9 +128,9 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
             _body = null!;
         }
 
-        public override NodeId Neighbor => _neighbor;
-        public override RelationshipId Relationship => _relId;
-        public override RelationshipTypeId Type => _type;
+        public override VertexId Neighbor => _neighbor;
+        public override EdgeId Edge => _edgeId;
+        public override EdgeTypeId Type => _type;
 
         public override bool MoveNext()
         {
@@ -189,11 +189,11 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
         private bool TryDecode(int off)
         {
             Span<byte> e = _body.AsSpan(off);
-            var typeId = new RelationshipTypeId(BinaryPrimitives.ReadInt16LittleEndian(e));
+            var typeId = new EdgeTypeId(BinaryPrimitives.ReadInt16LittleEndian(e));
             if (_typeFilter.HasValue && typeId != _typeFilter.Value) return false;
             _type = typeId;
-            _relId = new RelationshipId(RecordHelpers.ReadInt48(e[2..]));
-            _neighbor = new NodeId(RecordHelpers.ReadInt48(e[8..]));
+            _edgeId = new EdgeId(RecordHelpers.ReadInt48(e[2..]));
+            _neighbor = new VertexId(RecordHelpers.ReadInt48(e[8..]));
             return true;
         }
     }
@@ -208,17 +208,17 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
     internal static void Build(
         IPagedFile dataFile,
         IPagedFile indexFile,
-        IReadOnlyList<(long Id, long Src, long Tgt, int TypeId)> rels,
-        long nodeHwm,
+        IReadOnlyList<(long Id, long Src, long Tgt, int TypeId)> edges,
+        long vertexHwm,
         bool writeDescriptor = true)
     {
         dataFile.Truncate(1);
         dataFile.AllocatePage(PageKind.AdjacencyBlock); // logical page 1 = 記述子 placeholder
 
-        var outEdges = new Dictionary<long, List<(short TypeId, long RelId, long NeighborId)>>();
-        var inEdges = new Dictionary<long, List<(short TypeId, long RelId, long NeighborId)>>();
+        var outEdges = new Dictionary<long, List<(short TypeId, long EdgeId, long NeighborId)>>();
+        var inEdges = new Dictionary<long, List<(short TypeId, long EdgeId, long NeighborId)>>();
 
-        foreach (var (id, src, tgt, typeId) in rels)
+        foreach (var (id, src, tgt, typeId) in edges)
         {
             GetOrAdd(outEdges, src).Add(((short)typeId, id, tgt));
             if (src != tgt)
@@ -228,16 +228,16 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
         foreach (var list in outEdges.Values) list.Sort((a, b) => a.TypeId.CompareTo(b.TypeId));
         foreach (var list in inEdges.Values) list.Sort((a, b) => a.TypeId.CompareTo(b.TypeId));
 
-        var firstPageIds = new long[nodeHwm];
-        for (long nodeId = 0; nodeId < nodeHwm; nodeId++)
+        var firstPageIds = new long[vertexHwm];
+        for (long vertexId = 0; vertexId < vertexHwm; vertexId++)
         {
-            outEdges.TryGetValue(nodeId, out var outs);
-            inEdges.TryGetValue(nodeId, out var ins);
+            outEdges.TryGetValue(vertexId, out var outs);
+            inEdges.TryGetValue(vertexId, out var ins);
 
             long firstPageId = -1;
             if ((outs?.Count ?? 0) > 0 || (ins?.Count ?? 0) > 0)
                 firstPageId = WriteBlocks(dataFile, outs ?? [], ins ?? []);
-            firstPageIds[nodeId] = firstPageId;
+            firstPageIds[vertexId] = firstPageId;
         }
 
         if (writeDescriptor)
@@ -247,11 +247,11 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
 
     // ──────────────────────────── private ────────────────────────────
 
-    private long GetBlockPageId(NodeId nodeId)
-        => AdjacencyContainer.ReadIndexEntry(_indexFile, _idxEntryCount, nodeId.Sequence); // index キーは Sequence
+    private long GetBlockPageId(VertexId vertexId)
+        => AdjacencyContainer.ReadIndexEntry(_indexFile, _idxEntryCount, vertexId.Sequence); // index キーは Sequence
 
     private static int CopyEntries(
-        ReadOnlySpan<byte> span, RelationshipTypeId? typeFilter,
+        ReadOnlySpan<byte> span, EdgeTypeId? typeFilter,
         AdjacencyEntry[] buffer, int offset)
     {
         int count = span.Length / EntrySize;
@@ -259,19 +259,19 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
         for (int i = 0; i < count && offset + written < buffer.Length; i++)
         {
             ReadOnlySpan<byte> e = span[(i * EntrySize)..];
-            var typeId = new RelationshipTypeId(BinaryPrimitives.ReadInt16LittleEndian(e));
+            var typeId = new EdgeTypeId(BinaryPrimitives.ReadInt16LittleEndian(e));
             if (typeFilter.HasValue && typeId != typeFilter.Value) continue;
-            var relId = new RelationshipId(RecordHelpers.ReadInt48(e[2..]));
-            var neighborId = new NodeId(RecordHelpers.ReadInt48(e[8..]));
-            buffer[offset + written++] = new AdjacencyEntry(typeId, relId, neighborId);
+            var edgeId = new EdgeId(RecordHelpers.ReadInt48(e[2..]));
+            var neighborId = new VertexId(RecordHelpers.ReadInt48(e[8..]));
+            buffer[offset + written++] = new AdjacencyEntry(typeId, edgeId, neighborId);
         }
         return written;
     }
 
     private static long WriteBlocks(
         IPagedFile dataFile,
-        List<(short TypeId, long RelId, long NeighborId)> outs,
-        List<(short TypeId, long RelId, long NeighborId)> ins)
+        List<(short TypeId, long EdgeId, long NeighborId)> outs,
+        List<(short TypeId, long EdgeId, long NeighborId)> ins)
     {
         // Pre-plan pages so we know NextPageId before writing each page.
         var pages = new List<(int OutCount, int InCount)>();
@@ -310,14 +310,14 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
             {
                 var e = outs[outIdx];
                 BinaryPrimitives.WriteInt16LittleEndian(body[off..], e.TypeId);
-                RecordHelpers.WriteInt48(body[(off + 2)..], e.RelId);
+                RecordHelpers.WriteInt48(body[(off + 2)..], e.EdgeId);
                 RecordHelpers.WriteInt48(body[(off + 8)..], e.NeighborId);
             }
             for (int i = 0; i < inCount; i++, inIdx++, off += EntrySize)
             {
                 var e = ins[inIdx];
                 BinaryPrimitives.WriteInt16LittleEndian(body[off..], e.TypeId);
-                RecordHelpers.WriteInt48(body[(off + 2)..], e.RelId);
+                RecordHelpers.WriteInt48(body[(off + 2)..], e.EdgeId);
                 RecordHelpers.WriteInt48(body[(off + 8)..], e.NeighborId);
             }
             ph.Dispose();
@@ -326,8 +326,8 @@ internal sealed class AdjacencyBlockStore : IAdjacencyBlockStore, IDisposable
         return pageIds[0];
     }
 
-    private static List<(short TypeId, long RelId, long NeighborId)> GetOrAdd(
-        Dictionary<long, List<(short TypeId, long RelId, long NeighborId)>> dict, long key)
+    private static List<(short TypeId, long EdgeId, long NeighborId)> GetOrAdd(
+        Dictionary<long, List<(short TypeId, long EdgeId, long NeighborId)>> dict, long key)
     {
         if (!dict.TryGetValue(key, out var list))
             dict[key] = list = [];

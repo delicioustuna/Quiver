@@ -6,7 +6,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// incidence chain 走査と binary relationship 1-hop の store-level 比較。
+/// incidence chain 走査と binary edge 1-hop の store-level 比較。
 /// role 指定 co-membership が binary 1-hop p50 の 3 倍以内かを判定する。
 /// </summary>
 public static class IncidenceTraversalBenchmarks
@@ -25,7 +25,7 @@ public static class IncidenceTraversalBenchmarks
         Console.WriteLine("=== Incidence traversal vs. binary 1-hop ===");
         Console.WriteLine($"warmup={warmup}  iterations={iterations}  arity=4");
         Console.WriteLine();
-        Console.WriteLine($"{"Degree",8} {"Binary p50",12} {"Node chain",12} {"Member expand",14} {"Chain p50",12} {"Block p50",12} {"Block ratio",12} {"Chain alloc",12} {"Block alloc",12}");
+        Console.WriteLine($"{"Degree",8} {"Binary p50",12} {"Vertex chain",12} {"Member expand",14} {"Chain p50",12} {"Block p50",12} {"Block ratio",12} {"Chain alloc",12} {"Block alloc",12}");
         Console.WriteLine(new string('-', 128));
 
         foreach (int degree in degrees)
@@ -43,23 +43,23 @@ public static class IncidenceTraversalBenchmarks
 
         try
         {
-            var nodeStore = new VersionedNodeStore(files[0], new ItemPointerMap(files[1]), labelIndex: null);
-            var relStore = new VersionedRelationshipStore(files[2], new ItemPointerMap(files[3]));
-            var hyperedgeStore = new VersionedHyperedgeStore(files[4], new ItemPointerMap(files[5]));
+            var vertexStore = new VersionedVertexStore(files[0], new ItemPointerMap(files[1]), labelIndex: null);
+            var edgeStore = new VersionedEdgeStore(files[2], new ItemPointerMap(files[3]));
+            var nexusStore = new VersionedNexusStore(files[4], new ItemPointerMap(files[5]));
             var incidenceStore = new IncidenceStore(files[6]);
-            var nodeHeadStore = new NodeIncidenceHeadStore(files[8]);
+            var vertexHeadStore = new VertexIncidenceHeadStore(files[8]);
             var coMembershipStore = new CoMembershipBlockStore(
                 [(SubjectRole, ObjectRole)]);
 
-            NodeId hub = nodeStore.Allocate(new LabelId(1));
+            VertexId hub = vertexStore.Allocate(new LabelId(1));
 
             for (int i = 0; i < degree; i++)
             {
-                var obj = nodeStore.Allocate(new LabelId(2));
-                var extra1 = nodeStore.Allocate(new LabelId(2));
-                var extra2 = nodeStore.Allocate(new LabelId(2));
+                var obj = vertexStore.Allocate(new LabelId(2));
+                var extra1 = vertexStore.Allocate(new LabelId(2));
+                var extra2 = vertexStore.Allocate(new LabelId(2));
 
-                relStore.Create(nodeStore, hub, obj, new RelationshipTypeId(1));
+                edgeStore.Create(vertexStore, hub, obj, new EdgeTypeId(1));
 
                 IncidenceMember[] members =
                 [
@@ -68,16 +68,16 @@ public static class IncidenceTraversalBenchmarks
                     new(extra1, Extra1Role),
                     new(extra2, Extra2Role),
                 ];
-                hyperedgeStore.Create(new HyperedgeTypeId(1), members, incidenceStore, nodeHeadStore);
+                nexusStore.Create(new NexusTypeId(1), members, incidenceStore, vertexHeadStore);
             }
-            coMembershipStore.Rebuild(hyperedgeStore, incidenceStore);
+            coMembershipStore.Rebuild(nexusStore, incidenceStore);
 
             // warmup
             for (int i = 0; i < warmup; i++)
             {
-                BinaryOneHop(relStore, hub, nodeStore);
-                CoMembershipRoleFilter(incidenceStore, hub, nodeHeadStore, hyperedgeStore);
-                CoMembershipBlock(coMembershipStore, hub, hyperedgeStore);
+                BinaryOneHop(edgeStore, hub, vertexStore);
+                CoMembershipRoleFilter(incidenceStore, hub, vertexHeadStore, nexusStore);
+                CoMembershipBlock(coMembershipStore, hub, nexusStore);
             }
 
             // measure binary
@@ -85,7 +85,7 @@ public static class IncidenceTraversalBenchmarks
             for (int i = 0; i < iterations; i++)
             {
                 long start = Stopwatch.GetTimestamp();
-                int c = BinaryOneHop(relStore, hub, nodeStore);
+                int c = BinaryOneHop(edgeStore, hub, vertexStore);
                 binaryTimes[i] = Stopwatch.GetElapsedTime(start).TotalNanoseconds;
                 if (c != degree) throw new InvalidOperationException($"binary count {c} != {degree}");
             }
@@ -93,11 +93,11 @@ public static class IncidenceTraversalBenchmarks
             // measure co-membership allocation
             long allocBefore = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < 100; i++)
-                CoMembershipRoleFilter(incidenceStore, hub, nodeHeadStore, hyperedgeStore);
+                CoMembershipRoleFilter(incidenceStore, hub, vertexHeadStore, nexusStore);
             long allocPer = (GC.GetAllocatedBytesForCurrentThread() - allocBefore) / 100;
             allocBefore = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < 100; i++)
-                CoMembershipBlock(coMembershipStore, hub, hyperedgeStore);
+                CoMembershipBlock(coMembershipStore, hub, nexusStore);
             long blockAllocPer = (GC.GetAllocatedBytesForCurrentThread() - allocBefore) / 100;
 
             // measure co-membership latency
@@ -106,36 +106,36 @@ public static class IncidenceTraversalBenchmarks
             for (int i = 0; i < iterations; i++)
             {
                 long start = Stopwatch.GetTimestamp();
-                int c = CoMembershipRoleFilter(incidenceStore, hub, nodeHeadStore, hyperedgeStore);
+                int c = CoMembershipRoleFilter(incidenceStore, hub, vertexHeadStore, nexusStore);
                 coMemTimes[i] = Stopwatch.GetElapsedTime(start).TotalNanoseconds;
                 if (c != degree) throw new InvalidOperationException($"co-mem count {c} != {degree}");
 
                 start = Stopwatch.GetTimestamp();
-                c = CoMembershipBlock(coMembershipStore, hub, hyperedgeStore);
+                c = CoMembershipBlock(coMembershipStore, hub, nexusStore);
                 blockTimes[i] = Stopwatch.GetElapsedTime(start).TotalNanoseconds;
                 if (c != degree) throw new InvalidOperationException($"block count {c} != {degree}");
             }
 
-            var hyperedgeIds = new HyperedgeId[degree];
-            int hyperedgeCount = CollectHyperedges(
-                incidenceStore, hub, nodeHeadStore, hyperedgeStore, hyperedgeIds);
-            if (hyperedgeCount != degree)
-                throw new InvalidOperationException($"hyperedge count {hyperedgeCount} != {degree}");
+            var nexusIds = new NexusId[degree];
+            int nexusCount = CollectNexuses(
+                incidenceStore, hub, vertexHeadStore, nexusStore, nexusIds);
+            if (nexusCount != degree)
+                throw new InvalidOperationException($"nexus count {nexusCount} != {degree}");
 
             // 1-hop を構成する二段を分けて測る。配列化は計測外で行い、
-            // 第一段は node chain の可視性判定まで、第二段は同じ header 集合から
+            // 第一段は vertex chain の可視性判定まで、第二段は同じ header 集合から
             // role 指定 member を展開する費用だけを計上する。
-            var nodeChainTimes = new double[iterations];
+            var vertexChainTimes = new double[iterations];
             var memberExpandTimes = new double[iterations];
             for (int i = 0; i < iterations; i++)
             {
                 long start = Stopwatch.GetTimestamp();
-                int c = CountHyperedges(incidenceStore, hub, nodeHeadStore, hyperedgeStore);
-                nodeChainTimes[i] = Stopwatch.GetElapsedTime(start).TotalNanoseconds;
-                if (c != degree) throw new InvalidOperationException($"node chain count {c} != {degree}");
+                int c = CountNexuses(incidenceStore, hub, vertexHeadStore, nexusStore);
+                vertexChainTimes[i] = Stopwatch.GetElapsedTime(start).TotalNanoseconds;
+                if (c != degree) throw new InvalidOperationException($"vertex chain count {c} != {degree}");
 
                 start = Stopwatch.GetTimestamp();
-                c = ExpandMembers(incidenceStore, hyperedgeStore, hyperedgeIds);
+                c = ExpandMembers(incidenceStore, nexusStore, nexusIds);
                 memberExpandTimes[i] = Stopwatch.GetElapsedTime(start).TotalNanoseconds;
                 if (c != degree) throw new InvalidOperationException($"member count {c} != {degree}");
             }
@@ -143,13 +143,13 @@ public static class IncidenceTraversalBenchmarks
             Array.Sort(binaryTimes);
             Array.Sort(coMemTimes);
             Array.Sort(blockTimes);
-            Array.Sort(nodeChainTimes);
+            Array.Sort(vertexChainTimes);
             Array.Sort(memberExpandTimes);
 
             double bp50 = binaryTimes[(int)(iterations * 0.50)];
             double cp50 = coMemTimes[(int)(iterations * 0.50)];
             double vp50 = blockTimes[(int)(iterations * 0.50)];
-            double np50 = nodeChainTimes[(int)(iterations * 0.50)];
+            double np50 = vertexChainTimes[(int)(iterations * 0.50)];
             double mp50 = memberExpandTimes[(int)(iterations * 0.50)];
             double ratio = vp50 / bp50;
 
@@ -163,24 +163,24 @@ public static class IncidenceTraversalBenchmarks
         }
     }
 
-    private static int BinaryOneHop(VersionedRelationshipStore relStore, NodeId hub, VersionedNodeStore nodeStore)
+    private static int BinaryOneHop(VersionedEdgeStore edgeStore, VertexId hub, VersionedVertexStore vertexStore)
     {
         int count = 0;
-        var en = relStore.EnumerateNeighbors(hub, nodeStore);
+        var en = edgeStore.EnumerateNeighbors(hub, vertexStore);
         while (en.MoveNext()) count++;
         return count;
     }
 
     private static int CoMembershipRoleFilter(
-        IncidenceStore incidenceStore, NodeId hub,
-        NodeIncidenceHeadStore nodeHeadStore, VersionedHyperedgeStore hyperedgeStore)
+        IncidenceStore incidenceStore, VertexId hub,
+        VertexIncidenceHeadStore vertexHeadStore, VersionedNexusStore nexusStore)
     {
         int count = 0;
-        var nodeEn = incidenceStore.EnumerateByNode(hub, nodeHeadStore, hyperedgeStore);
-        while (nodeEn.MoveNext())
+        var vertexEn = incidenceStore.EnumerateByVertex(hub, vertexHeadStore, nexusStore);
+        while (vertexEn.MoveNext())
         {
-            HyperedgeId heId = nodeEn.Current.HyperedgeId;
-            var memberEn = incidenceStore.EnumerateByHyperedge(heId, hyperedgeStore);
+            NexusId heId = vertexEn.Current.NexusId;
+            var memberEn = incidenceStore.EnumerateByNexus(heId, nexusStore);
             while (memberEn.MoveNext())
             {
                 if (memberEn.Current.RoleId == ObjectRole)
@@ -190,36 +190,36 @@ public static class IncidenceTraversalBenchmarks
         return count;
     }
 
-    private static int CountHyperedges(
-        IncidenceStore incidenceStore, NodeId hub,
-        NodeIncidenceHeadStore nodeHeadStore, VersionedHyperedgeStore hyperedgeStore)
+    private static int CountNexuses(
+        IncidenceStore incidenceStore, VertexId hub,
+        VertexIncidenceHeadStore vertexHeadStore, VersionedNexusStore nexusStore)
     {
         int count = 0;
-        var nodeEn = incidenceStore.EnumerateByNode(hub, nodeHeadStore, hyperedgeStore);
-        while (nodeEn.MoveNext()) count++;
+        var vertexEn = incidenceStore.EnumerateByVertex(hub, vertexHeadStore, nexusStore);
+        while (vertexEn.MoveNext()) count++;
         return count;
     }
 
-    private static int CollectHyperedges(
-        IncidenceStore incidenceStore, NodeId hub,
-        NodeIncidenceHeadStore nodeHeadStore, VersionedHyperedgeStore hyperedgeStore,
-        Span<HyperedgeId> destination)
+    private static int CollectNexuses(
+        IncidenceStore incidenceStore, VertexId hub,
+        VertexIncidenceHeadStore vertexHeadStore, VersionedNexusStore nexusStore,
+        Span<NexusId> destination)
     {
         int count = 0;
-        var nodeEn = incidenceStore.EnumerateByNode(hub, nodeHeadStore, hyperedgeStore);
-        while (nodeEn.MoveNext())
-            destination[count++] = nodeEn.Current.HyperedgeId;
+        var vertexEn = incidenceStore.EnumerateByVertex(hub, vertexHeadStore, nexusStore);
+        while (vertexEn.MoveNext())
+            destination[count++] = vertexEn.Current.NexusId;
         return count;
     }
 
     private static int ExpandMembers(
-        IncidenceStore incidenceStore, VersionedHyperedgeStore hyperedgeStore,
-        ReadOnlySpan<HyperedgeId> hyperedgeIds)
+        IncidenceStore incidenceStore, VersionedNexusStore nexusStore,
+        ReadOnlySpan<NexusId> nexusIds)
     {
         int count = 0;
-        foreach (HyperedgeId hyperedgeId in hyperedgeIds)
+        foreach (NexusId nexusId in nexusIds)
         {
-            var memberEn = incidenceStore.EnumerateByHyperedge(hyperedgeId, hyperedgeStore);
+            var memberEn = incidenceStore.EnumerateByNexus(nexusId, nexusStore);
             while (memberEn.MoveNext())
             {
                 if (memberEn.Current.RoleId == ObjectRole)
@@ -231,15 +231,15 @@ public static class IncidenceTraversalBenchmarks
 
     private static int CoMembershipBlock(
         CoMembershipBlockStore store,
-        NodeId origin,
-        VersionedHyperedgeStore hyperedgeStore)
+        VertexId origin,
+        VersionedNexusStore nexusStore)
     {
         CoMembershipEntry[] entries = store.GetEntries(
             origin, SubjectRole, ObjectRole, out int entryCount);
         int count = 0;
         for (int i = 0; i < entryCount; i++)
         {
-            using var header = hyperedgeStore.Read(entries[i].HyperedgeId);
+            using var header = nexusStore.Read(entries[i].NexusId);
             if (header.InUse)
                 count++;
         }

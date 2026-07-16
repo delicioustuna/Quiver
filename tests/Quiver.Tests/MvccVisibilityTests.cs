@@ -7,11 +7,11 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// <c>GraphDatabase</c> 経由で MVCC のスナップショット分離を確認する
+/// <c>QuiverDatabase</c> 経由で MVCC のスナップショット分離を確認する
 /// エンドツーエンドテスト。
 ///
 /// <para>
-/// NodeStore / RelationshipStore / PropertyStore のレコードヘッダーが xmin / xmax を保持し、
+/// VertexStore / EdgeStore / PropertyStore のレコードヘッダーが xmin / xmax を保持し、
 /// トランザクション開始時に <c>MvccContext.Begin</c>、コミット時に
 /// <c>CommittedTxRegistry.MarkCommitted</c> が呼ばれる一連の経路を確認する。
 /// </para>
@@ -19,12 +19,12 @@ namespace Quiver.Tests;
 public sealed class MvccVisibilityTests : IDisposable
 {
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public MvccVisibilityTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_mvcc_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
     }
 
     public void Dispose()
@@ -37,58 +37,58 @@ public sealed class MvccVisibilityTests : IDisposable
     [Fact]
     public void Snapshot_does_not_see_concurrent_uncommitted_inserts()
     {
-        // 既存 node を 1 つ commit。
-        NodeId existing;
+        // 既存 vertex を 1 つ commit。
+        VertexId existing;
         using (var tx = _db.BeginTransaction())
         {
-            existing = tx.CreateNode("Existing");
+            existing = tx.CreateVertex("Existing");
             tx.Commit();
         }
 
         // reader tx を開始 (snapshot 取得時に concurrent writer は active なし)。
         using var reader = _db.BeginReadOnlyTransaction();
 
-        // writer tx を別に開始して node を追加 (まだ commit しない)。
+        // writer tx を別に開始して vertex を追加 (まだ commit しない)。
         var writer = _db.BeginTransaction();
-        var added = writer.CreateNode("Added");
+        var added = writer.CreateVertex("Added");
 
-        // reader からは追加 node は invisible。
-        reader.NodeExists(added).Should().BeFalse("writer がまだ commit していないので snapshot から見えない");
-        reader.NodeExists(existing).Should().BeTrue();
+        // reader からは追加 vertex は invisible。
+        reader.VertexExists(added).Should().BeFalse("writer がまだ commit していないので snapshot から見えない");
+        reader.VertexExists(existing).Should().BeTrue();
 
         // writer commit 後も reader の snapshot からは依然不可視 (snapshot isolation)。
         writer.Commit();
-        reader.NodeExists(added).Should().BeFalse("writer commit 後も reader snapshot からは見えない (SI)");
+        reader.VertexExists(added).Should().BeFalse("writer commit 後も reader snapshot からは見えない (SI)");
 
         // 新規 reader を開けば可視 (writer commit は新規 snapshot の前)。
         using var freshReader = _db.BeginReadOnlyTransaction();
-        freshReader.NodeExists(added).Should().BeTrue("新規 snapshot からは writer commit が見える");
-        freshReader.NodeExists(existing).Should().BeTrue();
+        freshReader.VertexExists(added).Should().BeTrue("新規 snapshot からは writer commit が見える");
+        freshReader.VertexExists(existing).Should().BeTrue();
     }
 
     [Fact]
     public void Aborted_tx_writes_are_invisible_to_all()
     {
         var failedTx = _db.BeginTransaction();
-        var ghost = failedTx.CreateNode("Ghost");
+        var ghost = failedTx.CreateVertex("Ghost");
         failedTx.Rollback();
 
         using var observer = _db.BeginReadOnlyTransaction();
-        observer.NodeExists(ghost).Should().BeFalse("abort された tx の write は visible にならない");
+        observer.VertexExists(ghost).Should().BeFalse("abort された tx の write は visible にならない");
     }
 
     [Fact]
     public void Concurrent_reader_sees_consistent_snapshot_across_long_operation()
     {
-        // base: 3 node + 2 relationship。
-        NodeId a, b, c;
+        // base: 3 vertex + 2 edge。
+        VertexId a, b, c;
         using (var tx = _db.BeginTransaction())
         {
-            a = tx.CreateNode("A");
-            b = tx.CreateNode("B");
-            c = tx.CreateNode("C");
-            tx.CreateRelationship(a, b, "R");
-            tx.CreateRelationship(a, c, "R");
+            a = tx.CreateVertex("A");
+            b = tx.CreateVertex("B");
+            c = tx.CreateVertex("C");
+            tx.CreateEdge(a, b, "R");
+            tx.CreateEdge(a, c, "R");
             tx.Commit();
         }
 
@@ -99,8 +99,8 @@ public sealed class MvccVisibilityTests : IDisposable
         // 並行 writer が新規エッジ追加 + 既存 b → a エッジ削除を伴う tx を実行。
         using (var writer = _db.BeginTransaction())
         {
-            var d = writer.CreateNode("D");
-            writer.CreateRelationship(a, d, "R");
+            var d = writer.CreateVertex("D");
+            writer.CreateEdge(a, d, "R");
             writer.Commit();
         }
 
@@ -112,30 +112,30 @@ public sealed class MvccVisibilityTests : IDisposable
     [Fact]
     public void Reopen_preserves_visibility_for_pre_committed_data()
     {
-        NodeId pre;
+        VertexId pre;
         using (var tx = _db.BeginTransaction())
         {
-            pre = tx.CreateNode("Pre");
+            pre = tx.CreateVertex("Pre");
             tx.SetProperty(pre, "score", PropertyValue.FromInt32(42));
             tx.Commit();
         }
         _db.Dispose();
 
-        using var reopened = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var reopened = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var rtx = reopened.BeginReadOnlyTransaction();
         // recovery の CommittedTxRegistry rebuild と horizon により xmin が registry / horizon 経由で visible。
-        rtx.NodeExists(pre).Should().BeTrue();
+        rtx.VertexExists(pre).Should().BeTrue();
         rtx.GetProperty(pre, "score").Int32Value.Should().Be(42);
     }
 
     [Fact]
     public void Property_overwrite_is_visible_to_writer_not_to_prior_reader()
     {
-        // base: node with property = 100
-        NodeId n;
+        // base: vertex with property = 100
+        VertexId n;
         using (var tx = _db.BeginTransaction())
         {
-            n = tx.CreateNode("N");
+            n = tx.CreateVertex("N");
             tx.SetProperty(n, "v", PropertyValue.FromInt32(100));
             tx.Commit();
         }
@@ -162,42 +162,42 @@ public sealed class MvccVisibilityTests : IDisposable
     {
         // 単一スレッドで長時間リーダーとライタートランザクションを交互に進め、
         // 時系列にインターリーブし、reader snapshot が writer commit に揺らがないことを確認。
-        var baseNodes = new List<NodeId>();
+        var baseVertices = new List<VertexId>();
         using (var tx = _db.BeginTransaction())
         {
             for (int i = 0; i < 100; i++)
-                baseNodes.Add(tx.CreateNode("Base"));
+                baseVertices.Add(tx.CreateVertex("Base"));
             tx.Commit();
         }
 
         using var longReader = _db.BeginReadOnlyTransaction();
         int baselineCount = 0;
-        foreach (var nid in baseNodes)
-            if (longReader.NodeExists(nid)) baselineCount++;
-        baselineCount.Should().Be(baseNodes.Count);
+        foreach (var nid in baseVertices)
+            if (longReader.VertexExists(nid)) baselineCount++;
+        baselineCount.Should().Be(baseVertices.Count);
 
         for (int round = 0; round < 50; round++)
         {
             for (int j = 0; j < 4; j++)
             {
                 using var wtx = _db.BeginTransaction();
-                var n = wtx.CreateNode("W");
+                var n = wtx.CreateVertex("W");
                 wtx.SetProperty(n, "round", PropertyValue.FromInt64(round));
                 wtx.Commit();
             }
 
             int observed = 0;
-            foreach (var nid in baseNodes)
-                if (longReader.NodeExists(nid)) observed++;
+            foreach (var nid in baseVertices)
+                if (longReader.VertexExists(nid)) observed++;
             observed.Should().Be(baselineCount,
                 $"reader snapshot は writer commit を超えても drift せず、round {round} で {observed} != {baselineCount}");
         }
 
         using var fresh = _db.BeginReadOnlyTransaction();
         int baseFromFresh = 0;
-        foreach (var nid in baseNodes)
-            if (fresh.NodeExists(nid)) baseFromFresh++;
-        baseFromFresh.Should().Be(baseNodes.Count);
+        foreach (var nid in baseVertices)
+            if (fresh.VertexExists(nid)) baseFromFresh++;
+        baseFromFresh.Should().Be(baseVertices.Count);
     }
 
     [Fact]
@@ -206,11 +206,11 @@ public sealed class MvccVisibilityTests : IDisposable
         // 1 秒走査する長時間リーダーと並行ライターが互いをブロックせず、
         // reader の結果が consistent snapshot」を真の multi-thread で検証する。
         // per-frame RW lock により PagedFile レベルの torn-read を防ぐ。
-        var baseNodes = new List<NodeId>();
+        var baseVertices = new List<VertexId>();
         using (var tx = _db.BeginTransaction())
         {
             for (int i = 0; i < 200; i++)
-                baseNodes.Add(tx.CreateNode("Base"));
+                baseVertices.Add(tx.CreateVertex("Base"));
             tx.Commit();
         }
 
@@ -228,7 +228,7 @@ public sealed class MvccVisibilityTests : IDisposable
                 for (int i = 0; i < writerIterations; i++)
                 {
                     using var wtx = _db.BeginTransaction();
-                    var n = wtx.CreateNode("Writer");
+                    var n = wtx.CreateVertex("Writer");
                     wtx.SetProperty(n, "i", PropertyValue.FromInt64(i));
                     wtx.Commit();
                 }
@@ -244,14 +244,14 @@ public sealed class MvccVisibilityTests : IDisposable
             {
                 using var rtx = _db.BeginReadOnlyTransaction();
                 int baselineCount = 0;
-                foreach (var nid in baseNodes)
-                    if (rtx.NodeExists(nid)) baselineCount++;
+                foreach (var nid in baseVertices)
+                    if (rtx.VertexExists(nid)) baselineCount++;
 
                 while (!stopWriter.IsSet)
                 {
                     int observed = 0;
-                    foreach (var nid in baseNodes)
-                        if (rtx.NodeExists(nid)) observed++;
+                    foreach (var nid in baseVertices)
+                        if (rtx.VertexExists(nid)) observed++;
                     if (observed != baselineCount)
                         driftErrors.Add($"snapshot drift: baseline={baselineCount}, observed={observed}");
                 }
@@ -269,9 +269,9 @@ public sealed class MvccVisibilityTests : IDisposable
 
         using var fresh = _db.BeginReadOnlyTransaction();
         int baseFromFresh = 0;
-        foreach (var nid in baseNodes)
-            if (fresh.NodeExists(nid)) baseFromFresh++;
-        baseFromFresh.Should().Be(baseNodes.Count, "全 base node が fresh snapshot から visible");
+        foreach (var nid in baseVertices)
+            if (fresh.VertexExists(nid)) baseFromFresh++;
+        baseFromFresh.Should().Be(baseVertices.Count, "全 base vertex が fresh snapshot から visible");
     }
 
     [Fact]
@@ -279,34 +279,34 @@ public sealed class MvccVisibilityTests : IDisposable
     {
         // 単一トランザクションのワークロードで書き込み性能が極端に低下しないことを
         // MVCC なしの比較は format 互換性のため難しいので、絶対値の妥当性チェックに留める。
-        // 1000 ノード createNode + commit が 30 秒以内に終わること (CI で十分余裕のある上限)。
+        // 1000 Vertex createVertex + commit が 30 秒以内に終わること (CI で十分余裕のある上限)。
         const int N = 1000;
         var sw = System.Diagnostics.Stopwatch.StartNew();
         using (var tx = _db.BeginTransaction())
         {
             for (int i = 0; i < N; i++)
-                tx.CreateNode("X");
+                tx.CreateVertex("X");
             tx.Commit();
         }
         sw.Stop();
         sw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(30),
-            $"MVCC オーバヘッド sanity: {N} ノード create+commit が {sw.ElapsedMilliseconds} ms");
+            $"MVCC オーバヘッド sanity: {N} Vertex create+commit が {sw.ElapsedMilliseconds} ms");
 
         // verify all visible
         using var verify = _db.BeginReadOnlyTransaction();
         int visible = 0;
         for (long id = 0; id < N + 10; id++)
-            if (verify.NodeExists(new NodeId(id))) visible++;
-        visible.Should().BeGreaterOrEqualTo(N, $"創出した {N} ノードが visible");
+            if (verify.VertexExists(new VertexId(id))) visible++;
+        visible.Should().BeGreaterOrEqualTo(N, $"創出した {N} Vertexが visible");
     }
 
-    private static int CountOutgoing(IGraphTransaction tx, NodeId node)
+    private static int CountOutgoing(IGraphTransaction tx, VertexId vertex)
     {
         int count = 0;
-        var en = tx.EnumerateRelationships(node, Direction.Outgoing);
+        var en = tx.EnumerateEdges(vertex, Direction.Outgoing);
         while (en.MoveNext())
         {
-            if (en.Current.Source == node) count++;
+            if (en.Current.Source == vertex) count++;
         }
         return count;
     }

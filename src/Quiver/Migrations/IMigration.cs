@@ -4,7 +4,7 @@ namespace Quiver.Migrations;
 /// 宣言的スキーママイグレーション。EF Core 風に <see cref="Version"/> の昇順で適用される。
 /// </summary>
 /// <remarks>
-/// 各マイグレーションは <see cref="GraphDatabase.MigrateAsync"/> に渡され、未適用のものだけが
+/// 各マイグレーションは <see cref="QuiverDatabase.MigrateAsync"/> に渡され、未適用のものだけが
 /// 順に <see cref="ApplyAsync"/> される。同じ <see cref="Id"/> は 1 度しか適用されないため、
 /// 再実行 (アプリ再起動 / 障害復旧後) でも冪等。失敗時はトランザクションが rollback され、
 /// migration history にも登録されない (= 次回起動時に再度 Apply が試みられる)。

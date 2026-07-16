@@ -10,7 +10,7 @@ namespace Quiver.Index.FullText;
 /// および維持・検索に必要なメタデータ (label, property key, tokenizer id)。
 /// <para>
 /// postings/norms は通常の B+Tree テナントなので、トランザクション維持、
-/// abort/crash rollback (index ARIES)、buffer pool、WAL はすべて継承される。
+/// abort の in-process rollback、buffer pool、commit winner の page-WAL はすべて継承される。
 /// orphan sweep は entityId が値ではなく postings/norms の<i>キー</i>に入っているため
 /// 専用経路が必要。
 /// </para>
@@ -268,34 +268,6 @@ internal sealed class FullTextIndex : IDisposable
     // ---- orphan sweep support ----
     // postings は entityId を key 末尾 8B に、norms は entityId を key (Int64) に持つため、
     // 値ベースの汎用 sweep ではなく key からの entityId デコードが要る。
-
-    // ---- recovery 論理相 ----
-    // indexTenantId で postings / norms のどちらかへ raw apply を振り分ける。redo は state-setting
-    // (Upsert→UpsertRaw / Delete→DeleteRawEntry)、undo はその逆操作。いずれも冪等で二重適用安全。
-
-    /// <summary>Pass 2b redo — committed tx の leaf 論理ミューテーションを再適用する。</summary>
-    internal void ApplyLeafRedo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value)
-    {
-        var tree = TreeForTenant(tenantId);
-        if (isUpsert) tree.UpsertRaw(key, value);
-        else tree.DeleteRawEntry(key, value);
-    }
-
-    /// <summary>Pass 3 undo — Commit を持たない tx の leaf 論理ミューテーションを逆適用する。</summary>
-    internal void ApplyLeafUndo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value)
-    {
-        var tree = TreeForTenant(tenantId);
-        if (isUpsert) tree.DeleteRawEntry(key, value); // undo Upsert = delete
-        else tree.UpsertRaw(key, value);               // undo Delete = 旧値で再挿入
-    }
-
-    private IBTreeIndexFlushable TreeForTenant(byte tenantId)
-    {
-        if (tenantId == PostingsTenantId) return _postings;
-        if (tenantId == NormsTenantId) return _norms;
-        throw new Quiver.Core.CorruptionException(
-            $"FtLeafMutation tenant {tenantId} does not belong to full-text index '{Name}'.");
-    }
 
     internal IEnumerable<KeyValuePair<byte[], long>> EnumeratePostingsRaw() => _postings.EnumerateRawEntries();
     internal IEnumerable<KeyValuePair<byte[], long>> EnumerateNormsRaw() => _norms.EnumerateRawEntries();

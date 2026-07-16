@@ -1,6 +1,6 @@
 namespace Quiver.Core;
 
-// EntityKind は EntityId.cs で定義。ベクトルコードは Node / Relationship / Hyperedge を使用し、
+// EntityKind は EntityId.cs で定義。ベクトルコードは Vertex / Edge / Nexus を使用し、
 // Property は診断 / カタログ用に予約されている (IVectorStore 実装は拒否する)。
 
 /// <summary>
@@ -59,7 +59,7 @@ public enum VectorIndexKind : byte
 /// 正規化の扱いは <c>Quiver.Embedding</c> 側にある。
 /// </summary>
 /// <param name="Name">インデックス名 (一意)。</param>
-/// <param name="EntityKind">対象エンティティ種別 (Node / Relationship)。</param>
+/// <param name="EntityKind">対象エンティティ種別 (Vertex / Edge)。</param>
 /// <param name="SourcePropertyKeyId">埋め込み元の値を持つプロパティキー。</param>
 /// <param name="Dimensions">ベクトルの次元数。</param>
 /// <param name="Metric">スコアリングに使う距離尺度。</param>
@@ -266,4 +266,4 @@ public interface IVectorStore
 /// 不正な <c>k</c> 等) を表す例外。
 /// </summary>
 public sealed class VectorException(string message, Exception? inner = null)
-    : GraphDbException(message, inner!);
+    : QuiverException(message, inner!);

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -15,6 +15,6 @@
     <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
     <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
   </ItemGroup>
-  <!-- 属性は完全修飾名の文字列で照合するため (GraphNodeGenerator.NodeAttributeFqn 等)、
+  <!-- 属性は完全修飾名の文字列で照合するため (GraphVertexGenerator.VertexAttributeFqn 等)、
        属性アセンブリへの参照は不要。属性型は利用者側の Quiver から供給される。 -->
 </Project>

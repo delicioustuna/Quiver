@@ -16,7 +16,7 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
   外部公開したいなら、アプリ側で HTTP/gRPC API を立てて Quiver をその裏に置く
   ([`samples/Quiver.Samples.Hosting`](../../samples/Quiver.Samples.Hosting/) 参照)。
 - **1 つの DB ディレクトリは 1 プロセスからのみ開ける**。複数プロセスからの同時オープンは不可。
-  同一プロセス内では `GraphDatabase` を singleton 共有し、複数スレッドから使う (インスタンスはスレッドセーフ)。
+  同一プロセス内では `QuiverDatabase` を singleton 共有し、複数スレッドから使う (インスタンスはスレッドセーフ)。
 - **並行モデルは「単一ライタ + 並行リーダ」**。読み取りはスナップショット分離でロックフリーに並行でき、
   書き込み中でも読める。書き込みは 1 度に 1 tx を前提とするため、複数スレッドから書く場合はアプリ側で
   直列化する (`SemaphoreSlim(1,1)` ゲート、または専用ライタスレッド + キュー)。
@@ -52,11 +52,11 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
 
 ロードマップ上の 1.0 GA 出口条件は:
 
-> **100K nodes / 1M relationships / 10K concurrent reads (32 thread) を 1 時間連続 +
+> **100K vertices / 1M edges / 10K concurrent reads (32 thread) を 1 時間連続 +
 > chaos injection nightly が 24h 連続グリーン**
 
 これは「この規模・並列度で安定動作することを検証する」という目標であり、**上限ではない**が、
-この規模感が快適に動く設計ということ。これを大きく超える規模 (数億ノード等) は未検証領域。
+この規模感が快適に動く設計ということ。これを大きく超える規模 (数億Vertex等) は未検証領域。
 
 ### 書き込みスループット
 
@@ -117,7 +117,7 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
 
 | 項目 | 確認方法 / 決め方 | 効いてくるノブ |
 |---|---|---|
-| 想定ノード数 / エッジ数 | ドメインから見積もる。GA 目標 (100K/1M) を大きく超えるなら要実測 | — |
+| 想定Vertex数 / エッジ数 | ドメインから見積もる。GA 目標 (100K/1M) を大きく超えるなら要実測 | — |
 | hot working set のサイズ | 頻繁に触るページ量。全件か一部か | `BufferPoolSize` |
 | ピーク書き込み速度 | inserts/sec。bulk か per-tx か (鉄則) | tx 設計 / `CheckpointThresholdBytes` |
 | 並列 reader 数 | 同時に読むスレッド数 | `LockingMode = ReaderWriter` |

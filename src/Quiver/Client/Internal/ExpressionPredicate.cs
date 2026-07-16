@@ -5,7 +5,7 @@ namespace Quiver.Api.Internal;
 /// <summary>
 /// C# 式ツリー (<c>p =&gt; p.Age &gt; 20 &amp;&amp; p.Name.StartsWith("A")</c>) を
 /// 既存の <see cref="PropertyPredicate"/> ベースのフィルタ (<see cref="GraphTraversal{T}.Has(string, PropertyPredicate)"/>)
-/// へ変換する内部トランスレータ。ノード述語 (<c>TypedGraphTraversal&lt;T&gt;.Where</c>) と
+/// へ変換する内部トランスレータ。Vertex述語 (<c>TypedGraphTraversal&lt;T&gt;.Where</c>) と
 /// エッジ述語 (生成糖衣の <c>{Rel}(e =&gt; ...)</c>) で共有する。
 /// プロパティ名は CLR メンバ名をグラフキーとして用いる (既存の式ツリー版 <c>Has(selector, value)</c> と同規約)。
 /// 対応外の式は <see cref="NotSupportedException"/> を投げ、利用者は <c>Has(key, P.xxx)</c> を escape hatch にできる。

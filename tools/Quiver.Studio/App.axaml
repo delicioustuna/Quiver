@@ -112,13 +112,13 @@
                                 Padding="8,6"
                                 IsVisible="{Binding ViewModel.Statistics, Converter={x:Static ObjectConverters.IsNotNull}}">
                             <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
-                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{x:Static res:Strings.Stats_Nodes}" FontSize="11" />
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{x:Static res:Strings.Stats_Vertices}" FontSize="11" />
                                 <TextBlock Grid.Row="0" Grid.Column="1" FontSize="11"
-                                           Text="{Binding ViewModel.Statistics.NodeCount, StringFormat='{}{0:N0}'}" />
+                                           Text="{Binding ViewModel.Statistics.VertexCount, StringFormat='{}{0:N0}'}" />
 
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="{x:Static res:Strings.Stats_Relationships}" FontSize="11" />
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="{x:Static res:Strings.Stats_Edges}" FontSize="11" />
                                 <TextBlock Grid.Row="1" Grid.Column="1" FontSize="11"
-                                           Text="{Binding ViewModel.Statistics.RelationshipCount, StringFormat='{}{0:N0}'}" />
+                                           Text="{Binding ViewModel.Statistics.EdgeCount, StringFormat='{}{0:N0}'}" />
 
                                 <TextBlock Grid.Row="2" Grid.Column="0" Text="{x:Static res:Strings.Stats_Properties}" FontSize="11" />
                                 <TextBlock Grid.Row="2" Grid.Column="1" FontSize="11"

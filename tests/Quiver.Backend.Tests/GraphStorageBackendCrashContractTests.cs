@@ -39,7 +39,7 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     protected virtual string DatabasePath => _dir;
 
     protected IGraphStorageBackend Open()
-        => _factory.Open(DatabasePath, new GraphDatabaseOptions());
+        => _factory.Open(DatabasePath, new QuiverDatabaseOptions());
 
     // ===== (a) Commit → kill → reopen でコミット済みデータを復旧 =====
 
@@ -47,10 +47,10 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     public void Commit_then_kill_then_reopen_recovers_committed_data()
     {
         IGraphStorageBackend? backend = Open();
-        NodeId persisted;
+        VertexId persisted;
         using (var tx = backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false))
         {
-            persisted = tx.CreateNode("Survivor");
+            persisted = tx.CreateVertex("Survivor");
             tx.SetProperty(persisted, "marker", PropertyValue.FromInt64(7L));
             tx.Commit();
         }
@@ -59,24 +59,23 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
 
         using var reopened = Open();
         using var rtx = reopened.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: true);
-        rtx.NodeExists(persisted).Should().BeTrue();
+        rtx.VertexExists(persisted).Should().BeTrue();
         rtx.GetProperty(persisted, "marker").Int64Value.Should().Be(7L);
         rtx.Rollback();
     }
 
     // ===== (b) 書き込み中の kill 後も DB を再度開ける =====
     //
-    // binary backend はページの before-image を CompensationLogRecord として記録し、
-    // RecoveryManager は Commit レコードなしでクラッシュしたトランザクションに
-    // ARIES 方式の undo パスを実行する。書き込み途中の kill 後に reopen しても、
-    // 未コミットノードの痕跡が残ってはならない。
+    // binary backend は commit 直前の PageImage と明示 Commit を記録する。
+    // RecoveryManager は Commit のない transaction の PageImage を再生しない。
+    // 書き込み途中の kill 後に reopen しても未コミット Vertex の痕跡が残ってはならない。
 
     [Fact]
     public void KillDuringWrite_database_reopens_cleanly()
     {
         IGraphStorageBackend? backend = Open();
         var tx = backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false);
-        var doomed = tx.CreateNode("Doomed");
+        var doomed = tx.CreateVertex("Doomed");
         tx.SetProperty(doomed, "ephemeral", PropertyValue.FromInt64(999L));
         // 意図的に Commit しない。
 
@@ -95,8 +94,8 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     /// 将来の backend が strict rollback 契約を本質的に満たせない場合に限り override する。
     /// </summary>
     protected virtual void AssertUncommittedKillState(
-        IGraphTransaction tx, NodeId uncommittedNode)
-        => tx.NodeExists(uncommittedNode).Should().BeFalse(
+        IGraphTransaction tx, VertexId uncommittedVertex)
+        => tx.VertexExists(uncommittedVertex).Should().BeFalse(
             "uncommitted writes must not survive a kill (strict rollback contract)");
 
     // ===== (c) 混合ワークロード途中の kill でもコミット済み prefix を維持 =====
@@ -105,23 +104,23 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     public void KillDuringMixedWorkload_committed_writes_survive()
     {
         IGraphStorageBackend? backend = Open();
-        NodeId committed;
+        VertexId committed;
         using (var tx = backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false))
         {
-            committed = tx.CreateNode("Committed");
+            committed = tx.CreateVertex("Committed");
             tx.Commit();
         }
 
         // 2 本目のトランザクションを未コミットのまま模擬 kill する。
         var dirtyTx = backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false);
-        var dirty = dirtyTx.CreateNode("Dirty");
+        var dirty = dirtyTx.CreateVertex("Dirty");
 
         KillProcessSimulator.SimulateKill(ref backend);
 
         using var reopened = Open();
         using var rtx = reopened.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: true);
-        rtx.NodeExists(committed).Should().BeTrue("committed work must persist");
+        rtx.VertexExists(committed).Should().BeTrue("committed work must persist");
         AssertUncommittedKillState(rtx, dirty);
         rtx.Rollback();
     }
@@ -132,7 +131,7 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     public void RepeatedKillRecover_100_iterations_no_corruption()
     {
         const int Iterations = 100;
-        var ids = new List<NodeId>(Iterations);
+        var ids = new List<VertexId>(Iterations);
 
         for (int i = 0; i < Iterations; i++)
         {
@@ -142,16 +141,16 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
             {
                 foreach (var id in ids)
                 {
-                    rtx.NodeExists(id).Should().BeTrue(
-                        $"iteration {i}: previously committed node {id.Value} must still exist");
+                    rtx.VertexExists(id).Should().BeTrue(
+                        $"iteration {i}: previously committed vertex {id.Value} must still exist");
                 }
                 rtx.Rollback();
             }
 
-            NodeId next;
+            VertexId next;
             using (var wtx = backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false))
             {
-                next = wtx.CreateNode("Iter");
+                next = wtx.CreateVertex("Iter");
                 wtx.SetProperty(next, "i", PropertyValue.FromInt64(i));
                 wtx.Commit();
             }
@@ -164,7 +163,7 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
         using var ftx = final.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: true);
         for (int i = 0; i < Iterations; i++)
         {
-            ftx.NodeExists(ids[i]).Should().BeTrue();
+            ftx.VertexExists(ids[i]).Should().BeTrue();
             ftx.GetProperty(ids[i], "i").Int64Value.Should().Be(i);
         }
         ftx.Rollback();
@@ -177,10 +176,10 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     public void TornLastWrite_skipped_or_recovered()
     {
         IGraphStorageBackend? backend = Open();
-        NodeId pre;
+        VertexId pre;
         using (var tx = backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false))
         {
-            pre = tx.CreateNode("Pre");
+            pre = tx.CreateVertex("Pre");
             tx.Commit();
         }
 
@@ -195,7 +194,7 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
             reopened = Open();
             using var rtx = reopened.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: true);
             // torn write より前のコミット済み状態は残っていなければならない。
-            rtx.NodeExists(pre).Should().BeTrue("committed-before-tear data must survive");
+            rtx.VertexExists(pre).Should().BeTrue("committed-before-tear data must survive");
             rtx.Rollback();
         }
         catch (CorruptionException) { /* 破損を明示する挙動は許容する */ }
@@ -221,7 +220,7 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
         IGraphStorageBackend? backend = Open();
         using (var tx = backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false))
         {
-            tx.CreateNode("Will_be_corrupted");
+            tx.CreateVertex("Will_be_corrupted");
             tx.Commit();
         }
 
@@ -257,10 +256,10 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
     public void SidecarDeleted_backend_rebuilds_or_fails_safely()
     {
         IGraphStorageBackend? backend = Open();
-        NodeId stable;
+        VertexId stable;
         using (var tx = backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false))
         {
-            stable = tx.CreateNode("Stable");
+            stable = tx.CreateVertex("Stable");
             tx.Commit();
         }
 
@@ -273,8 +272,8 @@ public abstract class GraphStorageBackendCrashContractTests : IDisposable
             reopened = Open();
             using var rtx = reopened.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: true);
-            // sidecar が再構築可能な任意データなら、主ノードは引き続き読み取れる必要がある。
-            rtx.NodeExists(stable).Should().BeTrue();
+            // sidecar が再構築可能な任意データなら、主Vertexは引き続き読み取れる必要がある。
+            rtx.VertexExists(stable).Should().BeTrue();
             rtx.Rollback();
         }
         catch (StorageException) { /* fail-safe なら許容する */ }

@@ -10,7 +10,7 @@ namespace Quiver;
 public interface IGraphStorageBackend : IDisposable
 {
     // バックエンドがこのインタフェースを実装することで、
-    // <see cref="GraphDatabase"/> は薄いファサードに留まり、ストレージレイアウトを
+    // <see cref="QuiverDatabase"/> は薄いファサードに留まり、ストレージレイアウトを
     // ファクトリレベルで差し替え可能にする。
 
     // Transactions (ITransactionManager) / Access (IGraphAccessMethods) /
@@ -42,7 +42,7 @@ public interface IGraphStorageBackend : IDisposable
     // バイナリバックエンドの実装は: ベストエフォートでシャープチェックポイントを起動し、
     // 全データページファイル / 索引ファイルを page-by-page で複製した後、WAL セグメントを
     // 末尾までコピーする。並行で書き込むトランザクションは block されず、target を
-    // <see cref="GraphDatabase.Open"/> で開いたときに recovery が WAL から redo / undo して
+    // <see cref="QuiverDatabase.Open"/> で開いたときに recovery が WAL から redo / undo して
     // snapshot 時点までの整合状態に収束する。
     void CreateSnapshot(string targetDirectory, SnapshotOptions? options = null)
         => throw new NotSupportedException(

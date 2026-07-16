@@ -37,7 +37,7 @@ internal static class BenchTempDir
 
     /// <summary>
     /// <paramref name="prefix"/> + ランダム suffix で <see cref="Root"/> 配下の
-    /// パスを 1 つ返す。ディレクトリ実体は作らない(GraphDatabase.Open など
+    /// パスを 1 つ返す。ディレクトリ実体は作らない(QuiverDatabase.Open など
     /// 呼び出し側が必要に応じて作る)。ルートだけは確実に存在させておく。
     /// </summary>
     public static string Create(string prefix)

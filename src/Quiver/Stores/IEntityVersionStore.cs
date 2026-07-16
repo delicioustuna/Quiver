@@ -4,7 +4,7 @@ namespace Quiver.Storage.Records;
 /// <see cref="EntityVersionMeta"/> を <c>EntityId.LocalId</c> をキーに格納する sidecar の抽象。
 ///
 /// <para>Quiver の MVCC + SSN メタデータは EntityKind ごとに 1 ファイル
-/// (<see cref="Quiver.Wal.WalFileKind.NodeVersionMeta"/> / <see cref="Quiver.Wal.WalFileKind.RelationshipVersionMeta"/>
+/// (<see cref="Quiver.Wal.WalFileKind.VertexVersionMeta"/> / <see cref="Quiver.Wal.WalFileKind.EdgeVersionMeta"/>
 /// / <see cref="Quiver.Wal.WalFileKind.PropertyVersionMeta"/>) で保持する。本 interface はその物理層を抽象化。</para>
 ///
 /// <para>現時点ではどこからも呼ばれていない (テストのみ)。将来的に各 store の

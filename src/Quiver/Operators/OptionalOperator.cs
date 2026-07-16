@@ -9,8 +9,8 @@ namespace Quiver.Query.Physical;
 /// エンティティ列を 1 回だけそのまま放出する — これにより左側の行がドロップされず、
 /// 上流の値がそのまま流れる。
 ///
-/// 分岐は単一列 NodeId のタプルを返す必要がある。フォールスルー時の形状はソースの
-/// エンティティスロットの逐語コピーなので、出力列は常に単一 NodeId。
+/// 分岐は単一列 VertexId のタプルを返す必要がある。フォールスルー時の形状はソースの
+/// エンティティスロットの逐語コピーなので、出力列は常に単一 VertexId。
 /// </summary>
 internal sealed class OptionalOperator : IPhysicalOperator
 {
@@ -21,7 +21,7 @@ internal sealed class OptionalOperator : IPhysicalOperator
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
 
     private static readonly TupleSchema s_schema = new([
-        new ColumnDefinition("optional", TupleSlotType.NodeId)]);
+        new ColumnDefinition("optional", TupleSlotType.VertexId)]);
 
     private ITransaction? _tx;
     private bool _hasSource;

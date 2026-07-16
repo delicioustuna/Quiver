@@ -5,7 +5,7 @@ using Quiver.Transactions;
 
 namespace Quiver.Benchmarks.Operators;
 
-/// <summary>TS-6 sentinel: <see cref="OptionalOperator"/> always emitting the probe value.</summary>
+/// <summary> sentinel: <see cref="OptionalOperator"/> always emitting the probe value.</summary>
 [MemoryDiagnoser]
 [ShortRunJob]
 public class OptionalOperatorBench
@@ -24,7 +24,7 @@ public class OptionalOperatorBench
         private bool _emitted;
         private readonly TupleSlot[] _buffer = new TupleSlot[1];
         public EmitOnceBranch(CorrelatedInputOperator probe) => _probe = probe;
-        public TupleSchema Schema { get; } = new([new ColumnDefinition("optional", TupleSlotType.NodeId)]);
+        public TupleSchema Schema { get; } = new([new ColumnDefinition("optional", TupleSlotType.VertexId)]);
         public OperatorStatistics Statistics => default;
         public TupleRef Current => new(_buffer);
         public void Open(ITransaction tx) { _probe.Open(tx); _probe.MoveNext(); _emitted = false; }
@@ -41,7 +41,7 @@ public class OptionalOperatorBench
     [Benchmark]
     public int Optional_emit_each_row()
     {
-        var src = new NodeArraySource(_seed.PersonNodes);
+        var src = new VertexArraySource(_seed.PersonVertices);
         var probe = new CorrelatedInputOperator();
         using var op = new OptionalOperator(src, 0, probe, new EmitOnceBranch(probe));
         return OperatorBenchDrain.Drain(op, _seed.ReadTx);

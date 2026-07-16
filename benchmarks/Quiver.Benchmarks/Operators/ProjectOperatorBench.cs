@@ -3,7 +3,7 @@ using Quiver.Query.Physical;
 
 namespace Quiver.Benchmarks.Operators;
 
-/// <summary>TS-6 sentinel: <see cref="ProjectOperator"/> doubles col 0 into a new column.</summary>
+/// <summary> sentinel: <see cref="ProjectOperator"/> doubles col 0 into a new column.</summary>
 [MemoryDiagnoser]
 [ShortRunJob]
 public class ProjectOperatorBench
@@ -19,7 +19,7 @@ public class ProjectOperatorBench
     [Benchmark]
     public int Project_double()
     {
-        var src = new NodeArraySource(_seed.PersonNodes);
+        var src = new VertexArraySource(_seed.PersonVertices);
         var spec = new[] { new ProjectionSpec("doubled", new DoubleLongCompute()) };
         using var op = new ProjectOperator(src, spec);
         return OperatorBenchDrain.Drain(op, _seed.ReadTx);

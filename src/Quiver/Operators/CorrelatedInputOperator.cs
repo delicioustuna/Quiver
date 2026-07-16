@@ -1,4 +1,4 @@
-﻿using Quiver.Transactions;
+using Quiver.Transactions;
 
 namespace Quiver.Query.Physical;
 
@@ -14,7 +14,7 @@ internal sealed class CorrelatedInputOperator : IPhysicalOperator
     private TupleSlot _bound;
     private bool _pending;
 
-    public TupleSchema Schema { get; } = new([new ColumnDefinition("correlatedInput", TupleSlotType.NodeId)]);
+    public TupleSchema Schema { get; } = new([new ColumnDefinition("correlatedInput", TupleSlotType.VertexId)]);
     public OperatorStatistics Statistics { get; private set; }
     public TupleRef Current => new(_buffer);
 

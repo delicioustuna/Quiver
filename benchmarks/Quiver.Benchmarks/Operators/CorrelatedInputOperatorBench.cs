@@ -4,7 +4,7 @@ using Quiver.Query.Physical;
 namespace Quiver.Benchmarks.Operators;
 
 /// <summary>
-/// TS-6 sentinel: <see cref="CorrelatedInputOperator"/> bind+emit cycle.
+///  sentinel: <see cref="CorrelatedInputOperator"/> bind+emit cycle.
 /// The operator is normally driven from inside another operator (Coalesce /
 /// Optional / Union), so we measure the Bind/Open/MoveNext loop directly —
 /// matching how the parent operators rearm it per outer row.
@@ -28,9 +28,9 @@ public class CorrelatedInputOperatorBench
     {
         var probe = new CorrelatedInputOperator();
         int n = 0;
-        for (int i = 0; i < OperatorBenchSeed.NodeCount; i++)
+        for (int i = 0; i < OperatorBenchSeed.VertexCount; i++)
         {
-            probe.Bind(new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _seed.PersonNodes[i].Value });
+            probe.Bind(new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _seed.PersonVertices[i].Value });
             probe.Open(null!);
             while (probe.MoveNext()) n++;
         }

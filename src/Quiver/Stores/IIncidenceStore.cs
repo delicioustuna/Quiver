@@ -5,23 +5,23 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// node と hyperedge を結ぶ incidence record の割当と両方向 chain 列挙の契約。
-/// incidence 自身は独立した MVCC entity ではなく、可視性は参照先 hyperedge header に従う。
+/// vertex と nexus を結ぶ incidence record の割当と両方向 chain 列挙の契約。
+/// incidence 自身は独立した MVCC entity ではなく、可視性は参照先 nexus header に従う。
 /// </summary>
 internal interface IIncidenceStore
 {
     /// <summary>chain ポインタを指定して新しい incidence record を割り当てる。</summary>
     IncidenceId Allocate(
-        HyperedgeId hyperedgeId,
-        NodeId nodeId,
+        NexusId nexusId,
+        VertexId vertexId,
         RoleId roleId,
-        IncidenceId nextInNode,
-        IncidenceId nextInHyperedge);
+        IncidenceId nextInVertex,
+        IncidenceId nextInNexus);
 
     /// <summary>
     /// record を読む。範囲外や未使用 slot は <see cref="IncidenceReadHandle.InUse"/> が
     /// <c>false</c> のハンドルを返す。可視性判定は行わないため、呼び出し側が
-    /// hyperedge header で判定する。
+    /// nexus header で判定する。
     /// </summary>
     IncidenceReadHandle Read(IncidenceId incidenceId);
 
@@ -35,21 +35,21 @@ internal interface IIncidenceStore
     void Free(IncidenceId incidenceId);
 
     /// <summary>
-    /// node が参加する incidence を列挙する。参照先 hyperedge header が不可視な
+    /// vertex が参加する incidence を列挙する。参照先 nexus header が不可視な
     /// incidence は読み飛ばし、chain の後続は失わない。
     /// </summary>
-    NodeIncidenceEnumerator EnumerateByNode(
-        NodeId nodeId,
-        INodeIncidenceHeadStore nodeHeads,
-        IHyperedgeStore hyperedges);
+    VertexIncidenceEnumerator EnumerateByVertex(
+        VertexId vertexId,
+        IVertexIncidenceHeadStore vertexHeads,
+        INexusStore nexuses);
 
     /// <summary>
-    /// hyperedge のメンバー incidence を作成順に列挙する。
-    /// hyperedge header が不可視な場合は何も返さない。
+    /// nexus のメンバー incidence を作成順に列挙する。
+    /// nexus header が不可視な場合は何も返さない。
     /// </summary>
-    HyperedgeIncidenceEnumerator EnumerateByHyperedge(
-        HyperedgeId hyperedgeId,
-        IHyperedgeStore hyperedges);
+    NexusIncidenceEnumerator EnumerateByNexus(
+        NexusId nexusId,
+        INexusStore nexuses);
 
     /// <summary>生存 incidence 数</summary>
     long InUseCount { get; }
@@ -63,26 +63,26 @@ internal interface IIncidenceStore
 
 /// <summary>
 /// incidence record の読み取りスナップショット。
-/// <see cref="InUse"/> は record slot の生存フラグであり、hyperedge の可視性は含まない。
+/// <see cref="InUse"/> は record slot の生存フラグであり、nexus の可視性は含まない。
 /// </summary>
 internal readonly ref struct IncidenceReadHandle
 {
     internal IncidenceReadHandle(
         IncidenceId id,
         bool inUse,
-        HyperedgeId hyperedgeId,
-        NodeId nodeId,
+        NexusId nexusId,
+        VertexId vertexId,
         RoleId roleId,
-        IncidenceId nextInNode,
-        IncidenceId nextInHyperedge)
+        IncidenceId nextInVertex,
+        IncidenceId nextInNexus)
     {
         Id = id;
         InUse = inUse;
-        HyperedgeId = hyperedgeId;
-        NodeId = nodeId;
+        NexusId = nexusId;
+        VertexId = vertexId;
         RoleId = roleId;
-        NextInNode = nextInNode;
-        NextInHyperedge = nextInHyperedge;
+        NextInVertex = nextInVertex;
+        NextInNexus = nextInNexus;
     }
 
     /// <summary>incidence ID</summary>
@@ -91,20 +91,20 @@ internal readonly ref struct IncidenceReadHandle
     /// <summary>record slot が使用中か</summary>
     public bool InUse { get; }
 
-    /// <summary>所属する hyperedge</summary>
-    public HyperedgeId HyperedgeId { get; }
+    /// <summary>所属する nexus</summary>
+    public NexusId NexusId { get; }
 
-    /// <summary>参加している node</summary>
-    public NodeId NodeId { get; }
+    /// <summary>参加している vertex</summary>
+    public VertexId VertexId { get; }
 
     /// <summary>この参加の role</summary>
     public RoleId RoleId { get; }
 
-    /// <summary>node chain の後方 (Invalid = chain 終端)</summary>
-    public IncidenceId NextInNode { get; }
+    /// <summary>vertex chain の後方 (Invalid = chain 終端)</summary>
+    public IncidenceId NextInVertex { get; }
 
-    /// <summary>同一 hyperedge 内メンバー chain の後方 (Invalid = chain 終端)</summary>
-    public IncidenceId NextInHyperedge { get; }
+    /// <summary>同一 nexus 内メンバー chain の後方 (Invalid = chain 終端)</summary>
+    public IncidenceId NextInNexus { get; }
 
     public void Dispose() { }
 }
@@ -112,15 +112,15 @@ internal readonly ref struct IncidenceReadHandle
 /// <summary>
 /// incidence の chain ポインタを in-place 更新するハンドル。<paramref name="record"/> は
 /// slot 全体 (27B) を指す。Dispose するまで page を pin したままにし、Dispose で dirty 解放する。
-/// オフセットは slot レイアウト (nextInNode = 15、nextInHyperedge = 21) に対応する。
+/// オフセットは slot レイアウト (nextInVertex = 15、nextInNexus = 21) に対応する。
 /// </summary>
 internal ref struct IncidenceWriteHandle
 {
-    private const int OffHyperedge = 1;
-    private const int OffNode = 7;
+    private const int OffNexus = 1;
+    private const int OffVertex = 7;
     private const int OffRole = 13;
-    private const int OffNextInNode = 15;
-    private const int OffNextInHyperedge = 21;
+    private const int OffNextInVertex = 15;
+    private const int OffNextInNexus = 21;
 
     private readonly IPagedFile _file;
     private readonly PageId _pageId;
@@ -133,16 +133,16 @@ internal ref struct IncidenceWriteHandle
         _record = record;
     }
 
-    public HyperedgeId HyperedgeId
+    public NexusId NexusId
     {
-        readonly get => new(RecordHelpers.ReadInt48(_record[OffHyperedge..]));
-        set => RecordHelpers.WriteInt48(_record[OffHyperedge..], value.Sequence);
+        readonly get => new(RecordHelpers.ReadInt48(_record[OffNexus..]));
+        set => RecordHelpers.WriteInt48(_record[OffNexus..], value.Sequence);
     }
 
-    public NodeId NodeId
+    public VertexId VertexId
     {
-        readonly get => new(RecordHelpers.ReadInt48(_record[OffNode..]));
-        set => RecordHelpers.WriteInt48(_record[OffNode..], value.Sequence);
+        readonly get => new(RecordHelpers.ReadInt48(_record[OffVertex..]));
+        set => RecordHelpers.WriteInt48(_record[OffVertex..], value.Sequence);
     }
 
     public RoleId RoleId
@@ -151,16 +151,16 @@ internal ref struct IncidenceWriteHandle
         set => BinaryPrimitives.WriteInt16LittleEndian(_record[OffRole..], checked((short)value.Value));
     }
 
-    public IncidenceId NextInNode
+    public IncidenceId NextInVertex
     {
-        readonly get => new(RecordHelpers.ReadInt48(_record[OffNextInNode..]));
-        set => RecordHelpers.WriteInt48(_record[OffNextInNode..], value.Sequence);
+        readonly get => new(RecordHelpers.ReadInt48(_record[OffNextInVertex..]));
+        set => RecordHelpers.WriteInt48(_record[OffNextInVertex..], value.Sequence);
     }
 
-    public IncidenceId NextInHyperedge
+    public IncidenceId NextInNexus
     {
-        readonly get => new(RecordHelpers.ReadInt48(_record[OffNextInHyperedge..]));
-        set => RecordHelpers.WriteInt48(_record[OffNextInHyperedge..], value.Sequence);
+        readonly get => new(RecordHelpers.ReadInt48(_record[OffNextInNexus..]));
+        set => RecordHelpers.WriteInt48(_record[OffNextInNexus..], value.Sequence);
     }
 
     public void Dispose() => _file.UnpinDirty(_pageId, 0);
@@ -169,24 +169,24 @@ internal ref struct IncidenceWriteHandle
 // ref struct にすることで、可視性 skip を含む chain 走査を 1 incidence あたり
 // managed allocation なしで回せる (ホットパスの列挙で GC 圧を作らない)。
 /// <summary>
-/// node chain (<c>NextInNode</c>) を辿る列挙子。
-/// 参照先 hyperedge header が不可視な incidence は読み飛ばして次へ進む。
+/// vertex chain (<c>NextInVertex</c>) を辿る列挙子。
+/// 参照先 nexus header が不可視な incidence は読み飛ばして次へ進む。
 /// 可視な header を観測するたびに SSN read set への記録が発生する。
 /// </summary>
-internal ref struct NodeIncidenceEnumerator
+internal ref struct VertexIncidenceEnumerator
 {
     private readonly IIncidenceStore _store;
-    private readonly IHyperedgeStore _hyperedges;
+    private readonly INexusStore _nexuses;
     private IncidenceId _nextId;
     private IncidenceReadHandle _current;
 
-    internal NodeIncidenceEnumerator(
+    internal VertexIncidenceEnumerator(
         IIncidenceStore store,
-        IHyperedgeStore hyperedges,
+        INexusStore nexuses,
         IncidenceId firstId)
     {
         _store = store;
-        _hyperedges = hyperedges;
+        _nexuses = nexuses;
         _nextId = firstId;
         _current = default;
     }
@@ -196,11 +196,11 @@ internal ref struct NodeIncidenceEnumerator
         while (_nextId.IsValid)
         {
             _current = _store.Read(_nextId);
-            _nextId = _current.NextInNode;
+            _nextId = _current.NextInVertex;
             if (!_current.InUse)
                 continue;
 
-            using var header = _hyperedges.Read(_current.HyperedgeId);
+            using var header = _nexuses.Read(_current.NexusId);
             if (header.InUse)
                 return true;
         }
@@ -213,30 +213,30 @@ internal ref struct NodeIncidenceEnumerator
 }
 
 // メンバー集合は作成後不変なので、可視性は chain 全体で 1 回だけ header を見れば足りる
-// (node chain と違い incidence ごとの header 再判定は不要)。
+// (vertex chain と違い incidence ごとの header 再判定は不要)。
 /// <summary>
-/// hyperedge のメンバー chain (<c>NextInHyperedge</c>) を作成順に辿る列挙子。
-/// hyperedge header が不可視な場合は 1 件も返さない。
+/// nexus のメンバー chain (<c>NextInNexus</c>) を作成順に辿る列挙子。
+/// nexus header が不可視な場合は 1 件も返さない。
 /// </summary>
-internal ref struct HyperedgeIncidenceEnumerator
+internal ref struct NexusIncidenceEnumerator
 {
     private readonly IIncidenceStore _store;
-    private readonly IHyperedgeStore _hyperedges;
-    private readonly HyperedgeId _hyperedgeId;
+    private readonly INexusStore _nexuses;
+    private readonly NexusId _nexusId;
     private IncidenceId _nextId;
     private IncidenceReadHandle _current;
     private bool _visibilityChecked;
     private bool _visible;
 
-    internal HyperedgeIncidenceEnumerator(
+    internal NexusIncidenceEnumerator(
         IIncidenceStore store,
-        IHyperedgeStore hyperedges,
-        HyperedgeId hyperedgeId,
+        INexusStore nexuses,
+        NexusId nexusId,
         IncidenceId firstId)
     {
         _store = store;
-        _hyperedges = hyperedges;
-        _hyperedgeId = hyperedgeId;
+        _nexuses = nexuses;
+        _nexusId = nexusId;
         _nextId = firstId;
         _current = default;
         _visibilityChecked = false;
@@ -247,7 +247,7 @@ internal ref struct HyperedgeIncidenceEnumerator
     {
         if (!_visibilityChecked)
         {
-            using var header = _hyperedges.Read(_hyperedgeId);
+            using var header = _nexuses.Read(_nexusId);
             _visible = header.InUse;
             _visibilityChecked = true;
         }
@@ -258,7 +258,7 @@ internal ref struct HyperedgeIncidenceEnumerator
         while (_nextId.IsValid)
         {
             _current = _store.Read(_nextId);
-            _nextId = _current.NextInHyperedge;
+            _nextId = _current.NextInNexus;
             if (_current.InUse)
                 return true;
         }

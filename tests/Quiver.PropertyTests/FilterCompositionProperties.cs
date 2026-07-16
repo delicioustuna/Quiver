@@ -55,7 +55,7 @@ public class FilterCompositionProperties
 
     /// <summary>
     /// 単一カラム (LongValue) を返すソース演算子。FilterOperator のテスト専用。
-    /// FixedNodeListOperator が Support 配下の internal にあるため、ここで類似のものを定義する。
+    /// FixedVertexListOperator が Support 配下の internal にあるため、ここで類似のものを定義する。
     /// </summary>
     private sealed class LongListOperator : IPhysicalOperator
     {

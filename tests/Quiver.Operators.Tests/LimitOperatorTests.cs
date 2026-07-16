@@ -12,7 +12,7 @@ public class LimitOperatorTests
     [Fact]
     public void Empty_input_returns_empty()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         using var op = new LimitOperator(src, limit: 5);
         op.Open(null!);
         Collect(op).Should().BeEmpty();
@@ -21,8 +21,8 @@ public class LimitOperatorTests
     [Fact]
     public void Stops_at_limit()
     {
-        var src = new FixedNodeListOperator(
-            new NodeId(1), new NodeId(2), new NodeId(3), new NodeId(4), new NodeId(5));
+        var src = new FixedVertexListOperator(
+            new VertexId(1), new VertexId(2), new VertexId(3), new VertexId(4), new VertexId(5));
         using var op = new LimitOperator(src, limit: 3);
         op.Open(null!);
         Collect(op).Should().Equal(1, 2, 3);
@@ -31,8 +31,8 @@ public class LimitOperatorTests
     [Fact]
     public void Skip_skips_initial_rows()
     {
-        var src = new FixedNodeListOperator(
-            new NodeId(1), new NodeId(2), new NodeId(3), new NodeId(4));
+        var src = new FixedVertexListOperator(
+            new VertexId(1), new VertexId(2), new VertexId(3), new VertexId(4));
         using var op = new LimitOperator(src, limit: 2, skip: 1);
         op.Open(null!);
         Collect(op).Should().Equal(2, 3);
@@ -41,7 +41,7 @@ public class LimitOperatorTests
     [Fact]
     public void Limit_larger_than_input_returns_all()
     {
-        var src = new FixedNodeListOperator(new NodeId(7), new NodeId(8));
+        var src = new FixedVertexListOperator(new VertexId(7), new VertexId(8));
         using var op = new LimitOperator(src, limit: 100);
         op.Open(null!);
         Collect(op).Should().Equal(7, 8);
@@ -50,7 +50,7 @@ public class LimitOperatorTests
     [Fact]
     public void Statistics_count_produced_rows()
     {
-        var src = new FixedNodeListOperator(new NodeId(1), new NodeId(2), new NodeId(3));
+        var src = new FixedVertexListOperator(new VertexId(1), new VertexId(2), new VertexId(3));
         using var op = new LimitOperator(src, limit: 2);
         op.Open(null!);
         while (op.MoveNext()) { }
@@ -60,7 +60,7 @@ public class LimitOperatorTests
     [Fact]
     public void Skip_exceeds_input_yields_empty()
     {
-        var src = new FixedNodeListOperator(new NodeId(1), new NodeId(2));
+        var src = new FixedVertexListOperator(new VertexId(1), new VertexId(2));
         using var op = new LimitOperator(src, limit: 10, skip: 5);
         op.Open(null!);
         Collect(op).Should().BeEmpty();
@@ -69,7 +69,7 @@ public class LimitOperatorTests
     [Fact]
     public void Limit_zero_yields_empty()
     {
-        var src = new FixedNodeListOperator(new NodeId(1), new NodeId(2));
+        var src = new FixedVertexListOperator(new VertexId(1), new VertexId(2));
         using var op = new LimitOperator(src, limit: 0);
         op.Open(null!);
         Collect(op).Should().BeEmpty();

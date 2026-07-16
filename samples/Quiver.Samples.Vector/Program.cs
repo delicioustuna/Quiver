@@ -9,32 +9,32 @@ using Quiver.Core;
 string dir = Path.Combine(Path.GetTempPath(), "quiver_vec_" + Guid.NewGuid().ToString("N")[..8]);
 try
 {
-    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+    using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
 
     // ── インデックス定義 ──
     const string indexName = "person_bio_v1";
     var bioKey = db.Schema.GetOrCreatePropertyKey("bio");
     db.Vectors.CreateVectorIndex(new VectorIndexSpec(
         Name: indexName,
-        EntityKind: EntityKind.Node,
+        EntityKind: EntityKind.Vertex,
         SourcePropertyKeyId: bioKey,
         Dimensions: 4,
         Metric: DistanceMetric.Cosine,
         ProviderId: "sample-static"));
 
-    NodeId aliceId, bobId, carolId;
+    VertexId aliceId, bobId, carolId;
 
     // ── データ投入 ──
     using (var tx = db.BeginTransaction())
     {
         var g = tx.G(db.Schema);
-        aliceId = g.AddNode("Person").P("name", "Alice").Next();
-        bobId   = g.AddNode("Person").P("name", "Bob").Next();
-        carolId = g.AddNode("Person").P("name", "Carol").Next();
+        aliceId = g.AddVertex("Person").P("name", "Alice").Next();
+        bobId   = g.AddVertex("Person").P("name", "Bob").Next();
+        carolId = g.AddVertex("Person").P("name", "Carol").Next();
 
-        db.Vectors.SetVector(EntityKind.Node, aliceId.Value, indexName, new float[] { 0.1f, 0.2f, 0.3f, 0.4f });
-        db.Vectors.SetVector(EntityKind.Node, bobId.Value,   indexName, new float[] { 0.0f, 0.1f, 0.2f, 0.5f });
-        db.Vectors.SetVector(EntityKind.Node, carolId.Value, indexName, new float[] { 0.9f, 0.8f, 0.7f, 0.6f });
+        db.Vectors.SetVector(EntityKind.Vertex, aliceId.Value, indexName, new float[] { 0.1f, 0.2f, 0.3f, 0.4f });
+        db.Vectors.SetVector(EntityKind.Vertex, bobId.Value,   indexName, new float[] { 0.0f, 0.1f, 0.2f, 0.5f });
+        db.Vectors.SetVector(EntityKind.Vertex, carolId.Value, indexName, new float[] { 0.9f, 0.8f, 0.7f, 0.6f });
         tx.Commit();
     }
 
@@ -55,7 +55,7 @@ try
     using (var tx = db.BeginReadOnlyTransaction())
     {
         var g = tx.G(db.Schema);
-        var filtered = g.Nodes().HasLabel("Person")
+        var filtered = g.Vertices().HasLabel("Person")
                         .FilterByKnn(indexName, new float[] { 0.1f, 0.2f, 0.3f, 0.4f }, k: 1)
                         .Values("name")
                         .ToList();

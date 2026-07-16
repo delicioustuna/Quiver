@@ -9,13 +9,13 @@ namespace Quiver.Rag;
 /// <param name="HeadingPath">代表チャンク (最上位ヒット) の見出しパス。</param>
 /// <param name="Document">親文書の参照 (<see cref="RagSearchOptions.IncludeDocument"/> が false のときは空)。</param>
 /// <param name="Rank">融合ランキング上の順位 (1 起点。マージ時は最良順位を採用)。</param>
-/// <param name="ChunkNodeId">代表チャンクのノード ID。</param>
+/// <param name="ChunkVertexId">代表チャンクのVertex ID。</param>
 public sealed record RagHit(
     string ChunkText,
     string HeadingPath,
     RagDocumentRef Document,
     int Rank,
-    NodeId ChunkNodeId);
+    VertexId ChunkVertexId);
 
 /// <summary>ヒットの親文書の最小参照。</summary>
 /// <param name="SourceId">文書の一意キー。</param>

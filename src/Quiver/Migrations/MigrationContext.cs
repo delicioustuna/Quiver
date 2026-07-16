@@ -11,7 +11,7 @@ internal sealed class MigrationContext : IMigrationContext
 
     // スキーマミューテーションを <see cref="Transaction"/> の rollback と整合させるための
     // 逆操作キュー。各 schema mutation を行うたびにその逆操作を append し、OnRolledBack で
-    // 逆順 (LIFO) に再生する。TokenStore / IndexManager は ARIES tx に乗らないが、
+    // 逆順 (LIFO) に再生する。TokenStore / IndexManager の非ページ操作は write set に乗らないが、
     // この hook で論理的な巻き戻しを実現する。
     private readonly List<Action> _undoActions = [];
     private bool _hooksRegistered;
@@ -71,12 +71,12 @@ internal sealed class MigrationContext : IMigrationContext
         return ok;
     }
 
-    public bool RenameRelationshipType(string oldName, string newName)
+    public bool RenameEdgeType(string oldName, string newName)
     {
         EnsureRollbackHook();
-        bool willMutate = Schema.TryGetRelationshipTypeId(oldName, out _) && !Schema.TryGetRelationshipTypeId(newName, out _);
-        var ok = Schema.RenameRelationshipType(oldName, newName);
-        if (ok && willMutate) _undoActions.Add(() => Schema.RenameRelationshipType(newName, oldName));
+        bool willMutate = Schema.TryGetEdgeTypeId(oldName, out _) && !Schema.TryGetEdgeTypeId(newName, out _);
+        var ok = Schema.RenameEdgeType(oldName, newName);
+        if (ok && willMutate) _undoActions.Add(() => Schema.RenameEdgeType(newName, oldName));
         return ok;
     }
 
@@ -107,15 +107,15 @@ internal sealed class MigrationContext : IMigrationContext
         Schema.DropIndex(indexName);
     }
 
-    public void ForEachNode(string label, Action<NodeId> action)
+    public void ForEachVertex(string label, Action<VertexId> action)
     {
         ArgumentNullException.ThrowIfNull(action);
         ArgumentException.ThrowIfNullOrEmpty(label);
         var labelId = Schema.GetOrCreateLabel(label);
         if (Transaction is not GraphTransaction gtx)
             throw new InvalidOperationException(
-                "MigrationContext.ForEachNode requires the default GraphTransaction implementation.");
-        foreach (var nodeId in gtx.Access.ScanNodes(gtx.Inner, labelId))
-            action(nodeId);
+                "MigrationContext.ForEachVertex requires the default GraphTransaction implementation.");
+        foreach (var vertexId in gtx.Access.ScanVertices(gtx.Inner, labelId))
+            action(vertexId);
     }
 }

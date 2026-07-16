@@ -15,7 +15,7 @@ namespace Quiver.Telemetry;
 ///    <para>
 ///    <b>process-wide シングルトン</b>。<see cref="Log"/> から各 hot path (PagedFile,
 ///    WriteAheadLog, Transaction, LockManager, DeadlockDetector, RecoveryManager,
-///    Vacuum) が直接インクリメント API を呼ぶ。複数 <c>GraphDatabase</c> インスタンスが
+///    Vacuum) が直接インクリメント API を呼ぶ。複数 <c>QuiverDatabase</c> インスタンスが
 ///    同一プロセスに存在しても累計 / レート系メトリクスは合算される。
 ///    </para>
 ///  </item>

@@ -9,7 +9,7 @@ namespace Quiver.Tests;
 
 /// <summary>
 /// 読み取りとオプティマイザーを統合した列集約のエンドツーエンドテスト。
-/// 全走査集約 (<c>g.Nodes()</c> / <c>g.Relationships()</c> の
+/// 全走査集約 (<c>g.Vertices()</c> / <c>g.Edges()</c> の
 /// Sum、SumLong、Mean、Max、Min) が列化済みキーでは列スキャンを使い、
 /// 行経路と同じ結果になることを列の削除前後で確認する。
 /// フィルター付き入力は行経路へフォールバックする。
@@ -31,22 +31,22 @@ public sealed class ColumnAggregationTests : IDisposable
     }
 
     [Fact]
-    public void Node_int_aggregation_column_path_equals_row_path()
+    public void Vertex_int_aggregation_column_path_equals_row_path()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         using (var tx = db.BeginTransaction())
         {
             foreach (var v in new[] { 3, 7, 11, 20 })
             {
-                var n = tx.CreateNode("Person");
+                var n = tx.CreateVertex("Person");
                 tx.SetProperty(n, "score", PropertyValue.FromInt64(v));
             }
             tx.Commit();
         }
-        db.CreateColumn(EntityKind.Node, "score").Should().BeTrue();
+        db.CreateColumn(EntityKind.Vertex, "score").Should().BeTrue();
 
         // 列あり (= 列スキャン経路)。
-        (long colSum, double colSumD, double? colMax, double? colMin, double? colMean) = NodeAgg(db, "score");
+        (long colSum, double colSumD, double? colMax, double? colMin, double? colMean) = VertexAgg(db, "score");
         colSum.Should().Be(41);
         colSumD.Should().Be(41);
         colMax.Should().Be(20);
@@ -54,8 +54,8 @@ public sealed class ColumnAggregationTests : IDisposable
         colMean.Should().Be(41.0 / 4);
 
         // 列を外す → row path。結果は一致しなければならない。
-        db.DropColumn(EntityKind.Node, "score").Should().BeTrue();
-        (long rowSum, double rowSumD, double? rowMax, double? rowMin, double? rowMean) = NodeAgg(db, "score");
+        db.DropColumn(EntityKind.Vertex, "score").Should().BeTrue();
+        (long rowSum, double rowSumD, double? rowMax, double? rowMin, double? rowMean) = VertexAgg(db, "score");
         rowSum.Should().Be(colSum);
         rowSumD.Should().Be(colSumD);
         rowMax.Should().Be(colMax);
@@ -64,26 +64,26 @@ public sealed class ColumnAggregationTests : IDisposable
     }
 
     [Fact]
-    public void Node_double_aggregation_column_path_equals_row_path()
+    public void Vertex_double_aggregation_column_path_equals_row_path()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         using (var tx = db.BeginTransaction())
         {
             foreach (var v in new[] { 1.5, 2.25, -0.75 })
             {
-                var n = tx.CreateNode("M");
+                var n = tx.CreateVertex("M");
                 tx.SetProperty(n, "w", PropertyValue.FromDouble(v));
             }
             tx.Commit();
         }
-        db.CreateColumn(EntityKind.Node, "w").Should().BeTrue();
-        var col = NodeAgg(db, "w");
+        db.CreateColumn(EntityKind.Vertex, "w").Should().BeTrue();
+        var col = VertexAgg(db, "w");
         col.SumD.Should().BeApproximately(3.0, 1e-9);
         col.Max.Should().Be(2.25);
         col.Min.Should().Be(-0.75);
 
-        db.DropColumn(EntityKind.Node, "w").Should().BeTrue();
-        var row = NodeAgg(db, "w");
+        db.DropColumn(EntityKind.Vertex, "w").Should().BeTrue();
+        var row = VertexAgg(db, "w");
         row.SumD.Should().BeApproximately(col.SumD, 1e-9);
         row.Max.Should().Be(col.Max);
         row.Min.Should().Be(col.Min);
@@ -91,84 +91,84 @@ public sealed class ColumnAggregationTests : IDisposable
     }
 
     [Fact]
-    public void Relationship_aggregation_column_path_equals_row_path()
+    public void Edge_aggregation_column_path_equals_row_path()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         using (var tx = db.BeginTransaction())
         {
-            var a = tx.CreateNode("A");
-            var b = tx.CreateNode("B");
+            var a = tx.CreateVertex("A");
+            var b = tx.CreateVertex("B");
             foreach (var w in new[] { 10L, 25L, 5L })
             {
-                var r = tx.CreateRelationship(a, b, "R");
+                var r = tx.CreateEdge(a, b, "R");
                 tx.SetProperty(r, "weight", PropertyValue.FromInt64(w));
             }
             tx.Commit();
         }
-        db.CreateColumn(EntityKind.Relationship, "weight").Should().BeTrue();
+        db.CreateColumn(EntityKind.Edge, "weight").Should().BeTrue();
 
         using (var tx = db.BeginReadOnlyTransaction())
         {
             var g = tx.G(db.Schema);
-            g.Relationships().SumLong("weight").Should().Be(40);
-            g.Relationships().Max("weight").Should().Be(25);
-            g.Relationships().ToList().Should().HaveCount(3); // 全 rel 列挙
+            g.Edges().SumLong("weight").Should().Be(40);
+            g.Edges().Max("weight").Should().Be(25);
+            g.Edges().ToList().Should().HaveCount(3); // 全 edge 列挙
         }
 
-        db.DropColumn(EntityKind.Relationship, "weight").Should().BeTrue();
+        db.DropColumn(EntityKind.Edge, "weight").Should().BeTrue();
         using (var tx = db.BeginReadOnlyTransaction())
         {
             var g = tx.G(db.Schema);
-            g.Relationships().SumLong("weight").Should().Be(40); // row path 同値
-            g.Relationships().Max("weight").Should().Be(25);
+            g.Edges().SumLong("weight").Should().Be(40); // row path 同値
+            g.Edges().Max("weight").Should().Be(25);
         }
     }
 
     [Fact]
     public void Filtered_input_falls_back_to_row_path_and_is_correct()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         using (var tx = db.BeginTransaction())
         {
-            var p1 = tx.CreateNode("Person"); tx.SetProperty(p1, "age", PropertyValue.FromInt64(30));
-            var p2 = tx.CreateNode("Person"); tx.SetProperty(p2, "age", PropertyValue.FromInt64(40));
-            var c1 = tx.CreateNode("Company"); tx.SetProperty(c1, "age", PropertyValue.FromInt64(100));
+            var p1 = tx.CreateVertex("Person"); tx.SetProperty(p1, "age", PropertyValue.FromInt64(30));
+            var p2 = tx.CreateVertex("Person"); tx.SetProperty(p2, "age", PropertyValue.FromInt64(40));
+            var c1 = tx.CreateVertex("Company"); tx.SetProperty(c1, "age", PropertyValue.FromInt64(100));
             tx.Commit();
         }
-        db.CreateColumn(EntityKind.Node, "age").Should().BeTrue();
+        db.CreateColumn(EntityKind.Vertex, "age").Should().BeTrue();
 
         using var tx2 = db.BeginReadOnlyTransaction();
         var g = tx2.G(db.Schema);
         // 全件 (列スキャン): 30+40+100 = 170。
-        g.Nodes().SumLong("age").Should().Be(170);
+        g.Vertices().SumLong("age").Should().Be(170);
         // label フィルタ付き (row path フォールバック): Person のみ 70。
-        g.Nodes().HasLabel("Person").SumLong("age").Should().Be(70);
+        g.Vertices().HasLabel("Person").SumLong("age").Should().Be(70);
     }
 
     [Fact]
     public void Maintained_writes_reflect_in_column_aggregation()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.CreateColumn(EntityKind.Node, "score").Should().BeTrue();
+        using var db = QuiverDatabase.Open(_path);
+        db.CreateColumn(EntityKind.Vertex, "score").Should().BeTrue();
         using (var tx = db.BeginTransaction())
         {
-            var n1 = tx.CreateNode("X"); tx.SetProperty(n1, "score", PropertyValue.FromInt64(100));
-            var n2 = tx.CreateNode("X"); tx.SetProperty(n2, "score", PropertyValue.FromInt64(50));
+            var n1 = tx.CreateVertex("X"); tx.SetProperty(n1, "score", PropertyValue.FromInt64(100));
+            var n2 = tx.CreateVertex("X"); tx.SetProperty(n2, "score", PropertyValue.FromInt64(50));
             tx.Commit();
         }
         using var tx2 = db.BeginReadOnlyTransaction();
-        tx2.G(db.Schema).Nodes().SumLong("score").Should().Be(150);
+        tx2.G(db.Schema).Vertices().SumLong("score").Should().Be(150);
     }
 
-    private static (long Sum, double SumD, double? Max, double? Min, double? Mean) NodeAgg(GraphDatabase db, string key)
+    private static (long Sum, double SumD, double? Max, double? Min, double? Mean) VertexAgg(QuiverDatabase db, string key)
     {
         using var tx = db.BeginReadOnlyTransaction();
         var g = tx.G(db.Schema);
         return (
-            g.Nodes().SumLong(key),
-            g.Nodes().Sum(key),
-            g.Nodes().Max(key),
-            g.Nodes().Min(key),
-            g.Nodes().Mean(key));
+            g.Vertices().SumLong(key),
+            g.Vertices().Sum(key),
+            g.Vertices().Max(key),
+            g.Vertices().Min(key),
+            g.Vertices().Mean(key));
     }
 }

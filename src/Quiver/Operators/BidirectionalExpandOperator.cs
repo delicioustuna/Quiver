@@ -6,7 +6,7 @@ namespace Quiver.Query.Physical;
 
 /// <summary>
 /// 双方向 BFS 最短経路。長いパスでは <see cref="ShortestPathOperator"/> より効率的。
-/// 各 (sourceNode, targetNode) ペアについて、経路が存在すれば (source, target, distance) を放出する。
+/// 各 (sourceVertex, targetVertex) ペアについて、経路が存在すれば (source, target, distance) を放出する。
 /// ソースから前方 (引数 direction 方向) と、ターゲットから後方 (逆方向) を交互に展開する。
 /// </summary>
 internal sealed class BidirectionalExpandOperator : IPhysicalOperator
@@ -16,26 +16,26 @@ internal sealed class BidirectionalExpandOperator : IPhysicalOperator
     private readonly int _tgtCol;
     private readonly Direction _fwdDir;
     private readonly Direction _bwdDir;
-    private readonly RelationshipTypeId? _typeFilter;
+    private readonly EdgeTypeId? _typeFilter;
 
     private ITransaction? _tx;
     private readonly TupleSlot[] _buffer = new TupleSlot[3];
 
     private static readonly TupleSchema s_schema = new([
-        new ColumnDefinition("source",   TupleSlotType.NodeId),
-        new ColumnDefinition("target",   TupleSlotType.NodeId),
+        new ColumnDefinition("source",   TupleSlotType.VertexId),
+        new ColumnDefinition("target",   TupleSlotType.VertexId),
         new ColumnDefinition("distance", TupleSlotType.Int64)]);
 
     public BidirectionalExpandOperator(
         IPhysicalOperator source,
-        int sourceNodeColumn,
-        int targetNodeColumn,
+        int sourceVertexColumn,
+        int targetVertexColumn,
         Direction direction,
-        RelationshipTypeId? typeFilter)
+        EdgeTypeId? typeFilter)
     {
         _source = source;
-        _srcCol = sourceNodeColumn;
-        _tgtCol = targetNodeColumn;
+        _srcCol = sourceVertexColumn;
+        _tgtCol = targetVertexColumn;
         _fwdDir = direction;
         _bwdDir = direction switch
         {
@@ -60,13 +60,13 @@ internal sealed class BidirectionalExpandOperator : IPhysicalOperator
     {
         while (_source.MoveNext())
         {
-            var src = new NodeId(_source.Current[_srcCol].LongValue);
-            var tgt = new NodeId(_source.Current[_tgtCol].LongValue);
+            var src = new VertexId(_source.Current[_srcCol].LongValue);
+            var tgt = new VertexId(_source.Current[_tgtCol].LongValue);
             long dist = FindShortestPathBidir(src, tgt);
             if (dist < 0) continue;
 
-            _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = src.Value };
-            _buffer[1] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = tgt.Value };
+            _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = src.Value };
+            _buffer[1] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = tgt.Value };
             _buffer[2] = new TupleSlot { Type = TupleSlotType.Int64, LongValue = dist };
             var s = Statistics;
             s.RowsProduced++;
@@ -76,7 +76,7 @@ internal sealed class BidirectionalExpandOperator : IPhysicalOperator
         return false;
     }
 
-    private long FindShortestPathBidir(NodeId src, NodeId tgt)
+    private long FindShortestPathBidir(VertexId src, VertexId tgt)
     {
         if (src == tgt) return 0;
 
@@ -84,9 +84,9 @@ internal sealed class BidirectionalExpandOperator : IPhysicalOperator
         // 距離マップのキーは slot 同一性 (Sequence)。
         var fwdDist = new Dictionary<long, long> { [src.Sequence] = 0 };
         var bwdDist = new Dictionary<long, long> { [tgt.Sequence] = 0 };
-        var fwdFrontier = new List<NodeId> { src };
-        var bwdFrontier = new List<NodeId> { tgt };
-        var scratch = new List<NodeId>();
+        var fwdFrontier = new List<VertexId> { src };
+        var bwdFrontier = new List<VertexId> { tgt };
+        var scratch = new List<VertexId>();
         long bestDist = long.MaxValue;
 
         while (fwdFrontier.Count > 0 || bwdFrontier.Count > 0)
@@ -100,8 +100,8 @@ internal sealed class BidirectionalExpandOperator : IPhysicalOperator
             if (fwdFrontier.Count > 0 && fLevel <= bLevel)
             {
                 scratch.Clear();
-                foreach (var node in fwdFrontier)
-                    ExpandInto(node, _fwdDir, fwdDist, scratch);
+                foreach (var vertex in fwdFrontier)
+                    ExpandInto(vertex, _fwdDir, fwdDist, scratch);
                 foreach (var nb in scratch)
                     if (bwdDist.TryGetValue(nb.Sequence, out long bd))
                         bestDist = Math.Min(bestDist, fwdDist[nb.Sequence] + bd);
@@ -110,8 +110,8 @@ internal sealed class BidirectionalExpandOperator : IPhysicalOperator
             else if (bwdFrontier.Count > 0)
             {
                 scratch.Clear();
-                foreach (var node in bwdFrontier)
-                    ExpandInto(node, _bwdDir, bwdDist, scratch);
+                foreach (var vertex in bwdFrontier)
+                    ExpandInto(vertex, _bwdDir, bwdDist, scratch);
                 foreach (var nb in scratch)
                     if (fwdDist.TryGetValue(nb.Sequence, out long fd))
                         bestDist = Math.Min(bestDist, fd + bwdDist[nb.Sequence]);
@@ -123,10 +123,10 @@ internal sealed class BidirectionalExpandOperator : IPhysicalOperator
         return bestDist == long.MaxValue ? -1 : bestDist;
     }
 
-    private void ExpandInto(NodeId node, Direction dir, Dictionary<long, long> dist, List<NodeId> next)
+    private void ExpandInto(VertexId vertex, Direction dir, Dictionary<long, long> dist, List<VertexId> next)
     {
-        long nextDist = dist[node.Sequence] + 1;
-        using var cursor = _tx!.Access.Expand(_tx, node, dir, _typeFilter);
+        long nextDist = dist[vertex.Sequence] + 1;
+        using var cursor = _tx!.Access.Expand(_tx, vertex, dir, _typeFilter);
         while (cursor.MoveNext())
         {
             var nb = cursor.Neighbor;

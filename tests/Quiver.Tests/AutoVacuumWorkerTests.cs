@@ -6,7 +6,7 @@ namespace Quiver.Tests;
 
 /// <summary>
 /// 自動 Vacuum ワーカーの周期起動、逐次実行ガード、例外処理、破棄時の停止と、
-/// <see cref="GraphDatabase"/> のオープンおよび破棄との連携を確認する。
+/// <see cref="QuiverDatabase"/> のオープンおよび破棄との連携を確認する。
 /// </summary>
 public sealed class AutoVacuumWorkerTests : IDisposable
 {
@@ -23,7 +23,7 @@ public sealed class AutoVacuumWorkerTests : IDisposable
     }
 
     private static VacuumReport DummyReport(bool skipped = false) =>
-        new(ReclaimedNodes: 0, ReclaimedRelationships: 0, ReclaimedProperties: 0,
+        new(ReclaimedVertices: 0, ReclaimedEdges: 0, ReclaimedProperties: 0,
             PrunedCommittedTxEntries: 0, ElapsedMs: 0, HorizonTxId: 1, Skipped: skipped);
 
     [Fact]
@@ -131,16 +131,16 @@ public sealed class AutoVacuumWorkerTests : IDisposable
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
-    // ---- GraphDatabase 配線 ----
+    // ---- QuiverDatabase 配線 ----
 
     [Fact]
-    public void GraphDatabase_disabled_AutoVacuum_does_not_auto_run()
+    public void QuiverDatabase_disabled_AutoVacuum_does_not_auto_run()
     {
         // 既定 (AutoVacuum=false) では open しても自動 vacuum は走らない。
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var tx = db.BeginTransaction())
         {
-            tx.CreateNode("Person");
+            tx.CreateVertex("Person");
             tx.Commit();
         }
         // worker 不在の証明として、明示 Vacuum だけが効くことを確認 (例外なく open/dispose できる)。
@@ -149,35 +149,35 @@ public sealed class AutoVacuumWorkerTests : IDisposable
     }
 
     [Fact]
-    public void GraphDatabase_enabled_AutoVacuum_reclaims_dead_versions_in_background()
+    public void QuiverDatabase_enabled_AutoVacuum_reclaims_dead_versions_in_background()
     {
-        var options = new GraphDatabaseOptions
+        var options = new QuiverDatabaseOptions
         {
             AutoVacuum = true,
             AutoVacuumInterval = TimeSpan.FromMilliseconds(50),
         };
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
 
-        // ノードを作って全削除 → バックグラウンド worker が回収するのを待つ。
+        // Vertexを作って全削除 → バックグラウンド worker が回収するのを待つ。
         var ids = new List<long>();
         using (var tx = db.BeginTransaction())
         {
-            for (int i = 0; i < 50; i++) ids.Add(tx.CreateNode("Person").Sequence); // ARCH-5b: slot は Sequence
+            for (int i = 0; i < 50; i++) ids.Add(tx.CreateVertex("Person").Sequence); // slot は Sequence
             tx.Commit();
         }
         using (var tx = db.BeginTransaction())
         {
-            foreach (var id in ids) tx.DeleteNode(new Core.NodeId(id));
+            foreach (var id in ids) tx.DeleteVertex(new Core.VertexId(id));
             tx.Commit();
         }
 
-        // 物理回収が起きると、次に作るノードは free list の低い ID を再利用する。
+        // 物理回収が起きると、次に作るVertexは free list の低い ID を再利用する。
         // worker tick (50ms 周期) が走ってスロットが戻るのを最大 5 秒待つ。
         long reusedId = -1;
         bool reused = SpinWaitUntil(() =>
         {
             using var tx = db.BeginTransaction();
-            long newId = tx.CreateNode("Person").Sequence; // ARCH-5b: 再利用判定は Sequence
+            long newId = tx.CreateVertex("Person").Sequence; // 再利用判定は Sequence
             tx.Commit();
             reusedId = newId;
             // 回収済みなら元の範囲 [0..49] のどれかを再利用するはず。
@@ -185,21 +185,21 @@ public sealed class AutoVacuumWorkerTests : IDisposable
         }, TimeSpan.FromSeconds(5));
 
         reused.Should().BeTrue(
-            $"background AutoVacuum should reclaim node slots, but new id was {reusedId}");
+            $"background AutoVacuum should reclaim vertex slots, but new id was {reusedId}");
     }
 
     [Fact]
-    public void GraphDatabase_Dispose_stops_worker_cleanly()
+    public void QuiverDatabase_Dispose_stops_worker_cleanly()
     {
-        var options = new GraphDatabaseOptions
+        var options = new QuiverDatabaseOptions
         {
             AutoVacuum = true,
             AutoVacuumInterval = TimeSpan.FromMilliseconds(30),
         };
-        var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
+        var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
         using (var tx = db.BeginTransaction())
         {
-            tx.CreateNode("Person");
+            tx.CreateVertex("Person");
             tx.Commit();
         }
         Thread.Sleep(80); // 何 tick か回す
@@ -211,7 +211,7 @@ public sealed class AutoVacuumWorkerTests : IDisposable
     [Fact]
     public void AutoVacuum_with_zero_interval_does_not_start_worker()
     {
-        var options = new GraphDatabaseOptions
+        var options = new QuiverDatabaseOptions
         {
             AutoVacuum = true,
             AutoVacuumInterval = TimeSpan.Zero, // 無効化
@@ -219,9 +219,9 @@ public sealed class AutoVacuumWorkerTests : IDisposable
         // ワーカーは立たないが open/dispose は問題なく通る。
         var act = () =>
         {
-            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
+            using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
             using var tx = db.BeginTransaction();
-            tx.CreateNode("Person");
+            tx.CreateVertex("Person");
             tx.Commit();
         };
         act.Should().NotThrow();

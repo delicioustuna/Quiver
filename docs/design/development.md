@@ -12,7 +12,7 @@ README はライブラリ利用者向けの最小限に絞っているため、�
 
 | パッケージ | 役割 |
 |---|---|
-| `Quiver` | エンジン中核 + 公開ファサード。型付き属性（`[Node]` / `[Relationship]` / `[Property]` / `[Indexed]`、namespace `Quiver.Api`）を本体に内包し、`Quiver.SourceGen` を analyzer として同梱。これ 1 つの参照で型安全 CRUD まで使える |
+| `Quiver` | エンジン中核 + 公開ファサード。型付き属性（`[Vertex]` / `[Edge]` / `[Property]` / `[Indexed]`、namespace `Quiver.Api`）を本体に内包し、`Quiver.SourceGen` を analyzer として同梱。これ 1 つの参照で型安全 CRUD まで使える |
 | `Quiver.SourceGen` | Roslyn `IIncrementalGenerator`（CRUD / `FindBy*` / 型保存トラバーサル糖衣を生成）。単体公開せず `Quiver` に同梱する内部プロジェクト |
 | `Quiver.Embedding` | テキスト埋め込みパイプライン（VEC-4）。**incubating: NuGet 非公開**（`IsPackable=false`。「NuGet パッケージ化」§incubating 参照） |
 | `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ・取込・hybrid 検索 + graph expansion）。**開発中**（過去の設計ノートは historical record。現行の実装順序は再設計計画に従う） |
@@ -24,14 +24,14 @@ README はライブラリ利用者向けの最小限に絞っているため、�
 中核エンジンは単一アセンブリ `Quiver` に集約し、名前空間でレイヤを分離する。
 
 ```
-Quiver.Api / Quiver.Api.Match  ← 公開ファサード: GraphDatabase / GraphTransaction / Fluent Traversal / Match DSL
+Quiver.Api / Quiver.Api.Match  ← 公開ファサード: QuiverDatabase / GraphTransaction / Fluent Traversal / Match DSL
 Quiver.Query.Logical
 Quiver.Query.Optimizer         ← ヒストグラム統計 + ルールベース最適化
 Quiver.Query.Physical          ← Volcano 型物理演算子
 Quiver.Transactions            ← TransactionManager / LockManager / RecoveryManager
 Quiver.Storage.Wal             ← Write-Ahead Log（group commit）
 Quiver.Index                   ← B+Tree インデックス
-Quiver.Storage.Records         ← Node / Relationship / Property / Token ストア
+Quiver.Storage.Records         ← Vertex / Edge / Property / Token ストア
 Quiver.Codec                   ← Span<byte> シリアライザ
 Quiver.Storage                 ← ページ管理 + バッファプール（8KB ページ）
 Quiver.Core                    ← 共通型・例外・抽象インタフェース
@@ -53,61 +53,53 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 | ページサイズ | 8 KB |
 | エンディアン | Little-Endian |
 | バッファプール | デフォルト 256 MB |
-| WAL セグメント | デフォルト 64 MB |
+| 新規 DB の初期確保 | デフォルト 1 MiB（8 KiB 境界） |
+| ファイル成長 | 1 / 2 / 4 / 8 / 16 / 32 / 64 MiB の適応成長、1 回の上限はデフォルト 64 MiB |
 | 文字列エンコーディング | UTF-8（長さプレフィックス付き） |
 | 静止時のファイル | `*.quiver` 単一ファイル |
 | 運用中のファイル | `*.quiver` + `*.quiver-wal` |
-| FormatVersion | V5（旧バージョンからの自動移行なし） |
+| format family | `QUIVER-SW` family version 1（旧 family からの自動移行なし） |
 | ベクトル catalog | entry 長プレフィクス + per-index HNSW レイアウトパラメタ |
 
-FormatVersion の履歴: V2 で `VectorIndexSpec` の HNSW レイアウトパラメタを catalog に永続化、
-V3 で第一級ハイパーエッジ用の ID kind / token 空間 / 固定 tenant を追加、
-V4 で incidence を fixed-slot 直接アドレスレイアウトへ再設計、
-V5 で relationship delta の head sidecar と append-only page store 用固定 tenant を追加した。
-各バージョンは clean break であり、旧バージョンの DB は open 時に拒否して
-ソースデータから再構築する。
+`QuiverDatabaseOptions.InitialFileAllocationBytes` と `MaximumFileGrowthStepBytes` で初期確保量と成長上限を変更できる。
+いずれの値も 8 KiB 境界へ整列する。
+WAL は `QUIVER-SW` file header、明示的な `Commit` レコード、ページイメージを使用する。
+別 family、未知のレコード種別、切り詰め、checksum 不一致は open または解析時に拒否する。
+旧 DB と旧 WAL の読み替えは実装せず、ソースデータから再構築する。
 
-### 開発中の FormatVersion 運用（公開バージョンと分離する）
+### 開発中の format family version 運用（公開バージョンと分離する）
 
-`FormatVersion`（オンディスク format の内部カウンタ）と、利用者に公開する
-SemVer バージョン（`Directory.Build.props` の `VersionPrefix`）は **別物であり、連動させない**。
+`StorageFormatVersion` と `WalFormat.FamilyVersion` は、利用者に公開する SemVer バージョン（`Directory.Build.props` の `VersionPrefix`）とは別物であり、連動させない。
 開発中に両者を混同しないための運用規約を以下に定める。
 
-- **開発中の `FormatVersion` は自由に bump してよい単調カウンタである。** レイアウトを変える増分は
-  そのつど `FormatVersion.Current` を次の整数へ上げ、旧 format の読み替え・マイグレーションは
-  一切実装しない（未リリース方針。`FormatVersionMismatchException` で fail-fast する）。
-  1 本のトラック内で V3 → V4 のように複数回上がってよく、main へマージするまでに
-  数バージョン進むこと自体は問題としない。**中間バージョンを温存する必要はない。**
-- **公開バージョンは `FormatVersion` の増加回数に追随しない。** `VersionPrefix` は SemVer の
-  意味論（[api-stability.md](../api-stability.md)）だけで上下する。format を 3 回 bump しても、
-  公開 API に breaking が無ければ MINOR/PATCH のままでよい。
-- **GA 直前に pre-release 期の format 履歴を 1 本のベースラインへ畳む。** v1 で実施した前例
-  （pre-MVCC 以降の format 履歴を clean break で畳み、現実装を V1 として再宣言）と同じ手順を
-  次の GA でも踏む。畳み込みは `FormatVersion.cs` の定数整理と履歴コメントの書き直しだけで済み、
-  DB 資産の移行は伴わない（未リリースにつき）。
-- **GA 後（`1.0.0` 以降）は §7.2 の互換規約に従い、1.x 内では `FormatVersion` を bump しない。**
-  すなわち「自由に bump してよい」のは pre-release 期だけの運用である。
-- **計画書・タスク管理での表記。** `plans/` や skill のタスク定義で「FormatVersion V5 へ bump」と
-  書いても、それは開発上の内部カウンタの話であり公開バージョンの宣言ではない。公開バージョンを
-  指すときは SemVer 表記（例: `0.2.0`）を使い、両者を同じ文中で並べるときは
-  「on-disk format V5 / 公開 0.2.0」のように明示して区別する。
+- **pre-release 期の family version は clean break の内部カウンタとして扱う。**
+  レイアウトを変える場合は DB と WAL の family version を同じ変更で更新し、旧 family の読み替えやマイグレーションを実装しない。
+  DB は `StorageFormatMismatchException`、WAL は `WalFormatMismatchException` で fail-fast する。
+- **公開バージョンは family version の増加回数に追随しない。**
+  `VersionPrefix` は SemVer の意味論（[api-stability.md](../api-stability.md)）だけで上下する。
+- **GA 直前に pre-release 期の format 履歴を単一のベースラインへ畳む。**
+  中間 version の定数、decoder、fallback は残さない。
+  DB 資産の移行は伴わない。
+- **GA 後（`1.0.0` 以降）は §7.2 の互換規約に従う。**
+  format 変更の可否は公開互換性ポリシーで判断する。
+- **計画書では on-disk family version と公開 SemVer を明記して区別する。**
 
 ### ID 型
 
 すべての識別子は `readonly record struct` で型安全に表現する。
 
 ```csharp
-public readonly record struct NodeId(long Value);
-public readonly record struct RelationshipId(long Value);
-public readonly record struct HyperedgeId(long Value);
-public readonly record struct HyperedgeTypeId(int Value);
+public readonly record struct VertexId(long Value);
+public readonly record struct EdgeId(long Value);
+public readonly record struct NexusId(long Value);
+public readonly record struct NexusTypeId(int Value);
 public readonly record struct PropertyId(long Value);
 public readonly record struct LabelId(int Value);
 public readonly record struct TransactionId(long Value);
 // ... など
 ```
 
-`-1` は「無効 / null」を意味する予約値。`NodeId.Value` は generation + sequence をパックした値で、
+`-1` は「無効 / null」を意味する予約値。`VertexId.Value` は generation + sequence をパックした値で、
 スロット再利用後も識別子の往復一貫性を保つ。
 
 ## ビルド
@@ -137,18 +129,18 @@ dotnet run --project sandbox/QuiverSandbox
 Fluent Traversal / Source Generator の下位には、`GraphTransaction` を直接操作するローレベル API がある。
 
 ```csharp
-using var db = GraphDatabase.Open("./mygraph");
+using var db = QuiverDatabase.Open("./mygraph");
 
 using (var tx = db.BeginTransaction())
 {
-    var alice = tx.CreateNode("Person");
+    var alice = tx.CreateVertex("Person");
     tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
     tx.SetProperty(alice, "age",  PropertyValue.FromInt32(30));
 
-    var bob = tx.CreateNode("Person");
+    var bob = tx.CreateVertex("Person");
     tx.SetProperty(bob, "name", PropertyValue.FromString("Bob"));
 
-    tx.CreateRelationship(alice, bob, "KNOWS");
+    tx.CreateEdge(alice, bob, "KNOWS");
     tx.Commit();
 }
 ```
@@ -158,26 +150,26 @@ using (var tx = db.BeginTransaction())
 ```csharp
 var g = tx.G(db.Schema);
 
-var alice = g.AddNode("Person").P("Name", "Alice").P("Age", 30).Next();
-var bob   = g.AddNode("Person").P("Name", "Bob").P("Age", 25).Next();
-g.AddRelationship("KNOWS").From(alice).To(bob).Next();
+var alice = g.AddVertex("Person").P("Name", "Alice").P("Age", 30).Next();
+var bob   = g.AddVertex("Person").P("Name", "Bob").P("Age", 25).Next();
+g.AddEdge("KNOWS").From(alice).To(bob).Next();
 
-var names = g.Nodes().HasLabel("Person")
+var names = g.Vertices().HasLabel("Person")
               .Has("Age", P.Gt(25L))
               .Out("KNOWS")
               .Values("Name")
               .ToList();   // → ["Bob"]
 
 // 型なしエッジ経路
-var recent = g.Node(alice).OutRelationships("KNOWS").Has("since", P.Gt(2022L)).TargetNode();
+var recent = g.Vertex(alice).OutEdges("KNOWS").Has("since", P.Gt(2022L)).TargetVertex();
 ```
 
 グラフパターンマッチ（Match DSL, Cypher の宣言的パターンに相当）:
 
 ```csharp
 var results = g.Match(
-    GraphPattern.Node("n", "Person")
-                .Out("KNOWS", GraphPattern.Node("m", "Person"))
+    GraphPattern.Vertex("n", "Person")
+                .Out("KNOWS", GraphPattern.Vertex("m", "Person"))
 )
 .Where("n", "Age", P.Gt(25L))
 .Return(v => new
@@ -188,16 +180,16 @@ var results = g.Match(
 .ToList();
 
 // サブトラバーサル述語（WHERE EXISTS / NOT EXISTS 相当）
-var loners     = g.Nodes().HasLabel("Person").Not(t => t.Out("KNOWS")).ToList();
-var connectors = g.Nodes().HasLabel("Person").Where(t => t.Out("KNOWS").HasLabel("Person")).ToList();
+var loners     = g.Vertices().HasLabel("Person").Not(t => t.Out("KNOWS")).ToList();
+var connectors = g.Vertices().HasLabel("Person").Where(t => t.Out("KNOWS").HasLabel("Person")).ToList();
 
 // ストリーミング（大量結果でメモリを抑える）
-using var cursor = g.Nodes<Person>().AsCursor();
+using var cursor = g.Vertices<Person>().AsCursor();
 while (cursor.MoveNext())
 {
     var person = cursor.Current;   // トランザクション有効期間内のみ有効
 }
-foreach (var name in g.Nodes().HasLabel("Person").Values("Name").AsEnumerable())
+foreach (var name in g.Vertices().HasLabel("Person").Values("Name").AsEnumerable())
     Console.WriteLine(name);
 ```
 
@@ -205,75 +197,75 @@ foreach (var name in g.Nodes().HasLabel("Person").Values("Name").AsEnumerable())
 
 | 属性 | 対象 | 引数 | 省略時の挙動 |
 |---|---|---|---|
-| `[Node]` | クラス | `label` (省略可) | クラス名をラベルとして使用 |
-| `[Relationship]` | クラス | `type` (省略可) | クラス名をリレーションシップ型として使用 |
+| `[Vertex]` | クラス | `label` (省略可) | クラス名をラベルとして使用 |
+| `[Edge]` | クラス | `type` (省略可) | クラス名をEdge型として使用 |
 | `[Property]` | プロパティ | `key` (省略可) | プロパティ名をグラフキーとして使用 |
 | `[Indexed]` | プロパティ | `indexName` (省略可) | `idx_{label}_{propertyName}` を自動生成。`[Property]` と併用必須 |
-| `[Hyperedge]` | クラス | `type` (省略可) | クラス名をハイパーエッジ型として使用 |
-| `[Role]` | プロパティ | `role` (省略可) | プロパティ名をロール名として使用。型は `GraphNodeRef<TNode>`（複数ロールは `IReadOnlyList<GraphNodeRef<TNode>>`、省略可能ロールは nullable） |
+| `[Nexus]` | クラス | `type` (省略可) | クラス名をNexus型として使用 |
+| `[Role]` | プロパティ | `role` (省略可) | プロパティ名をロール名として使用。型は `GraphVertexRef<TVertex>`（複数ロールは `IReadOnlyList<GraphVertexRef<TVertex>>`、省略可能ロールは nullable） |
 
-> **注意:** クラス名・プロパティ名を変更すると `[Node]`・`[Indexed]` の自動生成名も変わり、既存
+> **注意:** クラス名・プロパティ名を変更すると `[Vertex]`・`[Indexed]` の自動生成名も変わり、既存
 > インデックスファイルが孤立する。リネームの可能性がある場合は明示指定を推奨。
 >
-> **名前衝突:** 属性はすべて `Quiver.Api` 名前空間にある。`[Node]` / `[Property]` のような一般名は
+> **名前衝突:** 属性はすべて `Quiver.Api` 名前空間にある。`[Vertex]` / `[Property]` のような一般名は
 > 他ライブラリの属性（例: FsCheck の `[Property]`）と衝突し得る。その場合は名前空間で限定する
 > （例: `[Quiver.Api.Property]`）。
 
 生成されるメソッド:
 
-**`[Node]` クラス** — `Insert(tx, entity) → NodeId` / `InsertIndexed` / `Load(tx, id) → T` /
-`Update(tx, id, entity)` / `Delete(tx, id)` / `FindBy{PropName}(tx, value) → List<(NodeId, T)>`（`[Indexed]` ごと）
+**`[Vertex]` クラス** — `Insert(tx, entity) → VertexId` / `InsertIndexed` / `Load(tx, id) → T` /
+`Update(tx, id, entity)` / `Delete(tx, id)` / `FindBy{PropName}(tx, value) → List<(VertexId, T)>`（`[Indexed]` ごと）
 
-**`[Relationship]` クラス** — `Insert(tx, from, to, entity) → RelationshipId` / `Load` / `Update` / `Delete`
+**`[Edge]` クラス** — `Insert(tx, from, to, entity) → EdgeId` / `Load` / `Update` / `Delete`
 
-**`[Hyperedge]` クラス** — `Insert(tx, entity) → HyperedgeId` / `Load` / `Update`（プロパティのみ。
+**`[Nexus]` クラス** — `Insert(tx, entity) → NexusId` / `Load` / `Update`（プロパティのみ。
 メンバー集合は作成時確定） / `Delete`、および型保存トラバーサル糖衣
 `{Class}As{Prop}()` / `{Prop}()` / `Other{Prop}()`（ロールプロパティごと）
 
-## ハイパーエッジ（第一級 n 項リレーション）
+## Nexus（第一級 n 項Edge）
 
-利用者向けの契約は [docs/spec/04_records_index.md](../spec/04_records_index.md#hyperedge-store)
-（レコード）、[docs/spec/05_query.md](../spec/05_query.md#hyperedge-ops)（オペレータ / DSL / Match）、
-[docs/spec/08_known_limits.md](../spec/08_known_limits.md#hyperedge-limits)（契約と限界）を正本とする。
-サンプルは [samples/Quiver.Samples.Hyperedges/](../../samples/Quiver.Samples.Hyperedges/)。
+利用者向けの契約は [docs/spec/04_records_index.md](../spec/04_records_index.md#nexus-store)
+（レコード）、[docs/spec/05_query.md](../spec/05_query.md#nexus-ops)（オペレータ / DSL / Match）、
+[docs/spec/08_known_limits.md](../spec/08_known_limits.md#nexus-limits)（契約と限界）を正本とする。
+サンプルは [samples/Quiver.Samples.Nexuses/](../../samples/Quiver.Samples.Nexuses/)。
 
 ### 実装マップ
 
 | レイヤ | 主なファイル |
 |---|---|
-| Core ID / kind | `src/Quiver/Core/EntityRef.cs`（kind 付き packed identity）、`src/Quiver/Core/Ids.cs`（typed ID と Generation 込み equality）、`src/Quiver/Core/EntityId.cs`（Node / Relationship / Hyperedge の strict internal tag） |
-| ストア | `src/Quiver/Stores/VersionedHyperedgeStore.cs`、`IncidenceStore.cs`、`NodeIncidenceHeadStore.cs`、`CoMembershipBlockStore.cs` |
-| トランザクション | `src/Quiver/Transactions/TxHyperedgeStore.cs`（locking / SSN / undo の配線） |
-| 公開 CRUD | `src/Quiver/IGraphTransaction.cs`（`CreateHyperedge` / `DeleteHyperedge` / `GetMembers` / `GetHyperedges` / プロパティ各種）、`ISchemaApi`（型 / ロールの token 管理） |
-| クエリ | `src/Quiver/Operators/`（`AllHyperedgesScan` / `ExpandToHyperedge` / `ExpandMembers` / `CoMembership` の各 operator）、`src/Quiver/Query/PhysicalPlanner.cs` |
-| DSL / Match | `src/Quiver/Client/GraphTraversalSource.cs`、`GraphTraversal.cs`、`Match/GraphPattern.cs`（`HyperedgePattern`） |
-| SourceGen | `src/Quiver.SourceGen/GraphHyperedgeGenerator.cs` / `GraphHyperedgeModel.cs` / `GraphHyperedgeEmitter.cs`、属性は `src/Quiver/Client/HyperedgeAttribute.cs` |
-| 保守 | `src/Quiver/Maintenance/Vacuum.cs`（`VacuumTarget.Hyperedges`）、`DiagnosticsApi.CheckConsistency`、`GraphStats`（型別件数 / アリティ分布） |
+| Core ID / kind | `src/Quiver/Core/EntityRef.cs`（kind 付き packed identity）、`src/Quiver/Core/Ids.cs`（typed ID と Generation 込み equality）、`src/Quiver/Core/EntityId.cs`（Vertex / Edge / Nexus の strict internal tag） |
+| ストア | `src/Quiver/Stores/VersionedNexusStore.cs`、`IncidenceStore.cs`、`VertexIncidenceHeadStore.cs`、`CoMembershipBlockStore.cs` |
+| トランザクション | `src/Quiver/Transactions/TxNexusStore.cs`（locking / SSN / undo の配線） |
+| 公開 CRUD | `src/Quiver/IGraphTransaction.cs`（`CreateNexus` / `DeleteNexus` / `GetMembers` / `GetNexuses` / プロパティ各種）、`ISchemaApi`（型 / ロールの token 管理） |
+| クエリ | `src/Quiver/Operators/`（`AllNexusesScan` / `ExpandToNexus` / `ExpandMembers` / `CoMembership` の各 operator）、`src/Quiver/Query/PhysicalPlanner.cs` |
+| DSL / Match | `src/Quiver/Client/GraphTraversalSource.cs`、`GraphTraversal.cs`、`Match/GraphPattern.cs`（`NexusPattern`） |
+| SourceGen | `src/Quiver.SourceGen/GraphNexusGenerator.cs` / `GraphNexusModel.cs` / `GraphNexusEmitter.cs`、属性は `src/Quiver/Client/NexusAttribute.cs` |
+| 保守 | `src/Quiver/Maintenance/Vacuum.cs`（`VacuumTarget.Nexuses`）、`DiagnosticsApi.CheckConsistency`、`GraphStats`（型別件数 / アリティ分布） |
 
 ### 固定 tenant（SingleFileContainer カタログ）
 
-ハイパーエッジ関連の論理ストアは次の固定 tenant を使う（変更しない）。
+Nexus関連の論理ストアは次の固定 tenant を使う（変更しない）。
 
 | tenant | 用途 |
 |---|---|
-| 18 | hyperedge heap（header + inline property） |
-| 19 | hyperedge の `ItemPointerMap` |
-| 20 | hyperedge の MVCC / generation sidecar |
+| 18 | nexus heap（header + inline property） |
+| 19 | nexus の `ItemPointerMap` |
+| 20 | nexus の MVCC / generation sidecar |
 | 21 | incidence heap（27B fixed-slot、直接アドレス） |
-| 22 | 欠番（旧 incidence 間接マップ。V4 で不要化、番号は詰めない） |
-| 23 | hyperedge type token |
+| 22 | 欠番（旧 incidence 間接マップ用。番号は詰めない） |
+| 23 | nexus type token |
 | 24 | role token |
-| 25 | node incidence head（6B sidecar） |
+| 25 | vertex incidence head（6B sidecar） |
 
 ### テスト
 
-hyperedge の回帰は `tests/Quiver.Stores.Tests/IncidenceStoreTests.cs`、
-`tests/Quiver.Tests/`（`HyperedgePropertyTests` / `HyperedgeDiagnosticsTests` /
-`HyperedgeGeneratedCrudTests` / `HyperedgeTypedTraversalTests` / `VacuumTests` / `GraphStatsTests` /
-`CoMembershipBlockTests`）、`tests/Quiver.Client.Tests/`（`HyperedgeRagQueryTests` /
-`MatchPatternTests`）、`tests/Quiver.SourceGen.Tests/HyperedgeGeneratorTests.cs` が担う。
-性能ゲートの実測は「ハイパーエッジ統合性能」節と
-[docs/benchmarks/2026-07-06_HYP-6c_Hyperedge.md](../benchmarks/2026-07-06_HYP-6c_Hyperedge.md) を参照。
+nexus の回帰は `tests/Quiver.Stores.Tests/IncidenceStoreTests.cs`、
+`tests/Quiver.Tests/`（`NexusPropertyTests` / `NexusDiagnosticsTests` /
+`NexusGeneratedCrudTests` / `NexusTypedTraversalTests` / `VacuumTests` / `GraphStatsTests` /
+`CoMembershipBlockTests`）、`tests/Quiver.Client.Tests/`（`NexusRagQueryTests` /
+`MatchPatternTests`）、`tests/Quiver.SourceGen.Tests/NexusGeneratorTests.cs` が担う。
+性能ゲートの実測は「Nexus統合性能」節と
+[docs/benchmarks/2026-07-06_HYP-6c_Nexus.md](../benchmarks/2026-07-06_HYP-6c_Nexus.md) を参照。
 
 ## 性能（詳細計測）
 
@@ -284,14 +276,14 @@ hyperedge の回帰は `tests/Quiver.Stores.Tests/IncidenceStoreTests.cs`、
 
 | 操作 | 設計目標 | 実測 (2026-06-09) |
 |---|---|---|
-| ノード作成（単一 tx 償却） | < 1 µs ※インメモリ操作目標 | ~3.5–4 µs/op（~250K ops/s） |
-| ノード作成 + プロパティ設定（同上） | < 2 µs | ~6 µs/op |
-| リレーション作成（同上） | — | ~7 µs/op（~140K ops/s） |
+| Vertex作成（単一 tx 償却） | < 1 µs ※インメモリ操作目標 | ~3.5–4 µs/op（~250K ops/s） |
+| Vertex作成 + プロパティ設定（同上） | < 2 µs | ~6 µs/op |
+| Edge作成（同上） | — | ~7 µs/op（~140K ops/s） |
 | 単発 durable commit（1 op = 1 commit、単一スレッド） | — | ~1.0 ms/commit（WAL flush 律速） |
 | 1-hop scan（degree 100、AdjacencyBlockStore） | < 0.5 µs | ~0.35 µs（~3.5 ns/edge） |
 | 1-hop scan（degree 100、linked-list / 索引なし） | — | ~11 µs（~0.11 µs/edge、MVCC 可視性込み） |
 | BFS 2-hop（ハブ degree 100、leaf 10,000、隣接ブロック） | < 5 ms | ~0.037 ms |
-| 1-hop クエリ（`g.Node().Out()`、degree 100、隣接ブロック） | クエリラッパ < 5% | ~4.2 µs/query（~42 ns/edge、生隣接の ~12×） |
+| 1-hop クエリ（`g.Vertex().Out()`、degree 100、隣接ブロック） | クエリラッパ < 5% | ~4.2 µs/query（~42 ns/edge、生隣接の ~12×） |
 | BulkLoader（10 万 edge） | 通常 TX 比 5× 以上高速 | 通常 TX（batch 1000）比 ~11.8× |
 
 ### 計測の要点
@@ -306,16 +298,16 @@ hyperedge の回帰は `tests/Quiver.Stores.Tests/IncidenceStoreTests.cs`、
   ロード時検出は維持（crash contract / chaos テストで担保）。この 1 点で linked-list 1-hop が
   ~2.3 → ~0.11 µs/edge（~20×）短縮した。
 - **書き込みは単発 durable commit が ~1 ms（WAL flush 律速）。** 大量書き込みは 1 tx にまとめる
-  （償却 ~3.5–4 µs/node）か BulkLoader を使う。並行 commit では group commit
-  （`GraphDatabaseOptions.GroupCommitWindow`）でスループットが桁違いに上がる
+  （償却 ~3.5–4 µs/vertex）か BulkLoader を使う。並行 commit では group commit
+  （`QuiverDatabaseOptions.GroupCommitWindow`）でスループットが桁違いに上がる
   （64-thread で window=0 比 ~28×、別計測 FT-27）。
 - **WAL page-image の Encode（trim+RLE）は commit 時にページ毎 1 回だけ行う（書込ごとには行わない）。**
   トランザクション内で同一ページを繰り返し書いても WAL に出るのは最終状態 1 件（latest-wins coalesce）
   なので、中間状態の Encode は無駄。これを `FlushPending`（commit）へ遅延し、ホットページ反復書込
   （version sidecar / record heap）の増幅を解消。recovery 形式は不変で、単一 tx 償却の書込が ~4×
-  高速化した（ノード作成 ~14 → ~3.5–4 µs/op）。
+  高速化した（Vertex作成 ~14 → ~3.5–4 µs/op）。
 - **クエリ DSL の 1-hop（degree 100）は ~4.2 µs/query（~42 ns/edge、生隣接の ~12×）。**
-  プラン構築 + 物理オペレータ生成は ~0.4 µs と僅少。結果行ごとの NodeId 世代スタンプは、スロット
+  プラン構築 + 物理オペレータ生成は ~0.4 µs と僅少。結果行ごとの VertexId 世代スタンプは、スロット
   再利用（vacuum 回収）が無い間は version sidecar 読み取りを省く高速パスで処理する。これで 1-hop
   クエリは ~62 → ~8 µs/query（~7.7×）に短縮し、さらに checksum-at-load で隣接ブロック pin が安くなり
   ~8 → ~4.2 µs/query になった。
@@ -335,22 +327,22 @@ carry-column は no-alias 比 ±3% 以内。詳細:
 40×40: BFS 4.27 ms / Dijkstra 7.79 ms / A* 7.63 ms。詳細:
 `benchmarks/Quiver.Benchmarks/WeightedShortestPathBenchmarks.cs`。
 
-### ハイパーエッジ統合性能（HYP-6c 統合ゲート）
+### Nexus統合性能（HYP-6c 統合ゲート）
 
-第一級ハイパーエッジの走査・書き込み・Match を製品 API（`GraphDatabase` / DSL / Match）経由で
+第一級Nexusの走査・書き込み・Match を製品 API（`QuiverDatabase` / DSL / Match）経由で
 再測定した（AMD64 / .NET 10.0.9 / workstation GC）。三ゲート全て合格。詳細:
-[docs/benchmarks/2026-07-06_HYP-6c_Hyperedge.md](../benchmarks/2026-07-06_HYP-6c_Hyperedge.md)。
-runner: `--hyperedge-traversal` / `--hyperedge-write` / `--hyperedge-match`。
+[docs/benchmarks/2026-07-06_HYP-6c_Nexus.md](../benchmarks/2026-07-06_HYP-6c_Nexus.md)。
+runner: `--nexus-traversal` / `--nexus-write` / `--nexus-match`。
 
-- **走査**（`g.Node(hub).Hyperedges("Fact","subject").OtherMembers("object")` の co-membership view
+- **走査**（`g.Vertex(hub).Nexuses("Fact","subject").OtherMembers("object")` の co-membership view
   vs binary `Out` 1-hop、arity 4）: p50 比 degree 10/100/1000 = 1.15x / 0.95x / 2.14x（ゲート ≤3x 合格）。
   ビュー未登録のリンクチェーン fallback は 3.59x / 2.80x / 4.57x。
 - **書き込み**（arity 2/4/8/16）: create WAL 増幅 1.249x / 1.890x / 3.182x / 5.746x（ゲート
   `(1+arity/2)×` = 2/3/5/9 以内、HYP-2d の WAL バイトを製品 API で再現）。作成遅延 48〜220 µs/op、
   プロパティ書込み ~11〜14 µs/op、削除 ~4〜5 µs/op。
-- **高次数 DeleteNode カスケード**（1 node が 10^3 / 10^4 hyperedge のメンバー）: tx 7.84 ms / 47.69 ms、
+- **高次数 DeleteVertex カスケード**（1 vertex が 10^3 / 10^4 nexus のメンバー）: tx 7.84 ms / 47.69 ms、
   WAL 61 KB / 608 KB、デッドロック無し、削除後 `CheckConsistency` は 0 件。
-- **Match**: 四役割の星型 Match は等価な reified graph pattern（node + MEMBER relationship の 4-way 結合）の
+- **Match**: 四役割の星型 Match は等価な reified graph pattern（vertex + MEMBER edge の 4-way 結合）の
   0.71x（facts=1000 で 1.960 ms vs 2.768 ms）。
 
 ## 開発状況
@@ -404,7 +396,7 @@ solution build、変更した contract の as-built 更新、Wave 固有の機�
 | [00_conventions.md](00_conventions.md) | 共通規約（命名・性能指針・テスト規約） |
 | `01_storage_paging.md` | historical record: ページ管理・バッファプール |
 | `02_record_codec.md` | historical record: バイト列直接操作プリミティブ |
-| `03_fixed_record_stores.md` | historical record: Node / Relationship ストア |
+| `03_fixed_record_stores.md` | historical record: Vertex / Edge ストア |
 | `04_property_token_stores.md` | historical record: Property / Token ストア |
 | `05_btree_index.md` | historical record: B+Tree インデックス |
 | `06_wal.md` | historical record: Write-Ahead Log |
@@ -526,12 +518,12 @@ public API surface は [tests/Quiver.PublicApi.Tests/](../../tests/Quiver.Public
 `IChunkEmbedder` のインライン注入で行い本パイプラインを使わない。参照プロバイダ実装・サンプル・実消費者
 （例: RAG の遅延/バックグラウンド埋め込みモード）が揃った時点で `IsPackable=true` にして公開へ昇格する。
 
-型付きエンティティ属性（`[Node]` / `[Relationship]` / `[Property]` / `[Indexed]`、namespace `Quiver.Api`）は
-**`Quiver` 本体アセンブリに内包**している（[src/Quiver/Client/NodeAttribute.cs](../../src/Quiver/Client/NodeAttribute.cs)・
-[RelationshipAttribute.cs](../../src/Quiver/Client/RelationshipAttribute.cs)）。`Quiver.SourceGen`（Roslyn generator）は
+型付きエンティティ属性（`[Vertex]` / `[Edge]` / `[Property]` / `[Indexed]`、namespace `Quiver.Api`）は
+**`Quiver` 本体アセンブリに内包**している（[src/Quiver/Client/VertexAttribute.cs](../../src/Quiver/Client/VertexAttribute.cs)・
+[EdgeAttribute.cs](../../src/Quiver/Client/EdgeAttribute.cs)）。`Quiver.SourceGen`（Roslyn generator）は
 **単体公開せず** `Quiver` パッケージへ analyzer として同梱する（`analyzers/dotnet/cs/Quiver.SourceGen.dll`、
 [src/Quiver/Quiver.csproj](../../src/Quiver/Quiver.csproj) の `_QuiverAddBundledAnalyzer` target）。生成器は属性を
-**完全修飾名の文字列**で照合する（`GraphNodeGenerator.NodeAttributeFqn = "Quiver.Api.NodeAttribute"` 等）ため、
+**完全修飾名の文字列**で照合する（`GraphVertexGenerator.VertexAttributeFqn = "Quiver.Api.VertexAttribute"` 等）ため、
 属性アセンブリへの参照は不要。SourceGen の `ProjectReference` は `PrivateAssets="all"` でパッケージ依存に昇格させない。
 
 結果、利用者は `Quiver` パッケージ 1 つの参照で属性 + 生成器まで揃う。さらに `Quiver` は
@@ -540,7 +532,7 @@ public API surface は [tests/Quiver.PublicApi.Tests/](../../tests/Quiver.Public
 不要なら利用者側で `<Using Remove="Quiver.Api" />` で opt-out 可）。
 
 > リポジトリ内のテスト/サンプルは `Quiver` を `ProjectReference` するが、analyzer は `PrivateAssets="all"` で
-> transitive には流れない。そのため `[Node]` 等を使うプロジェクトは `Quiver.SourceGen` を analyzer として
+> transitive には流れない。そのため `[Vertex]` 等を使うプロジェクトは `Quiver.SourceGen` を analyzer として
 > 直接参照する（`Quiver.Tests` / `Quiver.Client.Tests` / `Samples.SourceGen` / `QuiverSandbox` / `SourceGen.Tests`）。
 > 属性型は `Quiver` 本体から供給されるので、属性アセンブリの直接参照は不要。
 

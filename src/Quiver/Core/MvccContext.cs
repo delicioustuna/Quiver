@@ -16,9 +16,9 @@ internal interface ISsnReadSink
 }
 
 /// <summary>
-/// MVCC アンビエントコンテキスト。<c>Quiver.Storage.Wal.WalPageContext</c> と対で
+/// MVCC アンビエントコンテキスト。<c>Quiver.Storage.Wal.WalWriteSetContext</c> と対で
 /// 非同期フロー単位にトランザクションの可視性スナップショット (TxId / ActiveAtBegin / committed registry)
-/// を持つ。下層ストア (NodeStore / RelationshipStore / PropertyStore) はこれを参照して
+/// を持つ。下層ストア (VertexStore / EdgeStore / PropertyStore) はこれを参照して
 /// record の xmin / xmax を埋め、可視性判定を行う。
 /// <para>
 /// コンテキスト未設定時は <see cref="TransactionId.Bootstrap"/> として扱う。これにより

@@ -7,8 +7,7 @@ using Quiver.Telemetry;
 namespace Quiver.Storage.Wal;
 
 /// <summary>
-/// 単一ファイル WAL。旧来の <c>wal/</c> セグメント群 (<c>wal.NNNNNNNN.log</c>) を
-/// 1 本のサイドカーファイル (例: <c>graph.quiver-wal</c>) に統合する。
+/// QUIVER-SW 形式の単一ファイル WAL。
 /// <list type="bullet">
 ///   <item><see cref="Truncate"/> はセグメント削除の代わりにファイルをコンパクション
 ///     (truncate 対象 prefix を捨てて live tail を前詰め) する。checkpoint は
@@ -16,7 +15,7 @@ namespace Quiver.Storage.Wal;
 ///   <item><see cref="MarkDeleteOnDispose"/> されたクリーン終了では Dispose 時にファイルを削除する。
 ///     全データは graph.quiver へ durable 済みなので、静止時はサイドカーが消えて本体のみが残る。</item>
 /// </list>
-/// レコードフォーマット / コアレス / group commit / PageImage coalesce は据え置き。
+/// レコードフォーマット、コアレス、group commit、PageImage coalesce を提供する。
 /// </summary>
 internal sealed class WriteAheadLog : IWriteAheadLog
 {
@@ -69,15 +68,11 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     public long DrainedPageImageCount => Volatile.Read(ref _drainedPageImageCount);
 
     public WriteAheadLog(string path)
-        : this(path, 0, TimeSpan.Zero) { }
+        : this(path, TimeSpan.Zero) { }
 
-    public WriteAheadLog(string path, long segmentCapacity)
-        : this(path, segmentCapacity, TimeSpan.Zero) { }
-
-    public WriteAheadLog(string path, long segmentCapacity, TimeSpan groupCommitWindow)
+    public WriteAheadLog(string path, TimeSpan groupCommitWindow)
     {
         _path = path;
-        _ = segmentCapacity; // 単一ファイルでは未使用 (旧 API 互換のため受け取る)
         _groupCommitWindowTicks = groupCommitWindow > TimeSpan.Zero
             ? (long)(groupCommitWindow.TotalSeconds * Stopwatch.Frequency)
             : 0;
@@ -87,6 +82,7 @@ internal sealed class WriteAheadLog : IWriteAheadLog
             new UnboundedChannelOptions { SingleReader = true });
         RebuildState();
         _stream = new FileStream(_path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+        WalFormat.Initialize(_stream);
         _stream.Seek(0, SeekOrigin.End);
         _flushTask = Task.Factory.StartNew(
             RunFlushLoopAsync, CancellationToken.None,
@@ -101,6 +97,8 @@ internal sealed class WriteAheadLog : IWriteAheadLog
 
     public long Append(WalRecordType type, TransactionId tx, ReadOnlySpan<byte> payload)
     {
+        if (!WalFormat.IsKnownRecordType(type))
+            throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown WAL record type.");
         if (payload.Length > MaxPayloadSize)
             throw new StorageException($"WAL payload size {payload.Length} exceeds max {MaxPayloadSize}");
 
@@ -112,7 +110,6 @@ internal sealed class WriteAheadLog : IWriteAheadLog
             if (type == WalRecordType.Commit ||
                 type == WalRecordType.CheckpointBegin ||
                 type == WalRecordType.CheckpointEnd ||
-                type == WalRecordType.Checkpoint ||
                 type == WalRecordType.Abort)
             {
                 DrainCoalesceBufferLocked();
@@ -233,16 +230,6 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         }
     }
 
-    public long WriteCheckpoint(long oldestActiveLsn, long lastFlushedDataLsn)
-    {
-        Span<byte> payload = stackalloc byte[16];
-        BinaryPrimitives.WriteInt64LittleEndian(payload, oldestActiveLsn);
-        BinaryPrimitives.WriteInt64LittleEndian(payload[8..], lastFlushedDataLsn);
-        long lsn = Append(WalRecordType.Checkpoint, new TransactionId(-1), payload);
-        FlushTo(lsn);
-        return lsn;
-    }
-
     public long WriteCheckpointBegin(long oldestActiveLsn, int dirtyPageCount)
     {
         Span<byte> payload = stackalloc byte[20];
@@ -289,13 +276,12 @@ internal sealed class WriteAheadLog : IWriteAheadLog
             _stream.Flush();
 
             long keepFromOffset = FindOffsetOfFirstLsnGreaterThan(uptoLsn);
-            if (keepFromOffset == 0) return; // 何も捨てない (先頭から live)
+            if (keepFromOffset == WalFormat.FileHeaderSize) return;
 
             if (keepFromOffset < 0)
             {
-                // 全レコードが uptoLsn 以下 → ファイルを空にする。
-                _stream.SetLength(0);
-                _stream.Seek(0, SeekOrigin.Begin);
+                _stream.SetLength(WalFormat.FileHeaderSize);
+                _stream.Seek(WalFormat.FileHeaderSize, SeekOrigin.Begin);
                 return;
             }
 
@@ -398,11 +384,11 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     private long FindOffsetOfFirstLsnGreaterThan(long uptoLsn)
     {
         using var rs = new FileStream(_path, FileMode.OpenOrCreate, FileAccess.Read, FileShare.ReadWrite);
+        WalFormat.ValidateAndPosition(rs);
         while (true)
         {
             long recStart = rs.Position;
             if (!WalReader.TryReadRecord(rs, out var rec)) return -1;
-            if (rec.Type == WalRecordType.EndOfSegment) continue; // 旧形式互換 (新規には現れない)
             if (rec.Lsn > uptoLsn) return recStart;
         }
     }
@@ -420,6 +406,10 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         string tmp = _path + ".compact";
         using (var ts = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
         {
+            Span<byte> fileHeader = stackalloc byte[WalFormat.FileHeaderSize];
+            _stream.Seek(0, SeekOrigin.Begin);
+            _stream.ReadExactly(fileHeader);
+            ts.Write(fileHeader);
             ts.Write(tail, 0, tailLen);
             ts.Flush(flushToDisk: true);
         }
@@ -496,16 +486,14 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         if (!File.Exists(_path)) return;
 
         long maxLsn = -1;
-        try
+        using (var fs = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
         {
-            using var fs = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            WalFormat.ValidateAndPosition(fs);
             while (WalReader.TryReadRecord(fs, out WalRecord rec))
             {
-                if (rec.Type == WalRecordType.EndOfSegment) continue;
                 if (rec.Lsn > maxLsn) maxLsn = rec.Lsn;
             }
         }
-        catch { }
 
         _nextLsn = maxLsn >= 0 ? maxLsn + 1 : 0;
     }

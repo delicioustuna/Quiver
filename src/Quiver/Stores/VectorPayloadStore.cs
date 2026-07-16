@@ -12,11 +12,11 @@ namespace Quiver.Storage.Records;
 /// バイト列として striping され、任意次元で隙間なくパックされる。
 ///
 /// <para>書き込みは container の単一物理 <c>PagedFile</c> に乗るため、アクティブ tx の
-/// <c>WalPageContext</c> 下で行えば自動的にその tx の WAL / ARIES (PageImage redo + CLR undo) に
+/// <c>WalWriteSetContext</c> 下で行えば自動的にその tx の page-WAL (committed PageImage redo) に
 /// 含まれる。tx コンテキスト外の書き込みは buffer pool に乗り checkpoint / close で永続化される
 /// (crash-atomic ではない — autocommit 経路は呼び出し側が tx で包む)。</para>
 ///
-/// <para><c>gen</c> はバインド先エンティティの世代。slot 再利用で別ノードに化けた
+/// <para><c>gen</c> はバインド先エンティティの世代。slot 再利用で別Vertexに化けた
 /// stale binding を KNN read 時に世代照合で弾くために保持する。</para>
 /// </summary>
 internal sealed class VectorPayloadStore
@@ -224,8 +224,8 @@ internal sealed class VectorPayloadStore
     {
         using var h = _file.PinForRead(HeaderPageId);
         byte v = h.Data[MetaFormatVersion];
-        if (v != FormatVersion.Current)
-            throw new FormatVersionMismatchException("vectorpayload", v, FormatVersion.Current);
+        if (v != StorageFormatVersion.Current)
+            throw new StorageFormatMismatchException("vectorpayload", v, StorageFormatVersion.Current);
     }
 
     private void SaveMeta(bool initialise = false)
@@ -235,6 +235,6 @@ internal sealed class VectorPayloadStore
         BinaryPrimitives.WriteInt32LittleEndian(ph.Data[MetaDim..], _dim);
         ph.Data[MetaElementType] = (byte)_elementType;
         if (initialise)
-            ph.Data[MetaFormatVersion] = FormatVersion.Current;
+            ph.Data[MetaFormatVersion] = StorageFormatVersion.Current;
     }
 }

@@ -15,12 +15,12 @@ namespace Quiver.Tests;
 public sealed class GraphKernelTests : IDisposable
 {
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public GraphKernelTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_pw13_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
     }
 
     public void Dispose()
@@ -32,27 +32,27 @@ public sealed class GraphKernelTests : IDisposable
     // ------------------------------------------------------------------ BFS --
 
     [Fact]
-    public void BfsOperator_emits_every_reachable_node_with_correct_depth()
+    public void BfsOperator_emits_every_reachable_vertex_with_correct_depth()
     {
         using var tx = _db.BeginTransaction();
         var person = _db.Schema.GetOrCreateLabel("Person");
         // Path: a -> b -> c -> d, plus a -> e (depth 1 fork).
-        var a = tx.CreateNode("Person");
-        var b = tx.CreateNode("Person");
-        var c = tx.CreateNode("Person");
-        var d = tx.CreateNode("Person");
-        var e = tx.CreateNode("Person");
-        tx.CreateRelationship(a, b, "K");
-        tx.CreateRelationship(b, c, "K");
-        tx.CreateRelationship(c, d, "K");
-        tx.CreateRelationship(a, e, "K");
+        var a = tx.CreateVertex("Person");
+        var b = tx.CreateVertex("Person");
+        var c = tx.CreateVertex("Person");
+        var d = tx.CreateVertex("Person");
+        var e = tx.CreateVertex("Person");
+        tx.CreateEdge(a, b, "K");
+        tx.CreateEdge(b, c, "K");
+        tx.CreateEdge(c, d, "K");
+        tx.CreateEdge(a, e, "K");
 
-        var src = new SingleNodeSource(a);
+        var src = new SingleVertexSource(a);
         using var bfs = new BfsOperator(src, 0, Direction.Outgoing, typeFilter: null, maxDepth: 3);
         using var result = tx.Execute(bfs);
 
         var rows = result.Rows()
-            .Select(r => (end: r.GetNodeId(1).Value, depth: r.GetInt64(2)))
+            .Select(r => (end: r.GetVertexId(1).Value, depth: r.GetInt64(2)))
             .OrderBy(x => x.depth).ThenBy(x => x.end)
             .ToList();
 
@@ -70,17 +70,17 @@ public sealed class GraphKernelTests : IDisposable
     public void BfsOperator_caps_at_max_depth()
     {
         using var tx = _db.BeginTransaction();
-        var a = tx.CreateNode("X");
-        var b = tx.CreateNode("X");
-        var c = tx.CreateNode("X");
-        tx.CreateRelationship(a, b, "K");
-        tx.CreateRelationship(b, c, "K");
+        var a = tx.CreateVertex("X");
+        var b = tx.CreateVertex("X");
+        var c = tx.CreateVertex("X");
+        tx.CreateEdge(a, b, "K");
+        tx.CreateEdge(b, c, "K");
 
-        var src = new SingleNodeSource(a);
+        var src = new SingleVertexSource(a);
         using var bfs = new BfsOperator(src, 0, Direction.Outgoing, null, maxDepth: 1);
         using var result = tx.Execute(bfs);
 
-        var rows = result.Rows().Select(r => r.GetNodeId(1).Value).ToList();
+        var rows = result.Rows().Select(r => r.GetVertexId(1).Value).ToList();
         rows.Should().Equal([b.Value]);
         tx.Rollback();
     }
@@ -90,18 +90,18 @@ public sealed class GraphKernelTests : IDisposable
     {
         using var tx = _db.BeginTransaction();
         // a -> b -> c -> a cycle.
-        var a = tx.CreateNode("X");
-        var b = tx.CreateNode("X");
-        var c = tx.CreateNode("X");
-        tx.CreateRelationship(a, b, "K");
-        tx.CreateRelationship(b, c, "K");
-        tx.CreateRelationship(c, a, "K");
+        var a = tx.CreateVertex("X");
+        var b = tx.CreateVertex("X");
+        var c = tx.CreateVertex("X");
+        tx.CreateEdge(a, b, "K");
+        tx.CreateEdge(b, c, "K");
+        tx.CreateEdge(c, a, "K");
 
-        var src = new SingleNodeSource(a);
+        var src = new SingleVertexSource(a);
         using var bfs = new BfsOperator(src, 0, Direction.Outgoing, null, maxDepth: 10);
         using var result = tx.Execute(bfs);
 
-        var rows = result.Rows().Select(r => r.GetNodeId(1).Value).ToHashSet();
+        var rows = result.Rows().Select(r => r.GetVertexId(1).Value).ToHashSet();
         rows.Should().BeEquivalentTo([b.Value, c.Value]);
         tx.Rollback();
     }
@@ -112,35 +112,35 @@ public sealed class GraphKernelTests : IDisposable
     public void VariableLength_minHops_filters_short_paths()
     {
         using var tx = _db.BeginTransaction();
-        var a = tx.CreateNode("X");
-        var b = tx.CreateNode("X");
-        var c = tx.CreateNode("X");
-        tx.CreateRelationship(a, b, "K");
-        tx.CreateRelationship(b, c, "K");
+        var a = tx.CreateVertex("X");
+        var b = tx.CreateVertex("X");
+        var c = tx.CreateVertex("X");
+        tx.CreateEdge(a, b, "K");
+        tx.CreateEdge(b, c, "K");
 
-        var src = new SingleNodeSource(a);
+        var src = new SingleVertexSource(a);
         // [minHops=2, maxHops=3]: must skip a (depth 0) and b (depth 1) — only c.
         using var vle = new VariableLengthExpandOperator(src, 0, Direction.Outgoing, null, minHops: 2, maxHops: 3);
         using var result = tx.Execute(vle);
 
-        var rows = result.Rows().Select(r => r.GetNodeId(1).Value).ToList();
+        var rows = result.Rows().Select(r => r.GetVertexId(1).Value).ToList();
         rows.Should().Equal([c.Value]);
         tx.Rollback();
     }
 
     [Fact]
-    public void VariableLength_minHops_zero_emits_start_node()
+    public void VariableLength_minHops_zero_emits_start_vertex()
     {
         using var tx = _db.BeginTransaction();
-        var a = tx.CreateNode("X");
-        var b = tx.CreateNode("X");
-        tx.CreateRelationship(a, b, "K");
+        var a = tx.CreateVertex("X");
+        var b = tx.CreateVertex("X");
+        tx.CreateEdge(a, b, "K");
 
-        var src = new SingleNodeSource(a);
+        var src = new SingleVertexSource(a);
         using var vle = new VariableLengthExpandOperator(src, 0, Direction.Outgoing, null, minHops: 0, maxHops: 1);
         using var result = tx.Execute(vle);
 
-        var rows = result.Rows().Select(r => r.GetNodeId(1).Value).OrderBy(v => v).ToList();
+        var rows = result.Rows().Select(r => r.GetVertexId(1).Value).OrderBy(v => v).ToList();
         rows.Should().Equal([a.Value, b.Value]);
         tx.Rollback();
     }
@@ -152,21 +152,21 @@ public sealed class GraphKernelTests : IDisposable
     public void ShortestPath_returns_correct_distance_and_aborts_early()
     {
         using var tx = _db.BeginTransaction();
-        var a = tx.CreateNode("X");
-        var b = tx.CreateNode("X");
-        var c = tx.CreateNode("X");
-        var d = tx.CreateNode("X");
+        var a = tx.CreateVertex("X");
+        var b = tx.CreateVertex("X");
+        var c = tx.CreateVertex("X");
+        var d = tx.CreateVertex("X");
         // a -> b -> c -> d (distance 3) plus a side branch a -> d directly via two hops.
-        tx.CreateRelationship(a, b, "K");
-        tx.CreateRelationship(b, c, "K");
-        tx.CreateRelationship(c, d, "K");
-        tx.CreateRelationship(a, c, "K"); // shortcut: a -> c (1 hop) -> d (2 hops total)
+        tx.CreateEdge(a, b, "K");
+        tx.CreateEdge(b, c, "K");
+        tx.CreateEdge(c, d, "K");
+        tx.CreateEdge(a, c, "K"); // shortcut: a -> c (1 hop) -> d (2 hops total)
 
         var src = new SinglePairSource(a, d);
         using var sp = new ShortestPathOperator(src, 0, 1, Direction.Outgoing, null);
         using var result = tx.Execute(sp);
 
-        var rows = result.Rows().Select(r => (src: r.GetNodeId(0).Value, dst: r.GetNodeId(1).Value, dist: r.GetInt64(2))).ToList();
+        var rows = result.Rows().Select(r => (src: r.GetVertexId(0).Value, dst: r.GetVertexId(1).Value, dist: r.GetInt64(2))).ToList();
         rows.Should().HaveCount(1);
         rows[0].dist.Should().Be(2);
         tx.Rollback();
@@ -176,7 +176,7 @@ public sealed class GraphKernelTests : IDisposable
     public void ShortestPath_returns_zero_for_self_pair()
     {
         using var tx = _db.BeginTransaction();
-        var a = tx.CreateNode("X");
+        var a = tx.CreateVertex("X");
         var src = new SinglePairSource(a, a);
         using var sp = new ShortestPathOperator(src, 0, 1, Direction.Outgoing, null);
         using var result = tx.Execute(sp);
@@ -190,8 +190,8 @@ public sealed class GraphKernelTests : IDisposable
     public void ShortestPath_no_path_emits_no_row()
     {
         using var tx = _db.BeginTransaction();
-        var a = tx.CreateNode("X");
-        var b = tx.CreateNode("X");
+        var a = tx.CreateVertex("X");
+        var b = tx.CreateVertex("X");
         // No edges between a and b.
         var src = new SinglePairSource(a, b);
         using var sp = new ShortestPathOperator(src, 0, 1, Direction.Outgoing, null);
@@ -208,19 +208,19 @@ public sealed class GraphKernelTests : IDisposable
     {
         using var tx = _db.BeginTransaction();
         // ワーカー同士が相手のフロンティアを参照しないよう、独立した 2 本のチェーンを使う。
-        var a = tx.CreateNode("X");
-        var b = tx.CreateNode("X");
-        var c = tx.CreateNode("X");
-        var d = tx.CreateNode("X");
-        var e = tx.CreateNode("X");
-        var f = tx.CreateNode("X");
-        tx.CreateRelationship(a, b, "K");
-        tx.CreateRelationship(b, c, "K");
-        tx.CreateRelationship(d, e, "K");
-        tx.CreateRelationship(e, f, "K");
+        var a = tx.CreateVertex("X");
+        var b = tx.CreateVertex("X");
+        var c = tx.CreateVertex("X");
+        var d = tx.CreateVertex("X");
+        var e = tx.CreateVertex("X");
+        var f = tx.CreateVertex("X");
+        tx.CreateEdge(a, b, "K");
+        tx.CreateEdge(b, c, "K");
+        tx.CreateEdge(d, e, "K");
+        tx.CreateEdge(e, f, "K");
 
         // Same upstream definition for both runs so we compare apples-to-apples.
-        IPhysicalOperator BuildSrc() => new MultiNodeSource([a, d]);
+        IPhysicalOperator BuildSrc() => new MultiVertexSource([a, d]);
 
         using var sequential = new BfsOperator(BuildSrc(), 0, Direction.Outgoing, null, maxDepth: 2, maxParallelism: 1);
         using var parallel   = new BfsOperator(BuildSrc(), 0, Direction.Outgoing, null, maxDepth: 2, maxParallelism: -1);
@@ -235,56 +235,56 @@ public sealed class GraphKernelTests : IDisposable
         {
             using var r = tx.Execute(op);
             return r.Rows()
-                .Select(row => (row.GetNodeId(0).Value, row.GetNodeId(1).Value, row.GetInt64(2)))
+                .Select(row => (row.GetVertexId(0).Value, row.GetVertexId(1).Value, row.GetInt64(2)))
                 .ToHashSet();
         }
     }
 
     // ----- minimal physical-operator stubs that drive the kernel from a
-    //       fixed list of source nodes / source-target pairs ------------------
+    //       fixed list of source vertices / source-target pairs ------------------
 
-    private sealed class SingleNodeSource(NodeId node) : IPhysicalOperator
+    private sealed class SingleVertexSource(VertexId vertex) : IPhysicalOperator
     {
         private readonly TupleSlot[] _buffer = new TupleSlot[1];
         private bool _emitted;
-        public TupleSchema Schema { get; } = new([new ColumnDefinition("n", TupleSlotType.NodeId)]);
+        public TupleSchema Schema { get; } = new([new ColumnDefinition("n", TupleSlotType.VertexId)]);
         public OperatorStatistics Statistics => default;
         public TupleRef Current => new(_buffer);
         public void Open(Quiver.Transactions.ITransaction tx) { _emitted = false; }
         public bool MoveNext()
         {
             if (_emitted) return false;
-            _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = node.Value };
+            _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = vertex.Value };
             _emitted = true;
             return true;
         }
         public void Dispose() { }
     }
 
-    private sealed class MultiNodeSource(NodeId[] nodes) : IPhysicalOperator
+    private sealed class MultiVertexSource(VertexId[] vertices) : IPhysicalOperator
     {
         private readonly TupleSlot[] _buffer = new TupleSlot[1];
         private int _i = -1;
-        public TupleSchema Schema { get; } = new([new ColumnDefinition("n", TupleSlotType.NodeId)]);
+        public TupleSchema Schema { get; } = new([new ColumnDefinition("n", TupleSlotType.VertexId)]);
         public OperatorStatistics Statistics => default;
         public TupleRef Current => new(_buffer);
         public void Open(Quiver.Transactions.ITransaction tx) { _i = -1; }
         public bool MoveNext()
         {
-            if (++_i >= nodes.Length) return false;
-            _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = nodes[_i].Value };
+            if (++_i >= vertices.Length) return false;
+            _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = vertices[_i].Value };
             return true;
         }
         public void Dispose() { }
     }
 
-    private sealed class SinglePairSource(NodeId src, NodeId tgt) : IPhysicalOperator
+    private sealed class SinglePairSource(VertexId src, VertexId tgt) : IPhysicalOperator
     {
         private readonly TupleSlot[] _buffer = new TupleSlot[2];
         private bool _emitted;
         public TupleSchema Schema { get; } = new([
-            new ColumnDefinition("s", TupleSlotType.NodeId),
-            new ColumnDefinition("t", TupleSlotType.NodeId),
+            new ColumnDefinition("s", TupleSlotType.VertexId),
+            new ColumnDefinition("t", TupleSlotType.VertexId),
         ]);
         public OperatorStatistics Statistics => default;
         public TupleRef Current => new(_buffer);
@@ -292,8 +292,8 @@ public sealed class GraphKernelTests : IDisposable
         public bool MoveNext()
         {
             if (_emitted) return false;
-            _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = src.Value };
-            _buffer[1] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = tgt.Value };
+            _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = src.Value };
+            _buffer[1] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = tgt.Value };
             _emitted = true;
             return true;
         }

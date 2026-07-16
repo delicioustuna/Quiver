@@ -5,7 +5,7 @@ namespace Quiver.Backend.Tests.Chaos;
 /// <summary>
 /// seed 駆動で再現可能なワークロードを生成する。
 ///
-/// 1 シナリオ = 複数 tx。各 tx は 1〜4 個の <see cref="WorkloadOp"/> (CreateNode +
+/// 1 シナリオ = 複数 tx。各 tx は 1〜4 個の <see cref="WorkloadOp"/> (CreateVertex +
 /// 0..N 個の SetProperty / IndexInsert) を含み、最後に Commit or Rollback で締める。
 /// RNG seed が同じなら必ず同じシーケンスが生成される (debug 用にトレースから再現可能)。
 ///
@@ -31,7 +31,7 @@ internal static class WorkloadGenerator
             var ops = new List<WorkloadOp>(opsInTx);
             for (int j = 0; j < opsInTx; j++)
             {
-                // 各 op: CreateNode(label) + 最大 2 件のプロパティ + 50% で IndexInsert
+                // 各 op: CreateVertex(label) + 最大 2 件のプロパティ + 50% で IndexInsert
                 string label = "L" + (rng.Next(3));
                 long propValue = rng.Next(0, 100);
                 int keyForIndex = nextKey++;
@@ -48,8 +48,8 @@ internal static class WorkloadGenerator
 /// <summary>1 トランザクション分のワークロード。</summary>
 internal sealed record WorkloadTx(IReadOnlyList<WorkloadOp> Ops, bool Commit);
 
-/// <summary>1 ノード作成 + プロパティ + 任意の索引エントリ。</summary>
-/// <param name="Label">CreateNode に渡すラベル名。</param>
+/// <summary>1 Vertex作成 + プロパティ + 任意の索引エントリ。</summary>
+/// <param name="Label">CreateVertex に渡すラベル名。</param>
 /// <param name="PropertyValue">"marker" プロパティに入れる Int64 値。</param>
 /// <param name="IndexKey">非 null のとき <see cref="WorkloadGenerator.IndexName"/> へ Int64 キーで insert。</param>
 internal sealed record WorkloadOp(string Label, long PropertyValue, int? IndexKey);

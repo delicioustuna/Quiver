@@ -17,7 +17,7 @@ namespace Quiver.Tests;
 public sealed class AdjacencyEpochTests : IDisposable
 {
     private readonly string _dir;
-    private GraphDatabase? _db;
+    private QuiverDatabase? _db;
 
     public AdjacencyEpochTests()
     {
@@ -37,34 +37,34 @@ public sealed class AdjacencyEpochTests : IDisposable
     [Fact]
     public void Bulk_loaded_base_alone_returns_only_base_edges()
     {
-        BulkLoad(nodeCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
+        BulkLoad(vertexCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var tx = _db.BeginTransaction();
-        var neighbors = ExpandOut(tx, new NodeId(0));
+        var neighbors = ExpandOut(tx, new VertexId(0));
         neighbors.Should().BeEquivalentTo(new[] { 1L, 2L });
-        tx.AsInternal().AdjacencyBlocks!.BaseRelHwm.Should().Be(2,
-            "BulkLoader wrote 2 rels so the watermark sits at id 2");
+        tx.AsInternal().AdjacencyBlocks!.BaseEdgeHwm.Should().Be(2,
+            "BulkLoader wrote 2 edges so the watermark sits at id 2");
         tx.AsInternal().AdjacencyBlocks!.Epoch.Should().Be(1);
     }
 
     [Fact]
-    public void Delta_rel_created_after_bulk_load_is_visible_without_duplicating_base()
+    public void Delta_edge_created_after_bulk_load_is_visible_without_duplicating_base()
     {
-        BulkLoad(nodeCount: 4, edges: new[] { (0L, 1L), (0L, 2L) });
+        BulkLoad(vertexCount: 4, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        // node 3 was reserved at bulk-load (4 nodes) but had no edges; add a
-        // new delta edge 0→3. The new rel gets id >= BaseRelHwm so the merge
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        // vertex 3 was reserved at bulk-load (4 vertices) but had no edges; add a
+        // new delta edge 0→3. The new edge gets id >= BaseEdgeHwm so the merge
         // must yield {1, 2, 3} with no double-emission of 1 or 2.
         using (var tx = _db.BeginTransaction())
         {
-            tx.CreateRelationship(new NodeId(0), new NodeId(3), "R");
+            tx.CreateEdge(new VertexId(0), new VertexId(3), "R");
             tx.Commit();
         }
         using (var tx = _db.BeginTransaction())
         {
-            var neighbors = ExpandOut(tx, new NodeId(0));
+            var neighbors = ExpandOut(tx, new VertexId(0));
             neighbors.Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
         }
     }
@@ -72,48 +72,48 @@ public sealed class AdjacencyEpochTests : IDisposable
     [Fact]
     public void Tombstone_skips_deleted_base_edge_without_rebuild()
     {
-        BulkLoad(nodeCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
+        BulkLoad(vertexCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var tx = _db.BeginTransaction())
         {
-            // Delete the rel pointing 0→1 (id 0 by bulk-load order).
-            tx.DeleteRelationship(new RelationshipId(0));
+            // Delete the edge pointing 0→1 (id 0 by bulk-load order).
+            tx.DeleteEdge(new EdgeId(0));
             tx.Commit();
         }
         using (var tx = _db.BeginTransaction())
         {
-            var neighbors = ExpandOut(tx, new NodeId(0));
+            var neighbors = ExpandOut(tx, new VertexId(0));
             neighbors.Should().BeEquivalentTo(new[] { 2L });
-            tx.AsInternal().AdjacencyBlocks!.IsTombstoned(new RelationshipId(0)).Should().BeTrue();
+            tx.AsInternal().AdjacencyBlocks!.IsTombstoned(new EdgeId(0)).Should().BeTrue();
         }
     }
 
     [Fact]
     public void Mixed_base_plus_delta_with_base_delete_and_delta_delete()
     {
-        BulkLoad(nodeCount: 5, edges: new[] { (0L, 1L), (0L, 2L) });
+        BulkLoad(vertexCount: 5, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        long deltaRelId;
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        long deltaEdgeId;
         using (var tx = _db.BeginTransaction())
         {
             // Add two deltas.
-            tx.CreateRelationship(new NodeId(0), new NodeId(3), "R"); // first delta
-            var second = tx.CreateRelationship(new NodeId(0), new NodeId(4), "R");
-            deltaRelId = second.Value;
+            tx.CreateEdge(new VertexId(0), new VertexId(3), "R"); // first delta
+            var second = tx.CreateEdge(new VertexId(0), new VertexId(4), "R");
+            deltaEdgeId = second.Value;
             tx.Commit();
         }
         using (var tx = _db.BeginTransaction())
         {
             // Delete one base edge (0→1) and one delta edge (0→4).
-            tx.DeleteRelationship(new RelationshipId(0));
-            tx.DeleteRelationship(new RelationshipId(deltaRelId));
+            tx.DeleteEdge(new EdgeId(0));
+            tx.DeleteEdge(new EdgeId(deltaEdgeId));
             tx.Commit();
         }
         using (var tx = _db.BeginTransaction())
         {
-            var neighbors = ExpandOut(tx, new NodeId(0));
+            var neighbors = ExpandOut(tx, new VertexId(0));
             neighbors.Should().BeEquivalentTo(new[] { 2L, 3L });
         }
     }
@@ -121,134 +121,134 @@ public sealed class AdjacencyEpochTests : IDisposable
     [Fact]
     public void Read_only_snapshot_keeps_base_edge_deleted_after_begin()
     {
-        BulkLoad(nodeCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
+        BulkLoad(vertexCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var reader = _db.BeginReadOnlyTransaction();
 
         using (var writer = _db.BeginTransaction())
         {
-            writer.DeleteRelationship(new RelationshipId(0));
+            writer.DeleteEdge(new EdgeId(0));
             writer.Commit();
         }
 
-        ExpandOut(reader, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L });
+        ExpandOut(reader, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L });
 
         using var nextReader = _db.BeginReadOnlyTransaction();
-        ExpandOut(nextReader, new NodeId(0)).Should().BeEquivalentTo(new[] { 2L });
+        ExpandOut(nextReader, new VertexId(0)).Should().BeEquivalentTo(new[] { 2L });
     }
 
     [Fact]
     public void Read_only_snapshot_does_not_see_delta_insert_committed_after_begin()
     {
-        BulkLoad(nodeCount: 4, edges: new[] { (0L, 1L), (0L, 2L) });
+        BulkLoad(vertexCount: 4, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var reader = _db.BeginReadOnlyTransaction();
 
         using (var writer = _db.BeginTransaction())
         {
-            writer.CreateRelationship(new NodeId(0), new NodeId(3), "R");
+            writer.CreateEdge(new VertexId(0), new VertexId(3), "R");
             writer.Commit();
         }
 
-        ExpandOut(reader, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L });
+        ExpandOut(reader, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L });
 
         using var nextReader = _db.BeginReadOnlyTransaction();
-        ExpandOut(nextReader, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
+        ExpandOut(nextReader, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
     }
 
     [Fact]
     public void Read_only_snapshot_keeps_existing_delta_when_new_delta_becomes_head()
     {
-        BulkLoad(nodeCount: 5, edges: new[] { (0L, 1L), (0L, 2L) });
+        BulkLoad(vertexCount: 5, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var writer = _db.BeginTransaction())
         {
-            writer.CreateRelationship(new NodeId(0), new NodeId(3), "R");
+            writer.CreateEdge(new VertexId(0), new VertexId(3), "R");
             writer.Commit();
         }
 
         using var reader = _db.BeginReadOnlyTransaction();
         using (var writer = _db.BeginTransaction())
         {
-            writer.CreateRelationship(new NodeId(0), new NodeId(4), "R");
+            writer.CreateEdge(new VertexId(0), new VertexId(4), "R");
             writer.Commit();
         }
 
-        ExpandOut(reader, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
+        ExpandOut(reader, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
 
         using var nextReader = _db.BeginReadOnlyTransaction();
-        ExpandOut(nextReader, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L, 4L });
+        ExpandOut(nextReader, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L, 4L });
     }
 
     [Fact]
     public void Read_only_snapshot_keeps_delta_edge_deleted_after_begin()
     {
-        BulkLoad(nodeCount: 4, edges: new[] { (0L, 1L), (0L, 2L) });
+        BulkLoad(vertexCount: 4, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        RelationshipId delta;
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        EdgeId delta;
         using (var writer = _db.BeginTransaction())
         {
-            delta = writer.CreateRelationship(new NodeId(0), new NodeId(3), "R");
+            delta = writer.CreateEdge(new VertexId(0), new VertexId(3), "R");
             writer.Commit();
         }
 
         using var reader = _db.BeginReadOnlyTransaction();
         using (var writer = _db.BeginTransaction())
         {
-            writer.DeleteRelationship(delta);
+            writer.DeleteEdge(delta);
             writer.Commit();
         }
 
-        ExpandOut(reader, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
+        ExpandOut(reader, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
 
         using var nextReader = _db.BeginReadOnlyTransaction();
-        ExpandOut(nextReader, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 2L });
+        ExpandOut(nextReader, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L });
     }
 
     [Fact]
-    public void Read_only_snapshot_keeps_relationship_property_updated_after_begin()
+    public void Read_only_snapshot_keeps_edge_property_updated_after_begin()
     {
-        BulkLoad(nodeCount: 2, edges: new[] { (0L, 1L) });
+        BulkLoad(vertexCount: 2, edges: new[] { (0L, 1L) });
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var writer = _db.BeginTransaction())
         {
-            writer.SetProperty(new RelationshipId(0), "weight", PropertyValue.FromInt64(10));
+            writer.SetProperty(new EdgeId(0), "weight", PropertyValue.FromInt64(10));
             writer.Commit();
         }
 
         using var reader = _db.BeginReadOnlyTransaction();
         using (var writer = _db.BeginTransaction())
         {
-            writer.SetProperty(new RelationshipId(0), "weight", PropertyValue.FromInt64(20));
+            writer.SetProperty(new EdgeId(0), "weight", PropertyValue.FromInt64(20));
             writer.Commit();
         }
 
-        reader.GetProperty(new RelationshipId(0), "weight").Int64Value.Should().Be(10);
+        reader.GetProperty(new EdgeId(0), "weight").Int64Value.Should().Be(10);
 
         using var nextReader = _db.BeginReadOnlyTransaction();
-        nextReader.GetProperty(new RelationshipId(0), "weight").Int64Value.Should().Be(20);
+        nextReader.GetProperty(new EdgeId(0), "weight").Int64Value.Should().Be(20);
     }
 
     [Fact]
     public void Tombstones_persist_across_reopen()
     {
-        BulkLoad(nodeCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
+        BulkLoad(vertexCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
+        using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         using (var tx = db.BeginTransaction())
         {
-            tx.DeleteRelationship(new RelationshipId(0));
+            tx.DeleteEdge(new EdgeId(0));
             tx.Commit();
         }
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var tx2 = _db.BeginTransaction();
-        tx2.AsInternal().AdjacencyBlocks!.IsTombstoned(new RelationshipId(0)).Should().BeTrue();
-        var neighbors = ExpandOut(tx2, new NodeId(0));
+        tx2.AsInternal().AdjacencyBlocks!.IsTombstoned(new EdgeId(0)).Should().BeTrue();
+        var neighbors = ExpandOut(tx2, new VertexId(0));
         neighbors.Should().BeEquivalentTo(new[] { 2L });
     }
 
@@ -257,13 +257,13 @@ public sealed class AdjacencyEpochTests : IDisposable
     [Fact]
     public void Compact_absorbs_deltas_into_base_and_advances_epoch()
     {
-        BulkLoad(nodeCount: 5, edges: new[] { (0L, 1L), (0L, 2L) });
+        BulkLoad(vertexCount: 5, edges: new[] { (0L, 1L), (0L, 2L) });
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var tx = _db.BeginTransaction())
         {
-            tx.CreateRelationship(new NodeId(0), new NodeId(3), "R");
-            tx.CreateRelationship(new NodeId(0), new NodeId(4), "R");
+            tx.CreateEdge(new VertexId(0), new VertexId(3), "R");
+            tx.CreateEdge(new VertexId(0), new VertexId(4), "R");
             tx.Commit();
         }
 
@@ -277,27 +277,27 @@ public sealed class AdjacencyEpochTests : IDisposable
 
         using var txAfter = _db.BeginTransaction();
         txAfter.AsInternal().AdjacencyBlocks!.Epoch.Should().Be(epochBefore + 1);
-        // After compact, BaseRelHwm must cover every live rel id — there are
+        // After compact, BaseEdgeHwm must cover every live edge id — there are
         // 4 ids in [0..3] so hwm = 4.
-        txAfter.AsInternal().AdjacencyBlocks!.BaseRelHwm.Should().Be(4);
-        ExpandOut(txAfter, new NodeId(0))
+        txAfter.AsInternal().AdjacencyBlocks!.BaseEdgeHwm.Should().Be(4);
+        ExpandOut(txAfter, new VertexId(0))
             .Should().BeEquivalentTo(new[] { 1L, 2L, 3L, 4L });
     }
 
     [Fact]
     public void Compact_drops_tombstones_and_excludes_deleted_base_edges()
     {
-        BulkLoad(nodeCount: 4, edges: new[] { (0L, 1L), (0L, 2L), (0L, 3L) });
+        BulkLoad(vertexCount: 4, edges: new[] { (0L, 1L), (0L, 2L), (0L, 3L) });
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var tx = _db.BeginTransaction())
         {
-            tx.DeleteRelationship(new RelationshipId(1)); // base edge 0→2
+            tx.DeleteEdge(new EdgeId(1)); // base edge 0→2
             tx.Commit();
         }
         using (var tx = _db.BeginTransaction())
         {
-            tx.AsInternal().AdjacencyBlocks!.IsTombstoned(new RelationshipId(1)).Should().BeTrue();
+            tx.AsInternal().AdjacencyBlocks!.IsTombstoned(new EdgeId(1)).Should().BeTrue();
         }
 
         _db.CompactAdjacency();
@@ -305,16 +305,16 @@ public sealed class AdjacencyEpochTests : IDisposable
         using var tx2 = _db.BeginTransaction();
         // After compact the deleted edge is physically gone, so the tombstone
         // for the *new* base has nothing to do — IsTombstoned should report false.
-        tx2.AsInternal().AdjacencyBlocks!.IsTombstoned(new RelationshipId(1)).Should().BeFalse();
-        ExpandOut(tx2, new NodeId(0)).Should().BeEquivalentTo(new[] { 1L, 3L });
+        tx2.AsInternal().AdjacencyBlocks!.IsTombstoned(new EdgeId(1)).Should().BeFalse();
+        ExpandOut(tx2, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 3L });
     }
 
     [Fact]
     public void Compact_throws_when_a_transaction_is_active()
     {
-        BulkLoad(nodeCount: 2, edges: new[] { (0L, 1L) });
+        BulkLoad(vertexCount: 2, edges: new[] { (0L, 1L) });
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var tx = _db.BeginTransaction();
         Action act = () => _db.CompactAdjacency();
         act.Should().Throw<InvalidOperationException>()
@@ -341,14 +341,14 @@ public sealed class AdjacencyEpochTests : IDisposable
         var container = NewContainer();
         var tenant = container.OpenTenant(AdjacencyContainer.EpochTenant, Quiver.Storage.PageKind.Header);
 
-        var e = AdjacencyEpoch.CreateNew(tenant, baseRelHwm: 100);
+        var e = AdjacencyEpoch.CreateNew(tenant, baseEdgeHwm: 100);
         e.Tombstone(5);
         e.Tombstone(42);
         e.Tombstone(42); // duplicate; should stay at 2
 
         var reloaded = AdjacencyEpoch.Open(tenant);
         reloaded.Epoch.Should().Be(1);
-        reloaded.BaseRelHwm.Should().Be(100);
+        reloaded.BaseEdgeHwm.Should().Be(100);
         reloaded.TombstoneCount.Should().Be(2);
         reloaded.IsTombstoned(5).Should().BeTrue();
         reloaded.IsTombstoned(42).Should().BeTrue();
@@ -361,7 +361,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         var container = NewContainer();
         var tenant = container.OpenTenant(AdjacencyContainer.EpochTenant, Quiver.Storage.PageKind.Header);
 
-        var e = AdjacencyEpoch.CreateNew(tenant, baseRelHwm: 10);
+        var e = AdjacencyEpoch.CreateNew(tenant, baseEdgeHwm: 10);
         e.Tombstone(15); // outside base — ignored
         e.TombstoneCount.Should().Be(0);
         e.IsTombstoned(15).Should().BeFalse();
@@ -373,62 +373,62 @@ public sealed class AdjacencyEpochTests : IDisposable
         var container = NewContainer();
         var tenant = container.OpenTenant(AdjacencyContainer.EpochTenant, Quiver.Storage.PageKind.Header);
 
-        var e = AdjacencyEpoch.CreateNew(tenant, baseRelHwm: 50);
+        var e = AdjacencyEpoch.CreateNew(tenant, baseEdgeHwm: 50);
         e.Tombstone(3);
         e.Tombstone(7);
-        e.ResetAfterCompact(newBaseRelHwm: 200);
+        e.ResetAfterCompact(newBaseEdgeHwm: 200);
 
         e.Epoch.Should().Be(2);
-        e.BaseRelHwm.Should().Be(200);
+        e.BaseEdgeHwm.Should().Be(200);
         e.TombstoneCount.Should().Be(0);
 
         // Persisted state matches in-memory state.
         var reloaded = AdjacencyEpoch.Open(tenant);
         reloaded.Epoch.Should().Be(2);
-        reloaded.BaseRelHwm.Should().Be(200);
+        reloaded.BaseEdgeHwm.Should().Be(200);
         reloaded.TombstoneCount.Should().Be(0);
     }
 
     // ─────────────────────────── helpers ───────────────────────────
 
-    private void BulkLoad(int nodeCount, (long Src, long Tgt)[] edges)
+    private void BulkLoad(int vertexCount, (long Src, long Tgt)[] edges)
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
-        for (int i = 0; i < nodeCount; i++)
-            loader.AppendNode(new NodeId(i), new LabelId(0));
+        for (int i = 0; i < vertexCount; i++)
+            loader.AppendVertex(new VertexId(i), new LabelId(0));
         for (int i = 0; i < edges.Length; i++)
-            loader.AppendRelationship(
-                new RelationshipId(i),
-                new NodeId(edges[i].Src), new NodeId(edges[i].Tgt),
-                new RelationshipTypeId(0));
+            loader.AppendEdge(
+                new EdgeId(i),
+                new VertexId(edges[i].Src), new VertexId(edges[i].Tgt),
+                new EdgeTypeId(0));
         loader.Commit();
     }
 
-    private static List<long> ExpandOut(IGraphTransaction tx, NodeId source)
+    private static List<long> ExpandOut(IGraphTransaction tx, VertexId source)
     {
         // Going through Execute(ExpandOperator(...)) exercises the binary
         // backend's merged expand cursor (base via adjacency block, then delta
         // 連結リスト経由で辿り、差分マージの対象経路を通す。
         var op = new ExpandOperator(
-            new SingleNodeSource(source),
-            sourceNodeColumn: 0,
+            new SingleVertexSource(source),
+            sourceVertexColumn: 0,
             Direction.Outgoing,
             typeFilter: null,
             ExpandOutputMode.NeighborOnly);
         var result = tx.Execute(op);
         // 隣接のスロット番号 (Sequence) を検証する。Value は世代を含む。
-        return result.Rows().Select(r => r.GetNodeId(0).Sequence).ToList();
+        return result.Rows().Select(r => r.GetVertexId(0).Sequence).ToList();
     }
 
-    private sealed class SingleNodeSource : IPhysicalOperator
+    private sealed class SingleVertexSource : IPhysicalOperator
     {
         private readonly TupleSlot[] _buf = new TupleSlot[1];
-        private readonly NodeId _node;
+        private readonly VertexId _vertex;
         private bool _emitted;
 
-        public SingleNodeSource(NodeId node) { _node = node; }
-        public TupleSchema Schema { get; } = new([new ColumnDefinition("n", TupleSlotType.NodeId)]);
+        public SingleVertexSource(VertexId vertex) { _vertex = vertex; }
+        public TupleSchema Schema { get; } = new([new ColumnDefinition("n", TupleSlotType.VertexId)]);
         public OperatorStatistics Statistics { get; private set; }
         public TupleRef Current => new(_buf);
 
@@ -437,7 +437,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         public bool MoveNext()
         {
             if (_emitted) return false;
-            _buf[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _node.Value };
+            _buf[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _vertex.Value };
             _emitted = true;
             return true;
         }

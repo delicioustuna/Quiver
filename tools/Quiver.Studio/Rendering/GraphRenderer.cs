@@ -18,15 +18,15 @@ public sealed class GraphRenderer
     public GraphVisualSettings VisualSettings { get; set; } = new();
     public ContourMap Contour { get; } = new();
 
-    public void Render(DrawingContext ctx, IReadOnlyList<VisualNode> nodes, IReadOnlyList<VisualEdge> edges)
+    public void Render(DrawingContext ctx, IReadOnlyList<VisualVertex> vertices, IReadOnlyList<VisualEdge> edges)
     {
         Contour.Rebuild(VisualSettings.Contour);
 
         foreach (var edge in edges)
             DrawEdge(ctx, edge);
 
-        foreach (var node in nodes)
-            DrawNode(ctx, node, nodes);
+        foreach (var vertex in vertices)
+            DrawVertex(ctx, vertex, vertices);
     }
 
     private void DrawEdge(DrawingContext ctx, VisualEdge edge)
@@ -115,12 +115,12 @@ public sealed class GraphRenderer
 
     private void DrawEdgeLabel(DrawingContext ctx, VisualEdge edge, Point p1, Point p2)
     {
-        if (string.IsNullOrEmpty(edge.RelationshipType)) return;
+        if (string.IsNullOrEmpty(edge.EdgeType)) return;
 
         var mid = new Point((p1.X + p2.X) / 2, (p1.Y + p2.Y) / 2);
         var fontSize = Math.Max(9, 10 * Camera.Zoom);
         var text = new FormattedText(
-            edge.RelationshipType,
+            edge.EdgeType,
             System.Globalization.CultureInfo.InvariantCulture,
             FlowDirection.LeftToRight,
             EdgeTypeface,
@@ -129,21 +129,21 @@ public sealed class GraphRenderer
         ctx.DrawText(text, new Point(mid.X - text.Width / 2, mid.Y - text.Height - 2));
     }
 
-    private void DrawNode(DrawingContext ctx, VisualNode node, IReadOnlyList<VisualNode> allNodes)
+    private void DrawVertex(DrawingContext ctx, VisualVertex vertex, IReadOnlyList<VisualVertex> allVertices)
     {
-        var center = Camera.WorldToScreen(node.X, node.Y);
-        var baseR = node.Radius * Camera.Zoom;
+        var center = Camera.WorldToScreen(vertex.X, vertex.Y);
+        var baseR = vertex.Radius * Camera.Zoom;
         var r = baseR;
 
         var mode = VisualSettings.ScoreVisualization;
-        var color = node.Color;
+        var color = vertex.Color;
 
-        if (node.VectorScore.HasValue)
+        if (vertex.VectorScore.HasValue)
         {
-            ComputeDataRange(allNodes, out var dataMin, out var dataMax);
+            ComputeDataRange(allVertices, out var dataMin, out var dataMax);
 
             if (mode is ScoreVizMode.ColorOnly or ScoreVizMode.ColorAndSize)
-                color = Contour.Resolve(node.VectorScore.Value, dataMin, dataMax);
+                color = Contour.Resolve(vertex.VectorScore.Value, dataMin, dataMax);
 
             if (mode is ScoreVizMode.SizeOnly or ScoreVizMode.ColorAndSize)
             {
@@ -151,12 +151,12 @@ public sealed class GraphRenderer
                 if (VisualSettings.Contour.Mode == ContourMode.Absolute)
                 {
                     var range = VisualSettings.Contour.AbsoluteMax - VisualSettings.Contour.AbsoluteMin;
-                    normalized = range > 0 ? (node.VectorScore.Value - VisualSettings.Contour.AbsoluteMin) / range : 0.5;
+                    normalized = range > 0 ? (vertex.VectorScore.Value - VisualSettings.Contour.AbsoluteMin) / range : 0.5;
                 }
                 else
                 {
                     var range = dataMax - dataMin;
-                    normalized = range > 0 ? (node.VectorScore.Value - dataMin) / range : 0.5;
+                    normalized = range > 0 ? (vertex.VectorScore.Value - dataMin) / range : 0.5;
                 }
                 normalized = Math.Clamp(normalized, 0.0, 1.0);
                 r = baseR * (0.7 + 0.6 * normalized);
@@ -164,14 +164,14 @@ public sealed class GraphRenderer
         }
 
         var brush = new SolidColorBrush(color);
-        var pen = node.IsSelected ? SelectedPen : null;
+        var pen = vertex.IsSelected ? SelectedPen : null;
 
-        switch (VisualSettings.NodeShape)
+        switch (VisualSettings.VertexShape)
         {
-            case NodeShape.Square:
+            case VertexShape.Square:
                 ctx.DrawRectangle(brush, pen, new Rect(center.X - r, center.Y - r, r * 2, r * 2));
                 break;
-            case NodeShape.RoundedRect:
+            case VertexShape.RoundedRect:
                 ctx.DrawRectangle(brush, pen,
                     new Rect(center.X - r, center.Y - r, r * 2, r * 2),
                     RoundedRectCornerRadius, RoundedRectCornerRadius);
@@ -181,15 +181,15 @@ public sealed class GraphRenderer
                 break;
         }
 
-        DrawNodeLabel(ctx, node, center, r);
-        DrawScoreBadge(ctx, node, center, r);
+        DrawVertexLabel(ctx, vertex, center, r);
+        DrawScoreBadge(ctx, vertex, center, r);
     }
 
-    private static void ComputeDataRange(IReadOnlyList<VisualNode> nodes, out float min, out float max)
+    private static void ComputeDataRange(IReadOnlyList<VisualVertex> vertices, out float min, out float max)
     {
         min = float.MaxValue;
         max = float.MinValue;
-        foreach (var n in nodes)
+        foreach (var n in vertices)
         {
             if (!n.VectorScore.HasValue) continue;
             var s = n.VectorScore.Value;
@@ -199,11 +199,11 @@ public sealed class GraphRenderer
         if (min > max) { min = 0; max = 1; }
     }
 
-    private void DrawNodeLabel(DrawingContext ctx, VisualNode node, Point center, double r)
+    private void DrawVertexLabel(DrawingContext ctx, VisualVertex vertex, Point center, double r)
     {
         var fontSize = Math.Max(9, 11 * Camera.Zoom);
         var innerText = new FormattedText(
-            node.Label,
+            vertex.Label,
             System.Globalization.CultureInfo.InvariantCulture,
             FlowDirection.LeftToRight,
             LabelTypeface,
@@ -218,7 +218,7 @@ public sealed class GraphRenderer
         {
             var outerBrush = IsDarkTheme ? Brushes.White : Brushes.Black;
             var outerText = new FormattedText(
-                node.Label,
+                vertex.Label,
                 System.Globalization.CultureInfo.InvariantCulture,
                 FlowDirection.LeftToRight,
                 LabelTypeface,
@@ -228,14 +228,14 @@ public sealed class GraphRenderer
         }
     }
 
-    private void DrawScoreBadge(DrawingContext ctx, VisualNode node, Point center, double r)
+    private void DrawScoreBadge(DrawingContext ctx, VisualVertex vertex, Point center, double r)
     {
-        if (!node.VectorScore.HasValue) return;
+        if (!vertex.VectorScore.HasValue) return;
 
         var fontSize = Math.Max(9, 11 * Camera.Zoom);
         var badgeFontSize = Math.Max(7, 9 * Camera.Zoom);
         var scoreText = new FormattedText(
-            node.VectorScore.Value.ToString("F2"),
+            vertex.VectorScore.Value.ToString("F2"),
             System.Globalization.CultureInfo.InvariantCulture,
             FlowDirection.LeftToRight,
             LabelTypeface,

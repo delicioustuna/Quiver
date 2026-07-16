@@ -15,7 +15,7 @@ public sealed class InMemoryVectorStoreBatchTests
     private const string IndexName = "batch-embed";
 
     private static VectorIndexSpec Spec(int dim, DistanceMetric metric)
-        => new(IndexName, EntityKind.Node, new PropertyKeyId(1), dim, metric, "test");
+        => new(IndexName, EntityKind.Vertex, new PropertyKeyId(1), dim, metric, "test");
 
     [Theory]
     [InlineData(DistanceMetric.Cosine)]
@@ -33,13 +33,13 @@ public sealed class InMemoryVectorStoreBatchTests
 
         var rng = new Random(7);
         for (int i = 0; i < n; i++)
-            store.SetVector(EntityKind.Node, i, IndexName, RandomVector(rng, dim));
+            store.SetVector(EntityKind.Vertex, i, IndexName, RandomVector(rng, dim));
 
         // Take every 20th id so the candidate set is sparse and the gather path
         // is the natural pick.
         var candidateIds = new long[candidates];
         for (int i = 0; i < candidates; i++) candidateIds[i] = i * (n / candidates);
-        var set = new EntityCandidateSet(EntityKind.Node, candidateIds);
+        var set = new EntityCandidateSet(EntityKind.Vertex, candidateIds);
 
         var query = RandomVector(rng, dim);
 
@@ -80,18 +80,18 @@ public sealed class InMemoryVectorStoreBatchTests
 
         var rng = new Random(11);
         for (int i = 0; i < n; i++)
-            store.SetVector(EntityKind.Node, i, IndexName, RandomVector(rng, dim));
+            store.SetVector(EntityKind.Vertex, i, IndexName, RandomVector(rng, dim));
 
         // ~75% of the index → dense path.
         var dense = Enumerable.Range(0, n).Where(i => i % 4 != 0).Select(i => (long)i).ToArray();
-        var set = new EntityCandidateSet(EntityKind.Node, dense);
+        var set = new EntityCandidateSet(EntityKind.Vertex, dense);
         var query = RandomVector(rng, dim);
 
         using var actual = store.KnnSearchFiltered(IndexName, query, k, set);
         var actualList = Drain(actual);
 
         actualList.Should().HaveCount(k);
-        actualList.Should().OnlyContain(r => set.Contains(EntityKind.Node, r.Id));
+        actualList.Should().OnlyContain(r => set.Contains(EntityKind.Vertex, r.Id));
         for (int i = 1; i < actualList.Count; i++)
             actualList[i].Score.Should().BeLessThanOrEqualTo(actualList[i - 1].Score);
     }
@@ -101,9 +101,9 @@ public sealed class InMemoryVectorStoreBatchTests
     {
         var store = new InMemoryVectorStore();
         store.CreateVectorIndex(Spec(3, DistanceMetric.Cosine));
-        store.SetVector(EntityKind.Node, 1, IndexName, new float[] { 1, 0, 0 });
+        store.SetVector(EntityKind.Vertex, 1, IndexName, new float[] { 1, 0, 0 });
 
-        var empty = new EntityCandidateSet(EntityKind.Node, Array.Empty<long>());
+        var empty = new EntityCandidateSet(EntityKind.Vertex, Array.Empty<long>());
 
         using var c = store.KnnSearchFiltered(IndexName, new float[] { 1, 0, 0 }, 5, empty);
         Drain(c).Should().BeEmpty();
@@ -114,10 +114,10 @@ public sealed class InMemoryVectorStoreBatchTests
     {
         var store = new InMemoryVectorStore();
         store.CreateVectorIndex(Spec(3, DistanceMetric.Cosine));
-        store.SetVector(EntityKind.Node, 1, IndexName, new float[] { 1, 0, 0 });
+        store.SetVector(EntityKind.Vertex, 1, IndexName, new float[] { 1, 0, 0 });
 
-        // Index is Node-bound but candidate set declares Relationship.
-        var wrongKind = new EntityCandidateSet(EntityKind.Relationship, new long[] { 1 });
+        // Index is Vertex-bound but candidate set declares Edge.
+        var wrongKind = new EntityCandidateSet(EntityKind.Edge, new long[] { 1 });
 
         using var c = store.KnnSearchFiltered(IndexName, new float[] { 1, 0, 0 }, 5, wrongKind);
         Drain(c).Should().BeEmpty();
@@ -139,7 +139,7 @@ public sealed class InMemoryVectorStoreBatchTests
 
         var rng = new Random(99);
         for (int i = 0; i < n; i++)
-            store.SetVector(EntityKind.Node, i, IndexName, RandomVector(rng, dim));
+            store.SetVector(EntityKind.Vertex, i, IndexName, RandomVector(rng, dim));
 
         var queries = new ReadOnlyMemory<float>[q];
         for (int i = 0; i < q; i++) queries[i] = RandomVector(rng, dim);
@@ -176,7 +176,7 @@ public sealed class InMemoryVectorStoreBatchTests
     {
         var store = new InMemoryVectorStore();
         store.CreateVectorIndex(Spec(4, DistanceMetric.Dot));
-        store.SetVector(EntityKind.Node, 1, IndexName, new float[] { 1, 0, 0, 0 });
+        store.SetVector(EntityKind.Vertex, 1, IndexName, new float[] { 1, 0, 0, 0 });
 
         ReadOnlyMemory<float>[] queries =
         [

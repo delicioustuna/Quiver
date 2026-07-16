@@ -11,15 +11,15 @@ Quiver は `IGraphStorageBackend` 抽象を介してストレージレイアウ�
 ## 選択
 
 ```csharp
-using var db = GraphDatabase.Open("./mygraph.quiver");
+using var db = QuiverDatabase.Open("./mygraph.quiver");
 ```
 
 ## カスタムバックエンドの注入 (テスト向け)
 
 ```csharp
-using var db = GraphDatabase.Open(
+using var db = QuiverDatabase.Open(
     "./mygraph.quiver",
-    new GraphDatabaseOptions
+    new QuiverDatabaseOptions
     {
         BackendFactory = new MyInMemoryBackendFactory(),
     });

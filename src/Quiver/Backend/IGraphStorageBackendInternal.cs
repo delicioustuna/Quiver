@@ -8,7 +8,7 @@ namespace Quiver;
 /// 「トランザクションマネージャ / access methods / バルクロード ケイパビリティ」を担う。
 /// これらは内部実装型 (<see cref="ITransactionManager"/> / <see cref="IGraphAccessMethods"/> /
 /// <see cref="BulkLoadCapabilities"/>) を露出するため API 利用者には見せない。
-/// バックエンドはこの内部 SPI を実装し、<see cref="GraphDatabase"/> が駆動する。
+/// バックエンドはこの内部 SPI を実装し、<see cref="QuiverDatabase"/> が駆動する。
 /// </summary>
 internal interface IGraphStorageBackendInternal : IGraphStorageBackend
 {

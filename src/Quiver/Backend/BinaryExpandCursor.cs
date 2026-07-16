@@ -9,21 +9,21 @@ namespace Quiver;
 /// <summary>
 /// バイナリバックエンド用の expand cursor。
 ///
-/// ソースノードに隣接ブロックがある場合、<see cref="IAdjacencyBlockStore.OpenCursor"/> で
+/// ソースVertexに隣接ブロックがある場合、<see cref="IAdjacencyBlockStore.OpenCursor"/> で
 /// ブロックチェーンを走査する。次数にかかわらず途中で fallback しない。
 ///
 /// ブロックは bulk load / compact 時点のイミュータブルな <em>base</em> ビューのみを覆う。
-/// それ以降に作成されたリレーションシップは <em>delta</em> としてリンクリストに存在する。
+/// それ以降に作成されたEdgeは <em>delta</em> としてリンクリストに存在する。
 /// 隣接ブロックを使い切った後 (tombstone 済み base エントリをスキップしつつ)、リンクリストを
-/// 辿って delta を走査する。<c>relId &lt; BaseRelHwm</c> のエントリは base から既に出力済みなので
+/// 辿って delta を走査する。<c>edgeId &lt; BaseEdgeHwm</c> のエントリは base から既に出力済みなので
 /// フィルタし、チェーンは ID 降順なのでその境界を超えた時点で打ち切れる。
 /// </summary>
 internal sealed class BinaryExpandCursor : ExpandCursor
 {
     private readonly ITransaction _tx;
-    private NodeId _source;
+    private VertexId _source;
     private readonly Direction _direction;
-    private readonly RelationshipTypeId? _typeFilter;
+    private readonly EdgeTypeId? _typeFilter;
     private readonly BinaryGraphAccessMethods _owner;
 
     private AdjacencyCursor? _adjCursor;
@@ -32,14 +32,14 @@ internal sealed class BinaryExpandCursor : ExpandCursor
     private bool _opened;
     private bool _validSource;
 
-    private NodeId _neighbor;
-    private RelationshipId _relId;
+    private VertexId _neighbor;
+    private EdgeId _edgeId;
 
     internal BinaryExpandCursor(
         ITransaction tx,
-        NodeId source,
+        VertexId source,
         Direction direction,
-        RelationshipTypeId? typeFilter,
+        EdgeTypeId? typeFilter,
         BinaryGraphAccessMethods owner)
     {
         _tx = tx;
@@ -47,12 +47,12 @@ internal sealed class BinaryExpandCursor : ExpandCursor
         _direction = direction;
         _typeFilter = typeFilter;
         _owner = owner;
-        _neighbor = NodeId.Invalid;
-        _relId = RelationshipId.Invalid;
+        _neighbor = VertexId.Invalid;
+        _edgeId = EdgeId.Invalid;
     }
 
-    public override NodeId Neighbor => _neighbor;
-    public override RelationshipId Relationship => _relId;
+    public override VertexId Neighbor => _neighbor;
+    public override EdgeId Edge => _edgeId;
     public override long WeightRaw => _adjActive ? (_adjCursor?.WeightRaw ?? 0) : 0;
 
     public override bool MoveNext()
@@ -61,37 +61,37 @@ internal sealed class BinaryExpandCursor : ExpandCursor
         if (!_validSource) return false;
 
         // Phase 1: 隣接ブロック経由の base ビュー走査。tombstone をここでフィルタし、
-        // base リレーションシップの削除を読み手から不可視にする。
+        // base Edgeの削除を読み手から不可視にする。
         if (_adjActive)
         {
             var adj = _tx.AdjacencyBlocks!;
             while (_adjCursor!.MoveNext())
             {
-                // adjacency base は physical relationship Sequence だけを持つ。
+                // adjacency base は physical edge Sequence だけを持つ。
                 // current Generation を付与して primary Read し、candidate validation と
                 // logical output の materialization を一回の read で完結させる。
-                var physicalRelationship = _adjCursor.Relationship;
-                int generation = _tx.Relationships.CurrentGeneration(physicalRelationship.Sequence);
+                var physicalEdge = _adjCursor.Edge;
+                int generation = _tx.Edges.CurrentGeneration(physicalEdge.Sequence);
                 if (generation < 0
-                    || (physicalRelationship.Generation != 0
-                        && physicalRelationship.Generation != generation))
+                    || (physicalEdge.Generation != 0
+                        && physicalEdge.Generation != generation))
                     continue;
 
-                var rid = RelationshipId.Create(physicalRelationship.Sequence, generation);
-                using var rel = _tx.Relationships.Read(rid);
-                if (!rel.InUse)
+                var rid = EdgeId.Create(physicalEdge.Sequence, generation);
+                using var edge = _tx.Edges.Read(rid);
+                if (!edge.InUse)
                     continue;
-                bool sourceIsEndpoint = rel.Source.Sequence == _source.Sequence;
-                NodeId neighbor = sourceIsEndpoint ? rel.Target : rel.Source;
+                bool sourceIsEndpoint = edge.Source.Sequence == _source.Sequence;
+                VertexId neighbor = sourceIsEndpoint ? edge.Target : edge.Source;
                 if (adj.IsTombstoned(rid) &&
-                    (rel.Type != _adjCursor.Type ||
-                      (rel.Source.Sequence != _source.Sequence && rel.Target.Sequence != _source.Sequence) ||
+                    (edge.Type != _adjCursor.Type ||
+                      (edge.Source.Sequence != _source.Sequence && edge.Target.Sequence != _source.Sequence) ||
                       neighbor.Sequence != _adjCursor.Neighbor.Sequence))
                 {
                     continue;
                 }
                 _neighbor = neighbor;
-                _relId = rel.Id;
+                _edgeId = edge.Id;
                 return true;
             }
             _adjActive = false; // fall through to phase 2
@@ -99,11 +99,11 @@ internal sealed class BinaryExpandCursor : ExpandCursor
 
         while (_deltaCursor!.MoveNext())
         {
-            var rel = _tx.Relationships.Read(_deltaCursor.Relationship);
-            if (!rel.InUse)
+            var edge = _tx.Edges.Read(_deltaCursor.Edge);
+            if (!edge.InUse)
                 continue;
-            _neighbor = rel.Source.Sequence == _source.Sequence ? rel.Target : rel.Source;
-            _relId = rel.Id;
+            _neighbor = edge.Source.Sequence == _source.Sequence ? edge.Target : edge.Source;
+            _edgeId = edge.Id;
             return true;
         }
         return false;
@@ -111,8 +111,8 @@ internal sealed class BinaryExpandCursor : ExpandCursor
 
     private void Open()
     {
-        var materializer = new EntityIdentityMaterializer(_tx.Nodes);
-        if (!materializer.TryNode(_source, out _source))
+        var materializer = new EntityIdentityMaterializer(_tx.Vertices);
+        if (!materializer.TryVertex(_source, out _source))
             return;
         _validSource = true;
 
@@ -121,15 +121,15 @@ internal sealed class BinaryExpandCursor : ExpandCursor
         {
             _adjCursor = adj.OpenCursor(_source, _direction, _typeFilter);
             _adjActive = true;
-            _deltaCursor = _owner.RelationshipDeltas.OpenCursor(
-                _tx, _source, _direction, _typeFilter, adj.BaseRelHwm);
+            _deltaCursor = _owner.EdgeDeltas.OpenCursor(
+                _tx, _source, _direction, _typeFilter, adj.BaseEdgeHwm);
             return;
         }
-        // このソースに対する隣接ブロックが無い — リレーションシップリンクリストを辿る。
+        // このソースに対する隣接ブロックが無い — Edgeリンクリストを辿る。
         // fast path が使えなかった頻度を診断で可視化できるよう、カウンタをインクリメントする。
         System.Threading.Interlocked.Increment(ref _owner.FallbackCountInternal);
         _adjActive = false;
-        _deltaCursor = _owner.RelationshipDeltas.OpenRowCursor(
+        _deltaCursor = _owner.EdgeDeltas.OpenRowCursor(
             _tx, _source, _direction, _typeFilter);
     }
 

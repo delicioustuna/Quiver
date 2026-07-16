@@ -54,8 +54,8 @@ internal static class Strings
     public static string Schema => ResourceManager.GetString(nameof(Schema), Culture)!;
 
     // 統計
-    public static string Stats_Nodes => ResourceManager.GetString(nameof(Stats_Nodes), Culture)!;
-    public static string Stats_Relationships => ResourceManager.GetString(nameof(Stats_Relationships), Culture)!;
+    public static string Stats_Vertices => ResourceManager.GetString(nameof(Stats_Vertices), Culture)!;
+    public static string Stats_Edges => ResourceManager.GetString(nameof(Stats_Edges), Culture)!;
     public static string Stats_Properties => ResourceManager.GetString(nameof(Stats_Properties), Culture)!;
     public static string Stats_DataFile => ResourceManager.GetString(nameof(Stats_DataFile), Culture)!;
     public static string Stats_WAL => ResourceManager.GetString(nameof(Stats_WAL), Culture)!;
@@ -74,11 +74,11 @@ internal static class Strings
     public static string Status_GraphInfo => ResourceManager.GetString(nameof(Status_GraphInfo), Culture)!;
 
     // ダイアログ
-    public static string AddNode => ResourceManager.GetString(nameof(AddNode), Culture)!;
-    public static string AddRelationship => ResourceManager.GetString(nameof(AddRelationship), Culture)!;
+    public static string AddVertex => ResourceManager.GetString(nameof(AddVertex), Culture)!;
+    public static string AddEdge => ResourceManager.GetString(nameof(AddEdge), Culture)!;
     public static string Delete => ResourceManager.GetString(nameof(Delete), Culture)!;
-    public static string NodeLabel => ResourceManager.GetString(nameof(NodeLabel), Culture)!;
-    public static string RelationshipType => ResourceManager.GetString(nameof(RelationshipType), Culture)!;
+    public static string VertexLabel => ResourceManager.GetString(nameof(VertexLabel), Culture)!;
+    public static string EdgeType => ResourceManager.GetString(nameof(EdgeType), Culture)!;
     public static string OK => ResourceManager.GetString(nameof(OK), Culture)!;
     public static string Cancel => ResourceManager.GetString(nameof(Cancel), Culture)!;
     public static string Error => ResourceManager.GetString(nameof(Error), Culture)!;
@@ -98,10 +98,10 @@ internal static class Strings
     public static string Settings_DiscreteSteps => ResourceManager.GetString(nameof(Settings_DiscreteSteps), Culture)!;
     public static string Settings_CustomPalette => ResourceManager.GetString(nameof(Settings_CustomPalette), Culture)!;
     public static string Settings_Preview => ResourceManager.GetString(nameof(Settings_Preview), Culture)!;
-    public static string Settings_NodeRelationship => ResourceManager.GetString(nameof(Settings_NodeRelationship), Culture)!;
-    public static string Settings_NodeRelDesc => ResourceManager.GetString(nameof(Settings_NodeRelDesc), Culture)!;
-    public static string Settings_NodeShape => ResourceManager.GetString(nameof(Settings_NodeShape), Culture)!;
-    public static string Settings_RelationshipStyle => ResourceManager.GetString(nameof(Settings_RelationshipStyle), Culture)!;
+    public static string Settings_VertexEdge => ResourceManager.GetString(nameof(Settings_VertexEdge), Culture)!;
+    public static string Settings_VertexEdgeDesc => ResourceManager.GetString(nameof(Settings_VertexEdgeDesc), Culture)!;
+    public static string Settings_VertexShape => ResourceManager.GetString(nameof(Settings_VertexShape), Culture)!;
+    public static string Settings_EdgeStyle => ResourceManager.GetString(nameof(Settings_EdgeStyle), Culture)!;
     public static string Settings_Language => ResourceManager.GetString(nameof(Settings_Language), Culture)!;
     public static string Settings_LanguageDesc => ResourceManager.GetString(nameof(Settings_LanguageDesc), Culture)!;
     public static string Settings_LanguageAuto => ResourceManager.GetString(nameof(Settings_LanguageAuto), Culture)!;

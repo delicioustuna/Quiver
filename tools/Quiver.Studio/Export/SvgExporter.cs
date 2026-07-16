@@ -10,14 +10,14 @@ public static class SvgExporter
     private const double ArrowSize = 8;
 
     public static string Export(
-        IReadOnlyList<VisualNode> nodes,
+        IReadOnlyList<VisualVertex> vertices,
         IReadOnlyList<VisualEdge> edges,
         bool isDarkTheme)
     {
-        if (nodes.Count == 0)
+        if (vertices.Count == 0)
             return "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"/>";
 
-        ComputeBounds(nodes, out var minX, out var minY, out var maxX, out var maxY);
+        ComputeBounds(vertices, out var minX, out var minY, out var maxX, out var maxY);
         var vbX = minX - Margin;
         var vbY = minY - Margin;
         var vbW = (maxX - minX) + Margin * 2;
@@ -43,8 +43,8 @@ public static class SvgExporter
         foreach (var edge in edges)
             EmitEdge(sb, edge, edgeLabelFill);
 
-        foreach (var node in nodes)
-            EmitNode(sb, node, labelFill);
+        foreach (var vertex in vertices)
+            EmitVertex(sb, vertex, labelFill);
 
         sb.AppendLine("</svg>");
         return sb.ToString();
@@ -72,34 +72,34 @@ public static class SvgExporter
 
         sb.AppendLine(F($"<line x1=\"{x1}\" y1=\"{y1}\" x2=\"{x2}\" y2=\"{y2}\" stroke=\"gray\" stroke-width=\"1.5\" marker-end=\"url(#arrowhead)\"/>"));
 
-        if (!string.IsNullOrEmpty(edge.RelationshipType))
+        if (!string.IsNullOrEmpty(edge.EdgeType))
         {
             var mx = (x1 + x2) / 2;
             var my = (y1 + y2) / 2;
-            sb.AppendLine(F($"<text x=\"{mx}\" y=\"{my - 4}\" text-anchor=\"middle\" font-size=\"10\" font-family=\"Inter,sans-serif\" fill=\"{labelFill}\">{Esc(edge.RelationshipType)}</text>"));
+            sb.AppendLine(F($"<text x=\"{mx}\" y=\"{my - 4}\" text-anchor=\"middle\" font-size=\"10\" font-family=\"Inter,sans-serif\" fill=\"{labelFill}\">{Esc(edge.EdgeType)}</text>"));
         }
     }
 
-    private static void EmitNode(StringBuilder sb, VisualNode node, string labelFill)
+    private static void EmitVertex(StringBuilder sb, VisualVertex vertex, string labelFill)
     {
-        var cx = node.X;
-        var cy = node.Y;
-        var r = node.Radius;
-        var fill = $"#{node.Color.R:X2}{node.Color.G:X2}{node.Color.B:X2}";
+        var cx = vertex.X;
+        var cy = vertex.Y;
+        var r = vertex.Radius;
+        var fill = $"#{vertex.Color.R:X2}{vertex.Color.G:X2}{vertex.Color.B:X2}";
 
         sb.AppendLine(F($"<circle cx=\"{cx}\" cy=\"{cy}\" r=\"{r}\" fill=\"{fill}\"/>"));
 
-        var label = Esc(node.Label);
+        var label = Esc(vertex.Label);
         sb.AppendLine(F($"<text x=\"{cx}\" y=\"{cy + r + 14}\" text-anchor=\"middle\" font-size=\"11\" font-family=\"Inter,sans-serif\" fill=\"{labelFill}\">{label}</text>"));
     }
 
     private static void ComputeBounds(
-        IReadOnlyList<VisualNode> nodes,
+        IReadOnlyList<VisualVertex> vertices,
         out double minX, out double minY, out double maxX, out double maxY)
     {
         minX = double.MaxValue; minY = double.MaxValue;
         maxX = double.MinValue; maxY = double.MinValue;
-        foreach (var n in nodes)
+        foreach (var n in vertices)
         {
             var r = n.Radius;
             if (n.X - r < minX) minX = n.X - r;

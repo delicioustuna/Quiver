@@ -3,7 +3,7 @@ using Quiver.Query.Physical;
 
 namespace Quiver.Benchmarks.Operators;
 
-/// <summary>TS-6 sentinel: <see cref="BitmapFilterOperator"/> with a single even-id predicate.</summary>
+/// <summary> sentinel: <see cref="BitmapFilterOperator"/> with a single even-id predicate.</summary>
 [MemoryDiagnoser]
 [ShortRunJob]
 public class BitmapFilterOperatorBench
@@ -19,7 +19,7 @@ public class BitmapFilterOperatorBench
     [Benchmark]
     public int BitmapFilter_even()
     {
-        var src = new NodeArraySource(_seed.PersonNodes);
+        var src = new VertexArraySource(_seed.PersonVertices);
         using var op = new BitmapFilterOperator(src, new IPredicate[] { new EvenIdPredicate() });
         return OperatorBenchDrain.Drain(op, _seed.ReadTx);
     }

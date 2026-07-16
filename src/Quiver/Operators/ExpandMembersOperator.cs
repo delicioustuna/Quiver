@@ -5,44 +5,44 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// 上流 hyperedge の member node を放出する。
-/// 出力は (hyperedge, member) と任意の carry 列。
+/// 上流 nexus の member vertex を放出する。
+/// 出力は (nexus, member) と任意の carry 列。
 /// </summary>
 internal sealed class ExpandMembersOperator : IPhysicalOperator
 {
     private const int BaseColumnCount = 2;
 
     private readonly IPhysicalOperator _source;
-    private readonly int _hyperedgeColumn;
+    private readonly int _nexusColumn;
     private readonly RoleId? _roleFilter;
-    private readonly int? _excludeNodeColumn;
+    private readonly int? _excludeVertexColumn;
     private readonly int[]? _carryColumns;
     private readonly TupleSlot[] _buffer;
     private readonly TupleSchema _schema;
 
     private ITransaction? _tx;
-    private HyperedgeId _currentHyperedge;
-    private NodeId _excludedNode;
+    private NexusId _currentNexus;
+    private VertexId _excludedVertex;
     private IncidenceId _nextIncidence;
 
     public ExpandMembersOperator(
         IPhysicalOperator source,
-        int hyperedgeColumn,
+        int nexusColumn,
         RoleId? roleFilter,
-        int? excludeNodeColumn,
+        int? excludeVertexColumn,
         int[]? carryColumns = null)
     {
         _source = source;
-        _hyperedgeColumn = hyperedgeColumn;
+        _nexusColumn = nexusColumn;
         _roleFilter = roleFilter;
-        _excludeNodeColumn = excludeNodeColumn;
+        _excludeVertexColumn = excludeVertexColumn;
         _carryColumns = carryColumns is { Length: > 0 } ? carryColumns : null;
         _buffer = new TupleSlot[BaseColumnCount + (_carryColumns?.Length ?? 0)];
 
         var columns = new List<ColumnDefinition>(_buffer.Length)
         {
-            new("hyperedge", TupleSlotType.HyperedgeId),
-            new("member", TupleSlotType.NodeId),
+            new("nexus", TupleSlotType.NexusId),
+            new("member", TupleSlotType.VertexId),
         };
         if (_carryColumns != null)
         {
@@ -53,8 +53,8 @@ internal sealed class ExpandMembersOperator : IPhysicalOperator
             }
         }
         _schema = new TupleSchema(columns);
-        _currentHyperedge = HyperedgeId.Invalid;
-        _excludedNode = NodeId.Invalid;
+        _currentNexus = NexusId.Invalid;
+        _excludedVertex = VertexId.Invalid;
         _nextIncidence = IncidenceId.Invalid;
     }
 
@@ -66,8 +66,8 @@ internal sealed class ExpandMembersOperator : IPhysicalOperator
     {
         _tx = tx;
         _source.Open(tx);
-        _currentHyperedge = HyperedgeId.Invalid;
-        _excludedNode = NodeId.Invalid;
+        _currentNexus = NexusId.Invalid;
+        _excludedVertex = VertexId.Invalid;
         _nextIncidence = IncidenceId.Invalid;
     }
 
@@ -78,16 +78,16 @@ internal sealed class ExpandMembersOperator : IPhysicalOperator
             while (_nextIncidence.IsValid)
             {
                 using var incidence = _tx!.Incidences.Read(_nextIncidence);
-                _nextIncidence = incidence.NextInHyperedge;
+                _nextIncidence = incidence.NextInNexus;
                 if (!incidence.InUse)
                     continue;
                 if (_roleFilter.HasValue && incidence.RoleId != _roleFilter.Value)
                     continue;
-                int generation = _tx!.Nodes.CurrentGeneration(incidence.NodeId.Sequence);
+                int generation = _tx!.Vertices.CurrentGeneration(incidence.VertexId.Sequence);
                 if (generation < 0)
                     continue;
-                var member = NodeId.Create(incidence.NodeId.Sequence, generation);
-                if (_excludedNode.IsValid && member == _excludedNode)
+                var member = VertexId.Create(incidence.VertexId.Sequence, generation);
+                if (_excludedVertex.IsValid && member == _excludedVertex)
                     continue;
 
                 BuildOutput(member);
@@ -100,36 +100,36 @@ internal sealed class ExpandMembersOperator : IPhysicalOperator
             if (!_source.MoveNext())
                 return false;
 
-            var requested = new HyperedgeId(_source.Current[_hyperedgeColumn].LongValue);
-            using var header = _tx!.Hyperedges.Read(requested);
+            var requested = new NexusId(_source.Current[_nexusColumn].LongValue);
+            using var header = _tx!.Nexuses.Read(requested);
             if (!header.InUse)
                 continue;
 
-            _currentHyperedge = header.Id;
-            if (_excludeNodeColumn.HasValue)
+            _currentNexus = header.Id;
+            if (_excludeVertexColumn.HasValue)
             {
-                using var excluded = _tx.Nodes.Read(
-                    new NodeId(_source.Current[_excludeNodeColumn.Value].LongValue));
+                using var excluded = _tx.Vertices.Read(
+                    new VertexId(_source.Current[_excludeVertexColumn.Value].LongValue));
                 if (!excluded.InUse)
                     continue;
-                _excludedNode = excluded.Id;
+                _excludedVertex = excluded.Id;
             }
-            if (!_excludeNodeColumn.HasValue)
-                _excludedNode = NodeId.Invalid;
+            if (!_excludeVertexColumn.HasValue)
+                _excludedVertex = VertexId.Invalid;
             _nextIncidence = header.FirstIncidenceId;
         }
     }
 
-    private void BuildOutput(NodeId member)
+    private void BuildOutput(VertexId member)
     {
         _buffer[0] = new TupleSlot
         {
-            Type = TupleSlotType.HyperedgeId,
-            LongValue = _currentHyperedge.Value,
+            Type = TupleSlotType.NexusId,
+            LongValue = _currentNexus.Value,
         };
         _buffer[1] = new TupleSlot
         {
-            Type = TupleSlotType.NodeId,
+            Type = TupleSlotType.VertexId,
             LongValue = member.Value,
         };
         CopyCarry();

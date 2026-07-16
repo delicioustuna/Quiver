@@ -1,9 +1,9 @@
-﻿using Quiver.Core;
+using Quiver.Core;
 using Quiver.Storage.Records;
 
 namespace Quiver.Transactions;
 
-// プロパティチェーンは所有ノードのロック (TxNodeStore で取得済み) で保護される。
+// プロパティチェーンは所有Vertexのロック (TxVertexStore で取得済み) で保護される。
 // このラッパーは追加ロックなしで全操作を委譲する。
 internal sealed class TxPropertyStore : IPropertyStore
 {
@@ -12,7 +12,7 @@ internal sealed class TxPropertyStore : IPropertyStore
     private readonly SnapshotState _snapshot;
     private readonly CommittedTxRegistry? _committed;
     // SSN read-sink。プロパティ操作でも ambient sink を維持し、直後/直前の
-    // traversal 等が sink を失わないようにする (プロパティ自体は node/rel 粒度の read で
+    // traversal 等が sink を失わないようにする (プロパティ自体は vertex/edge 粒度の read で
     // 既に捕捉されるため、PropertyStore は RecordRead を呼ばない)。
     private readonly ISsnReadSink? _ssn;
 

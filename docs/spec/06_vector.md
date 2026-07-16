@@ -1,10 +1,6 @@
 # ベクトル検索
 
-> as-built 仕様 (on-disk FormatVersion V5)
->
-> **current (as-built)**: 以下は現在実装されている FormatVersion V5 のベクトル検索契約である。
-> **target (未実装)**: [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md) が将来の設計正本であり、本書の本文はその target を先取りして記述しない。
-> **実装済み境界**: 再設計の production code はまだ実装されていない。`redesign-baseline` は着工前の測定を固定するタグであり、再設計の実装完了を表さない。
+> as-built 仕様（QUIVER-SW family version 1、2026-07-15）
 
 ## ベクトルインデックス仕様 {#vector-index}
 
@@ -14,7 +10,7 @@
 |---|---|---|
 | Name | string | 一意な識別子 |
 | Dimensions | int | ベクトルの次元数（正の値） |
-| EntityKind | enum | `Node`、`Relationship`、または `Hyperedge` |
+| EntityKind | enum | `Vertex`、`Edge`、または `Nexus` |
 | Metric | enum | `Euclidean`, `Cosine`, または `Dot` |
 | IndexKind | enum | `HnswFlat` または `FlatOnly` |
 | ElementType | enum | 要素の格納表現。現在は `Float32` のみ (将来の量子化表現用の契約予約) |
@@ -63,9 +59,9 @@ Hierarchical Navigable Small World グラフを実装する。
 | MaxLevel | int32 |
 | Count | int64 |
 | MaxSeq | int64 |
-| FormatVersion | byte (オフセット 31) |
+| FamilyVersion | byte (オフセット 31) |
 
-**Node レコード**（index ごとの固定長）:
+**Vertex レコード**（index ごとの固定長）:
 
 | オフセット | サイズ | フィールド |
 |---|---|---|
@@ -78,14 +74,12 @@ Hierarchical Navigable Small World グラフを実装する。
 レコードサイズは
 `4 + MaxLayers + (Mmax0 + (MaxLayers - 1) * M) * 8`。既定値では 1,164 バイト。
 
-### ベクトルカタログ V2 {#vector-catalog-v2}
+### ベクトルカタログ {#vector-catalog}
 
 catalog の各 entry は `entryLength (int32)` に続いて、index metadata、payload/HNSW tenant、
-`IndexKind`、4 つの HNSW パラメタ、`ElementType (byte)` を保持する。reader は entry 内の
-既知フィールドを読み、未知の末尾を `entryLength` まで読み飛ばせる。`ElementType` を欠く
-短い entry (フィールド追加前に書かれたもの) は `Float32` として読む。V1 の長さ情報なし
-packed entry は読み取らず、DB open 時に `FormatVersionMismatchException` で拒否する。
-移行処理は提供しない。
+`IndexKind`、4 つの HNSW parameter、`ElementType (byte)` を保持する。
+必須 field の欠落と未知の trailing field は corruption として拒否する。
+旧 catalog を解釈する fallback と移行処理は提供しない。
 
 payload テナントのヘッダページにも `ElementType` (byte、オフセット 12) を焼き込み、
 open 時に catalog 側の値と照合する。
@@ -95,8 +89,8 @@ open 時に catalog 側の値と照合する。
 - **Insert**: 指数減衰でレベルを割り当て、各レイヤで最近傍にリンクする
 - **Search (KNN)**: エントリポイントから貪欲に走査し、レイヤを通じて精緻化する。presence チェックと
   generation フィルタ付きの top-k ヒープを用いる
-- **Delete**: ノードを absent としてマークし、削除時に近傍を再リンクする
-- **Rebuild**: tombstone 数がライブノード数を超えると自動で実行
+- **Delete**: Vertexを absent としてマークし、削除時に近傍を再リンクする
+- **Rebuild**: tombstone 数がライブVertex数を超えると自動で実行
 
 ### 制限 {#hnsw-limits}
 
@@ -129,7 +123,7 @@ open 時に catalog 側の値と照合する。
 var results = tx.KnnSearch("vec_idx", queryVector, k: 10);
 while (results.MoveNext())
 {
-    NodeId id = results.Current;
+    VertexId id = results.Current;
     float score = results.CurrentScore;
 }
 ```

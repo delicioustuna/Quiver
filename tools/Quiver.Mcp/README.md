@@ -6,7 +6,7 @@ LLM が **1 回のツール呼び出し** で全文検索・ベクトル検索�
 
 ## 特徴
 
-- **グラフ走査を 1 呼び出しで完結** — 検索で起点ノードを見つけ、エッジを最大 2-hop 辿り、中間フィルタを適用して結果を返す。LLM とサーバの往復を最小化する。
+- **グラフ走査を 1 呼び出しで完結** — 検索で起点Vertexを見つけ、エッジを最大 2-hop 辿り、中間フィルタを適用して結果を返す。LLM とサーバの往復を最小化する。
 - **4 種類の検索起点** — 全文検索 (fulltext)、ベクトル検索 (vector)、ラベル指定 (label)、ID 直接指定 (id)
 - **stdio トランスポート** — LM Studio / Claude Code / Claude Desktop など主要な MCP クライアントに対応
 - **ローカル LLM 向けに最適化** — ツールパラメータを flat な個別引数にし、JSON ダブルエンコードを不要にしている
@@ -116,7 +116,7 @@ claude mcp add quiver -- \
 
 ```json
 {
-  "nodes": [
+  "vertices": [
     {
       "label": "Document",
       "properties": { "title": "string", "year": "long" },
@@ -146,8 +146,8 @@ claude mcp add quiver -- \
 | `startType` | string | はい | 検索方法: `fulltext`, `vector`, `label`, `id` |
 | `query` | string | | 検索テキスト (fulltext / vector で必須) |
 | `label` | string | | ラベルで絞り込み |
-| `ids` | string | | カンマ区切りのノード ID (id 検索用) |
-| `startLimit` | int | | 起点ノードの最大数 (既定 10) |
+| `ids` | string | | カンマ区切りのVertex ID (id 検索用) |
+| `startLimit` | int | | 起点Vertexの最大数 (既定 10) |
 | `hop1Edge` | string | | 1 段目のエッジタイプ |
 | `hop1Direction` | string | | 1 段目の方向: `out`, `in`, `both` (既定 `both`) |
 | `hop1Filter` | string | | 1 段目のプロパティフィルタ (JSON) |
@@ -175,7 +175,7 @@ claude mcp add quiver -- \
 
 ```
 LLM → schema()
-LLM ← { nodes: [...], edges: [...] }
+LLM ← { vertices: [...], edges: [...] }
 
 LLM → traverse(
          startType: "fulltext",

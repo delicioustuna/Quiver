@@ -6,18 +6,18 @@ using Quiver.Query.Logical;
 namespace Quiver.Api;
 
 /// <summary>
-/// <see cref="IGraphNode{T}"/> 実装型でフィルタ済みの型付きトラバーサル。
+/// <see cref="IGraphVertex{T}"/> 実装型でフィルタ済みの型付きトラバーサル。
 /// 式ツリーベースのプロパティ参照 (<c>.Has(p =&gt; p.Age, 30)</c> など) や、
 /// 終端で自動的にエンティティ復元を行うヘルパを提供する。
 /// </summary>
-/// <typeparam name="T">対象ノード型。</typeparam>
-public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
+/// <typeparam name="T">対象Vertex型。</typeparam>
+public sealed class TypedGraphTraversal<T> where T : IGraphVertex<T>
 {
-    private readonly GraphTraversal<NodeId> _inner;
+    private readonly GraphTraversal<VertexId> _inner;
     private readonly IGraphTransaction _tx;
     private readonly ISchemaApi _schema;
 
-    internal TypedGraphTraversal(GraphTraversal<NodeId> inner, IGraphTransaction tx, ISchemaApi schema)
+    internal TypedGraphTraversal(GraphTraversal<VertexId> inner, IGraphTransaction tx, ISchemaApi schema)
     {
         _inner = inner; _tx = tx; _schema = schema;
     }
@@ -31,7 +31,7 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     public TypedGraphTraversal<T> Has<TProp>(Expression<Func<T, TProp>> selector, TProp value)
     {
         var key = MemberName(selector);
-        GraphTraversal<NodeId> next = value switch
+        GraphTraversal<VertexId> next = value switch
         {
             string  s => _inner.Has(key, s),
             int     i => _inner.Has(key, i),
@@ -68,7 +68,7 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     public TypedGraphTraversal<T> Has<TElem>(Expression<Func<T, List<TElem>>> selector, TElem value)
     {
         var key = MemberName(selector);
-        GraphTraversal<NodeId> next;
+        GraphTraversal<VertexId> next;
         if (typeof(TElem) == typeof(string))
             next = _inner.Has(key, (string)(object)value!);
         else if (typeof(TElem) == typeof(int))
@@ -95,89 +95,89 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
         => new TypedGraphTraversal<T>(ExpressionPredicate.Apply(_inner, predicate), _tx, _schema);
 
     /// <summary>
-    /// エッジ述語付きの型保存ホップ。<typeparamref name="TRel"/> エッジを
+    /// エッジ述語付きの型保存ホップ。<typeparamref name="TEdge"/> エッジを
     /// <paramref name="edgeFilter"/> (式ツリー述語) で絞り込んでから終点 <typeparamref name="TTarget"/> へ辿る。
     /// 通常は SourceGenerator 生成の糖衣 (<c>.Knows(e =&gt; e.Since == "2024-01")</c>) から呼ばれる。
-    /// エッジプロパティ述語は <see cref="ExpressionPredicate"/> がリレーションシップ用に構築する。
+    /// エッジプロパティ述語は <see cref="ExpressionPredicate"/> がEdge用に構築する。
     /// </summary>
-    public TypedGraphTraversal<TTarget> OutWhere<TRel, TTarget>(Expression<Func<TRel, bool>> edgeFilter)
-        where TRel : IGraphRelationship<TRel, T, TTarget>
-        where TTarget : IGraphNode<TTarget>
+    public TypedGraphTraversal<TTarget> OutWhere<TEdge, TTarget>(Expression<Func<TEdge, bool>> edgeFilter)
+        where TEdge : IGraphEdge<TEdge, T, TTarget>
+        where TTarget : IGraphVertex<TTarget>
     {
-        var edges = _inner.OutRelationships(TRel.GraphType);
+        var edges = _inner.OutEdges(TEdge.GraphType);
         var filtered = ExpressionPredicate.Apply(edges, edgeFilter);
-        return new TypedGraphTraversal<TTarget>(filtered.TargetNode(), _tx, _schema);
+        return new TypedGraphTraversal<TTarget>(filtered.TargetVertex(), _tx, _schema);
     }
 
     // ── トラバーサル（型なしに降格） ─────────────────────────────────────────
 
     /// <summary>外向に辿る (型なし <see cref="GraphTraversal{T}"/> に降格)。</summary>
-    public GraphTraversal<NodeId> Out(string? type = null) => _inner.Out(type);
+    public GraphTraversal<VertexId> Out(string? type = null) => _inner.Out(type);
 
     /// <summary>内向に辿る (型なし <see cref="GraphTraversal{T}"/> に降格)。</summary>
-    public GraphTraversal<NodeId> In(string? type = null)  => _inner.In(type);
+    public GraphTraversal<VertexId> In(string? type = null)  => _inner.In(type);
 
     /// <summary>双方向に辿る (型なし <see cref="GraphTraversal{T}"/> に降格)。</summary>
-    public GraphTraversal<NodeId> Both(string? type = null) => _inner.Both(type);
+    public GraphTraversal<VertexId> Both(string? type = null) => _inner.Both(type);
 
     /// <summary>
-    /// 端点型を保持するリレーションシップ <typeparamref name="TRel"/> で外向に辿り、
+    /// 端点型を保持するEdge <typeparamref name="TEdge"/> で外向に辿り、
     /// 終点 <typeparamref name="TTarget"/> 型の型付きトラバーサルを返す (ホップ間で型を保存)。
-    /// 制約 <c>IGraphRelationship&lt;TRel, T, TTarget&gt;</c> が「現在のノード型 <typeparamref name="T"/> が
-    /// <typeparamref name="TRel"/> の始点である」ことをコンパイル時に強制する。
+    /// 制約 <c>IGraphEdge&lt;TEdge, T, TTarget&gt;</c> が「現在のVertex型 <typeparamref name="T"/> が
+    /// <typeparamref name="TEdge"/> の始点である」ことをコンパイル時に強制する。
     /// 通常は SourceGenerator 生成の糖衣 (<c>.Knows()</c> 等) を使い、明示形は escape hatch。
     /// </summary>
-    public TypedGraphTraversal<TTarget> Out<TRel, TTarget>()
-        where TRel : IGraphRelationship<TRel, T, TTarget>
-        where TTarget : IGraphNode<TTarget>
-        => new TypedGraphTraversal<TTarget>(_inner.Out(TRel.GraphType), _tx, _schema);
+    public TypedGraphTraversal<TTarget> Out<TEdge, TTarget>()
+        where TEdge : IGraphEdge<TEdge, T, TTarget>
+        where TTarget : IGraphVertex<TTarget>
+        => new TypedGraphTraversal<TTarget>(_inner.Out(TEdge.GraphType), _tx, _schema);
 
     /// <summary>
-    /// 端点型を保持するリレーションシップ <typeparamref name="TRel"/> で内向に辿り、
+    /// 端点型を保持するEdge <typeparamref name="TEdge"/> で内向に辿り、
     /// 始点 <typeparamref name="TSource"/> 型の型付きトラバーサルを返す (ホップ間で型を保存)。
-    /// 現在のノード型 <typeparamref name="T"/> は <typeparamref name="TRel"/> の終点。
+    /// 現在のVertex型 <typeparamref name="T"/> は <typeparamref name="TEdge"/> の終点。
     /// </summary>
-    public TypedGraphTraversal<TSource> In<TRel, TSource>()
-        where TRel : IGraphRelationship<TRel, TSource, T>
-        where TSource : IGraphNode<TSource>
-        => new TypedGraphTraversal<TSource>(_inner.In(TRel.GraphType), _tx, _schema);
+    public TypedGraphTraversal<TSource> In<TEdge, TSource>()
+        where TEdge : IGraphEdge<TEdge, TSource, T>
+        where TSource : IGraphVertex<TSource>
+        => new TypedGraphTraversal<TSource>(_inner.In(TEdge.GraphType), _tx, _schema);
 
-    /// <summary>型付きリレーションシップで双方向に辿る (方向が定まらないため型なしに降格)。</summary>
-    public GraphTraversal<NodeId> Both<TRel>() where TRel : IGraphRelationship<TRel>
-        => _inner.Both<TRel>();
+    /// <summary>型付きEdgeで双方向に辿る (方向が定まらないため型なしに降格)。</summary>
+    public GraphTraversal<VertexId> Both<TEdge>() where TEdge : IGraphEdge<TEdge>
+        => _inner.Both<TEdge>();
 
     /// <summary>
-    /// 現在のノードが参加する <typeparamref name="THyperedge"/> 型のハイパーエッジへ展開し、
-    /// 型付きハイパーエッジトラバーサルを返す (ホップ間で型を保存)。
-    /// <paramref name="role"/> を指定すると、現在のノードがそのロールで参加する
-    /// ハイパーエッジだけに絞り込む。
+    /// 現在のVertexが参加する <typeparamref name="TNexus"/> 型のNexusへ展開し、
+    /// 型付きNexusトラバーサルを返す (ホップ間で型を保存)。
+    /// <paramref name="role"/> を指定すると、現在のVertexがそのロールで参加する
+    /// Nexusだけに絞り込む。
     /// 通常は SourceGenerator 生成の糖衣 (ロールプロパティ名にちなむ拡張メソッド) を使い、
     /// 明示形は escape hatch。
     /// </summary>
-    /// <typeparam name="THyperedge">対象ハイパーエッジ型。</typeparam>
-    /// <param name="role">現在のノードが担うロール名。null は全ロール。</param>
-    public TypedGraphHyperedgeTraversal<THyperedge> Hyperedges<THyperedge>(string? role = null)
-        where THyperedge : IGraphHyperedge<THyperedge>
-        => new TypedGraphHyperedgeTraversal<THyperedge>(
-            _inner.Hyperedges(THyperedge.GraphType, role), _tx, _schema);
+    /// <typeparam name="TNexus">対象Nexus型。</typeparam>
+    /// <param name="role">現在のVertexが担うロール名。null は全ロール。</param>
+    public TypedGraphNexusTraversal<TNexus> Nexuses<TNexus>(string? role = null)
+        where TNexus : IGraphNexus<TNexus>
+        => new TypedGraphNexusTraversal<TNexus>(
+            _inner.Nexuses(TNexus.GraphType, role), _tx, _schema);
 
-    /// <summary>外向リレーションシップ自体を放出する。</summary>
-    public GraphTraversal<RelationshipId> OutRelationships(string? type = null)  => _inner.OutRelationships(type);
+    /// <summary>外向Edge自体を放出する。</summary>
+    public GraphTraversal<EdgeId> OutEdges(string? type = null)  => _inner.OutEdges(type);
 
-    /// <summary>型付き外向リレーションシップ自体を放出する。</summary>
-    public GraphTraversal<RelationshipId> OutRelationships<TRel>() where TRel : IGraphRelationship<TRel> => _inner.OutRelationships<TRel>();
+    /// <summary>型付き外向Edge自体を放出する。</summary>
+    public GraphTraversal<EdgeId> OutEdges<TEdge>() where TEdge : IGraphEdge<TEdge> => _inner.OutEdges<TEdge>();
 
-    /// <summary>内向リレーションシップ自体を放出する。</summary>
-    public GraphTraversal<RelationshipId> InRelationships(string? type = null)   => _inner.InRelationships(type);
+    /// <summary>内向Edge自体を放出する。</summary>
+    public GraphTraversal<EdgeId> InEdges(string? type = null)   => _inner.InEdges(type);
 
-    /// <summary>型付き内向リレーションシップ自体を放出する。</summary>
-    public GraphTraversal<RelationshipId> InRelationships<TRel>() where TRel : IGraphRelationship<TRel>  => _inner.InRelationships<TRel>();
+    /// <summary>型付き内向Edge自体を放出する。</summary>
+    public GraphTraversal<EdgeId> InEdges<TEdge>() where TEdge : IGraphEdge<TEdge>  => _inner.InEdges<TEdge>();
 
-    /// <summary>双方向リレーションシップ自体を放出する。</summary>
-    public GraphTraversal<RelationshipId> BothRelationships(string? type = null) => _inner.BothRelationships(type);
+    /// <summary>双方向Edge自体を放出する。</summary>
+    public GraphTraversal<EdgeId> BothEdges(string? type = null) => _inner.BothEdges(type);
 
-    /// <summary>型付き双方向リレーションシップ自体を放出する。</summary>
-    public GraphTraversal<RelationshipId> BothRelationships<TRel>() where TRel : IGraphRelationship<TRel> => _inner.BothRelationships<TRel>();
+    /// <summary>型付き双方向Edge自体を放出する。</summary>
+    public GraphTraversal<EdgeId> BothEdges<TEdge>() where TEdge : IGraphEdge<TEdge> => _inner.BothEdges<TEdge>();
 
     /// <summary>プロパティキー名でプロパティ値を取り出す。</summary>
     public GraphTraversal<string> Values(string key) => _inner.Values(key);
@@ -192,7 +192,7 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
 
     /// <summary>
     /// Set cardinality プロパティの全値を <see cref="List{TElem}"/> として取り出す。
-    /// 各ノードに対し <see cref="IGraphTransaction.GetPropertyValues(NodeId, string)"/> を呼び、
+    /// 各Vertexに対し <see cref="IGraphTransaction.GetPropertyValues(VertexId, string)"/> を呼び、
     /// 要素を collect して返す。
     /// </summary>
     /// <typeparam name="TElem">リストの要素型。</typeparam>
@@ -206,9 +206,9 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
             tx, _inner._schema, _inner._plan,
             row =>
             {
-                var nodeId = row.GetNodeId(entityCol);
+                var vertexId = row.GetVertexId(entityCol);
                 var list = new List<TElem>();
-                var e = tx.GetPropertyValues(nodeId, key);
+                var e = tx.GetPropertyValues(vertexId, key);
                 while (e.MoveNext())
                 {
                     TElem val;
@@ -237,7 +237,7 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     // ── ダイアディック演算子ステップ ──────────────────────────────────
 
     /// <summary>
-    /// 上流の候補ノードに対し、<paramref name="selector"/> で指定した <c>float[]</c> プロパティの
+    /// 上流の候補Vertexに対し、<paramref name="selector"/> で指定した <c>float[]</c> プロパティの
     /// 格納ベクトル (a) と <paramref name="b"/> を <typeparamref name="TOp"/> で評価し、
     /// スコア降順で上位 <paramref name="k"/> 件を放出する。
     /// <para>
@@ -252,7 +252,7 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     /// <see cref="DotProductOp"/> / <see cref="CosineSimilarityOp"/> / <see cref="EuclideanDistanceOp"/>
     /// またはユーザー定義型。
     /// </typeparam>
-    /// <param name="selector">候補ノードから <c>float[]</c> プロパティを取得するアクセサ式。</param>
+    /// <param name="selector">候補Vertexから <c>float[]</c> プロパティを取得するアクセサ式。</param>
     /// <param name="b">スコアリング対象のクエリベクトル。</param>
     /// <param name="regions">演算対象の部分領域。<c>null</c> で全域。</param>
     /// <param name="k">返す上位件数。</param>
@@ -285,14 +285,14 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
     }
 
     /// <summary>
-    /// 上流の候補ノードに対しダイアディック演算子でスコアリングする。
+    /// 上流の候補Vertexに対しダイアディック演算子でスコアリングする。
     /// このオーバーロードは <paramref name="b"/> をトラバーサルで受け取り、
     /// クエリ Open 時に 1 回だけ評価する (uncorrelated sub-query)。
     /// </summary>
     /// <typeparam name="TOp">
     /// <see cref="IDyadicOperator{TResult}"/> を実装する <see langword="struct"/>。
     /// </typeparam>
-    /// <param name="selector">候補ノードから <c>float[]</c> プロパティを取得するアクセサ式。</param>
+    /// <param name="selector">候補Vertexから <c>float[]</c> プロパティを取得するアクセサ式。</param>
     /// <param name="b">参照ベクトルを返すトラバーサル (Open 時に 1 回だけ評価)。</param>
     /// <param name="regions">演算対象の部分領域。<c>null</c> で全域。</param>
     /// <param name="k">返す上位件数。</param>
@@ -335,12 +335,12 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
 
     // ── 終端 ─────────────────────────────────────────────────────────────────
 
-    /// <summary>結果ノードを <typeparamref name="T"/> インスタンスに復元してリストで返す。</summary>
+    /// <summary>結果Vertexを <typeparamref name="T"/> インスタンスに復元してリストで返す。</summary>
     public List<T> ToList()
         => _inner.ToList().ConvertAll(id => T.Load(_tx, id));
 
-    /// <summary>ノード ID とエンティティのペアでリスト化する。</summary>
-    public List<(NodeId Id, T Entity)> ToListWithIds()
+    /// <summary>Vertex ID とエンティティのペアでリスト化する。</summary>
+    public List<(VertexId Id, T Entity)> ToListWithIds()
         => _inner.ToList().ConvertAll(id => (id, T.Load(_tx, id)));
 
     /// <summary>最初の 1 件をエンティティとして返す。結果が空のときは <see langword="default"/>。</summary>
@@ -355,7 +355,7 @@ public sealed class TypedGraphTraversal<T> where T : IGraphNode<T>
 
     internal IGraphTransaction Transaction => _tx;
 
-    internal List<NodeId> MaterializeIds() => _inner.ToList();
+    internal List<VertexId> MaterializeIds() => _inner.ToList();
 
     // ── ヘルパー ─────────────────────────────────────────────────────────────
 

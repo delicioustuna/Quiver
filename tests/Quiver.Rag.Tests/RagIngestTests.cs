@@ -28,7 +28,7 @@ public sealed class RagIngestTests : IDisposable
 
     private const int Dim = 8;
 
-    private RagStore NewStore(GraphDatabase db, int target = 8, int overlap = 0) =>
+    private RagStore NewStore(QuiverDatabase db, int target = 8, int overlap = 0) =>
         new(db, new RagStoreOptions
         {
             EmbeddingDimensions = Dim,
@@ -71,34 +71,34 @@ public sealed class RagIngestTests : IDisposable
     }
 
     // ── 読み取りヘルパ ──
-    private static (NodeId Doc, bool Found) FindDoc(IGraphTransaction tx, string sourceId)
+    private static (VertexId Doc, bool Found) FindDoc(IGraphTransaction tx, string sourceId)
     {
-        // 索引には削除済みの orphan エントリが残り得るので生存ノードのみ採用する。
+        // 索引には削除済みの orphan エントリが残り得るので生存Vertexのみ採用する。
         var seek = tx.SeekIndex(RagSchema.DocSourceIndex, PropertyValue.FromString(sourceId));
         try
         {
             while (seek.MoveNext())
-                if (tx.NodeExists(seek.Current)) return (seek.Current, true);
+                if (tx.VertexExists(seek.Current)) return (seek.Current, true);
         }
         finally { seek.Dispose(); }
         return (default, false);
     }
 
-    private static List<NodeId> ChunkNodes(IGraphTransaction tx, NodeId docId)
+    private static List<VertexId> ChunkVertices(IGraphTransaction tx, VertexId docId)
     {
-        var ids = new List<NodeId>();
-        var e = tx.EnumerateRelationships(docId, Direction.Outgoing, RagSchema.HasChunkType);
+        var ids = new List<VertexId>();
+        var e = tx.EnumerateEdges(docId, Direction.Outgoing, RagSchema.HasChunkType);
         while (e.MoveNext()) ids.Add(e.Current.Target);
         return ids;
     }
 
-    private static List<string> ChunkTextsOrdered(GraphDatabase db, string sourceId)
+    private static List<string> ChunkTextsOrdered(QuiverDatabase db, string sourceId)
     {
         using var tx = db.BeginReadOnlyTransaction();
         var (docId, found) = FindDoc(tx, sourceId);
         if (!found) return new();
         var items = new List<(int Ord, string Text)>();
-        foreach (var c in ChunkNodes(tx, docId))
+        foreach (var c in ChunkVertices(tx, docId))
         {
             int ord = tx.GetProperty(c, RagSchema.PropOrdinal).Int32Value;
             string text = Encoding.UTF8.GetString(tx.GetProperty(c, RagSchema.PropText).Utf8StringValue);
@@ -107,7 +107,7 @@ public sealed class RagIngestTests : IDisposable
         return items.OrderBy(x => x.Ord).Select(x => x.Text).ToList();
     }
 
-    private static int RelCount(GraphDatabase db, string sourceId, string type)
+    private static int RelCount(QuiverDatabase db, string sourceId, string type)
     {
         using var tx = db.BeginReadOnlyTransaction();
         var (docId, found) = FindDoc(tx, sourceId);
@@ -116,20 +116,20 @@ public sealed class RagIngestTests : IDisposable
         if (type == RagSchema.HasChunkType)
         {
             int n = 0;
-            var e = tx.EnumerateRelationships(docId, Direction.Outgoing, RagSchema.HasChunkType);
+            var e = tx.EnumerateEdges(docId, Direction.Outgoing, RagSchema.HasChunkType);
             while (e.MoveNext()) n++;
             return n;
         }
         int next = 0;
-        foreach (var c in ChunkNodes(tx, docId))
+        foreach (var c in ChunkVertices(tx, docId))
         {
-            var e = tx.EnumerateRelationships(c, Direction.Outgoing, RagSchema.NextChunkType);
+            var e = tx.EnumerateEdges(c, Direction.Outgoing, RagSchema.NextChunkType);
             while (e.MoveNext()) next++;
         }
         return next;
     }
 
-    private static string DocTitle(GraphDatabase db, string sourceId)
+    private static string DocTitle(QuiverDatabase db, string sourceId)
     {
         using var tx = db.BeginReadOnlyTransaction();
         var (docId, found) = FindDoc(tx, sourceId);
@@ -137,7 +137,7 @@ public sealed class RagIngestTests : IDisposable
         return Encoding.UTF8.GetString(tx.GetProperty(docId, RagSchema.PropTitle).Utf8StringValue);
     }
 
-    private static int KnnHitCount(GraphDatabase db, string indexName, int k)
+    private static int KnnHitCount(QuiverDatabase db, string indexName, int k)
     {
         var q = new float[Dim];
         q[0] = 1f;
@@ -152,7 +152,7 @@ public sealed class RagIngestTests : IDisposable
     [Fact]
     public async Task Ingest_creates_document_and_chunks()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         var embedder = new FakeEmbedder(Dim);
 
@@ -171,7 +171,7 @@ public sealed class RagIngestTests : IDisposable
     [Fact]
     public async Task Same_document_twice_is_noop_and_skips_embedder()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         var embedder = new FakeEmbedder(Dim);
         var doc = Doc("d1", "alpha", "bravo");
@@ -189,18 +189,18 @@ public sealed class RagIngestTests : IDisposable
     [Fact]
     public async Task Reingest_replaces_old_chunks_and_removes_stale_vectors()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         var embedder = new FakeEmbedder(Dim);
 
         await store.UpsertDocumentAsync(Doc("d1", "alpha", "bravo"), embedder);
 
-        // 旧チャンクノード ID を控える。
-        List<NodeId> oldChunks;
+        // 旧チャンクVertex ID を控える。
+        List<VertexId> oldChunks;
         using (var tx = db.BeginReadOnlyTransaction())
         {
             var (docId, _) = FindDoc(tx, "d1");
-            oldChunks = ChunkNodes(tx, docId);
+            oldChunks = ChunkVertices(tx, docId);
         }
         oldChunks.Should().HaveCount(2);
 
@@ -211,11 +211,11 @@ public sealed class RagIngestTests : IDisposable
         r.ChunkCount.Should().Be(3);
         ChunkTextsOrdered(db, "d1").Should().Equal("charlie", "delta", "echo");
 
-        // 旧チャンクノードは消えている。
+        // 旧チャンクVertexは消えている。
         using (var tx = db.BeginReadOnlyTransaction())
         {
             foreach (var old in oldChunks)
-                tx.NodeExists(old).Should().BeFalse();
+                tx.VertexExists(old).Should().BeFalse();
         }
 
         // ベクトルも stale が残っていない (live = 3 件のみ)。
@@ -225,7 +225,7 @@ public sealed class RagIngestTests : IDisposable
     [Fact]
     public async Task Embedder_exception_leaves_db_unchanged()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
 
         // まず正常な版を入れる。
@@ -243,7 +243,7 @@ public sealed class RagIngestTests : IDisposable
     [Fact]
     public async Task Title_only_change_is_noop_and_keeps_old_title()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         var blocks = new[] { new IngestedBlock(BlockKind.Paragraph, "same body text") };
         var meta = new Dictionary<string, string>();
@@ -262,7 +262,7 @@ public sealed class RagIngestTests : IDisposable
     [Fact]
     public async Task Replace_nonempty_document_with_empty_clears_chunks()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         await store.UpsertDocumentAsync(Doc("d1", "alpha", "bravo"), new FakeEmbedder(Dim));
         ChunkTextsOrdered(db, "d1").Should().HaveCount(2);
@@ -279,7 +279,7 @@ public sealed class RagIngestTests : IDisposable
     [Fact]
     public async Task Dimension_mismatch_throws()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
 
         var act = async () => await store.UpsertDocumentAsync(Doc("d1", "x"), new FakeEmbedder(Dim + 1));
@@ -289,7 +289,7 @@ public sealed class RagIngestTests : IDisposable
     [Fact]
     public async Task Delete_document_removes_everything()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         await store.UpsertDocumentAsync(Doc("d1", "alpha", "bravo"), new FakeEmbedder(Dim));
 
@@ -303,7 +303,7 @@ public sealed class RagIngestTests : IDisposable
     [Fact]
     public void Delete_nonexistent_returns_false()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         store.DeleteDocument("missing").Should().BeFalse();
     }
@@ -311,7 +311,7 @@ public sealed class RagIngestTests : IDisposable
     [Fact]
     public async Task Next_chunk_chain_is_linear_and_ordered()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db, target: 3); // 2 文字段落 + 区切り 2 で 6 > 3 → 各段落が独立チャンク
         await store.UpsertDocumentAsync(Doc("d1", "aa", "bb", "cc", "dd"), new FakeEmbedder(Dim));
 
@@ -323,8 +323,8 @@ public sealed class RagIngestTests : IDisposable
         using var tx = db.BeginReadOnlyTransaction();
         var (docId, _) = FindDoc(tx, "d1");
         var byOrd = new Dictionary<long, int>();
-        NodeId start = default;
-        foreach (var c in ChunkNodes(tx, docId))
+        VertexId start = default;
+        foreach (var c in ChunkVertices(tx, docId))
         {
             int ord = tx.GetProperty(c, RagSchema.PropOrdinal).Int32Value;
             byOrd[c.Value] = ord;
@@ -335,7 +335,7 @@ public sealed class RagIngestTests : IDisposable
         var cur = start;
         while (true)
         {
-            var e = tx.EnumerateRelationships(cur, Direction.Outgoing, RagSchema.NextChunkType);
+            var e = tx.EnumerateEdges(cur, Direction.Outgoing, RagSchema.NextChunkType);
             if (!e.MoveNext()) break;
             cur = e.Current.Target;
             visited.Add(byOrd[cur.Value]);
@@ -346,7 +346,7 @@ public sealed class RagIngestTests : IDisposable
     [Fact]
     public async Task Large_document_ingests_in_single_pass()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db, target: 50, overlap: 10);
         var embedder = new FakeEmbedder(Dim);
 
@@ -366,7 +366,7 @@ public sealed class RagIngestTests : IDisposable
     [Fact]
     public async Task Empty_document_creates_doc_with_no_chunks_and_skips_embedder()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         var embedder = new FakeEmbedder(Dim);
         var empty = new IngestedDocument("e", "Empty", new Dictionary<string, string>(), Array.Empty<IngestedBlock>());
@@ -386,12 +386,12 @@ public sealed class RagIngestTests : IDisposable
     [Fact]
     public async Task Reopen_persists_chunks_and_vectors()
     {
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
         {
             var store = NewStore(db);
             await store.UpsertDocumentAsync(Doc("d1", "alpha", "bravo"), new FakeEmbedder(Dim));
         }
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
         {
             var store = NewStore(db); // 既存索引を踏んで再構築 (冪等)
             ChunkTextsOrdered(db, "d1").Should().Equal("alpha", "bravo");

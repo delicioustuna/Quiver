@@ -16,26 +16,26 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
     private const string VecIndex = "Waveform";
     private const int Dim = 4;
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public ApplyDyadicConstraintTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_sig8_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
 
         var keyId = _db.Schema.GetOrCreatePropertyKey(VecIndex);
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            VecIndex, EntityKind.Node, keyId, Dim,
+            VecIndex, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly));
 
         using var tx = _db.BeginTransaction();
         for (int i = 0; i < 5; i++)
         {
-            var nid = tx.CreateNode("Sensor");
+            var nid = tx.CreateVertex("Sensor");
             tx.SetProperty(nid, "Site", PropertyValue.FromString("A"));
             var vec = new float[Dim];
             vec[i % Dim] = 1f;
-            _db.Vectors.SetVector(EntityKind.Node, nid.Value, VecIndex, vec);
+            _db.Vectors.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
         }
         tx.Commit();
     }
@@ -53,7 +53,7 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var act = () => g.Nodes<SensorNode>().Has(s => s.Site, "A")
+        var act = () => g.Vertices<SensorVertex>().Has(s => s.Site, "A")
             .ApplyDyadic<NaNOp>(s => s.Waveform, [1f, 0f, 0f, 0f], k: 3)
             .ToList();
 
@@ -69,7 +69,7 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var act = () => g.Nodes<SensorNode>().Has(s => s.Site, "A")
+        var act = () => g.Vertices<SensorVertex>().Has(s => s.Site, "A")
             .ApplyDyadic<ThrowingOp>(s => s.Waveform, [1f, 0f, 0f, 0f], k: 3)
             .ToList();
 
@@ -77,7 +77,7 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
             .WithMessage("*deliberate*");
 
         // クエリ例外後もトランザクションを使用できる。
-        var count = g.Nodes().HasLabel("Sensor").Count();
+        var count = g.Vertices().HasLabel("Sensor").Count();
         count.Should().Be(5);
     }
 
@@ -92,9 +92,9 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
             for (int i = 0; i < 20 && !cts.Token.IsCancellationRequested; i++)
             {
                 using var tx = _db.BeginTransaction();
-                var nid = tx.CreateNode("Sensor");
+                var nid = tx.CreateVertex("Sensor");
                 tx.SetProperty(nid, "Site", PropertyValue.FromString("B"));
-                _db.Vectors.SetVector(EntityKind.Node, nid.Value, VecIndex,
+                _db.Vectors.SetVector(EntityKind.Vertex, nid.Value, VecIndex,
                     [0.1f * i, 0.2f, 0.3f, 0.4f]);
                 tx.Commit();
             }
@@ -104,7 +104,7 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
         using (var rtx = _db.BeginReadOnlyTransaction())
         {
             var g = rtx.G(_db.Schema);
-            var hits = g.Nodes<SensorNode>().Has(s => s.Site, "A")
+            var hits = g.Vertices<SensorVertex>().Has(s => s.Site, "A")
                 .ApplyDyadic<SlowOp>(s => s.Waveform, [1f, 0f, 0f, 0f], k: 3)
                 .ToList();
 
@@ -121,7 +121,7 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var hits = g.Nodes<SensorNode>().Has(s => s.Site, "A")
+        var hits = g.Vertices<SensorVertex>().Has(s => s.Site, "A")
             .ApplyDyadic<InfinityOp>(s => s.Waveform, [1f, 0f, 0f, 0f], k: 3)
             .ToListWithIds();
 
@@ -165,33 +165,33 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
             => float.PositiveInfinity;
     }
 
-    // ── 最小構成の IGraphNode 型 ──
+    // ── 最小構成の IGraphVertex 型 ──
 
-    private sealed class SensorNode : IGraphNode<SensorNode>
+    private sealed class SensorVertex : IGraphVertex<SensorVertex>
     {
         public string Site { get; set; } = "";
         public float[] Waveform { get; set; } = [];
 
         public static string GraphLabel => "Sensor";
 
-        public static NodeId Insert(IGraphTransaction tx, SensorNode entity)
+        public static VertexId Insert(IGraphTransaction tx, SensorVertex entity)
         {
-            var id = tx.CreateNode(GraphLabel);
+            var id = tx.CreateVertex(GraphLabel);
             tx.SetProperty(id, "Site", PropertyValue.FromString(entity.Site));
             return id;
         }
 
-        public static NodeId InsertIndexed(IGraphTransaction tx, SensorNode entity) => Insert(tx, entity);
+        public static VertexId InsertIndexed(IGraphTransaction tx, SensorVertex entity) => Insert(tx, entity);
 
-        public static SensorNode Load(IGraphTransaction tx, NodeId id)
+        public static SensorVertex Load(IGraphTransaction tx, VertexId id)
             => new()
             {
                 Site = System.Text.Encoding.UTF8.GetString(tx.GetProperty(id, "Site").Utf8StringValue),
             };
 
-        public static void Update(IGraphTransaction tx, NodeId id, SensorNode entity)
+        public static void Update(IGraphTransaction tx, VertexId id, SensorVertex entity)
             => tx.SetProperty(id, "Site", PropertyValue.FromString(entity.Site));
 
-        public static void Delete(IGraphTransaction tx, NodeId id) => tx.DeleteNode(id);
+        public static void Delete(IGraphTransaction tx, VertexId id) => tx.DeleteVertex(id);
     }
 }

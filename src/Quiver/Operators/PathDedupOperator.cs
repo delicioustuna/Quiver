@@ -1,10 +1,10 @@
-﻿using Quiver.Transactions;
+using Quiver.Transactions;
 
 namespace Quiver.Query.Physical;
 
 /// <summary>
 /// ソースオペレータからの行を、指定したキー列に基づいて重複排除する。
-/// キー列には NodeId / RelationshipId / Int64 のいずれかを保持する必要がある (ハッシュは LongValue を使用)。
+/// キー列には VertexId / EdgeId / Int64 のいずれかを保持する必要がある (ハッシュは LongValue を使用)。
 /// 各ユニークキーの最初の出現を放出し、以降の重複行はドロップする。
 /// </summary>
 internal sealed class PathDedupOperator : IPhysicalOperator

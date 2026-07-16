@@ -46,8 +46,8 @@ Quiver は [Semantic Versioning 2.0.0](https://semver.org/lang/ja/) (`MAJOR.MINO
 
 | 名前空間 | 対象 | 備考 |
 |---|---|---|
-| `Quiver` | ✅ 対象 | 公開ファサード (`GraphDatabase`, `GraphTransaction`, options 等) |
-| `Quiver.Api` | ✅ 対象 | Gremlin ライク API、Match DSL、`[Node]` 等の属性 |
+| `Quiver` | ✅ 対象 | 公開ファサード (`QuiverDatabase`, `GraphTransaction`, options 等) |
+| `Quiver.Api` | ✅ 対象 | Gremlin ライク API、Match DSL、`[Vertex]` 等の属性 |
 | `Quiver.Core` | ✅ 対象 | 共通 ID 型、例外型、`EntityId` 等の基礎型 |
 
 以下は **安定性の対象外**。SemVer に関係なく MINOR/PATCH でも変更しうる:
@@ -71,7 +71,7 @@ API を削除する場合、いきなり消さず以下の段階を踏む:
 1. **告知 (deprecate)**: 削除予定の 1 つ前の MINOR で `[Obsolete]` を付ける。
    ```csharp
    [Obsolete("Use GraphTransaction.SeekIndex instead. Will be removed in v2.0.", error: false)]
-   public IReadOnlyList<NodeId> FindByIndex(string indexName, PropertyValue value) { ... }
+   public IReadOnlyList<VertexId> FindByIndex(string indexName, PropertyValue value) { ... }
    ```
    - メッセージには **代替 API** と **削除予定バージョン** を必ず書く。
    - `error: false` のまま (コンパイルは通る)。
@@ -114,7 +114,7 @@ public enum IsolationLevel : byte
 }
 
 [Experimental("QUIVER001")]
-public sealed class SerializabilityException : GraphDbException { ... }
+public sealed class SerializabilityException : QuiverException { ... }
 ```
 
 利用側は明示的に opt-in する:
@@ -182,7 +182,7 @@ Get-ChildItem tests/Quiver.PublicApi.Tests/PublicApi/*.received.txt | ForEach-Ob
 
 ### 7.2 オンディスクフォーマット互換性
 
-- **1.x 内では `FormatVersion` を bump しない。** 1.0 で作成した DB ファイルは 1.x の全バージョンで
+- **1.x 内では QUIVER-SW family version を変更しない。** 1.0 で作成した DB ファイルは 1.x の全バージョンで
   そのまま開ける。
 - 新機能が追加フィールドを必要とする場合は、既存レイアウトの予約領域またはオプショナルな拡張ページを
   使い、旧バイナリでも読み飛ばせる形で追加する。

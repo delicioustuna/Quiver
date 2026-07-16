@@ -91,8 +91,8 @@
   <data name="Schema" xml:space="preserve"><value>スキーマ</value></data>
 
   <!-- Stats labels -->
-  <data name="Stats_Nodes" xml:space="preserve"><value>ノード</value></data>
-  <data name="Stats_Relationships" xml:space="preserve"><value>リレーションシップ</value></data>
+  <data name="Stats_Vertices" xml:space="preserve"><value>Vertex</value></data>
+  <data name="Stats_Edges" xml:space="preserve"><value>Edge</value></data>
   <data name="Stats_Properties" xml:space="preserve"><value>プロパティ</value></data>
   <data name="Stats_DataFile" xml:space="preserve"><value>データファイル</value></data>
   <data name="Stats_WAL" xml:space="preserve"><value>WAL</value></data>
@@ -100,7 +100,7 @@
   <!-- Query Editor -->
   <data name="ExecuteF5" xml:space="preserve"><value>実行 (F5)</value></data>
   <data name="QueryEditorPlaceholder" xml:space="preserve"><value>クエリを実行して結果を表示</value></data>
-  <data name="GraphPlaceholder" xml:space="preserve"><value>クエリを実行してノードを返すとグラフが表示されます</value></data>
+  <data name="GraphPlaceholder" xml:space="preserve"><value>クエリを実行してVertexを返すとグラフが表示されます</value></data>
 
   <!-- Results -->
   <data name="CopyCsv" xml:space="preserve"><value>CSV コピー</value></data>
@@ -108,14 +108,14 @@
 
   <!-- Status bar -->
   <data name="Status_Zoom" xml:space="preserve"><value>ズーム: {0:P0}</value></data>
-  <data name="Status_GraphInfo" xml:space="preserve"><value>グラフ: {0} ノード, {1} エッジ</value></data>
+  <data name="Status_GraphInfo" xml:space="preserve"><value>グラフ: {0} Vertex, {1} エッジ</value></data>
 
   <!-- Dialogs -->
-  <data name="AddNode" xml:space="preserve"><value>ノードを追加</value></data>
-  <data name="AddRelationship" xml:space="preserve"><value>リレーションシップを追加</value></data>
+  <data name="AddVertex" xml:space="preserve"><value>Vertexを追加</value></data>
+  <data name="AddEdge" xml:space="preserve"><value>Edgeを追加</value></data>
   <data name="Delete" xml:space="preserve"><value>削除</value></data>
-  <data name="NodeLabel" xml:space="preserve"><value>ノードラベル</value></data>
-  <data name="RelationshipType" xml:space="preserve"><value>リレーションシップタイプ</value></data>
+  <data name="VertexLabel" xml:space="preserve"><value>Vertexラベル</value></data>
+  <data name="EdgeType" xml:space="preserve"><value>Edgeタイプ</value></data>
   <data name="OK" xml:space="preserve"><value>OK</value></data>
   <data name="Cancel" xml:space="preserve"><value>キャンセル</value></data>
   <data name="Error" xml:space="preserve"><value>エラー</value></data>
@@ -123,7 +123,7 @@
 
   <!-- Settings -->
   <data name="Settings_ScoreVisualization" xml:space="preserve"><value>スコア可視化</value></data>
-  <data name="Settings_ScoreVizDesc" xml:space="preserve"><value>ベクトル検索スコアのノード上での表現方法。</value></data>
+  <data name="Settings_ScoreVizDesc" xml:space="preserve"><value>ベクトル検索スコアのVertex上での表現方法。</value></data>
   <data name="Settings_DisplayMode" xml:space="preserve"><value>表示モード</value></data>
   <data name="Settings_ContourMap" xml:space="preserve"><value>コンターマップ</value></data>
   <data name="Settings_ContourDesc" xml:space="preserve"><value>離散バンドによるスコアから色へのマッピング。</value></data>
@@ -135,10 +135,10 @@
   <data name="Settings_DiscreteSteps" xml:space="preserve"><value>離散ステップ数: {0}</value></data>
   <data name="Settings_CustomPalette" xml:space="preserve"><value>カスタムパレット (カンマ区切り #RRGGBB)</value></data>
   <data name="Settings_Preview" xml:space="preserve"><value>プレビュー</value></data>
-  <data name="Settings_NodeRelationship" xml:space="preserve"><value>ノードとリレーションシップ</value></data>
-  <data name="Settings_NodeRelDesc" xml:space="preserve"><value>グラフ要素の外観設定。</value></data>
-  <data name="Settings_NodeShape" xml:space="preserve"><value>ノード形状</value></data>
-  <data name="Settings_RelationshipStyle" xml:space="preserve"><value>リレーションシップスタイル</value></data>
+  <data name="Settings_VertexEdge" xml:space="preserve"><value>VertexとEdge</value></data>
+  <data name="Settings_VertexEdgeDesc" xml:space="preserve"><value>グラフ要素の外観設定。</value></data>
+  <data name="Settings_VertexShape" xml:space="preserve"><value>Vertex形状</value></data>
+  <data name="Settings_EdgeStyle" xml:space="preserve"><value>Edgeスタイル</value></data>
   <data name="Settings_Language" xml:space="preserve"><value>言語</value></data>
   <data name="Settings_LanguageDesc" xml:space="preserve"><value>アプリケーションの表示言語。</value></data>
   <data name="Settings_LanguageAuto" xml:space="preserve"><value>自動 (システム)</value></data>

@@ -6,7 +6,7 @@ namespace Quiver.Storage;
 
 /// <summary>
 /// <see cref="SingleFileContainer"/> 内の 1 テナント (= 1 ストアの論理ページ空間) を
-/// <see cref="IPagedFile"/> として見せる薄い変換シム。各ストア (NodeStore など) は自分が
+/// <see cref="IPagedFile"/> として見せる薄い変換シム。各ストア (VertexStore など) は自分が
 /// <c>page 0,1,2..</c> を所有していると思い込んだまま無改修で動く。
 ///
 /// 論理ページ ID は per-tenant page table で物理ページ ID に写像し、pin / alloc / free / unpin は
@@ -94,8 +94,6 @@ internal sealed class TenantPagedFile : IPagedFile
 
     public PageReadHandle PinForRead(PageId pageId) => _physical.PinForRead(Translate(pageId));
     public PageWriteHandle PinForWrite(PageId pageId) => _physical.PinForWrite(Translate(pageId));
-    // journaling モードを物理層へ転送する (mode は物理 pageId でキーされる)。
-    public PageWriteHandle PinForWrite(PageId pageId, WalJournalMode mode) => _physical.PinForWrite(Translate(pageId), mode);
     // Unpin / UnpinDirty は PagedFile では明示的インターフェイス実装なのでインターフェイス経由で呼ぶ。
     public void Unpin(PageId pageId) => ((IPagedFile)_physical).Unpin(Translate(pageId));
     public void UnpinDirty(PageId pageId, long lsn) => ((IPagedFile)_physical).UnpinDirty(Translate(pageId), lsn);
@@ -105,7 +103,6 @@ internal sealed class TenantPagedFile : IPagedFile
     // WAL は container 物理層で 1 fileKind に一本化する。
     // テナント単位の per-file WAL は行わないため、ここでは何もしない。
     public void EnableWalLogging(byte fileKind, IWriteAheadLog wal) { }
-    public void EnableWalFlushOnly(IWriteAheadLog wal) { }
 
     public void WritePageForRecovery(PageId pageId, ReadOnlySpan<byte> pageBytes)
         => _physical.WritePageForRecovery(Translate(pageId), pageBytes);

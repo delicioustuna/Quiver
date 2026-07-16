@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using Quiver.Core;
 using Quiver.Telemetry;
 using Quiver.Index;
@@ -10,22 +10,22 @@ namespace Quiver.Transactions;
 internal sealed class TransactionManager : ITransactionManager
 {
     private readonly IWriteAheadLog _wal;
-    private readonly INodeStore _nodeStore;
-    private readonly IRelationshipStore _relStore;
-    private readonly IHyperedgeStore _hyperedgeStore;
+    private readonly IVertexStore _vertexStore;
+    private readonly IEdgeStore _edgeStore;
+    private readonly INexusStore _nexusStore;
     private readonly IIncidenceStore _incidenceStore;
-    private readonly INodeIncidenceHeadStore _nodeIncidenceHeadStore;
+    private readonly IVertexIncidenceHeadStore _vertexIncidenceHeadStore;
     private readonly IPropertyStore _propStore;
     private readonly IIndexManager _indexManager;
-    private readonly PersistentRelationshipDeltaStore? _relationshipDeltas;
+    private readonly PersistentEdgeDeltaStore? _edgeDeltas;
     private IAdjacencyBlockStore? _adjStore;
     private readonly ICoMembershipBlockStore? _coMembershipStore;
     private readonly IGraphAccessMethods _access;
     // abort / コミット失敗時のインプロセス undo を担う。null のときは undo 無し。
     private readonly AbortUndoHandler? _undoHandler;
-    private readonly LockManager _nodeLocks = new();
-    private readonly LockManager _relLocks = new();
-    private readonly LockManager _hyperedgeLocks = new();
+    private readonly LockManager _vertexLocks = new();
+    private readonly LockManager _edgeLocks = new();
+    private readonly LockManager _nexusLocks = new();
     private readonly LockManager _indexLocks = new();
     private readonly ConcurrentDictionary<long, Transaction> _active = new();
     private long _nextTxId;
@@ -62,9 +62,9 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly CommittedTxRegistry _committed;
 
     // SSN 用の version sidecar (Serializable のときのみ Transaction に渡して使う)。
-    private readonly IEntityVersionStore? _nodeVersions;
-    private readonly IEntityVersionStore? _relVersions;
-    private readonly IEntityVersionStore? _hyperedgeVersions;
+    private readonly IEntityVersionStore? _vertexVersions;
+    private readonly IEntityVersionStore? _edgeVersions;
+    private readonly IEntityVersionStore? _nexusVersions;
     // Serializable commit の pre-commit 検証 + post-commit スタンプ書き戻しを
     // 直列化するゲート。並行 Serializable commit 間で version スタンプの read-modify-write を保護する。
     private readonly object _ssnCommitGate = new();
@@ -81,8 +81,8 @@ internal sealed class TransactionManager : ITransactionManager
 
     public TransactionManager(
         IWriteAheadLog wal,
-        INodeStore nodeStore,
-        IRelationshipStore relStore,
+        IVertexStore vertexStore,
+        IEdgeStore edgeStore,
         IPropertyStore propStore,
         IIndexManager indexManager,
         IAdjacencyBlockStore? adjStore = null,
@@ -92,33 +92,33 @@ internal sealed class TransactionManager : ITransactionManager
         TimeSpan? lockTimeout = null,
         TimeSpan? deadlockDetectionInterval = null,
         CommittedTxRegistry? committedRegistry = null,
-        IEntityVersionStore? nodeVersions = null,
-        IEntityVersionStore? relVersions = null,
-        IHyperedgeStore? hyperedgeStore = null,
+        IEntityVersionStore? vertexVersions = null,
+        IEntityVersionStore? edgeVersions = null,
+        INexusStore? nexusStore = null,
         IIncidenceStore? incidenceStore = null,
-        INodeIncidenceHeadStore? nodeIncidenceHeadStore = null,
-        IEntityVersionStore? hyperedgeVersions = null,
+        IVertexIncidenceHeadStore? vertexIncidenceHeadStore = null,
+        IEntityVersionStore? nexusVersions = null,
         ICoMembershipBlockStore? coMembershipStore = null,
-        PersistentRelationshipDeltaStore? relationshipDeltas = null)
+        PersistentEdgeDeltaStore? edgeDeltas = null)
     {
         _wal = wal;
-        _nodeStore = nodeStore;
-        _relStore = relStore;
-        _hyperedgeStore = hyperedgeStore ?? NullHyperedgeStore.Instance;
+        _vertexStore = vertexStore;
+        _edgeStore = edgeStore;
+        _nexusStore = nexusStore ?? NullNexusStore.Instance;
         _incidenceStore = incidenceStore ?? NullIncidenceStore.Instance;
-        _nodeIncidenceHeadStore = nodeIncidenceHeadStore ?? NullNodeIncidenceHeadStore.Instance;
+        _vertexIncidenceHeadStore = vertexIncidenceHeadStore ?? NullVertexIncidenceHeadStore.Instance;
         _propStore = propStore;
         _indexManager = indexManager;
-        _relationshipDeltas = relationshipDeltas;
+        _edgeDeltas = edgeDeltas;
         _adjStore = adjStore;
         _access = access ?? InlineGraphAccessMethods.Instance;
         _undoHandler = undoHandler;
         _lockingMode = lockingMode;
         _lockTimeout = lockTimeout ?? TimeSpan.FromSeconds(5);
         _committed = committedRegistry ?? new CommittedTxRegistry();
-        _nodeVersions = nodeVersions;
-        _relVersions = relVersions;
-        _hyperedgeVersions = hyperedgeVersions;
+        _vertexVersions = vertexVersions;
+        _edgeVersions = edgeVersions;
+        _nexusVersions = nexusVersions;
         _coMembershipStore = coMembershipStore;
         // _nextTxId は最初の Increment で 1 を返す (= Bootstrap.Value)。
         // Bootstrap は予約済みなので、最初の "ユーザ" tx が 2 から始まるよう offset しておく。
@@ -126,7 +126,7 @@ internal sealed class TransactionManager : ITransactionManager
         if (deadlockDetectionInterval is { } interval && interval > TimeSpan.Zero)
         {
             _deadlockDetector = new DeadlockDetector(
-                new[] { _nodeLocks, _relLocks, _hyperedgeLocks, _indexLocks }, interval);
+                new[] { _vertexLocks, _edgeLocks, _nexusLocks, _indexLocks }, interval);
         }
         // gauge provider 登録 (PollingCounter から sum-of-providers として参照される)。
         _activeTxCountRegistration =
@@ -140,11 +140,11 @@ internal sealed class TransactionManager : ITransactionManager
     /// </summary>
     internal CommittedTxRegistry CommittedRegistry => _committed;
 
-    // vacuum が dead hyperedge / incidence を回収するためのストア到達点。backend は
+    // vacuum が dead nexus / incidence を回収するためのストア到達点。backend は
     // これらを直接保持しないため、transaction 配線に渡した実体をここから参照する。
-    internal IHyperedgeStore HyperedgeStore => _hyperedgeStore;
+    internal INexusStore NexusStore => _nexusStore;
     internal IIncidenceStore IncidenceStore => _incidenceStore;
-    internal INodeIncidenceHeadStore NodeIncidenceHeadStore => _nodeIncidenceHeadStore;
+    internal IVertexIncidenceHeadStore VertexIncidenceHeadStore => _vertexIncidenceHeadStore;
 
     /// <summary>Serializable commit を直列化するゲート (Transaction から参照)。</summary>
     internal object SsnCommitGate => _ssnCommitGate;
@@ -278,15 +278,15 @@ internal sealed class TransactionManager : ITransactionManager
             txId = new TransactionId(Interlocked.Increment(ref _nextTxId) - 1);
             var activeAtBegin = new HashSet<long>(_active.Keys);
             snapshot = new SnapshotState(txId, activeAtBegin);
-            _wal.Append(WalRecordType.Begin, txId, ReadOnlySpan<byte>.Empty);
+            _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
             tx = new Transaction(txId, level, snapshotLsn,
-                _wal, _nodeLocks, _relLocks, _hyperedgeLocks, _indexLocks, this,
-                _nodeStore, _relStore,
-                _hyperedgeStore, _incidenceStore, _nodeIncidenceHeadStore,
+                _wal, _vertexLocks, _edgeLocks, _nexusLocks, _indexLocks, this,
+                _vertexStore, _edgeStore,
+                _nexusStore, _incidenceStore, _vertexIncidenceHeadStore,
                 _propStore, _indexManager, _adjStore, _access,
                 _undoHandler, _lockingMode, _lockTimeout,
-                snapshot, _committed, _nodeVersions, _relVersions, _hyperedgeVersions,
-                _coMembershipStore, _relationshipDeltas);
+                snapshot, _committed, _vertexVersions, _edgeVersions, _nexusVersions,
+                _coMembershipStore, _edgeDeltas);
             _active[txId.Value] = tx;
         }
         return tx;
@@ -432,7 +432,7 @@ internal sealed class TransactionManager : ITransactionManager
     internal void SwapAdjacencyStore(IAdjacencyBlockStore? next) => _adjStore = next;
 
     /// <summary>
-    /// <see cref="GraphDatabase.CreateSnapshot"/> の前段で呼ばれ、ベストエフォートで
+    /// <see cref="QuiverDatabase.CreateSnapshot"/> の前段で呼ばれ、ベストエフォートで
     /// シャープチェックポイントを 1 回起動する。アクティブトランザクションが居る場合は
     /// (シャープチェックポイントの不変条件を破らないよう) スキップする。スキップしても
     /// snapshot 自体は WAL から redo / undo して target を整合させるため correctness には

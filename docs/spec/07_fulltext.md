@@ -1,10 +1,6 @@
 # 全文検索
 
-> as-built 仕様 (on-disk FormatVersion V5)
->
-> **current (as-built)**: 以下は現在実装されている FormatVersion V5 の全文検索契約である。
-> **target (未実装)**: [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md) が将来の設計正本であり、本書の本文はその target を先取りして記述しない。
-> **実装済み境界**: 再設計の production code はまだ実装されていない。`redesign-baseline` は着工前の測定を固定するタグであり、再設計の実装完了を表さない。
+> as-built 仕様（QUIVER-SW family version 1、2026-07-15）
 
 ## アーキテクチャ {#architecture}
 
@@ -111,40 +107,14 @@ RRF_score(doc) = sum(1 / (k + rank_i(doc)))
 
 ここで `k` は平滑化定数（デフォルト 60）であり、`rank_i` は結果リスト `i` における文書の順位である。
 
-## 論理 WAL {#logical-wal}
+## WAL とリカバリ {#wal-recovery}
 
-全文 postings と norms は、リーフ更新に page-image ログではなく **論理 WAL レコード**
-(`FtLeafMutation`) を用いる。これにより、大量のテキスト取り込み時の WAL 増幅を劇的に削減する。
+Postings と Norms の B+Tree は、他の永続 B+Tree と同じ `PageImage` WAL を使う。
+リーフ更新、split、merge、root 更新を区別する全文専用 record は持たない。
+同じ transaction で同じページを複数回更新した場合は、commit 時に最終 image へ集約する。
 
-### レコード種別 {#ft-wal-records}
+commit 前の abort と savepoint rollback は、transaction-owned write set の before-image を使う。
+crash recovery は明示的な `Commit` を持つ transaction の `PageImage` だけを redo する。
+全文専用の論理 redo、compensation、loser undo は実行しない。
 
-| WAL 種別 | 値 | 目的 |
-|---|---|---|
-| `FtLeafMutation` | 17 | state-setting なリーフ mutation（Upsert または Delete） |
-| `FtStructureImage` | 18 | 構造ページ（split/merge/root）の after-image |
-
-### ジャーナリングモード {#ft-journaling}
-
-| モード | リーフ | 構造 (SMO) |
-|---|---|---|
-| **Suppressed** | page-image なし。FtLeafMutation のみ | N/A |
-| **RedoOnly** | N/A | eager な PageImage、nested top action（undo なし） |
-| **Full** | 標準の page-image + CLR | 標準の page-image + CLR |
-
-リーフ更新は Suppressed モードを用いる: FtLeafMutation レコードのみがログされる。
-構造変更（split, merge, root の変更）は RedoOnly モードを用いる: after-image が `FtStructureImage`
-レコードとして書き込まれ、リカバリ中に無条件で redo され、undo されることはない（nested top action のセマンティクス）。
-
-### リカバリ {#ft-recovery}
-
-リカバリ中:
-- **Pass 2a**: `FtStructureImage` レコードは無条件に redo される（nested top action）
-- **Pass 2b**: コミット済みトランザクションの `FtLeafMutation` レコードは `ApplyFtLeafRedo` で
-  redo される（state-setting、冪等）
-- **Pass 3**: loser トランザクションの `FtLeafMutation` レコードは逆操作で undo される
-  （Upsert は Delete に、Delete は保存値での Upsert になる）
-
-### WAL 増幅 {#wal-amplification}
-
-論理 WAL は postings の WAL 増幅を ~50-100x（リーフに触れるたびの page-image）から
-~5x（posting ごとの論理 mutation）へ削減する。batch=10 での実測値: 4.70x。
+詳細は [WAL とリカバリ](02_wal_recovery.md) を参照する。

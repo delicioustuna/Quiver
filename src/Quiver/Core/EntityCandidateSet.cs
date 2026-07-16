@@ -3,12 +3,12 @@ namespace Quiver.Core;
 /// <summary>
 /// <c>IGraphAccessMethods.KnnSearchFiltered</c> の所属判定側として使う、
 /// 事前計算済みのエンティティ ID 集合。graph-first プランが (label / property / 近傍マッチによる)
-/// 候補 frontier を vector access path に渡すことで、ベクトルインデックスを関連ノードだけに
+/// 候補 frontier を vector access path に渡すことで、ベクトルインデックスを関連Vertexだけに
 /// スコアリング対象を絞ることができる。
 /// </summary>
 /// <remarks>
 /// 現状は <see cref="HashSet{T}"/> 裏付け。<c>FrontierSet</c> 系のビットマップバリアントは、
-/// dense なノード ID パターンで効果が出るようになった段階で追加するのが妥当 — フィルタ付き KNN の
+/// dense なVertex ID パターンで効果が出るようになった段階で追加するのが妥当 — フィルタ付き KNN の
 /// 初期の正しさ経路では不要。
 /// </remarks>
 public sealed class EntityCandidateSet

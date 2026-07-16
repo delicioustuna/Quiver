@@ -4,9 +4,7 @@ using Quiver.Core;
 namespace Quiver.Storage.Wal;
 
 /// <summary>
-/// 単一ファイル WAL のシーケンシャルリーダ。先頭から順に読み、
-/// <see cref="WalRecordType.EndOfSegment"/> マーカ (旧形式の残骸) と LSN &lt; startLsn の
-/// レコードはスキップする。
+/// <c>QUIVER-SW</c> WAL のシーケンシャルリーダ。
 /// </summary>
 internal sealed class WalReader : IWalReader
 {
@@ -18,7 +16,10 @@ internal sealed class WalReader : IWalReader
     {
         _startLsn = startLsn;
         if (File.Exists(path))
+        {
             _stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            WalFormat.ValidateAndPosition(_stream);
+        }
     }
 
     public bool TryReadNext(out WalRecord record)
@@ -31,7 +32,6 @@ internal sealed class WalReader : IWalReader
             if (!TryReadRecord(_stream, out record))
                 return false;
 
-            if (record.Type == WalRecordType.EndOfSegment) continue;
             if (record.Lsn < _startLsn) continue;
 
             return true;
@@ -52,30 +52,38 @@ internal sealed class WalReader : IWalReader
         record = default;
         const int hs = WriteAheadLog.HeaderSize;
 
+        if (fs.Position == fs.Length) return false;
+        if (fs.Length - fs.Position < hs)
+            throw new CorruptionException("Truncated WAL record header.");
+
         Span<byte> hdr = stackalloc byte[hs];
-        try { fs.ReadExactly(hdr); }
-        catch (EndOfStreamException) { return false; }
+        fs.ReadExactly(hdr);
 
         int length = BinaryPrimitives.ReadInt32LittleEndian(hdr);
-        if (length < hs || length > hs + WriteAheadLog.MaxPayloadSize) return false;
+        if (length < hs || length > hs + WriteAheadLog.MaxPayloadSize)
+            throw new CorruptionException($"Invalid WAL record length {length}.");
 
         long lsn = BinaryPrimitives.ReadInt64LittleEndian(hdr[4..]);
         long txId = BinaryPrimitives.ReadInt64LittleEndian(hdr[12..]);
         var type = (WalRecordType)hdr[20];
+        if (!WalFormat.IsKnownRecordType(type))
+            throw new CorruptionException($"Unknown WAL record type 0x{hdr[20]:X2}.");
         uint storedCrc = BinaryPrimitives.ReadUInt32LittleEndian(hdr[21..]);
 
         int payloadLen = length - hs;
         byte[] payload = payloadLen > 0 ? new byte[payloadLen] : [];
         if (payloadLen > 0)
         {
-            try { fs.ReadExactly(payload); }
-            catch (EndOfStreamException) { return false; }
+            if (fs.Length - fs.Position < payloadLen)
+                throw new CorruptionException("Truncated WAL record payload.");
+            fs.ReadExactly(payload);
         }
 
         var crc = new Crc32();
         crc.Append(hdr[..21]);
         if (payloadLen > 0) crc.Append(payload);
-        if (crc.GetCurrentHashAsUInt32() != storedCrc) return false;
+        if (crc.GetCurrentHashAsUInt32() != storedCrc)
+            throw new CorruptionException($"WAL checksum mismatch at LSN {lsn}.");
 
         record = new WalRecord
         {

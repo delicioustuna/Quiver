@@ -19,8 +19,8 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
         => System.IO.Path.Combine(DatabaseDirectory, "graph.quiver");
 
     /// <summary>
-    /// rollback がページベースストアのメタデータ (ノードストアの high-water mark) も
-    /// 巻き戻し、abort された CreateNode の slot を次のコミット済みトランザクションが
+    /// rollback がページベースストアのメタデータ (Vertexストアの high-water mark) も
+    /// 巻き戻し、abort された CreateVertex の slot を次のコミット済みトランザクションが
     /// 再利用することを検証する。ID 割り当ては backend ごとの仕様なので、
     /// この保証は共通契約ではなく binary 固有テストに置く。
     /// </summary>
@@ -33,26 +33,26 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
         try
         {
             var factory = new BinaryGraphStorageBackendFactory();
-            using var backend = factory.Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions());
+            using var backend = factory.Open(System.IO.Path.Combine(dir, "graph.quiver"), new QuiverDatabaseOptions());
 
-            NodeId discarded;
+            VertexId discarded;
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
-                discarded = tx.CreateNode("Discarded");
+                discarded = tx.CreateVertex("Discarded");
                 tx.Rollback();
             }
 
-            NodeId reused;
+            VertexId reused;
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
-                reused = tx.CreateNode("Fresh");
+                reused = tx.CreateVertex("Fresh");
                 tx.Commit();
             }
 
             reused.Should().Be(discarded,
-                "rollback must restore the node store high-water mark so the id is reused");
+                "rollback must restore the vertex store high-water mark so the id is reused");
         }
         finally
         {
@@ -72,7 +72,7 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
-                var n = tx.CreateNode("Item");
+                var n = tx.CreateVertex("Item");
                 tx.IndexInsert("idx_score", 42L, n);
                 tx.Rollback();
             }
@@ -88,63 +88,63 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
     }
 
     /// <summary>
-    /// rollback でノードストアの high-water mark が戻り、解放 slot が再利用されても、
-    /// rollback 済みインデックスエントリが別の有効なノードを誤って指さないことを検証する。
+    /// rollback でVertexストアの high-water mark が戻り、解放 slot が再利用されても、
+    /// rollback 済みインデックスエントリが別の有効なVertexを誤って指さないことを検証する。
     /// </summary>
     [Fact]
     public void Rollback_prevents_stale_index_entry_aliasing()
     {
         RunInTempBackend(backend =>
         {
-            NodeId discarded;
+            VertexId discarded;
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
-                discarded = tx.CreateNode("Person");
+                discarded = tx.CreateVertex("Person");
                 tx.IndexInsert("idx_name", "alice", discarded);
                 tx.Rollback();
             }
 
-            NodeId reused;
+            VertexId reused;
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
-                // rollback されたノードが解放した slot を再利用する。
-                reused = tx.CreateNode("Person");
+                // rollback されたVertexが解放した slot を再利用する。
+                reused = tx.CreateVertex("Person");
                 tx.Commit();
             }
-            reused.Should().Be(discarded, "FT-15: the freed slot is reused");
+            reused.Should().Be(discarded, ": the freed slot is reused");
 
             using var rtx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: true);
             var en = rtx.SeekIndex("idx_name", PropertyValue.FromString("alice"));
-            var hits = new List<NodeId>();
+            var hits = new List<VertexId>();
             while (en.MoveNext()) hits.Add(en.Current);
             en.Dispose();
             hits.Should().BeEmpty(
-                "the rolled-back index entry must not alias the node that reused its slot");
+                "the rolled-back index entry must not alias the vertex that reused its slot");
             rtx.Rollback();
         });
     }
 
     /// <summary>
-    /// インデックス登録済みの <c>MergeNode</c> は、インデックス検索で create と find を
+    /// インデックス登録済みの <c>MergeVertex</c> は、インデックス検索で create と find を
     /// 判定する。rollback された merge が stale entry を残さず、同じキーの次の merge が
     /// ghost を誤検出しないことを検証する。
     /// </summary>
     [Fact]
-    public void MergeNode_with_index_upsert_is_correct_across_rollback()
+    public void MergeVertex_with_index_upsert_is_correct_across_rollback()
     {
         RunInTempBackend(backend =>
         {
             backend.Schema.CreateIndex(
                 "idx_person_email", "Person", "email", IndexKind.StringEquality);
 
-            // ノードとインデックスエントリを作成する merge を rollback する。
+            // Vertexとインデックスエントリを作成する merge を rollback する。
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
-                var (_, created) = tx.MergeNode(
+                var (_, created) = tx.MergeVertex(
                     "Person", "email", PropertyValue.FromString("a@x.com"));
                 created.Should().BeTrue();
                 tx.Rollback();
@@ -154,21 +154,21 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
-                var (_, created) = tx.MergeNode(
+                var (_, created) = tx.MergeVertex(
                     "Person", "email", PropertyValue.FromString("a@x.com"));
                 created.Should().BeTrue(
-                    "a rolled-back MergeNode must not leave a stale index entry");
+                    "a rolled-back MergeVertex must not leave a stale index entry");
                 tx.Commit();
             }
 
-            // コミット後は、同じキーの merge が既存ノードを見つける。
+            // コミット後は、同じキーの merge が既存Vertexを見つける。
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
-                var (_, created) = tx.MergeNode(
+                var (_, created) = tx.MergeVertex(
                     "Person", "email", PropertyValue.FromString("a@x.com"));
                 created.Should().BeFalse(
-                    "a committed MergeNode must be found by a later merge of the same key");
+                    "a committed MergeVertex must be found by a later merge of the same key");
                 tx.Commit();
             }
         });
@@ -184,7 +184,7 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
         try
         {
             using var backend = new BinaryGraphStorageBackendFactory()
-                .Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions());
+                .Open(System.IO.Path.Combine(dir, "graph.quiver"), new QuiverDatabaseOptions());
             body(backend);
         }
         finally

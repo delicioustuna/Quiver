@@ -1,36 +1,36 @@
-﻿using Quiver.Core;
+using Quiver.Core;
 using Quiver.Index;
 using Quiver.Storage.Records;
 
 namespace Quiver;
 
-internal interface IHyperedgeSchemaResolver
+internal interface INexusSchemaResolver
 {
     bool TryGetRoleId(string name, out RoleId id);
 }
 
-internal sealed class SchemaApi : ISchemaApi, IHyperedgeSchemaResolver
+internal sealed class SchemaApi : ISchemaApi, INexusSchemaResolver
 {
     private readonly ITokenStore<LabelId> _labels;
-    private readonly ITokenStore<RelationshipTypeId> _relTypes;
+    private readonly ITokenStore<EdgeTypeId> _edgeTypes;
     private readonly PropertyKeyTokenStore _propKeys;
-    private readonly ITokenStore<HyperedgeTypeId> _hyperedgeTypes;
+    private readonly ITokenStore<NexusTypeId> _nexusTypes;
     private readonly ITokenStore<RoleId> _roles;
     private readonly IIndexManager _indexManager;
 
     internal SchemaApi(
         ITokenStore<LabelId> labels,
-        ITokenStore<RelationshipTypeId> relTypes,
+        ITokenStore<EdgeTypeId> edgeTypes,
         PropertyKeyTokenStore propKeys,
         IIndexManager indexManager,
-        ITokenStore<HyperedgeTypeId> hyperedgeTypes,
+        ITokenStore<NexusTypeId> nexusTypes,
         ITokenStore<RoleId> roles)
     {
         _labels = labels;
-        _relTypes = relTypes;
+        _edgeTypes = edgeTypes;
         _propKeys = propKeys;
         _indexManager = indexManager;
-        _hyperedgeTypes = hyperedgeTypes;
+        _nexusTypes = nexusTypes;
         _roles = roles;
     }
 
@@ -38,7 +38,7 @@ internal sealed class SchemaApi : ISchemaApi, IHyperedgeSchemaResolver
     internal IIndexManager IndexManager => _indexManager;
 
     public LabelId GetOrCreateLabel(string name) => _labels.GetOrCreate(name);
-    public RelationshipTypeId GetOrCreateRelationshipType(string name) => _relTypes.GetOrCreate(name);
+    public EdgeTypeId GetOrCreateEdgeType(string name) => _edgeTypes.GetOrCreate(name);
     public PropertyKeyId GetOrCreatePropertyKey(string name) => _propKeys.GetOrCreate(name);
     public PropertyKeyId GetOrCreatePropertyKey(string name, PropertyCardinality cardinality) => _propKeys.GetOrCreate(name, cardinality);
     public PropertyCardinality GetPropertyKeyCardinality(PropertyKeyId id) => _propKeys.GetCardinality(id);
@@ -48,7 +48,7 @@ internal sealed class SchemaApi : ISchemaApi, IHyperedgeSchemaResolver
     // 冪等な rename 判定用。auto-create を回避するため TokenStore.TryGet を直叩き。
     public bool TryGetLabelId(string name, out LabelId id) => _labels.TryGet(name, out id);
     public bool TryGetPropertyKeyId(string name, out PropertyKeyId id) => _propKeys.TryGet(name, out id);
-    public bool TryGetRelationshipTypeId(string name, out RelationshipTypeId id) => _relTypes.TryGet(name, out id);
+    public bool TryGetEdgeTypeId(string name, out EdgeTypeId id) => _edgeTypes.TryGet(name, out id);
 
     public bool IndexExists(string indexName) => _indexManager.ListIndexes().Contains(indexName);
 
@@ -70,7 +70,7 @@ internal sealed class SchemaApi : ISchemaApi, IHyperedgeSchemaResolver
                 _indexManager.CreateStringIndex(indexName);
                 break;
         }
-        // バインディングを登録し、MergeNode が自動でこのインデックスを
+        // バインディングを登録し、MergeVertex が自動でこのインデックスを
         // 引けるようにする。kind は IndexInfo 側のメタデータ復元用に別途記録する。
         _indexManager.RegisterIndexBinding(indexName, label, propertyKey);
         _indexKinds[indexName] = kind;
@@ -123,7 +123,7 @@ internal sealed class SchemaApi : ISchemaApi, IHyperedgeSchemaResolver
 
     public bool RenameLabel(string oldName, string newName) => _labels.Rename(oldName, newName);
     public bool RenamePropertyKey(string oldName, string newName) => _propKeys.Rename(oldName, newName);
-    public bool RenameRelationshipType(string oldName, string newName) => _relTypes.Rename(oldName, newName);
+    public bool RenameEdgeType(string oldName, string newName) => _edgeTypes.Rename(oldName, newName);
 
     public bool RenameIndex(string oldName, string newName)
     {
@@ -139,18 +139,18 @@ internal sealed class SchemaApi : ISchemaApi, IHyperedgeSchemaResolver
     public IReadOnlyList<string> ListLabels()
         => _labels.All().Select(_labels.GetName).ToList();
 
-    public IReadOnlyList<string> ListRelationshipTypes()
-        => _relTypes.All().Select(_relTypes.GetName).ToList();
+    public IReadOnlyList<string> ListEdgeTypes()
+        => _edgeTypes.All().Select(_edgeTypes.GetName).ToList();
 
     public IReadOnlyList<string> ListPropertyKeys()
         => _propKeys.All().Select(_propKeys.GetName).ToList();
 
-    public HyperedgeTypeId GetOrCreateHyperedgeType(string name) => _hyperedgeTypes.GetOrCreate(name);
-    public string? GetHyperedgeTypeName(HyperedgeTypeId id) => id.IsValid ? _hyperedgeTypes.GetName(id) : null;
-    public bool TryGetHyperedgeTypeId(string name, out HyperedgeTypeId id) => _hyperedgeTypes.TryGet(name, out id);
+    public NexusTypeId GetOrCreateNexusType(string name) => _nexusTypes.GetOrCreate(name);
+    public string? GetNexusTypeName(NexusTypeId id) => id.IsValid ? _nexusTypes.GetName(id) : null;
+    public bool TryGetNexusTypeId(string name, out NexusTypeId id) => _nexusTypes.TryGet(name, out id);
 
-    public IReadOnlyList<string> ListHyperedgeTypes()
-        => _hyperedgeTypes.All().Select(_hyperedgeTypes.GetName).ToList();
+    public IReadOnlyList<string> ListNexusTypes()
+        => _nexusTypes.All().Select(_nexusTypes.GetName).ToList();
 
     public IReadOnlyList<string> ListRoles()
         => _roles.All().Select(_roles.GetName).ToList();

@@ -21,11 +21,32 @@ Single Writer 再設計では、これらの旧実装指示を本書で上書き
 - 最終 public contract の分離レベルは snapshot isolation だけとする。`ReadCommitted` と `Serializable` の実装分岐は Wave 4、public enum と旧開始 API は Wave 6 で削除する。
 - `xmin` / `xmax`、Generation、WAL、CRC32C、crash recovery、checkpoint、vacuum は維持する。
 - SSN、pstamp/sstamp、`SsnContext`、`SerializabilityException`、`LockManager`、ReaderWriter mode、`DeadlockDetector` は削除する。
-- entity は Node、Relationship、Hyperedge の三種類である。Property は entity ではなく、owner に束縛された versioned value である。
+- target entity は Vertex、Edge、Nexus の三種類である。Property は entity ではなく、owner に束縛された versioned value である。
+- Wave 2 で現行の Node、Relationship、Hyperedge から target vocabulary へ原子的に切り替え、database facade を `QuiverDatabase` とする。
 - Scalar、FullText、Vector index は property を検索する再構築可能な access path である。index 種別を `EntityKind` に表現しない。
 - 大きな vector は property record に inline せず、`VectorPayloadStore` に immutable payload として置く。property version は `VectorPayloadRef` を持つ。
 - ストレージは新しい file magic と format family を持つ。旧 Format V1〜V5、旧 WAL、旧 API を読む互換コードは持たない。
 - 未決定事項はない。性能値は採用判断ではなく、各ウェーブの回帰ゲートとして baseline と比較する。
+
+### 0.1 domain vocabulary
+
+Wave 2 完了後の Quiver は、次の語彙だけを graph domain の public contract と active implementation に使用する。
+
+| 現行語 | target 語 |
+|---|---|
+| `Node`, `NodeId`, `NodeStore`, `CreateNode` | `Vertex`, `VertexId`, `VertexStore`, `CreateVertex` |
+| `Relationship`, `RelationshipId`, `RelationshipTypeId`, `CreateRelationship` | `Edge`, `EdgeId`, `EdgeTypeId`, `CreateEdge` |
+| `Property` | `Property` |
+| `Hyperedge`, `HyperedgeId`, `HyperedgeTypeId`, `HyperedgeMember` | `Nexus`, `NexusId`, `NexusTypeId`, `NexusMember` |
+| `GraphDatabase`, `GraphDatabaseOptions` | `QuiverDatabase`, `QuiverDatabaseOptions` |
+
+複合識別子、method、file、test、sample、Source Generator、query slot、telemetry field、logical mutation、永続 record 名も同じ対応で変更する。
+複数形は `Vertices`、`Edges`、`Nexuses` とする。
+`IGraphVertex`、`IGraphEdge`、`IGraphNexus` のように graph model を表す `Graph` は維持する。
+`GraphTraversal`、graph algorithm、B-tree node、syntax node、HNSW node など、Quiver の domain entity を指さない一般用語はこの置換対象ではない。
+旧名の type alias、forwarder、extension alias、obsolete shim、JSON field fallback、Source Generator の二重出力は作らない。
+旧名を許すのは Git history、Wave 2 以前の fixture を拒否する test、decision log が過去 API を引用する箇所だけである。
+§7 の disposition 表で backtick に入った旧 file/type 名は Wave 2 着手時の入力名を示し、target 名を示さない。
 
 ## 1. 目的・非目標
 
@@ -481,6 +502,10 @@ record type は `BeginWrite`、`PageImage`、`Commit`、`Abort`、`CheckpointBeg
 | `IGraphTransaction` / `GraphTransaction` の read/write 共用 contract | `IReadTransaction` / `IWriteTransaction` と対応する handle に分割。共通 read surface は `IReadTransaction` に置く |
 | `IsolationLevel`, `ReadCommitted`, `Serializable` | snapshot isolation 固定。enum 自体を削除 |
 | `GraphDatabaseOptions.LockTimeout` | `WriterWaitTimeout` |
+| `GraphDatabase` / `GraphDatabaseOptions` | `QuiverDatabase` / `QuiverDatabaseOptions`。alias は提供しない |
+| `Node*` domain API | `Vertex*`。`NodeId` は `VertexId`、`CreateNode` は `CreateVertex`、`Nodes()` は `Vertices()` |
+| `Relationship*` domain API | `Edge*`。`RelationshipId` は `EdgeId`、`CreateRelationship` は `CreateEdge`、`Relationships()` は `Edges()` |
+| `Hyperedge*` domain API | `Nexus*`。`HyperedgeId` は `NexusId`、`CreateHyperedge` は `CreateNexus`、`Hyperedges()` は `Nexuses()` |
 | 新規 DB の固定 64 MiB 確保 | `InitialFileAllocationBytes` と `MaximumFileGrowthStepBytes` による 1 MiB 始動の適応成長 |
 | `LockingMode`, `DeadlockDetectionInterval`, `EnforceExclusiveWriter` | `WriterContentionMode { Wait, FailFast }` |
 | `GroupCommitWindow` | 削除。並行 commit が無いため意味を持たない |
@@ -588,24 +613,28 @@ Quiver 0.1.0 をローカル RAG バックエンドとして使用した結果�
 
 **完了条件**: identity public API が Generation 込み equality と三つの EntityKind だけを公開し、obsolete shim が0件である。現行 transaction/backend/property/index public API は後続 Wave の active contract として残り、対応する新 public model を先行追加しない。
 
-### Wave 2: 新 database/WAL format foundation
+### Wave 2: domain vocabulary と新 database/WAL format foundation
 
-**対象**: `Core/FormatVersion.cs`, `Storage/PageHeader.cs`, `SingleFileContainer.cs`, `Wal/*`, `Transactions/RecoveryManager.cs` の parser skeleton。
+**対象**: solution 全体の graph domain identifier、public API、Source Generator、tests、samples、benchmarks、active docs、`Core/FormatVersion.cs`, `Storage/PageHeader.cs`, `SingleFileContainer.cs`, `Wal/*`, `Transactions/RecoveryManager.cs` の parser skeleton。
 
 **削除/変更/追加**:
 
 - `QUIVER-SW` database/WAL magic、family version、record checksum を追加する。
 - V1〜V5 constants、legacy WAL records、V1/V2/V3 decoder を削除する。
+- graph entity の語彙を Vertex、Edge、Property、Nexus へ一括変更し、`GraphDatabase` を `QuiverDatabase` へ変更する。
+- `VertexId`、`EdgeId`、`NexusId`、`EntityKind.Vertex/Edge/Nexus` を identity の唯一の型とし、旧名は同じ commit で削除する。
+- CRUD、traversal、schema、index、RAG、logical mutation、telemetry、Source Generator、Studio、sample、test の graph domain identifier を同じ語彙へ切り替える。
+- on-disk catalog、record kind、WAL payload、diagnostic name は新語彙だけを生成し、旧 field 名の fallback を持たない。
 - `PagedFile` の固定 64 MiB 確保を廃止し、初期 1 MiB、容量比例の倍増、増分上限 64 MiB の適応成長へ置換する。
-- `GraphDatabaseOptions` から初期確保量と増分上限を `SingleFileContainer` と `PagedFile` へ渡す。
+- `QuiverDatabaseOptions` から初期確保量と増分上限を `SingleFileContainer` と `PagedFile` へ渡す。
 - `WalWriteSet` を transaction-owned object として追加する。
 - strict Commit winner table と checkpoint pair scanner を実装する。
 
-**テスト**: codec round-trip、truncation、unknown record、checksum corruption、old DB/WAL rejection、fuzz corpus を新 format へ置換する。空 DB が既定 1 MiB で作成されること、設定値の page alignment、容量に応じた 1、2、4、8、16、32、64 MiB の増分、64 MiB 増分上限、reopen 後の成長、成長境界の page checksum とデータ保持を検証する。
+**テスト**: public API approval、Source Generator golden、serialization/logical mutation、query slot、telemetry、Studio/sample build を新語彙へ置換し、active source と public docs に旧 graph domain identifier がないことを監査する。codec round-trip、truncation、unknown record、checksum corruption、old DB/WAL rejection、fuzz corpus を新 format へ置換する。空 DB が既定 1 MiB で作成されること、設定値の page alignment、容量に応じた 1、2、4、8、16、32、64 MiB の増分、64 MiB 増分上限、reopen 後の成長、成長境界の page checksum とデータ保持を検証する。
 
 **Build**: `dotnet build Quiver.slnx`。
 
-**完了条件**: 旧 fixture はすべて mismatch になり、新 WAL の winner/loser 分類が明示 Commit だけで決まる。空の `.quiver` は固定 64 MiB を占有せず、成長後も必要量を満たしながら増分上限を超えない。
+**完了条件**: public API、active implementation、file 名、Source Generator output、sample、test、active docs が Vertex、Edge、Property、Nexus、QuiverDatabase だけを domain vocabulary として使い、旧名の shim が 0 件である。旧 fixture はすべて mismatch になり、新 WAL の winner/loser 分類が明示 Commit だけで決まる。空の `.quiver` は固定 64 MiB を占有せず、成長後も必要量を満たしながら増分上限を超えない。
 
 ### Wave 3: primary entity/property/vector payload stores
 
@@ -938,7 +967,8 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 - physical format migration は提供しない。
 - 旧 API の obsolete period は設けない。
 - 新規ファイルは既定 1 MiB で開始し、容量に応じて増分を倍増させ、1 回の増分を 64 MiB 以下にする。初期確保量と増分上限は option で変更できる(§6.1、§8.1、§9 Wave 2)。
-- RAG 利用時の index 永続性、経路非依存 maintenance、candidate 再検証、merge、score 診断、candidate push-down、hyperedge lifecycle は §8.4 の public contract とする。
+- RAG 利用時の index 永続性、経路非依存 maintenance、candidate 再検証、merge、score 診断、candidate push-down、nexus lifecycle は §8.4 の public contract とする。
+- graph domain vocabulary は Vertex、Edge、Property、Nexus とし、database facade は `QuiverDatabase` とする。旧名は Wave 2 で一括削除し、alias と obsolete period を持たない(§0.1、§8.1、§9 Wave 2)。
 - buffer 管理は no-steal / no-force とする(新規確保 page への commit 前 append flush のみ例外)。recovery は redo-only とし、WAL 上の undo record を持たない(§2.5, §4.2, §4.3, §6.2)。
 - SSN/lock/Serializable 分岐は Wave 4 で削除し、public `IsolationLevel` と旧 transaction開始 API は Wave 6 の public transaction/query/schema cutover と同じ commit で削除する(§7.3, §9 Wave 4/6)。
 - writer transaction は自身の未 commit 書き込みに対して自己可視性の例外を持つ(§2.2)。
@@ -953,6 +983,13 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 実装中に新しい選択が必要になった場合は、曖昧な TODO を残さず、選択肢、推奨決定、根拠、検証方法を本書の decision log に追記してからコードを変更する。
 
 ## 16. decision log
+
+### 2026-07-15: graph domain vocabulary の clean break
+
+- **背景**：現行 API は Node、Relationship、Hyperedge と GraphDatabase を中心語にしている。Single Writer 再設計で public API と永続形式を破壊変更するため、後続 Wave が旧語彙の型を増やしてから再度改名すると、実装と review の両方を二重に修正することになる。
+- **決定**：Wave 2 で graph domain vocabulary を Vertex、Edge、Property、Nexus へ一括変更し、database facade を `QuiverDatabase` へ変更する。ID、type ID、store、CRUD、traversal、query slot、logical mutation、telemetry、Source Generator、file、test、sample、active docs を同じ commit 系列で切り替える。旧名の互換 surface は作らない。
+- **境界**：graph theory や data structure の一般用語としての node は維持する。`GraphTraversal` と `IGraphVertex` の `Graph` も維持し、`GraphDatabase` だけを `QuiverDatabase` へ変更する。複数形は `Vertices`、`Edges`、`Nexuses` とする。
+- **検証方法**：solution build、全 test、PublicApi approval、Source Generator golden、logical mutation/serialization、telemetry、Studio/sample build を実行する。active source、test、sample、tool、public docs を旧 graph domain identifier で監査し、許可された historical citation と rejection fixture 以外を 0 件にする。
 
 ### 2026-07-15: 小容量 DB の適応ファイル確保
 

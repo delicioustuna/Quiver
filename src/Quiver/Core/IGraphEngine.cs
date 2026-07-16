@@ -1,7 +1,7 @@
 namespace Quiver.Core;
 
 /// <summary>
-/// <c>Quiver.Embedding</c> ヘルパが直接 <c>Quiver.GraphDatabase</c> に依存せずに済むための薄い抽象。
+/// <c>Quiver.Embedding</c> ヘルパが直接 <c>Quiver.QuiverDatabase</c> に依存せずに済むための薄い抽象。
 /// アダプタを介することで、ヘルパはエンジン内部実装から疎結合に保たれる。
 /// </summary>
 /// <remarks>

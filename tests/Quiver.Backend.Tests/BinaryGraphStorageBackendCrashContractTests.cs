@@ -60,17 +60,17 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     public void AbortThenKill_leaves_no_uncommitted_data()
     {
         IGraphStorageBackend? backend = Open();
-        NodeId committed;
+        VertexId committed;
         using (var tx = backend.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: false))
         {
-            committed = tx.CreateNode("Committed");
+            committed = tx.CreateVertex("Committed");
             tx.Commit();
         }
 
         var abortTx = backend.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: false);
-        NodeId rolledBack = abortTx.CreateNode("RolledBack");
+        VertexId rolledBack = abortTx.CreateVertex("RolledBack");
         abortTx.SetProperty(rolledBack, "ephemeral", PropertyValue.FromInt64(42L));
         abortTx.Rollback();
 
@@ -79,18 +79,17 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         using var reopened = Open();
         using var rtx = reopened.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: true);
-        rtx.NodeExists(committed).Should().BeTrue(
+        rtx.VertexExists(committed).Should().BeTrue(
             "committed work survives an abort-then-kill sequence");
-        rtx.NodeExists(rolledBack).Should().BeFalse(
-            "an explicitly aborted node must not resurface after a kill");
+        rtx.VertexExists(rolledBack).Should().BeFalse(
+            "an explicitly aborted vertex must not resurface after a kill");
         rtx.Rollback();
     }
 
     /// <summary>
     /// 未コミットトランザクションが挿入した B+Tree エントリは kill 後の recovery で取り消され、
-    /// コミット済みエントリは残ることを検証する。binary backend はインデックス変更を
-    /// WalRecordType.IndexMutation として記録し、RecoveryManager はクラッシュした
-    /// トランザクションに逆操作を replay する。
+    /// コミット済みエントリは残ることを検証する。binary backend は B+Tree ページを
+    /// PageImage として記録し、RecoveryManager は明示 Commit のある transaction だけを replay する。
     /// </summary>
     [Fact]
     public void IndexEntry_from_uncommitted_tx_is_undone_after_kill()
@@ -101,7 +100,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         using (var tx = backend.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: false))
         {
-            var keep = tx.CreateNode("Person");
+            var keep = tx.CreateVertex("Person");
             tx.IndexInsert("idx_name", "committed", keep);
             tx.Commit();
         }
@@ -109,7 +108,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         // インデックスエントリを未コミットのままプロセスを kill する。
         var dirtyTx = backend.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: false);
-        var doomed = dirtyTx.CreateNode("Person");
+        var doomed = dirtyTx.CreateVertex("Person");
         dirtyTx.IndexInsert("idx_name", "doomed", doomed);
         // 意図的に Commit しない。
 
@@ -145,10 +144,9 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         try
         {
             var factory = new BinaryGraphStorageBackendFactory();
-            // ほぼ 2 commit ごとに roll する小さな segment を使う。
-            var opts = new GraphDatabaseOptions { WalSegmentSize = 64 * 1024 };
+            var opts = new QuiverDatabaseOptions();
 
-            var ids = new List<NodeId>();
+            var ids = new List<VertexId>();
             for (int i = 0; i < 30; i++)
             {
                 IGraphStorageBackend? backend = factory.Open(System.IO.Path.Combine(dir, "graph.quiver"), opts);
@@ -156,10 +154,10 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
                     IsolationLevel.SnapshotIsolation, readOnly: false))
                 {
                     // segment を早く満たすため 1 KB の payload を使う。
-                    var node = tx.CreateNode("Big");
-                    tx.SetProperty(node, "blob",
+                    var vertex = tx.CreateVertex("Big");
+                    tx.SetProperty(vertex, "blob",
                         PropertyValue.FromString(new string('x', 1024)));
-                    ids.Add(node);
+                    ids.Add(vertex);
                     tx.Commit();
                 }
                 KillProcessSimulator.SimulateKill(ref backend);
@@ -169,7 +167,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             using var rtx = reopened.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: true);
             foreach (var id in ids)
-                rtx.NodeExists(id).Should().BeTrue();
+                rtx.VertexExists(id).Should().BeTrue();
             rtx.Rollback();
         }
         finally
@@ -192,10 +190,10 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         {
             Directory.CreateDirectory(dir);
             using var backend = new BinaryGraphStorageBackendFactory()
-                .Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions());
+                .Open(System.IO.Path.Combine(dir, "graph.quiver"), new QuiverDatabaseOptions());
             using var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false);
-            var node = tx.CreateNode("First");
+            var vertex = tx.CreateVertex("First");
             tx.Commit();
         }
         finally
@@ -207,17 +205,17 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     /// <summary>
     /// commit 後に隣接ブロックインデックス sidecar を 0 バイトへ切り詰める。
     /// adj_idx.dat は BulkLoader だけが書くため、存在しなければ factory は V1 経路を
-    /// 安全にスキップする。コミット済みノードストアは引き続き読み取れる。
+    /// 安全にスキップする。コミット済みVertexストアは引き続き読み取れる。
     /// </summary>
     [Fact]
     public void AdjacencyIndexSidecar_truncated_backend_falls_back_safely()
     {
         IGraphStorageBackend? backend = Open();
-        NodeId persisted;
+        VertexId persisted;
         using (var tx = backend.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: false))
         {
-            persisted = tx.CreateNode("Pre");
+            persisted = tx.CreateVertex("Pre");
             tx.Commit();
         }
         KillProcessSimulator.SimulateKill(ref backend);
@@ -233,7 +231,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             reopened = Open();
             using var rtx = reopened.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: true);
-            rtx.NodeExists(persisted).Should().BeTrue();
+            rtx.VertexExists(persisted).Should().BeTrue();
             rtx.Rollback();
         }
         catch (StorageException) { /* fail-safe なら許容する */ }
@@ -246,19 +244,18 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
 
     /// <summary>
     /// コミット済み B+Tree エントリが、インデックスファイルの Dispose-flush
-    /// <strong>前</strong>の kill 後も残ることを検証する。IndexMutation WAL レコードは
-    /// commit の FlushTo で永続化され、recovery の index redo パスが冪等に forward replay
-    /// することでエントリを復元する。
+    /// <strong>前</strong>の kill 後も残ることを検証する。B+Tree の PageImage は
+    /// commit の FlushTo で永続化され、recovery が冪等に redo してエントリを復元する。
     /// </summary>
     [Fact]
     public void CommittedIndexEntry_survives_kill_via_redo()
     {
         IGraphStorageBackend? backend = Open();
-        NodeId committed;
+        VertexId committed;
         using (var tx = backend.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: false))
         {
-            committed = tx.CreateNode("Person");
+            committed = tx.CreateVertex("Person");
             tx.IndexInsert("idx_name", "alice", committed);
             tx.Commit();
         }
@@ -271,7 +268,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             IsolationLevel.SnapshotIsolation, readOnly: true);
         var cur = rtx.SeekIndex("idx_name", PropertyValue.FromString("alice"));
         cur.MoveNext().Should().BeTrue(
-            "committed index entry must be redone from IndexMutation WAL records");
+            "committed index entry must be redone from PageImage WAL records");
         cur.Current.Should().Be(committed);
         cur.MoveNext().Should().BeFalse(
             "idempotent redo must not create duplicate entries");
@@ -280,7 +277,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     }
 
     /// <summary>
-    /// checkpoint 後に IndexMutation を含む WAL prefix が切り詰められても、
+    /// checkpoint 後に B+Tree PageImage を含む WAL prefix が切り詰められても、
     /// コミット済みエントリが残ることを検証する。
     /// <see cref="Quiver.Index.IIndexManager.FlushAll"/> がなければ index file は永続化されず、
     /// 後続 kill でエントリを失う。checkpoint が index を fsync するため、
@@ -296,24 +293,24 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         {
             var factory = new BinaryGraphStorageBackendFactory();
             // 2 回目の commit で checkpoint を強制する小さな閾値を使う。
-            var opts = new GraphDatabaseOptions { CheckpointThresholdBytes = 1 };
+            var opts = new QuiverDatabaseOptions { CheckpointThresholdBytes = 1 };
 
-            NodeId committed;
+            VertexId committed;
             IGraphStorageBackend? backend = factory.Open(System.IO.Path.Combine(dir, "graph.quiver"), opts);
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
-                committed = tx.CreateNode("Person");
+                committed = tx.CreateVertex("Person");
                 tx.IndexInsert("idx_name", "checkpointed", committed);
                 tx.Commit();
             }
             // 2 回目の commit が MaybeCheckpoint (ActiveCount == 0、
             // BytesWritten >= threshold) を起動する。checkpoint は index を flush してから、
-            // IndexMutation を含む WAL prefix を切り詰める。
+            // B+Tree PageImage を含む WAL prefix を切り詰める。
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
-                tx.CreateNode("Filler");
+                tx.CreateVertex("Filler");
                 tx.Commit();
             }
 
@@ -345,18 +342,18 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     public void AbortedIndexInsert_then_kill_leaves_no_residual_entry()
     {
         IGraphStorageBackend? backend = Open();
-        NodeId baseline;
+        VertexId baseline;
         using (var tx = backend.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: false))
         {
-            baseline = tx.CreateNode("Person");
+            baseline = tx.CreateVertex("Person");
             tx.IndexInsert("idx_name", "baseline", baseline);
             tx.Commit();
         }
 
         var abortTx = backend.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: false);
-        var resurrected = abortTx.CreateNode("Person");
+        var resurrected = abortTx.CreateVertex("Person");
         abortTx.IndexInsert("idx_name", "resurrected", resurrected);
         abortTx.Rollback();
 
@@ -392,17 +389,17 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     {
         IGraphStorageBackend? backend = Open();
         var insertedKeys = new List<int>();
-        var insertedNodes = new List<NodeId>();
+        var insertedVertices = new List<VertexId>();
         using (var tx = backend.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: false))
         {
             // 1000 件 — 1 leaf (8 KB) を遥かに超えるので multi-level B+Tree に。
             for (int i = 0; i < 1000; i++)
             {
-                var n = tx.CreateNode("Person");
+                var n = tx.CreateVertex("Person");
                 tx.IndexInsert("idx_split", (long)i, n);
                 insertedKeys.Add(i);
-                insertedNodes.Add(n);
+                insertedVertices.Add(n);
             }
             tx.Commit();
         }
@@ -417,7 +414,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         {
             var cur = rtx.SeekIndex("idx_split", PropertyValue.FromInt64((long)probe));
             cur.MoveNext().Should().BeTrue($"key {probe} は committed PageImage 経由で復旧されるはず");
-            cur.Current.Should().Be(insertedNodes[probe]);
+            cur.Current.Should().Be(insertedVertices[probe]);
             cur.MoveNext().Should().BeFalse("idempotent recovery で重複なし");
             cur.Dispose();
         }
@@ -432,18 +429,18 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     public void MultipleIndexes_committed_then_kill_all_survive()
     {
         IGraphStorageBackend? backend = Open();
-        NodeId nodeA, nodeB;
+        VertexId vertexA, vertexB;
         using (var tx = backend.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: false))
         {
-            nodeA = tx.CreateNode("Person");
-            nodeB = tx.CreateNode("Person");
-            tx.IndexInsert("idx_name", "alice", nodeA);
-            tx.IndexInsert("idx_email", "alice@example.com", nodeA);
-            tx.IndexInsert("idx_age", 30L, nodeA);
-            tx.IndexInsert("idx_name", "bob", nodeB);
-            tx.IndexInsert("idx_email", "bob@example.com", nodeB);
-            tx.IndexInsert("idx_age", 25L, nodeB);
+            vertexA = tx.CreateVertex("Person");
+            vertexB = tx.CreateVertex("Person");
+            tx.IndexInsert("idx_name", "alice", vertexA);
+            tx.IndexInsert("idx_email", "alice@example.com", vertexA);
+            tx.IndexInsert("idx_age", 30L, vertexA);
+            tx.IndexInsert("idx_name", "bob", vertexB);
+            tx.IndexInsert("idx_email", "bob@example.com", vertexB);
+            tx.IndexInsert("idx_age", 25L, vertexB);
             tx.Commit();
         }
 
@@ -455,17 +452,17 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
 
         var nameAlice = rtx.SeekIndex("idx_name", PropertyValue.FromString("alice"));
         nameAlice.MoveNext().Should().BeTrue("idx_name の alice エントリは PageImage で復旧");
-        nameAlice.Current.Should().Be(nodeA);
+        nameAlice.Current.Should().Be(vertexA);
         nameAlice.Dispose();
 
         var emailBob = rtx.SeekIndex("idx_email", PropertyValue.FromString("bob@example.com"));
         emailBob.MoveNext().Should().BeTrue("idx_email の bob エントリも復旧");
-        emailBob.Current.Should().Be(nodeB);
+        emailBob.Current.Should().Be(vertexB);
         emailBob.Dispose();
 
         var age30 = rtx.SeekIndex("idx_age", PropertyValue.FromInt64(30L));
         age30.MoveNext().Should().BeTrue("idx_age の 30 エントリも復旧");
-        age30.Current.Should().Be(nodeA);
+        age30.Current.Should().Be(vertexA);
         age30.Dispose();
 
         rtx.Rollback();
@@ -482,18 +479,18 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     public void IndexCatalog_persists_fileKind_across_kill()
     {
         IGraphStorageBackend? backend = Open();
-        NodeId node;
+        VertexId vertex;
         using (var tx = backend.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: false))
         {
-            node = tx.CreateNode("Doc");
-            tx.IndexInsert("idx_persistent", 42L, node);
+            vertex = tx.CreateVertex("Doc");
+            tx.IndexInsert("idx_persistent", 42L, vertex);
             tx.Commit();
         }
 
         // 索引は graph.quiver に同居するため、独立した .idx / .fileKinds は作られない。
         File.Exists(Path.Combine(DatabaseDirectory, "indexes", ".fileKinds")).Should().BeFalse(
-            "ARCH-4 では索引カタログは graph.quiver 内テナントに同居し別ファイルを作らない");
+            " では索引カタログは graph.quiver 内テナントに同居し別ファイルを作らない");
 
         KillProcessSimulator.SimulateKill(ref backend);
 
@@ -504,7 +501,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             IsolationLevel.SnapshotIsolation, readOnly: true);
         var cur = rtx.SeekIndex("idx_persistent", PropertyValue.FromInt64(42L));
         cur.MoveNext().Should().BeTrue();
-        cur.Current.Should().Be(node);
+        cur.Current.Should().Be(vertex);
         cur.Dispose();
         rtx.Rollback();
     }
@@ -516,7 +513,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     /// 「checkpoint を必ず誘発する commit」を 1 回実行 → 例外を捕捉 → kill simulate →
     /// 再 open → コミット済みデータが全て読めることを assert する。
     ///
-    /// checkpoint 誘発手段: <see cref="GraphDatabaseOptions.CheckpointThresholdBytes"/> = 1
+    /// checkpoint 誘発手段: <see cref="QuiverDatabaseOptions.CheckpointThresholdBytes"/> = 1
     /// を渡しておき、最初の commit で <see cref="ITransactionManager"/>.MaybeCheckpoint
     /// が走るようにする。
     /// </summary>
@@ -528,25 +525,25 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         try
         {
             var factory = new BinaryGraphStorageBackendFactory();
-            var opts = new GraphDatabaseOptions { CheckpointThresholdBytes = 1 };
+            var opts = new QuiverDatabaseOptions { CheckpointThresholdBytes = 1 };
 
             // セットアップ phase: checkpoint phase injector 無しで、recovery で確認したい
             // コミット済みデータを 2 件書いておく。最初の commit で 1 回目の checkpoint
             // が完走するのは構わない (このシナリオでテストしたいのは「次の checkpoint
             // が phase X で kill されたとき」の挙動)。
-            var preserved = new List<NodeId>();
+            var preserved = new List<VertexId>();
             IGraphStorageBackend? backend = factory.Open(System.IO.Path.Combine(dir, "graph.quiver"), opts);
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
-                preserved.Add(tx.CreateNode("Pre1"));
+                preserved.Add(tx.CreateVertex("Pre1"));
                 tx.SetProperty(preserved[0], "marker", PropertyValue.FromInt64(11L));
                 tx.Commit();
             }
             using (var tx = backend.BeginGraphTransaction(
                 IsolationLevel.SnapshotIsolation, readOnly: false))
             {
-                preserved.Add(tx.CreateNode("Pre2"));
+                preserved.Add(tx.CreateVertex("Pre2"));
                 tx.SetProperty(preserved[1], "marker", PropertyValue.FromInt64(22L));
                 tx.Commit();
             }
@@ -561,14 +558,14 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
                 {
                     killed = true;
                     throw new InvalidOperationException(
-                        $"FT-21 simulated kill at {phase}");
+                        $" simulated kill at {phase}");
                 }
             };
             try
             {
                 using var killTx = backend.BeginGraphTransaction(
                     IsolationLevel.SnapshotIsolation, readOnly: false);
-                preserved.Add(killTx.CreateNode("PreKill"));
+                preserved.Add(killTx.CreateVertex("PreKill"));
                 killTx.SetProperty(preserved[2], "marker", PropertyValue.FromInt64(33L));
                 try { killTx.Commit(); }
                 catch (InvalidOperationException) { /* 想定した模擬 kill */ }
@@ -592,8 +589,8 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             // (Commit は checkpoint Begin より前に WAL に書かれて FlushTo 済み。)
             for (int i = 0; i < preserved.Count; i++)
             {
-                rtx.NodeExists(preserved[i]).Should().BeTrue(
-                    $"phase {killAt}: committed node #{i} must survive checkpoint kill");
+                rtx.VertexExists(preserved[i]).Should().BeTrue(
+                    $"phase {killAt}: committed vertex #{i} must survive checkpoint kill");
             }
             rtx.GetProperty(preserved[0], "marker").Int64Value.Should().Be(11L);
             rtx.GetProperty(preserved[1], "marker").Int64Value.Should().Be(22L);
@@ -689,37 +686,37 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         try
         {
             PropertyKeyId weightKey;
-            using (var seed = GraphDatabase.Open(path))
+            using (var seed = QuiverDatabase.Open(path))
             {
                 weightKey = seed.Schema.GetOrCreatePropertyKey("weight");
                 using var loader = seed.BeginBulkLoad(buildAdjacencyIndex: true);
                 loader.WithPayloadLane(PayloadLaneSpec.ForInt64(weightKey.Value));
-                loader.AppendNode(new NodeId(0), new LabelId(0));
+                loader.AppendVertex(new VertexId(0), new LabelId(0));
                 for (int i = 1; i <= 3; i++)
                 {
-                    loader.AppendNode(new NodeId(i), new LabelId(1));
-                    loader.AppendRelationship(
-                        new RelationshipId(i - 1),
-                        new NodeId(0),
-                        new NodeId(i),
-                        new RelationshipTypeId(0));
-                    loader.AppendRelationshipPayload(new RelationshipId(i - 1), weightKey, 100 + i);
+                    loader.AppendVertex(new VertexId(i), new LabelId(1));
+                    loader.AppendEdge(
+                        new EdgeId(i - 1),
+                        new VertexId(0),
+                        new VertexId(i),
+                        new EdgeTypeId(0));
+                    loader.AppendEdgePayload(new EdgeId(i - 1), weightKey, 100 + i);
                 }
 
                 loader.Commit();
             }
 
-            NodeId deltaNode;
-            RelationshipId deltaRel;
-            using (var db = GraphDatabase.Open(path))
+            VertexId deltaVertex;
+            EdgeId deltaEdge;
+            using (var db = QuiverDatabase.Open(path))
             {
                 using (var tx = db.BeginTransaction())
                 {
-                    tx.SetProperty(new RelationshipId(0), "weight", PropertyValue.FromInt64(700));
-                    deltaNode = tx.CreateNode("V");
-                    deltaRel = tx.CreateRelationship(new NodeId(0), deltaNode, "LINK");
-                    tx.SetProperty(deltaRel, "weight", PropertyValue.FromInt64(900));
-                    tx.DeleteRelationship(new RelationshipId(2));
+                    tx.SetProperty(new EdgeId(0), "weight", PropertyValue.FromInt64(700));
+                    deltaVertex = tx.CreateVertex("V");
+                    deltaEdge = tx.CreateEdge(new VertexId(0), deltaVertex, "LINK");
+                    tx.SetProperty(deltaEdge, "weight", PropertyValue.FromInt64(900));
+                    tx.DeleteEdge(new EdgeId(2));
                     tx.Commit();
                 }
 
@@ -734,7 +731,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
                     .WithMessage("injected compact interruption");
             }
 
-            using var reopened = GraphDatabase.Open(path);
+            using var reopened = QuiverDatabase.Open(path);
             using var read = reopened.BeginReadOnlyTransaction();
             var adjacency = read.AsInternal().AdjacencyBlocks;
             if (expectAdjacencyView)
@@ -744,10 +741,10 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
                     "final descriptor flush makes the rebuilt V2 view durable");
                 view!.PayloadSpec.PropertyKeyId.Should().Be(weightKey.Value);
 
-                var weights = ReadOutgoingWeights(read, new NodeId(0));
+                var weights = ReadOutgoingWeights(read, new VertexId(0));
                 weights[1].Should().Be(700);
                 weights[2].Should().Be(102);
-                weights[deltaNode.Sequence].Should().Be(900);
+                weights[deltaVertex.Sequence].Should().Be(900);
                 weights.Should().NotContainKey(3);
             }
             else
@@ -756,9 +753,9 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
                     "descriptor remains invalid until the final compact descriptor is durable");
             }
 
-            EnumerateOutgoingTargets(read, new NodeId(0))
-                .Should().BeEquivalentTo(new[] { 1L, 2L, deltaNode.Sequence });
-            read.GetProperty(deltaRel, "weight").Int64Value.Should().Be(900);
+            EnumerateOutgoingTargets(read, new VertexId(0))
+                .Should().BeEquivalentTo(new[] { 1L, 2L, deltaVertex.Sequence });
+            read.GetProperty(deltaEdge, "weight").Int64Value.Should().Be(900);
             read.Rollback();
         }
         finally
@@ -768,23 +765,23 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
         }
     }
 
-    private static Dictionary<long, long> ReadOutgoingWeights(IGraphTransaction tx, NodeId source)
+    private static Dictionary<long, long> ReadOutgoingWeights(IGraphTransaction tx, VertexId source)
     {
         var seen = new Dictionary<long, long>();
         using var cursor = tx.AsInternal().AdjacencyBlocks!.OpenCursor(source, Direction.Outgoing, null);
         while (cursor.MoveNext())
         {
-            if (!tx.AsInternal().AdjacencyBlocks!.IsTombstoned(cursor.Relationship))
+            if (!tx.AsInternal().AdjacencyBlocks!.IsTombstoned(cursor.Edge))
                 seen[cursor.Neighbor.Sequence] = cursor.WeightRaw;
         }
 
         return seen;
     }
 
-    private static List<long> EnumerateOutgoingTargets(IGraphTransaction tx, NodeId source)
+    private static List<long> EnumerateOutgoingTargets(IGraphTransaction tx, VertexId source)
     {
         var result = new List<long>();
-        var en = tx.EnumerateRelationships(source, Direction.Outgoing);
+        var en = tx.EnumerateEdges(source, Direction.Outgoing);
         while (en.MoveNext())
         {
             result.Add(en.Current.Target.Sequence);

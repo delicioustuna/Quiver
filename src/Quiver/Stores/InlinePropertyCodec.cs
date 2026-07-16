@@ -5,24 +5,24 @@ namespace Quiver.Storage.Records;
 
 /// <summary>
 /// entity version payload 内の inline property 領域の符号化/復号。
-/// <see cref="VersionedNodeStore"/> / <see cref="VersionedRelationshipStore"/> (set/remove/scan) と
+/// <see cref="VersionedVertexStore"/> / <see cref="VersionedEdgeStore"/> (set/remove/scan) と
 /// <see cref="PropertyEnumerator"/> (列挙) で共用する。
 ///
 /// <para>payload レイアウト: 固定 <c>fixedSize</c> B (entity ごとの構造フィールド) +
 /// [fixedSize] inlineCount(u8) + entries。entry = <c>[keyId:4][type:1][len:1][value:len]</c>。
 /// len は u8 のため値長 ≤ 255。それを超える string/bytes は inline 不可で overflow チェーン
-/// (PropertyStore) 行き。fixedSize は node=15 (flags/firstRel/firstProp/label) /
-/// rel=45 (flags/source/target/type/4本chain pointer/firstProp) /
-/// hyperedge=15 (flags/type/firstIncidence/firstProp)。</para>
+/// (PropertyStore) 行き。fixedSize は vertex=15 (flags/firstEdge/firstProp/label) /
+/// edge=45 (flags/source/target/type/4本chain pointer/firstProp) /
+/// nexus=15 (flags/type/firstIncidence/firstProp)。</para>
 /// </summary>
 internal static class InlinePropertyCodec
 {
-    /// <summary>node version payload の固定フィールド領域長 (flags/firstRel/firstProp/label)。</summary>
-    public const int NodeFixedSize = 15;
-    /// <summary>rel version payload の固定フィールド領域長 (flags/source/target/type/4本chain/firstProp)。</summary>
+    /// <summary>vertex version payload の固定フィールド領域長 (flags/firstEdge/firstProp/label)。</summary>
+    public const int VertexFixedSize = 15;
+    /// <summary>edge version payload の固定フィールド領域長 (flags/source/target/type/4本chain/firstProp)。</summary>
     public const int RelFixedSize = 45;
-    /// <summary>hyperedge header payload の固定フィールド領域長 (flags/type/firstIncidence/firstProp)。</summary>
-    public const int HyperedgeFixedSize = 15;
+    /// <summary>nexus header payload の固定フィールド領域長 (flags/type/firstIncidence/firstProp)。</summary>
+    public const int NexusFixedSize = 15;
     public const int EntryHeader = 6;      // keyId(4) + type(1) + len(1)
     public const int ValueMax = 255;       // len は u8
 

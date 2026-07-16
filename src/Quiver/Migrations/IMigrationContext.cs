@@ -4,10 +4,10 @@ namespace Quiver.Migrations;
 
 /// <summary>
 /// <see cref="IMigration.ApplyAsync"/> / <see cref="IMigration.RevertAsync"/> に渡される
-/// 操作面。スキーマ rename / 索引 add/drop / ノード走査を declarative にラップする。
+/// 操作面。スキーマ rename / 索引 add/drop / Vertex走査を declarative にラップする。
 /// </summary>
 /// <remarks>
-/// データミューテーション (<c>SetProperty</c>, <c>CreateRelationship</c>) は
+/// データミューテーション (<c>SetProperty</c>, <c>CreateEdge</c>) は
 /// <see cref="Transaction"/> を直接使うことを推奨する — context のヘルパは典型操作の
 /// shortcut にすぎず、未提供のオペレーションは tx 経由でフルアクセス可能。
 /// </remarks>
@@ -28,8 +28,8 @@ public interface IMigrationContext
     /// <summary>プロパティキーを rename する shortcut。</summary>
     bool RenamePropertyKey(string oldName, string newName);
 
-    /// <summary>リレーションシップ型を rename する shortcut。</summary>
-    bool RenameRelationshipType(string oldName, string newName);
+    /// <summary>Edge型を rename する shortcut。</summary>
+    bool RenameEdgeType(string oldName, string newName);
 
     /// <summary>索引を rename する shortcut。</summary>
     bool RenameIndex(string oldName, string newName);
@@ -41,9 +41,9 @@ public interface IMigrationContext
     void DropIndex(string indexName);
 
     /// <summary>
-    /// 指定ラベルを持つ全ノードに対し <paramref name="action"/> を呼ぶ。
+    /// 指定ラベルを持つ全Vertexに対し <paramref name="action"/> を呼ぶ。
     /// 走査中に <see cref="Transaction"/> に対するミューテーションを行うのは安全だが、
-    /// 同じノードの label / property を変更すると走査結果が二重に観測される可能性がある。
+    /// 同じVertexの label / property を変更すると走査結果が二重に観測される可能性がある。
     /// </summary>
-    void ForEachNode(string label, Action<NodeId> action);
+    void ForEachVertex(string label, Action<VertexId> action);
 }

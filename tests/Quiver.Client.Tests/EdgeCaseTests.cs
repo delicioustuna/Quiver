@@ -13,12 +13,12 @@ namespace Quiver.Api.Tests;
 public sealed class EdgeCaseTests : IDisposable
 {
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public EdgeCaseTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_edge_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
     }
 
     public void Dispose()
@@ -30,19 +30,19 @@ public sealed class EdgeCaseTests : IDisposable
     // ── 空グラフ ─────────────────────────────────────────────────────
 
     [Fact]
-    public void Nodes_on_empty_graph_returns_empty()
+    public void Vertices_on_empty_graph_returns_empty()
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        g.Nodes().ToList().Should().BeEmpty();
+        g.Vertices().ToList().Should().BeEmpty();
     }
 
     [Fact]
-    public void Relationships_on_empty_graph_returns_empty()
+    public void Edges_on_empty_graph_returns_empty()
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        g.Relationships().ToList().Should().BeEmpty();
+        g.Edges().ToList().Should().BeEmpty();
     }
 
     [Fact]
@@ -50,7 +50,7 @@ public sealed class EdgeCaseTests : IDisposable
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        g.Nodes().Count().Should().Be(0);
+        g.Vertices().Count().Should().Be(0);
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public sealed class EdgeCaseTests : IDisposable
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        g.Nodes().HasNext().Should().BeFalse();
+        g.Vertices().HasNext().Should().BeFalse();
     }
 
     // ── 存在しない label / property ─────────────────────────────────
@@ -66,38 +66,38 @@ public sealed class EdgeCaseTests : IDisposable
     [Fact]
     public void HasLabel_nonexistent_label_returns_empty()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        g.Nodes().HasLabel("NoSuchLabel").ToList().Should().BeEmpty();
+        g.Vertices().HasLabel("NoSuchLabel").ToList().Should().BeEmpty();
     }
 
     [Fact]
     public void Has_nonexistent_property_returns_empty()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        g.Nodes().HasLabel("Test").Has("NoSuchProp", "value").ToList().Should().BeEmpty();
+        g.Vertices().HasLabel("Test").Has("NoSuchProp", "value").ToList().Should().BeEmpty();
     }
 
     [Fact]
     public void Out_nonexistent_type_returns_empty()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var node = g.Nodes().HasLabel("Test").Next();
-        g.Node(node).Out("NoSuchType").ToList().Should().BeEmpty();
+        var vertex = g.Vertices().HasLabel("Test").Next();
+        g.Vertex(vertex).Out("NoSuchType").ToList().Should().BeEmpty();
     }
 
     [Fact]
     public void Values_nonexistent_property_returns_empty()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var values = g.Nodes().HasLabel("Test").Values("MissingProp").ToList();
+        var values = g.Vertices().HasLabel("Test").Values("MissingProp").ToList();
         values.Should().ContainSingle().Which.Should().BeEmpty();
     }
 
@@ -108,7 +108,7 @@ public sealed class EdgeCaseTests : IDisposable
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        g.Nodes().HasLabel("Ghost").Sum("Age").Should().Be(0.0);
+        g.Vertices().HasLabel("Ghost").Sum("Age").Should().Be(0.0);
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public sealed class EdgeCaseTests : IDisposable
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        g.Nodes().HasLabel("Ghost").Max("Age").Should().BeNull();
+        g.Vertices().HasLabel("Ghost").Max("Age").Should().BeNull();
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public sealed class EdgeCaseTests : IDisposable
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        g.Nodes().HasLabel("Ghost").Min("Age").Should().BeNull();
+        g.Vertices().HasLabel("Ghost").Min("Age").Should().BeNull();
     }
 
     [Fact]
@@ -132,7 +132,7 @@ public sealed class EdgeCaseTests : IDisposable
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        g.Nodes().HasLabel("Ghost").Mean("Age").Should().BeNull();
+        g.Vertices().HasLabel("Ghost").Mean("Age").Should().BeNull();
     }
 
     [Fact]
@@ -140,7 +140,7 @@ public sealed class EdgeCaseTests : IDisposable
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        g.Nodes().HasLabel("Ghost").GroupCount("Name").Should().BeEmpty();
+        g.Vertices().HasLabel("Ghost").GroupCount("Name").Should().BeEmpty();
     }
 
     // ── 引数検証 ─────────────────────────────────────────────────────
@@ -148,101 +148,101 @@ public sealed class EdgeCaseTests : IDisposable
     [Fact]
     public void And_empty_traversals_throws()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var act = () => g.Nodes().And();
+        var act = () => g.Vertices().And();
         act.Should().Throw<ArgumentException>();
     }
 
     [Fact]
     public void Or_empty_traversals_throws()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var act = () => g.Nodes().Or();
+        var act = () => g.Vertices().Or();
         act.Should().Throw<ArgumentException>();
     }
 
     [Fact]
     public void As_null_or_empty_throws()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var act = () => g.Nodes().As("");
+        var act = () => g.Vertices().As("");
         act.Should().Throw<ArgumentException>();
     }
 
     [Fact]
     public void Select_null_or_empty_throws()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var act = () => g.Nodes().Select("");
+        var act = () => g.Vertices().Select("");
         act.Should().Throw<ArgumentException>();
     }
 
     [Fact]
     public void Select_projection_without_As_throws()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var act = () => g.Nodes().Select(t => t.Node("a"));
+        var act = () => g.Vertices().Select(t => t.Vertex("a"));
         act.Should().Throw<InvalidOperationException>();
     }
 
     [Fact]
     public void OrderBy_null_key_throws()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var act = () => g.Nodes().OrderBy(null!);
+        var act = () => g.Vertices().OrderBy(null!);
         act.Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
     public void Repeat_null_step_throws()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var act = () => g.Nodes().Repeat(null!, times: 1);
+        var act = () => g.Vertices().Repeat(null!, times: 1);
         act.Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
     public void Skip_negative_throws()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var act = () => g.Nodes().Skip(-1);
+        var act = () => g.Vertices().Skip(-1);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Fact]
     public void Range_invalid_throws()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
         // to < from は不正
-        var act = () => g.Nodes().Range(5, 3);
+        var act = () => g.Vertices().Range(5, 3);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Fact]
     public void Range_negative_from_throws()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var act = () => g.Nodes().Range(-1, 5);
+        var act = () => g.Vertices().Range(-1, 5);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -251,53 +251,53 @@ public sealed class EdgeCaseTests : IDisposable
     [Fact]
     public void Limit_zero_returns_empty()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        g.Nodes().Limit(0).ToList().Should().BeEmpty();
+        g.Vertices().Limit(0).ToList().Should().BeEmpty();
     }
 
     [Fact]
     public void Limit_larger_than_result_returns_all()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var all = g.Nodes().ToList();
-        var limited = g.Nodes().Limit(100).ToList();
+        var all = g.Vertices().ToList();
+        var limited = g.Vertices().Limit(100).ToList();
         limited.Should().HaveCount(all.Count);
     }
 
-    // ── 単一ノードグラフの境界条件 ─────────────────────────────────
+    // ── 単一Vertexグラフの境界条件 ─────────────────────────────────
 
     [Fact]
-    public void Out_on_isolated_node_returns_empty()
+    public void Out_on_isolated_vertex_returns_empty()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var node = g.Nodes().HasLabel("Test").Next();
-        g.Node(node).Out().ToList().Should().BeEmpty();
+        var vertex = g.Vertices().HasLabel("Test").Next();
+        g.Vertex(vertex).Out().ToList().Should().BeEmpty();
     }
 
     [Fact]
-    public void In_on_isolated_node_returns_empty()
+    public void In_on_isolated_vertex_returns_empty()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var node = g.Nodes().HasLabel("Test").Next();
-        g.Node(node).In().ToList().Should().BeEmpty();
+        var vertex = g.Vertices().HasLabel("Test").Next();
+        g.Vertex(vertex).In().ToList().Should().BeEmpty();
     }
 
     [Fact]
-    public void Both_on_isolated_node_returns_empty()
+    public void Both_on_isolated_vertex_returns_empty()
     {
-        SeedSingleNode();
+        SeedSingleVertex();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
-        var node = g.Nodes().HasLabel("Test").Next();
-        g.Node(node).Both().ToList().Should().BeEmpty();
+        var vertex = g.Vertices().HasLabel("Test").Next();
+        g.Vertex(vertex).Both().ToList().Should().BeEmpty();
     }
 
     // ── P factory の境界条件 ─────────────────────────────────────────
@@ -353,11 +353,11 @@ public sealed class EdgeCaseTests : IDisposable
 
     // ── ヘルパー ─────────────────────────────────────────────────────
 
-    private void SeedSingleNode()
+    private void SeedSingleVertex()
     {
         using var tx = _db.BeginTransaction();
-        var n = tx.CreateNode("Test");
-        tx.SetProperty(n, "Name", PropertyValue.FromString("TestNode"));
+        var n = tx.CreateVertex("Test");
+        tx.SetProperty(n, "Name", PropertyValue.FromString("TestVertex"));
         tx.Commit();
     }
 }

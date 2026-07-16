@@ -16,7 +16,7 @@ public sealed class InMemoryVectorStoreTests
     private static VectorIndexSpec MakeSpec(int dim, DistanceMetric metric)
         => new(
             IndexName,
-            EntityKind.Node,
+            EntityKind.Vertex,
             new PropertyKeyId(1),
             dim,
             metric,
@@ -61,7 +61,7 @@ public sealed class InMemoryVectorStoreTests
         for (int i = 0; i < n; i++)
         {
             vectors[i] = NextVector(rng, dim);
-            store.SetVector(EntityKind.Node, entityId: i, IndexName, vectors[i]);
+            store.SetVector(EntityKind.Vertex, entityId: i, IndexName, vectors[i]);
         }
         var query = NextVector(rng, dim);
 
@@ -78,7 +78,7 @@ public sealed class InMemoryVectorStoreTests
         actual.Should().HaveCount(k);
         for (int rank = 0; rank < k; rank++)
         {
-            actual[rank].EntityKind.Should().Be(EntityKind.Node);
+            actual[rank].EntityKind.Should().Be(EntityKind.Vertex);
             actual[rank].EntityId.Should().Be(expected[rank].Id);
             actual[rank].Score.Should().BeApproximately(expected[rank].Score, 1e-5f);
         }
@@ -89,9 +89,9 @@ public sealed class InMemoryVectorStoreTests
     {
         var store = new InMemoryVectorStore();
         store.CreateVectorIndex(MakeSpec(3, DistanceMetric.Dot));
-        store.SetVector(EntityKind.Node, 1, IndexName, new float[] { 1f, 0f, 0f });
-        store.SetVector(EntityKind.Node, 2, IndexName, new float[] { 0f, 1f, 0f });
-        store.SetVector(EntityKind.Node, 3, IndexName, new float[] { 2f, 0f, 0f });
+        store.SetVector(EntityKind.Vertex, 1, IndexName, new float[] { 1f, 0f, 0f });
+        store.SetVector(EntityKind.Vertex, 2, IndexName, new float[] { 0f, 1f, 0f });
+        store.SetVector(EntityKind.Vertex, 3, IndexName, new float[] { 2f, 0f, 0f });
 
         using var cursor = store.KnnSearch(IndexName, new float[] { 1f, 0f, 0f }, k: 10);
         var results = Drain(cursor);
@@ -107,9 +107,9 @@ public sealed class InMemoryVectorStoreTests
     {
         var store = new InMemoryVectorStore();
         store.CreateVectorIndex(MakeSpec(2, DistanceMetric.Dot));
-        store.SetVector(EntityKind.Node, 1, IndexName, new float[] { 1f, 0f });
-        store.SetVector(EntityKind.Node, 2, IndexName, new float[] { 0f, 1f });
-        store.RemoveVector(EntityKind.Node, 1, IndexName);
+        store.SetVector(EntityKind.Vertex, 1, IndexName, new float[] { 1f, 0f });
+        store.SetVector(EntityKind.Vertex, 2, IndexName, new float[] { 0f, 1f });
+        store.RemoveVector(EntityKind.Vertex, 1, IndexName);
 
         using var cursor = store.KnnSearch(IndexName, new float[] { 1f, 0f }, k: 5);
         var results = Drain(cursor);
@@ -123,7 +123,7 @@ public sealed class InMemoryVectorStoreTests
         var store = new InMemoryVectorStore();
         store.CreateVectorIndex(MakeSpec(4, DistanceMetric.Cosine));
 
-        var act = () => store.SetVector(EntityKind.Node, 1, IndexName, new float[] { 1f, 2f, 3f });
+        var act = () => store.SetVector(EntityKind.Vertex, 1, IndexName, new float[] { 1f, 2f, 3f });
         act.Should().Throw<VectorException>().WithMessage("*expects 4 dimensions, got 3*");
     }
 
@@ -144,8 +144,8 @@ public sealed class InMemoryVectorStoreTests
         store.CreateVectorIndex(MakeSpec(2, DistanceMetric.Cosine));
 
         var act = () => store.SetVector(
-            EntityKind.Relationship, 1, IndexName, new float[] { 1f, 0f });
-        act.Should().Throw<VectorException>().WithMessage("*bound to Node but got Relationship*");
+            EntityKind.Edge, 1, IndexName, new float[] { 1f, 0f });
+        act.Should().Throw<VectorException>().WithMessage("*bound to Vertex but got Edge*");
     }
 
     [Fact]
@@ -173,7 +173,7 @@ public sealed class InMemoryVectorStoreTests
         store.CreateVectorIndex(MakeSpec(2, DistanceMetric.Cosine));
         store.DropVectorIndex(IndexName);
 
-        var act = () => store.SetVector(EntityKind.Node, 1, IndexName, new float[] { 1f, 0f });
+        var act = () => store.SetVector(EntityKind.Vertex, 1, IndexName, new float[] { 1f, 0f });
         act.Should().Throw<VectorException>().WithMessage("*does not exist*");
     }
 
@@ -192,8 +192,8 @@ public sealed class InMemoryVectorStoreTests
     {
         var store = new InMemoryVectorStore();
         store.CreateVectorIndex(MakeSpec(3, DistanceMetric.Cosine));
-        store.SetVector(EntityKind.Node, 1, IndexName, new float[] { 2f, 0f, 0f });   // parallel
-        store.SetVector(EntityKind.Node, 2, IndexName, new float[] { 0f, 1f, 0f });   // orthogonal
+        store.SetVector(EntityKind.Vertex, 1, IndexName, new float[] { 2f, 0f, 0f });   // parallel
+        store.SetVector(EntityKind.Vertex, 2, IndexName, new float[] { 0f, 1f, 0f });   // orthogonal
 
         using var cursor = store.KnnSearch(IndexName, new float[] { 5f, 0f, 0f }, k: 2);
         var results = Drain(cursor);
@@ -209,9 +209,9 @@ public sealed class InMemoryVectorStoreTests
     {
         var store = new InMemoryVectorStore();
         store.CreateVectorIndex(MakeSpec(2, DistanceMetric.Euclidean));
-        store.SetVector(EntityKind.Node, 1, IndexName, new float[] { 1f, 1f });   // dist sqrt 2
-        store.SetVector(EntityKind.Node, 2, IndexName, new float[] { 5f, 5f });   // dist sqrt 50
-        store.SetVector(EntityKind.Node, 3, IndexName, new float[] { 0.1f, 0f });   // dist 0.1
+        store.SetVector(EntityKind.Vertex, 1, IndexName, new float[] { 1f, 1f });   // dist sqrt 2
+        store.SetVector(EntityKind.Vertex, 2, IndexName, new float[] { 5f, 5f });   // dist sqrt 50
+        store.SetVector(EntityKind.Vertex, 3, IndexName, new float[] { 0.1f, 0f });   // dist 0.1
 
         using var cursor = store.KnnSearch(IndexName, new float[] { 0f, 0f }, k: 3);
         var results = Drain(cursor);
@@ -275,15 +275,15 @@ public sealed class InMemoryVectorStoreTests
     {
         var store = new InMemoryVectorStore();
         var spec = new VectorIndexSpec(
-            IndexName, EntityKind.Node, new PropertyKeyId(1), 4,
+            IndexName, EntityKind.Vertex, new PropertyKeyId(1), 4,
             DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly);
         store.CreateVectorIndex(spec);
 
         float[] vec = [1f, 2f, 3f, 4f];
-        store.SetVector(EntityKind.Node, 1, IndexName, vec);
+        store.SetVector(EntityKind.Vertex, 1, IndexName, vec);
 
         var buf = new float[4];
-        store.TryGetVector(EntityKind.Node, 1, IndexName, buf).Should().BeTrue();
+        store.TryGetVector(EntityKind.Vertex, 1, IndexName, buf).Should().BeTrue();
         buf.Should().Equal(vec);
     }
 
@@ -292,10 +292,10 @@ public sealed class InMemoryVectorStoreTests
     {
         var store = new InMemoryVectorStore();
         var spec = new VectorIndexSpec(
-            IndexName, EntityKind.Node, new PropertyKeyId(1), 4,
+            IndexName, EntityKind.Vertex, new PropertyKeyId(1), 4,
             DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly);
         store.CreateVectorIndex(spec);
-        store.SetVector(EntityKind.Node, 1, IndexName, [1f, 0f, 0f, 0f]);
+        store.SetVector(EntityKind.Vertex, 1, IndexName, [1f, 0f, 0f, 0f]);
 
         var act = () => store.KnnSearch(IndexName, new float[] { 1f, 0f, 0f, 0f }, 1);
         act.Should().Throw<VectorException>().WithMessage("*FlatOnly*");
@@ -306,10 +306,10 @@ public sealed class InMemoryVectorStoreTests
     {
         var store = new InMemoryVectorStore();
         var spec = new VectorIndexSpec(
-            IndexName, EntityKind.Node, new PropertyKeyId(1), 4,
+            IndexName, EntityKind.Vertex, new PropertyKeyId(1), 4,
             DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly);
         store.CreateVectorIndex(spec);
-        store.SetVector(EntityKind.Node, 1, IndexName, [1f, 0f, 0f, 0f]);
+        store.SetVector(EntityKind.Vertex, 1, IndexName, [1f, 0f, 0f, 0f]);
 
         var queries = new ReadOnlyMemory<float>[] { new float[] { 1f, 0f, 0f, 0f } };
         var act = () => store.KnnSearchBatch(IndexName, queries, 1);
@@ -321,15 +321,15 @@ public sealed class InMemoryVectorStoreTests
     {
         var store = new InMemoryVectorStore();
         var spec = new VectorIndexSpec(
-            IndexName, EntityKind.Node, new PropertyKeyId(1), 4,
+            IndexName, EntityKind.Vertex, new PropertyKeyId(1), 4,
             DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly);
         store.CreateVectorIndex(spec);
 
-        store.SetVector(EntityKind.Node, 1, IndexName, [1f, 0f, 0f, 0f]);
-        store.SetVector(EntityKind.Node, 2, IndexName, [0f, 1f, 0f, 0f]);
-        store.SetVector(EntityKind.Node, 3, IndexName, [0f, 0f, 1f, 0f]);
+        store.SetVector(EntityKind.Vertex, 1, IndexName, [1f, 0f, 0f, 0f]);
+        store.SetVector(EntityKind.Vertex, 2, IndexName, [0f, 1f, 0f, 0f]);
+        store.SetVector(EntityKind.Vertex, 3, IndexName, [0f, 0f, 1f, 0f]);
 
-        var candidates = new EntityCandidateSet(EntityKind.Node, [1, 2]);
+        var candidates = new EntityCandidateSet(EntityKind.Vertex, [1, 2]);
         using var cursor = store.KnnSearchFiltered(IndexName, new float[] { 1f, 0f, 0f, 0f }, 2, candidates);
         var results = Drain(cursor);
         results.Should().HaveCount(2);
@@ -341,16 +341,16 @@ public sealed class InMemoryVectorStoreTests
     {
         var store = new InMemoryVectorStore();
         var spec = new VectorIndexSpec(
-            IndexName, EntityKind.Node, new PropertyKeyId(1), 4,
+            IndexName, EntityKind.Vertex, new PropertyKeyId(1), 4,
             DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly);
         store.CreateVectorIndex(spec);
 
-        store.SetVector(EntityKind.Node, 1, IndexName, [1f, 0f, 0f, 0f]);
+        store.SetVector(EntityKind.Vertex, 1, IndexName, [1f, 0f, 0f, 0f]);
         var buf = new float[4];
-        store.TryGetVector(EntityKind.Node, 1, IndexName, buf).Should().BeTrue();
+        store.TryGetVector(EntityKind.Vertex, 1, IndexName, buf).Should().BeTrue();
 
-        store.RemoveVector(EntityKind.Node, 1, IndexName);
-        store.TryGetVector(EntityKind.Node, 1, IndexName, buf).Should().BeFalse();
+        store.RemoveVector(EntityKind.Vertex, 1, IndexName);
+        store.TryGetVector(EntityKind.Vertex, 1, IndexName, buf).Should().BeFalse();
     }
 
     [Fact]
@@ -358,7 +358,7 @@ public sealed class InMemoryVectorStoreTests
     {
         var store = new InMemoryVectorStore();
         var spec = new VectorIndexSpec(
-            IndexName, EntityKind.Node, new PropertyKeyId(1), 4,
+            IndexName, EntityKind.Vertex, new PropertyKeyId(1), 4,
             DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly);
         store.CreateVectorIndex(spec);
 

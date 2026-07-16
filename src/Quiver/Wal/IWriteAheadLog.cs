@@ -37,13 +37,6 @@ internal interface IWriteAheadLog : IDisposable
     void EvictCoalescedPageImagesFor(TransactionId tx) { }
 
     /// <summary>
-    /// 旧 1 段チェックポイントレコード。新規パスは
-    /// <see cref="WriteCheckpointBegin"/> / <see cref="WriteCheckpointEnd"/> を使う。
-    /// 既存 DB との互換のため残す。
-    /// </summary>
-    long WriteCheckpoint(long oldestActiveLsn, long lastFlushedDataLsn);
-
-    /// <summary>
     /// チェックポイント開始 sentinel。dirty page flush の前に書いて fsync する。
     /// 戻り値はこのレコードの LSN で、ペアとなる <see cref="WriteCheckpointEnd"/> に渡す。
     /// </summary>

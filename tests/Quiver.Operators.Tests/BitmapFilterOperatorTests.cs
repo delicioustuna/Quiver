@@ -14,7 +14,7 @@ public class BitmapFilterOperatorTests
         using var fx = OperatorTestFixture.OpenEmpty();
         using var tx = fx.Db.BeginTransaction();
         using var result = tx.Execute(new BitmapFilterOperator(
-            new FixedNodeListOperator(),
+            new FixedVertexListOperator(),
             new IPredicate[] { new AlwaysTruePredicate() }));
         result.Rows().Should().BeEmpty();
         tx.Rollback();
@@ -26,9 +26,9 @@ public class BitmapFilterOperatorTests
         using var fx = OperatorTestFixture.OpenEmpty();
         using var tx = fx.Db.BeginTransaction();
         using var result = tx.Execute(new BitmapFilterOperator(
-            new FixedNodeListOperator(new NodeId(1), new NodeId(2), new NodeId(3), new NodeId(4)),
-            new IPredicate[] { new EvenNodeIdPredicate() }));
-        result.Rows().Select(r => r.GetNodeId(0).Value).Should().Equal(2, 4);
+            new FixedVertexListOperator(new VertexId(1), new VertexId(2), new VertexId(3), new VertexId(4)),
+            new IPredicate[] { new EvenVertexIdPredicate() }));
+        result.Rows().Select(r => r.GetVertexId(0).Value).Should().Equal(2, 4);
         tx.Rollback();
     }
 
@@ -38,7 +38,7 @@ public class BitmapFilterOperatorTests
         using var fx = OperatorTestFixture.OpenEmpty();
         using var tx = fx.Db.BeginTransaction();
         using var result = tx.Execute(new BitmapFilterOperator(
-            new FixedNodeListOperator(new NodeId(1), new NodeId(2)),
+            new FixedVertexListOperator(new VertexId(1), new VertexId(2)),
             new IPredicate[] { new AlwaysFalsePredicate() }));
         result.Rows().Should().BeEmpty();
         tx.Rollback();
@@ -50,9 +50,9 @@ public class BitmapFilterOperatorTests
         using var fx = OperatorTestFixture.OpenEmpty();
         using var tx = fx.Db.BeginTransaction();
         using var result = tx.Execute(new BitmapFilterOperator(
-            new FixedNodeListOperator(new NodeId(5), new NodeId(6)),
+            new FixedVertexListOperator(new VertexId(5), new VertexId(6)),
             new IPredicate[] { new AlwaysTruePredicate() }));
-        result.Rows().Select(r => r.GetNodeId(0).Value).Should().Equal(5, 6);
+        result.Rows().Select(r => r.GetVertexId(0).Value).Should().Equal(5, 6);
         tx.Rollback();
     }
 }

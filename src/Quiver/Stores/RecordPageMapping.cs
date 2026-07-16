@@ -4,9 +4,7 @@ namespace Quiver.Storage.Records;
 
 internal static class RecordPageMapping
 {
-    private const int PageSize = 8192;
-    private const int PageHeaderSize = 32;
-    public const int PageBodySize = PageSize - PageHeaderSize; // 8160
+    public const int PageBodySize = PagedFile.BodySize;
 
     public static (PageId pageId, int recordOffset) GetLocation(long id, int recordSize)
     {

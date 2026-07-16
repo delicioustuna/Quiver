@@ -10,7 +10,7 @@ namespace Quiver.Logical;
 /// 下層トランザクションが永続化コミットされる (WAL フラッシュ) と、
 /// <see cref="ILogicalMutationSink"/> に渡される。
 ///
-/// レコードは自己完結している — ラベル / リレーションシップ型 / プロパティキーの名称は
+/// レコードは自己完結している — ラベル / Edge型 / プロパティキーの名称は
 /// トークン ID ではなく文字列で保持するため、まだそれらトークンが未登録のグラフに対しても
 /// ストリームを検査・送信・再生できる (トークン ID はソース DB とターゲット DB で異なる)。
 /// </summary>
@@ -19,117 +19,117 @@ public readonly struct LogicalMutation
     /// <summary>ミューテーションの種別。</summary>
     public LogicalMutationKind Kind { get; }
 
-    /// <summary>主要なノード ID (CreateNode / DeleteNode / *NodeProperty / CreateRelationship の source)。</summary>
-    public NodeId NodeId { get; }
+    /// <summary>主要なVertex ID (CreateVertex / DeleteVertex / *VertexProperty / CreateEdge の source)。</summary>
+    public VertexId VertexId { get; }
 
-    /// <summary>CreateRelationship のターゲットノード。</summary>
-    public NodeId TargetNodeId { get; }
+    /// <summary>CreateEdge のターゲットVertex。</summary>
+    public VertexId TargetVertexId { get; }
 
-    /// <summary>リレーションシップ ID (CreateRelationship の戻り値 / DeleteRelationship / SetRelationshipProperty)。</summary>
-    public RelationshipId RelationshipId { get; }
+    /// <summary>Edge ID (CreateEdge の戻り値 / DeleteEdge / SetEdgeProperty)。</summary>
+    public EdgeId EdgeId { get; }
 
-    /// <summary>ハイパーエッジ ID (CreateHyperedge の戻り値 / DeleteHyperedge / *HyperedgeProperty)。</summary>
-    public HyperedgeId HyperedgeId { get; }
+    /// <summary>Nexus ID (CreateNexus の戻り値 / DeleteNexus / *NexusProperty)。</summary>
+    public NexusId NexusId { get; }
 
-    /// <summary><see cref="LogicalMutationKind.CreateNode"/> ではラベル名、<see cref="LogicalMutationKind.CreateRelationship"/> ではリレーションシップ型名、<see cref="LogicalMutationKind.CreateHyperedge"/> ではハイパーエッジ型名。</summary>
+    /// <summary><see cref="LogicalMutationKind.CreateVertex"/> ではラベル名、<see cref="LogicalMutationKind.CreateEdge"/> ではEdge型名、<see cref="LogicalMutationKind.CreateNexus"/> ではNexus型名。</summary>
     public string? TokenName { get; }
 
     /// <summary>*Property ミューテーションのプロパティキー名。</summary>
     public string? PropertyKey { get; }
 
-    /// <summary><see cref="LogicalMutationKind.SetNodeProperty"/> / <see cref="LogicalMutationKind.SetRelationshipProperty"/> / <see cref="LogicalMutationKind.SetHyperedgeProperty"/> 等のプロパティ値。</summary>
+    /// <summary><see cref="LogicalMutationKind.SetVertexProperty"/> / <see cref="LogicalMutationKind.SetEdgeProperty"/> / <see cref="LogicalMutationKind.SetNexusProperty"/> 等のプロパティ値。</summary>
     public LogicalPropertyValue PropertyValue { get; }
 
     /// <summary>
-    /// <see cref="LogicalMutationKind.CreateHyperedge"/> のメンバー列 (ロール名 + ソース側 <see cref="NodeId"/>)。
-    /// 再生時に各メンバーの <see cref="NodeId"/> をターゲット DB の ID へ再マッピングする。
+    /// <see cref="LogicalMutationKind.CreateNexus"/> のメンバー列 (ロール名 + ソース側 <see cref="VertexId"/>)。
+    /// 再生時に各メンバーの <see cref="VertexId"/> をターゲット DB の ID へ再マッピングする。
     /// 他の種別では <c>null</c>。
     /// </summary>
-    public IReadOnlyList<HyperedgeMember>? Members { get; }
+    public IReadOnlyList<NexusMember>? Members { get; }
 
     private LogicalMutation(
         LogicalMutationKind kind,
-        NodeId nodeId = default,
-        NodeId targetNodeId = default,
-        RelationshipId relationshipId = default,
-        HyperedgeId hyperedgeId = default,
+        VertexId vertexId = default,
+        VertexId targetVertexId = default,
+        EdgeId edgeId = default,
+        NexusId nexusId = default,
         string? tokenName = null,
         string? propertyKey = null,
         LogicalPropertyValue propertyValue = default,
-        IReadOnlyList<HyperedgeMember>? members = null)
+        IReadOnlyList<NexusMember>? members = null)
     {
         Kind = kind;
-        NodeId = nodeId;
-        TargetNodeId = targetNodeId;
-        RelationshipId = relationshipId;
-        HyperedgeId = hyperedgeId;
+        VertexId = vertexId;
+        TargetVertexId = targetVertexId;
+        EdgeId = edgeId;
+        NexusId = nexusId;
         TokenName = tokenName;
         PropertyKey = propertyKey;
         PropertyValue = propertyValue;
         Members = members;
     }
 
-    /// <summary>ノード作成のミューテーションレコードを生成する。</summary>
-    public static LogicalMutation CreateNode(NodeId nodeId, string label)
-        => new(LogicalMutationKind.CreateNode, nodeId: nodeId, tokenName: label);
+    /// <summary>Vertex作成のミューテーションレコードを生成する。</summary>
+    public static LogicalMutation CreateVertex(VertexId vertexId, string label)
+        => new(LogicalMutationKind.CreateVertex, vertexId: vertexId, tokenName: label);
 
-    /// <summary>ノード削除のミューテーションレコードを生成する。</summary>
-    public static LogicalMutation DeleteNode(NodeId nodeId)
-        => new(LogicalMutationKind.DeleteNode, nodeId: nodeId);
+    /// <summary>Vertex削除のミューテーションレコードを生成する。</summary>
+    public static LogicalMutation DeleteVertex(VertexId vertexId)
+        => new(LogicalMutationKind.DeleteVertex, vertexId: vertexId);
 
-    /// <summary>リレーションシップ作成のミューテーションレコードを生成する。</summary>
-    public static LogicalMutation CreateRelationship(
-        RelationshipId relId, NodeId source, NodeId target, string type)
-        => new(LogicalMutationKind.CreateRelationship,
-            nodeId: source, targetNodeId: target,
-            relationshipId: relId, tokenName: type);
+    /// <summary>Edge作成のミューテーションレコードを生成する。</summary>
+    public static LogicalMutation CreateEdge(
+        EdgeId edgeId, VertexId source, VertexId target, string type)
+        => new(LogicalMutationKind.CreateEdge,
+            vertexId: source, targetVertexId: target,
+            edgeId: edgeId, tokenName: type);
 
-    /// <summary>リレーションシップ削除のミューテーションレコードを生成する。</summary>
-    public static LogicalMutation DeleteRelationship(RelationshipId relId)
-        => new(LogicalMutationKind.DeleteRelationship, relationshipId: relId);
+    /// <summary>Edge削除のミューテーションレコードを生成する。</summary>
+    public static LogicalMutation DeleteEdge(EdgeId edgeId)
+        => new(LogicalMutationKind.DeleteEdge, edgeId: edgeId);
 
-    /// <summary>ノードプロパティ設定のミューテーションレコードを生成する。</summary>
-    public static LogicalMutation SetNodeProperty(NodeId nodeId, string key, in LogicalPropertyValue value)
-        => new(LogicalMutationKind.SetNodeProperty, nodeId: nodeId, propertyKey: key, propertyValue: value);
+    /// <summary>Vertexプロパティ設定のミューテーションレコードを生成する。</summary>
+    public static LogicalMutation SetVertexProperty(VertexId vertexId, string key, in LogicalPropertyValue value)
+        => new(LogicalMutationKind.SetVertexProperty, vertexId: vertexId, propertyKey: key, propertyValue: value);
 
-    /// <summary>リレーションシッププロパティ設定のミューテーションレコードを生成する。</summary>
-    public static LogicalMutation SetRelationshipProperty(RelationshipId relId, string key, in LogicalPropertyValue value)
-        => new(LogicalMutationKind.SetRelationshipProperty,
-            relationshipId: relId, propertyKey: key, propertyValue: value);
+    /// <summary>Edgeプロパティ設定のミューテーションレコードを生成する。</summary>
+    public static LogicalMutation SetEdgeProperty(EdgeId edgeId, string key, in LogicalPropertyValue value)
+        => new(LogicalMutationKind.SetEdgeProperty,
+            edgeId: edgeId, propertyKey: key, propertyValue: value);
 
-    /// <summary>ノードプロパティ削除のミューテーションレコードを生成する。</summary>
-    public static LogicalMutation RemoveNodeProperty(NodeId nodeId, string key)
-        => new(LogicalMutationKind.RemoveNodeProperty, nodeId: nodeId, propertyKey: key);
+    /// <summary>Vertexプロパティ削除のミューテーションレコードを生成する。</summary>
+    public static LogicalMutation RemoveVertexProperty(VertexId vertexId, string key)
+        => new(LogicalMutationKind.RemoveVertexProperty, vertexId: vertexId, propertyKey: key);
 
     /// <summary>
-    /// ハイパーエッジ作成のミューテーションレコードを生成する。
-    /// <paramref name="members"/> はロール名とソース側 <see cref="NodeId"/> を保持し、再生時に再マッピングされる。
+    /// Nexus作成のミューテーションレコードを生成する。
+    /// <paramref name="members"/> はロール名とソース側 <see cref="VertexId"/> を保持し、再生時に再マッピングされる。
     /// </summary>
-    public static LogicalMutation CreateHyperedge(
-        HyperedgeId hyperedgeId, string type, IReadOnlyList<HyperedgeMember> members)
-        => new(LogicalMutationKind.CreateHyperedge,
-            hyperedgeId: hyperedgeId, tokenName: type, members: members);
+    public static LogicalMutation CreateNexus(
+        NexusId nexusId, string type, IReadOnlyList<NexusMember> members)
+        => new(LogicalMutationKind.CreateNexus,
+            nexusId: nexusId, tokenName: type, members: members);
 
-    /// <summary>ハイパーエッジ削除のミューテーションレコードを生成する。</summary>
-    public static LogicalMutation DeleteHyperedge(HyperedgeId hyperedgeId)
-        => new(LogicalMutationKind.DeleteHyperedge, hyperedgeId: hyperedgeId);
+    /// <summary>Nexus削除のミューテーションレコードを生成する。</summary>
+    public static LogicalMutation DeleteNexus(NexusId nexusId)
+        => new(LogicalMutationKind.DeleteNexus, nexusId: nexusId);
 
-    /// <summary>ハイパーエッジプロパティ設定のミューテーションレコードを生成する。</summary>
-    public static LogicalMutation SetHyperedgeProperty(HyperedgeId hyperedgeId, string key, in LogicalPropertyValue value)
-        => new(LogicalMutationKind.SetHyperedgeProperty,
-            hyperedgeId: hyperedgeId, propertyKey: key, propertyValue: value);
+    /// <summary>Nexusプロパティ設定のミューテーションレコードを生成する。</summary>
+    public static LogicalMutation SetNexusProperty(NexusId nexusId, string key, in LogicalPropertyValue value)
+        => new(LogicalMutationKind.SetNexusProperty,
+            nexusId: nexusId, propertyKey: key, propertyValue: value);
 
-    /// <summary>ハイパーエッジプロパティ削除のミューテーションレコードを生成する。</summary>
-    public static LogicalMutation RemoveHyperedgeProperty(HyperedgeId hyperedgeId, string key)
-        => new(LogicalMutationKind.RemoveHyperedgeProperty, hyperedgeId: hyperedgeId, propertyKey: key);
+    /// <summary>Nexusプロパティ削除のミューテーションレコードを生成する。</summary>
+    public static LogicalMutation RemoveNexusProperty(NexusId nexusId, string key)
+        => new(LogicalMutationKind.RemoveNexusProperty, nexusId: nexusId, propertyKey: key);
 
-    /// <summary>ハイパーエッジのマルチバリュープロパティへの値追加ミューテーションレコードを生成する。</summary>
-    public static LogicalMutation AddHyperedgePropertyValue(HyperedgeId hyperedgeId, string key, in LogicalPropertyValue value)
-        => new(LogicalMutationKind.AddHyperedgePropertyValue,
-            hyperedgeId: hyperedgeId, propertyKey: key, propertyValue: value);
+    /// <summary>Nexusのマルチバリュープロパティへの値追加ミューテーションレコードを生成する。</summary>
+    public static LogicalMutation AddNexusPropertyValue(NexusId nexusId, string key, in LogicalPropertyValue value)
+        => new(LogicalMutationKind.AddNexusPropertyValue,
+            nexusId: nexusId, propertyKey: key, propertyValue: value);
 
-    /// <summary>ハイパーエッジのマルチバリュープロパティからの値除去ミューテーションレコードを生成する。</summary>
-    public static LogicalMutation RemoveHyperedgePropertyValue(HyperedgeId hyperedgeId, string key, in LogicalPropertyValue value)
-        => new(LogicalMutationKind.RemoveHyperedgePropertyValue,
-            hyperedgeId: hyperedgeId, propertyKey: key, propertyValue: value);
+    /// <summary>Nexusのマルチバリュープロパティからの値除去ミューテーションレコードを生成する。</summary>
+    public static LogicalMutation RemoveNexusPropertyValue(NexusId nexusId, string key, in LogicalPropertyValue value)
+        => new(LogicalMutationKind.RemoveNexusPropertyValue,
+            nexusId: nexusId, propertyKey: key, propertyValue: value);
 }

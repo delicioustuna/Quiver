@@ -6,7 +6,7 @@ namespace Quiver.Transactions;
 /// <summary>
 /// 周期的に <see cref="LockManager"/> 群の wait-for graph を取得し、SCC で閉路を検出する。
 /// 閉路内で最も若い tx (TxId.Value が最大) を犠牲者として選び、<see cref="LockManager.TryAbortWaiter"/>
-/// 経由で <see cref="DeadlockException"/> を投げさせる。複数 lock manager (node / rel / index) を
+/// 経由で <see cref="DeadlockException"/> を投げさせる。複数 lock manager (vertex / edge / index) を
 /// またぐ deadlock も検出可能。
 /// </summary>
 internal sealed class DeadlockDetector : IDisposable

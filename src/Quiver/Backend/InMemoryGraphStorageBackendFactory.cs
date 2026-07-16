@@ -5,6 +5,6 @@ namespace Quiver;
 /// </summary>
 internal sealed class InMemoryGraphStorageBackendFactory : IGraphStorageBackendFactory
 {
-    public IGraphStorageBackend Open(string filePath, GraphDatabaseOptions options)
+    public IGraphStorageBackend Open(string filePath, QuiverDatabaseOptions options)
         => new BinaryGraphStorageBackendFactory().OpenInMemory(options);
 }

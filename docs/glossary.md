@@ -9,34 +9,34 @@ Quiver の API やドキュメントに登場する用語を定義する。
 
 | 用語 | 定義 |
 |---|---|
-| **有向プロパティグラフ** | ノードとエッジにプロパティ（属性）を持つ有向グラフモデル。Neo4j や JanusGraph と同じ基本モデルであり、Quiver もこれを採用する |
-| **Node（ノード）** | グラフの頂点。1 つのラベルと複数のプロパティを持つ。`NodeId` で識別される |
-| **Relationship（リレーションシップ）** | グラフの有向辺。1 つの型名と両端ノード（Source、Target）、複数のプロパティを持つ。`RelationshipId` で識別される |
-| **Label（ラベル）** | ノードの分類名（例: `"Person"`）。内部では `LabelId` にトークン化される |
-| **Relationship Type** | リレーションシップの分類名（例: `"KNOWS"`）。内部では `RelationshipTypeId` にトークン化される |
-| **Property（プロパティ）** | ノード、リレーションシップ、またはハイパーエッジに付与されるキーバリュー対。値の型は `Bool`、`Int32`、`Int64`、`Double`、`String`、`Bytes`、`FloatArray` |
-| **Hyperedge（ハイパーエッジ）** | 2 つ以上の任意個のノードを 1 つの関係として束ねる第一級エンティティ。1 つの型名とロール付きメンバー集合、複数のプロパティを持つ。`HyperedgeId` で識別される。リレーションシップとは別のエンティティ種別 |
-| **Role（ロール）** | ハイパーエッジにおけるメンバーの位置づけ（例: `"buyer"`、`"subject"`）。無向のハイパーエッジでは方向（Out/In）の代わりにロールフィルタが方向の一般化になる |
-| **Member（メンバー）** | ハイパーエッジに属すノード。ロールと `NodeId` の組（`HyperedgeMember`）で表す。メンバー集合は作成時に確定し、以後変更できない（変更は削除 + 再作成） |
-| **Arity（アリティ）** | ハイパーエッジのメンバー数。2 以上を要求する。リレーションシップは数学的にはアリティ 2 のハイパーエッジの特殊化にあたる |
-| **Co-membership** | 同じハイパーエッジに属すノード同士の関係。「起点ノード → 所属ハイパーエッジ → 別ロールのメンバー」の 1 論理ホップで辿る。`GraphDatabaseOptions.CoMembershipRolePairs` にロール対を登録すると物理ビューで高速化される |
+| **有向プロパティグラフ** | Vertexとエッジにプロパティ（属性）を持つ有向グラフモデル。Neo4j や JanusGraph と同じ基本モデルであり、Quiver もこれを採用する |
+| **Vertex（Vertex）** | グラフの頂点。1 つのラベルと複数のプロパティを持つ。`VertexId` で識別される |
+| **Edge（Edge）** | グラフの有向辺。1 つの型名と両端Vertex（Source、Target）、複数のプロパティを持つ。`EdgeId` で識別される |
+| **Label（ラベル）** | Vertexの分類名（例: `"Person"`）。内部では `LabelId` にトークン化される |
+| **Edge Type** | Edgeの分類名（例: `"KNOWS"`）。内部では `EdgeTypeId` にトークン化される |
+| **Property（プロパティ）** | Vertex、Edge、またはNexusに付与されるキーバリュー対。値の型は `Bool`、`Int32`、`Int64`、`Double`、`String`、`Bytes`、`FloatArray` |
+| **Nexus（Nexus）** | 2 つ以上の任意個のVertexを 1 つの関係として束ねる第一級エンティティ。1 つの型名とロール付きメンバー集合、複数のプロパティを持つ。`NexusId` で識別される。Edgeとは別のエンティティ種別 |
+| **Role（ロール）** | Nexusにおけるメンバーの位置づけ（例: `"buyer"`、`"subject"`）。無向のNexusでは方向（Out/In）の代わりにロールフィルタが方向の一般化になる |
+| **Member（メンバー）** | Nexusに属すVertex。ロールと `VertexId` の組（`NexusMember`）で表す。メンバー集合は作成時に確定し、以後変更できない（変更は削除 + 再作成） |
+| **Arity（アリティ）** | Nexusのメンバー数。2 以上を要求する。Edgeは数学的にはアリティ 2 のNexusの特殊化にあたる |
+| **Co-membership** | 同じNexusに属すVertex同士の関係。「起点Vertex → 所属Nexus → 別ロールのメンバー」の 1 論理ホップで辿る。`QuiverDatabaseOptions.CoMembershipRolePairs` にロール対を登録すると物理ビューで高速化される |
 
 ## 識別子
 
 | 用語 | 定義 |
 |---|---|
-| **NodeId** | ノードの識別子（`readonly record struct`）。`Value` は generation と sequence のパック値で、スロット再利用後も一貫性を保つ |
-| **RelationshipId** | リレーションシップの識別子 |
-| **HyperedgeId** | ハイパーエッジの識別子。NodeId と同じ generation + sequence のパック値 |
-| **HyperedgeTypeId** | インターンされたハイパーエッジ型の識別子。ロール名も同様に独立空間でインターンされる |
-| **EntityId** | ノード、リレーションシップ、ハイパーエッジを統一的に扱うための ID。`EntityId.FromNode(id)` で変換する |
+| **VertexId** | Vertexの識別子（`readonly record struct`）。`Value` は generation と sequence のパック値で、スロット再利用後も一貫性を保つ |
+| **EdgeId** | Edgeの識別子 |
+| **NexusId** | Nexusの識別子。VertexId と同じ generation + sequence のパック値 |
+| **NexusTypeId** | インターンされたNexus型の識別子。ロール名も同様に独立空間でインターンされる |
+| **EntityId** | Vertex、Edge、Nexusを統一的に扱うための ID。`EntityId.FromVertex(id)` で変換する |
 
 ## データベースとトランザクション
 
 | 用語 | 定義 |
 |---|---|
-| **GraphDatabase** | エンジンのエントリポイント。`GraphDatabase.Open(path)` で `*.quiver` ファイルを開く。スレッドセーフであり、プロセスのライフタイムを通じて 1 インスタンスを共有する |
-| **IGraphTransaction** | 読み書きトランザクションの公開インタフェース。`CreateNode`、`SetProperty`、`Commit` 等を提供する |
+| **QuiverDatabase** | エンジンのエントリポイント。`QuiverDatabase.Open(path)` で `*.quiver` ファイルを開く。スレッドセーフであり、プロセスのライフタイムを通じて 1 インスタンスを共有する |
+| **IGraphTransaction** | 読み書きトランザクションの公開インタフェース。`CreateVertex`、`SetProperty`、`Commit` 等を提供する |
 | **Commit** | WAL を `fsync` した時点で永続化が確定する。返った後はプロセスの kill や電源喪失を生き延びる |
 | **Snapshot Isolation** | Quiver の分離レベル。各トランザクションは開始時の一貫したスナップショットを見る。リーダはライタをブロックせず、ライタもリーダをブロックしない |
 | **Savepoint** | トランザクション内の中間地点。`RollbackTo(SavepointId)` でセーブポイント以降の変更だけを巻き戻せる |
@@ -48,27 +48,27 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | 用語 | 定義 |
 |---|---|
 | **Traversal** | Gremlin 風の Fluent API でグラフを辿る操作。`tx.G(db.Schema)` を起点にメソッドチェーンで論理プランを組み立て、終端ステップで実行する |
-| **Hop（ホップ）** | トラバーサルにおける 1 段階の隣接ノード移動 |
-| **Expand** | あるノードから隣接リレーションシップを辿って隣接ノードを列挙する操作。`Out()`、`In()`、`Both()` に対応する |
-| **Match DSL** | Cypher の `MATCH` に相当する宣言的パターンマッチ構文。`g.Match(GraphPattern.Node(...).Out(...))` のように使う |
+| **Hop（ホップ）** | トラバーサルにおける 1 段階の隣接Vertex移動 |
+| **Expand** | あるVertexから隣接Edgeを辿って隣接Vertexを列挙する操作。`Out()`、`In()`、`Both()` に対応する |
+| **Match DSL** | Cypher の `MATCH` に相当する宣言的パターンマッチ構文。`g.Match(GraphPattern.Vertex(...).Out(...))` のように使う |
 | **P（述語）** | フィルタ述語のファクトリクラス。`P.Eq(v)`、`P.Gt(v)`、`P.Lt(v)`、`P.Between(a,b)`、`P.StartsWith(s)` 等を提供する |
 | **AsCursor / AsEnumerable** | ストリーミング実行の終端ステップ。大量結果をメモリを抑えて逐次処理する |
-| **MERGE** | 既存ノードがあれば取得、なければ新規作成する冪等操作。`tx.MergeNode(label, matchKey, matchValue)` で使う |
-| **Hyperedges / Members / OtherMembers** | ハイパーエッジ走査のトラバーサルステップ。`Hyperedges(type?, role?)` はノードから所属ハイパーエッジへ、`Members(role?)` はメンバーノードへ展開する。`OtherMembers(role?)` は起点ノード自身を除外する co-membership |
-| **HyperedgeBuilder** | `g.AddHyperedge(type)` が返す作成ビルダ。`.Member(role, nodeId)` を複数回呼び、`.P(...)` でプロパティを積み、`.Next()` で確定する |
-| **HyperedgePattern** | Match DSL の星型パターン。`GraphPattern.Hyperedge("f", "Fact").Member("subject", ...)` のように 1 つのハイパーエッジと複数のロール付きメンバーを同じ結果行へ束縛する |
+| **MERGE** | 既存Vertexがあれば取得、なければ新規作成する冪等操作。`tx.MergeVertex(label, matchKey, matchValue)` で使う |
+| **Nexuses / Members / OtherMembers** | Nexus走査のトラバーサルステップ。`Nexuses(type?, role?)` はVertexから所属Nexusへ、`Members(role?)` はメンバーVertexへ展開する。`OtherMembers(role?)` は起点Vertex自身を除外する co-membership |
+| **NexusBuilder** | `g.AddNexus(type)` が返す作成ビルダ。`.Member(role, vertexId)` を複数回呼び、`.P(...)` でプロパティを積み、`.Next()` で確定する |
+| **NexusPattern** | Match DSL の星型パターン。`GraphPattern.Nexus("f", "Fact").Member("subject", ...)` のように 1 つのNexusと複数のロール付きメンバーを同じ結果行へ束縛する |
 
 ## Source Generator
 
 | 用語 | 定義 |
 |---|---|
-| **[Node]** | ノードモデルクラスに付与する属性。`Insert`、`Load`、`Update`、`Delete` メソッドが自動生成される |
-| **[Relationship]** | リレーションシップモデルクラスに付与する属性。`Relationship<TSource, TTarget>` でエンドポイント型を指定する |
+| **[Vertex]** | Vertexモデルクラスに付与する属性。`Insert`、`Load`、`Update`、`Delete` メソッドが自動生成される |
+| **[Edge]** | Edgeモデルクラスに付与する属性。`Edge<TSource, TTarget>` でエンドポイント型を指定する |
 | **[Property]** | グラフプロパティとして永続化するメンバに付与する属性 |
 | **[Indexed]** | B+Tree インデックスを自動作成する属性。`[Property]` と併用すると `FindBy{PropName}` メソッドが生成される |
-| **[Hyperedge]** | ハイパーエッジモデルクラスに付与する属性。`Insert`、`Load`、`Update`（プロパティのみ）、`Delete` と、ロールごとの型保存トラバーサル糖衣が自動生成される |
-| **[Role]** | ハイパーエッジのロールを宣言するプロパティ属性。型は `GraphNodeRef<TNode>`（複数メンバーは `IReadOnlyList<GraphNodeRef<TNode>>`、省略可能ロールは nullable）で参照先ノード型を表す |
-| **GraphNodeRef&lt;TNode&gt;** | ノード CLR 型を保ったまま `NodeId` を保持する参照。`NodeId` からの暗黙変換を持ち、ロールへの型不一致の代入はコンパイルエラーになる |
+| **[Nexus]** | Nexusモデルクラスに付与する属性。`Insert`、`Load`、`Update`（プロパティのみ）、`Delete` と、ロールごとの型保存トラバーサル糖衣が自動生成される |
+| **[Role]** | Nexusのロールを宣言するプロパティ属性。型は `GraphVertexRef<TVertex>`（複数メンバーは `IReadOnlyList<GraphVertexRef<TVertex>>`、省略可能ロールは nullable）で参照先Vertex型を表す |
+| **GraphVertexRef&lt;TVertex&gt;** | Vertex CLR 型を保ったまま `VertexId` を保持する参照。`VertexId` からの暗黙変換を持ち、ロールへの型不一致の代入はコンパイルエラーになる |
 
 ## インデックス
 
@@ -117,7 +117,7 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | **IngestedDocument** | 取込契約。`SourceId`（一意キー）、`Title`、`Metadata`、`Blocks`（正規化ブロック列）を持つ |
 | **IChunkEmbedder** | チャンクテキストからベクトル埋め込みを生成するインタフェース。実装はアプリケーション側が注入する |
 | **Graph Expansion** | ヒットしたチャンクから `NEXT_CHUNK`、`HAS_CHUNK` を辿って前後文脈や親文書を復元する機能。ベクトル DB が返せるのはヒット単体だけだが、Quiver はグラフ走査で文脈を復元できる |
-| **n 項ファクト（Fact パターン）** | 主体（subject）、客体（object）、出典（source = Chunk）、時点（asOf）などのロールを持つハイパーエッジで知識を表す利用パターン。出典がファクトのメンバーとして構造的に付随するため、回答生成時の出典引用（grounded citation）を join なしで取れる。実例は `samples/Quiver.Samples.Hyperedges/` |
+| **n 項ファクト（Fact パターン）** | 主体（subject）、客体（object）、出典（source = Chunk）、時点（asOf）などのロールを持つNexusで知識を表す利用パターン。出典がファクトのメンバーとして構造的に付随するため、回答生成時の出典引用（grounded citation）を join なしで取れる。実例は `samples/Quiver.Samples.Nexuses/` |
 
 ## パッケージ
 
@@ -136,7 +136,7 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | **\*.quiver** | Quiver のデータファイル。静止時は単一ファイルにすべてのデータが格納される |
 | **\*.quiver-wal** | WAL（Write-Ahead Log）サイドカー。稼働中にのみ存在し、クリーンシャットダウン後は空か不在になる |
 | **WAL** | データファイルへの書き込みに先立ってログを書くことで、クラッシュリカバリを保証する仕組み |
-| **FormatVersion** | オンディスクフォーマットのバージョン（現在 V4）。不一致時は `FormatVersionMismatchException` がスローされる |
+| **QUIVER-SW family version** | データファイルと WAL が共有するオンディスク形式の世代。現在は version 1。旧 DB は `StorageFormatMismatchException`、旧 WAL は `WalFormatMismatchException` で拒否する |
 
 ## メンテナンス
 

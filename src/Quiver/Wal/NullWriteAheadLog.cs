@@ -35,9 +35,6 @@ internal sealed class NullWriteAheadLog : IWriteAheadLog
     {
     }
 
-    public long WriteCheckpoint(long oldestActiveLsn, long lastFlushedDataLsn)
-        => CurrentLsn;
-
     public long WriteCheckpointBegin(long oldestActiveLsn, int dirtyPageCount)
         => CurrentLsn;
 

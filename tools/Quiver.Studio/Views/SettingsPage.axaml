@@ -28,7 +28,7 @@
                          Background="Transparent">
                     <ListBoxItem Content="{x:Static res:Strings.Settings_ScoreVisualization}" FontSize="13" Padding="10,6" />
                     <ListBoxItem Content="{x:Static res:Strings.Settings_ContourMap}" FontSize="13" Padding="10,6" />
-                    <ListBoxItem Content="{x:Static res:Strings.Settings_NodeRelationship}" FontSize="13" Padding="10,6" />
+                    <ListBoxItem Content="{x:Static res:Strings.Settings_VertexEdge}" FontSize="13" Padding="10,6" />
                     <ListBoxItem Content="{x:Static res:Strings.Settings_Language}" FontSize="13" Padding="10,6" />
                 </ListBox>
             </Border>
@@ -150,26 +150,26 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <!-- ===== Section: Node & Relationship ===== -->
+                    <!-- ===== Section: Vertex & Edge ===== -->
                     <StackPanel Spacing="10">
-                        <TextBlock Text="{x:Static res:Strings.Settings_NodeRelationship}"
+                        <TextBlock Text="{x:Static res:Strings.Settings_VertexEdge}"
                                    FontSize="16" FontWeight="SemiBold" />
-                        <TextBlock Text="{x:Static res:Strings.Settings_NodeRelDesc}"
+                        <TextBlock Text="{x:Static res:Strings.Settings_VertexEdgeDesc}"
                                    FontSize="12"
                                    Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
 
                         <StackPanel Spacing="4" Margin="0,6,0,0">
-                            <TextBlock Text="{x:Static res:Strings.Settings_NodeShape}" FontSize="12" FontWeight="Medium" />
-                            <ComboBox ItemsSource="{Binding NodeShapes}"
-                                      SelectedIndex="{Binding NodeShapeIndex}"
+                            <TextBlock Text="{x:Static res:Strings.Settings_VertexShape}" FontSize="12" FontWeight="Medium" />
+                            <ComboBox ItemsSource="{Binding VertexShapes}"
+                                      SelectedIndex="{Binding VertexShapeIndex}"
                                       HorizontalAlignment="Stretch"
                                       MaxWidth="300"
                                       FontSize="12" />
                         </StackPanel>
 
                         <StackPanel Spacing="4">
-                            <TextBlock Text="{x:Static res:Strings.Settings_RelationshipStyle}" FontSize="12" FontWeight="Medium" />
-                            <ComboBox ItemsSource="{Binding RelationshipStyles}"
+                            <TextBlock Text="{x:Static res:Strings.Settings_EdgeStyle}" FontSize="12" FontWeight="Medium" />
+                            <ComboBox ItemsSource="{Binding EdgeStyles}"
                                       SelectedIndex="{Binding EdgeStyleIndex}"
                                       HorizontalAlignment="Stretch"
                                       MaxWidth="300"

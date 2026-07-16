@@ -8,13 +8,13 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks.Standalone.Dev;
 
 /// <summary>
-/// FT-24: shared/exclusive lock の contention 特性を BDN 無しで短時間計測するランナー。
+/// shared/exclusive lock の contention 特性を BDN 無しで短時間計測するランナー。
 ///
 /// 二段構成:
 ///   1) Lock micro-bench — <see cref="LockManager"/> を直接叩き、N threads が同じ entityId を
 ///      奪い合う throughput を Shared / Exclusive で比較。Shared が増えるほど並列化される
 ///      ことを示す。仕様の「ReaderWriter が ExclusiveOnly 比 5× 以上」期待値を直接検証する。
-///   2) DB-level macro bench — <see cref="GraphDatabase"/> 経由で 32 reader + 1 writer の
+///   2) DB-level macro bench — <see cref="QuiverDatabase"/> 経由で 32 reader + 1 writer の
 ///      throughput を <see cref="LockingMode.ExclusiveOnly"/> vs <see cref="LockingMode.ReaderWriter"/>
 ///      で比較。
 ///
@@ -24,7 +24,7 @@ public static class LockContentionRunner
 {
     public static int Run()
     {
-        Console.WriteLine("=== FT-24: Lock Contention ===");
+        Console.WriteLine("=== Lock Contention ===");
         RunLockMicro();
         Console.WriteLine();
         RunDbMacro();
@@ -99,11 +99,11 @@ public static class LockContentionRunner
     private static bool s_stopFlag;
 
     // ------------------------------------------------------------------------
-    // 2) GraphDatabase macro bench
+    // 2) QuiverDatabase macro bench
     // ------------------------------------------------------------------------
     private static void RunDbMacro()
     {
-        Console.WriteLine("-- (2) GraphDatabase macro-bench (32 readers + 1 writer, 3s) --");
+        Console.WriteLine("-- (2) QuiverDatabase macro-bench (32 readers + 1 writer, 3s) --");
         Console.WriteLine("mode, readerTotal, reader/sec, writerTotal, writer/sec");
 
         int durationMs = 3_000;
@@ -120,21 +120,21 @@ public static class LockContentionRunner
         var dir = BenchTempDir.Create("ft24");
         try
         {
-            // Seed: 1 hot node with a Int64 property.
-            NodeId hot;
-            using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions
+            // Seed: 1 hot vertex with a Int64 property.
+            VertexId hot;
+            using (var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"), new QuiverDatabaseOptions
             {
                 LockingMode = mode,
                 LockTimeout = TimeSpan.FromSeconds(2),
             }))
             {
                 using var tx = db.BeginTransaction();
-                hot = tx.CreateNode("Hot");
+                hot = tx.CreateVertex("Hot");
                 tx.SetProperty(hot, "v", PropertyValue.FromInt64(0L));
                 tx.Commit();
             }
 
-            using var db2 = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions
+            using var db2 = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"), new QuiverDatabaseOptions
             {
                 LockingMode = mode,
                 LockTimeout = TimeSpan.FromSeconds(2),

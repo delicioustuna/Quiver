@@ -48,12 +48,12 @@ public class LiteralProviderTests
     }
 
     [Fact]
-    public void NodeId_carries_id_in_long_slot()
+    public void VertexId_carries_id_in_long_slot()
     {
-        var p = LiteralProvider.NodeId(new NodeId(99));
+        var p = LiteralProvider.VertexId(new VertexId(99));
         var empty = Empty;
         var slot = p.Provide(in empty, null!);
-        slot.Type.Should().Be(TupleSlotType.NodeId);
+        slot.Type.Should().Be(TupleSlotType.VertexId);
         slot.LongValue.Should().Be(99);
     }
 

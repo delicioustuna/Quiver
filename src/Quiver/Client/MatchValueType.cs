@@ -9,11 +9,11 @@ public enum MatchValueType : byte
     /// <summary>NULL / 未バインド。</summary>
     Null = 0,
 
-    /// <summary><see cref="Quiver.Core.NodeId"/>。</summary>
-    Node = 1,
+    /// <summary><see cref="Quiver.Core.VertexId"/>。</summary>
+    Vertex = 1,
 
-    /// <summary><see cref="Quiver.Core.RelationshipId"/>。</summary>
-    Relationship = 2,
+    /// <summary><see cref="Quiver.Core.EdgeId"/>。</summary>
+    Edge = 2,
 
     /// <summary><see cref="bool"/>。</summary>
     Boolean = 3,
@@ -30,6 +30,6 @@ public enum MatchValueType : byte
     /// <summary>バイト列。</summary>
     Bytes = 7,
 
-    /// <summary><see cref="Quiver.Core.HyperedgeId"/>。</summary>
-    Hyperedge = 8,
+    /// <summary><see cref="Quiver.Core.NexusId"/>。</summary>
+    Nexus = 8,
 }

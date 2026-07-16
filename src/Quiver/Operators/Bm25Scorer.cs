@@ -70,10 +70,10 @@ internal static class Bm25Scorer
     /// <summary>
     /// <paramref name="queryText"/> に対し BM25 スコア降順で文書をランキングする
     /// (同スコアは packed entityId 昇順で決定論的に解決)。返却 ID は生の packed entityId
-    /// (generation + sequence); 呼び出し元がライブ <c>NodeId</c> に解決する。
+    /// (generation + sequence); 呼び出し元がライブ <c>VertexId</c> に解決する。
     /// <para>
     /// <paramref name="candidateSequences"/> が non-null の場合、そのセットに限定して
-    /// 累積する (graph-first)。パイプライン上の NodeId は sequence 空間だが posting キーは
+    /// 累積する (graph-first)。パイプライン上の VertexId は sequence 空間だが posting キーは
     /// packed のため、posting の <see cref="EntityRef.Sequence"/> で照合する。
     /// df / idf は全 posting リスト (または <paramref name="termStats"/> 提供時は
     /// スナップショット df) から計算し、WAND 経路とスコアを一致させる。

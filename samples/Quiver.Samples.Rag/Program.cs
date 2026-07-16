@@ -9,7 +9,7 @@ using Quiver.Rag;
 string dir = Path.Combine(Path.GetTempPath(), "quiver_rag_sample_" + Guid.NewGuid().ToString("N")[..8]);
 try
 {
-    using var db = GraphDatabase.Open(Path.Combine(dir, "graph.quiver"));
+    using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
 
     var embedder = new HashEmbedder(dim: 16);
     var store = new RagStore(db, new RagStoreOptions

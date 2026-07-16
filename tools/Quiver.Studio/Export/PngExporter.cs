@@ -9,16 +9,16 @@ namespace Quiver.Studio.Export;
 public static class PngExporter
 {
     public static void Export(
-        IReadOnlyList<VisualNode> nodes,
+        IReadOnlyList<VisualVertex> vertices,
         IReadOnlyList<VisualEdge> edges,
         bool isDarkTheme,
         GraphVisualSettings visualSettings,
         string outputPath,
         double scale = 2.0)
     {
-        if (nodes.Count == 0) return;
+        if (vertices.Count == 0) return;
 
-        ComputeBounds(nodes, out var minX, out var minY, out var maxX, out var maxY);
+        ComputeBounds(vertices, out var minX, out var minY, out var maxX, out var maxY);
         const double margin = 40;
         var width = (maxX - minX) + margin * 2;
         var height = (maxY - minY) + margin * 2;
@@ -41,18 +41,18 @@ public static class PngExporter
         {
             var bg = isDarkTheme ? Color.Parse("#1e1e1e") : Colors.White;
             ctx.DrawRectangle(new SolidColorBrush(bg), null, new Rect(0, 0, pixelW, pixelH));
-            renderer.Render(ctx, nodes, edges);
+            renderer.Render(ctx, vertices, edges);
         }
         bitmap.Save(outputPath, new PngBitmapEncoderOptions());
     }
 
     private static void ComputeBounds(
-        IReadOnlyList<VisualNode> nodes,
+        IReadOnlyList<VisualVertex> vertices,
         out double minX, out double minY, out double maxX, out double maxY)
     {
         minX = double.MaxValue; minY = double.MaxValue;
         maxX = double.MinValue; maxY = double.MinValue;
-        foreach (var n in nodes)
+        foreach (var n in vertices)
         {
             var r = n.Radius;
             if (n.X - r < minX) minX = n.X - r;

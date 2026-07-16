@@ -208,7 +208,7 @@ public sealed class IntellisenseService : IDisposable
 
         AddReferenceIfMissing(refs, seen, typeof(object));
         AddReferenceIfMissing(refs, seen, typeof(Enumerable));
-        AddReferenceIfMissing(refs, seen, typeof(GraphDatabase));
+        AddReferenceIfMissing(refs, seen, typeof(QuiverDatabase));
         return refs;
     }
 
@@ -228,7 +228,7 @@ public sealed class IntellisenseService : IDisposable
 
         sb.AppendLine();
         sb.AppendLine("class __ScriptHost__ {");
-        sb.AppendLine("    GraphDatabase db = null!;");
+        sb.AppendLine("    QuiverDatabase db = null!;");
         sb.AppendLine("    IGraphTransaction tx = null!;");
         sb.AppendLine("    GraphTraversalSource g = null!;");
         sb.AppendLine("    ISchemaApi schema = null!;");
@@ -239,7 +239,7 @@ public sealed class IntellisenseService : IDisposable
 
     private static (Dictionary<string, string>?, Dictionary<string, XElement>?) LoadXmlDocs()
     {
-        var dllPath = typeof(GraphDatabase).Assembly.Location;
+        var dllPath = typeof(QuiverDatabase).Assembly.Location;
         if (string.IsNullOrEmpty(dllPath))
             return (null, null);
 

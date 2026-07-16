@@ -1,4 +1,4 @@
-﻿namespace Quiver.Query.Physical;
+namespace Quiver.Query.Physical;
 
 /// <summary>
 /// <see cref="ExpandOperator"/> が各エッジで放出するタプル構成を指定する。
@@ -6,10 +6,10 @@
 internal enum ExpandOutputMode
 {
     NeighborOnly = 1,
-    NeighborAndRel = 2,
+    NeighborAndEdge = 2,
     Full = 3,
     /// <summary>
-    /// (rel, neighbor, weight) を放出する。weight は隣接ビューの inline payload lane から読む。
+    /// (edge, neighbor, weight) を放出する。weight は隣接ビューの inline payload lane から読む。
     /// weight スロットの型は <c>PayloadLaneSpec.Kind</c> に従う
     /// (Int64 → <see cref="TupleSlotType.Int64"/>、Double → <see cref="TupleSlotType.Double"/>)。
     /// payload lane を持たない <c>IAdjacencyBlockStore</c> では <c>DefaultRaw</c> が入る

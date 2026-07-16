@@ -5,7 +5,7 @@ namespace Quiver.Query.Physical;
 
 /// <summary>
 /// 2 つ以上の子演算子 (通常 <see cref="FullTextScanOperator"/> BM25 +
-/// <see cref="KnnNodeSourceOperator"/>) のランク済み NodeId ストリームを
+/// <see cref="KnnVertexSourceOperator"/>) のランク済み VertexId ストリームを
 /// Reciprocal Rank Fusion で融合し、top-<c>k</c> を融合順で放出する演算子。
 /// </summary>
 /// <remarks>
@@ -14,7 +14,7 @@ namespace Quiver.Query.Physical;
 /// 各子は <see cref="Open"/> で完全に drain される (k は数十件なのでメモリは問題にならない)。
 /// 融合スコアの同点は entity id 昇順で決定論的に解決する。可視性は子が既に保証済み。
 /// <para>
-/// 前提条件: 全子が同一の packed <see cref="NodeId"/> 空間で ID を放出すること。
+/// 前提条件: 全子が同一の packed <see cref="VertexId"/> 空間で ID を放出すること。
 /// 現行の子 (text-first BM25 + vector-first KNN) はこれを満たす。
 /// </para>
 /// </remarks>
@@ -44,7 +44,7 @@ internal sealed class FusionOperator : IPhysicalOperator
         _k = k;
     }
 
-    public TupleSchema Schema { get; } = new([new ColumnDefinition("nodeId", TupleSlotType.NodeId)]);
+    public TupleSchema Schema { get; } = new([new ColumnDefinition("vertexId", TupleSlotType.VertexId)]);
     public OperatorStatistics Statistics { get; private set; }
     public TupleRef Current => new(_buffer);
 
@@ -62,7 +62,7 @@ internal sealed class FusionOperator : IPhysicalOperator
             while (child.MoveNext())
             {
                 var slot = child.Current[col];
-                if (slot.Type != TupleSlotType.NodeId) continue;
+                if (slot.Type != TupleSlotType.VertexId) continue;
                 rank++;
                 long id = slot.LongValue;
                 double contrib = 1.0 / (K0 + rank);
@@ -84,7 +84,7 @@ internal sealed class FusionOperator : IPhysicalOperator
     {
         if (_pos + 1 >= _results.Length) return false;
         _pos++;
-        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _results[_pos] };
+        _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _results[_pos] };
         var s = Statistics;
         s.RowsProduced++;
         Statistics = s;

@@ -20,7 +20,7 @@ public class CoalesceOperatorTests
         public ProbeBranch(CorrelatedInputOperator probe, int multiplier)
         { _probe = probe; _multiplier = multiplier; }
 
-        public TupleSchema Schema { get; } = new([new ColumnDefinition("coalesce", TupleSlotType.NodeId)]);
+        public TupleSchema Schema { get; } = new([new ColumnDefinition("coalesce", TupleSlotType.VertexId)]);
         public OperatorStatistics Statistics => default;
         public TupleRef Current => new(_buffer);
 
@@ -45,7 +45,7 @@ public class CoalesceOperatorTests
     [Fact]
     public void Empty_source_returns_empty()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         var probe = new CorrelatedInputOperator();
         using var op = new CoalesceOperator(src, 0, [probe], [new ProbeBranch(probe, 1)]);
         op.Open(null!);
@@ -55,7 +55,7 @@ public class CoalesceOperatorTests
     [Fact]
     public void First_emitting_branch_wins_and_later_branches_skipped()
     {
-        var src = new FixedNodeListOperator(new NodeId(5));
+        var src = new FixedVertexListOperator(new VertexId(5));
         var pA = new CorrelatedInputOperator();
         var pB = new CorrelatedInputOperator();
         using var op = new CoalesceOperator(
@@ -69,7 +69,7 @@ public class CoalesceOperatorTests
     [Fact]
     public void Empty_first_branch_falls_through_to_second()
     {
-        var src = new FixedNodeListOperator(new NodeId(8));
+        var src = new FixedVertexListOperator(new VertexId(8));
         var pA = new CorrelatedInputOperator();
         var pB = new CorrelatedInputOperator();
         using var op = new CoalesceOperator(
@@ -83,7 +83,7 @@ public class CoalesceOperatorTests
     [Fact]
     public void All_branches_empty_drops_input_row()
     {
-        var src = new FixedNodeListOperator(new NodeId(3));
+        var src = new FixedVertexListOperator(new VertexId(3));
         var pA = new CorrelatedInputOperator();
         var pB = new CorrelatedInputOperator();
         using var op = new CoalesceOperator(
@@ -97,7 +97,7 @@ public class CoalesceOperatorTests
     [Fact]
     public void Constructor_requires_matching_probe_branch_arity()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         var p = new CorrelatedInputOperator();
         Action act = () => new CoalesceOperator(src, 0, [p], [new ProbeBranch(p, 1), new ProbeBranch(p, 1)]);
         act.Should().Throw<ArgumentException>();

@@ -1,11 +1,9 @@
 # Quiver: システム概要
 
-> as-built 仕様 (on-disk FormatVersion V5, 2026-07-08)
+> as-built 仕様（QUIVER-SW family version 1、2026-07-15）
 >
-> **current (as-built)**: 以下は現在実装されている FormatVersion V5 の契約である。
-> **target (未実装)**: [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md) が将来の設計正本であり、本書の本文はその target を先取りして記述しない。
-> **実装済み境界**: identity の kind、Generation、packed representation は現行実装の契約である。
-> transaction、WAL、store の再設計は target の段階的な実装対象として残る。
+> **current (as-built)**: identity と QUIVER-SW format/WAL foundation は再設計 Wave 2 の契約である。
+> Single Writer + Snapshot Readers の後続 wave は [再設計正本](../../plans/single-writer-redesign.md) に従って段階的に実装する。
 
 ## ポジショニング {#positioning}
 
@@ -38,7 +36,7 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 ┌─────────────────────────────────────────────────┐
 │  Quiver.Rag / Quiver.Hosting / Quiver.OpenTelemetry │  オプションのアドオン
 ├─────────────────────────────────────────────────┤
-│  GraphDatabase (facade)                         │
+│  QuiverDatabase (facade)                         │
 │  ├─ ISchemaApi (labels, indexes, FT indexes)    │
 │  ├─ IGraphTransaction (CRUD, index, vector)     │
 │  ├─ IDiagnosticsApi (consistency check, repair) │
@@ -51,14 +49,14 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 ├─────────────────────────────────────────────────┤
 │  Transaction Manager                            │
 │  ├─ MVCC (snapshot isolation)                   │
-│  ├─ ARIES WAL + recovery                        │
+│  ├─ QUIVER-SW page WAL + Commit-only recovery   │
 │  └─ Checkpointer                                │
 ├─────────────────────────────────────────────────┤
 │  Storage Engine                                 │
 │  ├─ PagedFile (8 KB pages, Clock buffer pool)   │
 │  ├─ SingleFileContainer (*.quiver)              │
-│  ├─ NodeStore / RelationshipStore / PropertyStore│
-│  ├─ HyperedgeStore / IncidenceStore              │
+│  ├─ VertexStore / EdgeStore / PropertyStore│
+│  ├─ NexusStore / IncidenceStore              │
 │  ├─ B+Tree indexes                              │
 │  ├─ FullTextIndex (postings + norms B+Trees)    │
 │  └─ PersistentVectorStore + HNSW                │
@@ -82,13 +80,9 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 
 ## フォーマットバージョン {#format-version}
 
-`FormatVersion.Current = V5 = 5`。
-V2 は自己記述 vector catalog / per-index HNSW レイアウト、V3 は第一級ハイパーエッジ用の
-ID kind、type / role token 空間、固定 tenant 18–25 の予約、V4 は incidence の
-fixed-slot 直接アドレスレイアウト、V5 は relationship delta の head sidecar と
-append-only page store 用固定 tenant 27–28 を導入した clean break である。
-自動マイグレーションは行わない。
-異なるフォーマットバージョンのデータベースを開くと `FormatVersionMismatchException` をスローする。
+現行のデータファイルと WAL は `QUIVER-SW` family version 1 である。
+旧フォーマットを読み替える decoder と自動マイグレーションは提供しない。
+旧データベースは `StorageFormatMismatchException`、旧 WAL は `WalFormatMismatchException` で拒否する。
 
 ## 非目標 {#non-goals}
 

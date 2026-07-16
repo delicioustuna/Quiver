@@ -7,7 +7,7 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// SetProperty / DeleteNode の書き込み経路に統合された全文インデックス保守を検証する。
+/// SetProperty / DeleteVertex の書き込み経路に統合された全文インデックス保守を検証する。
 /// 挿入、更新時の更新前イメージ削除、削除、ロールバックのすべてで、
 /// 同一トランザクション内の Postings と Norms が整合することを確認する。
 /// </summary>
@@ -28,7 +28,7 @@ public sealed class FullTextMaintenanceTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private static FullTextIndex Ft(GraphDatabase db, string name)
+    private static FullTextIndex Ft(QuiverDatabase db, string name)
     {
         ((SchemaApi)db.Schema).IndexManager.TryGetFullTextIndex(name, out var ft).Should().BeTrue();
         return ft;
@@ -37,14 +37,14 @@ public sealed class FullTextMaintenanceTests : IDisposable
     [Fact]
     public void SetProperty_on_indexed_label_writes_postings()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
 
-        NodeId node;
+        VertexId vertex;
         using (var tx = db.BeginTransaction())
         {
-            node = tx.CreateNode("Doc");
-            tx.SetProperty(node, "body", PropertyValue.FromString("hello world"));
+            vertex = tx.CreateVertex("Doc");
+            tx.SetProperty(vertex, "body", PropertyValue.FromString("hello world"));
             tx.Commit();
         }
 
@@ -52,18 +52,18 @@ public sealed class FullTextMaintenanceTests : IDisposable
         ft.DocumentCount.Should().Be(1);
         var hello = ft.GetPostings("hello");
         hello.Should().ContainSingle();
-        EntityRef.UnpackSequence(hello[0].EntityId).Should().Be(node.Sequence);
+        EntityRef.UnpackSequence(hello[0].EntityId).Should().Be(vertex.Sequence);
     }
 
     [Fact]
     public void Read_your_own_writes_within_the_same_transaction()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
         var ft = Ft(db, "idx_body");
 
         using var tx = db.BeginTransaction();
-        var n = tx.CreateNode("Doc");
+        var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString("inflight content"));
         // Postings are visible before commit (same-Tx read-your-own-writes).
         ft.GetPostings("inflight").Should().ContainSingle();
@@ -73,19 +73,19 @@ public sealed class FullTextMaintenanceTests : IDisposable
     [Fact]
     public void Updating_property_removes_old_terms_via_before_image()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
 
-        NodeId node;
+        VertexId vertex;
         using (var tx = db.BeginTransaction())
         {
-            node = tx.CreateNode("Doc");
-            tx.SetProperty(node, "body", PropertyValue.FromString("hello world"));
+            vertex = tx.CreateVertex("Doc");
+            tx.SetProperty(vertex, "body", PropertyValue.FromString("hello world"));
             tx.Commit();
         }
         using (var tx = db.BeginTransaction())
         {
-            tx.SetProperty(node, "body", PropertyValue.FromString("goodbye world"));
+            tx.SetProperty(vertex, "body", PropertyValue.FromString("goodbye world"));
             tx.Commit();
         }
 
@@ -99,12 +99,12 @@ public sealed class FullTextMaintenanceTests : IDisposable
     [Fact]
     public void Rollback_leaves_no_postings()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
 
         using (var tx = db.BeginTransaction())
         {
-            var n = tx.CreateNode("Doc");
+            var n = tx.CreateVertex("Doc");
             tx.SetProperty(n, "body", PropertyValue.FromString("transient text"));
             tx.Rollback();
         }
@@ -115,21 +115,21 @@ public sealed class FullTextMaintenanceTests : IDisposable
     }
 
     [Fact]
-    public void DeleteNode_removes_postings()
+    public void DeleteVertex_removes_postings()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
 
-        NodeId node;
+        VertexId vertex;
         using (var tx = db.BeginTransaction())
         {
-            node = tx.CreateNode("Doc");
-            tx.SetProperty(node, "body", PropertyValue.FromString("hello world"));
+            vertex = tx.CreateVertex("Doc");
+            tx.SetProperty(vertex, "body", PropertyValue.FromString("hello world"));
             tx.Commit();
         }
         using (var tx = db.BeginTransaction())
         {
-            tx.DeleteNode(node);
+            tx.DeleteVertex(vertex);
             tx.Commit();
         }
 
@@ -141,12 +141,12 @@ public sealed class FullTextMaintenanceTests : IDisposable
     [Fact]
     public void Writes_to_unbound_keys_are_not_indexed()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
 
         using (var tx = db.BeginTransaction())
         {
-            var n = tx.CreateNode("Doc");
+            var n = tx.CreateVertex("Doc");
             tx.SetProperty(n, "title", PropertyValue.FromString("not indexed")); // 'title' is unbound
             tx.Commit();
         }

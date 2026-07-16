@@ -19,13 +19,13 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
     private bool _hasGraph;
 
     [ObservableProperty]
-    private VisualNode? _selectedNode;
+    private VisualVertex? _selectedVertex;
 
     [ObservableProperty]
     private VisualEdge? _selectedEdge;
 
     [ObservableProperty]
-    private int _nodeCount;
+    private int _vertexCount;
 
     [ObservableProperty]
     private int _edgeCount;
@@ -40,25 +40,25 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
     private bool _isLinkMode;
 
     [ObservableProperty]
-    private VisualNode? _linkSource;
+    private VisualVertex? _linkSource;
 
     public double LinkCursorX { get; set; }
     public double LinkCursorY { get; set; }
     public double LastContextWorldX { get; set; }
     public double LastContextWorldY { get; set; }
 
-    public List<VisualNode> Nodes { get; } = [];
+    public List<VisualVertex> Vertices { get; } = [];
     public List<VisualEdge> Edges { get; } = [];
     public GraphRenderer Renderer { get; } = new();
 
     public event Action? GraphChanged;
-    public event Func<Task>? AddNodeRequested;
-    public event Func<VisualNode, VisualNode, Task>? LinkCompleted;
+    public event Func<Task>? AddVertexRequested;
+    public event Func<VisualVertex, VisualVertex, Task>? LinkCompleted;
 
-    internal async Task InvokeAddNodeRequested()
+    internal async Task InvokeAddVertexRequested()
     {
-        if (AddNodeRequested is not null)
-            await AddNodeRequested.Invoke();
+        if (AddVertexRequested is not null)
+            await AddVertexRequested.Invoke();
     }
 
     public GraphCanvasViewModel(
@@ -77,7 +77,7 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
 
     partial void OnIsHierarchicalLayoutChanged(bool value)
     {
-        if (Nodes.Count > 0)
+        if (Vertices.Count > 0)
         {
             ApplyLayout();
             GraphChanged?.Invoke();
@@ -87,21 +87,21 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
     private void ApplyLayout()
     {
         if (IsHierarchicalLayout)
-            _hierarchyLayout.Layout(Nodes, Edges);
+            _hierarchyLayout.Layout(Vertices, Edges);
         else
-            _forceLayout.Layout(Nodes, Edges);
+            _forceLayout.Layout(Vertices, Edges);
     }
 
     public void BuildFromResult(QueryResult result)
     {
-        Nodes.Clear();
+        Vertices.Clear();
         Edges.Clear();
-        SelectedNode = null;
+        SelectedVertex = null;
 
         if (!result.HasGraphData || _db.CurrentDatabase is null)
         {
             HasGraph = false;
-            NodeCount = 0;
+            VertexCount = 0;
             EdgeCount = 0;
             GraphChanged?.Invoke();
             return;
@@ -109,35 +109,35 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
 
         using var tx = _db.CurrentDatabase.BeginReadOnlyTransaction();
 
-        var nodeMap = new Dictionary<long, VisualNode>();
+        var vertexMap = new Dictionary<long, VisualVertex>();
 
-        foreach (var nid in result.ExtractedNodeIds)
+        foreach (var nid in result.ExtractedVertexIds)
         {
-            if (nodeMap.ContainsKey(nid.Sequence)) continue;
-            if (!tx.NodeExists(nid)) continue;
+            if (vertexMap.ContainsKey(nid.Sequence)) continue;
+            if (!tx.VertexExists(nid)) continue;
 
-            var label = tx.GetNodeLabel(nid) ?? $"({nid.Sequence})";
-            nodeMap[nid.Sequence] = new VisualNode(nid, label);
+            var label = tx.GetVertexLabel(nid) ?? $"({nid.Sequence})";
+            vertexMap[nid.Sequence] = new VisualVertex(nid, label);
         }
 
         var edgeSet = new HashSet<long>();
-        foreach (var (_, vn) in nodeMap)
+        foreach (var (_, vn) in vertexMap)
         {
-            var rels = tx.EnumerateRelationships(vn.Id);
-            while (rels.MoveNext())
+            var edges = tx.EnumerateEdges(vn.Id);
+            while (edges.MoveNext())
             {
-                var rel = rels.Current;
-                if (!edgeSet.Add(rel.Id.Sequence)) continue;
-                if (!nodeMap.TryGetValue(rel.Source.Sequence, out var sourceVn)) continue;
-                if (!nodeMap.TryGetValue(rel.Target.Sequence, out var targetVn)) continue;
+                var edge = edges.Current;
+                if (!edgeSet.Add(edge.Id.Sequence)) continue;
+                if (!vertexMap.TryGetValue(edge.Source.Sequence, out var sourceVn)) continue;
+                if (!vertexMap.TryGetValue(edge.Target.Sequence, out var targetVn)) continue;
 
-                var typeName = tx.GetRelationshipTypeName(rel.Type) ?? rel.Type.Value.ToString();
-                Edges.Add(new VisualEdge(rel.Id, sourceVn, targetVn, typeName));
+                var typeName = tx.GetEdgeTypeName(edge.Type) ?? edge.Type.Value.ToString();
+                Edges.Add(new VisualEdge(edge.Id, sourceVn, targetVn, typeName));
             }
         }
 
-        Nodes.AddRange(nodeMap.Values);
-        NodeCount = Nodes.Count;
+        Vertices.AddRange(vertexMap.Values);
+        VertexCount = Vertices.Count;
         EdgeCount = Edges.Count;
 
         if (result.VectorScores is { Count: > 0 } scores)
@@ -151,7 +151,7 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
             }
             var range = max - min;
 
-            foreach (var vn in Nodes)
+            foreach (var vn in Vertices)
             {
                 if (scores.TryGetValue(vn.Id.Sequence, out var s))
                 {
@@ -161,9 +161,9 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
             }
         }
 
-        _logger.LogInformation("グラフ構築: Nodes={Nodes} Edges={Edges}", NodeCount, EdgeCount);
+        _logger.LogInformation("グラフ構築: Vertices={Vertices} Edges={Edges}", VertexCount, EdgeCount);
 
-        if (Nodes.Count > 0)
+        if (Vertices.Count > 0)
         {
             ApplyLayout();
             HasGraph = true;
@@ -176,35 +176,35 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
         GraphChanged?.Invoke();
     }
 
-    public void SelectNode(VisualNode? node)
+    public void SelectVertex(VisualVertex? vertex)
     {
-        if (SelectedNode is not null)
-            SelectedNode.IsSelected = false;
+        if (SelectedVertex is not null)
+            SelectedVertex.IsSelected = false;
         if (SelectedEdge is not null)
             SelectedEdge.IsSelected = false;
 
-        SelectedNode = node;
+        SelectedVertex = vertex;
         SelectedEdge = null;
 
-        if (node is not null)
-            node.IsSelected = true;
+        if (vertex is not null)
+            vertex.IsSelected = true;
     }
 
     public void SelectEdge(VisualEdge? edge)
     {
-        if (SelectedNode is not null)
-            SelectedNode.IsSelected = false;
+        if (SelectedVertex is not null)
+            SelectedVertex.IsSelected = false;
         if (SelectedEdge is not null)
             SelectedEdge.IsSelected = false;
 
-        SelectedNode = null;
+        SelectedVertex = null;
         SelectedEdge = edge;
 
         if (edge is not null)
             edge.IsSelected = true;
     }
 
-    public void BeginLinkMode(VisualNode source)
+    public void BeginLinkMode(VisualVertex source)
     {
         LinkSource = source;
         IsLinkMode = true;
@@ -216,7 +216,7 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
         LinkSource = null;
     }
 
-    public async Task CompleteLinkAsync(VisualNode target)
+    public async Task CompleteLinkAsync(VisualVertex target)
     {
         if (LinkSource is null || LinkSource == target) { CancelLinkMode(); return; }
         var source = LinkSource;
@@ -225,30 +225,30 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
             await LinkCompleted.Invoke(source, target);
     }
 
-    public void AddNodeToGraph(NodeId id, string label, double worldX, double worldY)
+    public void AddVertexToGraph(VertexId id, string label, double worldX, double worldY)
     {
-        var vn = new VisualNode(id, label) { X = worldX, Y = worldY, IsPinned = true };
-        Nodes.Add(vn);
-        NodeCount = Nodes.Count;
+        var vn = new VisualVertex(id, label) { X = worldX, Y = worldY, IsPinned = true };
+        Vertices.Add(vn);
+        VertexCount = Vertices.Count;
         HasGraph = true;
         GraphChanged?.Invoke();
     }
 
-    public void AddEdgeToGraph(RelationshipId id, VisualNode source, VisualNode target, string type)
+    public void AddEdgeToGraph(EdgeId id, VisualVertex source, VisualVertex target, string type)
     {
         Edges.Add(new VisualEdge(id, source, target, type));
         EdgeCount = Edges.Count;
         GraphChanged?.Invoke();
     }
 
-    public void RemoveNodeFromGraph(VisualNode node)
+    public void RemoveVertexFromGraph(VisualVertex vertex)
     {
-        Edges.RemoveAll(e => e.Source == node || e.Target == node);
-        Nodes.Remove(node);
-        if (SelectedNode == node) SelectNode(null);
-        NodeCount = Nodes.Count;
+        Edges.RemoveAll(e => e.Source == vertex || e.Target == vertex);
+        Vertices.Remove(vertex);
+        if (SelectedVertex == vertex) SelectVertex(null);
+        VertexCount = Vertices.Count;
         EdgeCount = Edges.Count;
-        HasGraph = Nodes.Count > 0;
+        HasGraph = Vertices.Count > 0;
         GraphChanged?.Invoke();
     }
 
@@ -266,13 +266,13 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
         GraphChanged?.Invoke();
     }
 
-    public VisualNode? FindNodeById(NodeId id) => Nodes.Find(n => n.Id == id);
+    public VisualVertex? FindVertexById(VertexId id) => Vertices.Find(n => n.Id == id);
 
     public string ExportSvg()
-        => Export.SvgExporter.Export(Nodes, Edges, Renderer.IsDarkTheme);
+        => Export.SvgExporter.Export(Vertices, Edges, Renderer.IsDarkTheme);
 
     public void ExportPng(string outputPath)
-        => Export.PngExporter.Export(Nodes, Edges, Renderer.IsDarkTheme, Renderer.VisualSettings, outputPath);
+        => Export.PngExporter.Export(Vertices, Edges, Renderer.IsDarkTheme, Renderer.VisualSettings, outputPath);
 
     public event Func<string, Task>? ExportSvgRequested;
     public event Func<string, Task>? ExportPngRequested;

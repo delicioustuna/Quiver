@@ -1,13 +1,13 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 
 namespace Quiver.Api.Tests;
 
 public class AttributesTest
 {
     [Fact]
-    public void NodeAttribute_stores_label()
+    public void VertexAttribute_stores_label()
     {
-        var attr = new NodeAttribute("Person");
+        var attr = new VertexAttribute("Person");
         attr.Label.Should().Be("Person");
     }
 

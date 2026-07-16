@@ -18,29 +18,29 @@ public sealed class InMemoryGraphStorageBackendContractTests
     protected override bool SupportsPersistence => false;
 
     [Fact]
-    public void CreateInMemory_でノードを作成して読み戻せる()
+    public void CreateInMemory_でVertexを作成して読み戻せる()
     {
-        using var database = GraphDatabase.CreateInMemory();
+        using var database = QuiverDatabase.CreateInMemory();
 
-        NodeId nodeId;
+        VertexId vertexId;
         using (var tx = database.BeginTransaction())
         {
-            nodeId = tx.CreateNode("Person");
+            vertexId = tx.CreateVertex("Person");
             tx.Commit();
         }
 
         using var readTx = database.BeginReadOnlyTransaction();
-        readTx.NodeExists(nodeId).Should().BeTrue();
+        readTx.VertexExists(vertexId).Should().BeTrue();
         readTx.Rollback();
     }
 
     [Fact]
     public void Memoryセンチネルはインメモリバックエンドを選択する()
     {
-        using var database = GraphDatabase.Open(":memory:");
+        using var database = QuiverDatabase.Open(":memory:");
 
         using var tx = database.BeginTransaction();
-        tx.CreateNode("Temporary");
+        tx.CreateVertex("Temporary");
         tx.Commit();
 
         database.Path.Should().Be(":memory:");
@@ -49,7 +49,7 @@ public sealed class InMemoryGraphStorageBackendContractTests
     [Fact]
     public void スナップショットはサポートしない()
     {
-        using var database = GraphDatabase.CreateInMemory();
+        using var database = QuiverDatabase.CreateInMemory();
 
         var action = () => database.CreateSnapshot("snapshot.quiver");
 

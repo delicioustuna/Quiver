@@ -32,13 +32,13 @@ public sealed class QuiverEventLoggerBridgeTests : IDisposable
         services.AddQuiver(options => options.DataDirectory = _dir);
 
         using var provider = services.BuildServiceProvider();
-        var db = provider.GetRequiredService<GraphDatabase>();
+        var db = provider.GetRequiredService<QuiverDatabase>();
 
         long txId;
         using (var tx = db.BeginTransaction())
         {
             txId = tx.Id.Value;
-            tx.CreateNode("Person");
+            tx.CreateVertex("Person");
             tx.Commit();
         }
 
@@ -60,10 +60,10 @@ public sealed class QuiverEventLoggerBridgeTests : IDisposable
         services.AddQuiver(options => options.DataDirectory = _dir);
 
         using var provider = services.BuildServiceProvider();
-        var db = provider.GetRequiredService<GraphDatabase>();
+        var db = provider.GetRequiredService<QuiverDatabase>();
 
         using var tx = db.BeginTransaction();
-        tx.CreateNode("Person");
+        tx.CreateVertex("Person");
         tx.Commit();
     }
 
