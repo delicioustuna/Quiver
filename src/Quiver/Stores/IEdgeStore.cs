@@ -24,32 +24,15 @@ internal interface IEdgeStore
     /// <summary>指定 sequence の現在の Generation。範囲外なら -1。</summary>
     int CurrentGeneration(long localId) => -1;
 
-    // Edge粒度の inline property。vertex (IVertexStore) と同型。
-    // 小さい値は edge record version へ inline 格納し get/has/set/remove を O(small) 化する。
-    // inline 不可な値は false を返し、呼出側 (GraphTransaction) が overflow チェーンへ回す。
-    // inline を持たない実装 (旧 EdgeStore) は false を返して overflow に委ねる (graceful degrade)。
-
-    /// <summary>visible 版の inline 領域から property を読む。inline に無ければ false。</summary>
-    bool TryGetInlineProperty(EdgeId edgeId, PropertyKeyId keyId, out PropertyValue value);
-
-    /// <summary>visible 版の inline 領域に keyId があるか。</summary>
-    bool HasInlineProperty(EdgeId edgeId, PropertyKeyId keyId);
-
-    /// <summary>inline property を set (copy-on-write)。inline 不可 / 予算超過なら false。</summary>
-    bool SetInlineProperty(EdgeId edgeId, PropertyKeyId keyId, in PropertyValue value);
-
-    /// <summary>inline property を remove (copy-on-write)。inline に無ければ false。</summary>
-    bool RemoveInlineProperty(EdgeId edgeId, PropertyKeyId keyId);
-
-    /// <summary>inline + overflow チェーンを結合した property 列挙子を返す。</summary>
-    PropertyEnumerator EnumerateProperties(EdgeId edgeId, IPropertyStore overflowStore);
+    /// <summary>owner-bound property version chain の列挙子を返す。</summary>
+    PropertyCursor EnumerateProperties(EdgeId edgeId, IPropertyStore overflowStore);
 }
 
 // EdgeRecord レイアウト (48 バイト):
-// 0 Flags(1) 1 Source(6) 7 Target(6) 13 TypeId(2) 15 SrcPrev(6) 21 SrcNext(6) 27 TgtPrev(6) 33 TgtNext(6) 39 FirstPropId(6) 45 Pad(3)
+// 0 Flags(1) 1 Source(6) 7 Target(6) 13 TypeId(2) 15 SrcPrev(6) 21 SrcNext(6) 27 TgtPrev(6) 33 TgtNext(6) 39 FirstPropertyRef(6) 45 Pad(3)
 /// <summary>
 /// Edgeレコードを読み出したハンドル。端点 (source/target)、型、両端の双方向リンク、
-/// 先頭プロパティ ID を公開する (アロケーションを避ける ref struct)。
+/// owner-bound property version chain の先頭参照を保持する (アロケーションを避ける ref struct)。
 /// </summary>
 public readonly ref struct EdgeReadHandle
 {
@@ -62,7 +45,7 @@ public readonly ref struct EdgeReadHandle
     private readonly EdgeId _srcNext;
     private readonly EdgeId _tgtPrev;
     private readonly EdgeId _tgtNext;
-    private readonly PropertyId _firstPropId;
+    private readonly PropertyVersionRef _firstPropertyRef;
 
     /// <summary>このEdgeの ID。</summary>
     public EdgeId Id => _id;
@@ -82,17 +65,16 @@ public readonly ref struct EdgeReadHandle
     public EdgeId TargetPrev => _tgtPrev;
     /// <summary>終点Vertexの隣接チェーン上の次エントリ。</summary>
     public EdgeId TargetNext => _tgtNext;
-    /// <summary>プロパティチェーンの先頭 ID (無しは <see cref="PropertyId.Invalid"/>)。</summary>
-    public PropertyId FirstPropertyId => _firstPropId;
+    internal PropertyVersionRef FirstPropertyRef => _firstPropertyRef;
 
     internal EdgeReadHandle(
         EdgeId id, bool inUse, VertexId source, VertexId target, EdgeTypeId type,
         EdgeId srcPrev, EdgeId srcNext, EdgeId tgtPrev, EdgeId tgtNext,
-        PropertyId firstPropId)
+        PropertyVersionRef firstPropertyRef)
     {
         _id = id; _inUse = inUse; _source = source; _target = target; _type = type;
         _srcPrev = srcPrev; _srcNext = srcNext; _tgtPrev = tgtPrev; _tgtNext = tgtNext;
-        _firstPropId = firstPropId;
+        _firstPropertyRef = firstPropertyRef;
     }
 
     /// <summary>ハンドルを破棄する (現状は no-op)。</summary>
@@ -146,7 +128,7 @@ internal ref struct EdgeWriteHandle
         readonly get => new(RecordHelpers.ReadInt48(_rec[33..]));
         set => RecordHelpers.WriteInt48(_rec[33..], value.Sequence);
     }
-    public PropertyId FirstPropertyId
+    public PropertyVersionRef FirstPropertyRef
     {
         readonly get => new(RecordHelpers.ReadInt48(_rec[39..]));
         set => RecordHelpers.WriteInt48(_rec[39..], value.Sequence);
@@ -203,7 +185,7 @@ public ref struct EdgeEnumerator
                 raw.SourceNext,
                 raw.TargetPrev,
                 raw.TargetNext,
-                raw.FirstPropertyId);
+                raw.FirstPropertyRef);
             // 論理削除された (= MVCC visibility で invisible な) record は
             // Read が InUse=false を返す。チェーンは維持されているので next に進む。
             if (!_current.InUse)

@@ -153,7 +153,7 @@ public static class CleanSlateCsrCompactRecoveryMatrixRunner
     {
         using var db = QuiverDatabase.Open(path);
         using var tx = db.BeginReadOnlyTransaction();
-        var adjacency = tx.AsInternal().AdjacencyBlocks;
+        var adjacency = tx.AsInternal().AdjacencySegments;
         if (expectAdjacencyView)
         {
             if (adjacency is not IAdjacencyPayloadView)
@@ -184,7 +184,7 @@ public static class CleanSlateCsrCompactRecoveryMatrixRunner
     private static Dictionary<long, long> ReadOutgoingWeights(IGraphTransaction tx, VertexId source)
     {
         var result = new Dictionary<long, long>();
-        var adjacency = tx.AsInternal().AdjacencyBlocks
+        var adjacency = tx.AsInternal().AdjacencySegments
             ?? throw new InvalidOperationException("Adjacency block store is missing.");
 
         using var cursor = adjacency.OpenCursor(source, Direction.Outgoing, null);

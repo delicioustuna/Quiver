@@ -9,7 +9,7 @@ namespace Quiver;
 /// <summary>
 /// バイナリバックエンド用の expand cursor。
 ///
-/// ソースVertexに隣接ブロックがある場合、<see cref="IAdjacencyBlockStore.OpenCursor"/> で
+/// ソースVertexに隣接ブロックがある場合、<see cref="IAdjacencySegmentStore.OpenCursor"/> で
 /// ブロックチェーンを走査する。次数にかかわらず途中で fallback しない。
 ///
 /// ブロックは bulk load / compact 時点のイミュータブルな <em>base</em> ビューのみを覆う。
@@ -60,11 +60,11 @@ internal sealed class BinaryExpandCursor : ExpandCursor
         if (!_opened) { Open(); _opened = true; }
         if (!_validSource) return false;
 
-        // Phase 1: 隣接ブロック経由の base ビュー走査。tombstone をここでフィルタし、
+        // まず segment の base ビューを走査する。tombstone をここでフィルタし、
         // base Edgeの削除を読み手から不可視にする。
         if (_adjActive)
         {
-            var adj = _tx.AdjacencyBlocks!;
+            var adj = _tx.AdjacencySegments!;
             while (_adjCursor!.MoveNext())
             {
                 // adjacency base は physical edge Sequence だけを持つ。
@@ -116,7 +116,7 @@ internal sealed class BinaryExpandCursor : ExpandCursor
             return;
         _validSource = true;
 
-        var adj = _tx.AdjacencyBlocks;
+        var adj = _tx.AdjacencySegments;
         if (adj != null && adj.HasBlock(_source))
         {
             _adjCursor = adj.OpenCursor(_source, _direction, _typeFilter);

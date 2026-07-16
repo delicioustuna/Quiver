@@ -245,7 +245,7 @@ public sealed class VacuumTests : IDisposable
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         // 小さい値はVertexレコードへインライン化されチェーンに乗らないため、このテストでは
-        // overflow チェーン vacuum (PropertyStore.VacuumDeadVersions) を検証する意図なので、
+        // overflow チェーン vacuum (PropertyVersionStore.VacuumDeadVersions) を検証する意図なので、
         // 255B を超える大きい文字列 (= overflow チェーン行き) を使う。
         static string Big(string s) => new string('x', 300) + s;
 

@@ -19,17 +19,17 @@ internal readonly struct AdjacencyEntry
 }
 
 /// <summary>
-/// inline payload lane (Int64 または Double) を持つ V2 隣接エントリ。
-/// <see cref="PayloadRaw"/> の解釈は V2 ストアの <see cref="PayloadLaneSpec.Kind"/> に依存する。
+/// inline payload lane を持つ adjacency segment entry。
+/// <see cref="PayloadRaw"/> の解釈は <see cref="PayloadLaneSpec.Kind"/> に依存する。
 /// </summary>
-internal readonly struct AdjacencyEntryV2
+internal readonly struct AdjacencySegmentEntry
 {
     public readonly EdgeTypeId Type;
     public readonly EdgeId EdgeId;
     public readonly VertexId NeighborId;
     public readonly long PayloadRaw;
 
-    public AdjacencyEntryV2(EdgeTypeId type, EdgeId edgeId, VertexId neighborId, long payloadRaw)
+    public AdjacencySegmentEntry(EdgeTypeId type, EdgeId edgeId, VertexId neighborId, long payloadRaw)
     {
         Type = type; EdgeId = edgeId; NeighborId = neighborId; PayloadRaw = payloadRaw;
     }
@@ -38,7 +38,7 @@ internal readonly struct AdjacencyEntryV2
 }
 
 /// <summary>
-/// V2 payload lane に inline する値の種別。
+/// adjacency segment の payload lane に格納する値の種別。
 /// </summary>
 public enum PayloadKind : byte
 {
@@ -51,7 +51,7 @@ public enum PayloadKind : byte
 }
 
 /// <summary>
-/// <see cref="AdjacencyBlockStoreV2"/> に付随する任意の payload lane の設定。
+/// <see cref="AdjacencySegmentStore"/> に付随する任意の payload lane の設定。
 /// <see cref="PropertyKeyId"/> はどのEdgeプロパティを inline するかを示し、
 /// <see cref="DefaultRaw"/> はそのキーの値を持たない (または型が異なる) エッジに代入する生の
 /// 64bit 値。既定値ポリシーはビュー構築時に固定される。

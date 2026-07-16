@@ -154,18 +154,18 @@ public class VersionedEdgeStoreTests : IDisposable
     }
 
     [Fact]
-    public void Write_updates_firstProp_in_place()
+    public void Write_updates_first_property_ref_in_place()
     {
         var a = _vertices.Allocate(new LabelId(1));
         var b = _vertices.Allocate(new LabelId(1));
         var edge = _edges.Create(_vertices, a, b, new EdgeTypeId(0));
         {
             var w = _edges.Write(edge);
-            w.FirstPropertyId = new PropertyId(42);
+            w.FirstPropertyRef = new PropertyVersionRef(42);
             w.Dispose();
         }
         using var h = _edges.Read(edge);
-        h.FirstPropertyId.Value.Should().Be(42);
+        h.FirstPropertyRef.Value.Should().Be(42);
         h.Source.Sequence.Should().Be(a.Sequence);
         h.Target.Sequence.Should().Be(b.Sequence);
     }
@@ -214,7 +214,7 @@ public class VersionedEdgeStoreTests : IDisposable
         var edge = _edges.Create(_vertices, a, b, new EdgeTypeId(7));
         {
             var w = _edges.Write(edge);
-            w.FirstPropertyId = new PropertyId(3);
+            w.FirstPropertyRef = new PropertyVersionRef(3);
             w.Dispose();
         }
         var dead = _edges.Create(_vertices, a, b, new EdgeTypeId(0));
@@ -226,89 +226,9 @@ public class VersionedEdgeStoreTests : IDisposable
         using var h = _edges.Read(edge);
         h.InUse.Should().BeTrue();
         h.Type.Value.Should().Be(7);
-        h.FirstPropertyId.Value.Should().Be(3);
+        h.FirstPropertyRef.Value.Should().Be(3);
         using var hd = _edges.Read(dead);
         hd.InUse.Should().BeFalse();
-    }
-
-    // ===== インラインプロパティ =====
-
-    private EdgeId NewEdge()
-    {
-        var a = _vertices.Allocate(new LabelId(1));
-        var b = _vertices.Allocate(new LabelId(1));
-        return _edges.Create(_vertices, a, b, new EdgeTypeId(0));
-    }
-
-    [Fact]
-    public void Inline_property_scalar_roundtrip()
-    {
-        var edge = NewEdge();
-        _edges.SetInlineProperty(edge, new PropertyKeyId(10), PropertyValue.FromInt32(42)).Should().BeTrue();
-        _edges.HasInlineProperty(edge, new PropertyKeyId(10)).Should().BeTrue();
-        _edges.TryGetInlineProperty(edge, new PropertyKeyId(10), out var v).Should().BeTrue();
-        v.Int32Value.Should().Be(42);
-        _edges.HasInlineProperty(edge, new PropertyKeyId(99)).Should().BeFalse();
-    }
-
-    [Fact]
-    public void Inline_property_replace_and_remove()
-    {
-        var edge = NewEdge();
-        var key = new PropertyKeyId(5);
-        _edges.SetInlineProperty(edge, key, PropertyValue.FromInt32(1));
-        _edges.SetInlineProperty(edge, key, PropertyValue.FromInt32(2));
-        _edges.TryGetInlineProperty(edge, key, out var v).Should().BeTrue();
-        v.Int32Value.Should().Be(2);
-        _edges.RemoveInlineProperty(edge, key).Should().BeTrue();
-        _edges.HasInlineProperty(edge, key).Should().BeFalse();
-        _edges.RemoveInlineProperty(edge, key).Should().BeFalse();
-    }
-
-    [Fact]
-    public void Inline_property_does_not_corrupt_endpoints_or_chain()
-    {
-        var a = _vertices.Allocate(new LabelId(1));
-        var b = _vertices.Allocate(new LabelId(1));
-        var c = _vertices.Allocate(new LabelId(1));
-        var r1 = _edges.Create(_vertices, a, b, new EdgeTypeId(3));
-        var r2 = _edges.Create(_vertices, a, c, new EdgeTypeId(3));
-        // r1 に inline property を付けても endpoint / chain は保持される。
-        _edges.SetInlineProperty(r1, new PropertyKeyId(1), PropertyValue.FromString("weight"));
-        using (var h = _edges.Read(r1))
-        {
-            h.Source.Sequence.Should().Be(a.Sequence);
-            h.Target.Sequence.Should().Be(b.Sequence);
-            h.Type.Value.Should().Be(3);
-        }
-        var neighbors = new List<long>();
-        var en = _edges.EnumerateNeighbors(a, _vertices);
-        while (en.MoveNext()) neighbors.Add(en.Current.Id.Sequence);
-        neighbors.Should().BeEquivalentTo(new[] { r1.Sequence, r2.Sequence });
-    }
-
-    [Fact]
-    public void Inline_rejects_oversized_value()
-    {
-        var edge = NewEdge();
-        var big = new string('a', 300); // > 255 → inline 不可
-        _edges.SetInlineProperty(edge, new PropertyKeyId(1), PropertyValue.FromString(big)).Should().BeFalse();
-        _edges.HasInlineProperty(edge, new PropertyKeyId(1)).Should().BeFalse();
-    }
-
-    [Fact]
-    public void Inline_property_persists_across_reopen()
-    {
-        var edge = NewEdge();
-        _edges.SetInlineProperty(edge, new PropertyKeyId(10), PropertyValue.FromInt64(123456789L));
-        _edges.SetInlineProperty(edge, new PropertyKeyId(11), PropertyValue.FromString("persist"));
-
-        Reopen();
-
-        _edges.TryGetInlineProperty(edge, new PropertyKeyId(10), out var v10).Should().BeTrue();
-        v10.Int64Value.Should().Be(123456789L);
-        _edges.TryGetInlineProperty(edge, new PropertyKeyId(11), out var v11).Should().BeTrue();
-        System.Text.Encoding.UTF8.GetString(v11.Utf8StringValue).Should().Be("persist");
     }
 
     [Fact]
@@ -319,12 +239,11 @@ public class VersionedEdgeStoreTests : IDisposable
         var committed = new CommittedTxRegistry();
         const int N = 2000;
 
-        // round 1: 多数の edge を inline property 付きで作成 (heap ページを埋める)。
+        // round 1: 多数の edge を作成して heap ページを埋める。
         var edges = new List<EdgeId>();
         for (int i = 0; i < N; i++)
         {
             var r = _edges.Create(_vertices, a, b, new EdgeTypeId(0));
-            _edges.SetInlineProperty(r, new PropertyKeyId(1), PropertyValue.FromInt64(i));
             edges.Add(r);
         }
         long pagesRound1 = _edges.UnderlyingFile.PageCount;
@@ -336,8 +255,7 @@ public class VersionedEdgeStoreTests : IDisposable
         // round 2: 再び多数作成 → free list のページを再利用し、ファイルはほぼ成長しないはず。
         for (int i = 0; i < N; i++)
         {
-            var r = _edges.Create(_vertices, a, b, new EdgeTypeId(0));
-            _edges.SetInlineProperty(r, new PropertyKeyId(1), PropertyValue.FromInt64(i));
+            _edges.Create(_vertices, a, b, new EdgeTypeId(0));
         }
         long pagesRound2 = _edges.UnderlyingFile.PageCount;
 

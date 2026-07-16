@@ -5,10 +5,31 @@ namespace Quiver.Storage.Records;
 
 internal interface IPropertyStore
 {
-    PropertyId Create(PropertyKeyId keyId, in PropertyValue value, PropertyId currentFirst);
-    PropertyId Delete(PropertyId propId, PropertyId currentFirst);
-    PropertyReadHandle Read(PropertyId propId);
-    PropertyEnumerator Enumerate(PropertyId firstPropId);
+    PropertyVersionRef Create(
+        PropertyAddress address,
+        PropertyCardinality cardinality,
+        in PropertyValue value,
+        PropertyVersionRef currentFirst);
+    PropertyVersionRef Delete(EntityRef owner, PropertyVersionRef version, PropertyVersionRef currentFirst);
+    PropertyVersionRecord Read(EntityRef owner, PropertyVersionRef version);
+    PropertyCursor Enumerate(EntityRef owner, PropertyVersionRef firstVersion);
+}
+
+internal readonly record struct PropertyVersionRef(long Value)
+{
+    internal static readonly PropertyVersionRef Invalid = new(-1);
+
+    internal bool IsValid => Value >= 0;
+
+    internal long Sequence => Value < 0 ? -1 : EntityRef.UnpackSequence(Value);
+
+    internal int Generation => Value < 0 ? 0 : EntityRef.UnpackGeneration(Value);
+
+    internal static PropertyVersionRef Create(long sequence, int generation)
+        => new(EntityRef.PackLocal(sequence, generation));
+
+    internal static PropertyVersionRef FromSequence(long sequence)
+        => sequence < 0 ? Invalid : new(sequence);
 }
 
 /// <summary>プロパティ値の物理型。オンディスクのプロパティレコードに 1 バイトで格納される。</summary>
@@ -119,114 +140,124 @@ public readonly ref struct PropertyValue
     };
 }
 
-/// <summary>
-/// プロパティチェーンの 1 エントリを読み出したハンドル。ID / キー / 値と、チェーン上の次エントリ
-/// への参照、および MVCC 可視性フラグを保持する。
-/// </summary>
-public readonly ref struct PropertyReadHandle
+internal readonly ref struct PropertyVersionRecord
 {
-    private readonly PropertyId _id;
-    private readonly PropertyKeyId _keyId;
-    private readonly PropertyId _nextPropertyId;
-    private readonly PropertyValue _value;
-    private readonly bool _inUse;
-
-    // inUse 既定 true で旧呼出元 (BulkLoader 等) と互換。
-    internal PropertyReadHandle(PropertyId id, PropertyKeyId keyId, PropertyId nextPropId, PropertyValue value, bool inUse = true)
+    internal PropertyVersionRecord(
+        PropertyVersionRef version,
+        PropertyAddress address,
+        PropertyCardinality cardinality,
+        PropertyValue value,
+        PropertyVersionRef previousVersion,
+        PropertyVersionRef nextOwnedProperty,
+        long xmin,
+        long xmax,
+        bool inUse)
     {
-        _id = id; _keyId = keyId; _nextPropertyId = nextPropId; _value = value; _inUse = inUse;
+        Version = version;
+        Address = address;
+        Cardinality = cardinality;
+        Value = value;
+        PreviousVersion = previousVersion;
+        NextOwnedProperty = nextOwnedProperty;
+        Xmin = xmin;
+        Xmax = xmax;
+        InUse = inUse;
     }
 
-    /// <summary>このプロパティレコードの ID。</summary>
-    public PropertyId Id => _id;
-    /// <summary>プロパティキーの ID。</summary>
-    public PropertyKeyId KeyId => _keyId;
-    /// <summary>プロパティ値。</summary>
-    public PropertyValue Value => _value;
-    /// <summary>同一エンティティのプロパティチェーン上の次エントリ ID (終端は <see cref="PropertyId.Invalid"/>)。</summary>
-    public PropertyId NextPropertyId => _nextPropertyId;
-    /// <summary>
-    /// MVCC visibility 判定の結果。false の場合は論理削除 / 不可視で、enumerate は skip すべき。
-    /// </summary>
-    public bool InUse => _inUse;
-    /// <summary>ハンドルを破棄する (現状は no-op)。</summary>
-    public void Dispose() { }
+    internal PropertyVersionRef Version { get; }
+    internal PropertyAddress Address { get; }
+    internal PropertyCardinality Cardinality { get; }
+    internal PropertyValue Value { get; }
+    internal PropertyVersionRef PreviousVersion { get; }
+    internal PropertyVersionRef NextOwnedProperty { get; }
+    internal long Xmin { get; }
+    internal long Xmax { get; }
+    internal bool InUse { get; }
 }
 
-/// <summary>
-/// 単一エンティティのプロパティを inline 領域 → overflow チェーンの順に列挙する前方イテレータ。
-/// MVCC 不可視のチェーンエントリは自動的にスキップする。
-/// </summary>
-public ref struct PropertyEnumerator
+/// <summary>所有者に属するプロパティのキー、多重度、値を表します。物理レコードIDは公開しません。</summary>
+public readonly ref struct PropertyEntry
 {
-    private readonly IPropertyStore _store;
-    private PropertyId _nextId;
-    private PropertyReadHandle _current;
-    private bool _chainStarted;
-
-    // entity の inline property 領域を chain より先に列挙する (chain-only は空)。
-    private readonly ReadOnlySpan<byte> _inline;
-    private readonly int _inlineCount;
-    private int _inlineIndex;
-    private int _inlinePos;
-
-    internal PropertyEnumerator(IPropertyStore store, PropertyId firstId)
-        : this(default, store, firstId, InlinePropertyCodec.VertexFixedSize) { }
-
-    internal PropertyEnumerator(ReadOnlySpan<byte> inlinePayload, IPropertyStore store, PropertyId firstId, int fixedSize)
+    internal PropertyEntry(PropertyKeyId keyId, PropertyCardinality cardinality, PropertyValue value)
     {
-        _store = store; _nextId = firstId; _chainStarted = false; _current = default;
-        _inline = inlinePayload;
-        _inlineCount = InlinePropertyCodec.Count(inlinePayload, fixedSize);
-        _inlineIndex = 0;
-        _inlinePos = InlinePropertyCodec.BaseSize(fixedSize);
+        KeyId = keyId;
+        Cardinality = cardinality;
+        Value = value;
     }
 
-    /// <summary>次のプロパティへ進む。可視なエントリがあれば <c>true</c>、列挙完了で <c>false</c>。</summary>
+    /// <summary>プロパティキー。</summary>
+    public PropertyKeyId KeyId { get; }
+
+    /// <summary>プロパティキーの多重度。</summary>
+    public PropertyCardinality Cardinality { get; }
+
+    /// <summary>プロパティ値。</summary>
+    public PropertyValue Value { get; }
+}
+
+/// <summary>単一エンティティの可視なプロパティを列挙する前方カーソルです。</summary>
+public ref struct PropertyCursor
+{
+    private readonly IPropertyStore _store;
+    private readonly EntityRef _owner;
+    private PropertyVersionRef _next;
+    private PropertyVersionRecord _record;
+    private PropertyEntry _current;
+    private bool _started;
+
+    internal PropertyCursor(IPropertyStore store, EntityRef owner, PropertyVersionRef firstVersion)
+    {
+        _store = store;
+        _owner = owner;
+        _next = firstVersion;
+        _record = default;
+        _current = default;
+        _started = false;
+    }
+
+    /// <summary>次の可視なプロパティへ進みます。</summary>
     public bool MoveNext()
     {
-        // Phase 1: inline entries (すべて visible 版由来なので skip 不要)。
-        if (_inlineIndex < _inlineCount)
-        {
-            var (keyId, type, nextPos) = InlinePropertyCodec.ReadEntryHeader(_inline, _inlinePos);
-            var val = InlinePropertyCodec.ValueAt(_inline, _inlinePos);
-            _inlinePos = nextPos;
-            _inlineIndex++;
-            _current = new PropertyReadHandle(
-                PropertyId.Invalid, new PropertyKeyId(keyId), PropertyId.Invalid,
-                InlinePropertyCodec.Decode(type, val), inUse: true);
-            return true;
-        }
+        if (_started)
+            _next = _record.NextOwnedProperty;
+        _started = true;
 
-        // Phase 2: overflow チェーン。論理削除 / invisible はチェーンを進める。
-        if (_chainStarted) _nextId = _current.NextPropertyId;
-        _chainStarted = true;
-        while (_nextId.IsValid)
+        while (_next.IsValid)
         {
-            _current = _store.Read(_nextId);
-            if (_current.InUse) return true;
-            _nextId = _current.NextPropertyId;
+            _record = _store.Read(_owner, _next);
+            if (_record.InUse)
+            {
+                _current = new PropertyEntry(
+                    _record.Address.Key,
+                    _record.Cardinality,
+                    _record.Value);
+                return true;
+            }
+            _next = _record.NextOwnedProperty;
         }
         return false;
     }
 
-    /// <summary>現在指しているプロパティの読み取りハンドル。</summary>
-    public PropertyReadHandle Current => _current;
-    /// <summary>イテレータを破棄する (現状は no-op)。</summary>
+    /// <summary>現在のプロパティ。</summary>
+    public PropertyEntry Current => _current;
+
+    internal PropertyVersionRef CurrentVersion => _record.Version;
+
+    /// <summary>カーソルを破棄します。現在の実装では処理を行いません。</summary>
     public void Dispose() { }
 }
 
 /// <summary>
 /// 特定キーのプロパティ値のみを列挙する前方イテレータ (Set cardinality 用)。
-/// <see cref="PropertyEnumerator"/> をラップし、指定 <see cref="PropertyKeyId"/> に一致する
+/// <see cref="PropertyCursor"/> をラップし、指定 <see cref="PropertyKeyId"/> に一致する
 /// エントリだけを返す。
 /// </summary>
 public ref struct PropertyValuesEnumerator
 {
-    private PropertyEnumerator _inner;
+    private PropertyCursor _inner;
     private readonly PropertyKeyId _keyId;
 
-    internal PropertyValuesEnumerator(PropertyEnumerator inner, PropertyKeyId keyId)
+    internal PropertyValuesEnumerator(PropertyCursor inner, PropertyKeyId keyId)
     {
         _inner = inner;
         _keyId = keyId;

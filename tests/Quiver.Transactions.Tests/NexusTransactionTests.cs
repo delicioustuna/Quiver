@@ -441,12 +441,8 @@ public sealed class NexusTransactionTests : IDisposable
         public VertexWriteHandle Write(VertexId vertexId) => throw new NotSupportedException();
         public IEnumerable<VertexId> Scan() => [];
         public int CurrentGeneration(long localId) => -1;
-        public bool TryGetInlineProperty(VertexId vertexId, PropertyKeyId keyId, out PropertyValue value) { value = default; return false; }
-        public bool HasInlineProperty(VertexId vertexId, PropertyKeyId keyId) => false;
-        public bool SetInlineProperty(VertexId vertexId, PropertyKeyId keyId, in PropertyValue value) => false;
-        public bool RemoveInlineProperty(VertexId vertexId, PropertyKeyId keyId) => false;
-        public PropertyEnumerator EnumerateProperties(VertexId vertexId, IPropertyStore overflowStore)
-            => new PropertyEnumerator(overflowStore, PropertyId.Invalid);
+        public PropertyCursor EnumerateProperties(VertexId vertexId, IPropertyStore overflowStore)
+            => new PropertyCursor(overflowStore, default, PropertyVersionRef.Invalid);
     }
 
     private sealed class StubEdgeStore : IEdgeStore
@@ -459,19 +455,15 @@ public sealed class NexusTransactionTests : IDisposable
         public EdgeEnumerator EnumerateNeighbors(VertexId vertexId, IVertexStore ns) => throw new NotSupportedException();
         public EdgeEnumerator EnumerateNeighbors(VertexId vertexId, IVertexStore ns, EdgeTypeId type, Direction dir) => throw new NotSupportedException();
         public IEnumerable<EdgeId> Scan() => [];
-        public bool TryGetInlineProperty(EdgeId edgeId, PropertyKeyId keyId, out PropertyValue value) { value = default; return false; }
-        public bool HasInlineProperty(EdgeId edgeId, PropertyKeyId keyId) => false;
-        public bool SetInlineProperty(EdgeId edgeId, PropertyKeyId keyId, in PropertyValue value) => false;
-        public bool RemoveInlineProperty(EdgeId edgeId, PropertyKeyId keyId) => false;
-        public PropertyEnumerator EnumerateProperties(EdgeId edgeId, IPropertyStore overflowStore) => new PropertyEnumerator(overflowStore, PropertyId.Invalid);
+        public PropertyCursor EnumerateProperties(EdgeId edgeId, IPropertyStore overflowStore) => new PropertyCursor(overflowStore, default, PropertyVersionRef.Invalid);
     }
 
     private sealed class StubPropertyStore : IPropertyStore
     {
-        public PropertyId Create(PropertyKeyId keyId, in PropertyValue value, PropertyId currentFirst) => PropertyId.Invalid;
-        public PropertyId Delete(PropertyId propId, PropertyId currentFirst) => PropertyId.Invalid;
-        public PropertyReadHandle Read(PropertyId propId) => throw new NotSupportedException();
-        public PropertyEnumerator Enumerate(PropertyId firstPropId) => throw new NotSupportedException();
+        public PropertyVersionRef Create(PropertyAddress address, PropertyCardinality cardinality, in PropertyValue value, PropertyVersionRef currentFirst) => PropertyVersionRef.Invalid;
+        public PropertyVersionRef Delete(EntityRef owner, PropertyVersionRef version, PropertyVersionRef currentFirst) => PropertyVersionRef.Invalid;
+        public PropertyVersionRecord Read(EntityRef owner, PropertyVersionRef version) => throw new NotSupportedException();
+        public PropertyCursor Enumerate(EntityRef owner, PropertyVersionRef firstVersion) => throw new NotSupportedException();
     }
 
     private sealed class NullIndexManager : IIndexManager

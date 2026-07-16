@@ -250,7 +250,7 @@ public sealed class QuiverDatabase : IDisposable
     public IGraphSnapshotView OpenSnapshotView()
     {
         using var tx = _backend.Transactions.Begin(IsolationLevel.SnapshotIsolation);
-        return GraphSnapshotView.Build(tx.Vertices, tx.Edges, tx.AdjacencyBlocks);
+        return GraphSnapshotView.Build(tx.Vertices, tx.Edges, tx.AdjacencySegments);
     }
 
     /// <summary>

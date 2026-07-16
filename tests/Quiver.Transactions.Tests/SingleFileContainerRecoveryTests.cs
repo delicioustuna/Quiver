@@ -25,6 +25,7 @@ public class SingleFileContainerRecoveryTests : IDisposable
     // カタログ内のテナント ID (WAL fileKind とは別空間)。
     private const byte VerticesTenant = (byte)WalFileKind.Vertices;
     private const byte VertexVerTenant = (byte)WalFileKind.VertexVersionMeta;
+    private const byte VertexMapTenant = 14;
 
     private readonly string _walDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
     private readonly string _srcPath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".quiver");
@@ -44,12 +45,13 @@ public class SingleFileContainerRecoveryTests : IDisposable
         if (File.Exists(_crashPath)) File.Delete(_crashPath);
     }
 
-    private static VertexStore OpenVertexStore(SingleFileContainer c)
+    private static VersionedVertexStore OpenVertexStore(SingleFileContainer c)
     {
         var vertexT = c.OpenTenant(VerticesTenant, PageKind.Header);
         var verT = c.OpenTenant(VertexVerTenant, PageKind.Header);
+        var mapT = c.OpenTenant(VertexMapTenant, PageKind.Header);
         var versions = new EntityVersionStore(verT);
-        return new VertexStore(vertexT, labelIndex: null, versions);
+        return new VersionedVertexStore(vertexT, new ItemPointerMap(mapT), labelIndex: null, versions);
     }
 
     /// <summary>ストアを init してデータファイルへフラッシュし、その時点を crashPath へスナップショットする。</summary>

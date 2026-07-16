@@ -10,7 +10,7 @@ namespace Quiver;
 /// バイナリバックエンドの <see cref="IGraphAccessMethods"/> 実装。リンクリストと隣接ブロックの
 /// 選択を <see cref="BinaryExpandCursor"/> に委譲し、隣接 fast path が使えなかった頻度
 /// (= インデックス構築時にブロックが無かったVertex、典型的には bulk load 後に作られたもの)
-/// を診断用カウンタとして公開する。<see cref="IAdjacencyBlockStore.OpenCursor"/> が
+/// を診断用カウンタとして公開する。<see cref="IAdjacencySegmentStore.OpenCursor"/> が
 /// ページチェーン全体を走査するため、cursor が走査途中で fast path を放棄することはない。
 /// カウンタは「ブロックが全く無い」経路でのみ発火する。
 /// </summary>
@@ -148,7 +148,7 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
 
         // GraphStats 未接続のため、隣接ブロックがあれば安価な O(degree) プローブを使い、
         // なければチェーンを走査する。
-        var adj = tx.AdjacencyBlocks;
+        var adj = tx.AdjacencySegments;
         if (adj != null && adj.HasBlock(source))
         {
             var probe = new AdjacencyEntry[64];

@@ -177,7 +177,7 @@ internal sealed class InlineExpandCursor : ExpandCursor
             return;
         _validSource = true;
 
-        var adj = _tx.AdjacencyBlocks;
+        var adj = _tx.AdjacencySegments;
         if (adj != null && adj.HasBlock(_source))
         {
             _adjCursor = adj.OpenCursor(_source, _direction, _typeFilter);

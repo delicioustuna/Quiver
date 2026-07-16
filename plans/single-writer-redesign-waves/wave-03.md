@@ -74,3 +74,35 @@ Wave 3 は entity、property、payload、incidence、adjacency、tenant catalog 
 - branch tip は完成または検証済み補修 commit であり、topic branch へ push 済みである。
 
 merge と tag はユーザの明示承認を別々に得る。
+
+## 6. 実装結果
+
+2026-07-16 に Release solution build と全 test project gate を実行した。
+`dotnet build Quiver.slnx -c Release -v minimal /m:1 /nr:false` は警告 0、エラー 0 で成功した。
+`dotnet test Quiver.slnx -c Release --no-build --no-restore -v minimal /m:1` は 2,127 件合格、9 件 skip、0 件失敗で成功した。
+logical mutation の export-replay focused test は 9/9、clean reopen は 2/2、property/vector generation と checksum は 3/3、container CRC と reopen は 7/7 で成功した。
+
+`--basic-perf` の comparable workload はすべて baseline 比 1.20 倍以内だった。
+
+| workload | baseline | 実装後 | 比率 |
+|---|---:|---:|---:|
+| CreateVertex | 12.960 µs/op | 13.160 µs/op | 1.015x |
+| CreateVertex + SetProperty | 17.700 µs/op | 20.820 µs/op | 1.176x |
+| CreateEdge | 42.600 µs/op | 47.900 µs/op | 1.124x |
+| durable commit | 1.022 ms/commit | 1.020 ms/commit | 0.998x |
+| linked 1-hop、degree 10 | 223.6 ns/op | 244.5 ns/op | 1.093x |
+| linked 1-hop、degree 100 | 195.6 ns/op | 197.8 ns/op | 1.011x |
+| adjacency segment、degree 10 | 14.0 ns/op | 11.9 ns/op | 0.850x |
+| adjacency segment、degree 100 | 3.6 ns/op | 3.6 ns/op | 1.000x |
+| BFS 2-hop | 0.0385 ms | 0.0379 ms | 0.984x |
+| wrapped query | 30,521 ns | 28,180 ns | 0.923x |
+| bulk load、100,000 edges | 1,977 ms | 1,968 ms | 0.995x |
+| transaction load、100,000 edges | 10,020 ms | 8,911 ms | 0.889x |
+
+payload 境界の計測値は次のとおりだった。
+
+| payload | µs/op | managed allocation B/op | file B/op |
+|---|---:|---:|---:|
+| inline Int64 | 51.271 | 56,064.2 | 419.4 |
+| blob string 300B | 111.637 | 65,712.8 | 13,421.8 |
+| vector Float32 x 128 | 117.326 | 66,207.0 | 13,421.8 |

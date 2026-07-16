@@ -18,17 +18,8 @@ internal sealed class NullNexusStore : INexusStore
         => throw new NotSupportedException("Nexus stores are not configured.");
     public IEnumerable<NexusId> Scan() => [];
 
-    public bool TryGetInlineProperty(NexusId nexusId, PropertyKeyId keyId, out PropertyValue value)
-    {
-        value = default;
-        return false;
-    }
-    public bool HasInlineProperty(NexusId nexusId, PropertyKeyId keyId) => false;
-    public bool SetInlineProperty(NexusId nexusId, PropertyKeyId keyId, in PropertyValue value)
-        => throw new NotSupportedException("Nexus stores are not configured.");
-    public bool RemoveInlineProperty(NexusId nexusId, PropertyKeyId keyId) => false;
-    public PropertyEnumerator EnumerateProperties(NexusId nexusId, IPropertyStore overflowStore)
-        => new(overflowStore, PropertyId.Invalid);
+    public PropertyCursor EnumerateProperties(NexusId nexusId, IPropertyStore overflowStore)
+        => new(overflowStore, default, PropertyVersionRef.Invalid);
 }
 
 internal sealed class NullIncidenceStore : IIncidenceStore

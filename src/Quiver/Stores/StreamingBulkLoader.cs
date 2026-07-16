@@ -30,7 +30,7 @@ public sealed class StreamingBulkLoader : IDisposable
 {
     private readonly VersionedVertexStore _vertexStore;
     private readonly VersionedEdgeStore _edgeStore;
-    private readonly PropertyStore _propStore;
+    private readonly PropertyVersionStore _propStore;
     // 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
     private readonly Quiver.Storage.SingleFileContainer? _container;
 
@@ -55,7 +55,7 @@ public sealed class StreamingBulkLoader : IDisposable
     private readonly record struct PendingProp(int KeyId, PropertyValueType Type, long Scalar, byte[]? Data);
 
     internal StreamingBulkLoader(
-        VersionedVertexStore vertexStore, VersionedEdgeStore edgeStore, PropertyStore propStore,
+        VersionedVertexStore vertexStore, VersionedEdgeStore edgeStore, PropertyVersionStore propStore,
         Quiver.Storage.SingleFileContainer? container = null)
     {
         _vertexStore = vertexStore;
@@ -262,13 +262,15 @@ public sealed class StreamingBulkLoader : IDisposable
     {
         foreach (var (vertexId, props) in _propsByVertex)
         {
-            long nextPropId = -1L;
+            long nextPropertySequence = -1L;
+            var owner = EntityRef.From(VertexId.Create(vertexId, _vertexStore.CurrentGeneration(vertexId)));
             foreach (var prop in props)
             {
-                var propId = _propStore.BulkCreate(prop.KeyId, prop.Type, prop.Scalar, prop.Data, nextPropId);
-                nextPropId = propId.Sequence; // Int48 NextPropId は Sequence
+                var propertyVersion = _propStore.BulkCreate(
+                    owner, prop.KeyId, PropertyCardinality.Single, prop.Type, prop.Scalar, prop.Data, nextPropertySequence);
+                nextPropertySequence = propertyVersion.Sequence; // Int48 chain link は Sequence
             }
-            _vertexStore.BulkUpdateFirstProp(vertexId, nextPropId);
+            _vertexStore.BulkUpdateFirstPropertyRef(vertexId, nextPropertySequence);
         }
         _propStore.BulkFlushMeta();
     }

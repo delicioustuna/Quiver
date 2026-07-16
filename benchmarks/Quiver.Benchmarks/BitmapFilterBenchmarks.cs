@@ -133,7 +133,7 @@ file sealed class BenchTagEqPredicate : IPredicate
     {
         var nid = new VertexId(tuple[0].LongValue);
         using var h = tx.Vertices.Read(nid);
-        var en = tx.Properties.Enumerate(h.FirstPropertyId);
+        var en = tx.Properties.Enumerate(EntityRef.From(nid), h.FirstPropertyRef);
         while (en.MoveNext())
         {
             if (en.Current.KeyId != _key) continue;
@@ -153,7 +153,7 @@ file sealed class BenchHotEqPredicate : IPredicate
     {
         var nid = new VertexId(tuple[0].LongValue);
         using var h = tx.Vertices.Read(nid);
-        var en = tx.Properties.Enumerate(h.FirstPropertyId);
+        var en = tx.Properties.Enumerate(EntityRef.From(nid), h.FirstPropertyRef);
         while (en.MoveNext())
         {
             if (en.Current.KeyId != _key) continue;

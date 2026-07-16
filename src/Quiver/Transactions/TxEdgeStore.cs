@@ -76,13 +76,13 @@ internal sealed class TxEdgeStore : IEdgeStore
             return new EdgeReadHandle(
                 raw.Id, inUse: false, raw.Source, raw.Target, raw.Type,
                 raw.SourcePrev, raw.SourceNext, raw.TargetPrev, raw.TargetNext,
-                raw.FirstPropertyId);
+                raw.FirstPropertyRef);
         }
 
         return new EdgeReadHandle(
             raw.Id, inUse: true, source, target, raw.Type,
             raw.SourcePrev, raw.SourceNext, raw.TargetPrev, raw.TargetNext,
-            raw.FirstPropertyId);
+            raw.FirstPropertyRef);
     }
 
     public EdgeWriteHandle Write(EdgeId edgeId)
@@ -111,39 +111,7 @@ internal sealed class TxEdgeStore : IEdgeStore
         return _inner.Scan();
     }
 
-    // inline property は TxVertexStore と同様に lock + SSN + MVCC コンテキストでラップする。
-
-    public bool TryGetInlineProperty(EdgeId edgeId, PropertyKeyId keyId, out PropertyValue value)
-    {
-        if (_mode == LockingMode.ReaderWriter) Acquire(edgeId.Sequence, LockMode.Shared);
-        ActivateMvccContext();
-        return _inner.TryGetInlineProperty(edgeId, keyId, out value);
-    }
-
-    public bool HasInlineProperty(EdgeId edgeId, PropertyKeyId keyId)
-    {
-        if (_mode == LockingMode.ReaderWriter) Acquire(edgeId.Sequence, LockMode.Shared);
-        ActivateMvccContext();
-        return _inner.HasInlineProperty(edgeId, keyId);
-    }
-
-    public bool SetInlineProperty(EdgeId edgeId, PropertyKeyId keyId, in PropertyValue value)
-    {
-        Acquire(edgeId.Sequence, LockMode.Exclusive);
-        ActivateMvccContext();
-        SsnOnWrite(edgeId.Sequence);
-        return _inner.SetInlineProperty(edgeId, keyId, in value);
-    }
-
-    public bool RemoveInlineProperty(EdgeId edgeId, PropertyKeyId keyId)
-    {
-        Acquire(edgeId.Sequence, LockMode.Exclusive);
-        ActivateMvccContext();
-        SsnOnWrite(edgeId.Sequence);
-        return _inner.RemoveInlineProperty(edgeId, keyId);
-    }
-
-    public PropertyEnumerator EnumerateProperties(EdgeId edgeId, IPropertyStore overflowStore)
+    public PropertyCursor EnumerateProperties(EdgeId edgeId, IPropertyStore overflowStore)
     {
         if (_mode == LockingMode.ReaderWriter) Acquire(edgeId.Sequence, LockMode.Shared);
         ActivateMvccContext();

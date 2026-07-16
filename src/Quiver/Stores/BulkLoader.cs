@@ -12,14 +12,14 @@ public sealed class BulkLoader : IDisposable
 {
     private readonly VersionedVertexStore _vertexStore;
     private readonly VersionedEdgeStore _edgeStore;
-    private readonly PropertyStore _propStore;
+    private readonly PropertyVersionStore _propStore;
     // 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
     private readonly Quiver.Storage.SingleFileContainer? _container;
 
     private readonly List<PendingVertex> _vertices = new();
     private readonly List<PendingEdge> _edges = new();
     private readonly Dictionary<long, List<PendingProp>> _propsByVertex = new();
-    // Edgeごとの V2 payload lane 用 raw 値を収集する。
+    // Edgeごとの payload lane 用 raw 値を収集する。
     // (EdgeId, PropertyKeyId) でキーイングしているため同一ローダが複数の payload キー
     // 候補を受けられるが、実際に inline されるのは WithPayloadLane で指定されたもののみ。
     private readonly Dictionary<(long EdgeId, int KeyId), long> _edgePayloads = new();
@@ -30,7 +30,7 @@ public sealed class BulkLoader : IDisposable
     private record struct PendingEdge(long Id, long Src, long Tgt, int TypeId);
     private readonly record struct PendingProp(int KeyId, PropertyValueType Type, long Scalar, byte[]? Data);
 
-    internal BulkLoader(VersionedVertexStore vertexStore, VersionedEdgeStore edgeStore, PropertyStore propStore,
+    internal BulkLoader(VersionedVertexStore vertexStore, VersionedEdgeStore edgeStore, PropertyVersionStore propStore,
         Quiver.Storage.SingleFileContainer? container = null)
     {
         _vertexStore = vertexStore;
@@ -71,7 +71,7 @@ public sealed class BulkLoader : IDisposable
 
     /// <summary>
     /// inline payload lane を設定し、<see cref="Commit"/> で指定したEdgeプロパティを
-    /// エッジエントリ毎に inline 格納した <c>AdjacencyBlockStoreV2</c> を構築させる
+    /// エッジエントリ毎に inline 格納した <c>AdjacencySegmentStore</c> を構築させる
     /// 。以後の <see cref="AppendEdgePayload"/> で lane を埋め、
     /// 値の無いエッジには <c>spec.DefaultRaw</c> が入る。
     /// </summary>
@@ -85,7 +85,7 @@ public sealed class BulkLoader : IDisposable
 
     /// <summary>
     /// Edgeの inline payload 値を記録する。<see cref="WithPayloadLane"/> の spec と
-    /// キーが一致する値のみが V2 ビューに inline され、他キーは破棄される。生の long は lane の
+    /// キーが一致する値のみが adjacency segment に inline され、他キーは破棄される。生の long は lane の
     /// 種別に応じて Int64 値または <c>BitConverter.DoubleToInt64Bits(d)</c>。
     /// </summary>
     public void AppendEdgePayload(EdgeId edgeId, PropertyKeyId key, long rawValue)
@@ -220,13 +220,15 @@ public sealed class BulkLoader : IDisposable
         foreach (var (vertexId, props) in _propsByVertex)
         {
             // tail-to-head でチェーンを構築する。最後に書き込まれたプロパティが head になる。
-            long nextPropId = -1L;
+            long nextPropertySequence = -1L;
+            var owner = EntityRef.From(VertexId.Create(vertexId, _vertexStore.CurrentGeneration(vertexId)));
             foreach (var prop in props)
             {
-                var propId = _propStore.BulkCreate(prop.KeyId, prop.Type, prop.Scalar, prop.Data, nextPropId);
-                nextPropId = propId.Sequence; // Int48 NextPropId は Sequence
+                var propertyVersion = _propStore.BulkCreate(
+                    owner, prop.KeyId, PropertyCardinality.Single, prop.Type, prop.Scalar, prop.Data, nextPropertySequence);
+                nextPropertySequence = propertyVersion.Sequence; // Int48 chain link は Sequence
             }
-            _vertexStore.BulkUpdateFirstProp(vertexId, nextPropId);
+            _vertexStore.BulkUpdateFirstPropertyRef(vertexId, nextPropertySequence);
         }
         _propStore.BulkFlushMeta();
     }
@@ -240,7 +242,7 @@ public sealed class BulkLoader : IDisposable
         Dictionary<long, long>? weights = null;
         if (_payloadSpec is { } spec)
         {
-            // V2 ビルド。設定されたキーに payload をフィルタする。raw 値はそのまま渡される
+            // 設定されたキーに payload をフィルタする。raw 値はそのまま渡される
             // (double<->long の再解釈は AppendEdgePayload 経由で呼び出し側の責任)。
             weights = new Dictionary<long, long>(_edgePayloads.Count);
             foreach (var ((edgeId, keyId), raw) in _edgePayloads)

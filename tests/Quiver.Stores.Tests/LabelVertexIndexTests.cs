@@ -12,17 +12,26 @@ namespace Quiver.Storage.Records.Tests;
 public class LabelVertexIndexTests : IDisposable
 {
     private readonly string _path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), System.IO.Path.GetRandomFileName());
+    private readonly string _mapPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), System.IO.Path.GetRandomFileName());
     private readonly PagedFile _pf;
-    private readonly VertexStore _store;
+    private readonly PagedFile _mapFile;
+    private readonly VersionedVertexStore _store;
     private readonly LabelVertexIndex _index = new();
 
     public LabelVertexIndexTests()
     {
         _pf = new PagedFile(_path);
-        _store = new VertexStore(_pf, _index);
+        _mapFile = new PagedFile(_mapPath);
+        _store = new VersionedVertexStore(_pf, new ItemPointerMap(_mapFile), _index);
     }
 
-    public void Dispose() { _pf.Dispose(); System.IO.File.Delete(_path); }
+    public void Dispose()
+    {
+        _pf.Dispose();
+        _mapFile.Dispose();
+        System.IO.File.Delete(_path);
+        System.IO.File.Delete(_mapPath);
+    }
 
     [Fact]
     public void Allocate_drives_index_to_O_by_L_lookup()

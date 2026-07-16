@@ -15,7 +15,7 @@ namespace Quiver;
 internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFactory
 {
     // コンテナ内の全コアページを載せる単一 WAL fileKind。旧 per-store WalFileKind
-    // (Vertices=1..PropertyVersionMeta=7) とも索引予約レンジ (0x40+) とも衝突しない値を使う。
+    // (Vertices=1..EdgeVersionMeta=6) とも索引予約レンジ (0x40+) とも衝突しない値を使う。
     // 特に vacuum の WriteFileTruncate は WalFileKind.Vertices 等を渡すため、DataFileKind がそれらと
     // 衝突すると recovery の FileTruncate replay が container.Physical 全体を誤って物理 truncate する。
     private const byte DataFileKind = 0x20;
@@ -27,7 +27,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     private const byte TenantBlobs = 4;
     private const byte TenantVertexVer = 5;
     private const byte TenantEdgeVer = 6;
-    private const byte TenantPropVer = 7;
+    // 7 は property entity sidecar を削除した clean-break 後の欠番。
     private const byte TenantLabelTok = 8;
     private const byte TenantEdgeTypeTok = 9;
     private const byte TenantPropKeyTok = 10;
@@ -57,6 +57,8 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     internal const byte TenantEdgeLocator = 26;
     internal const byte TenantEdgeDeltaHead = 27;
     internal const byte TenantEdgeDeltaPages = 28;
+    internal const byte TenantVectorPayloadMetadata = 29;
+    internal const byte TenantVectorPayloadBlobs = 30;
 
     public IGraphStorageBackend Open(string filePath, QuiverDatabaseOptions options)
     {
@@ -150,21 +152,18 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var indexManager = new IndexManager(container);
 
         // 隣接ビュー (bulk load 済みのときのみ存在) を container テナントから開く。
-        // epoch (base hwm + tombstones) も EpochTenant に同居。V1/V2 種別は DataTenant の
-        // 記述子で判別する。recovery + ReloadAll 後なのでテナントページは復元済み。
-        IAdjacencyBlockStore? adjStore = null;
+        // epoch (base hwm + tombstones) も EpochTenant に同居する。
+        IAdjacencySegmentStore? adjStore = null;
         AdjacencyEpoch? adjEpoch = null;
         if (container.HasTenant(AdjacencyContainer.DataTenant))
         {
             var adjData = container.OpenTenant(AdjacencyContainer.DataTenant, PageKind.AdjacencyBlock);
             var (adjKind, adjSpec) = AdjacencyContainer.ReadDescriptor(adjData);
-            if (adjKind != AdjacencyContainer.KindNone)
+            if (adjKind == AdjacencyContainer.KindSegment && adjSpec is { } spec)
             {
                 var adjIdx = container.OpenTenant(AdjacencyContainer.IndexTenant, PageKind.Header);
                 adjEpoch = AdjacencyEpoch.Open(container.OpenTenant(AdjacencyContainer.EpochTenant, PageKind.Header));
-                adjStore = adjKind == AdjacencyContainer.KindV2
-                    ? new AdjacencyBlockStoreV2(adjData, adjIdx, adjSpec!.Value, adjEpoch)
-                    : new AdjacencyBlockStore(adjData, adjIdx, adjEpoch);
+                adjStore = new AdjacencySegmentStore(adjData, adjIdx, spec, adjEpoch);
             }
         }
 
@@ -195,9 +194,15 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
 
         var propFile = container.OpenTenant(TenantProps, PageKind.Header);
         var blobFile = container.OpenTenant(TenantBlobs, PageKind.Header);
-        var propVerFile = container.OpenTenant(TenantPropVer, PageKind.Header);
-        var propVersions = new EntityVersionStore(propVerFile);
-        var propStore = new PropertyStore(propFile, blobFile, propVersions);
+        var vectorPayloadMetadataFile = container.OpenTenant(
+            TenantVectorPayloadMetadata, PageKind.Header);
+        var vectorPayloadBlobFile = container.OpenTenant(
+            TenantVectorPayloadBlobs, PageKind.Header);
+        var propStore = new PropertyVersionStore(
+            propFile,
+            blobFile,
+            vectorPayloadMetadataFile,
+            vectorPayloadBlobFile);
 
         var labelTokens   = new LabelTokenStore(container.OpenTenant(TenantLabelTok, PageKind.TokenRecord));
         var edgeTypeTokens = new EdgeTypeTokenStore(container.OpenTenant(TenantEdgeTypeTok, PageKind.TokenRecord));

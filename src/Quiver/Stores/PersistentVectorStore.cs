@@ -9,12 +9,12 @@ namespace Quiver.Storage.Records;
 /// <see cref="InMemoryVectorStore"/> を置き換え、再起動を跨いで KNN を再現する。
 ///
 /// <para>各 index は <see cref="VectorIndexCatalog"/> に登録され、専用の payload テナント
-/// (<see cref="VectorPayloadStore"/>) を持つ。書き込みは container の単一物理 PagedFile に乗るので、
+/// (<see cref="VectorIndexPayloadStore"/>) を持つ。書き込みは container の単一物理 PagedFile に乗るので、
 /// アクティブ tx の <c>WalWriteSetContext</c> 下で行えば自動的にその tx の page-WAL に含まれ、
 /// グラフ変更と原子整合する (tx 統合は GraphTransaction / 呼び出し側 autocommit が担う)。</para>
 ///
-/// <para>6a 時点では検索は永続データの flat scan (HNSW 索引は 6d)。binding キーは Sequence で、
-/// 世代照合によりslot再利用後のstale bindingを棄却する。</para>
+/// <para>検索は index 設定に応じて flat scan または HNSW を使う。
+/// binding キーは Sequence で、世代照合により slot 再利用後の stale binding を棄却する。</para>
 /// </summary>
 internal sealed class PersistentVectorStore : IVectorStore
 {
@@ -53,7 +53,7 @@ internal sealed class PersistentVectorStore : IVectorStore
 
     private IndexHandle OpenHandle(VectorCatalogEntry e)
     {
-        var payload = new VectorPayloadStore(
+        var payload = new VectorIndexPayloadStore(
             _container.OpenTenant(e.PayloadTenant, PageKind.Header),
             e.Spec.Dimensions,
             e.Spec.ElementType,
@@ -378,13 +378,13 @@ internal sealed class PersistentVectorStore : IVectorStore
 
     private sealed class IndexHandle(
         VectorIndexSpec spec,
-        VectorPayloadStore payload,
+        VectorIndexPayloadStore payload,
         HnswIndex? hnsw)
     {
         private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
 
         public VectorIndexSpec Spec { get; } = spec;
-        public VectorPayloadStore Payload { get; } = payload;
+        public VectorIndexPayloadStore Payload { get; } = payload;
         public HnswIndex? Hnsw { get; } = hnsw;
 
         public LockScope Read() => new(_lock, write: false);

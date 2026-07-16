@@ -67,12 +67,12 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
 
     // BulkLoader が構築する連続隣接インデックス。未構築またはミューテーション後は null。
     // ExpandOperator が高速な隣接スキャンに使い、null のときはリンクリストにフォールバック。
-    IAdjacencyBlockStore? AdjacencyBlocks { get; }
+    IAdjacencySegmentStore? AdjacencySegments { get; }
 
     // 明示設定されたロール対の co-membership 導出ビュー。未設定なら null。
     ICoMembershipBlockStore? CoMembershipBlocks { get; }
 
-    // バックエンド提供のアクセスメソッド。オペレータは Vertices/Edges/AdjacencyBlocks を
+    // バックエンド提供のアクセスメソッド。オペレータは Vertices/Edges/AdjacencySegments を
     // 直接読まずこちら経由で呼ぶ。バックエンド固有実装が無い場合は InlineGraphAccessMethods.Instance。
     IGraphAccessMethods Access { get; }
 }

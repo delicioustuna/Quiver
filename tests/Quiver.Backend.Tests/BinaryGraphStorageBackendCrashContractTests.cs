@@ -204,7 +204,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
 
     /// <summary>
     /// commit 後に隣接ブロックインデックス sidecar を 0 バイトへ切り詰める。
-    /// adj_idx.dat は BulkLoader だけが書くため、存在しなければ factory は V1 経路を
+    /// adjacency index は BulkLoader だけが書くため、存在しなければ factory は row path を
     /// 安全にスキップする。コミット済みVertexストアは引き続き読み取れる。
     /// </summary>
     [Fact]
@@ -673,7 +673,7 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     [InlineData(nameof(CompactAdjacencyPhase.AfterDescriptorInvalidated), false)]
     [InlineData(nameof(CompactAdjacencyPhase.AfterRebuild), false)]
     [InlineData(nameof(CompactAdjacencyPhase.AfterFinalDescriptorFlushed), true)]
-    public void CompactAdjacency_v2_interrupted_then_reopen_recovers_expected_view(
+    public void CompactAdjacency_segment_interrupted_then_reopen_recovers_expected_view(
         string killAtName,
         bool expectAdjacencyView)
     {
@@ -733,12 +733,12 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
 
             using var reopened = QuiverDatabase.Open(path);
             using var read = reopened.BeginReadOnlyTransaction();
-            var adjacency = read.AsInternal().AdjacencyBlocks;
+            var adjacency = read.AsInternal().AdjacencySegments;
             if (expectAdjacencyView)
             {
                 var view = adjacency as IAdjacencyPayloadView;
                 view.Should().NotBeNull(
-                    "final descriptor flush makes the rebuilt V2 view durable");
+                    "final descriptor flush makes the rebuilt segment durable");
                 view!.PayloadSpec.PropertyKeyId.Should().Be(weightKey.Value);
 
                 var weights = ReadOutgoingWeights(read, new VertexId(0));
@@ -768,10 +768,10 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
     private static Dictionary<long, long> ReadOutgoingWeights(IGraphTransaction tx, VertexId source)
     {
         var seen = new Dictionary<long, long>();
-        using var cursor = tx.AsInternal().AdjacencyBlocks!.OpenCursor(source, Direction.Outgoing, null);
+        using var cursor = tx.AsInternal().AdjacencySegments!.OpenCursor(source, Direction.Outgoing, null);
         while (cursor.MoveNext())
         {
-            if (!tx.AsInternal().AdjacencyBlocks!.IsTombstoned(cursor.Edge))
+            if (!tx.AsInternal().AdjacencySegments!.IsTombstoned(cursor.Edge))
                 seen[cursor.Neighbor.Sequence] = cursor.WeightRaw;
         }
 

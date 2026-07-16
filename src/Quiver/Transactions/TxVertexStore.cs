@@ -80,39 +80,7 @@ internal sealed class TxVertexStore : IVertexStore
     // 世代照合は raw な sidecar 読み取り (MVCC / lock 不要)。そのまま委譲する。
     public int CurrentGeneration(long localId) => _inner.CurrentGeneration(localId);
 
-    // ===== inline property (read は共有ロック / write は排他ロック + SSN write) =====
-
-    public bool TryGetInlineProperty(VertexId vertexId, PropertyKeyId keyId, out PropertyValue value)
-    {
-        if (_mode == LockingMode.ReaderWriter) Acquire(vertexId.Sequence, LockMode.Shared);
-        ActivateMvccContext();
-        return _inner.TryGetInlineProperty(vertexId, keyId, out value);
-    }
-
-    public bool HasInlineProperty(VertexId vertexId, PropertyKeyId keyId)
-    {
-        if (_mode == LockingMode.ReaderWriter) Acquire(vertexId.Sequence, LockMode.Shared);
-        ActivateMvccContext();
-        return _inner.HasInlineProperty(vertexId, keyId);
-    }
-
-    public bool SetInlineProperty(VertexId vertexId, PropertyKeyId keyId, in PropertyValue value)
-    {
-        Acquire(vertexId.Sequence, LockMode.Exclusive);
-        ActivateMvccContext();
-        SsnOnWrite(vertexId.Sequence);
-        return _inner.SetInlineProperty(vertexId, keyId, in value);
-    }
-
-    public bool RemoveInlineProperty(VertexId vertexId, PropertyKeyId keyId)
-    {
-        Acquire(vertexId.Sequence, LockMode.Exclusive);
-        ActivateMvccContext();
-        SsnOnWrite(vertexId.Sequence);
-        return _inner.RemoveInlineProperty(vertexId, keyId);
-    }
-
-    public PropertyEnumerator EnumerateProperties(VertexId vertexId, IPropertyStore overflowStore)
+    public PropertyCursor EnumerateProperties(VertexId vertexId, IPropertyStore overflowStore)
     {
         if (_mode == LockingMode.ReaderWriter) Acquire(vertexId.Sequence, LockMode.Shared);
         ActivateMvccContext();

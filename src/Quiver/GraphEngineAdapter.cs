@@ -81,7 +81,7 @@ internal sealed class GraphEngineAdapter : IGraphEngine
             }
 
         // vertex / edge とも inline + overflow を結合列挙する。
-            PropertyEnumerator enumerator;
+            PropertyCursor enumerator;
             if (entity.Kind == EntityKind.Vertex)
             {
                 enumerator = _tx.Vertices.EnumerateProperties(new VertexId(entity.Value), _tx.Properties);

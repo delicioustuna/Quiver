@@ -375,7 +375,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         // この ID が不変ベースビューに含まれる場合、隣接ブロックには依然として
         // 現れる — 後続の expand カーソルがスキップできるよう tombstone を記録する。
         // delta 側 ID に対してはストアは no-op。
-        _inner.AdjacencyBlocks?.Tombstone(edgeId);
+        _inner.AdjacencySegments?.Tombstone(edgeId);
         _inner.Edges.Delete(_inner.Vertices, edgeId);
         // リレーション削除に伴い、その kind の全列で seq を論理削除する。
         _columns?.OnDeleteEntity(Core.EntityKind.Edge, edgeId.Sequence, _inner.Id.Value);
@@ -385,15 +385,15 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     private void FreeEdgeProperties(EdgeId edgeId)
     {
-        var firstPropId = _inner.Edges.Read(edgeId).FirstPropertyId;
-        if (!firstPropId.IsValid) return;
-        var toDelete = new List<PropertyId>();
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
-            toDelete.Add(propEnum.Current.Id);
-        var currentFirst = firstPropId;
-        foreach (var pid in toDelete)
-            currentFirst = _inner.Properties.Delete(pid, currentFirst);
+        EntityRef owner = PropertyOwner(edgeId);
+        var firstProperty = _inner.Edges.Read(edgeId).FirstPropertyRef;
+        if (!firstProperty.IsValid) return;
+        var toDelete = new List<PropertyVersionRef>();
+        var cursor = _inner.Properties.Enumerate(owner, firstProperty);
+        while (cursor.MoveNext())
+            toDelete.Add(cursor.CurrentVersion);
+        foreach (var version in toDelete)
+            _inner.Properties.Delete(owner, version, firstProperty);
     }
 
     // ========== プロパティ操作 ==========
@@ -447,104 +447,102 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     private void SetEdgeProperty(EdgeId edgeId, PropertyKeyId keyId, in PropertyValue value)
     {
-        // 小さい値は edge record へ inline (copy-on-write)。
-        if (InlinePropertyCodec.IsInlineable(value) && _inner.Edges.SetInlineProperty(edgeId, keyId, in value))
-        {
-            // size-class 変更で同 key が overflow に残っていれば除去する。
-            RemoveEdgeOverflowIfPresent(edgeId, keyId);
-            return;
-        }
-        // inline 不可 / 予算超過 → overflow チェーン。inline 側に旧値があれば除去。
-        _inner.Edges.RemoveInlineProperty(edgeId, keyId);
-        SetEdgeOverflow(edgeId, keyId, in value);
-    }
-
-    private void SetEdgeOverflow(EdgeId edgeId, PropertyKeyId keyId, in PropertyValue value)
-    {
-        var firstPropId = _inner.Edges.Read(edgeId).FirstPropertyId;
-        var newFirst = firstPropId;
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
-        {
-            if (propEnum.Current.KeyId == keyId)
-            {
-                newFirst = _inner.Properties.Delete(propEnum.Current.Id, newFirst);
-                break;
-            }
-        }
-        var newPropId = _inner.Properties.Create(keyId, in value, newFirst);
+        EntityRef owner = PropertyOwner(edgeId);
+        var firstProperty = _inner.Edges.Read(edgeId).FirstPropertyRef;
+        var newHead = SetSingleProperty(owner, firstProperty, keyId, in value);
         var wh = _inner.Edges.Write(edgeId);
-        wh.FirstPropertyId = newPropId;
+        wh.FirstPropertyRef = newHead;
         wh.Dispose();
-    }
-
-    private void RemoveEdgeOverflowIfPresent(EdgeId edgeId, PropertyKeyId keyId)
-    {
-        var firstPropId = _inner.Edges.Read(edgeId).FirstPropertyId;
-        if (!firstPropId.IsValid) return;
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
-        {
-            if (propEnum.Current.KeyId == keyId)
-            {
-                var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
-                var wh = _inner.Edges.Write(edgeId);
-                wh.FirstPropertyId = newFirst;
-                wh.Dispose();
-                return;
-            }
-        }
     }
 
     private void SetVertexProperty(VertexId vertexId, PropertyKeyId keyId, in PropertyValue value)
     {
-        // 小さい値は vertex record へ inline (copy-on-write)。
-        if (InlinePropertyCodec.IsInlineable(value) && _inner.Vertices.SetInlineProperty(vertexId, keyId, in value))
+        EntityRef owner = PropertyOwner(vertexId);
+        // property chain を変更してから owner を lock する順序では、ラッパーが保証する owner lock の
+        // 外側で version が追加される。write handle を先に取得し、同じ pin で head の読書きを完結させる。
+        var wh = _inner.Vertices.Write(vertexId);
+        try
         {
-            // size-class 変更で同 key が overflow に残っていれば除去する。
-            RemoveVertexOverflowIfPresent(vertexId, keyId);
-            return;
+            var newHead = SetSingleProperty(owner, wh.FirstPropertyRef, keyId, in value);
+            wh.FirstPropertyRef = newHead;
         }
-        // inline 不可 / 予算超過 → overflow チェーン。inline 側に旧値があれば除去。
-        _inner.Vertices.RemoveInlineProperty(vertexId, keyId);
-        SetVertexOverflow(vertexId, keyId, in value);
+        finally
+        {
+            wh.Dispose();
+        }
     }
 
-    private void SetVertexOverflow(VertexId vertexId, PropertyKeyId keyId, in PropertyValue value)
+    private PropertyVersionRef SetSingleProperty(
+        EntityRef owner,
+        PropertyVersionRef firstProperty,
+        PropertyKeyId keyId,
+        in PropertyValue value)
     {
-        var firstPropId = _inner.Vertices.Read(vertexId).FirstPropertyId;
-        var newFirst = firstPropId;
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
+        var cursor = _inner.Properties.Enumerate(owner, firstProperty);
+        while (cursor.MoveNext())
         {
-            if (propEnum.Current.KeyId == keyId)
+            if (cursor.Current.KeyId == keyId)
             {
-                newFirst = _inner.Properties.Delete(propEnum.Current.Id, newFirst);
+                _inner.Properties.Delete(owner, cursor.CurrentVersion, firstProperty);
                 break;
             }
         }
-        var newPropId = _inner.Properties.Create(keyId, in value, newFirst);
-        var wh = _inner.Vertices.Write(vertexId);
-        wh.FirstPropertyId = newPropId;
-        wh.Dispose();
+        var address = new PropertyAddress(owner, keyId);
+        return _inner.Properties.Create(address, PropertyCardinality.Single, in value, firstProperty);
     }
 
-    private void RemoveVertexOverflowIfPresent(VertexId vertexId, PropertyKeyId keyId)
+    // Generation 0 の typed ID は物理アドレスとして受け取る既存経路がある。
+    // property owner を永続化する境界では current generation を補い、別 incarnation への alias を防ぐ。
+    private EntityRef PropertyOwner(VertexId id)
     {
-        var firstPropId = _inner.Vertices.Read(vertexId).FirstPropertyId;
-        if (!firstPropId.IsValid) return;
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
+        int generation = id.Generation == 0 ? _inner.Vertices.CurrentGeneration(id.Sequence) : id.Generation;
+        return EntityRef.From(generation > 0 ? VertexId.Create(id.Sequence, generation) : id);
+    }
+
+    private EntityRef PropertyOwner(EdgeId id)
+    {
+        int generation = id.Generation == 0 ? _inner.Edges.CurrentGeneration(id.Sequence) : id.Generation;
+        return EntityRef.From(generation > 0 ? EdgeId.Create(id.Sequence, generation) : id);
+    }
+
+    private EntityRef PropertyOwner(NexusId id)
+    {
+        int generation = id.Generation == 0 ? _inner.Nexuses.CurrentGeneration(id.Sequence) : id.Generation;
+        return EntityRef.From(generation > 0 ? NexusId.Create(id.Sequence, generation) : id);
+    }
+
+    private bool RemovePropertyCore(EntityRef owner, PropertyVersionRef firstProperty, PropertyKeyId keyId)
+    {
+        var cursor = _inner.Properties.Enumerate(owner, firstProperty);
+        while (cursor.MoveNext())
         {
-            if (propEnum.Current.KeyId == keyId)
-            {
-                var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
-                var wh = _inner.Vertices.Write(vertexId);
-                wh.FirstPropertyId = newFirst;
-                wh.Dispose();
-                return;
-            }
+            if (cursor.Current.KeyId != keyId) continue;
+            _inner.Properties.Delete(owner, cursor.CurrentVersion, firstProperty);
+            return true;
         }
+        return false;
+    }
+
+    private PropertyValue GetPropertyCore(EntityRef owner, PropertyVersionRef firstProperty, PropertyKeyId keyId)
+    {
+        var cursor = _inner.Properties.Enumerate(owner, firstProperty);
+        while (cursor.MoveNext())
+        {
+            if (cursor.Current.KeyId == keyId)
+                return cursor.Current.Value;
+        }
+        return default;
+    }
+
+    private bool HasPropertyCore(EntityRef owner, PropertyVersionRef firstProperty, PropertyKeyId keyId)
+    {
+        var cursor = _inner.Properties.Enumerate(owner, firstProperty);
+        while (cursor.MoveNext())
+        {
+            if (cursor.Current.KeyId == keyId)
+                return true;
+        }
+        return false;
     }
 
     public void RemoveProperty(VertexId vertexId, string key)
@@ -552,25 +550,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
 
-        // inline を先に試し、無ければ overflow チェーンから除去。
-        bool removed = _inner.Vertices.RemoveInlineProperty(vertexId, keyId);
-        if (!removed)
-        {
-            var firstPropId = _inner.Vertices.Read(vertexId).FirstPropertyId;
-            var propEnum = _inner.Properties.Enumerate(firstPropId);
-            while (propEnum.MoveNext())
-            {
-                if (propEnum.Current.KeyId == keyId)
-                {
-                    var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
-                    var wh = _inner.Vertices.Write(vertexId);
-                    wh.FirstPropertyId = newFirst;
-                    wh.Dispose();
-                    removed = true;
-                    break;
-                }
-            }
-        }
+        var firstProperty = _inner.Vertices.Read(vertexId).FirstPropertyRef;
+        bool removed = RemovePropertyCore(PropertyOwner(vertexId), firstProperty, keyId);
         if (removed)
         {
         // 列化済み key なら列も論理削除する。
@@ -586,16 +567,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
-        // inline を先に引き、無ければ overflow チェーンを walk。
-        if (_inner.Vertices.TryGetInlineProperty(vertexId, keyId, out var inlineVal)) return inlineVal;
-        var firstPropId = _inner.Vertices.Read(vertexId).FirstPropertyId;
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
-        {
-            var prop = propEnum.Current;
-            if (prop.KeyId == keyId) return prop.Value;
-        }
-        return default;
+        var firstProperty = _inner.Vertices.Read(vertexId).FirstPropertyRef;
+        return GetPropertyCore(PropertyOwner(vertexId), firstProperty, keyId);
     }
 
     public PropertyValue GetProperty(EdgeId edgeId, string key)
@@ -604,36 +577,21 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
-        // inline を先に引き、無ければ overflow チェーンを walk。
-        if (_inner.Edges.TryGetInlineProperty(edgeId, keyId, out var inlineVal)) return inlineVal;
-        var firstPropId = _inner.Edges.Read(edgeId).FirstPropertyId;
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
-        {
-            var prop = propEnum.Current;
-            if (prop.KeyId == keyId) return prop.Value;
-        }
-        return default;
+        var firstProperty = _inner.Edges.Read(edgeId).FirstPropertyRef;
+        return GetPropertyCore(PropertyOwner(edgeId), firstProperty, keyId);
     }
 
     public bool HasProperty(VertexId vertexId, string key)
     {
         using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return false;
-        if (_inner.Vertices.HasInlineProperty(vertexId, keyId)) return true;
-        var firstPropId = _inner.Vertices.Read(vertexId).FirstPropertyId;
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
-        {
-            if (propEnum.Current.KeyId == keyId) return true;
-        }
-        return false;
+        var firstProperty = _inner.Vertices.Read(vertexId).FirstPropertyRef;
+        return HasPropertyCore(PropertyOwner(vertexId), firstProperty, keyId);
     }
 
-    public PropertyEnumerator EnumerateProperties(VertexId vertexId)
+    public PropertyCursor EnumerateProperties(VertexId vertexId)
     {
         using var usage = EnterUsage();
-        // inline (visible 版) + overflow チェーンを結合して列挙。
         return _inner.Vertices.EnumerateProperties(vertexId, _inner.Properties);
     }
 
@@ -653,11 +611,14 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                 return;
         }
 
-        // overflow チェーンの head に prepend (既存 same-key エントリは削除しない)
-        var firstPropId = _inner.Vertices.Read(vertexId).FirstPropertyId;
-        var newPropId = _inner.Properties.Create(keyId, in value, firstPropId);
+        var firstProperty = _inner.Vertices.Read(vertexId).FirstPropertyRef;
+        var newHead = _inner.Properties.Create(
+            new PropertyAddress(PropertyOwner(vertexId), keyId),
+            PropertyCardinality.Set,
+            in value,
+            firstProperty);
         var wh = _inner.Vertices.Write(vertexId);
-        wh.FirstPropertyId = newPropId;
+        wh.FirstPropertyRef = newHead;
         wh.Dispose();
 
         if (TryResolveSecondaryIndex(vertexId, key, out var indexName))
@@ -679,10 +640,14 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                 return;
         }
 
-        var firstPropId = _inner.Edges.Read(edgeId).FirstPropertyId;
-        var newPropId = _inner.Properties.Create(keyId, in value, firstPropId);
+        var firstProperty = _inner.Edges.Read(edgeId).FirstPropertyRef;
+        var newHead = _inner.Properties.Create(
+            new PropertyAddress(PropertyOwner(edgeId), keyId),
+            PropertyCardinality.Set,
+            in value,
+            firstProperty);
         var wh = _inner.Edges.Write(edgeId);
-        wh.FirstPropertyId = newPropId;
+        wh.FirstPropertyRef = newHead;
         wh.Dispose();
     }
 
@@ -693,18 +658,15 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
             throw new InvalidOperationException($"Use RemoveProperty for Single-cardinality property '{key}'.");
 
-        var firstPropId = _inner.Vertices.Read(vertexId).FirstPropertyId;
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
+        var firstProperty = _inner.Vertices.Read(vertexId).FirstPropertyRef;
+        EntityRef owner = PropertyOwner(vertexId);
+        var cursor = _inner.Properties.Enumerate(owner, firstProperty);
+        while (cursor.MoveNext())
         {
-            if (propEnum.Current.KeyId == keyId
-                && propEnum.Current.InUse
-                && PropertyValueEqualityHelper.AreEqual(propEnum.Current.Value, in value))
+            if (cursor.Current.KeyId == keyId
+                && PropertyValueEqualityHelper.AreEqual(cursor.Current.Value, in value))
             {
-                var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
-                var wh = _inner.Vertices.Write(vertexId);
-                wh.FirstPropertyId = newFirst;
-                wh.Dispose();
+                _inner.Properties.Delete(owner, cursor.CurrentVersion, firstProperty);
 
                 if (TryResolveSecondaryIndex(vertexId, key, out var indexName))
                     RemoveFromIndex(indexName, in value, vertexId);
@@ -722,18 +684,15 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         if (!_inner.Edges.Read(edgeId).InUse)
             return;
 
-        var firstPropId = _inner.Edges.Read(edgeId).FirstPropertyId;
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
+        var firstProperty = _inner.Edges.Read(edgeId).FirstPropertyRef;
+        EntityRef owner = PropertyOwner(edgeId);
+        var cursor = _inner.Properties.Enumerate(owner, firstProperty);
+        while (cursor.MoveNext())
         {
-            if (propEnum.Current.KeyId == keyId
-                && propEnum.Current.InUse
-                && PropertyValueEqualityHelper.AreEqual(propEnum.Current.Value, in value))
+            if (cursor.Current.KeyId == keyId
+                && PropertyValueEqualityHelper.AreEqual(cursor.Current.Value, in value))
             {
-                var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
-                var wh = _inner.Edges.Write(edgeId);
-                wh.FirstPropertyId = newFirst;
-                wh.Dispose();
+                _inner.Properties.Delete(owner, cursor.CurrentVersion, firstProperty);
                 return;
             }
         }
@@ -744,7 +703,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId))
             return new PropertyValuesEnumerator(
-                new PropertyEnumerator(null!, PropertyId.Invalid), default);
+                new PropertyCursor(null!, default, PropertyVersionRef.Invalid), default);
         return new PropertyValuesEnumerator(
             _inner.Vertices.EnumerateProperties(vertexId, _inner.Properties), keyId);
     }
@@ -754,7 +713,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId))
             return new PropertyValuesEnumerator(
-                new PropertyEnumerator(null!, PropertyId.Invalid), default);
+                new PropertyCursor(null!, default, PropertyVersionRef.Invalid), default);
         return new PropertyValuesEnumerator(
             _inner.Edges.EnumerateProperties(edgeId, _inner.Properties), keyId);
     }
@@ -899,7 +858,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
             plan, _inner.Vertices, _inner.Edges, _inner.Nexuses);
     }
 
-    public IAdjacencyBlockStore? AdjacencyBlocks => _inner.AdjacencyBlocks;
+    public IAdjacencySegmentStore? AdjacencySegments => _inner.AdjacencySegments;
 
     public IGraphAccessMethods Access => _inner.Access;
 
@@ -1026,15 +985,15 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     private void FreeNexusProperties(NexusId nexusId)
     {
-        var firstPropId = _inner.Nexuses.Read(nexusId).FirstPropertyId;
-        if (!firstPropId.IsValid) return;
-        var toDelete = new List<PropertyId>();
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
-            toDelete.Add(propEnum.Current.Id);
-        var currentFirst = firstPropId;
-        foreach (var pid in toDelete)
-            currentFirst = _inner.Properties.Delete(pid, currentFirst);
+        EntityRef owner = PropertyOwner(nexusId);
+        var firstProperty = _inner.Nexuses.Read(nexusId).FirstPropertyRef;
+        if (!firstProperty.IsValid) return;
+        var toDelete = new List<PropertyVersionRef>();
+        var cursor = _inner.Properties.Enumerate(owner, firstProperty);
+        while (cursor.MoveNext())
+            toDelete.Add(cursor.CurrentVersion);
+        foreach (var version in toDelete)
+            _inner.Properties.Delete(owner, version, firstProperty);
     }
 
     public NexusMemberEnumerator GetMembers(NexusId nexusId, string? role = null)
@@ -1074,8 +1033,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         => typeId.IsValid ? _nexusTypeTokens.GetName(typeId) : null;
 
     // ========== Nexusプロパティ操作 ==========
-    // vertex / edge と同じプロパティエンティティとして扱う。header 15 バイト固定領域の後ろへ
-    // inline 符号化し、収まらない値は既存 PropertyStore の overflow チェーンへ回す。
+    // vertex / edge と同じ owner-bound property version store を使う。
 
     public void SetProperty(NexusId nexusId, string key, in PropertyValue value)
     {
@@ -1095,53 +1053,12 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     private void SetNexusProperty(NexusId nexusId, PropertyKeyId keyId, in PropertyValue value)
     {
-        // 小さい値は header へ inline (copy-on-write)。
-        if (InlinePropertyCodec.IsInlineable(value) && _inner.Nexuses.SetInlineProperty(nexusId, keyId, in value))
-        {
-            // size-class 変更で同 key が overflow に残っていれば除去する。
-            RemoveNexusOverflowIfPresent(nexusId, keyId);
-            return;
-        }
-        // inline 不可 / 予算超過 → overflow チェーン。inline 側に旧値があれば除去。
-        _inner.Nexuses.RemoveInlineProperty(nexusId, keyId);
-        SetNexusOverflow(nexusId, keyId, in value);
-    }
-
-    private void SetNexusOverflow(NexusId nexusId, PropertyKeyId keyId, in PropertyValue value)
-    {
-        var firstPropId = _inner.Nexuses.Read(nexusId).FirstPropertyId;
-        var newFirst = firstPropId;
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
-        {
-            if (propEnum.Current.KeyId == keyId)
-            {
-                newFirst = _inner.Properties.Delete(propEnum.Current.Id, newFirst);
-                break;
-            }
-        }
-        var newPropId = _inner.Properties.Create(keyId, in value, newFirst);
+        EntityRef owner = PropertyOwner(nexusId);
+        var firstProperty = _inner.Nexuses.Read(nexusId).FirstPropertyRef;
+        var newHead = SetSingleProperty(owner, firstProperty, keyId, in value);
         var wh = _inner.Nexuses.Write(nexusId);
-        wh.FirstPropertyId = newPropId;
+        wh.FirstPropertyRef = newHead;
         wh.Dispose();
-    }
-
-    private void RemoveNexusOverflowIfPresent(NexusId nexusId, PropertyKeyId keyId)
-    {
-        var firstPropId = _inner.Nexuses.Read(nexusId).FirstPropertyId;
-        if (!firstPropId.IsValid) return;
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
-        {
-            if (propEnum.Current.KeyId == keyId)
-            {
-                var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
-                var wh = _inner.Nexuses.Write(nexusId);
-                wh.FirstPropertyId = newFirst;
-                wh.Dispose();
-                return;
-            }
-        }
     }
 
     public PropertyValue GetProperty(NexusId nexusId, string key)
@@ -1150,30 +1067,16 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
-        // inline を先に引き、無ければ overflow チェーンを walk。
-        if (_inner.Nexuses.TryGetInlineProperty(nexusId, keyId, out var inlineVal)) return inlineVal;
-        var firstPropId = _inner.Nexuses.Read(nexusId).FirstPropertyId;
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
-        {
-            var prop = propEnum.Current;
-            if (prop.KeyId == keyId) return prop.Value;
-        }
-        return default;
+        var firstProperty = _inner.Nexuses.Read(nexusId).FirstPropertyRef;
+        return GetPropertyCore(PropertyOwner(nexusId), firstProperty, keyId);
     }
 
     public bool HasProperty(NexusId nexusId, string key)
     {
         using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return false;
-        if (_inner.Nexuses.HasInlineProperty(nexusId, keyId)) return true;
-        var firstPropId = _inner.Nexuses.Read(nexusId).FirstPropertyId;
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
-        {
-            if (propEnum.Current.KeyId == keyId) return true;
-        }
-        return false;
+        var firstProperty = _inner.Nexuses.Read(nexusId).FirstPropertyRef;
+        return HasPropertyCore(PropertyOwner(nexusId), firstProperty, keyId);
     }
 
     public void RemoveProperty(NexusId nexusId, string key)
@@ -1181,25 +1084,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
 
-        // inline を先に試し、無ければ overflow チェーンから除去。
-        bool removed = _inner.Nexuses.RemoveInlineProperty(nexusId, keyId);
-        if (!removed)
-        {
-            var firstPropId = _inner.Nexuses.Read(nexusId).FirstPropertyId;
-            var propEnum = _inner.Properties.Enumerate(firstPropId);
-            while (propEnum.MoveNext())
-            {
-                if (propEnum.Current.KeyId == keyId)
-                {
-                    var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
-                    var wh = _inner.Nexuses.Write(nexusId);
-                    wh.FirstPropertyId = newFirst;
-                    wh.Dispose();
-                    removed = true;
-                    break;
-                }
-            }
-        }
+        var firstProperty = _inner.Nexuses.Read(nexusId).FirstPropertyRef;
+        bool removed = RemovePropertyCore(PropertyOwner(nexusId), firstProperty, keyId);
         if (removed)
         {
             _columns?.OnRemoveProperty(Core.EntityKind.Nexus, nexusId.Sequence, keyId, _inner.Id.Value);
@@ -1208,7 +1094,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         }
     }
 
-    public PropertyEnumerator EnumerateProperties(NexusId nexusId)
+    public PropertyCursor EnumerateProperties(NexusId nexusId)
     {
         using var usage = EnterUsage();
         return _inner.Nexuses.EnumerateProperties(nexusId, _inner.Properties);
@@ -1230,11 +1116,14 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                 return;
         }
 
-        // overflow チェーンの head に prepend (既存 same-key エントリは削除しない)。
-        var firstPropId = _inner.Nexuses.Read(nexusId).FirstPropertyId;
-        var newPropId = _inner.Properties.Create(keyId, in value, firstPropId);
+        var firstProperty = _inner.Nexuses.Read(nexusId).FirstPropertyRef;
+        var newHead = _inner.Properties.Create(
+            new PropertyAddress(PropertyOwner(nexusId), keyId),
+            PropertyCardinality.Set,
+            in value,
+            firstProperty);
         var wh = _inner.Nexuses.Write(nexusId);
-        wh.FirstPropertyId = newPropId;
+        wh.FirstPropertyRef = newHead;
         wh.Dispose();
 
         if (_logicalSink != null)
@@ -1251,18 +1140,15 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
             throw new InvalidOperationException($"Use RemoveProperty for Single-cardinality property '{key}'.");
 
-        var firstPropId = _inner.Nexuses.Read(nexusId).FirstPropertyId;
-        var propEnum = _inner.Properties.Enumerate(firstPropId);
-        while (propEnum.MoveNext())
+        var firstProperty = _inner.Nexuses.Read(nexusId).FirstPropertyRef;
+        EntityRef owner = PropertyOwner(nexusId);
+        var cursor = _inner.Properties.Enumerate(owner, firstProperty);
+        while (cursor.MoveNext())
         {
-            if (propEnum.Current.KeyId == keyId
-                && propEnum.Current.InUse
-                && PropertyValueEqualityHelper.AreEqual(propEnum.Current.Value, in value))
+            if (cursor.Current.KeyId == keyId
+                && PropertyValueEqualityHelper.AreEqual(cursor.Current.Value, in value))
             {
-                var newFirst = _inner.Properties.Delete(propEnum.Current.Id, firstPropId);
-                var wh = _inner.Nexuses.Write(nexusId);
-                wh.FirstPropertyId = newFirst;
-                wh.Dispose();
+                _inner.Properties.Delete(owner, cursor.CurrentVersion, firstProperty);
 
                 if (_logicalSink != null)
                 {
@@ -1279,7 +1165,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId))
             return new PropertyValuesEnumerator(
-                new PropertyEnumerator(null!, PropertyId.Invalid), default);
+                new PropertyCursor(null!, default, PropertyVersionRef.Invalid), default);
         return new PropertyValuesEnumerator(
             _inner.Nexuses.EnumerateProperties(nexusId, _inner.Properties), keyId);
     }

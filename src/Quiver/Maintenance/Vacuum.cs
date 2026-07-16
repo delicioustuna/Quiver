@@ -25,7 +25,7 @@ internal sealed class Vacuum : IVacuum
 {
     private readonly VersionedVertexStore _vertexStore;
     private readonly VersionedEdgeStore _edgeStore;
-    private readonly PropertyStore _propStore;
+    private readonly PropertyVersionStore _propStore;
     private readonly TransactionManager _txManager;
     private readonly CommittedTxRegistry _committed;
     private readonly IWriteAheadLog? _wal;
@@ -39,7 +39,7 @@ internal sealed class Vacuum : IVacuum
     internal Vacuum(
         VersionedVertexStore vertexStore,
         VersionedEdgeStore edgeStore,
-        PropertyStore propStore,
+        PropertyVersionStore propStore,
         TransactionManager txManager,
         CommittedTxRegistry committed,
         IWriteAheadLog? wal = null,
@@ -86,7 +86,7 @@ internal sealed class Vacuum : IVacuum
             bool dryRun = options.Mode == VacuumMode.DryRun;
 
             // 順序:
-            //  1. Properties (dead Vertexの prop chain は vertex.FirstPropId 経由でしか辿れないので、
+            //  1. Properties (dead Vertexの prop chain は vertex.FirstPropertyRef 経由でしか辿れないので、
             //     vertex vacuum 前に処理する必要がある)
             //  2. Edges (同じく vertex の FirstEdgeId 経由で辿る)
             // 3. Vertex

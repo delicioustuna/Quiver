@@ -6,7 +6,7 @@ namespace Quiver.Transactions;
 /// <summary>
 /// バックエンドの access methods コントラクト。
 /// オペレータは <see cref="ITransaction.Vertices"/> / <see cref="ITransaction.Edges"/> /
-/// <see cref="ITransaction.AdjacencyBlocks"/> を直接叩く代わりに、scan / seek / expand を
+/// <see cref="ITransaction.AdjacencySegments"/> を直接叩く代わりに、scan / seek / expand を
 /// このインタフェースを経由してルーティングする。これにより各バックエンドは独自の access path
 /// (リンクリスト、隣接ブロック、Edgeスキャン等) を選択できる。
 /// </summary>
@@ -220,7 +220,7 @@ internal abstract class ExpandCursor : IDisposable
     public abstract EdgeId Edge { get; }
 
     /// <summary>
-    /// 現在エッジの生 64 ビット payload (典型的にはエッジ重み)。V2 隣接ビュー裏付けの
+    /// 現在エッジの生 64 ビット payload (典型的にはエッジ重み)。adjacency segment 裏付けの
     /// カーソルは inline payload lane を転送する。それ以外のカーソルは 0 を返す。
     /// 有効な payload 種別が Double のときは <see cref="BitConverter.Int64BitsToDouble"/> で
     /// <see cref="double"/> として再解釈する。

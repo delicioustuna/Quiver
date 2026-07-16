@@ -332,7 +332,7 @@ public static class CleanSlateCsrProductIntegrationRunner
         int rowMatches = 0;
         int mismatches = 0;
 
-        var adj = tx.AsInternal().AdjacencyBlocks
+        var adj = tx.AsInternal().AdjacencySegments
             ?? throw new InvalidOperationException("Adjacency block store was not built.");
 
         using var first = adj.OpenCursor(hub, Direction.Outgoing, null);
@@ -364,7 +364,7 @@ public static class CleanSlateCsrProductIntegrationRunner
 
     private static int CountPayloadMatches(IGraphTransaction tx, VertexId hub)
     {
-        var adj = tx.AsInternal().AdjacencyBlocks
+        var adj = tx.AsInternal().AdjacencySegments
             ?? throw new InvalidOperationException("Adjacency block store was not built.");
 
         int count = 0;
@@ -390,7 +390,7 @@ public static class CleanSlateCsrProductIntegrationRunner
         VertexId hub,
         int expectedEdges)
     {
-        var adj = tx.AsInternal().AdjacencyBlocks
+        var adj = tx.AsInternal().AdjacencySegments
             ?? throw new InvalidOperationException("Adjacency block store was not built.");
         if (adj is not IAdjacencyPayloadView)
             throw new InvalidOperationException("Payload adjacency view was not built.");

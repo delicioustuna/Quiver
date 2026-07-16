@@ -7,12 +7,12 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// Weighted-edge read via the V2 payload lane vs
+/// Weighted-edge read via the adjacency payload lane vs
 /// the property-chain join used by linked-list traversal. The hot path here
 /// is "for each out-edge of the hub, sum the weight" — the kind of inner loop
 /// SSSP / top-k neighbor / weighted PageRank perform.
 ///
-/// PayloadLane:   AdjacencyBlockStoreV2 inline lane (no property fetch).
+/// PayloadLane:   AdjacencySegmentStore inline lane (no property fetch).
 /// PropertyChain: linked-list walk + GetProperty per edge (existing path).
 ///
 /// Expectation: PayloadLane should be substantially faster at any degree;
@@ -37,7 +37,7 @@ public class WeightedAdjBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        // V2 path: bulk-load with payload lane configured, weights inlined.
+        // Segment path: bulk-load with payload lane configured, weights inlined.
         _v2Path = BenchTempDir.Create("v2");
         {
             using var db = QuiverDatabase.Open(System.IO.Path.Combine(_v2Path, "graph.quiver"));
@@ -57,10 +57,10 @@ public class WeightedAdjBenchmarks
         _v2Db = QuiverDatabase.Open(System.IO.Path.Combine(_v2Path, "graph.quiver"));
         _v2Tx = _v2Db.BeginTransaction();
 
-        // V1 path: bulk-load without payload lane, then set the weight via
+        // Property path: bulk-load without payload lane, then set the weight via
         // edge properties so the linked-list walk has something to
         // fetch. Two-phase so the property chain exercises the same lookup
-        // cost a non-V2 user would pay.
+        // cost when the payload lane is disabled.
         _v1Path = BenchTempDir.Create("v1");
         {
             using var db = QuiverDatabase.Open(System.IO.Path.Combine(_v1Path, "graph.quiver"));
@@ -100,11 +100,11 @@ public class WeightedAdjBenchmarks
         BenchTempDir.Delete(_v1Path);
     }
 
-    [Benchmark(Description = "PayloadLane sum (V2 inline)")]
+    [Benchmark(Description = "PayloadLane sum (segment inline)")]
     public long PayloadLane()
     {
         long sum = 0;
-        using var cursor = _v2Tx.AsInternal().AdjacencyBlocks!.OpenCursor(_hub, Direction.Outgoing, null);
+        using var cursor = _v2Tx.AsInternal().AdjacencySegments!.OpenCursor(_hub, Direction.Outgoing, null);
         while (cursor.MoveNext())
             sum += cursor.WeightRaw;
         return sum;

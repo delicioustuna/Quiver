@@ -9,7 +9,7 @@ internal struct RawNexusHeader
 {
     public bool InUse;
     public IncidenceId FirstIncidence;
-    public PropertyId FirstProperty;
+    public PropertyVersionRef FirstProperty;
     public long Xmin;
     public long Xmax;
 }
@@ -39,10 +39,6 @@ internal sealed class VersionedNexusStore : INexusStore
     private const int OffFirstIncidence = 3;
     private const int OffFirstProperty = 9;
     private const byte FlagInUse = 0x01;
-    // alloc-free な inline property 読み取りで使う stackalloc 量 (vertex store と同値)。
-    // 超過した payload は割り当て版へフォールバックする。
-    private const int InlineReadBuffer = 256;
-
     private static readonly int HdrSize = VersionedRecordHeap.VersionHeaderSize;
 
     private readonly IPagedFile _file;
@@ -88,15 +84,12 @@ internal sealed class VersionedNexusStore : INexusStore
         long generation = _versions.Read(sequence).Generation + 1;
         var nexusId = NexusId.Create(sequence, checked((int)generation));
 
-        // 固定領域 + inline property 領域 (件数 0 で開始)。vertex / edge store と同じ
-        // 可変長 payload 形式にして inline property の copy-on-write を土台にする。
-        Span<byte> payload = stackalloc byte[InlinePropertyCodec.BaseSize(PayloadSize)];
+        Span<byte> payload = stackalloc byte[PayloadSize];
         payload.Clear();
         payload[OffFlags] = FlagInUse;
         BinaryPrimitives.WriteInt16LittleEndian(payload[OffType..], checked((short)type.Value));
         RecordHelpers.WriteInt48(payload[OffFirstIncidence..], IncidenceId.Invalid.Sequence);
-        RecordHelpers.WriteInt48(payload[OffFirstProperty..], PropertyId.Invalid.Sequence);
-        payload[InlinePropertyCodec.OffInlineCount(PayloadSize)] = 0;
+        RecordHelpers.WriteInt48(payload[OffFirstProperty..], PropertyVersionRef.Invalid.Sequence);
 
         _heap.Insert(sequence, payload, MvccContext.CurrentTxId.Value);
         _versions.Write(sequence, new EntityVersionMeta(
@@ -188,7 +181,7 @@ internal sealed class VersionedNexusStore : INexusStore
             inUse,
             new NexusTypeId(BinaryPrimitives.ReadInt16LittleEndian(payload[OffType..])),
             new IncidenceId(RecordHelpers.ReadInt48(payload[OffFirstIncidence..])),
-            new PropertyId(RecordHelpers.ReadInt48(payload[OffFirstProperty..])),
+            new PropertyVersionRef(RecordHelpers.ReadInt48(payload[OffFirstProperty..])),
             xmin,
             xmax);
     }
@@ -230,87 +223,16 @@ internal sealed class VersionedNexusStore : INexusStore
         }
     }
 
-    // ===== inline property storage (nexus 粒度 copy-on-write) =====
-    // vertex / edge store と同型。header の可視性に従い、書き込みは copy-on-write で
-    // 新 header 版を積む。overflow チェーンは header の FirstPropertyId から辿る
-    // (呼び出し側が Read / Write ハンドル経由で管理する)。
-
-    public bool TryGetInlineProperty(NexusId nexusId, PropertyKeyId keyId, out PropertyValue value)
-    {
-        value = default;
-        long sequence = nexusId.Sequence;
-        // 可視版 payload を stackalloc へコピーして scan する。scalar は値コピーで安全、
-        // String/Bytes のみ安定 byte[] へ写す。超過は割り当て版へフォールバック。
-        Span<byte> buffer = stackalloc byte[InlineReadBuffer];
-        int length = _heap.TryReadVisibleInto(sequence, AmbientVisible, buffer, out _, out _);
-        if (length == 0) return false;
-        // property read も header の read。可視版を観測したので SSN read-set に記録する。
-        MvccContext.RecordRead(EntityKind.Nexus, sequence);
-        if (length <= buffer.Length)
-        {
-            if (!InlinePropertyCodec.TryScan(buffer[..length], PayloadSize, keyId.Value, out var type, out var span))
-                return false;
-            value = InlinePropertyCodec.IsScalar(type)
-                ? InlinePropertyCodec.DecodeScalar(type, span)
-                : InlinePropertyCodec.Decode(type, span.ToArray());
-            return true;
-        }
-        if (!_heap.TryReadVisible(sequence, AmbientVisible, out var payload, out _, out _)) return false;
-        if (!InlinePropertyCodec.TryScan(payload, PayloadSize, keyId.Value, out var t2, out var s2)) return false;
-        value = InlinePropertyCodec.Decode(t2, s2);
-        return true;
-    }
-
-    public bool HasInlineProperty(NexusId nexusId, PropertyKeyId keyId)
-    {
-        long sequence = nexusId.Sequence;
-        Span<byte> buffer = stackalloc byte[InlineReadBuffer];
-        int length = _heap.TryReadVisibleInto(sequence, AmbientVisible, buffer, out _, out _);
-        if (length == 0) return false;
-        MvccContext.RecordRead(EntityKind.Nexus, sequence);
-        if (length <= buffer.Length)
-            return InlinePropertyCodec.TryScan(buffer[..length], PayloadSize, keyId.Value, out _, out _);
-        if (!_heap.TryReadVisible(sequence, AmbientVisible, out var payload, out _, out _)) return false;
-        return InlinePropertyCodec.TryScan(payload, PayloadSize, keyId.Value, out _, out _);
-    }
-
-    /// <summary>
-    /// inline property を set (replace-or-add)。copy-on-write で新 header 版を作る (同一 tx の
-    /// 未コミット head は in-place)。inline 不可 (大きすぎ / 予算超過) なら false を返し、
-    /// 呼び出し側が overflow チェーンへ回す。
-    /// </summary>
-    public bool SetInlineProperty(NexusId nexusId, PropertyKeyId keyId, in PropertyValue value)
-    {
-        if (!InlinePropertyCodec.IsInlineable(value)) return false;
-        long sequence = nexusId.Sequence;
-        if (!_heap.TryReadVisible(sequence, AmbientVisible, out var current, out _, out _)) return false;
-        byte[] next = InlinePropertyCodec.Build(current, PayloadSize, keyId.Value, in value, remove: false);
-        if (next.Length > VersionedRecordHeap.MaxPayloadSize) return false; // 予算超過 → overflow
-        _heap.AppendOrReplaceHead(sequence, next, MvccContext.CurrentTxId.Value);
-        return true;
-    }
-
-    public bool RemoveInlineProperty(NexusId nexusId, PropertyKeyId keyId)
-    {
-        long sequence = nexusId.Sequence;
-        if (!_heap.TryReadVisible(sequence, AmbientVisible, out var current, out _, out _)) return false;
-        if (!InlinePropertyCodec.TryScan(current, PayloadSize, keyId.Value, out _, out _)) return false;
-        byte[] next = InlinePropertyCodec.Build(current, PayloadSize, keyId.Value, default, remove: true);
-        _heap.AppendOrReplaceHead(sequence, next, MvccContext.CurrentTxId.Value);
-        return true;
-    }
-
-    /// <summary>
-    /// inline property (可視版) + overflow チェーンを結合して列挙する。inline を先に、
-    /// 続いて <paramref name="overflowStore"/> 上の firstProp チェーンを辿る。
-    /// </summary>
-    public PropertyEnumerator EnumerateProperties(NexusId nexusId, IPropertyStore overflowStore)
+    public PropertyCursor EnumerateProperties(NexusId nexusId, IPropertyStore overflowStore)
     {
         if (!_heap.TryReadVisible(nexusId.Sequence, AmbientVisible, out var payload, out _, out _))
-            return new PropertyEnumerator(overflowStore, PropertyId.Invalid);
+            return new PropertyCursor(overflowStore, default, PropertyVersionRef.Invalid);
         MvccContext.RecordRead(EntityKind.Nexus, nexusId.Sequence); // property 列挙 = header read
-        var firstProp = new PropertyId(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProperty)));
-        return new PropertyEnumerator(payload, overflowStore, firstProp, PayloadSize);
+        var firstProp = new PropertyVersionRef(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProperty)));
+        var ownerId = nexusId.Generation == 0
+            ? NexusId.Create(nexusId.Sequence, CurrentGeneration(nexusId.Sequence))
+            : nexusId;
+        return overflowStore.Enumerate(EntityRef.From(ownerId), firstProp);
     }
 
     private static bool AmbientVisible(long xmin, long xmax) => Visibility.IsVisibleAmbient(xmin, xmax);
@@ -349,7 +271,7 @@ internal sealed class VersionedNexusStore : INexusStore
         {
             InUse = (span[OffFlags] & FlagInUse) != 0,
             FirstIncidence = new IncidenceId(RecordHelpers.ReadInt48(span[OffFirstIncidence..])),
-            FirstProperty = new PropertyId(RecordHelpers.ReadInt48(span[OffFirstProperty..])),
+            FirstProperty = new PropertyVersionRef(RecordHelpers.ReadInt48(span[OffFirstProperty..])),
             Xmin = xmin,
             Xmax = xmax,
         };
@@ -420,7 +342,7 @@ internal sealed class VersionedNexusStore : INexusStore
             false,
             NexusTypeId.Invalid,
             IncidenceId.Invalid,
-            PropertyId.Invalid,
+            PropertyVersionRef.Invalid,
             0,
             0);
 }

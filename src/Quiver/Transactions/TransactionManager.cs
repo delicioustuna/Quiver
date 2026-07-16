@@ -18,7 +18,7 @@ internal sealed class TransactionManager : ITransactionManager
     private readonly IPropertyStore _propStore;
     private readonly IIndexManager _indexManager;
     private readonly PersistentEdgeDeltaStore? _edgeDeltas;
-    private IAdjacencyBlockStore? _adjStore;
+    private IAdjacencySegmentStore? _adjStore;
     private readonly ICoMembershipBlockStore? _coMembershipStore;
     private readonly IGraphAccessMethods _access;
     // abort / コミット失敗時のインプロセス undo を担う。null のときは undo 無し。
@@ -85,7 +85,7 @@ internal sealed class TransactionManager : ITransactionManager
         IEdgeStore edgeStore,
         IPropertyStore propStore,
         IIndexManager indexManager,
-        IAdjacencyBlockStore? adjStore = null,
+        IAdjacencySegmentStore? adjStore = null,
         IGraphAccessMethods? access = null,
         AbortUndoHandler? undoHandler = null,
         LockingMode lockingMode = LockingMode.ExclusiveOnly,
@@ -429,7 +429,7 @@ internal sealed class TransactionManager : ITransactionManager
     /// トランザクションは <see cref="Begin"/> 時に参照を固定するため、
     /// <see cref="ActiveCount"/> が 0 の間だけ安全に実行できる。
     /// </summary>
-    internal void SwapAdjacencyStore(IAdjacencyBlockStore? next) => _adjStore = next;
+    internal void SwapAdjacencyStore(IAdjacencySegmentStore? next) => _adjStore = next;
 
     /// <summary>
     /// <see cref="QuiverDatabase.CreateSnapshot"/> の前段で呼ばれ、ベストエフォートで

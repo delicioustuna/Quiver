@@ -15,7 +15,7 @@ internal interface IGraphTransactionInternal : IGraphTransaction
     IGraphAccessMethods Access { get; }
 
     /// <summary>隣接ブロックインデックス。bulk load で構築された場合のみ非 null。</summary>
-    IAdjacencyBlockStore? AdjacencyBlocks { get; }
+    IAdjacencySegmentStore? AdjacencySegments { get; }
 
     /// <summary>物理プランを実行して結果を <see cref="QueryResult"/> で返す。</summary>
     QueryResult Execute(IPhysicalOperator plan);

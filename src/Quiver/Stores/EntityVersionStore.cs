@@ -14,10 +14,8 @@ namespace Quiver.Storage.Records;
 ///   <item>Page 2+ = 40B × 203 entries / page。<c>localId</c> からページと slot を算出する。</item>
 /// </list>
 ///
-/// <para>本クラスは EntityKind に依存せず、Vertex / Edge / Property 各 sidecar で共通利用される。
-/// 3 EntityKind 分の instance を <see cref="Quiver.Wal.WalFileKind.VertexVersionMeta"/> /
-/// <see cref="Quiver.Wal.WalFileKind.EdgeVersionMeta"/> /
-/// <see cref="Quiver.Wal.WalFileKind.PropertyVersionMeta"/> でそれぞれ生成する想定。</para>
+/// <para>本クラスは EntityKind に依存せず、Vertex と Edge の sidecar で共通利用される。
+/// Property version は MVCC と Generation を自身の record に保持するため、本クラスを使わない。</para>
 ///
 /// <para>現時点ではこの store は backend factory から配線されていない (デッドコード相当)。
 /// 将来的に各 store の MVCC access path に紐付ける。</para>

@@ -1,6 +1,6 @@
 # ストレージ & ページング
 
-> as-built 仕様（QUIVER-SW family version 1、2026-07-15）
+> as-built 仕様（QUIVER-SW family version 1、2026-07-16）
 
 ## ページフォーマット {#page-format}
 
@@ -17,9 +17,9 @@
 
 - デフォルト容量: 256 フレーム (`DefaultPoolCapacity`)
 - 退避: `_clockHand` でフレームを走査する **Clock (second-chance)** アルゴリズム
-- **現行 Wave 2 境界**: dirty frame の退避経路は残る。
+- dirty frame の退避経路は残る。
   transaction-owned before-image はプロセス内 abort と savepoint rollback に使う。
-  Single Writer の no-steal 統合は後続 wave で完成させる。
+  Single Writer の no-steal 統合はまだ完了していない。
 
 ### Pin / Unpin プロトコル {#pin-unpin}
 
@@ -59,15 +59,20 @@
 
 ## 単一ファイルコンテナ {#single-file}
 
-`TenantPagedFile` は、複数の論理ストア（vertices, edges, properties, indexes, vectors,
-FT postings, FT norms, catalog）を単一の `*.quiver` ファイルに多重化する。
+`TenantPagedFile` は、複数の論理ストア（vertex、edge、nexus、property version、blob、vector payload、adjacency segment、index、全文 posting、全文 norm、catalog）を単一の `*.quiver` ファイルに多重化する。
 各テナントはカタログが割り当てる `fileKind` バイトで識別される。
+
+Primary vector payload の metadata と blob は固定テナント 29、30 に分離する。
+ベクトルインデックスごとの payload と HNSW テナントは再構築可能な derived data であり、primary property value の正本ではない。
 
 ### カタログ {#catalog}
 
 カタログテナントは、論理ストア名（インデックス名、FT インデックス名など）から
 その `fileKind` バイトへのマッピングを保持する。カタログ自体もコンテナ内のテナントであり、
 WAL リカバリフェーズ中に復旧される。
+
+正常終了後の再オープンでは、カタログから versioned entity store、owner-bound property store、primary payload store、adjacency segment を同じ形式で復元する。
+process kill 後の winner redo と checkpoint 境界は、現行の crash recovery 契約に従う。
 
 ## WAL サイドカー {#wal-sidecar}
 

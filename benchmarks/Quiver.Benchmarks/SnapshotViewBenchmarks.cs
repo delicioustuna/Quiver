@@ -77,7 +77,7 @@ public class SnapshotViewBenchmarks
     [Benchmark(Description = "PageRank via AdjacencyCursor (per-pass open)", Baseline = true)]
     public double PageRank_Cursor()
     {
-        var adj = _readTx.AsInternal().AdjacencyBlocks!;
+        var adj = _readTx.AsInternal().AdjacencySegments!;
         int n = VertexCount;
         var rank = new double[n];
         var next = new double[n];
