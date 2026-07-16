@@ -99,11 +99,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         FullTextSearch.ResultReady += OnResultReady;
         GraphCanvas.PropertyChanged += OnGraphCanvasPropertyChanged;
         GraphCanvas.LinkCompleted += OnLinkCompleted;
-        GraphCanvas.AddNodeRequested += OnAddNodeRequested;
+        GraphCanvas.AddVertexRequested += OnAddVertexRequested;
         Results.PropertyChanged += OnResultsSelectionChanged;
 
-        PropertyInspector.NodeCreated += OnInlineNodeCreated;
-        PropertyInspector.RelationshipCreated += OnInlineRelationshipCreated;
+        PropertyInspector.VertexCreated += OnInlineVertexCreated;
+        PropertyInspector.EdgeCreated += OnInlineEdgeCreated;
         PropertyInspector.CreationCancelled += OnCreationCancelled;
 
         _subscriptions = Disposable.Combine(
@@ -145,10 +145,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OnGraphCanvasPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(GraphCanvasViewModel.SelectedNode))
+        if (e.PropertyName == nameof(GraphCanvasViewModel.SelectedVertex))
         {
-            if (GraphCanvas.SelectedNode is { } node)
-                PropertyInspector.InspectNode(node);
+            if (GraphCanvas.SelectedVertex is { } vertex)
+                PropertyInspector.InspectVertex(vertex);
             else if (GraphCanvas.SelectedEdge is null)
                 PropertyInspector.Clear();
         }
@@ -156,7 +156,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (GraphCanvas.SelectedEdge is { } edge)
                 PropertyInspector.InspectEdge(edge);
-            else if (GraphCanvas.SelectedNode is null)
+            else if (GraphCanvas.SelectedVertex is null)
                 PropertyInspector.Clear();
         }
     }
@@ -165,15 +165,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         if (e.PropertyName != nameof(ResultsViewModel.SelectedItem)) return;
 
-        var nid = Results.GetSelectedNodeId();
+        var nid = Results.GetSelectedVertexId();
         if (nid is { } id && _db.CurrentDatabase is not null)
         {
             using var tx = _db.CurrentDatabase.BeginReadOnlyTransaction();
-            if (tx.NodeExists(id))
+            if (tx.VertexExists(id))
             {
-                var label = tx.GetNodeLabel(id) ?? $"({id.Sequence})";
-                var vn = new Models.VisualNode(id, label);
-                PropertyInspector.InspectNode(vn);
+                var label = tx.GetVertexLabel(id) ?? $"({id.Sequence})";
+                var vn = new Models.VisualVertex(id, label);
+                PropertyInspector.InspectVertex(vn);
                 return;
             }
         }
@@ -206,30 +206,30 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _settings.MarkDirty();
     }
 
-    private Task OnLinkCompleted(VisualNode source, VisualNode target)
+    private Task OnLinkCompleted(VisualVertex source, VisualVertex target)
     {
-        PropertyInspector.BeginCreateRelationship(source, target);
+        PropertyInspector.BeginCreateEdge(source, target);
         return Task.CompletedTask;
     }
 
-    private Task OnAddNodeRequested()
+    private Task OnAddVertexRequested()
     {
-        AddNodeAtPosition(GraphCanvas.LastContextWorldX, GraphCanvas.LastContextWorldY);
+        AddVertexAtPosition(GraphCanvas.LastContextWorldX, GraphCanvas.LastContextWorldY);
         return Task.CompletedTask;
     }
 
-    public void AddNodeAtPosition(double worldX, double worldY)
+    public void AddVertexAtPosition(double worldX, double worldY)
     {
-        PropertyInspector.BeginCreateNode(worldX, worldY);
+        PropertyInspector.BeginCreateVertex(worldX, worldY);
     }
 
-    private void OnInlineNodeCreated(NodeId nid, string label, double worldX, double worldY)
+    private void OnInlineVertexCreated(VertexId nid, string label, double worldX, double worldY)
     {
-        GraphCanvas.AddNodeToGraph(nid, label, worldX, worldY);
+        GraphCanvas.AddVertexToGraph(nid, label, worldX, worldY);
         SchemaBrowser.Refresh();
     }
 
-    private void OnInlineRelationshipCreated(RelationshipId rid, VisualNode source, VisualNode target, string type)
+    private void OnInlineEdgeCreated(EdgeId rid, VisualVertex source, VisualVertex target, string type)
     {
         GraphCanvas.AddEdgeToGraph(rid, source, target, type);
         SchemaBrowser.Refresh();

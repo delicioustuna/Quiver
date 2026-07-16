@@ -85,7 +85,7 @@ public sealed class InMemoryVectorStore : IVectorStore
         var copy = vector.ToArray();
         lock (_gate)
         {
-            // binding キーは slot Sequence。利用者は node.Value (gen 付き packed) を
+            // binding キーは slot Sequence。利用者は vertex.Value (gen 付き packed) を
             // 渡しうるが、グラフ側 (label index / adjacency / candidate set) は Sequence 空間で
             // 動くため、ここで slot へ正規化して KNN を整合させる。
             idx.Vectors[new VectorKey(kind, EntityRef.UnpackSequence(entityId))] = copy;

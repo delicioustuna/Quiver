@@ -14,7 +14,7 @@ namespace Quiver.Tests;
 ///   <item><see cref="IsolationLevel.Serializable"/> で典型的な write skew を起こすと、
 ///     一方が <see cref="SerializabilityException"/> で中断される。</item>
 ///   <item>Serializable を指定しない既定のスナップショット分離では両方がコミットする。</item>
-///   <item>リレーションシップのトラバーサルによる読み取りも読み取り集合へ入り、
+///   <item>Edgeのトラバーサルによる読み取りも読み取り集合へ入り、
 ///     SSN が読み書き反依存を見落とさない。</item>
 /// </list>
 /// </summary>
@@ -25,12 +25,12 @@ public sealed class SsnSmokeTests : IDisposable
         "Multiple concurrent public writers are no longer supported; single-writer gate coverage replaces this white-box concurrency scenario.";
 
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public SsnSmokeTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_ssn_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), new GraphDatabaseOptions
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), new QuiverDatabaseOptions
         {
             // 全面並列とカオステストによる CPU 過剰購読下では、コミット経路の内部ロック取得が
             // 超えて spurious な TransactionException("Lock timeout") を投げ、abort 集計を狂わせて
@@ -90,21 +90,21 @@ public sealed class SsnSmokeTests : IDisposable
         => ex is null ? "(none)" : $"{ex.GetType().Name}: {ex.Message}";
 
     [Fact(Skip = PublicWriterGateSkip)]
-    public void Serializable_write_skew_via_relationship_traversal_aborts_one_transaction()
+    public void Serializable_write_skew_via_edge_traversal_aborts_one_transaction()
     {
-        // 読み取りを「直接 Read」ではなく「relationship traversal」で行う write skew。
+        // 読み取りを「直接 Read」ではなく「edge traversal」で行う write skew。
         // T1 は A の隣接を走査して (= edge eA を読む) eB を書き換え、
         // T2 は B の隣接を走査して (= edge eB を読む) eA を書き換える。
         // rw 交差: T1 が eA を読み T2 が eA を書く / T2 が eB を読み T1 が eB を書く → cycle。
         // 走査経由の read が read-set に入らなければ SSN は検出できず両方 commit してしまう。
         // これが abort されることで、read 捕捉が直接 Read 経路に限定されていないことを保証する。
-        RelationshipId eA, eB;
+        EdgeId eA, eB;
         using (var tx = _db.BeginTransaction())
         {
-            var a = tx.CreateNode("Account");
-            var b = tx.CreateNode("Account");
-            eA = tx.CreateRelationship(a, a, "SELF");
-            eB = tx.CreateRelationship(b, b, "SELF");
+            var a = tx.CreateVertex("Account");
+            var b = tx.CreateVertex("Account");
+            eA = tx.CreateEdge(a, a, "SELF");
+            eB = tx.CreateEdge(b, b, "SELF");
             tx.SetProperty(eA, "flag", PropertyValue.FromInt32(0));
             tx.SetProperty(eB, "flag", PropertyValue.FromInt32(0));
             tx.Commit();
@@ -131,13 +131,13 @@ public sealed class SsnSmokeTests : IDisposable
         var dir = Path.Combine(Path.GetTempPath(), "quiver_ssn_restart_" + Guid.NewGuid().ToString("N"));
         try
         {
-            NodeId x;
+            VertexId x;
             // Serializable の読み取りトランザクションを繰り返して X.Pstamp とクロックを進める。
-            using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
+            using (var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
             {
                 using (var tx = db.BeginTransaction())
                 {
-                    x = tx.CreateNode("N");
+                    x = tx.CreateVertex("N");
                     tx.SetProperty(x, "v", PropertyValue.FromInt32(1));
                     tx.Commit();
                 }
@@ -151,7 +151,7 @@ public sealed class SsnSmokeTests : IDisposable
 
             // 再オープンし、競合のない単独の Serializable トランザクションで X を上書きする。
             // クロックが連続していれば c(T) > X.Pstamp となり false-abort しない。
-            using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
+            using (var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
             {
                 using var wtx = db.BeginTransaction(IsolationLevel.Serializable);
                 wtx.SetProperty(x, "v", PropertyValue.FromInt32(2));
@@ -166,22 +166,22 @@ public sealed class SsnSmokeTests : IDisposable
         }
     }
 
-    private NodeId _a, _b;
+    private VertexId _a, _b;
 
-    private static void DrainNeighbors(IGraphTransaction tx, NodeId nodeId)
+    private static void DrainNeighbors(IGraphTransaction tx, VertexId vertexId)
     {
-        var e = tx.EnumerateRelationships(nodeId);
-        while (e.MoveNext()) { _ = e.Current.Type; } // 列挙が内部で各 relationship を Read する
+        var e = tx.EnumerateEdges(vertexId);
+        while (e.MoveNext()) { _ = e.Current.Type; } // 列挙が内部で各 edge を Read する
     }
 
     private static int CountSerializabilityFailures(Exception? ex1, Exception? ex2)
         => new[] { ex1, ex2 }.Count(e => e is SerializabilityException);
 
-    private (NodeId a, NodeId b) SeedTwoAccounts()
+    private (VertexId a, VertexId b) SeedTwoAccounts()
     {
         using var tx = _db.BeginTransaction();
-        var a = tx.CreateNode("Account");
-        var b = tx.CreateNode("Account");
+        var a = tx.CreateVertex("Account");
+        var b = tx.CreateVertex("Account");
         tx.SetProperty(a, "balance", PropertyValue.FromInt32(100));
         tx.SetProperty(b, "balance", PropertyValue.FromInt32(100));
         tx.Commit();

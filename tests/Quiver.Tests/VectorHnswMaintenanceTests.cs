@@ -34,7 +34,7 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
         return v;
     }
 
-    private static (List<long> Ids, List<float> Scores) Knn(GraphDatabase db, float[] query, int k)
+    private static (List<long> Ids, List<float> Scores) Knn(QuiverDatabase db, float[] query, int k)
     {
         using var cur = db.Vectors.KnnSearch(IndexName, query, k);
         var ids = new List<long>();
@@ -46,22 +46,22 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
     [Fact]
     public void Overwrite_relinks_hnsw_to_new_vector()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
             4, DistanceMetric.Dot, "test", null));
 
         long a;
         using (var tx = db.BeginTransaction())
         {
-            var na = tx.CreateNode("Doc");
+            var na = tx.CreateVertex("Doc");
             a = EntityRef.UnpackSequence(na.Value);
-            tx.SetVector(EntityKind.Node, na.Value, IndexName, new float[] { 1, 0, 0, 0 });
+            tx.SetVector(EntityKind.Vertex, na.Value, IndexName, new float[] { 1, 0, 0, 0 });
             // 何件かダミーを足してグラフを非自明にする。
             for (int i = 0; i < 5; i++)
             {
-                var n = tx.CreateNode("Doc");
-                tx.SetVector(EntityKind.Node, n.Value, IndexName, new float[] { 0, 0, 1, 0 });
+                var n = tx.CreateVertex("Doc");
+                tx.SetVector(EntityKind.Vertex, n.Value, IndexName, new float[] { 0, 0, 1, 0 });
             }
             tx.Commit();
         }
@@ -72,7 +72,7 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
         // A を [0,1,0,0] へ上書き (re-link)。
         using (var tx = db.BeginTransaction())
         {
-            tx.SetVector(EntityKind.Node, a, IndexName, new float[] { 0, 1, 0, 0 });
+            tx.SetVector(EntityKind.Vertex, a, IndexName, new float[] { 0, 1, 0, 0 });
             tx.Commit();
         }
 
@@ -86,23 +86,23 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
     public void RemoveVector_physically_deletes_from_graph_and_persists()
     {
         long keep, drop;
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
         {
             db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-                IndexName, EntityKind.Node, db.Schema.GetOrCreatePropertyKey("t"),
+                IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
                 4, DistanceMetric.Dot, "test", null));
             using var tx = db.BeginTransaction();
-            var a = tx.CreateNode("Doc");
-            var b = tx.CreateNode("Doc");
+            var a = tx.CreateVertex("Doc");
+            var b = tx.CreateVertex("Doc");
             keep = EntityRef.UnpackSequence(a.Value);
             drop = EntityRef.UnpackSequence(b.Value);
-            tx.SetVector(EntityKind.Node, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
-            tx.SetVector(EntityKind.Node, b.Value, IndexName, new float[] { 1, 0, 0, 0 });
-            tx.RemoveVector(EntityKind.Node, b.Value, IndexName);
+            tx.SetVector(EntityKind.Vertex, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
+            tx.SetVector(EntityKind.Vertex, b.Value, IndexName, new float[] { 1, 0, 0, 0 });
+            tx.RemoveVector(EntityKind.Vertex, b.Value, IndexName);
             tx.Commit();
         }
 
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
         {
             var (ids, _) = Knn(db, new float[] { 1, 0, 0, 0 }, 10);
             ids.Should().ContainSingle().Which.Should().Be(keep);
@@ -117,21 +117,21 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
         var rng = new Random(2024);
         var vecs = new List<float[]>();
 
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
             Dim, DistanceMetric.Cosine, "test", null));
 
-        var nodeIds = new List<long>();
+        var vertexIds = new List<long>();
         using (var tx = db.BeginTransaction())
         {
             for (int i = 0; i < N; i++)
             {
-                var n = tx.CreateNode("Doc");
-                nodeIds.Add(n.Value);
+                var n = tx.CreateVertex("Doc");
+                vertexIds.Add(n.Value);
                 var v = RandomVec(rng, Dim);
                 vecs.Add(v);
-                db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, v);
+                db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -140,13 +140,13 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
         using (var tx = db.BeginTransaction())
         {
             for (int i = 50; i < N; i++)
-                tx.RemoveVector(EntityKind.Node, nodeIds[i], IndexName);
+                tx.RemoveVector(EntityKind.Vertex, vertexIds[i], IndexName);
             tx.Commit();
         }
 
         // 残り 50 件 (seq 0..49) のうちクエリ自身が最近傍に出る (cosine 自己類似 = 1)。
         var (ids, _) = Knn(db, vecs[10], K);
-        ids.Should().Contain(EntityRef.UnpackSequence(nodeIds[10]));
+        ids.Should().Contain(EntityRef.UnpackSequence(vertexIds[10]));
         // 削除済みの seq は一切返らない。
         ids.Should().OnlyContain(id => id < 50);
     }
@@ -160,9 +160,9 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
         const int Dim = 32, Stable = 300, Churn = 10, Cycles = 20, K = 10;
         var rng = new Random(777);
 
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
             Dim, DistanceMetric.Cosine, "test", null));
 
         // 安定集合: 一度入れたら消さない。
@@ -172,11 +172,11 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
         {
             for (int i = 0; i < Stable; i++)
             {
-                var n = tx.CreateNode("Doc");
+                var n = tx.CreateVertex("Doc");
                 var v = RandomVec(rng, Dim);
                 stableIds.Add(n.Value);
                 stableVecs.Add(v);
-                db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, v);
+                db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -189,16 +189,16 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
             {
                 for (int i = 0; i < Churn; i++)
                 {
-                    var n = tx.CreateNode("Doc");
+                    var n = tx.CreateVertex("Doc");
                     churnIds.Add(n.Value);
-                    db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, RandomVec(rng, Dim));
+                    db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, RandomVec(rng, Dim));
                 }
                 tx.Commit();
             }
             using (var tx = db.BeginTransaction())
             {
                 foreach (var id in churnIds)
-                    tx.RemoveVector(EntityKind.Node, id, IndexName);
+                    tx.RemoveVector(EntityKind.Vertex, id, IndexName);
                 tx.Commit();
             }
         }

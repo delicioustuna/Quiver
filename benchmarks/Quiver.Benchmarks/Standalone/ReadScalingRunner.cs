@@ -32,7 +32,7 @@ public static class ReadScalingRunner
         string dir = BenchTempDir.Create("read_scaling");
         try
         {
-            using var db = GraphDatabase.Open(Path.Combine(dir, "graph.quiver"));
+            using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
             var (hub, query) = Seed(db);
 
             MeasureWorkload("1-hop", thread => CreateOneHopWorker(db, hub));
@@ -46,12 +46,12 @@ public static class ReadScalingRunner
         }
     }
 
-    private static (NodeId Hub, float[] Query) Seed(GraphDatabase db)
+    private static (VertexId Hub, float[] Query) Seed(QuiverDatabase db)
     {
         db.Schema.CreateFullTextIndex(FullTextIndex, "Doc", "body");
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             VectorIndex,
-            EntityKind.Node,
+            EntityKind.Vertex,
             db.Schema.GetOrCreatePropertyKey("embedding"),
             Dimensions,
             DistanceMetric.Cosine,
@@ -59,23 +59,23 @@ public static class ReadScalingRunner
 
         var random = new Random(VectorRecallCorpus.Seed);
         var vector = new float[Dimensions];
-        NodeId hub;
+        VertexId hub;
         using (var tx = db.BeginTransaction())
         {
-            hub = tx.CreateNode("Hub");
+            hub = tx.CreateVertex("Hub");
             for (int i = 0; i < Degree; i++)
             {
-                var neighbor = tx.CreateNode("Neighbor");
-                tx.CreateRelationship(hub, neighbor, "LINK");
+                var neighbor = tx.CreateVertex("Neighbor");
+                tx.CreateEdge(hub, neighbor, "LINK");
             }
 
             for (int i = 0; i < CorpusCount; i++)
             {
-                var node = tx.CreateNode("Doc");
-                tx.SetProperty(node, "body",
+                var vertex = tx.CreateVertex("Doc");
+                tx.SetProperty(vertex, "body",
                     PropertyValue.FromString($"alpha beta corpus token{i % 64}"));
                 VectorRecallCorpus.Fill(random, vector);
-                tx.SetVector(EntityKind.Node, node.Value, VectorIndex, vector);
+                tx.SetVector(EntityKind.Vertex, vertex.Value, VectorIndex, vector);
             }
             tx.Commit();
         }
@@ -85,19 +85,19 @@ public static class ReadScalingRunner
         return (hub, query);
     }
 
-    private static Worker CreateOneHopWorker(GraphDatabase db, NodeId hub)
+    private static Worker CreateOneHopWorker(QuiverDatabase db, VertexId hub)
     {
         var tx = db.BeginReadOnlyTransaction();
         return new Worker(() =>
         {
             int count = 0;
-            var relationships = tx.EnumerateRelationships(hub, Direction.Outgoing);
-            while (relationships.MoveNext()) count++;
+            var edges = tx.EnumerateEdges(hub, Direction.Outgoing);
+            while (edges.MoveNext()) count++;
             return count;
         }, tx);
     }
 
-    private static Worker CreateKnnWorker(GraphDatabase db, float[] query)
+    private static Worker CreateKnnWorker(QuiverDatabase db, float[] query)
         => new(() =>
         {
             int count = 0;
@@ -106,7 +106,7 @@ public static class ReadScalingRunner
             return count;
         });
 
-    private static Worker CreateBm25Worker(GraphDatabase db)
+    private static Worker CreateBm25Worker(QuiverDatabase db)
     {
         var tx = db.BeginReadOnlyTransaction();
         return new Worker(

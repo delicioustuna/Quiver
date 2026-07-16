@@ -51,11 +51,11 @@ public static class PayloadCacheRunner
 
     private static float[] Seed(string path, int count, int dimensions)
     {
-        var options = new GraphDatabaseOptions { VectorCacheBudgetBytes = CacheBudgetBytes };
-        using var db = GraphDatabase.Open(path, options);
+        var options = new QuiverDatabaseOptions { VectorCacheBudgetBytes = CacheBudgetBytes };
+        using var db = QuiverDatabase.Open(path, options);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName,
-            EntityKind.Node,
+            EntityKind.Vertex,
             db.Schema.GetOrCreatePropertyKey("embedding"),
             dimensions,
             DistanceMetric.Cosine,
@@ -70,9 +70,9 @@ public static class PayloadCacheRunner
             int end = Math.Min(count, start + batchSize);
             for (int i = start; i < end; i++)
             {
-                var node = tx.CreateNode("Doc");
+                var vertex = tx.CreateVertex("Doc");
                 VectorRecallCorpus.Fill(random, vector);
-                tx.SetVector(EntityKind.Node, node.Value, IndexName, vector);
+                tx.SetVector(EntityKind.Vertex, vertex.Value, IndexName, vector);
             }
             tx.Commit();
         }
@@ -88,9 +88,9 @@ public static class PayloadCacheRunner
         int queryCount,
         long cacheBudgetBytes)
     {
-        using var db = GraphDatabase.Open(
+        using var db = QuiverDatabase.Open(
             path,
-            new GraphDatabaseOptions { VectorCacheBudgetBytes = cacheBudgetBytes });
+            new QuiverDatabaseOptions { VectorCacheBudgetBytes = cacheBudgetBytes });
 
         var sw = Stopwatch.StartNew();
         long[] ids = Search(db, query);
@@ -115,7 +115,7 @@ public static class PayloadCacheRunner
         return new Measurement(cold, sw.Elapsed.TotalMilliseconds / queryCount, ids);
     }
 
-    private static long[] Search(GraphDatabase db, float[] query)
+    private static long[] Search(QuiverDatabase db, float[] query)
     {
         var result = new List<long>(K);
         using var cursor = db.Vectors.KnnSearch(IndexName, query, K);

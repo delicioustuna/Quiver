@@ -12,7 +12,7 @@ public class PathDedupOperatorTests
     [Fact]
     public void Empty_input_returns_empty()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         using var op = new PathDedupOperator(src, 0);
         op.Open(null!);
         Collect(op).Should().BeEmpty();
@@ -21,8 +21,8 @@ public class PathDedupOperatorTests
     [Fact]
     public void Removes_duplicate_keys_keeping_first_occurrence()
     {
-        var src = new FixedNodeListOperator(
-            new NodeId(1), new NodeId(2), new NodeId(1), new NodeId(3), new NodeId(2));
+        var src = new FixedVertexListOperator(
+            new VertexId(1), new VertexId(2), new VertexId(1), new VertexId(3), new VertexId(2));
         using var op = new PathDedupOperator(src, 0);
         op.Open(null!);
         Collect(op).Should().Equal(1, 2, 3);
@@ -31,7 +31,7 @@ public class PathDedupOperatorTests
     [Fact]
     public void All_unique_passes_through_unchanged()
     {
-        var src = new FixedNodeListOperator(new NodeId(1), new NodeId(2), new NodeId(3));
+        var src = new FixedVertexListOperator(new VertexId(1), new VertexId(2), new VertexId(3));
         using var op = new PathDedupOperator(src, 0);
         op.Open(null!);
         Collect(op).Should().Equal(1, 2, 3);
@@ -40,8 +40,8 @@ public class PathDedupOperatorTests
     [Fact]
     public void All_same_returns_single()
     {
-        var src = new FixedNodeListOperator(
-            new NodeId(7), new NodeId(7), new NodeId(7), new NodeId(7));
+        var src = new FixedVertexListOperator(
+            new VertexId(7), new VertexId(7), new VertexId(7), new VertexId(7));
         using var op = new PathDedupOperator(src, 0);
         op.Open(null!);
         Collect(op).Should().Equal(7);
@@ -50,7 +50,7 @@ public class PathDedupOperatorTests
     [Fact]
     public void Constructor_with_zero_keys_throws()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         Action act = () => new PathDedupOperator(src);
         act.Should().Throw<ArgumentException>();
     }
@@ -58,7 +58,7 @@ public class PathDedupOperatorTests
     [Fact]
     public void Reopen_resets_seen_set()
     {
-        var src = new FixedNodeListOperator(new NodeId(1), new NodeId(1));
+        var src = new FixedVertexListOperator(new VertexId(1), new VertexId(1));
         using var op = new PathDedupOperator(src, 0);
         op.Open(null!);
         Collect(op).Should().Equal(1);

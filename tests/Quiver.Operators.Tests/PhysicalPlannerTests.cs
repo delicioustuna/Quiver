@@ -16,53 +16,53 @@ public sealed class PhysicalPlannerTests
     // ── ScanOp ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void ScanOp_node_no_label_produces_AllNodesScanOperator()
+    public void ScanOp_vertex_no_label_produces_AllVerticesScanOperator()
     {
-        var plan = new ScanOp(EntityKind.Node, null);
+        var plan = new ScanOp(EntityKind.Vertex, null);
         var op = PhysicalPlanner.Plan(plan, _schema);
-        op.Should().BeOfType<AllNodesScanOperator>();
+        op.Should().BeOfType<AllVerticesScanOperator>();
     }
 
     [Fact]
-    public void ScanOp_node_with_label_produces_NodeByLabelScanOperator()
+    public void ScanOp_vertex_with_label_produces_VertexByLabelScanOperator()
     {
-        var plan = new ScanOp(EntityKind.Node, new LabelId(1));
+        var plan = new ScanOp(EntityKind.Vertex, new LabelId(1));
         var op = PhysicalPlanner.Plan(plan, _schema);
-        op.Should().BeOfType<NodeByLabelScanOperator>();
+        op.Should().BeOfType<VertexByLabelScanOperator>();
     }
 
     [Fact]
-    public void ScanOp_relationship_produces_AllRelationshipsScanOperator()
+    public void ScanOp_edge_produces_AllEdgesScanOperator()
     {
-        var plan = new ScanOp(EntityKind.Relationship, null);
+        var plan = new ScanOp(EntityKind.Edge, null);
         var op = PhysicalPlanner.Plan(plan, _schema);
-        op.Should().BeOfType<AllRelationshipsScanOperator>();
+        op.Should().BeOfType<AllEdgesScanOperator>();
     }
 
     [Fact]
-    public void ScanOp_hyperedge_produces_AllHyperedgesScanOperator()
+    public void ScanOp_nexus_produces_AllNexusesScanOperator()
     {
-        var plan = new ScanOp(EntityKind.Hyperedge, null);
+        var plan = new ScanOp(EntityKind.Nexus, null);
         var op = PhysicalPlanner.Plan(plan, _schema);
-        op.Should().BeOfType<AllHyperedgesScanOperator>();
+        op.Should().BeOfType<AllNexusesScanOperator>();
     }
 
-    // ── NodeSeedOp ──────────────────────────────────────────────────────────────
+    // ── VertexSeedOp ──────────────────────────────────────────────────────────────
 
     [Fact]
-    public void NodeSeedOp_single_id_produces_SingleNodeOperator()
+    public void VertexSeedOp_single_id_produces_SingleVertexOperator()
     {
-        var plan = new NodeSeedOp([new NodeId(42)]);
+        var plan = new VertexSeedOp([new VertexId(42)]);
         var op = PhysicalPlanner.Plan(plan, _schema);
-        op.Should().BeOfType<SingleNodeOperator>();
+        op.Should().BeOfType<SingleVertexOperator>();
     }
 
     [Fact]
-    public void NodeSeedOp_multiple_ids_produces_MultiNodeOperator()
+    public void VertexSeedOp_multiple_ids_produces_MultiVertexOperator()
     {
-        var plan = new NodeSeedOp([new NodeId(1), new NodeId(2)]);
+        var plan = new VertexSeedOp([new VertexId(1), new VertexId(2)]);
         var op = PhysicalPlanner.Plan(plan, _schema);
-        op.Should().BeOfType<MultiNodeOperator>();
+        op.Should().BeOfType<MultiVertexOperator>();
     }
 
     // ── FilterOp ────────────────────────────────────────────────────────────────
@@ -70,7 +70,7 @@ public sealed class PhysicalPlannerTests
     [Fact]
     public void FilterOp_wraps_source_in_FilterOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
+        var scan = new ScanOp(EntityKind.Vertex, null);
         var filter = new FilterOp(scan, _ => new AlwaysTruePredicate());
         var op = PhysicalPlanner.Plan(filter, _schema);
         op.Should().BeOfType<FilterOperator>();
@@ -81,7 +81,7 @@ public sealed class PhysicalPlannerTests
     [Fact]
     public void ExpandOp_produces_ExpandOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
+        var scan = new ScanOp(EntityKind.Vertex, null);
         var expand = new ExpandOp(scan, 0, Direction.Outgoing, null, ExpandOutputMode.NeighborOnly, null);
         var op = PhysicalPlanner.Plan(expand, _schema);
         op.Should().BeOfType<ExpandOperator>();
@@ -90,23 +90,23 @@ public sealed class PhysicalPlannerTests
     [Fact]
     public void ExpandOp_with_type_filter_produces_ExpandOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
+        var scan = new ScanOp(EntityKind.Vertex, null);
         var expand = new ExpandOp(scan, 0, Direction.Outgoing, "KNOWS", ExpandOutputMode.Full, null);
         var op = PhysicalPlanner.Plan(expand, _schema);
         op.Should().BeOfType<ExpandOperator>();
     }
 
     [Fact]
-    public void ExpandToHyperedgeOp_resolves_filters_and_preserves_shape()
+    public void ExpandToNexusOp_resolves_filters_and_preserves_shape()
     {
-        _schema.GetOrCreateHyperedgeType("Fact");
+        _schema.GetOrCreateNexusType("Fact");
         _schema.GetOrCreateRole("Subject");
-        var scan = new ScanOp(EntityKind.Node, null);
-        var expand = new ExpandToHyperedgeOp(scan, 0, "Fact", "Subject", [0]);
+        var scan = new ScanOp(EntityKind.Vertex, null);
+        var expand = new ExpandToNexusOp(scan, 0, "Fact", "Subject", [0]);
 
         var op = PhysicalPlanner.Plan(expand, _schema);
 
-        op.Should().BeOfType<ExpandToHyperedgeOperator>();
+        op.Should().BeOfType<ExpandToNexusOperator>();
         expand.CurrentEntityColumn.Should().Be(1);
         expand.PredictedOutputColumnCount.Should().Be(3);
     }
@@ -115,7 +115,7 @@ public sealed class PhysicalPlannerTests
     public void ExpandMembersOp_resolves_role_and_preserves_shape()
     {
         _schema.GetOrCreateRole("Object");
-        var scan = new ScanOp(EntityKind.Hyperedge, null);
+        var scan = new ScanOp(EntityKind.Nexus, null);
         var expand = new ExpandMembersOp(scan, 0, "Object", null, [0]);
 
         var op = PhysicalPlanner.Plan(expand, _schema);
@@ -128,20 +128,20 @@ public sealed class PhysicalPlannerTests
     // ── KnnOp ───────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void KnnOp_without_candidate_produces_KnnNodeSourceOperator()
+    public void KnnOp_without_candidate_produces_KnnVertexSourceOperator()
     {
         var knn = new KnnOp(null, "vec_idx", new float[] { 1, 2, 3 }, 5, 3);
         var op = PhysicalPlanner.Plan(knn, _schema);
-        op.Should().BeOfType<KnnNodeSourceOperator>();
+        op.Should().BeOfType<KnnVertexSourceOperator>();
     }
 
     [Fact]
-    public void KnnOp_with_candidate_produces_FilteredKnnNodeSourceOperator()
+    public void KnnOp_with_candidate_produces_FilteredKnnVertexSourceOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, new LabelId(1));
+        var scan = new ScanOp(EntityKind.Vertex, new LabelId(1));
         var knn = new KnnOp(scan, "vec_idx", new float[] { 1, 2, 3 }, 5, 3);
         var op = PhysicalPlanner.Plan(knn, _schema);
-        op.Should().BeOfType<FilteredKnnNodeSourceOperator>();
+        op.Should().BeOfType<FilteredKnnVertexSourceOperator>();
     }
 
     // ── FullTextScanOp ──────────────────────────────────────────────────────────
@@ -157,7 +157,7 @@ public sealed class PhysicalPlannerTests
     [Fact]
     public void FullTextScanOp_with_candidate_produces_FilteredFullTextScanOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, new LabelId(1));
+        var scan = new ScanOp(EntityKind.Vertex, new LabelId(1));
         var ft = new FullTextScanOp(scan, "ft_idx", "hello", 10);
         var op = PhysicalPlanner.Plan(ft, _schema);
         op.Should().BeOfType<FilteredFullTextScanOperator>();
@@ -180,7 +180,7 @@ public sealed class PhysicalPlannerTests
     [Fact]
     public void LimitOp_produces_LimitOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
+        var scan = new ScanOp(EntityKind.Vertex, null);
         var limit = new LimitOp(scan, 10, 0);
         var op = PhysicalPlanner.Plan(limit, _schema);
         op.Should().BeOfType<LimitOperator>();
@@ -191,7 +191,7 @@ public sealed class PhysicalPlannerTests
     [Fact]
     public void SortOp_with_property_key_produces_SortOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
+        var scan = new ScanOp(EntityKind.Vertex, null);
         var sort = new SortOp(scan, "age", 1, Descending: true);
         var op = PhysicalPlanner.Plan(sort, _schema);
         op.Should().BeOfType<SortOperator>();
@@ -200,7 +200,7 @@ public sealed class PhysicalPlannerTests
     [Fact]
     public void SortOp_without_property_key_produces_SortOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
+        var scan = new ScanOp(EntityKind.Vertex, null);
         var sort = new SortOp(scan, null, 0, Descending: false);
         var op = PhysicalPlanner.Plan(sort, _schema);
         op.Should().BeOfType<SortOperator>();
@@ -211,7 +211,7 @@ public sealed class PhysicalPlannerTests
     [Fact]
     public void DedupOp_produces_PathDedupOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
+        var scan = new ScanOp(EntityKind.Vertex, null);
         var dedup = new DedupOp(scan, 0);
         var op = PhysicalPlanner.Plan(dedup, _schema);
         op.Should().BeOfType<PathDedupOperator>();
@@ -222,8 +222,8 @@ public sealed class PhysicalPlannerTests
     [Fact]
     public void PropertyLookupOp_produces_PropertyLookupOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
-        var lookup = new PropertyLookupOp(scan, "name", EntityKind.Node);
+        var scan = new ScanOp(EntityKind.Vertex, null);
+        var lookup = new PropertyLookupOp(scan, "name", EntityKind.Vertex);
         var op = PhysicalPlanner.Plan(lookup, _schema);
         op.Should().BeOfType<PropertyLookupOperator>();
     }
@@ -233,7 +233,7 @@ public sealed class PhysicalPlannerTests
     [Fact]
     public void ApplyDyadicOp_produces_ApplyDyadicOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
+        var scan = new ScanOp(EntityKind.Vertex, null);
         DyadicScoreFunc scorer = (a, b, r) => 1.0f;
         var ad = new ApplyDyadicOp(
             scan, typeof(IDyadicOperator<float>), "emb", "vec_idx",
@@ -246,7 +246,7 @@ public sealed class PhysicalPlannerTests
     [Fact]
     public void ApplyDyadicOp_with_oversample_produces_ApplyDyadicOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
+        var scan = new ScanOp(EntityKind.Vertex, null);
         DyadicScoreFunc scorer = (a, b, r) => 1.0f;
         var ad = new ApplyDyadicOp(
             scan, typeof(IDyadicOperator<float>), "emb", "vec_idx",
@@ -259,8 +259,8 @@ public sealed class PhysicalPlannerTests
     [Fact]
     public void ApplyDyadicOp_with_BPlan_produces_ApplyDyadicOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
-        var bPlan = new ScanOp(EntityKind.Node, null);
+        var scan = new ScanOp(EntityKind.Vertex, null);
+        var bPlan = new ScanOp(EntityKind.Vertex, null);
         DyadicScoreFunc scorer = (a, b, r) => 1.0f;
         var ad = new ApplyDyadicOp(
             scan, typeof(IDyadicOperator<float>), "emb", "vec_idx",
@@ -273,7 +273,7 @@ public sealed class PhysicalPlannerTests
     [Fact]
     public void ApplyDyadicOp_with_regions_produces_ApplyDyadicOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
+        var scan = new ScanOp(EntityKind.Vertex, null);
         DyadicScoreFunc scorer = (a, b, r) => 1.0f;
         var regions = new Range[] { 0..10, 20..30 };
         var ad = new ApplyDyadicOp(
@@ -289,7 +289,7 @@ public sealed class PhysicalPlannerTests
     [Fact]
     public void VarLenExpandOp_produces_VariableLengthExpandOperator()
     {
-        var scan = new ScanOp(EntityKind.Node, null);
+        var scan = new ScanOp(EntityKind.Vertex, null);
         var varLen = new VarLenExpandOp(scan, Direction.Outgoing, null, 1, 3);
         var op = PhysicalPlanner.Plan(varLen, _schema);
         op.Should().BeOfType<VariableLengthExpandOperator>();

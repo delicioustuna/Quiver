@@ -16,12 +16,12 @@ public sealed class PrefixSearchTests : IDisposable
 {
     private const string Index = "idx_body";
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public PrefixSearchTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_prefix_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
         _db.Schema.CreateFullTextIndex(Index, "Doc", "body");
     }
 
@@ -31,10 +31,10 @@ public sealed class PrefixSearchTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private NodeId AddDoc(string body, string? lang = null)
+    private VertexId AddDoc(string body, string? lang = null)
     {
         using var tx = _db.BeginTransaction();
-        var n = tx.CreateNode("Doc");
+        var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString(body));
         if (lang != null) tx.SetProperty(n, "lang", PropertyValue.FromString(lang));
         tx.Commit();
@@ -124,7 +124,7 @@ public sealed class PrefixSearchTests : IDisposable
         var g = rtx.G(_db.Schema);
 
         var textFirst = g.Search(Index, "qui*", k: 10).ToList();
-        var graphFirst = g.Nodes().HasLabel("Doc").FilterByText(Index, "qui*", k: 10).ToList();
+        var graphFirst = g.Vertices().HasLabel("Doc").FilterByText(Index, "qui*", k: 10).ToList();
 
         graphFirst.Should().Equal(textFirst, "graph-first preserves text-first BM25 order for prefix queries");
     }

@@ -28,25 +28,25 @@ public sealed class TransactionRuntimeContractTests : IDisposable
     [Fact]
     public async Task Transaction_context_flows_across_task_boundary()
     {
-        NodeId nodeId;
-        using (var db = GraphDatabase.Open(_path))
+        VertexId vertexId;
+        using (var db = QuiverDatabase.Open(_path))
         {
             using (var seed = db.BeginTransaction())
             {
-                nodeId = seed.CreateNode("Doc");
-                seed.SetProperty(nodeId, "name", PropertyValue.FromString("before"));
+                vertexId = seed.CreateVertex("Doc");
+                seed.SetProperty(vertexId, "name", PropertyValue.FromString("before"));
                 seed.Commit();
             }
 
             using (var tx = db.BeginTransaction())
             {
                 await Task.Run(() =>
-                    tx.SetProperty(nodeId, "name", PropertyValue.FromString("after")));
+                    tx.SetProperty(vertexId, "name", PropertyValue.FromString("after")));
                 tx.Rollback();
             }
 
             using var read = db.BeginReadOnlyTransaction();
-            var value = read.GetProperty(nodeId, "name");
+            var value = read.GetProperty(vertexId, "name");
             System.Text.Encoding.UTF8.GetString(value.Utf8StringValue).Should().Be("before");
         }
     }
@@ -54,20 +54,20 @@ public sealed class TransactionRuntimeContractTests : IDisposable
     [Fact]
     public async Task BeginTransaction_waits_for_active_writer_by_default()
     {
-        using var db = GraphDatabase.Open(_path, new GraphDatabaseOptions
+        using var db = QuiverDatabase.Open(_path, new QuiverDatabaseOptions
         {
             LockTimeout = TimeSpan.FromSeconds(2),
         });
 
         using var first = db.BeginTransaction();
-        first.CreateNode("Held");
+        first.CreateVertex("Held");
 
         var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var second = Task.Run(() =>
         {
             using var tx = db.BeginTransaction();
             secondStarted.SetResult();
-            tx.CreateNode("Released");
+            tx.CreateVertex("Released");
             tx.Commit();
         });
 
@@ -82,7 +82,7 @@ public sealed class TransactionRuntimeContractTests : IDisposable
     [Fact]
     public void EnforceExclusiveWriter_rejects_active_writer_without_waiting()
     {
-        using var db = GraphDatabase.Open(_path, new GraphDatabaseOptions
+        using var db = QuiverDatabase.Open(_path, new QuiverDatabaseOptions
         {
             EnforceExclusiveWriter = true,
         });
@@ -100,7 +100,7 @@ public sealed class TransactionRuntimeContractTests : IDisposable
     [Fact]
     public void Vector_autocommit_mutations_use_writer_gate()
     {
-        using var db = GraphDatabase.Open(_path, new GraphDatabaseOptions
+        using var db = QuiverDatabase.Open(_path, new QuiverDatabaseOptions
         {
             EnforceExclusiveWriter = true,
         });
@@ -115,7 +115,7 @@ public sealed class TransactionRuntimeContractTests : IDisposable
             {
                 db.Vectors.CreateVectorIndex(new VectorIndexSpec(
                     "held_writer_vectors",
-                    EntityKind.Node,
+                    EntityKind.Vertex,
                     keyId,
                     Dimensions: 4,
                     DistanceMetric.Cosine,
@@ -138,14 +138,14 @@ public sealed class TransactionRuntimeContractTests : IDisposable
     [Fact]
     public async Task Same_transaction_handle_concurrent_use_throws()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         using var tx = db.BeginTransaction();
         var op = new BlockingOperator();
 
         var running = Task.Run(() => tx.Execute(op));
         op.Entered.Wait(TimeSpan.FromSeconds(2)).Should().BeTrue();
 
-        Action concurrentUse = () => tx.NodeExists(new NodeId(0));
+        Action concurrentUse = () => tx.VertexExists(new VertexId(0));
         concurrentUse.Should().Throw<TransactionException>();
 
         op.Release.Set();

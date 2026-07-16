@@ -20,18 +20,18 @@ using Quiver;
 using Quiver.Storage.Records;
 
 // DB ディレクトリを開く (無ければ新規作成)。using で必ず Dispose する。
-using var db = GraphDatabase.Open(@"C:\data\myapp-graph");
+using var db = QuiverDatabase.Open(@"C:\data\myapp-graph");
 
 // --- 書き込みトランザクション ---
 using (var tx = db.BeginTransaction())
 {
-    var alice = tx.CreateNode("Person");
+    var alice = tx.CreateVertex("Person");
     tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
 
-    var bob = tx.CreateNode("Person");
+    var bob = tx.CreateVertex("Person");
     tx.SetProperty(bob, "name", PropertyValue.FromString("Bob"));
 
-    tx.CreateRelationship(alice, bob, "KNOWS");
+    tx.CreateEdge(alice, bob, "KNOWS");
 
     tx.Commit();   // ← Commit を呼ばずに Dispose すると自動 rollback
 }
@@ -40,28 +40,28 @@ using (var tx = db.BeginTransaction())
 using (var tx = db.BeginReadOnlyTransaction())
 {
     var stats = db.Diagnostics.GetStatistics();
-    Console.WriteLine($"Nodes={stats.NodeCount}, Rels={stats.RelationshipCount}");
+    Console.WriteLine($"Vertices={stats.VertexCount}, Edges={stats.EdgeCount}");
 }
 ```
 
 ポイント:
 
-- `using var db = GraphDatabase.Open(dir)` の **Dispose は必須**。Dispose で AutoVacuum ワーカー停止
+- `using var db = QuiverDatabase.Open(dir)` の **Dispose は必須**。Dispose で AutoVacuum ワーカー停止
   → バックエンドの flush/close が行われる。プロセスを `kill` で落としても commit 済みデータは
   WAL replay で復元されるが (→ [04_recovery_troubleshoot.md](04_recovery_troubleshoot.md))、正常終了では必ず Dispose を通す。
 - `tx.Commit()` を呼ばないまま `tx` を Dispose すると **rollback** される。これが既定の安全側挙動。
-- `GraphDatabase` インスタンスは **スレッドセーフ**。複数スレッドから同時に `BeginTransaction` してよい。
+- `QuiverDatabase` インスタンスは **スレッドセーフ**。複数スレッドから同時に `BeginTransaction` してよい。
   ただし 1 つの `tx` を複数スレッドで共有してはいけない。
 
 ---
 
 ## 2. スキーマと索引を用意する
 
-ラベル / リレーションシップタイプ / プロパティキーは **使用時に自動で登録される** ので、
+ラベル / Edgeタイプ / プロパティキーは **使用時に自動で登録される** ので、
 事前のスキーマ宣言は必須ではない。ただし **検索や MERGE を高速化する索引は明示的に作る**。
 
 ```csharp
-using var db = GraphDatabase.Open(dir);
+using var db = QuiverDatabase.Open(dir);
 
 // 起動直後に一度だけ索引を作る (冪等。既にあれば no-op)。
 db.Schema.CreateIndex(
@@ -74,8 +74,8 @@ db.Schema.CreateIndex(
 索引を作っておくと:
 
 - プロパティ等価検索 (`Has("email", ...)`) が全スキャンから O(log n) シークになる
-- `MergeNode("Person", "email", ...)` が索引シークを使う (索引が無いとラベル内全スキャンに落ち、
-  ノード数次第で秒オーダー)
+- `MergeVertex("Person", "email", ...)` が索引シークを使う (索引が無いとラベル内全スキャンに落ち、
+  Vertex数次第で秒オーダー)
 
 > 大量データ初期投入時は、索引を後から張るより `BeginStreamingBulkLoad(buildAdjacencyIndex: true)`
 > を使う方が速い場合がある。[docs/cookbook.md](../cookbook.md) の「BulkLoader」レシピ参照。
@@ -85,7 +85,7 @@ db.Schema.CreateIndex(
 ## 3. appsettings.json + DI で開く (ASP.NET Core / Generic Host)
 
 `Quiver.Hosting` パッケージを足すと、`IConfiguration` から設定を bind して DI コンテナに
-`GraphDatabase` を singleton 登録できる。
+`QuiverDatabase` を singleton 登録できる。
 
 `appsettings.json`:
 
@@ -94,7 +94,6 @@ db.Schema.CreateIndex(
   "Quiver": {
     "DataDirectory": "C:\\data\\myapp-graph",
     "BufferPoolSize": 536870912,        // 512 MB
-    "WalSegmentSize": 67108864,         // 64 MB
     "CheckpointThresholdBytes": 67108864,
     "EnableChecksums": true,
     "Backend": "Binary"
@@ -110,15 +109,15 @@ using Quiver.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// "Quiver" セクションを bind して GraphDatabase を singleton 登録。
+// "Quiver" セクションを bind して QuiverDatabase を singleton 登録。
 builder.Services.AddQuiver(builder.Configuration.GetSection("Quiver"));
 
 var app = builder.Build();
 
-app.MapGet("/stats", (GraphDatabase db) =>
+app.MapGet("/stats", (QuiverDatabase db) =>
 {
     var s = db.Diagnostics.GetStatistics();
-    return Results.Ok(new { nodes = s.NodeCount, rels = s.RelationshipCount });
+    return Results.Ok(new { vertices = s.VertexCount, rels = s.EdgeCount });
 });
 
 app.Run();
@@ -136,7 +135,7 @@ $env:Quiver__BufferPoolSize = "1073741824"   # 1 GB
 
 `IConfiguration` でbind できない要素 (バックエンドファクトリ・
 `LogicalMutationSink` など) を差し込みたい場合は、`AddQuiver` の `postConfigure` デリゲートから
-実体 `GraphDatabaseOptions` を直接編集する:
+実体 `QuiverDatabaseOptions` を直接編集する:
 
 ```csharp
 builder.Services.AddQuiver(
@@ -172,21 +171,21 @@ builder.Services.AddQuiver(
 再オープンで戻る」こと。これを動作確認しておく:
 
 ```csharp
-NodeId savedId;
+VertexId savedId;
 
-using (var db = GraphDatabase.Open(dir))
+using (var db = QuiverDatabase.Open(dir))
 using (var tx = db.BeginTransaction())
 {
-    savedId = tx.CreateNode("Config");
+    savedId = tx.CreateVertex("Config");
     tx.SetProperty(savedId, "version", PropertyValue.FromString("1.0"));
     tx.Commit();
 }
 
 // プロセスをまたいでも、別の Open で復元される
-using (var db = GraphDatabase.Open(dir))
+using (var db = QuiverDatabase.Open(dir))
 using (var tx = db.BeginReadOnlyTransaction())
 {
-    Debug.Assert(tx.NodeExists(savedId));
+    Debug.Assert(tx.VertexExists(savedId));
 }
 ```
 

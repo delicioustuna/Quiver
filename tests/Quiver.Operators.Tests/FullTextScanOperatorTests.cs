@@ -38,11 +38,11 @@ public sealed class FullTextScanOperatorTests
     }
 
     [Fact]
-    public void Schema_has_single_NodeId_column()
+    public void Schema_has_single_VertexId_column()
     {
         var op = new FullTextScanOperator(IndexName, "hello", k: 3);
         op.Schema.Columns.Should().HaveCount(1);
-        op.Schema.Columns[0].Type.Should().Be(TupleSlotType.NodeId);
+        op.Schema.Columns[0].Type.Should().Be(TupleSlotType.VertexId);
         op.Dispose();
     }
 
@@ -78,7 +78,7 @@ public sealed class FullTextScanOperatorTests
         fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
         using (var seed = fx.Db.BeginTransaction())
         {
-            var n = seed.CreateNode("Doc");
+            var n = seed.CreateVertex("Doc");
             seed.SetProperty(n, "body", PropertyValue.FromString("alpha beta gamma"));
             seed.Commit();
         }
@@ -92,12 +92,12 @@ public sealed class FullTextScanOperatorTests
     [Fact]
     public void Single_match_returns_one_row()
     {
-        NodeId docId = default;
+        VertexId docId = default;
         using var fx = OperatorTestFixture.OpenEmpty(tag: "fts_single");
         fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
         using (var seed = fx.Db.BeginTransaction())
         {
-            docId = seed.CreateNode("Doc");
+            docId = seed.CreateVertex("Doc");
             seed.SetProperty(docId, "body", PropertyValue.FromString("hello world"));
             seed.Commit();
         }
@@ -116,9 +116,9 @@ public sealed class FullTextScanOperatorTests
         fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
         using (var seed = fx.Db.BeginTransaction())
         {
-            var d1 = seed.CreateNode("Doc");
+            var d1 = seed.CreateVertex("Doc");
             seed.SetProperty(d1, "body", PropertyValue.FromString("foo bar"));
-            var d2 = seed.CreateNode("Doc");
+            var d2 = seed.CreateVertex("Doc");
             seed.SetProperty(d2, "body", PropertyValue.FromString("foo foo"));
             seed.Commit();
         }
@@ -140,7 +140,7 @@ public sealed class FullTextScanOperatorTests
         {
             for (int i = 0; i < 5; i++)
             {
-                var n = seed.CreateNode("Doc");
+                var n = seed.CreateVertex("Doc");
                 seed.SetProperty(n, "body", PropertyValue.FromString("common term here"));
             }
             seed.Commit();
@@ -159,9 +159,9 @@ public sealed class FullTextScanOperatorTests
         fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
         using (var seed = fx.Db.BeginTransaction())
         {
-            var n1 = seed.CreateNode("Doc");
+            var n1 = seed.CreateVertex("Doc");
             seed.SetProperty(n1, "body", PropertyValue.FromString("alpha"));
-            var n2 = seed.CreateNode("Doc");
+            var n2 = seed.CreateVertex("Doc");
             seed.SetProperty(n2, "body", PropertyValue.FromString("alpha beta"));
             seed.Commit();
         }

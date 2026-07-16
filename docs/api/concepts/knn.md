@@ -10,7 +10,7 @@ db.Vectors.CreateIndex(
     spec: new VectorIndexSpec(
         Dimensions: 384,
         Metric: VectorMetric.Cosine,
-        EntityKind: EntityKind.Node));
+        EntityKind: EntityKind.Vertex));
 ```
 
 ## ベクトル登録
@@ -18,7 +18,7 @@ db.Vectors.CreateIndex(
 ```csharp
 db.Vectors.SetVector(
     indexName: "person_bio_v1",
-    entityId: EntityId.FromNode(personId),
+    entityId: EntityId.FromVertex(personId),
     vector: embeddingArray);
 ```
 
@@ -50,7 +50,7 @@ var top10Friends = g.Knn("person_bio_v1", queryVec, k: 10)
 グラフフィルタを先に評価し、その結果集合に対してのみ KNN を行うパターン。
 
 ```csharp
-var candidates = g.Nodes().HasLabel("Person")
+var candidates = g.Vertices().HasLabel("Person")
                   .Has("region", "JP")
                   .FilterByKnn("person_bio_v1", queryVec, k: 50)
                   .ToList();

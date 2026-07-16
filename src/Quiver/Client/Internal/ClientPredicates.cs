@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using Quiver.Core;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
@@ -9,17 +9,17 @@ namespace Quiver.Api.Internal;
 /// <summary>述語が読むエンティティの種別。</summary>
 internal enum PredicateEntity
 {
-    /// <summary>ノードプロパティ (<see cref="ITransaction.Nodes"/>)。</summary>
-    Node,
-    /// <summary>リレーションシップ (エッジ) プロパティ (<see cref="ITransaction.Relationships"/>)。</summary>
-    Relationship,
-    /// <summary>ハイパーエッジプロパティ (<see cref="ITransaction.Hyperedges"/>)。</summary>
-    Hyperedge,
+    /// <summary>Vertexプロパティ (<see cref="ITransaction.Vertices"/>)。</summary>
+    Vertex,
+    /// <summary>Edge (エッジ) プロパティ (<see cref="ITransaction.Edges"/>)。</summary>
+    Edge,
+    /// <summary>Nexusプロパティ (<see cref="ITransaction.Nexuses"/>)。</summary>
+    Nexus,
 }
 
 /// <summary>
 /// <see cref="PredicateEntity"/> に応じて正しいストアからプロパティを列挙する。
-/// ノード専用だった述語をエッジプロパティ (<c>OutRelationships().Has(...)</c> /
+/// Vertex専用だった述語をエッジプロパティ (<c>OutEdges().Has(...)</c> /
 /// <c>.Knows(e =&gt; ...)</c>) でも機能させるための共通経路。両ストアの
 /// <c>EnumerateProperties</c> は同じ <see cref="PropertyEnumerator"/> を返すため分岐 1 箇所で済む。
 /// </summary>
@@ -28,11 +28,11 @@ internal static class EntityProps
     public static PropertyEnumerator Enumerate(ITransaction tx, PredicateEntity entity, long id)
         => entity switch
         {
-            PredicateEntity.Relationship =>
-                tx.Relationships.EnumerateProperties(new RelationshipId(id), tx.Properties),
-            PredicateEntity.Hyperedge =>
-                tx.Hyperedges.EnumerateProperties(new HyperedgeId(id), tx.Properties),
-            _ => tx.Nodes.EnumerateProperties(new NodeId(id), tx.Properties),
+            PredicateEntity.Edge =>
+                tx.Edges.EnumerateProperties(new EdgeId(id), tx.Properties),
+            PredicateEntity.Nexus =>
+                tx.Nexuses.EnumerateProperties(new NexusId(id), tx.Properties),
+            _ => tx.Vertices.EnumerateProperties(new VertexId(id), tx.Properties),
         };
 }
 
@@ -49,28 +49,28 @@ internal sealed class LabelPredicate : IPredicate
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var nodeId = new NodeId(tuple[_column].LongValue);
-        using var h = tx.Nodes.Read(nodeId);
+        var vertexId = new VertexId(tuple[_column].LongValue);
+        using var h = tx.Vertices.Read(vertexId);
         return h.Label == _labelId;
     }
 }
 
 internal sealed class PropertyEqStringPredicate : IPredicate
 {
-    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Vertex;
 
-    private readonly int _nodeColumn;
+    private readonly int _vertexColumn;
     private readonly PropertyKeyId _keyId;
     private readonly string _value;
 
-    internal PropertyEqStringPredicate(int nodeColumn, PropertyKeyId keyId, string value)
+    internal PropertyEqStringPredicate(int vertexColumn, PropertyKeyId keyId, string value)
     {
-        _nodeColumn = nodeColumn; _keyId = keyId; _value = value;
+        _vertexColumn = vertexColumn; _keyId = keyId; _value = value;
     }
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_vertexColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -85,20 +85,20 @@ internal sealed class PropertyEqStringPredicate : IPredicate
 
 internal sealed class PropertyInt64Predicate : IPredicate
 {
-    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Vertex;
 
-    private readonly int _nodeColumn;
+    private readonly int _vertexColumn;
     private readonly PropertyKeyId _keyId;
     private readonly PropertyPredicate _pred;
 
-    internal PropertyInt64Predicate(int nodeColumn, PropertyKeyId keyId, PropertyPredicate pred)
+    internal PropertyInt64Predicate(int vertexColumn, PropertyKeyId keyId, PropertyPredicate pred)
     {
-        _nodeColumn = nodeColumn; _keyId = keyId; _pred = pred;
+        _vertexColumn = vertexColumn; _keyId = keyId; _pred = pred;
     }
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_vertexColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -127,20 +127,20 @@ internal sealed class PropertyInt64Predicate : IPredicate
 
 internal sealed class PropertyWithinStringPredicate : IPredicate
 {
-    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Vertex;
 
-    private readonly int _nodeColumn;
+    private readonly int _vertexColumn;
     private readonly PropertyKeyId _keyId;
     private readonly HashSet<string> _values;
 
-    internal PropertyWithinStringPredicate(int nodeColumn, PropertyKeyId keyId, IEnumerable<string> values)
+    internal PropertyWithinStringPredicate(int vertexColumn, PropertyKeyId keyId, IEnumerable<string> values)
     {
-        _nodeColumn = nodeColumn; _keyId = keyId; _values = new HashSet<string>(values);
+        _vertexColumn = vertexColumn; _keyId = keyId; _values = new HashSet<string>(values);
     }
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_vertexColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -155,20 +155,20 @@ internal sealed class PropertyWithinStringPredicate : IPredicate
 
 internal sealed class PropertyDoublePredicate : IPredicate
 {
-    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Vertex;
 
-    private readonly int _nodeColumn;
+    private readonly int _vertexColumn;
     private readonly PropertyKeyId _keyId;
     private readonly long _encodedValue;
 
-    internal PropertyDoublePredicate(int nodeColumn, PropertyKeyId keyId, long encodedValue)
+    internal PropertyDoublePredicate(int vertexColumn, PropertyKeyId keyId, long encodedValue)
     {
-        _nodeColumn = nodeColumn; _keyId = keyId; _encodedValue = encodedValue;
+        _vertexColumn = vertexColumn; _keyId = keyId; _encodedValue = encodedValue;
     }
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_vertexColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -188,23 +188,23 @@ internal sealed class PropertyDoublePredicate : IPredicate
 /// </summary>
 internal sealed class PropertyDoubleRangePredicate : IPredicate
 {
-    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Vertex;
 
-    private readonly int _nodeColumn;
+    private readonly int _vertexColumn;
     private readonly PropertyKeyId _keyId;
     private readonly PredicateKind _kind;
     private readonly double _from;
     private readonly double _to;
 
-    internal PropertyDoubleRangePredicate(int nodeColumn, PropertyKeyId keyId, PropertyPredicate pred)
+    internal PropertyDoubleRangePredicate(int vertexColumn, PropertyKeyId keyId, PropertyPredicate pred)
     {
-        _nodeColumn = nodeColumn; _keyId = keyId; _kind = pred.Kind;
+        _vertexColumn = vertexColumn; _keyId = keyId; _kind = pred.Kind;
         _from = pred.DoubleFrom; _to = pred.DoubleTo;
     }
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_vertexColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -234,21 +234,21 @@ internal sealed class PropertyDoubleRangePredicate : IPredicate
 }
 
 /// <summary>
-/// ノードに指定プロパティキーが存在するかを判定する。
+/// Vertexに指定プロパティキーが存在するかを判定する。
 /// <c>.Has(key)</c> では <c>mustExist=true</c>、<c>.HasNot(key)</c> では
 /// <c>mustExist=false</c> として否定を内包し、別の NegatedPredicate を不要にする。
 /// </summary>
 internal sealed class PropertyExistsPredicate : IPredicate
 {
-    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Vertex;
 
-    private readonly int _nodeColumn;
+    private readonly int _vertexColumn;
     private readonly PropertyKeyId _keyId;
     private readonly bool _mustExist;
 
-    internal PropertyExistsPredicate(int nodeColumn, PropertyKeyId keyId, bool mustExist)
+    internal PropertyExistsPredicate(int vertexColumn, PropertyKeyId keyId, bool mustExist)
     {
-        _nodeColumn = nodeColumn; _keyId = keyId; _mustExist = mustExist;
+        _vertexColumn = vertexColumn; _keyId = keyId; _mustExist = mustExist;
     }
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
@@ -257,7 +257,7 @@ internal sealed class PropertyExistsPredicate : IPredicate
         // この場合 HasNot(key) は true、Has(key) は false を返す。
         if (!_keyId.IsValid) return !_mustExist;
 
-        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_vertexColumn].LongValue);
         while (en.MoveNext())
         {
             if (en.Current.KeyId == _keyId) return _mustExist;
@@ -269,20 +269,20 @@ internal sealed class PropertyExistsPredicate : IPredicate
 /// <summary><c>P.Without(...)</c> — 文字列プロパティが列挙値のいずれにも一致しないことを判定する。</summary>
 internal sealed class PropertyWithoutStringPredicate : IPredicate
 {
-    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Vertex;
 
-    private readonly int _nodeColumn;
+    private readonly int _vertexColumn;
     private readonly PropertyKeyId _keyId;
     private readonly HashSet<string> _values;
 
-    internal PropertyWithoutStringPredicate(int nodeColumn, PropertyKeyId keyId, IEnumerable<string> values)
+    internal PropertyWithoutStringPredicate(int vertexColumn, PropertyKeyId keyId, IEnumerable<string> values)
     {
-        _nodeColumn = nodeColumn; _keyId = keyId; _values = new HashSet<string>(values);
+        _vertexColumn = vertexColumn; _keyId = keyId; _values = new HashSet<string>(values);
     }
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_vertexColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -302,47 +302,47 @@ internal sealed class PropertyWithoutStringPredicate : IPredicate
 /// </summary>
 internal static class PredicateDispatch
 {
-    internal static IPredicate Build(int nodeColumn, PropertyKeyId keyId, PropertyPredicate pred,
-        PredicateEntity entity = PredicateEntity.Node)
+    internal static IPredicate Build(int vertexColumn, PropertyKeyId keyId, PropertyPredicate pred,
+        PredicateEntity entity = PredicateEntity.Vertex)
     {
         switch (pred.Kind)
         {
             case PredicateKind.Eq when pred.StringValue != null:
-                return new PropertyEqStringPredicate(nodeColumn, keyId, pred.StringValue) { Entity = entity };
+                return new PropertyEqStringPredicate(vertexColumn, keyId, pred.StringValue) { Entity = entity };
             case PredicateKind.Within when pred.WithinValues != null:
-                return new PropertyWithinStringPredicate(nodeColumn, keyId, pred.WithinValues) { Entity = entity };
+                return new PropertyWithinStringPredicate(vertexColumn, keyId, pred.WithinValues) { Entity = entity };
             case PredicateKind.Without when pred.WithinValues != null:
-                return new PropertyWithoutStringPredicate(nodeColumn, keyId, pred.WithinValues) { Entity = entity };
+                return new PropertyWithoutStringPredicate(vertexColumn, keyId, pred.WithinValues) { Entity = entity };
             case PredicateKind.StartsWith:
-                return new StringPrefixPredicate(nodeColumn, keyId, pred.StringValue ?? string.Empty) { Entity = entity };
+                return new StringPrefixPredicate(vertexColumn, keyId, pred.StringValue ?? string.Empty) { Entity = entity };
             case PredicateKind.EndsWith:
-                return new StringSuffixPredicate(nodeColumn, keyId, pred.StringValue ?? string.Empty) { Entity = entity };
+                return new StringSuffixPredicate(vertexColumn, keyId, pred.StringValue ?? string.Empty) { Entity = entity };
             case PredicateKind.Contains:
-                return new StringContainsPredicate(nodeColumn, keyId, pred.StringValue ?? string.Empty) { Entity = entity };
+                return new StringContainsPredicate(vertexColumn, keyId, pred.StringValue ?? string.Empty) { Entity = entity };
             case PredicateKind.Regex when pred.CompiledRegex != null:
-                return new RegexPropertyPredicate(nodeColumn, keyId, pred.CompiledRegex) { Entity = entity };
+                return new RegexPropertyPredicate(vertexColumn, keyId, pred.CompiledRegex) { Entity = entity };
             case PredicateKind.Not when pred.Inner != null:
-                return new NegatedPredicate(Build(nodeColumn, keyId, pred.Inner, entity));
+                return new NegatedPredicate(Build(vertexColumn, keyId, pred.Inner, entity));
             case PredicateKind.And when pred.InnerArray != null:
-                return new AndPredicate(BuildAll(nodeColumn, keyId, pred.InnerArray, entity));
+                return new AndPredicate(BuildAll(vertexColumn, keyId, pred.InnerArray, entity));
             case PredicateKind.Or when pred.InnerArray != null:
-                return new OrPredicate(BuildAll(nodeColumn, keyId, pred.InnerArray, entity));
+                return new OrPredicate(BuildAll(vertexColumn, keyId, pred.InnerArray, entity));
             case PredicateKind.Eq or PredicateKind.Gt or PredicateKind.Gte
                 or PredicateKind.Lt or PredicateKind.Lte or PredicateKind.Between when pred.IsDouble:
                 // 浮動小数点の比較・範囲は double として復号比較する。
-                return new PropertyDoubleRangePredicate(nodeColumn, keyId, pred) { Entity = entity };
+                return new PropertyDoubleRangePredicate(vertexColumn, keyId, pred) { Entity = entity };
             default:
                 // 数値比較値を持つ Eq/Gt/Gte/Lt/Lte/Between は、型フラグも検証する
                 // int64 述語へフォールスルーする。
-                return new PropertyInt64Predicate(nodeColumn, keyId, pred) { Entity = entity };
+                return new PropertyInt64Predicate(vertexColumn, keyId, pred) { Entity = entity };
         }
     }
 
-    private static IPredicate[] BuildAll(int nodeColumn, PropertyKeyId keyId, PropertyPredicate[] preds,
+    private static IPredicate[] BuildAll(int vertexColumn, PropertyKeyId keyId, PropertyPredicate[] preds,
         PredicateEntity entity)
     {
         var result = new IPredicate[preds.Length];
-        for (int i = 0; i < preds.Length; i++) result[i] = Build(nodeColumn, keyId, preds[i], entity);
+        for (int i = 0; i < preds.Length; i++) result[i] = Build(vertexColumn, keyId, preds[i], entity);
         return result;
     }
 }
@@ -354,19 +354,19 @@ internal static class PredicateDispatch
 /// </summary>
 internal abstract class StringPropertyPredicateBase : IPredicate
 {
-    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Vertex;
 
-    private readonly int _nodeColumn;
+    private readonly int _vertexColumn;
     private readonly PropertyKeyId _keyId;
 
-    protected StringPropertyPredicateBase(int nodeColumn, PropertyKeyId keyId)
+    protected StringPropertyPredicateBase(int vertexColumn, PropertyKeyId keyId)
     {
-        _nodeColumn = nodeColumn; _keyId = keyId;
+        _vertexColumn = vertexColumn; _keyId = keyId;
     }
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_vertexColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;
@@ -385,7 +385,7 @@ internal abstract class StringPropertyPredicateBase : IPredicate
 internal sealed class StringPrefixPredicate : StringPropertyPredicateBase
 {
     private readonly string _prefix;
-    internal StringPrefixPredicate(int nodeColumn, PropertyKeyId keyId, string prefix) : base(nodeColumn, keyId) => _prefix = prefix;
+    internal StringPrefixPredicate(int vertexColumn, PropertyKeyId keyId, string prefix) : base(vertexColumn, keyId) => _prefix = prefix;
     protected override bool Match(string value) => value.StartsWith(_prefix, StringComparison.Ordinal);
 }
 
@@ -393,7 +393,7 @@ internal sealed class StringPrefixPredicate : StringPropertyPredicateBase
 internal sealed class StringSuffixPredicate : StringPropertyPredicateBase
 {
     private readonly string _suffix;
-    internal StringSuffixPredicate(int nodeColumn, PropertyKeyId keyId, string suffix) : base(nodeColumn, keyId) => _suffix = suffix;
+    internal StringSuffixPredicate(int vertexColumn, PropertyKeyId keyId, string suffix) : base(vertexColumn, keyId) => _suffix = suffix;
     protected override bool Match(string value) => value.EndsWith(_suffix, StringComparison.Ordinal);
 }
 
@@ -401,7 +401,7 @@ internal sealed class StringSuffixPredicate : StringPropertyPredicateBase
 internal sealed class StringContainsPredicate : StringPropertyPredicateBase
 {
     private readonly string _needle;
-    internal StringContainsPredicate(int nodeColumn, PropertyKeyId keyId, string needle) : base(nodeColumn, keyId) => _needle = needle;
+    internal StringContainsPredicate(int vertexColumn, PropertyKeyId keyId, string needle) : base(vertexColumn, keyId) => _needle = needle;
     protected override bool Match(string value) => value.Contains(_needle, StringComparison.Ordinal);
 }
 
@@ -409,7 +409,7 @@ internal sealed class StringContainsPredicate : StringPropertyPredicateBase
 internal sealed class RegexPropertyPredicate : StringPropertyPredicateBase
 {
     private readonly Regex _regex;
-    internal RegexPropertyPredicate(int nodeColumn, PropertyKeyId keyId, Regex regex) : base(nodeColumn, keyId) => _regex = regex;
+    internal RegexPropertyPredicate(int vertexColumn, PropertyKeyId keyId, Regex regex) : base(vertexColumn, keyId) => _regex = regex;
     protected override bool Match(string value) => _regex.IsMatch(value);
 }
 
@@ -449,20 +449,20 @@ internal sealed class OrPredicate : IPredicate
 
 internal sealed class PropertyBoolPredicate : IPredicate
 {
-    internal PredicateEntity Entity { get; init; } = PredicateEntity.Node;
+    internal PredicateEntity Entity { get; init; } = PredicateEntity.Vertex;
 
-    private readonly int _nodeColumn;
+    private readonly int _vertexColumn;
     private readonly PropertyKeyId _keyId;
     private readonly long _scalar;
 
-    internal PropertyBoolPredicate(int nodeColumn, PropertyKeyId keyId, long scalar)
+    internal PropertyBoolPredicate(int vertexColumn, PropertyKeyId keyId, long scalar)
     {
-        _nodeColumn = nodeColumn; _keyId = keyId; _scalar = scalar;
+        _vertexColumn = vertexColumn; _keyId = keyId; _scalar = scalar;
     }
 
     public bool Evaluate(in TupleRef tuple, ITransaction tx)
     {
-        var en = EntityProps.Enumerate(tx, Entity, tuple[_nodeColumn].LongValue);
+        var en = EntityProps.Enumerate(tx, Entity, tuple[_vertexColumn].LongValue);
         while (en.MoveNext())
         {
             var prop = en.Current;

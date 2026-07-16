@@ -26,38 +26,38 @@ public sealed class SubTraversal
         _entityColumn = entityColumn;
     }
 
-    /// <summary>外向 (Outgoing) リレーションシップを辿る。</summary>
+    /// <summary>外向 (Outgoing) Edgeを辿る。</summary>
     public SubTraversal Out(string? type = null)
     {
         var expand = new ExpandOp(_plan, _plan.CurrentEntityColumn, Direction.Outgoing, type, ExpandOutputMode.NeighborOnly, null);
         return new SubTraversal(_probe, expand, _schema, expand.CurrentEntityColumn);
     }
 
-    /// <summary>型付きリレーションシップで外向に辿る。</summary>
-    public SubTraversal Out<TRel>() where TRel : IGraphRelationship<TRel>
-        => Out(TRel.GraphType);
+    /// <summary>型付きEdgeで外向に辿る。</summary>
+    public SubTraversal Out<TEdge>() where TEdge : IGraphEdge<TEdge>
+        => Out(TEdge.GraphType);
 
-    /// <summary>内向 (Incoming) リレーションシップを辿る。</summary>
+    /// <summary>内向 (Incoming) Edgeを辿る。</summary>
     public SubTraversal In(string? type = null)
     {
         var expand = new ExpandOp(_plan, _plan.CurrentEntityColumn, Direction.Incoming, type, ExpandOutputMode.NeighborOnly, null);
         return new SubTraversal(_probe, expand, _schema, expand.CurrentEntityColumn);
     }
 
-    /// <summary>型付きリレーションシップで内向に辿る。</summary>
-    public SubTraversal In<TRel>() where TRel : IGraphRelationship<TRel>
-        => In(TRel.GraphType);
+    /// <summary>型付きEdgeで内向に辿る。</summary>
+    public SubTraversal In<TEdge>() where TEdge : IGraphEdge<TEdge>
+        => In(TEdge.GraphType);
 
-    /// <summary>双方向のリレーションシップを辿る。</summary>
+    /// <summary>双方向のEdgeを辿る。</summary>
     public SubTraversal Both(string? type = null)
     {
         var expand = new ExpandOp(_plan, _plan.CurrentEntityColumn, Direction.Both, type, ExpandOutputMode.NeighborOnly, null);
         return new SubTraversal(_probe, expand, _schema, expand.CurrentEntityColumn);
     }
 
-    /// <summary>型付きリレーションシップで双方向に辿る。</summary>
-    public SubTraversal Both<TRel>() where TRel : IGraphRelationship<TRel>
-        => Both(TRel.GraphType);
+    /// <summary>型付きEdgeで双方向に辿る。</summary>
+    public SubTraversal Both<TEdge>() where TEdge : IGraphEdge<TEdge>
+        => Both(TEdge.GraphType);
 
     /// <summary>ラベルでフィルタする。</summary>
     public SubTraversal HasLabel(string label)

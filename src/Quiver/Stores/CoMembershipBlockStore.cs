@@ -5,11 +5,11 @@ namespace Quiver.Storage.Records;
 
 /// <summary>
 /// 明示されたロール対だけを物理化する co-membership block。
-/// ノードとロール対ごとの配列に、ハイパーエッジと到達先ノードを連続配置する。
+/// Vertexとロール対ごとの配列に、Nexusと到達先Vertexを連続配置する。
 /// </summary>
 // header と incidence が正本であり、このビューは起動時・vacuum 後に全再構築できる。
 // transaction 中の追加は即時反映するが、abort された entry は header の可視性判定で
-// 読み飛ばす。HyperedgeId は世代を含むため slot 再利用後の別 entity とも一致しない。
+// 読み飛ばす。NexusId は世代を含むため slot 再利用後の別 entity とも一致しない。
 internal sealed class CoMembershipBlockStore : ICoMembershipBlockStore
 {
     private readonly object _gate = new();
@@ -30,7 +30,7 @@ internal sealed class CoMembershipBlockStore : ICoMembershipBlockStore
             && _pairs.Contains(new RolePair(originRole, memberRole));
 
     public CoMembershipEntry[] GetEntries(
-        NodeId originNode,
+        VertexId originVertex,
         RoleId originRole,
         RoleId memberRole,
         out int count)
@@ -39,7 +39,7 @@ internal sealed class CoMembershipBlockStore : ICoMembershipBlockStore
         lock (_gate)
         {
             if (_blocks.TryGetValue(
-                    new BlockKey(originNode.Sequence, originRole.Value, memberRole.Value),
+                    new BlockKey(originVertex.Sequence, originRole.Value, memberRole.Value),
                     out var block))
             {
                 count = block.Count;
@@ -53,30 +53,30 @@ internal sealed class CoMembershipBlockStore : ICoMembershipBlockStore
 
     internal long ReadCount => Interlocked.Read(ref _readCount);
 
-    public void Add(HyperedgeId hyperedgeId, ReadOnlySpan<IncidenceMember> members)
+    public void Add(NexusId nexusId, ReadOnlySpan<IncidenceMember> members)
     {
         lock (_gate)
-            AddCore(_blocks, hyperedgeId, members);
+            AddCore(_blocks, nexusId, members);
     }
 
-    public void Rebuild(IHyperedgeStore hyperedges, IIncidenceStore incidences)
+    public void Rebuild(INexusStore nexuses, IIncidenceStore incidences)
     {
         var replacement = new Dictionary<BlockKey, Block>();
-        foreach (HyperedgeId hyperedgeId in hyperedges.Scan())
+        foreach (NexusId nexusId in nexuses.Scan())
         {
-            using var header = hyperedges.Read(hyperedgeId);
+            using var header = nexuses.Read(nexusId);
             if (!header.InUse)
                 continue;
 
             var members = new List<IncidenceMember>();
-            var enumerator = incidences.EnumerateByHyperedge(hyperedgeId, hyperedges);
+            var enumerator = incidences.EnumerateByNexus(nexusId, nexuses);
             while (enumerator.MoveNext())
             {
                 var incidence = enumerator.Current;
-                members.Add(new IncidenceMember(incidence.NodeId, incidence.RoleId));
+                members.Add(new IncidenceMember(incidence.VertexId, incidence.RoleId));
             }
 
-            AddCore(replacement, hyperedgeId, CollectionsMarshal.AsSpan(members));
+            AddCore(replacement, nexusId, CollectionsMarshal.AsSpan(members));
         }
 
         lock (_gate)
@@ -90,7 +90,7 @@ internal sealed class CoMembershipBlockStore : ICoMembershipBlockStore
 
     private void AddCore(
         Dictionary<BlockKey, Block> blocks,
-        HyperedgeId hyperedgeId,
+        NexusId nexusId,
         ReadOnlySpan<IncidenceMember> members)
     {
         foreach (RolePair pair in _pairs)
@@ -104,11 +104,11 @@ internal sealed class CoMembershipBlockStore : ICoMembershipBlockStore
                 for (int memberIndex = 0; memberIndex < members.Length; memberIndex++)
                 {
                     IncidenceMember member = members[memberIndex];
-                    if (member.RoleId != pair.MemberRole || member.NodeId == origin.NodeId)
+                    if (member.RoleId != pair.MemberRole || member.VertexId == origin.VertexId)
                         continue;
 
                     var key = new BlockKey(
-                        origin.NodeId.Sequence,
+                        origin.VertexId.Sequence,
                         pair.OriginRole.Value,
                         pair.MemberRole.Value);
                     if (!blocks.TryGetValue(key, out Block? block))
@@ -116,14 +116,14 @@ internal sealed class CoMembershipBlockStore : ICoMembershipBlockStore
                         block = new Block();
                         blocks.Add(key, block);
                     }
-                    block.Add(new CoMembershipEntry(hyperedgeId, member.NodeId));
+                    block.Add(new CoMembershipEntry(nexusId, member.VertexId));
                 }
             }
         }
     }
 
     private readonly record struct RolePair(RoleId OriginRole, RoleId MemberRole);
-    private readonly record struct BlockKey(long NodeSequence, int OriginRole, int MemberRole);
+    private readonly record struct BlockKey(long VertexSequence, int OriginRole, int MemberRole);
 
     private sealed class Block
     {

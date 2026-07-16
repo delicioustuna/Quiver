@@ -5,7 +5,7 @@ Pure C# で実装するグラフデータベースエンジン Quiver のドキ�
 ## このサイトの構成
 
 - **[Getting Started](getting-started.md)** — インストールから最初のクエリまでの最短経路
-- **[Concepts](concepts/index.md)** — Node / Relationship モデル、Transaction、Traversal、MERGE、KNN、Backends
+- **[Concepts](concepts/index.md)** — Vertex / Edge モデル、Transaction、Traversal、MERGE、KNN、Backends
 - **[Tutorials](tutorials/index.md)** — 短いコード例で手を動かしながら覚える
 - **[API Reference](../api/Quiver.html)** — Roslyn メタデータから生成された全公開 API のリファレンス
 

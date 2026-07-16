@@ -31,54 +31,54 @@ public sealed class ColumnHardeningTests : IDisposable
     [Fact]
     public void CreateColumn_requires_no_active_transaction()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         using var tx = db.BeginTransaction(); // アクティブ tx を保持したまま
-        Action act = () => db.CreateColumn(EntityKind.Node, "x");
+        Action act = () => db.CreateColumn(EntityKind.Vertex, "x");
         act.Should().Throw<InvalidOperationException>();
     }
 
     [Fact]
     public void DropColumn_requires_no_active_transaction()
     {
-        using var db = GraphDatabase.Open(_path);
-        db.CreateColumn(EntityKind.Node, "x").Should().BeTrue();
+        using var db = QuiverDatabase.Open(_path);
+        db.CreateColumn(EntityKind.Vertex, "x").Should().BeTrue();
         using var tx = db.BeginReadOnlyTransaction(); // reader でも DDL は不可
-        Action act = () => db.DropColumn(EntityKind.Node, "x");
+        Action act = () => db.DropColumn(EntityKind.Vertex, "x");
         act.Should().Throw<InvalidOperationException>();
     }
 
     [Fact]
     public void Column_data_survives_reopen_and_aggregates()
     {
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
         {
             using (var tx = db.BeginTransaction())
             {
-                var a = tx.CreateNode("A");
-                var b = tx.CreateNode("B");
+                var a = tx.CreateVertex("A");
+                var b = tx.CreateVertex("B");
                 for (int i = 0; i < 4; i++)
                 {
-                    var r = tx.CreateRelationship(a, b, "R");
+                    var r = tx.CreateEdge(a, b, "R");
                     tx.SetProperty(r, "w", PropertyValue.FromInt64(10));
                 }
                 tx.Commit();
             }
-            db.CreateColumn(EntityKind.Relationship, "w").Should().BeTrue();
+            db.CreateColumn(EntityKind.Edge, "w").Should().BeTrue();
             using (var tx = db.BeginTransaction())
             {
-                foreach (var r in AllRels(db)) tx.SetProperty(r, "w", PropertyValue.FromInt64(15));
+                foreach (var r in AllEdges(db)) tx.SetProperty(r, "w", PropertyValue.FromInt64(15));
                 tx.Commit();
             }
         }
 
         // 再オープン (clean close → recovery)。列の head ページ + catalog が永続している。
-        using (var db2 = GraphDatabase.Open(_path))
+        using (var db2 = QuiverDatabase.Open(_path))
         {
-            db2.CreateColumn(EntityKind.Relationship, "w").Should().BeFalse(); // 登録永続
+            db2.CreateColumn(EntityKind.Edge, "w").Should().BeFalse(); // 登録永続
             using var tx = db2.BeginReadOnlyTransaction();
-            tx.G(db2.Schema).Relationships().ToList().Should().HaveCount(4);
+            tx.G(db2.Schema).Edges().ToList().Should().HaveCount(4);
             // 列スキャン集約は committed 最新値 (15 × 4 = 60)。
-            tx.G(db2.Schema).Relationships().SumLong("w").Should().Be(60);
+            tx.G(db2.Schema).Edges().SumLong("w").Should().Be(60);
         }
     }
 
@@ -88,35 +88,35 @@ public sealed class ColumnHardeningTests : IDisposable
         // CreateColumn の構築を WAL 文脈下で commit するため、online backup (CreateSnapshot) の
         // ターゲットも WAL redo で列 head ページ + catalog + 列テナント page-table を復元できる。
         var snapPath = Path.Combine(_dir, "snap.quiver");
-        using (var db = GraphDatabase.Open(_path))
+        using (var db = QuiverDatabase.Open(_path))
         {
             using (var tx = db.BeginTransaction())
             {
-                var a = tx.CreateNode("A");
-                var b = tx.CreateNode("B");
+                var a = tx.CreateVertex("A");
+                var b = tx.CreateVertex("B");
                 for (int i = 0; i < 4; i++)
                 {
-                    var r = tx.CreateRelationship(a, b, "R");
+                    var r = tx.CreateEdge(a, b, "R");
                     tx.SetProperty(r, "w", PropertyValue.FromInt64(10));
                 }
                 tx.Commit();
             }
-            db.CreateColumn(EntityKind.Relationship, "w").Should().BeTrue();
+            db.CreateColumn(EntityKind.Edge, "w").Should().BeTrue();
             db.CreateSnapshot(snapPath);
         }
 
-        using (var snap = GraphDatabase.Open(snapPath))
+        using (var snap = QuiverDatabase.Open(snapPath))
         {
-            snap.CreateColumn(EntityKind.Relationship, "w").Should().BeFalse(); // 登録 redo 済
+            snap.CreateColumn(EntityKind.Edge, "w").Should().BeFalse(); // 登録 redo 済
             using var tx = snap.BeginReadOnlyTransaction();
-            tx.G(snap.Schema).Relationships().ToList().Should().HaveCount(4);
-            tx.G(snap.Schema).Relationships().SumLong("w").Should().Be(40); // 10 × 4
+            tx.G(snap.Schema).Edges().ToList().Should().HaveCount(4);
+            tx.G(snap.Schema).Edges().SumLong("w").Should().Be(40); // 10 × 4
         }
     }
 
-    private static List<RelationshipId> AllRels(GraphDatabase db)
+    private static List<EdgeId> AllEdges(QuiverDatabase db)
     {
         using var tx = db.BeginReadOnlyTransaction();
-        return tx.G(db.Schema).Relationships().ToList();
+        return tx.G(db.Schema).Edges().ToList();
     }
 }

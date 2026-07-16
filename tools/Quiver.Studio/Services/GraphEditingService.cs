@@ -15,11 +15,11 @@ public sealed class GraphEditingService
         _logger = logger;
     }
 
-    public NodeId CreateNode(string label, IReadOnlyList<(string key, string value)>? properties = null)
+    public VertexId CreateVertex(string label, IReadOnlyList<(string key, string value)>? properties = null)
     {
         var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
         using var tx = db.BeginTransaction();
-        var nid = tx.CreateNode(label);
+        var nid = tx.CreateVertex(label);
 
         if (properties is not null)
         {
@@ -29,73 +29,73 @@ public sealed class GraphEditingService
 
         tx.Commit();
         _db.RefreshStatistics();
-        _logger.LogInformation("ノード作成: {Id} label={Label}", nid, label);
+        _logger.LogInformation("Vertex作成: {Id} label={Label}", nid, label);
         return nid;
     }
 
-    public void DeleteNode(NodeId id)
+    public void DeleteVertex(VertexId id)
     {
         var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
         using var tx = db.BeginTransaction();
 
-        var rels = tx.EnumerateRelationships(id);
-        var relIds = new List<RelationshipId>();
-        while (rels.MoveNext())
-            relIds.Add(rels.Current.Id);
-        foreach (var rid in relIds)
-            tx.DeleteRelationship(rid);
+        var edges = tx.EnumerateEdges(id);
+        var edgeIds = new List<EdgeId>();
+        while (edges.MoveNext())
+            edgeIds.Add(edges.Current.Id);
+        foreach (var rid in edgeIds)
+            tx.DeleteEdge(rid);
 
-        tx.DeleteNode(id);
+        tx.DeleteVertex(id);
         tx.Commit();
         _db.RefreshStatistics();
-        _logger.LogInformation("ノード削除: {Id}", id);
+        _logger.LogInformation("Vertex削除: {Id}", id);
     }
 
-    public RelationshipId CreateRelationship(NodeId source, NodeId target, string type)
+    public EdgeId CreateEdge(VertexId source, VertexId target, string type)
     {
         var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
         using var tx = db.BeginTransaction();
-        var rid = tx.CreateRelationship(source, target, type);
+        var rid = tx.CreateEdge(source, target, type);
         tx.Commit();
         _db.RefreshStatistics();
-        _logger.LogInformation("リレーションシップ作成: {Id} ({Source})-[{Type}]->({Target})", rid, source, type, target);
+        _logger.LogInformation("Edge作成: {Id} ({Source})-[{Type}]->({Target})", rid, source, type, target);
         return rid;
     }
 
-    public void DeleteRelationship(RelationshipId id)
+    public void DeleteEdge(EdgeId id)
     {
         var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
         using var tx = db.BeginTransaction();
-        tx.DeleteRelationship(id);
+        tx.DeleteEdge(id);
         tx.Commit();
         _db.RefreshStatistics();
-        _logger.LogInformation("リレーションシップ削除: {Id}", id);
+        _logger.LogInformation("Edge削除: {Id}", id);
     }
 
-    public void SetProperty(NodeId id, string key, string value)
+    public void SetProperty(VertexId id, string key, string value)
     {
         var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
         using var tx = db.BeginTransaction();
         tx.SetProperty(id, key, PropertyValue.FromString(value));
         tx.Commit();
-        _logger.LogInformation("プロパティ設定: Node {Id} {Key}={Value}", id, key, value);
+        _logger.LogInformation("プロパティ設定: Vertex {Id} {Key}={Value}", id, key, value);
     }
 
-    public void RemoveProperty(NodeId id, string key)
+    public void RemoveProperty(VertexId id, string key)
     {
         var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
         using var tx = db.BeginTransaction();
         tx.RemoveProperty(id, key);
         tx.Commit();
-        _logger.LogInformation("プロパティ削除: Node {Id} {Key}", id, key);
+        _logger.LogInformation("プロパティ削除: Vertex {Id} {Key}", id, key);
     }
 
-    public void SetRelationshipProperty(RelationshipId id, string key, string value)
+    public void SetEdgeProperty(EdgeId id, string key, string value)
     {
         var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
         using var tx = db.BeginTransaction();
         tx.SetProperty(id, key, PropertyValue.FromString(value));
         tx.Commit();
-        _logger.LogInformation("プロパティ設定: Relationship {Id} {Key}={Value}", id, key, value);
+        _logger.LogInformation("プロパティ設定: Edge {Id} {Key}={Value}", id, key, value);
     }
 }

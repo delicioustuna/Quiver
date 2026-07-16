@@ -8,16 +8,16 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// PW-18: GC-5 で導入された <c>MergeNode</c> (Cypher MERGE / Gremlin coalesce-fold-addV 相当) の
+/// <c>MergeVertex</c> (Cypher MERGE / Gremlin coalesce-fold-addV 相当) の
 /// mixed read/write ループ性能を計測。
 ///
-/// ループ: <c>g.MergeNode("Person", "uid", uid)</c> を <see cref="Operations"/> 回呼び出す。
-///   - <see cref="HitRatePercent"/> = 100 → 既存ノードを毎回ヒット (ON MATCH パス)
+/// ループ: <c>g.MergeVertex("Person", "uid", uid)</c> を <see cref="Operations"/> 回呼び出す。
+///   - <see cref="HitRatePercent"/> = 100 → 既存Vertexを毎回ヒット (ON MATCH パス)
 ///   - <see cref="HitRatePercent"/> = 0   → 毎回新規作成 (ON CREATE パス)
 ///   - 50 → 半々
 ///
-/// ベースライン: 同じループを <c>CreateNode + SetProperty</c> で書き直したもの (ヒット側だけ
-/// no-op になる version で MergeNode の look-up コストとの差分を見る)。
+/// ベースライン: 同じループを <c>CreateVertex + SetProperty</c> で書き直したもの (ヒット側だけ
+/// no-op になる version で MergeVertex の look-up コストとの差分を見る)。
 /// </summary>
 [MemoryDiagnoser]
 [ShortRunJob]
@@ -33,8 +33,8 @@ public class MergeWorkloadBenchmarks
     public int PreloadCount { get; set; }
 
     /// <summary>
-    /// PW-18 follow-up: <c>(label, uid)</c> にインデックスを登録するか。
-    /// <c>true</c> のとき MergeNode は O(log n) シーク経路、
+    /// <c>(label, uid)</c> にインデックスを登録するか。
+    /// <c>true</c> のとき MergeVertex は O(log n) シーク経路、
     /// <c>false</c> のとき従来通り O(N) フルスキャン経路。
     /// </summary>
     [Params(false, true)]
@@ -42,14 +42,14 @@ public class MergeWorkloadBenchmarks
 
     private const string IndexName = "idx_person_uid";
 
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
     private string _dbPath = null!;
 
     [GlobalSetup]
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("merge");
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _ = _db.Schema.GetOrCreateLabel("Person");
         _ = _db.Schema.GetOrCreatePropertyKey("uid");
         if (WithIndex)
@@ -58,7 +58,7 @@ public class MergeWorkloadBenchmarks
         using var tx = _db.BeginTransaction();
         for (int i = 0; i < PreloadCount; i++)
         {
-            var id = tx.CreateNode("Person");
+            var id = tx.CreateVertex("Person");
             tx.SetProperty(id, "uid", PropertyValue.FromInt64(i));
             if (WithIndex)
                 tx.IndexInsert(IndexName, i, id);
@@ -82,7 +82,7 @@ public class MergeWorkloadBenchmarks
         return PreloadCount + i;     // 新規 uid (PreloadCount 以降)
     }
 
-    [Benchmark(Description = "MergeNode loop (mixed read/write)")]
+    [Benchmark(Description = "MergeVertex loop (mixed read/write)")]
     public int MergeLoop()
     {
         int created = 0;
@@ -91,7 +91,7 @@ public class MergeWorkloadBenchmarks
         {
             long uid = PickUid(i);
             var pv = PropertyValue.FromInt64(uid);
-            var (_, c) = tx.MergeNode("Person", "uid", in pv);
+            var (_, c) = tx.MergeVertex("Person", "uid", in pv);
             if (c) created++;
         }
         // commit せず rollback (ベンチ毎の DB 肥大化を防ぐ)。
@@ -99,14 +99,14 @@ public class MergeWorkloadBenchmarks
         return created;
     }
 
-    [Benchmark(Baseline = true, Description = "Baseline: explicit CreateNode + SetProperty (no merge lookup)")]
+    [Benchmark(Baseline = true, Description = "Baseline: explicit CreateVertex + SetProperty (no merge lookup)")]
     public int CreateOnlyLoop()
     {
         using var tx = _db.BeginTransaction();
         for (int i = 0; i < Operations; i++)
         {
             long uid = PickUid(i);
-            var id = tx.CreateNode("Person");
+            var id = tx.CreateVertex("Person");
             tx.SetProperty(id, "uid", PropertyValue.FromInt64(uid));
         }
         return Operations;

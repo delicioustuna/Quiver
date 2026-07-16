@@ -6,16 +6,16 @@ namespace Quiver.Core;
 /// </summary>
 public enum EntityKind : byte
 {
-    /// <summary>ノード。</summary>
-    Node = 1,
-    /// <summary>リレーションシップ。</summary>
-    Relationship = 2,
-    /// <summary>ハイパーエッジ。</summary>
-    Hyperedge = 4,
+    /// <summary>Vertex。</summary>
+    Vertex = 1,
+    /// <summary>Edge。</summary>
+    Edge = 2,
+    /// <summary>Nexus。</summary>
+    Nexus = 4,
 }
 
 /// <summary>
-/// <see cref="NodeId"/>、<see cref="RelationshipId"/>、<see cref="HyperedgeId"/> を統一して扱うための
+/// <see cref="VertexId"/>、<see cref="EdgeId"/>、<see cref="NexusId"/> を統一して扱うための
 /// 内部タグ付き識別子。診断、オペレータ配線、将来のカタログ用途を想定。
 /// オンディスクフォーマットには含まれない — シリアライズする場合は事前にフォーマットバージョンバイトを導入すること。
 /// </summary>
@@ -29,37 +29,37 @@ internal readonly record struct EntityId(EntityKind Kind, long LocalId)
     /// <summary>有効な entity kind と 60 bit の local 値を持つなら true。</summary>
     public bool IsValid => IsSupportedKind(Kind) && LocalId >= 0 && (ulong)LocalId <= LocalMask;
 
-    /// <summary><see cref="NodeId"/> からタグ付き ID を生成する。</summary>
-    public static EntityId FromNode(NodeId id) => From(EntityKind.Node, id.Value);
+    /// <summary><see cref="VertexId"/> からタグ付き ID を生成する。</summary>
+    public static EntityId FromVertex(VertexId id) => From(EntityKind.Vertex, id.Value);
 
-    /// <summary><see cref="RelationshipId"/> からタグ付き ID を生成する。</summary>
-    public static EntityId FromRelationship(RelationshipId id) => From(EntityKind.Relationship, id.Value);
+    /// <summary><see cref="EdgeId"/> からタグ付き ID を生成する。</summary>
+    public static EntityId FromEdge(EdgeId id) => From(EntityKind.Edge, id.Value);
 
-    /// <summary><see cref="HyperedgeId"/> からタグ付き ID を生成する。</summary>
-    public static EntityId FromHyperedge(HyperedgeId id) => From(EntityKind.Hyperedge, id.Value);
+    /// <summary><see cref="NexusId"/> からタグ付き ID を生成する。</summary>
+    public static EntityId FromNexus(NexusId id) => From(EntityKind.Nexus, id.Value);
 
-    /// <summary>ノードとして取り出す。種別不一致なら <see cref="InvalidOperationException"/>。</summary>
-    public NodeId AsNode()
+    /// <summary>Vertexとして取り出す。種別不一致なら <see cref="InvalidOperationException"/>。</summary>
+    public VertexId AsVertex()
     {
-        if (Kind != EntityKind.Node)
-            throw new InvalidOperationException($"EntityId は {Kind} であり、Node ではありません。");
-        return new NodeId(LocalId);
+        if (Kind != EntityKind.Vertex)
+            throw new InvalidOperationException($"EntityId は {Kind} であり、Vertex ではありません。");
+        return new VertexId(LocalId);
     }
 
-    /// <summary>リレーションシップとして取り出す。種別不一致なら例外。</summary>
-    public RelationshipId AsRelationship()
+    /// <summary>Edgeとして取り出す。種別不一致なら例外。</summary>
+    public EdgeId AsEdge()
     {
-        if (Kind != EntityKind.Relationship)
-            throw new InvalidOperationException($"EntityId は {Kind} であり、Relationship ではありません。");
-        return new RelationshipId(LocalId);
+        if (Kind != EntityKind.Edge)
+            throw new InvalidOperationException($"EntityId は {Kind} であり、Edge ではありません。");
+        return new EdgeId(LocalId);
     }
 
-    /// <summary>ハイパーエッジとして取り出す。種別不一致なら例外。</summary>
-    public HyperedgeId AsHyperedge()
+    /// <summary>Nexusとして取り出す。種別不一致なら例外。</summary>
+    public NexusId AsNexus()
     {
-        if (Kind != EntityKind.Hyperedge)
-            throw new InvalidOperationException($"EntityId は {Kind} であり、Hyperedge ではありません。");
-        return new HyperedgeId(LocalId);
+        if (Kind != EntityKind.Nexus)
+            throw new InvalidOperationException($"EntityId は {Kind} であり、Nexus ではありません。");
+        return new NexusId(LocalId);
     }
 
     /// <summary>
@@ -98,11 +98,11 @@ internal readonly record struct EntityId(EntityKind Kind, long LocalId)
     }
 
     private static bool IsSupportedKind(EntityKind kind)
-        => kind is EntityKind.Node or EntityKind.Relationship or EntityKind.Hyperedge;
+        => kind is EntityKind.Vertex or EntityKind.Edge or EntityKind.Nexus;
 
     private static void ValidateKind(EntityKind kind)
     {
         if (!IsSupportedKind(kind))
-            throw new ArgumentOutOfRangeException(nameof(kind), kind, "EntityId は Node、Relationship、Hyperedge だけを受け入れます。");
+            throw new ArgumentOutOfRangeException(nameof(kind), kind, "EntityId は Vertex、Edge、Nexus だけを受け入れます。");
     }
 }

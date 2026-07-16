@@ -6,7 +6,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Benchmarks.Operators;
 
 /// <summary>
-/// TS-6 sentinel for <c>ParallelBfsOperator</c>. The parallel operator is
+///  sentinel for <c>ParallelBfsOperator</c>. The parallel operator is
 /// <c>internal sealed</c>, so we drive it through <see cref="BfsOperator"/>
 /// configured with <c>maxParallelism = -1</c> — that is the public entry
 /// point and the path real callers actually exercise.
@@ -16,14 +16,14 @@ namespace Quiver.Benchmarks.Operators;
 public class ParallelBfsOperatorBench
 {
     private OperatorBenchSeed _seed = null!;
-    private NodeId[] _frontier = null!;
+    private VertexId[] _frontier = null!;
 
     [GlobalSetup]
     public void Setup()
     {
         _seed = new OperatorBenchSeed("pbfs");
-        _frontier = new NodeId[20];
-        Array.Copy(_seed.PersonNodes, _frontier, 20);
+        _frontier = new VertexId[20];
+        Array.Copy(_seed.PersonVertices, _frontier, 20);
     }
 
     [GlobalCleanup]
@@ -32,7 +32,7 @@ public class ParallelBfsOperatorBench
     [Benchmark]
     public int ParallelBfs_depth3_via_BfsOperator()
     {
-        var src = new NodeArraySource(_frontier);
+        var src = new VertexArraySource(_frontier);
         using var op = new BfsOperator(src, 0, Direction.Outgoing, null, maxDepth: 3, maxParallelism: -1);
         return OperatorBenchDrain.Drain(op, _seed.ReadTx);
     }

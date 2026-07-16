@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using Quiver.Transactions;
 
 namespace Quiver.Query.Physical;
@@ -39,9 +39,9 @@ internal struct TupleSlot
 internal enum TupleSlotType : byte
 {
     Null = 0,
-    NodeId = 1,
-    RelationshipId = 2,
-    HyperedgeId = 3,
+    VertexId = 1,
+    EdgeId = 2,
+    NexusId = 3,
     Bool = 4,
     Int64 = 5,
     Double = 6,
@@ -73,16 +73,16 @@ internal struct OperatorStatistics
 
     /// <summary>
     /// 隣接ブロック高速パスで展開された回数。
-    /// <see cref="RelationshipScanRecords"/> やグローバルの
+    /// <see cref="EdgeScanRecords"/> やグローバルの
     /// <c>IGraphAccessMethods.AdjacencyFallbackCount</c> と比較してプラン選択を評価する。
     /// </summary>
     public long AdjacencyBlockHits;
 
     /// <summary>
-    /// <see cref="RelationshipScanExpandOperator"/> が走査したリレーションシップレコード数
-    /// (生存レコードのみ — 削除済み行は <c>IRelationshipStore.Scan</c> がスキップ)。
+    /// <see cref="EdgeScanExpandOperator"/> が走査したEdgeレコード数
+    /// (生存レコードのみ — 削除済み行は <c>IEdgeStore.Scan</c> がスキップ)。
     /// </summary>
-    public long RelationshipScanRecords;
+    public long EdgeScanRecords;
 
     /// <summary>
     /// <see cref="BitmapFilterOperator"/> が実行した <see cref="IPredicate.Evaluate"/> 呼び出し回数。

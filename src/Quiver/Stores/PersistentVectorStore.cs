@@ -10,11 +10,11 @@ namespace Quiver.Storage.Records;
 ///
 /// <para>各 index は <see cref="VectorIndexCatalog"/> に登録され、専用の payload テナント
 /// (<see cref="VectorPayloadStore"/>) を持つ。書き込みは container の単一物理 PagedFile に乗るので、
-/// アクティブ tx の <c>WalPageContext</c> 下で行えば自動的にその tx の WAL / ARIES に含まれ、
+/// アクティブ tx の <c>WalWriteSetContext</c> 下で行えば自動的にその tx の page-WAL に含まれ、
 /// グラフ変更と原子整合する (tx 統合は GraphTransaction / 呼び出し側 autocommit が担う)。</para>
 ///
 /// <para>6a 時点では検索は永続データの flat scan (HNSW 索引は 6d)。binding キーは Sequence で、
-/// 世代照合 (slot 再利用 stale 棄却) は 6c で導入する。</para>
+/// 世代照合によりslot再利用後のstale bindingを棄却する。</para>
 /// </summary>
 internal sealed class PersistentVectorStore : IVectorStore
 {
@@ -119,7 +119,7 @@ internal sealed class PersistentVectorStore : IVectorStore
         if (vector.Length != h.Spec.Dimensions)
             throw new VectorException(
                 $"Vector index '{indexName}' expects {h.Spec.Dimensions} dimensions, got {vector.Length}.");
-        // binding キーは slot Sequence へ正規化 (node.Value (gen 付き packed) を渡されうる)。
+        // binding キーは slot Sequence へ正規化 (vertex.Value (gen 付き packed) を渡されうる)。
         // 現世代を payload に焼き込み、slot 再利用で別エンティティに化けた stale binding を
         // KNN read 時に弾けるようにする。resolver 無し (テスト) は 0。
         long seq = EntityRef.UnpackSequence(entityId);

@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using Quiver.Core;
 using Quiver.Transactions;
 
@@ -34,5 +34,5 @@ internal sealed class LiteralProvider : ITupleProvider
     public static LiteralProvider String(string s) => new(TupleSlotType.Utf8String, 0, Encoding.UTF8.GetBytes(s));
     public static LiteralProvider Bytes(byte[] b) => new(TupleSlotType.Bytes, 0, b);
     // クエリパイプラインは Sequence 空間で動く。利用者 seed の gen を入口で剥がす。
-    public static LiteralProvider NodeId(NodeId id) => new(TupleSlotType.NodeId, id.Sequence, null);
+    public static LiteralProvider VertexId(VertexId id) => new(TupleSlotType.VertexId, id.Sequence, null);
 }

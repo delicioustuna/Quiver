@@ -14,12 +14,12 @@ namespace Quiver.Tests;
 public sealed class GremlinCompatGc2Tests : IDisposable
 {
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public GremlinCompatGc2Tests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_gc2_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
     }
 
     public void Dispose()
@@ -28,9 +28,9 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private NodeId AddPerson(IGraphTransaction tx, string name, int? age = null)
+    private VertexId AddPerson(IGraphTransaction tx, string name, int? age = null)
     {
-        var id = tx.CreateNode("Person");
+        var id = tx.CreateVertex("Person");
         tx.SetProperty(id, "name", PropertyValue.FromString(name));
         if (age.HasValue) tx.SetProperty(id, "age", PropertyValue.FromInt64(age.Value));
         return id;
@@ -49,7 +49,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var aPrefix = g.Nodes().HasLabel("Person").Has("name", P.StartsWith("Al")).ToList();
+        var aPrefix = g.Vertices().HasLabel("Person").Has("name", P.StartsWith("Al")).ToList();
         aPrefix.Should().HaveCount(2);
     }
 
@@ -66,7 +66,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var iceSuffix = g.Nodes().HasLabel("Person").Has("name", P.EndsWith("ice")).ToList();
+        var iceSuffix = g.Vertices().HasLabel("Person").Has("name", P.EndsWith("ice")).ToList();
         iceSuffix.Should().ContainSingle();
     }
 
@@ -83,7 +83,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var li = g.Nodes().HasLabel("Person").Has("name", P.Contains("li")).ToList();
+        var li = g.Vertices().HasLabel("Person").Has("name", P.Contains("li")).ToList();
         li.Should().HaveCount(2);
     }
 
@@ -100,7 +100,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var aStar = g.Nodes().HasLabel("Person").Has("name", P.Regex("^Al.*")).ToList();
+        var aStar = g.Vertices().HasLabel("Person").Has("name", P.Regex("^Al.*")).ToList();
         aStar.Should().HaveCount(2);
     }
 
@@ -117,14 +117,14 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var notAlice = g.Nodes().HasLabel("Person").Has("name", P.Not(P.Eq("Alice"))).ToList();
+        var notAlice = g.Vertices().HasLabel("Person").Has("name", P.Not(P.Eq("Alice"))).ToList();
         notAlice.Should().HaveCount(2);
     }
 
     [Fact]
     public void Not_returns_true_when_property_missing()
     {
-        // Cypher: WHERE NOT n.age = 30 evaluates to NOT false = true for nodes
+        // Cypher: WHERE NOT n.age = 30 evaluates to NOT false = true for vertices
         // that don't have an `age` property at all. The wrapped predicate
         // returns false when the key is absent, so NOT yields true.
         using (var tx = _db.BeginTransaction())
@@ -136,7 +136,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var notThirty = g.Nodes().HasLabel("Person").Has("age", P.Not(P.Eq(30))).ToList();
+        var notThirty = g.Vertices().HasLabel("Person").Has("age", P.Not(P.Eq(30))).ToList();
         notThirty.Should().HaveCount(1);
     }
 
@@ -154,7 +154,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         var g = rtx.G(_db.Schema);
 
         // half-open range [20, 40) on age
-        var inRange = g.Nodes().HasLabel("Person").Has("age", P.And(P.Gte(20), P.Lt(40))).ToList();
+        var inRange = g.Vertices().HasLabel("Person").Has("age", P.And(P.Gte(20), P.Lt(40))).ToList();
         inRange.Should().HaveCount(2);
     }
 
@@ -171,7 +171,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var alOrBo = g.Nodes().HasLabel("Person")
+        var alOrBo = g.Vertices().HasLabel("Person")
             .Has("name", P.Or(P.StartsWith("Al"), P.StartsWith("Bo")))
             .ToList();
         alOrBo.Should().HaveCount(2);
@@ -180,13 +180,13 @@ public sealed class GremlinCompatGc2Tests : IDisposable
     [Fact]
     public void Traversal_Or_keeps_elements_passing_any_sub_traversal()
     {
-        NodeId alice, bob, carol;
+        VertexId alice, bob, carol;
         using (var tx = _db.BeginTransaction())
         {
             alice = AddPerson(tx, "Alice");
             bob = AddPerson(tx, "Bob");
             carol = AddPerson(tx, "Carol");
-            tx.CreateRelationship(alice, bob, "KNOWS");
+            tx.CreateEdge(alice, bob, "KNOWS");
             tx.SetProperty(carol, "title", PropertyValue.FromString("VIP"));
             tx.Commit();
         }
@@ -194,7 +194,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         var g = rtx.G(_db.Schema);
 
         // matches Alice (KNOWS edge) and Carol (title=VIP); Bob has neither
-        var either = g.Nodes().HasLabel("Person")
+        var either = g.Vertices().HasLabel("Person")
             .Or(t => t.Out("KNOWS"),
                t => t.Has("title", "VIP"))
             .ToList();
@@ -205,12 +205,12 @@ public sealed class GremlinCompatGc2Tests : IDisposable
     [Fact]
     public void Traversal_And_requires_every_sub_traversal_to_match()
     {
-        NodeId alice, bob;
+        VertexId alice, bob;
         using (var tx = _db.BeginTransaction())
         {
             alice = AddPerson(tx, "Alice", age: 30);
             bob = AddPerson(tx, "Bob");
-            tx.CreateRelationship(alice, bob, "KNOWS");
+            tx.CreateEdge(alice, bob, "KNOWS");
             // Bob has no outgoing KNOWS edge and no age
             tx.Commit();
         }
@@ -218,7 +218,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         var g = rtx.G(_db.Schema);
 
         // Only Alice has both an outgoing KNOWS edge AND an age property.
-        var both = g.Nodes().HasLabel("Person")
+        var both = g.Vertices().HasLabel("Person")
             .And(t => t.Out("KNOWS"),
                  t => t.Has("age", P.Gte(0)))
             .ToList();
@@ -237,7 +237,7 @@ public sealed class GremlinCompatGc2Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        g.Nodes().HasLabel("Person").IsNull("age").ToList().Should().HaveCount(1);
-        g.Nodes().HasLabel("Person").IsNotNull("age").ToList().Should().HaveCount(1);
+        g.Vertices().HasLabel("Person").IsNull("age").ToList().Should().HaveCount(1);
+        g.Vertices().HasLabel("Person").IsNotNull("age").ToList().Should().HaveCount(1);
     }
 }

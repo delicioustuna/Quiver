@@ -4,7 +4,7 @@ using Quiver.Core;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// VEC-8: per-query loop vs single-snapshot <see cref="InMemoryVectorStore.KnnSearchBatch"/>.
+/// per-query loop vs single-snapshot <see cref="InMemoryVectorStore.KnnSearchBatch"/>.
 /// Sweeps Q (concurrent query count) over a fixed dim=768, N=100k corpus. With
 /// Q increasing, per-query cost should drop because the snapshot is taken once
 /// and the corpus is streamed once.
@@ -30,14 +30,14 @@ public class BatchKnnBenchmarks
         var rng = new Random(31337);
         _store = new InMemoryVectorStore();
         _store.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, new PropertyKeyId(1), Dim,
+            IndexName, EntityKind.Vertex, new PropertyKeyId(1), Dim,
             DistanceMetric.Cosine, "bench"));
 
         var buf = new float[Dim];
         for (int i = 0; i < N; i++)
         {
             for (int d = 0; d < Dim; d++) buf[d] = (float)(rng.NextDouble() * 2.0 - 1.0);
-            _store.SetVector(EntityKind.Node, i, IndexName, buf);
+            _store.SetVector(EntityKind.Vertex, i, IndexName, buf);
         }
 
         _queries = new ReadOnlyMemory<float>[Q];

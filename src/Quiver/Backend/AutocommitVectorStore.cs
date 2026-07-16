@@ -7,7 +7,7 @@ namespace Quiver;
 /// <c>db.Vectors</c> 経由のミューテーションを autocommit tx で包む <see cref="IVectorStore"/>
 /// ラッパ (binary backend 専用)。
 ///
-/// <para>スレッドに書き込み tx が既にアクティブ (<c>WalPageContext.Current != null</c>) なら、その tx へ
+/// <para>スレッドに書き込み tx が既にアクティブ (<c>WalWriteSetContext.Current != null</c>) なら、その tx へ
 /// 直接書く (既存挙動の維持: ユーザ tx 内の <c>SetVector</c> はその tx と原子整合する)。tx 外で
 /// 呼ばれた場合は単一の autocommit tx を張り、グラフ変更と同じ container WAL に乗せて crash-atomic に
 /// 永続化する。読み取り (<see cref="KnnSearch"/> 系) と <see cref="TryGetIndex"/> は下層へ直接委譲する。</para>
@@ -22,8 +22,8 @@ internal sealed class AutocommitVectorStore(IVectorStore underlying, Func<IGraph
 
     private void InTx(Action body)
     {
-        // tx が既にアクティブなら join (二重 tx で ambient WalPageContext を差し替えない)。
-        if (WalPageContext.Current is not null) { body(); return; }
+        // tx が既にアクティブなら join (二重 tx で ambient WalWriteSetContext を差し替えない)。
+        if (WalWriteSetContext.Current is not null) { body(); return; }
         using var tx = _beginTx();
         body();
         tx.Commit();
@@ -39,7 +39,7 @@ internal sealed class AutocommitVectorStore(IVectorStore underlying, Func<IGraph
     public void SetVector(EntityKind kind, long entityId, string indexName, ReadOnlySpan<float> vector)
     {
         // ReadOnlySpan はラムダに捕捉できないため InTx を展開する。
-        if (WalPageContext.Current is not null)
+        if (WalWriteSetContext.Current is not null)
         {
             _underlying.SetVector(kind, entityId, indexName, vector);
             return;

@@ -59,17 +59,17 @@ public sealed class VectorHnswFilteredBatchTests : IDisposable
         const int Dim = 16, N = 500, K = 8, Q = 10;
         var rng = new Random(4242);
 
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
             Dim, DistanceMetric.Cosine, "test", null));
 
         using (var tx = db.BeginTransaction())
         {
             for (int i = 0; i < N; i++)
             {
-                var n = tx.CreateNode("Doc");
-                db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, RandomVec(rng, Dim));
+                var n = tx.CreateVertex("Doc");
+                db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, RandomVec(rng, Dim));
             }
             tx.Commit();
         }
@@ -94,20 +94,20 @@ public sealed class VectorHnswFilteredBatchTests : IDisposable
         var rng = new Random(31415);
         var corpus = new List<float[]>(N);
 
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
             Dim, DistanceMetric.Cosine, "test", null));
 
-        // 全ノードを同一ラベル "Doc" にして候補 = 全件 (低選択率 → HNSW filtered branch)。
+        // 全Vertexを同一ラベル "Doc" にして候補 = 全件 (低選択率 → HNSW filtered branch)。
         using (var tx = db.BeginTransaction())
         {
             for (int i = 0; i < N; i++)
             {
                 var v = RandomVec(rng, Dim);
                 corpus.Add(v);
-                var n = tx.CreateNode("Doc");
-                db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, v);
+                var n = tx.CreateVertex("Doc");
+                db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -119,7 +119,7 @@ public sealed class VectorHnswFilteredBatchTests : IDisposable
         {
             var q = RandomVec(rng, Dim);
             // DSL の FilterByKnn は候補 = HasLabel("Doc") 全件に対する HNSW filtered 検索を通る。
-            var filtered = g.Nodes().HasLabel("Doc")
+            var filtered = g.Vertices().HasLabel("Doc")
                 .FilterByKnn(IndexName, q, K)
                 .ToList()
                 .Select(n => n.Sequence)

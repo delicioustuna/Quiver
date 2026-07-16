@@ -4,7 +4,7 @@ using Quiver.Core;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// VEC-8: gather-then-score vs default oversample-and-filter for
+/// gather-then-score vs default oversample-and-filter for
 /// <see cref="InMemoryVectorStore.KnnSearchFiltered"/>. Sweeps N (index size)
 /// against the candidate-set fraction; gather should dominate when the candidate
 /// set is sparse and converge with the oversample path as it grows.
@@ -34,14 +34,14 @@ public class FilteredKnnBenchmarks
         var rng = new Random(2026);
         _store = new InMemoryVectorStore();
         _store.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, new PropertyKeyId(1), Dim,
+            IndexName, EntityKind.Vertex, new PropertyKeyId(1), Dim,
             DistanceMetric.Cosine, "bench"));
 
         var buf = new float[Dim];
         for (int i = 0; i < N; i++)
         {
             for (int d = 0; d < Dim; d++) buf[d] = (float)(rng.NextDouble() * 2.0 - 1.0);
-            _store.SetVector(EntityKind.Node, i, IndexName, buf);
+            _store.SetVector(EntityKind.Vertex, i, IndexName, buf);
         }
 
         _query = new float[Dim];
@@ -54,7 +54,7 @@ public class FilteredKnnBenchmarks
         while (picked.Count < candidateCount) picked.Add(rng.Next(N));
         int idx = 0;
         foreach (var id in picked) ids[idx++] = id;
-        _candidates = new EntityCandidateSet(EntityKind.Node, ids);
+        _candidates = new EntityCandidateSet(EntityKind.Vertex, ids);
     }
 
     /// <summary>Default oversample-and-filter: invoke the interface helper directly.</summary>
@@ -90,7 +90,7 @@ public class FilteredKnnBenchmarks
         }
     }
 
-    /// <summary>VEC-8 gather-then-score.</summary>
+    /// <summary> gather-then-score.</summary>
     [Benchmark]
     public float Gather()
     {

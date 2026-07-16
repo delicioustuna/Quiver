@@ -15,18 +15,18 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
     private readonly IVectorStore _vectors;
     // db.Vectors の公開面。tx 外のミューテーションを autocommit tx で包む
-    // (tx 内の呼び出しは ambient WalPageContext を検出して join する)。生の _vectors は
+    // (tx 内の呼び出しは ambient WalWriteSetContext を検出して join する)。生の _vectors は
     // access methods / tx 配下 SetVector の委譲先として内部で使い続ける。
     private IVectorStore? _vectorsFacade;
     private readonly PageManager _pageManager;
     private readonly IWriteAheadLog _wal;
-    private readonly VersionedNodeStore _nodeStore;
-    private readonly VersionedRelationshipStore _relStore;
+    private readonly VersionedVertexStore _vertexStore;
+    private readonly VersionedEdgeStore _edgeStore;
     private readonly PropertyStore _propStore;
     private readonly LabelTokenStore _labelTokens;
-    private readonly RelationshipTypeTokenStore _relTypeTokens;
+    private readonly EdgeTypeTokenStore _edgeTypeTokens;
     private readonly PropertyKeyTokenStore _propKeyTokens;
-    private readonly HyperedgeTypeTokenStore _hyperedgeTypeTokens;
+    private readonly NexusTypeTokenStore _nexusTypeTokens;
     private readonly RoleTokenStore _roleTokens;
     private readonly IndexManager _indexManager;
     // AdjacencyBlockStore (V1) または AdjacencyBlockStoreV2 を保持。
@@ -44,21 +44,21 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     // 単一コンテナ (*.quiver) のフルパス。WAL サイドカー = _containerPath + "-wal"。
     private readonly string _containerPath;
     private readonly ILogicalMutationSink? _logicalSink;
-    private readonly RelationshipDeltaHeadStore? _relationshipDeltaHeads;
-    private readonly PersistentRelationshipDeltaStore? _relationshipDeltas;
+    private readonly EdgeDeltaHeadStore? _edgeDeltaHeads;
+    private readonly PersistentEdgeDeltaStore? _edgeDeltas;
 
     internal BinaryGraphStorageBackend(
         string containerPath,
         SingleFileContainer container,
         PageManager pageManager,
         IWriteAheadLog wal,
-        VersionedNodeStore nodeStore,
-        VersionedRelationshipStore relStore,
+        VersionedVertexStore vertexStore,
+        VersionedEdgeStore edgeStore,
         PropertyStore propStore,
         LabelTokenStore labelTokens,
-        RelationshipTypeTokenStore relTypeTokens,
+        EdgeTypeTokenStore edgeTypeTokens,
         PropertyKeyTokenStore propKeyTokens,
-        HyperedgeTypeTokenStore hyperedgeTypeTokens,
+        NexusTypeTokenStore nexusTypeTokens,
         RoleTokenStore roleTokens,
         IndexManager indexManager,
         IAdjacencyBlockStore? adjStore,
@@ -67,9 +67,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         IVectorStore vectors,
         ColumnManager columnManager,
         ICoMembershipBlockStore? coMembershipStore = null,
-        LabelNodeIndex? labelIndex = null,
-        RelationshipDeltaHeadStore? relationshipDeltaHeads = null,
-        PersistentRelationshipDeltaStore? relationshipDeltas = null,
+        LabelVertexIndex? labelIndex = null,
+        EdgeDeltaHeadStore? edgeDeltaHeads = null,
+        PersistentEdgeDeltaStore? edgeDeltas = null,
         ILogicalMutationSink? logicalSink = null,
         TimeSpan? adaptiveTargetRecoveryTime = null,
         long adaptiveMinThresholdBytes = 4L * 1024 * 1024,
@@ -82,32 +82,32 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _vectors = vectors;
         _pageManager = pageManager;
         _wal = wal;
-        _nodeStore = nodeStore;
-        _relStore = relStore;
+        _vertexStore = vertexStore;
+        _edgeStore = edgeStore;
         _propStore = propStore;
         _labelTokens = labelTokens;
-        _relTypeTokens = relTypeTokens;
+        _edgeTypeTokens = edgeTypeTokens;
         _propKeyTokens = propKeyTokens;
-        _hyperedgeTypeTokens = hyperedgeTypeTokens;
+        _nexusTypeTokens = nexusTypeTokens;
         _roleTokens = roleTokens;
         _indexManager = indexManager;
         _adjStore = adjStore;
         _coMembershipStore = coMembershipStore;
-        _relationshipDeltaHeads = relationshipDeltaHeads;
-        _relationshipDeltas = relationshipDeltas;
+        _edgeDeltaHeads = edgeDeltaHeads;
+        _edgeDeltas = edgeDeltas;
         _txManager = txManager;
         _columnManager = columnManager;
 
-        _schema = new SchemaApi(_labelTokens, _relTypeTokens, _propKeyTokens, _indexManager,
-            _hyperedgeTypeTokens, _roleTokens);
+        _schema = new SchemaApi(_labelTokens, _edgeTypeTokens, _propKeyTokens, _indexManager,
+            _nexusTypeTokens, _roleTokens);
         // index manager と label index を DiagnosticsApi に渡して
         // CheckIndexConsistency / RepairIndexes が機能するようにする。
         // TransactionManager を渡し、CurrentCheckpointThresholdBytes /
         // SetCheckpointPolicy をホットスワップ経路として公開する。Adaptive 用パラメタは
         // factory で既知の options 値を持つので、後段で AttachAdaptiveDefaults により上書き可能。
         _diagnostics = new DiagnosticsApi(
-            _nodeStore, _relStore, access,
-            _txManager.HyperedgeStore, _txManager.IncidenceStore, _txManager.NodeIncidenceHeadStore,
+            _vertexStore, _edgeStore, access,
+            _txManager.NexusStore, _txManager.IncidenceStore, _txManager.VertexIncidenceHeadStore,
             _indexManager, labelIndex, _txManager,
             adaptiveTargetRecoveryTime,
             adaptiveMinThresholdBytes,
@@ -117,10 +117,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _bulkLoad = new BulkLoadCapabilities
         {
             BeginBinaryBulkLoad = buildAdjacencyIndex => new BulkLoader(
-                _nodeStore, _relStore, _propStore,
+                _vertexStore, _edgeStore, _propStore,
                 buildAdjacencyIndex ? _container : null),
             BeginStreamingBinaryBulkLoad = buildAdjacencyIndex => new StreamingBulkLoader(
-                _nodeStore, _relStore, _propStore,
+                _vertexStore, _edgeStore, _propStore,
                 buildAdjacencyIndex ? _container : null),
         };
     }
@@ -130,7 +130,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
     /// <summary>
     /// テスト専用 (torn-commit crash 再現): 全データページ + B+Tree 索引を fsync する
-    /// (WAL truncate なし)。これにより未 checkpoint の committed データ (Suppressed FT leaf 含む) を
+    /// (WAL truncate なし)。これにより未 checkpoint の committed データを
     /// disk へ落とし、Commit レコードだけ欠けた torn-commit の「body 保持」状態を決定論的に作れる。
     /// </summary>
     internal void FlushDataPagesForTest()
@@ -198,7 +198,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         var tx = _txManager.Begin(IsolationLevel.SnapshotIsolation);
         try
         {
-            _ = tx.Relationships.Read(new RelationshipId(0)); // MvccContext を activate
+            _ = tx.Edges.Read(new EdgeId(0)); // MvccContext を activate
             return col.ProjectSum(MvccContext.CurrentSnapshot, MvccContext.CurrentTxId, MvccContext.CurrentCommitted!);
         }
         finally { tx.Dispose(); }
@@ -210,11 +210,11 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
     // 整合性テストは公開 API では作れない破損を明示的に注入する必要がある。
     // ストア実体だけを internal に露出し、通常の利用者が物理レコードを変更する経路にはしない。
-    internal IHyperedgeStore HyperedgeStoreForTest => _txManager.HyperedgeStore;
+    internal INexusStore NexusStoreForTest => _txManager.NexusStore;
     internal IIncidenceStore IncidenceStoreForTest => _txManager.IncidenceStore;
     internal long CoMembershipReadCountForTest
         => (_coMembershipStore as CoMembershipBlockStore)?.ReadCount ?? 0;
-    internal INodeIncidenceHeadStore NodeIncidenceHeadStoreForTest => _txManager.NodeIncidenceHeadStore;
+    internal IVertexIncidenceHeadStore VertexIncidenceHeadStoreForTest => _txManager.VertexIncidenceHeadStore;
     public IGraphAccessMethods Access => _access;
     public BulkLoadCapabilities BulkLoad => _bulkLoad;
     public IVectorStore Vectors => _vectorsFacade ??= new AutocommitVectorStore(
@@ -224,8 +224,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     {
         var inner = _txManager.Begin(level);
         return new GraphTransaction(
-            inner, _labelTokens, _relTypeTokens, _propKeyTokens,
-            _hyperedgeTypeTokens, _roleTokens,
+            inner, _labelTokens, _edgeTypeTokens, _propKeyTokens,
+            _nexusTypeTokens, _roleTokens,
             readOnly,
             readOnly ? null : _logicalSink,
             _columnManager,
@@ -233,9 +233,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     }
 
     /// <summary>
-    /// イミュータブルな base 隣接ビューを現在のリレーションシップストアから再構築し、
+    /// イミュータブルな base 隣接ビューを現在のEdgeストアから再構築し、
     /// tombstone を除去して epoch を進める。呼び出し後、すべての生存エッジは base から供給され、
-    /// 新しいリレーションシップが作成されるまで delta 走査は何も返さない。
+    /// 新しいEdgeが作成されるまで delta 走査は何も返さない。
     ///
     /// 呼び出し元はアクティブなトランザクションが無いことを保証すること。
     /// </summary>
@@ -246,42 +246,42 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
                 "CompactAdjacency requires no active transactions.");
         PayloadLaneSpec? payloadSpec = (_adjStore as IAdjacencyPayloadView)?.PayloadSpec;
 
-        // 現在の adj ファイルを壊す前に生存 rels (id, src, tgt, type) をスナップショットする。
-        // IRelationshipStore.Scan はストア順で id を返し、各読み出しがアクティブページから
+        // 現在の adj ファイルを壊す前に生存 edges (id, src, tgt, type) をスナップショットする。
+        // IEdgeStore.Scan はストア順で id を返し、各読み出しがアクティブページから
         // src/tgt/type を取得する。
         var live = new List<(long Id, long Src, long Tgt, int TypeId)>();
         long maxId = -1;
-        foreach (var relId in _relStore.Scan())
+        foreach (var edgeId in _edgeStore.Scan())
         {
-            var r = _relStore.Read(relId);
+            var r = _edgeStore.Read(edgeId);
             // 隣接ビルドへ渡す id は Sequence (packed Value ではない)。
-            live.Add((relId.Sequence, r.Source.Sequence, r.Target.Sequence, r.Type.Value));
-            if (relId.Sequence > maxId) maxId = relId.Sequence;
+            live.Add((edgeId.Sequence, r.Source.Sequence, r.Target.Sequence, r.Type.Value));
+            if (edgeId.Sequence > maxId) maxId = edgeId.Sequence;
         }
-        long newBaseHwm = maxId + 1; // リレーションシップが無ければ 0 — "no base" と一致
+        long newBaseHwm = maxId + 1; // Edgeが無ければ 0 — "no base" と一致
         Dictionary<long, long>? weights = null;
         if (payloadSpec is { } payload)
         {
             weights = CaptureExistingPayloads(live);
             foreach (var (id, _, _, _) in live)
             {
-                var relId = new RelationshipId(id);
-                if (TryReadPayload(relId, payload, out long raw))
-                    weights[relId.Sequence] = raw;
+                var edgeId = new EdgeId(id);
+                if (TryReadPayload(edgeId, payload, out long raw))
+                    weights[edgeId.Sequence] = raw;
             }
         }
 
-        long nodeHwm = 0;
+        long vertexHwm = 0;
         foreach (var (_, src, tgt, _) in live)
         {
-            if (src + 1 > nodeHwm) nodeHwm = src + 1;
-            if (tgt + 1 > nodeHwm) nodeHwm = tgt + 1;
+            if (src + 1 > vertexHwm) vertexHwm = src + 1;
+            if (tgt + 1 > vertexHwm) vertexHwm = tgt + 1;
         }
 
         var adjData = _container.OpenTenant(AdjacencyContainer.DataTenant, PageKind.AdjacencyBlock);
         var adjIdx = _container.OpenTenant(AdjacencyContainer.IndexTenant, PageKind.Header);
 
-        // compact は導出ビューの再構築であり、正本は relationship store にある。
+        // compact は導出ビューの再構築であり、正本は edge store にある。
         // 先に descriptor を無効化して durable 化しておくと、以降の crash/reopen は
         // 部分的な adjacency view を開かず、row path へ安全にフォールバックできる。
         if (_adjStore is IDisposable old) old.Dispose();
@@ -291,12 +291,12 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _container.Flush();
         CompactAdjacencyPhaseInjector?.Invoke(CompactAdjacencyPhase.AfterDescriptorInvalidated);
 
-        // 隣接インデックスをその場で再構築する。Build は論理ノード ID ごとに 1 エントリを持つ前提なので
-        // nodeHwm を要求する。バルクロード後はこれ以外の情報が無いため、観測した src/tgt の最大値 + 1 を使う。
+        // 隣接インデックスをその場で再構築する。Build は論理Vertex ID ごとに 1 エントリを持つ前提なので
+        // vertexHwm を要求する。バルクロード後はこれ以外の情報が無いため、観測した src/tgt の最大値 + 1 を使う。
         if (payloadSpec is { } compactSpec)
-            AdjacencyBlockStoreV2.Build(adjData, adjIdx, live, weights ?? [], nodeHwm, compactSpec, writeDescriptor: false);
+            AdjacencyBlockStoreV2.Build(adjData, adjIdx, live, weights ?? [], vertexHwm, compactSpec, writeDescriptor: false);
         else
-            AdjacencyBlockStore.Build(adjData, adjIdx, live, nodeHwm, writeDescriptor: false);
+            AdjacencyBlockStore.Build(adjData, adjIdx, live, vertexHwm, writeDescriptor: false);
         CompactAdjacencyPhaseInjector?.Invoke(CompactAdjacencyPhase.AfterRebuild);
 
         // epoch メタデータをリセットして再オープン。ResetAfterCompact は epoch カウンタを
@@ -305,9 +305,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         var epochTenant = _container.OpenTenant(AdjacencyContainer.EpochTenant, PageKind.Header);
         AdjacencyEpoch newEpoch = AdjacencyEpoch.Open(epochTenant);
         newEpoch.ResetAfterCompact(newBaseHwm);
-        _relationshipDeltas?.Reset();
-        _relationshipDeltaHeads?.ReloadMeta();
-        _relationshipDeltas?.ReloadMeta();
+        _edgeDeltas?.Reset();
+        _edgeDeltaHeads?.ReloadMeta();
+        _edgeDeltas?.ReloadMeta();
         AdjacencyContainer.WriteDescriptor(
             adjData,
             payloadSpec is { } ? AdjacencyContainer.KindV2 : AdjacencyContainer.KindV1,
@@ -322,16 +322,16 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _txManager.SwapAdjacencyStore(newStore);
     }
 
-    private bool TryReadPayload(RelationshipId relId, PayloadLaneSpec spec, out long raw)
+    private bool TryReadPayload(EdgeId edgeId, PayloadLaneSpec spec, out long raw)
     {
         var keyId = new PropertyKeyId(spec.PropertyKeyId);
-        if (_relStore.TryGetInlineProperty(relId, keyId, out var inlineValue) &&
+        if (_edgeStore.TryGetInlineProperty(edgeId, keyId, out var inlineValue) &&
             TryEncodePayload(in inlineValue, spec, out raw))
         {
             return true;
         }
 
-        var firstPropId = _relStore.Read(relId).FirstPropertyId;
+        var firstPropId = _edgeStore.Read(edgeId).FirstPropertyId;
         var propEnum = _propStore.Enumerate(firstPropId);
         while (propEnum.MoveNext())
         {
@@ -360,12 +360,12 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             if (!seenSources.Add(src))
                 continue;
 
-            using var cursor = _adjStore.OpenCursor(new NodeId(src), Direction.Outgoing, null);
+            using var cursor = _adjStore.OpenCursor(new VertexId(src), Direction.Outgoing, null);
             while (cursor.MoveNext())
             {
-                var relId = cursor.Relationship;
-                if (!_adjStore.IsTombstoned(relId))
-                    result[relId.Sequence] = cursor.WeightRaw;
+                var edgeId = cursor.Edge;
+                if (!_adjStore.IsTombstoned(edgeId))
+                    result[edgeId.Sequence] = cursor.WeightRaw;
             }
         }
 
@@ -408,37 +408,34 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     ///     並行 writer は同一ページが衝突するときだけ短い待ち時間を経験する (block しない)。
     ///  3. トークン / 隣接 / .fileKinds / .idxmeta などの非ページファイルを <see cref="File.Copy"/> で複製。
     ///     これらはいずれも <c>FileShare.Read</c> 以上で開かれているため外部から並行読みできる。
-    ///  4. WAL を <see cref="IWriteAheadLog.FlushTo"/> で末尾までフラッシュしてから wal/*.log を複製。
-    ///     データファイルを先に取って WAL を後に取る順序は重要: 並行 in-flight tx が <c>PinForWrite</c>
-    ///     で吐く CompensationLogRecord (before-image) は <b>即時 WAL 追記</b>される (案 C の FlushPending
-    ///     が後段でまとめる PageImage と異なる) ため、データコピー中にバッファ pool eviction で
-    ///     uncommitted modification が target のデータファイルへ漏れたとしても、WAL コピーは必ず
-    ///     その CLR を含み、target recovery の Pass 3 undo が正しく巻き戻せる。
+    ///  4. WAL を <see cref="IWriteAheadLog.FlushTo"/> で末尾までフラッシュしてから単一 WAL を複製。
+    ///     データファイルを先に取り、WAL を後に取ることで、コピー中に完了した Commit とその PageImage を
+    ///     コピー先の recovery が観測できる。Commit を持たない transaction の PageImage は適用されない。
     ///
     /// target の recovery 後 LSN は snapshot WAL 末尾 LSN まで進む。
     /// </summary>
     /// <summary>
-    /// ノードストアの dead version 物理回収 + committed registry の prune。
+    /// vertex store の dead version 物理回収 + committed registry の prune。
     /// アクティブトランザクションが残っているときは安全側で何もせず Skip 報告する。
     /// </summary>
     public VacuumReport Vacuum(VacuumOptions? options = null)
     {
         // WAL を渡して、dead version 回収後の末尾連続 free page を物理 truncate する。
         // WAL の FileTruncate レコード経由で crash recovery に対する冪等再生を保証する。
-        // hyperedge / incidence / node-incidence-head の実体は transaction 配線側が保持するため、
-        // そこから取り出して hyperedge 回収を有効にする (backend は直接参照を持たない)。
+        // nexus / incidence / vertex-incidence-head の実体は transaction 配線側が保持するため、
+        // そこから取り出して nexus 回収を有効にする (backend は直接参照を持たない)。
         var vac = new Vacuum(
-            _nodeStore, _relStore, _propStore,
+            _vertexStore, _edgeStore, _propStore,
             _txManager, _txManager.CommittedRegistry, _wal, _columnManager,
-            _txManager.HyperedgeStore as VersionedHyperedgeStore,
+            _txManager.NexusStore as VersionedNexusStore,
             _txManager.IncidenceStore as IncidenceStore,
-            _txManager.NodeIncidenceHeadStore);
+            _txManager.VertexIncidenceHeadStore);
         VacuumReport report = vac.Run(options);
         // vacuum は正本の incidence slot を回収する。導出ビューは active transaction が
         // 無い同じ境界で作り直し、論理削除や abort 由来の無効 entry をまとめて除去する。
         if (_txManager.ActiveCount == 0)
             _coMembershipStore?.Rebuild(
-                _txManager.HyperedgeStore,
+                _txManager.NexusStore,
                 _txManager.IncidenceStore);
         return report;
     }
@@ -528,9 +525,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         if (_adjStore is IDisposable d) d.Dispose();
         _indexManager.Dispose();
         _labelTokens.Dispose();
-        _relTypeTokens.Dispose();
+        _edgeTypeTokens.Dispose();
         _propKeyTokens.Dispose();
-        _hyperedgeTypeTokens.Dispose();
+        _nexusTypeTokens.Dispose();
         _roleTokens.Dispose();
         // WAL を dispose する前にデータファイルを flush する。PagedFile.Flush() は
         // write-ahead 順序 (WAL→データ) に従うため、page manager がダーティフレームを

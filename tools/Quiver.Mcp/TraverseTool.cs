@@ -10,12 +10,12 @@
 //
 // ■ PropertyValue の ref struct 制約
 //   Quiver の PropertyValue は ref struct であり、ラムダキャプチャや
-//   コレクション格納ができない。そのため ReadNode / PassesFilter では
-//   値を即座にコピーして PathNode (sealed record) に詰め替えている。
+//   コレクション格納ができない。そのため ReadVertex / PassesFilter では
+//   値を即座にコピーして PathVertex (sealed record) に詰め替えている。
 //   文字列は Utf8StringValue (ReadOnlySpan<byte>) なので都度 UTF-8 デコードが必要。
 //
 // ■ パス展開戦略
-//   各 hop でパス (List<PathNode>) を分岐コピーする BFS 方式。
+//   各 hop でパス (List<PathVertex>) を分岐コピーする BFS 方式。
 //   最大 2-hop かつ MCP の result limit があるため、メモリ爆発リスクは許容範囲。
 
 using System.ComponentModel;
@@ -35,18 +35,18 @@ internal static class TraverseTool
 {
     [McpServerTool(Name = "traverse"), Description(
         "Search and traverse the graph. " +
-        "Start from nodes found by fulltext/vector/label/id, then optionally follow edges (up to 2 hops).")]
+        "Start from vertices found by fulltext/vector/label/id, then optionally follow edges (up to 2 hops).")]
     public static async Task<string> Execute(
         McpContext ctx,
-        [Description("How to find start nodes: fulltext, vector, label, or id")]
+        [Description("How to find start vertices: fulltext, vector, label, or id")]
         string startType,
         [Description("Search text (required for fulltext and vector)")]
         string? query = null,
-        [Description("Filter by node label")]
+        [Description("Filter by vertex label")]
         string? label = null,
-        [Description("Comma-separated node IDs (for id lookup)")]
+        [Description("Comma-separated vertex IDs (for id lookup)")]
         string? ids = null,
-        [Description("Max start nodes to retrieve (default 10)")]
+        [Description("Max start vertices to retrieve (default 10)")]
         int? startLimit = null,
         [Description("Edge type for first hop")]
         string? hop1Edge = null,
@@ -103,36 +103,36 @@ internal static class TraverseTool
         var db = ctx.Db;
         var allPropKeys = db.Schema.ListPropertyKeys();
 
-        // 起点ノードを解決 (vector の場合は embedding API 呼び出しがあるため async)
-        var startNodes = await ResolveStartNodes(start, db, ctx.Embedder);
+        // 起点Vertexを解決 (vector の場合は embedding API 呼び出しがあるため async)
+        var startVertices = await ResolveStartVertices(start, db, ctx.Embedder);
 
         using var tx = db.BeginReadOnlyTransaction();
         var wantedProps = wantedPropsList ?? allPropKeys.ToList();
 
-        // 起点ノードそれぞれを「長さ 1 のパス」として初期化
-        var paths = startNodes
-            .Select(n => new List<PathNode> { ReadNode(n, tx, db.Schema, wantedProps) })
+        // 起点Vertexそれぞれを「長さ 1 のパス」として初期化
+        var paths = startVertices
+            .Select(n => new List<PathVertex> { ReadVertex(n, tx, db.Schema, wantedProps) })
             .ToList();
 
-        // 各 hop でパスを伸長する (BFS: 全既存パスの末端から隣接ノードへ分岐)
+        // 各 hop でパスを伸長する (BFS: 全既存パスの末端から隣接Vertexへ分岐)
         foreach (var hop in hops)
             paths = ExecuteHop(paths, hop, tx, db.Schema, wantedProps);
 
         int limit = returnLimit ?? 100;
 
-        // path モード: 経由ノード含む完全パスを返す
+        // path モード: 経由Vertex含む完全パスを返す
         if (returnMode == "path")
         {
             var result = paths
                 .Take(limit)
                 .Select(p => new JsonObject
                 {
-                    ["path"] = new JsonArray(p.Select(NodeToJson).ToArray())
+                    ["path"] = new JsonArray(p.Select(VertexToJson).ToArray())
                 })
                 .ToList();
             return JsonSerializer.Serialize(result, TraverseJsonContext.Default.ListJsonObject);
         }
-        // terminal モード (既定): 末端ノードのみ重複排除して返す
+        // terminal モード (既定): 末端Vertexのみ重複排除して返す
         else
         {
             var seen = new HashSet<long>();
@@ -143,7 +143,7 @@ internal static class TraverseTool
                 var terminal = path[^1];
                 if (seen.Add(terminal.Id))
                 {
-                    result.Add(NodeToJson(terminal));
+                    result.Add(VertexToJson(terminal));
                     if (result.Count >= limit) break;
                 }
             }
@@ -157,12 +157,12 @@ internal static class TraverseTool
         return JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
     }
 
-    // ── 起点ノード解決 ──────────────────────────────────────
+    // ── 起点Vertex解決 ──────────────────────────────────────
 
     // startType に応じて Quiver の検索 API を使い分ける。
     // LLM は type を指定するだけで、内部で機械的に適切な API に変換する。
-    private static async Task<List<NodeId>> ResolveStartNodes(
-        StartSpec start, GraphDatabase db, OpenAiEmbedder? embedder)
+    private static async Task<List<VertexId>> ResolveStartVertices(
+        StartSpec start, QuiverDatabase db, OpenAiEmbedder? embedder)
     {
         var type = start.Type?.ToLowerInvariant() ?? "label";
         int limit = start.Limit ?? 10;
@@ -193,7 +193,7 @@ internal static class TraverseTool
             }
             case "label":
             {
-                var traversal = g.Nodes();
+                var traversal = g.Vertices();
                 if (!string.IsNullOrEmpty(start.Label))
                     traversal = traversal.HasLabel(start.Label);
                 traversal = ApplyTraversalFilters(traversal, start.Filter);
@@ -204,8 +204,8 @@ internal static class TraverseTool
                 if (start.Ids is null or { Count: 0 })
                     throw new ArgumentException("'ids' is required for id lookup.");
                 return start.Ids
-                    .Select(id => new NodeId(long.Parse(id)))
-                    .Where(tx.NodeExists)
+                    .Select(id => new VertexId(long.Parse(id)))
+                    .Where(tx.VertexExists)
                     .ToList();
             }
             default:
@@ -216,35 +216,35 @@ internal static class TraverseTool
 
     // ── Hop 実行 ────────────────────────────────────────────
 
-    // 全パスの末端ノードからエッジを辿り、フィルタを通過した隣接ノードで新しいパスを生成する。
-    // RelationshipReadHandle から Source/Target を取り出し、
-    // 現在ノード側でない方を隣接ノードとみなす (both 方向対応)。
-    private static List<List<PathNode>> ExecuteHop(
-        List<List<PathNode>> paths, HopSpec hop,
+    // 全パスの末端Vertexからエッジを辿り、フィルタを通過した隣接Vertexで新しいパスを生成する。
+    // EdgeReadHandle から Source/Target を取り出し、
+    // 現在Vertex側でない方を隣接Vertexとみなす (both 方向対応)。
+    private static List<List<PathVertex>> ExecuteHop(
+        List<List<PathVertex>> paths, HopSpec hop,
         IGraphTransaction tx, ISchemaApi schema, List<string> wantedProps)
     {
         var direction = ParseDirection(hop.Direction);
-        var result = new List<List<PathNode>>();
+        var result = new List<List<PathVertex>>();
 
         foreach (var path in paths)
         {
             var current = path[^1];
-            var nodeId = new NodeId(current.Id);
-            var rels = tx.EnumerateRelationships(nodeId, direction, hop.Edge);
+            var vertexId = new VertexId(current.Id);
+            var edges = tx.EnumerateEdges(vertexId, direction, hop.Edge);
 
-            while (rels.MoveNext())
+            while (edges.MoveNext())
             {
-                var rel = rels.Current;
-                // both 方向の場合、Source/Target のうち自分でない方が隣接ノード
-                var neighbor = rel.Source == nodeId ? rel.Target : rel.Source;
+                var edge = edges.Current;
+                // both 方向の場合、Source/Target のうち自分でない方が隣接Vertex
+                var neighbor = edge.Source == vertexId ? edge.Target : edge.Source;
 
                 if (!PassesFilter(neighbor, hop.Filter, tx))
                     continue;
 
-                // パスをコピーして隣接ノードを追加 (BFS 分岐)
-                var newPath = new List<PathNode>(path)
+                // パスをコピーして隣接Vertexを追加 (BFS 分岐)
+                var newPath = new List<PathVertex>(path)
                 {
-                    ReadNode(neighbor, tx, schema, wantedProps)
+                    ReadVertex(neighbor, tx, schema, wantedProps)
                 };
                 result.Add(newPath);
             }
@@ -258,14 +258,14 @@ internal static class TraverseTool
     // フィルタは { "propKey": value } (eq 省略形) または { "propKey": { "op": value } } 形式。
     // PropertyValue は ref struct なので、この関数の呼び出しスコープ内で値を消費し切る必要がある。
     private static bool PassesFilter(
-        NodeId nodeId, Dictionary<string, JsonElement>? filter, IGraphTransaction tx)
+        VertexId vertexId, Dictionary<string, JsonElement>? filter, IGraphTransaction tx)
     {
         if (filter is null or { Count: 0 }) return true;
 
         foreach (var (key, ops) in filter)
         {
-            if (!tx.HasProperty(nodeId, key)) return false;
-            var value = tx.GetProperty(nodeId, key);
+            if (!tx.HasProperty(vertexId, key)) return false;
+            var value = tx.GetProperty(vertexId, key);
 
             if (ops.ValueKind == JsonValueKind.Object)
             {
@@ -344,9 +344,9 @@ internal static class TraverseTool
     // ── Gremlin トラバーサルへのフィルタ適用 ────────────────
 
     // label 検索の場合のみ、Quiver の Gremlin 風 API (Has + P 述語) を直接使う。
-    // hop のフィルタは PassesFilter でノード単位に評価する (Gremlin API は使わない)。
-    private static GraphTraversal<NodeId> ApplyTraversalFilters(
-        GraphTraversal<NodeId> traversal, Dictionary<string, JsonElement>? filter)
+    // hop のフィルタは PassesFilter でVertex単位に評価する (Gremlin API は使わない)。
+    private static GraphTraversal<VertexId> ApplyTraversalFilters(
+        GraphTraversal<VertexId> traversal, Dictionary<string, JsonElement>? filter)
     {
         if (filter is null) return traversal;
 
@@ -365,8 +365,8 @@ internal static class TraverseTool
         return traversal;
     }
 
-    private static GraphTraversal<NodeId> ApplySingleFilter(
-        GraphTraversal<NodeId> traversal, string key, string op, JsonElement value)
+    private static GraphTraversal<VertexId> ApplySingleFilter(
+        GraphTraversal<VertexId> traversal, string key, string op, JsonElement value)
     {
         // JsonElement の型を見て適切な Has オーバーロードに振り分ける。
         // int64 → double のフォールバックにより、数値は整数優先で解釈される。
@@ -399,25 +399,25 @@ internal static class TraverseTool
         };
     }
 
-    // ── ノード読み取り・JSON 変換 ───────────────────────────
+    // ── Vertex読み取り・JSON 変換 ───────────────────────────
 
     // PropertyValue は ref struct のため、値を即座に object にコピーする。
     // EnumerateProperties (PropertyKeyId 逆引き不要) ではなく、
     // キー名指定の HasProperty/GetProperty を使うことで、欲しいプロパティだけを取得する。
-    private static PathNode ReadNode(
-        NodeId nodeId, IGraphTransaction tx, ISchemaApi schema, List<string> wantedProps)
+    private static PathVertex ReadVertex(
+        VertexId vertexId, IGraphTransaction tx, ISchemaApi schema, List<string> wantedProps)
     {
-        var label = tx.GetNodeLabel(nodeId) ?? "";
+        var label = tx.GetVertexLabel(vertexId) ?? "";
         var props = new Dictionary<string, object?>();
 
         foreach (var key in wantedProps)
         {
-            if (!tx.HasProperty(nodeId, key)) continue;
-            var pv = tx.GetProperty(nodeId, key);
+            if (!tx.HasProperty(vertexId, key)) continue;
+            var pv = tx.GetProperty(vertexId, key);
             props[key] = ExtractValue(pv);
         }
 
-        return new PathNode(nodeId.Value, label, props);
+        return new PathVertex(vertexId.Value, label, props);
     }
 
     // ref struct → boxed object への変換。文字列は UTF-8 バイト列からデコードする。
@@ -431,14 +431,14 @@ internal static class TraverseTool
         _ => null,
     };
 
-    private static JsonObject NodeToJson(PathNode node)
+    private static JsonObject VertexToJson(PathVertex vertex)
     {
         var obj = new JsonObject
         {
-            ["id"] = node.Id.ToString(),
-            ["label"] = node.Label,
+            ["id"] = vertex.Id.ToString(),
+            ["label"] = vertex.Label,
         };
-        foreach (var (key, val) in node.Properties)
+        foreach (var (key, val) in vertex.Properties)
         {
             obj[key] = val switch
             {
@@ -486,9 +486,9 @@ internal static class TraverseTool
             : throw new InvalidOperationException("No vector index found.");
     }
 
-    // hop 間で受け渡すノード情報。ref struct の PropertyValue を保持できないため、
+    // hop 間で受け渡すVertex情報。ref struct の PropertyValue を保持できないため、
     // 値は object にコピー済み。
-    private sealed record PathNode(long Id, string Label, Dictionary<string, object?> Properties);
+    private sealed record PathVertex(long Id, string Label, Dictionary<string, object?> Properties);
 }
 
 // ── 内部モデル ──────────────────────────────────────────────

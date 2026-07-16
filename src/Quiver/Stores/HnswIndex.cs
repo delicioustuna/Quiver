@@ -9,7 +9,7 @@ namespace Quiver.Storage.Records;
 /// 1 つのベクトルインデックスの HNSW (Hierarchical Navigable Small World) ANN 索引。
 /// グラフ構造を container テナントのページに永続化し (再起動跨ぎで再現)、in-memory 隣接キャッシュ
 /// (open 時にページから rebuild) を read 経路に使う。書き込みはページ write-through で、container の
-/// 単一物理 PagedFile を経由するため、アクティブ tx の WalPageContext 下なら WAL/ARIES に乗り
+/// 単一物理 PagedFile を経由するため、アクティブ tx の WalWriteSetContext 下なら page-WAL に乗り
 /// abort/crash でグラフ構造ごと巻き戻る。
 ///
 /// <para><b>ページレイアウト</b>:</para>
@@ -31,7 +31,7 @@ internal sealed class HnswIndex
     private const int MetaMaxLevel = 8;       // i32
     private const int MetaCount = 12;         // i64
     private const int MetaMaxSeq = 20;        // i64 (scan 上限)
-    private const int MetaFormatVersion = 31; // byte
+    private const int MetaFamilyVersion = 31; // byte
 
     private readonly IPagedFile _file;
     private readonly VectorPayloadStore _payload;
@@ -84,7 +84,7 @@ internal sealed class HnswIndex
         }
         else
         {
-            CheckFormatVersion();
+            CheckFamilyVersion();
             LoadMeta();
             RebuildFromPages();
         }
@@ -654,12 +654,12 @@ internal sealed class HnswIndex
         _maxSeq = BinaryPrimitives.ReadInt64LittleEndian(h.Data[MetaMaxSeq..]);
     }
 
-    private void CheckFormatVersion()
+    private void CheckFamilyVersion()
     {
         using var h = _file.PinForRead(HeaderPageId);
-        byte v = h.Data[MetaFormatVersion];
-        if (v != FormatVersion.Current)
-            throw new FormatVersionMismatchException("hnsw", v, FormatVersion.Current);
+        byte v = h.Data[MetaFamilyVersion];
+        if (v != StorageFormatVersion.Current)
+            throw new StorageFormatMismatchException("hnsw", v, StorageFormatVersion.Current);
     }
 
     private void SaveMeta(bool initialise = false)
@@ -669,6 +669,6 @@ internal sealed class HnswIndex
         BinaryPrimitives.WriteInt32LittleEndian(ph.Data[MetaMaxLevel..], _maxLevel);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaCount..], _count);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaMaxSeq..], _maxSeq);
-        if (initialise) ph.Data[MetaFormatVersion] = FormatVersion.Current;
+        if (initialise) ph.Data[MetaFamilyVersion] = StorageFormatVersion.Current;
     }
 }

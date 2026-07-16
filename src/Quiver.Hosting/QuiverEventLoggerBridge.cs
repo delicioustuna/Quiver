@@ -8,7 +8,7 @@ namespace Quiver.Hosting;
 /// Quiver core の process-wide EventSource イベントを Microsoft.Extensions.Logging へ転送する。
 /// </summary>
 /// <remarks>
-/// EventSource 自体がプロセス単位なので、イベントは特定の <c>GraphDatabase</c> インスタンスには
+/// EventSource 自体がプロセス単位なので、イベントは特定の <c>QuiverDatabase</c> インスタンスには
 /// ルーティングされない。通常の Generic Host 構成では本 listener を 1 個だけ生成する。
 /// </remarks>
 internal sealed class QuiverEventLoggerBridge : EventListener

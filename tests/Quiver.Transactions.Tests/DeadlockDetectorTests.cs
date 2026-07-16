@@ -100,35 +100,35 @@ public class DeadlockDetectorTests
     [Fact]
     public void Cross_lock_manager_deadlock_is_detected()
     {
-        // tx1 が nodeLocks(10) を hold + relLocks(20) を待機、tx2 が relLocks(20) を hold + nodeLocks(10) を待機。
+        // tx1 が vertexLocks(10) を hold + edgeLocks(20) を待機、tx2 が edgeLocks(20) を hold + vertexLocks(10) を待機。
         // 両者が同一 LockManager に居ない deadlock を検出する。
-        var nodeLocks = new LockManager();
-        var relLocks = new LockManager();
+        var vertexLocks = new LockManager();
+        var edgeLocks = new LockManager();
         var tx1 = new TransactionId(1);
         var tx2 = new TransactionId(2);
 
-        nodeLocks.TryAcquire(10L, tx1, LockMode.Exclusive, LongTimeout).Should().BeTrue();
-        relLocks.TryAcquire(20L, tx2, LockMode.Exclusive, LongTimeout).Should().BeTrue();
+        vertexLocks.TryAcquire(10L, tx1, LockMode.Exclusive, LongTimeout).Should().BeTrue();
+        edgeLocks.TryAcquire(20L, tx2, LockMode.Exclusive, LongTimeout).Should().BeTrue();
 
         Exception? tx1Ex = null, tx2Ex = null;
         var ready = new CountdownEvent(2);
         var t1 = new Thread(() =>
         {
             ready.Signal();
-            try { relLocks.TryAcquire(20L, tx1, LockMode.Exclusive, LongTimeout); }
-            catch (Exception ex) { tx1Ex = ex; nodeLocks.ReleaseAll(tx1); relLocks.ReleaseAll(tx1); }
+            try { edgeLocks.TryAcquire(20L, tx1, LockMode.Exclusive, LongTimeout); }
+            catch (Exception ex) { tx1Ex = ex; vertexLocks.ReleaseAll(tx1); edgeLocks.ReleaseAll(tx1); }
         });
         var t2 = new Thread(() =>
         {
             ready.Signal();
-            try { nodeLocks.TryAcquire(10L, tx2, LockMode.Exclusive, LongTimeout); }
-            catch (Exception ex) { tx2Ex = ex; nodeLocks.ReleaseAll(tx2); relLocks.ReleaseAll(tx2); }
+            try { vertexLocks.TryAcquire(10L, tx2, LockMode.Exclusive, LongTimeout); }
+            catch (Exception ex) { tx2Ex = ex; vertexLocks.ReleaseAll(tx2); edgeLocks.ReleaseAll(tx2); }
         });
         t1.Start(); t2.Start();
         ready.Wait();
         Thread.Sleep(100);
 
-        using var detector = new DeadlockDetector(new[] { nodeLocks, relLocks }, TimeSpan.FromHours(1));
+        using var detector = new DeadlockDetector(new[] { vertexLocks, edgeLocks }, TimeSpan.FromHours(1));
         int aborted = detector.RunOnce();
 
         t1.Join(TimeSpan.FromSeconds(5)).Should().BeTrue();

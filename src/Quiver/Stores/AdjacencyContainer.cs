@@ -5,7 +5,7 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// 隣接ブロックストア (V1 / V2) + その node→firstPageId 索引 + epoch メタを、
+/// 隣接ブロックストア (V1 / V2) + その vertex→firstPageId 索引 + epoch メタを、
 /// 旧来の <c>adj.db</c> / <c>adj_idx.dat</c> / <c>adj_v2.*</c> / <c>adj.epoch</c> サイドカー群から
 /// 単一 <c>graph.quiver</c> コンテナ内のテナントへ移すための共有レイアウトヘルパ。
 ///
@@ -13,9 +13,9 @@ namespace Quiver.Storage.Records;
 /// <list type="bullet">
 ///   <item><see cref="DataTenant"/> = ブロックページ。論理 page 1 に記述子 (V1/V2 種別 + payload spec)、
 ///     論理 page 2+ に隣接ブロック。</item>
-///   <item><see cref="IndexTenant"/> = NodeId → 先頭ブロック論理 PageId の int64 配列。
+///   <item><see cref="IndexTenant"/> = VertexId → 先頭ブロック論理 PageId の int64 配列。
 ///     論理 page 1 に entryCount、論理 page 2+ に int64 エントリ (1 ページ 1020 件)。</item>
-///   <item><see cref="EpochTenant"/> = <see cref="AdjacencyEpoch"/> (epoch / baseRelHwm / tombstones)。</item>
+///   <item><see cref="EpochTenant"/> = <see cref="AdjacencyEpoch"/> (epoch / baseEdgeHwm / tombstones)。</item>
 /// </list>
 /// </summary>
 internal static class AdjacencyContainer
@@ -34,7 +34,7 @@ internal static class AdjacencyContainer
     public static void Build(
         SingleFileContainer container,
         IReadOnlyList<(long Id, long Src, long Tgt, int TypeId)> relData,
-        long nodeHwm,
+        long vertexHwm,
         long relHwm,
         PayloadLaneSpec? spec,
         IReadOnlyDictionary<long, long>? weights)
@@ -44,9 +44,9 @@ internal static class AdjacencyContainer
         var epochTenant = container.OpenTenant(EpochTenant, PageKind.Header);
 
         if (spec is { } s)
-            AdjacencyBlockStoreV2.Build(data, idx, relData, weights ?? EmptyWeights, nodeHwm, s);
+            AdjacencyBlockStoreV2.Build(data, idx, relData, weights ?? EmptyWeights, vertexHwm, s);
         else
-            AdjacencyBlockStore.Build(data, idx, relData, nodeHwm);
+            AdjacencyBlockStore.Build(data, idx, relData, vertexHwm);
 
         AdjacencyEpoch.CreateNew(epochTenant, relHwm);
         container.Flush();
@@ -118,7 +118,7 @@ internal static class AdjacencyContainer
     }
 
     // ──────────────────────────────────────────────────────────────────
-    // IndexTenant (NodeId → 先頭ブロック論理 PageId)
+    // IndexTenant (VertexId → 先頭ブロック論理 PageId)
     // ──────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -142,22 +142,22 @@ internal static class AdjacencyContainer
         }
         finally { hh.Dispose(); }
 
-        long node = 0;
+        long vertex = 0;
         for (int page = 0; page < dataPages; page++)
         {
             var dh = idx.PinForWrite(new PageId(2 + page));
             try
             {
                 var body = dh.Data;
-                int slots = (int)Math.Min(IndexEntriesPerPage, entryCount - node);
-                for (int s = 0; s < slots; s++, node++)
-                    BinaryPrimitives.WriteInt64LittleEndian(body[(s * 8)..], firstPageIds[(int)node]);
+                int slots = (int)Math.Min(IndexEntriesPerPage, entryCount - vertex);
+                for (int s = 0; s < slots; s++, vertex++)
+                    BinaryPrimitives.WriteInt64LittleEndian(body[(s * 8)..], firstPageIds[(int)vertex]);
             }
             finally { dh.Dispose(); }
         }
     }
 
-    /// <summary>索引テナントの entryCount (= bulk load 時の nodeHwm) を読む。空なら 0。</summary>
+    /// <summary>索引テナントの entryCount (= bulk load 時の vertexHwm) を読む。空なら 0。</summary>
     public static long ReadIndexEntryCount(IPagedFile idx)
     {
         if (idx.PageCount < 2) return 0;
@@ -167,14 +167,14 @@ internal static class AdjacencyContainer
     }
 
     /// <summary>
-    /// NodeId <paramref name="nodeId"/> の先頭ブロック論理 PageId を返す (未索引 / 範囲外は -1)。
+    /// VertexId <paramref name="vertexId"/> の先頭ブロック論理 PageId を返す (未索引 / 範囲外は -1)。
     /// <paramref name="entryCount"/> はコンストラクション時に <see cref="ReadIndexEntryCount"/> で取得した値。
     /// </summary>
-    public static long ReadIndexEntry(IPagedFile idx, long entryCount, long nodeId)
+    public static long ReadIndexEntry(IPagedFile idx, long entryCount, long vertexId)
     {
-        if (nodeId < 0 || nodeId >= entryCount) return -1;
-        long page = 2 + nodeId / IndexEntriesPerPage;
-        int slot = (int)(nodeId % IndexEntriesPerPage);
+        if (vertexId < 0 || vertexId >= entryCount) return -1;
+        long page = 2 + vertexId / IndexEntriesPerPage;
+        int slot = (int)(vertexId % IndexEntriesPerPage);
         var rh = idx.PinForRead(new PageId(page));
         try { return BinaryPrimitives.ReadInt64LittleEndian(rh.Data[(slot * 8)..]); }
         finally { rh.Dispose(); }

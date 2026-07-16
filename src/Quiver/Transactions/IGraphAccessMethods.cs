@@ -5,19 +5,19 @@ namespace Quiver.Transactions;
 
 /// <summary>
 /// バックエンドの access methods コントラクト。
-/// オペレータは <see cref="ITransaction.Nodes"/> / <see cref="ITransaction.Relationships"/> /
+/// オペレータは <see cref="ITransaction.Vertices"/> / <see cref="ITransaction.Edges"/> /
 /// <see cref="ITransaction.AdjacencyBlocks"/> を直接叩く代わりに、scan / seek / expand を
 /// このインタフェースを経由してルーティングする。これにより各バックエンドは独自の access path
-/// (リンクリスト、隣接ブロック、リレーションシップスキャン等) を選択できる。
+/// (リンクリスト、隣接ブロック、Edgeスキャン等) を選択できる。
 /// </summary>
 internal interface IGraphAccessMethods
 {
-    /// <summary>生存中のノードを列挙する。任意でラベル 1 件に絞り込める。</summary>
-    IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null);
+    /// <summary>生存中のVertexを列挙する。任意でラベル 1 件に絞り込める。</summary>
+    IEnumerable<VertexId> ScanVertices(ITransaction tx, LabelId? label = null);
 
     /// <summary>
     /// ラベル絞り込みが O(|L|) で走るかを backend が申告する capability。
-    /// バイナリ backend は <c>LabelNodeIndex</c> sidecar が接続されているとき <c>true</c>。
+    /// バイナリ backend は <c>LabelVertexIndex</c> sidecar が接続されているとき <c>true</c>。
     /// <c>InlineGraphAccessMethods</c> / 単体テストや ANN bypass 等 sidecar の無い backend では <c>false</c>。
     /// optimizer (PendingKnnBuilder の push-down 閾値) が graph-first / vector-first の選択に用いる。
     /// </summary>
@@ -40,7 +40,7 @@ internal interface IGraphAccessMethods
     /// <see cref="PropertyValue.Type"/> に基づき型ごとのインデックスへルーティングする。
     /// インデックスが存在しないか、型が未対応の場合は空シーケンスを返す。
     /// </summary>
-    IEnumerable<NodeId> SeekNodesByIndex(ITransaction tx, string indexName, PropertyValue key);
+    IEnumerable<VertexId> SeekVerticesByIndex(ITransaction tx, string indexName, PropertyValue key);
 
     /// <summary>
     /// <paramref name="source"/> に接続するエッジのうち、要求された方向と任意の型フィルタに
@@ -50,9 +50,9 @@ internal interface IGraphAccessMethods
     /// </summary>
     ExpandCursor Expand(
         ITransaction tx,
-        NodeId source,
+        VertexId source,
         Direction direction,
-        RelationshipTypeId? typeFilter);
+        EdgeTypeId? typeFilter);
 
     /// <summary>
     /// <see cref="Expand"/> が放出するエッジ数の推定値。オプティマイザのプラン選択で
@@ -60,9 +60,9 @@ internal interface IGraphAccessMethods
     /// </summary>
     double EstimateExpandCardinality(
         ITransaction tx,
-        NodeId source,
+        VertexId source,
         Direction direction,
-        RelationshipTypeId? typeFilter);
+        EdgeTypeId? typeFilter);
 
     /// <summary>
     /// expand カーソルが fast path (例: 隣接ブロックバッファが満杯になった場合) を諦めて
@@ -213,11 +213,11 @@ internal abstract class ExpandCursor : IDisposable
     /// <summary>次のエッジに進む。エッジを使い切ったら false を返す。</summary>
     public abstract bool MoveNext();
 
-    /// <summary>現在エッジの隣接ノード ID。</summary>
-    public abstract NodeId Neighbor { get; }
+    /// <summary>現在エッジの隣接Vertex ID。</summary>
+    public abstract VertexId Neighbor { get; }
 
-    /// <summary>現在エッジのリレーションシップ ID。</summary>
-    public abstract RelationshipId Relationship { get; }
+    /// <summary>現在エッジのEdge ID。</summary>
+    public abstract EdgeId Edge { get; }
 
     /// <summary>
     /// 現在エッジの生 64 ビット payload (典型的にはエッジ重み)。V2 隣接ビュー裏付けの

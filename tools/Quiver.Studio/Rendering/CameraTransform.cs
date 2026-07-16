@@ -33,15 +33,15 @@ public sealed class CameraTransform
         OffsetY += (worldAfter.Y - worldBefore.Y) * Zoom;
     }
 
-    public void FitToContent(IReadOnlyList<Models.VisualNode> nodes, double viewWidth, double viewHeight)
+    public void FitToContent(IReadOnlyList<Models.VisualVertex> vertices, double viewWidth, double viewHeight)
     {
-        if (nodes.Count == 0) return;
+        if (vertices.Count == 0) return;
 
         var minX = double.MaxValue;
         var minY = double.MaxValue;
         var maxX = double.MinValue;
         var maxY = double.MinValue;
-        foreach (var n in nodes)
+        foreach (var n in vertices)
         {
             var r = n.Radius;
             if (n.X - r < minX) minX = n.X - r;

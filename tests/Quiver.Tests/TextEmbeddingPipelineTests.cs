@@ -21,7 +21,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
     private const int Dim = 4;
 
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
     private readonly InMemoryVectorStore _vectors = new();
     private readonly JsonFileVectorCatalog _catalog;
     private readonly GraphEngineAdapter _engine;
@@ -30,13 +30,13 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_vec4_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         _catalog = new JsonFileVectorCatalog(Path.Combine(_dir, "vector_catalog.json"));
         _engine = new GraphEngineAdapter(_db, _vectors, _catalog);
 
         var keyId = _db.Schema.GetOrCreatePropertyKey(SourceProp);
         _vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, keyId, Dim,
+            IndexName, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "mock", null));
     }
 
@@ -63,13 +63,13 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var worker = pipeline.RunAsync(cts.Token);
 
-        NodeId node;
+        VertexId vertex;
         using (var tx = _db.BeginTransaction())
         {
-            node = tx.CreateNode("Page");
-            tx.SetProperty(node, SourceProp, Storage.Records.PropertyValue.FromString("hello world"));
+            vertex = tx.CreateVertex("Page");
+            tx.SetProperty(vertex, SourceProp, Storage.Records.PropertyValue.FromString("hello world"));
             pipeline.EnqueueOnCommit(tx,
-                EntityRef.From(node),
+                EntityRef.From(vertex),
                 IndexName,
                 "hello world");
             tx.Commit();
@@ -80,7 +80,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         var query = provider.Vectorize("hello world");
         using var cursor = _vectors.KnnSearch(IndexName, query, k: 1);
         cursor.MoveNext().Should().BeTrue();
-        cursor.Current.EntityId.Should().Be(node.Sequence); // ARCH-5b: vector binding キーは slot Sequence
+        cursor.Current.EntityId.Should().Be(vertex.Sequence); // vector binding キーは slot Sequence
         provider.CallCount.Should().Be(1);
 
         cts.Cancel();
@@ -97,10 +97,10 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
 
         using (var tx = _db.BeginTransaction())
         {
-            var node = tx.CreateNode("Page");
-            tx.SetProperty(node, SourceProp, Storage.Records.PropertyValue.FromString("dropped"));
+            var vertex = tx.CreateVertex("Page");
+            tx.SetProperty(vertex, SourceProp, Storage.Records.PropertyValue.FromString("dropped"));
             pipeline.EnqueueOnCommit(tx,
-                EntityRef.From(node),
+                EntityRef.From(vertex),
                 IndexName,
                 "dropped");
             tx.Rollback();
@@ -116,18 +116,18 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
     }
 
     [Fact]
-    public async Task ScanAndEnqueueAsync_picks_up_pre_existing_nodes()
+    public async Task ScanAndEnqueueAsync_picks_up_pre_existing_vertices()
     {
-        // Pretend a prior process committed nodes but never enqueued embeddings
+        // Pretend a prior process committed vertices but never enqueued embeddings
         // (Z' scenario: commit durable, hook never fired).
         var ids = new List<long>();
         using (var tx = _db.BeginTransaction())
         {
             for (int i = 0; i < 3; i++)
             {
-                var nid = tx.CreateNode("Page");
+                var nid = tx.CreateVertex("Page");
                 tx.SetProperty(nid, SourceProp, Storage.Records.PropertyValue.FromString($"doc {i}"));
-                ids.Add(nid.Sequence); // ARCH-5b: vector binding キーは slot Sequence
+                ids.Add(nid.Sequence); // vector binding キーは slot Sequence
             }
             tx.Commit();
         }
@@ -141,7 +141,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         {
             TargetIndexName = IndexName,
             SourcePropertyName = SourceProp,
-            Kind = EntityKind.Node,
+            Kind = EntityKind.Vertex,
         }, cts.Token);
         await pipeline.WhenDrainedAsync(cts.Token);
 
@@ -154,7 +154,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
             {
                 if (cursor.Current.EntityId == id) { found = true; break; }
             }
-            found.Should().BeTrue($"node {id} should have a vector after scan");
+            found.Should().BeTrue($"vertex {id} should have a vector after scan");
         }
 
         cts.Cancel();
@@ -166,7 +166,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
     {
         using (var tx = _db.BeginTransaction())
         {
-            var nid = tx.CreateNode("Page");
+            var nid = tx.CreateVertex("Page");
             tx.SetProperty(nid, SourceProp, Storage.Records.PropertyValue.FromString("same"));
             tx.Commit();
         }
@@ -180,7 +180,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         {
             TargetIndexName = IndexName,
             SourcePropertyName = SourceProp,
-            Kind = EntityKind.Node,
+            Kind = EntityKind.Vertex,
         };
         await pipeline.ScanAndEnqueueAsync(spec, cts.Token);
         await pipeline.WhenDrainedAsync(cts.Token);

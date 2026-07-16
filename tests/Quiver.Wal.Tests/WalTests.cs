@@ -1,4 +1,4 @@
-﻿using Xunit;
+using Xunit;
 using Quiver.Storage.Wal;
 using Quiver.Core;
 using FluentAssertions;
@@ -23,9 +23,10 @@ public class WalTests : IDisposable
     [Fact]
     public void WalRecordType_Values_AreCorrect()
     {
-        ((byte)WalRecordType.Begin).Should().Be(1);
-        ((byte)WalRecordType.Commit).Should().Be(2);
-        ((byte)WalRecordType.EndOfSegment).Should().Be(0xFE);
+        ((byte)WalRecordType.BeginWrite).Should().Be(1);
+        ((byte)WalRecordType.PageImage).Should().Be(2);
+        ((byte)WalRecordType.Commit).Should().Be(3);
+        ((byte)WalRecordType.Abort).Should().Be(4);
     }
 
     [Fact]
@@ -34,7 +35,7 @@ public class WalTests : IDisposable
         using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
         var tx = new TransactionId(1);
 
-        long lsn0 = wal.Append(WalRecordType.Begin, tx, ReadOnlySpan<byte>.Empty);
+        long lsn0 = wal.Append(WalRecordType.BeginWrite, tx, ReadOnlySpan<byte>.Empty);
         long lsn1 = wal.Append(WalRecordType.Commit, tx, ReadOnlySpan<byte>.Empty);
 
         lsn0.Should().Be(0);
@@ -87,31 +88,37 @@ public class WalTests : IDisposable
     public void FlushTo_UpdatesFlushedLsn()
     {
         using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
-        long lsn = wal.Append(WalRecordType.Begin, new TransactionId(1), []);
+        long lsn = wal.Append(WalRecordType.BeginWrite, new TransactionId(1), []);
         wal.FlushedLsn.Should().BeLessThan(lsn);
         wal.FlushTo(lsn);
         wal.FlushedLsn.Should().BeGreaterThanOrEqualTo(lsn);
     }
 
     [Fact]
-    public void WriteCheckpoint_ProducesCheckpointRecord()
+    public void CheckpointPair_ProducesExplicitBoundaryRecords()
     {
         using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
-        long cpLsn = wal.WriteCheckpoint(oldestActiveLsn: 0, lastFlushedDataLsn: 0);
+        long beginLsn = wal.Append(WalRecordType.CheckpointBegin, TransactionId.Bootstrap, new byte[20]);
+        byte[] endPayload = new byte[8];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(endPayload, beginLsn);
+        long endLsn = wal.Append(WalRecordType.CheckpointEnd, TransactionId.Bootstrap, endPayload);
+        wal.FlushTo(endLsn);
 
-        using var reader = wal.OpenReader(cpLsn);
+        using var reader = wal.OpenReader(beginLsn);
         reader.TryReadNext(out WalRecord rec).Should().BeTrue();
-        rec.Type.Should().Be(WalRecordType.Checkpoint);
-        rec.Lsn.Should().Be(cpLsn);
+        rec.Type.Should().Be(WalRecordType.CheckpointBegin);
+        reader.TryReadNext(out rec).Should().BeTrue();
+        rec.Type.Should().Be(WalRecordType.CheckpointEnd);
+        rec.Lsn.Should().Be(endLsn);
     }
 
     [Fact]
-    public void CorruptedRecord_IsSkipped_ReturnsNoMore()
+    public void CorruptedRecord_IsRejectedOnOpen()
     {
         long lsn;
         using (var wal = new WriteAheadLog(Path.Combine(_dir, "wal")))
         {
-            lsn = wal.Append(WalRecordType.Begin, new TransactionId(1), []);
+            lsn = wal.Append(WalRecordType.BeginWrite, new TransactionId(1), []);
             wal.FlushTo(lsn);
         }
 
@@ -122,9 +129,8 @@ public class WalTests : IDisposable
         bytes[21] ^= 0xFF;
         File.WriteAllBytes(walFile, bytes);
 
-        using var wal2 = new WriteAheadLog(Path.Combine(_dir, "wal"));
-        using var reader = wal2.OpenReader(0);
-        reader.TryReadNext(out _).Should().BeFalse();
+        Action reopen = () => new WriteAheadLog(Path.Combine(_dir, "wal"));
+        reopen.Should().Throw<CorruptionException>();
     }
 
     [Fact]
@@ -133,7 +139,7 @@ public class WalTests : IDisposable
         long lsnBefore;
         using (var wal = new WriteAheadLog(Path.Combine(_dir, "wal")))
         {
-            lsnBefore = wal.Append(WalRecordType.Begin, new TransactionId(1), [0, 1]);
+            lsnBefore = wal.Append(WalRecordType.BeginWrite, new TransactionId(1), [0, 1]);
             wal.FlushTo(lsnBefore);
         }
 
@@ -192,7 +198,7 @@ public class WalTests : IDisposable
 
         wal.Truncate(lsn1); // 全部捨てる
 
-        new FileInfo(walFile).Length.Should().Be(0);
+        new FileInfo(walFile).Length.Should().Be(WalFormat.FileHeaderSize);
         using var reader = wal.OpenReader(0);
         reader.TryReadNext(out _).Should().BeFalse();
 
@@ -205,7 +211,7 @@ public class WalTests : IDisposable
     public void OpenReader_StartLsn_SkipsPriorRecords()
     {
         using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"));
-        long lsn0 = wal.Append(WalRecordType.Begin, new TransactionId(1), []);
+        long lsn0 = wal.Append(WalRecordType.BeginWrite, new TransactionId(1), []);
         long lsn1 = wal.Append(WalRecordType.Commit, new TransactionId(1), []);
         wal.FlushTo(lsn1);
 
@@ -225,7 +231,7 @@ public class WalTests : IDisposable
         // window=0 (既定) では従来の opportunistic group commit のみで、
         // 各 FlushTo は確実に fsync を起動する。シングルスレッド逐次 commit では
         // 1 commit = 1 batch になることを確認する。
-        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"), 64L * 1024 * 1024, TimeSpan.Zero);
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"), TimeSpan.Zero);
         for (int i = 0; i < 5; i++)
         {
             long lsn = wal.Append(WalRecordType.Commit, new TransactionId(i + 1), []);
@@ -241,7 +247,7 @@ public class WalTests : IDisposable
         // window > 0 では複数スレッドが並列に FlushTo した commit が同じ fsync に束ねられる。
         // 64 concurrent FlushTo / window=5ms (テスト安定性のため仕様の 100µs より広め) で、
         // batch 数 <= request 数 / 4 になることを確認 (緩い閾値で false positive 回避)。
-        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"), 64L * 1024 * 1024, TimeSpan.FromMilliseconds(5));
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"), TimeSpan.FromMilliseconds(5));
 
         const int threadCount = 64;
         var ready = new ManualResetEventSlim(false);
@@ -275,7 +281,7 @@ public class WalTests : IDisposable
     {
         // 単一 commit のレイテンシは概ね「fsync 時間 + window」で済む。
         // window=2ms で 1 commit を流して 200ms 以内 (緩い上限で flaky 回避) に完了することを確認。
-        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"), 64L * 1024 * 1024, TimeSpan.FromMilliseconds(2));
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"), TimeSpan.FromMilliseconds(2));
         long lsn = wal.Append(WalRecordType.Commit, new TransactionId(1), []);
         var sw = System.Diagnostics.Stopwatch.StartNew();
         wal.FlushTo(lsn);
@@ -288,7 +294,7 @@ public class WalTests : IDisposable
     public void GroupCommit_AfterFlush_AdvancesFlushedLsn()
     {
         // batch flush 後、待機していた全 caller の TargetLsn 以上が flushedLsn に反映される。
-        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"), 64L * 1024 * 1024, TimeSpan.FromMilliseconds(3));
+        using var wal = new WriteAheadLog(Path.Combine(_dir, "wal"), TimeSpan.FromMilliseconds(3));
         long lastLsn = -1;
         for (int i = 0; i < 8; i++)
             lastLsn = wal.Append(WalRecordType.Commit, new TransactionId(i + 1), []);
@@ -520,7 +526,7 @@ public class WalTests : IDisposable
         var encoded = WalPageImageCodec.Encode(fileKind: 1, pageId: 100, page);
         // payload = v2 header (12B) + 63 バイト (= 末尾 zero 直前まで)。
         // ただし MinKeptBytes=32 のため 63 >= 32 で trim 影響なし → 12+63 = 75 バイト前後。
-        encoded.Length.Should().BeInRange(WalPageImageCodec.HeaderLengthV2, WalPageImageCodec.HeaderLengthV2 + WalPageImageCodec.FullPageBytes);
+        encoded.Length.Should().BeInRange(WalPageImageCodec.HeaderLength, WalPageImageCodec.HeaderLength + WalPageImageCodec.FullPageBytes);
         encoded.Length.Should().BeLessThan(200, "sparse page は trim で大幅に小さくなる");
 
         WalPageImageCodec.TryDecode(encoded, out byte fileKind, out long pageId, out byte[] pageBytes).Should().BeTrue();
@@ -532,7 +538,7 @@ public class WalTests : IDisposable
     }
 
     [Fact]
-    public void Codec_v1_StillDecodes_BackwardCompat()
+    public void Codec_with_trailing_legacy_bytes_is_rejected()
     {
         // 旧 v1 形式 (8192 バイト全保持) を手動構築して TryDecode が復元できることを確認。
         // 旧形式の DB に残る WAL レコードを安全に読み出せる互換性保証。
@@ -542,11 +548,7 @@ public class WalTests : IDisposable
         System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(v1Payload.AsSpan(2), 42L);
         v1Payload[WalPageImageCodec.HeaderLength + 100] = 0xEF; // 適当な位置に non-zero
 
-        WalPageImageCodec.TryDecode(v1Payload, out byte fileKind, out long pageId, out byte[] pageBytes).Should().BeTrue();
-        fileKind.Should().Be(7);
-        pageId.Should().Be(42L);
-        pageBytes.Length.Should().Be(WalPageImageCodec.FullPageBytes);
-        pageBytes[100].Should().Be(0xEF);
+        WalPageImageCodec.TryDecode(v1Payload, out _, out _, out _).Should().BeFalse();
     }
 
     [Fact]
@@ -560,20 +562,6 @@ public class WalTests : IDisposable
         var encoded = WalPageImageCodec.Encode(fileKind: 1, pageId: 5, page);
         // v3 = header (12) + literal chunk header (1 + 2 varint) + 8192 = 8207 バイト。
         encoded.Length.Should().BeInRange(8205, 8210, "literal chunk 1 個でほぼ生サイズ");
-
-        WalPageImageCodec.TryDecode(encoded, out _, out _, out byte[] pageBytes).Should().BeTrue();
-        pageBytes.Should().BeEquivalentTo(page);
-    }
-
-    [Fact]
-    public void Codec_v2_EncodeV2_NoCompression_StillWorks()
-    {
-        // EncodeV2 は v2 (trim 単独、RLE なし) を生成する fallback 用 API。decode 互換確認。
-        var page = new byte[WalPageImageCodec.FullPageBytes];
-        for (int i = 0; i < page.Length; i++) page[i] = (byte)((i & 0xFE) | 1);
-
-        var encoded = WalPageImageCodec.EncodeV2(fileKind: 1, pageId: 5, page);
-        encoded.Length.Should().Be(WalPageImageCodec.HeaderLengthV2 + WalPageImageCodec.FullPageBytes);
 
         WalPageImageCodec.TryDecode(encoded, out _, out _, out byte[] pageBytes).Should().BeTrue();
         pageBytes.Should().BeEquivalentTo(page);
@@ -599,9 +587,9 @@ public class WalTests : IDisposable
     // ─────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Codec_v3_NodeStoreRecordPattern_CompressesByteRuns()
+    public void Codec_v3_VertexStoreRecordPattern_CompressesByteRuns()
     {
-        // NodeStore record (31B) パターン: 01 FF×12 01 00 XX×8 00×8
+        // VertexStore record (31B) パターン: 01 FF×12 01 00 XX×8 00×8
         // FF×12 と 00×8 が Run chunk で圧縮されることを確認。
         var page = new byte[WalPageImageCodec.FullPageBytes];
         // ヘッダ後に 1 record。

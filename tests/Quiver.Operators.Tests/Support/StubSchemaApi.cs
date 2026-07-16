@@ -7,19 +7,19 @@ namespace Quiver.Query.Physical.Tests.Support;
 /// プラン構造テスト用の最小 <see cref="ISchemaApi"/> スタブ。
 /// 実データベースなしでプランナーが名前を解決できるよう連番 ID を割り当てる。
 /// </summary>
-internal sealed class StubSchemaApi : ISchemaApi, IHyperedgeSchemaResolver
+internal sealed class StubSchemaApi : ISchemaApi, INexusSchemaResolver
 {
     private int _nextLabel = 1;
-    private int _nextRelType = 1;
+    private int _nextEdgeType = 1;
     private int _nextPropKey = 1;
-    private int _nextHyperedgeType = 1;
+    private int _nextNexusType = 1;
     private int _nextRole = 1;
 
     private readonly Dictionary<string, LabelId> _labels = new();
     private readonly Dictionary<LabelId, string> _labelNames = new();
-    private readonly Dictionary<string, RelationshipTypeId> _relTypes = new();
+    private readonly Dictionary<string, EdgeTypeId> _edgeTypes = new();
     private readonly Dictionary<string, (PropertyKeyId Id, PropertyCardinality Card)> _propKeys = new();
-    private readonly Dictionary<string, HyperedgeTypeId> _hyperedgeTypes = new();
+    private readonly Dictionary<string, NexusTypeId> _nexusTypes = new();
     private readonly Dictionary<string, RoleId> _roles = new();
 
     public LabelId GetOrCreateLabel(string name)
@@ -33,12 +33,12 @@ internal sealed class StubSchemaApi : ISchemaApi, IHyperedgeSchemaResolver
         return id;
     }
 
-    public RelationshipTypeId GetOrCreateRelationshipType(string name)
+    public EdgeTypeId GetOrCreateEdgeType(string name)
     {
-        if (!_relTypes.TryGetValue(name, out var id))
+        if (!_edgeTypes.TryGetValue(name, out var id))
         {
-            id = new RelationshipTypeId(_nextRelType++);
-            _relTypes[name] = id;
+            id = new EdgeTypeId(_nextEdgeType++);
+            _edgeTypes[name] = id;
         }
         return id;
     }
@@ -79,8 +79,8 @@ internal sealed class StubSchemaApi : ISchemaApi, IHyperedgeSchemaResolver
         return false;
     }
 
-    public bool TryGetRelationshipTypeId(string name, out RelationshipTypeId id)
-        => _relTypes.TryGetValue(name, out id);
+    public bool TryGetEdgeTypeId(string name, out EdgeTypeId id)
+        => _edgeTypes.TryGetValue(name, out id);
 
     public bool IndexExists(string indexName) => false;
     public void CreateIndex(string indexName, string label, string propertyKey, IndexKind kind) { }
@@ -90,29 +90,29 @@ internal sealed class StubSchemaApi : ISchemaApi, IHyperedgeSchemaResolver
     public IReadOnlyList<FullTextIndexInfo> ListFullTextIndexes() => [];
     public bool RenameLabel(string oldName, string newName) => false;
     public bool RenamePropertyKey(string oldName, string newName) => false;
-    public bool RenameRelationshipType(string oldName, string newName) => false;
+    public bool RenameEdgeType(string oldName, string newName) => false;
     public bool RenameIndex(string oldName, string newName) => false;
     public IReadOnlyList<string> ListLabels() => _labels.Keys.ToList();
-    public IReadOnlyList<string> ListRelationshipTypes() => _relTypes.Keys.ToList();
+    public IReadOnlyList<string> ListEdgeTypes() => _edgeTypes.Keys.ToList();
     public IReadOnlyList<string> ListPropertyKeys() => _propKeys.Keys.ToList();
 
-    public HyperedgeTypeId GetOrCreateHyperedgeType(string name)
+    public NexusTypeId GetOrCreateNexusType(string name)
     {
-        if (!_hyperedgeTypes.TryGetValue(name, out var id))
+        if (!_nexusTypes.TryGetValue(name, out var id))
         {
-            id = new HyperedgeTypeId(_nextHyperedgeType++);
-            _hyperedgeTypes[name] = id;
+            id = new NexusTypeId(_nextNexusType++);
+            _nexusTypes[name] = id;
         }
         return id;
     }
 
-    public string? GetHyperedgeTypeName(HyperedgeTypeId id)
-        => _hyperedgeTypes.FirstOrDefault(kv => kv.Value == id).Key;
+    public string? GetNexusTypeName(NexusTypeId id)
+        => _nexusTypes.FirstOrDefault(kv => kv.Value == id).Key;
 
-    public bool TryGetHyperedgeTypeId(string name, out HyperedgeTypeId id)
-        => _hyperedgeTypes.TryGetValue(name, out id);
+    public bool TryGetNexusTypeId(string name, out NexusTypeId id)
+        => _nexusTypes.TryGetValue(name, out id);
 
-    public IReadOnlyList<string> ListHyperedgeTypes() => _hyperedgeTypes.Keys.ToList();
+    public IReadOnlyList<string> ListNexusTypes() => _nexusTypes.Keys.ToList();
     public IReadOnlyList<string> ListRoles() => _roles.Keys.ToList();
 
     public RoleId GetOrCreateRole(string name)

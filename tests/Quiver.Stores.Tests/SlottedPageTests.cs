@@ -87,7 +87,7 @@ public class SlottedPageTests
     }
 
     [Fact]
-    public void Update_relocates_on_growth_preserving_other_records()
+    public void Update_edgeocates_on_growth_preserving_other_records()
     {
         var body = NewBody();
         var sp = new SlottedPage(body);

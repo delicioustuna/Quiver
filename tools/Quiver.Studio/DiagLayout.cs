@@ -12,40 +12,40 @@ internal static class DiagLayout
         Console.WriteLine($"=== Layout Diagnostic ===");
         Console.WriteLine($"DB: {dbPath}");
 
-        using var db = GraphDatabase.Open(dbPath);
+        using var db = QuiverDatabase.Open(dbPath);
         using var tx = db.BeginReadOnlyTransaction();
 
-        var nodeMap = new Dictionary<long, VisualNode>();
-        var nodeIds = tx.G(db.Schema).Nodes().ToList();
-        foreach (var nid in nodeIds)
+        var vertexMap = new Dictionary<long, VisualVertex>();
+        var vertexIds = tx.G(db.Schema).Vertices().ToList();
+        foreach (var nid in vertexIds)
         {
-            var label = tx.GetNodeLabel(nid) ?? $"({nid.Sequence})";
-            nodeMap[nid.Sequence] = new VisualNode(nid, label);
+            var label = tx.GetVertexLabel(nid) ?? $"({nid.Sequence})";
+            vertexMap[nid.Sequence] = new VisualVertex(nid, label);
         }
 
         var edges = new List<VisualEdge>();
         var edgeSet = new HashSet<long>();
-        foreach (var (_, vn) in nodeMap)
+        foreach (var (_, vn) in vertexMap)
         {
-            var rels = tx.EnumerateRelationships(vn.Id);
-            while (rels.MoveNext())
+            var edgeEnumerator = tx.EnumerateEdges(vn.Id);
+            while (edgeEnumerator.MoveNext())
             {
-                var rel = rels.Current;
-                if (!edgeSet.Add(rel.Id.Sequence)) continue;
-                if (!nodeMap.TryGetValue(rel.Source.Sequence, out var src)) continue;
-                if (!nodeMap.TryGetValue(rel.Target.Sequence, out var tgt)) continue;
-                var typeName = tx.GetRelationshipTypeName(rel.Type) ?? "?";
-                edges.Add(new VisualEdge(rel.Id, src, tgt, typeName));
+                var edge = edgeEnumerator.Current;
+                if (!edgeSet.Add(edge.Id.Sequence)) continue;
+                if (!vertexMap.TryGetValue(edge.Source.Sequence, out var src)) continue;
+                if (!vertexMap.TryGetValue(edge.Target.Sequence, out var tgt)) continue;
+                var typeName = tx.GetEdgeTypeName(edge.Type) ?? "?";
+                edges.Add(new VisualEdge(edge.Id, src, tgt, typeName));
             }
         }
 
-        var nodes = nodeMap.Values.ToList();
-        Console.WriteLine($"Nodes: {nodes.Count}, Edges: {edges.Count}");
+        var vertices = vertexMap.Values.ToList();
+        Console.WriteLine($"Vertices: {vertices.Count}, Edges: {edges.Count}");
         Console.WriteLine();
 
         // 次数の分析
         var degree = new Dictionary<string, int>();
-        foreach (var n in nodes) degree[n.Label + "#" + n.Id.Sequence] = 0;
+        foreach (var n in vertices) degree[n.Label + "#" + n.Id.Sequence] = 0;
         foreach (var e in edges)
         {
             degree[e.Source.Label + "#" + e.Source.Id.Sequence]++;
@@ -58,18 +58,18 @@ internal static class DiagLayout
 
         // レイアウトの実行
         var layout = new GraphLayoutService();
-        layout.Layout(nodes, edges);
+        layout.Layout(vertices, edges);
 
         Console.WriteLine("--- Layout Result ---");
-        var minX = nodes.Min(n => n.X);
-        var maxX = nodes.Max(n => n.X);
-        var minY = nodes.Min(n => n.Y);
-        var maxY = nodes.Max(n => n.Y);
+        var minX = vertices.Min(n => n.X);
+        var maxX = vertices.Max(n => n.X);
+        var minY = vertices.Min(n => n.Y);
+        var maxY = vertices.Max(n => n.Y);
         Console.WriteLine($"BBox: X=[{minX:F1}, {maxX:F1}] Y=[{minY:F1}, {maxY:F1}]");
         Console.WriteLine($"Span: {maxX - minX:F1} x {maxY - minY:F1}");
         Console.WriteLine();
 
-        foreach (var n in nodes.OrderBy(n => n.Label).ThenBy(n => n.Id.Sequence))
+        foreach (var n in vertices.OrderBy(n => n.Label).ThenBy(n => n.Id.Sequence))
             Console.WriteLine($"  {n.Label,-8} #{n.Id.Sequence,-3} ({n.X:F1}, {n.Y:F1})");
         Console.WriteLine();
 
@@ -97,6 +97,6 @@ internal static class DiagLayout
         Console.WriteLine($"--- Simulated FitToContent ({viewW}x{viewH}) ---");
         Console.WriteLine($"  Graph size: {gw:F1} x {gh:F1}");
         Console.WriteLine($"  Zoom: {zoom:F4}");
-        Console.WriteLine($"  Node radius on screen: {r * zoom:F1}px");
+        Console.WriteLine($"  Vertex radius on screen: {r * zoom:F1}px");
     }
 }

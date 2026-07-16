@@ -16,7 +16,7 @@ namespace Quiver.Query.Physical;
 /// 探索は優先度キュー (<see cref="PriorityQueue{TElement,TPriority}"/>) 駆動の標準
 /// settled-set 法。1 ホップ展開は <see cref="OneHopExpansion"/> 経由で
 /// <see cref="WeightedShortestPathKernel"/> に委譲し、バックエンドのアクセス経路
-/// (隣接ブロック / リンクリスト / リレーションシップスキャン) に依存しない。
+/// (隣接ブロック / リンクリスト / Edgeスキャン) に依存しない。
 /// </para>
 /// <para>
 /// ヒューリスティック (<c>heuristic</c>) を渡すと A*、渡さない (null) と Dijkstra に
@@ -38,9 +38,9 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
     private readonly int _srcCol;
     private readonly int _tgtCol;
     private readonly Direction _dir;
-    private readonly RelationshipTypeId? _typeFilter;
+    private readonly EdgeTypeId? _typeFilter;
     private readonly IEdgeWeightProvider _weightProvider;
-    private readonly Func<NodeId, double>? _heuristic;
+    private readonly Func<VertexId, double>? _heuristic;
     private readonly double _maxDistance;
 
     private ITransaction? _tx;
@@ -50,22 +50,22 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
     private WeightedShortestPathKernel? _kernel;
 
     /// <summary>
-    /// これまでに確定 (settled) したノードの累計。Dijkstra と A* の探索効率
-    /// (A* がノード展開数を削減できているか) を比較するために公開する。
+    /// これまでに確定 (settled) したVertexの累計。Dijkstra と A* の探索効率
+    /// (A* がVertex展開数を削減できているか) を比較するために公開する。
     /// </summary>
-    public long ExpandedNodeCount { get; private set; }
+    public long ExpandedVertexCount { get; private set; }
 
     private static readonly TupleSchema s_schema = new([
-        new ColumnDefinition("source",   TupleSlotType.NodeId),
-        new ColumnDefinition("target",   TupleSlotType.NodeId),
+        new ColumnDefinition("source",   TupleSlotType.VertexId),
+        new ColumnDefinition("target",   TupleSlotType.VertexId),
         new ColumnDefinition("distance", TupleSlotType.Double),
         new ColumnDefinition("path",     TupleSlotType.Bytes)]);
 
     /// <param name="source">入力 <c>(source, target)</c> ペアを供給する上流オペレータ。</param>
-    /// <param name="sourceNodeColumn">上流タプルの始点ノード列インデックス。</param>
-    /// <param name="targetNodeColumn">上流タプルの終点ノード列インデックス。</param>
+    /// <param name="sourceVertexColumn">上流タプルの始点Vertex列インデックス。</param>
+    /// <param name="targetVertexColumn">上流タプルの終点Vertex列インデックス。</param>
     /// <param name="direction">辿る方向。</param>
-    /// <param name="typeFilter">辿るリレーションシップ型 (null なら全型)。</param>
+    /// <param name="typeFilter">辿るEdge型 (null なら全型)。</param>
     /// <param name="weightProvider">エッジ重みの取得経路。</param>
     /// <param name="heuristic">
     /// A* の推定残コスト <c>h(n)</c>。null なら Dijkstra。consistent (単調) かつ
@@ -74,17 +74,17 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
     /// <param name="maxDistance">この重み合計を超える経路は探索しない (既定: 無制限)。</param>
     public WeightedShortestPathOperator(
         IPhysicalOperator source,
-        int sourceNodeColumn,
-        int targetNodeColumn,
+        int sourceVertexColumn,
+        int targetVertexColumn,
         Direction direction,
-        RelationshipTypeId? typeFilter,
+        EdgeTypeId? typeFilter,
         IEdgeWeightProvider weightProvider,
-        Func<NodeId, double>? heuristic = null,
+        Func<VertexId, double>? heuristic = null,
         double maxDistance = double.PositiveInfinity)
     {
         _source = source;
-        _srcCol = sourceNodeColumn;
-        _tgtCol = targetNodeColumn;
+        _srcCol = sourceVertexColumn;
+        _tgtCol = targetVertexColumn;
         _dir = direction;
         _typeFilter = typeFilter;
         _weightProvider = weightProvider ?? throw new ArgumentNullException(nameof(weightProvider));
@@ -114,7 +114,7 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
         _tx = tx;
         _source.Open(tx);
         _state = default;
-        ExpandedNodeCount = 0;
+        ExpandedVertexCount = 0;
         _kernel = new WeightedShortestPathKernel(tx, _weightProvider, _heuristic, _maxDistance);
     }
 
@@ -123,14 +123,14 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
     {
         while (_source.MoveNext())
         {
-            var src = new NodeId(_source.Current[_srcCol].LongValue);
-            var tgt = new NodeId(_source.Current[_tgtCol].LongValue);
+            var src = new VertexId(_source.Current[_srcCol].LongValue);
+            var tgt = new VertexId(_source.Current[_tgtCol].LongValue);
 
             if (!FindShortestPath(src, tgt, out double dist))
                 continue;
 
-            _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = src.Value };
-            _buffer[1] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = tgt.Value };
+            _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = src.Value };
+            _buffer[1] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = tgt.Value };
             _buffer[2] = new TupleSlot { Type = TupleSlotType.Double, DoubleValue = dist };
             _buffer[3] = new TupleSlot { Type = TupleSlotType.Bytes };
 
@@ -142,7 +142,7 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
         return false;
     }
 
-    private bool FindShortestPath(NodeId src, NodeId tgt, out double distance)
+    private bool FindShortestPath(VertexId src, VertexId tgt, out double distance)
     {
         if (src == tgt)
         {
@@ -153,12 +153,12 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
 
         _kernel!.Initialize(src, ref _state);
 
-        while (_state.Pq!.TryDequeue(out long node, out _))
+        while (_state.Pq!.TryDequeue(out long vertex, out _))
         {
-            if (!_state.Settled!.Add(node)) continue;   // 既に確定済の重複エントリ
-            ExpandedNodeCount++;
-            if (node == tgt.Sequence) break;            // 確定 = 最短重み距離 (slot 同一性)
-            OneHopExpansion.Expand(_tx!, new NodeId(node), _dir, _typeFilter, depth: 0, _kernel, ref _state);
+            if (!_state.Settled!.Add(vertex)) continue;   // 既に確定済の重複エントリ
+            ExpandedVertexCount++;
+            if (vertex == tgt.Sequence) break;            // 確定 = 最短重み距離 (slot 同一性)
+            OneHopExpansion.Expand(_tx!, new VertexId(vertex), _dir, _typeFilter, depth: 0, _kernel, ref _state);
         }
 
         // 終点が settled に入っていれば Dist[終点] が最短重み距離。
@@ -173,37 +173,37 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
         return true;
     }
 
-    private byte[] ReconstructPath(NodeId src, NodeId tgt)
+    private byte[] ReconstructPath(VertexId src, VertexId tgt)
     {
         // 内部の距離/前任マップは slot 同一性 (Sequence) でキーされる。
-        var nodes = new List<long> { tgt.Sequence };
-        var rels = new List<long>();
+        var vertices = new List<long> { tgt.Sequence };
+        var edges = new List<long>();
         long cur = tgt.Sequence;
         while (cur != src.Sequence)
         {
-            var (predNode, relId) = _state.Pred![cur];
-            rels.Add(relId);
-            nodes.Add(predNode);
-            cur = predNode;
+            var (predVertex, edgeId) = _state.Pred![cur];
+            edges.Add(edgeId);
+            vertices.Add(predVertex);
+            cur = predVertex;
         }
-        nodes.Reverse();
-        rels.Reverse();
+        vertices.Reverse();
+        edges.Reverse();
 
         var materializer = new EntityIdentityMaterializer(
-            _tx!.Nodes, _tx.Relationships, _tx.Hyperedges);
-        var nodeIds = new NodeId[nodes.Count];
-        for (int i = 0; i < nodes.Count; i++)
+            _tx!.Vertices, _tx.Edges, _tx.Nexuses);
+        var vertexIds = new VertexId[vertices.Count];
+        for (int i = 0; i < vertices.Count; i++)
         {
-            if (!materializer.TryNode(new NodeId(nodes[i]), out nodeIds[i]))
+            if (!materializer.TryVertex(new VertexId(vertices[i]), out vertexIds[i]))
                 return [];
         }
-        var relIds = new RelationshipId[rels.Count];
-        for (int i = 0; i < rels.Count; i++)
+        var edgeIds = new EdgeId[edges.Count];
+        for (int i = 0; i < edges.Count; i++)
         {
-            if (!materializer.TryRelationship(new RelationshipId(rels[i]), out relIds[i]))
+            if (!materializer.TryEdge(new EdgeId(edges[i]), out edgeIds[i]))
                 return [];
         }
-        return WeightedPathCodec.Encode(nodeIds, relIds);
+        return WeightedPathCodec.Encode(vertexIds, edgeIds);
     }
 
     /// <inheritdoc/>
@@ -212,50 +212,50 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
 
 /// <summary>
 /// <see cref="WeightedShortestPathOperator"/> の <c>path</c> 列 (列 3) のバイト列コーデック。
-/// レイアウト (すべて little-endian): <c>[int32 nodeCount][int32 relCount]
-/// [nodeCount × int64 NodeId][relCount × int64 RelationshipId]</c>。
+/// レイアウト (すべて little-endian): <c>[int32 vertexCount][int32 edgeCount]
+/// [vertexCount × int64 VertexId][edgeCount × int64 EdgeId]</c>。
 /// </summary>
 internal static class WeightedPathCodec
 {
-    /// <summary>ノード列・リレーションシップ列をバイト列にエンコードする。</summary>
-    public static byte[] Encode(IReadOnlyList<NodeId> nodes, IReadOnlyList<RelationshipId> relationships)
+    /// <summary>Vertex列・Edge列をバイト列にエンコードする。</summary>
+    public static byte[] Encode(IReadOnlyList<VertexId> vertices, IReadOnlyList<EdgeId> edges)
     {
-        ArgumentNullException.ThrowIfNull(nodes);
-        ArgumentNullException.ThrowIfNull(relationships);
-        int n = nodes.Count, m = relationships.Count;
+        ArgumentNullException.ThrowIfNull(vertices);
+        ArgumentNullException.ThrowIfNull(edges);
+        int n = vertices.Count, m = edges.Count;
         var buf = new byte[8 + (n + m) * 8];
         var span = buf.AsSpan();
         BinaryPrimitives.WriteInt32LittleEndian(span, n);
         BinaryPrimitives.WriteInt32LittleEndian(span[4..], m);
         int off = 8;
         for (int i = 0; i < n; i++, off += 8)
-            BinaryPrimitives.WriteInt64LittleEndian(span[off..], nodes[i].Value);
+            BinaryPrimitives.WriteInt64LittleEndian(span[off..], vertices[i].Value);
         for (int i = 0; i < m; i++, off += 8)
-            BinaryPrimitives.WriteInt64LittleEndian(span[off..], relationships[i].Value);
+            BinaryPrimitives.WriteInt64LittleEndian(span[off..], edges[i].Value);
         return buf;
     }
 
     /// <summary>
-    /// <see cref="Encode"/> が生成したバイト列をノード列・リレーションシップ列に戻す。
+    /// <see cref="Encode"/> が生成したバイト列をVertex列・Edge列に戻す。
     /// 8 バイト未満の入力 (空 path) では両方とも空配列を返す。
     /// </summary>
-    public static void Decode(ReadOnlySpan<byte> bytes, out NodeId[] nodes, out RelationshipId[] relationships)
+    public static void Decode(ReadOnlySpan<byte> bytes, out VertexId[] vertices, out EdgeId[] edges)
     {
         if (bytes.Length < 8)
         {
-            nodes = [];
-            relationships = [];
+            vertices = [];
+            edges = [];
             return;
         }
         int n = BinaryPrimitives.ReadInt32LittleEndian(bytes);
         int m = BinaryPrimitives.ReadInt32LittleEndian(bytes[4..]);
-        nodes = new NodeId[n];
-        relationships = new RelationshipId[m];
+        vertices = new VertexId[n];
+        edges = new EdgeId[m];
         int off = 8;
         for (int i = 0; i < n; i++, off += 8)
-            nodes[i] = new NodeId(BinaryPrimitives.ReadInt64LittleEndian(bytes[off..]));
+            vertices[i] = new VertexId(BinaryPrimitives.ReadInt64LittleEndian(bytes[off..]));
         for (int i = 0; i < m; i++, off += 8)
-            relationships[i] = new RelationshipId(BinaryPrimitives.ReadInt64LittleEndian(bytes[off..]));
+            edges[i] = new EdgeId(BinaryPrimitives.ReadInt64LittleEndian(bytes[off..]));
     }
 }
 
@@ -266,13 +266,13 @@ internal static class WeightedPathCodec
 /// </summary>
 internal struct WeightedShortestPathState
 {
-    /// <summary>ノード → 既知の最小重み距離 <c>g(n)</c>。</summary>
+    /// <summary>Vertex → 既知の最小重み距離 <c>g(n)</c>。</summary>
     public Dictionary<long, double>? Dist;
 
-    /// <summary>ノード → (1 つ前のノード, そのエッジ) — 経路復元用。</summary>
-    public Dictionary<long, (long Node, long Rel)>? Pred;
+    /// <summary>Vertex → (1 つ前のVertex, そのエッジ) — 経路復元用。</summary>
+    public Dictionary<long, (long Vertex, long Rel)>? Pred;
 
-    /// <summary>確定済 (最短距離が判明した) ノード集合。</summary>
+    /// <summary>確定済 (最短距離が判明した) Vertex集合。</summary>
     public HashSet<long>? Settled;
 
     /// <summary>優先度キュー (priority = Dijkstra: g(n) / A*: g(n)+h(n))。</summary>
@@ -287,11 +287,11 @@ internal struct WeightedShortestPathState
 internal sealed class WeightedShortestPathKernel(
     ITransaction tx,
     IEdgeWeightProvider weightProvider,
-    Func<NodeId, double>? heuristic,
+    Func<VertexId, double>? heuristic,
     double maxDistance) : IGraphKernel<WeightedShortestPathState>
 {
     /// <inheritdoc/>
-    public void Initialize(NodeId source, ref WeightedShortestPathState s)
+    public void Initialize(VertexId source, ref WeightedShortestPathState s)
     {
         (s.Dist ??= []).Clear();
         (s.Pred ??= []).Clear();
@@ -305,16 +305,16 @@ internal sealed class WeightedShortestPathKernel(
 
     /// <inheritdoc/>
     public bool VisitNeighbor(
-        NodeId source, NodeId target, RelationshipId relationshipId,
+        VertexId source, VertexId target, EdgeId edgeId,
         long weightRaw, int depth, ref WeightedShortestPathState s)
     {
-        if (s.Settled!.Contains(target.Sequence)) return true;   // 確定済ノードは緩和不要
+        if (s.Settled!.Contains(target.Sequence)) return true;   // 確定済Vertexは緩和不要
 
-        double w = weightProvider.GetWeight(tx, relationshipId, weightRaw);
+        double w = weightProvider.GetWeight(tx, edgeId, weightRaw);
         if (w < 0.0)
             throw new InvalidOperationException(
                 $"重み付き最短経路 (Dijkstra/A*) は負のエッジ重みをサポートしません " +
-                $"(relationship {relationshipId.Value}, weight {w})。負の重みには Bellman-Ford 系が必要です。");
+                $"(edge {edgeId.Value}, weight {w})。負の重みには Bellman-Ford 系が必要です。");
 
         double cand = s.Dist![source.Sequence] + w;
         if (cand > maxDistance) return true;
@@ -322,7 +322,7 @@ internal sealed class WeightedShortestPathKernel(
         if (cand < s.Dist.GetValueOrDefault(target.Sequence, double.PositiveInfinity))
         {
             s.Dist[target.Sequence] = cand;
-            s.Pred![target.Sequence] = (source.Sequence, relationshipId.Sequence);
+            s.Pred![target.Sequence] = (source.Sequence, edgeId.Sequence);
             s.Pq!.Enqueue(target.Sequence, cand + Heuristic(target));
         }
         return true;
@@ -331,10 +331,10 @@ internal sealed class WeightedShortestPathKernel(
     /// <inheritdoc/>
     public bool ShouldContinue(int depth, in WeightedShortestPathState s) => true;
 
-    private double Heuristic(NodeId node)
+    private double Heuristic(VertexId vertex)
     {
         if (heuristic is null) return 0.0;
-        double h = heuristic(node);
+        double h = heuristic(vertex);
         // 負のヒューリスティックは admissibility を壊すため 0 にクランプする。
         return h > 0.0 ? h : 0.0;
     }

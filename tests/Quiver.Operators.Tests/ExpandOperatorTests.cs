@@ -12,7 +12,7 @@ public class ExpandOperatorTests
     [Fact]
     public void Schema_NeighborOnly_has_one_column()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         var op = new ExpandOperator(src, 0, Direction.Both, null, ExpandOutputMode.NeighborOnly);
         op.Schema.Columns.Should().HaveCount(1);
         op.Schema.Columns[0].Name.Should().Be("neighbor");
@@ -22,10 +22,10 @@ public class ExpandOperatorTests
     [Fact]
     public void Schema_Full_has_three_columns()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         var op = new ExpandOperator(src, 0, Direction.Both, null, ExpandOutputMode.Full);
         op.Schema.Columns.Should().HaveCount(3);
-        op.Schema.Columns.Select(c => c.Name).Should().Equal("source", "rel", "neighbor");
+        op.Schema.Columns.Select(c => c.Name).Should().Equal("source", "edge", "neighbor");
         op.Dispose();
     }
 
@@ -35,7 +35,7 @@ public class ExpandOperatorTests
         using var fx = OperatorTestFixture.OpenEmpty();
         using var tx = fx.Db.BeginTransaction();
         using var result = tx.Execute(
-            new ExpandOperator(new FixedNodeListOperator(), 0, Direction.Both, null, ExpandOutputMode.NeighborOnly));
+            new ExpandOperator(new FixedVertexListOperator(), 0, Direction.Both, null, ExpandOutputMode.NeighborOnly));
         result.Rows().Should().BeEmpty();
         tx.Rollback();
     }
@@ -43,28 +43,28 @@ public class ExpandOperatorTests
     [Fact]
     public void Single_edge_yields_neighbor()
     {
-        NodeId src = default, tgt = default;
+        VertexId src = default, tgt = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {
-            src = tx.CreateNode("X");
-            tgt = tx.CreateNode("X");
-            tx.CreateRelationship(src, tgt, "KNOWS");
+            src = tx.CreateVertex("X");
+            tgt = tx.CreateVertex("X");
+            tx.CreateEdge(src, tgt, "KNOWS");
         });
         using var tx2 = fx.Db.BeginTransaction();
         using var result = tx2.Execute(
-            new ExpandOperator(new FixedNodeListOperator(src), 0, Direction.Outgoing, null, ExpandOutputMode.NeighborOnly));
-        result.Rows().Select(r => r.GetNodeId(0)).Should().Equal(tgt);
+            new ExpandOperator(new FixedVertexListOperator(src), 0, Direction.Outgoing, null, ExpandOutputMode.NeighborOnly));
+        result.Rows().Select(r => r.GetVertexId(0)).Should().Equal(tgt);
         tx2.Rollback();
     }
 
     [Fact]
-    public void Disconnected_node_yields_empty()
+    public void Disconnected_vertex_yields_empty()
     {
-        NodeId isolated = default;
-        using var fx = OperatorTestFixture.Open(tx => { isolated = tx.CreateNode("X"); });
+        VertexId isolated = default;
+        using var fx = OperatorTestFixture.Open(tx => { isolated = tx.CreateVertex("X"); });
         using var tx2 = fx.Db.BeginTransaction();
         using var result = tx2.Execute(
-            new ExpandOperator(new FixedNodeListOperator(isolated), 0, Direction.Both, null, ExpandOutputMode.NeighborOnly));
+            new ExpandOperator(new FixedVertexListOperator(isolated), 0, Direction.Both, null, ExpandOutputMode.NeighborOnly));
         result.Rows().Should().BeEmpty();
         tx2.Rollback();
     }
@@ -72,85 +72,85 @@ public class ExpandOperatorTests
     [Fact]
     public void Direction_filters_neighbors()
     {
-        NodeId a = default, b = default;
+        VertexId a = default, b = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {
-            a = tx.CreateNode("X");
-            b = tx.CreateNode("X");
-            tx.CreateRelationship(a, b, "K"); // a -> b
+            a = tx.CreateVertex("X");
+            b = tx.CreateVertex("X");
+            tx.CreateEdge(a, b, "K"); // a -> b
         });
         using var tx2 = fx.Db.BeginTransaction();
-        // a への入力方向のリレーションシップは存在しない。
+        // a への入力方向のEdgeは存在しない。
         using var inResult = tx2.Execute(
-            new ExpandOperator(new FixedNodeListOperator(a), 0, Direction.Incoming, null, ExpandOutputMode.NeighborOnly));
+            new ExpandOperator(new FixedVertexListOperator(a), 0, Direction.Incoming, null, ExpandOutputMode.NeighborOnly));
         inResult.Rows().Should().BeEmpty();
         tx2.Rollback();
     }
 
     [Fact]
-    public void Type_filter_restricts_to_matching_relationships()
+    public void Type_filter_restricts_to_matching_edges()
     {
-        NodeId a = default;
+        VertexId a = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {
-            a = tx.CreateNode("X");
-            var b = tx.CreateNode("X");
-            var c = tx.CreateNode("X");
-            tx.CreateRelationship(a, b, "KNOWS");
-            tx.CreateRelationship(a, c, "LIKES");
+            a = tx.CreateVertex("X");
+            var b = tx.CreateVertex("X");
+            var c = tx.CreateVertex("X");
+            tx.CreateEdge(a, b, "KNOWS");
+            tx.CreateEdge(a, c, "LIKES");
         });
-        var knows = fx.Db.Schema.GetOrCreateRelationshipType("KNOWS");
+        var knows = fx.Db.Schema.GetOrCreateEdgeType("KNOWS");
         using var tx2 = fx.Db.BeginTransaction();
         using var result = tx2.Execute(
-            new ExpandOperator(new FixedNodeListOperator(a), 0, Direction.Outgoing, knows, ExpandOutputMode.NeighborOnly));
+            new ExpandOperator(new FixedVertexListOperator(a), 0, Direction.Outgoing, knows, ExpandOutputMode.NeighborOnly));
         result.Rows().Should().HaveCount(1);
         tx2.Rollback();
     }
 
     [Fact]
-    public void NeighborAndRel_mode_emits_rel_and_neighbor()
+    public void NeighborAndEdge_mode_emits_edge_and_neighbor()
     {
-        NodeId src = default, tgt = default;
-        RelationshipId rel = default;
+        VertexId src = default, tgt = default;
+        EdgeId edge = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {
-            src = tx.CreateNode("X");
-            tgt = tx.CreateNode("X");
-            rel = tx.CreateRelationship(src, tgt, "K");
+            src = tx.CreateVertex("X");
+            tgt = tx.CreateVertex("X");
+            edge = tx.CreateEdge(src, tgt, "K");
         });
         using var tx2 = fx.Db.BeginTransaction();
         using var result = tx2.Execute(
-            new ExpandOperator(new FixedNodeListOperator(src), 0, Direction.Outgoing, null, ExpandOutputMode.NeighborAndRel));
-        result.Schema.Columns.Select(c => c.Name).Should().Equal("rel", "neighbor");
+            new ExpandOperator(new FixedVertexListOperator(src), 0, Direction.Outgoing, null, ExpandOutputMode.NeighborAndEdge));
+        result.Schema.Columns.Select(c => c.Name).Should().Equal("edge", "neighbor");
         var row = result.Rows().Single();
-        row.GetInt64(0).Should().Be(rel.Value);
-        row.GetNodeId(1).Should().Be(tgt);
+        row.GetInt64(0).Should().Be(edge.Value);
+        row.GetVertexId(1).Should().Be(tgt);
         tx2.Rollback();
     }
 
     [Fact]
     public void NeighborAndWeight_schema_has_three_columns()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         var op = new ExpandOperator(src, 0, Direction.Outgoing, null, ExpandOutputMode.NeighborAndWeight);
         op.Schema.Columns.Should().HaveCount(3);
-        op.Schema.Columns.Select(c => c.Name).Should().Equal("rel", "neighbor", "weight");
+        op.Schema.Columns.Select(c => c.Name).Should().Equal("edge", "neighbor", "weight");
         op.Dispose();
     }
 
     [Fact]
     public void NeighborAndWeight_emits_zero_when_no_payload_lane()
     {
-        NodeId src = default;
+        VertexId src = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {
-            src = tx.CreateNode("X");
-            var tgt = tx.CreateNode("X");
-            tx.CreateRelationship(src, tgt, "K");
+            src = tx.CreateVertex("X");
+            var tgt = tx.CreateVertex("X");
+            tx.CreateEdge(src, tgt, "K");
         });
         using var tx2 = fx.Db.BeginTransaction();
         using var result = tx2.Execute(
-            new ExpandOperator(new FixedNodeListOperator(src), 0, Direction.Outgoing, null, ExpandOutputMode.NeighborAndWeight));
+            new ExpandOperator(new FixedVertexListOperator(src), 0, Direction.Outgoing, null, ExpandOutputMode.NeighborAndWeight));
         var row = result.Rows().Single();
         row.GetInt64(2).Should().Be(0); // documented zero fallback
         tx2.Rollback();
@@ -159,18 +159,18 @@ public class ExpandOperatorTests
     [Fact]
     public void Both_direction_includes_incoming_and_outgoing()
     {
-        NodeId mid = default;
+        VertexId mid = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {
-            var left = tx.CreateNode("X");
-            mid = tx.CreateNode("X");
-            var right = tx.CreateNode("X");
-            tx.CreateRelationship(left, mid, "K");   // mid has incoming
-            tx.CreateRelationship(mid, right, "K");  // mid has outgoing
+            var left = tx.CreateVertex("X");
+            mid = tx.CreateVertex("X");
+            var right = tx.CreateVertex("X");
+            tx.CreateEdge(left, mid, "K");   // mid has incoming
+            tx.CreateEdge(mid, right, "K");  // mid has outgoing
         });
         using var tx2 = fx.Db.BeginTransaction();
         using var result = tx2.Execute(
-            new ExpandOperator(new FixedNodeListOperator(mid), 0, Direction.Both, null, ExpandOutputMode.NeighborOnly));
+            new ExpandOperator(new FixedVertexListOperator(mid), 0, Direction.Both, null, ExpandOutputMode.NeighborOnly));
         result.Rows().Should().HaveCount(2);
         tx2.Rollback();
     }
@@ -179,40 +179,40 @@ public class ExpandOperatorTests
     public void CarryColumns_appends_upstream_slots_to_output()
     {
         // carryColumns は入力側の列を展開後の行へ引き継ぐ。
-        NodeId src = default;
+        VertexId src = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {
-            src = tx.CreateNode("X");
-            var tgt = tx.CreateNode("X");
-            tx.CreateRelationship(src, tgt, "K");
+            src = tx.CreateVertex("X");
+            var tgt = tx.CreateVertex("X");
+            tx.CreateEdge(src, tgt, "K");
         });
         using var tx2 = fx.Db.BeginTransaction();
         using var result = tx2.Execute(
-            new ExpandOperator(new FixedNodeListOperator(src), 0, Direction.Outgoing, null,
+            new ExpandOperator(new FixedVertexListOperator(src), 0, Direction.Outgoing, null,
                 ExpandOutputMode.NeighborOnly, carryColumns: new[] { 0 }));
         result.Schema.Columns.Should().HaveCount(2); // neighbor + carried column
         var row = result.Rows().Single();
-        row.GetNodeId(1).Value.Should().Be(src.Value); // carried source nodeId
+        row.GetVertexId(1).Value.Should().Be(src.Value); // carried source vertexId
         tx2.Rollback();
     }
 
     [Fact]
-    public void Full_mode_emits_source_rel_neighbor()
+    public void Full_mode_emits_source_edge_neighbor()
     {
-        NodeId src = default, tgt = default;
+        VertexId src = default, tgt = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {
-            src = tx.CreateNode("X");
-            tgt = tx.CreateNode("X");
-            tx.CreateRelationship(src, tgt, "K");
+            src = tx.CreateVertex("X");
+            tgt = tx.CreateVertex("X");
+            tx.CreateEdge(src, tgt, "K");
         });
         using var tx2 = fx.Db.BeginTransaction();
         using var result = tx2.Execute(
-            new ExpandOperator(new FixedNodeListOperator(src), 0, Direction.Outgoing, null, ExpandOutputMode.Full));
+            new ExpandOperator(new FixedVertexListOperator(src), 0, Direction.Outgoing, null, ExpandOutputMode.Full));
         result.Rows().Should().HaveCount(1);
         var row = result.Rows().Single();
-        row.GetNodeId(0).Should().Be(src);
-        row.GetNodeId(2).Should().Be(tgt);
+        row.GetVertexId(0).Should().Be(src);
+        row.GetVertexId(2).Should().Be(tgt);
         tx2.Rollback();
     }
 }

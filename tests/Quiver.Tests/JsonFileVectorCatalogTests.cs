@@ -32,7 +32,7 @@ public sealed class JsonFileVectorCatalogTests : IDisposable
         int dim = 8,
         DistanceMetric metric = DistanceMetric.Cosine,
         string provider = "test")
-        => new(name, EntityKind.Node, new PropertyKeyId(1), dim, metric, provider, NormalizationProfile: null);
+        => new(name, EntityKind.Vertex, new PropertyKeyId(1), dim, metric, provider, NormalizationProfile: null);
 
     [Fact]
     public void Empty_path_loads_with_no_indexes()
@@ -97,7 +97,7 @@ public sealed class JsonFileVectorCatalogTests : IDisposable
     public void Upserted_task_persists_across_reopen()
     {
         var record = new EmbeddingTaskRecord(
-            EntityKind.Node, EntityId: 42, IndexName: "doc-embed", ProviderId: "prov",
+            EntityKind.Vertex, EntityId: 42, IndexName: "doc-embed", ProviderId: "prov",
             State: EmbeddingTaskState.Completed,
             ContentHash: "hash-1",
             LastError: null,
@@ -116,7 +116,7 @@ public sealed class JsonFileVectorCatalogTests : IDisposable
     [Fact]
     public void Upsert_overwrites_existing_task_state()
     {
-        var key = new EmbeddingTaskKey(EntityKind.Node, 1, "doc-embed", "prov");
+        var key = new EmbeddingTaskKey(EntityKind.Vertex, 1, "doc-embed", "prov");
         var initial = new EmbeddingTaskRecord(
             key.EntityKind, key.EntityId, key.IndexName, key.ProviderId,
             EmbeddingTaskState.InProgress, ContentHash: null, LastError: null,
@@ -145,10 +145,10 @@ public sealed class JsonFileVectorCatalogTests : IDisposable
         catalog.CreateIndex(MakeSpec("a"));
         catalog.CreateIndex(MakeSpec("b"));
         catalog.UpsertTask(new EmbeddingTaskRecord(
-            EntityKind.Node, 1, "a", "prov",
+            EntityKind.Vertex, 1, "a", "prov",
             EmbeddingTaskState.Completed, null, null, DateTimeOffset.UtcNow));
         catalog.UpsertTask(new EmbeddingTaskRecord(
-            EntityKind.Node, 2, "b", "prov",
+            EntityKind.Vertex, 2, "b", "prov",
             EmbeddingTaskState.Completed, null, null, DateTimeOffset.UtcNow));
 
         catalog.DropIndex("a");
@@ -177,10 +177,10 @@ public sealed class JsonFileVectorCatalogTests : IDisposable
         catalog.CreateIndex(MakeSpec("a"));
         catalog.CreateIndex(MakeSpec("b"));
         catalog.UpsertTask(new EmbeddingTaskRecord(
-            EntityKind.Node, 1, "a", "prov",
+            EntityKind.Vertex, 1, "a", "prov",
             EmbeddingTaskState.Completed, null, null, DateTimeOffset.UtcNow));
         catalog.UpsertTask(new EmbeddingTaskRecord(
-            EntityKind.Node, 2, "b", "prov",
+            EntityKind.Vertex, 2, "b", "prov",
             EmbeddingTaskState.Completed, null, null, DateTimeOffset.UtcNow));
 
         catalog.ListTasks("a").Should().ContainSingle().Which.EntityId.Should().Be(1);
@@ -192,7 +192,7 @@ public sealed class JsonFileVectorCatalogTests : IDisposable
     public void FlatOnly_IndexKind_persists_across_reopen()
     {
         var spec = new VectorIndexSpec(
-            "signal", EntityKind.Node, new PropertyKeyId(1), 256,
+            "signal", EntityKind.Vertex, new PropertyKeyId(1), 256,
             DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly);
         new JsonFileVectorCatalog(_path).CreateIndex(spec);
 

@@ -7,14 +7,14 @@ using Quiver.Core;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// VEC-9: post-filter (vector-first) vs push-down (graph-first) for the
+/// post-filter (vector-first) vs push-down (graph-first) for the
 /// <c>g.Knn(idx, q, K).HasLabel("Hit").ToList()</c> pattern. The push-down
-/// path is the default behavior after VEC-9 (ARCH-7 で optimizer に集約)。
+/// path is the default behavior selected by the optimizer.
 /// The post-filter baseline is reproduced by building the KNN top-K → label
 /// post-filter physical plan directly via <see cref="KnnBenchSupport"/>
 /// (optimizer を介さない vector-first 基準)。
 ///
-/// Expected speedup (from VEC-8 extrapolation): 0.1% sel ~100×, 1% ~30-50×,
+/// Expected speedup from prior measurements: 0.1% sel ~100×, 1% ~30-50×,
 /// 5% ~10-20×, 25% ~2-3×.
 /// </summary>
 [MemoryDiagnoser]
@@ -33,7 +33,7 @@ public class KnnPushdownBenchmarks
     private const string IndexName = "pushdown-bench";
 
     private string _dir = null!;
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
     private float[] _query = null!;
 
     [GlobalSetup]
@@ -41,11 +41,11 @@ public class KnnPushdownBenchmarks
     {
         var rng = new Random(2026);
         _dir = BenchTempDir.Create("vec9");
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         var keyId = _db.Schema.GetOrCreatePropertyKey("title");
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, keyId, Dim,
+            IndexName, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "bench", null));
 
         int hitCount = Math.Max(1, (int)((long)N * FractionPermille / 1000));
@@ -57,9 +57,9 @@ public class KnnPushdownBenchmarks
         {
             for (int i = 0; i < N; i++)
             {
-                var n = tx.CreateNode(hitSet.Contains(i) ? "Hit" : "Miss");
+                var n = tx.CreateVertex(hitSet.Contains(i) ? "Hit" : "Miss");
                 for (int d = 0; d < Dim; d++) buf[d] = (float)(rng.NextDouble() * 2.0 - 1.0);
-                _db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, buf);
+                _db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, buf);
             }
             tx.Commit();
         }
@@ -78,7 +78,7 @@ public class KnnPushdownBenchmarks
 
     /// <summary>
     /// Legacy post-filter: top-K from full N, then drop by label. KNN top-K →
-    /// label post-filter の物理プランを直接構築して測る (= VEC-9 pre-rewrite plan)。
+    /// label post-filter の物理プランを直接構築して測る (=  pre-rewrite plan)。
     /// </summary>
     [Benchmark(Baseline = true)]
     public int PostFilter()
@@ -87,7 +87,7 @@ public class KnnPushdownBenchmarks
         return KnnBenchSupport.PostFilterCount(rtx, _db.Schema, IndexName, _query, K, "Hit");
     }
 
-    /// <summary>VEC-9 default: <c>g.Knn().HasLabel()</c> is rewritten to graph-first.</summary>
+    /// <summary> default: <c>g.Knn().HasLabel()</c> is rewritten to graph-first.</summary>
     [Benchmark]
     public int Pushdown()
     {

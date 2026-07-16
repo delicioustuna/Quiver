@@ -8,20 +8,20 @@ namespace Quiver.Transactions;
 /// <para>read-set は <see cref="ISsnReadSink"/> 実装として下層ストアの物理読み取り点
 /// (Read / Scan / 隣接走査) から <see cref="OnVisibleRead"/> 経由で収集する。これにより
 /// 直接 Read だけでなく traversal / scan / index seek 経由の読み取りも漏れなく入る。
-/// write-set は <c>TxNodeStore</c> / <c>TxRelationshipStore</c> の write hook が登録する。
+/// write-set は <c>TxVertexStore</c> / <c>TxEdgeStore</c> の write hook が登録する。
 /// η(T) / π(T) の計算と exclusion window (π(T) &gt; η(T)) 判定は commit 時に
 /// <see cref="TransactionManager"/> の commit-stamp クロックで一括実行する
 /// (<c>Transaction.SsnValidateAndStamp</c>)。</para>
-/// <para>granularity は Node / Relationship 単位 (プロパティ変更は所有ノードの read/write で
+/// <para>granularity は Vertex / Edge 単位 (プロパティ変更は所有Vertexの read/write で
 /// 捕捉される — per-property より粗いが over-abort 方向で安全)。phantom protection は対象外
 /// (index versioning 前提)。</para>
 /// </summary>
 internal sealed class SsnContext : ISsnReadSink
 {
-    /// <summary>このトランザクションが読み出したバージョン (Node / Relationship)。</summary>
+    /// <summary>このトランザクションが読み出したバージョン (Vertex / Edge)。</summary>
     public readonly HashSet<EntityId> Reads = new();
 
-    /// <summary>このトランザクションが上書き / 削除したバージョン (Node / Relationship)。</summary>
+    /// <summary>このトランザクションが上書き / 削除したバージョン (Vertex / Edge)。</summary>
     public readonly HashSet<EntityId> Writes = new();
 
     /// <inheritdoc/>

@@ -29,7 +29,7 @@ Quiver の全体構成、データの流れ、デプロイモデル、運用上�
   │
   ▼
 Quiver（エンジン中核）
-  ├─ GraphDatabase         ファサード
+  ├─ QuiverDatabase         ファサード
   ├─ GraphTransaction      CRUD、走査、インデックス操作
   ├─ Query Engine          論理 IR → 最適化 → 物理オペレータ
   ├─ Transaction Manager   MVCC、ロック、リカバリ、チェックポイント
@@ -55,7 +55,7 @@ Quiver は in-process の組み込み DB であり、サーバプロセスは存
 ```
 ┌──────────────────────────────┐
 │  ホストアプリケーション        │
-│    ├─ GraphDatabase.Open()   │
+│    ├─ QuiverDatabase.Open()   │
 │    ├─ ビジネスロジック         │
 │    └─ db.Dispose()           │
 │                              │
@@ -72,7 +72,7 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 ## 書き込みの流れ
 
 1. `db.BeginTransaction()` でトランザクションを開始する
-2. `CreateNode`、`SetProperty` 等で変更を加える。変更はバッファプール上のページに反映される
+2. `CreateVertex`、`SetProperty` 等で変更を加える。変更はバッファプール上のページに反映される
 3. `tx.Commit()` で WAL に Commit レコードを書き、`fsync` で永続化する
 4. チェックポイント条件に達すると、dirty ページがデータファイルに書き戻される
 
@@ -108,7 +108,7 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 
 さらに高速化するなら `BulkLoader` を使う（通常 TX 比 ~12× 高速）。
 
-並行書き込みでは `GraphDatabaseOptions.GroupCommitWindow` を設定すると、複数トランザクションの WAL フラッシュを 1 回の fsync にまとめられる。
+並行書き込みでは `QuiverDatabaseOptions.GroupCommitWindow` を設定すると、複数トランザクションの WAL フラッシュを 1 回の fsync にまとめられる。
 
 ### 読み取りの性能
 
@@ -117,7 +117,7 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 
 ### トランザクションの利用規約
 
-- `GraphDatabase` インスタンスはスレッド間で共有して使い回す（スレッドセーフ）
+- `QuiverDatabase` インスタンスはスレッド間で共有して使い回す（スレッドセーフ）
 - トランザクションは 1 スレッドで開始、使用、commit/dispose する（スレッドアフィン）
 - `Begin` と `Commit` の間で `await` しない
 - 書き込みの直列化はアプリケーション側の責任（`SemaphoreSlim(1,1)` 等）
@@ -131,7 +131,7 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 
 ### 障害復旧
 
-クラッシュ後の `GraphDatabase.Open()` で 2 フェーズリカバリが自動実行される。
+クラッシュ後の `QuiverDatabase.Open()` で 2 フェーズリカバリが自動実行される。
 コミット済みの変更は復元され、未コミットの変更は巻き戻される。
 詳細は [リカバリとトラブルシュート](operations/04_recovery_troubleshoot.md) を参照。
 

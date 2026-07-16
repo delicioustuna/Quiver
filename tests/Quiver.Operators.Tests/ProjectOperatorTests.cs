@@ -12,7 +12,7 @@ public class ProjectOperatorTests
     [Fact]
     public void Empty_input_returns_empty()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         using var op = new ProjectOperator(src, [new ProjectionSpec("doubled", new DoubleValueCompute())]);
         op.Open(null!);
         Collect(op).Should().BeEmpty();
@@ -21,7 +21,7 @@ public class ProjectOperatorTests
     [Fact]
     public void Computes_projection_per_row()
     {
-        var src = new FixedNodeListOperator(new NodeId(10), new NodeId(20));
+        var src = new FixedVertexListOperator(new VertexId(10), new VertexId(20));
         using var op = new ProjectOperator(src, [new ProjectionSpec("doubled", new DoubleValueCompute())]);
         op.Open(null!);
         Collect(op).Should().Equal(20, 40);
@@ -30,7 +30,7 @@ public class ProjectOperatorTests
     [Fact]
     public void Schema_carries_output_column_names()
     {
-        var src = new FixedNodeListOperator();
+        var src = new FixedVertexListOperator();
         using var op = new ProjectOperator(src, [
             new ProjectionSpec("a", new DoubleValueCompute()),
             new ProjectionSpec("b", new DoubleValueCompute()),
@@ -43,7 +43,7 @@ public class ProjectOperatorTests
     [Fact]
     public void Multiple_projections_compute_per_column()
     {
-        var src = new FixedNodeListOperator(new NodeId(5));
+        var src = new FixedVertexListOperator(new VertexId(5));
         using var op = new ProjectOperator(src, [
             new ProjectionSpec("x", new DoubleValueCompute()),
             new ProjectionSpec("y", new DoubleValueCompute()),
@@ -58,7 +58,7 @@ public class ProjectOperatorTests
     [Fact]
     public void Statistics_count_emitted_rows()
     {
-        var src = new FixedNodeListOperator(new NodeId(1), new NodeId(2), new NodeId(3));
+        var src = new FixedVertexListOperator(new VertexId(1), new VertexId(2), new VertexId(3));
         using var op = new ProjectOperator(src, [new ProjectionSpec("d", new DoubleValueCompute())]);
         op.Open(null!);
         while (op.MoveNext()) { }

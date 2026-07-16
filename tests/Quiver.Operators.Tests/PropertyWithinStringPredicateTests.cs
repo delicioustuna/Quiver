@@ -17,7 +17,7 @@ public class PropertyWithinStringPredicateTests
         var key = fx.Db.Schema.GetOrCreatePropertyKey("color");
         var pred = new PropertyWithinStringPredicate(0, key, new[] { "red" });
         using var tx = fx.Db.BeginTransaction();
-        using var result = tx.Execute(new FilterOperator(new FixedNodeListOperator(), pred));
+        using var result = tx.Execute(new FilterOperator(new FixedVertexListOperator(), pred));
         result.Rows().Should().BeEmpty();
         tx.Rollback();
     }
@@ -25,36 +25,36 @@ public class PropertyWithinStringPredicateTests
     [Fact]
     public void Within_keeps_only_listed_values()
     {
-        NodeId red = default, blue = default, green = default;
+        VertexId red = default, blue = default, green = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {
-            red = tx.CreateNode("X");   tx.SetProperty(red, "color", PropertyValue.FromString("red"));
-            blue = tx.CreateNode("X");  tx.SetProperty(blue, "color", PropertyValue.FromString("blue"));
-            green = tx.CreateNode("X"); tx.SetProperty(green, "color", PropertyValue.FromString("green"));
+            red = tx.CreateVertex("X");   tx.SetProperty(red, "color", PropertyValue.FromString("red"));
+            blue = tx.CreateVertex("X");  tx.SetProperty(blue, "color", PropertyValue.FromString("blue"));
+            green = tx.CreateVertex("X"); tx.SetProperty(green, "color", PropertyValue.FromString("green"));
         });
         var key = fx.Db.Schema.GetOrCreatePropertyKey("color");
         var pred = new PropertyWithinStringPredicate(0, key, new[] { "red", "green" });
         using var tx2 = fx.Db.BeginTransaction();
         using var result = tx2.Execute(new FilterOperator(
-            new FixedNodeListOperator(red, blue, green), pred));
+            new FixedVertexListOperator(red, blue, green), pred));
         result.Rows().Should().HaveCount(2);
-        result.Rows().Select(r => r.GetNodeId(0)).Should().BeEquivalentTo(new[] { red, green });
+        result.Rows().Select(r => r.GetVertexId(0)).Should().BeEquivalentTo(new[] { red, green });
         tx2.Rollback();
     }
 
     [Fact]
     public void Empty_allowlist_drops_everything()
     {
-        NodeId n = default;
+        VertexId n = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {
-            n = tx.CreateNode("X");
+            n = tx.CreateVertex("X");
             tx.SetProperty(n, "color", PropertyValue.FromString("red"));
         });
         var key = fx.Db.Schema.GetOrCreatePropertyKey("color");
         var pred = new PropertyWithinStringPredicate(0, key, Array.Empty<string>());
         using var tx2 = fx.Db.BeginTransaction();
-        using var result = tx2.Execute(new FilterOperator(new FixedNodeListOperator(n), pred));
+        using var result = tx2.Execute(new FilterOperator(new FixedVertexListOperator(n), pred));
         result.Rows().Should().BeEmpty();
         tx2.Rollback();
     }
@@ -62,20 +62,20 @@ public class PropertyWithinStringPredicateTests
     [Fact]
     public void Missing_property_drops_row()
     {
-        NodeId withProp = default, without = default;
+        VertexId withProp = default, without = default;
         using var fx = OperatorTestFixture.Open(tx =>
         {
-            withProp = tx.CreateNode("X");
+            withProp = tx.CreateVertex("X");
             tx.SetProperty(withProp, "color", PropertyValue.FromString("red"));
-            without = tx.CreateNode("X");
+            without = tx.CreateVertex("X");
         });
         var key = fx.Db.Schema.GetOrCreatePropertyKey("color");
         var pred = new PropertyWithinStringPredicate(0, key, new[] { "red", "blue" });
         using var tx2 = fx.Db.BeginTransaction();
         using var result = tx2.Execute(new FilterOperator(
-            new FixedNodeListOperator(withProp, without), pred));
+            new FixedVertexListOperator(withProp, without), pred));
         result.Rows().Should().HaveCount(1);
-        result.Rows().Single().GetNodeId(0).Should().Be(withProp);
+        result.Rows().Single().GetVertexId(0).Should().Be(withProp);
         tx2.Rollback();
     }
 }

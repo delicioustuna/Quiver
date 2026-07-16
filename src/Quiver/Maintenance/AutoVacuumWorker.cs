@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace Quiver.Maintenance;
 
 /// <summary>
-/// <see cref="GraphDatabaseOptions.AutoVacuum"/> が有効なときに、周期的に
+/// <see cref="QuiverDatabaseOptions.AutoVacuum"/> が有効なときに、周期的に
 /// <see cref="IVacuum.Run"/> を起動する低頻度バックグラウンドワーカー。
 /// </summary>
 /// <remarks>
@@ -45,7 +45,7 @@ internal sealed class AutoVacuumWorker : IDisposable
     internal Action<VacuumReport>? OnTickCompleted;
 
     /// <param name="runVacuum">
-    /// 1 tick で起動する vacuum 関数。通常は <c>() =&gt; graphDatabase.Vacuum()</c>。
+    /// 1 tick で起動する vacuum 関数。通常は <c>() =&gt; database.Vacuum()</c>。
     /// </param>
     /// <param name="interval">起動周期。<see cref="TimeSpan.Zero"/> 以下は不可。</param>
     public AutoVacuumWorker(Func<VacuumReport> runVacuum, TimeSpan interval)

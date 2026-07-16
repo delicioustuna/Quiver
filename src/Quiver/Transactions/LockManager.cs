@@ -121,7 +121,7 @@ internal sealed class LockManager
             while (!waiter.Granted)
             {
                 // DeadlockDetector が当該 waiter を犠牲者として印付けたら DeadlockException を投げて
-                // 上位 (TxNodeStore.Acquire 等の wrapping ではなく user 経路) へ伝播させる。
+                // 上位 (TxVertexStore.Acquire 等の wrapping ではなく user 経路) へ伝播させる。
                 if (waiter.DeadlockAborted)
                     throw new DeadlockException(txId,
                         $"Transaction {txId.Value} aborted by deadlock detector while waiting for {(mode == LockMode.Exclusive ? "exclusive" : "shared")} lock.");

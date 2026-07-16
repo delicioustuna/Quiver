@@ -5,15 +5,15 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// ソースノードの隣接エッジを走査し、出力モードに応じて近傍ノード・リレーションシップ・
+/// ソースVertexの隣接エッジを走査し、出力モードに応じて近傍Vertex・Edge・
 /// 重みを放出する 1 ホップ展開演算子。
 /// </summary>
 internal sealed class ExpandOperator : IPhysicalOperator
 {
     private readonly IPhysicalOperator _source;
-    private readonly int _sourceNodeColumn;
+    private readonly int _sourceVertexColumn;
     private readonly Direction _direction;
-    private readonly RelationshipTypeId? _typeFilter;
+    private readonly EdgeTypeId? _typeFilter;
     private readonly ExpandOutputMode _outputMode;
     // non-null のとき、上流の列値を出力タプルの末尾にコピーする。
     // インデックスセットは毎回同一なのでコンストラクタで 1 度だけ確保する。
@@ -25,18 +25,18 @@ internal sealed class ExpandOperator : IPhysicalOperator
     private TupleSlotType _weightSlotType = TupleSlotType.Int64;
 
     private ExpandCursor? _cursor;
-    private NodeId _currentSourceNode;
+    private VertexId _currentSourceVertex;
 
     public ExpandOperator(
         IPhysicalOperator source,
-        int sourceNodeColumn,
+        int sourceVertexColumn,
         Direction direction,
-        RelationshipTypeId? typeFilter,
+        EdgeTypeId? typeFilter,
         ExpandOutputMode outputMode,
         int[]? carryColumns = null)
     {
         _source = source;
-        _sourceNodeColumn = sourceNodeColumn;
+        _sourceVertexColumn = sourceVertexColumn;
         _direction = direction;
         _typeFilter = typeFilter;
         _outputMode = outputMode;
@@ -46,24 +46,24 @@ internal sealed class ExpandOperator : IPhysicalOperator
         {
             ExpandOutputMode.NeighborOnly => new ColumnDefinition[]
             {
-                new("neighbor", TupleSlotType.NodeId),
+                new("neighbor", TupleSlotType.VertexId),
             },
-            ExpandOutputMode.NeighborAndRel => new ColumnDefinition[]
+            ExpandOutputMode.NeighborAndEdge => new ColumnDefinition[]
             {
-                new("rel",      TupleSlotType.RelationshipId),
-                new("neighbor", TupleSlotType.NodeId),
+                new("edge",      TupleSlotType.EdgeId),
+                new("neighbor", TupleSlotType.VertexId),
             },
             ExpandOutputMode.NeighborAndWeight => new ColumnDefinition[]
             {
-                new("rel",      TupleSlotType.RelationshipId),
-                new("neighbor", TupleSlotType.NodeId),
+                new("edge",      TupleSlotType.EdgeId),
+                new("neighbor", TupleSlotType.VertexId),
                 new("weight",   TupleSlotType.Int64),
             },
             _ /* Full */ => new ColumnDefinition[]
             {
-                new("source",   TupleSlotType.NodeId),
-                new("rel",      TupleSlotType.RelationshipId),
-                new("neighbor", TupleSlotType.NodeId),
+                new("source",   TupleSlotType.VertexId),
+                new("edge",      TupleSlotType.EdgeId),
+                new("neighbor", TupleSlotType.VertexId),
             },
         };
 
@@ -88,7 +88,7 @@ internal sealed class ExpandOperator : IPhysicalOperator
             _schema = new TupleSchema(cols);
         }
 
-        _currentSourceNode = NodeId.Invalid;
+        _currentSourceVertex = VertexId.Invalid;
     }
 
     public TupleSchema Schema => _schema;
@@ -99,7 +99,7 @@ internal sealed class ExpandOperator : IPhysicalOperator
     {
         _tx = tx;
         _source.Open(tx);
-        _currentSourceNode = NodeId.Invalid;
+        _currentSourceVertex = VertexId.Invalid;
         _cursor = null;
 
         // 重み出力時、スロット型を payload lane の Kind に合わせる。
@@ -123,7 +123,7 @@ internal sealed class ExpandOperator : IPhysicalOperator
         {
             if (_cursor != null && _cursor.MoveNext())
             {
-                BuildOutput(_cursor.Neighbor, _cursor.Relationship, _cursor.WeightRaw);
+                BuildOutput(_cursor.Neighbor, _cursor.Edge, _cursor.WeightRaw);
                 var s = Statistics;
                 s.RowsProduced++;
                 Statistics = s;
@@ -134,14 +134,14 @@ internal sealed class ExpandOperator : IPhysicalOperator
             _cursor = null;
 
             if (!_source.MoveNext()) return false;
-            _currentSourceNode = new NodeId(_source.Current[_sourceNodeColumn].LongValue);
-            _cursor = _tx!.Access.Expand(_tx, _currentSourceNode, _direction, _typeFilter);
+            _currentSourceVertex = new VertexId(_source.Current[_sourceVertexColumn].LongValue);
+            _cursor = _tx!.Access.Expand(_tx, _currentSourceVertex, _direction, _typeFilter);
 
-            // ソースノードに隣接ブロックがある場合のみヒットとして計上する。
+            // ソースVertexに隣接ブロックがある場合のみヒットとして計上する。
             // AdjacencyFallbackCount (ブロック不在時のみ発火) とは異なり、
-            // オプティマイザが ExpandStrategy 選択時に RelationshipScanRecords と
+            // オプティマイザが ExpandStrategy 選択時に EdgeScanRecords と
             // 比較するための per-operator ヒット数を提供する。
-            if (_tx!.AdjacencyBlocks?.HasBlock(_currentSourceNode) == true)
+            if (_tx!.AdjacencyBlocks?.HasBlock(_currentSourceVertex) == true)
             {
                 var s = Statistics;
                 s.AdjacencyBlockHits++;
@@ -150,26 +150,26 @@ internal sealed class ExpandOperator : IPhysicalOperator
         }
     }
 
-    private void BuildOutput(NodeId neighbor, RelationshipId relId, long weightRaw)
+    private void BuildOutput(VertexId neighbor, EdgeId edgeId, long weightRaw)
     {
         switch (_outputMode)
         {
             case ExpandOutputMode.NeighborOnly:
-                _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = neighbor.Value };
+                _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = neighbor.Value };
                 break;
-            case ExpandOutputMode.NeighborAndRel:
-                _buffer[0] = new TupleSlot { Type = TupleSlotType.RelationshipId, LongValue = relId.Value };
-                _buffer[1] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = neighbor.Value };
+            case ExpandOutputMode.NeighborAndEdge:
+                _buffer[0] = new TupleSlot { Type = TupleSlotType.EdgeId, LongValue = edgeId.Value };
+                _buffer[1] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = neighbor.Value };
                 break;
             case ExpandOutputMode.NeighborAndWeight:
-                _buffer[0] = new TupleSlot { Type = TupleSlotType.RelationshipId, LongValue = relId.Value };
-                _buffer[1] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = neighbor.Value };
+                _buffer[0] = new TupleSlot { Type = TupleSlotType.EdgeId, LongValue = edgeId.Value };
+                _buffer[1] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = neighbor.Value };
                 _buffer[2] = new TupleSlot { Type = _weightSlotType, LongValue = weightRaw };
                 break;
             default:
-                _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _currentSourceNode.Value };
-                _buffer[1] = new TupleSlot { Type = TupleSlotType.RelationshipId, LongValue = relId.Value };
-                _buffer[2] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = neighbor.Value };
+                _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _currentSourceVertex.Value };
+                _buffer[1] = new TupleSlot { Type = TupleSlotType.EdgeId, LongValue = edgeId.Value };
+                _buffer[2] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = neighbor.Value };
                 break;
         }
 

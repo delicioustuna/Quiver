@@ -12,7 +12,7 @@ namespace Quiver.Tests;
 /// <summary>
 /// <see cref="LogicalOptimizer"/> の KNN プッシュダウンにおける統計ベースの
 /// フォールバックを検証する。
-/// 構造ヒントが graph-first を示していても、ラベルのカーディナリティと総ノード数の比率が
+/// 構造ヒントが graph-first を示していても、ラベルのカーディナリティと総Vertex数の比率が
 /// <see cref="LogicalOptimizer.VectorFirstLabelFraction"/> (既定 30%) 以上のときは vector-first にフォールバックする。
 /// 統計を渡さない場合は構造ヒントだけで graph-first を選ぶ。
 /// <para>
@@ -25,16 +25,16 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     private const string IndexName = "doc-embed";
     private const int Dim = 4;
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public KnnPushdownStatsAwareTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_vec10_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         var keyId = _db.Schema.GetOrCreatePropertyKey("title");
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, keyId, Dim,
+            IndexName, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "test", null));
     }
 
@@ -76,13 +76,13 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
         {
             for (int i = 0; i < 50; i++)
             {
-                var d = tx.CreateNode("Doc");
-                _db.Vectors.SetVector(EntityKind.Node, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                var d = tx.CreateVertex("Doc");
+                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             for (int i = 0; i < 50; i++)
             {
-                var o = tx.CreateNode("Other");
-                _db.Vectors.SetVector(EntityKind.Node, o.Value, IndexName, new float[] { 0, 1, 0, 0 });
+                var o = tx.CreateVertex("Other");
+                _db.Vectors.SetVector(EntityKind.Vertex, o.Value, IndexName, new float[] { 0, 1, 0, 0 });
             }
             tx.Commit();
         }
@@ -107,11 +107,11 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
         {
             for (int i = 0; i < 50; i++)
             {
-                var d = tx.CreateNode("Doc");
-                _db.Vectors.SetVector(EntityKind.Node, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                var d = tx.CreateVertex("Doc");
+                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             for (int i = 0; i < 50; i++)
-                _ = tx.CreateNode("Other");
+                _ = tx.CreateVertex("Other");
             tx.Commit();
         }
 
@@ -133,13 +133,13 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
         {
             for (int i = 0; i < 5; i++)
             {
-                var d = tx.CreateNode("Doc");
-                _db.Vectors.SetVector(EntityKind.Node, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                var d = tx.CreateVertex("Doc");
+                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             for (int i = 0; i < 95; i++)
             {
-                var o = tx.CreateNode("Other");
-                _db.Vectors.SetVector(EntityKind.Node, o.Value, IndexName, new float[] { 0, 1, 0, 0 });
+                var o = tx.CreateVertex("Other");
+                _db.Vectors.SetVector(EntityKind.Vertex, o.Value, IndexName, new float[] { 0, 1, 0, 0 });
             }
             tx.Commit();
         }
@@ -166,18 +166,18 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
             docIds = new long[50];
             for (int i = 0; i < 50; i++)
             {
-                var d = tx.CreateNode("Doc");
+                var d = tx.CreateVertex("Doc");
                 docIds[i] = d.Value;
                 var v = new float[Dim];
                 v[i % Dim] = 1f;
-                _db.Vectors.SetVector(EntityKind.Node, d.Value, IndexName, v);
+                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
             }
             for (int i = 0; i < 50; i++)
             {
-                var o = tx.CreateNode("Other");
+                var o = tx.CreateVertex("Other");
                 var v = new float[Dim];
                 v[i % Dim] = 1f;
-                _db.Vectors.SetVector(EntityKind.Node, o.Value, IndexName, v);
+                _db.Vectors.SetVector(EntityKind.Vertex, o.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -211,13 +211,13 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
             // k=10 なら全件が KNN 結果に入り、後段 HasLabel("Doc") で 6 件残る。
             for (int i = 0; i < 6; i++)
             {
-                var d = tx.CreateNode("Doc");
-                _db.Vectors.SetVector(EntityKind.Node, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                var d = tx.CreateVertex("Doc");
+                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             for (int i = 0; i < 4; i++)
             {
-                var o = tx.CreateNode("Other");
-                _db.Vectors.SetVector(EntityKind.Node, o.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                var o = tx.CreateVertex("Other");
+                _db.Vectors.SetVector(EntityKind.Vertex, o.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             tx.Commit();
         }
@@ -246,9 +246,9 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
         {
             for (int i = 0; i < 30; i++)
             {
-                var d = tx.CreateNode("Doc");
+                var d = tx.CreateVertex("Doc");
                 tx.SetProperty(d, "status", Storage.Records.PropertyValue.FromString(i == 0 ? "active" : "archived"));
-                _db.Vectors.SetVector(EntityKind.Node, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             tx.Commit();
         }
@@ -275,15 +275,15 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
             // 40 Doc + 40 Other (Doc = 50%)。Doc のうち 5 件だけ status=active。
             for (int i = 0; i < 40; i++)
             {
-                var d = tx.CreateNode("Doc");
+                var d = tx.CreateVertex("Doc");
                 tx.SetProperty(d, "status", Storage.Records.PropertyValue.FromString(i < 5 ? "active" : "archived"));
-                _db.Vectors.SetVector(EntityKind.Node, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             for (int i = 0; i < 40; i++)
             {
-                var o = tx.CreateNode("Other");
+                var o = tx.CreateVertex("Other");
                 tx.SetProperty(o, "status", Storage.Records.PropertyValue.FromString("active"));
-                _db.Vectors.SetVector(EntityKind.Node, o.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                _db.Vectors.SetVector(EntityKind.Vertex, o.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             tx.Commit();
         }
@@ -311,13 +311,13 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     {
         using (var tx = _db.BeginTransaction())
         {
-            for (int i = 0; i < 40; i++) _ = tx.CreateNode("Doc");
-            for (int i = 0; i < 60; i++) _ = tx.CreateNode("Other");
+            for (int i = 0; i < 40; i++) _ = tx.CreateVertex("Doc");
+            for (int i = 0; i < 60; i++) _ = tx.CreateVertex("Other");
             tx.Commit();
         }
 
         var stats = _db.CollectStats();
-        stats.HasFastLabelIndex.Should().BeTrue("binary backend は LabelNodeIndex sidecar を持つ");
+        stats.HasFastLabelIndex.Should().BeTrue("binary backend は LabelVertexIndex sidecar を持つ");
 
         AssertGraphFirst(
             OptimizeManual(stats, dim: 768, label: "Doc"),
@@ -333,8 +333,8 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     {
         using (var tx = _db.BeginTransaction())
         {
-            for (int i = 0; i < 40; i++) _ = tx.CreateNode("Doc");
-            for (int i = 0; i < 60; i++) _ = tx.CreateNode("Other");
+            for (int i = 0; i < 40; i++) _ = tx.CreateVertex("Doc");
+            for (int i = 0; i < 60; i++) _ = tx.CreateVertex("Other");
             tx.Commit();
         }
 
@@ -356,8 +356,8 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     {
         using (var tx = _db.BeginTransaction())
         {
-            for (int i = 0; i < 45; i++) _ = tx.CreateNode("Doc");
-            for (int i = 0; i < 55; i++) _ = tx.CreateNode("Other");
+            for (int i = 0; i < 45; i++) _ = tx.CreateVertex("Doc");
+            for (int i = 0; i < 55; i++) _ = tx.CreateVertex("Other");
             tx.Commit();
         }
 

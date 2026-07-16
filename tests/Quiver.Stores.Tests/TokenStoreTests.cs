@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using Quiver.Core;
 using Quiver.Storage.Records;
 using Xunit;

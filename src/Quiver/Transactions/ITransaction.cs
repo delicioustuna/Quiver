@@ -1,4 +1,4 @@
-﻿using Quiver.Core;
+using Quiver.Core;
 using Quiver.Index;
 using Quiver.Storage.Records;
 
@@ -57,11 +57,11 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     /// </summary>
     void ReleaseSavepoint(SavepointId savepoint);
 
-    INodeStore Nodes { get; }
-    IRelationshipStore Relationships { get; }
-    IHyperedgeStore Hyperedges { get; }
+    IVertexStore Vertices { get; }
+    IEdgeStore Edges { get; }
+    INexusStore Nexuses { get; }
     IIncidenceStore Incidences { get; }
-    INodeIncidenceHeadStore NodeIncidenceHeads { get; }
+    IVertexIncidenceHeadStore VertexIncidenceHeads { get; }
     IPropertyStore Properties { get; }
     IIndexManager Indexes { get; }
 
@@ -72,7 +72,7 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     // 明示設定されたロール対の co-membership 導出ビュー。未設定なら null。
     ICoMembershipBlockStore? CoMembershipBlocks { get; }
 
-    // バックエンド提供のアクセスメソッド。オペレータは Nodes/Relationships/AdjacencyBlocks を
+    // バックエンド提供のアクセスメソッド。オペレータは Vertices/Edges/AdjacencyBlocks を
     // 直接読まずこちら経由で呼ぶ。バックエンド固有実装が無い場合は InlineGraphAccessMethods.Instance。
     IGraphAccessMethods Access { get; }
 }

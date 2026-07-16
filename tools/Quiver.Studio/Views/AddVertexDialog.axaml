@@ -1,0 +1,31 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Quiver.Studio.Views.AddVertexDialog"
+        Title="Add Vertex"
+        Width="360" Height="200"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+    <StackPanel Margin="16" Spacing="12">
+        <TextBlock Text="Vertexの追加"
+                   FontWeight="SemiBold" />
+        <AutoCompleteBox x:Name="LabelBox"
+                         PlaceholderText="選択もしくは新規入力"
+                         FilterMode="Contains"
+                         FontSize="13" />
+
+        <StackPanel Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Spacing="8"
+                    Margin="0,12,0,0">
+            <Button Content="キャンセル"
+                    Click="OnCancel"
+                    Padding="16,6"
+                    IsCancel="True" />
+            <Button Content="作成"
+                    Click="OnCreate"
+                    Padding="16,6"
+                    IsDefault="True"
+                    Classes="accent" />
+        </StackPanel>
+    </StackPanel>
+</Window>

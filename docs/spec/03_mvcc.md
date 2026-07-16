@@ -1,89 +1,67 @@
-# MVCC & トランザクション
+# MVCC とトランザクション
 
-> as-built 仕様 (on-disk FormatVersion V5)
->
-> **current (as-built)**: 以下は現在実装されている FormatVersion V5 の MVCC とトランザクション契約である。
-> **target (未実装)**: [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md) が将来の設計正本であり、本書の本文はその target を先取りして記述しない。
-> **実装済み境界**: 再設計の production code はまだ実装されていない。`redesign-baseline` は着工前の測定を固定するタグであり、再設計の実装完了を表さない。
+> as-built 仕様（QUIVER-SW family version 1、2026-07-15）
 
 ## 分離レベル {#isolation}
 
-Quiver は **snapshot isolation** をサポートする。各トランザクションは、その開始時の LSN
-(`SnapshotLsn`) 時点におけるデータベースの一貫したスナップショットを見る。ライタはリーダを
-ブロックせず、並行するリーダはそれぞれ自分の一貫したスナップショットを見る。
+Quiver は snapshot isolation を提供する。
+各トランザクションは開始時の `SnapshotLsn` に対応する一貫した状態を参照する。
+読み取りは自分の snapshot より後に commit した version を参照しない。
 
-## トランザクションのライフサイクル {#lifecycle}
+## entity と property {#entities-and-properties}
 
-```
-Active → Preparing → Committed
-  │
-  └──────────────→ Aborted
+グラフ entity は `Vertex`、`Edge`、`Nexus` の三種類である。
+`Property` は独立した entity ではない。
+Property は owner の identity と property key に束縛された versioned value である。
+
+## ライフサイクル {#lifecycle}
+
+```text
+Active -> Preparing -> Committed
+  |
+  +-----------------> Aborted
 ```
 
 | 状態 | 値 | 意味 |
-|---|---|---|
-| `Active` | 1 | 進行中、読み書き可能 |
-| `Preparing` | 2 | コミット準備フェーズ |
-| `Committed` | 3 | 永続的にコミット済み（WAL フラッシュ済み） |
-| `Aborted` | 4 | ロールバック済み（明示的、または Commit なしの Dispose 時） |
+|---|---:|---|
+| `Active` | 1 | 読み書きを受け付ける |
+| `Preparing` | 2 | commit を準備している |
+| `Committed` | 3 | `Commit` が WAL へ永続化された |
+| `Aborted` | 4 | プロセス内の変更を巻き戻した |
 
-## トランザクション ID {#tx-id}
+`TransactionId` は単調に増える識別子である。
+`CommittedTxRegistry` は明示的な durable commit と recovery で確認した winner を記録し、version の可視性判定に使う。
 
-`TransactionId` は単調増加する識別子である。`CommittedTxRegistry` は、どのトランザクション ID が
-コミット済みかを追跡し、可視性の判断を可能にする。
+## commit {#commit}
 
-## スナップショット状態 {#snapshot}
+書き込みトランザクションは変更ページを transaction-owned write set に保持する。
+commit は最終 `PageImage` を WAL へ出力し、`Commit` を追記して、その LSN まで fsync する。
+この fsync が成功した時点が durability の境界である。
 
-`SnapshotState` は、あるトランザクションから見えるコミット済みトランザクションの集合を捕捉する。
-列スキャン集約はこれを直接用いて、オペレータパイプラインを介さずに可視性チェックを行う。
+durable commit 後に checkpoint や通知処理が失敗しても、トランザクションを abort 状態へ戻さない。
+`Commit` の後へ `Abort` を追記しない。
 
-## コミット {#commit}
+## abort と savepoint {#abort-savepoint}
 
-1. `Commit` レコードを WAL に書き込む
-2. WAL をディスクにフラッシュ（同期）
-3. `OnCommitted` フックを発火
-4. しきい値到達かつアクティブトランザクションが無い場合、チェックポイントを起動
+各 write pin は変更前のページを transaction-owned write set に保存する。
+明示 abort と commit なしの dispose は before-image を LIFO 順に適用してプロセス内の変更を復元し、`Abort` を WAL へ記録する。
 
-## アボート / ロールバック {#abort}
+`Savepoint` は現在の before-image 境界を記録する。
+`RollbackTo` は指定境界より後の before-image を逆順に適用し、後から作られた savepoint を無効にする。
+`ReleaseSavepoint` は境界だけを解放し、変更を親スコープへ残す。
 
-`AbortUndoHandler` が undo を処理する:
+全文索引を含む B+Tree 更新も同じ page write set を使う。
+全文専用の論理 undo stack や補償 WAL record は持たない。
 
-1. **物理 undo**: `_beforeImageStack` から before-image を LIFO 順で復元する
-   （CLR レコードによるページ単位の undo）
-2. **論理 undo**: `UndoFtLogical` が FT リーフ mutation を LIFO 順で巻き戻す
-3. `Abort` レコードを WAL に書き込む
-4. `OnRolledBack` フックを発火
+## crash recovery {#crash-recovery}
 
-Commit なしの Dispose は暗黙のアボートを引き起こす。
+crash recovery の winner は明示的な `Commit` record だけで決める。
+winner の `PageImage` は redo し、commit record を持たない transaction の image は適用しない。
+旧 WAL のような loser undo pass は実行しない。
 
-## セーブポイント {#savepoints}
-
-`SavepointId` はトランザクション内のセーブポイントを識別する。セーブポイントは SQL のセマンティクスに従う:
-
-- `Savepoint(name?)` → セーブポイントを作成し、`SavepointId` を返す
-- `RollbackTo(SavepointId)` → セーブポイント以降の変更を undo し、内側のセーブポイントを無効化する
-- `ReleaseSavepoint(SavepointId)` → セーブポイントを消費し、変更を親スコープにマージする
-
-### Before-Image スタック {#before-image-stack}
-
-`WalPageContext` は、セーブポイントごとのバケットからなる `_beforeImageStack` を保持する。各
-`PinForWrite` は現在のバケットに before-image を取得する。`RollbackTo` は対象セーブポイントより
-新しいバケットから before-image を復元する。
-
-### 全文の論理 Undo {#ft-logical-undo}
-
-全文 postings / norms のリーフは（page-image ではなく）論理 WAL を用いるため、その undo も論理的である。
-FT 論理 undo ログ (`_ftUndoStack`) は `_beforeImageStack` と並行して、セーブポイントレベルごとに
-バケット化される:
-
-- **完全アボート** は全バケットの逆操作を（LIFO で）ライブ FT ツリーに再生する。
-- **`RollbackTo(savepoint)`** は `>= level` のバケットのみを再生し、加えて各逆操作を
-  **補償用の `FtLeafMutation`** として WAL に書き込む。FT リーフ mutation は eager にログされるため、
-  セーブポイントで破棄された前向きレコードはコミット中のトランザクションの WAL に既に存在する。
-  補償レコードはリカバリの redo (Pass 2b) をロールバック後の状態に収束させる。補償レコード自体は
-  undo スタックに積まれないため、後の完全アボートで二重に巻き戻されることはない。
+詳細は [WAL とリカバリ](02_wal_recovery.md) を参照する。
 
 ## 読み取り専用トランザクション {#read-only}
 
-読み取り専用トランザクションはスナップショットを取得するが、WAL への書き込みや write ロックの取得は
-行わない。`IsolationLevel.SnapshotIsolation` を `readOnly: true` で用いる。
+読み取り専用トランザクションは snapshot を取得するが、WAL record と page before-image を生成しない。
+読み取り専用 transaction から write API を呼び出すことはできない。

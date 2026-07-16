@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace Quiver.Benchmarks.RegressionCheck;
 
 /// <summary>
-/// TS-6: BenchmarkDotNet JsonExporter.Full の出力を読み、baseline と比較して
+/// BenchmarkDotNet JsonExporter.Full の出力を読み、baseline と比較して
 /// 20% (かつ &gt; 3σ) 以上の wall-clock 劣化があれば exit code 1 を返す CLI。
 ///
 /// 想定ユース:
@@ -176,7 +176,7 @@ public static class Program
 
     private static int PrintHelp()
     {
-        Console.WriteLine("Quiver.Benchmarks.RegressionCheck — TS-6 regression sentinel");
+        Console.WriteLine("Quiver.Benchmarks.RegressionCheck —  regression sentinel");
         Console.WriteLine();
         Console.WriteLine("  compare two BDN reports and exit 1 on regression:");
         Console.WriteLine("    --baseline <main.json> --current <pr.json>");

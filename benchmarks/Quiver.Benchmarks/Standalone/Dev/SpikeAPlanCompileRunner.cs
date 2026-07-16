@@ -30,36 +30,36 @@ public static class SpikeAPlanCompileRunner
         try
         {
             {
-                using var db0 = GraphDatabase.Open(Path.Combine(dir, "graph.quiver"));
+                using var db0 = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
                 using var loader = db0.BeginBulkLoad(buildAdjacencyIndex: true);
-                loader.AppendNode(new NodeId(0), new LabelId(0));
+                loader.AppendVertex(new VertexId(0), new LabelId(0));
                 for (int i = 1; i <= Degree; i++)
                 {
-                    loader.AppendNode(new NodeId(i), new LabelId(1));
-                    loader.AppendRelationship(new RelationshipId(i - 1), new NodeId(0), new NodeId(i), new RelationshipTypeId(0));
+                    loader.AppendVertex(new VertexId(i), new LabelId(1));
+                    loader.AppendEdge(new EdgeId(i - 1), new VertexId(0), new VertexId(i), new EdgeTypeId(0));
                 }
                 loader.Commit();
             }
-            using var db = GraphDatabase.Open(Path.Combine(dir, "graph.quiver"));
-            var hub = new NodeId(0);
+            using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
+            var hub = new VertexId(0);
             using var tx = db.BeginTransaction();
             var schema = db.Schema;
             var g = tx.G(schema);
 
             // 事前に 1 本作って LogicalOp / optimized plan を取り出す (build/optimize/plan を個別計測するため)。
-            var trav = g.Node(hub).Out();
+            var trav = g.Vertex(hub).Out();
             LogicalOp plan = trav._plan;
             LogicalOp optimized = LogicalOptimizer.Optimize(plan, trav._stats, schema);
 
             // 各段を ns/query で計測。
-            double tBuild = Time(() => { var t = g.Node(hub).Out(); return t._plan is not null ? 1 : 0; });
+            double tBuild = Time(() => { var t = g.Vertex(hub).Out(); return t._plan is not null ? 1 : 0; });
             double tOptimize = Time(() => { var o = LogicalOptimizer.Optimize(plan, trav._stats, schema); return o is not null ? 1 : 0; });
             double tPlan = Time(() => { var op = PhysicalPlanner.Plan(optimized, schema); return op is not null ? 1 : 0; });
             double tCompile = Time(() => { var op = PhysicalPlanner.Plan(LogicalOptimizer.Optimize(plan, trav._stats, schema), schema); return op is not null ? 1 : 0; });
             double tFull = Time(() =>
             {
                 int c = 0;
-                using var cur = g.Node(hub).Out().AsCursor();
+                using var cur = g.Vertex(hub).Out().AsCursor();
                 while (cur.MoveNext()) c++;
                 return c;
             });
@@ -69,7 +69,7 @@ public static class SpikeAPlanCompileRunner
             const int AllocIters = 10_000;
             for (int i = 0; i < AllocIters; i++)
             {
-                using var cur = g.Node(hub).Out().AsCursor();
+                using var cur = g.Vertex(hub).Out().AsCursor();
                 while (cur.MoveNext()) { }
             }
             long allocPerQuery = (GC.GetAllocatedBytesForCurrentThread() - allocBefore) / AllocIters;

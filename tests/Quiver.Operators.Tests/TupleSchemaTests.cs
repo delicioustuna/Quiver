@@ -10,17 +10,17 @@ public class TupleSchemaTests
     public void IndexOf_returns_correct_index_for_known_column()
     {
         var schema = new TupleSchema([
-            new ColumnDefinition("nodeId", TupleSlotType.NodeId),
+            new ColumnDefinition("vertexId", TupleSlotType.VertexId),
             new ColumnDefinition("name", TupleSlotType.Utf8String),
         ]);
-        schema.IndexOf("nodeId").Should().Be(0);
+        schema.IndexOf("vertexId").Should().Be(0);
         schema.IndexOf("name").Should().Be(1);
     }
 
     [Fact]
     public void IndexOf_returns_negative_for_unknown_column()
     {
-        var schema = new TupleSchema([new ColumnDefinition("only", TupleSlotType.NodeId)]);
+        var schema = new TupleSchema([new ColumnDefinition("only", TupleSlotType.VertexId)]);
         schema.IndexOf("missing").Should().Be(-1);
     }
 

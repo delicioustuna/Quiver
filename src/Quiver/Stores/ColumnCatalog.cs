@@ -33,7 +33,7 @@ internal sealed class ColumnCatalog
             _nextTenantId = FirstColumnTenant;
             Save();
             using var ph = _file.PinForWrite(HeaderPageId);
-            ph.Data[MetaFormatVersion] = FormatVersion.Current;
+            ph.Data[MetaFormatVersion] = StorageFormatVersion.Current;
         }
         else
         {
@@ -113,7 +113,7 @@ internal sealed class ColumnCatalog
     {
         using var h = _file.PinForRead(HeaderPageId);
         byte v = h.Data[MetaFormatVersion];
-        if (v != FormatVersion.Current)
-            throw new FormatVersionMismatchException("columncatalog", v, FormatVersion.Current);
+        if (v != StorageFormatVersion.Current)
+            throw new StorageFormatMismatchException("columncatalog", v, StorageFormatVersion.Current);
     }
 }

@@ -4,7 +4,7 @@
 [![AOT publish smoke](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml/badge.svg)](https://github.com/delicioustuna/Quiver/actions/workflows/aot.yml)
 
 Quiver は組み込みのグラフデータベース + ベクトル検索 + 全文検索の統合エンジンです。
-ノードとリレーションシップをプロパティ付きで単一ファイルに永続化し、Source Generator による型安全な CRUD と
+VertexとEdgeをプロパティ付きで単一ファイルに永続化し、Source Generator による型安全な CRUD と
 Fluent な API　によるグラフトラバーサルが実行可能です。 
 コアパッケージは依存パッケージゼロの純 C# 実装です。アンマネージド依存がなく、NativeAOT に対応します。
 
@@ -12,7 +12,7 @@ Fluent な API　によるグラフトラバーサルが実行可能です。
 
 ```csharp
 var g = tx.G(db.Schema);
-var known = g.Nodes<Person>()
+var known = g.Vertices<Person>()
              .Has(p => p.Name, "Alice")
              .Knows()
              .Has(p => p.Age, P.Lt(30L))
@@ -20,7 +20,7 @@ var known = g.Nodes<Person>()
 ```
 
 ```csharp
-[Node]
+[Vertex]
 public partial class Person // Source Generator を使う場合 partial 指定が必須です。
 {
     [Indexed]
@@ -31,7 +31,7 @@ public partial class Person // Source Generator を使う場合 partial 指定�
     public int Age { get; set; }
 }
 
-[Relationship<Person, Person>]
+[Edge<Person, Person>]
 public partial class Knows
 {
     [Property]
@@ -44,7 +44,7 @@ public partial class Knows
 * 個人利用が目的のため公開バージョンは v0.1.0 (pre-release) としています。
 
 > 文字列キー指定のローレベル / 型なしトラバーサル、Match DSL（宣言的パターンマッチ）、
-> `tx.CreateNode` などの低レイヤ API は [docs/development.md](docs/design/development.md#ローレベル--型なし-api) を参照。
+> `tx.CreateVertex` などの低レイヤ API は [docs/development.md](docs/design/development.md#ローレベル--型なし-api) を参照。
 
 ## 特徴
 
@@ -69,14 +69,14 @@ public partial class Knows
 
 | 操作 | 実測 |
 |---|---|
-| ノード作成（単一 tx 償却） | ~3.5–4 µs/op（~250K ops/s） |
-| ノード作成 + プロパティ設定（同上） | ~6 µs/op |
+| Vertex作成（単一 tx 償却） | ~3.5–4 µs/op（~250K ops/s） |
+| Vertex作成 + プロパティ設定（同上） | ~6 µs/op |
 | リレーション作成（同上） | ~7 µs/op（~140K ops/s） |
 | 単発 durable commit（1 op = 1 commit、単一スレッド） | ~1.0 ms/commit（WAL flush 律速） |
 | 1-hop scan（degree 100、隣接ブロック） | ~0.35 µs（~3.5 ns/edge） |
 | 1-hop scan（degree 100、索引なし linked-list） | ~11 µs（~0.11 µs/edge） |
 | BFS 2-hop（ハブ degree 100、leaf 10,000、隣接ブロック） | ~0.037 ms |
-| 1-hop クエリ（`g.Node().Out()`、degree 100、隣接ブロック） | ~4.2 µs/query（~42 ns/edge） |
+| 1-hop クエリ（`g.Vertex().Out()`、degree 100、隣接ブロック） | ~4.2 µs/query（~42 ns/edge） |
 | BulkLoader（10 万 edge） | 通常 TX（batch 1000）比 ~11.8× |
 | HNSW true recall@10（N=10k、dim=384、既定 M=32/efC=400） | 0.950 |
 | HNSW true recall@10（同上、高品質 M=32/efC=400） | 0.950（30% 削除後 0.985） |
@@ -94,7 +94,7 @@ Quiver は組み込み用途に最適化されたエンジンであり、以下�
 | **単一ライタ** | 書き込みトランザクションは同時に 1 つのみ。トランザクションはスレッドアフィン | アプリ側で書き込みゲート (`SemaphoreSlim(1,1)`) または専用ライタスレッドを使用 |
 | **In-Process のみ** | サーバモード・ネットワークアクセスなし。1 プロセスが排他的にファイルを開く | マルチプロセスが必要なら上位に gRPC/HTTP ラッパを配置 |
 | **自動マイグレーションなし** | フォーマットバージョン不一致で例外スロー。in-place 自動変換パスは存在しない | ソースデータから再構築。1.x 内ではフォーマット固定 |
-| **HNSW 上書き** | ベクトル上書き時にグラフトポロジを再リンクしない（検索品質がわずかに劣化しうる） | tombstone 超過で自動 rebuild。頻繁更新時はノード削除→再作成 |
+| **HNSW 上書き** | ベクトル上書き時にグラフトポロジを再リンクしない（検索品質がわずかに劣化しうる） | tombstone 超過で自動 rebuild。頻繁更新時はVertex削除→再作成 |
 
 ## その他の資料
 
@@ -103,7 +103,7 @@ Quiver は組み込み用途に最適化されたエンジンであり、以下�
 | 資料 | 説明 |
 |---|---|
 | [Getting Started](docs/api/getting-started.md) | まずはここから |
-| [Concepts](docs/api/concepts/index.md) | Node/Relationship, Transaction, Traversal, MERGE, KNN, Backends など |
+| [Concepts](docs/api/concepts/index.md) | Vertex/Edge, Transaction, Traversal, MERGE, KNN, Backends など |
 | [Tutorials](docs/api/tutorials/index.md) | チュートリアル |
 | [Cookbook](docs/cookbook.md)| 典型ユースケースのレシピ集 |
 | [運用ガイド](docs/operations/README.md)| quickstart, backup/restore, performance tuning, recoveryなど |
@@ -115,8 +115,8 @@ Quiver は組み込み用途に最適化されたエンジンであり、以下�
 
 | サンプル | 内容 |
 |---|---|
-| [`Quiver.Samples.Crud`](samples/Quiver.Samples.Crud/) | 基本 CRUD（ノード / リレーション / プロパティ） |
-| [`Quiver.Samples.SourceGen`](samples/Quiver.Samples.SourceGen/) | `[Node]` / `[Relationship]` 属性ベースの型付き CRUD |
+| [`Quiver.Samples.Crud`](samples/Quiver.Samples.Crud/) | 基本 CRUD（Vertex / リレーション / プロパティ） |
+| [`Quiver.Samples.SourceGen`](samples/Quiver.Samples.SourceGen/) | `[Vertex]` / `[Edge]` 属性ベースの型付き CRUD |
 | [`Quiver.Samples.Traversal`](samples/Quiver.Samples.Traversal/) | 多段トラバーサル、フィルタ、可変長 repeat、集約、cursor |
 | [`Quiver.Samples.Match`](samples/Quiver.Samples.Match/) | Match DSL によるパターンマッチと MERGE / UPSERT |
 | [`Quiver.Samples.Vector`](samples/Quiver.Samples.Vector/) | KNN 起点トラバーサル + graph-first ハイブリッド検索 |

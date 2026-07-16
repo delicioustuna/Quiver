@@ -21,14 +21,14 @@ dotnet build Quiver.slnx
 using Quiver;
 using Quiver.Storage.Records;
 
-using var db = GraphDatabase.Open("./mygraph");
+using var db = QuiverDatabase.Open("./mygraph");
 using var tx = db.BeginTransaction();
 
-var alice = tx.CreateNode("Person");
-var bob   = tx.CreateNode("Person");
+var alice = tx.CreateVertex("Person");
+var bob   = tx.CreateVertex("Person");
 tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
 tx.SetProperty(bob,   "name", PropertyValue.FromString("Bob"));
-tx.CreateRelationship(alice, bob, "KNOWS");
+tx.CreateEdge(alice, bob, "KNOWS");
 
 tx.Commit();
 ```

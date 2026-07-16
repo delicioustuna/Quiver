@@ -1,6 +1,6 @@
 # ベンチマーク結果
 
-基本性能（ノード作成、1-hop スキャン、BFS 等）は [README の「性能（基本計測）」](../README.md#性能基本計測) を参照。
+基本性能（Vertex作成、1-hop スキャン、BFS 等）は [README の「性能（基本計測）」](../README.md#性能基本計測) を参照。
 本ページは、運用ガイドや cookbook で参照される計測データの詳細を掲載する。
 
 計測環境は共通: AMD Ryzen 7 5700X (16 logical cores) / Windows 11 / SSD / .NET 10 / Release ビルド。
@@ -185,14 +185,14 @@ optimistic pin は撤回した。frame read の seqlock/snapshot 化を含む別
 
 ## 索引付き書き込みの WAL 増幅
 
-索引（B+Tree）を持つノードの大量挿入で、書き込みパターンによって WAL サイズとスループットが
+索引（B+Tree）を持つVertexの大量挿入で、書き込みパターンによって WAL サイズとスループットが
 桁違いに変わることを示す計測結果。
 [パフォーマンスチューニングガイド](operations/03_performance_tuning.md) の「鉄則」の根拠。
 
 ### ワークロード
 
-`Int64Equality` 索引（8-byte キー + 8-byte 値）付きノードの挿入。
-各シナリオで、ノード作成 + プロパティ設定 + 索引エントリ挿入を 1 操作として計測。
+`Int64Equality` 索引（8-byte キー + 8-byte 値）付きVertexの挿入。
+各シナリオで、Vertex作成 + プロパティ設定 + 索引エントリ挿入を 1 操作として計測。
 
 ### 結果
 
@@ -210,7 +210,7 @@ optimistic pin は撤回した。frame read の seqlock/snapshot 化を含む別
 **bulk パス**では、同一ページへの複数変更が 1 つの PageImage に coalesce されるため、
 エントリ数に対してほぼフラットな ~69 B/entry に収まる。100k エントリでも WAL は 7 MB 程度。
 
-**per-tx パス**では、commit のたびに変更ページ（NodeStore + 索引 + meta）の PageImage を丸ごと WAL に書く。
+**per-tx パス**では、commit のたびに変更ページ（VertexStore + 索引 + meta）の PageImage を丸ごと WAL に書く。
 
 - 小規模 (1k) ではエントリあたり ~27 KB の極端な増幅になる。1,000 回の commit が累積して WAL 27 MB。
 - 大規模 (100k) では checkpoint truncation（`CheckpointThresholdBytes` 超過時の WAL 切り詰め）が効き、
@@ -222,16 +222,16 @@ optimistic pin は撤回した。frame read の seqlock/snapshot 化を含む別
 
 ---
 
-## MergeRelationship の degree 依存コスト
+## MergeEdge の degree 依存コスト
 
-`MergeRelationship` は既存エッジの重複を防ぐ upsert 操作を提供する。
-内部では始点ノードの同一型 outgoing edge を線形スキャンして既存マッチを探すため、
+`MergeEdge` は既存エッジの重複を防ぐ upsert 操作を提供する。
+内部では始点Vertexの同一型 outgoing edge を線形スキャンして既存マッチを探すため、
 スキャンコストは **始点の同一型 out-degree に比例** する。
-[cookbook の MergeRelationship セクション](cookbook.md) の根拠。
+[cookbook の MergeEdge セクション](cookbook.md) の根拠。
 
 ### 1. 単一呼び出し: hit (既存辺にマッチ)
 
-始点に指定本数の同一型 outgoing edge がある状態で、既存辺に対して MergeRelationship を呼ぶレイテンシ。
+始点に指定本数の同一型 outgoing edge がある状態で、既存辺に対して MergeEdge を呼ぶレイテンシ。
 
 | 同一型 out-degree | µs/call |
 |---:|---:|
@@ -246,8 +246,8 @@ degree 50〜1,000 の回帰で **~116 ns/edge** の勾配。固定オーバー�
 
 ### 2. 単一呼び出し: miss (マッチなし、新規作成)
 
-始点に既存辺がある状態で、存在しない target への MergeRelationship。
-全辺をスキャンし終えてから `CreateRelationship` を 1 本実行する。
+始点に既存辺がある状態で、存在しない target への MergeEdge。
+全辺をスキャンし終えてから `CreateEdge` を 1 本実行する。
 
 | 同一型 out-degree | µs/call |
 |---:|---:|
@@ -257,9 +257,9 @@ degree 50〜1,000 の回帰で **~116 ns/edge** の勾配。固定オーバー�
 | 500 | 75.69 |
 | 1,000 | 135.73 |
 
-miss ≈ full scan + CreateRelationship (~6µs)。degree 100 で hit 11.7µs、miss 28.3µs。
+miss ≈ full scan + CreateEdge (~6µs)。degree 100 で hit 11.7µs、miss 28.3µs。
 
-### 3. CreateRelationship baseline (存在チェックなし)
+### 3. CreateEdge baseline (存在チェックなし)
 
 | µs/call |
 |---:|
@@ -267,7 +267,7 @@ miss ≈ full scan + CreateRelationship (~6µs)。degree 100 で hit 11.7µs、m
 
 ### 4. 直積 upsert の実時間
 
-Traversal API の `MergeRelationship` (materialize → loop) による直積 upsert。
+Traversal API の `MergeEdge` (materialize → loop) による直積 upsert。
 `degree_before` は各始点に事前に張った同一型辺の本数。
 
 | sources | targets | degree_before | total ms | µs/pair |
@@ -280,7 +280,7 @@ Traversal API の `MergeRelationship` (materialize → loop) による直積 ups
 ### コスト構造
 
 ```
-MergeRelationship(src, tgt, type) =
+MergeEdge(src, tgt, type) =
     スキャン: ~116 ns × (src の type 型 out-degree) + ~2.5µs 固定
   + 作成 (miss のみ): ~6µs
 ```
@@ -296,11 +296,11 @@ hit/miss いずれでもスキャンコストが支配的。**degree が低い (
 | 1,000 | ~116µs | ~12ms |
 | 10,000 | ~1,160µs (推定) | ~116ms |
 
-degree 1,000 を超える始点ノードで MergeRelationship を多用するとコストが顕在化する。
-そのような高 fan-out ノードでは:
+degree 1,000 を超える始点Vertexで MergeEdge を多用するとコストが顕在化する。
+そのような高 fan-out Vertexでは:
 
-1. **`AddRelationship` を使う** — 存在チェックを省略 (~6µs/call で degree 非依存)
+1. **`AddEdge` を使う** — 存在チェックを省略 (~6µs/call で degree 非依存)
 2. **アプリ層で重複制御する** — `HashSet` 等で既存辺を 1 度だけ取得しチェック
 
 RAG バックエンド想定の典型ワークロード (degree < 50、ペア数 < 数百) であれば
-MergeRelationship のコストは問題にならない。
+MergeEdge のコストは問題にならない。

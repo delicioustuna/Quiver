@@ -289,8 +289,8 @@ internal sealed class ScalarColumnStore
     {
         using var h = _file.PinForRead(HeaderPageId);
         byte v = h.Data[MetaFormatVersion];
-        if (v != FormatVersion.Current)
-            throw new FormatVersionMismatchException("scalarcolumn", v, FormatVersion.Current);
+        if (v != StorageFormatVersion.Current)
+            throw new StorageFormatMismatchException("scalarcolumn", v, StorageFormatVersion.Current);
     }
 
     private void SaveMeta(bool initialise = false)
@@ -299,6 +299,6 @@ internal sealed class ScalarColumnStore
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaHwm..], _hwm);
         ph.Data[MetaValueType] = _valueType;
         if (initialise)
-            ph.Data[MetaFormatVersion] = FormatVersion.Current;
+            ph.Data[MetaFormatVersion] = StorageFormatVersion.Current;
     }
 }

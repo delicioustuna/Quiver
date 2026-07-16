@@ -28,7 +28,7 @@ public sealed class VectorGenerationBindingTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private static List<long> Knn(GraphDatabase db, float[] query, int k)
+    private static List<long> Knn(QuiverDatabase db, float[] query, int k)
     {
         using var cur = db.Vectors.KnnSearch(IndexName, query, k);
         var got = new List<long>();
@@ -39,29 +39,29 @@ public sealed class VectorGenerationBindingTests : IDisposable
     [Fact]
     public void Stale_binding_is_rejected_after_slot_reuse()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
             Dim, DistanceMetric.Dot, "test", null));
 
         // A を作りベクトルを焼く。
-        NodeId a;
+        VertexId a;
         long seqA;
         using (var tx = db.BeginTransaction())
         {
-            a = tx.CreateNode("Doc");
+            a = tx.CreateVertex("Doc");
             seqA = EntityRef.UnpackSequence(a.Value);
-            tx.SetVector(EntityKind.Node, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
+            tx.SetVector(EntityKind.Vertex, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
             tx.Commit();
         }
 
         // A を削除 → vacuum で物理回収すると slot が free list に戻る (MVCC は即時には free しない)。
-        using (var tx = db.BeginTransaction()) { tx.DeleteNode(a); tx.Commit(); }
+        using (var tx = db.BeginTransaction()) { tx.DeleteVertex(a); tx.Commit(); }
         db.Vacuum();
 
-        // 新ノード B を作る。回収済み slot を再利用し世代が bump する。B はベクトルを設定しない。
-        NodeId b;
-        using (var tx = db.BeginTransaction()) { b = tx.CreateNode("Doc"); tx.Commit(); }
+        // 新Vertex B を作る。回収済み slot を再利用し世代が bump する。B はベクトルを設定しない。
+        VertexId b;
+        using (var tx = db.BeginTransaction()) { b = tx.CreateVertex("Doc"); tx.Commit(); }
 
         // 前提: 同一 Sequence が再利用された (世代だけ違う)。
         EntityRef.UnpackSequence(b.Value).Should().Be(seqA);
@@ -73,27 +73,27 @@ public sealed class VectorGenerationBindingTests : IDisposable
     [Fact]
     public void Fresh_binding_on_reused_slot_is_returned()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
             Dim, DistanceMetric.Dot, "test", null));
 
-        NodeId a;
+        VertexId a;
         using (var tx = db.BeginTransaction())
         {
-            a = tx.CreateNode("Doc");
-            tx.SetVector(EntityKind.Node, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
+            a = tx.CreateVertex("Doc");
+            tx.SetVector(EntityKind.Vertex, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction()) { tx.DeleteNode(a); tx.Commit(); }
+        using (var tx = db.BeginTransaction()) { tx.DeleteVertex(a); tx.Commit(); }
         db.Vacuum();
 
         // B が同一 slot を再利用し、今度は自分のベクトルを焼く → 現世代でバインドされ live。
-        NodeId b;
+        VertexId b;
         using (var tx = db.BeginTransaction())
         {
-            b = tx.CreateNode("Doc");
-            tx.SetVector(EntityKind.Node, b.Value, IndexName, new float[] { 0, 1, 0, 0 });
+            b = tx.CreateVertex("Doc");
+            tx.SetVector(EntityKind.Vertex, b.Value, IndexName, new float[] { 0, 1, 0, 0 });
             tx.Commit();
         }
         EntityRef.UnpackSequence(b.Value).Should().Be(EntityRef.UnpackSequence(a.Value));

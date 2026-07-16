@@ -4,18 +4,18 @@ namespace Quiver.Studio.Models;
 
 public sealed class VisualEdge
 {
-    public RelationshipId Id { get; }
-    public VisualNode Source { get; }
-    public VisualNode Target { get; }
-    public string RelationshipType { get; }
+    public EdgeId Id { get; }
+    public VisualVertex Source { get; }
+    public VisualVertex Target { get; }
+    public string EdgeType { get; }
 
     public bool IsSelected { get; set; }
 
-    public VisualEdge(RelationshipId id, VisualNode source, VisualNode target, string relationshipType)
+    public VisualEdge(EdgeId id, VisualVertex source, VisualVertex target, string edgeType)
     {
         Id = id;
         Source = source;
         Target = target;
-        RelationshipType = relationshipType;
+        EdgeType = edgeType;
     }
 }

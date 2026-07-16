@@ -12,7 +12,7 @@ namespace Quiver.Backend.Tests.Chaos;
 /// 再 open して consistency check を回す。トレースは shape:
 /// <code>
 /// [seed=42, txCount=8, fault=KillThenTornWalTail]
-///   tx#0 commit nodes=[..]
+///   tx#0 commit vertices=[..]
 ///   tx#1 rollback
 ///   ...
 ///   INJECT TornWalTail
@@ -93,7 +93,7 @@ internal sealed class ChaosScenarioRunner
                         using var tx = backend!.BeginGraphTransaction(
                             IsolationLevel.SnapshotIsolation, readOnly: false);
                         // threshold=1 で commit 時に即 checkpoint する小さな payload を使う。
-                        tx.CreateNode("Sentinel");
+                        tx.CreateVertex("Sentinel");
                         try { tx.Commit(); }
                         catch (InvalidOperationException) { /* 模擬 kill */ }
                     }
@@ -164,10 +164,10 @@ internal sealed class ChaosScenarioRunner
         oracle.BeginTx();
         using var tx = backend.BeginGraphTransaction(
             IsolationLevel.SnapshotIsolation, readOnly: false);
-        var createdIds = new List<NodeId>();
+        var createdIds = new List<VertexId>();
         foreach (var op in wtx.Ops)
         {
-            var id = tx.CreateNode(op.Label);
+            var id = tx.CreateVertex(op.Label);
             tx.SetProperty(id, "marker", PropertyValue.FromInt64(op.PropertyValue));
             if (op.IndexKey is int k)
             {
@@ -181,13 +181,13 @@ internal sealed class ChaosScenarioRunner
         {
             tx.Commit();
             oracle.CommitTx();
-            trace.AppendLine($"  tx commit nodes=[{string.Join(",", createdIds.Select(n => n.Value))}]");
+            trace.AppendLine($"  tx commit vertices=[{string.Join(",", createdIds.Select(n => n.Value))}]");
         }
         else
         {
             tx.Rollback();
             oracle.RollbackTx();
-            trace.AppendLine($"  tx rollback nodes=[{string.Join(",", createdIds.Select(n => n.Value))}]{(forceRollback ? " (forced AbortThenKill)" : "")}");
+            trace.AppendLine($"  tx rollback vertices=[{string.Join(",", createdIds.Select(n => n.Value))}]{(forceRollback ? " (forced AbortThenKill)" : "")}");
         }
     }
 
@@ -227,9 +227,9 @@ internal sealed class ChaosScenarioRunner
         for (int i = 0; i < committed.Count; i++)
         {
             bool allPresent = true;
-            foreach (var n in committed[i].Nodes)
+            foreach (var n in committed[i].Vertices)
             {
-                if (!rtx.NodeExists(n.Id)) { allPresent = false; break; }
+                if (!rtx.VertexExists(n.Id)) { allPresent = false; break; }
                 var prop = rtx.GetProperty(n.Id, "marker");
                 if (prop.Int64Value != n.MarkerValue) { allPresent = false; break; }
             }
@@ -249,11 +249,11 @@ internal sealed class ChaosScenarioRunner
             // 失われたのは suffix だけであることを確認。
             for (int i = firstMissingTx; i < committed.Count; i++)
             {
-                foreach (var n in committed[i].Nodes)
+                foreach (var n in committed[i].Vertices)
                 {
-                    if (rtx.NodeExists(n.Id))
+                    if (rtx.VertexExists(n.Id))
                         throw new ChaosVerificationException(
-                            $"suffix-loss expected from tx#{firstMissingTx} onward, but tx#{i} node {n.Id.Value} survived (partial-replay corruption)");
+                            $"suffix-loss expected from tx#{firstMissingTx} onward, but tx#{i} vertex {n.Id.Value} survived (partial-replay corruption)");
                 }
             }
             trace.AppendLine($"  suffix-loss accepted: {firstMissingTx}/{committed.Count} survived");

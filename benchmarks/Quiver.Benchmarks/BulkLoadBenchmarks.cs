@@ -1,4 +1,4 @@
-﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Engines;
 using Quiver;
 using Quiver.Core;
@@ -14,7 +14,7 @@ namespace Quiver.Benchmarks;
 [MemoryDiagnoser]
 public class BulkLoadBenchmarks
 {
-    // PW-9: 10M case is the streaming target. The TX baseline is skipped at 10M
+    // 10M case is the streaming target. The TX baseline is skipped at 10M
     // (would take >30 min); only BulkLoader / StreamingBulkLoader are measured there.
     [Params(100_000, 1_000_000, 10_000_000)]
     public int EdgeCount { get; set; }
@@ -52,47 +52,47 @@ public class BulkLoadBenchmarks
     [Benchmark(Description = "BulkLoader")]
     public void BulkLoad()
     {
-        int nodeCount = Math.Max(EdgeCount / 10, 1_000);
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_bulkDbPath, "graph.quiver"));
+        int vertexCount = Math.Max(EdgeCount / 10, 1_000);
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_bulkDbPath, "graph.quiver"));
         var labelId   = db.Schema.GetOrCreateLabel("Vertex");
-        var relTypeId = db.Schema.GetOrCreateRelationshipType("KNOWS");
+        var edgeTypeId = db.Schema.GetOrCreateEdgeType("KNOWS");
 
         using var bulk = db.BeginBulkLoad();
 
-        for (long i = 0; i < nodeCount; i++)
-            bulk.AppendNode(new NodeId(i), labelId);
+        for (long i = 0; i < vertexCount; i++)
+            bulk.AppendVertex(new VertexId(i), labelId);
 
         var rng = new Random(42);
         for (long i = 0; i < EdgeCount; i++)
         {
-            long src = rng.Next(nodeCount);
-            long tgt = rng.Next(nodeCount);
-            bulk.AppendRelationship(new RelationshipId(i), new NodeId(src), new NodeId(tgt), relTypeId);
+            long src = rng.Next(vertexCount);
+            long tgt = rng.Next(vertexCount);
+            bulk.AppendEdge(new EdgeId(i), new VertexId(src), new VertexId(tgt), edgeTypeId);
         }
 
         bulk.Commit();
     }
 
-    /// <summary>PW-9: temp-file streamed variant, target for 10M+ edge imports.</summary>
+    /// <summary>: temp-file streamed variant, target for 10M+ edge imports.</summary>
     [Benchmark(Description = "StreamingBulkLoader")]
     public void StreamingBulkLoad()
     {
-        int nodeCount = Math.Max(EdgeCount / 10, 1_000);
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_streamingDbPath, "graph.quiver"));
+        int vertexCount = Math.Max(EdgeCount / 10, 1_000);
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_streamingDbPath, "graph.quiver"));
         var labelId   = db.Schema.GetOrCreateLabel("Vertex");
-        var relTypeId = db.Schema.GetOrCreateRelationshipType("KNOWS");
+        var edgeTypeId = db.Schema.GetOrCreateEdgeType("KNOWS");
 
         using var bulk = db.BeginStreamingBulkLoad();
 
-        for (long i = 0; i < nodeCount; i++)
-            bulk.AppendNode(new NodeId(i), labelId);
+        for (long i = 0; i < vertexCount; i++)
+            bulk.AppendVertex(new VertexId(i), labelId);
 
         var rng = new Random(42);
         for (long i = 0; i < EdgeCount; i++)
         {
-            long src = rng.Next(nodeCount);
-            long tgt = rng.Next(nodeCount);
-            bulk.AppendRelationship(new RelationshipId(i), new NodeId(src), new NodeId(tgt), relTypeId);
+            long src = rng.Next(vertexCount);
+            long tgt = rng.Next(vertexCount);
+            bulk.AppendEdge(new EdgeId(i), new VertexId(src), new VertexId(tgt), edgeTypeId);
         }
 
         bulk.Commit();
@@ -103,16 +103,16 @@ public class BulkLoadBenchmarks
     {
         if (EdgeCount >= 10_000_000) return; // skip — TX path is hours at this size
         const int BatchSize = 1_000;
-        int nodeCount = Math.Max(EdgeCount / 10, 1_000);
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_txDbPath, "graph.quiver"));
+        int vertexCount = Math.Max(EdgeCount / 10, 1_000);
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_txDbPath, "graph.quiver"));
 
-        var nodeIds = new NodeId[nodeCount];
-        for (int i = 0; i < nodeCount; i += BatchSize)
+        var vertexIds = new VertexId[vertexCount];
+        for (int i = 0; i < vertexCount; i += BatchSize)
         {
             using var tx = db.BeginTransaction();
-            int end = Math.Min(i + BatchSize, nodeCount);
+            int end = Math.Min(i + BatchSize, vertexCount);
             for (int j = i; j < end; j++)
-                nodeIds[j] = tx.CreateNode("Vertex");
+                vertexIds[j] = tx.CreateVertex("Vertex");
             tx.Commit();
         }
 
@@ -123,9 +123,9 @@ public class BulkLoadBenchmarks
             int end = Math.Min(i + BatchSize, EdgeCount);
             for (int j = i; j < end; j++)
             {
-                int src = rng.Next(nodeCount);
-                int tgt = rng.Next(nodeCount);
-                tx.CreateRelationship(nodeIds[src], nodeIds[tgt], "KNOWS");
+                int src = rng.Next(vertexCount);
+                int tgt = rng.Next(vertexCount);
+                tx.CreateEdge(vertexIds[src], vertexIds[tgt], "KNOWS");
             }
             tx.Commit();
         }

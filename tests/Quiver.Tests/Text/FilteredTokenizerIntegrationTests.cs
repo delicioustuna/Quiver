@@ -14,12 +14,12 @@ namespace Quiver.Tests.Text;
 public sealed class FilteredTokenizerIntegrationTests : IDisposable
 {
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public FilteredTokenizerIntegrationTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_filt_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
     }
 
     public void Dispose()
@@ -38,9 +38,9 @@ public sealed class FilteredTokenizerIntegrationTests : IDisposable
 
         using (var tx = _db.BeginTransaction())
         {
-            var n1 = tx.CreateNode("Doc");
+            var n1 = tx.CreateVertex("Doc");
             tx.SetProperty(n1, "body", PropertyValue.FromString("the quick brown fox"));
-            var n2 = tx.CreateNode("Doc");
+            var n2 = tx.CreateVertex("Doc");
             tx.SetProperty(n2, "body", PropertyValue.FromString("a lazy dog is sleeping"));
             tx.Commit();
         }

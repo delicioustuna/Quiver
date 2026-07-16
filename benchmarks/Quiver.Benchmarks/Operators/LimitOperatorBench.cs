@@ -3,7 +3,7 @@ using Quiver.Query.Physical;
 
 namespace Quiver.Benchmarks.Operators;
 
-/// <summary>TS-6 sentinel: <see cref="LimitOperator"/> caps a 200-row stream to 50.</summary>
+/// <summary> sentinel: <see cref="LimitOperator"/> caps a 200-row stream to 50.</summary>
 [MemoryDiagnoser]
 [ShortRunJob]
 public class LimitOperatorBench
@@ -19,7 +19,7 @@ public class LimitOperatorBench
     [Benchmark]
     public int Limit_50_skip_10()
     {
-        var src = new NodeArraySource(_seed.PersonNodes);
+        var src = new VertexArraySource(_seed.PersonVertices);
         using var op = new LimitOperator(src, limit: 50, skip: 10);
         return OperatorBenchDrain.Drain(op, _seed.ReadTx);
     }

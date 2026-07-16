@@ -19,7 +19,7 @@ internal sealed class ShortestPathOperator : IPhysicalOperator
     private readonly int _srcCol;
     private readonly int _tgtCol;
     private readonly Direction _dir;
-    private readonly RelationshipTypeId? _typeFilter;
+    private readonly EdgeTypeId? _typeFilter;
     private readonly long _maxDistance;
 
     private ITransaction? _tx;
@@ -28,21 +28,21 @@ internal sealed class ShortestPathOperator : IPhysicalOperator
     private ShortestPathKernel? _kernel;
 
     private static readonly TupleSchema s_schema = new([
-        new ColumnDefinition("source",   TupleSlotType.NodeId),
-        new ColumnDefinition("target",   TupleSlotType.NodeId),
+        new ColumnDefinition("source",   TupleSlotType.VertexId),
+        new ColumnDefinition("target",   TupleSlotType.VertexId),
         new ColumnDefinition("distance", TupleSlotType.Int64)]);
 
     public ShortestPathOperator(
         IPhysicalOperator source,
-        int sourceNodeColumn,
-        int targetNodeColumn,
+        int sourceVertexColumn,
+        int targetVertexColumn,
         Direction direction,
-        RelationshipTypeId? typeFilter,
+        EdgeTypeId? typeFilter,
         long maxDistance = long.MaxValue)
     {
         _source = source;
-        _srcCol = sourceNodeColumn;
-        _tgtCol = targetNodeColumn;
+        _srcCol = sourceVertexColumn;
+        _tgtCol = targetVertexColumn;
         _dir = direction;
         _typeFilter = typeFilter;
         _maxDistance = maxDistance;
@@ -64,17 +64,17 @@ internal sealed class ShortestPathOperator : IPhysicalOperator
     {
         while (_source.MoveNext())
         {
-            var materializer = new EntityIdentityMaterializer(_tx!.Nodes);
-            if (!materializer.TryNode(new NodeId(_source.Current[_srcCol].LongValue), out var src)
-                || !materializer.TryNode(new NodeId(_source.Current[_tgtCol].LongValue), out var tgt))
+            var materializer = new EntityIdentityMaterializer(_tx!.Vertices);
+            if (!materializer.TryVertex(new VertexId(_source.Current[_srcCol].LongValue), out var src)
+                || !materializer.TryVertex(new VertexId(_source.Current[_tgtCol].LongValue), out var tgt))
             {
                 continue;
             }
             long dist = FindShortestPath(src, tgt);
             if (dist < 0) continue;
 
-            _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = src.Value };
-            _buffer[1] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = tgt.Value };
+            _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = src.Value };
+            _buffer[1] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = tgt.Value };
             _buffer[2] = new TupleSlot { Type = TupleSlotType.Int64, LongValue = dist };
             var s = Statistics;
             s.RowsProduced++;
@@ -84,7 +84,7 @@ internal sealed class ShortestPathOperator : IPhysicalOperator
         return false;
     }
 
-    private long FindShortestPath(NodeId src, NodeId tgt)
+    private long FindShortestPath(VertexId src, VertexId tgt)
     {
         if (src == tgt) return 0;
 
@@ -93,10 +93,10 @@ internal sealed class ShortestPathOperator : IPhysicalOperator
 
         while (_state.Queue!.Count > 0)
         {
-            var (node, depth) = _state.Queue.Dequeue();
+            var (vertex, depth) = _state.Queue.Dequeue();
             if (!_kernel.ShouldContinue(depth, in _state)) continue;
 
-            if (!OneHopExpansion.Expand(_tx!, node, _dir, _typeFilter, depth, _kernel, ref _state))
+            if (!OneHopExpansion.Expand(_tx!, vertex, _dir, _typeFilter, depth, _kernel, ref _state))
                 return _state.FoundDistance;
         }
         return -1;
@@ -112,17 +112,17 @@ internal sealed class ShortestPathOperator : IPhysicalOperator
     /// </summary>
     internal struct ShortestPathState
     {
-        public Queue<(NodeId Node, int Depth)>? Queue;
+        public Queue<(VertexId Vertex, int Depth)>? Queue;
         public Dictionary<long, long>? Dist;
-        public NodeId Target;
+        public VertexId Target;
         public long FoundDistance;
     }
 
     private sealed class ShortestPathKernel(long maxDistance) : IGraphKernel<ShortestPathState>
     {
-        public void Initialize(NodeId source, ref ShortestPathState s)
+        public void Initialize(VertexId source, ref ShortestPathState s)
         {
-            s.Queue ??= new Queue<(NodeId, int)>();
+            s.Queue ??= new Queue<(VertexId, int)>();
             s.Queue.Clear();
             s.Dist ??= new Dictionary<long, long>();
             s.Dist.Clear();
@@ -132,7 +132,7 @@ internal sealed class ShortestPathOperator : IPhysicalOperator
         }
 
         public bool VisitNeighbor(
-            NodeId source, NodeId target, RelationshipId rel,
+            VertexId source, VertexId target, EdgeId edge,
             long weightRaw, int depth, ref ShortestPathState s)
         {
             long nextDist = depth + 1;

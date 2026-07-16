@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using Quiver.Core;
 using Quiver.Index;
 using Quiver.Storage.Records;
@@ -17,7 +17,7 @@ public class TransactionManagerTests : IDisposable
     {
         _wal = new WriteAheadLog(Path.Combine(_walDir, "wal"));
         _manager = new TransactionManager(_wal,
-            new StubNodeStore(), new StubRelationshipStore(),
+            new StubVertexStore(), new StubEdgeStore(),
             new StubPropertyStore(), new NullIndexManager());
     }
 
@@ -277,38 +277,38 @@ public class TransactionManagerTests : IDisposable
 
     // ---- テスト用実装 ----
 
-    private sealed class StubNodeStore : INodeStore
+    private sealed class StubVertexStore : IVertexStore
     {
         public long InUseCount => 0;
-        public NodeId Allocate(LabelId labelId) => NodeId.Invalid;
-        public void Free(NodeId nodeId) { }
-        public NodeReadHandle Read(NodeId nodeId) => throw new NotSupportedException();
-        public NodeWriteHandle Write(NodeId nodeId) => throw new NotSupportedException();
-        public IEnumerable<NodeId> Scan() => [];
+        public VertexId Allocate(LabelId labelId) => VertexId.Invalid;
+        public void Free(VertexId vertexId) { }
+        public VertexReadHandle Read(VertexId vertexId) => throw new NotSupportedException();
+        public VertexWriteHandle Write(VertexId vertexId) => throw new NotSupportedException();
+        public IEnumerable<VertexId> Scan() => [];
         public int CurrentGeneration(long localId) => -1;
-        public bool TryGetInlineProperty(NodeId nodeId, PropertyKeyId keyId, out PropertyValue value) { value = default; return false; }
-        public bool HasInlineProperty(NodeId nodeId, PropertyKeyId keyId) => false;
-        public bool SetInlineProperty(NodeId nodeId, PropertyKeyId keyId, in PropertyValue value) => false;
-        public bool RemoveInlineProperty(NodeId nodeId, PropertyKeyId keyId) => false;
-        public PropertyEnumerator EnumerateProperties(NodeId nodeId, IPropertyStore overflowStore)
+        public bool TryGetInlineProperty(VertexId vertexId, PropertyKeyId keyId, out PropertyValue value) { value = default; return false; }
+        public bool HasInlineProperty(VertexId vertexId, PropertyKeyId keyId) => false;
+        public bool SetInlineProperty(VertexId vertexId, PropertyKeyId keyId, in PropertyValue value) => false;
+        public bool RemoveInlineProperty(VertexId vertexId, PropertyKeyId keyId) => false;
+        public PropertyEnumerator EnumerateProperties(VertexId vertexId, IPropertyStore overflowStore)
             => new PropertyEnumerator(overflowStore, PropertyId.Invalid);
     }
 
-    private sealed class StubRelationshipStore : IRelationshipStore
+    private sealed class StubEdgeStore : IEdgeStore
     {
         public long InUseCount => 0;
-        public RelationshipId Create(INodeStore ns, NodeId src, NodeId tgt, RelationshipTypeId type) => RelationshipId.Invalid;
-        public void Delete(INodeStore ns, RelationshipId relId) { }
-        public RelationshipReadHandle Read(RelationshipId relId) => throw new NotSupportedException();
-        public RelationshipWriteHandle Write(RelationshipId relId) => throw new NotSupportedException();
-        public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore ns) => throw new NotSupportedException();
-        public RelationshipEnumerator EnumerateNeighbors(NodeId nodeId, INodeStore ns, RelationshipTypeId type, Direction dir) => throw new NotSupportedException();
-        public IEnumerable<RelationshipId> Scan() => [];
-        public bool TryGetInlineProperty(RelationshipId relId, PropertyKeyId keyId, out PropertyValue value) { value = default; return false; }
-        public bool HasInlineProperty(RelationshipId relId, PropertyKeyId keyId) => false;
-        public bool SetInlineProperty(RelationshipId relId, PropertyKeyId keyId, in PropertyValue value) => false;
-        public bool RemoveInlineProperty(RelationshipId relId, PropertyKeyId keyId) => false;
-        public PropertyEnumerator EnumerateProperties(RelationshipId relId, IPropertyStore overflowStore) => new PropertyEnumerator(overflowStore, PropertyId.Invalid);
+        public EdgeId Create(IVertexStore ns, VertexId src, VertexId tgt, EdgeTypeId type) => EdgeId.Invalid;
+        public void Delete(IVertexStore ns, EdgeId edgeId) { }
+        public EdgeReadHandle Read(EdgeId edgeId) => throw new NotSupportedException();
+        public EdgeWriteHandle Write(EdgeId edgeId) => throw new NotSupportedException();
+        public EdgeEnumerator EnumerateNeighbors(VertexId vertexId, IVertexStore ns) => throw new NotSupportedException();
+        public EdgeEnumerator EnumerateNeighbors(VertexId vertexId, IVertexStore ns, EdgeTypeId type, Direction dir) => throw new NotSupportedException();
+        public IEnumerable<EdgeId> Scan() => [];
+        public bool TryGetInlineProperty(EdgeId edgeId, PropertyKeyId keyId, out PropertyValue value) { value = default; return false; }
+        public bool HasInlineProperty(EdgeId edgeId, PropertyKeyId keyId) => false;
+        public bool SetInlineProperty(EdgeId edgeId, PropertyKeyId keyId, in PropertyValue value) => false;
+        public bool RemoveInlineProperty(EdgeId edgeId, PropertyKeyId keyId) => false;
+        public PropertyEnumerator EnumerateProperties(EdgeId edgeId, IPropertyStore overflowStore) => new PropertyEnumerator(overflowStore, PropertyId.Invalid);
     }
 
     private sealed class StubPropertyStore : IPropertyStore

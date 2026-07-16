@@ -8,10 +8,10 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// PW-18: フィルタ連鎖 + 展開 + sub-traversal + sort/limit を 1 本のクエリに乗せた複雑クエリ。
+/// フィルタ連鎖 + 展開 + sub-traversal + sort/limit を 1 本のクエリに乗せた複雑クエリ。
 ///
 /// 形:
-///   g.Nodes().HasLabel("Person")
+///   g.Vertices().HasLabel("Person")
 ///     .Has("city", "Tokyo")
 ///     .Out("KNOWS")
 ///     .Has("age", P.Gt(30))
@@ -28,12 +28,12 @@ namespace Quiver.Benchmarks;
 public class FilterChainExpandBenchmarks
 {
     [Params(10_000, 100_000)]
-    public int NodeCount { get; set; }
+    public int VertexCount { get; set; }
 
     [Params(8, 32)]
     public int AvgDegree { get; set; }
 
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
     private string _dbPath = null!;
     private IGraphTransaction _readTx = null!;
 
@@ -45,12 +45,12 @@ public class FilterChainExpandBenchmarks
     {
         _dbPath = BenchTempDir.Create("filterchain");
 
-        // Person ノード: city/age プロパティ付き
+        // Person Vertex: city/age プロパティ付き
         // WORKS_AT ターゲット (Company): type プロパティ付き
         // KNOWS エッジ: Person 間で AvgDegree 本ずつ
         // WORKS_AT エッジ: Person → Company (各 Person 1 本)
         var rnd = new Random(42);
-        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver")))
+        using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver")))
         {
             // schema をウォームアップ
             using (var schemaTx = db.BeginTransaction())
@@ -60,27 +60,27 @@ public class FilterChainExpandBenchmarks
                 _ = db.Schema.GetOrCreatePropertyKey("city");
                 _ = db.Schema.GetOrCreatePropertyKey("age");
                 _ = db.Schema.GetOrCreatePropertyKey("type");
-                _ = db.Schema.GetOrCreateRelationshipType("KNOWS");
-                _ = db.Schema.GetOrCreateRelationshipType("WORKS_AT");
+                _ = db.Schema.GetOrCreateEdgeType("KNOWS");
+                _ = db.Schema.GetOrCreateEdgeType("WORKS_AT");
                 schemaTx.Commit();
             }
 
-            // ノード作成 (Person + 1/4 の Company)
-            int companyCount = Math.Max(1, NodeCount / 4);
-            var personIds = new NodeId[NodeCount];
-            var companyIds = new NodeId[companyCount];
+            // Vertex作成 (Person + 1/4 の Company)
+            int companyCount = Math.Max(1, VertexCount / 4);
+            var personIds = new VertexId[VertexCount];
+            var companyIds = new VertexId[companyCount];
             using (var tx = db.BeginTransaction())
             {
-                for (int i = 0; i < NodeCount; i++)
+                for (int i = 0; i < VertexCount; i++)
                 {
-                    var id = tx.CreateNode("Person");
+                    var id = tx.CreateVertex("Person");
                     personIds[i] = id;
                     tx.SetProperty(id, "city", PropertyValue.FromString(s_cities[i % s_cities.Length]));
                     tx.SetProperty(id, "age", PropertyValue.FromInt32(20 + (i % 50)));
                 }
                 for (int i = 0; i < companyCount; i++)
                 {
-                    var id = tx.CreateNode("Company");
+                    var id = tx.CreateVertex("Company");
                     companyIds[i] = id;
                     tx.SetProperty(id, "type", PropertyValue.FromString(s_types[i % s_types.Length]));
                 }
@@ -94,12 +94,12 @@ public class FilterChainExpandBenchmarks
             try
             {
                 batchTx = db.BeginTransaction();
-                for (int i = 0; i < NodeCount; i++)
+                for (int i = 0; i < VertexCount; i++)
                 {
                     for (int d = 0; d < AvgDegree; d++)
                     {
-                        int tgt = rnd.Next(NodeCount);
-                        batchTx.CreateRelationship(personIds[i], personIds[tgt], "KNOWS");
+                        int tgt = rnd.Next(VertexCount);
+                        batchTx.CreateEdge(personIds[i], personIds[tgt], "KNOWS");
                         created++;
                         if (created % batchSize == 0)
                         {
@@ -109,7 +109,7 @@ public class FilterChainExpandBenchmarks
                         }
                     }
                     int cIdx = rnd.Next(companyCount);
-                    batchTx.CreateRelationship(personIds[i], companyIds[cIdx], "WORKS_AT");
+                    batchTx.CreateEdge(personIds[i], companyIds[cIdx], "WORKS_AT");
                     created++;
                     if (created % batchSize == 0)
                     {
@@ -126,7 +126,7 @@ public class FilterChainExpandBenchmarks
             }
         }
 
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _readTx = _db.BeginReadOnlyTransaction();
     }
 
@@ -143,14 +143,14 @@ public class FilterChainExpandBenchmarks
     public int BaselineExpandAll()
     {
         var g = _readTx.G(_db.Schema);
-        return g.Nodes().HasLabel("Person").Out("KNOWS").ToList().Count;
+        return g.Vertices().HasLabel("Person").Out("KNOWS").ToList().Count;
     }
 
     [Benchmark(Description = "FilterChain: city+age+sub+order+limit")]
     public int FilterChainExpand()
     {
         var g = _readTx.G(_db.Schema);
-        return g.Nodes().HasLabel("Person")
+        return g.Vertices().HasLabel("Person")
                     .Has("city", "Tokyo")
                     .Out("KNOWS")
                     .Has("age", P.Gt(30))
@@ -164,7 +164,7 @@ public class FilterChainExpandBenchmarks
     public int FilterChainNoSub()
     {
         var g = _readTx.G(_db.Schema);
-        return g.Nodes().HasLabel("Person")
+        return g.Vertices().HasLabel("Person")
                     .Has("city", "Tokyo")
                     .Out("KNOWS")
                     .Has("age", P.Gt(30))

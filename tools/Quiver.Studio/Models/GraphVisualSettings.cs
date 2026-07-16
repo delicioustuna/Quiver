@@ -2,7 +2,7 @@ namespace Quiver.Studio.Models;
 
 public enum ScoreVizMode { ColorOnly, ColorAndSize, SizeOnly }
 public enum ContourMode { Relative, Absolute }
-public enum NodeShape { Circle, Square, RoundedRect }
+public enum VertexShape { Circle, Square, RoundedRect }
 public enum EdgeStyle { Straight, Bezier, Polyline }
 
 public sealed class ColorPalettePreset
@@ -58,6 +58,6 @@ public sealed class GraphVisualSettings
 {
     public ScoreVizMode ScoreVisualization { get; set; } = ScoreVizMode.ColorAndSize;
     public ContourSettings Contour { get; set; } = new();
-    public NodeShape NodeShape { get; set; } = NodeShape.Circle;
+    public VertexShape VertexShape { get; set; } = VertexShape.Circle;
     public EdgeStyle EdgeStyle { get; set; } = EdgeStyle.Straight;
 }

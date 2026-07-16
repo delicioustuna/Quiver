@@ -123,7 +123,7 @@ internal sealed class PropertyStore : IPropertyStore
 
     public PropertyReadHandle Read(PropertyId propId)
     {
-        // HWM 超 / 負 ID は "存在しない" 扱い。NodeStore.Read と同じ理由。
+        // HWM 超 / 負 ID は "存在しない" 扱い。VertexStore.Read と同じ理由。
         // slot 演算 / version キーは Sequence (packed Value ではない)。
         long seq = propId.Sequence;
         if (seq < 0 || seq >= _hwm)
@@ -222,40 +222,40 @@ internal sealed class PropertyStore : IPropertyStore
     internal void BulkFlushMeta() => FlushMeta();
 
     /// <summary>
-    /// vacuum: ノードストアと協調してプロパティ chain を整理し、dead version を
+    /// vacuum: Vertexストアと協調してプロパティ chain を整理し、dead version を
     /// 物理回収する。実行手順:
     /// <list type="number">
-    ///   <item>各ノード slot を raw 走査。</item>
-    ///   <item>ノードが reclaim 対象 (xmax committed かつ horizon 未満) なら、その prop chain を
-    ///         全 free (blob 含む) しノードの FirstPropId は触らない (ノード vacuum で record ごと消える)。</item>
-    ///   <item>ノードが live なら chain を walk し、dead prop を unlink + free。</item>
+    ///   <item>各Vertex slot を raw 走査。</item>
+    ///   <item>Vertexが reclaim 対象 (xmax committed かつ horizon 未満) なら、その prop chain を
+    ///         全 free (blob 含む) しVertexの FirstPropId は触らない (Vertex vacuum で record ごと消える)。</item>
+    ///   <item>Vertexが live なら chain を walk し、dead prop を unlink + free。</item>
     /// </list>
     /// </summary>
     /// <remarks>呼び出し前提: アクティブトランザクション 0 件。</remarks>
     /// <returns>物理回収したプロパティ版数。</returns>
-    internal int VacuumDeadVersions(VersionedNodeStore nodeStore, long horizonTxId, CommittedTxRegistry committed)
+    internal int VacuumDeadVersions(VersionedVertexStore vertexStore, long horizonTxId, CommittedTxRegistry committed)
     {
         int reclaimed = 0;
-        long hwm = nodeStore.Hwm;
+        long hwm = vertexStore.Hwm;
         for (long nid = 0; nid < hwm; nid++)
         {
-            var raw = nodeStore.ReadRaw(nid);
+            var raw = vertexStore.ReadRaw(nid);
             if (!raw.InUse) continue;
             if (!raw.FirstPropId.IsValid) continue;
 
-            bool nodeWillBeReclaimed = raw.Xmax != 0
+            bool vertexWillBeReclaimed = raw.Xmax != 0
                 && raw.Xmax < horizonTxId
                 && committed.IsCommitted(raw.Xmax);
 
-            if (nodeWillBeReclaimed)
+            if (vertexWillBeReclaimed)
             {
-                // 全 chain を解放。NodeStore 側で FirstPropId はクリアされる。
+                // 全 chain を解放。VertexStore 側で FirstPropId はクリアされる。
                 reclaimed += ReclaimEntireChain(raw.FirstPropId);
             }
             else
             {
-                // 部分解放: dead prop だけ unlink + free。chain head が変わったら NodeStore に書き戻す。
-                reclaimed += CompactChain(new NodeId(nid), raw.FirstPropId, nodeStore, horizonTxId, committed);
+                // 部分解放: dead prop だけ unlink + free。chain head が変わったら VertexStore に書き戻す。
+                reclaimed += CompactChain(new VertexId(nid), raw.FirstPropId, vertexStore, horizonTxId, committed);
             }
         }
         if (reclaimed > 0)
@@ -267,8 +267,8 @@ internal sealed class PropertyStore : IPropertyStore
     }
 
     /// <summary>
-    /// vacuum: 指定した overflow chain 全体を物理回収する。node vacuum が辿らない
-    /// hyperedge の overflow プロパティを、その header 回収に合わせて解放するために使う。
+    /// vacuum: 指定した overflow chain 全体を物理回収する。vertex vacuum が辿らない
+    /// nexus の overflow プロパティを、その header 回収に合わせて解放するために使う。
     /// hwm 縮小と meta flush はまとめて <see cref="FinishExternalReclaim"/> で行う。
     /// </summary>
     /// <returns>回収したプロパティ版数。</returns>
@@ -299,7 +299,7 @@ internal sealed class PropertyStore : IPropertyStore
         return count;
     }
 
-    private int CompactChain(NodeId owner, PropertyId head, VersionedNodeStore nodeStore,
+    private int CompactChain(VertexId owner, PropertyId head, VersionedVertexStore vertexStore,
         long horizonTxId, CommittedTxRegistry committed)
     {
         // raw に chain を遍歴して live/dead に分類。
@@ -364,8 +364,8 @@ internal sealed class PropertyStore : IPropertyStore
             newHead = id;
         }
 
-        // node.FirstPropId 更新
-        nodeStore.UpdateFirstPropId(owner, newHead);
+        // vertex.FirstPropId 更新
+        vertexStore.UpdateFirstPropId(owner, newHead);
         return reclaimedHere;
     }
 
@@ -558,8 +558,8 @@ internal sealed class PropertyStore : IPropertyStore
     {
         using var h = _file.PinForRead(HeaderPageId);
         byte v = h.Data[MetaFormatVersion];
-        if (v != FormatVersion.Current)
-            throw new FormatVersionMismatchException("props", v, FormatVersion.Current);
+        if (v != StorageFormatVersion.Current)
+            throw new StorageFormatMismatchException("props", v, StorageFormatVersion.Current);
     }
 
     private void FlushMeta(bool initialise = false)
@@ -568,7 +568,7 @@ internal sealed class PropertyStore : IPropertyStore
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaFreeHead..], _freeHead);
         BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaHwm..], _hwm);
         if (initialise)
-            ph.Data[MetaFormatVersion] = FormatVersion.Current;
+            ph.Data[MetaFormatVersion] = StorageFormatVersion.Current;
         _file.UnpinDirty(HeaderPageId, 0);
     }
 }

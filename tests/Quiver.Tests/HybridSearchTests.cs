@@ -18,16 +18,16 @@ public sealed class HybridSearchTests : IDisposable
     private const string VectorIndex = "doc-embed";
     private const int Dim = 4;
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public HybridSearchTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fts5_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
         _db.Schema.CreateFullTextIndex(TextIndex, "Doc", "body");
         var keyId = _db.Schema.GetOrCreatePropertyKey("embedding");
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            VectorIndex, EntityKind.Node, keyId, Dim, DistanceMetric.Cosine, "test", null));
+            VectorIndex, EntityKind.Vertex, keyId, Dim, DistanceMetric.Cosine, "test", null));
     }
 
     public void Dispose()
@@ -37,17 +37,17 @@ public sealed class HybridSearchTests : IDisposable
     }
 
     /// <summary>Creates a Doc with an optional body (full-text) and optional vector (KNN).</summary>
-    private NodeId AddDoc(string? body, float[]? vector)
+    private VertexId AddDoc(string? body, float[]? vector)
     {
         using var tx = _db.BeginTransaction();
-        var n = tx.CreateNode("Doc");
+        var n = tx.CreateVertex("Doc");
         if (body is not null) tx.SetProperty(n, "body", PropertyValue.FromString(body));
-        if (vector is not null) _db.Vectors.SetVector(EntityKind.Node, n.Value, VectorIndex, vector);
+        if (vector is not null) _db.Vectors.SetVector(EntityKind.Vertex, n.Value, VectorIndex, vector);
         tx.Commit();
         return n;
     }
 
-    private List<NodeId> Hybrid(string queryText, float[] queryVector, int k)
+    private List<VertexId> Hybrid(string queryText, float[] queryVector, int k)
     {
         using var rtx = _db.BeginReadOnlyTransaction();
         return rtx.G(_db.Schema)
@@ -118,14 +118,14 @@ public sealed class HybridSearchTests : IDisposable
     [Fact]
     public void Hybrid_search_composes_with_Out_traversal()
     {
-        NodeId author;
+        VertexId author;
         using (var tx = _db.BeginTransaction())
         {
-            author = tx.CreateNode("Author");
-            var doc = tx.CreateNode("Doc");
+            author = tx.CreateVertex("Author");
+            var doc = tx.CreateVertex("Doc");
             tx.SetProperty(doc, "body", PropertyValue.FromString("quiver report"));
-            _db.Vectors.SetVector(EntityKind.Node, doc.Value, VectorIndex, new float[] { 1f, 0f, 0f, 0f });
-            tx.CreateRelationship(doc, author, "WROTE");
+            _db.Vectors.SetVector(EntityKind.Vertex, doc.Value, VectorIndex, new float[] { 1f, 0f, 0f, 0f });
+            tx.CreateEdge(doc, author, "WROTE");
             tx.Commit();
         }
 

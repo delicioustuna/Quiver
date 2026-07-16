@@ -9,14 +9,14 @@ public sealed class QueryResult
     public string? ScalarText { get; }
     public string? Error { get; }
     public TimeSpan Elapsed { get; }
-    public IReadOnlyList<NodeId> ExtractedNodeIds { get; }
-    public IReadOnlyList<RelationshipId> ExtractedRelationshipIds { get; }
+    public IReadOnlyList<VertexId> ExtractedVertexIds { get; }
+    public IReadOnlyList<EdgeId> ExtractedEdgeIds { get; }
     public IReadOnlyDictionary<long, float>? VectorScores { get; }
 
     public bool IsError => Error is not null;
     public bool IsScalar => ScalarText is not null;
     public bool IsTabular => Columns.Count > 0;
-    public bool HasGraphData => ExtractedNodeIds.Count > 0 || ExtractedRelationshipIds.Count > 0;
+    public bool HasGraphData => ExtractedVertexIds.Count > 0 || ExtractedEdgeIds.Count > 0;
 
     private QueryResult(
         IReadOnlyList<string> columns,
@@ -24,8 +24,8 @@ public sealed class QueryResult
         string? scalarText,
         string? error,
         TimeSpan elapsed,
-        IReadOnlyList<NodeId>? nodeIds = null,
-        IReadOnlyList<RelationshipId>? relIds = null,
+        IReadOnlyList<VertexId>? vertexIds = null,
+        IReadOnlyList<EdgeId>? edgeIds = null,
         IReadOnlyDictionary<long, float>? vectorScores = null)
     {
         Columns = columns;
@@ -33,8 +33,8 @@ public sealed class QueryResult
         ScalarText = scalarText;
         Error = error;
         Elapsed = elapsed;
-        ExtractedNodeIds = nodeIds ?? [];
-        ExtractedRelationshipIds = relIds ?? [];
+        ExtractedVertexIds = vertexIds ?? [];
+        ExtractedEdgeIds = edgeIds ?? [];
         VectorScores = vectorScores;
     }
 
@@ -42,15 +42,15 @@ public sealed class QueryResult
         IReadOnlyList<string> columns,
         IReadOnlyList<IReadOnlyList<object?>> rows,
         TimeSpan elapsed,
-        IReadOnlyList<NodeId>? nodeIds = null,
-        IReadOnlyList<RelationshipId>? relIds = null,
+        IReadOnlyList<VertexId>? vertexIds = null,
+        IReadOnlyList<EdgeId>? edgeIds = null,
         IReadOnlyDictionary<long, float>? vectorScores = null)
-        => new(columns, rows, null, null, elapsed, nodeIds, relIds, vectorScores);
+        => new(columns, rows, null, null, elapsed, vertexIds, edgeIds, vectorScores);
 
     public static QueryResult Scalar(string text, TimeSpan elapsed,
-        IReadOnlyList<NodeId>? nodeIds = null,
-        IReadOnlyList<RelationshipId>? relIds = null)
-        => new([], [], text, null, elapsed, nodeIds, relIds);
+        IReadOnlyList<VertexId>? vertexIds = null,
+        IReadOnlyList<EdgeId>? edgeIds = null)
+        => new([], [], text, null, elapsed, vertexIds, edgeIds);
 
     public static QueryResult Empty(TimeSpan elapsed)
         => new([], [], null, null, elapsed);

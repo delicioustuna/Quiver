@@ -48,7 +48,7 @@ public sealed class RagSearchTests : IDisposable
         }
     }
 
-    private RagStore NewStore(GraphDatabase db) =>
+    private RagStore NewStore(QuiverDatabase db) =>
         new(db, new RagStoreOptions
         {
             EmbeddingDimensions = Dim,
@@ -62,7 +62,7 @@ public sealed class RagSearchTests : IDisposable
     [Fact]
     public async Task Bm25_finds_chunk_with_rare_proper_noun()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         await store.UpsertDocumentAsync(
             Doc("d1", null,
@@ -82,7 +82,7 @@ public sealed class RagSearchTests : IDisposable
     [Fact]
     public async Task Bm25_finds_chunk_by_heading_word_absent_from_body()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         // 固有語 "Quetzal" は見出しにだけ置き、本文には含めない。
         var doc = new IngestedDocument("d1", "title-d1", new Dictionary<string, string>(),
@@ -105,7 +105,7 @@ public sealed class RagSearchTests : IDisposable
     [Fact]
     public async Task Knn_finds_chunk_nearest_to_query_vector()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         await store.UpsertDocumentAsync(
             Doc("d1", null,
@@ -127,7 +127,7 @@ public sealed class RagSearchTests : IDisposable
     [Fact]
     public async Task Expansion_concatenates_neighbor_chunks()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         await store.UpsertDocumentAsync(
             Doc("d1", null,
@@ -148,7 +148,7 @@ public sealed class RagSearchTests : IDisposable
     [Fact]
     public async Task Adjacent_hits_merge_into_single_result()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         // "common" が隣接 2 チャンクに出る → 2 ヒットだが 1 つの RagHit にマージ。
         await store.UpsertDocumentAsync(
@@ -169,7 +169,7 @@ public sealed class RagSearchTests : IDisposable
     [Fact]
     public async Task Neighbor_expansion_zero_returns_only_center()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         await store.UpsertDocumentAsync(
             Doc("d1", null,
@@ -189,7 +189,7 @@ public sealed class RagSearchTests : IDisposable
     [Fact]
     public async Task Metadata_filter_excludes_documents()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         var searcher = new RagSearcher(store);
 
@@ -213,7 +213,7 @@ public sealed class RagSearchTests : IDisposable
     [Fact]
     public async Task Metadata_equals_pushdown_excludes_non_matching_documents()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         var searcher = new RagSearcher(store);
 
@@ -237,7 +237,7 @@ public sealed class RagSearchTests : IDisposable
     [Fact]
     public async Task Metadata_equals_pushdown_avoids_recall_hole()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         var searcher = new RagSearcher(store);
 
@@ -267,7 +267,7 @@ public sealed class RagSearchTests : IDisposable
     [Fact]
     public async Task Metadata_equals_pushdown_returns_empty_when_no_document_matches()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         await store.UpsertDocumentAsync(
             Doc("d1", new Dictionary<string, string> { ["acl"] = "secret" }, "secret Zphobos note text body"),
@@ -285,7 +285,7 @@ public sealed class RagSearchTests : IDisposable
     [Fact]
     public async Task Metadata_equals_pushdown_works_for_hybrid()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         await store.UpsertDocumentAsync(
             Doc("pub", new Dictionary<string, string> { ["acl"] = "public" },
@@ -315,7 +315,7 @@ public sealed class RagSearchTests : IDisposable
     [Fact]
     public async Task Hybrid_search_returns_results_from_both_signals()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         await store.UpsertDocumentAsync(
             Doc("d1", null,
@@ -339,7 +339,7 @@ public sealed class RagSearchTests : IDisposable
     {
         // ブロック内分割 (Overlap=0) されたチャンクを expansion で再連結したとき、
         // 偽の区切り ("\n\n") を挟まず原文を完全復元する (ConcatChunks の連続判定を pin)。
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = new RagStore(db, new RagStoreOptions
         {
             EmbeddingDimensions = Dim,
@@ -360,7 +360,7 @@ public sealed class RagSearchTests : IDisposable
     [Fact]
     public void Empty_query_returns_empty()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         var searcher = new RagSearcher(store);
 
@@ -370,7 +370,7 @@ public sealed class RagSearchTests : IDisposable
     [Fact]
     public async Task IncludeDocument_false_omits_document_ref()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         await store.UpsertDocumentAsync(Doc("d1", null, "solo Zphobos only chunk of text"), new FakeEmbedder());
 
@@ -379,13 +379,13 @@ public sealed class RagSearchTests : IDisposable
 
         hits.Should().HaveCount(1);
         hits[0].Document.SourceId.Should().BeEmpty();
-        hits[0].ChunkNodeId.Value.Should().NotBe(0); // 代表ノードは入る
+        hits[0].ChunkVertexId.Value.Should().NotBe(0); // 代表Vertexは入る
     }
 
     [Fact]
     public async Task Ranks_are_one_based_and_sorted()
     {
-        using var db = GraphDatabase.Open(_path);
+        using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         // 別文書にして expansion でマージされないようにする。
         await store.UpsertDocumentAsync(Doc("d1", null, "Zphobos appears once in textaa"), new FakeEmbedder());

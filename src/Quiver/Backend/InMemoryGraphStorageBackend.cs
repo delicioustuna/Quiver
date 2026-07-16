@@ -30,8 +30,8 @@ internal sealed class InMemoryGraphStorageBackend(
 
     public VacuumReport Vacuum(VacuumOptions? options = null)
         => new(
-            ReclaimedNodes: 0,
-            ReclaimedRelationships: 0,
+            ReclaimedVertices: 0,
+            ReclaimedEdges: 0,
             ReclaimedProperties: 0,
             PrunedCommittedTxEntries: 0,
             ElapsedMs: 0,

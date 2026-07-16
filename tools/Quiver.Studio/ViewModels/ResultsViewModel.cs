@@ -95,7 +95,7 @@ public sealed partial class ResultsViewModel : ObservableObject
         TopLevel?.Clipboard?.SetTextAsync(json);
     }
 
-    public NodeId? GetSelectedNodeId()
+    public VertexId? GetSelectedVertexId()
     {
         if (_currentResult is null || SelectedItem is not string[] cells) return null;
         var rows = _currentResult.Rows;
@@ -105,7 +105,7 @@ public sealed partial class ResultsViewModel : ObservableObject
         var row = rows[idx];
         foreach (var val in row)
         {
-            if (val is NodeId nid) return nid;
+            if (val is VertexId nid) return nid;
         }
         return null;
     }

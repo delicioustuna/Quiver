@@ -21,7 +21,7 @@ public sealed class PublicApiApprovalTests
     {
         // 旧 Quiver / Quiver.Api / Quiver.Core は単一 'Quiver' アセンブリに
         // 統合されたため、安定性の対象は 1 アセンブリのみ (3 つの typeof はすべて同一 Assembly を指す)。
-        yield return new object[] { typeof(global::Quiver.GraphDatabase).Assembly };
+        yield return new object[] { typeof(global::Quiver.QuiverDatabase).Assembly };
     }
 
     [Theory]

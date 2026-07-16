@@ -5,26 +5,26 @@ using Quiver.Storage;
 namespace Quiver.Storage.Records;
 
 /// <summary>
-/// 27 バイト固定 slot の incidence store。node sequence を添字にする
-/// <see cref="NodeIncidenceHeadStore"/> と同じ「sequence → page/offset 直引き」で slot を引き、
+/// 27 バイト固定 slot の incidence store。vertex sequence を添字にする
+/// <see cref="VertexIncidenceHeadStore"/> と同じ「sequence → page/offset 直引き」で slot を引き、
 /// version チェーンも間接ポインタ層 (map / slot directory) も持たない。
-/// incidence 自身は MVCC entity ではなく、可視性は参照先 hyperedge header に従う。
+/// incidence 自身は MVCC entity ではなく、可視性は参照先 nexus header に従う。
 ///
 /// <para>slot レイアウト (27B、302 slots/page):</para>
 /// <code>
 ///   [0]  flags           : u8    (FlagInUse)
-///   [1]  hyperedge       : Int48 (Sequence)
-///   [7]  node            : Int48 (Sequence)
+///   [1]  nexus       : Int48 (Sequence)
+///   [7]  vertex            : Int48 (Sequence)
 ///   [13] role            : i16
-///   [15] nextInNode      : Int48 (Sequence)
-///   [21] nextInHyperedge : Int48 (Sequence)
+///   [15] nextInVertex      : Int48 (Sequence)
+///   [21] nextInNexus : Int48 (Sequence)
 /// </code>
 ///
 /// <para>ヘッダページ (page 1) レイアウト:</para>
 /// <code>
 ///   [0]  hwm       : i64   (採番済み slot 数 = 最大 sequence + 1)
 ///   [8]  freeHead  : i64   (free chain 先頭 sequence、-1 = 空)
-///   [31] format    : u8    (FormatVersion sentinel)
+///   [31] family    : u8    (QUIVER-SW family version sentinel)
 /// </code>
 /// slot 本体は page 2 以降に密配置する。<c>seq → (page = seq/302 + 2, offset = seq%302 × 27)</c>。
 /// </summary>
@@ -36,17 +36,17 @@ namespace Quiver.Storage.Records;
 // ヒープ形式を差し替えても rollback / recovery の機構は変わらない。
 internal sealed class IncidenceStore : IIncidenceStore
 {
-    // slot 固定領域。node chain からの前方リンク (旧 prevInNode) は持たない。
-    // vacuum の unlink は影響 node chain を head から 1 回走査する sweep で行うため
+    // slot 固定領域。vertex chain からの前方リンク (旧 prevInVertex) は持たない。
+    // vacuum の unlink は影響 vertex chain を head から 1 回走査する sweep で行うため
     // 逆リンクを常時維持する必要がなく、その 6B を書かないぶん WAL の member あたり実費も減る。
-    // メンバー集合は不変で hyperedge chain は header ごと消えるため nextInHyperedge のみで足りる。
+    // メンバー集合は不変で nexus chain は header ごと消えるため nextInNexus のみで足りる。
     private const int SlotSize = 27;
     private const int OffFlags = 0;
-    private const int OffHyperedge = 1;
-    private const int OffNode = 7;
+    private const int OffNexus = 1;
+    private const int OffVertex = 7;
     private const int OffRole = 13;
-    private const int OffNextInNode = 15;
-    private const int OffNextInHyperedge = 21;
+    private const int OffNextInVertex = 15;
+    private const int OffNextInNexus = 21;
     // 生存 slot は flags == FlagInUse。0xFF fill された未書き込み slot (flags = 0xFF) や
     // free chain に載る slot (flags = 0) と厳密に区別するため bit マスクではなく等値で判定する。
     private const byte FlagInUse = 0x01;
@@ -86,11 +86,11 @@ internal sealed class IncidenceStore : IIncidenceStore
     public long SequenceHighWaterMark => _hwm;
 
     public IncidenceId Allocate(
-        HyperedgeId hyperedgeId,
-        NodeId nodeId,
+        NexusId nexusId,
+        VertexId vertexId,
         RoleId roleId,
-        IncidenceId nextInNode,
-        IncidenceId nextInHyperedge)
+        IncidenceId nextInVertex,
+        IncidenceId nextInNexus)
     {
         long sequence = PopFreeSlot();
         if (sequence < 0)
@@ -105,11 +105,11 @@ internal sealed class IncidenceStore : IIncidenceStore
         using var page = _file.PinForWrite(pageId);
         Span<byte> slot = page.Data.Slice(offset, SlotSize);
         slot[OffFlags] = FlagInUse;
-        RecordHelpers.WriteInt48(slot[OffHyperedge..], hyperedgeId.Sequence);
-        RecordHelpers.WriteInt48(slot[OffNode..], nodeId.Sequence);
+        RecordHelpers.WriteInt48(slot[OffNexus..], nexusId.Sequence);
+        RecordHelpers.WriteInt48(slot[OffVertex..], vertexId.Sequence);
         BinaryPrimitives.WriteInt16LittleEndian(slot[OffRole..], checked((short)roleId.Value));
-        RecordHelpers.WriteInt48(slot[OffNextInNode..], nextInNode.Sequence);
-        RecordHelpers.WriteInt48(slot[OffNextInHyperedge..], nextInHyperedge.Sequence);
+        RecordHelpers.WriteInt48(slot[OffNextInVertex..], nextInVertex.Sequence);
+        RecordHelpers.WriteInt48(slot[OffNextInNexus..], nextInNexus.Sequence);
 
         _inUseCount++;
         return new IncidenceId(sequence);
@@ -130,11 +130,11 @@ internal sealed class IncidenceStore : IIncidenceStore
         return new IncidenceReadHandle(
             incidenceId,
             slot[OffFlags] == FlagInUse,
-            new HyperedgeId(RecordHelpers.ReadInt48(slot[OffHyperedge..])),
-            new NodeId(RecordHelpers.ReadInt48(slot[OffNode..])),
+            new NexusId(RecordHelpers.ReadInt48(slot[OffNexus..])),
+            new VertexId(RecordHelpers.ReadInt48(slot[OffVertex..])),
             new RoleId(BinaryPrimitives.ReadInt16LittleEndian(slot[OffRole..])),
-            new IncidenceId(RecordHelpers.ReadInt48(slot[OffNextInNode..])),
-            new IncidenceId(RecordHelpers.ReadInt48(slot[OffNextInHyperedge..])));
+            new IncidenceId(RecordHelpers.ReadInt48(slot[OffNextInVertex..])),
+            new IncidenceId(RecordHelpers.ReadInt48(slot[OffNextInNexus..])));
     }
 
     public IncidenceWriteHandle Write(IncidenceId incidenceId)
@@ -152,7 +152,7 @@ internal sealed class IncidenceStore : IIncidenceStore
     /// slot を free chain へ戻し、再利用可能にする。呼び出し側 (vacuum) は
     /// slot が全 live chain から unlink 済みかつ active transaction が無いことを保証する。
     /// </summary>
-    // 空 slot の nextInNode フィールドを free chain のリンクに転用する。専用の free-list
+    // 空 slot の nextInVertex フィールドを free chain のリンクに転用する。専用の free-list
     // ページを別に持たず、既存 slot 領域を再利用してヘッダ 1 語 (freeHead) だけを増やす。
     public void Free(IncidenceId incidenceId)
     {
@@ -168,27 +168,27 @@ internal sealed class IncidenceStore : IIncidenceStore
             if (slot[OffFlags] == FlagInUse)
                 _inUseCount--;
             slot[OffFlags] = FlagFree;
-            // free chain の後続を nextInNode に書く (-1 = chain 終端)。
-            RecordHelpers.WriteInt48(slot[OffNextInNode..], _freeHead);
+            // free chain の後続を nextInVertex に書く (-1 = chain 終端)。
+            RecordHelpers.WriteInt48(slot[OffNextInVertex..], _freeHead);
         }
 
         _freeHead = sequence;
         SaveMeta();
     }
 
-    public NodeIncidenceEnumerator EnumerateByNode(
-        NodeId nodeId,
-        INodeIncidenceHeadStore nodeHeads,
-        IHyperedgeStore hyperedges)
-        => new(this, hyperedges, nodeHeads.Get(nodeId));
+    public VertexIncidenceEnumerator EnumerateByVertex(
+        VertexId vertexId,
+        IVertexIncidenceHeadStore vertexHeads,
+        INexusStore nexuses)
+        => new(this, nexuses, vertexHeads.Get(vertexId));
 
-    public HyperedgeIncidenceEnumerator EnumerateByHyperedge(
-        HyperedgeId hyperedgeId,
-        IHyperedgeStore hyperedges)
+    public NexusIncidenceEnumerator EnumerateByNexus(
+        NexusId nexusId,
+        INexusStore nexuses)
     {
-        using var header = hyperedges.Read(hyperedgeId);
-        return new HyperedgeIncidenceEnumerator(
-            this, hyperedges, hyperedgeId, header.FirstIncidenceId);
+        using var header = nexuses.Read(nexusId);
+        return new NexusIncidenceEnumerator(
+            this, nexuses, nexusId, header.FirstIncidenceId);
     }
 
     /// <summary>free chain 先頭 sequence (-1 で空)。テスト / 診断用。</summary>
@@ -203,7 +203,7 @@ internal sealed class IncidenceStore : IIncidenceStore
         _inUseCount = RecomputeInUse();
     }
 
-    // free chain から 1 slot 取り出す。空なら -1。取り出した slot の nextInNode に
+    // free chain から 1 slot 取り出す。空なら -1。取り出した slot の nextInVertex に
     // 積まれていた後続 sequence を新しい freeHead にする。
     private long PopFreeSlot()
     {
@@ -214,7 +214,7 @@ internal sealed class IncidenceStore : IIncidenceStore
         var (pageId, offset) = Location(sequence);
         long next;
         using (var page = _file.PinForRead(pageId))
-            next = RecordHelpers.ReadInt48(page.Data.Slice(offset, SlotSize)[OffNextInNode..]);
+            next = RecordHelpers.ReadInt48(page.Data.Slice(offset, SlotSize)[OffNextInVertex..]);
 
         _freeHead = next;
         SaveMeta();
@@ -263,23 +263,23 @@ internal sealed class IncidenceStore : IIncidenceStore
         BinaryPrimitives.WriteInt64LittleEndian(page.Data[MetaHwm..], _hwm);
         BinaryPrimitives.WriteInt64LittleEndian(page.Data[MetaFreeHead..], _freeHead);
         if (initialise)
-            page.Data[HeaderFormatOffset] = FormatVersion.Current;
+            page.Data[HeaderFormatOffset] = StorageFormatVersion.Current;
     }
 
     private void CheckFormatVersion()
     {
         using var page = _file.PinForRead(HeaderPageId);
         byte actual = page.Data[HeaderFormatOffset];
-        if (actual != FormatVersion.Current)
-            throw new FormatVersionMismatchException("incidence", actual, FormatVersion.Current);
+        if (actual != StorageFormatVersion.Current)
+            throw new StorageFormatMismatchException("incidence", actual, StorageFormatVersion.Current);
     }
 
     private static IncidenceReadHandle NotInUse(IncidenceId id)
         => new(
             id,
             false,
-            HyperedgeId.Invalid,
-            NodeId.Invalid,
+            NexusId.Invalid,
+            VertexId.Invalid,
             RoleId.Invalid,
             IncidenceId.Invalid,
             IncidenceId.Invalid);

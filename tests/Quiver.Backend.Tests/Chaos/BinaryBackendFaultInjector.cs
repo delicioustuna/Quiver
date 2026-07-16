@@ -44,7 +44,7 @@ internal sealed class BinaryBackendFaultInjector(string databaseDirectory) : IFa
             {
                 fired = true;
                 throw new InvalidOperationException(
-                    $"TS-4 simulated kill at checkpoint phase {phase}");
+                    $" simulated kill at checkpoint phase {phase}");
             }
         };
         return new Disarm();

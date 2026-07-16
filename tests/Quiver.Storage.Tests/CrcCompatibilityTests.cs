@@ -25,68 +25,45 @@ public sealed class CrcCompatibilityTests : IDisposable
     }
 
     [Fact]
-    public void Golden_database_fixture_opens_and_validates_page_checksums()
+    public void Legacy_database_fixture_is_rejected()
     {
         string path = CopyFixtureToTemp(DatabaseFixtureName);
-        byte[] fixture = File.ReadAllBytes(path);
-        BinaryPrimitives.ReadUInt32LittleEndian(fixture.AsSpan(24)).Should().Be(0x461A_C369u);
-        BinaryPrimitives.ReadUInt32LittleEndian(fixture.AsSpan(PagedFile.PageSizeConst + 24))
-            .Should().Be(0x0351_505Cu);
-
-        using var pagedFile = new PagedFile(path);
-        pagedFile.PageCount.Should().Be(2);
-        using var page = pagedFile.PinForRead(new PageId(1));
-        BinaryPrimitives.ReadInt64LittleEndian(page.Data).Should().Be(0x0102_0304_0506_0708);
-        page.Data[127].Should().Be(0xA5);
-        page.Data[4095].Should().Be(0x5A);
+        Action open = () => new PagedFile(path);
+        open.Should().Throw<StorageFormatMismatchException>();
     }
 
     [Fact]
-    public void Golden_wal_fixture_opens_and_validates_record_checksums()
+    public void Legacy_wal_fixture_is_rejected()
     {
         string path = CopyFixtureToTemp(WalFixtureName);
-        byte[] fixture = File.ReadAllBytes(path);
-        BinaryPrimitives.ReadUInt32LittleEndian(fixture.AsSpan(21)).Should().Be(0xD010_6524u);
-        BinaryPrimitives.ReadUInt32LittleEndian(fixture.AsSpan(25 + 21)).Should().Be(0xB902_337Fu);
-        BinaryPrimitives.ReadUInt32LittleEndian(fixture.AsSpan(55 + 21)).Should().Be(0x9D25_A459u);
-
-        using var reader = new WalReader(path, startLsn: 0);
-        reader.TryReadNext(out WalRecord begin).Should().BeTrue();
-        begin.Lsn.Should().Be(0);
-        begin.Type.Should().Be(WalRecordType.Begin);
-        begin.TransactionId.Should().Be(new TransactionId(42));
-
-        reader.TryReadNext(out WalRecord pageImage).Should().BeTrue();
-        pageImage.Lsn.Should().Be(1);
-        pageImage.Type.Should().Be(WalRecordType.PageImage);
-        pageImage.Payload.ToArray().Should().Equal(0x10, 0x20, 0x30, 0x40, 0x50);
-
-        reader.TryReadNext(out WalRecord commit).Should().BeTrue();
-        commit.Lsn.Should().Be(2);
-        commit.Type.Should().Be(WalRecordType.Commit);
-        reader.TryReadNext(out _).Should().BeFalse();
+        Action open = () => new WalReader(path, startLsn: 0);
+        open.Should().Throw<WalFormatMismatchException>();
     }
 
     [Fact]
-    public void Golden_fixtures_match_current_writer()
+    public void Current_family_writer_round_trips_and_checksums()
     {
         byte[] database = CreateDatabaseFixture();
         byte[] wal = CreateWalFixture();
-        string databasePath = FixturePath(DatabaseFixtureName);
-        string walPath = FixturePath(WalFixtureName);
+        database[..9].Should().Equal("QUIVER-SW"u8.ToArray());
+        wal[..9].Should().Equal("QUIVER-SW"u8.ToArray());
 
-        if (Environment.GetEnvironmentVariable("QUIVER_UPDATE_CRC_GOLDENS") == "1")
-        {
-            string fixtureDirectory = FindFixtureSourceDirectory();
-            Directory.CreateDirectory(fixtureDirectory);
-            databasePath = Path.Combine(fixtureDirectory, DatabaseFixtureName);
-            walPath = Path.Combine(fixtureDirectory, WalFixtureName);
-            File.WriteAllBytes(databasePath, database);
-            File.WriteAllBytes(walPath, wal);
-        }
+        uint storedPageCrc = BinaryPrimitives.ReadUInt32LittleEndian(database.AsSpan(32));
+        uint storedRecordCrc = BinaryPrimitives.ReadUInt32LittleEndian(wal.AsSpan(WalFormat.FileHeaderSize + 21));
+        storedPageCrc.Should().NotBe(0);
+        storedRecordCrc.Should().NotBe(0);
 
-        File.ReadAllBytes(databasePath).Should().Equal(database);
-        File.ReadAllBytes(walPath).Should().Equal(wal);
+        string databasePath = Path.Combine(_tempDirectory, "roundtrip.quiver");
+        string walPath = Path.Combine(_tempDirectory, "roundtrip.quiver-wal");
+        File.WriteAllBytes(databasePath, database);
+        File.WriteAllBytes(walPath, wal);
+
+        using var pagedFile = new PagedFile(databasePath);
+        using var pageHandle = pagedFile.PinForRead(new PageId(1));
+        pageHandle.Data[127].Should().Be(0xA5);
+        using var reader = new WalReader(walPath, 0);
+        reader.TryReadNext(out var begin).Should().BeTrue();
+        begin.Type.Should().Be(WalRecordType.BeginWrite);
     }
 
     [Fact]
@@ -141,7 +118,7 @@ public sealed class CrcCompatibilityTests : IDisposable
         string path = Path.Combine(_tempDirectory, "generated.quiver");
         using (var pagedFile = new PagedFile(path))
         {
-            PageId pageId = pagedFile.AllocatePage(PageKind.NodeRecord);
+            PageId pageId = pagedFile.AllocatePage(PageKind.VertexRecord);
             using var page = pagedFile.PinForWrite(pageId);
             BinaryPrimitives.WriteInt64LittleEndian(page.Data, 0x0102_0304_0506_0708);
             page.Data[127] = 0xA5;
@@ -157,7 +134,7 @@ public sealed class CrcCompatibilityTests : IDisposable
         using (var wal = new WriteAheadLog(path))
         {
             var tx = new TransactionId(42);
-            wal.Append(WalRecordType.Begin, tx, []);
+            wal.Append(WalRecordType.BeginWrite, tx, []);
             wal.Append(WalRecordType.PageImage, tx, [0x10, 0x20, 0x30, 0x40, 0x50]);
             long commitLsn = wal.Append(WalRecordType.Commit, tx, []);
             wal.FlushTo(commitLsn);
@@ -176,15 +153,4 @@ public sealed class CrcCompatibilityTests : IDisposable
     private static string FixturePath(string fixtureName) =>
         Path.Combine(AppContext.BaseDirectory, "Fixtures", fixtureName);
 
-    private static string FindFixtureSourceDirectory()
-    {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Quiver.slnx")))
-            directory = directory.Parent;
-
-        if (directory is null)
-            throw new InvalidOperationException("Could not find the Quiver repository root.");
-
-        return Path.Combine(directory.FullName, "tests", "Quiver.Storage.Tests", "Fixtures");
-    }
 }

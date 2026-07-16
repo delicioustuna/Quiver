@@ -100,15 +100,15 @@ public class PagedTokenStoreTests : IDisposable
     }
 
     [Fact]
-    public void Hyperedge_type_and_role_tokens_have_independent_persistent_spaces()
+    public void Nexus_type_and_role_tokens_have_independent_persistent_spaces()
     {
         string path = DbFile();
-        HyperedgeTypeId factType;
+        NexusTypeId factType;
         RoleId factRole;
         using (var c = new SingleFileContainer(path))
         {
-            using var types = new HyperedgeTypeTokenStore(
-                c.OpenTenant(BinaryGraphStorageBackendFactory.TenantHyperedgeTypeToken, PageKind.TokenRecord));
+            using var types = new NexusTypeTokenStore(
+                c.OpenTenant(BinaryGraphStorageBackendFactory.TenantNexusTypeToken, PageKind.TokenRecord));
             using var roles = new RoleTokenStore(
                 c.OpenTenant(BinaryGraphStorageBackendFactory.TenantRoleToken, PageKind.TokenRecord));
 
@@ -123,8 +123,8 @@ public class PagedTokenStoreTests : IDisposable
 
         using (var c = new SingleFileContainer(path))
         {
-            using var types = new HyperedgeTypeTokenStore(
-                c.OpenTenant(BinaryGraphStorageBackendFactory.TenantHyperedgeTypeToken, PageKind.TokenRecord));
+            using var types = new NexusTypeTokenStore(
+                c.OpenTenant(BinaryGraphStorageBackendFactory.TenantNexusTypeToken, PageKind.TokenRecord));
             using var roles = new RoleTokenStore(
                 c.OpenTenant(BinaryGraphStorageBackendFactory.TenantRoleToken, PageKind.TokenRecord));
 
@@ -138,18 +138,18 @@ public class PagedTokenStoreTests : IDisposable
     }
 
     [Fact]
-    public void Binary_backend_reserves_fixed_hyperedge_tenants()
+    public void Binary_backend_reserves_fixed_nexus_tenants()
     {
         string path = DbFile();
-        using (GraphDatabase.Open(path)) { }
+        using (QuiverDatabase.Open(path)) { }
 
         // incidence は間接マップを持たない直接アドレスストアなので tenant 22 は欠番。
         // 番号は詰め直さないため 22 だけを飛ばして 18..25 の在籍を確かめる。
         const byte vacantIncidenceMapTenant = 22;
 
         using var container = new SingleFileContainer(path);
-        for (byte tenant = BinaryGraphStorageBackendFactory.TenantHyperedgeHeap;
-             tenant <= BinaryGraphStorageBackendFactory.TenantNodeIncidenceHead;
+        for (byte tenant = BinaryGraphStorageBackendFactory.TenantNexusHeap;
+             tenant <= BinaryGraphStorageBackendFactory.TenantVertexIncidenceHead;
              tenant++)
         {
             if (tenant == vacantIncidenceMapTenant)
@@ -159,7 +159,7 @@ public class PagedTokenStoreTests : IDisposable
                 continue;
             }
 
-            container.HasTenant(tenant).Should().BeTrue($"tenant {tenant} is a fixed hyperedge tenant");
+            container.HasTenant(tenant).Should().BeTrue($"tenant {tenant} is a fixed nexus tenant");
         }
     }
 }

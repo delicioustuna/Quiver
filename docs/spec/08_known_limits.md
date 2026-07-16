@@ -1,10 +1,6 @@
 # 既知の限界
 
-> as-built 仕様 (on-disk FormatVersion V5)
->
-> **current (as-built)**: 以下は現在実装されている FormatVersion V5 の既知の限界である。
-> **target (未実装)**: [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md) が将来の設計正本であり、本書の本文はその target を先取りして記述しない。
-> **実装済み境界**: 再設計の production code はまだ実装されていない。`redesign-baseline` は着工前の測定を固定するタグであり、再設計の実装完了を表さない。
+> as-built 仕様（QUIVER-SW family version 1、2026-07-15）
 
 本書はエンジンの現時点での既知の限界を記す。v1 統合監査で発見・修正された欠陥はここでは追跡しない
 — それらは回帰テストと git 履歴でカバーされる。
@@ -19,7 +15,7 @@
 - **データベースごとに 1 プロセス。** `*.quiver` ファイルは排他 OS ファイルロック (`FileShare.None`) で
   開かれる。2 つ目のプロセスはこれを開けない。マルチプロセスやネットワークアクセスは存在しない —
   それが必要なら自前のサービスを前段に置くこと。
-- **データベースごとに 1 つの `GraphDatabase` をスレッド間で共有する。** インスタンスはスレッドセーフ。
+- **データベースごとに 1 つの `QuiverDatabase` をスレッド間で共有する。** インスタンスはスレッドセーフ。
   一度開いてプロセスのライフタイムを通じて再利用すること。同一プロセス内で同じファイルを 2 度開かないこと。
 - **トランザクションハンドルは同時使用不可である。** write 文脈と MVCC 文脈は非同期フローに保持されるため、
   `await` の継続や、重ならない `Task.Run` 越しの利用で WAL ロギングが暗黙に欠落することはない。
@@ -31,8 +27,8 @@
 
 - **書き込みトランザクションは 1 度に 1 つだけ進行できる。** エンジンは内部 writer gate により
   `BeginTransaction()` を直列化する。2 本目の書き込みトランザクションは既定で先行 writer の終了を
-  `GraphDatabaseOptions.LockTimeout` まで待ち、期限を超えると `TransactionException` をスローする。
-  `GraphDatabaseOptions.EnforceExclusiveWriter` を有効にすると待機せず即時に `TransactionException` をスローする。
+  `QuiverDatabaseOptions.LockTimeout` まで待ち、期限を超えると `TransactionException` をスローする。
+  `QuiverDatabaseOptions.EnforceExclusiveWriter` を有効にすると待機せず即時に `TransactionException` をスローする。
   さらに、すべての二次インデックスと全文の
   mutation は単一のグローバルインデックスロックに集約されるため、ロックモードに関わらず、2 つの
   トランザクションがインデックス / postings を同時に mutation することは決してない。
@@ -58,7 +54,7 @@ dispose されたトランザクション（例外が `using` スコープを巻
 部分適用されたトランザクションが可視になることは決してない。
 
 この永続性保証は binary backend に適用される。インメモリバックエンド
-（`GraphDatabase.CreateInMemory()` / `":memory:"`）の commit は同一インスタンス内の可視性と
+（`QuiverDatabase.CreateInMemory()` / `":memory:"`）の commit は同一インスタンス内の可視性と
 rollback 原子性だけを保証し、プロセス終了やデータベースの破棄・再オープンを跨いでデータを保持しない。
 スナップショットと vacuum もサポート対象外である。
 
@@ -97,48 +93,48 @@ T WithRetry<T>(Func<T> runTxn, int maxAttempts = 5)
 
 複数の書き込みトランザクションを同時に進行させる機能はサポートしない。
 
-## ハイパーエッジの契約と限界 {#hyperedge-limits}
+## Nexusの契約と限界 {#nexus-limits}
 
-第一級ハイパーエッジは次の契約で動作する。いずれも v1 の設計判断であり、緩和は実需が出てから検討する。
+第一級Nexusは次の契約で動作する。いずれも v1 の設計判断であり、緩和は実需が出てから検討する。
 
-### メンバー集合は作成時確定 {#hyperedge-immutable-members}
+### メンバー集合は作成時確定 {#nexus-immutable-members}
 
-ハイパーエッジのメンバー集合（ロールとノードの組）は `CreateHyperedge` の時点で確定し、
+Nexusのメンバー集合（ロールとVertexの組）は `CreateNexus` の時点で確定し、
 以後変更できない。変更は削除 + 再作成で表現する。プロパティは作成後も変更できる。
 
 **設計根拠**: メンバー集合が不変であることで、「型 + ロール付きメンバー集合」による同一性が
 well-defined になり、incidence チェーンの構築を作成時の一括処理にでき、
 逆方向リンクの常時維持も不要になる。ストレージとロック設計の大部分がこの前提に立つ。
 
-### メンバーはノードのみ、アリティ 2 以上 {#hyperedge-node-members}
+### メンバーはVertexのみ、アリティ 2 以上 {#nexus-vertex-members}
 
-v1 のメンバーは `NodeId` に限る。リレーションシップやハイパーエッジ自身をメンバーにする
+v1 のメンバーは `VertexId` に限る。EdgeやNexus自身をメンバーにする
 高階の入れ子（RDF-star 的な拡張）はサポートしない。アリティ（メンバー数）は 2 以上を要求し、
-同じロールとノードの組は 1 つのハイパーエッジ内で重複できない。
+同じロールとVertexの組は 1 つのNexus内で重複できない。
 
-### メンバーの列挙順序は保証しない {#hyperedge-member-order}
+### メンバーの列挙順序は保証しない {#nexus-member-order}
 
 `GetMembers` と DSL の `Members` は、作成時に渡したメンバーの順序を保存しない。
-順序が意味を持つ場合は、ロール名（`first` / `second` など）またはメンバーノードのプロパティで表現する。
+順序が意味を持つ場合は、ロール名（`first` / `second` など）またはメンバーVertexのプロパティで表現する。
 
-### リレーションシップとの相互変換 API は対象外 {#hyperedge-no-conversion}
+### Edgeとの相互変換 API は対象外 {#nexus-no-conversion}
 
-ハイパーエッジ走査からリレーションシップを生成する API、およびその逆
+Nexus走査からEdgeを生成する API、およびその逆
 （reified パターンからの移行を含む）は v1 では提供しない。必要な場合はアプリケーション側で
-走査結果から明示的に作成する。このとき導出したリレーションシップは元のハイパーエッジと系譜を同期しない
-（元の削除は導出先に波及しない）。冪等な更新は再実行と `MergeRelationship` で行う。
+走査結果から明示的に作成する。このとき導出したEdgeは元のNexusと系譜を同期しない
+（元の削除は導出先に波及しない）。冪等な更新は再実行と `MergeEdge` で行う。
 
-### ノード削除の高次数カスケード {#hyperedge-delete-cascade}
+### Vertex削除の高次数カスケード {#nexus-delete-cascade}
 
-`DeleteNode` は、そのノードが属すすべてのライブハイパーエッジを 1 度ずつカスケード削除する。
-このコストは所属ハイパーエッジ数に比例する。実測（arity 4、AMD Ryzen 7 5700X）では
-1 ノードが 10^3 / 10^4 個のハイパーエッジに属す状態の削除がトランザクション時間
+`DeleteVertex` は、そのVertexが属すすべてのライブNexusを 1 度ずつカスケード削除する。
+このコストは所属Nexus数に比例する。実測（arity 4、AMD Ryzen 7 5700X）では
+1 Vertexが 10^3 / 10^4 個のNexusに属す状態の削除がトランザクション時間
 7.84 ms / 47.69 ms、WAL 61 KB / 608 KB で完走し、デッドロックや整合性違反は生じない。
-RAG の Chunk や頻出エンティティのような高次数ノードを大量に削除するバッチでは、
+RAG の Chunk や頻出エンティティのような高次数Vertexを大量に削除するバッチでは、
 トランザクションを分割して WAL 切り詰めの余地を与えること
 （[§short-transactions](#short-transactions) 参照）。
 
-### 整合性チェックは書き込み停止時を想定 {#hyperedge-consistency-check}
+### 整合性チェックは書き込み停止時を想定 {#nexus-consistency-check}
 
 `CheckConsistency` は複数ストアをロックなしで走査するため、同時更新中は一時的な不整合を
 観測しうる。診断は書き込みを止めた状態で実行すること。
@@ -175,13 +171,13 @@ auto-refresh オプションの追加を検討している。
 変化したときに検索品質を低下させうる。
 
 **設計根拠**: HNSW グラフの再リンク（近傍グラフのトポロジ修正）はグラフ全体に波及しうる高コスト
-操作であり、単一ノード更新のレイテンシを数桁悪化させる。ほとんどの RAG ユースケースでは
+操作であり、単一Vertex更新のレイテンシを数桁悪化させる。ほとんどの RAG ユースケースでは
 エンベディングモデルの変更時にインデックスを再構築するため、in-place 上書きで近傍トポロジが
 劣化するケースの発生頻度は低い。
 
 **緩和策**: tombstone 数がライブ数を超えたときの自動 rebuild がトリガーされる。アプリケーション側
 から明示的にインデックスを再構築する場合は、ベクトルインデックスを drop + 再作成する。頻繁に
-ベクトルを更新するワークロードでは、ノードを削除→再作成するパターンが品質劣化を回避できる。
+ベクトルを更新するワークロードでは、Vertexを削除→再作成するパターンが品質劣化を回避できる。
 
 **将来方針**: 1.x では現行動作を維持する。再リンクコストを局所化する lazy repair（検索時に近傍を
 部分修正する手法）の導入を検討している。
@@ -202,11 +198,9 @@ cosine の決定的コーパスで true recall@10 **0.950**、30% 削除後 **0.
 
 ## 自動マイグレーションなし {#no-migration}
 
-異なる `FormatVersion` のデータベースを開くと `FormatVersionMismatchException` をスローする。
-自動マイグレーションのパスは存在しない。データベースはソースデータから作り直す必要がある。
-現行 V5 は relationship delta の head sidecar と append-only page store 用固定 tenant を導入した
-clean break であり（V4 は incidence の fixed-slot 直接アドレスレイアウト、
-V3 は第一級ハイパーエッジ用 ID / token / tenant 基盤）、V4 以前との互換 reader は意図的に持たない。
+QUIVER-SW family version 1 ではないデータベースは `StorageFormatMismatchException` で拒否する。
+旧 WAL は `WalFormatMismatchException` で拒否する。
+自動 migration と互換 reader は存在しないため、データベースは source data または logical export から作り直す。
 
 **設計根拠**: オンディスクフォーマットのマイグレーションは、全ページの読み書きとバリデーションが
 必要であり、データ破損リスクが高い。Quiver の主要ユースケース（ローカル RAG）ではソースデータ
@@ -221,7 +215,7 @@ V3 は第一級ハイパーエッジ用 ID / token / tenant 基盤）、V4 以�
 でサポートされる。ここで言う「自動マイグレーションなし」は
 オンディスクの物理フォーマット変更のみを指す。
 
-**将来方針**: 1.x 内ではフォーマットバージョンを固定する（`FormatVersion` を bump しない）。
+**将来方針**: 1.x 内では QUIVER-SW family version を固定する。
 MAJOR バージョンアップ時には migration tool の提供を検討する
 （[api-stability.md §4](../api-stability.md#4-ファイル--wal-フォーマット互換性) 参照）。
 

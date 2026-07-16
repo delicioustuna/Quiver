@@ -6,7 +6,7 @@ namespace Quiver.Studio.Services;
 public sealed class DatabaseService : IDisposable
 {
     private readonly ILogger<DatabaseService> _logger;
-    private GraphDatabase? _database;
+    private QuiverDatabase? _database;
     private readonly ReactiveProperty<bool> _isOpen = new(false);
     private readonly ReactiveProperty<string> _filePath = new(string.Empty);
     private readonly ReactiveProperty<DatabaseStatistics?> _statistics = new(null);
@@ -16,7 +16,7 @@ public sealed class DatabaseService : IDisposable
         _logger = logger;
     }
 
-    public GraphDatabase? CurrentDatabase => _database;
+    public QuiverDatabase? CurrentDatabase => _database;
     public ReadOnlyReactiveProperty<bool> IsOpen => _isOpen;
     public ReadOnlyReactiveProperty<string> FilePath => _filePath;
     public ReadOnlyReactiveProperty<DatabaseStatistics?> Statistics => _statistics;
@@ -25,7 +25,7 @@ public sealed class DatabaseService : IDisposable
     {
         Close();
         _logger.LogInformation("データベースを開いています: {Path}", filePath);
-        _database = GraphDatabase.Open(filePath);
+        _database = QuiverDatabase.Open(filePath);
         _filePath.Value = filePath;
         _isOpen.Value = true;
         RefreshStatistics();

@@ -7,51 +7,51 @@ namespace Quiver.Tests;
 public sealed class EntityIdTests
 {
     [Fact]
-    public void FromNode_RoundTrips()
+    public void FromVertex_RoundTrips()
     {
-        var node = new NodeId(42);
-        var entity = EntityId.FromNode(node);
+        var vertex = new VertexId(42);
+        var entity = EntityId.FromVertex(vertex);
 
-        entity.Kind.Should().Be(EntityKind.Node);
+        entity.Kind.Should().Be(EntityKind.Vertex);
         entity.LocalId.Should().Be(42);
         entity.IsValid.Should().BeTrue();
-        entity.AsNode().Should().Be(node);
+        entity.AsVertex().Should().Be(vertex);
     }
 
     [Fact]
-    public void FromRelationship_RoundTrips()
+    public void FromEdge_RoundTrips()
     {
-        var rel = new RelationshipId(1234);
-        var entity = EntityId.FromRelationship(rel);
+        var edge = new EdgeId(1234);
+        var entity = EntityId.FromEdge(edge);
 
-        entity.Kind.Should().Be(EntityKind.Relationship);
+        entity.Kind.Should().Be(EntityKind.Edge);
         entity.LocalId.Should().Be(1234);
-        entity.AsRelationship().Should().Be(rel);
+        entity.AsEdge().Should().Be(edge);
     }
 
     [Fact]
-    public void FromHyperedge_RoundTrips()
+    public void FromNexus_RoundTrips()
     {
-        var hyperedge = new HyperedgeId(7);
-        var entity = EntityId.FromHyperedge(hyperedge);
+        var nexus = new NexusId(7);
+        var entity = EntityId.FromNexus(nexus);
 
-        entity.Kind.Should().Be(EntityKind.Hyperedge);
-        entity.AsHyperedge().Should().Be(hyperedge);
+        entity.Kind.Should().Be(EntityKind.Nexus);
+        entity.AsNexus().Should().Be(nexus);
     }
 
     [Fact]
-    public void AsNode_OnRelationship_Throws()
+    public void AsVertex_OnEdge_Throws()
     {
-        var entity = EntityId.FromRelationship(new RelationshipId(1));
-        var act = () => entity.AsNode();
+        var entity = EntityId.FromEdge(new EdgeId(1));
+        var act = () => entity.AsVertex();
         act.Should().Throw<InvalidOperationException>();
     }
 
     [Fact]
-    public void AsRelationship_OnNode_Throws()
+    public void AsEdge_OnVertex_Throws()
     {
-        var entity = EntityId.FromNode(new NodeId(1));
-        var act = () => entity.AsRelationship();
+        var entity = EntityId.FromVertex(new VertexId(1));
+        var act = () => entity.AsEdge();
         act.Should().Throw<InvalidOperationException>();
     }
 
@@ -66,11 +66,11 @@ public sealed class EntityIdTests
     {
         var entries = new[]
         {
-            EntityId.FromNode(new NodeId(0)),
-            EntityId.FromNode(new NodeId(1)),
-            EntityId.FromNode(new NodeId(1_000_000_000L)),
-            EntityId.FromRelationship(new RelationshipId(42)),
-            EntityId.FromHyperedge(new HyperedgeId(99)),
+            EntityId.FromVertex(new VertexId(0)),
+            EntityId.FromVertex(new VertexId(1)),
+            EntityId.FromVertex(new VertexId(1_000_000_000L)),
+            EntityId.FromEdge(new EdgeId(42)),
+            EntityId.FromNexus(new NexusId(99)),
         };
 
         foreach (var e in entries)
@@ -91,7 +91,7 @@ public sealed class EntityIdTests
     [Fact]
     public void Packed_TooLargeLocalId_Throws()
     {
-        var entity = new EntityId(EntityKind.Node, (1L << 60));
+        var entity = new EntityId(EntityKind.Vertex, (1L << 60));
         var act = () => entity.ToPacked();
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
@@ -108,8 +108,8 @@ public sealed class EntityIdTests
     }
 
     [Theory]
-    [InlineData(EntityKind.Node, -2L)]
-    [InlineData(EntityKind.Node, 1L << 60)]
+    [InlineData(EntityKind.Vertex, -2L)]
+    [InlineData(EntityKind.Vertex, 1L << 60)]
     [InlineData((EntityKind)3, 1L)]
     public void Noncanonical_invalid_entity_id_is_not_packable(EntityKind kind, long localId)
     {
@@ -123,23 +123,23 @@ public sealed class EntityIdTests
     [Fact]
     public void Typed_invalid_ids_normalize_to_canonical_invalid()
     {
-        EntityId.FromNode(NodeId.Invalid).Should().Be(EntityId.Invalid);
-        EntityId.FromRelationship(RelationshipId.Invalid).Should().Be(EntityId.Invalid);
-        EntityId.FromHyperedge(HyperedgeId.Invalid).Should().Be(EntityId.Invalid);
+        EntityId.FromVertex(VertexId.Invalid).Should().Be(EntityId.Invalid);
+        EntityId.FromEdge(EdgeId.Invalid).Should().Be(EntityId.Invalid);
+        EntityId.FromNexus(NexusId.Invalid).Should().Be(EntityId.Invalid);
     }
 
     [Fact]
     public void Equality_DistinguishesKind()
     {
-        var nodeEntity = EntityId.FromNode(new NodeId(5));
-        var relEntity = EntityId.FromRelationship(new RelationshipId(5));
-        nodeEntity.Should().NotBe(relEntity);
+        var vertexEntity = EntityId.FromVertex(new VertexId(5));
+        var relEntity = EntityId.FromEdge(new EdgeId(5));
+        vertexEntity.Should().NotBe(relEntity);
     }
 
     [Fact]
     public void ToString_Formats()
     {
-        EntityId.FromNode(new NodeId(7)).ToString().Should().Be("Node#7");
+        EntityId.FromVertex(new VertexId(7)).ToString().Should().Be("Vertex#7");
         EntityId.Invalid.ToString().Should().Be("Entity#Invalid");
     }
 }

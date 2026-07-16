@@ -18,12 +18,12 @@ public sealed class FilterByTextTests : IDisposable
 {
     private const string Index = "idx_body";
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public FilterByTextTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fts4_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
         _db.Schema.CreateFullTextIndex(Index, "Doc", "body");
     }
 
@@ -33,10 +33,10 @@ public sealed class FilterByTextTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private NodeId AddDoc(string body, string? lang = null)
+    private VertexId AddDoc(string body, string? lang = null)
     {
         using var tx = _db.BeginTransaction();
-        var n = tx.CreateNode("Doc");
+        var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString(body));
         if (lang != null) tx.SetProperty(n, "lang", PropertyValue.FromString(lang));
         tx.Commit();
@@ -46,7 +46,7 @@ public sealed class FilterByTextTests : IDisposable
     private void AddOther(int count)
     {
         using var tx = _db.BeginTransaction();
-        for (int i = 0; i < count; i++) tx.CreateNode("Author");
+        for (int i = 0; i < count; i++) tx.CreateVertex("Author");
         tx.Commit();
     }
 
@@ -60,13 +60,13 @@ public sealed class FilterByTextTests : IDisposable
         AddDoc("quiver");                 // tf=1
         AddDoc("quiver quiver");          // tf=2
         AddDoc("quiver quiver quiver");   // tf=3  → strict BM25 order, no ties
-        AddOther(3);                      // non-indexed nodes, must not perturb either path
+        AddOther(3);                      // non-indexed vertices, must not perturb either path
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
         var textFirst  = g.Search(Index, "quiver", k: 10).ToList();
-        var graphFirst = g.Nodes().HasLabel("Doc").FilterByText(Index, "quiver", k: 10).ToList();
+        var graphFirst = g.Vertices().HasLabel("Doc").FilterByText(Index, "quiver", k: 10).ToList();
 
         graphFirst.Should().Equal(textFirst, "graph-first preserves the text-first BM25 order");
         graphFirst.Should().HaveCount(3);
@@ -83,7 +83,7 @@ public sealed class FilterByTextTests : IDisposable
         var g = rtx.G(_db.Schema);
 
         var pushdown = g.Search(Index, "alpha", k: 10).HasLabel("Doc").ToList();
-        var manual   = g.Nodes().HasLabel("Doc").FilterByText(Index, "alpha", k: 10).ToList();
+        var manual   = g.Vertices().HasLabel("Doc").FilterByText(Index, "alpha", k: 10).ToList();
 
         pushdown.Should().Equal(manual);
     }
@@ -108,19 +108,19 @@ public sealed class FilterByTextTests : IDisposable
     [Fact]
     public void FilterByText_composes_with_Out_traversal()
     {
-        NodeId author;
+        VertexId author;
         using (var tx = _db.BeginTransaction())
         {
-            author = tx.CreateNode("Author");
-            var doc = tx.CreateNode("Doc");
+            author = tx.CreateVertex("Author");
+            var doc = tx.CreateVertex("Doc");
             tx.SetProperty(doc, "body", PropertyValue.FromString("quiver report"));
-            tx.CreateRelationship(doc, author, "WROTE");
+            tx.CreateEdge(doc, author, "WROTE");
             tx.Commit();
         }
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var authors = rtx.G(_db.Schema)
-            .Nodes().HasLabel("Doc")
+            .Vertices().HasLabel("Doc")
             .FilterByText(Index, "quiver", k: 10)
             .Out("WROTE").ToList();
 
@@ -134,7 +134,7 @@ public sealed class FilterByTextTests : IDisposable
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var result = rtx.G(_db.Schema)
-            .Nodes().HasLabel("Ghost")   // no such label → empty candidate set
+            .Vertices().HasLabel("Ghost")   // no such label → empty candidate set
             .FilterByText(Index, "quiver", k: 10).ToList();
 
         result.Should().BeEmpty();
@@ -149,24 +149,24 @@ public sealed class FilterByTextTests : IDisposable
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var act = () => rtx.G(_db.Schema)
-            .Nodes().HasLabel("Doc")
+            .Vertices().HasLabel("Doc")
             .FilterByText("idx_missing", "quiver", k: 10).ToList();
 
         act.Should().Throw<ConstraintException>();
     }
 
     [Fact]
-    public void Deleted_node_is_not_returned_via_graph_first()
+    public void Deleted_vertex_is_not_returned_via_graph_first()
     {
         var doc = AddDoc("secret content");
         using var rtx0 = _db.BeginReadOnlyTransaction();
-        rtx0.G(_db.Schema).Nodes().HasLabel("Doc").FilterByText(Index, "secret", k: 10)
+        rtx0.G(_db.Schema).Vertices().HasLabel("Doc").FilterByText(Index, "secret", k: 10)
             .ToList().Should().ContainSingle().Which.Should().Be(doc);
 
-        using (var tx = _db.BeginTransaction()) { tx.DeleteNode(doc); tx.Commit(); }
+        using (var tx = _db.BeginTransaction()) { tx.DeleteVertex(doc); tx.Commit(); }
 
         using var rtx = _db.BeginReadOnlyTransaction();
-        rtx.G(_db.Schema).Nodes().HasLabel("Doc").FilterByText(Index, "secret", k: 10)
+        rtx.G(_db.Schema).Vertices().HasLabel("Doc").FilterByText(Index, "secret", k: 10)
             .ToList().Should().BeEmpty();
     }
 
@@ -232,11 +232,11 @@ public sealed class FilterByTextTests : IDisposable
             docIds = new long[50];
             for (int i = 0; i < 50; i++)
             {
-                var d = tx.CreateNode("Doc");
+                var d = tx.CreateVertex("Doc");
                 docIds[i] = d.Value;
                 tx.SetProperty(d, "body", PropertyValue.FromString("quiver " + (i % 3)));
             }
-            for (int i = 0; i < 50; i++) tx.CreateNode("Author");
+            for (int i = 0; i < 50; i++) tx.CreateVertex("Author");
             tx.Commit();
         }
 

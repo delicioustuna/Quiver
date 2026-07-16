@@ -11,44 +11,44 @@ Quiver の典型ユースケースをすぐに動かせるレシピ集。各レ�
 ## 1. 重み付き shortest-path (Dijkstra / A*)
 
 エッジに重みプロパティを乗せ、重み合計が最小の経路を求める。
-`g.WeightedShortestPath(...)` は距離だけでなく経路 (ノード列 / エッジ列) も返す。
+`g.WeightedShortestPath(...)` は距離だけでなく経路 (Vertex列 / エッジ列) も返す。
 
 ```csharp
 var g = tx.G(db.Schema);
 
 // 重み付きの道路網を構築
-var s = g.AddNode("Junction").P("name", "S").Next();
-var a = g.AddNode("Junction").P("name", "A").Next();
-var b = g.AddNode("Junction").P("name", "B").Next();
-var t = g.AddNode("Junction").P("name", "T").Next();
+var s = g.AddVertex("Junction").P("name", "S").Next();
+var a = g.AddVertex("Junction").P("name", "A").Next();
+var b = g.AddVertex("Junction").P("name", "B").Next();
+var t = g.AddVertex("Junction").P("name", "T").Next();
 
-g.AddRelationship("ROAD").From(s).To(a).P("weight", 1.0).Next();
-g.AddRelationship("ROAD").From(s).To(b).P("weight", 5.0).Next();
-g.AddRelationship("ROAD").From(a).To(t).P("weight", 2.0).Next();
-g.AddRelationship("ROAD").From(b).To(t).P("weight", 1.0).Next();
+g.AddEdge("ROAD").From(s).To(a).P("weight", 1.0).Next();
+g.AddEdge("ROAD").From(s).To(b).P("weight", 5.0).Next();
+g.AddEdge("ROAD").From(a).To(t).P("weight", 2.0).Next();
+g.AddEdge("ROAD").From(b).To(t).P("weight", 1.0).Next();
 
 // 重み付き最短経路 (Dijkstra)。weight プロパティをエッジ重みとして読む。
 var path = g.WeightedShortestPath(s, t, weightKey: "weight", type: "ROAD");
 if (path.Found)
-    Console.WriteLine($"S→T 最短重み: {path.Distance}, 経由ノード数: {path.Nodes.Count}");
+    Console.WriteLine($"S→T 最短重み: {path.Distance}, 経由Vertex数: {path.Vertices.Count}");
 //  → S→A→T (1.0 + 2.0 = 3.0) が S→B→T (5.0 + 1.0 = 6.0) より短い
 
 // ホップ数だけが必要なら従来どおり ShortestPathTo も使える
-var hops = g.Node(s).ShortestPathTo(t, type: "ROAD").TryNext();
+var hops = g.Vertex(s).ShortestPathTo(t, type: "ROAD").TryNext();
 ```
 
-> A* を使うときは `WeightedShortestPathAStar(s, t, "weight", "x", "y")` でノードの座標プロパティから
-> ヒューリスティックを自動生成するか、`WeightedShortestPath(s, t, "weight", heuristic: node => ...)` で
+> A* を使うときは `WeightedShortestPathAStar(s, t, "weight", "x", "y")` でVertexの座標プロパティから
+> ヒューリスティックを自動生成するか、`WeightedShortestPath(s, t, "weight", heuristic: vertex => ...)` で
 > 推定残コストを渡す。ヒューリスティックが admissible (consistent) なら Dijkstra と同じ最適解を、
-> より少ないノード展開で得られる。エッジ重みは非負である必要がある。
+> より少ないVertex展開で得られる。エッジ重みは非負である必要がある。
 
 ---
 
 ## 2. MERGE で upsert
 
-冪等な書き込みパターン。同じキーで何度実行しても重複ノードを増やさない。
+冪等な書き込みパターン。同じキーで何度実行しても重複Vertexを増やさない。
 
-> `MergeNode` は `(label, matchKey)` のインデックスが登録されていれば O(log n) シークを使い、無ければラベル内全スキャンに落ちる (ノード数次第で秒オーダー)。MERGE を多用する業務キーには事前に `Schema.CreateIndex` を呼んでおく。
+> `MergeVertex` は `(label, matchKey)` のインデックスが登録されていれば O(log n) シークを使い、無ければラベル内全スキャンに落ちる (Vertex数次第で秒オーダー)。MERGE を多用する業務キーには事前に `Schema.CreateIndex` を呼んでおく。
 
 ```csharp
 // データベース起動直後に一度だけ
@@ -56,7 +56,7 @@ db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEqu
 
 using var tx = db.BeginTransaction();
 
-var (id, created) = tx.MergeNode(
+var (id, created) = tx.MergeVertex(
     "Person",
     "email",
     PropertyValue.FromString("alice@example.com"));
@@ -79,7 +79,7 @@ tx.Commit();
 
 ```csharp
 // graph-first: 先にラベル/プロパティで絞ってから KNN
-var candidates = g.Nodes().HasLabel("Document")
+var candidates = g.Vertices().HasLabel("Document")
                   .Has("language", "ja")
                   .FilterByKnn("doc_v1", queryVec, k: 20)
                   .Has("isPublic", true)
@@ -101,8 +101,8 @@ Cypher の `MATCH (n:Person)-[:KNOWS]->(m:Person)` 相当のパターンを書�
 
 ```csharp
 var pairs = g.Match(
-    GraphPattern.Node("n", "Person")
-                .Out("KNOWS", GraphPattern.Node("m", "Person"))
+    GraphPattern.Vertex("n", "Person")
+                .Out("KNOWS", GraphPattern.Vertex("m", "Person"))
 )
 .Where("n", "age", P.Gt(25L))
 .Return(v => new
@@ -123,13 +123,13 @@ var pairs = g.Match(
 using var loader = db.BeginStreamingBulkLoad(buildAdjacencyIndex: true);
 
 var personLabel = db.Schema.GetOrCreateLabel("Person");
-var knowsType   = db.Schema.GetOrCreateRelationshipType("KNOWS");
+var knowsType   = db.Schema.GetOrCreateEdgeType("KNOWS");
 
 for (long i = 0; i < 10_000_000; i++)
-    loader.AppendNode(new NodeId(i), personLabel);
+    loader.AppendVertex(new VertexId(i), personLabel);
 
 for (long i = 0; i < 9_999_999; i++)
-    loader.AppendRelationship(new RelationshipId(i), new NodeId(i), new NodeId(i + 1), knowsType);
+    loader.AppendEdge(new EdgeId(i), new VertexId(i), new VertexId(i + 1), knowsType);
 
 loader.Commit();
 ```
@@ -143,7 +143,7 @@ loader.Commit();
 > `[Indexed]` は SourceGenerator に `InsertIndexed` / `FindByName` および属性情報からインデックスを作成する `EnsureIndexes` / `CreateIndex` の生成を指示するマーカー。実体インデックスは `db.EnsureIndexes<T>()` (一括) もしくは `db.CreateIndex<T>(p => p.Prop)` (単一) で作成する。文字列直書きの `db.Schema.CreateIndex(...)` も引き続き使えるが、属性値との二重管理になる。
 
 ```csharp
-[Node]
+[Vertex]
 public partial class Person
 {
     [Indexed]   // SourceGen マーカー — 実体インデックスは下で作成
@@ -175,22 +175,22 @@ var found = Person.FindByName(tx, "Alice");
 WAL の PageImage replay によりコミット済みデータはクラッシュ後も完全復元される。
 
 ```csharp
-NodeId savedId;
+VertexId savedId;
 
 // 書き込み
-using (var db = GraphDatabase.Open(dir))
+using (var db = QuiverDatabase.Open(dir))
 using (var tx = db.BeginTransaction())
 {
-    savedId = tx.CreateNode("Config");
+    savedId = tx.CreateVertex("Config");
     tx.SetProperty(savedId, "version", PropertyValue.FromString("1.0"));
     tx.Commit();
 }
 
 // 再オープン: コミット済みデータは復元される
-using (var db = GraphDatabase.Open(dir))
+using (var db = QuiverDatabase.Open(dir))
 using (var tx = db.BeginTransaction())
 {
-    System.Diagnostics.Debug.Assert(tx.NodeExists(savedId));
+    System.Diagnostics.Debug.Assert(tx.VertexExists(savedId));
 }
 ```
 
@@ -202,7 +202,7 @@ using (var tx = db.BeginTransaction())
 
 ```csharp
 var stats = db.Diagnostics.GetStatistics();
-Console.WriteLine($"Nodes={stats.NodeCount}, Rels={stats.RelationshipCount}");
+Console.WriteLine($"Vertices={stats.VertexCount}, Edges={stats.EdgeCount}");
 Console.WriteLine($"BufferPool ヒット率 = {stats.BufferPoolHits} / {stats.BufferPoolHits + stats.BufferPoolMisses}");
 
 var report = db.Diagnostics.CheckConsistency();
@@ -287,7 +287,7 @@ sealed class MyEmbedder(MyModel model) : IChunkEmbedder
 using Quiver;
 using Quiver.Rag;
 
-using var db = GraphDatabase.Open("rag.quiver");
+using var db = QuiverDatabase.Open("rag.quiver");
 
 // 索引 (sourceId / ベクトル / 全文) はコンストラクタで冪等作成される。
 var store = new RagStore(db, new RagStoreOptions
@@ -364,7 +364,7 @@ store.DeleteDocument("docs/intro.md");
 
 ```csharp
 // KNOWS 先があればその先を、無ければ自分自身を返す。
-var names = g.Nodes().HasLabel("Person")
+var names = g.Vertices().HasLabel("Person")
     .Coalesce(s => s.Out("KNOWS"), s => s)
     .Values("name").ToList();
 ```
@@ -372,8 +372,8 @@ var names = g.Nodes().HasLabel("Person")
 ### Optional — マッチしなければ元のまま
 
 ```csharp
-// Cypher の OPTIONAL MATCH 相当。Out("KNOWS") が空なら元ノードをそのまま通す。
-var names = g.Nodes().HasLabel("Person")
+// Cypher の OPTIONAL MATCH 相当。Out("KNOWS") が空なら元Vertexをそのまま通す。
+var names = g.Vertices().HasLabel("Person")
     .Optional(s => s.Out("KNOWS"))
     .Dedup().Values("name").ToList();
 ```
@@ -382,7 +382,7 @@ var names = g.Nodes().HasLabel("Person")
 
 ```csharp
 // KNOWS 先と USE 先を両方放出する。
-var names = g.Nodes().HasLabel("Person").Has("name", "Alice")
+var names = g.Vertices().HasLabel("Person").Has("name", "Alice")
     .Union(s => s.Out("KNOWS"), s => s.Out("USE"))
     .Values("name").ToList();
 ```
@@ -391,41 +391,41 @@ var names = g.Nodes().HasLabel("Person").Has("name", "Alice")
 
 ```csharp
 // (Person)→KNOWS→(Person) のペアを射影で取り出す。
-var pairs = g.Nodes().HasLabel("Person").As("src")
+var pairs = g.Vertices().HasLabel("Person").As("src")
     .Out("KNOWS").As("dst")
     .Select(t => (
-        Src: Encoding.UTF8.GetString(tx.GetProperty(t.Node("src"), "name").Utf8StringValue),
-        Dst: Encoding.UTF8.GetString(tx.GetProperty(t.Node("dst"), "name").Utf8StringValue)));
+        Src: Encoding.UTF8.GetString(tx.GetProperty(t.Vertex("src"), "name").Utf8StringValue),
+        Dst: Encoding.UTF8.GetString(tx.GetProperty(t.Vertex("dst"), "name").Utf8StringValue)));
 ```
 
 ### 型安全 Where (式ツリー)
 
 ```csharp
 // LINQ ライクな式ツリー。&&、比較、StartsWith/EndsWith/Contains に対応。
-var result = g.Nodes<Person>()
+var result = g.Vertices<Person>()
     .Where(p => p.Age > 26 && p.Name.StartsWith("C"))
     .ToList();
 ```
 
 ---
 
-## 12. 型安全な集合 write シンク (AddRelationship / MergeRelationship)
+## 12. 型安全な集合 write シンク (AddEdge / MergeEdge)
 
 `TypedGraphTraversal<TSource>` の拡張メソッドで、始点集合と終点集合の直積に対して
-辺を一括生成 / upsert する。端点の型整合は `IGraphRelationship<TRel,TSource,TTarget>`
+辺を一括生成 / upsert する。端点の型整合は `IGraphEdge<TRel,TSource,TTarget>`
 制約でコンパイル時に強制される。
 
 > **Coalesce / Optional ブランチ内での変異 (upsert) は非対応。**
 > Quiver のブランチは読み取り専用で、`fold` / `unfold` / `constant` も非対応のため、
 > Gremlin の `coalesce(V().has(...), addV(...))` パターンは成立しない。
-> 代替として `MergeNode` / `MergeRelationship` + C# `if` を使う (§2 / §6 参照)。
+> 代替として `MergeVertex` / `MergeEdge` + C# `if` を使う (§2 / §6 参照)。
 
-### AddRelationship — 直積で常に辺を生成
+### AddEdge — 直積で常に辺を生成
 
 ```csharp
 // B で始まる Person × C で始まる Tool に Use 辺を張る (プロパティ付き)。
-long n = g.Nodes<Person>().Where(p => p.Name.StartsWith("B"))
-    .AddRelationship(g.Nodes<Tool>().Where(t => t.Name.StartsWith("C")),
+long n = g.Vertices<Person>().Where(p => p.Name.StartsWith("B"))
+    .AddEdge(g.Vertices<Tool>().Where(t => t.Name.StartsWith("C")),
              (p, t) => new Use { Note = $"{p.Name}→{t.Name}" });
 // → Bob × {Cutter, Compiler} = 2 本
 ```
@@ -433,15 +433,15 @@ long n = g.Nodes<Person>().Where(p => p.Name.StartsWith("B"))
 プロパティ無し版は SourceGen 糖衣で型引数を省ける:
 
 ```csharp
-long n = g.Nodes<Person>().AddUse(g.Nodes<Tool>());
+long n = g.Vertices<Person>().AddUse(g.Vertices<Tool>());
 ```
 
-### MergeRelationship — 冪等 upsert
+### MergeEdge — 冪等 upsert
 
 ```csharp
 // 2 回目は全て既存ヒット (Matched)。プロパティは ON CREATE のみ書かれる。
-var (created, matched) = g.Nodes<Person>()
-    .MergeRelationship(g.Nodes<Tool>(),
+var (created, matched) = g.Vertices<Person>()
+    .MergeEdge(g.Vertices<Tool>(),
                (p, t) => new Use { Note = "auto" });
 ```
 
@@ -449,8 +449,8 @@ var (created, matched) = g.Nodes<Person>()
 
 ```csharp
 // 各 Person の頭文字で始まる Tool だけに辺を張る。
-long n = g.Nodes<Person>()
-    .AddRelationship(p => g.Nodes<Tool>().Where(t => t.Name.StartsWith(p.Name[..1])),
+long n = g.Vertices<Person>()
+    .AddEdge(p => g.Vertices<Tool>().Where(t => t.Name.StartsWith(p.Name[..1])),
              (p, t) => new Use { Note = p.Name });
 ```
 
@@ -464,7 +464,7 @@ SourceGenerator が生成する型保存ホップ糖衣 (§6) とシームレス
 ### スキーマ定義 (前提)
 
 ```csharp
-[Node]
+[Vertex]
 public partial class Person
 {
     [Property] public string Name { get; set; } = "";
@@ -472,7 +472,7 @@ public partial class Person
     [Property] public string Role { get; set; } = "";
 }
 
-[Node]
+[Vertex]
 public partial class Post
 {
     [Property] public string Title { get; set; } = "";
@@ -480,7 +480,7 @@ public partial class Post
     [Property] public bool Featured { get; set; }
 }
 
-[Relationship<Person, Post>("WROTE")]
+[Edge<Person, Post>("WROTE")]
 public partial class Wrote
 {
     [Property] public string Note { get; set; } = "";
@@ -513,7 +513,7 @@ public static class BlogDsl
 {
     // ── 起点 ──
     public static TypedGraphTraversal<Person> Authors(this GraphTraversalSource g)
-        => g.Nodes<Person>().Where(p => p.Role == "author");
+        => g.Vertices<Person>().Where(p => p.Role == "author");
 
     // ── Person フィルタ ──
     public static TypedGraphTraversal<Person> Adults(this TypedGraphTraversal<Person> t)
@@ -543,7 +543,7 @@ var hits = g.Authors()
     .ToList();   // List<Post>
 
 // エッジ述語付き生成メソッドとの組み合わせ
-var drafts = g.Nodes<Person>()
+var drafts = g.Vertices<Person>()
     .Adults()
     .Wrote(e => e.Note.Contains("draft"))
     .Since(cutoff)
@@ -552,30 +552,30 @@ var drafts = g.Nodes<Person>()
 
 ### 型なしトラバーサルとの境界
 
-`TypedGraphTraversal<T>` から `.Out(string)` 等で `GraphTraversal<NodeId>` に降格すると、`TypedGraphTraversal<T>` 用の DSL メソッドは使えなくなる。型付きホップで辿れるなら常にそちらを使う。
+`TypedGraphTraversal<T>` から `.Out(string)` 等で `GraphTraversal<VertexId>` に降格すると、`TypedGraphTraversal<T>` 用の DSL メソッドは使えなくなる。型付きホップで辿れるなら常にそちらを使う。
 
 ```csharp
-// NG: .Out("WROTE") は GraphTraversal<NodeId> を返すため .Featured() が見えない
-g.Nodes<Person>().Adults()
-    .Out("WROTE")    // → GraphTraversal<NodeId>
+// NG: .Out("WROTE") は GraphTraversal<VertexId> を返すため .Featured() が見えない
+g.Vertices<Person>().Adults()
+    .Out("WROTE")    // → GraphTraversal<VertexId>
     .Featured();     // ❌ コンパイルエラー
 
 // OK: SourceGenerator の .Wrote() は TypedGraphTraversal<Post> を返す
-g.Nodes<Person>().Adults()
+g.Vertices<Person>().Adults()
     .Wrote()         // → TypedGraphTraversal<Post>
     .Featured();     // ✅
 ```
 
-`GraphTraversal<NodeId>` (型なし) 用の DSL を書くこともできるが、ドメイン固有の型安全性は失われる:
+`GraphTraversal<VertexId>` (型なし) 用の DSL を書くこともできるが、ドメイン固有の型安全性は失われる:
 
 ```csharp
 // 型なし DSL も定義可能 (ラベル名の文字列指定)
 public static class UntypedBlogDsl
 {
-    public static GraphTraversal<NodeId> People(this GraphTraversalSource g)
-        => g.Nodes().HasLabel("Person");
+    public static GraphTraversal<VertexId> People(this GraphTraversalSource g)
+        => g.Vertices().HasLabel("Person");
 
-    public static GraphTraversal<NodeId> Adults(this GraphTraversal<NodeId> t)
+    public static GraphTraversal<VertexId> Adults(this GraphTraversal<VertexId> t)
         => t.Has("Age", P.Gte(18L));
 }
 
@@ -583,9 +583,9 @@ public static class UntypedBlogDsl
 var names = g.People().Adults().Out("WROTE").Values("Title").ToList();
 ```
 
-### MergeRelationship のコスト
+### MergeEdge のコスト
 
-`MergeRelationship` の存在判定は始点ノードの同一型 outgoing edge を線形スキャン
+`MergeEdge` の存在判定は始点Vertexの同一型 outgoing edge を線形スキャン
 する (**O(out-degree)**)。実測で **~116 ns/edge** の勾配 + ~2.5µs の固定コスト。
 
 | 同一型 out-degree | 1 回の hit | 1 回の miss (scan + create) |
@@ -595,11 +595,11 @@ var names = g.People().Adults().Out("WROTE").Values("Title").ToList();
 | 1,000 | ~116µs | ~136µs |
 
 低 fan-out (degree < 50) では 1 回数µs で実用上問題にならない。
-**degree 1,000 を超える高 fan-out ノードで大量の直積 MergeRelationship を回す場合は
+**degree 1,000 を超える高 fan-out Vertexで大量の直積 MergeEdge を回す場合は
 コストが顕在化する** (10×10 直積 × degree 1,000 ≈ 12ms)。その場合は
-`AddRelationship` (存在チェックなし、~6µs/call で degree 非依存) を使うか、
+`AddEdge` (存在チェックなし、~6µs/call で degree 非依存) を使うか、
 アプリ層で重複制御すること。エッジ存在インデックスは現時点で非目標。
-詳細: [MergeRelationship の degree 依存コスト](benchmark-results.md#mergerelationship-の-degree-依存コスト)。
+詳細: [MergeEdge の degree 依存コスト](benchmark-results.md#mergeedge-の-degree-依存コスト)。
 
 ---
 

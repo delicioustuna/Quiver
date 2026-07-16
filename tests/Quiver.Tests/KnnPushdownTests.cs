@@ -11,7 +11,7 @@ namespace Quiver.Tests;
 /// 後置フィルターをプッシュダウンし、
 /// <c>g.Knn(...).HasLabel(...).Has(...).ToList()</c> into a graph-first
 /// <see cref="KnnOp"/> (Candidate != null) の graph-first プランへ書き換える処理を検証する。
-/// <c>g.Nodes().HasLabel(...).FilterByKnn(...)</c> との結果の同値性、
+/// <c>g.Vertices().HasLabel(...).FilterByKnn(...)</c> との結果の同値性、
 /// フィルター後に k 件を満たせない回帰、Limit による K の縮小、
 /// 選択性ヒントが無い場合の vector-first へのフォールバックを確認する。
 /// </summary>
@@ -20,16 +20,16 @@ public sealed class KnnPushdownTests : IDisposable
     private const string IndexName = "doc-embed";
     private const int Dim = 4;
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public KnnPushdownTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_vec9_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         var keyId = _db.Schema.GetOrCreatePropertyKey("title");
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, keyId, Dim,
+            IndexName, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "test", null));
     }
 
@@ -46,19 +46,19 @@ public sealed class KnnPushdownTests : IDisposable
         using var tx = _db.BeginTransaction();
         for (int i = 0; i < 5; i++)
         {
-            var d = tx.CreateNode("Doc");
+            var d = tx.CreateVertex("Doc");
             docIds[i] = d.Value;
             var v = new float[Dim];
             v[i % Dim] = 1f;
-            _db.Vectors.SetVector(EntityKind.Node, d.Value, IndexName, v);
+            _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
         }
         for (int i = 0; i < 5; i++)
         {
-            var a = tx.CreateNode("Article");
+            var a = tx.CreateVertex("Article");
             articleIds[i] = a.Value;
             var v = new float[Dim];
             v[0] = 1f;
-            _db.Vectors.SetVector(EntityKind.Node, a.Value, IndexName, v);
+            _db.Vectors.SetVector(EntityKind.Vertex, a.Value, IndexName, v);
         }
         tx.Commit();
     }
@@ -73,7 +73,7 @@ public sealed class KnnPushdownTests : IDisposable
         var query = new float[] { 1f, 0f, 0f, 0f };
 
         var pushdown = g.Knn(IndexName, query, k: 2).HasLabel("Doc").ToList();
-        var manual = g.Nodes().HasLabel("Doc").FilterByKnn(IndexName, query, k: 2).ToList();
+        var manual = g.Vertices().HasLabel("Doc").FilterByKnn(IndexName, query, k: 2).ToList();
 
         pushdown.Select(n => n.Value).Should().BeEquivalentTo(manual.Select(n => n.Value));
     }
@@ -88,13 +88,13 @@ public sealed class KnnPushdownTests : IDisposable
         {
             for (int i = 0; i < 50; i++)
             {
-                var a = tx.CreateNode("Article");
-                _db.Vectors.SetVector(EntityKind.Node, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                var a = tx.CreateVertex("Article");
+                _db.Vectors.SetVector(EntityKind.Vertex, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             for (int i = 0; i < 2; i++)
             {
-                var d = tx.CreateNode("Doc");
-                _db.Vectors.SetVector(EntityKind.Node, d.Value, IndexName, new float[] { 0.5f, 0.5f, 0, 0 });
+                var d = tx.CreateVertex("Doc");
+                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 0.5f, 0.5f, 0, 0 });
             }
             tx.Commit();
         }
@@ -117,11 +117,11 @@ public sealed class KnnPushdownTests : IDisposable
             // 3 Doc, only 1 with status=active. Push-down must keep only that.
             for (int i = 0; i < 3; i++)
             {
-                var d = tx.CreateNode("Doc");
+                var d = tx.CreateVertex("Doc");
                 tx.SetProperty(d, "status", PropertyValue.FromString(i == 1 ? "active" : "archived"));
                 var v = new float[Dim];
                 v[0] = 1f;
-                _db.Vectors.SetVector(EntityKind.Node, d.Value, IndexName, v);
+                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -221,23 +221,23 @@ public sealed class KnnPushdownTests : IDisposable
     public void Knn_Out_after_pushdown_traverses_neighbors()
     {
         // 3 Doc, the best-scoring Doc has one outgoing REFERENCES edge to
-        // a 4th node. After push-down the result of .Out("REFERENCES") must
-        // contain that 4th node.
+        // a 4th vertex. After push-down the result of .Out("REFERENCES") must
+        // contain that 4th vertex.
         long target;
         using (var tx = _db.BeginTransaction())
         {
-            var bestDoc = tx.CreateNode("Doc");
-            _db.Vectors.SetVector(EntityKind.Node, bestDoc.Value, IndexName, new float[] { 1, 0, 0, 0 });
+            var bestDoc = tx.CreateVertex("Doc");
+            _db.Vectors.SetVector(EntityKind.Vertex, bestDoc.Value, IndexName, new float[] { 1, 0, 0, 0 });
             for (int i = 1; i < 3; i++)
             {
-                var d = tx.CreateNode("Doc");
+                var d = tx.CreateVertex("Doc");
                 var v = new float[Dim];
                 v[i] = 1f;
-                _db.Vectors.SetVector(EntityKind.Node, d.Value, IndexName, v);
+                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
             }
-            var t = tx.CreateNode("Other");
+            var t = tx.CreateVertex("Other");
             target = t.Value;
-            tx.CreateRelationship(bestDoc, t, "REFERENCES");
+            tx.CreateEdge(bestDoc, t, "REFERENCES");
             tx.Commit();
         }
 
@@ -261,7 +261,7 @@ public sealed class KnnPushdownTests : IDisposable
         var g = rtx.G(_db.Schema);
 
         // .As("a") right after Knn must survive the push-down materialize
-        // (FilteredKnn output is 1 column NodeId, so alias col = 0 stays valid).
+        // (FilteredKnn output is 1 column VertexId, so alias col = 0 stays valid).
         var result = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 2)
             .As("a")
             .HasLabel("Doc")

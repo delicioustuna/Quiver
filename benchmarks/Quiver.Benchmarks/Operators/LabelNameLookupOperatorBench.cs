@@ -3,7 +3,7 @@ using Quiver.Query.Physical;
 
 namespace Quiver.Benchmarks.Operators;
 
-/// <summary>TS-6 sentinel: <see cref="LabelNameLookupOperator"/> resolves label names per row.</summary>
+/// <summary> sentinel: <see cref="LabelNameLookupOperator"/> resolves label names per row.</summary>
 [MemoryDiagnoser]
 [ShortRunJob]
 public class LabelNameLookupOperatorBench
@@ -19,7 +19,7 @@ public class LabelNameLookupOperatorBench
     [Benchmark]
     public int Lookup_label_names()
     {
-        var src = new NodeArraySource(_seed.PersonNodes);
+        var src = new VertexArraySource(_seed.PersonVertices);
         using var op = new LabelNameLookupOperator(src, 0, lid => _seed.Db.Schema.GetLabelName(lid));
         return OperatorBenchDrain.Drain(op, _seed.ReadTx);
     }

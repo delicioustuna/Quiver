@@ -35,17 +35,17 @@ Directory.CreateDirectory(dbDir);
 
 try
 {
-    using var db = GraphDatabase.Open(System.IO.Path.Combine(dbDir, "graph.quiver"));
+    using var db = QuiverDatabase.Open(System.IO.Path.Combine(dbDir, "graph.quiver"));
 
     // 100 トランザクションを回して tx.commit / wal.flush / buffer-pool / query を計装出力。
     for (int i = 0; i < 100; i++)
     {
         using var tx = db.BeginTransaction();
-        var alice = tx.CreateNode("Person");
-        var bob = tx.CreateNode("Person");
+        var alice = tx.CreateVertex("Person");
+        var bob = tx.CreateVertex("Person");
         tx.SetProperty(alice, "name", PropertyValue.FromString($"alice-{i}"));
         tx.SetProperty(bob, "name", PropertyValue.FromString($"bob-{i}"));
-        tx.CreateRelationship(alice, bob, "KNOWS");
+        tx.CreateEdge(alice, bob, "KNOWS");
         tx.Commit();
     }
 
@@ -53,7 +53,7 @@ try
     try
     {
         using var tx = db.BeginTransaction();
-        tx.CreateNode("Temp");
+        tx.CreateVertex("Temp");
         tx.Rollback();
     }
     catch { /* ignore */ }
@@ -64,7 +64,7 @@ try
     Thread.Sleep(2000);
 
     var stats = db.Diagnostics.GetStatistics();
-    Console.WriteLine($"[sample] final stats: nodes={stats.NodeCount}, rels={stats.RelationshipCount}");
+    Console.WriteLine($"[sample] final stats: vertices={stats.VertexCount}, edges={stats.EdgeCount}");
 }
 finally
 {

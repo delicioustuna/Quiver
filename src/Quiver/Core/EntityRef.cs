@@ -3,8 +3,8 @@ namespace Quiver.Core;
 /// <summary>
 /// 物理 ID の統一パック表現。旧 <c>GenerationalRef</c> を吸収し、
 /// 索引値レーン・ベクトル binding キー・外部往復 ID と、論理 ID 構造体
-/// (<see cref="NodeId"/> / <see cref="RelationshipId"/> / <see cref="PropertyId"/> /
-/// <see cref="HyperedgeId"/>) の
+/// (<see cref="VertexId"/> / <see cref="EdgeId"/> / <see cref="PropertyId"/> /
+/// <see cref="NexusId"/>) の
 /// 内部 <c>Value</c> を、ただ一つの packing 規約に集約する。
 /// <para>レイアウト (上位→下位):</para>
 /// <list type="bullet">
@@ -32,7 +32,7 @@ public readonly partial record struct EntityRef
     /// <summary>種別を含まない Generation + Sequence の packed 値。</summary>
     public long Value { get; }
 
-    /// <summary>有効な Node、Relationship、または Hyperedge を表すか。</summary>
+    /// <summary>有効な Vertex、Edge、または Nexus を表すか。</summary>
     public bool IsValid => IsSupportedKind(Kind) && Value >= 0;
 
     /// <summary>slot の局所 ID。</summary>
@@ -95,14 +95,14 @@ public readonly partial record struct EntityRef
     /// <summary>パック済み値から Sequence (局所 ID) を取り出す (kind ビット有無を問わない)。</summary>
     public static long UnpackSequence(long packed) => packed & SequenceMask;
 
-    /// <summary><see cref="NodeId"/> から種別付き参照を作成する。</summary>
-    public static EntityRef From(NodeId id) => From(EntityKind.Node, id.Value);
+    /// <summary><see cref="VertexId"/> から種別付き参照を作成する。</summary>
+    public static EntityRef From(VertexId id) => From(EntityKind.Vertex, id.Value);
 
-    /// <summary><see cref="RelationshipId"/> から種別付き参照を作成する。</summary>
-    public static EntityRef From(RelationshipId id) => From(EntityKind.Relationship, id.Value);
+    /// <summary><see cref="EdgeId"/> から種別付き参照を作成する。</summary>
+    public static EntityRef From(EdgeId id) => From(EntityKind.Edge, id.Value);
 
-    /// <summary><see cref="HyperedgeId"/> から種別付き参照を作成する。</summary>
-    public static EntityRef From(HyperedgeId id) => From(EntityKind.Hyperedge, id.Value);
+    /// <summary><see cref="NexusId"/> から種別付き参照を作成する。</summary>
+    public static EntityRef From(NexusId id) => From(EntityKind.Nexus, id.Value);
 
     /// <summary>種別、slot、世代を検証して種別付き参照を作成する。</summary>
     public static EntityRef Create(EntityKind kind, long sequence, int generation)
@@ -132,11 +132,11 @@ public readonly partial record struct EntityRef
     private static void ValidateKind(EntityKind kind)
     {
         if (!IsSupportedKind(kind))
-            throw new ArgumentOutOfRangeException(nameof(kind), kind, "EntityRef は Node、Relationship、Hyperedge だけを受け入れます。");
+            throw new ArgumentOutOfRangeException(nameof(kind), kind, "EntityRef は Vertex、Edge、Nexus だけを受け入れます。");
     }
 
     private static bool IsSupportedKind(EntityKind kind)
-        => kind is EntityKind.Node or EntityKind.Relationship or EntityKind.Hyperedge;
+        => kind is EntityKind.Vertex or EntityKind.Edge or EntityKind.Nexus;
 
     private static void ValidateLocal(long value)
     {

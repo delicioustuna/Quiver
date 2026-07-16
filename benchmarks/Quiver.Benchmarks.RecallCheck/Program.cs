@@ -48,10 +48,10 @@ static bool RunScenario(Scenario scenario)
         var live = new bool[VectorRecallCorpus.RecallCount];
         Array.Fill(live, true);
 
-        using var db = GraphDatabase.Open(path);
+        using var db = QuiverDatabase.Open(path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName,
-            EntityKind.Node,
+            EntityKind.Vertex,
             db.Schema.GetOrCreatePropertyKey("embedding"),
             VectorRecallCorpus.RecallDimensions,
             DistanceMetric.Cosine,
@@ -68,8 +68,8 @@ static bool RunScenario(Scenario scenario)
                 var vector = VectorRecallCorpus.NextVector(
                     random, VectorRecallCorpus.RecallDimensions);
                 corpus.Add(vector);
-                var node = tx.CreateNode("Doc");
-                tx.SetVector(EntityKind.Node, node.Value, IndexName, vector);
+                var vertex = tx.CreateVertex("Doc");
+                tx.SetVector(EntityKind.Vertex, vertex.Value, IndexName, vector);
             }
             tx.Commit();
         }
@@ -99,7 +99,7 @@ static bool RunScenario(Scenario scenario)
             for (int i = 0; i < deleteCount; i++)
             {
                 int seq = order[i];
-                tx.RemoveVector(EntityKind.Node, seq, IndexName);
+                tx.RemoveVector(EntityKind.Vertex, seq, IndexName);
                 live[seq] = false;
             }
             tx.Commit();
@@ -125,7 +125,7 @@ static bool RunScenario(Scenario scenario)
 }
 
 static double MeasureRecall(
-    GraphDatabase db,
+    QuiverDatabase db,
     string indexName,
     IReadOnlyList<float[]> corpus,
     IReadOnlyList<bool> live,
@@ -134,7 +134,7 @@ static double MeasureRecall(
     => MeasureRecallAndLatency(db, indexName, corpus, live, queries, options).Recall;
 
 static (double Recall, double MeanLatencyMs) MeasureRecallAndLatency(
-    GraphDatabase db,
+    QuiverDatabase db,
     string indexName,
     IReadOnlyList<float[]> corpus,
     IReadOnlyList<bool> live,
@@ -172,7 +172,7 @@ static (double Recall, double MeanLatencyMs) MeasureRecallAndLatency(
 }
 
 static void MeasureEfSearchSweep(
-    GraphDatabase db,
+    QuiverDatabase db,
     string indexName,
     IReadOnlyList<float[]> corpus,
     IReadOnlyList<bool> live,

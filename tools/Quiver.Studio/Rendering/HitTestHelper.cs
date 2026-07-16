@@ -4,19 +4,19 @@ namespace Quiver.Studio.Rendering;
 
 public static class HitTestHelper
 {
-    public static VisualNode? HitTestNode(
-        IReadOnlyList<VisualNode> nodes,
+    public static VisualVertex? HitTestVertex(
+        IReadOnlyList<VisualVertex> vertices,
         CameraTransform camera,
         double screenX,
         double screenY)
     {
         var world = camera.ScreenToWorld(screenX, screenY);
-        VisualNode? best = null;
+        VisualVertex? best = null;
         var bestDist2 = double.MaxValue;
 
-        for (var i = nodes.Count - 1; i >= 0; i--)
+        for (var i = vertices.Count - 1; i >= 0; i--)
         {
-            var n = nodes[i];
+            var n = vertices[i];
             var dx = world.X - n.X;
             var dy = world.Y - n.Y;
             var dist2 = dx * dx + dy * dy;

@@ -11,13 +11,13 @@ namespace Quiver.Transactions;
 /// abort する。捕捉した呼び出し側は <see cref="ITransaction.Abort"/> / <see cref="IDisposable.Dispose"/>
 /// で終了させる責務がある。SSN は deadlock-free かつ abort 後の即時 retry が必ず成功する
 /// (Wang et al. Theorem 7) ため、典型的な対処は「abort → 同一ロジックで retry」。</para>
-/// <para>並列モデルは <see cref="DeadlockException"/> と同様 (<see cref="GraphDbException"/> 派生、
+/// <para>並列モデルは <see cref="DeadlockException"/> と同様 (<see cref="QuiverException"/> 派生、
 /// 犠牲 tx の識別子を保持)。</para>
 /// <para>SSN ベースの Serializable 分離は評価中のため <c>[Experimental("QUIVER001")]</c> 指定。
 /// SemVer の安定性保証対象外 (docs/api-stability.md §5)。</para>
 /// </summary>
 [Experimental("QUIVER001")]
-public sealed class SerializabilityException : GraphDbException
+public sealed class SerializabilityException : QuiverException
 {
     /// <summary>直列化可能性違反で abort された tx 識別子。</summary>
     public TransactionId Victim { get; }

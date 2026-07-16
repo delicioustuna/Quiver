@@ -29,8 +29,8 @@ public sealed class LogicalMutationTests : IDisposable
         return d;
     }
 
-    private static GraphDatabase OpenWithSink(string dir, ILogicalMutationSink sink)
-        => GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions { LogicalMutationSink = sink });
+    private static QuiverDatabase OpenWithSink(string dir, ILogicalMutationSink sink)
+        => QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"), new QuiverDatabaseOptions { LogicalMutationSink = sink });
 
     [Fact]
     public void Commit_publishes_buffered_mutations()
@@ -40,20 +40,20 @@ public sealed class LogicalMutationTests : IDisposable
 
         using (var tx = db.BeginTransaction())
         {
-            var a = tx.CreateNode("Person");
-            var b = tx.CreateNode("Person");
+            var a = tx.CreateVertex("Person");
+            var b = tx.CreateVertex("Person");
             tx.SetProperty(a, "name", PropertyValue.FromString("Alice"));
-            tx.CreateRelationship(a, b, "KNOWS");
+            tx.CreateEdge(a, b, "KNOWS");
             tx.Commit();
         }
 
         sink.Batches.Should().HaveCount(1);
         var kinds = sink.Mutations.Select(m => m.Kind).ToArray();
         kinds.Should().Equal(
-            LogicalMutationKind.CreateNode,
-            LogicalMutationKind.CreateNode,
-            LogicalMutationKind.SetNodeProperty,
-            LogicalMutationKind.CreateRelationship);
+            LogicalMutationKind.CreateVertex,
+            LogicalMutationKind.CreateVertex,
+            LogicalMutationKind.SetVertexProperty,
+            LogicalMutationKind.CreateEdge);
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public sealed class LogicalMutationTests : IDisposable
 
         using (var tx = db.BeginTransaction())
         {
-            tx.CreateNode("Person");
+            tx.CreateVertex("Person");
             tx.Rollback();
         }
 
@@ -80,7 +80,7 @@ public sealed class LogicalMutationTests : IDisposable
         // Seed something first via a writing tx.
         using (var tx = db.BeginTransaction())
         {
-            tx.CreateNode("Person");
+            tx.CreateVertex("Person");
             tx.Commit();
         }
         sink.Clear();
@@ -99,12 +99,12 @@ public sealed class LogicalMutationTests : IDisposable
         // No sink → no logical buffering at all. We can't observe a missing
         // sink directly; instead exercise the full mutation surface and confirm
         // no exceptions and normal semantics.
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(NewDir(), "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(NewDir(), "graph.quiver"));
         using var tx = db.BeginTransaction();
-        var a = tx.CreateNode("X");
+        var a = tx.CreateVertex("X");
         tx.SetProperty(a, "k", PropertyValue.FromInt32(1));
         tx.RemoveProperty(a, "k");
-        tx.DeleteNode(a);
+        tx.DeleteVertex(a);
         tx.Commit();
     }
 
@@ -117,25 +117,25 @@ public sealed class LogicalMutationTests : IDisposable
         using (var src = OpenWithSink(srcDir, sink))
         using (var tx = src.BeginTransaction())
         {
-            var alice = tx.CreateNode("Person");
-            var bob = tx.CreateNode("Person");
-            var carol = tx.CreateNode("Person");
+            var alice = tx.CreateVertex("Person");
+            var bob = tx.CreateVertex("Person");
+            var carol = tx.CreateVertex("Person");
             tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
             tx.SetProperty(alice, "age", PropertyValue.FromInt32(30));
             tx.SetProperty(bob, "name", PropertyValue.FromString("Bob"));
             tx.SetProperty(carol, "name", PropertyValue.FromString("Carol"));
-            var e1 = tx.CreateRelationship(alice, bob, "KNOWS");
-            var e2 = tx.CreateRelationship(alice, carol, "KNOWS");
+            var e1 = tx.CreateEdge(alice, bob, "KNOWS");
+            var e2 = tx.CreateEdge(alice, carol, "KNOWS");
             tx.SetProperty(e1, "since", PropertyValue.FromInt32(2010));
             tx.RemoveProperty(alice, "age");
-            // delete one edge to also exercise DeleteRelationship in the stream
-            tx.DeleteRelationship(e2);
+            // delete one edge to also exercise DeleteEdge in the stream
+            tx.DeleteEdge(e2);
             tx.Commit();
         }
 
         // Open a brand new database and replay against it.
         string targetDir = NewDir();
-        using var target = GraphDatabase.Open(System.IO.Path.Combine(targetDir, "graph.quiver"));
+        using var target = QuiverDatabase.Open(System.IO.Path.Combine(targetDir, "graph.quiver"));
         using (var tx = target.BeginTransaction())
         {
             LogicalMutationReplay.Apply(tx, sink.Mutations);
@@ -145,13 +145,13 @@ public sealed class LogicalMutationTests : IDisposable
         // Walk the rebuilt graph and check the surviving structure.
         using (var ro = target.BeginReadOnlyTransaction())
         {
-            // Find Alice by scanning created nodes via the replay map is not
-            // exposed — instead inspect each node and locate by name.
-            NodeId? alice = null, bob = null, carol = null;
+            // Find Alice by scanning created vertices via the replay map is not
+            // exposed — instead inspect each vertex and locate by name.
+            VertexId? alice = null, bob = null, carol = null;
             for (long i = 0; i < 16 && (alice is null || bob is null || carol is null); i++)
             {
-                var n = new NodeId(i);
-                if (!ro.NodeExists(n)) continue;
+                var n = new VertexId(i);
+                if (!ro.VertexExists(n)) continue;
                 var name = ro.GetProperty(n, "name");
                 if (name.Type != PropertyValueType.String) continue;
                 var nameStr = System.Text.Encoding.UTF8.GetString(name.Utf8StringValue);
@@ -169,14 +169,14 @@ public sealed class LogicalMutationTests : IDisposable
 
             // Exactly one KNOWS edge from Alice should remain.
             int knowsCount = 0;
-            var rels = ro.EnumerateRelationships(alice.Value, Direction.Outgoing, "KNOWS");
-            while (rels.MoveNext()) knowsCount++;
+            var edges = ro.EnumerateEdges(alice.Value, Direction.Outgoing, "KNOWS");
+            while (edges.MoveNext()) knowsCount++;
             knowsCount.Should().Be(1);
         }
     }
 
     [Fact]
-    public void Hyperedge_mutations_are_captured_in_commit_order()
+    public void Nexus_mutations_are_captured_in_commit_order()
     {
         var sink = new InMemoryLogicalMutationSink();
         using var db = OpenWithSink(NewDir(), sink);
@@ -185,38 +185,38 @@ public sealed class LogicalMutationTests : IDisposable
 
         using (var tx = db.BeginTransaction())
         {
-            var a = tx.CreateNode("Person");
-            var b = tx.CreateNode("Book");
-            var he = tx.CreateHyperedge("Purchase", [new("Buyer", a), new("Item", b)]);
+            var a = tx.CreateVertex("Person");
+            var b = tx.CreateVertex("Book");
+            var he = tx.CreateNexus("Purchase", [new("Buyer", a), new("Item", b)]);
             tx.SetProperty(he, "price", PropertyValue.FromInt32(30));
             tx.AddPropertyValue(he, "tags", PropertyValue.FromString("gift"));
             tx.RemoveProperty(he, "price");
-            tx.DeleteHyperedge(he);
+            tx.DeleteNexus(he);
             tx.Commit();
         }
 
         var kinds = sink.Mutations.Select(m => m.Kind).ToArray();
         kinds.Should().Equal(
-            LogicalMutationKind.CreateNode,
-            LogicalMutationKind.CreateNode,
-            LogicalMutationKind.CreateHyperedge,
-            LogicalMutationKind.SetHyperedgeProperty,
-            LogicalMutationKind.AddHyperedgePropertyValue,
-            LogicalMutationKind.RemoveHyperedgeProperty,
-            LogicalMutationKind.DeleteHyperedge);
+            LogicalMutationKind.CreateVertex,
+            LogicalMutationKind.CreateVertex,
+            LogicalMutationKind.CreateNexus,
+            LogicalMutationKind.SetNexusProperty,
+            LogicalMutationKind.AddNexusPropertyValue,
+            LogicalMutationKind.RemoveNexusProperty,
+            LogicalMutationKind.DeleteNexus);
     }
 
     [Fact]
-    public void Hyperedge_mutations_are_not_published_on_rollback()
+    public void Nexus_mutations_are_not_published_on_rollback()
     {
         var sink = new InMemoryLogicalMutationSink();
         using var db = OpenWithSink(NewDir(), sink);
 
         using (var tx = db.BeginTransaction())
         {
-            var a = tx.CreateNode("A");
-            var b = tx.CreateNode("B");
-            var he = tx.CreateHyperedge("T", [new("R1", a), new("R2", b)]);
+            var a = tx.CreateVertex("A");
+            var b = tx.CreateVertex("B");
+            var he = tx.CreateNexus("T", [new("R1", a), new("R2", b)]);
             tx.SetProperty(he, "k", PropertyValue.FromInt32(1));
             tx.Rollback();
         }
@@ -225,21 +225,21 @@ public sealed class LogicalMutationTests : IDisposable
     }
 
     [Fact]
-    public void Replay_rebuilds_hyperedge_with_members_and_properties()
+    public void Replay_rebuilds_nexus_with_members_and_properties()
     {
         var sink = new InMemoryLogicalMutationSink();
         string srcDir = NewDir();
 
-        HyperedgeId srcHe;
-        NodeId srcA, srcB, srcC;
+        NexusId srcHe;
+        VertexId srcA, srcB, srcC;
         using (var src = OpenWithSink(srcDir, sink))
         {
             src.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
             using var tx = src.BeginTransaction();
-            srcA = tx.CreateNode("Person");
-            srcB = tx.CreateNode("Book");
-            srcC = tx.CreateNode("Store");
-            srcHe = tx.CreateHyperedge("Purchase",
+            srcA = tx.CreateVertex("Person");
+            srcB = tx.CreateVertex("Book");
+            srcC = tx.CreateVertex("Store");
+            srcHe = tx.CreateNexus("Purchase",
                 [new("Buyer", srcA), new("Item", srcB), new("Seller", srcC)]);
             tx.SetProperty(srcHe, "price", PropertyValue.FromInt32(30));
             tx.AddPropertyValue(srcHe, "tags", PropertyValue.FromString("gift"));
@@ -249,13 +249,13 @@ public sealed class LogicalMutationTests : IDisposable
 
         // 別 DB へ再生する。target 側は tags の cardinality を宣言しておく。
         string targetDir = NewDir();
-        using var target = GraphDatabase.Open(System.IO.Path.Combine(targetDir, "graph.quiver"));
+        using var target = QuiverDatabase.Open(System.IO.Path.Combine(targetDir, "graph.quiver"));
         target.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
-        var nodeMap = new Dictionary<long, NodeId>();
-        var heMap = new Dictionary<long, HyperedgeId>();
+        var vertexMap = new Dictionary<long, VertexId>();
+        var heMap = new Dictionary<long, NexusId>();
         using (var tx = target.BeginTransaction())
         {
-            LogicalMutationReplay.Apply(tx, sink.Mutations, nodeMap, hyperedgeMap: heMap);
+            LogicalMutationReplay.Apply(tx, sink.Mutations, vertexMap, nexusMap: heMap);
             tx.Commit();
         }
 
@@ -265,12 +265,12 @@ public sealed class LogicalMutationTests : IDisposable
         using (var ro = target.BeginReadOnlyTransaction())
         {
             // メンバーがターゲット側 ID へ再マッピングされて再構築されていること。
-            var members = new List<HyperedgeMember>();
+            var members = new List<NexusMember>();
             var me = ro.GetMembers(targetHe);
             while (me.MoveNext()) members.Add(me.Current);
             members.Should().HaveCount(3);
             members.Select(m => m.Role).Should().BeEquivalentTo(["Buyer", "Item", "Seller"]);
-            members.Select(m => m.NodeId).Should().OnlyContain(n => nodeMap.ContainsValue(n));
+            members.Select(m => m.VertexId).Should().OnlyContain(n => vertexMap.ContainsValue(n));
 
             ro.GetProperty(targetHe, "price").Int32Value.Should().Be(30);
 
@@ -290,13 +290,13 @@ public sealed class LogicalMutationTests : IDisposable
 
         using (var tx = db.BeginTransaction())
         {
-            tx.CreateNode("A");
+            tx.CreateVertex("A");
             tx.Commit();
         }
         using (var tx = db.BeginTransaction())
         {
-            tx.CreateNode("B");
-            tx.CreateNode("C");
+            tx.CreateVertex("B");
+            tx.CreateVertex("C");
             tx.Commit();
         }
 

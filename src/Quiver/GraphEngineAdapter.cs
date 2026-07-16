@@ -6,7 +6,7 @@ using Quiver.Transactions;
 namespace Quiver;
 
 /// <summary>
-/// <see cref="GraphDatabase"/> と呼び出し側から渡される <see cref="IVectorStore"/> /
+/// <see cref="QuiverDatabase"/> と呼び出し側から渡される <see cref="IVectorStore"/> /
 /// <see cref="IVectorCatalog"/> を、<c>Quiver.Embedding</c> が依存する <see cref="IGraphEngine"/>
 /// 抽象に橋渡しするアダプタ。
 /// ヘルパからエンジン内部実装を隠蔽しつつ、エンティティ走査と source-text プロパティ読み出しを公開する。
@@ -18,12 +18,12 @@ namespace Quiver;
 /// </remarks>
 internal sealed class GraphEngineAdapter : IGraphEngine
 {
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
     private readonly IVectorStore _vectors;
     private readonly IVectorCatalog _catalog;
 
     /// <summary>指定 DB と外部から注入されたベクトルストア / カタログでアダプタを生成する。</summary>
-    public GraphEngineAdapter(GraphDatabase db, IVectorStore vectors, IVectorCatalog catalog)
+    public GraphEngineAdapter(QuiverDatabase db, IVectorStore vectors, IVectorCatalog catalog)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _vectors = vectors ?? throw new ArgumentNullException(nameof(vectors));
@@ -56,12 +56,12 @@ internal sealed class GraphEngineAdapter : IGraphEngine
         {
             switch (kind)
             {
-                case EntityKind.Node:
-                    foreach (var nid in _tx.Nodes.Scan())
+                case EntityKind.Vertex:
+                    foreach (var nid in _tx.Vertices.Scan())
                         yield return EntityRef.From(nid);
                     break;
-                case EntityKind.Relationship:
-                    foreach (var rid in _tx.Relationships.Scan())
+                case EntityKind.Edge:
+                    foreach (var rid in _tx.Edges.Scan())
                         yield return EntityRef.From(rid);
                     break;
                 default:
@@ -80,15 +80,15 @@ internal sealed class GraphEngineAdapter : IGraphEngine
                 return false;
             }
 
-        // node / rel とも inline + overflow を結合列挙する。
+        // vertex / edge とも inline + overflow を結合列挙する。
             PropertyEnumerator enumerator;
-            if (entity.Kind == EntityKind.Node)
+            if (entity.Kind == EntityKind.Vertex)
             {
-                enumerator = _tx.Nodes.EnumerateProperties(new NodeId(entity.Value), _tx.Properties);
+                enumerator = _tx.Vertices.EnumerateProperties(new VertexId(entity.Value), _tx.Properties);
             }
-            else if (entity.Kind == EntityKind.Relationship)
+            else if (entity.Kind == EntityKind.Edge)
             {
-                enumerator = _tx.Relationships.EnumerateProperties(new RelationshipId(entity.Value), _tx.Properties);
+                enumerator = _tx.Edges.EnumerateProperties(new EdgeId(entity.Value), _tx.Properties);
             }
             else
             {

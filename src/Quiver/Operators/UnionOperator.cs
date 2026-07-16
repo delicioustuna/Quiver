@@ -6,7 +6,7 @@ namespace Quiver.Query.Physical;
 /// Cypher の <c>UNION ALL</c> 相当。
 /// 各入力行に対し、新しくバインドされた <see cref="CorrelatedInputOperator"/> を用いて
 /// すべての分岐を再オープンし、各分岐の行を順番に放出する。
-/// すべての分岐は単一列 NodeId のタプルを返す必要があり、出力スキーマも単一 NodeId 列となる。
+/// すべての分岐は単一列 VertexId のタプルを返す必要があり、出力スキーマも単一 VertexId 列となる。
 /// </summary>
 internal sealed class UnionOperator : IPhysicalOperator
 {
@@ -17,7 +17,7 @@ internal sealed class UnionOperator : IPhysicalOperator
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
 
     private static readonly TupleSchema s_schema = new([
-        new ColumnDefinition("union", TupleSlotType.NodeId)]);
+        new ColumnDefinition("union", TupleSlotType.VertexId)]);
 
     private ITransaction? _tx;
     private int _curBranch = -1;

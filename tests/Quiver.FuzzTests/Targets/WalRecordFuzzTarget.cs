@@ -7,13 +7,8 @@ namespace Quiver.FuzzTests.Targets;
 /// <see cref="WriteAheadLog"/> コンストラクタ (RebuildState) と
 /// <see cref="WriteAheadLog.OpenReader"/>.TryReadNext を一巡させる。
 ///
-/// 契約:
-///   - 任意バイト列を WAL サイドカーファイルとして配置しても、コンストラクタは破損を
-///     黙って吸収して return しなければならない (RebuildState の catch 経由)。
-///   - reader.TryReadNext は <c>false</c> を返して終了するだけで、例外を投げてはならない。
-///   - IOException / EndOfStreamException 系は temp file 取り回しの環境要因として
-///     許容するが、CorruptionException / NullReferenceException / IndexOutOfRangeException
-///     等は fuzz 発見対象としてバブルアップさせる。
+/// 任意入力は正常に parse されるか、strict parser の定義済み format/corruption 例外で拒否される。
+/// NullReferenceException や IndexOutOfRangeException などの実装例外は fuzz 発見対象として伝播させる。
 /// </summary>
 public static class WalRecordFuzzTarget
 {

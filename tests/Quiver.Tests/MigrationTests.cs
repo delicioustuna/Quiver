@@ -26,20 +26,20 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task RenameLabel_migration_applied_once_and_idempotent_on_rerun()
     {
-        // seed: 3 User ノードを作って "User" ラベルを使う
+        // seed: 3 User Vertexを作って "User" ラベルを使う
         {
-            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+            using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
             using var tx = db.BeginTransaction();
             for (int i = 0; i < 3; i++)
             {
-                var n = tx.CreateNode("User");
+                var n = tx.CreateVertex("User");
                 tx.SetProperty(n, "email", PropertyValue.FromString($"user{i}@example.com"));
             }
             tx.Commit();
         }
 
         // 1 回目: 適用される
-        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
+        using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             var migrations = new IMigration[] { new RenameUserToPerson() };
             var result = await db.MigrateAsync(migrations);
@@ -51,13 +51,13 @@ public sealed class MigrationTests : IDisposable
 
             using var tx = db.BeginReadOnlyTransaction();
             int count = 0;
-            foreach (var _ in tx.AsInternal().Access.ScanNodes(GetInner(tx), db.Schema.GetOrCreateLabel("Person")))
+            foreach (var _ in tx.AsInternal().Access.ScanVertices(GetInner(tx), db.Schema.GetOrCreateLabel("Person")))
                 count++;
             count.Should().Be(3);
         }
 
         // 2 回目: history があるので skip
-        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
+        using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             var migrations = new IMigration[] { new RenameUserToPerson() };
             var result = await db.MigrateAsync(migrations);
@@ -69,7 +69,7 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task Migration_failure_rolls_back_data_mutations_but_does_not_record_history()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var migrations = new IMigration[] { new FailingMigration() };
 
         Func<Task> act = () => db.MigrateAsync(migrations);
@@ -84,36 +84,36 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task Migration_failure_rolls_back_label_rename_via_OnRolledBack_hook()
     {
-        // seed: "OldLabel" を持つノード
+        // seed: "OldLabel" を持つVertex
         {
-            using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+            using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
             using var tx = db.BeginTransaction();
-            tx.CreateNode("OldLabel");
+            tx.CreateVertex("OldLabel");
             tx.Commit();
         }
 
         // rename → 例外 → tx rollback 経由で rename も巻き戻る
-        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
+        using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             var migrations = new IMigration[] { new RenameThenFailMigration() };
             Func<Task> act = () => db.MigrateAsync(migrations);
             await act.Should().ThrowAsync<InvalidOperationException>();
 
-            // ノードは "OldLabel" のまま残っているべき (rename が巻き戻った)
+            // Vertexは "OldLabel" のまま残っているべき (rename が巻き戻った)
             using var tx = db.BeginReadOnlyTransaction();
             var oldId = db.Schema.GetOrCreateLabel("OldLabel");
             int oldCount = 0;
-            foreach (var _ in tx.AsInternal().Access.ScanNodes(GetInner(tx), oldId)) oldCount++;
-            oldCount.Should().Be(1, "rename failed, so the node should still be under OldLabel");
+            foreach (var _ in tx.AsInternal().Access.ScanVertices(GetInner(tx), oldId)) oldCount++;
+            oldCount.Should().Be(1, "rename failed, so the vertex should still be under OldLabel");
         }
 
         // 再 open でも "OldLabel" が durable に残っていることを確認
-        using (var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
+        using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
             using var tx = db.BeginReadOnlyTransaction();
             var oldId = db.Schema.GetOrCreateLabel("OldLabel");
             int oldCount = 0;
-            foreach (var _ in tx.AsInternal().Access.ScanNodes(GetInner(tx), oldId)) oldCount++;
+            foreach (var _ in tx.AsInternal().Access.ScanVertices(GetInner(tx), oldId)) oldCount++;
             oldCount.Should().Be(1);
         }
     }
@@ -123,12 +123,12 @@ public sealed class MigrationTests : IDisposable
     {
         // Bug 1 regression: 旧 rename("A","B") を別 migration が冪等 no-op として通したとき、
         // その migration が失敗しても B → A の逆操作が発火してはいけない (corruption)。
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         // 先行 migration が完了: A→B
         {
             using var tx = db.BeginTransaction();
-            tx.CreateNode("A");
+            tx.CreateVertex("A");
             tx.Commit();
         }
         await db.MigrateAsync(new IMigration[] { new VersionedMigration("first", 1, ctx =>
@@ -147,7 +147,7 @@ public sealed class MigrationTests : IDisposable
         // B のままであるべき (A に巻き戻ってはいけない)
         using var rtx = db.BeginReadOnlyTransaction();
         int bCount = 0;
-        foreach (var _ in rtx.AsInternal().Access.ScanNodes(GetInner(rtx), db.Schema.GetOrCreateLabel("B")))
+        foreach (var _ in rtx.AsInternal().Access.ScanVertices(GetInner(rtx), db.Schema.GetOrCreateLabel("B")))
             bCount++;
         bCount.Should().Be(1, "first migration's B should be preserved");
     }
@@ -157,7 +157,7 @@ public sealed class MigrationTests : IDisposable
     {
         // Bug 2 regression: 既に存在する索引に対し AddIndex を呼んでも、
         // それは no-op であり、後の rollback で既存索引を消してはいけない。
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_preexisting", "Foo", "bar", IndexKind.StringEquality);
 
         Func<Task> act = () => db.MigrateAsync(new IMigration[] { new VersionedMigration("addidx", 1, ctx =>
@@ -175,7 +175,7 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task Migration_failure_rolls_back_AddIndex_via_OnRolledBack_hook()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var migrations = new IMigration[] { new AddIndexThenFailMigration() };
         Func<Task> act = () => db.MigrateAsync(migrations);
         await act.Should().ThrowAsync<InvalidOperationException>();
@@ -188,7 +188,7 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task Multiple_migrations_applied_in_version_order()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var migrations = new IMigration[]
         {
             new VersionedMigration("c", 3, _ => { }),
@@ -202,7 +202,7 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task Duplicate_migration_ids_throw()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var migrations = new IMigration[]
         {
             new VersionedMigration("dup", 1, _ => { }),
@@ -215,13 +215,13 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task AddIndex_via_migration_then_seek_works()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         // データを先に投入
         {
             using var tx = db.BeginTransaction();
             for (int i = 0; i < 5; i++)
             {
-                var n = tx.CreateNode("Product");
+                var n = tx.CreateVertex("Product");
                 tx.SetProperty(n, "sku", PropertyValue.FromString($"SKU-{i:D3}"));
             }
             tx.Commit();
@@ -239,7 +239,7 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task Empty_migration_completes_and_records_history()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var migrations = new IMigration[]
         {
             new VersionedMigration("noop", 1, _ => { }),
@@ -255,17 +255,17 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task Partial_batch_first_succeeds_second_fails_only_first_recorded()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         var migrations = new IMigration[]
         {
             new VersionedMigration("ok", 1, ctx =>
             {
-                ctx.Transaction.CreateNode("Survivor");
+                ctx.Transaction.CreateVertex("Survivor");
             }),
             new VersionedMigration("fail", 2, ctx =>
             {
-                ctx.Transaction.CreateNode("Ghost");
+                ctx.Transaction.CreateVertex("Ghost");
                 throw new InvalidOperationException("intentional");
             }),
         };
@@ -277,16 +277,16 @@ public sealed class MigrationTests : IDisposable
 
         using var tx = db.BeginReadOnlyTransaction();
         int survivors = 0;
-        foreach (var _ in tx.AsInternal().Access.ScanNodes(
+        foreach (var _ in tx.AsInternal().Access.ScanVertices(
             GetInner(tx), db.Schema.GetOrCreateLabel("Survivor")))
             survivors++;
         survivors.Should().Be(1);
 
         int ghosts = 0;
-        foreach (var _ in tx.AsInternal().Access.ScanNodes(
+        foreach (var _ in tx.AsInternal().Access.ScanVertices(
             GetInner(tx), db.Schema.GetOrCreateLabel("Ghost")))
             ghosts++;
-        ghosts.Should().Be(0, "failed migration's nodes should be rolled back");
+        ghosts.Should().Be(0, "failed migration's vertices should be rolled back");
     }
 
     // ── Same version, different Id → Ordinal sort ──────────────
@@ -294,7 +294,7 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task Same_version_migrations_sorted_by_id_ordinal()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         var migrations = new IMigration[]
         {
             new VersionedMigration("z_last", 1, _ => { }),
@@ -310,10 +310,10 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task Migration_failure_rolls_back_RenamePropertyKey()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         {
             using var tx = db.BeginTransaction();
-            var n = tx.CreateNode("Item");
+            var n = tx.CreateVertex("Item");
             tx.SetProperty(n, "old_prop", PropertyValue.FromString("val"));
             tx.Commit();
         }
@@ -329,29 +329,29 @@ public sealed class MigrationTests : IDisposable
             "rename should be rolled back on failure");
     }
 
-    // ── RenameRelationshipType rollback ────────────────────────
+    // ── RenameEdgeType rollback ────────────────────────
 
     [Fact]
-    public async Task Migration_failure_rolls_back_RenameRelationshipType()
+    public async Task Migration_failure_rolls_back_RenameEdgeType()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         {
             using var tx = db.BeginTransaction();
-            var a = tx.CreateNode("N");
-            var b = tx.CreateNode("N");
-            tx.CreateRelationship(a, b, "OLD_REL");
+            var a = tx.CreateVertex("N");
+            var b = tx.CreateVertex("N");
+            tx.CreateEdge(a, b, "OLD_REL");
             tx.Commit();
         }
 
-        Func<Task> act = () => db.MigrateAsync(new IMigration[] { new VersionedMigration("renrel", 1, ctx =>
+        Func<Task> act = () => db.MigrateAsync(new IMigration[] { new VersionedMigration("renameedge", 1, ctx =>
         {
-            ctx.RenameRelationshipType("OLD_REL", "NEW_REL").Should().BeTrue();
+            ctx.RenameEdgeType("OLD_REL", "NEW_REL").Should().BeTrue();
             throw new InvalidOperationException("intentional");
         }) });
         await act.Should().ThrowAsync<InvalidOperationException>();
 
-        db.Schema.TryGetRelationshipTypeId("OLD_REL", out _).Should().BeTrue(
-            "relationship type rename should be rolled back on failure");
+        db.Schema.TryGetEdgeTypeId("OLD_REL", out _).Should().BeTrue(
+            "edge type rename should be rolled back on failure");
     }
 
     // ── DropIndex is non-transactional ─────────────────────────
@@ -359,7 +359,7 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task DropIndex_in_failed_migration_is_permanent()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         db.Schema.CreateIndex("idx_doomed", "X", "y", IndexKind.StringEquality);
 
         Func<Task> act = () => db.MigrateAsync(new IMigration[] { new VersionedMigration("dropfail", 1, ctx =>
@@ -373,17 +373,17 @@ public sealed class MigrationTests : IDisposable
             "DropIndex is a physical operation and not rolled back");
     }
 
-    // ── ForEachNode inside migration ───────────────────────────
+    // ── ForEachVertex inside migration ───────────────────────────
 
     [Fact]
-    public async Task ForEachNode_walks_all_nodes_and_mutates()
+    public async Task ForEachVertex_walks_all_vertices_and_mutates()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         {
             using var tx = db.BeginTransaction();
             for (int i = 0; i < 4; i++)
             {
-                var n = tx.CreateNode("Sensor");
+                var n = tx.CreateVertex("Sensor");
                 tx.SetProperty(n, "name", PropertyValue.FromString($"s{i}"));
             }
             tx.Commit();
@@ -391,7 +391,7 @@ public sealed class MigrationTests : IDisposable
 
         var result = await db.MigrateAsync(new IMigration[] { new VersionedMigration("foreach_m", 1, ctx =>
         {
-            ctx.ForEachNode("Sensor", nid =>
+            ctx.ForEachVertex("Sensor", nid =>
             {
                 ctx.Transaction.SetProperty(nid, "migrated", PropertyValue.FromString("yes"));
             });
@@ -400,7 +400,7 @@ public sealed class MigrationTests : IDisposable
 
         using var ro = db.BeginReadOnlyTransaction();
         int migratedCount = 0;
-        foreach (var nid in ro.AsInternal().Access.ScanNodes(
+        foreach (var nid in ro.AsInternal().Access.ScanVertices(
             GetInner(ro), db.Schema.GetOrCreateLabel("Sensor")))
         {
             ro.HasProperty(nid, "migrated").Should().BeTrue();
@@ -418,7 +418,7 @@ public sealed class MigrationTests : IDisposable
     {
         var path = System.IO.Path.Combine(_dir, "graph.quiver");
 
-        using (var db = GraphDatabase.Open(path))
+        using (var db = QuiverDatabase.Open(path))
         {
             await db.MigrateAsync(new IMigration[]
             {
@@ -427,7 +427,7 @@ public sealed class MigrationTests : IDisposable
             });
         }
 
-        using (var db = GraphDatabase.Open(path))
+        using (var db = QuiverDatabase.Open(path))
         {
             var result = await db.MigrateAsync(new IMigration[]
             {
@@ -444,7 +444,7 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task MigrateAsync_respects_cancellation_token()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
@@ -463,7 +463,7 @@ public sealed class MigrationTests : IDisposable
     {
         var path = System.IO.Path.Combine(_dir, "graph.quiver");
 
-        using (var db = GraphDatabase.Open(path))
+        using (var db = QuiverDatabase.Open(path))
         {
             var result = await db.MigrateAsync(new IMigration[] { new VersionedMigration("mv_schema", 1, ctx =>
             {
@@ -474,7 +474,7 @@ public sealed class MigrationTests : IDisposable
             result.Applied.Should().ContainSingle();
         }
 
-        using (var db = GraphDatabase.Open(path))
+        using (var db = QuiverDatabase.Open(path))
         {
             var keyId = db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
             db.Schema.GetPropertyKeyCardinality(keyId).Should().Be(PropertyCardinality.Set);
@@ -487,31 +487,31 @@ public sealed class MigrationTests : IDisposable
     public async Task Migration_uses_AddPropertyValue_and_values_persist()
     {
         var path = System.IO.Path.Combine(_dir, "graph.quiver");
-        NodeId nodeId;
+        VertexId vertexId;
 
-        using (var db = GraphDatabase.Open(path))
+        using (var db = QuiverDatabase.Open(path))
         {
             using var tx = db.BeginTransaction();
-            nodeId = tx.CreateNode("Doc");
-            tx.SetProperty(nodeId, "title", PropertyValue.FromString("readme"));
+            vertexId = tx.CreateVertex("Doc");
+            tx.SetProperty(vertexId, "title", PropertyValue.FromString("readme"));
             tx.Commit();
         }
 
-        using (var db = GraphDatabase.Open(path))
+        using (var db = QuiverDatabase.Open(path))
         {
             var result = await db.MigrateAsync(new IMigration[] { new VersionedMigration("mv_add", 1, ctx =>
             {
                 ctx.Schema.GetOrCreatePropertyKey("labels", PropertyCardinality.Set);
-                ctx.Transaction.AddPropertyValue(nodeId, "labels", PropertyValue.FromString("important"));
-                ctx.Transaction.AddPropertyValue(nodeId, "labels", PropertyValue.FromString("draft"));
+                ctx.Transaction.AddPropertyValue(vertexId, "labels", PropertyValue.FromString("important"));
+                ctx.Transaction.AddPropertyValue(vertexId, "labels", PropertyValue.FromString("draft"));
             }) });
             result.Applied.Should().ContainSingle();
         }
 
-        using (var db = GraphDatabase.Open(path))
+        using (var db = QuiverDatabase.Open(path))
         {
             using var ro = db.BeginReadOnlyTransaction();
-            var values = CollectPropertyValues(ro.GetPropertyValues(nodeId, "labels"));
+            var values = CollectPropertyValues(ro.GetPropertyValues(vertexId, "labels"));
             values.Should().HaveCount(2);
             values.Should().Contain("important");
             values.Should().Contain("draft");
@@ -524,55 +524,55 @@ public sealed class MigrationTests : IDisposable
     public async Task Migration_failure_rolls_back_AddPropertyValue()
     {
         var path = System.IO.Path.Combine(_dir, "graph.quiver");
-        NodeId nodeId;
+        VertexId vertexId;
 
-        using (var db = GraphDatabase.Open(path))
+        using (var db = QuiverDatabase.Open(path))
         {
             db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
             using var tx = db.BeginTransaction();
-            nodeId = tx.CreateNode("Item");
+            vertexId = tx.CreateVertex("Item");
             tx.Commit();
         }
 
-        using (var db = GraphDatabase.Open(path))
+        using (var db = QuiverDatabase.Open(path))
         {
             Func<Task> act = () => db.MigrateAsync(new IMigration[] { new VersionedMigration("mv_fail", 1, ctx =>
             {
-                ctx.Transaction.AddPropertyValue(nodeId, "tags", PropertyValue.FromString("temp"));
+                ctx.Transaction.AddPropertyValue(vertexId, "tags", PropertyValue.FromString("temp"));
                 throw new InvalidOperationException("intentional");
             }) });
             await act.Should().ThrowAsync<InvalidOperationException>();
 
             using var ro = db.BeginReadOnlyTransaction();
-            var values = CollectPropertyValues(ro.GetPropertyValues(nodeId, "tags"));
+            var values = CollectPropertyValues(ro.GetPropertyValues(vertexId, "tags"));
             values.Should().BeEmpty("AddPropertyValue should be rolled back");
         }
     }
 
-    // ── MV: ForEachNode + AddPropertyValue combination ─────────
+    // ── MV: ForEachVertex + AddPropertyValue combination ─────────
 
     [Fact]
-    public async Task Migration_ForEachNode_with_AddPropertyValue()
+    public async Task Migration_ForEachVertex_with_AddPropertyValue()
     {
         var path = System.IO.Path.Combine(_dir, "graph.quiver");
 
-        using (var db = GraphDatabase.Open(path))
+        using (var db = QuiverDatabase.Open(path))
         {
             using var tx = db.BeginTransaction();
             for (int i = 0; i < 3; i++)
             {
-                var n = tx.CreateNode("Article");
+                var n = tx.CreateVertex("Article");
                 tx.SetProperty(n, "title", PropertyValue.FromString($"article_{i}"));
             }
             tx.Commit();
         }
 
-        using (var db = GraphDatabase.Open(path))
+        using (var db = QuiverDatabase.Open(path))
         {
             var result = await db.MigrateAsync(new IMigration[] { new VersionedMigration("mv_foreach", 1, ctx =>
             {
                 ctx.Schema.GetOrCreatePropertyKey("category", PropertyCardinality.Set);
-                ctx.ForEachNode("Article", nid =>
+                ctx.ForEachVertex("Article", nid =>
                 {
                     ctx.Transaction.AddPropertyValue(nid, "category", PropertyValue.FromString("tech"));
                     ctx.Transaction.AddPropertyValue(nid, "category", PropertyValue.FromString("blog"));
@@ -582,7 +582,7 @@ public sealed class MigrationTests : IDisposable
 
             using var ro = db.BeginReadOnlyTransaction();
             int checked_ = 0;
-            foreach (var nid in ro.AsInternal().Access.ScanNodes(
+            foreach (var nid in ro.AsInternal().Access.ScanVertices(
                 GetInner(ro), db.Schema.GetOrCreateLabel("Article")))
             {
                 var cats = CollectPropertyValues(ro.GetPropertyValues(nid, "category"));
@@ -600,7 +600,7 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public async Task Migration_cardinality_mismatch_throws()
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         db.Schema.GetOrCreatePropertyKey("name");
 
@@ -648,7 +648,7 @@ public sealed class MigrationTests : IDisposable
         public int Version => 99;
         public Task ApplyAsync(IMigrationContext ctx)
         {
-            ctx.Transaction.CreateNode("ShouldRollback");
+            ctx.Transaction.CreateVertex("ShouldRollback");
             throw new InvalidOperationException("intentional failure");
         }
     }

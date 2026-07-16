@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace Quiver.Benchmarks.Standalone;
 
 /// <summary>
-/// Clean-slate CSR relationship persistence spike.
+/// Clean-slate CSR edge persistence spike.
 /// The prototype writes explicit commit frames for base segments, locator sidecars,
 /// delta records, and deletion bitmaps, then recovers only fully committed frame groups.
 /// </summary>
@@ -19,7 +19,7 @@ public static class CleanSlateCsrPersistenceSpikeRunner
         int pointUpdates = Parse(args, 1, 160);
         int mergeDeltaCount = Parse(args, 2, 100_000);
 
-        Console.WriteLine("=== Clean-slate CSR relationship persistence spike ===");
+        Console.WriteLine("=== Clean-slate CSR edge persistence spike ===");
         Console.WriteLine(
             $"machine={Environment.MachineName}, procs={Environment.ProcessorCount}, " +
             $"runtime={RuntimeInformation.FrameworkDescription}");
@@ -167,7 +167,7 @@ public static class CleanSlateCsrPersistenceSpikeRunner
             string casePath = Path.Combine(dir, "half-merge.bin");
             File.Copy(baseline.Path, casePath, overwrite: true);
             var mergeState = baseline.Current.Clone();
-            mergeState.ApplyDelta(new RelRecord(baseline.NextSequence, 0, 0, 30_000_000, 1, false));
+            mergeState.ApplyDelta(new EdgeRecord(baseline.NextSequence, 0, 0, 30_000_000, 1, false));
             mergeState.Locators[baseline.NextSequence] = Locator.LiveDelta(0);
             var frames = CsrPrototypeStore.MakeMergeFrames(mergeState, baseline.Current.CommitId + 1);
             frames.RemoveAll(f => f.Part == FramePart.BackwardBase);
@@ -217,7 +217,7 @@ public static class CleanSlateCsrPersistenceSpikeRunner
         {
             long seq = store.NextSequence++;
             int source = i % Math.Max(1, degree);
-            store.Current.ApplyDelta(new RelRecord(seq, 0, source, 40_000_000 + i, i & 1, false));
+            store.Current.ApplyDelta(new EdgeRecord(seq, 0, source, 40_000_000 + i, i & 1, false));
             store.Current.Locators[seq] = Locator.LiveDelta(0);
         }
 
@@ -264,7 +264,7 @@ public static class CleanSlateCsrPersistenceSpikeRunner
 
     private readonly record struct RelHandle(long Sequence, int Generation);
 
-    private readonly record struct RelRecord(
+    private readonly record struct EdgeRecord(
         long Sequence,
         int Generation,
         int Source,
@@ -285,13 +285,13 @@ public static class CleanSlateCsrPersistenceSpikeRunner
     {
         public long CommitId { get; set; }
 
-        public List<RelRecord> ForwardBase { get; } = [];
+        public List<EdgeRecord> ForwardBase { get; } = [];
 
-        public List<RelRecord> BackwardBase { get; } = [];
+        public List<EdgeRecord> BackwardBase { get; } = [];
 
         public Dictionary<long, Locator> Locators { get; } = [];
 
-        public Dictionary<long, RelRecord> Delta { get; } = [];
+        public Dictionary<long, EdgeRecord> Delta { get; } = [];
 
         public HashSet<long> Deleted { get; } = [];
 
@@ -309,7 +309,7 @@ public static class CleanSlateCsrPersistenceSpikeRunner
             return clone;
         }
 
-        public bool TryLookup(RelHandle handle, out RelRecord record)
+        public bool TryLookup(RelHandle handle, out EdgeRecord record)
         {
             record = default;
             if (!Locators.TryGetValue(handle.Sequence, out var locator) ||
@@ -330,7 +330,7 @@ public static class CleanSlateCsrPersistenceSpikeRunner
             return record.Sequence == handle.Sequence && record.Generation == handle.Generation;
         }
 
-        public IEnumerable<RelRecord> Outgoing(int deleteSeqSource)
+        public IEnumerable<EdgeRecord> Outgoing(int deleteSeqSource)
         {
             foreach (var record in ForwardBase)
             {
@@ -355,7 +355,7 @@ public static class CleanSlateCsrPersistenceSpikeRunner
             }
         }
 
-        public void ApplyBase(List<RelRecord> records)
+        public void ApplyBase(List<EdgeRecord> records)
         {
             ForwardBase.Clear();
             ForwardBase.AddRange(records.OrderBy(r => r.Source).ThenBy(r => r.Target).ThenBy(r => r.Sequence));
@@ -363,7 +363,7 @@ public static class CleanSlateCsrPersistenceSpikeRunner
             BackwardBase.AddRange(records.OrderBy(r => r.Target).ThenBy(r => r.Source).ThenBy(r => r.Sequence));
         }
 
-        public void ApplyDelta(RelRecord record)
+        public void ApplyDelta(EdgeRecord record)
         {
             Delta[record.Sequence] = record;
             Deleted.Remove(record.Sequence);
@@ -422,18 +422,18 @@ public static class CleanSlateCsrPersistenceSpikeRunner
             var state = new CsrState();
             long seq = 0;
             long firstSecondHop = -1;
-            var records = new List<RelRecord>();
+            var records = new List<EdgeRecord>();
             for (int mid = 0; mid < degree; mid++)
             {
-                int midNode = 1 + mid;
-                records.Add(new RelRecord(seq++, 0, 0, midNode, 0, false));
+                int midVertex = 1 + mid;
+                records.Add(new EdgeRecord(seq++, 0, 0, midVertex, 0, false));
                 for (int leaf = 0; leaf < degree; leaf++)
                 {
                     if (firstSecondHop < 0)
                         firstSecondHop = seq;
-                    int leafNode = 1 + degree + mid * degree + leaf;
+                    int leafVertex = 1 + degree + mid * degree + leaf;
                     long score = (mid + leaf) % 4 == 0 ? 1 : 0;
-                    records.Add(new RelRecord(seq++, 0, midNode, leafNode, score, false));
+                    records.Add(new EdgeRecord(seq++, 0, midVertex, leafVertex, score, false));
                 }
             }
 
@@ -483,13 +483,13 @@ public static class CleanSlateCsrPersistenceSpikeRunner
             return state;
         }
 
-        public bool TryLookup(RelHandle handle, out RelRecord record)
+        public bool TryLookup(RelHandle handle, out EdgeRecord record)
             => Current.TryLookup(handle, out record);
 
         public void CommitUpdate(long sequence, long score)
         {
             if (!Current.TryLookup(new RelHandle(sequence, Current.Locators[sequence].Generation), out var before))
-                throw new InvalidOperationException("Cannot update a missing relationship.");
+                throw new InvalidOperationException("Cannot update a missing edge.");
 
             var frames = MakeUpdateFrames(Current, sequence, score, Current.CommitId + 1);
             AppendFrames(Path, frames, flush: true);
@@ -502,7 +502,7 @@ public static class CleanSlateCsrPersistenceSpikeRunner
         public void CommitDelete(long sequence)
         {
             if (!Current.Locators.TryGetValue(sequence, out var locator))
-                throw new InvalidOperationException("Cannot delete a missing relationship.");
+                throw new InvalidOperationException("Cannot delete a missing edge.");
 
             long commitId = Current.CommitId + 1;
             var frames = new List<FrameWrite>
@@ -520,12 +520,12 @@ public static class CleanSlateCsrPersistenceSpikeRunner
 
         public void CommitReuse(long sequence, int generation, int source, int target, long score)
         {
-            CommitDeltaRecord(new RelRecord(sequence, generation, source, target, score, false));
+            CommitDeltaRecord(new EdgeRecord(sequence, generation, source, target, score, false));
         }
 
         public void CommitInsert(int source, int target, long score)
         {
-            CommitDeltaRecord(new RelRecord(NextSequence++, 0, source, target, score, false));
+            CommitDeltaRecord(new EdgeRecord(NextSequence++, 0, source, target, score, false));
         }
 
         public void CommitMerge()
@@ -543,7 +543,7 @@ public static class CleanSlateCsrPersistenceSpikeRunner
             long commitId)
         {
             if (!state.TryLookup(new RelHandle(sequence, state.Locators[sequence].Generation), out var before))
-                throw new InvalidOperationException("Cannot create update frames for a missing relationship.");
+                throw new InvalidOperationException("Cannot create update frames for a missing edge.");
 
             var updated = before with { Score = score };
             return
@@ -556,7 +556,7 @@ public static class CleanSlateCsrPersistenceSpikeRunner
 
         public static List<FrameWrite> MakeMergeFrames(CsrState state, long commitId)
         {
-            var live = new Dictionary<long, RelRecord>();
+            var live = new Dictionary<long, EdgeRecord>();
             foreach (var record in state.ForwardBase)
             {
                 if (!state.Deleted.Contains(record.Sequence) &&
@@ -640,7 +640,7 @@ public static class CleanSlateCsrPersistenceSpikeRunner
             ];
         }
 
-        private void CommitDeltaRecord(RelRecord record)
+        private void CommitDeltaRecord(EdgeRecord record)
         {
             long commitId = Current.CommitId + 1;
             var frames = new List<FrameWrite>
@@ -734,11 +734,11 @@ public static class CleanSlateCsrPersistenceSpikeRunner
             return checksum == Checksum(commitId, part, payload);
         }
 
-        private static byte[] SerializeRecords(IEnumerable<RelRecord> records)
+        private static byte[] SerializeRecords(IEnumerable<EdgeRecord> records)
         {
             using var ms = new MemoryStream();
             using var writer = new BinaryWriter(ms);
-            var list = records as ICollection<RelRecord> ?? records.ToArray();
+            var list = records as ICollection<EdgeRecord> ?? records.ToArray();
             writer.Write(list.Count);
             foreach (var record in list)
             {
@@ -752,15 +752,15 @@ public static class CleanSlateCsrPersistenceSpikeRunner
             return ms.ToArray();
         }
 
-        private static List<RelRecord> ReadRecords(byte[] payload)
+        private static List<EdgeRecord> ReadRecords(byte[] payload)
         {
             using var ms = new MemoryStream(payload);
             using var reader = new BinaryReader(ms);
             int count = reader.ReadInt32();
-            var records = new List<RelRecord>(count);
+            var records = new List<EdgeRecord>(count);
             for (int i = 0; i < count; i++)
             {
-                records.Add(new RelRecord(
+                records.Add(new EdgeRecord(
                     reader.ReadInt64(),
                     reader.ReadInt32(),
                     reader.ReadInt32(),

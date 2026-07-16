@@ -1,9 +1,9 @@
 # 04. SourceGenerator で型付き CRUD
 
-`[Node]` / `[Property]` / `[Indexed]` / `[Relationship]` を付与すると、Roslyn SourceGenerator が型安全な CRUD メソッドを自動生成する。完全コードは [`samples/Quiver.Samples.SourceGen`](https://github.com/delicioustuna/Quiver/tree/main/samples/Quiver.Samples.SourceGen)。
+`[Vertex]` / `[Property]` / `[Indexed]` / `[Edge]` を付与すると、Roslyn SourceGenerator が型安全な CRUD メソッドを自動生成する。完全コードは [`samples/Quiver.Samples.SourceGen`](https://github.com/delicioustuna/Quiver/tree/main/samples/Quiver.Samples.SourceGen)。
 
 ```csharp
-[Node]
+[Vertex]
 public partial class Person
 {
     [Indexed]
@@ -23,10 +23,10 @@ public partial class Person
 > db.CreateIndex<Person>(p => p.Name, IndexKind.StringRange);  // kind を上書き
 > ```
 >
-> 文字列で書く `db.Schema.CreateIndex("idx_person_name", "Person", "Name", IndexKind.StringEquality)` も引き続き使えるが、属性の値と二重に書くことになるので新規コードでは上記の型付き API を推奨。`MergeNode` も同じ `(label, propertyKey)` のインデックスを自動で利用するので、業務キー upsert を使う場合も初期化時に index 作成が必須。
+> 文字列で書く `db.Schema.CreateIndex("idx_person_name", "Person", "Name", IndexKind.StringEquality)` も引き続き使えるが、属性の値と二重に書くことになるので新規コードでは上記の型付き API を推奨。`MergeVertex` も同じ `(label, propertyKey)` のインデックスを自動で利用するので、業務キー upsert を使う場合も初期化時に index 作成が必須。
 
 ```csharp
-using var db = GraphDatabase.Open("./mygraph");
+using var db = QuiverDatabase.Open("./mygraph");
 db.EnsureIndexes<Person>();   // [Indexed] 付きプロパティをまとめて作成
 
 using var tx = db.BeginTransaction();

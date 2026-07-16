@@ -5,22 +5,22 @@ namespace Quiver.Studio.Services;
 public sealed class SugiyamaLayoutService
 {
     private const double LayerSpacing = 120.0;
-    private const double NodeSpacing = 80.0;
+    private const double VertexSpacing = 80.0;
     private const double ComponentGap = 60.0;
 
-    public void Layout(IReadOnlyList<VisualNode> nodes, IReadOnlyList<VisualEdge> edges)
+    public void Layout(IReadOnlyList<VisualVertex> vertices, IReadOnlyList<VisualEdge> edges)
     {
-        if (nodes.Count <= 1)
+        if (vertices.Count <= 1)
         {
-            if (nodes.Count == 1) { nodes[0].X = 0; nodes[0].Y = 0; }
+            if (vertices.Count == 1) { vertices[0].X = 0; vertices[0].Y = 0; }
             return;
         }
 
-        var components = FindComponents(nodes, edges);
+        var components = FindComponents(vertices, edges);
         if (components.Count == 1)
         {
-            LayoutComponent(nodes, edges);
-            CenterGraph(nodes);
+            LayoutComponent(vertices, edges);
+            CenterGraph(vertices);
             return;
         }
 
@@ -32,20 +32,20 @@ public sealed class SugiyamaLayoutService
         }
 
         PackComponents(components);
-        CenterGraph(nodes);
+        CenterGraph(vertices);
     }
 
-    private static void LayoutComponent(IReadOnlyList<VisualNode> nodes, IReadOnlyList<VisualEdge> edges)
+    private static void LayoutComponent(IReadOnlyList<VisualVertex> vertices, IReadOnlyList<VisualEdge> edges)
     {
-        if (nodes.Count <= 1)
+        if (vertices.Count <= 1)
         {
-            if (nodes.Count == 1) { nodes[0].X = 0; nodes[0].Y = 0; }
+            if (vertices.Count == 1) { vertices[0].X = 0; vertices[0].Y = 0; }
             return;
         }
 
-        var adj = BuildAdjacency(nodes, edges);
-        var reversed = RemoveCycles(nodes, adj);
-        var layers = AssignLayers(nodes, adj);
+        var adj = BuildAdjacency(vertices, edges);
+        var reversed = RemoveCycles(vertices, adj);
+        var layers = AssignLayers(vertices, adj);
         MinimizeCrossings(layers, adj, passes: 3);
         AssignCoordinates(layers);
 
@@ -56,11 +56,11 @@ public sealed class SugiyamaLayoutService
         }
     }
 
-    private static Dictionary<VisualNode, List<VisualNode>> BuildAdjacency(
-        IReadOnlyList<VisualNode> nodes, IReadOnlyList<VisualEdge> edges)
+    private static Dictionary<VisualVertex, List<VisualVertex>> BuildAdjacency(
+        IReadOnlyList<VisualVertex> vertices, IReadOnlyList<VisualEdge> edges)
     {
-        var adj = new Dictionary<VisualNode, List<VisualNode>>();
-        foreach (var n in nodes) adj[n] = [];
+        var adj = new Dictionary<VisualVertex, List<VisualVertex>>();
+        foreach (var n in vertices) adj[n] = [];
         foreach (var e in edges)
         {
             if (adj.ContainsKey(e.Source) && adj.ContainsKey(e.Target))
@@ -69,14 +69,14 @@ public sealed class SugiyamaLayoutService
         return adj;
     }
 
-    private static List<(VisualNode Src, VisualNode Tgt)> RemoveCycles(
-        IReadOnlyList<VisualNode> nodes, Dictionary<VisualNode, List<VisualNode>> adj)
+    private static List<(VisualVertex Src, VisualVertex Tgt)> RemoveCycles(
+        IReadOnlyList<VisualVertex> vertices, Dictionary<VisualVertex, List<VisualVertex>> adj)
     {
-        var reversed = new List<(VisualNode, VisualNode)>();
-        var visited = new HashSet<VisualNode>();
-        var inStack = new HashSet<VisualNode>();
+        var reversed = new List<(VisualVertex, VisualVertex)>();
+        var visited = new HashSet<VisualVertex>();
+        var inStack = new HashSet<VisualVertex>();
 
-        foreach (var n in nodes)
+        foreach (var n in vertices)
         {
             if (!visited.Contains(n))
                 DfsCycleRemoval(n, adj, visited, inStack, reversed);
@@ -92,16 +92,16 @@ public sealed class SugiyamaLayoutService
     }
 
     private static void DfsCycleRemoval(
-        VisualNode node,
-        Dictionary<VisualNode, List<VisualNode>> adj,
-        HashSet<VisualNode> visited,
-        HashSet<VisualNode> inStack,
-        List<(VisualNode, VisualNode)> reversed)
+        VisualVertex vertex,
+        Dictionary<VisualVertex, List<VisualVertex>> adj,
+        HashSet<VisualVertex> visited,
+        HashSet<VisualVertex> inStack,
+        List<(VisualVertex, VisualVertex)> reversed)
     {
-        visited.Add(node);
-        inStack.Add(node);
+        visited.Add(vertex);
+        inStack.Add(vertex);
 
-        foreach (var neighbor in adj[node].ToArray())
+        foreach (var neighbor in adj[vertex].ToArray())
         {
             if (!visited.Contains(neighbor))
             {
@@ -109,26 +109,26 @@ public sealed class SugiyamaLayoutService
             }
             else if (inStack.Contains(neighbor))
             {
-                reversed.Add((node, neighbor));
+                reversed.Add((vertex, neighbor));
             }
         }
 
-        inStack.Remove(node);
+        inStack.Remove(vertex);
     }
 
-    private static List<List<VisualNode>> AssignLayers(
-        IReadOnlyList<VisualNode> nodes, Dictionary<VisualNode, List<VisualNode>> adj)
+    private static List<List<VisualVertex>> AssignLayers(
+        IReadOnlyList<VisualVertex> vertices, Dictionary<VisualVertex, List<VisualVertex>> adj)
     {
-        var inDegree = new Dictionary<VisualNode, int>();
-        foreach (var n in nodes) inDegree[n] = 0;
+        var inDegree = new Dictionary<VisualVertex, int>();
+        foreach (var n in vertices) inDegree[n] = 0;
         foreach (var (_, neighbors) in adj)
             foreach (var neighbor in neighbors)
                 if (inDegree.ContainsKey(neighbor))
                     inDegree[neighbor]++;
 
-        var depth = new Dictionary<VisualNode, int>();
-        var queue = new Queue<VisualNode>();
-        foreach (var n in nodes)
+        var depth = new Dictionary<VisualVertex, int>();
+        var queue = new Queue<VisualVertex>();
+        foreach (var n in vertices)
         {
             if (inDegree[n] == 0)
             {
@@ -139,8 +139,8 @@ public sealed class SugiyamaLayoutService
 
         if (queue.Count == 0)
         {
-            depth[nodes[0]] = 0;
-            queue.Enqueue(nodes[0]);
+            depth[vertices[0]] = 0;
+            queue.Enqueue(vertices[0]);
         }
 
         while (queue.Count > 0)
@@ -157,25 +157,25 @@ public sealed class SugiyamaLayoutService
             }
         }
 
-        foreach (var n in nodes)
+        foreach (var n in vertices)
             depth.TryAdd(n, 0);
 
         var maxLayer = depth.Values.DefaultIfEmpty(0).Max();
-        var layers = new List<List<VisualNode>>(maxLayer + 1);
+        var layers = new List<List<VisualVertex>>(maxLayer + 1);
         for (var i = 0; i <= maxLayer; i++) layers.Add([]);
-        foreach (var n in nodes)
+        foreach (var n in vertices)
             layers[depth[n]].Add(n);
 
         return layers;
     }
 
     private static void MinimizeCrossings(
-        List<List<VisualNode>> layers,
-        Dictionary<VisualNode, List<VisualNode>> adj,
+        List<List<VisualVertex>> layers,
+        Dictionary<VisualVertex, List<VisualVertex>> adj,
         int passes)
     {
-        var reverseAdj = new Dictionary<VisualNode, List<VisualNode>>();
-        foreach (var (node, _) in adj) reverseAdj[node] = [];
+        var reverseAdj = new Dictionary<VisualVertex, List<VisualVertex>>();
+        foreach (var (vertex, _) in adj) reverseAdj[vertex] = [];
         foreach (var (src, neighbors) in adj)
             foreach (var tgt in neighbors)
                 if (reverseAdj.ContainsKey(tgt))
@@ -192,24 +192,24 @@ public sealed class SugiyamaLayoutService
     }
 
     private static void SortByBarycenter(
-        List<VisualNode> layer,
-        List<VisualNode> referenceLayer,
-        Dictionary<VisualNode, List<VisualNode>> connections)
+        List<VisualVertex> layer,
+        List<VisualVertex> referenceLayer,
+        Dictionary<VisualVertex, List<VisualVertex>> connections)
     {
-        var posMap = new Dictionary<VisualNode, int>();
+        var posMap = new Dictionary<VisualVertex, int>();
         for (var i = 0; i < referenceLayer.Count; i++)
             posMap[referenceLayer[i]] = i;
 
-        var barycenters = new Dictionary<VisualNode, double>();
-        foreach (var node in layer)
+        var barycenters = new Dictionary<VisualVertex, double>();
+        foreach (var vertex in layer)
         {
-            if (!connections.TryGetValue(node, out var neighbors)) continue;
+            if (!connections.TryGetValue(vertex, out var neighbors)) continue;
             var positions = new List<int>();
             foreach (var n in neighbors)
                 if (posMap.TryGetValue(n, out var pos))
                     positions.Add(pos);
 
-            barycenters[node] = positions.Count > 0
+            barycenters[vertex] = positions.Count > 0
                 ? positions.Average()
                 : double.MaxValue;
         }
@@ -222,41 +222,41 @@ public sealed class SugiyamaLayoutService
         });
     }
 
-    private static void AssignCoordinates(List<List<VisualNode>> layers)
+    private static void AssignCoordinates(List<List<VisualVertex>> layers)
     {
         for (var layerIdx = 0; layerIdx < layers.Count; layerIdx++)
         {
             var layer = layers[layerIdx];
-            var totalWidth = (layer.Count - 1) * NodeSpacing;
+            var totalWidth = (layer.Count - 1) * VertexSpacing;
             var startX = -totalWidth / 2;
 
             for (var i = 0; i < layer.Count; i++)
             {
-                layer[i].X = startX + i * NodeSpacing;
+                layer[i].X = startX + i * VertexSpacing;
                 layer[i].Y = layerIdx * LayerSpacing;
             }
         }
     }
 
-    private static List<List<VisualNode>> FindComponents(
-        IReadOnlyList<VisualNode> nodes, IReadOnlyList<VisualEdge> edges)
+    private static List<List<VisualVertex>> FindComponents(
+        IReadOnlyList<VisualVertex> vertices, IReadOnlyList<VisualEdge> edges)
     {
-        var adj = new Dictionary<VisualNode, List<VisualNode>>();
-        foreach (var n in nodes) adj[n] = [];
+        var adj = new Dictionary<VisualVertex, List<VisualVertex>>();
+        foreach (var n in vertices) adj[n] = [];
         foreach (var e in edges)
         {
             if (adj.ContainsKey(e.Source)) adj[e.Source].Add(e.Target);
             if (adj.ContainsKey(e.Target)) adj[e.Target].Add(e.Source);
         }
 
-        var visited = new HashSet<VisualNode>();
-        var components = new List<List<VisualNode>>();
+        var visited = new HashSet<VisualVertex>();
+        var components = new List<List<VisualVertex>>();
 
-        foreach (var n in nodes)
+        foreach (var n in vertices)
         {
             if (!visited.Add(n)) continue;
-            var comp = new List<VisualNode>();
-            var queue = new Queue<VisualNode>();
+            var comp = new List<VisualVertex>();
+            var queue = new Queue<VisualVertex>();
             queue.Enqueue(n);
             while (queue.Count > 0)
             {
@@ -273,7 +273,7 @@ public sealed class SugiyamaLayoutService
         return components;
     }
 
-    private static void PackComponents(List<List<VisualNode>> components)
+    private static void PackComponents(List<List<VisualVertex>> components)
     {
         var cursorX = 0.0;
         foreach (var comp in components)
@@ -286,13 +286,13 @@ public sealed class SugiyamaLayoutService
         }
     }
 
-    private static void CenterGraph(IReadOnlyList<VisualNode> nodes)
+    private static void CenterGraph(IReadOnlyList<VisualVertex> vertices)
     {
         var cx = 0.0;
         var cy = 0.0;
-        foreach (var n in nodes) { cx += n.X; cy += n.Y; }
-        cx /= nodes.Count;
-        cy /= nodes.Count;
-        foreach (var n in nodes) { n.X -= cx; n.Y -= cy; }
+        foreach (var n in vertices) { cx += n.X; cy += n.Y; }
+        cx /= vertices.Count;
+        cy /= vertices.Count;
+        foreach (var n in vertices) { n.X -= cx; n.Y -= cy; }
     }
 }

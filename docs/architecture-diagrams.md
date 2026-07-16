@@ -18,11 +18,11 @@ flowchart TB
     end
 
     subgraph core["Quiver（エンジン中核）"]
-        API["GraphDatabase / GraphTransaction<br/>Fluent Traversal / Match DSL"]
+        API["QuiverDatabase / GraphTransaction<br/>Fluent Traversal / Match DSL"]
         Query["Query Engine"]
         TxMgr["Transaction Manager<br/>MVCC / Checkpoint"]
         Index["B+Tree / FullTextIndex"]
-        Records["NodeStore / RelationshipStore<br/>PropertyStore"]
+        Records["VertexStore / EdgeStore<br/>PropertyStore"]
         Vector["PersistentVectorStore + HNSW"]
         WAL["Write-Ahead Log"]
         Storage["PagedFile / バッファプール"]
@@ -89,8 +89,8 @@ sequenceDiagram
     Rag->>Chk: ブロック列をチャンク分割
     Rag->>Emb: EmbedAsync(チャンクテキスト[])
     Emb-->>Rag: float[][]
-    Rag->>DB: Document ノード作成
-    Rag->>DB: Chunk ノード N 件作成
+    Rag->>DB: Document Vertex作成
+    Rag->>DB: Chunk Vertex N 件作成
     Rag->>DB: HAS_CHUNK / NEXT_CHUNK 作成
     Rag->>DB: 全文インデックス登録 + ベクトル登録
     Rag->>DB: Commit

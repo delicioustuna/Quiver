@@ -2,7 +2,7 @@ namespace Quiver;
 
 /// <summary>
 /// データベースの統計と整合性チェックを提供する診断 API。
-/// <see cref="GraphDatabase.Diagnostics"/> から取得する。
+/// <see cref="QuiverDatabase.Diagnostics"/> から取得する。
 /// </summary>
 public interface IDiagnosticsApi
 {
@@ -19,8 +19,8 @@ public interface IDiagnosticsApi
 
     /// <summary>
     /// 全 B+Tree インデックスを走査し、対応するエンティティが既に解放されている
-    /// (orphan な) エントリを検出する。索引も ARIES に乗っているが、
-    /// 「base store の delete だけ commit され index entry の削除が未到達」「DeleteNode が
+    /// (orphan な) エントリを検出する。索引も page-WAL に含まれるが、
+    /// 「base store の delete だけ commit され index entry の削除が未到達」「DeleteVertex が
     /// 索引エントリを自動削除しない設計上の前提」などで orphan は依然として生じうるため、
     /// 運用者が任意のタイミングで状態を観測できる経路を提供する。
     /// 既定実装は健全 (orphan 0) を返す。
@@ -59,7 +59,7 @@ public interface IDiagnosticsApi
 }
 
 /// <summary>
-/// orphan 索引エントリ。<paramref name="EntityId"/> は <see cref="Quiver.Core.NodeId.Value"/>
+/// orphan 索引エントリ。<paramref name="EntityId"/> は <see cref="Quiver.Core.VertexId.Value"/>
 /// 互換の long。<paramref name="RawKey"/> は索引の生バイト列で、再削除に必要なため複製を保持する。
 /// </summary>
 public sealed record OrphanIndexEntry(string IndexName, byte[] RawKey, long EntityId);
@@ -71,8 +71,8 @@ public sealed record OrphanIndexEntry(string IndexName, byte[] RawKey, long Enti
 /// <param name="EntryCount">走査した索引エントリの総数。</param>
 /// <param name="OrphanCount">そのうち orphan として検出された件数。</param>
 /// <param name="Orphans">orphan エントリの一覧 (再現性のためそのまま <see cref="IDiagnosticsApi.RepairIndexes"/> に渡せる)。</param>
-/// <param name="LabelIndexOrphanCount">in-memory <c>LabelNodeIndex</c> 内で観測された
-    /// 解放済みノード ID の件数。<c>RepairIndexes(Apply)</c> 時に index を <c>Invalidate()</c> して
+/// <param name="LabelIndexOrphanCount">in-memory <c>LabelVertexIndex</c> 内で観測された
+    /// 解放済みVertex ID の件数。<c>RepairIndexes(Apply)</c> 時に index を <c>Invalidate()</c> して
 ///  次回 lookup で再構築させる。</param>
 public sealed record IndexConsistencyReport(
     int IndexCount,
@@ -95,7 +95,7 @@ public enum IndexRepairMode
 /// </summary>
 /// <param name="RemovedCount">実削除に成功した B+Tree エントリの件数。<see cref="IndexRepairMode.DryRun"/> 時は 0。</param>
 /// <param name="Orphans">検出された orphan エントリの一覧 (Apply 時は削除前のスナップショット)。</param>
-/// <param name="LabelIndexInvalidated"><c>LabelNodeIndex</c> を invalidate したか。</param>
+/// <param name="LabelIndexInvalidated"><c>LabelVertexIndex</c> を invalidate したか。</param>
 public sealed record IndexRepairReport(
     int RemovedCount,
     IReadOnlyList<OrphanIndexEntry> Orphans,
@@ -105,9 +105,9 @@ public sealed record IndexRepairReport(
 /// <see cref="IDiagnosticsApi.GetStatistics"/> の返却用統計レコード。
 /// バッファプールヒット率や WAL サイズなど、運用観測の起点として使う。
 /// </summary>
-/// <param name="NodeCount">ノード件数。</param>
-/// <param name="RelationshipCount">リレーションシップ件数。</param>
-/// <param name="HyperedgeCount">現在可視なハイパーエッジ件数。</param>
+/// <param name="VertexCount">Vertex件数。</param>
+/// <param name="EdgeCount">Edge件数。</param>
+/// <param name="NexusCount">現在可視なNexus件数。</param>
 /// <param name="IncidenceCount">物理的に生存している incidence 件数。論理削除後、vacuum 前のものを含む。</param>
 /// <param name="PropertyCount">プロパティ件数。</param>
 /// <param name="DataFileSize">データファイルの合計サイズ (バイト)。</param>
@@ -116,9 +116,9 @@ public sealed record IndexRepairReport(
 /// <param name="BufferPoolMisses">バッファプールミス数。</param>
 /// <param name="AdjacencyFallbackCount">隣接ブロックフォールバック発生回数。</param>
 public sealed record DatabaseStatistics(
-    long NodeCount,
-    long RelationshipCount,
-    long HyperedgeCount,
+    long VertexCount,
+    long EdgeCount,
+    long NexusCount,
     long IncidenceCount,
     long PropertyCount,
     long DataFileSize,

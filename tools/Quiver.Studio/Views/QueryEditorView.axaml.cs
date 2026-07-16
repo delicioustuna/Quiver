@@ -35,7 +35,7 @@ public partial class QueryEditorView : UserControl
 
         QueryTextEditor.Text = "// Globals: db, tx (read-only), g, schema\n"
                              + "// Press F5 to execute\n\n"
-                             + "g.Nodes().ToList()";
+                             + "g.Vertices().ToList()";
 
         ApplyTextMateTheme(isDark: false);
         ActualThemeVariantChanged += (_, _) =>

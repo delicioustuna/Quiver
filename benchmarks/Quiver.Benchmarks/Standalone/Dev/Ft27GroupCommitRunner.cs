@@ -7,10 +7,10 @@ using Quiver.Storage.Wal;
 namespace Quiver.Benchmarks.Standalone.Dev;
 
 /// <summary>
-/// FT-27: WAL group commit batching の throughput 改善を BDN 無しで短時間計測するランナー。
+/// WAL group commit batching の throughput 改善を BDN 無しで短時間計測するランナー。
 ///
 /// 64 concurrent producer が 1 commit ずつ Append + FlushTo を回し、
-/// <see cref="GraphDatabaseOptions.GroupCommitWindow"/> = 0 (旧挙動) と
+/// <see cref="QuiverDatabaseOptions.GroupCommitWindow"/> = 0 (旧挙動) と
 /// 100µs / 1ms (新挙動) でスループットを比較する。
 ///
 /// 仕様: 64 concurrent commit で <c>GroupCommitWindow=100µs</c> が default 比 3× 以上。
@@ -21,7 +21,7 @@ public static class Ft27GroupCommitRunner
 {
     public static int Run()
     {
-        Console.WriteLine("=== FT-27: WAL Group Commit ===");
+        Console.WriteLine("=== WAL Group Commit ===");
 
         int[] threadCounts = { 1, 8, 32, 64 };
         TimeSpan[] windows =
@@ -56,7 +56,7 @@ public static class Ft27GroupCommitRunner
         Directory.CreateDirectory(dir);
         try
         {
-            using var wal = new WriteAheadLog(Path.Combine(dir, "wal"), 256L * 1024 * 1024, window);
+            using var wal = new WriteAheadLog(Path.Combine(dir, "wal"), window);
 
             long commits = 0;
             using var stop = new ManualResetEventSlim(false);

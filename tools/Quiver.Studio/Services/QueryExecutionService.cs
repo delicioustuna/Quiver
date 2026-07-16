@@ -110,11 +110,11 @@ public sealed class QueryExecutionService
         if (result is string s)
             return QueryResult.Scalar(s, elapsed);
 
-        if (result is NodeId nid)
-            return QueryResult.Scalar(result.ToString()!, elapsed, nodeIds: [nid]);
+        if (result is VertexId nid)
+            return QueryResult.Scalar(result.ToString()!, elapsed, vertexIds: [nid]);
 
-        if (result is RelationshipId rid)
-            return QueryResult.Scalar(result.ToString()!, elapsed, relIds: [rid]);
+        if (result is EdgeId rid)
+            return QueryResult.Scalar(result.ToString()!, elapsed, edgeIds: [rid]);
 
         if (IsPrimitive(result))
             return QueryResult.Scalar(result.ToString() ?? "", elapsed);
@@ -130,7 +130,7 @@ public sealed class QueryExecutionService
 
     private static QueryResult MaterializeVectorCursor(VectorSearchCursor cursor, TimeSpan elapsed)
     {
-        var nodeIds = new List<NodeId>();
+        var vertexIds = new List<VertexId>();
         var scores = new Dictionary<long, float>();
         var rows = new List<IReadOnlyList<object?>>();
 
@@ -139,8 +139,8 @@ public sealed class QueryExecutionService
             while (cursor.MoveNext())
             {
                 var hit = cursor.Current;
-                if (hit.EntityKind == EntityKind.Node)
-                    nodeIds.Add(new NodeId(hit.EntityId));
+                if (hit.EntityKind == EntityKind.Vertex)
+                    vertexIds.Add(new VertexId(hit.EntityId));
                 scores[hit.EntityId] = hit.Score;
                 rows.Add([hit.EntityKind.ToString(), hit.EntityId, hit.Score]);
             }
@@ -151,7 +151,7 @@ public sealed class QueryExecutionService
 
         return QueryResult.Tabular(
             ["EntityKind", "EntityId", "Score"], rows, elapsed,
-            nodeIds, [], scores);
+            vertexIds, [], scores);
     }
 
     private static QueryResult MaterializeEnumerable(IEnumerable enumerable, TimeSpan elapsed)
@@ -163,8 +163,8 @@ public sealed class QueryExecutionService
         if (items.Count == 0)
             return QueryResult.Empty(elapsed);
 
-        var nodeIds = new List<NodeId>();
-        var relIds = new List<RelationshipId>();
+        var vertexIds = new List<VertexId>();
+        var edgeIds = new List<EdgeId>();
 
         var firstNonNull = items.FirstOrDefault(x => x is not null);
         if (firstNonNull is null)
@@ -178,8 +178,8 @@ public sealed class QueryExecutionService
             {
                 if (item is VectorSearchResult vsr)
                 {
-                    if (vsr.EntityKind == EntityKind.Node)
-                        nodeIds.Add(new NodeId(vsr.EntityId));
+                    if (vsr.EntityKind == EntityKind.Vertex)
+                        vertexIds.Add(new VertexId(vsr.EntityId));
                     scores[vsr.EntityId] = vsr.Score;
                 }
             }
@@ -192,21 +192,21 @@ public sealed class QueryExecutionService
                 return (IReadOnlyList<object?>)[null, null, null];
             }).ToList();
 
-            return QueryResult.Tabular(vsrColumns, vsrRows, elapsed, nodeIds, relIds, scores);
+            return QueryResult.Tabular(vsrColumns, vsrRows, elapsed, vertexIds, edgeIds, scores);
         }
 
         var type = firstNonNull.GetType();
 
-        if (IsPrimitive(firstNonNull) || firstNonNull is string || firstNonNull is NodeId || firstNonNull is RelationshipId)
+        if (IsPrimitive(firstNonNull) || firstNonNull is string || firstNonNull is VertexId || firstNonNull is EdgeId)
         {
             foreach (var item in items)
             {
-                if (item is NodeId nid) nodeIds.Add(nid);
-                else if (item is RelationshipId rid) relIds.Add(rid);
+                if (item is VertexId nid) vertexIds.Add(nid);
+                else if (item is EdgeId rid) edgeIds.Add(rid);
             }
             return QueryResult.Tabular(["Value"],
                 items.Select(x => (IReadOnlyList<object?>)[x?.ToString()]).ToList(), elapsed,
-                nodeIds, relIds);
+                vertexIds, edgeIds);
         }
 
         var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
@@ -226,15 +226,15 @@ public sealed class QueryExecutionService
                 try
                 {
                     var val = p.GetValue(item);
-                    if (val is NodeId nid) nodeIds.Add(nid);
-                    else if (val is RelationshipId rid) relIds.Add(rid);
+                    if (val is VertexId nid) vertexIds.Add(nid);
+                    else if (val is EdgeId rid) edgeIds.Add(rid);
                     return val;
                 }
                 catch { return null; }
             }).ToArray();
         }).ToList();
 
-        return QueryResult.Tabular(columns, rows, elapsed, nodeIds, relIds);
+        return QueryResult.Tabular(columns, rows, elapsed, vertexIds, edgeIds);
     }
 
     private static QueryResult MaterializeObject(object result, TimeSpan elapsed)

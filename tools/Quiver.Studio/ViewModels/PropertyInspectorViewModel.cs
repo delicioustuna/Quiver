@@ -10,7 +10,7 @@ using Quiver.Studio.Services;
 
 namespace Quiver.Studio.ViewModels;
 
-public enum InspectorMode { None, Node, Edge, CreateNode, CreateRelationship }
+public enum InspectorMode { None, Vertex, Edge, CreateVertex, CreateEdge }
 
 public sealed partial class PropertyInspectorViewModel : ObservableObject
 {
@@ -18,8 +18,8 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
     private readonly GraphEditingService _editing;
     private readonly ILogger _logger;
 
-    private NodeId _currentNodeId;
-    private RelationshipId _currentRelId;
+    private VertexId _currentVertexId;
+    private EdgeId _currentEdgeId;
 
     [ObservableProperty]
     private string _header = string.Empty;
@@ -43,13 +43,13 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
     private string _createLabel = string.Empty;
 
     [ObservableProperty]
-    private string _createRelType = string.Empty;
+    private string _createEdgeType = string.Empty;
 
     [ObservableProperty]
     private IReadOnlyList<string> _labelSuggestions = [];
 
     [ObservableProperty]
-    private IReadOnlyList<string> _relTypeSuggestions = [];
+    private IReadOnlyList<string> _edgeTypeSuggestions = [];
 
     [ObservableProperty]
     private ObservableCollection<EditablePropertyEntry> _createProperties = [];
@@ -60,17 +60,17 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
     [ObservableProperty]
     private string _createNewValue = string.Empty;
 
-    public bool IsEditing => Mode is InspectorMode.Node or InspectorMode.Edge;
-    public bool IsCreating => Mode is InspectorMode.CreateNode or InspectorMode.CreateRelationship;
-    public bool IsCreateNode => Mode == InspectorMode.CreateNode;
-    public bool IsCreateRel => Mode == InspectorMode.CreateRelationship;
+    public bool IsEditing => Mode is InspectorMode.Vertex or InspectorMode.Edge;
+    public bool IsCreating => Mode is InspectorMode.CreateVertex or InspectorMode.CreateEdge;
+    public bool IsCreateVertex => Mode == InspectorMode.CreateVertex;
+    public bool IsCreateEdge => Mode == InspectorMode.CreateEdge;
 
-    public event Action<NodeId, string, double, double>? NodeCreated;
-    public event Action<RelationshipId, VisualNode, VisualNode, string>? RelationshipCreated;
+    public event Action<VertexId, string, double, double>? VertexCreated;
+    public event Action<EdgeId, VisualVertex, VisualVertex, string>? EdgeCreated;
     public event Action? CreationCancelled;
 
     private double _createWorldX, _createWorldY;
-    private VisualNode? _linkSource, _linkTarget;
+    private VisualVertex? _linkSource, _linkTarget;
 
     public PropertyInspectorViewModel(DatabaseService databaseService, GraphEditingService editingService, ILogger logger)
     {
@@ -79,22 +79,22 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
         _logger = logger;
     }
 
-    public void InspectNode(VisualNode node)
+    public void InspectVertex(VisualVertex vertex)
     {
         if (_db.CurrentDatabase is null) { Clear(); return; }
 
         var schema = _db.CurrentDatabase.Schema;
         using var tx = _db.CurrentDatabase.BeginReadOnlyTransaction();
-        if (!tx.NodeExists(node.Id)) { Clear(); return; }
+        if (!tx.VertexExists(vertex.Id)) { Clear(); return; }
 
-        _currentNodeId = node.Id;
-        Header = $"Node #{node.Id.Sequence} ({node.Label})";
-        Mode = InspectorMode.Node;
+        _currentVertexId = vertex.Id;
+        Header = $"Vertex #{vertex.Id.Sequence} ({vertex.Label})";
+        Mode = InspectorMode.Vertex;
 
         var keyMap = BuildPropertyKeyMap(schema);
         var entries = new ObservableCollection<EditablePropertyEntry>();
 
-        var propEnum = tx.EnumerateProperties(node.Id);
+        var propEnum = tx.EnumerateProperties(vertex.Id);
         while (propEnum.MoveNext())
         {
             var keyName = keyMap.TryGetValue(propEnum.Current.KeyId, out var name) ? name : $"key#{propEnum.Current.KeyId.Value}";
@@ -107,8 +107,8 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
         NewPropertyValue = string.Empty;
         OnPropertyChanged(nameof(IsEditing));
         OnPropertyChanged(nameof(IsCreating));
-        OnPropertyChanged(nameof(IsCreateNode));
-        OnPropertyChanged(nameof(IsCreateRel));
+        OnPropertyChanged(nameof(IsCreateVertex));
+        OnPropertyChanged(nameof(IsCreateEdge));
     }
 
     public void InspectEdge(VisualEdge edge)
@@ -118,8 +118,8 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
         var schema = _db.CurrentDatabase.Schema;
         using var tx = _db.CurrentDatabase.BeginReadOnlyTransaction();
 
-        _currentRelId = edge.Id;
-        Header = $"Relationship #{edge.Id.Sequence} (:{edge.RelationshipType})";
+        _currentEdgeId = edge.Id;
+        Header = $"Edge #{edge.Id.Sequence} (:{edge.EdgeType})";
         Mode = InspectorMode.Edge;
 
         var entries = new ObservableCollection<EditablePropertyEntry>();
@@ -156,11 +156,11 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
         NewPropertyValue = string.Empty;
         OnPropertyChanged(nameof(IsEditing));
         OnPropertyChanged(nameof(IsCreating));
-        OnPropertyChanged(nameof(IsCreateNode));
-        OnPropertyChanged(nameof(IsCreateRel));
+        OnPropertyChanged(nameof(IsCreateVertex));
+        OnPropertyChanged(nameof(IsCreateEdge));
     }
 
-    public void BeginCreateNode(double worldX, double worldY)
+    public void BeginCreateVertex(double worldX, double worldY)
     {
         _createWorldX = worldX;
         _createWorldY = worldY;
@@ -168,8 +168,8 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
         var labels = _db.CurrentDatabase?.Schema.ListLabels() ?? [];
         LabelSuggestions = labels;
 
-        Header = "ノードの作成";
-        Mode = InspectorMode.CreateNode;
+        Header = "Vertexの作成";
+        Mode = InspectorMode.CreateVertex;
         HasSelection = true;
         CreateLabel = string.Empty;
         CreateProperties = [];
@@ -178,30 +178,30 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
         Properties = [];
         OnPropertyChanged(nameof(IsEditing));
         OnPropertyChanged(nameof(IsCreating));
-        OnPropertyChanged(nameof(IsCreateNode));
-        OnPropertyChanged(nameof(IsCreateRel));
+        OnPropertyChanged(nameof(IsCreateVertex));
+        OnPropertyChanged(nameof(IsCreateEdge));
     }
 
-    public void BeginCreateRelationship(VisualNode source, VisualNode target)
+    public void BeginCreateEdge(VisualVertex source, VisualVertex target)
     {
         _linkSource = source;
         _linkTarget = target;
 
-        var types = _db.CurrentDatabase?.Schema.ListRelationshipTypes() ?? [];
-        RelTypeSuggestions = types;
+        var types = _db.CurrentDatabase?.Schema.ListEdgeTypes() ?? [];
+        EdgeTypeSuggestions = types;
 
-        Header = $"リレーションシップの作成 ({source.Label} → {target.Label})";
-        Mode = InspectorMode.CreateRelationship;
+        Header = $"Edgeの作成 ({source.Label} → {target.Label})";
+        Mode = InspectorMode.CreateEdge;
         HasSelection = true;
-        CreateRelType = string.Empty;
+        CreateEdgeType = string.Empty;
         CreateProperties = [];
         CreateNewKey = string.Empty;
         CreateNewValue = string.Empty;
         Properties = [];
         OnPropertyChanged(nameof(IsEditing));
         OnPropertyChanged(nameof(IsCreating));
-        OnPropertyChanged(nameof(IsCreateNode));
-        OnPropertyChanged(nameof(IsCreateRel));
+        OnPropertyChanged(nameof(IsCreateVertex));
+        OnPropertyChanged(nameof(IsCreateEdge));
     }
 
     [RelayCommand]
@@ -213,14 +213,14 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
 
         try
         {
-            if (Mode == InspectorMode.Node)
+            if (Mode == InspectorMode.Vertex)
             {
-                _editing.SetProperty(_currentNodeId, key, value);
+                _editing.SetProperty(_currentVertexId, key, value);
                 Properties.Add(new EditablePropertyEntry(key, value));
             }
             else if (Mode == InspectorMode.Edge)
             {
-                _editing.SetRelationshipProperty(_currentRelId, key, value);
+                _editing.SetEdgeProperty(_currentEdgeId, key, value);
                 Properties.Add(new EditablePropertyEntry(key, value));
             }
             NewPropertyKey = string.Empty;
@@ -235,10 +235,10 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
     [RelayCommand]
     private void RemoveProperty(EditablePropertyEntry entry)
     {
-        if (Mode != InspectorMode.Node) return;
+        if (Mode != InspectorMode.Vertex) return;
         try
         {
-            _editing.RemoveProperty(_currentNodeId, entry.Key);
+            _editing.RemoveProperty(_currentVertexId, entry.Key);
             Properties.Remove(entry);
         }
         catch (Exception ex)
@@ -269,7 +269,7 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
     {
         try
         {
-            if (Mode == InspectorMode.CreateNode)
+            if (Mode == InspectorMode.CreateVertex)
             {
                 var label = CreateLabel.Trim();
                 if (string.IsNullOrEmpty(label)) return;
@@ -277,20 +277,20 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
                 var props = CreateProperties.Count > 0
                     ? CreateProperties.Select(p => (p.Key, p.Value)).ToList()
                     : null;
-                var nid = _editing.CreateNode(label, props);
-                NodeCreated?.Invoke(nid, label, _createWorldX, _createWorldY);
+                var nid = _editing.CreateVertex(label, props);
+                VertexCreated?.Invoke(nid, label, _createWorldX, _createWorldY);
             }
-            else if (Mode == InspectorMode.CreateRelationship && _linkSource is not null && _linkTarget is not null)
+            else if (Mode == InspectorMode.CreateEdge && _linkSource is not null && _linkTarget is not null)
             {
-                var type = CreateRelType.Trim();
+                var type = CreateEdgeType.Trim();
                 if (string.IsNullOrEmpty(type)) return;
 
-                var rid = _editing.CreateRelationship(_linkSource.Id, _linkTarget.Id, type);
+                var rid = _editing.CreateEdge(_linkSource.Id, _linkTarget.Id, type);
 
                 foreach (var prop in CreateProperties)
-                    _editing.SetRelationshipProperty(rid, prop.Key, prop.Value);
+                    _editing.SetEdgeProperty(rid, prop.Key, prop.Value);
 
-                RelationshipCreated?.Invoke(rid, _linkSource, _linkTarget, type);
+                EdgeCreated?.Invoke(rid, _linkSource, _linkTarget, type);
             }
         }
         catch (Exception ex)
@@ -318,8 +318,8 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
         _linkTarget = null;
         OnPropertyChanged(nameof(IsEditing));
         OnPropertyChanged(nameof(IsCreating));
-        OnPropertyChanged(nameof(IsCreateNode));
-        OnPropertyChanged(nameof(IsCreateRel));
+        OnPropertyChanged(nameof(IsCreateVertex));
+        OnPropertyChanged(nameof(IsCreateEdge));
     }
 
     private static Dictionary<PropertyKeyId, string> BuildPropertyKeyMap(ISchemaApi schema)

@@ -42,10 +42,10 @@ if (args.Length >= 1 && args[0] == "--fts6")
     return Fts6SearchRunner.Run(chunkCount, queryCount);
 }
 
-// MergeRelationship degree cost standalone runner
+// MergeEdge degree cost standalone runner
 if (args.Length >= 1 && args[0] == "--qp3-merge-cost")
 {
-    return MergeRelationshipCostRunner.Run();
+    return MergeEdgeCostRunner.Run();
 }
 
 // 基本性能 (README 性能目標) standalone runner
@@ -75,42 +75,42 @@ if (args.Length >= 1 && args[0] == "--scorer-accumulator")
     return ScorerAccumulatorRunner.Run();
 }
 
-// clean-slate redesign baseline on the current ARIES-style kernel.
-// Usage: -- --clean-slate-aries-baseline [degree] [traversalIters] [fullTextChunks] [fullTextQueries] [vectorCount] [vectorQueries]
-if (args.Length >= 1 && args[0] == "--clean-slate-aries-baseline")
+// clean-slate redesign baseline on the QUIVER-SW page-WAL kernel.
+// Usage: -- --clean-slate-page-wal-baseline [degree] [traversalIters] [fullTextChunks] [fullTextQueries] [vectorCount] [vectorQueries]
+if (args.Length >= 1 && args[0] == "--clean-slate-page-wal-baseline")
 {
-    return CleanSlateAriesBaselineRunner.Run(args.Skip(1).ToArray());
+    return CleanSlatePageWalBaselineRunner.Run(args.Skip(1).ToArray());
 }
 
-// clean-slate CSR relationship spike using adjacency payload lanes as a base segment approximation.
-// Usage: -- --clean-slate-csr-relationship-spike [degree] [iterations]
-if (args.Length >= 1 && args[0] == "--clean-slate-csr-relationship-spike")
+// clean-slate CSR edge spike using adjacency payload lanes as a base segment approximation.
+// Usage: -- --clean-slate-csr-edge-spike [degree] [iterations]
+if (args.Length >= 1 && args[0] == "--clean-slate-csr-edge-spike")
 {
-    return CleanSlateCsrRelationshipSpikeRunner.Run(args.Skip(1).ToArray());
+    return CleanSlateCsrEdgeSpikeRunner.Run(args.Skip(1).ToArray());
 }
 
-// clean-slate CSR relationship persistence spike for locator, delta, deletion, merge, and recovery contracts.
+// clean-slate CSR edge persistence spike for locator, delta, deletion, merge, and recovery contracts.
 // Usage: -- --clean-slate-csr-persistence-spike [degree] [pointUpdates] [mergeDeltaCount]
 if (args.Length >= 1 && args[0] == "--clean-slate-csr-persistence-spike")
 {
     return CleanSlateCsrPersistenceSpikeRunner.Run(args.Skip(1).ToArray());
 }
 
-// clean-slate CSR relationship product-path integration validation.
+// clean-slate CSR edge product-path integration validation.
 // Usage: -- --clean-slate-csr-product-integration [degree] [iterations] [mutationCount]
 if (args.Length >= 1 && args[0] == "--clean-slate-csr-product-integration")
 {
     return CleanSlateCsrProductIntegrationRunner.Run(args.Skip(1).ToArray());
 }
 
-// clean-slate CSR relationship integrated merge gate.
+// clean-slate CSR edge integrated merge gate.
 // Usage: -- --clean-slate-csr-product-merge-gate [deltaCount] [batchSize] [targetPool]
 if (args.Length >= 1 && args[0] == "--clean-slate-csr-product-merge-gate")
 {
     return CleanSlateCsrProductIntegrationRunner.RunMergeGate(args.Skip(1).ToArray());
 }
 
-// clean-slate CSR relationship compact process-kill recovery matrix.
+// clean-slate CSR edge compact process-kill recovery matrix.
 // Usage: -- --clean-slate-csr-compact-recovery-matrix
 if (args.Length >= 1 && args[0] == "--clean-slate-csr-compact-recovery-matrix")
 {
@@ -136,27 +136,27 @@ if (args.Length >= 1 && args[0] == "--incidence-traversal")
     return 0;
 }
 
-if (args.Length >= 1 && args[0] == "--hyperedge-wal")
+if (args.Length >= 1 && args[0] == "--nexus-wal")
 {
-    return HyperedgeWalAmplificationBenchmarks.Run();
+    return NexusWalAmplificationBenchmarks.Run();
 }
 
 // co-membership 走査 (製品 API) vs binary 1-hop の p50 gate
-if (args.Length >= 1 && args[0] == "--hyperedge-traversal")
+if (args.Length >= 1 && args[0] == "--nexus-traversal")
 {
-    return HyperedgeTraversalBenchmarks.Run();
+    return NexusTraversalBenchmarks.Run();
 }
 
-// arity 別 create/setProperty/delete 遅延 + create WAL 増幅 + 高次数 DeleteNode カスケード
-if (args.Length >= 1 && args[0] == "--hyperedge-write")
+// arity 別 create/setProperty/delete 遅延 + create WAL 増幅 + 高次数 DeleteVertex カスケード
+if (args.Length >= 1 && args[0] == "--nexus-write")
 {
-    return HyperedgeWriteBenchmarks.Run();
+    return NexusWriteBenchmarks.Run();
 }
 
-// 星型ハイパーエッジ Match vs reified graph pattern の p50 比較
-if (args.Length >= 1 && args[0] == "--hyperedge-match")
+// 星型Nexus Match vs reified graph pattern の p50 比較
+if (args.Length >= 1 && args[0] == "--nexus-match")
 {
-    return HyperedgeMatchBenchmarks.Run();
+    return NexusMatchBenchmarks.Run();
 }
 
 // JsonExporter.Full は <ResultsDir>/<Class>-report-full.json を出す。

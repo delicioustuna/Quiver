@@ -1,4 +1,4 @@
-﻿using Quiver.Index.FullText;
+using Quiver.Index.FullText;
 using Quiver.Text;
 
 namespace Quiver.Index;
@@ -39,7 +39,7 @@ internal interface IBTreeIndexFlushable
 
     /// <summary>
     /// 索引内の全 (生キー, 値) ペアを leaf 順に列挙する。
-    /// 値は <see cref="Quiver.Core.NodeId.Value"/> など long を想定。
+    /// 値は <see cref="Quiver.Core.VertexId.Value"/> など long を想定。
     /// orphan 検出は呼び出し側 (IndexManager.ValidateAll) で行う。
     /// </summary>
     IEnumerable<KeyValuePair<byte[], long>> EnumerateRawEntries();
@@ -103,7 +103,7 @@ internal interface IIndexManager
 
     /// <summary>
     /// スキーマ層から呼ばれ、(label, propertyKey) → indexName の対応を
-    /// 登録する。これにより MergeNode が業務キー検索で自動的にインデックスを利用できる。
+    /// 登録する。これにより MergeVertex が業務キー検索で自動的にインデックスを利用できる。
     /// 既定実装は no-op (バインディングを保持しないバックエンドはフルスキャン経路に落ちる)。
     /// </summary>
     void RegisterIndexBinding(string indexName, string label, string propertyKey) { }
@@ -136,7 +136,7 @@ internal interface IIndexManager
 
     /// <summary>
     /// 全 B+Tree 索引を走査し、<paramref name="isLive"/> が <c>false</c> を返した
-    /// 値 (NodeId.Value 互換) を持つエントリを orphan として収集する。
+    /// 値 (VertexId.Value 互換) を持つエントリを orphan として収集する。
     /// 戻り値の <c>EntryCount</c> は走査総数、<c>IndexCount</c> は走査対象の索引数。
     /// 既定実装は何もせず (0, 0) を返す。
     /// </summary>
@@ -200,26 +200,17 @@ internal interface IIndexManager
 
     /// <summary>
     /// 全文索引が 1 つでも存在するか。透過維持フックの fast-path
-    /// (FT 索引がゼロなら SetProperty はノード読取を省略して素通り)。既定は false。
+    /// (FT 索引がゼロなら SetProperty はVertex読取を省略して素通り)。既定は false。
     /// </summary>
     bool HasAnyFullTextIndex => false;
 
     /// <summary>
     /// 透過維持: <paramref name="oldText"/> (before-image) の postings/norms を削除し、
     /// <paramref name="newText"/> を tokenize して挿入する。いずれも null ならその側はスキップ。
-    /// 同一 Tx 内で呼ばれ、B+Tree 操作は WAL/ARIES で保護される。既定は no-op。
+    /// 同一 Tx 内で呼ばれ、B+Tree 操作は page-WAL で保護される。既定は no-op。
     /// </summary>
     void MaintainFullText(FullTextIndex index, long entityId, string? oldText, string? newText) { }
 
-    /// <summary>
-    /// recovery 論理相の redo。indexTenantId の postings/norms へ
-    /// state-setting leaf ミューテーションを再適用する (isUpsert ? UpsertRaw : DeleteRawEntry)。
-    /// abort の論理 undo (逆操作) でも同経路を使う。既定 no-op。
-    /// </summary>
-    void ApplyFtLeafRedo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value) { }
-
-    /// <summary>論理 undo — leaf ミューテーションの逆操作を適用する。既定 no-op。</summary>
-    void ApplyFtLeafUndo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value) { }
 }
 
 internal interface IBulkLoadable<TKey>

@@ -20,10 +20,10 @@ public sealed class VectorConcurrencyTests : IDisposable
     [Fact]
     public async Task Concurrent_knn_readers_and_writer_remain_consistent()
     {
-        using var db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName,
-            EntityKind.Node,
+            EntityKind.Vertex,
             db.Schema.GetOrCreatePropertyKey("embedding"),
             Dimensions,
             DistanceMetric.Cosine,
@@ -31,15 +31,15 @@ public sealed class VectorConcurrencyTests : IDisposable
 
         var random = new Random(42);
         var vector = new float[Dimensions];
-        NodeId updated = default;
+        VertexId updated = default;
         using (var tx = db.BeginTransaction())
         {
             for (int i = 0; i < 200; i++)
             {
-                var node = tx.CreateNode("Doc");
-                if (i == 0) updated = node;
+                var vertex = tx.CreateVertex("Doc");
+                if (i == 0) updated = vertex;
                 Fill(random, vector);
-                tx.SetVector(EntityKind.Node, node.Value, IndexName, vector);
+                tx.SetVector(EntityKind.Vertex, vertex.Value, IndexName, vector);
             }
             tx.Commit();
         }
@@ -75,7 +75,7 @@ public sealed class VectorConcurrencyTests : IDisposable
                 {
                     Fill(local, replacement);
                     db.Vectors.SetVector(
-                        EntityKind.Node, updated.Value, IndexName, replacement);
+                        EntityKind.Vertex, updated.Value, IndexName, replacement);
                 }
             }
             catch (Exception ex) { errors.Enqueue(ex); }

@@ -3,7 +3,7 @@
 > 効力宣言: 本書と設計正本が食い違う場合は設計正本を優先し、食い違いをユーザへ報告する。
 > 作成日: 2026-07-15
 > 対応する正本のバージョン: `3f3d63bcfee2b92c890d3000907cbd1891427d7e`
-> ステータス: 承認済み(2026-07-15)
+> ステータス: 実装・検証完了(2026-07-15)
 
 ## 1. 着手前チェック
 
@@ -67,3 +67,17 @@ Wave 2 は vocabulary、database format、WAL format、file allocation を別タ
 - branch tip は完成または検証済み補修 commit であり、ローカル commit まで作成し、push は行わない。
 
 merge と tag はユーザの明示承認を別々に得る。
+
+## 6. 完了記録
+
+solution buildは0 warning、0 errorで成功した。
+全test projectは成功し、`Quiver.Tests`の意図的なskip 9件を除く失敗は0件だった。
+Public API approval、Source Generator、WAL、Storage、Transactions、Backend、Fuzz、Studioとsample/tool buildを含む各gateが成功した。
+
+`--basic-perf`はbaselineと同じNIRVANA、.NET 10.0.9で実行した。
+CreateVertexは1.009x、property付きCreateVertexは0.981x、CreateEdgeは0.985x、1-hopは最大1.007x、BFS 2-hopは0.961xであり、すべて1.20x以内だった。
+このrunnerはp50ではなくbest-of-Nを記録するため、指示書のp50条件は同一runnerの比較可能値で判定した。
+
+旧domain API、旧serialized field、旧WAL record、旧file名のactive root監査は0件だった。
+日本語の旧domain語彙は、B-tree、HNSW、wait-for graphの一般用語として意図的に維持するNodeだけが残った。
+`check-track-markers.ps1 -Scan`と`git diff --check`は成功した。

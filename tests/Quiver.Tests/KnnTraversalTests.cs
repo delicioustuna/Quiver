@@ -17,16 +17,16 @@ public sealed class KnnTraversalTests : IDisposable
     private const string IndexName = "doc-embed";
     private const int Dim = 4;
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public KnnTraversalTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_vec5_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         var keyId = _db.Schema.GetOrCreatePropertyKey("title");
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, keyId, Dim,
+            IndexName, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "test", null));
     }
 
@@ -39,18 +39,18 @@ public sealed class KnnTraversalTests : IDisposable
     [Fact]
     public void Knn_source_returns_top_k_in_similarity_order()
     {
-        // Three Doc nodes, each with a distinct one-hot vector so the
+        // Three Doc vertices, each with a distinct one-hot vector so the
         // expected ranking is unambiguous.
         var ids = new long[3];
         using (var tx = _db.BeginTransaction())
         {
             for (int i = 0; i < 3; i++)
             {
-                var nid = tx.CreateNode("Doc");
+                var nid = tx.CreateVertex("Doc");
                 ids[i] = nid.Value;
                 var vec = new float[Dim];
                 vec[i] = 1f;
-                _db.Vectors.SetVector(EntityKind.Node, nid.Value, IndexName, vec);
+                _db.Vectors.SetVector(EntityKind.Vertex, nid.Value, IndexName, vec);
             }
             tx.Commit();
         }
@@ -69,7 +69,7 @@ public sealed class KnnTraversalTests : IDisposable
     [Fact]
     public void Knn_composes_with_HasLabel_and_Out()
     {
-        // Mix Doc + Article nodes in the same vector index; HasLabel("Doc")
+        // Mix Doc + Article vertices in the same vector index; HasLabel("Doc")
         // must trim the candidate set after KNN orders it. Each Doc points
         // at one Author via REFERENCES so the .Out() leg yields Author ids.
         var docIds = new long[3];
@@ -78,23 +78,23 @@ public sealed class KnnTraversalTests : IDisposable
         {
             for (int i = 0; i < 3; i++)
             {
-                var author = tx.CreateNode("Author");
+                var author = tx.CreateVertex("Author");
                 authorIds[i] = author.Value;
             }
             for (int i = 0; i < 3; i++)
             {
-                var doc = tx.CreateNode("Doc");
+                var doc = tx.CreateVertex("Doc");
                 docIds[i] = doc.Value;
                 var v = new float[Dim];
                 v[i] = 1f;
-                _db.Vectors.SetVector(EntityKind.Node, doc.Value, IndexName, v);
-                tx.CreateRelationship(doc, new NodeId(authorIds[i]), "REFERENCES");
+                _db.Vectors.SetVector(EntityKind.Vertex, doc.Value, IndexName, v);
+                tx.CreateEdge(doc, new VertexId(authorIds[i]), "REFERENCES");
             }
             // One Article that would beat all Docs on cosine to the query
             // vector below — must be filtered out by HasLabel("Doc").
-            var article = tx.CreateNode("Article");
+            var article = tx.CreateVertex("Article");
             var articleVec = new float[] { 0f, 1f, 0f, 0f };
-            _db.Vectors.SetVector(EntityKind.Node, article.Value, IndexName, articleVec);
+            _db.Vectors.SetVector(EntityKind.Vertex, article.Value, IndexName, articleVec);
 
             tx.Commit();
         }

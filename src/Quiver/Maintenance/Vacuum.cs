@@ -14,50 +14,50 @@ namespace Quiver.Maintenance;
 /// <remarks>
 /// スコープ:
 /// <list type="bullet">
-///  <item>リレーションシップ / プロパティ / ノードの dead version を物理回収 (順序保証付き)</item>
+///  <item>Edge / プロパティ / Vertexの dead version を物理回収 (順序保証付き)</item>
 ///  <item>各ストアの free list 圧縮 + 末尾 hwm 縮減</item>
 ///  <item><see cref="CommittedTxRegistry"/> の visibility horizon を下回ったエントリを prune</item>
 /// </list>
-/// 後続拡張: B+Tree node merge、ページファイル物理 truncate (WAL record 追加が必要)、
+/// 後続拡張: B+Tree vertex merge、ページファイル物理 truncate (WAL record 追加が必要)、
 /// AutoVacuum バックグラウンドワーカー。
 /// </remarks>
 internal sealed class Vacuum : IVacuum
 {
-    private readonly VersionedNodeStore _nodeStore;
-    private readonly VersionedRelationshipStore _relStore;
+    private readonly VersionedVertexStore _vertexStore;
+    private readonly VersionedEdgeStore _edgeStore;
     private readonly PropertyStore _propStore;
     private readonly TransactionManager _txManager;
     private readonly CommittedTxRegistry _committed;
     private readonly IWriteAheadLog? _wal;
     // opt-in 列の delta compaction 対象 (列無し DB では null)。
     private readonly ColumnManager? _columns;
-    // hyperedge 回収に必要な 3 ストア。hyperedge を持たない構成 (in-memory 等) では null。
-    private readonly VersionedHyperedgeStore? _hyperedgeStore;
+    // nexus 回収に必要な 3 ストア。nexus を持たない構成 (in-memory 等) では null。
+    private readonly VersionedNexusStore? _nexusStore;
     private readonly IncidenceStore? _incidenceStore;
-    private readonly INodeIncidenceHeadStore? _nodeHeads;
+    private readonly IVertexIncidenceHeadStore? _vertexHeads;
 
     internal Vacuum(
-        VersionedNodeStore nodeStore,
-        VersionedRelationshipStore relStore,
+        VersionedVertexStore vertexStore,
+        VersionedEdgeStore edgeStore,
         PropertyStore propStore,
         TransactionManager txManager,
         CommittedTxRegistry committed,
         IWriteAheadLog? wal = null,
         ColumnManager? columns = null,
-        VersionedHyperedgeStore? hyperedgeStore = null,
+        VersionedNexusStore? nexusStore = null,
         IncidenceStore? incidenceStore = null,
-        INodeIncidenceHeadStore? nodeHeads = null)
+        IVertexIncidenceHeadStore? vertexHeads = null)
     {
-        _nodeStore = nodeStore;
-        _relStore = relStore;
+        _vertexStore = vertexStore;
+        _edgeStore = edgeStore;
         _propStore = propStore;
         _txManager = txManager;
         _committed = committed;
         _wal = wal;
         _columns = columns;
-        _hyperedgeStore = hyperedgeStore;
+        _nexusStore = nexusStore;
         _incidenceStore = incidenceStore;
-        _nodeHeads = nodeHeads;
+        _vertexHeads = vertexHeads;
     }
 
     public VacuumReport Run(VacuumOptions? options = null)
@@ -68,8 +68,8 @@ internal sealed class Vacuum : IVacuum
         if (_txManager.ActiveCount > 0)
         {
             return new VacuumReport(
-                ReclaimedNodes: 0,
-                ReclaimedRelationships: 0,
+                ReclaimedVertices: 0,
+                ReclaimedEdges: 0,
                 ReclaimedProperties: 0,
                 PrunedCommittedTxEntries: 0,
                 ElapsedMs: sw.ElapsedMilliseconds,
@@ -86,42 +86,42 @@ internal sealed class Vacuum : IVacuum
             bool dryRun = options.Mode == VacuumMode.DryRun;
 
             // 順序:
-            //  1. Properties (dead ノードの prop chain は node.FirstPropId 経由でしか辿れないので、
-            //     node vacuum 前に処理する必要がある)
-            //  2. Relationships (同じく node の FirstRelId 経由で辿る)
-            // 3. ノード
+            //  1. Properties (dead Vertexの prop chain は vertex.FirstPropId 経由でしか辿れないので、
+            //     vertex vacuum 前に処理する必要がある)
+            //  2. Edges (同じく vertex の FirstEdgeId 経由で辿る)
+            // 3. Vertex
             // committed registry prune は最後 (visibility 判定に依存する処理が全て終わってから)。
             int reclaimedProps = 0;
             if (!dryRun && (options.Targets & VacuumTarget.Properties) != 0)
             {
-                reclaimedProps = _propStore.VacuumDeadVersions(_nodeStore, horizon, _committed);
+                reclaimedProps = _propStore.VacuumDeadVersions(_vertexStore, horizon, _committed);
             }
             QuiverEventSource.Log.SetVacuumProgress(25);
 
-            int reclaimedRels = 0;
-            if (!dryRun && (options.Targets & VacuumTarget.Relationships) != 0)
+            int reclaimedEdges = 0;
+            if (!dryRun && (options.Targets & VacuumTarget.Edges) != 0)
             {
-                reclaimedRels = _relStore.VacuumDeadVersions(_nodeStore, horizon, _committed);
+                reclaimedEdges = _edgeStore.VacuumDeadVersions(_vertexStore, horizon, _committed);
             }
             QuiverEventSource.Log.SetVacuumProgress(50);
 
-            int reclaimedNodes = 0;
-            if (!dryRun && (options.Targets & VacuumTarget.Nodes) != 0)
+            int reclaimedVertices = 0;
+            if (!dryRun && (options.Targets & VacuumTarget.Vertices) != 0)
             {
-                reclaimedNodes = _nodeStore.VacuumDeadVersions(horizon, _committed);
+                reclaimedVertices = _vertexStore.VacuumDeadVersions(horizon, _committed);
             }
             QuiverEventSource.Log.SetVacuumProgress(75);
 
-            // dead hyperedge の property → incidence → header を回収する。node vacuum は
-            // hyperedge の overflow property を辿らないため、この phase が独立して解放する。
+            // dead nexus の property → incidence → header を回収する。vertex vacuum は
+            // nexus の overflow property を辿らないため、この phase が独立して解放する。
             // 回収した overflow property は ReclaimedProperties へ合算する。
-            int reclaimedHyperedges = 0;
+            int reclaimedNexuses = 0;
             int reclaimedIncidences = 0;
-            if (!dryRun && (options.Targets & VacuumTarget.Hyperedges) != 0)
+            if (!dryRun && (options.Targets & VacuumTarget.Nexuses) != 0)
             {
-                int hyperedgeProps;
-                (reclaimedHyperedges, reclaimedIncidences, hyperedgeProps) = VacuumHyperedges(horizon);
-                reclaimedProps += hyperedgeProps;
+                int nexusProps;
+                (reclaimedNexuses, reclaimedIncidences, nexusProps) = VacuumNexuses(horizon);
+                reclaimedProps += nexusProps;
             }
 
             // opt-in 列の delta compaction。committed registry の prune より前に
@@ -161,19 +161,19 @@ internal sealed class Vacuum : IVacuum
                     _propStore.UnderlyingFile,
                     _propStore.ComputeRequiredPageCount());
                 truncatedPages += TryTruncateStore(
-                    WalFileKind.Relationships,
-                    _relStore.UnderlyingFile,
-                    _relStore.ComputeRequiredPageCount());
+                    WalFileKind.Edges,
+                    _edgeStore.UnderlyingFile,
+                    _edgeStore.ComputeRequiredPageCount());
                 truncatedPages += TryTruncateStore(
-                    WalFileKind.Nodes,
-                    _nodeStore.UnderlyingFile,
-                    _nodeStore.ComputeRequiredPageCount());
+                    WalFileKind.Vertices,
+                    _vertexStore.UnderlyingFile,
+                    _vertexStore.ComputeRequiredPageCount());
             }
             QuiverEventSource.Log.SetVacuumProgress(100);
 
             return new VacuumReport(
-                ReclaimedNodes: reclaimedNodes,
-                ReclaimedRelationships: reclaimedRels,
+                ReclaimedVertices: reclaimedVertices,
+                ReclaimedEdges: reclaimedEdges,
                 ReclaimedProperties: reclaimedProps,
                 PrunedCommittedTxEntries: prunedTxEntries,
                 ElapsedMs: sw.ElapsedMilliseconds,
@@ -181,7 +181,7 @@ internal sealed class Vacuum : IVacuum
                 Skipped: false,
                 TruncatedPages: truncatedPages,
                 ReclaimedColumnVersions: reclaimedColumnVersions,
-                ReclaimedHyperedges: reclaimedHyperedges,
+                ReclaimedNexuses: reclaimedNexuses,
                 ReclaimedIncidences: reclaimedIncidences);
         }
         finally
@@ -191,34 +191,34 @@ internal sealed class Vacuum : IVacuum
     }
 
     /// <summary>
-    /// dead hyperedge を回収する。手順は property → incidence → header の順:
+    /// dead nexus を回収する。手順は property → incidence → header の順:
     /// <list type="number">
     ///   <item>全 header slot を走査し、horizon 未満で commit 済みの xmax を持つ dead header を集める。
-    ///         その overflow property chain をここで解放し、hyperedge chain を辿って所属 incidence を
-    ///         node 別に集める。live header は inline property の copy-on-write 旧版を prune する。</item>
-    ///   <item>影響を受けた各 node の chain を head から 1 回だけ走査し、running prev で dead incidence を
-    ///         一括 unlink する。逆リンクを持たないため個別 unlink はせず、node ごと O(chain 長) で済む。</item>
+    ///         その overflow property chain をここで解放し、nexus chain を辿って所属 incidence を
+    ///         vertex 別に集める。live header は inline property の copy-on-write 旧版を prune する。</item>
+    ///   <item>影響を受けた各 vertex の chain を head から 1 回だけ走査し、running prev で dead incidence を
+    ///         一括 unlink する。逆リンクを持たないため個別 unlink はせず、vertex ごと O(chain 長) で済む。</item>
     ///   <item>unlink 済み incidence slot を free list へ返す (active tx が無いことは <see cref="Run"/> が保証)。</item>
     ///   <item>header を heap から物理回収し sequence を free list へ返す (再利用時に世代 +1)。</item>
     /// </list>
     /// </summary>
-    /// <returns>回収した (hyperedge header 数, incidence 数, overflow property 版数)。</returns>
-    private (int Hyperedges, int Incidences, int Properties) VacuumHyperedges(long horizon)
+    /// <returns>回収した (nexus header 数, incidence 数, overflow property 版数)。</returns>
+    private (int Nexuses, int Incidences, int Properties) VacuumNexuses(long horizon)
     {
-        // hyperedge を持たない構成では 3 ストアが揃わない。安全側で何もしない。
-        if (_hyperedgeStore is null || _incidenceStore is null || _nodeHeads is null)
+        // nexus を持たない構成では 3 ストアが揃わない。安全側で何もしない。
+        if (_nexusStore is null || _incidenceStore is null || _vertexHeads is null)
             return (0, 0, 0);
 
         var deadHeaders = new List<long>();
         var deadIncidences = new HashSet<long>();
-        // dead incidence を「影響 node の sequence」でグループ化し、chain sweep 対象 node を一意化する。
-        var affectedNodes = new HashSet<long>();
+        // dead incidence を「影響 vertex の sequence」でグループ化し、chain sweep 対象 vertex を一意化する。
+        var affectedVertices = new HashSet<long>();
         int reclaimedProps = 0;
 
-        long hwm = _hyperedgeStore.SequenceHighWaterMark;
+        long hwm = _nexusStore.SequenceHighWaterMark;
         for (long seq = 0; seq < hwm; seq++)
         {
-            if (!_hyperedgeStore.TryReadRawHeader(seq, out RawHyperedgeHeader raw))
+            if (!_nexusStore.TryReadRawHeader(seq, out RawNexusHeader raw))
                 continue;
             bool dead = raw.Xmax != 0 && raw.Xmax < horizon && _committed.IsCommitted(raw.Xmax);
             if (dead)
@@ -228,7 +228,7 @@ internal sealed class Vacuum : IVacuum
                 // property を先に解放する。Invalid head は 0 件で返る。
                 reclaimedProps += _propStore.ReclaimOverflowChain(raw.FirstProperty);
 
-                // hyperedge chain (NextInHyperedge) を辿って所属 incidence を集める。header は
+                // nexus chain (NextInNexus) を辿って所属 incidence を集める。header は
                 // まだ heap 上にあり、incidence slot も未解放なので安全に走査できる。
                 IncidenceId cur = raw.FirstIncidence;
                 long guard = _incidenceStore.SequenceHighWaterMark + 1;
@@ -238,22 +238,22 @@ internal sealed class Vacuum : IVacuum
                     if (!inc.InUse)
                         break;
                     if (deadIncidences.Add(cur.Sequence))
-                        affectedNodes.Add(inc.NodeId.Sequence);
-                    cur = inc.NextInHyperedge;
+                        affectedVertices.Add(inc.VertexId.Sequence);
+                    cur = inc.NextInNexus;
                 }
             }
             else if (raw.InUse && raw.Xmax == 0)
             {
-                _hyperedgeStore.PruneDeadInlineVersions(seq, horizon, _committed);
+                _nexusStore.PruneDeadInlineVersions(seq, horizon, _committed);
             }
         }
 
         if (deadHeaders.Count == 0)
             return (0, 0, 0);
 
-        // 影響 node ごとに 1 パスで dead incidence を chain から外す。
-        foreach (long nodeSeq in affectedNodes)
-            SweepNodeChain(nodeSeq, deadIncidences);
+        // 影響 vertex ごとに 1 パスで dead incidence を chain から外す。
+        foreach (long vertexSeq in affectedVertices)
+            SweepVertexChain(vertexSeq, deadIncidences);
 
         // unlink 済み slot を free list へ返す。
         foreach (long incSeq in deadIncidences)
@@ -261,7 +261,7 @@ internal sealed class Vacuum : IVacuum
 
         // header を物理回収する (property → incidence の後、最後に header)。
         foreach (long seq in deadHeaders)
-            _hyperedgeStore.ReclaimHeader(seq);
+            _nexusStore.ReclaimHeader(seq);
 
         if (reclaimedProps > 0)
             _propStore.FinishExternalReclaim();
@@ -270,15 +270,15 @@ internal sealed class Vacuum : IVacuum
     }
 
     /// <summary>
-    /// 1 つの node の incidence chain を head から走査し、<paramref name="deadSet"/> に含まれる
-    /// incidence を running prev で一括 unlink する。head 自体が dead の場合は node head を
+    /// 1 つの vertex の incidence chain を head から走査し、<paramref name="deadSet"/> に含まれる
+    /// incidence を running prev で一括 unlink する。head 自体が dead の場合は vertex head を
     /// 次の生存 incidence へ進める。逆リンクを持たない前提での O(chain 長) sweep。
     /// </summary>
-    private void SweepNodeChain(long nodeSeq, HashSet<long> deadSet)
+    private void SweepVertexChain(long vertexSeq, HashSet<long> deadSet)
     {
-        var node = new NodeId(nodeSeq);
+        var vertex = new VertexId(vertexSeq);
         IncidenceId prev = IncidenceId.Invalid;
-        IncidenceId cur = _nodeHeads!.Get(node);
+        IncidenceId cur = _vertexHeads!.Get(vertex);
         long guard = _incidenceStore!.SequenceHighWaterMark + 1;
 
         while (cur.IsValid && guard-- > 0)
@@ -289,20 +289,20 @@ internal sealed class Vacuum : IVacuum
             {
                 if (!inc.InUse)
                     break;
-                next = inc.NextInNode;
+                next = inc.NextInVertex;
                 dead = deadSet.Contains(cur.Sequence);
             }
 
             if (dead)
             {
-                // dead を chain から外す。head 位置なら node head を前進、途中なら
-                // 直前の生存 incidence の nextInNode を後続へ繋ぎ替える。prev は進めない。
+                // dead を chain から外す。head 位置なら vertex head を前進、途中なら
+                // 直前の生存 incidence の nextInVertex を後続へ繋ぎ替える。prev は進めない。
                 if (!prev.IsValid)
-                    _nodeHeads.Set(node, next);
+                    _vertexHeads.Set(vertex, next);
                 else
                 {
                     IncidenceWriteHandle w = _incidenceStore.Write(prev);
-                    w.NextInNode = next;
+                    w.NextInVertex = next;
                     w.Dispose();
                 }
             }

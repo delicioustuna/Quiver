@@ -7,12 +7,12 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks.Operators;
 
 /// <summary>
-/// TS-6: 全 operator micro-benchmark で共通利用する小さな seed graph。
+/// 全 operator micro-benchmark で共通利用する小さな seed graph。
 /// 各 operator bench は <see cref="GlobalSetup"/> 相当のフェーズで
 /// <see cref="Open"/> を 1 回呼び、計測区間は warm transaction 上で
 /// operator パイプラインを 1 回 drain する形に統一する。
 ///
-/// グラフ規模は意図的に小さく (200 nodes / 400 edges) 保つ:
+/// グラフ規模は意図的に小さく (200 vertices / 400 edges) 保つ:
 ///   - 目的は「20% 以上の劣化を見逃さない baseline を全 operator に持つ」こと。
 ///     hot path 性能特性は既存ベンチ (BulkLoad / OneHop / FilterChainExpand 等) が
 ///     担当しているので、ここでは regression sentinel としての 1 数値があれば十分。
@@ -20,17 +20,17 @@ namespace Quiver.Benchmarks.Operators;
 /// </summary>
 internal sealed class OperatorBenchSeed : IDisposable
 {
-    public const int NodeCount = 200;
-    public const int EdgesPerNode = 2;
+    public const int VertexCount = 200;
+    public const int EdgesPerVertex = 2;
 
     public string Dir { get; }
-    public GraphDatabase Db { get; }
-    public NodeId[] PersonNodes { get; }
-    public NodeId[] MovieNodes { get; }
-    public RelationshipId[] Relationships { get; }
+    public QuiverDatabase Db { get; }
+    public VertexId[] PersonVertices { get; }
+    public VertexId[] MovieVertices { get; }
+    public EdgeId[] Edges { get; }
     public LabelId PersonLabel { get; }
     public LabelId MovieLabel { get; }
-    public RelationshipTypeId KnowsType { get; }
+    public EdgeTypeId KnowsType { get; }
     public PropertyKeyId NameKey { get; }
     public PropertyKeyId ValueKey { get; }
     public PropertyKeyId WeightKey { get; }
@@ -39,7 +39,7 @@ internal sealed class OperatorBenchSeed : IDisposable
     public OperatorBenchSeed(string tag)
     {
         Dir = BenchTempDir.Create("opbench_" + tag);
-        Db = GraphDatabase.Open(System.IO.Path.Combine(Dir, "graph.quiver"));
+        Db = QuiverDatabase.Open(System.IO.Path.Combine(Dir, "graph.quiver"));
 
         Db.Schema.CreateIndex("idx_value", "Person", "value", IndexKind.Int64Equality);
         Db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
@@ -48,34 +48,34 @@ internal sealed class OperatorBenchSeed : IDisposable
         ValueKey = Db.Schema.GetOrCreatePropertyKey("value");
         WeightKey = Db.Schema.GetOrCreatePropertyKey("weight");
 
-        PersonNodes = new NodeId[NodeCount];
-        MovieNodes = new NodeId[NodeCount];
-        Relationships = new RelationshipId[NodeCount * EdgesPerNode];
+        PersonVertices = new VertexId[VertexCount];
+        MovieVertices = new VertexId[VertexCount];
+        Edges = new EdgeId[VertexCount * EdgesPerVertex];
 
         var rng = new Random(2026);
         using (var tx = Db.BeginTransaction())
         {
-            for (int i = 0; i < NodeCount; i++)
+            for (int i = 0; i < VertexCount; i++)
             {
-                var p = tx.CreateNode("Person");
-                PersonNodes[i] = p;
+                var p = tx.CreateVertex("Person");
+                PersonVertices[i] = p;
                 tx.SetProperty(p, "value", PropertyValue.FromInt64(i));
                 tx.SetProperty(p, "name", PropertyValue.FromString("name-" + i.ToString("D4")));
                 tx.IndexInsert("idx_value", (long)i, p);
                 tx.IndexInsert("idx_name", "name-" + i.ToString("D4"), p);
 
-                var m = tx.CreateNode("Movie");
-                MovieNodes[i] = m;
+                var m = tx.CreateVertex("Movie");
+                MovieVertices[i] = m;
             }
-            int relIdx = 0;
-            for (int i = 0; i < NodeCount; i++)
+            int edgeIdx = 0;
+            for (int i = 0; i < VertexCount; i++)
             {
-                for (int e = 0; e < EdgesPerNode; e++)
+                for (int e = 0; e < EdgesPerVertex; e++)
                 {
-                    int target = rng.Next(NodeCount);
-                    var r = tx.CreateRelationship(PersonNodes[i], PersonNodes[target], "KNOWS");
+                    int target = rng.Next(VertexCount);
+                    var r = tx.CreateEdge(PersonVertices[i], PersonVertices[target], "KNOWS");
                     tx.SetProperty(r, "weight", PropertyValue.FromDouble(1.0 + (i % 5)));
-                    Relationships[relIdx++] = r;
+                    Edges[edgeIdx++] = r;
                 }
             }
             tx.Commit();
@@ -83,7 +83,7 @@ internal sealed class OperatorBenchSeed : IDisposable
 
         PersonLabel = Db.Schema.GetOrCreateLabel("Person");
         MovieLabel = Db.Schema.GetOrCreateLabel("Movie");
-        KnowsType = Db.Schema.GetOrCreateRelationshipType("KNOWS");
+        KnowsType = Db.Schema.GetOrCreateEdgeType("KNOWS");
 
         ReadTx = Db.BeginReadOnlyTransaction();
     }
@@ -97,27 +97,27 @@ internal sealed class OperatorBenchSeed : IDisposable
 }
 
 /// <summary>
-/// Source operator that re-emits a pre-built NodeId[] each Open() — used by
+/// Source operator that re-emits a pre-built VertexId[] each Open() — used by
 /// expand/filter/etc benches as a warm input that incurs no per-iteration
 /// allocations beyond the operator under test.
 /// </summary>
-internal sealed class NodeArraySource : IPhysicalOperator
+internal sealed class VertexArraySource : IPhysicalOperator
 {
-    private readonly NodeId[] _nodes;
+    private readonly VertexId[] _vertices;
     private int _index = -1;
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
 
-    public NodeArraySource(NodeId[] nodes) => _nodes = nodes;
+    public VertexArraySource(VertexId[] vertices) => _vertices = vertices;
 
-    public TupleSchema Schema { get; } = new([new ColumnDefinition("nodeId", TupleSlotType.NodeId)]);
+    public TupleSchema Schema { get; } = new([new ColumnDefinition("vertexId", TupleSlotType.VertexId)]);
     public OperatorStatistics Statistics => default;
     public TupleRef Current => new(_buffer);
 
     public void Open(ITransaction tx) { _index = -1; }
     public bool MoveNext()
     {
-        if (++_index >= _nodes.Length) return false;
-        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _nodes[_index].Value };
+        if (++_index >= _vertices.Length) return false;
+        _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _vertices[_index].Value };
         return true;
     }
     public void Dispose() { }
@@ -125,32 +125,32 @@ internal sealed class NodeArraySource : IPhysicalOperator
 
 internal sealed class RelArraySource : IPhysicalOperator
 {
-    private readonly RelationshipId[] _rels;
+    private readonly EdgeId[] _edges;
     private int _index = -1;
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
-    public RelArraySource(RelationshipId[] rels) => _rels = rels;
-    public TupleSchema Schema { get; } = new([new ColumnDefinition("rel", TupleSlotType.RelationshipId)]);
+    public RelArraySource(EdgeId[] edges) => _edges = edges;
+    public TupleSchema Schema { get; } = new([new ColumnDefinition("edge", TupleSlotType.EdgeId)]);
     public OperatorStatistics Statistics => default;
     public TupleRef Current => new(_buffer);
     public void Open(ITransaction tx) { _index = -1; }
     public bool MoveNext()
     {
-        if (++_index >= _rels.Length) return false;
-        _buffer[0] = new TupleSlot { Type = TupleSlotType.RelationshipId, LongValue = _rels[_index].Value };
+        if (++_index >= _edges.Length) return false;
+        _buffer[0] = new TupleSlot { Type = TupleSlotType.EdgeId, LongValue = _edges[_index].Value };
         return true;
     }
     public void Dispose() { }
 }
 
-internal sealed class NodePairSource : IPhysicalOperator
+internal sealed class VertexPairSource : IPhysicalOperator
 {
-    private readonly (NodeId src, NodeId tgt)[] _pairs;
+    private readonly (VertexId src, VertexId tgt)[] _pairs;
     private int _index = -1;
     private readonly TupleSlot[] _buffer = new TupleSlot[2];
-    public NodePairSource((NodeId src, NodeId tgt)[] pairs) => _pairs = pairs;
+    public VertexPairSource((VertexId src, VertexId tgt)[] pairs) => _pairs = pairs;
     public TupleSchema Schema { get; } = new([
-        new ColumnDefinition("s", TupleSlotType.NodeId),
-        new ColumnDefinition("t", TupleSlotType.NodeId),
+        new ColumnDefinition("s", TupleSlotType.VertexId),
+        new ColumnDefinition("t", TupleSlotType.VertexId),
     ]);
     public OperatorStatistics Statistics => default;
     public TupleRef Current => new(_buffer);
@@ -158,8 +158,8 @@ internal sealed class NodePairSource : IPhysicalOperator
     public bool MoveNext()
     {
         if (++_index >= _pairs.Length) return false;
-        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _pairs[_index].src.Value };
-        _buffer[1] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _pairs[_index].tgt.Value };
+        _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _pairs[_index].src.Value };
+        _buffer[1] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _pairs[_index].tgt.Value };
         return true;
     }
     public void Dispose() { }
@@ -167,12 +167,12 @@ internal sealed class NodePairSource : IPhysicalOperator
 
 internal sealed class DepthRowSource : IPhysicalOperator
 {
-    private readonly (long nodeId, long depth)[] _rows;
+    private readonly (long vertexId, long depth)[] _rows;
     private int _index = -1;
     private readonly TupleSlot[] _buffer = new TupleSlot[2];
-    public DepthRowSource((long nodeId, long depth)[] rows) => _rows = rows;
+    public DepthRowSource((long vertexId, long depth)[] rows) => _rows = rows;
     public TupleSchema Schema { get; } = new([
-        new ColumnDefinition("nodeId", TupleSlotType.NodeId),
+        new ColumnDefinition("vertexId", TupleSlotType.VertexId),
         new ColumnDefinition("depth", TupleSlotType.Int64),
     ]);
     public OperatorStatistics Statistics => default;
@@ -181,7 +181,7 @@ internal sealed class DepthRowSource : IPhysicalOperator
     public bool MoveNext()
     {
         if (++_index >= _rows.Length) return false;
-        _buffer[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _rows[_index].nodeId };
+        _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _rows[_index].vertexId };
         _buffer[1] = new TupleSlot { Type = TupleSlotType.Int64, LongValue = _rows[_index].depth };
         return true;
     }

@@ -26,13 +26,13 @@ public sealed class FullTextConcurrencyTests : IDisposable
 {
     private const string Index = "idx_body";
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
     private readonly object _writeGate = new();
 
     public FullTextConcurrencyTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fts6_conc_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), new GraphDatabaseOptions
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), new QuiverDatabaseOptions
         {
             // CI の全面並列実行では内部コミットロックの待機が既定の 5 秒を超えることがある。
             // スターベーションを正しさの障害と誤認しないよう待機時間を広げる。
@@ -65,7 +65,7 @@ public sealed class FullTextConcurrencyTests : IDisposable
         const int DocsPerWriter = 50;
         const int Readers = 3;
 
-        var committed = new ConcurrentDictionary<string, NodeId>();   // marker -> node
+        var committed = new ConcurrentDictionary<string, VertexId>();   // marker -> vertex
         var faults = new ConcurrentBag<Exception>();
         using var done = new CountdownEvent(Writers);
 
@@ -82,7 +82,7 @@ public sealed class FullTextConcurrencyTests : IDisposable
                     lock (_writeGate)
                     {
                         using var tx = _db.BeginTransaction();
-                        var n = tx.CreateNode("Doc");
+                        var n = tx.CreateVertex("Doc");
                         tx.SetProperty(n, "body",
                             PropertyValue.FromString($"shared token {marker} payload body"));
                         tx.Commit();
@@ -136,14 +136,14 @@ public sealed class FullTextConcurrencyTests : IDisposable
         // Writes are gated, so every document commits.
         committed.Should().HaveCount(Writers * DocsPerWriter);
 
-        // Final consistency: each committed marker resolves to exactly its node, and
+        // Final consistency: each committed marker resolves to exactly its vertex, and
         // the shared term returns the whole committed set (postings stayed coherent
         // under concurrent search).
         using (var rtx = _db.BeginReadOnlyTransaction())
         {
             var g = rtx.G(_db.Schema);
-            foreach (var (marker, node) in committed)
-                g.Search(Index, marker, k: 5).ToList().Should().ContainSingle().Which.Should().Be(node);
+            foreach (var (marker, vertex) in committed)
+                g.Search(Index, marker, k: 5).ToList().Should().ContainSingle().Which.Should().Be(vertex);
         }
         using (var rtx = _db.BeginReadOnlyTransaction())
         {

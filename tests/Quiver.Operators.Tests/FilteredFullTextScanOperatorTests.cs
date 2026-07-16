@@ -20,7 +20,7 @@ public sealed class FilteredFullTextScanOperatorTests
     public void Constructor_rejects_empty_index_name()
     {
         Action act = () => new FilteredFullTextScanOperator(
-            new FixedNodeListOperator(), 0, "", "query", k: 5);
+            new FixedVertexListOperator(), 0, "", "query", k: 5);
         act.Should().Throw<ArgumentException>();
     }
 
@@ -28,7 +28,7 @@ public sealed class FilteredFullTextScanOperatorTests
     public void Constructor_rejects_null_query()
     {
         Action act = () => new FilteredFullTextScanOperator(
-            new FixedNodeListOperator(), 0, "idx", null!, k: 5);
+            new FixedVertexListOperator(), 0, "idx", null!, k: 5);
         act.Should().Throw<ArgumentNullException>();
     }
 
@@ -36,7 +36,7 @@ public sealed class FilteredFullTextScanOperatorTests
     public void Constructor_rejects_non_positive_k()
     {
         Action act = () => new FilteredFullTextScanOperator(
-            new FixedNodeListOperator(), 0, "idx", "q", k: 0);
+            new FixedVertexListOperator(), 0, "idx", "q", k: 0);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -49,12 +49,12 @@ public sealed class FilteredFullTextScanOperatorTests
     }
 
     [Fact]
-    public void Schema_has_single_NodeId_column()
+    public void Schema_has_single_VertexId_column()
     {
         var op = new FilteredFullTextScanOperator(
-            new FixedNodeListOperator(), 0, IndexName, "hello", k: 3);
+            new FixedVertexListOperator(), 0, IndexName, "hello", k: 3);
         op.Schema.Columns.Should().HaveCount(1);
-        op.Schema.Columns[0].Type.Should().Be(TupleSlotType.NodeId);
+        op.Schema.Columns[0].Type.Should().Be(TupleSlotType.VertexId);
         op.Dispose();
     }
 
@@ -64,7 +64,7 @@ public sealed class FilteredFullTextScanOperatorTests
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_missing");
         using var tx = fx.Db.BeginTransaction();
         var op = new FilteredFullTextScanOperator(
-            new FixedNodeListOperator(), 0, "no_such_index", "hello", k: 3);
+            new FixedVertexListOperator(), 0, "no_such_index", "hello", k: 3);
 
         Action act = () => op.Open(((GraphTransaction)tx).Inner);
         act.Should().Throw<ConstraintException>();
@@ -79,14 +79,14 @@ public sealed class FilteredFullTextScanOperatorTests
         fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
         using (var seed = fx.Db.BeginTransaction())
         {
-            var n = seed.CreateNode("Doc");
+            var n = seed.CreateVertex("Doc");
             seed.SetProperty(n, "body", PropertyValue.FromString("hello world"));
             seed.Commit();
         }
 
         // 入力側が候補を 1 件も生成しない場合。
         using var tx = fx.Db.BeginTransaction();
-        var source = new FixedNodeListOperator(); // no nodes
+        var source = new FixedVertexListOperator(); // no vertices
         var op = new FilteredFullTextScanOperator(source, 0, IndexName, "hello", k: 10);
         op.Open(((GraphTransaction)tx).Inner);
         op.MoveNext().Should().BeFalse();
@@ -95,23 +95,23 @@ public sealed class FilteredFullTextScanOperatorTests
     }
 
     [Fact]
-    public void Filter_excludes_non_candidate_nodes()
+    public void Filter_excludes_non_candidate_vertices()
     {
-        NodeId included = default;
-        NodeId excluded = default;
+        VertexId included = default;
+        VertexId excluded = default;
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_filter");
         fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
         using (var seed = fx.Db.BeginTransaction())
         {
-            included = seed.CreateNode("Doc");
+            included = seed.CreateVertex("Doc");
             seed.SetProperty(included, "body", PropertyValue.FromString("hello world"));
-            excluded = seed.CreateNode("Doc");
+            excluded = seed.CreateVertex("Doc");
             seed.SetProperty(excluded, "body", PropertyValue.FromString("hello universe"));
             seed.Commit();
         }
 
         using var tx = fx.Db.BeginTransaction();
-        var source = new NodeByLabelScanOperator(
+        var source = new VertexByLabelScanOperator(
             fx.Db.Schema.GetOrCreateLabel("Doc"));
         var op = new FilteredFullTextScanOperator(source, 0, IndexName, "hello", k: 10);
         op.Open(((GraphTransaction)tx).Inner);
@@ -125,18 +125,18 @@ public sealed class FilteredFullTextScanOperatorTests
     [Fact]
     public void No_hit_among_candidates_returns_empty()
     {
-        NodeId candidate = default;
+        VertexId candidate = default;
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_nohit");
         fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
         using (var seed = fx.Db.BeginTransaction())
         {
-            candidate = seed.CreateNode("Doc");
+            candidate = seed.CreateVertex("Doc");
             seed.SetProperty(candidate, "body", PropertyValue.FromString("alpha beta"));
             seed.Commit();
         }
 
         using var tx = fx.Db.BeginTransaction();
-        var source = new FixedNodeListOperator(candidate);
+        var source = new FixedVertexListOperator(candidate);
         using var result = tx.Execute(
             new FilteredFullTextScanOperator(source, 0, IndexName, "zzzzz", k: 10));
         result.Rows().Should().BeEmpty();
@@ -146,21 +146,21 @@ public sealed class FilteredFullTextScanOperatorTests
     [Fact]
     public void K_limits_filtered_results()
     {
-        var ids = new NodeId[5];
+        var ids = new VertexId[5];
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_klimit");
         fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
         using (var seed = fx.Db.BeginTransaction())
         {
             for (int i = 0; i < 5; i++)
             {
-                ids[i] = seed.CreateNode("Doc");
+                ids[i] = seed.CreateVertex("Doc");
                 seed.SetProperty(ids[i], "body", PropertyValue.FromString("common term"));
             }
             seed.Commit();
         }
 
         using var tx = fx.Db.BeginTransaction();
-        var source = new NodeByLabelScanOperator(
+        var source = new VertexByLabelScanOperator(
             fx.Db.Schema.GetOrCreateLabel("Doc"));
         var op = new FilteredFullTextScanOperator(source, 0, IndexName, "common", k: 2);
         op.Open(((GraphTransaction)tx).Inner);
@@ -174,21 +174,21 @@ public sealed class FilteredFullTextScanOperatorTests
     [Fact]
     public void Statistics_tracks_rows_produced()
     {
-        var ids = new NodeId[3];
+        var ids = new VertexId[3];
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_stats");
         fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
         using (var seed = fx.Db.BeginTransaction())
         {
             for (int i = 0; i < 3; i++)
             {
-                ids[i] = seed.CreateNode("Doc");
+                ids[i] = seed.CreateVertex("Doc");
                 seed.SetProperty(ids[i], "body", PropertyValue.FromString("target word"));
             }
             seed.Commit();
         }
 
         using var tx = fx.Db.BeginTransaction();
-        var source = new FixedNodeListOperator(ids);
+        var source = new FixedVertexListOperator(ids);
         var op = new FilteredFullTextScanOperator(source, 0, IndexName, "target", k: 10);
         op.Open(((GraphTransaction)tx).Inner);
         var count = 0;

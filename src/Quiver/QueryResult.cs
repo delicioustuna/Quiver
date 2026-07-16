@@ -7,40 +7,40 @@ namespace Quiver;
 /// <summary>
 /// 結果行をマテリアライズする際に、entity ID 列へ現 slot 世代 (incarnation) を load する。
 /// 内部クエリパイプラインは Sequence 空間 (gen=0) で動かして hot path のコストを避けつつ、
-/// 利用者に返す NodeId の <c>Value</c> を <c>CreateNode</c>/<c>Allocate</c> が返した id と一致させる
+/// 利用者に返す VertexId の <c>Value</c> を <c>CreateVertex</c>/<c>Allocate</c> が返した id と一致させる
 /// (round-trip 一貫 + 世代付きで往復検証が効く)。物理 pipeline が保持する
-/// Sequence を logical output へ漏らさないため、relationship と hyperedge も同じ境界で解決する。
+/// Sequence を logical output へ漏らさないため、edge と nexus も同じ境界で解決する。
 /// </summary>
 internal static class QueryRowMaterializer
 {
     public static void StampEntityGenerations(
         TupleSlot[] slots,
-        INodeStore nodes,
-        IRelationshipStore relationships,
-        IHyperedgeStore hyperedges)
+        IVertexStore vertices,
+        IEdgeStore edges,
+        INexusStore nexuses)
     {
         for (int i = 0; i < slots.Length; i++)
         {
-            if (slots[i].Type == TupleSlotType.NodeId)
+            if (slots[i].Type == TupleSlotType.VertexId)
             {
-                long seq = new NodeId(slots[i].LongValue).Sequence;
+                long seq = new VertexId(slots[i].LongValue).Sequence;
                 if (seq < 0) continue;
-                int gen = nodes.CurrentGeneration(seq);
+                int gen = vertices.CurrentGeneration(seq);
                 if (gen > 0) slots[i].LongValue = EntityRef.PackLocal(seq, gen);
             }
-            else if (slots[i].Type == TupleSlotType.HyperedgeId)
+            else if (slots[i].Type == TupleSlotType.NexusId)
             {
-                var id = new HyperedgeId(slots[i].LongValue);
+                var id = new NexusId(slots[i].LongValue);
                 if (!id.IsValid || id.Generation > 0) continue;
-                using var header = hyperedges.Read(id);
+                using var header = nexuses.Read(id);
                 if (header.InUse) slots[i].LongValue = header.Id.Value;
             }
-            else if (slots[i].Type == TupleSlotType.RelationshipId)
+            else if (slots[i].Type == TupleSlotType.EdgeId)
             {
-                var id = new RelationshipId(slots[i].LongValue);
+                var id = new EdgeId(slots[i].LongValue);
                 if (!id.IsValid || id.Generation > 0) continue;
-                using var relationship = relationships.Read(id);
-                if (relationship.InUse) slots[i].LongValue = relationship.Id.Value;
+                using var edge = edges.Read(id);
+                if (edge.InUse) slots[i].LongValue = edge.Id.Value;
             }
         }
     }
@@ -95,14 +95,14 @@ internal readonly struct QueryRow
     /// <summary>指定列を <see cref="long"/> として取り出す。</summary>
     public long GetInt64(int column) => _slots[column].LongValue;
 
-    /// <summary>指定列を <see cref="NodeId"/> として取り出す。</summary>
-    public NodeId GetNodeId(int column) => new(_slots[column].LongValue);
+    /// <summary>指定列を <see cref="VertexId"/> として取り出す。</summary>
+    public VertexId GetVertexId(int column) => new(_slots[column].LongValue);
 
-    /// <summary>指定列を <see cref="RelationshipId"/> として取り出す。</summary>
-    public RelationshipId GetRelationshipId(int column) => new(_slots[column].LongValue);
+    /// <summary>指定列を <see cref="EdgeId"/> として取り出す。</summary>
+    public EdgeId GetEdgeId(int column) => new(_slots[column].LongValue);
 
-    /// <summary>指定列を <see cref="HyperedgeId"/> として取り出す。</summary>
-    public HyperedgeId GetHyperedgeId(int column) => new(_slots[column].LongValue);
+    /// <summary>指定列を <see cref="NexusId"/> として取り出す。</summary>
+    public NexusId GetNexusId(int column) => new(_slots[column].LongValue);
 
     /// <summary>指定列を <see cref="double"/> として取り出す。</summary>
     public double GetDouble(int column) => _slots[column].DoubleValue;

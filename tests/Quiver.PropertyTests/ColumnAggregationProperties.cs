@@ -26,13 +26,13 @@ public class ColumnAggregationProperties
         string path = Path.Combine(dir, "graph.quiver");
         try
         {
-            using var db = GraphDatabase.Open(path);
-            db.CreateColumn(EntityKind.Node, "v");
+            using var db = QuiverDatabase.Open(path);
+            db.CreateColumn(EntityKind.Vertex, "v");
             using (var tx = db.BeginTransaction())
             {
                 foreach (var v in values)
                 {
-                    var n = tx.CreateNode("N");
+                    var n = tx.CreateVertex("N");
                     tx.SetProperty(n, "v", PropertyValue.FromInt64(v));
                 }
                 tx.Commit();
@@ -42,20 +42,20 @@ public class ColumnAggregationProperties
             using (var tx = db.BeginReadOnlyTransaction())
             {
                 var g = tx.G(db.Schema);
-                colSum = g.Nodes().SumLong("v");
-                colMax = g.Nodes().Max("v");
-                colMin = g.Nodes().Min("v");
+                colSum = g.Vertices().SumLong("v");
+                colMax = g.Vertices().Max("v");
+                colMin = g.Vertices().Min("v");
             }
 
             // 列を外して row path 経路で再計算。
-            db.DropColumn(EntityKind.Node, "v");
+            db.DropColumn(EntityKind.Vertex, "v");
             long rowSum; double? rowMax; double? rowMin;
             using (var tx = db.BeginReadOnlyTransaction())
             {
                 var g = tx.G(db.Schema);
-                rowSum = g.Nodes().SumLong("v");
-                rowMax = g.Nodes().Max("v");
-                rowMin = g.Nodes().Min("v");
+                rowSum = g.Vertices().SumLong("v");
+                rowMax = g.Vertices().Max("v");
+                rowMin = g.Vertices().Min("v");
             }
 
             long naiveSum = values.Sum();

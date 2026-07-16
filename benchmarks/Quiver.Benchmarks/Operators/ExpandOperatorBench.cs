@@ -5,7 +5,7 @@ using Quiver.Storage.Records;
 
 namespace Quiver.Benchmarks.Operators;
 
-/// <summary>TS-6 sentinel: <see cref="ExpandOperator"/> 1-hop NeighborOnly outgoing.</summary>
+/// <summary> sentinel: <see cref="ExpandOperator"/> 1-hop NeighborOnly outgoing.</summary>
 [MemoryDiagnoser]
 [ShortRunJob]
 public class ExpandOperatorBench
@@ -21,7 +21,7 @@ public class ExpandOperatorBench
     [Benchmark]
     public int Expand_outgoing_neighbor_only()
     {
-        var src = new NodeArraySource(_seed.PersonNodes);
+        var src = new VertexArraySource(_seed.PersonVertices);
         using var op = new ExpandOperator(src, 0, Direction.Outgoing, null, ExpandOutputMode.NeighborOnly);
         return OperatorBenchDrain.Drain(op, _seed.ReadTx);
     }
@@ -29,7 +29,7 @@ public class ExpandOperatorBench
     [Benchmark]
     public int Expand_outgoing_full()
     {
-        var src = new NodeArraySource(_seed.PersonNodes);
+        var src = new VertexArraySource(_seed.PersonVertices);
         using var op = new ExpandOperator(src, 0, Direction.Outgoing, null, ExpandOutputMode.Full);
         return OperatorBenchDrain.Drain(op, _seed.ReadTx);
     }

@@ -14,7 +14,7 @@ namespace Quiver.Query.Physical;
 /// <remarks>
 /// カーネルは「近傍ごとに何をするか」だけを記述する。frontier スケジューリングと行マテリアライズは
 /// オペレータ側に残し、コルーチン無しでも段階的 (Volcano) 反復が機能するようにしている。
-/// 物理アクセス経路の選択 (隣接ブロック / リンクリスト / リレーションシップスキャン) は
+/// 物理アクセス経路の選択 (隣接ブロック / リンクリスト / Edgeスキャン) は
 /// <see cref="IGraphAccessMethods.Expand"/> に隠蔽されている。
 /// <see cref="OneHopExpansion"/> はカーネルラッパが 1 ホップ走査時に呼ぶヘルパ。
 /// </remarks>
@@ -24,7 +24,7 @@ internal interface IGraphKernel<TState>
     /// 各ソースに対し、いずれのホップ展開も始まる前に 1 回だけ呼ばれる。
     /// 実装は <paramref name="state"/> 内の frontier / visited セットをシードする。
     /// </summary>
-    void Initialize(NodeId source, ref TState state);
+    void Initialize(VertexId source, ref TState state);
 
     /// <summary>
     /// <see cref="OneHopExpansion.Expand"/> が放出する近傍エッジ毎に呼ばれる。
@@ -38,9 +38,9 @@ internal interface IGraphKernel<TState>
     /// JIT が既にインライン化する)。
     /// </param>
     bool VisitNeighbor(
-        NodeId source,
-        NodeId target,
-        RelationshipId relationshipId,
+        VertexId source,
+        VertexId target,
+        EdgeId edgeId,
         long weightRaw,
         int depth,
         ref TState state);
@@ -69,9 +69,9 @@ internal static class OneHopExpansion
     /// </summary>
     public static bool Expand<TState>(
         ITransaction tx,
-        NodeId source,
+        VertexId source,
         Direction direction,
-        RelationshipTypeId? typeFilter,
+        EdgeTypeId? typeFilter,
         int depth,
         IGraphKernel<TState> kernel,
         ref TState state)
@@ -82,7 +82,7 @@ internal static class OneHopExpansion
             if (!kernel.VisitNeighbor(
                     source,
                     cursor.Neighbor,
-                    cursor.Relationship,
+                    cursor.Edge,
                     cursor.WeightRaw,
                     depth,
                     ref state))

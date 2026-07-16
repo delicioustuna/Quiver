@@ -13,12 +13,12 @@ namespace Quiver.Tests;
 public sealed class GremlinCompatGc4Tests : IDisposable
 {
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public GremlinCompatGc4Tests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_gc4_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
     }
 
     public void Dispose()
@@ -27,24 +27,24 @@ public sealed class GremlinCompatGc4Tests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private NodeId AddPerson(IGraphTransaction tx, string name)
+    private VertexId AddPerson(IGraphTransaction tx, string name)
     {
-        var id = tx.CreateNode("Person");
+        var id = tx.CreateVertex("Person");
         tx.SetProperty(id, "name", PropertyValue.FromString(name));
         return id;
     }
 
     // ── chain helper: a -> b -> c -> d (linear) plus optional branches ──────
-    private (NodeId a, NodeId b, NodeId c, NodeId d) BuildLineGraph()
+    private (VertexId a, VertexId b, VertexId c, VertexId d) BuildLineGraph()
     {
         using var tx = _db.BeginTransaction();
         var a = AddPerson(tx, "A");
         var b = AddPerson(tx, "B");
         var c = AddPerson(tx, "C");
         var d = AddPerson(tx, "D");
-        tx.CreateRelationship(a, b, "KNOWS");
-        tx.CreateRelationship(b, c, "KNOWS");
-        tx.CreateRelationship(c, d, "KNOWS");
+        tx.CreateEdge(a, b, "KNOWS");
+        tx.CreateEdge(b, c, "KNOWS");
+        tx.CreateEdge(c, d, "KNOWS");
         tx.Commit();
         return (a, b, c, d);
     }
@@ -58,7 +58,7 @@ public sealed class GremlinCompatGc4Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var depth2 = g.Node(a).Repeat(s => s.Out("KNOWS"), times: 2).ToList();
+        var depth2 = g.Vertex(a).Repeat(s => s.Out("KNOWS"), times: 2).ToList();
         depth2.Should().ContainSingle().Which.Value.Should().Be(c.Value);
     }
 
@@ -69,27 +69,27 @@ public sealed class GremlinCompatGc4Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var nodes = g.Node(a).Repeat(s => s.Out("KNOWS"), times: 3, emit: true).ToList()
+        var vertices = g.Vertex(a).Repeat(s => s.Out("KNOWS"), times: 3, emit: true).ToList()
             .Select(n => n.Value).OrderBy(v => v).ToList();
-        nodes.Should().BeEquivalentTo(new[] { b.Value, c.Value, d.Value });
+        vertices.Should().BeEquivalentTo(new[] { b.Value, c.Value, d.Value });
     }
 
     [Fact]
-    public void Repeat_with_type_filter_respects_relationship_type()
+    public void Repeat_with_type_filter_respects_edge_type()
     {
         using var tx = _db.BeginTransaction();
         var a = AddPerson(tx, "A");
         var b = AddPerson(tx, "B");
         var c = AddPerson(tx, "C");
-        tx.CreateRelationship(a, b, "KNOWS");
-        tx.CreateRelationship(b, c, "WORKS_AT"); // different type — should NOT be followed
+        tx.CreateEdge(a, b, "KNOWS");
+        tx.CreateEdge(b, c, "WORKS_AT"); // different type — should NOT be followed
         tx.Commit();
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
         // 2 hops of KNOWS from a: only b reachable at depth 1, depth 2 is empty.
-        g.Node(a).Repeat(s => s.Out("KNOWS"), times: 2).ToList().Should().BeEmpty();
+        g.Vertex(a).Repeat(s => s.Out("KNOWS"), times: 2).ToList().Should().BeEmpty();
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public sealed class GremlinCompatGc4Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        FluentActions.Invoking(() => g.Nodes().Repeat(s => s.Out("KNOWS"), times: 0))
+        FluentActions.Invoking(() => g.Vertices().Repeat(s => s.Out("KNOWS"), times: 0))
             .Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -111,7 +111,7 @@ public sealed class GremlinCompatGc4Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        g.Node(a).ShortestPathTo(d, type: "KNOWS").Next().Should().Be(3);
+        g.Vertex(a).ShortestPathTo(d, type: "KNOWS").Next().Should().Be(3);
     }
 
     [Fact]
@@ -123,21 +123,21 @@ public sealed class GremlinCompatGc4Tests : IDisposable
             var b = AddPerson(tx, "B");
             var c = AddPerson(tx, "C");
             var d = AddPerson(tx, "D");
-            tx.CreateRelationship(a, b, "K");
-            tx.CreateRelationship(b, c, "K");
-            tx.CreateRelationship(c, d, "K");
-            tx.CreateRelationship(a, c, "K"); // shortcut: a -> c directly
+            tx.CreateEdge(a, b, "K");
+            tx.CreateEdge(b, c, "K");
+            tx.CreateEdge(c, d, "K");
+            tx.CreateEdge(a, c, "K"); // shortcut: a -> c directly
             tx.Commit();
         }
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var nodes = g.Nodes().HasLabel("Person").Has("name", "A").ToList();
-        nodes.Should().HaveCount(1);
-        var src = nodes[0];
-        var dst = g.Nodes().HasLabel("Person").Has("name", "D").ToList()[0];
+        var vertices = g.Vertices().HasLabel("Person").Has("name", "A").ToList();
+        vertices.Should().HaveCount(1);
+        var src = vertices[0];
+        var dst = g.Vertices().HasLabel("Person").Has("name", "D").ToList()[0];
 
-        g.Node(src).ShortestPathTo(dst, type: "K").Next().Should().Be(2);
+        g.Vertex(src).ShortestPathTo(dst, type: "K").Next().Should().Be(2);
     }
 
     [Fact]
@@ -152,34 +152,34 @@ public sealed class GremlinCompatGc4Tests : IDisposable
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var a = g.Nodes().HasLabel("Person").Has("name", "A").ToList()[0];
-        var z = g.Nodes().HasLabel("Person").Has("name", "Z").ToList()[0];
+        var a = g.Vertices().HasLabel("Person").Has("name", "A").ToList()[0];
+        var z = g.Vertices().HasLabel("Person").Has("name", "Z").ToList()[0];
 
-        g.Node(a).ShortestPathTo(z, type: "K").ToList().Should().BeEmpty();
+        g.Vertex(a).ShortestPathTo(z, type: "K").ToList().Should().BeEmpty();
     }
 
     // ── .Dedup ──────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Dedup_keeps_first_occurrence_of_each_node()
+    public void Dedup_keeps_first_occurrence_of_each_vertex()
     {
         using (var tx = _db.BeginTransaction())
         {
             var a = AddPerson(tx, "A");
             var b = AddPerson(tx, "B");
             var c = AddPerson(tx, "C");
-            tx.CreateRelationship(a, c, "K");
-            tx.CreateRelationship(b, c, "K"); // c is reachable twice
+            tx.CreateEdge(a, c, "K");
+            tx.CreateEdge(b, c, "K"); // c is reachable twice
             tx.Commit();
         }
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var raw = g.Nodes().HasLabel("Person").Out("K").ToList();
+        var raw = g.Vertices().HasLabel("Person").Out("K").ToList();
         raw.Should().HaveCount(2); // c reached twice
 
-        var deduped = g.Nodes().HasLabel("Person").Out("K").Dedup().ToList();
+        var deduped = g.Vertices().HasLabel("Person").Out("K").Dedup().ToList();
         deduped.Should().HaveCount(1);
     }
 
@@ -193,16 +193,16 @@ public sealed class GremlinCompatGc4Tests : IDisposable
             var aSeed = AddPerson(tx, "A");
             var bSeed = AddPerson(tx, "B");
             var cSeed = AddPerson(tx, "C");
-            tx.CreateRelationship(aSeed, bSeed, "KNOWS");
-            tx.CreateRelationship(cSeed, aSeed, "KNOWS"); // c -> a so a has incoming
+            tx.CreateEdge(aSeed, bSeed, "KNOWS");
+            tx.CreateEdge(cSeed, aSeed, "KNOWS"); // c -> a so a has incoming
             tx.Commit();
         }
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var a = g.Nodes().HasLabel("Person").Has("name", "A").ToList()[0];
+        var a = g.Vertices().HasLabel("Person").Has("name", "A").ToList()[0];
 
-        var union = g.Node(a)
+        var union = g.Vertex(a)
             .Union(
                 s => s.Out("KNOWS"),
                 s => s.In("KNOWS"))
@@ -221,15 +221,15 @@ public sealed class GremlinCompatGc4Tests : IDisposable
         {
             var aSeed = AddPerson(tx, "A");
             var bSeed = AddPerson(tx, "B");
-            tx.CreateRelationship(aSeed, bSeed, "KNOWS"); // a only has KNOWS, no LIKES
+            tx.CreateEdge(aSeed, bSeed, "KNOWS"); // a only has KNOWS, no LIKES
             tx.Commit();
         }
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var a = g.Nodes().HasLabel("Person").Has("name", "A").ToList()[0];
+        var a = g.Vertices().HasLabel("Person").Has("name", "A").ToList()[0];
 
-        var coalesced = g.Node(a)
+        var coalesced = g.Vertex(a)
             .Coalesce(
                 s => s.Out("LIKES"),    // empty
                 s => s.Out("KNOWS"))    // matches — used
@@ -246,17 +246,17 @@ public sealed class GremlinCompatGc4Tests : IDisposable
             var aSeed = AddPerson(tx, "A");
             var bSeed = AddPerson(tx, "B");
             var cSeed = AddPerson(tx, "C");
-            tx.CreateRelationship(aSeed, bSeed, "KNOWS");
-            tx.CreateRelationship(aSeed, cSeed, "LIKES");
+            tx.CreateEdge(aSeed, bSeed, "KNOWS");
+            tx.CreateEdge(aSeed, cSeed, "LIKES");
             tx.Commit();
         }
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var a = g.Nodes().HasLabel("Person").Has("name", "A").ToList()[0];
+        var a = g.Vertices().HasLabel("Person").Has("name", "A").ToList()[0];
 
         // First branch (KNOWS) returns b — LIKES branch is never evaluated.
-        var coalesced = g.Node(a)
+        var coalesced = g.Vertex(a)
             .Coalesce(
                 s => s.Out("KNOWS"),
                 s => s.Out("LIKES"))
@@ -273,7 +273,7 @@ public sealed class GremlinCompatGc4Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var rows = g.Node(a).Optional(s => s.Out("KNOWS")).ToList();
+        var rows = g.Vertex(a).Optional(s => s.Out("KNOWS")).ToList();
         rows.Should().ContainSingle().Which.Value.Should().Be(b.Value);
     }
 
@@ -288,9 +288,9 @@ public sealed class GremlinCompatGc4Tests : IDisposable
 
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
-        var lonely = g.Nodes().HasLabel("Person").Has("name", "Lonely").ToList()[0];
+        var lonely = g.Vertices().HasLabel("Person").Has("name", "Lonely").ToList()[0];
 
-        var rows = g.Node(lonely).Optional(s => s.Out("KNOWS")).ToList();
+        var rows = g.Vertex(lonely).Optional(s => s.Out("KNOWS")).ToList();
         rows.Should().ContainSingle().Which.Value.Should().Be(lonely.Value);
     }
 }

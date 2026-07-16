@@ -17,7 +17,7 @@ namespace Quiver.Tests;
 public sealed class ConcurrencyStressCollection { }
 
 /// <summary>
-/// <see cref="GraphDatabaseOptions.LockingMode"/> に <see cref="LockingMode.ReaderWriter"/>
+/// <see cref="QuiverDatabaseOptions.LockingMode"/> に <see cref="LockingMode.ReaderWriter"/>
 /// を指定したときの挙動をデータベース単位で確認する。
 /// </summary>
 [Collection("concurrency-stress")]
@@ -35,8 +35,8 @@ public sealed class ReaderWriterLockingModeTests : IDisposable
         try { Directory.Delete(_dir, recursive: true); } catch { }
     }
 
-    private GraphDatabase OpenWithReaderWriter(TimeSpan? lockTimeout = null)
-        => GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), new GraphDatabaseOptions
+    private QuiverDatabase OpenWithReaderWriter(TimeSpan? lockTimeout = null)
+        => QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), new QuiverDatabaseOptions
         {
             LockingMode = LockingMode.ReaderWriter,
             // 既定 500ms は writer_blocks_concurrent_reader が「短時間で fail する」ことに依存する。
@@ -44,32 +44,32 @@ public sealed class ReaderWriterLockingModeTests : IDisposable
             LockTimeout = lockTimeout ?? TimeSpan.FromMilliseconds(500),
         });
 
-    private static long ReadInt64(IGraphTransaction tx, NodeId nodeId, string key)
-        => tx.GetProperty(nodeId, key).Int64Value;
+    private static long ReadInt64(IGraphTransaction tx, VertexId vertexId, string key)
+        => tx.GetProperty(vertexId, key).Int64Value;
 
     [Fact]
     public void DefaultMode_is_ExclusiveOnly_and_readers_do_not_lock()
     {
         // ExclusiveOnly: read API はロックを取らないので、書き込み tx が exclusive を持っていても
         // 別 tx の Read は即座に通る (現挙動を破壊していないことの確認)。
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        NodeId nodeId;
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        VertexId vertexId;
         using (var tx = db.BeginTransaction())
         {
-            nodeId = tx.CreateNode("Person");
-            tx.SetProperty(nodeId, "score", PropertyValue.FromInt64(1L));
+            vertexId = tx.CreateVertex("Person");
+            tx.SetProperty(vertexId, "score", PropertyValue.FromInt64(1L));
             tx.Commit();
         }
 
         using var w = db.BeginTransaction();
-        w.SetProperty(nodeId, "score", PropertyValue.FromInt64(2L));
+        w.SetProperty(vertexId, "score", PropertyValue.FromInt64(2L));
 
         // ExclusiveOnly default: read は無ロックでブロックも例外にもならない。
         // スナップショット分離自体の値は別議論なので、ここでは「例外無しに完走」のみ確認。
         Action act = () =>
         {
             using var r = db.BeginReadOnlyTransaction();
-            _ = ReadInt64(r, nodeId, "score");
+            _ = ReadInt64(r, vertexId, "score");
         };
         act.Should().NotThrow();
     }
@@ -85,11 +85,11 @@ public sealed class ReaderWriterLockingModeTests : IDisposable
         //   ② lock timeout           = CPU starvation シグナル → 30s 下では発生しないはず
         //   ③ その他例外              = 想定外 → 致命
         using var db = OpenWithReaderWriter(TimeSpan.FromSeconds(30));
-        NodeId nodeId;
+        VertexId vertexId;
         using (var tx = db.BeginTransaction())
         {
-            nodeId = tx.CreateNode("Person");
-            tx.SetProperty(nodeId, "score", PropertyValue.FromInt64(42L));
+            vertexId = tx.CreateVertex("Person");
+            tx.SetProperty(vertexId, "score", PropertyValue.FromInt64(42L));
             tx.Commit();
         }
 
@@ -106,7 +106,7 @@ public sealed class ReaderWriterLockingModeTests : IDisposable
                 try
                 {
                     using var rtx = db.BeginReadOnlyTransaction();
-                    long v = ReadInt64(rtx, nodeId, "score");
+                    long v = ReadInt64(rtx, vertexId, "score");
                     if (v != 42L) wrongValues.Add(v);
                 }
                 catch (TransactionException ex) when (ex.Message.Contains("Lock timeout"))
@@ -136,25 +136,25 @@ public sealed class ReaderWriterLockingModeTests : IDisposable
     }
 
     [Fact]
-    public void ReaderWriter_writer_blocks_concurrent_reader_on_same_node()
+    public void ReaderWriter_writer_blocks_concurrent_reader_on_same_vertex()
     {
         using var db = OpenWithReaderWriter();
-        NodeId nodeId;
+        VertexId vertexId;
         using (var tx = db.BeginTransaction())
         {
-            nodeId = tx.CreateNode("Person");
-            tx.SetProperty(nodeId, "score", PropertyValue.FromInt64(1L));
+            vertexId = tx.CreateVertex("Person");
+            tx.SetProperty(vertexId, "score", PropertyValue.FromInt64(1L));
             tx.Commit();
         }
 
         using var w = db.BeginTransaction();
-        w.SetProperty(nodeId, "score", PropertyValue.FromInt64(99L));
+        w.SetProperty(vertexId, "score", PropertyValue.FromInt64(99L));
 
         // 別 reader tx の shared 取得は w の exclusive で 500ms タイムアウトまで blocked。
         Action act = () =>
         {
             using var r = db.BeginReadOnlyTransaction();
-            _ = ReadInt64(r, nodeId, "score");
+            _ = ReadInt64(r, vertexId, "score");
         };
         act.Should().Throw<TransactionException>();
     }
@@ -163,23 +163,23 @@ public sealed class ReaderWriterLockingModeTests : IDisposable
     public void ReaderWriter_reader_then_writer_in_same_tx_upgrades()
     {
         using var db = OpenWithReaderWriter();
-        NodeId nodeId;
+        VertexId vertexId;
         using (var tx = db.BeginTransaction())
         {
-            nodeId = tx.CreateNode("Person");
-            tx.SetProperty(nodeId, "score", PropertyValue.FromInt64(1L));
+            vertexId = tx.CreateVertex("Person");
+            tx.SetProperty(vertexId, "score", PropertyValue.FromInt64(1L));
             tx.Commit();
         }
 
         using (var tx2 = db.BeginTransaction())
         {
             // 単独 reader (自分) → exclusive 昇格は無待機で成功する。
-            ReadInt64(tx2, nodeId, "score").Should().Be(1L);
-            tx2.SetProperty(nodeId, "score", PropertyValue.FromInt64(2L));
+            ReadInt64(tx2, vertexId, "score").Should().Be(1L);
+            tx2.SetProperty(vertexId, "score", PropertyValue.FromInt64(2L));
             tx2.Commit();
         }
 
         using var r = db.BeginReadOnlyTransaction();
-        ReadInt64(r, nodeId, "score").Should().Be(2L);
+        ReadInt64(r, vertexId, "score").Should().Be(2L);
     }
 }

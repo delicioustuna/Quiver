@@ -8,7 +8,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// FT-20: FT-19 で索引を ARIES page-WAL ロギング対象にしたことによる WAL 書き込み増幅と
+/// 索引を QUIVER-SW page-WAL の対象にした場合の WAL 書き込み増幅と
 /// throughput 影響の実測。
 ///
 /// 計測軸:
@@ -31,13 +31,13 @@ public class IndexWalAmplificationBenchmarks
     public int EntryCount { get; set; }
 
     private string _dbPath = null!;
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
 
     [IterationSetup]
     public void Setup()
     {
         _dbPath = BenchTempDir.Create("ft20_wal_amp");
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _ = _db.Schema.GetOrCreateLabel("Doc");
         _ = _db.Schema.GetOrCreatePropertyKey("idx");
         _db.Schema.CreateIndex("idx_bench", "Doc", "idx", IndexKind.Int64Equality);
@@ -61,8 +61,8 @@ public class IndexWalAmplificationBenchmarks
         {
             for (int i = 0; i < EntryCount; i++)
             {
-                var node = tx.CreateNode("Doc");
-                tx.IndexInsert("idx_bench", (long)i, node);
+                var vertex = tx.CreateVertex("Doc");
+                tx.IndexInsert("idx_bench", (long)i, vertex);
             }
             tx.Commit();
         }
@@ -79,8 +79,8 @@ public class IndexWalAmplificationBenchmarks
         for (int i = 0; i < EntryCount; i++)
         {
             using var tx = _db.BeginTransaction();
-            var node = tx.CreateNode("Doc");
-            tx.IndexInsert("idx_bench", (long)i, node);
+            var vertex = tx.CreateVertex("Doc");
+            tx.IndexInsert("idx_bench", (long)i, vertex);
             tx.Commit();
         }
         return WalBytes();
@@ -94,20 +94,20 @@ public class IndexWalAmplificationBenchmarks
     [Benchmark(Description = "hot-page (per-tx, 100 keys recycled)")]
     public long HotPagePerTx()
     {
-        var nodes = new NodeId[100];
-        // 100 ノードを 1 tx で先行作成 (key と 1:1 対応)。
+        var vertices = new VertexId[100];
+        // 100 Vertexを 1 tx で先行作成 (key と 1:1 対応)。
         using (var tx = _db.BeginTransaction())
         {
-            for (int i = 0; i < nodes.Length; i++)
-                nodes[i] = tx.CreateNode("Doc");
+            for (int i = 0; i < vertices.Length; i++)
+                vertices[i] = tx.CreateVertex("Doc");
             tx.Commit();
         }
         // EntryCount 回、同じ 100 key を順繰りに index insert (各回独立 tx)。
         for (int i = 0; i < EntryCount; i++)
         {
             using var tx = _db.BeginTransaction();
-            long key = (long)(i % nodes.Length);
-            tx.IndexInsert("idx_bench", key, nodes[(int)key]);
+            long key = (long)(i % vertices.Length);
+            tx.IndexInsert("idx_bench", key, vertices[(int)key]);
             tx.Commit();
         }
         return WalBytes();
@@ -122,7 +122,7 @@ public class IndexWalAmplificationBenchmarks
 }
 
 /// <summary>
-/// FT-20: 一回限りの「対比計測」用スタンドアロンランナー (BenchmarkDotNet 経由ではなく
+/// 一回限りの「対比計測」用スタンドアロンランナー (BenchmarkDotNet 経由ではなく
 /// 通常の Stopwatch 測定)。CI / ローカル開発で素早く参考値を取るために使う。
 /// 詳細プロファイリングは <see cref="IndexWalAmplificationBenchmarks"/> で取得。
 /// </summary>
@@ -137,10 +137,10 @@ public static class IndexWalAmplificationStandalone
         {
             // 並列シナリオは group commit window を opt-in にして coalesce 窓を広げる。
             var options = scenario == "per-tx-parallel"
-                ? new GraphDatabaseOptions { GroupCommitWindow = TimeSpan.FromMicroseconds(100) }
-                : new GraphDatabaseOptions();
+                ? new QuiverDatabaseOptions { GroupCommitWindow = TimeSpan.FromMicroseconds(100) }
+                : new QuiverDatabaseOptions();
 
-            using var db = GraphDatabase.Open(System.IO.Path.Combine(dbPath, "graph.quiver"), options);
+            using var db = QuiverDatabase.Open(System.IO.Path.Combine(dbPath, "graph.quiver"), options);
             _ = db.Schema.GetOrCreateLabel("Doc");
             _ = db.Schema.GetOrCreatePropertyKey("idx");
             db.Schema.CreateIndex("idx_bench", "Doc", "idx", IndexKind.Int64Equality);
@@ -153,8 +153,8 @@ public static class IndexWalAmplificationStandalone
                     using var tx = db.BeginTransaction();
                     for (int i = 0; i < entryCount; i++)
                     {
-                        var node = tx.CreateNode("Doc");
-                        tx.IndexInsert("idx_bench", (long)i, node);
+                        var vertex = tx.CreateVertex("Doc");
+                        tx.IndexInsert("idx_bench", (long)i, vertex);
                     }
                     tx.Commit();
                     break;
@@ -164,15 +164,15 @@ public static class IndexWalAmplificationStandalone
                     for (int i = 0; i < entryCount; i++)
                     {
                         using var tx = db.BeginTransaction();
-                        var node = tx.CreateNode("Doc");
-                        tx.IndexInsert("idx_bench", (long)i, node);
+                        var vertex = tx.CreateVertex("Doc");
+                        tx.IndexInsert("idx_bench", (long)i, vertex);
                         tx.Commit();
                     }
                     break;
                 }
                 case "per-tx-parallel":
                 {
-                    // FT-29: 並列 per-tx insert で cross-tx coalescing 効果を測定。
+                    // 並列 per-tx insert で cross-tx coalescing 効果を測定。
                     // group commit window を opt-in (100µs) して flush ループ内で
                     // 複数 tx の PageImage を 1 drain に集約させる。
                     int threadCount = Math.Max(8, Environment.ProcessorCount);
@@ -186,8 +186,8 @@ public static class IndexWalAmplificationStandalone
                             for (int i = 0; i < perThread; i++)
                             {
                                 using var tx = db.BeginTransaction();
-                                var node = tx.CreateNode("Doc");
-                                tx.IndexInsert("idx_bench", tid * 1_000_000L + i, node);
+                                var vertex = tx.CreateVertex("Doc");
+                                tx.IndexInsert("idx_bench", tid * 1_000_000L + i, vertex);
                                 tx.Commit();
                             }
                         });

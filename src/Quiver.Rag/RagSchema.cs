@@ -2,14 +2,14 @@ namespace Quiver.Rag;
 
 /// <summary>
 /// Quiver.Rag が使うグラフスキーマの正準名 (ラベル / 関係型 / プロパティキー / 索引名)。
-/// RAG スキーマ表に対応する。利用側がノードを直接問い合わせる際にも参照できるよう公開する。
+/// RAG スキーマ表に対応する。利用側がVertexを直接問い合わせる際にも参照できるよう公開する。
 /// </summary>
 public static class RagSchema
 {
     // ── ラベル ──
-    /// <summary>文書ノードのラベル。</summary>
+    /// <summary>文書Vertexのラベル。</summary>
     public const string DocumentLabel = "Document";
-    /// <summary>チャンクノードのラベル。</summary>
+    /// <summary>チャンクVertexのラベル。</summary>
     public const string ChunkLabel = "Chunk";
 
     // ── 関係型 ──

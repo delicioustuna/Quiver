@@ -8,7 +8,7 @@ using Xunit;
 namespace Quiver.Storage.Records.Tests;
 
 /// <summary>
-/// 実ストア (NodeStore / RelationshipStore / EntityVersionStore sidecar) を
+/// 実ストア (VertexStore / EdgeStore / EntityVersionStore sidecar) を
 /// <see cref="SingleFileContainer"/> のテナント上で無改修のまま動かせることを検証する。
 /// header ページ (論理 page1) / レコードページ (論理 page2+) / <c>EnsurePage</c> による論理空間
 /// 拡張 / MVCC sidecar / reopen 時のメタ読み戻し + format チェックを、単一ファイル内で確認する。
@@ -27,49 +27,49 @@ public class TenantStoreIntegrationTests : IDisposable
 
     private string DbFile() => System.IO.Path.Combine(_tmpDir, "graph.quiver");
 
-    private static (NodeStore nodes, RelationshipStore rels) BuildStores(SingleFileContainer c)
+    private static (VertexStore vertices, EdgeStore edges) BuildStores(SingleFileContainer c)
     {
-        var nodeFile = c.OpenTenant((byte)WalFileKind.Nodes, PageKind.Header);
-        var nodeVerFile = c.OpenTenant((byte)WalFileKind.NodeVersionMeta, PageKind.Header);
-        var nodeVersions = new EntityVersionStore(nodeVerFile);
-        var nodes = new NodeStore(nodeFile, labelIndex: null, nodeVersions);
+        var vertexFile = c.OpenTenant((byte)WalFileKind.Vertices, PageKind.Header);
+        var vertexVerFile = c.OpenTenant((byte)WalFileKind.VertexVersionMeta, PageKind.Header);
+        var vertexVersions = new EntityVersionStore(vertexVerFile);
+        var vertices = new VertexStore(vertexFile, labelIndex: null, vertexVersions);
 
-        var relFile = c.OpenTenant((byte)WalFileKind.Relationships, PageKind.Header);
-        var relVerFile = c.OpenTenant((byte)WalFileKind.RelationshipVersionMeta, PageKind.Header);
-        var relVersions = new EntityVersionStore(relVerFile);
-        var rels = new RelationshipStore(relFile, relVersions);
-        return (nodes, rels);
+        var edgeFile = c.OpenTenant((byte)WalFileKind.Edges, PageKind.Header);
+        var relVerFile = c.OpenTenant((byte)WalFileKind.EdgeVersionMeta, PageKind.Header);
+        var edgeVersions = new EntityVersionStore(relVerFile);
+        var edges = new EdgeStore(edgeFile, edgeVersions);
+        return (vertices, edges);
     }
 
     [Fact]
-    public void Nodes_And_Rels_Coexist_In_Single_File_And_Persist()
+    public void Vertices_And_Edges_Coexist_In_Single_File_And_Persist()
     {
         string path = DbFile();
-        NodeId a, b;
-        RelationshipId r;
+        VertexId a, b;
+        EdgeId r;
         using (var c = new SingleFileContainer(path))
         {
-            var (nodes, rels) = BuildStores(c);
-            a = nodes.Allocate(new LabelId(10));
-            b = nodes.Allocate(new LabelId(20));
-            r = rels.Create(nodes, a, b, new RelationshipTypeId(1));
+            var (vertices, edges) = BuildStores(c);
+            a = vertices.Allocate(new LabelId(10));
+            b = vertices.Allocate(new LabelId(20));
+            r = edges.Create(vertices, a, b, new EdgeTypeId(1));
             c.Flush();
         }
 
         using (var c = new SingleFileContainer(path))
         {
-            var (nodes, rels) = BuildStores(c);
-            using (var ha = nodes.Read(a))
+            var (vertices, edges) = BuildStores(c);
+            using (var ha = vertices.Read(a))
             {
                 ha.InUse.Should().BeTrue();
                 ha.Label.Value.Should().Be(10);
             }
-            using (var hb = nodes.Read(b))
+            using (var hb = vertices.Read(b))
             {
                 hb.InUse.Should().BeTrue();
                 hb.Label.Value.Should().Be(20);
             }
-            using var hr = rels.Read(r);
+            using var hr = edges.Read(r);
             hr.InUse.Should().BeTrue();
             hr.Id.Should().Be(r);
             hr.Source.Sequence.Should().Be(a.Sequence);
@@ -83,45 +83,45 @@ public class TenantStoreIntegrationTests : IDisposable
     }
 
     [Fact]
-    public void Many_Nodes_Span_Multiple_Record_Pages_On_A_Tenant()
+    public void Many_Vertices_Span_Multiple_Record_Pages_On_A_Tenant()
     {
         // EnsurePage による論理ページ拡張がテナント上で正しく動くことを確認する。
         using var c = new SingleFileContainer(DbFile());
-        var (nodes, _) = BuildStores(c);
+        var (vertices, _) = BuildStores(c);
 
-        int n = NodeStore.RecordsPerPage + 50; // レコードページ境界を確実に跨ぐ
-        var ids = new List<NodeId>(n);
+        int n = VertexStore.RecordsPerPage + 50; // レコードページ境界を確実に跨ぐ
+        var ids = new List<VertexId>(n);
         for (int i = 0; i < n; i++)
-            ids.Add(nodes.Allocate(new LabelId((short)(i % 100))));
+            ids.Add(vertices.Allocate(new LabelId((short)(i % 100))));
 
-        nodes.InUseCount.Should().Be(n);
+        vertices.InUseCount.Should().Be(n);
         for (int i = 0; i < n; i++)
         {
-            using var h = nodes.Read(ids[i]);
+            using var h = vertices.Read(ids[i]);
             h.InUse.Should().BeTrue();
             h.Label.Value.Should().Be((short)(i % 100));
         }
     }
 
     [Fact]
-    public void Node_Write_FirstRel_Persists_Across_Reopen()
+    public void Vertex_Write_FirstEdge_Persists_Across_Reopen()
     {
         string path = DbFile();
-        NodeId id;
+        VertexId id;
         using (var c = new SingleFileContainer(path))
         {
-            var (nodes, _) = BuildStores(c);
-            id = nodes.Allocate(new LabelId(1));
-            var w = nodes.Write(id);
-            w.FirstRelationshipId = new RelationshipId(7);
+            var (vertices, _) = BuildStores(c);
+            id = vertices.Allocate(new LabelId(1));
+            var w = vertices.Write(id);
+            w.FirstEdgeId = new EdgeId(7);
             w.Dispose();
             c.Flush();
         }
         using (var c = new SingleFileContainer(path))
         {
-            var (nodes, _) = BuildStores(c);
-            using var h = nodes.Read(id);
-            h.FirstRelationshipId.Value.Should().Be(7);
+            var (vertices, _) = BuildStores(c);
+            using var h = vertices.Read(id);
+            h.FirstEdgeId.Value.Should().Be(7);
         }
     }
 }

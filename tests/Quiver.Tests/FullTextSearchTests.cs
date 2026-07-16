@@ -15,12 +15,12 @@ public sealed class FullTextSearchTests : IDisposable
 {
     private const string Index = "idx_body";
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public FullTextSearchTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fts3_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
         _db.Schema.CreateFullTextIndex(Index, "Doc", "body");
     }
 
@@ -30,16 +30,16 @@ public sealed class FullTextSearchTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private NodeId AddDoc(string body)
+    private VertexId AddDoc(string body)
     {
         using var tx = _db.BeginTransaction();
-        var n = tx.CreateNode("Doc");
+        var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString(body));
         tx.Commit();
         return n;
     }
 
-    private List<NodeId> Search(string query, int k)
+    private List<VertexId> Search(string query, int k)
     {
         using var rtx = _db.BeginReadOnlyTransaction();
         return rtx.G(_db.Schema).Search(Index, query, k).ToList();
@@ -82,7 +82,7 @@ public sealed class FullTextSearchTests : IDisposable
         // DoD: a document written earlier in a transaction is found by g.Search
         // within that same (uncommitted) transaction.
         using var tx = _db.BeginTransaction();
-        var n = tx.CreateNode("Doc");
+        var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString("inflight searchable text"));
 
         var hits = tx.G(_db.Schema).Search(Index, "inflight", k: 10).ToList();
@@ -114,14 +114,14 @@ public sealed class FullTextSearchTests : IDisposable
     }
 
     [Fact]
-    public void Deleted_node_is_not_returned()
+    public void Deleted_vertex_is_not_returned()
     {
         var doc = AddDoc("secret content");
         Search("secret", k: 10).Should().ContainSingle().Which.Should().Be(doc);
 
         using (var tx = _db.BeginTransaction())
         {
-            tx.DeleteNode(doc);
+            tx.DeleteVertex(doc);
             tx.Commit();
         }
 
@@ -131,14 +131,14 @@ public sealed class FullTextSearchTests : IDisposable
     [Fact]
     public void Search_composes_with_Out_traversal()
     {
-        NodeId author;
-        NodeId doc;
+        VertexId author;
+        VertexId doc;
         using (var tx = _db.BeginTransaction())
         {
-            author = tx.CreateNode("Author");
-            doc = tx.CreateNode("Doc");
+            author = tx.CreateVertex("Author");
+            doc = tx.CreateVertex("Doc");
             tx.SetProperty(doc, "body", PropertyValue.FromString("quiver report"));
-            tx.CreateRelationship(doc, author, "WROTE");
+            tx.CreateEdge(doc, author, "WROTE");
             tx.Commit();
         }
 

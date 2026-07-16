@@ -21,7 +21,7 @@ public sealed class SchemaInspectionService
 
         var schema = database.Schema;
         var labels = schema.ListLabels();
-        var relTypes = schema.ListRelationshipTypes();
+        var edgeTypes = schema.ListEdgeTypes();
         var propKeys = schema.ListPropertyKeys();
 
         var keyIdToName = new Dictionary<PropertyKeyId, string>();
@@ -32,7 +32,7 @@ public sealed class SchemaInspectionService
         }
 
         var labelProperties = new Dictionary<string, List<PropertyInfo>>();
-        var relTypeProperties = new Dictionary<string, List<PropertyInfo>>();
+        var edgeTypeProperties = new Dictionary<string, List<PropertyInfo>>();
 
         using var tx = database.BeginReadOnlyTransaction();
         var g = tx.G(schema);
@@ -40,11 +40,11 @@ public sealed class SchemaInspectionService
         foreach (var label in labels)
         {
             var observed = new Dictionary<PropertyKeyId, PropertyTypeFlags>();
-            var nodeIds = g.Nodes().HasLabel(label).Limit(SampleLimit).ToList();
+            var vertexIds = g.Vertices().HasLabel(label).Limit(SampleLimit).ToList();
 
-            foreach (var nodeId in nodeIds)
+            foreach (var vertexId in vertexIds)
             {
-                var props = tx.EnumerateProperties(nodeId);
+                var props = tx.EnumerateProperties(vertexId);
                 while (props.MoveNext())
                 {
                     var ph = props.Current;
@@ -63,32 +63,32 @@ public sealed class SchemaInspectionService
             labelProperties[label] = list;
         }
 
-        foreach (var relType in relTypes)
+        foreach (var edgeType in edgeTypes)
         {
             var observed = new Dictionary<string, PropertyTypeFlags>();
-            int relSampled = 0;
+            int edgeSampled = 0;
 
             foreach (var label in labels)
             {
-                if (relSampled >= SampleLimit) break;
-                var nodeIds = g.Nodes().HasLabel(label).Limit(SampleLimit).ToList();
-                foreach (var nodeId in nodeIds)
+                if (edgeSampled >= SampleLimit) break;
+                var vertexIds = g.Vertices().HasLabel(label).Limit(SampleLimit).ToList();
+                foreach (var vertexId in vertexIds)
                 {
-                    if (relSampled >= SampleLimit) break;
-                    var rels = tx.EnumerateRelationships(nodeId, typeFilter: relType);
-                    while (rels.MoveNext())
+                    if (edgeSampled >= SampleLimit) break;
+                    var edges = tx.EnumerateEdges(vertexId, typeFilter: edgeType);
+                    while (edges.MoveNext())
                     {
-                        var rel = rels.Current;
-                        if (rel.Source != nodeId) continue;
+                        var edge = edges.Current;
+                        if (edge.Source != vertexId) continue;
                         foreach (var keyName in propKeys)
                         {
-                            var val = tx.GetProperty(rel.Id, keyName);
+                            var val = tx.GetProperty(edge.Id, keyName);
                             if ((int)val.Type == 0) continue;
                             observed.TryGetValue(keyName, out var flags);
                             observed[keyName] = flags | val.Type.ToFlags();
                         }
-                        relSampled++;
-                        if (relSampled >= SampleLimit) break;
+                        edgeSampled++;
+                        if (edgeSampled >= SampleLimit) break;
                     }
                 }
             }
@@ -97,10 +97,10 @@ public sealed class SchemaInspectionService
             foreach (var (keyName, flags) in observed)
                 list.Add(new PropertyInfo(keyName, FormatType(flags)));
             list.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
-            relTypeProperties[relType] = list;
+            edgeTypeProperties[edgeType] = list;
         }
 
-        return new SchemaInspectionResult(labelProperties, relTypeProperties);
+        return new SchemaInspectionResult(labelProperties, edgeTypeProperties);
     }
 
     private static string FormatType(PropertyTypeFlags flags)
@@ -119,6 +119,6 @@ public sealed class SchemaInspectionService
 
 public sealed record SchemaInspectionResult(
     Dictionary<string, List<PropertyInfo>> LabelProperties,
-    Dictionary<string, List<PropertyInfo>> RelTypeProperties);
+    Dictionary<string, List<PropertyInfo>> EdgeTypeProperties);
 
 public sealed record PropertyInfo(string Name, string InferredType);

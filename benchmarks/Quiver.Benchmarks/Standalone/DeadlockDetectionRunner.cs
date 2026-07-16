@@ -5,7 +5,7 @@ using Quiver.Transactions;
 namespace Quiver.Benchmarks.Standalone;
 
 /// <summary>
-/// FT-25: DeadlockDetector の特性を BDN 無しで短時間計測するランナー。
+/// DeadlockDetector の特性を BDN 無しで短時間計測するランナー。
 ///
 /// 計測軸:
 ///   1) detection latency — 意図的に作った 2-way circular wait が、検出器の周期に応じて
@@ -20,7 +20,7 @@ public static class DeadlockDetectionRunner
 {
     public static int Run()
     {
-        Console.WriteLine("=== FT-25: Deadlock Detection ===");
+        Console.WriteLine("=== Deadlock Detection ===");
         RunDetectionLatency();
         Console.WriteLine();
         RunCpuOverhead();

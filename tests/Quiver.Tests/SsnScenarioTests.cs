@@ -21,8 +21,8 @@ public sealed class SsnScenarioTests
     private const string PublicWriterGateSkip =
         "Multiple concurrent public writers are no longer supported; single-writer gate coverage replaces this white-box concurrency scenario.";
 
-    private static GraphDatabase Open(string dir)
-        => GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"), new GraphDatabaseOptions
+    private static QuiverDatabase Open(string dir)
+        => QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"), new QuiverDatabaseOptions
         {
             // ww cycle (lost update / 相互上書き) は SSN ではなく wait-for graph で解く。
             DeadlockDetectionInterval = TimeSpan.FromMilliseconds(100),
@@ -234,20 +234,20 @@ public sealed class SsnScenarioTests
     }
 
     // ─────────────────────────── helpers ───────────────────────────
-    private static NodeId[] Seed(GraphDatabase db, params (string key, int val)[] nodes)
+    private static VertexId[] Seed(QuiverDatabase db, params (string key, int val)[] vertices)
     {
-        var ids = new NodeId[nodes.Length];
+        var ids = new VertexId[vertices.Length];
         using var tx = db.BeginTransaction();
-        for (int i = 0; i < nodes.Length; i++)
+        for (int i = 0; i < vertices.Length; i++)
         {
-            ids[i] = tx.CreateNode("N");
-            tx.SetProperty(ids[i], "v", PropertyValue.FromInt32(nodes[i].val));
+            ids[i] = tx.CreateVertex("N");
+            tx.SetProperty(ids[i], "v", PropertyValue.FromInt32(vertices[i].val));
         }
         tx.Commit();
         return ids;
     }
 
-    private static (NodeId, NodeId) Seed(GraphDatabase db, (string, int) a, (string, int) b)
+    private static (VertexId, VertexId) Seed(QuiverDatabase db, (string, int) a, (string, int) b)
     {
         var ids = Seed(db, new[] { a, b });
         return (ids[0], ids[1]);

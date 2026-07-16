@@ -16,7 +16,7 @@ public sealed class MatchQuery
     private readonly CompileFunc _compile;
     private readonly List<(string variable, string key, PropertyPredicate pred)> _wherePredicates = new();
 
-    // node/edge パターンと星型ハイパーエッジパターンを同じ実行経路 (Execute) に載せるため、
+    // vertex/edge パターンと星型Nexusパターンを同じ実行経路 (Execute) に載せるため、
     // パターン種別ごとの compile 呼び出しをクロージャに閉じ込める。
     internal delegate (IPhysicalOperator plan, Dictionary<string, int> varToColumn) CompileFunc(
         IGraphTransaction tx,
@@ -28,7 +28,7 @@ public sealed class MatchQuery
     {
     }
 
-    internal MatchQuery(IGraphTransaction tx, ISchemaApi schema, HyperedgePattern pattern)
+    internal MatchQuery(IGraphTransaction tx, ISchemaApi schema, NexusPattern pattern)
         : this(tx, schema, (t, s, w) => MatchCompiler.Compile(t, s, pattern, w))
     {
     }

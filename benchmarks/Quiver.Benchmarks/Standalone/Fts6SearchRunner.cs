@@ -7,7 +7,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Benchmarks.Standalone;
 
 /// <summary>
-/// FTS-6: BenchmarkDotNet を経由しない短時間ランナーで、設計書 13 §9 の 3 つの
+/// BenchmarkDotNet を経由しない短時間ランナーで、設計書 13 §9 の 3 つの
 /// 目標値を実測する:
 /// <list type="bullet">
 ///   <item><b>検索 p50/p90/p99</b>: N チャンク・2〜5 term クエリ (バッファプール常駐)。目標 p50 &lt; 10ms。</item>
@@ -15,7 +15,7 @@ namespace Quiver.Benchmarks.Standalone;
 ///   <item><b>WAL bytes/chunk</b>: 索引維持込みでチャンク 1 件あたりの WAL バイト数 (回帰 sentinel 値)。</item>
 /// </list>
 /// checkpoint は閾値を最大化して WAL truncate を止め、取込で発生した物理ログを
-/// 全量計測する。WAL は単一サイドカー <c>graph.quiver-wal</c> (ARCH-4)。
+/// 全量計測する。WAL は単一サイドカー <c>graph.quiver-wal</c> ()。
 ///
 /// 起動方法: <c>dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --fts6 [chunkCount] [queryCount]</c>
 /// </summary>
@@ -27,7 +27,7 @@ public static class Fts6SearchRunner
 
     public static int Run(int searchChunks, int queryCount)
     {
-        Console.WriteLine("=== FTS-6: Full-Text Search / Ingest Amplification ===");
+        Console.WriteLine("=== Full-Text Search / Ingest Amplification ===");
         Console.WriteLine($"searchChunks={searchChunks}, queryCount={queryCount}, batchSize={BatchSize}");
         Console.WriteLine();
 
@@ -60,7 +60,7 @@ public static class Fts6SearchRunner
         var dirFt = BenchTempDir.Create("fts6_search");
         try
         {
-            using var db = GraphDatabase.Open(System.IO.Path.Combine(dirFt, "graph.quiver"));
+            using var db = QuiverDatabase.Open(System.IO.Path.Combine(dirFt, "graph.quiver"));
             db.Schema.CreateFullTextIndex(Index, "Doc", "body");
             double ingestMs = IngestCorpus(db, vocab, searchChunks, seed: 11);
             Console.WriteLine($"built search corpus: {searchChunks:N0} chunks in {ingestMs,7:F0} ms ({searchChunks / (ingestMs / 1000.0),8:F0} chunks/s)");
@@ -87,9 +87,9 @@ public static class Fts6SearchRunner
         var dir = BenchTempDir.Create(withIndex ? "fts6_amp_ft" : "fts6_amp_plain");
         try
         {
-            using var db = GraphDatabase.Open(
+            using var db = QuiverDatabase.Open(
                 System.IO.Path.Combine(dir, "graph.quiver"),
-                new GraphDatabaseOptions { CheckpointThresholdBytes = long.MaxValue });
+                new QuiverDatabaseOptions { CheckpointThresholdBytes = long.MaxValue });
             if (withIndex) db.Schema.CreateFullTextIndex(Index, "Doc", "body");
             ingestMs = IngestCorpus(db, vocab, chunkCount, seed: 11);
             return WalBytes(dir);
@@ -100,7 +100,7 @@ public static class Fts6SearchRunner
         }
     }
 
-    private static double IngestCorpus(GraphDatabase db, ZipfVocabulary vocab, int chunkCount, int seed)
+    private static double IngestCorpus(QuiverDatabase db, ZipfVocabulary vocab, int chunkCount, int seed)
     {
         var rng = new Random(seed);
         var sw = Stopwatch.StartNew();
@@ -111,7 +111,7 @@ public static class Fts6SearchRunner
             using var tx = db.BeginTransaction();
             for (int b = 0; b < batch; b++)
             {
-                var n = tx.CreateNode("Doc");
+                var n = tx.CreateVertex("Doc");
                 tx.SetProperty(n, "body", PropertyValue.FromString(MakeChunk(vocab, rng)));
             }
             tx.Commit();
@@ -122,12 +122,12 @@ public static class Fts6SearchRunner
     }
 
     private static List<double> MeasureSearchLatencies(
-        GraphDatabase db, ZipfVocabulary vocab, int queryCount, int seed)
+        QuiverDatabase db, ZipfVocabulary vocab, int queryCount, int seed)
     {
         var rng = new Random(seed);
-        // FTS-8: collect stats so the per-term (df, maxTf) snapshot is available and the
+        // collect stats so the per-term (df, maxTf) snapshot is available and the
         // text-first operator takes the WAND pruning path (G(schema) without stats stays on
-        // the full term-at-a-time scan — the FTS-6 baseline).
+        // the full term-at-a-time scan — the  baseline).
         var stats = db.CollectStats();
         using var rtx = db.BeginReadOnlyTransaction();
         var g = rtx.G(db.Schema, stats);

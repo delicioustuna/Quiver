@@ -4,19 +4,19 @@ using Quiver.Query.Physical;
 
 namespace Quiver.Benchmarks.Operators;
 
-/// <summary>TS-6 sentinel: <see cref="SortOperator"/> sorts 200 node ids ascending.</summary>
+/// <summary> sentinel: <see cref="SortOperator"/> sorts 200 vertex ids ascending.</summary>
 [MemoryDiagnoser]
 [ShortRunJob]
 public class SortOperatorBench
 {
     private OperatorBenchSeed _seed = null!;
-    private NodeId[] _shuffled = null!;
+    private VertexId[] _shuffled = null!;
 
     [GlobalSetup]
     public void Setup()
     {
         _seed = new OperatorBenchSeed("sort");
-        _shuffled = (NodeId[])_seed.PersonNodes.Clone();
+        _shuffled = (VertexId[])_seed.PersonVertices.Clone();
         var rng = new Random(2026);
         for (int i = _shuffled.Length - 1; i > 0; i--)
         {
@@ -31,7 +31,7 @@ public class SortOperatorBench
     [Benchmark]
     public int Sort_ascending()
     {
-        var src = new NodeArraySource(_shuffled);
+        var src = new VertexArraySource(_shuffled);
         using var op = new SortOperator(src, sortColumn: 0);
         return OperatorBenchDrain.Drain(op, _seed.ReadTx);
     }

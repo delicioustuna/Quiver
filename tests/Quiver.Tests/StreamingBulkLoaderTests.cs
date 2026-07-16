@@ -9,9 +9,9 @@ namespace Quiver.Tests;
 /// <summary>
 /// <c>StreamingBulkLoader</c> がメモリ内 <see cref="BulkLoader"/> と
 /// 同じオンディスクデータベースを生成することを検証する。
-/// 両者は同じ密ポインターアルゴリズムを使い、リレーションシップの入力元だけが
-/// 一時ファイルとヒープ上のリストで異なるため、RelationshipStore、NodeStore、
-/// FirstRelId チェーンがバイト単位で一致することを確認する。
+/// 両者は同じ密ポインターアルゴリズムを使い、Edgeの入力元だけが
+/// 一時ファイルとヒープ上のリストで異なるため、EdgeStore、VertexStore、
+/// FirstEdgeId チェーンがバイト単位で一致することを確認する。
 /// </summary>
 public sealed class StreamingBulkLoaderTests : IDisposable
 {
@@ -33,13 +33,13 @@ public sealed class StreamingBulkLoaderTests : IDisposable
     public void Empty_graph_commits_without_error()
     {
         var dir = Path.Combine(_baseDir, "empty");
-        using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
+        using (var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
         using (var loader = db.BeginStreamingBulkLoad())
             loader.Commit();
 
-        using var reopened = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+        using var reopened = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
         using var tx = reopened.BeginTransaction();
-        // No nodes, no rels — but the db must be openable.
+        // No vertices, no edges — but the db must be openable.
         tx.Should().NotBeNull();
     }
 
@@ -47,40 +47,40 @@ public sealed class StreamingBulkLoaderTests : IDisposable
     public void Streaming_matches_inmemory_for_simple_chain()
     {
         var edges = new[] { (0L, 1L), (1L, 2L), (2L, 3L), (0L, 3L) };
-        AssertParity(nodeCount: 4, edges, payloadKey: null);
+        AssertParity(vertexCount: 4, edges, payloadKey: null);
     }
 
     [Fact]
     public void Streaming_matches_inmemory_with_self_loop()
     {
         var edges = new[] { (0L, 0L), (0L, 1L), (1L, 1L) };
-        AssertParity(nodeCount: 2, edges, payloadKey: null);
+        AssertParity(vertexCount: 2, edges, payloadKey: null);
     }
 
     [Fact]
     public void Streaming_matches_inmemory_with_dense_random_edges()
     {
         var rng = new Random(42);
-        const int nodeCount = 50;
+        const int vertexCount = 50;
         const int edgeCount = 500;
         var edges = new (long Src, long Tgt)[edgeCount];
         for (int i = 0; i < edgeCount; i++)
-            edges[i] = (rng.Next(nodeCount), rng.Next(nodeCount));
-        AssertParity(nodeCount, edges, payloadKey: null);
+            edges[i] = (rng.Next(vertexCount), rng.Next(vertexCount));
+        AssertParity(vertexCount, edges, payloadKey: null);
     }
 
     [Fact]
-    public void Streaming_throws_when_appendrelationship_is_out_of_order()
+    public void Streaming_throws_when_appendedge_is_out_of_order()
     {
         var dir = Path.Combine(_baseDir, "oodo");
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
         using var loader = db.BeginStreamingBulkLoad();
-        loader.AppendNode(new NodeId(0), new LabelId(0));
-        loader.AppendNode(new NodeId(1), new LabelId(0));
-        loader.AppendRelationship(new RelationshipId(5), new NodeId(0), new NodeId(1), new RelationshipTypeId(0));
+        loader.AppendVertex(new VertexId(0), new LabelId(0));
+        loader.AppendVertex(new VertexId(1), new LabelId(0));
+        loader.AppendEdge(new EdgeId(5), new VertexId(0), new VertexId(1), new EdgeTypeId(0));
 
-        Action act = () => loader.AppendRelationship(
-            new RelationshipId(3), new NodeId(0), new NodeId(1), new RelationshipTypeId(0));
+        Action act = () => loader.AppendEdge(
+            new EdgeId(3), new VertexId(0), new VertexId(1), new EdgeTypeId(0));
         act.Should().Throw<InvalidOperationException>().WithMessage("*strictly increasing*");
     }
 
@@ -91,20 +91,20 @@ public sealed class StreamingBulkLoaderTests : IDisposable
 
         var inmemDir = Path.Combine(_baseDir, "adj_in");
         var streamDir = Path.Combine(_baseDir, "adj_st");
-        Build(inmemDir, streaming: false, nodeCount: 4, edges, buildAdj: true);
-        Build(streamDir, streaming: true,  nodeCount: 4, edges, buildAdj: true);
+        Build(inmemDir, streaming: false, vertexCount: 4, edges, buildAdj: true);
+        Build(streamDir, streaming: true,  vertexCount: 4, edges, buildAdj: true);
 
         // The adjacency index must produce identical Expand results for every source.
-        using var dbA = GraphDatabase.Open(System.IO.Path.Combine(inmemDir, "graph.quiver"));
-        using var dbB = GraphDatabase.Open(System.IO.Path.Combine(streamDir, "graph.quiver"));
+        using var dbA = QuiverDatabase.Open(System.IO.Path.Combine(inmemDir, "graph.quiver"));
+        using var dbB = QuiverDatabase.Open(System.IO.Path.Combine(streamDir, "graph.quiver"));
         for (long n = 0; n < 4; n++)
         {
             using var txA = dbA.BeginTransaction();
             using var txB = dbB.BeginTransaction();
-            var ea = ExpandOut(txA, new NodeId(n));
-            var eb = ExpandOut(txB, new NodeId(n));
+            var ea = ExpandOut(txA, new VertexId(n));
+            var eb = ExpandOut(txB, new VertexId(n));
             eb.Should().BeEquivalentTo(ea, opts => opts.WithStrictOrdering(),
-                $"node {n}: streaming and in-memory adjacency must yield the same neighbors in the same order");
+                $"vertex {n}: streaming and in-memory adjacency must yield the same neighbors in the same order");
         }
     }
 
@@ -116,58 +116,58 @@ public sealed class StreamingBulkLoaderTests : IDisposable
         BuildWithProps(dir1, streaming: false);
         BuildWithProps(dir2, streaming: true);
 
-        AssertNodeStoreBytesEqual(dir1, dir2);
-        AssertRelStoreBytesEqual(dir1, dir2);
+        AssertVertexStoreBytesEqual(dir1, dir2);
+        AssertEdgeStoreBytesEqual(dir1, dir2);
         AssertPropStoreBytesEqual(dir1, dir2);
     }
 
     // ─────────────────────── helpers ───────────────────────
 
-    private void AssertParity(int nodeCount, (long Src, long Tgt)[] edges, string? payloadKey)
+    private void AssertParity(int vertexCount, (long Src, long Tgt)[] edges, string? payloadKey)
     {
         var inmemDir = Path.Combine(_baseDir, "parity_in_" + Guid.NewGuid().ToString("N")[..8]);
         var streamDir = Path.Combine(_baseDir, "parity_st_" + Guid.NewGuid().ToString("N")[..8]);
-        Build(inmemDir, streaming: false, nodeCount, edges, buildAdj: false);
-        Build(streamDir, streaming: true,  nodeCount, edges, buildAdj: false);
+        Build(inmemDir, streaming: false, vertexCount, edges, buildAdj: false);
+        Build(streamDir, streaming: true,  vertexCount, edges, buildAdj: false);
 
-        // Files on disk must match byte-for-byte: same chain pointers, same FirstRelId.
-        AssertNodeStoreBytesEqual(inmemDir, streamDir);
-        AssertRelStoreBytesEqual(inmemDir, streamDir);
+        // Files on disk must match byte-for-byte: same chain pointers, same FirstEdgeId.
+        AssertVertexStoreBytesEqual(inmemDir, streamDir);
+        AssertEdgeStoreBytesEqual(inmemDir, streamDir);
     }
 
-    private static void Build(string dir, bool streaming, int nodeCount,
+    private static void Build(string dir, bool streaming, int vertexCount,
         (long Src, long Tgt)[] edges, bool buildAdj)
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
         if (streaming)
         {
             using var loader = db.BeginStreamingBulkLoad(buildAdjacencyIndex: buildAdj);
-            for (int i = 0; i < nodeCount; i++)
-                loader.AppendNode(new NodeId(i), new LabelId(0));
+            for (int i = 0; i < vertexCount; i++)
+                loader.AppendVertex(new VertexId(i), new LabelId(0));
             for (int i = 0; i < edges.Length; i++)
-                loader.AppendRelationship(
-                    new RelationshipId(i),
-                    new NodeId(edges[i].Src), new NodeId(edges[i].Tgt),
-                    new RelationshipTypeId(0));
+                loader.AppendEdge(
+                    new EdgeId(i),
+                    new VertexId(edges[i].Src), new VertexId(edges[i].Tgt),
+                    new EdgeTypeId(0));
             loader.Commit();
         }
         else
         {
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: buildAdj);
-            for (int i = 0; i < nodeCount; i++)
-                loader.AppendNode(new NodeId(i), new LabelId(0));
+            for (int i = 0; i < vertexCount; i++)
+                loader.AppendVertex(new VertexId(i), new LabelId(0));
             for (int i = 0; i < edges.Length; i++)
-                loader.AppendRelationship(
-                    new RelationshipId(i),
-                    new NodeId(edges[i].Src), new NodeId(edges[i].Tgt),
-                    new RelationshipTypeId(0));
+                loader.AppendEdge(
+                    new EdgeId(i),
+                    new VertexId(edges[i].Src), new VertexId(edges[i].Tgt),
+                    new EdgeTypeId(0));
             loader.Commit();
         }
     }
 
     private static void BuildWithProps(string dir, bool streaming)
     {
-        using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
         var keyName = db.Schema.GetOrCreatePropertyKey("name");
         var keyAge  = db.Schema.GetOrCreatePropertyKey("age");
 
@@ -175,34 +175,34 @@ public sealed class StreamingBulkLoaderTests : IDisposable
         {
             using var loader = db.BeginStreamingBulkLoad();
             for (int i = 0; i < 3; i++)
-                loader.AppendNode(new NodeId(i), new LabelId(0));
-            loader.AppendRelationship(new RelationshipId(0), new NodeId(0), new NodeId(1), new RelationshipTypeId(0));
-            loader.AppendRelationship(new RelationshipId(1), new NodeId(1), new NodeId(2), new RelationshipTypeId(0));
-            loader.AppendProperty(new NodeId(0), keyName, PropertyValue.FromString("alice"));
-            loader.AppendProperty(new NodeId(0), keyAge,  PropertyValue.FromInt64(30));
-            loader.AppendProperty(new NodeId(1), keyName, PropertyValue.FromString("bob"));
+                loader.AppendVertex(new VertexId(i), new LabelId(0));
+            loader.AppendEdge(new EdgeId(0), new VertexId(0), new VertexId(1), new EdgeTypeId(0));
+            loader.AppendEdge(new EdgeId(1), new VertexId(1), new VertexId(2), new EdgeTypeId(0));
+            loader.AppendProperty(new VertexId(0), keyName, PropertyValue.FromString("alice"));
+            loader.AppendProperty(new VertexId(0), keyAge,  PropertyValue.FromInt64(30));
+            loader.AppendProperty(new VertexId(1), keyName, PropertyValue.FromString("bob"));
             loader.Commit();
         }
         else
         {
             using var loader = db.BeginBulkLoad();
             for (int i = 0; i < 3; i++)
-                loader.AppendNode(new NodeId(i), new LabelId(0));
-            loader.AppendRelationship(new RelationshipId(0), new NodeId(0), new NodeId(1), new RelationshipTypeId(0));
-            loader.AppendRelationship(new RelationshipId(1), new NodeId(1), new NodeId(2), new RelationshipTypeId(0));
-            loader.AppendProperty(new NodeId(0), keyName, PropertyValue.FromString("alice"));
-            loader.AppendProperty(new NodeId(0), keyAge,  PropertyValue.FromInt64(30));
-            loader.AppendProperty(new NodeId(1), keyName, PropertyValue.FromString("bob"));
+                loader.AppendVertex(new VertexId(i), new LabelId(0));
+            loader.AppendEdge(new EdgeId(0), new VertexId(0), new VertexId(1), new EdgeTypeId(0));
+            loader.AppendEdge(new EdgeId(1), new VertexId(1), new VertexId(2), new EdgeTypeId(0));
+            loader.AppendProperty(new VertexId(0), keyName, PropertyValue.FromString("alice"));
+            loader.AppendProperty(new VertexId(0), keyAge,  PropertyValue.FromInt64(30));
+            loader.AppendProperty(new VertexId(1), keyName, PropertyValue.FromString("bob"));
             loader.Commit();
         }
     }
 
     // すべてのコアストアは単一ファイル graph.quiver に同居する。一括読み込みは決定的で、
     // WAL 非対象 (LSN=0) なので、streaming / in-memory の graph.quiver はバイト一致するはず。
-    private static void AssertNodeStoreBytesEqual(string dirA, string dirB)
+    private static void AssertVertexStoreBytesEqual(string dirA, string dirB)
         => AssertFileBytesEqual(Path.Combine(dirA, "graph.quiver"), Path.Combine(dirB, "graph.quiver"));
 
-    private static void AssertRelStoreBytesEqual(string dirA, string dirB)
+    private static void AssertEdgeStoreBytesEqual(string dirA, string dirB)
         => AssertFileBytesEqual(Path.Combine(dirA, "graph.quiver"), Path.Combine(dirB, "graph.quiver"));
 
     private static void AssertPropStoreBytesEqual(string dirA, string dirB)
@@ -222,26 +222,26 @@ public sealed class StreamingBulkLoaderTests : IDisposable
             }
     }
 
-    private static List<long> ExpandOut(IGraphTransaction tx, NodeId source)
+    private static List<long> ExpandOut(IGraphTransaction tx, VertexId source)
     {
         var op = new ExpandOperator(
-            new SingleNodeSource(source),
-            sourceNodeColumn: 0,
+            new SingleVertexSource(source),
+            sourceVertexColumn: 0,
             Direction.Outgoing,
             typeFilter: null,
             ExpandOutputMode.NeighborOnly);
         var result = tx.Execute(op);
-        return result.Rows().Select(r => r.GetNodeId(0).Value).ToList();
+        return result.Rows().Select(r => r.GetVertexId(0).Value).ToList();
     }
 
-    private sealed class SingleNodeSource : IPhysicalOperator
+    private sealed class SingleVertexSource : IPhysicalOperator
     {
         private readonly TupleSlot[] _buf = new TupleSlot[1];
-        private readonly NodeId _node;
+        private readonly VertexId _vertex;
         private bool _emitted;
 
-        public SingleNodeSource(NodeId node) { _node = node; }
-        public TupleSchema Schema { get; } = new([new ColumnDefinition("n", TupleSlotType.NodeId)]);
+        public SingleVertexSource(VertexId vertex) { _vertex = vertex; }
+        public TupleSchema Schema { get; } = new([new ColumnDefinition("n", TupleSlotType.VertexId)]);
         public OperatorStatistics Statistics { get; private set; }
         public TupleRef Current => new(_buf);
 
@@ -250,7 +250,7 @@ public sealed class StreamingBulkLoaderTests : IDisposable
         public bool MoveNext()
         {
             if (_emitted) return false;
-            _buf[0] = new TupleSlot { Type = TupleSlotType.NodeId, LongValue = _node.Value };
+            _buf[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = _vertex.Value };
             _emitted = true;
             return true;
         }

@@ -1,6 +1,6 @@
 namespace Quiver.Core;
 
-// NodeId / RelationshipId / PropertyId の Value は packed 物理 ID
+// VertexId / EdgeId / PropertyId の Value は packed 物理 ID
 // (kind 消去ローカル形 Gen16<<44 | Seq44、kind は型で表現)。
 //  - Sequence (slot 局所 ID) は record の page/offset 演算に使う。オンディスクの ID
 //    フィールド (Int48) には Value ではなく Sequence を書く。
@@ -9,12 +9,12 @@ namespace Quiver.Core;
 // Why not Sequence-only equality: vacuum 後の slot 再利用で別 entity を同一キーとして扱い、
 // dictionary、frontier、index key が stale reference を現在の entity へ alias してしまう。
 
-/// <summary>ノードの識別子。<paramref name="Value"/> は世代 (上位) と slot 局所 ID (下位) を詰めた packed 値。</summary>
+/// <summary>Vertexの識別子。<paramref name="Value"/> は世代 (上位) と slot 局所 ID (下位) を詰めた packed 値。</summary>
 /// <param name="Value">packed 物理 ID (Generation &lt;&lt; 44 | Sequence)。</param>
-public readonly record struct NodeId(long Value)
+public readonly record struct VertexId(long Value)
 {
     /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
-    public static readonly NodeId Invalid = new(-1);
+    public static readonly VertexId Invalid = new(-1);
 
     /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
     public bool IsValid => Value >= 0;
@@ -29,22 +29,22 @@ public readonly record struct NodeId(long Value)
     /// <summary>slot incarnation (bits 44-59)。世代未指定 (= new(seq)) は 0。</summary>
     public int Generation => Value < 0 ? 0 : EntityRef.UnpackGeneration(Value);
 
-    /// <summary>(sequence, generation) から packed な <see cref="NodeId"/> を生成する。</summary>
-    public static NodeId Create(long sequence, int generation) => new(EntityRef.PackLocal(sequence, generation));
+    /// <summary>(sequence, generation) から packed な <see cref="VertexId"/> を生成する。</summary>
+    public static VertexId Create(long sequence, int generation) => new(EntityRef.PackLocal(sequence, generation));
 
     /// <summary>Generation を含む packed identity が等しいかを判定する。</summary>
-    public bool Equals(NodeId other) => Value == other.Value;
+    public bool Equals(VertexId other) => Value == other.Value;
 
     /// <summary>Generation を含む packed identity のハッシュ値。</summary>
     public override int GetHashCode() => Value.GetHashCode();
 }
 
-/// <summary>リレーションシップ (エッジ) の識別子。<paramref name="Value"/> は世代 + slot 局所 ID の packed 値。</summary>
+/// <summary>Edge (エッジ) の識別子。<paramref name="Value"/> は世代 + slot 局所 ID の packed 値。</summary>
 /// <param name="Value">packed 物理 ID (Generation &lt;&lt; 44 | Sequence)。</param>
-public readonly record struct RelationshipId(long Value)
+public readonly record struct EdgeId(long Value)
 {
     /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
-    public static readonly RelationshipId Invalid = new(-1);
+    public static readonly EdgeId Invalid = new(-1);
 
     /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
     public bool IsValid => Value >= 0;
@@ -55,22 +55,22 @@ public readonly record struct RelationshipId(long Value)
     /// <summary>slot incarnation (bits 44-59)。世代未指定 (= new(seq)) は 0。</summary>
     public int Generation => Value < 0 ? 0 : EntityRef.UnpackGeneration(Value);
 
-    /// <summary>(sequence, generation) から packed な <see cref="RelationshipId"/> を生成する。</summary>
-    public static RelationshipId Create(long sequence, int generation) => new(EntityRef.PackLocal(sequence, generation));
+    /// <summary>(sequence, generation) から packed な <see cref="EdgeId"/> を生成する。</summary>
+    public static EdgeId Create(long sequence, int generation) => new(EntityRef.PackLocal(sequence, generation));
 
     /// <summary>Generation を含む packed identity が等しいかを判定する。</summary>
-    public bool Equals(RelationshipId other) => Value == other.Value;
+    public bool Equals(EdgeId other) => Value == other.Value;
 
     /// <summary>Generation を含む packed identity のハッシュ値。</summary>
     public override int GetHashCode() => Value.GetHashCode();
 }
 
-/// <summary>ハイパーエッジの識別子。<paramref name="Value"/> は世代 + slot 局所 ID の packed 値。</summary>
+/// <summary>Nexusの識別子。<paramref name="Value"/> は世代 + slot 局所 ID の packed 値。</summary>
 /// <param name="Value">packed 物理 ID (Generation &lt;&lt; 44 | Sequence)。</param>
-public readonly record struct HyperedgeId(long Value)
+public readonly record struct NexusId(long Value)
 {
     /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
-    public static readonly HyperedgeId Invalid = new(-1);
+    public static readonly NexusId Invalid = new(-1);
 
     /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
     public bool IsValid => Value >= 0;
@@ -81,12 +81,12 @@ public readonly record struct HyperedgeId(long Value)
     /// <summary>slot incarnation (bits 44-59)。世代未指定 (= new(seq)) は 0。</summary>
     public int Generation => Value < 0 ? 0 : EntityRef.UnpackGeneration(Value);
 
-    /// <summary>(sequence, generation) から packed な <see cref="HyperedgeId"/> を生成する。</summary>
-    public static HyperedgeId Create(long sequence, int generation)
+    /// <summary>(sequence, generation) から packed な <see cref="NexusId"/> を生成する。</summary>
+    public static NexusId Create(long sequence, int generation)
         => new(EntityRef.PackLocal(sequence, generation));
 
     /// <summary>Generation を含む packed identity が等しいかを判定する。</summary>
-    public bool Equals(HyperedgeId other) => Value == other.Value;
+    public bool Equals(NexusId other) => Value == other.Value;
 
     /// <summary>Generation を含む packed identity のハッシュ値。</summary>
     public override int GetHashCode() => Value.GetHashCode();
@@ -129,29 +129,29 @@ public readonly record struct LabelId(int Value)
     public bool IsValid => Value >= 0;
 }
 
-/// <summary>リレーションシップ型の識別子 (トークンストアが払い出す稠密 int)。</summary>
-/// <param name="Value">リレーションシップ型トークン ID。</param>
-public readonly record struct RelationshipTypeId(int Value)
+/// <summary>Edge型の識別子 (トークンストアが払い出す稠密 int)。</summary>
+/// <param name="Value">Edge型トークン ID。</param>
+public readonly record struct EdgeTypeId(int Value)
 {
     /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
-    public static readonly RelationshipTypeId Invalid = new(-1);
+    public static readonly EdgeTypeId Invalid = new(-1);
 
     /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
     public bool IsValid => Value >= 0;
 }
 
-/// <summary>ハイパーエッジ型の識別子 (トークンストアが払い出す稠密 int)。</summary>
-/// <param name="Value">ハイパーエッジ型トークン ID。</param>
-public readonly record struct HyperedgeTypeId(int Value)
+/// <summary>Nexus型の識別子 (トークンストアが払い出す稠密 int)。</summary>
+/// <param name="Value">Nexus型トークン ID。</param>
+public readonly record struct NexusTypeId(int Value)
 {
     /// <summary>無効値を表す sentinel (<see cref="Value"/> = -1)。</summary>
-    public static readonly HyperedgeTypeId Invalid = new(-1);
+    public static readonly NexusTypeId Invalid = new(-1);
 
     /// <summary>有効な ID か (<see cref="Value"/> が非負か)。</summary>
     public bool IsValid => Value >= 0;
 }
 
-/// <summary>ハイパーエッジ内のロールを表す内部トークン ID。</summary>
+/// <summary>Nexus内のロールを表す内部トークン ID。</summary>
 internal readonly record struct RoleId(int Value)
 {
     public static readonly RoleId Invalid = new(-1);

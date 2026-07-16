@@ -5,7 +5,7 @@ namespace Quiver.Logical;
 /// <summary>
 /// キャプチャ済みの <see cref="LogicalMutation"/> ストリームを別の
 /// <see cref="IGraphTransaction"/> に再適用するヘルパー。ターゲット DB が独自の ID を
-/// 割り当てるため、ノード・リレーションシップ ID はオンザフライで再マッピングする。
+/// 割り当てるため、Vertex・Edge ID はオンザフライで再マッピングする。
 /// 事前シード済みマップを渡すことで複数回の再生パスを連結できる。
 /// </summary>
 public static class LogicalMutationReplay
@@ -18,123 +18,123 @@ public static class LogicalMutationReplay
     /// <param name="tx">ターゲットトランザクション。</param>
     /// <param name="mutations">ミューテーションストリーム。通常は
     /// <see cref="ILogicalMutationSink"/> から取得する。</param>
-    /// <param name="nodeMap">ソース ID → ターゲット ID のノードマップ (省略可)。呼び出し側で変更される。</param>
-    /// <param name="relationshipMap">ソース ID → ターゲット ID のリレーションシップマップ (省略可)。呼び出し側で変更される。</param>
-    /// <param name="hyperedgeMap">ソース ID → ターゲット ID のハイパーエッジマップ (省略可)。呼び出し側で変更される。</param>
+    /// <param name="vertexMap">ソース ID → ターゲット ID のVertexマップ (省略可)。呼び出し側で変更される。</param>
+    /// <param name="edgeMap">ソース ID → ターゲット ID のEdgeマップ (省略可)。呼び出し側で変更される。</param>
+    /// <param name="nexusMap">ソース ID → ターゲット ID のNexusマップ (省略可)。呼び出し側で変更される。</param>
     public static void Apply(
         IGraphTransaction tx,
         IEnumerable<LogicalMutation> mutations,
-        IDictionary<long, NodeId>? nodeMap = null,
-        IDictionary<long, RelationshipId>? relationshipMap = null,
-        IDictionary<long, HyperedgeId>? hyperedgeMap = null)
+        IDictionary<long, VertexId>? vertexMap = null,
+        IDictionary<long, EdgeId>? edgeMap = null,
+        IDictionary<long, NexusId>? nexusMap = null)
     {
         ArgumentNullException.ThrowIfNull(tx);
         ArgumentNullException.ThrowIfNull(mutations);
-        nodeMap ??= new Dictionary<long, NodeId>();
-        relationshipMap ??= new Dictionary<long, RelationshipId>();
-        hyperedgeMap ??= new Dictionary<long, HyperedgeId>();
+        vertexMap ??= new Dictionary<long, VertexId>();
+        edgeMap ??= new Dictionary<long, EdgeId>();
+        nexusMap ??= new Dictionary<long, NexusId>();
 
         foreach (var m in mutations)
         {
             switch (m.Kind)
             {
-                case LogicalMutationKind.CreateNode:
+                case LogicalMutationKind.CreateVertex:
                 {
-                    var newId = tx.CreateNode(m.TokenName ?? string.Empty);
-                    nodeMap[m.NodeId.Sequence] = newId;
+                    var newId = tx.CreateVertex(m.TokenName ?? string.Empty);
+                    vertexMap[m.VertexId.Sequence] = newId;
                     break;
                 }
-                case LogicalMutationKind.DeleteNode:
+                case LogicalMutationKind.DeleteVertex:
                 {
-                    if (nodeMap.TryGetValue(m.NodeId.Sequence, out var nodeId))
-                        tx.DeleteNode(nodeId);
+                    if (vertexMap.TryGetValue(m.VertexId.Sequence, out var vertexId))
+                        tx.DeleteVertex(vertexId);
                     break;
                 }
-                case LogicalMutationKind.CreateRelationship:
+                case LogicalMutationKind.CreateEdge:
                 {
-                    if (!nodeMap.TryGetValue(m.NodeId.Sequence, out var src)) break;
-                    if (!nodeMap.TryGetValue(m.TargetNodeId.Sequence, out var tgt)) break;
-                    var newId = tx.CreateRelationship(src, tgt, m.TokenName ?? string.Empty);
-                    relationshipMap[m.RelationshipId.Sequence] = newId;
+                    if (!vertexMap.TryGetValue(m.VertexId.Sequence, out var src)) break;
+                    if (!vertexMap.TryGetValue(m.TargetVertexId.Sequence, out var tgt)) break;
+                    var newId = tx.CreateEdge(src, tgt, m.TokenName ?? string.Empty);
+                    edgeMap[m.EdgeId.Sequence] = newId;
                     break;
                 }
-                case LogicalMutationKind.DeleteRelationship:
+                case LogicalMutationKind.DeleteEdge:
                 {
-                    if (relationshipMap.TryGetValue(m.RelationshipId.Sequence, out var relId))
-                        tx.DeleteRelationship(relId);
+                    if (edgeMap.TryGetValue(m.EdgeId.Sequence, out var edgeId))
+                        tx.DeleteEdge(edgeId);
                     break;
                 }
-                case LogicalMutationKind.SetNodeProperty:
+                case LogicalMutationKind.SetVertexProperty:
                 {
-                    if (!nodeMap.TryGetValue(m.NodeId.Sequence, out var nodeId)) break;
+                    if (!vertexMap.TryGetValue(m.VertexId.Sequence, out var vertexId)) break;
                     var value = m.PropertyValue.ToPropertyValue();
-                    tx.SetProperty(nodeId, m.PropertyKey ?? string.Empty, value);
+                    tx.SetProperty(vertexId, m.PropertyKey ?? string.Empty, value);
                     break;
                 }
-                case LogicalMutationKind.SetRelationshipProperty:
+                case LogicalMutationKind.SetEdgeProperty:
                 {
-                    if (!relationshipMap.TryGetValue(m.RelationshipId.Sequence, out var relId)) break;
+                    if (!edgeMap.TryGetValue(m.EdgeId.Sequence, out var edgeId)) break;
                     var value = m.PropertyValue.ToPropertyValue();
-                    tx.SetProperty(relId, m.PropertyKey ?? string.Empty, value);
+                    tx.SetProperty(edgeId, m.PropertyKey ?? string.Empty, value);
                     break;
                 }
-                case LogicalMutationKind.RemoveNodeProperty:
+                case LogicalMutationKind.RemoveVertexProperty:
                 {
-                    if (nodeMap.TryGetValue(m.NodeId.Sequence, out var nodeId))
-                        tx.RemoveProperty(nodeId, m.PropertyKey ?? string.Empty);
+                    if (vertexMap.TryGetValue(m.VertexId.Sequence, out var vertexId))
+                        tx.RemoveProperty(vertexId, m.PropertyKey ?? string.Empty);
                     break;
                 }
-                case LogicalMutationKind.CreateHyperedge:
+                case LogicalMutationKind.CreateNexus:
                 {
                     var source = m.Members;
                     if (source is null || source.Count == 0) break;
-                    // メンバーの NodeId をターゲット DB の ID へ再マッピングする。
-                    // 依存ノードが未再生 (マップ欠落) なら、このハイパーエッジは再生しない。
-                    var remapped = new HyperedgeMember[source.Count];
+                    // メンバーの VertexId をターゲット DB の ID へ再マッピングする。
+                    // 依存Vertexが未再生 (マップ欠落) なら、このNexusは再生しない。
+                    var remapped = new NexusMember[source.Count];
                     bool complete = true;
                     for (int i = 0; i < source.Count; i++)
                     {
-                        if (!nodeMap.TryGetValue(source[i].NodeId.Sequence, out var mapped))
+                        if (!vertexMap.TryGetValue(source[i].VertexId.Sequence, out var mapped))
                         {
                             complete = false;
                             break;
                         }
-                        remapped[i] = new HyperedgeMember(source[i].Role, mapped);
+                        remapped[i] = new NexusMember(source[i].Role, mapped);
                     }
                     if (!complete) break;
-                    var newId = tx.CreateHyperedge(m.TokenName ?? string.Empty, remapped);
-                    hyperedgeMap[m.HyperedgeId.Sequence] = newId;
+                    var newId = tx.CreateNexus(m.TokenName ?? string.Empty, remapped);
+                    nexusMap[m.NexusId.Sequence] = newId;
                     break;
                 }
-                case LogicalMutationKind.DeleteHyperedge:
+                case LogicalMutationKind.DeleteNexus:
                 {
-                    if (hyperedgeMap.TryGetValue(m.HyperedgeId.Sequence, out var heId))
-                        tx.DeleteHyperedge(heId);
+                    if (nexusMap.TryGetValue(m.NexusId.Sequence, out var heId))
+                        tx.DeleteNexus(heId);
                     break;
                 }
-                case LogicalMutationKind.SetHyperedgeProperty:
+                case LogicalMutationKind.SetNexusProperty:
                 {
-                    if (!hyperedgeMap.TryGetValue(m.HyperedgeId.Sequence, out var heId)) break;
+                    if (!nexusMap.TryGetValue(m.NexusId.Sequence, out var heId)) break;
                     var value = m.PropertyValue.ToPropertyValue();
                     tx.SetProperty(heId, m.PropertyKey ?? string.Empty, value);
                     break;
                 }
-                case LogicalMutationKind.RemoveHyperedgeProperty:
+                case LogicalMutationKind.RemoveNexusProperty:
                 {
-                    if (hyperedgeMap.TryGetValue(m.HyperedgeId.Sequence, out var heId))
+                    if (nexusMap.TryGetValue(m.NexusId.Sequence, out var heId))
                         tx.RemoveProperty(heId, m.PropertyKey ?? string.Empty);
                     break;
                 }
-                case LogicalMutationKind.AddHyperedgePropertyValue:
+                case LogicalMutationKind.AddNexusPropertyValue:
                 {
-                    if (!hyperedgeMap.TryGetValue(m.HyperedgeId.Sequence, out var heId)) break;
+                    if (!nexusMap.TryGetValue(m.NexusId.Sequence, out var heId)) break;
                     var value = m.PropertyValue.ToPropertyValue();
                     tx.AddPropertyValue(heId, m.PropertyKey ?? string.Empty, value);
                     break;
                 }
-                case LogicalMutationKind.RemoveHyperedgePropertyValue:
+                case LogicalMutationKind.RemoveNexusPropertyValue:
                 {
-                    if (!hyperedgeMap.TryGetValue(m.HyperedgeId.Sequence, out var heId)) break;
+                    if (!nexusMap.TryGetValue(m.NexusId.Sequence, out var heId)) break;
                     var value = m.PropertyValue.ToPropertyValue();
                     tx.RemovePropertyValue(heId, m.PropertyKey ?? string.Empty, value);
                     break;

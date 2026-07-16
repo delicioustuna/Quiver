@@ -6,9 +6,9 @@ using Quiver.Storage.Records;
 namespace Quiver.Rag;
 
 /// <summary>
-/// ローカル RAG バックエンドのファサード。<see cref="GraphDatabase"/> をラップし、Document/Chunk
+/// ローカル RAG バックエンドのファサード。<see cref="QuiverDatabase"/> をラップし、Document/Chunk
 /// スキーマの索引 (sourceId 索引 + ベクトル索引 + 任意で全文索引) をコンストラクタで冪等に用意する。
-/// 取込/再取込 (<see cref="UpsertDocumentAsync"/>) と削除 (<see cref="DeleteDocument"/>) は RAG-3 で実装する。
+/// 取込/再取込 (<see cref="UpsertDocumentAsync"/>) と削除 (<see cref="DeleteDocument"/>) は  で実装する。
 /// </summary>
 /// <remarks>
 /// コンストラクタは複数回・複数プロセスから呼んでも安全 (既存索引は再作成しない)。エンジン本体には
@@ -16,7 +16,7 @@ namespace Quiver.Rag;
 /// </remarks>
 public sealed class RagStore
 {
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
     private readonly RagStoreOptions _options;
 
     /// <summary>
@@ -26,7 +26,7 @@ public sealed class RagStore
     /// <param name="options">ベクトル次元・距離尺度・全文索引の有効/無効などの構成。</param>
     /// <exception cref="ArgumentNullException"><paramref name="db"/> / <paramref name="options"/> が null。</exception>
     /// <exception cref="ArgumentOutOfRangeException"><see cref="RagStoreOptions.EmbeddingDimensions"/> が 1 未満。</exception>
-    public RagStore(GraphDatabase db, RagStoreOptions options)
+    public RagStore(QuiverDatabase db, RagStoreOptions options)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -39,7 +39,7 @@ public sealed class RagStore
     }
 
     /// <summary>ラップしているグラフ DB。検索や直接問い合わせで利用する。</summary>
-    public GraphDatabase Database => _db;
+    public QuiverDatabase Database => _db;
 
     /// <summary>このストアの構成。</summary>
     public RagStoreOptions Options => _options;
@@ -130,11 +130,11 @@ public sealed class RagStore
         using var tx = _db.BeginTransaction();
 
         // 索引には削除済みノードの orphan エントリが残り得るため生存確認で絞る
-        // (DeleteNode は二次索引を維持しない。エンジンの RepairIndexes が後で掃除する)。
-        var docIds = new List<NodeId>();
+        // (DeleteVertex は二次索引を維持しない。エンジンの RepairIndexes が後で掃除する)。
+        var docIds = new List<VertexId>();
         var seek = tx.SeekIndex(RagSchema.DocSourceIndex, PropertyValue.FromString(sourceId));
         while (seek.MoveNext())
-            if (tx.NodeExists(seek.Current)) docIds.Add(seek.Current);
+            if (tx.VertexExists(seek.Current)) docIds.Add(seek.Current);
         seek.Dispose();
 
         if (docIds.Count == 0)
@@ -144,12 +144,12 @@ public sealed class RagStore
         }
 
         foreach (var docId in docIds)
-            DeleteDocumentNode(tx, docId);
+            DeleteDocumentVertex(tx, docId);
         tx.Commit();
         return true;
     }
 
-    // ── RAG-3 内部実装 ──────────────────────────────────────────
+    // ──  内部実装 ──────────────────────────────────────────
 
     /// <summary>PropertyValue (ref struct) を扱う同期トランザクション本体。async 本体から分離する。</summary>
     private UpsertResult UpsertCore(
@@ -158,7 +158,7 @@ public sealed class RagStore
     {
         using var tx = _db.BeginTransaction();
 
-        var (docId, created) = tx.MergeNode(
+        var (docId, created) = tx.MergeVertex(
             RagSchema.DocumentLabel, RagSchema.PropSourceId, PropertyValue.FromString(doc.SourceId));
 
         // べき等: 既存文書でハッシュ一致なら何も変更しない。
@@ -167,7 +167,7 @@ public sealed class RagStore
         {
             int existingCount = CountChunks(tx, docId);
             tx.Rollback();
-            return new UpsertResult(Unchanged: true, ChunkCount: existingCount, DocumentNodeId: docId);
+            return new UpsertResult(Unchanged: true, ChunkCount: existingCount, DocumentVertexId: docId);
         }
 
         // 差し替え: 既存 Chunk 群を削除してから入れ直す。
@@ -175,19 +175,19 @@ public sealed class RagStore
             foreach (var oldChunk in CollectChunks(tx, docId))
                 DeleteChunk(tx, oldChunk);
 
-        // Document プロパティ (sourceId は MergeNode 作成時に設定済み)。
+        // Document プロパティ (sourceId は MergeVertex 作成時に設定済み)。
         tx.SetProperty(docId, RagSchema.PropTitle, PropertyValue.FromString(doc.Title ?? string.Empty));
         tx.SetProperty(docId, RagSchema.PropContentHash, PropertyValue.FromString(contentHash));
         tx.SetProperty(docId, RagSchema.PropIngestedAt, PropertyValue.FromDateTime(DateTime.UtcNow));
         tx.SetProperty(docId, RagSchema.PropMetadataJson, PropertyValue.FromString(MetadataToJson(doc.Metadata)));
 
         // 新チャンク挿入 + HAS_CHUNK / NEXT_CHUNK 連結 + ベクトル。
-        NodeId prev = default;
+        VertexId prev = default;
         bool hasPrev = false;
         for (int i = 0; i < drafts.Count; i++)
         {
             var d = drafts[i];
-            var chunkId = tx.CreateNode(RagSchema.ChunkLabel);
+            var chunkId = tx.CreateVertex(RagSchema.ChunkLabel);
             tx.SetProperty(chunkId, RagSchema.PropText, PropertyValue.FromString(d.Text));
             // 全文索引対象は見出し語を含む searchText。SetProperty で透過維持フックが postings を追従する。
             tx.SetProperty(chunkId, RagSchema.PropSearchText,
@@ -199,16 +199,16 @@ public sealed class RagStore
             tx.SetProperty(chunkId, RagSchema.PropCharStart, PropertyValue.FromInt32(d.CharStart));
             tx.SetProperty(chunkId, RagSchema.PropCharEnd, PropertyValue.FromInt32(d.CharEnd));
 
-            tx.CreateRelationship(docId, chunkId, RagSchema.HasChunkType);
-            if (hasPrev) tx.CreateRelationship(prev, chunkId, RagSchema.NextChunkType);
-            tx.SetVector(EntityKind.Node, chunkId.Value, _options.VectorIndexName, embeddings[i]);
+            tx.CreateEdge(docId, chunkId, RagSchema.HasChunkType);
+            if (hasPrev) tx.CreateEdge(prev, chunkId, RagSchema.NextChunkType);
+            tx.SetVector(EntityKind.Vertex, chunkId.Value, _options.VectorIndexName, embeddings[i]);
 
             prev = chunkId;
             hasPrev = true;
         }
 
         tx.Commit();
-        return new UpsertResult(Unchanged: false, ChunkCount: drafts.Count, DocumentNodeId: docId);
+        return new UpsertResult(Unchanged: false, ChunkCount: drafts.Count, DocumentVertexId: docId);
     }
 
     /// <summary>埋め込み入力を組み立てる。見出しパスがあれば本文の前へ付与し検索時の文脈を補う。</summary>
@@ -235,7 +235,7 @@ public sealed class RagStore
             && TryReadString(tx, docId, RagSchema.PropContentHash, out var existing)
             && existing == contentHash)
         {
-            result = new UpsertResult(Unchanged: true, ChunkCount: CountChunks(tx, docId), DocumentNodeId: docId);
+            result = new UpsertResult(Unchanged: true, ChunkCount: CountChunks(tx, docId), DocumentVertexId: docId);
             return true;
         }
         result = default;
@@ -243,13 +243,13 @@ public sealed class RagStore
     }
 
     /// <summary>sourceId 索引から最初の<b>生存</b> Document ノードを返す (orphan エントリは skip)。</summary>
-    private static bool TryFindLiveDocument(IGraphTransaction tx, string sourceId, out NodeId docId)
+    private static bool TryFindLiveDocument(IGraphTransaction tx, string sourceId, out VertexId docId)
     {
         var seek = tx.SeekIndex(RagSchema.DocSourceIndex, PropertyValue.FromString(sourceId));
         try
         {
             while (seek.MoveNext())
-                if (tx.NodeExists(seek.Current)) { docId = seek.Current; return true; }
+                if (tx.VertexExists(seek.Current)) { docId = seek.Current; return true; }
         }
         finally { seek.Dispose(); }
         docId = default;
@@ -257,45 +257,45 @@ public sealed class RagStore
     }
 
     /// <summary>Document に紐づく Chunk ノードを収集する (列挙中に削除しないため一旦リスト化)。</summary>
-    private static List<NodeId> CollectChunks(IGraphTransaction tx, NodeId docId)
+    private static List<VertexId> CollectChunks(IGraphTransaction tx, VertexId docId)
     {
-        var chunks = new List<NodeId>();
-        var e = tx.EnumerateRelationships(docId, Direction.Outgoing, RagSchema.HasChunkType);
+        var chunks = new List<VertexId>();
+        var e = tx.EnumerateEdges(docId, Direction.Outgoing, RagSchema.HasChunkType);
         while (e.MoveNext()) chunks.Add(e.Current.Target);
         return chunks;
     }
 
-    private static int CountChunks(IGraphTransaction tx, NodeId docId)
+    private static int CountChunks(IGraphTransaction tx, VertexId docId)
     {
         int n = 0;
-        var e = tx.EnumerateRelationships(docId, Direction.Outgoing, RagSchema.HasChunkType);
+        var e = tx.EnumerateEdges(docId, Direction.Outgoing, RagSchema.HasChunkType);
         while (e.MoveNext()) n++;
         return n;
     }
 
-    // DeleteNode はノードに接続する全リレーションを自身でカスケード削除する
-    // (GraphTransaction.DeleteNode)。そのためここでは vector の除去とノード削除のみ行う。
+    // DeleteVertex はノードに接続する全リレーションを自身でカスケード削除する
+    // (GraphTransaction.DeleteVertex)。そのためここでは vector の除去とノード削除のみ行う。
 
     /// <summary>Chunk のベクトルとノード (接続関係はカスケード) を削除する。</summary>
-    private void DeleteChunk(IGraphTransaction tx, NodeId chunkId)
+    private void DeleteChunk(IGraphTransaction tx, VertexId chunkId)
     {
-        tx.RemoveVector(EntityKind.Node, chunkId.Value, _options.VectorIndexName);
-        tx.DeleteNode(chunkId);
+        tx.RemoveVector(EntityKind.Vertex, chunkId.Value, _options.VectorIndexName);
+        tx.DeleteVertex(chunkId);
     }
 
     /// <summary>Document とその全 Chunk・関係・ベクトルを削除する。</summary>
-    private void DeleteDocumentNode(IGraphTransaction tx, NodeId docId)
+    private void DeleteDocumentVertex(IGraphTransaction tx, VertexId docId)
     {
         foreach (var chunkId in CollectChunks(tx, docId))
             DeleteChunk(tx, chunkId);
-        tx.DeleteNode(docId);
+        tx.DeleteVertex(docId);
     }
 
-    private static bool TryReadString(IGraphTransaction tx, NodeId nodeId, string key, out string value)
+    private static bool TryReadString(IGraphTransaction tx, VertexId vertexId, string key, out string value)
     {
-        if (tx.HasProperty(nodeId, key))
+        if (tx.HasProperty(vertexId, key))
         {
-            var pv = tx.GetProperty(nodeId, key);
+            var pv = tx.GetProperty(vertexId, key);
             if (pv.Type == PropertyValueType.String)
             {
                 value = Encoding.UTF8.GetString(pv.Utf8StringValue);
@@ -373,8 +373,8 @@ public sealed class RagStore
         // トークンの事前登録 (GetOrCreate* はそれ自体が冪等)。
         schema.GetOrCreateLabel(RagSchema.DocumentLabel);
         schema.GetOrCreateLabel(RagSchema.ChunkLabel);
-        schema.GetOrCreateRelationshipType(RagSchema.HasChunkType);
-        schema.GetOrCreateRelationshipType(RagSchema.NextChunkType);
+        schema.GetOrCreateEdgeType(RagSchema.HasChunkType);
+        schema.GetOrCreateEdgeType(RagSchema.NextChunkType);
         schema.GetOrCreatePropertyKey(RagSchema.PropSourceId);
         schema.GetOrCreatePropertyKey(RagSchema.PropTitle);
         schema.GetOrCreatePropertyKey(RagSchema.PropContentHash);
@@ -389,7 +389,7 @@ public sealed class RagStore
         schema.GetOrCreatePropertyKey(RagSchema.PropCharEnd);
 
         // Document.sourceId の検索用索引 (StringEquality)。エンジンに unique 制約は無く、
-        // 一意性は RAG-3 の upsert (MergeNode) 側で担保する。
+        // 一意性は  の upsert (MergeVertex) 側で担保する。
         if (!schema.IndexExists(RagSchema.DocSourceIndex))
             schema.CreateIndex(
                 RagSchema.DocSourceIndex, RagSchema.DocumentLabel, RagSchema.PropSourceId,
@@ -413,7 +413,7 @@ public sealed class RagStore
         {
             _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
                 Name: _options.VectorIndexName,
-                EntityKind: EntityKind.Node,
+                EntityKind: EntityKind.Vertex,
                 SourcePropertyKeyId: searchTextKey,
                 Dimensions: _options.EmbeddingDimensions,
                 Metric: _options.VectorMetric,
@@ -458,5 +458,5 @@ public sealed class RagStore
 /// </summary>
 /// <param name="Unchanged"><c>contentHash</c> が既存と一致し no-op だったか。</param>
 /// <param name="ChunkCount">取込後の文書のチャンク数 (no-op 時は既存値)。</param>
-/// <param name="DocumentNodeId">対象 Document ノードの ID。</param>
-public readonly record struct UpsertResult(bool Unchanged, int ChunkCount, NodeId DocumentNodeId);
+/// <param name="DocumentVertexId">対象 Document ノードの ID。</param>
+public readonly record struct UpsertResult(bool Unchanged, int ChunkCount, VertexId DocumentVertexId);

@@ -8,57 +8,57 @@ using Quiver.Storage.Wal;
 namespace Quiver;
 
 /// <summary>
-/// Default factory used when <see cref="GraphDatabaseOptions.Backend"/> is
+/// Default factory used when <see cref="QuiverDatabaseOptions.Backend"/> is
 /// <see cref="BackendKind.Binary"/>. Produces a <see cref="BinaryGraphStorageBackend"/>
 /// constructed from the binary page / WAL / store / index components.
 /// </summary>
 internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFactory
 {
     // コンテナ内の全コアページを載せる単一 WAL fileKind。旧 per-store WalFileKind
-    // (Nodes=1..PropertyVersionMeta=7) とも索引予約レンジ (0x40+) とも衝突しない値を使う。
-    // 特に vacuum の WriteFileTruncate は WalFileKind.Nodes 等を渡すため、DataFileKind がそれらと
+    // (Vertices=1..PropertyVersionMeta=7) とも索引予約レンジ (0x40+) とも衝突しない値を使う。
+    // 特に vacuum の WriteFileTruncate は WalFileKind.Vertices 等を渡すため、DataFileKind がそれらと
     // 衝突すると recovery の FileTruncate replay が container.Physical 全体を誤って物理 truncate する。
     private const byte DataFileKind = 0x20;
 
     // カタログ内のテナント ID (WAL fileKind とは別空間。各 store / sidecar / token に 1 つ)。
-    internal const byte TenantNodes = 1;
-    private const byte TenantRels = 2;
+    internal const byte TenantVertices = 1;
+    private const byte TenantEdges = 2;
     private const byte TenantProps = 3;
     private const byte TenantBlobs = 4;
-    private const byte TenantNodeVer = 5;
-    private const byte TenantRelVer = 6;
+    private const byte TenantVertexVer = 5;
+    private const byte TenantEdgeVer = 6;
     private const byte TenantPropVer = 7;
     private const byte TenantLabelTok = 8;
-    private const byte TenantRelTypeTok = 9;
+    private const byte TenantEdgeTypeTok = 9;
     private const byte TenantPropKeyTok = 10;
-    // VersionedNodeStore の ItemPointerMap (Sequence→物理位置) テナント。
+    // VersionedVertexStore の ItemPointerMap (Sequence→物理位置) テナント。
     // 11/12/13 は AdjacencyContainer (DataTenant/IndexTenant/EpochTenant) が使用済みのため 14。
-    internal const byte TenantNodeMap = 14;
-    // VersionedRelationshipStore の ItemPointerMap テナント。
-    private const byte TenantRelMap = 15;
+    internal const byte TenantVertexMap = 14;
+    // VersionedEdgeStore の ItemPointerMap テナント。
+    private const byte TenantEdgeMap = 15;
     // opt-in 列の catalog テナント (各列テナントは ColumnCatalog が 64+ で採番)。
     private const byte TenantColumnCatalog = 16;
     // 永続ベクトルインデックスの catalog テナント (各 index の payload/HNSW テナントは
     // VectorIndexCatalog が 200+ で採番)。
     private const byte TenantVectorCatalog = 17;
-    // 第一級ハイパーエッジ。18..24 は固定 tenant で、後続 store 実装でも変更しない。
-    internal const byte TenantHyperedgeHeap = 18;
-    internal const byte TenantHyperedgeMap = 19;
-    internal const byte TenantHyperedgeVersion = 20;
+    // 第一級Nexus。18..24 は固定 tenant で、後続 store 実装でも変更しない。
+    internal const byte TenantNexusHeap = 18;
+    internal const byte TenantNexusMap = 19;
+    internal const byte TenantNexusVersion = 20;
     // incidence は fixed-slot 直接アドレスの単一テナント (ヘッダページ + slot ページ)。
     // 間接マップを持たないため tenant 22 は使わない。番号は詰め直さず欠番のまま残し、
     // 既存 DB の他テナント番号を動かさない。
     internal const byte TenantIncidenceHeap = 21;
     // 22 は旧 incidence 間接マップの欠番。再割り当てしない。
-    internal const byte TenantHyperedgeTypeToken = 23;
+    internal const byte TenantNexusTypeToken = 23;
     internal const byte TenantRoleToken = 24;
-    // node sequence 直引きの 6B incidence head sidecar 用 tenant。
-    internal const byte TenantNodeIncidenceHead = 25;
-    internal const byte TenantRelationshipLocator = 26;
-    internal const byte TenantRelationshipDeltaHead = 27;
-    internal const byte TenantRelationshipDeltaPages = 28;
+    // vertex sequence 直引きの 6B incidence head sidecar 用 tenant。
+    internal const byte TenantVertexIncidenceHead = 25;
+    internal const byte TenantEdgeLocator = 26;
+    internal const byte TenantEdgeDeltaHead = 27;
+    internal const byte TenantEdgeDeltaPages = 28;
 
-    public IGraphStorageBackend Open(string filePath, GraphDatabaseOptions options)
+    public IGraphStorageBackend Open(string filePath, QuiverDatabaseOptions options)
     {
         // filePath は単一コンテナ (*.quiver) のフルパス。親ディレクトリを用意する。
         var parentDir = Path.GetDirectoryName(filePath);
@@ -69,21 +69,25 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // WAL は単一サイドカー <filePath>-wal。クリーン終了で削除され、
         // 静止時は *.quiver のみが残る。
         var walPath = filePath + "-wal";
-        var wal = new WriteAheadLog(walPath, options.WalSegmentSize, options.GroupCommitWindow);
+        var wal = new WriteAheadLog(walPath, options.GroupCommitWindow);
 
         // 単一ファイルコンテナ。コア store / version sidecar / token / 索引 / 隣接ブロック /
         // epoch をすべて *.quiver に同居させ、全ページを単一 DATA fileKind で WAL に載せる。
         // 物理ページ ID は全テナント横断で一意なので recovery / abort は純物理ページ単位で動く。
-        // GraphDatabaseOptions.BufferPoolSize を共有プール容量に実配線する。
+        // QuiverDatabaseOptions.BufferPoolSize を共有プール容量に実配線する。
         int poolPages = (int)Math.Max(64, options.BufferPoolSize / PagedFile.PageSizeConst);
-        var container = new SingleFileContainer(filePath, poolPages);
+        var container = new SingleFileContainer(
+            filePath,
+            poolPages,
+            options.InitialFileAllocationBytes,
+            options.MaximumFileGrowthStepBytes);
         return OpenCore(filePath, options, pageManager, wal, container, recover: true);
     }
 
     /// <summary>
     /// RAM 専用の物理ページ層と WAL を使い、通常バックエンドと同じストア群を組み立てる。
     /// </summary>
-    internal IGraphStorageBackend OpenInMemory(GraphDatabaseOptions options)
+    internal IGraphStorageBackend OpenInMemory(QuiverDatabaseOptions options)
     {
         var pageManager = new PageManager();
         var wal = new NullWriteAheadLog();
@@ -94,7 +98,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
 
     private static IGraphStorageBackend OpenCore(
         string filePath,
-        GraphDatabaseOptions options,
+        QuiverDatabaseOptions options,
         PageManager pageManager,
         IWriteAheadLog wal,
         SingleFileContainer container,
@@ -102,7 +106,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     {
         // 同スレッドの先行 backend がトランザクション途中で終了している可能性がある
         // (crash シミュレーション等)。ambient コンテキストをクリーン状態へ戻す。
-        WalPageContext.End();
+        WalWriteSetContext.End();
         MvccContext.End();
 
         container.EnableWalLogging(DataFileKind, wal);
@@ -127,7 +131,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var committedRegistry = new CommittedTxRegistry();
 
         // fileRegistry には data file + materialize 済み索引が既に登録されている。
-        // 索引も ARIES page-WAL 対象なので PageImage redo + CLR undo が透過的に走る。
+        // 索引も page-WAL 対象なので、明示 Commit を持つトランザクションだけを redo する。
         RecoveryManager? recovery = null;
         if (recover)
         {
@@ -144,11 +148,6 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // テナントと各索引テナントの page-table は物理ページとして recovery 済みなので、
         // ここで container から開き直すだけで永続済み索引を materialize できる。
         var indexManager = new IndexManager(container);
-
-        // recovery 論理相。物理相 (recovery.Recover 上) が FtStructureImage で
-        // FT 木の構造を復元済みで、IndexManager が 2a 後のヘッダから live FullTextIndex を構築した今、
-        // committed tx の FtLeafMutation を再実行 (2b) + loser tx の逆操作 undo (Pass 3) を適用する。
-        recovery?.RecoverLogical(indexManager);
 
         // 隣接ビュー (bulk load 済みのときのみ存在) を container テナントから開く。
         // epoch (base hwm + tombstones) も EpochTenant に同居。V1/V2 種別は DataTenant の
@@ -169,30 +168,30 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             }
         }
 
-        // ノードは slotted ヒープ (TenantNodes) + ItemPointerMap (TenantNodeMap) に
-        // 載る。MVCC/Generation/SSN は従来どおり sidecar (TenantNodeVer) で管理する。
-        var nodeFile = container.OpenTenant(TenantNodes, PageKind.Header);
-        var nodeMapFile = container.OpenTenant(TenantNodeMap, PageKind.Header);
-        var nodeVerFile = container.OpenTenant(TenantNodeVer, PageKind.Header);
-        var nodeVersions = new EntityVersionStore(nodeVerFile);
-        var nodeMap = new ItemPointerMap(nodeMapFile);
-        var nodeStore = new VersionedNodeStore(nodeFile, nodeMap, labelIndex: null, nodeVersions);
+        // Vertexは slotted ヒープ (TenantVertices) + ItemPointerMap (TenantVertexMap) に
+        // 載る。MVCC/Generation/SSN は従来どおり sidecar (TenantVertexVer) で管理する。
+        var vertexFile = container.OpenTenant(TenantVertices, PageKind.Header);
+        var vertexMapFile = container.OpenTenant(TenantVertexMap, PageKind.Header);
+        var vertexVerFile = container.OpenTenant(TenantVertexVer, PageKind.Header);
+        var vertexVersions = new EntityVersionStore(vertexVerFile);
+        var vertexMap = new ItemPointerMap(vertexMapFile);
+        var vertexStore = new VersionedVertexStore(vertexFile, vertexMap, labelIndex: null, vertexVersions);
 
-        // リレーションシップも slotted ヒープ (TenantRels) + ItemPointerMap
-        // (TenantRelMap) に載る。MVCC は heap version、Generation/SSN は sidecar (TenantRelVer)。
-        var relFile = container.OpenTenant(TenantRels, PageKind.Header);
-        var relMapFile = container.OpenTenant(TenantRelMap, PageKind.Header);
-        var relVerFile = container.OpenTenant(TenantRelVer, PageKind.Header);
-        var relLocatorFile = container.OpenTenant(TenantRelationshipLocator, PageKind.Header);
-        var relVersions = new EntityVersionStore(relVerFile);
-        var relMap = new ItemPointerMap(relMapFile);
-        var relLocators = new RelationshipLocatorStore(relLocatorFile);
-        var relStore = new VersionedRelationshipStore(relFile, relMap, relVersions, relLocators);
-        var relationshipDeltaHeads = new RelationshipDeltaHeadStore(
-            container.OpenTenant(TenantRelationshipDeltaHead, PageKind.Header));
-        var relationshipDeltas = new PersistentRelationshipDeltaStore(
-            container.OpenTenant(TenantRelationshipDeltaPages, PageKind.RelationshipDeltaRecord),
-            relationshipDeltaHeads);
+        // Edgeも slotted ヒープ (TenantEdges) + ItemPointerMap
+        // (TenantEdgeMap) に載る。MVCC は heap version、Generation/SSN は sidecar (TenantEdgeVer)。
+        var edgeFile = container.OpenTenant(TenantEdges, PageKind.Header);
+        var edgeMapFile = container.OpenTenant(TenantEdgeMap, PageKind.Header);
+        var relVerFile = container.OpenTenant(TenantEdgeVer, PageKind.Header);
+        var relLocatorFile = container.OpenTenant(TenantEdgeLocator, PageKind.Header);
+        var edgeVersions = new EntityVersionStore(relVerFile);
+        var edgeMap = new ItemPointerMap(edgeMapFile);
+        var edgeLocators = new EdgeLocatorStore(relLocatorFile);
+        var edgeStore = new VersionedEdgeStore(edgeFile, edgeMap, edgeVersions, edgeLocators);
+        var edgeDeltaHeads = new EdgeDeltaHeadStore(
+            container.OpenTenant(TenantEdgeDeltaHead, PageKind.Header));
+        var edgeDeltas = new PersistentEdgeDeltaStore(
+            container.OpenTenant(TenantEdgeDeltaPages, PageKind.EdgeDeltaRecord),
+            edgeDeltaHeads);
 
         var propFile = container.OpenTenant(TenantProps, PageKind.Header);
         var blobFile = container.OpenTenant(TenantBlobs, PageKind.Header);
@@ -201,24 +200,24 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var propStore = new PropertyStore(propFile, blobFile, propVersions);
 
         var labelTokens   = new LabelTokenStore(container.OpenTenant(TenantLabelTok, PageKind.TokenRecord));
-        var relTypeTokens = new RelationshipTypeTokenStore(container.OpenTenant(TenantRelTypeTok, PageKind.TokenRecord));
+        var edgeTypeTokens = new EdgeTypeTokenStore(container.OpenTenant(TenantEdgeTypeTok, PageKind.TokenRecord));
         var propKeyTokens = new PropertyKeyTokenStore(container.OpenTenant(TenantPropKeyTok, PageKind.TokenRecord));
 
-        var hyperedgeHeapFile = container.OpenTenant(TenantHyperedgeHeap, PageKind.Header);
-        var hyperedgeMapFile = container.OpenTenant(TenantHyperedgeMap, PageKind.Header);
-        var hyperedgeVerFile = container.OpenTenant(TenantHyperedgeVersion, PageKind.Header);
-        var hyperedgeVersions = new EntityVersionStore(hyperedgeVerFile);
-        var hyperedgeMap = new ItemPointerMap(hyperedgeMapFile);
-        var hyperedgeStore = new VersionedHyperedgeStore(hyperedgeHeapFile, hyperedgeMap, hyperedgeVersions);
+        var nexusHeapFile = container.OpenTenant(TenantNexusHeap, PageKind.Header);
+        var nexusMapFile = container.OpenTenant(TenantNexusMap, PageKind.Header);
+        var nexusVerFile = container.OpenTenant(TenantNexusVersion, PageKind.Header);
+        var nexusVersions = new EntityVersionStore(nexusVerFile);
+        var nexusMap = new ItemPointerMap(nexusMapFile);
+        var nexusStore = new VersionedNexusStore(nexusHeapFile, nexusMap, nexusVersions);
 
         var incidenceHeapFile = container.OpenTenant(TenantIncidenceHeap, PageKind.Header);
         var incidenceStore = new IncidenceStore(incidenceHeapFile);
 
-        var nodeIncidenceHeadFile = container.OpenTenant(TenantNodeIncidenceHead, PageKind.Header);
-        var nodeIncidenceHeadStore = new NodeIncidenceHeadStore(nodeIncidenceHeadFile);
+        var vertexIncidenceHeadFile = container.OpenTenant(TenantVertexIncidenceHead, PageKind.Header);
+        var vertexIncidenceHeadStore = new VertexIncidenceHeadStore(vertexIncidenceHeadFile);
 
-        var hyperedgeTypeTokens = new HyperedgeTypeTokenStore(
-            container.OpenTenant(TenantHyperedgeTypeToken, PageKind.TokenRecord));
+        var nexusTypeTokens = new NexusTypeTokenStore(
+            container.OpenTenant(TenantNexusTypeToken, PageKind.TokenRecord));
         var roleTokens = new RoleTokenStore(
             container.OpenTenant(TenantRoleToken, PageKind.TokenRecord));
 
@@ -244,14 +243,14 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             coMembershipStore = new CoMembershipBlockStore(resolvedPairs);
             // 導出ビューは recovery 済みの正本だけから作る。途中でプロセスが停止しても
             // 次回 open で同じ再構築を行うため、独自の WAL や永続レイアウトを持たない。
-            coMembershipStore.Rebuild(hyperedgeStore, incidenceStore);
+            coMembershipStore.Rebuild(nexusStore, incidenceStore);
         }
 
         // 列マネージャを startup で eager に開く。
         // 登録済み列の head cache を開いておくことで (1) write 経路が列を維持でき、
         // (2) abort の ReloadStoreMeta から列 cache を head ページへ再同期できる。
         var columnManager = new ColumnManager(
-            container, TenantColumnCatalog, relStore, nodeStore, hyperedgeStore, propStore);
+            container, TenantColumnCatalog, edgeStore, vertexStore, nexusStore, propStore);
 
         // ベクトル payload を container テナントへ永続化するストア。InMemoryVectorStore を置換し、
         // 再起動を跨いで KNN を再現する。書き込みは container WAL に乗るので tx 配下なら原子整合する。
@@ -259,32 +258,32 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var vectors = new PersistentVectorStore(container, TenantVectorCatalog,
             (kind, seq) => kind switch
             {
-                Core.EntityKind.Node => nodeStore.CurrentGeneration(seq),
-                Core.EntityKind.Relationship => relStore.CurrentGeneration(seq),
-                Core.EntityKind.Hyperedge => hyperedgeStore.CurrentGeneration(seq),
+                Core.EntityKind.Vertex => vertexStore.CurrentGeneration(seq),
+                Core.EntityKind.Edge => edgeStore.CurrentGeneration(seq),
+                Core.EntityKind.Nexus => nexusStore.CurrentGeneration(seq),
                 _ => -1,
             },
             options.VectorCacheBudgetBytes);
 
-        // abort (CLR undo) 後に container のテナント記述子 / page table と store メタを
+        // abort の before-image 復元後に container のテナント記述子 / page table と store メタを
         // 再同期するコールバック。AbortUndoHandler が before-image 復元後に呼ぶ。
         void ReloadStoreMeta()
         {
             container.ReloadAll();
-            nodeStore.ReloadMeta();
-            relStore.ReloadMeta();
-            relationshipDeltaHeads.ReloadMeta();
-            relationshipDeltas.ReloadMeta();
-            hyperedgeStore.ReloadMeta();
+            vertexStore.ReloadMeta();
+            edgeStore.ReloadMeta();
+            edgeDeltaHeads.ReloadMeta();
+            edgeDeltas.ReloadMeta();
+            nexusStore.ReloadMeta();
             incidenceStore.ReloadMeta();
             propStore.ReloadMeta();
             labelTokens.Reload();
-            relTypeTokens.Reload();
+            edgeTypeTokens.Reload();
             propKeyTokens.Reload();
-            hyperedgeTypeTokens.Reload();
+            nexusTypeTokens.Reload();
             roleTokens.Reload();
-            // epoch テナントも container WAL 対象。abort で CLR がページを戻すので
-            // in-memory の epoch / baseRelHwm / tombstone を読み直してディスクと一致させる。
+            // epoch テナントも container WAL 対象。abort で before-image がページを戻すので
+            // in-memory の epoch / baseEdgeHwm / tombstone を読み直してディスクと一致させる。
             adjEpoch?.Reload();
             // 列 head ページも container WAL 対象。abort の before-image undo で
             // head ページが tx 開始前へ戻るので、列の in-memory cache をページから再構築して
@@ -301,42 +300,39 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
 
         var access = new BinaryGraphAccessMethods(
             vectors,
-            new RelationshipDeltaStore(relationshipDeltas));
+            new EdgeDeltaStore(edgeDeltas));
 
         // LabelId をキーとする in-memory 転置索引。ラベル付き scan が O(N) ではなく O(|L|) で走る。
-        // WAL recovery 後の NodeStore.Scan() から遅延構築し、Allocate/Free は store の
-        // LabelNodeIndex hook で通知され、bulk load は無効化 (次回 lookup で再構築)。
-        var labelIndex = new LabelNodeIndex();
-        nodeStore.AttachLabelIndex(labelIndex);
+        // WAL recovery 後の VertexStore.Scan() から遅延構築し、Allocate/Free は store の
+        // LabelVertexIndex hook で通知され、bulk load は無効化 (次回 lookup で再構築)。
+        var labelIndex = new LabelVertexIndex();
+        vertexStore.AttachLabelIndex(labelIndex);
         access.AttachLabelIndex(labelIndex);
 
         // in-process undo handler。abort / commit 失敗時に before-image を復元し store メタを再同期する。
-        // leaf 論理 undo の適用器も渡す (postings/norms の Suppressed leaf を
-        // abort 時に逆操作で取り消す)。
-        var undoHandler = new AbortUndoHandler(fileRegistry, ReloadStoreMeta,
-            (tenant, isUpsert, key, value) => indexManager.ApplyFtLeafUndo(tenant, isUpsert, key, value));
+        var undoHandler = new AbortUndoHandler(fileRegistry, ReloadStoreMeta);
 
         var txManager = new TransactionManager(
-            wal, nodeStore, relStore, propStore, indexManager, adjStore, access,
+            wal, vertexStore, edgeStore, propStore, indexManager, adjStore, access,
             undoHandler, options.LockingMode, options.LockTimeout,
             options.DeadlockDetectionInterval, committedRegistry,
-            nodeVersions, relVersions,
-            hyperedgeStore, incidenceStore, nodeIncidenceHeadStore, hyperedgeVersions,
+            vertexVersions, edgeVersions,
+            nexusStore, incidenceStore, vertexIncidenceHeadStore, nexusVersions,
             coMembershipStore,
-            relationshipDeltas);
+            edgeDeltas);
         // recovery で観測した最大 TxId より大きい値から新規 tx を採番するよう、
         // TransactionManager の _nextTxId を巻き上げる。これがないと新規 tx ID が
         // 過去 commit 済み TxId と衝突して registry が同じ entry を 2 回 Mark してしまう。
         txManager.AdvanceNextTxIdAtLeast(committedRegistry.MaxObservedTxId + 1);
-        // recovery 後の node sidecar ヘッダから SSN commit-stamp 高水位を読み、
+        // recovery 後の vertex sidecar ヘッダから SSN commit-stamp 高水位を読み、
         // クロックをそこまで巻き上げる。これがないと再起動でクロックが 0 に戻り、永続化済みの
         // 旧 stamp 空間と新 stamp 空間が混在して Serializable tx が過剰 abort する。
-        txManager.SeedCommitStamp(nodeVersions.ReadCommitStampHighWater());
+        txManager.SeedCommitStamp(vertexVersions.ReadCommitStampHighWater());
 
         // クリーン終了で WAL が削除されていた場合、recovery では committedRegistry が
         // 空のままになる (WAL から復元できない)。container に永続化された committed TxId 高水位から
         // visibility horizon (= これ未満は presumed-committed) と次 TxId 採番起点を復元する。
-        // abort 済み tx の効果は CLR で巻き戻り済みなので、高水位未満を一律 committed と presume しても
+        // abort 済み tx の効果は before-image で巻き戻り済みなので、高水位未満を committed とみなしても
         // 生存レコードはすべて committed tx の xmin を持ち、安全。crash 経路では WAL 由来の horizon が
         // より新しいため max を取る。
         long containerHighWater = container.CommittedHighWaterTxId;
@@ -372,14 +368,14 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         }
 
         var backend = new BinaryGraphStorageBackend(
-            filePath, container, pageManager, wal, nodeStore, relStore, propStore,
-            labelTokens, relTypeTokens, propKeyTokens, hyperedgeTypeTokens, roleTokens, indexManager,
+            filePath, container, pageManager, wal, vertexStore, edgeStore, propStore,
+            labelTokens, edgeTypeTokens, propKeyTokens, nexusTypeTokens, roleTokens, indexManager,
             adjStore, txManager, access, vectors,
             columnManager,
             coMembershipStore,
             labelIndex,
-            relationshipDeltaHeads,
-            relationshipDeltas,
+            edgeDeltaHeads,
+            edgeDeltas,
             options.LogicalMutationSink,
             options.TargetRecoveryTime,
             options.MinCheckpointThresholdBytes,

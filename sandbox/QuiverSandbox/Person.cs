@@ -1,6 +1,6 @@
-﻿using Quiver.Api;
+using Quiver.Api;
 
-[Node("Person")]
+[Vertex("Person")]
 public partial class Person
 {
     [Indexed("idx_person_name")]

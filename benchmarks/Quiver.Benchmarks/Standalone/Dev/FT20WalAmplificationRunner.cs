@@ -3,7 +3,7 @@
 namespace Quiver.Benchmarks.Standalone.Dev;
 
 /// <summary>
-/// FT-20: BenchmarkDotNet を経由せず短時間で WAL 増幅の参考値を取るランナー。
+/// BenchmarkDotNet を経由せず短時間で WAL 増幅の参考値を取るランナー。
 /// 通常 BDN は数十分かかるので、ローカル開発 / commit 時の簡易計測に使う。
 ///
 /// 起動方法: <c>dotnet run --project benchmarks/Quiver.Benchmarks -- --ft20-wal</c>
@@ -13,7 +13,7 @@ public static class FT20WalAmplificationRunner
 {
     public static int Run()
     {
-        Console.WriteLine("=== FT-20: Index WAL Amplification ===");
+        Console.WriteLine("=== Index WAL Amplification ===");
         Console.WriteLine("scenario, entryCount, walBytes, walBytesPerEntry, wallMs");
 
         int[] sizes = { 1_000, 10_000, 100_000 };

@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Quiver.Core;
 using Quiver.Telemetry;
 using Quiver.Index;
@@ -10,16 +10,17 @@ namespace Quiver.Transactions;
 internal sealed class Transaction : ITransaction
 {
     private readonly IWriteAheadLog _wal;
-    private readonly LockManager _nodeLocks;
-    private readonly LockManager _relLocks;
-    private readonly LockManager _hyperedgeLocks;
+    private readonly WalWriteSet _walWriteSet;
+    private readonly LockManager _vertexLocks;
+    private readonly LockManager _edgeLocks;
+    private readonly LockManager _nexusLocks;
     private readonly LockManager _indexLocks;
     private readonly TransactionManager _manager;
-    private readonly TxNodeStore _nodes;
-    private readonly TxRelationshipStore _relationships;
-    private readonly TxHyperedgeStore _hyperedges;
+    private readonly TxVertexStore _vertices;
+    private readonly TxEdgeStore _edges;
+    private readonly TxNexusStore _nexuses;
     private readonly IIncidenceStore _incidences;
-    private readonly INodeIncidenceHeadStore _nodeIncidenceHeads;
+    private readonly IVertexIncidenceHeadStore _vertexIncidenceHeads;
     private readonly TxPropertyStore _properties;
     private readonly TxIndexManager _indexes;
     private readonly IAdjacencyBlockStore? _adjStore;
@@ -36,7 +37,7 @@ internal sealed class Transaction : ITransaction
     private int _usageOwnerThreadId;
     private int _usageDepth;
 
-    // savepoint 管理。SavepointId.Value (連番) → スタック深度 (= WalPageContext のバケット index)。
+    // savepoint 管理。SavepointId.Value (連番) → transaction-owned write set のバケット index。
     // RollbackTo で巻き戻しても savepoint 自体は消費しないので、Value は同じレベルで再利用される。
     // ReleaseSavepoint または親 savepoint の Rollback/Release で初めて無効化される。
     private long _nextSavepointId;
@@ -45,9 +46,9 @@ internal sealed class Transaction : ITransaction
     // SSN (Serializable) のときのみ非 null。read/write hook が η/π を更新し、
     // Commit の pre-commit 検証 + post-commit スタンプ書き戻しで使う。
     private readonly SsnContext? _ssn;
-    private readonly IEntityVersionStore? _nodeVersions;
-    private readonly IEntityVersionStore? _relVersions;
-    private readonly IEntityVersionStore? _hyperedgeVersions;
+    private readonly IEntityVersionStore? _vertexVersions;
+    private readonly IEntityVersionStore? _edgeVersions;
+    private readonly IEntityVersionStore? _nexusVersions;
     // Begin 時の commit-stamp クロック (snapshot 下限)。読んだ版の v.sstamp を π に
     // 反映するかの判定に使う (詳細は TransactionManager.CurrentCommitStampClock)。
     private readonly long _ssnSnapshotCstamp;
@@ -63,27 +64,27 @@ internal sealed class Transaction : ITransaction
     public SnapshotState Snapshot => _snapshot;
     public CommittedTxRegistry? Committed => _committed;
 
-    public INodeStore Nodes => _nodes;
-    public IRelationshipStore Relationships => _relationships;
-    public IHyperedgeStore Hyperedges => _hyperedges;
+    public IVertexStore Vertices => _vertices;
+    public IEdgeStore Edges => _edges;
+    public INexusStore Nexuses => _nexuses;
     public IIncidenceStore Incidences => _incidences;
-    public INodeIncidenceHeadStore NodeIncidenceHeads => _nodeIncidenceHeads;
+    public IVertexIncidenceHeadStore VertexIncidenceHeads => _vertexIncidenceHeads;
     public IPropertyStore Properties => _properties;
     public IIndexManager Indexes => _indexes;
     public IAdjacencyBlockStore? AdjacencyBlocks => _adjStore;
     public ICoMembershipBlockStore? CoMembershipBlocks
-        => _hyperedges.HasPendingViewAdds ? null : _coMembershipStore;
+        => _nexuses.HasPendingViewAdds ? null : _coMembershipStore;
     public IGraphAccessMethods Access => _access;
 
     internal Transaction(
         TransactionId id, IsolationLevel level, long snapshotLsn,
         IWriteAheadLog wal,
-        LockManager nodeLocks, LockManager relLocks, LockManager hyperedgeLocks,
+        LockManager vertexLocks, LockManager edgeLocks, LockManager nexusLocks,
         LockManager indexLocks,
         TransactionManager manager,
-        INodeStore nodeStore, IRelationshipStore relStore,
-        IHyperedgeStore hyperedgeStore, IIncidenceStore incidenceStore,
-        INodeIncidenceHeadStore nodeIncidenceHeadStore,
+        IVertexStore vertexStore, IEdgeStore edgeStore,
+        INexusStore nexusStore, IIncidenceStore incidenceStore,
+        IVertexIncidenceHeadStore vertexIncidenceHeadStore,
         IPropertyStore propStore, IIndexManager indexManager,
         IAdjacencyBlockStore? adjStore = null,
         IGraphAccessMethods? access = null,
@@ -92,15 +93,15 @@ internal sealed class Transaction : ITransaction
         TimeSpan? lockTimeout = null,
         SnapshotState snapshot = default,
         CommittedTxRegistry? committed = null,
-        IEntityVersionStore? nodeVersions = null,
-        IEntityVersionStore? relVersions = null,
-        IEntityVersionStore? hyperedgeVersions = null,
+        IEntityVersionStore? vertexVersions = null,
+        IEntityVersionStore? edgeVersions = null,
+        IEntityVersionStore? nexusVersions = null,
         ICoMembershipBlockStore? coMembershipStore = null,
-        PersistentRelationshipDeltaStore? relationshipDeltas = null)
+        PersistentEdgeDeltaStore? edgeDeltas = null)
     {
         Id = id; Level = level; SnapshotLsn = snapshotLsn;
         _wal = wal;
-        _nodeLocks = nodeLocks; _relLocks = relLocks; _hyperedgeLocks = hyperedgeLocks;
+        _vertexLocks = vertexLocks; _edgeLocks = edgeLocks; _nexusLocks = nexusLocks;
         _indexLocks = indexLocks;
         _manager = manager;
         _adjStore = adjStore;
@@ -111,11 +112,11 @@ internal sealed class Transaction : ITransaction
         var timeout = lockTimeout ?? TimeSpan.FromSeconds(5);
         // Serializable かつ MVCC コンテキストがあるときのみ SSN を起動する。
         // sidecar が無い (旧テスト経路など) 場合は SI と同じ挙動に縮退する。
-        _nodeVersions = nodeVersions;
-        _relVersions = relVersions;
-        _hyperedgeVersions = hyperedgeVersions;
+        _vertexVersions = vertexVersions;
+        _edgeVersions = edgeVersions;
+        _nexusVersions = nexusVersions;
         _ssn = (level == IsolationLevel.Serializable && committed != null
-            && nodeVersions != null && relVersions != null)
+            && vertexVersions != null && edgeVersions != null)
             ? new SsnContext() : null;
         // Serializable のときだけ Begin 時点の commit-stamp クロックを捕捉する
         // (ctor は TransactionManager.Begin の _snapshotGate 下で走るため一貫した下限)。
@@ -126,18 +127,18 @@ internal sealed class Transaction : ITransaction
         var snap = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
         _snapshot = snap;
         _committed = committed;
-        _nodes = new TxNodeStore(nodeStore, nodeLocks, id, lockingMode, timeout, snap, committed, _ssn);
-        _relationships = new TxRelationshipStore(
-            relStore, relLocks, id, _nodes, lockingMode, timeout, snap, committed, _ssn,
-            relationshipDeltas);
-        _hyperedges = new TxHyperedgeStore(hyperedgeStore, incidenceStore, nodeIncidenceHeadStore,
-            hyperedgeLocks, nodeLocks, id, lockingMode, timeout, snap, committed, _ssn,
+        _vertices = new TxVertexStore(vertexStore, vertexLocks, id, lockingMode, timeout, snap, committed, _ssn);
+        _edges = new TxEdgeStore(
+            edgeStore, edgeLocks, id, _vertices, lockingMode, timeout, snap, committed, _ssn,
+            edgeDeltas);
+        _nexuses = new TxNexusStore(nexusStore, incidenceStore, vertexIncidenceHeadStore,
+            nexusLocks, vertexLocks, id, lockingMode, timeout, snap, committed, _ssn,
             coMembershipStore);
         _incidences = incidenceStore;
-        _nodeIncidenceHeads = nodeIncidenceHeadStore;
+        _vertexIncidenceHeads = vertexIncidenceHeadStore;
         _properties = new TxPropertyStore(propStore, id, snap, committed, _ssn);
         _indexes = new TxIndexManager(indexManager, indexLocks, id, timeout);
-        WalPageContext.Begin(wal, id);
+        _walWriteSet = WalWriteSetContext.Begin(wal, id);
         // MVCC ambient コンテキスト開始 (Tx wrapper を介さない経路のため)。
         // null なら旧テスト等の互換経路として MvccContext を起動しない (= Bootstrap fallback)。
         if (committed != null)
@@ -148,6 +149,7 @@ internal sealed class Transaction : ITransaction
 
     public TransactionUsageLease EnterUsage()
     {
+        WalWriteSetContext.Activate(_walWriteSet);
         int threadId = Environment.CurrentManagedThreadId;
         int owner = Volatile.Read(ref _usageOwnerThreadId);
         if (owner == threadId)
@@ -194,6 +196,8 @@ internal sealed class Transaction : ITransaction
             "tx.commit", ActivityKind.Internal);
         activity?.SetTag("quiver.tx.id", Id.Value);
         var sw = Stopwatch.StartNew();
+        bool durableCommitted = false;
+        bool managerEntered = false;
         try
         {
             // Serializable のときは PageImage を WAL へ流す前に SSN の
@@ -206,18 +210,20 @@ internal sealed class Transaction : ITransaction
             // ここで全 PageImage を WAL へ追記し、その後に Commit レコードを書く。
             // Commit を最後に書くことで、recovery はコミット済みトランザクションの
             // ページイメージのみを replay する。
-            WalPageContext.FlushPending();
+            _walWriteSet.FlushPending();
             long lsn = _wal.Append(WalRecordType.Commit, Id, ReadOnlySpan<byte>.Empty);
             _wal.FlushTo(lsn);
-            WalPageContext.End();
+            durableCommitted = true;
+            WalWriteSetContext.End(_walWriteSet);
             // MVCC ambient コンテキスト終了 (これ以降このスレッドは
             // ベンチ / bulk loader 等の Bootstrap fallback 経路に戻る)。
             MvccContext.End();
             // durable commit を観測できる境界より前に導出ビュー差分を公開する。
             // これ以降に開始する reader は正本とビューを同じ状態で参照できる。
-            _hyperedges.PublishPendingViewAdds();
+            _nexuses.PublishPendingViewAdds();
             ReleaseAllLocks();
             _state = TransactionState.Committed;
+            managerEntered = true;
             _manager.OnCommit(Id);
             QuiverTelemetry.TxCommitCount.Add(1);
             QuiverTelemetry.TxCommitDurationMs.Record(sw.Elapsed.TotalMilliseconds);
@@ -227,6 +233,28 @@ internal sealed class Transaction : ITransaction
         }
         catch (Exception ex)
         {
+            // Commit の fsync 後は結果を abort へ戻せない。checkpoint や通知処理の失敗が
+            // 呼び出し元へ伝播しても、明示 Commit を winner とする状態を維持する。
+            if (durableCommitted)
+            {
+                try { WalWriteSetContext.End(_walWriteSet); } catch { }
+                try { MvccContext.End(); } catch { }
+                try { _nexuses.PublishPendingViewAdds(); } catch { }
+                try { ReleaseAllLocks(); } catch { }
+                _state = TransactionState.Committed;
+                if (!managerEntered)
+                {
+                    try { _manager.OnCommit(Id); } catch { }
+                }
+                QuiverTelemetry.TxCommitCount.Add(1);
+                QuiverTelemetry.TxCommitDurationMs.Record(sw.Elapsed.TotalMilliseconds);
+                QuiverEventSource.Log.TxCommit();
+                QuiverEventSource.Log.TxCommitted(Id.Value, sw.Elapsed.TotalMilliseconds);
+                activity?.SetStatus(ActivityStatusCode.Error, "post-commit processing failed");
+                FireHooks(_onCommitted);
+                throw;
+            }
+
             // WAL flush 失敗などで Commit が途中失敗した場合は rollback として公開し、
             // 登録済み OnRolledBack フックから一貫した結果が見えるようにする。
             // コンテキスト破棄前にページ変更をその場で戻し、WAL 上でも abort を記録する。
@@ -234,7 +262,7 @@ internal sealed class Transaction : ITransaction
             // drain 前に自分の PageImage を coalesce バッファから除去 (最適化)。
             try { _wal.EvictCoalescedPageImagesFor(Id); } catch { }
             try { _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty); } catch { }
-            try { WalPageContext.End(); } catch { }
+            try { WalWriteSetContext.End(_walWriteSet); } catch { }
             try { MvccContext.End(); } catch { }
             try { ReleaseAllLocks(); } catch { }
             _state = TransactionState.Aborted;
@@ -263,16 +291,16 @@ internal sealed class Transaction : ITransaction
         activity?.SetTag("quiver.tx.id", Id.Value);
         var sw = Stopwatch.StartNew();
         // in-process undo では取得済み before-image をデータファイルへ戻し、
-        // ページベースストアのメタデータを再読込する。破棄したノード、エッジ、
+        // ページベースストアのメタデータを再読込する。破棄したVertex、エッジ、
         // プロパティが後続トランザクションから見えないようにするため、
-        // WalPageContext.End() がトランザクション単位の before-image バッファを破棄する前に実行する。
+        // write set の before-image を破棄する前に実行する。
         RollBackInPlace();
         // 共有 coalesce バッファに残った自分の PageImage を破棄してから Abort を書く。
         // (Append(Abort) の drain で aborted tx の after-image が WAL に漏れるのを抑制する最適化。
         // 漏れても recovery で abortedTxs により skip されるため correctness には影響しない。)
         _wal.EvictCoalescedPageImagesFor(Id);
         _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty);
-        WalPageContext.End();
+        WalWriteSetContext.End(_walWriteSet);
         MvccContext.End();
         ReleaseAllLocks();
         _state = TransactionState.Aborted;
@@ -288,14 +316,7 @@ internal sealed class Transaction : ITransaction
     private void RollBackInPlace()
     {
         if (_undoHandler == null) return;
-        // **順序が重要** (spec: 07_fulltext.md#logical-wal)。先に leaf 論理 undo (逆操作) を当てて Suppressed leaf
-        // (page before-image を持たない) からキーを除去する。その後 before-image undo が Full の header
-        // ページを pre-tx CLR へ戻し ReloadFromHeader で root/height/entryCount を権威的に再同期するので、
-        // 論理 undo が触った entryCount は最終的に header CLR の値 (= pre-tx) で上書きされ二重計上しない。
-        // (逆順だと header が先に 0 へ戻った後 DeleteRawEntry が更に減らし entryCount=-1 になる。)
-        // 論理 undo は post-tx 構造を辿るので Suppressed leaf のキーを正しく見つけられる。
-        _undoHandler.UndoFtLogical(WalPageContext.CurrentFtUndoLog);
-        var beforeImages = WalPageContext.CurrentBeforeImagePayloads;
+        var beforeImages = _walWriteSet.GetAllBeforeImagesOldestWins();
         if (beforeImages.Count > 0)
             _undoHandler.Undo(beforeImages);
     }
@@ -309,14 +330,14 @@ internal sealed class Transaction : ITransaction
     /// もとに、creator cstamp / reader pstamp / overwriter sstamp を畳み込んで exclusion window
     /// (π(T) &gt; η(T)) を判定する。検証 + 書き戻しは <see cref="TransactionManager.SsnCommitGate"/>
     /// 下で直列化し、並行 Serializable commit 間の version スタンプ read-modify-write を保護する。
-    /// <para>read 捕捉は <see cref="ISsnReadSink"/> をストアの物理読み取り点 (NodeStore /
-    /// RelationshipStore の Read・Scan) に挿しているため、直接 Read だけでなく traversal の隣接走査・
+    /// <para>read 捕捉は <see cref="ISsnReadSink"/> をストアの物理読み取り点 (VertexStore /
+    /// EdgeStore の Read・Scan) に挿しているため、直接 Read だけでなく traversal の隣接走査・
     /// scan・index seek 後のレコード読みも一律 read-set に入る (= rw-antidependency の取りこぼしなし)。</para>
     /// <para>仕様上の限界 (設計でスコープ外、index versioning / 別タスク前提): phantom protection は
     /// 対象外 — 述語に新規一致する行や隣接の増加 (= 既存バージョンの読みではない) は検出しない。
     /// lock は SSN と併存し撤去しない (将来別タスク)。</para>
     /// <para>実装上の割り切り (いずれも安全側 = false-abort 方向で、missed-anomaly は起こさない):
-    /// (1) 競合粒度は Node / Relationship 単位で per-property ではない (同一ノードの別プロパティ同士も
+    /// (1) 競合粒度は Vertex / Edge 単位で per-property ではない (同一Vertexの別プロパティ同士も
     /// 衝突扱い = over-abort)。(2) early-abort は入れず commit 時に一括判定 (perf 最適化の見送りで
     /// correctness 不変)。(3) commit-stamp クロックはプロセスローカルで再起動時リセット
     /// (永続化/復元せず)。再起動を跨ぐと旧/新 stamp 空間が混在し得るが η は下限・π は上限なので
@@ -329,11 +350,11 @@ internal sealed class Transaction : ITransaction
         {
             // 候補 commit stamp (単調)。最終 cstamp(T) は下で π(T) に確定する。
             long candidate = _manager.NextCommitStamp();
-            // commit-stamp 高水位を node sidecar ヘッダへ耐久化する。本 tx の
-            // WalPageContext がまだ生きているので commit と同一 page-WAL 単位で永続化され、
+            // commit-stamp 高水位を vertex sidecar ヘッダへ耐久化する。本 tx の
+            // transaction-owned write set がまだ生きているので commit と同じ page-WAL 単位で永続化され、
             // 再起動後の Open でこの値からクロックを再開できる (旧/新 stamp 空間の混在を防ぐ)。
             // 候補は gate 下で単調増加するため最新書き込みが最高値。
-            _nodeVersions!.WriteCommitStampHighWater(candidate);
+            _vertexVersions!.WriteCommitStampHighWater(candidate);
             long eta = 0;                 // η(T)
             long pi = long.MaxValue;      // π(T)
 
@@ -372,7 +393,7 @@ internal sealed class Transaction : ITransaction
             _manager.SetCommitStamp(Id.Value, cstamp);
 
             // post-commit: 読んだバージョンに reader cstamp (π(T)) を、上書きしたバージョンに
-            // overwriter cstamp (π(T)) を記録する。これらの書き込みは WalPageContext がまだ
+            // overwriter cstamp (π(T)) を記録する。これらの書き込みは transaction-owned write set がまだ
             // 生きているため本 tx の PageImage として WAL に乗り、commit と一体で durable になる。
             foreach (var r in ssn.Reads)
             {
@@ -399,9 +420,9 @@ internal sealed class Transaction : ITransaction
 
     private IEntityVersionStore? StoreFor(EntityKind kind) => kind switch
     {
-        EntityKind.Node => _nodeVersions,
-        EntityKind.Relationship => _relVersions,
-        EntityKind.Hyperedge => _hyperedgeVersions,
+        EntityKind.Vertex => _vertexVersions,
+        EntityKind.Edge => _edgeVersions,
+        EntityKind.Nexus => _nexusVersions,
         _ => null,
     };
 
@@ -412,13 +433,7 @@ internal sealed class Transaction : ITransaction
         using var usage = EnterUsage();
         if (_state != TransactionState.Active)
             throw new TransactionException("Cannot create savepoint: transaction is not Active.");
-        int level = WalPageContext.PushSavepoint();
-        if (level < 0)
-        {
-            // 書き込みコンテキストが無い (例: 読み取り専用 tx) — savepoint は no-op で良いが、
-            // RollbackTo / Release の正当性チェックのため id だけは発行しておく。
-            level = 0;
-        }
+        int level = _walWriteSet.PushSavepoint();
         long id = ++_nextSavepointId;
         (_savepoints ??= new List<(long, int)>()).Add((id, level));
         return new SavepointId(id, name);
@@ -438,19 +453,14 @@ internal sealed class Transaction : ITransaction
         // Sn より新しい全ての savepoint も解放する)。Sn 自身は消費しない。
         _savepoints.RemoveRange(index + 1, _savepoints.Count - index - 1);
 
-        // 監査 #2: FT 論理 undo を先に当てる (full abort の RollBackInPlace と同順)。Suppressed leaf は
-        // page before-image を持たないため、savepoint 以降の FT mutation はこの論理 undo + WAL 補償でのみ
-        // 巻き戻る。両スタック (FT / before-image) を揃って [level..] 巻き戻すため両方を呼ぶ。
-        var ftUndo = WalPageContext.RollbackFtToSavepoint(level);
-        var beforeImages = WalPageContext.RollbackToSavepoint(level);
+        var beforeImages = _walWriteSet.RollbackToSavepoint(level);
         if (_undoHandler != null)
         {
-            if (ftUndo.Count > 0) _undoHandler.UndoFtLogicalPartial(ftUndo);
             if (beforeImages.Count > 0) _undoHandler.UndoPartial(beforeImages);
         }
         // savepoint undo 後の正本から、この transaction がまだ保持する create 差分だけを
         // 再収集する。ID slot が同じ transaction 内で再利用されても古い member を公開しない。
-        _hyperedges.RefreshPendingViewAdds();
+        _nexuses.RefreshPendingViewAdds();
     }
 
     public void ReleaseSavepoint(SavepointId savepoint)
@@ -465,7 +475,7 @@ internal sealed class Transaction : ITransaction
         int level = _savepoints![index].Level;
         // Release した savepoint より新しい savepoint も同時に無効化する (SQL 標準準拠)。
         _savepoints.RemoveRange(index, _savepoints.Count - index);
-        WalPageContext.ReleaseSavepoint(level);
+        _walWriteSet.ReleaseSavepoint(level);
     }
 
     private int FindSavepointIndex(long id)
@@ -530,9 +540,9 @@ internal sealed class Transaction : ITransaction
 
     private void ReleaseAllLocks()
     {
-        _nodeLocks.ReleaseAll(Id);
-        _relLocks.ReleaseAll(Id);
-        _hyperedgeLocks.ReleaseAll(Id);
+        _vertexLocks.ReleaseAll(Id);
+        _edgeLocks.ReleaseAll(Id);
+        _nexusLocks.ReleaseAll(Id);
         _indexLocks.ReleaseAll(Id);
     }
 }

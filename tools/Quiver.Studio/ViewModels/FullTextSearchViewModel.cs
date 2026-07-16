@@ -88,7 +88,7 @@ public sealed partial class FullTextSearchViewModel : ObservableObject
                 using var tx = database.BeginReadOnlyTransaction();
                 var g = tx.G(database.Schema);
 
-                List<NodeId> ids;
+                List<VertexId> ids;
                 try
                 {
                     ids = g.Search(indexName, query, k).ToList();
@@ -103,13 +103,13 @@ public sealed partial class FullTextSearchViewModel : ObservableObject
                 if (database.Schema.TryGetPropertyKeyId(propKeyName, out var kid))
                     propKeyId = kid;
 
-                var columns = new List<string> { "NodeId", "Label", propKeyName };
+                var columns = new List<string> { "VertexId", "Label", propKeyName };
                 var rows = new List<IReadOnlyList<object?>>();
 
                 foreach (var nid in ids)
                 {
-                    if (!tx.NodeExists(nid)) continue;
-                    var label = tx.GetNodeLabel(nid) ?? $"({nid.Sequence})";
+                    if (!tx.VertexExists(nid)) continue;
+                    var label = tx.GetVertexLabel(nid) ?? $"({nid.Sequence})";
 
                     var propValue = "";
                     if (propKeyId is not null)

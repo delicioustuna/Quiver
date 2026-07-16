@@ -13,29 +13,29 @@ namespace Quiver.Api.Tests;
 public sealed class MatchPatternTests : IDisposable
 {
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public MatchPatternTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_match_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
 
         using var tx = _db.BeginTransaction();
-        var alice = tx.CreateNode("Person");
+        var alice = tx.CreateVertex("Person");
         tx.SetProperty(alice, "Name", PropertyValue.FromString("Alice"));
         tx.SetProperty(alice, "Age", PropertyValue.FromInt32(30));
 
-        var bob = tx.CreateNode("Person");
+        var bob = tx.CreateVertex("Person");
         tx.SetProperty(bob, "Name", PropertyValue.FromString("Bob"));
         tx.SetProperty(bob, "Age", PropertyValue.FromInt32(25));
 
-        var carol = tx.CreateNode("Person");
+        var carol = tx.CreateVertex("Person");
         tx.SetProperty(carol, "Name", PropertyValue.FromString("Carol"));
         tx.SetProperty(carol, "Age", PropertyValue.FromInt32(35));
 
-        tx.CreateRelationship(alice, bob, "KNOWS");
-        tx.CreateRelationship(bob, carol, "KNOWS");
-        tx.CreateRelationship(alice, carol, "LIKES");
+        tx.CreateEdge(alice, bob, "KNOWS");
+        tx.CreateEdge(bob, carol, "KNOWS");
+        tx.CreateEdge(alice, carol, "LIKES");
 
         tx.Commit();
     }
@@ -49,17 +49,17 @@ public sealed class MatchPatternTests : IDisposable
     // ── GraphPattern 構築 ────────────────────────────────────────────
 
     [Fact]
-    public void Node_creates_pattern_with_variable()
+    public void Vertex_creates_pattern_with_variable()
     {
-        var n = GraphPattern.Node("n", "Person");
+        var n = GraphPattern.Vertex("n", "Person");
         n.Variable.Should().Be("n");
         n.Label.Should().Be("Person");
     }
 
     [Fact]
-    public void Node_without_label()
+    public void Vertex_without_label()
     {
-        var n = GraphPattern.Node("x");
+        var n = GraphPattern.Vertex("x");
         n.Variable.Should().Be("x");
         n.Label.Should().BeNull();
     }
@@ -67,8 +67,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void Out_creates_directed_pattern()
     {
-        var a = GraphPattern.Node("a", "Person");
-        var b = GraphPattern.Node("b", "Person");
+        var a = GraphPattern.Vertex("a", "Person");
+        var b = GraphPattern.Vertex("b", "Person");
         var pattern = a.Out("KNOWS", b);
         pattern.Should().NotBeNull();
     }
@@ -76,8 +76,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void In_creates_reverse_pattern()
     {
-        var a = GraphPattern.Node("a", "Person");
-        var b = GraphPattern.Node("b", "Person");
+        var a = GraphPattern.Vertex("a", "Person");
+        var b = GraphPattern.Vertex("b", "Person");
         var pattern = a.In("KNOWS", b);
         pattern.Should().NotBeNull();
     }
@@ -90,8 +90,8 @@ public sealed class MatchPatternTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var a = GraphPattern.Node("a", "Person");
-        var b = GraphPattern.Node("b", "Person");
+        var a = GraphPattern.Vertex("a", "Person");
+        var b = GraphPattern.Vertex("b", "Person");
         var pattern = a.Out("KNOWS", b);
 
         var results = g.Match(pattern)
@@ -111,8 +111,8 @@ public sealed class MatchPatternTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var a = GraphPattern.Node("a", "Person");
-        var b = GraphPattern.Node("b", "Person");
+        var a = GraphPattern.Vertex("a", "Person");
+        var b = GraphPattern.Vertex("b", "Person");
         var pattern = a.Out("KNOWS", b);
 
         var results = g.Match(pattern)
@@ -129,8 +129,8 @@ public sealed class MatchPatternTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var a = GraphPattern.Node("a", "Person");
-        var b = GraphPattern.Node("b", "Person");
+        var a = GraphPattern.Vertex("a", "Person");
+        var b = GraphPattern.Vertex("b", "Person");
         var pattern = a.Out("KNOWS", b);
 
         var count = g.Match(pattern).Count();
@@ -143,8 +143,8 @@ public sealed class MatchPatternTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var a = GraphPattern.Node("a", "Person");
-        var b = GraphPattern.Node("b", "Person");
+        var a = GraphPattern.Vertex("a", "Person");
+        var b = GraphPattern.Vertex("b", "Person");
         var pattern = a.Out("KNOWS", b);
 
         var first = g.Match(pattern)
@@ -160,8 +160,8 @@ public sealed class MatchPatternTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var a = GraphPattern.Node("a", "Person");
-        var b = GraphPattern.Node("b", "Person");
+        var a = GraphPattern.Vertex("a", "Person");
+        var b = GraphPattern.Vertex("b", "Person");
         var pattern = a.Out("GHOST", b);
 
         var first = g.Match(pattern)
@@ -177,8 +177,8 @@ public sealed class MatchPatternTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var a = GraphPattern.Node("a", "Person");
-        var b = GraphPattern.Node("b", "Person");
+        var a = GraphPattern.Vertex("a", "Person");
+        var b = GraphPattern.Vertex("b", "Person");
         var pattern = a.Out("KNOWS", b);
 
         var enumerable = g.Match(pattern)
@@ -194,8 +194,8 @@ public sealed class MatchPatternTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var a = GraphPattern.Node("a", "Person");
-        var b = GraphPattern.Node("b", "Person");
+        var a = GraphPattern.Vertex("a", "Person");
+        var b = GraphPattern.Vertex("b", "Person");
         var pattern = b.In("KNOWS", a);
 
         var results = g.Match(pattern)
@@ -212,8 +212,8 @@ public sealed class MatchPatternTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var a = GraphPattern.Node("a", "Person");
-        var b = GraphPattern.Node("b", "Person");
+        var a = GraphPattern.Vertex("a", "Person");
+        var b = GraphPattern.Vertex("b", "Person");
         var pattern = a.Out("KNOWS", b);
 
         var results = g.Match(pattern)
@@ -230,8 +230,8 @@ public sealed class MatchPatternTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var a = GraphPattern.Node("a", "Person");
-        var b = GraphPattern.Node("b", "Person");
+        var a = GraphPattern.Vertex("a", "Person");
+        var b = GraphPattern.Vertex("b", "Person");
         var pattern = a.Out("LIKES", b);
 
         var results = g.Match(pattern)
@@ -253,8 +253,8 @@ public sealed class MatchPatternTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var a = GraphPattern.Node("a", "Person");
-        var b = GraphPattern.Node("b", "Person");
+        var a = GraphPattern.Vertex("a", "Person");
+        var b = GraphPattern.Vertex("b", "Person");
         var pattern = a.Out("KNOWS", b);
 
         using var cursor = g.Match(pattern)
@@ -276,13 +276,13 @@ public sealed class MatchPatternTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var a = GraphPattern.Node("a", "Person");
-        var b = GraphPattern.Node("b", "Person");
+        var a = GraphPattern.Vertex("a", "Person");
+        var b = GraphPattern.Vertex("b", "Person");
         var pattern = a.Out("KNOWS", b);
 
         var results = g.Match(pattern)
             .Where("a", "Name", P.Eq("Alice"))
-            .Return(ctx => ctx.Load<PersonNode>("b"))
+            .Return(ctx => ctx.Load<PersonVertex>("b"))
             .ToList();
 
         results.Should().ContainSingle().Which.Name.Should().Be("Bob");
@@ -296,8 +296,8 @@ public sealed class MatchPatternTests : IDisposable
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var n = GraphPattern.Node("n", "Person");
-        var pattern = n.Out("KNOWS", GraphPattern.Node("x"));
+        var n = GraphPattern.Vertex("n", "Person");
+        var pattern = n.Out("KNOWS", GraphPattern.Vertex("x"));
 
         var ages = g.Match(pattern)
             .Where("n", "Name", P.Eq("Alice"))
@@ -307,41 +307,41 @@ public sealed class MatchPatternTests : IDisposable
         ages.Should().ContainSingle().Which.Should().Be(30L);
     }
 
-    // ── 星型ハイパーエッジパターン ───────────────────────────────────
+    // ── 星型Nexusパターン ───────────────────────────────────
 
-    // subject/object/source/asOf の 4 role を持つ Fact ハイパーエッジ 2 件を用意する。
+    // subject/object/source/asOf の 4 role を持つ Fact Nexus 2 件を用意する。
     // 2 件目は object role に 2 メンバー (同一 role 複数メンバー) を持たせる。
-    private (HyperedgeId Verified, HyperedgeId Draft, NodeId Alice, NodeId Bob,
-             NodeId Quiver, NodeId GraphDb, NodeId Chunk, NodeId AsOf) SeedFacts()
+    private (NexusId Verified, NexusId Draft, VertexId Alice, VertexId Bob,
+             VertexId Quiver, VertexId GraphDb, VertexId Chunk, VertexId AsOf) SeedFacts()
     {
         using var tx = _db.BeginTransaction();
-        var alice = tx.CreateNode("Entity");
+        var alice = tx.CreateVertex("Entity");
         tx.SetProperty(alice, "Name", PropertyValue.FromString("Alice"));
-        var bob = tx.CreateNode("Entity");
+        var bob = tx.CreateVertex("Entity");
         tx.SetProperty(bob, "Name", PropertyValue.FromString("Bob"));
-        var quiver = tx.CreateNode("Entity");
+        var quiver = tx.CreateVertex("Entity");
         tx.SetProperty(quiver, "Name", PropertyValue.FromString("Quiver"));
-        var graphDb = tx.CreateNode("Entity");
-        tx.SetProperty(graphDb, "Name", PropertyValue.FromString("GraphDatabase"));
-        var chunk = tx.CreateNode("Chunk");
-        var asOf = tx.CreateNode("TimePoint");
+        var graphDb = tx.CreateVertex("Entity");
+        tx.SetProperty(graphDb, "Name", PropertyValue.FromString("QuiverDatabase"));
+        var chunk = tx.CreateVertex("Chunk");
+        var asOf = tx.CreateVertex("TimePoint");
 
-        var verified = tx.CreateHyperedge("Fact",
+        var verified = tx.CreateNexus("Fact",
         [
-            new HyperedgeMember("subject", alice),
-            new HyperedgeMember("object", quiver),
-            new HyperedgeMember("source", chunk),
-            new HyperedgeMember("asOf", asOf),
+            new NexusMember("subject", alice),
+            new NexusMember("object", quiver),
+            new NexusMember("source", chunk),
+            new NexusMember("asOf", asOf),
         ]);
         tx.SetProperty(verified, "status", PropertyValue.FromString("verified"));
 
-        var draft = tx.CreateHyperedge("Fact",
+        var draft = tx.CreateNexus("Fact",
         [
-            new HyperedgeMember("subject", bob),
-            new HyperedgeMember("object", quiver),
-            new HyperedgeMember("object", graphDb),
-            new HyperedgeMember("source", chunk),
-            new HyperedgeMember("asOf", asOf),
+            new NexusMember("subject", bob),
+            new NexusMember("object", quiver),
+            new NexusMember("object", graphDb),
+            new NexusMember("source", chunk),
+            new NexusMember("asOf", asOf),
         ]);
         tx.SetProperty(draft, "status", PropertyValue.FromString("draft"));
         tx.Commit();
@@ -349,18 +349,18 @@ public sealed class MatchPatternTests : IDisposable
     }
 
     [Fact]
-    public void Hyperedge_pattern_binds_two_members_to_same_row()
+    public void Nexus_pattern_binds_two_members_to_same_row()
     {
         var seed = SeedFacts();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var pattern = GraphPattern.Hyperedge("f", "Fact")
-            .Member("subject", GraphPattern.Node("s"))
-            .Member("object", GraphPattern.Node("o"));
+        var pattern = GraphPattern.Nexus("f", "Fact")
+            .Member("subject", GraphPattern.Vertex("s"))
+            .Member("object", GraphPattern.Vertex("o"));
 
         var rows = g.Match(pattern)
-            .Return(ctx => (Subject: ctx.Node("s"), Object: ctx.Node("o")))
+            .Return(ctx => (Subject: ctx.Vertex("s"), Object: ctx.Vertex("o")))
             .ToList();
 
         // verified: (Alice, Quiver)。draft: (Bob, Quiver), (Bob, GraphDb)。
@@ -373,26 +373,26 @@ public sealed class MatchPatternTests : IDisposable
     }
 
     [Fact]
-    public void Hyperedge_pattern_binds_four_members_and_hyperedge()
+    public void Nexus_pattern_binds_four_members_and_nexus()
     {
         var seed = SeedFacts();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var pattern = GraphPattern.Hyperedge("f", "Fact")
-            .Member("subject", GraphPattern.Node("s"))
-            .Member("object", GraphPattern.Node("o"))
-            .Member("source", GraphPattern.Node("src"))
-            .Member("asOf", GraphPattern.Node("t"));
+        var pattern = GraphPattern.Nexus("f", "Fact")
+            .Member("subject", GraphPattern.Vertex("s"))
+            .Member("object", GraphPattern.Vertex("o"))
+            .Member("source", GraphPattern.Vertex("src"))
+            .Member("asOf", GraphPattern.Vertex("t"));
 
         var rows = g.Match(pattern)
             .Where("f", "status", P.Eq("verified"))
             .Return(ctx => (
-                Fact: ctx.Hyperedge("f"),
-                Subject: ctx.Node("s"),
-                Object: ctx.Node("o"),
-                Source: ctx.Node("src"),
-                AsOf: ctx.Node("t")))
+                Fact: ctx.Nexus("f"),
+                Subject: ctx.Vertex("s"),
+                Object: ctx.Vertex("o"),
+                Source: ctx.Vertex("src"),
+                AsOf: ctx.Vertex("t")))
             .ToList();
 
         rows.Should().ContainSingle().Which.Should().Be(
@@ -400,17 +400,17 @@ public sealed class MatchPatternTests : IDisposable
     }
 
     [Fact]
-    public void Hyperedge_pattern_supports_variable_member_count()
+    public void Nexus_pattern_supports_variable_member_count()
     {
         var seed = SeedFacts();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
         // 3 メンバー (subject/object/source) の可変個ケース。
-        var pattern = GraphPattern.Hyperedge("f", "Fact")
-            .Member("subject", GraphPattern.Node("s"))
-            .Member("object", GraphPattern.Node("o"))
-            .Member("source", GraphPattern.Node("src"));
+        var pattern = GraphPattern.Nexus("f", "Fact")
+            .Member("subject", GraphPattern.Vertex("s"))
+            .Member("object", GraphPattern.Vertex("o"))
+            .Member("source", GraphPattern.Vertex("src"));
 
         var count = g.Match(pattern).Count();
 
@@ -419,39 +419,39 @@ public sealed class MatchPatternTests : IDisposable
     }
 
     [Fact]
-    public void Hyperedge_pattern_applies_member_label_filter()
+    public void Nexus_pattern_applies_member_label_filter()
     {
         var seed = SeedFacts();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
         // anchor に Chunk ラベルを課すと Fact は source メンバーが Chunk のものだけ残る。
-        var pattern = GraphPattern.Hyperedge("f", "Fact")
-            .Member("source", GraphPattern.Node("src", "Chunk"))
-            .Member("subject", GraphPattern.Node("s", "Entity"));
+        var pattern = GraphPattern.Nexus("f", "Fact")
+            .Member("source", GraphPattern.Vertex("src", "Chunk"))
+            .Member("subject", GraphPattern.Vertex("s", "Entity"));
 
         var subjects = g.Match(pattern)
-            .Return(ctx => ctx.Node("s"))
+            .Return(ctx => ctx.Vertex("s"))
             .ToList();
 
         subjects.Should().BeEquivalentTo(new[] { seed.Alice, seed.Bob });
     }
 
     [Fact]
-    public void Hyperedge_pattern_filters_by_node_and_hyperedge_property()
+    public void Nexus_pattern_filters_by_vertex_and_nexus_property()
     {
         var seed = SeedFacts();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var pattern = GraphPattern.Hyperedge("f", "Fact")
-            .Member("subject", GraphPattern.Node("s"))
-            .Member("object", GraphPattern.Node("o"));
+        var pattern = GraphPattern.Nexus("f", "Fact")
+            .Member("subject", GraphPattern.Vertex("s"))
+            .Member("object", GraphPattern.Vertex("o"));
 
         var rows = g.Match(pattern)
-            .Where("f", "status", P.Eq("draft"))       // hyperedge property
-            .Where("s", "Name", P.Eq("Bob"))            // node property
-            .Return(ctx => ctx.Node("o"))
+            .Where("f", "status", P.Eq("draft"))       // nexus property
+            .Where("s", "Name", P.Eq("Bob"))            // vertex property
+            .Return(ctx => ctx.Vertex("o"))
             .ToList();
 
         // draft の subject=Bob。object は Quiver と GraphDb の 2 件。
@@ -459,115 +459,115 @@ public sealed class MatchPatternTests : IDisposable
     }
 
     [Fact]
-    public void Hyperedge_pattern_same_role_multiple_candidates_emits_each()
+    public void Nexus_pattern_same_role_multiple_candidates_emits_each()
     {
         var seed = SeedFacts();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        // draft は object role に 2 メンバー。同じ hyperedge 内で組み合わせを放出する。
-        var pattern = GraphPattern.Hyperedge("f", "Fact")
-            .Member("subject", GraphPattern.Node("s", "Entity"))
-            .Member("object", GraphPattern.Node("o"));
+        // draft は object role に 2 メンバー。同じ nexus 内で組み合わせを放出する。
+        var pattern = GraphPattern.Nexus("f", "Fact")
+            .Member("subject", GraphPattern.Vertex("s", "Entity"))
+            .Member("object", GraphPattern.Vertex("o"));
 
         var objects = g.Match(pattern)
             .Where("s", "Name", P.Eq("Bob"))
-            .Return(ctx => ctx.Node("o"))
+            .Return(ctx => ctx.Vertex("o"))
             .ToList();
 
         objects.Should().BeEquivalentTo(new[] { seed.Quiver, seed.GraphDb });
     }
 
     [Fact]
-    public void Hyperedge_pattern_rejects_duplicate_variable()
+    public void Nexus_pattern_rejects_duplicate_variable()
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var pattern = GraphPattern.Hyperedge("f", "Fact")
-            .Member("subject", GraphPattern.Node("x"))
-            .Member("object", GraphPattern.Node("x"));
+        var pattern = GraphPattern.Nexus("f", "Fact")
+            .Member("subject", GraphPattern.Vertex("x"))
+            .Member("object", GraphPattern.Vertex("x"));
 
         Action act = () => g.Match(pattern).Count();
         act.Should().Throw<InvalidOperationException>().WithMessage("*x*");
     }
 
     [Fact]
-    public void Hyperedge_pattern_rejects_variable_colliding_with_hyperedge()
+    public void Nexus_pattern_rejects_variable_colliding_with_nexus()
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var pattern = GraphPattern.Hyperedge("f", "Fact")
-            .Member("subject", GraphPattern.Node("f"));
+        var pattern = GraphPattern.Nexus("f", "Fact")
+            .Member("subject", GraphPattern.Vertex("f"));
 
         Action act = () => g.Match(pattern).Count();
         act.Should().Throw<InvalidOperationException>().WithMessage("*f*");
     }
 
     [Fact]
-    public void Hyperedge_pattern_rejects_empty_role()
+    public void Nexus_pattern_rejects_empty_role()
     {
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var pattern = GraphPattern.Hyperedge("f", "Fact")
-            .Member("", GraphPattern.Node("s"));
+        var pattern = GraphPattern.Nexus("f", "Fact")
+            .Member("", GraphPattern.Vertex("s"));
 
         Action act = () => g.Match(pattern).Count();
         act.Should().Throw<InvalidOperationException>();
     }
 
     [Fact]
-    public void Hyperedge_pattern_rejects_unknown_where_variable()
+    public void Nexus_pattern_rejects_unknown_where_variable()
     {
         var seed = SeedFacts();
         using var tx = _db.BeginReadOnlyTransaction();
         var g = tx.G(_db.Schema);
 
-        var pattern = GraphPattern.Hyperedge("f", "Fact")
-            .Member("subject", GraphPattern.Node("s"));
+        var pattern = GraphPattern.Nexus("f", "Fact")
+            .Member("subject", GraphPattern.Vertex("s"));
 
         Action act = () => g.Match(pattern)
             .Where("ghost", "Name", P.Eq("Alice"))
-            .Return(ctx => ctx.Node("s"))
+            .Return(ctx => ctx.Vertex("s"))
             .ToList();
 
         act.Should().Throw<InvalidOperationException>().WithMessage("*ghost*");
     }
 
-    // ── 最小 IGraphNode 型 ───────────────────────────────────────────
+    // ── 最小 IGraphVertex 型 ───────────────────────────────────────────
 
-    private sealed class PersonNode : IGraphNode<PersonNode>
+    private sealed class PersonVertex : IGraphVertex<PersonVertex>
     {
         public string Name { get; set; } = "";
         public int Age { get; set; }
 
         public static string GraphLabel => "Person";
 
-        public static NodeId Insert(IGraphTransaction tx, PersonNode entity)
+        public static VertexId Insert(IGraphTransaction tx, PersonVertex entity)
         {
-            var id = tx.CreateNode(GraphLabel);
+            var id = tx.CreateVertex(GraphLabel);
             tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
             tx.SetProperty(id, "Age", PropertyValue.FromInt32(entity.Age));
             return id;
         }
 
-        public static NodeId InsertIndexed(IGraphTransaction tx, PersonNode entity) => Insert(tx, entity);
+        public static VertexId InsertIndexed(IGraphTransaction tx, PersonVertex entity) => Insert(tx, entity);
 
-        public static PersonNode Load(IGraphTransaction tx, NodeId id)
+        public static PersonVertex Load(IGraphTransaction tx, VertexId id)
             => new()
             {
                 Name = System.Text.Encoding.UTF8.GetString(tx.GetProperty(id, "Name").Utf8StringValue),
                 Age = tx.GetProperty(id, "Age").Int32Value,
             };
 
-        public static void Update(IGraphTransaction tx, NodeId id, PersonNode entity)
+        public static void Update(IGraphTransaction tx, VertexId id, PersonVertex entity)
         {
             tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
             tx.SetProperty(id, "Age", PropertyValue.FromInt32(entity.Age));
         }
 
-        public static void Delete(IGraphTransaction tx, NodeId id) => tx.DeleteNode(id);
+        public static void Delete(IGraphTransaction tx, VertexId id) => tx.DeleteVertex(id);
     }
 }

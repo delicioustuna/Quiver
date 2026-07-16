@@ -3,7 +3,7 @@ using Quiver.Core;
 namespace Quiver.Backend.Tests.Chaos;
 
 /// <summary>
-/// workload を実行した結果として「recovery 後に存在すべき」ノード集合を追跡する。
+/// workload を実行した結果として「recovery 後に存在すべき」Vertex集合を追跡する。
 ///
 /// 1 tx 単位で <see cref="BeginTx"/> → ops 実行で <see cref="RecordCreate"/> → <see cref="CommitTx"/>
 /// または <see cref="RollbackTx"/> でまとめる。Rollback されると当該 tx の create は破棄される。
@@ -14,45 +14,45 @@ namespace Quiver.Backend.Tests.Chaos;
 internal sealed class OracleState
 {
     private readonly List<TxRecord> _committedTxs = new();
-    private List<NodeRecord>? _currentTxNodes;
+    private List<VertexRecord>? _currentTxVertices;
     private bool _txOpen;
 
     public IReadOnlyList<TxRecord> CommittedTxs => _committedTxs;
 
     public void BeginTx()
     {
-        _currentTxNodes = new List<NodeRecord>();
+        _currentTxVertices = new List<VertexRecord>();
         _txOpen = true;
     }
 
-    public void RecordCreate(NodeId id, long markerValue, int? indexKey)
+    public void RecordCreate(VertexId id, long markerValue, int? indexKey)
     {
         if (!_txOpen)
             throw new InvalidOperationException("BeginTx() must be called first.");
-        _currentTxNodes!.Add(new NodeRecord(id, markerValue, indexKey));
+        _currentTxVertices!.Add(new VertexRecord(id, markerValue, indexKey));
     }
 
     public void CommitTx()
     {
         if (!_txOpen) return;
-        _committedTxs.Add(new TxRecord(_currentTxNodes!));
-        _currentTxNodes = null;
+        _committedTxs.Add(new TxRecord(_currentTxVertices!));
+        _currentTxVertices = null;
         _txOpen = false;
     }
 
     public void RollbackTx()
     {
-        _currentTxNodes = null;
+        _currentTxVertices = null;
         _txOpen = false;
     }
 
-    public IEnumerable<NodeRecord> AllCommittedNodes()
+    public IEnumerable<VertexRecord> AllCommittedVertices()
     {
         foreach (var tx in _committedTxs)
-            foreach (var n in tx.Nodes)
+            foreach (var n in tx.Vertices)
                 yield return n;
     }
 }
 
-internal sealed record TxRecord(IReadOnlyList<NodeRecord> Nodes);
-internal sealed record NodeRecord(NodeId Id, long MarkerValue, int? IndexKey);
+internal sealed record TxRecord(IReadOnlyList<VertexRecord> Vertices);
+internal sealed record VertexRecord(VertexId Id, long MarkerValue, int? IndexKey);

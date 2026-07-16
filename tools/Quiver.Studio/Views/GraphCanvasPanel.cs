@@ -14,7 +14,7 @@ namespace Quiver.Studio.Views;
 public sealed class GraphCanvasPanel : Control
 {
     private GraphCanvasViewModel? _vm;
-    private VisualNode? _dragNode;
+    private VisualVertex? _dragVertex;
     private Point _lastPointer;
     private bool _isPanning;
     private bool _isMinimapDragging;
@@ -85,12 +85,12 @@ public sealed class GraphCanvasPanel : Control
 
         if (_needsFit && Bounds.Width > 0 && Bounds.Height > 0)
         {
-            _vm.Renderer.Camera.FitToContent(_vm.Nodes, Bounds.Width, Bounds.Height);
+            _vm.Renderer.Camera.FitToContent(_vm.Vertices, Bounds.Width, Bounds.Height);
             _needsFit = false;
             SyncZoomLevel();
         }
 
-        _vm.Renderer.Render(context, _vm.Nodes, _vm.Edges);
+        _vm.Renderer.Render(context, _vm.Vertices, _vm.Edges);
 
         if (_vm.IsLinkMode && _vm.LinkSource is { } src)
         {
@@ -104,7 +104,7 @@ public sealed class GraphCanvasPanel : Control
 
     private void DrawMinimap(DrawingContext ctx)
     {
-        if (_vm is not { HasGraph: true } || _vm.Nodes.Count == 0) return;
+        if (_vm is not { HasGraph: true } || _vm.Vertices.Count == 0) return;
         if (Bounds.Width < MinimapWidth * 2 || Bounds.Height < MinimapHeight * 2) return;
 
         var mapRect = GetMinimapRect();
@@ -132,12 +132,12 @@ public sealed class GraphCanvasPanel : Control
         var ox = innerX + (innerW - drawW) / 2;
         var oy = innerY + (innerH - drawH) / 2;
 
-        foreach (var node in _vm.Nodes)
+        foreach (var vertex in _vm.Vertices)
         {
-            var nx = ox + (node.X - wMinX) * scale;
-            var ny = oy + (node.Y - wMinY) * scale;
-            var dotR = Math.Max(2, node.Radius * scale * 0.5);
-            var brush = new SolidColorBrush(node.Color);
+            var nx = ox + (vertex.X - wMinX) * scale;
+            var ny = oy + (vertex.Y - wMinY) * scale;
+            var dotR = Math.Max(2, vertex.Radius * scale * 0.5);
+            var brush = new SolidColorBrush(vertex.Color);
             ctx.DrawEllipse(brush, null, new Point(nx, ny), dotR, dotR);
         }
 
@@ -176,7 +176,7 @@ public sealed class GraphCanvasPanel : Control
     {
         minX = double.MaxValue; minY = double.MaxValue;
         maxX = double.MinValue; maxY = double.MinValue;
-        foreach (var n in _vm!.Nodes)
+        foreach (var n in _vm!.Vertices)
         {
             var r = n.Radius;
             if (n.X - r < minX) minX = n.X - r;
@@ -188,7 +188,7 @@ public sealed class GraphCanvasPanel : Control
 
     private bool TryMinimapPan(double screenX, double screenY)
     {
-        if (_vm is not { HasGraph: true } || _vm.Nodes.Count == 0) return false;
+        if (_vm is not { HasGraph: true } || _vm.Vertices.Count == 0) return false;
 
         var mapRect = GetMinimapRect();
         if (!mapRect.Contains(new Point(screenX, screenY))) return false;
@@ -231,11 +231,11 @@ public sealed class GraphCanvasPanel : Control
 
         if (_vm.IsLinkMode && props.IsLeftButtonPressed)
         {
-            var hitNode = _vm.HasGraph
-                ? HitTestHelper.HitTestNode(_vm.Nodes, _vm.Renderer.Camera, pos.X, pos.Y)
+            var hitVertex = _vm.HasGraph
+                ? HitTestHelper.HitTestVertex(_vm.Vertices, _vm.Renderer.Camera, pos.X, pos.Y)
                 : null;
-            if (hitNode is not null)
-                _ = _vm.CompleteLinkAsync(hitNode);
+            if (hitVertex is not null)
+                _ = _vm.CompleteLinkAsync(hitVertex);
             else
                 _vm.CancelLinkMode();
             InvalidateVisual();
@@ -246,11 +246,11 @@ public sealed class GraphCanvasPanel : Control
 
         if (props.IsRightButtonPressed)
         {
-            var hitNode = HitTestHelper.HitTestNode(_vm.Nodes, _vm.Renderer.Camera, pos.X, pos.Y);
-            if (hitNode is not null)
+            var hitVertex = HitTestHelper.HitTestVertex(_vm.Vertices, _vm.Renderer.Camera, pos.X, pos.Y);
+            if (hitVertex is not null)
             {
-                _vm.SelectNode(hitNode);
-                ShowNodeContextMenu(hitNode, pos);
+                _vm.SelectVertex(hitVertex);
+                ShowVertexContextMenu(hitVertex, pos);
             }
             else
             {
@@ -278,11 +278,11 @@ public sealed class GraphCanvasPanel : Control
                 return;
             }
 
-            var hitNode = HitTestHelper.HitTestNode(_vm.Nodes, _vm.Renderer.Camera, pos.X, pos.Y);
-            if (hitNode is not null)
+            var hitVertex = HitTestHelper.HitTestVertex(_vm.Vertices, _vm.Renderer.Camera, pos.X, pos.Y);
+            if (hitVertex is not null)
             {
-                _dragNode = hitNode;
-                _vm.SelectNode(hitNode);
+                _dragVertex = hitVertex;
+                _vm.SelectVertex(hitVertex);
                 e.Pointer.Capture(this);
             }
             else
@@ -294,7 +294,7 @@ public sealed class GraphCanvasPanel : Control
                 }
                 else
                 {
-                    _vm.SelectNode(null);
+                    _vm.SelectVertex(null);
                     _isPanning = true;
                 }
                 e.Pointer.Capture(this);
@@ -333,14 +333,14 @@ public sealed class GraphCanvasPanel : Control
 
         if (!_vm.HasGraph) return;
 
-        if (_dragNode is not null)
+        if (_dragVertex is not null)
         {
             var camera = _vm.Renderer.Camera;
             var worldBefore = camera.ScreenToWorld(_lastPointer.X, _lastPointer.Y);
             var worldNow = camera.ScreenToWorld(pos.X, pos.Y);
-            _dragNode.X += worldNow.X - worldBefore.X;
-            _dragNode.Y += worldNow.Y - worldBefore.Y;
-            _dragNode.IsPinned = true;
+            _dragVertex.X += worldNow.X - worldBefore.X;
+            _dragVertex.Y += worldNow.Y - worldBefore.Y;
+            _dragVertex.IsPinned = true;
             _lastPointer = pos;
             InvalidateVisual();
         }
@@ -357,7 +357,7 @@ public sealed class GraphCanvasPanel : Control
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
-        _dragNode = null;
+        _dragVertex = null;
         _isPanning = false;
         _isMinimapDragging = false;
         e.Pointer.Capture(null);
@@ -395,38 +395,38 @@ public sealed class GraphCanvasPanel : Control
         _vm.LastContextWorldY = world.Y;
 
         var menu = new ContextMenu();
-        var addNode = new MenuItem { Header = "Add Node..." };
-        addNode.Click += async (_, _) =>
+        var addVertex = new MenuItem { Header = "Add Vertex..." };
+        addVertex.Click += async (_, _) =>
         {
-            await _vm.InvokeAddNodeRequested();
+            await _vm.InvokeAddVertexRequested();
         };
-        menu.Items.Add(addNode);
+        menu.Items.Add(addVertex);
         menu.Open(this);
     }
 
-    private void ShowNodeContextMenu(VisualNode node, Point screenPos)
+    private void ShowVertexContextMenu(VisualVertex vertex, Point screenPos)
     {
         var menu = new ContextMenu();
 
-        var addRel = new MenuItem { Header = "Add Relationship from here..." };
-        addRel.Click += (_, _) => _vm?.BeginLinkMode(node);
-        menu.Items.Add(addRel);
+        var addEdge = new MenuItem { Header = "Add Edge from here..." };
+        addEdge.Click += (_, _) => _vm?.BeginLinkMode(vertex);
+        menu.Items.Add(addEdge);
 
-        var deleteNode = new MenuItem { Header = "Delete Node" };
-        deleteNode.Click += async (_, _) =>
+        var deleteVertex = new MenuItem { Header = "Delete Vertex" };
+        deleteVertex.Click += async (_, _) =>
         {
             if (_vm is null) return;
             try
             {
-                _vm._editingService?.DeleteNode(node.Id);
-                _vm.RemoveNodeFromGraph(node);
+                _vm._editingService?.DeleteVertex(vertex.Id);
+                _vm.RemoveVertexFromGraph(vertex);
             }
             catch (Exception ex)
             {
-                _vm._logger.LogError(ex, "ノード削除失敗");
+                _vm._logger.LogError(ex, "Vertex削除失敗");
             }
         };
-        menu.Items.Add(deleteNode);
+        menu.Items.Add(deleteVertex);
 
         menu.Open(this);
     }
@@ -434,21 +434,21 @@ public sealed class GraphCanvasPanel : Control
     private void ShowEdgeContextMenu(VisualEdge edge, Point screenPos)
     {
         var menu = new ContextMenu();
-        var deleteRel = new MenuItem { Header = "Delete Relationship" };
-        deleteRel.Click += async (_, _) =>
+        var deleteEdge = new MenuItem { Header = "Delete Edge" };
+        deleteEdge.Click += async (_, _) =>
         {
             if (_vm is null) return;
             try
             {
-                _vm._editingService?.DeleteRelationship(edge.Id);
+                _vm._editingService?.DeleteEdge(edge.Id);
                 _vm.RemoveEdgeFromGraph(edge);
             }
             catch (Exception ex)
             {
-                _vm._logger.LogError(ex, "リレーションシップ削除失敗");
+                _vm._logger.LogError(ex, "Edge削除失敗");
             }
         };
-        menu.Items.Add(deleteRel);
+        menu.Items.Add(deleteEdge);
         menu.Open(this);
     }
 }

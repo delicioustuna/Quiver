@@ -5,13 +5,13 @@ using Quiver.Transactions;
 namespace Quiver;
 
 /// <summary>
-/// Quiver の最上位グラフトランザクション。ノード / リレーションシップの作成・削除、
+/// Quiver の最上位グラフトランザクション。Vertex / Edgeの作成・削除、
 /// プロパティ操作、隣接列挙、インデックスシーク、物理プラン実行、コミット / ロールバックを
 /// 1 つのトランザクション境界として束ねる。
 /// </summary>
 /// <remarks>
-/// <see cref="IDisposable"/> 実装。<see cref="GraphDatabase.BeginTransaction"/> や
-/// <see cref="GraphDatabase.BeginReadOnlyTransaction"/> で取得し、<c>using</c> で
+/// <see cref="IDisposable"/> 実装。<see cref="QuiverDatabase.BeginTransaction"/> や
+/// <see cref="QuiverDatabase.BeginReadOnlyTransaction"/> で取得し、<c>using</c> で
 /// 確実に破棄すること。スレッドセーフではない (シングルスレッドで利用)。
 /// </remarks>
 public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
@@ -29,89 +29,89 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// </summary>
     bool IsReadOnly { get; }
 
-    // ── ノード操作 ─────────────────────────────────────────────
+    // ── Vertex操作 ─────────────────────────────────────────────
 
-    /// <summary>指定ラベル名で新規ノードを作成し、その ID を返す。</summary>
-    NodeId CreateNode(string label);
+    /// <summary>指定ラベル名で新規Vertexを作成し、その ID を返す。</summary>
+    VertexId CreateVertex(string label);
 
-    /// <summary>指定ラベル ID で新規ノードを作成し、その ID を返す。</summary>
-    NodeId CreateNode(LabelId labelId);
+    /// <summary>指定ラベル ID で新規Vertexを作成し、その ID を返す。</summary>
+    VertexId CreateVertex(LabelId labelId);
 
-    /// <summary>指定 ID のノードを削除する。</summary>
-    void DeleteNode(NodeId nodeId);
+    /// <summary>指定 ID のVertexを削除する。</summary>
+    void DeleteVertex(VertexId vertexId);
 
-    /// <summary>指定 ID のノードが存在するかを返す。</summary>
-    bool NodeExists(NodeId nodeId);
+    /// <summary>指定 ID のVertexが存在するかを返す。</summary>
+    bool VertexExists(VertexId vertexId);
 
-    /// <summary>指定ノードのラベル名を返す。ノードが存在しない場合は <c>null</c>。</summary>
-    string? GetNodeLabel(NodeId nodeId);
+    /// <summary>指定Vertexのラベル名を返す。Vertexが存在しない場合は <c>null</c>。</summary>
+    string? GetVertexLabel(VertexId vertexId);
 
     /// <summary>
     /// Cypher の <c>MERGE (n:label {matchKey: matchValue})</c> 相当 —
     /// <paramref name="label"/> を持ち、<paramref name="matchKey"/> が
-    /// <paramref name="matchValue"/> と等しいノードが存在すればその ID を返す。
-    /// 存在しなければ新規ノードを確保してマッチプロパティをセットし、その ID を返す。
+    /// <paramref name="matchValue"/> と等しいVertexが存在すればその ID を返す。
+    /// 存在しなければ新規Vertexを確保してマッチプロパティをセットし、その ID を返す。
     /// <c>Created</c> でどちらの経路かを判別できるため、呼び出し側で
     /// <c>ON CREATE SET</c> / <c>ON MATCH SET</c> の分岐が書ける。
-    /// 重複保持時は NodeId 順で最初にヒットしたものを採用。
+    /// 重複保持時は VertexId 順で最初にヒットしたものを採用。
     /// 等値判定は String / Bytes はバイト単位、Double はビット完全一致、
     /// Bool / Int32 / Int64 はスカラ等値。
     /// </summary>
     /// <remarks>
     /// パフォーマンス: <c>(label, matchKey)</c> に <see cref="ISchemaApi.CreateIndex"/>
     /// で登録されたインデックスがあれば自動で O(log n) シーク経路を使い、新規作成時の
-    /// インデックスエントリ追加も自動で行う。インデックス未登録の場合はラベル内全ノードに
+    /// インデックスエントリ追加も自動で行う。インデックス未登録の場合はラベル内全Vertexに
     /// 対する O(N) フルスキャン + プロパティ比較に落ち、初回呼び出しで
     /// <c>System.Diagnostics.Trace.TraceWarning</c> が出力される (サイレント劣化検出用)。
     /// </remarks>
-    (NodeId Id, bool Created) MergeNode(string label, string matchKey, in PropertyValue matchValue);
+    (VertexId Id, bool Created) MergeVertex(string label, string matchKey, in PropertyValue matchValue);
 
-    /// <summary>リレーションシップ型 ID から型名を返す。未登録 ID では <c>null</c>。</summary>
-    string? GetRelationshipTypeName(RelationshipTypeId typeId);
+    /// <summary>Edge型 ID から型名を返す。未登録 ID では <c>null</c>。</summary>
+    string? GetEdgeTypeName(EdgeTypeId typeId);
 
     // ── リレーション操作 ──────────────────────────────────────
 
-    /// <summary><paramref name="source"/> から <paramref name="target"/> へ指定型のリレーションシップを作成する。</summary>
-    RelationshipId CreateRelationship(NodeId source, NodeId target, string type);
+    /// <summary><paramref name="source"/> から <paramref name="target"/> へ指定型のEdgeを作成する。</summary>
+    EdgeId CreateEdge(VertexId source, VertexId target, string type);
 
-    /// <summary>型 ID 指定版の <see cref="CreateRelationship(NodeId, NodeId, string)"/>。</summary>
-    RelationshipId CreateRelationship(NodeId source, NodeId target, RelationshipTypeId typeId);
+    /// <summary>型 ID 指定版の <see cref="CreateEdge(VertexId, VertexId, string)"/>。</summary>
+    EdgeId CreateEdge(VertexId source, VertexId target, EdgeTypeId typeId);
 
     /// <summary>
     /// エッジ版 MERGE / UPSERT — <paramref name="source"/> から <paramref name="target"/> へ向かう
-    /// <paramref name="type"/> 型のリレーションシップが既に存在すればその ID を返し、無ければ新規作成して
-    /// その ID を返す。<c>Created</c> でどちらの経路かを判別できる (<see cref="MergeNode"/> と対称)。
+    /// <paramref name="type"/> 型のEdgeが既に存在すればその ID を返し、無ければ新規作成して
+    /// その ID を返す。<c>Created</c> でどちらの経路かを判別できる (<see cref="MergeVertex"/> と対称)。
     /// 同一 (source, target, type) のエッジが複数あるときは最初にヒットしたものを採用する。
     /// </summary>
     /// <remarks>
     /// 存在判定は <paramref name="source"/> の外向き隣接を走査するため計算量は O(source の out-degree)。
-    /// 高 fan-out ノードで多用する場合はコストに留意すること (エッジ存在インデックスは持たない)。
+    /// 高 fan-out Vertexで多用する場合はコストに留意すること (エッジ存在インデックスは持たない)。
     /// read-your-writes により、同一トランザクション内で直前に作成したエッジも検出される。
     /// </remarks>
-    (RelationshipId Id, bool Created) MergeRelationship(NodeId source, NodeId target, string type);
+    (EdgeId Id, bool Created) MergeEdge(VertexId source, VertexId target, string type);
 
-    /// <summary>指定 ID のリレーションシップを削除する。</summary>
-    void DeleteRelationship(RelationshipId relId);
+    /// <summary>指定 ID のEdgeを削除する。</summary>
+    void DeleteEdge(EdgeId edgeId);
 
     // ── プロパティ操作 ────────────────────────────────────────
 
-    /// <summary>ノードにプロパティを設定する (既存値は上書き)。</summary>
-    void SetProperty(NodeId nodeId, string key, in PropertyValue value);
+    /// <summary>Vertexにプロパティを設定する (既存値は上書き)。</summary>
+    void SetProperty(VertexId vertexId, string key, in PropertyValue value);
 
-    /// <summary>リレーションシップにプロパティを設定する (既存値は上書き)。</summary>
-    void SetProperty(RelationshipId relId, string key, in PropertyValue value);
+    /// <summary>Edgeにプロパティを設定する (既存値は上書き)。</summary>
+    void SetProperty(EdgeId edgeId, string key, in PropertyValue value);
 
-    /// <summary>ノードからプロパティを削除する。</summary>
-    void RemoveProperty(NodeId nodeId, string key);
+    /// <summary>Vertexからプロパティを削除する。</summary>
+    void RemoveProperty(VertexId vertexId, string key);
 
-    /// <summary>ノードのプロパティ値を取得する。存在しない場合の挙動は実装依存。</summary>
-    PropertyValue GetProperty(NodeId nodeId, string key);
+    /// <summary>Vertexのプロパティ値を取得する。存在しない場合の挙動は実装依存。</summary>
+    PropertyValue GetProperty(VertexId vertexId, string key);
 
-    /// <summary>リレーションシップのプロパティ値を取得する。</summary>
-    PropertyValue GetProperty(RelationshipId relId, string key);
+    /// <summary>Edgeのプロパティ値を取得する。</summary>
+    PropertyValue GetProperty(EdgeId edgeId, string key);
 
-    /// <summary>ノードが指定キーのプロパティを保持しているかを返す。</summary>
-    bool HasProperty(NodeId nodeId, string key);
+    /// <summary>Vertexが指定キーのプロパティを保持しているかを返す。</summary>
+    bool HasProperty(VertexId vertexId, string key);
 
     // ── マルチバリュープロパティ操作 (Set cardinality) ──────────────────
 
@@ -119,60 +119,60 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// Set cardinality プロパティに値を追加する。同一 key+value が既に存在すればスキップ (冪等)。
     /// Single cardinality キーに対して呼ぶと <see cref="InvalidOperationException"/>。
     /// </summary>
-    void AddPropertyValue(NodeId nodeId, string key, in PropertyValue value);
+    void AddPropertyValue(VertexId vertexId, string key, in PropertyValue value);
 
-    /// <inheritdoc cref="AddPropertyValue(NodeId, string, in PropertyValue)"/>
-    void AddPropertyValue(RelationshipId relId, string key, in PropertyValue value);
+    /// <inheritdoc cref="AddPropertyValue(VertexId, string, in PropertyValue)"/>
+    void AddPropertyValue(EdgeId edgeId, string key, in PropertyValue value);
 
     /// <summary>
     /// Set cardinality プロパティから特定の値を除去する。一致する値が無ければ no-op (冪等)。
     /// Single cardinality キーに対して呼ぶと <see cref="InvalidOperationException"/>。
     /// </summary>
-    void RemovePropertyValue(NodeId nodeId, string key, in PropertyValue value);
+    void RemovePropertyValue(VertexId vertexId, string key, in PropertyValue value);
 
-    /// <inheritdoc cref="RemovePropertyValue(NodeId, string, in PropertyValue)"/>
-    void RemovePropertyValue(RelationshipId relId, string key, in PropertyValue value);
+    /// <inheritdoc cref="RemovePropertyValue(VertexId, string, in PropertyValue)"/>
+    void RemovePropertyValue(EdgeId edgeId, string key, in PropertyValue value);
 
     /// <summary>
     /// Set cardinality プロパティの全値を列挙する。
     /// </summary>
-    PropertyValuesEnumerator GetPropertyValues(NodeId nodeId, string key);
+    PropertyValuesEnumerator GetPropertyValues(VertexId vertexId, string key);
 
-    /// <inheritdoc cref="GetPropertyValues(NodeId, string)"/>
-    PropertyValuesEnumerator GetPropertyValues(RelationshipId relId, string key);
+    /// <inheritdoc cref="GetPropertyValues(VertexId, string)"/>
+    PropertyValuesEnumerator GetPropertyValues(EdgeId edgeId, string key);
 
-    /// <summary>ノードに付与された全プロパティを列挙する。</summary>
-    PropertyEnumerator EnumerateProperties(NodeId nodeId);
+    /// <summary>Vertexに付与された全プロパティを列挙する。</summary>
+    PropertyEnumerator EnumerateProperties(VertexId vertexId);
 
     // ── トラバーサル ──────────────────────────────────────
 
     /// <summary>
-    /// 指定ノードに接続するリレーションシップを列挙する。
+    /// 指定Vertexに接続するEdgeを列挙する。
     /// <paramref name="direction"/> と <paramref name="typeFilter"/> で絞り込み可能。
     /// </summary>
-    RelationshipEnumerator EnumerateRelationships(
-        NodeId nodeId,
+    EdgeEnumerator EnumerateEdges(
+        VertexId vertexId,
         Direction direction = Direction.Both,
         string? typeFilter = null);
 
     // ── インデックス書き込み (データ投入時に手動で呼ぶ) ──────────────
 
-    /// <summary>文字列キーで指定ノードをインデックスに登録する。</summary>
-    void IndexInsert(string indexName, string key, NodeId nodeId);
+    /// <summary>文字列キーで指定Vertexをインデックスに登録する。</summary>
+    void IndexInsert(string indexName, string key, VertexId vertexId);
 
-    /// <summary><see cref="long"/> キーで指定ノードをインデックスに登録する。</summary>
-    void IndexInsert(string indexName, long key, NodeId nodeId);
+    /// <summary><see cref="long"/> キーで指定Vertexをインデックスに登録する。</summary>
+    void IndexInsert(string indexName, long key, VertexId vertexId);
 
-    /// <summary><see cref="double"/> キーで指定ノードをインデックスに登録する。</summary>
-    void IndexInsert(string indexName, double key, NodeId nodeId);
+    /// <summary><see cref="double"/> キーで指定Vertexをインデックスに登録する。</summary>
+    void IndexInsert(string indexName, double key, VertexId vertexId);
 
     // ── インデックスシーク ──────────────────────────────────
 
     /// <summary>等値シーク。物理プラン経由の利用も可能。</summary>
-    NodeIdEnumerator SeekIndex(string indexName, in PropertyValue key);
+    VertexIdEnumerator SeekIndex(string indexName, in PropertyValue key);
 
     /// <summary>範囲シーク。両端の包含有無を指定できる。</summary>
-    NodeIdEnumerator RangeIndex(
+    VertexIdEnumerator RangeIndex(
         string indexName,
         in PropertyValue from, bool fromInclusive,
         in PropertyValue to, bool toInclusive);
@@ -204,66 +204,66 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
         => throw new NotSupportedException("This backend does not support TryGetVector.");
 
-    // ── ハイパーエッジ操作 ──────────────────────────────────────
+    // ── Nexus操作 ──────────────────────────────────────
 
     /// <summary>
-    /// 指定型と参加メンバーでハイパーエッジを作成し、その ID を返す。
-    /// メンバーは 2 件以上必要。同じ (Role, NodeId) の組の重複は許可しない。
+    /// 指定型と参加メンバーでNexusを作成し、その ID を返す。
+    /// メンバーは 2 件以上必要。同じ (Role, VertexId) の組の重複は許可しない。
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// arity が 2 未満、role/type が空文字列、同じ (Role, NodeId) の組が重複、
-    /// または参照先ノードが存在しない場合。
+    /// arity が 2 未満、role/type が空文字列、同じ (Role, VertexId) の組が重複、
+    /// または参照先Vertexが存在しない場合。
     /// </exception>
-    HyperedgeId CreateHyperedge(string type, ReadOnlySpan<HyperedgeMember> members);
+    NexusId CreateNexus(string type, ReadOnlySpan<NexusMember> members);
 
-    /// <summary>型 ID 指定版の <see cref="CreateHyperedge(string, ReadOnlySpan{HyperedgeMember})"/>。</summary>
-    HyperedgeId CreateHyperedge(HyperedgeTypeId typeId, ReadOnlySpan<HyperedgeMember> members);
-
-    /// <summary>
-    /// ハイパーエッジを論理削除する。存在しない ID や削除済み ID は no-op。
-    /// </summary>
-    void DeleteHyperedge(HyperedgeId hyperedgeId);
+    /// <summary>型 ID 指定版の <see cref="CreateNexus(string, ReadOnlySpan{NexusMember})"/>。</summary>
+    NexusId CreateNexus(NexusTypeId typeId, ReadOnlySpan<NexusMember> members);
 
     /// <summary>
-    /// ハイパーエッジのメンバーを列挙する。<paramref name="role"/> を指定すると
-    /// そのロールのメンバーのみに絞り込む。ハイパーエッジが不可視な場合は空列挙を返す。
+    /// Nexusを論理削除する。存在しない ID や削除済み ID は no-op。
     /// </summary>
-    HyperedgeMemberEnumerator GetMembers(HyperedgeId hyperedgeId, string? role = null);
+    void DeleteNexus(NexusId nexusId);
 
     /// <summary>
-    /// 指定ノードが参加するハイパーエッジを列挙する。型やロールで絞り込み可能。
-    /// 同一ハイパーエッジに複数ロールで参加している場合も重複なく列挙される。
+    /// Nexusのメンバーを列挙する。<paramref name="role"/> を指定すると
+    /// そのロールのメンバーのみに絞り込む。Nexusが不可視な場合は空列挙を返す。
     /// </summary>
-    HyperedgeIdEnumerator GetHyperedges(NodeId nodeId, string? type = null, string? role = null);
+    NexusMemberEnumerator GetMembers(NexusId nexusId, string? role = null);
 
-    /// <summary>ハイパーエッジ型 ID から型名を返す。未登録 ID では <c>null</c>。</summary>
-    string? GetHyperedgeTypeName(HyperedgeTypeId typeId);
+    /// <summary>
+    /// 指定Vertexが参加するNexusを列挙する。型やロールで絞り込み可能。
+    /// 同一Nexusに複数ロールで参加している場合も重複なく列挙される。
+    /// </summary>
+    NexusIdEnumerator GetNexuses(VertexId vertexId, string? type = null, string? role = null);
 
-    // ── ハイパーエッジプロパティ操作 ──────────────────────────────
+    /// <summary>Nexus型 ID から型名を返す。未登録 ID では <c>null</c>。</summary>
+    string? GetNexusTypeName(NexusTypeId typeId);
 
-    /// <summary>ハイパーエッジにプロパティを設定する (既存値は上書き)。</summary>
-    void SetProperty(HyperedgeId hyperedgeId, string key, in PropertyValue value);
+    // ── Nexusプロパティ操作 ──────────────────────────────
 
-    /// <summary>ハイパーエッジのプロパティ値を取得する。存在しない場合は既定値を返す。</summary>
-    PropertyValue GetProperty(HyperedgeId hyperedgeId, string key);
+    /// <summary>Nexusにプロパティを設定する (既存値は上書き)。</summary>
+    void SetProperty(NexusId nexusId, string key, in PropertyValue value);
 
-    /// <summary>ハイパーエッジが指定キーのプロパティを保持しているかを返す。</summary>
-    bool HasProperty(HyperedgeId hyperedgeId, string key);
+    /// <summary>Nexusのプロパティ値を取得する。存在しない場合は既定値を返す。</summary>
+    PropertyValue GetProperty(NexusId nexusId, string key);
 
-    /// <summary>ハイパーエッジからプロパティを削除する。</summary>
-    void RemoveProperty(HyperedgeId hyperedgeId, string key);
+    /// <summary>Nexusが指定キーのプロパティを保持しているかを返す。</summary>
+    bool HasProperty(NexusId nexusId, string key);
 
-    /// <summary>ハイパーエッジに付与された全プロパティを列挙する。</summary>
-    PropertyEnumerator EnumerateProperties(HyperedgeId hyperedgeId);
+    /// <summary>Nexusからプロパティを削除する。</summary>
+    void RemoveProperty(NexusId nexusId, string key);
 
-    /// <inheritdoc cref="AddPropertyValue(NodeId, string, in PropertyValue)"/>
-    void AddPropertyValue(HyperedgeId hyperedgeId, string key, in PropertyValue value);
+    /// <summary>Nexusに付与された全プロパティを列挙する。</summary>
+    PropertyEnumerator EnumerateProperties(NexusId nexusId);
 
-    /// <inheritdoc cref="RemovePropertyValue(NodeId, string, in PropertyValue)"/>
-    void RemovePropertyValue(HyperedgeId hyperedgeId, string key, in PropertyValue value);
+    /// <inheritdoc cref="AddPropertyValue(VertexId, string, in PropertyValue)"/>
+    void AddPropertyValue(NexusId nexusId, string key, in PropertyValue value);
 
-    /// <inheritdoc cref="GetPropertyValues(NodeId, string)"/>
-    PropertyValuesEnumerator GetPropertyValues(HyperedgeId hyperedgeId, string key);
+    /// <inheritdoc cref="RemovePropertyValue(VertexId, string, in PropertyValue)"/>
+    void RemovePropertyValue(NexusId nexusId, string key, in PropertyValue value);
+
+    /// <inheritdoc cref="GetPropertyValues(VertexId, string)"/>
+    PropertyValuesEnumerator GetPropertyValues(NexusId nexusId, string key);
 
     // 物理プラン実行 (Execute/ExecuteCursor)、access methods (Access)、隣接ブロック
     // (AdjacencyBlocks) は内部実装型を露出するため公開面から除外し、internal な
@@ -303,30 +303,30 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     void ReleaseSavepoint(SavepointId savepoint);
 }
 
-/// <summary>ハイパーエッジを構成する 1 メンバー (ロール名と参加ノードの組)。</summary>
-public readonly record struct HyperedgeMember(string Role, NodeId NodeId);
+/// <summary>Nexusを構成する 1 メンバー (ロール名と参加Vertexの組)。</summary>
+public readonly record struct NexusMember(string Role, VertexId VertexId);
 
 /// <summary>
-/// ハイパーエッジのメンバーを列挙する ref struct 列挙子。
+/// Nexusのメンバーを列挙する ref struct 列挙子。
 /// ロールフィルタ付きの場合は一致するロールのメンバーのみを返す。
 /// </summary>
-public ref struct HyperedgeMemberEnumerator
+public ref struct NexusMemberEnumerator
 {
-    private HyperedgeIncidenceEnumerator _inner;
+    private NexusIncidenceEnumerator _inner;
     private readonly ITokenStore<RoleId> _roleTokens;
-    private readonly INodeStore _nodes;
+    private readonly IVertexStore _vertices;
     private readonly RoleId _roleFilter;
-    private HyperedgeMember _current;
+    private NexusMember _current;
 
-    internal HyperedgeMemberEnumerator(
-        HyperedgeIncidenceEnumerator inner,
+    internal NexusMemberEnumerator(
+        NexusIncidenceEnumerator inner,
         ITokenStore<RoleId> roleTokens,
-        INodeStore nodes,
+        IVertexStore vertices,
         RoleId roleFilter)
     {
         _inner = inner;
         _roleTokens = roleTokens;
-        _nodes = nodes;
+        _vertices = vertices;
         _roleFilter = roleFilter;
         _current = default;
     }
@@ -340,10 +340,10 @@ public ref struct HyperedgeMemberEnumerator
             var inc = _inner.Current;
             if (_roleFilter.IsValid && inc.RoleId != _roleFilter)
                 continue;
-            var materializer = new EntityIdentityMaterializer(_nodes);
-            if (!materializer.TryNode(inc.NodeId, out var member))
+            var materializer = new EntityIdentityMaterializer(_vertices);
+            if (!materializer.TryVertex(inc.VertexId, out var member))
                 continue;
-            _current = new HyperedgeMember(
+            _current = new NexusMember(
                 _roleTokens.GetName(inc.RoleId),
                 member);
             return true;
@@ -352,33 +352,33 @@ public ref struct HyperedgeMemberEnumerator
     }
 
     /// <inheritdoc />
-    public HyperedgeMember Current => _current;
+    public NexusMember Current => _current;
     /// <inheritdoc />
     public void Dispose() => _inner.Dispose();
 }
 
 /// <summary>
-/// 指定ノードが参加するハイパーエッジ ID を列挙する ref struct 列挙子。
+/// 指定Vertexが参加するNexus ID を列挙する ref struct 列挙子。
 /// 型・ロールフィルタ付きの場合は一致するもののみを返す。
-/// 同一ハイパーエッジに複数ロールで参加している場合も重複なく列挙する。
+/// 同一Nexusに複数ロールで参加している場合も重複なく列挙する。
 /// </summary>
-public ref struct HyperedgeIdEnumerator
+public ref struct NexusIdEnumerator
 {
-    private NodeIncidenceEnumerator _inner;
-    private readonly IHyperedgeStore _hyperedges;
-    private readonly HyperedgeTypeId _typeFilter;
+    private VertexIncidenceEnumerator _inner;
+    private readonly INexusStore _nexuses;
+    private readonly NexusTypeId _typeFilter;
     private readonly RoleId _roleFilter;
     private HashSet<long>? _seen;
-    private HyperedgeId _current;
+    private NexusId _current;
 
-    internal HyperedgeIdEnumerator(
-        NodeIncidenceEnumerator inner,
-        IHyperedgeStore hyperedges,
-        HyperedgeTypeId typeFilter,
+    internal NexusIdEnumerator(
+        VertexIncidenceEnumerator inner,
+        INexusStore nexuses,
+        NexusTypeId typeFilter,
         RoleId roleFilter)
     {
         _inner = inner;
-        _hyperedges = hyperedges;
+        _nexuses = nexuses;
         _typeFilter = typeFilter;
         _roleFilter = roleFilter;
         _seen = null;
@@ -388,13 +388,13 @@ public ref struct HyperedgeIdEnumerator
     /// <inheritdoc />
     public bool MoveNext()
     {
-        if (_hyperedges is null) return false;
+        if (_nexuses is null) return false;
         while (_inner.MoveNext())
         {
             var inc = _inner.Current;
             if (_roleFilter.IsValid && inc.RoleId != _roleFilter)
                 continue;
-            using var header = _hyperedges.Read(inc.HyperedgeId);
+            using var header = _nexuses.Read(inc.NexusId);
             if (!header.InUse || (_typeFilter.IsValid && header.Type != _typeFilter))
                 continue;
             var heId = header.Id;
@@ -408,18 +408,18 @@ public ref struct HyperedgeIdEnumerator
     }
 
     /// <inheritdoc />
-    public HyperedgeId Current => _current;
+    public NexusId Current => _current;
     /// <inheritdoc />
     public void Dispose() => _inner.Dispose();
 }
 
-/// <summary><c>long</c> 列挙子を <see cref="NodeId"/> に変換するための薄いラッパ。</summary>
-public ref struct NodeIdEnumerator
+/// <summary><c>long</c> 列挙子を <see cref="VertexId"/> に変換するための薄いラッパ。</summary>
+public ref struct VertexIdEnumerator
 {
     private IEnumerator<long>? _inner;
-    private NodeId _current;
+    private VertexId _current;
 
-    internal NodeIdEnumerator(IEnumerable<long> source)
+    internal VertexIdEnumerator(IEnumerable<long> source)
     {
         _inner = source.GetEnumerator();
         _current = default;
@@ -429,12 +429,12 @@ public ref struct NodeIdEnumerator
     public bool MoveNext()
     {
         if (_inner == null || !_inner.MoveNext()) return false;
-        _current = new NodeId(_inner.Current);
+        _current = new VertexId(_inner.Current);
         return true;
     }
 
     /// <summary>直近の <see cref="MoveNext"/> で取得した現在要素。</summary>
-    public NodeId Current => _current;
+    public VertexId Current => _current;
 
     /// <summary>内部列挙子を破棄する。</summary>
     public void Dispose() { _inner?.Dispose(); }

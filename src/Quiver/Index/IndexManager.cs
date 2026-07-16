@@ -52,7 +52,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     private readonly HashSet<byte> _usedTenantIds = [];
 
     // (label, propertyKey) → indexName のバインディング。
-    // SchemaApi.CreateIndex から登録され、MergeNode の自動インデックス選択に使われる。
+    // SchemaApi.CreateIndex から登録され、MergeVertex の自動インデックス選択に使われる。
     private readonly Dictionary<(string Label, string PropertyKey), string> _bindings = new();
     private readonly Dictionary<string, (string Label, string PropertyKey)> _bindingByName
         = new(StringComparer.Ordinal);
@@ -119,7 +119,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
 
     /// <summary>
     /// 全 B+Tree 索引を走査し、<paramref name="isLive"/> が <c>false</c> を返した
-    /// 値 (NodeId.Value 互換 long) を持つ orphan エントリを <paramref name="output"/> に集める。
+    /// 値 (VertexId.Value 互換 long) を持つ orphan エントリを <paramref name="output"/> に集める。
     /// 戻り値は (走査索引本数, 走査エントリ総数)。<see cref="RemoveOrphans"/> で実削除する。
     /// </summary>
     public (int IndexCount, long EntryCount) CollectOrphans(
@@ -330,7 +330,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
 
         byte tenantId = AllocateTenantId();
         var tenant = _container.OpenTenant(tenantId, PageKind.Header);
-        var index = new BTreeIndex<TKey>(tenant, codec, name, kind);
+        var index = new BTreeIndex<TKey>(tenant, codec);
         _indexes[name] = index;
         _indexTypes[name] = typeFlag;
         _indexFiles[name] = tenant;
@@ -423,26 +423,6 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         if (newText is not null) index.AddDocument(entityId, tok, newText);
     }
 
-    // recovery 論理相 / abort 論理 undo の振り分け。indexTenantId から
-    // 該当 FullTextIndex (postings or norms tenant 一致) を引いて raw apply する。
-    public void ApplyFtLeafRedo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value)
-    {
-        if (TryGetFullTextByTenant(tenantId, out var ft)) ft.ApplyLeafRedo(tenantId, isUpsert, key, value);
-    }
-
-    public void ApplyFtLeafUndo(byte tenantId, bool isUpsert, ReadOnlySpan<byte> key, long value)
-    {
-        if (TryGetFullTextByTenant(tenantId, out var ft)) ft.ApplyLeafUndo(tenantId, isUpsert, key, value);
-    }
-
-    private bool TryGetFullTextByTenant(byte tenantId, out FullTextIndex ft)
-    {
-        foreach (var f in _ftIndexes.Values)
-            if (f.PostingsTenantId == tenantId || f.NormsTenantId == tenantId) { ft = f; return true; }
-        ft = null!;
-        return false;
-    }
-
     public void RegisterTokenizer(ITokenizer tokenizer) => _tokenizers.Register(tokenizer);
 
     private FullTextIndex MaterializeFullText(
@@ -451,12 +431,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     {
         var pTenant = _container.OpenTenant(postingsTenant, PageKind.Header);
         var nTenant = _container.OpenTenant(normsTenant, PageKind.Header);
-        // postings/norms は logical-leaf モードで開く
-        // (leaf 更新 = FtLeafMutation 論理レコード、SMO = FtStructureImage)。logicalTenantId は recovery が tenant→tree を引くキー。
-        var postings = new BTreeIndex<byte[]>(pTenant, new BytesKeyCodec(), name + ":postings", IndexKeyKind.Bytes,
-            logicalLeaf: true, logicalTenantId: postingsTenant);
-        var norms = new BTreeIndex<long>(nTenant, new Int64KeyCodec(), name + ":norms", IndexKeyKind.Int64,
-            logicalLeaf: true, logicalTenantId: normsTenant);
+        var postings = new BTreeIndex<byte[]>(pTenant, new BytesKeyCodec());
+        var norms = new BTreeIndex<long>(nTenant, new Int64KeyCodec());
         var ft = new FullTextIndex(name, label, propertyKey, tokenizerId, postingsTenant, normsTenant, postings, norms);
         _ftIndexes[name] = ft;
         _ftBindings[(label, propertyKey)] = name;
@@ -553,11 +529,11 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         var tenant = _container.OpenTenant(tenantId, PageKind.Header);
         object index = typeFlags switch
         {
-            PropertyTypeFlags.Int32  => new BTreeIndex<int>(tenant, new Int32KeyCodec(), name, IndexKeyKind.Int32),
-            PropertyTypeFlags.Int64  => new BTreeIndex<long>(tenant, new Int64KeyCodec(), name, IndexKeyKind.Int64),
-            PropertyTypeFlags.Double => new BTreeIndex<double>(tenant, new DoubleKeyCodec(), name, IndexKeyKind.Double),
-            PropertyTypeFlags.String => new BTreeIndex<string>(tenant, new StringKeyCodec(), name, IndexKeyKind.String),
-            PropertyTypeFlags.Bytes  => new BTreeIndex<byte[]>(tenant, new BytesKeyCodec(), name, IndexKeyKind.Bytes),
+            PropertyTypeFlags.Int32  => new BTreeIndex<int>(tenant, new Int32KeyCodec()),
+            PropertyTypeFlags.Int64  => new BTreeIndex<long>(tenant, new Int64KeyCodec()),
+            PropertyTypeFlags.Double => new BTreeIndex<double>(tenant, new DoubleKeyCodec()),
+            PropertyTypeFlags.String => new BTreeIndex<string>(tenant, new StringKeyCodec()),
+            PropertyTypeFlags.Bytes  => new BTreeIndex<byte[]>(tenant, new BytesKeyCodec()),
             _ => throw new CorruptionException(
                 $"索引 '{name}' の PropertyTypeFlags={typeFlags} が materialize 対象外。"),
         };
@@ -632,7 +608,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         //    旧 .fileKinds/.idxmeta の即時 fsync と同等の durability を保つよう container を flush する。
         //    tx 内 (IndexInsert 経由の遅延作成) では PageImage が WAL に乗り commit/checkpoint で
         //    durable になるので flush しない (uncommitted ページの早期 steal を避ける)。
-        if (WalPageContext.Current is null)
+        if (WalWriteSetContext.Current is null)
             _container.Flush();
     }
 

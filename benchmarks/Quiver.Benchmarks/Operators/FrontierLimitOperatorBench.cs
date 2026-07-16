@@ -3,7 +3,7 @@ using Quiver.Query.Physical;
 
 namespace Quiver.Benchmarks.Operators;
 
-/// <summary>TS-6 sentinel: <see cref="FrontierLimitOperator"/> with rolling per-depth cap of 50.</summary>
+/// <summary> sentinel: <see cref="FrontierLimitOperator"/> with rolling per-depth cap of 50.</summary>
 [MemoryDiagnoser]
 [ShortRunJob]
 public class FrontierLimitOperatorBench
@@ -15,9 +15,9 @@ public class FrontierLimitOperatorBench
     public void Setup()
     {
         _seed = new OperatorBenchSeed("frontierlim");
-        _rows = new (long, long)[OperatorBenchSeed.NodeCount];
-        for (int i = 0; i < OperatorBenchSeed.NodeCount; i++)
-            _rows[i] = (_seed.PersonNodes[i].Value, i % 4);
+        _rows = new (long, long)[OperatorBenchSeed.VertexCount];
+        for (int i = 0; i < OperatorBenchSeed.VertexCount; i++)
+            _rows[i] = (_seed.PersonVertices[i].Value, i % 4);
     }
 
     [GlobalCleanup]

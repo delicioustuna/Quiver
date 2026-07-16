@@ -90,9 +90,9 @@ public sealed class EntityVersionStoreTests : IDisposable
     {
         using var store = CreateStore();
 
-        // entry 32→40B で RecordsPerPage = 8160/40 = 204。rpp 番目は別 page に乗る
+        // QUIVER-SW header 40B、entry 40B なので RecordsPerPage = 8152/40 = 203。
         int rpp = EntityVersionStore.RecordsPerPage;
-        rpp.Should().Be(204);
+        rpp.Should().Be(203);
 
         var lastOnPage1 = new EntityVersionMeta(Xmin: 100, Xmax: 0, Pstamp: 0, Sstamp: long.MaxValue);
         var firstOnPage2 = new EntityVersionMeta(Xmin: 200, Xmax: 0, Pstamp: 0, Sstamp: long.MaxValue);

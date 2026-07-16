@@ -15,12 +15,12 @@ namespace Quiver.Tests;
 public sealed class GremlinCompatGc6Tests : IDisposable
 {
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public GremlinCompatGc6Tests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_gc6_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
     }
 
     public void Dispose()
@@ -29,25 +29,25 @@ public sealed class GremlinCompatGc6Tests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private NodeId AddPerson(IGraphTransaction tx, string name, int? age = null)
+    private VertexId AddPerson(IGraphTransaction tx, string name, int? age = null)
     {
-        var id = tx.CreateNode("Person");
+        var id = tx.CreateVertex("Person");
         tx.SetProperty(id, "name", PropertyValue.FromString(name));
         if (age.HasValue) tx.SetProperty(id, "age", PropertyValue.FromInt64(age.Value));
         return id;
     }
 
     // Linear: Alice -> Bob, Alice -> Carol, Bob -> Dave
-    private (NodeId alice, NodeId bob, NodeId carol, NodeId dave) BuildSmallGraph()
+    private (VertexId alice, VertexId bob, VertexId carol, VertexId dave) BuildSmallGraph()
     {
         using var tx = _db.BeginTransaction();
         var alice = AddPerson(tx, "Alice", age: 30);
         var bob   = AddPerson(tx, "Bob",   age: 25);
         var carol = AddPerson(tx, "Carol", age: 40);
         var dave  = AddPerson(tx, "Dave",  age: 35);
-        tx.CreateRelationship(alice, bob,   "KNOWS");
-        tx.CreateRelationship(alice, carol, "KNOWS");
-        tx.CreateRelationship(bob,   dave,  "KNOWS");
+        tx.CreateEdge(alice, bob,   "KNOWS");
+        tx.CreateEdge(alice, carol, "KNOWS");
+        tx.CreateEdge(bob,   dave,  "KNOWS");
         tx.Commit();
         return (alice, bob, carol, dave);
     }
@@ -59,7 +59,7 @@ public sealed class GremlinCompatGc6Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var ids = g.Nodes().HasLabel("Person").Has("name", "Alice").As("a").Select("a").ToList();
+        var ids = g.Vertices().HasLabel("Person").Has("name", "Alice").As("a").Select("a").ToList();
 
         ids.Should().ContainSingle().Which.Should().Be(alice);
     }
@@ -73,7 +73,7 @@ public sealed class GremlinCompatGc6Tests : IDisposable
 
         // Pin "a"=Alice, walk to her friends, then ask for "a" again — should
         // recover Alice once per outgoing edge (2 friends → 2 occurrences).
-        var aliceCopies = g.Nodes().HasLabel("Person").Has("name", "Alice").As("a")
+        var aliceCopies = g.Vertices().HasLabel("Person").Has("name", "Alice").As("a")
             .Out("KNOWS")
             .Select("a")
             .ToList();
@@ -89,9 +89,9 @@ public sealed class GremlinCompatGc6Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var pairs = g.Nodes().HasLabel("Person").Has("name", "Alice").As("a")
+        var pairs = g.Vertices().HasLabel("Person").Has("name", "Alice").As("a")
             .Out("KNOWS").As("b")
-            .Select(t => (Source: t.Node("a"), Friend: t.Node("b")));
+            .Select(t => (Source: t.Vertex("a"), Friend: t.Vertex("b")));
 
         pairs.Should().HaveCount(2);
         pairs.Should().BeEquivalentTo(new[]
@@ -109,9 +109,9 @@ public sealed class GremlinCompatGc6Tests : IDisposable
         var g = rtx.G(_db.Schema);
 
         // Bob is the only friend named "Bob" — Has() must not drop carried "a".
-        var pairs = g.Nodes().HasLabel("Person").Has("name", "Alice").As("a")
+        var pairs = g.Vertices().HasLabel("Person").Has("name", "Alice").As("a")
             .Out("KNOWS").Has("name", "Bob").As("b")
-            .Select(t => (a: t.Node("a"), b: t.Node("b")));
+            .Select(t => (a: t.Vertex("a"), b: t.Vertex("b")));
 
         pairs.Should().ContainSingle().Which.Should().Be((alice, bob));
     }
@@ -125,10 +125,10 @@ public sealed class GremlinCompatGc6Tests : IDisposable
 
         // Alice -> Bob -> Dave. After two hops "a"=Alice and "b"=Bob must
         // still resolve correctly alongside the current entity (Dave).
-        var triples = g.Nodes().HasLabel("Person").Has("name", "Alice").As("a")
+        var triples = g.Vertices().HasLabel("Person").Has("name", "Alice").As("a")
             .Out("KNOWS").As("b")
             .Out("KNOWS").As("c")
-            .Select(t => (a: t.Node("a"), b: t.Node("b"), c: t.Node("c")));
+            .Select(t => (a: t.Vertex("a"), b: t.Vertex("b"), c: t.Vertex("c")));
 
         triples.Should().ContainSingle().Which.Should().Be((alice, bob, dave));
     }
@@ -143,7 +143,7 @@ public sealed class GremlinCompatGc6Tests : IDisposable
         // After Out("KNOWS"), .Select("a") re-aims back at Alice; .Out("KNOWS")
         // from there should re-walk her two friends. Once for each upstream
         // row, so 2 friends × 2 upstream rows = 4 rows.
-        var friendsOfA = g.Nodes().HasLabel("Person").Has("name", "Alice").As("a")
+        var friendsOfA = g.Vertices().HasLabel("Person").Has("name", "Alice").As("a")
             .Out("KNOWS")
             .Select("a")
             .Out("KNOWS")
@@ -159,25 +159,25 @@ public sealed class GremlinCompatGc6Tests : IDisposable
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        var act = () => g.Nodes().HasLabel("Person").As("a").Select("zzz").ToList();
+        var act = () => g.Vertices().HasLabel("Person").As("a").Select("zzz").ToList();
 
         act.Should().Throw<InvalidOperationException>()
            .WithMessage("*zzz*");
     }
 
     [Fact]
-    public void OutE_then_select_resolves_both_node_and_edge_aliases()
+    public void OutE_then_select_resolves_both_vertex_and_edge_aliases()
     {
         var (alice, bob, _, _) = BuildSmallGraph();
         using var rtx = _db.BeginReadOnlyTransaction();
         var g = rtx.G(_db.Schema);
 
-        // Pin source node "a", capture edge as "r", terminate on the neighbor.
-        // OutE keeps rel@0 / neighbor@1, so carry should preserve "a" at the
-        // tail and let .Select recover both Alice and the relationship id.
-        var bobEdge = g.Nodes().HasLabel("Person").Has("name", "Alice").As("a")
-            .OutRelationships("KNOWS").As("r")
-            .TargetNode().ToList();
+        // Pin source vertex "a", capture edge as "r", terminate on the neighbor.
+        // OutE keeps edge@0 / neighbor@1, so carry should preserve "a" at the
+        // tail and let .Select recover both Alice and the edge id.
+        var bobEdge = g.Vertices().HasLabel("Person").Has("name", "Alice").As("a")
+            .OutEdges("KNOWS").As("r")
+            .TargetVertex().ToList();
 
         // Sanity: the InV step itself produces 2 neighbors (Bob and Carol).
         bobEdge.Should().HaveCount(2);

@@ -32,13 +32,13 @@ public sealed class CoMembershipBlockTests : IDisposable
     public void Configured_role_pair_uses_block_and_matches_chain_result()
     {
         using var db = OpenConfigured(_path);
-        NodeId subject;
-        NodeId expected;
+        VertexId subject;
+        VertexId expected;
         using (var tx = db.BeginTransaction())
         {
-            subject = tx.CreateNode("Person");
-            expected = tx.CreateNode("Person");
-            tx.CreateHyperedge("Fact", [
+            subject = tx.CreateVertex("Person");
+            expected = tx.CreateVertex("Person");
+            tx.CreateNexus("Fact", [
                 new("Subject", subject),
                 new("Object", expected),
             ]);
@@ -59,18 +59,18 @@ public sealed class CoMembershipBlockTests : IDisposable
     public void Block_path_preserves_type_filter_and_carried_alias()
     {
         using var db = OpenConfigured(_path);
-        NodeId subject;
-        NodeId factTarget;
+        VertexId subject;
+        VertexId factTarget;
         using (var tx = db.BeginTransaction())
         {
-            subject = tx.CreateNode("Person");
-            factTarget = tx.CreateNode("Person");
-            NodeId otherTarget = tx.CreateNode("Person");
-            tx.CreateHyperedge("Fact", [
+            subject = tx.CreateVertex("Person");
+            factTarget = tx.CreateVertex("Person");
+            VertexId otherTarget = tx.CreateVertex("Person");
+            tx.CreateNexus("Fact", [
                 new("Subject", subject),
                 new("Object", factTarget),
             ]);
-            tx.CreateHyperedge("Other", [
+            tx.CreateNexus("Other", [
                 new("Subject", subject),
                 new("Object", otherTarget),
             ]);
@@ -79,9 +79,9 @@ public sealed class CoMembershipBlockTests : IDisposable
 
         using var read = db.BeginReadOnlyTransaction();
         var traversal = read.G(db.Schema)
-            .Node(subject)
+            .Vertex(subject)
             .As("origin")
-            .Hyperedges("Fact", "Subject")
+            .Nexuses("Fact", "Subject")
             .OtherMembers("Object");
         traversal.ToList().Should().Equal(factTarget);
         traversal.Select("origin").ToList().Should().Equal(subject);
@@ -90,14 +90,14 @@ public sealed class CoMembershipBlockTests : IDisposable
     [Fact]
     public void Missing_view_falls_back_to_incidence_chain()
     {
-        using var db = GraphDatabase.Open(_path);
-        NodeId subject;
-        NodeId expected;
+        using var db = QuiverDatabase.Open(_path);
+        VertexId subject;
+        VertexId expected;
         using (var tx = db.BeginTransaction())
         {
-            subject = tx.CreateNode("Person");
-            expected = tx.CreateNode("Person");
-            tx.CreateHyperedge("Fact", [
+            subject = tx.CreateVertex("Person");
+            expected = tx.CreateVertex("Person");
+            tx.CreateNexus("Fact", [
                 new("Subject", subject),
                 new("Object", expected),
             ]);
@@ -114,28 +114,28 @@ public sealed class CoMembershipBlockTests : IDisposable
     public void Savepoint_and_abort_do_not_publish_discarded_members()
     {
         using var db = OpenConfigured(_path);
-        NodeId subject;
-        NodeId discarded;
-        NodeId committed;
-        NodeId aborted;
+        VertexId subject;
+        VertexId discarded;
+        VertexId committed;
+        VertexId aborted;
         using (var setup = db.BeginTransaction())
         {
-            subject = setup.CreateNode("Person");
-            discarded = setup.CreateNode("Person");
-            committed = setup.CreateNode("Person");
-            aborted = setup.CreateNode("Person");
+            subject = setup.CreateVertex("Person");
+            discarded = setup.CreateVertex("Person");
+            committed = setup.CreateVertex("Person");
+            aborted = setup.CreateVertex("Person");
             setup.Commit();
         }
 
         using (var tx = db.BeginTransaction())
         {
             SavepointId savepoint = tx.Savepoint();
-            tx.CreateHyperedge("Fact", [
+            tx.CreateNexus("Fact", [
                 new("Subject", subject),
                 new("Object", discarded),
             ]);
             tx.RollbackTo(savepoint);
-            tx.CreateHyperedge("Fact", [
+            tx.CreateNexus("Fact", [
                 new("Subject", subject),
                 new("Object", committed),
             ]);
@@ -144,7 +144,7 @@ public sealed class CoMembershipBlockTests : IDisposable
 
         using (var tx = db.BeginTransaction())
         {
-            tx.CreateHyperedge("Fact", [
+            tx.CreateNexus("Fact", [
                 new("Subject", subject),
                 new("Object", aborted),
             ]);
@@ -158,14 +158,14 @@ public sealed class CoMembershipBlockTests : IDisposable
     [Fact]
     public void Reopen_rebuilds_view_from_canonical_records()
     {
-        NodeId subject;
-        NodeId expected;
+        VertexId subject;
+        VertexId expected;
         using (var db = OpenConfigured(_path))
         using (var tx = db.BeginTransaction())
         {
-            subject = tx.CreateNode("Person");
-            expected = tx.CreateNode("Person");
-            tx.CreateHyperedge("Fact", [
+            subject = tx.CreateVertex("Person");
+            expected = tx.CreateVertex("Person");
+            tx.CreateNexus("Fact", [
                 new("Subject", subject),
                 new("Object", expected),
             ]);
@@ -183,15 +183,15 @@ public sealed class CoMembershipBlockTests : IDisposable
     public void Snapshot_recovery_rebuilds_view_from_canonical_records()
     {
         string snapshotPath = Path.Combine(_dir, "snapshot.quiver");
-        NodeId subject;
-        NodeId expected;
+        VertexId subject;
+        VertexId expected;
         using (var db = OpenConfigured(_path))
         {
             using (var tx = db.BeginTransaction())
             {
-                subject = tx.CreateNode("Person");
-                expected = tx.CreateNode("Person");
-                tx.CreateHyperedge("Fact", [
+                subject = tx.CreateVertex("Person");
+                expected = tx.CreateVertex("Person");
+                tx.CreateNexus("Fact", [
                     new("Subject", subject),
                     new("Object", expected),
                 ]);
@@ -209,13 +209,13 @@ public sealed class CoMembershipBlockTests : IDisposable
     public void Vacuum_rebuild_removes_deleted_entries()
     {
         using var db = OpenConfigured(_path);
-        NodeId subject;
-        HyperedgeId hyperedge;
+        VertexId subject;
+        NexusId nexus;
         using (var tx = db.BeginTransaction())
         {
-            subject = tx.CreateNode("Person");
-            NodeId target = tx.CreateNode("Person");
-            hyperedge = tx.CreateHyperedge("Fact", [
+            subject = tx.CreateVertex("Person");
+            VertexId target = tx.CreateVertex("Person");
+            nexus = tx.CreateNexus("Fact", [
                 new("Subject", subject),
                 new("Object", target),
             ]);
@@ -223,7 +223,7 @@ public sealed class CoMembershipBlockTests : IDisposable
         }
         using (var tx = db.BeginTransaction())
         {
-            tx.DeleteHyperedge(hyperedge);
+            tx.DeleteNexus(nexus);
             tx.Commit();
         }
 
@@ -233,20 +233,20 @@ public sealed class CoMembershipBlockTests : IDisposable
         Query(read, db, subject).Should().BeEmpty();
     }
 
-    private static GraphDatabase OpenConfigured(string path)
+    private static QuiverDatabase OpenConfigured(string path)
     {
-        var options = new GraphDatabaseOptions();
+        var options = new QuiverDatabaseOptions();
         options.CoMembershipRolePairs.Add(new("Subject", "Object"));
-        return GraphDatabase.Open(path, options);
+        return QuiverDatabase.Open(path, options);
     }
 
-    private static List<NodeId> Query(
+    private static List<VertexId> Query(
         IGraphTransaction tx,
-        GraphDatabase db,
-        NodeId subject)
+        QuiverDatabase db,
+        VertexId subject)
         => tx.G(db.Schema)
-            .Node(subject)
-            .Hyperedges("Fact", "Subject")
+            .Vertex(subject)
+            .Nexuses("Fact", "Subject")
             .OtherMembers("Object")
             .ToList();
 }

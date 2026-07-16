@@ -20,7 +20,7 @@ public class WalReplayProperties
 {
     /// <summary>
     /// FsCheck の <see cref="Gen"/> で「実際に WAL に書ける」レコードだけを生成する。
-    /// EndOfSegment / CheckpointBegin/End は payload 形式に制約があるため除外し、
+    /// CheckpointBegin/End は payload 形式に制約があるため除外し、
     /// payload は 0..512 バイトの任意バイト列に絞る。
     /// </summary>
     public sealed record WalOp(byte TypeRaw, long TxId, byte[] Payload)
@@ -32,11 +32,10 @@ public class WalReplayProperties
     public static Arbitrary<WalOp> WalOpArb()
     {
         byte[] safeTypes = [
-            (byte)WalRecordType.Begin,
+            (byte)WalRecordType.BeginWrite,
             (byte)WalRecordType.Commit,
             (byte)WalRecordType.Abort,
-            (byte)WalRecordType.PageDelta,
-            (byte)WalRecordType.IndexMutation,
+            (byte)WalRecordType.PageImage,
         ];
         var typeGen = Gen.Elements(safeTypes);
         var txGen = ArbMap.Default.GeneratorFor<long>()

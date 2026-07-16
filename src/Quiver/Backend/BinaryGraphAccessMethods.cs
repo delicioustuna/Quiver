@@ -9,7 +9,7 @@ namespace Quiver;
 /// <summary>
 /// バイナリバックエンドの <see cref="IGraphAccessMethods"/> 実装。リンクリストと隣接ブロックの
 /// 選択を <see cref="BinaryExpandCursor"/> に委譲し、隣接 fast path が使えなかった頻度
-/// (= インデックス構築時にブロックが無かったノード、典型的には bulk load 後に作られたもの)
+/// (= インデックス構築時にブロックが無かったVertex、典型的には bulk load 後に作られたもの)
 /// を診断用カウンタとして公開する。<see cref="IAdjacencyBlockStore.OpenCursor"/> が
 /// ページチェーン全体を走査するため、cursor が走査途中で fast path を放棄することはない。
 /// カウンタは「ブロックが全く無い」経路でのみ発火する。
@@ -20,30 +20,30 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     internal long FallbackCountInternal;
 
     private readonly IVectorStore _vectors;
-    private readonly RelationshipDeltaStore _relationshipDeltas;
-    // ラベル転置索引 (任意)。接続時はラベル付き ScanNodes/LabelScan が全件 Scan() から O(|L|) lookup に切り替わる。
-    private LabelNodeIndex? _labelIndex;
+    private readonly EdgeDeltaStore _edgeDeltas;
+    // ラベル転置索引 (任意)。接続時はラベル付き ScanVertices/LabelScan が全件 Scan() から O(|L|) lookup に切り替わる。
+    private LabelVertexIndex? _labelIndex;
 
     internal BinaryGraphAccessMethods(
         IVectorStore vectors,
-        RelationshipDeltaStore? relationshipDeltas = null)
+        EdgeDeltaStore? edgeDeltas = null)
     {
         _vectors = vectors;
-        _relationshipDeltas = relationshipDeltas ?? RelationshipDeltaStore.Shared;
+        _edgeDeltas = edgeDeltas ?? EdgeDeltaStore.Shared;
     }
 
-    internal RelationshipDeltaStore RelationshipDeltas => _relationshipDeltas;
+    internal EdgeDeltaStore EdgeDeltas => _edgeDeltas;
 
     /// <summary>
-    /// factory が NodeStore に attach した後の index を共有する。
+    /// factory が VertexStore に attach した後の index を共有する。
     /// 接続前 (open 直後 / unit テスト) は <see cref="ScanByLabelSlow"/> にフォールバックする。
     /// </summary>
-    internal void AttachLabelIndex(LabelNodeIndex labelIndex) => _labelIndex = labelIndex;
+    internal void AttachLabelIndex(LabelVertexIndex labelIndex) => _labelIndex = labelIndex;
 
     public long AdjacencyFallbackCount => Interlocked.Read(ref FallbackCountInternal);
 
     /// <summary>
-    /// <c>LabelNodeIndex</c> sidecar が接続されているときに <c>true</c>。
+    /// <c>LabelVertexIndex</c> sidecar が接続されているときに <c>true</c>。
     /// factory が <see cref="AttachLabelIndex"/> を呼ぶ前 (open 直後 / 単体テスト) は <c>false</c>。
     /// </summary>
     public bool HasFastLabelIndex => _labelIndex is not null;
@@ -91,27 +91,27 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
         return _vectors.KnnSearchBatch(indexName, queries, k, options);
     }
 
-    public IEnumerable<NodeId> ScanNodes(ITransaction tx, LabelId? label = null)
+    public IEnumerable<VertexId> ScanVertices(ITransaction tx, LabelId? label = null)
     {
-        if (!label.HasValue) return tx.Nodes.Scan();
+        if (!label.HasValue) return tx.Vertices.Scan();
         // sidecar 接続済みなら O(|L|) lookup。factory が index を attach するまでは
         // 旧来の O(N) scan-and-filter にフォールバックし、スタンドアロンの
         // TransactionManager 構築 (backend なしのテスト等) でも動作する。
         if (_labelIndex is { } idx)
-            return idx.Lookup(tx.Nodes, label.Value);
+            return idx.Lookup(tx.Vertices, label.Value);
         return ScanByLabelSlow(tx, label.Value);
     }
 
-    private static IEnumerable<NodeId> ScanByLabelSlow(ITransaction tx, LabelId label)
+    private static IEnumerable<VertexId> ScanByLabelSlow(ITransaction tx, LabelId label)
     {
-        foreach (var id in tx.Nodes.Scan())
+        foreach (var id in tx.Vertices.Scan())
         {
-            if (tx.Nodes.Read(id).Label == label)
+            if (tx.Vertices.Read(id).Label == label)
                 yield return id;
         }
     }
 
-    public IEnumerable<NodeId> SeekNodesByIndex(ITransaction tx, string indexName, PropertyValue key)
+    public IEnumerable<VertexId> SeekVerticesByIndex(ITransaction tx, string indexName, PropertyValue key)
     {
         // PropertyValue は ref struct なので yield を跨いで保持できない。
         IEnumerable<long> ids = key.Type switch
@@ -125,25 +125,25 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
                     .SeekValues(Encoding.UTF8.GetString(key.Utf8StringValue)),
             _ => [],
         };
-        // パック値を世代照合しつつ NodeId へ unpack し、slot 再利用の stale 参照を弾く。
-        return IndexValueResolver.ResolveLiveNodeIds(ids, tx.Nodes);
+        // パック値を世代照合しつつ VertexId へ unpack し、slot 再利用の stale 参照を弾く。
+        return IndexValueResolver.ResolveLiveVertexIds(ids, tx.Vertices);
     }
 
     public ExpandCursor Expand(
         ITransaction tx,
-        NodeId source,
+        VertexId source,
         Direction direction,
-        RelationshipTypeId? typeFilter)
+        EdgeTypeId? typeFilter)
         => new BinaryExpandCursor(tx, source, direction, typeFilter, this);
 
     public double EstimateExpandCardinality(
         ITransaction tx,
-        NodeId source,
+        VertexId source,
         Direction direction,
-        RelationshipTypeId? typeFilter)
+        EdgeTypeId? typeFilter)
     {
-        var materializer = new EntityIdentityMaterializer(tx.Nodes);
-        if (!materializer.TryNode(source, out source))
+        var materializer = new EntityIdentityMaterializer(tx.Vertices);
+        if (!materializer.TryVertex(source, out source))
             return 0;
 
         // GraphStats 未接続のため、隣接ブロックがあれば安価な O(degree) プローブを使い、
@@ -154,26 +154,26 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
             var probe = new AdjacencyEntry[64];
             int baseCount = adj.ReadEdges(source, direction, typeFilter, probe);
             int deltaLimit = Math.Max(0, probe.Length - Math.Min(baseCount, probe.Length));
-            int deltaCount = _relationshipDeltas.Count(
-                tx, source, direction, typeFilter, adj.BaseRelHwm, deltaLimit);
+            int deltaCount = _edgeDeltas.Count(
+                tx, source, direction, typeFilter, adj.BaseEdgeHwm, deltaLimit);
             int total = Math.Min(probe.Length, baseCount + deltaCount);
             return total;
         }
 
         double count = 0;
-        var relId = tx.Nodes.Read(source).FirstRelationshipId;
-        while (relId.IsValid)
+        var edgeId = tx.Vertices.Read(source).FirstEdgeId;
+        while (edgeId.IsValid)
         {
-            var rel = tx.Relationships.Read(relId);
-            bool typeOk = !typeFilter.HasValue || rel.Type == typeFilter.Value;
+            var edge = tx.Edges.Read(edgeId);
+            bool typeOk = !typeFilter.HasValue || edge.Type == typeFilter.Value;
             bool dirOk = direction switch
             {
-                Direction.Outgoing => rel.Source.Sequence == source.Sequence,
-                Direction.Incoming => rel.Target.Sequence == source.Sequence,
+                Direction.Outgoing => edge.Source.Sequence == source.Sequence,
+                Direction.Incoming => edge.Target.Sequence == source.Sequence,
                 _ => true,
             };
             if (typeOk && dirOk) count++;
-            relId = rel.Source.Sequence == source.Sequence ? rel.SourceNext : rel.TargetNext;
+            edgeId = edge.Source.Sequence == source.Sequence ? edge.SourceNext : edge.TargetNext;
         }
         return count;
     }

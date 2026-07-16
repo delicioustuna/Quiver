@@ -6,8 +6,8 @@ using Quiver.Testing;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// ARCH-6 (6d): persistent HNSW ANN search vs brute-force flat scan over the same
-/// in-file corpus, exercised through the public <see cref="GraphDatabase"/> surface
+/// Persistent HNSW ANN search vs brute-force flat scan over the same
+/// in-file corpus, exercised through the public <see cref="QuiverDatabase"/> surface
 /// (so the persistent <c>PersistentVectorStore</c> + <c>HnswIndex</c> path is measured,
 /// not the in-memory reference store).
 ///
@@ -30,7 +30,7 @@ public class HnswSearchBenchmarks
     private const string IndexName = "hnsw-bench";
 
     private string _dir = null!;
-    private GraphDatabase _db = null!;
+    private QuiverDatabase _db = null!;
     private float[] _query = null!;
 
     [GlobalSetup]
@@ -38,9 +38,9 @@ public class HnswSearchBenchmarks
     {
         var rng = new Random(VectorRecallCorpus.Seed);
         _dir = BenchTempDir.Create("hnsw");
-        _db = GraphDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Node, _db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, _db.Schema.GetOrCreatePropertyKey("t"),
             Dim, DistanceMetric.Cosine, "bench"));
 
         var buf = new float[Dim];
@@ -49,8 +49,8 @@ public class HnswSearchBenchmarks
             for (int i = 0; i < N; i++)
             {
                 VectorRecallCorpus.Fill(rng, buf);
-                var n = tx.CreateNode("Doc");
-                _db.Vectors.SetVector(EntityKind.Node, n.Value, IndexName, buf);
+                var n = tx.CreateVertex("Doc");
+                _db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, buf);
             }
             tx.Commit();
         }

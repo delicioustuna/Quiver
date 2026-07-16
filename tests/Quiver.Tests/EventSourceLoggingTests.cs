@@ -12,13 +12,13 @@ public sealed class EventSourceLoggingTests : IDisposable
 {
     private readonly string _dir;
     private readonly CapturingEventListener _listener;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public EventSourceLoggingTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_eventsource_" + Guid.NewGuid().ToString("N"));
         _listener = new CapturingEventListener();
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
     }
 
     public void Dispose()
@@ -36,7 +36,7 @@ public sealed class EventSourceLoggingTests : IDisposable
         using (var tx = _db.BeginTransaction())
         {
             txId = tx.Id.Value;
-            tx.CreateNode("Person");
+            tx.CreateVertex("Person");
             tx.Commit();
         }
 
@@ -53,7 +53,7 @@ public sealed class EventSourceLoggingTests : IDisposable
         using (var tx = _db.BeginTransaction())
         {
             txId = tx.Id.Value;
-            tx.CreateNode("Person");
+            tx.CreateVertex("Person");
             tx.Rollback();
         }
 
@@ -69,9 +69,9 @@ public sealed class EventSourceLoggingTests : IDisposable
     {
         using (var tx = _db.BeginTransaction())
         {
-            tx.CreateNode("Person");
-            tx.CreateNode("Person");
-            tx.CreateNode("Person");
+            tx.CreateVertex("Person");
+            tx.CreateVertex("Person");
+            tx.CreateVertex("Person");
             tx.Commit();
         }
 
@@ -80,7 +80,7 @@ public sealed class EventSourceLoggingTests : IDisposable
         {
             txId = tx.Id.Value;
             var labelId = _db.Schema.GetOrCreateLabel("Person");
-            tx.Execute(new NodeByLabelScanOperator(labelId));
+            tx.Execute(new VertexByLabelScanOperator(labelId));
             tx.Commit();
         }
 

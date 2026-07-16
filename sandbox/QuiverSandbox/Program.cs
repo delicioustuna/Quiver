@@ -31,13 +31,13 @@ finally
 static void Demo1_BasicCrud(string dir)
 {
     H("Demo 1: 基本 CRUD — ソーシャルグラフ");
-    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+    using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     using var tx = db.BeginTransaction();
 
     // ── ノード作成 & プロパティ設定 ──────────────────────────────────────
-    var alice = tx.CreateNode("Person");
-    var bob   = tx.CreateNode("Person");
-    var carol = tx.CreateNode("Person");
+    var alice = tx.CreateVertex("Person");
+    var bob   = tx.CreateVertex("Person");
+    var carol = tx.CreateVertex("Person");
 
     tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
     tx.SetProperty(bob,   "name", PropertyValue.FromString("Bob"));
@@ -45,18 +45,18 @@ static void Demo1_BasicCrud(string dir)
     tx.SetProperty(alice, "age",  PropertyValue.FromInt32(30));
     tx.SetProperty(bob,   "age",  PropertyValue.FromInt32(25));
 
-    Console.WriteLine($"  alice exists : {tx.NodeExists(alice)}");
+    Console.WriteLine($"  alice exists : {tx.VertexExists(alice)}");
     Console.WriteLine($"  alice.name   = {Str(tx.GetProperty(alice, "name"))}");
     Console.WriteLine($"  alice.age    = {tx.GetProperty(alice, "age").Int32Value}");
     Console.WriteLine($"  alice has email: {tx.HasProperty(alice, "email")}");
 
     // ── リレーション作成 & 隣接ノード列挙 ──────────────────────────────
-    tx.CreateRelationship(alice, bob,   "KNOWS");
-    tx.CreateRelationship(alice, carol, "KNOWS");
-    tx.CreateRelationship(bob,   carol, "FOLLOWS");
+    tx.CreateEdge(alice, bob,   "KNOWS");
+    tx.CreateEdge(alice, carol, "KNOWS");
+    tx.CreateEdge(bob,   carol, "FOLLOWS");
 
     Console.WriteLine("  alice の隣接ノード (Direction.Both):");
-    var en = tx.EnumerateRelationships(alice);
+    var en = tx.EnumerateEdges(alice);
     while (en.MoveNext())
     {
         var r = en.Current;
@@ -69,12 +69,12 @@ static void Demo1_BasicCrud(string dir)
     Console.WriteLine($"  age 削除後: HasProperty(age)={tx.HasProperty(alice, "age")}");
 
     // ── リレーション削除 ──────────────────────────────────────────────
-    var relEn = tx.EnumerateRelationships(alice, Direction.Both, "KNOWS");
+    var relEn = tx.EnumerateEdges(alice, Direction.Both, "KNOWS");
     if (relEn.MoveNext())
-        tx.DeleteRelationship(relEn.Current.Id);
+        tx.DeleteEdge(relEn.Current.Id);
 
     int remaining = 0;
-    var cntEn = tx.EnumerateRelationships(alice);
+    var cntEn = tx.EnumerateEdges(alice);
     while (cntEn.MoveNext()) remaining++;
     Console.WriteLine($"  KNOWS 1件削除後のリレーション数: {remaining}");
 
@@ -87,10 +87,10 @@ static void Demo1_BasicCrud(string dir)
 static void Demo2_AllPropertyTypes(string dir)
 {
     H("Demo 2: プロパティ各型");
-    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+    using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     using var tx = db.BeginTransaction();
 
-    var n = tx.CreateNode("Item");
+    var n = tx.CreateVertex("Item");
 
     tx.SetProperty(n, "flag",   PropertyValue.FromBool(true));
     tx.SetProperty(n, "count",  PropertyValue.FromInt32(42));
@@ -122,17 +122,17 @@ static void Demo2_AllPropertyTypes(string dir)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Demo 3: Volcano オペレータパイプライン
-//   AllNodesScan / NodeByLabelScan → PropertyLookup → Filter → Limit
+//   AllVerticesScan / VertexByLabelScan → PropertyLookup → Filter → Limit
 // ─────────────────────────────────────────────────────────────────────────────
 static void Demo3_OperatorPipeline(string dir)
 {
     H("Demo 3: Volcano オペレータパイプライン");
-    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+    using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     using var tx = db.BeginTransaction();
 
     for (int i = 0; i < 10; i++)
     {
-        var p = tx.CreateNode("Product");
+        var p = tx.CreateVertex("Product");
         tx.SetProperty(p, "name",  PropertyValue.FromString($"Product-{i:D2}"));
         tx.SetProperty(p, "price", PropertyValue.FromInt64(100L * (i + 1)));
     }
@@ -141,20 +141,20 @@ static void Demo3_OperatorPipeline(string dir)
     var priceKey  = db.Schema.GetOrCreatePropertyKey("price");
     var prodLabel = db.Schema.GetOrCreateLabel("Product");
 
-    // (A) NodeByLabelScan → Limit(3)  ─ ラベルフィルタ + ページング
-    Console.WriteLine("  Product 先頭 3 件 (nodeId):");
+    // (A) VertexByLabelScan → Limit(3)  ─ ラベルフィルタ + ページング
+    Console.WriteLine("  Product 先頭 3 件 (vertexId):");
     {
-        var scan  = new NodeByLabelScanOperator(prodLabel);
+        var scan  = new VertexByLabelScanOperator(prodLabel);
         var limit = new LimitOperator(scan, limit: 3);
         using var r = tx.Execute(limit);
         foreach (var row in r.Rows())
-            Console.WriteLine($"    nodeId={row.GetNodeId(0).Value}");
+            Console.WriteLine($"    vertexId={row.GetVertexId(0).Value}");
     }
 
-    // (B) AllNodesScan → PropertyLookup(name) → Limit(skip:2, limit:3)  ─ SKIP/TAKE
+    // (B) AllVerticesScan → PropertyLookup(name) → Limit(skip:2, limit:3)  ─ SKIP/TAKE
     Console.WriteLine("  全 Product の name を SKIP 2, TAKE 3:");
     {
-        var scan   = new AllNodesScanOperator(prodLabel);
+        var scan   = new AllVerticesScanOperator(prodLabel);
         var lookup = new PropertyLookupOperator(scan, 0, nameKey, "name");
         var limit  = new LimitOperator(lookup, limit: 3, skip: 2);
         using var r = tx.Execute(limit);
@@ -162,10 +162,10 @@ static void Demo3_OperatorPipeline(string dir)
             Console.WriteLine($"    {row.GetString(1)}");
     }
 
-    // (C) AllNodesScan → PropertyLookup(price) → Filter(price >= 600) → PropertyLookup(name)
+    // (C) AllVerticesScan → PropertyLookup(price) → Filter(price >= 600) → PropertyLookup(name)
     Console.WriteLine("  price ≥ 600 の Product:");
     {
-        var scan    = new AllNodesScanOperator(prodLabel);
+        var scan    = new AllVerticesScanOperator(prodLabel);
         var lookupP = new PropertyLookupOperator(scan,    0, priceKey, "price");
         var filter  = new FilterOperator(lookupP, new Int64MinPredicate(column: 1, min: 600L));
         var lookupN = new PropertyLookupOperator(filter,  0, nameKey,  "name");
@@ -184,48 +184,48 @@ static void Demo3_OperatorPipeline(string dir)
 static void Demo4_ExpandOperator(string dir)
 {
     H("Demo 4: ExpandOperator — グラフパターンマッチング");
-    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+    using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     using var tx = db.BeginTransaction();
 
     // グラフ構築: Alice→Bob→Dave, Alice→Carol→Dave (KNOWS), Carol→Dave (FOLLOWS)
     string[] names = ["Alice", "Bob", "Carol", "Dave"];
-    var nodes = names.Select(name =>
+    var vertices = names.Select(name =>
     {
-        var id = tx.CreateNode("Person");
+        var id = tx.CreateVertex("Person");
         tx.SetProperty(id, "name", PropertyValue.FromString(name));
         return id;
     }).ToArray();
 
-    tx.CreateRelationship(nodes[0], nodes[1], "KNOWS");   // Alice→Bob
-    tx.CreateRelationship(nodes[0], nodes[2], "KNOWS");   // Alice→Carol
-    tx.CreateRelationship(nodes[1], nodes[3], "KNOWS");   // Bob→Dave
-    tx.CreateRelationship(nodes[2], nodes[3], "FOLLOWS"); // Carol→Dave
+    tx.CreateEdge(vertices[0], vertices[1], "KNOWS");   // Alice→Bob
+    tx.CreateEdge(vertices[0], vertices[2], "KNOWS");   // Alice→Carol
+    tx.CreateEdge(vertices[1], vertices[3], "KNOWS");   // Bob→Dave
+    tx.CreateEdge(vertices[2], vertices[3], "FOLLOWS"); // Carol→Dave
 
     var personLabel = db.Schema.GetOrCreateLabel("Person");
-    var knowsType   = db.Schema.GetOrCreateRelationshipType("KNOWS");
+    var knowsType   = db.Schema.GetOrCreateEdgeType("KNOWS");
     var nameKey     = db.Schema.GetOrCreatePropertyKey("name");
 
     // (A) Outgoing KNOWS の隣接ノード (NeighborOnly モード)
     Console.WriteLine("  Outgoing KNOWS の隣接ノード:");
     {
-        var scan   = new NodeByLabelScanOperator(personLabel);
+        var scan   = new VertexByLabelScanOperator(personLabel);
         var expand = new ExpandOperator(scan, 0, Direction.Outgoing, knowsType, ExpandOutputMode.NeighborOnly);
         using var r = tx.Execute(expand);
         foreach (var row in r.Rows())
-            Console.WriteLine($"    → {Str(tx.GetProperty(row.GetNodeId(0), "name"))}");
+            Console.WriteLine($"    → {Str(tx.GetProperty(row.GetVertexId(0), "name"))}");
     }
 
     // (B) 全エッジを source / rel / neighbor として取得 (Full モード)
     Console.WriteLine("  全 Outgoing エッジ (Full モード):");
     {
-        var scan   = new NodeByLabelScanOperator(personLabel);
+        var scan   = new VertexByLabelScanOperator(personLabel);
         var expand = new ExpandOperator(scan, 0, Direction.Outgoing, null, ExpandOutputMode.Full);
         using var r = tx.Execute(expand);
         foreach (var row in r.Rows())
         {
-            var src = Str(tx.GetProperty(row.GetNodeId(0), "name"));
-            var nbr = Str(tx.GetProperty(row.GetNodeId(2), "name"));
-            Console.WriteLine($"    {src} -[rel#{row.GetRelationshipId(1).Value}]-> {nbr}");
+            var src = Str(tx.GetProperty(row.GetVertexId(0), "name"));
+            var nbr = Str(tx.GetProperty(row.GetVertexId(2), "name"));
+            Console.WriteLine($"    {src} -[rel#{row.GetEdgeId(1).Value}]-> {nbr}");
         }
     }
 
@@ -238,7 +238,7 @@ static void Demo4_ExpandOperator(string dir)
 static void Demo5_IndexSearch(string dir)
 {
     H("Demo 5: インデックス検索 (Seek / Range)");
-    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+    using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
 
     db.Schema.CreateIndex("idx_name",  "Person", "name",  IndexKind.StringEquality);
     db.Schema.CreateIndex("idx_score", "Person", "score", IndexKind.Int64Equality);
@@ -251,11 +251,11 @@ static void Demo5_IndexSearch(string dir)
         ];
         foreach (var (name, score) in data)
         {
-            var node = tx.CreateNode("Person");
-            tx.SetProperty(node, "name",  PropertyValue.FromString(name));
-            tx.SetProperty(node, "score", PropertyValue.FromInt64(score));
-            tx.IndexInsert("idx_name",  name,  node);
-            tx.IndexInsert("idx_score", score, node);
+            var vertex = tx.CreateVertex("Person");
+            tx.SetProperty(vertex, "name",  PropertyValue.FromString(name));
+            tx.SetProperty(vertex, "score", PropertyValue.FromInt64(score));
+            tx.IndexInsert("idx_name",  name,  vertex);
+            tx.IndexInsert("idx_score", score, vertex);
         }
         tx.Commit();
     }
@@ -267,7 +267,7 @@ static void Demo5_IndexSearch(string dir)
         // 等値検索: name == "Carol"
         Console.WriteLine("  idx_name で \"Carol\" を等値検索:");
         {
-            var seek   = new NodeIndexSeekOperator("idx_name", LiteralProvider.String("Carol"));
+            var seek   = new VertexIndexSeekOperator("idx_name", LiteralProvider.String("Carol"));
             var lookup = new PropertyLookupOperator(seek, 0, nameKey, "name");
             using var r = tx.Execute(lookup);
             foreach (var row in r.Rows())
@@ -277,7 +277,7 @@ static void Demo5_IndexSearch(string dir)
         // 範囲検索: 150 ≤ score ≤ 250
         Console.WriteLine("  idx_score で 150 ≤ score ≤ 250 の範囲検索:");
         {
-            var range  = new NodeIndexRangeScanOperator("idx_score",
+            var range  = new VertexIndexRangeScanOperator("idx_score",
                 LiteralProvider.Int64(150), fromInclusive: true,
                 LiteralProvider.Int64(250), toInclusive:   true);
             var lookup = new PropertyLookupOperator(range, 0, nameKey, "name");
@@ -301,24 +301,24 @@ static void Demo6_Persistence(string dir)
 {
     H("Demo 6: 永続性 — DB 再オープン後もデータが残る");
 
-    NodeId savedId;
+    VertexId savedId;
 
     // 書き込み & クローズ
-    using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
+    using (var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
     {
         using var tx = db.BeginTransaction();
-        savedId = tx.CreateNode("Config");
+        savedId = tx.CreateVertex("Config");
         tx.SetProperty(savedId, "version", PropertyValue.FromString("1.0"));
         tx.SetProperty(savedId, "build",   PropertyValue.FromInt64(42L));
         tx.Commit();
-        Console.WriteLine($"  書き込み完了: nodeId={savedId.Value}, version=1.0, build=42");
+        Console.WriteLine($"  書き込み完了: vertexId={savedId.Value}, version=1.0, build=42");
     }
 
     // 再オープン & 読み出し
-    using (var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
+    using (var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
     {
         using var tx = db.BeginTransaction();
-        Console.WriteLine($"  再オープン後: NodeExists={tx.NodeExists(savedId)}");
+        Console.WriteLine($"  再オープン後: VertexExists={tx.VertexExists(savedId)}");
         Console.WriteLine($"  version = {Str(tx.GetProperty(savedId, "version"))}");
         Console.WriteLine($"  build   = {tx.GetProperty(savedId, "build").Int64Value}");
         tx.Rollback();
@@ -331,23 +331,23 @@ static void Demo6_Persistence(string dir)
 static void Demo7_Diagnostics(string dir)
 {
     H("Demo 7: 診断 API");
-    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+    using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
 
     using (var tx = db.BeginTransaction())
     {
         for (int i = 0; i < 5; i++)
         {
-            var a = tx.CreateNode("N");
-            var b = tx.CreateNode("N");
+            var a = tx.CreateVertex("N");
+            var b = tx.CreateVertex("N");
             tx.SetProperty(a, "idx", PropertyValue.FromInt32(i));
-            tx.CreateRelationship(a, b, "LINK");
+            tx.CreateEdge(a, b, "LINK");
         }
         tx.Commit();
     }
 
     var stats = db.Diagnostics.GetStatistics();
-    Console.WriteLine($"  NodeCount         = {stats.NodeCount}");
-    Console.WriteLine($"  RelationshipCount = {stats.RelationshipCount}");
+    Console.WriteLine($"  VertexCount         = {stats.VertexCount}");
+    Console.WriteLine($"  EdgeCount = {stats.EdgeCount}");
     Console.WriteLine($"  DataFileSize      = {stats.DataFileSize / 1024.0:F1} KB");
     Console.WriteLine($"  WalFileSize       = {stats.WalFileSize  / 1024.0:F1} KB");
 
@@ -358,12 +358,12 @@ static void Demo7_Diagnostics(string dir)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Demo 8: SourceGenerator CRUD  ([Node] / [Property] / [Indexed])
+// Demo 8: SourceGenerator CRUD  ([Vertex] / [Property] / [Indexed])
 // ─────────────────────────────────────────────────────────────────────────────
 static void Demo8_SourceGenCrud(string dir)
 {
     H("Demo 8: SourceGenerator CRUD + g.Insert / g.Load / g.Update / g.Delete");
-    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+    using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     db.Schema.CreateIndex("idx_person_name", "Person", "name", IndexKind.StringEquality);
 
     using var tx = db.BeginTransaction();
@@ -372,8 +372,8 @@ static void Demo8_SourceGenCrud(string dir)
     // g.InsertIndexed<T> — SourceGen 経由で IndexInsert も呼ぶ
     var aliceId = g.InsertIndexed(new Person { Name = "Alice", Age = 30 });
     var bobId   = g.InsertIndexed(new Person { Name = "Bob",   Age = 25 });
-    tx.CreateRelationship(aliceId, bobId, "KNOWS");
-    Console.WriteLine($"  Inserted Alice (nodeId={aliceId.Value}) and Bob (nodeId={bobId.Value})");
+    tx.CreateEdge(aliceId, bobId, "KNOWS");
+    Console.WriteLine($"  Inserted Alice (vertexId={aliceId.Value}) and Bob (vertexId={bobId.Value})");
 
     // g.Load<T>
     var alice = g.Load<Person>(aliceId);
@@ -390,7 +390,7 @@ static void Demo8_SourceGenCrud(string dir)
 
     // g.Delete<T>
     g.Delete<Person>(bobId);
-    Console.WriteLine($"  Bob deleted: NodeExists={tx.NodeExists(bobId)}");
+    Console.WriteLine($"  Bob deleted: VertexExists={tx.VertexExists(bobId)}");
 
     tx.Commit();
 }
@@ -401,45 +401,45 @@ static void Demo8_SourceGenCrud(string dir)
 static void Demo9_GremlinAndMatch(string dir)
 {
     H("Demo 9: Gremlin ライク API + Match DSL");
-    using var db = GraphDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
+    using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     using var tx = db.BeginTransaction();
 
     var g = tx.G(db.Schema);
 
     // ── 書き込み: 命名統一後の API ──────────────────────────────────────
-    var alice = g.AddNode("Person").P("Name", "Alice").P("Age", 30).Next();
-    var bob   = g.AddNode("Person").P("Name", "Bob").P("Age", 25).Next();
-    var carol = g.AddNode("Person").P("Name", "Carol").P("Age", 35).Next();
-    g.AddRelationship("KNOWS").From(alice).To(bob).Next();
-    g.AddRelationship("KNOWS").From(alice).To(carol).Next();
-    g.AddRelationship("FOLLOWS").From(bob).To(carol).Next();
-    Console.WriteLine($"  Created nodes: alice={alice.Value}, bob={bob.Value}, carol={carol.Value}");
+    var alice = g.AddVertex("Person").P("Name", "Alice").P("Age", 30).Next();
+    var bob   = g.AddVertex("Person").P("Name", "Bob").P("Age", 25).Next();
+    var carol = g.AddVertex("Person").P("Name", "Carol").P("Age", 35).Next();
+    g.AddEdge("KNOWS").From(alice).To(bob).Next();
+    g.AddEdge("KNOWS").From(alice).To(carol).Next();
+    g.AddEdge("FOLLOWS").From(bob).To(carol).Next();
+    Console.WriteLine($"  Created vertices: alice={alice.Value}, bob={bob.Value}, carol={carol.Value}");
 
     // ── 型なしトラバーサル ─────────────────────────────────────────────
-    var names = g.Nodes().HasLabel("Person").Has("Age", P.Gt(25L)).Values("Name").ToList();
+    var names = g.Vertices().HasLabel("Person").Has("Age", P.Gt(25L)).Values("Name").ToList();
     Console.WriteLine($"  Age > 25 の Person: [{string.Join(", ", names)}]");
 
-    var aliceFriends = g.Node(alice).Out("KNOWS").Values("Name").ToList();
+    var aliceFriends = g.Vertex(alice).Out("KNOWS").Values("Name").ToList();
     Console.WriteLine($"  Alice の KNOWS 先: [{string.Join(", ", aliceFriends)}]");
 
-    var knowsCount = g.Nodes().HasLabel("Person").OutRelationships("KNOWS").Count();
+    var knowsCount = g.Vertices().HasLabel("Person").OutEdges("KNOWS").Count();
     Console.WriteLine($"  KNOWS エッジ数: {knowsCount}");
 
-    // ── 型付きトラバーサル g.Nodes<T>() + expression-based Has ──────────────
-    var people = g.Nodes<Person>()
+    // ── 型付きトラバーサル g.Vertices<T>() + expression-based Has ──────────────
+    var people = g.Vertices<Person>()
                   .Has(p => p.Age, P.Gt(25L))
                   .ToList();
     Console.WriteLine($"  V<Person>().Has(p=>p.Age, Gt(25)): [{string.Join(", ", people.Select(p => p.Name))}]");
 
-    var peopleWithIds = g.Nodes<Person>()
+    var peopleWithIds = g.Vertices<Person>()
                          .Has(p => p.Name, "Alice")
                          .ToListWithIds();
     Console.WriteLine($"  V<Person>().Has(p=>p.Name,\"Alice\"): id={peopleWithIds[0].Id.Value}, name={peopleWithIds[0].Entity.Name}");
 
     // ── Match DSL ─────────────────────────────────────────────────────
     var results = g.Match(
-        GraphPattern.Node("n", "Person")
-                    .Out("KNOWS", GraphPattern.Node("m", "Person"))
+        GraphPattern.Vertex("n", "Person")
+                    .Out("KNOWS", GraphPattern.Vertex("m", "Person"))
     )
     .Where("n", "Age", P.Gt(25L))
     .Return(v => new

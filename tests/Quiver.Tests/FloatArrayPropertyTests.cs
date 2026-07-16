@@ -10,12 +10,12 @@ namespace Quiver.Tests;
 public sealed class FloatArrayPropertyTests : IDisposable
 {
     private readonly string _dir;
-    private readonly GraphDatabase _db;
+    private readonly QuiverDatabase _db;
 
     public FloatArrayPropertyTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fa_" + Guid.NewGuid().ToString("N"));
-        _db = GraphDatabase.Open(Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
     }
 
     public void Dispose()
@@ -57,7 +57,7 @@ public sealed class FloatArrayPropertyTests : IDisposable
         float[] small = [1.0f, 2.0f, 3.0f];
 
         using var tx = _db.BeginTransaction();
-        var n = tx.CreateNode("Sensor");
+        var n = tx.CreateVertex("Sensor");
         tx.SetProperty(n, "wave", PropertyValue.FromFloatArray(small));
         tx.Commit();
 
@@ -74,7 +74,7 @@ public sealed class FloatArrayPropertyTests : IDisposable
         for (int i = 0; i < large.Length; i++) large[i] = i * 0.1f;
 
         using var tx = _db.BeginTransaction();
-        var n = tx.CreateNode("Sensor");
+        var n = tx.CreateVertex("Sensor");
         tx.SetProperty(n, "embedding", PropertyValue.FromFloatArray(large));
         tx.Commit();
 
@@ -92,21 +92,21 @@ public sealed class FloatArrayPropertyTests : IDisposable
 
         using (var tx = _db.BeginTransaction())
         {
-            var n = tx.CreateNode("Item");
+            var n = tx.CreateVertex("Item");
             tx.SetProperty(n, "vec", PropertyValue.FromFloatArray(first));
             tx.Commit();
         }
 
-        NodeId nodeId;
+        VertexId vertexId;
         using (var tx = _db.BeginTransaction())
         {
-            nodeId = tx.G(_db.Schema).Nodes().HasLabel("Item").ToList()[0];
-            tx.SetProperty(nodeId, "vec", PropertyValue.FromFloatArray(second));
+            vertexId = tx.G(_db.Schema).Vertices().HasLabel("Item").ToList()[0];
+            tx.SetProperty(vertexId, "vec", PropertyValue.FromFloatArray(second));
             tx.Commit();
         }
 
         using var read = _db.BeginTransaction();
-        read.GetProperty(nodeId, "vec").FloatArrayValue.ToArray().Should().Equal(second);
+        read.GetProperty(vertexId, "vec").FloatArrayValue.ToArray().Should().Equal(second);
     }
 
     [Fact]

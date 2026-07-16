@@ -3,16 +3,16 @@ using Quiver.Core;
 namespace Quiver;
 
 /// <summary>
-/// ラベル / リレーションシップ型 / プロパティキー / インデックスを管理するスキーマ API。
-/// <see cref="GraphDatabase.Schema"/> から取得する。
+/// ラベル / Edge型 / プロパティキー / インデックスを管理するスキーマ API。
+/// <see cref="QuiverDatabase.Schema"/> から取得する。
 /// </summary>
 public interface ISchemaApi
 {
     /// <summary>ラベル名を ID に解決する (未登録の場合は新規発行)。</summary>
     LabelId GetOrCreateLabel(string name);
 
-    /// <summary>リレーションシップ型名を ID に解決する (未登録の場合は新規発行)。</summary>
-    RelationshipTypeId GetOrCreateRelationshipType(string name);
+    /// <summary>Edge型名を ID に解決する (未登録の場合は新規発行)。</summary>
+    EdgeTypeId GetOrCreateEdgeType(string name);
 
     /// <summary>プロパティキー名を ID に解決する (未登録の場合は <see cref="PropertyCardinality.Single"/> で新規発行)。</summary>
     PropertyKeyId GetOrCreatePropertyKey(string name);
@@ -41,8 +41,8 @@ public interface ISchemaApi
     /// <summary>自動作成せず、プロパティキー名から ID を引く。</summary>
     bool TryGetPropertyKeyId(string name, out PropertyKeyId id);
 
-    /// <summary>自動作成せず、リレーションシップ型名から ID を引く。</summary>
-    bool TryGetRelationshipTypeId(string name, out RelationshipTypeId id);
+    /// <summary>自動作成せず、Edge型名から ID を引く。</summary>
+    bool TryGetEdgeTypeId(string name, out EdgeTypeId id);
 
     /// <summary>指定名の索引が存在するか。AddIndex が新規作成になるかの判定用。</summary>
     bool IndexExists(string indexName);
@@ -69,7 +69,7 @@ public interface ISchemaApi
 
     /// <summary>
     /// ラベル名を <paramref name="oldName"/> から <paramref name="newName"/> へ変更する。
-    /// ラベル ID は維持されるため、既存ノードのラベル所属関係は変更されない (テキスト表記のみ更新)。
+    /// ラベル ID は維持されるため、既存Vertexのラベル所属関係は変更されない (テキスト表記のみ更新)。
     /// 旧名が無く新名が既にある場合は冪等な no-op として <c>true</c>。旧名も新名も無い場合は <c>false</c>。
     /// 新名が他のラベル ID に占有されているときは <see cref="InvalidOperationException"/>。
     /// </summary>
@@ -78,8 +78,8 @@ public interface ISchemaApi
     /// <summary>プロパティキー名を rename する。意味論は <see cref="RenameLabel"/> と同じ。</summary>
     bool RenamePropertyKey(string oldName, string newName);
 
-    /// <summary>リレーションシップ型名を rename する。意味論は <see cref="RenameLabel"/> と同じ。</summary>
-    bool RenameRelationshipType(string oldName, string newName);
+    /// <summary>Edge型名を rename する。意味論は <see cref="RenameLabel"/> と同じ。</summary>
+    bool RenameEdgeType(string oldName, string newName);
 
     /// <summary>
     /// インデックス名を rename する。索引は <c>graph.quiver</c> 内テナントとして
@@ -91,25 +91,25 @@ public interface ISchemaApi
     /// <summary>登録済みラベル名の一覧を返す。</summary>
     IReadOnlyList<string> ListLabels();
 
-    /// <summary>登録済みリレーションシップ型名の一覧を返す。</summary>
-    IReadOnlyList<string> ListRelationshipTypes();
+    /// <summary>登録済みEdge型名の一覧を返す。</summary>
+    IReadOnlyList<string> ListEdgeTypes();
 
     /// <summary>登録済みプロパティキー名の一覧を返す。</summary>
     IReadOnlyList<string> ListPropertyKeys();
 
-    // ── ハイパーエッジ型 / ロール ──────────────────────────────
+    // ── Nexus型 / ロール ──────────────────────────────
 
-    /// <summary>ハイパーエッジ型名を ID に解決する (未登録の場合は新規発行)。</summary>
-    HyperedgeTypeId GetOrCreateHyperedgeType(string name);
+    /// <summary>Nexus型名を ID に解決する (未登録の場合は新規発行)。</summary>
+    NexusTypeId GetOrCreateNexusType(string name);
 
-    /// <summary>ハイパーエッジ型 ID から名前へ逆引きする。未登録 ID では <c>null</c>。</summary>
-    string? GetHyperedgeTypeName(HyperedgeTypeId id);
+    /// <summary>Nexus型 ID から名前へ逆引きする。未登録 ID では <c>null</c>。</summary>
+    string? GetNexusTypeName(NexusTypeId id);
 
-    /// <summary>自動作成せず、ハイパーエッジ型名から ID を引く。未登録なら <c>false</c>。</summary>
-    bool TryGetHyperedgeTypeId(string name, out HyperedgeTypeId id);
+    /// <summary>自動作成せず、Nexus型名から ID を引く。未登録なら <c>false</c>。</summary>
+    bool TryGetNexusTypeId(string name, out NexusTypeId id);
 
-    /// <summary>登録済みハイパーエッジ型名の一覧を返す。</summary>
-    IReadOnlyList<string> ListHyperedgeTypes();
+    /// <summary>登録済みNexus型名の一覧を返す。</summary>
+    IReadOnlyList<string> ListNexusTypes();
 
     /// <summary>登録済みロール名の一覧を返す。</summary>
     IReadOnlyList<string> ListRoles();

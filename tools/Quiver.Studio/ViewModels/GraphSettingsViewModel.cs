@@ -22,7 +22,7 @@ public sealed partial class GraphSettingsViewModel : ObservableObject
     [ObservableProperty] private double _absoluteMax = 1.0;
 
     // --- 形状 ---
-    [ObservableProperty] private int _nodeShapeIndex;
+    [ObservableProperty] private int _vertexShapeIndex;
     [ObservableProperty] private int _edgeStyleIndex;
 
     // --- 言語 ---
@@ -35,8 +35,8 @@ public sealed partial class GraphSettingsViewModel : ObservableObject
     public string[] ContourModes { get; } = ["Relative (auto min-max)", "Absolute (fixed range)"];
     public string[] PaletteNames { get; }
     public string[] PaletteDescriptions { get; }
-    public string[] NodeShapes { get; } = ["Circle", "Square", "Rounded Rect"];
-    public string[] RelationshipStyles { get; } = ["Straight", "Bezier", "Polyline"];
+    public string[] VertexShapes { get; } = ["Circle", "Square", "Rounded Rect"];
+    public string[] EdgeStyles { get; } = ["Straight", "Bezier", "Polyline"];
     public string[] Languages { get; } = ["Auto", "English", "日本語"];
 
     public bool IsAbsoluteMode => ContourModeIndex == 1;
@@ -72,7 +72,7 @@ public sealed partial class GraphSettingsViewModel : ObservableObject
         PaletteSteps = c.Steps;
         AbsoluteMin = c.AbsoluteMin;
         AbsoluteMax = c.AbsoluteMax;
-        NodeShapeIndex = (int)gs.NodeShape;
+        VertexShapeIndex = (int)gs.VertexShape;
         EdgeStyleIndex = (int)gs.EdgeStyle;
         CustomColors = c.CustomPaletteColors is not null
             ? string.Join(", ", c.CustomPaletteColors)
@@ -105,7 +105,7 @@ public sealed partial class GraphSettingsViewModel : ObservableObject
     partial void OnCustomColorsChanged(string value) => Apply();
     partial void OnAbsoluteMinChanged(double value) => Apply();
     partial void OnAbsoluteMaxChanged(double value) => Apply();
-    partial void OnNodeShapeIndexChanged(int value) => Apply();
+    partial void OnVertexShapeIndexChanged(int value) => Apply();
     partial void OnEdgeStyleIndexChanged(int value) => Apply();
 
     partial void OnLanguageIndexChanged(int value)
@@ -126,7 +126,7 @@ public sealed partial class GraphSettingsViewModel : ObservableObject
 
         var gs = _settings.Settings.GraphVisual;
         gs.ScoreVisualization = (ScoreVizMode)ScoreVizModeIndex;
-        gs.NodeShape = (NodeShape)NodeShapeIndex;
+        gs.VertexShape = (VertexShape)VertexShapeIndex;
         gs.EdgeStyle = (EdgeStyle)EdgeStyleIndex;
 
         var c = gs.Contour;
