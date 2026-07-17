@@ -125,8 +125,8 @@ internal sealed class Vacuum : IVacuum
             }
 
             // opt-in 列の delta compaction。committed registry の prune より前に
-            // 走らせる (Merge は committed.IsCommitted を見るため、prune で presumed-committed 化される前に
-            // 判定する必要がある — dead version 回収と同じ順序制約)。targets に依らず常に実行する
+            // 走らせる (Merge は committed.IsCommitted を見るため、物理履歴を compact 済みとして
+            // 扱う前に判定する必要がある — dead version 回収と同じ順序制約)。targets に依らず常に実行する
             // (in-memory delta の merge は安価で常に有益)。
             int reclaimedColumnVersions = 0;
             if (!dryRun && _columns != null)
@@ -134,16 +134,16 @@ internal sealed class Vacuum : IVacuum
                 reclaimedColumnVersions = _columns.Compact(horizon, _committed);
             }
 
-            // committed registry を horizon で prune。RecoveryHorizon を horizon-1 まで進めてから
+            // committed registry を horizon で prune。CompactedVisibilityHorizon を horizon-1 まで進めてから
             // 取り除かないと、データファイル上の xmin がまだ参照する committed tx を「未コミット」と
-            // 誤判定してしまう。aborted tx は before-image undo で record ごと消えるため、horizon 未満の
-            // 全 tx を presumed-committed として扱っても correctness は崩れない。
+            // 誤判定してしまう。aborted tx は before-image undo で record ごと消えており、
+            // horizon 未満には compact 済みの committed record だけが残る。
             int prunedTxEntries = 0;
             if (!dryRun)
             {
-                long newRecoveryHorizon = horizon - 1;
-                if (newRecoveryHorizon > _committed.RecoveryHorizon)
-                    _committed.RecoveryHorizon = newRecoveryHorizon;
+                long compactedHorizon = horizon - 1;
+                if (compactedHorizon > _committed.CompactedVisibilityHorizon)
+                    _committed.CompactedVisibilityHorizon = compactedHorizon;
                 prunedTxEntries = _committed.PruneBelow(horizon);
             }
 

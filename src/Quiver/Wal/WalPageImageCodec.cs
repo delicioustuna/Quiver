@@ -46,7 +46,7 @@ internal static class WalPageImageCodec
     private const byte ChunkRun = 0x01;
 
     /// <summary>
-    /// ページバイト列を QUIVER-SW family version 1 の WAL ペイロードへエンコードする。
+    /// ページバイト列を現行 QUIVER-SW family の WAL ペイロードへエンコードする。
     /// 末尾ゼロを trim した上で、連続同一バイトの run (>= <see cref="MinRunBytes"/>) を
     /// chunk として符号化する。VertexStore record の FF×12 / 00×8 等が縮む。
     /// </summary>

@@ -2,7 +2,9 @@ using Quiver.Core;
 
 namespace Quiver.Transactions;
 
-internal sealed class TransactionUsageGuard(TransactionId transactionId)
+internal sealed class TransactionUsageGuard(
+    TransactionId transactionId,
+    Action? onUsageExited = null)
 {
     private int _inUse;
 
@@ -17,6 +19,7 @@ internal sealed class TransactionUsageGuard(TransactionId transactionId)
     {
         if (Interlocked.Exchange(ref _inUse, 0) == 0)
             throw new ConcurrentTransactionUseException(transactionId);
+        onUsageExited?.Invoke();
     }
 }
 

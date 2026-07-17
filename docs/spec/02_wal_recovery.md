@@ -1,19 +1,16 @@
 # WAL とリカバリ
 
-> as-built 仕様（QUIVER-SW family version 1、2026-07-17）
->
-> 本文は Single Writer + Snapshot Readers 再設計 Wave 2 で実装した parser foundation の契約を記す。
-> Wave 5 の統合リカバリは本仕様の対象外である。
+> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
 
 ## フォーマットファミリ {#format-family}
 
 データファイルと WAL は `QUIVER-SW` という同じフォーマットファミリに属する。
-ファミリバージョンは `1` である。
+ファミリバージョンは `2` である。
 旧データベースと旧 WAL は読み替えず、open 時に拒否する。
 データファイルの不一致は `StorageFormatMismatchException`、WAL の不一致は `WalFormatMismatchException` で通知する。
 
 WAL はデータファイルと同じ場所に置く単一の `*.quiver-wal` サイドカーファイルである。
-先頭 16 バイトはファイルヘッダであり、magic `QUIVER-SW`、kind `W`、family version `1` を記録する。
+先頭 16 バイトはファイルヘッダであり、magic `QUIVER-SW`、kind `W`、family version `2` を記録する。
 空の WAL は open 時に現行ヘッダで初期化する。
 
 ## WAL レコード {#wal-records}
@@ -41,10 +38,18 @@ CRC が一致しないレコードは `CorruptionException` とし、途中ま�
 トランザクションは変更したページの before-image をメモリ上の write set に保持する。
 同じページを複数回変更した場合、WAL へ出力する `PageImage` は最終状態へ集約する。
 commit は集約済み `PageImage` と明示的な `Commit` を WAL へ書き、`Commit` の LSN まで fsync した時点で成立する。
+各 `PageImage` の record LSN は、payload 内の page LSN と同じ値である。
 
 fsync 済みの `Commit` は取り消さない。
-その後の checkpoint や post-commit 処理が失敗しても `Abort` を追記せず、呼び出し側へは durable commit として扱う。
+その後の post-commit 処理が失敗しても `Abort` を追記せず、呼び出し側へは durable commit として扱う。
 commit 前の例外、明示 abort、savepoint rollback は、メモリ上の before-image を逆順に適用してプロセス内で復元する。
+
+active writer が変更した、committed 構造から到達可能な dirty page は、commit fsync 前にデータファイルへ書かない。
+退避、close、checkpoint、buffer pressure もこの no-steal 規則を迂回しない。
+commit はデータページの flush を待たないため、no-force である。
+
+バッファプールが active writer の dirty page で埋まり、pin できる退避候補がなくなった場合は `TransactionTooLargeException` を送出する。
+エンジンは before-image を適用してその writer を自動 abort し、writer lease を解放する。
 
 読み取り専用トランザクションは `BeginWrite`、`Abort`、`PageImage` を含む WAL record を一切生成しない。
 したがって、開始、読み取り、commit、dispose の全経路で WAL bytes は 0 のままである。
@@ -57,10 +62,16 @@ winner は checksum が正しい明示的な `Commit` レコードを持つト�
 
 リカバリは WAL を解析して winner 集合と再生開始 LSN を決めた後、winner の `PageImage` を LSN 順に適用する。
 同じページへ複数の committed image がある場合は、後の image が先の状態を置き換える。
+データファイル上の page LSN が `PageImage` の LSN 以上なら、その image は適用済みとして読み飛ばす。
+WAL record LSN と payload 内の page LSN が一致しない image は corruption として拒否する。
 `FileTruncate` は payload の file kind と page count を検証して冪等に再適用する。
 
-Wave 2 の形式は crash undo 用の before-image、論理 mutation、compensation record を持たない。
-未コミット変更をデータファイルへ永続化しないための統合境界は Wave 5 で完成させる。
+crash recovery は loser の undo pass、論理 mutation、compensation record、全文専用 pass を持たない。
+loser の物理変更は no-steal によってデータファイルへ到達しないため、winner redo だけで復旧できる。
+
+open はデータベースと WAL のヘッダ、WAL record、再生する page image を検証し、recovery と完了 checkpoint を終えてから通常 operation を受け付ける。
+WAL で観測した transaction のうち winner でない ID は aborted gap に復元する。
+次の transaction ID は、checkpoint 済み catalog と WAL で観測した最大 ID の後へ進める。
 
 ## チェックポイント {#checkpoint}
 
@@ -69,9 +80,13 @@ Wave 2 の形式は crash undo 用の before-image、論理 mutation、compensat
 先行する Begin と一致する End がある場合だけ、その checkpoint を完了済みとみなす。
 対応しない End、不正な payload 長、途中で切れた checkpoint record は corruption として拒否する。
 
-完了済み checkpoint があれば、その `CheckpointEnd` から後を redo 対象とする。
-checkpoint の途中でクラッシュした場合は、その不完全な checkpoint を採用しない。
-WAL の切り詰めはデータページの flush と checkpoint 完了後にだけ行う。
+checkpoint は writer lease を取得し、active writer がいない sharp boundary で実行する。
+reader の終了は待たない。
+`CheckpointBegin` を fsync した後に committed high-water と次の transaction ID を catalog へ保存し、committed dirty page とデータファイルを flush する。
+対応する `CheckpointEnd` を fsync できた場合だけ checkpoint を完了済みとみなし、その End 以前の WAL を切り詰める。
+
+checkpoint の各段階でクラッシュした場合は、対応する End のない checkpoint を採用しない。
+open-time recovery の redo 後も同じ手順で完了 checkpoint を作るため、再びクラッシュしても page LSN による冪等 redoから再開できる。
 
 ## ページとチェックサム {#pages}
 

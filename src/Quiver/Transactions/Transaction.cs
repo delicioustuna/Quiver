@@ -77,7 +77,6 @@ internal sealed class Transaction : ITransaction
         SnapshotRegistry.SnapshotRegistration? snapshotRegistration)
     {
         Id = id;
-        _usageGuard = new TransactionUsageGuard(id);
         Level = level;
         SnapshotLsn = snapshotLsn;
         Snapshot = snapshot;
@@ -110,6 +109,7 @@ internal sealed class Transaction : ITransaction
         _walWriteSet = isReadOnly ? null : new WalWriteSet(wal, id);
         if (_walWriteSet is not null)
             _wal.ActiveWriteSet = _walWriteSet;
+        _usageGuard = new TransactionUsageGuard(id, OnUsageExited);
     }
 
     public TransactionUsageLease EnterUsage() => _usageGuard.Enter();
@@ -118,6 +118,10 @@ internal sealed class Transaction : ITransaction
     {
         using var usage = EnterUsage();
         EnsureActive("commit");
+        if (_walWriteSet?.IsTooLarge == true)
+            throw new TransactionTooLargeException(
+                Id,
+                _walWriteSet.TooLargeBufferCapacity);
         if (_isReadOnly)
         {
             _state = TransactionState.Committed;
@@ -169,7 +173,6 @@ internal sealed class Transaction : ITransaction
             }
 
             try { RollBackInPlace(); } catch { }
-            try { _wal.EvictCoalescedPageImagesFor(Id); } catch { }
             try { _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty); } catch { }
             _state = TransactionState.Aborted;
             try { _manager.Complete(Id, committed: false, isReadOnly: false); } catch { }
@@ -185,6 +188,11 @@ internal sealed class Transaction : ITransaction
     public void Abort()
     {
         using var usage = EnterUsage();
+        AbortCore();
+    }
+
+    private void AbortCore()
+    {
         if (_state is TransactionState.Committed or TransactionState.Aborted) return;
         var stopwatch = Stopwatch.StartNew();
         using Activity? activity = QuiverTelemetry.TransactionActivitySource.StartActivity(
@@ -195,7 +203,6 @@ internal sealed class Transaction : ITransaction
         if (!_isReadOnly)
         {
             RollBackInPlace();
-            _wal.EvictCoalescedPageImagesFor(Id);
             _wal.Append(WalRecordType.Abort, Id, ReadOnlySpan<byte>.Empty);
         }
 
@@ -209,6 +216,16 @@ internal sealed class Transaction : ITransaction
             QuiverEventSource.Log.TxAborted(Id.Value, stopwatch.Elapsed.TotalMilliseconds);
         }
         FireHooks(_onRolledBack);
+    }
+
+    private void OnUsageExited()
+    {
+        if (_walWriteSet?.IsTooLarge != true || _state != TransactionState.Active)
+            return;
+
+        // 容量超過は page latch と buffer-pool lock が解放された後、この usage 境界で
+        // rollback する。検出箇所から直接 undo すると同じ PagedFile lock へ再入してしまう。
+        AbortCore();
     }
 
     private void RollBackInPlace()

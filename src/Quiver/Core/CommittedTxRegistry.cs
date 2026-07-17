@@ -11,22 +11,22 @@ internal sealed class CommittedTxRegistry
     private readonly ConcurrentDictionary<long, byte> _aborted = new();
     private long _committedHighWater;
     private long _maxObservedTxId;
-    private long _recoveryHorizon;
+    private long _compactedVisibilityHorizon;
 
     internal CommittedTxRegistry()
     {
         _committed[TransactionId.Bootstrap.Value] = 0;
         _committedHighWater = TransactionId.Bootstrap.Value;
         _maxObservedTxId = TransactionId.Bootstrap.Value;
-        _recoveryHorizon = TransactionId.Bootstrap.Value;
+        _compactedVisibilityHorizon = TransactionId.Bootstrap.Value;
     }
 
-    internal long RecoveryHorizon
+    internal long CompactedVisibilityHorizon
     {
-        get => Volatile.Read(ref _recoveryHorizon);
+        get => Volatile.Read(ref _compactedVisibilityHorizon);
         set
         {
-            Volatile.Write(ref _recoveryHorizon, value);
+            Volatile.Write(ref _compactedVisibilityHorizon, value);
             AdvanceHighWater(value);
         }
     }
@@ -73,8 +73,18 @@ internal sealed class CommittedTxRegistry
 
     internal bool IsCommitted(long txId)
     {
-        if (txId <= Volatile.Read(ref _recoveryHorizon)) return true;
+        // checkpoint/vacuum がこの horizon を進める前に、中止 tx の物理効果を
+        // rollback/reclaim 済みにする。gap を捨てた後も残存 version が中止 tx を参照しない。
+        if (txId <= Volatile.Read(ref _compactedVisibilityHorizon)) return true;
         return _committed.ContainsKey(txId);
+    }
+
+    internal void RestoreCheckpointedHighWater(long highWater)
+    {
+        if (highWater <= TransactionId.Bootstrap.Value)
+            return;
+        CompactedVisibilityHorizon = highWater;
+        RecordMaxObservedTxId(highWater);
     }
 
     internal int Count => _committed.Count;

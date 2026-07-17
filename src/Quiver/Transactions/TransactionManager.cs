@@ -306,16 +306,17 @@ internal sealed class TransactionManager : ITransactionManager
         if (checkpointer is null) return;
         long threshold = CurrentCheckpointThresholdBytes;
         if (threshold <= 0) return;
-        if (_writerLease.ActiveWriterId is not null) return;
         if (_wal.BytesWritten - Volatile.Read(ref _lastCheckpointBytes) < threshold) return;
 
         if (!Monitor.TryEnter(_checkpointGate)) return;
         try
         {
-            if (_writerLease.ActiveWriterId is not null) return;
             threshold = CurrentCheckpointThresholdBytes;
             if (threshold <= 0) return;
             if (_wal.BytesWritten - _lastCheckpointBytes < threshold) return;
+            // threshold/manual/close のどの入口でも同じ writer lease を取得する。
+            // reader は lease を使わないため checkpoint の前後で待たされない。
+            using IDisposable checkpointLease = AcquireMutationLease();
             checkpointer.Checkpoint();
             Volatile.Write(ref _lastCheckpointBytes, _wal.BytesWritten);
         }
@@ -337,12 +338,12 @@ internal sealed class TransactionManager : ITransactionManager
     internal void RequestCheckpoint(bool writerLeaseHeld = false)
     {
         Checkpointer? checkpointer = _checkpointer;
-        if (checkpointer is null
-            || (!writerLeaseHeld && _writerLease.ActiveWriterId is not null)) return;
-        if (!Monitor.TryEnter(_checkpointGate)) return;
+        if (checkpointer is null) return;
+        Monitor.Enter(_checkpointGate);
         try
         {
-            if (!writerLeaseHeld && _writerLease.ActiveWriterId is not null) return;
+            using IDisposable? checkpointLease =
+                writerLeaseHeld ? null : AcquireMutationLease();
             checkpointer.Checkpoint();
             Volatile.Write(ref _lastCheckpointBytes, _wal.BytesWritten);
         }

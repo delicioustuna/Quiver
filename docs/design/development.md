@@ -58,7 +58,7 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 | 文字列エンコーディング | UTF-8（長さプレフィックス付き） |
 | 静止時のファイル | `*.quiver` 単一ファイル |
 | 運用中のファイル | `*.quiver` + `*.quiver-wal` |
-| format family | `QUIVER-SW` family version 1（旧 family からの自動移行なし） |
+| format family | `QUIVER-SW` family version 2（旧 family からの自動移行なし） |
 | primary property | `PropertyAddress` と 84B record の `PropertyVersionStore`。xmin、xmax、Generation は record 内に置き、public property ID と entity inline property は持たない |
 | entity version sidecar | `EntityVersionMeta(xmin,xmax,generation)` の 24B record。page あたり 339 件、sidecar format version 4、旧 40B fallback なし |
 | primary vector payload | 固定 tenant の `VectorPayloadStore`。generation、dimensions、element type、byte length、CRC32C を検証 |
@@ -69,11 +69,14 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 facade と backend の既存開始 API は、内部の `BeginRead` と `BeginWrite` へ集約する adapter である。
 read transaction は WAL を生成せず、writer と並行して開始時 snapshot を読む。
 bulk、schema、maintenance の mutation 入口も同じ writer lease を取得する。
+active writer の dirty page は commit fsync 前に data file へ書かない。
+checkpoint は同じ writer lease で sharp boundary を作り、reader を待たずに committed dirty page と transaction catalog を flush する。
 
 `QuiverDatabaseOptions.InitialFileAllocationBytes` と `MaximumFileGrowthStepBytes` で初期確保量と成長上限を変更できる。
 いずれの値も 8 KiB 境界へ整列する。
 WAL は `QUIVER-SW` file header、明示的な `Commit` レコード、ページイメージを使用する。
 別 family、未知のレコード種別、切り詰め、checksum 不一致は open または解析時に拒否する。
+recovery は有効な `Commit` を持つ winner の page image だけを page LSN 順に redoし、loser undo pass を持たない。
 旧 DB と旧 WAL の読み替えは実装せず、ソースデータから再構築する。
 
 ### 開発中の format family version 運用（公開バージョンと分離する）
@@ -317,7 +320,7 @@ nexus の回帰は `tests/Quiver.Stores.Tests/IncidenceStoreTests.cs`、
 - **WAL page-image の Encode（trim+RLE）は commit 時にページ毎 1 回だけ行う（書込ごとには行わない）。**
   トランザクション内で同一ページを繰り返し書いても WAL に出るのは最終状態 1 件（latest-wins coalesce）
   なので、中間状態の Encode は無駄。これを `FlushPending`（commit）へ遅延し、ホットページ反復書込
-  （version sidecar / record heap）の増幅を解消。recovery 形式は不変で、単一 tx 償却の書込が ~4×
+  （version sidecar / record heap）の増幅を解消。単一 tx 償却の書込が ~4×
   高速化した（Vertex作成 ~14 → ~3.5–4 µs/op）。
 - **クエリ DSL の 1-hop（degree 100）は ~4.2 µs/query（~42 ns/edge、生隣接の ~12×）。**
   プラン構築 + 物理オペレータ生成は ~0.4 µs と僅少。結果行ごとの VertexId 世代スタンプは、スロット

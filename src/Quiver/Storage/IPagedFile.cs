@@ -55,6 +55,12 @@ internal interface IPagedFile : IDisposable
     void WritePageForRecovery(PageId pageId, ReadOnlySpan<byte> pageBytes);
 
     /// <summary>
+    /// recovery が古い after-image で新しいページを上書きしないため、
+    /// 現在のページ LSN を返す。未割り当てまたは検証不能なページは -1。
+    /// </summary>
+    long ReadPageLsnForRecovery(PageId pageId) => -1;
+
+    /// <summary>
     /// ページファイルを <paramref name="newPageCount"/> へ物理 truncate する。
     /// バッファプール上で newPageCount 以上のページキャッシュを drop し、MMF を unmap、
     /// <c>SetLength</c> 後に remap、メタページの PageCount を新しい値で書き戻す。

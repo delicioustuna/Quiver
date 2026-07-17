@@ -214,15 +214,16 @@ public sealed class FullTextCrashContractTests : IDisposable
     // ===== コミットレコードだけが失われた不完全コミット =====
 
     /// <summary>
-    /// Vertex body と全文 B+Tree の PageImage を WAL へ書いた後、末尾の Commit record を切り詰める。
-    /// recovery は両者を同じ loser transaction として扱い、Vertex 可視性と検索結果を一致させる。
+    /// Vertex body と全文 B+Tree の PageImage に続く Commit record を途中で切り詰める。
+    /// checksum を検証できない Commit を無視して開くと primary と posting の可視性が分かれうるため、
+    /// open は通常 operation を受け付ける前に corruption として拒否する。
     /// </summary>
     [Fact]
-    public void TornCommit_fulltext_recovery_keeps_postings_consistent_with_vertex()
+    public void TornCommit_record_is_rejected_before_fulltext_open()
     {
         var db = OpenAndCreateIndex();
-        VertexId baseDoc = Ingest(db, "durable base baseword0001");
-        VertexId torn = Ingest(db, "tornword7777 committed content");
+        _ = Ingest(db, "durable base baseword0001");
+        _ = Ingest(db, "tornword7777 committed content");
         // committed データを disk へ flush し torn-commit の前提を作る。
         ((BinaryGraphStorageBackend)db.BackendInternal).FlushDataPagesForTest();
         // 未コミットの writer を 1 つ開いたまま kill すると WAL がクリーン削除されず torn 注入できる。
@@ -230,20 +231,12 @@ public sealed class FullTextCrashContractTests : IDisposable
         keepWalAlive.CreateVertex("Doc");
         Kill(db);
 
-        // 末尾 (= torn doc) の Commit レコードを 1 件削る (これより後ろの未コミット tx 記録も落ちるが無害)。
-        // 残るのは torn doc の PageImage であり、明示 Commit は存在しない。
+        // 末尾 (= torn doc) の Commit レコードを途中で切る。
+        // checksum を検証できない WAL tail は有効な prefix として受理しない。
         TruncateTrailingCommitRecord(_path + "-wal");
 
-        using var reopened = Open();
-        // Vertex body と postings は同じ winner 判定を受ける。
-        bool vertexVisible;
-        using (var rtx = reopened.BeginReadOnlyTransaction())
-            vertexVisible = rtx.VertexExists(torn);
-        bool searchable = Search(reopened, "tornword7777").Contains(torn);
-        searchable.Should().Be(vertexVisible,
-            "torn-commit recovery must keep FT postings consistent with vertex visibility");
-        // committed prefix (base doc) は無傷。
-        Search(reopened, "baseword0001").Should().ContainSingle().Which.Should().Be(baseDoc);
+        ((Action)(() => Open()))
+            .Should().Throw<CorruptionException>();
     }
 
     // ===== abort 後の PageImage は committed key を上書きしない =====
@@ -421,7 +414,7 @@ public sealed class FullTextCrashContractTests : IDisposable
         db.Dispose();
     }
 
-    // WAL 末尾の Commit レコードを 1 件削って torn commit を作る。レコード形式:
+    // WAL 末尾の Commit レコードを途中で切って torn commit を作る。レコード形式:
     // [length:4][lsn:8][txId:8][type:1][crc:4][payload] (WriteAheadLog.EncodeRecord)。
     private static void TruncateTrailingCommitRecord(string walPath)
     {
@@ -438,6 +431,6 @@ public sealed class FullTextCrashContractTests : IDisposable
         }
         if (lastCommit < 0) throw new InvalidOperationException("no Commit record in WAL to truncate");
         using var fs = new FileStream(walPath, FileMode.Open, FileAccess.Write, FileShare.None);
-        fs.SetLength(lastCommit);
+        fs.SetLength(lastCommit + headerSize / 2);
     }
 }

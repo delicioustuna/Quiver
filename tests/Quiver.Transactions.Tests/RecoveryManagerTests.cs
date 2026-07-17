@@ -184,6 +184,64 @@ public class RecoveryManagerTests : IDisposable
         }
     }
 
+    [Fact]
+    public void ApplyPageImage_does_not_replace_a_page_with_a_newer_lsn()
+    {
+        string dataDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(dataDir);
+        string sourcePath = Path.Combine(dataDir, "source.db");
+        string destinationPath = Path.Combine(dataDir, "destination.db");
+        try
+        {
+            PageId pageId;
+            var txId = new TransactionId(77);
+            using (IPagedFile source = new PagedFile(sourcePath))
+            {
+                source.EnableWalLogging(1, _wal);
+                pageId = source.AllocatePage(PageKind.VertexRecord);
+                _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
+                var writeSet = new WalWriteSet(_wal, txId);
+                _wal.ActiveWriteSet = writeSet;
+                using (var page = source.PinForWrite(pageId))
+                    System.Text.Encoding.UTF8.GetBytes("OLDER").CopyTo(page.Data);
+                writeSet.FlushPending();
+                long commitLsn = _wal.Append(
+                    WalRecordType.Commit,
+                    txId,
+                    ReadOnlySpan<byte>.Empty);
+                _wal.FlushTo(commitLsn);
+                _wal.ActiveWriteSet = null;
+            }
+
+            using IPagedFile destination = new PagedFile(destinationPath);
+            PageId destinationPage = destination.AllocatePage(PageKind.VertexRecord);
+            destinationPage.Should().Be(pageId);
+            var destinationWrite = destination.PinForWrite(destinationPage);
+            try
+            {
+                System.Text.Encoding.UTF8.GetBytes("NEWER").CopyTo(destinationWrite.Data);
+                destinationWrite.Lsn = 10_000;
+            }
+            finally
+            {
+                destinationWrite.Dispose();
+            }
+            destination.Flush();
+
+            var registry = new Dictionary<byte, IPagedFile> { { 1, destination } };
+            new RecoveryManager(new NullPageManager(), _wal, registry).Recover();
+
+            using var recovered = destination.PinForRead(destinationPage);
+            System.Text.Encoding.UTF8.GetString(recovered.Data[..5])
+                .Should().Be("NEWER");
+            PageHeader.ReadLsn(recovered.Raw).Should().Be(10_000);
+        }
+        finally
+        {
+            Directory.Delete(dataDir, recursive: true);
+        }
+    }
+
     private sealed class NullPageManager : IPageManager
     {
         public IPagedFile OpenOrCreate(string path, PageKind defaultKind) => throw new NotSupportedException();

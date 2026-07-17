@@ -278,7 +278,7 @@ public sealed class IndexGenerationTests : IDisposable
     [Fact]
     public void Storage_format_family_has_a_single_current_version()
     {
-        StorageFormatVersion.Current.Should().Be(1);
+        StorageFormatVersion.Current.Should().Be(2);
     }
 
     // 旧 family version を持つ store は open 時に reject する。

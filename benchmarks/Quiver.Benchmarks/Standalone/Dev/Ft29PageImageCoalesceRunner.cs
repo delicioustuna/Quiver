@@ -5,11 +5,10 @@ namespace Quiver.Benchmarks.Standalone.Dev;
 /// <summary>
 /// Per-tx PageImage coalescing の効果を測る standalone runner。
 ///
-/// 基準は  の per-tx 1k 65,964 B/entry (sequential)。 は WAL レベルで
-/// PageImage を「commit 直前まで遅延 + (fileKind, pageId) latest-wins 集約」する
-/// 設計のため、効果が出るのは「複数 tx の FlushPending と Append(Commit) が時間的に
-/// 重なる」並列 workload。本ランナーは bulk / per-tx (sequential 互換) / per-tx-parallel
-/// を 1k / 10k entry で測り、parallel 経路の bytes/entry を sequential 経路と対比する。
+/// transaction-owned write set が PageImage を commit 直前まで遅延し、
+/// (fileKind, pageId) ごとに latest-wins 集約する効果を測る。
+/// 本ランナーは bulk / per-tx / per-tx-parallel を 1k / 10k entry で測り、
+/// transaction shape ごとの bytes/entry を比較する。
 ///
 /// 起動方法: <c>dotnet run --project benchmarks/Quiver.Benchmarks -c Release -- --ft29-coalesce</c>
 /// </summary>

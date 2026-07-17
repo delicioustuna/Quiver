@@ -12,7 +12,7 @@ namespace Quiver.Benchmarks;
 /// throughput 影響の実測。
 ///
 /// 計測軸:
-/// - 1 tx に大量 insert を詰める **bulk** パス (commit-coalesce の best case)
+/// - 1 tx に大量 insert を詰める **bulk** パス (transaction-owned latest-wins の best case)
 /// - 各 insert を独立 tx で行う **per-tx** パス (fsync per commit の worst case)
 /// - 同一ホットページを上書きする **hot-page** パス (per-tx PageImage 重複の上限)
 ///
@@ -52,7 +52,7 @@ public class IndexWalAmplificationBenchmarks
 
     /// <summary>
     /// bulk: 1 トランザクションに全 insert を詰めて 1 回だけ commit。
-    /// commit-coalesce で同一ページの複数変更が 1 PageImage に集約される best case。
+    /// transaction-owned write set で同一ページの複数変更が 1 PageImage に集約される best case。
     /// </summary>
     [Benchmark(Description = "bulk (single tx)")]
     public long BulkSingleTx()

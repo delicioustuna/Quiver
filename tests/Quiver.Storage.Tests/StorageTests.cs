@@ -1,6 +1,7 @@
 using Xunit;
 using Quiver.Storage;
 using Quiver.Core;
+using Quiver.Storage.Wal;
 using FluentAssertions;
 
 namespace Quiver.Storage.Tests;
@@ -169,6 +170,82 @@ public class StorageTests : IDisposable
             rh.Data[0].Should().Be(0x42);
             rh.Data[100].Should().Be(0xFF);
         }
+    }
+
+    [Fact]
+    public void Uncommitted_dirty_frames_are_not_evicted_or_flushed_on_dispose()
+    {
+        string dataPath = TmpFile();
+        string walPath = TmpFile("test.wal");
+        var file = new PagedFile(dataPath, poolCapacity: 2);
+        using var wal = new WriteAheadLog(walPath);
+
+        PageId first = file.AllocatePage(PageKind.VertexRecord);
+        PageId second = file.AllocatePage(PageKind.VertexRecord);
+        PageId third = file.AllocatePage(PageKind.VertexRecord);
+        using (var page = file.PinForWrite(first))
+            page.Data[0] = 0x11;
+        using (var page = file.PinForWrite(second))
+            page.Data[0] = 0x22;
+        file.Flush();
+
+        file.EnableWalLogging(fileKind: 1, wal);
+        var txId = new TransactionId(7);
+        wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
+        var writeSet = new WalWriteSet(wal, txId);
+        wal.ActiveWriteSet = writeSet;
+        using (var page = file.PinForWrite(first))
+            page.Data[0] = 0xAA;
+        using (var page = file.PinForWrite(second))
+            page.Data[0] = 0xBB;
+
+        bool threw = false;
+        try
+        {
+            using var page = file.PinForRead(third);
+        }
+        catch (TransactionTooLargeException exception)
+        {
+            exception.TransactionId.Should().Be(txId);
+            exception.BufferPoolPageCapacity.Should().Be(2);
+            threw = true;
+        }
+        threw.Should().BeTrue();
+
+        // process kill 相当では ActiveWriteSet を残したまま file handle を閉じる。
+        // no-steal なら Dispose も未コミット dirty frame を data fileへ書かない。
+        file.Dispose();
+        wal.ActiveWriteSet = null;
+
+        using var reopened = new PagedFile(dataPath, poolCapacity: 2);
+        using (var page = reopened.PinForRead(first))
+            page.Data[0].Should().Be(0x11);
+        using (var page = reopened.PinForRead(second))
+            page.Data[0].Should().Be(0x22);
+    }
+
+    [Fact]
+    public void Uncommitted_allocation_does_not_advance_persisted_page_count()
+    {
+        string dataPath = TmpFile();
+        using var wal = new WriteAheadLog(TmpFile("test.wal"));
+        var file = new PagedFile(dataPath, poolCapacity: 4);
+        file.EnableWalLogging(fileKind: 1, wal);
+
+        var txId = new TransactionId(7);
+        var writeSet = new WalWriteSet(wal, txId);
+        wal.ActiveWriteSet = writeSet;
+
+        file.AllocatePage(PageKind.VertexRecord).Should().Be(new PageId(1));
+        file.PageCount.Should().Be(2);
+
+        // process kill 相当では allocation meta の dirty frame を残したまま閉じる。
+        // 物理領域は確保済みでも、到達可能な page count は commit 前の値で再開する。
+        file.Dispose();
+        wal.ActiveWriteSet = null;
+
+        using var reopened = new PagedFile(dataPath, poolCapacity: 4);
+        reopened.PageCount.Should().Be(1);
     }
 
     // ------------------------------------------------------------------

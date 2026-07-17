@@ -94,7 +94,7 @@ PagedFile.InitMetaPage と同じバイナリレイアウト。
 
 `PinForWrite` で `WalPageContext.CaptureBeforeImage` を呼ぶことで、
 `AbortUndoHandler` がトランザクション中断時に before-image を `WritePageForRecovery` で
-復元するフローが透過的に動く。NullWriteAheadLog の `BufferPageImage` は no-op だが、
+復元するフローが透過的に動く。NullWriteAheadLog の `AppendPageImage` は LSN の採番だけを行うが、
 WalPageContext のスレッドローカルな before-image バッファは依然として機能し、
 abort 時の in-process undo が正しく動作する。
 
@@ -121,8 +121,7 @@ internal sealed class NullWriteAheadLog : IWriteAheadLog
 | `BytesWritten` | `_bytesWritten` |
 | `Append` | `_bytesWritten += payload.Length`, `Interlocked.Increment(_currentLsn)` を返す |
 | `FlushTo` / `FlushToAsync` | no-op |
-| `BufferPageImage` | no-op |
-| `EvictCoalescedPageImagesFor` | no-op |
+| `AppendPageImage` | LSN 採番のみ |
 | `WriteCheckpoint*` | 現在の LSN を返す |
 | `WriteFileTruncate` | 現在の LSN を返す |
 | `Truncate` | no-op |

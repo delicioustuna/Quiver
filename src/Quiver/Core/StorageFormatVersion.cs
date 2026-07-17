@@ -3,8 +3,8 @@ namespace Quiver.Core;
 /// <summary><c>QUIVER-SW</c> database family のフォーマットバージョン。</summary>
 internal static class StorageFormatVersion
 {
-    /// <summary><c>QUIVER-SW</c> family の最初の形式。</summary>
-    public const byte Current = 1;
+    /// <summary>checkpoint catalog と page-LSN WAL を持つ形式。</summary>
+    public const byte Current = 2;
 }
 
 /// <summary>

@@ -1,6 +1,6 @@
 # クエリエンジン
 
-> as-built 仕様（QUIVER-SW family version 1、2026-07-15）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
 
 ## アーキテクチャ {#architecture}
 

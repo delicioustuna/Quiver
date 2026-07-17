@@ -9,9 +9,11 @@ namespace Quiver.Transactions;
 
 internal sealed class RecoveryManager : IRecoveryManager
 {
+    private readonly IPageManager _pageManager;
     private readonly IWriteAheadLog _wal;
     private readonly Dictionary<byte, IPagedFile> _fileRegistry;
     private readonly CommittedTxRegistry? _committedRegistry;
+    private readonly Action<long, long>? _persistRecoveryState;
 
     public RecoveryManager(IPageManager pageManager, IWriteAheadLog wal)
         : this(pageManager, wal, [])
@@ -23,13 +25,15 @@ internal sealed class RecoveryManager : IRecoveryManager
         IWriteAheadLog wal,
         Dictionary<byte, IPagedFile> fileRegistry,
         IIndexManager? indexManager = null,
-        CommittedTxRegistry? committedRegistry = null)
+        CommittedTxRegistry? committedRegistry = null,
+        Action<long, long>? persistRecoveryState = null)
     {
-        _ = pageManager;
+        _pageManager = pageManager;
         _ = indexManager;
         _wal = wal;
         _fileRegistry = fileRegistry;
         _committedRegistry = committedRegistry;
+        _persistRecoveryState = persistRecoveryState;
     }
 
     public long Recover()
@@ -42,26 +46,45 @@ internal sealed class RecoveryManager : IRecoveryManager
             foreach (long txId in scan.Winners)
                 _committedRegistry.MarkCommitted(new TransactionId(txId));
 
-            _committedRegistry.RecordMaxObservedTxId(scan.MaxObservedTxId);
-            if (scan.MinObservedTxId is { } minTxId
-                && minTxId > TransactionId.Bootstrap.Value)
+            foreach (long txId in scan.ObservedTransactions)
             {
-                _committedRegistry.RecoveryHorizon = minTxId - 1;
+                if (!scan.Winners.Contains(txId))
+                    _committedRegistry.MarkAborted(new TransactionId(txId));
+            }
+            _committedRegistry.RecordMaxObservedTxId(scan.MaxObservedTxId);
+        }
+
+        {
+            using var reader = _wal.OpenReader(scan.RedoStartLsn);
+            while (reader.TryReadNext(out WalRecord record))
+            {
+                if (record.Type == WalRecordType.PageImage
+                    && scan.Winners.Contains(record.TransactionId.Value))
+                {
+                    ApplyPageImage(record);
+                }
+                else if (record.Type == WalRecordType.FileTruncate)
+                {
+                    ApplyFileTruncate(record);
+                }
             }
         }
 
-        using var reader = _wal.OpenReader(scan.RedoStartLsn);
-        while (reader.TryReadNext(out WalRecord record))
+        if (_persistRecoveryState is not null)
         {
-            if (record.Type == WalRecordType.PageImage
-                && scan.Winners.Contains(record.TransactionId.Value))
-            {
-                ApplyPageImage(record);
-            }
-            else if (record.Type == WalRecordType.FileTruncate)
-            {
-                ApplyFileTruncate(record);
-            }
+            long committedHighWater = _committedRegistry?.CommittedHighWater
+                ?? TransactionId.Bootstrap.Value;
+            long nextTransactionId = Math.Max(
+                TransactionId.Bootstrap.Value + 1,
+                scan.MaxObservedTxId + 1);
+
+            // recovery が適用した page を通常 operation の前に sharp checkpoint する。
+            // End が durable になるまでは元の WAL tail を残すため、途中停止しても再試行できる。
+            long beginLsn = _wal.WriteCheckpointBegin(scan.RedoStartLsn, dirtyPageCount: 0);
+            _persistRecoveryState(committedHighWater, nextTransactionId);
+            _pageManager.FlushAll();
+            _wal.WriteCheckpointEnd(beginLsn);
+            _wal.Truncate(beginLsn - 1);
         }
 
         return scan.LastLsn;
@@ -80,6 +103,14 @@ internal sealed class RecoveryManager : IRecoveryManager
 
         if (!_fileRegistry.TryGetValue(fileKind, out IPagedFile? file))
             throw new CorruptionException($"Unknown WAL file kind {fileKind} at LSN {record.Lsn}.");
+
+        PageHeader.Validate(pageBytes, new PageId(pageId));
+        long imageLsn = PageHeader.ReadLsn(pageBytes);
+        if (imageLsn != record.Lsn)
+            throw new CorruptionException(
+                $"PageImage header LSN {imageLsn} does not match record LSN {record.Lsn}.");
+        if (file.ReadPageLsnForRecovery(new PageId(pageId)) >= imageLsn)
+            return;
 
         file.WritePageForRecovery(new PageId(pageId), pageBytes);
     }
@@ -106,6 +137,7 @@ internal static class WalRecoveryScanner
     internal static WalRecoveryScanResult Scan(IWriteAheadLog wal)
     {
         var winners = new HashSet<long>();
+        var observedTransactions = new HashSet<long>();
         var checkpointBegins = new HashSet<long>();
         long redoStartLsn = 0;
         long lastLsn = -1;
@@ -119,6 +151,7 @@ internal static class WalRecoveryScanner
             long txId = record.TransactionId.Value;
             if (txId > 0)
             {
+                observedTransactions.Add(txId);
                 maxObservedTxId = Math.Max(maxObservedTxId, txId);
                 minObservedTxId = minObservedTxId is { } current
                     ? Math.Min(current, txId)
@@ -153,6 +186,7 @@ internal static class WalRecoveryScanner
 
         return new WalRecoveryScanResult(
             winners,
+            observedTransactions,
             redoStartLsn,
             lastLsn,
             maxObservedTxId,
@@ -162,6 +196,7 @@ internal static class WalRecoveryScanner
 
 internal sealed record WalRecoveryScanResult(
     HashSet<long> Winners,
+    HashSet<long> ObservedTransactions,
     long RedoStartLsn,
     long LastLsn,
     long MaxObservedTxId,
