@@ -6,8 +6,8 @@ internal enum WalFileKind : byte
     Edges = 2,
     Properties    = 3,
     BlobData      = 4,
-    /// <summary>VertexStore に対応する MVCC+SSN メタデータ sidecar。</summary>
+    /// <summary>VertexStore に対応する MVCC+Generation メタデータ sidecar。</summary>
     VertexVersionMeta = 5,
-    /// <summary>EdgeStore に対応する MVCC+SSN メタデータ sidecar。</summary>
+    /// <summary>EdgeStore に対応する MVCC+Generation メタデータ sidecar。</summary>
     EdgeVersionMeta = 6,
 }

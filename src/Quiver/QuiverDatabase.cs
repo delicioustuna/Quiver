@@ -21,24 +21,17 @@ public sealed class QuiverDatabase : IDisposable
     private readonly string _path;
     // AutoVacuum が有効なときのみ非 null。Dispose で停止する。
     private readonly AutoVacuumWorker? _autoVacuumWorker;
-    private readonly bool _rejectConcurrentWriters;
-    private readonly TimeSpan _writerGateTimeout;
-    private readonly SemaphoreSlim _writerSemaphore = new(1, 1);
     private Core.IVectorStore? _vectors;
 
     private QuiverDatabase(
         IGraphStorageBackend backend,
         string path,
-        AutoVacuumWorker? autoVacuumWorker = null,
-        bool rejectConcurrentWriters = false,
-        TimeSpan? writerGateTimeout = null)
+        AutoVacuumWorker? autoVacuumWorker = null)
     {
         // 内部 SPI へキャスト。
         _backend = (IGraphStorageBackendInternal)backend;
         _path = path;
         _autoVacuumWorker = autoVacuumWorker;
-        _rejectConcurrentWriters = rejectConcurrentWriters;
-        _writerGateTimeout = writerGateTimeout ?? TimeSpan.FromSeconds(5);
     }
 
     /// <summary><see cref="Open"/> に渡したデータベースファイルのパス (<c>*.quiver</c>)。</summary>
@@ -69,9 +62,7 @@ public sealed class QuiverDatabase : IDisposable
         if (options.AutoVacuum && options.AutoVacuumInterval > TimeSpan.Zero)
             worker = new AutoVacuumWorker(() => backend.Vacuum(), options.AutoVacuumInterval);
 
-        return new QuiverDatabase(backend, filePath, worker,
-            options.EnforceExclusiveWriter,
-            options.LockTimeout);
+        return new QuiverDatabase(backend, filePath, worker);
     }
 
     private static IGraphStorageBackendFactory CreateDefaultFactory(BackendKind kind) => kind switch
@@ -133,42 +124,7 @@ public sealed class QuiverDatabase : IDisposable
     /// <param name="level">分離レベル (既定: スナップショット分離)。</param>
     public IGraphTransaction BeginTransaction(
         IsolationLevel level = IsolationLevel.SnapshotIsolation)
-    {
-        AcquireWriterGate();
-        try
-        {
-            var tx = _backend.BeginGraphTransaction(level, readOnly: false);
-            RegisterWriterRelease(tx);
-            return tx;
-        }
-        catch
-        {
-            _writerSemaphore.Release();
-            throw;
-        }
-    }
-
-    private void AcquireWriterGate()
-    {
-        if (_rejectConcurrentWriters)
-        {
-            if (!_writerSemaphore.Wait(0))
-                throw new TransactionException(
-                    "Another write transaction is already active.");
-            return;
-        }
-
-        if (!_writerSemaphore.Wait(_writerGateTimeout))
-            throw new TransactionException(
-                $"Timed out waiting for the active write transaction to finish after {_writerGateTimeout}.");
-    }
-
-    private void RegisterWriterRelease(IGraphTransaction tx)
-    {
-        Action release = () => _writerSemaphore.Release();
-        tx.OnCommitted(release);
-        tx.OnRolledBack(release);
-    }
+        => _backend.BeginWriteGraphTransaction(level);
 
     /// <summary>
     /// 読み取り専用としてマークしたスナップショット分離トランザクションを開く。
@@ -176,7 +132,7 @@ public sealed class QuiverDatabase : IDisposable
     /// 並列トラバーサル系オペレータと安全に組み合わせられる。
     /// </summary>
     public IGraphTransaction BeginReadOnlyTransaction()
-        => _backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: true);
+        => _backend.BeginReadGraphTransaction();
 
     /// <summary>ラベル・プロパティキー・Edge型・インデックスのスキーマ API。</summary>
     public ISchemaApi Schema => _backend.Schema;
@@ -214,7 +170,7 @@ public sealed class QuiverDatabase : IDisposable
     /// </summary>
     public GraphStats CollectStats(int powerVertexThreshold)
     {
-        using var tx = _backend.Transactions.Begin(IsolationLevel.SnapshotIsolation);
+        using var tx = _backend.Transactions.BeginRead();
         return GraphStats.Collect(tx, powerVertexThreshold);
     }
 
@@ -224,7 +180,7 @@ public sealed class QuiverDatabase : IDisposable
     /// </summary>
     public GraphStats CollectStats(int powerVertexThreshold, double denseThreshold)
     {
-        using var tx = _backend.Transactions.Begin(IsolationLevel.SnapshotIsolation);
+        using var tx = _backend.Transactions.BeginRead();
         return GraphStats.Collect(tx, powerVertexThreshold, denseThreshold);
     }
 
@@ -249,7 +205,7 @@ public sealed class QuiverDatabase : IDisposable
     /// </remarks>
     public IGraphSnapshotView OpenSnapshotView()
     {
-        using var tx = _backend.Transactions.Begin(IsolationLevel.SnapshotIsolation);
+        using var tx = _backend.Transactions.BeginRead();
         return GraphSnapshotView.Build(tx.Vertices, tx.Edges, tx.AdjacencySegments);
     }
 
@@ -272,7 +228,7 @@ public sealed class QuiverDatabase : IDisposable
     {
         ArgumentNullException.ThrowIfNull(propertyKey);
         var keyId = _backend.Schema.GetOrCreatePropertyKey(propertyKey);
-        using var tx = _backend.Transactions.Begin(IsolationLevel.SnapshotIsolation);
+        using var tx = _backend.Transactions.BeginRead();
         return Storage.Records.DirectArrayEdgePropertyJoinIndex.Build(
             tx.Edges, tx.Properties, keyId, expectedType);
     }
@@ -291,16 +247,14 @@ public sealed class QuiverDatabase : IDisposable
     public bool CreateColumn(Core.EntityKind kind, string propertyKey)
     {
         ArgumentNullException.ThrowIfNull(propertyKey);
-        var keyId = _backend.Schema.GetOrCreatePropertyKey(propertyKey);
-        return RequireBinaryForColumns().CreateColumn(kind, keyId.Value);
+        return RequireBinaryForColumns().CreateColumn(kind, propertyKey);
     }
 
     /// <summary>列化登録を解除する。未登録なら false。</summary>
     public bool DropColumn(Core.EntityKind kind, string propertyKey)
     {
         ArgumentNullException.ThrowIfNull(propertyKey);
-        if (!_backend.Schema.TryGetPropertyKeyId(propertyKey, out var keyId)) return false;
-        return RequireBinaryForColumns().DropColumn(kind, keyId.Value);
+        return RequireBinaryForColumns().DropColumn(kind, propertyKey);
     }
 
     /// <summary>列指向の読み取り経路を検証するため、列の可視値合計を返す。未登録なら -1。</summary>
@@ -380,7 +334,6 @@ public sealed class QuiverDatabase : IDisposable
         // 破棄済み backend に触れて落ちうる。
         _autoVacuumWorker?.Dispose();
         _backend.Dispose();
-        _writerSemaphore.Dispose();
     }
 
 }
@@ -480,15 +433,6 @@ public sealed class QuiverDatabaseOptions
     /// <summary>ロック取得のタイムアウト。既定 5 秒。</summary>
     public TimeSpan LockTimeout { get; set; } = TimeSpan.FromSeconds(5);
 
-    /// <summary>
-    /// ロック戦略。<see cref="Quiver.Transactions.LockingMode.ExclusiveOnly"/> (既定) は
-    /// 読み取りロック無し (現挙動)、<see cref="Quiver.Transactions.LockingMode.ReaderWriter"/> は
-    /// 読み取りを <see cref="Quiver.Transactions.LockMode.Shared"/>・書き込みを
-    /// <see cref="Quiver.Transactions.LockMode.Exclusive"/> として、複数 reader 間の競合を解消する。
-    /// </summary>
-    public Quiver.Transactions.LockingMode LockingMode { get; set; }
-        = Quiver.Transactions.LockingMode.ExclusiveOnly;
-
     /// <summary>ページのチェックサム計算 / 検証を有効にするか。既定 <c>true</c>。</summary>
     public bool EnableChecksums { get; set; } = true;
 
@@ -523,16 +467,6 @@ public sealed class QuiverDatabaseOptions
     /// <see cref="IDiagnosticsApi.RepairIndexes"/> を明示的に呼ぶ前提)。
     /// </summary>
     public bool AutoRepairOrphansOnRecovery { get; set; } = false;
-
-    /// <summary>
-    /// デッドロック検出器の周期。<c>null</c> または <see cref="TimeSpan.Zero"/> 以下で無効化
-    /// (既定。<see cref="LockTimeout"/> でフォールバックする旧挙動)。値を設定すると周期ごとに
-    /// 全 <c>LockManager</c> の wait-for graph snapshot を取り、Tarjan SCC で閉路を検出する。
-    /// 閉路内で最も若い tx (<see cref="Quiver.Core.TransactionId.Value"/> が最大) を犠牲者として
-    /// <see cref="Quiver.Transactions.DeadlockException"/> で中断させる。
-    /// 推奨値: 100ms (検出遅延が短く、CPU オーバーヘッドも 1% 未満を狙える)。
-    /// </summary>
-    public TimeSpan? DeadlockDetectionInterval { get; set; }
 
     /// <summary>
     /// WAL グループコミットの coalesce window。<see cref="TimeSpan.Zero"/> (既定) で無効

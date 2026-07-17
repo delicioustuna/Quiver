@@ -5,6 +5,12 @@ namespace Quiver.Storage.Wal;
 /// <summary>WAL ライタ・リーダの統合インタフェース。</summary>
 internal interface IWriteAheadLog : IDisposable
 {
+    WalWriteSet? ActiveWriteSet
+    {
+        get => null;
+        set { }
+    }
+
     long CurrentLsn { get; }
     long FlushedLsn { get; }
 

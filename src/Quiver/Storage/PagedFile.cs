@@ -213,7 +213,7 @@ internal sealed class PagedFile : IPagedFile
             // before-image は in-process abort/savepoint 用に transaction-owned write set へ捕捉する。
             if (_walFileKind is byte fileKind)
             {
-                WalWriteSetContext.CaptureBeforeImage(fileKind, pageId.Value, raw);
+                _wal?.ActiveWriteSet?.CaptureBeforeImage(fileKind, pageId.Value, raw);
             }
             return new PageWriteHandle(this, pageId, raw);
         }
@@ -256,7 +256,10 @@ internal sealed class PagedFile : IPagedFile
 
             // WAL-first: クラッシュリカバリでコミット済み書き込みを再生できるよう、ページイメージをログに残す。
             if (_walFileKind is byte fileKind)
-                WalWriteSetContext.LogPageImage(fileKind, pageId.Value, _frames[frame].Buffer.AsSpan(0, PageSizeConst));
+                _wal?.ActiveWriteSet?.LogPageImage(
+                    fileKind,
+                    pageId.Value,
+                    _frames[frame].Buffer.AsSpan(0, PageSizeConst));
 
             _frames[frame].IsDirty = true;
             Interlocked.Decrement(ref _frames[frame].PinCount);

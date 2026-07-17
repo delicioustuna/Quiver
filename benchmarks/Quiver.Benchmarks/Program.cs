@@ -27,12 +27,6 @@ if (!skipTempSweep)
     AppDomain.CurrentDomain.ProcessExit += (_, _) => BenchTempDir.SweepRoot();
 }
 
-// deadlock detection latency / CPU overhead standalone runner
-if (args.Length >= 1 && args[0] == "--ft25-deadlock")
-{
-    return DeadlockDetectionRunner.Run();
-}
-
 // full-text search p50 + ingest amplification + WAL bytes/chunk standalone runner.
 // Usage: -- --fts6 [chunkCount] [queryCount]   (defaults: 100000 chunks, 500 queries)
 if (args.Length >= 1 && args[0] == "--fts6")
@@ -58,6 +52,12 @@ if (args.Length >= 1 && args[0] == "--basic-perf")
 if (args.Length >= 1 && args[0] == "--read-scaling")
 {
     return ReadScalingRunner.Run();
+}
+
+// Wave 4: reader なし writer と 32 snapshot readers 併走時の commit p50 比較。
+if (args.Length >= 1 && args[0] == "--single-writer-perf")
+{
+    return SingleWriterPerfRunner.Run();
 }
 
 // payload page pin と slab cache の同一 DB 比較。

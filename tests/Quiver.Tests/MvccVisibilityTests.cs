@@ -12,8 +12,8 @@ namespace Quiver.Tests;
 ///
 /// <para>
 /// VertexStore / EdgeStore / PropertyVersionStore のレコードヘッダーが xmin / xmax を保持し、
-/// トランザクション開始時に <c>MvccContext.Begin</c>、コミット時に
-/// <c>CommittedTxRegistry.MarkCommitted</c> が呼ばれる一連の経路を確認する。
+/// トランザクション開始時に snapshot が固定され、コミット時に
+/// committed high-water が進む一連の経路を確認する。
 /// </para>
 /// </summary>
 public sealed class MvccVisibilityTests : IDisposable

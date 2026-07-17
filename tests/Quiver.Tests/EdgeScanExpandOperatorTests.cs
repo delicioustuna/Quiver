@@ -27,8 +27,8 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
     [Fact]
     public void NeighborOnly_outgoing_matches_ExpandOperator()
     {
-        using var tx = _db.BeginTransaction();
         var person = _db.Schema.GetOrCreateLabel("Person");
+        using var tx = _db.BeginTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         var carol = tx.CreateVertex("Person");
@@ -50,8 +50,8 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
     [Fact]
     public void Full_outgoing_emits_source_edge_neighbor()
     {
-        using var tx = _db.BeginTransaction();
         var person = _db.Schema.GetOrCreateLabel("Person");
+        using var tx = _db.BeginTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         var edge = tx.CreateEdge(alice, bob, "KNOWS");
@@ -148,8 +148,8 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
     [Fact]
     public void TypeFilter_excludes_other_types()
     {
-        using var tx = _db.BeginTransaction();
         var person = _db.Schema.GetOrCreateLabel("Person");
+        using var tx = _db.BeginTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         var carol = tx.CreateVertex("Person");
@@ -170,8 +170,8 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
     [Fact]
     public void Incoming_direction_matches_targets()
     {
-        using var tx = _db.BeginTransaction();
         var person = _db.Schema.GetOrCreateLabel("Person");
+        using var tx = _db.BeginTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         tx.CreateEdge(alice, bob, "KNOWS");
@@ -206,8 +206,8 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
     [Fact]
     public void Statistics_count_RowsProduced_and_ScanRecords()
     {
-        using var tx = _db.BeginTransaction();
         var person = _db.Schema.GetOrCreateLabel("Person");
+        using var tx = _db.BeginTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         var carol = tx.CreateVertex("Person");

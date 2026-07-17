@@ -314,11 +314,13 @@ public sealed class AdjacencyEpochTests : IDisposable
     {
         BulkLoad(vertexCount: 2, edges: new[] { (0L, 1L) });
 
-        _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        _db = QuiverDatabase.Open(
+            System.IO.Path.Combine(_dir, "graph.quiver"),
+            new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
         using var tx = _db.BeginTransaction();
         Action act = () => _db.CompactAdjacency();
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*active transactions*");
+        act.Should().Throw<TransactionException>()
+            .WithMessage("*write transaction*");
     }
 
     // ────────────────────── AdjacencyEpoch unit-level ────────────────────────

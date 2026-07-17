@@ -49,6 +49,7 @@ internal sealed class SingleFileContainer : IDisposable
     private bool _disposed;
     // committed TxId 高水位 (= 最終クリーン終了時の次採番 TxId)。0 = 未設定。
     private long _committedHighWaterTxId;
+    private IWriteAheadLog? _wal;
 
     public string Path => _physical.Path;
     internal IPagedFile Physical => _physical;
@@ -184,7 +185,12 @@ internal sealed class SingleFileContainer : IDisposable
     /// を渡せば PageImage redo が物理ページへ適用される。
     /// </summary>
     internal void EnableWalLogging(byte dataFileKind, IWriteAheadLog wal)
-        => _physical.EnableWalLogging(dataFileKind, wal);
+    {
+        _wal = wal;
+        _physical.EnableWalLogging(dataFileKind, wal);
+    }
+
+    internal bool HasActiveWriteSet => _wal?.ActiveWriteSet is not null;
 
     /// <summary>
     /// recovery / abort の before-image 復元が物理 page1 (カタログ root) と page-table ページを書き戻した

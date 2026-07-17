@@ -38,7 +38,7 @@ internal sealed class GraphEngineAdapter : IGraphEngine
 
     /// <inheritdoc/>
     public IGraphEngineReadSession BeginRead()
-        => new ReadSession(_db.BackendInternal.Transactions.Begin(IsolationLevel.SnapshotIsolation), _db.Schema);
+        => new ReadSession(_db.BackendInternal.Transactions.BeginRead(), _db.Schema);
 
     private sealed class ReadSession : IGraphEngineReadSession
     {

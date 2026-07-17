@@ -53,7 +53,7 @@ public sealed class ApplyDyadicOversampleTests : IDisposable
                 vec[0] = 1f - i * 0.05f;
                 vec[1] = i * 0.05f;
                 Normalize(vec);
-                _db.Vectors.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
+                tx.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
                 created.Add((nid, vec));
             }
             tx.Commit();
@@ -93,7 +93,7 @@ public sealed class ApplyDyadicOversampleTests : IDisposable
                 vec[0] = 1f - i * 0.03f;
                 vec[1] = i * 0.03f;
                 Normalize(vec);
-                _db.Vectors.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
+                tx.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
             }
             tx.Commit();
         }
@@ -125,7 +125,7 @@ public sealed class ApplyDyadicOversampleTests : IDisposable
             {
                 var nid = tx.CreateVertex("Sensor");
                 tx.SetProperty(nid, "Site", PropertyValue.FromString("A"));
-                flatDb.Vectors.SetVector(EntityKind.Vertex, nid.Value, VecIndex, [1f, 0f, 0f, 0f]);
+                tx.SetVector(EntityKind.Vertex, nid.Value, VecIndex, [1f, 0f, 0f, 0f]);
                 tx.Commit();
             }
 
@@ -173,7 +173,7 @@ public sealed class ApplyDyadicOversampleTests : IDisposable
                 tx.SetProperty(nid, "Site", PropertyValue.FromString("A"));
                 var vec = new float[Dim];
                 vec[i % Dim] = 1f;
-                _db.Vectors.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
+                tx.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
             }
 
             var tmpl = tx.CreateVertex("Template");
@@ -210,7 +210,7 @@ public sealed class ApplyDyadicOversampleTests : IDisposable
                 tx.SetProperty(nid, "Site", PropertyValue.FromString("A"));
                 var vec = new float[Dim];
                 vec[i % Dim] = 1f;
-                _db.Vectors.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
+                tx.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
             }
             tx.Commit();
         }

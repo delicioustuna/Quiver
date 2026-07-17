@@ -77,12 +77,12 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
             for (int i = 0; i < 50; i++)
             {
                 var d = tx.CreateVertex("Doc");
-                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                tx.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             for (int i = 0; i < 50; i++)
             {
                 var o = tx.CreateVertex("Other");
-                _db.Vectors.SetVector(EntityKind.Vertex, o.Value, IndexName, new float[] { 0, 1, 0, 0 });
+                tx.SetVector(EntityKind.Vertex, o.Value, IndexName, new float[] { 0, 1, 0, 0 });
             }
             tx.Commit();
         }
@@ -108,7 +108,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
             for (int i = 0; i < 50; i++)
             {
                 var d = tx.CreateVertex("Doc");
-                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                tx.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             for (int i = 0; i < 50; i++)
                 _ = tx.CreateVertex("Other");
@@ -134,12 +134,12 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
             for (int i = 0; i < 5; i++)
             {
                 var d = tx.CreateVertex("Doc");
-                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                tx.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             for (int i = 0; i < 95; i++)
             {
                 var o = tx.CreateVertex("Other");
-                _db.Vectors.SetVector(EntityKind.Vertex, o.Value, IndexName, new float[] { 0, 1, 0, 0 });
+                tx.SetVector(EntityKind.Vertex, o.Value, IndexName, new float[] { 0, 1, 0, 0 });
             }
             tx.Commit();
         }
@@ -170,14 +170,14 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
                 docIds[i] = d.Value;
                 var v = new float[Dim];
                 v[i % Dim] = 1f;
-                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
+                tx.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
             }
             for (int i = 0; i < 50; i++)
             {
                 var o = tx.CreateVertex("Other");
                 var v = new float[Dim];
                 v[i % Dim] = 1f;
-                _db.Vectors.SetVector(EntityKind.Vertex, o.Value, IndexName, v);
+                tx.SetVector(EntityKind.Vertex, o.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -212,12 +212,12 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
             for (int i = 0; i < 6; i++)
             {
                 var d = tx.CreateVertex("Doc");
-                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                tx.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             for (int i = 0; i < 4; i++)
             {
                 var o = tx.CreateVertex("Other");
-                _db.Vectors.SetVector(EntityKind.Vertex, o.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                tx.SetVector(EntityKind.Vertex, o.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             tx.Commit();
         }
@@ -248,7 +248,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
             {
                 var d = tx.CreateVertex("Doc");
                 tx.SetProperty(d, "status", Storage.Records.PropertyValue.FromString(i == 0 ? "active" : "archived"));
-                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                tx.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             tx.Commit();
         }
@@ -277,13 +277,13 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
             {
                 var d = tx.CreateVertex("Doc");
                 tx.SetProperty(d, "status", Storage.Records.PropertyValue.FromString(i < 5 ? "active" : "archived"));
-                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                tx.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             for (int i = 0; i < 40; i++)
             {
                 var o = tx.CreateVertex("Other");
                 tx.SetProperty(o, "status", Storage.Records.PropertyValue.FromString("active"));
-                _db.Vectors.SetVector(EntityKind.Vertex, o.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                tx.SetVector(EntityKind.Vertex, o.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             tx.Commit();
         }

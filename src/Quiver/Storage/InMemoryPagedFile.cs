@@ -126,7 +126,7 @@ internal sealed class InMemoryPagedFile : IPagedFile
         {
             if (_walFileKind is byte fileKind)
             {
-                WalWriteSetContext.CaptureBeforeImage(fileKind, pageId.Value, page);
+                _wal?.ActiveWriteSet?.CaptureBeforeImage(fileKind, pageId.Value, page);
             }
 
             return new PageWriteHandle(this, pageId, page);
@@ -149,7 +149,7 @@ internal sealed class InMemoryPagedFile : IPagedFile
             var page = _pages[(int)pageId.Value];
             PageHeader.UpdateLsnAndChecksum(page, lsn);
             if (_walFileKind is byte fileKind)
-                WalWriteSetContext.LogPageImage(fileKind, pageId.Value, page);
+                _wal?.ActiveWriteSet?.LogPageImage(fileKind, pageId.Value, page);
         }
         finally
         {

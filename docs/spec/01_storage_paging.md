@@ -1,6 +1,6 @@
 # ストレージ & ページング
 
-> as-built 仕様（QUIVER-SW family version 1、2026-07-16）
+> as-built 仕様（QUIVER-SW family version 1、2026-07-17）
 
 ## ページフォーマット {#page-format}
 
@@ -78,6 +78,12 @@ process kill 後の winner redo と checkpoint 境界は、現行の crash recov
 
 WAL は単一のサイドカーファイル `*.quiver-wal` に存在する。チェックポイントは dirty ページと
 インデックスをデータファイルにフラッシュし、その後 WAL を切り詰める。
+
+## entity version sidecar {#entity-version-sidecar}
+
+Vertex、Edge、Nexus の version sidecar は 24 バイト固定長の `EntityVersionMeta(xmin, xmax, generation)` を格納する。
+8,152 バイトの page body には 339 record を格納する。
+sidecar header の format version は 4 であり、旧 40 バイト layout の fallback reader は持たない。
 
 ## チェックサム {#checksum}
 

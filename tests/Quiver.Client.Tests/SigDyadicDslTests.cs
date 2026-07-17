@@ -33,7 +33,7 @@ public sealed class SigDyadicDslTests : IDisposable
             tx.SetProperty(nid, "Site", PropertyValue.FromString($"S{i}"));
             var vec = new float[Dim];
             vec[i % Dim] = 1f;
-            _db.Vectors.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
+            tx.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
             tx.SetProperty(nid, "Embedding", PropertyValue.FromFloatArray(vec));
         }
         tx.Commit();

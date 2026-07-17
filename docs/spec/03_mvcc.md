@@ -1,12 +1,16 @@
 # MVCC とトランザクション
 
-> as-built 仕様（QUIVER-SW family version 1、2026-07-16）
+> as-built 仕様（QUIVER-SW family version 1、2026-07-17）
 
 ## 分離レベル {#isolation}
 
 Quiver は snapshot isolation を提供する。
-各トランザクションは開始時の `SnapshotLsn` に対応する一貫した状態を参照する。
+データベースインスタンスごとの `TransactionManager` は、一つの `WriterLease` と `SnapshotRegistry` を所有する。
+書き込みトランザクションは同じ lease で直列化し、読み取りトランザクションは writer を待たずに開始する。
+読み取り開始時の状態は `Snapshot(CommittedHighWater, AbortedGaps, ActiveWriterId?)` として固定する。
 読み取りは自分の snapshot より後に commit した version を参照しない。
+開始時に active だった writer の version も、その reader からは commit 後まで不可視のままである。
+writer 自身の `xmin` と `xmax` は自己可視性として扱う。
 
 ## entity と property {#entities-and-properties}
 
@@ -23,7 +27,8 @@ property record に保存した owner と読み取り側の owner が一致し�
 Vertex、Edge、Nexus の Generation は各 entity version sidecar を正本とする。
 Property version は `xmin`、`xmax`、Generation を 84 バイトの version record に保持する。
 同じ Sequence でも Generation が異なる参照は別 incarnation として扱い、stale な参照を返さない。
-Vertex、Edge、Nexus の `EntityVersionMeta` にある `pstamp` と `sstamp` は現行 SSN 判定のため残っているが、primary identity と可視性の根拠には使わない。
+Vertex、Edge、Nexus の `EntityVersionMeta` は `xmin`、`xmax`、Generation だけを持つ 24 バイト record である。
+sidecar format version は 4 であり、旧 40 バイト record は読み替えない。
 
 ## ライフサイクル {#lifecycle}
 
@@ -41,7 +46,12 @@ Active -> Preparing -> Committed
 | `Aborted` | 4 | プロセス内の変更を巻き戻した |
 
 `TransactionId` は単調に増える識別子である。
-`CommittedTxRegistry` は明示的な durable commit と recovery で確認した winner を記録し、version の可視性判定に使う。
+`CommittedTxRegistry` は durable commit の高水位と、高水位以下で中止した writer の gap を記録する。
+可視性は高水位、gap、開始時の active writer、自己 transaction ID だけで判定する。
+
+writer lease の取得は既定で最大 5 秒待機する。
+`EnforceExclusiveWriter` を有効にした場合は、二本目の writer を待たずに拒否する。
+facade、backend、manager、bulk、schema、maintenance の mutation 入口は同じ lease を使う。
 
 ## commit {#commit}
 
@@ -51,6 +61,7 @@ commit は最終 `PageImage` を WAL へ出力し、`Commit` を追記して、�
 
 durable commit 後に checkpoint や通知処理が失敗しても、トランザクションを abort 状態へ戻さない。
 `Commit` の後へ `Abort` を追記しない。
+durable commit 後の導出 view publish が失敗したインスタンスは faulted となり、新しい operation を拒否する。
 
 ## abort と savepoint {#abort-savepoint}
 
@@ -76,3 +87,5 @@ winner の `PageImage` は redo し、commit record を持たない transaction 
 
 読み取り専用トランザクションは snapshot を取得するが、WAL record と page before-image を生成しない。
 読み取り専用 transaction から write API を呼び出すことはできない。
+`SnapshotRegistry` は active reader 数、最古 reader の経過時間、開始位置、高水位を保持する。
+長時間 reader は警告対象にできるが、強制失効しない。

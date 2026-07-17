@@ -71,7 +71,7 @@ public sealed class WeightedShortestPathTests : IDisposable
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");   // a と b の間にエッジ無し
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey("w");
+        var keyId = ResolveWeightKey();
         using var op = new WeightedShortestPathOperator(
             new PairSource(a, b), 0, 1, Direction.Outgoing, null,
             new PropertyChainWeightProvider(keyId));
@@ -89,7 +89,7 @@ public sealed class WeightedShortestPathTests : IDisposable
         var b = tx.CreateVertex("X");
         SetWeight(tx, tx.CreateEdge(a, b, "K"), -1.0);
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey("w");
+        var keyId = ResolveWeightKey();
         using var op = new WeightedShortestPathOperator(
             new PairSource(a, b), 0, 1, Direction.Outgoing, null,
             new PropertyChainWeightProvider(keyId));
@@ -127,7 +127,7 @@ public sealed class WeightedShortestPathTests : IDisposable
         SetWeight(tx, tx.CreateEdge(a, b, "ROAD"), 1.0);
         SetWeight(tx, tx.CreateEdge(a, b, "RAIL"), 5.0);
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey("w");
+        var keyId = ResolveWeightKey();
         var railType = _db.Schema.GetOrCreateEdgeType("RAIL");
         using var op = new WeightedShortestPathOperator(
             new PairSource(a, b), 0, 1, Direction.Outgoing, railType,
@@ -271,10 +271,15 @@ public sealed class WeightedShortestPathTests : IDisposable
     private void SetWeight(IGraphTransaction tx, EdgeId edge, double weight)
         => tx.SetProperty(edge, "w", PropertyValue.FromDouble(weight));
 
+    private PropertyKeyId ResolveWeightKey()
+        => _db.Schema.TryGetPropertyKeyId("w", out var keyId)
+            ? keyId
+            : PropertyKeyId.Invalid;
+
     private (double Distance, VertexId[] Vertices, EdgeId[] Edges) RunOperator(
         IGraphTransaction tx, VertexId source, VertexId target)
     {
-        var keyId = _db.Schema.GetOrCreatePropertyKey("w");
+        var keyId = ResolveWeightKey();
         using var op = new WeightedShortestPathOperator(
             new PairSource(source, target), 0, 1, Direction.Outgoing, null,
             new PropertyChainWeightProvider(keyId));

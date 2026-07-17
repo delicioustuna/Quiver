@@ -1,3 +1,4 @@
+using Quiver.Core;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
@@ -11,6 +12,13 @@ namespace Quiver;
 /// </summary>
 internal interface IGraphTransactionInternal : IGraphTransaction
 {
+    TransactionId TransactionId { get; }
+
+    /// <summary>
+    /// 内部オーケストレータが複数の公開操作を一つのトランザクション実行フローとして束ねる。
+    /// </summary>
+    TransactionUsageLease EnterUsage();
+
     /// <summary>backend が提供する access methods (capability 問い合わせ・scan / expand)。</summary>
     IGraphAccessMethods Access { get; }
 

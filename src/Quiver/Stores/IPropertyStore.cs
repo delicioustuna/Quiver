@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Quiver.Core;
+using Quiver.Transactions;
 
 namespace Quiver.Storage.Records;
 
@@ -13,6 +14,27 @@ internal interface IPropertyStore
     PropertyVersionRef Delete(EntityRef owner, PropertyVersionRef version, PropertyVersionRef currentFirst);
     PropertyVersionRecord Read(EntityRef owner, PropertyVersionRef version);
     PropertyCursor Enumerate(EntityRef owner, PropertyVersionRef firstVersion);
+}
+
+internal interface ITransactionPropertyStore
+{
+    PropertyVersionRef Create(
+        PropertyAddress address,
+        PropertyCardinality cardinality,
+        in PropertyValue value,
+        PropertyVersionRef currentFirst,
+        TransactionId transactionId,
+        VersionVisible visibility);
+    PropertyVersionRef Delete(
+        EntityRef owner,
+        PropertyVersionRef version,
+        PropertyVersionRef currentFirst,
+        TransactionId transactionId,
+        VersionVisible visibility);
+    PropertyVersionRecord Read(
+        EntityRef owner,
+        PropertyVersionRef version,
+        VersionVisible visibility);
 }
 
 internal readonly record struct PropertyVersionRef(long Value)
@@ -204,6 +226,7 @@ public ref struct PropertyCursor
     private PropertyVersionRecord _record;
     private PropertyEntry _current;
     private bool _started;
+    private TransactionUsageGuard? _usageGuard;
 
     internal PropertyCursor(IPropertyStore store, EntityRef owner, PropertyVersionRef firstVersion)
     {
@@ -213,11 +236,19 @@ public ref struct PropertyCursor
         _record = default;
         _current = default;
         _started = false;
+        _usageGuard = null;
+    }
+
+    internal void AttachUsage(TransactionUsageLease usage)
+    {
+        _usageGuard = usage.Guard;
+        usage.Dispose();
     }
 
     /// <summary>次の可視なプロパティへ進みます。</summary>
     public bool MoveNext()
     {
+        using var usage = _usageGuard?.Enter() ?? default;
         if (_started)
             _next = _record.NextOwnedProperty;
         _started = true;

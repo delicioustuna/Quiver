@@ -49,7 +49,7 @@ public sealed class PersistentVectorStoreTests : IDisposable
                 ids[i] = nid.Value;
                 var vec = new float[Dim];
                 vec[i] = 1f;
-                db.Vectors.SetVector(EntityKind.Vertex, nid.Value, IndexName, vec);
+                tx.SetVector(EntityKind.Vertex, nid.Value, IndexName, vec);
             }
             tx.Commit();
         }
@@ -107,7 +107,7 @@ public sealed class PersistentVectorStoreTests : IDisposable
             using var tx = db.BeginTransaction();
             var vertex = tx.CreateVertex("Doc");
             id = vertex.Value;
-            db.Vectors.SetVector(
+            tx.SetVector(
                 EntityKind.Vertex,
                 vertex.Value,
                 IndexName,
@@ -197,9 +197,9 @@ public sealed class PersistentVectorStoreTests : IDisposable
             var a = tx.CreateVertex("Doc");
             var b = tx.CreateVertex("Doc");
             keep = a.Value; drop = b.Value;
-            db.Vectors.SetVector(EntityKind.Vertex, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
-            db.Vectors.SetVector(EntityKind.Vertex, b.Value, IndexName, new float[] { 1, 0, 0, 0 });
-            db.Vectors.RemoveVector(EntityKind.Vertex, b.Value, IndexName);
+            tx.SetVector(EntityKind.Vertex, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
+            tx.SetVector(EntityKind.Vertex, b.Value, IndexName, new float[] { 1, 0, 0, 0 });
+            tx.RemoveVector(EntityKind.Vertex, b.Value, IndexName);
             tx.Commit();
         }
 
@@ -229,7 +229,7 @@ public sealed class PersistentVectorStoreTests : IDisposable
             using var tx = db.BeginTransaction();
             var n = tx.CreateVertex("Sensor");
             nid = n.Value;
-            db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, [1f, 2f, 3f, 4f]);
+            tx.SetVector(EntityKind.Vertex, n.Value, IndexName, [1f, 2f, 3f, 4f]);
             tx.Commit();
         }
 

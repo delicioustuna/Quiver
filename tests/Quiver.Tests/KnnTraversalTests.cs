@@ -50,7 +50,7 @@ public sealed class KnnTraversalTests : IDisposable
                 ids[i] = nid.Value;
                 var vec = new float[Dim];
                 vec[i] = 1f;
-                _db.Vectors.SetVector(EntityKind.Vertex, nid.Value, IndexName, vec);
+                tx.SetVector(EntityKind.Vertex, nid.Value, IndexName, vec);
             }
             tx.Commit();
         }
@@ -87,14 +87,14 @@ public sealed class KnnTraversalTests : IDisposable
                 docIds[i] = doc.Value;
                 var v = new float[Dim];
                 v[i] = 1f;
-                _db.Vectors.SetVector(EntityKind.Vertex, doc.Value, IndexName, v);
+                tx.SetVector(EntityKind.Vertex, doc.Value, IndexName, v);
                 tx.CreateEdge(doc, new VertexId(authorIds[i]), "REFERENCES");
             }
             // One Article that would beat all Docs on cosine to the query
             // vector below — must be filtered out by HasLabel("Doc").
             var article = tx.CreateVertex("Article");
             var articleVec = new float[] { 0f, 1f, 0f, 0f };
-            _db.Vectors.SetVector(EntityKind.Vertex, article.Value, IndexName, articleVec);
+            tx.SetVector(EntityKind.Vertex, article.Value, IndexName, articleVec);
 
             tx.Commit();
         }

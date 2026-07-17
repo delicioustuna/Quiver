@@ -608,7 +608,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         //    旧 .fileKinds/.idxmeta の即時 fsync と同等の durability を保つよう container を flush する。
         //    tx 内 (IndexInsert 経由の遅延作成) では PageImage が WAL に乗り commit/checkpoint で
         //    durable になるので flush しない (uncommitted ページの早期 steal を避ける)。
-        if (WalWriteSetContext.Current is null)
+        if (!_container.HasActiveWriteSet)
             _container.Flush();
     }
 

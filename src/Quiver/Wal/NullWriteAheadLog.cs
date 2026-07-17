@@ -9,10 +9,16 @@ internal sealed class NullWriteAheadLog : IWriteAheadLog
 {
     private long _currentLsn;
     private long _bytesWritten;
+    private WalWriteSet? _activeWriteSet;
 
     public long CurrentLsn => Volatile.Read(ref _currentLsn);
     public long FlushedLsn => CurrentLsn;
     public long BytesWritten => Volatile.Read(ref _bytesWritten);
+    public WalWriteSet? ActiveWriteSet
+    {
+        get => Volatile.Read(ref _activeWriteSet);
+        set => Volatile.Write(ref _activeWriteSet, value);
+    }
 
     public long Append(WalRecordType type, TransactionId tx, ReadOnlySpan<byte> payload)
     {

@@ -171,7 +171,7 @@ internal ref struct IncidenceWriteHandle
 /// <summary>
 /// vertex chain (<c>NextInVertex</c>) を辿る列挙子。
 /// 参照先 nexus header が不可視な incidence は読み飛ばして次へ進む。
-/// 可視な header を観測するたびに SSN read set への記録が発生する。
+/// 可視性は参照先 nexus header の snapshot 判定に従う。
 /// </summary>
 internal ref struct VertexIncidenceEnumerator
 {

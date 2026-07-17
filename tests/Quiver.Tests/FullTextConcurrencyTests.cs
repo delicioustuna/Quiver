@@ -52,7 +52,6 @@ public sealed class FullTextConcurrencyTests : IDisposable
 
     private static Bucket Classify(Exception ex) => ex switch
     {
-        SerializabilityException => Bucket.Transient,
         TransactionException te when te.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase)
             || te.Message.Contains("lock", StringComparison.OrdinalIgnoreCase) => Bucket.Transient,
         _ => Bucket.Unexpected,

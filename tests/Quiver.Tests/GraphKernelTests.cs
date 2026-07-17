@@ -34,8 +34,8 @@ public sealed class GraphKernelTests : IDisposable
     [Fact]
     public void BfsOperator_emits_every_reachable_vertex_with_correct_depth()
     {
-        using var tx = _db.BeginTransaction();
         var person = _db.Schema.GetOrCreateLabel("Person");
+        using var tx = _db.BeginTransaction();
         // Path: a -> b -> c -> d, plus a -> e (depth 1 fork).
         var a = tx.CreateVertex("Person");
         var b = tx.CreateVertex("Person");

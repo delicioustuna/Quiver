@@ -70,7 +70,7 @@ public sealed class VectorSearchOptionsTests : IDisposable
         using (var tx = db.BeginTransaction())
         {
             var vertex = tx.CreateVertex("Doc");
-            db.Vectors.SetVector(EntityKind.Vertex, vertex.Value, IndexName, [1f, 0f, 0f, 0f]);
+            tx.SetVector(EntityKind.Vertex, vertex.Value, IndexName, [1f, 0f, 0f, 0f]);
             tx.Commit();
         }
 

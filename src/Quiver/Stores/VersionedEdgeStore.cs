@@ -44,12 +44,12 @@ internal struct RawEdgeRecord
 ///
 /// <para><b>MVCC</b>: xmin/xmax は heap version ヘッダに保持する (<see cref="VersionedVertexStore"/>
 /// Vertex と同じ統一レコードモデル)。<see cref="IEntityVersionStore"/> sidecar は Generation +
-/// SSN (Pstamp/Sstamp) + commit 高水位のみを保持する。edge の raw Sequence は
+/// MVCC (xmin/xmax) + Generation を保持する。edge の raw Sequence は
 /// adjacency、delta、locator、epoch entry に残り得るため、再利用解放 coordinator がそれらを
 /// 除去するまで free list へ戻さない。物理ページの回収と logical Sequence の再利用を混同すると、
 /// raw entry が別 edge を指す ABA になる。</para>
 /// </summary>
-internal sealed class VersionedEdgeStore : IEdgeStore
+internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
 {
     // 固定フィールド領域 (EdgeWriteHandle が in-place 更新する先頭 45B)。
     private const int PayloadSize = 45;
@@ -95,6 +95,14 @@ internal sealed class VersionedEdgeStore : IEdgeStore
     public long InUseCount => _inUseCount;
 
     public EdgeId Create(IVertexStore vertexStore, VertexId source, VertexId target, EdgeTypeId type)
+        => Create(vertexStore, source, target, type, TransactionId.Bootstrap);
+
+    public EdgeId Create(
+        IVertexStore vertexStore,
+        VertexId source,
+        VertexId target,
+        EdgeTypeId type,
+        TransactionId transactionId)
     {
         // raw adjacency / delta / locator / epoch entry が残る間に slot を再利用すると、
         // entry の Sequence が別 edge を指す。再利用解放 coordinator が lifecycle を
@@ -118,8 +126,8 @@ internal sealed class VersionedEdgeStore : IEdgeStore
         RecordHelpers.WriteInt48(payload[OffTgtNext..], tgtHead.Sequence);
         RecordHelpers.WriteInt48(payload[OffFirstProp..], PropertyVersionRef.Invalid.Sequence);
 
-        _heap.Insert(seq, payload, MvccContext.CurrentTxId.Value);
-        _versions.Write(seq, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue, generation));
+        _heap.Insert(seq, payload, transactionId.Value);
+        _versions.Write(seq, new EntityVersionMeta(transactionId.Value, 0, generation));
         _locators?.WriteLive(seq, checked((int)generation), seq, source, target, type);
         _inUseCount++;
 
@@ -135,6 +143,9 @@ internal sealed class VersionedEdgeStore : IEdgeStore
     }
 
     public void Delete(IVertexStore vertexStore, EdgeId edgeId)
+        => Delete(vertexStore, edgeId, TransactionId.Bootstrap);
+
+    public void Delete(IVertexStore vertexStore, EdgeId edgeId, TransactionId transactionId)
     {
         // 論理削除のみ — head version に xmax をスタンプ。chain / slot は維持する
         // (snapshot reader が辿れるよう)。物理回収 + chain 整理は vacuum (OP-3)。
@@ -142,7 +153,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore
         if (!TryResolveRecordSequence(edgeId, out long seq, requireLive: true)) return;
         if (!_heap.TryReadHeadRaw(seq, out _, out _, out long xmax)) return;
         if (xmax != 0) return; // 既に論理削除済
-        _heap.StampXmax(seq, MvccContext.CurrentTxId.Value);
+        _heap.StampXmax(seq, transactionId.Value);
         int generation = CurrentGeneration(edgeId.Sequence);
         if (generation >= 0)
             _locators?.WriteDeleted(edgeId.Sequence, generation);
@@ -150,6 +161,9 @@ internal sealed class VersionedEdgeStore : IEdgeStore
     }
 
     public EdgeReadHandle Read(EdgeId edgeId)
+        => Read(edgeId, LatestVisible);
+
+    public EdgeReadHandle Read(EdgeId edgeId, VersionVisible visibility)
     {
         if (!TryResolveRecordSequence(edgeId, out long seq))
             return NotInUse(edgeId);
@@ -187,14 +201,13 @@ internal sealed class VersionedEdgeStore : IEdgeStore
         bool inUse;
         if ((span[OffFlags] & FlagInUse) == 0)
             inUse = false;
-        else if (AmbientVisible(xmin, xmax))
+        else if (visibility(xmin, xmax))
             inUse = true;
         else if (!hasOlderVersion)
             inUse = false;
         else
-            inUse = _heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _);
+            inUse = _heap.TryReadVisible(seq, visibility, out _, out _, out _);
 
-        if (inUse) MvccContext.RecordRead(EntityKind.Edge, seq);
         var resolvedId = EdgeId.Create(seq, CurrentGeneration(seq));
         return new EdgeReadHandle(resolvedId, inUse, src, tgt, type, srcPrev, srcNext, tgtPrev, tgtNext, firstProp);
     }
@@ -226,13 +239,15 @@ internal sealed class VersionedEdgeStore : IEdgeStore
         => new EdgeEnumerator(this, vertexStore, vertexId, GetFirstEdgeId(vertexStore, vertexId), type, direction);
 
     public IEnumerable<EdgeId> Scan()
+        => Scan(LatestVisible);
+
+    public IEnumerable<EdgeId> Scan(VersionVisible visibility)
     {
         long hwm = _map.Hwm;
         for (long seq = 0; seq < hwm; seq++)
         {
-            if (_heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _))
+            if (_heap.TryReadVisible(seq, visibility, out _, out _, out _))
             {
-                MvccContext.RecordRead(EntityKind.Edge, seq);
                 yield return EdgeId.Create(seq, CurrentGeneration(seq));
             }
         }
@@ -241,9 +256,8 @@ internal sealed class VersionedEdgeStore : IEdgeStore
     public PropertyCursor EnumerateProperties(EdgeId edgeId, IPropertyStore overflowStore)
     {
         if (!TryResolveRecordSequence(edgeId, out long seq) ||
-            !_heap.TryReadVisible(seq, AmbientVisible, out var payload, out _, out _))
+            !_heap.TryReadVisible(seq, LatestVisible, out var payload, out _, out _))
             return new PropertyCursor(overflowStore, default, PropertyVersionRef.Invalid);
-        MvccContext.RecordRead(EntityKind.Edge, edgeId.Sequence); // property 列挙 = edge read
         var firstProp = new PropertyVersionRef(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProp)));
         var ownerId = edgeId.Generation == 0
             ? EdgeId.Create(edgeId.Sequence, CurrentGeneration(edgeId.Sequence))
@@ -251,7 +265,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore
         return overflowStore.Enumerate(EntityRef.From(ownerId), firstProp);
     }
 
-    // --- internal bulk-load helpers (no MvccContext; heap insert handles paging) ---
+    // --- internal bulk-load helpers (bootstrap TxId; heap insert handles paging) ---
 
     internal void BulkWrite(long id, long src, long tgt, int typeId,
         long srcPrev, long srcNext, long tgtPrev, long tgtNext)
@@ -268,7 +282,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore
         RecordHelpers.WriteInt48(payload[OffTgtNext..], tgtNext);
         RecordHelpers.WriteInt48(payload[OffFirstProp..], -1L);
         _heap.Insert(id, payload, TransactionId.Bootstrap.Value);
-        _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue, 1));
+        _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 1));
         _locators?.WriteLive(
             id,
             1,
@@ -457,7 +471,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore
 
     // --- private helpers ---
 
-    private static bool AmbientVisible(long xmin, long xmax) => Visibility.IsVisibleAmbient(xmin, xmax);
+    private static bool LatestVisible(long xmin, long xmax) => xmin != 0 && xmax == 0;
 
     private bool TryResolveRecordSequence(
         EdgeId edgeId,

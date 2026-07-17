@@ -131,10 +131,10 @@ internal sealed class ScalarColumnStore
     {
         value = 0;
         if (seq < 0 || seq >= _hwm || _xmin[seq] == 0) return false;
-        if (Visibility.IsVisible(_xmin[seq], _xmax[seq], in snap, self, committed)) { value = _value[seq]; return true; }
+        if (Visibility.IsVisible(_xmin[seq], _xmax[seq], in snap, self)) { value = _value[seq]; return true; }
         if (_delta.TryGetValue(seq, out var list))
             for (int i = list.Count - 1; i >= 0; i--)
-                if (Visibility.IsVisible(list[i].Xmin, list[i].Xmax, in snap, self, committed)) { value = list[i].Val; return true; }
+                if (Visibility.IsVisible(list[i].Xmin, list[i].Xmax, in snap, self)) { value = list[i].Val; return true; }
         return false;
     }
 

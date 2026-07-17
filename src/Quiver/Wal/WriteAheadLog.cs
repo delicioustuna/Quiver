@@ -50,10 +50,16 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     private bool _disposed;
     // クリーン終了時に WAL ファイルを削除するフラグ。backend が最終 flush 後に立てる。
     private bool _deleteOnDispose;
+    private WalWriteSet? _activeWriteSet;
 
     public long CurrentLsn => Volatile.Read(ref _nextLsn) - 1;
     public long FlushedLsn => Volatile.Read(ref _flushedLsn);
     public long BytesWritten => Volatile.Read(ref _bytesWritten);
+    public WalWriteSet? ActiveWriteSet
+    {
+        get => Volatile.Read(ref _activeWriteSet);
+        set => Volatile.Write(ref _activeWriteSet, value);
+    }
 
     /// <summary>バックグラウンドフラッシュループが実際に fsync を起動した回数。</summary>
     public long FlushBatchCount => Volatile.Read(ref _flushBatchCount);

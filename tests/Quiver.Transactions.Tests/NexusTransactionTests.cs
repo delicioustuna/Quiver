@@ -10,7 +10,7 @@ namespace Quiver.Transactions.Tests;
 
 /// <summary>
 /// nexus store の transaction 統合を検証する。
-/// commit、rollback、savepoint、crash recovery、SSN、reader-writer lock をカバーする。
+/// commit、rollback、savepoint、crash recovery、snapshot reader をカバーする。
 /// </summary>
 public sealed class NexusTransactionTests : IDisposable
 {
@@ -37,8 +37,7 @@ public sealed class NexusTransactionTests : IDisposable
     private (TransactionManager Manager, WriteAheadLog Wal, SingleFileContainer Container,
         VersionedNexusStore NexusStore, IncidenceStore IncidenceStore,
         VertexIncidenceHeadStore VertexHeadStore, CommittedTxRegistry Registry) CreateManager(
-        string path,
-        LockingMode lockingMode = LockingMode.ExclusiveOnly)
+        string path)
     {
         var wal = new WriteAheadLog(Path.Combine(_walDir, "wal-" + Path.GetFileNameWithoutExtension(path)));
         var container = new SingleFileContainer(path);
@@ -73,15 +72,11 @@ public sealed class NexusTransactionTests : IDisposable
             wal,
             new StubVertexStore(), new StubEdgeStore(),
             new StubPropertyStore(), new NullIndexManager(),
-            adjStore: null, access: null, undoHandler: undoHandler,
-            lockingMode: lockingMode,
+            adjacencyStore: null, access: null, undoHandler: undoHandler,
             committedRegistry: registry,
-            vertexVersions: new InMemoryEntityVersionStore(),
-            edgeVersions: new InMemoryEntityVersionStore(),
             nexusStore: nexusStore,
             incidenceStore: incidenceStore,
-            vertexIncidenceHeadStore: vertexHeadStore,
-            nexusVersions: nexusVersions);
+            vertexIncidenceHeadStore: vertexHeadStore);
 
         return (manager, wal, container, nexusStore, incidenceStore, vertexHeadStore, registry);
     }
@@ -98,14 +93,14 @@ public sealed class NexusTransactionTests : IDisposable
         using var _ = Disposables(manager, wal, container);
 
         NexusId id;
-        using (var tx = manager.Begin())
+        using (var tx = manager.BeginWrite())
         {
             id = tx.Nexuses.Create(new NexusTypeId(1), TwoMembers(),
                 tx.Incidences, tx.VertexIncidenceHeads);
             tx.Commit();
         }
 
-        using (var tx = manager.Begin())
+        using (var tx = manager.BeginRead())
         {
             using var h = tx.Nexuses.Read(id);
             h.InUse.Should().BeTrue();
@@ -119,14 +114,14 @@ public sealed class NexusTransactionTests : IDisposable
         using var _ = Disposables(manager, wal, container);
 
         NexusId id;
-        using (var tx = manager.Begin())
+        using (var tx = manager.BeginWrite())
         {
             id = tx.Nexuses.Create(new NexusTypeId(1), TwoMembers(),
                 tx.Incidences, tx.VertexIncidenceHeads);
             tx.Abort();
         }
 
-        using (var tx = manager.Begin())
+        using (var tx = manager.BeginRead())
         {
             using var h = tx.Nexuses.Read(id);
             h.InUse.Should().BeFalse();
@@ -140,14 +135,14 @@ public sealed class NexusTransactionTests : IDisposable
         using var _ = Disposables(manager, wal, container);
 
         NexusId id;
-        using (var tx = manager.Begin())
+        using (var tx = manager.BeginWrite())
         {
             id = tx.Nexuses.Create(new NexusTypeId(1), TwoMembers(),
                 tx.Incidences, tx.VertexIncidenceHeads);
             // no commit, dispose triggers abort
         }
 
-        using (var tx = manager.Begin())
+        using (var tx = manager.BeginRead())
         {
             using var h = tx.Nexuses.Read(id);
             h.InUse.Should().BeFalse();
@@ -162,7 +157,7 @@ public sealed class NexusTransactionTests : IDisposable
         var (manager, wal, container, _, _, _, _) = CreateManager(_containerPath);
         using var _ = Disposables(manager, wal, container);
 
-        using var tx = manager.Begin();
+        using var tx = manager.BeginWrite();
         var sp = tx.Savepoint("before_create");
         NexusId id = tx.Nexuses.Create(new NexusTypeId(1), TwoMembers(),
             tx.Incidences, tx.VertexIncidenceHeads);
@@ -178,7 +173,7 @@ public sealed class NexusTransactionTests : IDisposable
         var (manager, wal, container, _, _, _, _) = CreateManager(_containerPath);
         using var _ = Disposables(manager, wal, container);
 
-        using var tx = manager.Begin();
+        using var tx = manager.BeginWrite();
 
         NexusId outer = tx.Nexuses.Create(new NexusTypeId(1), TwoMembers(0, 1),
             tx.Incidences, tx.VertexIncidenceHeads);
@@ -223,12 +218,13 @@ public sealed class NexusTransactionTests : IDisposable
 
                 var txId = new TransactionId(42);
                 wal2.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
-                WalWriteSetContext.Begin(wal2, txId);
+                var writeSet = new WalWriteSet(wal2, txId);
+                wal2.ActiveWriteSet = writeSet;
                 id = store.Create(new NexusTypeId(5), TwoMembers(), incStore, headStore);
-                WalWriteSetContext.FlushPending();
+                writeSet.FlushPending();
                 long commitLsn = wal2.Append(WalRecordType.Commit, txId, ReadOnlySpan<byte>.Empty);
                 wal2.FlushTo(commitLsn);
-                WalWriteSetContext.End();
+                wal2.ActiveWriteSet = null;
             }
 
             using var crashWal = new WriteAheadLog(walPath);
@@ -276,12 +272,13 @@ public sealed class NexusTransactionTests : IDisposable
 
                 var txId = new TransactionId(99);
                 wal2.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
-                WalWriteSetContext.Begin(wal2, txId);
+                var writeSet = new WalWriteSet(wal2, txId);
+                wal2.ActiveWriteSet = writeSet;
                 id = store.Create(new NexusTypeId(5), TwoMembers(), incStore, headStore);
-                WalWriteSetContext.FlushPending();
+                writeSet.FlushPending();
                 long abortLsn = wal2.Append(WalRecordType.Abort, txId, ReadOnlySpan<byte>.Empty);
                 wal2.FlushTo(abortLsn);
-                WalWriteSetContext.End();
+                wal2.ActiveWriteSet = null;
             }
 
             using var crashWal = new WriteAheadLog(walPath);
@@ -315,101 +312,27 @@ public sealed class NexusTransactionTests : IDisposable
         return (store, incStore, headStore);
     }
 
-    // --- SSN (Serializable) ---
-
     [Fact]
-    public void Ssn_write_set_tracks_nexus_entity_kind()
+    public void Snapshot_readers_can_read_the_same_committed_nexus()
     {
         var (manager, wal, container, _, _, _, _) = CreateManager(_containerPath);
         using var _ = Disposables(manager, wal, container);
 
         NexusId id;
-        using (var tx = manager.Begin())
+        using (var tx = manager.BeginWrite())
         {
             id = tx.Nexuses.Create(new NexusTypeId(1), TwoMembers(),
                 tx.Incidences, tx.VertexIncidenceHeads);
             tx.Commit();
         }
 
-        using (var tx = manager.Begin(IsolationLevel.Serializable))
-        {
-            tx.Nexuses.Delete(id);
-            // SSN write-set should contain the nexus entity.
-            // Commit succeeds because no conflicting read dependency exists.
-            var act = () => tx.Commit();
-            act.Should().NotThrow();
-        }
-    }
-
-    // --- reader-writer locking ---
-
-    [Fact]
-    public void Reader_writer_mode_allows_concurrent_shared_reads()
-    {
-        var (manager, wal, container, _, _, _, _) = CreateManager(_containerPath,
-            lockingMode: LockingMode.ReaderWriter);
-        using var _ = Disposables(manager, wal, container);
-
-        NexusId id;
-        using (var tx = manager.Begin())
-        {
-            id = tx.Nexuses.Create(new NexusTypeId(1), TwoMembers(),
-                tx.Incidences, tx.VertexIncidenceHeads);
-            tx.Commit();
-        }
-
-        // Two concurrent readers should not deadlock or timeout.
-        using var tx1 = manager.Begin();
-        using var tx2 = manager.Begin();
+        using var tx1 = manager.BeginRead();
+        using var tx2 = manager.BeginRead();
 
         using var h1 = tx1.Nexuses.Read(id);
         using var h2 = tx2.Nexuses.Read(id);
         h1.InUse.Should().BeTrue();
         h2.InUse.Should().BeTrue();
-    }
-
-    // --- vertex lock ascending order ---
-
-    [Fact]
-    public void Create_acquires_vertex_locks_in_ascending_order()
-    {
-        var (manager, wal, container, _, _, _, _) = CreateManager(_containerPath);
-        using var _ = Disposables(manager, wal, container);
-
-        // Creating a nexus with descending vertex IDs should succeed
-        // (internal sorting prevents deadlocks with ascending lock acquisition).
-        using var tx = manager.Begin();
-        var members = new IncidenceMember[]
-        {
-            new(new VertexId(100), new RoleId(1)),
-            new(new VertexId(50), new RoleId(1)),
-            new(new VertexId(200), new RoleId(1)),
-        };
-
-        var act = () => tx.Nexuses.Create(new NexusTypeId(1), members,
-            tx.Incidences, tx.VertexIncidenceHeads);
-        act.Should().NotThrow();
-        tx.Commit();
-    }
-
-    // --- DeadlockDetector now monitors nexus locks ---
-
-    [Fact]
-    public void Deadlock_detector_includes_nexus_lock_manager()
-    {
-        var (manager, wal, container, _, _, _, _) = CreateManager(_containerPath);
-        using var _ = Disposables(manager, wal, container);
-
-        // Simple smoke: creating and committing exercises the nexus lock manager
-        // which is monitored by DeadlockDetector. No hang = pass.
-        using (var tx = manager.Begin())
-        {
-            tx.Nexuses.Create(new NexusTypeId(1), TwoMembers(),
-                tx.Incidences, tx.VertexIncidenceHeads);
-            tx.Commit();
-        }
-
-        manager.ActiveCount.Should().Be(0);
     }
 
     // --- helpers ---

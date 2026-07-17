@@ -24,6 +24,20 @@ public sealed class StorageException(string message, Exception? inner = null)
 public sealed class TransactionException(string message, Exception? inner = null)
     : QuiverException(message, inner!);
 
+/// <summary>同じトランザクションハンドルが同時に使用された場合の例外です。</summary>
+public sealed class ConcurrentTransactionUseException : QuiverException
+{
+    /// <summary>競合したトランザクションIDを指定して例外を生成します。</summary>
+    public ConcurrentTransactionUseException(TransactionId transactionId)
+        : base($"Transaction {transactionId.Value} is already in use by another execution flow.")
+    {
+        TransactionId = transactionId;
+    }
+
+    /// <summary>競合したトランザクションID。</summary>
+    public TransactionId TransactionId { get; }
+}
+
 /// <summary>制約違反 (一意制約など) を表す例外。</summary>
 /// <param name="message">エラーメッセージ。</param>
 /// <param name="inner">原因となった内部例外 (任意)。</param>

@@ -35,7 +35,7 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
             tx.SetProperty(nid, "Site", PropertyValue.FromString("A"));
             var vec = new float[Dim];
             vec[i % Dim] = 1f;
-            _db.Vectors.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
+            tx.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
         }
         tx.Commit();
     }
@@ -94,7 +94,7 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
                 using var tx = _db.BeginTransaction();
                 var nid = tx.CreateVertex("Sensor");
                 tx.SetProperty(nid, "Site", PropertyValue.FromString("B"));
-                _db.Vectors.SetVector(EntityKind.Vertex, nid.Value, VecIndex,
+                tx.SetVector(EntityKind.Vertex, nid.Value, VecIndex,
                     [0.1f * i, 0.2f, 0.3f, 0.4f]);
                 tx.Commit();
             }

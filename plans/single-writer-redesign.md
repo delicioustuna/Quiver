@@ -985,6 +985,13 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 
 ## 16. decision log
 
+### 2026-07-17: Critical review の設計解決と実装検証を分離
+
+- **背景**：review C-8 は設計、検証方法、実装 Wave が確定している一方、実装完了まで「実装未対応」とする記述だった。`quiver-implement` は未対応 Critical の該当箇所を実装禁止とするため、Wave 4 の実装でしか満たせない条件が Wave 4 の着手を禁止する循環になっていた。
+- **選択肢**：(a) 実装完了まで Critical を未対応のままにして個別例外で Wave 4 を開始する、(b) Critical の `対応済み` を設計矛盾の解消、検証方法、実装 Wave の確定として扱い、コードの完成は Wave 指示書の gate で別に検証する。
+- **決定**：(b)。個別例外は review 正本と skill の着手条件を形骸化する。review C-8 は設計対応済みにし、SSN call site の除去と entity metadata の三 lane 化は Wave 4 の追加条件として合否判定する。
+- **検証方法**：Wave 4 着手前に review C-8 が対応済みであり、Wave 4 指示書が production source の pstamp/sstamp/SSN hook 0 件、metadata `(xmin,xmax,generation)`、24 byte record、page-boundary/reopen test を列挙していることを確認する。Wave 4 の merge/tag は当該 gate 成功後だけ許可する。
+
 ### 2026-07-16: entity metadata 縮約を SSN 削除境界へ集約
 
 - **背景**：Wave 3 は `EntityVersionMeta` を `(xmin,xmax,generation)` へ縮約する一方、現行 `Transaction` は Wave 4 まで同じ sidecar の `Pstamp` / `Sstamp` と更新 API を SSN 判定に使用する。字義どおり Wave 3 で lane を除去すると、Wave 4 の transaction rewrite より先に production build が成立しなくなる。

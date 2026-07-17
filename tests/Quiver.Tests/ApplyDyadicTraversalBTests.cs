@@ -51,7 +51,7 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
                 tx.SetProperty(nid, "Site", PropertyValue.FromString("A"));
                 var vec = new float[Dim];
                 vec[i] = 1f;
-                _db.Vectors.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
+                tx.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
             }
 
             // 参照ベクトルを float[] プロパティに持つ Template Vertexを作る。
@@ -94,7 +94,7 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
         {
             var nid = tx.CreateVertex("Sensor");
             tx.SetProperty(nid, "Site", PropertyValue.FromString("A"));
-            _db.Vectors.SetVector(EntityKind.Vertex, nid.Value, VecIndex, [1f, 0f, 0f, 0f]);
+            tx.SetVector(EntityKind.Vertex, nid.Value, VecIndex, [1f, 0f, 0f, 0f]);
             tx.Commit();
         }
 

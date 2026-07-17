@@ -139,6 +139,6 @@ public sealed class VectorTransactionTests : IDisposable
         db.Vectors.CreateVectorIndex(Spec(db));
         using var rtx = db.BeginReadOnlyTransaction();
         var act = () => rtx.SetVector(EntityKind.Vertex, 0, IndexName, new float[] { 1, 0, 0, 0 });
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<TransactionException>();
     }
 }

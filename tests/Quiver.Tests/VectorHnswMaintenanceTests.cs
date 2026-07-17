@@ -131,7 +131,7 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
                 vertexIds.Add(n.Value);
                 var v = RandomVec(rng, Dim);
                 vecs.Add(v);
-                db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
+                tx.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -176,7 +176,7 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
                 var v = RandomVec(rng, Dim);
                 stableIds.Add(n.Value);
                 stableVecs.Add(v);
-                db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
+                tx.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -191,7 +191,7 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
                 {
                     var n = tx.CreateVertex("Doc");
                     churnIds.Add(n.Value);
-                    db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, RandomVec(rng, Dim));
+                    tx.SetVector(EntityKind.Vertex, n.Value, IndexName, RandomVec(rng, Dim));
                 }
                 tx.Commit();
             }

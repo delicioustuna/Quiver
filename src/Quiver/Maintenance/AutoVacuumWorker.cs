@@ -17,7 +17,7 @@ namespace Quiver.Maintenance;
 ///  <item>tick は逐次実行 (re-entrancy ガード)。前回 tick がまだ走っている間に
 ///  次の周期が来ても二重起動しない。長時間 vacuum が周期を食い潰しても貯まらない。</item>
 ///  <item>vacuum 中の例外はワーカー内で握り潰す。バックグラウンドの失敗で本体 DB を
-///  巻き込まない (<see cref="DeadlockDetector"/> と同じ方針)。</item>
+///  巻き込まない。</item>
 ///  <item><see cref="Dispose"/> は idempotent。進行中 tick の完了を最大
 ///  <see cref="StopJoinTimeout"/> まで待ってから戻る。</item>
 /// </list>

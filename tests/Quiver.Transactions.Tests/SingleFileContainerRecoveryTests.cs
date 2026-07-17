@@ -80,12 +80,13 @@ public class SingleFileContainerRecoveryTests : IDisposable
 
             var txId = new TransactionId(42);
             _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
-            WalWriteSetContext.Begin(_wal, txId);
+            var writeSet = new WalWriteSet(_wal, txId);
+            _wal.ActiveWriteSet = writeSet;
             id = store.Allocate(new LabelId(7));
-            WalWriteSetContext.FlushPending();
+            writeSet.FlushPending();
             long commitLsn = _wal.Append(WalRecordType.Commit, txId, ReadOnlySpan<byte>.Empty);
             _wal.FlushTo(commitLsn);
-            WalWriteSetContext.End();
+            _wal.ActiveWriteSet = null;
         }
 
         // pre-tx スナップショット (crashPath) へ WAL を recover。
@@ -113,13 +114,14 @@ public class SingleFileContainerRecoveryTests : IDisposable
 
             var txId = new TransactionId(99);
             _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
-            WalWriteSetContext.Begin(_wal, txId);
+            var writeSet = new WalWriteSet(_wal, txId);
+            _wal.ActiveWriteSet = writeSet;
             id = store.Allocate(new LabelId(7));
-            WalWriteSetContext.FlushPending();
+            writeSet.FlushPending();
             // Commit ではなく Abort。recovery は committed でないページイメージを redo しない。
             long abortLsn = _wal.Append(WalRecordType.Abort, txId, ReadOnlySpan<byte>.Empty);
             _wal.FlushTo(abortLsn);
-            WalWriteSetContext.End();
+            _wal.ActiveWriteSet = null;
         }
 
         using var dst = new SingleFileContainer(_crashPath);

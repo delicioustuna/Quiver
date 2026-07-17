@@ -44,11 +44,8 @@ public sealed class QuiverConfigurationOptions
     /// <summary>Adaptive 移動平均のサンプル窓 (トランザクション数)。既定 1000。</summary>
     public int AdaptiveSampleWindow { get; set; } = 1000;
 
-    /// <summary>ロック取得のタイムアウト。既定 5 秒。</summary>
+    /// <summary>writer lease 取得のタイムアウト。既定 5 秒。</summary>
     public TimeSpan LockTimeout { get; set; } = TimeSpan.FromSeconds(5);
-
-    /// <summary>ロック戦略。</summary>
-    public LockingMode LockingMode { get; set; } = LockingMode.ExclusiveOnly;
 
     /// <summary>ページのチェックサム計算 / 検証を有効にするか。既定 <c>true</c>。</summary>
     public bool EnableChecksums { get; set; } = true;
@@ -58,9 +55,6 @@ public sealed class QuiverConfigurationOptions
 
     /// <summary>open 完了後に索引 orphan を自動修復するか。既定 <c>false</c>。</summary>
     public bool AutoRepairOrphansOnRecovery { get; set; }
-
-    /// <summary>デッドロック検出器の周期。null または 0 以下で無効 (既定)。</summary>
-    public TimeSpan? DeadlockDetectionInterval { get; set; }
 
     /// <summary>WAL グループコミットの coalesce window。既定 0 (無効)。</summary>
     public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.Zero;
@@ -81,11 +75,9 @@ public sealed class QuiverConfigurationOptions
             MaxCheckpointThresholdBytes = MaxCheckpointThresholdBytes,
             AdaptiveSampleWindow = AdaptiveSampleWindow,
             LockTimeout = LockTimeout,
-            LockingMode = LockingMode,
             EnableChecksums = EnableChecksums,
             Backend = Backend,
             AutoRepairOrphansOnRecovery = AutoRepairOrphansOnRecovery,
-            DeadlockDetectionInterval = DeadlockDetectionInterval,
             GroupCommitWindow = GroupCommitWindow,
         };
     }

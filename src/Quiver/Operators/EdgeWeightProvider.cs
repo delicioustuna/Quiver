@@ -23,6 +23,22 @@ internal interface IEdgeWeightProvider
     double GetWeight(ITransaction tx, EdgeId edgeId, long weightRaw);
 }
 
+/// <summary>A* の推定残コストを transaction の明示的 snapshot store から計算する。</summary>
+internal interface ITransactionVertexHeuristic
+{
+    double Estimate(ITransaction transaction, VertexId vertex);
+}
+
+internal sealed class DelegateVertexHeuristic(Func<VertexId, double> heuristic)
+    : ITransactionVertexHeuristic
+{
+    public double Estimate(ITransaction transaction, VertexId vertex)
+    {
+        _ = transaction;
+        return heuristic(vertex);
+    }
+}
+
 /// <summary>
 /// Edgeのプロパティチェーンを走査して重みを取得する既定の
 /// <see cref="IEdgeWeightProvider"/>。セットアップ不要でどのバックエンドでも動くが、
