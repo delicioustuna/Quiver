@@ -38,6 +38,33 @@ public sealed class ConcurrentTransactionUseException : QuiverException
     public TransactionId TransactionId { get; }
 }
 
+/// <summary>
+/// 未コミットページをディスクへ退避せずに保持できる安全容量を、
+/// 一つの書き込みトランザクションが超えた場合の例外です。
+/// </summary>
+public sealed class TransactionTooLargeException : QuiverException
+{
+    /// <summary>対象トランザクションとバッファプール容量を指定して例外を生成します。</summary>
+    /// <param name="transactionId">容量を超えたトランザクションID。</param>
+    /// <param name="bufferPoolPageCapacity">利用可能なバッファプールのページ数。</param>
+    public TransactionTooLargeException(
+        TransactionId transactionId,
+        int bufferPoolPageCapacity)
+        : base(
+            $"Transaction {transactionId.Value} exceeded the no-steal buffer capacity " +
+            $"of {bufferPoolPageCapacity} pages.")
+    {
+        TransactionId = transactionId;
+        BufferPoolPageCapacity = bufferPoolPageCapacity;
+    }
+
+    /// <summary>容量を超えたトランザクションID。</summary>
+    public TransactionId TransactionId { get; }
+
+    /// <summary>超過判定に使用したバッファプールのページ数。</summary>
+    public int BufferPoolPageCapacity { get; }
+}
+
 /// <summary>制約違反 (一意制約など) を表す例外。</summary>
 /// <param name="message">エラーメッセージ。</param>
 /// <param name="inner">原因となった内部例外 (任意)。</param>

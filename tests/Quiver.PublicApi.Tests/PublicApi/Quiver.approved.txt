@@ -1212,6 +1212,12 @@ namespace Quiver.Core
         public bool IsValid { get; }
         public long Value { get; init; }
     }
+    public sealed class TransactionTooLargeException : Quiver.Core.QuiverException
+    {
+        public TransactionTooLargeException(Quiver.Core.TransactionId transactionId, int bufferPoolPageCapacity) { }
+        public int BufferPoolPageCapacity { get; }
+        public Quiver.Core.TransactionId TransactionId { get; }
+    }
     public enum VectorElementType : byte
     {
         Float32 = 0,

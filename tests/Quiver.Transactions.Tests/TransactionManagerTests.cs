@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Quiver.Core;
 using Quiver.Index;
+using Quiver.Storage;
 using Quiver.Storage.Records;
 using Quiver.Storage.Wal;
 using Xunit;
@@ -143,6 +144,52 @@ public class TransactionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task Checkpoint_waits_for_the_active_writer_lease()
+    {
+        var pages = new RecordingPageManager();
+        var checkpointer = new Checkpointer(
+            pages,
+            _wal,
+            () => _manager.OldestActiveLsn);
+        _manager.EnableCheckpointing(checkpointer, thresholdBytes: 0);
+        using ITransaction writer = _manager.BeginWrite();
+        using var requestStarted = new ManualResetEventSlim();
+
+        Task checkpoint = Task.Run(() =>
+        {
+            requestStarted.Set();
+            _manager.RequestCheckpoint();
+        });
+
+        requestStarted.Wait(TimeSpan.FromSeconds(1)).Should().BeTrue();
+        await Task.Delay(TimeSpan.FromMilliseconds(100));
+        checkpoint.IsCompleted.Should().BeFalse();
+        pages.FlushCount.Should().Be(0);
+
+        writer.Abort();
+        await checkpoint.WaitAsync(TimeSpan.FromSeconds(5));
+        pages.FlushCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void Checkpoint_does_not_wait_for_active_readers()
+    {
+        var pages = new RecordingPageManager();
+        var checkpointer = new Checkpointer(
+            pages,
+            _wal,
+            () => _manager.OldestActiveLsn);
+        _manager.EnableCheckpointing(checkpointer, thresholdBytes: 0);
+        using ITransaction reader = _manager.BeginRead();
+
+        _manager.RequestCheckpoint();
+
+        reader.State.Should().Be(TransactionState.Active);
+        pages.FlushCount.Should().Be(1);
+        reader.Commit();
+    }
+
+    [Fact]
     public void Durable_publish_failure_faults_manager_and_rejects_new_operations()
     {
         string directory = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -174,6 +221,23 @@ public class TransactionManagerTests : IDisposable
         manager.Dispose();
         wal.Dispose();
         if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
+
+    private sealed class RecordingPageManager : IPageManager
+    {
+        private int _flushCount;
+
+        internal int FlushCount => Volatile.Read(ref _flushCount);
+
+        public IPagedFile OpenOrCreate(string path, PageKind defaultKind)
+            => throw new NotSupportedException();
+
+        public void FlushAll()
+            => Interlocked.Increment(ref _flushCount);
+
+        public void Dispose()
+        {
+        }
     }
 
     // ---- Commit hook テスト ----

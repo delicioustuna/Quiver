@@ -60,7 +60,7 @@ using var db = QuiverDatabase.Open(dir);   // ← ここで WAL replay (recovery
 
 ### C. `StorageFormatMismatchException` / `WalFormatMismatchException` で開けない
 
-**原因**: QUIVER-SW family version 1 ではない DB または WAL を開こうとしている。
+**原因**: QUIVER-SW family version 2 ではない DB または WAL を開こうとしている。
 
 **対処**:
 

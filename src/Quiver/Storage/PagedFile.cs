@@ -98,6 +98,12 @@ internal sealed class PagedFile : IPagedFile
     {
         lock (_poolLock)
         {
+            if (_wal?.ActiveWriteSet is not null)
+                return AllocatePageNoStealLocked(kind);
+
+            // 直前の no-force commit が meta/free-list の最新状態を frame に残している場合がある。
+            // transaction 外の allocation は、その committed dirty state を MMF へ反映してから読む。
+            FlushDirtyFramesLocked();
             byte[] metaBuf = ArrayPool<byte>.Shared.Rent(PageSizeConst);
             try
             {
@@ -157,10 +163,85 @@ internal sealed class PagedFile : IPagedFile
         }
     }
 
+    /// <summary>
+    /// active writer 中の allocation metadata を通常の dirty frame として更新する。
+    /// 末尾ページの物理領域は到達不能なため先に確保できるが、meta page と free-list page は
+    /// strict Commit 前にデータファイルへ公開しない。
+    /// </summary>
+    private PageId AllocatePageNoStealLocked(PageKind kind)
+    {
+        var meta = PinForWrite(MetaPageId);
+        try
+        {
+            Span<byte> metaBody = meta.Data;
+            long firstFree = BinaryPrimitives.ReadInt64LittleEndian(
+                metaBody[MetaOffsetFirstFree..]);
+            long pageCount = BinaryPrimitives.ReadInt64LittleEndian(
+                metaBody[MetaOffsetPageCount..]);
+
+            if (firstFree >= 0)
+            {
+                var newPageId = new PageId(firstFree);
+                var free = PinForWrite(newPageId);
+                try
+                {
+                    long nextFree = BinaryPrimitives.ReadInt64LittleEndian(free.Data);
+                    BinaryPrimitives.WriteInt64LittleEndian(
+                        metaBody[MetaOffsetFirstFree..],
+                        nextFree);
+                    free.Raw.Clear();
+                    PageHeader.Write(free.Raw, newPageId, kind, lsn: 0);
+                }
+                finally
+                {
+                    free.Dispose();
+                }
+                return newPageId;
+            }
+
+            var appendedPageId = new PageId(pageCount);
+            EnsureFileSizeAndRemapLocked(pageCount + 1);
+
+            byte[] newBuffer = ArrayPool<byte>.Shared.Rent(PageSizeConst);
+            try
+            {
+                newBuffer.AsSpan(0, PageSizeConst).Clear();
+                PageHeader.Write(
+                    newBuffer.AsSpan(0, PageSizeConst),
+                    appendedPageId,
+                    kind,
+                    lsn: 0);
+                // 既存の committed 構造から到達不能な末尾領域だけを物理確保する。
+                MmfWritePageAndSync(appendedPageId, newBuffer);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(newBuffer);
+            }
+
+            BinaryPrimitives.WriteInt64LittleEndian(
+                metaBody[MetaOffsetPageCount..],
+                pageCount + 1);
+            _logicalPageCount = pageCount + 1;
+            return appendedPageId;
+        }
+        finally
+        {
+            meta.Dispose();
+        }
+    }
+
     public void FreePage(PageId pageId)
     {
         lock (_poolLock)
         {
+            if (_wal?.ActiveWriteSet is not null)
+            {
+                FreePageNoStealLocked(pageId);
+                return;
+            }
+
+            FlushDirtyFramesLocked();
             byte[] metaBuf = ArrayPool<byte>.Shared.Rent(PageSizeConst);
             byte[] freeBuf = ArrayPool<byte>.Shared.Rent(PageSizeConst);
             try
@@ -250,18 +331,24 @@ internal sealed class PagedFile : IPagedFile
         lock (_poolLock)
         {
             if (!_pageToFrame.TryGetValue(pageId, out int frame)) return;
+            WalWriteSet? writeSet = _wal?.ActiveWriteSet;
 
             // WAL ログ書き込み前にヘッダの LSN とチェックサムを更新し、ページイメージを有効化する。
             PageHeader.UpdateLsnAndChecksum(_frames[frame].Buffer.AsSpan(), lsn);
 
             // WAL-first: クラッシュリカバリでコミット済み書き込みを再生できるよう、ページイメージをログに残す。
             if (_walFileKind is byte fileKind)
-                _wal?.ActiveWriteSet?.LogPageImage(
+                writeSet?.LogPageImage(
                     fileKind,
                     pageId.Value,
-                    _frames[frame].Buffer.AsSpan(0, PageSizeConst));
+                    _frames[frame].Buffer.AsSpan(0, PageSizeConst),
+                    committedLsn => StampCommittedLsn(
+                        pageId,
+                        writeSet.TransactionId,
+                        committedLsn));
 
             _frames[frame].IsDirty = true;
+            _frames[frame].DirtyTransactionId = writeSet?.TransactionId.Value ?? 0;
             Interlocked.Decrement(ref _frames[frame].PinCount);
             lockedFrame = frame;
         }
@@ -278,6 +365,7 @@ internal sealed class PagedFile : IPagedFile
     public void WritePageForRecovery(PageId pageId, ReadOnlySpan<byte> pageBytes)
     {
         if (pageBytes.Length != PageSizeConst) return;
+        PageHeader.Validate(pageBytes, pageId);
         lock (_poolLock)
         {
             EnsureFileSizeAndRemapLocked(pageId.Value + 1);
@@ -302,6 +390,77 @@ internal sealed class PagedFile : IPagedFile
             {
                 pageBytes.CopyTo(_frames[frame].Buffer.AsSpan());
                 _frames[frame].IsDirty = false;
+                _frames[frame].DirtyTransactionId = 0;
+            }
+        }
+    }
+
+    private void FreePageNoStealLocked(PageId pageId)
+    {
+        var meta = PinForWrite(MetaPageId);
+        try
+        {
+            long currentFirstFree = BinaryPrimitives.ReadInt64LittleEndian(
+                meta.Data[MetaOffsetFirstFree..]);
+            var freed = PinForWrite(pageId);
+            try
+            {
+                freed.Raw.Clear();
+                BinaryPrimitives.WriteInt64LittleEndian(
+                    freed.Data,
+                    currentFirstFree);
+                PageHeader.Write(freed.Raw, pageId, PageKind.Free, lsn: 0);
+            }
+            finally
+            {
+                freed.Dispose();
+            }
+
+            BinaryPrimitives.WriteInt64LittleEndian(
+                meta.Data[MetaOffsetFirstFree..],
+                pageId.Value);
+        }
+        finally
+        {
+            meta.Dispose();
+        }
+    }
+
+    public long ReadPageLsnForRecovery(PageId pageId)
+    {
+        lock (_poolLock)
+        {
+            if (_pageToFrame.TryGetValue(pageId, out int frame))
+            {
+                try
+                {
+                    PageHeader.Validate(_frames[frame].Buffer, pageId);
+                    return PageHeader.ReadLsn(_frames[frame].Buffer);
+                }
+                catch (QuiverException)
+                {
+                    return -1;
+                }
+            }
+
+            long offset = pageId.Value * (long)PageSizeConst;
+            if (pageId.Value < 0 || offset + PageSizeConst > _fileStream.Length)
+                return -1;
+
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(PageSizeConst);
+            try
+            {
+                MmfReadPage(pageId, buffer);
+                PageHeader.Validate(buffer.AsSpan(0, PageSizeConst), pageId);
+                return PageHeader.ReadLsn(buffer);
+            }
+            catch (QuiverException)
+            {
+                return -1;
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
             }
         }
     }
@@ -335,6 +494,9 @@ internal sealed class PagedFile : IPagedFile
         lock (_poolLock)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_wal?.ActiveWriteSet is not null)
+                throw new TransactionException(
+                    "Cannot truncate a page file while a write transaction is active.");
             if (newPageCount >= _logicalPageCount) return;
 
             // 1. 削除対象範囲のキャッシュフレームを drop (dirty も discard — vacuum 前提で
@@ -350,6 +512,7 @@ internal sealed class PagedFile : IPagedFile
                 _pageToFrame.Remove(f.PageId);
                 f.PageId = PageId.Invalid;
                 f.IsDirty = false;
+                f.DirtyTransactionId = 0;
                 f.Referenced = false;
             }
 
@@ -431,21 +594,41 @@ internal sealed class PagedFile : IPagedFile
     // Clock (Second-Chance) アルゴリズム。_poolLock 保持下で呼び出す。
     private int FindVictim()
     {
-        while (true)
+        int probes = 0;
+        int maximumProbes = checked(_poolCapacity * 2);
+        while (probes++ < maximumProbes)
         {
             ref PoolFrame f = ref _frames[_clockHand];
             if (f.PinCount == 0)
             {
                 if (!f.Referenced)
                 {
-                    int victim = _clockHand;
-                    _clockHand = (_clockHand + 1) % _poolCapacity;
-                    return victim;
+                    if (!IsUncommittedDirty(f))
+                    {
+                        int victim = _clockHand;
+                        _clockHand = (_clockHand + 1) % _poolCapacity;
+                        return victim;
+                    }
                 }
-                f.Referenced = false;
+                else
+                {
+                    f.Referenced = false;
+                }
             }
             _clockHand = (_clockHand + 1) % _poolCapacity;
         }
+
+        WalWriteSet? active = _wal?.ActiveWriteSet;
+        if (active is not null)
+        {
+            active.MarkTooLarge(_poolCapacity);
+            throw new TransactionTooLargeException(
+                active.TransactionId,
+                _poolCapacity);
+        }
+
+        throw new StorageException(
+            $"Buffer pool has no evictable frame among {_poolCapacity} pages.");
     }
 
     // _poolLock 保持下で呼び出す。
@@ -456,14 +639,43 @@ internal sealed class PagedFile : IPagedFile
         {
             if (f.IsDirty)
             {
-                // データページより先に、現在 WAL に出力済みのレコードを durable にする。
-                // Single Writer 統合後の no-steal 境界は再設計の後続 wave で完成させる。
+                // 未 commit owner の frame は FindVictim が候補から除外する。ここへ到達する
+                // dirty frame は Commit が durable 済みか transaction 外で作られたものだけである。
                 FlushWalBeforeDataWrite();
                 MmfWritePage(f.PageId, f.Buffer);
             }
             _pageToFrame.Remove(f.PageId);
             f.PageId = PageId.Invalid;
             f.IsDirty = false;
+            f.DirtyTransactionId = 0;
+        }
+    }
+
+    private bool IsUncommittedDirty(PoolFrame frame)
+    {
+        if (!frame.IsDirty || frame.DirtyTransactionId == 0)
+            return false;
+        WalWriteSet? active = _wal?.ActiveWriteSet;
+        return active is not null
+            && active.TransactionId.Value == frame.DirtyTransactionId;
+    }
+
+    private void StampCommittedLsn(
+        PageId pageId,
+        TransactionId transactionId,
+        long lsn)
+    {
+        lock (_poolLock)
+        {
+            if (!_pageToFrame.TryGetValue(pageId, out int frame))
+                return;
+            ref PoolFrame current = ref _frames[frame];
+            if (!current.IsDirty
+                || current.DirtyTransactionId != transactionId.Value)
+            {
+                return;
+            }
+            PageHeader.UpdateLsnAndChecksum(current.Buffer, lsn);
         }
     }
 
@@ -500,28 +712,36 @@ internal sealed class PagedFile : IPagedFile
         {
             buffer.AsSpan(0, PageSizeConst).CopyTo(_frames[frame].Buffer);
             _frames[frame].IsDirty = false;
+            _frames[frame].DirtyTransactionId = 0;
         }
     }
 
     // ダーティなフレームを全て MMF に書き出す。_poolLock 保持下で呼び出す。
     private void FlushDirtyFramesLocked()
     {
-        bool anyDirty = false;
+        bool anyFlushableDirty = false;
         for (int i = 0; i < _poolCapacity; i++)
         {
-            if (_frames[i].IsDirty && _frames[i].PageId.IsValid) { anyDirty = true; break; }
+            if (_frames[i].IsDirty
+                && _frames[i].PageId.IsValid
+                && !IsUncommittedDirty(_frames[i]))
+            {
+                anyFlushableDirty = true;
+                break;
+            }
         }
         // データページを書き出す前に WAL を先行フラッシュする (checkpoint / Flush /
         // ファイル拡張時の remap 経路も含む write-ahead 順序)。
-        if (anyDirty) FlushWalBeforeDataWrite();
+        if (anyFlushableDirty) FlushWalBeforeDataWrite();
 
         for (int i = 0; i < _poolCapacity; i++)
         {
             ref PoolFrame f = ref _frames[i];
-            if (f.IsDirty && f.PageId.IsValid)
+            if (f.IsDirty && f.PageId.IsValid && !IsUncommittedDirty(f))
             {
                 MmfWritePage(f.PageId, f.Buffer);
                 f.IsDirty = false;
+                f.DirtyTransactionId = 0;
             }
         }
     }
@@ -635,6 +855,7 @@ internal sealed class PagedFile : IPagedFile
         public int PinCount;
         public bool Referenced;
         public bool IsDirty;
+        public long DirtyTransactionId;
         public readonly byte[] Buffer = new byte[PageSizeConst];
         // per-frame RW lock — Pin{Read|Write} 中の他スレッドからのページバッファ
         // 並行アクセスを排他する。同一ページ上の異なるレコードを別 tx (= 別スレッド) が

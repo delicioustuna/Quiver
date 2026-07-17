@@ -774,8 +774,7 @@ public sealed class VacuumTests : IDisposable
         Core.NexusId dead, alive, added;
         Core.VertexId a, b;
 
-        // まず論理削除までを正常終了し、vacuum 前のデータファイルを
-        // 「クラッシュ時に未フラッシュだったページ」の基準スナップショットにする。
+        // まず論理削除までを正常終了する。
         using (var db = QuiverDatabase.Open(path))
         {
             using (var tx = db.BeginTransaction())
@@ -792,14 +791,13 @@ public sealed class VacuumTests : IDisposable
                 tx.Commit();
             }
         }
-        byte[] preVacuumData = File.ReadAllBytes(path);
-
         {
             var db = QuiverDatabase.Open(path);
             db.Vacuum().ReclaimedNexuses.Should().Be(1);
 
-            // vacuum 後に回収 slot を再利用するコミットを積む。未完了 tx を残して
-            // clean shutdown を抑止し、コミット済み WAL を保持する。
+            // vacuum は返却前に sharp checkpoint を完了する。
+            // その後に回収 slot を再利用するコミットを積み、未完了 tx を残して
+            // clean shutdown を抑止することで、追加分は WAL recovery から復元する。
             using (var tx = db.BeginTransaction())
             {
                 added = tx.CreateNexus("Fact", [new("S", a), new("O", b)]);
@@ -809,9 +807,6 @@ public sealed class VacuumTests : IDisposable
             db.Dispose();
         }
 
-        // データファイルだけを vacuum 前へ戻し、WAL は残す。再オープン時の redo が
-        // vacuum 後にコミットした再利用 entity と incidence chain を復元する。
-        File.WriteAllBytes(path, preVacuumData);
         using (var db = QuiverDatabase.Open(path))
         {
             using (var read = db.BeginReadOnlyTransaction())

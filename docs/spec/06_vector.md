@@ -1,6 +1,6 @@
 # ベクトル検索
 
-> as-built 仕様（QUIVER-SW family version 1、2026-07-16）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
 
 ## ベクトルインデックス仕様 {#vector-index}
 

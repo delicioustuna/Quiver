@@ -31,15 +31,12 @@ internal sealed class NullWriteAheadLog : IWriteAheadLog
         // 永続化先がないため常に flush 済みとして扱う。
     }
 
-
-    public void BufferPageImage(TransactionId tx, byte fileKind, long pageId, byte[] payload)
-    {
-        // ページ本体は InMemoryPagedFile に保持されるため WAL 側には複製しない。
-    }
-
-    public void EvictCoalescedPageImagesFor(TransactionId tx)
-    {
-    }
+    public long AppendPageImage(
+        TransactionId tx,
+        byte fileKind,
+        long pageId,
+        ReadOnlySpan<byte> pageBytes)
+        => Interlocked.Increment(ref _currentLsn);
 
     public long WriteCheckpointBegin(long oldestActiveLsn, int dirtyPageCount)
         => CurrentLsn;

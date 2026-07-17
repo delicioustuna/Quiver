@@ -1,6 +1,6 @@
 # ストレージ & ページング
 
-> as-built 仕様（QUIVER-SW family version 1、2026-07-17）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
 
 ## ページフォーマット {#page-format}
 
@@ -17,9 +17,10 @@
 
 - デフォルト容量: 256 フレーム (`DefaultPoolCapacity`)
 - 退避: `_clockHand` でフレームを走査する **Clock (second-chance)** アルゴリズム
-- dirty frame の退避経路は残る。
-  transaction-owned before-image はプロセス内 abort と savepoint rollback に使う。
-  Single Writer の no-steal 統合はまだ完了していない。
+- active writer が所有する dirty frame は退避せず、データファイルにも書かない。
+- committed dirty frame は checkpoint または退避時にデータファイルへ書ける。
+- pin できる退避候補が尽きると、書き込みトランザクションを `TransactionTooLargeException` で中止する。
+  transaction-owned before-image を適用してから writer lease を解放するため、chunk commit で再試行できる。
 
 ### Pin / Unpin プロトコル {#pin-unpin}
 
@@ -28,7 +29,10 @@
 | `PinForRead(PageId)` | フレーム read ロック | `ReadOnlySpan<byte>` を返し、pin カウントを増やす |
 | `PinForWrite(PageId)` | フレーム write ロック | `PageWriteHandle` を返し、write set に before-image を取得する |
 | `Unpin(PageId)` | read ロックを解放 | pin カウントを減らす |
-| `UnpinDirty(PageId, lsn)` | write ロックを解放 | ヘッダの LSN+チェックサムを更新し、PageImage を WAL にログ、dirty マーク |
+| `UnpinDirty(PageId, lsn)` | write ロックを解放 | transaction-owned write set へ最終 after-image を登録し、dirty owner を記録する |
+
+`UnpinDirty` の時点では page LSN を確定しない。
+commit が `PageImage` を追記するときに割り当てた LSN を WAL payload とフレームの両方へ刻み、`Commit` の fsync 後に dirty owner を解除する。
 
 ### ページアロケーション {#page-allocation}
 
@@ -39,7 +43,8 @@
 - 容量不足時は 1、2、4、8、16、32、64 MiB の段階で成長する
 - 一回の増分上限は既定 64 MiB であり、初期量と上限は option で設定できる
 - すべての確保量は 8 KiB page 境界へ切り上げる
-- アロケーションは WAL をバイパスする（`MmfWritePageAndSync` で LSN=0 として直接書き込む）
+- committed allocation high-water を超える末尾ページは、既存の committed 構造から到達不能な物理領域として commit 前に確保できる
+- root、catalog、free-list から新規ページを到達可能にする after-image は、同じ transaction-owned write set と strict Commit 境界に従う
 
 ### メモリマップトファイル {#mmf}
 
@@ -72,12 +77,15 @@ Primary vector payload の metadata と blob は固定テナント 29、30 に�
 WAL リカバリフェーズ中に復旧される。
 
 正常終了後の再オープンでは、カタログから versioned entity store、owner-bound property store、primary payload store、adjacency segment を同じ形式で復元する。
-process kill 後の winner redo と checkpoint 境界は、現行の crash recovery 契約に従う。
+カタログは checkpoint 済み committed high-water と次の transaction ID も保持する。
+process kill 後は、最後に完了した checkpoint 以降の winner redo と transaction ID 復元を通常 operation より先に終える。
 
 ## WAL サイドカー {#wal-sidecar}
 
-WAL は単一のサイドカーファイル `*.quiver-wal` に存在する。チェックポイントは dirty ページと
-インデックスをデータファイルにフラッシュし、その後 WAL を切り詰める。
+WAL は単一のサイドカーファイル `*.quiver-wal` に存在する。
+チェックポイントは writer lease を取得して active writer がいない境界を作り、`CheckpointBegin` を fsync してから committed dirty page とカタログを flush する。
+データファイルの flush 後に対応する `CheckpointEnd` を fsync できた場合だけ WAL を切り詰める。
+reader の終了は待たない。
 
 ## entity version sidecar {#entity-version-sidecar}
 

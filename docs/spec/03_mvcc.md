@@ -1,6 +1,6 @@
 # MVCC とトランザクション
 
-> as-built 仕様（QUIVER-SW family version 1、2026-07-17）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
 
 ## 分離レベル {#isolation}
 
@@ -63,6 +63,10 @@ durable commit 後に checkpoint や通知処理が失敗しても、トラン�
 `Commit` の後へ `Abort` を追記しない。
 durable commit 後の導出 view publish が失敗したインスタンスは faulted となり、新しい operation を拒否する。
 
+active writer の dirty page は commit fsync 前にデータファイルへ書かない。
+commit はデータページの flush を待たず、dirty page は後続 checkpoint または退避で書く。
+バッファプール内に退避可能な frame がなくなると `TransactionTooLargeException` を送出し、その writer を自動 abort して lease を解放する。
+
 ## abort と savepoint {#abort-savepoint}
 
 各 write pin は変更前のページを transaction-owned write set に保存する。
@@ -77,9 +81,9 @@ durable commit 後の導出 view publish が失敗したインスタンスは fa
 
 ## crash recovery {#crash-recovery}
 
-crash recovery の winner は明示的な `Commit` record だけで決める。
+crash recovery の winner は checksum が有効な明示的な `Commit` record だけで決める。
 winner の `PageImage` は redo し、commit record を持たない transaction の image は適用しない。
-旧 WAL のような loser undo pass は実行しない。
+page LSN が image LSN 以上なら適用済みとして読み飛ばし、loser undo pass は実行しない。
 
 詳細は [WAL とリカバリ](02_wal_recovery.md) を参照する。
 

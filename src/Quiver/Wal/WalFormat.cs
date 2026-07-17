@@ -7,7 +7,7 @@ internal static class WalFormat
     private static ReadOnlySpan<byte> FamilyMagic => "QUIVER-SW"u8;
 
     internal const int FileHeaderSize = 16;
-    internal const byte FamilyVersion = 1;
+    internal const byte FamilyVersion = StorageFormatVersion.Current;
     private const byte WalKind = (byte)'W';
 
     internal static void Initialize(FileStream stream)

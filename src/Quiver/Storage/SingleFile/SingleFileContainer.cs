@@ -28,10 +28,11 @@ internal sealed class SingleFileContainer : IDisposable
     // カタログ root body レイアウト
     private const int CatalogNextOffset = 0;          // int64: 次カタログページ物理 ID (-1 = なし)
     private const int CatalogCountOffset = 8;          // int64: 記述子件数
-    // クリーン終了で WAL を削除しても MVCC visibility / TxId 採番を継続できるよう、
-    // 「これ未満の TxId は committed と presume してよい」高水位 (= 終了時の次 TxId) を root に保持する。
-    private const int CommittedHighWaterOffset = 16;   // int64: committed TxId 高水位 (= 次採番 TxId)
-    private const int CatalogDescriptorsOffset = 24;   // 以降 DescriptorSize バイトずつ
+    // 完了 checkpoint より前の WAL を落としても visibility と採番を再開できるよう、
+    // checkpoint 済み committed high-water と次 TxId を別フィールドで保持する。
+    private const int CommittedHighWaterOffset = 16;   // int64: checkpoint 済み committed TxId
+    private const int NextTransactionIdOffset = 24;    // int64: checkpoint 時点の次 TxId
+    private const int CatalogDescriptorsOffset = 32;   // 以降 DescriptorSize バイトずつ
 
     // 記述子: tenantId(1) flags(1) pageTableHead(8) logicalPageCount(8) logicalFreeHead(8) = 26B
     private const int DescriptorSize = 26;
@@ -47,17 +48,16 @@ internal sealed class SingleFileContainer : IDisposable
     private readonly Dictionary<byte, TenantPagedFile> _tenants = new();
     private readonly object _gate = new();
     private bool _disposed;
-    // committed TxId 高水位 (= 最終クリーン終了時の次採番 TxId)。0 = 未設定。
+    // 完了 checkpoint へ含まれた committed TxId 高水位。0 = 未設定。
     private long _committedHighWaterTxId;
+    private long _nextTransactionId;
     private IWriteAheadLog? _wal;
 
     public string Path => _physical.Path;
     internal IPagedFile Physical => _physical;
 
     /// <summary>
-    /// 永続化されている committed TxId 高水位。クリーン終了で WAL を削除しても、
-    /// reopen 時に「これ未満の TxId は committed」と presume して MVCC visibility を維持し、
-    /// 次 TxId 採番をここから継続するために factory が参照する。0 = 未設定 (WAL から復元)。
+    /// 完了 checkpoint に含まれる committed TxId 高水位。
     /// </summary>
     public long CommittedHighWaterTxId
     {
@@ -65,19 +65,38 @@ internal sealed class SingleFileContainer : IDisposable
     }
 
     /// <summary>
-    /// クリーン終了時に backend が呼び、終了時点の次採番 TxId をカタログ root へ
-    /// 書き込む。実際の durable 化は呼び出し側の <c>FlushAll</c> に委ねる (本メソッドは buffer pool 更新)。
+    /// 完了 checkpoint に含まれる次 TxId。
     /// </summary>
-    public void SetCommittedHighWaterTxId(long value)
+    public long NextTransactionId
+    {
+        get { lock (_gate) return _nextTransactionId; }
+    }
+
+    /// <summary>
+    /// checkpoint/recovery が visibility と採番の再開位置をカタログ root へ書き込む。
+    /// durable 化は呼び出し側の sharp checkpoint に委ねる。
+    /// </summary>
+    public void SetRecoveryState(long committedHighWater, long nextTransactionId)
     {
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            _committedHighWaterTxId = value;
+            if (committedHighWater < TransactionId.Bootstrap.Value)
+                throw new ArgumentOutOfRangeException(nameof(committedHighWater));
+            if (nextTransactionId <= committedHighWater)
+                nextTransactionId = committedHighWater + 1;
+
+            _committedHighWaterTxId = committedHighWater;
+            _nextTransactionId = Math.Max(_nextTransactionId, nextTransactionId);
             var wh = _physical.PinForWrite(CatalogRootPageId);
             try
             {
-                BinaryPrimitives.WriteInt64LittleEndian(wh.Data[CommittedHighWaterOffset..], value);
+                BinaryPrimitives.WriteInt64LittleEndian(
+                    wh.Data[CommittedHighWaterOffset..],
+                    _committedHighWaterTxId);
+                BinaryPrimitives.WriteInt64LittleEndian(
+                    wh.Data[NextTransactionIdOffset..],
+                    _nextTransactionId);
             }
             finally { wh.Dispose(); }
         }
@@ -258,7 +277,10 @@ internal sealed class SingleFileContainer : IDisposable
                 long count = BinaryPrimitives.ReadInt64LittleEndian(body[CatalogCountOffset..]);
                 // committed TxId 高水位は root ページ (page 1) にのみ持つ。
                 if (catalogPage == CatalogRootPageId.Value)
+                {
                     _committedHighWaterTxId = BinaryPrimitives.ReadInt64LittleEndian(body[CommittedHighWaterOffset..]);
+                    _nextTransactionId = BinaryPrimitives.ReadInt64LittleEndian(body[NextTransactionIdOffset..]);
+                }
                 int offset = CatalogDescriptorsOffset;
                 for (long i = 0; i < count && offset + DescriptorSize <= body.Length; i++, offset += DescriptorSize)
                 {

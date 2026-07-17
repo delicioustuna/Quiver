@@ -15,7 +15,7 @@ namespace Quiver.Storage.Wal;
 ///   <item><see cref="MarkDeleteOnDispose"/> されたクリーン終了では Dispose 時にファイルを削除する。
 ///     全データは graph.quiver へ durable 済みなので、静止時はサイドカーが消えて本体のみが残る。</item>
 /// </list>
-/// レコードフォーマット、コアレス、group commit、PageImage coalesce を提供する。
+/// レコードフォーマット、group commit、checkpoint 用コンパクションを提供する。
 /// </summary>
 internal sealed class WriteAheadLog : IWriteAheadLog
 {
@@ -33,13 +33,6 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     // 観測用カウンタ。
     private long _flushBatchCount;
     private long _flushRequestCount;
-
-    // 複数 tx の PageImage を Commit/CheckpointBegin/CheckpointEnd の直前にまとめて
-    // drain する共有 coalesce バッファ。`(fileKind, pageId)` ごとに「最後に書いた tx」の
-    // payload を 1 件だけ保持し、同一ページに対する重複 PageImage 出力を抑制する。
-    private readonly Dictionary<(byte FileKind, long PageId), CoalescedPageImage> _coalescedPageImages = new();
-    private long _coalescedPageImageCount;
-    private long _drainedPageImageCount;
 
     private long _nextLsn;
     private long _flushedLsn = -1;
@@ -66,12 +59,6 @@ internal sealed class WriteAheadLog : IWriteAheadLog
 
     /// <summary><see cref="FlushTo"/> 経由でフラッシュ要求された累計回数。</summary>
     public long FlushRequestCount => Volatile.Read(ref _flushRequestCount);
-
-    /// <summary>cross-tx de-dup ヒット数。</summary>
-    public long CoalescedPageImageCount => Volatile.Read(ref _coalescedPageImageCount);
-
-    /// <summary>coalesce バッファから drain された PageImage 件数の累計。</summary>
-    public long DrainedPageImageCount => Volatile.Read(ref _drainedPageImageCount);
 
     public WriteAheadLog(string path)
         : this(path, TimeSpan.Zero) { }
@@ -112,16 +99,31 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
-            // Commit / Checkpoint sentinel / Abort の直前で coalesce バッファを drain。
-            if (type == WalRecordType.Commit ||
-                type == WalRecordType.CheckpointBegin ||
-                type == WalRecordType.CheckpointEnd ||
-                type == WalRecordType.Abort)
-            {
-                DrainCoalesceBufferLocked();
-            }
-
             return WriteRecordLocked(type, tx.Value, payload);
+        }
+    }
+
+    public long AppendPageImage(
+        TransactionId tx,
+        byte fileKind,
+        long pageId,
+        ReadOnlySpan<byte> pageBytes)
+    {
+        if (pageBytes.Length != WalPageImageCodec.FullPageBytes)
+            throw new ArgumentException(
+                $"PageImage must contain exactly {WalPageImageCodec.FullPageBytes} bytes.",
+                nameof(pageBytes));
+
+        lock (_writeLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            long expectedLsn = _nextLsn;
+            byte[] stampedPage = pageBytes.ToArray();
+            PageHeader.UpdateLsnAndChecksum(stampedPage, expectedLsn);
+            byte[] payload = WalPageImageCodec.Encode(fileKind, pageId, stampedPage);
+            long actualLsn = WriteRecordLocked(WalRecordType.PageImage, tx.Value, payload);
+            Debug.Assert(actualLsn == expectedLsn);
+            return actualLsn;
         }
     }
 
@@ -147,67 +149,6 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         QuiverEventSource.Log.WalBytesWritten(recordSize);
         return lsn;
     }
-
-    /// <summary>
-    /// PageImage を共有 coalesce バッファへ投入する (詳細は旧実装と同一)。
-    /// </summary>
-    public void BufferPageImage(TransactionId tx, byte fileKind, long pageId, byte[] payload)
-    {
-        if (payload == null) throw new ArgumentNullException(nameof(payload));
-        if (payload.Length > MaxPayloadSize)
-            throw new StorageException($"WAL payload size {payload.Length} exceeds max {MaxPayloadSize}");
-
-        var key = (fileKind, pageId);
-        lock (_writeLock)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_coalescedPageImages.TryGetValue(key, out var existing))
-            {
-                if (existing.Tx.Value != tx.Value)
-                {
-                    // 別 tx が同一ページに書こうとした: 既存エントリを drain して per-tx 帰属を保持。
-                    WriteRecordLocked(WalRecordType.PageImage, existing.Tx.Value, existing.Payload);
-                    Interlocked.Increment(ref _drainedPageImageCount);
-                }
-                else
-                {
-                    Interlocked.Increment(ref _coalescedPageImageCount);
-                }
-            }
-            _coalescedPageImages[key] = new CoalescedPageImage(tx, payload);
-        }
-    }
-
-    /// <summary><paramref name="tx"/> が coalesce バッファに残しているエントリをすべて除去する。</summary>
-    public void EvictCoalescedPageImagesFor(TransactionId tx)
-    {
-        lock (_writeLock)
-        {
-            if (_disposed || _coalescedPageImages.Count == 0) return;
-            List<(byte, long)>? remove = null;
-            foreach (var kv in _coalescedPageImages)
-            {
-                if (kv.Value.Tx.Value == tx.Value)
-                    (remove ??= new()).Add(kv.Key);
-            }
-            if (remove == null) return;
-            foreach (var key in remove)
-                _coalescedPageImages.Remove(key);
-        }
-    }
-
-    private void DrainCoalesceBufferLocked()
-    {
-        if (_coalescedPageImages.Count == 0) return;
-        foreach (var entry in _coalescedPageImages.Values)
-        {
-            WriteRecordLocked(WalRecordType.PageImage, entry.Tx.Value, entry.Payload);
-            Interlocked.Increment(ref _drainedPageImageCount);
-        }
-        _coalescedPageImages.Clear();
-    }
-
-    private readonly record struct CoalescedPageImage(TransactionId Tx, byte[] Payload);
 
     public void FlushTo(long lsn)
     {
@@ -316,11 +257,6 @@ internal sealed class WriteAheadLog : IWriteAheadLog
             return;
         }
 
-        // Dispose 完了前に coalesce バッファを最終 drain する。
-        lock (_writeLock)
-        {
-            DrainCoalesceBufferLocked();
-        }
         _disposed = true;
         _flushChannel.Writer.TryComplete();
         try { _flushTask.GetAwaiter().GetResult(); } catch { }
@@ -424,7 +360,8 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         {
             File.Move(tmp, _path, overwrite: true);
         }
-        catch (IOException)
+        catch (Exception exception)
+            when (exception is IOException or UnauthorizedAccessException)
         {
             // 並行ハンドル (snapshot のファイルコピー等) が _path を開いていて rename できない場合は
             // 今回のコンパクションを諦める。File.Move は atomic なので _path は元の全内容のまま。

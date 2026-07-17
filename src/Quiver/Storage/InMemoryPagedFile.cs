@@ -192,6 +192,24 @@ internal sealed class InMemoryPagedFile : IPagedFile
         }
     }
 
+    public long ReadPageLsnForRecovery(PageId pageId)
+    {
+        lock (_allocLock)
+        {
+            if (pageId.Value < 0 || pageId.Value >= _pages.Count)
+                return -1;
+            try
+            {
+                PageHeader.Validate(_pages[(int)pageId.Value], pageId);
+                return PageHeader.ReadLsn(_pages[(int)pageId.Value]);
+            }
+            catch (QuiverException)
+            {
+                return -1;
+            }
+        }
+    }
+
     public void Truncate(long newPageCount)
     {
         if (newPageCount < 1)

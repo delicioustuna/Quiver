@@ -81,8 +81,8 @@ internal sealed class ChaosScenarioRunner
                     RunOneTx(backend!, wtx, oracle, trace, forceRollback);
                 }
 
-                // checkpoint fault では PhaseInjector を有効にして小さな commit を追加実行する。
-                // kill 例外は Commit から伝播する。
+                // checkpoint fault では PhaseInjector を有効にして小さな commit を追加し、
+                // manual checkpoint を起動する。workload の各 commit では checkpoint しない。
                 if (isCheckpointFault)
                 {
                     var phase = CheckpointPhaseFor(scenario.Fault);
@@ -92,10 +92,9 @@ internal sealed class ChaosScenarioRunner
                     {
                         using var tx = backend!.BeginGraphTransaction(
                             IsolationLevel.SnapshotIsolation, readOnly: false);
-                        // threshold=1 で commit 時に即 checkpoint する小さな payload を使う。
                         tx.CreateVertex("Sentinel");
-                        try { tx.Commit(); }
-                        catch (InvalidOperationException) { /* 模擬 kill */ }
+                        tx.Commit();
+                        ((BinaryGraphStorageBackend)backend).RequestCheckpointForTest();
                     }
                     catch (InvalidOperationException) { /* scope での模擬 kill */ }
                 }

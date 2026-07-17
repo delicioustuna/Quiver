@@ -1,6 +1,6 @@
 # 既知の限界
 
-> as-built 仕様（QUIVER-SW family version 1、2026-07-15）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
 
 本書はエンジンの現時点での既知の限界を記す。v1 統合監査で発見・修正された欠陥はここでは追跡しない
 — それらは回帰テストと git 履歴でカバーされる。
@@ -198,7 +198,7 @@ cosine の決定的コーパスで true recall@10 **0.950**、30% 削除後 **0.
 
 ## 自動マイグレーションなし {#no-migration}
 
-QUIVER-SW family version 1 ではないデータベースは `StorageFormatMismatchException` で拒否する。
+QUIVER-SW family version 2 ではないデータベースは `StorageFormatMismatchException` で拒否する。
 旧 WAL は `WalFormatMismatchException` で拒否する。
 自動 migration と互換 reader は存在しないため、データベースは source data または logical export から作り直す。
 

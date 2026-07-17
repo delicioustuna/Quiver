@@ -25,22 +25,18 @@ internal interface IWriteAheadLog : IDisposable
     void FlushTo(long lsn);
 
     /// <summary>
-    /// PageImage を WAL レベルの共有 coalesce バッファへ投入する。
-    /// 実際の WAL 追記は次の Commit / CheckpointBegin / CheckpointEnd / Abort 出力時にまとめて
-    /// 行われる。同一 (fileKind, pageId) は latest-wins で de-dup される。
-    /// 既定実装は <c>Append(WalRecordType.PageImage, ...)</c> へフォールバックして coalesce 無効化と等価。
+    /// ページヘッダへ割り当て LSN を刻んだ after-image を追記する。
+    /// 戻り値は PageImage record とページヘッダで共有する LSN。
     /// </summary>
-    void BufferPageImage(TransactionId tx, byte fileKind, long pageId, byte[] payload)
+    long AppendPageImage(
+        TransactionId tx,
+        byte fileKind,
+        long pageId,
+        ReadOnlySpan<byte> pageBytes)
     {
-        _ = Append(WalRecordType.PageImage, tx, payload);
+        byte[] payload = WalPageImageCodec.Encode(fileKind, pageId, pageBytes);
+        return Append(WalRecordType.PageImage, tx, payload);
     }
-
-    /// <summary>
-    /// <paramref name="tx"/> が coalesce バッファに残しているエントリをすべて除去する。
-    /// abort 経路から呼ばれ、ロールバックされた tx の PageImage が後続の drain で
-    /// WAL へ漏れるのを防ぐ。既定実装は no-op。
-    /// </summary>
-    void EvictCoalescedPageImagesFor(TransactionId tx) { }
 
     /// <summary>
     /// チェックポイント開始 sentinel。dirty page flush の前に書いて fsync する。

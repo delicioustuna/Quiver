@@ -8,19 +8,35 @@ namespace Quiver.Storage.Wal;
 /// </summary>
 internal sealed class WalWriteSet(IWriteAheadLog wal, TransactionId txId)
 {
-    private readonly Dictionary<(byte FileKind, long PageId), byte[]> _pending = new();
+    private readonly Dictionary<(byte FileKind, long PageId), PendingPageImage> _pending = new();
     private readonly List<Dictionary<(byte FileKind, long PageId), byte[]>> _beforeImageStack =
         [new Dictionary<(byte FileKind, long PageId), byte[]>()];
+    private int _tooLarge;
+    private int _tooLargeBufferCapacity;
 
     public int Depth => _beforeImageStack.Count;
     internal TransactionId TransactionId => txId;
+    internal bool IsTooLarge => Volatile.Read(ref _tooLarge) != 0;
+    internal int TooLargeBufferCapacity => Volatile.Read(ref _tooLargeBufferCapacity);
 
-    public long LogPageImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
+    public long LogPageImage(
+        byte fileKind,
+        long pageId,
+        ReadOnlySpan<byte> pageBytes,
+        Action<long>? stampCommittedLsn = null)
     {
         var key = (fileKind, pageId);
-        if (!_pending.TryGetValue(key, out var buffer) || buffer.Length != pageBytes.Length)
-            _pending[key] = buffer = new byte[pageBytes.Length];
-        pageBytes.CopyTo(buffer);
+        if (!_pending.TryGetValue(key, out PendingPageImage? pending)
+            || pending.PageBytes.Length != pageBytes.Length)
+        {
+            pending = new PendingPageImage(new byte[pageBytes.Length], stampCommittedLsn);
+            _pending[key] = pending;
+        }
+        else if (stampCommittedLsn is not null)
+        {
+            pending.StampCommittedLsn = stampCommittedLsn;
+        }
+        pageBytes.CopyTo(pending.PageBytes);
         return -1L;
     }
 
@@ -36,10 +52,20 @@ internal sealed class WalWriteSet(IWriteAheadLog wal, TransactionId txId)
     {
         foreach (var entry in _pending)
         {
-            byte[] payload = WalPageImageCodec.Encode(entry.Key.FileKind, entry.Key.PageId, entry.Value);
-            wal.BufferPageImage(txId, entry.Key.FileKind, entry.Key.PageId, payload);
+            long lsn = wal.AppendPageImage(
+                txId,
+                entry.Key.FileKind,
+                entry.Key.PageId,
+                entry.Value.PageBytes);
+            entry.Value.StampCommittedLsn?.Invoke(lsn);
         }
         _pending.Clear();
+    }
+
+    internal void MarkTooLarge(int bufferPoolPageCapacity)
+    {
+        Volatile.Write(ref _tooLargeBufferCapacity, bufferPoolPageCapacity);
+        Interlocked.Exchange(ref _tooLarge, 1);
     }
 
     public IReadOnlyCollection<byte[]> GetAllBeforeImagesOldestWins()
@@ -90,4 +116,12 @@ internal sealed class WalWriteSet(IWriteAheadLog wal, TransactionId txId)
 
     public void OverwritePendingFromBeforeImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
         => LogPageImage(fileKind, pageId, pageBytes);
+
+    private sealed class PendingPageImage(
+        byte[] pageBytes,
+        Action<long>? stampCommittedLsn)
+    {
+        internal byte[] PageBytes { get; } = pageBytes;
+        internal Action<long>? StampCommittedLsn { get; set; } = stampCommittedLsn;
+    }
 }

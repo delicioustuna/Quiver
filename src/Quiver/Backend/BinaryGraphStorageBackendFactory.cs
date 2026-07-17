@@ -126,10 +126,11 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             { DataFileKind, container.Physical },
         };
 
-        // MVCC visibility 判定用の committed TxId 集合。recovery が WAL を走査して
-        // (Commit レコードがあり、かつ Abort も無く、PageImage を持つ等の信頼できる条件を満たす)
-        // tx を Mark してから TransactionManager 配線へ。Bootstrap は ctor で自動登録される。
+        // MVCC visibility 判定用の committed TxId 集合。recovery は checksum が有効な
+        // 明示 Commit を持つ transaction だけを Mark してから TransactionManager へ渡す。
+        // Bootstrap は ctor で自動登録される。
         var committedRegistry = new CommittedTxRegistry();
+        committedRegistry.RestoreCheckpointedHighWater(container.CommittedHighWaterTxId);
 
         // fileRegistry には data file + materialize 済み索引が既に登録されている。
         // 索引も page-WAL 対象なので、明示 Commit を持つトランザクションだけを redo する。
@@ -137,7 +138,14 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         if (recover)
         {
             recovery = new RecoveryManager(
-                pageManager, wal, fileRegistry, committedRegistry: committedRegistry);
+                pageManager,
+                wal,
+                fileRegistry,
+                committedRegistry: committedRegistry,
+                persistRecoveryState: (committedHighWater, nextTransactionId) =>
+                    container.SetRecoveryState(
+                        committedHighWater,
+                        Math.Max(nextTransactionId, container.NextTransactionId)));
             recovery.Recover();
 
             // recovery が物理 page1 (カタログ) + page-table + header ページを WAL から復元した。
@@ -326,20 +334,9 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // recovery で観測した最大 TxId より大きい値から新規 tx を採番するよう、
         // TransactionManager の _nextTxId を巻き上げる。これがないと新規 tx ID が
         // 過去 commit 済み TxId と衝突して registry が同じ entry を 2 回 Mark してしまう。
-        txManager.AdvanceNextTxIdAtLeast(committedRegistry.MaxObservedTxId + 1);
-        // クリーン終了で WAL が削除されていた場合、recovery では committedRegistry が
-        // 空のままになる (WAL から復元できない)。container に永続化された committed TxId 高水位から
-        // visibility horizon (= これ未満は presumed-committed) と次 TxId 採番起点を復元する。
-        // abort 済み tx の効果は before-image で巻き戻り済みなので、高水位未満を committed とみなしても
-        // 生存レコードはすべて committed tx の xmin を持ち、安全。crash 経路では WAL 由来の horizon が
-        // より新しいため max を取る。
-        long containerHighWater = container.CommittedHighWaterTxId;
-        if (containerHighWater > 0)
-        {
-            if (containerHighWater - 1 > committedRegistry.RecoveryHorizon)
-                committedRegistry.RecoveryHorizon = containerHighWater - 1;
-            txManager.AdvanceNextTxIdAtLeast(containerHighWater);
-        }
+        txManager.AdvanceNextTxIdAtLeast(Math.Max(
+            committedRegistry.MaxObservedTxId + 1,
+            container.NextTransactionId));
 
         // チェックポイント契機を配線する。コミットごとに WAL 成長量を見て、
         // しきい値超過 + アクティブ TX 0 の時点で全データページを flush し WAL を truncate する。
@@ -348,7 +345,13 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         if (recover)
         {
             var checkpointer = new Checkpointer(
-                pageManager, wal, () => txManager.OldestActiveLsn, indexManager);
+                pageManager,
+                wal,
+                () => txManager.OldestActiveLsn,
+                indexManager,
+                prepareCheckpoint: () => container.SetRecoveryState(
+                    committedRegistry.CommittedHighWater,
+                    txManager.PeekNextTxId()));
             txManager.EnableCheckpointing(checkpointer, options.CheckpointThresholdBytes);
             // Adaptive ポリシー時は controller を作成して TxManager に注入。
             // controller は warmup 完了までは options.CheckpointThresholdBytes (initial) を返す。
@@ -363,6 +366,10 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
                     options.AdaptiveSampleWindow);
                 txManager.SetAdaptiveController(adaptive);
             }
+
+            // store constructors が作成した catalog/header page を、利用者へ返す前に
+            // 最初の完了 checkpoint へ含める。以後の open は同じ durable foundation から始まる。
+            txManager.RequestCheckpoint();
         }
 
         var backend = new BinaryGraphStorageBackend(

@@ -166,6 +166,12 @@ public sealed class EdgeDeltaIntegrationTests : IDisposable
                 tx.Commit();
             }
 
+            using (var beforeCompact = db.BeginReadOnlyTransaction())
+            {
+                beforeCompact.G(db.Schema).Vertex(source).Out("LINK").ToList()
+                    .Should().ContainSingle().Which.Should().Be(target);
+            }
+
             db.CompactAdjacency();
 
             using var read = db.BeginReadOnlyTransaction();

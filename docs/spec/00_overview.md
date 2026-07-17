@@ -1,9 +1,9 @@
 # Quiver: システム概要
 
-> as-built 仕様（QUIVER-SW family version 1、2026-07-15）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
 >
-> **current (as-built)**: identity と QUIVER-SW format/WAL foundation は再設計 Wave 2 の契約である。
-> Single Writer + Snapshot Readers の後続 wave は [再設計正本](../../plans/single-writer-redesign.md) に従って段階的に実装する。
+> **current (as-built)**: identity、Single Writer + Snapshot Readers、no-steal page-WAL、redo-only recovery を実装している。
+> 後続の query、vector、全文検索統合は [再設計正本](../../plans/single-writer-redesign.md) に従って段階的に実装する。
 
 ## ポジショニング {#positioning}
 
@@ -81,7 +81,7 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 
 ## フォーマットバージョン {#format-version}
 
-現行のデータファイルと WAL は `QUIVER-SW` family version 1 である。
+現行のデータファイルと WAL は `QUIVER-SW` family version 2 である。
 旧フォーマットを読み替える decoder と自動マイグレーションは提供しない。
 旧データベースは `StorageFormatMismatchException`、旧 WAL は `WalFormatMismatchException` で拒否する。
 

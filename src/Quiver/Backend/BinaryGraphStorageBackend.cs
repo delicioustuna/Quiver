@@ -144,6 +144,20 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _indexManager.FlushAll();
     }
 
+    internal void RequestCheckpointForTest()
+    {
+        try
+        {
+            _txManager.RequestCheckpoint();
+        }
+        catch
+        {
+            // phase injector が checkpoint を中断した後の Dispose を clean shutdown にしない。
+            _txManager.MarkFaulted();
+            throw;
+        }
+    }
+
     // opt-in 列。catalog はテナント 16、各列テナントは 64+ (ColumnCatalog 採番)。
     // startup で eager に構築 (factory が注入)。write 経路 (GraphTransaction) と abort hook
     // (ReloadStoreMeta → ReloadColumns) の両方から参照される。
@@ -159,22 +173,19 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         // 取りこぼし、列スキャン集約が row path と乖離しうる。CompactAdjacency と同じ契約で塞ぐ。
         if (_txManager.ActiveCount > 0)
             throw new InvalidOperationException("CreateColumn requires no active transactions.");
-        using var mutationLease = _txManager.AcquireMutationLease();
-        if (_txManager.ActiveCount > 0)
-            throw new InvalidOperationException("CreateColumn requires no active transactions.");
-        int keyId = _propKeyTokens.GetOrCreate(propertyKey).Value;
         // 構築 (列データ / 列テナント page-table / catalog ページの書き込み) を
         // WAL 文脈下で行い commit する。これにより crash recovery / CreateSnapshot (online backup) が
         // 列ページを redo / 複製できる。tx 外で書くと clean Dispose のフラッシュ依存になり、
         // 未チェックポイント crash や snapshot で列が失われる。
-        return RunColumnDdl(() => _columnManager.CreateColumn(kind, keyId));
+        return RunColumnDdl(() =>
+        {
+            int keyId = _propKeyTokens.GetOrCreate(propertyKey).Value;
+            return _columnManager.CreateColumn(kind, keyId);
+        });
     }
 
     internal bool DropColumn(EntityKind kind, string propertyKey)
     {
-        if (_txManager.ActiveCount > 0)
-            throw new InvalidOperationException("DropColumn requires no active transactions.");
-        using var mutationLease = _txManager.AcquireMutationLease();
         if (_txManager.ActiveCount > 0)
             throw new InvalidOperationException("DropColumn requires no active transactions.");
         if (!_propKeyTokens.TryGet(propertyKey, out var keyId)) return false;
@@ -184,9 +195,12 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     // 列 DDL の page 書き込みを WAL ログ + commit して durable 化する共通ラッパ。
     private bool RunColumnDdl(Func<bool> ddl)
     {
-        var tx = _txManager.BeginRead();
+        var tx = _txManager.BeginWrite();
         try
         {
+            if (_txManager.ActiveCount != 1)
+                throw new InvalidOperationException(
+                    "Column DDL requires no concurrent read transactions.");
             bool result = ddl();
             tx.Commit();
             return result;
@@ -452,6 +466,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             _coMembershipStore?.Rebuild(
                 _txManager.NexusStore,
                 _txManager.IncidenceStore);
+        // vacuum は transaction 外の maintenance mutation なので、返却前に同じ writer lease 下で
+        // sharp checkpoint を完了し、回収した page/free-list/catalog state を durable にする。
+        _txManager.RequestCheckpoint(writerLeaseHeld: true);
         return report;
     }
 
@@ -465,7 +482,6 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         var parentDir = Path.GetDirectoryName(targetFilePath);
         if (!string.IsNullOrEmpty(parentDir)) Directory.CreateDirectory(parentDir);
 
-        _container.SetCommittedHighWaterTxId(_txManager.PeekNextTxId());
         _txManager.RequestCheckpoint(writerLeaseHeld: true);
 
         // 1. コンテナ (graph.quiver = コア / 索引 / 隣接 / token / epoch を同居) を page-by-page で
@@ -526,14 +542,11 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         // クリーン終了。アクティブ tx が無ければ全データを graph.quiver へ
         // durable 化し、WAL サイドカーを削除対象にする (静止時は graph.quiver のみ)。
         // ActiveCount==0 なので未コミットデータは存在せず、flush 後の graph.quiver は完全。
-        bool cleanShutdown = _txManager.ActiveCount == 0;
+        bool cleanShutdown = _txManager.ActiveCount == 0 && !_txManager.IsFaulted;
         if (cleanShutdown)
         {
-            // committed TxId 高水位を container へ永続化してから flush する。
-            // WAL 削除後の reopen で MVCC visibility horizon と次 TxId 採番を復元するため。
-            _container.SetCommittedHighWaterTxId(_txManager.PeekNextTxId());
-            _pageManager.FlushAll();   // 全データページを fsync (container.Physical を含む)
-            _indexManager.FlushAll();  // 索引も container 上だが念のため
+            // clean close も manual/threshold と同じ sharp checkpoint を通す。
+            _txManager.RequestCheckpoint();
             if (_wal is WriteAheadLog durableWal)
                 durableWal.MarkDeleteOnDispose();
         }
