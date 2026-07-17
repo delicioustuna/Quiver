@@ -119,6 +119,9 @@
 ### M-4. §10.4 の baseline 定義が自己矛盾(基点 commit で測定不能な基準値を含む)
 
 > **対応済み(2026-07-10)**: `plans/single-writer-redesign-baseline.md` を追加し、各 gate の出所、再現コマンド、測定環境、基点 commit で測定できない構造の扱いを分離した。正本 §10.4 は出所列を持つ表へ変更済み。
+>
+> **追補対応済み(2026-07-17)**: Wave 5の実測で、11.74xがFT専用logical WALを持つARIES方式の値であり、redo-onlyのpage-image WALと同方式ではないことを確認した。
+> 正本 §10.4と§16で、Wave 5を`redesign-wave-4`の同一runner比1.00x以内、11.74xをWave 8のfull-text segment WAL gateへ分離した。
 
 - **該当**: §10.4 前文 (L688「基点 commit の baseline と比較する」) と表 (L692-698)、Wave 8 完了条件 (L621)
 - **内容**: 前文は「基点 commit `ee811d1` の baseline と比較」と宣言するが、表の値の一部は基点 commit では測定不能。特に「full-text 4 segment p50 8.55 ms」— 基点実装は mutable postings tree であり segment 構造を持たないため、「4 segment」という測定条件が基点に存在しない(Wave 8 完了条件は正しく「`clean-slate` baseline gate」と別ソースを指しており、10.4 前文と食い違う)。commit の 1163.80 µs、WAL 11.74x も「`clean-slate` ARIES baseline」と表内に書かれており、出所が前文と不一致。また前文が「同じマシン」比較を掲げる一方で絶対値 (1.8982 ms 等) を本文に焼いており、測定環境が変わった瞬間に全ゲートが無意味になる。

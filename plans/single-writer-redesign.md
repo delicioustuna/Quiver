@@ -690,7 +690,7 @@ Quiver 0.1.0 をローカル RAG バックエンドとして使用した結果�
 - active writer 中の checkpoint は待機し、reader は待たない。transaction dirty set が安全容量を超えた場合は no-steal を破らず abort する。
 - presume-committed と FT logical recovery pass を削除する。
 
-**テスト**: commit 各境界の process kill、torn WAL tail、torn page、checkpoint 5 phase、checkpoint と writer wait、reader 並行 checkpoint、oversized transaction abort、abort/savepoint、payload ref atomicity、100反復 recovery。
+**テスト**: commit 各境界の process kill、torn WAL tail、torn page、checkpoint 5 phase、checkpoint と writer wait、reader 並行 checkpoint、oversized transaction abort、abort/savepoint、payload ref atomicity、100反復 recovery、Wave 4 と同一 runner による page-image WAL 増幅率の非回帰比較。
 
 **Build**: `dotnet build Quiver.slnx`。
 
@@ -842,7 +842,8 @@ Quiver 0.1.0 をローカル RAG バックエンドとして使用した結果�
 | hyperedge traversal | `docs/benchmarks/2026-07-06_HYP-6c_Hyperedge.md` | degree 10、100、1000の各形状で binary/view 比3.0x以内 |
 | full-text | `plans/clean-slate-redesign.md` | 4 segment p50 8.55 ms以下、BM25 strict scan と top-k 一致 |
 | vector | `plans/clean-slate-redesign.md` と RecallCheck | recall@10 0.95以上、segment merge 前後で結果集合一致 |
-| WAL | `plans/clean-slate-redesign.md` | RAG ingest amplification 11.74x以下。payload/index別内訳も記録 |
+| page-image WAL | `redesign-wave-4` と Wave 5 の同一 runner | RAG ingest amplification が同一環境の Wave 4 比1.00x以内。2026-07-17の参照値はWave 4が16.37x、Wave 5が16.26x。payload/index別内訳も記録 |
+| full-text segment WAL | `plans/clean-slate-redesign.md` | Wave 8でRAG ingest amplification 11.74x以下。payload/index別内訳も記録 |
 | segment publish stall | Wave 7/8 の同一セッション比較 | lease 保持中 p99 が `WriterWaitTimeout` 既定値の10%以内。重い構築時間は含めない |
 | vacuum | correctness gate | long reader の snapshot を壊さず、reader 終了後に回収が前進する |
 
@@ -925,7 +926,7 @@ skill は実装者の入口である。
 | segment publish stall | artifact 構築中に writer lease を保持すると全 write が停止する | lease 外 build、manifest generation 再検証、publish p99 gate |
 | checkpoint stall | sharp checkpoint が長いと次 writer が timeout する | checkpoint duration と writer wait p99、dirty page 上限、chunk commit test |
 | vacuum と reader | 早い回収で旧 reader が freed page を読む | oldest snapshot horizon property/chaos test |
-| WAL 増幅 | page image + payload + segment が重なる | primary/payload/index 内訳と 11.74x gate |
+| WAL 増幅 | page image + payload + segment が重なる | Wave 5のpage-image WALはWave 4同方式比1.00x、Wave 8のsegment WALは11.74x、primary/payload/index内訳 |
 | addon drift | Hosting/Rag/SourceGen が旧 API を隠れて保持する | solution build、samples、public API grep |
 
 各 Wave の merge 条件は、機能 test、crash test、baseline gate、as-built 更新の四つである。
@@ -984,6 +985,22 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 実装中に新しい選択が必要になった場合は、曖昧な TODO を残さず、選択肢、推奨決定、根拠、検証方法を本書の decision log に追記してからコードを変更する。
 
 ## 16. decision log
+
+### 2026-07-17: page-image WAL と full-text segment WAL の増幅 gate 分離
+
+- **背景**：Wave 5のpage-image WALを同一環境で測定すると、RAG ingest amplificationは16.26xだった。
+  直前の`redesign-wave-4`を同じrunnerと引数で測定した値は16.37xであり、Wave 5による回帰はない。
+  一方、従来の11.74xはFT専用logical WALと専用recovery passを持つclean-slate ARIES実装の測定値であり、redo-onlyの汎用`PageImage`へ統一したWave 5とはWAL方式が異なる。
+- **選択肢**：(a) 異なるWAL方式の11.74xをWave 5の絶対gateとして維持する、(b) Wave 5へ汎用`PageImage`圧縮を追加する、(c) Wave 5は同方式のWave 4との非回帰を判定し、11.74xはimmutable full-text segmentを導入するWave 8のgateに限定する。
+- **決定**：(c)。
+  Wave 5のRAG ingest amplificationは、同じrunner、引数、machine、runtimeで測定したWave 4比1.00x以内を合格条件とする。
+  2026-07-17の参照値はWave 4が16.37x、Wave 5が16.26xである。
+  11.74xはhistorical referenceとして保持し、Wave 8のfull-text segment WALで絶対gateとして再適用する。
+- **Why not**：(a) はFT専用logical WALの削除によって成立しなくなった比較条件を固定し、redo-only設計の実装可否を別方式の数値で判定する。
+  (b) はWAL codec、recovery、CPU costを同時に変える永続形式上の選択であり、mutable postings pageを記録するWave 5の構造を維持したまま圧縮率だけを合格条件へ合わせても、Wave 8でsegmentへ置換する経路を短くしない。
+- **検証方法**：`redesign-wave-4`とWave 5で`--clean-slate-page-wal-baseline 20 200 5000 20 1000 20`を実行し、RAG ingest amplification、payload/index内訳、durable point updateを同一環境で比較する。
+  Wave 5は増幅率がWave 4比1.00x以内、durable point update p50が3491.40 us以内であることを確認する。
+  Wave 8ではimmutable full-text segmentの同じworkloadを測定し、11.74x以下を別途確認する。
 
 ### 2026-07-17: Critical review の設計解決と実装検証を分離
 

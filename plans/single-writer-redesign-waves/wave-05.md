@@ -2,7 +2,7 @@
 
 > 効力宣言: 本書と設計正本が食い違う場合は設計正本を優先し、食い違いをユーザへ報告する。
 > 作成日: 2026-07-17
-> 対応する正本のバージョン: `9585ba99f07414ccac5e02c04c947bfa02914831`
+> 対応する正本のバージョン: 本書と同一のdoc-only commit（基点: `9585ba99f07414ccac5e02c04c947bfa02914831`）
 > ステータス: 承認済み(2026-07-17)
 
 ## 1. 着手前チェック
@@ -59,7 +59,7 @@ Wave 5 は commit、buffer eviction/flush、checkpoint、recovery、binary backe
 |---|---|---|---|
 | 機能 test | 適用 | `dotnet build Quiver.slnx -v minimal`、`dotnet test tests/Quiver.Wal.Tests/Quiver.Wal.Tests.csproj --no-build`、`dotnet test tests/Quiver.Transactions.Tests/Quiver.Transactions.Tests.csproj --no-build`、`dotnet test tests/Quiver.Storage.Tests/Quiver.Storage.Tests.csproj --no-build`、`dotnet test tests/Quiver.Backend.Tests/Quiver.Backend.Tests.csproj --no-build --filter "Category!=Chaos"`、`dotnet test tests/Quiver.PropertyTests/Quiver.PropertyTests.csproj --no-build`、solution全test project | 0 errors、0 warnings、全対象test成功。strict Commit、no-steal、redo-only、sharp checkpoint、payload/ref atomicityが同じbinary pathで成立する |
 | crash test | 適用 | `BinaryGraphStorageBackendCrashContractTests`、`Category=Chaos`、checkpoint 5 phase、commit kill matrix、torn WAL/page、truncate、payload/ref crash、100反復recoveryをbinary backendで実行 | commit返却済みwinnerは必ず残り、Commit無しloserは必ず消える。全kill pointが期待するreopen成功または明示corruptionへ収束し、欠損payload参照がない |
-| baseline gate | 適用 | redesign baselineと同一環境で`--basic-perf`のdurable point updateと、`--clean-slate-aries-baseline`または同一WAL runnerのRAG ingest amplification/payload/index内訳を測定する | durable point update p50が3491.40 us以内、RAG ingest WAL amplificationが11.74x以下。測定環境、commit、生出力を`docs/benchmarks/`へ保存する |
+| baseline gate | 適用 | redesign baselineと同一環境で`--basic-perf`のdurable point updateを測定し、`redesign-wave-4`とWave 5の双方で`--clean-slate-page-wal-baseline 20 200 5000 20 1000 20`のRAG ingest amplification/payload/index内訳を測定する | durable point update p50が3491.40 us以内、RAG ingest WAL amplificationが同一環境のWave 4比1.00x以内。2026-07-17の参照値はWave 4が16.37x、Wave 5が16.26x。測定環境、commit、生出力を`docs/benchmarks/`へ保存する。11.74xはWave 8のfull-text segment WAL gateとする |
 | as-built 更新 | 適用 | `docs/spec/01_storage_paging.md`、`docs/spec/02_wal_recovery.md`、`docs/spec/03_mvcc.md`、`docs/design/development.md`の実装mapとactive docs scan | parser foundation/後続Wave注記、presumed-committed、未統合checkpoint記述が残らず、no-steal/no-force、strict Commit、sharp checkpoint、redo-only open/recoveryと一致する |
 
 追加条件は次のとおりである。
