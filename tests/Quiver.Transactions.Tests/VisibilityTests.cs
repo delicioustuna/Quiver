@@ -4,145 +4,72 @@ using Xunit;
 
 namespace Quiver.Transactions.Tests;
 
-/// <summary>
-/// <see cref="Visibility.IsVisible"/> 述語の単体テスト。
-/// snapshot / committed registry / self TxId の各組み合わせで Postgres SI 風の判定が出ることを確認する。
-/// </summary>
 public class VisibilityTests
 {
     private static readonly TransactionId Self = new(10);
-    private static readonly TransactionId Snapshot = new(20);
 
-    private static SnapshotState MakeSnapshot(params long[] activeAtBegin)
-        => new(Snapshot, new HashSet<long>(activeAtBegin));
+    private static SnapshotState Snapshot(
+        long highWater = 20,
+        long[]? aborted = null,
+        long? activeWriter = null)
+        => new(
+            highWater,
+            new HashSet<long>(aborted ?? []),
+            activeWriter is null ? null : new TransactionId(activeWriter.Value));
 
-    private static CommittedTxRegistry RegistryWith(params long[] committedTxIds)
+    [Fact]
+    public void Xmin_zero_is_invisible()
     {
-        var reg = new CommittedTxRegistry();
-        foreach (var id in committedTxIds) reg.MarkCommitted(new TransactionId(id));
-        return reg;
+        SnapshotState snapshot = Snapshot();
+        Visibility.IsVisible(0, 0, in snapshot, Self).Should().BeFalse();
     }
 
     [Fact]
-    public void Xmin_zero_means_uninitialised_and_invisible()
+    public void Own_write_is_visible_and_own_delete_hides_it()
     {
-        var snap = MakeSnapshot();
-        var reg = RegistryWith();
-        Visibility.IsVisible(xmin: 0, xmax: 0, in snap, Self, reg).Should().BeFalse();
+        SnapshotState snapshot = Snapshot();
+        Visibility.IsVisible(Self.Value, 0, in snapshot, Self).Should().BeTrue();
+        Visibility.IsVisible(Self.Value, Self.Value, in snapshot, Self).Should().BeFalse();
     }
 
     [Fact]
-    public void Own_writes_are_visible_to_self()
+    public void Xmin_at_or_below_high_water_is_visible_unless_aborted()
     {
-        var snap = MakeSnapshot();
-        var reg = RegistryWith();
-        // 自分の Tx の書き込みは committed 前でも visible (read-your-writes)。
-        Visibility.IsVisible(xmin: Self.Value, xmax: 0, in snap, Self, reg).Should().BeTrue();
+        SnapshotState snapshot = Snapshot(aborted: [8]);
+        Visibility.IsVisible(7, 0, in snapshot, Self).Should().BeTrue();
+        Visibility.IsVisible(8, 0, in snapshot, Self).Should().BeFalse();
     }
 
     [Fact]
-    public void Own_delete_hides_own_record_from_self()
+    public void Future_or_active_writer_xmin_is_invisible()
     {
-        var snap = MakeSnapshot();
-        var reg = RegistryWith();
-        Visibility.IsVisible(xmin: Self.Value, xmax: Self.Value, in snap, Self, reg).Should().BeFalse();
+        SnapshotState snapshot = Snapshot(activeWriter: 15);
+        Visibility.IsVisible(21, 0, in snapshot, Self).Should().BeFalse();
+        Visibility.IsVisible(15, 0, in snapshot, Self).Should().BeFalse();
     }
 
     [Fact]
-    public void Committed_xmin_before_snapshot_is_visible()
+    public void Committed_xmax_hides_record()
     {
-        var snap = MakeSnapshot();
-        var reg = RegistryWith(committedTxIds: 5);
-        Visibility.IsVisible(xmin: 5, xmax: 0, in snap, Self, reg).Should().BeTrue();
+        SnapshotState snapshot = Snapshot();
+        Visibility.IsVisible(5, 9, in snapshot, Self).Should().BeFalse();
     }
 
     [Fact]
-    public void Future_xmin_after_snapshot_is_invisible()
+    public void Aborted_future_or_active_writer_xmax_does_not_hide_record()
     {
-        var snap = MakeSnapshot();
-        var reg = RegistryWith(committedTxIds: 30); // 30 > Snapshot(20)
-        Visibility.IsVisible(xmin: 30, xmax: 0, in snap, Self, reg).Should().BeFalse();
+        SnapshotState snapshot = Snapshot(aborted: [9], activeWriter: 15);
+        Visibility.IsVisible(5, 9, in snapshot, Self).Should().BeTrue();
+        Visibility.IsVisible(5, 21, in snapshot, Self).Should().BeTrue();
+        Visibility.IsVisible(5, 15, in snapshot, Self).Should().BeTrue();
     }
 
     [Fact]
-    public void Active_at_begin_xmin_is_invisible_even_when_later_committed()
+    public void Bootstrap_snapshot_only_accepts_live_records()
     {
-        // 開始時に並行 active だった tx (=7) はその後 committed しても snapshot から見えない (SI)。
-        var snap = MakeSnapshot(activeAtBegin: 7);
-        var reg = RegistryWith(committedTxIds: 7);
-        Visibility.IsVisible(xmin: 7, xmax: 0, in snap, Self, reg).Should().BeFalse();
-    }
-
-    [Fact]
-    public void Aborted_xmin_is_invisible()
-    {
-        var snap = MakeSnapshot();
-        var reg = RegistryWith(); // 8 はどこにも登録されていない = aborted / 不明
-        Visibility.IsVisible(xmin: 8, xmax: 0, in snap, Self, reg).Should().BeFalse();
-    }
-
-    [Fact]
-    public void Committed_xmax_before_snapshot_hides_record()
-    {
-        var snap = MakeSnapshot();
-        var reg = RegistryWith(committedTxIds: new[] { 5L, 9L });
-        Visibility.IsVisible(xmin: 5, xmax: 9, in snap, Self, reg).Should().BeFalse();
-    }
-
-    [Fact]
-    public void Aborted_xmax_does_not_hide_record()
-    {
-        var snap = MakeSnapshot();
-        var reg = RegistryWith(committedTxIds: 5); // xmax=9 は未 commit → 削除無効
-        Visibility.IsVisible(xmin: 5, xmax: 9, in snap, Self, reg).Should().BeTrue();
-    }
-
-    [Fact]
-    public void Future_xmax_after_snapshot_does_not_hide_record()
-    {
-        var snap = MakeSnapshot();
-        var reg = RegistryWith(committedTxIds: new[] { 5L, 30L });
-        // xmax=30 > Snapshot(20): 自分の snapshot 以後の削除なので無視する。
-        Visibility.IsVisible(xmin: 5, xmax: 30, in snap, Self, reg).Should().BeTrue();
-    }
-
-    [Fact]
-    public void Active_at_begin_xmax_does_not_hide_record()
-    {
-        var snap = MakeSnapshot(activeAtBegin: 9);
-        var reg = RegistryWith(committedTxIds: new[] { 5L, 9L });
-        // xmax=9 は ActiveAtBegin に含まれる → 削除はまだ snapshot 時点で未確定。
-        Visibility.IsVisible(xmin: 5, xmax: 9, in snap, Self, reg).Should().BeTrue();
-    }
-
-    [Fact]
-    public void Bootstrap_xmin_visible_via_registry_default()
-    {
-        // CommittedTxRegistry は ctor で Bootstrap を committed として登録する。
-        var snap = MakeSnapshot();
-        var reg = new CommittedTxRegistry();
-        Visibility.IsVisible(xmin: TransactionId.Bootstrap.Value, xmax: 0, in snap, Self, reg)
-            .Should().BeTrue();
-    }
-
-    [Fact]
-    public void MvccContext_ambient_overload_uses_thread_static_state()
-    {
-        // ambient コンテキスト未設定: committed registry が null なので xmin != 0 && xmax == 0 で visible。
-        Visibility.IsVisibleAmbient(xmin: 100, xmax: 0).Should().BeTrue();
-        Visibility.IsVisibleAmbient(xmin: 0, xmax: 0).Should().BeFalse();
-        Visibility.IsVisibleAmbient(xmin: 100, xmax: 5).Should().BeFalse();
-    }
-
-    [Fact]
-    public void CommittedTxRegistry_prune_keeps_bootstrap()
-    {
-        var reg = new CommittedTxRegistry();
-        reg.MarkCommitted(new TransactionId(5));
-        reg.MarkCommitted(new TransactionId(7));
-        int removed = reg.PruneBelow(horizonTxId: 10);
-        removed.Should().Be(2);
-        reg.IsCommitted(TransactionId.Bootstrap.Value).Should().BeTrue();
-        reg.IsCommitted(5).Should().BeFalse();
+        SnapshotState snapshot = Snapshot(long.MaxValue);
+        Visibility.IsVisible(100, 0, in snapshot, TransactionId.Bootstrap).Should().BeTrue();
+        Visibility.IsVisible(0, 0, in snapshot, TransactionId.Bootstrap).Should().BeFalse();
+        Visibility.IsVisible(100, 5, in snapshot, TransactionId.Bootstrap).Should().BeFalse();
     }
 }

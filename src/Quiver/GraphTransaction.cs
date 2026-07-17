@@ -80,13 +80,15 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     // MigrationContext.ForEachVertex が Access.ScanVertices に渡す。
     internal ITransaction Inner => _inner;
+    public TransactionId TransactionId => _inner.Id;
 
-    private TransactionUsageLease EnterUsage() => _inner.EnterUsage();
+    public TransactionUsageLease EnterUsage() => _inner.EnterUsage();
 
     // ========== Vertex操作 ==========
 
     public VertexId CreateVertex(string label)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         var labelId = _labelTokens.GetOrCreate(label);
         var vertexId = _inner.Vertices.Allocate(labelId);
@@ -97,6 +99,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public VertexId CreateVertex(LabelId labelId)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         var vertexId = _inner.Vertices.Allocate(labelId);
         if (_logicalSink != null)
@@ -106,6 +109,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void DeleteVertex(VertexId vertexId)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         var firstEdgeId = _inner.Vertices.Read(vertexId).FirstEdgeId;
         var edgesToDelete = new List<EdgeId>();
@@ -117,7 +121,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
             edgeId = edge.Source.Sequence == vertexId.Sequence ? edge.SourceNext : edge.TargetNext;
         }
         foreach (var rid in edgesToDelete)
-            DeleteEdge(rid);
+            DeleteEdgeCore(rid);
 
         var heToDelete = new HashSet<long>();
         var incEnum = _inner.Incidences.EnumerateByVertex(
@@ -125,7 +129,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         while (incEnum.MoveNext())
             heToDelete.Add(incEnum.Current.NexusId.Sequence);
         foreach (var heSeq in heToDelete)
-            DeleteNexus(new NexusId(heSeq));
+            DeleteNexusCore(new NexusId(heSeq));
 
         if (_inner.Indexes.HasAnyFullTextIndex)
             RemoveVertexFromFullTextIndexes(vertexId);
@@ -162,6 +166,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public (VertexId Id, bool Created) MergeVertex(string label, string matchKey, in PropertyValue matchValue)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         var labelId = _labelTokens.GetOrCreate(label);
 
@@ -329,46 +334,58 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public EdgeId CreateEdge(VertexId source, VertexId target, string type)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         var typeId = _edgeTypeTokens.GetOrCreate(type);
-        var edgeId = _inner.Edges.Create(_inner.Vertices, source, target, typeId);
-        if (_logicalSink != null)
-            RecordLogical(LogicalMutation.CreateEdge(edgeId, source, target, type));
-        return edgeId;
+        return CreateEdgeCore(source, target, typeId, type);
     }
 
     public EdgeId CreateEdge(VertexId source, VertexId target, EdgeTypeId typeId)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
+        return CreateEdgeCore(source, target, typeId, _edgeTypeTokens.GetName(typeId));
+    }
+
+    private EdgeId CreateEdgeCore(
+        VertexId source,
+        VertexId target,
+        EdgeTypeId typeId,
+        string typeName)
+    {
         var edgeId = _inner.Edges.Create(_inner.Vertices, source, target, typeId);
         if (_logicalSink != null)
-            RecordLogical(LogicalMutation.CreateEdge(
-                edgeId, source, target, _edgeTypeTokens.GetName(typeId)));
+            RecordLogical(LogicalMutation.CreateEdge(edgeId, source, target, typeName));
         return edgeId;
     }
 
     public (EdgeId Id, bool Created) MergeEdge(VertexId source, VertexId target, string type)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
-        // 型トークンが未観測なら、その型のエッジは存在し得ない → 走査せず直接作成。
-        // (公開 EnumerateEdges は型未知のとき全隣接へフォールバックするため、ここでは
-        // store の typed + Outgoing 列挙を直接使い、別型エッジを target 一致で誤マッチしないようにする。)
-        if (_edgeTypeTokens.TryGet(type, out var typeId))
+        // Merge の作成パスでは型トークンが必ず必要になるため、先に同一 ID へ解決する。
+        // その ID で既存 adjacency を照合すれば、同一 tx で新規作成した型も確実に検索できる。
+        var typeId = _edgeTypeTokens.GetOrCreate(type);
+        var e = _inner.Edges.EnumerateNeighbors(source, _inner.Vertices);
+        while (e.MoveNext())
         {
-            var e = _inner.Edges.EnumerateNeighbors(source, _inner.Vertices, typeId, Direction.Outgoing);
-            while (e.MoveNext())
-            {
-                // Outgoing 列挙では Current.Source == source が保証されるので Target だけ照合する。
-                if (e.Current.Target == target)
-                    return (e.Current.Id, false);
-            }
+            if (e.Current.Source.Sequence == source.Sequence
+                && e.Current.Target.Sequence == target.Sequence
+                && e.Current.Type == typeId)
+                return (e.Current.Id, false);
         }
-        return (CreateEdge(source, target, type), true);
+        return (CreateEdgeCore(source, target, typeId, type), true);
     }
 
     public void DeleteEdge(EdgeId edgeId)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
+        DeleteEdgeCore(edgeId);
+    }
+
+    private void DeleteEdgeCore(EdgeId edgeId)
+    {
         if (!_inner.Edges.Read(edgeId).InUse)
             return;
         FreeEdgeProperties(edgeId);
@@ -400,6 +417,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void SetProperty(VertexId vertexId, string key, in PropertyValue value)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         var keyId = _propKeyTokens.GetOrCreate(key);
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
@@ -429,6 +447,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void SetProperty(EdgeId edgeId, string key, in PropertyValue value)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         var keyId = _propKeyTokens.GetOrCreate(key);
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
@@ -547,6 +566,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void RemoveProperty(VertexId vertexId, string key)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
 
@@ -591,14 +611,25 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public PropertyCursor EnumerateProperties(VertexId vertexId)
     {
-        using var usage = EnterUsage();
-        return _inner.Vertices.EnumerateProperties(vertexId, _inner.Properties);
+        var usage = EnterUsage();
+        try
+        {
+            var cursor = _inner.Vertices.EnumerateProperties(vertexId, _inner.Properties);
+            cursor.AttachUsage(usage);
+            return cursor;
+        }
+        catch
+        {
+            usage.Dispose();
+            throw;
+        }
     }
 
     // ========== マルチバリュープロパティ操作 (Set cardinality) ==========
 
     public void AddPropertyValue(VertexId vertexId, string key, in PropertyValue value)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         var keyId = _propKeyTokens.GetOrCreate(key, PropertyCardinality.Set);
 
@@ -627,6 +658,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void AddPropertyValue(EdgeId edgeId, string key, in PropertyValue value)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         var keyId = _propKeyTokens.GetOrCreate(key, PropertyCardinality.Set);
         if (!_inner.Edges.Read(edgeId).InUse)
@@ -653,6 +685,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void RemovePropertyValue(VertexId vertexId, string key, in PropertyValue value)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
         if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
@@ -677,6 +710,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void RemovePropertyValue(EdgeId edgeId, string key, in PropertyValue value)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
         if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
@@ -700,22 +734,46 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public PropertyValuesEnumerator GetPropertyValues(VertexId vertexId, string key)
     {
-        using var usage = EnterUsage();
+        var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId))
+        {
+            usage.Dispose();
             return new PropertyValuesEnumerator(
                 new PropertyCursor(null!, default, PropertyVersionRef.Invalid), default);
-        return new PropertyValuesEnumerator(
-            _inner.Vertices.EnumerateProperties(vertexId, _inner.Properties), keyId);
+        }
+        try
+        {
+            var cursor = _inner.Vertices.EnumerateProperties(vertexId, _inner.Properties);
+            cursor.AttachUsage(usage);
+            return new PropertyValuesEnumerator(cursor, keyId);
+        }
+        catch
+        {
+            usage.Dispose();
+            throw;
+        }
     }
 
     public PropertyValuesEnumerator GetPropertyValues(EdgeId edgeId, string key)
     {
-        using var usage = EnterUsage();
+        var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId))
+        {
+            usage.Dispose();
             return new PropertyValuesEnumerator(
                 new PropertyCursor(null!, default, PropertyVersionRef.Invalid), default);
-        return new PropertyValuesEnumerator(
-            _inner.Edges.EnumerateProperties(edgeId, _inner.Properties), keyId);
+        }
+        try
+        {
+            var cursor = _inner.Edges.EnumerateProperties(edgeId, _inner.Properties);
+            cursor.AttachUsage(usage);
+            return new PropertyValuesEnumerator(cursor, keyId);
+        }
+        catch
+        {
+            usage.Dispose();
+            throw;
+        }
     }
 
     // ========== トラバーサル ==========
@@ -725,49 +783,73 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         Direction direction = Direction.Both,
         string? typeFilter = null)
     {
-        using var usage = EnterUsage();
-        if (typeFilter != null && _edgeTypeTokens.TryGet(typeFilter, out var typeId))
-            return _inner.Edges.EnumerateNeighbors(vertexId, _inner.Vertices, typeId, direction);
-
-        return _inner.Edges.EnumerateNeighbors(vertexId, _inner.Vertices);
+        var usage = EnterUsage();
+        try
+        {
+            EdgeEnumerator enumerator;
+            if (typeFilter != null && _edgeTypeTokens.TryGet(typeFilter, out var typeId))
+                enumerator = _inner.Edges.EnumerateNeighbors(vertexId, _inner.Vertices, typeId, direction);
+            else
+                enumerator = _inner.Edges.EnumerateNeighbors(vertexId, _inner.Vertices);
+            enumerator.AttachUsage(usage);
+            return enumerator;
+        }
+        catch
+        {
+            usage.Dispose();
+            throw;
+        }
     }
 
     // ========== インデックス ==========
 
     public void IndexInsert(string indexName, string key, VertexId vertexId)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         _inner.Indexes.CreateStringIndex(indexName).Insert(key, PackVertex(vertexId));
     }
 
     public void IndexInsert(string indexName, long key, VertexId vertexId)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         _inner.Indexes.CreateInt64Index(indexName).Insert(key, PackVertex(vertexId));
     }
 
     public void IndexInsert(string indexName, double key, VertexId vertexId)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         _inner.Indexes.CreateDoubleIndex(indexName).Insert(key, PackVertex(vertexId));
     }
 
     public VertexIdEnumerator SeekIndex(string indexName, in PropertyValue key)
     {
-        using var usage = EnterUsage();
-        IEnumerable<long> values = key.Type switch
+        var usage = EnterUsage();
+        try
         {
-            PropertyValueType.Int32 or PropertyValueType.Int64 or PropertyValueType.Bool =>
-                _inner.Indexes.CreateInt64Index(indexName).SeekValues(key.Int64Value),
-            PropertyValueType.Double =>
-                _inner.Indexes.CreateDoubleIndex(indexName).SeekValues(key.DoubleValue),
-            PropertyValueType.String =>
-                _inner.Indexes.CreateStringIndex(indexName).SeekValues(
-                    System.Text.Encoding.UTF8.GetString(key.Utf8StringValue)),
-            _ => [],
-        };
-        // パック値を世代照合しつつ VertexId.Value へ unpack する。
-        return new VertexIdEnumerator(IndexValueResolver.ResolveLiveVertexSequences(values, _inner.Vertices));
+            IEnumerable<long> values = key.Type switch
+            {
+                PropertyValueType.Int32 or PropertyValueType.Int64 or PropertyValueType.Bool =>
+                    _inner.Indexes.CreateInt64Index(indexName).SeekValues(key.Int64Value),
+                PropertyValueType.Double =>
+                    _inner.Indexes.CreateDoubleIndex(indexName).SeekValues(key.DoubleValue),
+                PropertyValueType.String =>
+                    _inner.Indexes.CreateStringIndex(indexName).SeekValues(
+                        System.Text.Encoding.UTF8.GetString(key.Utf8StringValue)),
+                _ => [],
+            };
+            // パック値を世代照合しつつ VertexId.Value へ unpack する。
+            return new VertexIdEnumerator(
+                IndexValueResolver.ResolveLiveVertexSequences(values, _inner.Vertices),
+                usage);
+        }
+        catch
+        {
+            usage.Dispose();
+            throw;
+        }
     }
 
     public VertexIdEnumerator RangeIndex(
@@ -775,87 +857,112 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         in PropertyValue from, bool fromInclusive,
         in PropertyValue to, bool toInclusive)
     {
-        using var usage = EnterUsage();
-        IEnumerable<long> values;
-        switch (from.Type)
+        var usage = EnterUsage();
+        try
         {
-            case PropertyValueType.Int32:
-            case PropertyValueType.Int64:
-            case PropertyValueType.Bool:
-                values = _inner.Indexes.CreateInt64Index(indexName).RangeValues(
-                    from.Int64Value, fromInclusive, to.Int64Value, toInclusive);
-                break;
-            case PropertyValueType.Double:
-                values = _inner.Indexes.CreateDoubleIndex(indexName).RangeValues(
-                    from.DoubleValue, fromInclusive, to.DoubleValue, toInclusive);
-                break;
-            case PropertyValueType.String:
-                string fromStr = System.Text.Encoding.UTF8.GetString(from.Utf8StringValue);
-                string toStr   = System.Text.Encoding.UTF8.GetString(to.Utf8StringValue);
-                values = _inner.Indexes.CreateStringIndex(indexName).RangeValues(
-                    fromStr, fromInclusive, toStr, toInclusive);
-                break;
-            default:
-                values = [];
-                break;
+            IEnumerable<long> values;
+            switch (from.Type)
+            {
+                case PropertyValueType.Int32:
+                case PropertyValueType.Int64:
+                case PropertyValueType.Bool:
+                    values = _inner.Indexes.CreateInt64Index(indexName).RangeValues(
+                        from.Int64Value, fromInclusive, to.Int64Value, toInclusive);
+                    break;
+                case PropertyValueType.Double:
+                    values = _inner.Indexes.CreateDoubleIndex(indexName).RangeValues(
+                        from.DoubleValue, fromInclusive, to.DoubleValue, toInclusive);
+                    break;
+                case PropertyValueType.String:
+                    string fromStr = System.Text.Encoding.UTF8.GetString(from.Utf8StringValue);
+                    string toStr   = System.Text.Encoding.UTF8.GetString(to.Utf8StringValue);
+                    values = _inner.Indexes.CreateStringIndex(indexName).RangeValues(
+                        fromStr, fromInclusive, toStr, toInclusive);
+                    break;
+                default:
+                    values = [];
+                    break;
+            }
+            // パック値を世代照合しつつ VertexId.Value へ unpack する。
+            return new VertexIdEnumerator(
+                IndexValueResolver.ResolveLiveVertexSequences(values, _inner.Vertices),
+                usage);
         }
-        // パック値を世代照合しつつ VertexId.Value へ unpack する。
-        return new VertexIdEnumerator(IndexValueResolver.ResolveLiveVertexSequences(values, _inner.Vertices));
+        catch
+        {
+            usage.Dispose();
+            throw;
+        }
     }
 
     // ========== 物理プラン実行 ==========
 
     public QueryResult Execute(IPhysicalOperator plan)
     {
-        using var usage = EnterUsage();
-        // query 実行全体を span + duration histogram で計測。
-        using var activity = QuiverTelemetry.QueryActivitySource.StartActivity(
-            "query.execute", ActivityKind.Internal);
-        activity?.SetTag("quiver.tx.id", _inner.Id.Value);
-        var sw = Stopwatch.StartNew();
-        plan.Open(_inner);
-        var rows = new List<QueryRow>();
-
-        while (plan.MoveNext())
+        var usage = EnterUsage();
+        try
         {
-            var cur = plan.Current;
-            var slots = new TupleSlot[cur.ColumnCount];
-            byte[]?[]? byteData = null;
+            // query 実行全体を span + duration histogram で計測。
+            using var activity = QuiverTelemetry.QueryActivitySource.StartActivity(
+                "query.execute", ActivityKind.Internal);
+            activity?.SetTag("quiver.tx.id", _inner.Id.Value);
+            var sw = Stopwatch.StartNew();
+            plan.Open(_inner);
+            var rows = new List<QueryRow>();
 
-            for (int i = 0; i < cur.ColumnCount; i++)
+            while (plan.MoveNext())
             {
-                slots[i] = cur[i];
-                if (slots[i].Type is TupleSlotType.Utf8String or TupleSlotType.Bytes)
-                {
-                    byteData ??= new byte[]?[cur.ColumnCount];
-                    byteData[i] = plan.GetBytes(i).ToArray();
-                }
-            }
-            // 結果 VertexId 列に現世代を load (round-trip 一貫)。
-            QueryRowMaterializer.StampEntityGenerations(
-                slots, _inner.Vertices, _inner.Edges, _inner.Nexuses);
-            rows.Add(new QueryRow(slots, byteData));
-        }
+                var cur = plan.Current;
+                var slots = new TupleSlot[cur.ColumnCount];
+                byte[]?[]? byteData = null;
 
-        var schema = plan.Schema;
-        var stats = plan.Statistics;
-        plan.Dispose();
-        QuiverTelemetry.QueryDurationMs.Record(sw.Elapsed.TotalMilliseconds);
-        activity?.SetTag("quiver.query.rows", rows.Count);
-        // EventSource で件数 + 経過時間を発行。N+1 検出や hot operator 推定に有効。
-        QuiverEventSource.Log.QueryExecuted(
-            _inner.Id.Value,
-            rows.Count,
-            sw.Elapsed.TotalMilliseconds);
-        return new QueryResult(schema, stats, rows);
+                for (int i = 0; i < cur.ColumnCount; i++)
+                {
+                    slots[i] = cur[i];
+                    if (slots[i].Type is TupleSlotType.Utf8String or TupleSlotType.Bytes)
+                    {
+                        byteData ??= new byte[]?[cur.ColumnCount];
+                        byteData[i] = plan.GetBytes(i).ToArray();
+                    }
+                }
+                // 結果 VertexId 列に現世代を load (round-trip 一貫)。
+                QueryRowMaterializer.StampEntityGenerations(
+                    slots, _inner.Vertices, _inner.Edges, _inner.Nexuses);
+                rows.Add(new QueryRow(slots, byteData));
+            }
+
+            var schema = plan.Schema;
+            var stats = plan.Statistics;
+            plan.Dispose();
+            QuiverTelemetry.QueryDurationMs.Record(sw.Elapsed.TotalMilliseconds);
+            activity?.SetTag("quiver.query.rows", rows.Count);
+            // EventSource で件数 + 経過時間を発行。N+1 検出や hot operator 推定に有効。
+            QuiverEventSource.Log.QueryExecuted(
+                _inner.Id.Value,
+                rows.Count,
+                sw.Elapsed.TotalMilliseconds);
+            return new QueryResult(schema, stats, rows);
+        }
+        finally
+        {
+            usage.Dispose();
+        }
     }
 
     public IQueryCursor ExecuteCursor(IPhysicalOperator plan)
     {
-        using var usage = EnterUsage();
-        plan.Open(_inner);
-        return new PhysicalOperatorCursor(
-            plan, _inner.Vertices, _inner.Edges, _inner.Nexuses);
+        var usage = EnterUsage();
+        try
+        {
+            plan.Open(_inner);
+            return new PhysicalOperatorCursor(
+                plan, _inner.Vertices, _inner.Edges, _inner.Nexuses, usage);
+        }
+        catch
+        {
+            usage.Dispose();
+            throw;
+        }
     }
 
     public IAdjacencySegmentStore? AdjacencySegments => _inner.AdjacencySegments;
@@ -882,21 +989,19 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void SetVector(Core.EntityKind kind, long entityId, string indexName, ReadOnlySpan<float> vector)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
-        if (IsReadOnly)
-            throw new InvalidOperationException("Cannot SetVector in a read-only transaction.");
         if (_vectors is null)
             throw new NotSupportedException("This backend does not support transaction-scoped SetVector.");
-        // tx の ambient WalWriteSetContext 下で書く → グラフ変更と同じ WAL に乗り、
+        // transaction-owned WalWriteSet 下で書く → グラフ変更と同じ WAL に乗り、
         // commit で原子確定し、プロセス内 abort は before-image で巻き戻る。
         _vectors.SetVector(kind, entityId, indexName, vector);
     }
 
     public void RemoveVector(Core.EntityKind kind, long entityId, string indexName)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
-        if (IsReadOnly)
-            throw new InvalidOperationException("Cannot RemoveVector in a read-only transaction.");
         if (_vectors is null)
             throw new NotSupportedException("This backend does not support transaction-scoped RemoveVector.");
         _vectors.RemoveVector(kind, entityId, indexName);
@@ -913,6 +1018,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public NexusId CreateNexus(string type, ReadOnlySpan<NexusMember> members)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         if (string.IsNullOrWhiteSpace(type))
             throw new ArgumentException("Nexus type must not be null, empty, or whitespace.", nameof(type));
@@ -922,6 +1028,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public NexusId CreateNexus(NexusTypeId typeId, ReadOnlySpan<NexusMember> members)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         if (!typeId.IsValid)
             throw new ArgumentException("Invalid nexus type ID.", nameof(typeId));
@@ -972,7 +1079,13 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void DeleteNexus(NexusId nexusId)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
+        DeleteNexusCore(nexusId);
+    }
+
+    private void DeleteNexusCore(NexusId nexusId)
+    {
         // header の可視性が incidence とプロパティの可視性の正本 — header を論理削除すれば
         // それらも同スナップショットで不可視になる。overflow プロパティレコードは物理的に残る
         // ため、slot を回収できるよう先にチェーンを解放してから header をスタンプする。
@@ -998,35 +1111,66 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public NexusMemberEnumerator GetMembers(NexusId nexusId, string? role = null)
     {
-        using var usage = EnterUsage();
+        var usage = EnterUsage();
         RoleId roleFilter = RoleId.Invalid;
         if (role != null && _roleTokens.TryGet(role, out var rid))
             roleFilter = rid;
         else if (role != null)
+        {
+            usage.Dispose();
             return default;
+        }
 
-        var innerEnum = _inner.Incidences.EnumerateByNexus(nexusId, _inner.Nexuses);
-        return new NexusMemberEnumerator(innerEnum, _roleTokens, _inner.Vertices, roleFilter);
+        try
+        {
+            var innerEnum = _inner.Incidences.EnumerateByNexus(nexusId, _inner.Nexuses);
+            var enumerator = new NexusMemberEnumerator(
+                innerEnum, _roleTokens, _inner.Vertices, roleFilter);
+            enumerator.AttachUsage(usage);
+            return enumerator;
+        }
+        catch
+        {
+            usage.Dispose();
+            throw;
+        }
     }
 
     public NexusIdEnumerator GetNexuses(VertexId vertexId, string? type = null, string? role = null)
     {
-        using var usage = EnterUsage();
+        var usage = EnterUsage();
         NexusTypeId typeFilter = NexusTypeId.Invalid;
         if (type != null && _nexusTypeTokens.TryGet(type, out var tid))
             typeFilter = tid;
         else if (type != null)
+        {
+            usage.Dispose();
             return default;
+        }
 
         RoleId roleFilter = RoleId.Invalid;
         if (role != null && _roleTokens.TryGet(role, out var rid))
             roleFilter = rid;
         else if (role != null)
+        {
+            usage.Dispose();
             return default;
+        }
 
-        var innerEnum = _inner.Incidences.EnumerateByVertex(
-            vertexId, _inner.VertexIncidenceHeads, _inner.Nexuses);
-        return new NexusIdEnumerator(innerEnum, _inner.Nexuses, typeFilter, roleFilter);
+        try
+        {
+            var innerEnum = _inner.Incidences.EnumerateByVertex(
+                vertexId, _inner.VertexIncidenceHeads, _inner.Nexuses);
+            var enumerator = new NexusIdEnumerator(
+                innerEnum, _inner.Nexuses, typeFilter, roleFilter);
+            enumerator.AttachUsage(usage);
+            return enumerator;
+        }
+        catch
+        {
+            usage.Dispose();
+            throw;
+        }
     }
 
     public string? GetNexusTypeName(NexusTypeId typeId)
@@ -1037,6 +1181,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void SetProperty(NexusId nexusId, string key, in PropertyValue value)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         var keyId = _propKeyTokens.GetOrCreate(key);
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
@@ -1081,6 +1226,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void RemoveProperty(NexusId nexusId, string key)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
 
@@ -1096,14 +1242,25 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public PropertyCursor EnumerateProperties(NexusId nexusId)
     {
-        using var usage = EnterUsage();
-        return _inner.Nexuses.EnumerateProperties(nexusId, _inner.Properties);
+        var usage = EnterUsage();
+        try
+        {
+            var cursor = _inner.Nexuses.EnumerateProperties(nexusId, _inner.Properties);
+            cursor.AttachUsage(usage);
+            return cursor;
+        }
+        catch
+        {
+            usage.Dispose();
+            throw;
+        }
     }
 
     // ── Nexusのマルチバリュープロパティ (Set cardinality) ──
 
     public void AddPropertyValue(NexusId nexusId, string key, in PropertyValue value)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         var keyId = _propKeyTokens.GetOrCreate(key, PropertyCardinality.Set);
 
@@ -1135,6 +1292,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public void RemovePropertyValue(NexusId nexusId, string key, in PropertyValue value)
     {
+        EnsureWritable();
         using var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
         if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
@@ -1162,48 +1320,54 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     public PropertyValuesEnumerator GetPropertyValues(NexusId nexusId, string key)
     {
-        using var usage = EnterUsage();
+        var usage = EnterUsage();
         if (!_propKeyTokens.TryGet(key, out var keyId))
+        {
+            usage.Dispose();
             return new PropertyValuesEnumerator(
                 new PropertyCursor(null!, default, PropertyVersionRef.Invalid), default);
-        return new PropertyValuesEnumerator(
-            _inner.Nexuses.EnumerateProperties(nexusId, _inner.Properties), keyId);
+        }
+        try
+        {
+            var cursor = _inner.Nexuses.EnumerateProperties(nexusId, _inner.Properties);
+            cursor.AttachUsage(usage);
+            return new PropertyValuesEnumerator(cursor, keyId);
+        }
+        catch
+        {
+            usage.Dispose();
+            throw;
+        }
     }
 
     public void Commit()
     {
-        using var usage = EnterUsage();
         _inner.Commit();
     }
 
     public void Rollback()
     {
-        using var usage = EnterUsage();
         _inner.Abort();
     }
 
     public void Dispose()
     {
-        using var usage = EnterUsage();
         _inner.Dispose();
     }
 
     // savepoint / nested undo — 下層トランザクションへ委譲する。
     public SavepointId Savepoint(string? name = null)
     {
-        using var usage = EnterUsage();
         return _inner.Savepoint(name);
     }
 
     public void RollbackTo(SavepointId savepoint)
     {
-        using var usage = EnterUsage();
         _inner.RollbackTo(savepoint);
     }
 
     public void ReleaseSavepoint(SavepointId savepoint)
     {
-        using var usage = EnterUsage();
         _inner.ReleaseSavepoint(savepoint);
     }
 
@@ -1219,5 +1383,11 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     {
         using var usage = EnterUsage();
         _inner.OnRolledBack(callback);
+    }
+
+    private void EnsureWritable()
+    {
+        if (IsReadOnly)
+            throw new TransactionException("Cannot mutate through a read-only transaction.");
     }
 }

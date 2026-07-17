@@ -40,7 +40,7 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
     private readonly Direction _dir;
     private readonly EdgeTypeId? _typeFilter;
     private readonly IEdgeWeightProvider _weightProvider;
-    private readonly Func<VertexId, double>? _heuristic;
+    private readonly ITransactionVertexHeuristic? _heuristic;
     private readonly double _maxDistance;
 
     private ITransaction? _tx;
@@ -81,6 +81,27 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
         IEdgeWeightProvider weightProvider,
         Func<VertexId, double>? heuristic = null,
         double maxDistance = double.PositiveInfinity)
+        : this(
+            source,
+            sourceVertexColumn,
+            targetVertexColumn,
+            direction,
+            typeFilter,
+            weightProvider,
+            heuristic is null ? null : new DelegateVertexHeuristic(heuristic),
+            maxDistance)
+    {
+    }
+
+    internal WeightedShortestPathOperator(
+        IPhysicalOperator source,
+        int sourceVertexColumn,
+        int targetVertexColumn,
+        Direction direction,
+        EdgeTypeId? typeFilter,
+        IEdgeWeightProvider weightProvider,
+        ITransactionVertexHeuristic? transactionHeuristic,
+        double maxDistance = double.PositiveInfinity)
     {
         _source = source;
         _srcCol = sourceVertexColumn;
@@ -88,7 +109,7 @@ internal sealed class WeightedShortestPathOperator : IPhysicalOperator
         _dir = direction;
         _typeFilter = typeFilter;
         _weightProvider = weightProvider ?? throw new ArgumentNullException(nameof(weightProvider));
-        _heuristic = heuristic;
+        _heuristic = transactionHeuristic;
         _maxDistance = maxDistance;
     }
 
@@ -287,7 +308,7 @@ internal struct WeightedShortestPathState
 internal sealed class WeightedShortestPathKernel(
     ITransaction tx,
     IEdgeWeightProvider weightProvider,
-    Func<VertexId, double>? heuristic,
+    ITransactionVertexHeuristic? heuristic,
     double maxDistance) : IGraphKernel<WeightedShortestPathState>
 {
     /// <inheritdoc/>
@@ -334,7 +355,7 @@ internal sealed class WeightedShortestPathKernel(
     private double Heuristic(VertexId vertex)
     {
         if (heuristic is null) return 0.0;
-        double h = heuristic(vertex);
+        double h = heuristic.Estimate(tx, vertex);
         // 負のヒューリスティックは admissibility を壊すため 0 にクランプする。
         return h > 0.0 ? h : 0.0;
     }

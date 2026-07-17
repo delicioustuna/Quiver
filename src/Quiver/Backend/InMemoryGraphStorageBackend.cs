@@ -24,6 +24,12 @@ internal sealed class InMemoryGraphStorageBackend(
     public IGraphTransaction BeginGraphTransaction(IsolationLevel level, bool readOnly)
         => _inner.BeginGraphTransaction(level, readOnly);
 
+    public IGraphTransaction BeginReadGraphTransaction()
+        => _inner.BeginReadGraphTransaction();
+
+    public IGraphTransaction BeginWriteGraphTransaction(IsolationLevel level)
+        => _inner.BeginWriteGraphTransaction(level);
+
     public void CreateSnapshot(string targetDirectory, SnapshotOptions? options = null)
         => throw new NotSupportedException(
             "インメモリバックエンドはスナップショットをサポートしていません。");

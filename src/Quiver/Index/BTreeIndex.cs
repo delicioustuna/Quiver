@@ -230,7 +230,7 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
     /// <summary>
     /// 生キーの **idempotent set** (recovery Pass 2b redo / Pass 3 undo 用)。
     /// 存在すれば値を上書き、無ければ挿入する (state-setting なので二重適用が no-op)。WAL は emit しない
-    /// pure apply (recovery 中は WalWriteSetContext.Current が null で page-WAL も出ない)。
+    /// pure apply (recovery 中は active WalWriteSet が無いため page-WAL も出ない)。
     /// </summary>
     public void UpsertRaw(ReadOnlySpan<byte> rawKey, long value)
     {

@@ -69,7 +69,7 @@ public sealed class VectorHnswFilteredBatchTests : IDisposable
             for (int i = 0; i < N; i++)
             {
                 var n = tx.CreateVertex("Doc");
-                db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, RandomVec(rng, Dim));
+                tx.SetVector(EntityKind.Vertex, n.Value, IndexName, RandomVec(rng, Dim));
             }
             tx.Commit();
         }
@@ -107,7 +107,7 @@ public sealed class VectorHnswFilteredBatchTests : IDisposable
                 var v = RandomVec(rng, Dim);
                 corpus.Add(v);
                 var n = tx.CreateVertex("Doc");
-                db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
+                tx.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
             }
             tx.Commit();
         }

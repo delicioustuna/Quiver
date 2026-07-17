@@ -15,7 +15,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
     private readonly IVectorStore _vectors;
     // db.Vectors の公開面。tx 外のミューテーションを autocommit tx で包む
-    // (tx 内の呼び出しは ambient WalWriteSetContext を検出して join する)。生の _vectors は
+    // (公開面の mutation は autocommit transaction を開始する)。生の _vectors は
     // access methods / tx 配下 SetVector の委譲先として内部で使い続ける。
     private IVectorStore? _vectorsFacade;
     private readonly PageManager _pageManager;
@@ -99,7 +99,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _columnManager = columnManager;
 
         _schema = new SchemaApi(_labelTokens, _edgeTypeTokens, _propKeyTokens, _indexManager,
-            _nexusTypeTokens, _roleTokens);
+            nexusTypes: _nexusTypeTokens,
+            roles: _roleTokens,
+            acquireMutationLease: _txManager.AcquireMutationLease,
+            acquireOwnedMutationLease: owner => _txManager.AcquireMutationLease(owner));
         // index manager と label index を DiagnosticsApi に渡して
         // CheckIndexConsistency / RepairIndexes が機能するようにする。
         // TransactionManager を渡し、CurrentCheckpointThresholdBytes /
@@ -118,10 +121,12 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         {
             BeginBinaryBulkLoad = buildAdjacencyIndex => new BulkLoader(
                 _vertexStore, _edgeStore, _propStore,
-                buildAdjacencyIndex ? _container : null),
+                buildAdjacencyIndex ? _container : null,
+                _txManager.AcquireMutationLease()),
             BeginStreamingBinaryBulkLoad = buildAdjacencyIndex => new StreamingBulkLoader(
                 _vertexStore, _edgeStore, _propStore,
-                buildAdjacencyIndex ? _container : null),
+                buildAdjacencyIndex ? _container : null,
+                _txManager.AcquireMutationLease()),
         };
     }
 
@@ -147,13 +152,17 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     /// <summary>write 経路 (列維持) のため GraphTransaction へ渡す列マネージャ。</summary>
     internal ColumnManager Columns => _columnManager;
 
-    internal bool CreateColumn(EntityKind kind, int keyId)
+    internal bool CreateColumn(EntityKind kind, string propertyKey)
     {
         // opt-in 列の DDL はアクティブ tx 無しを要求する。CreateColumn は
         // 現コミット済みデータから列を 1 パス構築するため、構築を跨ぐ並行 writer がいると列が
         // 取りこぼし、列スキャン集約が row path と乖離しうる。CompactAdjacency と同じ契約で塞ぐ。
         if (_txManager.ActiveCount > 0)
             throw new InvalidOperationException("CreateColumn requires no active transactions.");
+        using var mutationLease = _txManager.AcquireMutationLease();
+        if (_txManager.ActiveCount > 0)
+            throw new InvalidOperationException("CreateColumn requires no active transactions.");
+        int keyId = _propKeyTokens.GetOrCreate(propertyKey).Value;
         // 構築 (列データ / 列テナント page-table / catalog ページの書き込み) を
         // WAL 文脈下で行い commit する。これにより crash recovery / CreateSnapshot (online backup) が
         // 列ページを redo / 複製できる。tx 外で書くと clean Dispose のフラッシュ依存になり、
@@ -161,17 +170,21 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         return RunColumnDdl(() => _columnManager.CreateColumn(kind, keyId));
     }
 
-    internal bool DropColumn(EntityKind kind, int keyId)
+    internal bool DropColumn(EntityKind kind, string propertyKey)
     {
         if (_txManager.ActiveCount > 0)
             throw new InvalidOperationException("DropColumn requires no active transactions.");
-        return RunColumnDdl(() => _columnManager.DropColumn(kind, keyId));
+        using var mutationLease = _txManager.AcquireMutationLease();
+        if (_txManager.ActiveCount > 0)
+            throw new InvalidOperationException("DropColumn requires no active transactions.");
+        if (!_propKeyTokens.TryGet(propertyKey, out var keyId)) return false;
+        return RunColumnDdl(() => _columnManager.DropColumn(kind, keyId.Value));
     }
 
     // 列 DDL の page 書き込みを WAL ログ + commit して durable 化する共通ラッパ。
     private bool RunColumnDdl(Func<bool> ddl)
     {
-        var tx = _txManager.Begin(IsolationLevel.SnapshotIsolation);
+        var tx = _txManager.BeginRead();
         try
         {
             bool result = ddl();
@@ -195,11 +208,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     internal long ColumnProjectSumForTest(EntityKind kind, int keyId)
     {
         if (!TryGetColumn(kind, keyId, out var col)) return -1;
-        var tx = _txManager.Begin(IsolationLevel.SnapshotIsolation);
+        var tx = _txManager.BeginRead();
         try
         {
-            _ = tx.Edges.Read(new EdgeId(0)); // MvccContext を activate
-            return col.ProjectSum(MvccContext.CurrentSnapshot, MvccContext.CurrentTxId, MvccContext.CurrentCommitted!);
+            return col.ProjectSum(tx.Snapshot, tx.Id, tx.Committed!);
         }
         finally { tx.Dispose(); }
     }
@@ -221,8 +233,16 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _vectors, () => BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false));
 
     public IGraphTransaction BeginGraphTransaction(IsolationLevel level, bool readOnly)
+        => readOnly ? BeginReadGraphTransaction() : BeginWriteGraphTransaction(level);
+
+    public IGraphTransaction BeginReadGraphTransaction()
+        => WrapGraphTransaction(_txManager.BeginRead(), readOnly: true);
+
+    public IGraphTransaction BeginWriteGraphTransaction(IsolationLevel level)
+        => WrapGraphTransaction(_txManager.BeginWrite(level), readOnly: false);
+
+    private IGraphTransaction WrapGraphTransaction(ITransaction inner, bool readOnly)
     {
-        var inner = _txManager.Begin(level);
         return new GraphTransaction(
             inner, _labelTokens, _edgeTypeTokens, _propKeyTokens,
             _nexusTypeTokens, _roleTokens,
@@ -241,6 +261,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     /// </summary>
     public void CompactAdjacency()
     {
+        using var mutationLease = _txManager.AcquireMutationLease();
         if (_txManager.ActiveCount > 0)
             throw new InvalidOperationException(
                 "CompactAdjacency requires no active transactions.");
@@ -286,7 +307,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         // 先に descriptor を無効化して durable 化しておくと、以降の crash/reopen は
         // 部分的な adjacency view を開かず、row path へ安全にフォールバックできる。
         if (_adjStore is IDisposable old) old.Dispose();
-        _txManager.SwapAdjacencyStore(null);
+        _txManager.SwapAdjacencyStore(null, writerLeaseHeld: true);
         _adjStore = null;
         AdjacencyContainer.WriteDescriptor(adjData, AdjacencyContainer.KindNone, null);
         _container.Flush();
@@ -317,7 +338,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         IAdjacencySegmentStore newStore = new AdjacencySegmentStore(
             adjData, adjIdx, payloadSpec, newEpoch);
         _adjStore = newStore;
-        _txManager.SwapAdjacencyStore(newStore);
+        _txManager.SwapAdjacencyStore(newStore, writerLeaseHeld: true);
     }
 
     private bool TryReadPayload(EdgeId edgeId, PayloadLaneSpec spec, out long raw)
@@ -413,6 +434,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     /// </summary>
     public VacuumReport Vacuum(VacuumOptions? options = null)
     {
+        using var mutationLease = _txManager.AcquireMutationLease();
         // WAL を渡して、dead version 回収後の末尾連続 free page を物理 truncate する。
         // WAL の FileTruncate レコード経由で crash recovery に対する冪等再生を保証する。
         // nexus / incidence / vertex-incidence-head の実体は transaction 配線側が保持するため、
@@ -435,6 +457,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
     public void CreateSnapshot(string targetFilePath, SnapshotOptions? options = null)
     {
+        using var mutationLease = _txManager.AcquireMutationLease();
         ArgumentException.ThrowIfNullOrEmpty(targetFilePath);
         options ??= new SnapshotOptions();
 
@@ -442,7 +465,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         var parentDir = Path.GetDirectoryName(targetFilePath);
         if (!string.IsNullOrEmpty(parentDir)) Directory.CreateDirectory(parentDir);
 
-        _txManager.RequestCheckpoint();
+        _container.SetCommittedHighWaterTxId(_txManager.PeekNextTxId());
+        _txManager.RequestCheckpoint(writerLeaseHeld: true);
 
         // 1. コンテナ (graph.quiver = コア / 索引 / 隣接 / token / epoch を同居) を page-by-page で
         //    複製する。PinForRead でフレームレベル read lock を取りながら写すので、並行 writer は

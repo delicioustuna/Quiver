@@ -42,8 +42,8 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     {
         // matchA: first 'matchA' vertices get tag=A. matchB: first 'matchB' vertices get hot=true.
         // matchBoth = min(matchA, matchB).
-        using var tx = _db.BeginTransaction();
         _db.Schema.GetOrCreateLabel("N");
+        using var tx = _db.BeginTransaction();
         for (int i = 0; i < total; i++)
         {
             var nid = tx.CreateVertex("N");
@@ -175,8 +175,8 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     [Fact]
     public void Empty_source_yields_no_rows()
     {
-        using var tx = _db.BeginTransaction();
         var label = _db.Schema.GetOrCreateLabel("Missing");
+        using var tx = _db.BeginTransaction();
 
         var always = new CountingPredicate((_, _) => true);
         using var result = tx.Execute(

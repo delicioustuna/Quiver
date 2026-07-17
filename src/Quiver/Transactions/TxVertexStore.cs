@@ -1,4 +1,5 @@
 using Quiver.Core;
+using Quiver.Storage;
 using Quiver.Storage.Records;
 
 namespace Quiver.Transactions;
@@ -6,110 +7,81 @@ namespace Quiver.Transactions;
 internal sealed class TxVertexStore : IVertexStore
 {
     private readonly IVertexStore _inner;
-    private readonly LockManager _locks;
-    private readonly TransactionId _txId;
-    private readonly LockingMode _mode;
-    private readonly TimeSpan _timeout;
-    // per-tx MVCC コンテキスト。複数 tx を交互に操作する場合、
-    // ambient MvccContext を呼出側で「使う直前に毎回」設定し直さないと
-    // 別 tx の snapshot で visibility 判定が走ってしまう。Tx 操作ごとに ambient を再アクティベートする。
+    private readonly TransactionId _transactionId;
     private readonly SnapshotState _snapshot;
-    private readonly CommittedTxRegistry? _committed;
-    // SSN (Serializable) のときのみ非 null。read/write hook は read/write set を
-    // 収集するだけ。η/π の計算と exclusion window 判定は commit 時に commit-stamp 空間で
-    // 一括実行する (Transaction.SsnValidateAndStamp)。
-    private readonly SsnContext? _ssn;
+    private readonly VersionVisible _visibility;
+    private readonly bool _isReadOnly;
 
-    internal TxVertexStore(IVertexStore inner, LockManager locks, TransactionId txId, LockingMode mode, TimeSpan timeout,
-        SnapshotState snapshot = default, CommittedTxRegistry? committed = null,
-        SsnContext? ssn = null)
+    internal TxVertexStore(
+        IVertexStore inner,
+        TransactionId transactionId,
+        in SnapshotState snapshot,
+        CommittedTxRegistry committed,
+        bool isReadOnly)
     {
-        _inner = inner; _locks = locks; _txId = txId; _mode = mode; _timeout = timeout;
-        _snapshot = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
-        _committed = committed;
-        _ssn = ssn;
+        _inner = inner;
+        _transactionId = transactionId;
+        _snapshot = snapshot;
+        _visibility = (xmin, xmax) => Visibility.IsVisible(xmin, xmax, in _snapshot, _transactionId);
+        _isReadOnly = isReadOnly;
     }
 
     public long InUseCount => _inner.InUseCount;
 
     public VertexId Allocate(LabelId labelId)
     {
-        ActivateMvccContext();
-        // Allocate は新規バージョンの作成 — 誰も読めなかった entity なので
-        // r:w / w:w in-edge は存在しない。SSN write set には登録しない。
-        return _inner.Allocate(labelId);
+        EnsureWritable();
+        return _inner is ITransactionVertexStore store
+            ? store.Allocate(labelId, _transactionId)
+            : _inner.Allocate(labelId);
     }
 
     public void Free(VertexId vertexId)
     {
-        ActivateMvccContext();
-        // lock / SSN キーは Sequence (read-set 側 RecordRead と整合させる)。
-        Acquire(vertexId.Sequence, LockMode.Exclusive);
-        // 論理削除は既存バージョンの上書きと同じ依存を生む。
-        SsnOnWrite(vertexId.Sequence);
-        _inner.Free(vertexId);
+        EnsureWritable();
+        if (_inner is ITransactionVertexStore store)
+            store.Free(vertexId, _transactionId);
+        else
+            _inner.Free(vertexId);
     }
 
     public VertexReadHandle Read(VertexId vertexId)
     {
-        // ReaderWriter モードでは共有ロックを取り、書き込み tx と分離する。
-        // ExclusiveOnly (既定) は後方互換のため無ロック。
-        if (_mode == LockingMode.ReaderWriter)
-            Acquire(vertexId.Sequence, LockMode.Shared);
-        // read-set は ActivateMvccContext で登録した sink 経由で _inner.Read が記録する
-        // (可視判定後の 1 件のみ)。traversal / scan も同じ _inner.Read を通るので一律捕捉される。
-        ActivateMvccContext();
-        return _inner.Read(vertexId);
+        return _inner is ITransactionVertexStore store
+            ? store.Read(vertexId, _visibility)
+            : _inner.Read(vertexId);
     }
 
     public VertexWriteHandle Write(VertexId vertexId)
     {
-        Acquire(vertexId.Sequence, LockMode.Exclusive);
-        ActivateMvccContext();
-        // early-abort は _inner.Write のミューテーション前に評価する。
-        SsnOnWrite(vertexId.Sequence);
+        EnsureWritable();
         return _inner.Write(vertexId);
     }
 
     public IEnumerable<VertexId> Scan()
     {
-        ActivateMvccContext();
-        return _inner.Scan();
+        return _inner is ITransactionVertexStore store
+            ? store.Scan(_visibility)
+            : _inner.Scan();
     }
 
-    // 世代照合は raw な sidecar 読み取り (MVCC / lock 不要)。そのまま委譲する。
-    public int CurrentGeneration(long localId) => _inner.CurrentGeneration(localId);
+    public int CurrentGeneration(long localId)
+        => _inner.CurrentGeneration(localId);
 
-    public PropertyCursor EnumerateProperties(VertexId vertexId, IPropertyStore overflowStore)
+    public PropertyCursor EnumerateProperties(
+        VertexId vertexId,
+        IPropertyStore overflowStore)
     {
-        if (_mode == LockingMode.ReaderWriter) Acquire(vertexId.Sequence, LockMode.Shared);
-        ActivateMvccContext();
-        return _inner.EnumerateProperties(vertexId, overflowStore);
+        VertexReadHandle vertex = Read(vertexId);
+        if (!vertex.InUse)
+            return new PropertyCursor(overflowStore, default, PropertyVersionRef.Invalid);
+        var ownerId = vertexId.Generation == 0 ? vertex.Id : vertexId;
+        return overflowStore.Enumerate(EntityRef.From(ownerId), vertex.FirstPropertyRef);
     }
 
-    private void ActivateMvccContext()
+    private void EnsureWritable()
     {
-        if (_committed != null)
-            MvccContext.Begin(_txId, _snapshot, _committed, _ssn);
-    }
-
-    // ==================== SSN write-set 収集 ====================
-    // read-set は MvccContext の sink (SsnContext) 経由でストアの Read/Scan が記録する。
-
-    private void SsnOnWrite(long localId)
-    {
-        if (_ssn == null || localId < 0) return;
-        var id = new EntityId(EntityKind.Vertex, localId);
-        _ssn.Writes.Add(id);
-        _ssn.Reads.Remove(id); // self r:w 抹消
-    }
-
-    private void Acquire(long id, LockMode mode)
-    {
-        if (!_locks.TryAcquire(id, _txId, mode, _timeout))
-        {
-            string what = mode == LockMode.Exclusive ? "write" : "read";
-            throw new TransactionException($"Lock timeout acquiring {what} lock on vertex {id}.");
-        }
+        if (_isReadOnly)
+            throw new TransactionException("Cannot mutate vertices in a read-only transaction.");
     }
 }

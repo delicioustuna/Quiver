@@ -3,48 +3,6 @@ using Quiver.Core;
 namespace Quiver.Storage.Wal;
 
 /// <summary>
-/// ページ層から、現在の書き込みトランザクションが所有する WAL write set へ接続する。
-/// 明示的な owner は <see cref="WalWriteSet"/> であり、この型は既存のページ API を通す境界に限って使う。
-/// </summary>
-internal static class WalWriteSetContext
-{
-    private static readonly AsyncLocal<WalWriteSet?> CurrentSlot = new();
-
-    internal static WalWriteSet? Current
-    {
-        get => CurrentSlot.Value;
-        set => CurrentSlot.Value = value;
-    }
-
-    public static WalWriteSet Begin(IWriteAheadLog wal, TransactionId txId)
-    {
-        var writeSet = new WalWriteSet(wal, txId);
-        Current = writeSet;
-        return writeSet;
-    }
-
-    public static void Activate(WalWriteSet writeSet) => Current = writeSet;
-
-    public static void End(WalWriteSet writeSet)
-    {
-        if (ReferenceEquals(Current, writeSet)) Current = null;
-    }
-
-    public static void End() => Current = null;
-
-    public static void FlushPending() => Current?.FlushPending();
-
-    public static long LogPageImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
-        => Current is { } writeSet ? writeSet.LogPageImage(fileKind, pageId, pageBytes) : -1L;
-
-    public static void CaptureBeforeImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
-        => Current?.CaptureBeforeImage(fileKind, pageId, pageBytes);
-
-    public static void OverwritePendingFromBeforeImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
-        => Current?.OverwritePendingFromBeforeImage(fileKind, pageId, pageBytes);
-}
-
-/// <summary>
 /// 一つの書き込みトランザクションが所有する page image と in-process undo の集合。
 /// WAL には commit 直前の after-image だけを出し、勝者は明示的な Commit レコードだけで決める。
 /// </summary>
@@ -55,6 +13,7 @@ internal sealed class WalWriteSet(IWriteAheadLog wal, TransactionId txId)
         [new Dictionary<(byte FileKind, long PageId), byte[]>()];
 
     public int Depth => _beforeImageStack.Count;
+    internal TransactionId TransactionId => txId;
 
     public long LogPageImage(byte fileKind, long pageId, ReadOnlySpan<byte> pageBytes)
     {

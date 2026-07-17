@@ -1,6 +1,6 @@
 # WAL とリカバリ
 
-> as-built 仕様（QUIVER-SW family version 1、2026-07-15）
+> as-built 仕様（QUIVER-SW family version 1、2026-07-17）
 >
 > 本文は Single Writer + Snapshot Readers 再設計 Wave 2 で実装した parser foundation の契約を記す。
 > Wave 5 の統合リカバリは本仕様の対象外である。
@@ -45,6 +45,9 @@ commit は集約済み `PageImage` と明示的な `Commit` を WAL へ書き、
 fsync 済みの `Commit` は取り消さない。
 その後の checkpoint や post-commit 処理が失敗しても `Abort` を追記せず、呼び出し側へは durable commit として扱う。
 commit 前の例外、明示 abort、savepoint rollback は、メモリ上の before-image を逆順に適用してプロセス内で復元する。
+
+読み取り専用トランザクションは `BeginWrite`、`Abort`、`PageImage` を含む WAL record を一切生成しない。
+したがって、開始、読み取り、commit、dispose の全経路で WAL bytes は 0 のままである。
 
 ## リカバリ契約 {#recovery}
 

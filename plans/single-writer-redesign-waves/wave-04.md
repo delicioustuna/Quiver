@@ -3,7 +3,7 @@
 > 効力宣言: 本書と設計正本が食い違う場合は設計正本を優先し、食い違いをユーザへ報告する。
 > 作成日: 2026-07-17
 > 対応する正本のバージョン: 本書と同じ C-8 forward-fix commit に含まれる正本
-> ステータス: 承認済み(2026-07-17、C-8 forward-fix)
+> ステータス: 実装・検証完了（2026-07-17）
 
 ## 1. 着手前チェック
 
@@ -79,3 +79,53 @@ Wave 4 は transaction manager、visibility、backend/facade adapter、transacti
 - branch tipは完成または検証済み補修commitであり、topic branchへpush済みである。
 
 mergeとtagはユーザの明示承認を別々に得る。
+
+## 6. 完了記録
+
+Wave 4 は2026年7月17日に実装とローカル検証を完了した。
+`TransactionManager` がdatabase instanceごとの`WriterLease`、`SnapshotRegistry`、`CommittedTxRegistry`を所有し、facade、backend、manager、bulk、vector autocommit、schema、maintenanceの書込み入口を同じleaseへ統合した。
+read transactionは開始時snapshotを登録し、writer leaseとWAL Beginを使わず、write transactionは明示的なsnapshot storeとwrite setを所有する。
+同一transaction handleの同時使用はtransaction-owned atomic guardで拒否し、cursorは`MoveNext`単位でguardへ参加するため、通常の`await`継続と逐次的なpoint readを妨げない。
+`EntityVersionMeta`は`(xmin,xmax,generation)`の24byte recordへ縮約し、sidecar format versionを4へ更新した。
+productionとbenchmarkからlock manager、deadlock detector、SSN、ambient MVCC/WAL contextを削除した。
+
+### 6.1 機能検証
+
+DebugとReleaseの`dotnet build Quiver.slnx`は、いずれも0 errors、0 warningsで成功した。
+通常testは16 project、合計1,953件が成功した。
+
+| test project | 成功件数 |
+|---|---:|
+| `Quiver.Tests` | 894 |
+| `Quiver.Operators.Tests` | 316 |
+| `Quiver.Client.Tests` | 216 |
+| `Quiver.Stores.Tests` | 124 |
+| `Quiver.Backend.Tests`の通常gate | 83 |
+| `Quiver.Transactions.Tests` | 64 |
+| `Quiver.Rag.Tests` | 63 |
+| その他9 project | 193 |
+
+`Quiver.Backend.Tests`の通常gateは`Category!=Chaos`かつ`BinaryGraphStorageBackendCrashContractTests`を除外して実行した。
+`BinaryGraphStorageBackendCrashContractTests`は実装途中の回帰確認で27件すべて成功しており、その後にrecovery orderingの変更はないため再実行しなかった。
+
+### 6.2 crash gate
+
+Wave 4ではCommit、PageImage、fsyncの順序、winner判定、checkpoint、recovery algorithmを変更していない。
+WAL差分はtransaction-owned write setをambient contextから`IWriteAheadLog.ActiveWriteSet`へ移す所有権変更であり、PageImageをCommitより前に追記してからflushする順序は維持した。
+read transactionのWAL 0 bytesは通常testで確認した。
+したがってcrash gateは着手指示書どおりN/Aとし、ChaosはWave 5、Wave 9、Wave 10の該当gateで実行する。
+
+### 6.3 性能検証
+
+Single Writer性能の生出力は`docs/benchmarks/2026-07-17_SingleWriterRedesign_Wave4_SingleWriterPerfRaw.md`へ保存した。
+readerなしのwriter commit p50は1296.90µs、32 readers並行時は1178.90µs、比率は0.909であり、上限1.50を満たした。
+BasicPerfの生出力は`docs/benchmarks/2026-07-17_SingleWriterRedesign_Wave4_BasicPerfRaw.md`へ保存した。
+comparable workloadの最大比率はCreateVertexとSetPropertyの1.128であり、上限1.20を満たした。
+durable commitは1018µsであり、上限3491.40µsを満たした。
+
+### 6.4 静的監査
+
+productionとbenchmarkに対する旧lock、deadlock、SSN、commit-stamp、ambient context、thread-id ownershipの参照スキャンは0件だった。
+productionの`Serializable`と`ReadCommitted`は公開互換enumの定義だけに残り、実装分岐は0件だった。
+`scripts/agent-guardrails/check-track-markers.ps1 -Scan`と`git diff --check`は成功した。
+mergeとtagはこの完了記録に含めず、ユーザの明示承認を別途得る。

@@ -110,9 +110,9 @@ public sealed class FilteredFullTextScanOperatorTests
             seed.Commit();
         }
 
+        var label = fx.Db.Schema.GetOrCreateLabel("Doc");
         using var tx = fx.Db.BeginTransaction();
-        var source = new VertexByLabelScanOperator(
-            fx.Db.Schema.GetOrCreateLabel("Doc"));
+        var source = new VertexByLabelScanOperator(label);
         var op = new FilteredFullTextScanOperator(source, 0, IndexName, "hello", k: 10);
         op.Open(((GraphTransaction)tx).Inner);
         var count = 0;
@@ -159,9 +159,9 @@ public sealed class FilteredFullTextScanOperatorTests
             seed.Commit();
         }
 
+        var label = fx.Db.Schema.GetOrCreateLabel("Doc");
         using var tx = fx.Db.BeginTransaction();
-        var source = new VertexByLabelScanOperator(
-            fx.Db.Schema.GetOrCreateLabel("Doc"));
+        var source = new VertexByLabelScanOperator(label);
         var op = new FilteredFullTextScanOperator(source, 0, IndexName, "common", k: 2);
         op.Open(((GraphTransaction)tx).Inner);
         var count = 0;

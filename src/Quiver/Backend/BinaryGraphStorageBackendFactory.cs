@@ -106,10 +106,9 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         SingleFileContainer container,
         bool recover)
     {
-        // 同スレッドの先行 backend がトランザクション途中で終了している可能性がある
-        // (crash シミュレーション等)。ambient コンテキストをクリーン状態へ戻す。
-        WalWriteSetContext.End();
-        MvccContext.End();
+        // 先行 backend がトランザクション途中で終了している可能性がある
+        // (crash シミュレーション等)。WAL の明示的 write-set 参照をクリーン状態へ戻す。
+        wal.ActiveWriteSet = null;
 
         container.EnableWalLogging(DataFileKind, wal);
         // checkpoint (pageManager.FlushAll) / snapshot 経路に container 物理ファイルを乗せる。
@@ -168,7 +167,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         }
 
         // Vertexは slotted ヒープ (TenantVertices) + ItemPointerMap (TenantVertexMap) に
-        // 載る。MVCC/Generation/SSN は従来どおり sidecar (TenantVertexVer) で管理する。
+        // 載る。MVCC/Generation は sidecar (TenantVertexVer) で管理する。
         var vertexFile = container.OpenTenant(TenantVertices, PageKind.Header);
         var vertexMapFile = container.OpenTenant(TenantVertexMap, PageKind.Header);
         var vertexVerFile = container.OpenTenant(TenantVertexVer, PageKind.Header);
@@ -177,7 +176,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var vertexStore = new VersionedVertexStore(vertexFile, vertexMap, labelIndex: null, vertexVersions);
 
         // Edgeも slotted ヒープ (TenantEdges) + ItemPointerMap
-        // (TenantEdgeMap) に載る。MVCC は heap version、Generation/SSN は sidecar (TenantEdgeVer)。
+        // (TenantEdgeMap) に載る。MVCC は heap version、Generation は sidecar (TenantEdgeVer)。
         var edgeFile = container.OpenTenant(TenantEdges, PageKind.Header);
         var edgeMapFile = container.OpenTenant(TenantEdgeMap, PageKind.Header);
         var relVerFile = container.OpenTenant(TenantEdgeVer, PageKind.Header);
@@ -319,21 +318,15 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
 
         var txManager = new TransactionManager(
             wal, vertexStore, edgeStore, propStore, indexManager, adjStore, access,
-            undoHandler, options.LockingMode, options.LockTimeout,
-            options.DeadlockDetectionInterval, committedRegistry,
-            vertexVersions, edgeVersions,
-            nexusStore, incidenceStore, vertexIncidenceHeadStore, nexusVersions,
+            undoHandler, options.EnforceExclusiveWriter, options.LockTimeout,
+            committedRegistry,
+            nexusStore, incidenceStore, vertexIncidenceHeadStore,
             coMembershipStore,
             edgeDeltas);
         // recovery で観測した最大 TxId より大きい値から新規 tx を採番するよう、
         // TransactionManager の _nextTxId を巻き上げる。これがないと新規 tx ID が
         // 過去 commit 済み TxId と衝突して registry が同じ entry を 2 回 Mark してしまう。
         txManager.AdvanceNextTxIdAtLeast(committedRegistry.MaxObservedTxId + 1);
-        // recovery 後の vertex sidecar ヘッダから SSN commit-stamp 高水位を読み、
-        // クロックをそこまで巻き上げる。これがないと再起動でクロックが 0 に戻り、永続化済みの
-        // 旧 stamp 空間と新 stamp 空間が混在して Serializable tx が過剰 abort する。
-        txManager.SeedCommitStamp(vertexVersions.ReadCommitStampHighWater());
-
         // クリーン終了で WAL が削除されていた場合、recovery では committedRegistry が
         // 空のままになる (WAL から復元できない)。container に永続化された committed TxId 高水位から
         // visibility horizon (= これ未満は presumed-committed) と次 TxId 採番起点を復元する。

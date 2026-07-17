@@ -1,4 +1,5 @@
 using Quiver.Query.Physical;
+using Quiver.Transactions;
 
 namespace Quiver;
 
@@ -32,24 +33,30 @@ internal sealed class PhysicalOperatorCursor : IQueryCursor
     // ※ materialize 経路 (GraphTransaction.Execute) は各行を保持するので別実装 (プールしない)。
     private TupleSlot[]? _slots;
     private byte[]?[]? _byteData;
+    private readonly TransactionUsageGuard _usageGuard;
 
     internal PhysicalOperatorCursor(
         IPhysicalOperator plan,
         Quiver.Storage.Records.IVertexStore vertices,
         Quiver.Storage.Records.IEdgeStore edges,
-        Quiver.Storage.Records.INexusStore nexuses)
+        Quiver.Storage.Records.INexusStore nexuses,
+        TransactionUsageLease usage)
     {
         _plan = plan;
         _vertices = vertices;
         _edges = edges;
         _nexuses = nexuses;
+        _usageGuard = usage.Guard;
+        usage.Dispose();
     }
 
     public TupleSchema Schema => _plan.Schema;
 
     public bool MoveNext()
     {
-        if (!_plan.MoveNext()) return false;
+        using var usage = _usageGuard.Enter();
+        if (!_plan.MoveNext())
+            return false;
         var cur = _plan.Current;
         int n = cur.ColumnCount;
         var slots = _slots;
@@ -82,5 +89,9 @@ internal sealed class PhysicalOperatorCursor : IQueryCursor
 
     public QueryRow Current => _current;
 
-    public void Dispose() => _plan.Dispose();
+    public void Dispose()
+    {
+        using var usage = _usageGuard.Enter();
+        _plan.Dispose();
+    }
 }

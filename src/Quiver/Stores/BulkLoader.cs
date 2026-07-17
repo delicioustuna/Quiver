@@ -15,6 +15,7 @@ public sealed class BulkLoader : IDisposable
     private readonly PropertyVersionStore _propStore;
     // 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
     private readonly Quiver.Storage.SingleFileContainer? _container;
+    private IDisposable? _writerLease;
 
     private readonly List<PendingVertex> _vertices = new();
     private readonly List<PendingEdge> _edges = new();
@@ -31,12 +32,14 @@ public sealed class BulkLoader : IDisposable
     private readonly record struct PendingProp(int KeyId, PropertyValueType Type, long Scalar, byte[]? Data);
 
     internal BulkLoader(VersionedVertexStore vertexStore, VersionedEdgeStore edgeStore, PropertyVersionStore propStore,
-        Quiver.Storage.SingleFileContainer? container = null)
+        Quiver.Storage.SingleFileContainer? container = null,
+        IDisposable? writerLease = null)
     {
         _vertexStore = vertexStore;
         _edgeStore = edgeStore;
         _propStore = propStore;
         _container = container;
+        _writerLease = writerLease;
     }
 
     /// <summary>Vertexを追加する (ラベル付き)。</summary>
@@ -100,15 +103,25 @@ public sealed class BulkLoader : IDisposable
         ThrowIfCommitted();
         _committed = true;
 
-        CommitVertices();
-        CommitEdges();
-        CommitProperties();
-        if (_container != null)
-            BuildAdjacencyIndex(_container);
+        try
+        {
+            CommitVertices();
+            CommitEdges();
+            CommitProperties();
+            if (_container != null)
+                BuildAdjacencyIndex(_container);
+        }
+        finally
+        {
+            ReleaseWriterLease();
+        }
     }
 
-    /// <summary>ローダを破棄する (現状は no-op)。</summary>
-    public void Dispose() { }
+    /// <summary>ローダを破棄し、未使用の writer lease を解放する。</summary>
+    public void Dispose() => ReleaseWriterLease();
+
+    private void ReleaseWriterLease()
+        => Interlocked.Exchange(ref _writerLease, null)?.Dispose();
 
     // -----------------------------------------------------------------------
 

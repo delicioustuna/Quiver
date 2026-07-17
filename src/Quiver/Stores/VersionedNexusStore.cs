@@ -30,7 +30,7 @@ internal struct RawNexusHeader
 /// <see cref="IEntityVersionStore"/> sidecar で管理する。sequence は free list から
 /// 再利用し、stale 参照は世代照合で弾く (vertex store と同セマンティクス)。</para>
 /// </summary>
-internal sealed class VersionedNexusStore : INexusStore
+internal sealed class VersionedNexusStore : INexusStore, ITransactionNexusStore
 {
     // NexusWriteHandle が in-place 更新する固定フィールド領域。
     private const int PayloadSize = 15;
@@ -75,6 +75,14 @@ internal sealed class VersionedNexusStore : INexusStore
         ReadOnlySpan<IncidenceMember> members,
         IIncidenceStore incidenceStore,
         IVertexIncidenceHeadStore vertexHeads)
+        => Create(type, members, incidenceStore, vertexHeads, TransactionId.Bootstrap);
+
+    public NexusId Create(
+        NexusTypeId type,
+        ReadOnlySpan<IncidenceMember> members,
+        IIncidenceStore incidenceStore,
+        IVertexIncidenceHeadStore vertexHeads,
+        TransactionId transactionId)
     {
         // 検証はどのレコードよりも先。失敗時に header・incidence・vertex head の
         // いずれにも書き込みを残さない契約 (テストで担保)。
@@ -91,9 +99,9 @@ internal sealed class VersionedNexusStore : INexusStore
         RecordHelpers.WriteInt48(payload[OffFirstIncidence..], IncidenceId.Invalid.Sequence);
         RecordHelpers.WriteInt48(payload[OffFirstProperty..], PropertyVersionRef.Invalid.Sequence);
 
-        _heap.Insert(sequence, payload, MvccContext.CurrentTxId.Value);
+        _heap.Insert(sequence, payload, transactionId.Value);
         _versions.Write(sequence, new EntityVersionMeta(
-            MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue, generation));
+            transactionId.Value, 0, generation));
         _inUseCount++;
 
         IncidenceId first = IncidenceId.Invalid;
@@ -136,6 +144,9 @@ internal sealed class VersionedNexusStore : INexusStore
     }
 
     public void Delete(NexusId nexusId)
+        => Delete(nexusId, TransactionId.Bootstrap);
+
+    public void Delete(NexusId nexusId, TransactionId transactionId)
     {
         long sequence = nexusId.Sequence;
         // xmax != 0 は論理削除済み。incidence には触れず header だけをスタンプする
@@ -143,11 +154,14 @@ internal sealed class VersionedNexusStore : INexusStore
         if (!_heap.TryReadHeadRaw(sequence, out _, out _, out long xmax) || xmax != 0)
             return;
 
-        _heap.StampXmax(sequence, MvccContext.CurrentTxId.Value);
+        _heap.StampXmax(sequence, transactionId.Value);
         _inUseCount--;
     }
 
     public NexusReadHandle Read(NexusId nexusId)
+        => Read(nexusId, LatestVisible);
+
+    public NexusReadHandle Read(NexusId nexusId, VersionVisible visibility)
     {
         long sequence = nexusId.Sequence;
         if (sequence < 0 || sequence >= _map.Hwm)
@@ -168,14 +182,11 @@ internal sealed class VersionedNexusStore : INexusStore
         // head 版が不可視でも、旧版が snapshot から可視なら生存として扱う
         // (削除は xmax スタンプのみで版を積まないため、payload は head と同一)。
         bool inUse = (payload[OffFlags] & FlagInUse) != 0
-            && (Visibility.IsVisibleAmbient(xmin, xmax)
+            && (visibility(xmin, xmax)
                 || (hasOlderVersion
-                    && _heap.TryReadVisible(sequence, Visibility.IsVisibleAmbient, out _, out _, out _)));
+                    && _heap.TryReadVisible(sequence, visibility, out _, out _, out _)));
 
         NexusId resolvedId = NexusId.Create(sequence, checked((int)version.Generation));
-        if (inUse)
-            MvccContext.RecordRead(EntityKind.Nexus, sequence);
-
         return new NexusReadHandle(
             resolvedId,
             inUse,
@@ -210,14 +221,15 @@ internal sealed class VersionedNexusStore : INexusStore
     }
 
     public IEnumerable<NexusId> Scan()
+        => Scan(LatestVisible);
+
+    public IEnumerable<NexusId> Scan(VersionVisible visibility)
     {
         for (long sequence = 0; sequence < _map.Hwm; sequence++)
         {
-            if (!_heap.TryReadVisible(
-                    sequence, Visibility.IsVisibleAmbient, out _, out _, out _))
+            if (!_heap.TryReadVisible(sequence, visibility, out _, out _, out _))
                 continue;
 
-            MvccContext.RecordRead(EntityKind.Nexus, sequence);
             int generation = checked((int)_versions.Read(sequence).Generation);
             yield return NexusId.Create(sequence, generation);
         }
@@ -225,9 +237,8 @@ internal sealed class VersionedNexusStore : INexusStore
 
     public PropertyCursor EnumerateProperties(NexusId nexusId, IPropertyStore overflowStore)
     {
-        if (!_heap.TryReadVisible(nexusId.Sequence, AmbientVisible, out var payload, out _, out _))
+        if (!_heap.TryReadVisible(nexusId.Sequence, LatestVisible, out var payload, out _, out _))
             return new PropertyCursor(overflowStore, default, PropertyVersionRef.Invalid);
-        MvccContext.RecordRead(EntityKind.Nexus, nexusId.Sequence); // property 列挙 = header read
         var firstProp = new PropertyVersionRef(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProperty)));
         var ownerId = nexusId.Generation == 0
             ? NexusId.Create(nexusId.Sequence, CurrentGeneration(nexusId.Sequence))
@@ -235,7 +246,7 @@ internal sealed class VersionedNexusStore : INexusStore
         return overflowStore.Enumerate(EntityRef.From(ownerId), firstProp);
     }
 
-    private static bool AmbientVisible(long xmin, long xmax) => Visibility.IsVisibleAmbient(xmin, xmax);
+    private static bool LatestVisible(long xmin, long xmax) => xmin != 0 && xmax == 0;
 
     private long NextSequence()
     {
@@ -301,8 +312,7 @@ internal sealed class VersionedNexusStore : INexusStore
         long count = 0;
         for (long sequence = 0; sequence < _map.Hwm; sequence++)
         {
-            if (_heap.TryReadVisible(
-                    sequence, Visibility.IsVisibleAmbient, out _, out _, out _))
+            if (_heap.TryReadVisible(sequence, LatestVisible, out _, out _, out _))
                 count++;
         }
         return count;

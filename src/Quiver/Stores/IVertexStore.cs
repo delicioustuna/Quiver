@@ -23,6 +23,14 @@ internal interface IVertexStore
     PropertyCursor EnumerateProperties(VertexId vertexId, IPropertyStore overflowStore);
 }
 
+internal interface ITransactionVertexStore
+{
+    VertexId Allocate(LabelId labelId, TransactionId transactionId);
+    void Free(VertexId vertexId, TransactionId transactionId);
+    VertexReadHandle Read(VertexId vertexId, VersionVisible visibility);
+    IEnumerable<VertexId> Scan(VersionVisible visibility);
+}
+
 internal readonly ref struct VertexReadHandle
 {
     private readonly VertexId _id;

@@ -5,6 +5,7 @@ using Quiver.Core;
 using Quiver.Query.Logical;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
+using Quiver.Transactions;
 
 namespace Quiver.Api;
 
@@ -349,7 +350,14 @@ public sealed class GraphTraversalSource
         double maxDistance = double.PositiveInfinity)
     {
         ArgumentNullException.ThrowIfNull(heuristic);
-        return RunWeightedShortestPath(source, target, weightKey, direction, type, maxDistance, heuristic);
+        return RunWeightedShortestPath(
+            source,
+            target,
+            weightKey,
+            direction,
+            type,
+            maxDistance,
+            new DelegateVertexHeuristic(heuristic));
     }
 
     /// <summary>
@@ -384,17 +392,15 @@ public sealed class GraphTraversalSource
         ArgumentException.ThrowIfNullOrEmpty(xKey);
         ArgumentException.ThrowIfNullOrEmpty(yKey);
 
+        if (!_schema.TryGetPropertyKeyId(xKey, out var xKeyId))
+            throw MissingCoordinate(target, xKey);
+        if (!_schema.TryGetPropertyKeyId(yKey, out var yKeyId))
+            throw MissingCoordinate(target, yKey);
+
         double targetX = VertexCoordinate(target, xKey);
         double targetY = VertexCoordinate(target, yKey);
-
-        Func<VertexId, double> heuristic = metric == HeuristicMetric.Haversine
-            ? vertex => Haversine(VertexCoordinate(vertex, yKey), VertexCoordinate(vertex, xKey), targetY, targetX)
-            : vertex =>
-            {
-                double dx = VertexCoordinate(vertex, xKey) - targetX;
-                double dy = VertexCoordinate(vertex, yKey) - targetY;
-                return Math.Sqrt(dx * dx + dy * dy);
-            };
+        ITransactionVertexHeuristic heuristic = new CoordinateHeuristic(
+            xKeyId, yKeyId, xKey, yKey, targetX, targetY, metric);
 
         return RunWeightedShortestPath(source, target, weightKey, direction, type, maxDistance, heuristic);
     }
@@ -402,13 +408,22 @@ public sealed class GraphTraversalSource
     private WeightedPathResult RunWeightedShortestPath(
         VertexId source, VertexId target, string weightKey,
         Direction direction, string? type, double maxDistance,
-        Func<VertexId, double>? heuristic)
+        ITransactionVertexHeuristic? heuristic)
     {
         ArgumentException.ThrowIfNullOrEmpty(weightKey);
 
-        var keyId = _schema.GetOrCreatePropertyKey(weightKey);
+        var keyId = _schema.TryGetPropertyKeyId(weightKey, out var resolvedKeyId)
+            ? resolvedKeyId
+            : PropertyKeyId.Invalid;
         var weightProvider = new PropertyChainWeightProvider(keyId);
-        EdgeTypeId? typeId = type != null ? _schema.GetOrCreateEdgeType(type) : null;
+        EdgeTypeId? typeId = null;
+        if (type is not null)
+        {
+            if (!_schema.TryGetEdgeTypeId(type, out var resolvedTypeId))
+                return WeightedPathResult.NotFound;
+
+            typeId = resolvedTypeId;
+        }
 
         var pair = new PairWithConstantOperator(new SingleVertexOperator(source), 0, target);
         var op = new WeightedShortestPathOperator(
@@ -426,6 +441,27 @@ public sealed class GraphTraversalSource
     private double VertexCoordinate(VertexId vertex, string key)
     {
         var v = _tx.GetProperty(vertex, key);
+        return NumericCoordinate(vertex, key, in v);
+    }
+
+    private static double VertexCoordinate(
+        ITransaction transaction,
+        VertexId vertex,
+        PropertyKeyId keyId,
+        string key)
+    {
+        var properties = transaction.Vertices.EnumerateProperties(vertex, transaction.Properties);
+        while (properties.MoveNext())
+        {
+            if (properties.Current.KeyId != keyId) continue;
+            PropertyValue value = properties.Current.Value;
+            return NumericCoordinate(vertex, key, in value);
+        }
+        throw MissingCoordinate(vertex, key);
+    }
+
+    private static double NumericCoordinate(VertexId vertex, string key, in PropertyValue v)
+    {
         return v.Type switch
         {
             Storage.Records.PropertyValueType.Double => v.DoubleValue,
@@ -434,6 +470,31 @@ public sealed class GraphTraversalSource
             _ => throw new InvalidOperationException(
                 $"Vertex {vertex.Value} の座標プロパティ '{key}' が数値型ではありません (型: {v.Type})。"),
         };
+    }
+
+    private static InvalidOperationException MissingCoordinate(VertexId vertex, string key)
+        => new($"Vertex {vertex.Value} の座標プロパティ '{key}' が設定されていません。");
+
+    private sealed class CoordinateHeuristic(
+        PropertyKeyId xKeyId,
+        PropertyKeyId yKeyId,
+        string xKey,
+        string yKey,
+        double targetX,
+        double targetY,
+        HeuristicMetric metric) : ITransactionVertexHeuristic
+    {
+        public double Estimate(ITransaction transaction, VertexId vertex)
+        {
+            double x = VertexCoordinate(transaction, vertex, xKeyId, xKey);
+            double y = VertexCoordinate(transaction, vertex, yKeyId, yKey);
+            if (metric == HeuristicMetric.Haversine)
+                return Haversine(y, x, targetY, targetX);
+
+            double dx = x - targetX;
+            double dy = y - targetY;
+            return Math.Sqrt(dx * dx + dy * dy);
+        }
     }
 
     /// <summary>緯度経度 (度) 2 点間の大圏距離をメートルで返す。</summary>

@@ -4,146 +4,82 @@ using Quiver.Storage;
 
 namespace Quiver.Storage.Records;
 
-/// <summary>
-/// <see cref="IEntityVersionStore"/> の PagedFile 実装。
-///
-/// <para>レイアウト (page = 8192B、PageHeader = 40B、body = 8152B、entry = 40B):</para>
-/// <list type="bullet">
-///   <item>Page 0 = PagedFile メタ (free list / page count)</item>
-///   <item>Page 1 = sidecar ヘッダ (offset 31 に sidecar 専用 format version sentinel = 1)</item>
-///   <item>Page 2+ = 40B × 203 entries / page。<c>localId</c> からページと slot を算出する。</item>
-/// </list>
-///
-/// <para>本クラスは EntityKind に依存せず、Vertex と Edge の sidecar で共通利用される。
-/// Property version は MVCC と Generation を自身の record に保持するため、本クラスを使わない。</para>
-///
-/// <para>現時点ではこの store は backend factory から配線されていない (デッドコード相当)。
-/// 将来的に各 store の MVCC access path に紐付ける。</para>
-/// </summary>
+/// <summary>24byte entity version recordのpaged-file実装です。</summary>
 internal sealed class EntityVersionStore : IEntityVersionStore
 {
-    /// <summary>1 エントリのサイズ (40 バイト)。</summary>
     public const int RecordSize = EntityVersionMeta.Size;
-
-    /// <summary>1 ページに格納できるエントリ数。</summary>
     public static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize;
 
     private static readonly PageId HeaderPageId = new(1);
-    private const int MetaCommitStampHighWater = 0; // int64 (SSN commit-stamp 高水位)
-    private const int MetaAnyReuse = 8; // byte: 世代再利用が一度でも起きたか (stamping 高速パスのゲート)
-    private const int MetaFormatVersion = 31; // byte (VertexStore と同 offset)
-    // entry が 32→40B に拡張され Generation レーンを持つため sidecar 版を 1→2 に上げる。
-    // gen-stamp-fastpath: ヘッダに MetaAnyReuse を追加したため 2→3。
-    internal const byte SidecarFormatVersion = 3;
-
-    // entry 内 offset
+    private const int MetaAnyReuse = 8;
+    private const int MetaFormatVersion = 31;
+    internal const byte SidecarFormatVersion = 4;
     private const int OffsetXmin = 0;
     private const int OffsetXmax = 8;
-    private const int OffsetPstamp = 16;
-    private const int OffsetSstamp = 24;
-    private const int OffsetGeneration = 32;
+    private const int OffsetGeneration = 16;
 
     private readonly IPagedFile _file;
     private bool _disposed;
     private bool _anyReuse;
 
-    /// <summary>
-    /// 既存ファイル / 新規ファイルのいずれも受け入れる。新規時は page 0 (PagedFile メタ)
-    /// に続いて page 1 を <see cref="PageKind.Header"/> として割り当て、format version を書き込む。
-    /// 既存時は format version を検証する。
-    /// </summary>
     public EntityVersionStore(IPagedFile file)
     {
         _file = file;
         if (_file.PageCount <= 1)
         {
             _file.AllocatePage(PageKind.Header);
-            InitHeader();
+            InitializeHeader();
         }
         else
         {
             CheckFormatVersion();
         }
-        using (var h = _file.PinForRead(HeaderPageId))
-            _anyReuse = h.Data[MetaAnyReuse] != 0;
+
+        using var header = _file.PinForRead(HeaderPageId);
+        _anyReuse = header.Data[MetaAnyReuse] != 0;
     }
 
-    /// <inheritdoc/>
     public bool AnyGenerationReuse => _anyReuse;
 
-    /// <inheritdoc/>
     public void MarkGenerationReuse()
     {
         if (_anyReuse) return;
         _anyReuse = true;
-        var ph = _file.PinForWrite(HeaderPageId);
-        ph.Data[MetaAnyReuse] = 1;
+        var header = _file.PinForWrite(HeaderPageId);
+        header.Data[MetaAnyReuse] = 1;
         _file.UnpinDirty(HeaderPageId, 0);
     }
 
-    /// <inheritdoc/>
     public EntityVersionMeta Read(long localId)
     {
         if (localId < 0) return EntityVersionMeta.Unset;
-        var (pageId, off) = Location(localId);
+        (PageId pageId, int offset) = Location(localId);
         if (pageId.Value >= _file.PageCount) return EntityVersionMeta.Unset;
-        using var h = _file.PinForRead(pageId);
-        ReadOnlySpan<byte> rec = h.Data.Slice(off, RecordSize);
-        long xmin = BinaryPrimitives.ReadInt64LittleEndian(rec[OffsetXmin..]);
-        long xmax = BinaryPrimitives.ReadInt64LittleEndian(rec[OffsetXmax..]);
-        long pstamp = BinaryPrimitives.ReadInt64LittleEndian(rec[OffsetPstamp..]);
-        long sstamp = BinaryPrimitives.ReadInt64LittleEndian(rec[OffsetSstamp..]);
-        long generation = BinaryPrimitives.ReadInt64LittleEndian(rec[OffsetGeneration..]);
-        // 0 埋め page (= 未書き込み slot) は Unset として正規化:
-        // 全フィールド 0 のとき Sstamp を long.MaxValue に翻訳する。
-        // Generation は xmin と対で書かれる (Allocate) ため、xmin=0 の slot は世代も 0。
-        if (xmin == 0 && xmax == 0 && pstamp == 0 && sstamp == 0)
-            return EntityVersionMeta.Unset;
-        return new EntityVersionMeta(xmin, xmax, pstamp, sstamp, generation);
+        using var handle = _file.PinForRead(pageId);
+        ReadOnlySpan<byte> record = handle.Data.Slice(offset, RecordSize);
+        var metadata = new EntityVersionMeta(
+            BinaryPrimitives.ReadInt64LittleEndian(record[OffsetXmin..]),
+            BinaryPrimitives.ReadInt64LittleEndian(record[OffsetXmax..]),
+            BinaryPrimitives.ReadInt64LittleEndian(record[OffsetGeneration..]));
+        return metadata.IsUnset ? EntityVersionMeta.Unset : metadata;
     }
 
-    /// <inheritdoc/>
     public void Write(long localId, in EntityVersionMeta meta)
     {
-        if (localId < 0)
-            throw new ArgumentOutOfRangeException(nameof(localId), "LocalId は非負である必要があります。");
-        var (pageId, off) = Location(localId);
+        if (localId < 0) throw new ArgumentOutOfRangeException(nameof(localId));
+        (PageId pageId, int offset) = Location(localId);
         EnsurePage(pageId);
-        var ph = _file.PinForWrite(pageId);
-        Span<byte> rec = ph.Data.Slice(off, RecordSize);
-        BinaryPrimitives.WriteInt64LittleEndian(rec[OffsetXmin..], meta.Xmin);
-        BinaryPrimitives.WriteInt64LittleEndian(rec[OffsetXmax..], meta.Xmax);
-        BinaryPrimitives.WriteInt64LittleEndian(rec[OffsetPstamp..], meta.Pstamp);
-        BinaryPrimitives.WriteInt64LittleEndian(rec[OffsetSstamp..], meta.Sstamp);
-        BinaryPrimitives.WriteInt64LittleEndian(rec[OffsetGeneration..], meta.Generation);
+        var handle = _file.PinForWrite(pageId);
+        Span<byte> record = handle.Data.Slice(offset, RecordSize);
+        BinaryPrimitives.WriteInt64LittleEndian(record[OffsetXmin..], meta.Xmin);
+        BinaryPrimitives.WriteInt64LittleEndian(record[OffsetXmax..], meta.Xmax);
+        BinaryPrimitives.WriteInt64LittleEndian(record[OffsetGeneration..], meta.Generation);
         _file.UnpinDirty(pageId, 0);
     }
 
-    /// <inheritdoc/>
-    public void UpdateXmax(long localId, long xmax) => UpdateField(localId, OffsetXmax, xmax);
+    public void UpdateXmax(long localId, long xmax)
+        => UpdateField(localId, OffsetXmax, xmax);
 
-    /// <inheritdoc/>
-    public void UpdatePstamp(long localId, long pstamp) => UpdateField(localId, OffsetPstamp, pstamp);
-
-    /// <inheritdoc/>
-    public void UpdateSstamp(long localId, long sstamp) => UpdateField(localId, OffsetSstamp, sstamp);
-
-    /// <inheritdoc/>
-    public void WriteCommitStampHighWater(long value)
-    {
-        var ph = _file.PinForWrite(HeaderPageId);
-        BinaryPrimitives.WriteInt64LittleEndian(ph.Data[MetaCommitStampHighWater..], value);
-        _file.UnpinDirty(HeaderPageId, 0);
-    }
-
-    /// <inheritdoc/>
-    public long ReadCommitStampHighWater()
-    {
-        using var h = _file.PinForRead(HeaderPageId);
-        return BinaryPrimitives.ReadInt64LittleEndian(h.Data[MetaCommitStampHighWater..]);
-    }
-
-    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;
@@ -151,24 +87,24 @@ internal sealed class EntityVersionStore : IEntityVersionStore
         _file.Dispose();
     }
 
-    // --- private ---
-
     private void UpdateField(long localId, int fieldOffset, long value)
     {
-        if (localId < 0)
-            throw new ArgumentOutOfRangeException(nameof(localId), "LocalId は非負である必要があります。");
-        var (pageId, off) = Location(localId);
+        if (localId < 0) throw new ArgumentOutOfRangeException(nameof(localId));
+        (PageId pageId, int offset) = Location(localId);
         EnsurePage(pageId);
-        var ph = _file.PinForWrite(pageId);
-        Span<byte> rec = ph.Data.Slice(off, RecordSize);
-        BinaryPrimitives.WriteInt64LittleEndian(rec[fieldOffset..], value);
+        var handle = _file.PinForWrite(pageId);
+        BinaryPrimitives.WriteInt64LittleEndian(
+            handle.Data.Slice(offset + fieldOffset, sizeof(long)),
+            value);
         _file.UnpinDirty(pageId, 0);
     }
 
-    private (PageId pageId, int offset) Location(long localId)
+    private static (PageId PageId, int Offset) Location(long localId)
     {
-        int rpp = RecordsPerPage;
-        return (new PageId(localId / rpp + 2), (int)(localId % rpp) * RecordSize);
+        int recordsPerPage = RecordsPerPage;
+        return (
+            new PageId(localId / recordsPerPage + 2),
+            checked((int)(localId % recordsPerPage) * RecordSize));
     }
 
     private void EnsurePage(PageId pageId)
@@ -177,18 +113,21 @@ internal sealed class EntityVersionStore : IEntityVersionStore
             _file.AllocatePage(PageKind.VertexRecord);
     }
 
-    private void InitHeader()
+    private void InitializeHeader()
     {
-        var ph = _file.PinForWrite(HeaderPageId);
-        ph.Data[MetaFormatVersion] = SidecarFormatVersion;
+        var header = _file.PinForWrite(HeaderPageId);
+        header.Data[MetaFormatVersion] = SidecarFormatVersion;
         _file.UnpinDirty(HeaderPageId, 0);
     }
 
     private void CheckFormatVersion()
     {
-        using var h = _file.PinForRead(HeaderPageId);
-        byte v = h.Data[MetaFormatVersion];
-        if (v != SidecarFormatVersion)
-            throw new StorageFormatMismatchException("entity-version-meta", v, SidecarFormatVersion);
+        using var header = _file.PinForRead(HeaderPageId);
+        byte actual = header.Data[MetaFormatVersion];
+        if (actual != SidecarFormatVersion)
+            throw new StorageFormatMismatchException(
+                "entity-version-meta",
+                actual,
+                SidecarFormatVersion);
     }
 }

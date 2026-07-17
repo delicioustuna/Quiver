@@ -868,13 +868,11 @@ namespace Quiver
         public Quiver.Transactions.CheckpointPolicy CheckpointPolicy { get; set; }
         public long CheckpointThresholdBytes { get; set; }
         public System.Collections.Generic.List<Quiver.CoMembershipRolePair> CoMembershipRolePairs { get; }
-        public System.TimeSpan? DeadlockDetectionInterval { get; set; }
         public bool EnableChecksums { get; set; }
         public bool EnforceExclusiveWriter { get; set; }
         public System.TimeSpan GroupCommitWindow { get; set; }
         public long InitialFileAllocationBytes { get; set; }
         public System.TimeSpan LockTimeout { get; set; }
-        public Quiver.Transactions.LockingMode LockingMode { get; set; }
         public Quiver.Logical.ILogicalMutationSink? LogicalMutationSink { get; set; }
         public long MaxCheckpointThresholdBytes { get; set; }
         public long MaximumFileGrowthStepBytes { get; set; }
@@ -926,6 +924,11 @@ namespace Quiver
 }
 namespace Quiver.Core
 {
+    public sealed class ConcurrentTransactionUseException : Quiver.Core.QuiverException
+    {
+        public ConcurrentTransactionUseException(Quiver.Core.TransactionId transactionId) { }
+        public Quiver.Core.TransactionId TransactionId { get; }
+    }
     public sealed class ConstraintException : Quiver.Core.QuiverException
     {
         public ConstraintException(string message, System.Exception? inner = null) { }
@@ -1608,7 +1611,6 @@ namespace Quiver.Telemetry
         public static readonly System.Diagnostics.Metrics.Counter<long> BufferPoolMisses;
         public static readonly System.Diagnostics.ActivitySource CheckpointActivitySource;
         public static readonly System.Diagnostics.Metrics.Histogram<double> CheckpointDurationMs;
-        public static readonly System.Diagnostics.Metrics.Histogram<double> LockWaitMs;
         public static readonly System.Diagnostics.Metrics.Meter Meter;
         public static readonly System.Diagnostics.ActivitySource QueryActivitySource;
         public static readonly System.Diagnostics.Metrics.Histogram<double> QueryDurationMs;
@@ -1722,10 +1724,6 @@ namespace Quiver.Transactions
         Fixed = 0,
         Adaptive = 1,
     }
-    public sealed class DeadlockException : Quiver.Core.QuiverException
-    {
-        public Quiver.Core.TransactionId Victim { get; }
-    }
     public interface ICommitHookRegistrar
     {
         void OnCommitted(System.Action callback);
@@ -1738,27 +1736,12 @@ namespace Quiver.Transactions
         [System.Diagnostics.CodeAnalysis.Experimental("QUIVER001")]
         Serializable = 3,
     }
-    public enum LockMode : byte
-    {
-        Shared = 1,
-        Exclusive = 2,
-    }
-    public enum LockingMode : byte
-    {
-        ExclusiveOnly = 0,
-        ReaderWriter = 1,
-    }
     public readonly struct SavepointId : System.IEquatable<Quiver.Transactions.SavepointId>
     {
         public SavepointId(long Value, string? Name = null) { }
         public string? Name { get; init; }
         public long Value { get; init; }
         public override string ToString() { }
-    }
-    [System.Diagnostics.CodeAnalysis.Experimental("QUIVER001")]
-    public sealed class SerializabilityException : Quiver.Core.QuiverException
-    {
-        public Quiver.Core.TransactionId Victim { get; }
     }
     public enum TransactionState : byte
     {

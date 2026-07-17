@@ -12,7 +12,7 @@ namespace Quiver.Storage.Records;
 /// バイト列として striping され、任意次元で隙間なくパックされる。
 ///
 /// <para>書き込みは container の単一物理 <c>PagedFile</c> に乗るため、アクティブ tx の
-/// <c>WalWriteSetContext</c> 下で行えば自動的にその tx の page-WAL (committed PageImage redo) に
+/// <c>WalWriteSet</c> 下で行えば自動的にその tx の page-WAL (committed PageImage redo) に
 /// 含まれる。tx コンテキスト外の書き込みは buffer pool に乗り checkpoint / close で永続化される
 /// (crash-atomic ではない — autocommit 経路は呼び出し側が tx で包む)。</para>
 ///

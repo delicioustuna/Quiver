@@ -38,7 +38,7 @@ public class ScalarColumnStoreTests : IDisposable
     }
 
     private static SnapshotState Snap(long snapshotTxId, params long[] active)
-        => new(new TransactionId(snapshotTxId), new HashSet<long>(active));
+        => new(snapshotTxId, new HashSet<long>(active));
 
     private static CommittedTxRegistry Committed(params long[] txs)
     {

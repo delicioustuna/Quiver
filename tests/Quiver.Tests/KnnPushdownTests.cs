@@ -50,7 +50,7 @@ public sealed class KnnPushdownTests : IDisposable
             docIds[i] = d.Value;
             var v = new float[Dim];
             v[i % Dim] = 1f;
-            _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
+            tx.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
         }
         for (int i = 0; i < 5; i++)
         {
@@ -58,7 +58,7 @@ public sealed class KnnPushdownTests : IDisposable
             articleIds[i] = a.Value;
             var v = new float[Dim];
             v[0] = 1f;
-            _db.Vectors.SetVector(EntityKind.Vertex, a.Value, IndexName, v);
+            tx.SetVector(EntityKind.Vertex, a.Value, IndexName, v);
         }
         tx.Commit();
     }
@@ -89,12 +89,12 @@ public sealed class KnnPushdownTests : IDisposable
             for (int i = 0; i < 50; i++)
             {
                 var a = tx.CreateVertex("Article");
-                _db.Vectors.SetVector(EntityKind.Vertex, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
+                tx.SetVector(EntityKind.Vertex, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
             }
             for (int i = 0; i < 2; i++)
             {
                 var d = tx.CreateVertex("Doc");
-                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 0.5f, 0.5f, 0, 0 });
+                tx.SetVector(EntityKind.Vertex, d.Value, IndexName, new float[] { 0.5f, 0.5f, 0, 0 });
             }
             tx.Commit();
         }
@@ -121,7 +121,7 @@ public sealed class KnnPushdownTests : IDisposable
                 tx.SetProperty(d, "status", PropertyValue.FromString(i == 1 ? "active" : "archived"));
                 var v = new float[Dim];
                 v[0] = 1f;
-                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
+                tx.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -227,13 +227,13 @@ public sealed class KnnPushdownTests : IDisposable
         using (var tx = _db.BeginTransaction())
         {
             var bestDoc = tx.CreateVertex("Doc");
-            _db.Vectors.SetVector(EntityKind.Vertex, bestDoc.Value, IndexName, new float[] { 1, 0, 0, 0 });
+            tx.SetVector(EntityKind.Vertex, bestDoc.Value, IndexName, new float[] { 1, 0, 0, 0 });
             for (int i = 1; i < 3; i++)
             {
                 var d = tx.CreateVertex("Doc");
                 var v = new float[Dim];
                 v[i] = 1f;
-                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
+                tx.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
             }
             var t = tx.CreateVertex("Other");
             target = t.Value;

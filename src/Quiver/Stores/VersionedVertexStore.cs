@@ -29,13 +29,13 @@ internal struct RawVertexRecord
 /// </code>
 /// 先頭 15B がそのまま <see cref="VertexWriteHandle"/> のレイアウトと一致するので in-place 更新に再利用する。
 ///
-/// <para>Generation と SSN 用 stamp は <see cref="IEntityVersionStore"/> sidecar で管理する。
+/// <para>Generation と MVCC stamp は <see cref="IEntityVersionStore"/> sidecar で管理する。
 /// xmin/xmax は versioned record header に保持する。
 /// Sequence は vacuum 回収後に再利用する (ItemPointerMap の free list)。
 /// slot 再利用に伴う stale 参照は世代カウンタ照合 + MVCC visibility で弾く
 /// (旧 VertexStore と同セマンティクス)。</para>
 /// </summary>
-internal sealed class VersionedVertexStore : IVertexStore
+internal sealed class VersionedVertexStore : IVertexStore, ITransactionVertexStore
 {
     // 固定フィールド領域 (VertexWriteHandle が in-place 更新する先頭 15B)。
     private const int PayloadSize = 15;
@@ -73,6 +73,9 @@ internal sealed class VersionedVertexStore : IVertexStore
     public long InUseCount => _inUseCount;
 
     public VertexId Allocate(LabelId labelId)
+        => Allocate(labelId, TransactionId.Bootstrap);
+
+    public VertexId Allocate(LabelId labelId, TransactionId transactionId)
     {
         // vacuum 回収済み seq を free list から再利用する。世代が上限に達した seq は
         // 永久退役 (ABA 回避)。空なら hwm から新規採番。
@@ -102,8 +105,8 @@ internal sealed class VersionedVertexStore : IVertexStore
         RecordHelpers.WriteInt48(payload[OffFirstProp..], -1L);
         BinaryPrimitives.WriteInt16LittleEndian(payload[OffLabel..], (short)labelId.Value);
 
-        _heap.Insert(seq, payload, MvccContext.CurrentTxId.Value);
-        _versions.Write(seq, new EntityVersionMeta(MvccContext.CurrentTxId.Value, 0, 0, long.MaxValue, generation));
+        _heap.Insert(seq, payload, transactionId.Value);
+        _versions.Write(seq, new EntityVersionMeta(transactionId.Value, 0, generation));
         _inUseCount++;
 
         var newId = VertexId.Create(seq, (int)generation);
@@ -112,25 +115,31 @@ internal sealed class VersionedVertexStore : IVertexStore
     }
 
     public void Free(VertexId vertexId)
+        => Free(vertexId, TransactionId.Bootstrap);
+
+    public void Free(VertexId vertexId, TransactionId transactionId)
     {
         long seq = vertexId.Sequence;
         // 論理削除は head version に xmax をスタンプする。
         if (!_heap.TryReadHeadRaw(seq, out var payload, out _, out long xmax)) return;
         if (xmax != 0) return; // 既に論理削除済
         var prevLabel = new LabelId(BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(OffLabel)));
-        _heap.StampXmax(seq, MvccContext.CurrentTxId.Value);
+        _heap.StampXmax(seq, transactionId.Value);
         _inUseCount--;
         _labelIndex?.OnFree(vertexId, prevLabel);
     }
 
     public VertexReadHandle Read(VertexId vertexId)
+        => Read(vertexId, LatestVisible);
+
+    public VertexReadHandle Read(VertexId vertexId, VersionVisible visibility)
     {
         long seq = vertexId.Sequence;
         if (seq < 0 || seq >= _map.Hwm)
             return new VertexReadHandle(vertexId, inUse: false, EdgeId.Invalid, PropertyVersionRef.Invalid, default);
 
         // 可視性は heap version の xmin/xmax で判定する (TryReadVisible が版チェーンを辿る)。
-        if (!_heap.TryReadVisible(seq, AmbientVisible, out var payload, out long xmin, out long xmax))
+        if (!_heap.TryReadVisible(seq, visibility, out var payload, out long xmin, out long xmax))
             return new VertexReadHandle(vertexId, inUse: false, EdgeId.Invalid, PropertyVersionRef.Invalid, default);
 
         var span = payload.AsSpan();
@@ -144,7 +153,6 @@ internal sealed class VersionedVertexStore : IVertexStore
         if (carriedGen != 0 && carriedGen != (int)_versions.Read(seq).Generation)
             inUse = false;
 
-        if (inUse) MvccContext.RecordRead(EntityKind.Vertex, seq);
         var resolvedId = VertexId.Create(seq, CurrentGeneration(seq));
         return new VertexReadHandle(resolvedId, inUse, firstEdge, firstProp, label, xmin, xmax);
     }
@@ -167,14 +175,16 @@ internal sealed class VersionedVertexStore : IVertexStore
     }
 
     public IEnumerable<VertexId> Scan()
+        => Scan(LatestVisible);
+
+    public IEnumerable<VertexId> Scan(VersionVisible visibility)
     {
         long hwm = _map.Hwm;
         for (long seq = 0; seq < hwm; seq++)
         {
             // 可視性は heap version で判定する (null head / 不可視は false)。
-            if (_heap.TryReadVisible(seq, AmbientVisible, out _, out _, out _))
+            if (_heap.TryReadVisible(seq, visibility, out _, out _, out _))
             {
-                MvccContext.RecordRead(EntityKind.Vertex, seq);
                 yield return VertexId.Create(seq, CurrentGeneration(seq));
             }
         }
@@ -192,9 +202,8 @@ internal sealed class VersionedVertexStore : IVertexStore
 
     public PropertyCursor EnumerateProperties(VertexId vertexId, IPropertyStore overflowStore)
     {
-        if (!_heap.TryReadVisible(vertexId.Sequence, AmbientVisible, out var payload, out _, out _))
+        if (!_heap.TryReadVisible(vertexId.Sequence, LatestVisible, out var payload, out _, out _))
             return new PropertyCursor(overflowStore, default, PropertyVersionRef.Invalid);
-        MvccContext.RecordRead(EntityKind.Vertex, vertexId.Sequence); // property 列挙 = vertex read
         var firstProp = new PropertyVersionRef(RecordHelpers.ReadInt48(payload.AsSpan(OffFirstProp)));
         var ownerId = vertexId.Generation == 0
             ? VertexId.Create(vertexId.Sequence, CurrentGeneration(vertexId.Sequence))
@@ -300,7 +309,7 @@ internal sealed class VersionedVertexStore : IVertexStore
         BinaryPrimitives.WriteInt16LittleEndian(payload[OffLabel..], (short)labelId);
         _heap.Insert(id, payload, TransactionId.Bootstrap.Value);
         // bulk load は tx 外。Bootstrap を xmin に、Generation=1 (新規 slot)。
-        _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 0, long.MaxValue, 1));
+        _versions.Write(id, new EntityVersionMeta(TransactionId.Bootstrap.Value, 0, 1));
     }
 
     internal void BulkUpdateFirstPropertyRef(long id, long firstPropertyRef)
@@ -324,7 +333,7 @@ internal sealed class VersionedVertexStore : IVertexStore
 
     // --- private ---
 
-    private static bool AmbientVisible(long xmin, long xmax) => Visibility.IsVisibleAmbient(xmin, xmax);
+    private static bool LatestVisible(long xmin, long xmax) => xmin != 0 && xmax == 0;
 
     private void MutateHeadField(long seq, int payloadOffset, long sequenceValue)
     {

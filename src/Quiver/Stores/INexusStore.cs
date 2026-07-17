@@ -73,6 +73,19 @@ internal interface INexusStore
     PropertyCursor EnumerateProperties(NexusId nexusId, IPropertyStore overflowStore);
 }
 
+internal interface ITransactionNexusStore
+{
+    NexusId Create(
+        NexusTypeId type,
+        ReadOnlySpan<IncidenceMember> members,
+        IIncidenceStore incidenceStore,
+        IVertexIncidenceHeadStore vertexHeads,
+        TransactionId transactionId);
+    void Delete(NexusId nexusId, TransactionId transactionId);
+    NexusReadHandle Read(NexusId nexusId, VersionVisible visibility);
+    IEnumerable<NexusId> Scan(VersionVisible visibility);
+}
+
 /// <summary>
 /// nexus header の読み取りスナップショット。
 /// 不可視・未使用の場合は <see cref="InUse"/> が <c>false</c> になり、他のフィールドは無効値を返す。

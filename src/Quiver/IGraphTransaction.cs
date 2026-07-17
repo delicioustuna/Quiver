@@ -317,6 +317,7 @@ public ref struct NexusMemberEnumerator
     private readonly IVertexStore _vertices;
     private readonly RoleId _roleFilter;
     private NexusMember _current;
+    private TransactionUsageGuard? _usageGuard;
 
     internal NexusMemberEnumerator(
         NexusIncidenceEnumerator inner,
@@ -329,11 +330,19 @@ public ref struct NexusMemberEnumerator
         _vertices = vertices;
         _roleFilter = roleFilter;
         _current = default;
+        _usageGuard = null;
+    }
+
+    internal void AttachUsage(TransactionUsageLease usage)
+    {
+        _usageGuard = usage.Guard;
+        usage.Dispose();
     }
 
     /// <inheritdoc />
     public bool MoveNext()
     {
+        using var usage = _usageGuard?.Enter() ?? default;
         if (_roleTokens is null) return false;
         while (_inner.MoveNext())
         {
@@ -354,7 +363,10 @@ public ref struct NexusMemberEnumerator
     /// <inheritdoc />
     public NexusMember Current => _current;
     /// <inheritdoc />
-    public void Dispose() => _inner.Dispose();
+    public void Dispose()
+    {
+        _inner.Dispose();
+    }
 }
 
 /// <summary>
@@ -370,6 +382,7 @@ public ref struct NexusIdEnumerator
     private readonly RoleId _roleFilter;
     private HashSet<long>? _seen;
     private NexusId _current;
+    private TransactionUsageGuard? _usageGuard;
 
     internal NexusIdEnumerator(
         VertexIncidenceEnumerator inner,
@@ -383,11 +396,19 @@ public ref struct NexusIdEnumerator
         _roleFilter = roleFilter;
         _seen = null;
         _current = default;
+        _usageGuard = null;
+    }
+
+    internal void AttachUsage(TransactionUsageLease usage)
+    {
+        _usageGuard = usage.Guard;
+        usage.Dispose();
     }
 
     /// <inheritdoc />
     public bool MoveNext()
     {
+        using var usage = _usageGuard?.Enter() ?? default;
         if (_nexuses is null) return false;
         while (_inner.MoveNext())
         {
@@ -410,7 +431,10 @@ public ref struct NexusIdEnumerator
     /// <inheritdoc />
     public NexusId Current => _current;
     /// <inheritdoc />
-    public void Dispose() => _inner.Dispose();
+    public void Dispose()
+    {
+        _inner.Dispose();
+    }
 }
 
 /// <summary><c>long</c> 列挙子を <see cref="VertexId"/> に変換するための薄いラッパ。</summary>
@@ -418,17 +442,28 @@ public ref struct VertexIdEnumerator
 {
     private IEnumerator<long>? _inner;
     private VertexId _current;
+    private TransactionUsageGuard? _usageGuard;
 
     internal VertexIdEnumerator(IEnumerable<long> source)
     {
         _inner = source.GetEnumerator();
         _current = default;
+        _usageGuard = null;
+    }
+
+    internal VertexIdEnumerator(IEnumerable<long> source, TransactionUsageLease usage)
+        : this(source)
+    {
+        _usageGuard = usage.Guard;
+        usage.Dispose();
     }
 
     /// <summary>次の要素に進む。要素が無くなったら <c>false</c>。</summary>
     public bool MoveNext()
     {
-        if (_inner == null || !_inner.MoveNext()) return false;
+        using var usage = _usageGuard?.Enter() ?? default;
+        if (_inner == null || !_inner.MoveNext())
+            return false;
         _current = new VertexId(_inner.Current);
         return true;
     }
@@ -437,5 +472,9 @@ public ref struct VertexIdEnumerator
     public VertexId Current => _current;
 
     /// <summary>内部列挙子を破棄する。</summary>
-    public void Dispose() { _inner?.Dispose(); }
+    public void Dispose()
+    {
+        using var usage = _usageGuard?.Enter() ?? default;
+        _inner?.Dispose();
+    }
 }

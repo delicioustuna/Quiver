@@ -78,7 +78,7 @@ public sealed class VectorHnswTests : IDisposable
                 var v = RandomVec(rng, Dim);
                 corpus.Add(v);
                 var n = tx.CreateVertex("Doc");
-                db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
+                tx.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -115,7 +115,7 @@ public sealed class VectorHnswTests : IDisposable
                 var n = tx.CreateVertex("Doc");
                 var v = RandomVec(rng, Dim);
                 vectors.Add(v);
-                db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
+                tx.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -143,7 +143,7 @@ public sealed class VectorHnswTests : IDisposable
         using (var tx = db.BeginTransaction())
         {
             var n = tx.CreateVertex("Doc");
-            db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, new float[] { 1, 0, 0, 0, 0, 0, 0, 0 });
+            tx.SetVector(EntityKind.Vertex, n.Value, IndexName, new float[] { 1, 0, 0, 0, 0, 0, 0, 0 });
             tx.Commit();
         }
 

@@ -102,13 +102,6 @@ public static class QuiverTelemetry
             unit: "ms",
             description: "Duration of a single query pipeline execution。");
 
-    /// <summary>ロック取得待ち時間 (ms)。</summary>
-    public static readonly Histogram<double> LockWaitMs =
-        Meter.CreateHistogram<double>(
-            name: "quiver.lock.wait.duration",
-            unit: "ms",
-            description: "Time spent waiting for a vertex / edge / index lock。");
-
     /// <summary>WAL に書き込んだバイト数 (累計)。</summary>
     public static readonly Counter<long> WalBytesWritten =
         Meter.CreateCounter<long>(

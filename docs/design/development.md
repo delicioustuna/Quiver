@@ -60,9 +60,15 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 | 運用中のファイル | `*.quiver` + `*.quiver-wal` |
 | format family | `QUIVER-SW` family version 1（旧 family からの自動移行なし） |
 | primary property | `PropertyAddress` と 84B record の `PropertyVersionStore`。xmin、xmax、Generation は record 内に置き、public property ID と entity inline property は持たない |
+| entity version sidecar | `EntityVersionMeta(xmin,xmax,generation)` の 24B record。page あたり 339 件、sidecar format version 4、旧 40B fallback なし |
 | primary vector payload | 固定 tenant の `VectorPayloadStore`。generation、dimensions、element type、byte length、CRC32C を検証 |
 | adjacency | `AdjacencySegmentStore` の単一 format。payload なしも `PayloadKind.None` で同形式 |
 | ベクトル catalog | entry 長プレフィクス + per-index HNSW レイアウトパラメタ |
+
+`TransactionManager` は database instance ごとの `WriterLease` と `SnapshotRegistry` を所有する。
+facade と backend の既存開始 API は、内部の `BeginRead` と `BeginWrite` へ集約する adapter である。
+read transaction は WAL を生成せず、writer と並行して開始時 snapshot を読む。
+bulk、schema、maintenance の mutation 入口も同じ writer lease を取得する。
 
 `QuiverDatabaseOptions.InitialFileAllocationBytes` と `MaximumFileGrowthStepBytes` で初期確保量と成長上限を変更できる。
 いずれの値も 8 KiB 境界へ整列する。
@@ -239,7 +245,7 @@ foreach (var name in g.Vertices().HasLabel("Person").Values("Name").AsEnumerable
 |---|---|
 | Core ID / kind | `src/Quiver/Core/EntityRef.cs`（kind 付き packed identity）、`src/Quiver/Core/Ids.cs`（typed ID と Generation 込み equality）、`src/Quiver/Core/EntityId.cs`（Vertex / Edge / Nexus の strict internal tag） |
 | ストア | `src/Quiver/Stores/VersionedNexusStore.cs`、`IncidenceStore.cs`、`VertexIncidenceHeadStore.cs`、`CoMembershipBlockStore.cs` |
-| トランザクション | `src/Quiver/Transactions/TxNexusStore.cs`（locking / SSN / undo の配線） |
+| トランザクション | `src/Quiver/Transactions/TransactionManager.cs`、`WriterLease.cs`、`SnapshotRegistry.cs`、`TxNexusStore.cs`（snapshot / undo の配線） |
 | 公開 CRUD | `src/Quiver/IGraphTransaction.cs`（`CreateNexus` / `DeleteNexus` / `GetMembers` / `GetNexuses` / プロパティ各種）、`ISchemaApi`（型 / ロールの token 管理） |
 | クエリ | `src/Quiver/Operators/`（`AllNexusesScan` / `ExpandToNexus` / `ExpandMembers` / `CoMembership` の各 operator）、`src/Quiver/Query/PhysicalPlanner.cs` |
 | DSL / Match | `src/Quiver/Client/GraphTraversalSource.cs`、`GraphTraversal.cs`、`Match/GraphPattern.cs`（`NexusPattern`） |

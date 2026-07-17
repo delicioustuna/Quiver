@@ -33,6 +33,7 @@ public sealed class StreamingBulkLoader : IDisposable
     private readonly PropertyVersionStore _propStore;
     // 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
     private readonly Quiver.Storage.SingleFileContainer? _container;
+    private IDisposable? _writerLease;
 
     private const int EdgeRecordSize = 28; // Id(8) + Src(8) + Tgt(8) + TypeId(4)
 
@@ -56,12 +57,14 @@ public sealed class StreamingBulkLoader : IDisposable
 
     internal StreamingBulkLoader(
         VersionedVertexStore vertexStore, VersionedEdgeStore edgeStore, PropertyVersionStore propStore,
-        Quiver.Storage.SingleFileContainer? container = null)
+        Quiver.Storage.SingleFileContainer? container = null,
+        IDisposable? writerLease = null)
     {
         _vertexStore = vertexStore;
         _edgeStore = edgeStore;
         _propStore = propStore;
         _container = container;
+        _writerLease = writerLease;
 
         _tempPath = Path.Combine(
             Path.GetTempPath(),
@@ -142,13 +145,19 @@ public sealed class StreamingBulkLoader : IDisposable
         ThrowIfCommitted();
         _committed = true;
 
-        _edgeTemp.Flush();
-
-        CommitVertices();
-        CommitEdgesStreaming();
-        CommitProperties();
-        if (_container != null)
-            BuildAdjacencyIndexStreaming(_container);
+        try
+        {
+            _edgeTemp.Flush();
+            CommitVertices();
+            CommitEdgesStreaming();
+            CommitProperties();
+            if (_container != null)
+                BuildAdjacencyIndexStreaming(_container);
+        }
+        finally
+        {
+            ReleaseWriterLease();
+        }
     }
 
     /// <summary>一時ファイルを破棄する (<see cref="Commit"/> 有無に関わらずクリーンアップする)。</summary>
@@ -158,7 +167,11 @@ public sealed class StreamingBulkLoader : IDisposable
         _disposed = true;
         try { _edgeTemp.Dispose(); } // FileOptions.DeleteOnClose handles cleanup
         catch { /* swallow — temp file cleanup is best-effort */ }
+        ReleaseWriterLease();
     }
+
+    private void ReleaseWriterLease()
+        => Interlocked.Exchange(ref _writerLease, null)?.Dispose();
 
     // -----------------------------------------------------------------------
 

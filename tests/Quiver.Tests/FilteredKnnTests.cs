@@ -52,7 +52,7 @@ public sealed class FilteredKnnTests : IDisposable
                 docIds[i] = d.Value;
                 var v = new float[Dim];
                 v[i % Dim] = 1f;
-                _db.Vectors.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
+                tx.SetVector(EntityKind.Vertex, d.Value, IndexName, v);
             }
             for (int i = 0; i < 5; i++)
             {
@@ -61,7 +61,7 @@ public sealed class FilteredKnnTests : IDisposable
                 var v = new float[Dim];
                 // Articles get an exact match on the query, Docs get less.
                 v[0] = 1f;
-                _db.Vectors.SetVector(EntityKind.Vertex, a.Value, IndexName, v);
+                tx.SetVector(EntityKind.Vertex, a.Value, IndexName, v);
             }
             tx.Commit();
         }
@@ -87,7 +87,7 @@ public sealed class FilteredKnnTests : IDisposable
         using (var tx = _db.BeginTransaction())
         {
             var n = tx.CreateVertex("Doc");
-            _db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, new float[] { 1, 0, 0, 0 });
+            tx.SetVector(EntityKind.Vertex, n.Value, IndexName, new float[] { 1, 0, 0, 0 });
             tx.Commit();
         }
 
@@ -121,7 +121,7 @@ public sealed class FilteredKnnTests : IDisposable
                 // Score-against-query (1,0,0,0): higher index → lower score.
                 v[0] = (50 - i) / 50f;
                 v[1] = i / 50f;
-                _db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
+                tx.SetVector(EntityKind.Vertex, n.Value, IndexName, v);
             }
             tx.Commit();
         }

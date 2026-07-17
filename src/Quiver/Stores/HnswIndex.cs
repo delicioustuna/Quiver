@@ -9,7 +9,7 @@ namespace Quiver.Storage.Records;
 /// 1 つのベクトルインデックスの HNSW (Hierarchical Navigable Small World) ANN 索引。
 /// グラフ構造を container テナントのページに永続化し (再起動跨ぎで再現)、in-memory 隣接キャッシュ
 /// (open 時にページから rebuild) を read 経路に使う。書き込みはページ write-through で、container の
-/// 単一物理 PagedFile を経由するため、アクティブ tx の WalWriteSetContext 下なら page-WAL に乗り
+/// 単一物理 PagedFile を経由するため、アクティブ tx の WalWriteSet 下なら page-WAL に乗り
 /// abort/crash でグラフ構造ごと巻き戻る。
 ///
 /// <para><b>ページレイアウト</b>:</para>

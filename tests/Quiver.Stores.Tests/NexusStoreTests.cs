@@ -9,8 +9,8 @@ namespace Quiver.Storage.Records.Tests;
 /// <summary>
 /// VersionedNexusStore の単体テスト。
 /// nexus header + incidence + vertex head sidecar の 3 ストアを永続ファイル上に組み、
-/// 作成・検証・snapshot 可視性・再オープン・SSN read 記録の契約を検証する。
-/// MVCC の検証以外は ambient トランザクション無し (Bootstrap 相当) で実行する。
+/// 作成・検証・snapshot 可視性・再オープンの契約を検証する。
+/// MVCC の検証以外は Bootstrap 相当の明示的な可視性で実行する。
 /// </summary>
 public sealed class NexusStoreTests : IDisposable
 {
@@ -90,59 +90,37 @@ public sealed class NexusStoreTests : IDisposable
     [Fact]
     public void Snapshot_visibility_handles_uncommitted_create_and_committed_delete()
     {
-        var committed = new CommittedTxRegistry();
-        NexusId id;
+        var store = (ITransactionNexusStore)_nexuses;
+        var creator = new TransactionId(10);
+        SnapshotState createSnapshot = new(9, new HashSet<long>());
+        NexusId id = CreateTwoMemberNexus(store, creator);
 
-        try
-        {
-            MvccContext.Begin(
-                new TransactionId(10),
-                new SnapshotState(new TransactionId(9), new HashSet<long>()),
-                committed);
-            id = CreateTwoMemberNexus();
+        using var ownWrite = store.Read(id, VisibleAt(createSnapshot, creator));
+        ownWrite.InUse.Should().BeTrue();
 
-            using var ownWrite = _nexuses.Read(id);
-            ownWrite.InUse.Should().BeTrue();
+        SnapshotState oldSnapshotState = new(9, new HashSet<long>(), creator);
+        using var oldSnapshot = store.Read(
+            id,
+            VisibleAt(oldSnapshotState, new TransactionId(11)));
+        oldSnapshot.InUse.Should().BeFalse();
 
-            MvccContext.End();
-            committed.MarkCommitted(new TransactionId(10));
-            MvccContext.Begin(
-                new TransactionId(11),
-                new SnapshotState(new TransactionId(9), new HashSet<long>()),
-                committed);
-            using var oldSnapshot = _nexuses.Read(id);
-            oldSnapshot.InUse.Should().BeFalse();
+        var deleter = new TransactionId(20);
+        SnapshotState beforeDeleteState = new(10, new HashSet<long>());
+        using var beforeDelete = store.Read(id, VisibleAt(beforeDeleteState, deleter));
+        beforeDelete.InUse.Should().BeTrue();
+        store.Delete(id, deleter);
 
-            MvccContext.End();
-            MvccContext.Begin(
-                new TransactionId(20),
-                new SnapshotState(new TransactionId(10), new HashSet<long>()),
-                committed);
-            using var beforeDelete = _nexuses.Read(id);
-            beforeDelete.InUse.Should().BeTrue();
-            _nexuses.Delete(id);
+        SnapshotState concurrentSnapshotState = new(15, new HashSet<long>(), deleter);
+        using var concurrentSnapshot = store.Read(
+            id,
+            VisibleAt(concurrentSnapshotState, new TransactionId(21)));
+        concurrentSnapshot.InUse.Should().BeTrue();
 
-            MvccContext.End();
-            committed.MarkCommitted(new TransactionId(20));
-            MvccContext.Begin(
-                new TransactionId(21),
-                new SnapshotState(new TransactionId(15), new HashSet<long>()),
-                committed);
-            using var concurrentSnapshot = _nexuses.Read(id);
-            concurrentSnapshot.InUse.Should().BeTrue();
-
-            MvccContext.End();
-            MvccContext.Begin(
-                new TransactionId(22),
-                new SnapshotState(new TransactionId(20), new HashSet<long>()),
-                committed);
-            using var afterDelete = _nexuses.Read(id);
-            afterDelete.InUse.Should().BeFalse();
-        }
-        finally
-        {
-            MvccContext.End();
-        }
+        SnapshotState afterDeleteState = new(20, new HashSet<long>());
+        using var afterDelete = store.Read(
+            id,
+            VisibleAt(afterDeleteState, new TransactionId(22)));
+        afterDelete.InUse.Should().BeFalse();
     }
 
     /// <summary>
@@ -168,43 +146,6 @@ public sealed class NexusStoreTests : IDisposable
             (new VertexId(2), new RoleId(20)));
     }
 
-    /// <summary>
-    /// Read・Scan・vertex からの incidence 列挙のいずれで可視な header を観測しても、
-    /// SSN の read set に nexus の読み取りとして記録されることを検証する
-    /// (Serializable 分離の read-write 依存検出の前提)。
-    /// </summary>
-    [Fact]
-    public void Read_scan_and_incidence_enumeration_record_nexus_reads()
-    {
-        NexusId id = CreateTwoMemberNexus();
-        var committed = new CommittedTxRegistry();
-        var sink = new ReadSink();
-
-        try
-        {
-            MvccContext.Begin(
-                new TransactionId(2),
-                SnapshotState.Empty,
-                committed,
-                sink);
-
-            using var record = _nexuses.Read(id);
-            _ = _nexuses.Scan().Single();
-            var iterator = _incidences.EnumerateByVertex(
-                new VertexId(1), _heads, _nexuses);
-            iterator.MoveNext().Should().BeTrue();
-        }
-        finally
-        {
-            MvccContext.End();
-        }
-
-        sink.Reads.Should().OnlyContain(
-            read => read.Kind == EntityKind.Nexus
-                && read.LocalId == id.Sequence);
-        sink.Reads.Should().HaveCountGreaterThanOrEqualTo(3);
-    }
-
     private NexusId CreateTwoMemberNexus()
     {
         IncidenceMember[] members =
@@ -215,6 +156,22 @@ public sealed class NexusStoreTests : IDisposable
         return _nexuses.Create(
             new NexusTypeId(3), members, _incidences, _heads);
     }
+
+    private NexusId CreateTwoMemberNexus(
+        ITransactionNexusStore store,
+        TransactionId transactionId)
+    {
+        IncidenceMember[] members =
+        [
+            new(new VertexId(1), new RoleId(10)),
+            new(new VertexId(2), new RoleId(20)),
+        ];
+        return store.Create(
+            new NexusTypeId(3), members, _incidences, _heads, transactionId);
+    }
+
+    private static VersionVisible VisibleAt(SnapshotState snapshot, TransactionId self)
+        => (xmin, xmax) => Visibility.IsVisible(xmin, xmax, in snapshot, self);
 
     private void Open()
     {
@@ -255,11 +212,4 @@ public sealed class NexusStoreTests : IDisposable
         _vertexHeads?.Dispose();
     }
 
-    private sealed class ReadSink : ISsnReadSink
-    {
-        public List<(EntityKind Kind, long LocalId)> Reads { get; } = [];
-
-        public void OnVisibleRead(EntityKind kind, long localId)
-            => Reads.Add((kind, localId));
-    }
 }

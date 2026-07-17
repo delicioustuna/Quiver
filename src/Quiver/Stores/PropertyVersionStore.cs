@@ -7,7 +7,7 @@ using Quiver.Transactions;
 
 namespace Quiver.Storage.Records;
 
-internal sealed class PropertyVersionStore : IPropertyStore
+internal sealed class PropertyVersionStore : IPropertyStore, ITransactionPropertyStore
 {
     internal const int RecordSize = 84;
     internal static int RecordsPerPage => RecordPageMapping.PageBodySize / RecordSize;
@@ -78,13 +78,33 @@ internal sealed class PropertyVersionStore : IPropertyStore
             cardinality,
             in value,
             currentFirst,
-            deferMetaFlush: WalWriteSetContext.Current is not null);
+            TransactionId.Bootstrap,
+            LatestVisible,
+            deferMetaFlush: false);
+
+    public PropertyVersionRef Create(
+        PropertyAddress address,
+        PropertyCardinality cardinality,
+        in PropertyValue value,
+        PropertyVersionRef currentFirst,
+        TransactionId transactionId,
+        VersionVisible visibility)
+        => CreateCore(
+            address,
+            cardinality,
+            in value,
+            currentFirst,
+            transactionId,
+            visibility,
+            deferMetaFlush: true);
 
     private PropertyVersionRef CreateCore(
         PropertyAddress address,
         PropertyCardinality cardinality,
         in PropertyValue value,
         PropertyVersionRef currentFirst,
+        TransactionId transactionId,
+        VersionVisible visibility,
         bool deferMetaFlush)
     {
         if (!address.IsValid)
@@ -92,7 +112,7 @@ internal sealed class PropertyVersionStore : IPropertyStore
         if (cardinality is not PropertyCardinality.Single and not PropertyCardinality.Set)
             throw new ArgumentOutOfRangeException(nameof(cardinality));
 
-        PropertyVersionRef previousVersion = FindPreviousVersion(address, currentFirst);
+        PropertyVersionRef previousVersion = FindPreviousVersion(address, currentFirst, visibility);
         long sequence;
         int generation;
         if (_freeHead >= 0)
@@ -141,7 +161,7 @@ internal sealed class PropertyVersionStore : IPropertyStore
         RecordHelpers.WriteInt48(record[OffPreviousVersion..], previousVersion.Sequence);
         RecordHelpers.WriteInt48(record[OffNextOwned..], currentFirst.Sequence);
         WriteValue(record, in value);
-        BinaryPrimitives.WriteInt64LittleEndian(record[OffXmin..], MvccContext.CurrentTxId.Value);
+        BinaryPrimitives.WriteInt64LittleEndian(record[OffXmin..], transactionId.Value);
         BinaryPrimitives.WriteInt64LittleEndian(record[OffXmax..], 0);
         BinaryPrimitives.WriteInt64LittleEndian(record[OffGeneration..], generation);
         _file.UnpinDirty(pageId, 0);
@@ -155,26 +175,41 @@ internal sealed class PropertyVersionStore : IPropertyStore
         EntityRef owner,
         PropertyVersionRef version,
         PropertyVersionRef currentFirst)
+        => Delete(owner, version, currentFirst, TransactionId.Bootstrap, LatestVisible);
+
+    public PropertyVersionRef Delete(
+        EntityRef owner,
+        PropertyVersionRef version,
+        PropertyVersionRef currentFirst,
+        TransactionId transactionId,
+        VersionVisible visibility)
     {
-        PropertyVersionRecord record = Read(owner, version);
+        PropertyVersionRecord record = Read(owner, version, visibility);
         if (record.InUse)
         {
             var (pageId, offset) = Location(record.Version.Sequence);
             var page = _file.PinForWrite(pageId);
             BinaryPrimitives.WriteInt64LittleEndian(
                 page.Data[(offset + OffXmax)..],
-                MvccContext.CurrentTxId.Value);
+                transactionId.Value);
             _file.UnpinDirty(pageId, 0);
         }
         return currentFirst;
     }
 
     public PropertyVersionRecord Read(EntityRef owner, PropertyVersionRef version)
-        => ReadCore(owner, version, applyVisibility: true);
+        => ReadCore(owner, version, LatestVisible, applyVisibility: true);
+
+    public PropertyVersionRecord Read(
+        EntityRef owner,
+        PropertyVersionRef version,
+        VersionVisible visibility)
+        => ReadCore(owner, version, visibility, applyVisibility: true);
 
     private PropertyVersionRecord ReadCore(
         EntityRef owner,
         PropertyVersionRef version,
+        VersionVisible visibility,
         bool applyVisibility)
     {
         if (!owner.IsValid || !version.IsValid || version.Sequence >= _hwm)
@@ -222,7 +257,7 @@ internal sealed class PropertyVersionStore : IPropertyStore
         var address = new PropertyAddress(storedOwner, new PropertyKeyId(keyId));
         var previous = Materialize(previousSequence);
         var next = Materialize(nextSequence);
-        if (applyVisibility && inUse && !Visibility.IsVisibleAmbient(xmin, xmax))
+        if (applyVisibility && inUse && !visibility(xmin, xmax))
             inUse = false;
         return new PropertyVersionRecord(
             actualVersion,
@@ -264,6 +299,8 @@ internal sealed class PropertyVersionStore : IPropertyStore
             cardinality,
             in value,
             PropertyVersionRef.FromSequence(nextPropertySequence),
+            TransactionId.Bootstrap,
+            LatestVisible,
             deferMetaFlush: true);
     }
 
@@ -344,13 +381,16 @@ internal sealed class PropertyVersionStore : IPropertyStore
         return _vectors.ScanOrphans(reachable).ToArray();
     }
 
-    private PropertyVersionRef FindPreviousVersion(PropertyAddress address, PropertyVersionRef currentFirst)
+    private PropertyVersionRef FindPreviousVersion(
+        PropertyAddress address,
+        PropertyVersionRef currentFirst,
+        VersionVisible visibility)
     {
         PropertyVersionRef current = Materialize(currentFirst.Sequence);
         long guard = _hwm + 1;
         while (current.IsValid && guard-- > 0)
         {
-            PropertyVersionRecord record = Read(address.Owner, current);
+            PropertyVersionRecord record = Read(address.Owner, current, visibility);
             if (record.Address.Key == address.Key)
                 return record.Version;
             current = record.NextOwnedProperty;
@@ -399,8 +439,10 @@ internal sealed class PropertyVersionStore : IPropertyStore
 
     private PropertyVersionRecord ReadRaw(EntityRef owner, PropertyVersionRef version)
     {
-        return ReadCore(owner, version, applyVisibility: false);
+        return ReadCore(owner, version, LatestVisible, applyVisibility: false);
     }
+
+    private static bool LatestVisible(long xmin, long xmax) => xmin != 0 && xmax == 0;
 
     private int ReclaimEntireChain(PropertyVersionRef head)
     {

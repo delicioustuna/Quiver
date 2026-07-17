@@ -105,15 +105,16 @@ public class RecoveryManagerTests : IDisposable
                 srcFile.EnableWalLogging(1, _wal);
                 var txId = new TransactionId(42);
                 _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
-                WalWriteSetContext.Begin(_wal, txId);
+                var writeSet = new WalWriteSet(_wal, txId);
+                _wal.ActiveWriteSet = writeSet;
                 dataPage = srcFile.AllocatePage(PageKind.VertexRecord);
                 var ph = srcFile.PinForWrite(dataPage);
                 System.Text.Encoding.UTF8.GetBytes("RECOVERED").CopyTo(ph.Data);
                 ph.Dispose(); // UnpinDirty → PageImage をトランザクションバッファにコアレス
-                WalWriteSetContext.FlushPending(); // コミット直前にバッファをWALへ追記
+                writeSet.FlushPending(); // コミット直前にバッファをWALへ追記
                 long commitLsn = _wal.Append(WalRecordType.Commit, txId, ReadOnlySpan<byte>.Empty);
                 _wal.FlushTo(commitLsn);
-                WalWriteSetContext.End();
+                _wal.ActiveWriteSet = null;
                 srcFile.Dispose();
             }
 
@@ -152,17 +153,18 @@ public class RecoveryManagerTests : IDisposable
                 srcFile.EnableWalLogging(1, _wal);
                 var txId = new TransactionId(99);
                 _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
-                WalWriteSetContext.Begin(_wal, txId);
+                var writeSet = new WalWriteSet(_wal, txId);
+                _wal.ActiveWriteSet = writeSet;
                 dataPage = srcFile.AllocatePage(PageKind.VertexRecord);
                 var ph = srcFile.PinForWrite(dataPage);
                 System.Text.Encoding.UTF8.GetBytes("ABORTED!").CopyTo(ph.Data);
                 ph.Dispose(); // UnpinDirty → PageImage をトランザクションバッファにコアレス
                 // PageImage を WAL へ追記したうえで、Commit ではなく Abort で終える。
                 // recovery は「WAL に PageImage はあるが Commit が無い」場合に skip するはず。
-                WalWriteSetContext.FlushPending();
+                writeSet.FlushPending();
                 long abortLsn = _wal.Append(WalRecordType.Abort, txId, ReadOnlySpan<byte>.Empty);
                 _wal.FlushTo(abortLsn);
-                WalWriteSetContext.End();
+                _wal.ActiveWriteSet = null;
                 srcFile.Dispose();
             }
 

@@ -14,7 +14,7 @@ namespace Quiver.Telemetry;
 ///  <item>
 ///    <para>
 ///    <b>process-wide シングルトン</b>。<see cref="Log"/> から各 hot path (PagedFile,
-///    WriteAheadLog, Transaction, LockManager, DeadlockDetector, RecoveryManager,
+///    WriteAheadLog, Transaction, RecoveryManager,
 ///    Vacuum) が直接インクリメント API を呼ぶ。複数 <c>QuiverDatabase</c> インスタンスが
 ///    同一プロセスに存在しても累計 / レート系メトリクスは合算される。
 ///    </para>
@@ -65,13 +65,7 @@ internal sealed class QuiverEventSource : EventSource
     // トランザクション
     private long _txCommitCount;
     private long _txAbortCount;
-    private long _deadlockVictimCount;
     private long _crashRecoveryCount;
-
-    // ロック
-    private long _lockWaitTotalMs;
-    private long _lockWaitSampleCount;
-    private long _lockContentionCount;
 
     // Index orphan: 最後に CheckIndexConsistency が観測した orphan 件数 (進行中の vacuum 等で更新)。
     private long _indexOrphanLastObserved;
@@ -93,15 +87,12 @@ internal sealed class QuiverEventSource : EventSource
     private PollingCounter? _walPendingFlushCounter;
     private PollingCounter? _checkpointThresholdCounter;
     private PollingCounter? _activeTxCountCounter;
-    private PollingCounter? _lockWaitAvgMsCounter;
-    private PollingCounter? _lockContentionCounter;
     private PollingCounter? _indexOrphanCountCounter;
     private PollingCounter? _vacuumProgressCounter;
 
     private IncrementingPollingCounter? _walBytesPerSecCounter;
     private IncrementingPollingCounter? _txCommitPerSecCounter;
     private IncrementingPollingCounter? _txAbortPerSecCounter;
-    private IncrementingPollingCounter? _deadlockVictimRateCounter;
     private IncrementingPollingCounter? _crashRecoveryRateCounter;
 
     private QuiverEventSource() { }
@@ -216,17 +207,6 @@ internal sealed class QuiverEventSource : EventSource
         {
             DisplayName = "Active transactions",
         };
-        _lockWaitAvgMsCounter ??= new PollingCounter(
-            "lock-wait-avg-ms", this, GetLockWaitAvgMs)
-        {
-            DisplayName = "Average lock-wait time",
-            DisplayUnits = "ms",
-        };
-        _lockContentionCounter ??= new PollingCounter(
-            "lock-contention-count", this, () => Volatile.Read(ref _lockContentionCount))
-        {
-            DisplayName = "Lock contention count (running total)",
-        };
         _indexOrphanCountCounter ??= new PollingCounter(
             "index-orphan-count", this, () => Volatile.Read(ref _indexOrphanLastObserved))
         {
@@ -257,12 +237,6 @@ internal sealed class QuiverEventSource : EventSource
             "tx-abort-per-sec", this, () => Volatile.Read(ref _txAbortCount))
         {
             DisplayName = "Transaction aborts / s",
-            DisplayRateTimeScale = TimeSpan.FromSeconds(1),
-        };
-        _deadlockVictimRateCounter ??= new IncrementingPollingCounter(
-            "tx-deadlock-victim-count", this, () => Volatile.Read(ref _deadlockVictimCount))
-        {
-            DisplayName = "Deadlock victims / s",
             DisplayRateTimeScale = TimeSpan.FromSeconds(1),
         };
         _crashRecoveryRateCounter ??= new IncrementingPollingCounter(
@@ -312,26 +286,9 @@ internal sealed class QuiverEventSource : EventSource
     [NonEvent]
     public void TxAbort() => Interlocked.Increment(ref _txAbortCount);
 
-    /// <summary>デッドロック検出器が犠牲者を中断 (1 回 = 1)。</summary>
-    [NonEvent]
-    public void DeadlockVictim() => Interlocked.Increment(ref _deadlockVictimCount);
-
     /// <summary>crash recovery が起動した (1 回 = 1)。<see cref="Quiver.Transactions.RecoveryManager.Recover"/> で 1 度呼ぶ。</summary>
     [NonEvent]
     public void CrashRecovery() => Interlocked.Increment(ref _crashRecoveryCount);
-
-    /// <summary>
-    /// ロック取得待ち時間 (ms) と「待ちが発生したかどうか」を記録する。
-    /// <paramref name="contended"/> = true なら同時にロック競合カウンタも 1 増やす。
-    /// </summary>
-    [NonEvent]
-    public void RecordLockWait(double waitMs, bool contended)
-    {
-        long rounded = waitMs <= 0 ? 0 : (long)waitMs;
-        Interlocked.Add(ref _lockWaitTotalMs, rounded);
-        Interlocked.Increment(ref _lockWaitSampleCount);
-        if (contended) Interlocked.Increment(ref _lockContentionCount);
-    }
 
     /// <summary>
     /// CheckIndexConsistency が観測した orphan 件数を gauge にセットする。
@@ -376,13 +333,6 @@ internal sealed class QuiverEventSource : EventSource
         long m = Volatile.Read(ref _bufferPoolMisses);
         long total = h + m;
         return total == 0 ? 0.0 : (double)h / total;
-    }
-
-    private double GetLockWaitAvgMs()
-    {
-        long total = Volatile.Read(ref _lockWaitTotalMs);
-        long n = Volatile.Read(ref _lockWaitSampleCount);
-        return n == 0 ? 0.0 : (double)total / n;
     }
 
     private static long Sum(ConcurrentDictionary<object, Func<long>> providers)

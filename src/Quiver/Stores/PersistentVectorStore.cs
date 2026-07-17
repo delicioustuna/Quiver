@@ -10,7 +10,7 @@ namespace Quiver.Storage.Records;
 ///
 /// <para>各 index は <see cref="VectorIndexCatalog"/> に登録され、専用の payload テナント
 /// (<see cref="VectorIndexPayloadStore"/>) を持つ。書き込みは container の単一物理 PagedFile に乗るので、
-/// アクティブ tx の <c>WalWriteSetContext</c> 下で行えば自動的にその tx の page-WAL に含まれ、
+/// アクティブ tx の <c>WalWriteSet</c> 下で行えば自動的にその tx の page-WAL に含まれ、
 /// グラフ変更と原子整合する (tx 統合は GraphTransaction / 呼び出し側 autocommit が担う)。</para>
 ///
 /// <para>検索は index 設定に応じて flat scan または HNSW を使う。

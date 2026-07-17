@@ -146,7 +146,7 @@ public sealed class TransactionRuntimeContractTests : IDisposable
         op.Entered.Wait(TimeSpan.FromSeconds(2)).Should().BeTrue();
 
         Action concurrentUse = () => tx.VertexExists(new VertexId(0));
-        concurrentUse.Should().Throw<TransactionException>();
+        concurrentUse.Should().Throw<ConcurrentTransactionUseException>();
 
         op.Release.Set();
         await running;

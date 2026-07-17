@@ -1,4 +1,5 @@
 using Quiver.Core;
+using Quiver.Storage;
 using Quiver.Storage.Records;
 
 namespace Quiver.Transactions;
@@ -8,14 +9,10 @@ internal sealed class TxNexusStore : INexusStore
     private readonly INexusStore _inner;
     private readonly IIncidenceStore _incidenceStore;
     private readonly IVertexIncidenceHeadStore _vertexHeads;
-    private readonly LockManager _nexusLocks;
-    private readonly LockManager _vertexLocks;
-    private readonly TransactionId _txId;
-    private readonly LockingMode _mode;
-    private readonly TimeSpan _timeout;
+    private readonly TransactionId _transactionId;
     private readonly SnapshotState _snapshot;
-    private readonly CommittedTxRegistry? _committed;
-    private readonly SsnContext? _ssn;
+    private readonly VersionVisible _visibility;
+    private readonly bool _isReadOnly;
     private readonly ICoMembershipBlockStore? _coMembershipStore;
     private List<(NexusId NexusId, IncidenceMember[] Members)>? _pendingViewAdds;
 
@@ -23,27 +20,19 @@ internal sealed class TxNexusStore : INexusStore
         INexusStore inner,
         IIncidenceStore incidenceStore,
         IVertexIncidenceHeadStore vertexHeads,
-        LockManager nexusLocks,
-        LockManager vertexLocks,
-        TransactionId txId,
-        LockingMode mode,
-        TimeSpan timeout,
-        SnapshotState snapshot = default,
-        CommittedTxRegistry? committed = null,
-        SsnContext? ssn = null,
+        TransactionId transactionId,
+        in SnapshotState snapshot,
+        CommittedTxRegistry committed,
+        bool isReadOnly,
         ICoMembershipBlockStore? coMembershipStore = null)
     {
         _inner = inner;
         _incidenceStore = incidenceStore;
         _vertexHeads = vertexHeads;
-        _nexusLocks = nexusLocks;
-        _vertexLocks = vertexLocks;
-        _txId = txId;
-        _mode = mode;
-        _timeout = timeout;
-        _snapshot = snapshot.ActiveAtBegin == null ? SnapshotState.Empty : snapshot;
-        _committed = committed;
-        _ssn = ssn;
+        _transactionId = transactionId;
+        _snapshot = snapshot;
+        _visibility = (xmin, xmax) => Visibility.IsVisible(xmin, xmax, in _snapshot, _transactionId);
+        _isReadOnly = isReadOnly;
         _coMembershipStore = coMembershipStore;
     }
 
@@ -56,107 +45,66 @@ internal sealed class TxNexusStore : INexusStore
         IIncidenceStore _,
         IVertexIncidenceHeadStore __)
     {
-        AcquireVertexLocksAscending(members);
-        ActivateMvccContext();
-        NexusId nexusId = _inner.Create(type, members, _incidenceStore, _vertexHeads);
-        // 導出ビューは commit が durable になってから公開する。同一 transaction 内では
-        // pending がある間だけ通常 chain へフォールバックし、未コミット差分も読み落とさない。
-        if (_coMembershipStore != null)
-        {
-            var captured = members.ToArray();
-            (_pendingViewAdds ??= []).Add((nexusId, captured));
-        }
+        EnsureWritable();
+        NexusId nexusId = _inner is ITransactionNexusStore store
+            ? store.Create(type, members, _incidenceStore, _vertexHeads, _transactionId)
+            : _inner.Create(type, members, _incidenceStore, _vertexHeads);
+        if (_coMembershipStore is not null)
+            (_pendingViewAdds ??= []).Add((nexusId, members.ToArray()));
         return nexusId;
     }
 
     public void Delete(NexusId nexusId)
     {
-        AcquireNexus(nexusId.Sequence, LockMode.Exclusive);
-        ActivateMvccContext();
-        SsnOnWrite(nexusId.Sequence);
-        _inner.Delete(nexusId);
+        EnsureWritable();
+        if (_inner is ITransactionNexusStore store)
+            store.Delete(nexusId, _transactionId);
+        else
+            _inner.Delete(nexusId);
     }
 
     public NexusReadHandle Read(NexusId nexusId)
     {
-        if (_mode == LockingMode.ReaderWriter)
-            AcquireNexus(nexusId.Sequence, LockMode.Shared);
-        ActivateMvccContext();
-        return _inner.Read(nexusId);
+        return _inner is ITransactionNexusStore store
+            ? store.Read(nexusId, _visibility)
+            : _inner.Read(nexusId);
     }
 
     public NexusWriteHandle Write(NexusId nexusId)
     {
-        AcquireNexus(nexusId.Sequence, LockMode.Exclusive);
-        ActivateMvccContext();
-        SsnOnWrite(nexusId.Sequence);
+        EnsureWritable();
         return _inner.Write(nexusId);
     }
 
     public IEnumerable<NexusId> Scan()
     {
-        ActivateMvccContext();
-        return _inner.Scan();
+        return _inner is ITransactionNexusStore store
+            ? store.Scan(_visibility)
+            : _inner.Scan();
     }
 
-    public PropertyCursor EnumerateProperties(NexusId nexusId, IPropertyStore overflowStore)
-    {
-        if (_mode == LockingMode.ReaderWriter)
-            AcquireNexus(nexusId.Sequence, LockMode.Shared);
-        ActivateMvccContext();
-        return _inner.EnumerateProperties(nexusId, overflowStore);
-    }
+    public int CurrentGeneration(long sequence)
+        => _inner.CurrentGeneration(sequence);
 
-    private void AcquireVertexLocksAscending(ReadOnlySpan<IncidenceMember> members)
-    {
-        Span<long> sequences = members.Length <= 16
-            ? stackalloc long[members.Length]
-            : new long[members.Length];
-        for (int i = 0; i < members.Length; i++)
-            sequences[i] = members[i].VertexId.Sequence;
-        sequences.Sort();
+    public bool TryReadRawHeader(long sequence, out RawNexusHeader header)
+        => _inner.TryReadRawHeader(sequence, out header);
 
-        long prev = -1;
-        for (int i = 0; i < sequences.Length; i++)
-        {
-            if (sequences[i] == prev) continue;
-            prev = sequences[i];
-            if (!_vertexLocks.TryAcquire(sequences[i], _txId, LockMode.Exclusive, _timeout))
-                throw new TransactionException(
-                    $"Lock timeout acquiring vertex lock on sequence {sequences[i]} during nexus creation.");
-        }
-    }
-
-    private void AcquireNexus(long id, LockMode mode)
+    public PropertyCursor EnumerateProperties(
+        NexusId nexusId,
+        IPropertyStore overflowStore)
     {
-        if (!_nexusLocks.TryAcquire(id, _txId, mode, _timeout))
-        {
-            string what = mode == LockMode.Exclusive ? "write" : "read";
-            throw new TransactionException(
-                $"Lock timeout acquiring {what} lock on nexus {id}.");
-        }
-    }
-
-    private void ActivateMvccContext()
-    {
-        if (_committed != null)
-            MvccContext.Begin(_txId, _snapshot, _committed, _ssn);
-    }
-
-    private void SsnOnWrite(long localId)
-    {
-        if (_ssn == null || localId < 0) return;
-        var id = new EntityId(EntityKind.Nexus, localId);
-        _ssn.Writes.Add(id);
-        _ssn.Reads.Remove(id);
+        NexusReadHandle nexus = Read(nexusId);
+        if (!nexus.InUse)
+            return new PropertyCursor(overflowStore, default, PropertyVersionRef.Invalid);
+        var ownerId = nexusId.Generation == 0 ? nexus.Id : nexusId;
+        return overflowStore.Enumerate(EntityRef.From(ownerId), nexus.FirstPropertyRef);
     }
 
     internal bool HasPendingViewAdds => _pendingViewAdds is { Count: > 0 };
 
     internal void PublishPendingViewAdds()
     {
-        if (_coMembershipStore == null || _pendingViewAdds == null)
-            return;
+        if (_coMembershipStore is null || _pendingViewAdds is null) return;
         try
         {
             foreach (var pending in _pendingViewAdds)
@@ -164,9 +112,10 @@ internal sealed class TxNexusStore : INexusStore
         }
         catch
         {
-            // commit は既に durable なので導出ビュー更新の失敗で transaction 結果を
-            // 反転させない。不完全な block を無効化し、次回 rebuild まで chain へ縮退する。
+            // durable commit後に導出viewだけを部分公開するとprimaryと食い違うため、
+            // block全体を無効化して再構築可能なchainへ縮退する。
             _coMembershipStore.Invalidate();
+            throw;
         }
         finally
         {
@@ -176,25 +125,27 @@ internal sealed class TxNexusStore : INexusStore
 
     internal void RefreshPendingViewAdds()
     {
-        if (_coMembershipStore == null)
-            return;
-
+        if (_coMembershipStore is null) return;
         _pendingViewAdds ??= [];
         _pendingViewAdds.Clear();
-        foreach (NexusId nexusId in _inner.Scan())
+        foreach (NexusId nexusId in Scan())
         {
-            using var header = _inner.Read(nexusId);
-            if (!header.InUse || header.Xmin != _txId.Value)
-                continue;
-
+            using NexusReadHandle header = Read(nexusId);
+            if (!header.InUse || header.Xmin != _transactionId.Value) continue;
             var members = new List<IncidenceMember>();
-            var enumerator = _incidenceStore.EnumerateByNexus(nexusId, _inner);
+            NexusIncidenceEnumerator enumerator = _incidenceStore.EnumerateByNexus(nexusId, _inner);
             while (enumerator.MoveNext())
             {
-                var incidence = enumerator.Current;
+                IncidenceReadHandle incidence = enumerator.Current;
                 members.Add(new IncidenceMember(incidence.VertexId, incidence.RoleId));
             }
             _pendingViewAdds.Add((nexusId, members.ToArray()));
         }
+    }
+
+    private void EnsureWritable()
+    {
+        if (_isReadOnly)
+            throw new TransactionException("Cannot mutate nexuses in a read-only transaction.");
     }
 }

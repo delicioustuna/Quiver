@@ -42,7 +42,7 @@ public sealed class HybridSearchTests : IDisposable
         using var tx = _db.BeginTransaction();
         var n = tx.CreateVertex("Doc");
         if (body is not null) tx.SetProperty(n, "body", PropertyValue.FromString(body));
-        if (vector is not null) _db.Vectors.SetVector(EntityKind.Vertex, n.Value, VectorIndex, vector);
+        if (vector is not null) tx.SetVector(EntityKind.Vertex, n.Value, VectorIndex, vector);
         tx.Commit();
         return n;
     }
@@ -124,7 +124,7 @@ public sealed class HybridSearchTests : IDisposable
             author = tx.CreateVertex("Author");
             var doc = tx.CreateVertex("Doc");
             tx.SetProperty(doc, "body", PropertyValue.FromString("quiver report"));
-            _db.Vectors.SetVector(EntityKind.Vertex, doc.Value, VectorIndex, new float[] { 1f, 0f, 0f, 0f });
+            tx.SetVector(EntityKind.Vertex, doc.Value, VectorIndex, new float[] { 1f, 0f, 0f, 0f });
             tx.CreateEdge(doc, author, "WROTE");
             tx.Commit();
         }

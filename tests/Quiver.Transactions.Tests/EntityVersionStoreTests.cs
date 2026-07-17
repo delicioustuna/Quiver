@@ -51,7 +51,7 @@ public sealed class EntityVersionStoreTests : IDisposable
     {
         using var store = CreateStore();
 
-        var meta = new EntityVersionMeta(Xmin: 42, Xmax: 99, Pstamp: 1234, Sstamp: 5678);
+        var meta = new EntityVersionMeta(Xmin: 42, Xmax: 99, Generation: 7);
         store.Write(7, meta);
 
         store.Read(7).Should().Be(meta);
@@ -62,27 +62,12 @@ public sealed class EntityVersionStoreTests : IDisposable
     {
         using var store = CreateStore();
 
-        var initial = new EntityVersionMeta(Xmin: 10, Xmax: 0, Pstamp: 0, Sstamp: long.MaxValue);
+        var initial = new EntityVersionMeta(Xmin: 10, Xmax: 0, Generation: 3);
         store.Write(3, initial);
 
         store.UpdateXmax(3, 77);
 
-        store.Read(3).Should().Be(new EntityVersionMeta(Xmin: 10, Xmax: 77, Pstamp: 0, Sstamp: long.MaxValue));
-    }
-
-    [Fact]
-    public void UpdatePstamp_and_UpdateSstamp_only_change_their_field()
-    {
-        using var store = CreateStore();
-
-        var initial = new EntityVersionMeta(Xmin: 1, Xmax: 2, Pstamp: 3, Sstamp: 4);
-        store.Write(5, initial);
-
-        store.UpdatePstamp(5, 33);
-        store.Read(5).Should().Be(new EntityVersionMeta(1, 2, 33, 4));
-
-        store.UpdateSstamp(5, 44);
-        store.Read(5).Should().Be(new EntityVersionMeta(1, 2, 33, 44));
+        store.Read(3).Should().Be(new EntityVersionMeta(Xmin: 10, Xmax: 77, Generation: 3));
     }
 
     [Fact]
@@ -90,12 +75,12 @@ public sealed class EntityVersionStoreTests : IDisposable
     {
         using var store = CreateStore();
 
-        // QUIVER-SW header 40B、entry 40B なので RecordsPerPage = 8152/40 = 203。
+        // page body 8152B、entry 24B なので RecordsPerPage = 8152/24 = 339。
         int rpp = EntityVersionStore.RecordsPerPage;
-        rpp.Should().Be(203);
+        rpp.Should().Be(339);
 
-        var lastOnPage1 = new EntityVersionMeta(Xmin: 100, Xmax: 0, Pstamp: 0, Sstamp: long.MaxValue);
-        var firstOnPage2 = new EntityVersionMeta(Xmin: 200, Xmax: 0, Pstamp: 0, Sstamp: long.MaxValue);
+        var lastOnPage1 = new EntityVersionMeta(Xmin: 100, Xmax: 0, Generation: 1);
+        var firstOnPage2 = new EntityVersionMeta(Xmin: 200, Xmax: 0, Generation: 2);
 
         store.Write(rpp - 1, lastOnPage1);  // page 2, last slot
         store.Write(rpp, firstOnPage2);      // page 3, first slot
@@ -110,14 +95,14 @@ public sealed class EntityVersionStoreTests : IDisposable
         // 1 回目の open: エントリを書き込む
         using (var store = CreateStore())
         {
-            store.Write(0, new EntityVersionMeta(1, 0, 0, long.MaxValue));
-            store.Write(500, new EntityVersionMeta(2, 3, 4, 5));
+            store.Write(0, new EntityVersionMeta(1, 0, 4));
+            store.Write(500, new EntityVersionMeta(2, 3, 5));
         }
 
         // 2 回目の open: 読み戻す
         using var reopened = CreateStore();
-        reopened.Read(0).Should().Be(new EntityVersionMeta(1, 0, 0, long.MaxValue));
-        reopened.Read(500).Should().Be(new EntityVersionMeta(2, 3, 4, 5));
+        reopened.Read(0).Should().Be(new EntityVersionMeta(1, 0, 4));
+        reopened.Read(500).Should().Be(new EntityVersionMeta(2, 3, 5));
         reopened.Read(999).Should().Be(EntityVersionMeta.Unset);
     }
 
@@ -133,7 +118,7 @@ public sealed class EntityVersionStoreTests : IDisposable
     public void Negative_localId_throws_on_Write()
     {
         using var store = CreateStore();
-        var act = () => store.Write(-1, new EntityVersionMeta(1, 0, 0, long.MaxValue));
+        var act = () => store.Write(-1, new EntityVersionMeta(1, 0, 1));
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 }

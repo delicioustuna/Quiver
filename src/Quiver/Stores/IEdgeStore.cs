@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using Quiver.Core;
 using Quiver.Storage;
+using Quiver.Transactions;
 
 namespace Quiver.Storage.Records;
 
@@ -26,6 +27,19 @@ internal interface IEdgeStore
 
     /// <summary>owner-bound property version chain の列挙子を返す。</summary>
     PropertyCursor EnumerateProperties(EdgeId edgeId, IPropertyStore overflowStore);
+}
+
+internal interface ITransactionEdgeStore
+{
+    EdgeId Create(
+        IVertexStore vertexStore,
+        VertexId source,
+        VertexId target,
+        EdgeTypeId type,
+        TransactionId transactionId);
+    void Delete(IVertexStore vertexStore, EdgeId edgeId, TransactionId transactionId);
+    EdgeReadHandle Read(EdgeId edgeId, VersionVisible visibility);
+    IEnumerable<EdgeId> Scan(VersionVisible visibility);
 }
 
 // EdgeRecord レイアウト (48 バイト):
@@ -152,11 +166,13 @@ public ref struct EdgeEnumerator
     private EdgeId _currentId;
     private EdgeReadHandle _current;
     private bool _started;
+    private TransactionUsageGuard? _usageGuard;
 
     internal EdgeEnumerator(IEdgeStore store, IVertexStore vertices, VertexId vertexId, EdgeId firstEdgeId)
     {
         _store = store; _vertices = vertices; _vertexId = vertexId; _currentId = firstEdgeId;
         _filterType = default; _direction = Direction.Both; _hasFilter = false; _started = false;
+        _usageGuard = null;
     }
 
     internal EdgeEnumerator(IEdgeStore store, IVertexStore vertices, VertexId vertexId, EdgeId firstEdgeId,
@@ -164,11 +180,19 @@ public ref struct EdgeEnumerator
     {
         _store = store; _vertices = vertices; _vertexId = vertexId; _currentId = firstEdgeId;
         _filterType = type; _direction = direction; _hasFilter = true; _started = false;
+        _usageGuard = null;
+    }
+
+    internal void AttachUsage(TransactionUsageLease usage)
+    {
+        _usageGuard = usage.Guard;
+        usage.Dispose();
     }
 
     /// <summary>次の可視Edgeへ進む。見つかれば <c>true</c>、列挙完了で <c>false</c>。</summary>
     public bool MoveNext()
     {
+        using var usage = _usageGuard?.Enter() ?? default;
         if (_started) _currentId = NextInChain();
         _started = true;
 

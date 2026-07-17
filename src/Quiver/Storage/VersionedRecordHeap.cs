@@ -23,7 +23,7 @@ namespace Quiver.Storage;
 /// <c>nextVersionPtr</c> を辿り最初に可視な version を返す。これにより xmin/xmax を
 /// レコードへ再内包した統一 MVCC レコードモデルを実現する。</para>
 ///
-/// <para>可視性は <see cref="VersionVisible"/> デリゲートで注入し、MvccContext に依存しない
+/// <para>可視性は <see cref="VersionVisible"/> デリゲートで注入し、ambient state に依存しない
 /// (単体テスト容易性のため)。</para>
 /// </summary>
 internal sealed class VersionedRecordHeap
@@ -507,7 +507,7 @@ internal sealed class VersionedRecordHeap
 }
 
 /// <summary>
-/// 版の可視性判定デリゲート。<see cref="VersionedRecordHeap"/> を MvccContext から
+/// 版の可視性判定デリゲート。<see cref="VersionedRecordHeap"/> へ transaction snapshot を
 /// 切り離し、<see cref="Quiver.Core.Visibility"/> を注入できるようにする。
 /// </summary>
 internal delegate bool VersionVisible(long xmin, long xmax);
