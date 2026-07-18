@@ -302,7 +302,7 @@ internal sealed class QueryOptimizer
     /// </param>
     /// <param name="k">KNN 側から要求された top-k。</param>
     /// <param name="totalIndexedCount">
-    /// ベクトルインデックスのサイズ (通常は <c>db.Vectors</c> のエントリ数)。
+    /// ベクトルインデックスが対象とする owner の推定件数。
     /// 厳密な件数を把握できない場合は <c>GraphStats.TotalVertices</c> を渡す。
     /// </param>
     public KnnStrategy ChooseKnnStrategy(long candidateCount, int k, long totalIndexedCount)

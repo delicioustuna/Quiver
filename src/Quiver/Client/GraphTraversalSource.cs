@@ -160,7 +160,7 @@ public sealed class GraphTraversalSource
     /// </summary>
     /// <remarks>
     /// 類似度スコア自体は伝播しない。生スコアが必要な場合は
-    /// <c>db.Vectors.KnnSearch(...)</c> を直接呼び出すこと。
+    /// read transaction の <c>KnnSearch(...)</c> を使う。
     /// インデックスは <see cref="Core.EntityKind.Vertex"/> にバインドされている必要がある。
     /// Edge向け KNN は具体的なユースケースが出るまで意図的にスコープ外とする。
     /// <para>
@@ -189,7 +189,11 @@ public sealed class GraphTraversalSource
         // _stats があれば label cardinality fallback を効かせる。
         // backend が spec を返せれば dim-aware piecewise threshold を使い、返さなければ
         // dim=0 で単一閾値経路にフォールバックする。
-        int dim = _tx.AsInternal().Access.TryGetVectorIndexSpec(indexName, out var spec) ? spec.Dimensions : 0;
+        int dim = _tx.AsInternal().Access.TryGetVectorIndex(
+            indexName,
+            out var descriptor)
+            ? descriptor.Dimensions
+            : 0;
         // vector-first を既定とし、後続 pure-filter / Limit は終端で KnnPushdown が
         // candidate-side に巻き戻して graph-first 化を判定する。
         var plan = new KnnOp(null, indexName, query.ToArray(), k, dim, options);
@@ -239,7 +243,11 @@ public sealed class GraphTraversalSource
         string textIndex, string queryText,
         string vectorIndex, ReadOnlySpan<float> queryVector, int k)
     {
-        int dim = _tx.AsInternal().Access.TryGetVectorIndexSpec(vectorIndex, out var spec) ? spec.Dimensions : 0;
+        int dim = _tx.AsInternal().Access.TryGetVectorIndex(
+            vectorIndex,
+            out var descriptor)
+            ? descriptor.Dimensions
+            : 0;
         var children = ImmutableArray.Create<LogicalOp>(
             new FullTextScanOp(null, textIndex, queryText, k, _stats?.FullTextCorpus(textIndex)),
             new KnnOp(null, vectorIndex, queryVector.ToArray(), k, dim));

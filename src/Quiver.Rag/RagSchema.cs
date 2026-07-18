@@ -42,6 +42,8 @@ public static class RagSchema
     /// (本文を二重に持つストレージコストとのトレードオフ)。
     /// </summary>
     public const string PropSearchText = "searchText";
+    /// <summary>Chunkの埋め込みvector property。</summary>
+    public const string PropEmbedding = "embedding";
     /// <summary>文書内のチャンク順序 (0 起点)。</summary>
     public const string PropOrdinal = "ordinal";
     /// <summary>見出しパス ("1.2 概要 &gt; 1.2.1 背景" 形式)。</summary>

@@ -107,10 +107,13 @@ static void GenerateVector(string outputPath)
     PrepareFile(outputPath);
     using var db = QuiverDatabase.Open(outputPath);
 
-    EditSchema(db, schema => schema.CreateIndex(
-        new ScalarIndexDefinition("idx_doc_title", new PropertyTarget(PropertyOwnerKind.Vertex, "title", "Document"), IndexKind.StringEquality)));
-    db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-        "vec_doc", EntityKind.Vertex, default, 8, DistanceMetric.Cosine, "sample"));
+    EditSchema(db, schema =>
+    {
+        schema.CreateIndex(
+            new ScalarIndexDefinition("idx_doc_title", new PropertyTarget(PropertyOwnerKind.Vertex, "title", "Document"), IndexKind.StringEquality));
+        schema.CreateIndex(
+            new VectorIndexDefinition("vec_doc", new PropertyTarget(PropertyOwnerKind.Vertex, "embedding", "Document"), 8));
+    });
 
     var rng = new Random(42);
 
@@ -145,7 +148,7 @@ static void GenerateVector(string outputPath)
                 .P("wordCount", (long)(rng.Next(500, 3000)))
                 .Next();
 
-            tx.SetVector(EntityKind.Vertex, docId.Sequence, "vec_doc", vec);
+            tx.SetVectorProperty(EntityRef.From(docId), "embedding", vec);
             vertexIds.Add((docId, topic));
 
             tx.Mutate.AddEdge("BELONGS_TO").From(docId).To(topicVertex).Next();
@@ -170,7 +173,7 @@ static void GenerateVector(string outputPath)
     Console.WriteLine("  Vector Indexes: 1 (vec_doc)");
     Console.WriteLine();
     Console.WriteLine("Test query in Studio:");
-    Console.WriteLine("  db.Vectors.KnnSearch(\"vec_doc\", new float[] { 0.1f, 0.2f, 0.9f, 0.85f, 0.1f, 0.05f, 0.1f, 0.3f }, 8)");
+    Console.WriteLine("  readTx.KnnSearch(\"vec_doc\", new float[] { 0.1f, 0.2f, 0.9f, 0.85f, 0.1f, 0.05f, 0.1f, 0.3f }, 8)");
 }
 
 static void GenerateHierarchical(string outputPath)

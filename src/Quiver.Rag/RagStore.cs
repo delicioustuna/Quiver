@@ -205,7 +205,10 @@ public sealed class RagStore
 
             tx.CreateEdge(docId, chunkId, RagSchema.HasChunkType);
             if (hasPrev) tx.CreateEdge(prev, chunkId, RagSchema.NextChunkType);
-            tx.SetVector(EntityKind.Vertex, chunkId.Value, _options.VectorIndexName, embeddings[i]);
+            tx.SetVectorProperty(
+                EntityRef.From(chunkId),
+                RagSchema.PropEmbedding,
+                embeddings[i]);
 
             prev = chunkId;
             hasPrev = true;
@@ -287,7 +290,7 @@ public sealed class RagStore
     /// <summary>Chunk のベクトルとノード (接続関係はカスケード) を削除する。</summary>
     private void DeleteChunk(IWriteTransaction tx, VertexId chunkId)
     {
-        tx.RemoveVector(EntityKind.Vertex, chunkId.Value, _options.VectorIndexName);
+        tx.RemoveProperty(chunkId, RagSchema.PropEmbedding);
         tx.DeleteVertex(chunkId);
     }
 
@@ -376,7 +379,6 @@ public sealed class RagStore
     /// </summary>
     private void EnsureSchema()
     {
-        PropertyKeyId searchTextKey;
         using (var schemaTx = _db.BeginWriteTransaction())
         {
             var schema = schemaTx.EditSchema;
@@ -391,7 +393,8 @@ public sealed class RagStore
             schema.GetOrCreatePropertyKey(RagSchema.PropIngestedAt);
             schema.GetOrCreatePropertyKey(RagSchema.PropMetadataJson);
             schema.GetOrCreatePropertyKey(RagSchema.PropText);
-            searchTextKey = schema.GetOrCreatePropertyKey(RagSchema.PropSearchText);
+            schema.GetOrCreatePropertyKey(RagSchema.PropSearchText);
+            schema.GetOrCreatePropertyKey(RagSchema.PropEmbedding);
             schema.GetOrCreatePropertyKey(RagSchema.PropOrdinal);
             schema.GetOrCreatePropertyKey(RagSchema.PropHeadingPath);
             schema.GetOrCreatePropertyKey(RagSchema.PropPage);
@@ -406,32 +409,36 @@ public sealed class RagStore
                         RagSchema.PropSourceId,
                         RagSchema.DocumentLabel),
                     IndexKind.StringEquality));
-            schemaTx.Commit();
-        }
 
-        // Chunk 埋め込みベクトル索引。埋め込み元は Chunk.searchText (見出しパス + 本文 = 埋め込み入力と一致)。
-        // 既存があれば次元・距離尺度が options と一致することを照合する (reopen 時の取り違えを
-        // SetVector/検索まで遅延させない)。
-        if (_db.Vectors.TryGetIndex(_options.VectorIndexName, out var existingVector))
-        {
-            if (existingVector.Dimensions != _options.EmbeddingDimensions)
-                throw new InvalidOperationException(
-                    $"既存ベクトル索引 '{_options.VectorIndexName}' の次元 {existingVector.Dimensions} が " +
-                    $"options.EmbeddingDimensions {_options.EmbeddingDimensions} と一致しません。");
-            if (existingVector.Metric != _options.VectorMetric)
-                throw new InvalidOperationException(
-                    $"既存ベクトル索引 '{_options.VectorIndexName}' の距離尺度 {existingVector.Metric} が " +
-                    $"options.VectorMetric {_options.VectorMetric} と一致しません。");
-        }
-        else
-        {
-            _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-                Name: _options.VectorIndexName,
-                EntityKind: EntityKind.Vertex,
-                SourcePropertyKeyId: searchTextKey,
-                Dimensions: _options.EmbeddingDimensions,
-                Metric: _options.VectorMetric,
-                ProviderId: _options.VectorProviderId));
+            if (schema.TryGetIndex(_options.VectorIndexName, out IndexInfo existing))
+            {
+                if (existing.Definition is not VectorIndexDefinition existingVector)
+                    throw new InvalidOperationException(
+                        $"既存index '{_options.VectorIndexName}' はvector indexではありません。");
+                if (existingVector.Dimensions != _options.EmbeddingDimensions)
+                    throw new InvalidOperationException(
+                        $"既存index '{_options.VectorIndexName}' の次元は" +
+                        $"{existingVector.Dimensions}ですが、要求値は{_options.EmbeddingDimensions}です。");
+                if (existingVector.Metric != _options.VectorMetric)
+                    throw new InvalidOperationException(
+                        $"既存index '{_options.VectorIndexName}' の距離尺度は" +
+                        $"{existingVector.Metric}ですが、要求値は{_options.VectorMetric}です。");
+                if (existingVector.Target.PropertyKey != RagSchema.PropEmbedding)
+                    throw new InvalidOperationException(
+                        $"既存index '{_options.VectorIndexName}' のvector propertyが一致しません。");
+            }
+            else
+            {
+                schema.CreateIndex(new VectorIndexDefinition(
+                    _options.VectorIndexName,
+                    new PropertyTarget(
+                        PropertyOwnerKind.Vertex,
+                        RagSchema.PropEmbedding,
+                        RagSchema.ChunkLabel),
+                    _options.EmbeddingDimensions,
+                    _options.VectorMetric));
+            }
+            schemaTx.Commit();
         }
 
         // Chunk.searchText 全文索引。作成は EnableFullTextIndex で制御するが、FullTextEnabled は

@@ -49,23 +49,19 @@ static bool RunScenario(Scenario scenario)
         Array.Fill(live, true);
 
         using var db = QuiverDatabase.Open(path);
-        PropertyKeyId embeddingKey;
+        const string VectorProperty = "embedding";
         using (var schemaTx = db.BeginWriteTransaction())
         {
-            embeddingKey = schemaTx.EditSchema.GetOrCreatePropertyKey("embedding");
+            schemaTx.EditSchema.CreateIndex(new VectorIndexDefinition(
+                IndexName,
+                new PropertyTarget(PropertyOwnerKind.Vertex, VectorProperty),
+                VectorRecallCorpus.RecallDimensions,
+                DistanceMetric.Cosine,
+                HnswM: scenario.HnswM,
+                HnswMMax0: scenario.HnswMMax0,
+                HnswEfConstruction: scenario.HnswEfConstruction));
             schemaTx.Commit();
         }
-
-        db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName,
-            EntityKind.Vertex,
-            embeddingKey,
-            VectorRecallCorpus.RecallDimensions,
-            DistanceMetric.Cosine,
-            "deterministic recall corpus",
-            HnswM: scenario.HnswM,
-            HnswMMax0: scenario.HnswMMax0,
-            HnswEfConstruction: scenario.HnswEfConstruction));
 
         var buildStopwatch = Stopwatch.StartNew();
         using (var tx = db.BeginWriteTransaction())
@@ -76,7 +72,7 @@ static bool RunScenario(Scenario scenario)
                     random, VectorRecallCorpus.RecallDimensions);
                 corpus.Add(vector);
                 var vertex = tx.CreateVertex("Doc");
-                tx.SetVector(EntityKind.Vertex, vertex.Value, IndexName, vector);
+                tx.SetVectorProperty(EntityRef.From(vertex), VectorProperty, vector);
             }
             tx.Commit();
         }
@@ -106,7 +102,7 @@ static bool RunScenario(Scenario scenario)
             for (int i = 0; i < deleteCount; i++)
             {
                 int seq = order[i];
-                tx.RemoveVector(EntityKind.Vertex, seq, IndexName);
+                tx.RemoveProperty(new VertexId(seq), VectorProperty);
                 live[seq] = false;
             }
             tx.Commit();
@@ -148,7 +144,8 @@ static (double Recall, double MeanLatencyMs) MeasureRecallAndLatency(
     IReadOnlyList<float[]> queries,
     VectorSearchOptions? options = null)
 {
-    using (var warmup = db.Vectors.KnnSearch(
+    using var warmupTx = db.BeginReadTransaction();
+    using (var warmup = warmupTx.KnnSearch(
         indexName, queries[0], VectorRecallCorpus.K, options))
         while (warmup.MoveNext()) { }
 
@@ -158,9 +155,10 @@ static (double Recall, double MeanLatencyMs) MeasureRecallAndLatency(
     {
         var approximate = new List<long>(VectorRecallCorpus.K);
         long started = Stopwatch.GetTimestamp();
-        using (var cursor = db.Vectors.KnnSearch(
+        using var read = db.BeginReadTransaction();
+        using (var cursor = read.KnnSearch(
             indexName, query, VectorRecallCorpus.K, options))
-            while (cursor.MoveNext()) approximate.Add(cursor.Current.EntityId);
+            while (cursor.MoveNext()) approximate.Add(cursor.Current.Owner.Sequence);
         elapsedTicks += Stopwatch.GetTimestamp() - started;
 
         var exact = Enumerable.Range(0, corpus.Count)

@@ -164,23 +164,14 @@ BM25 の `tf-idf` 系スコアはコーパスサイズの対数に依存する�
 **将来方針**: 1.x では現行動作を維持する。将来的にはチェックポイント時に自動で統計を更新する
 auto-refresh オプションの追加を検討している。
 
-## HNSW の上書き {#hnsw-overwrite}
+## Derived vector segment の再構築 {#vector-segment-rebuild}
 
-既存 sequence に対する `HnswIndex.Insert(seq)` は、ベクトル payload を更新するが HNSW グラフの
-トポロジを再リンクしない。古いグラフリンクは新しいベクトルを指したまま残る。これはベクトルが大きく
-変化したときに検索品質を低下させうる。
+reopen 直後、merge 中、または derived state が不足する場合、KNN は primary vector property を exact scan する。
+この fallback は結果集合を保つが、immutable HNSW segment の publish が完了するまで検索レイテンシが corpus size に比例する。
 
-**設計根拠**: HNSW グラフの再リンク（近傍グラフのトポロジ修正）はグラフ全体に波及しうる高コスト
-操作であり、単一Vertex更新のレイテンシを数桁悪化させる。ほとんどの RAG ユースケースでは
-エンベディングモデルの変更時にインデックスを再構築するため、in-place 上書きで近傍トポロジが
-劣化するケースの発生頻度は低い。
-
-**緩和策**: tombstone 数がライブ数を超えたときの自動 rebuild がトリガーされる。アプリケーション側
-から明示的にインデックスを再構築する場合は、ベクトルインデックスを drop + 再作成する。頻繁に
-ベクトルを更新するワークロードでは、Vertexを削除→再作成するパターンが品質劣化を回避できる。
-
-**将来方針**: 1.x では現行動作を維持する。再リンクコストを局所化する lazy repair（検索時に近傍を
-部分修正する手法）の導入を検討している。
+通常の vector property update は commit-local flat delta segment を公開するため、共有 HNSW グラフを in-place で再リンクしない。
+merge worker は writer lease の外で新しい HNSW artifact を構築し、source generation が一致する場合だけ versioned manifest を公開する。
+index の drop と再作成は primary vector property を削除しない。
 
 ## HNSW 既定パラメタの品質とコスト {#hnsw-default-recall}
 
@@ -190,7 +181,7 @@ cosine の決定的コーパスで true recall@10 **0.950**、30% 削除後 **0.
 旧既定 M=16 / Mmax0=32 / efConstruction=200 は recall 0.825、構築 5.95 秒、
 検索 1.02 ms。新既定は構築 10.00 秒 (+68%)、検索 1.43 ms (+41%) だが、
 ローカル RAG の既定品質目標 0.95 を満たすため、このコストを採用した。
-より軽い構築を優先する利用者は `VectorIndexSpec` で旧値相当を明示できる。
+より軽い構築を優先する利用者は `VectorIndexDefinition` の HNSW parameter で旧値相当を明示できる。
 
 **設計根拠**: efSearch=200 まで広げても旧構築グラフは 0.825 止まりで、検索時パラメタだけでは
 0.95 に届かない。payload cache 導入後は新既定の 1.51 ms も導入前の旧既定 2.21 ms より速い。

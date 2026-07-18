@@ -13,20 +13,16 @@ try
 
     // ── インデックス定義 ──
     const string indexName = "person_bio_v1";
-    PropertyKeyId bioKey;
     using (var schemaTx = db.BeginWriteTransaction())
     {
-        bioKey = schemaTx.EditSchema.GetOrCreatePropertyKey("bio");
+        schemaTx.EditSchema.GetOrCreatePropertyKey("bio");
+        schemaTx.EditSchema.CreateIndex(new VectorIndexDefinition(
+            indexName,
+            new PropertyTarget(PropertyOwnerKind.Vertex, "bio", "Person"),
+            Dimensions: 4,
+            Metric: DistanceMetric.Cosine));
         schemaTx.Commit();
     }
-
-    db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-        Name: indexName,
-        EntityKind: EntityKind.Vertex,
-        SourcePropertyKeyId: bioKey,
-        Dimensions: 4,
-        Metric: DistanceMetric.Cosine,
-        ProviderId: "sample-static"));
 
     VertexId aliceId, bobId, carolId;
 
@@ -38,9 +34,9 @@ try
         bobId   = tx.Mutate.AddVertex("Person").P("name", "Bob").Next();
         carolId = tx.Mutate.AddVertex("Person").P("name", "Carol").Next();
 
-        db.Vectors.SetVector(EntityKind.Vertex, aliceId.Value, indexName, new float[] { 0.1f, 0.2f, 0.3f, 0.4f });
-        db.Vectors.SetVector(EntityKind.Vertex, bobId.Value,   indexName, new float[] { 0.0f, 0.1f, 0.2f, 0.5f });
-        db.Vectors.SetVector(EntityKind.Vertex, carolId.Value, indexName, new float[] { 0.9f, 0.8f, 0.7f, 0.6f });
+        tx.SetVectorProperty(EntityRef.From(aliceId), "bio", [0.1f, 0.2f, 0.3f, 0.4f]);
+        tx.SetVectorProperty(EntityRef.From(bobId), "bio", [0.0f, 0.1f, 0.2f, 0.5f]);
+        tx.SetVectorProperty(EntityRef.From(carolId), "bio", [0.9f, 0.8f, 0.7f, 0.6f]);
         tx.Commit();
     }
 
@@ -70,13 +66,14 @@ try
 
     // ── 3. 生スコア付きの直接 KNN ──
     Console.WriteLine();
-    Console.WriteLine("── 3. 生スコア付き db.Vectors.KnnSearch ──");
-    using (var cursor = db.Vectors.KnnSearch(indexName, new float[] { 0.1f, 0.2f, 0.3f, 0.4f }, k: 3))
+    Console.WriteLine("── 3. 生スコア付き transaction KNN ──");
+    using (var tx = db.BeginReadTransaction())
     {
+        using var cursor = tx.KnnSearch(indexName, [0.1f, 0.2f, 0.3f, 0.4f], k: 3);
         while (cursor.MoveNext())
         {
             var hit = cursor.Current;
-            Console.WriteLine($"  {hit.EntityKind}#{hit.EntityId}  score={hit.Score:F4}");
+            Console.WriteLine($"  {hit.Owner.Kind}#{hit.Owner.Sequence}  score={hit.Score:F4}");
         }
     }
 }

@@ -121,7 +121,8 @@ public class VertexIndexRangeScanOperatorTests
     {
         ScalarIndexDefinition definition = transaction.Schema.ListIndexes()
             .Single(index => index.Name == indexName)
-            .Definition;
+            .Definition as ScalarIndexDefinition
+            ?? throw new InvalidOperationException($"{indexName} is not a scalar index.");
         if (!transaction.Schema.TryGetPropertyKeyId(
             definition.Target.PropertyKey,
             out PropertyKeyId propertyKey))

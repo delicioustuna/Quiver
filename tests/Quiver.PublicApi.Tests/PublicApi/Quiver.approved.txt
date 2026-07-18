@@ -646,7 +646,6 @@ namespace Quiver
     public interface IGraphStorageBackend : System.IDisposable
     {
         Quiver.IDiagnosticsApi Diagnostics { get; }
-        Quiver.Core.IVectorStore Vectors { get; }
         Quiver.IReadTransaction BeginReadTransaction();
         Quiver.IWriteTransaction BeginWriteTransaction();
         void CreateSnapshot(string targetDirectory, Quiver.SnapshotOptions? options = null);
@@ -686,9 +685,11 @@ namespace Quiver
         string? GetVertexLabel(Quiver.Core.VertexId vertexId);
         bool HasProperty(Quiver.Core.NexusId nexusId, string key);
         bool HasProperty(Quiver.Core.VertexId vertexId, string key);
+        Quiver.Core.VectorSearchCursor KnnSearch(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.VectorSearchOptions? options = null);
+        System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorSearchCursor> KnnSearchBatch(string indexName, System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>> queries, int k, Quiver.Core.VectorSearchOptions? options = null);
         Quiver.EntityRefEnumerator RangeIndex(string indexName, in Quiver.Storage.Records.PropertyValue from, bool fromInclusive, in Quiver.Storage.Records.PropertyValue to, bool toInclusive);
         Quiver.EntityRefEnumerator SeekIndex(string indexName, in Quiver.Storage.Records.PropertyValue key);
-        bool TryGetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.Span<float> destination);
+        bool TryGetVectorProperty(Quiver.Core.EntityRef owner, string propertyKey, System.Span<float> destination);
         bool VertexExists(Quiver.Core.VertexId vertexId);
     }
     public interface ISchemaCatalog
@@ -705,6 +706,7 @@ namespace Quiver
         System.Collections.Generic.IReadOnlyList<string> ListPropertyKeys();
         System.Collections.Generic.IReadOnlyList<string> ListRoles();
         bool TryGetEdgeTypeId(string name, out Quiver.Core.EdgeTypeId id);
+        bool TryGetIndex(string indexName, out Quiver.IndexInfo info);
         bool TryGetLabelId(string name, out Quiver.Core.LabelId id);
         bool TryGetNexusTypeId(string name, out Quiver.Core.NexusTypeId id);
         bool TryGetPropertyKeyId(string name, out Quiver.Core.PropertyKeyId id);
@@ -759,14 +761,13 @@ namespace Quiver
         void RemovePropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Storage.Records.PropertyValue value);
         void RemovePropertyValue(Quiver.Core.NexusId nexusId, string key, in Quiver.Storage.Records.PropertyValue value);
         void RemovePropertyValue(Quiver.Core.VertexId vertexId, string key, in Quiver.Storage.Records.PropertyValue value);
-        void RemoveVector(Quiver.Core.EntityKind kind, long entityId, string indexName);
         void Rollback();
         void RollbackTo(Quiver.Transactions.SavepointId savepoint);
         Quiver.Transactions.SavepointId Savepoint(string? name = null);
         void SetProperty(Quiver.Core.EdgeId edgeId, string key, in Quiver.Storage.Records.PropertyValue value);
         void SetProperty(Quiver.Core.NexusId nexusId, string key, in Quiver.Storage.Records.PropertyValue value);
         void SetProperty(Quiver.Core.VertexId vertexId, string key, in Quiver.Storage.Records.PropertyValue value);
-        void SetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.ReadOnlySpan<float> vector);
+        void SetVectorProperty(Quiver.Core.EntityRef owner, string propertyKey, System.ReadOnlySpan<float> vector);
     }
     public sealed class IndexConsistencyReport : System.IEquatable<Quiver.IndexConsistencyReport>
     {
@@ -785,10 +786,10 @@ namespace Quiver
     }
     public sealed class IndexInfo : System.IEquatable<Quiver.IndexInfo>
     {
-        public IndexInfo(Quiver.ScalarIndexDefinition Definition, Quiver.IndexLifecycleState State, long EntryCount) { }
-        public Quiver.ScalarIndexDefinition Definition { get; init; }
+        public IndexInfo(Quiver.IndexDefinition Definition, Quiver.IndexLifecycleState State, long EntryCount) { }
+        public Quiver.IndexDefinition Definition { get; init; }
         public long EntryCount { get; init; }
-        public Quiver.IndexKind Kind { get; }
+        public Quiver.IndexKind? Kind { get; }
         public string Name { get; }
         public Quiver.IndexLifecycleState State { get; init; }
         public Quiver.PropertyTarget Target { get; }
@@ -878,7 +879,6 @@ namespace Quiver
         public Quiver.IDiagnosticsApi Diagnostics { get; }
         public string Path { get; }
         public Quiver.ISchemaCatalog Schema { get; }
-        public Quiver.Core.IVectorStore Vectors { get; }
         public Quiver.Storage.Records.BulkLoader BeginBulkLoad(bool buildAdjacencyIndex = false) { }
         public Quiver.IReadTransaction BeginReadTransaction() { }
         public Quiver.Storage.Records.StreamingBulkLoader BeginStreamingBulkLoad(bool buildAdjacencyIndex = false) { }
@@ -889,7 +889,6 @@ namespace Quiver
         public Quiver.GraphStats CollectStats(int powerVertexThreshold, double denseThreshold) { }
         public void CompactAdjacency() { }
         public bool CreateColumn(Quiver.Core.EntityKind kind, string propertyKey) { }
-        public Quiver.Core.IGraphEngine CreateEmbeddingEngine(Quiver.Core.IVectorStore vectors, Quiver.Core.IVectorCatalog catalog) { }
         public void CreateSnapshot(string targetFilePath, Quiver.SnapshotOptions? options = null) { }
         public void Dispose() { }
         public bool DropColumn(Quiver.Core.EntityKind kind, string propertyKey) { }
@@ -923,7 +922,6 @@ namespace Quiver
         public long MaximumFileGrowthStepBytes { get; set; }
         public long MinCheckpointThresholdBytes { get; set; }
         public System.TimeSpan TargetRecoveryTime { get; set; }
-        public long VectorCacheBudgetBytes { get; set; }
     }
     public sealed class ReadTransaction : Quiver.IReadTransaction, System.IDisposable
     {
@@ -950,9 +948,11 @@ namespace Quiver
         public string? GetVertexLabel(Quiver.Core.VertexId vertexId) { }
         public bool HasProperty(Quiver.Core.NexusId nexusId, string key) { }
         public bool HasProperty(Quiver.Core.VertexId vertexId, string key) { }
+        public Quiver.Core.VectorSearchCursor KnnSearch(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.VectorSearchOptions? options = null) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorSearchCursor> KnnSearchBatch(string indexName, System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>> queries, int k, Quiver.Core.VectorSearchOptions? options = null) { }
         public Quiver.EntityRefEnumerator RangeIndex(string indexName, in Quiver.Storage.Records.PropertyValue from, bool fromInclusive, in Quiver.Storage.Records.PropertyValue to, bool toInclusive) { }
         public Quiver.EntityRefEnumerator SeekIndex(string indexName, in Quiver.Storage.Records.PropertyValue key) { }
-        public bool TryGetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.Span<float> destination) { }
+        public bool TryGetVectorProperty(Quiver.Core.EntityRef owner, string propertyKey, System.Span<float> destination) { }
         public bool VertexExists(Quiver.Core.VertexId vertexId) { }
     }
     public sealed class ScalarIndexDefinition : Quiver.IndexDefinition, System.IEquatable<Quiver.ScalarIndexDefinition>
@@ -971,6 +971,24 @@ namespace Quiver
     {
         public SnapshotOptions() { }
         public bool IncludeIndexes { get; set; }
+    }
+    public sealed class VectorIndexDefinition : Quiver.IndexDefinition, System.IEquatable<Quiver.VectorIndexDefinition>
+    {
+        public VectorIndexDefinition(string Name, Quiver.PropertyTarget Target, int Dimensions, Quiver.Core.DistanceMetric Metric = 1, Quiver.Core.VectorElementType ElementType = 0, int HnswM = 32, int HnswMMax0 = 64, int HnswMaxLayers = 8, int HnswEfConstruction = 400, Quiver.VectorSegmentPolicy? SegmentPolicy = null) { }
+        public int Dimensions { get; init; }
+        public Quiver.Core.VectorElementType ElementType { get; init; }
+        public int HnswEfConstruction { get; init; }
+        public int HnswM { get; init; }
+        public int HnswMMax0 { get; init; }
+        public int HnswMaxLayers { get; init; }
+        public Quiver.Core.DistanceMetric Metric { get; init; }
+        public Quiver.VectorSegmentPolicy? SegmentPolicy { get; init; }
+    }
+    public sealed class VectorSegmentPolicy : System.IEquatable<Quiver.VectorSegmentPolicy>
+    {
+        public VectorSegmentPolicy(int MaximumDeltaEntries = 4096, int MaximumSegments = 16) { }
+        public int MaximumDeltaEntries { get; init; }
+        public int MaximumSegments { get; init; }
     }
     public sealed class VertexDegreeLookup
     {
@@ -1041,6 +1059,8 @@ namespace Quiver
         public string? GetVertexLabel(Quiver.Core.VertexId vertexId) { }
         public bool HasProperty(Quiver.Core.NexusId nexusId, string key) { }
         public bool HasProperty(Quiver.Core.VertexId vertexId, string key) { }
+        public Quiver.Core.VectorSearchCursor KnnSearch(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.VectorSearchOptions? options = null) { }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorSearchCursor> KnnSearchBatch(string indexName, System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>> queries, int k, Quiver.Core.VectorSearchOptions? options = null) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "Id",
                 "Created"})]
@@ -1062,7 +1082,6 @@ namespace Quiver
         public void RemovePropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Storage.Records.PropertyValue value) { }
         public void RemovePropertyValue(Quiver.Core.NexusId nexusId, string key, in Quiver.Storage.Records.PropertyValue value) { }
         public void RemovePropertyValue(Quiver.Core.VertexId vertexId, string key, in Quiver.Storage.Records.PropertyValue value) { }
-        public void RemoveVector(Quiver.Core.EntityKind kind, long entityId, string indexName) { }
         public void Rollback() { }
         public void RollbackTo(Quiver.Transactions.SavepointId savepoint) { }
         public Quiver.Transactions.SavepointId Savepoint(string? name = null) { }
@@ -1070,8 +1089,8 @@ namespace Quiver
         public void SetProperty(Quiver.Core.EdgeId edgeId, string key, in Quiver.Storage.Records.PropertyValue value) { }
         public void SetProperty(Quiver.Core.NexusId nexusId, string key, in Quiver.Storage.Records.PropertyValue value) { }
         public void SetProperty(Quiver.Core.VertexId vertexId, string key, in Quiver.Storage.Records.PropertyValue value) { }
-        public void SetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.ReadOnlySpan<float> vector) { }
-        public bool TryGetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.Span<float> destination) { }
+        public void SetVectorProperty(Quiver.Core.EntityRef owner, string propertyKey, System.ReadOnlySpan<float> vector) { }
+        public bool TryGetVectorProperty(Quiver.Core.EntityRef owner, string propertyKey, System.Span<float> destination) { }
         public bool VertexExists(Quiver.Core.VertexId vertexId) { }
     }
 }
@@ -1125,45 +1144,6 @@ namespace Quiver.Core
         public bool IsValid { get; }
         public int Value { get; init; }
     }
-    public readonly struct EmbeddingTaskKey : System.IEquatable<Quiver.Core.EmbeddingTaskKey>
-    {
-        public EmbeddingTaskKey(Quiver.Core.EntityKind EntityKind, long EntityId, string IndexName, string ProviderId) { }
-        public long EntityId { get; init; }
-        public Quiver.Core.EntityKind EntityKind { get; init; }
-        public string IndexName { get; init; }
-        public string ProviderId { get; init; }
-    }
-    public sealed class EmbeddingTaskRecord : System.IEquatable<Quiver.Core.EmbeddingTaskRecord>
-    {
-        public EmbeddingTaskRecord(Quiver.Core.EntityKind EntityKind, long EntityId, string IndexName, string ProviderId, Quiver.Core.EmbeddingTaskState State, string? ContentHash, string? LastError, System.DateTimeOffset LastUpdatedAtUtc) { }
-        public string? ContentHash { get; init; }
-        public long EntityId { get; init; }
-        public Quiver.Core.EntityKind EntityKind { get; init; }
-        public string IndexName { get; init; }
-        public Quiver.Core.EmbeddingTaskKey Key { get; }
-        public string? LastError { get; init; }
-        public System.DateTimeOffset LastUpdatedAtUtc { get; init; }
-        public string ProviderId { get; init; }
-        public Quiver.Core.EmbeddingTaskState State { get; init; }
-    }
-    public enum EmbeddingTaskState : byte
-    {
-        NotStarted = 0,
-        InProgress = 1,
-        Completed = 2,
-        FailedRetryable = 3,
-        FailedPermanent = 4,
-        Stale = 5,
-    }
-    public sealed class EntityCandidateSet
-    {
-        public EntityCandidateSet(Quiver.Core.EntityKind kind, System.Collections.Generic.IEnumerable<long> ids) { }
-        public int Count { get; }
-        public System.Collections.Generic.IEnumerable<long> Ids { get; }
-        public Quiver.Core.EntityKind Kind { get; }
-        public bool Contains(long id) { }
-        public bool Contains(Quiver.Core.EntityKind kind, long id) { }
-    }
     public enum EntityKind : byte
     {
         Vertex = 1,
@@ -1203,70 +1183,10 @@ namespace Quiver.Core
         TResult Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b);
         TResult Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<float> b, System.ReadOnlySpan<System.Range> regions);
     }
-    public interface IGraphEngine
-    {
-        Quiver.Core.IVectorCatalog Catalog { get; }
-        Quiver.Core.IVectorStore Vectors { get; }
-        Quiver.Core.IGraphEngineReadSession BeginRead();
-    }
-    public interface IGraphEngineReadSession : System.IDisposable
-    {
-        System.Collections.Generic.IEnumerable<Quiver.Core.EntityRef> EnumerateEntities(Quiver.Core.EntityKind kind);
-        bool TryReadStringProperty(Quiver.Core.EntityRef entity, string propertyKey, out string text);
-    }
     public interface IMonadicOperator<TResult>
     {
         TResult Invoke(System.ReadOnlySpan<float> a);
         TResult Invoke(System.ReadOnlySpan<float> a, System.ReadOnlySpan<System.Range> regions);
-    }
-    public interface IVectorCatalog
-    {
-        void CreateIndex(Quiver.Core.VectorIndexSpec spec);
-        bool DeleteTask(Quiver.Core.EmbeddingTaskKey key);
-        bool DropIndex(string name);
-        Quiver.Core.EmbeddingTaskRecord? GetTask(Quiver.Core.EmbeddingTaskKey key);
-        System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorIndexSpec> ListIndexes();
-        System.Collections.Generic.IEnumerable<Quiver.Core.EmbeddingTaskRecord> ListTasks(string? indexName = null);
-        bool TryGetIndex(string name, out Quiver.Core.VectorIndexSpec spec);
-        void UpsertTask(Quiver.Core.EmbeddingTaskRecord record);
-    }
-    public interface IVectorStore
-    {
-        void CreateVectorIndex(Quiver.Core.VectorIndexSpec spec);
-        void DropVectorIndex(string name);
-        Quiver.Core.VectorSearchCursor KnnSearch(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.VectorSearchOptions? options = null);
-        System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorSearchCursor> KnnSearchBatch(string indexName, System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>> queries, int k, Quiver.Core.VectorSearchOptions? options = null);
-        System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorIndexSpec> ListVectorIndexes();
-        void RemoveVector(Quiver.Core.EntityKind kind, long entityId, string indexName);
-        void SetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.ReadOnlySpan<float> vector);
-        bool TryGetIndex(string name, out Quiver.Core.VectorIndexSpec spec);
-        bool TryGetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.Span<float> destination);
-    }
-    public sealed class InMemoryVectorStore : Quiver.Core.IVectorStore
-    {
-        public InMemoryVectorStore() { }
-        public void CreateVectorIndex(Quiver.Core.VectorIndexSpec spec) { }
-        public void DropVectorIndex(string name) { }
-        public Quiver.Core.VectorSearchCursor KnnSearch(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.VectorSearchOptions? options = null) { }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorSearchCursor> KnnSearchBatch(string indexName, System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>> queries, int k, Quiver.Core.VectorSearchOptions? options = null) { }
-        public Quiver.Core.VectorSearchCursor KnnSearchFiltered(string indexName, System.ReadOnlySpan<float> query, int k, Quiver.Core.EntityCandidateSet candidates, Quiver.Core.VectorSearchOptions? options = null) { }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorIndexSpec> ListVectorIndexes() { }
-        public void RemoveVector(Quiver.Core.EntityKind kind, long entityId, string indexName) { }
-        public void SetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.ReadOnlySpan<float> vector) { }
-        public bool TryGetIndex(string name, out Quiver.Core.VectorIndexSpec spec) { }
-        public bool TryGetVector(Quiver.Core.EntityKind kind, long entityId, string indexName, System.Span<float> destination) { }
-    }
-    public sealed class JsonFileVectorCatalog : Quiver.Core.IVectorCatalog
-    {
-        public JsonFileVectorCatalog(string path) { }
-        public void CreateIndex(Quiver.Core.VectorIndexSpec spec) { }
-        public bool DeleteTask(Quiver.Core.EmbeddingTaskKey key) { }
-        public bool DropIndex(string name) { }
-        public Quiver.Core.EmbeddingTaskRecord? GetTask(Quiver.Core.EmbeddingTaskKey key) { }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Core.VectorIndexSpec> ListIndexes() { }
-        public System.Collections.Generic.IEnumerable<Quiver.Core.EmbeddingTaskRecord> ListTasks(string? indexName = null) { }
-        public bool TryGetIndex(string name, out Quiver.Core.VectorIndexSpec spec) { }
-        public void UpsertTask(Quiver.Core.EmbeddingTaskRecord record) { }
     }
     public readonly struct LabelId : System.IEquatable<Quiver.Core.LabelId>
     {
@@ -1379,28 +1299,6 @@ namespace Quiver.Core
     {
         public VectorException(string message, System.Exception? inner = null) { }
     }
-    public enum VectorIndexKind : byte
-    {
-        HnswFlat = 0,
-        FlatOnly = 1,
-    }
-    public sealed class VectorIndexSpec : System.IEquatable<Quiver.Core.VectorIndexSpec>
-    {
-        public VectorIndexSpec(string Name, Quiver.Core.EntityKind EntityKind, Quiver.Core.PropertyKeyId SourcePropertyKeyId, int Dimensions, Quiver.Core.DistanceMetric Metric, string ProviderId, string? NormalizationProfile = null, Quiver.Core.VectorIndexKind IndexKind = 0, int HnswM = 32, int HnswMMax0 = 64, int HnswMaxLayers = 8, int HnswEfConstruction = 400, Quiver.Core.VectorElementType ElementType = 0) { }
-        public int Dimensions { get; init; }
-        public Quiver.Core.VectorElementType ElementType { get; init; }
-        public Quiver.Core.EntityKind EntityKind { get; init; }
-        public int HnswEfConstruction { get; init; }
-        public int HnswM { get; init; }
-        public int HnswMMax0 { get; init; }
-        public int HnswMaxLayers { get; init; }
-        public Quiver.Core.VectorIndexKind IndexKind { get; init; }
-        public Quiver.Core.DistanceMetric Metric { get; init; }
-        public string Name { get; init; }
-        public string? NormalizationProfile { get; init; }
-        public string ProviderId { get; init; }
-        public Quiver.Core.PropertyKeyId SourcePropertyKeyId { get; init; }
-    }
     public abstract class VectorSearchCursor : System.IDisposable
     {
         protected VectorSearchCursor() { }
@@ -1416,9 +1314,8 @@ namespace Quiver.Core
     }
     public readonly struct VectorSearchResult : System.IEquatable<Quiver.Core.VectorSearchResult>
     {
-        public VectorSearchResult(Quiver.Core.EntityKind EntityKind, long EntityId, float Score) { }
-        public long EntityId { get; init; }
-        public Quiver.Core.EntityKind EntityKind { get; init; }
+        public VectorSearchResult(Quiver.Core.EntityRef Owner, float Score) { }
+        public Quiver.Core.EntityRef Owner { get; init; }
         public float Score { get; init; }
     }
     public readonly struct VertexId : System.IEquatable<Quiver.Core.VertexId>

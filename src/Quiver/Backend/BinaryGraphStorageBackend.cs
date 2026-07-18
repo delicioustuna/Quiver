@@ -1,5 +1,6 @@
 using Quiver.Core;
 using Quiver.Index;
+using Quiver.Index.Vector;
 using Quiver.Logical;
 using Quiver.Maintenance;
 using Quiver.Storage;
@@ -15,12 +16,12 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     internal static Action<CompactAdjacencyPhase>? CompactAdjacencyPhaseInjector;
     internal static Action? ScalarIndexArtifactBuiltForTest;
     internal static Action<ScalarIndexRebuildPhase>? ScalarIndexRebuildPhaseInjector;
+    internal static Action? VectorSegmentBuildStartedForTest;
+    internal static Action? VectorSegmentBuildCompletedForTest;
+    internal static Action<TimeSpan>? VectorSegmentPublishMeasuredForTest;
 
-    private readonly IVectorStore _vectors;
-    // db.Vectors の公開面。tx 外のミューテーションを autocommit tx で包む
-    // (公開面の mutation は autocommit transaction を開始する)。生の _vectors は
-    // access methods / tx 配下 SetVector の委譲先として内部で使い続ける。
-    private IVectorStore? _vectorsFacade;
+    private readonly IVectorDefinitionCatalog _vectorDefinitions;
+    private readonly VectorSegmentIndex _vectorSegments = new();
     private readonly PageManager _pageManager;
     private readonly IWriteAheadLog _wal;
     private readonly VersionedVertexStore _vertexStore;
@@ -55,6 +56,11 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     private Task? _scalarIndexRebuildTask;
     private int _scalarIndexRebuildRequested;
     private Exception? _scalarIndexRebuildError;
+    private readonly CancellationTokenSource _vectorSegmentMergeCancellation = new();
+    private readonly object _vectorSegmentMergeSync = new();
+    private Task? _vectorSegmentMergeTask;
+    private int _vectorSegmentMergeRequested;
+    private Exception? _vectorSegmentMergeError;
 
     internal BinaryGraphStorageBackend(
         string containerPath,
@@ -73,7 +79,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         IAdjacencySegmentStore? adjStore,
         TransactionManager txManager,
         BinaryGraphAccessMethods access,
-        IVectorStore vectors,
+        IVectorDefinitionCatalog vectorDefinitions,
         ColumnManager columnManager,
         ICoMembershipBlockStore? coMembershipStore = null,
         LabelVertexIndex? labelIndex = null,
@@ -88,7 +94,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _logicalSink = logicalSink;
         _containerPath = containerPath;
         _container = container;
-        _vectors = vectors;
+        _vectorDefinitions = vectorDefinitions;
         _pageManager = pageManager;
         _wal = wal;
         _vertexStore = vertexStore;
@@ -110,8 +116,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _schema = new SchemaApi(_labelTokens, _edgeTypeTokens, _propKeyTokens, _indexManager,
             nexusTypes: _nexusTypeTokens,
             roles: _roleTokens,
+            vectorDefinitions: _vectorDefinitions,
             acquireMutationLease: _txManager.AcquireMutationLease,
             acquireOwnedMutationLease: owner => _txManager.AcquireMutationLease(owner));
+        _vectorSegments.MergeRequested = QueueVectorSegmentMerge;
         // index manager と label index を DiagnosticsApi に渡して
         // CheckIndexConsistency / RepairIndexes が機能するようにする。
         // TransactionManager を渡し、CurrentCheckpointThresholdBytes /
@@ -371,12 +379,26 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     internal long CoMembershipReadCountForTest
         => (_coMembershipStore as CoMembershipBlockStore)?.ReadCount ?? 0;
     internal Exception? ScalarIndexRebuildErrorForTest => _scalarIndexRebuildError;
+    internal Exception? VectorSegmentMergeErrorForTest => _vectorSegmentMergeError;
+    internal void WaitForVectorSegmentMergeForTest()
+    {
+        while (true)
+        {
+            Task? task;
+            lock (_vectorSegmentMergeSync)
+                task = _vectorSegmentMergeTask;
+            task?.GetAwaiter().GetResult();
+            lock (_vectorSegmentMergeSync)
+            {
+                if (_vectorSegmentMergeTask == task
+                    && Volatile.Read(ref _vectorSegmentMergeRequested) == 0)
+                    return;
+            }
+        }
+    }
     internal IVertexIncidenceHeadStore VertexIncidenceHeadStoreForTest => _txManager.VertexIncidenceHeadStore;
     public IGraphAccessMethods Access => _access;
     public BulkLoadCapabilities BulkLoad => _bulkLoad;
-    public IVectorStore Vectors => _vectorsFacade ??= new AutocommitVectorStore(
-        _vectors, BeginWriteTransaction);
-
     public IReadTransaction BeginReadTransaction()
         => new ReadTransaction(WrapGraphTransaction(_txManager.BeginRead(), readOnly: true));
 
@@ -403,8 +425,99 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             readOnly,
             readOnly ? null : _logicalSink,
             _columnManager,
-            _vectors,
+            _vectorSegments,
             _nexusMergeIndex);
+    }
+
+    private void QueueVectorSegmentMerge()
+    {
+        if (_disposed)
+            return;
+        Volatile.Write(ref _vectorSegmentMergeRequested, 1);
+        lock (_vectorSegmentMergeSync)
+        {
+            if (_vectorSegmentMergeTask is { IsCompleted: false })
+                return;
+            _vectorSegmentMergeTask = Task.Run(() =>
+            {
+                try
+                {
+                    MergeVectorSegments(_vectorSegmentMergeCancellation.Token);
+                }
+                finally
+                {
+                    lock (_vectorSegmentMergeSync)
+                        _vectorSegmentMergeTask = null;
+                    if (!_disposed
+                        && Volatile.Read(ref _vectorSegmentMergeRequested) != 0)
+                        QueueVectorSegmentMerge();
+                }
+            });
+        }
+    }
+
+    private void MergeVectorSegments(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested
+                   && Interlocked.Exchange(ref _vectorSegmentMergeRequested, 0) != 0)
+            {
+                IReadOnlyList<VectorSegmentBuildSource> sources =
+                    _vectorSegments.CaptureBuildSources();
+                foreach (VectorSegmentBuildSource source in sources)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    IReadOnlyList<VectorSegmentMutation> entries;
+                    using (ITransaction read = _txManager.BeginRead())
+                    {
+                        entries = VectorSegmentIndex.ScanPrimary(
+                            read,
+                            source.Definition,
+                            _labelTokens,
+                            _edgeTypeTokens,
+                            _nexusTypeTokens,
+                            _propKeyTokens);
+                    }
+
+                    // artifact構築はread snapshotの内容だけを使い、writer leaseを保持しない。
+                    VectorSegmentBuildStartedForTest?.Invoke();
+                    VectorSegmentBuildArtifact artifact =
+                        VectorSegmentIndex.Build(source, entries);
+                    VectorSegmentBuildCompletedForTest?.Invoke();
+                    using ITransaction publish = _txManager.BeginWrite();
+                    var publishDuration = Stopwatch.StartNew();
+                    long publishTransactionId = publish.Id.Value;
+                    publish.OnCommitted(() =>
+                    {
+                        IndexDefinition? currentDefinition = null;
+                        if (_schema.CommittedCatalog.TryGetIndex(
+                                source.IndexName,
+                                out IndexInfo current))
+                            currentDefinition = current.Definition;
+                        if (!_vectorSegments.TryPublishMerge(
+                                publishTransactionId,
+                                artifact,
+                                currentDefinition))
+                        {
+                            artifact.Segment.Dispose();
+                            Volatile.Write(ref _vectorSegmentMergeRequested, 1);
+                        }
+                    });
+                    publish.Commit();
+                    publishDuration.Stop();
+                    VectorSegmentPublishMeasuredForTest?.Invoke(
+                        publishDuration.Elapsed);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _vectorSegmentMergeError = ex;
+        }
     }
 
     /// <summary>
@@ -680,12 +793,20 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         if (_disposed) return;
         _disposed = true;
         _scalarIndexRebuildCancellation.Cancel();
+        _vectorSegmentMergeCancellation.Cancel();
         Task? rebuildTask;
+        Task? vectorMergeTask;
         lock (_scalarIndexRebuildSync)
             rebuildTask = _scalarIndexRebuildTask;
+        lock (_vectorSegmentMergeSync)
+            vectorMergeTask = _vectorSegmentMergeTask;
         try { rebuildTask?.GetAwaiter().GetResult(); }
         catch (OperationCanceledException) { }
+        try { vectorMergeTask?.GetAwaiter().GetResult(); }
+        catch (OperationCanceledException) { }
         _scalarIndexRebuildCancellation.Dispose();
+        _vectorSegmentMergeCancellation.Dispose();
+        _vectorSegments.Dispose();
 
         // クリーン終了。アクティブ tx が無ければ全データを graph.quiver へ
         // durable 化し、WAL サイドカーを削除対象にする (静止時は graph.quiver のみ)。

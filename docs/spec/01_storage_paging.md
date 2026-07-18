@@ -68,7 +68,8 @@ commit が `PageImage` を追記するときに割り当てた LSN を WAL paylo
 各テナントはカタログが割り当てる `fileKind` バイトで識別される。
 
 Primary vector payload の metadata と blob は固定テナント 29、30 に分離する。
-ベクトルインデックスごとの payload と HNSW テナントは再構築可能な derived data であり、primary property value の正本ではない。
+vector definition catalog は target property と immutable segment policy を保持する。
+HNSW artifact と versioned manifest は primary property から再構築可能な derived data であり、primary property value の正本ではない。
 
 ### カタログ {#catalog}
 

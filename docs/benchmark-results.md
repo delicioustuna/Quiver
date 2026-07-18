@@ -49,7 +49,7 @@ payload cache 導入後の再測値。既定値 200 は変更しない。低 ef 
 
 ### payload slab cache
 
-同一の persistent HNSW を `VectorCacheBudgetBytes=0` と 64 MiB で開き直し、
+旧 mutable HNSW 実装を cache 無効と 64 MiB で開き直し、
 固定 query の warm steady-state を比較した。cache は全 index で予算を共有する約 64 KiB の
 遅延確保 slab で、hit 時は payload page pin と vector の scratch copy を行わない。
 
@@ -79,7 +79,7 @@ dotnet run -c Release --project benchmarks\Quiver.Benchmarks -- --payload-cache 
 | HNSW KNN（N=2k、dim=384、k=10） | 1,632 (1.00×) | 1,573 (0.96×) | 1,615 (0.99×) | 1,648 (1.01×) |
 | BM25（N=2k、k=10） | 259 (1.00×) | 297 (1.15×) | 411 (1.58×) | 568 (2.19×) |
 
-KNN は `PersistentVectorStore._gate` によりほぼ完全に直列化されている。1-hop は
+当時の KNN 実装は store-wide gate によりほぼ完全に直列化されている。1-hop は
 `PagedFile` の resident pin/unpin も単一 pool lock を通るため、thread 数を増やすほど退行した。
 
 ### index 単位 ReaderWriterLockSlim spike

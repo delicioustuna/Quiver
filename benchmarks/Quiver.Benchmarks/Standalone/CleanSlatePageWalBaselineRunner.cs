@@ -330,16 +330,14 @@ public static class CleanSlatePageWalBaselineRunner
             var random = new Random(VectorRecallCorpus.Seed);
             var corpus = new List<float[]>(vectorCount);
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
-            db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-                VectorIndex,
-                EntityKind.Vertex,
-                db.EditSchema(schema => schema.GetOrCreatePropertyKey("embedding")),
-                VectorRecallCorpus.RecallDimensions,
-                DistanceMetric.Cosine,
-                "clean-slate QUIVER-SW page-WAL baseline",
-                HnswM: 32,
-                HnswMMax0: 64,
-                HnswEfConstruction: 400));
+            db.EditSchema(schema =>
+            {
+                schema.GetOrCreatePropertyKey("embedding");
+                schema.CreateIndex(new VectorIndexDefinition(
+                    VectorIndex,
+                    new PropertyTarget(PropertyOwnerKind.Vertex, "embedding", "Doc"),
+                    VectorRecallCorpus.RecallDimensions));
+            });
 
             var build = Stopwatch.StartNew();
             using (var tx = db.BeginWriteTransaction())
@@ -349,7 +347,7 @@ public static class CleanSlatePageWalBaselineRunner
                     var vector = VectorRecallCorpus.NextVector(random, VectorRecallCorpus.RecallDimensions);
                     corpus.Add(vector);
                     var vertex = tx.CreateVertex("Doc");
-                    tx.SetVector(EntityKind.Vertex, vertex.Value, VectorIndex, vector);
+                    tx.SetVectorProperty(EntityRef.From(vertex), "embedding", vector);
                 }
                 tx.Commit();
             }
@@ -380,7 +378,8 @@ public static class CleanSlatePageWalBaselineRunner
         IReadOnlyList<float[]> corpus,
         IReadOnlyList<float[]> queries)
     {
-        using (var warmup = db.Vectors.KnnSearch(VectorIndex, queries[0], VectorRecallCorpus.K))
+        using (var warmupTx = db.BeginReadTransaction())
+        using (var warmup = warmupTx.KnnSearch(VectorIndex, queries[0], VectorRecallCorpus.K))
             while (warmup.MoveNext()) { }
 
         double recallTotal = 0;
@@ -389,10 +388,11 @@ public static class CleanSlatePageWalBaselineRunner
         {
             var approximate = new List<long>(VectorRecallCorpus.K);
             var sw = Stopwatch.StartNew();
-            using (var cursor = db.Vectors.KnnSearch(VectorIndex, query, VectorRecallCorpus.K))
+            using (var tx = db.BeginReadTransaction())
+            using (var cursor = tx.KnnSearch(VectorIndex, query, VectorRecallCorpus.K))
             {
                 while (cursor.MoveNext())
-                    approximate.Add(cursor.Current.EntityId);
+                    approximate.Add(cursor.Current.Owner.Sequence);
             }
             sw.Stop();
             latencies.Add(sw.Elapsed.TotalMilliseconds);

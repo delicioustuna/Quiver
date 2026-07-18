@@ -88,10 +88,12 @@ internal sealed class OperatorBenchSeed : IDisposable
         KnowsType = Db.EditSchema(schema => schema.GetOrCreateEdgeType("KNOWS"));
         ValueIndex = Db.Schema.ListIndexes()
             .Single(index => index.Name == "idx_value")
-            .Definition;
+            .Definition as ScalarIndexDefinition
+            ?? throw new InvalidOperationException("idx_value is not a scalar index.");
         NameIndex = Db.Schema.ListIndexes()
             .Single(index => index.Name == "idx_name")
-            .Definition;
+            .Definition as ScalarIndexDefinition
+            ?? throw new InvalidOperationException("idx_name is not a scalar index.");
 
         ReadTx = Db.BeginReadTransaction();
     }

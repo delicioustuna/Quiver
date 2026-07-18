@@ -94,12 +94,27 @@ public sealed class ReadTransaction : IReadTransaction, IReadTransactionInternal
         => _core.RangeIndex(indexName, in from, fromInclusive, in to, toInclusive);
 
     /// <inheritdoc />
-    public bool TryGetVector(
-        EntityKind kind,
-        long entityId,
-        string indexName,
+    public bool TryGetVectorProperty(
+        EntityRef owner,
+        string propertyKey,
         Span<float> destination)
-        => _core.TryGetVector(kind, entityId, indexName, destination);
+        => _core.TryGetVectorProperty(owner, propertyKey, destination);
+
+    /// <inheritdoc />
+    public VectorSearchCursor KnnSearch(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
+        => _core.KnnSearch(indexName, query, k, options);
+
+    /// <inheritdoc />
+    public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
+        string indexName,
+        IReadOnlyList<ReadOnlyMemory<float>> queries,
+        int k,
+        VectorSearchOptions? options = null)
+        => _core.KnnSearchBatch(indexName, queries, k, options);
 
     /// <inheritdoc />
     public NexusMemberEnumerator GetMembers(NexusId nexusId, string? role = null)
@@ -247,14 +262,25 @@ public sealed class WriteTransaction : IWriteTransaction, IReadTransactionIntern
         bool toInclusive)
         => _core.RangeIndex(indexName, in from, fromInclusive, in to, toInclusive);
     /// <inheritdoc />
-    public void SetVector(EntityKind kind, long entityId, string indexName, ReadOnlySpan<float> vector)
-        => _core.SetVector(kind, entityId, indexName, vector);
+    public void SetVectorProperty(EntityRef owner, string propertyKey, ReadOnlySpan<float> vector)
+        => _core.SetVectorProperty(owner, propertyKey, vector);
     /// <inheritdoc />
-    public void RemoveVector(EntityKind kind, long entityId, string indexName)
-        => _core.RemoveVector(kind, entityId, indexName);
+    public bool TryGetVectorProperty(EntityRef owner, string propertyKey, Span<float> destination)
+        => _core.TryGetVectorProperty(owner, propertyKey, destination);
     /// <inheritdoc />
-    public bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
-        => _core.TryGetVector(kind, entityId, indexName, destination);
+    public VectorSearchCursor KnnSearch(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
+        => _core.KnnSearch(indexName, query, k, options);
+    /// <inheritdoc />
+    public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
+        string indexName,
+        IReadOnlyList<ReadOnlyMemory<float>> queries,
+        int k,
+        VectorSearchOptions? options = null)
+        => _core.KnnSearchBatch(indexName, queries, k, options);
     /// <inheritdoc />
     public NexusId CreateNexus(string type, ReadOnlySpan<NexusMember> members)
         => _core.CreateNexus(type, members);

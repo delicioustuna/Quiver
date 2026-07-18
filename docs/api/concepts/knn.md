@@ -1,60 +1,71 @@
-# KNN (Vector Search)
+# KNN ベクトル検索
 
-Quiver はベクトルストア (`IVectorStore`) を介して KNN 検索をサポートし、グラフトラバーサルとシームレスに結合できる。
+Quiver は vector を owner-bound property として保存し、read transaction の snapshot で KNN を実行する。
 
-## ベクトルインデックス作成
+## インデックスの作成
 
 ```csharp
-db.Vectors.CreateIndex(
-    name: "person_bio_v1",
-    spec: new VectorIndexSpec(
-        Dimensions: 384,
-        Metric: VectorMetric.Cosine,
-        EntityKind: EntityKind.Vertex));
+using var schema = db.BeginWriteTransaction();
+schema.EditSchema.CreateIndex(new VectorIndexDefinition(
+    "person_bio_v1",
+    new PropertyTarget(
+        PropertyOwnerKind.Vertex,
+        "bio_embedding",
+        "Person"),
+    Dimensions: 384,
+    Metric: DistanceMetric.Cosine));
+schema.Commit();
 ```
 
-## ベクトル登録
+## ベクトルの保存
 
 ```csharp
-db.Vectors.SetVector(
-    indexName: "person_bio_v1",
-    entityId: EntityId.FromVertex(personId),
-    vector: embeddingArray);
+using var write = db.BeginWriteTransaction();
+write.SetVectorProperty(
+    EntityRef.From(personId),
+    "bio_embedding",
+    embeddingArray);
+write.Commit();
 ```
 
-## KNN 検索 (生スコア付き)
+vector property はインデックスの有無に依存しない。
+index の drop と rebuild は primary value を削除しない。
+
+## スコア付き KNN
 
 ```csharp
-var hits = db.Vectors.KnnSearch(
-    indexName: "person_bio_v1",
-    query: queryVector,
+using var read = db.BeginReadTransaction();
+using VectorSearchCursor hits = read.KnnSearch(
+    "person_bio_v1",
+    queryVector,
     k: 10);
 
-foreach (var hit in hits)
-    Console.WriteLine($"{hit.EntityId}: {hit.Score}");
+while (hits.MoveNext())
+{
+    Console.WriteLine($"{hits.Current.Owner}: {hits.Current.Score}");
+}
 ```
 
 ## トラバーサルとの結合
 
-KNN スキャンをトラバーサル起点にする:
-
 ```csharp
-var top10Friends = g.Knn("person_bio_v1", queryVec, k: 10)
-                    .Out("KNOWS")
-                    .Has("active", true)
-                    .ToList();
+var top10Friends = read.Query
+    .Knn("person_bio_v1", queryVector, k: 10)
+    .Out("KNOWS")
+    .Has("active", true)
+    .ToList();
 ```
 
-## graph-first ハイブリッド
-
-グラフフィルタを先に評価し、その結果集合に対してのみ KNN を行うパターン。
+graph-first の絞り込みは typed owner identity を保持し、KNN candidate を primary property で再検証する。
 
 ```csharp
-var candidates = g.Vertices().HasLabel("Person")
-                  .Has("region", "JP")
-                  .FilterByKnn("person_bio_v1", queryVec, k: 50)
-                  .ToList();
+var candidates = read.Query
+    .Vertices()
+    .HasLabel("Person")
+    .Has("region", "JP")
+    .FilterByKnn("person_bio_v1", queryVector, k: 50)
+    .ToList();
 ```
 
-> 埋め込みベクトルの生成は利用者側の責務。`tx.SetVector(...)` に渡す `float[]` を任意の
-> 埋め込みモデル（OpenAI API / ローカル ONNX 等）で用意する。
+埋め込みの生成は利用者または `Quiver.Embedding` が担う。
+保存先は index 名ではなく vector property key で指定する。

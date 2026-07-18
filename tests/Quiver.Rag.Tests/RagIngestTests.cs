@@ -149,7 +149,8 @@ public sealed class RagIngestTests : IDisposable
     {
         var q = new float[Dim];
         q[0] = 1f;
-        using var cursor = db.Vectors.KnnSearch(indexName, q, k);
+        using var tx = db.BeginReadTransaction();
+        using var cursor = tx.KnnSearch(indexName, q, k);
         int n = 0;
         while (cursor.MoveNext()) n++;
         return n;

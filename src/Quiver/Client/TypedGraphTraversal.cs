@@ -244,7 +244,6 @@ public sealed class TypedGraphTraversal<T> where T : IGraphVertex<T>
     /// <paramref name="oversample"/> が <c>null</c> (既定) なら全候補を brute-force スコアリングする。
     /// 正の整数を指定すると、インデックスの組み込み距離で HNSW から <c>k × oversample</c> 件を
     /// プリフィルタし、その結果のみをカスタム演算子でリランクする (近似)。
-    /// <see cref="VectorIndexKind.FlatOnly"/> のインデックスでは oversample は使用できない。
     /// </para>
     /// </summary>
     /// <typeparam name="TOp">

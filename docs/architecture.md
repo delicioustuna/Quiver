@@ -34,7 +34,7 @@ Quiver（エンジン中核）
   ├─ Query Engine          論理 IR → 最適化 → 物理オペレータ
   ├─ Transaction Manager   MVCC、ロック、リカバリ、チェックポイント
   ├─ Index                 B+Tree、全文インデックス
-  ├─ Vector                永続ベクトルストア + HNSW
+  ├─ Vector                owner-bound property + immutable segment
   ├─ WAL                   Write-Ahead Log
   └─ Storage               ページ管理、バッファプール
        │

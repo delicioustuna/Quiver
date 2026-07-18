@@ -270,7 +270,8 @@ static void Demo5_IndexSearch(string dir)
         {
             var definition = tx.Schema.ListIndexes()
                 .Single(index => index.Name == "idx_name")
-                .Definition;
+                .Definition as ScalarIndexDefinition
+                ?? throw new InvalidOperationException("idx_name is not a scalar index.");
             tx.Schema.TryGetLabelId("Person", out var personLabel);
             var seek = new VertexIndexSeekOperator(
                 definition,
@@ -288,7 +289,8 @@ static void Demo5_IndexSearch(string dir)
         {
             var definition = tx.Schema.ListIndexes()
                 .Single(index => index.Name == "idx_score")
-                .Definition;
+                .Definition as ScalarIndexDefinition
+                ?? throw new InvalidOperationException("idx_score is not a scalar index.");
             tx.Schema.TryGetPropertyKeyId("score", out var scoreKey);
             tx.Schema.TryGetLabelId("Person", out var personLabel);
             var range = new VertexIndexRangeScanOperator(

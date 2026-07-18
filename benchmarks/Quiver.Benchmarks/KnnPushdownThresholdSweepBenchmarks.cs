@@ -61,10 +61,14 @@ public class KnnPushdownThresholdSweepBenchmarks
         _dir = BenchTempDir.Create("vec12");
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        var keyId = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("title"));
-        _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Vertex, keyId, Dim,
-            DistanceMetric.Cosine, "bench", null));
+        _db.EditSchema(schema =>
+        {
+            schema.GetOrCreatePropertyKey("embedding");
+            schema.CreateIndex(new VectorIndexDefinition(
+                IndexName,
+                new PropertyTarget(PropertyOwnerKind.Vertex, "embedding"),
+                Dim));
+        });
 
         int hitCount = Math.Max(1, (int)((long)N * FractionPermille / 1000));
         var hitSet = new HashSet<int>();
@@ -77,7 +81,7 @@ public class KnnPushdownThresholdSweepBenchmarks
             {
                 var n = tx.CreateVertex(hitSet.Contains(i) ? "Hit" : "Miss");
                 for (int d = 0; d < Dim; d++) buf[d] = (float)(rng.NextDouble() * 2.0 - 1.0);
-                _db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, buf);
+                tx.SetVectorProperty(EntityRef.From(n), "embedding", buf);
             }
             tx.Commit();
         }

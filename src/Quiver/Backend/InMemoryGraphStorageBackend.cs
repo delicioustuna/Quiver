@@ -14,7 +14,6 @@ internal sealed class InMemoryGraphStorageBackend(
     private readonly BinaryGraphStorageBackend _inner = inner;
 
     public IDiagnosticsApi Diagnostics => _inner.Diagnostics;
-    public IVectorStore Vectors => _inner.Vectors;
     public ITransactionManager Transactions => _inner.Transactions;
     public ISchemaCatalog SchemaCatalog => _inner.SchemaCatalog;
     internal SchemaApi SchemaApiForTesting => _inner.SchemaApiForTesting;

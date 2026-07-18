@@ -60,16 +60,6 @@ if (args.Length >= 1 && args[0] == "--single-writer-perf")
     return SingleWriterPerfRunner.Run();
 }
 
-// payload page pin と slab cache の同一 DB 比較。
-// Usage: -- --payload-cache [N] [dim] [queries]
-if (args.Length >= 1 && args[0] == "--payload-cache")
-{
-    int count = args.Length >= 2 && int.TryParse(args[1], out var n) ? n : 10_000;
-    int dimensions = args.Length >= 3 && int.TryParse(args[2], out var d) ? d : 768;
-    int queryCount = args.Length >= 4 && int.TryParse(args[3], out var q) ? q : 50;
-    return PayloadCacheRunner.Run(count, dimensions, queryCount);
-}
-
 if (args.Length >= 1 && args[0] == "--scorer-accumulator")
 {
     return ScorerAccumulatorRunner.Run();
@@ -128,6 +118,13 @@ if (args.Length >= 1 && args[0] == "--clean-slate-csr-compact-recovery-child")
 if (args.Length >= 1 && args[0] == "--clean-slate-segment-spike")
 {
     return CleanSlateFullTextVectorSegmentSpikeRunner.Run(args.Skip(1).ToArray());
+}
+
+// product vector segment build/publish gate。
+// Usage: -- --vector-segment-publish [vectors] [dimensions]
+if (args.Length >= 1 && args[0] == "--vector-segment-publish")
+{
+    return VectorSegmentPublishRunner.Run(args.Skip(1).ToArray());
 }
 
 if (args.Length >= 1 && args[0] == "--incidence-traversal")

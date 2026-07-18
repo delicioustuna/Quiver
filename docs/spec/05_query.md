@@ -106,6 +106,10 @@ co-membership（起点Vertex → 所属Nexus → 別ロールのメンバー、�
 | `KnnVertexSourceOperator` | K 近傍ベクトル検索 |
 | `FilteredKnnVertexSourceOperator` | 述語フィルタ付き KNN |
 
+KNN は read transaction の snapshot から vector definition と可視 manifest を解決する。
+logical row と filtered candidate は full typed ID を保持し、raw sequence を transaction 入力へ渡さない。
+segment candidate は primary property で owner generation、property visibility、target、payload checksum を再検証してから出力する。
+
 ## Traversal DSL {#traversal-dsl}
 
 `GraphTraversalSource` (`Quiver.Api`) は Gremlin 風の読み取り専用走査 API を提供する。

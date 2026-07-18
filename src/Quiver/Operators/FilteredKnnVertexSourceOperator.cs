@@ -4,7 +4,7 @@ using Quiver.Transactions;
 namespace Quiver.Query.Physical;
 
 /// <summary>
-/// 上流の VertexId 生成演算子を <see cref="EntityCandidateSet"/> に排出し、
+/// 上流の VertexId 生成演算子を full typed owner の集合に排出し、
 /// <see cref="IGraphAccessMethods.KnnSearchFiltered"/> でそのセット内の
 /// top-<c>k</c> ベクトルを取得する graph-first KNN 演算子。
 /// 上流は通常 <see cref="AllVerticesScanOperator"/> にラベル / プロパティフィルタを適用したもの。
@@ -52,7 +52,7 @@ internal sealed class FilteredKnnVertexSourceOperator : IPhysicalOperator
     public void Open(ITransaction tx)
     {
         _source.Open(tx);
-        var ids = new List<long>();
+        var candidates = new HashSet<EntityRef>();
         while (_source.MoveNext())
         {
             var slot = _source.Current[_sourceVertexColumn];
@@ -61,10 +61,15 @@ internal sealed class FilteredKnnVertexSourceOperator : IPhysicalOperator
 
             using var vertex = tx.Vertices.Read(new VertexId(slot.LongValue));
             if (vertex.InUse)
-                ids.Add(vertex.Id.Sequence);
+                candidates.Add(EntityRef.From(vertex.Id));
         }
-        var candidates = new EntityCandidateSet(EntityKind.Vertex, ids);
-        _cursor = tx.Access.KnnSearchFiltered(_indexName, _query, _k, candidates, _options);
+        _cursor = tx.Access.KnnSearchFiltered(
+            tx,
+            _indexName,
+            _query,
+            _k,
+            candidates,
+            _options);
     }
 
     public bool MoveNext()
@@ -73,7 +78,11 @@ internal sealed class FilteredKnnVertexSourceOperator : IPhysicalOperator
         {
             var hit = _cursor.Current;
             if (hit.EntityKind != EntityKind.Vertex) continue;
-            _buffer[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = hit.EntityId };
+            _buffer[0] = new TupleSlot
+            {
+                Type = TupleSlotType.VertexId,
+                LongValue = hit.Owner.Value,
+            };
             var s = Statistics;
             s.RowsProduced++;
             Statistics = s;

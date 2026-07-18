@@ -21,11 +21,6 @@ public interface IGraphStorageBackend : IDisposable
     IDiagnosticsApi Diagnostics { get; }
 
     /// <summary>
-    /// <see cref="IGraphAccessMethods.KnnSearch"/> が利用するベクトルストア
-    /// </summary>
-    IVectorStore Vectors { get; } // ユーザにも <c>CreateVectorIndex</c> / <c>SetVector</c> 用に公開される。
-
-    /// <summary>
     /// backend 固有の snapshot reader を開始する。
     /// </summary>
     IReadTransaction BeginReadTransaction();

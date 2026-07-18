@@ -202,7 +202,7 @@ MCP クライアント (LM Studio / Claude)
     │  stdio (JSON-RPC)
     ▼
 Quiver.Mcp プロセス
-    ├── schema ツール ──→ ISchemaCatalog / IVectorStore
+    ├── schema ツール ──→ ISchemaCatalog / IndexDefinition
     └── traverse ツール ─→ IReadTransaction
                            IChunkEmbedder (vector 検索時のみ)
     │

@@ -9,6 +9,8 @@ namespace Quiver.Embedding;
 /// </summary>
 public sealed class TextEmbeddingPipelineOptions
 {
+    /// <summary>task metadata に記録する正規化プロファイル名。</summary>
+    public string NormalizationProfile { get; init; } = "default";
     /// <summary>パイプラインキューの容量。既定 10000。</summary>
     public int QueueCapacity { get; init; } = 10_000;
 
@@ -39,8 +41,8 @@ public enum BackpressureMode : byte
 /// </summary>
 public sealed record EmbeddingScanSpec
 {
-    /// <summary>バックフィル対象のベクトルインデックス名。</summary>
-    public required string TargetIndexName { get; init; }
+    /// <summary>生成したvectorを書き込むプロパティ名。</summary>
+    public required string TargetPropertyName { get; init; }
     /// <summary>source-text を保持するプロパティ名。</summary>
     public required string SourcePropertyName { get; init; }
     /// <summary>走査対象のエンティティ種別。</summary>

@@ -139,10 +139,10 @@ public sealed class QueryExecutionService
             while (cursor.MoveNext())
             {
                 var hit = cursor.Current;
-                if (hit.EntityKind == EntityKind.Vertex)
-                    vertexIds.Add(new VertexId(hit.EntityId));
-                scores[hit.EntityId] = hit.Score;
-                rows.Add([hit.EntityKind.ToString(), hit.EntityId, hit.Score]);
+                if (hit.Owner.Kind == EntityKind.Vertex)
+                    vertexIds.Add(new VertexId(hit.Owner.Value));
+                scores[hit.Owner.Value] = hit.Score;
+                rows.Add([hit.Owner.Kind.ToString(), hit.Owner.Value, hit.Score]);
             }
         }
 
@@ -178,9 +178,9 @@ public sealed class QueryExecutionService
             {
                 if (item is VectorSearchResult vsr)
                 {
-                    if (vsr.EntityKind == EntityKind.Vertex)
-                        vertexIds.Add(new VertexId(vsr.EntityId));
-                    scores[vsr.EntityId] = vsr.Score;
+                    if (vsr.Owner.Kind == EntityKind.Vertex)
+                        vertexIds.Add(new VertexId(vsr.Owner.Value));
+                    scores[vsr.Owner.Value] = vsr.Score;
                 }
             }
 
@@ -188,7 +188,7 @@ public sealed class QueryExecutionService
             var vsrRows = items.Select(x =>
             {
                 if (x is VectorSearchResult r)
-                    return (IReadOnlyList<object?>)[r.EntityKind.ToString(), r.EntityId, r.Score];
+                    return (IReadOnlyList<object?>)[r.Owner.Kind.ToString(), r.Owner.Value, r.Score];
                 return (IReadOnlyList<object?>)[null, null, null];
             }).ToList();
 
