@@ -69,27 +69,6 @@ double hitRatio = (double)s.BufferPoolHits / (s.BufferPoolHits + s.BufferPoolMis
 
 ---
 
-## Vector payload slab cache (`VectorCacheBudgetBytes`)
-
-既定 64 MB。全 vector index で共有する上限で、HNSW 距離計算時の payload page pin と
-ベクトルコピーを避ける。約 64 KiB の slab を seq range ごとに遅延確保するため、
-削除や世代混在で seq が疎でも単一の巨大配列は確保しない。
-
-```csharp
-var options = new QuiverDatabaseOptions
-{
-    VectorCacheBudgetBytes = 128L * 1024 * 1024,
-};
-```
-
-- vector 検索が主要 workload で RAM に余裕があれば、hot vector 集合が収まるまで増やす。
-- 複数 index の合計予算なので、index 数を増やしても指定値を超えて常駐しない。
-- 0 以下で無効。予算超過時は永続ページへフォールバックし、検索結果は変わらない。
-- legacy 構築グラフの N=20k / dim=768 で 2.76×、新既定の N=10k で 2.07×。詳細は
-  [payload slab cache](../benchmark-results.md#payload-slab-cache) を参照。
-
----
-
 ## KNN 探索幅 (`VectorSearchOptions`)
 
 HNSW の検索精度とレイテンシは `VectorSearchOptions.EfSearch` で調整できる。
@@ -102,8 +81,8 @@ var searchOptions = new VectorSearchOptions
     FilteredOversampleFactor = 8,
 };
 
-using var cursor = db.Vectors.KnnSearch("embedding", query, k: 10, searchOptions);
-var batch = db.Vectors.KnnSearchBatch("embedding", queries, k: 10, searchOptions);
+using var cursor = tx.KnnSearch("embedding", query, k: 10, searchOptions);
+var batch = tx.KnnSearchBatch("embedding", queries, k: 10, searchOptions);
 
 var traversal = tx.Query
     .Knn("embedding", query, k: 10, searchOptions);

@@ -98,14 +98,12 @@ public sealed class TransactionRuntimeContractTests : IDisposable
     }
 
     [Fact]
-    public void Vector_autocommit_mutations_use_writer_gate()
+    public void Vector_schema_mutations_use_writer_gate()
     {
         using var db = QuiverDatabase.Open(_path, new QuiverDatabaseOptions
         {
             EnforceExclusiveWriter = true,
         });
-        var keyId = db.EditSchema(schema => schema.GetOrCreatePropertyKey("embedding"));
-
         using var first = db.BeginWriteTransaction();
 
         Exception? error = null;
@@ -113,13 +111,13 @@ public sealed class TransactionRuntimeContractTests : IDisposable
         {
             try
             {
-                db.Vectors.CreateVectorIndex(new VectorIndexSpec(
+                using var second = db.BeginWriteTransaction();
+                second.EditSchema.CreateIndex(new VectorIndexDefinition(
                     "held_writer_vectors",
-                    EntityKind.Vertex,
-                    keyId,
+                    new PropertyTarget(PropertyOwnerKind.Vertex, "embedding"),
                     Dimensions: 4,
-                    DistanceMetric.Cosine,
-                    ProviderId: "test"));
+                    Metric: DistanceMetric.Cosine));
+                second.Commit();
             }
             catch (Exception ex)
             {

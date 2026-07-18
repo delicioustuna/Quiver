@@ -87,11 +87,10 @@ public sealed class ApplyDyadicOperatorTests
     {
         VertexId vertexId = default;
         using var fx = CreateFixtureWithVectors(1, tag: "dyadic_single_dot",
-            seedVectors: (db, ids) =>
+            seedVectors: (tx, ids) =>
             {
                 vertexId = ids[0];
-                db.Vectors.SetVector(EntityKind.Vertex, ids[0].Value, VecIndex,
-                    [1f, 0f, 0f, 0f]);
+                tx.SetVectorProperty(EntityRef.From(ids[0]), VecIndex, [1f, 0f, 0f, 0f]);
             });
 
         using var tx = fx.Db.BeginWriteTransaction();
@@ -112,17 +111,14 @@ public sealed class ApplyDyadicOperatorTests
     {
         var ids = new VertexId[3];
         using var fx = CreateFixtureWithVectors(3, tag: "dyadic_dot_topk",
-            seedVectors: (db, vertexIds) =>
+            seedVectors: (tx, vertexIds) =>
             {
                 Array.Copy(vertexIds, ids, 3);
                 // [1,0,0,0] に対する内積が異なるベクトルを用意する。
                 // vertex0: dot=0.5, vertex1: dot=1.0, vertex2: dot=0.3
-                db.Vectors.SetVector(EntityKind.Vertex, vertexIds[0].Value, VecIndex,
-                    [0.5f, 0f, 0f, 0f]);
-                db.Vectors.SetVector(EntityKind.Vertex, vertexIds[1].Value, VecIndex,
-                    [1.0f, 0f, 0f, 0f]);
-                db.Vectors.SetVector(EntityKind.Vertex, vertexIds[2].Value, VecIndex,
-                    [0.3f, 0f, 0f, 0f]);
+                tx.SetVectorProperty(EntityRef.From(vertexIds[0]), VecIndex, [0.5f, 0f, 0f, 0f]);
+                tx.SetVectorProperty(EntityRef.From(vertexIds[1]), VecIndex, [1.0f, 0f, 0f, 0f]);
+                tx.SetVectorProperty(EntityRef.From(vertexIds[2]), VecIndex, [0.3f, 0f, 0f, 0f]);
             });
 
         using var tx = fx.Db.BeginWriteTransaction();
@@ -147,15 +143,13 @@ public sealed class ApplyDyadicOperatorTests
     {
         var ids = new VertexId[2];
         using var fx = CreateFixtureWithVectors(2, tag: "dyadic_cosine",
-            seedVectors: (db, vertexIds) =>
+            seedVectors: (tx, vertexIds) =>
             {
                 Array.Copy(vertexIds, ids, 2);
                 // vertex0 はクエリと同じ方向なのでコサイン類似度は 1.0。
-                db.Vectors.SetVector(EntityKind.Vertex, vertexIds[0].Value, VecIndex,
-                    [1f, 0f, 0f, 0f]);
+                tx.SetVectorProperty(EntityRef.From(vertexIds[0]), VecIndex, [1f, 0f, 0f, 0f]);
                 // vertex1 はクエリと直交するのでコサイン類似度は 0.0。
-                db.Vectors.SetVector(EntityKind.Vertex, vertexIds[1].Value, VecIndex,
-                    [0f, 1f, 0f, 0f]);
+                tx.SetVectorProperty(EntityRef.From(vertexIds[1]), VecIndex, [0f, 1f, 0f, 0f]);
             });
 
         using var tx = fx.Db.BeginWriteTransaction();
@@ -177,15 +171,13 @@ public sealed class ApplyDyadicOperatorTests
     {
         var ids = new VertexId[2];
         using var fx = CreateFixtureWithVectors(2, tag: "dyadic_euclidean",
-            seedVectors: (db, vertexIds) =>
+            seedVectors: (tx, vertexIds) =>
             {
                 Array.Copy(vertexIds, ids, 2);
                 // vertex0 はクエリに近いためユークリッド距離が小さい。
-                db.Vectors.SetVector(EntityKind.Vertex, vertexIds[0].Value, VecIndex,
-                    [1f, 0f, 0f, 0f]);
+                tx.SetVectorProperty(EntityRef.From(vertexIds[0]), VecIndex, [1f, 0f, 0f, 0f]);
                 // vertex1 はクエリから遠いためユークリッド距離が大きい。
-                db.Vectors.SetVector(EntityKind.Vertex, vertexIds[1].Value, VecIndex,
-                    [0f, 0f, 0f, 1f]);
+                tx.SetVectorProperty(EntityRef.From(vertexIds[1]), VecIndex, [0f, 0f, 0f, 1f]);
             });
 
         using var tx = fx.Db.BeginWriteTransaction();
@@ -209,14 +201,14 @@ public sealed class ApplyDyadicOperatorTests
     {
         var ids = new VertexId[5];
         using var fx = CreateFixtureWithVectors(5, tag: "dyadic_klimit",
-            seedVectors: (db, vertexIds) =>
+            seedVectors: (tx, vertexIds) =>
             {
                 Array.Copy(vertexIds, ids, 5);
                 for (int i = 0; i < 5; i++)
                 {
                     var vec = new float[Dim];
                     vec[0] = (i + 1) * 0.1f;
-                    db.Vectors.SetVector(EntityKind.Vertex, vertexIds[i].Value, VecIndex, vec);
+                    tx.SetVectorProperty(EntityRef.From(vertexIds[i]), VecIndex, vec);
                 }
             });
 
@@ -238,14 +230,14 @@ public sealed class ApplyDyadicOperatorTests
     {
         var ids = new VertexId[3];
         using var fx = CreateFixtureWithVectors(3, tag: "dyadic_stats",
-            seedVectors: (db, vertexIds) =>
+            seedVectors: (tx, vertexIds) =>
             {
                 Array.Copy(vertexIds, ids, 3);
                 for (int i = 0; i < 3; i++)
                 {
                     var vec = new float[Dim];
                     vec[i % Dim] = 1f;
-                    db.Vectors.SetVector(EntityKind.Vertex, vertexIds[i].Value, VecIndex, vec);
+                    tx.SetVectorProperty(EntityRef.From(vertexIds[i]), VecIndex, vec);
                 }
             });
 
@@ -267,11 +259,10 @@ public sealed class ApplyDyadicOperatorTests
     {
         var ids = new VertexId[1];
         using var fx = CreateFixtureWithVectors(1, tag: "dyadic_nan",
-            seedVectors: (db, vertexIds) =>
+            seedVectors: (tx, vertexIds) =>
             {
                 Array.Copy(vertexIds, ids, 1);
-                db.Vectors.SetVector(EntityKind.Vertex, vertexIds[0].Value, VecIndex,
-                    [1f, 0f, 0f, 0f]);
+                tx.SetVectorProperty(EntityRef.From(vertexIds[0]), VecIndex, [1f, 0f, 0f, 0f]);
             });
 
         using var tx = fx.Db.BeginWriteTransaction();
@@ -295,7 +286,7 @@ public sealed class ApplyDyadicOperatorTests
     private static OperatorTestFixture CreateFixtureWithVectors(
         int vertexCount,
         string tag,
-        Action<QuiverDatabase, VertexId[]>? seedVectors = null)
+        Action<IWriteTransaction, VertexId[]>? seedVectors = null)
     {
         var ids = new VertexId[vertexCount];
         var fx = OperatorTestFixture.Open(tx =>
@@ -306,13 +297,22 @@ public sealed class ApplyDyadicOperatorTests
 
         if (vertexCount > 0 || seedVectors is not null)
         {
-            var keyId = fx.EditSchema(schema => schema.GetOrCreatePropertyKey(VecIndex));
-            fx.Db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-                VecIndex, EntityKind.Vertex, keyId, Dim,
-                DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly));
+            fx.EditSchema(schema =>
+            {
+                schema.GetOrCreatePropertyKey(VecIndex);
+                schema.CreateIndex(new VectorIndexDefinition(
+                    VecIndex,
+                    new PropertyTarget(PropertyOwnerKind.Vertex, VecIndex, "Sensor"),
+                    Dim));
+            });
         }
 
-        seedVectors?.Invoke(fx.Db, ids);
+        if (seedVectors is not null)
+        {
+            using var write = fx.Db.BeginWriteTransaction();
+            seedVectors(write, ids);
+            write.Commit();
+        }
         return fx;
     }
 

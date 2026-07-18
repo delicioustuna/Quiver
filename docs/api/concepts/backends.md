@@ -27,6 +27,6 @@ using var db = QuiverDatabase.Open(
 
 ## バックエンドのケイパビリティ
 
-- `IGraphStorageBackend.Vectors` — ベクトルストア (binary backend は永続化対応)
+- transaction-scoped KNN と vector property は、binary と in-memory の両 backend が同じ契約で提供する
 - `IGraphStorageBackend.Access` — `IGraphAccessMethods` 抽象を経由した access path
 - `IGraphStorageBackend.BulkLoad` — `BulkLoadCapabilities` で利用可能なバルクロード経路を表す

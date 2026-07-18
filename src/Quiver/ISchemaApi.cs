@@ -29,6 +29,9 @@ public interface ISchemaCatalog
     /// <summary>登録済み scalar index definition の一覧を返す。</summary>
     IReadOnlyList<IndexInfo> ListIndexes();
 
+    /// <summary>指定名の index definition と現在の artifact 状態を返す。</summary>
+    bool TryGetIndex(string indexName, out IndexInfo info);
+
     /// <summary>登録済み全文索引の一覧を返す。</summary>
     IReadOnlyList<FullTextIndexInfo> ListFullTextIndexes();
 
@@ -164,12 +167,44 @@ public sealed record ScalarIndexDefinition(
     PropertyTarget Target,
     IndexKind Kind) : IndexDefinition(Name, Target);
 
-/// <summary>登録済み scalar index definition と artifact 状態。</summary>
+/// <summary>
+/// immutable HNSW segment の構築と flat delta の統合方針。
+/// </summary>
+/// <param name="MaximumDeltaEntries">merge を開始する flat delta entry 数。</param>
+/// <param name="MaximumSegments">検索対象 segment 数の上限。</param>
+public sealed record VectorSegmentPolicy(
+    int MaximumDeltaEntries = 4096,
+    int MaximumSegments = 16);
+
+/// <summary>vector property を検索する index definition。</summary>
+/// <param name="Name">一意な index 名。</param>
+/// <param name="Target">対象の vector property。</param>
+/// <param name="Dimensions">vector の次元数。</param>
+/// <param name="Metric">類似度の計算方法。</param>
+/// <param name="ElementType">vector element の格納形式。</param>
+/// <param name="HnswM">上位 layer の最大近傍数。</param>
+/// <param name="HnswMMax0">layer 0 の最大近傍数。</param>
+/// <param name="HnswMaxLayers">最大 layer 数。</param>
+/// <param name="HnswEfConstruction">構築時の探索幅。</param>
+/// <param name="SegmentPolicy">delta と segment の統合方針。</param>
+public sealed record VectorIndexDefinition(
+    string Name,
+    PropertyTarget Target,
+    int Dimensions,
+    DistanceMetric Metric = DistanceMetric.Cosine,
+    VectorElementType ElementType = VectorElementType.Float32,
+    int HnswM = 32,
+    int HnswMMax0 = 64,
+    int HnswMaxLayers = 8,
+    int HnswEfConstruction = 400,
+    VectorSegmentPolicy? SegmentPolicy = null) : IndexDefinition(Name, Target);
+
+/// <summary>登録済み index definition と artifact 状態。</summary>
 /// <param name="Definition">永続 definition。</param>
 /// <param name="State">artifact の lifecycle state。</param>
 /// <param name="EntryCount">診断用の entry 数。</param>
 public sealed record IndexInfo(
-    ScalarIndexDefinition Definition,
+    IndexDefinition Definition,
     IndexLifecycleState State,
     long EntryCount)
 {
@@ -179,6 +214,6 @@ public sealed record IndexInfo(
     /// <summary>対象プロパティ。</summary>
     public PropertyTarget Target => Definition.Target;
 
-    /// <summary>比較に使う scalar 型と検索モード。</summary>
-    public IndexKind Kind => Definition.Kind;
+    /// <summary>scalar index の比較方法。vector index では <c>null</c>。</summary>
+    public IndexKind? Kind => (Definition as ScalarIndexDefinition)?.Kind;
 }

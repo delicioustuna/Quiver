@@ -86,6 +86,11 @@ internal sealed class StubSchemaApi : ISchemaEditor, INexusSchemaResolver
     public void CreateIndex(IndexDefinition definition) { }
     public void DropIndex(string indexName) { }
     public IReadOnlyList<IndexInfo> ListIndexes() => [];
+    public bool TryGetIndex(string indexName, out IndexInfo info)
+    {
+        info = default!;
+        return false;
+    }
     public void CreateFullTextIndex(string indexName, string label, string propertyKey, FullTextIndexOptions? options = null) { }
     public IReadOnlyList<FullTextIndexInfo> ListFullTextIndexes() => [];
     public bool RenameLabel(string oldName, string newName) => false;

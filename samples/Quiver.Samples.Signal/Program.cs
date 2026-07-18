@@ -15,24 +15,19 @@ try
 {
     using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
 
-    // ── インデックス定義 (カスタムスコアリングでは HNSW が不要なため FlatOnly) ──
+    // ── インデックス定義 ──
     const string indexName = "Waveform";
     const int dim = 8;
-    PropertyKeyId waveformKey;
     using (var schemaTx = db.BeginWriteTransaction())
     {
-        waveformKey = schemaTx.EditSchema.GetOrCreatePropertyKey("Waveform");
+        schemaTx.EditSchema.GetOrCreatePropertyKey("Waveform");
+        schemaTx.EditSchema.CreateIndex(new VectorIndexDefinition(
+            indexName,
+            new PropertyTarget(PropertyOwnerKind.Vertex, "Waveform", "Sensor"),
+            Dimensions: dim,
+            Metric: DistanceMetric.Cosine));
         schemaTx.Commit();
     }
-
-    db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-        Name: indexName,
-        EntityKind: EntityKind.Vertex,
-        SourcePropertyKeyId: waveformKey,
-        Dimensions: dim,
-        Metric: DistanceMetric.Cosine,
-        ProviderId: "sample-static",
-        IndexKind: VectorIndexKind.FlatOnly));
 
     // ── 合成波形を持つセンサーを投入 ──
     using (var tx = db.BeginWriteTransaction())
@@ -51,7 +46,7 @@ try
             var nid = tx.CreateVertex("Sensor");
             tx.SetProperty(nid, "Site", PropertyValue.FromString(site));
             tx.SetProperty(nid, "SensorId", PropertyValue.FromString(id));
-            db.Vectors.SetVector(EntityKind.Vertex, nid.Value, indexName, wave);
+            tx.SetVectorProperty(EntityRef.From(nid), "Waveform", wave);
         }
 
         // 基準パターンとなるテンプレートを float[] プロパティとして保存する。

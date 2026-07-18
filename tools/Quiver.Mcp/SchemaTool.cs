@@ -19,14 +19,16 @@ internal static class SchemaTool
     {
         var db = ctx.Db;
         var schema = db.Schema;
-        var vectors = db.Vectors;
 
         var labels = schema.ListLabels();
         var edgeTypes = schema.ListEdgeTypes();
         var allPropKeys = schema.ListPropertyKeys();
         var indexes = schema.ListIndexes();
         var ftIndexes = schema.ListFullTextIndexes();
-        var vecIndexes = vectors.ListVectorIndexes();
+        var vecIndexes = indexes
+            .Select(static index => index.Definition)
+            .OfType<VectorIndexDefinition>()
+            .ToList();
 
         // ラベルごとにプロパティとインデックスを集約する
         var vertexMap = new Dictionary<string, VertexSchemaEntry>();
@@ -35,7 +37,8 @@ internal static class SchemaTool
 
         foreach (var idx in indexes)
         {
-            if (idx.Target.OwnerKind == PropertyOwnerKind.Vertex &&
+            if (idx.Definition is ScalarIndexDefinition &&
+                idx.Target.OwnerKind == PropertyOwnerKind.Vertex &&
                 idx.Target.Scope is { } label &&
                 vertexMap.TryGetValue(label, out var entry))
             {

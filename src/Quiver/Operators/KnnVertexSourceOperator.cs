@@ -9,7 +9,8 @@ namespace Quiver.Query.Physical;
 /// チェーンと合成できる。
 /// </summary>
 /// <remarks>
-/// スコアは現時点では公開しない。必要な場合は <c>db.Vectors.KnnSearch</c> を直接呼ぶ。
+/// スコアは現時点では公開しない。必要な場合は read transaction の
+/// <c>KnnSearch</c> を使う。
 /// <see cref="EntityKind.Edge"/> にバインドされたインデックスは拒否する —
 /// edge-KNN は需要が生じた時点で兄弟オペレータとして追加する。
 /// </remarks>
@@ -46,7 +47,7 @@ internal sealed class KnnVertexSourceOperator : IPhysicalOperator
     public void Open(ITransaction tx)
     {
         _tx = tx;
-        _cursor = tx.Access.KnnSearch(_indexName, _query, _k, _options);
+        _cursor = tx.Access.KnnSearch(tx, _indexName, _query, _k, _options);
     }
 
     public bool MoveNext()

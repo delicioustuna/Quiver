@@ -19,16 +19,25 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     // BinaryExpandCursor から Interlocked 経由でアクセスされる。
     internal long FallbackCountInternal;
 
-    private readonly IVectorStore _vectors;
+    private readonly IVectorDefinitionCatalog _vectorDefinitions;
     private readonly EdgeDeltaStore _edgeDeltas;
+    private readonly LabelTokenStore _labels;
+    private readonly EdgeTypeTokenStore _edgeTypes;
+    private readonly NexusTypeTokenStore _nexusTypes;
     // ラベル転置索引 (任意)。接続時はラベル付き ScanVertices/LabelScan が全件 Scan() から O(|L|) lookup に切り替わる。
     private LabelVertexIndex? _labelIndex;
 
     internal BinaryGraphAccessMethods(
-        IVectorStore vectors,
+        IVectorDefinitionCatalog vectorDefinitions,
+        LabelTokenStore labels,
+        EdgeTypeTokenStore edgeTypes,
+        NexusTypeTokenStore nexusTypes,
         EdgeDeltaStore? edgeDeltas = null)
     {
-        _vectors = vectors;
+        _vectorDefinitions = vectorDefinitions;
+        _labels = labels;
+        _edgeTypes = edgeTypes;
+        _nexusTypes = nexusTypes;
         _edgeDeltas = edgeDeltas ?? EdgeDeltaStore.Shared;
     }
 
@@ -49,46 +58,187 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
     public bool HasFastLabelIndex => _labelIndex is not null;
 
     /// <inheritdoc/>
-    public bool TryGetVectorIndexSpec(string indexName, out VectorIndexSpec spec)
-        => _vectors.TryGetIndex(indexName, out spec);
+    public bool TryGetVectorIndex(
+        string indexName,
+        out VectorIndexDescriptor descriptor)
+        => _vectorDefinitions.TryGet(indexName, out descriptor);
 
     /// <inheritdoc/>
-    public bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
-        => _vectors.TryGetVector(kind, entityId, indexName, destination);
+    public bool TryGetVector(
+        ITransaction transaction,
+        EntityRef owner,
+        string indexName,
+        Span<float> destination)
+    {
+        if (!_vectorDefinitions.TryGet(
+                indexName,
+                out VectorIndexDescriptor descriptor)
+            || descriptor.OwnerKind != owner.Kind
+            || destination.Length < descriptor.Dimensions)
+            return false;
+        PropertyCursor properties = owner.Kind switch
+        {
+            EntityKind.Vertex => transaction.Vertices.EnumerateProperties(
+                new VertexId(owner.Value),
+                transaction.Properties),
+            EntityKind.Edge => transaction.Edges.EnumerateProperties(
+                new EdgeId(owner.Value),
+                transaction.Properties),
+            EntityKind.Nexus => transaction.Nexuses.EnumerateProperties(
+                new NexusId(owner.Value),
+                transaction.Properties),
+            _ => default,
+        };
+        while (properties.MoveNext())
+        {
+            PropertyEntry property = properties.Current;
+            if (property.KeyId != descriptor.TargetPropertyKeyId
+                || property.Value.Type != PropertyValueType.FloatArray
+                || property.Value.FloatArrayValue.Length != descriptor.Dimensions)
+                continue;
+            property.Value.FloatArrayValue.CopyTo(destination);
+            return true;
+        }
+        return false;
+    }
 
     public VectorSearchCursor KnnSearch(
+        ITransaction transaction,
         string indexName,
         ReadOnlySpan<float> query,
         int k,
-        VectorSearchOptions? options = null)
-        => _vectors.KnnSearch(indexName, query, k, options);
-
-    // in-memory backend では gather-then-score / 単一 snapshot バッチで短絡。
-    public VectorSearchCursor KnnSearchFiltered(
-        string indexName,
-        ReadOnlySpan<float> query,
-        int k,
-        EntityCandidateSet candidates,
         VectorSearchOptions? options = null)
     {
-        if (_vectors is InMemoryVectorStore inMem)
-            return inMem.KnnSearchFiltered(indexName, query, k, candidates, options);
-        // 永続ストアも gather-then-score / scan+post-filter を直接持つ。
-        if (_vectors is Storage.Records.PersistentVectorStore persistent)
-            return persistent.KnnSearchFiltered(indexName, query, k, candidates, options);
-        return IGraphAccessMethods.KnnSearchFilteredOversample(
-            this, indexName, query, k, candidates, options);
+        options = VectorSearchOptionsValidator.Normalize(options);
+        if (!_vectorDefinitions.TryGet(
+                indexName,
+                out VectorIndexDescriptor descriptor))
+            throw new VectorException($"Vector index '{indexName}' does not exist.");
+        if (query.Length != descriptor.Dimensions)
+            throw new VectorException(
+                $"Vector index '{indexName}' expects {descriptor.Dimensions} dimensions, got {query.Length}.");
+        if (k <= 0)
+            throw new ArgumentOutOfRangeException(nameof(k));
+
+        var heap = new VectorKnnHeap(k);
+        switch (descriptor.OwnerKind)
+        {
+            case EntityKind.Vertex:
+                foreach (VertexId id in transaction.Vertices.Scan())
+                {
+                    using VertexReadHandle owner = transaction.Vertices.Read(id);
+                    if (!owner.InUse
+                        || descriptor.TargetScope is { } scope
+                            && _labels.GetName(owner.Label) != scope)
+                        continue;
+                    OfferPrimaryVector(
+                        transaction.Vertices.EnumerateProperties(id, transaction.Properties),
+                        EntityRef.From(owner.Id),
+                        descriptor,
+                        query,
+                        heap);
+                }
+                break;
+            case EntityKind.Edge:
+                foreach (EdgeId id in transaction.Edges.Scan())
+                {
+                    EdgeReadHandle owner = transaction.Edges.Read(id);
+                    if (!owner.InUse
+                        || descriptor.TargetScope is { } scope
+                            && _edgeTypes.GetName(owner.Type) != scope)
+                        continue;
+                    OfferPrimaryVector(
+                        transaction.Edges.EnumerateProperties(id, transaction.Properties),
+                        EntityRef.From(owner.Id),
+                        descriptor,
+                        query,
+                        heap);
+                }
+                break;
+            case EntityKind.Nexus:
+                foreach (NexusId id in transaction.Nexuses.Scan())
+                {
+                    using NexusReadHandle owner = transaction.Nexuses.Read(id);
+                    if (!owner.InUse
+                        || descriptor.TargetScope is { } scope
+                            && _nexusTypes.GetName(owner.Type) != scope)
+                        continue;
+                    OfferPrimaryVector(
+                        transaction.Nexuses.EnumerateProperties(id, transaction.Properties),
+                        EntityRef.From(owner.Id),
+                        descriptor,
+                        query,
+                        heap);
+                }
+                break;
+        }
+        return new MaterializedVectorSearchCursor(heap.ToSortedArray());
+    }
+
+    public VectorSearchCursor KnnSearchFiltered(
+        ITransaction transaction,
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        IReadOnlySet<EntityRef> candidates,
+        VectorSearchOptions? options = null)
+    {
+        if (candidates.Count == 0)
+            return EmptyVectorSearchCursor.Instance;
+        var hits = new List<VectorSearchResult>(k);
+        using var cursor = KnnSearch(
+            transaction,
+            indexName,
+            query,
+            Math.Max(k, candidates.Count),
+            options);
+        while (cursor.MoveNext())
+        {
+            VectorSearchResult hit = cursor.Current;
+            if (!candidates.Contains(hit.Owner))
+                continue;
+            hits.Add(hit);
+            if (hits.Count == k)
+                break;
+        }
+        return new MaterializedVectorSearchCursor(hits);
     }
 
     public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
+        ITransaction transaction,
         string indexName,
         IReadOnlyList<ReadOnlyMemory<float>> queries,
         int k,
         VectorSearchOptions? options = null)
     {
-        if (_vectors is InMemoryVectorStore inMem)
-            return inMem.KnnSearchBatch(indexName, queries, k, options);
-        return _vectors.KnnSearchBatch(indexName, queries, k, options);
+        var result = new VectorSearchCursor[queries.Count];
+        for (int i = 0; i < queries.Count; i++)
+            result[i] = KnnSearch(transaction, indexName, queries[i].Span, k, options);
+        return result;
+    }
+
+    private static void OfferPrimaryVector(
+        PropertyCursor properties,
+        EntityRef owner,
+        VectorIndexDescriptor descriptor,
+        ReadOnlySpan<float> query,
+        VectorKnnHeap heap)
+    {
+        while (properties.MoveNext())
+        {
+            PropertyEntry property = properties.Current;
+            if (property.KeyId != descriptor.TargetPropertyKeyId
+                || property.Value.Type != PropertyValueType.FloatArray
+                || property.Value.FloatArrayValue.Length != descriptor.Dimensions)
+                continue;
+            heap.Offer(new VectorSearchResult(
+                owner,
+                VectorMetrics.Score(
+                    descriptor.Metric,
+                    query,
+                    property.Value.FloatArrayValue)));
+            return;
+        }
     }
 
     public IEnumerable<VertexId> ScanVertices(ITransaction tx, LabelId? label = null)

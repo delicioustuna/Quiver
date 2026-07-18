@@ -1,48 +1,59 @@
 # 05. KNN ベクトル検索
 
-ベクトル検索とグラフトラバーサルを結合する。
-完全コードは [`samples/Quiver.Samples.Vector`](https://github.com/delicioustuna/Quiver/tree/main/samples/Quiver.Samples.Vector)。
+ベクトル検索とグラフトラバーサルを同じ transaction snapshot で実行する。
+完全な例は [`samples/Quiver.Samples.Vector`](https://github.com/delicioustuna/Quiver/tree/main/samples/Quiver.Samples.Vector) にある。
 
 ```csharp
 using var db = QuiverDatabase.Open("./mygraph");
 
-// インデックス作成
-db.Vectors.CreateIndex(
-    "person_bio_v1",
-    new VectorIndexSpec(Dimensions: 4, Metric: VectorMetric.Cosine, EntityKind: EntityKind.Vertex));
-
-// データ登録
-using (var tx = db.BeginWriteTransaction())
+using (var schema = db.BeginWriteTransaction())
 {
-    var alice = tx.Mutate.AddVertex("Person").P("Name", "Alice").Next();
-    var bob = tx.Mutate.AddVertex("Person").P("Name", "Bob").Next();
-
-    db.Vectors.SetVector("person_bio_v1", EntityId.FromVertex(alice), new float[] { 0.1f, 0.2f, 0.3f, 0.4f });
-    db.Vectors.SetVector("person_bio_v1", EntityId.FromVertex(bob),   new float[] { 0.0f, 0.1f, 0.2f, 0.5f });
-    tx.Commit();
+    schema.EditSchema.CreateIndex(new VectorIndexDefinition(
+        "person_bio_v1",
+        new PropertyTarget(
+            PropertyOwnerKind.Vertex,
+            "bio_embedding",
+            "Person"),
+        Dimensions: 4,
+        Metric: DistanceMetric.Cosine));
+    schema.Commit();
 }
 
-// KNN を起点としたトラバーサル
-using (var tx = db.BeginReadTransaction())
+using (var write = db.BeginWriteTransaction())
 {
-    var g = tx.Query;
-    var query = new float[] { 0.1f, 0.2f, 0.3f, 0.4f };
-
-    var top2Names = g.Knn("person_bio_v1", query, k: 2)
-                     .Values("Name")
-                     .ToList();
+    VertexId alice = write.CreateVertex("Person");
+    VertexId bob = write.CreateVertex("Person");
+    write.SetProperty(alice, "Name", "Alice");
+    write.SetProperty(bob, "Name", "Bob");
+    write.SetVectorProperty(
+        EntityRef.From(alice),
+        "bio_embedding",
+        [0.1f, 0.2f, 0.3f, 0.4f]);
+    write.SetVectorProperty(
+        EntityRef.From(bob),
+        "bio_embedding",
+        [0.0f, 0.1f, 0.2f, 0.5f]);
+    write.Commit();
 }
 
-// graph-first ハイブリッド
-using (var tx = db.BeginReadTransaction())
+using (var read = db.BeginReadTransaction())
 {
-    var g = tx.Query;
-    var query = new float[] { 0.1f, 0.2f, 0.3f, 0.4f };
+    float[] query = [0.1f, 0.2f, 0.3f, 0.4f];
+    List<string> top2Names = read.Query
+        .Knn("person_bio_v1", query, k: 2)
+        .Values("Name")
+        .ToList();
+}
 
-    var filtered = g.Vertices().HasLabel("Person")
-                    .Has("Name", "Alice")
-                    .FilterByKnn("person_bio_v1", query, k: 1)
-                    .Values("Name")
-                    .ToList();
+using (var read = db.BeginReadTransaction())
+{
+    float[] query = [0.1f, 0.2f, 0.3f, 0.4f];
+    List<string> filtered = read.Query
+        .Vertices()
+        .HasLabel("Person")
+        .Has("Name", "Alice")
+        .FilterByKnn("person_bio_v1", query, k: 1)
+        .Values("Name")
+        .ToList();
 }
 ```

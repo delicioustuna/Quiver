@@ -1,7 +1,6 @@
 namespace Quiver.Core;
 
-// EntityKind は EntityId.cs で定義。ベクトルコードは Vertex / Edge / Nexus を使用し、
-// Property は診断 / カタログ用に予約されている (IVectorStore 実装は拒否する)。
+// EntityKind は EntityId.cs で定義。ベクトルコードは Vertex / Edge / Nexus を使用する。
 
 /// <summary>
 /// ベクトルインデックスが用いる距離尺度。インデックス作成時に固定され以後変更できない —
@@ -39,99 +38,99 @@ public enum VectorElementType : byte
     Float32 = 0,
 }
 
-/// <summary>
-/// ベクトルインデックスの構造種別。<see cref="HnswFlat"/> は HNSW ANN グラフ + payload を保持し
-/// KNN 検索 (vector-first / graph-first) の両方に使える。<see cref="FlatOnly"/> は payload のみ
-/// 保持し HNSW を構築しない — <c>ApplyDyadic</c> (brute-force graph-first) 専用。
-/// </summary>
-public enum VectorIndexKind : byte
-{
-    /// <summary>HNSW ANN グラフ + payload (既定)。KNN / ApplyDyadic 両対応。</summary>
-    HnswFlat = 0,
-    /// <summary>payload のみ。HNSW を構築せず <c>SetVector</c> の upsert コストを削減する。
-    /// vector-first <c>KnnSearch</c> は <see cref="VectorException"/> を投げる。</summary>
-    FlatOnly = 1,
-}
-
-/// <summary>
-/// ベクトルインデックスの宣言的仕様。インデックス作成時に確定し backend カタログに永続化される。
-/// <see cref="SourcePropertyKeyId"/> は埋め込み元となる値を持つプロパティを指す — プロバイダ /
-/// 正規化の扱いは <c>Quiver.Embedding</c> 側にある。
-/// </summary>
-/// <param name="Name">インデックス名 (一意)。</param>
-/// <param name="EntityKind">対象エンティティ種別 (Vertex / Edge)。</param>
-/// <param name="SourcePropertyKeyId">埋め込み元の値を持つプロパティキー。</param>
-/// <param name="Dimensions">ベクトルの次元数。</param>
-/// <param name="Metric">スコアリングに使う距離尺度。</param>
-/// <param name="ProviderId">埋め込みプロバイダ識別子。</param>
-/// <param name="NormalizationProfile">正規化プロファイル名 (任意)。</param>
-/// <param name="IndexKind">ベクトルインデックスの構造種別。</param>
-/// <param name="HnswM">HNSW のレイヤ 1 以上で保持する最大近傍数。</param>
-/// <param name="HnswMMax0">HNSW のレイヤ 0 で保持する最大近傍数。</param>
-/// <param name="HnswMaxLayers">HNSW が保持できる最大レイヤ数。</param>
-/// <param name="HnswEfConstruction">HNSW 構築時のビーム幅。</param>
-/// <param name="ElementType">ベクトル要素の格納表現。現在は <see cref="VectorElementType.Float32"/> のみ。</param>
-public sealed record VectorIndexSpec(
+internal sealed record VectorIndexDescriptor(
     string Name,
-    EntityKind EntityKind,
-    PropertyKeyId SourcePropertyKeyId,
+    EntityKind OwnerKind,
+    PropertyKeyId TargetPropertyKeyId,
+    string? TargetScope,
     int Dimensions,
     DistanceMetric Metric,
-    string ProviderId,
-    string? NormalizationProfile = null,
-    VectorIndexKind IndexKind = VectorIndexKind.HnswFlat,
+    VectorElementType ElementType = VectorElementType.Float32,
     int HnswM = 32,
     int HnswMMax0 = 64,
     int HnswMaxLayers = 8,
     int HnswEfConstruction = 400,
-    VectorElementType ElementType = VectorElementType.Float32);
+    VectorSegmentPolicy? SegmentPolicy = null);
 
-internal static class VectorIndexSpecValidator
+internal static class VectorIndexDescriptorValidator
 {
-    public static void Validate(VectorIndexSpec spec)
+    public static void Validate(VectorIndexDescriptor descriptor)
     {
-        if (string.IsNullOrEmpty(spec.Name))
+        if (string.IsNullOrEmpty(descriptor.Name))
             throw new VectorException("Vector index name must not be empty.");
         // 新しい要素表現の追加時はここの許可リストを広げ、スコアリングカーネル /
         // payload レコード長 / cache slab の型をあわせて分岐させること。
-        if (spec.ElementType != VectorElementType.Float32)
+        if (descriptor.ElementType != VectorElementType.Float32)
             throw new VectorException(
-                $"Vector index '{spec.Name}' has unsupported element type " +
-                $"{spec.ElementType}; this version supports only {VectorElementType.Float32}.");
-        if (spec.Dimensions <= 0)
+                $"Vector index '{descriptor.Name}' has unsupported element type " +
+                $"{descriptor.ElementType}; this version supports only {VectorElementType.Float32}.");
+        if (descriptor.Dimensions <= 0)
             throw new VectorException(
-                $"Vector index '{spec.Name}' must have positive dimensions (was {spec.Dimensions}).");
-        if (spec.HnswM is < 2 or > byte.MaxValue)
-            throw Invalid(spec, nameof(spec.HnswM), spec.HnswM, "2..255");
-        if (spec.HnswMMax0 < spec.HnswM || spec.HnswMMax0 > byte.MaxValue)
-            throw Invalid(spec, nameof(spec.HnswMMax0), spec.HnswMMax0, $"{spec.HnswM}..255");
-        if (spec.HnswMaxLayers is < 1 or > byte.MaxValue)
-            throw Invalid(spec, nameof(spec.HnswMaxLayers), spec.HnswMaxLayers, "1..255");
-        if (spec.HnswEfConstruction < spec.HnswM || spec.HnswEfConstruction > 1_000_000)
+                $"Vector index '{descriptor.Name}' must have positive dimensions (was {descriptor.Dimensions}).");
+        if (descriptor.HnswM is < 2 or > byte.MaxValue)
+            throw Invalid(descriptor, nameof(descriptor.HnswM), descriptor.HnswM, "2..255");
+        if (descriptor.HnswMMax0 < descriptor.HnswM || descriptor.HnswMMax0 > byte.MaxValue)
             throw Invalid(
-                spec,
-                nameof(spec.HnswEfConstruction),
-                spec.HnswEfConstruction,
-                $"{spec.HnswM}..1000000");
+                descriptor,
+                nameof(descriptor.HnswMMax0),
+                descriptor.HnswMMax0,
+                $"{descriptor.HnswM}..255");
+        if (descriptor.HnswMaxLayers is < 1 or > byte.MaxValue)
+            throw Invalid(
+                descriptor,
+                nameof(descriptor.HnswMaxLayers),
+                descriptor.HnswMaxLayers,
+                "1..255");
+        if (descriptor.HnswEfConstruction < descriptor.HnswM
+            || descriptor.HnswEfConstruction > 1_000_000)
+            throw Invalid(
+                descriptor,
+                nameof(descriptor.HnswEfConstruction),
+                descriptor.HnswEfConstruction,
+                $"{descriptor.HnswM}..1000000");
+        VectorSegmentPolicy policy = descriptor.SegmentPolicy ?? new();
+        if (policy.MaximumDeltaEntries <= 0)
+            throw Invalid(
+                descriptor,
+                nameof(policy.MaximumDeltaEntries),
+                policy.MaximumDeltaEntries,
+                "1..2147483647");
+        if (policy.MaximumSegments <= 0)
+            throw Invalid(
+                descriptor,
+                nameof(policy.MaximumSegments),
+                policy.MaximumSegments,
+                "1..2147483647");
     }
 
     private static VectorException Invalid(
-        VectorIndexSpec spec,
+        VectorIndexDescriptor descriptor,
         string parameter,
         int value,
         string expected) =>
         new(
-            $"Vector index '{spec.Name}' has invalid {parameter}={value}; expected {expected}.");
+            $"Vector index '{descriptor.Name}' has invalid {parameter}={value}; expected {expected}.");
 }
 
 /// <summary>KNN 検索の 1 行: どのエンティティがマッチしたかと、その類似度スコア。</summary>
-/// <param name="EntityKind">マッチしたエンティティの種別。</param>
-/// <param name="EntityId">マッチしたエンティティの ID。</param>
+/// <param name="Owner">マッチしたownerのfull typed identity。</param>
 /// <param name="Score">類似度スコア。</param>
 public readonly record struct VectorSearchResult(
-    EntityKind EntityKind,
-    long EntityId,
-    float Score);
+    EntityRef Owner,
+    float Score)
+{
+    internal VectorSearchResult(EntityKind kind, long localId, float score)
+        : this(EntityRef.Create(
+            kind,
+            EntityRef.UnpackSequence(localId),
+            EntityRef.UnpackGeneration(localId)),
+            score)
+    {
+    }
+
+    internal EntityKind EntityKind => Owner.Kind;
+    internal long EntityId => Owner.Value;
+}
 
 /// <summary>
 /// KNN 検索の精度と探索量を制御する実行時オプション。
@@ -191,74 +190,17 @@ public abstract class VectorSearchCursor : IDisposable
 /// リトライ / タスクログは意図的に除外され、それらは <c>Quiver.Embedding</c> にある
 /// 。
 /// </summary>
-public interface IVectorStore
+internal interface IVectorDefinitionCatalog
 {
-    /// <summary>新しいベクトルインデックスを作成する。</summary>
-    void CreateVectorIndex(VectorIndexSpec spec);
+    void Create(VectorIndexDescriptor descriptor);
 
-    /// <summary>指定名のベクトルインデックスを削除する。</summary>
-    void DropVectorIndex(string name);
+    void Drop(string name);
 
-    /// <summary>
-    /// 登録済み index の <see cref="VectorIndexSpec"/> を取得する。
-    /// optimizer / push-down rewrite が dim 等のメタ情報を必要とするために用いる。
-    /// 既定実装は <c>false</c> を返す — メタを取得できない backend は dim awareness 無しの
-    /// 旧経路にフォールバックする。
-    /// </summary>
-    bool TryGetIndex(string name, out VectorIndexSpec spec)
-    {
-        spec = default!;
-        return false;
-    }
+    bool TryGet(string name, out VectorIndexDescriptor descriptor);
 
-    /// <summary>登録済みベクトルインデックスの一覧を返す。</summary>
-    IReadOnlyList<VectorIndexSpec> ListVectorIndexes() => [];
+    IReadOnlyList<VectorIndexDescriptor> List();
 
-    /// <summary>指定エンティティのベクトルを設定 (上書き) する。</summary>
-    void SetVector(
-        EntityKind kind,
-        long entityId,
-        string indexName,
-        ReadOnlySpan<float> vector);
-
-    /// <summary>指定エンティティのベクトルをインデックスから除去する。</summary>
-    void RemoveVector(EntityKind kind, long entityId, string indexName);
-
-    /// <summary>
-    /// 指定エンティティの格納ベクトルを <paramref name="destination"/> へ読み出す。
-    /// alloc-free — 呼び出し側がインデックスの次元数以上のバッファを用意する。
-    /// 未設定 / 削除済み / 世代不一致 (slot 再利用による stale binding) は <c>false</c>。
-    /// </summary>
-    bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
-        => false;
-
-    /// <summary>クエリベクトルに対する上位 <paramref name="k"/> 件の近傍を検索する。</summary>
-    VectorSearchCursor KnnSearch(
-        string indexName,
-        ReadOnlySpan<float> query,
-        int k,
-        VectorSearchOptions? options = null);
-
-    /// <summary>
-    /// 同一インデックスに対する複数クエリを 1 回の呼び出しで投げる。
-    /// <see cref="ReadOnlySpan{T}"/> は <see cref="IReadOnlyList{T}"/> に格納できないため、
-    /// 入力は <see cref="ReadOnlyMemory{T}"/> 配列で受ける。既定実装は個別 <see cref="KnnSearch"/>
-    /// を Q 回呼ぶフォールバック。in-memory backend は単一 snapshot 上で
-    /// 「Q 個のクエリ × N 件のコーパス」を gather-then-score でまとめて評価する。
-    /// </summary>
-    /// <remarks>返却順序は入力 <paramref name="queries"/> と一致する。</remarks>
-    IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
-        string indexName,
-        IReadOnlyList<ReadOnlyMemory<float>> queries,
-        int k,
-        VectorSearchOptions? options = null)
-    {
-        ArgumentNullException.ThrowIfNull(queries);
-        var arr = new VectorSearchCursor[queries.Count];
-        for (int i = 0; i < queries.Count; i++)
-            arr[i] = KnnSearch(indexName, queries[i].Span, k, options);
-        return arr;
-    }
+    void Reload();
 }
 
 /// <summary>

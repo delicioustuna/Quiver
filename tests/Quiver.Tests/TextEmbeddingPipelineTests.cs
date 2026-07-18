@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using FluentAssertions;
 using Quiver.Core;
 using Quiver.Embedding;
@@ -17,27 +18,28 @@ namespace Quiver.Tests;
 public sealed class TextEmbeddingPipelineTests : IDisposable
 {
     private const string IndexName = "title-embed";
+    private const string VectorProp = "titleEmbedding";
     private const string SourceProp = "title";
     private const int Dim = 4;
 
     private readonly string _dir;
     private readonly QuiverDatabase _db;
-    private readonly InMemoryVectorStore _vectors = new();
-    private readonly JsonFileVectorCatalog _catalog;
-    private readonly GraphEngineAdapter _engine;
+    private readonly MemoryEmbeddingTaskLog _taskLog = new();
 
     public TextEmbeddingPipelineTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_vec4_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        _catalog = new JsonFileVectorCatalog(Path.Combine(_dir, "vector_catalog.json"));
-        _engine = new GraphEngineAdapter(_db, _vectors, _catalog);
-
-        var keyId = _db.EditSchema(schema => schema.GetOrCreatePropertyKey(SourceProp));
-        _vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Vertex, keyId, Dim,
-            DistanceMetric.Cosine, "mock", null));
+        _db.EditSchema(schema =>
+        {
+            schema.GetOrCreatePropertyKey(SourceProp);
+            schema.GetOrCreatePropertyKey(VectorProp);
+            schema.CreateIndex(new VectorIndexDefinition(
+                IndexName,
+                new PropertyTarget(PropertyOwnerKind.Vertex, VectorProp, "Page"),
+                Dim));
+        });
     }
 
     public void Dispose()
@@ -48,11 +50,11 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
 
     private TextEmbeddingPipeline MakePipeline(MockEmbeddingProvider provider)
         => new(
-            _engine,
+            _db,
             provider,
             new MinimalNormalizer(),
             new GraphemeTextTruncator(),
-            new VectorCatalogEmbeddingTaskLog(_catalog),
+            _taskLog,
             new NoRetryPolicy());
 
     [Fact]
@@ -70,7 +72,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
             tx.SetProperty(vertex, SourceProp, Storage.Records.PropertyValue.FromString("hello world"));
             pipeline.EnqueueOnCommit(tx,
                 EntityRef.From(vertex),
-                IndexName,
+                VectorProp,
                 "hello world");
             tx.Commit();
         }
@@ -78,9 +80,10 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         await pipeline.WhenDrainedAsync(cts.Token);
 
         var query = provider.Vectorize("hello world");
-        using var cursor = _vectors.KnnSearch(IndexName, query, k: 1);
+        using var read = _db.BeginReadTransaction();
+        using var cursor = read.KnnSearch(IndexName, query, k: 1);
         cursor.MoveNext().Should().BeTrue();
-        cursor.Current.EntityId.Should().Be(vertex.Sequence); // vector binding キーは slot Sequence
+        cursor.Current.Owner.Should().Be(EntityRef.From(vertex));
         provider.CallCount.Should().Be(1);
 
         cts.Cancel();
@@ -101,7 +104,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
             tx.SetProperty(vertex, SourceProp, Storage.Records.PropertyValue.FromString("dropped"));
             pipeline.EnqueueOnCommit(tx,
                 EntityRef.From(vertex),
-                IndexName,
+                VectorProp,
                 "dropped");
             tx.Rollback();
         }
@@ -139,7 +142,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
 
         await pipeline.ScanAndEnqueueAsync(new EmbeddingScanSpec
         {
-            TargetIndexName = IndexName,
+            TargetPropertyName = VectorProp,
             SourcePropertyName = SourceProp,
             Kind = EntityKind.Vertex,
         }, cts.Token);
@@ -148,13 +151,13 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         provider.CallCount.Should().Be(3);
         foreach (var id in ids)
         {
-            using var cursor = _vectors.KnnSearch(IndexName, provider.Vectorize(""), k: 100);
-            var found = false;
-            while (cursor.MoveNext())
-            {
-                if (cursor.Current.EntityId == id) { found = true; break; }
-            }
-            found.Should().BeTrue($"vertex {id} should have a vector after scan");
+            using var read = _db.BeginReadTransaction();
+            var buffer = new float[Dim];
+            read.TryGetVectorProperty(
+                    EntityRef.From(new VertexId(id)),
+                    VectorProp,
+                    buffer)
+                .Should().BeTrue($"vertex {id} should have a vector after scan");
         }
 
         cts.Cancel();
@@ -178,7 +181,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
 
         var spec = new EmbeddingScanSpec
         {
-            TargetIndexName = IndexName,
+            TargetPropertyName = VectorProp,
             SourcePropertyName = SourceProp,
             Kind = EntityKind.Vertex,
         };
@@ -256,5 +259,54 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class MemoryEmbeddingTaskLog : IEmbeddingTaskLog
+    {
+        private readonly ConcurrentDictionary<EmbeddingTaskKey, EmbeddingTaskInfo> _entries = new();
+
+        public ValueTask<EmbeddingTaskInfo> GetInfoAsync(
+            EmbeddingTaskKey key,
+            CancellationToken ct)
+            => ValueTask.FromResult(_entries.GetValueOrDefault(key));
+
+        public ValueTask MarkInProgressAsync(
+            EmbeddingTaskKey key,
+            string contentHash,
+            CancellationToken ct)
+        {
+            _entries[key] = new(
+                EmbeddingTaskState.InProgress,
+                contentHash,
+                DateTimeOffset.UtcNow);
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask MarkCompletedAsync(
+            EmbeddingTaskKey key,
+            string contentHash,
+            CancellationToken ct)
+        {
+            _entries[key] = new(
+                EmbeddingTaskState.Completed,
+                contentHash,
+                DateTimeOffset.UtcNow);
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask MarkFailedAsync(
+            EmbeddingTaskKey key,
+            string error,
+            bool retryable,
+            CancellationToken ct)
+        {
+            _entries[key] = new(
+                retryable
+                    ? EmbeddingTaskState.FailedRetryable
+                    : EmbeddingTaskState.FailedPermanent,
+                _entries.GetValueOrDefault(key).LastContentHash,
+                DateTimeOffset.UtcNow);
+            return ValueTask.CompletedTask;
+        }
     }
 }

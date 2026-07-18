@@ -1,142 +1,111 @@
 # ベクトル検索
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-18）
 
-## ベクトルインデックス仕様 {#vector-index}
+## Primary vector property
 
-ベクトルインデックスは以下で定義される:
+ベクトル値の正本は、owner に束縛された `FloatArray` property version である。
+`IWriteTransaction.SetVectorProperty(owner, propertyKey, vector)` は通常の property mutation と同じトランザクションへ値を書き込む。
+ベクトルインデックスが存在しない場合も、property は commit、rollback、reopen の規則に従う。
 
-| フィールド | 型 | 説明 |
-|---|---|---|
-| Name | string | 一意な識別子 |
-| Dimensions | int | ベクトルの次元数（正の値） |
-| EntityKind | enum | `Vertex`、`Edge`、または `Nexus` |
-| Metric | enum | `Euclidean`, `Cosine`, または `Dot` |
-| IndexKind | enum | `HnswFlat` または `FlatOnly` |
-| ElementType | enum | 要素の格納表現。現在は `Float32` のみ (将来の量子化表現用の契約予約) |
-| HnswM | int | レイヤ 1 以上の最大近傍数。既定 32、範囲 2..255 |
-| HnswMMax0 | int | レイヤ 0 の最大近傍数。既定 64、範囲 HnswM..255 |
-| HnswMaxLayers | int | 最大レイヤ数。既定 8、範囲 1..255 |
-| HnswEfConstruction | int | 構築時ビーム幅。既定 400、範囲 HnswM..1,000,000 |
-
-`ElementType` は payload のレコード幅と距離計算の数値型を決める契約フィールドで、
-index 作成時に固定される。未対応の値は index 作成時・catalog 読込時・payload open 時の
-いずれでも `VectorException` で拒否される (将来の表現で書かれた DB を誤読しない)。
-
-## Primary vector payload {#primary-vector-payload}
-
-`VectorPayloadStore` (`src/Quiver/Stores/VectorPayloadStore.cs`) は `FloatArray` property value の正本を保持する。
-property version は配列本体ではなく immutable `VectorPayloadRef(Sequence, Generation)` を格納する。
-
-metadata record は present flag、`ElementType`、Generation、dimensions、byte length、CRC32C checksum、blob ID を保持する。
-読み取りは ref generation、`Float32`、dimensions と byte length の一致、blob length、checksum を検証する。
+property version は配列本体ではなく、immutable な `VectorPayloadRef(Sequence, Generation)` を保持する。
+payload metadata は element type、generation、dimensions、byte length、CRC32C checksum、blob ID を保持する。
+読み取りは ref generation、element type、dimensions、byte length、blob length、checksum を検証する。
 到達可能な property version が参照する payload の欠落または不一致だけを primary corruption とする。
-到達不能な payload は orphan scan で回収候補として列挙し、この時点では削除しない。
 
-## ベクトルインデックスの payload {#persistent-store}
+`IReadTransaction.TryGetVectorProperty(owner, propertyKey, destination)` は、その read transaction の snapshot で可視な property version を読む。
+destination が短い場合、owner が可視でない場合、または property が `FloatArray` でない場合は `false` を返す。
 
-`PersistentVectorStore` (`src/Quiver/Stores/PersistentVectorStore.cs`) は、`*.quiver`
-ファイル内で再構築可能なベクトルインデックスを管理する。
+## Vector index definition
 
-- **バインディングキー**: エンティティの `Sequence`（EntityRef の slot-local 部分）
-- **Generation チェック**: 古いバインディング（generation 不一致）は KNN 読み取り時にフィルタされる
-- **インデックスごとのテナント**: catalog + `VectorIndexPayloadStore` + HNSW グラフ
+ベクトルインデックスは `VectorIndexDefinition` で宣言する。
+definition は scalar index と同じ `IndexDefinition` catalog に参加し、`ISchemaEditor.CreateIndex` と `DropIndex` で変更する。
 
-`VectorIndexPayloadStore` は検索用の derived copy であり、property value の正本ではない。
-index を削除または再構築しても、`VectorPayloadStore` の primary value は失われない。
-
-## HNSW インデックス {#hnsw}
-
-`HnswIndex` (`src/Quiver/Stores/HnswIndex.cs`) は、近似最近傍探索のための
-Hierarchical Navigable Small World グラフを実装する。
-
-### パラメータ {#hnsw-params}
-
-| パラメータ | 既定値 | レイアウトへの影響 |
+| フィールド | 説明 |
 |---|---|
-| M（レイヤあたり最大近傍数） | 32 | あり |
-| Mmax0（レイヤ 0 での最大近傍数） | 64 | あり |
-| EfConstruction | 400 | なし（構築品質のみ） |
-| MaxLayers | 8 | あり |
+| `Name` | 一意なインデックス名 |
+| `Target` | owner kind、vector property key、任意の label または type scope |
+| `Dimensions` | 正の次元数 |
+| `Metric` | `Cosine`、`Dot`、`Euclidean` |
+| `ElementType` | 現在は `Float32` のみ |
+| `HnswM` | 上位レイヤの最大近傍数 |
+| `HnswMMax0` | レイヤ 0 の最大近傍数 |
+| `HnswMaxLayers` | 最大レイヤ数 |
+| `HnswEfConstruction` | artifact 構築時の探索幅 |
+| `SegmentPolicy` | delta entry 数と segment 数の merge しきい値 |
 
-これらは `VectorIndexSpec` により index 作成時に確定し、catalog に永続化される。`M`、
-`Mmax0`、`MaxLayers` からレコード幅を index ごとに導出する。既存 index の値は変更できない。
-
-### オンディスクレイアウト {#hnsw-layout}
-
-**ヘッダページ** (page 1):
-
-| フィールド | 型 |
-|---|---|
-| EntryPoint | int64 |
-| MaxLevel | int32 |
-| Count | int64 |
-| MaxSeq | int64 |
-| FamilyVersion | byte (オフセット 31) |
-
-**Vertex レコード**（index ごとの固定長）:
-
-| オフセット | サイズ | フィールド |
-|---|---|---|
-| 0 | 1 | Present フラグ |
-| 1 | 1 | Level |
-| 2 | 2 | パディング |
-| 4 | MaxLayers | 近傍カウント (レイヤごとに int8) |
-| 4 + MaxLayers | 可変 | 近傍配列: (Mmax0 + (MaxLayers-1) x M) x int64 |
-
-レコードサイズは
-`4 + MaxLayers + (Mmax0 + (MaxLayers - 1) * M) * 8`。既定値では 1,164 バイト。
-
-### ベクトルカタログ {#vector-catalog}
-
-catalog の各 entry は `entryLength (int32)` に続いて、index metadata、payload/HNSW tenant、
-`IndexKind`、4 つの HNSW parameter、`ElementType (byte)` を保持する。
-必須 field の欠落と未知の trailing field は corruption として拒否する。
-旧 catalog を解釈する fallback と移行処理は提供しない。
-
-payload テナントのヘッダページにも `ElementType` (byte、オフセット 12) を焼き込み、
-open 時に catalog 側の値と照合する。
-
-### 操作 {#hnsw-ops}
-
-- **Insert**: 指数減衰でレベルを割り当て、各レイヤで最近傍にリンクする
-- **Search (KNN)**: エントリポイントから貪欲に走査し、レイヤを通じて精緻化する。presence チェックと
-  generation フィルタ付きの top-k ヒープを用いる
-- **Delete**: Vertexを absent としてマークし、削除時に近傍を再リンクする
-- **Rebuild**: tombstone 数がライブVertex数を超えると自動で実行
-
-### 制限 {#hnsw-limits}
-
-- 既存 sequence の上書きは payload のみを更新する。HNSW グラフのトポロジは再リンクされない
-- 再リンクと物理削除は rebuild まで遅延される
-
-## 距離メトリクス {#distance}
-
-`VectorScorer` (`src/Quiver/Core/VectorScorer.cs`) は、SIMD 加速された `Vector<float>` 演算で
-ベクトル類似度を計算する:
-
-| メトリクス | 数式 | 規約 |
-|---|---|---|
-| Dot | `sum(a[i] * b[i])` | 大きいほど類似 |
-| Cosine | `dot / (norm_a * norm_b)` | 大きいほど類似 |
-| Euclidean | `-sum((a[i] - b[i])^2)` | 符号反転。大きいほど類似 |
-
-すべてのメトリクスは **スコアが大きいほど類似** という規約に従う。Euclidean 距離は符号反転されており、
-すべてのメトリクスで同一の max-heap を使えるようにしている。
-
-## トランザクション統合 {#tx-integration}
-
-`tx.SetVector(kind, entityId, indexName, vector)` は現在のトランザクション内でベクトルを書き込む。
-この書き込みはグラフの mutation と同じコンテナ WAL に相乗りするため、コミットとロールバックは
-トランザクションの他の部分とアトミックである。
-
-## KNN 検索 {#knn-search}
+definition catalog は target property key と scope を明示的に保存する。
+embedding 元 property、provider、normalization profile は index definition に含めず、Embedding task metadata が保持する。
 
 ```csharp
-var results = tx.KnnSearch("vec_idx", queryVector, k: 10);
-while (results.MoveNext())
+using var schema = database.BeginWriteTransaction();
+schema.EditSchema.CreateIndex(new VectorIndexDefinition(
+    "document_embedding",
+    new PropertyTarget(
+        PropertyOwnerKind.Vertex,
+        "embedding",
+        "Document"),
+    Dimensions: 384,
+    Metric: DistanceMetric.Cosine));
+schema.Commit();
+```
+
+index を drop しても primary vector property と payload は削除しない。
+同じ target で index を作り直すと、検索経路は primary property から derived segment を再構築できる。
+
+## Immutable vector segments
+
+vector property の commit は、一致する definition ごとに commit-local flat delta segment を公開する。
+segment entry は full typed owner identity と payload checksum を保持する。
+mutable な共有 HNSW へ commit ごとに insert する経路はない。
+
+検索 manifest は `xmin` と `xmax` を持つ versioned state である。
+old reader は開始時点で可視だった manifest を使い続け、新しい reader だけが publish 後の manifest を使う。
+検索は可視な flat segment と immutable HNSW segmentを fan-out し、segment ごとの候補を top-k heap で統合する。
+
+merge worker は committed primary property の read snapshot を取得し、writer lease の外で HNSW artifact を構築する。
+publish 用の短い write transaction は source manifest generation と現在の definition を再検証する。
+どちらかが変わっていれば artifact を破棄し、新しい snapshot から再試行する。
+
+derived segment と manifest は primary value の正本ではない。
+reopen 後や derived state が不足する場合、KNN は同じ read snapshot の primary property を exact scan し、バックグラウンド rebuild を要求する。
+そのため、derived state の欠落は committed vector property の消失や database open の失敗を意味しない。
+
+## Candidate validation
+
+segment candidate は logical result に変換する前に primary store で再検証する。
+検証対象は full typed owner identity、owner generation、owner の snapshot visibility、target scope、property key、dimensions、payload checksum である。
+削除済み owner、同じ sequence の別 generation、更新前 property、別 target の entry は結果から除外する。
+
+raw sequence は physical store の read 成功直後にだけ使う。
+transaction、query、traversal、検索結果は `EntityRef`、`VertexId`、`EdgeId`、`NexusId` の full identity を保持する。
+
+## Transaction-scoped KNN
+
+`IReadTransaction.KnnSearch` と `KnnSearchBatch` は、transaction snapshot から definition、manifest、primary property を解決する。
+cursor は transaction の利用期間を超えて使えない。
+
+```csharp
+using var read = database.BeginReadTransaction();
+using VectorSearchCursor cursor = read.KnnSearch(
+    "document_embedding",
+    queryVector,
+    k: 10);
+
+while (cursor.MoveNext())
 {
-    VertexId id = results.Current;
-    float score = results.CurrentScore;
+    EntityRef owner = cursor.Current.Owner;
+    float score = cursor.Current.Score;
 }
 ```
+
+すべての metric は「スコアが大きいほど近い」という規約にそろえる。
+`Dot` は内積、`Cosine` は cosine similarity、`Euclidean` は二乗距離の符号反転を返す。
+
+## Embedding と RAG
+
+`Quiver.Embedding` は source property と vector target property を別々の task metadata として扱う。
+pipeline は embedding を生成した後、write transaction の `SetVectorProperty` で target property を保存する。
+
+`Quiver.Rag` は read transaction の `KnnSearch` と graph property read を同じ snapshot で実行する。
+database または backend から vector store を取得する公開 API は存在しない。

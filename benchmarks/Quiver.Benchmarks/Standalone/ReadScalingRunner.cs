@@ -48,14 +48,15 @@ public static class ReadScalingRunner
 
     private static (VertexId Hub, float[] Query) Seed(QuiverDatabase db)
     {
-        db.EditSchema(schema => schema.CreateFullTextIndex(FullTextIndex, "Doc", "body"));
-        db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            VectorIndex,
-            EntityKind.Vertex,
-            db.EditSchema(schema => schema.GetOrCreatePropertyKey("embedding")),
-            Dimensions,
-            DistanceMetric.Cosine,
-            "deterministic read-scaling corpus"));
+        db.EditSchema(schema =>
+        {
+            schema.CreateFullTextIndex(FullTextIndex, "Doc", "body");
+            schema.GetOrCreatePropertyKey("embedding");
+            schema.CreateIndex(new VectorIndexDefinition(
+                VectorIndex,
+                new PropertyTarget(PropertyOwnerKind.Vertex, "embedding", "Doc"),
+                Dimensions));
+        });
 
         var random = new Random(VectorRecallCorpus.Seed);
         var vector = new float[Dimensions];
@@ -75,7 +76,7 @@ public static class ReadScalingRunner
                 tx.SetProperty(vertex, "body",
                     PropertyValue.FromString($"alpha beta corpus token{i % 64}"));
                 VectorRecallCorpus.Fill(random, vector);
-                tx.SetVector(EntityKind.Vertex, vertex.Value, VectorIndex, vector);
+                tx.SetVectorProperty(EntityRef.From(vertex), "embedding", vector);
             }
             tx.Commit();
         }
@@ -98,13 +99,16 @@ public static class ReadScalingRunner
     }
 
     private static Worker CreateKnnWorker(QuiverDatabase db, float[] query)
-        => new(() =>
+    {
+        var tx = db.BeginReadTransaction();
+        return new Worker(() =>
         {
             int count = 0;
-            using var cursor = db.Vectors.KnnSearch(VectorIndex, query, VectorRecallCorpus.K);
+            using var cursor = tx.KnnSearch(VectorIndex, query, VectorRecallCorpus.K);
             while (cursor.MoveNext()) count++;
             return count;
-        });
+        }, tx);
+    }
 
     private static Worker CreateBm25Worker(QuiverDatabase db)
     {

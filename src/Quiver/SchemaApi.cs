@@ -25,6 +25,7 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
     private readonly ITokenStore<NexusTypeId> _nexusTypes;
     private readonly ITokenStore<RoleId> _roles;
     private readonly IIndexManager _indexManager;
+    private readonly IVectorDefinitionCatalog? _vectorDefinitions;
     private readonly Func<IDisposable>? _acquireMutationLease;
     private readonly Func<TransactionId, IDisposable>? _acquireOwnedMutationLease;
     private SnapshotSchemaCatalog _committedSnapshot;
@@ -36,6 +37,7 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
         IIndexManager indexManager,
         ITokenStore<NexusTypeId> nexusTypes,
         ITokenStore<RoleId> roles,
+        IVectorDefinitionCatalog? vectorDefinitions = null,
         Func<IDisposable>? acquireMutationLease = null,
         Func<TransactionId, IDisposable>? acquireOwnedMutationLease = null)
     {
@@ -45,6 +47,7 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
         _indexManager = indexManager;
         _nexusTypes = nexusTypes;
         _roles = roles;
+        _vectorDefinitions = vectorDefinitions;
         _acquireMutationLease = acquireMutationLease;
         _acquireOwnedMutationLease = acquireOwnedMutationLease;
         _committedSnapshot = new SnapshotSchemaCatalog(this);
@@ -114,7 +117,9 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
     public bool TryGetPropertyKeyId(string name, out PropertyKeyId id) => _propKeys.TryGet(name, out id);
     public bool TryGetEdgeTypeId(string name, out EdgeTypeId id) => _edgeTypes.TryGet(name, out id);
 
-    public bool IndexExists(string indexName) => _indexManager.ListIndexes().Contains(indexName);
+    public bool IndexExists(string indexName)
+        => _indexManager.ListIndexes().Contains(indexName)
+            || _vectorDefinitions?.TryGet(indexName, out _) == true;
 
     public void CreateIndex(IndexDefinition definition)
         => _ = CreateIndex(definition, owner: null);
@@ -124,9 +129,11 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
         TransactionId? owner)
     {
         ArgumentNullException.ThrowIfNull(definition);
+        if (definition is VectorIndexDefinition vector)
+            return CreateVectorIndex(vector, owner);
         if (definition is not ScalarIndexDefinition scalar)
             throw new NotSupportedException(
-                $"index definition '{definition.GetType().Name}' はこの Wave ではサポートされていません。");
+                $"index definition '{definition.GetType().Name}' はサポートされていません。");
 
         ScalarIndexMetadata existing = _indexManager.ListIndexDefinitions()
             .FirstOrDefault(x => x.Definition.Name == scalar.Name);
@@ -164,6 +171,46 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
         _indexManager.RegisterIndexDefinition(
             scalar,
             owner is null ? IndexLifecycleState.Ready : IndexLifecycleState.Building);
+        return true;
+    }
+
+    private bool CreateVectorIndex(
+        VectorIndexDefinition definition,
+        TransactionId? owner)
+    {
+        if (_vectorDefinitions is null)
+            throw new NotSupportedException("このbackendはvector indexをサポートしていません。");
+        if (_vectorDefinitions.TryGet(
+                definition.Name,
+                out VectorIndexDescriptor? existing))
+        {
+            VectorIndexDefinition current = ToDefinition(existing);
+            if (current == definition)
+                return false;
+            throw new ConstraintException(
+                $"Index definition '{definition.Name}' already exists with a different target or options.");
+        }
+
+        PropertyKeyId propertyKey = owner is { } transactionId
+            ? GetOrCreatePropertyKey(definition.Target.PropertyKey, transactionId)
+            : GetOrCreatePropertyKey(definition.Target.PropertyKey);
+        var descriptor = new VectorIndexDescriptor(
+            definition.Name,
+            ToEntityKind(definition.Target.OwnerKind),
+            propertyKey,
+            definition.Target.Scope,
+            definition.Dimensions,
+            definition.Metric,
+            definition.ElementType,
+            definition.HnswM,
+            definition.HnswMMax0,
+            definition.HnswMaxLayers,
+            definition.HnswEfConstruction,
+            definition.SegmentPolicy);
+        using var lease = owner is { } ownedTransaction
+            ? AcquireMutationLease(ownedTransaction)
+            : AcquireMutationLease();
+        _vectorDefinitions.Create(descriptor);
         return true;
     }
 
@@ -276,6 +323,11 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
         using var lease = owner is { } transactionId
             ? AcquireMutationLease(transactionId)
             : AcquireMutationLease();
+        if (_vectorDefinitions?.TryGet(indexName, out _) == true)
+        {
+            _vectorDefinitions.Drop(indexName);
+            return;
+        }
         _indexManager.DropIndex(indexName);
     }
 
@@ -289,8 +341,68 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
                 metadata.State,
                 0));
         }
+        if (_vectorDefinitions is not null)
+        {
+            foreach (VectorIndexDescriptor descriptor in _vectorDefinitions.List())
+            {
+                result.Add(new IndexInfo(
+                    ToDefinition(descriptor),
+                    IndexLifecycleState.Ready,
+                    0));
+            }
+        }
         return result;
     }
+
+    public bool TryGetIndex(string indexName, out IndexInfo info)
+    {
+        foreach (IndexInfo candidate in ListIndexes())
+        {
+            if (candidate.Name != indexName)
+                continue;
+            info = candidate;
+            return true;
+        }
+        info = default!;
+        return false;
+    }
+
+    private VectorIndexDefinition ToDefinition(VectorIndexDescriptor descriptor)
+    {
+        string propertyKey = _propKeys.GetName(descriptor.TargetPropertyKeyId);
+        return new VectorIndexDefinition(
+            descriptor.Name,
+            new PropertyTarget(
+                ToOwnerKind(descriptor.OwnerKind),
+                propertyKey,
+                descriptor.TargetScope),
+            descriptor.Dimensions,
+            descriptor.Metric,
+            descriptor.ElementType,
+            descriptor.HnswM,
+            descriptor.HnswMMax0,
+            descriptor.HnswMaxLayers,
+            descriptor.HnswEfConstruction,
+            descriptor.SegmentPolicy);
+    }
+
+    private static EntityKind ToEntityKind(PropertyOwnerKind ownerKind)
+        => ownerKind switch
+        {
+            PropertyOwnerKind.Vertex => EntityKind.Vertex,
+            PropertyOwnerKind.Edge => EntityKind.Edge,
+            PropertyOwnerKind.Nexus => EntityKind.Nexus,
+            _ => throw new ArgumentOutOfRangeException(nameof(ownerKind)),
+        };
+
+    private static PropertyOwnerKind ToOwnerKind(EntityKind kind)
+        => kind switch
+        {
+            EntityKind.Vertex => PropertyOwnerKind.Vertex,
+            EntityKind.Edge => PropertyOwnerKind.Edge,
+            EntityKind.Nexus => PropertyOwnerKind.Nexus,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
 
     public void CreateFullTextIndex(string indexName, string label, string propertyKey, FullTextIndexOptions? options = null)
         => CreateFullTextIndex(indexName, label, propertyKey, options, owner: null);
@@ -549,6 +661,18 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
         public bool IndexExists(string indexName)
             => _indexes.Any(index => index.Name == indexName);
         public IReadOnlyList<IndexInfo> ListIndexes() => _indexes;
+        public bool TryGetIndex(string indexName, out IndexInfo info)
+        {
+            foreach (IndexInfo candidate in _indexes)
+            {
+                if (candidate.Name != indexName)
+                    continue;
+                info = candidate;
+                return true;
+            }
+            info = default!;
+            return false;
+        }
         public IReadOnlyList<FullTextIndexInfo> ListFullTextIndexes()
             => _fullTextIndexes;
         public IReadOnlyList<string> ListLabels() => [.. _labelIds.Keys];
@@ -595,6 +719,8 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
         }
         public void DropIndex(string indexName) => schema.DropIndex(indexName, Owner);
         public IReadOnlyList<IndexInfo> ListIndexes() => schema.ListIndexes();
+        public bool TryGetIndex(string indexName, out IndexInfo info)
+            => schema.TryGetIndex(indexName, out info);
         public void CreateFullTextIndex(
             string indexName,
             string label,

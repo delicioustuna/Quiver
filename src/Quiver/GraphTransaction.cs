@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Quiver.Core;
 using Quiver.Index;
+using Quiver.Index.Vector;
 using Quiver.Index.FullText;
 using Quiver.Telemetry;
 using Quiver.Logical;
@@ -24,7 +25,8 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     private readonly ILogicalMutationSink? _logicalSink;
     private List<LogicalMutation>? _logicalBuffer;
     private readonly Storage.Records.ColumnManager? _columns;
-    private readonly Core.IVectorStore? _vectors;
+    private readonly VectorSegmentIndex? _vectorSegments;
+    private List<VectorSegmentMutation>? _vectorMutations;
     private readonly ISchemaCatalog _schema;
     private readonly ISchemaEditor? _schemaEditor;
     private readonly NexusMergeIndex? _nexusMergeIndex;
@@ -40,7 +42,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         bool isReadOnly = false,
         ILogicalMutationSink? logicalSink = null,
         Storage.Records.ColumnManager? columns = null,
-        Core.IVectorStore? vectors = null,
+        VectorSegmentIndex? vectorSegments = null,
         NexusMergeIndex? nexusMergeIndex = null)
     {
         _inner = inner;
@@ -53,7 +55,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         _schemaEditor = schema as ISchemaEditor;
         IsReadOnly = isReadOnly;
         _logicalSink = logicalSink;
-        _vectors = vectors;
+        _vectorSegments = vectorSegments;
         _nexusMergeIndex = nexusMergeIndex;
         // 登録済み列があるときだけ列維持を有効化し、ホット path の
         // 余計な hook 登録 / dict lookup を避ける。
@@ -756,6 +758,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         {
         // 列化済み key なら列も論理削除する。
             _columns?.OnRemoveProperty(Core.EntityKind.Vertex, vertexId.Sequence, keyId, _inner.Id.Value);
+            RemoveVectorIndexEntries(PropertyOwner(vertexId), key);
             if (_logicalSink != null)
                 RecordLogical(LogicalMutation.RemoveVertexProperty(vertexId, key));
         }
@@ -1162,33 +1165,350 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         return true;
     }
 
-    // ========== ベクトル (tx 配下) ==========
+    // ========== vector property ==========
 
-    public void SetVector(Core.EntityKind kind, long entityId, string indexName, ReadOnlySpan<float> vector)
+    public void SetVectorProperty(
+        Core.EntityRef owner,
+        string propertyKey,
+        ReadOnlySpan<float> vector)
     {
         EnsureWritable();
-        using var usage = EnterUsage();
-        if (_vectors is null)
-            throw new NotSupportedException("This backend does not support transaction-scoped SetVector.");
-        // transaction-owned WalWriteSet 下で書く → グラフ変更と同じ WAL に乗り、
-        // commit で原子確定し、プロセス内 abort は before-image で巻き戻る。
-        _vectors.SetVector(kind, entityId, indexName, vector);
+        ArgumentException.ThrowIfNullOrEmpty(propertyKey);
+        if (!owner.IsValid)
+            throw new ArgumentException("有効な owner が必要です。", nameof(owner));
+
+        PropertyValue value = PropertyValue.FromFloatArray(vector);
+        switch (owner.Kind)
+        {
+            case Core.EntityKind.Vertex:
+                SetProperty(new VertexId(owner.Value), propertyKey, in value);
+                break;
+            case Core.EntityKind.Edge:
+                SetProperty(new EdgeId(owner.Value), propertyKey, in value);
+                break;
+            case Core.EntityKind.Nexus:
+                SetProperty(new NexusId(owner.Value), propertyKey, in value);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(owner));
+        }
+
+        // index の存在を primary property の保存条件にしない。
+        // definition に一致する場合だけ同じ transaction-owned WAL batch へ delta を加える。
+        foreach (IndexInfo index in _schema.ListIndexes())
+        {
+            if (index.Definition is not VectorIndexDefinition vectorIndex
+                || vectorIndex.Target.PropertyKey != propertyKey
+                || !MatchesOwner(owner, vectorIndex.Target))
+                continue;
+            StageVectorMutation(VectorSegmentMutation.Upsert(vectorIndex, owner, vector));
+        }
     }
 
-    public void RemoveVector(Core.EntityKind kind, long entityId, string indexName)
+    public bool TryGetVectorProperty(
+        Core.EntityRef owner,
+        string propertyKey,
+        Span<float> destination)
     {
-        EnsureWritable();
-        using var usage = EnterUsage();
-        if (_vectors is null)
-            throw new NotSupportedException("This backend does not support transaction-scoped RemoveVector.");
-        _vectors.RemoveVector(kind, entityId, indexName);
+        if (!owner.IsValid || string.IsNullOrEmpty(propertyKey))
+            return false;
+
+        PropertyValue value;
+        switch (owner.Kind)
+        {
+            case Core.EntityKind.Vertex:
+                value = GetProperty(new VertexId(owner.Value), propertyKey);
+                break;
+            case Core.EntityKind.Edge:
+                value = GetProperty(new EdgeId(owner.Value), propertyKey);
+                break;
+            case Core.EntityKind.Nexus:
+                value = GetProperty(new NexusId(owner.Value), propertyKey);
+                break;
+            default:
+                return false;
+        }
+        if (value.Type != PropertyValueType.FloatArray
+            || destination.Length < value.FloatArrayValue.Length)
+            return false;
+        value.FloatArrayValue.CopyTo(destination);
+        return true;
     }
 
-    public bool TryGetVector(Core.EntityKind kind, long entityId, string indexName, Span<float> destination)
+    public VectorSearchCursor KnnSearch(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null)
     {
-        using var usage = EnterUsage();
-        if (_vectors is null) return false;
-        return _vectors.TryGetVector(kind, entityId, indexName, destination);
+        var usage = EnterUsage();
+        try
+        {
+            options = VectorSearchOptionsValidator.Normalize(options);
+            if (k <= 0)
+                throw new ArgumentOutOfRangeException(nameof(k));
+            if (!_schema.TryGetIndex(indexName, out IndexInfo index)
+                || index.Definition is not VectorIndexDefinition definition)
+            {
+                throw new VectorException($"Vector index '{indexName}' does not exist.");
+            }
+            if (query.Length != definition.Dimensions)
+            {
+                throw new VectorException(
+                    $"Vector index '{indexName}' expects {definition.Dimensions} dimensions, got {query.Length}.");
+            }
+
+            // derived segment は候補生成に使えてもsnapshot visibilityの正本にはできない。
+            // primary property scanで候補を再検証する経路を常に保持し、drop/rebuild中も値を失わない。
+            VectorSearchResult[] hits = [];
+            if (_vectorSegments is not null)
+            {
+                VectorSegmentSearchResult segmentResult = _vectorSegments.Search(
+                    _inner.Snapshot,
+                    definition,
+                    query,
+                    k,
+                    options);
+                var segmentHeap = new VectorKnnHeap(k);
+                var seen = new HashSet<EntityRef>();
+                foreach (VectorSegmentCandidate candidate in segmentResult.Candidates)
+                {
+                    if (!seen.Add(candidate.Owner)
+                        || !TryValidateSegmentCandidate(
+                            definition,
+                            candidate,
+                            query,
+                            out VectorSearchResult validated))
+                        continue;
+                    segmentHeap.Offer(validated);
+                }
+                hits = segmentHeap.ToSortedArray();
+                if (!segmentResult.CoversPrimarySnapshot || hits.Length < k || !IsReadOnly)
+                    hits = [];
+            }
+            if (hits.Length == 0)
+            {
+                var heap = new VectorKnnHeap(k);
+                if (_propKeyTokens.TryGet(definition.Target.PropertyKey, out PropertyKeyId keyId))
+                    ScanPrimaryVectors(definition, keyId, query, heap);
+                hits = heap.ToSortedArray();
+            }
+            VectorSearchCursor cursor = new MaterializedVectorSearchCursor(hits);
+            return new TransactionVectorSearchCursor(cursor, usage);
+        }
+        catch
+        {
+            usage.Dispose();
+            throw;
+        }
+    }
+
+    public IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
+        string indexName,
+        IReadOnlyList<ReadOnlyMemory<float>> queries,
+        int k,
+        VectorSearchOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(queries);
+        var cursors = new VectorSearchCursor[queries.Count];
+        for (int i = 0; i < queries.Count; i++)
+            cursors[i] = KnnSearch(indexName, queries[i].Span, k, options);
+        return cursors;
+    }
+
+    private bool MatchesOwner(Core.EntityRef owner, PropertyTarget target)
+    {
+        if (owner.Kind == Core.EntityKind.Nexus
+            && target.OwnerKind == PropertyOwnerKind.Nexus)
+        {
+            if (target.Scope is null)
+                return true;
+            using NexusReadHandle nexus =
+                _inner.Nexuses.Read(new NexusId(owner.Value));
+            return nexus.InUse
+                && _nexusTypeTokens.GetName(nexus.Type) == target.Scope;
+        }
+        return (owner.Kind, target.OwnerKind) switch
+        {
+            (Core.EntityKind.Vertex, PropertyOwnerKind.Vertex) =>
+                target.Scope is null
+                || _labelTokens.GetName(
+                    _inner.Vertices.Read(new VertexId(owner.Value)).Label) == target.Scope,
+            (Core.EntityKind.Edge, PropertyOwnerKind.Edge) =>
+                target.Scope is null
+                || _edgeTypeTokens.GetName(
+                    _inner.Edges.Read(new EdgeId(owner.Value)).Type) == target.Scope,
+            _ => false,
+        };
+    }
+
+    private void ScanPrimaryVectors(
+        VectorIndexDefinition definition,
+        PropertyKeyId keyId,
+        ReadOnlySpan<float> query,
+        VectorKnnHeap heap)
+    {
+        switch (definition.Target.OwnerKind)
+        {
+            case PropertyOwnerKind.Vertex:
+                foreach (VertexId id in _inner.Vertices.Scan())
+                {
+                    var vertex = _inner.Vertices.Read(id);
+                    if (!vertex.InUse
+                        || definition.Target.Scope is { } label
+                            && _labelTokens.GetName(vertex.Label) != label)
+                        continue;
+                    OfferVector(
+                        EntityRef.From(id),
+                        _inner.Vertices.EnumerateProperties(id, _inner.Properties),
+                        keyId,
+                        definition.Metric,
+                        query,
+                        heap);
+                }
+                break;
+            case PropertyOwnerKind.Edge:
+                foreach (EdgeId id in _inner.Edges.Scan())
+                {
+                    var edge = _inner.Edges.Read(id);
+                    if (!edge.InUse
+                        || definition.Target.Scope is { } type
+                            && _edgeTypeTokens.GetName(edge.Type) != type)
+                        continue;
+                    OfferVector(
+                        EntityRef.From(id),
+                        _inner.Edges.EnumerateProperties(id, _inner.Properties),
+                        keyId,
+                        definition.Metric,
+                        query,
+                        heap);
+                }
+                break;
+            case PropertyOwnerKind.Nexus:
+                foreach (NexusId id in _inner.Nexuses.Scan())
+                {
+                    using var nexus = _inner.Nexuses.Read(id);
+                    if (!nexus.InUse
+                        || definition.Target.Scope is { } type
+                            && _nexusTypeTokens.GetName(nexus.Type) != type)
+                        continue;
+                    OfferVector(
+                        EntityRef.From(id),
+                        _inner.Nexuses.EnumerateProperties(id, _inner.Properties),
+                        keyId,
+                        definition.Metric,
+                        query,
+                        heap);
+                }
+                break;
+        }
+    }
+
+    private static void OfferVector(
+        EntityRef owner,
+        PropertyCursor properties,
+        PropertyKeyId keyId,
+        DistanceMetric metric,
+        ReadOnlySpan<float> query,
+        VectorKnnHeap heap)
+    {
+        while (properties.MoveNext())
+        {
+            PropertyEntry property = properties.Current;
+            if (property.KeyId != keyId
+                || property.Value.Type != PropertyValueType.FloatArray
+                || property.Value.FloatArrayValue.Length != query.Length)
+                continue;
+            heap.Offer(new VectorSearchResult(
+                owner,
+                VectorMetrics.Score(metric, query, property.Value.FloatArrayValue)));
+            return;
+        }
+    }
+
+    private bool TryValidateSegmentCandidate(
+        VectorIndexDefinition definition,
+        VectorSegmentCandidate candidate,
+        ReadOnlySpan<float> query,
+        out VectorSearchResult result)
+    {
+        result = default;
+        if (!MatchesOwner(candidate.Owner, definition.Target)
+            || !_propKeyTokens.TryGet(
+                definition.Target.PropertyKey,
+                out PropertyKeyId keyId))
+            return false;
+
+        PropertyCursor properties = candidate.Owner.Kind switch
+        {
+            EntityKind.Vertex => _inner.Vertices.EnumerateProperties(
+                new VertexId(candidate.Owner.Value),
+                _inner.Properties),
+            EntityKind.Edge => _inner.Edges.EnumerateProperties(
+                new EdgeId(candidate.Owner.Value),
+                _inner.Properties),
+            EntityKind.Nexus => _inner.Nexuses.EnumerateProperties(
+                new NexusId(candidate.Owner.Value),
+                _inner.Properties),
+            _ => default,
+        };
+        while (properties.MoveNext())
+        {
+            PropertyEntry property = properties.Current;
+            if (property.KeyId != keyId
+                || property.Value.Type != PropertyValueType.FloatArray
+                || property.Value.FloatArrayValue.Length != definition.Dimensions
+                || VectorPayloadChecksum.Compute(property.Value.FloatArrayValue)
+                    != candidate.PayloadChecksum)
+                continue;
+            result = new(
+                candidate.Owner,
+                VectorMetrics.Score(
+                    definition.Metric,
+                    query,
+                    property.Value.FloatArrayValue));
+            return true;
+        }
+        return false;
+    }
+
+    private void RemoveVectorIndexEntries(Core.EntityRef owner, string propertyKey)
+    {
+        PropertyOwnerKind ownerKind = owner.Kind switch
+        {
+            Core.EntityKind.Vertex => PropertyOwnerKind.Vertex,
+            Core.EntityKind.Edge => PropertyOwnerKind.Edge,
+            Core.EntityKind.Nexus => PropertyOwnerKind.Nexus,
+            _ => throw new ArgumentOutOfRangeException(nameof(owner)),
+        };
+        foreach (IndexInfo index in _schema.ListIndexes())
+        {
+            if (index.Definition is VectorIndexDefinition vectorIndex
+                && vectorIndex.Target.OwnerKind == ownerKind
+                && vectorIndex.Target.PropertyKey == propertyKey)
+            {
+                StageVectorMutation(VectorSegmentMutation.Tombstone(vectorIndex, owner));
+            }
+        }
+    }
+
+    private void StageVectorMutation(VectorSegmentMutation mutation)
+    {
+        if (_vectorSegments is null)
+            return;
+        if (_vectorMutations is null)
+        {
+            _vectorMutations = [];
+            _inner.OnCommitted(PublishVectorMutations);
+        }
+        _vectorMutations.Add(mutation);
+    }
+
+    private void PublishVectorMutations()
+    {
+        if (_vectorSegments is null || _vectorMutations is not { Count: > 0 })
+            return;
+        _vectorSegments.PublishDelta(_inner.Id.Value, _vectorMutations);
     }
 
     // ========== Nexus操作 ==========
@@ -1463,6 +1783,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         if (removed)
         {
             _columns?.OnRemoveProperty(Core.EntityKind.Nexus, nexusId.Sequence, keyId, _inner.Id.Value);
+            RemoveVectorIndexEntries(PropertyOwner(nexusId), key);
             if (_logicalSink != null)
                 RecordLogical(LogicalMutation.RemoveNexusProperty(nexusId, key));
         }
@@ -1773,5 +2094,41 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
                     => string.Compare(Text, other.Text, StringComparison.Ordinal),
                 _ => 0,
             };
+    }
+}
+
+internal sealed class TransactionVectorSearchCursor : VectorSearchCursor
+{
+    private readonly VectorSearchCursor _inner;
+    private readonly TransactionUsageGuard _guard;
+
+    internal TransactionVectorSearchCursor(
+        VectorSearchCursor inner,
+        TransactionUsageLease usage)
+    {
+        _inner = inner;
+        _guard = usage.Guard;
+        usage.Dispose();
+    }
+
+    public override bool MoveNext()
+    {
+        using var usage = _guard.Enter();
+        return _inner.MoveNext();
+    }
+
+    public override VectorSearchResult Current
+    {
+        get
+        {
+            using var usage = _guard.Enter();
+            return _inner.Current;
+        }
+    }
+
+    public override void Dispose()
+    {
+        using var usage = _guard.Enter();
+        _inner.Dispose();
     }
 }

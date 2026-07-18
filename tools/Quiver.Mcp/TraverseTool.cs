@@ -188,7 +188,7 @@ internal static class TraverseTool
                         "Embedding is not configured. Set 'embedding' in quiver-mcp.json.");
                 // テキストを embedding API でベクトル化し、KNN 検索にかける
                 var vectors = await embedder.EmbedAsync([start.Query]);
-                var vecIndexName = FindVectorIndex(db.Vectors, start.Label);
+                var vecIndexName = FindVectorIndex(db.Schema, start.Label);
                 return g.Knn(vecIndexName, vectors[0], limit).ToList();
             }
             case "label":
@@ -478,9 +478,13 @@ internal static class TraverseTool
             : throw new InvalidOperationException("No full-text index found.");
     }
 
-    private static string FindVectorIndex(IVectorStore vectors, string? label)
+    private static string FindVectorIndex(ISchemaCatalog schema, string? label)
     {
-        var vecIndexes = vectors.ListVectorIndexes();
+        var vecIndexes = schema.ListIndexes()
+            .Select(static index => index.Definition)
+            .OfType<VectorIndexDefinition>()
+            .Where(index => string.IsNullOrEmpty(label) || index.Target.Scope == label)
+            .ToList();
         return vecIndexes.Count > 0
             ? vecIndexes[0].Name
             : throw new InvalidOperationException("No vector index found.");

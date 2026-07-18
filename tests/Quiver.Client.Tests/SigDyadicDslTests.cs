@@ -21,15 +21,15 @@ public sealed class SigDyadicDslTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "quiver_sig_dsl_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
 
-        PropertyKeyId keyId;
         using (var schemaTx = _db.BeginWriteTransaction())
         {
-            keyId = schemaTx.EditSchema.GetOrCreatePropertyKey(VecIndex);
+            schemaTx.EditSchema.GetOrCreatePropertyKey(VecIndex);
+            schemaTx.EditSchema.CreateIndex(new VectorIndexDefinition(
+                VecIndex,
+                new PropertyTarget(PropertyOwnerKind.Vertex, VecIndex, "Signal"),
+                Dim));
             schemaTx.Commit();
         }
-        _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            VecIndex, EntityKind.Vertex, keyId, Dim,
-            DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly));
 
         using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < 5; i++)
@@ -38,8 +38,7 @@ public sealed class SigDyadicDslTests : IDisposable
             tx.SetProperty(nid, "Site", PropertyValue.FromString($"S{i}"));
             var vec = new float[Dim];
             vec[i % Dim] = 1f;
-            tx.SetVector(EntityKind.Vertex, nid.Value, VecIndex, vec);
-            tx.SetProperty(nid, "Embedding", PropertyValue.FromFloatArray(vec));
+            tx.SetVectorProperty(EntityRef.From(nid), VecIndex, vec);
         }
         tx.Commit();
     }

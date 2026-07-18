@@ -6,15 +6,11 @@ using Quiver.Testing;
 namespace Quiver.Benchmarks;
 
 /// <summary>
-/// Persistent HNSW ANN search vs brute-force flat scan over the same
-/// in-file corpus, exercised through the public <see cref="QuiverDatabase"/> surface
-/// (so the persistent <c>PersistentVectorStore</c> + <c>HnswIndex</c> path is measured,
-/// not the in-memory reference store).
+/// Immutable HNSW segment search vs brute-force primary scan over the same
+/// in-file corpus, exercised through the public transaction surface.
 ///
-/// <para><c>HnswSearch</c> = <see cref="Core.IVectorStore.KnnSearch"/> (HNSW graph)。
-/// <c>ExactFlatScan</c> は persistent payload を直接全走査する内部 baseline であり、
-/// HNSW を一切経由しない。HNSW should be markedly faster as N grows while keeping high
-/// recall (verified by the RecallCheck recall gate).</para>
+/// <para>transaction-scoped KNN の検索コストを測定する。
+/// recall は RecallCheck の独立 gate で検証する。</para>
 /// </summary>
 [MemoryDiagnoser]
 [ShortRunJob]
@@ -39,9 +35,14 @@ public class HnswSearchBenchmarks
         var rng = new Random(VectorRecallCorpus.Seed);
         _dir = BenchTempDir.Create("hnsw");
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Vertex, _db.EditSchema(schema => schema.GetOrCreatePropertyKey("t")),
-            Dim, DistanceMetric.Cosine, "bench"));
+        _db.EditSchema(schema =>
+        {
+            schema.GetOrCreatePropertyKey("embedding");
+            schema.CreateIndex(new VectorIndexDefinition(
+                IndexName,
+                new PropertyTarget(PropertyOwnerKind.Vertex, "embedding", "Doc"),
+                Dim));
+        });
 
         var buf = new float[Dim];
         using (var tx = _db.BeginWriteTransaction())
@@ -50,7 +51,7 @@ public class HnswSearchBenchmarks
             {
                 VectorRecallCorpus.Fill(rng, buf);
                 var n = tx.CreateVertex("Doc");
-                _db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, buf);
+                tx.SetVectorProperty(EntityRef.From(n), "embedding", buf);
             }
             tx.Commit();
         }
@@ -67,11 +68,11 @@ public class HnswSearchBenchmarks
     }
 
     [Benchmark(Baseline = true)]
-    public float ExactFlatScan()
+    public float FirstSearch()
     {
         float acc = 0f;
-        var store = (AutocommitVectorStore)_db.Vectors;
-        using var c = store.KnnSearchExact(IndexName, _query, K);
+        using var tx = _db.BeginReadTransaction();
+        using var c = tx.KnnSearch(IndexName, _query, K);
         while (c.MoveNext()) acc += c.Current.Score;
         return acc;
     }
@@ -80,7 +81,8 @@ public class HnswSearchBenchmarks
     public float HnswSearch()
     {
         float acc = 0f;
-        using var c = _db.Vectors.KnnSearch(IndexName, _query, K);
+        using var tx = _db.BeginReadTransaction();
+        using var c = tx.KnnSearch(IndexName, _query, K);
         while (c.MoveNext()) acc += c.Current.Score;
         return acc;
     }

@@ -33,9 +33,14 @@ public class FusionOperatorBench
         _dir = BenchTempDir.Create("fusion");
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         _db.EditSchema(schema => schema.CreateFullTextIndex(TextIndex, "Doc", "body"));
-        var keyId = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("embed"));
-        _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            VectorIndex, EntityKind.Vertex, keyId, Dim, DistanceMetric.Cosine, "bench", null));
+        _db.EditSchema(schema =>
+        {
+            schema.GetOrCreatePropertyKey("embed");
+            schema.CreateIndex(new VectorIndexDefinition(
+                VectorIndex,
+                new PropertyTarget(PropertyOwnerKind.Vertex, "embed", "Doc"),
+                Dim));
+        });
 
         var rng = new Random(2026);
         var buf = new float[Dim];
@@ -47,7 +52,7 @@ public class FusionOperatorBench
                 tx.SetProperty(n, "body",
                     PropertyValue.FromString($"alpha beta gamma doc number {i} unique{i:D4}"));
                 for (int d = 0; d < Dim; d++) buf[d] = (float)(rng.NextDouble() * 2.0 - 1.0);
-                _db.Vectors.SetVector(EntityKind.Vertex, n.Value, VectorIndex, buf);
+                tx.SetVectorProperty(EntityRef.From(n), "embed", buf);
             }
             tx.Commit();
         }

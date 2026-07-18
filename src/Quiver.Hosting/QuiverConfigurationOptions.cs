@@ -23,9 +23,6 @@ public sealed class QuiverConfigurationOptions
     /// <summary>バッファプールの目標サイズ (バイト単位)。既定 256 MB。</summary>
     public long BufferPoolSize { get; set; } = 256L * 1024 * 1024;
 
-    /// <summary>全 vector index で共有する payload slab cache 上限。既定 64 MB。0 以下で無効。</summary>
-    public long VectorCacheBudgetBytes { get; set; } = 64L * 1024 * 1024;
-
     /// <summary>チェックポイント契機の WAL 成長しきい値 (バイト単位)。既定 64 MB。</summary>
     public long CheckpointThresholdBytes { get; set; } = 64L * 1024 * 1024;
 
@@ -67,7 +64,6 @@ public sealed class QuiverConfigurationOptions
         return new QuiverDatabaseOptions
         {
             BufferPoolSize = BufferPoolSize,
-            VectorCacheBudgetBytes = VectorCacheBudgetBytes,
             CheckpointThresholdBytes = CheckpointThresholdBytes,
             CheckpointPolicy = CheckpointPolicy,
             TargetRecoveryTime = TargetRecoveryTime,

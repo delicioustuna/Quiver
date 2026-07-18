@@ -637,14 +637,15 @@ public sealed class VacuumTests : IDisposable
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         const string indexName = "facts";
-        db.Vectors.CreateVectorIndex(new Core.VectorIndexSpec(
-            indexName,
-            Core.EntityKind.Nexus,
-            db.EditSchema(schema => schema.GetOrCreatePropertyKey("embedding")),
-            2,
-            Core.DistanceMetric.Dot,
-            "test",
-            null));
+        using (var schema = db.BeginWriteTransaction())
+        {
+            schema.EditSchema.CreateIndex(new VectorIndexDefinition(
+                indexName,
+                new PropertyTarget(PropertyOwnerKind.Nexus, "embedding", "Fact"),
+                2,
+                Core.DistanceMetric.Dot));
+            schema.Commit();
+        }
 
         Core.VertexId a, b;
         Core.NexusId old;
@@ -653,7 +654,7 @@ public sealed class VacuumTests : IDisposable
             a = tx.CreateVertex("Entity");
             b = tx.CreateVertex("Entity");
             old = tx.CreateNexus("Fact", [new("S", a), new("O", b)]);
-            tx.SetVector(Core.EntityKind.Nexus, old.Value, indexName, [1f, 0f]);
+            tx.SetVectorProperty(Core.EntityRef.From(old), "embedding", [1f, 0f]);
             tx.Commit();
         }
 
@@ -674,9 +675,10 @@ public sealed class VacuumTests : IDisposable
         reused.Generation.Should().Be(old.Generation + 1);
 
         Span<float> vector = stackalloc float[2];
-        db.Vectors.TryGetVector(Core.EntityKind.Nexus, reused.Value, indexName, vector)
+        using var read = db.BeginReadTransaction();
+        read.TryGetVectorProperty(Core.EntityRef.From(reused), "embedding", vector)
             .Should().BeFalse("残存 payload の世代は再利用後の entity と一致しない");
-        using var results = db.Vectors.KnnSearch(indexName, [1f, 0f], 10);
+        using var results = read.KnnSearch(indexName, [1f, 0f], 10);
         results.MoveNext().Should().BeFalse();
     }
 

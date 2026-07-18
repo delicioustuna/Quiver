@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Channels;
+using Quiver;
 using Quiver.Core;
 using Quiver.Embedding.Providers;
 using Quiver.Embedding.Text;
+using Quiver.Storage.Records;
 using Quiver.Text;
 using Quiver.Transactions;
 
@@ -12,8 +14,7 @@ namespace Quiver.Embedding;
 /// <summary>
 /// テキストからベクトルを生成して保存するパイプライン。
 /// <c>normalize → emoji policy → truncate → hash → dedup → embed → SetVector
-/// → MarkCompleted</c> の処理を <see cref="IGraphEngine"/> アダプタ上で組み立て、
-/// エンジン内部へのコンパイル時依存を持たない。
+/// → MarkCompleted</c> の処理を transaction-scoped vector property API 上で組み立てる。
 /// </summary>
 /// <remarks>
 /// 入口は次の 3 つ。
@@ -28,7 +29,7 @@ namespace Quiver.Embedding;
 /// </remarks>
 public sealed class TextEmbeddingPipeline : IAsyncDisposable
 {
-    private readonly IGraphEngine _engine;
+    private readonly QuiverDatabase _database;
     private readonly IEmbeddingProvider _provider;
     private readonly ITextNormalizer _normalizer;
     private readonly ITextTruncator _truncator;
@@ -41,7 +42,7 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
     private int _pending;
 
     public TextEmbeddingPipeline(
-        IGraphEngine engine,
+        QuiverDatabase database,
         IEmbeddingProvider provider,
         ITextNormalizer normalizer,
         ITextTruncator truncator,
@@ -49,7 +50,7 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
         IRetryPolicy retryPolicy,
         TextEmbeddingPipelineOptions? options = null)
     {
-        _engine = engine ?? throw new ArgumentNullException(nameof(engine));
+        _database = database ?? throw new ArgumentNullException(nameof(database));
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         _normalizer = normalizer ?? throw new ArgumentNullException(nameof(normalizer));
         _truncator = truncator ?? throw new ArgumentNullException(nameof(truncator));
@@ -81,15 +82,19 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
     /// </summary>
     public async ValueTask EnqueueAsync(
         EntityRef entity,
-        string indexName,
+        string targetPropertyName,
         string sourceText,
         CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrEmpty(indexName);
+        ArgumentException.ThrowIfNullOrEmpty(targetPropertyName);
         ArgumentNullException.ThrowIfNull(sourceText);
 
         var prepared = Prepare(sourceText);
-        var key = new EmbeddingTaskKey(entity.Kind, entity.Sequence, indexName, _provider.ProviderId);
+        var key = new EmbeddingTaskKey(
+            entity,
+            targetPropertyName,
+            _provider.ProviderId,
+            _options.NormalizationProfile);
 
         var info = await _taskLog.GetInfoAsync(key, ct).ConfigureAwait(false);
         if (info.State == EmbeddingTaskState.Completed && info.LastContentHash == prepared.ContentHash)
@@ -100,7 +105,7 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
         {
             if (_options.Backpressure == BackpressureMode.ThrowOnFull)
             {
-                if (!_channel.Writer.TryWrite(new QueueItem(entity, indexName, prepared)))
+                if (!_channel.Writer.TryWrite(new QueueItem(entity, targetPropertyName, prepared)))
                 {
                     Interlocked.Decrement(ref _pending);
                     throw new InvalidOperationException(
@@ -109,7 +114,7 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
             }
             else
             {
-                await _channel.Writer.WriteAsync(new QueueItem(entity, indexName, prepared), ct)
+                await _channel.Writer.WriteAsync(new QueueItem(entity, targetPropertyName, prepared), ct)
                     .ConfigureAwait(false);
             }
         }
@@ -128,24 +133,24 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
     public void EnqueueOnCommit(
         ICommitHookRegistrar tx,
         EntityRef entity,
-        string indexName,
+        string targetPropertyName,
         string sourceText)
     {
         ArgumentNullException.ThrowIfNull(tx);
-        ArgumentException.ThrowIfNullOrEmpty(indexName);
+        ArgumentException.ThrowIfNullOrEmpty(targetPropertyName);
         ArgumentNullException.ThrowIfNull(sourceText);
 
         tx.OnCommitted(() =>
         {
             // フックの契約上、例外はキャッチされて無視される — それでもベストエフォートで enqueue を試みる。
             // fire-and-forget。ここで取りこぼした分は ScanAndEnqueueAsync が拾う。
-            _ = EnqueueAsync(entity, indexName, sourceText, CancellationToken.None);
+            _ = EnqueueAsync(entity, targetPropertyName, sourceText, CancellationToken.None);
         });
     }
 
     /// <summary>
     /// クエリ文字列をプロバイダ経由で同期的に埋め込み、
-    /// <c>IVectorStore.KnnSearch</c> に渡せる生ベクトルを返す。
+    /// <see cref="IReadTransaction.KnnSearch"/> に渡せる生ベクトルを返す。
     /// キューとタスクログをバイパスする経路。
     /// </summary>
     public async ValueTask<ReadOnlyMemory<float>> EmbedQueryAsync(string queryText, CancellationToken ct)
@@ -169,12 +174,16 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
         // await をまたいでセッションを保持しないよう、1 セッション内でエンティティ一覧を
         // 一度にマテリアライズする。
         var staged = new List<(EntityRef Entity, string Text)>();
-        using (var session = _engine.BeginRead())
+        using (var transaction = _database.BeginReadTransaction())
         {
-            foreach (var entity in session.EnumerateEntities(spec.Kind))
+            foreach (EntityRef entity in EnumerateEntities(transaction, spec.Kind))
             {
                 ct.ThrowIfCancellationRequested();
-                if (!session.TryReadStringProperty(entity, spec.SourcePropertyName, out var text))
+                if (!TryReadStringProperty(
+                        transaction,
+                        entity,
+                        spec.SourcePropertyName,
+                        out string text))
                     continue;
                 staged.Add((entity, text));
             }
@@ -183,7 +192,7 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
         foreach (var (entity, text) in staged)
         {
             ct.ThrowIfCancellationRequested();
-            await EnqueueAsync(entity, spec.TargetIndexName, text, ct).ConfigureAwait(false);
+            await EnqueueAsync(entity, spec.TargetPropertyName, text, ct).ConfigureAwait(false);
         }
     }
 
@@ -221,7 +230,11 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
 
     private async Task ProcessAsync(QueueItem item, CancellationToken ct)
     {
-        var key = new EmbeddingTaskKey(item.Entity.Kind, item.Entity.Sequence, item.IndexName, _provider.ProviderId);
+        var key = new EmbeddingTaskKey(
+            item.Entity,
+            item.TargetPropertyName,
+            _provider.ProviderId,
+            _options.NormalizationProfile);
 
         await _taskLog.MarkInProgressAsync(key, item.Prepared.ContentHash, ct).ConfigureAwait(false);
 
@@ -239,7 +252,14 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
                     throw new InvalidOperationException(
                         $"Provider '{_provider.ProviderId}' returned {result.Vector.Length} dims, expected {_provider.Dimensions}.");
                 }
-                _engine.Vectors.SetVector(item.Entity.Kind, item.Entity.Sequence, item.IndexName, result.Vector.Span);
+                using (var transaction = _database.BeginWriteTransaction())
+                {
+                    transaction.SetVectorProperty(
+                        item.Entity,
+                        item.TargetPropertyName,
+                        result.Vector.Span);
+                    transaction.Commit();
+                }
                 await _taskLog.MarkCompletedAsync(key, item.Prepared.ContentHash, ct).ConfigureAwait(false);
                 return;
             }
@@ -285,5 +305,54 @@ public sealed class TextEmbeddingPipeline : IAsyncDisposable
 
     private readonly record struct PreparedText(string Text, string ContentHash);
 
-    private readonly record struct QueueItem(EntityRef Entity, string IndexName, PreparedText Prepared);
+    private static IEnumerable<EntityRef> EnumerateEntities(
+        IReadTransaction transaction,
+        EntityKind kind)
+        => kind switch
+        {
+            EntityKind.Vertex => transaction.Query.Vertices().ToList().Select(EntityRef.From),
+            EntityKind.Edge => transaction.Query.Edges().ToList().Select(EntityRef.From),
+            EntityKind.Nexus => transaction.Query.Nexuses().ToList().Select(EntityRef.From),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+        };
+
+    private static bool TryReadStringProperty(
+        IReadTransaction transaction,
+        EntityRef entity,
+        string propertyKey,
+        out string text)
+    {
+        PropertyValue value;
+        switch (entity.Kind)
+        {
+            case EntityKind.Vertex:
+                var vertex = new VertexId(entity.Value);
+                value = transaction.GetProperty(vertex, propertyKey);
+                break;
+            case EntityKind.Edge:
+                var edge = new EdgeId(entity.Value);
+                value = transaction.GetProperty(edge, propertyKey);
+                break;
+            case EntityKind.Nexus:
+                var nexus = new NexusId(entity.Value);
+                value = transaction.GetProperty(nexus, propertyKey);
+                break;
+            default:
+                text = string.Empty;
+                return false;
+        }
+
+        if (value.Type != PropertyValueType.String)
+        {
+            text = string.Empty;
+            return false;
+        }
+        text = Encoding.UTF8.GetString(value.Utf8StringValue);
+        return true;
+    }
+
+    private readonly record struct QueueItem(
+        EntityRef Entity,
+        string TargetPropertyName,
+        PreparedText Prepared);
 }

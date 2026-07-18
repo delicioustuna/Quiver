@@ -38,8 +38,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     private const byte TenantEdgeMap = 15;
     // opt-in 列の catalog テナント (各列テナントは ColumnCatalog が 64+ で採番)。
     private const byte TenantColumnCatalog = 16;
-    // 永続ベクトルインデックスの catalog テナント (各 index の payload/HNSW テナントは
-    // VectorIndexCatalog が 200+ で採番)。
+    // transactional vector definition catalog の固定テナント。
     private const byte TenantVectorCatalog = 17;
     // 第一級Nexus。18..24 は固定 tenant で、後続 store 実装でも変更しない。
     internal const byte TenantNexusHeap = 18;
@@ -264,18 +263,9 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var columnManager = new ColumnManager(
             container, TenantColumnCatalog, edgeStore, vertexStore, nexusStore, propStore);
 
-        // ベクトル payload を container テナントへ永続化するストア。InMemoryVectorStore を置換し、
-        // 再起動を跨いで KNN を再現する。書き込みは container WAL に乗るので tx 配下なら原子整合する。
-        // (kind, seq) → 現世代 resolver を渡し、slot 再利用で化けた stale binding を弾く。
-        var vectors = new PersistentVectorStore(container, TenantVectorCatalog,
-            (kind, seq) => kind switch
-            {
-                Core.EntityKind.Vertex => vertexStore.CurrentGeneration(seq),
-                Core.EntityKind.Edge => edgeStore.CurrentGeneration(seq),
-                Core.EntityKind.Nexus => nexusStore.CurrentGeneration(seq),
-                _ => -1,
-            },
-            options.VectorCacheBudgetBytes);
+        var vectorDefinitions = new PersistentVectorDefinitionCatalog(
+            container,
+            TenantVectorCatalog);
 
         // abort の before-image 復元後に container のテナント記述子 / page table と store メタを
         // 再同期するコールバック。AbortUndoHandler が before-image 復元後に呼ぶ。
@@ -301,9 +291,9 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             // head ページが tx 開始前へ戻るので、列の in-memory cache をページから再構築して
             // head 値の正当性を回復する。delta の中止 tx 分は OnRolledBack の PruneAbortedTx で掃除。
             columnManager.ReloadColumns();
-            // ベクトル payload / catalog ページも container WAL 対象。abort の before-image
-            // undo でページが tx 開始前へ戻るので、in-memory の catalog / payload meta を読み直す。
-            vectors.ReloadAll();
+            // definition catalog も container WAL 対象なので、abort undo 後は
+            // page の winner state から in-memory view を再構成する。
+            vectorDefinitions.Reload();
             // B+Tree 索引 (secondary + 全文 postings/norms) の in-memory ヘッダキャッシュ
             // (root / entryCount / height) も abort で戻ったページから読み直す。これが無いと
             // EntryCount が陳腐化し、索引 split を含む tx の abort で root/height が不整合になる。
@@ -311,7 +301,10 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         }
 
         var access = new BinaryGraphAccessMethods(
-            vectors,
+            vectorDefinitions,
+            labelTokens,
+            edgeTypeTokens,
+            nexusTypeTokens,
             new EdgeDeltaStore(edgeDeltas));
 
         // LabelId をキーとする in-memory 転置索引。ラベル付き scan が O(N) ではなく O(|L|) で走る。
@@ -375,7 +368,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         var backend = new BinaryGraphStorageBackend(
             filePath, container, pageManager, wal, vertexStore, edgeStore, propStore,
             labelTokens, edgeTypeTokens, propKeyTokens, nexusTypeTokens, roleTokens, indexManager,
-            adjStore, txManager, access, vectors,
+            adjStore, txManager, access, vectorDefinitions,
             columnManager,
             coMembershipStore,
             labelIndex,

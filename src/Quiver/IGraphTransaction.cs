@@ -80,8 +80,24 @@ public interface IReadTransaction : IDisposable
         in PropertyValue from, bool fromInclusive,
         in PropertyValue to, bool toInclusive);
 
-    /// <summary>格納済みベクトルを読み出す。</summary>
-    bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination);
+    /// <summary>
+    /// 指定 owner の vector property を現在のsnapshotから読み出す。
+    /// </summary>
+    bool TryGetVectorProperty(EntityRef owner, string propertyKey, Span<float> destination);
+
+    /// <summary>指定vector indexを現在のsnapshotで検索する。</summary>
+    VectorSearchCursor KnnSearch(
+        string indexName,
+        ReadOnlySpan<float> query,
+        int k,
+        VectorSearchOptions? options = null);
+
+    /// <summary>複数のquery vectorを同じsnapshotで検索する。</summary>
+    IReadOnlyList<VectorSearchCursor> KnnSearchBatch(
+        string indexName,
+        IReadOnlyList<ReadOnlyMemory<float>> queries,
+        int k,
+        VectorSearchOptions? options = null);
 
     /// <summary>Nexusのメンバーを列挙する。</summary>
     NexusMemberEnumerator GetMembers(NexusId nexusId, string? role = null);
@@ -152,13 +168,11 @@ public interface IWriteTransaction : IReadTransaction, ICommitHookRegistrar
     /// <inheritdoc cref="RemovePropertyValue(VertexId, string, in PropertyValue)"/>
     void RemovePropertyValue(EdgeId edgeId, string key, in PropertyValue value);
 
-    /// <summary>このトランザクション内でベクトルを設定する。</summary>
-    void SetVector(EntityKind kind, long entityId, string indexName, ReadOnlySpan<float> vector)
-        => throw new NotSupportedException("This backend does not support transaction-scoped SetVector.");
-
-    /// <summary>このトランザクション内でベクトルを論理削除する。</summary>
-    void RemoveVector(EntityKind kind, long entityId, string indexName)
-        => throw new NotSupportedException("This backend does not support transaction-scoped RemoveVector.");
+    /// <summary>
+    /// 指定 owner のvector propertyを設定する。
+    /// vector indexの有無はpropertyの保存可否に影響しない。
+    /// </summary>
+    void SetVectorProperty(EntityRef owner, string propertyKey, ReadOnlySpan<float> vector);
 
     /// <summary>指定型と参加メンバーでNexusを作成する。</summary>
     NexusId CreateNexus(string type, ReadOnlySpan<NexusMember> members);

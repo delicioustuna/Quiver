@@ -96,9 +96,9 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | 用語 | 定義 |
 |---|---|
 | **KNN (K-Nearest Neighbors)** | クエリベクトルに最も近い k 件を返す近傍探索 |
-| **HNSW (Hierarchical Navigable Small World)** | 近似最近傍探索のためのグラフベースインデックス。Quiver では `*.quiver` ファイル内にページベースで永続化する |
+| **HNSW (Hierarchical Navigable Small World)** | 近似最近傍探索のためのグラフベースインデックス。Quiver では read snapshot から immutable artifact を構築する |
 | **VectorMetric** | 距離関数の種類。`Euclidean`、`Cosine`、`Dot` から選択する |
-| **VectorIndexSpec** | ベクトルインデックスの定義。次元数、メトリクス、対象 EntityKind を指定する |
+| **VectorIndexDefinition** | ベクトルインデックスの定義。対象 property、scope、次元数、metric、segment policy を指定する |
 | **graph-first ハイブリッド** | グラフフィルタ（トラバーサル）を先に評価し、絞り込んだ候補集合に対して KNN を実行するパターン |
 
 ## ダイアディック演算

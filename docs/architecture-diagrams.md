@@ -23,7 +23,7 @@ flowchart TB
         TxMgr["Transaction Manager<br/>MVCC / Checkpoint"]
         Index["B+Tree / FullTextIndex"]
         Records["VertexStore / EdgeStore<br/>PropertyStore"]
-        Vector["PersistentVectorStore + HNSW"]
+        Vector["Vector property + immutable HNSW segments"]
         WAL["Write-Ahead Log"]
         Storage["PagedFile / バッファプール"]
     end

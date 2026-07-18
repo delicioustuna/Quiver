@@ -36,10 +36,11 @@ public sealed class RagStoreInitializationTests : IDisposable
         db.Schema.IndexExists(RagSchema.DocSourceIndex).Should().BeTrue();
 
         // ベクトル索引 (次元・尺度が options どおり)。
-        db.Vectors.TryGetIndex(RagSchema.ChunkVectorIndex, out var spec).Should().BeTrue();
-        spec.Dimensions.Should().Be(8);
-        spec.Metric.Should().Be(DistanceMetric.Cosine);
-        spec.EntityKind.Should().Be(EntityKind.Vertex);
+        db.Schema.TryGetIndex(RagSchema.ChunkVectorIndex, out var info).Should().BeTrue();
+        var definition = info.Definition.Should().BeOfType<VectorIndexDefinition>().Subject;
+        definition.Dimensions.Should().Be(8);
+        definition.Metric.Should().Be(DistanceMetric.Cosine);
+        definition.Target.OwnerKind.Should().Be(PropertyOwnerKind.Vertex);
 
         // 全文索引 (binary backend は対応)。
         store.FullTextEnabled.Should().BeTrue();
@@ -76,7 +77,7 @@ public sealed class RagStoreInitializationTests : IDisposable
             var store = new RagStore(db, Options());
             store.FullTextEnabled.Should().BeTrue();
             db.Schema.IndexExists(RagSchema.DocSourceIndex).Should().BeTrue();
-            db.Vectors.TryGetIndex(RagSchema.ChunkVectorIndex, out _).Should().BeTrue();
+            db.Schema.TryGetIndex(RagSchema.ChunkVectorIndex, out _).Should().BeTrue();
             db.Schema.ListFullTextIndexes().Count(i => i.Name == RagSchema.ChunkTextIndex).Should().Be(1);
         }
     }
@@ -91,7 +92,7 @@ public sealed class RagStoreInitializationTests : IDisposable
         db.Schema.ListFullTextIndexes().Select(i => i.Name)
             .Should().NotContain(RagSchema.ChunkTextIndex);
         // ベクトル索引は引き続き作られる。
-        db.Vectors.TryGetIndex(RagSchema.ChunkVectorIndex, out _).Should().BeTrue();
+        db.Schema.TryGetIndex(RagSchema.ChunkVectorIndex, out _).Should().BeTrue();
     }
 
     [Fact]
@@ -106,9 +107,10 @@ public sealed class RagStoreInitializationTests : IDisposable
         });
 
         store.VectorIndexName.Should().Be("my_embeddings");
-        db.Vectors.TryGetIndex("my_embeddings", out var spec).Should().BeTrue();
-        spec.Dimensions.Should().Be(16);
-        spec.Metric.Should().Be(DistanceMetric.Dot);
+        db.Schema.TryGetIndex("my_embeddings", out var info).Should().BeTrue();
+        var definition = info.Definition.Should().BeOfType<VectorIndexDefinition>().Subject;
+        definition.Dimensions.Should().Be(16);
+        definition.Metric.Should().Be(DistanceMetric.Dot);
     }
 
     [Fact]

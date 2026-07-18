@@ -56,12 +56,12 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 │  Storage Engine                                 │
 │  ├─ PagedFile (8 KB pages, Clock buffer pool)   │
 │  ├─ SingleFileContainer (*.quiver)              │
-│  ├─ Versioned Vertex / Edge / Nexus stores   │
-│  ├─ PropertyVersionStore / payload stores    │
-│  ├─ Incidence / AdjacencySegment stores      │
+│  ├─ Versioned Vertex / Edge / Nexus stores      │
+│  ├─ PropertyVersionStore / payload stores       │
+│  ├─ Incidence / AdjacencySegment stores         │
 │  ├─ B+Tree indexes                              │
 │  ├─ FullTextIndex (postings + norms B+Trees)    │
-│  └─ PersistentVectorStore + HNSW                │
+│  └─ Immutable vector segments + HNSW artifacts  │
 └─────────────────────────────────────────────────┘
 ```
 

@@ -61,16 +61,19 @@ internal sealed class HnswIndex
     // 決定的構築のための per-index 乱数 (seq を seed に混ぜて再現性を持たせる)。
     private readonly Random _rng = new(0x6D6E7377);
 
-    public HnswIndex(IPagedFile file, VectorIndexPayloadStore payload, VectorIndexSpec spec)
+    public HnswIndex(
+        IPagedFile file,
+        VectorIndexPayloadStore payload,
+        VectorIndexDescriptor descriptor)
     {
         _file = file;
         _payload = payload;
-        _metric = spec.Metric;
+        _metric = descriptor.Metric;
         _dim = payload.Dimensions;
-        _m = spec.HnswM;
-        _mmax0 = spec.HnswMMax0;
-        _efConstruction = spec.HnswEfConstruction;
-        _maxLayers = spec.HnswMaxLayers;
+        _m = descriptor.HnswM;
+        _mmax0 = descriptor.HnswMMax0;
+        _efConstruction = descriptor.HnswEfConstruction;
+        _maxLayers = descriptor.HnswMaxLayers;
         _ml = 1.0 / Math.Log(_m);
         _countsBytes = _maxLayers;
         int neighborSlots = checked(_mmax0 + (_maxLayers - 1) * _m);
@@ -294,7 +297,9 @@ internal sealed class HnswIndex
                 if (!_payload.TryGetForScoring(c.Seq, buf, out var vector, out var gen)) continue;
                 if (!isLive(c.Seq, gen)) continue;
                 heap.Offer(new VectorSearchResult(
-                    kind, c.Seq, VectorMetrics.Score(_metric, query, vector)));
+                    kind,
+                    EntityRef.PackLocal(c.Seq, gen),
+                    VectorMetrics.Score(_metric, query, vector)));
             }
         }
         finally { ArrayPool<float>.Shared.Return(buf); }

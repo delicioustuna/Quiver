@@ -12,7 +12,7 @@ namespace Quiver.Query.Physical;
 /// DSL 構築時にキャプチャした <see cref="DyadicScoreFunc"/> で各候補を <c>b</c> に対しスコアリングする。
 /// gather と score を 2 フェーズに分離し、ユーザ提供の演算子コードがストアロック保持中に走らないようにする。
 /// <para>
-/// <see cref="_oversample"/> が設定済みかつインデックスが <see cref="VectorIndexKind.HnswFlat"/> の場合、
+/// <see cref="_oversample"/> が設定済みの場合、
 /// HNSW がインデックス組み込みメトリクスで <c>k × oversample</c> 件を事前フィルタし、
 /// カスタム演算子がその候補のみを再ランクする 2 段パイプラインを使用する。
 /// </para>
@@ -32,7 +32,6 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
     private readonly int? _oversample;
 
     private VectorSearchResult[]? _results;
-    private Dictionary<long, long>? _logicalVertexIds;
     private int _resultIndex = -1;
     private readonly TupleSlot[] _buf = new TupleSlot[1];
 
@@ -87,22 +86,16 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
 
         _source.Open(tx);
 
-        var candidateIds = new List<long>();
-        _logicalVertexIds = new Dictionary<long, long>();
+        var candidateIds = new List<EntityRef>();
         while (_source.MoveNext())
         {
             var slot = _source.Current[_sourceVertexColumn];
             if (slot.Type != TupleSlotType.VertexId)
                 continue;
 
-            // vector key は physical Sequence だが、operator の出力は full logical ID である。
-            // primary Read 直後にだけ Sequence へ落とし、対応する full ID を結果復元用に保持する。
             using var vertex = tx.Vertices.Read(new VertexId(slot.LongValue));
             if (vertex.InUse)
-            {
-                candidateIds.Add(vertex.Id.Sequence);
-                _logicalVertexIds[vertex.Id.Sequence] = vertex.Id.Value;
-            }
+                candidateIds.Add(EntityRef.From(vertex.Id));
         }
 
         if (candidateIds.Count == 0)
@@ -111,16 +104,16 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
             return;
         }
 
-        if (!tx.Access.TryGetVectorIndexSpec(_indexName, out var spec))
+        if (!tx.Access.TryGetVectorIndex(_indexName, out var descriptor))
             throw new VectorException($"Vector index '{_indexName}' does not exist.");
 
         if (_oversample is not null)
         {
-            _results = OpenOversample(tx, bVector, candidateIds, spec);
+            _results = OpenOversample(tx, bVector, candidateIds, descriptor);
             return;
         }
 
-        _results = ScoreCandidates(tx, bVector, candidateIds, spec);
+        _results = ScoreCandidates(tx, bVector, candidateIds, descriptor);
     }
 
     /// <summary>
@@ -131,26 +124,26 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
     private VectorSearchResult[] OpenOversample(
         ITransaction tx,
         float[] bVector,
-        List<long> upstreamIds,
-        VectorIndexSpec spec)
+        List<EntityRef> upstreamIds,
+        VectorIndexDescriptor descriptor)
     {
-        if (spec.IndexKind == VectorIndexKind.FlatOnly)
-            throw new VectorException(
-                $"Vector index '{_indexName}' is FlatOnly and does not support HNSW oversample. " +
-                "Remove the oversample parameter or use a HnswFlat index.");
-
         int hnswK = checked(_k * _oversample!.Value);
-        var candidates = new EntityCandidateSet(EntityKind.Vertex, upstreamIds);
+        var candidates = upstreamIds.ToHashSet();
 
-        var narrowedIds = new List<long>();
-        using (var cursor = tx.Access.KnnSearchFiltered(_indexName, bVector, hnswK, candidates))
+        var narrowedIds = new List<EntityRef>();
+        using (var cursor = tx.Access.KnnSearchFiltered(
+                   tx,
+                   _indexName,
+                   bVector,
+                   hnswK,
+                   candidates))
         {
             while (cursor.MoveNext())
-                narrowedIds.Add(cursor.Current.EntityId);
+                narrowedIds.Add(cursor.Current.Owner);
         }
 
         if (narrowedIds.Count == 0) return [];
-        return ScoreCandidates(tx, bVector, narrowedIds, spec);
+        return ScoreCandidates(tx, bVector, narrowedIds, descriptor);
     }
 
     /// <summary>
@@ -160,10 +153,10 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
     private VectorSearchResult[] ScoreCandidates(
         ITransaction tx,
         float[] bVector,
-        List<long> candidateIds,
-        VectorIndexSpec spec)
+        List<EntityRef> candidateIds,
+        VectorIndexDescriptor descriptor)
     {
-        int dim = spec.Dimensions;
+        int dim = descriptor.Dimensions;
         ReadOnlySpan<Range> regionSpan = _regions.AsSpan();
         ReadOnlySpan<float> bSpan = bVector;
 
@@ -172,7 +165,7 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
         int chunk = Math.Min(ChunkSize, total);
 
         var gatherBuf = ArrayPool<float>.Shared.Rent(chunk * dim);
-        var gatherIds = ArrayPool<long>.Shared.Rent(chunk);
+        var gatherIds = ArrayPool<EntityRef>.Shared.Rent(chunk);
         try
         {
             int pos = 0;
@@ -185,7 +178,11 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
                 for (int i = pos; i < end; i++)
                 {
                     var dest = gatherBuf.AsSpan(gathered * dim, dim);
-                    if (tx.Access.TryGetVector(EntityKind.Vertex, candidateIds[i], _indexName, dest))
+                    if (tx.Access.TryGetVector(
+                            tx,
+                            candidateIds[i],
+                            _indexName,
+                            dest))
                     {
                         gatherIds[gathered] = candidateIds[i];
                         gathered++;
@@ -200,7 +197,7 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
                     if (float.IsNaN(score))
                         throw new VectorException(
                             $"Operator {_operatorType.Name} returned NaN for entity {gatherIds[i]}.");
-                    heap.Offer(new VectorSearchResult(EntityKind.Vertex, gatherIds[i], score));
+                    heap.Offer(new VectorSearchResult(gatherIds[i], score));
                 }
 
                 pos = end;
@@ -209,7 +206,7 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
         finally
         {
             ArrayPool<float>.Shared.Return(gatherBuf);
-            ArrayPool<long>.Shared.Return(gatherIds);
+            ArrayPool<EntityRef>.Shared.Return(gatherIds);
         }
 
         return heap.ToSortedArray();
@@ -219,10 +216,11 @@ internal sealed class ApplyDyadicOperator : IPhysicalOperator
     {
         if (++_resultIndex >= _results!.Length) return false;
         var hit = _results[_resultIndex];
-        if (!_logicalVertexIds!.TryGetValue(hit.EntityId, out long logicalVertexId))
-            throw new CorruptionException(
-                $"Vector result {hit.EntityId} was not present in the validated candidate set.");
-        _buf[0] = new TupleSlot { Type = TupleSlotType.VertexId, LongValue = logicalVertexId };
+        _buf[0] = new TupleSlot
+        {
+            Type = TupleSlotType.VertexId,
+            LongValue = hit.Owner.Value,
+        };
         var s = Statistics;
         s.RowsProduced++;
         Statistics = s;

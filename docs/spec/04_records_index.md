@@ -247,6 +247,15 @@ source snapshot より古い reader が残る間は publish を延期し、旧 r
 定義が `Ready` でない間の seek と range は、同じ読み取りスナップショットの primary scan へフォールバックする。
 フォールバックも同じ値比較と順序規則を使うため、artifact の状態によって結果集合を変えない。
 
+### ベクトル索引定義と segment lifecycle {#vector-index-lifecycle}
+
+`VectorIndexDefinition` は `PropertyTarget`、dimensions、metric、element type、HNSW 構築パラメタ、`VectorSegmentPolicy` を永続定義とする。
+vector property mutation は一致する definition ごとに commit-local flat delta segment を公開する。
+merge worker は read snapshot から immutable HNSW artifact を構築し、source manifest generation と definition が一致する場合だけ短い write transaction で新 manifest を公開する。
+old reader は旧 manifest を使い続け、新 reader だけが新 manifest を参照する。
+candidate は owner generation、property visibility、target、payload checksum を primary store で再検証する。
+derived state が不足する場合は同じ snapshot の primary property scan へフォールバックする。
+
 ### B+Tree WAL {#btree-journal}
 
 すべての B+Tree ページは同じ `PageImage` WAL 経路を使う。

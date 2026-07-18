@@ -21,7 +21,6 @@ public sealed class QuiverDatabase : IDisposable
     private readonly string _path;
     // AutoVacuum が有効なときのみ非 null。Dispose で停止する。
     private readonly AutoVacuumWorker? _autoVacuumWorker;
-    private Core.IVectorStore? _vectors;
 
     private QuiverDatabase(
         IGraphStorageBackend backend,
@@ -145,22 +144,6 @@ public sealed class QuiverDatabase : IDisposable
 
     /// <summary>統計取得・整合性検査などの診断 API。</summary>
     public IDiagnosticsApi Diagnostics => _backend.Diagnostics;
-
-    /// <summary>
-    /// バックエンドのベクトルストア。<c>CreateVectorIndex</c> や
-    /// <c>SetVector</c> は直接ここから呼ぶ。問い合わせ側のアクセスは
-    /// トラバーサルソースの <c>g.Knn(...)</c> 経由。
-    /// </summary>
-    public Core.IVectorStore Vectors => _vectors ??= new AutocommitVectorStore(
-        _backend.Vectors, BeginWriteTransaction);
-
-    /// <summary>
-    /// 埋め込みパイプライン (<c>Quiver.Embedding</c>) が消費する
-    /// <see cref="Core.IGraphEngine"/> ブリッジを生成する。グラフ読み取りと
-    /// <paramref name="vectors"/> / <paramref name="catalog"/> を 1 つのエンジン契約に束ねる。
-    /// </summary>
-    public Core.IGraphEngine CreateEmbeddingEngine(Core.IVectorStore vectors, Core.IVectorCatalog catalog)
-        => new GraphEngineAdapter(this, vectors, catalog);
 
     /// <summary>
     /// データベース全体をスキャンして新しい <see cref="GraphStats"/> スナップショットを返す。
@@ -385,12 +368,6 @@ public sealed class QuiverDatabaseOptions
 
     /// <summary>バッファプールの目標サイズ (バイト単位)。既定 256 MB。</summary>
     public long BufferPoolSize { get; set; } = 256 * 1024 * 1024;
-
-    /// <summary>
-    /// 全 vector index で共有する payload slab cache の上限 (バイト単位)。既定 64 MB。
-    /// 0 以下で無効。予算を超える range は永続ページから読み出すため、検索結果は変わらない。
-    /// </summary>
-    public long VectorCacheBudgetBytes { get; set; } = 64L * 1024 * 1024;
 
     /// <summary>
     /// チェックポイント契機のしきい値 (バイト単位)。前回チェックポイント以降に
