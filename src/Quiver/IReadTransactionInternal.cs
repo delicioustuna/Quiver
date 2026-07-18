@@ -6,12 +6,15 @@ using Quiver.Transactions;
 namespace Quiver;
 
 /// <summary>
-/// backend 非依存の内部トランザクション契約。公開 <see cref="IGraphTransaction"/> から
+/// backend 非依存の内部トランザクション契約。公開 <see cref="IReadTransaction"/> から
 /// 外した「物理プラン実行 / access methods / 隣接ブロック」を担い、エンジン内部と
 /// backend 衛星が実装する。API 利用者には露出しない。
 /// </summary>
-internal interface IGraphTransactionInternal : IGraphTransaction
+internal interface IReadTransactionInternal : IReadTransaction
 {
+    /// <summary>物理オペレータへ渡す snapshot-scoped store context。</summary>
+    ITransaction Inner { get; }
+
     TransactionId TransactionId { get; }
 
     /// <summary>
@@ -53,20 +56,19 @@ internal readonly record struct ColumnAggregate(
     Storage.Records.PropertyValueType ValueType);
 
 /// <summary>
-/// 旧 <see cref="IGraphTransaction"/> の物理実行 API を internal 拡張として温存し、
-/// 既存の呼び出し側 (DSL / テスト) を無改変で内部経路へ橋渡しする。
+/// 公開 read transaction を内部の物理実行契約へ橋渡しする。
 /// </summary>
 internal static class GraphTransactionInternalExtensions
 {
     /// <summary>公開ハンドルを内部契約へキャストする。</summary>
-    internal static IGraphTransactionInternal AsInternal(this IGraphTransaction tx)
-        => (IGraphTransactionInternal)tx;
+    internal static IReadTransactionInternal AsInternal(this IReadTransaction tx)
+        => (IReadTransactionInternal)tx;
 
-    /// <summary>物理プランを実行する (旧 <c>IGraphTransaction.Execute</c> 互換)。</summary>
-    internal static QueryResult Execute(this IGraphTransaction tx, IPhysicalOperator plan)
-        => ((IGraphTransactionInternal)tx).Execute(plan);
+    /// <summary>物理プランを実行する。</summary>
+    internal static QueryResult Execute(this IReadTransaction tx, IPhysicalOperator plan)
+        => ((IReadTransactionInternal)tx).Execute(plan);
 
-    /// <summary>物理プランをストリーミング実行する (旧 <c>IGraphTransaction.ExecuteCursor</c> 互換)。</summary>
-    internal static IQueryCursor ExecuteCursor(this IGraphTransaction tx, IPhysicalOperator plan)
-        => ((IGraphTransactionInternal)tx).ExecuteCursor(plan);
+    /// <summary>物理プランをストリーミング実行する。</summary>
+    internal static IQueryCursor ExecuteCursor(this IReadTransaction tx, IPhysicalOperator plan)
+        => ((IReadTransactionInternal)tx).ExecuteCursor(plan);
 }

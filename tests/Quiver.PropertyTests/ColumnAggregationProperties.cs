@@ -28,7 +28,7 @@ public class ColumnAggregationProperties
         {
             using var db = QuiverDatabase.Open(path);
             db.CreateColumn(EntityKind.Vertex, "v");
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 foreach (var v in values)
                 {
@@ -39,9 +39,9 @@ public class ColumnAggregationProperties
             }
 
             long colSum; double? colMax; double? colMin;
-            using (var tx = db.BeginReadOnlyTransaction())
+            using (var tx = db.BeginReadTransaction())
             {
-                var g = tx.G(db.Schema);
+                var g = tx.Query;
                 colSum = g.Vertices().SumLong("v");
                 colMax = g.Vertices().Max("v");
                 colMin = g.Vertices().Min("v");
@@ -50,9 +50,9 @@ public class ColumnAggregationProperties
             // 列を外して row path 経路で再計算。
             db.DropColumn(EntityKind.Vertex, "v");
             long rowSum; double? rowMax; double? rowMin;
-            using (var tx = db.BeginReadOnlyTransaction())
+            using (var tx = db.BeginReadTransaction())
             {
-                var g = tx.G(db.Schema);
+                var g = tx.Query;
                 rowSum = g.Vertices().SumLong("v");
                 rowMax = g.Vertices().Max("v");
                 rowMin = g.Vertices().Min("v");

@@ -1,15 +1,17 @@
 using System.Diagnostics;
 using Quiver.Core;
+using Quiver.Index;
 using Quiver.Index.FullText;
 using Quiver.Telemetry;
 using Quiver.Logical;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
+using Quiver.Api;
 
 namespace Quiver;
 
-internal sealed class GraphTransaction : IGraphTransactionInternal
+internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInternal
 {
     private readonly ITransaction _inner;
     private readonly ITokenStore<LabelId> _labelTokens;
@@ -23,6 +25,9 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     private List<LogicalMutation>? _logicalBuffer;
     private readonly Storage.Records.ColumnManager? _columns;
     private readonly Core.IVectorStore? _vectors;
+    private readonly ISchemaCatalog _schema;
+    private readonly ISchemaEditor? _schemaEditor;
+    private readonly NexusMergeIndex? _nexusMergeIndex;
 
     internal GraphTransaction(
         ITransaction inner,
@@ -31,10 +36,12 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         PropertyKeyTokenStore propKeyTokens,
         ITokenStore<NexusTypeId> nexusTypeTokens,
         ITokenStore<RoleId> roleTokens,
+        ISchemaCatalog schema,
         bool isReadOnly = false,
         ILogicalMutationSink? logicalSink = null,
         Storage.Records.ColumnManager? columns = null,
-        Core.IVectorStore? vectors = null)
+        Core.IVectorStore? vectors = null,
+        NexusMergeIndex? nexusMergeIndex = null)
     {
         _inner = inner;
         _labelTokens = labelTokens;
@@ -42,9 +49,12 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         _propKeyTokens = propKeyTokens;
         _nexusTypeTokens = nexusTypeTokens;
         _roleTokens = roleTokens;
+        _schema = schema;
+        _schemaEditor = schema as ISchemaEditor;
         IsReadOnly = isReadOnly;
         _logicalSink = logicalSink;
         _vectors = vectors;
+        _nexusMergeIndex = nexusMergeIndex;
         // 登録済み列があるときだけ列維持を有効化し、ホット path の
         // 余計な hook 登録 / dict lookup を避ける。
         _columns = columns is { HasAnyColumns: true } ? columns : null;
@@ -77,9 +87,17 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public TransactionId Id => _inner.Id;
     public TransactionState State => _inner.State;
     public bool IsReadOnly { get; }
+    public ISchemaCatalog Schema => _schema;
+    public ISchemaEditor EditSchema
+        => _schemaEditor
+            ?? throw new TransactionException(
+                "Cannot edit schema in a read-only transaction.");
+    public GraphTraversalSource Query => new(this, _schema);
+    public GraphMutationSource Mutate => new(this);
 
     // MigrationContext.ForEachVertex が Access.ScanVertices に渡す。
     internal ITransaction Inner => _inner;
+    ITransaction IReadTransactionInternal.Inner => _inner;
     public TransactionId TransactionId => _inner.Id;
 
     public TransactionUsageLease EnterUsage() => _inner.EnterUsage();
@@ -157,6 +175,15 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public string? GetEdgeTypeName(EdgeTypeId typeId)
         => typeId.IsValid ? _edgeTypeTokens.GetName(typeId) : null;
 
+    public string? GetEdgeType(EdgeId edgeId)
+    {
+        using var usage = EnterUsage();
+        EdgeReadHandle edge = _inner.Edges.Read(edgeId);
+        return edge.InUse && edge.Type.IsValid
+            ? _edgeTypeTokens.GetName(edge.Type)
+            : null;
+    }
+
     // ========== MERGE ==========
 
     // 「インデックス未登録」を初回 MergeVertex 呼び出し時に一度だけ警告する。
@@ -170,17 +197,22 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         using var usage = EnterUsage();
         var labelId = _labelTokens.GetOrCreate(label);
 
-        // (label, matchKey) にインデックスが登録されていれば、
-        // SeekVerticesByIndex で O(log n) シーク。なければ既存のフルスキャン経路へフォールバック。
-        if (_inner.Indexes.TryGetIndexName(label, matchKey, out var indexName))
+        ScalarIndexDefinition? mergeIndex = _inner.Indexes.ListIndexDefinitions()
+            .FirstOrDefault(x =>
+                x.State == IndexLifecycleState.Ready
+                && x.Definition.Target.OwnerKind == PropertyOwnerKind.Vertex
+                && x.Definition.Target.PropertyKey == matchKey
+                && x.Definition.Target.Scope == label)
+            .Definition;
+        if (mergeIndex is not null)
         {
-            foreach (var vertexId in _inner.Access.SeekVerticesByIndex(_inner, indexName, matchValue))
+            var probe = ScalarIndexProbe.Equal(in matchValue);
+            foreach (long raw in SeekScalarValues(mergeIndex, in matchValue))
             {
-                // インデックスには削除済みVertexの古いエントリが残ることがあるので生存確認。
-                if (_inner.Vertices.Read(vertexId).InUse)
-                    return (vertexId, false);
+                EntityRef? candidate = ResolveScalarCandidate(mergeIndex, raw, probe);
+                if (candidate is { Kind: EntityKind.Vertex } owner)
+                    return (new VertexId(owner.Value), false);
             }
-            // ヒット無し → 新規作成へ
         }
         else
         {
@@ -192,7 +224,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                 {
                     System.Diagnostics.Trace.TraceWarning(
                         "Quiver.MergeVertex: (label='{0}', key='{1}') にインデックスが未登録のためフルスキャンに落ちました。" +
-                        " 'Schema.CreateIndex(name, label, propertyKey, kind)' で索引を作成すると O(log n) になります。",
+                        " 'EditSchema.CreateIndex(new ScalarIndexDefinition(name, new PropertyTarget(PropertyOwnerKind.Vertex, propertyKey, label), kind))' で索引を作成すると O(log n) になります。",
                         label, matchKey);
                 }
                 foreach (var vertexId in _inner.Access.ScanVertices(_inner, labelId))
@@ -213,67 +245,210 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
         var newId = _inner.Vertices.Allocate(labelId);
         var newKeyId = _propKeyTokens.GetOrCreate(matchKey);
-        SetVertexProperty(newId, newKeyId, in matchValue);
-        // インデックスが登録されていれば新規エントリも追加する。
-        // これが無いと「初回 MergeVertex は遅い、2 回目以降の MergeVertex で同じキーを見つけられない」
-        // 状態になり upsert セマンティクスが壊れる。
-        if (!string.IsNullOrEmpty(indexName))
-            InsertIntoIndex(indexName, in matchValue, newId);
+        var version = SetVertexProperty(newId, newKeyId, in matchValue);
+        MaintainScalarIndexes(PropertyOwner(newId), matchKey, in matchValue, version);
         return (newId, true);
     }
 
-    private void InsertIntoIndex(string indexName, in PropertyValue value, VertexId vertexId)
+    private void MaintainScalarIndexes(
+        EntityRef owner,
+        string propertyKey,
+        in PropertyValue value,
+        PropertyVersionRef version)
     {
-        long packed = PackVertex(vertexId);
-        switch (value.Type)
+        foreach (ScalarIndexMetadata metadata in _inner.Indexes.ListIndexDefinitions())
         {
-            case PropertyValueType.Bool:
-            case PropertyValueType.Int32:
-            case PropertyValueType.Int64:
-                _inner.Indexes.CreateInt64Index(indexName).Insert(value.Int64Value, packed);
-                break;
-            case PropertyValueType.Double:
-                _inner.Indexes.CreateDoubleIndex(indexName).Insert(value.DoubleValue, packed);
-                break;
-            case PropertyValueType.String:
-            {
-                var s = System.Text.Encoding.UTF8.GetString(value.Utf8StringValue);
-                _inner.Indexes.CreateStringIndex(indexName).Insert(s, packed);
-                break;
-            }
-            // Bytes / 他は現状未対応 — フォールスルー (=フルスキャン経路と同等の安全動作)。
+            ScalarIndexDefinition definition = metadata.Definition;
+            if (metadata.State != IndexLifecycleState.Ready
+                || definition.Target.PropertyKey != propertyKey
+                || !MatchesTarget(owner, definition.Target))
+                continue;
+
+            InsertScalarValue(definition, in value, version.Value);
         }
     }
 
-    private void RemoveFromIndex(string indexName, in PropertyValue value, VertexId vertexId)
+    private void InsertScalarValue(
+        ScalarIndexDefinition definition,
+        in PropertyValue value,
+        long propertyVersion)
     {
-        long packed = PackVertex(vertexId);
-        switch (value.Type)
+        switch (definition.Kind)
         {
-            case PropertyValueType.Bool:
-            case PropertyValueType.Int32:
-            case PropertyValueType.Int64:
-                _inner.Indexes.CreateInt64Index(indexName).Delete(value.Int64Value, packed);
+            case IndexKind.Int32Equality when value.Type == PropertyValueType.Int32:
+                _inner.Indexes.CreateInt32Index(definition.Name)
+                    .Insert(value.Int32Value, propertyVersion);
                 break;
-            case PropertyValueType.Double:
-                _inner.Indexes.CreateDoubleIndex(indexName).Delete(value.DoubleValue, packed);
+            case IndexKind.Int64Equality when value.Type is
+                PropertyValueType.Bool or PropertyValueType.Int32 or PropertyValueType.Int64:
+                _inner.Indexes.CreateInt64Index(definition.Name)
+                    .Insert(value.Int64Value, propertyVersion);
                 break;
-            case PropertyValueType.String:
-            {
-                var s = System.Text.Encoding.UTF8.GetString(value.Utf8StringValue);
-                _inner.Indexes.CreateStringIndex(indexName).Delete(s, packed);
+            case IndexKind.DoubleEquality when value.Type == PropertyValueType.Double:
+                _inner.Indexes.CreateDoubleIndex(definition.Name)
+                    .Insert(value.DoubleValue, propertyVersion);
                 break;
-            }
+            case IndexKind.StringEquality or IndexKind.StringRange
+                when value.Type == PropertyValueType.String:
+                _inner.Indexes.CreateStringIndex(definition.Name).Insert(
+                    System.Text.Encoding.UTF8.GetString(value.Utf8StringValue),
+                    propertyVersion);
+                break;
         }
     }
 
-    private bool TryResolveSecondaryIndex(VertexId vertexId, string key, out string indexName)
+    private ScalarIndexDefinition? FindReadyScalarIndex(string indexName)
+        => _inner.Indexes.ListIndexDefinitions()
+            .FirstOrDefault(x =>
+                x.State == IndexLifecycleState.Ready
+                && x.Definition.Name == indexName)
+            .Definition;
+
+    private bool TryFindScalarIndex(
+        string indexName,
+        out ScalarIndexMetadata metadata)
     {
-        var vertex = _inner.Vertices.Read(vertexId);
-        if (!vertex.InUse || !vertex.Label.IsValid) { indexName = string.Empty; return false; }
-        var labelName = _labelTokens.GetName(vertex.Label);
-        if (string.IsNullOrEmpty(labelName)) { indexName = string.Empty; return false; }
-        return _inner.Indexes.TryGetIndexName(labelName, key, out indexName);
+        metadata = _inner.Indexes.ListIndexDefinitions()
+            .FirstOrDefault(x => x.Definition.Name == indexName);
+        return metadata.Definition is not null;
+    }
+
+    private IEnumerable<long> SeekScalarValues(
+        ScalarIndexDefinition definition,
+        in PropertyValue key)
+        => definition.Kind switch
+        {
+            IndexKind.Int32Equality when key.Type == PropertyValueType.Int32 =>
+                _inner.Indexes.CreateInt32Index(definition.Name).SeekValues(key.Int32Value),
+            IndexKind.Int64Equality when key.Type is
+                PropertyValueType.Bool or PropertyValueType.Int32 or PropertyValueType.Int64 =>
+                _inner.Indexes.CreateInt64Index(definition.Name).SeekValues(key.Int64Value),
+            IndexKind.DoubleEquality when key.Type == PropertyValueType.Double =>
+                _inner.Indexes.CreateDoubleIndex(definition.Name).SeekValues(key.DoubleValue),
+            IndexKind.StringEquality or IndexKind.StringRange
+                when key.Type == PropertyValueType.String =>
+                _inner.Indexes.CreateStringIndex(definition.Name).SeekValues(
+                    System.Text.Encoding.UTF8.GetString(key.Utf8StringValue)),
+            _ => [],
+        };
+
+    private EntityRef? ResolveScalarCandidate(
+        ScalarIndexDefinition? definition,
+        long propertyVersion,
+        ScalarIndexProbe probe)
+    {
+        if (definition is null)
+            return null;
+
+        PropertyVersionRecord property = _inner.Properties.Read(
+            new PropertyVersionRef(propertyVersion));
+        PropertyValue propertyValue = property.Value;
+        if (!property.InUse
+            || _propKeyTokens.GetName(property.Address.Key) != definition.Target.PropertyKey
+            || !MatchesTarget(property.Address.Owner, definition.Target)
+            || !probe.Matches(in propertyValue))
+            return null;
+
+        return property.Address.Owner;
+    }
+
+    private IEnumerable<long> ScanScalarValues(
+        ScalarIndexDefinition definition,
+        ScalarIndexProbe probe)
+    {
+        var values = new List<(ScalarIndexSortKey Key, long Version)>();
+
+        void Collect(EntityRef owner, PropertyCursor properties)
+        {
+            if (!MatchesTarget(owner, definition.Target))
+                return;
+
+            while (properties.MoveNext())
+            {
+                PropertyEntry current = properties.Current;
+                PropertyValue currentValue = current.Value;
+                if (_propKeyTokens.GetName(current.KeyId) != definition.Target.PropertyKey
+                    || !probe.Matches(in currentValue)
+                    || !ScalarIndexSortKey.TryCreate(
+                        definition.Kind,
+                        in currentValue,
+                        out ScalarIndexSortKey sortKey))
+                    continue;
+                values.Add((sortKey, properties.CurrentVersion.Value));
+            }
+        }
+
+        switch (definition.Target.OwnerKind)
+        {
+            case PropertyOwnerKind.Vertex:
+                foreach (VertexId id in _inner.Vertices.Scan())
+                    Collect(
+                        EntityRef.From(id),
+                        _inner.Vertices.EnumerateProperties(id, _inner.Properties));
+                break;
+            case PropertyOwnerKind.Edge:
+                foreach (EdgeId id in _inner.Edges.Scan())
+                    Collect(
+                        EntityRef.From(id),
+                        _inner.Edges.EnumerateProperties(id, _inner.Properties));
+                break;
+            case PropertyOwnerKind.Nexus:
+                foreach (NexusId id in _inner.Nexuses.Scan())
+                    Collect(
+                        EntityRef.From(id),
+                        _inner.Nexuses.EnumerateProperties(id, _inner.Properties));
+                break;
+        }
+
+        values.Sort(static (left, right) =>
+        {
+            int keyOrder = left.Key.CompareTo(right.Key);
+            return keyOrder != 0
+                ? keyOrder
+                : left.Version.CompareTo(right.Version);
+        });
+        return values.Select(x => x.Version);
+    }
+
+    private bool MatchesTarget(EntityRef owner, PropertyTarget target)
+    {
+        if (owner.Kind != target.OwnerKind switch
+            {
+                PropertyOwnerKind.Vertex => EntityKind.Vertex,
+                PropertyOwnerKind.Edge => EntityKind.Edge,
+                PropertyOwnerKind.Nexus => EntityKind.Nexus,
+                _ => (EntityKind)0,
+            })
+            return false;
+
+        return owner.Kind switch
+        {
+            EntityKind.Vertex => MatchesVertexTarget(owner, target.Scope),
+            EntityKind.Edge => MatchesEdgeTarget(owner, target.Scope),
+            EntityKind.Nexus => MatchesNexusTarget(owner, target.Scope),
+            _ => false,
+        };
+    }
+
+    private bool MatchesVertexTarget(EntityRef owner, string? scope)
+    {
+        var vertex = _inner.Vertices.Read(new VertexId(owner.Value));
+        return vertex.InUse
+            && (scope is null || _labelTokens.GetName(vertex.Label) == scope);
+    }
+
+    private bool MatchesEdgeTarget(EntityRef owner, string? scope)
+    {
+        var edge = _inner.Edges.Read(new EdgeId(owner.Value));
+        return edge.InUse
+            && (scope is null || _edgeTypeTokens.GetName(edge.Type) == scope);
+    }
+
+    private bool MatchesNexusTarget(EntityRef owner, string? scope)
+    {
+        using var nexus = _inner.Nexuses.Read(new NexusId(owner.Value));
+        return nexus.InUse
+            && (scope is null || _nexusTypeTokens.GetName(nexus.Type) == scope);
     }
 
     // 索引の値レーンに (Kind=Vertex, Sequence=vertexId, Generation=現世代) をパックする。
@@ -366,13 +541,14 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         // Merge の作成パスでは型トークンが必ず必要になるため、先に同一 ID へ解決する。
         // その ID で既存 adjacency を照合すれば、同一 tx で新規作成した型も確実に検索できる。
         var typeId = _edgeTypeTokens.GetOrCreate(type);
-        var e = _inner.Edges.EnumerateNeighbors(source, _inner.Vertices);
-        while (e.MoveNext())
+        foreach (EdgeId candidate in _inner.Edges.Lookup(source, target, typeId))
         {
-            if (e.Current.Source.Sequence == source.Sequence
-                && e.Current.Target.Sequence == target.Sequence
-                && e.Current.Type == typeId)
-                return (e.Current.Id, false);
+            EdgeReadHandle edge = _inner.Edges.Read(candidate);
+            if (edge.InUse
+                && edge.Source == source
+                && edge.Target == target
+                && edge.Type == typeId)
+                return (edge.Id, false);
         }
         return (CreateEdgeCore(source, target, typeId, type), true);
     }
@@ -433,7 +609,8 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
             var captured = LogicalPropertyValue.Capture(in value);
             RecordLogical(LogicalMutation.SetVertexProperty(vertexId, key, in captured));
         }
-        SetVertexProperty(vertexId, keyId, in value);
+        var version = SetVertexProperty(vertexId, keyId, in value);
+        MaintainScalarIndexes(PropertyOwner(vertexId), key, in value, version);
         // 列化済み key なら同 tx で列を維持する。
         _columns?.OnSetProperty(Core.EntityKind.Vertex, vertexId.Sequence, keyId, in value, _inner.Id.Value);
         if (ft is not null)
@@ -459,12 +636,13 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
             var captured = LogicalPropertyValue.Capture(in value);
             RecordLogical(LogicalMutation.SetEdgeProperty(edgeId, key, in captured));
         }
-        SetEdgeProperty(edgeId, keyId, in value);
+        var version = SetEdgeProperty(edgeId, keyId, in value);
+        MaintainScalarIndexes(PropertyOwner(edgeId), key, in value, version);
         // 列化済み key なら同 tx で列を維持する。
         _columns?.OnSetProperty(Core.EntityKind.Edge, edgeId.Sequence, keyId, in value, _inner.Id.Value);
     }
 
-    private void SetEdgeProperty(EdgeId edgeId, PropertyKeyId keyId, in PropertyValue value)
+    private PropertyVersionRef SetEdgeProperty(EdgeId edgeId, PropertyKeyId keyId, in PropertyValue value)
     {
         EntityRef owner = PropertyOwner(edgeId);
         var firstProperty = _inner.Edges.Read(edgeId).FirstPropertyRef;
@@ -472,9 +650,10 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         var wh = _inner.Edges.Write(edgeId);
         wh.FirstPropertyRef = newHead;
         wh.Dispose();
+        return newHead;
     }
 
-    private void SetVertexProperty(VertexId vertexId, PropertyKeyId keyId, in PropertyValue value)
+    private PropertyVersionRef SetVertexProperty(VertexId vertexId, PropertyKeyId keyId, in PropertyValue value)
     {
         EntityRef owner = PropertyOwner(vertexId);
         // property chain を変更してから owner を lock する順序では、ラッパーが保証する owner lock の
@@ -484,6 +663,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         {
             var newHead = SetSingleProperty(owner, wh.FirstPropertyRef, keyId, in value);
             wh.FirstPropertyRef = newHead;
+            return newHead;
         }
         finally
         {
@@ -651,9 +831,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         var wh = _inner.Vertices.Write(vertexId);
         wh.FirstPropertyRef = newHead;
         wh.Dispose();
-
-        if (TryResolveSecondaryIndex(vertexId, key, out var indexName))
-            InsertIntoIndex(indexName, in value, vertexId);
+        MaintainScalarIndexes(PropertyOwner(vertexId), key, in value, newHead);
     }
 
     public void AddPropertyValue(EdgeId edgeId, string key, in PropertyValue value)
@@ -681,6 +859,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         var wh = _inner.Edges.Write(edgeId);
         wh.FirstPropertyRef = newHead;
         wh.Dispose();
+        MaintainScalarIndexes(PropertyOwner(edgeId), key, in value, newHead);
     }
 
     public void RemovePropertyValue(VertexId vertexId, string key, in PropertyValue value)
@@ -700,9 +879,6 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                 && PropertyValueEqualityHelper.AreEqual(cursor.Current.Value, in value))
             {
                 _inner.Properties.Delete(owner, cursor.CurrentVersion, firstProperty);
-
-                if (TryResolveSecondaryIndex(vertexId, key, out var indexName))
-                    RemoveFromIndex(indexName, in value, vertexId);
                 return;
             }
         }
@@ -784,6 +960,16 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         string? typeFilter = null)
     {
         var usage = EnterUsage();
+        if (typeFilter is not null
+            && !_edgeTypeTokens.TryGet(typeFilter, out _))
+        {
+            usage.Dispose();
+            return new EdgeEnumerator(
+                _inner.Edges,
+                _inner.Vertices,
+                vertexId,
+                EdgeId.Invalid);
+        }
         try
         {
             EdgeEnumerator enumerator;
@@ -803,46 +989,22 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
     // ========== インデックス ==========
 
-    public void IndexInsert(string indexName, string key, VertexId vertexId)
-    {
-        EnsureWritable();
-        using var usage = EnterUsage();
-        _inner.Indexes.CreateStringIndex(indexName).Insert(key, PackVertex(vertexId));
-    }
-
-    public void IndexInsert(string indexName, long key, VertexId vertexId)
-    {
-        EnsureWritable();
-        using var usage = EnterUsage();
-        _inner.Indexes.CreateInt64Index(indexName).Insert(key, PackVertex(vertexId));
-    }
-
-    public void IndexInsert(string indexName, double key, VertexId vertexId)
-    {
-        EnsureWritable();
-        using var usage = EnterUsage();
-        _inner.Indexes.CreateDoubleIndex(indexName).Insert(key, PackVertex(vertexId));
-    }
-
-    public VertexIdEnumerator SeekIndex(string indexName, in PropertyValue key)
+    public EntityRefEnumerator SeekIndex(string indexName, in PropertyValue key)
     {
         var usage = EnterUsage();
         try
         {
-            IEnumerable<long> values = key.Type switch
-            {
-                PropertyValueType.Int32 or PropertyValueType.Int64 or PropertyValueType.Bool =>
-                    _inner.Indexes.CreateInt64Index(indexName).SeekValues(key.Int64Value),
-                PropertyValueType.Double =>
-                    _inner.Indexes.CreateDoubleIndex(indexName).SeekValues(key.DoubleValue),
-                PropertyValueType.String =>
-                    _inner.Indexes.CreateStringIndex(indexName).SeekValues(
-                        System.Text.Encoding.UTF8.GetString(key.Utf8StringValue)),
-                _ => [],
-            };
-            // パック値を世代照合しつつ VertexId.Value へ unpack する。
-            return new VertexIdEnumerator(
-                IndexValueResolver.ResolveLiveVertexSequences(values, _inner.Vertices),
+            bool found = TryFindScalarIndex(indexName, out var metadata);
+            ScalarIndexDefinition? definition = found ? metadata.Definition : null;
+            var probe = ScalarIndexProbe.Equal(in key);
+            IEnumerable<long> values = definition is null
+                ? []
+                : metadata.State == IndexLifecycleState.Ready
+                    ? SeekScalarValues(definition, in key)
+                    : ScanScalarValues(definition, probe);
+            return new EntityRefEnumerator(
+                values,
+                raw => ResolveScalarCandidate(definition, raw, probe),
                 usage);
         }
         catch
@@ -852,7 +1014,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         }
     }
 
-    public VertexIdEnumerator RangeIndex(
+    public EntityRefEnumerator RangeIndex(
         string indexName,
         in PropertyValue from, bool fromInclusive,
         in PropertyValue to, bool toInclusive)
@@ -860,20 +1022,33 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         var usage = EnterUsage();
         try
         {
+            bool found = TryFindScalarIndex(indexName, out var metadata);
+            ScalarIndexDefinition? definition = found ? metadata.Definition : null;
             IEnumerable<long> values;
-            switch (from.Type)
+            if (definition is not null
+                && metadata.State != IndexLifecycleState.Ready)
             {
-                case PropertyValueType.Int32:
-                case PropertyValueType.Int64:
-                case PropertyValueType.Bool:
+                var fallbackProbe = ScalarIndexProbe.Range(
+                    in from, fromInclusive, in to, toInclusive);
+                values = ScanScalarValues(definition, fallbackProbe);
+            }
+            else switch (definition?.Kind)
+            {
+                case IndexKind.Int32Equality when from.Type == PropertyValueType.Int32:
+                    values = _inner.Indexes.CreateInt32Index(indexName).RangeValues(
+                        from.Int32Value, fromInclusive, to.Int32Value, toInclusive);
+                    break;
+                case IndexKind.Int64Equality when from.Type is
+                    PropertyValueType.Bool or PropertyValueType.Int32 or PropertyValueType.Int64:
                     values = _inner.Indexes.CreateInt64Index(indexName).RangeValues(
                         from.Int64Value, fromInclusive, to.Int64Value, toInclusive);
                     break;
-                case PropertyValueType.Double:
+                case IndexKind.DoubleEquality when from.Type == PropertyValueType.Double:
                     values = _inner.Indexes.CreateDoubleIndex(indexName).RangeValues(
                         from.DoubleValue, fromInclusive, to.DoubleValue, toInclusive);
                     break;
-                case PropertyValueType.String:
+                case IndexKind.StringEquality or IndexKind.StringRange
+                    when from.Type == PropertyValueType.String:
                     string fromStr = System.Text.Encoding.UTF8.GetString(from.Utf8StringValue);
                     string toStr   = System.Text.Encoding.UTF8.GetString(to.Utf8StringValue);
                     values = _inner.Indexes.CreateStringIndex(indexName).RangeValues(
@@ -883,9 +1058,11 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
                     values = [];
                     break;
             }
-            // パック値を世代照合しつつ VertexId.Value へ unpack する。
-            return new VertexIdEnumerator(
-                IndexValueResolver.ResolveLiveVertexSequences(values, _inner.Vertices),
+            var probe = ScalarIndexProbe.Range(
+                in from, fromInclusive, in to, toInclusive);
+            return new EntityRefEnumerator(
+                values,
+                raw => ResolveScalarCandidate(definition, raw, probe),
                 usage);
         }
         catch
@@ -1035,14 +1212,67 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         return CreateNexusCore(typeId, members);
     }
 
+    public (NexusId Id, bool Created) MergeNexus(
+        string type,
+        ReadOnlySpan<NexusMember> members)
+    {
+        EnsureWritable();
+        using var usage = EnterUsage();
+        if (string.IsNullOrWhiteSpace(type))
+            throw new ArgumentException(
+                "Nexus type must not be null, empty, or whitespace.",
+                nameof(type));
+
+        NexusTypeId typeId = _nexusTypeTokens.GetOrCreate(type);
+        IncidenceMember[] resolved = ResolveNexusMembers(members);
+        if (_nexusMergeIndex is not null
+            && _nexusMergeIndex.TryFind(
+                _inner,
+                typeId,
+                resolved,
+                out NexusId existing))
+            return (existing, false);
+        return (CreateNexusCore(typeId, members, resolved), true);
+    }
+
     private NexusId CreateNexusCore(NexusTypeId typeId, ReadOnlySpan<NexusMember> members)
+    {
+        IncidenceMember[] resolved = ResolveNexusMembers(members);
+        return CreateNexusCore(typeId, members, resolved);
+    }
+
+    private NexusId CreateNexusCore(
+        NexusTypeId typeId,
+        ReadOnlySpan<NexusMember> members,
+        ReadOnlySpan<IncidenceMember> resolved)
+    {
+        var nexusId = _inner.Nexuses.Create(
+            typeId,
+            resolved,
+            _inner.Incidences,
+            _inner.VertexIncidenceHeads);
+        _nexusMergeIndex?.Add(nexusId, typeId, resolved);
+
+        // 論理ストリームは自己完結させる — メンバーは型名とロール名 (トークン ID ではなく)
+        // で保持し、別 DB への再生時にターゲット側の ID へ再マッピングできるようにする。
+        if (_logicalSink != null)
+        {
+            var typeName = _nexusTypeTokens.GetName(typeId);
+            var captured = new NexusMember[members.Length];
+            for (int i = 0; i < members.Length; i++)
+                captured[i] = members[i];
+            RecordLogical(LogicalMutation.CreateNexus(nexusId, typeName, captured));
+        }
+        return nexusId;
+    }
+
+    private IncidenceMember[] ResolveNexusMembers(
+        ReadOnlySpan<NexusMember> members)
     {
         if (members.Length < 2)
             throw new ArgumentException("A nexus requires at least 2 members.", nameof(members));
 
-        Span<IncidenceMember> resolved = members.Length <= 16
-            ? stackalloc IncidenceMember[members.Length]
-            : new IncidenceMember[members.Length];
+        var resolved = new IncidenceMember[members.Length];
 
         var seen = new HashSet<(int, long)>();
         for (int i = 0; i < members.Length; i++)
@@ -1061,20 +1291,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
 
             resolved[i] = new IncidenceMember(m.VertexId, roleId);
         }
-
-        var nexusId = _inner.Nexuses.Create(typeId, resolved, _inner.Incidences, _inner.VertexIncidenceHeads);
-
-        // 論理ストリームは自己完結させる — メンバーは型名とロール名 (トークン ID ではなく)
-        // で保持し、別 DB への再生時にターゲット側の ID へ再マッピングできるようにする。
-        if (_logicalSink != null)
-        {
-            var typeName = _nexusTypeTokens.GetName(typeId);
-            var captured = new NexusMember[members.Length];
-            for (int i = 0; i < members.Length; i++)
-                captured[i] = members[i];
-            RecordLogical(LogicalMutation.CreateNexus(nexusId, typeName, captured));
-        }
-        return nexusId;
+        return resolved;
     }
 
     public void DeleteNexus(NexusId nexusId)
@@ -1176,6 +1393,15 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     public string? GetNexusTypeName(NexusTypeId typeId)
         => typeId.IsValid ? _nexusTypeTokens.GetName(typeId) : null;
 
+    public string? GetNexusType(NexusId nexusId)
+    {
+        using var usage = EnterUsage();
+        using NexusReadHandle nexus = _inner.Nexuses.Read(nexusId);
+        return nexus.InUse && nexus.Type.IsValid
+            ? _nexusTypeTokens.GetName(nexus.Type)
+            : null;
+    }
+
     // ========== Nexusプロパティ操作 ==========
     // vertex / edge と同じ owner-bound property version store を使う。
 
@@ -1191,12 +1417,13 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
             var captured = LogicalPropertyValue.Capture(in value);
             RecordLogical(LogicalMutation.SetNexusProperty(nexusId, key, in captured));
         }
-        SetNexusProperty(nexusId, keyId, in value);
+        var version = SetNexusProperty(nexusId, keyId, in value);
+        MaintainScalarIndexes(PropertyOwner(nexusId), key, in value, version);
         // 列化済み key なら同 tx で列を維持する (列作成の公開糖衣は後続タスク)。
         _columns?.OnSetProperty(Core.EntityKind.Nexus, nexusId.Sequence, keyId, in value, _inner.Id.Value);
     }
 
-    private void SetNexusProperty(NexusId nexusId, PropertyKeyId keyId, in PropertyValue value)
+    private PropertyVersionRef SetNexusProperty(NexusId nexusId, PropertyKeyId keyId, in PropertyValue value)
     {
         EntityRef owner = PropertyOwner(nexusId);
         var firstProperty = _inner.Nexuses.Read(nexusId).FirstPropertyRef;
@@ -1204,6 +1431,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         var wh = _inner.Nexuses.Write(nexusId);
         wh.FirstPropertyRef = newHead;
         wh.Dispose();
+        return newHead;
     }
 
     public PropertyValue GetProperty(NexusId nexusId, string key)
@@ -1282,6 +1510,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
         var wh = _inner.Nexuses.Write(nexusId);
         wh.FirstPropertyRef = newHead;
         wh.Dispose();
+        MaintainScalarIndexes(PropertyOwner(nexusId), key, in value, newHead);
 
         if (_logicalSink != null)
         {
@@ -1372,7 +1601,7 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     }
 
     // post-commit / post-rollback フックの登録は下層トランザクションへ委譲する。
-    // ユーザは IGraphTransaction 経由でフックを登録できる。
+    // ユーザは IWriteTransaction 経由でフックを登録できる。
     public void OnCommitted(Action callback)
     {
         using var usage = EnterUsage();
@@ -1389,5 +1618,160 @@ internal sealed class GraphTransaction : IGraphTransactionInternal
     {
         if (IsReadOnly)
             throw new TransactionException("Cannot mutate through a read-only transaction.");
+    }
+
+    private readonly record struct ScalarIndexProbe(
+        PropertyValueType Type,
+        bool IsRange,
+        long FromScalar,
+        long ToScalar,
+        double FromDouble,
+        double ToDouble,
+        string? FromString,
+        string? UpperString,
+        bool FromInclusive,
+        bool ToInclusive)
+    {
+        internal static ScalarIndexProbe Equal(in PropertyValue value)
+            => value.Type switch
+            {
+                PropertyValueType.Bool => new(
+                    value.Type, false, value.BoolValue ? 1 : 0, 0,
+                    0, 0, null, null, true, true),
+                PropertyValueType.Int32 => new(
+                    value.Type, false, value.Int32Value, 0,
+                    0, 0, null, null, true, true),
+                PropertyValueType.Int64 => new(
+                    value.Type, false, value.Int64Value, 0,
+                    0, 0, null, null, true, true),
+                PropertyValueType.Double => new(
+                    value.Type, false, 0, 0,
+                    value.DoubleValue, 0, null, null, true, true),
+                PropertyValueType.String => new(
+                    value.Type, false, 0, 0, 0, 0,
+                    System.Text.Encoding.UTF8.GetString(value.Utf8StringValue),
+                    null, true, true),
+                _ => default,
+            };
+
+        internal static ScalarIndexProbe Range(
+            in PropertyValue from,
+            bool fromInclusive,
+            in PropertyValue to,
+            bool toInclusive)
+        {
+            if (from.Type != to.Type)
+                return default;
+            ScalarIndexProbe start = Equal(in from);
+            ScalarIndexProbe end = Equal(in to);
+            return start with
+            {
+                IsRange = true,
+                ToScalar = end.FromScalar,
+                ToDouble = end.FromDouble,
+                UpperString = end.FromString,
+                FromInclusive = fromInclusive,
+                ToInclusive = toInclusive,
+            };
+        }
+
+        internal bool Matches(in PropertyValue value)
+        {
+            if (value.Type != Type)
+                return false;
+
+            int lower;
+            int upper;
+            switch (Type)
+            {
+                case PropertyValueType.Bool:
+                {
+                    long current = value.BoolValue ? 1 : 0;
+                    lower = current.CompareTo(FromScalar);
+                    upper = current.CompareTo(ToScalar);
+                    break;
+                }
+                case PropertyValueType.Int32:
+                    lower = value.Int32Value.CompareTo((int)FromScalar);
+                    upper = value.Int32Value.CompareTo((int)ToScalar);
+                    break;
+                case PropertyValueType.Int64:
+                    lower = value.Int64Value.CompareTo(FromScalar);
+                    upper = value.Int64Value.CompareTo(ToScalar);
+                    break;
+                case PropertyValueType.Double:
+                    lower = value.DoubleValue.CompareTo(FromDouble);
+                    upper = value.DoubleValue.CompareTo(ToDouble);
+                    break;
+                case PropertyValueType.String:
+                {
+                    string current = System.Text.Encoding.UTF8.GetString(value.Utf8StringValue);
+                    lower = string.CompareOrdinal(current, FromString);
+                    upper = string.CompareOrdinal(current, UpperString);
+                    break;
+                }
+                default:
+                    return false;
+            }
+
+            if (!IsRange)
+                return lower == 0;
+            return (FromInclusive ? lower >= 0 : lower > 0)
+                && (ToInclusive ? upper <= 0 : upper < 0);
+        }
+    }
+
+    private readonly record struct ScalarIndexSortKey(
+        IndexKind Kind,
+        long Scalar,
+        double FloatingPoint,
+        string? Text) : IComparable<ScalarIndexSortKey>
+    {
+        internal static bool TryCreate(
+            IndexKind kind,
+            in PropertyValue value,
+            out ScalarIndexSortKey key)
+        {
+            key = kind switch
+            {
+                IndexKind.Int32Equality when value.Type == PropertyValueType.Int32
+                    => new(kind, value.Int32Value, 0, null),
+                IndexKind.Int64Equality when value.Type is
+                    PropertyValueType.Bool or PropertyValueType.Int32 or PropertyValueType.Int64
+                    => new(kind, value.Int64Value, 0, null),
+                IndexKind.DoubleEquality when value.Type == PropertyValueType.Double
+                    => new(kind, 0, value.DoubleValue, null),
+                IndexKind.StringEquality or IndexKind.StringRange
+                    when value.Type == PropertyValueType.String
+                    => new(
+                        kind,
+                        0,
+                        0,
+                        System.Text.Encoding.UTF8.GetString(value.Utf8StringValue)),
+                _ => default,
+            };
+            return kind switch
+            {
+                IndexKind.Int32Equality => value.Type == PropertyValueType.Int32,
+                IndexKind.Int64Equality => value.Type is
+                    PropertyValueType.Bool or PropertyValueType.Int32 or PropertyValueType.Int64,
+                IndexKind.DoubleEquality => value.Type == PropertyValueType.Double,
+                IndexKind.StringEquality or IndexKind.StringRange
+                    => value.Type == PropertyValueType.String,
+                _ => false,
+            };
+        }
+
+        public int CompareTo(ScalarIndexSortKey other)
+            => Kind switch
+            {
+                IndexKind.Int32Equality or IndexKind.Int64Equality
+                    => Scalar.CompareTo(other.Scalar),
+                IndexKind.DoubleEquality
+                    => FloatingPoint.CompareTo(other.FloatingPoint),
+                IndexKind.StringEquality or IndexKind.StringRange
+                    => string.Compare(Text, other.Text, StringComparison.Ordinal),
+                _ => 0,
+            };
     }
 }

@@ -64,7 +64,7 @@ public static class SingleWriterPerfRunner
                 {
                     try
                     {
-                        using var tx = db.BeginReadOnlyTransaction();
+                        using var tx = db.BeginReadTransaction();
                         ready.Signal();
                         start.Wait();
                         bool first = true;
@@ -125,7 +125,7 @@ public static class SingleWriterPerfRunner
 
     private static VertexId Seed(QuiverDatabase db)
     {
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var hub = tx.CreateVertex("Hub");
         _ = tx.CreateVertex("WriterPayload");
         for (int i = 0; i < 64; i++)
@@ -153,7 +153,7 @@ public static class SingleWriterPerfRunner
 
     private static void CommitOne(QuiverDatabase db)
     {
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         tx.CreateVertex("WriterPayload");
         tx.Commit();
     }

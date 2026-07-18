@@ -34,7 +34,7 @@ public sealed class ColumnBreadthTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path);
         db.CreateColumn(EntityKind.Vertex, "n").Should().BeTrue();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             foreach (var v in new[] { 5, 8, 13 })
             {
@@ -43,17 +43,17 @@ public sealed class ColumnBreadthTests : IDisposable
             }
             tx.Commit();
         }
-        using (var tx = db.BeginReadOnlyTransaction())
+        using (var tx = db.BeginReadTransaction())
         {
-            tx.G(db.Schema).Vertices().SumLong("n").Should().Be(26);
-            tx.G(db.Schema).Vertices().Max("n").Should().Be(13);
+            tx.Query.Vertices().SumLong("n").Should().Be(26);
+            tx.Query.Vertices().Max("n").Should().Be(13);
         }
         // 列を外しても (row path) 同値。
         db.DropColumn(EntityKind.Vertex, "n").Should().BeTrue();
-        using (var tx = db.BeginReadOnlyTransaction())
+        using (var tx = db.BeginReadTransaction())
         {
-            tx.G(db.Schema).Vertices().SumLong("n").Should().Be(26);
-            tx.G(db.Schema).Vertices().Max("n").Should().Be(13);
+            tx.Query.Vertices().SumLong("n").Should().Be(26);
+            tx.Query.Vertices().Max("n").Should().Be(13);
         }
     }
 
@@ -63,7 +63,7 @@ public sealed class ColumnBreadthTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
         db.CreateColumn(EntityKind.Vertex, "a").Should().BeTrue();
         db.CreateColumn(EntityKind.Vertex, "b").Should().BeTrue();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var n1 = tx.CreateVertex("X");
             tx.SetProperty(n1, "a", PropertyValue.FromInt64(10));
@@ -73,8 +73,8 @@ public sealed class ColumnBreadthTests : IDisposable
             tx.SetProperty(n2, "b", PropertyValue.FromInt64(200));
             tx.Commit();
         }
-        using var rtx = db.BeginReadOnlyTransaction();
-        var g = rtx.G(db.Schema);
+        using var rtx = db.BeginReadTransaction();
+        var g = rtx.Query;
         g.Vertices().SumLong("a").Should().Be(30);
         g.Vertices().SumLong("b").Should().Be(300);
     }
@@ -85,15 +85,15 @@ public sealed class ColumnBreadthTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
         db.CreateColumn(EntityKind.Vertex, "score").Should().BeTrue();
         db.CreateColumn(EntityKind.Edge, "weight").Should().BeTrue();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("A"); tx.SetProperty(a, "score", PropertyValue.FromInt64(7));
             var b = tx.CreateVertex("B"); tx.SetProperty(b, "score", PropertyValue.FromInt64(3));
             var r = tx.CreateEdge(a, b, "R"); tx.SetProperty(r, "weight", PropertyValue.FromDouble(2.5));
             tx.Commit();
         }
-        using var rtx = db.BeginReadOnlyTransaction();
-        var g = rtx.G(db.Schema);
+        using var rtx = db.BeginReadTransaction();
+        var g = rtx.Query;
         g.Vertices().SumLong("score").Should().Be(10);
         g.Edges().Sum("weight").Should().BeApproximately(2.5, 1e-9);
     }
@@ -104,17 +104,17 @@ public sealed class ColumnBreadthTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
         db.CreateColumn(EntityKind.Vertex, "flag").Should().BeTrue();
         VertexId n;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             n = tx.CreateVertex("X");
             tx.SetProperty(n, "flag", PropertyValue.FromBool(true));
             tx.Commit();
         }
-        using var rtx = db.BeginReadOnlyTransaction();
+        using var rtx = db.BeginReadTransaction();
         // 値は保持される (point read)。
         rtx.GetProperty(n, "flag").BoolValue.Should().BeTrue();
         // 数値集約は row path フォールバック (bool は数値集約対象外で 0、クラッシュしない)。
-        rtx.G(db.Schema).Vertices().Sum("flag").Should().Be(0.0);
-        rtx.G(db.Schema).Vertices().Max("flag").Should().BeNull();
+        rtx.Query.Vertices().Sum("flag").Should().Be(0.0);
+        rtx.Query.Vertices().Max("flag").Should().BeNull();
     }
 }

@@ -6,12 +6,15 @@ using Quiver.Storage;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
 using Quiver.Storage.Wal;
+using System.Diagnostics;
 
 namespace Quiver;
 
 internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 {
     internal static Action<CompactAdjacencyPhase>? CompactAdjacencyPhaseInjector;
+    internal static Action? ScalarIndexArtifactBuiltForTest;
+    internal static Action<ScalarIndexRebuildPhase>? ScalarIndexRebuildPhaseInjector;
 
     private readonly IVectorStore _vectors;
     // db.Vectors の公開面。tx 外のミューテーションを autocommit tx で包む
@@ -29,6 +32,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     private readonly NexusTypeTokenStore _nexusTypeTokens;
     private readonly RoleTokenStore _roleTokens;
     private readonly IndexManager _indexManager;
+    private readonly NexusMergeIndex _nexusMergeIndex = new();
     // immutable adjacency segment view を保持する。
     // CompactAdjacency が再構築したストアを差し替えるため mutable。
     // 隣接データは container 内テナントに同居するため、別 PagedFile の所有は不要。
@@ -46,6 +50,11 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     private readonly ILogicalMutationSink? _logicalSink;
     private readonly EdgeDeltaHeadStore? _edgeDeltaHeads;
     private readonly PersistentEdgeDeltaStore? _edgeDeltas;
+    private readonly CancellationTokenSource _scalarIndexRebuildCancellation = new();
+    private readonly object _scalarIndexRebuildSync = new();
+    private Task? _scalarIndexRebuildTask;
+    private int _scalarIndexRebuildRequested;
+    private Exception? _scalarIndexRebuildError;
 
     internal BinaryGraphStorageBackend(
         string containerPath,
@@ -109,7 +118,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         // SetCheckpointPolicy をホットスワップ経路として公開する。Adaptive 用パラメタは
         // factory で既知の options 値を持つので、後段で AttachAdaptiveDefaults により上書き可能。
         _diagnostics = new DiagnosticsApi(
-            _vertexStore, _edgeStore, access,
+            _vertexStore, _edgeStore, access, _propStore,
             _txManager.NexusStore, _txManager.IncidenceStore, _txManager.VertexIncidenceHeadStore,
             _indexManager, labelIndex, _txManager,
             adaptiveTargetRecoveryTime,
@@ -122,12 +131,131 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             BeginBinaryBulkLoad = buildAdjacencyIndex => new BulkLoader(
                 _vertexStore, _edgeStore, _propStore,
                 buildAdjacencyIndex ? _container : null,
-                _txManager.AcquireMutationLease()),
+                _txManager.AcquireMutationLease(),
+                RefreshScalarIndexesAfterBulkLoad),
             BeginStreamingBinaryBulkLoad = buildAdjacencyIndex => new StreamingBulkLoader(
                 _vertexStore, _edgeStore, _propStore,
                 buildAdjacencyIndex ? _container : null,
-                _txManager.AcquireMutationLease()),
+                _txManager.AcquireMutationLease(),
+                RefreshScalarIndexesAfterBulkLoad),
         };
+
+        if (_indexManager.ListIndexDefinitions()
+            .Any(x => x.State != IndexLifecycleState.Ready))
+        {
+            Volatile.Write(ref _scalarIndexRebuildRequested, 1);
+            QueueScalarIndexRebuild();
+        }
+    }
+
+    private void RefreshScalarIndexesAfterBulkLoad()
+    {
+        using ITransaction transaction = _txManager.BeginWrite();
+        ScalarIndexMetadata[] definitions =
+            [.. transaction.Indexes.ListIndexDefinitions()];
+        if (definitions.Length == 0)
+        {
+            transaction.Commit();
+            return;
+        }
+
+        foreach (ScalarIndexMetadata metadata in definitions)
+            transaction.Indexes.SetIndexState(
+                metadata.Definition.Name,
+                IndexLifecycleState.RebuildRequired);
+        transaction.Commit();
+        Volatile.Write(ref _scalarIndexRebuildRequested, 1);
+        QueueScalarIndexRebuild();
+    }
+
+    private void QueueScalarIndexRebuild()
+    {
+        if (_disposed || Volatile.Read(ref _scalarIndexRebuildRequested) == 0)
+            return;
+
+        lock (_scalarIndexRebuildSync)
+        {
+            if (_scalarIndexRebuildTask is { IsCompleted: false })
+                return;
+            _scalarIndexRebuildTask = Task.Run(
+                () => RebuildScalarIndexes(_scalarIndexRebuildCancellation.Token));
+        }
+    }
+
+    private void RebuildScalarIndexes(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                ScalarIndexBuildArtifact[] artifacts;
+                using (ITransaction read = _txManager.BeginRead())
+                {
+                    ScalarIndexMetadata[] pending = read.Indexes
+                        .ListIndexDefinitions()
+                        .Where(x => x.State != IndexLifecycleState.Ready)
+                        .ToArray();
+                    if (pending.Length == 0)
+                    {
+                        Volatile.Write(ref _scalarIndexRebuildRequested, 0);
+                        return;
+                    }
+
+                    // primary scan、key decode、sort は snapshot reader だけで行う。
+                    // writer lease は下の source generation 検証と publish にだけ使う。
+                    artifacts = pending
+                        .Select(x => _schema.BuildScalarIndexArtifact(
+                            read,
+                            x.Definition))
+                        .ToArray();
+                }
+
+                ScalarIndexRebuildPhaseInjector?.Invoke(
+                    ScalarIndexRebuildPhase.AfterArtifactBuilt);
+                Interlocked.Exchange(ref ScalarIndexArtifactBuiltForTest, null)?.Invoke();
+                cancellationToken.ThrowIfCancellationRequested();
+                using ITransaction publish = _txManager.BeginWrite();
+                _ = _schema.Bind(publish, readOnly: false);
+                long oldestReader = _txManager.Snapshots.OldestCommittedHighWater(
+                    publish.Snapshot.CommittedHighWater);
+                bool accepted = artifacts.All(
+                    artifact => oldestReader >= artifact.SourceCommittedHighWater);
+                foreach (ScalarIndexBuildArtifact artifact in artifacts)
+                {
+                    if (!accepted
+                        || !_schema.TryPublishScalarIndexArtifact(publish, artifact))
+                    {
+                        accepted = false;
+                        break;
+                    }
+                }
+
+                if (accepted)
+                {
+                    ScalarIndexRebuildPhaseInjector?.Invoke(
+                        ScalarIndexRebuildPhase.BeforePublishCommit);
+                    publish.Commit();
+                    ScalarIndexRebuildPhaseInjector?.Invoke(
+                        ScalarIndexRebuildPhase.AfterPublishCommit);
+                    continue;
+                }
+
+                publish.Abort();
+                if (cancellationToken.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(10)))
+                    return;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _scalarIndexRebuildError = ex;
+            // rebuild failure is a derived-data failure。
+            // definition remains non-Ready, so query continues to use the same-snapshot fallback。
+            Trace.TraceWarning(
+                $"[Quiver] Scalar index rebuild was deferred after an error: {ex}");
+        }
     }
 
     // *.quiver の親ディレクトリ (operational metadata = migrations.history の保存先)。
@@ -231,7 +359,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     }
 
     public ITransactionManager Transactions => _txManager;
-    public ISchemaApi Schema => _schema;
+    internal ISchemaCatalog Schema => _schema.CommittedCatalog;
+    internal SchemaApi SchemaApiForTesting => _schema;
+    public ISchemaCatalog SchemaCatalog => _schema.CommittedCatalog;
     public IDiagnosticsApi Diagnostics => _diagnostics;
 
     // 整合性テストは公開 API では作れない破損を明示的に注入する必要がある。
@@ -240,30 +370,41 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     internal IIncidenceStore IncidenceStoreForTest => _txManager.IncidenceStore;
     internal long CoMembershipReadCountForTest
         => (_coMembershipStore as CoMembershipBlockStore)?.ReadCount ?? 0;
+    internal Exception? ScalarIndexRebuildErrorForTest => _scalarIndexRebuildError;
     internal IVertexIncidenceHeadStore VertexIncidenceHeadStoreForTest => _txManager.VertexIncidenceHeadStore;
     public IGraphAccessMethods Access => _access;
     public BulkLoadCapabilities BulkLoad => _bulkLoad;
     public IVectorStore Vectors => _vectorsFacade ??= new AutocommitVectorStore(
-        _vectors, () => BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false));
+        _vectors, BeginWriteTransaction);
 
-    public IGraphTransaction BeginGraphTransaction(IsolationLevel level, bool readOnly)
-        => readOnly ? BeginReadGraphTransaction() : BeginWriteGraphTransaction(level);
+    public IReadTransaction BeginReadTransaction()
+        => new ReadTransaction(WrapGraphTransaction(_txManager.BeginRead(), readOnly: true));
 
-    public IGraphTransaction BeginReadGraphTransaction()
-        => WrapGraphTransaction(_txManager.BeginRead(), readOnly: true);
+    public IWriteTransaction BeginWriteTransaction()
+    {
+        if (Volatile.Read(ref _scalarIndexRebuildRequested) == 0
+            && _indexManager.ListIndexDefinitions()
+                .Any(x => x.State != IndexLifecycleState.Ready))
+        {
+            Volatile.Write(ref _scalarIndexRebuildRequested, 1);
+        }
+        QueueScalarIndexRebuild();
+        return new WriteTransaction(WrapGraphTransaction(
+            _txManager.BeginWrite(),
+            readOnly: false));
+    }
 
-    public IGraphTransaction BeginWriteGraphTransaction(IsolationLevel level)
-        => WrapGraphTransaction(_txManager.BeginWrite(level), readOnly: false);
-
-    private IGraphTransaction WrapGraphTransaction(ITransaction inner, bool readOnly)
+    private GraphTransaction WrapGraphTransaction(ITransaction inner, bool readOnly)
     {
         return new GraphTransaction(
             inner, _labelTokens, _edgeTypeTokens, _propKeyTokens,
             _nexusTypeTokens, _roleTokens,
+            _schema.Bind(inner, readOnly),
             readOnly,
             readOnly ? null : _logicalSink,
             _columnManager,
-            _vectors);
+            _vectors,
+            _nexusMergeIndex);
     }
 
     /// <summary>
@@ -538,6 +679,13 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         // 冪等でないので、2 回目以降は no-op にする (テストが db を二重 Dispose する経路がある)。
         if (_disposed) return;
         _disposed = true;
+        _scalarIndexRebuildCancellation.Cancel();
+        Task? rebuildTask;
+        lock (_scalarIndexRebuildSync)
+            rebuildTask = _scalarIndexRebuildTask;
+        try { rebuildTask?.GetAwaiter().GetResult(); }
+        catch (OperationCanceledException) { }
+        _scalarIndexRebuildCancellation.Dispose();
 
         // クリーン終了。アクティブ tx が無ければ全データを graph.quiver へ
         // durable 化し、WAL サイドカーを削除対象にする (静止時は graph.quiver のみ)。
@@ -572,4 +720,11 @@ internal enum CompactAdjacencyPhase
     AfterDescriptorInvalidated,
     AfterRebuild,
     AfterFinalDescriptorFlushed,
+}
+
+internal enum ScalarIndexRebuildPhase
+{
+    AfterArtifactBuilt,
+    BeforePublishCommit,
+    AfterPublishCommit,
 }

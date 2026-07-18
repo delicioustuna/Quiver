@@ -34,8 +34,8 @@ public sealed class SchemaInspectionService
         var labelProperties = new Dictionary<string, List<PropertyInfo>>();
         var edgeTypeProperties = new Dictionary<string, List<PropertyInfo>>();
 
-        using var tx = database.BeginReadOnlyTransaction();
-        var g = tx.G(schema);
+        using var tx = database.BeginReadTransaction();
+        var g = tx.Query;
 
         foreach (var label in labels)
         {

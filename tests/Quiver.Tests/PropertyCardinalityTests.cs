@@ -25,7 +25,7 @@ public sealed class PropertyCardinalityTests : IDisposable
     public void GetOrCreate_with_Set_returns_Set_cardinality()
     {
         using var db = QuiverDatabase.Open(_path);
-        var id = db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        var id = db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
         db.Schema.GetPropertyKeyCardinality(id).Should().Be(PropertyCardinality.Set);
     }
 
@@ -33,7 +33,7 @@ public sealed class PropertyCardinalityTests : IDisposable
     public void Default_cardinality_is_Single()
     {
         using var db = QuiverDatabase.Open(_path);
-        var id = db.Schema.GetOrCreatePropertyKey("name");
+        var id = db.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
         db.Schema.GetPropertyKeyCardinality(id).Should().Be(PropertyCardinality.Single);
     }
 
@@ -41,8 +41,8 @@ public sealed class PropertyCardinalityTests : IDisposable
     public void Same_key_same_cardinality_is_idempotent()
     {
         using var db = QuiverDatabase.Open(_path);
-        var id1 = db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
-        var id2 = db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        var id1 = db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
+        var id2 = db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
         id2.Should().Be(id1);
     }
 
@@ -50,8 +50,8 @@ public sealed class PropertyCardinalityTests : IDisposable
     public void Same_key_different_cardinality_throws()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
-        var act = () => db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Single);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
+        var act = () => db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Single));
         act.Should().Throw<InvalidOperationException>();
     }
 
@@ -59,8 +59,8 @@ public sealed class PropertyCardinalityTests : IDisposable
     public void Existing_Single_key_rejects_Set()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("name");
-        var act = () => db.Schema.GetOrCreatePropertyKey("name", PropertyCardinality.Set);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
+        var act = () => db.EditSchema(schema => schema.GetOrCreatePropertyKey("name", PropertyCardinality.Set));
         act.Should().Throw<InvalidOperationException>();
     }
 
@@ -70,8 +70,8 @@ public sealed class PropertyCardinalityTests : IDisposable
         PropertyKeyId tagsId, nameId;
         using (var db = QuiverDatabase.Open(_path))
         {
-            tagsId = db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
-            nameId = db.Schema.GetOrCreatePropertyKey("name", PropertyCardinality.Single);
+            tagsId = db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
+            nameId = db.EditSchema(schema => schema.GetOrCreatePropertyKey("name", PropertyCardinality.Single));
         }
 
         using (var db = QuiverDatabase.Open(_path))
@@ -79,7 +79,7 @@ public sealed class PropertyCardinalityTests : IDisposable
             db.Schema.GetPropertyKeyCardinality(tagsId).Should().Be(PropertyCardinality.Set);
             db.Schema.GetPropertyKeyCardinality(nameId).Should().Be(PropertyCardinality.Single);
 
-            db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set).Should().Be(tagsId);
+            db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set).Should().Be(tagsId));
         }
     }
 

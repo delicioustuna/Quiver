@@ -13,8 +13,8 @@ public class PropertyLookupOperatorTests
     public void Empty_source_returns_empty()
     {
         using var fx = OperatorTestFixture.OpenEmpty();
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("name");
-        using var tx = fx.Db.BeginTransaction();
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new PropertyLookupOperator(
             new FixedVertexListOperator(), 0, key, "name"));
         result.Rows().Should().BeEmpty();
@@ -30,8 +30,8 @@ public class PropertyLookupOperatorTests
             n = tx.CreateVertex("X");
             tx.SetProperty(n, "name", PropertyValue.FromString("Alice"));
         });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("name");
-        using var tx2 = fx.Db.BeginTransaction();
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new PropertyLookupOperator(
             new FixedVertexListOperator(n), 0, key, "name"));
         result.Rows().Single().GetString(1).Should().Be("Alice");
@@ -43,8 +43,8 @@ public class PropertyLookupOperatorTests
     {
         VertexId n = default;
         using var fx = OperatorTestFixture.Open(tx => { n = tx.CreateVertex("X"); });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("missing");
-        using var tx2 = fx.Db.BeginTransaction();
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("missing"));
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new PropertyLookupOperator(
             new FixedVertexListOperator(n), 0, key, "missing"));
         result.Rows().Single().GetString(1).Should().BeEmpty();
@@ -60,8 +60,8 @@ public class PropertyLookupOperatorTests
             n = tx.CreateVertex("X");
             tx.SetProperty(n, "age", PropertyValue.FromInt64(42));
         });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("age");
-        using var tx2 = fx.Db.BeginTransaction();
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("age"));
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new PropertyLookupOperator(
             new FixedVertexListOperator(n), 0, key, "age"));
         result.Rows().Single().GetInt64(1).Should().Be(42);
@@ -77,8 +77,8 @@ public class PropertyLookupOperatorTests
             n = tx.CreateVertex("X");
             tx.SetProperty(n, "name", PropertyValue.FromString("Bob"));
         });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("name");
-        using var tx2 = fx.Db.BeginTransaction();
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
+        using var tx2 = fx.Db.BeginWriteTransaction();
         // 文字列値に対して Int だけを要求するため、出力は null のままになる。
         using var result = tx2.Execute(new PropertyLookupOperator(
             new FixedVertexListOperator(n), 0, key, "name",

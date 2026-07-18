@@ -38,7 +38,7 @@ public sealed class StreamingBulkLoaderTests : IDisposable
             loader.Commit();
 
         using var reopened = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
-        using var tx = reopened.BeginTransaction();
+        using var tx = reopened.BeginWriteTransaction();
         // No vertices, no edges — but the db must be openable.
         tx.Should().NotBeNull();
     }
@@ -99,8 +99,8 @@ public sealed class StreamingBulkLoaderTests : IDisposable
         using var dbB = QuiverDatabase.Open(System.IO.Path.Combine(streamDir, "graph.quiver"));
         for (long n = 0; n < 4; n++)
         {
-            using var txA = dbA.BeginTransaction();
-            using var txB = dbB.BeginTransaction();
+            using var txA = dbA.BeginWriteTransaction();
+            using var txB = dbB.BeginWriteTransaction();
             var ea = ExpandOut(txA, new VertexId(n));
             var eb = ExpandOut(txB, new VertexId(n));
             eb.Should().BeEquivalentTo(ea, opts => opts.WithStrictOrdering(),
@@ -168,8 +168,8 @@ public sealed class StreamingBulkLoaderTests : IDisposable
     private static void BuildWithProps(string dir, bool streaming)
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
-        var keyName = db.Schema.GetOrCreatePropertyKey("name");
-        var keyAge  = db.Schema.GetOrCreatePropertyKey("age");
+        var keyName = db.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
+        var keyAge  = db.EditSchema(schema => schema.GetOrCreatePropertyKey("age"));
 
         if (streaming)
         {
@@ -222,7 +222,7 @@ public sealed class StreamingBulkLoaderTests : IDisposable
             }
     }
 
-    private static List<long> ExpandOut(IGraphTransaction tx, VertexId source)
+    private static List<long> ExpandOut(IWriteTransaction tx, VertexId source)
     {
         var op = new ExpandOperator(
             new SingleVertexSource(source),

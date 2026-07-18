@@ -133,6 +133,12 @@ internal sealed class TxEdgeStore : IEdgeStore
             : _inner.Scan();
     }
 
+    public IEnumerable<EdgeId> Lookup(
+        VertexId source,
+        VertexId target,
+        EdgeTypeId type)
+        => _inner.Lookup(source, target, type);
+
     public PropertyCursor EnumerateProperties(
         EdgeId edgeId,
         IPropertyStore overflowStore)

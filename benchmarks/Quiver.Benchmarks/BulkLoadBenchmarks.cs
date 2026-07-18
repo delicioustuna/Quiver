@@ -54,8 +54,8 @@ public class BulkLoadBenchmarks
     {
         int vertexCount = Math.Max(EdgeCount / 10, 1_000);
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_bulkDbPath, "graph.quiver"));
-        var labelId   = db.Schema.GetOrCreateLabel("Vertex");
-        var edgeTypeId = db.Schema.GetOrCreateEdgeType("KNOWS");
+        var labelId   = db.EditSchema(schema => schema.GetOrCreateLabel("Vertex"));
+        var edgeTypeId = db.EditSchema(schema => schema.GetOrCreateEdgeType("KNOWS"));
 
         using var bulk = db.BeginBulkLoad();
 
@@ -79,8 +79,8 @@ public class BulkLoadBenchmarks
     {
         int vertexCount = Math.Max(EdgeCount / 10, 1_000);
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_streamingDbPath, "graph.quiver"));
-        var labelId   = db.Schema.GetOrCreateLabel("Vertex");
-        var edgeTypeId = db.Schema.GetOrCreateEdgeType("KNOWS");
+        var labelId   = db.EditSchema(schema => schema.GetOrCreateLabel("Vertex"));
+        var edgeTypeId = db.EditSchema(schema => schema.GetOrCreateEdgeType("KNOWS"));
 
         using var bulk = db.BeginStreamingBulkLoad();
 
@@ -109,7 +109,7 @@ public class BulkLoadBenchmarks
         var vertexIds = new VertexId[vertexCount];
         for (int i = 0; i < vertexCount; i += BatchSize)
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             int end = Math.Min(i + BatchSize, vertexCount);
             for (int j = i; j < end; j++)
                 vertexIds[j] = tx.CreateVertex("Vertex");
@@ -119,7 +119,7 @@ public class BulkLoadBenchmarks
         var rng = new Random(42);
         for (int i = 0; i < EdgeCount; i += BatchSize)
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             int end = Math.Min(i + BatchSize, EdgeCount);
             for (int j = i; j < end; j++)
             {

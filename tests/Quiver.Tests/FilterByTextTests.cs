@@ -24,7 +24,7 @@ public sealed class FilterByTextTests : IDisposable
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fts4_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
-        _db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+        _db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
     }
 
     public void Dispose()
@@ -35,7 +35,7 @@ public sealed class FilterByTextTests : IDisposable
 
     private VertexId AddDoc(string body, string? lang = null)
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString(body));
         if (lang != null) tx.SetProperty(n, "lang", PropertyValue.FromString(lang));
@@ -45,7 +45,7 @@ public sealed class FilterByTextTests : IDisposable
 
     private void AddOther(int count)
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < count; i++) tx.CreateVertex("Author");
         tx.Commit();
     }
@@ -62,8 +62,8 @@ public sealed class FilterByTextTests : IDisposable
         AddDoc("quiver quiver quiver");   // tf=3  → strict BM25 order, no ties
         AddOther(3);                      // non-indexed vertices, must not perturb either path
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var textFirst  = g.Search(Index, "quiver", k: 10).ToList();
         var graphFirst = g.Vertices().HasLabel("Doc").FilterByText(Index, "quiver", k: 10).ToList();
@@ -79,8 +79,8 @@ public sealed class FilterByTextTests : IDisposable
         AddDoc("alpha alpha");
         AddOther(2);
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var pushdown = g.Search(Index, "alpha", k: 10).HasLabel("Doc").ToList();
         var manual   = g.Vertices().HasLabel("Doc").FilterByText(Index, "alpha", k: 10).ToList();
@@ -97,8 +97,8 @@ public sealed class FilterByTextTests : IDisposable
         for (int i = 0; i < 5; i++) AddDoc("quiver quiver", lang: "en");
         for (int i = 0; i < 2; i++) AddDoc("quiver", lang: "ja");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var result = g.Search(Index, "quiver", k: 2).Has("lang", "ja").ToList();
 
@@ -109,7 +109,7 @@ public sealed class FilterByTextTests : IDisposable
     public void FilterByText_composes_with_Out_traversal()
     {
         VertexId author;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             author = tx.CreateVertex("Author");
             var doc = tx.CreateVertex("Doc");
@@ -118,8 +118,8 @@ public sealed class FilterByTextTests : IDisposable
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var authors = rtx.G(_db.Schema)
+        using var rtx = _db.BeginReadTransaction();
+        var authors = rtx.Query
             .Vertices().HasLabel("Doc")
             .FilterByText(Index, "quiver", k: 10)
             .Out("WROTE").ToList();
@@ -132,8 +132,8 @@ public sealed class FilterByTextTests : IDisposable
     {
         AddDoc("quiver report");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var result = rtx.G(_db.Schema)
+        using var rtx = _db.BeginReadTransaction();
+        var result = rtx.Query
             .Vertices().HasLabel("Ghost")   // no such label → empty candidate set
             .FilterByText(Index, "quiver", k: 10).ToList();
 
@@ -147,8 +147,8 @@ public sealed class FilterByTextTests : IDisposable
         // not a silent empty result, even though the candidate set is non-empty.
         AddDoc("quiver report");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var act = () => rtx.G(_db.Schema)
+        using var rtx = _db.BeginReadTransaction();
+        var act = () => rtx.Query
             .Vertices().HasLabel("Doc")
             .FilterByText("idx_missing", "quiver", k: 10).ToList();
 
@@ -159,14 +159,14 @@ public sealed class FilterByTextTests : IDisposable
     public void Deleted_vertex_is_not_returned_via_graph_first()
     {
         var doc = AddDoc("secret content");
-        using var rtx0 = _db.BeginReadOnlyTransaction();
-        rtx0.G(_db.Schema).Vertices().HasLabel("Doc").FilterByText(Index, "secret", k: 10)
+        using var rtx0 = _db.BeginReadTransaction();
+        rtx0.Query.Vertices().HasLabel("Doc").FilterByText(Index, "secret", k: 10)
             .ToList().Should().ContainSingle().Which.Should().Be(doc);
 
-        using (var tx = _db.BeginTransaction()) { tx.DeleteVertex(doc); tx.Commit(); }
+        using (var tx = _db.BeginWriteTransaction()) { tx.DeleteVertex(doc); tx.Commit(); }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        rtx.G(_db.Schema).Vertices().HasLabel("Doc").FilterByText(Index, "secret", k: 10)
+        using var rtx = _db.BeginReadTransaction();
+        rtx.Query.Vertices().HasLabel("Doc").FilterByText(Index, "secret", k: 10)
             .ToList().Should().BeEmpty();
     }
 
@@ -175,8 +175,8 @@ public sealed class FilterByTextTests : IDisposable
     [Fact]
     public void Search_no_filter_chain_stays_text_first()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var optimized = rtx.G(_db.Schema).Search(Index, "quiver", k: 5).Optimized();
+        using var rtx = _db.BeginReadTransaction();
+        var optimized = rtx.Query.Search(Index, "quiver", k: 5).Optimized();
 
         optimized.Should().BeOfType<FullTextScanOp>();
         ((FullTextScanOp)optimized).Candidate.Should().BeNull("no filter → text-first");
@@ -185,8 +185,8 @@ public sealed class FilterByTextTests : IDisposable
     [Fact]
     public void Search_HasLabel_materializes_to_graph_first_without_stats()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var optimized = rtx.G(_db.Schema).Search(Index, "quiver", k: 5).HasLabel("Doc").Optimized();
+        using var rtx = _db.BeginReadTransaction();
+        var optimized = rtx.Query.Search(Index, "quiver", k: 5).HasLabel("Doc").Optimized();
 
         optimized.Should().BeOfType<FullTextScanOp>();
         ((FullTextScanOp)optimized).Candidate.Should().NotBeNull("filter chain → graph-first");
@@ -200,8 +200,8 @@ public sealed class FilterByTextTests : IDisposable
         AddOther(50);
 
         var stats = _db.CollectStats();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var optimized = rtx.G(_db.Schema, stats).Search(Index, "quiver", k: 5).HasLabel("Doc").Optimized();
+        using var rtx = _db.BeginReadTransaction();
+        var optimized = rtx.Query.WithStats(stats).Search(Index, "quiver", k: 5).HasLabel("Doc").Optimized();
 
         optimized.Should().BeOfType<FilterOp>("50% >= 30% → stay text-first (filter on top)");
     }
@@ -214,8 +214,8 @@ public sealed class FilterByTextTests : IDisposable
         AddOther(95);
 
         var stats = _db.CollectStats();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var optimized = rtx.G(_db.Schema, stats).Search(Index, "quiver", k: 5).HasLabel("Doc").Optimized();
+        using var rtx = _db.BeginReadTransaction();
+        var optimized = rtx.Query.WithStats(stats).Search(Index, "quiver", k: 5).HasLabel("Doc").Optimized();
 
         optimized.Should().BeOfType<FullTextScanOp>();
         ((FullTextScanOp)optimized).Candidate.Should().NotBeNull("5% < 30% → graph-first");
@@ -227,7 +227,7 @@ public sealed class FilterByTextTests : IDisposable
         // Doc-bound index means HasLabel("Doc") keeps every indexed hit, so the
         // text-first fallback (50% card) and graph-first (no stats) yield the same set.
         long[] docIds;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             docIds = new long[50];
             for (int i = 0; i < 50; i++)
@@ -241,10 +241,10 @@ public sealed class FilterByTextTests : IDisposable
         }
 
         var stats = _db.CollectStats();
-        using var rtx = _db.BeginReadOnlyTransaction();
+        using var rtx = _db.BeginReadTransaction();
 
-        var withStats    = rtx.G(_db.Schema, stats).Search(Index, "quiver", k: 50).HasLabel("Doc").ToList();
-        var withoutStats = rtx.G(_db.Schema).Search(Index, "quiver", k: 50).HasLabel("Doc").ToList();
+        var withStats    = rtx.Query.WithStats(stats).Search(Index, "quiver", k: 50).HasLabel("Doc").ToList();
+        var withoutStats = rtx.Query.Search(Index, "quiver", k: 50).HasLabel("Doc").ToList();
 
         withStats.Select(n => n.Value).Should().BeEquivalentTo(withoutStats.Select(n => n.Value));
         withStats.Should().OnlyContain(n => docIds.Contains(n.Value));
@@ -253,8 +253,8 @@ public sealed class FilterByTextTests : IDisposable
     [Fact]
     public void Limit_smaller_than_k_shrinks_graph_first_k()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var optimized = rtx.G(_db.Schema)
+        using var rtx = _db.BeginReadTransaction();
+        var optimized = rtx.Query
             .Search(Index, "quiver", k: 20).HasLabel("Doc").Limit(5).Optimized();
 
         optimized.Should().BeOfType<FullTextScanOp>();

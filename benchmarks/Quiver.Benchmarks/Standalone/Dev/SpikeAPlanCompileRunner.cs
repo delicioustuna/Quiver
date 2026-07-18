@@ -42,9 +42,9 @@ public static class SpikeAPlanCompileRunner
             }
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
             var hub = new VertexId(0);
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             var schema = db.Schema;
-            var g = tx.G(schema);
+            var g = tx.Query;
 
             // 事前に 1 本作って LogicalOp / optimized plan を取り出す (build/optimize/plan を個別計測するため)。
             var trav = g.Vertex(hub).Out();

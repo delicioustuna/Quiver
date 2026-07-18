@@ -13,16 +13,16 @@ public interface IGraphEdge<TSelf> where TSelf : IGraphEdge<TSelf>
     static abstract string GraphType { get; }
 
     /// <summary>新規Edgeを作成してプロパティを書き込み、その ID を返す。</summary>
-    static abstract EdgeId Insert(IGraphTransaction tx, VertexId from, VertexId to, TSelf entity);
+    static abstract EdgeId Insert(IWriteTransaction tx, VertexId from, VertexId to, TSelf entity);
 
     /// <summary>指定 ID のEdgeを読み込んでインスタンスを復元する。</summary>
-    static abstract TSelf Load(IGraphTransaction tx, EdgeId id);
+    static abstract TSelf Load(IReadTransaction tx, EdgeId id);
 
     /// <summary>指定 ID のEdgeのプロパティを上書きする。</summary>
-    static abstract void Update(IGraphTransaction tx, EdgeId id, TSelf entity);
+    static abstract void Update(IWriteTransaction tx, EdgeId id, TSelf entity);
 
     /// <summary>指定 ID のEdgeを削除する。</summary>
-    static abstract void Delete(IGraphTransaction tx, EdgeId id);
+    static abstract void Delete(IWriteTransaction tx, EdgeId id);
 }
 
 /// <summary>

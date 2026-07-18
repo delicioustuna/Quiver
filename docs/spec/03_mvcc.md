@@ -1,6 +1,14 @@
 # MVCC とトランザクション
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-18）
+
+## 公開トランザクション能力 {#public-capabilities}
+
+公開 API は読み取り能力を `IReadTransaction`、書き込み能力を `IWriteTransaction` として分離する。
+`BeginReadTransaction()` は `IReadTransaction` を返し、query、スキーマ参照、エンティティ参照だけを公開する。
+`BeginWriteTransaction()` は `IWriteTransaction` を返し、読み取り能力に加えて mutation、スキーマ編集、commit、rollback、savepoint を公開する。
+トラバーサルは `Query`、mutation DSL は書き込みハンドルの `Mutate` から開始する。
+読み取りハンドルに書き込みメソッドを持たせて実行時に拒否する設計は採用しない。
 
 ## 分離レベル {#isolation}
 
@@ -78,6 +86,15 @@ commit はデータページの flush を待たず、dirty page は後続 checkp
 
 全文索引を含む B+Tree 更新も同じ page write set を使う。
 全文専用の論理 undo stack や補償 WAL record は持たない。
+
+## スキーマのスナップショット {#schema-snapshot}
+
+ラベル、Edge 型、Nexus 型、ロール、プロパティキー、索引定義はデータと同じ書き込みトランザクションに属する。
+書き込みトランザクションは `EditSchema` で未コミットの変更を参照できる。
+別の reader と `QuiverDatabase.Schema` は、その変更が commit されるまで参照できない。
+reader の `Schema` は開始時の不変な `ISchemaCatalog` を保持し、後続 commit によって変化しない。
+rollback と `RollbackTo` はスキーマページと索引定義を同じ before-image 境界まで戻す。
+未知の名前を読み取り API に渡した場合は空結果または missing を返し、トークンを作成しない。
 
 ## crash recovery {#crash-recovery}
 

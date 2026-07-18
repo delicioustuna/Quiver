@@ -32,7 +32,7 @@ public sealed class ColumnRegistrationTests : IDisposable
     {
         using (var db = QuiverDatabase.Open(_path))
         {
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 var a = tx.CreateVertex("A");
                 var b = tx.CreateVertex("B");
@@ -66,7 +66,7 @@ public sealed class ColumnRegistrationTests : IDisposable
     {
         using (var db = QuiverDatabase.Open(_path))
         {
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 var a = tx.CreateVertex("A");
                 var b = tx.CreateVertex("B");
@@ -94,7 +94,7 @@ public sealed class ColumnRegistrationTests : IDisposable
         VertexId b;
         using (var db = QuiverDatabase.Open(_path))
         {
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 a = tx.CreateVertex("Entity");
                 b = tx.CreateVertex("Entity");
@@ -106,7 +106,7 @@ public sealed class ColumnRegistrationTests : IDisposable
             db.CreateColumn(EntityKind.Nexus, "confidence").Should().BeTrue();
             db.ColumnProjectSumForTest(EntityKind.Nexus, "confidence").Should().Be(10);
 
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 var second = tx.CreateNexus("Fact", [new("Subject", a), new("Object", b)]);
                 tx.SetProperty(second, "confidence", PropertyValue.FromInt64(20));

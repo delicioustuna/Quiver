@@ -128,10 +128,10 @@ public class TransactionManagerTests : IDisposable
     }
 
     [Fact]
-    public void Isolation_level_is_preserved()
+    public void Write_transaction_starts_active()
     {
-        using var tx = _manager.BeginWrite(IsolationLevel.ReadCommitted);
-        tx.Level.Should().Be(IsolationLevel.ReadCommitted);
+        using var tx = _manager.BeginWrite();
+        tx.State.Should().Be(TransactionState.Active);
     }
 
     [Fact]
@@ -374,6 +374,7 @@ public class TransactionManagerTests : IDisposable
     {
         public PropertyVersionRef Create(PropertyAddress address, PropertyCardinality cardinality, in PropertyValue value, PropertyVersionRef currentFirst) => PropertyVersionRef.Invalid;
         public PropertyVersionRef Delete(EntityRef owner, PropertyVersionRef version, PropertyVersionRef currentFirst) => PropertyVersionRef.Invalid;
+        public PropertyVersionRecord Read(PropertyVersionRef version) => throw new NotSupportedException();
         public PropertyVersionRecord Read(EntityRef owner, PropertyVersionRef version) => throw new NotSupportedException();
         public PropertyCursor Enumerate(EntityRef owner, PropertyVersionRef firstVersion) => throw new NotSupportedException();
     }

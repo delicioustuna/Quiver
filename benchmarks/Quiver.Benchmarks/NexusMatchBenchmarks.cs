@@ -36,8 +36,8 @@ public static class NexusMatchBenchmarks
             using var db = QuiverDatabase.Open(Path.Combine(directory, "graph.quiver"));
             BuildDataset(db);
 
-            using var tx = db.BeginReadOnlyTransaction();
-            var g = tx.G(db.Schema);
+            using var tx = db.BeginReadTransaction();
+            var g = tx.Query;
 
             double starP50 = MeasureP50(() => StarMatch(g), FactCount);
             double reifiedP50 = MeasureP50(() => ReifiedJoin(g), FactCount);
@@ -61,7 +61,7 @@ public static class NexusMatchBenchmarks
     // Nexus型名とVertexラベル名は別空間なので衝突しない。
     private static void BuildDataset(QuiverDatabase db)
     {
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         VertexId asOf = tx.CreateVertex("TimePoint");
 
         for (int i = 0; i < FactCount; i++)

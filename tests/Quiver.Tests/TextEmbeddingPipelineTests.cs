@@ -34,7 +34,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         _catalog = new JsonFileVectorCatalog(Path.Combine(_dir, "vector_catalog.json"));
         _engine = new GraphEngineAdapter(_db, _vectors, _catalog);
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey(SourceProp);
+        var keyId = _db.EditSchema(schema => schema.GetOrCreatePropertyKey(SourceProp));
         _vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "mock", null));
@@ -64,7 +64,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         var worker = pipeline.RunAsync(cts.Token);
 
         VertexId vertex;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             vertex = tx.CreateVertex("Page");
             tx.SetProperty(vertex, SourceProp, Storage.Records.PropertyValue.FromString("hello world"));
@@ -95,7 +95,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var worker = pipeline.RunAsync(cts.Token);
 
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var vertex = tx.CreateVertex("Page");
             tx.SetProperty(vertex, SourceProp, Storage.Records.PropertyValue.FromString("dropped"));
@@ -121,7 +121,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
         // Pretend a prior process committed vertices but never enqueued embeddings
         // (Z' scenario: commit durable, hook never fired).
         var ids = new List<long>();
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 3; i++)
             {
@@ -164,7 +164,7 @@ public sealed class TextEmbeddingPipelineTests : IDisposable
     [Fact]
     public async Task ScanAndEnqueueAsync_is_idempotent_for_unchanged_content()
     {
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var nid = tx.CreateVertex("Page");
             tx.SetProperty(nid, SourceProp, Storage.Records.PropertyValue.FromString("same"));

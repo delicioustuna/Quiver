@@ -39,7 +39,7 @@ public sealed class FullTextConcurrencyTests : IDisposable
             // 実際のタイムアウトは分類器が一時的な競合として扱う。
             LockTimeout = TimeSpan.FromSeconds(30),
         });
-        _db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+        _db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
     }
 
     public void Dispose()
@@ -80,7 +80,7 @@ public sealed class FullTextConcurrencyTests : IDisposable
                     // 一度に 1 つの Postings インデックスだけを書き換える。
                     lock (_writeGate)
                     {
-                        using var tx = _db.BeginTransaction();
+                        using var tx = _db.BeginWriteTransaction();
                         var n = tx.CreateVertex("Doc");
                         tx.SetProperty(n, "body",
                             PropertyValue.FromString($"shared token {marker} payload body"));
@@ -105,11 +105,11 @@ public sealed class FullTextConcurrencyTests : IDisposable
             {
                 while (!done.IsSet)
                 {
-                    using var rtx = _db.BeginReadOnlyTransaction();
+                    using var rtx = _db.BeginReadTransaction();
                     // Searching the shared term may legitimately return any prefix of
                     // the committed set (empty included) while a writer is in flight —
                     // the only contract here is "no fault, well-formed ids".
-                    var hits = rtx.G(_db.Schema).Search(Index, "shared", k: 100).ToList();
+                    var hits = rtx.Query.Search(Index, "shared", k: 100).ToList();
                     foreach (var id in hits) id.Value.Should().BeGreaterThan(0);
                     Thread.Yield();
                 }
@@ -138,15 +138,15 @@ public sealed class FullTextConcurrencyTests : IDisposable
         // Final consistency: each committed marker resolves to exactly its vertex, and
         // the shared term returns the whole committed set (postings stayed coherent
         // under concurrent search).
-        using (var rtx = _db.BeginReadOnlyTransaction())
+        using (var rtx = _db.BeginReadTransaction())
         {
-            var g = rtx.G(_db.Schema);
+            var g = rtx.Query;
             foreach (var (marker, vertex) in committed)
                 g.Search(Index, marker, k: 5).ToList().Should().ContainSingle().Which.Should().Be(vertex);
         }
-        using (var rtx = _db.BeginReadOnlyTransaction())
+        using (var rtx = _db.BeginReadTransaction())
         {
-            rtx.G(_db.Schema).Search(Index, "shared", k: Writers * DocsPerWriter + 1)
+            rtx.Query.Search(Index, "shared", k: Writers * DocsPerWriter + 1)
                 .ToList().Should().HaveCount(Writers * DocsPerWriter);
         }
     }

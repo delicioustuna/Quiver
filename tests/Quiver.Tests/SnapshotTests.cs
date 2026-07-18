@@ -34,7 +34,7 @@ public sealed class SnapshotTests : IDisposable
         var ids = new List<VertexId>();
         using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             for (int i = 0; i < 50; i++)
             {
                 var n = tx.CreateVertex("Person");
@@ -47,7 +47,7 @@ public sealed class SnapshotTests : IDisposable
         }
 
         using var target = QuiverDatabase.Open(System.IO.Path.Combine(_snapDir, "graph.quiver"));
-        using var read = target.BeginReadOnlyTransaction();
+        using var read = target.BeginReadTransaction();
         foreach (var id in ids)
         {
             read.VertexExists(id).Should().BeTrue();
@@ -61,14 +61,14 @@ public sealed class SnapshotTests : IDisposable
     {
         using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
-            db.Schema.CreateIndex("idx_email", "Person", "email", IndexKind.StringEquality);
-            using (var tx = db.BeginTransaction())
+            db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_email", new PropertyTarget(PropertyOwnerKind.Vertex, "email", "Person"), IndexKind.StringEquality)));
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < 20; i++)
                 {
                     var n = tx.CreateVertex("Person");
                     tx.SetProperty(n, "email", PropertyValue.FromString($"u{i}@x"));
-                    tx.IndexInsert("idx_email", $"u{i}@x", n);
+                    tx.SetIndexedProperty("idx_email", $"u{i}@x", n);
                 }
                 tx.Commit();
             }
@@ -77,7 +77,7 @@ public sealed class SnapshotTests : IDisposable
         }
 
         using var target = QuiverDatabase.Open(System.IO.Path.Combine(_snapDir, "graph.quiver"));
-        using var read = target.BeginReadOnlyTransaction();
+        using var read = target.BeginReadTransaction();
         for (int i = 0; i < 20; i++)
         {
             var key = PropertyValue.FromString($"u{i}@x");
@@ -94,12 +94,12 @@ public sealed class SnapshotTests : IDisposable
     {
         using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
-            db.Schema.CreateIndex("idx_email", "Person", "email", IndexKind.StringEquality);
-            using (var tx = db.BeginTransaction())
+            db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_email", new PropertyTarget(PropertyOwnerKind.Vertex, "email", "Person"), IndexKind.StringEquality)));
+            using (var tx = db.BeginWriteTransaction())
             {
                 var n = tx.CreateVertex("Person");
                 tx.SetProperty(n, "email", PropertyValue.FromString("a@b"));
-                tx.IndexInsert("idx_email", "a@b", n);
+                tx.SetIndexedProperty("idx_email", "a@b", n);
                 tx.Commit();
             }
 
@@ -118,7 +118,7 @@ public sealed class SnapshotTests : IDisposable
     public void Snapshot_target_passes_CheckConsistency_after_concurrent_writes()
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < 100; i++) tx.CreateVertex("Seed");
             tx.Commit();
@@ -132,7 +132,7 @@ public sealed class SnapshotTests : IDisposable
             {
                 try
                 {
-                    using var tx = db.BeginTransaction();
+                    using var tx = db.BeginWriteTransaction();
                     for (int i = 0; i < 10; i++)
                     {
                         var n = tx.CreateVertex("Live");
@@ -174,7 +174,7 @@ public sealed class SnapshotTests : IDisposable
         // WAL 末尾 LSN > 0」(= snapshot 時点を超える new tx を受け付ける) ことが確認できる。
         using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 tx.CreateVertex("A");
                 tx.Commit();
@@ -183,7 +183,7 @@ public sealed class SnapshotTests : IDisposable
         }
 
         using var target = QuiverDatabase.Open(System.IO.Path.Combine(_snapDir, "graph.quiver"));
-        using (var tx = target.BeginTransaction())
+        using (var tx = target.BeginWriteTransaction())
         {
             tx.CreateVertex("B");
             tx.Commit();

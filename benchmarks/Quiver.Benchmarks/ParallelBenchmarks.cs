@@ -26,7 +26,7 @@ public class ParallelBenchmarks
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
     private VertexId[] _sourceVertices = [];
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -72,7 +72,7 @@ public class ParallelBenchmarks
         for (int s = 0; s < Sources; s++)
             _sourceVertices[s] = new VertexId(s * stride);
 
-        _readTx = _db.BeginReadOnlyTransaction();
+        _readTx = _db.BeginReadTransaction();
     }
 
     [GlobalCleanup]

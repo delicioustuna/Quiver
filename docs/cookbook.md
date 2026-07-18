@@ -14,18 +14,20 @@ Quiver の典型ユースケースをすぐに動かせるレシピ集。各レ�
 `g.WeightedShortestPath(...)` は距離だけでなく経路 (Vertex列 / エッジ列) も返す。
 
 ```csharp
-var g = tx.G(db.Schema);
+using var tx = db.BeginWriteTransaction();
+var m = tx.Mutate;
+var g = tx.Query;
 
 // 重み付きの道路網を構築
-var s = g.AddVertex("Junction").P("name", "S").Next();
-var a = g.AddVertex("Junction").P("name", "A").Next();
-var b = g.AddVertex("Junction").P("name", "B").Next();
-var t = g.AddVertex("Junction").P("name", "T").Next();
+var s = m.AddVertex("Junction").P("name", "S").Next();
+var a = m.AddVertex("Junction").P("name", "A").Next();
+var b = m.AddVertex("Junction").P("name", "B").Next();
+var t = m.AddVertex("Junction").P("name", "T").Next();
 
-g.AddEdge("ROAD").From(s).To(a).P("weight", 1.0).Next();
-g.AddEdge("ROAD").From(s).To(b).P("weight", 5.0).Next();
-g.AddEdge("ROAD").From(a).To(t).P("weight", 2.0).Next();
-g.AddEdge("ROAD").From(b).To(t).P("weight", 1.0).Next();
+m.AddEdge("ROAD").From(s).To(a).P("weight", 1.0).Next();
+m.AddEdge("ROAD").From(s).To(b).P("weight", 5.0).Next();
+m.AddEdge("ROAD").From(a).To(t).P("weight", 2.0).Next();
+m.AddEdge("ROAD").From(b).To(t).P("weight", 1.0).Next();
 
 // 重み付き最短経路 (Dijkstra)。weight プロパティをエッジ重みとして読む。
 var path = g.WeightedShortestPath(s, t, weightKey: "weight", type: "ROAD");
@@ -35,6 +37,7 @@ if (path.Found)
 
 // ホップ数だけが必要なら従来どおり ShortestPathTo も使える
 var hops = g.Vertex(s).ShortestPathTo(t, type: "ROAD").TryNext();
+tx.Commit();
 ```
 
 > A* を使うときは `WeightedShortestPathAStar(s, t, "weight", "x", "y")` でVertexの座標プロパティから
@@ -48,13 +51,20 @@ var hops = g.Vertex(s).ShortestPathTo(t, type: "ROAD").TryNext();
 
 冪等な書き込みパターン。同じキーで何度実行しても重複Vertexを増やさない。
 
-> `MergeVertex` は `(label, matchKey)` のインデックスが登録されていれば O(log n) シークを使い、無ければラベル内全スキャンに落ちる (Vertex数次第で秒オーダー)。MERGE を多用する業務キーには事前に `Schema.CreateIndex` を呼んでおく。
+> `MergeVertex` は `(label, matchKey)` のインデックスが登録されていれば O(log n) シークを使い、無ければラベル内全スキャンに落ちる (Vertex数次第で秒オーダー)。MERGE を多用する業務キーには事前に `EditSchema` で索引を作成しておく。
 
 ```csharp
 // データベース起動直後に一度だけ
-db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEquality);
+using (var schemaTx = db.BeginWriteTransaction())
+{
+    schemaTx.EditSchema.CreateIndex(new ScalarIndexDefinition(
+        "idx_person_email",
+        new PropertyTarget(PropertyOwnerKind.Vertex, "email", "Person"),
+        IndexKind.StringEquality));
+    schemaTx.Commit();
+}
 
-using var tx = db.BeginTransaction();
+using var tx = db.BeginWriteTransaction();
 
 var (id, created) = tx.MergeVertex(
     "Person",
@@ -122,8 +132,14 @@ var pairs = g.Match(
 ```csharp
 using var loader = db.BeginStreamingBulkLoad(buildAdjacencyIndex: true);
 
-var personLabel = db.Schema.GetOrCreateLabel("Person");
-var knowsType   = db.Schema.GetOrCreateEdgeType("KNOWS");
+LabelId personLabel;
+EdgeTypeId knowsType;
+using (var schemaTx = db.BeginWriteTransaction())
+{
+    personLabel = schemaTx.EditSchema.GetOrCreateLabel("Person");
+    knowsType = schemaTx.EditSchema.GetOrCreateEdgeType("KNOWS");
+    schemaTx.Commit();
+}
 
 for (long i = 0; i < 10_000_000; i++)
     loader.AppendVertex(new VertexId(i), personLabel);
@@ -140,7 +156,7 @@ loader.Commit();
 
 ボイラープレートを削減し、リファクタリング耐性を上げる。
 
-> `[Indexed]` は SourceGenerator に `InsertIndexed` / `FindByName` および属性情報からインデックスを作成する `EnsureIndexes` / `CreateIndex` の生成を指示するマーカー。実体インデックスは `db.EnsureIndexes<T>()` (一括) もしくは `db.CreateIndex<T>(p => p.Prop)` (単一) で作成する。文字列直書きの `db.Schema.CreateIndex(...)` も引き続き使えるが、属性値との二重管理になる。
+> `[Indexed]` は SourceGenerator に `InsertIndexed` / `FindByName` および属性情報からインデックスを作成する `EnsureIndexes` / `CreateIndex` の生成を指示するマーカー。実体インデックスは書き込みトランザクションの `EditSchema.EnsureIndexes<T>()` または `EditSchema.CreateIndex<T>(p => p.Prop)` で作成する。
 
 ```csharp
 [Vertex]
@@ -154,16 +170,20 @@ public partial class Person
     public int Age { get; set; }
 }
 
-// 初期化時に一度だけ — [Indexed] 付きプロパティを SourceGen 情報からまとめて作成。
-db.EnsureIndexes<Person>();
+// 初期化時に一度だけ。
+using (var schemaTx = db.BeginWriteTransaction())
+{
+    schemaTx.EditSchema.EnsureIndexes<Person>();
+    schemaTx.Commit();
+}
 
-using var tx = db.BeginTransaction();
-var g = tx.G(db.Schema);
+using var tx = db.BeginWriteTransaction();
+var g = tx.Query;
 
-var id = g.InsertIndexed(new Person { Name = "Alice", Age = 30 });
+var id = tx.Mutate.InsertIndexed(new Person { Name = "Alice", Age = 30 });
 var loaded = g.Load<Person>(id);
 loaded.Age = 31;
-g.Update(id, loaded);
+tx.Mutate.Update(id, loaded);
 
 var found = Person.FindByName(tx, "Alice");
 ```
@@ -179,7 +199,7 @@ VertexId savedId;
 
 // 書き込み
 using (var db = QuiverDatabase.Open(dir))
-using (var tx = db.BeginTransaction())
+using (var tx = db.BeginWriteTransaction())
 {
     savedId = tx.CreateVertex("Config");
     tx.SetProperty(savedId, "version", PropertyValue.FromString("1.0"));
@@ -188,7 +208,7 @@ using (var tx = db.BeginTransaction())
 
 // 再オープン: コミット済みデータは復元される
 using (var db = QuiverDatabase.Open(dir))
-using (var tx = db.BeginTransaction())
+using (var tx = db.BeginWriteTransaction())
 {
     System.Diagnostics.Debug.Assert(tx.VertexExists(savedId));
 }
@@ -616,5 +636,5 @@ while (cursor.MoveNext())
 
 長い走査をキャンセル可能にする場合は、`AsCursor()` で同期カーソルを取得し、各反復で
 `CancellationToken.ThrowIfCancellationRequested()` を呼ぶ。カーソルは `using` で必ず破棄する。
-トランザクションはスレッドアフィンなので、列挙を別スレッドへ移したり、列挙中に `await` を挟んだりしない。
+同じトランザクションと列挙子を複数の操作フローから同時に使わない。
 

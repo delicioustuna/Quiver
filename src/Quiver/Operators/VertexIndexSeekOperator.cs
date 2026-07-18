@@ -9,14 +9,22 @@ namespace Quiver.Query.Physical;
 /// </summary>
 internal sealed class VertexIndexSeekOperator : IPhysicalOperator
 {
-    private readonly string _indexName;
+    private readonly ScalarIndexDefinition _definition;
+    private readonly PropertyKeyId _propertyKey;
+    private readonly LabelId? _scopeLabel;
     private readonly ITupleProvider _keyProvider;
     private IEnumerator<VertexId>? _enumerator;
     private readonly TupleSlot[] _buffer = new TupleSlot[1];
 
-    public VertexIndexSeekOperator(string indexName, ITupleProvider keyProvider)
+    public VertexIndexSeekOperator(
+        ScalarIndexDefinition definition,
+        PropertyKeyId propertyKey,
+        LabelId? scopeLabel,
+        ITupleProvider keyProvider)
     {
-        _indexName = indexName;
+        _definition = definition;
+        _propertyKey = propertyKey;
+        _scopeLabel = scopeLabel;
         _keyProvider = keyProvider;
     }
 
@@ -37,7 +45,12 @@ internal sealed class VertexIndexSeekOperator : IPhysicalOperator
                 PropertyValue.FromUtf8(_keyProvider.ProvideBytes(in emptyRef, tx)),
             _ => default,
         };
-        _enumerator = tx.Access.SeekVerticesByIndex(tx, _indexName, key).GetEnumerator();
+        _enumerator = tx.Access.SeekVerticesByIndex(
+            tx,
+            _definition,
+            _propertyKey,
+            _scopeLabel,
+            key).GetEnumerator();
     }
 
     public bool MoveNext()

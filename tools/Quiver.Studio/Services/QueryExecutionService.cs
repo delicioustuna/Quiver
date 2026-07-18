@@ -50,13 +50,13 @@ public sealed class QueryExecutionService
         _scriptOptions ??= CreateScriptOptions();
 
         var sw = Stopwatch.StartNew();
-        using var tx = db.BeginReadOnlyTransaction();
+        using var tx = db.BeginReadTransaction();
 
         var globals = new ScriptGlobals
         {
             db = db,
             tx = tx,
-            g = tx.G(db.Schema),
+            g = tx.Query,
             schema = db.Schema,
         };
 

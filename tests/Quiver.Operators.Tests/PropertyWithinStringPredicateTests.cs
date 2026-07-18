@@ -14,9 +14,9 @@ public class PropertyWithinStringPredicateTests
     public void Empty_source_returns_empty()
     {
         using var fx = OperatorTestFixture.OpenEmpty();
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("color");
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("color"));
         var pred = new PropertyWithinStringPredicate(0, key, new[] { "red" });
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new FilterOperator(new FixedVertexListOperator(), pred));
         result.Rows().Should().BeEmpty();
         tx.Rollback();
@@ -32,9 +32,9 @@ public class PropertyWithinStringPredicateTests
             blue = tx.CreateVertex("X");  tx.SetProperty(blue, "color", PropertyValue.FromString("blue"));
             green = tx.CreateVertex("X"); tx.SetProperty(green, "color", PropertyValue.FromString("green"));
         });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("color");
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("color"));
         var pred = new PropertyWithinStringPredicate(0, key, new[] { "red", "green" });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new FilterOperator(
             new FixedVertexListOperator(red, blue, green), pred));
         result.Rows().Should().HaveCount(2);
@@ -51,9 +51,9 @@ public class PropertyWithinStringPredicateTests
             n = tx.CreateVertex("X");
             tx.SetProperty(n, "color", PropertyValue.FromString("red"));
         });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("color");
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("color"));
         var pred = new PropertyWithinStringPredicate(0, key, Array.Empty<string>());
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new FilterOperator(new FixedVertexListOperator(n), pred));
         result.Rows().Should().BeEmpty();
         tx2.Rollback();
@@ -69,9 +69,9 @@ public class PropertyWithinStringPredicateTests
             tx.SetProperty(withProp, "color", PropertyValue.FromString("red"));
             without = tx.CreateVertex("X");
         });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("color");
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("color"));
         var pred = new PropertyWithinStringPredicate(0, key, new[] { "red", "blue" });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new FilterOperator(
             new FixedVertexListOperator(withProp, without), pred));
         result.Rows().Should().HaveCount(1);

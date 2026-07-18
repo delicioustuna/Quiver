@@ -27,7 +27,7 @@ public sealed class KnnPushdownTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "quiver_vec9_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey("title");
+        var keyId = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("title"));
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "test", null));
@@ -43,7 +43,7 @@ public sealed class KnnPushdownTests : IDisposable
     {
         docIds = new long[5];
         articleIds = new long[5];
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < 5; i++)
         {
             var d = tx.CreateVertex("Doc");
@@ -68,8 +68,8 @@ public sealed class KnnPushdownTests : IDisposable
     {
         SeedDocsAndArticles(out _, out _);
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
         var query = new float[] { 1f, 0f, 0f, 0f };
 
         var pushdown = g.Knn(IndexName, query, k: 2).HasLabel("Doc").ToList();
@@ -84,7 +84,7 @@ public sealed class KnnPushdownTests : IDisposable
         // 2 Doc + 50 Article, all sharing the same query direction. Post-filter
         // 先に全 52 件から上位 2 件を取ると Article だけになり、その後の HasLabel で
         // drops both → 0 results. Push-down filters labels first → 2 Docs.
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 50; i++)
             {
@@ -99,8 +99,8 @@ public sealed class KnnPushdownTests : IDisposable
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var result = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 2)
             .HasLabel("Doc")
@@ -112,7 +112,7 @@ public sealed class KnnPushdownTests : IDisposable
     [Fact]
     public void Knn_Has_pushdown_filters_on_property()
     {
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             // 3 Doc, only 1 with status=active. Push-down must keep only that.
             for (int i = 0; i < 3; i++)
@@ -126,8 +126,8 @@ public sealed class KnnPushdownTests : IDisposable
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var result = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5)
             .HasLabel("Doc")
@@ -141,8 +141,8 @@ public sealed class KnnPushdownTests : IDisposable
     public void Knn_Limit_smaller_than_k_shrinks_KNN_k()
     {
         // 無 filter chain → vector-first. Limit が KNN の K を 5 に縮める。
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
         var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 20).Limit(5).Optimized();
 
         optimized.Should().BeOfType<KnnOp>();
@@ -154,8 +154,8 @@ public sealed class KnnPushdownTests : IDisposable
     [Fact]
     public void Knn_HasLabel_Limit_smaller_than_k_shrinks_FilteredKnn_k()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
         var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 20)
             .HasLabel("Doc")
             .Limit(5)
@@ -170,8 +170,8 @@ public sealed class KnnPushdownTests : IDisposable
     [Fact]
     public void Knn_Limit_greater_than_k_keeps_K_unchanged()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
         var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).Limit(20).Optimized();
 
         optimized.Should().BeOfType<KnnOp>();
@@ -181,8 +181,8 @@ public sealed class KnnPushdownTests : IDisposable
     [Fact]
     public void Knn_no_filter_chain_materializes_to_vector_first()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
         var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).Optimized();
 
         optimized.Should().BeOfType<KnnOp>();
@@ -192,8 +192,8 @@ public sealed class KnnPushdownTests : IDisposable
     [Fact]
     public void Knn_HasLabel_materializes_to_graph_first()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
         var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).HasLabel("Doc").Optimized();
 
         optimized.Should().BeOfType<KnnOp>();
@@ -207,8 +207,8 @@ public sealed class KnnPushdownTests : IDisposable
         // FilteredKnn short-circuits without throwing.
         SeedDocsAndArticles(out _, out _);
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var result = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 3)
             .HasLabel("Missing")
@@ -224,7 +224,7 @@ public sealed class KnnPushdownTests : IDisposable
         // a 4th vertex. After push-down the result of .Out("REFERENCES") must
         // contain that 4th vertex.
         long target;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var bestDoc = tx.CreateVertex("Doc");
             tx.SetVector(EntityKind.Vertex, bestDoc.Value, IndexName, new float[] { 1, 0, 0, 0 });
@@ -241,8 +241,8 @@ public sealed class KnnPushdownTests : IDisposable
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var neighbors = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 1)
             .HasLabel("Doc")
@@ -257,8 +257,8 @@ public sealed class KnnPushdownTests : IDisposable
     {
         SeedDocsAndArticles(out var docIds, out _);
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // .As("a") right after Knn must survive the push-down materialize
         // (FilteredKnn output is 1 column VertexId, so alias col = 0 stays valid).

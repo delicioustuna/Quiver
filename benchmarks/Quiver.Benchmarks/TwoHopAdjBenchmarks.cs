@@ -19,7 +19,7 @@ public class TwoHopAdjBenchmarks
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
     private VertexId _hub;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
     private readonly AdjacencyEntry[] _l1Buf = new AdjacencyEntry[16_384];
     private readonly AdjacencyEntry[] _l2Buf = new AdjacencyEntry[16_384];
 
@@ -53,7 +53,7 @@ public class TwoHopAdjBenchmarks
         }
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _hub = new VertexId(0);
-        _readTx = _db.BeginTransaction();
+        _readTx = _db.BeginWriteTransaction();
     }
 
     [GlobalCleanup]

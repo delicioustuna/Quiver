@@ -12,7 +12,7 @@ public class LabelNameLookupOperatorTests
     public void Empty_source_returns_empty()
     {
         using var fx = OperatorTestFixture.OpenEmpty();
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new LabelNameLookupOperator(
             new FixedVertexListOperator(), 0, _ => "X"));
         result.Rows().Should().BeEmpty();
@@ -24,7 +24,7 @@ public class LabelNameLookupOperatorTests
     {
         VertexId n = default;
         using var fx = OperatorTestFixture.Open(tx => { n = tx.CreateVertex("Person"); });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new LabelNameLookupOperator(
             new FixedVertexListOperator(n), 0, id => fx.Db.Schema.GetLabelName(id)));
         result.Rows().Single().GetString(1).Should().Be("Person");
@@ -36,7 +36,7 @@ public class LabelNameLookupOperatorTests
     {
         VertexId n = default;
         using var fx = OperatorTestFixture.Open(tx => { n = tx.CreateVertex("Anything"); });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new LabelNameLookupOperator(
             new FixedVertexListOperator(n), 0, _ => null));
         result.Rows().Single().GetString(1).Should().BeEmpty();
@@ -47,7 +47,7 @@ public class LabelNameLookupOperatorTests
     public void Result_schema_appends_label_string_column()
     {
         using var fx = OperatorTestFixture.OpenEmpty();
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new LabelNameLookupOperator(
             new FixedVertexListOperator(), 0, _ => "?"));
         result.Schema.Columns.Should().HaveCount(2);

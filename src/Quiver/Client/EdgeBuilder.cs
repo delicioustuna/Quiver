@@ -10,13 +10,13 @@ namespace Quiver.Api;
 /// </summary>
 public sealed class EdgeBuilder
 {
-    private readonly IGraphTransaction _tx;
+    private readonly IWriteTransaction _tx;
     private readonly string _type;
     private VertexId _from = VertexId.Invalid;
     private VertexId _to   = VertexId.Invalid;
-    private readonly List<Action<IGraphTransaction, EdgeId>> _props = new();
+    private readonly List<Action<IWriteTransaction, EdgeId>> _props = new();
 
-    internal EdgeBuilder(IGraphTransaction tx, string type) { _tx = tx; _type = type; }
+    internal EdgeBuilder(IWriteTransaction tx, string type) { _tx = tx; _type = type; }
 
     /// <summary>始点Vertexを指定する。</summary>
     public EdgeBuilder From(VertexId src) { _from = src; return this; }

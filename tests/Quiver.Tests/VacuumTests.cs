@@ -32,7 +32,7 @@ public sealed class VacuumTests : IDisposable
 
         // 100 個のVertexを作成 → 全削除 → vacuum で物理回収。
         var ids = new List<long>();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < 100; i++)
                 ids.Add(tx.CreateVertex("Person").Value);
@@ -40,7 +40,7 @@ public sealed class VacuumTests : IDisposable
         }
         db.Diagnostics.GetStatistics().VertexCount.Should().Be(100);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             foreach (var id in ids)
                 tx.DeleteVertex(new Core.VertexId(id));
@@ -62,19 +62,19 @@ public sealed class VacuumTests : IDisposable
 
         // 削除済み version を 1 件作る (vacuum 対象がある状態)。
         long id;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             id = tx.CreateVertex("Person").Value;
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteVertex(new Core.VertexId(id));
             tx.Commit();
         }
 
         // アクティブ tx を抱えた状態で vacuum 起動 → Skipped。
-        using var holder = db.BeginReadOnlyTransaction();
+        using var holder = db.BeginReadTransaction();
         var report = db.Vacuum();
         report.Skipped.Should().BeTrue();
         report.ReclaimedVertices.Should().Be(0);
@@ -87,13 +87,13 @@ public sealed class VacuumTests : IDisposable
 
         // 10 Vertex作成 → 全削除 → vacuum。
         var ids = new List<long>();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < 10; i++)
                 ids.Add(tx.CreateVertex("Person").Value);
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             foreach (var v in ids) tx.DeleteVertex(new Core.VertexId(v));
             tx.Commit();
@@ -103,7 +103,7 @@ public sealed class VacuumTests : IDisposable
 
         // vacuum 後の新規 Allocate は回収済み slot (= 元と同じ ID 範囲) を再利用する。
         var newIds = new List<long>();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < 5; i++)
                 newIds.Add(tx.CreateVertex("Person").Sequence); // slot 再利用は Sequence で確認
@@ -122,14 +122,14 @@ public sealed class VacuumTests : IDisposable
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         long seq;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("Person");
             seq = a.Sequence;
             a.Generation.Should().Be(1);
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteVertex(new Core.VertexId(seq));
             tx.Commit();
@@ -137,7 +137,7 @@ public sealed class VacuumTests : IDisposable
         db.Vacuum().ReclaimedVertices.Should().Be(1);
 
         Core.VertexId reused;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             reused = tx.CreateVertex("Person");
             tx.Commit();
@@ -145,9 +145,9 @@ public sealed class VacuumTests : IDisposable
         reused.Sequence.Should().Be(seq);   // 同 slot を再利用
         reused.Generation.Should().Be(2);   // 世代 bump
 
-        using (var tx = db.BeginReadOnlyTransaction())
+        using (var tx = db.BeginReadTransaction())
         {
-            var rows = tx.G(db.Schema).Vertices().ToList();
+            var rows = tx.Query.Vertices().ToList();
             rows.Should().ContainSingle();
             rows[0].Sequence.Should().Be(seq);
             rows[0].Generation.Should().Be(2);          // stamping が bump 世代を載せる
@@ -164,16 +164,16 @@ public sealed class VacuumTests : IDisposable
         long seq;
         using (var db = QuiverDatabase.Open(path))
         {
-            using (var tx = db.BeginTransaction()) { seq = tx.CreateVertex("P").Sequence; tx.Commit(); }
-            using (var tx = db.BeginTransaction()) { tx.DeleteVertex(new Core.VertexId(seq)); tx.Commit(); }
+            using (var tx = db.BeginWriteTransaction()) { seq = tx.CreateVertex("P").Sequence; tx.Commit(); }
+            using (var tx = db.BeginWriteTransaction()) { tx.DeleteVertex(new Core.VertexId(seq)); tx.Commit(); }
             db.Vacuum();
-            using (var tx = db.BeginTransaction()) { tx.CreateVertex("P").Generation.Should().Be(2); tx.Commit(); }
+            using (var tx = db.BeginWriteTransaction()) { tx.CreateVertex("P").Generation.Should().Be(2); tx.Commit(); }
         }
 
         using (var db = QuiverDatabase.Open(path))
-        using (var tx = db.BeginReadOnlyTransaction())
+        using (var tx = db.BeginReadTransaction())
         {
-            var rows = tx.G(db.Schema).Vertices().ToList();
+            var rows = tx.Query.Vertices().ToList();
             rows.Should().ContainSingle();
             rows[0].Generation.Should().Be(2);
         }
@@ -183,7 +183,7 @@ public sealed class VacuumTests : IDisposable
     public void DryRun_does_not_write()
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var n = tx.CreateVertex("Person");
             tx.DeleteVertex(n);
@@ -208,7 +208,7 @@ public sealed class VacuumTests : IDisposable
         // 3 Vertex a/b/c。a→b, a→c, a→b の 3 リレーション。
         long aId, bId, cId;
         long r1, r2, r3;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             aId = tx.CreateVertex("Person").Value;
             bId = tx.CreateVertex("Person").Value;
@@ -219,7 +219,7 @@ public sealed class VacuumTests : IDisposable
             tx.Commit();
         }
         // 中間の edge r2 だけ削除。
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteEdge(new Core.EdgeId(r2));
             tx.Commit();
@@ -230,7 +230,7 @@ public sealed class VacuumTests : IDisposable
         report.ReclaimedEdges.Should().Be(1);
 
         // a の chain は r1, r3 だけが残ること。
-        using var read = db.BeginReadOnlyTransaction();
+        using var read = db.BeginReadTransaction();
         var outs = new List<long>();
         var en = read.EnumerateEdges(new Core.VertexId(aId), Storage.Records.Direction.Outgoing);
         while (en.MoveNext())
@@ -250,7 +250,7 @@ public sealed class VacuumTests : IDisposable
         static string Big(string s) => new string('x', 300) + s;
 
         long vertexId;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             vertexId = tx.CreateVertex("Person").Value;
             tx.SetProperty(new Core.VertexId(vertexId), "k1", Storage.Records.PropertyValue.FromString(Big("1")));
@@ -259,7 +259,7 @@ public sealed class VacuumTests : IDisposable
             tx.Commit();
         }
         // 1 つだけ削除 (= xmax がスタンプされて dead version 化)。
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.RemoveProperty(new Core.VertexId(vertexId), "k2");
             tx.Commit();
@@ -270,7 +270,7 @@ public sealed class VacuumTests : IDisposable
         report.ReclaimedProperties.Should().Be(1);
 
         // 残った k1 / k3 が読めて、k2 は消えていること。
-        using var read = db.BeginReadOnlyTransaction();
+        using var read = db.BeginReadTransaction();
         System.Text.Encoding.UTF8.GetString(read.GetProperty(new Core.VertexId(vertexId), "k1").Utf8StringValue).Should().Be(Big("1"));
         System.Text.Encoding.UTF8.GetString(read.GetProperty(new Core.VertexId(vertexId), "k3").Utf8StringValue).Should().Be(Big("3"));
         read.HasProperty(new Core.VertexId(vertexId), "k2").Should().BeFalse();
@@ -286,14 +286,14 @@ public sealed class VacuumTests : IDisposable
         static string Big(string s) => new string('x', 300) + s;
 
         long deletedId;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             deletedId = tx.CreateVertex("Person").Value;
             tx.SetProperty(new Core.VertexId(deletedId), "a", Storage.Records.PropertyValue.FromString(Big("a")));
             tx.SetProperty(new Core.VertexId(deletedId), "b", Storage.Records.PropertyValue.FromString(Big("b")));
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteVertex(new Core.VertexId(deletedId));
             tx.Commit();
@@ -311,13 +311,13 @@ public sealed class VacuumTests : IDisposable
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         long aliveId, deletedId;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             aliveId = tx.CreateVertex("Person").Value;
             deletedId = tx.CreateVertex("Person").Value;
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteVertex(new Core.VertexId(deletedId));
             tx.Commit();
@@ -327,7 +327,7 @@ public sealed class VacuumTests : IDisposable
         report.ReclaimedVertices.Should().Be(1);
 
         // 残った live Vertexはまだ読める。
-        using var read = db.BeginReadOnlyTransaction();
+        using var read = db.BeginReadTransaction();
         read.VertexExists(new Core.VertexId(aliveId)).Should().BeTrue();
     }
 
@@ -346,13 +346,13 @@ public sealed class VacuumTests : IDisposable
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         var ids = new List<long>();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < 1000; i++)
                 ids.Add(tx.CreateVertex("Person").Value);
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             foreach (var id in ids)
                 tx.DeleteVertex(new Core.VertexId(id));
@@ -367,14 +367,14 @@ public sealed class VacuumTests : IDisposable
         // ここでは物理回収を行わず、プロパティとEdgeだけ従来どおり回収する。
         // よってここでは「再作成が free list の seq を再利用し全件読める」ことを検証する。
         var refilled = new List<long>();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < 1000; i++)
                 refilled.Add(tx.CreateVertex("Person").Value);
             tx.Commit();
         }
         // seq 再利用: 再作成した 1000 件の Sequence は元の 0..999 の範囲に収まる (新規採番されない)。
-        using (var read = db.BeginReadOnlyTransaction())
+        using (var read = db.BeginReadTransaction())
         {
             foreach (var id in refilled)
                 read.VertexExists(new Core.VertexId(id)).Should().BeTrue();
@@ -395,7 +395,7 @@ public sealed class VacuumTests : IDisposable
         {
             using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
             var deletedIds = new List<long>();
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 aliveId = tx.CreateVertex("Person").Value;
                 tx.SetProperty(new Core.VertexId(aliveId), "name", Storage.Records.PropertyValue.FromInt32(42));
@@ -406,7 +406,7 @@ public sealed class VacuumTests : IDisposable
                     deletedIds.Add(tx.CreateVertex("Person").Value);
                 tx.Commit();
             }
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 foreach (var id in deletedIds)
                     tx.DeleteVertex(new Core.VertexId(id));
@@ -419,7 +419,7 @@ public sealed class VacuumTests : IDisposable
 
         // フェーズ 2: 再 open。残った live Vertexと property が読めること。
         using var db2 = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using var read = db2.BeginReadOnlyTransaction();
+        using var read = db2.BeginReadTransaction();
         read.VertexExists(new Core.VertexId(aliveId)).Should().BeTrue();
         read.GetProperty(new Core.VertexId(aliveId), "name").Int32Value.Should().Be(42);
     }
@@ -435,13 +435,13 @@ public sealed class VacuumTests : IDisposable
 
         // 500 Vertex作成 → 全削除 → vacuum (truncate を狙う)。
         var ids = new List<long>();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < 500; i++)
                 ids.Add(tx.CreateVertex("Person").Value);
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             foreach (var id in ids) tx.DeleteVertex(new Core.VertexId(id));
             tx.Commit();
@@ -450,14 +450,14 @@ public sealed class VacuumTests : IDisposable
 
         // truncate 後に再び 500 Vertex作る — エラーなく完了し全件読める。
         var newIds = new List<long>();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < 500; i++)
                 newIds.Add(tx.CreateVertex("Person").Value);
             tx.Commit();
         }
 
-        using var read = db.BeginReadOnlyTransaction();
+        using var read = db.BeginReadTransaction();
         foreach (var id in newIds)
             read.VertexExists(new Core.VertexId(id)).Should().BeTrue();
     }
@@ -479,7 +479,7 @@ public sealed class VacuumTests : IDisposable
 
         Core.NexusId dead, alive;
         Core.VertexId a, b;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             a = tx.CreateVertex("Entity");
             b = tx.CreateVertex("Entity");
@@ -489,7 +489,7 @@ public sealed class VacuumTests : IDisposable
             tx.SetProperty(alive, "note", Storage.Records.PropertyValue.FromString(Big("a")));
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteNexus(dead);
             tx.Commit();
@@ -502,7 +502,7 @@ public sealed class VacuumTests : IDisposable
         report.ReclaimedProperties.Should().BeGreaterThanOrEqualTo(1,
             "dead Nexusの overflow プロパティも回収される");
 
-        using (var read = db.BeginReadOnlyTransaction())
+        using (var read = db.BeginReadTransaction())
         {
             CollectMembers(read.GetMembers(dead)).Should().BeEmpty();
             CollectMembers(read.GetMembers(alive)).Should().HaveCount(2);
@@ -524,7 +524,7 @@ public sealed class VacuumTests : IDisposable
 
         Core.VertexId hub;
         var edges = new List<Core.NexusId>();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             hub = tx.CreateVertex("Hub");
             for (int i = 0; i < 5; i++)
@@ -537,7 +537,7 @@ public sealed class VacuumTests : IDisposable
 
         // hub の chain は作成の逆順 [4] (head), [3], [2], [1], [0] (tail)。
         // 先頭 (edges[4])・中間 (edges[2])・末尾 (edges[0]) を削除する。
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteNexus(edges[4]);
             tx.DeleteNexus(edges[2]);
@@ -550,7 +550,7 @@ public sealed class VacuumTests : IDisposable
         report.ReclaimedIncidences.Should().Be(6);
 
         // 生き残った 2 件だけが hub から辿れる。
-        using (var read = db.BeginReadOnlyTransaction())
+        using (var read = db.BeginReadTransaction())
         {
             CollectIds(read.GetNexuses(hub)).Should().BeEquivalentTo(
                 new[] { edges[1].Sequence, edges[3].Sequence });
@@ -559,13 +559,13 @@ public sealed class VacuumTests : IDisposable
 
         // sweep 後の chain (head 前進 + 中間の繋ぎ替え) に対して新規作成が正しく head insert される。
         Core.NexusId added;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var partner = tx.CreateVertex("Partner");
             added = tx.CreateNexus("Link", [new("Hub", hub), new("Partner", partner)]);
             tx.Commit();
         }
-        using (var read = db.BeginReadOnlyTransaction())
+        using (var read = db.BeginReadTransaction())
         {
             CollectIds(read.GetNexuses(hub)).Should().BeEquivalentTo(
                 new[] { edges[1].Sequence, edges[3].Sequence, added.Sequence });
@@ -584,7 +584,7 @@ public sealed class VacuumTests : IDisposable
 
         Core.NexusId old;
         Core.VertexId a, b;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             a = tx.CreateVertex("Entity");
             b = tx.CreateVertex("Entity");
@@ -594,7 +594,7 @@ public sealed class VacuumTests : IDisposable
         }
         old.Generation.Should().Be(1);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteNexus(old);
             tx.Commit();
@@ -602,7 +602,7 @@ public sealed class VacuumTests : IDisposable
         db.Vacuum().ReclaimedNexuses.Should().Be(1);
 
         Core.NexusId reused;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             reused = tx.CreateNexus("Fact", [new("S", a), new("O", b)]);
             tx.SetProperty(reused, "k", Storage.Records.PropertyValue.FromInt32(2));
@@ -616,7 +616,7 @@ public sealed class VacuumTests : IDisposable
 
         // 古い packed ID は ID 解決経路 (header Read) の世代照合で弾かれ、
         // 新しい entity を観測しない。
-        using (var read = db.BeginReadOnlyTransaction())
+        using (var read = db.BeginReadTransaction())
         {
             CollectMembers(read.GetMembers(old)).Should().BeEmpty();
             read.GetProperty(reused, "k").Int32Value.Should().Be(2);
@@ -640,7 +640,7 @@ public sealed class VacuumTests : IDisposable
         db.Vectors.CreateVectorIndex(new Core.VectorIndexSpec(
             indexName,
             Core.EntityKind.Nexus,
-            db.Schema.GetOrCreatePropertyKey("embedding"),
+            db.EditSchema(schema => schema.GetOrCreatePropertyKey("embedding")),
             2,
             Core.DistanceMetric.Dot,
             "test",
@@ -648,7 +648,7 @@ public sealed class VacuumTests : IDisposable
 
         Core.VertexId a, b;
         Core.NexusId old;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             a = tx.CreateVertex("Entity");
             b = tx.CreateVertex("Entity");
@@ -657,7 +657,7 @@ public sealed class VacuumTests : IDisposable
             tx.Commit();
         }
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteNexus(old);
             tx.Commit();
@@ -665,7 +665,7 @@ public sealed class VacuumTests : IDisposable
         db.Vacuum().ReclaimedNexuses.Should().Be(1);
 
         Core.NexusId reused;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             reused = tx.CreateNexus("Fact", [new("S", a), new("O", b)]);
             tx.Commit();
@@ -687,20 +687,20 @@ public sealed class VacuumTests : IDisposable
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         Core.NexusId heId;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("A");
             var b = tx.CreateVertex("B");
             heId = tx.CreateNexus("T", [new("R1", a), new("R2", b)]);
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteNexus(heId);
             tx.Commit();
         }
 
-        using (var holder = db.BeginReadOnlyTransaction())
+        using (var holder = db.BeginReadTransaction())
         {
             var report = db.Vacuum();
             report.Skipped.Should().BeTrue();
@@ -724,7 +724,7 @@ public sealed class VacuumTests : IDisposable
         Core.VertexId a, b;
         using (var db = QuiverDatabase.Open(path))
         {
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 a = tx.CreateVertex("Entity");
                 b = tx.CreateVertex("Entity");
@@ -733,7 +733,7 @@ public sealed class VacuumTests : IDisposable
                 tx.SetProperty(alive, "k", Storage.Records.PropertyValue.FromInt32(7));
                 tx.Commit();
             }
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 tx.DeleteNexus(dead);
                 tx.Commit();
@@ -743,7 +743,7 @@ public sealed class VacuumTests : IDisposable
 
         using (var db = QuiverDatabase.Open(path))
         {
-            using (var read = db.BeginReadOnlyTransaction())
+            using (var read = db.BeginReadTransaction())
             {
                 CollectMembers(read.GetMembers(alive)).Should().HaveCount(2);
                 read.GetProperty(alive, "k").Int32Value.Should().Be(7);
@@ -752,7 +752,7 @@ public sealed class VacuumTests : IDisposable
 
             // 再オープン後も free list から回収済み sequence を世代 bump 付きで再利用する。
             Core.NexusId reused;
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 reused = tx.CreateNexus("Fact", [new("S", a), new("O", b)]);
                 tx.Commit();
@@ -777,7 +777,7 @@ public sealed class VacuumTests : IDisposable
         // まず論理削除までを正常終了する。
         using (var db = QuiverDatabase.Open(path))
         {
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 a = tx.CreateVertex("Entity");
                 b = tx.CreateVertex("Entity");
@@ -785,7 +785,7 @@ public sealed class VacuumTests : IDisposable
                 alive = tx.CreateNexus("Fact", [new("S", a), new("O", b)]);
                 tx.Commit();
             }
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 tx.DeleteNexus(dead);
                 tx.Commit();
@@ -798,18 +798,18 @@ public sealed class VacuumTests : IDisposable
             // vacuum は返却前に sharp checkpoint を完了する。
             // その後に回収 slot を再利用するコミットを積み、未完了 tx を残して
             // clean shutdown を抑止することで、追加分は WAL recovery から復元する。
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 added = tx.CreateNexus("Fact", [new("S", a), new("O", b)]);
                 tx.Commit();
             }
-            _ = db.BeginTransaction();
+            _ = db.BeginWriteTransaction();
             db.Dispose();
         }
 
         using (var db = QuiverDatabase.Open(path))
         {
-            using (var read = db.BeginReadOnlyTransaction())
+            using (var read = db.BeginReadTransaction())
             {
                 CollectMembers(read.GetMembers(dead)).Should().BeEmpty();
                 CollectMembers(read.GetMembers(alive)).Should().HaveCount(2);

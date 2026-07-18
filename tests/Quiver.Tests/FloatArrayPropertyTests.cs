@@ -56,12 +56,12 @@ public sealed class FloatArrayPropertyTests : IDisposable
     {
         float[] small = [1.0f, 2.0f, 3.0f];
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var n = tx.CreateVertex("Sensor");
         tx.SetProperty(n, "wave", PropertyValue.FromFloatArray(small));
         tx.Commit();
 
-        using var read = _db.BeginTransaction();
+        using var read = _db.BeginWriteTransaction();
         var pv = read.GetProperty(n, "wave");
         pv.Type.Should().Be(PropertyValueType.FloatArray);
         pv.FloatArrayValue.ToArray().Should().Equal(small);
@@ -73,12 +73,12 @@ public sealed class FloatArrayPropertyTests : IDisposable
         var large = new float[256];
         for (int i = 0; i < large.Length; i++) large[i] = i * 0.1f;
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var n = tx.CreateVertex("Sensor");
         tx.SetProperty(n, "embedding", PropertyValue.FromFloatArray(large));
         tx.Commit();
 
-        using var read = _db.BeginTransaction();
+        using var read = _db.BeginWriteTransaction();
         var pv = read.GetProperty(n, "embedding");
         pv.Type.Should().Be(PropertyValueType.FloatArray);
         pv.FloatArrayValue.ToArray().Should().Equal(large);
@@ -90,7 +90,7 @@ public sealed class FloatArrayPropertyTests : IDisposable
         float[] first = [1.0f, 2.0f];
         float[] second = [10.0f, 20.0f, 30.0f];
 
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var n = tx.CreateVertex("Item");
             tx.SetProperty(n, "vec", PropertyValue.FromFloatArray(first));
@@ -98,14 +98,14 @@ public sealed class FloatArrayPropertyTests : IDisposable
         }
 
         VertexId vertexId;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
-            vertexId = tx.G(_db.Schema).Vertices().HasLabel("Item").ToList()[0];
+            vertexId = tx.Query.Vertices().HasLabel("Item").ToList()[0];
             tx.SetProperty(vertexId, "vec", PropertyValue.FromFloatArray(second));
             tx.Commit();
         }
 
-        using var read = _db.BeginTransaction();
+        using var read = _db.BeginWriteTransaction();
         read.GetProperty(vertexId, "vec").FloatArrayValue.ToArray().Should().Equal(second);
     }
 

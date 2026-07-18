@@ -41,13 +41,13 @@ public sealed class VectorGenerationBindingTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.EditSchema(schema => schema.GetOrCreatePropertyKey("t")),
             Dim, DistanceMetric.Dot, "test", null));
 
         // A を作りベクトルを焼く。
         VertexId a;
         long seqA;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             a = tx.CreateVertex("Doc");
             seqA = EntityRef.UnpackSequence(a.Value);
@@ -56,12 +56,12 @@ public sealed class VectorGenerationBindingTests : IDisposable
         }
 
         // A を削除 → vacuum で物理回収すると slot が free list に戻る (MVCC は即時には free しない)。
-        using (var tx = db.BeginTransaction()) { tx.DeleteVertex(a); tx.Commit(); }
+        using (var tx = db.BeginWriteTransaction()) { tx.DeleteVertex(a); tx.Commit(); }
         db.Vacuum();
 
         // 新Vertex B を作る。回収済み slot を再利用し世代が bump する。B はベクトルを設定しない。
         VertexId b;
-        using (var tx = db.BeginTransaction()) { b = tx.CreateVertex("Doc"); tx.Commit(); }
+        using (var tx = db.BeginWriteTransaction()) { b = tx.CreateVertex("Doc"); tx.Commit(); }
 
         // 前提: 同一 Sequence が再利用された (世代だけ違う)。
         EntityRef.UnpackSequence(b.Value).Should().Be(seqA);
@@ -75,22 +75,22 @@ public sealed class VectorGenerationBindingTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.EditSchema(schema => schema.GetOrCreatePropertyKey("t")),
             Dim, DistanceMetric.Dot, "test", null));
 
         VertexId a;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             a = tx.CreateVertex("Doc");
             tx.SetVector(EntityKind.Vertex, a.Value, IndexName, new float[] { 1, 0, 0, 0 });
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction()) { tx.DeleteVertex(a); tx.Commit(); }
+        using (var tx = db.BeginWriteTransaction()) { tx.DeleteVertex(a); tx.Commit(); }
         db.Vacuum();
 
         // B が同一 slot を再利用し、今度は自分のベクトルを焼く → 現世代でバインドされ live。
         VertexId b;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             b = tx.CreateVertex("Doc");
             tx.SetVector(EntityKind.Vertex, b.Value, IndexName, new float[] { 0, 1, 0, 0 });

@@ -24,7 +24,7 @@ public class SubquerySemiJoinBenchmarks
 
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -32,7 +32,7 @@ public class SubquerySemiJoinBenchmarks
         _dbPath = BenchTempDir.Create("ssj");
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < VertexCount; i++)
         {
             var person = tx.CreateVertex("Person");
@@ -44,7 +44,7 @@ public class SubquerySemiJoinBenchmarks
         }
         tx.Commit();
 
-        _readTx = _db.BeginReadOnlyTransaction();
+        _readTx = _db.BeginReadTransaction();
     }
 
     [GlobalCleanup]
@@ -59,14 +59,14 @@ public class SubquerySemiJoinBenchmarks
     [Benchmark(Baseline = true, Description = "V().HasLabel scan (no sub-traversal)")]
     public int BaselineScan()
     {
-        var g = _readTx.G(_db.Schema);
+        var g = _readTx.Query;
         return g.Vertices().HasLabel("Person").ToList().Count;
     }
 
     [Benchmark(Description = "Where(t => t.Out(KNOWS)) EXISTS filter")]
     public int WhereOutExists()
     {
-        var g = _readTx.G(_db.Schema);
+        var g = _readTx.Query;
         return g.Vertices().HasLabel("Person")
                     .Where(t => t.Out("KNOWS"))
                     .ToList().Count;
@@ -75,7 +75,7 @@ public class SubquerySemiJoinBenchmarks
     [Benchmark(Description = "Not(t => t.Out(KNOWS)) NOT EXISTS filter")]
     public int NotOutExists()
     {
-        var g = _readTx.G(_db.Schema);
+        var g = _readTx.Query;
         return g.Vertices().HasLabel("Person")
                     .Not(t => t.Out("KNOWS"))
                     .ToList().Count;

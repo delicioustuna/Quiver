@@ -11,15 +11,19 @@ try
 {
     using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
     // [Indexed] 付き全プロパティのインデックスを SourceGenerator 生成情報から一括作成。
-    db.EnsureIndexes<Person>();
+    using (var schemaTx = db.BeginWriteTransaction())
+    {
+        schemaTx.EditSchema.EnsureIndexes<Person>();
+        schemaTx.Commit();
+    }
 
     // ── 1. 型付き Insert / Load / Update / Delete ──
-    using (var tx = db.BeginTransaction())
+    using (var tx = db.BeginWriteTransaction())
     {
-        var g = tx.G(db.Schema);
+        var g = tx.Query;
 
-        var aliceId = g.InsertIndexed(new Person { Name = "Alice", Age = 30, Height = 1.65f, CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Tags = ["dev", "senior"] });
-        var bobId   = g.InsertIndexed(new Person { Name = "Bob",   Age = 25, Height = 1.80f, CreatedAt = new DateTime(2024, 6, 1, 0, 0, 0, DateTimeKind.Utc), Tags = ["dev", "junior"] });
+        var aliceId = tx.Mutate.InsertIndexed(new Person { Name = "Alice", Age = 30, Height = 1.65f, CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Tags = ["dev", "senior"] });
+        var bobId   = tx.Mutate.InsertIndexed(new Person { Name = "Bob",   Age = 25, Height = 1.80f, CreatedAt = new DateTime(2024, 6, 1, 0, 0, 0, DateTimeKind.Utc), Tags = ["dev", "junior"] });
         Console.WriteLine($"  Insert: Alice={aliceId.Value}, Bob={bobId.Value}");
 
         Knows.Insert(tx, aliceId, bobId, new Knows { Since = "2024-01" });
@@ -29,7 +33,7 @@ try
 
         loaded.Age = 31;
         loaded.Tags = ["dev", "lead"];
-        g.Update(aliceId, loaded);
+        tx.Mutate.Update(aliceId, loaded);
         var afterUpdate = g.Load<Person>(aliceId);
         Console.WriteLine($"  Update 後: Age={afterUpdate.Age}, Tags=[{string.Join(", ", afterUpdate.Tags)}]");
 
@@ -40,9 +44,9 @@ try
     }
 
     // ── 2. 型付きトラバーサル: g.Vertices<Person>().Has(p => p.Age, P.Gt(20)) ──
-    using (var tx = db.BeginReadOnlyTransaction())
+    using (var tx = db.BeginReadTransaction())
     {
-        var g = tx.G(db.Schema);
+        var g = tx.Query;
 
         var adults = g.Vertices<Person>()
                       .Has(p => p.Age, P.Gt(20L))

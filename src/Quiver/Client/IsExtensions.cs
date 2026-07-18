@@ -23,7 +23,7 @@ public static class IsExtensions
                 "GraphTraversal<string>.Is(value) は .Values(key) の直後でのみ有効です。" +
                 "他の文字列ソース (例: .Label()) はフィルタ対象のプロパティキー文脈を保持しません。");
 
-        var keyId = traversal._schema.GetOrCreatePropertyKey(lookup.Key);
+        var keyId = traversal._schema.ResolvePropertyKey(lookup.Key);
         var sourceCol = lookup.Source.CurrentEntityColumn;
         var filtered = new FilterOp(
             lookup.Source,
@@ -44,7 +44,7 @@ public static class IsExtensions
                 "GraphTraversal<long>.Is(value) は .Values(key) または .Id() の直後でのみ有効です。" +
                 "生の ID をフィルタするには .Has(key, P.Eq(value)) を直接使用してください。");
 
-        var keyId = traversal._schema.GetOrCreatePropertyKey(lookup.Key);
+        var keyId = traversal._schema.ResolvePropertyKey(lookup.Key);
         var sourceCol = lookup.Source.CurrentEntityColumn;
         var pred = P.Eq(value);
         var filtered = new FilterOp(

@@ -1,6 +1,7 @@
 # Traversal
 
-`GraphTraversalSource` (`tx.G(schema)`) を起点とする Gremlin 風のトラバーサル DSL。チェーンステップで論理プランを組み立て、終端ステップ (`.ToList()` / `.Next()` / `.AsCursor()` 等) で物理プランに変換して実行する。
+`GraphTraversalSource` (`tx.Query`) を起点とする Gremlin 風の読み取り専用トラバーサル DSL。
+チェーンステップで論理プランを組み立て、終端ステップ (`.ToList()` / `.Next()` / `.AsCursor()` 等) で物理プランに変換して実行する。
 
 ## 基本ステップ
 

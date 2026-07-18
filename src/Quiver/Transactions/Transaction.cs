@@ -35,7 +35,6 @@ internal sealed class Transaction : ITransaction
     private List<(long Id, int Level)>? _savepoints;
 
     public TransactionId Id { get; }
-    public IsolationLevel Level { get; }
     public long SnapshotLsn { get; }
     public TransactionState State => _state;
     public SnapshotState Snapshot { get; }
@@ -54,7 +53,6 @@ internal sealed class Transaction : ITransaction
 
     internal Transaction(
         TransactionId id,
-        IsolationLevel level,
         long snapshotLsn,
         IWriteAheadLog wal,
         TransactionManager manager,
@@ -77,7 +75,6 @@ internal sealed class Transaction : ITransaction
         SnapshotRegistry.SnapshotRegistration? snapshotRegistration)
     {
         Id = id;
-        Level = level;
         SnapshotLsn = snapshotLsn;
         Snapshot = snapshot;
         Committed = committed;

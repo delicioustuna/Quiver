@@ -9,14 +9,15 @@ Quiver は有向プロパティグラフを採用する。Vertexはラベルを 
 ```csharp
 public readonly record struct VertexId(long Value);
 public readonly record struct EdgeId(long Value);
-public readonly record struct PropertyId(long Value);
+public readonly record struct NexusId(long Value);
 public readonly record struct LabelId(int Value);
 public readonly record struct EdgeTypeId(int Value);
 public readonly record struct PropertyKeyId(int Value);
 public readonly record struct TransactionId(long Value);
 ```
 
-`-1` は「無効 / null」を意味する予約値。
+Vertex、Edge、Nexus の ID は generation と sequence を含む。
+Property は owner と property key に束縛された versioned value であり、公開 ID を持たない。
 
 ## プロパティ値の型
 
@@ -37,10 +38,13 @@ tx.SetProperty(vertexId, "score", PropertyValue.FromDouble(95.5));
 
 ## ラベルとEdge型
 
-ラベル名・Edge型名・プロパティキー名は内部でトークン化され、整数 ID (`LabelId` / `EdgeTypeId` / `PropertyKeyId`) で表現される。トークン解決は `ISchemaApi` 経由で行う。
+ラベル名・Edge型名・プロパティキー名は内部でトークン化され、整数 ID (`LabelId` / `EdgeTypeId` / `PropertyKeyId`) で表現される。
+読み取り時のトークン解決は `ISchemaCatalog`、作成と変更は書き込みトランザクションの `ISchemaEditor` 経由で行う。
 
 ```csharp
-var personLabel = db.Schema.GetOrCreateLabel("Person");
-var knowsType   = db.Schema.GetOrCreateEdgeType("KNOWS");
-var nameKey     = db.Schema.GetOrCreatePropertyKey("name");
+using var tx = db.BeginWriteTransaction();
+var personLabel = tx.EditSchema.GetOrCreateLabel("Person");
+var knowsType = tx.EditSchema.GetOrCreateEdgeType("KNOWS");
+var nameKey = tx.EditSchema.GetOrCreatePropertyKey("name");
+tx.Commit();
 ```

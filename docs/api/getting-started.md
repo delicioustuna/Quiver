@@ -22,7 +22,7 @@ using Quiver;
 using Quiver.Storage.Records;
 
 using var db = QuiverDatabase.Open("./mygraph");
-using var tx = db.BeginTransaction();
+using var tx = db.BeginWriteTransaction();
 
 var alice = tx.CreateVertex("Person");
 var bob   = tx.CreateVertex("Person");

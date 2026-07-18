@@ -12,8 +12,8 @@ internal static class MatchCompiler
     // (plan, 変数から列へのマップ) を返す。
     // 2 Vertex 1 エッジでは Full expand → [source(0), edge(1), neighbor(2)]。
     internal static (IPhysicalOperator plan, Dictionary<string, int> varToColumn) Compile(
-        IGraphTransaction tx,
-        ISchemaApi schema,
+        IReadTransaction tx,
+        ISchemaCatalog schema,
         GraphPattern pattern,
         List<(string variable, string key, PropertyPredicate pred)> wherePredicates)
     {
@@ -24,7 +24,7 @@ internal static class MatchCompiler
 
         builder = new ScanOp(
             EntityKind.Vertex,
-            startVertex.Label != null ? schema.GetOrCreateLabel(startVertex.Label) : null);
+            startVertex.Label != null ? schema.ResolveLabel(startVertex.Label) : null);
 
         if (pattern.Edge == null || pattern.EndVertex == null)
         {
@@ -46,7 +46,7 @@ internal static class MatchCompiler
             // 終端Vertexをラベルで絞り込む。
             if (endVertex.Label != null)
             {
-                var labelId = schema.GetOrCreateLabel(endVertex.Label);
+                var labelId = schema.ResolveLabel(endVertex.Label);
                 builder = new FilterOp(builder, _ => new LabelPredicate(labelId, column: 2));
             }
         }
@@ -59,8 +59,8 @@ internal static class MatchCompiler
     // vertex → nexus、残りの role member の順に logical op を組む。各メンバー列は
     // 後続の展開を通して carry で持ち越し、同じ Match row に束ねる。
     internal static (IPhysicalOperator plan, Dictionary<string, int> varToColumn) Compile(
-        IGraphTransaction tx,
-        ISchemaApi schema,
+        IReadTransaction tx,
+        ISchemaCatalog schema,
         NexusPattern pattern,
         List<(string variable, string key, PropertyPredicate pred)> wherePredicates)
     {
@@ -75,7 +75,7 @@ internal static class MatchCompiler
         var anchor = members[0];
         LogicalOp builder = new ScanOp(
             EntityKind.Vertex,
-            anchor.Vertex.Label != null ? schema.GetOrCreateLabel(anchor.Vertex.Label) : null);
+            anchor.Vertex.Label != null ? schema.ResolveLabel(anchor.Vertex.Label) : null);
 
         // vertex → nexus。出力は (anchorVertex@0, nexus@1)。
         // anchor のラベル絞り込みは ScanOp が行うため、追加の filter は不要。
@@ -117,7 +117,7 @@ internal static class MatchCompiler
             // メンバーのラベル絞り込みは現在の member 列 (1) に適用する。
             if (member.Vertex.Label != null)
             {
-                var labelId = schema.GetOrCreateLabel(member.Vertex.Label);
+                var labelId = schema.ResolveLabel(member.Vertex.Label);
                 builder = new FilterOp(builder, _ => new LabelPredicate(labelId, column: 1));
             }
         }
@@ -152,7 +152,7 @@ internal static class MatchCompiler
     // null (binary パターン) のときは全変数をVertexとして扱う。
     private static LogicalOp ApplyWherePredicates(
         LogicalOp builder,
-        ISchemaApi schema,
+        ISchemaCatalog schema,
         Dictionary<string, int> varToColumn,
         Dictionary<string, EntityKind>? entityKindOf,
         List<(string variable, string key, PropertyPredicate pred)> wherePredicates)
@@ -162,7 +162,7 @@ internal static class MatchCompiler
             if (!varToColumn.TryGetValue(variable, out int entityCol))
                 throw new InvalidOperationException($"Unknown variable '{variable}' in WHERE clause.");
 
-            var keyId = schema.GetOrCreatePropertyKey(key);
+            var keyId = schema.ResolvePropertyKey(key);
             var capturedCol  = entityCol;
             var capturedKey  = keyId;
             var capturedPred = pred;

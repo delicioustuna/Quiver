@@ -67,7 +67,7 @@ public sealed class VectorSearchOptionsTests : IDisposable
     {
         using var db = QuiverDatabase.Open(Path.Combine(_directory, "graph.quiver"));
         db.Vectors.CreateVectorIndex(CreateSpec(IndexName));
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var vertex = tx.CreateVertex("Doc");
             tx.SetVector(EntityKind.Vertex, vertex.Value, IndexName, [1f, 0f, 0f, 0f]);
@@ -80,8 +80,8 @@ public sealed class VectorSearchOptionsTests : IDisposable
         Action batch = () => db.Vectors.KnnSearchBatch(
             IndexName, new ReadOnlyMemory<float>[] { new float[] { 1f, 0f, 0f, 0f } }, 1, invalid);
 
-        using var read = db.BeginReadOnlyTransaction();
-        var g = read.G(db.Schema);
+        using var read = db.BeginReadTransaction();
+        var g = read.Query;
         Action traversal = () => g.Knn(
             IndexName, [1f, 0f, 0f, 0f], 1, invalid).ToList();
         Action filteredTraversal = () => g.Vertices()

@@ -38,11 +38,11 @@ public sealed class PropertyAttribute : Attribute
 /// </summary>
 /// <remarks>
 /// 本属性は <b>SourceGenerator 向けのマーカーに過ぎず、実体の B+Tree インデックスは
-/// ユーザが <c>db.Schema.CreateIndex(indexName, label, propertyKey, kind)</c> で
+/// ユーザが <c>tx.EditSchema.CreateIndex(new ScalarIndexDefinition(indexName, new PropertyTarget(PropertyOwnerKind.Vertex, propertyKey, label), kind))</c> で
 /// 明示的に作成する必要がある</b>。属性の <see cref="IndexName"/> (省略時
 /// <c>idx_{label}_{propertyName}</c>) と <c>CreateIndex</c> 第 1 引数を一致させること。
 /// <see cref="IndexName"/> を作り忘れた場合、生成された <c>FindBy{Prop}</c> や
-/// <c>IGraphTransaction.MergeVertex</c> はインデックス未登録としてフルスキャン経路に
+/// <c>IWriteTransaction.MergeVertex</c> はインデックス未登録としてフルスキャン経路に
 /// フォールバックし、初回呼び出しで <see cref="System.Diagnostics.Trace.TraceWarning"/>
 /// が出力される。
 /// </remarks>

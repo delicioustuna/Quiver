@@ -19,14 +19,14 @@ public interface IGraphNexus<TSelf> where TSelf : IGraphNexus<TSelf>
     static abstract string GraphType { get; }
 
     /// <summary>ロール束縛とプロパティを書き込んで新規Nexusを作成し、その ID を返す。</summary>
-    static abstract NexusId Insert(IGraphTransaction tx, TSelf entity);
+    static abstract NexusId Insert(IWriteTransaction tx, TSelf entity);
 
     /// <summary>指定 ID のNexusを読み込み、ロール束縛とプロパティを <typeparamref name="TSelf"/> へ復元する。</summary>
-    static abstract TSelf Load(IGraphTransaction tx, NexusId id);
+    static abstract TSelf Load(IReadTransaction tx, NexusId id);
 
     /// <summary>指定 ID のNexusのプロパティを <paramref name="entity"/> で上書きする (ロール束縛は不変)。</summary>
-    static abstract void Update(IGraphTransaction tx, NexusId id, TSelf entity);
+    static abstract void Update(IWriteTransaction tx, NexusId id, TSelf entity);
 
     /// <summary>指定 ID のNexusを削除する。</summary>
-    static abstract void Delete(IGraphTransaction tx, NexusId id);
+    static abstract void Delete(IWriteTransaction tx, NexusId id);
 }

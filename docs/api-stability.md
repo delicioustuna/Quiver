@@ -103,28 +103,6 @@ API を削除する場合、いきなり消さず以下の段階を踏む:
 
 まだ安定化していない API には `[System.Diagnostics.CodeAnalysis.Experimental("QUIVERxxx")]` 属性を付ける。
 
-```csharp
-// SSN ベースの Serializable 分離は評価中。利用すると QUIVER001 診断が出る。
-public enum IsolationLevel : byte
-{
-    ReadCommitted = 1,
-    SnapshotIsolation = 2,
-    [Experimental("QUIVER001")]
-    Serializable = 3,
-}
-
-[Experimental("QUIVER001")]
-public sealed class SerializabilityException : QuiverException { ... }
-```
-
-利用側は明示的に opt-in する:
-
-```csharp
-#pragma warning disable QUIVER001 // SSN Serializable は実験的と理解した上で使う
-using var tx = db.BeginTransaction(IsolationLevel.Serializable);
-#pragma warning restore QUIVER001
-```
-
 - `[Experimental]` 付きの API は **SemVer の対象外**。MINOR / PATCH でも予告なくシグネチャ変更・削除しうる。
 - 利用するには診断 ID (`QUIVER001` 等) を明示的に suppress する必要があり、「これは不安定」と利用側が意識的に opt-in する形になる。
 - 安定化したら `[Experimental]` を外す。これは API 追加扱い (MINOR) であり breaking ではない。
@@ -133,7 +111,7 @@ using var tx = db.BeginTransaction(IsolationLevel.Serializable);
 
 | ID | 対象 | 状態 |
 |---|---|---|
-| `QUIVER001` | SSN ベースの Serializable 分離 (`IsolationLevel.Serializable` / `SerializabilityException`) | 評価中 |
+| なし | 現在公開中の experimental API はない | - |
 
 ---
 

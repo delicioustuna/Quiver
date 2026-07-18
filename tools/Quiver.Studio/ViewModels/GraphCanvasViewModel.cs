@@ -107,7 +107,7 @@ public sealed partial class GraphCanvasViewModel : ObservableObject
             return;
         }
 
-        using var tx = _db.CurrentDatabase.BeginReadOnlyTransaction();
+        using var tx = _db.CurrentDatabase.BeginReadTransaction();
 
         var vertexMap = new Dictionary<long, VisualVertex>();
 

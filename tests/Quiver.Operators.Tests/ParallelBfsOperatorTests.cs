@@ -22,11 +22,10 @@ public class ParallelBfsOperatorTests
     public void Empty_source_returns_empty()
     {
         using var fx = OperatorTestFixture.OpenEmpty();
-        using var tx = fx.Db.BeginReadOnlyTransaction();
+        using var tx = fx.Db.BeginReadTransaction();
         using var result = tx.Execute(
             new ParallelBfsOperator(new FixedVertexListOperator(), 0, Direction.Both, null, 3));
         result.Rows().Should().BeEmpty();
-        tx.Rollback();
     }
 
     [Fact]
@@ -42,11 +41,10 @@ public class ParallelBfsOperatorTests
             var d = tx.CreateVertex("X");
             tx.CreateEdge(c, d, "K");
         });
-        using var tx2 = fx.Db.BeginReadOnlyTransaction();
+        using var tx2 = fx.Db.BeginReadTransaction();
         using var result = tx2.Execute(
             new ParallelBfsOperator(new FixedVertexListOperator(a, c), 0, Direction.Outgoing, null, maxDepth: 2));
         result.Rows().Should().HaveCount(2);
-        tx2.Rollback();
     }
 
     [Fact]
@@ -58,10 +56,9 @@ public class ParallelBfsOperatorTests
             a = tx.CreateVertex("X");
             b = tx.CreateVertex("X");
         });
-        using var tx2 = fx.Db.BeginReadOnlyTransaction();
+        using var tx2 = fx.Db.BeginReadTransaction();
         using var result = tx2.Execute(
             new ParallelBfsOperator(new FixedVertexListOperator(a, b), 0, Direction.Both, null, maxDepth: 3));
         result.Rows().Should().BeEmpty();
-        tx2.Rollback();
     }
 }

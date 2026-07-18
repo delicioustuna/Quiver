@@ -35,7 +35,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
         for (int i = 0; i < commits; i++)
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             tx.CreateVertex("Person");
             tx.Commit();
         }
@@ -56,7 +56,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
         db.Diagnostics.CurrentCheckpointThresholdBytes.Should().Be(16 * 1024 * 1024);
 
         // 通常の動作 (commit + read) に regression 無し。
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.CreateVertex("Person");
             tx.Commit();
@@ -93,7 +93,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
         // 16MB threshold 以下にするには avg ≥ 16KB が必要 → trim+RLE 後 ~18 B/vertex × 1000 = 18KB。
         for (int i = 0; i < 32; i++)
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             for (int j = 0; j < 1000; j++) tx.CreateVertex("Person");
             tx.Commit();
         }
@@ -121,7 +121,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), opts);
         for (int i = 0; i < 32; i++)
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             // 1 tx で大量のVertex作成 → 64KB 超の WAL bytes/tx を確保し min 値 (4MB) に
             // clamp させる。recommended = 250MB × 1024 / amp なので amp > 64 KB で min に張り付く。
             // 切り詰めと RLE 圧縮後も 5000 Vertexで約 90 KB を見込み、上限への丸めを強制する。
@@ -154,7 +154,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
         // 400 vertices/tx で per-tx を ~8 KB 以上に押し上げる。
         for (int i = 0; i < 32; i++)
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             for (int j = 0; j < 400; j++) tx.CreateVertex("Person");
             tx.Commit();
         }
@@ -185,7 +185,7 @@ public sealed class CheckpointPolicyAdaptiveTests : IDisposable
         {
             for (int i = 0; i < 64; i++)
             {
-                using var tx = db.BeginTransaction();
+                using var tx = db.BeginWriteTransaction();
                 for (int j = 0; j < 10; j++) tx.CreateVertex("Person");
                 tx.Commit();
             }

@@ -11,29 +11,29 @@ namespace Quiver.Api.Match;
 /// </summary>
 public sealed class MatchQuery
 {
-    private readonly IGraphTransaction _tx;
-    private readonly ISchemaApi _schema;
+    private readonly IReadTransaction _tx;
+    private readonly ISchemaCatalog _schema;
     private readonly CompileFunc _compile;
     private readonly List<(string variable, string key, PropertyPredicate pred)> _wherePredicates = new();
 
     // vertex/edge パターンと星型Nexusパターンを同じ実行経路 (Execute) に載せるため、
     // パターン種別ごとの compile 呼び出しをクロージャに閉じ込める。
     internal delegate (IPhysicalOperator plan, Dictionary<string, int> varToColumn) CompileFunc(
-        IGraphTransaction tx,
-        ISchemaApi schema,
+        IReadTransaction tx,
+        ISchemaCatalog schema,
         List<(string variable, string key, PropertyPredicate pred)> where);
 
-    internal MatchQuery(IGraphTransaction tx, ISchemaApi schema, GraphPattern pattern)
+    internal MatchQuery(IReadTransaction tx, ISchemaCatalog schema, GraphPattern pattern)
         : this(tx, schema, (t, s, w) => MatchCompiler.Compile(t, s, pattern, w))
     {
     }
 
-    internal MatchQuery(IGraphTransaction tx, ISchemaApi schema, NexusPattern pattern)
+    internal MatchQuery(IReadTransaction tx, ISchemaCatalog schema, NexusPattern pattern)
         : this(tx, schema, (t, s, w) => MatchCompiler.Compile(t, s, pattern, w))
     {
     }
 
-    private MatchQuery(IGraphTransaction tx, ISchemaApi schema, CompileFunc compile)
+    private MatchQuery(IReadTransaction tx, ISchemaCatalog schema, CompileFunc compile)
     {
         _tx = tx; _schema = schema; _compile = compile;
     }
@@ -72,14 +72,14 @@ public sealed class MatchQuery
 /// </summary>
 public sealed class ReturnClause<TResult>
 {
-    private readonly IGraphTransaction _tx;
-    private readonly ISchemaApi _schema;
+    private readonly IReadTransaction _tx;
+    private readonly ISchemaCatalog _schema;
     private readonly MatchQuery.CompileFunc _compile;
     private readonly List<(string variable, string key, PropertyPredicate pred)> _where;
     private readonly Func<MatchContext, TResult> _selector;
 
     internal ReturnClause(
-        IGraphTransaction tx, ISchemaApi schema,
+        IReadTransaction tx, ISchemaCatalog schema,
         MatchQuery.CompileFunc compile,
         List<(string variable, string key, PropertyPredicate pred)> where,
         Func<MatchContext, TResult> selector)

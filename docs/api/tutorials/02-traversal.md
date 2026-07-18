@@ -3,7 +3,8 @@
 Gremlin 風の DSL で多段トラバーサルを行う。完全コードは [`samples/Quiver.Samples.Traversal`](https://github.com/delicioustuna/Quiver/tree/main/samples/Quiver.Samples.Traversal)。
 
 ```csharp
-var g = tx.G(db.Schema);
+using var tx = db.BeginReadTransaction();
+var g = tx.Query;
 
 // 25 歳より上の Person を年齢降順で 10 件
 var top10 = g.Vertices().HasLabel("Person")

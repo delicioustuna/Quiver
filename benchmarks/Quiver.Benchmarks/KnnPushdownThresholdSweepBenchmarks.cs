@@ -61,7 +61,7 @@ public class KnnPushdownThresholdSweepBenchmarks
         _dir = BenchTempDir.Create("vec12");
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey("title");
+        var keyId = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("title"));
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "bench", null));
@@ -71,7 +71,7 @@ public class KnnPushdownThresholdSweepBenchmarks
         while (hitSet.Count < hitCount) hitSet.Add(rng.Next(N));
 
         var buf = new float[Dim];
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < N; i++)
             {
@@ -103,7 +103,7 @@ public class KnnPushdownThresholdSweepBenchmarks
     [Benchmark(Baseline = true)]
     public int PostFilter()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
+        using var rtx = _db.BeginReadTransaction();
         return KnnBenchSupport.PostFilterCount(rtx, _db.Schema, IndexName, _query, K, "Hit");
     }
 
@@ -115,8 +115,8 @@ public class KnnPushdownThresholdSweepBenchmarks
     [Benchmark]
     public int GraphFirstForced()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
         return g.Knn(IndexName, _query, K).HasLabel("Hit").ToList().Count;
     }
 
@@ -127,7 +127,7 @@ public class KnnPushdownThresholdSweepBenchmarks
     [Benchmark]
     public int VectorFirstForced()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
+        using var rtx = _db.BeginReadTransaction();
         return KnnBenchSupport.PostFilterCount(rtx, _db.Schema, IndexName, _query, K, "Hit");
     }
 }

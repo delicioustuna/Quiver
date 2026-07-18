@@ -36,7 +36,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         var weightKey = BuildWithInt64Weights(degree);
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var adj = tx.AsInternal().AdjacencySegments;
         adj.Should().NotBeNull();
 
@@ -66,7 +66,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         // Double 型のキーを使う。
         using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
-            var key = db.Schema.GetOrCreatePropertyKey("score");
+            var key = db.EditSchema(schema => schema.GetOrCreatePropertyKey("score"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
             loader.WithPayloadLane(PayloadLaneSpec.ForDouble(key.Value, defaultValue: double.NaN));
             loader.AppendVertex(new VertexId(0), new LabelId(0));
@@ -80,7 +80,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         }
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var seen = new Dictionary<long, double>();
         using var cursor = tx.AsInternal().AdjacencySegments!.OpenCursor(new VertexId(0), Direction.Outgoing, null);
         while (cursor.MoveNext())
@@ -96,7 +96,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
     {
         using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
-            var key = db.Schema.GetOrCreatePropertyKey("weight");
+            var key = db.EditSchema(schema => schema.GetOrCreatePropertyKey("weight"));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
             loader.WithPayloadLane(PayloadLaneSpec.ForInt64(key.Value, defaultValue: -42));
             loader.AppendVertex(new VertexId(0), new LabelId(0));
@@ -110,7 +110,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         }
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var seen = new Dictionary<long, long>();
         using var cursor = tx.AsInternal().AdjacencySegments!.OpenCursor(new VertexId(0), Direction.Outgoing, null);
         while (cursor.MoveNext())
@@ -129,7 +129,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         BuildWithInt64Weights(degree);
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var seen = new Dictionary<long, long>();
         using var cursor = tx.AsInternal().AdjacencySegments!.OpenCursor(new VertexId(0), Direction.Outgoing, null);
         while (cursor.MoveNext())
@@ -147,7 +147,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         BuildWithInt64Weights(degree);
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var op = new ExpandOperator(
             new SingleVertexSource(new VertexId(0)),
             sourceVertexColumn: 0,
@@ -180,7 +180,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         _db.Dispose();
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var view = tx.AsInternal().AdjacencySegments as IAdjacencyPayloadView;
         view.Should().NotBeNull();
         view!.PayloadSpec.Kind.Should().Be(PayloadKind.Int64);
@@ -195,7 +195,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         VertexId deltaVertex;
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var updated = PropertyValue.FromInt64(700);
             tx.SetProperty(new EdgeId(0), "weight", in updated);
@@ -211,7 +211,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
 
         _db.CompactAdjacency();
 
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var view = tx.AsInternal().AdjacencySegments as IAdjacencyPayloadView;
             view.Should().NotBeNull();
@@ -230,7 +230,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
 
         _db.Dispose();
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var seen = ReadOutgoingWeights(tx, new VertexId(0));
             seen[1].Should().Be(700);
@@ -246,7 +246,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         BuildWithInt64Weights(3);
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var updated = PropertyValue.FromInt64(700);
             tx.SetProperty(new EdgeId(0), "weight", in updated);
@@ -273,7 +273,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         _db.Dispose();
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        using var read = _db.BeginReadOnlyTransaction();
+        using var read = _db.BeginReadTransaction();
         read.AsInternal().AdjacencySegments.Should().BeNull(
             "an interrupted compact must not reopen a partial adjacency view");
 
@@ -289,7 +289,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         VertexId deltaVertex;
         EdgeId deltaEdge;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             deltaVertex = tx.CreateVertex("V");
             deltaEdge = tx.CreateEdge(new VertexId(0), deltaVertex, "LINK");
@@ -318,7 +318,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         _db.Dispose();
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        using var read = _db.BeginReadOnlyTransaction();
+        using var read = _db.BeginReadTransaction();
         read.AsInternal().AdjacencySegments.Should().BeNull(
             "descriptor must remain invalid until compact epoch metadata is ready");
 
@@ -335,7 +335,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         VertexId deltaVertex;
         EdgeId deltaEdge;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             tx.SetProperty(new EdgeId(0), "weight", PropertyValue.FromInt64(700));
             deltaVertex = tx.CreateVertex("V");
@@ -365,7 +365,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         _db.Dispose();
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        using var read = _db.BeginReadOnlyTransaction();
+        using var read = _db.BeginReadTransaction();
         var view = read.AsInternal().AdjacencySegments as IAdjacencyPayloadView;
         view.Should().NotBeNull("the final descriptor was durably flushed before interruption");
         view!.PayloadSpec.PropertyKeyId.Should().Be(weightKey.Value);
@@ -383,7 +383,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
     private PropertyKeyId BuildWithInt64Weights(int degree)
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        var key = db.Schema.GetOrCreatePropertyKey("weight");
+        var key = db.EditSchema(schema => schema.GetOrCreatePropertyKey("weight"));
         using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
         loader.WithPayloadLane(PayloadLaneSpec.ForInt64(key.Value));
         loader.AppendVertex(new VertexId(0), new LabelId(0));
@@ -398,7 +398,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         return key;
     }
 
-    private static Dictionary<long, long> ReadOutgoingWeights(IGraphTransaction tx, VertexId source)
+    private static Dictionary<long, long> ReadOutgoingWeights(IReadTransaction tx, VertexId source)
     {
         var seen = new Dictionary<long, long>();
         using var cursor = tx.AsInternal().AdjacencySegments!.OpenCursor(source, Direction.Outgoing, null);
@@ -410,7 +410,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         return seen;
     }
 
-    private static List<long> ExpandOut(IGraphTransaction tx, VertexId source)
+    private static List<long> ExpandOut(IReadTransaction tx, VertexId source)
     {
         var op = new ExpandOperator(
             new SingleVertexSource(source),

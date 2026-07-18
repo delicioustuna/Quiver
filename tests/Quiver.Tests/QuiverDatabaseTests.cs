@@ -30,7 +30,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void CreateVertex_and_VertexExists()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var id = tx.CreateVertex("Person");
         tx.VertexExists(id).Should().BeTrue();
         tx.Commit();
@@ -39,7 +39,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void DeleteVertex_makes_it_disappear()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var id = tx.CreateVertex("Person");
         tx.DeleteVertex(id);
         tx.VertexExists(id).Should().BeFalse();
@@ -49,7 +49,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void DeleteVertex_with_edges_succeeds()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
         tx.CreateEdge(a, b, "KNOWS");
@@ -63,7 +63,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void CreateEdge_and_enumerate()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         tx.CreateEdge(alice, bob, "KNOWS");
@@ -83,7 +83,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void DeleteEdge_removes_it_from_enumeration()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
         var edge = tx.CreateEdge(a, b, "LINK");
@@ -100,7 +100,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void SetProperty_Int64_and_GetProperty()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var id = tx.CreateVertex("Item");
         tx.SetProperty(id, "score", PropertyValue.FromInt64(42L));
         var val = tx.GetProperty(id, "score");
@@ -112,7 +112,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void SetProperty_String_and_GetProperty()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var id = tx.CreateVertex("Person");
         tx.SetProperty(id, "name", PropertyValue.FromString("Alice"));
         var val = tx.GetProperty(id, "name");
@@ -124,7 +124,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void HasProperty_returns_correct_values()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var id = tx.CreateVertex("X");
         tx.SetProperty(id, "exists", PropertyValue.FromBool(true));
         tx.HasProperty(id, "exists").Should().BeTrue();
@@ -135,7 +135,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void RemoveProperty_removes_it()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var id = tx.CreateVertex("X");
         tx.SetProperty(id, "age", PropertyValue.FromInt32(30));
         tx.RemoveProperty(id, "age");
@@ -146,7 +146,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void SetProperty_overwrites_previous_value()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var id = tx.CreateVertex("X");
         tx.SetProperty(id, "n", PropertyValue.FromInt64(1L));
         tx.SetProperty(id, "n", PropertyValue.FromInt64(99L));
@@ -159,7 +159,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void AllVerticesScan_returns_all_vertices()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
         var c = tx.CreateVertex("X");
@@ -174,12 +174,12 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void AllVerticesScan_with_label_filter()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         tx.CreateVertex("Person");
         tx.CreateVertex("Person");
         tx.CreateVertex("Car");
 
-        var personLabel = _db.Schema.GetOrCreateLabel("Person");
+        var personLabel = tx.EditSchema.GetOrCreateLabel("Person");
         var scan = new AllVerticesScanOperator(personLabel);
         using var result = tx.Execute(scan);
         result.Rows().Should().HaveCount(2);
@@ -189,7 +189,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void LimitOperator_via_Execute_limits_rows()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < 5; i++) tx.CreateVertex("N");
 
         var scan = new AllVerticesScanOperator();
@@ -202,11 +202,11 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void PropertyLookup_via_Execute_returns_string_value()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var id = tx.CreateVertex("Person");
         tx.SetProperty(id, "name", PropertyValue.FromString("Bob"));
 
-        var nameKey = _db.Schema.GetOrCreatePropertyKey("name");
+        var nameKey = tx.EditSchema.GetOrCreatePropertyKey("name");
         var scan = new AllVerticesScanOperator();
         var lookup = new PropertyLookupOperator(scan, entityIdColumn: 0, nameKey, "name");
         using var result = tx.Execute(lookup);
@@ -220,12 +220,12 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void ExpandOperator_via_Execute_finds_neighbor()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         tx.CreateEdge(alice, bob, "KNOWS");
 
-        var source = new VertexByLabelScanOperator(_db.Schema.GetOrCreateLabel("Person"));
+        var source = new VertexByLabelScanOperator(tx.EditSchema.GetOrCreateLabel("Person"));
         var expand = new ExpandOperator(source, sourceVertexColumn: 0,
             Direction.Outgoing, typeFilter: null, ExpandOutputMode.NeighborOnly);
         using var result = tx.Execute(expand);
@@ -240,7 +240,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void SetProperty_on_edge_and_GetProperty()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         var edge   = tx.CreateEdge(alice, bob, "KNOWS");
@@ -256,7 +256,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void SetProperty_on_edge_overwrites_previous_value()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a   = tx.CreateVertex("A");
         var b   = tx.CreateVertex("B");
         var edge = tx.CreateEdge(a, b, "LINK");
@@ -273,7 +273,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void GetProperty_on_edge_returns_default_for_missing_key()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a   = tx.CreateVertex("A");
         var b   = tx.CreateVertex("B");
         var edge = tx.CreateEdge(a, b, "LINK");
@@ -286,7 +286,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void DeleteEdge_frees_its_properties()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a   = tx.CreateVertex("A");
         var b   = tx.CreateVertex("B");
         var edge = tx.CreateEdge(a, b, "LINK");
@@ -302,7 +302,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void DeleteVertex_with_edge_properties_succeeds()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a   = tx.CreateVertex("A");
         var b   = tx.CreateVertex("B");
         var edge = tx.CreateEdge(a, b, "LINK");
@@ -323,7 +323,7 @@ public sealed class QuiverDatabaseTests : IDisposable
 
         using (var db = QuiverDatabase.Open(path))
         {
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 var a = tx.CreateVertex("A");
                 var b = tx.CreateVertex("B");
@@ -338,7 +338,7 @@ public sealed class QuiverDatabaseTests : IDisposable
 
         using (var db = QuiverDatabase.Open(path))
         {
-            using var tx = db.BeginReadOnlyTransaction();
+            using var tx = db.BeginReadTransaction();
             var value = tx.GetProperty(stamped, "weight");
             value.Type.Should().Be(PropertyValueType.Int64);
             value.Int64Value.Should().Be(10);
@@ -347,7 +347,7 @@ public sealed class QuiverDatabaseTests : IDisposable
         using (var db = QuiverDatabase.Open(path))
         {
             db.CompactAdjacency();
-            using var tx = db.BeginReadOnlyTransaction();
+            using var tx = db.BeginReadTransaction();
             var value = tx.GetProperty(stamped, "weight");
             value.Type.Should().Be(PropertyValueType.Int64);
             value.Int64Value.Should().Be(10);
@@ -364,7 +364,7 @@ public sealed class QuiverDatabaseTests : IDisposable
         VertexId b;
         VertexId c;
         EdgeId old;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             a = tx.CreateVertex("A");
             b = tx.CreateVertex("B");
@@ -376,7 +376,7 @@ public sealed class QuiverDatabaseTests : IDisposable
 
         var stale = old;
         var raw = new EdgeId(old.Sequence);
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteEdge(old);
             tx.Commit();
@@ -385,7 +385,7 @@ public sealed class QuiverDatabaseTests : IDisposable
         db.Vacuum().ReclaimedEdges.Should().Be(1);
 
         EdgeId replacement;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             replacement = tx.CreateEdge(a, c, "LINK");
             tx.SetProperty(replacement, "weight", PropertyValue.FromInt64(2));
@@ -395,7 +395,7 @@ public sealed class QuiverDatabaseTests : IDisposable
         replacement.Sequence.Should().BeGreaterThan(old.Sequence);
         db.CompactAdjacency();
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.GetProperty(stale, "weight").Type.Should().Be(default(PropertyValueType));
             tx.GetProperty(raw, "weight").Type.Should().Be(default(PropertyValueType));
@@ -404,7 +404,7 @@ public sealed class QuiverDatabaseTests : IDisposable
             tx.Commit();
         }
 
-        using (var tx = db.BeginReadOnlyTransaction())
+        using (var tx = db.BeginReadTransaction())
         {
             tx.GetProperty(replacement, "weight").Int64Value.Should().Be(2);
 
@@ -423,17 +423,17 @@ public sealed class QuiverDatabaseTests : IDisposable
         public int Since { get; set; }
 
         public static string GraphType => "KNOWS";
-        public static EdgeId Insert(IGraphTransaction tx, VertexId from, VertexId to, KnowsEdge entity)
+        public static EdgeId Insert(IWriteTransaction tx, VertexId from, VertexId to, KnowsEdge entity)
         {
             var id = tx.CreateEdge(from, to, "KNOWS");
             tx.SetProperty(id, "Since", PropertyValue.FromInt32(entity.Since));
             return id;
         }
-        public static KnowsEdge Load(IGraphTransaction tx, EdgeId id)
+        public static KnowsEdge Load(IReadTransaction tx, EdgeId id)
             => new() { Since = tx.GetProperty(id, "Since").Int32Value };
-        public static void Update(IGraphTransaction tx, EdgeId id, KnowsEdge entity)
+        public static void Update(IWriteTransaction tx, EdgeId id, KnowsEdge entity)
             => tx.SetProperty(id, "Since", PropertyValue.FromInt32(entity.Since));
-        public static void Delete(IGraphTransaction tx, EdgeId id)
+        public static void Delete(IWriteTransaction tx, EdgeId id)
             => tx.DeleteEdge(id);
     }
 
@@ -444,7 +444,7 @@ public sealed class QuiverDatabaseTests : IDisposable
         public DateTime CreatedAt { get; set; }
 
         public static string GraphLabel => "Person";
-        public static VertexId Insert(IGraphTransaction tx, PersonVertex entity)
+        public static VertexId Insert(IWriteTransaction tx, PersonVertex entity)
         {
             var id = tx.CreateVertex("Person");
             tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
@@ -452,28 +452,28 @@ public sealed class QuiverDatabaseTests : IDisposable
             tx.SetProperty(id, "CreatedAt", PropertyValue.FromDateTime(entity.CreatedAt));
             return id;
         }
-        public static VertexId InsertIndexed(IGraphTransaction tx, PersonVertex entity) => Insert(tx, entity);
-        public static PersonVertex Load(IGraphTransaction tx, VertexId id)
+        public static VertexId InsertIndexed(IWriteTransaction tx, PersonVertex entity) => Insert(tx, entity);
+        public static PersonVertex Load(IReadTransaction tx, VertexId id)
             => new()
             {
                 Name = System.Text.Encoding.UTF8.GetString(tx.GetProperty(id, "Name").Utf8StringValue),
                 Score = tx.GetProperty(id, "Score").DoubleValue,
                 CreatedAt = tx.GetProperty(id, "CreatedAt").DateTimeValue,
             };
-        public static void Update(IGraphTransaction tx, VertexId id, PersonVertex entity)
+        public static void Update(IWriteTransaction tx, VertexId id, PersonVertex entity)
             => tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
-        public static void Delete(IGraphTransaction tx, VertexId id) => tx.DeleteVertex(id);
+        public static void Delete(IWriteTransaction tx, VertexId id) => tx.DeleteVertex(id);
     }
 
     [Fact]
     public void TypedTraversal_Out_generic_finds_neighbor()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         tx.CreateEdge(alice, bob, "KNOWS");
 
-        var g = tx.G(_db.Schema);
+        var g = tx.Query;
         var neighbors = g.Vertex(alice).Out<KnowsEdge>().ToList();
 
         neighbors.Should().ContainSingle().Which.Should().Be(bob);
@@ -483,12 +483,12 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void TypedTraversal_In_generic_finds_neighbor()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         tx.CreateEdge(alice, bob, "KNOWS");
 
-        var g = tx.G(_db.Schema);
+        var g = tx.Query;
         var neighbors = g.Vertex(bob).In<KnowsEdge>().ToList();
 
         neighbors.Should().ContainSingle().Which.Should().Be(alice);
@@ -498,12 +498,12 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void TypedGraphTraversal_Out_generic_finds_neighbor()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = PersonVertex.Insert(tx, new PersonVertex { Name = "Alice" });
         var bob   = PersonVertex.Insert(tx, new PersonVertex { Name = "Bob" });
         tx.CreateEdge(alice, bob, "KNOWS");
 
-        var g = tx.G(_db.Schema);
+        var g = tx.Query;
         // Out<TEdge, TTarget>() は TypedGraphTraversal<PersonVertex> を型保存する。
         var neighbors = g.Vertices<PersonVertex>().Out<KnowsEdge, PersonVertex>().ToListWithIds();
 
@@ -516,11 +516,11 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void TypedGraphTraversal_Where_expression_filters_vertices()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = PersonVertex.Insert(tx, new PersonVertex { Name = "Alice" });
         var bob   = PersonVertex.Insert(tx, new PersonVertex { Name = "Bob" });
 
-        var g = tx.G(_db.Schema);
+        var g = tx.Query;
         var found = g.Vertices<PersonVertex>()
                      .Where(p => p.Name == "Alice" || p.Name.StartsWith("Al"))
                      .ToListWithIds();
@@ -532,14 +532,14 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void TypedGraphTraversal_OutWhere_edge_predicate_filters()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = PersonVertex.Insert(tx, new PersonVertex { Name = "Alice" });
         var bob   = PersonVertex.Insert(tx, new PersonVertex { Name = "Bob" });
         var carol = PersonVertex.Insert(tx, new PersonVertex { Name = "Carol" });
         KnowsEdge.Insert(tx, alice, bob,   new KnowsEdge { Since = 2020 });
         KnowsEdge.Insert(tx, alice, carol, new KnowsEdge { Since = 2024 });
 
-        var g = tx.G(_db.Schema);
+        var g = tx.Query;
         // Edgeプロパティ Since で絞り込みつつ PersonVertex 型を保存して対象へ進む。
         var recent = g.Vertices<PersonVertex>()
                       .Where(p => p.Name == "Alice")
@@ -555,11 +555,11 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void Has_double_range_filters_via_predicate()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("Item"); tx.SetProperty(a, "score", PropertyValue.FromDouble(1.5));
         var b = tx.CreateVertex("Item"); tx.SetProperty(b, "score", PropertyValue.FromDouble(2.5));
 
-        var g = tx.G(_db.Schema);
+        var g = tx.Query;
         var hi = g.Vertices().HasLabel("Item").Has("score", P.Gt(2.0)).ToList();
 
         hi.Should().ContainSingle().Which.Should().Be(b);
@@ -569,11 +569,11 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void TypedWhere_double_range_filters()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = PersonVertex.Insert(tx, new PersonVertex { Name = "Alice", Score = 1.5 });
         var bob   = PersonVertex.Insert(tx, new PersonVertex { Name = "Bob",   Score = 2.5 });
 
-        var g = tx.G(_db.Schema);
+        var g = tx.Query;
         // double メンバーの式ツリー比較では、整数リテラルも double 比較へ振り分ける。
         var found = g.Vertices<PersonVertex>().Where(p => p.Score > 2).ToListWithIds();
 
@@ -598,12 +598,12 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void TypedWhere_DateTime_range_filters_with_tz_normalization()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var utc = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         var alice = PersonVertex.Insert(tx, new PersonVertex { Name = "Alice", CreatedAt = utc.AddDays(1) });
         var bob   = PersonVertex.Insert(tx, new PersonVertex { Name = "Bob",   CreatedAt = utc.AddDays(10) });
 
-        var g = tx.G(_db.Schema);
+        var g = tx.Query;
         // 同一瞬時を Local で渡しても UTC へ正準化され一貫比較される。
         var cutoffLocal = utc.AddDays(5).ToLocalTime();
         var recent = g.Vertices<PersonVertex>().Where(p => p.CreatedAt > cutoffLocal).ToListWithIds();
@@ -615,7 +615,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void EdgeTraversal_Has_filters_edge_properties()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         var carol = tx.CreateVertex("Person");
@@ -624,7 +624,7 @@ public sealed class QuiverDatabaseTests : IDisposable
         tx.SetProperty(r1, "since", PropertyValue.FromInt64(2020));
         tx.SetProperty(r2, "since", PropertyValue.FromInt64(2024));
 
-        var g = tx.G(_db.Schema);
+        var g = tx.Query;
         // Edgeトラバーサルの .Has はEdgeプロパティを読む。
         var edges = g.Vertex(alice).OutEdges("KNOWS").Has("since", P.Gt(2022L)).ToList();
 
@@ -637,12 +637,12 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void OutE_generic_returns_edge_id()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         var edge   = tx.CreateEdge(alice, bob, "KNOWS");
 
-        var g    = tx.G(_db.Schema);
+        var g    = tx.Query;
         var edges = g.Vertex(alice).OutEdges<KnowsEdge>().ToList();
 
         edges.Should().ContainSingle().Which.Should().Be(edge);
@@ -652,12 +652,12 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void InE_generic_returns_edge_id()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         var edge   = tx.CreateEdge(alice, bob, "KNOWS");
 
-        var g    = tx.G(_db.Schema);
+        var g    = tx.Query;
         var edges = g.Vertex(bob).InEdges<KnowsEdge>().ToList();
 
         edges.Should().ContainSingle().Which.Should().Be(edge);
@@ -667,12 +667,12 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void BothE_generic_returns_both_directions()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         var edge   = tx.CreateEdge(alice, bob, "KNOWS");
 
-        var g    = tx.G(_db.Schema);
+        var g    = tx.Query;
         var fromAlice = g.Vertex(alice).BothEdges<KnowsEdge>().ToList();
         var fromBob   = g.Vertex(bob).BothEdges<KnowsEdge>().ToList();
 
@@ -684,12 +684,12 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void TypedTraversal_OutE_generic_returns_edge_id()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = PersonVertex.Insert(tx, new PersonVertex { Name = "Alice" });
         var bob   = PersonVertex.Insert(tx, new PersonVertex { Name = "Bob" });
         var edge   = KnowsEdge.Insert(tx, alice, bob, new KnowsEdge { Since = 2020 });
 
-        var g    = tx.G(_db.Schema);
+        var g    = tx.Query;
         var edges = g.Vertices<PersonVertex>().OutEdges<KnowsEdge>().ToList();
 
         edges.Should().Contain(edge);
@@ -701,11 +701,11 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void TypedTraversal_Values_expression_returns_property()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         PersonVertex.Insert(tx, new PersonVertex { Name = "Alice" });
         PersonVertex.Insert(tx, new PersonVertex { Name = "Bob" });
 
-        var g     = tx.G(_db.Schema);
+        var g     = tx.Query;
         var names = g.Vertices<PersonVertex>().Values(p => p.Name).ToList();
 
         names.Should().Contain("Alice").And.Contain("Bob");
@@ -717,18 +717,20 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void SeekIndex_string_equality_finds_vertex()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
         tx.SetProperty(bob,   "name", PropertyValue.FromString("Bob"));
-        tx.IndexInsert("idx_name", "Alice", alice);
-        tx.IndexInsert("idx_name", "Bob",   bob);
+        tx.SetIndexedProperty("idx_name", "Alice", alice);
+        tx.SetIndexedProperty("idx_name", "Bob",   bob);
 
         var key = PropertyValue.FromString("Alice");
         var en = tx.SeekIndex("idx_name", key);
         var results = new List<VertexId>();
-        while (en.MoveNext()) results.Add(en.Current);
+        while (en.MoveNext())
+            if (en.Current.Kind == EntityKind.Vertex)
+                results.Add(new VertexId(en.Current.Value));
         en.Dispose();
 
         results.Should().ContainSingle().Which.Should().Be(alice);
@@ -738,16 +740,18 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void SeekIndex_int64_equality_finds_vertex()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var n42 = tx.CreateVertex("Item");
         var n99 = tx.CreateVertex("Item");
-        tx.IndexInsert("idx_score", 42L, n42);
-        tx.IndexInsert("idx_score", 99L, n99);
+        tx.SetIndexedProperty("idx_score", 42L, n42);
+        tx.SetIndexedProperty("idx_score", 99L, n99);
 
         var key = PropertyValue.FromInt64(42L);
         var en = tx.SeekIndex("idx_score", key);
         var results = new List<VertexId>();
-        while (en.MoveNext()) results.Add(en.Current);
+        while (en.MoveNext())
+            if (en.Current.Kind == EntityKind.Vertex)
+                results.Add(new VertexId(en.Current.Value));
         en.Dispose();
 
         results.Should().ContainSingle().Which.Should().Be(n42);
@@ -757,19 +761,21 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void RangeIndex_int64_returns_vertices_in_range()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var n10 = tx.CreateVertex("Item");
         var n20 = tx.CreateVertex("Item");
         var n30 = tx.CreateVertex("Item");
-        tx.IndexInsert("idx_val", 10L, n10);
-        tx.IndexInsert("idx_val", 20L, n20);
-        tx.IndexInsert("idx_val", 30L, n30);
+        tx.SetIndexedProperty("idx_val", 10L, n10);
+        tx.SetIndexedProperty("idx_val", 20L, n20);
+        tx.SetIndexedProperty("idx_val", 30L, n30);
 
         var from = PropertyValue.FromInt64(10L);
         var to   = PropertyValue.FromInt64(25L);
         var en = tx.RangeIndex("idx_val", from, fromInclusive: true, to, toInclusive: true);
         var results = new List<VertexId>();
-        while (en.MoveNext()) results.Add(en.Current);
+        while (en.MoveNext())
+            if (en.Current.Kind == EntityKind.Vertex)
+                results.Add(new VertexId(en.Current.Value));
         en.Dispose();
 
         results.Should().Contain(n10).And.Contain(n20).And.NotContain(n30);
@@ -779,7 +785,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void SeekIndex_on_nonexistent_index_returns_empty()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var key = PropertyValue.FromInt64(1L);
         var en = tx.SeekIndex("no_such_index", key);
         en.MoveNext().Should().BeFalse();
@@ -814,13 +820,13 @@ public sealed class QuiverDatabaseTests : IDisposable
             // 1 つ開いたまま Dispose して「クラッシュ (ActiveCount>0 → WAL 非削除)」を模擬する。
             {
                 var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
-                using (var tx = db.BeginTransaction())
+                using (var tx = db.BeginWriteTransaction())
                 {
                     aliceId = tx.CreateVertex("Person");
                     tx.SetProperty(aliceId, "name", PropertyValue.FromString("Alice"));
                     tx.Commit();
                 }
-                _ = db.BeginTransaction(); // 未コミットのまま放置 → ActiveCount>0 → クリーン終了抑止 → WAL 残存
+                _ = db.BeginWriteTransaction(); // 未コミットのまま放置 → ActiveCount>0 → クリーン終了抑止 → WAL 残存
                 db.Dispose();
             }
 
@@ -830,9 +836,8 @@ public sealed class QuiverDatabaseTests : IDisposable
             // 再オープンし、RecoveryManager が WAL の PageImage レコードを再実行する。
             {
                 using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
-                using var tx = db.BeginReadOnlyTransaction();
+                using var tx = db.BeginReadTransaction();
                 tx.VertexExists(aliceId).Should().BeTrue("WAL recovery must restore the committed vertex");
-                tx.Rollback();
             }
         }
         finally
@@ -858,12 +863,12 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void Match_typed_Out_and_Load_returns_entity()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = PersonVertex.Insert(tx, new PersonVertex { Name = "Alice" });
         var bob   = PersonVertex.Insert(tx, new PersonVertex { Name = "Bob" });
         tx.CreateEdge(alice, bob, "KNOWS");
 
-        var g = tx.G(_db.Schema);
+        var g = tx.Query;
         var p = Quiver.Api.Match.GraphPattern.Vertex("p", "Person");
         var q = Quiver.Api.Match.GraphPattern.Vertex("q", "Person");
 
@@ -880,18 +885,17 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void GraphTraversal_AsEnumerable_streams_without_full_materialise()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         tx.CreateVertex("Person");
         tx.CreateVertex("Person");
         tx.CreateVertex("Person");
         tx.Commit();
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
         int count = 0;
         foreach (var _ in g.Vertices().HasLabel("Person").AsEnumerable())
             count++;
-        rtx.Rollback();
 
         count.Should().Be(3);
     }
@@ -899,7 +903,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void GraphTraversal_AsCursor_streams_results()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < 5; i++)
         {
             var id = tx.CreateVertex("Counter");
@@ -907,15 +911,14 @@ public sealed class QuiverDatabaseTests : IDisposable
         }
         tx.Commit();
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
         var names = new List<string>();
         using (var cursor = g.Vertices().HasLabel("Counter").Values("n").AsCursor())
         {
             while (cursor.MoveNext())
                 names.Add(cursor.Current);
         }
-        rtx.Rollback();
 
         names.Should().HaveCount(5);
     }
@@ -923,7 +926,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     [Fact]
     public void MatchQuery_AsCursor_streams_results()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("StreamPerson");
         tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
         var bob = tx.CreateVertex("StreamPerson");
@@ -931,8 +934,8 @@ public sealed class QuiverDatabaseTests : IDisposable
         tx.CreateEdge(alice, bob, "STREAM_KNOWS");
         tx.Commit();
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
         var p = Quiver.Api.Match.GraphPattern.Vertex("p", "StreamPerson");
         var q = Quiver.Api.Match.GraphPattern.Vertex("q", "StreamPerson");
         var found = new List<string>();
@@ -941,7 +944,6 @@ public sealed class QuiverDatabaseTests : IDisposable
             while (cursor.MoveNext())
                 found.Add(cursor.Current);
         }
-        rtx.Rollback();
 
         found.Should().ContainSingle().Which.Should().Be("Bob");
     }
@@ -952,36 +954,35 @@ public sealed class QuiverDatabaseTests : IDisposable
     public void Where_out_exists_keeps_only_vertices_with_neighbor()
     {
         // alice → bob (KNOWS), charlie has no edges
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice   = tx.CreateVertex("Person");
         var bob     = tx.CreateVertex("Person");
         var charlie = tx.CreateVertex("Person");
         tx.CreateEdge(alice, bob, "KNOWS");
         tx.Commit();
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var results = g.Vertices().HasLabel("Person")
                           .Where(t => t.Out("KNOWS"))
                           .ToList();
 
         results.Should().ContainSingle().Which.Should().Be(alice);
-        rtx.Rollback();
     }
 
     [Fact]
     public void Not_out_exists_keeps_only_vertices_without_neighbor()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice   = tx.CreateVertex("Person");
         var bob     = tx.CreateVertex("Person");
         var charlie = tx.CreateVertex("Person");
         tx.CreateEdge(alice, bob, "KNOWS");
         tx.Commit();
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var results = g.Vertices().HasLabel("Person")
                           .Not(t => t.Out("KNOWS"))
@@ -990,7 +991,6 @@ public sealed class QuiverDatabaseTests : IDisposable
         results.Should().HaveCount(2);
         results.Should().Contain(bob).And.Contain(charlie);
         results.Should().NotContain(alice);
-        rtx.Rollback();
     }
 
     [Fact]
@@ -998,7 +998,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     {
         // alice → bob("name"="Bob"), dave → eve("name"="Eve")
         // Where(t => t.Out("KNOWS").Has("name", "Bob")) should return only alice
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         var dave  = tx.CreateVertex("Person");
@@ -1009,22 +1009,21 @@ public sealed class QuiverDatabaseTests : IDisposable
         tx.CreateEdge(dave, eve, "KNOWS");
         tx.Commit();
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var results = g.Vertices().HasLabel("Person")
                           .Where(t => t.Out("KNOWS").Has("name", "Bob"))
                           .ToList();
 
         results.Should().ContainSingle().Which.Should().Be(alice);
-        rtx.Rollback();
     }
 
     [Fact]
     public void Where_multiple_vertices_each_probed_independently()
     {
         // 10 vertices, even-indexed ones each have a KNOWS edge
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var vertices = new VertexId[10];
         for (int i = 0; i < 10; i++)
             vertices[i] = tx.CreateVertex("Item");
@@ -1035,15 +1034,14 @@ public sealed class QuiverDatabaseTests : IDisposable
         }
         tx.Commit();
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var results = g.Vertices().HasLabel("Item")
                           .Where(t => t.Out("LINKS"))
                           .ToList();
 
         results.Should().HaveCount(5);
-        rtx.Rollback();
     }
 
     // ===== EnforceExclusiveWriter =====
@@ -1058,8 +1056,8 @@ public sealed class QuiverDatabaseTests : IDisposable
                 Path.Combine(dir, "g.quiver"),
                 new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
 
-            using var tx1 = db.BeginTransaction();
-            var act = () => db.BeginTransaction();
+            using var tx1 = db.BeginWriteTransaction();
+            var act = () => db.BeginWriteTransaction();
             act.Should().Throw<TransactionException>();
             tx1.Commit();
         }
@@ -1076,8 +1074,8 @@ public sealed class QuiverDatabaseTests : IDisposable
                 Path.Combine(dir, "g.quiver"),
                 new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
 
-            using (var tx1 = db.BeginTransaction()) { tx1.Commit(); }
-            using var tx2 = db.BeginTransaction();
+            using (var tx1 = db.BeginWriteTransaction()) { tx1.Commit(); }
+            using var tx2 = db.BeginWriteTransaction();
             tx2.CreateVertex("A");
             tx2.Commit();
         }
@@ -1094,8 +1092,8 @@ public sealed class QuiverDatabaseTests : IDisposable
                 Path.Combine(dir, "g.quiver"),
                 new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
 
-            using (var tx1 = db.BeginTransaction()) { tx1.Rollback(); }
-            using var tx2 = db.BeginTransaction();
+            using (var tx1 = db.BeginWriteTransaction()) { tx1.Rollback(); }
+            using var tx2 = db.BeginWriteTransaction();
             tx2.CreateVertex("A");
             tx2.Commit();
         }
@@ -1112,8 +1110,8 @@ public sealed class QuiverDatabaseTests : IDisposable
                 Path.Combine(dir, "g.quiver"),
                 new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
 
-            using (db.BeginTransaction()) { /* dispose without commit/rollback */ }
-            using var tx2 = db.BeginTransaction();
+            using (db.BeginWriteTransaction()) { /* dispose without commit/rollback */ }
+            using var tx2 = db.BeginWriteTransaction();
             tx2.CreateVertex("A");
             tx2.Commit();
         }
@@ -1130,8 +1128,8 @@ public sealed class QuiverDatabaseTests : IDisposable
                 Path.Combine(dir, "g.quiver"),
                 new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
 
-            using var tx1 = db.BeginTransaction();
-            using var ro = db.BeginReadOnlyTransaction();
+            using var tx1 = db.BeginWriteTransaction();
+            using var ro = db.BeginReadTransaction();
             tx1.Commit();
         }
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }

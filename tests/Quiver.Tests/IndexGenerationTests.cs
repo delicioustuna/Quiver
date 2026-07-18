@@ -81,19 +81,19 @@ public sealed class IndexGenerationTests : IDisposable
     public void Stale_index_entry_is_skipped_after_slot_reuse()
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
+        db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality)));
 
         // vertexA を作って "alice" で索引登録。
         VertexId vertexA;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             vertexA = tx.CreateVertex("Person");
-            tx.IndexInsert("idx_name", "alice", vertexA);
+            tx.SetIndexedProperty("idx_name", "alice", vertexA);
             tx.Commit();
         }
 
         // vertexA を削除 → vacuum で slot を物理回収。
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteVertex(vertexA);
             tx.Commit();
@@ -102,10 +102,10 @@ public sealed class IndexGenerationTests : IDisposable
 
         // 同じ slot を再利用して vertexB を作り "bob" で索引登録。
         VertexId vertexB;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             vertexB = tx.CreateVertex("Person");
-            tx.IndexInsert("idx_name", "bob", vertexB);
+            tx.SetIndexedProperty("idx_name", "bob", vertexB);
             tx.Commit();
         }
         // ABA の前提として、同じスロットが再利用されていることを Sequence で確認する。
@@ -113,7 +113,7 @@ public sealed class IndexGenerationTests : IDisposable
         vertexB.Sequence.Should().Be(vertexA.Sequence);
         vertexB.Generation.Should().NotBe(vertexA.Generation);
 
-        using var rtx = db.BeginReadOnlyTransaction();
+        using var rtx = db.BeginReadTransaction();
 
         // 旧キー "alice" は世代不一致で stale 検出 → 空 (vertexB を誤って返さない)。
         var stale = rtx.SeekIndex("idx_name", PropertyValue.FromString("alice"));
@@ -123,27 +123,26 @@ public sealed class IndexGenerationTests : IDisposable
         // 新キー "bob" は現世代と一致 → vertexB を返す。
         var fresh = rtx.SeekIndex("idx_name", PropertyValue.FromString("bob"));
         fresh.MoveNext().Should().BeTrue();
-        fresh.Current.Should().Be(vertexB);
+        fresh.Current.Should().Be(EntityRef.From(vertexB));
         fresh.MoveNext().Should().BeFalse();
         fresh.Dispose();
 
-        rtx.Rollback();
     }
 
     [Fact]
     public void RangeIndex_skips_stale_entry_after_slot_reuse()
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        db.Schema.CreateIndex("idx_age", "Person", "age", IndexKind.Int64Equality);
+        db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_age", new PropertyTarget(PropertyOwnerKind.Vertex, "age", "Person"), IndexKind.Int64Equality)));
 
         VertexId vertexA;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             vertexA = tx.CreateVertex("Person");
-            tx.IndexInsert("idx_age", 30L, vertexA);
+            tx.SetIndexedProperty("idx_age", 30L, vertexA);
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteVertex(vertexA);
             tx.Commit();
@@ -151,15 +150,15 @@ public sealed class IndexGenerationTests : IDisposable
         db.Vacuum().ReclaimedVertices.Should().Be(1);
 
         VertexId vertexB;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             vertexB = tx.CreateVertex("Person");
-            tx.IndexInsert("idx_age", 99L, vertexB);
+            tx.SetIndexedProperty("idx_age", 99L, vertexB);
             tx.Commit();
         }
         vertexB.Sequence.Should().Be(vertexA.Sequence); // slot 同一性は Sequence
 
-        using var rtx = db.BeginReadOnlyTransaction();
+        using var rtx = db.BeginReadTransaction();
 
         // 旧範囲 [30,30] は stale → 空。
         var stale = rtx.RangeIndex(
@@ -171,10 +170,9 @@ public sealed class IndexGenerationTests : IDisposable
         var fresh = rtx.RangeIndex(
             "idx_age", PropertyValue.FromInt64(99), true, PropertyValue.FromInt64(99), true);
         fresh.MoveNext().Should().BeTrue();
-        fresh.Current.Should().Be(vertexB);
+        fresh.Current.Should().Be(EntityRef.From(vertexB));
         fresh.Dispose();
 
-        rtx.Rollback();
     }
 
     // ---- 世代付き VertexId の外部往復検証 (TryResolve の不一致は not-found) ----
@@ -186,21 +184,21 @@ public sealed class IndexGenerationTests : IDisposable
 
         // vertexA を作って外部に往復した想定のハンドルとして保持する。
         VertexId vertexA;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             vertexA = tx.CreateVertex("Person");
             tx.Commit();
         }
 
         // 削除 → vacuum で slot を物理回収 → 同一 slot を vertexB が再利用 (世代 +1)。
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteVertex(vertexA);
             tx.Commit();
         }
         db.Vacuum().ReclaimedVertices.Should().Be(1);
         VertexId vertexB;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             vertexB = tx.CreateVertex("Person");
             tx.Commit();
@@ -210,14 +208,13 @@ public sealed class IndexGenerationTests : IDisposable
         vertexB.Sequence.Should().Be(vertexA.Sequence);
         vertexB.Generation.Should().NotBe(vertexA.Generation);
 
-        using var rtx = db.BeginReadOnlyTransaction();
+        using var rtx = db.BeginReadTransaction();
         // 旧ハンドル vertexA は世代不一致で not-found (別Vertex vertexB を誤って指さない)。
         rtx.VertexExists(vertexA).Should().BeFalse("stale generation handle must not resolve to the reused slot");
         // 現ハンドル vertexB は現世代と一致 → 存在する。
         rtx.VertexExists(vertexB).Should().BeTrue();
         // 世代を持たない (= 内部/旧来) ハンドルは照合をスキップし、生存 slot を素直に解決する。
         rtx.VertexExists(new VertexId(vertexA.Sequence)).Should().BeTrue();
-        rtx.Rollback();
     }
 
     // ---- Orphan GC: generation-mismatch entry is collected & repaired ----
@@ -226,16 +223,16 @@ public sealed class IndexGenerationTests : IDisposable
     public void OrphanGc_collects_and_repairs_generation_mismatch_after_reuse()
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
+        db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality)));
 
         VertexId vertexA;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             vertexA = tx.CreateVertex("Person");
-            tx.IndexInsert("idx_name", "alice", vertexA);
+            tx.SetIndexedProperty("idx_name", "alice", vertexA);
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteVertex(vertexA);
             tx.Commit();
@@ -243,10 +240,10 @@ public sealed class IndexGenerationTests : IDisposable
         db.Vacuum().ReclaimedVertices.Should().Be(1);
 
         VertexId vertexB;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             vertexB = tx.CreateVertex("Person");
-            tx.IndexInsert("idx_name", "bob", vertexB);
+            tx.SetIndexedProperty("idx_name", "bob", vertexB);
             tx.Commit();
         }
         vertexB.Sequence.Should().Be(vertexA.Sequence); // slot 同一性は Sequence
@@ -265,12 +262,11 @@ public sealed class IndexGenerationTests : IDisposable
         after.OrphanCount.Should().Be(0);
         after.EntryCount.Should().Be(1);
 
-        using var rtx = db.BeginReadOnlyTransaction();
+        using var rtx = db.BeginReadTransaction();
         var fresh = rtx.SeekIndex("idx_name", PropertyValue.FromString("bob"));
         fresh.MoveNext().Should().BeTrue();
-        fresh.Current.Should().Be(vertexB);
+        fresh.Current.Should().Be(EntityRef.From(vertexB));
         fresh.Dispose();
-        rtx.Rollback();
     }
 
     // ---- storage family gate ----

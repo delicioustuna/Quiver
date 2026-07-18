@@ -8,7 +8,6 @@ namespace Quiver.Transactions;
 internal interface ITransaction : IDisposable, ICommitHookRegistrar
 {
     TransactionId Id { get; }
-    IsolationLevel Level { get; }
     long SnapshotLsn { get; }
     TransactionState State { get; }
 

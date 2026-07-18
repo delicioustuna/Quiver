@@ -74,7 +74,7 @@ public sealed class SchemaBrowserViewModel : IDisposable
             $"Indexes ({indexes.Count})", "⚡",
             indexes.Select(i => SchemaTreeNode.Leaf(
                 i.Name, "⚡",
-                $"{i.Label}.{i.PropertyKey} ({i.Kind})"))));
+                $"{i.Target.Scope ?? "*"}.{i.Target.PropertyKey} ({i.Kind})"))));
 
         var ftIndexes = schema.ListFullTextIndexes();
         RootNodes.Add(SchemaTreeNode.Folder(

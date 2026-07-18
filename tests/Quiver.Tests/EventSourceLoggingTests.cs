@@ -33,7 +33,7 @@ public sealed class EventSourceLoggingTests : IDisposable
     public void Commit_emits_information_event_with_tx_id()
     {
         long txId;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             txId = tx.Id.Value;
             tx.CreateVertex("Person");
@@ -50,7 +50,7 @@ public sealed class EventSourceLoggingTests : IDisposable
     public void Rollback_emits_warning_event_with_tx_id()
     {
         long txId;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             txId = tx.Id.Value;
             tx.CreateVertex("Person");
@@ -67,7 +67,7 @@ public sealed class EventSourceLoggingTests : IDisposable
     [Fact]
     public void Query_emits_verbose_event_with_tx_id_and_row_count()
     {
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             tx.CreateVertex("Person");
             tx.CreateVertex("Person");
@@ -76,12 +76,11 @@ public sealed class EventSourceLoggingTests : IDisposable
         }
 
         long txId;
-        using (var tx = _db.BeginReadOnlyTransaction())
+        using (var tx = _db.BeginReadTransaction())
         {
             txId = tx.Id.Value;
-            var labelId = _db.Schema.GetOrCreateLabel("Person");
+            _db.Schema.TryGetLabelId("Person", out var labelId).Should().BeTrue();
             tx.Execute(new VertexByLabelScanOperator(labelId));
-            tx.Commit();
         }
 
         var entry = _listener.Events

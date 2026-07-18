@@ -62,7 +62,7 @@ internal sealed record CorrelatedInputOp(CorrelatedInputOperator Probe) : Logica
 }
 
 /// <summary>述語フィルタ。<see cref="PredicateFactory"/> は物理化時に schema を受け取り述語を作る。</summary>
-internal sealed record FilterOp(LogicalOp Source, Func<ISchemaApi, IPredicate> PredicateFactory) : LogicalOp
+internal sealed record FilterOp(LogicalOp Source, Func<ISchemaCatalog, IPredicate> PredicateFactory) : LogicalOp
 {
     public override int CurrentEntityColumn => Source.CurrentEntityColumn;
     public override int PredictedOutputColumnCount => Source.PredictedOutputColumnCount;
@@ -299,7 +299,7 @@ internal enum LogicalBranchKind
 /// </summary>
 internal sealed record BranchOp(
     LogicalOp Source,
-    Func<ISchemaApi, (CorrelatedInputOperator[] Probes, IPhysicalOperator[] Branches)> BuildBranches,
+    Func<ISchemaCatalog, (CorrelatedInputOperator[] Probes, IPhysicalOperator[] Branches)> BuildBranches,
     LogicalBranchKind Kind) : LogicalOp
 {
     public override int CurrentEntityColumn => 0;

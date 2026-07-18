@@ -30,7 +30,7 @@ public class BranchedTraversalBenchmarks
 
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -39,13 +39,13 @@ public class BranchedTraversalBenchmarks
         var rnd = new Random(7);
         using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver")))
         {
-            _ = db.Schema.GetOrCreateLabel("Person");
-            _ = db.Schema.GetOrCreateEdgeType("KNOWS");
-            _ = db.Schema.GetOrCreateEdgeType("FOLLOWS");
-            _ = db.Schema.GetOrCreateEdgeType("MENTORS");
+            _ = db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
+            _ = db.EditSchema(schema => schema.GetOrCreateEdgeType("KNOWS"));
+            _ = db.EditSchema(schema => schema.GetOrCreateEdgeType("FOLLOWS"));
+            _ = db.EditSchema(schema => schema.GetOrCreateEdgeType("MENTORS"));
 
             var ids = new VertexId[VertexCount];
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < VertexCount; i++) ids[i] = tx.CreateVertex("Person");
                 tx.Commit();
@@ -53,10 +53,10 @@ public class BranchedTraversalBenchmarks
 
             const int batchSize = 50_000;
             int written = 0;
-            IGraphTransaction? tx2 = null;
+            IWriteTransaction? tx2 = null;
             try
             {
-                tx2 = db.BeginTransaction();
+                tx2 = db.BeginWriteTransaction();
                 for (int i = 0; i < VertexCount; i++)
                 {
                     for (int d = 0; d < AvgDegree; d++)
@@ -79,7 +79,7 @@ public class BranchedTraversalBenchmarks
                     {
                         tx2.Commit();
                         tx2.Dispose();
-                        tx2 = db.BeginTransaction();
+                        tx2 = db.BeginWriteTransaction();
                         written = 0;
                     }
                 }
@@ -92,7 +92,7 @@ public class BranchedTraversalBenchmarks
         }
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
-        _readTx = _db.BeginReadOnlyTransaction();
+        _readTx = _db.BeginReadTransaction();
     }
 
     [GlobalCleanup]
@@ -107,14 +107,14 @@ public class BranchedTraversalBenchmarks
     [Benchmark(Baseline = true, Description = "Baseline: single Out(KNOWS)")]
     public int BaselineSingleExpand()
     {
-        var g = _readTx.G(_db.Schema);
+        var g = _readTx.Query;
         return g.Vertices().HasLabel("Person").Out("KNOWS").ToList().Count;
     }
 
     [Benchmark(Description = "Union(KNOWS|FOLLOWS|MENTORS)")]
     public int Union3Branches()
     {
-        var g = _readTx.G(_db.Schema);
+        var g = _readTx.Query;
         return g.Vertices().HasLabel("Person")
                     .Union(
                         t => t.Out("KNOWS"),
@@ -126,7 +126,7 @@ public class BranchedTraversalBenchmarks
     [Benchmark(Description = "Coalesce(MENTORS|FOLLOWS|KNOWS)")]
     public int Coalesce3Branches()
     {
-        var g = _readTx.G(_db.Schema);
+        var g = _readTx.Query;
         return g.Vertices().HasLabel("Person")
                     .Coalesce(
                         t => t.Out("MENTORS"),
@@ -138,7 +138,7 @@ public class BranchedTraversalBenchmarks
     [Benchmark(Description = "Optional(MENTORS) — 1/3 hit rate")]
     public int OptionalMentors()
     {
-        var g = _readTx.G(_db.Schema);
+        var g = _readTx.Query;
         return g.Vertices().HasLabel("Person")
                     .Optional(t => t.Out("MENTORS"))
                     .ToList().Count;
@@ -147,7 +147,7 @@ public class BranchedTraversalBenchmarks
     [Benchmark(Description = "Chained: Optional(MENTORS).Out(KNOWS)")]
     public int OptionalThenExpand()
     {
-        var g = _readTx.G(_db.Schema);
+        var g = _readTx.Query;
         return g.Vertices().HasLabel("Person")
                     .Optional(t => t.Out("MENTORS"))
                     .Out("KNOWS")

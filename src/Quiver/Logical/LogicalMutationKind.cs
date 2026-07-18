@@ -2,7 +2,7 @@ namespace Quiver.Logical;
 
 /// <summary>
 /// <see cref="LogicalMutation"/> の判別子。
-/// <see cref="IGraphTransaction"/> の公開ミューテーション API と対応する。
+/// <see cref="IWriteTransaction"/> の公開ミューテーション API と対応する。
 /// </summary>
 public enum LogicalMutationKind : byte
 {

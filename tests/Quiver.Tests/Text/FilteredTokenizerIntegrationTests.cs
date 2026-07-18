@@ -31,12 +31,13 @@ public sealed class FilteredTokenizerIntegrationTests : IDisposable
     [Fact]
     public void StopWordFilter_excludes_terms_from_index()
     {
-        _db.Schema.CreateFullTextIndex("idx", "Doc", "body", new FullTextIndexOptions
-        {
-            Filters = [new StopWordFilter(["the", "a", "is", "of"])],
-        });
+        _db.EditSchema(schema => schema.CreateFullTextIndex(
+            "idx", "Doc", "body", new FullTextIndexOptions
+            {
+                Filters = [new StopWordFilter(["the", "a", "is", "of"])],
+            }));
 
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var n1 = tx.CreateVertex("Doc");
             tx.SetProperty(n1, "body", PropertyValue.FromString("the quick brown fox"));
@@ -45,8 +46,8 @@ public sealed class FilteredTokenizerIntegrationTests : IDisposable
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         g.Search("idx", "quick", 10).ToList().Should().HaveCount(1);
         g.Search("idx", "the", 10).ToList().Should().BeEmpty();
@@ -56,10 +57,11 @@ public sealed class FilteredTokenizerIntegrationTests : IDisposable
     [Fact]
     public void FullTextIndexInfo_reports_composite_tokenizer_id()
     {
-        _db.Schema.CreateFullTextIndex("idx2", "Doc", "body", new FullTextIndexOptions
-        {
-            Filters = [new LowercaseFilter(), new StopWordFilter(["x"])],
-        });
+        _db.EditSchema(schema => schema.CreateFullTextIndex(
+            "idx2", "Doc", "body", new FullTextIndexOptions
+            {
+                Filters = [new LowercaseFilter(), new StopWordFilter(["x"])],
+            }));
 
         var indexes = _db.Schema.ListFullTextIndexes();
         indexes.Should().ContainSingle(i => i.Name == "idx2");

@@ -31,14 +31,14 @@ public sealed class IndexOrphanGcTests : IDisposable
     public void HealthyDatabase_reports_zero_orphans_and_Repair_is_noop()
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
+        db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality)));
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < 10; i++)
             {
                 var n = tx.CreateVertex("Person");
-                tx.IndexInsert("idx_name", $"alice-{i}", n);
+                tx.SetIndexedProperty("idx_name", $"alice-{i}", n);
             }
             tx.Commit();
         }
@@ -61,19 +61,19 @@ public sealed class IndexOrphanGcTests : IDisposable
     public void DeleteVertex_creates_orphan_detected_by_CheckIndexConsistency()
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
+        db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality)));
 
         VertexId aliveOnly, doomed;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             aliveOnly = tx.CreateVertex("Person");
-            tx.IndexInsert("idx_name", "alive", aliveOnly);
+            tx.SetIndexedProperty("idx_name", "alive", aliveOnly);
             doomed = tx.CreateVertex("Person");
-            tx.IndexInsert("idx_name", "doomed", doomed);
+            tx.SetIndexedProperty("idx_name", "doomed", doomed);
             tx.Commit();
         }
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteVertex(doomed);
             tx.Commit();
@@ -92,20 +92,20 @@ public sealed class IndexOrphanGcTests : IDisposable
     public void RepairIndexes_Apply_removes_orphans_then_CheckIndexConsistency_clean()
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
+        db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality)));
 
         VertexId alive, doomed1, doomed2;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             alive = tx.CreateVertex("Person");
-            tx.IndexInsert("idx_name", "alive", alive);
+            tx.SetIndexedProperty("idx_name", "alive", alive);
             doomed1 = tx.CreateVertex("Person");
-            tx.IndexInsert("idx_name", "doomed-1", doomed1);
+            tx.SetIndexedProperty("idx_name", "doomed-1", doomed1);
             doomed2 = tx.CreateVertex("Person");
-            tx.IndexInsert("idx_name", "doomed-2", doomed2);
+            tx.SetIndexedProperty("idx_name", "doomed-2", doomed2);
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteVertex(doomed1);
             tx.DeleteVertex(doomed2);
@@ -121,33 +121,32 @@ public sealed class IndexOrphanGcTests : IDisposable
         after.EntryCount.Should().Be(1);
 
         // 生きているVertexは依然として索引から引ける
-        using var rtx = db.BeginReadOnlyTransaction();
+        using var rtx = db.BeginReadTransaction();
         var cur = rtx.SeekIndex("idx_name", PropertyValue.FromString("alive"));
         cur.MoveNext().Should().BeTrue();
-        cur.Current.Should().Be(alive);
+        cur.Current.Should().Be(EntityRef.From(alive));
         cur.Dispose();
 
         // 削除されたエントリはヒットしない
         var gone = rtx.SeekIndex("idx_name", PropertyValue.FromString("doomed-1"));
         gone.MoveNext().Should().BeFalse();
         gone.Dispose();
-        rtx.Rollback();
     }
 
     [Fact]
     public void RepairIndexes_DryRun_reports_orphans_but_does_not_delete()
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
+        db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality)));
 
         VertexId doomed;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             doomed = tx.CreateVertex("Person");
-            tx.IndexInsert("idx_name", "doomed", doomed);
+            tx.SetIndexedProperty("idx_name", "doomed", doomed);
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteVertex(doomed);
             tx.Commit();
@@ -166,22 +165,22 @@ public sealed class IndexOrphanGcTests : IDisposable
     public void RepairIndexes_handles_multiple_indexes()
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
-        db.Schema.CreateIndex("idx_age", "Person", "age", IndexKind.Int64Equality);
+        db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality)));
+        db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_age", new PropertyTarget(PropertyOwnerKind.Vertex, "age", "Person"), IndexKind.Int64Equality)));
 
         VertexId alive, doomed;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             alive = tx.CreateVertex("Person");
-            tx.IndexInsert("idx_name", "alive", alive);
-            tx.IndexInsert("idx_age", 30L, alive);
+            tx.SetIndexedProperty("idx_name", "alive", alive);
+            tx.SetIndexedProperty("idx_age", 30L, alive);
 
             doomed = tx.CreateVertex("Person");
-            tx.IndexInsert("idx_name", "doomed", doomed);
-            tx.IndexInsert("idx_age", 99L, doomed);
+            tx.SetIndexedProperty("idx_name", "doomed", doomed);
+            tx.SetIndexedProperty("idx_age", 99L, doomed);
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteVertex(doomed);
             tx.Commit();
@@ -204,17 +203,17 @@ public sealed class IndexOrphanGcTests : IDisposable
         VertexId alive;
         using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
-            db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
+            db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality)));
             VertexId doomed;
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 alive = tx.CreateVertex("Person");
-                tx.IndexInsert("idx_name", "alive", alive);
+                tx.SetIndexedProperty("idx_name", "alive", alive);
                 doomed = tx.CreateVertex("Person");
-                tx.IndexInsert("idx_name", "doomed", doomed);
+                tx.SetIndexedProperty("idx_name", "doomed", doomed);
                 tx.Commit();
             }
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 tx.DeleteVertex(doomed);
                 tx.Commit();
@@ -230,12 +229,11 @@ public sealed class IndexOrphanGcTests : IDisposable
             db.Diagnostics.CheckIndexConsistency().OrphanCount.Should().Be(0);
 
             // alive エントリは生き残る
-            using var rtx = db.BeginReadOnlyTransaction();
+            using var rtx = db.BeginReadTransaction();
             var cur = rtx.SeekIndex("idx_name", PropertyValue.FromString("alive"));
             cur.MoveNext().Should().BeTrue();
-            cur.Current.Should().Be(alive);
+            cur.Current.Should().Be(EntityRef.From(alive));
             cur.Dispose();
-            rtx.Rollback();
         }
     }
 
@@ -244,15 +242,15 @@ public sealed class IndexOrphanGcTests : IDisposable
     {
         using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
-            db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
+            db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality)));
             VertexId doomed;
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 doomed = tx.CreateVertex("Person");
-                tx.IndexInsert("idx_name", "doomed", doomed);
+                tx.SetIndexedProperty("idx_name", "doomed", doomed);
                 tx.Commit();
             }
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 tx.DeleteVertex(doomed);
                 tx.Commit();
@@ -277,15 +275,15 @@ public sealed class IndexOrphanGcTests : IDisposable
 
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         for (int i = 0; i < indexCount; i++)
-            db.Schema.CreateIndex($"idx_{i}", "Doc", $"key_{i}", IndexKind.Int64Equality);
+            db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition($"idx_{i}", new PropertyTarget(PropertyOwnerKind.Vertex, $"key_{i}", "Doc"), IndexKind.Int64Equality)));
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int n = 0; n < vertexCount; n++)
             {
                 var vertex = tx.CreateVertex("Doc");
                 for (int i = 0; i < indexCount; i++)
-                    tx.IndexInsert($"idx_{i}", (long)n, vertex);
+                    tx.SetIndexedProperty($"idx_{i}", (long)n, vertex);
             }
             tx.Commit();
         }

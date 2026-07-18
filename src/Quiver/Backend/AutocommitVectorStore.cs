@@ -15,9 +15,9 @@ namespace Quiver;
 internal sealed class AutocommitVectorStore : IVectorStore
 {
     private readonly IVectorStore _underlying;
-    private readonly Func<IGraphTransaction> _beginTx;
+    private readonly Func<IWriteTransaction> _beginTx;
 
-    public AutocommitVectorStore(IVectorStore underlying, Func<IGraphTransaction> beginTx)
+    public AutocommitVectorStore(IVectorStore underlying, Func<IWriteTransaction> beginTx)
     {
         ArgumentNullException.ThrowIfNull(underlying);
         ArgumentNullException.ThrowIfNull(beginTx);

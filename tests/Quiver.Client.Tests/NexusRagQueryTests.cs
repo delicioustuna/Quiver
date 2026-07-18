@@ -24,7 +24,7 @@ public sealed class NexusRagQueryTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "quiver_nexus_rag_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         _alice = tx.CreateVertex("Entity");
         _bob = tx.CreateVertex("Entity");
         _quiver = tx.CreateVertex("Entity");
@@ -63,8 +63,8 @@ public sealed class NexusRagQueryTests : IDisposable
     [Fact]
     public void Subject_query_returns_object_and_source_in_one_operator_tree()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var facts = g.Vertex(_alice)
             .Nexuses("Fact", "subject").As("fact")
@@ -80,8 +80,8 @@ public sealed class NexusRagQueryTests : IDisposable
     [Fact]
     public void Chunk_query_returns_subject_and_object_in_one_operator_tree()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var facts = g.Vertex(_chunk)
             .Nexuses("Fact", "source").As("fact")
@@ -97,8 +97,8 @@ public sealed class NexusRagQueryTests : IDisposable
     [Fact]
     public void Property_filter_can_precede_all_role_expansions()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var facts = g.Nexuses()
             .Has("status", "verified").As("fact")
@@ -122,8 +122,8 @@ public sealed class NexusRagQueryTests : IDisposable
     [Fact]
     public void Same_role_with_multiple_members_emits_each_member()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var objects = g.Vertex(_bob)
             .Nexuses("Fact", "subject")
@@ -136,8 +136,8 @@ public sealed class NexusRagQueryTests : IDisposable
     [Fact]
     public void Typed_select_rejects_an_alias_with_a_different_entity_kind()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         Action act = () => g.Vertex(_alice).As("vertex").Select<NexusId>("vertex");
 

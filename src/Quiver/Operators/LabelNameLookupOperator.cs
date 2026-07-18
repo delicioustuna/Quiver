@@ -5,7 +5,7 @@ namespace Quiver.Query.Physical;
 
 /// <summary>
 /// 各行のVertexラベルを読み取り、
-/// 呼び出し側が渡す lookup (通常 <c>ISchemaApi.GetLabelName</c>) でラベル名を解決して
+/// 呼び出し側が渡す lookup (通常 <c>ISchemaEditor.GetLabelName</c>) でラベル名を解決して
 /// UTF-8 文字列列を末尾に付加する。
 /// </summary>
 /// <remarks>

@@ -46,12 +46,8 @@ internal static class Migrator
             // - History.Append は OnCommitted フックに乗せ、commit が WAL に durable に落ちた
                 // 直後に append される。commit 完了後・append 完了前の crash 窓は冪等性
             //  (history 不在 → 次回 re-run で同じ migration を再適用) で吸収する。
-            using var tx = db.BeginTransaction();
-            IGraphTransactionInternal internalTx = tx.AsInternal();
-            ISchemaApi migrationSchema = db.Schema is SchemaApi schema
-                ? schema.Bind(internalTx.TransactionId)
-                : db.Schema;
-            var ctx = new MigrationContext(tx, migrationSchema, migration.Id);
+            using var tx = db.BeginWriteTransaction();
+            var ctx = new MigrationContext(tx, tx.EditSchema, migration.Id);
             var entry = new MigrationHistoryEntry(migration.Id, migration.Version, DateTime.UtcNow);
             bool committed = false;
             tx.OnCommitted(() =>

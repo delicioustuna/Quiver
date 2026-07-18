@@ -13,22 +13,20 @@ internal sealed class InMemoryGraphStorageBackend(
 {
     private readonly BinaryGraphStorageBackend _inner = inner;
 
-    public ISchemaApi Schema => _inner.Schema;
     public IDiagnosticsApi Diagnostics => _inner.Diagnostics;
     public IVectorStore Vectors => _inner.Vectors;
     public ITransactionManager Transactions => _inner.Transactions;
+    public ISchemaCatalog SchemaCatalog => _inner.SchemaCatalog;
+    internal SchemaApi SchemaApiForTesting => _inner.SchemaApiForTesting;
     public IGraphAccessMethods Access => _inner.Access;
     public BulkLoadCapabilities BulkLoad => _inner.BulkLoad;
     public string DataDirectory => string.Empty;
 
-    public IGraphTransaction BeginGraphTransaction(IsolationLevel level, bool readOnly)
-        => _inner.BeginGraphTransaction(level, readOnly);
+    public IReadTransaction BeginReadTransaction()
+        => _inner.BeginReadTransaction();
 
-    public IGraphTransaction BeginReadGraphTransaction()
-        => _inner.BeginReadGraphTransaction();
-
-    public IGraphTransaction BeginWriteGraphTransaction(IsolationLevel level)
-        => _inner.BeginWriteGraphTransaction(level);
+    public IWriteTransaction BeginWriteTransaction()
+        => _inner.BeginWriteTransaction();
 
     public void CreateSnapshot(string targetDirectory, SnapshotOptions? options = null)
         => throw new NotSupportedException(

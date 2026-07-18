@@ -31,41 +31,41 @@ public sealed class TransactionRuntimeContractTests : IDisposable
         VertexId vertexId;
         using (var db = QuiverDatabase.Open(_path))
         {
-            using (var seed = db.BeginTransaction())
+            using (var seed = db.BeginWriteTransaction())
             {
                 vertexId = seed.CreateVertex("Doc");
                 seed.SetProperty(vertexId, "name", PropertyValue.FromString("before"));
                 seed.Commit();
             }
 
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 await Task.Run(() =>
                     tx.SetProperty(vertexId, "name", PropertyValue.FromString("after")));
                 tx.Rollback();
             }
 
-            using var read = db.BeginReadOnlyTransaction();
+            using var read = db.BeginReadTransaction();
             var value = read.GetProperty(vertexId, "name");
             System.Text.Encoding.UTF8.GetString(value.Utf8StringValue).Should().Be("before");
         }
     }
 
     [Fact]
-    public async Task BeginTransaction_waits_for_active_writer_by_default()
+    public async Task BeginWriteTransaction_waits_for_active_writer_by_default()
     {
         using var db = QuiverDatabase.Open(_path, new QuiverDatabaseOptions
         {
             LockTimeout = TimeSpan.FromSeconds(2),
         });
 
-        using var first = db.BeginTransaction();
+        using var first = db.BeginWriteTransaction();
         first.CreateVertex("Held");
 
         var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var second = Task.Run(() =>
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             secondStarted.SetResult();
             tx.CreateVertex("Released");
             tx.Commit();
@@ -87,11 +87,11 @@ public sealed class TransactionRuntimeContractTests : IDisposable
             EnforceExclusiveWriter = true,
         });
 
-        using var first = db.BeginTransaction();
+        using var first = db.BeginWriteTransaction();
 
         Action act = () =>
         {
-            using var _ = db.BeginTransaction();
+            using var _ = db.BeginWriteTransaction();
         };
 
         act.Should().Throw<TransactionException>();
@@ -104,9 +104,9 @@ public sealed class TransactionRuntimeContractTests : IDisposable
         {
             EnforceExclusiveWriter = true,
         });
-        var keyId = db.Schema.GetOrCreatePropertyKey("embedding");
+        var keyId = db.EditSchema(schema => schema.GetOrCreatePropertyKey("embedding"));
 
-        using var first = db.BeginTransaction();
+        using var first = db.BeginWriteTransaction();
 
         Exception? error = null;
         var thread = new Thread(() =>
@@ -139,7 +139,7 @@ public sealed class TransactionRuntimeContractTests : IDisposable
     public async Task Same_transaction_handle_concurrent_use_throws()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var op = new BlockingOperator();
 
         var running = Task.Run(() => tx.Execute(op));

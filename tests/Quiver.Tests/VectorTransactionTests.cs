@@ -29,7 +29,7 @@ public sealed class VectorTransactionTests : IDisposable
     }
 
     private static VectorIndexSpec Spec(QuiverDatabase db) =>
-        new(IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("title"),
+        new(IndexName, EntityKind.Vertex, db.EditSchema(schema => schema.GetOrCreatePropertyKey("title")),
             Dim, DistanceMetric.Dot, "test", null);
 
     private static List<long> Knn(QuiverDatabase db, float[] query, int k)
@@ -46,7 +46,7 @@ public sealed class VectorTransactionTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(Spec(db));
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var n = tx.CreateVertex("Doc");
             tx.SetVector(EntityKind.Vertex, n.Value, IndexName, new float[] { 1, 0, 0, 0 });
@@ -63,7 +63,7 @@ public sealed class VectorTransactionTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(Spec(db));
         VertexId vertex;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             vertex = tx.CreateVertex("Doc");
             tx.SetVector(EntityKind.Vertex, vertex.Value, IndexName, [1f, 0f, 0f, 0f]);
@@ -75,7 +75,7 @@ public sealed class VectorTransactionTests : IDisposable
         db.Vectors.TryGetVector(EntityKind.Vertex, vertex.Value, IndexName, destination).Should().BeTrue();
         destination.Should().Equal(1f, 0f, 0f, 0f);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.SetVector(EntityKind.Vertex, vertex.Value, IndexName, [0f, 1f, 0f, 0f]);
             tx.Rollback();
@@ -93,7 +93,7 @@ public sealed class VectorTransactionTests : IDisposable
         using (var db = QuiverDatabase.Open(_path))
         {
             db.Vectors.CreateVectorIndex(Spec(db));
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             var n = tx.CreateVertex("Doc");
             id = n.Value;
             tx.SetVector(EntityKind.Vertex, n.Value, IndexName, new float[] { 1, 0, 0, 0 });
@@ -103,7 +103,7 @@ public sealed class VectorTransactionTests : IDisposable
         using (var db = QuiverDatabase.Open(_path))
         {
             // Vertexもベクトルも一緒に永続化されている。
-            using var rtx = db.BeginReadOnlyTransaction();
+            using var rtx = db.BeginReadTransaction();
             rtx.VertexExists(new VertexId(id)).Should().BeTrue();
 
             Knn(db, new float[] { 1, 0, 0, 0 }, 10).Should().ContainSingle()
@@ -120,7 +120,7 @@ public sealed class VectorTransactionTests : IDisposable
             db.Vectors.CreateVectorIndex(Spec(db));
             // tx を一切張らずに直接 SetVector → autocommit で crash-atomic に永続化される。
             VertexId n;
-            using (var tx = db.BeginTransaction()) { n = tx.CreateVertex("Doc"); tx.Commit(); }
+            using (var tx = db.BeginWriteTransaction()) { n = tx.CreateVertex("Doc"); tx.Commit(); }
             seq = EntityRef.UnpackSequence(n.Value);
             db.Vectors.SetVector(EntityKind.Vertex, n.Value, IndexName, new float[] { 0, 1, 0, 0 });
         }
@@ -133,12 +133,12 @@ public sealed class VectorTransactionTests : IDisposable
     }
 
     [Fact]
-    public void SetVector_in_readonly_tx_throws()
+    public void Read_transaction_surface_exposes_no_vector_mutation()
     {
         using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(Spec(db));
-        using var rtx = db.BeginReadOnlyTransaction();
-        var act = () => rtx.SetVector(EntityKind.Vertex, 0, IndexName, new float[] { 1, 0, 0, 0 });
-        act.Should().Throw<TransactionException>();
+        using var rtx = db.BeginReadTransaction();
+        typeof(IReadTransaction).GetMethod(nameof(IWriteTransaction.SetVector))
+            .Should().BeNull();
     }
 }

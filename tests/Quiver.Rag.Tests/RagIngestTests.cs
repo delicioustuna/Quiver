@@ -71,20 +71,28 @@ public sealed class RagIngestTests : IDisposable
     }
 
     // ── 読み取りヘルパ ──
-    private static (VertexId Doc, bool Found) FindDoc(IGraphTransaction tx, string sourceId)
+    private static (VertexId Doc, bool Found) FindDoc(IReadTransaction tx, string sourceId)
     {
         // 索引には削除済みの orphan エントリが残り得るので生存Vertexのみ採用する。
         var seek = tx.SeekIndex(RagSchema.DocSourceIndex, PropertyValue.FromString(sourceId));
         try
         {
             while (seek.MoveNext())
-                if (tx.VertexExists(seek.Current)) return (seek.Current, true);
+            {
+                var hit = seek.Current;
+                if (hit.Kind != EntityKind.Vertex)
+                    continue;
+
+                var vertex = new VertexId(hit.Value);
+                if (tx.VertexExists(vertex))
+                    return (vertex, true);
+            }
         }
         finally { seek.Dispose(); }
         return (default, false);
     }
 
-    private static List<VertexId> ChunkVertices(IGraphTransaction tx, VertexId docId)
+    private static List<VertexId> ChunkVertices(IReadTransaction tx, VertexId docId)
     {
         var ids = new List<VertexId>();
         var e = tx.EnumerateEdges(docId, Direction.Outgoing, RagSchema.HasChunkType);
@@ -94,7 +102,7 @@ public sealed class RagIngestTests : IDisposable
 
     private static List<string> ChunkTextsOrdered(QuiverDatabase db, string sourceId)
     {
-        using var tx = db.BeginReadOnlyTransaction();
+        using var tx = db.BeginReadTransaction();
         var (docId, found) = FindDoc(tx, sourceId);
         if (!found) return new();
         var items = new List<(int Ord, string Text)>();
@@ -109,7 +117,7 @@ public sealed class RagIngestTests : IDisposable
 
     private static int RelCount(QuiverDatabase db, string sourceId, string type)
     {
-        using var tx = db.BeginReadOnlyTransaction();
+        using var tx = db.BeginReadTransaction();
         var (docId, found) = FindDoc(tx, sourceId);
         if (!found) return 0;
         // HAS_CHUNK は doc から、NEXT_CHUNK は各 chunk から数える。
@@ -131,7 +139,7 @@ public sealed class RagIngestTests : IDisposable
 
     private static string DocTitle(QuiverDatabase db, string sourceId)
     {
-        using var tx = db.BeginReadOnlyTransaction();
+        using var tx = db.BeginReadTransaction();
         var (docId, found) = FindDoc(tx, sourceId);
         if (!found) return "";
         return Encoding.UTF8.GetString(tx.GetProperty(docId, RagSchema.PropTitle).Utf8StringValue);
@@ -197,7 +205,7 @@ public sealed class RagIngestTests : IDisposable
 
         // 旧チャンクVertex ID を控える。
         List<VertexId> oldChunks;
-        using (var tx = db.BeginReadOnlyTransaction())
+        using (var tx = db.BeginReadTransaction())
         {
             var (docId, _) = FindDoc(tx, "d1");
             oldChunks = ChunkVertices(tx, docId);
@@ -212,7 +220,7 @@ public sealed class RagIngestTests : IDisposable
         ChunkTextsOrdered(db, "d1").Should().Equal("charlie", "delta", "echo");
 
         // 旧チャンクVertexは消えている。
-        using (var tx = db.BeginReadOnlyTransaction())
+        using (var tx = db.BeginReadTransaction())
         {
             foreach (var old in oldChunks)
                 tx.VertexExists(old).Should().BeFalse();
@@ -295,7 +303,7 @@ public sealed class RagIngestTests : IDisposable
 
         store.DeleteDocument("d1").Should().BeTrue();
 
-        using (var tx = db.BeginReadOnlyTransaction())
+        using (var tx = db.BeginReadTransaction())
             FindDoc(tx, "d1").Found.Should().BeFalse();
         KnnHitCount(db, store.VectorIndexName, 100).Should().Be(0);
     }
@@ -320,7 +328,7 @@ public sealed class RagIngestTests : IDisposable
         RelCount(db, "d1", RagSchema.NextChunkType).Should().Be(3);
 
         // ordinal 0 から NEXT_CHUNK を辿ると全チャンクを順に訪問できる。
-        using var tx = db.BeginReadOnlyTransaction();
+        using var tx = db.BeginReadTransaction();
         var (docId, _) = FindDoc(tx, "d1");
         var byOrd = new Dictionary<long, int>();
         VertexId start = default;

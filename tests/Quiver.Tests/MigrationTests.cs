@@ -29,7 +29,7 @@ public sealed class MigrationTests : IDisposable
         // seed: 3 User Vertexを作って "User" ラベルを使う
         {
             using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             for (int i = 0; i < 3; i++)
             {
                 var n = tx.CreateVertex("User");
@@ -47,11 +47,11 @@ public sealed class MigrationTests : IDisposable
             result.Applied[0].Id.Should().Be("001_user_to_person");
             result.Skipped.Should().BeEmpty();
 
-            db.Schema.GetOrCreateLabel("Person").Value.Should().BeGreaterThanOrEqualTo(0);
+            ResolveLabel(db, "Person").Value.Should().BeGreaterThanOrEqualTo(0);
 
-            using var tx = db.BeginReadOnlyTransaction();
+            using var tx = db.BeginReadTransaction();
             int count = 0;
-            foreach (var _ in tx.AsInternal().Access.ScanVertices(GetInner(tx), db.Schema.GetOrCreateLabel("Person")))
+            foreach (var _ in tx.AsInternal().Access.ScanVertices(GetInner(tx), ResolveLabel(db, "Person")))
                 count++;
             count.Should().Be(3);
         }
@@ -87,7 +87,7 @@ public sealed class MigrationTests : IDisposable
         // seed: "OldLabel" を持つVertex
         {
             using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             tx.CreateVertex("OldLabel");
             tx.Commit();
         }
@@ -100,8 +100,8 @@ public sealed class MigrationTests : IDisposable
             await act.Should().ThrowAsync<InvalidOperationException>();
 
             // Vertexは "OldLabel" のまま残っているべき (rename が巻き戻った)
-            using var tx = db.BeginReadOnlyTransaction();
-            var oldId = db.Schema.GetOrCreateLabel("OldLabel");
+            using var tx = db.BeginReadTransaction();
+            var oldId = ResolveLabel(db, "OldLabel");
             int oldCount = 0;
             foreach (var _ in tx.AsInternal().Access.ScanVertices(GetInner(tx), oldId)) oldCount++;
             oldCount.Should().Be(1, "rename failed, so the vertex should still be under OldLabel");
@@ -110,8 +110,8 @@ public sealed class MigrationTests : IDisposable
         // 再 open でも "OldLabel" が durable に残っていることを確認
         using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         {
-            using var tx = db.BeginReadOnlyTransaction();
-            var oldId = db.Schema.GetOrCreateLabel("OldLabel");
+            using var tx = db.BeginReadTransaction();
+            var oldId = ResolveLabel(db, "OldLabel");
             int oldCount = 0;
             foreach (var _ in tx.AsInternal().Access.ScanVertices(GetInner(tx), oldId)) oldCount++;
             oldCount.Should().Be(1);
@@ -127,7 +127,7 @@ public sealed class MigrationTests : IDisposable
 
         // 先行 migration が完了: A→B
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             tx.CreateVertex("A");
             tx.Commit();
         }
@@ -145,9 +145,9 @@ public sealed class MigrationTests : IDisposable
         await act.Should().ThrowAsync<InvalidOperationException>();
 
         // B のままであるべき (A に巻き戻ってはいけない)
-        using var rtx = db.BeginReadOnlyTransaction();
+        using var rtx = db.BeginReadTransaction();
         int bCount = 0;
-        foreach (var _ in rtx.AsInternal().Access.ScanVertices(GetInner(rtx), db.Schema.GetOrCreateLabel("B")))
+        foreach (var _ in rtx.AsInternal().Access.ScanVertices(GetInner(rtx), ResolveLabel(db, "B")))
             bCount++;
         bCount.Should().Be(1, "first migration's B should be preserved");
     }
@@ -158,7 +158,7 @@ public sealed class MigrationTests : IDisposable
         // Bug 2 regression: 既に存在する索引に対し AddIndex を呼んでも、
         // それは no-op であり、後の rollback で既存索引を消してはいけない。
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        db.Schema.CreateIndex("idx_preexisting", "Foo", "bar", IndexKind.StringEquality);
+        db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_preexisting", new PropertyTarget(PropertyOwnerKind.Vertex, "bar", "Foo"), IndexKind.StringEquality)));
 
         Func<Task> act = () => db.MigrateAsync(new IMigration[] { new VersionedMigration("addidx", 1, ctx =>
         {
@@ -218,7 +218,7 @@ public sealed class MigrationTests : IDisposable
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         // データを先に投入
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             for (int i = 0; i < 5; i++)
             {
                 var n = tx.CreateVertex("Product");
@@ -275,18 +275,22 @@ public sealed class MigrationTests : IDisposable
 
         db.GetMigrationHistory().Select(h => h.Id).Should().Equal("ok");
 
-        using var tx = db.BeginReadOnlyTransaction();
+        using var tx = db.BeginReadTransaction();
         int survivors = 0;
         foreach (var _ in tx.AsInternal().Access.ScanVertices(
-            GetInner(tx), db.Schema.GetOrCreateLabel("Survivor")))
+            GetInner(tx), ResolveLabel(db, "Survivor")))
             survivors++;
         survivors.Should().Be(1);
 
         int ghosts = 0;
-        foreach (var _ in tx.AsInternal().Access.ScanVertices(
-            GetInner(tx), db.Schema.GetOrCreateLabel("Ghost")))
-            ghosts++;
+        if (db.Schema.TryGetLabelId("Ghost", out var ghostLabel))
+        {
+            foreach (var _ in tx.AsInternal().Access.ScanVertices(GetInner(tx), ghostLabel))
+                ghosts++;
+        }
         ghosts.Should().Be(0, "failed migration's vertices should be rolled back");
+        db.Schema.TryGetLabelId("Ghost", out _).Should().BeFalse(
+            "failed migration's schema tokens share the transaction rollback boundary");
     }
 
     // ── Same version, different Id → Ordinal sort ──────────────
@@ -312,7 +316,7 @@ public sealed class MigrationTests : IDisposable
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             var n = tx.CreateVertex("Item");
             tx.SetProperty(n, "old_prop", PropertyValue.FromString("val"));
             tx.Commit();
@@ -336,7 +340,7 @@ public sealed class MigrationTests : IDisposable
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             var a = tx.CreateVertex("N");
             var b = tx.CreateVertex("N");
             tx.CreateEdge(a, b, "OLD_REL");
@@ -354,13 +358,13 @@ public sealed class MigrationTests : IDisposable
             "edge type rename should be rolled back on failure");
     }
 
-    // ── DropIndex is non-transactional ─────────────────────────
+    // ── DropIndex participates in the migration transaction ────
 
     [Fact]
-    public async Task DropIndex_in_failed_migration_is_permanent()
+    public async Task DropIndex_in_failed_migration_is_rolled_back()
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        db.Schema.CreateIndex("idx_doomed", "X", "y", IndexKind.StringEquality);
+        db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_doomed", new PropertyTarget(PropertyOwnerKind.Vertex, "y", "X"), IndexKind.StringEquality)));
 
         Func<Task> act = () => db.MigrateAsync(new IMigration[] { new VersionedMigration("dropfail", 1, ctx =>
         {
@@ -369,8 +373,8 @@ public sealed class MigrationTests : IDisposable
         }) });
         await act.Should().ThrowAsync<InvalidOperationException>();
 
-        db.Schema.ListIndexes().Select(i => i.Name).Should().NotContain("idx_doomed",
-            "DropIndex is a physical operation and not rolled back");
+        db.Schema.ListIndexes().Select(i => i.Name).Should().Contain("idx_doomed",
+            "schema and index definition changes share the migration transaction boundary");
     }
 
     // ── ForEachVertex inside migration ───────────────────────────
@@ -380,7 +384,7 @@ public sealed class MigrationTests : IDisposable
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             for (int i = 0; i < 4; i++)
             {
                 var n = tx.CreateVertex("Sensor");
@@ -398,10 +402,10 @@ public sealed class MigrationTests : IDisposable
         }) });
         result.Applied.Should().ContainSingle();
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         int migratedCount = 0;
         foreach (var nid in ro.AsInternal().Access.ScanVertices(
-            GetInner(ro), db.Schema.GetOrCreateLabel("Sensor")))
+            GetInner(ro), ResolveLabel(db, "Sensor")))
         {
             ro.HasProperty(nid, "migrated").Should().BeTrue();
             var v = ro.GetProperty(nid, "migrated");
@@ -476,7 +480,7 @@ public sealed class MigrationTests : IDisposable
 
         using (var db = QuiverDatabase.Open(path))
         {
-            var keyId = db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+            var keyId = db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
             db.Schema.GetPropertyKeyCardinality(keyId).Should().Be(PropertyCardinality.Set);
         }
     }
@@ -491,7 +495,7 @@ public sealed class MigrationTests : IDisposable
 
         using (var db = QuiverDatabase.Open(path))
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             vertexId = tx.CreateVertex("Doc");
             tx.SetProperty(vertexId, "title", PropertyValue.FromString("readme"));
             tx.Commit();
@@ -510,7 +514,7 @@ public sealed class MigrationTests : IDisposable
 
         using (var db = QuiverDatabase.Open(path))
         {
-            using var ro = db.BeginReadOnlyTransaction();
+            using var ro = db.BeginReadTransaction();
             var values = CollectPropertyValues(ro.GetPropertyValues(vertexId, "labels"));
             values.Should().HaveCount(2);
             values.Should().Contain("important");
@@ -528,8 +532,8 @@ public sealed class MigrationTests : IDisposable
 
         using (var db = QuiverDatabase.Open(path))
         {
-            db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
-            using var tx = db.BeginTransaction();
+            db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
+            using var tx = db.BeginWriteTransaction();
             vertexId = tx.CreateVertex("Item");
             tx.Commit();
         }
@@ -543,7 +547,7 @@ public sealed class MigrationTests : IDisposable
             }) });
             await act.Should().ThrowAsync<InvalidOperationException>();
 
-            using var ro = db.BeginReadOnlyTransaction();
+            using var ro = db.BeginReadTransaction();
             var values = CollectPropertyValues(ro.GetPropertyValues(vertexId, "tags"));
             values.Should().BeEmpty("AddPropertyValue should be rolled back");
         }
@@ -558,7 +562,7 @@ public sealed class MigrationTests : IDisposable
 
         using (var db = QuiverDatabase.Open(path))
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             for (int i = 0; i < 3; i++)
             {
                 var n = tx.CreateVertex("Article");
@@ -580,10 +584,10 @@ public sealed class MigrationTests : IDisposable
             }) });
             result.Applied.Should().ContainSingle();
 
-            using var ro = db.BeginReadOnlyTransaction();
+            using var ro = db.BeginReadTransaction();
             int checked_ = 0;
             foreach (var nid in ro.AsInternal().Access.ScanVertices(
-                GetInner(ro), db.Schema.GetOrCreateLabel("Article")))
+                GetInner(ro), ResolveLabel(db, "Article")))
             {
                 var cats = CollectPropertyValues(ro.GetPropertyValues(nid, "category"));
                 cats.Should().HaveCount(2);
@@ -602,7 +606,7 @@ public sealed class MigrationTests : IDisposable
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        db.Schema.GetOrCreatePropertyKey("name");
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
 
         Func<Task> act = () => db.MigrateAsync(new IMigration[] { new VersionedMigration("mv_mismatch", 1, ctx =>
         {
@@ -613,12 +617,13 @@ public sealed class MigrationTests : IDisposable
 
     // ── Helpers ────────────────────────────────────────────────
 
-    private static Transactions.ITransaction GetInner(IGraphTransaction tx)
+    private static Transactions.ITransaction GetInner(IReadTransaction tx)
+        => tx.AsInternal().Inner;
+
+    private static LabelId ResolveLabel(QuiverDatabase database, string name)
     {
-        var prop = tx.GetType().GetProperty("Inner",
-            System.Reflection.BindingFlags.Instance |
-            System.Reflection.BindingFlags.NonPublic);
-        return (Transactions.ITransaction)prop!.GetValue(tx)!;
+        database.Schema.TryGetLabelId(name, out var label).Should().BeTrue();
+        return label;
     }
 
     private static List<string> CollectPropertyValues(PropertyValuesEnumerator enumerator)

@@ -18,7 +18,13 @@ try
     // ── インデックス定義 (カスタムスコアリングでは HNSW が不要なため FlatOnly) ──
     const string indexName = "Waveform";
     const int dim = 8;
-    var waveformKey = db.Schema.GetOrCreatePropertyKey("Waveform");
+    PropertyKeyId waveformKey;
+    using (var schemaTx = db.BeginWriteTransaction())
+    {
+        waveformKey = schemaTx.EditSchema.GetOrCreatePropertyKey("Waveform");
+        schemaTx.Commit();
+    }
+
     db.Vectors.CreateVectorIndex(new VectorIndexSpec(
         Name: indexName,
         EntityKind: EntityKind.Vertex,
@@ -29,7 +35,7 @@ try
         IndexKind: VectorIndexKind.FlatOnly));
 
     // ── 合成波形を持つセンサーを投入 ──
-    using (var tx = db.BeginTransaction())
+    using (var tx = db.BeginWriteTransaction())
     {
         var sensors = new (string Site, string Id, float[] Wave)[]
         {
@@ -61,9 +67,9 @@ try
     Console.WriteLine("── 1. ApplyDyadic (static b, Tokyo sensors only) ──");
     float[] query = [0.9f, 0.8f, 0.1f, 0.0f, 0.0f, 0.1f, 0.8f, 0.9f];
 
-    using (var tx = db.BeginReadOnlyTransaction())
+    using (var tx = db.BeginReadTransaction())
     {
-        var g = tx.G(db.Schema);
+        var g = tx.Query;
         var hits = g.Vertices<SensorVertex>()
             .Has(s => s.Site, "Tokyo")
             .ApplyDyadic<CosineSimilarityOp>(s => s.Waveform, query, k: 3)
@@ -76,9 +82,9 @@ try
     // ── 2. 範囲を限定したスコアリング (先頭 4 次元のみ) ──
     Console.WriteLine();
     Console.WriteLine("── 2. Region-restricted scoring (dims 0..4) ──");
-    using (var tx = db.BeginReadOnlyTransaction())
+    using (var tx = db.BeginReadTransaction())
     {
-        var g = tx.G(db.Schema);
+        var g = tx.Query;
         var hits = g.Vertices<SensorVertex>()
             .Has(s => s.Site, "Tokyo")
             .ApplyDyadic<CosineSimilarityOp>(
@@ -94,9 +100,9 @@ try
     // ── 3. トラバーサルで b を指定 (グラフ内の参照ベクトル) ──
     Console.WriteLine();
     Console.WriteLine("── 3. Traversal b (Template 'bell-curve' as reference) ──");
-    using (var tx = db.BeginReadOnlyTransaction())
+    using (var tx = db.BeginReadTransaction())
     {
-        var g = tx.G(db.Schema);
+        var g = tx.Query;
 
         var templateB = g.Vertices<TemplateVertex>()
             .Has(t => t.Name, "bell-curve")
@@ -113,9 +119,9 @@ try
     // ── 4. 全センサーに対する内積 ──
     Console.WriteLine();
     Console.WriteLine("── 4. DotProductOp (all sensors) ──");
-    using (var tx = db.BeginReadOnlyTransaction())
+    using (var tx = db.BeginReadTransaction())
     {
-        var g = tx.G(db.Schema);
+        var g = tx.Query;
         var hits = g.Vertices<SensorVertex>()
             .ApplyDyadic<DotProductOp>(s => s.Waveform, query, k: 5)
             .ToList();
@@ -143,7 +149,7 @@ sealed class SensorVertex : IGraphVertex<SensorVertex>
 
     public static string GraphLabel => "Sensor";
 
-    public static VertexId Insert(IGraphTransaction tx, SensorVertex entity)
+    public static VertexId Insert(IWriteTransaction tx, SensorVertex entity)
     {
         var id = tx.CreateVertex(GraphLabel);
         tx.SetProperty(id, "Site", PropertyValue.FromString(entity.Site));
@@ -151,9 +157,9 @@ sealed class SensorVertex : IGraphVertex<SensorVertex>
         return id;
     }
 
-    public static VertexId InsertIndexed(IGraphTransaction tx, SensorVertex entity) => Insert(tx, entity);
+    public static VertexId InsertIndexed(IWriteTransaction tx, SensorVertex entity) => Insert(tx, entity);
 
-    public static SensorVertex Load(IGraphTransaction tx, VertexId id)
+    public static SensorVertex Load(IReadTransaction tx, VertexId id)
     {
         var site = tx.GetProperty(id, "Site");
         var sid = tx.GetProperty(id, "SensorId");
@@ -164,13 +170,13 @@ sealed class SensorVertex : IGraphVertex<SensorVertex>
         };
     }
 
-    public static void Update(IGraphTransaction tx, VertexId id, SensorVertex entity)
+    public static void Update(IWriteTransaction tx, VertexId id, SensorVertex entity)
     {
         tx.SetProperty(id, "Site", PropertyValue.FromString(entity.Site));
         tx.SetProperty(id, "SensorId", PropertyValue.FromString(entity.SensorId));
     }
 
-    public static void Delete(IGraphTransaction tx, VertexId id) => tx.DeleteVertex(id);
+    public static void Delete(IWriteTransaction tx, VertexId id) => tx.DeleteVertex(id);
 }
 
 sealed class TemplateVertex : IGraphVertex<TemplateVertex>
@@ -180,7 +186,7 @@ sealed class TemplateVertex : IGraphVertex<TemplateVertex>
 
     public static string GraphLabel => "Template";
 
-    public static VertexId Insert(IGraphTransaction tx, TemplateVertex entity)
+    public static VertexId Insert(IWriteTransaction tx, TemplateVertex entity)
     {
         var id = tx.CreateVertex(GraphLabel);
         tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
@@ -188,9 +194,9 @@ sealed class TemplateVertex : IGraphVertex<TemplateVertex>
         return id;
     }
 
-    public static VertexId InsertIndexed(IGraphTransaction tx, TemplateVertex entity) => Insert(tx, entity);
+    public static VertexId InsertIndexed(IWriteTransaction tx, TemplateVertex entity) => Insert(tx, entity);
 
-    public static TemplateVertex Load(IGraphTransaction tx, VertexId id)
+    public static TemplateVertex Load(IReadTransaction tx, VertexId id)
     {
         var nameVal = tx.GetProperty(id, "Name");
         var patternVal = tx.GetProperty(id, "Pattern");
@@ -203,11 +209,11 @@ sealed class TemplateVertex : IGraphVertex<TemplateVertex>
         };
     }
 
-    public static void Update(IGraphTransaction tx, VertexId id, TemplateVertex entity)
+    public static void Update(IWriteTransaction tx, VertexId id, TemplateVertex entity)
     {
         tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
         tx.SetProperty(id, "Pattern", PropertyValue.FromFloatArray(entity.Pattern));
     }
 
-    public static void Delete(IGraphTransaction tx, VertexId id) => tx.DeleteVertex(id);
+    public static void Delete(IWriteTransaction tx, VertexId id) => tx.DeleteVertex(id);
 }

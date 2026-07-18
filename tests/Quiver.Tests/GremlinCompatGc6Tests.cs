@@ -29,7 +29,7 @@ public sealed class GremlinCompatGc6Tests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private VertexId AddPerson(IGraphTransaction tx, string name, int? age = null)
+    private VertexId AddPerson(IWriteTransaction tx, string name, int? age = null)
     {
         var id = tx.CreateVertex("Person");
         tx.SetProperty(id, "name", PropertyValue.FromString(name));
@@ -40,7 +40,7 @@ public sealed class GremlinCompatGc6Tests : IDisposable
     // Linear: Alice -> Bob, Alice -> Carol, Bob -> Dave
     private (VertexId alice, VertexId bob, VertexId carol, VertexId dave) BuildSmallGraph()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = AddPerson(tx, "Alice", age: 30);
         var bob   = AddPerson(tx, "Bob",   age: 25);
         var carol = AddPerson(tx, "Carol", age: 40);
@@ -56,8 +56,8 @@ public sealed class GremlinCompatGc6Tests : IDisposable
     public void As_then_Select_same_step_returns_self()
     {
         var (alice, _, _, _) = BuildSmallGraph();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var ids = g.Vertices().HasLabel("Person").Has("name", "Alice").As("a").Select("a").ToList();
 
@@ -68,8 +68,8 @@ public sealed class GremlinCompatGc6Tests : IDisposable
     public void Select_recovers_pinned_column_after_Out()
     {
         var (alice, _, _, _) = BuildSmallGraph();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // Pin "a"=Alice, walk to her friends, then ask for "a" again — should
         // recover Alice once per outgoing edge (2 friends → 2 occurrences).
@@ -86,8 +86,8 @@ public sealed class GremlinCompatGc6Tests : IDisposable
     public void Select_with_projection_returns_typed_pairs()
     {
         var (alice, bob, carol, _) = BuildSmallGraph();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var pairs = g.Vertices().HasLabel("Person").Has("name", "Alice").As("a")
             .Out("KNOWS").As("b")
@@ -105,8 +105,8 @@ public sealed class GremlinCompatGc6Tests : IDisposable
     public void Aliases_survive_intermediate_filter()
     {
         var (alice, bob, _, _) = BuildSmallGraph();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // Bob is the only friend named "Bob" — Has() must not drop carried "a".
         var pairs = g.Vertices().HasLabel("Person").Has("name", "Alice").As("a")
@@ -120,8 +120,8 @@ public sealed class GremlinCompatGc6Tests : IDisposable
     public void Aliases_survive_two_hop_expansion()
     {
         var (alice, bob, _, dave) = BuildSmallGraph();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // Alice -> Bob -> Dave. After two hops "a"=Alice and "b"=Bob must
         // still resolve correctly alongside the current entity (Dave).
@@ -137,8 +137,8 @@ public sealed class GremlinCompatGc6Tests : IDisposable
     public void Select_chains_continuation_from_pinned_column()
     {
         var (alice, _, _, _) = BuildSmallGraph();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // After Out("KNOWS"), .Select("a") re-aims back at Alice; .Out("KNOWS")
         // from there should re-walk her two friends. Once for each upstream
@@ -156,8 +156,8 @@ public sealed class GremlinCompatGc6Tests : IDisposable
     public void Select_unknown_alias_throws()
     {
         BuildSmallGraph();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var act = () => g.Vertices().HasLabel("Person").As("a").Select("zzz").ToList();
 
@@ -169,8 +169,8 @@ public sealed class GremlinCompatGc6Tests : IDisposable
     public void OutE_then_select_resolves_both_vertex_and_edge_aliases()
     {
         var (alice, bob, _, _) = BuildSmallGraph();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // Pin source vertex "a", capture edge as "r", terminate on the neighbor.
         // OutE keeps edge@0 / neighbor@1, so carry should preserve "a" at the

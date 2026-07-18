@@ -20,7 +20,7 @@ public class MultiHopOperatorBenchmarks
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
     private VertexId _hub;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
 
     // LabelId mapping (BulkLoader で直接 int 指定)
     private static readonly LabelId HubLabel = new(0);
@@ -71,7 +71,7 @@ public class MultiHopOperatorBenchmarks
         }
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _hub = new VertexId(0);
-        _readTx = _db.BeginTransaction();
+        _readTx = _db.BeginWriteTransaction();
     }
 
     [GlobalCleanup]

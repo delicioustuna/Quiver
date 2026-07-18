@@ -23,15 +23,14 @@ public sealed class InMemoryGraphStorageBackendContractTests
         using var database = QuiverDatabase.CreateInMemory();
 
         VertexId vertexId;
-        using (var tx = database.BeginTransaction())
+        using (var tx = database.BeginWriteTransaction())
         {
             vertexId = tx.CreateVertex("Person");
             tx.Commit();
         }
 
-        using var readTx = database.BeginReadOnlyTransaction();
+        using var readTx = database.BeginReadTransaction();
         readTx.VertexExists(vertexId).Should().BeTrue();
-        readTx.Rollback();
     }
 
     [Fact]
@@ -39,7 +38,7 @@ public sealed class InMemoryGraphStorageBackendContractTests
     {
         using var database = QuiverDatabase.Open(":memory:");
 
-        using var tx = database.BeginTransaction();
+        using var tx = database.BeginWriteTransaction();
         tx.CreateVertex("Temporary");
         tx.Commit();
 

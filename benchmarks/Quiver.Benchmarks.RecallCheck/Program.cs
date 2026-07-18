@@ -49,10 +49,17 @@ static bool RunScenario(Scenario scenario)
         Array.Fill(live, true);
 
         using var db = QuiverDatabase.Open(path);
+        PropertyKeyId embeddingKey;
+        using (var schemaTx = db.BeginWriteTransaction())
+        {
+            embeddingKey = schemaTx.EditSchema.GetOrCreatePropertyKey("embedding");
+            schemaTx.Commit();
+        }
+
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName,
             EntityKind.Vertex,
-            db.Schema.GetOrCreatePropertyKey("embedding"),
+            embeddingKey,
             VectorRecallCorpus.RecallDimensions,
             DistanceMetric.Cosine,
             "deterministic recall corpus",
@@ -61,7 +68,7 @@ static bool RunScenario(Scenario scenario)
             HnswEfConstruction: scenario.HnswEfConstruction));
 
         var buildStopwatch = Stopwatch.StartNew();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < VectorRecallCorpus.RecallCount; i++)
             {
@@ -93,7 +100,7 @@ static bool RunScenario(Scenario scenario)
 
         var order = Enumerable.Range(0, VectorRecallCorpus.RecallCount).ToArray();
         new Random(VectorRecallCorpus.Seed ^ 0x5EED).Shuffle(order);
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             int deleteCount = VectorRecallCorpus.RecallCount * 3 / 10;
             for (int i = 0; i < deleteCount; i++)

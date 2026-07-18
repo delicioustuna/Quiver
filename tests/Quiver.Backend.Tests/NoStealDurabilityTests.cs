@@ -30,9 +30,7 @@ public sealed class NoStealDurabilityTests : IDisposable
         IGraphStorageBackend? backend = factory.Open(path, options);
 
         TransactionTooLargeException? overflow = null;
-        using (IGraphTransaction transaction = backend.BeginGraphTransaction(
-            IsolationLevel.SnapshotIsolation,
-            readOnly: false))
+        using (IWriteTransaction transaction = backend.BeginWriteTransaction())
         {
             try
             {
@@ -57,9 +55,7 @@ public sealed class NoStealDurabilityTests : IDisposable
         }
 
         VertexId committed;
-        using (IGraphTransaction next = backend.BeginGraphTransaction(
-            IsolationLevel.SnapshotIsolation,
-            readOnly: false))
+        using (IWriteTransaction next = backend.BeginWriteTransaction())
         {
             committed = next.CreateVertex("AfterOverflow");
             next.Commit();
@@ -68,9 +64,7 @@ public sealed class NoStealDurabilityTests : IDisposable
         KillProcessSimulator.SimulateKill(ref backend);
 
         using IGraphStorageBackend reopened = factory.Open(path, options);
-        using IGraphTransaction read = reopened.BeginGraphTransaction(
-            IsolationLevel.SnapshotIsolation,
-            readOnly: true);
+        using IReadTransaction read = reopened.BeginReadTransaction();
         read.VertexExists(committed).Should().BeTrue();
     }
 
@@ -89,9 +83,7 @@ public sealed class NoStealDurabilityTests : IDisposable
             .Select(index => index / 10.0f)
             .ToArray();
         VertexId committed;
-        using (IGraphTransaction transaction = backend.BeginGraphTransaction(
-            IsolationLevel.SnapshotIsolation,
-            readOnly: false))
+        using (IWriteTransaction transaction = backend.BeginWriteTransaction())
         {
             committed = transaction.CreateVertex("CommittedPayload");
             transaction.SetProperty(
@@ -101,9 +93,7 @@ public sealed class NoStealDurabilityTests : IDisposable
             transaction.Commit();
         }
 
-        IGraphTransaction? loser = backend.BeginGraphTransaction(
-            IsolationLevel.SnapshotIsolation,
-            readOnly: false);
+        IWriteTransaction? loser = backend.BeginWriteTransaction();
         VertexId uncommitted = loser.CreateVertex("UncommittedPayload");
         loser.SetProperty(
             uncommitted,
@@ -114,9 +104,7 @@ public sealed class NoStealDurabilityTests : IDisposable
         loser = null;
 
         using IGraphStorageBackend reopened = factory.Open(path, options);
-        using IGraphTransaction read = reopened.BeginGraphTransaction(
-            IsolationLevel.SnapshotIsolation,
-            readOnly: true);
+        using IReadTransaction read = reopened.BeginReadTransaction();
         read.GetProperty(committed, "embedding")
             .FloatArrayValue.ToArray()
             .Should().Equal(expected);

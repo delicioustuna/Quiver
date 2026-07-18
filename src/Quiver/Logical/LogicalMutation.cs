@@ -5,7 +5,7 @@ namespace Quiver.Logical;
 /// <summary>
 /// 1 件のグラフミューテーションを表すセマンティックレコード。
 ///
-/// 論理ミューテーションは書き込み中の <see cref="IGraphTransaction"/> によって、
+/// 論理ミューテーションは書き込み中の <see cref="IWriteTransaction"/> によって、
 /// 各公開ミューテーション呼び出しの後に生成され、コミットまでバッファされる。
 /// 下層トランザクションが永続化コミットされる (WAL フラッシュ) と、
 /// <see cref="ILogicalMutationSink"/> に渡される。

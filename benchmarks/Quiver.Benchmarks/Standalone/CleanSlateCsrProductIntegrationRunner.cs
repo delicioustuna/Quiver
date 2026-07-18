@@ -48,7 +48,7 @@ public static class CleanSlateCsrProductIntegrationRunner
             }
 
             using (var db = QuiverDatabase.Open(path))
-            using (var tx = db.BeginReadOnlyTransaction())
+            using (var tx = db.BeginReadTransaction())
             {
                 var validation = ValidatePayloadAgainstRowPath(tx, corpus.Hub);
                 if (!validation.Passed)
@@ -134,7 +134,7 @@ public static class CleanSlateCsrProductIntegrationRunner
             }
 
             using var reopened = QuiverDatabase.Open(path);
-            using var tx = reopened.BeginReadOnlyTransaction();
+            using var tx = reopened.BeginReadTransaction();
             var validation = ValidateMergeGate(tx, seeded.Hub, expectedEdges: deltaCount + 1);
             bool pass = validation.Passed && compactMs <= RequiredMergeGateMs;
 
@@ -166,9 +166,9 @@ public static class CleanSlateCsrProductIntegrationRunner
     private static Corpus BuildBulkGraph(string path, int degree)
     {
         using var db = QuiverDatabase.Open(path);
-        var label = db.Schema.GetOrCreateLabel("V");
-        var type = db.Schema.GetOrCreateEdgeType("LINK");
-        var scoreKey = db.Schema.GetOrCreatePropertyKey(ScoreKey);
+        var label = db.EditSchema(schema => schema.GetOrCreateLabel("V"));
+        var type = db.EditSchema(schema => schema.GetOrCreateEdgeType("LINK"));
+        var scoreKey = db.EditSchema(schema => schema.GetOrCreatePropertyKey(ScoreKey));
         var payload = PayloadLaneSpec.ForInt64(scoreKey.Value);
 
         int vertexCount = 1 + degree + degree * degree + degree;
@@ -205,9 +205,9 @@ public static class CleanSlateCsrProductIntegrationRunner
     private static MergeGateSeed SeedMergeGateBase(string path, int targetPool)
     {
         using var db = QuiverDatabase.Open(path);
-        var label = db.Schema.GetOrCreateLabel("V");
-        var type = db.Schema.GetOrCreateEdgeType("LINK");
-        var scoreKey = db.Schema.GetOrCreatePropertyKey(ScoreKey);
+        var label = db.EditSchema(schema => schema.GetOrCreateLabel("V"));
+        var type = db.EditSchema(schema => schema.GetOrCreateEdgeType("LINK"));
+        var scoreKey = db.EditSchema(schema => schema.GetOrCreatePropertyKey(ScoreKey));
         var payload = PayloadLaneSpec.ForInt64(scoreKey.Value);
 
         using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
@@ -219,7 +219,7 @@ public static class CleanSlateCsrProductIntegrationRunner
         loader.AppendEdgePayload(new EdgeId(0), scoreKey, 1);
         loader.Commit();
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var value = PropertyValue.FromInt64(1);
         tx.SetProperty(new EdgeId(0), ScoreKey, in value);
         tx.Commit();
@@ -239,7 +239,7 @@ public static class CleanSlateCsrProductIntegrationRunner
         using var db = QuiverDatabase.Open(path);
         while (inserted < deltaCount)
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             int take = Math.Min(batchSize, deltaCount - inserted);
             for (int i = 0; i < take; i++)
             {
@@ -278,7 +278,7 @@ public static class CleanSlateCsrProductIntegrationRunner
     private static void SeedEdgeProperties(string path, Corpus corpus)
     {
         using var db = QuiverDatabase.Open(path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         foreach (var (edgeSeq, score) in corpus.Scores)
         {
             var value = PropertyValue.FromInt64(score);
@@ -290,7 +290,7 @@ public static class CleanSlateCsrProductIntegrationRunner
     private static MutationSummary ApplyDeterministicMutations(string path, Corpus corpus, int mutationCount)
     {
         using var db = QuiverDatabase.Open(path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
 
         int updated = 0;
         int deleted = 0;
@@ -326,7 +326,7 @@ public static class CleanSlateCsrProductIntegrationRunner
         return new MutationSummary(updated, deleted, inserted);
     }
 
-    private static ValidationResult ValidatePayloadAgainstRowPath(IGraphTransaction tx, VertexId hub)
+    private static ValidationResult ValidatePayloadAgainstRowPath(IReadTransaction tx, VertexId hub)
     {
         int payloadMatches = 0;
         int rowMatches = 0;
@@ -362,7 +362,7 @@ public static class CleanSlateCsrProductIntegrationRunner
         return new ValidationResult(payloadMatches, rowMatches, mismatches);
     }
 
-    private static int CountPayloadMatches(IGraphTransaction tx, VertexId hub)
+    private static int CountPayloadMatches(IReadTransaction tx, VertexId hub)
     {
         var adj = tx.AsInternal().AdjacencySegments
             ?? throw new InvalidOperationException("Adjacency block store was not built.");
@@ -386,7 +386,7 @@ public static class CleanSlateCsrProductIntegrationRunner
     }
 
     private static MergeGateValidation ValidateMergeGate(
-        IGraphTransaction tx,
+        IReadTransaction tx,
         VertexId hub,
         int expectedEdges)
     {

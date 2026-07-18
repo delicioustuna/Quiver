@@ -15,10 +15,10 @@ public sealed class SubTraversal
 {
     private readonly CorrelatedInputOperator _probe;
     private readonly LogicalOp _plan;
-    private readonly ISchemaApi _schema;
+    private readonly ISchemaCatalog _schema;
     private readonly int _entityColumn;
 
-    internal SubTraversal(CorrelatedInputOperator probe, LogicalOp plan, ISchemaApi schema, int entityColumn = 0)
+    internal SubTraversal(CorrelatedInputOperator probe, LogicalOp plan, ISchemaCatalog schema, int entityColumn = 0)
     {
         _probe = probe;
         _plan = plan;
@@ -62,7 +62,7 @@ public sealed class SubTraversal
     /// <summary>ラベルでフィルタする。</summary>
     public SubTraversal HasLabel(string label)
     {
-        var labelId = _schema.GetOrCreateLabel(label);
+        var labelId = _schema.ResolveLabel(label);
         var col = _entityColumn;
         return new SubTraversal(_probe,
             new FilterOp(_plan, _ => new LabelPredicate(labelId, col)),
@@ -72,7 +72,7 @@ public sealed class SubTraversal
     /// <summary>プロパティ <paramref name="key"/> が文字列 <paramref name="value"/> と等しい要素のみを通す。</summary>
     public SubTraversal Has(string key, string value)
     {
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         var col = _entityColumn;
         return new SubTraversal(_probe,
             new FilterOp(_plan, _ => new PropertyEqStringPredicate(col, keyId, value)),
@@ -82,7 +82,7 @@ public sealed class SubTraversal
     /// <summary>プロパティ <paramref name="key"/> が <see cref="long"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
     public SubTraversal Has(string key, long value)
     {
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         var col = _entityColumn;
         var pred = P.Eq(value);
         return new SubTraversal(_probe,
@@ -93,7 +93,7 @@ public sealed class SubTraversal
     /// <summary>任意の <see cref="PropertyPredicate"/> でプロパティ <paramref name="key"/> をフィルタする。</summary>
     public SubTraversal Has(string key, PropertyPredicate pred)
     {
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         var col = _entityColumn;
         return new SubTraversal(_probe,
             new FilterOp(_plan, _ => PredicateDispatch.Build(col, keyId, pred)),

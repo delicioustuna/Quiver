@@ -38,6 +38,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     private const int CatalogBlobLenOffset = 0;   // int32: 直列化ブロブ長 (secondary + FT 両セクション合計)
     private const int CatalogEntryCountOffset = 4; // int32: secondary 索引件数
     private const int CatalogFtCountOffset = 8;    // int32: 全文索引件数
+    private const int CatalogFormatVersionOffset = 12;
+    private const int CatalogFormatVersion = 2;
 
     private readonly SingleFileContainer _container;
     private readonly bool _ownsContainer;
@@ -55,6 +57,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     // SchemaApi.CreateIndex から登録され、MergeVertex の自動インデックス選択に使われる。
     private readonly Dictionary<(string Label, string PropertyKey), string> _bindings = new();
     private readonly Dictionary<string, (string Label, string PropertyKey)> _bindingByName
+        = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ScalarIndexMetadata> _definitions
         = new(StringComparer.Ordinal);
 
     // 全文索引 (postings + norms の 2 テナント)。secondary 索引 (_indexes) とは別管理。
@@ -112,18 +116,35 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     public void ReloadAll()
     {
         foreach (var idx in _indexes.Values)
-            if (idx is IBTreeIndexFlushable f) f.ReloadFromHeader();
+            (idx as IDisposable)?.Dispose();
         foreach (var ft in _ftIndexes.Values)
-            ft.ReloadFromHeader();
+            ft.Dispose();
+
+        _indexes.Clear();
+        _indexTypes.Clear();
+        _indexTenantIds.Clear();
+        _indexFiles.Clear();
+        _usedTenantIds.Clear();
+        _bindings.Clear();
+        _bindingByName.Clear();
+        _definitions.Clear();
+        _ftIndexes.Clear();
+        _ftBindings.Clear();
+
+        // catalog pages are part of the transaction write set. Abort/rollback restores
+        // their before-image first, so rebuilding every cache from that primary catalog
+        // prevents an aborted definition from surviving in process memory.
+        LoadCatalogAndMaterialize();
     }
 
     /// <summary>
     /// 全 B+Tree 索引を走査し、<paramref name="isLive"/> が <c>false</c> を返した
-    /// 値 (VertexId.Value 互換 long) を持つ orphan エントリを <paramref name="output"/> に集める。
+    /// 値として保持するプロパティ版参照のうち orphan であるものを <paramref name="output"/> に集める。
     /// 戻り値は (走査索引本数, 走査エントリ総数)。<see cref="RemoveOrphans"/> で実削除する。
     /// </summary>
     public (int IndexCount, long EntryCount) CollectOrphans(
-        Func<long, bool> isLive,
+        Func<long, bool> isLiveScalarReference,
+        Func<long, bool> isLiveEntity,
         ICollection<(string IndexName, byte[] RawKey, long Value)> output)
     {
         int indexCount = 0;
@@ -135,7 +156,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             foreach (var kv in flushable.EnumerateRawEntries())
             {
                 entryCount++;
-                if (!isLive(kv.Value))
+                if (!isLiveScalarReference(kv.Value))
                     output.Add((name, kv.Key, kv.Value));
             }
         }
@@ -150,14 +171,14 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             foreach (var kv in ft.EnumeratePostingsRaw())
             {
                 entryCount++;
-                if (!isLive(PostingsKey.DecodeEntityId(kv.Key)))
+                if (!isLiveEntity(PostingsKey.DecodeEntityId(kv.Key)))
                     output.Add((ft.Name + FtLaneSep + PostingsLaneTag, kv.Key, kv.Value));
             }
             indexCount++;
             foreach (var kv in ft.EnumerateNormsRaw())
             {
                 entryCount++;
-                if (!isLive(int64.Decode(kv.Key)))
+                if (!isLiveEntity(int64.Decode(kv.Key)))
                     output.Add((ft.Name + FtLaneSep + NormsLaneTag, kv.Key, kv.Value));
             }
         }
@@ -222,6 +243,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             _bindings.Remove(key);
             _bindingByName.Remove(name);
         }
+        _definitions.Remove(name);
         PersistCatalog();
         return true;
     }
@@ -263,8 +285,72 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             _bindingByName[newName] = binding;
             _bindings[binding] = newName;
         }
+        if (_definitions.Remove(oldName, out var metadata))
+        {
+            _definitions[newName] = metadata with
+            {
+                Definition = metadata.Definition with { Name = newName },
+            };
+        }
         PersistCatalog();
         return true;
+    }
+
+    public void RenamePropertyTarget(string oldName, string newName)
+    {
+        bool changed = false;
+        foreach ((string name, ScalarIndexMetadata metadata) in _definitions.ToArray())
+        {
+            if (metadata.Definition.Target.PropertyKey != oldName)
+                continue;
+
+            _definitions[name] = metadata with
+            {
+                Definition = metadata.Definition with
+                {
+                    Target = metadata.Definition.Target with
+                    {
+                        PropertyKey = newName,
+                    },
+                },
+            };
+            changed = true;
+        }
+
+        if (changed)
+        {
+            RebuildDefinitionBindings();
+            PersistCatalog();
+        }
+    }
+
+    public void RenameTargetScope(
+        PropertyOwnerKind ownerKind,
+        string oldName,
+        string newName)
+    {
+        bool changed = false;
+        foreach ((string name, ScalarIndexMetadata metadata) in _definitions.ToArray())
+        {
+            PropertyTarget target = metadata.Definition.Target;
+            if (target.OwnerKind != ownerKind || target.Scope != oldName)
+                continue;
+
+            _definitions[name] = metadata with
+            {
+                Definition = metadata.Definition with
+                {
+                    Target = target with { Scope = newName },
+                },
+            };
+            changed = true;
+        }
+
+        if (changed)
+        {
+            RebuildDefinitionBindings();
+            PersistCatalog();
+        }
     }
 
     /// <summary>
@@ -281,13 +367,28 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     internal long GetIndexTenantPageCount(string name)
         => _indexFiles.TryGetValue(name, out var f) ? f.PageCount : 0L;
 
-    public void RegisterIndexBinding(string indexName, string label, string propertyKey)
+    internal void TruncateIndexArtifactForTest(string name)
     {
-        if (string.IsNullOrEmpty(label) || string.IsNullOrEmpty(propertyKey))
-            return; // 空メタデータは無視 (旧 CreateIndex 呼び出しとの互換性)
-        var key = (label, propertyKey);
-        _bindings[key] = indexName;
-        _bindingByName[indexName] = key;
+        if (!_indexFiles.TryGetValue(name, out var tenant))
+            throw new ConstraintException($"Index artifact '{name}' does not exist.");
+        tenant.Truncate(1);
+    }
+
+    public void RegisterIndexDefinition(
+        ScalarIndexDefinition definition,
+        IndexLifecycleState state = IndexLifecycleState.Ready)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        _definitions[definition.Name] = new ScalarIndexMetadata(definition, state);
+        if (definition.Target.OwnerKind == PropertyOwnerKind.Vertex
+            && !string.IsNullOrEmpty(definition.Target.Scope)
+            && !string.IsNullOrEmpty(definition.Target.PropertyKey))
+        {
+            var key = (definition.Target.Scope, definition.Target.PropertyKey);
+            _bindings[key] = definition.Name;
+            _bindingByName[definition.Name] = key;
+        }
+        PersistCatalog();
     }
 
     public bool TryGetIndexName(string label, string propertyKey, out string indexName)
@@ -301,10 +402,47 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         return false;
     }
 
-    public IEnumerable<(string IndexName, string Label, string PropertyKey)> ListIndexBindings()
+    public IEnumerable<ScalarIndexMetadata> ListIndexDefinitions() => _definitions.Values;
+
+    public void SetIndexState(string name, IndexLifecycleState state)
     {
-        foreach (var kv in _bindings)
-            yield return (kv.Value, kv.Key.Label, kv.Key.PropertyKey);
+        if (!_definitions.TryGetValue(name, out var metadata))
+            throw new ConstraintException($"Index definition '{name}' does not exist.");
+        _definitions[name] = metadata with { State = state };
+        PersistCatalog();
+    }
+
+    private void RebuildDefinitionBindings()
+    {
+        _bindings.Clear();
+        _bindingByName.Clear();
+        foreach ((string name, ScalarIndexMetadata metadata) in _definitions)
+        {
+            PropertyTarget target = metadata.Definition.Target;
+            if (target.OwnerKind != PropertyOwnerKind.Vertex
+                || string.IsNullOrEmpty(target.Scope)
+                || string.IsNullOrEmpty(target.PropertyKey))
+                continue;
+
+            var binding = (target.Scope, target.PropertyKey);
+            _bindings[binding] = name;
+            _bindingByName[name] = binding;
+        }
+    }
+
+    public void ResetIndexArtifact(string name)
+    {
+        _indexes.Remove(name, out var index);
+        if (!_indexFiles.TryGetValue(name, out var tenant)
+            || !_indexTypes.TryGetValue(name, out var typeFlags)
+            || !_indexTenantIds.TryGetValue(name, out var tenantId))
+        {
+            throw new ConstraintException($"Index artifact '{name}' does not exist.");
+        }
+
+        (index as IDisposable)?.Dispose();
+        tenant.Truncate(1);
+        MaterializeIndex(name, tenantId, typeFlags);
     }
 
     /// <summary>
@@ -453,13 +591,15 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         long pageCount = _catalogTenant.PageCount;
         if (pageCount < 2) return; // header 未作成 = 索引ゼロ
 
-        int blobLen, entryCount, ftCount;
+        int blobLen, entryCount, ftCount, formatVersion;
         var hh = _catalogTenant.PinForRead(new PageId(1));
         try
         {
             blobLen = BinaryPrimitives.ReadInt32LittleEndian(hh.Data[CatalogBlobLenOffset..]);
             entryCount = BinaryPrimitives.ReadInt32LittleEndian(hh.Data[CatalogEntryCountOffset..]);
             ftCount = BinaryPrimitives.ReadInt32LittleEndian(hh.Data[CatalogFtCountOffset..]);
+            formatVersion = BinaryPrimitives.ReadInt32LittleEndian(
+                hh.Data[CatalogFormatVersionOffset..]);
         }
         finally { hh.Dispose(); }
         if (blobLen <= 0) return;
@@ -487,6 +627,27 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             var typeFlags = (PropertyTypeFlags)BinaryPrimitives.ReadUInt64LittleEndian(blob.AsSpan(pos)); pos += 8;
             int nameLen = BinaryPrimitives.ReadUInt16LittleEndian(blob.AsSpan(pos)); pos += 2;
             string indexName = Encoding.UTF8.GetString(blob, pos, nameLen); pos += nameLen;
+
+            if (formatVersion >= CatalogFormatVersion)
+            {
+                var ownerKind = (PropertyOwnerKind)blob[pos++];
+                var state = (IndexLifecycleState)blob[pos++];
+                string scope = ReadString(blob, ref pos);
+                string propertyKey = ReadString(blob, ref pos);
+                IndexKind kind = IndexKindFromFlags(typeFlags);
+                var target = new PropertyTarget(
+                    ownerKind,
+                    propertyKey,
+                    string.IsNullOrEmpty(scope) ? null : scope);
+                var definition = new ScalarIndexDefinition(indexName, target, kind);
+                _definitions[indexName] = new ScalarIndexMetadata(definition, state);
+                if (ownerKind == PropertyOwnerKind.Vertex && !string.IsNullOrEmpty(scope))
+                {
+                    var binding = (scope, propertyKey);
+                    _bindings[binding] = indexName;
+                    _bindingByName[indexName] = binding;
+                }
+            }
 
             _indexTenantIds[indexName] = tenantId;
             _indexTypes[indexName] = typeFlags;
@@ -524,21 +685,56 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         dest.AddRange(bytes);
     }
 
+    private static IndexKind IndexKindFromFlags(PropertyTypeFlags flags) => flags switch
+    {
+        PropertyTypeFlags.Int32 => IndexKind.Int32Equality,
+        PropertyTypeFlags.Int64 => IndexKind.Int64Equality,
+        PropertyTypeFlags.Double => IndexKind.DoubleEquality,
+        PropertyTypeFlags.String => IndexKind.StringEquality,
+        _ => throw new CorruptionException(
+            $"scalar index の PropertyTypeFlags={flags} は未対応です。"),
+    };
+
     private void MaterializeIndex(string name, byte tenantId, PropertyTypeFlags typeFlags)
     {
         var tenant = _container.OpenTenant(tenantId, PageKind.Header);
-        object index = typeFlags switch
-        {
-            PropertyTypeFlags.Int32  => new BTreeIndex<int>(tenant, new Int32KeyCodec()),
-            PropertyTypeFlags.Int64  => new BTreeIndex<long>(tenant, new Int64KeyCodec()),
-            PropertyTypeFlags.Double => new BTreeIndex<double>(tenant, new DoubleKeyCodec()),
-            PropertyTypeFlags.String => new BTreeIndex<string>(tenant, new StringKeyCodec()),
-            PropertyTypeFlags.Bytes  => new BTreeIndex<byte[]>(tenant, new BytesKeyCodec()),
-            _ => throw new CorruptionException(
-                $"索引 '{name}' の PropertyTypeFlags={typeFlags} が materialize 対象外。"),
-        };
-        _indexes[name] = index;
         _indexFiles[name] = tenant;
+
+        bool ready = !_definitions.TryGetValue(name, out var metadata)
+            || metadata.State == IndexLifecycleState.Ready;
+        if (ready && tenant.PageCount <= 1)
+        {
+            MarkRebuildRequiredInMemory(name);
+            return;
+        }
+
+        try
+        {
+            object index = typeFlags switch
+            {
+                PropertyTypeFlags.Int32  => new BTreeIndex<int>(tenant, new Int32KeyCodec()),
+                PropertyTypeFlags.Int64  => new BTreeIndex<long>(tenant, new Int64KeyCodec()),
+                PropertyTypeFlags.Double => new BTreeIndex<double>(tenant, new DoubleKeyCodec()),
+                PropertyTypeFlags.String => new BTreeIndex<string>(tenant, new StringKeyCodec()),
+                PropertyTypeFlags.Bytes  => new BTreeIndex<byte[]>(tenant, new BytesKeyCodec()),
+                _ => throw new CorruptionException(
+                    $"索引 '{name}' の PropertyTypeFlags={typeFlags} が materialize 対象外。"),
+            };
+            _indexes[name] = index;
+        }
+        catch (CorruptionException) when (ready)
+        {
+            MarkRebuildRequiredInMemory(name);
+        }
+    }
+
+    private void MarkRebuildRequiredInMemory(string name)
+    {
+        if (_definitions.TryGetValue(name, out var metadata))
+            _definitions[name] = metadata with
+            {
+                State = IndexLifecycleState.RebuildRequired,
+            };
     }
 
     private void PersistCatalog()
@@ -557,6 +753,18 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             BinaryPrimitives.WriteUInt64LittleEndian(u64, tf);
             for (int i = 0; i < 8; i++) blobList.Add(u64[i]);
             WriteString(blobList, name);
+            ScalarIndexMetadata metadata = _definitions.TryGetValue(name, out var stored)
+                ? stored
+                : new ScalarIndexMetadata(
+                    new ScalarIndexDefinition(
+                        name,
+                        new PropertyTarget(PropertyOwnerKind.Vertex, string.Empty),
+                        IndexKindFromFlags((PropertyTypeFlags)tf)),
+                    IndexLifecycleState.RebuildRequired);
+            blobList.Add((byte)metadata.Definition.Target.OwnerKind);
+            blobList.Add((byte)metadata.State);
+            WriteString(blobList, metadata.Definition.Target.Scope ?? string.Empty);
+            WriteString(blobList, metadata.Definition.Target.PropertyKey);
             entryCount++;
         }
         int ftCount = 0;
@@ -581,10 +789,13 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         var wh = _catalogTenant.PinForWrite(new PageId(1));
         try
         {
-            wh.Data[..(CatalogFtCountOffset + 4)].Clear();
+            wh.Data[..(CatalogFormatVersionOffset + 4)].Clear();
             BinaryPrimitives.WriteInt32LittleEndian(wh.Data[CatalogBlobLenOffset..], blob.Length);
             BinaryPrimitives.WriteInt32LittleEndian(wh.Data[CatalogEntryCountOffset..], entryCount);
             BinaryPrimitives.WriteInt32LittleEndian(wh.Data[CatalogFtCountOffset..], ftCount);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                wh.Data[CatalogFormatVersionOffset..],
+                CatalogFormatVersion);
         }
         finally { wh.Dispose(); }
 

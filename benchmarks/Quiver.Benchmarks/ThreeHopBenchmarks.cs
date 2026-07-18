@@ -20,7 +20,7 @@ public class ThreeHopBenchmarks
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
     private VertexId _hub;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -28,7 +28,7 @@ public class ThreeHopBenchmarks
         _dbPath = BenchTempDir.Create("3hop");
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
 
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             _hub = tx.CreateVertex("Hub");
             tx.Commit();
@@ -44,13 +44,13 @@ public class ThreeHopBenchmarks
         for (int i = 0; i < l2Vertices.Length; i++)
             CreateLevel(l2Vertices[i], Degree, "L3");
 
-        _readTx = _db.BeginTransaction();
+        _readTx = _db.BeginWriteTransaction();
     }
 
     private VertexId[] CreateLevel(VertexId parent, int count, string label)
     {
         var ids = new VertexId[count];
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < count; i++)
         {
             ids[i] = tx.CreateVertex(label);

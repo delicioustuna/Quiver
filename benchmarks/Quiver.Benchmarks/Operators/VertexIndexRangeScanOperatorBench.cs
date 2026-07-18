@@ -20,9 +20,13 @@ public class VertexIndexRangeScanOperatorBench
     public int Range_50_to_150()
     {
         using var op = new VertexIndexRangeScanOperator(
-            "idx_value",
-            LiteralProvider.Int64(50), fromInclusive: true,
-            LiteralProvider.Int64(150), toInclusive: false);
+            _seed.ValueIndex,
+            _seed.ValueKey,
+            _seed.PersonLabel,
+            LiteralProvider.Int64(50),
+            fromInclusive: true,
+            LiteralProvider.Int64(150),
+            toInclusive: false);
         return OperatorBenchDrain.Drain(op, _seed.ReadTx);
     }
 }

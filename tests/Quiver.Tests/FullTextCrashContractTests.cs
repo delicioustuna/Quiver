@@ -17,7 +17,7 @@ namespace Quiver.Tests;
 ///
 /// Windows では停止した同一プロセスが排他的ファイルハンドルを再利用できないため、
 /// ハンドルの破棄とファイナライザーの強制実行でプロセス停止を模擬してから再オープンする。
-/// <see cref="IGraphTransaction.Commit"/> が完了した変更は復旧し、
+/// <see cref="IWriteTransaction.Commit"/> が完了した変更は復旧し、
 /// 未コミットの変更は復活しないことを確認する。
 /// </summary>
 public sealed class FullTextCrashContractTests : IDisposable
@@ -52,7 +52,7 @@ public sealed class FullTextCrashContractTests : IDisposable
     private QuiverDatabase OpenAndCreateIndex()
     {
         var db = Open();
-        db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+        db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
         return db;
     }
 
@@ -75,7 +75,7 @@ public sealed class FullTextCrashContractTests : IDisposable
 
     private static VertexId Ingest(QuiverDatabase db, string body)
     {
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString(body));
         tx.Commit();
@@ -84,8 +84,8 @@ public sealed class FullTextCrashContractTests : IDisposable
 
     private static List<VertexId> Search(QuiverDatabase db, string query, int k = 10)
     {
-        using var rtx = db.BeginReadOnlyTransaction();
-        return rtx.G(db.Schema).Search(Index, query, k).ToList();
+        using var rtx = db.BeginReadTransaction();
+        return rtx.Query.Search(Index, query, k).ToList();
     }
 
     // ===== (a) committed full-text docs survive a kill and stay searchable =====
@@ -118,7 +118,7 @@ public sealed class FullTextCrashContractTests : IDisposable
         var committed = Ingest(db, "durable content keepme9999");
 
         // Open a writer that indexes a property but never commits, then kill.
-        var dirtyTx = db.BeginTransaction();
+        var dirtyTx = db.BeginWriteTransaction();
         var doomed = dirtyTx.CreateVertex("Doc");
         dirtyTx.SetProperty(doomed, "body", PropertyValue.FromString("phantom doomed7777"));
         // NOTE: no Commit.
@@ -129,7 +129,7 @@ public sealed class FullTextCrashContractTests : IDisposable
         // Committed doc is intact; the uncommitted PageImage is not replayed.
         Search(reopened, "keepme9999").Should().ContainSingle().Which.Should().Be(committed);
         Search(reopened, "doomed7777").Should().BeEmpty("uncommitted postings must not survive a kill");
-        using var rtx = reopened.BeginReadOnlyTransaction();
+        using var rtx = reopened.BeginReadTransaction();
         rtx.VertexExists(doomed).Should().BeFalse();
     }
 
@@ -142,7 +142,7 @@ public sealed class FullTextCrashContractTests : IDisposable
         var keep = Ingest(db, "first committed doc retain5555");
 
         // A second writer adds a doc and leaves it uncommitted before the kill.
-        var pendingTx = db.BeginTransaction();
+        var pendingTx = db.BeginWriteTransaction();
         var pending = pendingTx.CreateVertex("Doc");
         pendingTx.SetProperty(pending, "body", PropertyValue.FromString("second pending lose4444"));
 
@@ -198,7 +198,7 @@ public sealed class FullTextCrashContractTests : IDisposable
         var db = OpenAndCreateIndex();
         VertexId doc = Ingest(db, "original oldterm1111 text");
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.SetProperty(doc, "body", PropertyValue.FromString("revised newterm2222 text"));
             tx.Commit();
@@ -227,7 +227,7 @@ public sealed class FullTextCrashContractTests : IDisposable
         // committed データを disk へ flush し torn-commit の前提を作る。
         ((BinaryGraphStorageBackend)db.BackendInternal).FlushDataPagesForTest();
         // 未コミットの writer を 1 つ開いたまま kill すると WAL がクリーン削除されず torn 注入できる。
-        var keepWalAlive = db.BeginTransaction();
+        var keepWalAlive = db.BeginWriteTransaction();
         keepWalAlive.CreateVertex("Doc");
         Kill(db);
 
@@ -257,21 +257,21 @@ public sealed class FullTextCrashContractTests : IDisposable
         VertexId e1 = Ingest(db, "alice");
 
         // tx2 は in-process before-image で rollback する。
-        using (var tx2 = db.BeginTransaction())
+        using (var tx2 = db.BeginWriteTransaction())
         {
             tx2.SetProperty(e1, "body", PropertyValue.FromString("bob"));
             tx2.Rollback();
         }
 
         // tx3: "charlie" へ更新して commit。committed 最終状態は alice 無し / charlie 有り。
-        using (var tx3 = db.BeginTransaction())
+        using (var tx3 = db.BeginWriteTransaction())
         {
             tx3.SetProperty(e1, "body", PropertyValue.FromString("charlie"));
             tx3.Commit();
         }
 
         // 未コミット writer を開いたまま kill して checkpoint truncate を防ぐ。
-        var keepWalAlive = db.BeginTransaction();
+        var keepWalAlive = db.BeginWriteTransaction();
         keepWalAlive.CreateVertex("Doc");
         Kill(db);
 
@@ -301,7 +301,7 @@ public sealed class FullTextCrashContractTests : IDisposable
         var db = OpenAndCreateIndex();
         VertexId e1 = Ingest(db, "alice");
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var sp = tx.Savepoint();
             tx.SetProperty(e1, "body", PropertyValue.FromString("bob"));
@@ -327,7 +327,7 @@ public sealed class FullTextCrashContractTests : IDisposable
         var db = OpenAndCreateIndex();
         VertexId e1 = Ingest(db, "alice");
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var sp = tx.Savepoint();
             tx.SetProperty(e1, "body", PropertyValue.FromString("bob"));
@@ -336,7 +336,7 @@ public sealed class FullTextCrashContractTests : IDisposable
         }
 
         // checkpoint truncate を防いで recovery を通す。
-        var keepWalAlive = db.BeginTransaction();
+        var keepWalAlive = db.BeginWriteTransaction();
         keepWalAlive.CreateVertex("Doc");
         Kill(db);
 
@@ -362,7 +362,7 @@ public sealed class FullTextCrashContractTests : IDisposable
         var db = OpenAndCreateIndex();
         VertexId e1 = Ingest(db, "alice");
 
-        var tx = db.BeginTransaction();
+        var tx = db.BeginWriteTransaction();
         var sp = tx.Savepoint();
         tx.SetProperty(e1, "body", PropertyValue.FromString("bob"));
         tx.RollbackTo(sp);
@@ -370,7 +370,7 @@ public sealed class FullTextCrashContractTests : IDisposable
         tx.Rollback(); // full abort
 
         // 未コミット writer で WAL を残し、recovery 経路も通す。
-        var keepWalAlive = db.BeginTransaction();
+        var keepWalAlive = db.BeginWriteTransaction();
         keepWalAlive.CreateVertex("Doc");
         Kill(db);
 
@@ -396,7 +396,7 @@ public sealed class FullTextCrashContractTests : IDisposable
         var db = OpenAndCreateIndex();
         VertexId e1 = Ingest(db, "alice");
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var sp1 = tx.Savepoint();
             tx.SetProperty(e1, "body", PropertyValue.FromString("bob"));

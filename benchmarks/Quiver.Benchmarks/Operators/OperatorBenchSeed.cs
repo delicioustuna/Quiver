@@ -34,26 +34,28 @@ internal sealed class OperatorBenchSeed : IDisposable
     public PropertyKeyId NameKey { get; }
     public PropertyKeyId ValueKey { get; }
     public PropertyKeyId WeightKey { get; }
-    public IGraphTransaction ReadTx { get; }
+    public ScalarIndexDefinition ValueIndex { get; }
+    public ScalarIndexDefinition NameIndex { get; }
+    public IReadTransaction ReadTx { get; }
 
     public OperatorBenchSeed(string tag)
     {
         Dir = BenchTempDir.Create("opbench_" + tag);
         Db = QuiverDatabase.Open(System.IO.Path.Combine(Dir, "graph.quiver"));
 
-        Db.Schema.CreateIndex("idx_value", "Person", "value", IndexKind.Int64Equality);
-        Db.Schema.CreateIndex("idx_name", "Person", "name", IndexKind.StringEquality);
+        Db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_value", new PropertyTarget(PropertyOwnerKind.Vertex, "value", "Person"), IndexKind.Int64Equality)));
+        Db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality)));
 
-        NameKey = Db.Schema.GetOrCreatePropertyKey("name");
-        ValueKey = Db.Schema.GetOrCreatePropertyKey("value");
-        WeightKey = Db.Schema.GetOrCreatePropertyKey("weight");
+        NameKey = Db.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
+        ValueKey = Db.EditSchema(schema => schema.GetOrCreatePropertyKey("value"));
+        WeightKey = Db.EditSchema(schema => schema.GetOrCreatePropertyKey("weight"));
 
         PersonVertices = new VertexId[VertexCount];
         MovieVertices = new VertexId[VertexCount];
         Edges = new EdgeId[VertexCount * EdgesPerVertex];
 
         var rng = new Random(2026);
-        using (var tx = Db.BeginTransaction())
+        using (var tx = Db.BeginWriteTransaction())
         {
             for (int i = 0; i < VertexCount; i++)
             {
@@ -61,8 +63,8 @@ internal sealed class OperatorBenchSeed : IDisposable
                 PersonVertices[i] = p;
                 tx.SetProperty(p, "value", PropertyValue.FromInt64(i));
                 tx.SetProperty(p, "name", PropertyValue.FromString("name-" + i.ToString("D4")));
-                tx.IndexInsert("idx_value", (long)i, p);
-                tx.IndexInsert("idx_name", "name-" + i.ToString("D4"), p);
+                tx.SetIndexedProperty("idx_value", (long)i, p);
+                tx.SetIndexedProperty("idx_name", "name-" + i.ToString("D4"), p);
 
                 var m = tx.CreateVertex("Movie");
                 MovieVertices[i] = m;
@@ -81,11 +83,17 @@ internal sealed class OperatorBenchSeed : IDisposable
             tx.Commit();
         }
 
-        PersonLabel = Db.Schema.GetOrCreateLabel("Person");
-        MovieLabel = Db.Schema.GetOrCreateLabel("Movie");
-        KnowsType = Db.Schema.GetOrCreateEdgeType("KNOWS");
+        PersonLabel = Db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
+        MovieLabel = Db.EditSchema(schema => schema.GetOrCreateLabel("Movie"));
+        KnowsType = Db.EditSchema(schema => schema.GetOrCreateEdgeType("KNOWS"));
+        ValueIndex = Db.Schema.ListIndexes()
+            .Single(index => index.Name == "idx_value")
+            .Definition;
+        NameIndex = Db.Schema.ListIndexes()
+            .Single(index => index.Name == "idx_name")
+            .Definition;
 
-        ReadTx = Db.BeginReadOnlyTransaction();
+        ReadTx = Db.BeginReadTransaction();
     }
 
     public void Dispose()
@@ -204,12 +212,12 @@ internal static class OperatorBenchDrain
 {
     /// <summary>
     /// Execute <paramref name="op"/> against <paramref name="tx"/> and count the
-    /// materialized rows. Goes through <see cref="IGraphTransaction.Execute"/>
+    /// materialized rows. Goes through <see cref="IWriteTransaction.Execute"/>
     /// rather than direct Open/MoveNext so the bench measures the same path
     /// used by client code (the Volcano iteration overhead is identical;
     /// QueryResult materializes into a list but the loop dominates).
     /// </summary>
-    public static int Drain(IPhysicalOperator op, IGraphTransaction tx)
+    public static int Drain(IPhysicalOperator op, IReadTransaction tx)
     {
         using var result = tx.Execute(op);
         int n = 0;

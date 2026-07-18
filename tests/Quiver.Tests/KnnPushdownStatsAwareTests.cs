@@ -32,7 +32,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "quiver_vec10_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey("title");
+        var keyId = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("title"));
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "test", null));
@@ -58,8 +58,14 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     {
         var plan = new FilterOp(
             new KnnOp(null, IndexName, new float[] { 1, 0, 0, 0 }, K: 5, Dim: dim),
-            _ => new LabelPredicate(_db.Schema.GetOrCreateLabel(label), 0));
+            _ => new LabelPredicate(ResolveLabel(label), 0));
         return LogicalOptimizer.Optimize(plan, stats, _db.Schema);
+    }
+
+    private LabelId ResolveLabel(string label)
+    {
+        _db.Schema.TryGetLabelId(label, out var id).Should().BeTrue();
+        return id;
     }
 
     /// <summary>
@@ -72,7 +78,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     [Fact]
     public void HighLabelCardinality_falls_back_to_vector_first_when_stats_present()
     {
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 50; i++)
             {
@@ -89,21 +95,21 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
 
         var stats = _db.CollectStats();
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema, stats);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query.WithStats(stats);
         var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).HasLabel("Doc").Optimized();
 
         AssertVectorFirst(optimized, "label cardinality 50% >= 30% threshold → vector-first fallback");
     }
 
     /// <summary>
-    /// 同じ構造でも統計を渡さない <c>g.G(schema)</c> では構造ヒントだけで判定するため、
+    /// 同じ構造でも統計を渡さない <c>g.Query</c> では構造ヒントだけで判定するため、
     /// graph-first を選ぶ。後方互換性の確認。
     /// </summary>
     [Fact]
     public void HighLabelCardinality_keeps_graph_first_when_stats_absent()
     {
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 50; i++)
             {
@@ -115,8 +121,8 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema); // stats 注入なし
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query; // stats 注入なし
         var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).HasLabel("Doc").Optimized();
 
         AssertGraphFirst(optimized, "stats 不在 → 構造ヒントのみで graph-first");
@@ -129,7 +135,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     [Fact]
     public void LowLabelCardinality_keeps_graph_first_with_stats()
     {
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 5; i++)
             {
@@ -146,8 +152,8 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
 
         var stats = _db.CollectStats();
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema, stats);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query.WithStats(stats);
         var optimized = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 5).HasLabel("Doc").Optimized();
 
         AssertGraphFirst(optimized, "label cardinality 5% < 30% → graph-first 維持");
@@ -161,7 +167,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     public void Vector_first_fallback_produces_same_results_as_graph_first()
     {
         long[] docIds;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             docIds = new long[50];
             for (int i = 0; i < 50; i++)
@@ -185,11 +191,11 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
         var stats = _db.CollectStats();
         var query = new float[] { 1f, 0f, 0f, 0f };
 
-        using var rtx = _db.BeginReadOnlyTransaction();
+        using var rtx = _db.BeginReadTransaction();
 
-        var withStats = rtx.G(_db.Schema, stats)
+        var withStats = rtx.Query.WithStats(stats)
             .Knn(IndexName, query, k: 5).HasLabel("Doc").ToList();
-        var withoutStats = rtx.G(_db.Schema)
+        var withoutStats = rtx.Query
             .Knn(IndexName, query, k: 5).HasLabel("Doc").ToList();
 
         // 結果集合 (set 等価)。順序はスコアタイブレーカ次第なのでセット比較で十分。
@@ -205,7 +211,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     [Fact]
     public void Vector_first_fallback_returns_some_docs_when_k_large_enough()
     {
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             // 6 Doc + 4 Other, 全員が query 方向に揃ったベクトルを持つ。
             // k=10 なら全件が KNN 結果に入り、後段 HasLabel("Doc") で 6 件残る。
@@ -223,10 +229,10 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
         }
 
         var stats = _db.CollectStats();
-        using var rtx = _db.BeginReadOnlyTransaction();
+        using var rtx = _db.BeginReadTransaction();
 
         // Doc 60% → fallback 発火。k=10 なら全 10 件が KNN を通り、HasLabel で 6 Doc が残る。
-        var result = rtx.G(_db.Schema, stats)
+        var result = rtx.Query.WithStats(stats)
             .Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 10)
             .HasLabel("Doc")
             .ToList();
@@ -242,7 +248,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     [Fact]
     public void Has_only_chain_without_label_keeps_graph_first()
     {
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 30; i++)
             {
@@ -254,8 +260,8 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
         }
 
         var stats = _db.CollectStats();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema, stats);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query.WithStats(stats);
 
         // Has のみ (HasLabel なし) — filter に LabelPredicate が無いため FindLabel が null を返し、
         // stats 経路では fallback しない。
@@ -270,7 +276,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     [Fact]
     public void HasLabel_plus_Has_pushdown_with_high_cardinality_falls_back_correctly()
     {
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             // 40 Doc + 40 Other (Doc = 50%)。Doc のうち 5 件だけ status=active。
             for (int i = 0; i < 40; i++)
@@ -289,8 +295,8 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
         }
 
         var stats = _db.CollectStats();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema, stats);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query.WithStats(stats);
 
         // k=50 (全件以上) で取り、後段 HasLabel("Doc") + Has("status","active") が両方適用されること。
         var result = g.Knn(IndexName, new float[] { 1, 0, 0, 0 }, k: 50)
@@ -309,7 +315,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     [Fact]
     public void Fast_label_index_keeps_graph_first_at_sel_40pct_dim_768()
     {
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 40; i++) _ = tx.CreateVertex("Doc");
             for (int i = 0; i < 60; i++) _ = tx.CreateVertex("Other");
@@ -331,7 +337,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     [Fact]
     public void Without_fast_label_index_falls_back_at_sel_40pct()
     {
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 40; i++) _ = tx.CreateVertex("Doc");
             for (int i = 0; i < 60; i++) _ = tx.CreateVertex("Other");
@@ -354,7 +360,7 @@ public sealed class KnnPushdownStatsAwareTests : IDisposable
     [Fact]
     public void Threshold_scales_with_dim()
     {
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 45; i++) _ = tx.CreateVertex("Doc");
             for (int i = 0; i < 55; i++) _ = tx.CreateVertex("Other");

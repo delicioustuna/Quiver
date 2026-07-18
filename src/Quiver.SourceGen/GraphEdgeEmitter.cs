@@ -79,7 +79,7 @@ internal static class GraphEdgeEmitter
         sb.AppendLine();
 
         // 挿入
-        sb.AppendLine($"    public static Quiver.Core.EdgeId Insert(IGraphTransaction tx, Quiver.Core.VertexId from, Quiver.Core.VertexId to, {model.ClassName} entity)");
+        sb.AppendLine($"    public static Quiver.Core.EdgeId Insert(IWriteTransaction tx, Quiver.Core.VertexId from, Quiver.Core.VertexId to, {model.ClassName} entity)");
         sb.AppendLine("    {");
         sb.AppendLine($"        var id = tx.CreateEdge(from, to, \"{model.EdgeType}\");");
         foreach (var prop in model.Properties)
@@ -94,7 +94,7 @@ internal static class GraphEdgeEmitter
         sb.AppendLine();
 
         // 読み込み
-        sb.AppendLine($"    public static {model.ClassName} Load(IGraphTransaction tx, Quiver.Core.EdgeId id)");
+        sb.AppendLine($"    public static {model.ClassName} Load(IReadTransaction tx, Quiver.Core.EdgeId id)");
         sb.AppendLine("    {");
         if (multiValueProps.Count > 0)
         {
@@ -125,7 +125,7 @@ internal static class GraphEdgeEmitter
         sb.AppendLine();
 
         // 更新
-        sb.AppendLine($"    public static void Update(IGraphTransaction tx, Quiver.Core.EdgeId id, {model.ClassName} entity)");
+        sb.AppendLine($"    public static void Update(IWriteTransaction tx, Quiver.Core.EdgeId id, {model.ClassName} entity)");
         sb.AppendLine("    {");
         foreach (var prop in model.Properties)
         {
@@ -138,7 +138,7 @@ internal static class GraphEdgeEmitter
         sb.AppendLine();
 
         // 削除
-        sb.AppendLine($"    public static void Delete(IGraphTransaction tx, Quiver.Core.EdgeId id) => tx.DeleteEdge(id);");
+        sb.AppendLine($"    public static void Delete(IWriteTransaction tx, Quiver.Core.EdgeId id) => tx.DeleteEdge(id);");
 
         sb.AppendLine("}");
         sb.AppendLine();
@@ -162,23 +162,23 @@ internal static class GraphEdgeEmitter
         var r = model.ClassName;
 
         sb.AppendLine($"    /// <summary>{s} と {t} の直積に {model.EdgeType} 辺を生成する。</summary>");
-        sb.AppendLine($"    public static long Add{r}(this Quiver.Api.TypedGraphTraversal<{s}> sources, Quiver.Api.TypedGraphTraversal<{t}> targets)");
-        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.AddEdge<{s}, {r}, {t}>(sources, targets);");
+        sb.AppendLine($"    public static long Add{r}(this Quiver.Api.GraphMutationSource mutation, Quiver.Api.TypedGraphTraversal<{s}> sources, Quiver.Api.TypedGraphTraversal<{t}> targets)");
+        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.AddEdge<{s}, {r}, {t}>(mutation, sources, targets);");
         sb.AppendLine();
 
         sb.AppendLine($"    /// <summary>始点ごとに終点を求め {model.EdgeType} 辺を生成する (相関版)。</summary>");
-        sb.AppendLine($"    public static long Add{r}(this Quiver.Api.TypedGraphTraversal<{s}> sources, System.Func<{s}, Quiver.Api.TypedGraphTraversal<{t}>> targets)");
-        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.AddEdge<{s}, {r}, {t}>(sources, targets);");
+        sb.AppendLine($"    public static long Add{r}(this Quiver.Api.GraphMutationSource mutation, Quiver.Api.TypedGraphTraversal<{s}> sources, System.Func<{s}, Quiver.Api.TypedGraphTraversal<{t}>> targets)");
+        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.AddEdge<{s}, {r}, {t}>(mutation, sources, targets);");
         sb.AppendLine();
 
         sb.AppendLine($"    /// <summary>{s} と {t} の直積で {model.EdgeType} 辺を upsert する。</summary>");
-        sb.AppendLine($"    public static (long Created, long Matched) Merge{r}(this Quiver.Api.TypedGraphTraversal<{s}> sources, Quiver.Api.TypedGraphTraversal<{t}> targets)");
-        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.MergeEdge<{s}, {r}, {t}>(sources, targets);");
+        sb.AppendLine($"    public static (long Created, long Matched) Merge{r}(this Quiver.Api.GraphMutationSource mutation, Quiver.Api.TypedGraphTraversal<{s}> sources, Quiver.Api.TypedGraphTraversal<{t}> targets)");
+        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.MergeEdge<{s}, {r}, {t}>(mutation, sources, targets);");
         sb.AppendLine();
 
         sb.AppendLine($"    /// <summary>始点ごとに終点を求め {model.EdgeType} 辺を upsert する (相関版)。</summary>");
-        sb.AppendLine($"    public static (long Created, long Matched) Merge{r}(this Quiver.Api.TypedGraphTraversal<{s}> sources, System.Func<{s}, Quiver.Api.TypedGraphTraversal<{t}>> targets)");
-        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.MergeEdge<{s}, {r}, {t}>(sources, targets);");
+        sb.AppendLine($"    public static (long Created, long Matched) Merge{r}(this Quiver.Api.GraphMutationSource mutation, Quiver.Api.TypedGraphTraversal<{s}> sources, System.Func<{s}, Quiver.Api.TypedGraphTraversal<{t}>> targets)");
+        sb.AppendLine($"        => Quiver.Api.TypedGraphTraversalWriteExtensions.MergeEdge<{s}, {r}, {t}>(mutation, sources, targets);");
 
         sb.AppendLine("}");
         return sb.ToString();

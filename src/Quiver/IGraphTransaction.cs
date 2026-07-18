@@ -1,35 +1,111 @@
 using Quiver.Core;
+using Quiver.Api;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
 
 namespace Quiver;
 
 /// <summary>
-/// Quiver の最上位グラフトランザクション。Vertex / Edgeの作成・削除、
-/// プロパティ操作、隣接列挙、インデックスシーク、物理プラン実行、コミット / ロールバックを
-/// 1 つのトランザクション境界として束ねる。
+/// 開始時点のスナップショットを読むトランザクション。
+/// entity/property read、query、read-only schema catalog を提供する。
 /// </summary>
-/// <remarks>
-/// <see cref="IDisposable"/> 実装。<see cref="QuiverDatabase.BeginTransaction"/> や
-/// <see cref="QuiverDatabase.BeginReadOnlyTransaction"/> で取得し、<c>using</c> で
-/// 確実に破棄すること。スレッドセーフではない (シングルスレッドで利用)。
-/// </remarks>
-public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
+public interface IReadTransaction : IDisposable
 {
     /// <summary>トランザクション識別子。</summary>
     TransactionId Id { get; }
 
-    /// <summary>現在のトランザクション状態 (Active / Committed / RolledBack)。</summary>
+    /// <summary>現在のトランザクション状態。</summary>
     TransactionState State { get; }
 
-    /// <summary>
-    /// 読み取り専用としてオープンされたトランザクションの場合に <c>true</c>。
-    /// <see cref="Quiver.Operators.ParallelBfsOperator"/> 等の並列トラバーサルオペレータは
-    /// 並行書き込み競合を避けるため読み取り専用トランザクションでの実行を必須とする。
-    /// </summary>
-    bool IsReadOnly { get; }
+    /// <summary>このトランザクションの読み取り専用スキーマカタログ。</summary>
+    ISchemaCatalog Schema { get; }
 
-    // ── Vertex操作 ─────────────────────────────────────────────
+    /// <summary>このトランザクションのスナップショットで query を構築する入口。</summary>
+    GraphTraversalSource Query { get; }
+
+    /// <summary>指定 ID のVertexが存在するかを返す。</summary>
+    bool VertexExists(VertexId vertexId);
+
+    /// <summary>指定Vertexのラベル名を返す。存在しない場合は <c>null</c>。</summary>
+    string? GetVertexLabel(VertexId vertexId);
+
+    /// <summary>Edge型 ID から型名を返す。未登録 ID では <c>null</c>。</summary>
+    string? GetEdgeTypeName(EdgeTypeId typeId);
+
+    /// <summary>指定Edgeの型名を返す。存在しない場合は <c>null</c>。</summary>
+    string? GetEdgeType(EdgeId edgeId);
+
+    /// <summary>Vertexのプロパティ値を取得する。</summary>
+    PropertyValue GetProperty(VertexId vertexId, string key);
+
+    /// <summary>Edgeのプロパティ値を取得する。</summary>
+    PropertyValue GetProperty(EdgeId edgeId, string key);
+
+    /// <summary>Nexusのプロパティ値を取得する。</summary>
+    PropertyValue GetProperty(NexusId nexusId, string key);
+
+    /// <summary>Vertexが指定キーのプロパティを保持しているかを返す。</summary>
+    bool HasProperty(VertexId vertexId, string key);
+
+    /// <summary>Nexusが指定キーのプロパティを保持しているかを返す。</summary>
+    bool HasProperty(NexusId nexusId, string key);
+
+    /// <summary>Set cardinality の全値を列挙する。</summary>
+    PropertyValuesEnumerator GetPropertyValues(VertexId vertexId, string key);
+
+    /// <summary>Set cardinality の全値を列挙する。</summary>
+    PropertyValuesEnumerator GetPropertyValues(EdgeId edgeId, string key);
+
+    /// <summary>Set cardinality の全値を列挙する。</summary>
+    PropertyValuesEnumerator GetPropertyValues(NexusId nexusId, string key);
+
+    /// <summary>Vertexに付与された全プロパティを列挙する。</summary>
+    PropertyCursor EnumerateProperties(VertexId vertexId);
+
+    /// <summary>Nexusに付与された全プロパティを列挙する。</summary>
+    PropertyCursor EnumerateProperties(NexusId nexusId);
+
+    /// <summary>指定Vertexに接続するEdgeを列挙する。</summary>
+    EdgeEnumerator EnumerateEdges(
+        VertexId vertexId,
+        Direction direction = Direction.Both,
+        string? typeFilter = null);
+
+    /// <summary>等値 scalar index seek を実行する。</summary>
+    EntityRefEnumerator SeekIndex(string indexName, in PropertyValue key);
+
+    /// <summary>scalar index range seek を実行する。</summary>
+    EntityRefEnumerator RangeIndex(
+        string indexName,
+        in PropertyValue from, bool fromInclusive,
+        in PropertyValue to, bool toInclusive);
+
+    /// <summary>格納済みベクトルを読み出す。</summary>
+    bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination);
+
+    /// <summary>Nexusのメンバーを列挙する。</summary>
+    NexusMemberEnumerator GetMembers(NexusId nexusId, string? role = null);
+
+    /// <summary>指定Vertexが参加するNexusを列挙する。</summary>
+    NexusIdEnumerator GetNexuses(VertexId vertexId, string? type = null, string? role = null);
+
+    /// <summary>Nexus型 ID から型名を返す。未登録 ID では <c>null</c>。</summary>
+    string? GetNexusTypeName(NexusTypeId typeId);
+
+    /// <summary>指定Nexusの型名を返す。存在しない場合は <c>null</c>。</summary>
+    string? GetNexusType(NexusId nexusId);
+}
+
+/// <summary>
+/// 読み取り能力に mutation、schema edit、commit/abort を加えた書き込みトランザクション。
+/// </summary>
+public interface IWriteTransaction : IReadTransaction, ICommitHookRegistrar
+{
+    /// <summary>このトランザクションで schema mutation を行う入口。</summary>
+    ISchemaEditor EditSchema { get; }
+
+    /// <summary>このトランザクションで graph mutation を構築する入口。</summary>
+    GraphMutationSource Mutate { get; }
 
     /// <summary>指定ラベル名で新規Vertexを作成し、その ID を返す。</summary>
     VertexId CreateVertex(string label);
@@ -40,36 +116,8 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// <summary>指定 ID のVertexを削除する。</summary>
     void DeleteVertex(VertexId vertexId);
 
-    /// <summary>指定 ID のVertexが存在するかを返す。</summary>
-    bool VertexExists(VertexId vertexId);
-
-    /// <summary>指定Vertexのラベル名を返す。Vertexが存在しない場合は <c>null</c>。</summary>
-    string? GetVertexLabel(VertexId vertexId);
-
-    /// <summary>
-    /// Cypher の <c>MERGE (n:label {matchKey: matchValue})</c> 相当 —
-    /// <paramref name="label"/> を持ち、<paramref name="matchKey"/> が
-    /// <paramref name="matchValue"/> と等しいVertexが存在すればその ID を返す。
-    /// 存在しなければ新規Vertexを確保してマッチプロパティをセットし、その ID を返す。
-    /// <c>Created</c> でどちらの経路かを判別できるため、呼び出し側で
-    /// <c>ON CREATE SET</c> / <c>ON MATCH SET</c> の分岐が書ける。
-    /// 重複保持時は VertexId 順で最初にヒットしたものを採用。
-    /// 等値判定は String / Bytes はバイト単位、Double はビット完全一致、
-    /// Bool / Int32 / Int64 はスカラ等値。
-    /// </summary>
-    /// <remarks>
-    /// パフォーマンス: <c>(label, matchKey)</c> に <see cref="ISchemaApi.CreateIndex"/>
-    /// で登録されたインデックスがあれば自動で O(log n) シーク経路を使い、新規作成時の
-    /// インデックスエントリ追加も自動で行う。インデックス未登録の場合はラベル内全Vertexに
-    /// 対する O(N) フルスキャン + プロパティ比較に落ち、初回呼び出しで
-    /// <c>System.Diagnostics.Trace.TraceWarning</c> が出力される (サイレント劣化検出用)。
-    /// </remarks>
+    /// <summary>ラベルと scalar property が一致するVertexを返し、無ければ作成する。</summary>
     (VertexId Id, bool Created) MergeVertex(string label, string matchKey, in PropertyValue matchValue);
-
-    /// <summary>Edge型 ID から型名を返す。未登録 ID では <c>null</c>。</summary>
-    string? GetEdgeTypeName(EdgeTypeId typeId);
-
-    // ── リレーション操作 ──────────────────────────────────────
 
     /// <summary><paramref name="source"/> から <paramref name="target"/> へ指定型のEdgeを作成する。</summary>
     EdgeId CreateEdge(VertexId source, VertexId target, string type);
@@ -77,23 +125,11 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// <summary>型 ID 指定版の <see cref="CreateEdge(VertexId, VertexId, string)"/>。</summary>
     EdgeId CreateEdge(VertexId source, VertexId target, EdgeTypeId typeId);
 
-    /// <summary>
-    /// エッジ版 MERGE / UPSERT — <paramref name="source"/> から <paramref name="target"/> へ向かう
-    /// <paramref name="type"/> 型のEdgeが既に存在すればその ID を返し、無ければ新規作成して
-    /// その ID を返す。<c>Created</c> でどちらの経路かを判別できる (<see cref="MergeVertex"/> と対称)。
-    /// 同一 (source, target, type) のエッジが複数あるときは最初にヒットしたものを採用する。
-    /// </summary>
-    /// <remarks>
-    /// 存在判定は <paramref name="source"/> の外向き隣接を走査するため計算量は O(source の out-degree)。
-    /// 高 fan-out Vertexで多用する場合はコストに留意すること (エッジ存在インデックスは持たない)。
-    /// read-your-writes により、同一トランザクション内で直前に作成したエッジも検出される。
-    /// </remarks>
+    /// <summary>source、type、target が一致するEdgeを返し、無ければ作成する。</summary>
     (EdgeId Id, bool Created) MergeEdge(VertexId source, VertexId target, string type);
 
     /// <summary>指定 ID のEdgeを削除する。</summary>
     void DeleteEdge(EdgeId edgeId);
-
-    // ── プロパティ操作 ────────────────────────────────────────
 
     /// <summary>Vertexにプロパティを設定する (既存値は上書き)。</summary>
     void SetProperty(VertexId vertexId, string key, in PropertyValue value);
@@ -104,157 +140,48 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// <summary>Vertexからプロパティを削除する。</summary>
     void RemoveProperty(VertexId vertexId, string key);
 
-    /// <summary>Vertexのプロパティ値を取得する。存在しない場合の挙動は実装依存。</summary>
-    PropertyValue GetProperty(VertexId vertexId, string key);
-
-    /// <summary>Edgeのプロパティ値を取得する。</summary>
-    PropertyValue GetProperty(EdgeId edgeId, string key);
-
-    /// <summary>Vertexが指定キーのプロパティを保持しているかを返す。</summary>
-    bool HasProperty(VertexId vertexId, string key);
-
-    // ── マルチバリュープロパティ操作 (Set cardinality) ──────────────────
-
-    /// <summary>
-    /// Set cardinality プロパティに値を追加する。同一 key+value が既に存在すればスキップ (冪等)。
-    /// Single cardinality キーに対して呼ぶと <see cref="InvalidOperationException"/>。
-    /// </summary>
+    /// <summary>Set cardinality のVertexプロパティへ値を追加する。</summary>
     void AddPropertyValue(VertexId vertexId, string key, in PropertyValue value);
 
     /// <inheritdoc cref="AddPropertyValue(VertexId, string, in PropertyValue)"/>
     void AddPropertyValue(EdgeId edgeId, string key, in PropertyValue value);
 
-    /// <summary>
-    /// Set cardinality プロパティから特定の値を除去する。一致する値が無ければ no-op (冪等)。
-    /// Single cardinality キーに対して呼ぶと <see cref="InvalidOperationException"/>。
-    /// </summary>
+    /// <summary>Set cardinality のVertexプロパティから値を除去する。</summary>
     void RemovePropertyValue(VertexId vertexId, string key, in PropertyValue value);
 
     /// <inheritdoc cref="RemovePropertyValue(VertexId, string, in PropertyValue)"/>
     void RemovePropertyValue(EdgeId edgeId, string key, in PropertyValue value);
 
-    /// <summary>
-    /// Set cardinality プロパティの全値を列挙する。
-    /// </summary>
-    PropertyValuesEnumerator GetPropertyValues(VertexId vertexId, string key);
-
-    /// <inheritdoc cref="GetPropertyValues(VertexId, string)"/>
-    PropertyValuesEnumerator GetPropertyValues(EdgeId edgeId, string key);
-
-    /// <summary>Vertexに付与された全プロパティを列挙する。</summary>
-    PropertyCursor EnumerateProperties(VertexId vertexId);
-
-    // ── トラバーサル ──────────────────────────────────────
-
-    /// <summary>
-    /// 指定Vertexに接続するEdgeを列挙する。
-    /// <paramref name="direction"/> と <paramref name="typeFilter"/> で絞り込み可能。
-    /// </summary>
-    EdgeEnumerator EnumerateEdges(
-        VertexId vertexId,
-        Direction direction = Direction.Both,
-        string? typeFilter = null);
-
-    // ── インデックス書き込み (データ投入時に手動で呼ぶ) ──────────────
-
-    /// <summary>文字列キーで指定Vertexをインデックスに登録する。</summary>
-    void IndexInsert(string indexName, string key, VertexId vertexId);
-
-    /// <summary><see cref="long"/> キーで指定Vertexをインデックスに登録する。</summary>
-    void IndexInsert(string indexName, long key, VertexId vertexId);
-
-    /// <summary><see cref="double"/> キーで指定Vertexをインデックスに登録する。</summary>
-    void IndexInsert(string indexName, double key, VertexId vertexId);
-
-    // ── インデックスシーク ──────────────────────────────────
-
-    /// <summary>等値シーク。物理プラン経由の利用も可能。</summary>
-    VertexIdEnumerator SeekIndex(string indexName, in PropertyValue key);
-
-    /// <summary>範囲シーク。両端の包含有無を指定できる。</summary>
-    VertexIdEnumerator RangeIndex(
-        string indexName,
-        in PropertyValue from, bool fromInclusive,
-        in PropertyValue to, bool toInclusive);
-
-    // ── ベクトル (tx 配下) ──────────────────────────────────────
-
-    /// <summary>
-    /// このトランザクション境界の内側でベクトルを set / 上書きする。書き込みは
-    /// グラフ変更と同じ container WAL に乗り、<see cref="Commit"/> で原子確定、
-    /// <see cref="Rollback"/> / クラッシュで巻き戻る (グラフ変更と原子整合)。
-    /// バインドキーは <paramref name="entityId"/> の Sequence。
-    /// </summary>
+    /// <summary>このトランザクション内でベクトルを設定する。</summary>
     void SetVector(EntityKind kind, long entityId, string indexName, ReadOnlySpan<float> vector)
         => throw new NotSupportedException("This backend does not support transaction-scoped SetVector.");
 
-    /// <summary>
-    /// このトランザクション境界の内側でベクトルを論理削除する。原子性は
-    /// <see cref="SetVector"/> と同じ。永続化に対応しないバックエンドでは <see cref="NotSupportedException"/>。
-    /// </summary>
+    /// <summary>このトランザクション内でベクトルを論理削除する。</summary>
     void RemoveVector(EntityKind kind, long entityId, string indexName)
         => throw new NotSupportedException("This backend does not support transaction-scoped RemoveVector.");
 
-    /// <summary>
-    /// 指定エンティティの格納ベクトルを <paramref name="destination"/> へ読み出す。
-    /// alloc-free — 呼び出し側がインデックスの次元数以上のバッファを用意する。
-    /// 未設定 / 削除済み / 世代不一致 (slot 再利用による stale binding) は <c>false</c>。
-    /// SourceGenerator の <c>float[]</c> プロパティ Load でも内部利用される。
-    /// </summary>
-    bool TryGetVector(EntityKind kind, long entityId, string indexName, Span<float> destination)
-        => throw new NotSupportedException("This backend does not support TryGetVector.");
-
-    // ── Nexus操作 ──────────────────────────────────────
-
-    /// <summary>
-    /// 指定型と参加メンバーでNexusを作成し、その ID を返す。
-    /// メンバーは 2 件以上必要。同じ (Role, VertexId) の組の重複は許可しない。
-    /// </summary>
-    /// <exception cref="ArgumentException">
-    /// arity が 2 未満、role/type が空文字列、同じ (Role, VertexId) の組が重複、
-    /// または参照先Vertexが存在しない場合。
-    /// </exception>
+    /// <summary>指定型と参加メンバーでNexusを作成する。</summary>
     NexusId CreateNexus(string type, ReadOnlySpan<NexusMember> members);
 
     /// <summary>型 ID 指定版の <see cref="CreateNexus(string, ReadOnlySpan{NexusMember})"/>。</summary>
     NexusId CreateNexus(NexusTypeId typeId, ReadOnlySpan<NexusMember> members);
 
     /// <summary>
-    /// Nexusを論理削除する。存在しない ID や削除済み ID は no-op。
+    /// 型と role 付き member 集合が同じ Nexus を返し、存在しなければ作成する。
+    /// member の入力順は同一性に影響しない。
     /// </summary>
+    (NexusId Id, bool Created) MergeNexus(
+        string type,
+        ReadOnlySpan<NexusMember> members);
+
+    /// <summary>Nexusを論理削除する。</summary>
     void DeleteNexus(NexusId nexusId);
-
-    /// <summary>
-    /// Nexusのメンバーを列挙する。<paramref name="role"/> を指定すると
-    /// そのロールのメンバーのみに絞り込む。Nexusが不可視な場合は空列挙を返す。
-    /// </summary>
-    NexusMemberEnumerator GetMembers(NexusId nexusId, string? role = null);
-
-    /// <summary>
-    /// 指定Vertexが参加するNexusを列挙する。型やロールで絞り込み可能。
-    /// 同一Nexusに複数ロールで参加している場合も重複なく列挙される。
-    /// </summary>
-    NexusIdEnumerator GetNexuses(VertexId vertexId, string? type = null, string? role = null);
-
-    /// <summary>Nexus型 ID から型名を返す。未登録 ID では <c>null</c>。</summary>
-    string? GetNexusTypeName(NexusTypeId typeId);
-
-    // ── Nexusプロパティ操作 ──────────────────────────────
 
     /// <summary>Nexusにプロパティを設定する (既存値は上書き)。</summary>
     void SetProperty(NexusId nexusId, string key, in PropertyValue value);
 
-    /// <summary>Nexusのプロパティ値を取得する。存在しない場合は既定値を返す。</summary>
-    PropertyValue GetProperty(NexusId nexusId, string key);
-
-    /// <summary>Nexusが指定キーのプロパティを保持しているかを返す。</summary>
-    bool HasProperty(NexusId nexusId, string key);
-
     /// <summary>Nexusからプロパティを削除する。</summary>
     void RemoveProperty(NexusId nexusId, string key);
-
-    /// <summary>Nexusに付与された全プロパティを列挙する。</summary>
-    PropertyCursor EnumerateProperties(NexusId nexusId);
 
     /// <inheritdoc cref="AddPropertyValue(VertexId, string, in PropertyValue)"/>
     void AddPropertyValue(NexusId nexusId, string key, in PropertyValue value);
@@ -262,44 +189,19 @@ public interface IGraphTransaction : IDisposable, ICommitHookRegistrar
     /// <inheritdoc cref="RemovePropertyValue(VertexId, string, in PropertyValue)"/>
     void RemovePropertyValue(NexusId nexusId, string key, in PropertyValue value);
 
-    /// <inheritdoc cref="GetPropertyValues(VertexId, string)"/>
-    PropertyValuesEnumerator GetPropertyValues(NexusId nexusId, string key);
-
-    // 物理プラン実行 (Execute/ExecuteCursor)、access methods (Access)、隣接ブロック
-    // (AdjacencySegments) は内部実装型を露出するため公開面から除外し、internal な
-    // IGraphTransactionInternal へ移設した (利用者は GraphTraversal DSL を使う)。
-
     /// <summary>トランザクションをコミットする。</summary>
     void Commit();
 
     /// <summary>トランザクションをロールバックする。</summary>
     void Rollback();
 
-    // ── セーブポイント / 入れ子 undo ───────────────────────────────
-
-    /// <summary>
-    /// トランザクション内に savepoint を作成し識別子を返す。
-    /// <see cref="RollbackTo"/> でこの時点まで部分的に巻き戻したり、
-    /// <see cref="ReleaseSavepoint"/> で親スコープへマージしたりできる。Nested savepoint 可。
-    /// </summary>
-    /// <remarks>
-    /// 部分ロールバックは durable ではない — クラッシュ復旧では tx 全体の commit / abort のみ
-    /// 反映され、savepoint 境界は再現されない。長い tx の途中失敗で部分的に巻き戻し
-    /// 残りを継続したい運用用途。
-    /// </remarks>
-    /// <param name="name">診断・例外メッセージ用の任意名。</param>
+    /// <summary>トランザクション内に savepoint を作成する。</summary>
     SavepointId Savepoint(string? name = null);
 
-    /// <summary>
-    /// 指定 savepoint 以降の変更を巻き戻す。Savepoint は消費されず、続けて
-    /// 別の変更を行ったあと再度 <see cref="RollbackTo"/> できる。
-    /// </summary>
+    /// <summary>指定 savepoint 以降の変更を巻き戻す。</summary>
     void RollbackTo(SavepointId savepoint);
 
-    /// <summary>
-    /// 指定 savepoint を解放し、その savepoint 以降の変更を親スコープへマージする。
-    /// 解放後は当該 SavepointId は無効。
-    /// </summary>
+    /// <summary>指定 savepoint を解放する。</summary>
     void ReleaseSavepoint(SavepointId savepoint);
 }
 
@@ -470,6 +372,52 @@ public ref struct VertexIdEnumerator
 
     /// <summary>直近の <see cref="MoveNext"/> で取得した現在要素。</summary>
     public VertexId Current => _current;
+
+    /// <summary>内部列挙子を破棄する。</summary>
+    public void Dispose()
+    {
+        using var usage = _usageGuard?.Enter() ?? default;
+        _inner?.Dispose();
+    }
+}
+
+/// <summary>scalar index が返す型付き entity 参照を列挙する前方列挙子。</summary>
+public ref struct EntityRefEnumerator
+{
+    private IEnumerator<long>? _inner;
+    private readonly Func<long, EntityRef?>? _materialize;
+    private EntityRef _current;
+    private TransactionUsageGuard? _usageGuard;
+
+    internal EntityRefEnumerator(
+        IEnumerable<long> source,
+        Func<long, EntityRef?> materialize,
+        TransactionUsageLease usage)
+    {
+        _inner = source.GetEnumerator();
+        _materialize = materialize;
+        _current = default;
+        _usageGuard = usage.Guard;
+        usage.Dispose();
+    }
+
+    /// <summary>次の可視な entity へ進む。候補が尽きたら <c>false</c>。</summary>
+    public bool MoveNext()
+    {
+        using var usage = _usageGuard?.Enter() ?? default;
+        while (_inner is not null && _inner.MoveNext())
+        {
+            EntityRef? materialized = _materialize?.Invoke(_inner.Current);
+            if (!materialized.HasValue)
+                continue;
+            _current = materialized.Value;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>直近に materialize された entity 参照。</summary>
+    public EntityRef Current => _current;
 
     /// <summary>内部列挙子を破棄する。</summary>
     public void Dispose()

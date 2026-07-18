@@ -3,7 +3,7 @@ using Quiver.Text;
 namespace Quiver;
 
 /// <summary>
-/// <see cref="ISchemaApi.CreateFullTextIndex"/> に渡す全文索引オプション。
+/// <see cref="ISchemaEditor.CreateFullTextIndex"/> に渡す全文索引オプション。
 /// </summary>
 /// <remarks>
 /// トークナイザ ID はカタログに永続化され、検索時のトークン化がインデックス構築時と
@@ -31,7 +31,7 @@ public sealed record FullTextIndexOptions
 }
 
 /// <summary>
-/// <see cref="ISchemaApi.ListFullTextIndexes"/> が返す登録済み全文索引のメタ情報。
+/// <see cref="ISchemaEditor.ListFullTextIndexes"/> が返す登録済み全文索引のメタ情報。
 /// </summary>
 public sealed record FullTextIndexInfo(
     string Name,

@@ -25,7 +25,7 @@ public class GraphVertexGeneratorTests
     public void Generator_emits_partial_class_for_GraphVertex()
     {
         var attributeRef = typeof(Quiver.Api.VertexAttribute).Assembly.Location;
-        var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
+        var engineRef    = typeof(Quiver.IWriteTransaction).Assembly.Location;
 
         var source = """
             using Quiver.Api;
@@ -75,7 +75,7 @@ public class GraphVertexGeneratorTests
     public void Generator_emits_FloatArray_property_accessors()
     {
         var attributeRef = typeof(Quiver.Api.VertexAttribute).Assembly.Location;
-        var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
+        var engineRef    = typeof(Quiver.IWriteTransaction).Assembly.Location;
 
         var source = """
             using Quiver.Api;
@@ -122,7 +122,7 @@ public class GraphVertexGeneratorTests
     public void Generator_emits_MultiValue_List_property()
     {
         var attributeRef = typeof(Quiver.Api.VertexAttribute).Assembly.Location;
-        var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
+        var engineRef    = typeof(Quiver.IWriteTransaction).Assembly.Location;
 
         var source = """
             using System.Collections.Generic;
@@ -194,7 +194,7 @@ public class GraphEdgeGeneratorTests
     public void Generator_emits_partial_class_for_GraphEdge()
     {
         var attributeRef = typeof(Quiver.Api.EdgeAttribute<,>).Assembly.Location;
-        var engineRef    = typeof(Quiver.IGraphTransaction).Assembly.Location;
+        var engineRef    = typeof(Quiver.IWriteTransaction).Assembly.Location;
 
         var source = """
             using Quiver.Api;

@@ -85,7 +85,7 @@ public sealed class GraphSnapshotViewTests : IDisposable
         BulkLoad(vertexCount: 3, edges: new[] { (0L, 1L) });
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             tx.CreateEdge(new VertexId(0), new VertexId(2), "R");
             tx.Commit();
@@ -106,7 +106,7 @@ public sealed class GraphSnapshotViewTests : IDisposable
         long edgesBefore = view.EdgeCount;
 
         // Mutate after view construction — view should still see the old shape.
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             tx.CreateEdge(new VertexId(1), new VertexId(2), "R");
             tx.Commit();

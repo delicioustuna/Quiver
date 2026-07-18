@@ -23,7 +23,7 @@ using Quiver.Storage.Records;
 using var db = QuiverDatabase.Open(@"C:\data\myapp-graph");
 
 // --- 書き込みトランザクション ---
-using (var tx = db.BeginTransaction())
+using (var tx = db.BeginWriteTransaction())
 {
     var alice = tx.CreateVertex("Person");
     tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
@@ -37,7 +37,7 @@ using (var tx = db.BeginTransaction())
 }
 
 // --- 読み取りトランザクション ---
-using (var tx = db.BeginReadOnlyTransaction())
+using (var tx = db.BeginReadTransaction())
 {
     var stats = db.Diagnostics.GetStatistics();
     Console.WriteLine($"Vertices={stats.VertexCount}, Edges={stats.EdgeCount}");
@@ -50,7 +50,7 @@ using (var tx = db.BeginReadOnlyTransaction())
   → バックエンドの flush/close が行われる。プロセスを `kill` で落としても commit 済みデータは
   WAL replay で復元されるが (→ [04_recovery_troubleshoot.md](04_recovery_troubleshoot.md))、正常終了では必ず Dispose を通す。
 - `tx.Commit()` を呼ばないまま `tx` を Dispose すると **rollback** される。これが既定の安全側挙動。
-- `QuiverDatabase` インスタンスは **スレッドセーフ**。複数スレッドから同時に `BeginTransaction` してよい。
+- `QuiverDatabase` インスタンスは **スレッドセーフ**。複数スレッドから同時に `BeginWriteTransaction` してよい。
   ただし 1 つの `tx` を複数スレッドで共有してはいけない。
 
 ---
@@ -64,11 +64,14 @@ using (var tx = db.BeginReadOnlyTransaction())
 using var db = QuiverDatabase.Open(dir);
 
 // 起動直後に一度だけ索引を作る (冪等。既にあれば no-op)。
-db.Schema.CreateIndex(
-    indexName: "idx_person_email",
-    label: "Person",
-    propertyKey: "email",
-    kind: IndexKind.StringEquality);
+using (var schemaTx = db.BeginWriteTransaction())
+{
+    schemaTx.EditSchema.CreateIndex(new ScalarIndexDefinition(
+        "idx_person_email",
+        new PropertyTarget(PropertyOwnerKind.Vertex, "email", "Person"),
+        IndexKind.StringEquality));
+    schemaTx.Commit();
+}
 ```
 
 索引を作っておくと:
@@ -174,7 +177,7 @@ builder.Services.AddQuiver(
 VertexId savedId;
 
 using (var db = QuiverDatabase.Open(dir))
-using (var tx = db.BeginTransaction())
+using (var tx = db.BeginWriteTransaction())
 {
     savedId = tx.CreateVertex("Config");
     tx.SetProperty(savedId, "version", PropertyValue.FromString("1.0"));
@@ -183,7 +186,7 @@ using (var tx = db.BeginTransaction())
 
 // プロセスをまたいでも、別の Open で復元される
 using (var db = QuiverDatabase.Open(dir))
-using (var tx = db.BeginReadOnlyTransaction())
+using (var tx = db.BeginReadTransaction())
 {
     Debug.Assert(tx.VertexExists(savedId));
 }

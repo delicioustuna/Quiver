@@ -15,11 +15,8 @@ internal interface IGraphStorageBackendInternal : IGraphStorageBackend
     /// <summary>このバックエンドのトランザクションマネージャ。</summary>
     ITransactionManager Transactions { get; }
 
-    /// <summary>WALを書かない読み取り専用トランザクションを開始する。</summary>
-    IGraphTransaction BeginReadGraphTransaction();
-
-    /// <summary>managerのwriter leaseを取得して書き込みトランザクションを開始する。</summary>
-    IGraphTransaction BeginWriteGraphTransaction(IsolationLevel level);
+    /// <summary>内部 adapter が token を参照する read-only catalog。</summary>
+    ISchemaCatalog SchemaCatalog { get; }
 
     /// <summary>access methods 抽象。スキャン / シーク / KNN などの物理アクセス経路を提供する。</summary>
     IGraphAccessMethods Access { get; }

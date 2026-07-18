@@ -19,7 +19,11 @@ public class VertexIndexSeekOperatorBench
     [Benchmark]
     public int Seek_int64_value_100()
     {
-        using var op = new VertexIndexSeekOperator("idx_value", LiteralProvider.Int64(100));
+        using var op = new VertexIndexSeekOperator(
+            _seed.ValueIndex,
+            _seed.ValueKey,
+            _seed.PersonLabel,
+            LiteralProvider.Int64(100));
         return OperatorBenchDrain.Drain(op, _seed.ReadTx);
     }
 }

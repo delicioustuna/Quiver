@@ -31,7 +31,7 @@ public class BitmapFilterBenchmarks
 
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
     private LabelId _label;
     private PropertyKeyId _tagKey;
     private PropertyKeyId _hotKey;
@@ -45,11 +45,11 @@ public class BitmapFilterBenchmarks
         int matchA = (int)(Total * SelectiveFraction);
         int matchHot = (int)(Total * BroadFraction);
 
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
-            _label = _db.Schema.GetOrCreateLabel("N");
-            _tagKey = _db.Schema.GetOrCreatePropertyKey("tag");
-            _hotKey = _db.Schema.GetOrCreatePropertyKey("hot");
+            _label = _db.EditSchema(schema => schema.GetOrCreateLabel("N"));
+            _tagKey = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("tag"));
+            _hotKey = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("hot"));
 
             for (int i = 0; i < Total; i++)
             {
@@ -60,7 +60,7 @@ public class BitmapFilterBenchmarks
             tx.Commit();
         }
 
-        _readTx = _db.BeginTransaction();
+        _readTx = _db.BeginWriteTransaction();
     }
 
     [GlobalCleanup]

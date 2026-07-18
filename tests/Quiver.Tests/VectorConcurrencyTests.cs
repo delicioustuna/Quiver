@@ -24,7 +24,7 @@ public sealed class VectorConcurrencyTests : IDisposable
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName,
             EntityKind.Vertex,
-            db.Schema.GetOrCreatePropertyKey("embedding"),
+            db.EditSchema(schema => schema.GetOrCreatePropertyKey("embedding")),
             Dimensions,
             DistanceMetric.Cosine,
             "concurrency test"));
@@ -32,7 +32,7 @@ public sealed class VectorConcurrencyTests : IDisposable
         var random = new Random(42);
         var vector = new float[Dimensions];
         VertexId updated = default;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < 200; i++)
             {

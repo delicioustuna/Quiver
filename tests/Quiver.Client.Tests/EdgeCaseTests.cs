@@ -32,32 +32,32 @@ public sealed class EdgeCaseTests : IDisposable
     [Fact]
     public void Vertices_on_empty_graph_returns_empty()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         g.Vertices().ToList().Should().BeEmpty();
     }
 
     [Fact]
     public void Edges_on_empty_graph_returns_empty()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         g.Edges().ToList().Should().BeEmpty();
     }
 
     [Fact]
     public void Count_on_empty_graph_returns_zero()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         g.Vertices().Count().Should().Be(0);
     }
 
     [Fact]
     public void HasNext_on_empty_graph_returns_false()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         g.Vertices().HasNext().Should().BeFalse();
     }
 
@@ -67,8 +67,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void HasLabel_nonexistent_label_returns_empty()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         g.Vertices().HasLabel("NoSuchLabel").ToList().Should().BeEmpty();
     }
 
@@ -76,8 +76,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void Has_nonexistent_property_returns_empty()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         g.Vertices().HasLabel("Test").Has("NoSuchProp", "value").ToList().Should().BeEmpty();
     }
 
@@ -85,8 +85,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void Out_nonexistent_type_returns_empty()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var vertex = g.Vertices().HasLabel("Test").Next();
         g.Vertex(vertex).Out("NoSuchType").ToList().Should().BeEmpty();
     }
@@ -95,8 +95,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void Values_nonexistent_property_returns_empty()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var values = g.Vertices().HasLabel("Test").Values("MissingProp").ToList();
         values.Should().ContainSingle().Which.Should().BeEmpty();
     }
@@ -106,40 +106,40 @@ public sealed class EdgeCaseTests : IDisposable
     [Fact]
     public void Sum_on_empty_returns_zero()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         g.Vertices().HasLabel("Ghost").Sum("Age").Should().Be(0.0);
     }
 
     [Fact]
     public void Max_on_empty_returns_null()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         g.Vertices().HasLabel("Ghost").Max("Age").Should().BeNull();
     }
 
     [Fact]
     public void Min_on_empty_returns_null()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         g.Vertices().HasLabel("Ghost").Min("Age").Should().BeNull();
     }
 
     [Fact]
     public void Mean_on_empty_returns_null()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         g.Vertices().HasLabel("Ghost").Mean("Age").Should().BeNull();
     }
 
     [Fact]
     public void GroupCount_on_empty_returns_empty_dict()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         g.Vertices().HasLabel("Ghost").GroupCount("Name").Should().BeEmpty();
     }
 
@@ -149,8 +149,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void And_empty_traversals_throws()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var act = () => g.Vertices().And();
         act.Should().Throw<ArgumentException>();
     }
@@ -159,8 +159,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void Or_empty_traversals_throws()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var act = () => g.Vertices().Or();
         act.Should().Throw<ArgumentException>();
     }
@@ -169,8 +169,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void As_null_or_empty_throws()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var act = () => g.Vertices().As("");
         act.Should().Throw<ArgumentException>();
     }
@@ -179,8 +179,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void Select_null_or_empty_throws()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var act = () => g.Vertices().Select("");
         act.Should().Throw<ArgumentException>();
     }
@@ -189,8 +189,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void Select_projection_without_As_throws()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var act = () => g.Vertices().Select(t => t.Vertex("a"));
         act.Should().Throw<InvalidOperationException>();
     }
@@ -199,8 +199,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void OrderBy_null_key_throws()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var act = () => g.Vertices().OrderBy(null!);
         act.Should().Throw<ArgumentNullException>();
     }
@@ -209,8 +209,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void Repeat_null_step_throws()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var act = () => g.Vertices().Repeat(null!, times: 1);
         act.Should().Throw<ArgumentNullException>();
     }
@@ -219,8 +219,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void Skip_negative_throws()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var act = () => g.Vertices().Skip(-1);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
@@ -229,8 +229,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void Range_invalid_throws()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         // to < from は不正
         var act = () => g.Vertices().Range(5, 3);
         act.Should().Throw<ArgumentOutOfRangeException>();
@@ -240,8 +240,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void Range_negative_from_throws()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var act = () => g.Vertices().Range(-1, 5);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
@@ -252,8 +252,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void Limit_zero_returns_empty()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         g.Vertices().Limit(0).ToList().Should().BeEmpty();
     }
 
@@ -261,8 +261,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void Limit_larger_than_result_returns_all()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var all = g.Vertices().ToList();
         var limited = g.Vertices().Limit(100).ToList();
         limited.Should().HaveCount(all.Count);
@@ -274,8 +274,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void Out_on_isolated_vertex_returns_empty()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var vertex = g.Vertices().HasLabel("Test").Next();
         g.Vertex(vertex).Out().ToList().Should().BeEmpty();
     }
@@ -284,8 +284,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void In_on_isolated_vertex_returns_empty()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var vertex = g.Vertices().HasLabel("Test").Next();
         g.Vertex(vertex).In().ToList().Should().BeEmpty();
     }
@@ -294,8 +294,8 @@ public sealed class EdgeCaseTests : IDisposable
     public void Both_on_isolated_vertex_returns_empty()
     {
         SeedSingleVertex();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
         var vertex = g.Vertices().HasLabel("Test").Next();
         g.Vertex(vertex).Both().ToList().Should().BeEmpty();
     }
@@ -355,7 +355,7 @@ public sealed class EdgeCaseTests : IDisposable
 
     private void SeedSingleVertex()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var n = tx.CreateVertex("Test");
         tx.SetProperty(n, "Name", PropertyValue.FromString("TestVertex"));
         tx.Commit();

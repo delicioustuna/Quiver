@@ -32,7 +32,7 @@
 
 ```csharp
 // ✅ GOOD: まとめて 1 tx
-using (var tx = db.BeginTransaction())
+using (var tx = db.BeginWriteTransaction())
 {
     foreach (var row in rows)
         tx.SetProperty(tx.CreateVertex("Item"), "sku", PropertyValue.FromString(row.Sku));
@@ -41,7 +41,7 @@ using (var tx = db.BeginTransaction())
 
 // ❌ BAD: 1 件ごとに commit (約 100× 遅い)
 foreach (var row in rows)
-    using (var tx = db.BeginTransaction()) { /* 1 件 */ tx.Commit(); }
+    using (var tx = db.BeginWriteTransaction()) { /* 1 件 */ tx.Commit(); }
 ```
 
 - 1 tx が大きすぎてメモリが厳しい場合は、**数千〜数万件単位のチャンク commit** に分ける
@@ -105,7 +105,7 @@ var searchOptions = new VectorSearchOptions
 using var cursor = db.Vectors.KnnSearch("embedding", query, k: 10, searchOptions);
 var batch = db.Vectors.KnnSearchBatch("embedding", queries, k: 10, searchOptions);
 
-var traversal = tx.G(db.Schema)
+var traversal = tx.Query
     .Knn("embedding", query, k: 10, searchOptions);
 ```
 
@@ -212,7 +212,14 @@ var opts = new QuiverDatabaseOptions { LockingMode = LockingMode.ReaderWriter };
 検索や MERGE が遅いとき、まず該当プロパティに索引があるか確認する。
 
 ```csharp
-db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEquality);
+using (var schemaTx = db.BeginWriteTransaction())
+{
+    schemaTx.EditSchema.CreateIndex(new ScalarIndexDefinition(
+        "idx_person_email",
+        new PropertyTarget(PropertyOwnerKind.Vertex, "email", "Person"),
+        IndexKind.StringEquality));
+    schemaTx.Commit();
+}
 ```
 
 - 索引が無いプロパティ等価検索はラベル内全スキャン。Vertex数に比例して遅くなる。
@@ -245,4 +252,4 @@ db.Schema.CreateIndex("idx_person_email", "Person", "email", IndexKind.StringEqu
 | read 並列が出ない | `LockingMode = ReaderWriter` |
 | KNN の latency / recall を調整したい | `VectorSearchOptions.EfSearch` を実測しながら変更 |
 | ロックで詰まる・デッドロック疑い | `DeadlockDetectionInterval = 100ms`、`LockTimeout` 見直し |
-| 特定プロパティ検索が遅い | `Schema.CreateIndex` |
+| 特定プロパティ検索が遅い | `EditSchema` でスカラ索引を作成 |

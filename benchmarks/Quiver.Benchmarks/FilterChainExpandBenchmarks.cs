@@ -35,7 +35,7 @@ public class FilterChainExpandBenchmarks
 
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
 
     private static readonly string[] s_cities = ["Tokyo", "Osaka", "Kyoto", "Nagoya"];
     private static readonly string[] s_types  = ["premium", "standard", "trial"];
@@ -53,15 +53,15 @@ public class FilterChainExpandBenchmarks
         using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver")))
         {
             // schema をウォームアップ
-            using (var schemaTx = db.BeginTransaction())
+            using (var schemaTx = db.BeginWriteTransaction())
             {
-                _ = db.Schema.GetOrCreateLabel("Person");
-                _ = db.Schema.GetOrCreateLabel("Company");
-                _ = db.Schema.GetOrCreatePropertyKey("city");
-                _ = db.Schema.GetOrCreatePropertyKey("age");
-                _ = db.Schema.GetOrCreatePropertyKey("type");
-                _ = db.Schema.GetOrCreateEdgeType("KNOWS");
-                _ = db.Schema.GetOrCreateEdgeType("WORKS_AT");
+                _ = db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
+                _ = db.EditSchema(schema => schema.GetOrCreateLabel("Company"));
+                _ = db.EditSchema(schema => schema.GetOrCreatePropertyKey("city"));
+                _ = db.EditSchema(schema => schema.GetOrCreatePropertyKey("age"));
+                _ = db.EditSchema(schema => schema.GetOrCreatePropertyKey("type"));
+                _ = db.EditSchema(schema => schema.GetOrCreateEdgeType("KNOWS"));
+                _ = db.EditSchema(schema => schema.GetOrCreateEdgeType("WORKS_AT"));
                 schemaTx.Commit();
             }
 
@@ -69,7 +69,7 @@ public class FilterChainExpandBenchmarks
             int companyCount = Math.Max(1, VertexCount / 4);
             var personIds = new VertexId[VertexCount];
             var companyIds = new VertexId[companyCount];
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < VertexCount; i++)
                 {
@@ -90,10 +90,10 @@ public class FilterChainExpandBenchmarks
             // エッジ作成 (バッチコミット)
             const int batchSize = 50_000;
             int created = 0;
-            IGraphTransaction? batchTx = null;
+            IWriteTransaction? batchTx = null;
             try
             {
-                batchTx = db.BeginTransaction();
+                batchTx = db.BeginWriteTransaction();
                 for (int i = 0; i < VertexCount; i++)
                 {
                     for (int d = 0; d < AvgDegree; d++)
@@ -105,7 +105,7 @@ public class FilterChainExpandBenchmarks
                         {
                             batchTx.Commit();
                             batchTx.Dispose();
-                            batchTx = db.BeginTransaction();
+                            batchTx = db.BeginWriteTransaction();
                         }
                     }
                     int cIdx = rnd.Next(companyCount);
@@ -115,7 +115,7 @@ public class FilterChainExpandBenchmarks
                     {
                         batchTx.Commit();
                         batchTx.Dispose();
-                        batchTx = db.BeginTransaction();
+                        batchTx = db.BeginWriteTransaction();
                     }
                 }
                 batchTx.Commit();
@@ -127,7 +127,7 @@ public class FilterChainExpandBenchmarks
         }
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
-        _readTx = _db.BeginReadOnlyTransaction();
+        _readTx = _db.BeginReadTransaction();
     }
 
     [GlobalCleanup]
@@ -142,14 +142,14 @@ public class FilterChainExpandBenchmarks
     [Benchmark(Baseline = true, Description = "Baseline: HasLabel scan + Out (no filter)")]
     public int BaselineExpandAll()
     {
-        var g = _readTx.G(_db.Schema);
+        var g = _readTx.Query;
         return g.Vertices().HasLabel("Person").Out("KNOWS").ToList().Count;
     }
 
     [Benchmark(Description = "FilterChain: city+age+sub+order+limit")]
     public int FilterChainExpand()
     {
-        var g = _readTx.G(_db.Schema);
+        var g = _readTx.Query;
         return g.Vertices().HasLabel("Person")
                     .Has("city", "Tokyo")
                     .Out("KNOWS")
@@ -163,7 +163,7 @@ public class FilterChainExpandBenchmarks
     [Benchmark(Description = "FilterChain (no sub-traversal)")]
     public int FilterChainNoSub()
     {
-        var g = _readTx.G(_db.Schema);
+        var g = _readTx.Query;
         return g.Vertices().HasLabel("Person")
                     .Has("city", "Tokyo")
                     .Out("KNOWS")

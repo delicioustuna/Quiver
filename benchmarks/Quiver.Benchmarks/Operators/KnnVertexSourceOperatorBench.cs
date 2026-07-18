@@ -17,7 +17,7 @@ public class KnnVertexSourceOperatorBench
 
     private string _dir = null!;
     private QuiverDatabase _db = null!;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
     private float[] _query = null!;
 
     [GlobalSetup]
@@ -25,14 +25,14 @@ public class KnnVertexSourceOperatorBench
     {
         _dir = BenchTempDir.Create("knn");
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        var keyId = _db.Schema.GetOrCreatePropertyKey("embed");
+        var keyId = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("embed"));
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "bench", null));
 
         var rng = new Random(2026);
         var buf = new float[Dim];
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 100; i++)
             {
@@ -44,7 +44,7 @@ public class KnnVertexSourceOperatorBench
         }
         _query = new float[Dim];
         for (int d = 0; d < Dim; d++) _query[d] = (float)(rng.NextDouble() * 2.0 - 1.0);
-        _readTx = _db.BeginReadOnlyTransaction();
+        _readTx = _db.BeginReadTransaction();
     }
 
     [GlobalCleanup]

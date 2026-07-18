@@ -48,11 +48,11 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.EditSchema(schema => schema.GetOrCreatePropertyKey("t")),
             4, DistanceMetric.Dot, "test", null));
 
         long a;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var na = tx.CreateVertex("Doc");
             a = EntityRef.UnpackSequence(na.Value);
@@ -70,7 +70,7 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
         Knn(db, new float[] { 1, 0, 0, 0 }, 1).Scores[0].Should().BeApproximately(1f, 1e-5f);
 
         // A を [0,1,0,0] へ上書き (re-link)。
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.SetVector(EntityKind.Vertex, a, IndexName, new float[] { 0, 1, 0, 0 });
             tx.Commit();
@@ -89,9 +89,9 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
         using (var db = QuiverDatabase.Open(_path))
         {
             db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-                IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
+                IndexName, EntityKind.Vertex, db.EditSchema(schema => schema.GetOrCreatePropertyKey("t")),
                 4, DistanceMetric.Dot, "test", null));
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             var a = tx.CreateVertex("Doc");
             var b = tx.CreateVertex("Doc");
             keep = EntityRef.UnpackSequence(a.Value);
@@ -119,11 +119,11 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
 
         using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.EditSchema(schema => schema.GetOrCreatePropertyKey("t")),
             Dim, DistanceMetric.Cosine, "test", null));
 
         var vertexIds = new List<long>();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < N; i++)
             {
@@ -137,7 +137,7 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
         }
 
         // 後半 150 件を削除 → tombstone が生存を上回り自動 Rebuild が走る。
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 50; i < N; i++)
                 tx.RemoveVector(EntityKind.Vertex, vertexIds[i], IndexName);
@@ -162,13 +162,13 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
 
         using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.EditSchema(schema => schema.GetOrCreatePropertyKey("t")),
             Dim, DistanceMetric.Cosine, "test", null));
 
         // 安定集合: 一度入れたら消さない。
         var stableIds = new List<long>();
         var stableVecs = new List<float[]>();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < Stable; i++)
             {
@@ -185,7 +185,7 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
         for (int c = 0; c < Cycles; c++)
         {
             var churnIds = new List<long>();
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < Churn; i++)
                 {
@@ -195,7 +195,7 @@ public sealed class VectorHnswMaintenanceTests : IDisposable
                 }
                 tx.Commit();
             }
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 foreach (var id in churnIds)
                     tx.RemoveVector(EntityKind.Vertex, id, IndexName);

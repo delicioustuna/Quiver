@@ -40,7 +40,12 @@ internal interface IGraphAccessMethods
     /// <see cref="PropertyValue.Type"/> に基づき型ごとのインデックスへルーティングする。
     /// インデックスが存在しないか、型が未対応の場合は空シーケンスを返す。
     /// </summary>
-    IEnumerable<VertexId> SeekVerticesByIndex(ITransaction tx, string indexName, PropertyValue key);
+    IEnumerable<VertexId> SeekVerticesByIndex(
+        ITransaction tx,
+        ScalarIndexDefinition definition,
+        PropertyKeyId propertyKey,
+        LabelId? scope,
+        PropertyValue key);
 
     /// <summary>
     /// <paramref name="source"/> に接続するエッジのうち、要求された方向と任意の型フィルタに

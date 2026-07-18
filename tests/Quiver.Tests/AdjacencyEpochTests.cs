@@ -40,7 +40,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         BulkLoad(vertexCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var neighbors = ExpandOut(tx, new VertexId(0));
         neighbors.Should().BeEquivalentTo(new[] { 1L, 2L });
         tx.AsInternal().AdjacencySegments!.BaseEdgeHwm.Should().Be(2,
@@ -57,12 +57,12 @@ public sealed class AdjacencyEpochTests : IDisposable
         // vertex 3 was reserved at bulk-load (4 vertices) but had no edges; add a
         // new delta edge 0→3. The new edge gets id >= BaseEdgeHwm so the merge
         // must yield {1, 2, 3} with no double-emission of 1 or 2.
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             tx.CreateEdge(new VertexId(0), new VertexId(3), "R");
             tx.Commit();
         }
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var neighbors = ExpandOut(tx, new VertexId(0));
             neighbors.Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
@@ -75,13 +75,13 @@ public sealed class AdjacencyEpochTests : IDisposable
         BulkLoad(vertexCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             // Delete the edge pointing 0→1 (id 0 by bulk-load order).
             tx.DeleteEdge(new EdgeId(0));
             tx.Commit();
         }
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var neighbors = ExpandOut(tx, new VertexId(0));
             neighbors.Should().BeEquivalentTo(new[] { 2L });
@@ -96,7 +96,7 @@ public sealed class AdjacencyEpochTests : IDisposable
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         long deltaEdgeId;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             // Add two deltas.
             tx.CreateEdge(new VertexId(0), new VertexId(3), "R"); // first delta
@@ -104,14 +104,14 @@ public sealed class AdjacencyEpochTests : IDisposable
             deltaEdgeId = second.Value;
             tx.Commit();
         }
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             // Delete one base edge (0→1) and one delta edge (0→4).
             tx.DeleteEdge(new EdgeId(0));
             tx.DeleteEdge(new EdgeId(deltaEdgeId));
             tx.Commit();
         }
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var neighbors = ExpandOut(tx, new VertexId(0));
             neighbors.Should().BeEquivalentTo(new[] { 2L, 3L });
@@ -124,9 +124,9 @@ public sealed class AdjacencyEpochTests : IDisposable
         BulkLoad(vertexCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using var reader = _db.BeginReadOnlyTransaction();
+        using var reader = _db.BeginReadTransaction();
 
-        using (var writer = _db.BeginTransaction())
+        using (var writer = _db.BeginWriteTransaction())
         {
             writer.DeleteEdge(new EdgeId(0));
             writer.Commit();
@@ -134,7 +134,7 @@ public sealed class AdjacencyEpochTests : IDisposable
 
         ExpandOut(reader, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L });
 
-        using var nextReader = _db.BeginReadOnlyTransaction();
+        using var nextReader = _db.BeginReadTransaction();
         ExpandOut(nextReader, new VertexId(0)).Should().BeEquivalentTo(new[] { 2L });
     }
 
@@ -144,9 +144,9 @@ public sealed class AdjacencyEpochTests : IDisposable
         BulkLoad(vertexCount: 4, edges: new[] { (0L, 1L), (0L, 2L) });
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using var reader = _db.BeginReadOnlyTransaction();
+        using var reader = _db.BeginReadTransaction();
 
-        using (var writer = _db.BeginTransaction())
+        using (var writer = _db.BeginWriteTransaction())
         {
             writer.CreateEdge(new VertexId(0), new VertexId(3), "R");
             writer.Commit();
@@ -154,7 +154,7 @@ public sealed class AdjacencyEpochTests : IDisposable
 
         ExpandOut(reader, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L });
 
-        using var nextReader = _db.BeginReadOnlyTransaction();
+        using var nextReader = _db.BeginReadTransaction();
         ExpandOut(nextReader, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
     }
 
@@ -164,14 +164,14 @@ public sealed class AdjacencyEpochTests : IDisposable
         BulkLoad(vertexCount: 5, edges: new[] { (0L, 1L), (0L, 2L) });
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using (var writer = _db.BeginTransaction())
+        using (var writer = _db.BeginWriteTransaction())
         {
             writer.CreateEdge(new VertexId(0), new VertexId(3), "R");
             writer.Commit();
         }
 
-        using var reader = _db.BeginReadOnlyTransaction();
-        using (var writer = _db.BeginTransaction())
+        using var reader = _db.BeginReadTransaction();
+        using (var writer = _db.BeginWriteTransaction())
         {
             writer.CreateEdge(new VertexId(0), new VertexId(4), "R");
             writer.Commit();
@@ -179,7 +179,7 @@ public sealed class AdjacencyEpochTests : IDisposable
 
         ExpandOut(reader, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
 
-        using var nextReader = _db.BeginReadOnlyTransaction();
+        using var nextReader = _db.BeginReadTransaction();
         ExpandOut(nextReader, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L, 4L });
     }
 
@@ -190,14 +190,14 @@ public sealed class AdjacencyEpochTests : IDisposable
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         EdgeId delta;
-        using (var writer = _db.BeginTransaction())
+        using (var writer = _db.BeginWriteTransaction())
         {
             delta = writer.CreateEdge(new VertexId(0), new VertexId(3), "R");
             writer.Commit();
         }
 
-        using var reader = _db.BeginReadOnlyTransaction();
-        using (var writer = _db.BeginTransaction())
+        using var reader = _db.BeginReadTransaction();
+        using (var writer = _db.BeginWriteTransaction())
         {
             writer.DeleteEdge(delta);
             writer.Commit();
@@ -205,7 +205,7 @@ public sealed class AdjacencyEpochTests : IDisposable
 
         ExpandOut(reader, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
 
-        using var nextReader = _db.BeginReadOnlyTransaction();
+        using var nextReader = _db.BeginReadTransaction();
         ExpandOut(nextReader, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L });
     }
 
@@ -215,14 +215,14 @@ public sealed class AdjacencyEpochTests : IDisposable
         BulkLoad(vertexCount: 2, edges: new[] { (0L, 1L) });
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using (var writer = _db.BeginTransaction())
+        using (var writer = _db.BeginWriteTransaction())
         {
             writer.SetProperty(new EdgeId(0), "weight", PropertyValue.FromInt64(10));
             writer.Commit();
         }
 
-        using var reader = _db.BeginReadOnlyTransaction();
-        using (var writer = _db.BeginTransaction())
+        using var reader = _db.BeginReadTransaction();
+        using (var writer = _db.BeginWriteTransaction())
         {
             writer.SetProperty(new EdgeId(0), "weight", PropertyValue.FromInt64(20));
             writer.Commit();
@@ -230,7 +230,7 @@ public sealed class AdjacencyEpochTests : IDisposable
 
         reader.GetProperty(new EdgeId(0), "weight").Int64Value.Should().Be(10);
 
-        using var nextReader = _db.BeginReadOnlyTransaction();
+        using var nextReader = _db.BeginReadTransaction();
         nextReader.GetProperty(new EdgeId(0), "weight").Int64Value.Should().Be(20);
     }
 
@@ -240,13 +240,13 @@ public sealed class AdjacencyEpochTests : IDisposable
         BulkLoad(vertexCount: 3, edges: new[] { (0L, 1L), (0L, 2L) });
 
         using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteEdge(new EdgeId(0));
             tx.Commit();
         }
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using var tx2 = _db.BeginTransaction();
+        using var tx2 = _db.BeginWriteTransaction();
         tx2.AsInternal().AdjacencySegments!.IsTombstoned(new EdgeId(0)).Should().BeTrue();
         var neighbors = ExpandOut(tx2, new VertexId(0));
         neighbors.Should().BeEquivalentTo(new[] { 2L });
@@ -260,7 +260,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         BulkLoad(vertexCount: 5, edges: new[] { (0L, 1L), (0L, 2L) });
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             tx.CreateEdge(new VertexId(0), new VertexId(3), "R");
             tx.CreateEdge(new VertexId(0), new VertexId(4), "R");
@@ -268,14 +268,14 @@ public sealed class AdjacencyEpochTests : IDisposable
         }
 
         long epochBefore;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             epochBefore = tx.AsInternal().AdjacencySegments!.Epoch;
         }
 
         _db.CompactAdjacency();
 
-        using var txAfter = _db.BeginTransaction();
+        using var txAfter = _db.BeginWriteTransaction();
         txAfter.AsInternal().AdjacencySegments!.Epoch.Should().Be(epochBefore + 1);
         // After compact, BaseEdgeHwm must cover every live edge id — there are
         // 4 ids in [0..3] so hwm = 4.
@@ -290,19 +290,19 @@ public sealed class AdjacencyEpochTests : IDisposable
         BulkLoad(vertexCount: 4, edges: new[] { (0L, 1L), (0L, 2L), (0L, 3L) });
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             tx.DeleteEdge(new EdgeId(1)); // base edge 0→2
             tx.Commit();
         }
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             tx.AsInternal().AdjacencySegments!.IsTombstoned(new EdgeId(1)).Should().BeTrue();
         }
 
         _db.CompactAdjacency();
 
-        using var tx2 = _db.BeginTransaction();
+        using var tx2 = _db.BeginWriteTransaction();
         // After compact the deleted edge is physically gone, so the tombstone
         // for the *new* base has nothing to do — IsTombstoned should report false.
         tx2.AsInternal().AdjacencySegments!.IsTombstoned(new EdgeId(1)).Should().BeFalse();
@@ -317,7 +317,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         _db = QuiverDatabase.Open(
             System.IO.Path.Combine(_dir, "graph.quiver"),
             new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         Action act = () => _db.CompactAdjacency();
         act.Should().Throw<TransactionException>()
             .WithMessage("*write transaction*");
@@ -407,7 +407,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         loader.Commit();
     }
 
-    private static List<long> ExpandOut(IGraphTransaction tx, VertexId source)
+    private static List<long> ExpandOut(IReadTransaction tx, VertexId source)
     {
         // Going through Execute(ExpandOperator(...)) exercises the binary
         // backend's merged expand cursor (base via adjacency block, then delta

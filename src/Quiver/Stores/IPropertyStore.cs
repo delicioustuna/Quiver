@@ -13,6 +13,7 @@ internal interface IPropertyStore
         PropertyVersionRef currentFirst);
     PropertyVersionRef Delete(EntityRef owner, PropertyVersionRef version, PropertyVersionRef currentFirst);
     PropertyVersionRecord Read(EntityRef owner, PropertyVersionRef version);
+    PropertyVersionRecord Read(PropertyVersionRef version);
     PropertyCursor Enumerate(EntityRef owner, PropertyVersionRef firstVersion);
 }
 
@@ -33,6 +34,9 @@ internal interface ITransactionPropertyStore
         VersionVisible visibility);
     PropertyVersionRecord Read(
         EntityRef owner,
+        PropertyVersionRef version,
+        VersionVisible visibility);
+    PropertyVersionRecord Read(
         PropertyVersionRef version,
         VersionVisible visibility);
 }

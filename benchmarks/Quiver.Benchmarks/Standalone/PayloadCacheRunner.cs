@@ -56,7 +56,7 @@ public static class PayloadCacheRunner
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName,
             EntityKind.Vertex,
-            db.Schema.GetOrCreatePropertyKey("embedding"),
+            db.EditSchema(schema => schema.GetOrCreatePropertyKey("embedding")),
             dimensions,
             DistanceMetric.Cosine,
             "deterministic payload cache corpus"));
@@ -66,7 +66,7 @@ public static class PayloadCacheRunner
         const int batchSize = 1_000;
         for (int start = 0; start < count; start += batchSize)
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             int end = Math.Min(count, start + batchSize);
             for (int i = start; i < end; i++)
             {

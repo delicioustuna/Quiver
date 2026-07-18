@@ -16,7 +16,7 @@ try
     {
         Console.WriteLine();
         Console.WriteLine("[v1 schema] seeding 3 User vertices");
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         for (int i = 0; i < 3; i++)
         {
             var n = tx.CreateVertex("User");
@@ -45,13 +45,13 @@ try
         Console.WriteLine();
         Console.WriteLine("[v2 schema] verifying Person label + email index");
 
-        using var tx = db.BeginReadOnlyTransaction();
+        using var tx = db.BeginReadTransaction();
         // 公開 DSL でラベル別にVertexを数える (g.V().HasLabel(...).Count())。
-        long personCount = tx.G(db.Schema).Vertices().HasLabel("Person").Count();
+        long personCount = tx.Query.Vertices().HasLabel("Person").Count();
         Console.WriteLine($"  Person count = {personCount}");
 
         var indexes = db.Schema.ListIndexes()
-            .Select(i => $"{i.Name}({i.Label}.{i.PropertyKey}, {i.Kind})")
+            .Select(i => $"{i.Name}({i.Target.Scope}.{i.Target.PropertyKey}, {i.Kind})")
             .ToArray();
         Console.WriteLine($"  indexes = [{string.Join(", ", indexes)}]");
 
@@ -105,10 +105,7 @@ internal sealed class V1ToV2_UserToPersonWithEmailIndex : IMigration
         {
             var email = ctx.Transaction.GetProperty(vertexId, "email");
             if (email.Type == PropertyValueType.String)
-            {
-                var s = System.Text.Encoding.UTF8.GetString(email.Utf8StringValue);
-                ctx.Transaction.IndexInsert("idx_person_email", s, vertexId);
-            }
+                ctx.Transaction.SetProperty(vertexId, "email", email);
         });
 
         return Task.CompletedTask;

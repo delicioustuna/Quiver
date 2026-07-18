@@ -29,8 +29,8 @@ public class WeightedAdjBenchmarks
     private QuiverDatabase _v1Db = null!;
     private string _v2Path = null!;
     private string _v1Path = null!;
-    private IGraphTransaction _v2Tx = null!;
-    private IGraphTransaction _v1Tx = null!;
+    private IReadTransaction _v2Tx = null!;
+    private IReadTransaction _v1Tx = null!;
     private VertexId _hub;
     private const string WeightProp = "weight";
 
@@ -41,7 +41,7 @@ public class WeightedAdjBenchmarks
         _v2Path = BenchTempDir.Create("v2");
         {
             using var db = QuiverDatabase.Open(System.IO.Path.Combine(_v2Path, "graph.quiver"));
-            var key = db.Schema.GetOrCreatePropertyKey(WeightProp);
+            var key = db.EditSchema(schema => schema.GetOrCreatePropertyKey(WeightProp));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
             loader.WithPayloadLane(PayloadLaneSpec.ForInt64(key.Value));
             loader.AppendVertex(new VertexId(0), new LabelId(0));
@@ -55,7 +55,7 @@ public class WeightedAdjBenchmarks
             loader.Commit();
         }
         _v2Db = QuiverDatabase.Open(System.IO.Path.Combine(_v2Path, "graph.quiver"));
-        _v2Tx = _v2Db.BeginTransaction();
+        _v2Tx = _v2Db.BeginWriteTransaction();
 
         // Property path: bulk-load without payload lane, then set the weight via
         // edge properties so the linked-list walk has something to
@@ -75,7 +75,7 @@ public class WeightedAdjBenchmarks
                 }
                 loader.Commit();
             }
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             for (int i = 1; i <= Degree; i++)
             {
                 tx.SetProperty(new EdgeId(i - 1), WeightProp, PropertyValue.FromInt64(100L + i));
@@ -83,7 +83,7 @@ public class WeightedAdjBenchmarks
             tx.Commit();
         }
         _v1Db = QuiverDatabase.Open(System.IO.Path.Combine(_v1Path, "graph.quiver"));
-        _v1Tx = _v1Db.BeginTransaction();
+        _v1Tx = _v1Db.BeginWriteTransaction();
 
         _hub = new VertexId(0);
     }

@@ -53,7 +53,7 @@ public static class SpikeBReadPathRunner
             }
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
             var hub = new VertexId(0);
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             var adj = tx.AsInternal().AdjacencySegments!;
             var buf = new AdjacencyEntry[Math.Max(1024, degree + 16)];
 
