@@ -13,8 +13,8 @@ public class WeightedShortestPathOperatorTests
     public void Empty_source_yields_empty()
     {
         using var fx = OperatorTestFixture.OpenEmpty();
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("w");
-        using var tx = fx.Db.BeginTransaction();
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("w"));
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new WeightedShortestPathOperator(
             new FixedVertexListOperator(), 0, 0, Direction.Both, null, new PropertyChainWeightProvider(key)));
         result.Rows().Should().BeEmpty();
@@ -37,8 +37,8 @@ public class WeightedShortestPathOperatorTests
             tx.SetProperty(detour1, "w", PropertyValue.FromDouble(1.0));
             tx.SetProperty(detour2, "w", PropertyValue.FromDouble(1.0));
         });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("w");
-        using var tx2 = fx.Db.BeginTransaction();
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("w"));
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new WeightedShortestPathOperator(
             new PairSourceOperator(a, b), 0, 1, Direction.Outgoing, null, new PropertyChainWeightProvider(key)));
         result.Rows().Should().HaveCount(1);
@@ -51,8 +51,8 @@ public class WeightedShortestPathOperatorTests
     {
         VertexId a = default;
         using var fx = OperatorTestFixture.Open(tx => { a = tx.CreateVertex("X"); });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("w");
-        using var tx2 = fx.Db.BeginTransaction();
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("w"));
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new WeightedShortestPathOperator(
             new PairSourceOperator(a, a), 0, 1, Direction.Outgoing, null, new PropertyChainWeightProvider(key)));
         result.Rows().Single().GetDouble(2).Should().Be(0.0);
@@ -70,8 +70,8 @@ public class WeightedShortestPathOperatorTests
             var e = tx.CreateEdge(a, b, "K");
             tx.SetProperty(e, "w", PropertyValue.FromDouble(-1.0));
         });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("w");
-        using var tx2 = fx.Db.BeginTransaction();
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("w"));
+        using var tx2 = fx.Db.BeginWriteTransaction();
         var op = new WeightedShortestPathOperator(
             new PairSourceOperator(a, b), 0, 1, Direction.Outgoing, null, new PropertyChainWeightProvider(key));
         Action act = () => tx2.Execute(op);
@@ -91,8 +91,8 @@ public class WeightedShortestPathOperatorTests
             tx.CreateEdge(a, b, "K");
             tx.CreateEdge(b, c, "K");
         });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("w");
-        using var tx2 = fx.Db.BeginTransaction();
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("w"));
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new WeightedShortestPathOperator(
             new PairSourceOperator(a, c), 0, 1, Direction.Outgoing, null, new PropertyChainWeightProvider(key)));
         result.Rows().Single().GetDouble(2).Should().Be(2.0); // 1.0 + 1.0 default

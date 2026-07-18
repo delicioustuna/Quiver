@@ -14,10 +14,10 @@ namespace Quiver.Api;
 public sealed class TypedGraphTraversal<T> where T : IGraphVertex<T>
 {
     private readonly GraphTraversal<VertexId> _inner;
-    private readonly IGraphTransaction _tx;
-    private readonly ISchemaApi _schema;
+    private readonly IReadTransaction _tx;
+    private readonly ISchemaCatalog _schema;
 
-    internal TypedGraphTraversal(GraphTraversal<VertexId> inner, IGraphTransaction tx, ISchemaApi schema)
+    internal TypedGraphTraversal(GraphTraversal<VertexId> inner, IReadTransaction tx, ISchemaCatalog schema)
     {
         _inner = inner; _tx = tx; _schema = schema;
     }
@@ -192,7 +192,7 @@ public sealed class TypedGraphTraversal<T> where T : IGraphVertex<T>
 
     /// <summary>
     /// Set cardinality プロパティの全値を <see cref="List{TElem}"/> として取り出す。
-    /// 各Vertexに対し <see cref="IGraphTransaction.GetPropertyValues(VertexId, string)"/> を呼び、
+    /// 各Vertexに対し <see cref="IWriteTransaction.GetPropertyValues(VertexId, string)"/> を呼び、
     /// 要素を collect して返す。
     /// </summary>
     /// <typeparam name="TElem">リストの要素型。</typeparam>
@@ -353,7 +353,7 @@ public sealed class TypedGraphTraversal<T> where T : IGraphVertex<T>
     // 拡張は別クラスのため private フィールドへ届かない。ID のみで足りる経路は
     // エンティティ復元を避けるため ToListWithIds とは別に ID 列だけを返す。
 
-    internal IGraphTransaction Transaction => _tx;
+    internal IReadTransaction Transaction => _tx;
 
     internal List<VertexId> MaterializeIds() => _inner.ToList();
 

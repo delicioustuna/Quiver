@@ -24,8 +24,8 @@ public sealed class HybridSearchTests : IDisposable
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fts5_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
-        _db.Schema.CreateFullTextIndex(TextIndex, "Doc", "body");
-        var keyId = _db.Schema.GetOrCreatePropertyKey("embedding");
+        _db.EditSchema(schema => schema.CreateFullTextIndex(TextIndex, "Doc", "body"));
+        var keyId = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("embedding"));
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             VectorIndex, EntityKind.Vertex, keyId, Dim, DistanceMetric.Cosine, "test", null));
     }
@@ -39,7 +39,7 @@ public sealed class HybridSearchTests : IDisposable
     /// <summary>Creates a Doc with an optional body (full-text) and optional vector (KNN).</summary>
     private VertexId AddDoc(string? body, float[]? vector)
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var n = tx.CreateVertex("Doc");
         if (body is not null) tx.SetProperty(n, "body", PropertyValue.FromString(body));
         if (vector is not null) tx.SetVector(EntityKind.Vertex, n.Value, VectorIndex, vector);
@@ -49,8 +49,8 @@ public sealed class HybridSearchTests : IDisposable
 
     private List<VertexId> Hybrid(string queryText, float[] queryVector, int k)
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        return rtx.G(_db.Schema)
+        using var rtx = _db.BeginReadTransaction();
+        return rtx.Query
             .HybridSearch(TextIndex, queryText, VectorIndex, queryVector, k)
             .ToList();
     }
@@ -119,7 +119,7 @@ public sealed class HybridSearchTests : IDisposable
     public void Hybrid_search_composes_with_Out_traversal()
     {
         VertexId author;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             author = tx.CreateVertex("Author");
             var doc = tx.CreateVertex("Doc");
@@ -129,8 +129,8 @@ public sealed class HybridSearchTests : IDisposable
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var authors = rtx.G(_db.Schema)
+        using var rtx = _db.BeginReadTransaction();
+        var authors = rtx.Query
             .HybridSearch(TextIndex, "quiver", VectorIndex, new float[] { 1f, 0f, 0f, 0f }, k: 10)
             .Out("WROTE")
             .ToList();

@@ -18,10 +18,10 @@ namespace Quiver.Api;
 public sealed class TypedGraphNexusTraversal<TNexus> where TNexus : IGraphNexus<TNexus>
 {
     private readonly GraphTraversal<NexusId> _inner;
-    private readonly IGraphTransaction _tx;
-    private readonly ISchemaApi _schema;
+    private readonly IReadTransaction _tx;
+    private readonly ISchemaCatalog _schema;
 
-    internal TypedGraphNexusTraversal(GraphTraversal<NexusId> inner, IGraphTransaction tx, ISchemaApi schema)
+    internal TypedGraphNexusTraversal(GraphTraversal<NexusId> inner, IReadTransaction tx, ISchemaCatalog schema)
     {
         _inner = inner; _tx = tx; _schema = schema;
     }

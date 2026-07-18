@@ -46,11 +46,11 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     /// </summary>
     protected abstract IGraphStorageBackendFactory CreateFactory();
 
-    private IGraphTransaction BeginWrite() =>
-        _backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: false);
+    private IWriteTransaction BeginWrite() =>
+        _backend.BeginWriteTransaction();
 
-    private IGraphTransaction BeginRead() =>
-        _backend.BeginGraphTransaction(IsolationLevel.SnapshotIsolation, readOnly: true);
+    private IReadTransaction BeginRead() =>
+        _backend.BeginReadTransaction();
 
     private void Reopen()
     {
@@ -82,8 +82,8 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     [Fact]
     public void CreateVertex_with_LabelId_resolved_via_Schema_works()
     {
-        var labelId = _backend.Schema.GetOrCreateLabel("Asset");
         using var tx = BeginWrite();
+        var labelId = tx.EditSchema.GetOrCreateLabel("Asset");
         var id = tx.CreateVertex(labelId);
         tx.VertexExists(id).Should().BeTrue();
         tx.Commit();
@@ -251,38 +251,46 @@ public abstract class GraphStorageBackendContractTests : IDisposable
     // ===== インデックス検索 =====
 
     [Fact]
-    public void IndexInsert_string_then_SeekIndex_finds_vertex()
+    public void SetProperty_string_then_SeekIndex_finds_vertex()
     {
         using var tx = BeginWrite();
+        tx.EditSchema.CreateIndex(new ScalarIndexDefinition(
+            "idx_name",
+            new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"),
+            IndexKind.StringEquality));
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
-        tx.IndexInsert("idx_name", "Alice", alice);
-        tx.IndexInsert("idx_name", "Bob",   bob);
+        tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
+        tx.SetProperty(bob, "name", PropertyValue.FromString("Bob"));
 
         var en = tx.SeekIndex("idx_name", PropertyValue.FromString("Alice"));
-        var found = new List<VertexId>();
+        var found = new List<EntityRef>();
         while (en.MoveNext()) found.Add(en.Current);
         en.Dispose();
 
-        found.Should().ContainSingle().Which.Should().Be(alice);
+        found.Should().ContainSingle().Which.Should().Be(EntityRef.From(alice));
         tx.Commit();
     }
 
     [Fact]
-    public void IndexInsert_int64_then_SeekIndex_finds_vertex()
+    public void SetProperty_int64_then_SeekIndex_finds_vertex()
     {
         using var tx = BeginWrite();
+        tx.EditSchema.CreateIndex(new ScalarIndexDefinition(
+            "idx_score",
+            new PropertyTarget(PropertyOwnerKind.Vertex, "score", "Item"),
+            IndexKind.Int64Equality));
         var n42 = tx.CreateVertex("Item");
         var n99 = tx.CreateVertex("Item");
-        tx.IndexInsert("idx_score", 42L, n42);
-        tx.IndexInsert("idx_score", 99L, n99);
+        tx.SetProperty(n42, "score", PropertyValue.FromInt64(42L));
+        tx.SetProperty(n99, "score", PropertyValue.FromInt64(99L));
 
         var en = tx.SeekIndex("idx_score", PropertyValue.FromInt64(42L));
-        var found = new List<VertexId>();
+        var found = new List<EntityRef>();
         while (en.MoveNext()) found.Add(en.Current);
         en.Dispose();
 
-        found.Should().ContainSingle().Which.Should().Be(n42);
+        found.Should().ContainSingle().Which.Should().Be(EntityRef.From(n42));
         tx.Commit();
     }
 
@@ -427,7 +435,6 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         using var rtx = BeginRead();
         rtx.VertexExists(persisted).Should().BeTrue();
         rtx.GetProperty(persisted, "marker").Int64Value.Should().Be(7L);
-        rtx.Rollback();
     }
 
     [Fact]
@@ -469,7 +476,6 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         using var rtx = BeginRead();
         rtx.VertexExists(a).Should().BeFalse("rolled-back vertex A must be gone");
         rtx.VertexExists(b).Should().BeFalse("rolled-back vertex B must be gone");
-        rtx.Rollback();
     }
 
     [Fact]
@@ -487,7 +493,6 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         using var rtx = BeginRead();
         rtx.VertexExists(discarded).Should().BeFalse(
             "a write transaction disposed without Commit must discard its writes");
-        rtx.Rollback();
     }
 
     [Fact]
@@ -514,7 +519,6 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         rtx.VertexExists(keeper).Should().BeTrue("committed data survives an unrelated rollback");
         rtx.GetProperty(keeper, "v").Int64Value.Should().Be(7L,
             "a rolled-back property mutation must restore the committed value");
-        rtx.Rollback();
     }
 
     [Fact]
@@ -541,7 +545,6 @@ public abstract class GraphStorageBackendContractTests : IDisposable
             rtx.VertexExists(persisted).Should().BeFalse(
                 "非永続バックエンドは再オープン時に空の状態へ戻る");
         }
-        rtx.Rollback();
     }
 
     // ===== Savepoint / ネストした undo =====
@@ -567,7 +570,6 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         rtx.VertexExists(after).Should().BeFalse("savepoint 以後のVertexは消える");
         rtx.GetProperty(before, "k").Int64Value.Should().Be(1L,
             "savepoint 以後のプロパティ上書きは取り消される");
-        rtx.Rollback();
     }
 
     [Fact]
@@ -595,7 +597,6 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         rtx.VertexExists(n1).Should().BeTrue();
         rtx.VertexExists(n2).Should().BeFalse("RollbackTo(sp2) で n2 は消える");
         rtx.VertexExists(n3).Should().BeFalse("RollbackTo(sp2) で sp3 配下の n3 も消える");
-        rtx.Rollback();
     }
 
     [Fact]
@@ -615,7 +616,6 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         using var rtx = BeginRead();
         rtx.VertexExists(outer).Should().BeTrue();
         rtx.VertexExists(inner).Should().BeTrue("released savepoint 内の変更はコミットで永続化");
-        rtx.Rollback();
     }
 
     [Fact]
@@ -640,7 +640,6 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         // pre 以外のVertexは何も残らない (Throw1/Throw2 は両方とも消えた)。
         using var rtx = BeginRead();
         rtx.VertexExists(pre).Should().BeTrue();
-        rtx.Rollback();
     }
 
     [Fact]
@@ -687,6 +686,5 @@ public abstract class GraphStorageBackendContractTests : IDisposable
         using var rtx = BeginRead();
         rtx.VertexExists(committed).Should().BeTrue();
         rtx.GetProperty(committed, "v").Int64Value.Should().Be(42L);
-        rtx.Rollback();
     }
 }

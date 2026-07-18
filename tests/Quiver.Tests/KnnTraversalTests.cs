@@ -24,7 +24,7 @@ public sealed class KnnTraversalTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "quiver_vec5_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey("title");
+        var keyId = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("title"));
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "test", null));
@@ -42,7 +42,7 @@ public sealed class KnnTraversalTests : IDisposable
         // Three Doc vertices, each with a distinct one-hot vector so the
         // expected ranking is unambiguous.
         var ids = new long[3];
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 3; i++)
             {
@@ -55,8 +55,8 @@ public sealed class KnnTraversalTests : IDisposable
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // Query parallel to ids[1] → expect ids[1] first.
         var query = new float[] { 0f, 1f, 0f, 0f };
@@ -74,7 +74,7 @@ public sealed class KnnTraversalTests : IDisposable
         // at one Author via REFERENCES so the .Out() leg yields Author ids.
         var docIds = new long[3];
         var authorIds = new long[3];
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 3; i++)
             {
@@ -99,8 +99,8 @@ public sealed class KnnTraversalTests : IDisposable
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var query = new float[] { 0f, 1f, 0f, 0f };
         var authorsViaKnn = g.Knn(IndexName, query, k: 5)
@@ -119,8 +119,8 @@ public sealed class KnnTraversalTests : IDisposable
     [Fact]
     public void Knn_throws_on_dimension_mismatch()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var wrongDim = new float[Dim + 1];
         var act = () =>
@@ -134,8 +134,8 @@ public sealed class KnnTraversalTests : IDisposable
     [Fact]
     public void Knn_throws_on_unknown_index()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var act = () =>
         {

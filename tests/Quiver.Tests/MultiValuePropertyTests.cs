@@ -29,16 +29,16 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void AddPropertyValue_multiple_values_returned_by_GetPropertyValues()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n = tx.CreateVertex("Sensor");
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("v2"));
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("active"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         var values = Collect(ro.GetPropertyValues(n, "tags"));
         values.Should().HaveCount(3);
         values.Should().Contain("outdoor");
@@ -50,16 +50,16 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void Duplicate_add_is_skipped_set_semantics()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n = tx.CreateVertex("Sensor");
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("v2"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         var values = Collect(ro.GetPropertyValues(n, "tags"));
         values.Should().HaveCount(2);
     }
@@ -70,9 +70,9 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void RemovePropertyValue_removes_specific_value()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n = tx.CreateVertex("Sensor");
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("v2"));
@@ -80,7 +80,7 @@ public sealed class MultiValuePropertyTests : IDisposable
         tx.RemovePropertyValue(n, "tags", PropertyValue.FromString("v2"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         var values = Collect(ro.GetPropertyValues(n, "tags"));
         values.Should().HaveCount(2);
         values.Should().Contain("outdoor");
@@ -92,15 +92,15 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void RemovePropertyValue_nonexistent_is_noop()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n = tx.CreateVertex("Sensor");
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
         tx.RemovePropertyValue(n, "tags", PropertyValue.FromString("nonexistent"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         var values = Collect(ro.GetPropertyValues(n, "tags"));
         values.Should().ContainSingle().Which.Should().Be("outdoor");
     }
@@ -111,9 +111,9 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void SetProperty_on_Set_key_throws()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n = tx.CreateVertex("Sensor");
         var act = () => tx.SetProperty(n, "tags", PropertyValue.FromString("x"));
         act.Should().Throw<InvalidOperationException>().WithMessage("*AddPropertyValue*");
@@ -123,9 +123,9 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void AddPropertyValue_on_Single_key_throws()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("name", PropertyCardinality.Single);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("name", PropertyCardinality.Single));
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n = tx.CreateVertex("Sensor");
         var act = () => tx.AddPropertyValue(n, "name", PropertyValue.FromString("x"));
         act.Should().Throw<InvalidOperationException>();
@@ -135,14 +135,14 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void GetProperty_on_Set_key_throws()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n = tx.CreateVertex("Sensor");
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         bool threw = false;
         try { _ = ro.GetProperty(n, "tags"); }
         catch (InvalidOperationException) { threw = true; }
@@ -153,9 +153,9 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void RemovePropertyValue_on_Single_key_throws()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("name", PropertyCardinality.Single);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("name", PropertyCardinality.Single));
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n = tx.CreateVertex("Sensor");
         tx.SetProperty(n, "name", PropertyValue.FromString("hello"));
         var act = () => tx.RemovePropertyValue(n, "name", PropertyValue.FromString("hello"));
@@ -168,10 +168,10 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void Mvcc_snapshot_sees_pre_add_state()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
 
         VertexId n;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             n = tx.CreateVertex("Sensor");
             tx.AddPropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
@@ -179,9 +179,9 @@ public sealed class MultiValuePropertyTests : IDisposable
         }
 
         // Start read-only snapshot before the second write commits
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
 
-        using (var tx2 = db.BeginTransaction())
+        using (var tx2 = db.BeginWriteTransaction())
         {
             tx2.AddPropertyValue(n, "tags", PropertyValue.FromString("new-tag"));
             tx2.Commit();
@@ -198,9 +198,9 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void Edge_AddPropertyValue_and_GetPropertyValues()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("labels", PropertyCardinality.Set);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("labels", PropertyCardinality.Set));
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n1 = tx.CreateVertex("A");
         var n2 = tx.CreateVertex("B");
         var r = tx.CreateEdge(n1, n2, "KNOWS");
@@ -208,7 +208,7 @@ public sealed class MultiValuePropertyTests : IDisposable
         tx.AddPropertyValue(r, "labels", PropertyValue.FromString("colleague"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         var values = Collect(ro.GetPropertyValues(r, "labels"));
         values.Should().HaveCount(2);
         values.Should().Contain("friend");
@@ -219,9 +219,9 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void Edge_RemovePropertyValue()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("labels", PropertyCardinality.Set);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("labels", PropertyCardinality.Set));
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n1 = tx.CreateVertex("A");
         var n2 = tx.CreateVertex("B");
         var r = tx.CreateEdge(n1, n2, "KNOWS");
@@ -230,7 +230,7 @@ public sealed class MultiValuePropertyTests : IDisposable
         tx.RemovePropertyValue(r, "labels", PropertyValue.FromString("friend"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         var values = Collect(ro.GetPropertyValues(r, "labels"));
         values.Should().ContainSingle().Which.Should().Be("colleague");
     }
@@ -243,8 +243,8 @@ public sealed class MultiValuePropertyTests : IDisposable
         VertexId n;
         using (var db = QuiverDatabase.Open(_path))
         {
-            db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
-            using var tx = db.BeginTransaction();
+            db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
+            using var tx = db.BeginWriteTransaction();
             n = tx.CreateVertex("Sensor");
             tx.AddPropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
             tx.AddPropertyValue(n, "tags", PropertyValue.FromString("v2"));
@@ -253,7 +253,7 @@ public sealed class MultiValuePropertyTests : IDisposable
 
         using (var db = QuiverDatabase.Open(_path))
         {
-            using var ro = db.BeginReadOnlyTransaction();
+            using var ro = db.BeginReadTransaction();
             var values = Collect(ro.GetPropertyValues(n, "tags"));
             values.Should().HaveCount(2);
             values.Should().Contain("outdoor");
@@ -267,7 +267,7 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void GetPropertyValues_unknown_key_returns_empty()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n = tx.CreateVertex("Sensor");
         var values = Collect(tx.GetPropertyValues(n, "nonexistent"));
         values.Should().BeEmpty();
@@ -279,14 +279,14 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void AddPropertyValue_auto_creates_key_as_Set()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n = tx.CreateVertex("Sensor");
         // No prior Schema.GetOrCreatePropertyKey call — AddPropertyValue auto-creates
         tx.AddPropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
         tx.Commit();
 
         db.Schema.GetPropertyKeyCardinality(
-            db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set))
+            db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set)))
             .Should().Be(PropertyCardinality.Set);
     }
 
@@ -296,10 +296,10 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void Indexed_set_property_elements_found_by_SeekIndex()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
-        db.Schema.CreateIndex("idx_tags", "Sensor", "tags", IndexKind.StringEquality);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
+        db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_tags", new PropertyTarget(PropertyOwnerKind.Vertex, "tags", "Sensor"), IndexKind.StringEquality)));
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n1 = tx.CreateVertex("Sensor");
         tx.AddPropertyValue(n1, "tags", PropertyValue.FromString("outdoor"));
         tx.AddPropertyValue(n1, "tags", PropertyValue.FromString("v2"));
@@ -308,7 +308,7 @@ public sealed class MultiValuePropertyTests : IDisposable
         tx.AddPropertyValue(n2, "tags", PropertyValue.FromString("v2"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         // "outdoor" → only n1
         var outdoor = CollectVertices(ro.SeekIndex("idx_tags", PropertyValue.FromString("outdoor")));
         outdoor.Should().ContainSingle().Which.Should().Be(n1);
@@ -326,11 +326,11 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void RemovePropertyValue_removes_from_index()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
-        db.Schema.CreateIndex("idx_tags", "Sensor", "tags", IndexKind.StringEquality);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
+        db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_tags", new PropertyTarget(PropertyOwnerKind.Vertex, "tags", "Sensor"), IndexKind.StringEquality)));
 
         VertexId n;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             n = tx.CreateVertex("Sensor");
             tx.AddPropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
@@ -338,13 +338,13 @@ public sealed class MultiValuePropertyTests : IDisposable
             tx.Commit();
         }
 
-        using (var tx2 = db.BeginTransaction())
+        using (var tx2 = db.BeginWriteTransaction())
         {
             tx2.RemovePropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
             tx2.Commit();
         }
 
-        using var ro = db.BeginReadOnlyTransaction();
+        using var ro = db.BeginReadTransaction();
         var outdoor = CollectVertices(ro.SeekIndex("idx_tags", PropertyValue.FromString("outdoor")));
         outdoor.Should().BeEmpty();
         var v2 = CollectVertices(ro.SeekIndex("idx_tags", PropertyValue.FromString("v2")));
@@ -355,10 +355,10 @@ public sealed class MultiValuePropertyTests : IDisposable
     public void Has_traversal_uses_index_for_set_property()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
-        db.Schema.CreateIndex("idx_tags", "Sensor", "tags", IndexKind.StringEquality);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
+        db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_tags", new PropertyTarget(PropertyOwnerKind.Vertex, "tags", "Sensor"), IndexKind.StringEquality)));
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n1 = tx.CreateVertex("Sensor");
         tx.SetProperty(n1, "name", PropertyValue.FromString("sensor-1"));
         tx.AddPropertyValue(n1, "tags", PropertyValue.FromString("outdoor"));
@@ -368,8 +368,8 @@ public sealed class MultiValuePropertyTests : IDisposable
         tx.AddPropertyValue(n2, "tags", PropertyValue.FromString("indoor"));
         tx.Commit();
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var g = ro.G(db.Schema);
+        using var ro = db.BeginReadTransaction();
+        var g = ro.Query;
         var hits = g.Vertices().HasLabel("Sensor").Has("tags", "outdoor").ToList();
         hits.Should().ContainSingle().Which.Should().Be(n1);
     }
@@ -380,9 +380,9 @@ public sealed class MultiValuePropertyTests : IDisposable
         VertexId n;
         using (var db = QuiverDatabase.Open(_path))
         {
-            db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
-            db.Schema.CreateIndex("idx_tags", "Sensor", "tags", IndexKind.StringEquality);
-            using var tx = db.BeginTransaction();
+            db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
+            db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_tags", new PropertyTarget(PropertyOwnerKind.Vertex, "tags", "Sensor"), IndexKind.StringEquality)));
+            using var tx = db.BeginWriteTransaction();
             n = tx.CreateVertex("Sensor");
             tx.AddPropertyValue(n, "tags", PropertyValue.FromString("outdoor"));
             tx.AddPropertyValue(n, "tags", PropertyValue.FromString("v2"));
@@ -391,7 +391,7 @@ public sealed class MultiValuePropertyTests : IDisposable
 
         using (var db = QuiverDatabase.Open(_path))
         {
-            using var ro = db.BeginReadOnlyTransaction();
+            using var ro = db.BeginReadTransaction();
             var outdoor = CollectVertices(ro.SeekIndex("idx_tags", PropertyValue.FromString("outdoor")));
             outdoor.Should().ContainSingle().Which.Should().Be(n);
             var v2 = CollectVertices(ro.SeekIndex("idx_tags", PropertyValue.FromString("v2")));
@@ -407,17 +407,17 @@ public sealed class MultiValuePropertyTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
         db.EnsureIndexes<MvSensor>();
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
-            var g = tx.G(db.Schema);
-            g.InsertIndexed(new MvSensor { Site = "A", Tags = ["outdoor", "v2"] });
-            g.InsertIndexed(new MvSensor { Site = "B", Tags = ["indoor", "v2"] });
-            g.InsertIndexed(new MvSensor { Site = "C", Tags = ["outdoor"] });
+            var g = tx.Query;
+            tx.Mutate.InsertIndexed(new MvSensor { Site = "A", Tags = ["outdoor", "v2"] });
+            tx.Mutate.InsertIndexed(new MvSensor { Site = "B", Tags = ["indoor", "v2"] });
+            tx.Mutate.InsertIndexed(new MvSensor { Site = "C", Tags = ["outdoor"] });
             tx.Commit();
         }
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var g2 = ro.G(db.Schema);
+        using var ro = db.BeginReadTransaction();
+        var g2 = ro.Query;
 
         // "outdoor" → A, C
         var outdoor = g2.Vertices<MvSensor>()
@@ -444,16 +444,16 @@ public sealed class MultiValuePropertyTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
         db.EnsureIndexes<MvSensor>();
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
-            var g = tx.G(db.Schema);
-            g.InsertIndexed(new MvSensor { Site = "A", Tags = ["outdoor", "v2"] });
-            g.InsertIndexed(new MvSensor { Site = "B", Tags = ["indoor"] });
+            var g = tx.Query;
+            tx.Mutate.InsertIndexed(new MvSensor { Site = "A", Tags = ["outdoor", "v2"] });
+            tx.Mutate.InsertIndexed(new MvSensor { Site = "B", Tags = ["indoor"] });
             tx.Commit();
         }
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var allTags = ro.G(db.Schema)
+        using var ro = db.BeginReadTransaction();
+        var allTags = ro.Query
                         .Vertices<MvSensor>()
                         .Values(s => s.Tags)
                         .ToList();
@@ -468,16 +468,16 @@ public sealed class MultiValuePropertyTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
         db.EnsureIndexes<MvSensor>();
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
-            var g = tx.G(db.Schema);
-            g.InsertIndexed(new MvSensor { Site = "A", Floor = 1, Tags = ["outdoor"] });
-            g.InsertIndexed(new MvSensor { Site = "B", Floor = 2, Tags = ["outdoor"] });
+            var g = tx.Query;
+            tx.Mutate.InsertIndexed(new MvSensor { Site = "A", Floor = 1, Tags = ["outdoor"] });
+            tx.Mutate.InsertIndexed(new MvSensor { Site = "B", Floor = 2, Tags = ["outdoor"] });
             tx.Commit();
         }
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var result = ro.G(db.Schema)
+        using var ro = db.BeginReadTransaction();
+        var result = ro.Query
                        .Vertices<MvSensor>()
                        .Has(s => s.Tags, "outdoor")
                        .Where(s => s.Floor > 1)
@@ -491,15 +491,15 @@ public sealed class MultiValuePropertyTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
         db.EnsureIndexes<MvSensor>();
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
-            var g = tx.G(db.Schema);
-            g.InsertIndexed(new MvSensor { Site = "A", Tags = [] });
+            var g = tx.Query;
+            tx.Mutate.InsertIndexed(new MvSensor { Site = "A", Tags = [] });
             tx.Commit();
         }
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var allTags = ro.G(db.Schema)
+        using var ro = db.BeginReadTransaction();
+        var allTags = ro.Query
                         .Vertices<MvSensor>()
                         .Values(s => s.Tags)
                         .ToList();
@@ -517,11 +517,12 @@ public sealed class MultiValuePropertyTests : IDisposable
         return result;
     }
 
-    private static List<VertexId> CollectVertices(VertexIdEnumerator enumerator)
+    private static List<VertexId> CollectVertices(EntityRefEnumerator enumerator)
     {
         var result = new List<VertexId>();
         while (enumerator.MoveNext())
-            result.Add(enumerator.Current);
+            if (enumerator.Current.Kind == EntityKind.Vertex)
+                result.Add(new VertexId(enumerator.Current.Value));
         return result;
     }
 }

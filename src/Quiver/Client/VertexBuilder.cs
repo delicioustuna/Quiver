@@ -10,11 +10,11 @@ namespace Quiver.Api;
 /// </summary>
 public sealed class VertexBuilder
 {
-    private readonly IGraphTransaction _tx;
+    private readonly IWriteTransaction _tx;
     private readonly string _label;
-    private readonly List<Action<IGraphTransaction, VertexId>> _props = new();
+    private readonly List<Action<IWriteTransaction, VertexId>> _props = new();
 
-    internal VertexBuilder(IGraphTransaction tx, string label) { _tx = tx; _label = label; }
+    internal VertexBuilder(IWriteTransaction tx, string label) { _tx = tx; _label = label; }
 
     /// <summary>文字列プロパティを追加する。</summary>
     public VertexBuilder P(string key, string value)  { _props.Add((tx, id) => tx.SetProperty(id, key, PropertyValue.FromString(value))); return this; }

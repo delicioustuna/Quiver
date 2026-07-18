@@ -39,8 +39,8 @@ public sealed class RagSearcher
         if (!hasText && !hasVector) return Array.Empty<RagHit>();
 
         var db = _store.Database;
-        using var tx = db.BeginReadOnlyTransaction();
-        var g = tx.G(db.Schema);
+        using var tx = db.BeginReadTransaction();
+        var g = tx.Query;
 
         // 1) ランク順のチャンク VertexId を取得 (score は伝播しないので順位 = relevance)。
         //    MetadataEquals があれば一致文書のチャンクに母集団を絞ってから検索する (push-down)。
@@ -83,7 +83,7 @@ public sealed class RagSearcher
     /// 通常の text-first / vector-first / hybrid 検索を行う。
     /// </summary>
     private List<VertexId> RankHits(
-        IGraphTransaction tx, GraphTraversalSource g,
+        IReadTransaction tx, GraphTraversalSource g,
         string queryText, float[]? queryVector, bool hasText, bool hasVector, RagSearchOptions options)
     {
         if (options.MetadataEquals is not { Count: > 0 } equals)
@@ -118,7 +118,7 @@ public sealed class RagSearcher
     /// Document ラベルスキャン (LabelVertexIndex があれば O(|Document|)) 1 回 + 各文書の HAS_CHUNK 列挙。
     /// </summary>
     private static VertexId[] CollectCandidateChunks(
-        IGraphTransaction tx, GraphTraversalSource g, IReadOnlyDictionary<string, string> equals)
+        IReadTransaction tx, GraphTraversalSource g, IReadOnlyDictionary<string, string> equals)
     {
         var cands = new List<VertexId>();
         foreach (var docId in g.Vertices().HasLabel(RagSchema.DocumentLabel).ToList())
@@ -134,7 +134,7 @@ public sealed class RagSearcher
 
     /// <summary>文書の metadataJson が <paramref name="equals"/> の全キーを期待値で満たすか (AND)。</summary>
     private static bool MatchesMetadataEquals(
-        IGraphTransaction tx, VertexId docId, IReadOnlyDictionary<string, string> equals)
+        IReadTransaction tx, VertexId docId, IReadOnlyDictionary<string, string> equals)
     {
         var meta = ParseMetadataJson(ReadStringOrEmpty(tx, docId, RagSchema.PropMetadataJson));
         foreach (var kv in equals)
@@ -183,7 +183,7 @@ public sealed class RagSearcher
 
     // ── ヒット展開 ──
 
-    private static bool TryReadChunk(IGraphTransaction tx, VertexId id, out ChunkInfo info)
+    private static bool TryReadChunk(IReadTransaction tx, VertexId id, out ChunkInfo info)
     {
         info = default;
         if (!tx.VertexExists(id) || !tx.HasProperty(id, RagSchema.PropText)) return false;
@@ -197,7 +197,7 @@ public sealed class RagSearcher
         return true;
     }
 
-    private static VertexId? FindDocumentOf(IGraphTransaction tx, VertexId chunk)
+    private static VertexId? FindDocumentOf(IReadTransaction tx, VertexId chunk)
     {
         var e = tx.EnumerateEdges(chunk, Direction.Incoming, RagSchema.HasChunkType);
         return e.MoveNext() ? e.Current.Source : null;
@@ -205,7 +205,7 @@ public sealed class RagSearcher
 
     /// <summary>center から NEXT_CHUNK を前後 <paramref name="n"/> 件ずつ辿って近傍チャンクを集める。</summary>
     private static List<ChunkInfo> ExpandNeighborhood(
-        IGraphTransaction tx, VertexId center, ChunkInfo centerInfo, int n)
+        IReadTransaction tx, VertexId center, ChunkInfo centerInfo, int n)
     {
         var list = new List<ChunkInfo> { centerInfo };
         if (n <= 0) return list;
@@ -230,7 +230,7 @@ public sealed class RagSearcher
         return list;
     }
 
-    private static VertexId? StepNextChunk(IGraphTransaction tx, VertexId vertex, Direction dir)
+    private static VertexId? StepNextChunk(IReadTransaction tx, VertexId vertex, Direction dir)
     {
         var e = tx.EnumerateEdges(vertex, dir, RagSchema.NextChunkType);
         if (!e.MoveNext()) return null;
@@ -240,7 +240,7 @@ public sealed class RagSearcher
     // ── マージ ──
 
     private static List<RagHit> MergeHits(
-        IGraphTransaction tx, List<ExpandedHit> hits, RagSearchOptions options)
+        IReadTransaction tx, List<ExpandedHit> hits, RagSearchOptions options)
     {
         var result = new List<RagHit>();
 
@@ -326,25 +326,25 @@ public sealed class RagSearcher
 
     // ── プロパティ読み取り ──
 
-    private static RagDocumentRef ReadDocRef(IGraphTransaction tx, VertexId docId)
+    private static RagDocumentRef ReadDocRef(IReadTransaction tx, VertexId docId)
         => new(ReadStringOrEmpty(tx, docId, RagSchema.PropSourceId),
                ReadStringOrEmpty(tx, docId, RagSchema.PropTitle));
 
-    private static RagMetadata ReadMetadata(IGraphTransaction tx, VertexId docId)
+    private static RagMetadata ReadMetadata(IReadTransaction tx, VertexId docId)
         => new(ReadStringOrEmpty(tx, docId, RagSchema.PropSourceId),
                ReadStringOrEmpty(tx, docId, RagSchema.PropTitle),
                ParseMetadataJson(ReadStringOrEmpty(tx, docId, RagSchema.PropMetadataJson)));
 
-    private static string ReadString(IGraphTransaction tx, VertexId id, string key)
+    private static string ReadString(IReadTransaction tx, VertexId id, string key)
     {
         var pv = tx.GetProperty(id, key);
         return pv.Type == PropertyValueType.String ? Encoding.UTF8.GetString(pv.Utf8StringValue) : string.Empty;
     }
 
-    private static string ReadStringOrEmpty(IGraphTransaction tx, VertexId id, string key)
+    private static string ReadStringOrEmpty(IReadTransaction tx, VertexId id, string key)
         => tx.HasProperty(id, key) ? ReadString(tx, id, key) : string.Empty;
 
-    private static int ReadInt(IGraphTransaction tx, VertexId id, string key, int fallback)
+    private static int ReadInt(IReadTransaction tx, VertexId id, string key, int fallback)
         => tx.HasProperty(id, key) ? tx.GetProperty(id, key).Int32Value : fallback;
 
     private static IReadOnlyDictionary<string, string> ParseMetadataJson(string json)

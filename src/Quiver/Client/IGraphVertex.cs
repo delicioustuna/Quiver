@@ -14,17 +14,17 @@ public interface IGraphVertex<TSelf> where TSelf : IGraphVertex<TSelf>
     static abstract string GraphLabel { get; }
 
     /// <summary>新規Vertexを作成してプロパティを書き込み、その ID を返す。</summary>
-    static abstract VertexId Insert(IGraphTransaction tx, TSelf entity);
+    static abstract VertexId Insert(IWriteTransaction tx, TSelf entity);
 
     /// <summary><see cref="Insert"/> に加え、<c>[Indexed]</c> プロパティを対応インデックスへ登録する。</summary>
-    static abstract VertexId InsertIndexed(IGraphTransaction tx, TSelf entity);
+    static abstract VertexId InsertIndexed(IWriteTransaction tx, TSelf entity);
 
     /// <summary>指定 ID のVertexを読み込み、<typeparamref name="TSelf"/> インスタンスとして復元する。</summary>
-    static abstract TSelf Load(IGraphTransaction tx, VertexId id);
+    static abstract TSelf Load(IReadTransaction tx, VertexId id);
 
     /// <summary>指定 ID のVertexのプロパティを <paramref name="entity"/> で上書きする。</summary>
-    static abstract void Update(IGraphTransaction tx, VertexId id, TSelf entity);
+    static abstract void Update(IWriteTransaction tx, VertexId id, TSelf entity);
 
     /// <summary>指定 ID のVertexを削除する。</summary>
-    static abstract void Delete(IGraphTransaction tx, VertexId id);
+    static abstract void Delete(IWriteTransaction tx, VertexId id);
 }

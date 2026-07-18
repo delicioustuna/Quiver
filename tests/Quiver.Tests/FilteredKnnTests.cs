@@ -24,7 +24,7 @@ public sealed class FilteredKnnTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "quiver_vec6_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey("title");
+        var keyId = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("title"));
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "test", null));
@@ -44,7 +44,7 @@ public sealed class FilteredKnnTests : IDisposable
         // then to a specific Doc.
         var docIds = new long[5];
         var articleIds = new long[5];
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 5; i++)
             {
@@ -66,8 +66,8 @@ public sealed class FilteredKnnTests : IDisposable
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var query = new float[] { 1f, 0f, 0f, 0f };
         var topDocs = g.Vertices().HasLabel("Doc")
@@ -84,15 +84,15 @@ public sealed class FilteredKnnTests : IDisposable
     [Fact]
     public void FilterByKnn_returns_empty_when_no_candidates()
     {
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var n = tx.CreateVertex("Doc");
             tx.SetVector(EntityKind.Vertex, n.Value, IndexName, new float[] { 1, 0, 0, 0 });
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // No vertices carry the label "Missing" → candidate set is empty →
         // KnnSearchFiltered must short-circuit, not throw or return Docs.
@@ -110,7 +110,7 @@ public sealed class FilteredKnnTests : IDisposable
         // the lowest-scoring vectors against the query. The oversample loop
         // must enlarge candidateK until it surfaces them.
         var docIds = new List<long>();
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 50; i++)
             {
@@ -126,8 +126,8 @@ public sealed class FilteredKnnTests : IDisposable
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var result = g.Vertices().HasLabel("Doc")
             .FilterByKnn(IndexName, new float[] { 1, 0, 0, 0 }, k: 2)

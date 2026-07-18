@@ -11,7 +11,7 @@ public sealed class SnapshotOptions
     /// </summary>
     /// <remarks>
     /// 別ストレージで索引を独立ファイルに持つバックエンドのための互換オプション。
-    /// <c>false</c> のときは target を開いた後に<see cref="ISchemaApi.CreateIndex"/> で再構築が必要。
+    /// <c>false</c> のときは target を開いた後に<see cref="ISchemaEditor.CreateIndex"/> で再構築が必要。
     /// </remarks>
     // binary backend では索引は <c>graph.quiver</c> 本体のページとして同居するため、
     // 物理 page-by-page コピーから索引だけを除外することはできない (本フラグは binary backend では

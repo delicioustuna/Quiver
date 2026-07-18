@@ -17,10 +17,10 @@ public interface IGraphVertexSchema<TSelf> where TSelf : IGraphVertexSchema<TSel
     /// <summary>
     /// <c>[Indexed]</c> が付与された全プロパティについて、属性で指定された
     /// インデックス名 (省略時 <c>idx_{label}_{propertyName}</c>) と C# 型から推論した
-    /// <see cref="IndexKind"/> で <see cref="ISchemaApi.CreateIndex"/> を冪等に呼び出す。
+    /// <see cref="IndexKind"/> で <see cref="ISchemaEditor.CreateIndex"/> を冪等に呼び出す。
     /// 起動時に一度呼べばよい。
     /// </summary>
-    static abstract void EnsureIndexes(ISchemaApi schema);
+    static abstract void EnsureIndexes(ISchemaEditor schema);
 
     /// <summary>
     /// 単一プロパティのインデックスを冪等に作成する。<paramref name="propertyName"/> は呼び出し側
@@ -32,13 +32,13 @@ public interface IGraphVertexSchema<TSelf> where TSelf : IGraphVertexSchema<TSel
     /// <exception cref="ArgumentException">
     /// <paramref name="propertyName"/> が <c>[Indexed]</c> を持たない場合。
     /// </exception>
-    static abstract void EnsureIndex(ISchemaApi schema, string propertyName, IndexKind? kindOverride);
+    static abstract void EnsureIndex(ISchemaEditor schema, string propertyName, IndexKind? kindOverride);
 }
 
 /// <summary>
 /// <see cref="IGraphVertexSchema{TSelf}"/> を実装した型に対するスキーマ操作の糖衣 API。
 /// </summary>
-public static class QuiverDatabaseSchemaExtensions
+public static class SchemaEditorExtensions
 {
     /// <summary>
     /// <c>[Indexed]</c> 付き全プロパティのインデックスを一括作成する。
@@ -48,8 +48,8 @@ public static class QuiverDatabaseSchemaExtensions
     /// db.EnsureIndexes&lt;Person&gt;;   //起動時に一度
     /// </code>
     /// </example>
-    public static void EnsureIndexes<T>(this QuiverDatabase db) where T : IGraphVertexSchema<T>
-        => T.EnsureIndexes(db.Schema);
+    public static void EnsureIndexes<T>(this ISchemaEditor schema) where T : IGraphVertexSchema<T>
+        => T.EnsureIndexes(schema);
 
     /// <summary>
     /// 単一プロパティ用のインデックスを冪等に作成する (既存なら何もしない)。
@@ -63,12 +63,12 @@ public static class QuiverDatabaseSchemaExtensions
     /// </code>
     /// </example>
     public static void EnsureIndex<T>(
-        this QuiverDatabase db,
+        this ISchemaEditor schema,
         Expression<Func<T, object?>> propertySelector,
         IndexKind? kindOverride = null) where T : IGraphVertexSchema<T>
     {
         var name = ExtractMemberName(propertySelector.Body);
-        T.EnsureIndex(db.Schema, name, kindOverride);
+        T.EnsureIndex(schema, name, kindOverride);
     }
 
     private static string ExtractMemberName(Expression body)

@@ -48,12 +48,12 @@ public sealed class ApplyDyadicOperatorTests
     {
         using var fx = CreateFixtureWithVectors(0, tag: "dyadic_empty");
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var source = new FixedVertexListOperator(); // no candidates
         var op = new ApplyDyadicOperator(
             source, 0, VecIndex, [1f, 0f, 0f, 0f], null, 0,
             null, 3, WrapScorer(new DotProductOp()), typeof(DotProductOp));
-        op.Open(((GraphTransaction)tx).Inner);
+        op.Open(tx.AsInternal().Inner);
         op.MoveNext().Should().BeFalse();
         op.Dispose();
         tx.Rollback();
@@ -67,8 +67,8 @@ public sealed class ApplyDyadicOperatorTests
             tx.CreateVertex("A");
         }, tag: "dyadic_no_idx");
 
-        using var tx = fx.Db.BeginTransaction();
-        var n = fx.Db.BeginReadOnlyTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
+        var n = fx.Db.BeginReadTransaction();
         // グラフから有効なVertex ID を取得する。
         var source = new AllVerticesScanOperator();
         var op = new ApplyDyadicOperator(
@@ -76,7 +76,7 @@ public sealed class ApplyDyadicOperatorTests
             null, 3, WrapScorer(new DotProductOp()), typeof(DotProductOp));
         n.Dispose();
 
-        Action act = () => op.Open(((GraphTransaction)tx).Inner);
+        Action act = () => op.Open(tx.AsInternal().Inner);
         act.Should().Throw<VectorException>().WithMessage("*does not exist*");
         op.Dispose();
         tx.Rollback();
@@ -94,12 +94,12 @@ public sealed class ApplyDyadicOperatorTests
                     [1f, 0f, 0f, 0f]);
             });
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var source = new FixedVertexListOperator(vertexId);
         var op = new ApplyDyadicOperator(
             source, 0, VecIndex, [1f, 0f, 0f, 0f], null, 0,
             null, 3, WrapScorer(new DotProductOp()), typeof(DotProductOp));
-        op.Open(((GraphTransaction)tx).Inner);
+        op.Open(tx.AsInternal().Inner);
         op.MoveNext().Should().BeTrue();
         op.MoveNext().Should().BeFalse();
         op.Statistics.RowsProduced.Should().Be(1);
@@ -125,12 +125,12 @@ public sealed class ApplyDyadicOperatorTests
                     [0.3f, 0f, 0f, 0f]);
             });
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var source = new FixedVertexListOperator(ids);
         var op = new ApplyDyadicOperator(
             source, 0, VecIndex, [1f, 0f, 0f, 0f], null, 0,
             null, 10, WrapScorer(new DotProductOp()), typeof(DotProductOp));
-        op.Open(((GraphTransaction)tx).Inner);
+        op.Open(tx.AsInternal().Inner);
 
         var results = OperatorCollect.Collect(op);
         results.Should().HaveCount(3);
@@ -158,12 +158,12 @@ public sealed class ApplyDyadicOperatorTests
                     [0f, 1f, 0f, 0f]);
             });
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var source = new FixedVertexListOperator(ids);
         var op = new ApplyDyadicOperator(
             source, 0, VecIndex, [1f, 0f, 0f, 0f], null, 0,
             null, 10, WrapScorer(new CosineSimilarityOp()), typeof(CosineSimilarityOp));
-        op.Open(((GraphTransaction)tx).Inner);
+        op.Open(tx.AsInternal().Inner);
 
         var results = OperatorCollect.Collect(op);
         results.Should().HaveCount(2);
@@ -188,12 +188,12 @@ public sealed class ApplyDyadicOperatorTests
                     [0f, 0f, 0f, 1f]);
             });
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var source = new FixedVertexListOperator(ids);
         var op = new ApplyDyadicOperator(
             source, 0, VecIndex, [1f, 0f, 0f, 0f], null, 0,
             null, 10, WrapScorer(new EuclideanDistanceOp()), typeof(EuclideanDistanceOp));
-        op.Open(((GraphTransaction)tx).Inner);
+        op.Open(tx.AsInternal().Inner);
 
         var results = OperatorCollect.Collect(op);
         results.Should().HaveCount(2);
@@ -220,12 +220,12 @@ public sealed class ApplyDyadicOperatorTests
                 }
             });
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var source = new FixedVertexListOperator(ids);
         var op = new ApplyDyadicOperator(
             source, 0, VecIndex, [1f, 0f, 0f, 0f], null, 0,
             null, 2, WrapScorer(new DotProductOp()), typeof(DotProductOp));
-        op.Open(((GraphTransaction)tx).Inner);
+        op.Open(tx.AsInternal().Inner);
 
         var results = OperatorCollect.Collect(op);
         results.Should().HaveCount(2);
@@ -249,12 +249,12 @@ public sealed class ApplyDyadicOperatorTests
                 }
             });
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var source = new FixedVertexListOperator(ids);
         var op = new ApplyDyadicOperator(
             source, 0, VecIndex, [1f, 0f, 0f, 0f], null, 0,
             null, 10, WrapScorer(new DotProductOp()), typeof(DotProductOp));
-        op.Open(((GraphTransaction)tx).Inner);
+        op.Open(tx.AsInternal().Inner);
         var count = 0;
         while (op.MoveNext()) count++;
         op.Statistics.RowsProduced.Should().Be(count);
@@ -274,14 +274,14 @@ public sealed class ApplyDyadicOperatorTests
                     [1f, 0f, 0f, 0f]);
             });
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var source = new FixedVertexListOperator(ids);
         DyadicScoreFunc nanScorer = (a, b, r) => float.NaN;
         var op = new ApplyDyadicOperator(
             source, 0, VecIndex, [1f, 0f, 0f, 0f], null, 0,
             null, 3, nanScorer, typeof(NaNTestOp));
 
-        Action act = () => op.Open(((GraphTransaction)tx).Inner);
+        Action act = () => op.Open(tx.AsInternal().Inner);
         act.Should().Throw<VectorException>().WithMessage("*NaN*");
         op.Dispose();
         tx.Rollback();
@@ -306,7 +306,7 @@ public sealed class ApplyDyadicOperatorTests
 
         if (vertexCount > 0 || seedVectors is not null)
         {
-            var keyId = fx.Db.Schema.GetOrCreatePropertyKey(VecIndex);
+            var keyId = fx.EditSchema(schema => schema.GetOrCreatePropertyKey(VecIndex));
             fx.Db.Vectors.CreateVectorIndex(new VectorIndexSpec(
                 VecIndex, EntityKind.Vertex, keyId, Dim,
                 DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly));

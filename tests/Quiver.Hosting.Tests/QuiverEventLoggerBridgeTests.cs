@@ -35,7 +35,7 @@ public sealed class QuiverEventLoggerBridgeTests : IDisposable
         var db = provider.GetRequiredService<QuiverDatabase>();
 
         long txId;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             txId = tx.Id.Value;
             tx.CreateVertex("Person");
@@ -62,7 +62,7 @@ public sealed class QuiverEventLoggerBridgeTests : IDisposable
         using var provider = services.BuildServiceProvider();
         var db = provider.GetRequiredService<QuiverDatabase>();
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         tx.CreateVertex("Person");
         tx.Commit();
     }

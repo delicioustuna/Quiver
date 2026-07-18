@@ -40,7 +40,7 @@ public sealed class NexusTypedTraversalTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
 
         VertexId alice, acme;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             alice = Person.Insert(tx, new Person { Name = "Alice" });
             acme = Company.Insert(tx, new Company { Name = "Acme" });
@@ -54,8 +54,8 @@ public sealed class NexusTypedTraversalTests : IDisposable
             tx.Commit();
         }
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var g = ro.G(db.Schema);
+        using var ro = db.BeginReadTransaction();
+        var g = ro.Query;
 
         var typed = g.Vertices<Person>().Has(p => p.Name, "Alice")
             .EmploymentAsEmployee().Employer().ToListWithIds();
@@ -74,7 +74,7 @@ public sealed class NexusTypedTraversalTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
 
         VertexId a, b, c;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             a = Person.Insert(tx, new Person { Name = "A" });
             b = Person.Insert(tx, new Person { Name = "B" });
@@ -90,8 +90,8 @@ public sealed class NexusTypedTraversalTests : IDisposable
             tx.Commit();
         }
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var g = ro.G(db.Schema);
+        using var ro = db.BeginReadTransaction();
+        var g = ro.Query;
 
         // 複数メンバーロールは各メンバーVertexを個別の行として放出する。
         var typed = g.Vertices<Person>().Has(p => p.Name, "A")
@@ -118,7 +118,7 @@ public sealed class NexusTypedTraversalTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
 
         VertexId a, hq;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             a = Person.Insert(tx, new Person { Name = "A" });
             var b = Person.Insert(tx, new Person { Name = "B" });
@@ -141,8 +141,8 @@ public sealed class NexusTypedTraversalTests : IDisposable
             tx.Commit();
         }
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var g = ro.G(db.Schema);
+        using var ro = db.BeginReadTransaction();
+        var g = ro.Query;
 
         var typed = g.Vertices<Person>().Has(p => p.Name, "A")
             .MeetingAsOrganizer().Venue().ToListWithIds();
@@ -159,7 +159,7 @@ public sealed class NexusTypedTraversalTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
 
         VertexId alice, bob;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             alice = Person.Insert(tx, new Person { Name = "Alice" });
             bob = Person.Insert(tx, new Person { Name = "Bob" });
@@ -170,8 +170,8 @@ public sealed class NexusTypedTraversalTests : IDisposable
             tx.Commit();
         }
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var g = ro.G(db.Schema);
+        using var ro = db.BeginReadTransaction();
+        var g = ro.Query;
 
         // Subject ロールで参加する Statement の Object メンバー。
         var typedObjects = g.Vertices<Person>().Has(p => p.Name, "Alice")
@@ -198,7 +198,7 @@ public sealed class NexusTypedTraversalTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
 
         VertexId alice, acme, globex;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             alice = Person.Insert(tx, new Person { Name = "Alice" });
             acme = Company.Insert(tx, new Company { Name = "Acme" });
@@ -214,8 +214,8 @@ public sealed class NexusTypedTraversalTests : IDisposable
             tx.Commit();
         }
 
-        using var ro = db.BeginReadOnlyTransaction();
-        var g = ro.G(db.Schema);
+        using var ro = db.BeginReadTransaction();
+        var g = ro.Query;
 
         // Nexusプロパティの式ツリーフィルタは型なし Has(key, value) と同じ述語になる。
         var typed = g.Vertices<Person>().Has(p => p.Name, "Alice")

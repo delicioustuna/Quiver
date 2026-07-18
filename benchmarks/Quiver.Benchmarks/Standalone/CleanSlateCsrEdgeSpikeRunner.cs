@@ -36,7 +36,7 @@ public static class CleanSlateCsrEdgeSpikeRunner
                 corpus = BuildCorpus(buildDb, degree);
 
             using var db = QuiverDatabase.Open(path);
-            using var read = db.BeginReadOnlyTransaction();
+            using var read = db.BeginReadTransaction();
             int warmup = CountPredicateMatches(read, corpus.Hub);
             if (warmup != corpus.ExpectedMatches)
             {
@@ -98,9 +98,9 @@ public static class CleanSlateCsrEdgeSpikeRunner
 
     private static CsrCorpus BuildCorpus(QuiverDatabase db, int degree)
     {
-        var label = db.Schema.GetOrCreateLabel("V");
-        var type = db.Schema.GetOrCreateEdgeType("LINK");
-        var scoreKey = db.Schema.GetOrCreatePropertyKey(ScoreKey);
+        var label = db.EditSchema(schema => schema.GetOrCreateLabel("V"));
+        var type = db.EditSchema(schema => schema.GetOrCreateEdgeType("LINK"));
+        var scoreKey = db.EditSchema(schema => schema.GetOrCreatePropertyKey(ScoreKey));
         var payload = PayloadLaneSpec.ForInt64(scoreKey.Value);
 
         int vertexCount = 1 + degree + degree * degree;
@@ -165,7 +165,7 @@ public static class CleanSlateCsrEdgeSpikeRunner
         scoreByEdge[edgeSequence] = score;
     }
 
-    private static int CountPredicateMatches(IGraphTransaction read, VertexId hub)
+    private static int CountPredicateMatches(IReadTransaction read, VertexId hub)
     {
         var adj = read.AsInternal().AdjacencySegments
             ?? throw new InvalidOperationException("Adjacency block store was not built.");

@@ -38,7 +38,7 @@ public sealed class LogicalMutationTests : IDisposable
         var sink = new InMemoryLogicalMutationSink();
         using var db = OpenWithSink(NewDir(), sink);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("Person");
             var b = tx.CreateVertex("Person");
@@ -62,7 +62,7 @@ public sealed class LogicalMutationTests : IDisposable
         var sink = new InMemoryLogicalMutationSink();
         using var db = OpenWithSink(NewDir(), sink);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.CreateVertex("Person");
             tx.Rollback();
@@ -78,17 +78,14 @@ public sealed class LogicalMutationTests : IDisposable
         using var db = OpenWithSink(NewDir(), sink);
 
         // Seed something first via a writing tx.
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.CreateVertex("Person");
             tx.Commit();
         }
         sink.Clear();
 
-        using (var ro = db.BeginReadOnlyTransaction())
-        {
-            ro.Commit();
-        }
+        using (db.BeginReadTransaction()) { }
 
         sink.Batches.Should().BeEmpty();
     }
@@ -100,7 +97,7 @@ public sealed class LogicalMutationTests : IDisposable
         // sink directly; instead exercise the full mutation surface and confirm
         // no exceptions and normal semantics.
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(NewDir(), "graph.quiver"));
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         tx.SetProperty(a, "k", PropertyValue.FromInt32(1));
         tx.RemoveProperty(a, "k");
@@ -115,7 +112,7 @@ public sealed class LogicalMutationTests : IDisposable
         string srcDir = NewDir();
 
         using (var src = OpenWithSink(srcDir, sink))
-        using (var tx = src.BeginTransaction())
+        using (var tx = src.BeginWriteTransaction())
         {
             var alice = tx.CreateVertex("Person");
             var bob = tx.CreateVertex("Person");
@@ -136,14 +133,14 @@ public sealed class LogicalMutationTests : IDisposable
         // Open a brand new database and replay against it.
         string targetDir = NewDir();
         using var target = QuiverDatabase.Open(System.IO.Path.Combine(targetDir, "graph.quiver"));
-        using (var tx = target.BeginTransaction())
+        using (var tx = target.BeginWriteTransaction())
         {
             LogicalMutationReplay.Apply(tx, sink.Mutations);
             tx.Commit();
         }
 
         // Walk the rebuilt graph and check the surviving structure.
-        using (var ro = target.BeginReadOnlyTransaction())
+        using (var ro = target.BeginReadTransaction())
         {
             // Find Alice by scanning created vertices via the replay map is not
             // exposed — instead inspect each vertex and locate by name.
@@ -181,9 +178,9 @@ public sealed class LogicalMutationTests : IDisposable
         var sink = new InMemoryLogicalMutationSink();
         using var db = OpenWithSink(NewDir(), sink);
 
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("Person");
             var b = tx.CreateVertex("Book");
@@ -212,7 +209,7 @@ public sealed class LogicalMutationTests : IDisposable
         var sink = new InMemoryLogicalMutationSink();
         using var db = OpenWithSink(NewDir(), sink);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("A");
             var b = tx.CreateVertex("B");
@@ -234,8 +231,8 @@ public sealed class LogicalMutationTests : IDisposable
         VertexId srcA, srcB, srcC;
         using (var src = OpenWithSink(srcDir, sink))
         {
-            src.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
-            using var tx = src.BeginTransaction();
+            src.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
+            using var tx = src.BeginWriteTransaction();
             srcA = tx.CreateVertex("Person");
             srcB = tx.CreateVertex("Book");
             srcC = tx.CreateVertex("Store");
@@ -250,10 +247,10 @@ public sealed class LogicalMutationTests : IDisposable
         // 別 DB へ再生する。target 側は tags の cardinality を宣言しておく。
         string targetDir = NewDir();
         using var target = QuiverDatabase.Open(System.IO.Path.Combine(targetDir, "graph.quiver"));
-        target.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        target.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
         var vertexMap = new Dictionary<long, VertexId>();
         var heMap = new Dictionary<long, NexusId>();
-        using (var tx = target.BeginTransaction())
+        using (var tx = target.BeginWriteTransaction())
         {
             LogicalMutationReplay.Apply(tx, sink.Mutations, vertexMap, nexusMap: heMap);
             tx.Commit();
@@ -262,7 +259,7 @@ public sealed class LogicalMutationTests : IDisposable
         heMap.Should().ContainKey(srcHe.Sequence);
         var targetHe = heMap[srcHe.Sequence];
 
-        using (var ro = target.BeginReadOnlyTransaction())
+        using (var ro = target.BeginReadTransaction())
         {
             // メンバーがターゲット側 ID へ再マッピングされて再構築されていること。
             var members = new List<NexusMember>();
@@ -288,12 +285,12 @@ public sealed class LogicalMutationTests : IDisposable
         var sink = new InMemoryLogicalMutationSink();
         using var db = OpenWithSink(NewDir(), sink);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.CreateVertex("A");
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.CreateVertex("B");
             tx.CreateVertex("C");

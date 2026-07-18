@@ -125,7 +125,6 @@ internal sealed class TransactionManager : ITransactionManager
             {
                 var transaction = CreateTransaction(
                     txId,
-                    IsolationLevel.SnapshotIsolation,
                     snapshot,
                     isReadOnly: true,
                     writerLease: null,
@@ -141,8 +140,7 @@ internal sealed class TransactionManager : ITransactionManager
         }
     }
 
-    public ITransaction BeginWrite(
-        IsolationLevel level = IsolationLevel.SnapshotIsolation)
+    public ITransaction BeginWrite()
     {
         ThrowIfFaulted();
         TransactionId txId = AllocateTransactionId();
@@ -156,7 +154,6 @@ internal sealed class TransactionManager : ITransactionManager
                 _wal.Append(WalRecordType.BeginWrite, txId, ReadOnlySpan<byte>.Empty);
                 var transaction = CreateTransaction(
                     txId,
-                    level,
                     snapshot,
                     isReadOnly: false,
                     lease,
@@ -174,14 +171,12 @@ internal sealed class TransactionManager : ITransactionManager
 
     private Transaction CreateTransaction(
         TransactionId txId,
-        IsolationLevel level,
         in SnapshotState snapshot,
         bool isReadOnly,
         WriterLease.WriterLeaseHandle? writerLease,
         SnapshotRegistry.SnapshotRegistration? registration)
         => new(
             txId,
-            level,
             _wal.FlushedLsn,
             _wal,
             this,

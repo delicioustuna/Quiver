@@ -90,8 +90,7 @@ internal sealed class ChaosScenarioRunner
                     using var arm = injector.ArmCheckpointPhaseKill(phase);
                     try
                     {
-                        using var tx = backend!.BeginGraphTransaction(
-                            IsolationLevel.SnapshotIsolation, readOnly: false);
+                        using var tx = backend!.BeginWriteTransaction();
                         tx.CreateVertex("Sentinel");
                         tx.Commit();
                         ((BinaryGraphStorageBackend)backend).RequestCheckpointForTest();
@@ -161,8 +160,7 @@ internal sealed class ChaosScenarioRunner
         StringBuilder trace, bool forceRollback)
     {
         oracle.BeginTx();
-        using var tx = backend.BeginGraphTransaction(
-            IsolationLevel.SnapshotIsolation, readOnly: false);
+        using var tx = backend.BeginWriteTransaction();
         var createdIds = new List<VertexId>();
         foreach (var op in wtx.Ops)
         {
@@ -170,7 +168,7 @@ internal sealed class ChaosScenarioRunner
             tx.SetProperty(id, "marker", PropertyValue.FromInt64(op.PropertyValue));
             if (op.IndexKey is int k)
             {
-                tx.IndexInsert(WorkloadGenerator.IndexName, (long)k, id);
+                tx.SetIndexedProperty(WorkloadGenerator.IndexName, (long)k, id);
             }
             oracle.RecordCreate(id, op.PropertyValue, op.IndexKey);
             createdIds.Add(id);
@@ -209,8 +207,7 @@ internal sealed class ChaosScenarioRunner
         IGraphStorageBackend backend, OracleState oracle,
         FaultKind fault, StringBuilder trace)
     {
-        using var rtx = backend.BeginGraphTransaction(
-            IsolationLevel.SnapshotIsolation, readOnly: true);
+        using var rtx = backend.BeginReadTransaction();
 
         // suffix-loss を許容する fault:
         //   - KillThenTornWalTail: WAL 末尾の最後の commit が消える可能性。
@@ -262,7 +259,6 @@ internal sealed class ChaosScenarioRunner
             throw new ChaosVerificationException(
                 $"committed tx#{firstMissingTx} was lost under fault {fault} (strict-survival contract violated)");
         }
-        rtx.Rollback();
     }
 }
 

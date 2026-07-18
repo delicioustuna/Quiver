@@ -36,18 +36,19 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | 用語 | 定義 |
 |---|---|
 | **QuiverDatabase** | エンジンのエントリポイント。`QuiverDatabase.Open(path)` で `*.quiver` ファイルを開く。スレッドセーフであり、プロセスのライフタイムを通じて 1 インスタンスを共有する |
-| **IGraphTransaction** | 読み書きトランザクションの公開インタフェース。`CreateVertex`、`SetProperty`、`Commit` 等を提供する |
+| **IReadTransaction** | snapshot 固定の読み取り、`Query`、スキーマ参照を提供する公開インタフェース |
+| **IWriteTransaction** | 読み取り能力に加えて mutation、`Mutate`、スキーマ編集、commit、rollback を提供する公開インタフェース |
 | **Commit** | WAL を `fsync` した時点で永続化が確定する。返った後はプロセスの kill や電源喪失を生き延びる |
 | **Snapshot Isolation** | Quiver の分離レベル。各トランザクションは開始時の一貫したスナップショットを見る。リーダはライタをブロックせず、ライタもリーダをブロックしない |
 | **Savepoint** | トランザクション内の中間地点。`RollbackTo(SavepointId)` でセーブポイント以降の変更だけを巻き戻せる |
-| **単一ライタ** | 書き込みトランザクションは同時に 1 つだけ進行できる。直列化はアプリケーション側の責任 |
-| **スレッドアフィン** | トランザクションは作成したスレッド上でのみ使用可能。`Begin` と `Commit` の間で `await` してはならない |
+| **単一ライタ** | 書き込みトランザクションは同時に 1 つだけ進行できる。データベース内の writer gate が直列化する |
+| **同時使用不可** | 同じトランザクションハンドル、カーソル、列挙子は複数の操作フローから同時に使用できない |
 
 ## クエリと走査
 
 | 用語 | 定義 |
 |---|---|
-| **Traversal** | Gremlin 風の Fluent API でグラフを辿る操作。`tx.G(db.Schema)` を起点にメソッドチェーンで論理プランを組み立て、終端ステップで実行する |
+| **Traversal** | Gremlin 風の Fluent API でグラフを辿る操作。`tx.Query` を起点に論理プランを組み立て、終端ステップで実行する |
 | **Hop（ホップ）** | トラバーサルにおける 1 段階の隣接Vertex移動 |
 | **Expand** | あるVertexから隣接Edgeを辿って隣接Vertexを列挙する操作。`Out()`、`In()`、`Both()` に対応する |
 | **Match DSL** | Cypher の `MATCH` に相当する宣言的パターンマッチ構文。`g.Match(GraphPattern.Vertex(...).Out(...))` のように使う |
@@ -74,7 +75,7 @@ Quiver の API やドキュメントに登場する用語を定義する。
 
 | 用語 | 定義 |
 |---|---|
-| **B+Tree インデックス** | プロパティの完全一致検索と範囲検索に使うインデックス。`[Indexed]` 属性または `ISchemaApi.CreateIndex` で作成する |
+| **B+Tree インデックス** | プロパティの完全一致検索と範囲検索に使う導出索引。`[Indexed]` 属性または `ISchemaEditor.CreateIndex` で作成する |
 | **FullTextIndex（全文インデックス）** | 転置インデックス（Postings B+Tree + Norms B+Tree）による全文検索機能。BM25 スコアリングを提供する |
 
 ## 全文検索

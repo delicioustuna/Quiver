@@ -4,7 +4,7 @@ namespace Quiver.Logical;
 
 /// <summary>
 /// キャプチャ済みの <see cref="LogicalMutation"/> ストリームを別の
-/// <see cref="IGraphTransaction"/> に再適用するヘルパー。ターゲット DB が独自の ID を
+/// <see cref="IWriteTransaction"/> に再適用するヘルパー。ターゲット DB が独自の ID を
 /// 割り当てるため、Vertex・Edge ID はオンザフライで再マッピングする。
 /// 事前シード済みマップを渡すことで複数回の再生パスを連結できる。
 /// </summary>
@@ -22,7 +22,7 @@ public static class LogicalMutationReplay
     /// <param name="edgeMap">ソース ID → ターゲット ID のEdgeマップ (省略可)。呼び出し側で変更される。</param>
     /// <param name="nexusMap">ソース ID → ターゲット ID のNexusマップ (省略可)。呼び出し側で変更される。</param>
     public static void Apply(
-        IGraphTransaction tx,
+        IWriteTransaction tx,
         IEnumerable<LogicalMutation> mutations,
         IDictionary<long, VertexId>? vertexMap = null,
         IDictionary<long, EdgeId>? edgeMap = null,

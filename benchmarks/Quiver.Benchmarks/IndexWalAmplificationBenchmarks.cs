@@ -38,9 +38,9 @@ public class IndexWalAmplificationBenchmarks
     {
         _dbPath = BenchTempDir.Create("ft20_wal_amp");
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
-        _ = _db.Schema.GetOrCreateLabel("Doc");
-        _ = _db.Schema.GetOrCreatePropertyKey("idx");
-        _db.Schema.CreateIndex("idx_bench", "Doc", "idx", IndexKind.Int64Equality);
+        _ = _db.EditSchema(schema => schema.GetOrCreateLabel("Doc"));
+        _ = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("idx"));
+        _db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_bench", new PropertyTarget(PropertyOwnerKind.Vertex, "idx", "Doc"), IndexKind.Int64Equality)));
     }
 
     [IterationCleanup]
@@ -57,12 +57,12 @@ public class IndexWalAmplificationBenchmarks
     [Benchmark(Description = "bulk (single tx)")]
     public long BulkSingleTx()
     {
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < EntryCount; i++)
             {
                 var vertex = tx.CreateVertex("Doc");
-                tx.IndexInsert("idx_bench", (long)i, vertex);
+                tx.SetIndexedProperty("idx_bench", (long)i, vertex);
             }
             tx.Commit();
         }
@@ -78,9 +78,9 @@ public class IndexWalAmplificationBenchmarks
     {
         for (int i = 0; i < EntryCount; i++)
         {
-            using var tx = _db.BeginTransaction();
+            using var tx = _db.BeginWriteTransaction();
             var vertex = tx.CreateVertex("Doc");
-            tx.IndexInsert("idx_bench", (long)i, vertex);
+            tx.SetIndexedProperty("idx_bench", (long)i, vertex);
             tx.Commit();
         }
         return WalBytes();
@@ -96,7 +96,7 @@ public class IndexWalAmplificationBenchmarks
     {
         var vertices = new VertexId[100];
         // 100 Vertexを 1 tx で先行作成 (key と 1:1 対応)。
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < vertices.Length; i++)
                 vertices[i] = tx.CreateVertex("Doc");
@@ -105,9 +105,9 @@ public class IndexWalAmplificationBenchmarks
         // EntryCount 回、同じ 100 key を順繰りに index insert (各回独立 tx)。
         for (int i = 0; i < EntryCount; i++)
         {
-            using var tx = _db.BeginTransaction();
+            using var tx = _db.BeginWriteTransaction();
             long key = (long)(i % vertices.Length);
-            tx.IndexInsert("idx_bench", key, vertices[(int)key]);
+            tx.SetIndexedProperty("idx_bench", key, vertices[(int)key]);
             tx.Commit();
         }
         return WalBytes();
@@ -141,20 +141,20 @@ public static class IndexWalAmplificationStandalone
                 : new QuiverDatabaseOptions();
 
             using var db = QuiverDatabase.Open(System.IO.Path.Combine(dbPath, "graph.quiver"), options);
-            _ = db.Schema.GetOrCreateLabel("Doc");
-            _ = db.Schema.GetOrCreatePropertyKey("idx");
-            db.Schema.CreateIndex("idx_bench", "Doc", "idx", IndexKind.Int64Equality);
+            _ = db.EditSchema(schema => schema.GetOrCreateLabel("Doc"));
+            _ = db.EditSchema(schema => schema.GetOrCreatePropertyKey("idx"));
+            db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition("idx_bench", new PropertyTarget(PropertyOwnerKind.Vertex, "idx", "Doc"), IndexKind.Int64Equality)));
 
             var sw = Stopwatch.StartNew();
             switch (scenario)
             {
                 case "bulk":
                 {
-                    using var tx = db.BeginTransaction();
+                    using var tx = db.BeginWriteTransaction();
                     for (int i = 0; i < entryCount; i++)
                     {
                         var vertex = tx.CreateVertex("Doc");
-                        tx.IndexInsert("idx_bench", (long)i, vertex);
+                        tx.SetIndexedProperty("idx_bench", (long)i, vertex);
                     }
                     tx.Commit();
                     break;
@@ -163,9 +163,9 @@ public static class IndexWalAmplificationStandalone
                 {
                     for (int i = 0; i < entryCount; i++)
                     {
-                        using var tx = db.BeginTransaction();
+                        using var tx = db.BeginWriteTransaction();
                         var vertex = tx.CreateVertex("Doc");
-                        tx.IndexInsert("idx_bench", (long)i, vertex);
+                        tx.SetIndexedProperty("idx_bench", (long)i, vertex);
                         tx.Commit();
                     }
                     break;
@@ -185,9 +185,9 @@ public static class IndexWalAmplificationStandalone
                         {
                             for (int i = 0; i < perThread; i++)
                             {
-                                using var tx = db.BeginTransaction();
+                                using var tx = db.BeginWriteTransaction();
                                 var vertex = tx.CreateVertex("Doc");
-                                tx.IndexInsert("idx_bench", tid * 1_000_000L + i, vertex);
+                                tx.SetIndexedProperty("idx_bench", tid * 1_000_000L + i, vertex);
                                 tx.Commit();
                             }
                         });

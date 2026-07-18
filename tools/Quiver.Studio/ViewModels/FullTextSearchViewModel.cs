@@ -85,8 +85,8 @@ public sealed partial class FullTextSearchViewModel : ObservableObject
             var result = await Task.Run(() =>
             {
                 var sw = Stopwatch.StartNew();
-                using var tx = database.BeginReadOnlyTransaction();
-                var g = tx.G(database.Schema);
+                using var tx = database.BeginReadTransaction();
+                var g = tx.Query;
 
                 List<VertexId> ids;
                 try

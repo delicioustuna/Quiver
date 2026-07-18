@@ -29,7 +29,7 @@ public sealed class NexusDiagnosticsTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path);
         NexusId nexusId;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("Entity");
             var b = tx.CreateVertex("Entity");
@@ -41,7 +41,7 @@ public sealed class NexusDiagnosticsTests : IDisposable
         created.NexusCount.Should().Be(1);
         created.IncidenceCount.Should().Be(2);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteNexus(nexusId);
             tx.Commit();
@@ -176,7 +176,7 @@ public sealed class NexusDiagnosticsTests : IDisposable
     {
         NexusId nexusId;
         VertexId firstVertex;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             firstVertex = tx.CreateVertex("Entity");
             var secondVertex = tx.CreateVertex("Entity");

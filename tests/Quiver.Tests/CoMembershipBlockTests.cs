@@ -34,7 +34,7 @@ public sealed class CoMembershipBlockTests : IDisposable
         using var db = OpenConfigured(_path);
         VertexId subject;
         VertexId expected;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             subject = tx.CreateVertex("Person");
             expected = tx.CreateVertex("Person");
@@ -49,7 +49,7 @@ public sealed class CoMembershipBlockTests : IDisposable
             tx.Commit();
         }
 
-        using var read = db.BeginReadOnlyTransaction();
+        using var read = db.BeginReadTransaction();
         Query(read, db, subject).Should().Equal(expected);
         var backend = (BinaryGraphStorageBackend)db.BackendInternal;
         backend.CoMembershipReadCountForTest.Should().BeGreaterThan(0);
@@ -61,7 +61,7 @@ public sealed class CoMembershipBlockTests : IDisposable
         using var db = OpenConfigured(_path);
         VertexId subject;
         VertexId factTarget;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             subject = tx.CreateVertex("Person");
             factTarget = tx.CreateVertex("Person");
@@ -77,8 +77,8 @@ public sealed class CoMembershipBlockTests : IDisposable
             tx.Commit();
         }
 
-        using var read = db.BeginReadOnlyTransaction();
-        var traversal = read.G(db.Schema)
+        using var read = db.BeginReadTransaction();
+        var traversal = read.Query
             .Vertex(subject)
             .As("origin")
             .Nexuses("Fact", "Subject")
@@ -93,7 +93,7 @@ public sealed class CoMembershipBlockTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
         VertexId subject;
         VertexId expected;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             subject = tx.CreateVertex("Person");
             expected = tx.CreateVertex("Person");
@@ -104,7 +104,7 @@ public sealed class CoMembershipBlockTests : IDisposable
             tx.Commit();
         }
 
-        using var read = db.BeginReadOnlyTransaction();
+        using var read = db.BeginReadTransaction();
         Query(read, db, subject).Should().Equal(expected);
         ((BinaryGraphStorageBackend)db.BackendInternal)
             .CoMembershipReadCountForTest.Should().Be(0);
@@ -118,7 +118,7 @@ public sealed class CoMembershipBlockTests : IDisposable
         VertexId discarded;
         VertexId committed;
         VertexId aborted;
-        using (var setup = db.BeginTransaction())
+        using (var setup = db.BeginWriteTransaction())
         {
             subject = setup.CreateVertex("Person");
             discarded = setup.CreateVertex("Person");
@@ -127,7 +127,7 @@ public sealed class CoMembershipBlockTests : IDisposable
             setup.Commit();
         }
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             SavepointId savepoint = tx.Savepoint();
             tx.CreateNexus("Fact", [
@@ -142,7 +142,7 @@ public sealed class CoMembershipBlockTests : IDisposable
             tx.Commit();
         }
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.CreateNexus("Fact", [
                 new("Subject", subject),
@@ -151,7 +151,7 @@ public sealed class CoMembershipBlockTests : IDisposable
             tx.Rollback();
         }
 
-        using var read = db.BeginReadOnlyTransaction();
+        using var read = db.BeginReadTransaction();
         Query(read, db, subject).Should().Equal(committed);
     }
 
@@ -161,7 +161,7 @@ public sealed class CoMembershipBlockTests : IDisposable
         VertexId subject;
         VertexId expected;
         using (var db = OpenConfigured(_path))
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             subject = tx.CreateVertex("Person");
             expected = tx.CreateVertex("Person");
@@ -173,7 +173,7 @@ public sealed class CoMembershipBlockTests : IDisposable
         }
 
         using var reopened = OpenConfigured(_path);
-        using var read = reopened.BeginReadOnlyTransaction();
+        using var read = reopened.BeginReadTransaction();
         Query(read, reopened, subject).Should().Equal(expected);
         ((BinaryGraphStorageBackend)reopened.BackendInternal)
             .CoMembershipReadCountForTest.Should().BeGreaterThan(0);
@@ -187,7 +187,7 @@ public sealed class CoMembershipBlockTests : IDisposable
         VertexId expected;
         using (var db = OpenConfigured(_path))
         {
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 subject = tx.CreateVertex("Person");
                 expected = tx.CreateVertex("Person");
@@ -201,7 +201,7 @@ public sealed class CoMembershipBlockTests : IDisposable
         }
 
         using var recovered = OpenConfigured(snapshotPath);
-        using var read = recovered.BeginReadOnlyTransaction();
+        using var read = recovered.BeginReadTransaction();
         Query(read, recovered, subject).Should().Equal(expected);
     }
 
@@ -211,7 +211,7 @@ public sealed class CoMembershipBlockTests : IDisposable
         using var db = OpenConfigured(_path);
         VertexId subject;
         NexusId nexus;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             subject = tx.CreateVertex("Person");
             VertexId target = tx.CreateVertex("Person");
@@ -221,7 +221,7 @@ public sealed class CoMembershipBlockTests : IDisposable
             ]);
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteNexus(nexus);
             tx.Commit();
@@ -229,7 +229,7 @@ public sealed class CoMembershipBlockTests : IDisposable
 
         db.Vacuum();
 
-        using var read = db.BeginReadOnlyTransaction();
+        using var read = db.BeginReadTransaction();
         Query(read, db, subject).Should().BeEmpty();
     }
 
@@ -241,10 +241,10 @@ public sealed class CoMembershipBlockTests : IDisposable
     }
 
     private static List<VertexId> Query(
-        IGraphTransaction tx,
+        IReadTransaction tx,
         QuiverDatabase db,
         VertexId subject)
-        => tx.G(db.Schema)
+        => tx.Query
             .Vertex(subject)
             .Nexuses("Fact", "Subject")
             .OtherMembers("Object")

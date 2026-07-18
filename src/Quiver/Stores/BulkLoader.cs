@@ -16,6 +16,7 @@ public sealed class BulkLoader : IDisposable
     // 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
     private readonly Quiver.Storage.SingleFileContainer? _container;
     private IDisposable? _writerLease;
+    private readonly Action? _afterCommit;
 
     private readonly List<PendingVertex> _vertices = new();
     private readonly List<PendingEdge> _edges = new();
@@ -33,13 +34,15 @@ public sealed class BulkLoader : IDisposable
 
     internal BulkLoader(VersionedVertexStore vertexStore, VersionedEdgeStore edgeStore, PropertyVersionStore propStore,
         Quiver.Storage.SingleFileContainer? container = null,
-        IDisposable? writerLease = null)
+        IDisposable? writerLease = null,
+        Action? afterCommit = null)
     {
         _vertexStore = vertexStore;
         _edgeStore = edgeStore;
         _propStore = propStore;
         _container = container;
         _writerLease = writerLease;
+        _afterCommit = afterCommit;
     }
 
     /// <summary>Vertexを追加する (ラベル付き)。</summary>
@@ -102,6 +105,7 @@ public sealed class BulkLoader : IDisposable
     {
         ThrowIfCommitted();
         _committed = true;
+        bool succeeded = false;
 
         try
         {
@@ -110,11 +114,14 @@ public sealed class BulkLoader : IDisposable
             CommitProperties();
             if (_container != null)
                 BuildAdjacencyIndex(_container);
+            succeeded = true;
         }
         finally
         {
             ReleaseWriterLease();
         }
+        if (succeeded)
+            _afterCommit?.Invoke();
     }
 
     /// <summary>ローダを破棄し、未使用の writer lease を解放する。</summary>

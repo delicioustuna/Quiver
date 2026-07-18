@@ -46,7 +46,7 @@ public static class MergeEdgeCostRunner
         {
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
             VertexId src, target;
-            using (var seed = db.BeginTransaction())
+            using (var seed = db.BeginWriteTransaction())
             {
                 src = seed.CreateVertex("A");
                 target = seed.CreateVertex("B");
@@ -62,7 +62,7 @@ public static class MergeEdgeCostRunner
             // warmup
             for (int i = 0; i < 500; i++)
             {
-                using var tx = db.BeginTransaction();
+                using var tx = db.BeginWriteTransaction();
                 tx.MergeEdge(src, target, "R");
                 // no commit — discard
             }
@@ -72,7 +72,7 @@ public static class MergeEdgeCostRunner
             double bestNs = double.MaxValue;
             for (int block = 0; block < 5; block++)
             {
-                using var tx = db.BeginTransaction();
+                using var tx = db.BeginWriteTransaction();
                 var sw = Stopwatch.StartNew();
                 for (int i = 0; i < Iters; i++)
                 {
@@ -98,7 +98,7 @@ public static class MergeEdgeCostRunner
         {
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
             VertexId src;
-            using (var seed = db.BeginTransaction())
+            using (var seed = db.BeginWriteTransaction())
             {
                 src = seed.CreateVertex("A");
                 for (int i = 0; i < existingDegree; i++)
@@ -113,7 +113,7 @@ public static class MergeEdgeCostRunner
 
             // warmup
             {
-                using var tx = db.BeginTransaction();
+                using var tx = db.BeginWriteTransaction();
                 for (int w = 0; w < Math.Min(200, iters); w++)
                 {
                     var t = tx.CreateVertex("B");
@@ -124,7 +124,7 @@ public static class MergeEdgeCostRunner
             double bestNs = double.MaxValue;
             for (int block = 0; block < 5; block++)
             {
-                using var tx = db.BeginTransaction();
+                using var tx = db.BeginWriteTransaction();
                 var targets = new VertexId[iters];
                 for (int i = 0; i < iters; i++)
                     targets[i] = tx.CreateVertex("B");
@@ -147,13 +147,13 @@ public static class MergeEdgeCostRunner
         try
         {
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
-            using (var seed = db.BeginTransaction()) { seed.CreateVertex("A"); seed.CreateVertex("B"); seed.Commit(); }
+            using (var seed = db.BeginWriteTransaction()) { seed.CreateVertex("A"); seed.CreateVertex("B"); seed.Commit(); }
             var src = new VertexId(0);
             var tgt = new VertexId(1);
 
             for (int i = 0; i < 1000; i++)
             {
-                using var tx = db.BeginTransaction();
+                using var tx = db.BeginWriteTransaction();
                 tx.CreateEdge(src, tgt, "R");
             }
 
@@ -161,7 +161,7 @@ public static class MergeEdgeCostRunner
             double bestNs = double.MaxValue;
             for (int block = 0; block < 5; block++)
             {
-                using var tx = db.BeginTransaction();
+                using var tx = db.BeginWriteTransaction();
                 var sw = Stopwatch.StartNew();
                 for (int i = 0; i < Iters; i++)
                     tx.CreateEdge(src, tgt, "R");
@@ -182,7 +182,7 @@ public static class MergeEdgeCostRunner
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
             var srcIds = new VertexId[sources];
             var tgtIds = new VertexId[targets];
-            using (var seed = db.BeginTransaction())
+            using (var seed = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < sources; i++)
                 {
@@ -206,7 +206,7 @@ public static class MergeEdgeCostRunner
             // warmup
             for (int w = 0; w < 3; w++)
             {
-                using var tx = db.BeginTransaction();
+                using var tx = db.BeginWriteTransaction();
                 for (int i = 0; i < sources; i++)
                     for (int j = 0; j < targets; j++)
                         tx.MergeEdge(srcIds[i], tgtIds[j], "R");
@@ -216,7 +216,7 @@ public static class MergeEdgeCostRunner
             double bestMs = double.MaxValue;
             for (int r = 0; r < Repeats; r++)
             {
-                using var tx = db.BeginTransaction();
+                using var tx = db.BeginWriteTransaction();
                 var sw = Stopwatch.StartNew();
                 for (int i = 0; i < sources; i++)
                     for (int j = 0; j < targets; j++)

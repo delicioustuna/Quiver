@@ -12,10 +12,10 @@ namespace Quiver.Api.Match;
 public sealed class MatchContext
 {
     private readonly QueryRow _row;
-    private readonly IGraphTransaction _tx;
+    private readonly IReadTransaction _tx;
     private readonly Dictionary<string, int> _varToColumn;
 
-    internal MatchContext(QueryRow row, IGraphTransaction tx, Dictionary<string, int> varToColumn)
+    internal MatchContext(QueryRow row, IReadTransaction tx, Dictionary<string, int> varToColumn)
     {
         _row = row; _tx = tx; _varToColumn = varToColumn;
     }
@@ -69,9 +69,9 @@ public sealed class MatchContext
 public readonly struct MatchContextRow
 {
     private readonly VertexId _vertexId;
-    private readonly IGraphTransaction _tx;
+    private readonly IReadTransaction _tx;
 
-    internal MatchContextRow(VertexId vertexId, IGraphTransaction tx)
+    internal MatchContextRow(VertexId vertexId, IReadTransaction tx)
     {
         _vertexId = vertexId; _tx = tx;
     }

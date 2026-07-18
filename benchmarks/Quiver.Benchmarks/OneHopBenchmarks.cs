@@ -19,7 +19,7 @@ public class OneHopBenchmarks
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
     private VertexId _hub;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -27,7 +27,7 @@ public class OneHopBenchmarks
         _dbPath = BenchTempDir.Create("1hop");
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         _hub = tx.CreateVertex("Hub");
         for (int i = 0; i < Degree; i++)
         {
@@ -36,7 +36,7 @@ public class OneHopBenchmarks
         }
         tx.Commit();
 
-        _readTx = _db.BeginTransaction();
+        _readTx = _db.BeginWriteTransaction();
     }
 
     [GlobalCleanup]

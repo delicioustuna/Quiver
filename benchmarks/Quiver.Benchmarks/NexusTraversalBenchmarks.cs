@@ -64,8 +64,8 @@ public static class NexusTraversalBenchmarks
             using (var db = OpenWithView(databasePath))
             {
                 AssertViewEngaged(db);
-                using var tx = db.BeginReadOnlyTransaction();
-                var g = tx.G(db.Schema);
+                using var tx = db.BeginReadTransaction();
+                var g = tx.Query;
 
                 binaryP50 = MeasureP50(() => g.Vertex(hub).Out("Link").Count(), degree);
                 viewP50 = MeasureP50(
@@ -81,8 +81,8 @@ public static class NexusTraversalBenchmarks
             double chainP50;
             using (var db = QuiverDatabase.Open(databasePath))
             {
-                using var tx = db.BeginReadOnlyTransaction();
-                var g = tx.G(db.Schema);
+                using var tx = db.BeginReadTransaction();
+                var g = tx.Query;
                 chainP50 = MeasureP50(
                     () => g.Vertex(hub).Nexuses("Fact", "subject").OtherMembers("object").Count(),
                     degree);
@@ -110,7 +110,7 @@ public static class NexusTraversalBenchmarks
     private static VertexId BuildDataset(string databasePath, int degree)
     {
         using var db = OpenWithView(databasePath);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
 
         VertexId hub = tx.CreateVertex("Hub");
         VertexId source = tx.CreateVertex("Chunk");
@@ -146,8 +146,8 @@ public static class NexusTraversalBenchmarks
     // ここで同じ条件を直接確認し、ビュー経路が実際に選ばれることを保証する。
     private static void AssertViewEngaged(QuiverDatabase db)
     {
-        using var tx = db.BeginReadOnlyTransaction();
-        ICoMembershipBlockStore? view = ((GraphTransaction)tx).Inner.CoMembershipBlocks;
+        using var tx = db.BeginReadTransaction();
+        ICoMembershipBlockStore? view = tx.AsInternal().Inner.CoMembershipBlocks;
         var resolver = (INexusSchemaResolver)db.Schema;
         resolver.TryGetRoleId("subject", out RoleId subjectRole);
         resolver.TryGetRoleId("object", out RoleId objectRole);

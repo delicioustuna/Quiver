@@ -17,9 +17,6 @@ public interface IGraphStorageBackend : IDisposable
     // BulkLoad (BulkLoadCapabilities) は内部実装型を露出するため公開面から外し、
     // internal な IGraphStorageBackendInternal へ移設した。
 
-    /// <summary>スキーマ API</summary>
-    ISchemaApi Schema { get; }
-
     /// <summary>診断 API</summary>
     IDiagnosticsApi Diagnostics { get; }
 
@@ -29,10 +26,12 @@ public interface IGraphStorageBackend : IDisposable
     IVectorStore Vectors { get; } // ユーザにも <c>CreateVectorIndex</c> / <c>SetVector</c> 用に公開される。
 
     /// <summary>
-    /// アクティブなバックエンドに整合したトークン解決を伴う形で
-    /// 新しいトランザクションを <see cref="IGraphTransaction"/> でラップして開始する。
+    /// backend 固有の snapshot reader を開始する。
     /// </summary>
-    IGraphTransaction BeginGraphTransaction(IsolationLevel level, bool readOnly);
+    IReadTransaction BeginReadTransaction();
+
+    /// <summary>backend 固有の single-writer transaction を開始する。</summary>
+    IWriteTransaction BeginWriteTransaction();
 
     /// <summary>
     /// 書き込みを止めずに <paramref name="targetDirectory"/> に

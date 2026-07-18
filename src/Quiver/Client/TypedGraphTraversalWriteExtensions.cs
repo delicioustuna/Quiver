@@ -19,7 +19,8 @@ public static class TypedGraphTraversalWriteExtensions
 
     /// <summary>始点集合と終点集合の直積に辺を生成し、生成本数を返す。</summary>
     public static long AddEdge<TSource, TEdge, TTarget>(
-        this TypedGraphTraversal<TSource> sources,
+        this GraphMutationSource mutation,
+        TypedGraphTraversal<TSource> sources,
         TypedGraphTraversal<TTarget> targets,
         Func<TSource, TTarget, TEdge> edge)
         where TSource : IGraphVertex<TSource>
@@ -29,7 +30,7 @@ public static class TypedGraphTraversalWriteExtensions
         ArgumentNullException.ThrowIfNull(targets);
         ArgumentNullException.ThrowIfNull(edge);
 
-        var tx = sources.Transaction;
+        var tx = mutation.Transaction;
         var src = sources.ToListWithIds();
         var dst = targets.ToListWithIds();   // 直積なので終点は一度だけ materialize し全始点で再利用。
 
@@ -45,7 +46,8 @@ public static class TypedGraphTraversalWriteExtensions
 
     /// <summary>直積にプロパティ無しの辺を生成し、生成本数を返す。</summary>
     public static long AddEdge<TSource, TEdge, TTarget>(
-        this TypedGraphTraversal<TSource> sources,
+        this GraphMutationSource mutation,
+        TypedGraphTraversal<TSource> sources,
         TypedGraphTraversal<TTarget> targets)
         where TSource : IGraphVertex<TSource>
         where TTarget : IGraphVertex<TTarget>
@@ -53,7 +55,7 @@ public static class TypedGraphTraversalWriteExtensions
     {
         ArgumentNullException.ThrowIfNull(targets);
 
-        var tx = sources.Transaction;
+        var tx = mutation.Transaction;
         var src = sources.MaterializeIds();
         var dst = targets.MaterializeIds();
 
@@ -69,7 +71,8 @@ public static class TypedGraphTraversalWriteExtensions
 
     /// <summary>始点ごとに <paramref name="targets"/> で終点集合を求め、その直積に辺を生成する。</summary>
     public static long AddEdge<TSource, TEdge, TTarget>(
-        this TypedGraphTraversal<TSource> sources,
+        this GraphMutationSource mutation,
+        TypedGraphTraversal<TSource> sources,
         Func<TSource, TypedGraphTraversal<TTarget>> targets,
         Func<TSource, TTarget, TEdge> edge)
         where TSource : IGraphVertex<TSource>
@@ -79,7 +82,7 @@ public static class TypedGraphTraversalWriteExtensions
         ArgumentNullException.ThrowIfNull(targets);
         ArgumentNullException.ThrowIfNull(edge);
 
-        var tx = sources.Transaction;
+        var tx = mutation.Transaction;
         var src = sources.ToListWithIds();   // 始点を先に確定してから終点を都度評価する。
 
         long created = 0;
@@ -94,7 +97,8 @@ public static class TypedGraphTraversalWriteExtensions
 
     /// <summary>相関版のプロパティ無し。</summary>
     public static long AddEdge<TSource, TEdge, TTarget>(
-        this TypedGraphTraversal<TSource> sources,
+        this GraphMutationSource mutation,
+        TypedGraphTraversal<TSource> sources,
         Func<TSource, TypedGraphTraversal<TTarget>> targets)
         where TSource : IGraphVertex<TSource>
         where TTarget : IGraphVertex<TTarget>
@@ -102,7 +106,7 @@ public static class TypedGraphTraversalWriteExtensions
     {
         ArgumentNullException.ThrowIfNull(targets);
 
-        var tx = sources.Transaction;
+        var tx = mutation.Transaction;
         var src = sources.ToListWithIds();
 
         long created = 0;
@@ -119,7 +123,8 @@ public static class TypedGraphTraversalWriteExtensions
 
     /// <summary>直積を upsert する。無ければ生成してプロパティを書き、戻り値は (新規, 既存ヒット) の本数。</summary>
     public static (long Created, long Matched) MergeEdge<TSource, TEdge, TTarget>(
-        this TypedGraphTraversal<TSource> sources,
+        this GraphMutationSource mutation,
+        TypedGraphTraversal<TSource> sources,
         TypedGraphTraversal<TTarget> targets,
         Func<TSource, TTarget, TEdge> edge)
         where TSource : IGraphVertex<TSource>
@@ -129,7 +134,7 @@ public static class TypedGraphTraversalWriteExtensions
         ArgumentNullException.ThrowIfNull(targets);
         ArgumentNullException.ThrowIfNull(edge);
 
-        var tx = sources.Transaction;
+        var tx = mutation.Transaction;
         var src = sources.ToListWithIds();
         var dst = targets.ToListWithIds();
 
@@ -146,7 +151,8 @@ public static class TypedGraphTraversalWriteExtensions
 
     /// <summary>直積をプロパティ無しで upsert する。戻り値は (新規, 既存ヒット) の本数。</summary>
     public static (long Created, long Matched) MergeEdge<TSource, TEdge, TTarget>(
-        this TypedGraphTraversal<TSource> sources,
+        this GraphMutationSource mutation,
+        TypedGraphTraversal<TSource> sources,
         TypedGraphTraversal<TTarget> targets)
         where TSource : IGraphVertex<TSource>
         where TTarget : IGraphVertex<TTarget>
@@ -154,7 +160,7 @@ public static class TypedGraphTraversalWriteExtensions
     {
         ArgumentNullException.ThrowIfNull(targets);
 
-        var tx = sources.Transaction;
+        var tx = mutation.Transaction;
         var src = sources.MaterializeIds();
         var dst = targets.MaterializeIds();
 
@@ -170,7 +176,8 @@ public static class TypedGraphTraversalWriteExtensions
 
     /// <summary>始点ごとに終点集合を求め、その直積を upsert する。</summary>
     public static (long Created, long Matched) MergeEdge<TSource, TEdge, TTarget>(
-        this TypedGraphTraversal<TSource> sources,
+        this GraphMutationSource mutation,
+        TypedGraphTraversal<TSource> sources,
         Func<TSource, TypedGraphTraversal<TTarget>> targets,
         Func<TSource, TTarget, TEdge> edge)
         where TSource : IGraphVertex<TSource>
@@ -180,7 +187,7 @@ public static class TypedGraphTraversalWriteExtensions
         ArgumentNullException.ThrowIfNull(targets);
         ArgumentNullException.ThrowIfNull(edge);
 
-        var tx = sources.Transaction;
+        var tx = mutation.Transaction;
         var src = sources.ToListWithIds();
 
         long created = 0, matched = 0;
@@ -196,7 +203,8 @@ public static class TypedGraphTraversalWriteExtensions
 
     /// <summary>相関版のプロパティ無し upsert。</summary>
     public static (long Created, long Matched) MergeEdge<TSource, TEdge, TTarget>(
-        this TypedGraphTraversal<TSource> sources,
+        this GraphMutationSource mutation,
+        TypedGraphTraversal<TSource> sources,
         Func<TSource, TypedGraphTraversal<TTarget>> targets)
         where TSource : IGraphVertex<TSource>
         where TTarget : IGraphVertex<TTarget>
@@ -204,7 +212,7 @@ public static class TypedGraphTraversalWriteExtensions
     {
         ArgumentNullException.ThrowIfNull(targets);
 
-        var tx = sources.Transaction;
+        var tx = mutation.Transaction;
         var src = sources.ToListWithIds();
 
         long created = 0, matched = 0;

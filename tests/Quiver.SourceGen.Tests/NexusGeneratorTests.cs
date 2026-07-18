@@ -18,7 +18,7 @@ public class GraphNexusGeneratorTests
             .Where(p => p.EndsWith(".dll", System.StringComparison.OrdinalIgnoreCase))
             .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p));
 
-        var quiver = MetadataReference.CreateFromFile(typeof(Quiver.IGraphTransaction).Assembly.Location);
+        var quiver = MetadataReference.CreateFromFile(typeof(Quiver.IWriteTransaction).Assembly.Location);
         return tpa.Append(quiver).ToArray();
     }
 

@@ -68,10 +68,10 @@ public sealed class VectorHnswTests : IDisposable
 
         using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.EditSchema(schema => schema.GetOrCreatePropertyKey("t")),
             Dim, DistanceMetric.Cosine, "test", null));
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < N; i++)
             {
@@ -107,9 +107,9 @@ public sealed class VectorHnswTests : IDisposable
         using (var db = QuiverDatabase.Open(_path))
         {
             db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-                IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
+                IndexName, EntityKind.Vertex, db.EditSchema(schema => schema.GetOrCreatePropertyKey("t")),
                 Dim, DistanceMetric.Cosine, "test", null));
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             for (int i = 0; i < N; i++)
             {
                 var n = tx.CreateVertex("Doc");
@@ -136,11 +136,11 @@ public sealed class VectorHnswTests : IDisposable
         const int Dim = 8;
         using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.EditSchema(schema => schema.GetOrCreatePropertyKey("t")),
             Dim, DistanceMetric.Dot, "test", null));
 
         // committed な 1 件。
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var n = tx.CreateVertex("Doc");
             tx.SetVector(EntityKind.Vertex, n.Value, IndexName, new float[] { 1, 0, 0, 0, 0, 0, 0, 0 });
@@ -148,7 +148,7 @@ public sealed class VectorHnswTests : IDisposable
         }
 
         // abort する tx で別ベクトルを挿入 → 巻き戻る。
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var n = tx.CreateVertex("Doc");
             tx.SetVector(EntityKind.Vertex, n.Value, IndexName, new float[] { 0, 1, 0, 0, 0, 0, 0, 0 });

@@ -24,13 +24,13 @@ public sealed class NexusBuilderTests : IDisposable
     [Fact]
     public void Builder_creates_multi_role_nexus_and_properties()
     {
-        using var tx = _db.BeginTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginWriteTransaction();
+        var g = tx.Query;
         VertexId alice = tx.CreateVertex("Person");
         VertexId bob = tx.CreateVertex("Person");
         VertexId book = tx.CreateVertex("Book");
 
-        NexusId id = g.AddNexus("Purchase")
+        NexusId id = tx.Mutate.AddNexus("Purchase")
             .Member("buyer", alice)
             .Member("approver", alice)
             .Member("seller", bob)
@@ -48,12 +48,12 @@ public sealed class NexusBuilderTests : IDisposable
     [Fact]
     public void Builder_allows_multiple_vertices_in_the_same_role()
     {
-        using var tx = _db.BeginTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginWriteTransaction();
+        var g = tx.Query;
         VertexId a = tx.CreateVertex("Person");
         VertexId b = tx.CreateVertex("Person");
 
-        NexusId id = g.AddNexus("Meeting")
+        NexusId id = tx.Mutate.AddNexus("Meeting")
             .Member("attendee", a)
             .Member("attendee", b)
             .Next();
@@ -66,11 +66,11 @@ public sealed class NexusBuilderTests : IDisposable
     [InlineData(" ")]
     public void Builder_rejects_an_empty_type(string type)
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         VertexId a = tx.CreateVertex("Person");
         VertexId b = tx.CreateVertex("Person");
 
-        Action act = () => tx.G(_db.Schema).AddNexus(type)
+        Action act = () => tx.Mutate.AddNexus(type)
             .Member("member", a)
             .Member("member", b)
             .Next();
@@ -81,10 +81,10 @@ public sealed class NexusBuilderTests : IDisposable
     [Fact]
     public void Builder_rejects_arity_below_two()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         VertexId a = tx.CreateVertex("Person");
 
-        Action act = () => tx.G(_db.Schema).AddNexus("Fact")
+        Action act = () => tx.Mutate.AddNexus("Fact")
             .Member("subject", a)
             .Next();
 
@@ -94,10 +94,10 @@ public sealed class NexusBuilderTests : IDisposable
     [Fact]
     public void Builder_rejects_duplicate_role_and_vertex_pair()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         VertexId a = tx.CreateVertex("Person");
 
-        Action act = () => tx.G(_db.Schema).AddNexus("Fact")
+        Action act = () => tx.Mutate.AddNexus("Fact")
             .Member("subject", a)
             .Member("subject", a)
             .Next();
@@ -108,12 +108,12 @@ public sealed class NexusBuilderTests : IDisposable
     [Fact]
     public void Successful_next_clears_members_and_properties_for_reuse()
     {
-        using var tx = _db.BeginTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginWriteTransaction();
+        var g = tx.Query;
         VertexId a = tx.CreateVertex("Person");
         VertexId b = tx.CreateVertex("Person");
         VertexId c = tx.CreateVertex("Person");
-        var builder = g.AddNexus("Pair");
+        var builder = tx.Mutate.AddNexus("Pair");
 
         NexusId first = builder
             .Member("left", a)

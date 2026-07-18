@@ -21,7 +21,7 @@ public class WeightedShortestPathBenchmarks
 
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
     private PropertyChainWeightProvider _weightProvider = null!;
     private readonly Dictionary<long, (double R, double C)> _coords = [];
     private VertexId _srcVertex;
@@ -36,7 +36,7 @@ public class WeightedShortestPathBenchmarks
         var grid = new VertexId[n, n];
 
         using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver")))
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int r = 0; r < n; r++)
                 for (int c = 0; c < n; c++)
@@ -59,8 +59,8 @@ public class WeightedShortestPathBenchmarks
                 _coords[grid[r, c].Value] = (r, c);
 
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
-        _readTx = _db.BeginTransaction();
-        var keyId = _db.Schema.GetOrCreatePropertyKey("w");
+        _readTx = _db.BeginWriteTransaction();
+        var keyId = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("w"));
         _weightProvider = new PropertyChainWeightProvider(keyId);
 
         _srcVertex = grid[0, 0];

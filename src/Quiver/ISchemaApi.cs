@@ -3,90 +3,34 @@ using Quiver.Core;
 namespace Quiver;
 
 /// <summary>
-/// ラベル / Edge型 / プロパティキー / インデックスを管理するスキーマ API。
-/// <see cref="QuiverDatabase.Schema"/> から取得する。
+/// トランザクションのスナップショットから token と index definition を参照するカタログ。
+/// 未知の名前を参照しても token を作成しない。
 /// </summary>
-public interface ISchemaApi
+public interface ISchemaCatalog
 {
-    /// <summary>ラベル名を ID に解決する (未登録の場合は新規発行)。</summary>
-    LabelId GetOrCreateLabel(string name);
-
-    /// <summary>Edge型名を ID に解決する (未登録の場合は新規発行)。</summary>
-    EdgeTypeId GetOrCreateEdgeType(string name);
-
-    /// <summary>プロパティキー名を ID に解決する (未登録の場合は <see cref="PropertyCardinality.Single"/> で新規発行)。</summary>
-    PropertyKeyId GetOrCreatePropertyKey(string name);
-
-    /// <summary>
-    /// プロパティキー名を ID に解決する (未登録の場合は指定 cardinality で新規発行)。
-    /// 既存キーで cardinality が一致すればそのまま返す。不一致なら <see cref="InvalidOperationException"/>。
-    /// </summary>
-    PropertyKeyId GetOrCreatePropertyKey(string name, PropertyCardinality cardinality);
-
     /// <summary>指定キーの多重度を返す。未登録キーは <see cref="PropertyCardinality.Single"/>。</summary>
     PropertyCardinality GetPropertyKeyCardinality(PropertyKeyId id);
 
-    /// <summary>
-    /// ラベル ID から名前へ逆引きする。未登録 ID では <c>null</c> を返す。
-    /// ラベル名の射影や、ID を元の名前で表示したい診断系で利用する。
-    /// </summary>
+    /// <summary>ラベル ID から名前へ逆引きする。未登録 ID では <c>null</c>。</summary>
     string? GetLabelName(LabelId id);
 
-    /// <summary>
-    /// 自動作成せず、ラベル名から ID を引く。未登録なら <c>false</c>。
-    /// MigrationContext が「rename が実際に状態を変えるかどうか」を判定するために使う。
-    /// </summary>
+    /// <summary>自動作成せず、ラベル名から ID を引く。未登録なら <c>false</c>。</summary>
     bool TryGetLabelId(string name, out LabelId id);
 
-    /// <summary>自動作成せず、プロパティキー名から ID を引く。</summary>
+    /// <summary>自動作成せず、プロパティキー名から ID を引く。未登録なら <c>false</c>。</summary>
     bool TryGetPropertyKeyId(string name, out PropertyKeyId id);
 
-    /// <summary>自動作成せず、Edge型名から ID を引く。</summary>
+    /// <summary>自動作成せず、Edge型名から ID を引く。未登録なら <c>false</c>。</summary>
     bool TryGetEdgeTypeId(string name, out EdgeTypeId id);
 
-    /// <summary>指定名の索引が存在するか。AddIndex が新規作成になるかの判定用。</summary>
+    /// <summary>指定名の index definition が存在するかを返す。</summary>
     bool IndexExists(string indexName);
 
-    /// <summary>新規インデックスを作成する。</summary>
-    void CreateIndex(string indexName, string label, string propertyKey, IndexKind kind);
-
-    /// <summary>既存インデックスを削除する。</summary>
-    void DropIndex(string indexName);
-
-    /// <summary>登録済みインデックスの一覧を返す。</summary>
+    /// <summary>登録済み scalar index definition の一覧を返す。</summary>
     IReadOnlyList<IndexInfo> ListIndexes();
-
-    /// <summary>
-    /// 全文検索索引を作成する。<paramref name="label"/> / <paramref name="propertyKey"/> に
-    /// 一致する文字列プロパティ書き込みが同一 Tx 内で転置インデックス (postings/norms) に維持される。
-    /// <paramref name="options"/> でトークナイザ ID 等を指定する (既定は <c>mixed-bigram-v1</c>)。
-    /// binary backend のみ対応。
-    /// </summary>
-    void CreateFullTextIndex(string indexName, string label, string propertyKey, FullTextIndexOptions? options = null);
 
     /// <summary>登録済み全文索引の一覧を返す。</summary>
     IReadOnlyList<FullTextIndexInfo> ListFullTextIndexes();
-
-    /// <summary>
-    /// ラベル名を <paramref name="oldName"/> から <paramref name="newName"/> へ変更する。
-    /// ラベル ID は維持されるため、既存Vertexのラベル所属関係は変更されない (テキスト表記のみ更新)。
-    /// 旧名が無く新名が既にある場合は冪等な no-op として <c>true</c>。旧名も新名も無い場合は <c>false</c>。
-    /// 新名が他のラベル ID に占有されているときは <see cref="InvalidOperationException"/>。
-    /// </summary>
-    bool RenameLabel(string oldName, string newName);
-
-    /// <summary>プロパティキー名を rename する。意味論は <see cref="RenameLabel"/> と同じ。</summary>
-    bool RenamePropertyKey(string oldName, string newName);
-
-    /// <summary>Edge型名を rename する。意味論は <see cref="RenameLabel"/> と同じ。</summary>
-    bool RenameEdgeType(string oldName, string newName);
-
-    /// <summary>
-    /// インデックス名を rename する。索引は <c>graph.quiver</c> 内テナントとして
-    /// 同居するため、リネームはカタログ上の name 付け替えのみで完結し (テナント実体・ページ・WAL
-    /// 整合性は不変)、物理ファイル rename は発生しない。
-    /// </summary>
-    bool RenameIndex(string oldName, string newName);
 
     /// <summary>登録済みラベル名の一覧を返す。</summary>
     IReadOnlyList<string> ListLabels();
@@ -96,11 +40,6 @@ public interface ISchemaApi
 
     /// <summary>登録済みプロパティキー名の一覧を返す。</summary>
     IReadOnlyList<string> ListPropertyKeys();
-
-    // ── Nexus型 / ロール ──────────────────────────────
-
-    /// <summary>Nexus型名を ID に解決する (未登録の場合は新規発行)。</summary>
-    NexusTypeId GetOrCreateNexusType(string name);
 
     /// <summary>Nexus型 ID から名前へ逆引きする。未登録 ID では <c>null</c>。</summary>
     string? GetNexusTypeName(NexusTypeId id);
@@ -115,27 +54,131 @@ public interface ISchemaApi
     IReadOnlyList<string> ListRoles();
 }
 
-/// <summary>インデックス種別。プロパティ型と検索モード (等値 / 範囲) で分かれる。</summary>
+/// <summary>
+/// 書き込みトランザクションに所有される schema editor。
+/// token と index definition の変更は所有トランザクションの commit/abort に従う。
+/// </summary>
+public interface ISchemaEditor : ISchemaCatalog
+{
+    /// <summary>ラベル名を ID に解決し、未登録なら新規発行する。</summary>
+    LabelId GetOrCreateLabel(string name);
+
+    /// <summary>Edge型名を ID に解決し、未登録なら新規発行する。</summary>
+    EdgeTypeId GetOrCreateEdgeType(string name);
+
+    /// <summary>プロパティキー名を ID に解決し、未登録なら single cardinality で新規発行する。</summary>
+    PropertyKeyId GetOrCreatePropertyKey(string name);
+
+    /// <summary>プロパティキー名を ID に解決し、未登録なら指定 cardinality で新規発行する。</summary>
+    PropertyKeyId GetOrCreatePropertyKey(string name, PropertyCardinality cardinality);
+
+    /// <summary>永続 scalar index definition を作成する。</summary>
+    void CreateIndex(IndexDefinition definition);
+
+    /// <summary>既存 index definition を削除する。</summary>
+    void DropIndex(string indexName);
+
+    /// <summary>全文索引を作成する。</summary>
+    void CreateFullTextIndex(
+        string indexName,
+        string label,
+        string propertyKey,
+        FullTextIndexOptions? options = null);
+
+    /// <summary>ラベル名を変更する。</summary>
+    bool RenameLabel(string oldName, string newName);
+
+    /// <summary>プロパティキー名を変更する。</summary>
+    bool RenamePropertyKey(string oldName, string newName);
+
+    /// <summary>Edge型名を変更する。</summary>
+    bool RenameEdgeType(string oldName, string newName);
+
+    /// <summary>index definition 名を変更する。</summary>
+    bool RenameIndex(string oldName, string newName);
+
+    /// <summary>Nexus型名を ID に解決し、未登録なら新規発行する。</summary>
+    NexusTypeId GetOrCreateNexusType(string name);
+}
+
+/// <summary>scalar index が比較に使う値と順序の種類。</summary>
 public enum IndexKind
 {
-    /// <summary><see cref="int"/> 等値インデックス。</summary>
+    /// <summary><see cref="int"/> の等値比較。</summary>
     Int32Equality,
-    /// <summary><see cref="long"/> 等値インデックス。</summary>
+    /// <summary><see cref="long"/> の等値比較。</summary>
     Int64Equality,
-    /// <summary><see cref="double"/> 等値インデックス。</summary>
+    /// <summary><see cref="double"/> の等値比較。</summary>
     DoubleEquality,
-    /// <summary>文字列等値インデックス。</summary>
+    /// <summary>文字列の等値比較。</summary>
     StringEquality,
-    /// <summary>文字列範囲インデックス (順序比較対応)。</summary>
+    /// <summary>文字列の範囲比較。</summary>
     StringRange,
 }
 
+/// <summary>scalar index artifact の利用可能状態。</summary>
+public enum IndexLifecycleState
+{
+    /// <summary>現在の primary data に対応し、query で利用できる。</summary>
+    Ready,
+    /// <summary>artifact を利用せず primary scan へ fallback する必要がある。</summary>
+    RebuildRequired,
+    /// <summary>再構築中であり、publish までは primary scan を使う。</summary>
+    Building,
+}
+
+/// <summary>プロパティを所有する entity の範囲。</summary>
+public enum PropertyOwnerKind
+{
+    /// <summary>Vertexプロパティ。</summary>
+    Vertex,
+    /// <summary>Edgeプロパティ。</summary>
+    Edge,
+    /// <summary>Nexusプロパティ。</summary>
+    Nexus,
+}
+
 /// <summary>
-/// <see cref="ISchemaApi.ListIndexes"/> が返す登録済みインデックスのメタ情報。
+/// scalar index の対象プロパティ。<see cref="Scope"/> が <c>null</c> の場合は
+/// owner kind 全体を対象にし、指定時は label、Edge型、またはNexus型で限定する。
 /// </summary>
-public sealed record IndexInfo(
-    string Name,
-    string Label,
+/// <param name="OwnerKind">プロパティを所有する entity kind。</param>
+/// <param name="PropertyKey">対象のプロパティキー名。</param>
+/// <param name="Scope">任意のラベル、Edge型、またはNexus型名。</param>
+public sealed record PropertyTarget(
+    PropertyOwnerKind OwnerKind,
     string PropertyKey,
-    IndexKind Kind,
-    long EntryCount);
+    string? Scope = null);
+
+/// <summary>永続 index definition の共通情報。</summary>
+/// <param name="Name">一意な index 名。</param>
+/// <param name="Target">対象プロパティ。</param>
+public abstract record IndexDefinition(string Name, PropertyTarget Target);
+
+/// <summary>単一 scalar 値を B+Tree で検索する index definition。</summary>
+/// <param name="Name">一意な index 名。</param>
+/// <param name="Target">対象プロパティ。</param>
+/// <param name="Kind">比較に使う scalar 型と検索モード。</param>
+public sealed record ScalarIndexDefinition(
+    string Name,
+    PropertyTarget Target,
+    IndexKind Kind) : IndexDefinition(Name, Target);
+
+/// <summary>登録済み scalar index definition と artifact 状態。</summary>
+/// <param name="Definition">永続 definition。</param>
+/// <param name="State">artifact の lifecycle state。</param>
+/// <param name="EntryCount">診断用の entry 数。</param>
+public sealed record IndexInfo(
+    ScalarIndexDefinition Definition,
+    IndexLifecycleState State,
+    long EntryCount)
+{
+    /// <summary>index 名。</summary>
+    public string Name => Definition.Name;
+
+    /// <summary>対象プロパティ。</summary>
+    public PropertyTarget Target => Definition.Target;
+
+    /// <summary>比較に使う scalar 型と検索モード。</summary>
+    public IndexKind Kind => Definition.Kind;
+}

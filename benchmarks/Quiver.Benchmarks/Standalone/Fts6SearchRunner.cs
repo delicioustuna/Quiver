@@ -61,7 +61,7 @@ public static class Fts6SearchRunner
         try
         {
             using var db = QuiverDatabase.Open(System.IO.Path.Combine(dirFt, "graph.quiver"));
-            db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+            db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
             double ingestMs = IngestCorpus(db, vocab, searchChunks, seed: 11);
             Console.WriteLine($"built search corpus: {searchChunks:N0} chunks in {ingestMs,7:F0} ms ({searchChunks / (ingestMs / 1000.0),8:F0} chunks/s)");
             Console.WriteLine();
@@ -90,7 +90,7 @@ public static class Fts6SearchRunner
             using var db = QuiverDatabase.Open(
                 System.IO.Path.Combine(dir, "graph.quiver"),
                 new QuiverDatabaseOptions { CheckpointThresholdBytes = long.MaxValue });
-            if (withIndex) db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+            if (withIndex) db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
             ingestMs = IngestCorpus(db, vocab, chunkCount, seed: 11);
             return WalBytes(dir);
         }
@@ -108,7 +108,7 @@ public static class Fts6SearchRunner
         while (written < chunkCount)
         {
             int batch = Math.Min(BatchSize, chunkCount - written);
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             for (int b = 0; b < batch; b++)
             {
                 var n = tx.CreateVertex("Doc");
@@ -129,8 +129,8 @@ public static class Fts6SearchRunner
         // text-first operator takes the WAND pruning path (G(schema) without stats stays on
         // the full term-at-a-time scan — the  baseline).
         var stats = db.CollectStats();
-        using var rtx = db.BeginReadOnlyTransaction();
-        var g = rtx.G(db.Schema, stats);
+        using var rtx = db.BeginReadTransaction();
+        var g = rtx.Query.WithStats(stats);
 
         // Warmup so the buffer pool is resident before timing (design §9 premise).
         for (int i = 0; i < Math.Min(20, queryCount); i++)

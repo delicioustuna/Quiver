@@ -34,8 +34,8 @@ public sealed class GraphKernelTests : IDisposable
     [Fact]
     public void BfsOperator_emits_every_reachable_vertex_with_correct_depth()
     {
-        var person = _db.Schema.GetOrCreateLabel("Person");
-        using var tx = _db.BeginTransaction();
+        var person = _db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
+        using var tx = _db.BeginWriteTransaction();
         // Path: a -> b -> c -> d, plus a -> e (depth 1 fork).
         var a = tx.CreateVertex("Person");
         var b = tx.CreateVertex("Person");
@@ -69,7 +69,7 @@ public sealed class GraphKernelTests : IDisposable
     [Fact]
     public void BfsOperator_caps_at_max_depth()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
         var c = tx.CreateVertex("X");
@@ -88,7 +88,7 @@ public sealed class GraphKernelTests : IDisposable
     [Fact]
     public void BfsOperator_cycle_does_not_loop_forever()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         // a -> b -> c -> a cycle.
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
@@ -111,7 +111,7 @@ public sealed class GraphKernelTests : IDisposable
     [Fact]
     public void VariableLength_minHops_filters_short_paths()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
         var c = tx.CreateVertex("X");
@@ -131,7 +131,7 @@ public sealed class GraphKernelTests : IDisposable
     [Fact]
     public void VariableLength_minHops_zero_emits_start_vertex()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
         tx.CreateEdge(a, b, "K");
@@ -151,7 +151,7 @@ public sealed class GraphKernelTests : IDisposable
     [Fact]
     public void ShortestPath_returns_correct_distance_and_aborts_early()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
         var c = tx.CreateVertex("X");
@@ -175,7 +175,7 @@ public sealed class GraphKernelTests : IDisposable
     [Fact]
     public void ShortestPath_returns_zero_for_self_pair()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var src = new SinglePairSource(a, a);
         using var sp = new ShortestPathOperator(src, 0, 1, Direction.Outgoing, null);
@@ -189,7 +189,7 @@ public sealed class GraphKernelTests : IDisposable
     [Fact]
     public void ShortestPath_no_path_emits_no_row()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
         // No edges between a and b.
@@ -206,7 +206,7 @@ public sealed class GraphKernelTests : IDisposable
     [Fact]
     public void ParallelBfs_matches_sequential_BFS_for_multiple_sources()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         // ワーカー同士が相手のフロンティアを参照しないよう、独立した 2 本のチェーンを使う。
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
@@ -231,7 +231,7 @@ public sealed class GraphKernelTests : IDisposable
         parRows.Should().BeEquivalentTo(seqRows);
         tx.Rollback();
 
-        static HashSet<(long start, long end, long depth)> Drain(IGraphTransaction tx, BfsOperator op)
+        static HashSet<(long start, long end, long depth)> Drain(IWriteTransaction tx, BfsOperator op)
         {
             using var r = tx.Execute(op);
             return r.Rows()

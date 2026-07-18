@@ -9,21 +9,21 @@ string dir = Path.Combine(Path.GetTempPath(), "quiver_traversal_" + Guid.NewGuid
 try
 {
     using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
-    using var tx = db.BeginTransaction();
-    var g = tx.G(db.Schema);
+    using var tx = db.BeginWriteTransaction();
+    var g = tx.Query;
 
     // ソーシャルグラフ: Alice→Bob→Dave, Alice→Carol→Dave, Carol→Eve
-    var alice = g.AddVertex("Person").P("name", "Alice").P("age", 30).Next();
-    var bob   = g.AddVertex("Person").P("name", "Bob").P("age", 25).Next();
-    var carol = g.AddVertex("Person").P("name", "Carol").P("age", 35).Next();
-    var dave  = g.AddVertex("Person").P("name", "Dave").P("age", 28).Next();
-    var eve   = g.AddVertex("Person").P("name", "Eve").P("age", 40).Next();
+    var alice = tx.Mutate.AddVertex("Person").P("name", "Alice").P("age", 30).Next();
+    var bob   = tx.Mutate.AddVertex("Person").P("name", "Bob").P("age", 25).Next();
+    var carol = tx.Mutate.AddVertex("Person").P("name", "Carol").P("age", 35).Next();
+    var dave  = tx.Mutate.AddVertex("Person").P("name", "Dave").P("age", 28).Next();
+    var eve   = tx.Mutate.AddVertex("Person").P("name", "Eve").P("age", 40).Next();
 
-    g.AddEdge("KNOWS").From(alice).To(bob).Next();
-    g.AddEdge("KNOWS").From(alice).To(carol).Next();
-    g.AddEdge("KNOWS").From(bob).To(dave).Next();
-    g.AddEdge("KNOWS").From(carol).To(dave).Next();
-    g.AddEdge("FOLLOWS").From(carol).To(eve).Next();
+    tx.Mutate.AddEdge("KNOWS").From(alice).To(bob).Next();
+    tx.Mutate.AddEdge("KNOWS").From(alice).To(carol).Next();
+    tx.Mutate.AddEdge("KNOWS").From(bob).To(dave).Next();
+    tx.Mutate.AddEdge("KNOWS").From(carol).To(dave).Next();
+    tx.Mutate.AddEdge("FOLLOWS").From(carol).To(eve).Next();
 
     Console.WriteLine("── 1. フィルタ + ページング ──");
     var seniors = g.Vertices().HasLabel("Person")

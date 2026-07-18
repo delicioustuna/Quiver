@@ -32,10 +32,10 @@ public sealed class GremlinCompatGc5Tests : IDisposable
     [Fact]
     public void TraversalSource_MergeVertex_creates_when_missing()
     {
-        using var tx = _db.BeginTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginWriteTransaction();
+        var g = tx.Query;
 
-        var (id, created) = g.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
+        var (id, created) = tx.Mutate.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
 
         created.Should().BeTrue();
         tx.VertexExists(id).Should().BeTrue();
@@ -45,12 +45,12 @@ public sealed class GremlinCompatGc5Tests : IDisposable
     [Fact]
     public void TraversalSource_MergeVertex_is_idempotent()
     {
-        using var tx = _db.BeginTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginWriteTransaction();
+        var g = tx.Query;
 
-        var first  = g.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
-        var second = g.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
-        var third  = g.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
+        var first  = tx.Mutate.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
+        var second = tx.Mutate.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
+        var third  = tx.Mutate.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
 
         first.Created.Should().BeTrue();
         second.Created.Should().BeFalse();
@@ -65,15 +65,15 @@ public sealed class GremlinCompatGc5Tests : IDisposable
     {
         // Pattern: MERGE (n:Person {name:'Alice'}) ON CREATE SET n.createdAt=1
         //          ON MATCH SET n.seen = n.seen + 1
-        using var tx = _db.BeginTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginWriteTransaction();
+        var g = tx.Query;
 
-        var (id, created) = g.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
+        var (id, created) = tx.Mutate.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
         if (created) tx.SetProperty(id, "createdAt", PropertyValue.FromInt64(1L));
         else         tx.SetProperty(id, "seen",      PropertyValue.FromInt64(1L));
 
         // Second pass: must hit the ON MATCH branch.
-        var (id2, created2) = g.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
+        var (id2, created2) = tx.Mutate.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
         created2.Should().BeFalse();
         id2.Should().Be(id);
         if (created2) tx.SetProperty(id2, "createdAt", PropertyValue.FromInt64(99L));
@@ -88,14 +88,14 @@ public sealed class GremlinCompatGc5Tests : IDisposable
     public void MergeVertex_match_property_is_visible_after_commit()
     {
         VertexId id;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
-            var g = tx.G(_db.Schema);
-            (id, _) = g.MergeVertex("Person", "name", PropertyValue.FromString("Carol"));
+            var g = tx.Query;
+            (id, _) = tx.Mutate.MergeVertex("Person", "name", PropertyValue.FromString("Carol"));
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
+        using var rtx = _db.BeginReadTransaction();
         System.Text.Encoding.UTF8.GetString(rtx.GetProperty(id, "name").Utf8StringValue)
             .Should().Be("Carol");
     }
@@ -105,10 +105,10 @@ public sealed class GremlinCompatGc5Tests : IDisposable
     {
         // A key the database has never seen cannot match anything, so the
         // create path must be taken without any wasted scan work.
-        using var tx = _db.BeginTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginWriteTransaction();
+        var g = tx.Query;
 
-        var (_, created) = g.MergeVertex("Person", "totallyNewKey",
+        var (_, created) = tx.Mutate.MergeVertex("Person", "totallyNewKey",
             PropertyValue.FromString("nope"));
         created.Should().BeTrue();
         tx.Commit();
@@ -117,12 +117,12 @@ public sealed class GremlinCompatGc5Tests : IDisposable
     [Fact]
     public void MergeVertex_with_int_match_property_round_trips()
     {
-        using var tx = _db.BeginTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginWriteTransaction();
+        var g = tx.Query;
 
-        var (a, ca) = g.MergeVertex("Item", "sku", PropertyValue.FromInt64(7L));
-        var (b, cb) = g.MergeVertex("Item", "sku", PropertyValue.FromInt64(7L));
-        var (c, cc) = g.MergeVertex("Item", "sku", PropertyValue.FromInt64(8L));
+        var (a, ca) = tx.Mutate.MergeVertex("Item", "sku", PropertyValue.FromInt64(7L));
+        var (b, cb) = tx.Mutate.MergeVertex("Item", "sku", PropertyValue.FromInt64(7L));
+        var (c, cc) = tx.Mutate.MergeVertex("Item", "sku", PropertyValue.FromInt64(8L));
 
         ca.Should().BeTrue();
         cb.Should().BeFalse();
@@ -135,11 +135,11 @@ public sealed class GremlinCompatGc5Tests : IDisposable
     [Fact]
     public void MergeVertex_does_not_match_vertex_with_same_label_but_different_value()
     {
-        using var tx = _db.BeginTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginWriteTransaction();
+        var g = tx.Query;
 
-        var (alice, _) = g.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
-        var (bob,   created) = g.MergeVertex("Person", "name", PropertyValue.FromString("Bob"));
+        var (alice, _) = tx.Mutate.MergeVertex("Person", "name", PropertyValue.FromString("Alice"));
+        var (bob,   created) = tx.Mutate.MergeVertex("Person", "name", PropertyValue.FromString("Bob"));
 
         created.Should().BeTrue();
         bob.Should().NotBe(alice);

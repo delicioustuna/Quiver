@@ -13,7 +13,7 @@ public class ShortestPathOperatorTests
     public void Empty_source_yields_empty()
     {
         using var fx = OperatorTestFixture.OpenEmpty();
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var op = new ShortestPathOperator(
             new FixedVertexListOperator(), 0, 0, Direction.Both, null);
         // PairSource は空だが、入力には 1 列だけの FixedVertexListOperator を使っている。
@@ -33,7 +33,7 @@ public class ShortestPathOperatorTests
             b = tx.CreateVertex("X");
             tx.CreateEdge(a, b, "K");
         });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new ShortestPathOperator(
             new PairSourceOperator(a, b), 0, 1, Direction.Outgoing, null));
         result.Rows().Should().HaveCount(1);
@@ -49,7 +49,7 @@ public class ShortestPathOperatorTests
             a = tx.CreateVertex("X");
             b = tx.CreateVertex("X"); // disconnected
         });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new ShortestPathOperator(
             new PairSourceOperator(a, b), 0, 1, Direction.Outgoing, null));
         result.Rows().Should().BeEmpty();
@@ -61,7 +61,7 @@ public class ShortestPathOperatorTests
     {
         VertexId a = default;
         using var fx = OperatorTestFixture.Open(tx => { a = tx.CreateVertex("X"); });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new ShortestPathOperator(
             new PairSourceOperator(a, a), 0, 1, Direction.Outgoing, null));
         result.Rows().Should().HaveCount(1);
@@ -80,7 +80,7 @@ public class ShortestPathOperatorTests
             tx.CreateEdge(a, b, "K");
             tx.CreateEdge(b, c, "K");
         });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new ShortestPathOperator(
             new PairSourceOperator(a, c), 0, 1, Direction.Outgoing, null, maxDistance: 1));
         result.Rows().Should().BeEmpty();

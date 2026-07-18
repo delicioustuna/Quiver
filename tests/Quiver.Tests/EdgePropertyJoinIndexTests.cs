@@ -76,7 +76,7 @@ public sealed class EdgePropertyJoinIndexTests : IDisposable
         idx.TryGetScalar(new EdgeId(9999), idx.KeyId, out _, out _).Should().BeFalse();
 
         // Wrong key — fabricate one that the index does not cover.
-        var otherKey = _db.Schema.GetOrCreatePropertyKey("not_weight");
+        var otherKey = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("not_weight"));
         idx.TryGetScalar(new EdgeId(0), otherKey, out _, out _).Should().BeFalse();
 
         // Negative id sentinel.
@@ -88,8 +88,8 @@ public sealed class EdgePropertyJoinIndexTests : IDisposable
     {
         // 5 edges total — only the first 3 carry the weight property.
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        _db.Schema.GetOrCreatePropertyKey("weight");
-        using (var tx = _db.BeginTransaction())
+        _db.EditSchema(schema => schema.GetOrCreatePropertyKey("weight"));
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 6; i++) tx.CreateVertex("N");
             for (int i = 0; i < 5; i++)
@@ -118,7 +118,7 @@ public sealed class EdgePropertyJoinIndexTests : IDisposable
     public void Type_mismatch_is_treated_as_missing()
     {
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             tx.CreateVertex("N"); tx.CreateVertex("N");
             var edge = tx.CreateEdge(new VertexId(0), new VertexId(1), "KNOWS");
@@ -144,7 +144,7 @@ public sealed class EdgePropertyJoinIndexTests : IDisposable
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
         var idx = _db.BuildEdgePropertyJoinIndex("weight", PropertyValueType.Int64);
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
 
         // Warm both paths.
         for (int i = 0; i < 32; i++)
@@ -186,8 +186,8 @@ public sealed class EdgePropertyJoinIndexTests : IDisposable
     private void BuildGraphWithInt64Weight(int edgeCount)
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        var key = db.Schema.GetOrCreatePropertyKey("weight");
-        using var tx = db.BeginTransaction();
+        var key = db.EditSchema(schema => schema.GetOrCreatePropertyKey("weight"));
+        using var tx = db.BeginWriteTransaction();
         for (int i = 0; i <= edgeCount; i++) tx.CreateVertex("N");
         for (int i = 0; i < edgeCount; i++)
         {
@@ -200,8 +200,8 @@ public sealed class EdgePropertyJoinIndexTests : IDisposable
     private void BuildGraphWithDoubleWeight(int edgeCount)
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        var key = db.Schema.GetOrCreatePropertyKey("score");
-        using var tx = db.BeginTransaction();
+        var key = db.EditSchema(schema => schema.GetOrCreatePropertyKey("score"));
+        using var tx = db.BeginWriteTransaction();
         for (int i = 0; i <= edgeCount; i++) tx.CreateVertex("N");
         for (int i = 0; i < edgeCount; i++)
         {

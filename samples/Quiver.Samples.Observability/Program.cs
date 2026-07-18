@@ -40,7 +40,7 @@ try
     // 100 トランザクションを回して tx.commit / wal.flush / buffer-pool / query を計装出力。
     for (int i = 0; i < 100; i++)
     {
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob = tx.CreateVertex("Person");
         tx.SetProperty(alice, "name", PropertyValue.FromString($"alice-{i}"));
@@ -52,7 +52,7 @@ try
     // 1 回くらい rollback も実行してみる (tx.abort span / counter を確認)。
     try
     {
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         tx.CreateVertex("Temp");
         tx.Rollback();
     }

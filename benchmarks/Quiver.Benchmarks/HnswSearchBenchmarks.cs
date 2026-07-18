@@ -40,11 +40,11 @@ public class HnswSearchBenchmarks
         _dir = BenchTempDir.Create("hnsw");
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Vertex, _db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, _db.EditSchema(schema => schema.GetOrCreatePropertyKey("t")),
             Dim, DistanceMetric.Cosine, "bench"));
 
         var buf = new float[Dim];
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < N; i++)
             {

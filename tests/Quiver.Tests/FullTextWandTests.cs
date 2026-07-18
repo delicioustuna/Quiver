@@ -27,7 +27,7 @@ public sealed class FullTextWandTests : IDisposable
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fts8_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
-        _db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+        _db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
     }
 
     public void Dispose()
@@ -38,7 +38,7 @@ public sealed class FullTextWandTests : IDisposable
 
     private VertexId AddDoc(string body)
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString(body));
         tx.Commit();
@@ -48,21 +48,21 @@ public sealed class FullTextWandTests : IDisposable
     /// <summary>統計を渡さず、語単位の全走査へフォールバックする。</summary>
     private List<VertexId> SearchFullScan(string query, int k)
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        return rtx.G(_db.Schema).Search(Index, query, k).ToList();
+        using var rtx = _db.BeginReadTransaction();
+        return rtx.Query.Search(Index, query, k).ToList();
     }
 
     /// <summary>統計を渡し、語ごとの上限値を使う WAND 経路を選択する。</summary>
     private List<VertexId> SearchWand(string query, int k)
     {
         var stats = _db.CollectStats();
-        using var rtx = _db.BeginReadOnlyTransaction();
-        return rtx.G(_db.Schema, stats).Search(Index, query, k).ToList();
+        using var rtx = _db.BeginReadTransaction();
+        return rtx.Query.WithStats(stats).Search(Index, query, k).ToList();
     }
 
     private void AddDocsBatch(IReadOnlyList<string> bodies)
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         foreach (var body in bodies)
         {
             var n = tx.CreateVertex("Doc");
@@ -73,7 +73,7 @@ public sealed class FullTextWandTests : IDisposable
 
     private FullTextIndex Ft()
     {
-        ((SchemaApi)_db.Schema).IndexManager.TryGetFullTextIndex(Index, out var ft).Should().BeTrue();
+        _db.SchemaApiForTesting.IndexManager.TryGetFullTextIndex(Index, out var ft).Should().BeTrue();
         return ft;
     }
 
@@ -146,7 +146,7 @@ public sealed class FullTextWandTests : IDisposable
         var keep = AddDoc("secret keepme");
         var drop = AddDoc("secret dropme");
 
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             tx.DeleteVertex(drop);
             tx.Commit();
@@ -223,7 +223,7 @@ public sealed class FullTextWandTests : IDisposable
 
         var corpus = stale.FullTextCorpus(Index)!.Value;
         var ft = Ft();
-        var tokenizer = ((SchemaApi)_db.Schema).IndexManager.ResolveTokenizer(ft.TokenizerId);
+        var tokenizer = _db.SchemaApiForTesting.IndexManager.ResolveTokenizer(ft.TokenizerId);
 
         // 同一 (stale) stats 基準での exact 全走査と WAND を比較する。
         var exact = Bm25Scorer.Rank(
@@ -252,7 +252,7 @@ public sealed class FullTextWandTests : IDisposable
 
         var corpus = _db.CollectStats().FullTextCorpus(Index)!.Value;
         var ft = Ft();
-        var tokenizer = ((SchemaApi)_db.Schema).IndexManager.ResolveTokenizer(ft.TokenizerId);
+        var tokenizer = _db.SchemaApiForTesting.IndexManager.ResolveTokenizer(ft.TokenizerId);
 
         var full = Bm25Scorer.RankWand(
             ft, tokenizer, "x", corpus.DocumentCount, corpus.AverageDocLength, corpus.Terms!, k: 6, isLive: null)!;

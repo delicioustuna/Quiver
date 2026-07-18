@@ -229,9 +229,9 @@ public sealed class IntellisenseService : IDisposable
         sb.AppendLine();
         sb.AppendLine("class __ScriptHost__ {");
         sb.AppendLine("    QuiverDatabase db = null!;");
-        sb.AppendLine("    IGraphTransaction tx = null!;");
+        sb.AppendLine("    IWriteTransaction tx = null!;");
         sb.AppendLine("    GraphTraversalSource g = null!;");
-        sb.AppendLine("    ISchemaApi schema = null!;");
+        sb.AppendLine("    ISchemaEditor schema = null!;");
         sb.AppendLine("    void __Run__() {");
 
         return sb.ToString();

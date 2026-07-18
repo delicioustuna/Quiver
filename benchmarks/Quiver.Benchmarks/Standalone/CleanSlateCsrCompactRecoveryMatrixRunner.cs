@@ -122,7 +122,7 @@ public static class CleanSlateCsrCompactRecoveryMatrixRunner
         PropertyKeyId scoreKey;
         using (var db = QuiverDatabase.Open(path))
         {
-            scoreKey = db.Schema.GetOrCreatePropertyKey(ScoreKey);
+            scoreKey = db.EditSchema(schema => schema.GetOrCreatePropertyKey(ScoreKey));
             using var loader = db.BeginBulkLoad(buildAdjacencyIndex: true);
             loader.WithPayloadLane(PayloadLaneSpec.ForInt64(scoreKey.Value));
             loader.AppendVertex(new VertexId(0), new LabelId(0));
@@ -138,7 +138,7 @@ public static class CleanSlateCsrCompactRecoveryMatrixRunner
         }
 
         using (var db = QuiverDatabase.Open(path))
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.SetProperty(new EdgeId(0), ScoreKey, PropertyValue.FromInt64(700));
             var deltaVertex = tx.CreateVertex("V");
@@ -152,7 +152,7 @@ public static class CleanSlateCsrCompactRecoveryMatrixRunner
     private static bool ValidateRecovered(string path, bool expectAdjacencyView)
     {
         using var db = QuiverDatabase.Open(path);
-        using var tx = db.BeginReadOnlyTransaction();
+        using var tx = db.BeginReadTransaction();
         var adjacency = tx.AsInternal().AdjacencySegments;
         if (expectAdjacencyView)
         {
@@ -181,7 +181,7 @@ public static class CleanSlateCsrCompactRecoveryMatrixRunner
                targets.Any(static x => x > 3);
     }
 
-    private static Dictionary<long, long> ReadOutgoingWeights(IGraphTransaction tx, VertexId source)
+    private static Dictionary<long, long> ReadOutgoingWeights(IReadTransaction tx, VertexId source)
     {
         var result = new Dictionary<long, long>();
         var adjacency = tx.AsInternal().AdjacencySegments
@@ -197,7 +197,7 @@ public static class CleanSlateCsrCompactRecoveryMatrixRunner
         return result;
     }
 
-    private static List<long> EnumerateOutgoingTargets(IGraphTransaction tx, VertexId source)
+    private static List<long> EnumerateOutgoingTargets(IReadTransaction tx, VertexId source)
     {
         var result = new List<long>();
         var cursor = tx.EnumerateEdges(source, Direction.Outgoing);

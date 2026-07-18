@@ -22,7 +22,7 @@ public sealed class Bm25ScorerTests : IDisposable
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_bm25_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
-        _db.Schema.CreateFullTextIndex(Index, "Doc", "body");
+        _db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
     }
 
     public void Dispose()
@@ -33,7 +33,7 @@ public sealed class Bm25ScorerTests : IDisposable
 
     private VertexId AddDoc(string body)
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString(body));
         tx.Commit();
@@ -42,8 +42,8 @@ public sealed class Bm25ScorerTests : IDisposable
 
     private List<VertexId> Search(string query, int k = 10)
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        return rtx.G(_db.Schema).Search(Index, query, k).ToList();
+        using var rtx = _db.BeginReadTransaction();
+        return rtx.Query.Search(Index, query, k).ToList();
     }
 
     // ── Default parameters ──────────────────────────────────────────────
@@ -377,17 +377,17 @@ public sealed class Bm25ScorerTests : IDisposable
 
         // Live scan path
         List<VertexId> liveResults;
-        using (var rtx = _db.BeginReadOnlyTransaction())
+        using (var rtx = _db.BeginReadTransaction())
         {
-            liveResults = rtx.G(_db.Schema).Search(Index, "cat", 10).ToList();
+            liveResults = rtx.Query.Search(Index, "cat", 10).ToList();
         }
 
         // Stats-driven path
         var stats = _db.CollectStats();
         List<VertexId> statsResults;
-        using (var rtx = _db.BeginReadOnlyTransaction())
+        using (var rtx = _db.BeginReadTransaction())
         {
-            statsResults = rtx.G(_db.Schema, stats).Search(Index, "cat", 10).ToList();
+            statsResults = rtx.Query.WithStats(stats).Search(Index, "cat", 10).ToList();
         }
 
         statsResults.Should().Equal(liveResults, "stats-driven ranking should match live scan ranking");
@@ -416,8 +416,8 @@ public sealed class Bm25ScorerTests : IDisposable
         var d3 = AddDoc("cat dog bird");
         AddDoc("dog bird fish");
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var textFirst = g.Search(Index, "cat", 10).ToList();
         var graphFirst = g.Vertices().HasLabel("Doc")

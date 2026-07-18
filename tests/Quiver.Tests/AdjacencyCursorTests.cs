@@ -38,7 +38,7 @@ public sealed class AdjacencyCursorTests : IDisposable
         BulkLoadHub(degree);
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var adj = tx.AsInternal().AdjacencySegments!;
         adj.HasBlock(new VertexId(0)).Should().BeTrue();
 
@@ -75,7 +75,7 @@ public sealed class AdjacencyCursorTests : IDisposable
         }
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var adj = tx.AsInternal().AdjacencySegments!;
         int count = 0;
         using var cursor = adj.OpenCursor(new VertexId(0), Direction.Outgoing, new EdgeTypeId(0));
@@ -95,7 +95,7 @@ public sealed class AdjacencyCursorTests : IDisposable
         BulkLoadHub(10);
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var adj = tx.AsInternal().AdjacencySegments!;
         // 高水位標を超えるVertex ID にはブロックがない。
         adj.HasBlock(new VertexId(99_999)).Should().BeFalse();

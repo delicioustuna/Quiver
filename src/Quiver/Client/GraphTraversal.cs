@@ -20,8 +20,8 @@ namespace Quiver.Api;
 /// </remarks>
 public sealed class GraphTraversal<T>
 {
-    internal readonly IGraphTransaction _tx;
-    internal readonly ISchemaApi _schema;
+    internal readonly IReadTransaction _tx;
+    internal readonly ISchemaCatalog _schema;
     internal readonly LogicalOp _plan;
     internal readonly Func<QueryRow, T> _projection;
     internal readonly int _entityColumn;
@@ -46,8 +46,8 @@ public sealed class GraphTraversal<T>
         PredicateEntity.Vertex;
 
     internal GraphTraversal(
-        IGraphTransaction tx,
-        ISchemaApi schema,
+        IReadTransaction tx,
+        ISchemaCatalog schema,
         LogicalOp plan,
         Func<QueryRow, T> projection,
         int entityColumn,
@@ -96,10 +96,10 @@ public sealed class GraphTraversal<T>
     {
         LogicalOp next;
         if (_plan is ScanOp { Kind: EntityKind.Vertex })
-            next = new ScanOp(EntityKind.Vertex, _schema.GetOrCreateLabel(label));
+            next = new ScanOp(EntityKind.Vertex, _schema.ResolveLabel(label));
         else
         {
-            var labelId = _schema.GetOrCreateLabel(label);
+            var labelId = _schema.ResolveLabel(label);
             var col = _entityColumn;
             next = new FilterOp(_plan, _ => new LabelPredicate(labelId, col));
         }
@@ -114,20 +114,20 @@ public sealed class GraphTraversal<T>
     /// 対象列番号を受け取り、predicate ファクトリを返す。KNN 押し下げ (candidate-side rewrite) は
     /// 終端で <see cref="LogicalOptimizer"/> が <see cref="FilterOp"/> 連鎖から再構成する。
     /// </summary>
-    private GraphTraversal<T> ApplyPureFilter(Func<int, Func<ISchemaApi, IPredicate>> factoryWithCol)
+    private GraphTraversal<T> ApplyPureFilter(Func<int, Func<ISchemaCatalog, IPredicate>> factoryWithCol)
         => Chain(new FilterOp(_plan, factoryWithCol(_entityColumn)), _projection, _entityColumn);
 
     /// <summary>プロパティ <paramref name="key"/> が文字列 <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, string value)
     {
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         return ApplyPureFilter(col => _ => new PropertyEqStringPredicate(col, keyId, value) { Entity = EntityKindForT });
     }
 
     /// <summary>プロパティ <paramref name="key"/> が <see cref="int"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, int value)
     {
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         var pred  = P.Eq((long)value);
         return ApplyPureFilter(col => _ => new PropertyInt64Predicate(col, keyId, pred) { Entity = EntityKindForT });
     }
@@ -135,7 +135,7 @@ public sealed class GraphTraversal<T>
     /// <summary>プロパティ <paramref name="key"/> が <see cref="long"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, long value)
     {
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         var pred  = P.Eq(value);
         return ApplyPureFilter(col => _ => new PropertyInt64Predicate(col, keyId, pred) { Entity = EntityKindForT });
     }
@@ -143,7 +143,7 @@ public sealed class GraphTraversal<T>
     /// <summary>プロパティ <paramref name="key"/> が <see cref="double"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, double value)
     {
-        var keyId   = _schema.GetOrCreatePropertyKey(key);
+        var keyId   = _schema.ResolvePropertyKey(key);
         var encoded = BitConverter.DoubleToInt64Bits(value);
         return ApplyPureFilter(col => _ => new PropertyDoublePredicate(col, keyId, encoded) { Entity = EntityKindForT });
     }
@@ -151,7 +151,7 @@ public sealed class GraphTraversal<T>
     /// <summary>プロパティ <paramref name="key"/> が <see cref="bool"/> <paramref name="value"/> と等しい要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key, bool value)
     {
-        var keyId  = _schema.GetOrCreatePropertyKey(key);
+        var keyId  = _schema.ResolvePropertyKey(key);
         var scalar = value ? 1L : 0L;
         return ApplyPureFilter(col => _ => new PropertyBoolPredicate(col, keyId, scalar) { Entity = EntityKindForT });
     }
@@ -161,7 +161,7 @@ public sealed class GraphTraversal<T>
     /// </summary>
     public GraphTraversal<T> Has(string key, PropertyPredicate pred)
     {
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         return ApplyPureFilter(col => _ => PredicateDispatch.Build(col, keyId, pred, EntityKindForT));
     }
 
@@ -294,17 +294,14 @@ public sealed class GraphTraversal<T>
     /// <summary>プロパティ <paramref name="key"/> を保持する要素のみを通す。</summary>
     public GraphTraversal<T> Has(string key)
     {
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         return ApplyPureFilter(col => _ => new PropertyExistsPredicate(col, keyId, mustExist: true) { Entity = EntityKindForT });
     }
 
     /// <summary>プロパティ <paramref name="key"/> を持たない要素のみを通す。</summary>
     public GraphTraversal<T> HasNot(string key)
     {
-        // TryGet があれば不要なトークン ID 割り当てを避けられるが、ISchemaApi.TryGet は
-        // 現状公開されていない。最悪ケースで初回呼び出し時にトークン 1 個を割り当てるだけで
-        // 動作は正しい — 新規作成されたキーには観測値が 0 件のため。
-        var keyId = _schema.GetOrCreatePropertyKey(key);
+        var keyId = _schema.ResolvePropertyKey(key);
         return ApplyPureFilter(col => _ => new PropertyExistsPredicate(col, keyId, mustExist: false) { Entity = EntityKindForT });
     }
 

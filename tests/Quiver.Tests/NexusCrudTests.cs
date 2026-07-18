@@ -5,7 +5,7 @@ using Xunit;
 namespace Quiver.Tests;
 
 /// <summary>
-/// <see cref="IGraphTransaction"/> のNexus CRUD 操作を検証する。
+/// <see cref="IWriteTransaction"/> のNexus CRUD 操作を検証する。
 /// 入力検証、削除カスケード、スナップショット分離、ロール / 型フィルタを網羅する。
 /// </summary>
 public sealed class NexusCrudTests : IDisposable
@@ -32,7 +32,7 @@ public sealed class NexusCrudTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
         NexusId heId;
         VertexId a, b, c;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             a = tx.CreateVertex("Person");
             b = tx.CreateVertex("Person");
@@ -45,7 +45,7 @@ public sealed class NexusCrudTests : IDisposable
             tx.Commit();
         }
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var members = Collect(tx.GetMembers(heId));
             members.Should().HaveCount(3);
@@ -59,8 +59,8 @@ public sealed class NexusCrudTests : IDisposable
     public void CreateNexus_with_typeId_works()
     {
         using var db = QuiverDatabase.Open(_path);
-        var typeId = db.Schema.GetOrCreateNexusType("Fact");
-        using var tx = db.BeginTransaction();
+        var typeId = db.EditSchema(schema => schema.GetOrCreateNexusType("Fact"));
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
         var heId = tx.CreateNexus(typeId, [new("S", a), new("O", b)]);
@@ -74,7 +74,7 @@ public sealed class NexusCrudTests : IDisposable
     public void DeleteNexus_makes_it_invisible()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
         var heId = tx.CreateNexus("T", [new("R1", a), new("R2", b)]);
@@ -90,7 +90,7 @@ public sealed class NexusCrudTests : IDisposable
     public void DeleteNexus_nonexistent_is_noop()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         tx.DeleteNexus(new NexusId(99999));
     }
 
@@ -100,7 +100,7 @@ public sealed class NexusCrudTests : IDisposable
     public void CreateNexus_rejects_fewer_than_2_members()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
 
         var act = () => tx.CreateNexus("T", [new("R", a)]);
@@ -111,7 +111,7 @@ public sealed class NexusCrudTests : IDisposable
     public void CreateNexus_rejects_empty_type()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
 
@@ -123,7 +123,7 @@ public sealed class NexusCrudTests : IDisposable
     public void CreateNexus_rejects_empty_role()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
 
@@ -135,7 +135,7 @@ public sealed class NexusCrudTests : IDisposable
     public void CreateNexus_rejects_duplicate_role_vertex_pair()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
 
         var act = () => tx.CreateNexus("T", [new("R", a), new("R", a)]);
@@ -146,7 +146,7 @@ public sealed class NexusCrudTests : IDisposable
     public void CreateNexus_rejects_nonexistent_vertex()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
 
         var act = () => tx.CreateNexus("T", [new("R1", a), new("R2", new VertexId(99999))]);
@@ -157,7 +157,7 @@ public sealed class NexusCrudTests : IDisposable
     public void CreateNexus_allows_same_vertex_different_roles()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
 
@@ -171,7 +171,7 @@ public sealed class NexusCrudTests : IDisposable
     public void GetMembers_filters_by_role()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
         var c = tx.CreateVertex("C");
@@ -185,7 +185,7 @@ public sealed class NexusCrudTests : IDisposable
     public void GetMembers_unknown_role_returns_empty()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
         var heId = tx.CreateNexus("T", [new("R1", a), new("R2", b)]);
@@ -199,7 +199,7 @@ public sealed class NexusCrudTests : IDisposable
     public void GetNexuses_returns_all_for_vertex()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
         var c = tx.CreateVertex("C");
@@ -216,7 +216,7 @@ public sealed class NexusCrudTests : IDisposable
     public void GetNexuses_filters_by_type()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
         var c = tx.CreateVertex("C");
@@ -231,7 +231,7 @@ public sealed class NexusCrudTests : IDisposable
     public void GetNexuses_filters_by_role()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
         var c = tx.CreateVertex("C");
@@ -246,7 +246,7 @@ public sealed class NexusCrudTests : IDisposable
     public void GetNexuses_filters_by_type_and_role()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
         var c = tx.CreateVertex("C");
@@ -263,7 +263,7 @@ public sealed class NexusCrudTests : IDisposable
     public void GetNexuses_unknown_type_returns_empty()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
         tx.CreateNexus("T", [new("R1", a), new("R2", b)]);
@@ -275,7 +275,7 @@ public sealed class NexusCrudTests : IDisposable
     public void GetNexuses_deduplicates_when_vertex_has_multiple_roles()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
         var heId = tx.CreateNexus("T", [new("Subject", a), new("Object", a), new("Witness", b)]);
@@ -292,7 +292,7 @@ public sealed class NexusCrudTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
         NexusId he1, he2;
         VertexId a, b, c;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             a = tx.CreateVertex("A");
             b = tx.CreateVertex("B");
@@ -302,13 +302,13 @@ public sealed class NexusCrudTests : IDisposable
             tx.Commit();
         }
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteVertex(a);
             tx.Commit();
         }
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             Collect(tx.GetMembers(he1)).Should().BeEmpty();
             Collect(tx.GetMembers(he2)).Should().BeEmpty();
@@ -321,7 +321,7 @@ public sealed class NexusCrudTests : IDisposable
     public void DeleteVertex_cascades_each_nexus_once()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
         tx.CreateNexus("T", [new("Subject", a), new("Object", a), new("Witness", b)]);
@@ -337,7 +337,7 @@ public sealed class NexusCrudTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path);
         NexusId heId;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("A");
             var b = tx.CreateVertex("B");
@@ -345,7 +345,7 @@ public sealed class NexusCrudTests : IDisposable
             tx.Commit();
         }
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             Collect(tx.GetMembers(heId)).Should().HaveCount(2);
         }
@@ -356,7 +356,7 @@ public sealed class NexusCrudTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path);
         NexusId heId;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("A");
             var b = tx.CreateVertex("B");
@@ -364,7 +364,7 @@ public sealed class NexusCrudTests : IDisposable
             tx.Rollback();
         }
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             Collect(tx.GetMembers(heId)).Should().BeEmpty();
         }
@@ -376,7 +376,7 @@ public sealed class NexusCrudTests : IDisposable
         using var db = QuiverDatabase.Open(_path);
         VertexId a, b;
         NexusId heId;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             a = tx.CreateVertex("A");
             b = tx.CreateVertex("B");
@@ -384,11 +384,11 @@ public sealed class NexusCrudTests : IDisposable
             tx.Commit();
         }
 
-        using var reader = db.BeginReadOnlyTransaction();
+        using var reader = db.BeginReadTransaction();
         var membersBefore = Collect(reader.GetMembers(heId));
         membersBefore.Should().HaveCount(2);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteNexus(heId);
             tx.Commit();
@@ -404,7 +404,7 @@ public sealed class NexusCrudTests : IDisposable
     public void Schema_lists_nexus_types_and_roles()
     {
         using var db = QuiverDatabase.Open(_path);
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("A");
             var b = tx.CreateVertex("B");
@@ -421,7 +421,7 @@ public sealed class NexusCrudTests : IDisposable
     public void Schema_TryGetNexusTypeId_works()
     {
         using var db = QuiverDatabase.Open(_path);
-        var typeId = db.Schema.GetOrCreateNexusType("MyType");
+        var typeId = db.EditSchema(schema => schema.GetOrCreateNexusType("MyType"));
         db.Schema.TryGetNexusTypeId("MyType", out var found).Should().BeTrue();
         found.Should().Be(typeId);
 

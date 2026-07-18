@@ -91,6 +91,9 @@ public class QueryOptimizerBenchmarks
     private LabelId _carLabel;
     private EdgeTypeId _knowsType;
     private EdgeTypeId _likesType;
+    private PropertyKeyId _nameKey;
+    private PropertyKeyId _ageKey;
+    private PropertyKeyId _scoreKey;
 
     [GlobalSetup]
     public void Setup()
@@ -122,6 +125,9 @@ public class QueryOptimizerBenchmarks
         _carLabel    = new LabelId(1);
         _knowsType   = new EdgeTypeId(0);
         _likesType   = new EdgeTypeId(1);
+        _nameKey = new PropertyKeyId(0);
+        _ageKey = new PropertyKeyId(1);
+        _scoreKey = new PropertyKeyId(2);
 
         // 統計は GlobalSetup 時に 1 回だけ収集
         var stats = _db.CollectStats();
@@ -146,7 +152,14 @@ public class QueryOptimizerBenchmarks
     [Benchmark(Description = "SelectScan (IndexSeek, 1 candidate)")]
     public int SelectScanWithSelectiveIndex()
     {
-        var candidates = new[] { new IndexCandidate("name_idx", _personLabel, EstimatedRows: 5) };
+        var candidates = new[]
+        {
+            new IndexCandidate(
+                VertexIndex("name_idx", "name"),
+                _nameKey,
+                _personLabel,
+                EstimatedRows: 5),
+        };
         return (int)_optimizer.SelectScan(_personLabel, candidates).Kind;
     }
 
@@ -156,12 +169,18 @@ public class QueryOptimizerBenchmarks
     {
         var candidates = new[]
         {
-            new IndexCandidate("name_idx",  _personLabel, EstimatedRows: 200),
-            new IndexCandidate("age_idx",   _personLabel, EstimatedRows: 50),
-            new IndexCandidate("score_idx", _personLabel, EstimatedRows: 3),
+            new IndexCandidate(VertexIndex("name_idx", "name"), _nameKey, _personLabel, EstimatedRows: 200),
+            new IndexCandidate(VertexIndex("age_idx", "age"), _ageKey, _personLabel, EstimatedRows: 50),
+            new IndexCandidate(VertexIndex("score_idx", "score"), _scoreKey, _personLabel, EstimatedRows: 3),
         };
         return (int)_optimizer.SelectScan(_personLabel, candidates).Kind;
     }
+
+    private static ScalarIndexDefinition VertexIndex(string name, string propertyKey)
+        => new(
+            name,
+            new PropertyTarget(PropertyOwnerKind.Vertex, propertyKey, "Person"),
+            IndexKind.Int64Equality);
 
     /// <summary>2ステップ traversal の並び替え。</summary>
     [Benchmark(Description = "OptimizeTraversal (2 steps)")]

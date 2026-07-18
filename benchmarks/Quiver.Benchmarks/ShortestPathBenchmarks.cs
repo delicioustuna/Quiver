@@ -20,7 +20,7 @@ public class ShortestPathBenchmarks
 
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
     private VertexId _srcVertex;
     private VertexId _tgtVertex;
 
@@ -42,7 +42,7 @@ public class ShortestPathBenchmarks
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _srcVertex = new VertexId(0);
         _tgtVertex = new VertexId(PathLength);
-        _readTx = _db.BeginTransaction();
+        _readTx = _db.BeginWriteTransaction();
     }
 
     [GlobalCleanup]

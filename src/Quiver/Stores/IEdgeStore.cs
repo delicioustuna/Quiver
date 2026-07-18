@@ -22,6 +22,15 @@ internal interface IEdgeStore
     /// </summary>
     IEnumerable<EdgeId> Scan();
 
+    /// <summary>
+    /// endpoint/type lookup の derived candidate を返す。呼び出し側は必ず primary read で再検証する。
+    /// </summary>
+    IEnumerable<EdgeId> Lookup(
+        VertexId source,
+        VertexId target,
+        EdgeTypeId type)
+        => [];
+
     /// <summary>指定 sequence の現在の Generation。範囲外なら -1。</summary>
     int CurrentGeneration(long localId) => -1;
 

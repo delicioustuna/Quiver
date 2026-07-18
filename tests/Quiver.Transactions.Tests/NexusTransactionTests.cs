@@ -385,6 +385,7 @@ public sealed class NexusTransactionTests : IDisposable
     {
         public PropertyVersionRef Create(PropertyAddress address, PropertyCardinality cardinality, in PropertyValue value, PropertyVersionRef currentFirst) => PropertyVersionRef.Invalid;
         public PropertyVersionRef Delete(EntityRef owner, PropertyVersionRef version, PropertyVersionRef currentFirst) => PropertyVersionRef.Invalid;
+        public PropertyVersionRecord Read(PropertyVersionRef version) => throw new NotSupportedException();
         public PropertyVersionRecord Read(EntityRef owner, PropertyVersionRef version) => throw new NotSupportedException();
         public PropertyCursor Enumerate(EntityRef owner, PropertyVersionRef firstVersion) => throw new NotSupportedException();
     }

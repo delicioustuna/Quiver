@@ -14,9 +14,9 @@ public class PropertyExistsPredicateTests
     public void Empty_source_returns_empty()
     {
         using var fx = OperatorTestFixture.OpenEmpty();
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("name");
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
         var pred = new PropertyExistsPredicate(0, key, mustExist: true);
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new FilterOperator(new FixedVertexListOperator(), pred));
         result.Rows().Should().BeEmpty();
         tx.Rollback();
@@ -32,9 +32,9 @@ public class PropertyExistsPredicateTests
             tx.SetProperty(withProp, "name", PropertyValue.FromString("alice"));
             without = tx.CreateVertex("X");
         });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("name");
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
         var pred = new PropertyExistsPredicate(0, key, mustExist: true);
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new FilterOperator(
             new FixedVertexListOperator(withProp, without), pred));
         result.Rows().Should().HaveCount(1);
@@ -52,9 +52,9 @@ public class PropertyExistsPredicateTests
             tx.SetProperty(withProp, "name", PropertyValue.FromString("bob"));
             without = tx.CreateVertex("X");
         });
-        var key = fx.Db.Schema.GetOrCreatePropertyKey("name");
+        var key = fx.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
         var pred = new PropertyExistsPredicate(0, key, mustExist: false);
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new FilterOperator(
             new FixedVertexListOperator(withProp, without), pred));
         result.Rows().Should().HaveCount(1);
@@ -69,7 +69,7 @@ public class PropertyExistsPredicateTests
         using var fx = OperatorTestFixture.Open(tx => { n = tx.CreateVertex("X"); });
         // PropertyKeyId.Invalid で未登録キーを再現する。
         var pred = new PropertyExistsPredicate(0, default, mustExist: true);
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new FilterOperator(new FixedVertexListOperator(n), pred));
         result.Rows().Should().BeEmpty();
         tx2.Rollback();
@@ -85,7 +85,7 @@ public class PropertyExistsPredicateTests
             b = tx.CreateVertex("X");
         });
         var pred = new PropertyExistsPredicate(0, default, mustExist: false);
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new FilterOperator(new FixedVertexListOperator(a, b), pred));
         result.Rows().Should().HaveCount(2);
         tx2.Rollback();

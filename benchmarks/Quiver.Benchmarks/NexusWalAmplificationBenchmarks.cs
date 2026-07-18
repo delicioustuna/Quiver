@@ -70,7 +70,7 @@ public static class NexusWalAmplificationBenchmarks
             using var db = OpenForMeasurement(databasePath);
             VertexId[] vertices = CreateVertices(db, 16);
 
-            using (var warmup = db.BeginTransaction())
+            using (var warmup = db.BeginWriteTransaction())
             {
                 warmup.CreateEdge(vertices[0], vertices[1], "Link");
                 warmup.Commit();
@@ -80,7 +80,7 @@ public static class NexusWalAmplificationBenchmarks
             string walPath = databasePath + "-wal";
             long before = FileLength(walPath);
 
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < itemCount; i++)
                     tx.CreateEdge(vertices[0], vertices[1], "Link");
@@ -116,7 +116,7 @@ public static class NexusWalAmplificationBenchmarks
             for (int i = 0; i < members.Length; i++)
                 members[i] = new NexusMember($"Role{i}", vertices[i]);
 
-            using (var warmup = db.BeginTransaction())
+            using (var warmup = db.BeginWriteTransaction())
             {
                 warmup.CreateNexus("Fact", members);
                 warmup.Commit();
@@ -126,7 +126,7 @@ public static class NexusWalAmplificationBenchmarks
             string walPath = databasePath + "-wal";
             long before = FileLength(walPath);
 
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < itemCount; i++)
                     tx.CreateNexus("Fact", members);
@@ -195,7 +195,7 @@ public static class NexusWalAmplificationBenchmarks
     private static VertexId[] CreateVertices(QuiverDatabase db, int count)
     {
         var vertices = new VertexId[count];
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         for (int i = 0; i < vertices.Length; i++)
             vertices[i] = tx.CreateVertex("Member");
         tx.Commit();

@@ -27,7 +27,7 @@ public sealed class NexusPropertyTests : IDisposable
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
-    private static NexusId Seed(IGraphTransaction tx)
+    private static NexusId Seed(IWriteTransaction tx)
     {
         var a = tx.CreateVertex("A");
         var b = tx.CreateVertex("B");
@@ -40,7 +40,7 @@ public sealed class NexusPropertyTests : IDisposable
     public void Scalar_property_roundtrips()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var he = Seed(tx);
 
         tx.SetProperty(he, "count", PropertyValue.FromInt32(7));
@@ -56,7 +56,7 @@ public sealed class NexusPropertyTests : IDisposable
     public void String_property_roundtrips()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var he = Seed(tx);
 
         tx.SetProperty(he, "label", PropertyValue.FromString("bought"));
@@ -67,7 +67,7 @@ public sealed class NexusPropertyTests : IDisposable
     public void Bytes_property_roundtrips()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var he = Seed(tx);
 
         var payload = new byte[] { 1, 2, 3, 250, 255 };
@@ -79,7 +79,7 @@ public sealed class NexusPropertyTests : IDisposable
     public void FloatArray_property_roundtrips()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var he = Seed(tx);
 
         var vec = new float[] { 0.1f, 0.2f, 0.3f, 0.4f };
@@ -91,7 +91,7 @@ public sealed class NexusPropertyTests : IDisposable
     public void HasProperty_and_RemoveProperty()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var he = Seed(tx);
 
         tx.SetProperty(he, "k", PropertyValue.FromInt32(1));
@@ -106,7 +106,7 @@ public sealed class NexusPropertyTests : IDisposable
     public void EnumerateProperties_returns_all_keys()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var he = Seed(tx);
 
         tx.SetProperty(he, "a", PropertyValue.FromInt32(1));
@@ -124,7 +124,7 @@ public sealed class NexusPropertyTests : IDisposable
     public void Inline_to_overflow_and_back_to_inline()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var he = Seed(tx);
 
         // 小さい値は inline。
@@ -153,7 +153,7 @@ public sealed class NexusPropertyTests : IDisposable
         var big = new string('z', 512);
         NexusId he;
         using (var db = QuiverDatabase.Open(_path))
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             he = Seed(tx);
             tx.SetProperty(he, "big", PropertyValue.FromString(big));
@@ -163,7 +163,7 @@ public sealed class NexusPropertyTests : IDisposable
 
         // 再オープン (open 時の recovery を経由) してもプロパティが残ること。
         using (var db = QuiverDatabase.Open(_path))
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             Utf8(tx.GetProperty(he, "big")).Should().Be(big);
             tx.GetProperty(he, "small").Int64Value.Should().Be(42);
@@ -176,9 +176,9 @@ public sealed class NexusPropertyTests : IDisposable
     public void Set_cardinality_add_get_remove()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var he = Seed(tx);
 
         tx.AddPropertyValue(he, "tags", PropertyValue.FromString("a"));
@@ -195,9 +195,9 @@ public sealed class NexusPropertyTests : IDisposable
     public void SetProperty_on_set_key_throws()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set);
+        db.EditSchema(schema => schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var he = Seed(tx);
 
         var act = () => tx.SetProperty(he, "tags", PropertyValue.FromString("x"));
@@ -211,16 +211,16 @@ public sealed class NexusPropertyTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path);
         NexusId he;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             he = Seed(tx);
             tx.Commit();
         }
 
-        using var reader = db.BeginReadOnlyTransaction();
+        using var reader = db.BeginReadTransaction();
         reader.HasProperty(he, "k").Should().BeFalse();
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.SetProperty(he, "k", PropertyValue.FromInt32(1));
             tx.Commit();
@@ -234,7 +234,7 @@ public sealed class NexusPropertyTests : IDisposable
     public void Savepoint_rollback_reverts_property_write()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var he = Seed(tx);
         tx.SetProperty(he, "k", PropertyValue.FromInt32(1));
 
@@ -250,7 +250,7 @@ public sealed class NexusPropertyTests : IDisposable
     {
         NexusId he;
         using (var db = QuiverDatabase.Open(_path))
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             he = Seed(tx);
             tx.SetProperty(he, "name", PropertyValue.FromString("purchase"));
@@ -258,7 +258,7 @@ public sealed class NexusPropertyTests : IDisposable
         }
 
         using (var db = QuiverDatabase.Open(_path))
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             Utf8(tx.GetProperty(he, "name")).Should().Be("purchase");
         }

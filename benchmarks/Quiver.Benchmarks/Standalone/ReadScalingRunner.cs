@@ -48,11 +48,11 @@ public static class ReadScalingRunner
 
     private static (VertexId Hub, float[] Query) Seed(QuiverDatabase db)
     {
-        db.Schema.CreateFullTextIndex(FullTextIndex, "Doc", "body");
+        db.EditSchema(schema => schema.CreateFullTextIndex(FullTextIndex, "Doc", "body"));
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             VectorIndex,
             EntityKind.Vertex,
-            db.Schema.GetOrCreatePropertyKey("embedding"),
+            db.EditSchema(schema => schema.GetOrCreatePropertyKey("embedding")),
             Dimensions,
             DistanceMetric.Cosine,
             "deterministic read-scaling corpus"));
@@ -60,7 +60,7 @@ public static class ReadScalingRunner
         var random = new Random(VectorRecallCorpus.Seed);
         var vector = new float[Dimensions];
         VertexId hub;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             hub = tx.CreateVertex("Hub");
             for (int i = 0; i < Degree; i++)
@@ -87,7 +87,7 @@ public static class ReadScalingRunner
 
     private static Worker CreateOneHopWorker(QuiverDatabase db, VertexId hub)
     {
-        var tx = db.BeginReadOnlyTransaction();
+        var tx = db.BeginReadTransaction();
         return new Worker(() =>
         {
             int count = 0;
@@ -108,9 +108,9 @@ public static class ReadScalingRunner
 
     private static Worker CreateBm25Worker(QuiverDatabase db)
     {
-        var tx = db.BeginReadOnlyTransaction();
+        var tx = db.BeginReadTransaction();
         return new Worker(
-            () => tx.G(db.Schema).Search(FullTextIndex, "alpha beta", 10).ToList().Count,
+            () => tx.Query.Search(FullTextIndex, "alpha beta", 10).ToList().Count,
             tx);
     }
 

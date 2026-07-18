@@ -106,7 +106,7 @@ internal static class TraverseTool
         // 起点Vertexを解決 (vector の場合は embedding API 呼び出しがあるため async)
         var startVertices = await ResolveStartVertices(start, db, ctx.Embedder);
 
-        using var tx = db.BeginReadOnlyTransaction();
+        using var tx = db.BeginReadTransaction();
         var wantedProps = wantedPropsList ?? allPropKeys.ToList();
 
         // 起点Vertexそれぞれを「長さ 1 のパス」として初期化
@@ -167,8 +167,8 @@ internal static class TraverseTool
         var type = start.Type?.ToLowerInvariant() ?? "label";
         int limit = start.Limit ?? 10;
 
-        using var tx = db.BeginReadOnlyTransaction();
-        var g = tx.G(db.Schema);
+        using var tx = db.BeginReadTransaction();
+        var g = tx.Query;
 
         switch (type)
         {
@@ -221,7 +221,7 @@ internal static class TraverseTool
     // 現在Vertex側でない方を隣接Vertexとみなす (both 方向対応)。
     private static List<List<PathVertex>> ExecuteHop(
         List<List<PathVertex>> paths, HopSpec hop,
-        IGraphTransaction tx, ISchemaApi schema, List<string> wantedProps)
+        IReadTransaction tx, ISchemaCatalog schema, List<string> wantedProps)
     {
         var direction = ParseDirection(hop.Direction);
         var result = new List<List<PathVertex>>();
@@ -258,7 +258,7 @@ internal static class TraverseTool
     // フィルタは { "propKey": value } (eq 省略形) または { "propKey": { "op": value } } 形式。
     // PropertyValue は ref struct なので、この関数の呼び出しスコープ内で値を消費し切る必要がある。
     private static bool PassesFilter(
-        VertexId vertexId, Dictionary<string, JsonElement>? filter, IGraphTransaction tx)
+        VertexId vertexId, Dictionary<string, JsonElement>? filter, IReadTransaction tx)
     {
         if (filter is null or { Count: 0 }) return true;
 
@@ -405,7 +405,7 @@ internal static class TraverseTool
     // EnumerateProperties (PropertyKeyId 逆引き不要) ではなく、
     // キー名指定の HasProperty/GetProperty を使うことで、欲しいプロパティだけを取得する。
     private static PathVertex ReadVertex(
-        VertexId vertexId, IGraphTransaction tx, ISchemaApi schema, List<string> wantedProps)
+        VertexId vertexId, IReadTransaction tx, ISchemaCatalog schema, List<string> wantedProps)
     {
         var label = tx.GetVertexLabel(vertexId) ?? "";
         var props = new Dictionary<string, object?>();
@@ -465,7 +465,7 @@ internal static class TraverseTool
 
     // label が指定されていれば該当ラベルの FTS インデックスを探し、
     // 無ければ DB 内の最初の FTS インデックスにフォールバックする
-    private static string FindFullTextIndex(ISchemaApi schema, string? label)
+    private static string FindFullTextIndex(ISchemaCatalog schema, string? label)
     {
         var ftIndexes = schema.ListFullTextIndexes();
         if (!string.IsNullOrEmpty(label))

@@ -70,6 +70,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
     private readonly VersionedRecordHeap _heap;
     private readonly IEntityVersionStore _versions;
     private readonly EdgeLocatorStore? _locators;
+    private readonly Dictionary<EdgeMergeKey, List<EdgeId>> _mergeLookup = [];
     private long _inUseCount;
     // raw adjacency、delta、locator が Sequence を保持する間は edge Sequence を再利用しない。
     // sidecar に再利用履歴がなければ全採番済み slot の generation は 1 なので、
@@ -88,6 +89,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
         _versions = versions ?? new InMemoryEntityVersionStore();
         _locators = locators;
         BackfillLocators();
+        BackfillMergeLookup();
         _inUseCount = RecomputeInUse();
         _anyReuse = _versions.AnyGenerationReuse;
     }
@@ -129,6 +131,7 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
         _heap.Insert(seq, payload, transactionId.Value);
         _versions.Write(seq, new EntityVersionMeta(transactionId.Value, 0, generation));
         _locators?.WriteLive(seq, checked((int)generation), seq, source, target, type);
+        AddMergeCandidate(edgeId, source, target, type);
         _inUseCount++;
 
         // 旧 head の物理 prev を新 edge に向ける (双方向リンク維持。visibility は xmin/xmax で判定)。
@@ -264,6 +267,16 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
             : edgeId;
         return overflowStore.Enumerate(EntityRef.From(ownerId), firstProp);
     }
+
+    public IEnumerable<EdgeId> Lookup(
+        VertexId source,
+        VertexId target,
+        EdgeTypeId type)
+        => _mergeLookup.TryGetValue(
+            new EdgeMergeKey(source.Sequence, target.Sequence, type.Value),
+            out var candidates)
+            ? candidates
+            : [];
 
     // --- internal bulk-load helpers (bootstrap TxId; heap insert handles paging) ---
 
@@ -519,6 +532,45 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
                 _locators.WriteDeleted(seq, generation);
         }
     }
+
+    private void BackfillMergeLookup()
+    {
+        for (long sequence = 0; sequence < _map.Hwm; sequence++)
+        {
+            if (!_heap.TryReadHeadRaw(sequence, out var payload, out _, out _))
+                continue;
+            ReadOnlySpan<byte> span = payload;
+            var source = new VertexId(RecordHelpers.ReadInt48(span[OffSource..]));
+            var target = new VertexId(RecordHelpers.ReadInt48(span[OffTarget..]));
+            var type = new EdgeTypeId(
+                BinaryPrimitives.ReadInt16LittleEndian(span[OffType..]));
+            int generation = CurrentGeneration(sequence);
+            if (generation <= 0)
+                continue;
+            AddMergeCandidate(
+                EdgeId.Create(sequence, generation),
+                source,
+                target,
+                type);
+        }
+    }
+
+    private void AddMergeCandidate(
+        EdgeId edge,
+        VertexId source,
+        VertexId target,
+        EdgeTypeId type)
+    {
+        var key = new EdgeMergeKey(source.Sequence, target.Sequence, type.Value);
+        if (!_mergeLookup.TryGetValue(key, out var candidates))
+            _mergeLookup[key] = candidates = [];
+        candidates.Add(edge);
+    }
+
+    private readonly record struct EdgeMergeKey(
+        long Source,
+        long Target,
+        int Type);
 
     private static EdgeReadHandle NotInUse(EdgeId edgeId)
         => new EdgeReadHandle(

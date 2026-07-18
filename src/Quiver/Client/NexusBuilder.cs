@@ -18,12 +18,12 @@ namespace Quiver.Api;
 /// </remarks>
 public sealed class NexusBuilder
 {
-    private readonly IGraphTransaction _tx;
+    private readonly IWriteTransaction _tx;
     private readonly string _type;
     private readonly List<NexusMember> _members = new();
-    private readonly List<Action<IGraphTransaction, NexusId>> _properties = new();
+    private readonly List<Action<IWriteTransaction, NexusId>> _properties = new();
 
-    internal NexusBuilder(IGraphTransaction tx, string type)
+    internal NexusBuilder(IWriteTransaction tx, string type)
     {
         _tx = tx;
         _type = type;
@@ -78,7 +78,7 @@ public sealed class NexusBuilder
         // 観測させない。配列化した作成単位をトランザクションへ渡す。
         NexusMember[] members = _members.ToArray();
         NexusId id = _tx.CreateNexus(_type, members);
-        Action<IGraphTransaction, NexusId>[] properties = _properties.ToArray();
+        Action<IWriteTransaction, NexusId>[] properties = _properties.ToArray();
         foreach (var apply in properties)
             apply(_tx, id);
 
@@ -87,7 +87,7 @@ public sealed class NexusBuilder
         return id;
     }
 
-    private NexusBuilder AddProperty(Action<IGraphTransaction, NexusId> property)
+    private NexusBuilder AddProperty(Action<IWriteTransaction, NexusId> property)
     {
         _properties.Add(property);
         return this;

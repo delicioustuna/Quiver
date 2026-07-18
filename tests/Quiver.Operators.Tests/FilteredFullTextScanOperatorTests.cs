@@ -62,11 +62,11 @@ public sealed class FilteredFullTextScanOperatorTests
     public void Open_on_missing_index_throws_ConstraintException()
     {
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_missing");
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var op = new FilteredFullTextScanOperator(
             new FixedVertexListOperator(), 0, "no_such_index", "hello", k: 3);
 
-        Action act = () => op.Open(((GraphTransaction)tx).Inner);
+        Action act = () => op.Open(tx.AsInternal().Inner);
         act.Should().Throw<ConstraintException>();
         op.Dispose();
         tx.Rollback();
@@ -76,8 +76,8 @@ public sealed class FilteredFullTextScanOperatorTests
     public void Empty_upstream_returns_no_results()
     {
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_empty_up");
-        fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
-        using (var seed = fx.Db.BeginTransaction())
+        fx.EditSchema(schema => schema.CreateFullTextIndex(IndexName, "Doc", "body"));
+        using (var seed = fx.Db.BeginWriteTransaction())
         {
             var n = seed.CreateVertex("Doc");
             seed.SetProperty(n, "body", PropertyValue.FromString("hello world"));
@@ -85,10 +85,10 @@ public sealed class FilteredFullTextScanOperatorTests
         }
 
         // 入力側が候補を 1 件も生成しない場合。
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var source = new FixedVertexListOperator(); // no vertices
         var op = new FilteredFullTextScanOperator(source, 0, IndexName, "hello", k: 10);
-        op.Open(((GraphTransaction)tx).Inner);
+        op.Open(tx.AsInternal().Inner);
         op.MoveNext().Should().BeFalse();
         op.Dispose();
         tx.Rollback();
@@ -100,8 +100,8 @@ public sealed class FilteredFullTextScanOperatorTests
         VertexId included = default;
         VertexId excluded = default;
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_filter");
-        fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
-        using (var seed = fx.Db.BeginTransaction())
+        fx.EditSchema(schema => schema.CreateFullTextIndex(IndexName, "Doc", "body"));
+        using (var seed = fx.Db.BeginWriteTransaction())
         {
             included = seed.CreateVertex("Doc");
             seed.SetProperty(included, "body", PropertyValue.FromString("hello world"));
@@ -110,11 +110,11 @@ public sealed class FilteredFullTextScanOperatorTests
             seed.Commit();
         }
 
-        var label = fx.Db.Schema.GetOrCreateLabel("Doc");
-        using var tx = fx.Db.BeginTransaction();
+        var label = fx.EditSchema(schema => schema.GetOrCreateLabel("Doc"));
+        using var tx = fx.Db.BeginWriteTransaction();
         var source = new VertexByLabelScanOperator(label);
         var op = new FilteredFullTextScanOperator(source, 0, IndexName, "hello", k: 10);
-        op.Open(((GraphTransaction)tx).Inner);
+        op.Open(tx.AsInternal().Inner);
         var count = 0;
         while (op.MoveNext()) count++;
         count.Should().Be(2);
@@ -127,15 +127,15 @@ public sealed class FilteredFullTextScanOperatorTests
     {
         VertexId candidate = default;
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_nohit");
-        fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
-        using (var seed = fx.Db.BeginTransaction())
+        fx.EditSchema(schema => schema.CreateFullTextIndex(IndexName, "Doc", "body"));
+        using (var seed = fx.Db.BeginWriteTransaction())
         {
             candidate = seed.CreateVertex("Doc");
             seed.SetProperty(candidate, "body", PropertyValue.FromString("alpha beta"));
             seed.Commit();
         }
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var source = new FixedVertexListOperator(candidate);
         using var result = tx.Execute(
             new FilteredFullTextScanOperator(source, 0, IndexName, "zzzzz", k: 10));
@@ -148,8 +148,8 @@ public sealed class FilteredFullTextScanOperatorTests
     {
         var ids = new VertexId[5];
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_klimit");
-        fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
-        using (var seed = fx.Db.BeginTransaction())
+        fx.EditSchema(schema => schema.CreateFullTextIndex(IndexName, "Doc", "body"));
+        using (var seed = fx.Db.BeginWriteTransaction())
         {
             for (int i = 0; i < 5; i++)
             {
@@ -159,11 +159,11 @@ public sealed class FilteredFullTextScanOperatorTests
             seed.Commit();
         }
 
-        var label = fx.Db.Schema.GetOrCreateLabel("Doc");
-        using var tx = fx.Db.BeginTransaction();
+        var label = fx.EditSchema(schema => schema.GetOrCreateLabel("Doc"));
+        using var tx = fx.Db.BeginWriteTransaction();
         var source = new VertexByLabelScanOperator(label);
         var op = new FilteredFullTextScanOperator(source, 0, IndexName, "common", k: 2);
-        op.Open(((GraphTransaction)tx).Inner);
+        op.Open(tx.AsInternal().Inner);
         var count = 0;
         while (op.MoveNext()) count++;
         count.Should().Be(2);
@@ -176,8 +176,8 @@ public sealed class FilteredFullTextScanOperatorTests
     {
         var ids = new VertexId[3];
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_stats");
-        fx.Db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
-        using (var seed = fx.Db.BeginTransaction())
+        fx.EditSchema(schema => schema.CreateFullTextIndex(IndexName, "Doc", "body"));
+        using (var seed = fx.Db.BeginWriteTransaction())
         {
             for (int i = 0; i < 3; i++)
             {
@@ -187,10 +187,10 @@ public sealed class FilteredFullTextScanOperatorTests
             seed.Commit();
         }
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var source = new FixedVertexListOperator(ids);
         var op = new FilteredFullTextScanOperator(source, 0, IndexName, "target", k: 10);
-        op.Open(((GraphTransaction)tx).Inner);
+        op.Open(tx.AsInternal().Inner);
         var count = 0;
         while (op.MoveNext()) count++;
         op.Statistics.RowsProduced.Should().Be(count);

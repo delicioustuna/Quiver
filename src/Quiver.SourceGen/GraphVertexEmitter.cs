@@ -110,7 +110,7 @@ internal static class GraphVertexEmitter
         sb.AppendLine();
 
         // 挿入
-        sb.AppendLine($"    public static Quiver.Core.VertexId Insert(IGraphTransaction tx, {model.ClassName} entity)");
+        sb.AppendLine($"    public static Quiver.Core.VertexId Insert(IWriteTransaction tx, {model.ClassName} entity)");
         sb.AppendLine("    {");
         sb.AppendLine($"        var id = tx.CreateVertex(\"{model.Label}\");");
         foreach (var prop in model.Properties)
@@ -125,20 +125,14 @@ internal static class GraphVertexEmitter
         sb.AppendLine();
 
         // インデックス付き挿入
-        sb.AppendLine($"    public static Quiver.Core.VertexId InsertIndexed(IGraphTransaction tx, {model.ClassName} entity)");
+        sb.AppendLine($"    public static Quiver.Core.VertexId InsertIndexed(IWriteTransaction tx, {model.ClassName} entity)");
         sb.AppendLine("    {");
-        sb.AppendLine("        var id = Insert(tx, entity);");
-        foreach (var prop in indexedProps)
-        {
-            if (_indexCallMap.TryGetValue(prop.CSharpType, out var fmt))
-                sb.AppendLine($"        {string.Format(fmt, prop.IndexName, prop.PropertyName)}");
-        }
-        sb.AppendLine("        return id;");
+        sb.AppendLine("        return Insert(tx, entity);");
         sb.AppendLine("    }");
         sb.AppendLine();
 
         // 読み込み
-        sb.AppendLine($"    public static {model.ClassName} Load(IGraphTransaction tx, Quiver.Core.VertexId id)");
+        sb.AppendLine($"    public static {model.ClassName} Load(IReadTransaction tx, Quiver.Core.VertexId id)");
         sb.AppendLine("    {");
         if (multiValueProps.Count > 0)
         {
@@ -169,7 +163,7 @@ internal static class GraphVertexEmitter
         sb.AppendLine();
 
         // 更新
-        sb.AppendLine($"    public static void Update(IGraphTransaction tx, Quiver.Core.VertexId id, {model.ClassName} entity)");
+        sb.AppendLine($"    public static void Update(IWriteTransaction tx, Quiver.Core.VertexId id, {model.ClassName} entity)");
         sb.AppendLine("    {");
         foreach (var prop in model.Properties)
         {
@@ -182,23 +176,23 @@ internal static class GraphVertexEmitter
         sb.AppendLine();
 
         // 削除
-        sb.AppendLine($"    public static void Delete(IGraphTransaction tx, Quiver.Core.VertexId id) => tx.DeleteVertex(id);");
+        sb.AppendLine($"    public static void Delete(IWriteTransaction tx, Quiver.Core.VertexId id) => tx.DeleteVertex(id);");
 
         // 全インデックスの作成保証
         sb.AppendLine();
-        sb.AppendLine("    public static void EnsureIndexes(Quiver.ISchemaApi schema)");
+        sb.AppendLine("    public static void EnsureIndexes(Quiver.ISchemaEditor schema)");
         sb.AppendLine("    {");
         foreach (var prop in indexedProps)
         {
             if (!_indexKindMap.TryGetValue(prop.CSharpType, out var kindExpr)) continue;
             sb.AppendLine(
-                $"        schema.CreateIndex(\"{prop.IndexName}\", \"{model.Label}\", \"{prop.GraphKey}\", {kindExpr});");
+                $"        schema.CreateIndex(new Quiver.ScalarIndexDefinition(\"{prop.IndexName}\", new Quiver.PropertyTarget(Quiver.PropertyOwnerKind.Vertex, \"{prop.GraphKey}\", \"{model.Label}\"), {kindExpr}));");
         }
         sb.AppendLine("    }");
 
         // 単一プロパティのインデックス作成保証
         sb.AppendLine();
-        sb.AppendLine("    public static void EnsureIndex(Quiver.ISchemaApi schema, string propertyName, Quiver.IndexKind? kindOverride)");
+        sb.AppendLine("    public static void EnsureIndex(Quiver.ISchemaEditor schema, string propertyName, Quiver.IndexKind? kindOverride)");
         sb.AppendLine("    {");
         sb.AppendLine("        switch (propertyName)");
         sb.AppendLine("        {");
@@ -207,7 +201,7 @@ internal static class GraphVertexEmitter
             if (!_indexKindMap.TryGetValue(prop.CSharpType, out var kindExpr)) continue;
             sb.AppendLine($"            case \"{prop.PropertyName}\":");
             sb.AppendLine(
-                $"                schema.CreateIndex(\"{prop.IndexName}\", \"{model.Label}\", \"{prop.GraphKey}\", kindOverride ?? {kindExpr});");
+                $"                schema.CreateIndex(new Quiver.ScalarIndexDefinition(\"{prop.IndexName}\", new Quiver.PropertyTarget(Quiver.PropertyOwnerKind.Vertex, \"{prop.GraphKey}\", \"{model.Label}\"), kindOverride ?? {kindExpr}));");
             sb.AppendLine("                return;");
         }
         sb.AppendLine("            default:");
@@ -222,13 +216,14 @@ internal static class GraphVertexEmitter
             var paramType = prop.CSharpType.TrimEnd('?');
             sb.AppendLine();
             sb.AppendLine($"    public static System.Collections.Generic.List<(Quiver.Core.VertexId Id, {model.ClassName} Entity)> FindBy{prop.PropertyName}(");
-            sb.AppendLine($"        IGraphTransaction tx, {paramType} value)");
+            sb.AppendLine($"        IReadTransaction tx, {paramType} value)");
             sb.AppendLine("    {");
             sb.AppendLine($"        var results = new System.Collections.Generic.List<(Quiver.Core.VertexId, {model.ClassName})>();");
             sb.AppendLine($"        var seek = tx.SeekIndex(\"{prop.IndexName}\", {seekExpr});");
             sb.AppendLine("        while (seek.MoveNext())");
             sb.AppendLine("        {");
-            sb.AppendLine("            var id = seek.Current;");
+            sb.AppendLine("            if (seek.Current.Kind != Quiver.Core.EntityKind.Vertex) continue;");
+            sb.AppendLine("            var id = new Quiver.Core.VertexId(seek.Current.Value);");
             sb.AppendLine("            results.Add((id, Load(tx, id)));");
             sb.AppendLine("        }");
             sb.AppendLine("        return results;");

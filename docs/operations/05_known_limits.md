@@ -99,7 +99,7 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
 
 ### 索引
 
-- 索引は明示的に作る必要がある (自動索引は無い)。検索/MERGE する列に `Schema.CreateIndex`。
+- 索引は明示的に作る必要がある (自動索引は無い)。検索/MERGE する列に `EditSchema` で `ScalarIndexDefinition` を作成する。
 - 索引数を増やすほど書き込みコスト (WAL 増幅) が上がる。必要な列に絞る。
 - abort/crash 後に稀に orphan が残ることがある。`CheckIndexConsistency`、`RepairIndexes` で対処
   ([04_recovery_troubleshoot.md](04_recovery_troubleshoot.md))。

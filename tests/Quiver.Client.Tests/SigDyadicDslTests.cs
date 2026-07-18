@@ -21,12 +21,17 @@ public sealed class SigDyadicDslTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "quiver_sig_dsl_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey(VecIndex);
+        PropertyKeyId keyId;
+        using (var schemaTx = _db.BeginWriteTransaction())
+        {
+            keyId = schemaTx.EditSchema.GetOrCreatePropertyKey(VecIndex);
+            schemaTx.Commit();
+        }
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             VecIndex, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < 5; i++)
         {
             var nid = tx.CreateVertex("Signal");
@@ -50,8 +55,8 @@ public sealed class SigDyadicDslTests : IDisposable
     [Fact]
     public void ApplyDyadic_DotProduct_chains_and_returns_results()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var hits = g.Vertices<SignalVertex>()
             .ApplyDyadic<DotProductOp>(s => s.Embedding, [1f, 0f, 0f, 0f], k: 3)
@@ -63,8 +68,8 @@ public sealed class SigDyadicDslTests : IDisposable
     [Fact]
     public void ApplyDyadic_CosineSimilarity_chains_and_returns_results()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var hits = g.Vertices<SignalVertex>()
             .ApplyDyadic<CosineSimilarityOp>(s => s.Embedding, [1f, 0f, 0f, 0f], k: 3)
@@ -76,8 +81,8 @@ public sealed class SigDyadicDslTests : IDisposable
     [Fact]
     public void ApplyDyadic_EuclideanDistance_chains_and_returns_results()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var hits = g.Vertices<SignalVertex>()
             .ApplyDyadic<EuclideanDistanceOp>(s => s.Embedding, [1f, 0f, 0f, 0f], k: 3)
@@ -91,8 +96,8 @@ public sealed class SigDyadicDslTests : IDisposable
     [Fact]
     public void ApplyDyadic_chains_after_Has_filter()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var hits = g.Vertices<SignalVertex>()
             .Has(s => s.Site, "S0")
@@ -107,8 +112,8 @@ public sealed class SigDyadicDslTests : IDisposable
     [Fact]
     public void ApplyDyadic_with_regions_restricts_scoring()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var hits = g.Vertices<SignalVertex>()
             .ApplyDyadic<DotProductOp>(
@@ -126,8 +131,8 @@ public sealed class SigDyadicDslTests : IDisposable
     [Fact]
     public void ApplyDyadic_null_b_throws()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var act = () => g.Vertices<SignalVertex>()
             .ApplyDyadic<DotProductOp>(s => s.Embedding, (float[])null!, k: 3);
@@ -138,8 +143,8 @@ public sealed class SigDyadicDslTests : IDisposable
     [Fact]
     public void ApplyDyadic_zero_k_throws()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var act = () => g.Vertices<SignalVertex>()
             .ApplyDyadic<DotProductOp>(s => s.Embedding, [1f, 0f, 0f, 0f], k: 0);
@@ -150,8 +155,8 @@ public sealed class SigDyadicDslTests : IDisposable
     [Fact]
     public void ApplyDyadic_negative_k_throws()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var act = () => g.Vertices<SignalVertex>()
             .ApplyDyadic<DotProductOp>(s => s.Embedding, [1f, 0f, 0f, 0f], k: -1);
@@ -162,8 +167,8 @@ public sealed class SigDyadicDslTests : IDisposable
     [Fact]
     public void ApplyDyadic_negative_oversample_throws()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var act = () => g.Vertices<SignalVertex>()
             .ApplyDyadic<DotProductOp>(s => s.Embedding, [1f, 0f, 0f, 0f], k: 3, oversample: -1);
@@ -176,8 +181,8 @@ public sealed class SigDyadicDslTests : IDisposable
     [Fact]
     public void ApplyDyadic_with_traversal_b_chains_correctly()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // 別Vertexの embedding を query vector として使う
         var refTraversal = g.Vertices<SignalVertex>()
@@ -194,8 +199,8 @@ public sealed class SigDyadicDslTests : IDisposable
     [Fact]
     public void ApplyDyadic_traversal_b_null_throws()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var act = () => g.Vertices<SignalVertex>()
             .ApplyDyadic<DotProductOp>(s => s.Embedding, (GraphTraversal<float[]>)null!, k: 3);
@@ -208,8 +213,8 @@ public sealed class SigDyadicDslTests : IDisposable
     [Fact]
     public void Values_float_array_returns_vectors()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var vectors = g.Vertices<SignalVertex>()
             .Has(s => s.Site, "S0")
@@ -225,8 +230,8 @@ public sealed class SigDyadicDslTests : IDisposable
     [Fact]
     public void ApplyDyadic_result_supports_Count()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var count = g.Vertices<SignalVertex>()
             .ApplyDyadic<DotProductOp>(s => s.Embedding, [1f, 0f, 0f, 0f], k: 3)
@@ -239,8 +244,8 @@ public sealed class SigDyadicDslTests : IDisposable
     [Fact]
     public void ApplyDyadic_result_supports_First()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var first = g.Vertices<SignalVertex>()
             .ApplyDyadic<DotProductOp>(s => s.Embedding, [1f, 0f, 0f, 0f], k: 3)
@@ -258,16 +263,16 @@ public sealed class SigDyadicDslTests : IDisposable
 
         public static string GraphLabel => "Signal";
 
-        public static VertexId Insert(IGraphTransaction tx, SignalVertex entity)
+        public static VertexId Insert(IWriteTransaction tx, SignalVertex entity)
         {
             var id = tx.CreateVertex(GraphLabel);
             tx.SetProperty(id, "Site", PropertyValue.FromString(entity.Site));
             return id;
         }
 
-        public static VertexId InsertIndexed(IGraphTransaction tx, SignalVertex entity) => Insert(tx, entity);
+        public static VertexId InsertIndexed(IWriteTransaction tx, SignalVertex entity) => Insert(tx, entity);
 
-        public static SignalVertex Load(IGraphTransaction tx, VertexId id)
+        public static SignalVertex Load(IReadTransaction tx, VertexId id)
         {
             var vertex = new SignalVertex
             {
@@ -279,9 +284,9 @@ public sealed class SigDyadicDslTests : IDisposable
             return vertex;
         }
 
-        public static void Update(IGraphTransaction tx, VertexId id, SignalVertex entity)
+        public static void Update(IWriteTransaction tx, VertexId id, SignalVertex entity)
             => tx.SetProperty(id, "Site", PropertyValue.FromString(entity.Site));
 
-        public static void Delete(IGraphTransaction tx, VertexId id) => tx.DeleteVertex(id);
+        public static void Delete(IWriteTransaction tx, VertexId id) => tx.DeleteVertex(id);
     }
 }

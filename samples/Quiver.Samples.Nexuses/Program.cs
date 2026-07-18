@@ -45,7 +45,7 @@ try
     // ── 1. エンティティと 4 ロールの Fact を作成する ──
     VertexId acme, quiver, graphdb, y2026;
     NexusId verifiedFact;
-    using (var tx = db.BeginTransaction())
+    using (var tx = db.BeginWriteTransaction())
     {
         acme    = Entity.Insert(tx, new Entity { Name = "Acme" });
         quiver  = Entity.Insert(tx, new Entity { Name = "Quiver" });
@@ -63,8 +63,8 @@ try
         });
 
         // 型なし builder でも作れる。同一ロール (object) の複数メンバーを持つ 2 件目。
-        var g = tx.G(db.Schema);
-        g.AddNexus("Fact")
+        var g = tx.Query;
+        tx.Mutate.AddNexus("Fact")
          .Member("subject", acme)
          .Member("object", quiver)
          .Member("object", graphdb)
@@ -83,9 +83,9 @@ try
     // ── 2. 型なし DSL: 1 つのオペレータツリーで object と source を同時に取る ──
     Console.WriteLine();
     Console.WriteLine("── 2. 型なし DSL (Nexuses / Members / Select<NexusId>) ──");
-    using (var tx = db.BeginReadOnlyTransaction())
+    using (var tx = db.BeginReadTransaction())
     {
-        var g = tx.G(db.Schema);
+        var g = tx.Query;
         var rows = g.Vertex(acme)
             .Nexuses("Fact", role: "subject").As("fact")
             .Members("object").As("object")
@@ -109,9 +109,9 @@ try
     // ── 3. Match: 星型パターンで 1 つのファクトと複数ロールを同じ行に束縛する ──
     Console.WriteLine();
     Console.WriteLine("── 3. Match (GraphPattern.Nexus 星型パターン) ──");
-    using (var tx = db.BeginReadOnlyTransaction())
+    using (var tx = db.BeginReadTransaction())
     {
-        var g = tx.G(db.Schema);
+        var g = tx.Query;
         var rows = g.Match(
             GraphPattern.Nexus("f", "Fact")
                 .Member("subject", GraphPattern.Vertex("s", "Entity"))
@@ -131,7 +131,7 @@ try
     // ── 4. 型付き API: Load と型保存トラバーサルで出典チャンクの本文を回収する ──
     Console.WriteLine();
     Console.WriteLine("── 4. 型付き API (Fact.Load / FactAsSubject / Source) ──");
-    using (var tx = db.BeginReadOnlyTransaction())
+    using (var tx = db.BeginReadTransaction())
     {
         var f = Fact.Load(tx, verifiedFact);
         Console.WriteLine($"  Fact.Load: subject={names[f.Subject.VertexId]}, " +
@@ -139,7 +139,7 @@ try
                           $"status={f.Status}, asOf={(f.AsOf is null ? "-" : names[f.AsOf.Value.VertexId])}");
 
         // Entity → Fact → source Chunk を型を保ったまま辿り、出典本文 (grounded citation) を得る。
-        var g = tx.G(db.Schema);
+        var g = tx.Query;
         var sources = g.Vertices<Entity>().Has(e => e.Name, "Acme")
             .FactAsSubject()
             .Has(fa => fa.Status, "verified")

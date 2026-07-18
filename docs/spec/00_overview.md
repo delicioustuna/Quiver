@@ -1,9 +1,9 @@
 # Quiver: システム概要
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-18）
 >
-> **current (as-built)**: identity、Single Writer + Snapshot Readers、no-steal page-WAL、redo-only recovery を実装している。
-> 後続の query、vector、全文検索統合は [再設計正本](../../plans/single-writer-redesign.md) に従って段階的に実装する。
+> **current (as-built)**: identity、Single Writer + Snapshot Readers、no-steal page-WAL、redo-only recovery、統一スカラ索引、トランザクション境界付き query を実装している。
+> 後続の vector と全文検索統合は [再設計正本](../../plans/single-writer-redesign.md) に従って段階的に実装する。
 
 ## ポジショニング {#positioning}
 
@@ -37,8 +37,9 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 │  Quiver.Rag / Quiver.Hosting / Quiver.OpenTelemetry │  オプションのアドオン
 ├─────────────────────────────────────────────────┤
 │  QuiverDatabase (facade)                         │
-│  ├─ ISchemaApi (labels, indexes, FT indexes)    │
-│  ├─ IGraphTransaction (CRUD, index, vector)     │
+│  ├─ ISchemaCatalog / ISchemaEditor              │
+│  ├─ IReadTransaction / IWriteTransaction        │
+│  ├─ GraphTraversalSource / GraphMutationSource  │
 │  ├─ IDiagnosticsApi (consistency check, repair) │
 │  └─ Logical mutation sink (audit / replication) │
 ├─────────────────────────────────────────────────┤

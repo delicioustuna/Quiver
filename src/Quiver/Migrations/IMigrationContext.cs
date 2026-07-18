@@ -14,15 +14,15 @@ namespace Quiver.Migrations;
 public interface IMigrationContext
 {
     /// <summary>このマイグレーションがバインドされた書き込みトランザクション。</summary>
-    IGraphTransaction Transaction { get; }
+    IWriteTransaction Transaction { get; }
 
     /// <summary>このデータベースのスキーマ API (ラベル / プロパティキー / 索引)。</summary>
-    ISchemaApi Schema { get; }
+    ISchemaEditor Schema { get; }
 
     /// <summary>マイグレーション ID (診断 / 例外メッセージ用)。</summary>
     string MigrationId { get; }
 
-    /// <summary>ラベルを rename する shortcut。詳細は <see cref="ISchemaApi.RenameLabel"/>。</summary>
+    /// <summary>ラベルを rename する shortcut。詳細は <see cref="ISchemaEditor.RenameLabel"/>。</summary>
     bool RenameLabel(string oldName, string newName);
 
     /// <summary>プロパティキーを rename する shortcut。</summary>
@@ -34,10 +34,10 @@ public interface IMigrationContext
     /// <summary>索引を rename する shortcut。</summary>
     bool RenameIndex(string oldName, string newName);
 
-    /// <summary>索引を追加する shortcut。詳細は <see cref="ISchemaApi.CreateIndex"/>。</summary>
+    /// <summary>索引を追加する shortcut。詳細は <see cref="ISchemaEditor.CreateIndex"/>。</summary>
     void AddIndex(string indexName, string label, string propertyKey, IndexKind kind);
 
-    /// <summary>索引を削除する shortcut。詳細は <see cref="ISchemaApi.DropIndex"/>。</summary>
+    /// <summary>索引を削除する shortcut。詳細は <see cref="ISchemaEditor.DropIndex"/>。</summary>
     void DropIndex(string indexName);
 
     /// <summary>

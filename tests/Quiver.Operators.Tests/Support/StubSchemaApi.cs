@@ -4,10 +4,10 @@ using Quiver.Core;
 namespace Quiver.Query.Physical.Tests.Support;
 
 /// <summary>
-/// プラン構造テスト用の最小 <see cref="ISchemaApi"/> スタブ。
+/// プラン構造テスト用の最小 <see cref="ISchemaEditor"/> スタブ。
 /// 実データベースなしでプランナーが名前を解決できるよう連番 ID を割り当てる。
 /// </summary>
-internal sealed class StubSchemaApi : ISchemaApi, INexusSchemaResolver
+internal sealed class StubSchemaApi : ISchemaEditor, INexusSchemaResolver
 {
     private int _nextLabel = 1;
     private int _nextEdgeType = 1;
@@ -83,7 +83,7 @@ internal sealed class StubSchemaApi : ISchemaApi, INexusSchemaResolver
         => _edgeTypes.TryGetValue(name, out id);
 
     public bool IndexExists(string indexName) => false;
-    public void CreateIndex(string indexName, string label, string propertyKey, IndexKind kind) { }
+    public void CreateIndex(IndexDefinition definition) { }
     public void DropIndex(string indexName) { }
     public IReadOnlyList<IndexInfo> ListIndexes() => [];
     public void CreateFullTextIndex(string indexName, string label, string propertyKey, FullTextIndexOptions? options = null) { }

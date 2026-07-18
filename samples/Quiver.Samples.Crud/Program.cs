@@ -9,7 +9,7 @@ string dir = Path.Combine(Path.GetTempPath(), "quiver_crud_" + Guid.NewGuid().To
 try
 {
     using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
-    using var tx = db.BeginTransaction();
+    using var tx = db.BeginWriteTransaction();
 
     Console.WriteLine("── 1. Vertex作成 + プロパティ ──");
     var alice = tx.CreateVertex("Person");

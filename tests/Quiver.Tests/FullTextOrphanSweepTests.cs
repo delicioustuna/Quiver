@@ -33,9 +33,9 @@ public sealed class FullTextOrphanSweepTests : IDisposable
     public void Repair_removes_postings_and_norms_for_dead_entities_only()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+        db.EditSchema(schema => schema.CreateFullTextIndex("idx_body", "Doc", "body"));
 
-        var mgr = ((SchemaApi)db.Schema).IndexManager;
+        var mgr = db.SchemaApiForTesting.IndexManager;
         mgr.TryGetFullTextIndex("idx_body", out var ft).Should().BeTrue();
         var tok = mgr.ResolveTokenizer(ft.TokenizerId);
 
@@ -44,7 +44,7 @@ public sealed class FullTextOrphanSweepTests : IDisposable
         ft.AddDocument(deadEntity, tok, "orphan term");
 
         // A real, live document that must survive the sweep.
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var live = tx.CreateVertex("Doc");
             tx.SetProperty(live, "body", PropertyValue.FromString("kept term"));

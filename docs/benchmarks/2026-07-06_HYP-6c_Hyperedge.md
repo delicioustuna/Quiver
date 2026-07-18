@@ -2,7 +2,7 @@
 
 - 日付: 2026-07-06
 - 目的: HYP-1d (走査)、HYP-2c (WAL 増幅)、HYP-3c (RAG 表現力) の三仮説を、ストア直呼びの
-  ハーネスではなく **製品 API** (`GraphDatabase` / `IGraphTransaction` / fluent DSL / Match) を
+  ハーネスではなく **製品 API** (`QuiverDatabase` / `IReadTransaction` / `IWriteTransaction` / fluent DSL / Match) を
   通して再測定する。
 - ベンチ:
   - [benchmarks/Quiver.Benchmarks/HyperedgeTraversalBenchmarks.cs](../../benchmarks/Quiver.Benchmarks/HyperedgeTraversalBenchmarks.cs)

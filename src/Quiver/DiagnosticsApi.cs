@@ -12,6 +12,7 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     private readonly IVertexStore _vertexStore;
     private readonly IEdgeStore _edgeStore;
     private readonly INexusStore _nexusStore;
+    private readonly IPropertyStore _propertyStore;
     private readonly IIncidenceStore _incidenceStore;
     private readonly IVertexIncidenceHeadStore _vertexIncidenceHeads;
     private readonly IGraphAccessMethods _access;
@@ -31,6 +32,7 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
         IVertexStore vertexStore,
         IEdgeStore edgeStore,
         IGraphAccessMethods access,
+        IPropertyStore propertyStore,
         INexusStore? nexusStore = null,
         IIncidenceStore? incidenceStore = null,
         IVertexIncidenceHeadStore? vertexIncidenceHeads = null,
@@ -44,6 +46,7 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     {
         _vertexStore = vertexStore;
         _edgeStore = edgeStore;
+        _propertyStore = propertyStore;
         _nexusStore = nexusStore ?? NullNexusStore.Instance;
         _incidenceStore = incidenceStore ?? NullIncidenceStore.Instance;
         _vertexIncidenceHeads = vertexIncidenceHeads ?? NullVertexIncidenceHeadStore.Instance;
@@ -305,12 +308,15 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
         int indexCount = 0;
         long entryCount = 0;
         if (_indexManager != null)
-            (indexCount, entryCount) = _indexManager.CollectOrphans(IsLiveVertex, raw);
+            (indexCount, entryCount) = _indexManager.CollectOrphans(
+                IsLiveIndexReference,
+                IsLiveEntityReference,
+                raw);
         return (indexCount, entryCount, raw, CountLabelIndexOrphans());
     }
 
     /// <summary>raw orphan (packed 値) を公開 <see cref="OrphanIndexEntry"/> (unpacked VertexId.Value) へ変換。</summary>
-    private static List<OrphanIndexEntry> ToPublicOrphans(List<(string IndexName, byte[] RawKey, long Value)> raw)
+    private List<OrphanIndexEntry> ToPublicOrphans(List<(string IndexName, byte[] RawKey, long Value)> raw)
     {
         var int64 = new Int64KeyCodec();
         var list = new List<OrphanIndexEntry>(raw.Count);
@@ -329,21 +335,54 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
             }
             else
             {
-                list.Add(new OrphanIndexEntry(name, key, EntityRef.UnpackSequence(value)));
+                PropertyVersionRecord property = _propertyStore.Read(
+                    new PropertyVersionRef(value));
+                long ownerSequence = property.Address.Owner.IsValid
+                    ? property.Address.Owner.Sequence
+                    : new PropertyVersionRef(value).Sequence;
+                list.Add(new OrphanIndexEntry(name, key, ownerSequence));
             }
         }
         return list;
     }
 
-    private bool IsLiveVertex(long packedValue)
+    private bool IsLiveIndexReference(long value)
     {
-        // /: B+Tree 索引値は EntityRef でパック済み (Kind/Generation/Sequence)。
-        // 索引は現状 Vertex 限定。Vertex 以外、物理的に解放済み (InUse=false)、または slot が
-        // 再利用されて世代が食い違う (ABA) エントリは orphan とみなす。
-        if (EntityRef.UnpackKind(packedValue) != EntityKind.Vertex) return false;
-        long seq = EntityRef.UnpackSequence(packedValue);
-        return _vertexStore.Read(new VertexId(seq)).InUse
-            && _vertexStore.CurrentGeneration(seq) == EntityRef.UnpackGeneration(packedValue);
+        PropertyVersionRecord property = _propertyStore.Read(
+            new PropertyVersionRef(value));
+        if (!property.InUse)
+            return false;
+
+        EntityRef owner = property.Address.Owner;
+        return owner.Kind switch
+        {
+            EntityKind.Vertex => _vertexStore.Read(
+                new VertexId(owner.Value)).InUse,
+            EntityKind.Edge => _edgeStore.Read(
+                new EdgeId(owner.Value)).InUse,
+            EntityKind.Nexus => _nexusStore.Read(
+                new NexusId(owner.Value)).InUse,
+            _ => false,
+        };
+    }
+
+    private bool IsLiveEntityReference(long value)
+    {
+        EntityKind kind = EntityRef.UnpackKind(value);
+        EntityRef entity = EntityRef.Create(
+            kind,
+            EntityRef.UnpackSequence(value),
+            EntityRef.UnpackGeneration(value));
+        return entity.Kind switch
+        {
+            EntityKind.Vertex => _vertexStore.Read(
+                new VertexId(entity.Value)).InUse,
+            EntityKind.Edge => _edgeStore.Read(
+                new EdgeId(entity.Value)).InUse,
+            EntityKind.Nexus => _nexusStore.Read(
+                new NexusId(entity.Value)).InUse,
+            _ => false,
+        };
     }
 
     private long CountLabelIndexOrphans()

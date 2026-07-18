@@ -27,7 +27,7 @@ public sealed class EdgeDeltaIntegrationTests : IDisposable
 
         using (var db = QuiverDatabase.Open(_path))
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             source = tx.CreateVertex("Vertex");
             target = tx.CreateVertex("Vertex");
             edgeId = tx.CreateEdge(source, target, "LINK");
@@ -55,7 +55,7 @@ public sealed class EdgeDeltaIntegrationTests : IDisposable
 
         using (var db = QuiverDatabase.Open(_path))
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             vertex = tx.CreateVertex("Vertex");
             edgeId = tx.CreateEdge(vertex, vertex, "SELF");
             tx.Commit();
@@ -80,7 +80,7 @@ public sealed class EdgeDeltaIntegrationTests : IDisposable
         VertexId target;
 
         using (var db = QuiverDatabase.Open(_path))
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             source = tx.CreateVertex("Vertex");
             target = tx.CreateVertex("Vertex");
@@ -89,10 +89,10 @@ public sealed class EdgeDeltaIntegrationTests : IDisposable
         }
 
         using var reopened = QuiverDatabase.Open(_path);
-        using var read = reopened.BeginReadOnlyTransaction();
-        read.G(reopened.Schema).Vertex(source).Out("LINK").ToList()
+        using var read = reopened.BeginReadTransaction();
+        read.Query.Vertex(source).Out("LINK").ToList()
             .Should().ContainSingle().Which.Should().Be(target);
-        read.G(reopened.Schema).Vertex(target).In("LINK").ToList()
+        read.Query.Vertex(target).In("LINK").ToList()
             .Should().ContainSingle().Which.Should().Be(source);
     }
 
@@ -106,7 +106,7 @@ public sealed class EdgeDeltaIntegrationTests : IDisposable
 
         using (var db = QuiverDatabase.Open(_path))
         {
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 source = tx.CreateVertex("Vertex");
                 deletedTarget = tx.CreateVertex("Vertex");
@@ -116,7 +116,7 @@ public sealed class EdgeDeltaIntegrationTests : IDisposable
                 tx.Commit();
             }
 
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 tx.DeleteEdge(deleted);
                 tx.Commit();
@@ -124,8 +124,8 @@ public sealed class EdgeDeltaIntegrationTests : IDisposable
         }
 
         using var reopened = QuiverDatabase.Open(_path);
-        using var read = reopened.BeginReadOnlyTransaction();
-        read.G(reopened.Schema).Vertex(source).Out("LINK").ToList()
+        using var read = reopened.BeginReadTransaction();
+        read.Query.Vertex(source).Out("LINK").ToList()
             .Should().ContainSingle().Which.Should().Be(liveTarget);
     }
 
@@ -135,7 +135,7 @@ public sealed class EdgeDeltaIntegrationTests : IDisposable
         VertexId vertex;
 
         using (var db = QuiverDatabase.Open(_path))
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             vertex = tx.CreateVertex("Vertex");
             tx.CreateEdge(vertex, vertex, "SELF");
@@ -143,10 +143,10 @@ public sealed class EdgeDeltaIntegrationTests : IDisposable
         }
 
         using var reopened = QuiverDatabase.Open(_path);
-        using var read = reopened.BeginReadOnlyTransaction();
-        read.G(reopened.Schema).Vertex(vertex).In("SELF").ToList()
+        using var read = reopened.BeginReadTransaction();
+        read.Query.Vertex(vertex).In("SELF").ToList()
             .Should().ContainSingle().Which.Should().Be(vertex);
-        read.G(reopened.Schema).Vertex(vertex).Both("SELF").ToList()
+        read.Query.Vertex(vertex).Both("SELF").ToList()
             .Should().ContainSingle().Which.Should().Be(vertex);
     }
 
@@ -158,7 +158,7 @@ public sealed class EdgeDeltaIntegrationTests : IDisposable
 
         using (var db = QuiverDatabase.Open(_path))
         {
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 source = tx.CreateVertex("Vertex");
                 target = tx.CreateVertex("Vertex");
@@ -166,16 +166,16 @@ public sealed class EdgeDeltaIntegrationTests : IDisposable
                 tx.Commit();
             }
 
-            using (var beforeCompact = db.BeginReadOnlyTransaction())
+            using (var beforeCompact = db.BeginReadTransaction())
             {
-                beforeCompact.G(db.Schema).Vertex(source).Out("LINK").ToList()
+                beforeCompact.Query.Vertex(source).Out("LINK").ToList()
                     .Should().ContainSingle().Which.Should().Be(target);
             }
 
             db.CompactAdjacency();
 
-            using var read = db.BeginReadOnlyTransaction();
-            read.G(db.Schema).Vertex(source).Out("LINK").ToList()
+            using var read = db.BeginReadTransaction();
+            read.Query.Vertex(source).Out("LINK").ToList()
                 .Should().ContainSingle().Which.Should().Be(target);
         }
 
@@ -192,8 +192,8 @@ public sealed class EdgeDeltaIntegrationTests : IDisposable
         }
 
         using var reopened = QuiverDatabase.Open(_path);
-        using var readAfterReopen = reopened.BeginReadOnlyTransaction();
-        readAfterReopen.G(reopened.Schema).Vertex(source).Out("LINK").ToList()
+        using var readAfterReopen = reopened.BeginReadTransaction();
+        readAfterReopen.Query.Vertex(source).Out("LINK").ToList()
             .Should().ContainSingle().Which.Should().Be(target);
     }
 

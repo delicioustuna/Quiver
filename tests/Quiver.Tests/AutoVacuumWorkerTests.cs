@@ -138,7 +138,7 @@ public sealed class AutoVacuumWorkerTests : IDisposable
     {
         // 既定 (AutoVacuum=false) では open しても自動 vacuum は走らない。
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.CreateVertex("Person");
             tx.Commit();
@@ -160,12 +160,12 @@ public sealed class AutoVacuumWorkerTests : IDisposable
 
         // Vertexを作って全削除 → バックグラウンド worker が回収するのを待つ。
         var ids = new List<long>();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < 50; i++) ids.Add(tx.CreateVertex("Person").Sequence); // slot は Sequence
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             foreach (var id in ids) tx.DeleteVertex(new Core.VertexId(id));
             tx.Commit();
@@ -176,7 +176,7 @@ public sealed class AutoVacuumWorkerTests : IDisposable
         long reusedId = -1;
         bool reused = SpinWaitUntil(() =>
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             long newId = tx.CreateVertex("Person").Sequence; // 再利用判定は Sequence
             tx.Commit();
             reusedId = newId;
@@ -197,7 +197,7 @@ public sealed class AutoVacuumWorkerTests : IDisposable
             AutoVacuumInterval = TimeSpan.FromMilliseconds(30),
         };
         var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.CreateVertex("Person");
             tx.Commit();
@@ -220,7 +220,7 @@ public sealed class AutoVacuumWorkerTests : IDisposable
         var act = () =>
         {
             using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             tx.CreateVertex("Person");
             tx.Commit();
         };

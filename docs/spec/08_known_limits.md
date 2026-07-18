@@ -1,6 +1,6 @@
 # 既知の限界
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-18）
 
 本書はエンジンの現時点での既知の限界を記す。v1 統合監査で発見・修正された欠陥はここでは追跡しない
 — それらは回帰テストと git 履歴でカバーされる。
@@ -19,20 +19,20 @@
   一度開いてプロセスのライフタイムを通じて再利用すること。同一プロセス内で同じファイルを 2 度開かないこと。
 - **トランザクションハンドルは同時使用不可である。** write 文脈と MVCC 文脈は非同期フローに保持されるため、
   `await` の継続や、重ならない `Task.Run` 越しの利用で WAL ロギングが暗黙に欠落することはない。
-  ただし同じ `IGraphTransaction` ハンドルを複数スレッドから同時に使うことは未サポートであり、
+  ただし同じ `IReadTransaction` または `IWriteTransaction` ハンドルを複数スレッドから同時に使うことは未サポートであり、
   検出された場合は `TransactionException` をスローする。トランザクションから取得したカーソルや列挙子も、
   トランザクション有効期間内に 1 つの操作フローで消費すること。
 
 ### ライタは 1 つ、リーダは並行 {#one-writer}
 
 - **書き込みトランザクションは 1 度に 1 つだけ進行できる。** エンジンは内部 writer gate により
-  `BeginTransaction()` を直列化する。2 本目の書き込みトランザクションは既定で先行 writer の終了を
+  `BeginWriteTransaction()` を直列化する。2 本目の書き込みトランザクションは既定で先行 writer の終了を
   `QuiverDatabaseOptions.LockTimeout` まで待ち、期限を超えると `TransactionException` をスローする。
   `QuiverDatabaseOptions.EnforceExclusiveWriter` を有効にすると待機せず即時に `TransactionException` をスローする。
   さらに、すべての二次インデックスと全文の
   mutation は単一のグローバルインデックスロックに集約されるため、ロックモードに関わらず、2 つの
   トランザクションがインデックス / postings を同時に mutation することは決してない。
-- **リーダはブロックせず、ブロックもされない。** `BeginReadOnlyTransaction()` は開始時の一貫した
+- **リーダはブロックせず、ブロックもされない。** `BeginReadTransaction()` は開始時の一貫した
   コミット済みスナップショットを取得し（snapshot isolation）、デフォルトではロックを取得しない。
   任意数のリーダがそれぞれのスレッド上で、単一のライタと並行して並列に動作する。リーダは自身の開始後に
   コミットされた書き込みを観測しない — より新しい状態を見るには新しいリーダを開くこと。
@@ -61,8 +61,8 @@ rollback 原子性だけを保証し、プロセス終了やデータベース�
 ### 競合時のリトライ {#retry}
 
 複数スレッドから書き込みを駆動する場合、writer gate / ロック競合は待機中のトランザクションを
-`TransactionException`（writer gate またはロック待ちタイムアウト）、または — `IsolationLevel.Serializable` 下では —
-`SerializabilityException` でアボートする。これらは *一時的* である: アボートされたトランザクションは
+`TransactionException`（writer gate またはロック待ちタイムアウト）でアボートする。
+これは *一時的* である: アボートされたトランザクションは
 永続的な変更を何も行っていないため、小さな有界バックオフを挟んで **トランザクション全体** を
 リトライすること（部分的にではなく）:
 
@@ -73,7 +73,7 @@ T WithRetry<T>(Func<T> runTxn, int maxAttempts = 5)
     {
         try { return runTxn(); }
         catch (Exception e) when (
-            e is DeadlockException or TransactionException or SerializabilityException
+            e is DeadlockException or TransactionException
             && attempt < maxAttempts)
         {
             Thread.Sleep(TimeSpan.FromMilliseconds(2 * attempt)); // back off, retry whole txn
@@ -84,11 +84,11 @@ T WithRetry<T>(Func<T> runTxn, int maxAttempts = 5)
 
 ### 書き込みの直列化 {#write-serialization}
 
-書き込みゲートはエンジン内に組み込まれているため、アプリケーション側で `BeginTransaction()` を
+書き込みゲートはエンジン内に組み込まれているため、アプリケーション側で `BeginWriteTransaction()` を
 さらに `SemaphoreSlim` で囲む必要はない。高頻度の書き込みを扱うアプリケーションでは、専用の
 ライタキューでジョブを集約すると、自然なバッチングとリトライ制御を実装しやすい。
 
-読み取りにゲートは不要: `BeginReadOnlyTransaction()` を任意のスレッドで開き、互いに、そしてライタと
+読み取りにゲートは不要: `BeginReadTransaction()` を任意のスレッドで開き、互いに、そしてライタと
 並行して実行できる。
 
 複数の書き込みトランザクションを同時に進行させる機能はサポートしない。

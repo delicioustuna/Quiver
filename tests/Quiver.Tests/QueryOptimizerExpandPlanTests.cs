@@ -85,7 +85,7 @@ public sealed class QueryOptimizerExpandPlanTests : IDisposable
         // Enough edges that a frontier of 1 vertex only scratches the surface
         // (well below the 25% scan threshold) but a frontier covering all vertices
         // clearly exceeds it.
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var vertices = new VertexId[40];
         for (int i = 0; i < vertices.Length; i++) vertices[i] = tx.CreateVertex("Person");
         for (int i = 0; i < vertices.Length; i++)

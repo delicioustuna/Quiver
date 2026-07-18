@@ -15,7 +15,7 @@ internal interface IVertexStore
 
     /// <summary>
     /// slot <paramref name="localId"/> の現在の世代 (incarnation)。範囲外 / 負は -1。
-    /// 索引値 (<see cref="Quiver.Core.EntityRef"/>) の世代照合に使う。
+    /// property owner や導出候補の世代照合に使う。
     /// </summary>
     int CurrentGeneration(long localId);
 

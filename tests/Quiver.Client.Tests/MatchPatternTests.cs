@@ -20,7 +20,7 @@ public sealed class MatchPatternTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "quiver_match_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         tx.SetProperty(alice, "Name", PropertyValue.FromString("Alice"));
         tx.SetProperty(alice, "Age", PropertyValue.FromInt32(30));
@@ -87,8 +87,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void Match_returns_matching_pairs()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var a = GraphPattern.Vertex("a", "Person");
         var b = GraphPattern.Vertex("b", "Person");
@@ -108,8 +108,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void Match_with_Where_filters_results()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var a = GraphPattern.Vertex("a", "Person");
         var b = GraphPattern.Vertex("b", "Person");
@@ -126,8 +126,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void Match_Count_returns_match_count()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var a = GraphPattern.Vertex("a", "Person");
         var b = GraphPattern.Vertex("b", "Person");
@@ -140,8 +140,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void Match_Return_First_returns_first_match()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var a = GraphPattern.Vertex("a", "Person");
         var b = GraphPattern.Vertex("b", "Person");
@@ -157,8 +157,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void Match_Return_First_returns_null_on_empty()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var a = GraphPattern.Vertex("a", "Person");
         var b = GraphPattern.Vertex("b", "Person");
@@ -174,8 +174,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void Match_Return_AsEnumerable_streams_results()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var a = GraphPattern.Vertex("a", "Person");
         var b = GraphPattern.Vertex("b", "Person");
@@ -191,8 +191,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void Match_In_direction_matches_reverse()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var a = GraphPattern.Vertex("a", "Person");
         var b = GraphPattern.Vertex("b", "Person");
@@ -209,8 +209,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void Match_with_Where_range_predicate()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var a = GraphPattern.Vertex("a", "Person");
         var b = GraphPattern.Vertex("b", "Person");
@@ -227,8 +227,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void Match_different_edge_type()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var a = GraphPattern.Vertex("a", "Person");
         var b = GraphPattern.Vertex("b", "Person");
@@ -250,8 +250,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void Match_AsCursor_iterates_results()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var a = GraphPattern.Vertex("a", "Person");
         var b = GraphPattern.Vertex("b", "Person");
@@ -273,8 +273,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void MatchContext_Load_restores_typed_entity()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var a = GraphPattern.Vertex("a", "Person");
         var b = GraphPattern.Vertex("b", "Person");
@@ -293,8 +293,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void MatchContextRow_Get_long_returns_correct_value()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var n = GraphPattern.Vertex("n", "Person");
         var pattern = n.Out("KNOWS", GraphPattern.Vertex("x"));
@@ -314,7 +314,7 @@ public sealed class MatchPatternTests : IDisposable
     private (NexusId Verified, NexusId Draft, VertexId Alice, VertexId Bob,
              VertexId Quiver, VertexId GraphDb, VertexId Chunk, VertexId AsOf) SeedFacts()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Entity");
         tx.SetProperty(alice, "Name", PropertyValue.FromString("Alice"));
         var bob = tx.CreateVertex("Entity");
@@ -352,8 +352,8 @@ public sealed class MatchPatternTests : IDisposable
     public void Nexus_pattern_binds_two_members_to_same_row()
     {
         var seed = SeedFacts();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var pattern = GraphPattern.Nexus("f", "Fact")
             .Member("subject", GraphPattern.Vertex("s"))
@@ -376,8 +376,8 @@ public sealed class MatchPatternTests : IDisposable
     public void Nexus_pattern_binds_four_members_and_nexus()
     {
         var seed = SeedFacts();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var pattern = GraphPattern.Nexus("f", "Fact")
             .Member("subject", GraphPattern.Vertex("s"))
@@ -403,8 +403,8 @@ public sealed class MatchPatternTests : IDisposable
     public void Nexus_pattern_supports_variable_member_count()
     {
         var seed = SeedFacts();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         // 3 メンバー (subject/object/source) の可変個ケース。
         var pattern = GraphPattern.Nexus("f", "Fact")
@@ -422,8 +422,8 @@ public sealed class MatchPatternTests : IDisposable
     public void Nexus_pattern_applies_member_label_filter()
     {
         var seed = SeedFacts();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         // anchor に Chunk ラベルを課すと Fact は source メンバーが Chunk のものだけ残る。
         var pattern = GraphPattern.Nexus("f", "Fact")
@@ -441,8 +441,8 @@ public sealed class MatchPatternTests : IDisposable
     public void Nexus_pattern_filters_by_vertex_and_nexus_property()
     {
         var seed = SeedFacts();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var pattern = GraphPattern.Nexus("f", "Fact")
             .Member("subject", GraphPattern.Vertex("s"))
@@ -462,8 +462,8 @@ public sealed class MatchPatternTests : IDisposable
     public void Nexus_pattern_same_role_multiple_candidates_emits_each()
     {
         var seed = SeedFacts();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         // draft は object role に 2 メンバー。同じ nexus 内で組み合わせを放出する。
         var pattern = GraphPattern.Nexus("f", "Fact")
@@ -481,8 +481,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void Nexus_pattern_rejects_duplicate_variable()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var pattern = GraphPattern.Nexus("f", "Fact")
             .Member("subject", GraphPattern.Vertex("x"))
@@ -495,8 +495,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void Nexus_pattern_rejects_variable_colliding_with_nexus()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var pattern = GraphPattern.Nexus("f", "Fact")
             .Member("subject", GraphPattern.Vertex("f"));
@@ -508,8 +508,8 @@ public sealed class MatchPatternTests : IDisposable
     [Fact]
     public void Nexus_pattern_rejects_empty_role()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var pattern = GraphPattern.Nexus("f", "Fact")
             .Member("", GraphPattern.Vertex("s"));
@@ -522,8 +522,8 @@ public sealed class MatchPatternTests : IDisposable
     public void Nexus_pattern_rejects_unknown_where_variable()
     {
         var seed = SeedFacts();
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var pattern = GraphPattern.Nexus("f", "Fact")
             .Member("subject", GraphPattern.Vertex("s"));
@@ -545,7 +545,7 @@ public sealed class MatchPatternTests : IDisposable
 
         public static string GraphLabel => "Person";
 
-        public static VertexId Insert(IGraphTransaction tx, PersonVertex entity)
+        public static VertexId Insert(IWriteTransaction tx, PersonVertex entity)
         {
             var id = tx.CreateVertex(GraphLabel);
             tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
@@ -553,21 +553,21 @@ public sealed class MatchPatternTests : IDisposable
             return id;
         }
 
-        public static VertexId InsertIndexed(IGraphTransaction tx, PersonVertex entity) => Insert(tx, entity);
+        public static VertexId InsertIndexed(IWriteTransaction tx, PersonVertex entity) => Insert(tx, entity);
 
-        public static PersonVertex Load(IGraphTransaction tx, VertexId id)
+        public static PersonVertex Load(IReadTransaction tx, VertexId id)
             => new()
             {
                 Name = System.Text.Encoding.UTF8.GetString(tx.GetProperty(id, "Name").Utf8StringValue),
                 Age = tx.GetProperty(id, "Age").Int32Value,
             };
 
-        public static void Update(IGraphTransaction tx, VertexId id, PersonVertex entity)
+        public static void Update(IWriteTransaction tx, VertexId id, PersonVertex entity)
         {
             tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
             tx.SetProperty(id, "Age", PropertyValue.FromInt32(entity.Age));
         }
 
-        public static void Delete(IGraphTransaction tx, VertexId id) => tx.DeleteVertex(id);
+        public static void Delete(IWriteTransaction tx, VertexId id) => tx.DeleteVertex(id);
     }
 }

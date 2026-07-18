@@ -11,8 +11,8 @@ namespace Quiver.Api;
 
 /// <summary>
 /// グラフトラバーサルを構築するエントリポイント。
-/// <see cref="GraphTransactionExtensions.G"/> 拡張で取得し、Vertex追加・
-/// リレーション追加・スキャン起点・Match DSL・KNN 検索の起点として用いる。
+/// <see cref="IReadTransaction.Query"/> から取得し、scan、Match DSL、
+/// KNN 検索の起点として用いる。
 /// </summary>
 /// <remarks>
 /// 同一トランザクション中で複数のトラバーサルを並行して生成できるが、
@@ -21,19 +21,19 @@ namespace Quiver.Api;
 /// </remarks>
 public sealed class GraphTraversalSource
 {
-    private readonly IGraphTransaction _tx;
-    private readonly ISchemaApi _schema;
+    private readonly IReadTransaction _tx;
+    private readonly ISchemaCatalog _schema;
     // 任意で注入された GraphStats。KNN push-down 時に label cardinality が高ければ
     // vector-first フォールバックさせる。null のときは構造ヒントのみで判定する。
     private readonly GraphStats? _stats;
 
     /// <summary>
     /// 指定したトランザクションとスキーマでトラバーサルソースを生成する。
-    /// 通常は <see cref="GraphTransactionExtensions.G"/> 経由で呼び出す。
+    /// 通常は <see cref="IReadTransaction.Query"/> 経由で取得する。
     /// </summary>
     /// <param name="tx">所属するグラフトランザクション。</param>
     /// <param name="schema">ラベル / プロパティキー / Edge型を解決するスキーマ API。</param>
-    public GraphTraversalSource(IGraphTransaction tx, ISchemaApi schema)
+    internal GraphTraversalSource(IReadTransaction tx, ISchemaCatalog schema)
         : this(tx, schema, stats: null)
     {
     }
@@ -45,76 +45,20 @@ public sealed class GraphTraversalSource
     /// (既定 30%) 以上のときに vector-first フォールバックを選ぶための判定材料となる。
     /// stats を渡さない場合は構造ヒントのみで graph-first を選ぶ。
     /// </summary>
-    public GraphTraversalSource(IGraphTransaction tx, ISchemaApi schema, GraphStats? stats)
+    internal GraphTraversalSource(IReadTransaction tx, ISchemaCatalog schema, GraphStats? stats)
     {
         _tx = tx; _schema = schema; _stats = stats;
     }
 
-    // ── Vertex書き込み ──────────────────────────────────────────────────────
-
-    /// <summary>
-    /// 新しいVertexビルダを開始する。
-    /// <c>g.AddVertex("Person").P("Name", "Alice").Next()</c> のように呼ぶ。
-    /// </summary>
-    /// <param name="label">作成するVertexのラベル名。</param>
-    public VertexBuilder         AddVertex(string label) => new(_tx, label);
-
-    /// <summary>
-    /// 新しいEdgeビルダを開始する。
-    /// <c>g.AddEdge("KNOWS").From(a).To(b).Next()</c> のように呼ぶ。
-    /// </summary>
-    /// <param name="type">作成するEdgeの型名。</param>
-    public EdgeBuilder AddEdge(string type) => new(_tx, type);
-
-    /// <summary>
-    /// ロール付きの複数Vertexを一つの関係として扱うNexusの追加を開始する。
-    /// <c>g.AddNexus("Purchase").Member("buyer", buyer).Member("item", item).Next()</c>
-    /// のように、メンバーを 2 件以上指定して使用する。
-    /// </summary>
-    /// <param name="type">作成するNexusの型名。</param>
-    /// <returns>メンバーとプロパティを蓄積するビルダ。</returns>
-    public NexusBuilder AddNexus(string type) => new(_tx, type);
-
-    /// <summary>
-    /// Cypher の <c>MERGE (n:label {matchKey: matchValue})</c> に相当する糖衣構文。
-    /// <see cref="IGraphTransaction.MergeVertex"/> のラッパで、<c>Created</c> フラグを
-    /// 用いて ON CREATE SET / ON MATCH SET の分岐を呼び出し側で書ける。
-    /// </summary>
-    /// <param name="label">マージ対象Vertexのラベル。</param>
-    /// <param name="matchKey">マッチに用いるプロパティキー。</param>
-    /// <param name="matchValue">マッチに用いるプロパティ値。</param>
-    /// <returns>マッチした or 作成されたVertex ID と、新規作成だったかを表すフラグの組。</returns>
-    public (VertexId Id, bool Created) MergeVertex(string label, string matchKey, in Storage.Records.PropertyValue matchValue)
-        => _tx.MergeVertex(label, matchKey, in matchValue);
-
-    /// <summary>
-    /// Cypher の <c>MERGE (a)-[:type]-&gt;(b)</c> に相当するエッジ upsert 糖衣。
-    /// <see cref="IGraphTransaction.MergeEdge"/> のラッパで、<c>Created</c> フラグで
-    /// 新規作成 / 既存ヒットを分岐できる (<see cref="MergeVertex"/> と対称)。
-    /// </summary>
-    /// <param name="source">始点Vertex。</param>
-    /// <param name="target">終点Vertex。</param>
-    /// <param name="type">Edge型名。</param>
-    /// <returns>マッチした or 作成されたEdge ID と、新規作成だったかを表すフラグの組。</returns>
-    public (EdgeId Id, bool Created) MergeEdge(VertexId source, VertexId target, string type)
-        => _tx.MergeEdge(source, target, type);
-
-    // ── エンティティ操作糖衣 (IGraphVertex<T> ベース) ─────────────────────────
-
-    /// <summary><see cref="IGraphVertex{T}"/> 実装型を用いた型安全な Insert。</summary>
-    public VertexId Insert<T>(T entity)             where T : IGraphVertex<T> => T.Insert(_tx, entity);
-
-    /// <summary><see cref="IGraphVertex{T}"/> 実装型を用いた Insert + インデックス登録。</summary>
-    public VertexId InsertIndexed<T>(T entity)      where T : IGraphVertex<T> => T.InsertIndexed(_tx, entity);
+    /// <summary>同じ transaction/schema に query planning 用統計を関連付けた source を返す。</summary>
+    public GraphTraversalSource WithStats(GraphStats stats)
+    {
+        ArgumentNullException.ThrowIfNull(stats);
+        return new GraphTraversalSource(_tx, _schema, stats);
+    }
 
     /// <summary>指定 ID のVertexプロパティを <typeparamref name="T"/> インスタンスに復元する。</summary>
     public T      Load<T>(VertexId id)              where T : IGraphVertex<T> => T.Load(_tx, id);
-
-    /// <summary>指定 ID のVertexのプロパティを <paramref name="entity"/> の値で上書きする。</summary>
-    public void   Update<T>(VertexId id, T entity)  where T : IGraphVertex<T> => T.Update(_tx, id, entity);
-
-    /// <summary>指定 ID のVertexを削除する。</summary>
-    public void   Delete<T>(VertexId id)            where T : IGraphVertex<T> => T.Delete(_tx, id);
 
     // ── スキャン起点 ─────────────────────────────────────────────────────────
 
@@ -509,23 +453,4 @@ public sealed class GraphTraversalSource
                  * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
         return 2 * earthRadiusMeters * Math.Asin(Math.Min(1.0, Math.Sqrt(a)));
     }
-}
-
-/// <summary><see cref="IGraphTransaction"/> から <see cref="GraphTraversalSource"/> を取得する拡張メソッド。</summary>
-public static class GraphTransactionExtensions
-{
-    /// <summary>
-    /// トランザクションとスキーマから新規 <see cref="GraphTraversalSource"/> を構築する。
-    /// </summary>
-    public static GraphTraversalSource G(this IGraphTransaction tx, ISchemaApi schema)
-        => new(tx, schema);
-
-    /// <summary>
-    /// GraphStats を渡してトラバーサルソースを構築する。
-    /// <c>g.Knn(...).HasLabel(L)</c> 形式の push-down が、L の cardinality が高いときに
-    /// vector-first にフォールバックして wall-clock 劣化を回避できる。stats を渡さない場合
-    /// は構造ヒントのみで graph-first を選ぶ。
-    /// </summary>
-    public static GraphTraversalSource G(this IGraphTransaction tx, ISchemaApi schema, GraphStats? stats)
-        => new(tx, schema, stats);
 }

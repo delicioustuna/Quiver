@@ -6,9 +6,13 @@ namespace Quiver;
 
 /// <summary>オプティマイザが評価対象とする候補インデックスを表す。</summary>
 internal sealed record IndexCandidate(
-    string IndexName,
+    ScalarIndexDefinition Definition,
+    PropertyKeyId PropertyKey,
     LabelId Label,
-    long EstimatedRows);
+    long EstimatedRows)
+{
+    internal string IndexName => Definition.Name;
+}
 
 /// <summary>多段トラバーサルプランの 1 ホップ。</summary>
 internal sealed record TraversalPlanStep(
@@ -70,14 +74,20 @@ internal sealed record ExpandPlan(
 internal sealed record ScanPlan(
     ScanKind Kind,
     LabelId? Label,
-    string? IndexName,
+    IndexCandidate? Index,
     long EstimatedRows)
 {
+    internal string? IndexName => Index?.IndexName;
+
     /// <summary>プランを物理オペレータとして実体化する。</summary>
     public IPhysicalOperator Build(ITupleProvider? indexKey = null) => Kind switch
     {
-        ScanKind.IndexSeek when IndexName != null && indexKey != null
-            => new VertexIndexSeekOperator(IndexName, indexKey),
+        ScanKind.IndexSeek when Index is not null && indexKey != null
+            => new VertexIndexSeekOperator(
+                Index.Definition,
+                Index.PropertyKey,
+                Index.Label,
+                indexKey),
         ScanKind.LabelScan when Label.HasValue
             => new VertexByLabelScanOperator(Label.Value),
         _ => new AllVerticesScanOperator(Label),
@@ -116,7 +126,7 @@ internal sealed class QueryOptimizer
                 : _stats.TotalVertices;
 
             if (labelCount == 0 || (double)best.EstimatedRows / labelCount < IndexSelectivityThreshold)
-                return new ScanPlan(ScanKind.IndexSeek, label, best.IndexName, best.EstimatedRows);
+                return new ScanPlan(ScanKind.IndexSeek, label, best, best.EstimatedRows);
         }
 
         if (label.HasValue)

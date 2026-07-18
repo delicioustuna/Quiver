@@ -33,7 +33,7 @@ public sealed class WeightedShortestPathTests : IDisposable
     [Fact]
     public void Dijkstra_picks_lower_weight_multi_hop_over_direct_edge()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
         var c = tx.CreateVertex("X");
@@ -53,7 +53,7 @@ public sealed class WeightedShortestPathTests : IDisposable
     [Fact]
     public void Dijkstra_self_pair_returns_zero_distance_and_single_vertex_path()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
 
         var (dist, vertices, edges) = RunOperator(tx, a, a);
@@ -67,11 +67,11 @@ public sealed class WeightedShortestPathTests : IDisposable
     [Fact]
     public void Dijkstra_no_path_emits_no_row()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");   // a と b の間にエッジ無し
 
-        var keyId = ResolveWeightKey();
+        var keyId = ResolveWeightKey(tx);
         using var op = new WeightedShortestPathOperator(
             new PairSource(a, b), 0, 1, Direction.Outgoing, null,
             new PropertyChainWeightProvider(keyId));
@@ -84,12 +84,12 @@ public sealed class WeightedShortestPathTests : IDisposable
     [Fact]
     public void Negative_edge_weight_throws()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
         SetWeight(tx, tx.CreateEdge(a, b, "K"), -1.0);
 
-        var keyId = ResolveWeightKey();
+        var keyId = ResolveWeightKey(tx);
         using var op = new WeightedShortestPathOperator(
             new PairSource(a, b), 0, 1, Direction.Outgoing, null,
             new PropertyChainWeightProvider(keyId));
@@ -102,7 +102,7 @@ public sealed class WeightedShortestPathTests : IDisposable
     [Fact]
     public void Missing_weight_property_falls_back_to_default_weight()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
         var c = tx.CreateVertex("X");
@@ -120,15 +120,15 @@ public sealed class WeightedShortestPathTests : IDisposable
     [Fact]
     public void TypeFilter_restricts_traversal_to_requested_edge_type()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
         // ROAD 経由は重み 5、RAIL 経由は重み 1 — RAIL に限定すると ROAD は使えない。
         SetWeight(tx, tx.CreateEdge(a, b, "ROAD"), 1.0);
         SetWeight(tx, tx.CreateEdge(a, b, "RAIL"), 5.0);
 
-        var keyId = ResolveWeightKey();
-        var railType = _db.Schema.GetOrCreateEdgeType("RAIL");
+        var keyId = ResolveWeightKey(tx);
+        var railType = tx.EditSchema.GetOrCreateEdgeType("RAIL");
         using var op = new WeightedShortestPathOperator(
             new PairSource(a, b), 0, 1, Direction.Outgoing, railType,
             new PropertyChainWeightProvider(keyId));
@@ -142,7 +142,7 @@ public sealed class WeightedShortestPathTests : IDisposable
     [Fact]
     public void AStar_with_admissible_heuristic_matches_dijkstra_and_expands_no_more_vertices()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         // 線形チェーン n0 -> n1 -> ... -> n5 (各重み 1)、分岐の袋小路 n1 -> dead。
         var n = new VertexId[6];
         for (int i = 0; i < 6; i++) n[i] = tx.CreateVertex("X");
@@ -151,7 +151,7 @@ public sealed class WeightedShortestPathTests : IDisposable
         var dead = tx.CreateVertex("X");
         SetWeight(tx, tx.CreateEdge(n[1], dead, "K"), 1.0);
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey("w");
+        var keyId = tx.EditSchema.GetOrCreatePropertyKey("w");
 
         // Dijkstra (heuristic 無)。
         using var dij = new WeightedShortestPathOperator(
@@ -181,7 +181,7 @@ public sealed class WeightedShortestPathTests : IDisposable
     [Fact]
     public void Client_WeightedShortestPath_returns_distance_and_path()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
         var c = tx.CreateVertex("X");
@@ -189,7 +189,7 @@ public sealed class WeightedShortestPathTests : IDisposable
         var ac = tx.CreateEdge(a, c, "K"); SetWeight(tx, ac, 3.0);
         var cb = tx.CreateEdge(c, b, "K"); SetWeight(tx, cb, 4.0);
 
-        var g = tx.G(_db.Schema);
+        var g = tx.Query;
         var result = g.WeightedShortestPath(a, b, "w");
 
         result.Found.Should().BeTrue();
@@ -202,11 +202,11 @@ public sealed class WeightedShortestPathTests : IDisposable
     [Fact]
     public void Client_WeightedShortestPath_returns_NotFound_when_unreachable()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
 
-        var g = tx.G(_db.Schema);
+        var g = tx.Query;
         var result = g.WeightedShortestPath(a, b, "w");
 
         result.Found.Should().BeFalse();
@@ -218,13 +218,13 @@ public sealed class WeightedShortestPathTests : IDisposable
     [Fact]
     public void Client_WeightedShortestPathAStar_grid_matches_dijkstra()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         const int n = 6;
         var grid = BuildWeightedGrid(tx, n);
         var src = grid[0, 0];
         var dst = grid[n - 1, n - 1];
 
-        var g = tx.G(_db.Schema);
+        var g = tx.Query;
         var dijkstra = g.WeightedShortestPath(src, dst, "w");
         var astar = g.WeightedShortestPathAStar(src, dst, "w", "x", "y", HeuristicMetric.Euclidean);
 
@@ -240,14 +240,14 @@ public sealed class WeightedShortestPathTests : IDisposable
     [Fact]
     public void Client_WeightedShortestPath_maxDistance_prunes_long_paths()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("X");
         var b = tx.CreateVertex("X");
         var c = tx.CreateVertex("X");
         SetWeight(tx, tx.CreateEdge(a, b, "K"), 5.0);
         SetWeight(tx, tx.CreateEdge(b, c, "K"), 5.0);
 
-        var g = tx.G(_db.Schema);
+        var g = tx.Query;
         g.WeightedShortestPath(a, c, "w", maxDistance: 9.0).Found.Should().BeFalse();
         g.WeightedShortestPath(a, c, "w", maxDistance: 10.0).Found.Should().BeTrue();
         tx.Rollback();
@@ -268,18 +268,18 @@ public sealed class WeightedShortestPathTests : IDisposable
 
     // ------------------------------------------------------------------ helpers --
 
-    private void SetWeight(IGraphTransaction tx, EdgeId edge, double weight)
+    private void SetWeight(IWriteTransaction tx, EdgeId edge, double weight)
         => tx.SetProperty(edge, "w", PropertyValue.FromDouble(weight));
 
-    private PropertyKeyId ResolveWeightKey()
-        => _db.Schema.TryGetPropertyKeyId("w", out var keyId)
+    private static PropertyKeyId ResolveWeightKey(IReadTransaction transaction)
+        => transaction.Schema.TryGetPropertyKeyId("w", out var keyId)
             ? keyId
             : PropertyKeyId.Invalid;
 
     private (double Distance, VertexId[] Vertices, EdgeId[] Edges) RunOperator(
-        IGraphTransaction tx, VertexId source, VertexId target)
+        IWriteTransaction tx, VertexId source, VertexId target)
     {
-        var keyId = ResolveWeightKey();
+        var keyId = ResolveWeightKey(tx);
         using var op = new WeightedShortestPathOperator(
             new PairSource(source, target), 0, 1, Direction.Outgoing, null,
             new PropertyChainWeightProvider(keyId));
@@ -290,7 +290,7 @@ public sealed class WeightedShortestPathTests : IDisposable
     }
 
     /// <summary>n×n 格子グラフを構築する。各Vertexは x/y 座標、各エッジは重み 1.0。</summary>
-    private VertexId[,] BuildWeightedGrid(IGraphTransaction tx, int n)
+    private VertexId[,] BuildWeightedGrid(IWriteTransaction tx, int n)
     {
         var grid = new VertexId[n, n];
         for (int r = 0; r < n; r++)

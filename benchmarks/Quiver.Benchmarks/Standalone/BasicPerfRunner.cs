@@ -77,7 +77,7 @@ public static class BasicPerfRunner
         {
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
             var sw = Stopwatch.StartNew();
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < n; i++)
                 {
@@ -112,7 +112,7 @@ public static class BasicPerfRunner
             long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             var sw = Stopwatch.StartNew();
             using (var db = QuiverDatabase.Open(path))
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < n; i++)
                 {
@@ -144,14 +144,14 @@ public static class BasicPerfRunner
         try
         {
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
-            using (var seed = db.BeginTransaction())
+            using (var seed = db.BeginWriteTransaction())
             {
                 seed.CreateVertex("A");
                 seed.CreateVertex("B");
                 seed.Commit();
             }
             var sw = Stopwatch.StartNew();
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < n; i++)
                     tx.CreateEdge(new VertexId(0), new VertexId(1), "R");
@@ -177,7 +177,7 @@ public static class BasicPerfRunner
                 var sw = Stopwatch.StartNew();
                 for (int i = 0; i < Commits; i++)
                 {
-                    using var tx = db.BeginTransaction();
+                    using var tx = db.BeginWriteTransaction();
                     tx.CreateVertex("X");
                     tx.Commit();
                 }
@@ -216,7 +216,7 @@ public static class BasicPerfRunner
             }
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
             var hub = new VertexId(0);
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             var adj = tx.AsInternal().AdjacencySegments!;
             var buf = new AdjacencyEntry[Math.Max(1024, degree + 16)];
 
@@ -265,7 +265,7 @@ public static class BasicPerfRunner
             }
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
             var hub = new VertexId(0);
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             var adj = tx.AsInternal().AdjacencySegments!;
             var l1 = new AdjacencyEntry[8192];
             var l2 = new AdjacencyEntry[8192];
@@ -305,8 +305,8 @@ public static class BasicPerfRunner
             }
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
             var hub = new VertexId(0);
-            using var tx = db.BeginTransaction();
-            var g = tx.G(db.Schema);
+            using var tx = db.BeginWriteTransaction();
+            var g = tx.Query;
             var adj = tx.AsInternal().AdjacencySegments!;
             var buf = new AdjacencyEntry[Degree + 16];
 
@@ -346,8 +346,8 @@ public static class BasicPerfRunner
         try
         {
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
-            var label = db.Schema.GetOrCreateLabel("V");
-            var rt = db.Schema.GetOrCreateEdgeType("R");
+            var label = db.EditSchema(schema => schema.GetOrCreateLabel("V"));
+            var rt = db.EditSchema(schema => schema.GetOrCreateEdgeType("R"));
             var sw = Stopwatch.StartNew();
             using (var bulk = db.BeginBulkLoad())
             {
@@ -374,7 +374,7 @@ public static class BasicPerfRunner
             var sw = Stopwatch.StartNew();
             for (int i = 0; i < vertices; i += Batch)
             {
-                using var tx = db.BeginTransaction();
+                using var tx = db.BeginWriteTransaction();
                 int end = Math.Min(i + Batch, vertices);
                 for (int j = i; j < end; j++) vertexIds[j] = tx.CreateVertex("V");
                 tx.Commit();
@@ -382,7 +382,7 @@ public static class BasicPerfRunner
             var rng = new Random(42);
             for (int i = 0; i < edges; i += Batch)
             {
-                using var tx = db.BeginTransaction();
+                using var tx = db.BeginWriteTransaction();
                 int end = Math.Min(i + Batch, edges);
                 for (int j = i; j < end; j++)
                     tx.CreateEdge(vertexIds[rng.Next(vertices)], vertexIds[rng.Next(vertices)], "R");

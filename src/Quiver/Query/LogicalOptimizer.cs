@@ -67,7 +67,7 @@ internal static class LogicalOptimizer
     internal const double TextFirstLabelFraction = 0.30;
 
     /// <summary>論理プランを最適化する。<paramref name="stats"/> が null なら KNN / 全文は構造ヒントのみで判定。</summary>
-    public static LogicalOp Optimize(LogicalOp plan, GraphStats? stats, ISchemaApi schema)
+    public static LogicalOp Optimize(LogicalOp plan, GraphStats? stats, ISchemaCatalog schema)
     {
         var p = RewriteKnn(plan, stats, schema);
         p = RewriteFullText(p, stats, schema);
@@ -77,7 +77,7 @@ internal static class LogicalOptimizer
 
     // ── KnnLimitPushdown + KnnPushdown (再帰的書き換え) ──────────────────────────
 
-    private static LogicalOp RewriteKnn(LogicalOp n, GraphStats? stats, ISchemaApi schema)
+    private static LogicalOp RewriteKnn(LogicalOp n, GraphStats? stats, ISchemaCatalog schema)
     {
         // KnnLimitPushdown: Limit(skip=0) が <filters>(Knn(null,K)) の直上にあるなら K を縮め Limit を除去。
         if (n is LimitOp { Skip: 0 } lim
@@ -96,7 +96,7 @@ internal static class LogicalOptimizer
     }
 
     private static LogicalOp PushdownKnn(
-        List<Func<ISchemaApi, IPredicate>> filters, KnnOp knn, GraphStats? stats, ISchemaApi schema)
+        List<Func<ISchemaCatalog, IPredicate>> filters, KnnOp knn, GraphStats? stats, ISchemaCatalog schema)
     {
         // 構造ヒントあり (filters 非空)。stats があり label cardinality が閾値以上なら vector-first へ。
         if (stats is not null && ShouldFallBackToVectorFirst(filters, knn.Dim, stats, schema))
@@ -108,7 +108,7 @@ internal static class LogicalOptimizer
     }
 
     private static bool ShouldFallBackToVectorFirst(
-        List<Func<ISchemaApi, IPredicate>> filters, int dim, GraphStats stats, ISchemaApi schema)
+        List<Func<ISchemaCatalog, IPredicate>> filters, int dim, GraphStats stats, ISchemaCatalog schema)
     {
         if (stats.TotalVertices <= 0) return false;
         if (FindLabel(filters, schema) is not LabelId lid) return false;
@@ -121,7 +121,7 @@ internal static class LogicalOptimizer
     }
 
     /// <summary>filter 群を materialize し、最初に見つかった col0 の <see cref="LabelPredicate"/> のラベルを返す。</summary>
-    private static LabelId? FindLabel(List<Func<ISchemaApi, IPredicate>> filters, ISchemaApi schema)
+    private static LabelId? FindLabel(List<Func<ISchemaCatalog, IPredicate>> filters, ISchemaCatalog schema)
     {
         foreach (var f in filters)
             if (f(schema) is LabelPredicate { Column: 0 } lp) return lp.Label;
@@ -129,9 +129,9 @@ internal static class LogicalOptimizer
     }
 
     /// <summary>FilterOp を剥がしながら底の <see cref="KnnOp"/> まで辿る。filter は outer→inner 順で返す。</summary>
-    private static bool TryCollectKnnStack(LogicalOp n, out List<Func<ISchemaApi, IPredicate>> filters, out KnnOp? knn)
+    private static bool TryCollectKnnStack(LogicalOp n, out List<Func<ISchemaCatalog, IPredicate>> filters, out KnnOp? knn)
     {
-        filters = new List<Func<ISchemaApi, IPredicate>>();
+        filters = new List<Func<ISchemaCatalog, IPredicate>>();
         var cur = n;
         while (cur is FilterOp f) { filters.Add(f.PredicateFactory); cur = f.Source; }
         if (cur is KnnOp k) { knn = k; return true; }
@@ -140,7 +140,7 @@ internal static class LogicalOptimizer
     }
 
     /// <summary>outer→inner 順の filter 群を <paramref name="baseOp"/> の上に元の入れ子で積み直す。</summary>
-    private static LogicalOp RebuildStack(List<Func<ISchemaApi, IPredicate>> filters, LogicalOp baseOp)
+    private static LogicalOp RebuildStack(List<Func<ISchemaCatalog, IPredicate>> filters, LogicalOp baseOp)
     {
         var result = baseOp;
         for (int i = filters.Count - 1; i >= 0; i--)
@@ -150,7 +150,7 @@ internal static class LogicalOptimizer
 
     // ── FullTextLimitPushdown + FullTextPushdown (KnnPushdown と同型) ──────
 
-    private static LogicalOp RewriteFullText(LogicalOp n, GraphStats? stats, ISchemaApi schema)
+    private static LogicalOp RewriteFullText(LogicalOp n, GraphStats? stats, ISchemaCatalog schema)
     {
         // FullTextLimitPushdown: Limit(skip=0) が <filters>(FullTextScan(null,K)) の直上なら K を縮め Limit を除去。
         if (n is LimitOp { Skip: 0 } lim
@@ -169,7 +169,7 @@ internal static class LogicalOptimizer
     }
 
     private static LogicalOp PushdownFullText(
-        List<Func<ISchemaApi, IPredicate>> filters, FullTextScanOp ft, GraphStats? stats, ISchemaApi schema)
+        List<Func<ISchemaCatalog, IPredicate>> filters, FullTextScanOp ft, GraphStats? stats, ISchemaCatalog schema)
     {
         // stats があり label cardinality が閾値以上なら text-first に据え置く (filter は post-filter のまま)。
         if (stats is not null && ShouldStayTextFirst(filters, stats, schema))
@@ -181,7 +181,7 @@ internal static class LogicalOptimizer
     }
 
     private static bool ShouldStayTextFirst(
-        List<Func<ISchemaApi, IPredicate>> filters, GraphStats stats, ISchemaApi schema)
+        List<Func<ISchemaCatalog, IPredicate>> filters, GraphStats stats, ISchemaCatalog schema)
     {
         if (stats.TotalVertices <= 0) return false;
         if (FindLabel(filters, schema) is not LabelId lid) return false;
@@ -192,9 +192,9 @@ internal static class LogicalOptimizer
 
     /// <summary>FilterOp を剥がしながら底の <see cref="FullTextScanOp"/> まで辿る。filter は outer→inner 順で返す。</summary>
     private static bool TryCollectFullTextStack(
-        LogicalOp n, out List<Func<ISchemaApi, IPredicate>> filters, out FullTextScanOp? ft)
+        LogicalOp n, out List<Func<ISchemaCatalog, IPredicate>> filters, out FullTextScanOp? ft)
     {
-        filters = new List<Func<ISchemaApi, IPredicate>>();
+        filters = new List<Func<ISchemaCatalog, IPredicate>>();
         var cur = n;
         while (cur is FilterOp f) { filters.Add(f.PredicateFactory); cur = f.Source; }
         if (cur is FullTextScanOp s) { ft = s; return true; }
@@ -204,7 +204,7 @@ internal static class LogicalOptimizer
 
     // ── LabelScanRewrite ────────────────────────────────────────────────────────
 
-    private static LogicalOp LabelScanRewrite(LogicalOp n, ISchemaApi schema)
+    private static LogicalOp LabelScanRewrite(LogicalOp n, ISchemaCatalog schema)
     {
         n = RewriteChildren(n, c => LabelScanRewrite(c, schema));
         if (n is FilterOp { Source: ScanOp { Kind: EntityKind.Vertex, Label: null } } f

@@ -1018,6 +1018,15 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         _root = new PageId(BinaryPrimitives.ReadInt64LittleEndian(h.Data));
         _entryCount = BinaryPrimitives.ReadInt64LittleEndian(h.Data[8..]);
         _height = BinaryPrimitives.ReadInt32LittleEndian(h.Data[16..]);
+        if (_root.Value < 2
+            || _root.Value >= _file.PageCount
+            || _entryCount < 0
+            || _height < 1)
+        {
+            throw new CorruptionException(
+                $"B+Tree header is invalid: root={_root.Value}, " +
+                $"entryCount={_entryCount}, height={_height}, pages={_file.PageCount}.");
+        }
     }
 
     // header (root@0 / entryCount@8 / height@16) も他ページと同じ PageImage WAL の対象である。

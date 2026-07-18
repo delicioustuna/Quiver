@@ -58,6 +58,13 @@ internal sealed class TxPropertyStore : IPropertyStore
             : _inner.Read(owner, version);
     }
 
+    public PropertyVersionRecord Read(PropertyVersionRef version)
+    {
+        return _inner is ITransactionPropertyStore store
+            ? store.Read(version, _visibility)
+            : _inner.Read(version);
+    }
+
     public PropertyCursor Enumerate(
         EntityRef owner,
         PropertyVersionRef firstVersion)

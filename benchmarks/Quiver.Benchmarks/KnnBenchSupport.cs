@@ -14,9 +14,11 @@ internal static class KnnBenchSupport
 {
     /// <summary>vector-first: KNN top-K を全 N から取得後、label で post-filter した件数を返す。</summary>
     public static int PostFilterCount(
-        IGraphTransaction rtx, ISchemaApi schema, string indexName, float[] query, int k, string label)
+        IReadTransaction rtx, ISchemaCatalog schema, string indexName, float[] query, int k, string label)
     {
-        var labelId = schema.GetOrCreateLabel(label);
+        if (!schema.TryGetLabelId(label, out var labelId))
+            return 0;
+
         var knn = new KnnVertexSourceOperator(indexName, query, k);
         var filtered = new FilterOperator(knn, new LabelPredicate(labelId, 0));
         int count = 0;

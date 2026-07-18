@@ -168,7 +168,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var nid = Results.GetSelectedVertexId();
         if (nid is { } id && _db.CurrentDatabase is not null)
         {
-            using var tx = _db.CurrentDatabase.BeginReadOnlyTransaction();
+            using var tx = _db.CurrentDatabase.BeginReadTransaction();
             if (tx.VertexExists(id))
             {
                 var label = tx.GetVertexLabel(id) ?? $"({id.Sequence})";

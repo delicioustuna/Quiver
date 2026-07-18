@@ -27,8 +27,8 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
     [Fact]
     public void NeighborOnly_outgoing_matches_ExpandOperator()
     {
-        var person = _db.Schema.GetOrCreateLabel("Person");
-        using var tx = _db.BeginTransaction();
+        var person = _db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         var carol = tx.CreateVertex("Person");
@@ -50,8 +50,8 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
     [Fact]
     public void Full_outgoing_emits_source_edge_neighbor()
     {
-        var person = _db.Schema.GetOrCreateLabel("Person");
-        using var tx = _db.BeginTransaction();
+        var person = _db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         var edge = tx.CreateEdge(alice, bob, "KNOWS");
@@ -73,12 +73,12 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
     public void Stale_full_frontier_does_not_expand_reused_vertex_slot()
     {
         VertexId stale;
-        using (var write = _db.BeginTransaction())
+        using (var write = _db.BeginWriteTransaction())
         {
             stale = write.CreateVertex("Person");
             write.Commit();
         }
-        using (var write = _db.BeginTransaction())
+        using (var write = _db.BeginWriteTransaction())
         {
             write.DeleteVertex(stale);
             write.Commit();
@@ -86,7 +86,7 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
         _db.Vacuum().ReclaimedVertices.Should().Be(1);
 
         VertexId replacement;
-        using (var write = _db.BeginTransaction())
+        using (var write = _db.BeginWriteTransaction())
         {
             replacement = write.CreateVertex("Person");
             var neighbor = write.CreateVertex("Person");
@@ -96,7 +96,7 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
         replacement.Sequence.Should().Be(stale.Sequence);
         replacement.Generation.Should().NotBe(stale.Generation);
 
-        using var read = _db.BeginReadOnlyTransaction();
+        using var read = _db.BeginReadTransaction();
         using var result = read.Execute(new EdgeScanExpandOperator(
             new FixedVertexListOperatorForPw17([stale]),
             sourceVertexColumn: 0,
@@ -112,19 +112,19 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
     public void Stale_full_source_does_not_enter_binary_adjacency_cursor()
     {
         VertexId stale;
-        using (var write = _db.BeginTransaction())
+        using (var write = _db.BeginWriteTransaction())
         {
             stale = write.CreateVertex("Person");
             write.Commit();
         }
-        using (var write = _db.BeginTransaction())
+        using (var write = _db.BeginWriteTransaction())
         {
             write.DeleteVertex(stale);
             write.Commit();
         }
         _db.Vacuum().ReclaimedVertices.Should().Be(1);
 
-        using (var write = _db.BeginTransaction())
+        using (var write = _db.BeginWriteTransaction())
         {
             var replacement = write.CreateVertex("Person");
             var neighbor = write.CreateVertex("Person");
@@ -133,7 +133,7 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
             write.Commit();
         }
 
-        using var read = _db.BeginReadOnlyTransaction();
+        using var read = _db.BeginReadTransaction();
         using var result = read.Execute(new ExpandOperator(
             new FixedVertexListOperatorForPw17([stale]),
             sourceVertexColumn: 0,
@@ -148,14 +148,14 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
     [Fact]
     public void TypeFilter_excludes_other_types()
     {
-        var person = _db.Schema.GetOrCreateLabel("Person");
-        using var tx = _db.BeginTransaction();
+        var person = _db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         var carol = tx.CreateVertex("Person");
         tx.CreateEdge(alice, bob,   "KNOWS");
         tx.CreateEdge(alice, carol, "BLOCKS");
-        var knows = _db.Schema.GetOrCreateEdgeType("KNOWS");
+        var knows = tx.EditSchema.GetOrCreateEdgeType("KNOWS");
 
         var src = new VertexByLabelScanOperator(person);
         using var scan = new EdgeScanExpandOperator(
@@ -170,8 +170,8 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
     [Fact]
     public void Incoming_direction_matches_targets()
     {
-        var person = _db.Schema.GetOrCreateLabel("Person");
-        using var tx = _db.BeginTransaction();
+        var person = _db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         tx.CreateEdge(alice, bob, "KNOWS");
@@ -189,7 +189,7 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
     [Fact]
     public void Both_direction_emits_each_neighbor_once()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         tx.CreateEdge(alice, bob, "KNOWS");
@@ -206,8 +206,8 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
     [Fact]
     public void Statistics_count_RowsProduced_and_ScanRecords()
     {
-        var person = _db.Schema.GetOrCreateLabel("Person");
-        using var tx = _db.BeginTransaction();
+        var person = _db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         var carol = tx.CreateVertex("Person");
@@ -230,7 +230,7 @@ public sealed class EdgeScanExpandOperatorTests : IDisposable
     [Fact]
     public void Empty_frontier_emits_nothing()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var alice = tx.CreateVertex("Person");
         var bob   = tx.CreateVertex("Person");
         tx.CreateEdge(alice, bob, "KNOWS");

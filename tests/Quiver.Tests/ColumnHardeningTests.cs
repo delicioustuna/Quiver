@@ -32,7 +32,7 @@ public sealed class ColumnHardeningTests : IDisposable
     public void CreateColumn_requires_no_active_transaction()
     {
         using var db = QuiverDatabase.Open(_path);
-        using var tx = db.BeginTransaction(); // アクティブ tx を保持したまま
+        using var tx = db.BeginWriteTransaction(); // アクティブ tx を保持したまま
         Action act = () => db.CreateColumn(EntityKind.Vertex, "x");
         act.Should().Throw<InvalidOperationException>();
     }
@@ -42,7 +42,7 @@ public sealed class ColumnHardeningTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path);
         db.CreateColumn(EntityKind.Vertex, "x").Should().BeTrue();
-        using var tx = db.BeginReadOnlyTransaction(); // reader でも DDL は不可
+        using var tx = db.BeginReadTransaction(); // reader でも DDL は不可
         Action act = () => db.DropColumn(EntityKind.Vertex, "x");
         act.Should().Throw<InvalidOperationException>();
     }
@@ -52,7 +52,7 @@ public sealed class ColumnHardeningTests : IDisposable
     {
         using (var db = QuiverDatabase.Open(_path))
         {
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 var a = tx.CreateVertex("A");
                 var b = tx.CreateVertex("B");
@@ -64,7 +64,7 @@ public sealed class ColumnHardeningTests : IDisposable
                 tx.Commit();
             }
             db.CreateColumn(EntityKind.Edge, "w").Should().BeTrue();
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 foreach (var r in AllEdges(db)) tx.SetProperty(r, "w", PropertyValue.FromInt64(15));
                 tx.Commit();
@@ -75,10 +75,10 @@ public sealed class ColumnHardeningTests : IDisposable
         using (var db2 = QuiverDatabase.Open(_path))
         {
             db2.CreateColumn(EntityKind.Edge, "w").Should().BeFalse(); // 登録永続
-            using var tx = db2.BeginReadOnlyTransaction();
-            tx.G(db2.Schema).Edges().ToList().Should().HaveCount(4);
+            using var tx = db2.BeginReadTransaction();
+            tx.Query.Edges().ToList().Should().HaveCount(4);
             // 列スキャン集約は committed 最新値 (15 × 4 = 60)。
-            tx.G(db2.Schema).Edges().SumLong("w").Should().Be(60);
+            tx.Query.Edges().SumLong("w").Should().Be(60);
         }
     }
 
@@ -90,7 +90,7 @@ public sealed class ColumnHardeningTests : IDisposable
         var snapPath = Path.Combine(_dir, "snap.quiver");
         using (var db = QuiverDatabase.Open(_path))
         {
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 var a = tx.CreateVertex("A");
                 var b = tx.CreateVertex("B");
@@ -108,15 +108,15 @@ public sealed class ColumnHardeningTests : IDisposable
         using (var snap = QuiverDatabase.Open(snapPath))
         {
             snap.CreateColumn(EntityKind.Edge, "w").Should().BeFalse(); // 登録 redo 済
-            using var tx = snap.BeginReadOnlyTransaction();
-            tx.G(snap.Schema).Edges().ToList().Should().HaveCount(4);
-            tx.G(snap.Schema).Edges().SumLong("w").Should().Be(40); // 10 × 4
+            using var tx = snap.BeginReadTransaction();
+            tx.Query.Edges().ToList().Should().HaveCount(4);
+            tx.Query.Edges().SumLong("w").Should().Be(40); // 10 × 4
         }
     }
 
     private static List<EdgeId> AllEdges(QuiverDatabase db)
     {
-        using var tx = db.BeginReadOnlyTransaction();
-        return tx.G(db.Schema).Edges().ToList();
+        using var tx = db.BeginReadTransaction();
+        return tx.Query.Edges().ToList();
     }
 }

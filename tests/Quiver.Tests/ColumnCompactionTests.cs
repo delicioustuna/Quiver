@@ -35,7 +35,7 @@ public sealed class ColumnCompactionTests : IDisposable
         // 複数 edge を使う (heap version-chain guard は ~entity 数依存なので、単一 edge を多重上書き
         // すると小グラフで guard に当たる — それは列とは無関係の既存ヒューリスティック)。
         var edges = new EdgeId[6];
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("A");
             var b = tx.CreateVertex("B");
@@ -51,15 +51,15 @@ public sealed class ColumnCompactionTests : IDisposable
         // 各 edge を数回上書きして delta (超過版) を積む。各 commit が旧 head を delta へ退避する。
         for (long round = 2; round <= 4; round++)
         {
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             foreach (var r in edges)
                 tx.SetProperty(r, "w", PropertyValue.FromInt64(round));
             tx.Commit();
         }
 
         // 最新値が見える (全 edge が w=4 → 合計 24)。
-        using (var tx = db.BeginReadOnlyTransaction())
-            tx.G(db.Schema).Edges().SumLong("w").Should().Be(24);
+        using (var tx = db.BeginReadTransaction())
+            tx.Query.Edges().SumLong("w").Should().Be(24);
 
         // vacuum で horizon 未満の commit 済み超過版を回収する。
         var report = db.Vacuum();
@@ -67,8 +67,8 @@ public sealed class ColumnCompactionTests : IDisposable
         report.ReclaimedColumnVersions.Should().BeGreaterThan(0);
 
         // 回収後も最新値は不変。
-        using (var tx = db.BeginReadOnlyTransaction())
-            tx.G(db.Schema).Edges().SumLong("w").Should().Be(24);
+        using (var tx = db.BeginReadTransaction())
+            tx.Query.Edges().SumLong("w").Should().Be(24);
 
         // 二度目の vacuum では回収するものが無い (冪等)。
         db.Vacuum().ReclaimedColumnVersions.Should().Be(0);
@@ -78,7 +78,7 @@ public sealed class ColumnCompactionTests : IDisposable
     public void Vacuum_without_columns_reports_zero_column_reclaim()
     {
         using var db = QuiverDatabase.Open(_path);
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var n = tx.CreateVertex("A");
             tx.SetProperty(n, "x", PropertyValue.FromInt64(1));

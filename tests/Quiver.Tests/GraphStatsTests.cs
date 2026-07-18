@@ -44,7 +44,7 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void CollectStats_records_nexus_type_counts_and_arity_histograms()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("Entity");
         var b = tx.CreateVertex("Entity");
         var c = tx.CreateVertex("Entity");
@@ -54,8 +54,8 @@ public sealed class GraphStatsTests : IDisposable
         tx.Commit();
 
         var stats = _db.CollectStats();
-        var fact = _db.Schema.GetOrCreateNexusType("Fact");
-        var eventType = _db.Schema.GetOrCreateNexusType("Event");
+        var fact = _db.EditSchema(schema => schema.GetOrCreateNexusType("Fact"));
+        var eventType = _db.EditSchema(schema => schema.GetOrCreateNexusType("Event"));
 
         stats.TotalNexuses.Should().Be(3);
         stats.NexusTypeFrequency[fact].Should().Be(2);
@@ -70,7 +70,7 @@ public sealed class GraphStatsTests : IDisposable
     public void Nexus_stats_follow_logical_delete_and_vacuum()
     {
         NexusId removed;
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("Entity");
             var b = tx.CreateVertex("Entity");
@@ -79,13 +79,13 @@ public sealed class GraphStatsTests : IDisposable
             tx.Commit();
         }
 
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             tx.DeleteNexus(removed);
             tx.Commit();
         }
 
-        var fact = _db.Schema.GetOrCreateNexusType("Fact");
+        var fact = _db.EditSchema(schema => schema.GetOrCreateNexusType("Fact"));
         var afterDelete = _db.CollectStats();
         afterDelete.TotalNexuses.Should().Be(1);
         afterDelete.NexusTypeFrequency[fact].Should().Be(1);
@@ -105,7 +105,7 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void CollectStats_counts_vertices_by_label()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         tx.CreateVertex("Person");
         tx.CreateVertex("Person");
         tx.CreateVertex("Car");
@@ -113,8 +113,8 @@ public sealed class GraphStatsTests : IDisposable
 
         var stats = _db.CollectStats();
 
-        var personLabel = _db.Schema.GetOrCreateLabel("Person");
-        var carLabel    = _db.Schema.GetOrCreateLabel("Car");
+        var personLabel = _db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
+        var carLabel    = _db.EditSchema(schema => schema.GetOrCreateLabel("Car"));
 
         stats.TotalVertices.Should().Be(3);
         stats.EstimateCardinality(personLabel).Should().Be(2);
@@ -124,7 +124,7 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void CollectStats_counts_edges_by_type()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("Person");
         var b = tx.CreateVertex("Person");
         var c = tx.CreateVertex("Person");
@@ -136,8 +136,8 @@ public sealed class GraphStatsTests : IDisposable
         var stats = _db.CollectStats();
 
         stats.TotalEdges.Should().Be(3);
-        var knowsType = _db.Schema.GetOrCreateEdgeType("KNOWS");
-        var likesType = _db.Schema.GetOrCreateEdgeType("LIKES");
+        var knowsType = _db.EditSchema(schema => schema.GetOrCreateEdgeType("KNOWS"));
+        var likesType = _db.EditSchema(schema => schema.GetOrCreateEdgeType("LIKES"));
         stats.EdgeTypeFrequency[knowsType].Should().Be(2);
         stats.EdgeTypeFrequency[likesType].Should().Be(1);
     }
@@ -145,7 +145,7 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void CollectStats_computes_degree_histogram()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var hub  = tx.CreateVertex("Person");
         var leaf1 = tx.CreateVertex("Person");
         var leaf2 = tx.CreateVertex("Person");
@@ -166,21 +166,21 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void EstimateSelectivity_returns_fraction_of_label_over_total()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         tx.CreateVertex("Person");
         tx.CreateVertex("Person");
         tx.CreateVertex("Car");
         tx.Commit();
 
         var stats = _db.CollectStats();
-        var personLabel = _db.Schema.GetOrCreateLabel("Person");
+        var personLabel = _db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
         stats.EstimateSelectivity(personLabel).Should().BeApproximately(2.0 / 3, 1e-9);
     }
 
     [Fact]
     public void EstimateMeanDegree_per_label_is_accurate()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var p1 = tx.CreateVertex("Person");
         var p2 = tx.CreateVertex("Person");
         tx.CreateVertex("Car");
@@ -188,8 +188,8 @@ public sealed class GraphStatsTests : IDisposable
         tx.Commit();
 
         var stats = _db.CollectStats();
-        var personLabel = _db.Schema.GetOrCreateLabel("Person");
-        var carLabel    = _db.Schema.GetOrCreateLabel("Car");
+        var personLabel = _db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
+        var carLabel    = _db.EditSchema(schema => schema.GetOrCreateLabel("Car"));
 
         // p1: degree 1, p2: degree 1  → mean 1.0
         stats.EstimateMeanDegree(personLabel).Should().BeApproximately(1.0, 1e-9);
@@ -210,13 +210,13 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void SelectScan_prefers_LabelScan_when_no_index()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         tx.CreateVertex("Person");
         tx.Commit();
 
         var stats = _db.CollectStats();
         var opt   = new QueryOptimizer(stats);
-        var label = _db.Schema.GetOrCreateLabel("Person");
+        var label = _db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
         var plan  = opt.SelectScan(label);
 
         plan.Kind.Should().Be(ScanKind.LabelScan);
@@ -228,18 +228,25 @@ public sealed class GraphStatsTests : IDisposable
     public void SelectScan_prefers_IndexSeek_when_index_is_highly_selective()
     {
         // Populate 100 Person vertices
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < 100; i++) tx.CreateVertex("Person");
         tx.Commit();
 
         var stats = _db.CollectStats();
         var opt   = new QueryOptimizer(stats);
-        var label = _db.Schema.GetOrCreateLabel("Person");
+        var label = _db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
 
         // A highly selective index returning 2 rows out of 100 (2 %) → below 5 % threshold
         var candidates = new List<IndexCandidate>
         {
-            new("name_idx", label, EstimatedRows: 2),
+            new(
+                new ScalarIndexDefinition(
+                    "name_idx",
+                    new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"),
+                    IndexKind.StringEquality),
+                new PropertyKeyId(0),
+                label,
+                EstimatedRows: 2),
         };
 
         var plan = opt.SelectScan(label, candidates);
@@ -250,18 +257,25 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void SelectScan_falls_back_to_LabelScan_when_index_is_not_selective()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < 100; i++) tx.CreateVertex("Person");
         tx.Commit();
 
         var stats = _db.CollectStats();
         var opt   = new QueryOptimizer(stats);
-        var label = _db.Schema.GetOrCreateLabel("Person");
+        var label = _db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
 
         // Index returns 90 out of 100 (90 %) → not selective
         var candidates = new List<IndexCandidate>
         {
-            new("name_idx", label, EstimatedRows: 90),
+            new(
+                new ScalarIndexDefinition(
+                    "name_idx",
+                    new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"),
+                    IndexKind.StringEquality),
+                new PropertyKeyId(0),
+                label,
+                EstimatedRows: 90),
         };
 
         var plan = opt.SelectScan(label, candidates);
@@ -271,7 +285,7 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void OptimizeTraversal_orders_steps_by_fan_out_ascending()
     {
-        using var setup = _db.BeginTransaction();
+        using var setup = _db.BeginWriteTransaction();
         var a = setup.CreateVertex("N");
         var b = setup.CreateVertex("N");
         var c = setup.CreateVertex("N");
@@ -283,8 +297,8 @@ public sealed class GraphStatsTests : IDisposable
 
         var stats  = _db.CollectStats();
         var opt    = new QueryOptimizer(stats);
-        var knows  = _db.Schema.GetOrCreateEdgeType("KNOWS");
-        var likes  = _db.Schema.GetOrCreateEdgeType("LIKES");
+        var knows  = _db.EditSchema(schema => schema.GetOrCreateEdgeType("KNOWS"));
+        var likes  = _db.EditSchema(schema => schema.GetOrCreateEdgeType("LIKES"));
 
         var steps = new List<TraversalPlanStep>
         {
@@ -311,7 +325,7 @@ public sealed class GraphStatsTests : IDisposable
     public void ShouldUseBidirectional_true_when_fanout_exceeds_threshold()
     {
         // Build a graph where Person vertices have very high mean degree
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var hub = tx.CreateVertex("Person");
         // 10 spokes → degree 10
         for (int i = 0; i < 10; i++)
@@ -323,7 +337,7 @@ public sealed class GraphStatsTests : IDisposable
 
         var stats = _db.CollectStats();
         var opt   = new QueryOptimizer(stats);
-        var label = _db.Schema.GetOrCreateLabel("Person");
+        var label = _db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
 
         // 3-hop: mean ~(10*11/11) ≈ 10/11*10 — but hub has degree 10, leaves degree 1 → mean ≈ 20/11
         // 3-hop: mean^3 ≈ (20/11)^3 ≈ 6 → below threshold 1000  (no bidirectional yet)
@@ -344,7 +358,7 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void CollectStats_records_direction_aware_global_histograms()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var hub = tx.CreateVertex("Person");
         var a   = tx.CreateVertex("Person");
         var b   = tx.CreateVertex("Person");
@@ -369,7 +383,7 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void CollectStats_records_per_type_direction_histograms()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("Person");
         var b = tx.CreateVertex("Person");
         var c = tx.CreateVertex("Person");
@@ -379,8 +393,8 @@ public sealed class GraphStatsTests : IDisposable
         tx.Commit();
 
         var stats = _db.CollectStats();
-        var knows = _db.Schema.GetOrCreateEdgeType("KNOWS");
-        var likes = _db.Schema.GetOrCreateEdgeType("LIKES");
+        var knows = _db.EditSchema(schema => schema.GetOrCreateEdgeType("KNOWS"));
+        var likes = _db.EditSchema(schema => schema.GetOrCreateEdgeType("LIKES"));
 
         // OutDegreeByType[KNOWS]: only vertices with outgoing KNOWS are recorded → a (degree 2)
         stats.OutDegreeByType.Should().ContainKey(knows);
@@ -398,7 +412,7 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void EstimateFanOut_prefers_direction_and_type_histograms()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("Person");
         var b = tx.CreateVertex("Person");
         var c = tx.CreateVertex("Person");
@@ -408,7 +422,7 @@ public sealed class GraphStatsTests : IDisposable
         tx.Commit();
 
         var stats = _db.CollectStats();
-        var knows = _db.Schema.GetOrCreateEdgeType("KNOWS");
+        var knows = _db.EditSchema(schema => schema.GetOrCreateEdgeType("KNOWS"));
 
         // Type+direction specific: outgoing KNOWS has 1 vertex with degree 2 → mean 2.0
         stats.EstimateFanOut(null, knows, Direction.Outgoing).Should().BeApproximately(2.0, 1e-9);
@@ -426,7 +440,7 @@ public sealed class GraphStatsTests : IDisposable
     {
         // Use a small threshold so the test can exercise the dense-vertex path without
         // creating thousands of edges.
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var hub  = tx.CreateVertex("Person");
         var lone = tx.CreateVertex("Person");
         for (int i = 0; i < 10; i++)
@@ -452,7 +466,7 @@ public sealed class GraphStatsTests : IDisposable
     public void VertexDegrees_dense_path_records_every_vertex()
     {
         // 12 vertices with VertexId values 0..11 → contiguous, dense.
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var hub  = tx.CreateVertex("Person");
         var vertices = new List<VertexId> { hub };
         for (int i = 0; i < 10; i++)
@@ -504,7 +518,7 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void VertexDegrees_dense_path_handles_out_of_range_vertex_id()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         tx.CreateVertex("Person");
         tx.Commit();
 
@@ -518,7 +532,7 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void VertexDegrees_falls_back_to_sparse_when_ratio_exceeds_threshold()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var hub = tx.CreateVertex("Person");
         for (int i = 0; i < 10; i++)
         {
@@ -560,7 +574,7 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void CollectStats_records_property_key_observed_types_and_range()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var n1 = tx.CreateVertex("Person");
         var n2 = tx.CreateVertex("Person");
         var n3 = tx.CreateVertex("Person");
@@ -572,8 +586,8 @@ public sealed class GraphStatsTests : IDisposable
         tx.Commit();
 
         var stats = _db.CollectStats();
-        var ageKey  = _db.Schema.GetOrCreatePropertyKey("age");
-        var nameKey = _db.Schema.GetOrCreatePropertyKey("name");
+        var ageKey  = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("age"));
+        var nameKey = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("name"));
 
         var ageStats = stats.PropertyKeys[ageKey];
         ageStats.Count.Should().Be(2);
@@ -594,7 +608,7 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void CollectStats_records_edge_property_stats()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var a = tx.CreateVertex("Person");
         var b = tx.CreateVertex("Person");
         var c = tx.CreateVertex("Person");
@@ -605,7 +619,7 @@ public sealed class GraphStatsTests : IDisposable
         tx.Commit();
 
         var stats = _db.CollectStats();
-        var weightKey = _db.Schema.GetOrCreatePropertyKey("weight");
+        var weightKey = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("weight"));
 
         var ws = stats.PropertyKeys[weightKey];
         ws.Count.Should().Be(2);
@@ -620,7 +634,7 @@ public sealed class GraphStatsTests : IDisposable
     [Fact]
     public void QueryOptimizer_OptimizeTraversal_uses_direction_aware_fanout()
     {
-        using var setup = _db.BeginTransaction();
+        using var setup = _db.BeginWriteTransaction();
         var a = setup.CreateVertex("N");
         var b = setup.CreateVertex("N");
         var c = setup.CreateVertex("N");
@@ -633,8 +647,8 @@ public sealed class GraphStatsTests : IDisposable
 
         var stats = _db.CollectStats();
         var opt   = new QueryOptimizer(stats);
-        var knows = _db.Schema.GetOrCreateEdgeType("KNOWS");
-        var likes = _db.Schema.GetOrCreateEdgeType("LIKES");
+        var knows = _db.EditSchema(schema => schema.GetOrCreateEdgeType("KNOWS"));
+        var likes = _db.EditSchema(schema => schema.GetOrCreateEdgeType("LIKES"));
 
         var outgoing = new List<TraversalPlanStep>
         {

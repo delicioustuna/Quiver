@@ -1,6 +1,6 @@
 # レコード & インデックス
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-18）
 
 ## Slotted ページモデル {#slotted-pages}
 
@@ -22,14 +22,14 @@ Property version、incidence、primary vector payload は Sequence から固定 
 | 13 | 2 | LabelId |
 
 - xmin/xmax は version header に格納する。
-- Generation と現行 SSN 用 stamp は `EntityVersionMeta` sidecar に格納する。
+- Generation は `EntityVersionMeta` sidecar に格納する。
 - vacuum が reader horizon を越えた record を回収した後、Sequence を再利用すると Generation が増える。
 
 ## Edge ストア {#rel-store}
 
 `VersionedEdgeStore` (`src/Quiver/Stores/VersionedEdgeStore.cs`) は 45 バイト payload を `VersionedRecordHeap` に格納する。
 payload は flags、source、target、type、両端の prev/next、`FirstPropertyRef` で構成する。
-xmin/xmax は version header、Generation と現行 SSN 用 stamp は `EntityVersionMeta` sidecar に置く。
+xmin/xmax は version header、Generation は `EntityVersionMeta` sidecar に置く。
 
 各Edgeは source と target の両Vertexについて prev/next にリンクし、Vertexのエンドポイントごとに双方向連結リストを形成する。
 adjacency、delta、locator が raw Sequence を保持する間は Edge Sequence を再利用しない。
@@ -55,7 +55,7 @@ header レコードが MVCC 可視性の正本になる。
 | 9 | 6 | FirstPropertyRef（owner-bound property version chain の先頭 Sequence） |
 
 - `VersionedRecordHeap` + `ItemPointerMap` 上の固定 payload であり、inline property 領域は持たない
-- xmin/xmax は heap の version header、Generation と現行 SSN 用 stamp は `EntityVersionMeta` sidecar に置く
+- xmin/xmax は heap の version header、Generation は `EntityVersionMeta` sidecar に置く
 - メンバー集合は作成時に確定し、以後変更されない。変更は削除 + 再作成で表現する
 - 同じロールとVertexの組は 1 つのNexus内で重複できない。
   同じVertexが別ロールで参加すること、同じロールに複数Vertexが参加することは許される
@@ -218,8 +218,34 @@ Property は独立 entity ではなく、public `PropertyId` を持たない。
 | 種別 | キー型 | ルックアップ |
 |---|---|---|
 | `StringEquality` | string | SeekIndex による完全一致 |
+| `StringRange` | string | RangeIndex による範囲スキャン |
+| `Int32Equality` | int32 | SeekIndex による完全一致 |
 | `Int64Equality` | int64 | SeekIndex による完全一致 |
-| Range indexes | int64 | RangeIndex による範囲スキャン |
+| `DoubleEquality` | double | SeekIndex による完全一致 |
+
+### 統一スカラ索引定義 {#scalar-index-definition}
+
+スカラ索引は `ScalarIndexDefinition(Name, Target, Kind)` を永続定義の正本とする。
+`PropertyTarget` は所有者種別、プロパティキー名、任意のラベルまたは型スコープを明示する。
+所有者種別は Vertex、Edge、Nexus を区別し、同じ sequence 値を別種別へ誤解決しない。
+各 B+Tree value はエンティティ ID ではなく `PropertyVersionRef` を格納する。
+seek と range はプロパティキー、値、所有者種別、所有者世代、所有者の MVCC 可視性、スコープを primary record で再検証する。
+stale entry は結果から除外されるため、索引 artifact 自体を可視性の正本にしない。
+
+### ライフサイクルと再構築 {#scalar-index-lifecycle}
+
+永続状態は `Building`、`Ready`、`RebuildRequired` の三種類である。
+作成時は定義を `Building` として記録し、既存の可視プロパティを backfill してから `Ready` に遷移する。
+同じ名前と同じ定義の再作成は冪等であり、同じ名前で異なる定義を要求した場合は拒否する。
+通常 mutation、Set cardinality、bulk load、streaming bulk load は同じ定義集合を更新対象とする。
+bulk load 後は定義を `RebuildRequired` にし、snapshot reader が primary property を走査して immutable な候補 artifact を構築する。
+open 時に `Building`、`RebuildRequired`、欠損または不正な B+Tree header を検出した場合も、同じ background rebuild を開始する。
+primary scan、key decode、sort の間は writer lease を保持しない。
+publish transaction は source committed high-water と index definition を再検証し、一致した artifact だけを `Ready` にする。
+再検証に失敗した artifact は破棄し、新しい snapshot から再試行する。
+source snapshot より古い reader が残る間は publish を延期し、旧 reader が参照する artifact を reset しない。
+定義が `Ready` でない間の seek と range は、同じ読み取りスナップショットの primary scan へフォールバックする。
+フォールバックも同じ値比較と順序規則を使うため、artifact の状態によって結果集合を変えない。
 
 ### B+Tree WAL {#btree-journal}
 

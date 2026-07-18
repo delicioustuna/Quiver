@@ -32,7 +32,7 @@ static void Demo1_BasicCrud(string dir)
 {
     H("Demo 1: 基本 CRUD — ソーシャルグラフ");
     using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
-    using var tx = db.BeginTransaction();
+    using var tx = db.BeginWriteTransaction();
 
     // ── ノード作成 & プロパティ設定 ──────────────────────────────────────
     var alice = tx.CreateVertex("Person");
@@ -88,7 +88,7 @@ static void Demo2_AllPropertyTypes(string dir)
 {
     H("Demo 2: プロパティ各型");
     using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
-    using var tx = db.BeginTransaction();
+    using var tx = db.BeginWriteTransaction();
 
     var n = tx.CreateVertex("Item");
 
@@ -128,7 +128,7 @@ static void Demo3_OperatorPipeline(string dir)
 {
     H("Demo 3: Volcano オペレータパイプライン");
     using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
-    using var tx = db.BeginTransaction();
+    using var tx = db.BeginWriteTransaction();
 
     for (int i = 0; i < 10; i++)
     {
@@ -137,9 +137,9 @@ static void Demo3_OperatorPipeline(string dir)
         tx.SetProperty(p, "price", PropertyValue.FromInt64(100L * (i + 1)));
     }
 
-    var nameKey   = db.Schema.GetOrCreatePropertyKey("name");
-    var priceKey  = db.Schema.GetOrCreatePropertyKey("price");
-    var prodLabel = db.Schema.GetOrCreateLabel("Product");
+    var nameKey = tx.EditSchema.GetOrCreatePropertyKey("name");
+    var priceKey = tx.EditSchema.GetOrCreatePropertyKey("price");
+    var prodLabel = tx.EditSchema.GetOrCreateLabel("Product");
 
     // (A) VertexByLabelScan → Limit(3)  ─ ラベルフィルタ + ページング
     Console.WriteLine("  Product 先頭 3 件 (vertexId):");
@@ -185,7 +185,7 @@ static void Demo4_ExpandOperator(string dir)
 {
     H("Demo 4: ExpandOperator — グラフパターンマッチング");
     using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
-    using var tx = db.BeginTransaction();
+    using var tx = db.BeginWriteTransaction();
 
     // グラフ構築: Alice→Bob→Dave, Alice→Carol→Dave (KNOWS), Carol→Dave (FOLLOWS)
     string[] names = ["Alice", "Bob", "Carol", "Dave"];
@@ -201,9 +201,9 @@ static void Demo4_ExpandOperator(string dir)
     tx.CreateEdge(vertices[1], vertices[3], "KNOWS");   // Bob→Dave
     tx.CreateEdge(vertices[2], vertices[3], "FOLLOWS"); // Carol→Dave
 
-    var personLabel = db.Schema.GetOrCreateLabel("Person");
-    var knowsType   = db.Schema.GetOrCreateEdgeType("KNOWS");
-    var nameKey     = db.Schema.GetOrCreatePropertyKey("name");
+    var personLabel = tx.EditSchema.GetOrCreateLabel("Person");
+    var knowsType = tx.EditSchema.GetOrCreateEdgeType("KNOWS");
+    var nameKey = tx.EditSchema.GetOrCreatePropertyKey("name");
 
     // (A) Outgoing KNOWS の隣接ノード (NeighborOnly モード)
     Console.WriteLine("  Outgoing KNOWS の隣接ノード:");
@@ -240,10 +240,13 @@ static void Demo5_IndexSearch(string dir)
     H("Demo 5: インデックス検索 (Seek / Range)");
     using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
 
-    db.Schema.CreateIndex("idx_name",  "Person", "name",  IndexKind.StringEquality);
-    db.Schema.CreateIndex("idx_score", "Person", "score", IndexKind.Int64Equality);
+    EditSchema(db, schema =>
+    {
+        schema.CreateIndex(new ScalarIndexDefinition("idx_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality));
+        schema.CreateIndex(new ScalarIndexDefinition("idx_score", new PropertyTarget(PropertyOwnerKind.Vertex, "score", "Person"), IndexKind.Int64Equality));
+    });
 
-    using (var tx = db.BeginTransaction())
+    using (var tx = db.BeginWriteTransaction())
     {
         (string name, long score)[] data =
         [
@@ -254,20 +257,26 @@ static void Demo5_IndexSearch(string dir)
             var vertex = tx.CreateVertex("Person");
             tx.SetProperty(vertex, "name",  PropertyValue.FromString(name));
             tx.SetProperty(vertex, "score", PropertyValue.FromInt64(score));
-            tx.IndexInsert("idx_name",  name,  vertex);
-            tx.IndexInsert("idx_score", score, vertex);
         }
         tx.Commit();
     }
 
-    using (var tx = db.BeginTransaction())
+    using (var tx = db.BeginWriteTransaction())
     {
-        var nameKey = db.Schema.GetOrCreatePropertyKey("name");
+        var nameKey = tx.EditSchema.GetOrCreatePropertyKey("name");
 
         // 等値検索: name == "Carol"
         Console.WriteLine("  idx_name で \"Carol\" を等値検索:");
         {
-            var seek   = new VertexIndexSeekOperator("idx_name", LiteralProvider.String("Carol"));
+            var definition = tx.Schema.ListIndexes()
+                .Single(index => index.Name == "idx_name")
+                .Definition;
+            tx.Schema.TryGetLabelId("Person", out var personLabel);
+            var seek = new VertexIndexSeekOperator(
+                definition,
+                nameKey,
+                personLabel,
+                LiteralProvider.String("Carol"));
             var lookup = new PropertyLookupOperator(seek, 0, nameKey, "name");
             using var r = tx.Execute(lookup);
             foreach (var row in r.Rows())
@@ -277,9 +286,19 @@ static void Demo5_IndexSearch(string dir)
         // 範囲検索: 150 ≤ score ≤ 250
         Console.WriteLine("  idx_score で 150 ≤ score ≤ 250 の範囲検索:");
         {
-            var range  = new VertexIndexRangeScanOperator("idx_score",
-                LiteralProvider.Int64(150), fromInclusive: true,
-                LiteralProvider.Int64(250), toInclusive:   true);
+            var definition = tx.Schema.ListIndexes()
+                .Single(index => index.Name == "idx_score")
+                .Definition;
+            tx.Schema.TryGetPropertyKeyId("score", out var scoreKey);
+            tx.Schema.TryGetLabelId("Person", out var personLabel);
+            var range = new VertexIndexRangeScanOperator(
+                definition,
+                scoreKey,
+                personLabel,
+                LiteralProvider.Int64(150),
+                fromInclusive: true,
+                LiteralProvider.Int64(250),
+                toInclusive: true);
             var lookup = new PropertyLookupOperator(range, 0, nameKey, "name");
             using var r = tx.Execute(lookup);
             foreach (var row in r.Rows())
@@ -306,7 +325,7 @@ static void Demo6_Persistence(string dir)
     // 書き込み & クローズ
     using (var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
     {
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         savedId = tx.CreateVertex("Config");
         tx.SetProperty(savedId, "version", PropertyValue.FromString("1.0"));
         tx.SetProperty(savedId, "build",   PropertyValue.FromInt64(42L));
@@ -317,7 +336,7 @@ static void Demo6_Persistence(string dir)
     // 再オープン & 読み出し
     using (var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver")))
     {
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         Console.WriteLine($"  再オープン後: VertexExists={tx.VertexExists(savedId)}");
         Console.WriteLine($"  version = {Str(tx.GetProperty(savedId, "version"))}");
         Console.WriteLine($"  build   = {tx.GetProperty(savedId, "build").Int64Value}");
@@ -333,7 +352,7 @@ static void Demo7_Diagnostics(string dir)
     H("Demo 7: 診断 API");
     using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
 
-    using (var tx = db.BeginTransaction())
+    using (var tx = db.BeginWriteTransaction())
     {
         for (int i = 0; i < 5; i++)
         {
@@ -364,14 +383,16 @@ static void Demo8_SourceGenCrud(string dir)
 {
     H("Demo 8: SourceGenerator CRUD + g.Insert / g.Load / g.Update / g.Delete");
     using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
-    db.Schema.CreateIndex("idx_person_name", "Person", "name", IndexKind.StringEquality);
+    EditSchema(db, schema => schema.CreateIndex(
+        new ScalarIndexDefinition("idx_person_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality)));
 
-    using var tx = db.BeginTransaction();
-    var g = tx.G(db.Schema);
+    using var tx = db.BeginWriteTransaction();
+    var g = tx.Query;
+    var m = tx.Mutate;
 
-    // g.InsertIndexed<T> — SourceGen 経由で IndexInsert も呼ぶ
-    var aliceId = g.InsertIndexed(new Person { Name = "Alice", Age = 30 });
-    var bobId   = g.InsertIndexed(new Person { Name = "Bob",   Age = 25 });
+    // SourceGen 経由で、エンティティと索引を同じトランザクションに反映する。
+    var aliceId = m.InsertIndexed(new Person { Name = "Alice", Age = 30 });
+    var bobId   = m.InsertIndexed(new Person { Name = "Bob",   Age = 25 });
     tx.CreateEdge(aliceId, bobId, "KNOWS");
     Console.WriteLine($"  Inserted Alice (vertexId={aliceId.Value}) and Bob (vertexId={bobId.Value})");
 
@@ -381,7 +402,7 @@ static void Demo8_SourceGenCrud(string dir)
 
     // g.Update<T>
     alice.Age = 31;
-    g.Update(aliceId, alice);
+    m.Update(aliceId, alice);
     Console.WriteLine($"  After Update: Age={g.Load<Person>(aliceId).Age}");
 
     // FindByName — SourceGen 生成の検索メソッド
@@ -389,7 +410,7 @@ static void Demo8_SourceGenCrud(string dir)
     Console.WriteLine($"  FindByName(\"Alice\"): {found.Count} 件, Age={found[0].Entity.Age}");
 
     // g.Delete<T>
-    g.Delete<Person>(bobId);
+    m.Delete<Person>(bobId);
     Console.WriteLine($"  Bob deleted: VertexExists={tx.VertexExists(bobId)}");
 
     tx.Commit();
@@ -402,17 +423,18 @@ static void Demo9_GremlinAndMatch(string dir)
 {
     H("Demo 9: Gremlin ライク API + Match DSL");
     using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
-    using var tx = db.BeginTransaction();
+    using var tx = db.BeginWriteTransaction();
 
-    var g = tx.G(db.Schema);
+    var g = tx.Query;
+    var m = tx.Mutate;
 
     // ── 書き込み: 命名統一後の API ──────────────────────────────────────
-    var alice = g.AddVertex("Person").P("Name", "Alice").P("Age", 30).Next();
-    var bob   = g.AddVertex("Person").P("Name", "Bob").P("Age", 25).Next();
-    var carol = g.AddVertex("Person").P("Name", "Carol").P("Age", 35).Next();
-    g.AddEdge("KNOWS").From(alice).To(bob).Next();
-    g.AddEdge("KNOWS").From(alice).To(carol).Next();
-    g.AddEdge("FOLLOWS").From(bob).To(carol).Next();
+    var alice = m.AddVertex("Person").P("Name", "Alice").P("Age", 30).Next();
+    var bob   = m.AddVertex("Person").P("Name", "Bob").P("Age", 25).Next();
+    var carol = m.AddVertex("Person").P("Name", "Carol").P("Age", 35).Next();
+    m.AddEdge("KNOWS").From(alice).To(bob).Next();
+    m.AddEdge("KNOWS").From(alice).To(carol).Next();
+    m.AddEdge("FOLLOWS").From(bob).To(carol).Next();
     Console.WriteLine($"  Created vertices: alice={alice.Value}, bob={bob.Value}, carol={carol.Value}");
 
     // ── 型なしトラバーサル ─────────────────────────────────────────────
@@ -469,6 +491,13 @@ static void H(string title)
 
 static string Str(PropertyValue v) =>
     System.Text.Encoding.UTF8.GetString(v.Utf8StringValue);
+
+static void EditSchema(QuiverDatabase db, Action<ISchemaEditor> edit)
+{
+    using var tx = db.BeginWriteTransaction();
+    edit(tx.EditSchema);
+    tx.Commit();
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // カスタム演算子

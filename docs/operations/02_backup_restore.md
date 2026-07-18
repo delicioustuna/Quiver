@@ -53,7 +53,7 @@ db.CreateSnapshot(@"C:\backup\graph", new SnapshotOptions
 ```
 
 - `IncludeIndexes = true` (既定): 索引ファイルもコピー。開いてすぐ使える。
-- `IncludeIndexes = false`: バックアップサイズを削るが、復元後に `db.Schema.CreateIndex(...)` で
+- `IncludeIndexes = false`: バックアップサイズを削るが、復元後に書き込みトランザクションの `EditSchema` で
   索引を張り直す必要がある。索引が巨大で再構築が許容できるときだけ。
 
 ### 注意

@@ -25,7 +25,7 @@ public class OneHopAdjBenchmarks
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
     private VertexId _hub;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
     private readonly AdjacencyEntry[] _adjBuf = new AdjacencyEntry[65_536];
 
     [GlobalSetup]
@@ -49,7 +49,7 @@ public class OneHopAdjBenchmarks
         // adj.db が書き出された状態で再オープン
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
         _hub = new VertexId(0);
-        _readTx = _db.BeginTransaction();
+        _readTx = _db.BeginWriteTransaction();
     }
 
     [GlobalCleanup]

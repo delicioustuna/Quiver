@@ -38,11 +38,11 @@ public sealed class PersistentVectorStoreTests : IDisposable
         // セッション 1: index を作り、3 件のベクトルを write tx 内で set してコミット → close。
         using (var db = QuiverDatabase.Open(_path))
         {
-            var keyId = db.Schema.GetOrCreatePropertyKey("title");
+            var keyId = db.EditSchema(schema => schema.GetOrCreatePropertyKey("title"));
             db.Vectors.CreateVectorIndex(new VectorIndexSpec(
                 IndexName, EntityKind.Vertex, keyId, Dim, DistanceMetric.Cosine, "test", null));
 
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             for (int i = 0; i < 3; i++)
             {
                 var nid = tx.CreateVertex("Doc");
@@ -80,7 +80,7 @@ public sealed class PersistentVectorStoreTests : IDisposable
         long id;
         using (var db = QuiverDatabase.Open(_path))
         {
-            var keyId = db.Schema.GetOrCreatePropertyKey("title");
+            var keyId = db.EditSchema(schema => schema.GetOrCreatePropertyKey("title"));
             db.Vectors.CreateVectorIndex(new VectorIndexSpec(
                 IndexName,
                 EntityKind.Vertex,
@@ -104,7 +104,7 @@ public sealed class PersistentVectorStoreTests : IDisposable
                 HnswMaxLayers: 5,
                 HnswEfConstruction: 40));
 
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             var vertex = tx.CreateVertex("Doc");
             id = vertex.Value;
             tx.SetVector(
@@ -140,7 +140,7 @@ public sealed class PersistentVectorStoreTests : IDisposable
     {
         using (var db = QuiverDatabase.Open(_path))
         {
-            var keyId = db.Schema.GetOrCreatePropertyKey("title");
+            var keyId = db.EditSchema(schema => schema.GetOrCreatePropertyKey("title"));
             db.Vectors.CreateVectorIndex(new VectorIndexSpec(
                 IndexName, EntityKind.Vertex, keyId, Dim, DistanceMetric.Cosine, "test"));
         }
@@ -156,7 +156,7 @@ public sealed class PersistentVectorStoreTests : IDisposable
     public void Unsupported_element_type_is_rejected_at_creation()
     {
         using var db = QuiverDatabase.Open(_path);
-        var keyId = db.Schema.GetOrCreatePropertyKey("title");
+        var keyId = db.EditSchema(schema => schema.GetOrCreatePropertyKey("title"));
         var act = () => db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName, EntityKind.Vertex, keyId, Dim, DistanceMetric.Cosine, "test",
             ElementType: (VectorElementType)7));
@@ -189,11 +189,11 @@ public sealed class PersistentVectorStoreTests : IDisposable
         long keep, drop;
         using (var db = QuiverDatabase.Open(_path))
         {
-            var keyId = db.Schema.GetOrCreatePropertyKey("title");
+            var keyId = db.EditSchema(schema => schema.GetOrCreatePropertyKey("title"));
             db.Vectors.CreateVectorIndex(new VectorIndexSpec(
                 IndexName, EntityKind.Vertex, keyId, Dim, DistanceMetric.Dot, "test", null));
 
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             var a = tx.CreateVertex("Doc");
             var b = tx.CreateVertex("Doc");
             keep = a.Value; drop = b.Value;
@@ -221,12 +221,12 @@ public sealed class PersistentVectorStoreTests : IDisposable
         long nid;
         using (var db = QuiverDatabase.Open(_path))
         {
-            var keyId = db.Schema.GetOrCreatePropertyKey("waveform");
+            var keyId = db.EditSchema(schema => schema.GetOrCreatePropertyKey("waveform"));
             db.Vectors.CreateVectorIndex(new VectorIndexSpec(
                 IndexName, EntityKind.Vertex, keyId, Dim, DistanceMetric.Cosine, "test", null,
                 VectorIndexKind.FlatOnly));
 
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             var n = tx.CreateVertex("Sensor");
             nid = n.Value;
             tx.SetVector(EntityKind.Vertex, n.Value, IndexName, [1f, 2f, 3f, 4f]);
@@ -248,7 +248,7 @@ public sealed class PersistentVectorStoreTests : IDisposable
     public void FlatOnly_KnnSearch_throws()
     {
         using var db = QuiverDatabase.Open(_path);
-        var keyId = db.Schema.GetOrCreatePropertyKey("waveform");
+        var keyId = db.EditSchema(schema => schema.GetOrCreatePropertyKey("waveform"));
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName, EntityKind.Vertex, keyId, Dim, DistanceMetric.Cosine, "test", null,
             VectorIndexKind.FlatOnly));
@@ -261,7 +261,7 @@ public sealed class PersistentVectorStoreTests : IDisposable
     public void FlatOnly_KnnSearchBatch_throws()
     {
         using var db = QuiverDatabase.Open(_path);
-        var keyId = db.Schema.GetOrCreatePropertyKey("waveform");
+        var keyId = db.EditSchema(schema => schema.GetOrCreatePropertyKey("waveform"));
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             IndexName, EntityKind.Vertex, keyId, Dim, DistanceMetric.Cosine, "test", null,
             VectorIndexKind.FlatOnly));

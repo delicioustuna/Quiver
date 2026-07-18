@@ -3,7 +3,7 @@
 > 効力宣言: 本書と設計正本が食い違う場合は設計正本を優先し、食い違いをユーザへ報告する。
 > 作成日: 2026-07-18
 > 対応する正本のバージョン: `ede755edac004606e618bf8d77e3d8f01d7f2eb6`
-> ステータス: 承認済み(2026-07-18)
+> ステータス: 実装・検証完了(2026-07-18)
 
 ## 1. 着手前チェック
 
@@ -66,7 +66,7 @@ Wave 6 は public transaction/schema/query cutover、scalar index の永続 cont
 |---|---|---|---|
 | 機能 test | 適用 | `dotnet build Quiver.slnx -v minimal`、`dotnet test tests/Quiver.PublicApi.Tests/Quiver.PublicApi.Tests.csproj --no-build`、`dotnet test tests/Quiver.Backend.Tests/Quiver.Backend.Tests.csproj --no-build --filter "Category!=Chaos"`、`dotnet test tests/Quiver.Index.Tests/Quiver.Index.Tests.csproj --no-build`、`dotnet test tests/Quiver.Operators.Tests/Quiver.Operators.Tests.csproj --no-build`、`dotnet test tests/Quiver.Client.Tests/Quiver.Client.Tests.csproj --no-build`、`dotnet test tests/Quiver.SourceGen.Tests/Quiver.SourceGen.Tests.csproj --no-build`、`dotnet test tests/Quiver.Tests/Quiver.Tests.csproj --no-build`、`dotnet test tests/Quiver.PropertyTests/Quiver.PropertyTests.csproj --no-build`、solution全test project | 0 errors、0 warnings、全対象test成功。public capability分離、transactional schema、definition-driven scalar maintenance、candidate revalidation、fallback/rebuild、traversal equivalenceがbinary/in-memory両backendで成立する |
 | crash test | 適用 | binary backendでschema/index definitionのcommit前後、index page/manifest publish、rebuild publishのkill matrixを実行し、`Category=Chaos`のindex manifest対象とdefinition reopen/fallback testを実行する | Commit無しdefinition/mutationは消え、Commit済みdefinitionとprimary propertyは残る。derived indexの欠落/破損はprimary openを壊さず`RebuildRequired`とsame-snapshot base-scan fallbackへ収束し、rebuild後にindex pathへ戻る |
-| baseline gate | 適用 | redesign baselineと同じ環境で`dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --basic-perf`、`dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --clean-slate-aries-baseline`、`dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --nexus-traversal`を実行し、必要に応じて`--filter "*ApplyDyadic*"`でcandidate validation回帰を補助測定する | comparableなCRUD/visibility/traversal p50がbaseline比1.20x以内、述語付き2-hop p50が1.8982 ms以下、nexus traversalのdegree 10/100/1000が各binary/view比3.0x以内。環境、commit、生出力を`docs/benchmarks/`へ保存する |
+| baseline gate | 適用 | redesign baselineと同じ環境で`dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --basic-perf`、`dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --clean-slate-page-wal-baseline`、`dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --clean-slate-csr-product-integration`、`dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --nexus-traversal`を実行し、必要に応じて`--filter "*ApplyDyadic*"`でcandidate validation回帰を補助測定する | comparableなCRUD/visibility/traversal p50がbaseline比1.20x以内、述語付き2-hop p50が1.8982 ms以下、nexus traversalのdegree 10/100/1000が各binary/view比3.0x以内。環境、commit、生出力を`docs/benchmarks/`へ保存する |
 | as-built 更新 | 適用 | `docs/spec/00_overview.md`、`docs/spec/03_mvcc.md`、`docs/spec/04_records_index.md`、`docs/spec/05_query.md`、`docs/spec/08_known_limits.md`、`docs/design/development.md`、README、samplesのactive contract scan | 旧transaction/schema/query例、raw scalar candidate、非transactional index definition、旧SSN metadata記述が残らず、新public API、unified scalar index、candidate revalidation、fallback/rebuildと一致する |
 
 追加条件は次のとおりである。
@@ -90,3 +90,15 @@ Wave 6 は public transaction/schema/query cutover、scalar index の永続 cont
 - branch tipは完成または検証済み補修commitであり、topic branchへpush済みである。
 
 mergeとtagはユーザの明示承認を別々に得る。
+
+## 6. 完了記録
+
+- public transaction、schema、query、mutation capability を新契約へ原子的に切り替え、旧 surface を削除した。
+- scalar index definition、`PropertyVersionRef` value、candidate revalidation、vertex/edge/nexus target、自動 maintenance を実装した。
+- rebuild は snapshot reader で artifact を構築し、source generation と reader horizon を再検証する background publish へ変更した。
+- index path と same-snapshot primary fallback、schema rollback、未知 token 非 mutation、merge 冪等性、old/new reader を回帰テストで検証した。
+- scalar definition の未 commit kill と、artifact 構築後、publish commit 前、publish commit 後の crash 境界を検証した。
+- solution build は 0 warnings、0 errors で成功した。
+- solution test は全 test project で成功した。
+- BasicPerf の最大 baseline 比は 1.134x、述語付き 2-hop p50 は 1.2680 ms、Nexus view/binary の最大比は 1.09x で全 gate に合格した。
+- 生出力は `docs/benchmarks/2026-07-18_SingleWriterRedesign_Wave6_*Raw.md` に保存した。

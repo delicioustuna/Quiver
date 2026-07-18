@@ -21,16 +21,16 @@ public class FullTextScanOperatorBench
 
     private string _dir = null!;
     private QuiverDatabase _db = null!;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
 
     [GlobalSetup]
     public void Setup()
     {
         _dir = BenchTempDir.Create("ftscan");
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        _db.Schema.CreateFullTextIndex(IndexName, "Doc", "body");
+        _db.EditSchema(schema => schema.CreateFullTextIndex(IndexName, "Doc", "body"));
 
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 100; i++)
             {
@@ -42,7 +42,7 @@ public class FullTextScanOperatorBench
             }
             tx.Commit();
         }
-        _readTx = _db.BeginReadOnlyTransaction();
+        _readTx = _db.BeginReadTransaction();
     }
 
     [GlobalCleanup]

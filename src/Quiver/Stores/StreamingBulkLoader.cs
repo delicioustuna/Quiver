@@ -34,6 +34,7 @@ public sealed class StreamingBulkLoader : IDisposable
     // 隣接ビューは graph.quiver 内テナントへ構築する (null = 構築しない)。
     private readonly Quiver.Storage.SingleFileContainer? _container;
     private IDisposable? _writerLease;
+    private readonly Action? _afterCommit;
 
     private const int EdgeRecordSize = 28; // Id(8) + Src(8) + Tgt(8) + TypeId(4)
 
@@ -58,13 +59,15 @@ public sealed class StreamingBulkLoader : IDisposable
     internal StreamingBulkLoader(
         VersionedVertexStore vertexStore, VersionedEdgeStore edgeStore, PropertyVersionStore propStore,
         Quiver.Storage.SingleFileContainer? container = null,
-        IDisposable? writerLease = null)
+        IDisposable? writerLease = null,
+        Action? afterCommit = null)
     {
         _vertexStore = vertexStore;
         _edgeStore = edgeStore;
         _propStore = propStore;
         _container = container;
         _writerLease = writerLease;
+        _afterCommit = afterCommit;
 
         _tempPath = Path.Combine(
             Path.GetTempPath(),
@@ -144,6 +147,7 @@ public sealed class StreamingBulkLoader : IDisposable
     {
         ThrowIfCommitted();
         _committed = true;
+        bool succeeded = false;
 
         try
         {
@@ -153,11 +157,14 @@ public sealed class StreamingBulkLoader : IDisposable
             CommitProperties();
             if (_container != null)
                 BuildAdjacencyIndexStreaming(_container);
+            succeeded = true;
         }
         finally
         {
             ReleaseWriterLease();
         }
+        if (succeeded)
+            _afterCommit?.Invoke();
     }
 
     /// <summary>一時ファイルを破棄する (<see cref="Commit"/> 有無に関わらずクリーンアップする)。</summary>

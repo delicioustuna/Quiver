@@ -9,12 +9,18 @@ internal sealed class TxIndexManager : IIndexManager
 {
     private readonly IIndexManager _inner;
     private readonly bool _isReadOnly;
+    private readonly ScalarIndexMetadata[]? _definitionSnapshot;
 
     internal TxIndexManager(IIndexManager inner, bool isReadOnly)
     {
         _inner = inner;
         _isReadOnly = isReadOnly;
+        _definitionSnapshot = isReadOnly
+            ? inner.ListIndexDefinitions().ToArray()
+            : null;
     }
+
+    internal IIndexManager Inner => _inner;
 
     public IBTreeIndex<int> CreateInt32Index(string name)
     { EnsureCanOpen(name); return _inner.CreateInt32Index(name); }
@@ -28,16 +34,53 @@ internal sealed class TxIndexManager : IIndexManager
     { EnsureCanOpen(name); return _inner.CreateBytesIndex(name); }
     public bool DropIndex(string name)
     { EnsureWritable(); return _inner.DropIndex(name); }
+    public bool RenameIndex(string oldName, string newName)
+    { EnsureWritable(); return _inner.RenameIndex(oldName, newName); }
+    public void RenamePropertyTarget(string oldName, string newName)
+    { EnsureWritable(); _inner.RenamePropertyTarget(oldName, newName); }
+    public void RenameTargetScope(
+        PropertyOwnerKind ownerKind,
+        string oldName,
+        string newName)
+    { EnsureWritable(); _inner.RenameTargetScope(ownerKind, oldName, newName); }
     public IEnumerable<string> ListIndexes() => _inner.ListIndexes();
 
-    public void RegisterIndexBinding(string indexName, string label, string propertyKey)
-    { EnsureWritable(); _inner.RegisterIndexBinding(indexName, label, propertyKey); }
+    public void RegisterIndexDefinition(
+        ScalarIndexDefinition definition,
+        IndexLifecycleState state = IndexLifecycleState.Ready)
+    { EnsureWritable(); _inner.RegisterIndexDefinition(definition, state); }
 
     public bool TryGetIndexName(string label, string propertyKey, out string indexName)
-        => _inner.TryGetIndexName(label, propertyKey, out indexName);
+    {
+        if (_definitionSnapshot is null)
+            return _inner.TryGetIndexName(label, propertyKey, out indexName);
 
-    public IEnumerable<(string IndexName, string Label, string PropertyKey)> ListIndexBindings()
-        => _inner.ListIndexBindings();
+        ScalarIndexMetadata match = _definitionSnapshot.FirstOrDefault(x =>
+            x.Definition.Target.OwnerKind == PropertyOwnerKind.Vertex
+            && x.Definition.Target.Scope == label
+            && x.Definition.Target.PropertyKey == propertyKey);
+        indexName = match.Definition?.Name ?? string.Empty;
+        return match.Definition is not null;
+    }
+
+    public IEnumerable<ScalarIndexMetadata> ListIndexDefinitions()
+    {
+        if (_definitionSnapshot is null)
+            return _inner.ListIndexDefinitions();
+
+        HashSet<string> available =
+            [.. _inner.ListIndexes()];
+        return _definitionSnapshot.Select(x =>
+            available.Contains(x.Definition.Name)
+                ? x
+                : x with { State = IndexLifecycleState.RebuildRequired });
+    }
+
+    public void SetIndexState(string name, IndexLifecycleState state)
+    { EnsureWritable(); _inner.SetIndexState(name, state); }
+
+    public void ResetIndexArtifact(string name)
+    { EnsureWritable(); _inner.ResetIndexArtifact(name); }
 
     public FullTextIndex CreateFullTextIndex(
         string name,

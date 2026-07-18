@@ -66,7 +66,7 @@ public static class CleanSlatePageWalBaselineRunner
             double traversalP50Ms;
             double traversalP95Ms;
             double directLookupNs;
-            using (var read = db.BeginReadOnlyTransaction())
+            using (var read = db.BeginReadTransaction())
             {
                 int warmup = CountPredicateMatches(read, shape.Hub);
                 GC.KeepAlive(warmup);
@@ -118,7 +118,7 @@ public static class CleanSlatePageWalBaselineRunner
         var secondHopEdges = new EdgeId[degree * degree];
         int expectedMatches = 0;
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var hub = tx.CreateVertex("Hub");
         int relIndex = 0;
         for (int i = 0; i < degree; i++)
@@ -140,7 +140,7 @@ public static class CleanSlatePageWalBaselineRunner
         return new EdgeCorpus(hub, secondHopEdges, expectedMatches);
     }
 
-    private static int CountPredicateMatches(IGraphTransaction tx, VertexId hub)
+    private static int CountPredicateMatches(IReadTransaction tx, VertexId hub)
     {
         int count = 0;
         var first = tx.EnumerateEdges(hub, Direction.Outgoing, EdgeType);
@@ -161,7 +161,7 @@ public static class CleanSlatePageWalBaselineRunner
     }
 
     private static double MeasureDirectEdgeLookup(
-        IGraphTransaction tx,
+        IReadTransaction tx,
         IReadOnlyList<EdgeId> edgeIds)
     {
         const int SampleSize = 4096;
@@ -192,7 +192,7 @@ public static class CleanSlatePageWalBaselineRunner
         {
             var edge = edgeIds[i % edgeIds.Count];
             long started = Stopwatch.GetTimestamp();
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 tx.SetProperty(edge, EdgeScoreKey, PropertyValue.FromInt64(10_000 + i));
                 tx.Commit();
@@ -225,7 +225,7 @@ public static class CleanSlatePageWalBaselineRunner
         try
         {
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
-            db.Schema.CreateFullTextIndex(FullTextIndex, "Doc", "body");
+            db.EditSchema(schema => schema.CreateFullTextIndex(FullTextIndex, "Doc", "body"));
             double ingestMs = IngestFullTextCorpus(db, vocab, chunkCount, seed: 11);
             var latencies = MeasureFullTextSearchLatencies(db, vocab, queryCount, seed: 99);
             Console.WriteLine(
@@ -257,7 +257,7 @@ public static class CleanSlatePageWalBaselineRunner
                 Path.Combine(dir, "graph.quiver"),
                 new QuiverDatabaseOptions { CheckpointThresholdBytes = long.MaxValue });
             if (withIndex)
-                db.Schema.CreateFullTextIndex(FullTextIndex, "Doc", "body");
+                db.EditSchema(schema => schema.CreateFullTextIndex(FullTextIndex, "Doc", "body"));
 
             ingestMs = IngestFullTextCorpus(db, vocab, chunkCount, seed: 11);
             return WalBytes(dir);
@@ -280,7 +280,7 @@ public static class CleanSlatePageWalBaselineRunner
         while (written < chunkCount)
         {
             int batch = Math.Min(FtsBatchSize, chunkCount - written);
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             for (int i = 0; i < batch; i++)
             {
                 var vertex = tx.CreateVertex("Doc");
@@ -301,8 +301,8 @@ public static class CleanSlatePageWalBaselineRunner
     {
         var rng = new Random(seed);
         var stats = db.CollectStats();
-        using var read = db.BeginReadOnlyTransaction();
-        var g = read.G(db.Schema, stats);
+        using var read = db.BeginReadTransaction();
+        var g = read.Query.WithStats(stats);
 
         for (int i = 0; i < Math.Min(20, queryCount); i++)
             _ = g.Search(FullTextIndex, MakeQuery(vocab, rng, 2, 5), k: 20).ToList();
@@ -333,7 +333,7 @@ public static class CleanSlatePageWalBaselineRunner
             db.Vectors.CreateVectorIndex(new VectorIndexSpec(
                 VectorIndex,
                 EntityKind.Vertex,
-                db.Schema.GetOrCreatePropertyKey("embedding"),
+                db.EditSchema(schema => schema.GetOrCreatePropertyKey("embedding")),
                 VectorRecallCorpus.RecallDimensions,
                 DistanceMetric.Cosine,
                 "clean-slate QUIVER-SW page-WAL baseline",
@@ -342,7 +342,7 @@ public static class CleanSlatePageWalBaselineRunner
                 HnswEfConstruction: 400));
 
             var build = Stopwatch.StartNew();
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < vectorCount; i++)
                 {

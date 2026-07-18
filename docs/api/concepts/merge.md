@@ -1,6 +1,6 @@
 # MERGE / UPSERT
 
-Cypher の `MERGE (n:Label {key: value})` 相当の操作を `IGraphTransaction.MergeVertex` で提供する。
+Cypher の `MERGE (n:Label {key: value})` 相当の操作を `IWriteTransaction.MergeVertex` で提供する。
 
 ```csharp
 var (id, created) = tx.MergeVertex(
@@ -29,11 +29,14 @@ else
 
 ```csharp
 using var db = QuiverDatabase.Open("./mygraph");
-db.Schema.CreateIndex(
-    indexName: "idx_person_email",
-    label: "Person",
-    propertyKey: "email",
-    kind: IndexKind.StringEquality);
+using (var schemaTx = db.BeginWriteTransaction())
+{
+    schemaTx.EditSchema.CreateIndex(new ScalarIndexDefinition(
+        "idx_person_email",
+        new PropertyTarget(PropertyOwnerKind.Vertex, "email", "Person"),
+        IndexKind.StringEquality));
+    schemaTx.Commit();
+}
 
 // 以降の MergeVertex("Person", "email", ...) は O(log n) シーク経路で実行される。
 // MergeVertex が新規作成した場合のインデックスエントリ追加も自動で行われる。
@@ -49,8 +52,11 @@ db.Schema.CreateIndex(
 | `Double` | ビット完全一致 |
 | `Bool` / `Int32` / `Int64` | スカラ等値 (符号拡張あり) |
 
-## トラバーサルソース経由の糖衣構文
+## mutation source 経由の糖衣構文
 
 ```csharp
-var (id, created) = g.MergeVertex("Person", "email", PropertyValue.FromString("alice@example.com"));
+var (id, created) = tx.Mutate.MergeVertex(
+    "Person",
+    "email",
+    PropertyValue.FromString("alice@example.com"));
 ```

@@ -11,7 +11,7 @@ public class AllVerticesScanOperatorTests
     public void Empty_database_returns_empty()
     {
         using var fx = OperatorTestFixture.OpenEmpty();
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new AllVerticesScanOperator());
         result.Rows().Should().BeEmpty();
         tx.Rollback();
@@ -26,7 +26,7 @@ public class AllVerticesScanOperatorTests
             tx.CreateVertex("B");
             tx.CreateVertex("A");
         });
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new AllVerticesScanOperator());
         result.Rows().Should().HaveCount(3);
         tx.Rollback();
@@ -41,8 +41,8 @@ public class AllVerticesScanOperatorTests
             tx.CreateVertex("B");
             tx.CreateVertex("A");
         });
-        var labelA = fx.Db.Schema.GetOrCreateLabel("A");
-        using var tx = fx.Db.BeginTransaction();
+        var labelA = fx.EditSchema(schema => schema.GetOrCreateLabel("A"));
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new AllVerticesScanOperator(labelA));
         result.Rows().Should().HaveCount(2);
         tx.Rollback();
@@ -52,8 +52,8 @@ public class AllVerticesScanOperatorTests
     public void Label_miss_yields_empty()
     {
         using var fx = OperatorTestFixture.Open(tx => { tx.CreateVertex("A"); });
-        var labelB = fx.Db.Schema.GetOrCreateLabel("DoesNotExist");
-        using var tx = fx.Db.BeginTransaction();
+        var labelB = fx.EditSchema(schema => schema.GetOrCreateLabel("DoesNotExist"));
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new AllVerticesScanOperator(labelB));
         result.Rows().Should().BeEmpty();
         tx.Rollback();

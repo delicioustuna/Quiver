@@ -19,7 +19,7 @@ public class TwoHopBenchmarks
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
     private VertexId _hub;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -30,7 +30,7 @@ public class TwoHopBenchmarks
         const int BatchSize = 2_000;
         int totalMid = Degree;
 
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             _hub = tx.CreateVertex("Hub");
             tx.Commit();
@@ -38,7 +38,7 @@ public class TwoHopBenchmarks
 
         // hub → mid vertices (可能なら1バッチで)
         var midVertices = new VertexId[totalMid];
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < totalMid; i++)
             {
@@ -53,7 +53,7 @@ public class TwoHopBenchmarks
         int totalLeaf = totalMid * Degree;
         while (leafIdx < totalLeaf)
         {
-            using var tx = _db.BeginTransaction();
+            using var tx = _db.BeginWriteTransaction();
             int end = Math.Min(leafIdx + BatchSize, totalLeaf);
             while (leafIdx < end)
             {
@@ -65,7 +65,7 @@ public class TwoHopBenchmarks
             tx.Commit();
         }
 
-        _readTx = _db.BeginTransaction();
+        _readTx = _db.BeginWriteTransaction();
     }
 
     [GlobalCleanup]

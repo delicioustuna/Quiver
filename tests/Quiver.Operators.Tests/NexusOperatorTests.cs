@@ -23,7 +23,7 @@ public sealed class NexusOperatorTests
         });
 
         fx.Db.Schema.TryGetNexusTypeId("Fact", out var factType).Should().BeTrue();
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new AllNexusesScanOperator(factType));
 
         result.Schema.Columns.Single().Type.Should().Be(TupleSlotType.NexusId);
@@ -49,7 +49,7 @@ public sealed class NexusOperatorTests
         var roles = (INexusSchemaResolver)fx.Db.Schema;
         roles.TryGetRoleId("Subject", out var subjectRole).Should().BeTrue();
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new ExpandToNexusOperator(
             new FixedVertexListOperator(source),
             sourceVertexColumn: 0,
@@ -81,7 +81,7 @@ public sealed class NexusOperatorTests
             ]);
         });
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         var toNexus = new ExpandToNexusOperator(
             new FixedVertexListOperator(source), 0, null, null);
         using var result = tx.Execute(new ExpandMembersOperator(
@@ -115,7 +115,7 @@ public sealed class NexusOperatorTests
         var roles = (INexusSchemaResolver)fx.Db.Schema;
         roles.TryGetRoleId("Object", out var objectRole).Should().BeTrue();
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new ExpandMembersOperator(
             new FixedNexusListOperator(nexus),
             nexusColumn: 0,
@@ -139,7 +139,7 @@ public sealed class NexusOperatorTests
 
         var logical = new ExpandToNexusOp(
             new VertexSeedOp([source]), 0, null, "MissingRole", null);
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(PhysicalPlanner.Plan(logical, fx.Db.Schema));
 
         result.Rows().Should().BeEmpty();
@@ -158,8 +158,8 @@ public sealed class NexusOperatorTests
             b = tx.CreateVertex("N");
         });
 
-        using var snapshot = fx.Db.BeginReadOnlyTransaction();
-        using (var writer = fx.Db.BeginTransaction())
+        using var snapshot = fx.Db.BeginReadTransaction();
+        using (var writer = fx.Db.BeginWriteTransaction())
         {
             writer.CreateNexus("Fact", [new("Subject", a), new("Object", b)]);
             writer.Commit();
@@ -167,7 +167,6 @@ public sealed class NexusOperatorTests
 
         using var result = snapshot.Execute(new AllNexusesScanOperator());
         result.Rows().Should().BeEmpty();
-        snapshot.Rollback();
     }
 
     [Fact]
@@ -184,17 +183,17 @@ public sealed class NexusOperatorTests
             }
         });
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using (var warmup = new ExpandToNexusOperator(
             new FixedVertexListOperator(source), 0, null, null))
         {
-            warmup.Open(((GraphTransaction)tx).Inner);
+            warmup.Open(tx.AsInternal().Inner);
             while (warmup.MoveNext()) { }
         }
 
         using var op = new ExpandToNexusOperator(
             new FixedVertexListOperator(source), 0, null, null);
-        op.Open(((GraphTransaction)tx).Inner);
+        op.Open(tx.AsInternal().Inner);
         long before = GC.GetAllocatedBytesForCurrentThread();
         int count = 0;
         while (op.MoveNext()) count++;
@@ -223,21 +222,21 @@ public sealed class NexusOperatorTests
             }
         });
 
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using (var warmScan = new AllNexusesScanOperator())
         {
-            warmScan.Open(((GraphTransaction)tx).Inner);
+            warmScan.Open(tx.AsInternal().Inner);
             while (warmScan.MoveNext()) { }
         }
         using (var warmMembers = new ExpandMembersOperator(
             new FixedNexusListOperator(nexus), 0, null, null))
         {
-            warmMembers.Open(((GraphTransaction)tx).Inner);
+            warmMembers.Open(tx.AsInternal().Inner);
             while (warmMembers.MoveNext()) { }
         }
 
         using var scan = new AllNexusesScanOperator();
-        scan.Open(((GraphTransaction)tx).Inner);
+        scan.Open(tx.AsInternal().Inner);
         long scanBefore = GC.GetAllocatedBytesForCurrentThread();
         int scanCount = 0;
         while (scan.MoveNext()) scanCount++;
@@ -245,7 +244,7 @@ public sealed class NexusOperatorTests
 
         using var membersOp = new ExpandMembersOperator(
             new FixedNexusListOperator(nexus), 0, null, null);
-        membersOp.Open(((GraphTransaction)tx).Inner);
+        membersOp.Open(tx.AsInternal().Inner);
         long membersBefore = GC.GetAllocatedBytesForCurrentThread();
         int memberCount = 0;
         while (membersOp.MoveNext()) memberCount++;

@@ -34,7 +34,7 @@ public sealed class NexusGeneratedCrudTests : IDisposable
 
         VertexId alice, acme;
         NexusId id;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             alice = Person.Insert(tx, new Person { Name = "Alice" });
             acme = Company.Insert(tx, new Company { Name = "Acme" });
@@ -49,7 +49,7 @@ public sealed class NexusGeneratedCrudTests : IDisposable
         }
 
         // Load restores both role bindings and properties.
-        using (var ro = db.BeginReadOnlyTransaction())
+        using (var ro = db.BeginReadTransaction())
         {
             var e = Employment.Load(ro, id);
             e.Employee.VertexId.Should().Be(alice);
@@ -59,7 +59,7 @@ public sealed class NexusGeneratedCrudTests : IDisposable
         }
 
         // Update writes only properties; role bindings stay intact.
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             Employment.Update(tx, id, new Employment
             {
@@ -71,7 +71,7 @@ public sealed class NexusGeneratedCrudTests : IDisposable
             tx.Commit();
         }
 
-        using (var ro = db.BeginReadOnlyTransaction())
+        using (var ro = db.BeginReadTransaction())
         {
             var e = Employment.Load(ro, id);
             e.Title.Should().Be("Senior Engineer");
@@ -81,13 +81,13 @@ public sealed class NexusGeneratedCrudTests : IDisposable
         }
 
         // Delete makes the nexus invisible.
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             Employment.Delete(tx, id);
             tx.Commit();
         }
 
-        using (var ro = db.BeginReadOnlyTransaction())
+        using (var ro = db.BeginReadTransaction())
         {
             var members = new List<NexusMember>();
             var m = ro.GetMembers(id);
@@ -104,7 +104,7 @@ public sealed class NexusGeneratedCrudTests : IDisposable
 
         VertexId a, b, c, loc;
         NexusId id;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             a = Person.Insert(tx, new Person { Name = "A" });
             b = Person.Insert(tx, new Person { Name = "B" });
@@ -121,7 +121,7 @@ public sealed class NexusGeneratedCrudTests : IDisposable
             tx.Commit();
         }
 
-        using (var ro = db.BeginReadOnlyTransaction())
+        using (var ro = db.BeginReadTransaction())
         {
             var meeting = Meeting.Load(ro, id);
             // Incidence stores the vertex sequence; identity is compared by VertexId equality
@@ -141,7 +141,7 @@ public sealed class NexusGeneratedCrudTests : IDisposable
 
         VertexId a, b;
         NexusId id;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             a = Person.Insert(tx, new Person { Name = "A" });
             b = Person.Insert(tx, new Person { Name = "B" });
@@ -155,7 +155,7 @@ public sealed class NexusGeneratedCrudTests : IDisposable
             tx.Commit();
         }
 
-        using (var ro = db.BeginReadOnlyTransaction())
+        using (var ro = db.BeginReadTransaction())
         {
             var meeting = Meeting.Load(ro, id);
             meeting.Venue.Should().BeNull();

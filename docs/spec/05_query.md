@@ -1,6 +1,6 @@
 # クエリエンジン
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-18）
 
 ## アーキテクチャ {#architecture}
 
@@ -34,6 +34,12 @@ interface IGraphKernel<TState>
 | `AllVerticesScanOperator` | 全ライブVertexのシーケンシャルスキャン |
 | `VertexByLabelScanOperator` | スキャン中にラベルでフィルタ |
 | `AllEdgesScanOperator` | 全Edgeのシーケンシャルスキャン |
+| `VertexIndexSeekOperator` | 統一スカラ索引による等値検索と primary 再検証 |
+| `VertexIndexRangeScanOperator` | 統一スカラ索引による範囲検索と primary 再検証 |
+
+索引候補は `ScalarIndexDefinition`、`PropertyKeyId`、ラベルスコープを物理プランへ明示的に渡す。
+演算子は索引 value が指すプロパティ版を現在の snapshot で読み、キー、値、所有者 identity、スコープを再検証する。
+定義が `Ready` でない場合は primary property scan へフォールバックし、同じ比較と結果順序を保つ。
 
 ### Expand / 走査 {#expand-ops}
 
@@ -102,14 +108,21 @@ co-membership（起点Vertex → 所属Nexus → 別ロールのメンバー、�
 
 ## Traversal DSL {#traversal-dsl}
 
-`GraphTraversalSource` (`Quiver.Api`) は Gremlin 風の流暢な走査 API を提供する:
+`GraphTraversalSource` (`Quiver.Api`) は Gremlin 風の読み取り専用走査 API を提供する。
+`IReadTransaction.Query` と `IWriteTransaction.Query` は、それぞれのトランザクションに束縛された source を返す。
 
 ```csharp
-var g = tx.G(schema);
-g.V("Person").Has("name", "Alice")
- .Out("KNOWS")
- .Values<string>("name");
+using var read = db.BeginReadTransaction();
+var names = read.Query.Vertices()
+    .HasLabel("Person")
+    .Has("name", "Alice")
+    .Out("KNOWS")
+    .Values<string>("name")
+    .ToList();
 ```
+
+作成、更新、削除、merge は `IWriteTransaction.Mutate` の `GraphMutationSource` から開始する。
+読み取り source に mutation メソッドは公開しない。
 
 ### Nexus の走査 {#nexus-dsl}
 
@@ -118,21 +131,31 @@ Nexusは無向でロール付きのため、方向動詞（`Out` / `In`）は使
 
 ```csharp
 // 作成: builder にロール付きメンバーとプロパティを積み、Next() で確定する
-var factId = g.AddNexus("Fact")
+using var write = db.BeginWriteTransaction();
+var factId = write.Mutate.AddNexus("Fact")
     .Member("subject", alice)
     .Member("object", quiver)
     .Member("source", chunk)
     .P("status", "verified")
     .Next();
+write.Commit();
 
 // Vertex → Nexus → メンバーの走査
-g.Vertex(alice)
+read.Query.Vertex(alice)
  .Nexuses("Fact", role: "subject")   // alice が subject として属す Fact
  .Members("object");                     // その Fact の object メンバー
 
 // 起点Vertexを除いた co-membership
-g.Vertex(alice).Nexuses("Purchase", "buyer").OtherMembers("item");
+read.Query.Vertex(alice).Nexuses("Purchase", "buyer").OtherMembers("item");
 ```
+
+### merge ルックアップ {#merge-lookup}
+
+`MergeEdge` は source、target、Edge 型の組を専用ルックアップで検索する。
+`MergeNexus` は Nexus 型と、ロールとメンバーの正規化済み集合を専用ルックアップで検索する。
+Nexus の入力順序は同一性に影響しない。
+両ルックアップは open 時に primary store から再構築できる導出 view であり、候補の MVCC 可視性と generation を primary record で再検証する。
+rollback、削除、slot 再利用で stale になった候補は採用しない。
 
 - `Nexuses(type?, role?)` はVertex起点でNexus ID の走査を返す。
   `g.Nexuses()` は全スキャン起点、`g.Nexus(id)` は単一起点

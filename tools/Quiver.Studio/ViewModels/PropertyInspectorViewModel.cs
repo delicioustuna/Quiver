@@ -84,7 +84,7 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
         if (_db.CurrentDatabase is null) { Clear(); return; }
 
         var schema = _db.CurrentDatabase.Schema;
-        using var tx = _db.CurrentDatabase.BeginReadOnlyTransaction();
+        using var tx = _db.CurrentDatabase.BeginReadTransaction();
         if (!tx.VertexExists(vertex.Id)) { Clear(); return; }
 
         _currentVertexId = vertex.Id;
@@ -116,7 +116,7 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
         if (_db.CurrentDatabase is null) { Clear(); return; }
 
         var schema = _db.CurrentDatabase.Schema;
-        using var tx = _db.CurrentDatabase.BeginReadOnlyTransaction();
+        using var tx = _db.CurrentDatabase.BeginReadTransaction();
 
         _currentEdgeId = edge.Id;
         Header = $"Edge #{edge.Id.Sequence} (:{edge.EdgeType})";
@@ -322,7 +322,7 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
         OnPropertyChanged(nameof(IsCreateEdge));
     }
 
-    private static Dictionary<PropertyKeyId, string> BuildPropertyKeyMap(ISchemaApi schema)
+    private static Dictionary<PropertyKeyId, string> BuildPropertyKeyMap(ISchemaCatalog schema)
     {
         var map = new Dictionary<PropertyKeyId, string>();
         foreach (var name in schema.ListPropertyKeys())
@@ -333,7 +333,7 @@ public sealed partial class PropertyInspectorViewModel : ObservableObject
         return map;
     }
 
-    private static PropertyCardinality GetCardinality(ISchemaApi schema, string keyName)
+    private static PropertyCardinality GetCardinality(ISchemaCatalog schema, string keyName)
     {
         if (!schema.TryGetPropertyKeyId(keyName, out var id))
             return PropertyCardinality.Single;

@@ -84,7 +84,7 @@ internal static class GraphNexusEmitter
         EmitLoad(sb, model, multiValueProps);
         EmitUpdate(sb, model);
 
-        sb.AppendLine($"    public static void Delete(IGraphTransaction tx, Quiver.Core.NexusId id) => tx.DeleteNexus(id);");
+        sb.AppendLine($"    public static void Delete(IWriteTransaction tx, Quiver.Core.NexusId id) => tx.DeleteNexus(id);");
         sb.AppendLine("}");
 
         if (model.Roles.Count > 0)
@@ -138,7 +138,7 @@ internal static class GraphNexusEmitter
 
     private static void EmitInsert(StringBuilder sb, GraphNexusModel model)
     {
-        sb.AppendLine($"    public static Quiver.Core.NexusId Insert(IGraphTransaction tx, {model.ClassName} entity)");
+        sb.AppendLine($"    public static Quiver.Core.NexusId Insert(IWriteTransaction tx, {model.ClassName} entity)");
         sb.AppendLine("    {");
         // NexusMember は managed 型 (Role が string) のため stackalloc できない。
         // 全メンバーを一度組み立てて CreateNexus を一回だけ呼ぶ。
@@ -178,7 +178,7 @@ internal static class GraphNexusEmitter
 
     private static void EmitLoad(StringBuilder sb, GraphNexusModel model, List<PropertyModel> multiValueProps)
     {
-        sb.AppendLine($"    public static {model.ClassName} Load(IGraphTransaction tx, Quiver.Core.NexusId id)");
+        sb.AppendLine($"    public static {model.ClassName} Load(IReadTransaction tx, Quiver.Core.NexusId id)");
         sb.AppendLine("    {");
         sb.AppendLine($"        var __entity = new {model.ClassName}");
         sb.AppendLine("        {");
@@ -228,7 +228,7 @@ internal static class GraphNexusEmitter
     private static void EmitUpdate(StringBuilder sb, GraphNexusModel model)
     {
         // メンバー集合は作成時不変 — Update はプロパティのみを書き、ロール束縛は再構成しない。
-        sb.AppendLine($"    public static void Update(IGraphTransaction tx, Quiver.Core.NexusId id, {model.ClassName} entity)");
+        sb.AppendLine($"    public static void Update(IWriteTransaction tx, Quiver.Core.NexusId id, {model.ClassName} entity)");
         sb.AppendLine("    {");
         foreach (var prop in model.Properties)
         {

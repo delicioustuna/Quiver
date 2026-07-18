@@ -18,7 +18,7 @@ public class VertexCrudBenchmarks
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
     private VertexId[] _vertexIds = null!;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
     private readonly Random _rng = new(42);
 
     [GlobalSetup]
@@ -31,14 +31,14 @@ public class VertexCrudBenchmarks
         const int BatchSize = 5_000;
         for (int i = 0; i < VertexCount; i += BatchSize)
         {
-            using var tx = _db.BeginTransaction();
+            using var tx = _db.BeginWriteTransaction();
             int end = Math.Min(i + BatchSize, VertexCount);
             for (int j = i; j < end; j++)
                 _vertexIds[j] = tx.CreateVertex("Vertex");
             tx.Commit();
         }
 
-        _readTx = _db.BeginTransaction();
+        _readTx = _db.BeginWriteTransaction();
     }
 
     [GlobalCleanup]
@@ -60,7 +60,7 @@ public class VertexCrudBenchmarks
     [Benchmark(Description = "CreateVertex + Commit")]
     public VertexId InsertVertex()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var id = tx.CreateVertex("Vertex");
         tx.Commit();
         return id;
@@ -69,7 +69,7 @@ public class VertexCrudBenchmarks
     [Benchmark(Description = "CreateVertex + SetProperty + Commit")]
     public VertexId InsertVertexWithProperty()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var id = tx.CreateVertex("Vertex");
         tx.SetProperty(id, "id", PropertyValue.FromInt64(id.Value));
         tx.Commit();

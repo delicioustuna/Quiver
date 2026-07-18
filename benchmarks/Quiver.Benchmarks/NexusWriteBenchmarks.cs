@@ -145,7 +145,7 @@ public static class NexusWriteBenchmarks
             NexusId[] ids = CommitCreates(db, members, LatencyOps);
 
             long start = Stopwatch.GetTimestamp();
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 foreach (NexusId id in ids)
                     tx.DeleteNexus(id);
@@ -173,7 +173,7 @@ public static class NexusWriteBenchmarks
             VertexId[] vertices = CreateVertices(db, arity);
             NexusMember[] members = BuildMembers(arity, vertices);
 
-            using (var warmup = db.BeginTransaction())
+            using (var warmup = db.BeginWriteTransaction())
             {
                 warmup.CreateNexus("Fact", members);
                 warmup.Commit();
@@ -183,7 +183,7 @@ public static class NexusWriteBenchmarks
             string walPath = databasePath + "-wal";
             long before = FileLength(walPath);
 
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < itemCount; i++)
                     tx.CreateNexus("Fact", members);
@@ -208,7 +208,7 @@ public static class NexusWriteBenchmarks
             using var db = OpenForWalMeasurement(databasePath);
             VertexId[] vertices = CreateVertices(db, 2);
 
-            using (var warmup = db.BeginTransaction())
+            using (var warmup = db.BeginWriteTransaction())
             {
                 warmup.CreateEdge(vertices[0], vertices[1], "Link");
                 warmup.Commit();
@@ -218,7 +218,7 @@ public static class NexusWriteBenchmarks
             string walPath = databasePath + "-wal";
             long before = FileLength(walPath);
 
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < itemCount; i++)
                     tx.CreateEdge(vertices[0], vertices[1], "Link");
@@ -248,7 +248,7 @@ public static class NexusWriteBenchmarks
             using var db = OpenForWalMeasurement(databasePath);
 
             VertexId hub;
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 hub = tx.CreateVertex("Hub");
                 VertexId obj = tx.CreateVertex("Object");
@@ -272,7 +272,7 @@ public static class NexusWriteBenchmarks
             long before = FileLength(walPath);
 
             long start = Stopwatch.GetTimestamp();
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 tx.DeleteVertex(hub);
                 tx.Commit();
@@ -297,7 +297,7 @@ public static class NexusWriteBenchmarks
     private static VertexId[] CreateVertices(QuiverDatabase db, int count)
     {
         var vertices = new VertexId[count];
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         for (int i = 0; i < vertices.Length; i++)
             vertices[i] = tx.CreateVertex("Member");
         tx.Commit();
@@ -315,7 +315,7 @@ public static class NexusWriteBenchmarks
     private static NexusId[] CommitCreates(QuiverDatabase db, NexusMember[] members, int count)
     {
         var ids = new NexusId[count];
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         for (int i = 0; i < count; i++)
             ids[i] = tx.CreateNexus("Fact", members);
         tx.Commit();
@@ -324,7 +324,7 @@ public static class NexusWriteBenchmarks
 
     private static void WriteProperty(QuiverDatabase db, NexusId[] ids, PropertyValue value)
     {
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         foreach (NexusId id in ids)
             tx.SetProperty(id, "score", in value);
         tx.Commit();

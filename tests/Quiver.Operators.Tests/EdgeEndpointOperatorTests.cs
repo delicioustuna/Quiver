@@ -12,7 +12,7 @@ public class EdgeEndpointOperatorTests
     public void Empty_source_returns_empty()
     {
         using var fx = OperatorTestFixture.OpenEmpty();
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(new EdgeEndpointOperator(
             new FixedEdgeListOperator(), 0, EdgeEndpoint.Source));
         result.Rows().Should().BeEmpty();
@@ -30,7 +30,7 @@ public class EdgeEndpointOperatorTests
             b = tx.CreateVertex("X");
             edge = tx.CreateEdge(a, b, "K");
         });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new EdgeEndpointOperator(
             new FixedEdgeListOperator(edge), 0, EdgeEndpoint.Source));
         result.Rows().Single().GetVertexId(0).Should().Be(a);
@@ -48,7 +48,7 @@ public class EdgeEndpointOperatorTests
             b = tx.CreateVertex("X");
             edge = tx.CreateEdge(a, b, "K");
         });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new EdgeEndpointOperator(
             new FixedEdgeListOperator(edge), 0, EdgeEndpoint.Target));
         result.Rows().Single().GetVertexId(0).Should().Be(b);
@@ -66,7 +66,7 @@ public class EdgeEndpointOperatorTests
             b = tx.CreateVertex("X");
             edge = tx.CreateEdge(a, b, "K");
         });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(new EdgeEndpointOperator(
             new FixedEdgeListOperator(edge), 0, EdgeEndpoint.Other));
         result.Rows().Single().GetVertexId(0).Should().Be(b);

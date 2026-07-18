@@ -24,7 +24,7 @@ public class EdgePropertyBenchmarks
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
     private EdgeId[] _edgeIds = null!;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
     private VertexId _hub;
     private Quiver.Storage.Records.IEdgePropertyJoinIndex _weightColumn = null!;
     private readonly Random _rng = new(42);
@@ -38,7 +38,7 @@ public class EdgePropertyBenchmarks
 
         const int BatchSize = 5_000;
         // hub 1 個 + leaf を都度作って hub→leaf エッジに weight を inline で持たせる。
-        using (var seed = _db.BeginTransaction())
+        using (var seed = _db.BeginWriteTransaction())
         {
             _hub = seed.CreateVertex("Hub");
             seed.Commit();
@@ -46,7 +46,7 @@ public class EdgePropertyBenchmarks
 
         for (int i = 0; i < RelCount; i += BatchSize)
         {
-            using var tx = _db.BeginTransaction();
+            using var tx = _db.BeginWriteTransaction();
             int end = Math.Min(i + BatchSize, RelCount);
             for (int j = i; j < end; j++)
             {
@@ -58,7 +58,7 @@ public class EdgePropertyBenchmarks
             tx.Commit();
         }
 
-        _readTx = _db.BeginTransaction();
+        _readTx = _db.BeginWriteTransaction();
 
         // Phase 5 列指向 proto: dense Sequence→value 列セグメント (join index) を 1 回構築。
         // projection はこれを逐次走査でき per-edge page pin / chain walk を回避する。
@@ -83,7 +83,7 @@ public class EdgePropertyBenchmarks
     [Benchmark(Description = "CreateEdge + SetProperty + Commit")]
     public EdgeId InsertEdgeWithProperty()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         var leaf = tx.CreateVertex("Leaf");
         var edge = tx.CreateEdge(_hub, leaf, "LINK");
         tx.SetProperty(edge, "weight", PropertyValue.FromInt64(1));

@@ -23,12 +23,12 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "quiver_sig8_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey(VecIndex);
+        var keyId = _db.EditSchema(schema => schema.GetOrCreatePropertyKey(VecIndex));
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             VecIndex, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "test", null, VectorIndexKind.FlatOnly));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < 5; i++)
         {
             var nid = tx.CreateVertex("Sensor");
@@ -50,8 +50,8 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
     [Fact]
     public void NaN_score_throws_VectorException()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var act = () => g.Vertices<SensorVertex>().Has(s => s.Site, "A")
             .ApplyDyadic<NaNOp>(s => s.Waveform, [1f, 0f, 0f, 0f], k: 3)
@@ -66,8 +66,8 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
     [Fact]
     public void Operator_exception_aborts_query_without_affecting_tx()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var act = () => g.Vertices<SensorVertex>().Has(s => s.Site, "A")
             .ApplyDyadic<ThrowingOp>(s => s.Waveform, [1f, 0f, 0f, 0f], k: 3)
@@ -91,7 +91,7 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
         {
             for (int i = 0; i < 20 && !cts.Token.IsCancellationRequested; i++)
             {
-                using var tx = _db.BeginTransaction();
+                using var tx = _db.BeginWriteTransaction();
                 var nid = tx.CreateVertex("Sensor");
                 tx.SetProperty(nid, "Site", PropertyValue.FromString("B"));
                 tx.SetVector(EntityKind.Vertex, nid.Value, VecIndex,
@@ -101,9 +101,9 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
         }, cts.Token);
 
         // リーダー側で ApplyDyadic の採点を並行実行する。
-        using (var rtx = _db.BeginReadOnlyTransaction())
+        using (var rtx = _db.BeginReadTransaction())
         {
-            var g = rtx.G(_db.Schema);
+            var g = rtx.Query;
             var hits = g.Vertices<SensorVertex>().Has(s => s.Site, "A")
                 .ApplyDyadic<SlowOp>(s => s.Waveform, [1f, 0f, 0f, 0f], k: 3)
                 .ToList();
@@ -118,8 +118,8 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
     [Fact]
     public void Infinity_score_is_permitted()
     {
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         var hits = g.Vertices<SensorVertex>().Has(s => s.Site, "A")
             .ApplyDyadic<InfinityOp>(s => s.Waveform, [1f, 0f, 0f, 0f], k: 3)
@@ -174,24 +174,24 @@ public sealed class ApplyDyadicConstraintTests : IDisposable
 
         public static string GraphLabel => "Sensor";
 
-        public static VertexId Insert(IGraphTransaction tx, SensorVertex entity)
+        public static VertexId Insert(IWriteTransaction tx, SensorVertex entity)
         {
             var id = tx.CreateVertex(GraphLabel);
             tx.SetProperty(id, "Site", PropertyValue.FromString(entity.Site));
             return id;
         }
 
-        public static VertexId InsertIndexed(IGraphTransaction tx, SensorVertex entity) => Insert(tx, entity);
+        public static VertexId InsertIndexed(IWriteTransaction tx, SensorVertex entity) => Insert(tx, entity);
 
-        public static SensorVertex Load(IGraphTransaction tx, VertexId id)
+        public static SensorVertex Load(IReadTransaction tx, VertexId id)
             => new()
             {
                 Site = System.Text.Encoding.UTF8.GetString(tx.GetProperty(id, "Site").Utf8StringValue),
             };
 
-        public static void Update(IGraphTransaction tx, VertexId id, SensorVertex entity)
+        public static void Update(IWriteTransaction tx, VertexId id, SensorVertex entity)
             => tx.SetProperty(id, "Site", PropertyValue.FromString(entity.Site));
 
-        public static void Delete(IGraphTransaction tx, VertexId id) => tx.DeleteVertex(id);
+        public static void Delete(IWriteTransaction tx, VertexId id) => tx.DeleteVertex(id);
     }
 }

@@ -38,15 +38,17 @@ internal sealed class GraphEngineAdapter : IGraphEngine
 
     /// <inheritdoc/>
     public IGraphEngineReadSession BeginRead()
-        => new ReadSession(_db.BackendInternal.Transactions.BeginRead(), _db.Schema);
+        => new ReadSession(
+            _db.BackendInternal.Transactions.BeginRead(),
+            _db.BackendInternal.SchemaCatalog);
 
     private sealed class ReadSession : IGraphEngineReadSession
     {
         private readonly ITransaction _tx;
-        private readonly ISchemaApi _schema;
+        private readonly ISchemaCatalog _schema;
         private readonly Dictionary<string, PropertyKeyId> _keyCache = new(StringComparer.Ordinal);
 
-        internal ReadSession(ITransaction tx, ISchemaApi schema)
+        internal ReadSession(ITransaction tx, ISchemaCatalog schema)
         {
             _tx = tx;
             _schema = schema;
@@ -117,7 +119,7 @@ internal sealed class GraphEngineAdapter : IGraphEngine
         private PropertyKeyId ResolveKey(string name)
         {
             if (_keyCache.TryGetValue(name, out var id)) return id;
-            id = _schema.GetOrCreatePropertyKey(name);
+            id = _schema.ResolvePropertyKey(name);
             _keyCache[name] = id;
             return id;
         }

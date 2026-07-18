@@ -71,7 +71,7 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 
 ## 書き込みの流れ
 
-1. `db.BeginTransaction()` でトランザクションを開始する
+1. `db.BeginWriteTransaction()` でトランザクションを開始する
 2. `CreateVertex`、`SetProperty` 等で変更を加える。変更はバッファプール上のページに反映される
 3. `tx.Commit()` で WAL に Commit レコードを書き、`fsync` で永続化する
 4. チェックポイント条件に達すると、dirty ページがデータファイルに書き戻される
@@ -81,7 +81,7 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 
 ## 読み取りの流れ
 
-1. `db.BeginReadOnlyTransaction()` で開始時点のスナップショットを取得する
+1. `db.BeginReadTransaction()` で開始時点のスナップショットを取得する
 2. スキャンやインデックス検索で読み取る行は、MVCC 可視性チェックを通る
 3. リーダはライタをブロックせず、ライタもリーダをブロックしない
 
@@ -118,9 +118,9 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 ### トランザクションの利用規約
 
 - `QuiverDatabase` インスタンスはスレッド間で共有して使い回す（スレッドセーフ）
-- トランザクションは 1 スレッドで開始、使用、commit/dispose する（スレッドアフィン）
+- 同じトランザクションハンドルは複数の操作フローから同時に使用しない
 - `Begin` と `Commit` の間で `await` しない
-- 書き込みの直列化はアプリケーション側の責任（`SemaphoreSlim(1,1)` 等）
+- 書き込みはデータベース内の writer gate が直列化する
 - トランザクションは短く保つ。長時間のオープンは WAL ファイルの増大を招く
 
 ### バックアップ

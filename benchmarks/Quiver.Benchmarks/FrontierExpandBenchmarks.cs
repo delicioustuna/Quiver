@@ -25,7 +25,7 @@ public class FrontierExpandBenchmarks
 
     private QuiverDatabase _db = null!;
     private string _dbPath = null!;
-    private IGraphTransaction _readTx = null!;
+    private IReadTransaction _readTx = null!;
     private VertexId[] _frontier = null!;
 
     [GlobalSetup]
@@ -36,7 +36,7 @@ public class FrontierExpandBenchmarks
 
         var rng = new Random(42);
         var ids = new VertexId[VertexCount];
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < VertexCount; i++) ids[i] = tx.CreateVertex("N");
             for (int i = 0; i < VertexCount; i++)
@@ -51,7 +51,7 @@ public class FrontierExpandBenchmarks
         int k = (int)(VertexCount * FrontierFraction);
         _frontier = new VertexId[k];
         Array.Copy(ids, _frontier, k);
-        _readTx = _db.BeginTransaction();
+        _readTx = _db.BeginWriteTransaction();
     }
 
     [GlobalCleanup]

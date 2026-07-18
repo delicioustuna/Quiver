@@ -35,8 +35,15 @@ internal static class SchemaTool
 
         foreach (var idx in indexes)
         {
-            if (vertexMap.TryGetValue(idx.Label, out var entry))
-                entry.Indexes["btree"] = entry.Indexes.GetValueOrDefault("btree", []).Append(idx.PropertyKey).ToList();
+            if (idx.Target.OwnerKind == PropertyOwnerKind.Vertex &&
+                idx.Target.Scope is { } label &&
+                vertexMap.TryGetValue(label, out var entry))
+            {
+                entry.Indexes["btree"] = entry.Indexes
+                    .GetValueOrDefault("btree", [])
+                    .Append(idx.Target.PropertyKey)
+                    .ToList();
+            }
         }
 
         foreach (var ftIdx in ftIndexes)
@@ -77,8 +84,8 @@ internal static class SchemaTool
         IReadOnlyList<string> allPropKeys)
     {
         const int sampleSize = 50;
-        using var tx = db.BeginReadOnlyTransaction();
-        var g = tx.G(db.Schema);
+        using var tx = db.BeginReadTransaction();
+        var g = tx.Query;
 
         foreach (var (label, entry) in vertexMap)
         {

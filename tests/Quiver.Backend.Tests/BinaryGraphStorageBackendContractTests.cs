@@ -36,16 +36,14 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
             using var backend = factory.Open(System.IO.Path.Combine(dir, "graph.quiver"), new QuiverDatabaseOptions());
 
             VertexId discarded;
-            using (var tx = backend.BeginGraphTransaction(
-                IsolationLevel.SnapshotIsolation, readOnly: false))
+            using (var tx = backend.BeginWriteTransaction())
             {
                 discarded = tx.CreateVertex("Discarded");
                 tx.Rollback();
             }
 
             VertexId reused;
-            using (var tx = backend.BeginGraphTransaction(
-                IsolationLevel.SnapshotIsolation, readOnly: false))
+            using (var tx = backend.BeginWriteTransaction())
             {
                 reused = tx.CreateVertex("Fresh");
                 tx.Commit();
@@ -65,25 +63,26 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
     /// その後の <c>SeekIndex</c> から見えないことを検証する。
     /// </summary>
     [Fact]
-    public void IndexInsert_rolled_back_is_not_visible()
+    public void Indexed_property_rolled_back_is_not_visible()
     {
         RunInTempBackend(backend =>
         {
-            using (var tx = backend.BeginGraphTransaction(
-                IsolationLevel.SnapshotIsolation, readOnly: false))
+            using (var tx = backend.BeginWriteTransaction())
             {
+                tx.EditSchema.CreateIndex(new ScalarIndexDefinition(
+                    "idx_score",
+                    new PropertyTarget(PropertyOwnerKind.Vertex, "score", "Item"),
+                    IndexKind.Int64Equality));
                 var n = tx.CreateVertex("Item");
-                tx.IndexInsert("idx_score", 42L, n);
+                tx.SetProperty(n, "score", PropertyValue.FromInt64(42L));
                 tx.Rollback();
             }
 
-            using var rtx = backend.BeginGraphTransaction(
-                IsolationLevel.SnapshotIsolation, readOnly: true);
+            using var rtx = backend.BeginReadTransaction();
             var en = rtx.SeekIndex("idx_score", PropertyValue.FromInt64(42L));
             en.MoveNext().Should().BeFalse(
                 "a rolled-back IndexInsert must leave no index entry");
             en.Dispose();
-            rtx.Rollback();
         });
     }
 
@@ -97,17 +96,19 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
         RunInTempBackend(backend =>
         {
             VertexId discarded;
-            using (var tx = backend.BeginGraphTransaction(
-                IsolationLevel.SnapshotIsolation, readOnly: false))
+            using (var tx = backend.BeginWriteTransaction())
             {
+                tx.EditSchema.CreateIndex(new ScalarIndexDefinition(
+                    "idx_name",
+                    new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"),
+                    IndexKind.StringEquality));
                 discarded = tx.CreateVertex("Person");
-                tx.IndexInsert("idx_name", "alice", discarded);
+                tx.SetProperty(discarded, "name", PropertyValue.FromString("alice"));
                 tx.Rollback();
             }
 
             VertexId reused;
-            using (var tx = backend.BeginGraphTransaction(
-                IsolationLevel.SnapshotIsolation, readOnly: false))
+            using (var tx = backend.BeginWriteTransaction())
             {
                 // rollback されたVertexが解放した slot を再利用する。
                 reused = tx.CreateVertex("Person");
@@ -115,15 +116,13 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
             }
             reused.Should().Be(discarded, ": the freed slot is reused");
 
-            using var rtx = backend.BeginGraphTransaction(
-                IsolationLevel.SnapshotIsolation, readOnly: true);
+            using var rtx = backend.BeginReadTransaction();
             var en = rtx.SeekIndex("idx_name", PropertyValue.FromString("alice"));
-            var hits = new List<VertexId>();
+            var hits = new List<EntityRef>();
             while (en.MoveNext()) hits.Add(en.Current);
             en.Dispose();
             hits.Should().BeEmpty(
                 "the rolled-back index entry must not alias the vertex that reused its slot");
-            rtx.Rollback();
         });
     }
 
@@ -137,12 +136,17 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
     {
         RunInTempBackend(backend =>
         {
-            backend.Schema.CreateIndex(
-                "idx_person_email", "Person", "email", IndexKind.StringEquality);
+            using (var schemaTx = backend.BeginWriteTransaction())
+            {
+                schemaTx.EditSchema.CreateIndex(new ScalarIndexDefinition(
+                    "idx_person_email",
+                    new PropertyTarget(PropertyOwnerKind.Vertex, "email", "Person"),
+                    IndexKind.StringEquality));
+                schemaTx.Commit();
+            }
 
             // Vertexとインデックスエントリを作成する merge を rollback する。
-            using (var tx = backend.BeginGraphTransaction(
-                IsolationLevel.SnapshotIsolation, readOnly: false))
+            using (var tx = backend.BeginWriteTransaction())
             {
                 var (_, created) = tx.MergeVertex(
                     "Person", "email", PropertyValue.FromString("a@x.com"));
@@ -151,8 +155,7 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
             }
 
             // stale entry が残っていないため、ここでは新規作成される。
-            using (var tx = backend.BeginGraphTransaction(
-                IsolationLevel.SnapshotIsolation, readOnly: false))
+            using (var tx = backend.BeginWriteTransaction())
             {
                 var (_, created) = tx.MergeVertex(
                     "Person", "email", PropertyValue.FromString("a@x.com"));
@@ -162,8 +165,7 @@ public sealed class BinaryGraphStorageBackendContractTests : GraphStorageBackend
             }
 
             // コミット後は、同じキーの merge が既存Vertexを見つける。
-            using (var tx = backend.BeginGraphTransaction(
-                IsolationLevel.SnapshotIsolation, readOnly: false))
+            using (var tx = backend.BeginWriteTransaction())
             {
                 var (_, created) = tx.MergeVertex(
                     "Person", "email", PropertyValue.FromString("a@x.com"));

@@ -120,22 +120,28 @@ public sealed class QuiverDatabase : IDisposable
         return fn(buildAdjacencyIndex);
     }
 
-    /// <summary>新規グラフトランザクションを開始する。</summary>
-    /// <param name="level">分離レベル (既定: スナップショット分離)。</param>
-    public IGraphTransaction BeginTransaction(
-        IsolationLevel level = IsolationLevel.SnapshotIsolation)
-        => _backend.BeginWriteGraphTransaction(level);
+    /// <summary>開始時点の snapshot を読む transaction を開く。</summary>
+    public IReadTransaction BeginReadTransaction()
+        => _backend.BeginReadTransaction();
+
+    /// <summary>single-writer lease を所有する transaction を開く。</summary>
+    public IWriteTransaction BeginWriteTransaction()
+        => _backend.BeginWriteTransaction();
 
     /// <summary>
-    /// 読み取り専用としてマークしたスナップショット分離トランザクションを開く。
-    /// 読み取り専用トランザクションは <see cref="Quiver.Operators.ParallelBfsOperator"/> など
-    /// 並列トラバーサル系オペレータと安全に組み合わせられる。
+    /// 現在 commit 済みの schema を参照する読み取り専用 catalog。
+    /// query と同じ snapshot が必要な読み取りは <see cref="IReadTransaction.Schema"/> を使う。
     /// </summary>
-    public IGraphTransaction BeginReadOnlyTransaction()
-        => _backend.BeginReadGraphTransaction();
+    public ISchemaCatalog Schema => _backend.SchemaCatalog;
 
-    /// <summary>ラベル・プロパティキー・Edge型・インデックスのスキーマ API。</summary>
-    public ISchemaApi Schema => _backend.Schema;
+    internal SchemaApi SchemaApiForTesting
+        => _backend switch
+        {
+            BinaryGraphStorageBackend binary => binary.SchemaApiForTesting,
+            InMemoryGraphStorageBackend memory => memory.SchemaApiForTesting,
+            _ => throw new NotSupportedException(
+                "The configured backend does not expose Quiver's internal schema implementation."),
+        };
 
     /// <summary>統計取得・整合性検査などの診断 API。</summary>
     public IDiagnosticsApi Diagnostics => _backend.Diagnostics;
@@ -146,7 +152,7 @@ public sealed class QuiverDatabase : IDisposable
     /// トラバーサルソースの <c>g.Knn(...)</c> 経由。
     /// </summary>
     public Core.IVectorStore Vectors => _vectors ??= new AutocommitVectorStore(
-        _backend.Vectors, () => BeginTransaction());
+        _backend.Vectors, BeginWriteTransaction);
 
     /// <summary>
     /// 埋め込みパイプライン (<c>Quiver.Embedding</c>) が消費する
@@ -220,14 +226,17 @@ public sealed class QuiverDatabase : IDisposable
     /// 構築後のミューテーションは可視化されない — 鮮度が必要なら、グラフを変更した後に再構築する。
     /// 返却インデックスは構築トランザクションよりも長く生存可能。
     /// </remarks>
-    /// <param name="propertyKey">プロパティキー名。<see cref="ISchemaApi.GetOrCreatePropertyKey"/> で事前に作成済みであること。</param>
+    /// <param name="propertyKey">プロパティキー名。書き込みトランザクションの schema editor で事前に作成済みであること。</param>
     /// <param name="expectedType">射影するスカラ型。他の型の値はスキップされる。</param>
     public Storage.Records.IEdgePropertyJoinIndex BuildEdgePropertyJoinIndex(
         string propertyKey,
         Storage.Records.PropertyValueType expectedType)
     {
         ArgumentNullException.ThrowIfNull(propertyKey);
-        var keyId = _backend.Schema.GetOrCreatePropertyKey(propertyKey);
+        if (!_backend.SchemaCatalog.TryGetPropertyKeyId(propertyKey, out var keyId))
+            throw new ArgumentException(
+                $"未登録のプロパティキーです: '{propertyKey}'。",
+                nameof(propertyKey));
         using var tx = _backend.Transactions.BeginRead();
         return Storage.Records.DirectArrayEdgePropertyJoinIndex.Build(
             tx.Edges, tx.Properties, keyId, expectedType);
@@ -260,7 +269,7 @@ public sealed class QuiverDatabase : IDisposable
     /// <summary>列指向の読み取り経路を検証するため、列の可視値合計を返す。未登録なら -1。</summary>
     internal long ColumnProjectSumForTest(Core.EntityKind kind, string propertyKey)
     {
-        if (!_backend.Schema.TryGetPropertyKeyId(propertyKey, out var keyId)) return -1;
+        if (!_backend.SchemaCatalog.TryGetPropertyKeyId(propertyKey, out var keyId)) return -1;
         return RequireBinaryForColumns().ColumnProjectSumForTest(kind, keyId.Value);
     }
 
@@ -483,7 +492,7 @@ public sealed class QuiverDatabaseOptions
     public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.Zero;
 
     /// <summary>
-    /// <c>true</c> のとき、<see cref="QuiverDatabase.BeginTransaction"/> は既にアクティブな
+    /// <c>true</c> のとき、<see cref="QuiverDatabase.BeginWriteTransaction"/> は既にアクティブな
     /// 書き込みトランザクションが存在する場合に待機せず <see cref="TransactionException"/> をスローする。
     /// 既定 <c>false</c> では、内部 writer gate で <see cref="LockTimeout"/> まで待機する。
     /// </summary>

@@ -25,11 +25,11 @@ public sealed class SnapshotReaderTests : IDisposable
     [Fact]
     public void Thirty_two_readers_start_during_writer_and_keep_their_start_snapshot()
     {
-        using var writer = _database.BeginTransaction();
+        using var writer = _database.BeginWriteTransaction();
         VertexId created = writer.CreateVertex("created");
 
-        IGraphTransaction[] readers = Enumerable.Range(0, 32)
-            .Select(_ => _database.BeginReadOnlyTransaction())
+        IReadTransaction[] readers = Enumerable.Range(0, 32)
+            .Select(_ => _database.BeginReadTransaction())
             .ToArray();
         try
         {
@@ -37,12 +37,12 @@ public sealed class SnapshotReaderTests : IDisposable
             writer.Commit();
             readers.Should().OnlyContain(reader => !reader.VertexExists(created));
 
-            using var fresh = _database.BeginReadOnlyTransaction();
+            using var fresh = _database.BeginReadTransaction();
             fresh.VertexExists(created).Should().BeTrue();
         }
         finally
         {
-            foreach (IGraphTransaction reader in readers) reader.Dispose();
+            foreach (IReadTransaction reader in readers) reader.Dispose();
         }
     }
 
@@ -50,15 +50,15 @@ public sealed class SnapshotReaderTests : IDisposable
     public void Long_reader_does_not_drift_across_update_and_delete_and_does_not_block_commit()
     {
         VertexId vertex;
-        using (var seed = _database.BeginTransaction())
+        using (var seed = _database.BeginWriteTransaction())
         {
             vertex = seed.CreateVertex("item");
             seed.SetProperty(vertex, "value", PropertyValue.FromInt32(1));
             seed.Commit();
         }
 
-        using var oldReader = _database.BeginReadOnlyTransaction();
-        using (var writer = _database.BeginTransaction())
+        using var oldReader = _database.BeginReadTransaction();
+        using (var writer = _database.BeginWriteTransaction())
         {
             writer.SetProperty(vertex, "value", PropertyValue.FromInt32(2));
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -67,25 +67,25 @@ public sealed class SnapshotReaderTests : IDisposable
         }
 
         oldReader.GetProperty(vertex, "value").Int32Value.Should().Be(1);
-        using (var fresh = _database.BeginReadOnlyTransaction())
+        using (var fresh = _database.BeginReadTransaction())
             fresh.GetProperty(vertex, "value").Int32Value.Should().Be(2);
 
-        using (var delete = _database.BeginTransaction())
+        using (var delete = _database.BeginWriteTransaction())
         {
             delete.DeleteVertex(vertex);
             delete.Commit();
         }
         oldReader.VertexExists(vertex).Should().BeTrue();
-        using var afterDelete = _database.BeginReadOnlyTransaction();
+        using var afterDelete = _database.BeginReadTransaction();
         afterDelete.VertexExists(vertex).Should().BeFalse();
     }
 
     [Fact]
-    public void Read_only_mutation_is_rejected_before_token_or_record_changes()
+    public void Read_transaction_surface_exposes_no_mutation_methods()
     {
-        using var reader = _database.BeginReadOnlyTransaction();
-        Action mutate = () => reader.CreateVertex("must-not-exist");
-        mutate.Should().Throw<TransactionException>();
+        using var reader = _database.BeginReadTransaction();
+        typeof(IReadTransaction).GetMethod(nameof(IWriteTransaction.CreateVertex))
+            .Should().BeNull();
         _database.Schema.ListLabels().Should().NotContain("must-not-exist");
     }
 }

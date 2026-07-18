@@ -39,7 +39,7 @@ internal interface IBTreeIndexFlushable
 
     /// <summary>
     /// 索引内の全 (生キー, 値) ペアを leaf 順に列挙する。
-    /// 値は <see cref="Quiver.Core.VertexId.Value"/> など long を想定。
+    /// scalar 索引値はプロパティ版参照を long で保持する。
     /// orphan 検出は呼び出し側 (IndexManager.ValidateAll) で行う。
     /// </summary>
     IEnumerable<KeyValuePair<byte[], long>> EnumerateRawEntries();
@@ -81,6 +81,10 @@ internal readonly ref struct KeyValueEntry
     }
 }
 
+internal readonly record struct ScalarIndexMetadata(
+    ScalarIndexDefinition Definition,
+    IndexLifecycleState State);
+
 internal interface IIndexManager
 {
     IBTreeIndex<int> CreateInt32Index(string name);
@@ -101,12 +105,21 @@ internal interface IIndexManager
     bool RenameIndex(string oldName, string newName)
         => throw new NotSupportedException("RenameIndex is not supported by this index manager.");
 
+    void RenamePropertyTarget(string oldName, string newName) { }
+
+    void RenameTargetScope(
+        PropertyOwnerKind ownerKind,
+        string oldName,
+        string newName) { }
+
     /// <summary>
     /// スキーマ層から呼ばれ、(label, propertyKey) → indexName の対応を
     /// 登録する。これにより MergeVertex が業務キー検索で自動的にインデックスを利用できる。
     /// 既定実装は no-op (バインディングを保持しないバックエンドはフルスキャン経路に落ちる)。
     /// </summary>
-    void RegisterIndexBinding(string indexName, string label, string propertyKey) { }
+    void RegisterIndexDefinition(
+        ScalarIndexDefinition definition,
+        IndexLifecycleState state = IndexLifecycleState.Ready) { }
 
     /// <summary>
     /// (label, propertyKey) に登録されたインデックス名を返す。
@@ -123,8 +136,17 @@ internal interface IIndexManager
     /// (<see cref="ListIndexes"/> の補助。SchemaApi.ListIndexes のメタデータ復元に使う)。
     /// 既定実装は空シーケンス。
     /// </summary>
-    IEnumerable<(string IndexName, string Label, string PropertyKey)> ListIndexBindings()
-        => Array.Empty<(string, string, string)>();
+    IEnumerable<ScalarIndexMetadata> ListIndexDefinitions()
+        => Array.Empty<ScalarIndexMetadata>();
+
+    /// <summary>永続 definition の lifecycle state だけを更新する。</summary>
+    void SetIndexState(string name, IndexLifecycleState state) { }
+
+    /// <summary>
+    /// definition と tenant identity を維持したまま derived B+Tree artifact を空に戻す。
+    /// </summary>
+    void ResetIndexArtifact(string name)
+        => throw new NotSupportedException("Index artifact reset is not supported.");
 
     /// <summary>
     /// 管理下の全索引ファイルのバッファプールダーティページを fsync する。
@@ -136,12 +158,13 @@ internal interface IIndexManager
 
     /// <summary>
     /// 全 B+Tree 索引を走査し、<paramref name="isLive"/> が <c>false</c> を返した
-    /// 値 (VertexId.Value 互換) を持つエントリを orphan として収集する。
+    /// scalar lane ではプロパティ版参照、全文 lane では entity 参照を持つエントリを orphan として収集する。
     /// 戻り値の <c>EntryCount</c> は走査総数、<c>IndexCount</c> は走査対象の索引数。
     /// 既定実装は何もせず (0, 0) を返す。
     /// </summary>
     (int IndexCount, long EntryCount) CollectOrphans(
-        Func<long, bool> isLive,
+        Func<long, bool> isLiveScalarReference,
+        Func<long, bool> isLiveEntity,
         ICollection<(string IndexName, byte[] RawKey, long Value)> output)
         => (0, 0);
 

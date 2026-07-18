@@ -33,7 +33,7 @@ public class ExpandOperatorTests
     public void Empty_source_returns_empty()
     {
         using var fx = OperatorTestFixture.OpenEmpty();
-        using var tx = fx.Db.BeginTransaction();
+        using var tx = fx.Db.BeginWriteTransaction();
         using var result = tx.Execute(
             new ExpandOperator(new FixedVertexListOperator(), 0, Direction.Both, null, ExpandOutputMode.NeighborOnly));
         result.Rows().Should().BeEmpty();
@@ -50,7 +50,7 @@ public class ExpandOperatorTests
             tgt = tx.CreateVertex("X");
             tx.CreateEdge(src, tgt, "KNOWS");
         });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(
             new ExpandOperator(new FixedVertexListOperator(src), 0, Direction.Outgoing, null, ExpandOutputMode.NeighborOnly));
         result.Rows().Select(r => r.GetVertexId(0)).Should().Equal(tgt);
@@ -62,7 +62,7 @@ public class ExpandOperatorTests
     {
         VertexId isolated = default;
         using var fx = OperatorTestFixture.Open(tx => { isolated = tx.CreateVertex("X"); });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(
             new ExpandOperator(new FixedVertexListOperator(isolated), 0, Direction.Both, null, ExpandOutputMode.NeighborOnly));
         result.Rows().Should().BeEmpty();
@@ -79,7 +79,7 @@ public class ExpandOperatorTests
             b = tx.CreateVertex("X");
             tx.CreateEdge(a, b, "K"); // a -> b
         });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         // a への入力方向のEdgeは存在しない。
         using var inResult = tx2.Execute(
             new ExpandOperator(new FixedVertexListOperator(a), 0, Direction.Incoming, null, ExpandOutputMode.NeighborOnly));
@@ -99,8 +99,8 @@ public class ExpandOperatorTests
             tx.CreateEdge(a, b, "KNOWS");
             tx.CreateEdge(a, c, "LIKES");
         });
-        var knows = fx.Db.Schema.GetOrCreateEdgeType("KNOWS");
-        using var tx2 = fx.Db.BeginTransaction();
+        var knows = fx.EditSchema(schema => schema.GetOrCreateEdgeType("KNOWS"));
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(
             new ExpandOperator(new FixedVertexListOperator(a), 0, Direction.Outgoing, knows, ExpandOutputMode.NeighborOnly));
         result.Rows().Should().HaveCount(1);
@@ -118,7 +118,7 @@ public class ExpandOperatorTests
             tgt = tx.CreateVertex("X");
             edge = tx.CreateEdge(src, tgt, "K");
         });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(
             new ExpandOperator(new FixedVertexListOperator(src), 0, Direction.Outgoing, null, ExpandOutputMode.NeighborAndEdge));
         result.Schema.Columns.Select(c => c.Name).Should().Equal("edge", "neighbor");
@@ -148,7 +148,7 @@ public class ExpandOperatorTests
             var tgt = tx.CreateVertex("X");
             tx.CreateEdge(src, tgt, "K");
         });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(
             new ExpandOperator(new FixedVertexListOperator(src), 0, Direction.Outgoing, null, ExpandOutputMode.NeighborAndWeight));
         var row = result.Rows().Single();
@@ -168,7 +168,7 @@ public class ExpandOperatorTests
             tx.CreateEdge(left, mid, "K");   // mid has incoming
             tx.CreateEdge(mid, right, "K");  // mid has outgoing
         });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(
             new ExpandOperator(new FixedVertexListOperator(mid), 0, Direction.Both, null, ExpandOutputMode.NeighborOnly));
         result.Rows().Should().HaveCount(2);
@@ -186,7 +186,7 @@ public class ExpandOperatorTests
             var tgt = tx.CreateVertex("X");
             tx.CreateEdge(src, tgt, "K");
         });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(
             new ExpandOperator(new FixedVertexListOperator(src), 0, Direction.Outgoing, null,
                 ExpandOutputMode.NeighborOnly, carryColumns: new[] { 0 }));
@@ -206,7 +206,7 @@ public class ExpandOperatorTests
             tgt = tx.CreateVertex("X");
             tx.CreateEdge(src, tgt, "K");
         });
-        using var tx2 = fx.Db.BeginTransaction();
+        using var tx2 = fx.Db.BeginWriteTransaction();
         using var result = tx2.Execute(
             new ExpandOperator(new FixedVertexListOperator(src), 0, Direction.Outgoing, null, ExpandOutputMode.Full));
         result.Rows().Should().HaveCount(1);

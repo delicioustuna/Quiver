@@ -111,23 +111,18 @@ internal sealed class BinaryGraphAccessMethods : IGraphAccessMethods
         }
     }
 
-    public IEnumerable<VertexId> SeekVerticesByIndex(ITransaction tx, string indexName, PropertyValue key)
-    {
-        // PropertyValue は ref struct なので yield を跨いで保持できない。
-        IEnumerable<long> ids = key.Type switch
-        {
-            PropertyValueType.Int32 or PropertyValueType.Int64 or PropertyValueType.Bool =>
-                tx.Indexes.CreateInt64Index(indexName).SeekValues(key.Int64Value),
-            PropertyValueType.Double =>
-                tx.Indexes.CreateDoubleIndex(indexName).SeekValues(key.DoubleValue),
-            PropertyValueType.String =>
-                tx.Indexes.CreateStringIndex(indexName)
-                    .SeekValues(Encoding.UTF8.GetString(key.Utf8StringValue)),
-            _ => [],
-        };
-        // パック値を世代照合しつつ VertexId へ unpack し、slot 再利用の stale 参照を弾く。
-        return IndexValueResolver.ResolveLiveVertexIds(ids, tx.Vertices);
-    }
+    public IEnumerable<VertexId> SeekVerticesByIndex(
+        ITransaction tx,
+        ScalarIndexDefinition definition,
+        PropertyKeyId propertyKey,
+        LabelId? scope,
+        PropertyValue key)
+        => IndexValueResolver.SeekVisibleVertexPropertyOwners(
+            tx,
+            definition,
+            propertyKey,
+            scope,
+            in key);
 
     public ExpandCursor Expand(
         ITransaction tx,

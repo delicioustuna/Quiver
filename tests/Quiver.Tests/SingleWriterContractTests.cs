@@ -29,11 +29,10 @@ public sealed class SingleWriterContractTests : IDisposable
     [Fact]
     public void Facade_backend_and_manager_share_the_same_fail_fast_lease()
     {
-        using var first = _database.BeginTransaction();
+        using var first = _database.BeginWriteTransaction();
 
-        Action facade = () => _database.BeginTransaction().Dispose();
-        Action backend = () => _database.BackendInternal.BeginWriteGraphTransaction(
-            IsolationLevel.SnapshotIsolation).Dispose();
+        Action facade = () => _database.BeginWriteTransaction().Dispose();
+        Action backend = () => _database.BackendInternal.BeginWriteTransaction().Dispose();
         Action manager = () => _database.BackendInternal.Transactions.BeginWrite().Dispose();
 
         facade.Should().Throw<TransactionException>();
@@ -45,10 +44,10 @@ public sealed class SingleWriterContractTests : IDisposable
     [Fact]
     public void Bulk_and_schema_mutations_cannot_bypass_an_active_writer()
     {
-        using (var first = _database.BeginTransaction())
+        using (var first = _database.BeginWriteTransaction())
         {
             Action bulk = () => _database.BackendInternal.BulkLoad.BeginBinaryBulkLoad!(false).Dispose();
-            Action schema = () => _database.Schema.GetOrCreateLabel("blocked");
+            Action schema = () => _database.EditSchema(schema => schema.GetOrCreateLabel("blocked"));
             bulk.Should().Throw<TransactionException>();
             schema.Should().Throw<TransactionException>();
             first.Rollback();
@@ -56,11 +55,11 @@ public sealed class SingleWriterContractTests : IDisposable
 
         using (var loader = _database.BackendInternal.BulkLoad.BeginBinaryBulkLoad!(false))
         {
-            Action secondWriter = () => _database.BeginTransaction().Dispose();
+            Action secondWriter = () => _database.BeginWriteTransaction().Dispose();
             secondWriter.Should().Throw<TransactionException>();
         }
 
-        using var availableAgain = _database.BeginTransaction();
+        using var availableAgain = _database.BeginWriteTransaction();
         availableAgain.Rollback();
     }
 
@@ -74,13 +73,13 @@ public sealed class SingleWriterContractTests : IDisposable
             {
                 LockTimeout = TimeSpan.FromSeconds(2),
             });
-            using var first = database.BeginTransaction();
-            Task<IGraphTransaction> waiting = Task.Run(() => database.BeginTransaction());
+            using var first = database.BeginWriteTransaction();
+            Task<IWriteTransaction> waiting = Task.Run(() => database.BeginWriteTransaction());
             await Task.Delay(100);
             waiting.IsCompleted.Should().BeFalse();
 
             first.Rollback();
-            using IGraphTransaction second = await waiting;
+            using IWriteTransaction second = await waiting;
             second.Rollback();
         }
         finally

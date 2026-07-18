@@ -25,7 +25,7 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "quiver_sig5_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
 
-        var keyId = _db.Schema.GetOrCreatePropertyKey(VecIndex);
+        var keyId = _db.EditSchema(schema => schema.GetOrCreatePropertyKey(VecIndex));
         _db.Vectors.CreateVectorIndex(new VectorIndexSpec(
             VecIndex, EntityKind.Vertex, keyId, Dim,
             DistanceMetric.Cosine, "test", null));
@@ -43,7 +43,7 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
         float[] refVec = [0f, 1f, 0f, 0f];
 
         // 異なる one-hot ベクトルを持つ Sensor Vertexを 3 件作る。
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             for (int i = 0; i < 3; i++)
             {
@@ -62,8 +62,8 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // 固定値 b を基準結果にする。
         var staticResult = g.Vertices<SensorVertex>().Has(s => s.Site, "A")
@@ -90,7 +90,7 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
     public void ApplyDyadic_traversal_b_empty_throws()
     {
         // 入力を空にしないため Sensor Vertexを作る。
-        using (var tx = _db.BeginTransaction())
+        using (var tx = _db.BeginWriteTransaction())
         {
             var nid = tx.CreateVertex("Sensor");
             tx.SetProperty(nid, "Site", PropertyValue.FromString("A"));
@@ -98,8 +98,8 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
             tx.Commit();
         }
 
-        using var rtx = _db.BeginReadOnlyTransaction();
-        var g = rtx.G(_db.Schema);
+        using var rtx = _db.BeginReadTransaction();
+        var g = rtx.Query;
 
         // 何にも一致しないトラバーサル b。
         var emptyB = g.Vertices<TemplateVertex>()
@@ -123,25 +123,25 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
 
         public static string GraphLabel => "Sensor";
 
-        public static VertexId Insert(IGraphTransaction tx, SensorVertex entity)
+        public static VertexId Insert(IWriteTransaction tx, SensorVertex entity)
         {
             var id = tx.CreateVertex(GraphLabel);
             tx.SetProperty(id, "Site", PropertyValue.FromString(entity.Site));
             return id;
         }
 
-        public static VertexId InsertIndexed(IGraphTransaction tx, SensorVertex entity) => Insert(tx, entity);
+        public static VertexId InsertIndexed(IWriteTransaction tx, SensorVertex entity) => Insert(tx, entity);
 
-        public static SensorVertex Load(IGraphTransaction tx, VertexId id)
+        public static SensorVertex Load(IReadTransaction tx, VertexId id)
             => new()
             {
                 Site = System.Text.Encoding.UTF8.GetString(tx.GetProperty(id, "Site").Utf8StringValue),
             };
 
-        public static void Update(IGraphTransaction tx, VertexId id, SensorVertex entity)
+        public static void Update(IWriteTransaction tx, VertexId id, SensorVertex entity)
             => tx.SetProperty(id, "Site", PropertyValue.FromString(entity.Site));
 
-        public static void Delete(IGraphTransaction tx, VertexId id)
+        public static void Delete(IWriteTransaction tx, VertexId id)
             => tx.DeleteVertex(id);
     }
 
@@ -152,7 +152,7 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
 
         public static string GraphLabel => "Template";
 
-        public static VertexId Insert(IGraphTransaction tx, TemplateVertex entity)
+        public static VertexId Insert(IWriteTransaction tx, TemplateVertex entity)
         {
             var id = tx.CreateVertex(GraphLabel);
             tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
@@ -160,9 +160,9 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
             return id;
         }
 
-        public static VertexId InsertIndexed(IGraphTransaction tx, TemplateVertex entity) => Insert(tx, entity);
+        public static VertexId InsertIndexed(IWriteTransaction tx, TemplateVertex entity) => Insert(tx, entity);
 
-        public static TemplateVertex Load(IGraphTransaction tx, VertexId id)
+        public static TemplateVertex Load(IReadTransaction tx, VertexId id)
         {
             var nameVal = tx.GetProperty(id, "Name");
             var patternVal = tx.GetProperty(id, "Pattern");
@@ -175,13 +175,13 @@ public sealed class ApplyDyadicTraversalBTests : IDisposable
             };
         }
 
-        public static void Update(IGraphTransaction tx, VertexId id, TemplateVertex entity)
+        public static void Update(IWriteTransaction tx, VertexId id, TemplateVertex entity)
         {
             tx.SetProperty(id, "Name", PropertyValue.FromString(entity.Name));
             tx.SetProperty(id, "Pattern", PropertyValue.FromFloatArray(entity.Pattern));
         }
 
-        public static void Delete(IGraphTransaction tx, VertexId id)
+        public static void Delete(IWriteTransaction tx, VertexId id)
             => tx.DeleteVertex(id);
     }
 }

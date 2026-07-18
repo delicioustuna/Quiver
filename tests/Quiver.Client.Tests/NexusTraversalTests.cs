@@ -19,7 +19,7 @@ public sealed class NexusTraversalTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "quiver_nexus_traversal_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         _alice = tx.CreateVertex("Person");
         _bob = tx.CreateVertex("Person");
         _book = tx.CreateVertex("Book");
@@ -43,8 +43,8 @@ public sealed class NexusTraversalTests : IDisposable
     [Fact]
     public void Scan_and_seed_return_nexuses()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         g.Nexuses().ToList().Should().ContainSingle().Which.Should().Be(_purchase);
         g.Nexus(_purchase).ToList().Should().ContainSingle().Which.Should().Be(_purchase);
@@ -53,8 +53,8 @@ public sealed class NexusTraversalTests : IDisposable
     [Fact]
     public void Nexuses_filters_by_type_and_origin_role()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         g.Vertex(_alice).Nexuses("Purchase", "buyer").ToList().Should().Equal(_purchase);
         g.Vertex(_alice).Nexuses("Purchase", "seller").ToList().Should().BeEmpty();
@@ -64,8 +64,8 @@ public sealed class NexusTraversalTests : IDisposable
     [Fact]
     public void Members_filters_by_role()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         g.Nexus(_purchase).Members().ToList()
             .Should().BeEquivalentTo([_alice, _alice, _bob, _book]);
@@ -75,8 +75,8 @@ public sealed class NexusTraversalTests : IDisposable
     [Fact]
     public void OtherMembers_excludes_origin_vertex_from_every_role()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         var others = g.Vertex(_alice)
             .Nexuses("Purchase", "buyer")
@@ -90,8 +90,8 @@ public sealed class NexusTraversalTests : IDisposable
     [Fact]
     public void OtherMembers_requires_a_vertex_expansion_origin()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         Action fromSeed = () => g.Nexus(_purchase).OtherMembers();
         Action afterMembers = () => g.Vertex(_alice).Nexuses().Members().OtherMembers();
@@ -103,8 +103,8 @@ public sealed class NexusTraversalTests : IDisposable
     [Fact]
     public void Nexus_properties_remain_chainable_before_member_expansion()
     {
-        using var tx = _db.BeginReadOnlyTransaction();
-        var g = tx.G(_db.Schema);
+        using var tx = _db.BeginReadTransaction();
+        var g = tx.Query;
 
         g.Nexuses().Has("status", "paid").Members("item").ToList().Should().Equal(_book);
         g.Nexuses().Values("status").ToList().Should().Equal("paid");

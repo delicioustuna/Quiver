@@ -13,10 +13,10 @@ internal static class DiagLayout
         Console.WriteLine($"DB: {dbPath}");
 
         using var db = QuiverDatabase.Open(dbPath);
-        using var tx = db.BeginReadOnlyTransaction();
+        using var tx = db.BeginReadTransaction();
 
         var vertexMap = new Dictionary<long, VisualVertex>();
-        var vertexIds = tx.G(db.Schema).Vertices().ToList();
+        var vertexIds = tx.Query.Vertices().ToList();
         foreach (var nid in vertexIds)
         {
             var label = tx.GetVertexLabel(nid) ?? $"({nid.Sequence})";

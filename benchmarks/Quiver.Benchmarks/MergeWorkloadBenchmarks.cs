@@ -50,18 +50,18 @@ public class MergeWorkloadBenchmarks
     {
         _dbPath = BenchTempDir.Create("merge");
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dbPath, "graph.quiver"));
-        _ = _db.Schema.GetOrCreateLabel("Person");
-        _ = _db.Schema.GetOrCreatePropertyKey("uid");
+        _ = _db.EditSchema(schema => schema.GetOrCreateLabel("Person"));
+        _ = _db.EditSchema(schema => schema.GetOrCreatePropertyKey("uid"));
         if (WithIndex)
-            _db.Schema.CreateIndex(IndexName, "Person", "uid", IndexKind.Int64Equality);
+            _db.EditSchema(schema => schema.CreateIndex(new ScalarIndexDefinition(IndexName, new PropertyTarget(PropertyOwnerKind.Vertex, "uid", "Person"), IndexKind.Int64Equality)));
 
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < PreloadCount; i++)
         {
             var id = tx.CreateVertex("Person");
             tx.SetProperty(id, "uid", PropertyValue.FromInt64(i));
             if (WithIndex)
-                tx.IndexInsert(IndexName, i, id);
+                tx.SetIndexedProperty(IndexName, i, id);
         }
         tx.Commit();
     }
@@ -86,7 +86,7 @@ public class MergeWorkloadBenchmarks
     public int MergeLoop()
     {
         int created = 0;
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < Operations; i++)
         {
             long uid = PickUid(i);
@@ -102,7 +102,7 @@ public class MergeWorkloadBenchmarks
     [Benchmark(Baseline = true, Description = "Baseline: explicit CreateVertex + SetProperty (no merge lookup)")]
     public int CreateOnlyLoop()
     {
-        using var tx = _db.BeginTransaction();
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < Operations; i++)
         {
             long uid = PickUid(i);

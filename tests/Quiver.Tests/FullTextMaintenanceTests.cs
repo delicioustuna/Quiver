@@ -30,7 +30,7 @@ public sealed class FullTextMaintenanceTests : IDisposable
 
     private static FullTextIndex Ft(QuiverDatabase db, string name)
     {
-        ((SchemaApi)db.Schema).IndexManager.TryGetFullTextIndex(name, out var ft).Should().BeTrue();
+        db.SchemaApiForTesting.IndexManager.TryGetFullTextIndex(name, out var ft).Should().BeTrue();
         return ft;
     }
 
@@ -38,10 +38,10 @@ public sealed class FullTextMaintenanceTests : IDisposable
     public void SetProperty_on_indexed_label_writes_postings()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+        db.EditSchema(schema => schema.CreateFullTextIndex("idx_body", "Doc", "body"));
 
         VertexId vertex;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             vertex = tx.CreateVertex("Doc");
             tx.SetProperty(vertex, "body", PropertyValue.FromString("hello world"));
@@ -59,10 +59,10 @@ public sealed class FullTextMaintenanceTests : IDisposable
     public void Read_your_own_writes_within_the_same_transaction()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+        db.EditSchema(schema => schema.CreateFullTextIndex("idx_body", "Doc", "body"));
         var ft = Ft(db, "idx_body");
 
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var n = tx.CreateVertex("Doc");
         tx.SetProperty(n, "body", PropertyValue.FromString("inflight content"));
         // Postings are visible before commit (same-Tx read-your-own-writes).
@@ -74,16 +74,16 @@ public sealed class FullTextMaintenanceTests : IDisposable
     public void Updating_property_removes_old_terms_via_before_image()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+        db.EditSchema(schema => schema.CreateFullTextIndex("idx_body", "Doc", "body"));
 
         VertexId vertex;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             vertex = tx.CreateVertex("Doc");
             tx.SetProperty(vertex, "body", PropertyValue.FromString("hello world"));
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.SetProperty(vertex, "body", PropertyValue.FromString("goodbye world"));
             tx.Commit();
@@ -100,9 +100,9 @@ public sealed class FullTextMaintenanceTests : IDisposable
     public void Rollback_leaves_no_postings()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+        db.EditSchema(schema => schema.CreateFullTextIndex("idx_body", "Doc", "body"));
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var n = tx.CreateVertex("Doc");
             tx.SetProperty(n, "body", PropertyValue.FromString("transient text"));
@@ -118,16 +118,16 @@ public sealed class FullTextMaintenanceTests : IDisposable
     public void DeleteVertex_removes_postings()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+        db.EditSchema(schema => schema.CreateFullTextIndex("idx_body", "Doc", "body"));
 
         VertexId vertex;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             vertex = tx.CreateVertex("Doc");
             tx.SetProperty(vertex, "body", PropertyValue.FromString("hello world"));
             tx.Commit();
         }
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteVertex(vertex);
             tx.Commit();
@@ -142,9 +142,9 @@ public sealed class FullTextMaintenanceTests : IDisposable
     public void Writes_to_unbound_keys_are_not_indexed()
     {
         using var db = QuiverDatabase.Open(_path);
-        db.Schema.CreateFullTextIndex("idx_body", "Doc", "body");
+        db.EditSchema(schema => schema.CreateFullTextIndex("idx_body", "Doc", "body"));
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var n = tx.CreateVertex("Doc");
             tx.SetProperty(n, "title", PropertyValue.FromString("not indexed")); // 'title' is unbound

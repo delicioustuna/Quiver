@@ -78,7 +78,7 @@ public static class Ft26MvccThroughputRunner
         {
             using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
             var sw = Stopwatch.StartNew();
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < n; i++)
                     tx.CreateVertex("X");
@@ -97,7 +97,7 @@ public static class Ft26MvccThroughputRunner
         {
             using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
             var sw = Stopwatch.StartNew();
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < n; i++)
                 {
@@ -118,14 +118,14 @@ public static class Ft26MvccThroughputRunner
         try
         {
             using var db = QuiverDatabase.Open(System.IO.Path.Combine(dir, "graph.quiver"));
-            using (var seed = db.BeginTransaction())
+            using (var seed = db.BeginWriteTransaction())
             {
                 _ = seed.CreateVertex("A"); // VertexId(0)
                 _ = seed.CreateVertex("B"); // VertexId(1)
                 seed.Commit();
             }
             var sw = Stopwatch.StartNew();
-            using (var tx = db.BeginTransaction())
+            using (var tx = db.BeginWriteTransaction())
             {
                 for (int i = 0; i < n; i++)
                     tx.CreateEdge(new VertexId(0), new VertexId(1), "R");

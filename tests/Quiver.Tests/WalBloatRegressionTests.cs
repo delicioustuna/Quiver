@@ -49,7 +49,7 @@ public sealed class WalBloatRegressionTests : IDisposable
         _peakWalBytes = 0;
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < vertexCount; i++)
                 vertexIds[i] = tx.CreateVertex("Person");
@@ -58,7 +58,7 @@ public sealed class WalBloatRegressionTests : IDisposable
         SampleWal();
 
         long created = 0;
-        var batchTx = db.BeginTransaction();
+        var batchTx = db.BeginWriteTransaction();
         try
         {
             for (int i = 0; i < vertexCount; i++)
@@ -72,7 +72,7 @@ public sealed class WalBloatRegressionTests : IDisposable
                         batchTx.Commit();
                         batchTx.Dispose();
                         SampleWal();
-                        batchTx = db.BeginTransaction();
+                        batchTx = db.BeginWriteTransaction();
                     }
                 }
             }
@@ -144,8 +144,8 @@ public sealed class WalBloatRegressionTests : IDisposable
     private long CountKnowsEdges(QuiverDatabaseOptions? options = null)
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"), options);
-        using var tx = db.BeginReadOnlyTransaction();
-        var g = tx.G(db.Schema);
+        using var tx = db.BeginReadTransaction();
+        var g = tx.Query;
         return g.Vertices().HasLabel("Person").Out("KNOWS").ToList().Count;
     }
 }

@@ -13,7 +13,13 @@ try
 
     // ── インデックス定義 ──
     const string indexName = "person_bio_v1";
-    var bioKey = db.Schema.GetOrCreatePropertyKey("bio");
+    PropertyKeyId bioKey;
+    using (var schemaTx = db.BeginWriteTransaction())
+    {
+        bioKey = schemaTx.EditSchema.GetOrCreatePropertyKey("bio");
+        schemaTx.Commit();
+    }
+
     db.Vectors.CreateVectorIndex(new VectorIndexSpec(
         Name: indexName,
         EntityKind: EntityKind.Vertex,
@@ -25,12 +31,12 @@ try
     VertexId aliceId, bobId, carolId;
 
     // ── データ投入 ──
-    using (var tx = db.BeginTransaction())
+    using (var tx = db.BeginWriteTransaction())
     {
-        var g = tx.G(db.Schema);
-        aliceId = g.AddVertex("Person").P("name", "Alice").Next();
-        bobId   = g.AddVertex("Person").P("name", "Bob").Next();
-        carolId = g.AddVertex("Person").P("name", "Carol").Next();
+        var g = tx.Query;
+        aliceId = tx.Mutate.AddVertex("Person").P("name", "Alice").Next();
+        bobId   = tx.Mutate.AddVertex("Person").P("name", "Bob").Next();
+        carolId = tx.Mutate.AddVertex("Person").P("name", "Carol").Next();
 
         db.Vectors.SetVector(EntityKind.Vertex, aliceId.Value, indexName, new float[] { 0.1f, 0.2f, 0.3f, 0.4f });
         db.Vectors.SetVector(EntityKind.Vertex, bobId.Value,   indexName, new float[] { 0.0f, 0.1f, 0.2f, 0.5f });
@@ -40,9 +46,9 @@ try
 
     // ── 1. KNN を起点とするトラバーサル ──
     Console.WriteLine("── 1. g.Knn(query, k=2) ──");
-    using (var tx = db.BeginReadOnlyTransaction())
+    using (var tx = db.BeginReadTransaction())
     {
-        var g = tx.G(db.Schema);
+        var g = tx.Query;
         var top2Names = g.Knn(indexName, new float[] { 0.1f, 0.2f, 0.3f, 0.4f }, k: 2)
                          .Values("name")
                          .ToList();
@@ -52,9 +58,9 @@ try
     // ── 2. グラフファーストな複合検索 (フィルタしてから KNN) ──
     Console.WriteLine();
     Console.WriteLine("── 2. graph-first hybrid ──");
-    using (var tx = db.BeginReadOnlyTransaction())
+    using (var tx = db.BeginReadTransaction())
     {
-        var g = tx.G(db.Schema);
+        var g = tx.Query;
         var filtered = g.Vertices().HasLabel("Person")
                         .FilterByKnn(indexName, new float[] { 0.1f, 0.2f, 0.3f, 0.4f }, k: 1)
                         .Values("name")

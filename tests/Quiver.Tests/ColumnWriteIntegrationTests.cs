@@ -8,7 +8,7 @@ namespace Quiver.Tests;
 
 /// <summary>
 /// 列の書き込み経路を統合したエンドツーエンドテスト。列化済みキーへの
-/// <see cref="IGraphTransaction.SetProperty(EdgeId, string, in PropertyValue)"/> /
+/// <see cref="IWriteTransaction.SetProperty(EdgeId, string, in PropertyValue)"/> /
 /// RemoveProperty / DeleteVertex / DeleteEdge が同じトランザクションで列を維持し、
 /// 中断時には列が巻き戻り、コミット時には再オープン後も永続することを確認する。
 /// 射影結果はテスト用アクセサ <c>ColumnProjectSumForTest</c> で確認する。
@@ -40,7 +40,7 @@ public sealed class ColumnWriteIntegrationTests : IDisposable
         // 空データに列を作ってから write する (= 純粋に write 経路で維持されることの確認)。
         db.CreateColumn(EntityKind.Edge, "w").Should().BeTrue();
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("A");
             var b = tx.CreateVertex("B");
@@ -59,7 +59,7 @@ public sealed class ColumnWriteIntegrationTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path);
         EdgeId r;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("A");
             var b = tx.CreateVertex("B");
@@ -71,7 +71,7 @@ public sealed class ColumnWriteIntegrationTests : IDisposable
         db.ColumnProjectSumForTest(EntityKind.Edge, "w").Should().Be(10);
 
         // 上書き → 旧版は delta へ退避、可視値は新値のみ。
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.SetProperty(r, "w", PropertyValue.FromInt64(30));
             tx.Commit();
@@ -84,7 +84,7 @@ public sealed class ColumnWriteIntegrationTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path);
         EdgeId r1, r2;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("A");
             var b = tx.CreateVertex("B");
@@ -97,7 +97,7 @@ public sealed class ColumnWriteIntegrationTests : IDisposable
         db.CreateColumn(EntityKind.Edge, "w").Should().BeTrue();
         db.ColumnProjectSumForTest(EntityKind.Edge, "w").Should().Be(30);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.DeleteEdge(r2);
             tx.Commit();
@@ -110,7 +110,7 @@ public sealed class ColumnWriteIntegrationTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path);
         VertexId n;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             n = tx.CreateVertex("A");
             tx.SetProperty(n, "score", PropertyValue.FromInt64(7));
@@ -119,7 +119,7 @@ public sealed class ColumnWriteIntegrationTests : IDisposable
         db.CreateColumn(EntityKind.Vertex, "score").Should().BeTrue();
         db.ColumnProjectSumForTest(EntityKind.Vertex, "score").Should().Be(7);
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.RemoveProperty(n, "score");
             tx.Commit();
@@ -132,7 +132,7 @@ public sealed class ColumnWriteIntegrationTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path);
         EdgeId r;
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("A");
             var b = tx.CreateVertex("B");
@@ -144,7 +144,7 @@ public sealed class ColumnWriteIntegrationTests : IDisposable
         db.ColumnProjectSumForTest(EntityKind.Edge, "w").Should().Be(10);
 
         // 上書きして rollback → 列も旧値へ戻る (head 復元 + delta prune)。
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.SetProperty(r, "w", PropertyValue.FromInt64(99));
             tx.Rollback();
@@ -152,7 +152,7 @@ public sealed class ColumnWriteIntegrationTests : IDisposable
         db.ColumnProjectSumForTest(EntityKind.Edge, "w").Should().Be(10);
 
         // rollback 後も正しく write できる (列状態が壊れていない)。
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             tx.SetProperty(r, "w", PropertyValue.FromInt64(50));
             tx.Commit();
@@ -166,7 +166,7 @@ public sealed class ColumnWriteIntegrationTests : IDisposable
         using (var db = QuiverDatabase.Open(_path))
         {
             db.CreateColumn(EntityKind.Edge, "w").Should().BeTrue();
-            using var tx = db.BeginTransaction();
+            using var tx = db.BeginWriteTransaction();
             var a = tx.CreateVertex("A");
             var b = tx.CreateVertex("B");
             var r1 = tx.CreateEdge(a, b, "R");

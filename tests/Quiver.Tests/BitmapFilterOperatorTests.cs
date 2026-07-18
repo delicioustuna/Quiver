@@ -42,8 +42,8 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     {
         // matchA: first 'matchA' vertices get tag=A. matchB: first 'matchB' vertices get hot=true.
         // matchBoth = min(matchA, matchB).
-        _db.Schema.GetOrCreateLabel("N");
-        using var tx = _db.BeginTransaction();
+        _db.EditSchema(schema => schema.GetOrCreateLabel("N"));
+        using var tx = _db.BeginWriteTransaction();
         for (int i = 0; i < total; i++)
         {
             var nid = tx.CreateVertex("N");
@@ -57,10 +57,10 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     public void Yields_same_rows_as_chained_FilterOperator()
     {
         Seed(total: 200, matchA: 50, matchB: 80, matchBoth: 50);
-        using var tx = _db.BeginTransaction();
-        var label = _db.Schema.GetOrCreateLabel("N");
-        var tagKey = _db.Schema.GetOrCreatePropertyKey("tag");
-        var hotKey = _db.Schema.GetOrCreatePropertyKey("hot");
+        using var tx = _db.BeginWriteTransaction();
+        var label = tx.EditSchema.GetOrCreateLabel("N");
+        var tagKey = tx.EditSchema.GetOrCreatePropertyKey("tag");
+        var hotKey = tx.EditSchema.GetOrCreatePropertyKey("hot");
 
         IPredicate tagIsA = new TagEqPredicate(tagKey, "A");
         IPredicate hotIsTrue = new HotEqPredicate(hotKey, true);
@@ -91,10 +91,10 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     {
         // 1000 vertices: 50 with tag=A, 500 with hot=true, 50 with both.
         Seed(total: 1000, matchA: 50, matchB: 500, matchBoth: 50);
-        using var tx = _db.BeginTransaction();
-        var label = _db.Schema.GetOrCreateLabel("N");
-        var tagKey = _db.Schema.GetOrCreatePropertyKey("tag");
-        var hotKey = _db.Schema.GetOrCreatePropertyKey("hot");
+        using var tx = _db.BeginWriteTransaction();
+        var label = tx.EditSchema.GetOrCreateLabel("N");
+        var tagKey = tx.EditSchema.GetOrCreatePropertyKey("tag");
+        var hotKey = tx.EditSchema.GetOrCreatePropertyKey("hot");
 
         var tagSelective = new CountingPredicate((nid, t) =>
         {
@@ -134,10 +134,10 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     public void Least_selective_first_evaluates_more_predicates()
     {
         Seed(total: 1000, matchA: 50, matchB: 500, matchBoth: 50);
-        using var tx = _db.BeginTransaction();
-        var label = _db.Schema.GetOrCreateLabel("N");
-        var tagKey = _db.Schema.GetOrCreatePropertyKey("tag");
-        var hotKey = _db.Schema.GetOrCreatePropertyKey("hot");
+        using var tx = _db.BeginWriteTransaction();
+        var label = tx.EditSchema.GetOrCreateLabel("N");
+        var tagKey = tx.EditSchema.GetOrCreatePropertyKey("tag");
+        var hotKey = tx.EditSchema.GetOrCreatePropertyKey("hot");
 
         var tagSelective = new CountingPredicate((nid, t) =>
         {
@@ -175,8 +175,8 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     [Fact]
     public void Empty_source_yields_no_rows()
     {
-        var label = _db.Schema.GetOrCreateLabel("Missing");
-        using var tx = _db.BeginTransaction();
+        var label = _db.EditSchema(schema => schema.GetOrCreateLabel("Missing"));
+        using var tx = _db.BeginWriteTransaction();
 
         var always = new CountingPredicate((_, _) => true);
         using var result = tx.Execute(
@@ -192,8 +192,8 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     public void All_pass_yields_every_input_row()
     {
         Seed(total: 70, matchA: 70, matchB: 70, matchBoth: 70);
-        using var tx = _db.BeginTransaction();
-        var label = _db.Schema.GetOrCreateLabel("N");
+        using var tx = _db.BeginWriteTransaction();
+        var label = tx.EditSchema.GetOrCreateLabel("N");
         var alwaysTrue = new CountingPredicate((_, _) => true);
         using var result = tx.Execute(
             new BitmapFilterOperator(
@@ -208,8 +208,8 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     public void All_fail_yields_zero_rows()
     {
         Seed(total: 70, matchA: 70, matchB: 70, matchBoth: 70);
-        using var tx = _db.BeginTransaction();
-        var label = _db.Schema.GetOrCreateLabel("N");
+        using var tx = _db.BeginWriteTransaction();
+        var label = tx.EditSchema.GetOrCreateLabel("N");
         var alwaysFalse = new CountingPredicate((_, _) => false);
         var alsoAlwaysFalse = new CountingPredicate((_, _) => false);
         using var result = tx.Execute(
@@ -229,9 +229,9 @@ public sealed class BitmapFilterOperatorTests : IDisposable
     {
         // BatchSize = 64. Feed 200 rows so we cross batch boundaries.
         Seed(total: 200, matchA: 30, matchB: 200, matchBoth: 30);
-        using var tx = _db.BeginTransaction();
-        var label = _db.Schema.GetOrCreateLabel("N");
-        var tagKey = _db.Schema.GetOrCreatePropertyKey("tag");
+        using var tx = _db.BeginWriteTransaction();
+        var label = tx.EditSchema.GetOrCreateLabel("N");
+        var tagKey = tx.EditSchema.GetOrCreatePropertyKey("tag");
 
         var pickA = new CountingPredicate((nid, t) =>
         {

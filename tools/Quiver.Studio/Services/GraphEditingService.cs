@@ -18,7 +18,7 @@ public sealed class GraphEditingService
     public VertexId CreateVertex(string label, IReadOnlyList<(string key, string value)>? properties = null)
     {
         var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var nid = tx.CreateVertex(label);
 
         if (properties is not null)
@@ -36,7 +36,7 @@ public sealed class GraphEditingService
     public void DeleteVertex(VertexId id)
     {
         var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
 
         var edges = tx.EnumerateEdges(id);
         var edgeIds = new List<EdgeId>();
@@ -54,7 +54,7 @@ public sealed class GraphEditingService
     public EdgeId CreateEdge(VertexId source, VertexId target, string type)
     {
         var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         var rid = tx.CreateEdge(source, target, type);
         tx.Commit();
         _db.RefreshStatistics();
@@ -65,7 +65,7 @@ public sealed class GraphEditingService
     public void DeleteEdge(EdgeId id)
     {
         var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         tx.DeleteEdge(id);
         tx.Commit();
         _db.RefreshStatistics();
@@ -75,7 +75,7 @@ public sealed class GraphEditingService
     public void SetProperty(VertexId id, string key, string value)
     {
         var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         tx.SetProperty(id, key, PropertyValue.FromString(value));
         tx.Commit();
         _logger.LogInformation("プロパティ設定: Vertex {Id} {Key}={Value}", id, key, value);
@@ -84,7 +84,7 @@ public sealed class GraphEditingService
     public void RemoveProperty(VertexId id, string key)
     {
         var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         tx.RemoveProperty(id, key);
         tx.Commit();
         _logger.LogInformation("プロパティ削除: Vertex {Id} {Key}", id, key);
@@ -93,7 +93,7 @@ public sealed class GraphEditingService
     public void SetEdgeProperty(EdgeId id, string key, string value)
     {
         var db = _db.CurrentDatabase ?? throw new InvalidOperationException("No database open.");
-        using var tx = db.BeginTransaction();
+        using var tx = db.BeginWriteTransaction();
         tx.SetProperty(id, key, PropertyValue.FromString(value));
         tx.Commit();
         _logger.LogInformation("プロパティ設定: Edge {Id} {Key}={Value}", id, key, value);

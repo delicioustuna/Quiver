@@ -61,10 +61,10 @@ public sealed class VectorHnswFilteredBatchTests : IDisposable
 
         using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.EditSchema(schema => schema.GetOrCreatePropertyKey("t")),
             Dim, DistanceMetric.Cosine, "test", null));
 
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < N; i++)
             {
@@ -96,11 +96,11 @@ public sealed class VectorHnswFilteredBatchTests : IDisposable
 
         using var db = QuiverDatabase.Open(_path);
         db.Vectors.CreateVectorIndex(new VectorIndexSpec(
-            IndexName, EntityKind.Vertex, db.Schema.GetOrCreatePropertyKey("t"),
+            IndexName, EntityKind.Vertex, db.EditSchema(schema => schema.GetOrCreatePropertyKey("t")),
             Dim, DistanceMetric.Cosine, "test", null));
 
         // 全Vertexを同一ラベル "Doc" にして候補 = 全件 (低選択率 → HNSW filtered branch)。
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             for (int i = 0; i < N; i++)
             {
@@ -113,8 +113,8 @@ public sealed class VectorHnswFilteredBatchTests : IDisposable
         }
 
         double totalRecall = 0;
-        using var rtx = db.BeginReadOnlyTransaction();
-        var g = rtx.G(db.Schema);
+        using var rtx = db.BeginReadTransaction();
+        var g = rtx.Query;
         for (int qi = 0; qi < Queries; qi++)
         {
             var q = RandomVec(rng, Dim);

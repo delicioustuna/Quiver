@@ -24,7 +24,7 @@ README はライブラリ利用者向けの最小限に絞っているため、�
 中核エンジンは単一アセンブリ `Quiver` に集約し、名前空間でレイヤを分離する。
 
 ```
-Quiver.Api / Quiver.Api.Match  ← 公開ファサード: QuiverDatabase / GraphTransaction / Fluent Traversal / Match DSL
+Quiver.Api / Quiver.Api.Match  ← 公開ファサード: QuiverDatabase / IReadTransaction / IWriteTransaction / Fluent DSL
 Quiver.Query.Logical
 Quiver.Query.Optimizer         ← ヒストグラム統計 + ルールベース最適化
 Quiver.Query.Physical          ← Volcano 型物理演算子
@@ -63,12 +63,16 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 | entity version sidecar | `EntityVersionMeta(xmin,xmax,generation)` の 24B record。page あたり 339 件、sidecar format version 4、旧 40B fallback なし |
 | primary vector payload | 固定 tenant の `VectorPayloadStore`。generation、dimensions、element type、byte length、CRC32C を検証 |
 | adjacency | `AdjacencySegmentStore` の単一 format。payload なしも `PayloadKind.None` で同形式 |
+| scalar index | `ScalarIndexDefinition` と `PropertyTarget` が永続定義。B+Tree value は `PropertyVersionRef` で、primary owner を snapshot 再検証 |
 | ベクトル catalog | entry 長プレフィクス + per-index HNSW レイアウトパラメタ |
 
 `TransactionManager` は database instance ごとの `WriterLease` と `SnapshotRegistry` を所有する。
-facade と backend の既存開始 API は、内部の `BeginRead` と `BeginWrite` へ集約する adapter である。
+facade は `BeginReadTransaction()` から `IReadTransaction`、`BeginWriteTransaction()` から `IWriteTransaction` を返す。
+読み取り DSL は `Query`、書き込み DSL は `Mutate` に分離する。
+スキーマ参照は snapshot 固定の `ISchemaCatalog`、編集は writer 所有の `ISchemaEditor` を使う。
 read transaction は WAL を生成せず、writer と並行して開始時 snapshot を読む。
 bulk、schema、maintenance の mutation 入口も同じ writer lease を取得する。
+scalar index rebuild は primary scan、key decode、sort を snapshot reader で実行し、source generation と reader horizon を再検証する publish transaction だけが writer lease を取得する。
 active writer の dirty page は commit fsync 前に data file へ書かない。
 checkpoint は同じ writer lease で sharp boundary を作り、reader を待たずに committed dirty page と transaction catalog を flush する。
 
@@ -139,12 +143,12 @@ dotnet run --project sandbox/QuiverSandbox
 
 ## ローレベル / 型なし API
 
-Fluent Traversal / Source Generator の下位には、`GraphTransaction` を直接操作するローレベル API がある。
+Fluent Traversal / Source Generator の下位には、`IReadTransaction` と `IWriteTransaction` を直接操作するローレベル API がある。
 
 ```csharp
 using var db = QuiverDatabase.Open("./mygraph");
 
-using (var tx = db.BeginTransaction())
+using (var tx = db.BeginWriteTransaction())
 {
     var alice = tx.CreateVertex("Person");
     tx.SetProperty(alice, "name", PropertyValue.FromString("Alice"));
@@ -158,23 +162,26 @@ using (var tx = db.BeginTransaction())
 }
 ```
 
-型なしトラバーサル（`tx.G(db.Schema)` 起点。文字列キーで指定）:
+型なし DSL は `tx.Query` と `tx.Mutate` を起点にし、文字列キーで指定する。
 
 ```csharp
-var g = tx.G(db.Schema);
+using var tx = db.BeginWriteTransaction();
+var alice = tx.Mutate.AddVertex("Person").P("Name", "Alice").P("Age", 30).Next();
+var bob = tx.Mutate.AddVertex("Person").P("Name", "Bob").P("Age", 25).Next();
+tx.Mutate.AddEdge("KNOWS").From(alice).To(bob).Next();
 
-var alice = g.AddVertex("Person").P("Name", "Alice").P("Age", 30).Next();
-var bob   = g.AddVertex("Person").P("Name", "Bob").P("Age", 25).Next();
-g.AddEdge("KNOWS").From(alice).To(bob).Next();
-
-var names = g.Vertices().HasLabel("Person")
-              .Has("Age", P.Gt(25L))
-              .Out("KNOWS")
-              .Values("Name")
-              .ToList();   // → ["Bob"]
+var names = tx.Query.Vertices().HasLabel("Person")
+    .Has("Age", P.Gt(25L))
+    .Out("KNOWS")
+    .Values("Name")
+    .ToList();
 
 // 型なしエッジ経路
-var recent = g.Vertex(alice).OutEdges("KNOWS").Has("since", P.Gt(2022L)).TargetVertex();
+var recent = tx.Query.Vertex(alice)
+    .OutEdges("KNOWS")
+    .Has("since", P.Gt(2022L))
+    .TargetVertex();
+tx.Commit();
 ```
 
 グラフパターンマッチ（Match DSL, Cypher の宣言的パターンに相当）:
@@ -249,7 +256,7 @@ foreach (var name in g.Vertices().HasLabel("Person").Values("Name").AsEnumerable
 | Core ID / kind | `src/Quiver/Core/EntityRef.cs`（kind 付き packed identity）、`src/Quiver/Core/Ids.cs`（typed ID と Generation 込み equality）、`src/Quiver/Core/EntityId.cs`（Vertex / Edge / Nexus の strict internal tag） |
 | ストア | `src/Quiver/Stores/VersionedNexusStore.cs`、`IncidenceStore.cs`、`VertexIncidenceHeadStore.cs`、`CoMembershipBlockStore.cs` |
 | トランザクション | `src/Quiver/Transactions/TransactionManager.cs`、`WriterLease.cs`、`SnapshotRegistry.cs`、`TxNexusStore.cs`（snapshot / undo の配線） |
-| 公開 CRUD | `src/Quiver/IGraphTransaction.cs`（`CreateNexus` / `DeleteNexus` / `GetMembers` / `GetNexuses` / プロパティ各種）、`ISchemaApi`（型 / ロールの token 管理） |
+| 公開 CRUD | `src/Quiver/IGraphTransaction.cs`（`IReadTransaction` / `IWriteTransaction`）、`TransactionHandles.cs`、`ISchemaApi.cs`（`ISchemaCatalog` / `ISchemaEditor`） |
 | クエリ | `src/Quiver/Operators/`（`AllNexusesScan` / `ExpandToNexus` / `ExpandMembers` / `CoMembership` の各 operator）、`src/Quiver/Query/PhysicalPlanner.cs` |
 | DSL / Match | `src/Quiver/Client/GraphTraversalSource.cs`、`GraphTraversal.cs`、`Match/GraphPattern.cs`（`NexusPattern`） |
 | SourceGen | `src/Quiver.SourceGen/GraphNexusGenerator.cs` / `GraphNexusModel.cs` / `GraphNexusEmitter.cs`、属性は `src/Quiver/Client/NexusAttribute.cs` |

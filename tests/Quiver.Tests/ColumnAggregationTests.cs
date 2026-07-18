@@ -34,7 +34,7 @@ public sealed class ColumnAggregationTests : IDisposable
     public void Vertex_int_aggregation_column_path_equals_row_path()
     {
         using var db = QuiverDatabase.Open(_path);
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             foreach (var v in new[] { 3, 7, 11, 20 })
             {
@@ -67,7 +67,7 @@ public sealed class ColumnAggregationTests : IDisposable
     public void Vertex_double_aggregation_column_path_equals_row_path()
     {
         using var db = QuiverDatabase.Open(_path);
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             foreach (var v in new[] { 1.5, 2.25, -0.75 })
             {
@@ -94,7 +94,7 @@ public sealed class ColumnAggregationTests : IDisposable
     public void Edge_aggregation_column_path_equals_row_path()
     {
         using var db = QuiverDatabase.Open(_path);
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var a = tx.CreateVertex("A");
             var b = tx.CreateVertex("B");
@@ -107,18 +107,18 @@ public sealed class ColumnAggregationTests : IDisposable
         }
         db.CreateColumn(EntityKind.Edge, "weight").Should().BeTrue();
 
-        using (var tx = db.BeginReadOnlyTransaction())
+        using (var tx = db.BeginReadTransaction())
         {
-            var g = tx.G(db.Schema);
+            var g = tx.Query;
             g.Edges().SumLong("weight").Should().Be(40);
             g.Edges().Max("weight").Should().Be(25);
             g.Edges().ToList().Should().HaveCount(3); // 全 edge 列挙
         }
 
         db.DropColumn(EntityKind.Edge, "weight").Should().BeTrue();
-        using (var tx = db.BeginReadOnlyTransaction())
+        using (var tx = db.BeginReadTransaction())
         {
-            var g = tx.G(db.Schema);
+            var g = tx.Query;
             g.Edges().SumLong("weight").Should().Be(40); // row path 同値
             g.Edges().Max("weight").Should().Be(25);
         }
@@ -128,7 +128,7 @@ public sealed class ColumnAggregationTests : IDisposable
     public void Filtered_input_falls_back_to_row_path_and_is_correct()
     {
         using var db = QuiverDatabase.Open(_path);
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var p1 = tx.CreateVertex("Person"); tx.SetProperty(p1, "age", PropertyValue.FromInt64(30));
             var p2 = tx.CreateVertex("Person"); tx.SetProperty(p2, "age", PropertyValue.FromInt64(40));
@@ -137,8 +137,8 @@ public sealed class ColumnAggregationTests : IDisposable
         }
         db.CreateColumn(EntityKind.Vertex, "age").Should().BeTrue();
 
-        using var tx2 = db.BeginReadOnlyTransaction();
-        var g = tx2.G(db.Schema);
+        using var tx2 = db.BeginReadTransaction();
+        var g = tx2.Query;
         // 全件 (列スキャン): 30+40+100 = 170。
         g.Vertices().SumLong("age").Should().Be(170);
         // label フィルタ付き (row path フォールバック): Person のみ 70。
@@ -150,20 +150,20 @@ public sealed class ColumnAggregationTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path);
         db.CreateColumn(EntityKind.Vertex, "score").Should().BeTrue();
-        using (var tx = db.BeginTransaction())
+        using (var tx = db.BeginWriteTransaction())
         {
             var n1 = tx.CreateVertex("X"); tx.SetProperty(n1, "score", PropertyValue.FromInt64(100));
             var n2 = tx.CreateVertex("X"); tx.SetProperty(n2, "score", PropertyValue.FromInt64(50));
             tx.Commit();
         }
-        using var tx2 = db.BeginReadOnlyTransaction();
-        tx2.G(db.Schema).Vertices().SumLong("score").Should().Be(150);
+        using var tx2 = db.BeginReadTransaction();
+        tx2.Query.Vertices().SumLong("score").Should().Be(150);
     }
 
     private static (long Sum, double SumD, double? Max, double? Min, double? Mean) VertexAgg(QuiverDatabase db, string key)
     {
-        using var tx = db.BeginReadOnlyTransaction();
-        var g = tx.G(db.Schema);
+        using var tx = db.BeginReadTransaction();
+        var g = tx.Query;
         return (
             g.Vertices().SumLong(key),
             g.Vertices().Sum(key),

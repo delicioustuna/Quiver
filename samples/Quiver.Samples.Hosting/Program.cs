@@ -36,7 +36,7 @@ app.MapPost("/vertices", (CreateVertexRequest? req, QuiverDatabase db) =>
 {
     if (req is null || string.IsNullOrEmpty(req.Label))
         return Results.BadRequest(new { error = "label is required" });
-    using var tx = db.BeginTransaction();
+    using var tx = db.BeginWriteTransaction();
     var id = tx.CreateVertex(req.Label);
     if (!string.IsNullOrEmpty(req.Name))
         tx.SetProperty(id, "name", PropertyValue.FromString(req.Name));
@@ -46,7 +46,7 @@ app.MapPost("/vertices", (CreateVertexRequest? req, QuiverDatabase db) =>
 
 app.MapGet("/vertices/{id:long}", (long id, QuiverDatabase db) =>
 {
-    using var tx = db.BeginReadOnlyTransaction();
+    using var tx = db.BeginReadTransaction();
     var nid = new VertexId(id);
     // HWM 超 / 負 ID は安全にreturn される。
     if (!tx.VertexExists(nid))
@@ -59,7 +59,7 @@ app.MapGet("/vertices/{id:long}", (long id, QuiverDatabase db) =>
 
 app.MapDelete("/vertices/{id:long}", (long id, QuiverDatabase db) =>
 {
-    using var tx = db.BeginTransaction();
+    using var tx = db.BeginWriteTransaction();
     var nid = new VertexId(id);
     if (!tx.VertexExists(nid))
         return Results.NotFound();
@@ -72,7 +72,7 @@ app.MapPost("/vertices/{id:long}/properties", (long id, SetPropertyRequest? req,
 {
     if (req is null || string.IsNullOrEmpty(req.Key))
         return Results.BadRequest(new { error = "key is required" });
-    using var tx = db.BeginTransaction();
+    using var tx = db.BeginWriteTransaction();
     var nid = new VertexId(id);
     if (!tx.VertexExists(nid))
         return Results.NotFound();
@@ -85,7 +85,7 @@ app.MapPost("/edges", (CreateEdgeRequest? req, QuiverDatabase db) =>
 {
     if (req is null || string.IsNullOrEmpty(req.Type))
         return Results.BadRequest(new { error = "type is required" });
-    using var tx = db.BeginTransaction();
+    using var tx = db.BeginWriteTransaction();
     var src = new VertexId(req.Source);
     var tgt = new VertexId(req.Target);
     if (!tx.VertexExists(src) || !tx.VertexExists(tgt))
@@ -98,9 +98,9 @@ app.MapPost("/edges", (CreateEdgeRequest? req, QuiverDatabase db) =>
 
 app.MapGet("/edges/{id:long}", (long id, QuiverDatabase db) =>
 {
-    using var tx = db.BeginReadOnlyTransaction();
+    using var tx = db.BeginReadTransaction();
     // GraphTransaction には EdgeExists が無いので Stats / VertexExists 系のみ。
-    // ここではVertexと同じ HWM 安全契約を期待するが、現状の IGraphTransaction には
+    // ここではVertexと同じ HWM 安全契約を期待するが、現状の IWriteTransaction には
     // EdgeExists API が無いので存在チェックは sample 範囲では省略する。
     // (将来 API 追加時にここを補強する)
     _ = tx;

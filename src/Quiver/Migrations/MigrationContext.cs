@@ -5,8 +5,8 @@ namespace Quiver.Migrations;
 
 internal sealed class MigrationContext : IMigrationContext
 {
-    public IGraphTransaction Transaction { get; }
-    public ISchemaApi Schema { get; }
+    public IWriteTransaction Transaction { get; }
+    public ISchemaEditor Schema { get; }
     public string MigrationId { get; }
 
     // スキーマミューテーションを <see cref="Transaction"/> の rollback と整合させるための
@@ -16,7 +16,7 @@ internal sealed class MigrationContext : IMigrationContext
     private readonly List<Action> _undoActions = [];
     private bool _hooksRegistered;
 
-    internal MigrationContext(IGraphTransaction tx, ISchemaApi schema, string migrationId)
+    internal MigrationContext(IWriteTransaction tx, ISchemaEditor schema, string migrationId)
     {
         Transaction = tx;
         Schema = schema;
@@ -95,27 +95,23 @@ internal sealed class MigrationContext : IMigrationContext
         // 既存索引に対する AddIndex は no-op。その場合 DropIndex undo を
         // 登録すると rollback で pre-existing な索引が消える corruption になる。
         bool existedBefore = Schema.IndexExists(indexName);
-        Schema.CreateIndex(indexName, label, propertyKey, kind);
+        Schema.CreateIndex(new ScalarIndexDefinition(
+            indexName,
+            new PropertyTarget(PropertyOwnerKind.Vertex, propertyKey, label),
+            kind));
         if (!existedBefore) _undoActions.Add(() => Schema.DropIndex(indexName));
     }
 
     public void DropIndex(string indexName)
-    {
-        // DropIndex は索引ファイルを物理削除するため transactional rollback できない。
-        // migrations を書く側で「失敗しうる重い処理の後」に置く / または rebuild migration として
-        // 設計する責任がある点を IMigrationContext.DropIndex の doc で明記。
-        Schema.DropIndex(indexName);
-    }
+        => Schema.DropIndex(indexName);
 
     public void ForEachVertex(string label, Action<VertexId> action)
     {
         ArgumentNullException.ThrowIfNull(action);
         ArgumentException.ThrowIfNullOrEmpty(label);
         var labelId = Schema.GetOrCreateLabel(label);
-        if (Transaction is not GraphTransaction gtx)
-            throw new InvalidOperationException(
-                "MigrationContext.ForEachVertex requires the default GraphTransaction implementation.");
-        foreach (var vertexId in gtx.Access.ScanVertices(gtx.Inner, labelId))
+        IReadTransactionInternal transaction = Transaction.AsInternal();
+        foreach (var vertexId in transaction.Access.ScanVertices(transaction.Inner, labelId))
             action(vertexId);
     }
 }

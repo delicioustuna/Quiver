@@ -200,19 +200,29 @@ internal sealed class PropertyVersionStore : IPropertyStore, ITransactionPropert
     public PropertyVersionRecord Read(EntityRef owner, PropertyVersionRef version)
         => ReadCore(owner, version, LatestVisible, applyVisibility: true);
 
+    public PropertyVersionRecord Read(PropertyVersionRef version)
+        => ReadCore(null, version, LatestVisible, applyVisibility: true);
+
     public PropertyVersionRecord Read(
         EntityRef owner,
         PropertyVersionRef version,
         VersionVisible visibility)
         => ReadCore(owner, version, visibility, applyVisibility: true);
 
+    public PropertyVersionRecord Read(
+        PropertyVersionRef version,
+        VersionVisible visibility)
+        => ReadCore(null, version, visibility, applyVisibility: true);
+
     private PropertyVersionRecord ReadCore(
-        EntityRef owner,
+        EntityRef? expectedOwner,
         PropertyVersionRef version,
         VersionVisible visibility,
         bool applyVisibility)
     {
-        if (!owner.IsValid || !version.IsValid || version.Sequence >= _hwm)
+        if ((expectedOwner.HasValue && !expectedOwner.Value.IsValid)
+            || !version.IsValid
+            || version.Sequence >= _hwm)
             return Missing(version);
 
         long sequence = version.Sequence;
@@ -250,9 +260,9 @@ internal sealed class PropertyVersionStore : IPropertyStore, ITransactionPropert
             return Missing(actualVersion);
 
         EntityRef storedOwner = DecodeOwner(packedOwner);
-        if (storedOwner != owner)
+        if (expectedOwner.HasValue && storedOwner != expectedOwner.Value)
             throw new CorruptionException(
-                $"Property version {sequence} belongs to {storedOwner.Kind}:{storedOwner.Value}, not {owner.Kind}:{owner.Value}.");
+                $"Property version {sequence} belongs to {storedOwner.Kind}:{storedOwner.Value}, not {expectedOwner.Value.Kind}:{expectedOwner.Value.Value}.");
 
         var address = new PropertyAddress(storedOwner, new PropertyKeyId(keyId));
         var previous = Materialize(previousSequence);

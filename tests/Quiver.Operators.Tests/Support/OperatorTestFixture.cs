@@ -10,7 +10,7 @@ namespace Quiver.Query.Physical.Tests.Support;
 /// 各インスタンスは %TEMP% 配下に新しいオンディスクデータベースを開き、
 /// 破棄時にディレクトリを削除する。
 /// グラフが不要なテストは <see cref="OpenEmpty"/> を使い、
-/// 初期データが必要なテストは <see cref="Open(Action{IGraphTransaction})"/> に
+/// 初期データが必要なテストは <see cref="Open(Action{IWriteTransaction})"/> に
 /// シード処理を渡す。
 /// </summary>
 internal sealed class OperatorTestFixture : IDisposable
@@ -31,15 +31,30 @@ internal sealed class OperatorTestFixture : IDisposable
         return new OperatorTestFixture(dir, db);
     }
 
-    public static OperatorTestFixture Open(Action<IGraphTransaction> seed, string tag = "")
+    public static OperatorTestFixture Open(Action<IWriteTransaction> seed, string tag = "")
     {
         var fx = OpenEmpty(tag);
-        using (var tx = fx.Db.BeginTransaction())
+        using (var tx = fx.Db.BeginWriteTransaction())
         {
             seed(tx);
             tx.Commit();
         }
         return fx;
+    }
+
+    public TResult EditSchema<TResult>(Func<ISchemaEditor, TResult> edit)
+    {
+        using var tx = Db.BeginWriteTransaction();
+        TResult result = edit(tx.EditSchema);
+        tx.Commit();
+        return result;
+    }
+
+    public void EditSchema(Action<ISchemaEditor> edit)
+    {
+        using var tx = Db.BeginWriteTransaction();
+        edit(tx.EditSchema);
+        tx.Commit();
     }
 
     public void Dispose()

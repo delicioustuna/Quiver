@@ -14,7 +14,7 @@ namespace Quiver.Query.Optimizer;
 internal static class PhysicalPlanner
 {
     /// <summary>論理プランツリーを物理オペレータツリーへ変換する。</summary>
-    public static IPhysicalOperator Plan(LogicalOp op, ISchemaApi schema) => op switch
+    public static IPhysicalOperator Plan(LogicalOp op, ISchemaCatalog schema) => op switch
     {
         ScanOp s                  => PlanScan(s, schema),
         VertexSeedOp n              => n.Ids.Length == 1
@@ -34,7 +34,7 @@ internal static class PhysicalPlanner
         ApplyDyadicOp ad          => PlanApplyDyadic(ad, schema),
         PropertyLookupOp pl       => new PropertyLookupOperator(
                                         Plan(pl.Source, schema), pl.Source.CurrentEntityColumn,
-                                        schema.GetOrCreatePropertyKey(pl.Key), pl.Key,
+                                        schema.ResolvePropertyKey(pl.Key), pl.Key,
                                         PropertyTypeFlags.Scalar | PropertyTypeFlags.FloatArray, pl.Kind),
         LabelNameLookupOp ln      => new LabelNameLookupOperator(
                                         Plan(ln.Source, schema), ln.VertexColumn, schema.GetLabelName),
@@ -47,7 +47,7 @@ internal static class PhysicalPlanner
         _ => throw new NotSupportedException($"未対応の LogicalOp: {op.GetType().Name}"),
     };
 
-    private static IPhysicalOperator PlanScan(ScanOp s, ISchemaApi schema)
+    private static IPhysicalOperator PlanScan(ScanOp s, ISchemaCatalog schema)
     {
         if (s.Kind == EntityKind.Nexus)
             return new AllNexusesScanOperator();
@@ -58,15 +58,15 @@ internal static class PhysicalPlanner
         return new AllVerticesScanOperator();
     }
 
-    private static IPhysicalOperator PlanExpand(ExpandOp e, ISchemaApi schema)
+    private static IPhysicalOperator PlanExpand(ExpandOp e, ISchemaCatalog schema)
     {
-        EdgeTypeId? typeId = e.Type != null ? schema.GetOrCreateEdgeType(e.Type) : null;
+        EdgeTypeId? typeId = e.Type != null ? schema.ResolveEdgeType(e.Type) : null;
         return new ExpandOperator(Plan(e.Source, schema), e.SourceColumn, e.Direction, typeId, e.Mode, e.Carry);
     }
 
     private static IPhysicalOperator PlanExpandToNexus(
         ExpandToNexusOp e,
-        ISchemaApi schema)
+        ISchemaCatalog schema)
         => new ExpandToNexusOperator(
             Plan(e.Source, schema),
             e.SourceVertexColumn,
@@ -76,7 +76,7 @@ internal static class PhysicalPlanner
 
     private static IPhysicalOperator PlanExpandMembers(
         ExpandMembersOp e,
-        ISchemaApi schema)
+        ISchemaCatalog schema)
     {
         var fallback = new ExpandMembersOperator(
             Plan(e.Source, schema),
@@ -110,7 +110,7 @@ internal static class PhysicalPlanner
             e.Carry);
     }
 
-    private static NexusTypeId? ResolveNexusType(string? name, ISchemaApi schema)
+    private static NexusTypeId? ResolveNexusType(string? name, ISchemaCatalog schema)
     {
         if (name == null) return null;
         return schema.TryGetNexusTypeId(name, out var id)
@@ -118,7 +118,7 @@ internal static class PhysicalPlanner
             : NexusTypeId.Invalid;
     }
 
-    private static RoleId? ResolveRole(string? name, ISchemaApi schema)
+    private static RoleId? ResolveRole(string? name, ISchemaCatalog schema)
     {
         if (name == null) return null;
         return schema is INexusSchemaResolver resolver
@@ -127,21 +127,21 @@ internal static class PhysicalPlanner
                 : RoleId.Invalid;
     }
 
-    private static IPhysicalOperator PlanVarLenExpand(VarLenExpandOp v, ISchemaApi schema)
+    private static IPhysicalOperator PlanVarLenExpand(VarLenExpandOp v, ISchemaCatalog schema)
     {
-        EdgeTypeId? typeId = v.Type != null ? schema.GetOrCreateEdgeType(v.Type) : null;
+        EdgeTypeId? typeId = v.Type != null ? schema.ResolveEdgeType(v.Type) : null;
         return new VariableLengthExpandOperator(
             Plan(v.Source, schema), v.Source.CurrentEntityColumn, v.Direction, typeId, v.MinHops, v.MaxHops);
     }
 
-    private static IPhysicalOperator PlanPath(PathOp p, ISchemaApi schema)
+    private static IPhysicalOperator PlanPath(PathOp p, ISchemaCatalog schema)
     {
-        EdgeTypeId? typeId = p.Type != null ? schema.GetOrCreateEdgeType(p.Type) : null;
+        EdgeTypeId? typeId = p.Type != null ? schema.ResolveEdgeType(p.Type) : null;
         var pair = new PairWithConstantOperator(Plan(p.Source, schema), p.Source.CurrentEntityColumn, p.Target);
         return new ShortestPathOperator(pair, 0, 1, p.Direction, typeId, p.MaxDistance);
     }
 
-    private static IPhysicalOperator PlanKnn(KnnOp k, ISchemaApi schema)
+    private static IPhysicalOperator PlanKnn(KnnOp k, ISchemaCatalog schema)
     {
         if (k.Candidate is null)
             return new KnnVertexSourceOperator(k.IndexName, k.Query, k.K, k.Options);
@@ -150,7 +150,7 @@ internal static class PhysicalPlanner
             k.IndexName, k.Query, k.K, k.Options);
     }
 
-    private static IPhysicalOperator PlanFullTextScan(FullTextScanOp ft, ISchemaApi schema)
+    private static IPhysicalOperator PlanFullTextScan(FullTextScanOp ft, ISchemaCatalog schema)
     {
         // text-first (Candidate=null) / graph-first (Candidate!=null = 候補集合内 BM25)。
         if (ft.Candidate is null)
@@ -160,7 +160,7 @@ internal static class PhysicalPlanner
             ft.IndexName, ft.QueryText, ft.K, ft.Corpus);
     }
 
-    private static IPhysicalOperator PlanFusion(FusionOp fu, ISchemaApi schema)
+    private static IPhysicalOperator PlanFusion(FusionOp fu, ISchemaCatalog schema)
     {
         // Phase 1 は RRF のみ。enum 拡張時に他戦略の物理化をここへ足す。
         if (fu.Strategy != FusionStrategy.Rrf)
@@ -176,11 +176,11 @@ internal static class PhysicalPlanner
         return new FusionOperator(children, columns, fu.K);
     }
 
-    private static IPhysicalOperator PlanSort(SortOp so, ISchemaApi schema)
+    private static IPhysicalOperator PlanSort(SortOp so, ISchemaCatalog schema)
     {
         if (so.PropertyKey != null)
         {
-            var keyId = schema.GetOrCreatePropertyKey(so.PropertyKey);
+            var keyId = schema.ResolvePropertyKey(so.PropertyKey);
             var withProp = new PropertyLookupOperator(
                 Plan(so.Source, schema), so.Source.CurrentEntityColumn, keyId, so.PropertyKey);
             return new SortOperator(withProp, so.SortColumn, so.Descending);
@@ -188,7 +188,7 @@ internal static class PhysicalPlanner
         return new SortOperator(Plan(so.Source, schema), so.SortColumn, so.Descending);
     }
 
-    private static IPhysicalOperator PlanApplyDyadic(ApplyDyadicOp ad, ISchemaApi schema)
+    private static IPhysicalOperator PlanApplyDyadic(ApplyDyadicOp ad, ISchemaCatalog schema)
     {
         IPhysicalOperator? bSource = null;
         int bFloatColumn = 0;
@@ -212,7 +212,7 @@ internal static class PhysicalPlanner
             ad.Oversample);
     }
 
-    private static IPhysicalOperator PlanBranch(BranchOp b, ISchemaApi schema)
+    private static IPhysicalOperator PlanBranch(BranchOp b, ISchemaCatalog schema)
     {
         var (probes, branches) = b.BuildBranches(schema);
         var src = Plan(b.Source, schema);

@@ -6,7 +6,7 @@ VertexとEdgeの基本的な作成・読み出し・更新・削除を一通り�
 
 ```csharp
 using var db = QuiverDatabase.Open("./mygraph");
-using var tx = db.BeginTransaction();
+using var tx = db.BeginWriteTransaction();
 
 // ── Create ────────────────────────────
 var alice = tx.CreateVertex("Person");
