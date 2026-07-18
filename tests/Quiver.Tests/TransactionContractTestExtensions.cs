@@ -4,7 +4,7 @@ using Quiver.Storage.Records;
 
 namespace Quiver.Tests;
 
-internal static class Wave6TestExtensions
+internal static class TransactionContractTestExtensions
 {
     internal static TResult EditSchema<TResult>(
         this QuiverDatabase database,

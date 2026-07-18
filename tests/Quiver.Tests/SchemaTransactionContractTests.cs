@@ -6,13 +6,13 @@ using Xunit;
 
 namespace Quiver.Tests;
 
-public sealed class Wave6SchemaTransactionTests : IDisposable
+public sealed class SchemaTransactionContractTests : IDisposable
 {
     private readonly string _directory =
-        Path.Combine(Path.GetTempPath(), "quiver_wave6_schema_" + Guid.NewGuid().ToString("N"));
+        Path.Combine(Path.GetTempPath(), "quiver_schema_transaction_" + Guid.NewGuid().ToString("N"));
     private readonly string _path;
 
-    public Wave6SchemaTransactionTests()
+    public SchemaTransactionContractTests()
     {
         _path = Path.Combine(_directory, "graph.quiver");
     }

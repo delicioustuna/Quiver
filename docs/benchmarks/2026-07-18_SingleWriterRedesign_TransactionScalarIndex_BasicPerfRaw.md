@@ -1,6 +1,6 @@
-# Single Writer 再設計 Wave 6 BasicPerf 生出力
+# Single Writer 再設計 transaction/scalar index cutover BasicPerf 生出力
 
-- commit under test：`f1909daed4dc5289d1f8fe5aa4c8c2d09a79005f` に Wave 6 の未コミット実装を加えた作業ツリー。
+- commit under test：`2145b96b463d8880a042086638681e9a1e7d9c53` の実装内容を含む作業ツリー。
 - 実行日：2026-07-18（Asia/Tokyo）。
 - OS と runtime：Windows、.NET 10.0.9、logical processors 16。
 - 実行コマンド：`dotnet run -c Release --project benchmarks\Quiver.Benchmarks -- --basic-perf`。
@@ -11,9 +11,9 @@
 ## 判定
 
 baseline と同じ CRUD、durable commit、warm read、BFS、query wrapper、bulk/transaction workload を判定対象とする。
-各値は latency または経過時間の `Wave 6 / baseline` を計算し、1.20 以下を合格とする。
+各値は latency または経過時間の `current / baseline` を計算し、1.20 以下を合格とする。
 
-| workload | baseline | Wave 6 | 比率 | 判定 |
+| workload | baseline | current | 比率 | 判定 |
 |---|---:|---:|---:|---|
 | CreateVertex | 12.960 us/op | 13.040 us/op | 1.006 | PASS |
 | CreateVertex + SetProperty | 17.700 us/op | 20.080 us/op | 1.134 | PASS |

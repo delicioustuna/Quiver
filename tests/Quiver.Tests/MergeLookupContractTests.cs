@@ -4,13 +4,13 @@ using Xunit;
 
 namespace Quiver.Tests;
 
-public sealed class Wave6MergeLookupTests : IDisposable
+public sealed class MergeLookupContractTests : IDisposable
 {
     private readonly string _directory =
-        Path.Combine(Path.GetTempPath(), "quiver_wave6_merge_" + Guid.NewGuid().ToString("N"));
+        Path.Combine(Path.GetTempPath(), "quiver_merge_lookup_" + Guid.NewGuid().ToString("N"));
     private readonly string _path;
 
-    public Wave6MergeLookupTests()
+    public MergeLookupContractTests()
     {
         _path = Path.Combine(_directory, "graph.quiver");
     }

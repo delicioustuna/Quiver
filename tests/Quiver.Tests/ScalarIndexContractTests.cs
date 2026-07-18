@@ -8,16 +8,16 @@ using Xunit;
 
 namespace Quiver.Tests;
 
-public sealed class Wave6ScalarIndexContractTests : IDisposable
+public sealed class ScalarIndexContractTests : IDisposable
 {
     private readonly string _directory;
     private readonly string _path;
 
-    public Wave6ScalarIndexContractTests()
+    public ScalarIndexContractTests()
     {
         _directory = Path.Combine(
             Path.GetTempPath(),
-            "quiver_wave6_scalar_" + Guid.NewGuid().ToString("N"));
+            "quiver_scalar_index_" + Guid.NewGuid().ToString("N"));
         _path = Path.Combine(_directory, "graph.quiver");
     }
 
@@ -453,19 +453,19 @@ public sealed class Wave6ScalarIndexContractTests : IDisposable
         {
             using var bulk = db.BeginStreamingBulkLoad();
             bulk.AppendVertex(vertex, label);
-            bulk.AppendProperty(vertex, key, PropertyValue.FromString("Wave 6"));
+            bulk.AppendProperty(vertex, key, PropertyValue.FromString("Indexed document"));
             bulk.Commit();
         }
         else
         {
             using var bulk = db.BeginBulkLoad();
             bulk.AppendVertex(vertex, label);
-            bulk.AppendProperty(vertex, key, PropertyValue.FromString("Wave 6"));
+            bulk.AppendProperty(vertex, key, PropertyValue.FromString("Indexed document"));
             bulk.Commit();
         }
 
         using var read = db.BeginReadTransaction();
-        Seek(read, "idx_document_title", "Wave 6")
+        Seek(read, "idx_document_title", "Indexed document")
             .Should().Equal(EntityRef.From(vertex));
         read.Schema.ListIndexes().Single(x => x.Name == "idx_document_title")
             .State.Should().Be(IndexLifecycleState.Ready);

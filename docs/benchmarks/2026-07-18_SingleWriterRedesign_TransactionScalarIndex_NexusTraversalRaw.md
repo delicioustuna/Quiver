@@ -1,6 +1,6 @@
-# Single Writer 再設計 Wave 6 Nexus traversal 生出力
+# Single Writer 再設計 transaction/scalar index cutover Nexus traversal 生出力
 
-- commit under test：`f1909daed4dc5289d1f8fe5aa4c8c2d09a79005f` に Wave 6 の未コミット実装を加えた作業ツリー。
+- commit under test：`2145b96b463d8880a042086638681e9a1e7d9c53` の実装内容を含む作業ツリー。
 - 実行日：2026-07-18（Asia/Tokyo）。
 - OS と runtime：Windows、.NET 10.0.9、logical processors 16。
 - 実行コマンド：`dotnet run -c Release --project benchmarks\Quiver.Benchmarks -- --nexus-traversal`。

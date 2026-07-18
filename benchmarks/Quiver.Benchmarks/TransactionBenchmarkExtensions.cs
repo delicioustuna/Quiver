@@ -1,6 +1,6 @@
 namespace Quiver.Benchmarks;
 
-internal static class Wave6BenchmarkExtensions
+internal static class TransactionBenchmarkExtensions
 {
     internal static TResult EditSchema<TResult>(
         this QuiverDatabase database,

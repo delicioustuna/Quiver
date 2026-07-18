@@ -101,4 +101,4 @@ mergeとtagはユーザの明示承認を別々に得る。
 - solution build は 0 warnings、0 errors で成功した。
 - solution test は全 test project で成功した。
 - BasicPerf の最大 baseline 比は 1.134x、述語付き 2-hop p50 は 1.2680 ms、Nexus view/binary の最大比は 1.09x で全 gate に合格した。
-- 生出力は `docs/benchmarks/2026-07-18_SingleWriterRedesign_Wave6_*Raw.md` に保存した。
+- 生出力は `docs/benchmarks/2026-07-18_SingleWriterRedesign_TransactionScalarIndex_*Raw.md` に保存した。

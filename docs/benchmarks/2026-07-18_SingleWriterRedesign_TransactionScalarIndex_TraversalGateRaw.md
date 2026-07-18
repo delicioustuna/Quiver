@@ -1,12 +1,12 @@
-# Single Writer 再設計 Wave 6 述語付き 2-hop 生出力
+# Single Writer 再設計 transaction/scalar index cutover 述語付き 2-hop 生出力
 
-- commit under test：`f1909daed4dc5289d1f8fe5aa4c8c2d09a79005f` に Wave 6 の未コミット実装を加えた作業ツリー。
+- commit under test：`2145b96b463d8880a042086638681e9a1e7d9c53` の実装内容を含む作業ツリー。
 - 実行日：2026-07-18（Asia/Tokyo）。
 - OS と runtime：Windows、.NET 10.0.9、logical processors 16。
 
 ## runner の訂正
 
-Wave 6 着手指示書に記載した `--clean-slate-aries-baseline` は、Wave 5 で `--clean-slate-page-wal-baseline` へ置換済みであり、現行の実行入口には存在しない。
+測定計画に記載されていた `--clean-slate-aries-baseline` は、前段で `--clean-slate-page-wal-baseline` へ置換済みであり、現行の実行入口には存在しない。
 旧コマンドが終了コード 0 と usage を返すだけで測定しないことを確認した。
 現行 row-path の生値は `--clean-slate-page-wal-baseline` で保存し、1.8982 ms の product-path gate は同じ形状を検証する `--clean-slate-csr-product-integration` で判定する。
 
