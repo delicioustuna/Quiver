@@ -9,7 +9,7 @@ namespace Quiver.Tests;
 
 /// <summary>
 /// 全文検索の前方一致クエリ (<c>g.Search("idx", "quiv*", k)</c>) を検証する。
-/// ワイルドカード検出、Postings B+Tree に対する接頭辞展開、展開語の BM25 採点を
+/// ワイルドカード検出、visible term dictionaryに対する接頭辞展開、展開語の BM25 採点を
 /// text-first と graph-first の両経路で確認する。
 /// </summary>
 public sealed class PrefixSearchTests : IDisposable
@@ -22,7 +22,7 @@ public sealed class PrefixSearchTests : IDisposable
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_prefix_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
-        _db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
     }
 
     public void Dispose()

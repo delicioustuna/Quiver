@@ -91,8 +91,6 @@ internal sealed class StubSchemaApi : ISchemaEditor, INexusSchemaResolver
         info = default!;
         return false;
     }
-    public void CreateFullTextIndex(string indexName, string label, string propertyKey, FullTextIndexOptions? options = null) { }
-    public IReadOnlyList<FullTextIndexInfo> ListFullTextIndexes() => [];
     public bool RenameLabel(string oldName, string newName) => false;
     public bool RenamePropertyKey(string oldName, string newName) => false;
     public bool RenameEdgeType(string oldName, string newName) => false;

@@ -2,8 +2,8 @@
 
 > as-built 仕様（QUIVER-SW family version 2、2026-07-18）
 >
-> **current (as-built)**: identity、Single Writer + Snapshot Readers、no-steal page-WAL、redo-only recovery、統一スカラ索引、トランザクション境界付き query を実装している。
-> 後続の vector と全文検索統合は [再設計正本](../../plans/single-writer-redesign.md) に従って段階的に実装する。
+> **current (as-built)**: identity、Single Writer + Snapshot Readers、no-steal page-WAL、redo-only recovery、統一スカラ索引、immutable vector/full-text segment、トランザクション境界付き query を実装している。
+> 後続の segment GC と maintenance 統合は [再設計正本](../../plans/single-writer-redesign.md) に従って段階的に実装する。
 
 ## ポジショニング {#positioning}
 
@@ -60,7 +60,7 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 │  ├─ PropertyVersionStore / payload stores       │
 │  ├─ Incidence / AdjacencySegment stores         │
 │  ├─ B+Tree indexes                              │
-│  ├─ FullTextIndex (postings + norms B+Trees)    │
+│  ├─ Immutable full-text segments + BM25/WAND    │
 │  └─ Immutable vector segments + HNSW artifacts  │
 └─────────────────────────────────────────────────┘
 ```

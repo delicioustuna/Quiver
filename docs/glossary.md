@@ -76,7 +76,8 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | 用語 | 定義 |
 |---|---|
 | **B+Tree インデックス** | プロパティの完全一致検索と範囲検索に使う導出索引。`[Indexed]` 属性または `ISchemaEditor.CreateIndex` で作成する |
-| **FullTextIndex（全文インデックス）** | 転置インデックス（Postings B+Tree + Norms B+Tree）による全文検索機能。BM25 スコアリングを提供する |
+| **FullTextIndexDefinition（全文インデックス定義）** | `PropertyTarget`、tokenizer/filter、BM25 parameter、segment policyを統一schema catalogへ保存する定義 |
+| **全文 segment** | full typed owner identity、`PropertyVersionRef`、posting、norm、stats、tombstoneを保持するimmutable derived artifact |
 
 ## 全文検索
 
@@ -88,7 +89,7 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | **WAND (Weighted AND)** | Top-k 検索の早期終了アルゴリズム。term ごとの寄与上限を用いて候補をスキップする |
 | **MixedBigramTokenizer** | Quiver のデフォルトトークナイザ。CJK 文字は bigram 分解し、Latin 文字は空白区切りで小文字化する。2 つのモードを持つ（下記参照） |
 | **ユニグラム併用モード** | デフォルト（`mixed-bigram-unigram-v1`）。CJK ランのバイグラムに加えて各文字のユニグラムも放出する。1 文字の CJK 検索クエリが隣接文字に関わらずヒットする |
-| **バイグラム専用モード** | `mixed-bigram-v1`。CJK はバイグラムのみ。インデックスサイズが小さい代わりに 1 文字検索はプレフィクス展開（`粉*`）で代替する。`FullTextIndexOptions.TokenizerId` で明示指定する |
+| **バイグラム専用モード** | `mixed-bigram-v1`。CJK はバイグラムのみ。インデックスサイズが小さい代わりに 1 文字検索はプレフィクス展開（`粉*`）で代替する。`FullTextIndexDefinition.TokenizerId` で明示指定する |
 | **RRF (Reciprocal Rank Fusion)** | 複数のランク付きリストをマージするスコア融合手法。全文検索とベクトル検索のハイブリッド結合に使用する |
 
 ## ベクトル検索

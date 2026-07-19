@@ -80,7 +80,7 @@ internal static class Bm25Scorer
     /// </para>
     /// </summary>
     public static List<long> Rank(
-        FullTextIndex ft, ITokenizer tokenizer, string queryText,
+        FullTextSegmentSnapshot ft, ITokenizer tokenizer, string queryText,
         long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats = null)
     {
         var sink = new TermSink();
@@ -94,7 +94,7 @@ internal static class Bm25Scorer
     /// (プレフィックスワイルドカードをインデックスに対して展開済みの場合に使用)。
     /// </summary>
     public static List<long> RankTerms(
-        FullTextIndex ft, IReadOnlySet<string> queryTerms,
+        FullTextSegmentSnapshot ft, IReadOnlySet<string> queryTerms,
         long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats = null)
     {
         if (queryTerms.Count == 0) return new List<long>();
@@ -108,7 +108,7 @@ internal static class Bm25Scorer
     /// (<c>quiv*</c> のようなプレフィックス展開節で有用)。
     /// </summary>
     public static List<long> RankBoolean(
-        FullTextIndex ft, ParsedFtsQuery query,
+        FullTextSegmentSnapshot ft, ParsedFtsQuery query,
         long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats = null)
     {
         var allPositive = query.AllPositiveTerms();
@@ -139,11 +139,13 @@ internal static class Bm25Scorer
     }
 
     private static Dictionary<long, double> AccumulateScores(
-        FullTextIndex ft, IReadOnlySet<string> queryTerms,
+        FullTextSegmentSnapshot ft, IReadOnlySet<string> queryTerms,
         long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats)
     {
         var scores = new Dictionary<long, double>();
         var docLenCache = new Dictionary<long, int>();
+        double k1 = ft.Definition.K1;
+        double b = ft.Definition.B;
         foreach (var term in queryTerms)
         {
             var postings = ft.GetPostings(term);
@@ -159,15 +161,15 @@ internal static class Bm25Scorer
                     dl = ft.TryGetDocLength(eid, out var d) ? d : 0;
                     docLenCache[eid] = dl;
                 }
-                double denom = tf + K1 * (1.0 - B + (avgdl > 0 ? B * dl / avgdl : 0.0));
-                double contrib = denom > 0 ? idf * (tf * (K1 + 1.0)) / denom : 0.0;
+                double denom = tf + k1 * (1.0 - b + (avgdl > 0 ? b * dl / avgdl : 0.0));
+                double contrib = denom > 0 ? idf * (tf * (k1 + 1.0)) / denom : 0.0;
                 scores[eid] = scores.TryGetValue(eid, out var prev) ? prev + contrib : contrib;
             }
         }
         return scores;
     }
 
-    private static HashSet<long> CollectPostingEids(FullTextIndex ft, IReadOnlySet<string> terms)
+    private static HashSet<long> CollectPostingEids(FullTextSegmentSnapshot ft, IReadOnlySet<string> terms)
     {
         var eids = new HashSet<long>();
         foreach (var term in terms)
@@ -179,7 +181,7 @@ internal static class Bm25Scorer
     /// <summary>
     /// WAND document-at-a-time 枝刈りによる exact top-<paramref name="k"/> BM25。
     /// per-term スナップショット df + 上限を使い、k 番目のスコアを超えられない高 df 語の
-    /// posting をスキップし、遅れたカーソルを B+Tree <c>SeekTo</c> で前進させる。
+    /// posting をスキップし、遅れたimmutable postings cursorを <c>SeekTo</c> で前進させる。
     /// ランク済み packed entityId を返す。クエリ語が <paramref name="termStats"/> に無い場合は
     /// <c>null</c> を返し、呼び出し元が <see cref="Rank"/> にフォールバックする。
     /// <para>
@@ -189,7 +191,7 @@ internal static class Bm25Scorer
     /// </para>
     /// </summary>
     public static List<long>? RankWand(
-        FullTextIndex ft, ITokenizer tokenizer, string queryText,
+        FullTextSegmentSnapshot ft, ITokenizer tokenizer, string queryText,
         long n, double avgdl, Bm25TermStats termStats, int k, Func<long, bool>? isLive = null)
     {
         var sink = new TermSink();
@@ -203,11 +205,13 @@ internal static class Bm25Scorer
     /// (呼び出し元が <see cref="RankTerms"/> にフォールバック)。
     /// </summary>
     public static List<long>? RankWandTerms(
-        FullTextIndex ft, IReadOnlySet<string> queryTerms,
+        FullTextSegmentSnapshot ft, IReadOnlySet<string> queryTerms,
         long n, double avgdl, Bm25TermStats termStats, int k, Func<long, bool>? isLive = null)
     {
         if (queryTerms.Count == 0) return new List<long>();
 
+        double k1 = ft.Definition.K1;
+        double b = ft.Definition.B;
         var cursors = new List<WandTerm>(queryTerms.Count);
         foreach (var term in queryTerms)
         {
@@ -220,8 +224,8 @@ internal static class Bm25Scorer
             // idf*(K1+1) に収束し、lenNorm≥0 なので任意の tf/docLen に対し ≤ idf*(K1+1)。
             // snapshot の maxTf/minDocLen に依存しないため、snapshot 後にライブ index へ
             // 高 tf / 短文書が増えても上限が過小評価されず top-k を取りこぼさない。
-            double ub = idf * (K1 + 1.0);
-            var cur = ft.OpenPostingsCursor(Encoding.UTF8.GetBytes(term));
+            double ub = idf * (k1 + 1.0);
+            FullTextPostingsCursor cur = ft.OpenPostingsCursor(Encoding.UTF8.GetBytes(term));
             if (cur.MoveNext()) cursors.Add(new WandTerm(idf, ub, cur));
         }
         if (cursors.Count == 0) return new List<long>();
@@ -250,14 +254,14 @@ internal static class Bm25Scorer
             if (cursors[0].Cursor.CurrentEid == pivotEid)
             {
                 int docLen = ft.TryGetDocLength(pivotEid, out var dl) ? dl : 0;
-                double lenNorm = 1.0 - B + (avgdl > 0 ? B * docLen / avgdl : 0.0);
+                double lenNorm = 1.0 - b + (avgdl > 0 ? b * docLen / avgdl : 0.0);
                 double score = 0;
                 for (int i = 0; i < cursors.Count; i++)
                 {
                     if (cursors[i].Cursor.CurrentEid != pivotEid) continue;
                     int tf = cursors[i].Cursor.CurrentTf;
-                    double denom = tf + K1 * lenNorm;
-                    if (denom > 0) score += cursors[i].Idf * (tf * (K1 + 1.0)) / denom;
+                    double denom = tf + k1 * lenNorm;
+                    if (denom > 0) score += cursors[i].Idf * (tf * (k1 + 1.0)) / denom;
                     cursors[i].Cursor.MoveNext();
                 }
                 if (isLive is null || isLive(pivotEid))
@@ -278,7 +282,9 @@ internal static class Bm25Scorer
     /// それを使い (GraphStats 経路、O(N) norms スキャンを回避)、
     /// なければ norms summary へのフォールバック。
     /// </summary>
-    public static (long N, double Avgdl) ResolveCorpus(FullTextIndex ft, Bm25CorpusStats? corpus)
+    public static (long N, double Avgdl) ResolveCorpus(
+        FullTextSegmentSnapshot ft,
+        Bm25CorpusStats? corpus)
     {
         if (corpus is { DocumentCount: > 0 } c)
             return (c.DocumentCount, c.AverageDocLength);
@@ -303,14 +309,14 @@ internal static class Bm25Scorer
 
     private readonly struct WandTerm
     {
-        public WandTerm(double idf, double ub, PostingsCursor cursor)
+        public WandTerm(double idf, double ub, FullTextPostingsCursor cursor)
         {
             Idf = idf; Ub = ub; Cursor = cursor;
         }
 
         public double Idf { get; }
         public double Ub { get; }
-        public PostingsCursor Cursor { get; }
+        public FullTextPostingsCursor Cursor { get; }
     }
 
     /// <summary>

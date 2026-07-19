@@ -24,7 +24,10 @@ internal static class SchemaTool
         var edgeTypes = schema.ListEdgeTypes();
         var allPropKeys = schema.ListPropertyKeys();
         var indexes = schema.ListIndexes();
-        var ftIndexes = schema.ListFullTextIndexes();
+        var ftIndexes = indexes
+            .Select(static index => index.Definition)
+            .OfType<FullTextIndexDefinition>()
+            .ToList();
         var vecIndexes = indexes
             .Select(static index => index.Definition)
             .OfType<VectorIndexDefinition>()
@@ -51,8 +54,12 @@ internal static class SchemaTool
 
         foreach (var ftIdx in ftIndexes)
         {
-            if (vertexMap.TryGetValue(ftIdx.Label, out var entry))
-                entry.Indexes["fulltext"] = entry.Indexes.GetValueOrDefault("fulltext", []).Append(ftIdx.PropertyKey).ToList();
+            if (ftIdx.Target.Scope is { } scope
+                && vertexMap.TryGetValue(scope, out var entry))
+                entry.Indexes["fulltext"] = entry.Indexes
+                    .GetValueOrDefault("fulltext", [])
+                    .Append(ftIdx.Target.PropertyKey)
+                    .ToList();
         }
 
         // プロパティの名前と型を実データから推定する (下記メソッド参照)

@@ -228,6 +228,11 @@ sequenceDiagram
 `Commit` fsync 後に利用者へ例外を返す実装は、reopen で committed か aborted か曖昧になるため禁止する。
 fsync 後の in-memory publish が失敗した場合は database instance を faulted にし、再 open/recovery を要求する。durable commit 自体は取り消さない。
 
+immutable segment body は通常 page の before/after image と異なり、commit 後に上書きしない。
+segment body は WAL へ複製せず、checksum 付き append-only artifact として書いて fsync した後、その artifact ID、checksum、source high-water、`xmin/xmax` を持つ manifest だけを transaction-owned `PageImage` と strict `Commit` で primary mutation と同時に publish する。
+body fsync 前に manifest を publishしてはならない。
+body fsync 後かつ `Commit` 前の crash は未参照 orphan を残すだけであり、`Commit` 後の manifest は fsync 済みの完全な body だけを参照する。
+
 ### 4.3 recovery
 
 1. database magic、format family、page checksum を検証する。
@@ -266,6 +271,12 @@ fsync 後の in-memory publish が失敗した場合は database instance を fa
 **search**: snapshot から visible な segment の postings を WAND/BM25 で検索し top-k を mergeする。tombstone または不可視 property version を最後に除外する。N、df、総文書長は visible segment の統計を合算する。
 
 **merge/rebuild**: read snapshot から lease 外で immutable segment を構築する。構築後に writer lease を取得し、source manifest generation を再検証してから、旧 manifest の `xmax` と新 manifest の `xmin` を同一の短い commit で切り替える。generation が変わっていれば artifact を破棄して再試行する。これにより旧 reader は旧 segment、新 reader は新 segment を使える。現行の `FtLeafMutation` / `FtStructureImage` という例外 WAL は不要になる。
+
+**durability**: delta/merged segment body は checksum 付き append-only artifact として永続化し、body fsync 完了後にだけ versioned manifest を通常の write transaction で publish する。
+manifest は segment ID、checksum、source snapshot high-water、`xmin/xmax` を保持する。
+reopen は manifest から segment を開き、欠損または checksum 不一致の場合だけ `RebuildRequired` として primary text property から再構築する。
+primary 全走査から作る transaction-local artifact は破損時の fallback であり、正常 reopen の標準経路にしない。
+未参照 orphan と reader horizon を越えた旧 segment の物理回収は Wave 9 が担う。
 
 ## 5. ID / Entity / Property / IndexDefinition / VectorPayload モデル
 
@@ -749,7 +760,8 @@ Quiver 0.1.0 をローカル RAG バックエンドとして使用した結果�
 
 - mutable postings/norms tree と FT 専用 WAL recordsを削除する。
 - `FullTextIndexDefinition` を追加し、旧 `CreateFullTextIndex` と同じ Wave で置換する。
-- immutable delta segment、manifest、snapshot stats、merge/rebuild を追加する。
+- checksum 付き append-only immutable delta/merged segment body、transactional manifest、snapshot stats、merge/rebuild を追加する。
+- segment body は WAL へ複製せず、body fsync 後に artifact ID/checksum/source high-water を持つ manifest だけを primary mutation と同じ strict `Commit` で publish する。
 - immutable segment の重い構築は read snapshot で lease 外に行い、manifest publish だけを短い writer transaction にする。
 - text property update/delete を segment visibility で表す。
 - public full-text と hybrid result は snapshot と Generation の再検証後だけ返す。
@@ -843,7 +855,7 @@ Quiver 0.1.0 をローカル RAG バックエンドとして使用した結果�
 | full-text | `plans/clean-slate-redesign.md` | 4 segment p50 8.55 ms以下、BM25 strict scan と top-k 一致 |
 | vector | `plans/clean-slate-redesign.md` と RecallCheck | recall@10 0.95以上、segment merge 前後で結果集合一致 |
 | page-image WAL | `redesign-wave-4` と Wave 5 の同一 runner | RAG ingest amplification が同一環境の Wave 4 比1.00x以内。2026-07-17の参照値はWave 4が16.37x、Wave 5が16.26x。payload/index別内訳も記録 |
-| full-text segment WAL | `plans/clean-slate-redesign.md` | Wave 8でRAG ingest amplification 11.74x以下。payload/index別内訳も記録 |
+| full-text segment write | `plans/clean-slate-redesign.md` | Wave 8でRAG ingest WAL amplificationとsegment merge込み総write amplificationがそれぞれ11.74x以下。payload/manifest/segment body別内訳も記録 |
 | segment publish stall | Wave 7/8 の同一セッション比較 | lease 保持中 p99 が `WriterWaitTimeout` 既定値の10%以内。重い構築時間は含めない |
 | vacuum | correctness gate | long reader の snapshot を壊さず、reader 終了後に回収が前進する |
 
@@ -926,7 +938,7 @@ skill は実装者の入口である。
 | segment publish stall | artifact 構築中に writer lease を保持すると全 write が停止する | lease 外 build、manifest generation 再検証、publish p99 gate |
 | checkpoint stall | sharp checkpoint が長いと次 writer が timeout する | checkpoint duration と writer wait p99、dirty page 上限、chunk commit test |
 | vacuum と reader | 早い回収で旧 reader が freed page を読む | oldest snapshot horizon property/chaos test |
-| WAL 増幅 | page image + payload + segment が重なる | Wave 5のpage-image WALはWave 4同方式比1.00x、Wave 8のsegment WALは11.74x、primary/payload/index内訳 |
+| WAL / artifact 書込み増幅 | page image、payload、manifest、segment body が重なる | Wave 5のpage-image WALはWave 4同方式比1.00x、Wave 8はWALとsegment merge込み総writeを別々に11.74x以下、payload/manifest/body内訳 |
 | addon drift | Hosting/Rag/SourceGen が旧 API を隠れて保持する | solution build、samples、public API grep |
 
 各 Wave の merge 条件は、機能 test、crash test、baseline gate、as-built 更新の四つである。
@@ -986,7 +998,24 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 
 ## 16. decision log
 
-### 2026-07-17: page-image WAL と full-text segment WAL の増幅 gate 分離
+### 2026-07-19: immutable full-text segment のdurable bodyとmanifest publish
+
+- **背景**：Wave 8の最初の実装はsegmentとmanifestをメモリ内だけに保持し、reopen後の最初の検索でprimary text propertyを全走査して再構築した。
+  この方式はprimary dataの安全性と低いWAL増幅を満たす一方、100,000 chunkで約23秒の再構築を正常reopenごとに要求し、merge済みartifactを再起動で失う。
+  またWAL 1.00xはdurable segmentを書いた結果ではなく、segment mutationを永続化しなかった結果になる。
+- **選択肢**：(a) メモリ内segmentを標準経路とし、reopen全走査を利用者contractにする、(b) segment bodyも通常`PageImage` WALへ複製する、(c) checksum付きappend-only segment bodyをWAL外でfsyncし、manifestだけをprimary mutationと同じtransactionでpublishする。
+- **決定**：(c)をWave 8の完成条件とする。
+  bodyはcommit後に上書きしないためWALへ複製せず、body fsync後にartifact ID、checksum、source high-water、`xmin/xmax`を持つmanifestをstrict `Commit`でpublishする。
+  crashがbody fsync後かつmanifest commit前なら未参照orphan、commit後なら完全なbodyへの参照になる。
+  欠損またはchecksum不一致時のprimary scanは`RebuildRequired` fallbackに限定する。
+  orphanとreader horizon通過後の旧bodyの物理回収はWave 9へ残す。
+- **Why not**：(a) はdatabase openと最初の全文検索を全件数に比例させ、索引作成とmergeの成果を再起動で失う。
+  (b) は上書きしないbodyを本体とWALへ二重記録し、immutable artifactが持つprepare-before-publishの原子性を使わず書込み増幅を増やす。
+- **検証方法**：正常reopenがprimary全走査なしでmanifestから同じtop-kを返すこと、body write/fsync、manifest PageImage、strict `Commit`、publishの各境界killで未commit bodyが不可視かつcommit済みmanifestがchecksum一致bodyだけを参照することを確認する。
+  body欠損とchecksum不一致はprimaryを失わず`RebuildRequired`から再構築する。
+  WAL amplificationとsegment merge込み総write amplificationを別々に測定し、各11.74x以下とする。
+
+### 2026-07-17: page-image WAL と full-text segment write の増幅 gate 分離
 
 - **背景**：Wave 5のpage-image WALを同一環境で測定すると、RAG ingest amplificationは16.26xだった。
   直前の`redesign-wave-4`を同じrunnerと引数で測定した値は16.37xであり、Wave 5による回帰はない。
@@ -995,12 +1024,13 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 - **決定**：(c)。
   Wave 5のRAG ingest amplificationは、同じrunner、引数、machine、runtimeで測定したWave 4比1.00x以内を合格条件とする。
   2026-07-17の参照値はWave 4が16.37x、Wave 5が16.26xである。
-  11.74xはhistorical referenceとして保持し、Wave 8のfull-text segment WALで絶対gateとして再適用する。
+  11.74xはhistorical referenceとして保持し、Wave 8のfull-text segment writeで絶対gateとして再適用する。
+  2026-07-19の後続決定により、Wave 8はWAL amplificationとsegment merge込み総write amplificationを分けて同じ上限を適用する。
 - **Why not**：(a) はFT専用logical WALの削除によって成立しなくなった比較条件を固定し、redo-only設計の実装可否を別方式の数値で判定する。
   (b) はWAL codec、recovery、CPU costを同時に変える永続形式上の選択であり、mutable postings pageを記録するWave 5の構造を維持したまま圧縮率だけを合格条件へ合わせても、Wave 8でsegmentへ置換する経路を短くしない。
 - **検証方法**：`redesign-wave-4`とWave 5で`--clean-slate-page-wal-baseline 20 200 5000 20 1000 20`を実行し、RAG ingest amplification、payload/index内訳、durable point updateを同一環境で比較する。
   Wave 5は増幅率がWave 4比1.00x以内、durable point update p50が3491.40 us以内であることを確認する。
-  Wave 8ではimmutable full-text segmentの同じworkloadを測定し、11.74x以下を別途確認する。
+  Wave 8ではimmutable full-text segmentの同じworkloadを測定し、WALとsegment merge込み総writeがそれぞれ11.74x以下であることを別途確認する。
 
 ### 2026-07-17: Critical review の設計解決と実装検証を分離
 

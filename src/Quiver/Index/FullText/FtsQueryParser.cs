@@ -6,7 +6,7 @@ namespace Quiver.Index.FullText;
 /// <summary>
 /// 全文検索クエリ文字列を前処理し、完全一致ターム・prefix ターム (末尾 <c>*</c>)・
 /// fuzzy ターム (末尾 <c>~N</c>) に分割する。Boolean 演算子 (<c>AND</c>, <c>OR</c>,
-/// <c>NOT</c>) にも対応する。prefix タームは索引の B+Tree に対して展開し、
+/// <c>NOT</c>) にも対応する。prefix タームは可視immutable segmentの辞書に対して展開し、
 /// fuzzy タームは Levenshtein 編集距離で展開する。展開後のターム集合が BM25
 /// スコアラに渡される。
 /// </summary>
@@ -17,7 +17,7 @@ internal static class FtsQueryParser
     /// <paramref name="index"/> に対して展開)。スコアリング対象のターム集合を返す。
     /// </summary>
     public static HashSet<string> ParseAndExpand(
-        string queryText, ITokenizer tokenizer, FullTextIndex index)
+        string queryText, ITokenizer tokenizer, FullTextSegmentSnapshot index)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         ReadOnlySpan<char> span = queryText.AsSpan();
@@ -136,7 +136,7 @@ internal static class FtsQueryParser
     /// Required/Optional/Excluded グルーピングを持つ構造化結果を返す。
     /// </summary>
     public static ParsedFtsQuery ParseBooleanAndExpand(
-        string queryText, ITokenizer tokenizer, FullTextIndex index)
+        string queryText, ITokenizer tokenizer, FullTextSegmentSnapshot index)
     {
         var rawTokens = Tokenize(queryText.AsSpan());
         if (rawTokens.Count == 0)
@@ -178,7 +178,11 @@ internal static class FtsQueryParser
     }
 
     private static HashSet<string> ExpandSingleWord(
-        string word, bool isPrefix, int fuzzyDistance, ITokenizer tokenizer, FullTextIndex index)
+        string word,
+        bool isPrefix,
+        int fuzzyDistance,
+        ITokenizer tokenizer,
+        FullTextSegmentSnapshot index)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         if (isPrefix)

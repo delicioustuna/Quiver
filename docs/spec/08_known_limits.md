@@ -29,9 +29,8 @@
   `BeginWriteTransaction()` を直列化する。2 本目の書き込みトランザクションは既定で先行 writer の終了を
   `QuiverDatabaseOptions.LockTimeout` まで待ち、期限を超えると `TransactionException` をスローする。
   `QuiverDatabaseOptions.EnforceExclusiveWriter` を有効にすると待機せず即時に `TransactionException` をスローする。
-  さらに、すべての二次インデックスと全文の
-  mutation は単一のグローバルインデックスロックに集約されるため、ロックモードに関わらず、2 つの
-  トランザクションがインデックス / postings を同時に mutation することは決してない。
+  scalar index definition と全文 manifest の publish も同じ書き込み排他に従う。
+  immutable全文 artifact の構築は read snapshot で行うため、構築中も通常 writer は進行できる。
 - **リーダはブロックせず、ブロックもされない。** `BeginReadTransaction()` は開始時の一貫した
   コミット済みスナップショットを取得し（snapshot isolation）、デフォルトではロックを取得しない。
   任意数のリーダがそれぞれのスレッド上で、単一のライタと並行して並列に動作する。リーダは自身の開始後に
@@ -141,28 +140,26 @@ RAG の Chunk や頻出エンティティのような高次数Vertexを大量に
 
 ## BM25 コーパス統計はスナップショットベース {#bm25-stats}
 
-`GraphStats` スナップショットが `Search` に与えられると、BM25 スコアリングはコーパス文書数 `N`、
-平均文書長 `avgdl`、term ごとの `df` をそのスナップショットから取得し、クエリのたびに norms / postings を
-再スキャンしない。したがって、インデックス変更後に再利用されたスナップショットは近似的で
-ある — `avgdl` / `df` がライブインデックスから遅延し、BM25 スコアをわずかにずらしうる。これは許容された
-トレードオフである: BM25 はコーパス統計の陳腐化に頑健であり、`avgdl` はすべての文書の長さ正規化を
-一様にスケールする。
+BM25 スコアリングはコーパス文書数 `N`、平均文書長 `avgdl`、term ごとの `df` を同じ visible segment snapshot から取得する。
+同じ manifest generation の postings、norms、stats は読み取り専用 snapshot cache として再利用する。
+`GraphStats` を明示的に与えた場合は取得時点の近似統計を使う。
 
-これはスコアリングにのみ影響する。WAND top-k 枝刈りは陳腐化に依存しない term ごとの上限
-(`idf * (K1 + 1)`) を用いるため、厳密な全スキャンと比べて文書を取りこぼすことは決してない。また両方の
-クエリパスが同一のスナップショット基準を用いるため、互いに整合し続ける。
+WAND top-k 枝刈りは term ごとの保守的な上限 `idf * (K1 + 1)` を用いる。
+上限または stats の鮮度から正しさを証明できない場合は strict scan へ fallback する。
 
-**設計根拠**: スコアリングのたびに postings 全体を再走査するとクエリレイテンシが文書数に比例して悪化する。
-検索エンジン（Lucene, Elasticsearch 等）も同様にセグメント単位で凍結した統計を用いる。
-BM25 の `tf-idf` 系スコアはコーパスサイズの対数に依存するため、数%の文書増減でランキングが大きく
-変動することはなく、実用上問題にならない。
+**設計根拠**: スコアリングのたびに segment 全体を再materializeするとクエリレイテンシが文書数に比例して悪化する。
+immutable manifest 単位の cache は old/new reader の統計を混ぜずに再計算を避ける。
 
-**緩和策**: アプリケーション側で `db.GetGraphStats()` を定期的（例: 書き込みバッチ終了後）に取り直し、
-検索呼び出しに渡す。リアルタイム性を最優先する場合は毎回新しいスナップショットを取得すればライブ統計に
-追従するが、検索頻度が高い場合はスナップショット再利用によるキャッシュ効果を活かすことを推奨する。
+**緩和策**: `GraphStats` を検索へ与える場合は、書き込みバッチ後に取り直して WAND の snapshot 統計を更新する。
 
-**将来方針**: 1.x では現行動作を維持する。将来的にはチェックポイント時に自動で統計を更新する
-auto-refresh オプションの追加を検討している。
+**将来方針**: reader horizonを越えた旧全文 segment の物理回収は segment GC で行う。
+
+## Derived全文 segment の再構築 {#fulltext-segment-rebuild}
+
+正常 reopen は persisted manifest から `*.quiver-ftseg` の checksum 一致 body を開き、primary scan を行わない。
+referenced body の欠損または checksum 不一致で `RebuildRequired` になった場合だけ、全文検索は transaction-local primary property scan へ fallback する。
+fallback artifact は global manifest として公開せず、background worker が source generation を再検証してから publish する。
+この破損時 fallback は結果集合を保つが、publish 完了までは検索レイテンシが corpus size に比例する。
 
 ## Derived vector segment の再構築 {#vector-segment-rebuild}
 

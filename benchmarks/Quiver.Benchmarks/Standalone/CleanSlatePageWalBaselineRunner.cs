@@ -225,7 +225,7 @@ public static class CleanSlatePageWalBaselineRunner
         try
         {
             using var db = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
-            db.EditSchema(schema => schema.CreateFullTextIndex(FullTextIndex, "Doc", "body"));
+            db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(FullTextIndex, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
             double ingestMs = IngestFullTextCorpus(db, vocab, chunkCount, seed: 11);
             var latencies = MeasureFullTextSearchLatencies(db, vocab, queryCount, seed: 99);
             Console.WriteLine(
@@ -257,7 +257,7 @@ public static class CleanSlatePageWalBaselineRunner
                 Path.Combine(dir, "graph.quiver"),
                 new QuiverDatabaseOptions { CheckpointThresholdBytes = long.MaxValue });
             if (withIndex)
-                db.EditSchema(schema => schema.CreateFullTextIndex(FullTextIndex, "Doc", "body"));
+                db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(FullTextIndex, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
 
             ingestMs = IngestFullTextCorpus(db, vocab, chunkCount, seed: 11);
             return WalBytes(dir);

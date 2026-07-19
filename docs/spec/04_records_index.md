@@ -258,6 +258,17 @@ derived state が不足する場合は同じ snapshot の primary property scan 
 
 ### B+Tree WAL {#btree-journal}
 
-すべての B+Tree ページは同じ `PageImage` WAL 経路を使う。
-全文 postings/norms のリーフと構造ページにも専用 journaling mode は設けない。
+すべての scalar B+Tree ページは同じ `PageImage` WAL 経路を使う。
+全文のterm dataとdocument lengthは immutable derived segment に置き、B+Tree page と専用 journaling modeを持たない。
+
+## 全文 definition と segment {#fulltext-segment}
+
+`FullTextIndexDefinition` は `PropertyTarget`、tokenizer/filter pipeline、BM25 parameter、segment policy を統一 catalog に保存する。
+
+全文 artifact は full typed owner identity と `PropertyVersionRef` を保持する immutable delta/merged segment である。
+
+body record は entry metadata、term dictionary、sorted postings、document length と checksum を `*.quiver-ftseg` に保持する。
+catalog manifest は generation、`xmin/xmax`、source committed high-water、artifact offset/length/checksum、lifecycle state を保持する。
+
+検索は visible manifest を選び、candidate を primary owner と property version に照合してから返す。
 プロセス内 rollback は transaction-owned write set の before-image を使う。

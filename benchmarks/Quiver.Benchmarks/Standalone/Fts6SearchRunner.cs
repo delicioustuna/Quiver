@@ -61,7 +61,7 @@ public static class Fts6SearchRunner
         try
         {
             using var db = QuiverDatabase.Open(System.IO.Path.Combine(dirFt, "graph.quiver"));
-            db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
+            db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
             double ingestMs = IngestCorpus(db, vocab, searchChunks, seed: 11);
             Console.WriteLine($"built search corpus: {searchChunks:N0} chunks in {ingestMs,7:F0} ms ({searchChunks / (ingestMs / 1000.0),8:F0} chunks/s)");
             Console.WriteLine();
@@ -90,7 +90,7 @@ public static class Fts6SearchRunner
             using var db = QuiverDatabase.Open(
                 System.IO.Path.Combine(dir, "graph.quiver"),
                 new QuiverDatabaseOptions { CheckpointThresholdBytes = long.MaxValue });
-            if (withIndex) db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
+            if (withIndex) db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
             ingestMs = IngestCorpus(db, vocab, chunkCount, seed: 11);
             return WalBytes(dir);
         }

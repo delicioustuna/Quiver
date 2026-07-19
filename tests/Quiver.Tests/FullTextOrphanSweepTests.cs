@@ -1,16 +1,13 @@
 using FluentAssertions;
+using Quiver.Api;
 using Quiver.Core;
-using Quiver.Index.FullText;
 using Quiver.Storage.Records;
 using Xunit;
 
 namespace Quiver.Tests;
 
 /// <summary>
-/// 全文インデックスの孤立エントリを走査する安全網を検証する。
-/// キーから復号した EntityId が存在しないVertexを指す Postings と Norms を
-/// <c>CheckIndexConsistency</c> が検出し、<c>RepairIndexes</c> が
-/// 有効な文書を変更せずに削除することを確認する。
+/// derived segmentを保持しない再起動後もprimary propertyから検索状態を復元できることを検証する。
 /// </summary>
 public sealed class FullTextOrphanSweepTests : IDisposable
 {
@@ -30,45 +27,23 @@ public sealed class FullTextOrphanSweepTests : IDisposable
     }
 
     [Fact]
-    public void Repair_removes_postings_and_norms_for_dead_entities_only()
+    public void Reopen_rebuilds_search_from_live_primary_properties()
     {
-        using var db = QuiverDatabase.Open(_path);
-        db.EditSchema(schema => schema.CreateFullTextIndex("idx_body", "Doc", "body"));
-
-        var mgr = db.SchemaApiForTesting.IndexManager;
-        mgr.TryGetFullTextIndex("idx_body", out var ft).Should().BeTrue();
-        var tok = mgr.ResolveTokenizer(ft.TokenizerId);
-
-        // Inject an orphan: a packed ref to a vertex sequence that was never allocated.
-        long deadEntity = EntityRef.Pack(EntityKind.Vertex, 99_999, 0);
-        ft.AddDocument(deadEntity, tok, "orphan term");
-
-        // A real, live document that must survive the sweep.
-        using (var tx = db.BeginWriteTransaction())
+        VertexId live;
+        using (var db = QuiverDatabase.Open(_path))
         {
-            var live = tx.CreateVertex("Doc");
+            db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(
+                "idx_body",
+                new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
+            using var tx = db.BeginWriteTransaction();
+            live = tx.CreateVertex("Doc");
             tx.SetProperty(live, "body", PropertyValue.FromString("kept term"));
             tx.Commit();
         }
 
-        ft.DocumentCount.Should().Be(2);
-
-        var report = db.Diagnostics.CheckIndexConsistency();
-        report.OrphanCount.Should().BeGreaterThan(0);
-        // The public report decodes the entityId from the key (not the tf/docLen value)
-        // and strips the lane tag from the index name.
-        report.Orphans.Should().Contain(o => o.IndexName == "idx_body");
-
-        var repair = db.Diagnostics.RepairIndexes(IndexRepairMode.Apply);
-        repair.RemovedCount.Should().BeGreaterThan(0);
-
-        ft.GetPostings("orphan").Should().BeEmpty();
-        ft.TryGetDocLength(deadEntity, out _).Should().BeFalse();
-        // Live document untouched.
-        ft.GetPostings("kept").Should().ContainSingle();
-        ft.DocumentCount.Should().Be(1);
-
-        // Re-check: no orphans remain.
-        db.Diagnostics.CheckIndexConsistency().OrphanCount.Should().Be(0);
+        using var reopened = QuiverDatabase.Open(_path);
+        using var read = reopened.BeginReadTransaction();
+        read.Query.Search("idx_body", "kept", 10).ToList()
+            .Should().ContainSingle().Which.Should().Be(live);
     }
 }

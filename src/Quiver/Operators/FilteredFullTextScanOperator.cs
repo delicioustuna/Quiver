@@ -59,9 +59,10 @@ internal sealed class FilteredFullTextScanOperator : IPhysicalOperator
     {
         // インデックスの存在を先行検証し、候補数に関わらず text-first 演算子と
         // 対称的に例外を投げる (drain の前に検証する)。
-        if (!tx.Indexes.TryGetFullTextIndex(_indexName, out var ft))
+        if (tx.FullTextSegments is null
+            || !tx.FullTextSegments.TryOpen(tx, _indexName, out var ft))
             throw new ConstraintException($"Full-text index '{_indexName}' does not exist.");
-        var tokenizer = tx.Indexes.ResolveTokenizer(ft.TokenizerId);
+        var tokenizer = ft.Tokenizer;
 
         _source.Open(tx);
         var candidates = new HashSet<long>();
@@ -100,7 +101,11 @@ internal sealed class FilteredFullTextScanOperator : IPhysicalOperator
             ranked = Bm25Scorer.Rank(ft, tokenizer, _queryText, n, avgdl, candidates, _corpus?.Terms);
         }
 
-        _results = IndexValueResolver.ResolveLiveVertexIds(ranked, tx.Vertices).Take(_k).ToArray();
+        _results = IndexValueResolver.ResolveLiveVertexIds(
+                ranked.Where(packed => ft.IsVisibleVertexCandidate(packed, tx)),
+                tx.Vertices)
+            .Take(_k)
+            .ToArray();
         _pos = -1;
     }
 

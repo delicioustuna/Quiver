@@ -59,12 +59,13 @@ dotnet run -c Release --project benchmarks/Quiver.Benchmarks.RecallCheck
 | full-text 4 segment | `plans/clean-slate-redesign.md` の segment gate | p50 8.55 ms 以下 |
 | vector | `plans/clean-slate-redesign.md` と RecallCheck | recall@10 0.95以上 |
 | page-image WAL amplification | `redesign-wave-4` と Wave 5 の同一 runner | 同一環境のWave 4比1.00x以内。2026-07-17の参照値はWave 4が16.37x |
-| full-text segment WAL amplification | `plans/clean-slate-redesign.md` の ARIES baseline | Wave 8で11.74x以下 |
+| full-text segment write amplification | `plans/clean-slate-redesign.md` の ARIES baseline | Wave 8でWAL amplificationとsegment merge込み総write amplificationがそれぞれ11.74x以下 |
 | hyperedge traversal | `docs/benchmarks/2026-07-06_HYP-6c_Hyperedge.md` | degree 10、100、1000の各形状で binary/view 比3.0x以内 |
 
 絶対値 gate は出所文書と同じ workload、runtime major、seed を再現できる場合だけ判定に使う。
 再現できない場合は同一セッションで旧版と新版を測り、比率と環境差を decision log へ記録してユーザの承認を得る。
 11.74xはFT専用logical WALと専用recovery passを持つARIES方式の測定値なので、汎用`PageImage`へ統一するWave 5の合否には使わない。
+Wave 8ではWAL外のappend-only segment bodyとtransactional manifestを分離し、WAL amplificationとsegment merge込み総write amplificationの双方へ同じ上限を適用する。
 
 ## 5. タグ付与条件
 

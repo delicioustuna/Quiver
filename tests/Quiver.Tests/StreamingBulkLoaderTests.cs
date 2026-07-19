@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Quiver.Api;
 using Quiver.Core;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
@@ -119,6 +120,54 @@ public sealed class StreamingBulkLoaderTests : IDisposable
         AssertVertexStoreBytesEqual(dir1, dir2);
         AssertEdgeStoreBytesEqual(dir1, dir2);
         AssertPropStoreBytesEqual(dir1, dir2);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Bulk_text_property_invalidates_cached_manifest(bool streaming)
+    {
+        string dir = Path.Combine(
+            _baseDir,
+            "fulltext_" + streaming + "_" + Guid.NewGuid().ToString("N"));
+        using var database = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
+        LabelId label = database.EditSchema(schema => schema.GetOrCreateLabel("Doc"));
+        PropertyKeyId key = database.EditSchema(
+            schema => schema.GetOrCreatePropertyKey("body"));
+        database.EditSchema(schema => schema.CreateIndex(
+            new FullTextIndexDefinition(
+                "body_idx",
+                new PropertyTarget(PropertyOwnerKind.Vertex, "body"))));
+
+        using (var initialize = database.BeginReadTransaction())
+            initialize.Query.Search("body_idx", "bulk", 10).ToList().Should().BeEmpty();
+        ((BinaryGraphStorageBackend)database.BackendInternal)
+            .WaitForFullTextSegmentMergeForTest();
+
+        if (streaming)
+        {
+            using var loader = database.BeginStreamingBulkLoad();
+            loader.AppendVertex(new VertexId(0), label);
+            loader.AppendProperty(
+                new VertexId(0),
+                key,
+                PropertyValue.FromString("bulk searchable text"));
+            loader.Commit();
+        }
+        else
+        {
+            using var loader = database.BeginBulkLoad();
+            loader.AppendVertex(new VertexId(0), label);
+            loader.AppendProperty(
+                new VertexId(0),
+                key,
+                PropertyValue.FromString("bulk searchable text"));
+            loader.Commit();
+        }
+
+        using var read = database.BeginReadTransaction();
+        read.Query.Search("body_idx", "bulk", 10).ToList()
+            .Should().ContainSingle();
     }
 
     // ─────────────────────── helpers ───────────────────────

@@ -8,7 +8,7 @@ using Xunit;
 namespace Quiver.Tests.Text;
 
 /// <summary>
-/// <see cref="FilteredTokenizer"/> を <see cref="FullTextIndexOptions.Filters"/> から
+/// <see cref="FilteredTokenizer"/> を <see cref="FullTextIndexDefinition.Filters"/> から
 /// 全文インデックス処理へ接続する経路をエンドツーエンドに検証する。
 /// </summary>
 public sealed class FilteredTokenizerIntegrationTests : IDisposable
@@ -31,11 +31,10 @@ public sealed class FilteredTokenizerIntegrationTests : IDisposable
     [Fact]
     public void StopWordFilter_excludes_terms_from_index()
     {
-        _db.EditSchema(schema => schema.CreateFullTextIndex(
-            "idx", "Doc", "body", new FullTextIndexOptions
-            {
-                Filters = [new StopWordFilter(["the", "a", "is", "of"])],
-            }));
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(
+            "idx",
+            new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"),
+            Filters: [new StopWordFilter(["the", "a", "is", "of"])])));
 
         using (var tx = _db.BeginWriteTransaction())
         {
@@ -55,16 +54,48 @@ public sealed class FilteredTokenizerIntegrationTests : IDisposable
     }
 
     [Fact]
-    public void FullTextIndexInfo_reports_composite_tokenizer_id()
+    public void FullTextIndexDefinition_reports_composite_tokenizer_id()
     {
-        _db.EditSchema(schema => schema.CreateFullTextIndex(
-            "idx2", "Doc", "body", new FullTextIndexOptions
-            {
-                Filters = [new LowercaseFilter(), new StopWordFilter(["x"])],
-            }));
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(
+            "idx2",
+            new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"),
+            Filters: [new LowercaseFilter(), new StopWordFilter(["x"])])));
 
-        var indexes = _db.Schema.ListFullTextIndexes();
+        var indexes = _db.Schema.ListIndexes()
+            .Where(static index => index.Definition is FullTextIndexDefinition)
+            .ToArray();
         indexes.Should().ContainSingle(i => i.Name == "idx2");
-        indexes[0].TokenizerId.Should().Be("mixed-bigram-unigram-v1+lowercase-v1+stopwords-v1");
+        ((FullTextIndexDefinition)indexes[0].Definition)
+            .TokenizerId.Should().Be("mixed-bigram-unigram-v1+lowercase-v1+stopwords-v1");
+    }
+
+    [Fact]
+    public void StopWordFilter_is_reconstructed_after_reopen()
+    {
+        string path = Path.Combine(_dir, "reopen.quiver");
+        using (var database = QuiverDatabase.Open(path))
+        {
+            database.EditSchema(schema => schema.CreateIndex(
+                new FullTextIndexDefinition(
+                    "reopen_idx",
+                    new PropertyTarget(
+                        PropertyOwnerKind.Vertex,
+                        "body",
+                        "Doc"),
+                    Filters: [new StopWordFilter(["the"])])));
+            using var write = database.BeginWriteTransaction();
+            VertexId document = write.CreateVertex("Doc");
+            write.SetProperty(
+                document,
+                "body",
+                PropertyValue.FromString("the durable text"));
+            write.Commit();
+        }
+
+        using var reopened = QuiverDatabase.Open(path);
+        using var read = reopened.BeginReadTransaction();
+        read.Query.Search("reopen_idx", "the", 10).ToList().Should().BeEmpty();
+        read.Query.Search("reopen_idx", "durable", 10).ToList()
+            .Should().ContainSingle();
     }
 }

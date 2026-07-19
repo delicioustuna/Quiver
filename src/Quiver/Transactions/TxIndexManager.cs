@@ -82,48 +82,41 @@ internal sealed class TxIndexManager : IIndexManager
     public void ResetIndexArtifact(string name)
     { EnsureWritable(); _inner.ResetIndexArtifact(name); }
 
-    public FullTextIndex CreateFullTextIndex(
+    public FullTextCatalogEntry CreateFullTextDefinition(
         string name,
-        string label,
+        string target,
         string propertyKey,
         string tokenizerId)
     {
         EnsureWritable();
-        return _inner.CreateFullTextIndex(name, label, propertyKey, tokenizerId);
+        return _inner.CreateFullTextDefinition(name, target, propertyKey, tokenizerId);
     }
 
-    public bool TryGetFullTextIndex(string name, out FullTextIndex index)
-        => _inner.TryGetFullTextIndex(name, out index);
+    public bool TryGetFullTextDefinition(
+        string name,
+        out FullTextCatalogEntry definition)
+        => _inner.TryGetFullTextDefinition(name, out definition);
 
-    public bool TryGetFullTextIndexByLabelKey(
-        string label,
-        string propertyKey,
-        out FullTextIndex index)
-        => _inner.TryGetFullTextIndexByLabelKey(label, propertyKey, out index);
+    public IEnumerable<(string Name, string Target, string PropertyKey, string TokenizerId)> ListFullTextDefinitions()
+        => _inner.ListFullTextDefinitions();
 
-    public IEnumerable<(string Name, string Label, string PropertyKey, string TokenizerId)> ListFullTextIndexes()
-        => _inner.ListFullTextIndexes();
+    public IEnumerable<FullTextCatalogEntry> ListFullTextCatalogEntries()
+        => _inner.ListFullTextCatalogEntries();
 
-    public bool DropFullTextIndex(string name)
-    { EnsureWritable(); return _inner.DropFullTextIndex(name); }
+    public bool DropFullTextDefinition(string name)
+    { EnsureWritable(); return _inner.DropFullTextDefinition(name); }
+
+    public void UpdateFullTextManifest(
+        string name,
+        string manifest,
+        IndexLifecycleState state)
+    { EnsureWritable(); _inner.UpdateFullTextManifest(name, manifest, state); }
 
     public ITokenizer ResolveTokenizer(string tokenizerId)
         => _inner.ResolveTokenizer(tokenizerId);
 
     public void RegisterTokenizer(ITokenizer tokenizer)
     { EnsureWritable(); _inner.RegisterTokenizer(tokenizer); }
-
-    public bool HasAnyFullTextIndex => _inner.HasAnyFullTextIndex;
-
-    public void MaintainFullText(
-        FullTextIndex index,
-        long entityId,
-        string? oldText,
-        string? newText)
-    {
-        EnsureWritable();
-        _inner.MaintainFullText(index, entityId, oldText, newText);
-    }
 
     private void EnsureWritable()
     {

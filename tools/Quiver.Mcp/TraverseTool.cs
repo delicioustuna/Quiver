@@ -467,13 +467,16 @@ internal static class TraverseTool
     // 無ければ DB 内の最初の FTS インデックスにフォールバックする
     private static string FindFullTextIndex(ISchemaCatalog schema, string? label)
     {
-        var ftIndexes = schema.ListFullTextIndexes();
+        var ftIndexes = schema.ListIndexes()
+            .Select(static index => index.Definition)
+            .OfType<FullTextIndexDefinition>()
+            .ToArray();
         if (!string.IsNullOrEmpty(label))
         {
-            var match = ftIndexes.FirstOrDefault(i => i.Label == label);
+            var match = ftIndexes.FirstOrDefault(i => i.Target.Scope == label);
             if (match is not null) return match.Name;
         }
-        return ftIndexes.Count > 0
+        return ftIndexes.Length > 0
             ? ftIndexes[0].Name
             : throw new InvalidOperationException("No full-text index found.");
     }

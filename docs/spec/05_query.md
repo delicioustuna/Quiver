@@ -103,6 +103,12 @@ co-membership（起点Vertex → 所属Nexus → 別ロールのメンバー、�
 |---|---|
 | `FullTextScanOperator` | BM25 スコア付き全文検索 |
 | `FilteredFullTextScanOperator` | 述語フィルタ付き全文検索 |
+
+両 operator は transaction snapshot から同じ immutable全文 manifest と corpus stats を解決する。
+
+`FullTextScanOperator` は owner Generation と `PropertyVersionRef` を primary store で再検証し、除外後に次点を補充して top-k を確定する。
+
+`FilteredFullTextScanOperator` は上流の full `VertexId` を primary `Read` で検証してから physical candidate setへ変換する。
 | `KnnVertexSourceOperator` | K 近傍ベクトル検索 |
 | `FilteredKnnVertexSourceOperator` | 述語フィルタ付き KNN |
 

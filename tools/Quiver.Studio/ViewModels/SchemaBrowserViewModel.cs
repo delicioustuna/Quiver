@@ -76,12 +76,14 @@ public sealed class SchemaBrowserViewModel : IDisposable
                 i.Name, "⚡",
                 $"{i.Target.Scope ?? "*"}.{i.Target.PropertyKey} ({i.Kind})"))));
 
-        var ftIndexes = schema.ListFullTextIndexes();
+        var ftIndexes = indexes
+            .Where(static index => index.Definition is FullTextIndexDefinition)
+            .ToArray();
         RootNodes.Add(SchemaTreeNode.Folder(
-            $"Full-Text Indexes ({ftIndexes.Count})", "🔍",
+            $"Full-Text Indexes ({ftIndexes.Length})", "🔍",
             ftIndexes.Select(f => SchemaTreeNode.Leaf(
                 f.Name, "🔍",
-                $"{f.Label}.{f.PropertyKey} ({f.TokenizerId})"))));
+                $"{f.Target.Scope}.{f.Target.PropertyKey} ({((FullTextIndexDefinition)f.Definition).TokenizerId})"))));
     }
 
     public void Dispose() => _subscription.Dispose();

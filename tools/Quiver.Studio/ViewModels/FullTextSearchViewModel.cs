@@ -15,10 +15,10 @@ public sealed partial class FullTextSearchViewModel : ObservableObject
     private readonly DatabaseService _db;
 
     [ObservableProperty]
-    private IReadOnlyList<FullTextIndexInfo> _indexes = [];
+    private IReadOnlyList<IndexInfo> _indexes = [];
 
     [ObservableProperty]
-    private FullTextIndexInfo? _selectedIndex;
+    private IndexInfo? _selectedIndex;
 
     [ObservableProperty]
     private string _queryText = "";
@@ -51,7 +51,9 @@ public sealed partial class FullTextSearchViewModel : ObservableObject
             return;
         }
 
-        Indexes = database.Schema.ListFullTextIndexes();
+        Indexes = database.Schema.ListIndexes()
+            .Where(static index => index.Definition is FullTextIndexDefinition)
+            .ToArray();
         if (SelectedIndex is not null &&
             !Indexes.Any(i => i.Name == SelectedIndex.Name))
             SelectedIndex = null;
@@ -77,7 +79,7 @@ public sealed partial class FullTextSearchViewModel : ObservableObject
         try
         {
             var indexName = SelectedIndex.Name;
-            var propKeyName = SelectedIndex.PropertyKey;
+            var propKeyName = SelectedIndex.Target.PropertyKey;
             var query = QueryText;
             var k = MaxResults;
             var database = _db.CurrentDatabase;

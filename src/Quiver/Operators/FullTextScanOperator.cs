@@ -47,9 +47,10 @@ internal sealed class FullTextScanOperator : IPhysicalOperator
 
     public void Open(ITransaction tx)
     {
-        if (!tx.Indexes.TryGetFullTextIndex(_indexName, out var ft))
+        if (tx.FullTextSegments is null
+            || !tx.FullTextSegments.TryOpen(tx, _indexName, out var ft))
             throw new ConstraintException($"Full-text index '{_indexName}' does not exist.");
-        var tokenizer = tx.Indexes.ResolveTokenizer(ft.TokenizerId);
+        var tokenizer = ft.Tokenizer;
 
         var (n, avgdl) = Bm25Scorer.ResolveCorpus(ft, _corpus);
 
@@ -67,7 +68,7 @@ internal sealed class FullTextScanOperator : IPhysicalOperator
             var terms = FtsQueryParser.ParseAndExpand(_queryText, tokenizer, ft);
             ranked = termStats is not null
                 ? Bm25Scorer.RankWandTerms(ft, terms, n, avgdl, termStats, _k,
-                    isLive: packed => IndexValueResolver.IsLiveVertex(packed, vertices))
+                    isLive: packed => ft.IsVisibleVertexCandidate(packed, tx))
                 : null;
             ranked ??= Bm25Scorer.RankTerms(ft, terms, n, avgdl, candidateSequences: null, termStats);
         }
@@ -75,12 +76,16 @@ internal sealed class FullTextScanOperator : IPhysicalOperator
         {
             ranked = termStats is not null
                 ? Bm25Scorer.RankWand(ft, tokenizer, _queryText, n, avgdl, termStats, _k,
-                    isLive: packed => IndexValueResolver.IsLiveVertex(packed, vertices))
+                    isLive: packed => ft.IsVisibleVertexCandidate(packed, tx))
                 : null;
             ranked ??= Bm25Scorer.Rank(ft, tokenizer, _queryText, n, avgdl, candidateSequences: null, termStats);
         }
 
-        _results = IndexValueResolver.ResolveLiveVertexIds(ranked, vertices).Take(_k).ToArray();
+        _results = IndexValueResolver.ResolveLiveVertexIds(
+                ranked.Where(packed => ft.IsVisibleVertexCandidate(packed, tx)),
+                vertices)
+            .Take(_k)
+            .ToArray();
         _pos = -1;
     }
 

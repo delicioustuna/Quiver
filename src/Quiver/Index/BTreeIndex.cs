@@ -33,7 +33,6 @@ internal static class BL // BTreeLayout
     // 可変長キーのため「最小キー数」ではなくバイト占有率で判定する。
     public const int MinFill = Body / 3;
 }
-
 internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
 {
     private static readonly PageId HeaderPageId = new(1);
@@ -106,9 +105,6 @@ internal sealed class BTreeIndex<TKey> : IBTreeIndex<TKey>
         => new(_file, FindLeaf(Encode(from)), Encode(from), fromInclusive, Encode(to), toInclusive);
 
     public BTreeRangeEnumerator FullScan() => new(_file, LeftmostLeaf(), null, true, null, true);
-
-    public BTreeRawCursor OpenScanCursor(byte[] fromKey, byte[] toKeyInclusive)
-        => new(_file, FindLeaf, FindLeaf(fromKey), fromKey, toKeyInclusive);
 
     public IEnumerable<long> SeekValues(TKey key)
     {
@@ -1165,123 +1161,3 @@ internal ref struct BTreeRangeEnumerator
     public KeyValueEntry Current => _current;
     public void Dispose() { }
 }
-
-/// <summary>
-/// 生バイトキー範囲に対する forward-only seekable cursor。WAND の
-/// document-at-a-time スコアリングに使う。<see cref="BTreeRangeEnumerator"/> と同様に
-/// leaf リンクチェーンを歩くが、ヒープオブジェクト (配列に保持可能) であり、
-/// <see cref="SeekTo"/> でターゲットが loaded leaf を超えていれば root から O(log N)
-/// で降下する (skip-pointer の代替)。
-/// </summary>
-internal sealed class BTreeRawCursor
-{
-    private readonly IPagedFile _file;
-    private readonly Func<byte[], PageId> _findLeaf;
-    private readonly byte[] _upperInclusive;
-    private byte[] _lower;
-    private bool _needLowerSkip;
-    private PageId _nextLeafToLoad;
-    private List<(byte[] Key, long Value)>? _entries;
-    private int _idx;
-    private bool _exhausted;
-
-    internal BTreeRawCursor(IPagedFile file, Func<byte[], PageId> findLeaf, PageId startLeaf,
-        byte[] lowerInclusive, byte[] upperInclusive)
-    {
-        _file = file;
-        _findLeaf = findLeaf;
-        _lower = lowerInclusive;
-        _upperInclusive = upperInclusive;
-        _needLowerSkip = true;
-        _nextLeafToLoad = startLeaf;
-        _exhausted = !startLeaf.IsValid;
-    }
-
-    public bool Exhausted => _exhausted;
-    public byte[] CurrentKey { get; private set; } = Array.Empty<byte>();
-    public long CurrentValue { get; private set; }
-
-    /// <summary>範囲内の次のエントリへ進む。末尾に達したら <c>false</c>。</summary>
-    public bool MoveNext()
-    {
-        while (!_exhausted)
-        {
-            if (_entries == null)
-            {
-                if (!_nextLeafToLoad.IsValid) { _exhausted = true; return false; }
-                LoadLeaf(_nextLeafToLoad);
-            }
-
-            while (_idx < _entries!.Count)
-            {
-                var (k, v) = _entries[_idx++];
-                ReadOnlySpan<byte> ks = k;
-                if (_needLowerSkip)
-                {
-                    if (ks.SequenceCompareTo(_lower) < 0) continue;
-                    _needLowerSkip = false;
-                }
-                if (ks.SequenceCompareTo(_upperInclusive) > 0) { _exhausted = true; return false; }
-                CurrentKey = k; CurrentValue = v;
-                return true;
-            }
-            _entries = null; // fall through to load the next leaf
-        }
-        return false;
-    }
-
-    /// <summary>
-    /// キーが <paramref name="target"/> 以上の最初のエントリへ移動する
-    /// (target は現在位置より前であってはならない)。範囲内に該当エントリが無ければ
-    /// <c>false</c>。ターゲットが loaded leaf を超えていれば tree root 経由でジャンプし、
-    /// そうでなければ leaf 内を forward scan する。
-    /// </summary>
-    public bool SeekTo(byte[] target)
-    {
-        if (_exhausted) return false;
-        ReadOnlySpan<byte> t = target;
-        if (CurrentKey.Length > 0 && ((ReadOnlySpan<byte>)CurrentKey).SequenceCompareTo(t) >= 0)
-            return true;
-
-        // Fast path: target lands inside the loaded leaf (last key already >= target).
-        if (_entries != null && _entries.Count > 0 &&
-            ((ReadOnlySpan<byte>)_entries[^1].Key).SequenceCompareTo(t) >= 0)
-        {
-            _needLowerSkip = false;
-            while (_idx < _entries.Count)
-            {
-                var (k, v) = _entries[_idx++];
-                ReadOnlySpan<byte> ks = k;
-                if (ks.SequenceCompareTo(_upperInclusive) > 0) { _exhausted = true; return false; }
-                if (ks.SequenceCompareTo(t) >= 0) { CurrentKey = k; CurrentValue = v; return true; }
-            }
-        }
-
-        // Slow path: descend from the root to the leaf that would hold target.
-        _lower = target;
-        _needLowerSkip = true;
-        _nextLeafToLoad = _findLeaf(target);
-        _entries = null;
-        if (!_nextLeafToLoad.IsValid) { _exhausted = true; return false; }
-        return MoveNext();
-    }
-
-    private void LoadLeaf(PageId leaf)
-    {
-        using var h = _file.PinForRead(leaf);
-        int count = BinaryPrimitives.ReadInt32LittleEndian(h.Data);
-        long nextLeaf = BinaryPrimitives.ReadInt64LittleEndian(h.Data[4..]);
-        _entries = new List<(byte[], long)>(count);
-        int pos = BL.LeafHdr;
-        for (int i = 0; i < count; i++)
-        {
-            int klen = BinaryPrimitives.ReadInt16LittleEndian(h.Data[pos..]);
-            byte[] k = h.Data.Slice(pos + 2, klen).ToArray();
-            long v = BinaryPrimitives.ReadInt64LittleEndian(h.Data[(pos + 2 + klen)..]);
-            _entries.Add((k, v)); pos += 2 + klen + 8;
-        }
-        _idx = 0;
-        _nextLeafToLoad = new PageId(nextLeaf);
-    }
-}
-

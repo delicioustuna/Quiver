@@ -32,7 +32,7 @@ public class FusionOperatorBench
     {
         _dir = BenchTempDir.Create("fusion");
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        _db.EditSchema(schema => schema.CreateFullTextIndex(TextIndex, "Doc", "body"));
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(TextIndex, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
         _db.EditSchema(schema =>
         {
             schema.GetOrCreatePropertyKey("embed");

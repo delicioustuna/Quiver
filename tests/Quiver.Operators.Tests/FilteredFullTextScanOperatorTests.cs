@@ -76,7 +76,7 @@ public sealed class FilteredFullTextScanOperatorTests
     public void Empty_upstream_returns_no_results()
     {
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_empty_up");
-        fx.EditSchema(schema => schema.CreateFullTextIndex(IndexName, "Doc", "body"));
+        fx.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(IndexName, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
         using (var seed = fx.Db.BeginWriteTransaction())
         {
             var n = seed.CreateVertex("Doc");
@@ -100,7 +100,7 @@ public sealed class FilteredFullTextScanOperatorTests
         VertexId included = default;
         VertexId excluded = default;
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_filter");
-        fx.EditSchema(schema => schema.CreateFullTextIndex(IndexName, "Doc", "body"));
+        fx.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(IndexName, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
         using (var seed = fx.Db.BeginWriteTransaction())
         {
             included = seed.CreateVertex("Doc");
@@ -127,7 +127,7 @@ public sealed class FilteredFullTextScanOperatorTests
     {
         VertexId candidate = default;
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_nohit");
-        fx.EditSchema(schema => schema.CreateFullTextIndex(IndexName, "Doc", "body"));
+        fx.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(IndexName, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
         using (var seed = fx.Db.BeginWriteTransaction())
         {
             candidate = seed.CreateVertex("Doc");
@@ -148,7 +148,7 @@ public sealed class FilteredFullTextScanOperatorTests
     {
         var ids = new VertexId[5];
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_klimit");
-        fx.EditSchema(schema => schema.CreateFullTextIndex(IndexName, "Doc", "body"));
+        fx.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(IndexName, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
         using (var seed = fx.Db.BeginWriteTransaction())
         {
             for (int i = 0; i < 5; i++)
@@ -176,7 +176,7 @@ public sealed class FilteredFullTextScanOperatorTests
     {
         var ids = new VertexId[3];
         using var fx = OperatorTestFixture.OpenEmpty(tag: "ffts_stats");
-        fx.EditSchema(schema => schema.CreateFullTextIndex(IndexName, "Doc", "body"));
+        fx.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(IndexName, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
         using (var seed = fx.Db.BeginWriteTransaction())
         {
             for (int i = 0; i < 3; i++)

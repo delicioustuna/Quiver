@@ -21,7 +21,7 @@ flowchart TB
         API["QuiverDatabase / GraphTransaction<br/>Fluent Traversal / Match DSL"]
         Query["Query Engine"]
         TxMgr["Transaction Manager<br/>MVCC / Checkpoint"]
-        Index["B+Tree / FullTextIndex"]
+        Index["Scalar B+Tree / Immutable Full-Text Segments"]
         Records["VertexStore / EdgeStore<br/>PropertyStore"]
         Vector["Vector property + immutable HNSW segments"]
         WAL["Write-Ahead Log"]

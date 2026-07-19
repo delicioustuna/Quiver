@@ -294,7 +294,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             // definition catalog も container WAL 対象なので、abort undo 後は
             // page の winner state から in-memory view を再構成する。
             vectorDefinitions.Reload();
-            // B+Tree 索引 (secondary + 全文 postings/norms) の in-memory ヘッダキャッシュ
+            // scalar B+Treeとdefinition catalogのin-memory cache
             // (root / entryCount / height) も abort で戻ったページから読み直す。これが無いと
             // EntryCount が陳腐化し、索引 split を含む tx の abort で root/height が不整合になる。
             indexManager.ReloadAll();

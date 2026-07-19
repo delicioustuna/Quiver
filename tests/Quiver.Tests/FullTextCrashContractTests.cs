@@ -13,7 +13,7 @@ namespace Quiver.Tests;
 /// <c>g.Search</c> のエンジンレベルで検証する。
 /// コミット、プロセス停止の模擬、再オープン、リカバリーの順に実行し、
 /// 検索結果がコミット済み文書集合と一致することを確認する。
-/// Postings と Norms は通常の B+Tree なので、QUIVER-SW の PageImage WAL で復旧する。
+/// segment bodyはappend-only artifact、manifestはpage-WALで復旧する。
 ///
 /// Windows では停止した同一プロセスが排他的ファイルハンドルを再利用できないため、
 /// ハンドルの破棄とファイナライザーの強制実行でプロセス停止を模擬してから再オープンする。
@@ -52,7 +52,7 @@ public sealed class FullTextCrashContractTests : IDisposable
     private QuiverDatabase OpenAndCreateIndex()
     {
         var db = Open();
-        db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
+        db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
         return db;
     }
 
@@ -126,7 +126,7 @@ public sealed class FullTextCrashContractTests : IDisposable
         Kill(db);
 
         using var reopened = Open();
-        // Committed doc is intact; the uncommitted PageImage is not replayed.
+        // Committed doc is intact; uncommitted primary pages and manifest are not replayed.
         Search(reopened, "keepme9999").Should().ContainSingle().Which.Should().Be(committed);
         Search(reopened, "doomed7777").Should().BeEmpty("uncommitted postings must not survive a kill");
         using var rtx = reopened.BeginReadTransaction();
@@ -214,7 +214,7 @@ public sealed class FullTextCrashContractTests : IDisposable
     // ===== コミットレコードだけが失われた不完全コミット =====
 
     /// <summary>
-    /// Vertex body と全文 B+Tree の PageImage に続く Commit record を途中で切り詰める。
+    /// Vertex body と全文manifestの PageImage に続く Commit record を途中で切り詰める。
     /// checksum を検証できない Commit を無視して開くと primary と posting の可視性が分かれうるため、
     /// open は通常 operation を受け付ける前に corruption として拒否する。
     /// </summary>
@@ -239,10 +239,10 @@ public sealed class FullTextCrashContractTests : IDisposable
             .Should().Throw<CorruptionException>();
     }
 
-    // ===== abort 後の PageImage は committed key を上書きしない =====
+    // ===== abort 後のmanifest PageImageはcommitted segment参照を上書きしない =====
 
     /// <summary>
-    /// abort した transaction の PageImage が、その後 commit された同じ postings key を上書きしないことを検証する。
+    /// abortしたtransactionのmanifest PageImageが、その後commitされたsegment参照を上書きしないことを検証する。
     /// シナリオ:
     ///   tx1: E1="alice"            commit  ((alice,E1) postings)
     ///   tx2: E1="bob"  -> Rollback
@@ -282,10 +282,10 @@ public sealed class FullTextCrashContractTests : IDisposable
             "aborted tx must not resurrect a key the committed state removed");
     }
 
-    // ===== RollbackTo(savepoint) は全文 B+Tree のページ変更も巻き戻す =====
+    // ===== RollbackTo(savepoint) は全文mutation bufferも巻き戻す =====
 
     /// <summary>
-    /// savepoint への部分 rollback は、savepoint 以降の全文 B+Tree ページ変更も巻き戻す。
+    /// savepointへの部分rollbackは、savepoint以降の全文mutation bufferも巻き戻す。
     ///
     /// シナリオ (単一 tx 内):
     ///   tx1: E1="alice"                 commit  (alice→E1)
@@ -312,14 +312,14 @@ public sealed class FullTextCrashContractTests : IDisposable
         Search(db, "alice").Should().ContainSingle().Which.Should().Be(e1,
             "RollbackTo restored E1.body=\"alice\" so the alice posting must be present");
         Search(db, "bob").Should().BeEmpty(
-            "RollbackTo must undo the savepoint's FT mutations (audit #2): the bob posting was rolled back");
+            "RollbackTo must undo the savepoint's full-text mutations");
         db.Dispose();
     }
 
-    // ===== savepoint rollback 後の PageImage が crash recovery でも保たれる =====
+    // ===== savepoint rollback後のmanifestがcrash recoveryでも保たれる =====
 
     /// <summary>
-    /// RollbackTo 後に commit した PageImage が rollback 後の状態を表し、crash recovery でも破棄分が蘇らないことを検証する。
+    /// RollbackTo後にcommitしたmanifestがrollback後の状態を表し、crash recoveryでも破棄分が蘇らないことを検証する。
     /// </summary>
     [Fact]
     public void RollbackToSavepoint_fulltext_undo_survives_kill()
@@ -347,10 +347,10 @@ public sealed class FullTextCrashContractTests : IDisposable
             "rolled-back FT mutation must not resurface after recovery");
     }
 
-    // ===== (j) 監査 #2: rollback 後に full abort しても二重破壊しない =====
+    // ===== rollback後にfull abortしても二重破壊しない =====
 
     /// <summary>
-    /// savepoint 以降の全文 B+Tree 更新を RollbackTo で戻した後、transaction 全体を abort する。
+    /// savepoint以降の全文mutationをRollbackToで戻した後、transaction全体をabortする。
     /// 最終的に transaction 開始前の committed 状態へ戻る。
     ///   tx1: E1="alice"               commit
     ///   tx2: sp=Savepoint(); E1="bob"; RollbackTo(sp); E1="charlie"; Rollback() (full abort)

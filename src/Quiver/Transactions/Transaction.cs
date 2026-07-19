@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Quiver.Core;
 using Quiver.Index;
+using Quiver.Index.FullText;
 using Quiver.Storage.Records;
 using Quiver.Storage.Wal;
 using Quiver.Telemetry;
@@ -46,6 +47,7 @@ internal sealed class Transaction : ITransaction
     public IVertexIncidenceHeadStore VertexIncidenceHeads => _vertexIncidenceHeads;
     public IPropertyStore Properties => _properties;
     public IIndexManager Indexes => _indexes;
+    public FullTextSegmentIndex? FullTextSegments => _manager.FullTextSegments;
     public IAdjacencySegmentStore? AdjacencySegments => _adjacencyStore;
     public ICoMembershipBlockStore? CoMembershipBlocks
         => _nexuses.HasPendingViewAdds ? null : _coMembershipStore;

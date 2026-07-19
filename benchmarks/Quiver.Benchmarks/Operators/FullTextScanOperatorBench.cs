@@ -28,7 +28,7 @@ public class FullTextScanOperatorBench
     {
         _dir = BenchTempDir.Create("ftscan");
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
-        _db.EditSchema(schema => schema.CreateFullTextIndex(IndexName, "Doc", "body"));
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(IndexName, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
 
         using (var tx = _db.BeginWriteTransaction())
         {

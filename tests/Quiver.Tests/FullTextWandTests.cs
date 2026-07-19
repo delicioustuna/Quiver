@@ -5,6 +5,7 @@ using Quiver.Core;
 using Quiver.Index.FullText;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
+using Quiver.Transactions;
 using Xunit;
 
 namespace Quiver.Tests;
@@ -27,7 +28,7 @@ public sealed class FullTextWandTests : IDisposable
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fts8_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
-        _db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
     }
 
     public void Dispose()
@@ -71,9 +72,12 @@ public sealed class FullTextWandTests : IDisposable
         tx.Commit();
     }
 
-    private FullTextIndex Ft()
+    private FullTextSegmentSnapshot Ft()
     {
-        _db.SchemaApiForTesting.IndexManager.TryGetFullTextIndex(Index, out var ft).Should().BeTrue();
+        using var transaction = _db.BeginReadTransaction();
+        ITransaction inner = transaction.AsInternal().Inner;
+        inner.FullTextSegments.Should().NotBeNull();
+        inner.FullTextSegments!.TryOpen(inner, Index, out var ft).Should().BeTrue();
         return ft;
     }
 
@@ -177,15 +181,11 @@ public sealed class FullTextWandTests : IDisposable
     }
 
     [Fact]
-    public void Wand_matches_full_scan_across_multiple_btree_leaves()
+    public void Wand_matches_full_scan_across_large_postings()
     {
-        // ~900 docs share "common" so its postings span several B+Tree leaves (≈313
-        // entries per 8160-byte leaf). WAND must traverse leaf links and, while pruning
-        // the low-idf common-only docs, SeekTo across leaf boundaries via the root descent
-        // (BTreeRawCursor's slow path — the skip-pointer substitute, untested by the small
-        // corpora). A rare "needle" seeded into scattered docs supplies the pivots that
-        // force those cross-leaf seeks. Two-term queries keep the comparison free of
-        // float summation-order differences (those need 3+ terms; review item #2).
+        // ~900 docs share "common". WAND must SeekTo across a large immutable postings
+        // array while pruning low-idf common-only docs. A rare "needle" seeded into
+        // scattered docs supplies pivots that force long skips.
         const int n = 900;
         var needleAt = new HashSet<int> { 50, 200, 400, 480, 620, 770, 899 };
         var bodies = new List<string>(n);
@@ -202,7 +202,7 @@ public sealed class FullTextWandTests : IDisposable
         {
             var wand = SearchWand(q, k: 10);
             var full = SearchFullScan(q, k: 10);
-            wand.Should().Equal(full, "WAND must equal the full scan across multiple leaves for '{0}'", q);
+            wand.Should().Equal(full, "WAND must equal the full scan across large postings for '{0}'", q);
         }
     }
 
@@ -223,7 +223,7 @@ public sealed class FullTextWandTests : IDisposable
 
         var corpus = stale.FullTextCorpus(Index)!.Value;
         var ft = Ft();
-        var tokenizer = _db.SchemaApiForTesting.IndexManager.ResolveTokenizer(ft.TokenizerId);
+        var tokenizer = ft.Tokenizer;
 
         // 同一 (stale) stats 基準での exact 全走査と WAND を比較する。
         var exact = Bm25Scorer.Rank(
@@ -234,7 +234,7 @@ public sealed class FullTextWandTests : IDisposable
 
         wand.Should().Equal(exact,
             "WAND must return the same exact top-k as the full scan under the same stats basis " +
-            "even when the snapshot maxTf/minDocLen are stale relative to the live postings (audit #3)");
+            "even when snapshot maxTf/minDocLen are stale relative to live postings");
     }
 
     [Fact]
@@ -252,7 +252,7 @@ public sealed class FullTextWandTests : IDisposable
 
         var corpus = _db.CollectStats().FullTextCorpus(Index)!.Value;
         var ft = Ft();
-        var tokenizer = _db.SchemaApiForTesting.IndexManager.ResolveTokenizer(ft.TokenizerId);
+        var tokenizer = ft.Tokenizer;
 
         var full = Bm25Scorer.RankWand(
             ft, tokenizer, "x", corpus.DocumentCount, corpus.AverageDocLength, corpus.Terms!, k: 6, isLive: null)!;
