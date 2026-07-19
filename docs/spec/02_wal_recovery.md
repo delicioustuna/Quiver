@@ -67,6 +67,8 @@ WAL record LSN と payload 内の page LSN が一致しない image は corrupti
 `FileTruncate` は payload の file kind と page count を検証して冪等に再適用する。
 
 crash recovery は loser の undo pass、論理 mutation、compensation record、全文専用 pass を持たない。
+
+全文 segment は primary text property から再構築できる derived artifact であり、segment-local posting、norm、tombstone の専用 WAL record を持たない。
 loser の物理変更は no-steal によってデータファイルへ到達しないため、winner redo だけで復旧できる。
 
 open はデータベースと WAL のヘッダ、WAL record、再生する page image を検証し、recovery と完了 checkpoint を終えてから通常 operation を受け付ける。

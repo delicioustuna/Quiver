@@ -451,9 +451,10 @@ public sealed class RagStore
             using var schemaTx = _db.BeginWriteTransaction();
             var schema = schemaTx.EditSchema;
             bool exists = false;
-            foreach (var ft in schema.ListFullTextIndexes())
+            foreach (IndexInfo ft in schema.ListIndexes())
             {
-                if (string.Equals(ft.Name, RagSchema.ChunkTextIndex, StringComparison.Ordinal))
+                if (ft.Definition is FullTextIndexDefinition
+                    && string.Equals(ft.Name, RagSchema.ChunkTextIndex, StringComparison.Ordinal))
                 {
                     exists = true;
                     break;
@@ -462,8 +463,7 @@ public sealed class RagStore
             if (!exists && _options.EnableFullTextIndex)
             {
                 // 見出し語も BM25 で引けるよう searchText (= 見出しパス + 本文) を索引対象にする。
-                schema.CreateFullTextIndex(
-                    RagSchema.ChunkTextIndex, RagSchema.ChunkLabel, RagSchema.PropSearchText);
+                schema.CreateIndex(new FullTextIndexDefinition(RagSchema.ChunkTextIndex, new PropertyTarget(PropertyOwnerKind.Vertex, RagSchema.PropSearchText, RagSchema.ChunkLabel)));
                 exists = true;
             }
             schemaTx.Commit();

@@ -120,6 +120,13 @@ if (args.Length >= 1 && args[0] == "--clean-slate-segment-spike")
     return CleanSlateFullTextVectorSegmentSpikeRunner.Run(args.Skip(1).ToArray());
 }
 
+// product全文segmentのfan-out、merge、WAL、publish gate。
+// Usage: -- --fulltext-segment-publish [documents] [queries]
+if (args.Length >= 1 && args[0] == "--fulltext-segment-publish")
+{
+    return FullTextSegmentPublishRunner.Run(args.Skip(1).ToArray());
+}
+
 // product vector segment build/publish gate。
 // Usage: -- --vector-segment-publish [vectors] [dimensions]
 if (args.Length >= 1 && args[0] == "--vector-segment-publish")

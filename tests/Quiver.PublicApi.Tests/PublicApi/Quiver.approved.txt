@@ -588,21 +588,21 @@ namespace Quiver
         public void Dispose() { }
         public bool MoveNext() { }
     }
-    public sealed class FullTextIndexInfo : System.IEquatable<Quiver.FullTextIndexInfo>
+    public sealed class FullTextIndexDefinition : Quiver.IndexDefinition, System.IEquatable<Quiver.FullTextIndexDefinition>
     {
-        public FullTextIndexInfo(string Name, string Label, string PropertyKey, string TokenizerId) { }
-        public string Label { get; init; }
-        public string Name { get; init; }
-        public string PropertyKey { get; init; }
+        public FullTextIndexDefinition(string Name, Quiver.PropertyTarget Target, string TokenizerId = "mixed-bigram-unigram-v1", System.Collections.Generic.IReadOnlyList<Quiver.Text.ITokenFilter>? Filters = null, double K1 = 1.2, double B = 0.75, Quiver.FullTextSegmentPolicy? SegmentPolicy = null) { }
+        public double B { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Quiver.Text.ITokenFilter>? Filters { get; init; }
+        public double K1 { get; init; }
+        public Quiver.FullTextSegmentPolicy? SegmentPolicy { get; init; }
         public string TokenizerId { get; init; }
     }
-    public sealed class FullTextIndexOptions : System.IEquatable<Quiver.FullTextIndexOptions>
+    public sealed class FullTextSegmentPolicy : System.IEquatable<Quiver.FullTextSegmentPolicy>
     {
-        public FullTextIndexOptions() { }
-        public double B { get; init; }
-        public System.Collections.Generic.IReadOnlyList<Quiver.Text.ITokenFilter> Filters { get; init; }
-        public double K1 { get; init; }
-        public string TokenizerId { get; init; }
+        public FullTextSegmentPolicy(int MaximumDeltaEntries = 4096, int MaximumSegments = 4, double MaximumTombstoneRatio = 0.3) { }
+        public int MaximumDeltaEntries { get; init; }
+        public int MaximumSegments { get; init; }
+        public double MaximumTombstoneRatio { get; init; }
     }
     public sealed class GraphStats
     {
@@ -699,7 +699,6 @@ namespace Quiver
         Quiver.Core.PropertyCardinality GetPropertyKeyCardinality(Quiver.Core.PropertyKeyId id);
         bool IndexExists(string indexName);
         System.Collections.Generic.IReadOnlyList<string> ListEdgeTypes();
-        System.Collections.Generic.IReadOnlyList<Quiver.FullTextIndexInfo> ListFullTextIndexes();
         System.Collections.Generic.IReadOnlyList<Quiver.IndexInfo> ListIndexes();
         System.Collections.Generic.IReadOnlyList<string> ListLabels();
         System.Collections.Generic.IReadOnlyList<string> ListNexusTypes();
@@ -713,7 +712,6 @@ namespace Quiver
     }
     public interface ISchemaEditor : Quiver.ISchemaCatalog
     {
-        void CreateFullTextIndex(string indexName, string label, string propertyKey, Quiver.FullTextIndexOptions? options = null);
         void CreateIndex(Quiver.IndexDefinition definition);
         void DropIndex(string indexName);
         Quiver.Core.EdgeTypeId GetOrCreateEdgeType(string name);

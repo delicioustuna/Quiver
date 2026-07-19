@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Quiver.Core;
 using Quiver.Index;
+using Quiver.Index.FullText;
 using Quiver.Storage.Records;
 using Quiver.Storage.Wal;
 using Quiver.Telemetry;
@@ -88,6 +89,7 @@ internal sealed class TransactionManager : ITransactionManager
     internal INexusStore NexusStore => _nexusStore;
     internal IIncidenceStore IncidenceStore => _incidenceStore;
     internal IVertexIncidenceHeadStore VertexIncidenceHeadStore => _vertexIncidenceHeadStore;
+    internal FullTextSegmentIndex? FullTextSegments { get; set; }
 
     public int ActiveCount => _active.Count;
 

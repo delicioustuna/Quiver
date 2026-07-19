@@ -1,4 +1,5 @@
 using Quiver.Core;
+using Quiver.Text;
 
 namespace Quiver;
 
@@ -31,9 +32,6 @@ public interface ISchemaCatalog
 
     /// <summary>指定名の index definition と現在の artifact 状態を返す。</summary>
     bool TryGetIndex(string indexName, out IndexInfo info);
-
-    /// <summary>登録済み全文索引の一覧を返す。</summary>
-    IReadOnlyList<FullTextIndexInfo> ListFullTextIndexes();
 
     /// <summary>登録済みラベル名の一覧を返す。</summary>
     IReadOnlyList<string> ListLabels();
@@ -80,13 +78,6 @@ public interface ISchemaEditor : ISchemaCatalog
 
     /// <summary>既存 index definition を削除する。</summary>
     void DropIndex(string indexName);
-
-    /// <summary>全文索引を作成する。</summary>
-    void CreateFullTextIndex(
-        string indexName,
-        string label,
-        string propertyKey,
-        FullTextIndexOptions? options = null);
 
     /// <summary>ラベル名を変更する。</summary>
     bool RenameLabel(string oldName, string newName);
@@ -199,6 +190,32 @@ public sealed record VectorIndexDefinition(
     int HnswEfConstruction = 400,
     VectorSegmentPolicy? SegmentPolicy = null) : IndexDefinition(Name, Target);
 
+/// <summary>全文 delta segment と immutable merge segment の統合方針。</summary>
+/// <param name="MaximumDeltaEntries">merge を開始する文書変更数。</param>
+/// <param name="MaximumSegments">検索対象 segment 数の上限。</param>
+/// <param name="MaximumTombstoneRatio">merge を開始する tombstone 比率。</param>
+public sealed record FullTextSegmentPolicy(
+    int MaximumDeltaEntries = 4096,
+    int MaximumSegments = 4,
+    double MaximumTombstoneRatio = 0.30);
+
+/// <summary>text property を BM25 で検索する全文 index definition。</summary>
+/// <param name="Name">一意な index 名。</param>
+/// <param name="Target">対象のtext property。</param>
+/// <param name="TokenizerId">書込みと検索で共通利用するtokenizer ID。</param>
+/// <param name="Filters">tokenizerの後段へ順に適用するfilter。</param>
+/// <param name="K1">BM25のterm frequency飽和パラメータ。</param>
+/// <param name="B">BM25の文書長正規化パラメータ。</param>
+/// <param name="SegmentPolicy">deltaとsegmentの統合方針。</param>
+public sealed record FullTextIndexDefinition(
+    string Name,
+    PropertyTarget Target,
+    string TokenizerId = MixedBigramTokenizer.UnigramTokenizerId,
+    IReadOnlyList<ITokenFilter>? Filters = null,
+    double K1 = 1.2,
+    double B = 0.75,
+    FullTextSegmentPolicy? SegmentPolicy = null) : IndexDefinition(Name, Target);
+
 /// <summary>登録済み index definition と artifact 状態。</summary>
 /// <param name="Definition">永続 definition。</param>
 /// <param name="State">artifact の lifecycle state。</param>
@@ -214,6 +231,6 @@ public sealed record IndexInfo(
     /// <summary>対象プロパティ。</summary>
     public PropertyTarget Target => Definition.Target;
 
-    /// <summary>scalar index の比較方法。vector index では <c>null</c>。</summary>
+    /// <summary>scalar index の比較方法。全文とvector indexでは<c>null</c>。</summary>
     public IndexKind? Kind => (Definition as ScalarIndexDefinition)?.Kind;
 }

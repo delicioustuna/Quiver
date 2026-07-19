@@ -44,7 +44,7 @@ public sealed class RagStoreInitializationTests : IDisposable
 
         // 全文索引 (binary backend は対応)。
         store.FullTextEnabled.Should().BeTrue();
-        db.Schema.ListFullTextIndexes()
+        db.Schema.ListIndexes().Where(i => i.Definition is FullTextIndexDefinition).ToArray()
             .Select(i => i.Name).Should().Contain(RagSchema.ChunkTextIndex);
     }
 
@@ -60,7 +60,7 @@ public sealed class RagStoreInitializationTests : IDisposable
 
         // 索引は重複作成されず 1 件ずつ。
         db.Schema.ListIndexes().Count(i => i.Name == RagSchema.DocSourceIndex).Should().Be(1);
-        db.Schema.ListFullTextIndexes().Count(i => i.Name == RagSchema.ChunkTextIndex).Should().Be(1);
+        db.Schema.ListIndexes().Where(i => i.Definition is FullTextIndexDefinition).ToArray().Count(i => i.Name == RagSchema.ChunkTextIndex).Should().Be(1);
     }
 
     [Fact]
@@ -78,7 +78,7 @@ public sealed class RagStoreInitializationTests : IDisposable
             store.FullTextEnabled.Should().BeTrue();
             db.Schema.IndexExists(RagSchema.DocSourceIndex).Should().BeTrue();
             db.Schema.TryGetIndex(RagSchema.ChunkVectorIndex, out _).Should().BeTrue();
-            db.Schema.ListFullTextIndexes().Count(i => i.Name == RagSchema.ChunkTextIndex).Should().Be(1);
+            db.Schema.ListIndexes().Where(i => i.Definition is FullTextIndexDefinition).ToArray().Count(i => i.Name == RagSchema.ChunkTextIndex).Should().Be(1);
         }
     }
 
@@ -89,7 +89,7 @@ public sealed class RagStoreInitializationTests : IDisposable
         var store = new RagStore(db, Options() with { EnableFullTextIndex = false });
 
         store.FullTextEnabled.Should().BeFalse();
-        db.Schema.ListFullTextIndexes().Select(i => i.Name)
+        db.Schema.ListIndexes().Where(i => i.Definition is FullTextIndexDefinition).ToArray().Select(i => i.Name)
             .Should().NotContain(RagSchema.ChunkTextIndex);
         // ベクトル索引は引き続き作られる。
         db.Schema.TryGetIndex(RagSchema.ChunkVectorIndex, out _).Should().BeTrue();
@@ -154,7 +154,7 @@ public sealed class RagStoreInitializationTests : IDisposable
         {
             var store = new RagStore(db, Options() with { EnableFullTextIndex = false });
             store.FullTextEnabled.Should().BeTrue();
-            db.Schema.ListFullTextIndexes().Count(i => i.Name == RagSchema.ChunkTextIndex).Should().Be(1);
+            db.Schema.ListIndexes().Where(i => i.Definition is FullTextIndexDefinition).ToArray().Count(i => i.Name == RagSchema.ChunkTextIndex).Should().Be(1);
         }
     }
 

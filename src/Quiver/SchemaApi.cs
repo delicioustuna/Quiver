@@ -119,6 +119,7 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
 
     public bool IndexExists(string indexName)
         => _indexManager.ListIndexes().Contains(indexName)
+            || _indexManager.ListFullTextDefinitions().Any(index => index.Name == indexName)
             || _vectorDefinitions?.TryGet(indexName, out _) == true;
 
     public void CreateIndex(IndexDefinition definition)
@@ -131,6 +132,8 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
         ArgumentNullException.ThrowIfNull(definition);
         if (definition is VectorIndexDefinition vector)
             return CreateVectorIndex(vector, owner);
+        if (definition is FullTextIndexDefinition fullText)
+            return CreateFullTextDefinition(fullText, owner);
         if (definition is not ScalarIndexDefinition scalar)
             throw new NotSupportedException(
                 $"index definition '{definition.GetType().Name}' はサポートされていません。");
@@ -328,6 +331,8 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
             _vectorDefinitions.Drop(indexName);
             return;
         }
+        if (_indexManager.DropFullTextDefinition(indexName))
+            return;
         _indexManager.DropIndex(indexName);
     }
 
@@ -350,6 +355,18 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
                     IndexLifecycleState.Ready,
                     0));
             }
+        }
+        foreach ((string name, string target, string propertyKey, string storedTokenizerId)
+                 in _indexManager.ListFullTextDefinitions())
+        {
+            result.Add(new IndexInfo(
+                Index.FullText.FullTextDefinitionCodec.Decode(
+                    name,
+                    target,
+                    propertyKey,
+                    storedTokenizerId),
+                IndexLifecycleState.Ready,
+                0));
         }
         return result;
     }
@@ -404,37 +421,52 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
         };
 
-    public void CreateFullTextIndex(string indexName, string label, string propertyKey, FullTextIndexOptions? options = null)
-        => CreateFullTextIndex(indexName, label, propertyKey, options, owner: null);
-
-    private void CreateFullTextIndex(
-        string indexName,
-        string label,
-        string propertyKey,
-        FullTextIndexOptions? options,
+    private bool CreateFullTextDefinition(
+        FullTextIndexDefinition definition,
         TransactionId? owner)
     {
-        using var lease = owner is { } transactionId
-            ? AcquireMutationLease(transactionId)
-            : AcquireMutationLease();
-        options ??= new FullTextIndexOptions();
-        var tokenizerId = options.TokenizerId;
-        if (options.Filters.Count > 0)
+        string tokenizerId = definition.TokenizerId;
+        if (definition.Filters is { Count: > 0 })
         {
             var baseTokenizer = _indexManager.ResolveTokenizer(tokenizerId);
-            var filtered = new Text.FilteredTokenizer(baseTokenizer, [.. options.Filters]);
+            var filtered = new Text.FilteredTokenizer(baseTokenizer, [.. definition.Filters]);
             tokenizerId = filtered.TokenizerId;
             _indexManager.RegisterTokenizer(filtered);
         }
-        _indexManager.CreateFullTextIndex(indexName, label, propertyKey, tokenizerId);
-    }
+        FullTextIndexDefinition storedDefinition = definition with
+        {
+            TokenizerId = tokenizerId,
+            SegmentPolicy = definition.SegmentPolicy ?? new(),
+        };
 
-    public IReadOnlyList<FullTextIndexInfo> ListFullTextIndexes()
-    {
-        var result = new List<FullTextIndexInfo>();
-        foreach (var (name, label, propKey, tokenizerId) in _indexManager.ListFullTextIndexes())
-            result.Add(new FullTextIndexInfo(name, label, propKey, tokenizerId));
-        return result;
+        foreach ((string name, string target, string propertyKey, string storedTokenizerId)
+                 in _indexManager.ListFullTextDefinitions())
+        {
+            if (name != definition.Name)
+                continue;
+            FullTextIndexDefinition existing =
+                Index.FullText.FullTextDefinitionCodec.Decode(
+                name,
+                target,
+                propertyKey,
+                storedTokenizerId);
+            if (Index.FullText.FullTextSegmentIndex.DefinitionEquivalent(
+                    existing,
+                    storedDefinition))
+                return false;
+            throw new ConstraintException(
+                $"Index definition '{definition.Name}' already exists with a different target or options.");
+        }
+
+        using var lease = owner is { } transactionId
+            ? AcquireMutationLease(transactionId)
+            : AcquireMutationLease();
+        _indexManager.CreateFullTextDefinition(
+            definition.Name,
+            Index.FullText.FullTextDefinitionCodec.Encode(storedDefinition),
+            definition.Target.PropertyKey,
+            tokenizerId);
+        return true;
     }
 
     public bool RenameLabel(string oldName, string newName)
@@ -570,7 +602,6 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
         private readonly string[] _roles;
         private readonly Dictionary<string, RoleId> _roleIds;
         private readonly IndexInfo[] _indexes;
-        private readonly FullTextIndexInfo[] _fullTextIndexes;
 
         internal SnapshotSchemaCatalog(SchemaApi schema)
         {
@@ -643,7 +674,6 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
                     },
                     StringComparer.Ordinal);
             _indexes = [.. schema.ListIndexes()];
-            _fullTextIndexes = [.. schema.ListFullTextIndexes()];
         }
 
         public PropertyCardinality GetPropertyKeyCardinality(PropertyKeyId id)
@@ -673,8 +703,6 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
             info = default!;
             return false;
         }
-        public IReadOnlyList<FullTextIndexInfo> ListFullTextIndexes()
-            => _fullTextIndexes;
         public IReadOnlyList<string> ListLabels() => [.. _labelIds.Keys];
         public IReadOnlyList<string> ListEdgeTypes() => _edgeTypes;
         public IReadOnlyList<string> ListPropertyKeys() => _propertyKeys;
@@ -721,14 +749,6 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
         public IReadOnlyList<IndexInfo> ListIndexes() => schema.ListIndexes();
         public bool TryGetIndex(string indexName, out IndexInfo info)
             => schema.TryGetIndex(indexName, out info);
-        public void CreateFullTextIndex(
-            string indexName,
-            string label,
-            string propertyKey,
-            FullTextIndexOptions? options = null)
-            => schema.CreateFullTextIndex(indexName, label, propertyKey, options, Owner);
-        public IReadOnlyList<FullTextIndexInfo> ListFullTextIndexes()
-            => schema.ListFullTextIndexes();
         public bool RenameLabel(string oldName, string newName)
             => schema.RenameLabel(oldName, newName, Owner);
         public bool RenamePropertyKey(string oldName, string newName)

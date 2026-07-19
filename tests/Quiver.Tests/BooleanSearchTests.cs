@@ -21,7 +21,7 @@ public sealed class BooleanSearchTests : IDisposable
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_bool_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
-        _db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
     }
 
     public void Dispose()

@@ -52,7 +52,7 @@ public sealed class FullTextCrashContractTests : IDisposable
     private QuiverDatabase OpenAndCreateIndex()
     {
         var db = Open();
-        db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
+        db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
         return db;
     }
 

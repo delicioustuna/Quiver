@@ -5,6 +5,7 @@ using Quiver.Core;
 using Quiver.Index.FullText;
 using Quiver.Query.Physical;
 using Quiver.Storage.Records;
+using Quiver.Transactions;
 using Xunit;
 
 namespace Quiver.Tests;
@@ -27,7 +28,7 @@ public sealed class FullTextWandTests : IDisposable
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fts8_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));
-        _db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
     }
 
     public void Dispose()
@@ -71,9 +72,12 @@ public sealed class FullTextWandTests : IDisposable
         tx.Commit();
     }
 
-    private FullTextIndex Ft()
+    private FullTextSegmentSnapshot Ft()
     {
-        _db.SchemaApiForTesting.IndexManager.TryGetFullTextIndex(Index, out var ft).Should().BeTrue();
+        using var transaction = _db.BeginReadTransaction();
+        ITransaction inner = transaction.AsInternal().Inner;
+        inner.FullTextSegments.Should().NotBeNull();
+        inner.FullTextSegments!.TryOpen(inner, Index, out var ft).Should().BeTrue();
         return ft;
     }
 
@@ -223,7 +227,7 @@ public sealed class FullTextWandTests : IDisposable
 
         var corpus = stale.FullTextCorpus(Index)!.Value;
         var ft = Ft();
-        var tokenizer = _db.SchemaApiForTesting.IndexManager.ResolveTokenizer(ft.TokenizerId);
+        var tokenizer = ft.Tokenizer;
 
         // 同一 (stale) stats 基準での exact 全走査と WAND を比較する。
         var exact = Bm25Scorer.Rank(
@@ -252,7 +256,7 @@ public sealed class FullTextWandTests : IDisposable
 
         var corpus = _db.CollectStats().FullTextCorpus(Index)!.Value;
         var ft = Ft();
-        var tokenizer = _db.SchemaApiForTesting.IndexManager.ResolveTokenizer(ft.TokenizerId);
+        var tokenizer = ft.Tokenizer;
 
         var full = Bm25Scorer.RankWand(
             ft, tokenizer, "x", corpus.DocumentCount, corpus.AverageDocLength, corpus.Terms!, k: 6, isLive: null)!;

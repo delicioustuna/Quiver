@@ -27,6 +27,8 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     private readonly Storage.Records.ColumnManager? _columns;
     private readonly VectorSegmentIndex? _vectorSegments;
     private List<VectorSegmentMutation>? _vectorMutations;
+    private readonly FullTextSegmentIndex? _fullTextSegments;
+    private List<FullTextSegmentMutation>? _fullTextMutations;
     private readonly ISchemaCatalog _schema;
     private readonly ISchemaEditor? _schemaEditor;
     private readonly NexusMergeIndex? _nexusMergeIndex;
@@ -43,6 +45,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         ILogicalMutationSink? logicalSink = null,
         Storage.Records.ColumnManager? columns = null,
         VectorSegmentIndex? vectorSegments = null,
+        FullTextSegmentIndex? fullTextSegments = null,
         NexusMergeIndex? nexusMergeIndex = null)
     {
         _inner = inner;
@@ -56,6 +59,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         IsReadOnly = isReadOnly;
         _logicalSink = logicalSink;
         _vectorSegments = vectorSegments;
+        _fullTextSegments = fullTextSegments;
         _nexusMergeIndex = nexusMergeIndex;
         // 登録済み列があるときだけ列維持を有効化し、ホット path の
         // 余計な hook 登録 / dict lookup を避ける。
@@ -151,8 +155,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         foreach (var heSeq in heToDelete)
             DeleteNexusCore(new NexusId(heSeq));
 
-        if (_inner.Indexes.HasAnyFullTextIndex)
-            RemoveVertexFromFullTextIndexes(vertexId);
+        RemoveFullTextIndexEntries(PropertyOwner(vertexId));
 
         _inner.Vertices.Free(vertexId);
         _columns?.OnDeleteEntity(Core.EntityKind.Vertex, vertexId.Sequence, _inner.Id.Value);
@@ -453,60 +456,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
             && (scope is null || _nexusTypeTokens.GetName(nexus.Type) == scope);
     }
 
-    // 索引の値レーンに (Kind=Vertex, Sequence=vertexId, Generation=現世代) をパックする。
-    // 解決時に現 slot 世代と照合して slot 再利用 (ABA) の stale 参照を弾けるようにする。
-    private long PackVertex(VertexId vertexId)
-        => EntityRef.Pack(EntityKind.Vertex, vertexId.Sequence, _inner.Vertices.CurrentGeneration(vertexId.Sequence));
-
-    // Vertexの (label, key) に bound された全文索引を引く。FT 索引がゼロなら fast-path で null。
-    private FullTextIndex? ResolveFullTextIndex(VertexId vertexId, string key)
-    {
-        if (!_inner.Indexes.HasAnyFullTextIndex) return null;
-        var vertex = _inner.Vertices.Read(vertexId);
-        if (!vertex.InUse || !vertex.Label.IsValid) return null;
-        var labelName = _labelTokens.GetName(vertex.Label);
-        if (string.IsNullOrEmpty(labelName)) return null;
-        return _inner.Indexes.TryGetFullTextIndexByLabelKey(labelName, key, out var ft) ? ft : null;
-    }
-
-    // Vertexの現在の string プロパティ値 (before-image) を読む。非 string / 未設定なら null。
-    private string? ReadVertexStringProperty(VertexId vertexId, PropertyKeyId keyId)
-    {
-        var e = _inner.Vertices.EnumerateProperties(vertexId, _inner.Properties);
-        while (e.MoveNext())
-        {
-            if (e.Current.KeyId != keyId) continue;
-            var v = e.Current.Value;
-            return v.Type == PropertyValueType.String
-                ? System.Text.Encoding.UTF8.GetString(v.Utf8StringValue) : null;
-        }
-        return null;
-    }
-
-    // Vertex削除時に、その string プロパティを bound 全文索引から除去する。
-    private void RemoveVertexFromFullTextIndexes(VertexId vertexId)
-    {
-        var vertex = _inner.Vertices.Read(vertexId);
-        if (!vertex.InUse || !vertex.Label.IsValid) return;
-        var labelName = _labelTokens.GetName(vertex.Label);
-        if (string.IsNullOrEmpty(labelName)) return;
-        long entityId = PackVertex(vertexId);
-        // span は MoveNext で無効化されるため、文字列を先に materialize してから除去する。
-        var docs = new List<(FullTextIndex Ft, string Text)>();
-        var e = _inner.Vertices.EnumerateProperties(vertexId, _inner.Properties);
-        while (e.MoveNext())
-        {
-            var v = e.Current.Value;
-            if (v.Type != PropertyValueType.String) continue;
-            var keyName = _propKeyTokens.GetName(e.Current.KeyId);
-            if (string.IsNullOrEmpty(keyName)) continue;
-            if (_inner.Indexes.TryGetFullTextIndexByLabelKey(labelName, keyName, out var ft))
-                docs.Add((ft, System.Text.Encoding.UTF8.GetString(v.Utf8StringValue)));
-        }
-        foreach (var (ft, text) in docs)
-            _inner.Indexes.MaintainFullText(ft, entityId, text, null);
-    }
-
     // ========== リレーション操作 ==========
 
     public EdgeId CreateEdge(VertexId source, VertexId target, string type)
@@ -566,6 +515,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         if (!_inner.Edges.Read(edgeId).InUse)
             return;
+        RemoveFullTextIndexEntries(PropertyOwner(edgeId));
         FreeEdgeProperties(edgeId);
         // この ID が不変ベースビューに含まれる場合、隣接ブロックには依然として
         // 現れる — 後続の expand カーソルがスキップできるよう tombstone を記録する。
@@ -600,10 +550,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         var keyId = _propKeyTokens.GetOrCreate(key);
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use AddPropertyValue for Set-cardinality property '{key}'.");
-        // 透過維持: この (label, key) に全文索引が bound されているときだけ before-image を読む。
-        // 非索引キーの書き込みは HasAnyFullTextIndex の bool チェックのみで素通り。
-        var ft = ResolveFullTextIndex(vertexId, key);
-        string? oldText = ft is null ? null : ReadVertexStringProperty(vertexId, keyId);
         // SetVertexProperty がチェーンを変更する前にキャプチャする — value は
         // ref struct のため、ヒープコピーは LogicalPropertyValue に閉じ込める。
         if (_logicalSink != null)
@@ -613,15 +559,9 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         }
         var version = SetVertexProperty(vertexId, keyId, in value);
         MaintainScalarIndexes(PropertyOwner(vertexId), key, in value, version);
+        StageFullTextPropertyMutation(PropertyOwner(vertexId), key, version, in value);
         // 列化済み key なら同 tx で列を維持する。
         _columns?.OnSetProperty(Core.EntityKind.Vertex, vertexId.Sequence, keyId, in value, _inner.Id.Value);
-        if (ft is not null)
-        {
-            string? newText = value.Type == PropertyValueType.String
-                ? System.Text.Encoding.UTF8.GetString(value.Utf8StringValue) : null;
-            if (oldText is not null || newText is not null)
-                _inner.Indexes.MaintainFullText(ft, PackVertex(vertexId), oldText, newText);
-        }
     }
 
     public void SetProperty(EdgeId edgeId, string key, in PropertyValue value)
@@ -640,6 +580,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         }
         var version = SetEdgeProperty(edgeId, keyId, in value);
         MaintainScalarIndexes(PropertyOwner(edgeId), key, in value, version);
+        StageFullTextPropertyMutation(PropertyOwner(edgeId), key, version, in value);
         // 列化済み key なら同 tx で列を維持する。
         _columns?.OnSetProperty(Core.EntityKind.Edge, edgeId.Sequence, keyId, in value, _inner.Id.Value);
     }
@@ -759,6 +700,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         // 列化済み key なら列も論理削除する。
             _columns?.OnRemoveProperty(Core.EntityKind.Vertex, vertexId.Sequence, keyId, _inner.Id.Value);
             RemoveVectorIndexEntries(PropertyOwner(vertexId), key);
+            RemoveFullTextIndexEntries(PropertyOwner(vertexId), key);
             if (_logicalSink != null)
                 RecordLogical(LogicalMutation.RemoveVertexProperty(vertexId, key));
         }
@@ -1511,6 +1453,73 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         _vectorSegments.PublishDelta(_inner.Id.Value, _vectorMutations);
     }
 
+    private void StageFullTextPropertyMutation(
+        EntityRef owner,
+        string propertyKey,
+        PropertyVersionRef propertyVersion,
+        in PropertyValue value)
+    {
+        string? text = value.Type == PropertyValueType.String
+            ? System.Text.Encoding.UTF8.GetString(value.Utf8StringValue)
+            : null;
+        foreach (IndexInfo index in _schema.ListIndexes())
+        {
+            if (index.Definition is FullTextIndexDefinition fullText
+                && fullText.Target.PropertyKey == propertyKey
+                && MatchesTarget(owner, fullText.Target))
+            {
+                StageFullTextMutation(new(
+                    fullText,
+                    owner,
+                    propertyVersion,
+                    text));
+            }
+        }
+    }
+
+    private void RemoveFullTextIndexEntries(
+        EntityRef owner,
+        string? propertyKey = null)
+    {
+        foreach (IndexInfo index in _schema.ListIndexes())
+        {
+            if (index.Definition is FullTextIndexDefinition fullText
+                && (propertyKey is null || fullText.Target.PropertyKey == propertyKey)
+                && MatchesTarget(owner, fullText.Target))
+            {
+                StageFullTextMutation(new(
+                    fullText,
+                    owner,
+                    PropertyVersionRef.Invalid,
+                    null));
+            }
+        }
+    }
+
+    private void StageFullTextMutation(FullTextSegmentMutation mutation)
+    {
+        if (_fullTextSegments is null)
+            return;
+        if (_fullTextMutations is null)
+        {
+            _fullTextMutations = [];
+            _fullTextSegments.RegisterPending(
+                _inner.Id.Value,
+                _fullTextMutations);
+            _inner.OnCommitted(PublishFullTextMutations);
+            _inner.OnRolledBack(
+                () => _fullTextSegments.DiscardPending(_inner.Id.Value));
+        }
+        _fullTextMutations.Add(mutation);
+    }
+
+    private void PublishFullTextMutations()
+    {
+        if (_fullTextSegments is null || _fullTextMutations is not { Count: > 0 })
+            return;
+        _fullTextSegments.PublishDelta(_inner.Id.Value, _fullTextMutations);
+    }
+
     // ========== Nexus操作 ==========
 
     public NexusId CreateNexus(string type, ReadOnlySpan<NexusMember> members)
@@ -1623,6 +1632,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
 
     private void DeleteNexusCore(NexusId nexusId)
     {
+        RemoveFullTextIndexEntries(PropertyOwner(nexusId));
         // header の可視性が incidence とプロパティの可視性の正本 — header を論理削除すれば
         // それらも同スナップショットで不可視になる。overflow プロパティレコードは物理的に残る
         // ため、slot を回収できるよう先にチェーンを解放してから header をスタンプする。
@@ -1739,6 +1749,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         }
         var version = SetNexusProperty(nexusId, keyId, in value);
         MaintainScalarIndexes(PropertyOwner(nexusId), key, in value, version);
+        StageFullTextPropertyMutation(PropertyOwner(nexusId), key, version, in value);
         // 列化済み key なら同 tx で列を維持する (列作成の公開糖衣は後続タスク)。
         _columns?.OnSetProperty(Core.EntityKind.Nexus, nexusId.Sequence, keyId, in value, _inner.Id.Value);
     }
@@ -1784,6 +1795,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         {
             _columns?.OnRemoveProperty(Core.EntityKind.Nexus, nexusId.Sequence, keyId, _inner.Id.Value);
             RemoveVectorIndexEntries(PropertyOwner(nexusId), key);
+            RemoveFullTextIndexEntries(PropertyOwner(nexusId), key);
             if (_logicalSink != null)
                 RecordLogical(LogicalMutation.RemoveNexusProperty(nexusId, key));
         }

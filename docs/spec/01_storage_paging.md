@@ -64,7 +64,9 @@ commit が `PageImage` を追記するときに割り当てた LSN を WAL paylo
 
 ## 単一ファイルコンテナ {#single-file}
 
-`TenantPagedFile` は、複数の論理ストア（vertex、edge、nexus、property version、blob、vector payload、adjacency segment、index、全文 posting、全文 norm、catalog）を単一の `*.quiver` ファイルに多重化する。
+`TenantPagedFile` は、複数の論理ストア（vertex、edge、nexus、property version、blob、vector payload、adjacency segment、scalar index、definition catalog）を単一の `*.quiver` ファイルに多重化する。
+
+全文のterm data、document length、stats は immutable derived segment に置き、専用 B+Tree tenant を割り当てない。
 各テナントはカタログが割り当てる `fileKind` バイトで識別される。
 
 Primary vector payload の metadata と blob は固定テナント 29、30 に分離する。

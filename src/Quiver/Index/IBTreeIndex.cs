@@ -175,41 +175,32 @@ internal interface IIndexManager
     /// </summary>
     int RemoveOrphans(IEnumerable<(string IndexName, byte[] RawKey, long Value)> orphans) => 0;
 
-    // ---- 全文索引 (postings + norms テナント) ----
+    // ---- 全文derived index definition ----
 
-    /// <summary>
-    /// 全文索引 (postings + norms の 2 テナント) を作成する。既存なら既存を返す。
-    /// 既定実装は <see cref="NotSupportedException"/> (binary backend のみ対応)。
-    /// </summary>
-    FullTextIndex CreateFullTextIndex(string name, string label, string propertyKey, string tokenizerId)
+    /// <summary>全文derived indexのdefinition参照を作成する。</summary>
+    FullTextCatalogEntry CreateFullTextDefinition(
+        string name,
+        string target,
+        string propertyKey,
+        string tokenizerId)
         => throw new NotSupportedException("Full-text indexes are not supported by this index manager.");
 
-    /// <summary>名前で全文索引を引く。既定実装は false。</summary>
-    bool TryGetFullTextIndex(string name, out FullTextIndex index)
+    /// <summary>名前で全文definition参照を引く。</summary>
+    bool TryGetFullTextDefinition(string name, out FullTextCatalogEntry definition)
     {
-        index = null!;
+        definition = null!;
         return false;
     }
 
-    /// <summary>
-    /// (label, propertyKey) に bound された全文索引を引く (透過維持フックの探索用)。
-    /// 既定実装は false。
-    /// </summary>
-    bool TryGetFullTextIndexByLabelKey(string label, string propertyKey, out FullTextIndex index)
-    {
-        index = null!;
-        return false;
-    }
-
-    /// <summary>登録済み全文索引のメタを列挙する。既定実装は空。</summary>
-    IEnumerable<(string Name, string Label, string PropertyKey, string TokenizerId)> ListFullTextIndexes()
+    /// <summary>登録済み全文definition参照を列挙する。</summary>
+    IEnumerable<(string Name, string Target, string PropertyKey, string TokenizerId)> ListFullTextDefinitions()
         => Array.Empty<(string, string, string, string)>();
 
-    /// <summary>全文索引を削除する。既定実装は false。</summary>
-    bool DropFullTextIndex(string name) => false;
+    /// <summary>全文definition参照を削除する。</summary>
+    bool DropFullTextDefinition(string name) => false;
 
     /// <summary>
-    /// abort の before-image undo 後に、全 B+Tree 索引 (secondary + 全文) の in-memory
+    /// abort の before-image undo 後に、全 B+Tree 索引とdefinitionの in-memory
     /// ヘッダキャッシュを読み直す。<c>ReloadStoreMeta</c> から呼ばれる。既定は no-op。
     /// </summary>
     void ReloadAll() { }
@@ -220,19 +211,6 @@ internal interface IIndexManager
 
     /// <summary>カスタムトークナイザ (フィルタ付きパイプライン等) を registry に登録する。</summary>
     void RegisterTokenizer(ITokenizer tokenizer) { }
-
-    /// <summary>
-    /// 全文索引が 1 つでも存在するか。透過維持フックの fast-path
-    /// (FT 索引がゼロなら SetProperty はVertex読取を省略して素通り)。既定は false。
-    /// </summary>
-    bool HasAnyFullTextIndex => false;
-
-    /// <summary>
-    /// 透過維持: <paramref name="oldText"/> (before-image) の postings/norms を削除し、
-    /// <paramref name="newText"/> を tokenize して挿入する。いずれも null ならその側はスキップ。
-    /// 同一 Tx 内で呼ばれ、B+Tree 操作は page-WAL で保護される。既定は no-op。
-    /// </summary>
-    void MaintainFullText(FullTextIndex index, long entityId, string? oldText, string? newText) { }
 
 }
 

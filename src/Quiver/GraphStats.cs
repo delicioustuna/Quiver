@@ -575,9 +575,11 @@ public sealed class GraphStats
         // 索引ごとに postings と norms を 1 回ずつ走査し、演算子がクエリごとに行う O(N) 走査を避ける。
         // 同時に WAND が必要とする語ごとの (df, maxTf) と minDocLen を供給する。
         var ftCorpora = new Dictionary<string, Bm25CorpusStats>(StringComparer.Ordinal);
-        foreach (var (name, _, _, _) in tx.Indexes.ListFullTextIndexes())
+        foreach (var (name, _, _, _) in tx.Indexes.ListFullTextDefinitions())
         {
-            if (!tx.Indexes.TryGetFullTextIndex(name, out var ft)) continue;
+            if (tx.FullTextSegments is null
+                || !tx.FullTextSegments.TryOpen(tx, name, out var ft))
+                continue;
             var (terms, minDocLen, docCount, totalTokens) = ft.CollectTermStats();
             double avgdl = docCount > 0 ? (double)totalTokens / docCount : 0.0;
             ftCorpora[name] = new Bm25CorpusStats(docCount, avgdl, new Bm25TermStats(terms, minDocLen));

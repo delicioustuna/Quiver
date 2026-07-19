@@ -31,6 +31,7 @@ Quiver.Query.Physical          ← Volcano 型物理演算子
 Quiver.Transactions            ← TransactionManager / LockManager / RecoveryManager
 Quiver.Storage.Wal             ← Write-Ahead Log（group commit）
 Quiver.Index                   ← B+Tree インデックス
+Quiver.Index.FullText          ← immutable全文segment / manifest / BM25 artifact
 Quiver.Storage.Records         ← Versioned Vertex / Edge / Nexus / owner-bound Property / Payload / Token ストア
 Quiver.Codec                   ← Span<byte> シリアライザ
 Quiver.Storage                 ← ページ管理 + バッファプール（8KB ページ）
@@ -65,6 +66,8 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 | adjacency | `AdjacencySegmentStore` の単一 format。payload なしも `PayloadKind.None` で同形式 |
 | scalar index | `ScalarIndexDefinition` と `PropertyTarget` が永続定義。B+Tree value は `PropertyVersionRef` で、primary owner を snapshot 再検証 |
 | vector definition catalog | target property、scope、dimensions、metric、HNSW 構築パラメタ、segment policy |
+| full-text definition catalog | `FullTextIndexDefinition` の target、tokenizer/filter、BM25 parameter、segment policy |
+| full-text artifact | full typed owner identity と `PropertyVersionRef` を持つ immutable delta/merged segment。mutable postings/norms tenant は持たない |
 
 `TransactionManager` は database instance ごとの `WriterLease` と `SnapshotRegistry` を所有する。
 facade は `BeginReadTransaction()` から `IReadTransaction`、`BeginWriteTransaction()` から `IWriteTransaction` を返す。
@@ -74,6 +77,7 @@ read transaction は WAL を生成せず、writer と並行して開始時 snaps
 bulk、schema、maintenance の mutation 入口も同じ writer lease を取得する。
 scalar index rebuild は primary scan、key decode、sort を snapshot reader で実行し、source generation と reader horizon を再検証する publish transaction だけが writer lease を取得する。
 vector segment merge も primary scan と HNSW artifact 構築を snapshot reader で実行し、source manifest generation と definition を再検証する publish transaction だけが writer lease を取得する。
+full-text segment merge も primary scan と term artifact 構築を snapshot reader で実行し、source manifest generation と definition を再検証する publish transaction だけが writer lease を取得する。
 active writer の dirty page は commit fsync 前に data file へ書かない。
 checkpoint は同じ writer lease で sharp boundary を作り、reader を待たずに committed dirty page と transaction catalog を flush する。
 

@@ -38,7 +38,7 @@ static void PrintStats(QuiverDatabase db)
     Console.WriteLine($"  Rel Types:     [{string.Join(", ", db.Schema.ListEdgeTypes())}]");
     Console.WriteLine($"  Prop Keys:     [{string.Join(", ", db.Schema.ListPropertyKeys())}]");
     Console.WriteLine($"  Indexes:       {db.Schema.ListIndexes().Count}");
-    Console.WriteLine($"  FT Indexes:    {db.Schema.ListFullTextIndexes().Count}");
+    Console.WriteLine($"  FT Indexes:    {db.Schema.ListIndexes().Count(i => i.Definition is FullTextIndexDefinition)}");
     Console.WriteLine("Done.");
 }
 
@@ -58,7 +58,7 @@ static void GenerateMovie(string outputPath)
     {
         schema.CreateIndex(new ScalarIndexDefinition("idx_person_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality));
         schema.CreateIndex(new ScalarIndexDefinition("idx_movie_year", new PropertyTarget(PropertyOwnerKind.Vertex, "year", "Movie"), IndexKind.Int64Equality));
-        schema.CreateFullTextIndex("ft_movie_title", "Movie", "title");
+        schema.CreateIndex(new FullTextIndexDefinition("ft_movie_title", new PropertyTarget(PropertyOwnerKind.Vertex, "title", "Movie")));
     });
 
     using (var tx = db.BeginWriteTransaction())
@@ -185,7 +185,7 @@ static void GenerateHierarchical(string outputPath)
     {
         schema.CreateIndex(new ScalarIndexDefinition("idx_dept_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Department"), IndexKind.StringEquality));
         schema.CreateIndex(new ScalarIndexDefinition("idx_person_name", new PropertyTarget(PropertyOwnerKind.Vertex, "name", "Person"), IndexKind.StringEquality));
-        schema.CreateFullTextIndex("ft_person_bio", "Person", "bio");
+        schema.CreateIndex(new FullTextIndexDefinition("ft_person_bio", new PropertyTarget(PropertyOwnerKind.Vertex, "bio", "Person")));
     });
 
     using (var tx = db.BeginWriteTransaction())

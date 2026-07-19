@@ -17,7 +17,7 @@ internal static class FtsQueryParser
     /// <paramref name="index"/> に対して展開)。スコアリング対象のターム集合を返す。
     /// </summary>
     public static HashSet<string> ParseAndExpand(
-        string queryText, ITokenizer tokenizer, FullTextIndex index)
+        string queryText, ITokenizer tokenizer, FullTextSegmentSnapshot index)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         ReadOnlySpan<char> span = queryText.AsSpan();
@@ -136,7 +136,7 @@ internal static class FtsQueryParser
     /// Required/Optional/Excluded グルーピングを持つ構造化結果を返す。
     /// </summary>
     public static ParsedFtsQuery ParseBooleanAndExpand(
-        string queryText, ITokenizer tokenizer, FullTextIndex index)
+        string queryText, ITokenizer tokenizer, FullTextSegmentSnapshot index)
     {
         var rawTokens = Tokenize(queryText.AsSpan());
         if (rawTokens.Count == 0)
@@ -178,7 +178,11 @@ internal static class FtsQueryParser
     }
 
     private static HashSet<string> ExpandSingleWord(
-        string word, bool isPrefix, int fuzzyDistance, ITokenizer tokenizer, FullTextIndex index)
+        string word,
+        bool isPrefix,
+        int fuzzyDistance,
+        ITokenizer tokenizer,
+        FullTextSegmentSnapshot index)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         if (isPrefix)

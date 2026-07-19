@@ -141,4 +141,20 @@ Wave 8は全文propertyのdefinition、commit maintenance、snapshot検索、imm
 - staged pathに対する`scripts/agent-guardrails/check-track-markers.ps1`と`git diff --check`が成功する。
 - branch tipは完成または検証済み補修commitであり、topic branchへpush済みである。
 
+## 6. 実装検証結果
+
+2026-07-18 に次の検証を実施した。
+
+| gate | 実測結果 |
+|---|---|
+| solution build | 0 warnings、0 errors |
+| solution test | 16 projects、2,012 tests、失敗0 |
+| snapshot / crash contract | old/new reader、update/delete、read-your-writes、slot generation、rollback、reopen、bulk load、stale build retryを含む回帰testが成功 |
+| product 4 segment search | p50 1.137 ms、WAND / strict一致 |
+| product ingest WAL amplification | 1.00x |
+| manifest publish | p99 1.208 ms、merge前後のvisible result一致 |
+| clean-slate segment spike | full-text p50 6.053 ms、write amplification 2.01x、text/vector/hybrid contract成功 |
+
+性能測定の環境、コマンド、生出力は`docs/benchmarks/2026-07-18_SingleWriterRedesign_FullTextSegmentRaw.md`を正本とする。
+
 mergeとtagはユーザの明示承認を別々に得る。

@@ -84,7 +84,8 @@ commit はデータページの flush を待たず、dirty page は後続 checkp
 `RollbackTo` は指定境界より後の before-image を逆順に適用し、後から作られた savepoint を無効にする。
 `ReleaseSavepoint` は境界だけを解放し、変更を親スコープへ残す。
 
-全文索引を含む B+Tree 更新も同じ page write set を使う。
+全文 definition catalog の更新は同じ page write set を使う。
+全文 delta segment は commit hook で manifest generationへ反映し、abort時は transaction-local overlay を破棄する。
 全文専用の論理 undo stack や補償 WAL record は持たない。
 
 ## スキーマのスナップショット {#schema-snapshot}

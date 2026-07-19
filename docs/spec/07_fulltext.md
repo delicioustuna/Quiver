@@ -1,120 +1,109 @@
 # 全文検索
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-18）
 
-## アーキテクチャ {#architecture}
+## Definition {#definition}
 
-各全文インデックスは、コンテナテナントを共有する 2 つの B+Tree から構成される:
+全文インデックスは `FullTextIndexDefinition` として統一 schema catalog に登録する。
 
-| B+Tree | キー | 値 | 目的 |
-|---|---|---|---|
-| **Postings** | `(term, entityId)` 複合 | `tf` (uint16, 飽和) | 転置インデックス |
-| **Norms** | `entityId` (int64) | `docLen`（文書長） | BM25 の長さ正規化 |
+作成には `IWriteTransaction.EditSchema.CreateIndex(IndexDefinition)` を使い、削除には `DropIndex` を使う。
+
+definition は `PropertyTarget`、tokenizer、filter pipeline、BM25 の `K1` と `B`、`FullTextSegmentPolicy` を保持する。
+
+全文専用のlegacy schema surfaceは公開 API に存在しない。
+
+## Immutable segment {#immutable-segment}
+
+全文 artifact は mutable B+Tree ではなく、commit-local delta segment と merged segment から構成する。
+
+各 document entry は full typed owner identity、`PropertyVersionRef`、text、term frequency、document length、tombstone を保持する。
+
+property の set と update は新しい document entryを追加し、property remove と owner delete は tombstone を追加する。
+
+commit 済み segment は in-place 更新しない。
+
+manifest は transaction ID の `xmin` と `xmax` で version 化し、read transaction の snapshot から可視な版を選ぶ。
+
+old reader は開始時に可視だった manifest と property version を読み続け、新 reader だけが publish 後の manifest を選ぶ。
+
+同じ manifest generation から materialize した postings、norms、corpus stats は読み取り専用 snapshot として再利用する。
+
+## Merge と rebuild {#merge-rebuild}
+
+segment policy の document 変更数、segment 数、tombstone 比率を超えると background merge を要求する。
+
+primary text property の scan と immutable artifact 構築は read transaction で行い、writer lease を保持しない。
+
+構築後に短い write transaction を開始し、source manifest generation と current definition が一致する場合だけ publish する。
+
+構築中に delta または definition が変わった場合は stale artifact を破棄し、新しい snapshot から再試行する。
+
+reopen 直後または derived state が不足する場合、検索は同じ transaction の primary property scan から結果を復元する。
+
+transaction-local fallback artifact を global manifest として公開しない。
 
 ## トークナイザ {#tokenizer}
 
-`MixedBigramTokenizer` は 2 つのモードを持つ。インデックス作成時に `TokenizerId` で選択する。
+`MixedBigramTokenizer` はユニグラム併用モード `mixed-bigram-unigram-v1` とバイグラム専用モード `mixed-bigram-v1` を持つ。
 
-### ユニグラム併用モード (デフォルト) {#tokenizer-unigram}
+既定はユニグラム併用モードである。
 
-id = `mixed-bigram-unigram-v1`（`FullTextIndexOptions` の既定値）
+入力は NFKC と ASCII 小文字化で正規化する。
 
-CJK 連続 2 文字以上のランで、バイグラムに加えて各文字の**補足ユニグラム**を放出する。
-1 文字の CJK 検索クエリが、隣接文字に関わらずヒットする。
+Latin と ASCII は空白区切りの word token とし、CJK の連続は重なり bigram として処理する。
 
-| 入力 | 放出トークン |
-|---|---|
-| `粉体工学` | バイグラム: `粉体` `体工` `工学`、ユニグラム: `粉` `体` `工` `学` |
-| `猫`（孤立 CJK 1 文字） | ユニグラム: `猫` |
-| `Hello` | ワード: `hello` |
+ユニグラム併用モードは CJK の補足 unigram も放出するが、補足 unigram を document length に含めない。
 
-**Norms 計算**: 補足ユニグラムは `docLen` に含めない（バイグラム + ワード + 孤立ユニグラムのみ）。
-これにより BM25 の長さ正規化パラメータ (k1, b) がバイグラム専用モードと同一のチューニングで機能する。
+`LowercaseFilter` と `StopWordFilter` の設定は versioned definition payload に保存し、reopen 後に同じ pipeline を再構築する。
 
-**Fuzzy 展開制限**: CJK ユニグラム同士の置換展開を禁止する。全 CJK 文字が相互に
-Levenshtein 距離 1 となり N² 爆発するため。
+永続表現を持たない custom `ITokenFilter` は schema definition として受け付けない。
 
-### バイグラム専用モード {#tokenizer-bigram}
+## BM25 と WAND {#bm25}
 
-id = `mixed-bigram-v1`
+BM25 は definition の `K1` と `B` を使う。
 
-CJK 連続は重なりバイグラムのみ。孤立 CJK 1 文字はユニグラムとして放出する。
-補足ユニグラムは生成しないため、インデックスサイズが小さく CJK 頻出文字の
-postings 肥大がない。1 文字検索は `粉*`（プレフィクス展開）で代替する。
+既定値は `K1 = 1.2`、`B = 0.75` である。
 
-### 共通仕様
-
-- 入力は NFKC + ASCII 小文字化で正規化
-- Latin/ASCII: 空白区切り、小文字化したワードトークン
-- CJK / Latin の混在: Unicode スクリプト境界でシームレスに切り替え
-- `TokenizerRegistry` に両バリアントが自動登録される
-
-## Postings キーエンコーディング {#postings-key}
-
-`PostingsKey.Encode(termUtf8, entityId)` は B+Tree 用の byte[] キーを生成する:
-- term バイト列（可変長）の後にエンティティ ID (int64 big-endian) を続ける
-- `PostingsKey.TermRange(termUtf8)` は、ある term に一致する全エンティティを prefix スキャンするための
-  `(lower, upper)` 境界を返す
-
-## BM25 スコアリング {#bm25}
-
-標準パラメータの Okapi BM25:
-
-| パラメータ | 値 |
-|---|---|
-| k1 | 1.2 |
-| b | 0.75 |
-
-### 数式 {#bm25-formulas}
-
-```
+```text
 IDF(term) = log(1 + (N - df + 0.5) / (df + 0.5))
 
-Score(term, doc) = IDF × (tf × (k1 + 1)) / (tf + k1 × (1 - b + b × docLen / avgdl))
+Score(term, doc) = IDF × (tf × (K1 + 1)) / (tf + K1 × (1 - B + B × docLen / avgdl))
 ```
 
-ここで:
-- `N` = 総文書数
-- `df` = 文書頻度（その term を含む文書数）
-- `tf` = 文書内での term 頻度
-- `docLen` = 文書長（norms から取得）
-- `avgdl` = 平均文書長
+`N`、`df`、総 document length、WAND 上界は、検索と同じ visible segment snapshot から求める。
 
-### コーパス統計 {#corpus-stats}
+WAND 上界は `idf × (K1 + 1)` とし、上界の保守性を証明できない場合は strict scan へ fallback する。
 
-`Bm25CorpusStats`: DocumentCount, AverageDocLength, term ごとの統計（任意）。
-`Bm25TermStats`: `{term -> (df, maxTf)}`, MinDocLen。
+strict scan と WAND は score 降順、同点時 packed owner ID 昇順で決定論的に並べる。
 
-## WAND Top-K {#wand}
+## Candidate validation {#candidate-validation}
 
-`Bm25Scorer.RankWand()` は、効率的な top-k 取得のための Weighted AND (WAND) アルゴリズムを実装する:
+segment candidate は top-k 確定前に primary snapshot で再検証する。
 
-1. 各クエリ term について、その寄与の **上限** を計算する:
-   `ub = IDF × (maxTf × (k1 + 1)) / (maxTf + k1 × normMin)`
-2. term カーソルを現在の文書 ID でソートする
-3. **Pivot**: 整列したカーソルの累積上限が `theta`（これまでに見た k 番目に良いスコア）を
-   超える最初の文書を探す
-4. その pivot 文書を完全評価したスコアが theta を超えれば、top-k ヒープに挿入する
-5. 候補でない文書をスキップするため、`SeekTo` で遅れているカーソルを前進させる
+検証対象は owner kind、owner Generation、entity visibility、`PropertyVersionRef`、property owner である。
 
-## Reciprocal Rank Fusion (RRF) {#rrf}
+deleted owner、slot 再利用後の別 owner、old property version、tombstone、別 target の entry は結果へ出さない。
 
-全文検索とベクトル検索の結果を組み合わせる（ハイブリッド検索）際、RRF はランク付きリストをマージする:
+candidate を除外した後に次点を補充してから `Take(k)` を適用する。
 
-```
-RRF_score(doc) = sum(1 / (k + rank_i(doc)))
-```
+graph-first 経路は上流の full `VertexId` を primary `Read` で検証した後にだけ Sequence を physical posting lookup へ渡す。
 
-ここで `k` は平滑化定数（デフォルト 60）であり、`rank_i` は結果リスト `i` における文書の順位である。
+## Query {#query}
 
-## WAL とリカバリ {#wal-recovery}
+`Search`、prefix、fuzzy、boolean、`FilterByText` は transaction snapshot から definition と manifest を解決する。
 
-Postings と Norms の B+Tree は、他の永続 B+Tree と同じ `PageImage` WAL を使う。
-リーフ更新、split、merge、root 更新を区別する全文専用 record は持たない。
-同じ transaction で同じページを複数回更新した場合は、commit 時に最終 image へ集約する。
+prefix と fuzzy は visible snapshot の term dictionary だけを展開対象にする。
 
-commit 前の abort と savepoint rollback は、transaction-owned write set の before-image を使う。
-crash recovery は明示的な `Commit` を持つ transaction の `PageImage` だけを redo する。
-全文専用の論理 redo、compensation、loser undo は実行しない。
+hybrid search は全文と vector を同じ read transaction から評価し、RRF で順位を統合する。
+
+## WAL と recovery {#wal-recovery}
+
+全文専用 WAL record、logical redo、compensation、loser undo、recovery pass は存在しない。
+
+definition catalog の変更は通常の transaction-owned `PageImage` と strict `Commit` で durable にする。
+
+全文 segment は primary property から再構築できる derived artifact であり、segment mutation 自体は WAL 増幅を発生させない。
+
+commit のない definition publish は recovery winner にならない。
 
 詳細は [WAL とリカバリ](02_wal_recovery.md) を参照する。

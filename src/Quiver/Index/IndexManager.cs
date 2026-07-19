@@ -61,10 +61,9 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     private readonly Dictionary<string, ScalarIndexMetadata> _definitions
         = new(StringComparer.Ordinal);
 
-    // 全文索引 (postings + norms の 2 テナント)。secondary 索引 (_indexes) とは別管理。
-    // orphan sweep が tf/docLen を entityId と誤認しないよう _indexes には載せない。
-    private readonly Dictionary<string, FullTextIndex> _ftIndexes = new(StringComparer.Ordinal);
-    private readonly Dictionary<(string Label, string PropertyKey), string> _ftBindings = new();
+    // 全文artifactはprimary propertyから再構築できるため、catalogにはdefinition参照だけを置く。
+    private readonly Dictionary<string, FullTextCatalogEntry> _fullTextDefinitions =
+        new(StringComparer.Ordinal);
     private readonly TokenizerRegistry _tokenizers = TokenizerRegistry.CreateDefault();
 
     /// <summary>本番経路: factory が共有 container を渡す。container の所有権は移らない。</summary>
@@ -106,20 +105,17 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     /// </summary>
     public void FlushAll()
     {
-        if (_indexes.Count > 0 || _ftIndexes.Count > 0) _container.Flush();
+        if (_indexes.Count > 0 || _fullTextDefinitions.Count > 0) _container.Flush();
     }
 
     /// <summary>
-    /// abort の before-image undo がヘッダページを戻した後、全 B+Tree 索引
-    /// (secondary + 全文 postings/norms) の in-memory ヘッダキャッシュを読み直す。
+    /// abort の before-image undo がヘッダページを戻した後、全 B+Tree 索引と
+    /// 全文definitionのin-memory cacheを読み直す。
     /// </summary>
     public void ReloadAll()
     {
         foreach (var idx in _indexes.Values)
             (idx as IDisposable)?.Dispose();
-        foreach (var ft in _ftIndexes.Values)
-            ft.Dispose();
-
         _indexes.Clear();
         _indexTypes.Clear();
         _indexTenantIds.Clear();
@@ -128,8 +124,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         _bindings.Clear();
         _bindingByName.Clear();
         _definitions.Clear();
-        _ftIndexes.Clear();
-        _ftBindings.Clear();
+        _fullTextDefinitions.Clear();
 
         // catalog pages are part of the transaction write set. Abort/rollback restores
         // their before-image first, so rebuilding every cache from that primary catalog
@@ -161,57 +156,18 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             }
         }
 
-        // 全文索引 (postings/norms) は entityId を key 側に持つので専用走査。
-        // postings は key 末尾 8B、norms は key(Int64) が packed entityId。orphan は lane を
-        // タグ付けして emit し、RemoveOrphans が postings/norms へ振り分ける。
-        var int64 = new Int64KeyCodec();
-        foreach (var ft in _ftIndexes.Values)
-        {
-            indexCount++;
-            foreach (var kv in ft.EnumeratePostingsRaw())
-            {
-                entryCount++;
-                if (!isLiveEntity(PostingsKey.DecodeEntityId(kv.Key)))
-                    output.Add((ft.Name + FtLaneSep + PostingsLaneTag, kv.Key, kv.Value));
-            }
-            indexCount++;
-            foreach (var kv in ft.EnumerateNormsRaw())
-            {
-                entryCount++;
-                if (!isLiveEntity(int64.Decode(kv.Key)))
-                    output.Add((ft.Name + FtLaneSep + NormsLaneTag, kv.Key, kv.Value));
-            }
-        }
         return (indexCount, entryCount);
     }
 
-    // orphan の IndexName に埋める lane タグ。index 名に現れない制御文字で区切る。
-    internal const char FtLaneSep = '';
-    internal const string PostingsLaneTag = "postings";
-    internal const string NormsLaneTag = "norms";
-
     /// <summary>
     /// 与えた orphan 一覧を索引から削除する。索引名で <see cref="_indexes"/> を引き、
-    /// <see cref="IBTreeIndexFlushable.DeleteRawEntry"/> で生キー削除する。lane タグ付き名は
-    /// 全文索引の postings/norms へ振り分ける。
+    /// <see cref="IBTreeIndexFlushable.DeleteRawEntry"/> で生キー削除する。
     /// </summary>
     public int RemoveOrphans(IEnumerable<(string IndexName, byte[] RawKey, long Value)> orphans)
     {
         int removed = 0;
         foreach (var (name, key, value) in orphans)
         {
-            int sep = name.IndexOf(FtLaneSep);
-            if (sep >= 0)
-            {
-                var ftName = name[..sep];
-                var lane = name[(sep + 1)..];
-                if (_ftIndexes.TryGetValue(ftName, out var ft))
-                {
-                    bool ok = lane == PostingsLaneTag ? ft.DeletePostingsRaw(key, value) : ft.DeleteNormsRaw(key, value);
-                    if (ok) removed++;
-                }
-                continue;
-            }
             if (!_indexes.TryGetValue(name, out var idxObj)) continue;
             if (idxObj is not IBTreeIndexFlushable flushable) continue;
             if (flushable.DeleteRawEntry(key, value)) removed++;
@@ -490,17 +446,21 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     }
 
     // ------------------------------------------------------------------
-    // 全文索引 (postings + norms)
+    // 全文derived index definition
     // ------------------------------------------------------------------
 
-    public FullTextIndex CreateFullTextIndex(string name, string label, string propertyKey, string tokenizerId)
+    public FullTextCatalogEntry CreateFullTextDefinition(
+        string name,
+        string target,
+        string propertyKey,
+        string tokenizerId)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
-        ArgumentException.ThrowIfNullOrEmpty(label);
+        ArgumentException.ThrowIfNullOrEmpty(target);
         ArgumentException.ThrowIfNullOrEmpty(propertyKey);
         ArgumentException.ThrowIfNullOrEmpty(tokenizerId);
 
-        if (_ftIndexes.TryGetValue(name, out var existing))
+        if (_fullTextDefinitions.TryGetValue(name, out var existing))
         {
             if (!string.Equals(existing.TokenizerId, tokenizerId, StringComparison.Ordinal))
                 throw new ConstraintException(
@@ -511,75 +471,67 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         if (_indexes.ContainsKey(name))
             throw new ConstraintException($"'{name}' already exists as a non-full-text index.");
 
-        byte postingsTenant = AllocateTenantId(); _usedTenantIds.Add(postingsTenant);
-        byte normsTenant = AllocateTenantId(); _usedTenantIds.Add(normsTenant);
-        var ft = MaterializeFullText(name, label, propertyKey, tokenizerId, postingsTenant, normsTenant);
+        var definition = MaterializeFullTextDefinition(
+            name,
+            target,
+            propertyKey,
+            tokenizerId,
+            legacyPostingsTenant: 0,
+            legacyNormsTenant: 0);
         PersistCatalog();
-        return ft;
+        return definition;
     }
 
-    public bool TryGetFullTextIndex(string name, out FullTextIndex index)
-        => _ftIndexes.TryGetValue(name, out index!);
+    public bool TryGetFullTextDefinition(
+        string name,
+        out FullTextCatalogEntry definition)
+        => _fullTextDefinitions.TryGetValue(name, out definition!);
 
-    public bool TryGetFullTextIndexByLabelKey(string label, string propertyKey, out FullTextIndex index)
+    public IEnumerable<(string Name, string Target, string PropertyKey, string TokenizerId)> ListFullTextDefinitions()
     {
-        if (_ftBindings.TryGetValue((label, propertyKey), out var name)
-            && _ftIndexes.TryGetValue(name, out index!))
-            return true;
-        index = null!;
-        return false;
+        foreach (FullTextCatalogEntry definition in _fullTextDefinitions.Values)
+            yield return (
+                definition.Name,
+                definition.Target,
+                definition.PropertyKey,
+                definition.TokenizerId);
     }
 
-    public IEnumerable<(string Name, string Label, string PropertyKey, string TokenizerId)> ListFullTextIndexes()
+    public bool DropFullTextDefinition(string name)
     {
-        foreach (var ft in _ftIndexes.Values)
-            yield return (ft.Name, ft.Label, ft.PropertyKey, ft.TokenizerId);
-    }
-
-    public bool DropFullTextIndex(string name)
-    {
-        if (!_ftIndexes.Remove(name, out var ft)) return false;
-        ft.Dispose();
-        _ftBindings.Remove((ft.Label, ft.PropertyKey));
-        // テナント論理ページをグローバル free list へ回収する。
-        if (_indexFiles.Remove(name + ":postings", out var pTenant)) pTenant.Truncate(1);
-        if (_indexFiles.Remove(name + ":norms", out var nTenant)) nTenant.Truncate(1);
-        _usedTenantIds.Remove(ft.PostingsTenantId);
-        _usedTenantIds.Remove(ft.NormsTenantId);
+        if (!_fullTextDefinitions.Remove(name, out FullTextCatalogEntry? definition))
+            return false;
+        _usedTenantIds.Remove(definition.LegacyPostingsTenantId);
+        _usedTenantIds.Remove(definition.LegacyNormsTenantId);
         PersistCatalog();
         return true;
     }
 
     public ITokenizer ResolveTokenizer(string tokenizerId) => _tokenizers.Resolve(tokenizerId);
 
-    public bool HasAnyFullTextIndex => _ftIndexes.Count > 0;
-
-    public void MaintainFullText(FullTextIndex index, long entityId, string? oldText, string? newText)
-    {
-        var tok = _tokenizers.Resolve(index.TokenizerId);
-        if (oldText is not null) index.RemoveDocument(entityId, tok, oldText);
-        if (newText is not null) index.AddDocument(entityId, tok, newText);
-    }
-
     public void RegisterTokenizer(ITokenizer tokenizer) => _tokenizers.Register(tokenizer);
 
-    private FullTextIndex MaterializeFullText(
-        string name, string label, string propertyKey, string tokenizerId,
-        byte postingsTenant, byte normsTenant)
+    private FullTextCatalogEntry MaterializeFullTextDefinition(
+        string name,
+        string target,
+        string propertyKey,
+        string tokenizerId,
+        byte legacyPostingsTenant,
+        byte legacyNormsTenant)
     {
-        var pTenant = _container.OpenTenant(postingsTenant, PageKind.Header);
-        var nTenant = _container.OpenTenant(normsTenant, PageKind.Header);
-        var postings = new BTreeIndex<byte[]>(pTenant, new BytesKeyCodec());
-        var norms = new BTreeIndex<long>(nTenant, new Int64KeyCodec());
-        var ft = new FullTextIndex(name, label, propertyKey, tokenizerId, postingsTenant, normsTenant, postings, norms);
-        _ftIndexes[name] = ft;
-        _ftBindings[(label, propertyKey)] = name;
-        // backing テナントを page-count 観測 / drop 時 truncate 用に登録する。
-        _indexFiles[name + ":postings"] = pTenant;
-        _indexFiles[name + ":norms"] = nTenant;
-        _usedTenantIds.Add(postingsTenant);
-        _usedTenantIds.Add(normsTenant);
-        return ft;
+        var definition = new FullTextCatalogEntry(
+            name,
+            target,
+            propertyKey,
+            tokenizerId,
+            legacyPostingsTenant,
+            legacyNormsTenant);
+        _fullTextDefinitions[name] = definition;
+        if (legacyPostingsTenant != 0)
+            _usedTenantIds.Add(legacyPostingsTenant);
+        if (legacyNormsTenant != 0)
+            _usedTenantIds.Add(legacyNormsTenant);
+        return definition;
     }
 
     // ------------------------------------------------------------------
@@ -664,7 +616,13 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             string propKey = ReadString(blob, ref pos);
             string tokenizerId = ReadString(blob, ref pos);
             string name = ReadString(blob, ref pos);
-            MaterializeFullText(name, label, propKey, tokenizerId, postingsTenant, normsTenant);
+            MaterializeFullTextDefinition(
+                name,
+                label,
+                propKey,
+                tokenizerId,
+                postingsTenant,
+                normsTenant);
         }
     }
 
@@ -768,14 +726,14 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             entryCount++;
         }
         int ftCount = 0;
-        foreach (var ft in _ftIndexes.Values)
+        foreach (FullTextCatalogEntry definition in _fullTextDefinitions.Values)
         {
-            blobList.Add(ft.PostingsTenantId);
-            blobList.Add(ft.NormsTenantId);
-            WriteString(blobList, ft.Label);
-            WriteString(blobList, ft.PropertyKey);
-            WriteString(blobList, ft.TokenizerId);
-            WriteString(blobList, ft.Name);
+            blobList.Add(definition.LegacyPostingsTenantId);
+            blobList.Add(definition.LegacyNormsTenantId);
+            WriteString(blobList, definition.Target);
+            WriteString(blobList, definition.PropertyKey);
+            WriteString(blobList, definition.TokenizerId);
+            WriteString(blobList, definition.Name);
             ftCount++;
         }
         byte[] blob = blobList.ToArray();
@@ -827,14 +785,11 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     {
         foreach (var idx in _indexes.Values.OfType<IDisposable>())
             idx.Dispose();
-        foreach (var ft in _ftIndexes.Values)
-            ft.Dispose();
         _indexes.Clear();
         _indexTypes.Clear();
         _indexFiles.Clear();
         _indexTenantIds.Clear();
-        _ftIndexes.Clear();
-        _ftBindings.Clear();
+        _fullTextDefinitions.Clear();
         _usedTenantIds.Clear();
         if (_ownsContainer) _container.Dispose();
     }

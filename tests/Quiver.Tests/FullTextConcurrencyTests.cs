@@ -11,7 +11,7 @@ namespace Quiver.Tests;
 /// <summary>
 /// 全文インデックスの並行性契約を、単一ライターと複数の並行リーダーという
 /// エンジンの実際のモデルに沿って検証する。
-/// 同じ Postings B+Tree を複数の書き込みトランザクションが同時に変更する操作は契約外なので、
+/// 同じ全文manifestを複数の書き込みトランザクションが同時にpublishしないため、
 /// 複数スレッドからの取り込みはアプリケーション側の書き込みゲートで直列化する。
 /// リーダーはロックなしで並行実行する。
 ///
@@ -39,7 +39,7 @@ public sealed class FullTextConcurrencyTests : IDisposable
             // 実際のタイムアウトは分類器が一時的な競合として扱う。
             LockTimeout = TimeSpan.FromSeconds(30),
         });
-        _db.EditSchema(schema => schema.CreateFullTextIndex(Index, "Doc", "body"));
+        _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
     }
 
     public void Dispose()

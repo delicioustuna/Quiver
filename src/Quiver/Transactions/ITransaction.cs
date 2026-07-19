@@ -1,5 +1,6 @@
 using Quiver.Core;
 using Quiver.Index;
+using Quiver.Index.FullText;
 using Quiver.Storage.Records;
 
 namespace Quiver.Transactions;
@@ -63,6 +64,9 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     IVertexIncidenceHeadStore VertexIncidenceHeads { get; }
     IPropertyStore Properties { get; }
     IIndexManager Indexes { get; }
+
+    /// <summary>同じread snapshotから全文manifestを選択するderived index。</summary>
+    FullTextSegmentIndex? FullTextSegments => null;
 
     // BulkLoader が構築する連続隣接インデックス。未構築またはミューテーション後は null。
     // ExpandOperator が高速な隣接スキャンに使い、null のときはリンクリストにフォールバック。

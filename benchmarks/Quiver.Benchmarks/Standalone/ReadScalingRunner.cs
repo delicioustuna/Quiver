@@ -50,7 +50,7 @@ public static class ReadScalingRunner
     {
         db.EditSchema(schema =>
         {
-            schema.CreateFullTextIndex(FullTextIndex, "Doc", "body");
+            schema.CreateIndex(new FullTextIndexDefinition(FullTextIndex, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc")));
             schema.GetOrCreatePropertyKey("embedding");
             schema.CreateIndex(new VectorIndexDefinition(
                 VectorIndex,
