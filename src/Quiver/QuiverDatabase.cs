@@ -337,9 +337,19 @@ public sealed class QuiverDatabase : IDisposable
 /// <param name="MemberRole">起点から直接取得するメンバーのロール名。</param>
 public readonly record struct CoMembershipRolePair(string OriginRole, string MemberRole);
 
+/// <summary>writer lease が使用中だった場合の動作を指定する。</summary>
+public enum WriterContentionMode
+{
+    /// <summary><see cref="QuiverDatabaseOptions.WriterWaitTimeout"/> まで待機する。</summary>
+    Wait = 0,
+
+    /// <summary>待機せず <see cref="WriterBusyException"/> を送出する。</summary>
+    FailFast = 1,
+}
+
 /// <summary>
 /// <see cref="QuiverDatabase.Open"/> に渡す起動オプション。
-/// バッファプール / WAL / ロックタイムアウト / チェックサム有効化 / バックエンド種別などを指定する。
+/// バッファプール、WAL、writer lease、チェックサム、バックエンド種別などを指定する。
 /// </summary>
 public sealed class QuiverDatabaseOptions
 {
@@ -416,8 +426,17 @@ public sealed class QuiverDatabaseOptions
     /// </summary>
     public int AdaptiveSampleWindow { get; set; } = 1000;
 
-    /// <summary>ロック取得のタイムアウト。既定 5 秒。</summary>
-    public TimeSpan LockTimeout { get; set; } = TimeSpan.FromSeconds(5);
+    /// <summary>
+    /// writer lease の取得を待つ上限時間。既定は 5 秒。
+    /// <see cref="WriterContentionMode.FailFast"/> では使用しない。
+    /// </summary>
+    public TimeSpan WriterWaitTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// writer lease が使用中だった場合の待機方針。既定は
+    /// <see cref="WriterContentionMode.Wait"/>。
+    /// </summary>
+    public WriterContentionMode WriterContentionMode { get; set; } = WriterContentionMode.Wait;
 
     /// <summary>ページのチェックサム計算 / 検証を有効にするか。既定 <c>true</c>。</summary>
     public bool EnableChecksums { get; set; } = true;
@@ -453,27 +472,6 @@ public sealed class QuiverDatabaseOptions
     /// <see cref="IDiagnosticsApi.RepairIndexes"/> を明示的に呼ぶ前提)。
     /// </summary>
     public bool AutoRepairOrphansOnRecovery { get; set; } = false;
-
-    /// <summary>
-    /// WAL グループコミットの coalesce window。<see cref="TimeSpan.Zero"/> (既定) で無効
-    /// (各 commit の <c>FlushTo</c> が即座に fsync を起動する旧挙動)。0 より大きい値を指定すると、
-    /// 最初の commit が到着した時点でこの window の経過まで spin-wait して後続 commit を貯め、
-    /// 累積した全 commit を 1 回の fsync で一括処理する。
-    /// 効果: 多 commit 並列ワークロードでは fsync 回数が激減し IOPS を節約できる。代償として
-    /// 単一 commit のレイテンシが (fsync 自体の時間 + window) まで増える。推奨値は 100µs
-    /// 〜 1ms。Windows の <c>Task.Delay</c> 解像度 (~15ms) を回避するため、内部実装は
-    /// <see cref="System.Diagnostics.Stopwatch"/> + <see cref="Thread.SpinWait"/> による
-    /// busy-wait で sub-millisecond 精度を確保している (専用 LongRunning スレッドで実行されるため
-    /// 他スレッドを阻害しない)。
-    /// </summary>
-    public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.Zero;
-
-    /// <summary>
-    /// <c>true</c> のとき、<see cref="QuiverDatabase.BeginWriteTransaction"/> は既にアクティブな
-    /// 書き込みトランザクションが存在する場合に待機せず <see cref="TransactionException"/> をスローする。
-    /// 既定 <c>false</c> では、内部 writer gate で <see cref="LockTimeout"/> まで待機する。
-    /// </summary>
-    public bool EnforceExclusiveWriter { get; set; }
 
     /// <summary>
     /// <c>true</c> のとき、バックエンドが提供するバックグラウンドワーカーで

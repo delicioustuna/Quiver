@@ -316,7 +316,7 @@ public sealed class AdjacencyEpochTests : IDisposable
 
         _db = QuiverDatabase.Open(
             System.IO.Path.Combine(_dir, "graph.quiver"),
-            new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
+            new QuiverDatabaseOptions { WriterContentionMode = WriterContentionMode.FailFast });
         using var tx = _db.BeginWriteTransaction();
         Action act = () => _db.CompactAdjacency();
         act.Should().Throw<TransactionException>()

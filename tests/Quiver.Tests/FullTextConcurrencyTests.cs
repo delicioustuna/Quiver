@@ -37,7 +37,7 @@ public sealed class FullTextConcurrencyTests : IDisposable
             // CI の全面並列実行では内部コミットロックの待機が既定の 5 秒を超えることがある。
             // スターベーションを正しさの障害と誤認しないよう待機時間を広げる。
             // 実際のタイムアウトは分類器が一時的な競合として扱う。
-            LockTimeout = TimeSpan.FromSeconds(30),
+            WriterWaitTimeout = TimeSpan.FromSeconds(30),
         });
         _db.EditSchema(schema => schema.CreateIndex(new FullTextIndexDefinition(Index, new PropertyTarget(PropertyOwnerKind.Vertex, "body", "Doc"))));
     }

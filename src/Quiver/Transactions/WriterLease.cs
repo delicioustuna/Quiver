@@ -39,9 +39,8 @@ internal sealed class WriterLease : IDisposable
         if (!acquired)
         {
             if (_failFast)
-                throw new TransactionException("Another write transaction is already active.");
-            throw new TransactionException(
-                $"Timed out waiting for the active write transaction to finish after {_timeout}.");
+                throw new WriterBusyException(WriterContentionMode.FailFast, TimeSpan.Zero);
+            throw new WriterBusyException(WriterContentionMode.Wait, _timeout);
         }
 
         Volatile.Write(ref _ownerTransactionId, transactionId.Value);

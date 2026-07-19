@@ -41,8 +41,11 @@ public sealed class QuiverConfigurationOptions
     /// <summary>Adaptive 移動平均のサンプル窓 (トランザクション数)。既定 1000。</summary>
     public int AdaptiveSampleWindow { get; set; } = 1000;
 
-    /// <summary>writer lease 取得のタイムアウト。既定 5 秒。</summary>
-    public TimeSpan LockTimeout { get; set; } = TimeSpan.FromSeconds(5);
+    /// <summary>writer lease 取得を待つ上限時間。既定 5 秒。</summary>
+    public TimeSpan WriterWaitTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>writer lease が使用中だった場合の動作。既定は待機。</summary>
+    public WriterContentionMode WriterContentionMode { get; set; } = WriterContentionMode.Wait;
 
     /// <summary>ページのチェックサム計算 / 検証を有効にするか。既定 <c>true</c>。</summary>
     public bool EnableChecksums { get; set; } = true;
@@ -52,9 +55,6 @@ public sealed class QuiverConfigurationOptions
 
     /// <summary>open 完了後に索引 orphan を自動修復するか。既定 <c>false</c>。</summary>
     public bool AutoRepairOrphansOnRecovery { get; set; }
-
-    /// <summary>WAL グループコミットの coalesce window。既定 0 (無効)。</summary>
-    public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.Zero;
 
     /// <summary>
     /// 現在の設定値を <see cref="QuiverDatabaseOptions"/> に写像する。
@@ -70,11 +70,11 @@ public sealed class QuiverConfigurationOptions
             MinCheckpointThresholdBytes = MinCheckpointThresholdBytes,
             MaxCheckpointThresholdBytes = MaxCheckpointThresholdBytes,
             AdaptiveSampleWindow = AdaptiveSampleWindow,
-            LockTimeout = LockTimeout,
+            WriterWaitTimeout = WriterWaitTimeout,
+            WriterContentionMode = WriterContentionMode,
             EnableChecksums = EnableChecksums,
             Backend = Backend,
             AutoRepairOrphansOnRecovery = AutoRepairOrphansOnRecovery,
-            GroupCommitWindow = GroupCommitWindow,
         };
     }
 }

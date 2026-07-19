@@ -24,6 +24,28 @@ public sealed class StorageException(string message, Exception? inner = null)
 public sealed class TransactionException(string message, Exception? inner = null)
     : QuiverException(message, inner!);
 
+/// <summary>別の writer が database instance の writer lease を保持している場合の例外。</summary>
+public sealed class WriterBusyException : QuiverException
+{
+    /// <summary>競合時の動作と待機時間を指定して例外を生成する。</summary>
+    /// <param name="mode">競合時の動作。</param>
+    /// <param name="waitTimeout">待機モードで使用した上限時間。</param>
+    public WriterBusyException(WriterContentionMode mode, TimeSpan waitTimeout)
+        : base(mode == WriterContentionMode.FailFast
+            ? "Another writer already owns the database writer lease."
+            : $"Timed out after {waitTimeout} while waiting for the database writer lease.")
+    {
+        Mode = mode;
+        WaitTimeout = waitTimeout;
+    }
+
+    /// <summary>競合時に指定されていた動作。</summary>
+    public WriterContentionMode Mode { get; }
+
+    /// <summary>待機モードで使用した上限時間。</summary>
+    public TimeSpan WaitTimeout { get; }
+}
+
 /// <summary>同じトランザクションハンドルが同時に使用された場合の例外です。</summary>
 public sealed class ConcurrentTransactionUseException : QuiverException
 {

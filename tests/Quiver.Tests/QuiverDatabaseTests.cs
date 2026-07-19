@@ -1044,35 +1044,35 @@ public sealed class QuiverDatabaseTests : IDisposable
         results.Should().HaveCount(5);
     }
 
-    // ===== EnforceExclusiveWriter =====
+    // ===== writer contention =====
 
     [Fact]
-    public void EnforceExclusiveWriter_blocks_second_writer()
+    public void Fail_fast_contention_blocks_second_writer()
     {
         var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
         try
         {
             using var db = QuiverDatabase.Open(
                 Path.Combine(dir, "g.quiver"),
-                new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
+                new QuiverDatabaseOptions { WriterContentionMode = WriterContentionMode.FailFast });
 
             using var tx1 = db.BeginWriteTransaction();
             var act = () => db.BeginWriteTransaction();
-            act.Should().Throw<TransactionException>();
+            act.Should().Throw<WriterBusyException>();
             tx1.Commit();
         }
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
     }
 
     [Fact]
-    public void EnforceExclusiveWriter_allows_after_commit()
+    public void Writer_lease_is_available_after_commit()
     {
         var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
         try
         {
             using var db = QuiverDatabase.Open(
                 Path.Combine(dir, "g.quiver"),
-                new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
+                new QuiverDatabaseOptions { WriterContentionMode = WriterContentionMode.FailFast });
 
             using (var tx1 = db.BeginWriteTransaction()) { tx1.Commit(); }
             using var tx2 = db.BeginWriteTransaction();
@@ -1083,14 +1083,14 @@ public sealed class QuiverDatabaseTests : IDisposable
     }
 
     [Fact]
-    public void EnforceExclusiveWriter_allows_after_rollback()
+    public void Writer_lease_is_available_after_rollback()
     {
         var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
         try
         {
             using var db = QuiverDatabase.Open(
                 Path.Combine(dir, "g.quiver"),
-                new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
+                new QuiverDatabaseOptions { WriterContentionMode = WriterContentionMode.FailFast });
 
             using (var tx1 = db.BeginWriteTransaction()) { tx1.Rollback(); }
             using var tx2 = db.BeginWriteTransaction();
@@ -1101,14 +1101,14 @@ public sealed class QuiverDatabaseTests : IDisposable
     }
 
     [Fact]
-    public void EnforceExclusiveWriter_allows_after_dispose_without_commit()
+    public void Writer_lease_is_available_after_dispose_without_commit()
     {
         var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
         try
         {
             using var db = QuiverDatabase.Open(
                 Path.Combine(dir, "g.quiver"),
-                new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
+                new QuiverDatabaseOptions { WriterContentionMode = WriterContentionMode.FailFast });
 
             using (db.BeginWriteTransaction()) { /* dispose without commit/rollback */ }
             using var tx2 = db.BeginWriteTransaction();
@@ -1119,14 +1119,14 @@ public sealed class QuiverDatabaseTests : IDisposable
     }
 
     [Fact]
-    public void EnforceExclusiveWriter_does_not_block_readonly()
+    public void Active_writer_does_not_block_readonly_transaction()
     {
         var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
         try
         {
             using var db = QuiverDatabase.Open(
                 Path.Combine(dir, "g.quiver"),
-                new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
+                new QuiverDatabaseOptions { WriterContentionMode = WriterContentionMode.FailFast });
 
             using var tx1 = db.BeginWriteTransaction();
             using var ro = db.BeginReadTransaction();

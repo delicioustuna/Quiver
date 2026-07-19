@@ -56,7 +56,7 @@ public sealed class TransactionRuntimeContractTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path, new QuiverDatabaseOptions
         {
-            LockTimeout = TimeSpan.FromSeconds(2),
+            WriterWaitTimeout = TimeSpan.FromSeconds(2),
         });
 
         using var first = db.BeginWriteTransaction();
@@ -80,11 +80,11 @@ public sealed class TransactionRuntimeContractTests : IDisposable
     }
 
     [Fact]
-    public void EnforceExclusiveWriter_rejects_active_writer_without_waiting()
+    public void Fail_fast_contention_rejects_active_writer_without_waiting()
     {
         using var db = QuiverDatabase.Open(_path, new QuiverDatabaseOptions
         {
-            EnforceExclusiveWriter = true,
+            WriterContentionMode = WriterContentionMode.FailFast,
         });
 
         using var first = db.BeginWriteTransaction();
@@ -94,7 +94,7 @@ public sealed class TransactionRuntimeContractTests : IDisposable
             using var _ = db.BeginWriteTransaction();
         };
 
-        act.Should().Throw<TransactionException>();
+        act.Should().Throw<WriterBusyException>();
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public sealed class TransactionRuntimeContractTests : IDisposable
     {
         using var db = QuiverDatabase.Open(_path, new QuiverDatabaseOptions
         {
-            EnforceExclusiveWriter = true,
+            WriterContentionMode = WriterContentionMode.FailFast,
         });
         using var first = db.BeginWriteTransaction();
 
@@ -130,7 +130,7 @@ public sealed class TransactionRuntimeContractTests : IDisposable
         }
         thread.Join();
 
-        error.Should().BeOfType<TransactionException>();
+        error.Should().BeOfType<WriterBusyException>();
     }
 
     [Fact]
