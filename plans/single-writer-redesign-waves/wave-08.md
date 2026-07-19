@@ -174,3 +174,27 @@ Wave 8は全文propertyのdefinition、commit maintenance、snapshot検索、imm
 性能測定の環境、コマンド、生出力は`docs/benchmarks/2026-07-18_SingleWriterRedesign_FullTextSegmentRaw.md`を正本とする。
 
 mergeとtagはユーザの明示承認を別々に得る。
+
+## 7. Durable artifact補修後の検証結果
+
+2026-07-19 に `5c4f6b2a25f85618d41d2b81fa8877ccdbf0b85e` を対象として再検証した。
+
+| gate | 実測結果 |
+|---|---|
+| solution build | 0 warnings、0 errors |
+| solution test | 16 projects、2,015 tests、失敗0 |
+| durable contract | body fsync後とmanifest stage後のabort、checksum不一致、normal reopen、online snapshotを検証 |
+| product 4 segment search | p50 1.202 ms、WAND / strict一致 |
+| product ingest WAL amplification | 1.01x |
+| product total write amplification | 2.66x |
+| manifest publish | p99 2.925 ms、merge前後のvisible result一致 |
+| normal reopen | primary scan 0件、reopen前後のresult一致 |
+| clean-slate segment spike | full-text p50 5.132 ms、write amplification 2.01x、text/vector/hybrid contract成功 |
+
+FTS6の100,000 chunk workloadはp50 18.121 msだった。
+この値は正式なproduct 4 segment gateではなく、汎用比較値として記録する。
+
+性能測定の環境、コマンド、生出力は`docs/benchmarks/2026-07-19_SingleWriterRedesign_DurableFullTextSegmentRaw.md`を正本とする。
+
+Wave 8の実装と検証は完了した。
+mergeとtagはユーザの明示承認を別々に得る。
