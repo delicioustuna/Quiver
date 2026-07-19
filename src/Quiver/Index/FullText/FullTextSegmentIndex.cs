@@ -667,6 +667,67 @@ internal sealed class FullTextSegmentIndex : IDisposable
             && left.B == right.B
             && left.SegmentPolicy == right.SegmentPolicy;
 
+    internal SegmentGarbageCollectionResult CollectGarbage(
+        long horizonTransactionId,
+        bool dryRun,
+        IEnumerable<FullTextCatalogEntry> catalogEntries)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            foreach (FullTextCatalogEntry catalog in catalogEntries)
+                GetOrCreateState(FromCatalog(catalog), catalog.Manifest);
+            int retiredManifests = 0;
+            var retainedArtifacts = new HashSet<Guid>();
+            foreach (IndexState state in _indexes.Values)
+            {
+                ManifestVersion[] retired = state.History
+                    .Where(manifest => manifest.Xmax < horizonTransactionId)
+                    .ToArray();
+                retiredManifests += retired.Length;
+
+                foreach (FullTextSegmentArtifactRef artifact in state.Current.Artifacts)
+                    retainedArtifacts.Add(artifact.ArtifactId);
+                foreach (ManifestVersion manifest in state.History)
+                {
+                    if (manifest.Xmax < horizonTransactionId)
+                        continue;
+                    foreach (FullTextSegmentArtifactRef artifact in manifest.Artifacts)
+                        retainedArtifacts.Add(artifact.ArtifactId);
+                }
+
+                if (dryRun || retired.Length == 0)
+                    continue;
+
+                // manifest body は immutable でも、旧 snapshot の検索が終了する前に消すと
+                // 同じ transaction 内の再検索が再現不能になる。current だけを正本として即時削除せず、
+                // SnapshotRegistry が固定した horizon を越えた世代だけを退役させる。
+                state.History.RemoveAll(manifest => manifest.Xmax < horizonTransactionId);
+                foreach (long generation in retired.Select(static manifest => manifest.Generation))
+                    state.Materialized.Remove(generation);
+
+                var retainedSegments = new HashSet<ImmutableFullTextSegment>(
+                    ReferenceEqualityComparer.Instance);
+                foreach (ImmutableFullTextSegment segment in state.Current.Segments)
+                    retainedSegments.Add(segment);
+                foreach (ManifestVersion manifest in state.History)
+                    foreach (ImmutableFullTextSegment segment in manifest.Segments)
+                        retainedSegments.Add(segment);
+                var disposed = new HashSet<ImmutableFullTextSegment>(
+                    ReferenceEqualityComparer.Instance);
+                foreach (ManifestVersion manifest in retired)
+                    foreach (ImmutableFullTextSegment segment in manifest.Segments)
+                        if (!retainedSegments.Contains(segment) && disposed.Add(segment))
+                            segment.Dispose();
+            }
+
+            int reclaimedArtifacts = dryRun
+                ? _artifacts.CountGarbage(retainedArtifacts)
+                : _artifacts.CollectGarbage(retainedArtifacts);
+            return new(retiredManifests, reclaimedArtifacts);
+        }
+    }
+
     public void Dispose()
     {
         lock (_gate)
@@ -732,6 +793,10 @@ internal sealed class FullTextSegmentIndex : IDisposable
         long SourceGeneration,
         ManifestVersion Manifest);
 }
+
+internal readonly record struct SegmentGarbageCollectionResult(
+    int RetiredManifests,
+    int ReclaimedArtifacts);
 
 internal enum FullTextArtifactPhase
 {

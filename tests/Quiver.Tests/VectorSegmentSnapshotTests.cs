@@ -101,6 +101,36 @@ public sealed class VectorSegmentSnapshotTests
     }
 
     [Fact]
+    public void Garbage_collection_retires_only_manifests_older_than_horizon()
+    {
+        using var index = new VectorSegmentIndex();
+        EntityRef owner = EntityRef.Create(EntityKind.Vertex, 1, 1);
+        var mutation = VectorSegmentMutation.Upsert(Definition, owner, [1f, 0f]);
+        index.PublishDelta(2, [mutation]);
+        VectorSegmentBuildSource source = index.CaptureBuildSources().Single();
+        VectorSegmentBuildArtifact artifact = VectorSegmentIndex.Build(source, [mutation]);
+        index.TryPublishMerge(3, artifact, Definition).Should().BeTrue();
+
+        index.CollectGarbage(3, dryRun: false).Should().Be(1);
+        index.Search(
+                new SnapshotState(2, new HashSet<long>()),
+                Definition,
+                [1f, 0f],
+                1,
+                null)
+            .ManifestGeneration.Should().Be(source.ManifestGeneration);
+
+        index.CollectGarbage(4, dryRun: false).Should().Be(1);
+        index.Search(
+                new SnapshotState(2, new HashSet<long>()),
+                Definition,
+                [1f, 0f],
+                1,
+                null)
+            .Candidates.Should().BeEmpty();
+    }
+
+    [Fact]
     public void Background_merge_builds_outside_writer_and_preserves_old_reader()
     {
         string dir = Path.Combine(

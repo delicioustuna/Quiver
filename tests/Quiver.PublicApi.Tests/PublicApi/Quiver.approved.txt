@@ -1456,16 +1456,19 @@ namespace Quiver.Maintenance
     }
     public sealed class VacuumReport : System.IEquatable<Quiver.Maintenance.VacuumReport>
     {
-        public VacuumReport(int ReclaimedVertices, int ReclaimedEdges, int ReclaimedProperties, int PrunedCommittedTxEntries, long ElapsedMs, long HorizonTxId, bool Skipped, long TruncatedPages = 0, int ReclaimedColumnVersions = 0, int ReclaimedNexuses = 0, int ReclaimedIncidences = 0) { }
+        public VacuumReport(int ReclaimedVertices, int ReclaimedEdges, int ReclaimedProperties, int PrunedCommittedTxEntries, long ElapsedMs, long HorizonTxId, bool Skipped, long TruncatedPages = 0, int ReclaimedColumnVersions = 0, int ReclaimedNexuses = 0, int ReclaimedIncidences = 0, int RetiredVectorManifests = 0, int RetiredFullTextManifests = 0, int ReclaimedFullTextArtifacts = 0) { }
         public long ElapsedMs { get; init; }
         public long HorizonTxId { get; init; }
         public int PrunedCommittedTxEntries { get; init; }
         public int ReclaimedColumnVersions { get; init; }
         public int ReclaimedEdges { get; init; }
+        public int ReclaimedFullTextArtifacts { get; init; }
         public int ReclaimedIncidences { get; init; }
         public int ReclaimedNexuses { get; init; }
         public int ReclaimedProperties { get; init; }
         public int ReclaimedVertices { get; init; }
+        public int RetiredFullTextManifests { get; init; }
+        public int RetiredVectorManifests { get; init; }
         public bool Skipped { get; init; }
         public long TruncatedPages { get; init; }
     }

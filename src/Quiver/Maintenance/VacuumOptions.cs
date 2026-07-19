@@ -80,6 +80,9 @@ public enum VacuumTarget
 /// <param name="ReclaimedColumnVersions">列 (opt-in) の delta から merge した超過版数。</param>
 /// <param name="ReclaimedNexuses">物理回収した dead Nexus header 数。</param>
 /// <param name="ReclaimedIncidences">dead Nexusに付随して回収した incidence 数。</param>
+/// <param name="RetiredVectorManifests">snapshot horizon を越えて退役した vector manifest 数。</param>
+/// <param name="RetiredFullTextManifests">snapshot horizon を越えて退役した全文 manifest 数。</param>
+/// <param name="ReclaimedFullTextArtifacts">committed manifest から未参照となり物理回収した全文 artifact 数。</param>
 public sealed record VacuumReport(
     int ReclaimedVertices,
     int ReclaimedEdges,
@@ -91,4 +94,7 @@ public sealed record VacuumReport(
     long TruncatedPages = 0,
     int ReclaimedColumnVersions = 0,
     int ReclaimedNexuses = 0,
-    int ReclaimedIncidences = 0);
+    int ReclaimedIncidences = 0,
+    int RetiredVectorManifests = 0,
+    int RetiredFullTextManifests = 0,
+    int ReclaimedFullTextArtifacts = 0);

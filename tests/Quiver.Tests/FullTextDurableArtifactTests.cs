@@ -2,6 +2,7 @@ using FluentAssertions;
 using Quiver.Api;
 using Quiver.Core;
 using Quiver.Index.FullText;
+using Quiver.Maintenance;
 using Quiver.Storage.Records;
 using Xunit;
 
@@ -32,13 +33,13 @@ public sealed class FullTextDurableArtifactTests : IDisposable
     public void Corrupt_referenced_body_falls_back_to_primary_rebuild()
     {
         VertexId document = CreateMergedDatabase("recover marker");
-        string artifactPath = DatabasePath + "-ftseg";
-        using (var stream = new FileStream(
-                   artifactPath,
-                   FileMode.Open,
-                   FileAccess.ReadWrite,
-                   FileShare.None))
+        foreach (string artifactPath in ArtifactFiles())
         {
+            using var stream = new FileStream(
+                artifactPath,
+                FileMode.Open,
+                FileAccess.ReadWrite,
+                FileShare.None);
             stream.Position = stream.Length - 1;
             int value = stream.ReadByte();
             stream.Position = stream.Length - 1;
@@ -115,11 +116,72 @@ public sealed class FullTextDurableArtifactTests : IDisposable
         using (var source = QuiverDatabase.Open(DatabasePath))
             source.CreateSnapshot(snapshotPath);
 
-        File.Exists(snapshotPath + "-ftseg").Should().BeTrue();
+        Directory.Exists(snapshotPath + "-ftseg").Should().BeTrue();
+        Directory.EnumerateFiles(snapshotPath + "-ftseg", "*.qfts")
+            .Should().NotBeEmpty();
         using var snapshot = QuiverDatabase.Open(snapshotPath);
         Search(snapshot, "marker").Should().ContainSingle().Which.Should().Be(document);
         ((BinaryGraphStorageBackend)snapshot.BackendInternal)
             .FullTextPrimaryFallbackScanCountForTest.Should().Be(0);
+    }
+
+    [Fact]
+    public void Vacuum_reclaims_orphan_body_without_deleting_current_manifest_body()
+    {
+        VertexId document = CreateMergedDatabase("stable marker");
+        int retainedCount = ArtifactFiles().Count();
+        using (var database = QuiverDatabase.Open(DatabasePath))
+        {
+            FullTextSegmentIndex.ArtifactPhaseInjector = phase =>
+            {
+                if (phase == FullTextArtifactPhase.AfterBodyFsync)
+                    throw new InjectedFailureException();
+            };
+            using var update = database.BeginWriteTransaction();
+            update.SetProperty(document, "body", PropertyValue.FromString("orphan marker"));
+            update.Invoking(static transaction => transaction.Commit())
+                .Should().Throw<InjectedFailureException>();
+        }
+
+        FullTextSegmentIndex.ArtifactPhaseInjector = null;
+        ArtifactFiles().Should().HaveCount(retainedCount + 1);
+        using var reopened = QuiverDatabase.Open(DatabasePath);
+        var report = reopened.Vacuum();
+        report.ReclaimedFullTextArtifacts.Should().BeGreaterThanOrEqualTo(1);
+        ArtifactFiles().Count().Should().BeLessThan(retainedCount + 1);
+        Search(reopened, "stable").Should().ContainSingle().Which.Should().Be(document);
+        Search(reopened, "orphan").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Vacuum_keeps_old_manifest_body_until_oldest_reader_finishes()
+    {
+        VertexId document = CreateMergedDatabase("old marker");
+        using var database = QuiverDatabase.Open(DatabasePath);
+        var backend = (BinaryGraphStorageBackend)database.BackendInternal;
+        using var oldReader = database.BeginReadTransaction();
+        using (var update = database.BeginWriteTransaction())
+        {
+            update.SetProperty(document, "body", PropertyValue.FromString("new marker"));
+            update.Commit();
+        }
+        backend.WaitForFullTextSegmentMergeForTest();
+        backend.FullTextSegmentMergeErrorForTest.Should().BeNull();
+        int beforeVacuum = ArtifactFiles().Count();
+
+        VacuumReport held = database.Vacuum();
+
+        ArtifactFiles().Should().NotBeEmpty();
+        oldReader.Query.Search(Index, "old", 10).ToList().Should()
+            .ContainSingle().Which.Should().Be(document);
+        oldReader.Dispose();
+
+        VacuumReport released = database.Vacuum();
+
+        released.RetiredFullTextManifests.Should().BeGreaterThan(0);
+        released.ReclaimedFullTextArtifacts.Should().BeGreaterThan(0);
+        ArtifactFiles().Count().Should().BeLessThan(beforeVacuum);
+        Search(database, "new").Should().ContainSingle().Which.Should().Be(document);
     }
 
     private VertexId CreateMergedDatabase(string body)
@@ -145,9 +207,16 @@ public sealed class FullTextDurableArtifactTests : IDisposable
         var backend = (BinaryGraphStorageBackend)database.BackendInternal;
         backend.WaitForFullTextSegmentMergeForTest();
         backend.FullTextSegmentMergeErrorForTest.Should().BeNull();
-        File.Exists(DatabasePath + "-ftseg").Should().BeTrue();
+        Directory.Exists(DatabasePath + "-ftseg").Should().BeTrue();
+        ArtifactFiles().Should().NotBeEmpty();
         return document;
     }
+
+    private IEnumerable<string> ArtifactFiles()
+        => Directory.EnumerateFiles(
+            DatabasePath + "-ftseg",
+            "*.qfts",
+            SearchOption.TopDirectoryOnly);
 
     private static List<VertexId> Search(QuiverDatabase database, string query)
     {

@@ -866,6 +866,25 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             _txManager.IncidenceStore as IncidenceStore,
             _txManager.VertexIncidenceHeadStore);
         VacuumReport report = vac.Run(options);
+        VacuumOptions effectiveOptions = options ?? new VacuumOptions();
+        if ((effectiveOptions.Targets & VacuumTarget.Indexes) != 0)
+        {
+            bool dryRun = effectiveOptions.Mode == VacuumMode.DryRun;
+            int retiredVectorManifests = _vectorSegments.CollectGarbage(
+                report.HorizonTxId,
+                dryRun);
+            SegmentGarbageCollectionResult fullTextGc =
+                _fullTextSegments.CollectGarbage(
+                    report.HorizonTxId,
+                    dryRun,
+                    _indexManager.ListFullTextCatalogEntries());
+            report = report with
+            {
+                RetiredVectorManifests = retiredVectorManifests,
+                RetiredFullTextManifests = fullTextGc.RetiredManifests,
+                ReclaimedFullTextArtifacts = fullTextGc.ReclaimedArtifacts,
+            };
+        }
         if (vac.ReclaimedEdgeSequences.Count > 0)
             _relationshipReuse.BeginAndRun(vac.ReclaimedEdgeSequences);
         // vacuum は正本の incidence slot を回収する。導出ビューは active transaction が
@@ -910,8 +929,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         //    artifact storeはappend-onlyなので、checkpoint後に増えた末尾recordを含んでも
         //    snapshot側manifestから参照されず、安全な孤児になる。
         string srcFullTextSegments = _containerPath + "-ftseg";
-        if (File.Exists(srcFullTextSegments))
-            CopySharedFile(srcFullTextSegments, targetFilePath + "-ftseg");
+        if (Directory.Exists(srcFullTextSegments))
+            CopyImmutableArtifactDirectory(
+                srcFullTextSegments,
+                targetFilePath + "-ftseg");
     }
 
     private static void CopyPagedFile(IPagedFile src, string dstPath)
@@ -943,6 +964,18 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             dstPath, FileMode.Create, FileAccess.Write, FileShare.None);
         src.CopyTo(dst);
         dst.Flush(flushToDisk: true);
+    }
+
+    private static void CopyImmutableArtifactDirectory(string srcPath, string dstPath)
+    {
+        Directory.CreateDirectory(dstPath);
+        foreach (string sourceFile in Directory.EnumerateFiles(
+                     srcPath,
+                     "*.qfts",
+                     SearchOption.TopDirectoryOnly))
+            CopySharedFile(
+                sourceFile,
+                Path.Combine(dstPath, Path.GetFileName(sourceFile)));
     }
 
     private bool _disposed;

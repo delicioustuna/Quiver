@@ -8,7 +8,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Index.FullText;
 
 internal readonly record struct FullTextSegmentArtifactRef(
-    long Offset,
+    Guid ArtifactId,
     int Length,
     uint Checksum);
 
@@ -29,24 +29,20 @@ internal sealed class FullTextSegmentArtifactStore : IDisposable
     private const uint RecordMagic = 0x4753_5446; // "FTSG"
     private const int RecordVersion = 1;
     private const int RecordHeaderSize = 16;
+    private const string ArtifactExtension = ".qfts";
     private const uint ManifestMagic = 0x4D46_5446; // "FTFM"
-    private const int ManifestVersion = 1;
+    private const int ManifestVersion = 2;
     private readonly Lock _gate = new();
     private readonly string? _path;
-    private Stream? _stream;
+    private readonly Dictionary<Guid, byte[]> _memoryArtifacts = [];
     private bool _disposed;
 
     internal FullTextSegmentArtifactStore(string? path)
     {
         if (string.IsNullOrEmpty(path))
-        {
-            _stream = new MemoryStream();
             return;
-        }
         _path = path;
-        string? directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(directory))
-            Directory.CreateDirectory(directory);
+        Directory.CreateDirectory(path);
     }
 
     internal FullTextSegmentArtifactRef Append(ImmutableFullTextSegment segment)
@@ -54,22 +50,36 @@ internal sealed class FullTextSegmentArtifactStore : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         byte[] body = SerializeSegment(segment);
         uint checksum = Crc32.HashToUInt32(body);
+        byte[] record = new byte[RecordHeaderSize + body.Length];
+        BinaryPrimitives.WriteUInt32LittleEndian(record, RecordMagic);
+        BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(4), RecordVersion);
+        BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(8), body.Length);
+        BinaryPrimitives.WriteUInt32LittleEndian(record.AsSpan(12), checksum);
+        body.CopyTo(record.AsSpan(RecordHeaderSize));
         lock (_gate)
         {
-            Stream stream = GetStream(create: true);
-            long offset = stream.Length;
-            stream.Position = offset;
-            Span<byte> header = stackalloc byte[RecordHeaderSize];
-            BinaryPrimitives.WriteUInt32LittleEndian(header, RecordMagic);
-            BinaryPrimitives.WriteInt32LittleEndian(header[4..], RecordVersion);
-            BinaryPrimitives.WriteInt32LittleEndian(header[8..], body.Length);
-            BinaryPrimitives.WriteUInt32LittleEndian(header[12..], checksum);
-            stream.Write(header);
-            stream.Write(body);
-            stream.Flush();
-            if (stream is FileStream file)
+            Guid artifactId;
+            do artifactId = Guid.NewGuid();
+            while (_memoryArtifacts.ContainsKey(artifactId)
+                   || _path is not null && File.Exists(GetArtifactPath(artifactId)));
+
+            if (_path is null)
+            {
+                _memoryArtifacts.Add(artifactId, record);
+            }
+            else
+            {
+                using var file = new FileStream(
+                    GetArtifactPath(artifactId),
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.Read,
+                    bufferSize: 64 * 1024,
+                    FileOptions.WriteThrough);
+                file.Write(record);
                 file.Flush(flushToDisk: true);
-            return new(offset, body.Length, checksum);
+            }
+            return new(artifactId, body.Length, checksum);
         }
     }
 
@@ -78,17 +88,28 @@ internal sealed class FullTextSegmentArtifactStore : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         lock (_gate)
         {
-            Stream stream = GetStream(create: false);
-            if (reference.Offset < 0
-                || reference.Length < 0
-                || reference.Offset > stream.Length - RecordHeaderSize
-                || reference.Length > stream.Length - reference.Offset - RecordHeaderSize)
-                throw new CorruptionException(
-                    $"全文segment artifact参照がファイル範囲外です: offset={reference.Offset}, length={reference.Length}.");
+            byte[] record;
+            if (_path is null)
+            {
+                if (!_memoryArtifacts.TryGetValue(reference.ArtifactId, out record!))
+                    throw new CorruptionException(
+                        $"全文segment artifactがありません: id={reference.ArtifactId:N}.");
+            }
+            else
+            {
+                string artifactPath = GetArtifactPath(reference.ArtifactId);
+                if (!File.Exists(artifactPath))
+                    throw new CorruptionException(
+                        $"全文segment artifactがありません: id={reference.ArtifactId:N}.");
+                record = File.ReadAllBytes(artifactPath);
+            }
 
-            stream.Position = reference.Offset;
-            Span<byte> header = stackalloc byte[RecordHeaderSize];
-            stream.ReadExactly(header);
+            if (reference.Length < 0
+                || record.Length != RecordHeaderSize + reference.Length)
+                throw new CorruptionException(
+                    $"全文segment artifact参照の長さが一致しません: id={reference.ArtifactId:N}, length={reference.Length}.");
+
+            ReadOnlySpan<byte> header = record.AsSpan(0, RecordHeaderSize);
             uint magic = BinaryPrimitives.ReadUInt32LittleEndian(header);
             int version = BinaryPrimitives.ReadInt32LittleEndian(header[4..]);
             int length = BinaryPrimitives.ReadInt32LittleEndian(header[8..]);
@@ -98,14 +119,71 @@ internal sealed class FullTextSegmentArtifactStore : IDisposable
                 || length != reference.Length
                 || checksum != reference.Checksum)
                 throw new CorruptionException(
-                    $"全文segment artifact headerがmanifest参照と一致しません: offset={reference.Offset}.");
+                    $"全文segment artifact headerがmanifest参照と一致しません: id={reference.ArtifactId:N}.");
 
-            byte[] body = new byte[length];
-            stream.ReadExactly(body);
+            byte[] body = record.AsSpan(RecordHeaderSize).ToArray();
             if (Crc32.HashToUInt32(body) != checksum)
                 throw new CorruptionException(
-                    $"全文segment artifactのchecksumが一致しません: offset={reference.Offset}.");
+                    $"全文segment artifactのchecksumが一致しません: id={reference.ArtifactId:N}.");
             return DeserializeSegment(body);
+        }
+    }
+
+    internal int CollectGarbage(IReadOnlySet<Guid> retainedArtifactIds)
+    {
+        ArgumentNullException.ThrowIfNull(retainedArtifactIds);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        lock (_gate)
+        {
+            int reclaimed = 0;
+            if (_path is null)
+            {
+                foreach (Guid artifactId in _memoryArtifacts.Keys
+                             .Where(id => !retainedArtifactIds.Contains(id))
+                             .ToArray())
+                {
+                    _memoryArtifacts.Remove(artifactId);
+                    reclaimed++;
+                }
+                return reclaimed;
+            }
+
+            foreach (string artifactPath in Directory.EnumerateFiles(
+                         _path,
+                         "*" + ArtifactExtension,
+                         SearchOption.TopDirectoryOnly))
+            {
+                if (Guid.TryParseExact(
+                        Path.GetFileNameWithoutExtension(artifactPath),
+                        "N",
+                        out Guid artifactId)
+                    && retainedArtifactIds.Contains(artifactId))
+                    continue;
+                File.Delete(artifactPath);
+                reclaimed++;
+            }
+            return reclaimed;
+        }
+    }
+
+    internal int CountGarbage(IReadOnlySet<Guid> retainedArtifactIds)
+    {
+        ArgumentNullException.ThrowIfNull(retainedArtifactIds);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        lock (_gate)
+        {
+            if (_path is null)
+                return _memoryArtifacts.Keys.Count(id => !retainedArtifactIds.Contains(id));
+            return Directory.EnumerateFiles(
+                    _path,
+                    "*" + ArtifactExtension,
+                    SearchOption.TopDirectoryOnly)
+                .Count(artifactPath =>
+                    !Guid.TryParseExact(
+                        Path.GetFileNameWithoutExtension(artifactPath),
+                        "N",
+                        out Guid artifactId)
+                    || !retainedArtifactIds.Contains(artifactId));
         }
     }
 
@@ -126,7 +204,7 @@ internal sealed class FullTextSegmentArtifactStore : IDisposable
             writer.Write(manifest.Segments.Length);
             foreach (FullTextSegmentArtifactRef segment in manifest.Segments)
             {
-                writer.Write(segment.Offset);
+                writer.Write(segment.ArtifactId.ToByteArray());
                 writer.Write(segment.Length);
                 writer.Write(segment.Checksum);
             }
@@ -156,7 +234,7 @@ internal sealed class FullTextSegmentArtifactStore : IDisposable
             var segments = ImmutableArray.CreateBuilder<FullTextSegmentArtifactRef>(count);
             for (int i = 0; i < count; i++)
                 segments.Add(new(
-                    reader.ReadInt64(),
+                    new Guid(reader.ReadBytes(16)),
                     reader.ReadInt32(),
                     reader.ReadUInt32()));
             if (stream.Position != stream.Length)
@@ -280,24 +358,8 @@ internal sealed class FullTextSegmentArtifactStore : IDisposable
         return count;
     }
 
-    private Stream GetStream(bool create)
-    {
-        if (_stream is not null)
-            return _stream;
-        if (_path is null)
-            throw new ObjectDisposedException(nameof(FullTextSegmentArtifactStore));
-        if (!create && !File.Exists(_path))
-            throw new CorruptionException(
-                $"全文segment artifact fileがありません: '{_path}'.");
-        _stream = new FileStream(
-            _path,
-            create ? FileMode.OpenOrCreate : FileMode.Open,
-            FileAccess.ReadWrite,
-            FileShare.Read,
-            bufferSize: 64 * 1024,
-            FileOptions.RandomAccess | FileOptions.WriteThrough);
-        return _stream;
-    }
+    private string GetArtifactPath(Guid artifactId)
+        => Path.Combine(_path!, artifactId.ToString("N") + ArtifactExtension);
 
     public void Dispose()
     {
@@ -306,8 +368,7 @@ internal sealed class FullTextSegmentArtifactStore : IDisposable
             if (_disposed)
                 return;
             _disposed = true;
-            _stream?.Dispose();
-            _stream = null;
+            _memoryArtifacts.Clear();
         }
     }
 }
