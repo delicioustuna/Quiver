@@ -106,10 +106,10 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
         EdgeTypeId type,
         TransactionId transactionId)
     {
-        // raw adjacency / delta / locator / epoch entry が残る間に slot を再利用すると、
-        // entry の Sequence が別 edge を指す。再利用解放 coordinator が lifecycle を
-        // 完結させるまでは free 候補を見ず high-water mark からだけ採番する。
-        long seq = _map.Hwm;
+        long seq = _map.PopFreeSeq();
+        bool reused = seq >= 0;
+        if (!reused)
+            seq = _map.Hwm;
         long generation = _versions.Read(seq).Generation + 1;
         var edgeId = EdgeId.Create(seq, checked((int)generation));
 
@@ -133,6 +133,8 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
         _locators?.WriteLive(seq, checked((int)generation), seq, source, target, type);
         AddMergeCandidate(edgeId, source, target, type);
         _inUseCount++;
+        if (reused)
+            _anyReuse = true;
 
         // 旧 head の物理 prev を新 edge に向ける (双方向リンク維持。visibility は xmin/xmax で判定)。
         if (srcHead.IsValid)
@@ -372,10 +374,17 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
     /// <summary>
     /// vacuum: Vertexストアと協調して双方向 chain を再構築し、dead version を物理回収する。
     /// 手順は旧 <c>EdgeStore.VacuumDeadVersions</c> と同じ (heap 上で実施)。
-    /// 呼び出し前提: アクティブトランザクション 0 件、Vertex vacuum **前**。
+    /// 呼び出し前提: writer lease 保持、開始時に固定した horizon、Vertex vacuum **前**。
     /// </summary>
     /// <returns>物理回収したEdge版数。</returns>
     internal int VacuumDeadVersions(VersionedVertexStore vertexStore, long horizonTxId, CommittedTxRegistry committed)
+        => VacuumDeadVersions(vertexStore, horizonTxId, committed, null);
+
+    internal int VacuumDeadVersions(
+        VersionedVertexStore vertexStore,
+        long horizonTxId,
+        CommittedTxRegistry committed,
+        ICollection<long>? reclaimedSequences)
     {
         var reclaimSet = new HashSet<long>();
 
@@ -419,9 +428,39 @@ internal sealed class VersionedEdgeStore : IEdgeStore, ITransactionEdgeStore
         foreach (var seq in reclaimSet)
         {
             _heap.Remove(seq);
+            reclaimedSequences?.Add(seq);
         }
 
         return reclaimSet.Count;
+    }
+
+    internal void RebuildLocators()
+    {
+        if (_locators is null) return;
+        foreach (EdgeId edgeId in Scan())
+        {
+            using EdgeReadHandle edge = Read(edgeId);
+            _locators.WriteLive(
+                edgeId.Sequence,
+                edgeId.Generation,
+                edgeId.Sequence,
+                edge.Source,
+                edge.Target,
+                edge.Type);
+        }
+    }
+
+    internal void ReleaseReclaimedSequences(IEnumerable<long> sequences)
+    {
+        foreach (long sequence in sequences)
+        {
+            if (sequence < 0 || sequence >= _map.Hwm || _map.IsFree(sequence))
+                continue;
+            if (!_map.Get(sequence).IsNull)
+                throw new InvalidOperationException(
+                    $"Edge sequence {sequence} still has a primary record.");
+            _map.PushFreeSeq(sequence);
+        }
     }
 
     private void RebuildChainForVertex(VertexId vertex, EdgeId head,

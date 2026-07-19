@@ -56,6 +56,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     private readonly ILogicalMutationSink? _logicalSink;
     private readonly EdgeDeltaHeadStore? _edgeDeltaHeads;
     private readonly PersistentEdgeDeltaStore? _edgeDeltas;
+    private readonly RelationshipReuseCoordinator _relationshipReuse;
     private readonly CancellationTokenSource _scalarIndexRebuildCancellation = new();
     private readonly object _scalarIndexRebuildSync = new();
     private Task? _scalarIndexRebuildTask;
@@ -132,6 +133,13 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _edgeDeltas = edgeDeltas;
         _txManager = txManager;
         _columnManager = columnManager;
+        _relationshipReuse = new RelationshipReuseCoordinator(
+            _container.OpenTenant(
+                BinaryGraphStorageBackendFactory.TenantRelationshipReuse,
+                PageKind.Header),
+            _edgeStore,
+            CompactAdjacencyCore,
+            _container.Flush);
 
         _schema = new SchemaApi(_labelTokens, _edgeTypeTokens, _propKeyTokens, _indexManager,
             nexusTypes: _nexusTypeTokens,
@@ -170,6 +178,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
                 _txManager.AcquireMutationLease(),
                 RefreshDerivedIndexesAfterBulkLoad),
         };
+
+        using (_txManager.AcquireMutationLease())
+            _relationshipReuse.Resume();
 
         if (_indexManager.ListIndexDefinitions()
             .Any(x => x.State != IndexLifecycleState.Ready))
@@ -663,14 +674,16 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     /// tombstone を除去して epoch を進める。呼び出し後、すべての生存エッジは base から供給され、
     /// 新しいEdgeが作成されるまで delta 走査は何も返さない。
     ///
-    /// 呼び出し元はアクティブなトランザクションが無いことを保証すること。
+    /// writer lease が更新を直列化し、既存 reader は snapshot visibility で結果を絞り込む。
     /// </summary>
     public void CompactAdjacency()
     {
         using var mutationLease = _txManager.AcquireMutationLease();
-        if (_txManager.ActiveCount > 0)
-            throw new InvalidOperationException(
-                "CompactAdjacency requires no active transactions.");
+        CompactAdjacencyCore();
+    }
+
+    private void CompactAdjacencyCore()
+    {
         PayloadLaneSpec payloadSpec = (_adjStore as IAdjacencyPayloadView)?.PayloadSpec
             ?? new PayloadLaneSpec(PayloadKind.None, -1, 0);
 
@@ -734,6 +747,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _edgeDeltas?.Reset();
         _edgeDeltaHeads?.ReloadMeta();
         _edgeDeltas?.ReloadMeta();
+        _edgeStore.RebuildLocators();
         AdjacencyContainer.WriteDescriptor(
             adjData,
             AdjacencyContainer.KindSegment,
@@ -835,8 +849,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     /// target の recovery 後 LSN は snapshot WAL 末尾 LSN まで進む。
     /// </summary>
     /// <summary>
-    /// vertex store の dead version 物理回収 + committed registry の prune。
-    /// アクティブトランザクションが残っているときは安全側で何もせず Skip 報告する。
+    /// oldest snapshot horizon より古い dead version の物理回収と
+    /// committed registry の prune。
     /// </summary>
     public VacuumReport Vacuum(VacuumOptions? options = null)
     {
@@ -852,9 +866,11 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             _txManager.IncidenceStore as IncidenceStore,
             _txManager.VertexIncidenceHeadStore);
         VacuumReport report = vac.Run(options);
+        if (vac.ReclaimedEdgeSequences.Count > 0)
+            _relationshipReuse.BeginAndRun(vac.ReclaimedEdgeSequences);
         // vacuum は正本の incidence slot を回収する。導出ビューは active transaction が
         // 無い同じ境界で作り直し、論理削除や abort 由来の無効 entry をまとめて除去する。
-        if (_txManager.ActiveCount == 0)
+        if (report.ReclaimedNexuses > 0 || _txManager.ActiveCount == 0)
             _coMembershipStore?.Rebuild(
                 _txManager.NexusStore,
                 _txManager.IncidenceStore);

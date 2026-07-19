@@ -56,7 +56,7 @@ public sealed class VacuumTests : IDisposable
     }
 
     [Fact]
-    public void Vacuum_returns_Skipped_when_active_transactions_exist()
+    public void Vacuum_reclaims_versions_older_than_an_active_snapshot()
     {
         using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
 
@@ -73,11 +73,39 @@ public sealed class VacuumTests : IDisposable
             tx.Commit();
         }
 
-        // アクティブ tx を抱えた状態で vacuum 起動 → Skipped。
+        // 削除より後に開始した snapshot は対象Vertexを観測しないため、並行回収できる。
         using var holder = db.BeginReadTransaction();
         var report = db.Vacuum();
-        report.Skipped.Should().BeTrue();
-        report.ReclaimedVertices.Should().Be(0);
+        report.Skipped.Should().BeFalse();
+        report.ReclaimedVertices.Should().Be(1);
+    }
+
+    [Fact]
+    public void Vacuum_defers_versions_visible_to_the_oldest_snapshot()
+    {
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        Core.VertexId id;
+        using (var tx = db.BeginWriteTransaction())
+        {
+            id = tx.CreateVertex("Person");
+            tx.Commit();
+        }
+
+        using (var holder = db.BeginReadTransaction())
+        {
+            using (var tx = db.BeginWriteTransaction())
+            {
+                tx.DeleteVertex(id);
+                tx.Commit();
+            }
+
+            VacuumReport report = db.Vacuum();
+            report.Skipped.Should().BeFalse();
+            report.ReclaimedVertices.Should().Be(0);
+            holder.VertexExists(id).Should().BeTrue();
+        }
+
+        db.Vacuum().ReclaimedVertices.Should().Be(1);
     }
 
     [Fact]
@@ -237,6 +265,107 @@ public sealed class VacuumTests : IDisposable
             outs.Add(en.Current.Id.Value);
         outs.Should().BeEquivalentTo(new[] { r1, r3 });
         _ = cId;
+    }
+
+    [Fact]
+    public void Relationship_sequence_reuse_waits_for_the_oldest_snapshot_horizon()
+    {
+        using var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
+        Core.VertexId a;
+        Core.VertexId b;
+        Core.EdgeId original;
+        using (var tx = db.BeginWriteTransaction())
+        {
+            a = tx.CreateVertex("Person");
+            b = tx.CreateVertex("Person");
+            original = tx.CreateEdge(a, b, "KNOWS");
+            tx.Commit();
+        }
+
+        using (var holder = db.BeginReadTransaction())
+        {
+            using (var tx = db.BeginWriteTransaction())
+            {
+                tx.DeleteEdge(original);
+                tx.Commit();
+            }
+
+            db.Vacuum().ReclaimedEdges.Should().Be(0);
+            Core.EdgeId allocatedWhilePinned;
+            using (var tx = db.BeginWriteTransaction())
+            {
+                allocatedWhilePinned = tx.CreateEdge(a, b, "KNOWS");
+                tx.Commit();
+            }
+            allocatedWhilePinned.Sequence.Should().NotBe(original.Sequence);
+
+            var visible = holder.EnumerateEdges(
+                a,
+                Storage.Records.Direction.Outgoing,
+                "KNOWS");
+            visible.MoveNext().Should().BeTrue();
+            visible.Current.Id.Should().Be(original);
+        }
+
+        db.Vacuum().ReclaimedEdges.Should().Be(1);
+        Core.EdgeId reused;
+        using (var tx = db.BeginWriteTransaction())
+        {
+            reused = tx.CreateEdge(a, b, "KNOWS");
+            tx.Commit();
+        }
+        reused.Sequence.Should().Be(original.Sequence);
+        reused.Generation.Should().Be(original.Generation + 1);
+    }
+
+    [Fact]
+    public void Relationship_reuse_resumes_after_candidates_become_durable()
+    {
+        string path = System.IO.Path.Combine(_dir, "graph.quiver");
+        Core.EdgeId deleted;
+        Core.VertexId a;
+        Core.VertexId b;
+        using (var db = QuiverDatabase.Open(path))
+        {
+            using (var tx = db.BeginWriteTransaction())
+            {
+                a = tx.CreateVertex("A");
+                b = tx.CreateVertex("B");
+                deleted = tx.CreateEdge(a, b, "LINK");
+                tx.Commit();
+            }
+            using (var tx = db.BeginWriteTransaction())
+            {
+                tx.DeleteEdge(deleted);
+                tx.Commit();
+            }
+
+            RelationshipReuseCoordinator.PhasePersistedForTest = phase =>
+            {
+                if (phase == RelationshipReusePhase.CandidatesDurable)
+                    throw new InvalidOperationException("simulated interruption");
+            };
+            try
+            {
+                Action vacuum = () => db.Vacuum();
+                vacuum.Should().Throw<InvalidOperationException>();
+            }
+            finally
+            {
+                RelationshipReuseCoordinator.PhasePersistedForTest = null;
+            }
+        }
+
+        using var reopened = QuiverDatabase.Open(path);
+        Core.EdgeId reused;
+        using (var tx = reopened.BeginWriteTransaction())
+        {
+            reused = tx.CreateEdge(a, b, "LINK");
+            tx.Commit();
+        }
+        reused.Sequence.Should().Be(deleted.Sequence);
+        reused.Generation.Should().Be(deleted.Generation + 1);
+        reopened.Diagnostics.CheckConsistency().IsConsistent.Should().BeTrue();
     }
 
     [Fact]
@@ -682,7 +811,7 @@ public sealed class VacuumTests : IDisposable
         results.MoveNext().Should().BeFalse();
     }
 
-    /// <summary>アクティブな snapshot (read-only tx) が居る間はNexusも回収しないこと。</summary>
+    /// <summary>削除より古い snapshot が参照できるNexusは horizon 到達まで回収しないこと。</summary>
     [Fact]
     public void Vacuum_does_not_reclaim_nexuses_while_snapshot_is_active()
     {
@@ -696,18 +825,18 @@ public sealed class VacuumTests : IDisposable
             heId = tx.CreateNexus("T", [new("R1", a), new("R2", b)]);
             tx.Commit();
         }
-        using (var tx = db.BeginWriteTransaction())
-        {
-            tx.DeleteNexus(heId);
-            tx.Commit();
-        }
-
         using (var holder = db.BeginReadTransaction())
         {
+            using (var tx = db.BeginWriteTransaction())
+            {
+                tx.DeleteNexus(heId);
+                tx.Commit();
+            }
             var report = db.Vacuum();
-            report.Skipped.Should().BeTrue();
+            report.Skipped.Should().BeFalse();
             report.ReclaimedNexuses.Should().Be(0);
             report.ReclaimedIncidences.Should().Be(0);
+            CollectMembers(holder.GetMembers(heId)).Should().HaveCount(2);
         }
 
         // snapshot が消えれば回収できる。

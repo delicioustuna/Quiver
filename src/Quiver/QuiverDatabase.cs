@@ -287,10 +287,9 @@ public sealed class QuiverDatabase : IDisposable
 
     /// <summary>
     /// 削除済みエンティティ (MVCC の dead version) を物理回収する vacuum を
-    /// 同期的に実行する。アクティブトランザクションがあるときは安全側で何もせず
-    /// <see cref="VacuumReport.Skipped"/> = true で返る。
-    /// 現状の MVP はVertexストアのみを対象とする (リレーション / プロパティ / 索引の
-    /// 物理回収は後続ステップで拡張)。<see cref="VacuumOptions.Mode"/> に
+    /// 同期的に実行する。開始時に固定した oldest snapshot horizon より古い版だけを
+    /// 回収するため、読み取りトランザクションと並行実行できる。
+    /// <see cref="VacuumOptions.Mode"/> に
     /// <see cref="VacuumMode.DryRun"/> を渡せば書き込み無しで実行できる。
     /// バイナリ以外のバックエンドはサポート対象外 (<see cref="NotSupportedException"/>)。
     /// </summary>

@@ -58,6 +58,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     internal const byte TenantEdgeDeltaPages = 28;
     internal const byte TenantVectorPayloadMetadata = 29;
     internal const byte TenantVectorPayloadBlobs = 30;
+    internal const byte TenantRelationshipReuse = 31;
 
     public IGraphStorageBackend Open(string filePath, QuiverDatabaseOptions options)
     {

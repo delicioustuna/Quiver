@@ -35,6 +35,9 @@ internal sealed class Vacuum : IVacuum
     private readonly VersionedNexusStore? _nexusStore;
     private readonly IncidenceStore? _incidenceStore;
     private readonly IVertexIncidenceHeadStore? _vertexHeads;
+    private readonly List<long> _reclaimedEdgeSequences = [];
+
+    internal IReadOnlyList<long> ReclaimedEdgeSequences => _reclaimedEdgeSequences;
 
     internal Vacuum(
         VersionedVertexStore vertexStore,
@@ -65,18 +68,6 @@ internal sealed class Vacuum : IVacuum
         options ??= new VacuumOptions();
         var sw = Stopwatch.StartNew();
 
-        if (_txManager.ActiveCount > 0)
-        {
-            return new VacuumReport(
-                ReclaimedVertices: 0,
-                ReclaimedEdges: 0,
-                ReclaimedProperties: 0,
-                PrunedCommittedTxEntries: 0,
-                ElapsedMs: sw.ElapsedMilliseconds,
-                HorizonTxId: 0,
-                Skipped: true);
-        }
-
         // vacuum-progress-percent gauge は phase 単位で 0 → 25 → 50 → 75 → 100 と進む。
         // 完了時に 0 へ戻すことで dotnet-counters では「現在実行中か」が判別できる。
         QuiverEventSource.Log.SetVacuumProgress(0);
@@ -101,7 +92,11 @@ internal sealed class Vacuum : IVacuum
             int reclaimedEdges = 0;
             if (!dryRun && (options.Targets & VacuumTarget.Edges) != 0)
             {
-                reclaimedEdges = _edgeStore.VacuumDeadVersions(_vertexStore, horizon, _committed);
+                reclaimedEdges = _edgeStore.VacuumDeadVersions(
+                    _vertexStore,
+                    horizon,
+                    _committed,
+                    _reclaimedEdgeSequences);
             }
             QuiverEventSource.Log.SetVacuumProgress(50);
 
@@ -198,7 +193,7 @@ internal sealed class Vacuum : IVacuum
     ///         vertex 別に集める。live header は inline property の copy-on-write 旧版を prune する。</item>
     ///   <item>影響を受けた各 vertex の chain を head から 1 回だけ走査し、running prev で dead incidence を
     ///         一括 unlink する。逆リンクを持たないため個別 unlink はせず、vertex ごと O(chain 長) で済む。</item>
-    ///   <item>unlink 済み incidence slot を free list へ返す (active tx が無いことは <see cref="Run"/> が保証)。</item>
+    ///   <item>unlink 済み incidence slot を free list へ返す。horizon より新しい snapshot 可視版は対象外。</item>
     ///   <item>header を heap から物理回収し sequence を free list へ返す (再利用時に世代 +1)。</item>
     /// </list>
     /// </summary>
