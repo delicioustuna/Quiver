@@ -754,6 +754,7 @@ namespace Quiver
                 "Created"})]
         System.ValueTuple<Quiver.Core.VertexId, bool> MergeVertex(string label, string matchKey, in Quiver.Storage.Records.PropertyValue matchValue);
         void ReleaseSavepoint(Quiver.Transactions.SavepointId savepoint);
+        void RemoveProperty(Quiver.Core.EdgeId edgeId, string key);
         void RemoveProperty(Quiver.Core.NexusId nexusId, string key);
         void RemoveProperty(Quiver.Core.VertexId vertexId, string key);
         void RemovePropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Storage.Records.PropertyValue value);
@@ -911,15 +912,14 @@ namespace Quiver
         public long CheckpointThresholdBytes { get; set; }
         public System.Collections.Generic.List<Quiver.CoMembershipRolePair> CoMembershipRolePairs { get; }
         public bool EnableChecksums { get; set; }
-        public bool EnforceExclusiveWriter { get; set; }
-        public System.TimeSpan GroupCommitWindow { get; set; }
         public long InitialFileAllocationBytes { get; set; }
-        public System.TimeSpan LockTimeout { get; set; }
         public Quiver.Logical.ILogicalMutationSink? LogicalMutationSink { get; set; }
         public long MaxCheckpointThresholdBytes { get; set; }
         public long MaximumFileGrowthStepBytes { get; set; }
         public long MinCheckpointThresholdBytes { get; set; }
         public System.TimeSpan TargetRecoveryTime { get; set; }
+        public Quiver.WriterContentionMode WriterContentionMode { get; set; }
+        public System.TimeSpan WriterWaitTimeout { get; set; }
     }
     public sealed class ReadTransaction : Quiver.IReadTransaction, System.IDisposable
     {
@@ -1075,6 +1075,7 @@ namespace Quiver
         public void OnRolledBack(System.Action callback) { }
         public Quiver.EntityRefEnumerator RangeIndex(string indexName, in Quiver.Storage.Records.PropertyValue from, bool fromInclusive, in Quiver.Storage.Records.PropertyValue to, bool toInclusive) { }
         public void ReleaseSavepoint(Quiver.Transactions.SavepointId savepoint) { }
+        public void RemoveProperty(Quiver.Core.EdgeId edgeId, string key) { }
         public void RemoveProperty(Quiver.Core.NexusId nexusId, string key) { }
         public void RemoveProperty(Quiver.Core.VertexId vertexId, string key) { }
         public void RemovePropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Storage.Records.PropertyValue value) { }
@@ -1090,6 +1091,11 @@ namespace Quiver
         public void SetVectorProperty(Quiver.Core.EntityRef owner, string propertyKey, System.ReadOnlySpan<float> vector) { }
         public bool TryGetVectorProperty(Quiver.Core.EntityRef owner, string propertyKey, System.Span<float> destination) { }
         public bool VertexExists(Quiver.Core.VertexId vertexId) { }
+    }
+    public enum WriterContentionMode
+    {
+        Wait = 0,
+        FailFast = 1,
     }
 }
 namespace Quiver.Core
@@ -1334,6 +1340,12 @@ namespace Quiver.Core
         public string Expected { get; }
         public string Found { get; }
     }
+    public sealed class WriterBusyException : Quiver.Core.QuiverException
+    {
+        public WriterBusyException(Quiver.WriterContentionMode mode, System.TimeSpan waitTimeout) { }
+        public Quiver.WriterContentionMode Mode { get; }
+        public System.TimeSpan WaitTimeout { get; }
+    }
 }
 namespace Quiver.Logical
 {
@@ -1366,16 +1378,21 @@ namespace Quiver.Logical
         public Quiver.Core.VertexId TargetVertexId { get; }
         public string? TokenName { get; }
         public Quiver.Core.VertexId VertexId { get; }
+        public static Quiver.Logical.LogicalMutation AddEdgePropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation AddNexusPropertyValue(Quiver.Core.NexusId nexusId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
+        public static Quiver.Logical.LogicalMutation AddVertexPropertyValue(Quiver.Core.VertexId vertexId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation CreateEdge(Quiver.Core.EdgeId edgeId, Quiver.Core.VertexId source, Quiver.Core.VertexId target, string type) { }
         public static Quiver.Logical.LogicalMutation CreateNexus(Quiver.Core.NexusId nexusId, string type, System.Collections.Generic.IReadOnlyList<Quiver.NexusMember> members) { }
         public static Quiver.Logical.LogicalMutation CreateVertex(Quiver.Core.VertexId vertexId, string label) { }
         public static Quiver.Logical.LogicalMutation DeleteEdge(Quiver.Core.EdgeId edgeId) { }
         public static Quiver.Logical.LogicalMutation DeleteNexus(Quiver.Core.NexusId nexusId) { }
         public static Quiver.Logical.LogicalMutation DeleteVertex(Quiver.Core.VertexId vertexId) { }
+        public static Quiver.Logical.LogicalMutation RemoveEdgeProperty(Quiver.Core.EdgeId edgeId, string key) { }
+        public static Quiver.Logical.LogicalMutation RemoveEdgePropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation RemoveNexusProperty(Quiver.Core.NexusId nexusId, string key) { }
         public static Quiver.Logical.LogicalMutation RemoveNexusPropertyValue(Quiver.Core.NexusId nexusId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation RemoveVertexProperty(Quiver.Core.VertexId vertexId, string key) { }
+        public static Quiver.Logical.LogicalMutation RemoveVertexPropertyValue(Quiver.Core.VertexId vertexId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation SetEdgeProperty(Quiver.Core.EdgeId edgeId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation SetNexusProperty(Quiver.Core.NexusId nexusId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation SetVertexProperty(Quiver.Core.VertexId vertexId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
@@ -1395,6 +1412,11 @@ namespace Quiver.Logical
         RemoveNexusProperty = 11,
         AddNexusPropertyValue = 12,
         RemoveNexusPropertyValue = 13,
+        RemoveEdgeProperty = 14,
+        AddVertexPropertyValue = 15,
+        RemoveVertexPropertyValue = 16,
+        AddEdgePropertyValue = 17,
+        RemoveEdgePropertyValue = 18,
     }
     public static class LogicalMutationReplay
     {

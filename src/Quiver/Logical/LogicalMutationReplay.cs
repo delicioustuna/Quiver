@@ -18,9 +18,9 @@ public static class LogicalMutationReplay
     /// <param name="tx">ターゲットトランザクション。</param>
     /// <param name="mutations">ミューテーションストリーム。通常は
     /// <see cref="ILogicalMutationSink"/> から取得する。</param>
-    /// <param name="vertexMap">ソース ID → ターゲット ID のVertexマップ (省略可)。呼び出し側で変更される。</param>
-    /// <param name="edgeMap">ソース ID → ターゲット ID のEdgeマップ (省略可)。呼び出し側で変更される。</param>
-    /// <param name="nexusMap">ソース ID → ターゲット ID のNexusマップ (省略可)。呼び出し側で変更される。</param>
+    /// <param name="vertexMap">ソースの世代込み packed ID → ターゲット ID のVertexマップ。</param>
+    /// <param name="edgeMap">ソースの世代込み packed ID → ターゲット ID のEdgeマップ。</param>
+    /// <param name="nexusMap">ソースの世代込み packed ID → ターゲット ID のNexusマップ。</param>
     public static void Apply(
         IWriteTransaction tx,
         IEnumerable<LogicalMutation> mutations,
@@ -41,47 +41,81 @@ public static class LogicalMutationReplay
                 case LogicalMutationKind.CreateVertex:
                 {
                     var newId = tx.CreateVertex(m.TokenName ?? string.Empty);
-                    vertexMap[m.VertexId.Sequence] = newId;
+                    vertexMap[m.VertexId.Value] = newId;
                     break;
                 }
                 case LogicalMutationKind.DeleteVertex:
                 {
-                    if (vertexMap.TryGetValue(m.VertexId.Sequence, out var vertexId))
+                    if (vertexMap.TryGetValue(m.VertexId.Value, out var vertexId))
                         tx.DeleteVertex(vertexId);
                     break;
                 }
                 case LogicalMutationKind.CreateEdge:
                 {
-                    if (!vertexMap.TryGetValue(m.VertexId.Sequence, out var src)) break;
-                    if (!vertexMap.TryGetValue(m.TargetVertexId.Sequence, out var tgt)) break;
+                    if (!vertexMap.TryGetValue(m.VertexId.Value, out var src)) break;
+                    if (!vertexMap.TryGetValue(m.TargetVertexId.Value, out var tgt)) break;
                     var newId = tx.CreateEdge(src, tgt, m.TokenName ?? string.Empty);
-                    edgeMap[m.EdgeId.Sequence] = newId;
+                    edgeMap[m.EdgeId.Value] = newId;
                     break;
                 }
                 case LogicalMutationKind.DeleteEdge:
                 {
-                    if (edgeMap.TryGetValue(m.EdgeId.Sequence, out var edgeId))
+                    if (edgeMap.TryGetValue(m.EdgeId.Value, out var edgeId))
                         tx.DeleteEdge(edgeId);
                     break;
                 }
                 case LogicalMutationKind.SetVertexProperty:
                 {
-                    if (!vertexMap.TryGetValue(m.VertexId.Sequence, out var vertexId)) break;
+                    if (!vertexMap.TryGetValue(m.VertexId.Value, out var vertexId)) break;
                     var value = m.PropertyValue.ToPropertyValue();
                     tx.SetProperty(vertexId, m.PropertyKey ?? string.Empty, value);
                     break;
                 }
                 case LogicalMutationKind.SetEdgeProperty:
                 {
-                    if (!edgeMap.TryGetValue(m.EdgeId.Sequence, out var edgeId)) break;
+                    if (!edgeMap.TryGetValue(m.EdgeId.Value, out var edgeId)) break;
                     var value = m.PropertyValue.ToPropertyValue();
                     tx.SetProperty(edgeId, m.PropertyKey ?? string.Empty, value);
                     break;
                 }
                 case LogicalMutationKind.RemoveVertexProperty:
                 {
-                    if (vertexMap.TryGetValue(m.VertexId.Sequence, out var vertexId))
+                    if (vertexMap.TryGetValue(m.VertexId.Value, out var vertexId))
                         tx.RemoveProperty(vertexId, m.PropertyKey ?? string.Empty);
+                    break;
+                }
+                case LogicalMutationKind.RemoveEdgeProperty:
+                {
+                    if (edgeMap.TryGetValue(m.EdgeId.Value, out var edgeId))
+                        tx.RemoveProperty(edgeId, m.PropertyKey ?? string.Empty);
+                    break;
+                }
+                case LogicalMutationKind.AddVertexPropertyValue:
+                {
+                    if (!vertexMap.TryGetValue(m.VertexId.Value, out var vertexId)) break;
+                    var value = m.PropertyValue.ToPropertyValue();
+                    tx.AddPropertyValue(vertexId, m.PropertyKey ?? string.Empty, in value);
+                    break;
+                }
+                case LogicalMutationKind.RemoveVertexPropertyValue:
+                {
+                    if (!vertexMap.TryGetValue(m.VertexId.Value, out var vertexId)) break;
+                    var value = m.PropertyValue.ToPropertyValue();
+                    tx.RemovePropertyValue(vertexId, m.PropertyKey ?? string.Empty, in value);
+                    break;
+                }
+                case LogicalMutationKind.AddEdgePropertyValue:
+                {
+                    if (!edgeMap.TryGetValue(m.EdgeId.Value, out var edgeId)) break;
+                    var value = m.PropertyValue.ToPropertyValue();
+                    tx.AddPropertyValue(edgeId, m.PropertyKey ?? string.Empty, in value);
+                    break;
+                }
+                case LogicalMutationKind.RemoveEdgePropertyValue:
+                {
+                    if (!edgeMap.TryGetValue(m.EdgeId.Value, out var edgeId)) break;
+                    var value = m.PropertyValue.ToPropertyValue();
+                    tx.RemovePropertyValue(edgeId, m.PropertyKey ?? string.Empty, in value);
                     break;
                 }
                 case LogicalMutationKind.CreateNexus:
@@ -94,7 +128,7 @@ public static class LogicalMutationReplay
                     bool complete = true;
                     for (int i = 0; i < source.Count; i++)
                     {
-                        if (!vertexMap.TryGetValue(source[i].VertexId.Sequence, out var mapped))
+                        if (!vertexMap.TryGetValue(source[i].VertexId.Value, out var mapped))
                         {
                             complete = false;
                             break;
@@ -103,38 +137,38 @@ public static class LogicalMutationReplay
                     }
                     if (!complete) break;
                     var newId = tx.CreateNexus(m.TokenName ?? string.Empty, remapped);
-                    nexusMap[m.NexusId.Sequence] = newId;
+                    nexusMap[m.NexusId.Value] = newId;
                     break;
                 }
                 case LogicalMutationKind.DeleteNexus:
                 {
-                    if (nexusMap.TryGetValue(m.NexusId.Sequence, out var heId))
+                    if (nexusMap.TryGetValue(m.NexusId.Value, out var heId))
                         tx.DeleteNexus(heId);
                     break;
                 }
                 case LogicalMutationKind.SetNexusProperty:
                 {
-                    if (!nexusMap.TryGetValue(m.NexusId.Sequence, out var heId)) break;
+                    if (!nexusMap.TryGetValue(m.NexusId.Value, out var heId)) break;
                     var value = m.PropertyValue.ToPropertyValue();
                     tx.SetProperty(heId, m.PropertyKey ?? string.Empty, value);
                     break;
                 }
                 case LogicalMutationKind.RemoveNexusProperty:
                 {
-                    if (nexusMap.TryGetValue(m.NexusId.Sequence, out var heId))
+                    if (nexusMap.TryGetValue(m.NexusId.Value, out var heId))
                         tx.RemoveProperty(heId, m.PropertyKey ?? string.Empty);
                     break;
                 }
                 case LogicalMutationKind.AddNexusPropertyValue:
                 {
-                    if (!nexusMap.TryGetValue(m.NexusId.Sequence, out var heId)) break;
+                    if (!nexusMap.TryGetValue(m.NexusId.Value, out var heId)) break;
                     var value = m.PropertyValue.ToPropertyValue();
                     tx.AddPropertyValue(heId, m.PropertyKey ?? string.Empty, value);
                     break;
                 }
                 case LogicalMutationKind.RemoveNexusPropertyValue:
                 {
-                    if (!nexusMap.TryGetValue(m.NexusId.Sequence, out var heId)) break;
+                    if (!nexusMap.TryGetValue(m.NexusId.Value, out var heId)) break;
                     var value = m.PropertyValue.ToPropertyValue();
                     tx.RemovePropertyValue(heId, m.PropertyKey ?? string.Empty, value);
                     break;

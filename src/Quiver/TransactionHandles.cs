@@ -219,6 +219,8 @@ public sealed class WriteTransaction : IWriteTransaction, IReadTransactionIntern
     /// <inheritdoc />
     public void RemoveProperty(VertexId vertexId, string key) => _core.RemoveProperty(vertexId, key);
     /// <inheritdoc />
+    public void RemoveProperty(EdgeId edgeId, string key) => _core.RemoveProperty(edgeId, key);
+    /// <inheritdoc />
     public PropertyValue GetProperty(VertexId vertexId, string key) => _core.GetProperty(vertexId, key);
     /// <inheritdoc />
     public PropertyValue GetProperty(EdgeId edgeId, string key) => _core.GetProperty(edgeId, key);

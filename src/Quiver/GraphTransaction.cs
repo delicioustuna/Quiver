@@ -779,6 +779,14 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         wh.FirstPropertyRef = newHead;
         wh.Dispose();
         MaintainScalarIndexes(PropertyOwner(vertexId), key, in value, newHead);
+        if (_logicalSink != null)
+        {
+            var captured = LogicalPropertyValue.Capture(in value);
+            RecordLogical(LogicalMutation.AddVertexPropertyValue(
+                vertexId,
+                key,
+                in captured));
+        }
     }
 
     public void AddPropertyValue(EdgeId edgeId, string key, in PropertyValue value)
@@ -807,6 +815,14 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         wh.FirstPropertyRef = newHead;
         wh.Dispose();
         MaintainScalarIndexes(PropertyOwner(edgeId), key, in value, newHead);
+        if (_logicalSink != null)
+        {
+            var captured = LogicalPropertyValue.Capture(in value);
+            RecordLogical(LogicalMutation.AddEdgePropertyValue(
+                edgeId,
+                key,
+                in captured));
+        }
     }
 
     public void RemovePropertyValue(VertexId vertexId, string key, in PropertyValue value)
@@ -826,6 +842,14 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
                 && PropertyValueEqualityHelper.AreEqual(cursor.Current.Value, in value))
             {
                 _inner.Properties.Delete(owner, cursor.CurrentVersion, firstProperty);
+                if (_logicalSink != null)
+                {
+                    var captured = LogicalPropertyValue.Capture(in value);
+                    RecordLogical(LogicalMutation.RemoveVertexPropertyValue(
+                        vertexId,
+                        key,
+                        in captured));
+                }
                 return;
             }
         }
@@ -850,6 +874,14 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
                 && PropertyValueEqualityHelper.AreEqual(cursor.Current.Value, in value))
             {
                 _inner.Properties.Delete(owner, cursor.CurrentVersion, firstProperty);
+                if (_logicalSink != null)
+                {
+                    var captured = LogicalPropertyValue.Capture(in value);
+                    RecordLogical(LogicalMutation.RemoveEdgePropertyValue(
+                        edgeId,
+                        key,
+                        in captured));
+                }
                 return;
             }
         }
@@ -875,6 +907,28 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
             usage.Dispose();
             throw;
         }
+    }
+
+    public void RemoveProperty(EdgeId edgeId, string key)
+    {
+        EnsureWritable();
+        using var usage = EnterUsage();
+        if (!_propKeyTokens.TryGet(key, out var keyId)) return;
+        if (!_inner.Edges.Read(edgeId).InUse) return;
+
+        var firstProperty = _inner.Edges.Read(edgeId).FirstPropertyRef;
+        EntityRef owner = PropertyOwner(edgeId);
+        if (!RemovePropertyCore(owner, firstProperty, keyId)) return;
+
+        _columns?.OnRemoveProperty(
+            Core.EntityKind.Edge,
+            edgeId.Sequence,
+            keyId,
+            _inner.Id.Value);
+        RemoveVectorIndexEntries(owner, key);
+        RemoveFullTextIndexEntries(owner, key);
+        if (_logicalSink != null)
+            RecordLogical(LogicalMutation.RemoveEdgeProperty(edgeId, key));
     }
 
     public PropertyValuesEnumerator GetPropertyValues(EdgeId edgeId, string key)
