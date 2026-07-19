@@ -639,6 +639,7 @@ namespace Quiver
         long CurrentCheckpointThresholdBytes { get; }
         Quiver.ConsistencyReport CheckConsistency();
         Quiver.IndexConsistencyReport CheckIndexConsistency();
+        Quiver.SnapshotRuntimeDiagnostics GetSnapshotDiagnostics();
         Quiver.DatabaseStatistics GetStatistics();
         Quiver.IndexRepairReport RepairIndexes(Quiver.IndexRepairMode mode);
         void SetCheckpointPolicy(Quiver.Transactions.CheckpointPolicy policy, long? fixedThresholdBytes = default);
@@ -969,6 +970,14 @@ namespace Quiver
     {
         public SnapshotOptions() { }
         public bool IncludeIndexes { get; set; }
+    }
+    public sealed class SnapshotRuntimeDiagnostics : System.IEquatable<Quiver.SnapshotRuntimeDiagnostics>
+    {
+        public SnapshotRuntimeDiagnostics(int ActiveCount, System.TimeSpan OldestAge, string? OldestStartLocation, long? OldestCommittedHighWater) { }
+        public int ActiveCount { get; init; }
+        public System.TimeSpan OldestAge { get; init; }
+        public long? OldestCommittedHighWater { get; init; }
+        public string? OldestStartLocation { get; init; }
     }
     public sealed class VectorIndexDefinition : Quiver.IndexDefinition, System.IEquatable<Quiver.VectorIndexDefinition>
     {
@@ -1685,12 +1694,16 @@ namespace Quiver.Telemetry
         public const string TransactionSourceName = "Quiver.Transaction";
         public const string Version = "1.0.0";
         public const string WalFlushSourceName = "Quiver.WalFlush";
+        public static readonly System.Diagnostics.Metrics.ObservableGauge<long> ActiveSnapshotCount;
         public static readonly string[] AllSourceNames;
         public static readonly System.Diagnostics.Metrics.Counter<long> BufferPoolHits;
         public static readonly System.Diagnostics.Metrics.Counter<long> BufferPoolMisses;
         public static readonly System.Diagnostics.ActivitySource CheckpointActivitySource;
         public static readonly System.Diagnostics.Metrics.Histogram<double> CheckpointDurationMs;
+        public static readonly System.Diagnostics.Metrics.UpDownCounter<long> MaintenanceGarbageCollectionActive;
+        public static readonly System.Diagnostics.Metrics.UpDownCounter<long> MaintenanceRebuildActive;
         public static readonly System.Diagnostics.Metrics.Meter Meter;
+        public static readonly System.Diagnostics.Metrics.ObservableGauge<double> OldestSnapshotAgeSeconds;
         public static readonly System.Diagnostics.ActivitySource QueryActivitySource;
         public static readonly System.Diagnostics.Metrics.Histogram<double> QueryDurationMs;
         public static readonly System.Diagnostics.ActivitySource TransactionActivitySource;
@@ -1701,6 +1714,8 @@ namespace Quiver.Telemetry
         public static readonly System.Diagnostics.Metrics.Counter<long> WalBytesWritten;
         public static readonly System.Diagnostics.ActivitySource WalFlushActivitySource;
         public static readonly System.Diagnostics.Metrics.Histogram<double> WalFlushDurationMs;
+        public static readonly System.Diagnostics.Metrics.Counter<long> WriterContentionCount;
+        public static readonly System.Diagnostics.Metrics.Histogram<double> WriterWaitDurationMs;
     }
 }
 namespace Quiver.Text

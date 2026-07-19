@@ -10,6 +10,14 @@ public interface IDiagnosticsApi
     DatabaseStatistics GetStatistics();
 
     /// <summary>
+    /// active な reader snapshot の件数と最古 snapshot の診断情報を返す。
+    /// reader が存在しない場合、件数は 0、経過時間は 0、開始位置と high-water は
+    /// <see langword="null"/> になる。
+    /// </summary>
+    SnapshotRuntimeDiagnostics GetSnapshotDiagnostics()
+        => new(0, TimeSpan.Zero, null, null);
+
+    /// <summary>
     /// 整合性チェックを実行して結果レポートを返す。
     /// ストアの物理構造 (incidence chain 等) をロックなしで走査するため、
     /// 書き込みと並行して呼ぶと途中状態を一時的な不整合として誤検出しうる
@@ -57,6 +65,17 @@ public interface IDiagnosticsApi
         Quiver.Transactions.CheckpointPolicy policy,
         long? fixedThresholdBytes = null) { }
 }
+
+/// <summary>reader snapshot の現在状態。</summary>
+/// <param name="ActiveCount">active な reader snapshot 数。</param>
+/// <param name="OldestAge">最古 snapshot の開始からの経過時間。</param>
+/// <param name="OldestStartLocation">最古 snapshot を登録した内部開始位置。</param>
+/// <param name="OldestCommittedHighWater">最古 snapshot が固定した committed transaction high-water。</param>
+public sealed record SnapshotRuntimeDiagnostics(
+    int ActiveCount,
+    TimeSpan OldestAge,
+    string? OldestStartLocation,
+    long? OldestCommittedHighWater);
 
 /// <summary>
 /// orphan 索引エントリ。<paramref name="EntityId"/> は <see cref="Quiver.Core.VertexId.Value"/>

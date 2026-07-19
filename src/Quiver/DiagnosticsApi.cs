@@ -63,6 +63,17 @@ internal sealed class DiagnosticsApi : IDiagnosticsApi
     public long CurrentCheckpointThresholdBytes
         => _txManager?.CurrentCheckpointThresholdBytes ?? 0;
 
+    public SnapshotRuntimeDiagnostics GetSnapshotDiagnostics()
+    {
+        SnapshotDiagnostics diagnostics =
+            _txManager?.Snapshots.Diagnostics ?? default;
+        return new(
+            diagnostics.ActiveCount,
+            diagnostics.OldestAge,
+            diagnostics.OldestStartLocation,
+            diagnostics.OldestCommittedHighWater);
+    }
+
     public void SetCheckpointPolicy(CheckpointPolicy policy, long? fixedThresholdBytes = null)
     {
         if (_txManager == null) return;

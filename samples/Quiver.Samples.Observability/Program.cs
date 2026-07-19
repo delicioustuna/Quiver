@@ -60,6 +60,16 @@ try
 
     Console.WriteLine("[sample] 100 commits + 1 abort done; flushing OTel exports ...");
 
+    using (var reader = db.BeginReadTransaction())
+    {
+        var snapshots = db.Diagnostics.GetSnapshotDiagnostics();
+        Console.WriteLine(
+            $"[sample] active snapshots={snapshots.ActiveCount}, "
+            + $"oldest={snapshots.OldestAge.TotalMilliseconds:F1} ms, "
+            + $"start={snapshots.OldestStartLocation}");
+    }
+    db.Vacuum();
+
     // メトリクスのコンソール出力が走る時間を確保。
     Thread.Sleep(2000);
 

@@ -8,6 +8,7 @@ using Quiver.Storage;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
 using Quiver.Storage.Wal;
+using Quiver.Telemetry;
 using System.Diagnostics;
 
 namespace Quiver;
@@ -235,6 +236,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
     private void RebuildScalarIndexes(CancellationToken cancellationToken)
     {
+        using IDisposable rebuildMeasurement = QuiverTelemetry.TrackRebuild();
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -521,6 +523,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
     private void MergeVectorSegments(CancellationToken cancellationToken)
     {
+        using IDisposable rebuildMeasurement = QuiverTelemetry.TrackRebuild();
         try
         {
             while (!cancellationToken.IsCancellationRequested
@@ -612,6 +615,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
     private void MergeFullTextSegments(CancellationToken cancellationToken)
     {
+        using IDisposable rebuildMeasurement = QuiverTelemetry.TrackRebuild();
         try
         {
             while (!cancellationToken.IsCancellationRequested
@@ -854,6 +858,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     /// </summary>
     public VacuumReport Vacuum(VacuumOptions? options = null)
     {
+        using IDisposable garbageCollectionMeasurement =
+            QuiverTelemetry.TrackGarbageCollection();
         using var mutationLease = _txManager.AcquireMutationLease();
         // WAL を渡して、dead version 回収後の末尾連続 free page を物理 truncate する。
         // WAL の FileTruncate レコード経由で crash recovery に対する冪等再生を保証する。
