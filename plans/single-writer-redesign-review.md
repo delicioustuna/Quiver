@@ -55,7 +55,7 @@
 
 ### C-6. Relationship raw entry の reuse fence が未定義
 
-> **設計決定済み・実装未対応(2026-07-13、Wave 9 移管)**: 正本 §2.3、§5.1、§7.1、§9 Wave 1/9、§15、§16 に raw entry の lifetime、Wave 1 no-reuse、Wave 9 の再利用解放 coordinator を追加した。Wave 1 の no-reuse と materialization、Wave 9 の coordinator と lifecycle test が完了するまで対応済みにはしない。
+> **対応済み(2026-07-19、設計解決)**: 正本 §2.3、§5.1、§7.1、§9 Wave 1/9、§15、§16 に raw entry の lifetime、Wave 1 no-reuse、Wave 9 の再利用解放 coordinator を追加した。Critical の設計着手 gate は解決済みとし、Wave 1 の no-reuse と materialization、Wave 9 の coordinator と lifecycle test の実装完了は各 Wave gate で別に検証する。
 
 - **発見日**: 2026-07-13
 - **影響**: Wave 1 commit 1
