@@ -2,7 +2,7 @@
 
 > 効力宣言: 本書と設計正本が食い違う場合は設計正本を優先し、食い違いをユーザへ報告する。
 > 作成日: 2026-07-18
-> 対応する正本のバージョン: `ede755edac004606e618bf8d77e3d8f01d7f2eb6`
+> 対応する正本のバージョン: `689af54e9d1c8c676ff3ea36f4101b929bc2bd7e`
 > ステータス: 承認済み(2026-07-18)
 
 ## 1. 着手前チェック
@@ -13,7 +13,8 @@
 - review C-5 は全文 candidate と search result を full typed ID へ materializeし、owner Generationとproperty version visibilityをprimary storeで再検証する設計である。
 - review C-7 はfiltered full-textのlogical pipelineがfull typed IDを保持し、physical lookupへ渡すSequenceをprimary `Read`成功直後の値に限定する設計である。
 - review M-3 はimmutable full-text segmentをread snapshotからwriter lease外で構築し、source manifest generationの再検証とpublish commitだけをlease内に置く設計で解決済みである。
-- review M-4 はfull-text 4 segment p50とsegment WAL amplificationの出所を`clean-slate` baselineへ分離し、本Waveの性能gateを8.55 ms以下かつ11.74x以下に固定している。
+- review M-4 はfull-text 4 segment p50とsegment write amplificationの出所を`clean-slate` baselineへ分離し、本Waveの性能gateを8.55 ms以下かつ11.74x以下に固定している。
+- review M-7 はchecksum付きappend-only segment bodyをWAL外でfsyncし、manifestだけをprimary mutationと同じstrict `Commit`でpublishする設計で解決済みである。
 - review M-5 は旧`CreateFullTextIndex`とfull-text専用schema surfaceを`CreateIndex(FullTextIndexDefinition)`へ置換する設計である。
 - Wave 3のowner-bound text property version、Wave 4のsnapshot visibilityとidentity materializer、Wave 5のtransaction-owned page-image WAL、Wave 6のunified `IndexDefinitionCatalog`とtyped query pipeline、Wave 7のimmutable segment manifestとhybrid同一snapshotの基盤が実在する。
 - 現行のmutable postings/norms B+Tree、`FullTextIndexInfo`、`FullTextIndexOptions`、旧`CreateFullTextIndex`、full-text専用catalog APIは、本Waveでtarget contractへ置換する入力であり、compatibility surfaceとして残さない。
@@ -48,6 +49,11 @@ Wave 8は全文propertyのdefinition、commit maintenance、snapshot検索、imm
   segmentはterm dictionary、postings、norms、segment-local corpus stats、checksumを持つ。
   commit済みsegmentをin-place更新せず、更新と削除は新document generationとtombstoneで表す。
   old readerは旧manifest、新readerはpublish済みmanifestを選ぶ。
+- **durable artifact contract**：delta/merged segment bodyはchecksum付きappend-only artifactとして永続化し、body writeとfsyncを完了してからmanifestだけをprimary mutationと同じwrite transactionでpublishする。
+  manifestはartifact ID、checksum、source snapshot high-water、`xmin/xmax`を保持する。
+  bodyは上書きしないためpage-image WALへ複製せず、body fsync後かつmanifest commit前のcrashは未参照orphan、commit後は完全なbodyへの参照として復旧する。
+  正常reopenはpersisted manifestからsegmentを開き、primary property全走査を行わない。
+  body欠損またはchecksum不一致の場合だけ`RebuildRequired`へ遷移し、同じread transactionのprimary scanから再構築する。
 - **snapshot stats contract**：BM25の`N`、`df`、総document length、WAND上界は、同じread transactionからvisibleなsegment統計を合算する。
   tombstoneまたは不可視property versionはtop-k確定前のcandidate validationで除外し、同じownerとproperty addressの複数versionはsnapshotからvisibleな最新versionだけを採用する。
   segment fan-outとmergeの前後でstrict BM25 scanのscore順、同点処理、top-k結果を一致させる。
@@ -68,8 +74,8 @@ Wave 8は全文propertyのdefinition、commit maintenance、snapshot検索、imm
   mergeが片方で進行しても既存readerのRRF入力は固定され、新しいreaderだけがpublish後のmanifestを使う。
   score内訳とtop-k前candidate push-downの利用者contractはWave 9へ残す。
 - **WALとrecovery contract**：`FtLeafMutation`、`FtStructureImage`、full-text専用logical redo、compensation、loser undo、recovery passを削除する。
-  segment body、manifest、definition catalogはWave 5の通常page-image transactionとstrict `Commit` recordでdurableにする。
-  recovery後にmanifestが指すsegmentはchecksumまで完全でなければならず、未参照segment bodyは不可視のorphanとしてrebuildまたはmaintenanceの回収対象にする。
+  segment bodyはWAL外のappend-only artifactとしてfsyncし、manifestとdefinition catalogだけをWave 5の通常page-image transactionとstrict `Commit` recordでdurableにする。
+  recovery後にmanifestが指すsegmentはchecksumまで完全でなければならず、未参照segment bodyは不可視のorphanとしてWave 9 maintenanceの回収対象にする。
 - **補修方法**：最初にpublic definition、schema catalog、property maintenance、segment manifest、BM25/WAND、filtered operator、hybrid snapshot、WAL/recoveryをtarget contractへ一括変更する。
   続けてsolution buildのcompiler errorを旧schema API、mutable index dependency、raw candidate dependencyの一覧として補修する。
   build成功後はPublicApi、tokenization、definition reopen、segment commit、strict BM25、old/new snapshot、tombstone、candidate validation、merge/rebuild、operators、Rag、crash、性能、publish stallの順で契約漏れを補修する。
@@ -92,6 +98,12 @@ Wave 8は全文propertyのdefinition、commit maintenance、snapshot検索、imm
   同じownerとproperty addressの旧versionを重複排除し、primary snapshotで可視性を再検証してからglobal top-kを確定する。
 - segment構築中にwriter leaseを保持しない。
   lease内に置くのはsource generationの再検証とmanifest publish commitだけであり、publish p99は`WriterWaitTimeout`既定値の10%以内に収める。
+- segment bodyをmanifest commit後にfsyncしない。
+  strict `Commit`がdurableなのにbodyが欠ける状態を作るため、body writeとfsyncはmanifest transaction開始前に完了させる。
+- immutable bodyをpage-image WALへ複製しない。
+  append-only bodyはprepare-before-publishとchecksumで完全性を保証し、WALには小さいmanifest変更だけを載せる。
+- 正常reopenをprimary全走査で成立させない。
+  primary scanは欠損・checksum不一致時のrebuild fallbackであり、persisted manifestを開けない通常動作を性能gate成功として扱わない。
 - stale artifactを無条件にpublishしない。
   definitionまたはmanifest generationが構築中に変化した場合はartifactを破棄し、新しいread snapshotから再構築する。
 - old manifestとsegment bodyをpublish直後に物理削除しない。
@@ -114,8 +126,8 @@ Wave 8は全文propertyのdefinition、commit maintenance、snapshot検索、imm
 | gate | 適用/N/A | コマンドまたは差分根拠 | 合格条件 |
 |---|---|---|---|
 | 機能test | 適用 | `dotnet build Quiver.slnx -v minimal`、`dotnet test tests/Quiver.PublicApi.Tests/Quiver.PublicApi.Tests.csproj --no-build`、`dotnet test tests/Quiver.Index.Tests/Quiver.Index.Tests.csproj --no-build`、`dotnet test tests/Quiver.Operators.Tests/Quiver.Operators.Tests.csproj --no-build`、`dotnet test tests/Quiver.PropertyTests/Quiver.PropertyTests.csproj --no-build`、`dotnet test tests/Quiver.Tests/Quiver.Tests.csproj --no-build`、`dotnet test tests/Quiver.Rag.Tests/Quiver.Rag.Tests.csproj --no-build`、solution全test project | 0 errors、0 warnings、全対象test成功。unified definition、全mutation入口、immutable segment snapshot、strict BM25/WAND、candidate validation、hybrid same-snapshotがbinaryとin-memory両backendで成立する |
-| crashtest | 適用 | binary backendでdelta segment body、manifest publish、update tombstone、merge publish、rebuild publishのcommit境界kill matrixを実行し、full-text chaos filterとconsistency testを実行する | `Commit`なしsegmentとmanifestは不可視で、`Commit`済みmanifestは完全なsegmentだけを参照する。delete済みdocumentが復活せず、入力segmentとmerge出力が同じsnapshotで二重可視にならない。derived欠落または破損はprimary openを壊さずrebuildへ収束する |
-| baseline gate | 適用 | `dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --clean-slate-segment-spike`、product full-text segmentの4 segment検索、merge前後、publish stallを測るrunner、`dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --fts6`を実行する | 4 segment p50が8.55 ms以下、BM25 top-kがstrict scanと一致する。RAG ingest WAL amplificationが11.74x以下でpayload/index別内訳を記録する。lease保持中publish p99は`WriterWaitTimeout`既定値の10%以内であり、重いartifact構築時間を含めない。環境、commit、生出力を`docs/benchmarks/`へ保存する |
+| crashtest | 適用 | binary backendでdelta/merged body write、body fsync、manifest PageImage、strict `Commit`、in-memory publish、update tombstone、rebuild publishの各境界kill matrixを実行し、full-text chaos filterとconsistency testを実行する | body fsync後かつ`Commit`前のartifactはorphanとして不可視で、`Commit`済みmanifestはchecksum一致の完全なsegmentだけを参照する。正常reopenはprimary全走査なしで同じ結果を返す。delete済みdocumentが復活せず、入力segmentとmerge出力が同じsnapshotで二重可視にならない。derived欠落または破損はprimary openを壊さず`RebuildRequired`からrebuildへ収束する |
+| baseline gate | 適用 | `dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --clean-slate-segment-spike`、product full-text segmentの4 segment検索、merge前後、reopen、publish stallを測るrunner、`dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --fts6`を実行する | 4 segment p50が8.55 ms以下、BM25 top-kがstrict scanと一致する。RAG ingest WAL amplificationとsegment merge込み総write amplificationがそれぞれ11.74x以下でpayload/manifest/body別内訳を記録する。正常reopenはpersisted manifestを使いprimary scan件数0である。lease保持中publish p99は`WriterWaitTimeout`既定値の10%以内であり、重いartifact構築時間とbody fsyncを含めない。環境、commit、生出力を`docs/benchmarks/`へ保存する |
 | as-built更新 | 適用 | `docs/spec/00_overview.md`、`docs/spec/01_storage_paging.md`、`docs/spec/02_wal_recovery.md`、`docs/spec/03_mvcc.md`、`docs/spec/04_records_index.md`、`docs/spec/05_query.md`、`docs/spec/07_fulltext.md`、`docs/spec/08_known_limits.md`、`docs/design/development.md`、README、samplesのactive contract scan | mutable postings/norms、旧full-text schema API、full-text専用WAL/recovery、snapshot外statsの記述が残らず、unified definition、immutable segment、manifest visibility、candidate validation、通常WAL recoveryと一致する |
 
 追加条件は次のとおりである。
@@ -134,16 +146,20 @@ Wave 8は全文propertyのdefinition、commit maintenance、snapshot検索、imm
 - text-firstとgraph-first filtered full-textが同じsnapshotとcandidate predicateで同じvisible result setを返す。
 - segment artifact構築中に通常writerが進行し、lease保持中publish p99が性能gateを満たす。
 - source definitionまたはmanifest generationが構築中に変化した場合、stale artifactはpublishされず、新しいsnapshotから再試行される。
+- delta/merged bodyはchecksum付きappend-only artifactとしてfsync後にだけmanifestから参照され、body bytesはpage-image WALへ複製されない。
+- 正常reopenはpersisted manifestとchecksum一致bodyを開き、primary property scan件数0で同じtop-kを返す。
+- body write/fsync、manifest PageImage、strict `Commit`、in-memory publishの各crash境界で、未commit bodyは不可視orphan、commit済みmanifestは完全なbodyだけを参照する。
 - segmentの削除またはchecksum不整合がprimary text propertyを失わせず、`RebuildRequired`とbase scanからのrebuildでsearch pathへ戻る。
 - full-textとvectorを融合するoperatorとRagは、同じread transactionのsnapshotから両manifestとproperty visibilityを解決する。
 - full-text専用logical WAL record、compensation、loser undo、recovery passが0件であり、strict `Commit`の有無だけでsegment manifestのwinnerを決める。
-- product-pathの4 segment p50、ingest WAL amplification、publish stallが正本 §10.4のgateを満たし、測定環境、commit、生出力、payload/index別内訳が記録される。
+- product-pathの4 segment p50、ingest WAL amplification、segment merge込み総write amplification、正常reopen、publish stallが正本 §10.4のgateを満たし、測定環境、commit、生出力、payload/manifest/body別内訳が記録される。
 - staged pathに対する`scripts/agent-guardrails/check-track-markers.ps1`と`git diff --check`が成功する。
 - branch tipは完成または検証済み補修commitであり、topic branchへpush済みである。
 
-## 6. 実装検証結果
+## 6. 最初のcandidate検証結果（失効）
 
-2026-07-18 に次の検証を実施した。
+2026-07-18 に次の検証を実施したが、segment bodyとmanifestがメモリ内だけで正常reopen時にprimary全走査していたため、2026-07-19のdecisionでWave 8合格根拠として失効した。
+次の値はforward-fix前のhistorical resultであり、durable artifact実装後に再測定して置き換える。
 
 | gate | 実測結果 |
 |---|---|
