@@ -1,6 +1,7 @@
 using Quiver.Core;
 using Quiver.Index;
 using Quiver.Index.FullText;
+using Quiver.Migrations;
 using Quiver.Text;
 
 namespace Quiver.Transactions;
@@ -44,6 +45,15 @@ internal sealed class TxIndexManager : IIndexManager
         string newName)
     { EnsureWritable(); _inner.RenameTargetScope(ownerKind, oldName, newName); }
     public IEnumerable<string> ListIndexes() => _inner.ListIndexes();
+
+    public IReadOnlyList<MigrationHistoryEntry> ListMigrationHistory()
+        => _inner.ListMigrationHistory();
+
+    public void AppendMigrationHistory(MigrationHistoryEntry entry)
+    {
+        EnsureWritable();
+        _inner.AppendMigrationHistory(entry);
+    }
 
     public void RegisterIndexDefinition(
         ScalarIndexDefinition definition,

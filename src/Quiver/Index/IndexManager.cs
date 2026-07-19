@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Text;
 using Quiver.Core;
 using Quiver.Index.FullText;
+using Quiver.Migrations;
 using Quiver.Storage;
 using Quiver.Storage.Wal;
 using Quiver.Text;
@@ -39,7 +40,9 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     private const int CatalogEntryCountOffset = 4; // int32: secondary 索引件数
     private const int CatalogFtCountOffset = 8;    // int32: 全文索引件数
     private const int CatalogFormatVersionOffset = 12;
-    private const int CatalogFormatVersion = 3;
+    private const int CatalogMigrationCountOffset = 16;
+    private const int CatalogHeaderLength = 20;
+    private const int CatalogFormatVersion = 4;
 
     private readonly SingleFileContainer _container;
     private readonly bool _ownsContainer;
@@ -64,6 +67,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     // 全文bodyは外部append-only artifactに置き、catalogにはdefinition、lifecycle、manifestを置く。
     private readonly Dictionary<string, FullTextCatalogEntry> _fullTextDefinitions =
         new(StringComparer.Ordinal);
+    private readonly List<MigrationHistoryEntry> _migrationHistory = [];
+    private readonly HashSet<string> _appliedMigrationIds = new(StringComparer.Ordinal);
     private readonly TokenizerRegistry _tokenizers = TokenizerRegistry.CreateDefault();
 
     /// <summary>本番経路: factory が共有 container を渡す。container の所有権は移らない。</summary>
@@ -105,7 +110,12 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     /// </summary>
     public void FlushAll()
     {
-        if (_indexes.Count > 0 || _fullTextDefinitions.Count > 0) _container.Flush();
+        if (_indexes.Count > 0
+            || _fullTextDefinitions.Count > 0
+            || _migrationHistory.Count > 0)
+        {
+            _container.Flush();
+        }
     }
 
     /// <summary>
@@ -125,11 +135,27 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         _bindingByName.Clear();
         _definitions.Clear();
         _fullTextDefinitions.Clear();
+        _migrationHistory.Clear();
+        _appliedMigrationIds.Clear();
 
         // catalog pages are part of the transaction write set. Abort/rollback restores
         // their before-image first, so rebuilding every cache from that primary catalog
         // prevents an aborted definition from surviving in process memory.
         LoadCatalogAndMaterialize();
+    }
+
+    public IReadOnlyList<MigrationHistoryEntry> ListMigrationHistory()
+        => _migrationHistory.ToArray();
+
+    public void AppendMigrationHistory(MigrationHistoryEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (!_appliedMigrationIds.Add(entry.Id))
+            throw new InvalidOperationException(
+                $"Migration '{entry.Id}' is already recorded in history.");
+
+        _migrationHistory.Add(entry);
+        PersistCatalog();
     }
 
     /// <summary>
@@ -577,7 +603,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         long pageCount = _catalogTenant.PageCount;
         if (pageCount < 2) return; // header 未作成 = 索引ゼロ
 
-        int blobLen, entryCount, ftCount, formatVersion;
+        int blobLen, entryCount, ftCount, migrationCount, formatVersion;
         var hh = _catalogTenant.PinForRead(new PageId(1));
         try
         {
@@ -586,6 +612,10 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             ftCount = BinaryPrimitives.ReadInt32LittleEndian(hh.Data[CatalogFtCountOffset..]);
             formatVersion = BinaryPrimitives.ReadInt32LittleEndian(
                 hh.Data[CatalogFormatVersionOffset..]);
+            migrationCount = formatVersion >= 4
+                ? BinaryPrimitives.ReadInt32LittleEndian(
+                    hh.Data[CatalogMigrationCountOffset..])
+                : 0;
         }
         finally { hh.Dispose(); }
         if (blobLen <= 0) return;
@@ -663,6 +693,21 @@ internal sealed class IndexManager : IIndexManager, IDisposable
                 normsTenant,
                 state,
                 manifest);
+        }
+
+        for (int i = 0; i < migrationCount; i++)
+        {
+            string id = ReadString(blob, ref pos);
+            int version = BinaryPrimitives.ReadInt32LittleEndian(blob.AsSpan(pos));
+            pos += sizeof(int);
+            long ticks = BinaryPrimitives.ReadInt64LittleEndian(blob.AsSpan(pos));
+            pos += sizeof(long);
+            var entry = new MigrationHistoryEntry(
+                id,
+                version,
+                new DateTime(ticks, DateTimeKind.Utc));
+            _migrationHistory.Add(entry);
+            _appliedMigrationIds.Add(id);
         }
     }
 
@@ -744,6 +789,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         //       lifecycleState(1) manifest(len+utf8)。
         var blobList = new List<byte>();
         Span<byte> u64 = stackalloc byte[8];
+        Span<byte> i32 = stackalloc byte[sizeof(int)];
         int entryCount = 0;
         foreach (var (name, tenantId) in _indexTenantIds)
         {
@@ -779,6 +825,16 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             WriteString(blobList, definition.Manifest);
             ftCount++;
         }
+        foreach (MigrationHistoryEntry entry in _migrationHistory)
+        {
+            WriteString(blobList, entry.Id);
+            BinaryPrimitives.WriteInt32LittleEndian(i32, entry.Version);
+            for (int i = 0; i < i32.Length; i++) blobList.Add(i32[i]);
+            BinaryPrimitives.WriteInt64LittleEndian(
+                u64,
+                entry.AppliedAtUtc.ToUniversalTime().Ticks);
+            for (int i = 0; i < u64.Length; i++) blobList.Add(u64[i]);
+        }
         byte[] blob = blobList.ToArray();
 
         // 2. 必要なテナント論理ページを確保する (header = 論理 1, data = 論理 2..)。
@@ -790,13 +846,16 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         var wh = _catalogTenant.PinForWrite(new PageId(1));
         try
         {
-            wh.Data[..(CatalogFormatVersionOffset + 4)].Clear();
+            wh.Data[..CatalogHeaderLength].Clear();
             BinaryPrimitives.WriteInt32LittleEndian(wh.Data[CatalogBlobLenOffset..], blob.Length);
             BinaryPrimitives.WriteInt32LittleEndian(wh.Data[CatalogEntryCountOffset..], entryCount);
             BinaryPrimitives.WriteInt32LittleEndian(wh.Data[CatalogFtCountOffset..], ftCount);
             BinaryPrimitives.WriteInt32LittleEndian(
                 wh.Data[CatalogFormatVersionOffset..],
                 CatalogFormatVersion);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                wh.Data[CatalogMigrationCountOffset..],
+                _migrationHistory.Count);
         }
         finally { wh.Dispose(); }
 
@@ -833,6 +892,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         _indexFiles.Clear();
         _indexTenantIds.Clear();
         _fullTextDefinitions.Clear();
+        _migrationHistory.Clear();
+        _appliedMigrationIds.Clear();
         _usedTenantIds.Clear();
         if (_ownsContainer) _container.Dispose();
     }

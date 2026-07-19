@@ -306,15 +306,14 @@ public sealed class QuiverDatabase : IDisposable
     public Task<Migrations.MigrationResult> MigrateAsync(
         IEnumerable<Migrations.IMigration> migrations,
         CancellationToken cancellationToken = default)
-        => Migrations.Migrator.RunAsync(this, MigrationDirectory, migrations, cancellationToken);
+        => Migrations.Migrator.RunAsync(this, migrations, cancellationToken);
 
     /// <summary>適用済みマイグレーション履歴のスナップショット (適用順)。</summary>
     public IReadOnlyList<Migrations.MigrationHistoryEntry> GetMigrationHistory()
-        => new Migrations.MigrationHistory(MigrationDirectory).Entries;
-
-    // 増分8: migrations.history はバックエンドのデータディレクトリに置く (operational metadata)。
-    // backend の DataDirectory を正本とする。
-    private string MigrationDirectory => _backend.DataDirectory;
+    {
+        using var tx = BeginReadTransaction();
+        return tx.AsInternal().Inner.Indexes.ListMigrationHistory();
+    }
 
     /// <summary>
     /// バックグラウンドの AutoVacuum ワーカーを停止してから下層バックエンドを破棄する。
