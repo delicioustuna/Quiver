@@ -29,6 +29,8 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     private List<VectorSegmentMutation>? _vectorMutations;
     private readonly FullTextSegmentIndex? _fullTextSegments;
     private List<FullTextSegmentMutation>? _fullTextMutations;
+    private bool _fullTextPrepared;
+    private List<(long Id, int MutationCount)>? _fullTextSavepoints;
     private readonly ISchemaCatalog _schema;
     private readonly ISchemaEditor? _schemaEditor;
     private readonly NexusMergeIndex? _nexusMergeIndex;
@@ -1506,18 +1508,10 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
             _fullTextSegments.RegisterPending(
                 _inner.Id.Value,
                 _fullTextMutations);
-            _inner.OnCommitted(PublishFullTextMutations);
             _inner.OnRolledBack(
                 () => _fullTextSegments.DiscardPending(_inner.Id.Value));
         }
         _fullTextMutations.Add(mutation);
-    }
-
-    private void PublishFullTextMutations()
-    {
-        if (_fullTextSegments is null || _fullTextMutations is not { Count: > 0 })
-            return;
-        _fullTextSegments.PublishDelta(_inner.Id.Value, _fullTextMutations);
     }
 
     // ========== Nexus操作 ==========
@@ -1904,7 +1898,23 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
 
     public void Commit()
     {
-        _inner.Commit();
+        try
+        {
+            if (!_fullTextPrepared
+                && _fullTextSegments is not null
+                && _fullTextMutations is { Count: > 0 })
+            {
+                _fullTextSegments.PrepareCommit(_inner, _fullTextMutations);
+                _fullTextPrepared = true;
+            }
+            _inner.Commit();
+        }
+        catch
+        {
+            if (_inner.State == TransactionState.Active)
+                _inner.Abort();
+            throw;
+        }
     }
 
     public void Rollback()
@@ -1920,17 +1930,45 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     // savepoint / nested undo — 下層トランザクションへ委譲する。
     public SavepointId Savepoint(string? name = null)
     {
-        return _inner.Savepoint(name);
+        SavepointId savepoint = _inner.Savepoint(name);
+        (_fullTextSavepoints ??= []).Add((
+            savepoint.Value,
+            _fullTextMutations?.Count ?? 0));
+        return savepoint;
     }
 
     public void RollbackTo(SavepointId savepoint)
     {
         _inner.RollbackTo(savepoint);
+        if (_fullTextSavepoints is null)
+            return;
+        int index = _fullTextSavepoints.FindIndex(
+            entry => entry.Id == savepoint.Value);
+        if (index < 0)
+            return;
+        int mutationCount = _fullTextSavepoints[index].MutationCount;
+        if (_fullTextMutations is { } mutations
+            && mutations.Count > mutationCount)
+            mutations.RemoveRange(
+                mutationCount,
+                mutations.Count - mutationCount);
+        if (index + 1 < _fullTextSavepoints.Count)
+            _fullTextSavepoints.RemoveRange(
+                index + 1,
+                _fullTextSavepoints.Count - index - 1);
     }
 
     public void ReleaseSavepoint(SavepointId savepoint)
     {
         _inner.ReleaseSavepoint(savepoint);
+        if (_fullTextSavepoints is null)
+            return;
+        int index = _fullTextSavepoints.FindIndex(
+            entry => entry.Id == savepoint.Value);
+        if (index >= 0)
+            _fullTextSavepoints.RemoveRange(
+                index,
+                _fullTextSavepoints.Count - index);
     }
 
     // post-commit / post-rollback フックの登録は下層トランザクションへ委譲する。

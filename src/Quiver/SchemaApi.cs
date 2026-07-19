@@ -28,6 +28,7 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
     private readonly IVectorDefinitionCatalog? _vectorDefinitions;
     private readonly Func<IDisposable>? _acquireMutationLease;
     private readonly Func<TransactionId, IDisposable>? _acquireOwnedMutationLease;
+    private readonly object _committedSnapshotGate = new();
     private SnapshotSchemaCatalog _committedSnapshot;
 
     internal SchemaApi(
@@ -356,16 +357,16 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
                     0));
             }
         }
-        foreach ((string name, string target, string propertyKey, string storedTokenizerId)
-                 in _indexManager.ListFullTextDefinitions())
+        foreach (Index.FullText.FullTextCatalogEntry catalog
+                 in _indexManager.ListFullTextCatalogEntries())
         {
             result.Add(new IndexInfo(
                 Index.FullText.FullTextDefinitionCodec.Decode(
-                    name,
-                    target,
-                    propertyKey,
-                    storedTokenizerId),
-                IndexLifecycleState.Ready,
+                    catalog.Name,
+                    catalog.Target,
+                    catalog.PropertyKey,
+                    catalog.TokenizerId),
+                catalog.State,
                 0));
         }
         return result;
@@ -584,9 +585,27 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
     }
 
     private void PublishCommittedSnapshot()
-        => Volatile.Write(
-            ref _committedSnapshot,
-            new SnapshotSchemaCatalog(this));
+    {
+        lock (_committedSnapshotGate)
+            Volatile.Write(
+                ref _committedSnapshot,
+                new SnapshotSchemaCatalog(this));
+    }
+
+    internal void RefreshCommittedSnapshot()
+        => PublishCommittedSnapshot();
+
+    internal void UpdateCommittedIndexState(
+        string indexName,
+        IndexLifecycleState state)
+    {
+        lock (_committedSnapshotGate)
+            Volatile.Write(
+                ref _committedSnapshot,
+                Volatile.Read(ref _committedSnapshot).WithIndexState(
+                    indexName,
+                    state));
+    }
 
     private sealed class SnapshotSchemaCatalog : ISchemaCatalog, INexusSchemaResolver
     {
@@ -602,6 +621,36 @@ internal sealed class SchemaApi : ISchemaEditor, INexusSchemaResolver
         private readonly string[] _roles;
         private readonly Dictionary<string, RoleId> _roleIds;
         private readonly IndexInfo[] _indexes;
+
+        private SnapshotSchemaCatalog(
+            SnapshotSchemaCatalog source,
+            IndexInfo[] indexes)
+        {
+            _labelsById = source._labelsById;
+            _labelIds = source._labelIds;
+            _edgeTypeIds = source._edgeTypeIds;
+            _propertyKeyIds = source._propertyKeyIds;
+            _propertyCardinalities = source._propertyCardinalities;
+            _nexusTypesById = source._nexusTypesById;
+            _nexusTypeIds = source._nexusTypeIds;
+            _edgeTypes = source._edgeTypes;
+            _propertyKeys = source._propertyKeys;
+            _roles = source._roles;
+            _roleIds = source._roleIds;
+            _indexes = indexes;
+        }
+
+        internal SnapshotSchemaCatalog WithIndexState(
+            string indexName,
+            IndexLifecycleState state)
+        {
+            IndexInfo[] indexes = _indexes
+                .Select(index => index.Name == indexName
+                    ? index with { State = state }
+                    : index)
+                .ToArray();
+            return new(this, indexes);
+        }
 
         internal SnapshotSchemaCatalog(SchemaApi schema)
         {

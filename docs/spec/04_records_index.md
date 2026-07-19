@@ -267,5 +267,8 @@ derived state が不足する場合は同じ snapshot の primary property scan 
 
 全文 artifact は full typed owner identity と `PropertyVersionRef` を保持する immutable delta/merged segment である。
 
+body record は entry metadata、term dictionary、sorted postings、document length と checksum を `*.quiver-ftseg` に保持する。
+catalog manifest は generation、`xmin/xmax`、source committed high-water、artifact offset/length/checksum、lifecycle state を保持する。
+
 検索は visible manifest を選び、candidate を primary owner と property version に照合してから返す。
 プロセス内 rollback は transaction-owned write set の before-image を使う。

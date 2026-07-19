@@ -100,8 +100,17 @@ internal sealed class TxIndexManager : IIndexManager
     public IEnumerable<(string Name, string Target, string PropertyKey, string TokenizerId)> ListFullTextDefinitions()
         => _inner.ListFullTextDefinitions();
 
+    public IEnumerable<FullTextCatalogEntry> ListFullTextCatalogEntries()
+        => _inner.ListFullTextCatalogEntries();
+
     public bool DropFullTextDefinition(string name)
     { EnsureWritable(); return _inner.DropFullTextDefinition(name); }
+
+    public void UpdateFullTextManifest(
+        string name,
+        string manifest,
+        IndexLifecycleState state)
+    { EnsureWritable(); _inner.UpdateFullTextManifest(name, manifest, state); }
 
     public ITokenizer ResolveTokenizer(string tokenizerId)
         => _inner.ResolveTokenizer(tokenizerId);

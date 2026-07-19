@@ -24,17 +24,20 @@ public static class FullTextSegmentPublishRunner
             $"machine={Environment.MachineName}, procs={Environment.ProcessorCount}, " +
             $"runtime={RuntimeInformation.FrameworkDescription}, documents={documentCount}, queries={queryCount}");
 
-        double walAmplification = MeasureWalAmplification(
+        WriteAmplification amplification = MeasureWriteAmplification(
             Math.Min(documentCount, 5_000));
         ProductResult product = MeasureProductSegments(documentCount, queryCount);
         bool pass = product.SearchP50Ms <= SearchGateMs
-            && walAmplification <= WalAmplificationGate
+            && amplification.Wal <= WalAmplificationGate
+            && amplification.Total <= WalAmplificationGate
             && product.StrictEquivalent
             && product.MergeEquivalent
+            && product.ReopenNoPrimaryScan
             && product.PublishP99Ms <= PublishGateMs;
         Console.WriteLine(
             $"fulltext_segment_product_result, result={(pass ? "PASS" : "FAIL")}, " +
-            $"search_p50_ms={product.SearchP50Ms:F3}, wal_amplification={walAmplification:F2}, " +
+            $"search_p50_ms={product.SearchP50Ms:F3}, wal_amplification={amplification.Wal:F2}, " +
+            $"total_write_amplification={amplification.Total:F2}, reopen_primary_scans={product.ReopenPrimaryScans}, " +
             $"publish_p99_ms={product.PublishP99Ms:F3}");
         return pass ? 0 : 2;
     }
@@ -141,7 +144,28 @@ public static class FullTextSegmentPublishRunner
             Console.WriteLine(
                 $"fulltext_merge_publish, merge_equivalent={mergeEquivalent}, " +
                 $"publish_p99_ms={publishP99:F3}, required_max={PublishGateMs:F0}");
-            return new(p50, publishP99, strictEquivalent, mergeEquivalent);
+            read.Dispose();
+            afterRead.Dispose();
+            database.Dispose();
+            using var reopened = QuiverDatabase.Open(Path.Combine(dir, "graph.quiver"));
+            using var reopenRead = reopened.BeginReadTransaction();
+            bool reopenEquivalent = reopenRead.Query
+                .Search(IndexName, "merge-marker", 20)
+                .ToList()
+                .SequenceEqual(afterMerge);
+            long reopenPrimaryScans =
+                ((BinaryGraphStorageBackend)reopened.BackendInternal)
+                .FullTextPrimaryFallbackScanCountForTest;
+            Console.WriteLine(
+                $"fulltext_reopen, equivalent={reopenEquivalent}, " +
+                $"primary_scans={reopenPrimaryScans}, required=0");
+            return new(
+                p50,
+                publishP99,
+                strictEquivalent,
+                mergeEquivalent,
+                reopenEquivalent && reopenPrimaryScans == 0,
+                reopenPrimaryScans);
         }
         finally
         {
@@ -150,21 +174,25 @@ public static class FullTextSegmentPublishRunner
         }
     }
 
-    private static double MeasureWalAmplification(int documentCount)
+    private static WriteAmplification MeasureWriteAmplification(int documentCount)
     {
-        long indexed = MeasureWalBytes(documentCount, withIndex: true);
-        long primary = MeasureWalBytes(documentCount, withIndex: false);
-        double amplification = primary == 0
+        WriteBytes indexed = MeasureWriteBytes(documentCount, withIndex: true);
+        WriteBytes primary = MeasureWriteBytes(documentCount, withIndex: false);
+        double walAmplification = primary.Wal == 0
             ? double.NaN
-            : indexed / (double)primary;
+            : indexed.Wal / (double)primary.Wal;
+        double totalAmplification = primary.Wal == 0
+            ? double.NaN
+            : (indexed.Wal + indexed.Artifact) / (double)primary.Wal;
         Console.WriteLine(
-            $"fulltext_ingest_wal, documents={documentCount}, payload_bytes={primary}, " +
-            $"payload_plus_index_bytes={indexed}, amplification={amplification:F2}, " +
+            $"fulltext_ingest_write, documents={documentCount}, payload_wal_bytes={primary.Wal}, " +
+            $"manifest_plus_payload_wal_bytes={indexed.Wal}, segment_body_bytes={indexed.Artifact}, " +
+            $"wal_amplification={walAmplification:F2}, total_write_amplification={totalAmplification:F2}, " +
             $"required_max={WalAmplificationGate:F2}");
-        return amplification;
+        return new(walAmplification, totalAmplification);
     }
 
-    private static long MeasureWalBytes(int documentCount, bool withIndex)
+    private static WriteBytes MeasureWriteBytes(int documentCount, bool withIndex)
     {
         string dir = BenchTempDir.Create(
             withIndex ? "product_fulltext_wal_indexed" : "product_fulltext_wal_primary");
@@ -201,7 +229,10 @@ public static class FullTextSegmentPublishRunner
                 write.Commit();
             }
             string wal = Path.Combine(dir, "graph.quiver-wal");
-            return File.Exists(wal) ? new FileInfo(wal).Length : 0;
+            string artifact = Path.Combine(dir, "graph.quiver-ftseg");
+            return new(
+                File.Exists(wal) ? new FileInfo(wal).Length : 0,
+                File.Exists(artifact) ? new FileInfo(artifact).Length : 0);
         }
         finally
         {
@@ -231,5 +262,10 @@ public static class FullTextSegmentPublishRunner
         double SearchP50Ms,
         double PublishP99Ms,
         bool StrictEquivalent,
-        bool MergeEquivalent);
+        bool MergeEquivalent,
+        bool ReopenNoPrimaryScan,
+        long ReopenPrimaryScans);
+
+    private readonly record struct WriteBytes(long Wal, long Artifact);
+    private readonly record struct WriteAmplification(double Wal, double Total);
 }

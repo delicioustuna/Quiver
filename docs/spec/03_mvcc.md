@@ -85,7 +85,9 @@ commit はデータページの flush を待たず、dirty page は後続 checkp
 `ReleaseSavepoint` は境界だけを解放し、変更を親スコープへ残す。
 
 全文 definition catalog の更新は同じ page write set を使う。
-全文 delta segment は commit hook で manifest generationへ反映し、abort時は transaction-local overlay を破棄する。
+全文 delta segment body は commit 前に fsyncし、artifact参照を持つmanifest pageをprimary propertyと同じwrite setへ追加する。
+commit hook は durable manifest generation を in-memory snapshotへ反映し、abort時はtransaction-local overlayを破棄する。
+`RollbackTo` は savepoint 後の全文 mutation buffer も同じ境界まで切り戻す。
 全文専用の論理 undo stack や補償 WAL record は持たない。
 
 ## スキーマのスナップショット {#schema-snapshot}

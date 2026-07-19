@@ -6,7 +6,7 @@ namespace Quiver.Index.FullText;
 /// <summary>
 /// 全文検索クエリ文字列を前処理し、完全一致ターム・prefix ターム (末尾 <c>*</c>)・
 /// fuzzy ターム (末尾 <c>~N</c>) に分割する。Boolean 演算子 (<c>AND</c>, <c>OR</c>,
-/// <c>NOT</c>) にも対応する。prefix タームは索引の B+Tree に対して展開し、
+/// <c>NOT</c>) にも対応する。prefix タームは可視immutable segmentの辞書に対して展開し、
 /// fuzzy タームは Levenshtein 編集距離で展開する。展開後のターム集合が BM25
 /// スコアラに渡される。
 /// </summary>

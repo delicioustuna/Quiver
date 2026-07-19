@@ -117,7 +117,11 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _roleTokens = roleTokens;
         _indexManager = indexManager;
         _fullTextSegments = new FullTextSegmentIndex(
+            string.IsNullOrEmpty(_containerPath)
+                ? null
+                : _containerPath + "-ftseg",
             _indexManager.ResolveTokenizer,
+            _indexManager.MarkFullTextRebuildRequiredInMemory,
             _labelTokens,
             _edgeTypeTokens,
             _nexusTypeTokens,
@@ -137,6 +141,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             acquireOwnedMutationLease: owner => _txManager.AcquireMutationLease(owner));
         _vectorSegments.MergeRequested = QueueVectorSegmentMerge;
         _fullTextSegments.MergeRequested = QueueFullTextSegmentMerge;
+        _fullTextSegments.CatalogStateChanged = _schema.UpdateCommittedIndexState;
         _txManager.FullTextSegments = _fullTextSegments;
         // index manager と label index を DiagnosticsApi に渡して
         // CheckIndexConsistency / RepairIndexes が機能するようにする。
@@ -179,12 +184,23 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         using ITransaction transaction = _txManager.BeginWrite();
         ScalarIndexMetadata[] definitions =
             [.. transaction.Indexes.ListIndexDefinitions()];
+        FullTextCatalogEntry[] fullTextDefinitions =
+            [.. transaction.Indexes.ListFullTextCatalogEntries()];
         foreach (ScalarIndexMetadata metadata in definitions)
             transaction.Indexes.SetIndexState(
                 metadata.Definition.Name,
                 IndexLifecycleState.RebuildRequired);
+        foreach (FullTextCatalogEntry definition in fullTextDefinitions)
+            transaction.Indexes.UpdateFullTextManifest(
+                definition.Name,
+                definition.Manifest,
+                IndexLifecycleState.RebuildRequired);
         transaction.Commit();
         _fullTextSegments.InvalidateAll();
+        foreach (FullTextCatalogEntry definition in fullTextDefinitions)
+            _schema.UpdateCommittedIndexState(
+                definition.Name,
+                IndexLifecycleState.RebuildRequired);
         if (definitions.Length > 0)
         {
             Volatile.Write(ref _scalarIndexRebuildRequested, 1);
@@ -413,6 +429,8 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         }
     }
     internal Exception? FullTextSegmentMergeErrorForTest => _fullTextSegmentMergeError;
+    internal long FullTextPrimaryFallbackScanCountForTest
+        => _fullTextSegments.PrimaryFallbackScanCountForTest;
     internal void WaitForFullTextSegmentMergeForTest()
     {
         while (true)
@@ -594,6 +612,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     IReadOnlyList<FullTextSegmentMutation> entries;
+                    long sourceCommittedHighWater;
                     using (ITransaction read = _txManager.BeginRead())
                     {
                         entries = FullTextSegmentIndex.ScanPrimary(
@@ -603,31 +622,26 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
                             _edgeTypeTokens,
                             _nexusTypeTokens,
                             _propKeyTokens);
+                        sourceCommittedHighWater =
+                            read.Snapshot.CommittedHighWater;
                     }
 
                     FullTextSegmentBuildStartedForTest?.Invoke();
                     FullTextSegmentBuildArtifact artifact =
-                        _fullTextSegments.Build(source, entries);
+                        _fullTextSegments.Build(
+                            source,
+                            entries,
+                            sourceCommittedHighWater);
                     FullTextSegmentBuildCompletedForTest?.Invoke();
                     using ITransaction publish = _txManager.BeginWrite();
                     var publishDuration = Stopwatch.StartNew();
-                    long publishTransactionId = publish.Id.Value;
-                    publish.OnCommitted(() =>
+                    if (!_fullTextSegments.TryPrepareMerge(publish, artifact))
                     {
-                        IndexDefinition? currentDefinition = null;
-                        if (_schema.CommittedCatalog.TryGetIndex(
-                                source.IndexName,
-                                out IndexInfo current))
-                            currentDefinition = current.Definition;
-                        if (!_fullTextSegments.TryPublishMerge(
-                                publishTransactionId,
-                                artifact,
-                                currentDefinition))
-                        {
-                            artifact.Segment.Dispose();
-                            Volatile.Write(ref _fullTextSegmentMergeRequested, 1);
-                        }
-                    });
+                        artifact.Segment.Dispose();
+                        Volatile.Write(ref _fullTextSegmentMergeRequested, 1);
+                        publish.Abort();
+                        continue;
+                    }
                     publish.Commit();
                     publishDuration.Stop();
                     FullTextSegmentPublishMeasuredForTest?.Invoke(
@@ -875,6 +889,13 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         var srcWal = _containerPath + "-wal";
         if (File.Exists(srcWal))
             CopySharedFile(srcWal, targetFilePath + "-wal");
+
+        // 3. manifestが参照するimmutable全文segment bodyを複製する。
+        //    artifact storeはappend-onlyなので、checkpoint後に増えた末尾recordを含んでも
+        //    snapshot側manifestから参照されず、安全な孤児になる。
+        string srcFullTextSegments = _containerPath + "-ftseg";
+        if (File.Exists(srcFullTextSegments))
+            CopySharedFile(srcFullTextSegments, targetFilePath + "-ftseg");
     }
 
     private static void CopyPagedFile(IPagedFile src, string dstPath)

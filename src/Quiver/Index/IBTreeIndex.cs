@@ -11,13 +11,6 @@ internal interface IBTreeIndex<TKey> : IDisposable, IBTreeIndexFlushable
     BTreeRangeEnumerator Range(in TKey from, bool fromInclusive, in TKey to, bool toInclusive);
     BTreeRangeEnumerator FullScan();
 
-    /// <summary>
-    /// 生バイト範囲 <c>[fromKey, toKeyInclusive]</c> に対する forward-only seekable cursor。
-    /// <see cref="Range"/> (leaf リンクの <c>ref struct</c>) と異なりヒープオブジェクトなので
-    /// WAND がタームごとの cursor 配列を保持でき、<see cref="BTreeRawCursor.SeekTo"/> は
-    /// tree root 経由の O(log N) ジャンプ (WAND pivoting の skip-pointer 代替) を行う。
-    /// </summary>
-    BTreeRawCursor OpenScanCursor(byte[] fromKey, byte[] toKeyInclusive);
     int Height { get; }
     long EntryCount { get; }
     IEnumerable<long> SeekValues(TKey key);
@@ -196,8 +189,21 @@ internal interface IIndexManager
     IEnumerable<(string Name, string Target, string PropertyKey, string TokenizerId)> ListFullTextDefinitions()
         => Array.Empty<(string, string, string, string)>();
 
+    /// <summary>lifecycleとmanifestを含む全文catalog entryを列挙する。</summary>
+    IEnumerable<FullTextCatalogEntry> ListFullTextCatalogEntries()
+        => Array.Empty<FullTextCatalogEntry>();
+
     /// <summary>全文definition参照を削除する。</summary>
     bool DropFullTextDefinition(string name) => false;
+
+    /// <summary>
+    /// immutable全文segment bodyを参照するmanifestを、現在のpage-WAL transactionで更新する。
+    /// </summary>
+    void UpdateFullTextManifest(
+        string name,
+        string manifest,
+        IndexLifecycleState state)
+        => throw new NotSupportedException("Full-text manifests are not supported by this index manager.");
 
     /// <summary>
     /// abort の before-image undo 後に、全 B+Tree 索引とdefinitionの in-memory

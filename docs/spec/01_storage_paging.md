@@ -66,7 +66,8 @@ commit が `PageImage` を追記するときに割り当てた LSN を WAL paylo
 
 `TenantPagedFile` は、複数の論理ストア（vertex、edge、nexus、property version、blob、vector payload、adjacency segment、scalar index、definition catalog）を単一の `*.quiver` ファイルに多重化する。
 
-全文のterm data、document length、stats は immutable derived segment に置き、専用 B+Tree tenant を割り当てない。
+全文のterm data、document length、stats は `*.quiver-ftseg` の checksum 付き append-only immutable segment に置き、専用 B+Tree tenant を割り当てない。
+artifact ID、checksum、source high-water、lifecycle state を持つ小さい manifest は definition catalog tenant に保存する。
 各テナントはカタログが割り当てる `fileKind` バイトで識別される。
 
 Primary vector payload の metadata と blob は固定テナント 29、30 に分離する。
@@ -88,6 +89,9 @@ process kill 後は、最後に完了した checkpoint 以降の winner redo と
 WAL は単一のサイドカーファイル `*.quiver-wal` に存在する。
 チェックポイントは writer lease を取得して active writer がいない境界を作り、`CheckpointBegin` を fsync してから committed dirty page とカタログを flush する。
 データファイルの flush 後に対応する `CheckpointEnd` を fsync できた場合だけ WAL を切り詰める。
+
+全文 index を持つ database は `*.quiver-ftseg` も保持する。
+online snapshot は container と WAL に加えてこの append-only artifact を複製する。
 reader の終了は待たない。
 
 ## entity version sidecar {#entity-version-sidecar}

@@ -156,9 +156,10 @@ immutable manifest 単位の cache は old/new reader の統計を混ぜずに�
 
 ## Derived全文 segment の再構築 {#fulltext-segment-rebuild}
 
-reopen 直後または derived state が不足する場合、全文検索は transaction-local primary property scan へ fallback する。
+正常 reopen は persisted manifest から `*.quiver-ftseg` の checksum 一致 body を開き、primary scan を行わない。
+referenced body の欠損または checksum 不一致で `RebuildRequired` になった場合だけ、全文検索は transaction-local primary property scan へ fallback する。
 fallback artifact は global manifest として公開せず、background worker が source generation を再検証してから publish する。
-この fallback は結果集合を保つが、publish 完了までは初回検索レイテンシが corpus size に比例する。
+この破損時 fallback は結果集合を保つが、publish 完了までは検索レイテンシが corpus size に比例する。
 
 ## Derived vector segment の再構築 {#vector-segment-rebuild}
 

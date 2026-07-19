@@ -1,6 +1,6 @@
 # 全文検索
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-18）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
 
 ## Definition {#definition}
 
@@ -16,13 +16,17 @@ definition は `PropertyTarget`、tokenizer、filter pipeline、BM25 の `K1` �
 
 全文 artifact は mutable B+Tree ではなく、commit-local delta segment と merged segment から構成する。
 
-各 document entry は full typed owner identity、`PropertyVersionRef`、text、term frequency、document length、tombstone を保持する。
+各 document entry は full typed owner identity、`PropertyVersionRef`、term frequency、document length、tombstone を保持する。
 
 property の set と update は新しい document entryを追加し、property remove と owner delete は tombstone を追加する。
 
 commit 済み segment は in-place 更新しない。
 
 manifest は transaction ID の `xmin` と `xmax` で version 化し、read transaction の snapshot から可視な版を選ぶ。
+
+segment body は `*.quiver-ftseg` へ checksum 付き append-only record として保存する。
+body を fsync した後、artifact offset、length、checksum、source committed high-water を持つ manifest だけを catalog page に書く。
+manifest と primary property mutation は同じ strict `Commit` で可視になる。
 
 old reader は開始時に可視だった manifest と property version を読み続け、新 reader だけが publish 後の manifest を選ぶ。
 
@@ -38,7 +42,9 @@ primary text property の scan と immutable artifact 構築は read transaction
 
 構築中に delta または definition が変わった場合は stale artifact を破棄し、新しい snapshot から再試行する。
 
-reopen 直後または derived state が不足する場合、検索は同じ transaction の primary property scan から結果を復元する。
+正常 reopen は catalog の persisted manifest と checksum が一致する segment body を直接開き、primary property を scan しない。
+
+referenced body の欠損または checksum 不一致を検出した場合は definition を `RebuildRequired` にし、検索は同じ transaction の primary property scan から結果を復元する。
 
 transaction-local fallback artifact を global manifest として公開しない。
 
@@ -100,9 +106,11 @@ hybrid search は全文と vector を同じ read transaction から評価し、R
 
 全文専用 WAL record、logical redo、compensation、loser undo、recovery pass は存在しない。
 
-definition catalog の変更は通常の transaction-owned `PageImage` と strict `Commit` で durable にする。
+definition catalog と segment manifest の変更は通常の transaction-owned `PageImage` と strict `Commit` で durable にする。
 
-全文 segment は primary property から再構築できる derived artifact であり、segment mutation 自体は WAL 増幅を発生させない。
+segment body は manifest commit より前に fsync し、page-image WAL へ複製しない。
+body fsync 後かつ manifest commit 前の crash は未参照 orphan を残すだけである。
+reader horizon を越えた orphan と旧世代 body の物理回収は maintenance が扱う。
 
 commit のない definition publish は recovery winner にならない。
 

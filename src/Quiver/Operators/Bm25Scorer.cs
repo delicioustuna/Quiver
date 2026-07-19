@@ -181,7 +181,7 @@ internal static class Bm25Scorer
     /// <summary>
     /// WAND document-at-a-time 枝刈りによる exact top-<paramref name="k"/> BM25。
     /// per-term スナップショット df + 上限を使い、k 番目のスコアを超えられない高 df 語の
-    /// posting をスキップし、遅れたカーソルを B+Tree <c>SeekTo</c> で前進させる。
+    /// posting をスキップし、遅れたimmutable postings cursorを <c>SeekTo</c> で前進させる。
     /// ランク済み packed entityId を返す。クエリ語が <paramref name="termStats"/> に無い場合は
     /// <c>null</c> を返し、呼び出し元が <see cref="Rank"/> にフォールバックする。
     /// <para>

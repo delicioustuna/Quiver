@@ -39,7 +39,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     private const int CatalogEntryCountOffset = 4; // int32: secondary 索引件数
     private const int CatalogFtCountOffset = 8;    // int32: 全文索引件数
     private const int CatalogFormatVersionOffset = 12;
-    private const int CatalogFormatVersion = 2;
+    private const int CatalogFormatVersion = 3;
 
     private readonly SingleFileContainer _container;
     private readonly bool _ownsContainer;
@@ -61,7 +61,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     private readonly Dictionary<string, ScalarIndexMetadata> _definitions
         = new(StringComparer.Ordinal);
 
-    // 全文artifactはprimary propertyから再構築できるため、catalogにはdefinition参照だけを置く。
+    // 全文bodyは外部append-only artifactに置き、catalogにはdefinition、lifecycle、manifestを置く。
     private readonly Dictionary<string, FullTextCatalogEntry> _fullTextDefinitions =
         new(StringComparer.Ordinal);
     private readonly TokenizerRegistry _tokenizers = TokenizerRegistry.CreateDefault();
@@ -477,7 +477,9 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             propertyKey,
             tokenizerId,
             legacyPostingsTenant: 0,
-            legacyNormsTenant: 0);
+            legacyNormsTenant: 0,
+            state: IndexLifecycleState.RebuildRequired,
+            manifest: string.Empty);
         PersistCatalog();
         return definition;
     }
@@ -497,6 +499,9 @@ internal sealed class IndexManager : IIndexManager, IDisposable
                 definition.TokenizerId);
     }
 
+    public IEnumerable<FullTextCatalogEntry> ListFullTextCatalogEntries()
+        => _fullTextDefinitions.Values.ToArray();
+
     public bool DropFullTextDefinition(string name)
     {
         if (!_fullTextDefinitions.Remove(name, out FullTextCatalogEntry? definition))
@@ -505,6 +510,31 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         _usedTenantIds.Remove(definition.LegacyNormsTenantId);
         PersistCatalog();
         return true;
+    }
+
+    public void UpdateFullTextManifest(
+        string name,
+        string manifest,
+        IndexLifecycleState state)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        if (!_fullTextDefinitions.TryGetValue(name, out FullTextCatalogEntry? definition))
+            throw new KeyNotFoundException($"Full-text index '{name}' does not exist.");
+        _fullTextDefinitions[name] = definition with
+        {
+            Manifest = manifest,
+            State = state,
+        };
+        PersistCatalog();
+    }
+
+    internal void MarkFullTextRebuildRequiredInMemory(string name)
+    {
+        if (_fullTextDefinitions.TryGetValue(name, out FullTextCatalogEntry? definition))
+            _fullTextDefinitions[name] = definition with
+            {
+                State = IndexLifecycleState.RebuildRequired,
+            };
     }
 
     public ITokenizer ResolveTokenizer(string tokenizerId) => _tokenizers.Resolve(tokenizerId);
@@ -517,7 +547,9 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         string propertyKey,
         string tokenizerId,
         byte legacyPostingsTenant,
-        byte legacyNormsTenant)
+        byte legacyNormsTenant,
+        IndexLifecycleState state,
+        string manifest)
     {
         var definition = new FullTextCatalogEntry(
             name,
@@ -525,7 +557,9 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             propertyKey,
             tokenizerId,
             legacyPostingsTenant,
-            legacyNormsTenant);
+            legacyNormsTenant,
+            state,
+            manifest);
         _fullTextDefinitions[name] = definition;
         if (legacyPostingsTenant != 0)
             _usedTenantIds.Add(legacyPostingsTenant);
@@ -580,7 +614,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             int nameLen = BinaryPrimitives.ReadUInt16LittleEndian(blob.AsSpan(pos)); pos += 2;
             string indexName = Encoding.UTF8.GetString(blob, pos, nameLen); pos += nameLen;
 
-            if (formatVersion >= CatalogFormatVersion)
+            if (formatVersion >= 2)
             {
                 var ownerKind = (PropertyOwnerKind)blob[pos++];
                 var state = (IndexLifecycleState)blob[pos++];
@@ -616,13 +650,19 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             string propKey = ReadString(blob, ref pos);
             string tokenizerId = ReadString(blob, ref pos);
             string name = ReadString(blob, ref pos);
+            IndexLifecycleState state = formatVersion >= 3
+                ? (IndexLifecycleState)blob[pos++]
+                : IndexLifecycleState.RebuildRequired;
+            string manifest = formatVersion >= 3 ? ReadString(blob, ref pos) : string.Empty;
             MaterializeFullTextDefinition(
                 name,
                 label,
                 propKey,
                 tokenizerId,
                 postingsTenant,
-                normsTenant);
+                normsTenant,
+                state,
+                manifest);
         }
     }
 
@@ -700,7 +740,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         // 1. カタログを直列化する。
         //    secondary セクション (索引件数=entryCount): tenantId(1) typeFlags(8) nameLen(2) nameBytes。
         //    全文索引セクション (件数=ftCount): postingsTenant(1) normsTenant(1)
-        //       label(len+utf8) propKey(len+utf8) tokenizerId(len+utf8) name(len+utf8)。
+        //       label(len+utf8) propKey(len+utf8) tokenizerId(len+utf8) name(len+utf8)
+        //       lifecycleState(1) manifest(len+utf8)。
         var blobList = new List<byte>();
         Span<byte> u64 = stackalloc byte[8];
         int entryCount = 0;
@@ -734,6 +775,8 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             WriteString(blobList, definition.PropertyKey);
             WriteString(blobList, definition.TokenizerId);
             WriteString(blobList, definition.Name);
+            blobList.Add((byte)definition.State);
+            WriteString(blobList, definition.Manifest);
             ftCount++;
         }
         byte[] blob = blobList.ToArray();

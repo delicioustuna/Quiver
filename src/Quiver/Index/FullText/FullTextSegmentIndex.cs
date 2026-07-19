@@ -24,8 +24,10 @@ internal sealed record FullTextSegmentBuildSource(
 internal sealed record FullTextSegmentBuildArtifact(
     string IndexName,
     long SourceManifestGeneration,
+    long SourceCommittedHighWater,
     FullTextIndexDefinition Definition,
-    ImmutableFullTextSegment Segment);
+    ImmutableFullTextSegment Segment,
+    FullTextSegmentArtifactRef Artifact);
 
 /// <summary>
 /// commit-local deltaとlease外で構築したimmutable artifactを、
@@ -33,31 +35,42 @@ internal sealed record FullTextSegmentBuildArtifact(
 /// </summary>
 internal sealed class FullTextSegmentIndex : IDisposable
 {
+    internal static Action<FullTextArtifactPhase>? ArtifactPhaseInjector;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, IndexState> _indexes = new(StringComparer.Ordinal);
     private readonly Dictionary<long, List<FullTextSegmentMutation>> _pending = [];
     private readonly Func<string, ITokenizer> _resolveTokenizer;
+    private readonly Action<string> _markRebuildRequired;
     private readonly LabelTokenStore _labels;
     private readonly EdgeTypeTokenStore _edgeTypes;
     private readonly NexusTypeTokenStore _nexusTypes;
     private readonly PropertyKeyTokenStore _propertyKeys;
+    private readonly FullTextSegmentArtifactStore _artifacts;
+    private long _primaryFallbackScanCount;
     private bool _disposed;
 
     internal FullTextSegmentIndex(
+        string? artifactPath,
         Func<string, ITokenizer> resolveTokenizer,
+        Action<string> markRebuildRequired,
         LabelTokenStore labels,
         EdgeTypeTokenStore edgeTypes,
         NexusTypeTokenStore nexusTypes,
         PropertyKeyTokenStore propertyKeys)
     {
         _resolveTokenizer = resolveTokenizer;
+        _markRebuildRequired = markRebuildRequired;
         _labels = labels;
         _edgeTypes = edgeTypes;
         _nexusTypes = nexusTypes;
         _propertyKeys = propertyKeys;
+        _artifacts = new FullTextSegmentArtifactStore(artifactPath);
     }
 
     internal Action? MergeRequested { get; set; }
+    internal Action<string, IndexLifecycleState>? CatalogStateChanged { get; set; }
+    internal long PrimaryFallbackScanCountForTest
+        => Interlocked.Read(ref _primaryFallbackScanCount);
 
     internal void RegisterPending(
         long transactionId,
@@ -70,7 +83,10 @@ internal sealed class FullTextSegmentIndex : IDisposable
     internal void DiscardPending(long transactionId)
     {
         lock (_gate)
+        {
             _pending.Remove(transactionId);
+            RollbackManifestCore(transactionId);
+        }
     }
 
     internal void InvalidateAll()
@@ -83,25 +99,46 @@ internal sealed class FullTextSegmentIndex : IDisposable
         }
     }
 
-    internal void PublishDelta(
-        long committedTransactionId,
+    internal void PrepareCommit(
+        ITransaction transaction,
         IReadOnlyList<FullTextSegmentMutation> mutations)
     {
         if (mutations.Count == 0)
             return;
 
-        bool requestMerge = false;
-        lock (_gate)
+        var prepared = new List<PreparedManifest>();
+        foreach (IGrouping<string, FullTextSegmentMutation> group in mutations.GroupBy(
+                     static mutation => mutation.Definition.Name,
+                     StringComparer.Ordinal))
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            _pending.Remove(committedTransactionId);
-            foreach (IGrouping<string, FullTextSegmentMutation> group in mutations.GroupBy(
-                         static mutation => mutation.Definition.Name,
-                         StringComparer.Ordinal))
+            FullTextSegmentMutation[] entries = group.ToArray();
+            FullTextIndexDefinition definition = entries[0].Definition;
+            if (!transaction.Indexes.TryGetFullTextDefinition(
+                    definition.Name,
+                    out FullTextCatalogEntry catalog))
+                continue;
+
+            var delta = new ImmutableFullTextSegment(
+                entries,
+                ResolveTokenizer(definition));
+            FullTextSegmentArtifactRef artifact;
+            try
             {
-                FullTextSegmentMutation[] entries = group.ToArray();
-                FullTextIndexDefinition definition = entries[0].Definition;
-                IndexState state = GetOrCreateState(definition);
+                artifact = _artifacts.Append(delta);
+                ArtifactPhaseInjector?.Invoke(
+                    FullTextArtifactPhase.AfterBodyFsync);
+            }
+            catch
+            {
+                delta.Dispose();
+                throw;
+            }
+
+            PreparedManifest candidate;
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                IndexState state = GetOrCreateState(definition, catalog.Manifest);
                 if (!DefinitionEquivalent(state.Current.Definition, definition))
                 {
                     state.Dispose();
@@ -109,27 +146,62 @@ internal sealed class FullTextSegmentIndex : IDisposable
                     _indexes[definition.Name] = state;
                 }
 
-                var delta = new ImmutableFullTextSegment(
-                    definition,
-                    entries,
-                    ResolveTokenizer(definition));
                 ManifestVersion previous = state.Current;
-                state.History.Add(previous with { Xmax = committedTransactionId });
-                state.Current = new(
-                    previous.Generation + 1,
-                    committedTransactionId,
-                    null,
-                    definition,
-                    previous.Segments.Add(delta),
-                    previous.CoversPrimarySnapshot);
+                candidate = new(
+                    definition.Name,
+                    previous.Generation,
+                    new(
+                        previous.Generation + 1,
+                        transaction.Id.Value,
+                        null,
+                        definition,
+                        previous.Segments.Add(delta),
+                        previous.Artifacts.Add(artifact),
+                        previous.CoversPrimarySnapshot,
+                        previous.SourceCommittedHighWater));
+            }
 
-                FullTextSegmentPolicy policy = definition.SegmentPolicy ?? new();
-                int deltaEntries = state.Current.Segments.Sum(static segment => segment.EntryCount);
-                int tombstones = state.Current.Segments.Sum(static segment => segment.TombstoneCount);
-                requestMerge |= deltaEntries >= policy.MaximumDeltaEntries
-                    || state.Current.Segments.Length > policy.MaximumSegments
+            transaction.Indexes.UpdateFullTextManifest(
+                definition.Name,
+                Encode(candidate.Manifest),
+                catalog.State);
+            ArtifactPhaseInjector?.Invoke(
+                FullTextArtifactPhase.AfterManifestStaged);
+            prepared.Add(candidate);
+        }
+
+        transaction.OnCommitted(() => PublishPrepared(transaction.Id.Value, prepared));
+    }
+
+    private void PublishPrepared(
+        long committedTransactionId,
+        IReadOnlyList<PreparedManifest> prepared)
+    {
+        bool requestMerge = false;
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _pending.Remove(committedTransactionId);
+            foreach (PreparedManifest candidate in prepared)
+            {
+                FullTextSegmentPolicy policy =
+                    candidate.Manifest.Definition.SegmentPolicy ?? new();
+                int deltaEntries = candidate.Manifest.Segments.Sum(
+                    static segment => segment.EntryCount);
+                int tombstones = candidate.Manifest.Segments.Sum(
+                    static segment => segment.TombstoneCount);
+                requestMerge |= !candidate.Manifest.CoversPrimarySnapshot
+                    || deltaEntries >= policy.MaximumDeltaEntries
+                    || candidate.Manifest.Segments.Length > policy.MaximumSegments
                     || deltaEntries > 0
                     && (double)tombstones / deltaEntries > policy.MaximumTombstoneRatio;
+
+                if (!_indexes.TryGetValue(candidate.IndexName, out IndexState? state)
+                    || state.Current.Generation != candidate.SourceGeneration)
+                    continue;
+                ManifestVersion previous = state.Current;
+                state.History.Add(previous with { Xmax = committedTransactionId });
+                state.Current = candidate.Manifest;
             }
         }
 
@@ -159,6 +231,7 @@ internal sealed class FullTextSegmentIndex : IDisposable
 
         if (manifest is null || !manifest.CoversPrimarySnapshot)
         {
+            Interlocked.Increment(ref _primaryFallbackScanCount);
             IReadOnlyList<FullTextSegmentMutation> primary = ScanPrimary(
                 transaction,
                 definition,
@@ -167,7 +240,6 @@ internal sealed class FullTextSegmentIndex : IDisposable
                 _nexusTypes,
                 _propertyKeys);
             var rebuilt = new ImmutableFullTextSegment(
-                definition,
                 primary,
                 ResolveTokenizer(definition));
             manifest = new(
@@ -176,7 +248,9 @@ internal sealed class FullTextSegmentIndex : IDisposable
                 null,
                 definition,
                 [rebuilt],
-                CoversPrimarySnapshot: true);
+                [],
+                CoversPrimarySnapshot: true,
+                transaction.Snapshot.CommittedHighWater);
             primaryIsComplete = true;
             MergeRequested?.Invoke();
         }
@@ -194,7 +268,6 @@ internal sealed class FullTextSegmentIndex : IDisposable
                 if (matching.Length > 0)
                 {
                     visibleSegments = visibleSegments.Add(new ImmutableFullTextSegment(
-                        definition,
                         matching,
                         ResolveTokenizer(definition)));
                 }
@@ -237,7 +310,17 @@ internal sealed class FullTextSegmentIndex : IDisposable
             snapshot = null!;
             return false;
         }
-        snapshot = Open(transaction, FromCatalog(catalog));
+        FullTextIndexDefinition definition = FromCatalog(catalog);
+        lock (_gate)
+        {
+            IndexState state = GetOrCreateState(definition, catalog.Manifest);
+            if (catalog.State != IndexLifecycleState.Ready)
+                state.Current = state.Current with
+                {
+                    CoversPrimarySnapshot = false,
+                };
+        }
+        snapshot = Open(transaction, definition);
         return true;
     }
 
@@ -272,41 +355,113 @@ internal sealed class FullTextSegmentIndex : IDisposable
 
     internal FullTextSegmentBuildArtifact Build(
         FullTextSegmentBuildSource source,
-        IReadOnlyList<FullTextSegmentMutation> primary)
-        => new(
-            source.IndexName,
-            source.ManifestGeneration,
-            source.Definition,
-            new ImmutableFullTextSegment(
-                source.Definition,
-                primary,
-                ResolveTokenizer(source.Definition)));
-
-    internal bool TryPublishMerge(
-        long committedTransactionId,
-        FullTextSegmentBuildArtifact artifact,
-        IndexDefinition? currentDefinition)
+        IReadOnlyList<FullTextSegmentMutation> primary,
+        long sourceCommittedHighWater)
     {
+        var segment = new ImmutableFullTextSegment(
+            primary,
+            ResolveTokenizer(source.Definition));
+        try
+        {
+            FullTextSegmentArtifactRef artifact = _artifacts.Append(segment);
+            return new(
+                source.IndexName,
+                source.ManifestGeneration,
+                sourceCommittedHighWater,
+                source.Definition,
+                segment,
+                artifact);
+        }
+        catch
+        {
+            segment.Dispose();
+            throw;
+        }
+    }
+
+    internal bool TryPrepareMerge(
+        ITransaction transaction,
+        FullTextSegmentBuildArtifact artifact)
+    {
+        PreparedManifest prepared;
         lock (_gate)
         {
-            if (!_indexes.TryGetValue(artifact.IndexName, out IndexState? state)
-                || state.Current.Generation != artifact.SourceManifestGeneration
+            if (!transaction.Indexes.TryGetFullTextDefinition(
+                    artifact.IndexName,
+                    out FullTextCatalogEntry catalog))
+                return false;
+            IndexState state = GetOrCreateState(
+                artifact.Definition,
+                catalog.Manifest);
+            if (state.Current.Generation != artifact.SourceManifestGeneration
                 || !DefinitionEquivalent(state.Current.Definition, artifact.Definition)
-                || currentDefinition is not FullTextIndexDefinition current
-                || !DefinitionEquivalent(current, artifact.Definition))
+                || !DefinitionEquivalent(FromCatalog(catalog), artifact.Definition))
                 return false;
 
             ManifestVersion previous = state.Current;
-            state.History.Add(previous with { Xmax = committedTransactionId });
-            state.Current = new(
-                previous.Generation + 1,
-                committedTransactionId,
-                null,
-                artifact.Definition,
-                [artifact.Segment],
-                CoversPrimarySnapshot: true);
-            return true;
+            prepared = new(
+                artifact.IndexName,
+                previous.Generation,
+                new(
+                    previous.Generation + 1,
+                    transaction.Id.Value,
+                    null,
+                    artifact.Definition,
+                    [artifact.Segment],
+                    [artifact.Artifact],
+                    CoversPrimarySnapshot: true,
+                    artifact.SourceCommittedHighWater));
         }
+        transaction.Indexes.UpdateFullTextManifest(
+            artifact.IndexName,
+            Encode(prepared.Manifest),
+            IndexLifecycleState.Ready);
+        transaction.OnCommitted(
+            () => PublishPreparedMerge(transaction.Id.Value, prepared));
+        transaction.OnRolledBack(
+            () => RollbackPreparedMerge(transaction.Id.Value));
+        return true;
+    }
+
+    private void RollbackPreparedMerge(long transactionId)
+    {
+        lock (_gate)
+            RollbackManifestCore(transactionId);
+    }
+
+    private void RollbackManifestCore(long transactionId)
+    {
+        foreach (IndexState state in _indexes.Values)
+        {
+            if (state.Current.Xmin != transactionId
+                || state.History.Count == 0
+                || state.History[^1].Xmax != transactionId)
+                continue;
+            state.Current = state.History[^1] with { Xmax = null };
+            state.History.RemoveAt(state.History.Count - 1);
+            state.Materialized.Clear();
+        }
+    }
+
+    private void PublishPreparedMerge(
+        long committedTransactionId,
+        PreparedManifest prepared)
+    {
+        bool published = false;
+        lock (_gate)
+        {
+            if (!_indexes.TryGetValue(prepared.IndexName, out IndexState? state)
+                || state.Current.Generation != prepared.SourceGeneration)
+                return;
+            ManifestVersion previous = state.Current;
+            state.History.Add(previous with { Xmax = committedTransactionId });
+            state.Current = prepared.Manifest;
+            published = true;
+        }
+        if (published)
+            CatalogStateChanged?.Invoke(
+                prepared.IndexName,
+                IndexLifecycleState.Ready);
     }
 
     internal static IReadOnlyList<FullTextSegmentMutation> ScanPrimary(
@@ -397,14 +552,74 @@ internal sealed class FullTextSegmentIndex : IDisposable
         }
     }
 
-    private IndexState GetOrCreateState(FullTextIndexDefinition definition)
+    private IndexState GetOrCreateState(
+        FullTextIndexDefinition definition,
+        string? encodedManifest = null)
     {
         if (_indexes.TryGetValue(definition.Name, out IndexState? state))
+        {
+            SynchronizeFromCatalog(state, definition, encodedManifest);
             return state;
+        }
         state = new(definition);
+        SynchronizeFromCatalog(state, definition, encodedManifest);
         _indexes.Add(definition.Name, state);
         return state;
     }
+
+    private void SynchronizeFromCatalog(
+        IndexState state,
+        FullTextIndexDefinition definition,
+        string? encodedManifest)
+    {
+        if (!string.IsNullOrEmpty(encodedManifest))
+        {
+            try
+            {
+                FullTextDurableManifest durable =
+                    FullTextSegmentArtifactStore.DecodeManifest(encodedManifest);
+                if (durable.Generation <= state.Current.Generation)
+                    return;
+                var segments = ImmutableArray.CreateBuilder<ImmutableFullTextSegment>(
+                    durable.Segments.Length);
+                foreach (FullTextSegmentArtifactRef artifact in durable.Segments)
+                    segments.Add(_artifacts.Read(artifact));
+                ManifestVersion next = new(
+                    durable.Generation,
+                    durable.Xmin,
+                    durable.Xmax,
+                    definition,
+                    segments.MoveToImmutable(),
+                    durable.Segments,
+                    durable.CoversPrimarySnapshot,
+                    durable.SourceCommittedHighWater);
+                state.History.Add(state.Current with { Xmax = durable.Xmin });
+                state.Current = next;
+                state.Materialized.Clear();
+            }
+            catch (CorruptionException)
+            {
+                _markRebuildRequired(definition.Name);
+                CatalogStateChanged?.Invoke(
+                    definition.Name,
+                    IndexLifecycleState.RebuildRequired);
+                if (state.Current.Generation == 0)
+                    state.Current = state.Current with
+                    {
+                        CoversPrimarySnapshot = false,
+                    };
+            }
+        }
+    }
+
+    private static string Encode(ManifestVersion manifest)
+        => FullTextSegmentArtifactStore.EncodeManifest(new(
+            manifest.Generation,
+            manifest.Xmin,
+            manifest.Xmax,
+            manifest.SourceCommittedHighWater,
+            manifest.CoversPrimarySnapshot,
+            manifest.Artifacts));
 
     private ITokenizer ResolveTokenizer(FullTextIndexDefinition definition)
     {
@@ -463,6 +678,7 @@ internal sealed class FullTextSegmentIndex : IDisposable
                 state.Dispose();
             _indexes.Clear();
             _pending.Clear();
+            _artifacts.Dispose();
         }
     }
 
@@ -474,7 +690,9 @@ internal sealed class FullTextSegmentIndex : IDisposable
             null,
             definition,
             [],
-            CoversPrimarySnapshot: false);
+            [],
+            CoversPrimarySnapshot: false,
+            TransactionId.Bootstrap.Value);
 
         internal List<ManifestVersion> History { get; } = [];
         internal Dictionary<long, FullTextSegmentSnapshot> Materialized { get; } = [];
@@ -505,36 +723,60 @@ internal sealed class FullTextSegmentIndex : IDisposable
         long? Xmax,
         FullTextIndexDefinition Definition,
         ImmutableArray<ImmutableFullTextSegment> Segments,
-        bool CoversPrimarySnapshot);
+        ImmutableArray<FullTextSegmentArtifactRef> Artifacts,
+        bool CoversPrimarySnapshot,
+        long SourceCommittedHighWater);
+
+    private sealed record PreparedManifest(
+        string IndexName,
+        long SourceGeneration,
+        ManifestVersion Manifest);
 }
+
+internal enum FullTextArtifactPhase
+{
+    AfterBodyFsync,
+    AfterManifestStaged,
+}
+
+internal readonly record struct FullTextStoredEntry(
+    long Owner,
+    PropertyVersionRef PropertyVersion,
+    bool IsTombstone);
 
 internal sealed class ImmutableFullTextSegment : IDisposable
 {
-    private readonly FullTextSegmentMutation[] _entries;
+    private readonly FullTextStoredEntry[] _entries;
     private readonly Dictionary<string, List<(long Owner, int Tf)>> _postings;
     private readonly Dictionary<long, int> _norms;
-    private readonly HashSet<long> _tombstones;
 
     internal ImmutableFullTextSegment(
-        FullTextIndexDefinition definition,
         IReadOnlyList<FullTextSegmentMutation> entries,
         ITokenizer tokenizer)
     {
-        _entries = entries.ToArray();
-        _postings = new(StringComparer.Ordinal);
-        _norms = [];
-        _tombstones = [];
-        foreach (FullTextSegmentMutation entry in _entries)
+        var latest = new Dictionary<long, FullTextSegmentMutation>();
+        foreach (FullTextSegmentMutation entry in entries)
         {
             long owner = EntityRef.Pack(
                 entry.Owner.Kind,
                 entry.Owner.Sequence,
                 entry.Owner.Generation);
+            latest[owner] = entry;
+        }
+
+        _entries = new FullTextStoredEntry[latest.Count];
+        _postings = new(StringComparer.Ordinal);
+        _norms = [];
+        int entryIndex = 0;
+        foreach ((long owner, FullTextSegmentMutation entry) in latest)
+        {
+            _entries[entryIndex] = new(
+                owner,
+                entry.PropertyVersion,
+                entry.IsTombstone);
+            entryIndex++;
             if (entry.Text is null)
-            {
-                _tombstones.Add(owner);
                 continue;
-            }
 
             var sink = new TfSink();
             tokenizer.Tokenize(entry.Text, sink);
@@ -553,9 +795,19 @@ internal sealed class ImmutableFullTextSegment : IDisposable
             postings.Sort(static (left, right) => left.Owner.CompareTo(right.Owner));
     }
 
+    internal ImmutableFullTextSegment(
+        FullTextStoredEntry[] entries,
+        Dictionary<string, List<(long Owner, int Tf)>> postings,
+        Dictionary<long, int> norms)
+    {
+        _entries = entries;
+        _postings = postings;
+        _norms = norms;
+    }
+
     internal int EntryCount => _entries.Length;
-    internal int TombstoneCount => _tombstones.Count;
-    internal IReadOnlyList<FullTextSegmentMutation> Entries => _entries;
+    internal int TombstoneCount => _entries.Count(static entry => entry.IsTombstone);
+    internal IReadOnlyList<FullTextStoredEntry> Entries => _entries;
     internal IReadOnlyDictionary<string, List<(long Owner, int Tf)>> Postings => _postings;
     internal IReadOnlyDictionary<long, int> Norms => _norms;
 
@@ -591,37 +843,47 @@ internal sealed class FullTextSegmentSnapshot
     {
         Definition = definition;
         Tokenizer = tokenizer;
-        var latest = new Dictionary<long, FullTextSegmentMutation>();
+        var latest = new Dictionary<long, (int SegmentIndex, FullTextStoredEntry Entry)>();
         for (int segmentIndex = segments.Length - 1; segmentIndex >= 0; segmentIndex--)
         {
-            IReadOnlyList<FullTextSegmentMutation> entries = segments[segmentIndex].Entries;
+            IReadOnlyList<FullTextStoredEntry> entries = segments[segmentIndex].Entries;
             for (int entryIndex = entries.Count - 1; entryIndex >= 0; entryIndex--)
             {
-                FullTextSegmentMutation entry = entries[entryIndex];
-                long owner = EntityRef.Pack(
-                    entry.Owner.Kind,
-                    entry.Owner.Sequence,
-                    entry.Owner.Generation);
-                latest.TryAdd(owner, entry);
+                FullTextStoredEntry entry = entries[entryIndex];
+                latest.TryAdd(entry.Owner, (segmentIndex, entry));
             }
         }
 
-        foreach ((long owner, FullTextSegmentMutation mutation) in latest)
+        foreach ((long owner, (int _, FullTextStoredEntry entry)) in latest)
         {
-            if (mutation.Text is null)
+            if (entry.IsTombstone)
                 continue;
-            _propertyVersions[owner] = mutation.PropertyVersion;
-            var sink = new TfSink();
-            tokenizer.Tokenize(mutation.Text, sink);
-            foreach ((string term, int tf) in sink.Frequencies)
+            _propertyVersions[owner] = entry.PropertyVersion;
+        }
+
+        for (int segmentIndex = 0; segmentIndex < segments.Length; segmentIndex++)
+        {
+            ImmutableFullTextSegment segment = segments[segmentIndex];
+            foreach ((long owner, int norm) in segment.Norms)
             {
-                if (!_postings.TryGetValue(term, out List<(long, int)>? list))
-                    _postings.Add(term, list = []);
-                list.Add((owner, Math.Min(tf, ushort.MaxValue)));
+                if (latest.TryGetValue(owner, out var selected)
+                    && selected.SegmentIndex == segmentIndex
+                    && !selected.Entry.IsTombstone)
+                    _norms[owner] = norm;
             }
-            _norms[owner] = tokenizer is INormTokenCounter counter
-                ? counter.CountNormTokens(mutation.Text)
-                : sink.Total;
+            foreach ((string term, List<(long Owner, int Tf)> postings) in segment.Postings)
+            {
+                foreach ((long owner, int tf) in postings)
+                {
+                    if (!latest.TryGetValue(owner, out var selected)
+                        || selected.SegmentIndex != segmentIndex
+                        || selected.Entry.IsTombstone)
+                        continue;
+                    if (!_postings.TryGetValue(term, out List<(long, int)>? list))
+                        _postings.Add(term, list = []);
+                    list.Add((owner, tf));
+                }
+            }
         }
 
         foreach (List<(long EntityId, int Tf)> postings in _postings.Values)
@@ -702,18 +964,6 @@ internal sealed class FullTextSegmentSnapshot
     internal FullTextPostingsCursor OpenPostingsCursor(ReadOnlySpan<byte> termUtf8)
         => new(GetPostings(Encoding.UTF8.GetString(termUtf8)));
 
-    private sealed class TfSink : ITokenSink
-    {
-        internal Dictionary<string, int> Frequencies { get; } = new(StringComparer.Ordinal);
-        internal int Total { get; private set; }
-
-        public void Accept(ReadOnlySpan<char> token)
-        {
-            Total++;
-            string value = token.ToString();
-            Frequencies[value] = Frequencies.GetValueOrDefault(value) + 1;
-        }
-    }
 }
 
 internal sealed class FullTextPostingsCursor(IReadOnlyList<(long EntityId, int Tf)> postings)

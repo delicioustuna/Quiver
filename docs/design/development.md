@@ -57,8 +57,8 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 | 新規 DB の初期確保 | デフォルト 1 MiB（8 KiB 境界） |
 | ファイル成長 | 1 / 2 / 4 / 8 / 16 / 32 / 64 MiB の適応成長、1 回の上限はデフォルト 64 MiB |
 | 文字列エンコーディング | UTF-8（長さプレフィックス付き） |
-| 静止時のファイル | `*.quiver` 単一ファイル |
-| 運用中のファイル | `*.quiver` + `*.quiver-wal` |
+| 静止時のファイル | `*.quiver`。全文 index があれば append-only `*.quiver-ftseg` も保持 |
+| 運用中のファイル | `*.quiver` + `*.quiver-wal`。全文 index があれば `*.quiver-ftseg` も保持 |
 | format family | `QUIVER-SW` family version 2（旧 family からの自動移行なし） |
 | primary property | `PropertyAddress` と 84B record の `PropertyVersionStore`。xmin、xmax、Generation は record 内に置き、public property ID と entity inline property は持たない |
 | entity version sidecar | `EntityVersionMeta(xmin,xmax,generation)` の 24B record。page あたり 339 件、sidecar format version 4、旧 40B fallback なし |
@@ -66,8 +66,8 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 | adjacency | `AdjacencySegmentStore` の単一 format。payload なしも `PayloadKind.None` で同形式 |
 | scalar index | `ScalarIndexDefinition` と `PropertyTarget` が永続定義。B+Tree value は `PropertyVersionRef` で、primary owner を snapshot 再検証 |
 | vector definition catalog | target property、scope、dimensions、metric、HNSW 構築パラメタ、segment policy |
-| full-text definition catalog | `FullTextIndexDefinition` の target、tokenizer/filter、BM25 parameter、segment policy |
-| full-text artifact | full typed owner identity と `PropertyVersionRef` を持つ immutable delta/merged segment。mutable postings/norms tenant は持たない |
+| full-text definition catalog | `FullTextIndexDefinition` の target、tokenizer/filter、BM25 parameter、segment policy、lifecycle state、artifact manifest |
+| full-text artifact | `*.quiver-ftseg` の checksum 付き append-only immutable delta/merged segment。full typed owner identity と `PropertyVersionRef` を持ち、mutable postings/norms tenant は持たない |
 
 `TransactionManager` は database instance ごとの `WriterLease` と `SnapshotRegistry` を所有する。
 facade は `BeginReadTransaction()` から `IReadTransaction`、`BeginWriteTransaction()` から `IWriteTransaction` を返す。
@@ -78,6 +78,8 @@ bulk、schema、maintenance の mutation 入口も同じ writer lease を取得�
 scalar index rebuild は primary scan、key decode、sort を snapshot reader で実行し、source generation と reader horizon を再検証する publish transaction だけが writer lease を取得する。
 vector segment merge も primary scan と HNSW artifact 構築を snapshot reader で実行し、source manifest generation と definition を再検証する publish transaction だけが writer lease を取得する。
 full-text segment merge も primary scan と term artifact 構築を snapshot reader で実行し、source manifest generation と definition を再検証する publish transaction だけが writer lease を取得する。
+segment body は WAL 外で fsync してから manifest を publishする。
+正常 reopen は persisted manifest を使い、欠損または checksum 不一致の場合だけ `RebuildRequired` と primary scan fallbackへ移る。
 active writer の dirty page は commit fsync 前に data file へ書かない。
 checkpoint は同じ writer lease で sharp boundary を作り、reader を待たずに committed dirty page と transaction catalog を flush する。
 
