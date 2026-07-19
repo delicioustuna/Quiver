@@ -121,7 +121,7 @@
 > **対応済み(2026-07-10)**: `plans/single-writer-redesign-baseline.md` を追加し、各 gate の出所、再現コマンド、測定環境、基点 commit で測定できない構造の扱いを分離した。正本 §10.4 は出所列を持つ表へ変更済み。
 >
 > **追補対応済み(2026-07-17)**: Wave 5の実測で、11.74xがFT専用logical WALを持つARIES方式の値であり、redo-onlyのpage-image WALと同方式ではないことを確認した。
-> 正本 §10.4と§16で、Wave 5を`redesign-wave-4`の同一runner比1.00x以内、11.74xをWave 8のfull-text segment WAL gateへ分離した。
+> 正本 §10.4と§16で、Wave 5を`redesign-wave-4`の同一runner比1.00x以内、11.74xをWave 8のfull-text segment write gateへ分離した。
 
 - **該当**: §10.4 前文 (L688「基点 commit の baseline と比較する」) と表 (L692-698)、Wave 8 完了条件 (L621)
 - **内容**: 前文は「基点 commit `ee811d1` の baseline と比較」と宣言するが、表の値の一部は基点 commit では測定不能。特に「full-text 4 segment p50 8.55 ms」— 基点実装は mutable postings tree であり segment 構造を持たないため、「4 segment」という測定条件が基点に存在しない(Wave 8 完了条件は正しく「`clean-slate` baseline gate」と別ソースを指しており、10.4 前文と食い違う)。commit の 1163.80 µs、WAL 11.74x も「`clean-slate` ARIES baseline」と表内に書かれており、出所が前文と不一致。また前文が「同じマシン」比較を掲げる一方で絶対値 (1.8982 ms 等) を本文に焼いており、測定環境が変わった瞬間に全ゲートが無意味になる。
@@ -146,6 +146,19 @@
 - **該当**: §4.1 Update/Delete step 4 (L168「property、payload、index entry、incidence、entity slot の順」)、§5.5 (L313「property ref が durable なのに payload が無い状態は primary corruption として open/recovery を失敗させる」)
 - **内容**: §5.5 の corruption 規則が「visible な property version」に限定されていない。vacuum の順序は property→payload だが、crash がこの 2 ステップの間に落ちると「reclaim 済み property version(または reclaim commit が durable になる前の状態)が、すでに回収された payload を指す」中間状態が heap 上に残り得る。字義通りに実装すると open/recovery が正常な GC 中間状態を corruption と誤判定し、DB が開けなくなる。また payload より**後**に回収される index entry は必然的に dangling ref 期間を持つが、これが「正常」である旨は §4.5 の revalidation 記述から推測するしかない。
 - **修正案**: §5.5 の規則を「snapshot horizon 上で visible な property version が payload を欠く場合のみ corruption」と限定し、vacuum の property/payload 回収を単一 commit にする(または回収順を payload が最後になるよう定義する)ことを明記する。
+
+### M-7. Wave 8の最初の実装が全文segmentを正常reopenごとに再構築する
+
+> **設計対応済み(2026-07-19)**: 正本 §4.2、§4.6、§9 Wave 8、§10.4、§13、§16で、checksum付きappend-only segment bodyをWAL外でfsyncし、manifestだけをstrict `Commit`でpublishする方式へ確定した。
+> 実装とcrash/performance gateはWave 8のforward-fixで検証する。
+
+- **該当**: §4.6、§9 Wave 8、Wave 8着手指示書のWAL/recovery contractとcrash gate。
+- **内容**: 最初のWave 8実装はsegment bodyとmanifestをメモリ内`Dictionary`だけに保持し、reopen後の検索でprimary text propertyを全走査した。
+  primary dataは失わないが、正常reopenがデータ量に比例し、merge成果が再起動で失われる。
+  WAL 1.00xもdurable segmentの測定ではなく、segmentを永続化していない結果になる。
+- **修正案**: immutable bodyをchecksum付きappend-only artifactとして書いてfsyncし、artifact ID/checksum/source high-waterを持つmanifestだけをprimary mutationと同じtransactionでpublishする。
+  body fsync前のmanifest publishを禁止し、commit前bodyはorphan、commit後manifestは完全なbodyだけを参照する。
+  primary全走査は欠損・checksum不一致時の`RebuildRequired` fallbackに限定する。
 
 ## Minor
 
