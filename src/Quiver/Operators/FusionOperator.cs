@@ -20,8 +20,6 @@ namespace Quiver.Query.Physical;
 /// </remarks>
 internal sealed class FusionOperator : IPhysicalOperator
 {
-    private const double K0 = 60.0;
-
     private readonly IPhysicalOperator[] _children;
     private readonly int[] _childColumns;
     private readonly int _k;
@@ -50,33 +48,24 @@ internal sealed class FusionOperator : IPhysicalOperator
 
     public void Open(ITransaction tx)
     {
-        // RRF 累積: 各子のランク済みストリームを走査し、entity の累積スコアに
-        // 1/(k0 + rank) (rank 1-based) を加算する。複数の子で上位に入る文書がブーストされる。
-        var scores = new Dictionary<long, double>();
+        var channels = new List<IReadOnlyList<long>>(_children.Length);
         for (int c = 0; c < _children.Length; c++)
         {
             var child = _children[c];
             int col = _childColumns[c];
             child.Open(tx);
-            int rank = 0;
+            var channel = new List<long>();
             while (child.MoveNext())
             {
                 var slot = child.Current[col];
                 if (slot.Type != TupleSlotType.VertexId) continue;
-                rank++;
-                long id = slot.LongValue;
-                double contrib = 1.0 / (K0 + rank);
-                scores[id] = scores.TryGetValue(id, out var prev) ? prev + contrib : contrib;
+                channel.Add(slot.LongValue);
             }
+            channels.Add(channel);
         }
-
-        var ranked = new List<KeyValuePair<long, double>>(scores);
-        ranked.Sort(static (a, b) =>
-        {
-            int cmp = b.Value.CompareTo(a.Value);
-            return cmp != 0 ? cmp : a.Key.CompareTo(b.Key);
-        });
-        _results = ranked.Take(_k).Select(kv => kv.Key).ToArray();
+        _results = ReciprocalRankFusion.Fuse(channels, _k)
+            .Select(static result => result.EntityId)
+            .ToArray();
         _pos = -1;
     }
 

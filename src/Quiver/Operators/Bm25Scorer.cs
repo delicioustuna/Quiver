@@ -51,6 +51,9 @@ internal sealed class Bm25TermStats
 internal readonly record struct Bm25CorpusStats(
     long DocumentCount, double AverageDocLength, Bm25TermStats? Terms = null);
 
+// 順位から score を逆算すると同点処理や丸めを再現できないため、scorer の累積結果をそのまま渡す。
+internal readonly record struct Bm25Score(long PackedEntityId, double Score);
+
 /// <summary>
 /// text-first (<see cref="FullTextScanOperator"/>) と graph-first
 /// (<see cref="FilteredFullTextScanOperator"/>) の両経路で共有する
@@ -83,10 +86,37 @@ internal static class Bm25Scorer
         FullTextSegmentSnapshot ft, ITokenizer tokenizer, string queryText,
         long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats = null)
     {
+        return RankScored(
+                ft,
+                tokenizer,
+                queryText,
+                n,
+                avgdl,
+                candidateSequences,
+                termStats)
+            .Select(static hit => hit.PackedEntityId)
+            .ToList();
+    }
+
+    internal static List<Bm25Score> RankScored(
+        FullTextSegmentSnapshot ft,
+        ITokenizer tokenizer,
+        string queryText,
+        long n,
+        double avgdl,
+        HashSet<long>? candidateSequences,
+        Bm25TermStats? termStats = null)
+    {
         var sink = new TermSink();
         tokenizer.Tokenize(queryText, sink);
-        if (sink.Terms.Count == 0) return new List<long>();
-        return RankTerms(ft, sink.Terms, n, avgdl, candidateSequences, termStats);
+        if (sink.Terms.Count == 0) return [];
+        return RankTermsScored(
+            ft,
+            sink.Terms,
+            n,
+            avgdl,
+            candidateSequences,
+            termStats);
     }
 
     /// <summary>
@@ -97,8 +127,34 @@ internal static class Bm25Scorer
         FullTextSegmentSnapshot ft, IReadOnlySet<string> queryTerms,
         long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats = null)
     {
-        if (queryTerms.Count == 0) return new List<long>();
-        return SortByScore(AccumulateScores(ft, queryTerms, n, avgdl, candidateSequences, termStats));
+        return RankTermsScored(
+                ft,
+                queryTerms,
+                n,
+                avgdl,
+                candidateSequences,
+                termStats)
+            .Select(static hit => hit.PackedEntityId)
+            .ToList();
+    }
+
+    internal static List<Bm25Score> RankTermsScored(
+        FullTextSegmentSnapshot ft,
+        IReadOnlySet<string> queryTerms,
+        long n,
+        double avgdl,
+        HashSet<long>? candidateSequences,
+        Bm25TermStats? termStats = null)
+    {
+        if (queryTerms.Count == 0) return [];
+        return SortByScore(
+            AccumulateScores(
+                ft,
+                queryTerms,
+                n,
+                avgdl,
+                candidateSequences,
+                termStats));
     }
 
     /// <summary>
@@ -111,8 +167,27 @@ internal static class Bm25Scorer
         FullTextSegmentSnapshot ft, ParsedFtsQuery query,
         long n, double avgdl, HashSet<long>? candidateSequences, Bm25TermStats? termStats = null)
     {
+        return RankBooleanScored(
+                ft,
+                query,
+                n,
+                avgdl,
+                candidateSequences,
+                termStats)
+            .Select(static hit => hit.PackedEntityId)
+            .ToList();
+    }
+
+    internal static List<Bm25Score> RankBooleanScored(
+        FullTextSegmentSnapshot ft,
+        ParsedFtsQuery query,
+        long n,
+        double avgdl,
+        HashSet<long>? candidateSequences,
+        Bm25TermStats? termStats = null)
+    {
         var allPositive = query.AllPositiveTerms();
-        if (allPositive.Count == 0) return new List<long>();
+        if (allPositive.Count == 0) return [];
 
         var scores = AccumulateScores(ft, allPositive, n, avgdl, candidateSequences, termStats);
 
@@ -294,7 +369,7 @@ internal static class Bm25Scorer
         return (n, avgdl);
     }
 
-    private static List<long> SortByScore(Dictionary<long, double> scores)
+    private static List<Bm25Score> SortByScore(Dictionary<long, double> scores)
     {
         var ranked = new List<KeyValuePair<long, double>>(scores);
         ranked.Sort(static (a, b) =>
@@ -302,8 +377,8 @@ internal static class Bm25Scorer
             int byScore = b.Value.CompareTo(a.Value);
             return byScore != 0 ? byScore : a.Key.CompareTo(b.Key);
         });
-        var result = new List<long>(ranked.Count);
-        foreach (var kv in ranked) result.Add(kv.Key);
+        var result = new List<Bm25Score>(ranked.Count);
+        foreach (var kv in ranked) result.Add(new(kv.Key, kv.Value));
         return result;
     }
 

@@ -2,13 +2,15 @@ using System.Text;
 using System.Text.Json;
 using Quiver.Api;
 using Quiver.Core;
+using Quiver.Index.FullText;
+using Quiver.Query.Physical;
 using Quiver.Storage.Records;
 
 namespace Quiver.Rag;
 
 /// <summary>
 /// ハイブリッド検索 (BM25 + KNN を RRF 融合) と graph expansion (隣接チャンク連結・親文書付与) を 1 API で返す検索器。
-/// クエリ実行はエンジン DSL (<c>g.HybridSearch</c> / <c>g.Knn</c> / <c>g.Search</c>) への薄い写像に徹し、融合ロジックは持たない。
+/// score はエンジンの BM25 / vector scorer と RRF 実装から受け取り、隣接チャンク連結後も代表ヒットの内訳を保持する。
 /// </summary>
 public sealed class RagSearcher
 {
@@ -42,9 +44,10 @@ public sealed class RagSearcher
         using var tx = db.BeginReadTransaction();
         var g = tx.Query;
 
-        // 1) ランク順のチャンク VertexId を取得 (score は伝播しないので順位 = relevance)。
-        //    MetadataEquals があれば一致文書のチャンクに母集団を絞ってから検索する (push-down)。
-        List<VertexId> ranked = RankHits(tx, g, queryText, queryVector, hasText, hasVector, options);
+        // 1) MetadataEquals があれば一致文書のチャンクに母集団を絞ってから
+        //    engine scorerへ渡し、top-k と score 内訳を同じ母集団から得る。
+        List<RankedChunk> ranked =
+            RankHits(tx, g, queryText, queryVector, hasText, hasVector, options);
         if (ranked.Count == 0) return Array.Empty<RagHit>();
 
         // 2) 各ヒットを展開し、MetadataFilter で文書単位に絞る。
@@ -53,7 +56,8 @@ public sealed class RagSearcher
         var metaCache = new Dictionary<long, RagMetadata>();
         for (int i = 0; i < ranked.Count; i++)
         {
-            var center = ranked[i];
+            RankedChunk rankedChunk = ranked[i];
+            var center = rankedChunk.VertexId;
             if (!TryReadChunk(tx, center, out var centerInfo)) continue;
 
             var docId = FindDocumentOf(tx, center);
@@ -68,7 +72,13 @@ public sealed class RagSearcher
             }
 
             var neighborhood = ExpandNeighborhood(tx, center, centerInfo, options.NeighborExpansion);
-            expanded.Add(new ExpandedHit(i + 1, center, doc, centerInfo.HeadingPath, neighborhood));
+            expanded.Add(new ExpandedHit(
+                i + 1,
+                center,
+                doc,
+                centerInfo.HeadingPath,
+                neighborhood,
+                rankedChunk.Score));
         }
 
         // 3) 文書単位で隣接ヒットをマージし、ランク順に整列して返す。
@@ -82,35 +92,198 @@ public sealed class RagSearcher
     /// 一致文書のチャンクへ母集団を絞った candidate-side 検索 (graph-first) に切替え、無ければ
     /// 通常の text-first / vector-first / hybrid 検索を行う。
     /// </summary>
-    private List<VertexId> RankHits(
+    private List<RankedChunk> RankHits(
         IReadTransaction tx, GraphTraversalSource g,
         string queryText, float[]? queryVector, bool hasText, bool hasVector, RagSearchOptions options)
     {
-        if (options.MetadataEquals is not { Count: > 0 } equals)
+        VertexId[]? candidates = null;
+        if (options.MetadataEquals is { Count: > 0 } equals)
         {
-            // push-down なし: エンジン DSL の global 検索へ薄く写像。
-            if (hasText && hasVector)
-                return g.HybridSearch(
-                    RagSchema.ChunkTextIndex, queryText, _store.VectorIndexName, queryVector!, options.K).ToList();
-            if (hasVector)
-                return g.Knn(_store.VectorIndexName, queryVector!, options.K).ToList();
-            return g.Search(RagSchema.ChunkTextIndex, queryText, options.K).ToList();
+            candidates = CollectCandidateChunks(tx, g, equals);
+            if (candidates.Length == 0) return [];
         }
 
-        // メタデータ一致文書のチャンクだけを母集団にする (recall hole を避ける)。
-        var cands = CollectCandidateChunks(tx, g, equals);
-        if (cands.Length == 0) return new List<VertexId>();
+        List<ChannelHit> text = hasText
+            ? ScoreText(tx, queryText, options.K, candidates)
+            : [];
+        List<ChannelHit> vector = hasVector
+            ? ScoreVector(tx, queryVector!, options.K, candidates)
+            : [];
 
-        if (hasText && hasVector)
+        if (!hasVector)
+            return text.Select(static hit => new RankedChunk(
+                    hit.VertexId,
+                    new RagScore(
+                        hit.Score,
+                        null,
+                        hit.Score,
+                        RagFusionMethod.TextOnly,
+                        0)))
+                .ToList();
+        if (!hasText)
+            return vector.Select(static hit => new RankedChunk(
+                    hit.VertexId,
+                    new RagScore(
+                        null,
+                        (float)hit.Score,
+                        hit.Score,
+                        RagFusionMethod.VectorOnly,
+                        0)))
+                .ToList();
+
+        var textScores = text.ToDictionary(
+            static hit => hit.VertexId.Value,
+            static hit => hit.Score);
+        var vectorScores = vector.ToDictionary(
+            static hit => hit.VertexId.Value,
+            static hit => hit.Score);
+        IReadOnlyList<IReadOnlyList<long>> channels =
+        [
+            text.Select(static hit => hit.VertexId.Value).ToArray(),
+            vector.Select(static hit => hit.VertexId.Value).ToArray(),
+        ];
+        // RAG 側で式と定数を複製するとエンジンの fusion 順位と乖離するため、共有プリミティブを使う。
+        return ReciprocalRankFusion.Fuse(channels, options.K)
+            .Select(result => new RankedChunk(
+                new VertexId(result.EntityId),
+                new RagScore(
+                    textScores.TryGetValue(result.EntityId, out double bm25)
+                        ? bm25
+                        : null,
+                    vectorScores.TryGetValue(result.EntityId, out double similarity)
+                        ? (float)similarity
+                        : null,
+                    result.Score,
+                    RagFusionMethod.ReciprocalRankFusion,
+                    ReciprocalRankFusion.RankConstant)))
+            .ToList();
+    }
+
+    private static List<ChannelHit> ScoreText(
+        IReadTransaction tx,
+        string queryText,
+        int k,
+        IReadOnlyList<VertexId>? candidates)
+    {
+        var inner = tx.AsInternal().Inner;
+        if (inner.FullTextSegments is null
+            || !inner.FullTextSegments.TryOpen(
+                inner,
+                RagSchema.ChunkTextIndex,
+                out FullTextSegmentSnapshot snapshot))
+            return [];
+
+        HashSet<long>? candidateSequences = candidates is null
+            ? null
+            : candidates.Select(static id => id.Sequence).ToHashSet();
+        HashSet<long>? candidateIds = candidates is null
+            ? null
+            : candidates.Select(static id => EntityRef.Pack(
+                    EntityKind.Vertex,
+                    id.Sequence,
+                    id.Generation))
+                .ToHashSet();
+        (long n, double avgdl) = Bm25Scorer.ResolveCorpus(snapshot, null);
+        List<Bm25Score> scored;
+        if (FtsQueryParser.ContainsBooleanOps(queryText))
         {
-            // candidate 制約付き hybrid: 各チャンネルを母集団内で求め RRF で融合する。
-            var textRanked = g.Vertices(cands).FilterByText(RagSchema.ChunkTextIndex, queryText, options.K).ToList();
-            var vecRanked = g.Vertices(cands).FilterByKnn(_store.VectorIndexName, queryVector!, options.K).ToList();
-            return RrfFuse(textRanked, vecRanked, options.K);
+            ParsedFtsQuery parsed = FtsQueryParser.ParseBooleanAndExpand(
+                queryText,
+                snapshot.Tokenizer,
+                snapshot);
+            scored = Bm25Scorer.RankBooleanScored(
+                snapshot,
+                parsed,
+                n,
+                avgdl,
+                candidateSequences);
         }
-        if (hasVector)
-            return g.Vertices(cands).FilterByKnn(_store.VectorIndexName, queryVector!, options.K).ToList();
-        return g.Vertices(cands).FilterByText(RagSchema.ChunkTextIndex, queryText, options.K).ToList();
+        else if (FtsQueryParser.ContainsWildcard(queryText)
+                 || FtsQueryParser.ContainsFuzzy(queryText))
+        {
+            IReadOnlySet<string> terms = FtsQueryParser.ParseAndExpand(
+                queryText,
+                snapshot.Tokenizer,
+                snapshot);
+            scored = Bm25Scorer.RankTermsScored(
+                snapshot,
+                terms,
+                n,
+                avgdl,
+                candidateSequences);
+        }
+        else
+        {
+            scored = Bm25Scorer.RankScored(
+                snapshot,
+                snapshot.Tokenizer,
+                queryText,
+                n,
+                avgdl,
+                candidateSequences);
+        }
+
+        var result = new List<ChannelHit>(Math.Min(k, scored.Count));
+        foreach (Bm25Score hit in scored)
+        {
+            if (candidateIds is not null
+                && !candidateIds.Contains(hit.PackedEntityId))
+                continue;
+            var id = VertexId.Create(
+                EntityRef.UnpackSequence(hit.PackedEntityId),
+                EntityRef.UnpackGeneration(hit.PackedEntityId));
+            if (!snapshot.IsVisibleVertexCandidate(hit.PackedEntityId, inner)
+                || !tx.VertexExists(id))
+                continue;
+            result.Add(new(id, hit.Score));
+            if (result.Count == k)
+                break;
+        }
+        return result;
+    }
+
+    private List<ChannelHit> ScoreVector(
+        IReadTransaction tx,
+        float[] queryVector,
+        int k,
+        IReadOnlyList<VertexId>? candidates)
+    {
+        if (candidates is null)
+        {
+            var result = new List<ChannelHit>(k);
+            using VectorSearchCursor cursor = tx.KnnSearch(
+                _store.VectorIndexName,
+                queryVector,
+                k);
+            while (cursor.MoveNext())
+                if (cursor.Current.Owner.Kind == EntityKind.Vertex)
+                    result.Add(new(
+                        new VertexId(cursor.Current.Owner.Value),
+                        cursor.Current.Score));
+            return result;
+        }
+
+        var scored = new List<ChannelHit>(candidates.Count);
+        var vector = new float[_store.Options.EmbeddingDimensions];
+        foreach (VertexId candidate in candidates)
+        {
+            if (!tx.TryGetVectorProperty(
+                    EntityRef.From(candidate),
+                    RagSchema.PropEmbedding,
+                    vector))
+                continue;
+            scored.Add(new(
+                candidate,
+                VectorMetrics.Score(
+                    _store.Options.VectorMetric,
+                    queryVector,
+                    vector)));
+        }
+        return scored
+            .OrderByDescending(static hit => hit.Score)
+            .ThenBy(static hit => hit.VertexId.Value)
+            .Take(k)
+            .ToList();
     }
 
     /// <summary>
@@ -142,44 +315,19 @@ public sealed class RagSearcher
         return true;
     }
 
-    /// <summary>
-    /// 2 つのランク列を RRF (<c>Σ 1/(60 + rank)</c>, rank は 1 始まり) で融合し上位 <paramref name="k"/> 件を返す。
-    /// candidate 制約付き hybrid 用。エンジン <c>FusionOperator</c> の RRF と同値だが、
-    /// candidate-bearing な <c>g.HybridSearch</c> の DSL が無いため Rag 層で同じ定数 (k0=60) を用いて融合する。
-    /// 同一チャンクは sequence 空間で名寄せし、同点は sequence 昇順で決定的に整列する。
-    /// </summary>
-    private static List<VertexId> RrfFuse(List<VertexId> textRanked, List<VertexId> vecRanked, int k)
-    {
-        const int K0 = 60;
-        var score = new Dictionary<long, double>();
-        var rep = new Dictionary<long, VertexId>();
-
-        void Accumulate(List<VertexId> ranked)
-        {
-            for (int i = 0; i < ranked.Count; i++)
-            {
-                long key = EntityRef.UnpackSequence(ranked[i].Value);
-                score[key] = (score.TryGetValue(key, out var s) ? s : 0d) + 1d / (K0 + i + 1);
-                rep[key] = ranked[i]; // 生存 VertexId を代表に保持 (どちらのチャンネルも downstream 読取可)
-            }
-        }
-
-        Accumulate(vecRanked);
-        Accumulate(textRanked); // text を後勝ちにし代表 VertexId を text チャンネル側へ寄せる
-
-        return score
-            .OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key)
-            .Take(k)
-            .Select(kv => rep[kv.Key])
-            .ToList();
-    }
-
     // ── 内部表現 ──
+    private readonly record struct ChannelHit(VertexId VertexId, double Score);
+    private readonly record struct RankedChunk(VertexId VertexId, RagScore Score);
     private readonly record struct ChunkInfo(
         VertexId VertexId, int Ordinal, string Text, int CharStart, int CharEnd, string HeadingPath);
 
     private sealed record ExpandedHit(
-        int Rank, VertexId Center, VertexId DocId, string HeadingPath, List<ChunkInfo> Chunks);
+        int Rank,
+        VertexId Center,
+        VertexId DocId,
+        string HeadingPath,
+        List<ChunkInfo> Chunks,
+        RagScore Score);
 
     // ── ヒット展開 ──
 
@@ -281,7 +429,13 @@ public sealed class RagSearcher
                     ? ReadDocRef(tx, best.DocId)
                     : new RagDocumentRef(string.Empty, string.Empty);
 
-                result.Add(new RagHit(ConcatChunks(union), best.HeadingPath, docRef, best.Rank, best.Center));
+                result.Add(new RagHit(
+                    ConcatChunks(union),
+                    best.HeadingPath,
+                    docRef,
+                    best.Rank,
+                    best.Center,
+                    best.Score));
             }
         }
 

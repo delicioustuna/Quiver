@@ -58,8 +58,8 @@ public sealed class RagStore
 
     /// <summary>
     /// 文書単位でべき等に取込/差し替えを行う。Blocks の正規化ハッシュ (<c>contentHash</c>) が既存と
-    /// 一致すれば DB を一切変更せず no-op を返す。不一致なら<b>単一トランザクション</b>で旧 Chunk 群と
-    /// その関係を削除し、新チャンクを挿入して property / <c>NEXT_CHUNK</c> 連結 / ベクトルを設定する。
+    /// 一致すれば DB を一切変更せず no-op を返す。不一致なら<b>単一トランザクション</b>で旧 Document、
+    /// Chunk、接続 Edge、参加 Nexus を削除し、新しい Document ID とチャンク群を作成する。
     /// </summary>
     /// <remarks>
     /// 埋め込み生成 (<paramref name="embedder"/>) はトランザクションを開く前に実行されるため、embedder が
@@ -162,24 +162,39 @@ public sealed class RagStore
     {
         using var tx = _db.BeginWriteTransaction();
 
-        var (docId, created) = tx.MergeVertex(
-            RagSchema.DocumentLabel, RagSchema.PropSourceId, PropertyValue.FromString(doc.SourceId));
-
-        // べき等: 既存文書でハッシュ一致なら何も変更しない。
-        if (!created && TryReadString(tx, docId, RagSchema.PropContentHash, out var existing)
+        bool hasExisting = TryFindLiveDocument(tx, doc.SourceId, out VertexId existingDocument);
+        if (hasExisting
+            && TryReadString(
+                tx,
+                existingDocument,
+                RagSchema.PropContentHash,
+                out string existing)
             && existing == contentHash)
         {
-            int existingCount = CountChunks(tx, docId);
+            int existingCount = CountChunks(tx, existingDocument);
             tx.Rollback();
-            return new UpsertResult(Unchanged: true, ChunkCount: existingCount, DocumentVertexId: docId);
+            return new UpsertResult(
+                Unchanged: true,
+                ChunkCount: existingCount,
+                DocumentVertexId: existingDocument,
+                ReplacedDocumentVertexId: null);
         }
 
-        // 差し替え: 既存 Chunk 群を削除してから入れ直す。
-        if (!created)
-            foreach (var oldChunk in CollectChunks(tx, docId))
-                DeleteChunk(tx, oldChunk);
+        VertexId? replacedDocument = null;
+        if (hasExisting)
+        {
+            replacedDocument = existingDocument;
+            // 旧 ID の利用者関係を新 ID へ暗黙継承すると、再取込が利用者 graph の
+            // 意味まで推測することになる。旧 Document の Edge/Nexus は cascade し、
+            // 呼び出し側が返却 mapping を使って必要な関係だけを明示的に再アンカーする。
+            DeleteDocumentVertex(tx, existingDocument);
+        }
 
-        // Document プロパティ (sourceId は MergeVertex 作成時に設定済み)。
+        VertexId docId = tx.CreateVertex(RagSchema.DocumentLabel);
+        tx.SetProperty(
+            docId,
+            RagSchema.PropSourceId,
+            PropertyValue.FromString(doc.SourceId));
         tx.SetProperty(docId, RagSchema.PropTitle, PropertyValue.FromString(doc.Title ?? string.Empty));
         tx.SetProperty(docId, RagSchema.PropContentHash, PropertyValue.FromString(contentHash));
         tx.SetProperty(docId, RagSchema.PropIngestedAt, PropertyValue.FromDateTime(DateTime.UtcNow));
@@ -215,7 +230,11 @@ public sealed class RagStore
         }
 
         tx.Commit();
-        return new UpsertResult(Unchanged: false, ChunkCount: drafts.Count, DocumentVertexId: docId);
+        return new UpsertResult(
+            Unchanged: false,
+            ChunkCount: drafts.Count,
+            DocumentVertexId: docId,
+            ReplacedDocumentVertexId: replacedDocument);
     }
 
     /// <summary>埋め込み入力を組み立てる。見出しパスがあれば本文の前へ付与し検索時の文脈を補う。</summary>
@@ -242,7 +261,11 @@ public sealed class RagStore
             && TryReadString(tx, docId, RagSchema.PropContentHash, out var existing)
             && existing == contentHash)
         {
-            result = new UpsertResult(Unchanged: true, ChunkCount: CountChunks(tx, docId), DocumentVertexId: docId);
+            result = new UpsertResult(
+                Unchanged: true,
+                ChunkCount: CountChunks(tx, docId),
+                DocumentVertexId: docId,
+                ReplacedDocumentVertexId: null);
             return true;
         }
         result = default;
@@ -483,4 +506,9 @@ public sealed class RagStore
 /// <param name="Unchanged"><c>contentHash</c> が既存と一致し no-op だったか。</param>
 /// <param name="ChunkCount">取込後の文書のチャンク数 (no-op 時は既存値)。</param>
 /// <param name="DocumentVertexId">対象 Document ノードの ID。</param>
-public readonly record struct UpsertResult(bool Unchanged, int ChunkCount, VertexId DocumentVertexId);
+/// <param name="ReplacedDocumentVertexId">内容変更で置換した旧 Document ID。新規作成または no-op は <see langword="null"/>。</param>
+public readonly record struct UpsertResult(
+    bool Unchanged,
+    int ChunkCount,
+    VertexId DocumentVertexId,
+    VertexId? ReplacedDocumentVertexId);

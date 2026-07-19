@@ -77,6 +77,11 @@ public sealed class RagSearchTests : IDisposable
         hits.Should().NotBeEmpty();
         hits[0].ChunkText.Should().Contain("Zphobos");
         hits[0].Document.SourceId.Should().Be("d1");
+        hits[0].Score.Bm25Score.Should().BeGreaterThan(0);
+        hits[0].Score.VectorSimilarity.Should().BeNull();
+        hits[0].Score.FusedScore.Should().Be(hits[0].Score.Bm25Score!.Value);
+        hits[0].Score.FusionMethod.Should().Be(RagFusionMethod.TextOnly);
+        hits[0].Score.ReciprocalRankConstant.Should().Be(0);
     }
 
     [Fact]
@@ -122,6 +127,11 @@ public sealed class RagSearchTests : IDisposable
 
         hits.Should().NotBeEmpty();
         hits[0].ChunkText.Should().Contain("bravo banana");
+        hits[0].Score.Bm25Score.Should().BeNull();
+        hits[0].Score.VectorSimilarity.Should().NotBeNull();
+        hits[0].Score.FusedScore.Should()
+            .BeApproximately(hits[0].Score.VectorSimilarity!.Value, 1e-6);
+        hits[0].Score.FusionMethod.Should().Be(RagFusionMethod.VectorOnly);
     }
 
     [Fact]
@@ -164,6 +174,8 @@ public sealed class RagSearchTests : IDisposable
         hits.Should().HaveCount(1); // 隣接ヒットはマージされ重複文脈を返さない
         hits[0].ChunkText.Should().Contain("common alpha");
         hits[0].ChunkText.Should().Contain("common bravo");
+        hits[0].Score.Bm25Score.Should().BeGreaterThan(0,
+            "隣接チャンクのマージ後も代表ヒットの score 内訳を保持する");
     }
 
     [Fact]
@@ -265,6 +277,45 @@ public sealed class RagSearchTests : IDisposable
     }
 
     [Fact]
+    public async Task Metadata_equals_vector_pushdown_returns_candidate_top_one_before_global_neighbors()
+    {
+        using var db = QuiverDatabase.Open(_path);
+        var store = NewStore(db);
+        var searcher = new RagSearcher(store);
+        const string globalNearest = "secret vector nearest phrase body";
+
+        for (int i = 0; i < 8; i++)
+            await store.UpsertDocumentAsync(
+                Doc(
+                    $"sec{i}",
+                    new Dictionary<string, string> { ["acl"] = "secret" },
+                    globalNearest),
+                new FakeEmbedder());
+        await store.UpsertDocumentAsync(
+            Doc(
+                "pub",
+                new Dictionary<string, string> { ["acl"] = "public" },
+                "public allowed vector candidate body"),
+            new FakeEmbedder());
+
+        IReadOnlyList<RagHit> hits = searcher.Search(
+            queryText: "",
+            Embed(globalNearest, Dim),
+            new RagSearchOptions
+            {
+                K = 1,
+                NeighborExpansion = 0,
+                MetadataEquals =
+                    new Dictionary<string, string> { ["acl"] = "public" },
+            });
+
+        hits.Should().ContainSingle();
+        hits[0].Document.SourceId.Should().Be("pub");
+        hits[0].Score.VectorSimilarity.Should().NotBeNull();
+        hits[0].Score.FusionMethod.Should().Be(RagFusionMethod.VectorOnly);
+    }
+
+    [Fact]
     public async Task Metadata_equals_pushdown_returns_empty_when_no_document_matches()
     {
         using var db = QuiverDatabase.Open(_path);
@@ -310,6 +361,10 @@ public sealed class RagSearchTests : IDisposable
         hits.Should().NotBeEmpty();
         hits.Should().OnlyContain(h => h.Document.SourceId == "pub"); // secret は母集団から除外
         hits.Select(h => h.ChunkText).Should().Contain(t => t.Contains("Zphobos"));
+        hits.Should().OnlyContain(hit =>
+            hit.Score.FusionMethod == RagFusionMethod.ReciprocalRankFusion
+            && hit.Score.ReciprocalRankConstant == 60
+            && hit.Score.FusedScore > 0);
     }
 
     [Fact]
@@ -332,6 +387,14 @@ public sealed class RagSearchTests : IDisposable
         var texts = hits.Select(h => h.ChunkText).ToList();
         texts.Should().Contain(t => t.Contains("Zphobos"));
         texts.Should().Contain(t => t.Contains("bravo banana"));
+        hits.Should().OnlyContain(hit =>
+            hit.Score.FusionMethod == RagFusionMethod.ReciprocalRankFusion
+            && hit.Score.ReciprocalRankConstant == 60
+            && hit.Score.FusedScore > 0);
+        hits.Should().Contain(hit =>
+            hit.Score.Bm25Score.HasValue
+            && hit.Score.VectorSimilarity.HasValue,
+            "同じチャンクが両チャンネルに入った場合は両方の生 score を返す");
     }
 
     [Fact]

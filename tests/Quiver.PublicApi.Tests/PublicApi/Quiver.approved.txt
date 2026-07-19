@@ -5,6 +5,7 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Index.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Operators.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.PropertyTests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Rag")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Storage.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Stores.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Tests")]
