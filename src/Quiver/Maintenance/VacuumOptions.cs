@@ -7,7 +7,7 @@ public enum VacuumPolicy
 {
     /// <summary>手動実行のみ (既定)。<see cref="QuiverDatabaseOptions.AutoVacuum"/> が false の場合。</summary>
     Manual,
-    /// <summary>低頻度のバックグラウンドワーカーで自動実行。未実装の MVP では Manual と同義。</summary>
+    /// <summary>低頻度のバックグラウンドワーカーで自動実行。</summary>
     Auto,
 }
 
@@ -17,7 +17,7 @@ public enum VacuumPolicy
 public enum VacuumMode
 {
     /// <summary>
-    /// 全エンティティを走査して dead version を物理回収する。MVP ではVertexのみ。
+    /// 指定対象を走査して visibility horizon を越えた dead version と導出 artifact を物理回収する。
     /// </summary>
     Full,
     /// <summary>
@@ -35,13 +35,13 @@ public sealed class VacuumOptions
     public VacuumMode Mode { get; init; } = VacuumMode.Full;
 
     /// <summary>
-    /// 実行を打ち切る上限時間 (ミリ秒)。<c>0</c> 以下で制限なし。MVP では advisory にしか
-    /// 使われず、Vertex走査の各ステップ後にチェックされる。既定 0 (制限なし)。
+    /// 実行を打ち切る上限時間 (ミリ秒)。<c>0</c> 以下で制限なし。
+    /// 現在は advisory であり、走査 phase の境界で確認する。既定 0 (制限なし)。
     /// </summary>
     public int MaxDurationMs { get; init; }
 
     /// <summary>
-    /// 対象エンティティ種別のビットマスク。MVP では <see cref="VacuumTarget.Vertices"/> のみ。
+    /// 対象エンティティ種別のビットマスク。
     /// </summary>
     public VacuumTarget Targets { get; init; } = VacuumTarget.All;
 }
@@ -70,12 +70,12 @@ public enum VacuumTarget
 /// vacuum 実行結果。
 /// </summary>
 /// <param name="ReclaimedVertices">物理回収した dead Vertex版数。</param>
-/// <param name="ReclaimedEdges">物理回収した dead Edge版数 (MVP は 0)。</param>
-/// <param name="ReclaimedProperties">物理回収した dead プロパティ版数 (MVP は 0)。</param>
+/// <param name="ReclaimedEdges">物理回収した dead Edge版数。</param>
+/// <param name="ReclaimedProperties">物理回収した dead プロパティ版数。</param>
 /// <param name="PrunedCommittedTxEntries">visibility horizon を下回り削除した committed registry エントリ数。</param>
 /// <param name="ElapsedMs">実行に要した時間 (ミリ秒)。</param>
 /// <param name="HorizonTxId">この実行で採用した visibility horizon。これ未満の xmax を持つ dead version が回収対象。</param>
-/// <param name="Skipped">前提 (アクティブ tx 0) を満たせず未実行のとき true。</param>
+/// <param name="Skipped">バックエンドが vacuum を実行しなかったとき <see langword="true"/>。</param>
 /// <param name="TruncatedPages">物理 truncate で vertices/edges/props 3 ストア合計から削減したページ数。</param>
 /// <param name="ReclaimedColumnVersions">列 (opt-in) の delta から merge した超過版数。</param>
 /// <param name="ReclaimedNexuses">物理回収した dead Nexus header 数。</param>

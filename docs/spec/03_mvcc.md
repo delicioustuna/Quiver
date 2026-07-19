@@ -1,6 +1,6 @@
 # MVCC とトランザクション
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-18）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
 
 ## 公開トランザクション能力 {#public-capabilities}
 
@@ -58,7 +58,8 @@ Active -> Preparing -> Committed
 可視性は高水位、gap、開始時の active writer、自己 transaction ID だけで判定する。
 
 writer lease の取得は既定で最大 5 秒待機する。
-`EnforceExclusiveWriter` を有効にした場合は、二本目の writer を待たずに拒否する。
+`WriterContentionMode.Wait` は `WriterWaitTimeout` まで待ち、取得できなければ `WriterBusyException` を送出する。
+`WriterContentionMode.FailFast` は二本目の writer を待たずに同じ例外を送出する。
 facade、backend、manager、bulk、schema、maintenance の mutation 入口は同じ lease を使う。
 
 ## commit {#commit}
@@ -113,3 +114,5 @@ page LSN が image LSN 以上なら適用済みとして読み飛ばし、loser 
 読み取り専用 transaction から write API を呼び出すことはできない。
 `SnapshotRegistry` は active reader 数、最古 reader の経過時間、開始位置、高水位を保持する。
 長時間 reader は警告対象にできるが、強制失効しない。
+`IDiagnosticsApi.GetSnapshotDiagnostics()` はこの状態を public な診断値として返す。
+OpenTelemetry と EventSource は active snapshot 数と最古 snapshot age を同じ registry から観測する。

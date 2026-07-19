@@ -1,20 +1,18 @@
 namespace Quiver.Maintenance;
 
 /// <summary>
-/// 削除済みエンティティの物理回収・free list 圧縮・ファイル truncate を担う。
+/// visibility horizon を越えた dead version、導出 manifest、未参照 artifact の物理回収を担う。
 /// </summary>
 /// <remarks>
-/// MVP 実装はVertexストアのみを対象とする。Edge / プロパティ / B+Tree 索引の
-/// 物理回収はチェーン整合性 (双方向リンク / blob 解放 / 索引 merge) の維持が必要なため
-/// 後続のステップで拡張予定。前提として MVCC の <c>xmax</c> スタンプと
-/// visibility horizon が必要。
+/// active reader が存在しても、その reader が固定した最古の visibility horizon より前だけを
+/// 回収する。
+/// writer lease は maintenance mutation の直列化に使うが、reader の終了は待たない。
 /// </remarks>
 public interface IVacuum
 {
     /// <summary>
-    /// 同期的に vacuum を実行する。アクティブトランザクションが残っているときは
-    /// 何もせず <see cref="VacuumReport.Skipped"/> = true を返す
-    /// (snapshot reader が dead version を辿る可能性があるため安全側)。
+    /// 同期的に vacuum を実行し、active reader が参照し得ない version だけを回収する。
+    /// 未対応バックエンドは <see cref="VacuumReport.Skipped"/> = <see langword="true"/> を返す。
     /// </summary>
     VacuumReport Run(VacuumOptions? options = null);
 }

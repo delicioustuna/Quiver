@@ -1,6 +1,6 @@
 # WAL とリカバリ
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-17）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
 
 ## フォーマットファミリ {#format-family}
 
@@ -69,9 +69,9 @@ WAL record LSN と payload 内の page LSN が一致しない image は corrupti
 crash recovery は loser の undo pass、論理 mutation、compensation record、全文専用 pass を持たない。
 
 全文 segment は primary text property から再構築できる derived artifact であり、segment-local posting、norm、tombstone の専用 WAL record を持たない。
-segment body は manifest transaction より前に checksum 付き append-only record として fsync する。
-recovery は winner の catalog PageImage から manifest を復元し、参照 body の範囲と checksum を検証する。
-未参照 body は不可視 orphan であり、欠損または checksum 不一致の参照は primary corruption ではなく `RebuildRequired` とする。
+segment body は manifest transaction より前に checksum 付き immutable artifact file として fsync する。
+recovery は winner の catalog PageImage から manifest を復元し、artifact ID、length、checksum を検証する。
+未参照 file は不可視 orphan であり、欠損または checksum 不一致の参照は primary corruption ではなく `RebuildRequired` とする。
 loser の物理変更は no-steal によってデータファイルへ到達しないため、winner redo だけで復旧できる。
 
 open はデータベースと WAL のヘッダ、WAL record、再生する page image を検証し、recovery と完了 checkpoint を終えてから通常 operation を受け付ける。

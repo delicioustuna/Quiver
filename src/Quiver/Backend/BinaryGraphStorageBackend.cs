@@ -311,7 +311,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         }
     }
 
-    // *.quiver の親ディレクトリ (operational metadata = migrations.history の保存先)。
+    // *.quiver の親ディレクトリ。backend-local artifact の配置基準として保持する。
     public string DataDirectory => Path.GetDirectoryName(_containerPath) is { Length: > 0 } d ? d : ".";
 
     /// <summary>

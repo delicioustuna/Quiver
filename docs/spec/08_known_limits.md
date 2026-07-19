@@ -1,6 +1,6 @@
 # 既知の限界
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-18）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
 
 本書はエンジンの現時点での既知の限界を記す。v1 統合監査で発見・修正された欠陥はここでは追跡しない
 — それらは回帰テストと git 履歴でカバーされる。
@@ -26,9 +26,9 @@
 ### ライタは 1 つ、リーダは並行 {#one-writer}
 
 - **書き込みトランザクションは 1 度に 1 つだけ進行できる。** エンジンは内部 writer gate により
-  `BeginWriteTransaction()` を直列化する。2 本目の書き込みトランザクションは既定で先行 writer の終了を
-  `QuiverDatabaseOptions.LockTimeout` まで待ち、期限を超えると `TransactionException` をスローする。
-  `QuiverDatabaseOptions.EnforceExclusiveWriter` を有効にすると待機せず即時に `TransactionException` をスローする。
+  `BeginWriteTransaction()` を直列化する。2 本目の書き込みトランザクションは
+  `WriterContentionMode.Wait` なら `WriterWaitTimeout` まで待ち、期限を超えると `WriterBusyException` をスローする。
+  `WriterContentionMode.FailFast` は待機せず同じ例外をスローする。
   scalar index definition と全文 manifest の publish も同じ書き込み排他に従う。
   immutable全文 artifact の構築は read snapshot で行うため、構築中も通常 writer は進行できる。
 - **リーダはブロックせず、ブロックもされない。** `BeginReadTransaction()` は開始時の一貫した
@@ -38,12 +38,12 @@
 
 ### トランザクションは短く保つ {#short-transactions}
 
-チェックポイント、`Vacuum()`、WAL の切り詰めは、**アクティブなトランザクションが無い**とき
-(`ActiveCount == 0`) にのみ実行される。そして最も古いオープン中のトランザクションが WAL 切り詰めの
-境界をピン留めする。開いたままのトランザクションは — **読み書きを問わず** — したがって WAL 切り詰めと
-領域回収をブロックし、保持されている間 WAL ファイルが増大し続ける。トランザクションを開き、作業を行い、
-速やかに commit または dispose すること。ユーザの思考時間・UI イベント・ネットワーク呼び出しをまたいで
-トランザクションを開いたままにしないこと。
+チェックポイントと `Vacuum()` は writer lease を取得するが、active reader の終了を待たない。
+最古 reader の snapshot が visibility horizon と WAL 切り詰め可能位置を固定する。
+vacuum はその horizon より前だけを回収するため、reader が存在しても安全な範囲では前進する。
+ただし長時間 reader が古い horizon を保持すると、property、payload、manifest、artifact と WAL の回収可能範囲が広がらない。
+トランザクションを開き、作業を行い、速やかに commit または dispose すること。
+ユーザの思考時間、UI イベント、ネットワーク呼び出しをまたいでトランザクションを開いたままにしないこと。
 
 ### コミットと永続性 {#commit-durability}
 
@@ -59,8 +59,8 @@ rollback 原子性だけを保証し、プロセス終了やデータベース�
 
 ### 競合時のリトライ {#retry}
 
-複数スレッドから書き込みを駆動する場合、writer gate / ロック競合は待機中のトランザクションを
-`TransactionException`（writer gate またはロック待ちタイムアウト）でアボートする。
+複数スレッドから書き込みを駆動する場合、writer lease の待機上限または fail-fast 方針は
+`WriterBusyException` で書き込み開始を拒否する。
 これは *一時的* である: アボートされたトランザクションは
 永続的な変更を何も行っていないため、小さな有界バックオフを挟んで **トランザクション全体** を
 リトライすること（部分的にではなく）:
@@ -71,9 +71,7 @@ T WithRetry<T>(Func<T> runTxn, int maxAttempts = 5)
     for (int attempt = 1; ; attempt++)
     {
         try { return runTxn(); }
-        catch (Exception e) when (
-            e is DeadlockException or TransactionException
-            && attempt < maxAttempts)
+        catch (WriterBusyException) when (attempt < maxAttempts)
         {
             Thread.Sleep(TimeSpan.FromMilliseconds(2 * attempt)); // back off, retry whole txn
         }
@@ -152,11 +150,12 @@ immutable manifest 単位の cache は old/new reader の統計を混ぜずに�
 
 **緩和策**: `GraphStats` を検索へ与える場合は、書き込みバッチ後に取り直して WAND の snapshot 統計を更新する。
 
-**将来方針**: reader horizonを越えた旧全文 segment の物理回収は segment GC で行う。
+vacuum の segment GC は reader horizon を越えた旧 manifest と、どの committed manifest からも
+参照されない全文 artifact を物理回収する。
 
 ## Derived全文 segment の再構築 {#fulltext-segment-rebuild}
 
-正常 reopen は persisted manifest から `*.quiver-ftseg` の checksum 一致 body を開き、primary scan を行わない。
+正常 reopen は persisted manifest から `*.quiver-ftseg/` 内の checksum 一致 artifact file を開き、primary scan を行わない。
 referenced body の欠損または checksum 不一致で `RebuildRequired` になった場合だけ、全文検索は transaction-local primary property scan へ fallback する。
 fallback artifact は global manifest として公開せず、background worker が source generation を再検証してから publish する。
 この破損時 fallback は結果集合を保つが、publish 完了までは検索レイテンシが corpus size に比例する。
@@ -202,6 +201,9 @@ QUIVER-SW family version 2 ではないデータベースは `StorageFormatMisma
 スキーマレベルの変更（ラベル名変更・プロパティキー追加等）は `IMigration` API
 でサポートされる。ここで言う「自動マイグレーションなし」は
 オンディスクの物理フォーマット変更のみを指す。
+適用履歴は database 内の transactional catalog に格納し、migration の mutation と同じ commit で追加する。
+rollback または crash で commit record が残らない migration は履歴にも現れない。
+reopen 後の `GetMigrationHistory()` はこの catalog を読み、外部履歴ファイルへ依存しない。
 
 **将来方針**: 1.x 内では QUIVER-SW family version を固定する。
 MAJOR バージョンアップ時には migration tool の提供を検討する
@@ -239,7 +241,7 @@ WAL ファイルは際限なく増大する。
 
 **緩和策**:
 - トランザクションを短く保つ（[§short-transactions](#short-transactions) 参照）
-- `CheckpointPolicy.Adaptive`（既定）を使う: WAL サイズがしきい値を超えると自動でチェックポイントが走る
+- recovery 時間を目標に自動調整する場合は `CheckpointPolicy.Adaptive` を選ぶ
 - 長時間バッチ処理ではバッチを小さいトランザクションに分割し、各 commit 後にチェックポイントの余地を与える
 - `AutoVacuum` を有効にすると、アイドル時に定期的にチェックポイント + vacuum が実行される
 

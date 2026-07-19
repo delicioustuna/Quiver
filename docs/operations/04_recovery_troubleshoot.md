@@ -116,20 +116,20 @@ Console.WriteLine($"除去した orphan = {applied.RemovedCount}, " +
 var dry = db.Vacuum(new VacuumOptions { Mode = VacuumMode.DryRun });
 Console.WriteLine($"回収可能 Vertex version 数 = {dry.ReclaimedVertices}, horizon={dry.HorizonTxId}");
 
-// 実行 (アクティブ tx があるときは安全側で Skipped=true になり何もしない)
+// 実行。active reader がいても最古 snapshot の horizon より前は回収できる。
 var report = db.Vacuum();
 if (report.Skipped)
-    Console.WriteLine("アクティブ tx があるため vacuum をスキップしました");
+    Console.WriteLine("この backend は vacuum を実行しませんでした");
 else
     Console.WriteLine($"回収={report.ReclaimedVertices} 版, truncate={report.TruncatedPages} ページ, " +
                       $"{report.ElapsedMs}ms");
 ```
 
-- vacuum は **アクティブトランザクションが 0 のときだけ** 実行される (古い snapshot がまだ dead version を
-  見ているかもしれないため)。`Skipped = true` で返ったら、書き込みが落ち着いたタイミングで再実行する。
+- vacuum は writer lease を取得するが、active reader の終了を待たない。
+  最古 snapshot の visibility horizon より前だけを回収し、reader が参照できる version は残す。
+- `GetSnapshotDiagnostics()` の `OldestAge` が長い場合は、不要な read transaction が開いたままになっていないか確認する。
 - 物理 truncate (ページファイル縮小) にも対応済み (`TruncatedPages` に削減ページ数が出る)。
-- 自動で回したい場合は AutoVacuum ワーカー (`VacuumPolicy.Auto`) を有効にする。バックグラウンドで
-  周期実行される。
+- 自動で回したい場合は `QuiverDatabaseOptions.AutoVacuum = true` と `AutoVacuumInterval` を設定する。
 
 ### F. 「DB が開けない / 既にロックされている」
 
@@ -152,11 +152,15 @@ Hosting を使わない場合は `dotnet-trace` または独自の `EventListene
 
 - **起動時**: recovery が再生した LSN 範囲と winner transaction を確認する。
   毎回 recovery が走る (= 直前に異常終了している) なら正常終了経路を見直す。
-- **lock 待ち / deadlock victim**: 競合が多いなら `LockingMode` / `DeadlockDetectionInterval` を調整。
+- **writer lease 待ち**: `writer-contention-count` と `writer-wait-duration-ms` を確認する。
+  競合が続く場合は mutation を一つの writer queue へ集約し、トランザクションをまとめる。
+- **長時間 reader**: `active-snapshot-count` と `oldest-snapshot-age-seconds` を確認する。
+  `db.Diagnostics.GetSnapshotDiagnostics()` から最古 snapshot の開始位置と high-water も取得できる。
 - **checkpoint**: 頻度が高すぎ/低すぎなら threshold を調整。
 
 ライブ観測は `dotnet-counters ... --counters Quiver-EventSource` ([docs/cookbook.md](../cookbook.md) §9)。
-`crash-recovery-count` / `index-orphan-count` / `tx-deadlock-victim-count` / `vacuum-progress-percent` が
+`crash-recovery-count` / `index-orphan-count` / `writer-contention-count` /
+`oldest-snapshot-age-seconds` / `vacuum-progress-percent` が
 トラブルシュートの主要シグナル。
 
 ---
@@ -212,5 +216,5 @@ open 直後に自動修復させる。
 2. 直近バックアップから復元できるか確認 ([02_backup_restore.md](02_backup_restore.md))。
 3. `CheckIndexConsistency()` で索引整合を確認、必要なら `RepairIndexes(Apply)`。
 4. ディスク使用量問題なら `Vacuum(DryRun)` → `Vacuum()`。
-5. Hosting の構造化ログまたは `dotnet-trace` と `dotnet-counters` で recovery 回数・orphan・deadlock を観測。
+5. Hosting の構造化ログまたは `dotnet-trace` と `dotnet-counters` で recovery 回数、orphan、writer 待機、snapshot age を観測。
 6. `EnableChecksums` は無効化しない。破損の早期検出を失うだけ。

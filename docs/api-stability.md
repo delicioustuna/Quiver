@@ -169,7 +169,7 @@ Get-ChildItem tests/Quiver.PublicApi.Tests/PublicApi/*.received.txt | ForEach-Ob
 
 ### 7.3 挙動の安定性
 
-- デフォルトの `CheckpointPolicy`、`VacuumPolicy`、`GroupCommitWindow` 等のチューニングパラメータの
+- デフォルトの `CheckpointPolicy`、`VacuumPolicy`、`WriterContentionMode` 等のチューニングパラメータの
   デフォルト値は 1.x 内で変更しない。パフォーマンス改善のためにデフォルトを変えたい場合は新しい
   オプション値として追加し、既存アプリの挙動を変えない。
 - BM25 スコアリングアルゴリズム（k1=1.2, b=0.75）は 1.x 内で変更しない。

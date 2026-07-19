@@ -1,9 +1,8 @@
 # Quiver: システム概要
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-18）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
 >
-> **current (as-built)**: identity、Single Writer + Snapshot Readers、no-steal page-WAL、redo-only recovery、統一スカラ索引、immutable vector/full-text segment、トランザクション境界付き query を実装している。
-> 後続の segment GC と maintenance 統合は [再設計正本](../../plans/single-writer-redesign.md) に従って段階的に実装する。
+> **current (as-built)**: identity、Single Writer + Snapshot Readers、no-steal page-WAL、redo-only recovery、統一スカラ索引、immutable vector/full-text segment、horizon-aware maintenance、トランザクション境界付き query を実装している。
 
 ## ポジショニング {#positioning}
 
@@ -75,10 +74,26 @@ Quiver は .NET 向けの **pure C# 組み込み (in-process) グラフ + ベク
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` 連携（DI） |
 | `Quiver.OpenTelemetry` | OpenTelemetry エクスポート |
 
+## RAG 利用者契約 {#rag-contract}
+
+`Quiver.Rag` は Document と Chunk の取込、BM25 と vector の融合検索、graph expansion を提供する。
+`MetadataEquals` は一致文書の Chunk を scorer の候補集合へ渡し、全文と vector の top-k を候補集合内で確定する。
+後段 filter と oversampling を正しさの前提にしない。
+
+`RagHit.Score` は BM25 score、vector similarity、融合後 score、融合方式、RRF の rank 定数を返す。
+片方の検索チャンネルだけを使う場合は、使わない側の生 score を `null` にする。
+
+内容変更による upsert は Document ID を維持しない。
+旧 Document、Chunk、旧 ID に接続した Edge、旧 ID が参加した Nexus を同じ logical delete 境界で削除する。
+`UpsertResult` は旧 ID と新 ID の対応を返し、利用者が所有する関係だけを明示的に再アンカーできるようにする。
+旧 ID の利用者関係を新 ID へ暗黙継承しない。
+
 ## ファイルレイアウト {#file-layout}
 
-静止時、Quiver データベースは **単一ファイル** `*.quiver` である。稼働中は WAL サイドカー
-`*.quiver-wal` が並んで存在する。クリーンシャットダウン時には WAL は空になるか存在しない。
+primary state は `*.quiver` に格納する。
+稼働中は WAL サイドカー `*.quiver-wal` が並び、クリーンシャットダウン時には空になるか存在しない。
+全文索引を使う場合は、manifest が参照する immutable artifact を `*.quiver-ftseg/` ディレクトリへ個別ファイルとして格納する。
+snapshot は primary file、WAL、参照可能な artifact directory を一組として複製する。
 
 ## フォーマットバージョン {#format-version}
 

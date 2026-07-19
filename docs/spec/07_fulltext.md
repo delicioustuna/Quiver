@@ -24,8 +24,8 @@ commit 済み segment は in-place 更新しない。
 
 manifest は transaction ID の `xmin` と `xmax` で version 化し、read transaction の snapshot から可視な版を選ぶ。
 
-segment body は `*.quiver-ftseg` へ checksum 付き append-only record として保存する。
-body を fsync した後、artifact offset、length、checksum、source committed high-water を持つ manifest だけを catalog page に書く。
+segment body は `*.quiver-ftseg/` ディレクトリへ checksum 付き immutable artifact file として保存する。
+body を fsync した後、artifact ID、length、checksum、source committed high-water を持つ manifest だけを catalog page に書く。
 manifest と primary property mutation は同じ strict `Commit` で可視になる。
 
 old reader は開始時に可視だった manifest と property version を読み続け、新 reader だけが publish 後の manifest を選ぶ。
@@ -94,13 +94,17 @@ candidate を除外した後に次点を補充してから `Take(k)` を適用�
 
 graph-first 経路は上流の full `VertexId` を primary `Read` で検証した後にだけ Sequence を physical posting lookup へ渡す。
 
+`Quiver.Rag` の `MetadataEquals` も一致文書の chunk candidate を BM25 scorer へ渡し、候補集合内で top-k を確定する。
+BM25 の累積 score は順位から再計算せず、scorer が生成した値を `RagHit.Score.Bm25Score` へ渡す。
+
 ## Query {#query}
 
 `Search`、prefix、fuzzy、boolean、`FilterByText` は transaction snapshot から definition と manifest を解決する。
 
 prefix と fuzzy は visible snapshot の term dictionary だけを展開対象にする。
 
-hybrid search は全文と vector を同じ read transaction から評価し、RRF で順位を統合する。
+hybrid search は全文と vector を同じ read transaction から評価し、共通の RRF 実装で順位を統合する。
+RAG hit は BM25 score、vector similarity、RRF score、融合方式、rank 定数 60 を返す。
 
 ## WAL と recovery {#wal-recovery}
 
@@ -110,7 +114,8 @@ definition catalog と segment manifest の変更は通常の transaction-owned 
 
 segment body は manifest commit より前に fsync し、page-image WAL へ複製しない。
 body fsync 後かつ manifest commit 前の crash は未参照 orphan を残すだけである。
-reader horizon を越えた orphan と旧世代 body の物理回収は maintenance が扱う。
+maintenance は committed manifest の参照集合を作り、未参照 orphan file と reader horizon を越えた旧世代 file を削除する。
+現在または active reader が参照できる manifest の artifact は削除しない。
 
 commit のない definition publish は recovery winner にならない。
 

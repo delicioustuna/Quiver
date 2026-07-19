@@ -55,8 +55,8 @@ public sealed class QuiverDatabase : IDisposable
         var factory = options.BackendFactory ?? CreateDefaultFactory(options.Backend);
         var backend = factory.Open(filePath, options);
 
-        // AutoVacuum 有効時は周期ワーカーを起動する。各 tick は backend.Vacuum() を
-        // 呼ぶだけで、アクティブ tx があれば vacuum 自身が Skipped で安全に no-op する。
+        // AutoVacuum 有効時は周期ワーカーを起動する。各 tick は backend.Vacuum() を呼び、
+        // binary backend が writer lease と reader horizon の内側で安全な範囲だけを回収する。
         AutoVacuumWorker? worker = null;
         if (options.AutoVacuum && options.AutoVacuumInterval > TimeSpan.Zero)
             worker = new AutoVacuumWorker(() => backend.Vacuum(), options.AutoVacuumInterval);
