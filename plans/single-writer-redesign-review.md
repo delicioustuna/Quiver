@@ -35,7 +35,7 @@
 
 ### C-4. EntityRef の invalid と reserved kind の public contract が未定義
 
-> **設計決定済み・実装未対応(2026-07-12)**: 正本 §2.3、§5.1、§16 に canonical Invalid、public factory、raw unpack の境界を追加した。Wave 1 の実装、factory test、PublicApi approval が完了するまで対応済みにはしない。
+> **対応済み(2026-07-22、設計解決)**: 正本 §2.3、§5.1、§16 に canonical Invalid、public factory、raw unpack の境界と検証方法を確定した。Wave 1 の実装 gate は `redesign-wave-1` で合格済みであり、repo 全体の最終確認は Wave 10 の Definition of Done gate で行う。Critical の「対応済み」は設計着手条件の解決を表し、実装完了は Wave tag と gate で別に証明する。
 
 - **発見日**: 2026-07-12
 - **影響**: Wave 1 commit 1
@@ -45,7 +45,7 @@
 
 ### C-5. Generation materialization の source と logical 境界が未定義
 
-> **設計決定済み・実装未対応(2026-07-12)**: 正本 §2.3、§5.1、§7.1、§15、§16 に physical Sequence と logical full ID の境界を追加した。read/query/traversal/index の実装と test が完了するまで対応済みにはしない。
+> **対応済み(2026-07-22、設計解決)**: 正本 §2.3、§5.1、§7.1、§15、§16 に physical Sequence と logical full ID の境界、担当 Wave、検証方法を確定した。Wave 1、6、7、9 の実装 gate は各 tag で合格済みであり、Generation 0 の public emit、stale candidate、reuse 後の non-retarget を含む repo 全体の最終確認は Wave 10 の Definition of Done gate で行う。Critical の「対応済み」は設計着手条件の解決を表し、実装完了は Wave tag と gate で別に証明する。
 
 - **発見日**: 2026-07-12
 - **影響**: Wave 1 commit 1
@@ -65,7 +65,7 @@
 
 ### C-7. `LabelNodeIndex.Lookup` と legacy raw-long candidate の境界が未定義
 
-> **設計決定済み・実装未対応(2026-07-13、integration)**: `Lookup` を full `NodeId` を返す logical API に確定した。public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 まで残す physical compatibility surface (`compatibility adapter`) であり、logical identity API ではない。node query/traversal は full typed `NodeId` の primary `Read` 検証直後の `Sequence` だけを physical lookup に渡す。正本 §2.3、§5.1、§8.1、§15、§16 を参照。
+> **対応済み(2026-07-22、設計解決)**: `Lookup` を full `NodeId` を返す logical API に確定した。public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 で削除する physical compatibility surface (`compatibility adapter`) であり、logical identity API ではない。node query/traversal は full typed `NodeId` の primary `Read` 検証直後の `Sequence` だけを physical lookup に渡す。Wave 1、6、7 の実装 gate は各 tag で合格済みであり、raw-long surface と logical pipeline の最終残存監査は Wave 10 で行う。Critical の「対応済み」は設計着手条件の解決を表し、実装完了は Wave tag と gate で別に証明する。正本 §2.3、§5.1、§8.1、§15、§16 を参照。
 
 - **該当**: §2.3 identity と version、§5.1 ID、§7.2 `LabelNodeIndex`、§8.1、Wave 1 identity migration、Wave 7 vector。
 - **内容**: `LabelNodeIndex.Lookup` の output を physical sequence candidate と logical query/traversal result の双方が共有すると、どちらかが必ず誤る。raw sequence のまま logical pipeline に渡すと generation を失い、vacuum reuse 後に stale slot が別 node を指す。反対に full `NodeId` を返して raw candidate consumer がその packed value を locator、index key、または candidate set に入れると、physical sequence と一致せず empty result になる。public `EntityCandidateSet` と filtered vector の direct raw-long contract は Wave 7 まで残す physical compatibility surface (`compatibility adapter`) であり、logical identity API や query/traversal の入力ではない。

@@ -998,6 +998,14 @@ durability を変更しない Wave の crash test、hot path を変更しない 
 
 ## 16. decision log
 
+### 2026-07-22: Critical review の設計着手状態と実装完了状態を分離
+
+- **背景**: review C-4、C-5、C-7 は設計、担当 Wave、検証方法が正本で確定し、該当 Wave の合格 tag も存在する一方、表記だけが「設計決定済み・実装未対応」のままだった。`quiver-implement` は「対応済み」でない Critical の該当箇所を実装禁止とするため、repo 全体を監査する Wave 10 が過去 Wave の実装状態を検証できない循環になっていた。C-8 では既に、Critical の設計着手 gate と実装 Wave の完成 gate を分離している。
+- **選択肢**: (a) C-4、C-5、C-7 の表記を維持し、実装済み範囲を再度変更しない限り Wave 10 を開始できない状態にする、(b) C-8 と同じく「対応済み」を設計矛盾の解消、検証方法、担当 Wave の確定として扱い、コードの完成は Wave tag と Wave 10 の総合 gate で別に証明する。
+- **決定**: (b) を採用する。C-4、C-5、C-7 を「対応済み(設計解決)」へ更新するが、残存コードが 0 件であることを文書表記だけから推定しない。各過去 Wave tag を到達済みの境界とし、Wave 10 は §14 Definition of Done、legacy scan、PublicApi、全 test、Chaos/Fuzz/AOT、主要 benchmark で実装済み target と as-built の一致を再検証する。
+- **理由**: 着手可否を決める設計状態と、実装・回帰の合否を同じラベルへ重ねると、実装でしか証明できない条件が実装開始を禁止する。分離しても gate は緩和されず、Wave tag と最終総合 gate がコード完成の証拠として残る。
+- **検証方法**: Wave 10 指示書に C-4、C-5、C-7 の対応条件を明示し、canonical Invalid と strict factory、Generation 0 の非 emit、same-sequence/different-generation、stale candidate、label/scalar/full-text/vector materialization、owner delete、reader horizon 後の reuse non-retarget、raw-long public surface 0 件を focused test、PublicApi approval、repo scan で確認する。
+
 ### 2026-07-19: immutable full-text segment のdurable bodyとmanifest publish
 
 - **背景**：Wave 8の最初の実装はsegmentとmanifestをメモリ内だけに保持し、reopen後の最初の検索でprimary text propertyを全走査して再構築した。
