@@ -221,7 +221,7 @@ public static class CleanSlateCsrProductIntegrationRunner
 
         using var tx = db.BeginWriteTransaction();
         var value = PropertyValue.FromInt64(1);
-        tx.SetProperty(new EdgeId(0), ScoreKey, in value);
+        tx.SetProperty(EdgeId.Create(0, 1), ScoreKey, in value);
         tx.Commit();
 
         return new MergeGateSeed(new VertexId(0), targetPool);
@@ -282,7 +282,7 @@ public static class CleanSlateCsrProductIntegrationRunner
         foreach (var (edgeSeq, score) in corpus.Scores)
         {
             var value = PropertyValue.FromInt64(score);
-            tx.SetProperty(new EdgeId(edgeSeq), ScoreKey, in value);
+            tx.SetProperty(EdgeId.Create(edgeSeq, 1), ScoreKey, in value);
         }
         tx.Commit();
     }
@@ -300,14 +300,14 @@ public static class CleanSlateCsrProductIntegrationRunner
         {
             long edgeSeq = corpus.FirstSecondHopEdge + i;
             var update = PropertyValue.FromInt64(i % 2 == 0 ? 1 : 0);
-            tx.SetProperty(new EdgeId(edgeSeq), ScoreKey, in update);
+            tx.SetProperty(EdgeId.Create(edgeSeq, 1), ScoreKey, in update);
             updated++;
         }
 
         for (int i = 0; i < limit; i++)
         {
             long edgeSeq = corpus.FirstSecondHopEdge + corpus.Degree + i;
-            tx.DeleteEdge(new EdgeId(edgeSeq));
+            tx.DeleteEdge(EdgeId.Create(edgeSeq, 1));
             deleted++;
         }
 

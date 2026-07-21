@@ -55,8 +55,8 @@ public sealed class QuiverDatabase : IDisposable
         var factory = options.BackendFactory ?? CreateDefaultFactory(options.Backend);
         var backend = factory.Open(filePath, options);
 
-        // AutoVacuum 有効時は周期ワーカーを起動する。各 tick は backend.Vacuum() を
-        // 呼ぶだけで、アクティブ tx があれば vacuum 自身が Skipped で安全に no-op する。
+        // AutoVacuum 有効時は周期ワーカーを起動する。各 tick は backend.Vacuum() を呼び、
+        // binary backend が writer lease と reader horizon の内側で安全な範囲だけを回収する。
         AutoVacuumWorker? worker = null;
         if (options.AutoVacuum && options.AutoVacuumInterval > TimeSpan.Zero)
             worker = new AutoVacuumWorker(() => backend.Vacuum(), options.AutoVacuumInterval);
@@ -287,10 +287,9 @@ public sealed class QuiverDatabase : IDisposable
 
     /// <summary>
     /// 削除済みエンティティ (MVCC の dead version) を物理回収する vacuum を
-    /// 同期的に実行する。アクティブトランザクションがあるときは安全側で何もせず
-    /// <see cref="VacuumReport.Skipped"/> = true で返る。
-    /// 現状の MVP はVertexストアのみを対象とする (リレーション / プロパティ / 索引の
-    /// 物理回収は後続ステップで拡張)。<see cref="VacuumOptions.Mode"/> に
+    /// 同期的に実行する。開始時に固定した oldest snapshot horizon より古い版だけを
+    /// 回収するため、読み取りトランザクションと並行実行できる。
+    /// <see cref="VacuumOptions.Mode"/> に
     /// <see cref="VacuumMode.DryRun"/> を渡せば書き込み無しで実行できる。
     /// バイナリ以外のバックエンドはサポート対象外 (<see cref="NotSupportedException"/>)。
     /// </summary>
@@ -306,15 +305,14 @@ public sealed class QuiverDatabase : IDisposable
     public Task<Migrations.MigrationResult> MigrateAsync(
         IEnumerable<Migrations.IMigration> migrations,
         CancellationToken cancellationToken = default)
-        => Migrations.Migrator.RunAsync(this, MigrationDirectory, migrations, cancellationToken);
+        => Migrations.Migrator.RunAsync(this, migrations, cancellationToken);
 
     /// <summary>適用済みマイグレーション履歴のスナップショット (適用順)。</summary>
     public IReadOnlyList<Migrations.MigrationHistoryEntry> GetMigrationHistory()
-        => new Migrations.MigrationHistory(MigrationDirectory).Entries;
-
-    // 増分8: migrations.history はバックエンドのデータディレクトリに置く (operational metadata)。
-    // backend の DataDirectory を正本とする。
-    private string MigrationDirectory => _backend.DataDirectory;
+    {
+        using var tx = BeginReadTransaction();
+        return tx.AsInternal().Inner.Indexes.ListMigrationHistory();
+    }
 
     /// <summary>
     /// バックグラウンドの AutoVacuum ワーカーを停止してから下層バックエンドを破棄する。
@@ -337,9 +335,19 @@ public sealed class QuiverDatabase : IDisposable
 /// <param name="MemberRole">起点から直接取得するメンバーのロール名。</param>
 public readonly record struct CoMembershipRolePair(string OriginRole, string MemberRole);
 
+/// <summary>writer lease が使用中だった場合の動作を指定する。</summary>
+public enum WriterContentionMode
+{
+    /// <summary><see cref="QuiverDatabaseOptions.WriterWaitTimeout"/> まで待機する。</summary>
+    Wait = 0,
+
+    /// <summary>待機せず <see cref="WriterBusyException"/> を送出する。</summary>
+    FailFast = 1,
+}
+
 /// <summary>
 /// <see cref="QuiverDatabase.Open"/> に渡す起動オプション。
-/// バッファプール / WAL / ロックタイムアウト / チェックサム有効化 / バックエンド種別などを指定する。
+/// バッファプール、WAL、writer lease、チェックサム、バックエンド種別などを指定する。
 /// </summary>
 public sealed class QuiverDatabaseOptions
 {
@@ -416,8 +424,17 @@ public sealed class QuiverDatabaseOptions
     /// </summary>
     public int AdaptiveSampleWindow { get; set; } = 1000;
 
-    /// <summary>ロック取得のタイムアウト。既定 5 秒。</summary>
-    public TimeSpan LockTimeout { get; set; } = TimeSpan.FromSeconds(5);
+    /// <summary>
+    /// writer lease の取得を待つ上限時間。既定は 5 秒。
+    /// <see cref="WriterContentionMode.FailFast"/> では使用しない。
+    /// </summary>
+    public TimeSpan WriterWaitTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// writer lease が使用中だった場合の待機方針。既定は
+    /// <see cref="WriterContentionMode.Wait"/>。
+    /// </summary>
+    public WriterContentionMode WriterContentionMode { get; set; } = WriterContentionMode.Wait;
 
     /// <summary>ページのチェックサム計算 / 検証を有効にするか。既定 <c>true</c>。</summary>
     public bool EnableChecksums { get; set; } = true;
@@ -453,27 +470,6 @@ public sealed class QuiverDatabaseOptions
     /// <see cref="IDiagnosticsApi.RepairIndexes"/> を明示的に呼ぶ前提)。
     /// </summary>
     public bool AutoRepairOrphansOnRecovery { get; set; } = false;
-
-    /// <summary>
-    /// WAL グループコミットの coalesce window。<see cref="TimeSpan.Zero"/> (既定) で無効
-    /// (各 commit の <c>FlushTo</c> が即座に fsync を起動する旧挙動)。0 より大きい値を指定すると、
-    /// 最初の commit が到着した時点でこの window の経過まで spin-wait して後続 commit を貯め、
-    /// 累積した全 commit を 1 回の fsync で一括処理する。
-    /// 効果: 多 commit 並列ワークロードでは fsync 回数が激減し IOPS を節約できる。代償として
-    /// 単一 commit のレイテンシが (fsync 自体の時間 + window) まで増える。推奨値は 100µs
-    /// 〜 1ms。Windows の <c>Task.Delay</c> 解像度 (~15ms) を回避するため、内部実装は
-    /// <see cref="System.Diagnostics.Stopwatch"/> + <see cref="Thread.SpinWait"/> による
-    /// busy-wait で sub-millisecond 精度を確保している (専用 LongRunning スレッドで実行されるため
-    /// 他スレッドを阻害しない)。
-    /// </summary>
-    public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.Zero;
-
-    /// <summary>
-    /// <c>true</c> のとき、<see cref="QuiverDatabase.BeginWriteTransaction"/> は既にアクティブな
-    /// 書き込みトランザクションが存在する場合に待機せず <see cref="TransactionException"/> をスローする。
-    /// 既定 <c>false</c> では、内部 writer gate で <see cref="LockTimeout"/> まで待機する。
-    /// </summary>
-    public bool EnforceExclusiveWriter { get; set; }
 
     /// <summary>
     /// <c>true</c> のとき、バックエンドが提供するバックグラウンドワーカーで

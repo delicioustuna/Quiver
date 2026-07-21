@@ -7,11 +7,15 @@ using Xunit;
 
 namespace Quiver.Tests;
 
+[CollectionDefinition("binary-backend-maintenance", DisableParallelization = true)]
+public sealed class BinaryBackendMaintenanceCollection;
+
 /// <summary>
 /// インラインペイロードレーンを持つ隣接ブロックが、一括読み込みを経ても重みを保持し、
 /// 展開カーソルと <c>ExpandOperator</c> の <c>NeighborAndWeight</c> 射影から取得できることを検証する。
 /// 往復変換に加え、1 ページ約 370 エントリを超える多段ページチェーンも対象とする。
 /// </summary>
+[Collection("binary-backend-maintenance")]
 public sealed class AdjacencySegmentStoreTests : IDisposable
 {
     private readonly string _dir;
@@ -198,14 +202,14 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         using (var tx = _db.BeginWriteTransaction())
         {
             var updated = PropertyValue.FromInt64(700);
-            tx.SetProperty(new EdgeId(0), "weight", in updated);
+            tx.SetProperty(EdgeId.Create(0, 1), "weight", in updated);
 
             deltaVertex = tx.CreateVertex("V");
             deltaEdge = tx.CreateEdge(new VertexId(0), deltaVertex, "LINK");
             var deltaWeight = PropertyValue.FromInt64(900);
             tx.SetProperty(deltaEdge, "weight", in deltaWeight);
 
-            tx.DeleteEdge(new EdgeId(2));
+            tx.DeleteEdge(EdgeId.Create(2, 1));
             tx.Commit();
         }
 
@@ -249,7 +253,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         using (var tx = _db.BeginWriteTransaction())
         {
             var updated = PropertyValue.FromInt64(700);
-            tx.SetProperty(new EdgeId(0), "weight", in updated);
+            tx.SetProperty(EdgeId.Create(0, 1), "weight", in updated);
             tx.Commit();
         }
 
@@ -278,7 +282,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
             "an interrupted compact must not reopen a partial adjacency view");
 
         ExpandOut(read, new VertexId(0)).Should().BeEquivalentTo(new[] { 1L, 2L, 3L });
-        read.GetProperty(new EdgeId(0), "weight").Int64Value.Should().Be(700);
+        read.GetProperty(EdgeId.Create(0, 1), "weight").Int64Value.Should().Be(700);
     }
 
     [Fact]
@@ -294,7 +298,7 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
             deltaVertex = tx.CreateVertex("V");
             deltaEdge = tx.CreateEdge(new VertexId(0), deltaVertex, "LINK");
             tx.SetProperty(deltaEdge, "weight", PropertyValue.FromInt64(900));
-            tx.DeleteEdge(new EdgeId(2));
+            tx.DeleteEdge(EdgeId.Create(2, 1));
             tx.Commit();
         }
 
@@ -337,11 +341,11 @@ public sealed class AdjacencySegmentStoreTests : IDisposable
         EdgeId deltaEdge;
         using (var tx = _db.BeginWriteTransaction())
         {
-            tx.SetProperty(new EdgeId(0), "weight", PropertyValue.FromInt64(700));
+            tx.SetProperty(EdgeId.Create(0, 1), "weight", PropertyValue.FromInt64(700));
             deltaVertex = tx.CreateVertex("V");
             deltaEdge = tx.CreateEdge(new VertexId(0), deltaVertex, "LINK");
             tx.SetProperty(deltaEdge, "weight", PropertyValue.FromInt64(900));
-            tx.DeleteEdge(new EdgeId(2));
+            tx.DeleteEdge(EdgeId.Create(2, 1));
             tx.Commit();
         }
 

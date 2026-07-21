@@ -1,4 +1,5 @@
 using Quiver.Index.FullText;
+using Quiver.Migrations;
 using Quiver.Text;
 
 namespace Quiver.Index;
@@ -87,6 +88,14 @@ internal interface IIndexManager
     IBTreeIndex<byte[]> CreateBytesIndex(string name);
     bool DropIndex(string name);
     IEnumerable<string> ListIndexes();
+
+    /// <summary>primary catalog に記録された適用済みマイグレーションを適用順で返す。</summary>
+    IReadOnlyList<MigrationHistoryEntry> ListMigrationHistory()
+        => Array.Empty<MigrationHistoryEntry>();
+
+    /// <summary>現在の書き込みトランザクションで履歴を primary catalog に追加する。</summary>
+    void AppendMigrationHistory(MigrationHistoryEntry entry)
+        => throw new NotSupportedException("Migration history is not supported by this index manager.");
 
     /// <summary>
     /// 索引を <paramref name="oldName"/> から <paramref name="newName"/> へリネームする。

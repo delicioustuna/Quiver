@@ -145,7 +145,8 @@ builder.Services.AddQuiver(
     builder.Configuration.GetSection("Quiver"),
     postConfigure: opts =>
     {
-        opts.DeadlockDetectionInterval = TimeSpan.FromMilliseconds(100);
+        opts.WriterContentionMode = WriterContentionMode.Wait;
+        opts.WriterWaitTimeout = TimeSpan.FromSeconds(2);
     });
 ```
 
@@ -162,8 +163,9 @@ builder.Services.AddQuiver(
 | `BufferPoolSize` | 256 MB | working set がメモリに乗るか。乗らないと毎回ディスク I/O。 |
 | `CheckpointThresholdBytes` | 64 MB | 大きいほど書き込みは速いが recovery 時間が伸びる。 |
 | `CheckpointPolicy` | `Fixed` | `Adaptive` にすると `TargetRecoveryTime` から自動調整。 |
-| `GroupCommitWindow` | 0 (無効) | 多並列 commit のワークロードで fsync 回数を削減。 |
-| `LockingMode` | `ExclusiveOnly` | read 並列を上げたいなら `ReaderWriter`。 |
+| `WriterContentionMode` | `Wait` | 先行 writer を待つか、`FailFast` で即時拒否するか。 |
+| `WriterWaitTimeout` | 5 秒 | `Wait` 時に writer lease を待つ上限。 |
+| `AutoVacuum` | `false` | visibility horizon までの回収を周期実行するか。 |
 | `EnableChecksums` | `true` | 本番は **true 維持**。torn write を検出できる。 |
 
 ---

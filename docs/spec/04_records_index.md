@@ -1,6 +1,6 @@
 # レコード & インデックス
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-18）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
 
 ## Slotted ページモデル {#slotted-pages}
 
@@ -32,7 +32,12 @@ payload は flags、source、target、type、両端の prev/next、`FirstPropert
 xmin/xmax は version header、Generation は `EntityVersionMeta` sidecar に置く。
 
 各Edgeは source と target の両Vertexについて prev/next にリンクし、Vertexのエンドポイントごとに双方向連結リストを形成する。
-adjacency、delta、locator が raw Sequence を保持する間は Edge Sequence を再利用しない。
+adjacency、delta、locator が raw Sequence を保持するため、通常の dead version 回収だけでは Edge Sequence を再利用しない。
+
+`RelationshipReuseCoordinator` は reader horizon の通過後に base rebuild、delta/epoch reset、locator rebuild、derived durable checkpoint を順に完了し、その後だけ Sequence を free list へ返す。
+各 phase と対象 Sequence は primary catalog に永続化する。
+release 前の crash は再利用しない safe leak となり、reopen 後に未完了 phase から再開する。
+free list へ返した Sequence の次回割り当てでは Generation が増える。
 
 `AdjacencySegmentStore` は linked-list から再構築できる derived view である。
 descriptor version 2 の `KindSegment` だけを受理し、payload lane がない場合も `PayloadKind.None` の同じ segment format を使う。
@@ -112,6 +117,19 @@ vertex sequence を添字に、そのVertexのVertex側チェーン先頭 incide
 - header slot は free list へ戻し、sequence 再利用時に generation を進める。
   古い ID による参照（ベクトル binding を含む）は世代照合で弾く
 - 回収件数は `VacuumReport.ReclaimedNexuses` / `ReclaimedIncidences` で報告される
+
+## Horizon-aware vacuum {#horizon-vacuum}
+
+`Vacuum()` は database instance の writer lease を取得するが、active reader の終了は待たない。
+`SnapshotRegistry` が返す最古の visibility horizon より前だけを回収するため、long reader は開始時の property、payload、entity、manifest を読み続けられる。
+
+derived index entry を先に退役させ、primary property version とその version だけが参照する payload を同じ maintenance commit で回収する。
+その後に incidence、Edge、Vertex、Nexus slot を回収する。
+この順序により、到達可能な property version が解放済み payload を指す状態を作らない。
+
+`VacuumTarget.Indexes` は horizon を越えた vector manifest と全文 manifest を退役させる。
+どの committed manifest からも参照されない全文 artifact file は物理削除する。
+回収結果は `RetiredVectorManifests`、`RetiredFullTextManifests`、`ReclaimedFullTextArtifacts` で報告する。
 
 ## Property ストア {#property-store}
 
@@ -267,8 +285,8 @@ derived state が不足する場合は同じ snapshot の primary property scan 
 
 全文 artifact は full typed owner identity と `PropertyVersionRef` を保持する immutable delta/merged segment である。
 
-body record は entry metadata、term dictionary、sorted postings、document length と checksum を `*.quiver-ftseg` に保持する。
-catalog manifest は generation、`xmin/xmax`、source committed high-water、artifact offset/length/checksum、lifecycle state を保持する。
+artifact file は entry metadata、term dictionary、sorted postings、document length と checksum を `*.quiver-ftseg/` に保持する。
+catalog manifest は generation、`xmin/xmax`、source committed high-water、artifact ID/length/checksum、lifecycle state を保持する。
 
 検索は visible manifest を選び、candidate を primary owner と property version に照合してから返す。
 プロセス内 rollback は transaction-owned write set の before-image を使う。

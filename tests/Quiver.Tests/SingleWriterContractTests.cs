@@ -15,8 +15,8 @@ public sealed class SingleWriterContractTests : IDisposable
         _directory = Path.Combine(Path.GetTempPath(), "quiver_single_writer_" + Guid.NewGuid().ToString("N"));
         _database = QuiverDatabase.Open(Path.Combine(_directory, "graph.quiver"), new QuiverDatabaseOptions
         {
-            EnforceExclusiveWriter = true,
-            LockTimeout = TimeSpan.FromMilliseconds(100),
+            WriterContentionMode = WriterContentionMode.FailFast,
+            WriterWaitTimeout = TimeSpan.FromMilliseconds(100),
         });
     }
 
@@ -35,9 +35,9 @@ public sealed class SingleWriterContractTests : IDisposable
         Action backend = () => _database.BackendInternal.BeginWriteTransaction().Dispose();
         Action manager = () => _database.BackendInternal.Transactions.BeginWrite().Dispose();
 
-        facade.Should().Throw<TransactionException>();
-        backend.Should().Throw<TransactionException>();
-        manager.Should().Throw<TransactionException>();
+        facade.Should().Throw<WriterBusyException>();
+        backend.Should().Throw<WriterBusyException>();
+        manager.Should().Throw<WriterBusyException>();
         first.Rollback();
     }
 
@@ -48,15 +48,15 @@ public sealed class SingleWriterContractTests : IDisposable
         {
             Action bulk = () => _database.BackendInternal.BulkLoad.BeginBinaryBulkLoad!(false).Dispose();
             Action schema = () => _database.EditSchema(schema => schema.GetOrCreateLabel("blocked"));
-            bulk.Should().Throw<TransactionException>();
-            schema.Should().Throw<TransactionException>();
+            bulk.Should().Throw<WriterBusyException>();
+            schema.Should().Throw<WriterBusyException>();
             first.Rollback();
         }
 
         using (var loader = _database.BackendInternal.BulkLoad.BeginBinaryBulkLoad!(false))
         {
             Action secondWriter = () => _database.BeginWriteTransaction().Dispose();
-            secondWriter.Should().Throw<TransactionException>();
+            secondWriter.Should().Throw<WriterBusyException>();
         }
 
         using var availableAgain = _database.BeginWriteTransaction();
@@ -71,7 +71,7 @@ public sealed class SingleWriterContractTests : IDisposable
         {
             using var database = QuiverDatabase.Open(Path.Combine(directory, "graph.quiver"), new QuiverDatabaseOptions
             {
-                LockTimeout = TimeSpan.FromSeconds(2),
+                WriterWaitTimeout = TimeSpan.FromSeconds(2),
             });
             using var first = database.BeginWriteTransaction();
             Task<IWriteTransaction> waiting = Task.Run(() => database.BeginWriteTransaction());
@@ -118,5 +118,5 @@ public sealed class SingleWriterContractTests : IDisposable
 
     [Fact]
     public void Default_writer_wait_is_five_seconds()
-        => new QuiverDatabaseOptions().LockTimeout.Should().Be(TimeSpan.FromSeconds(5));
+        => new QuiverDatabaseOptions().WriterWaitTimeout.Should().Be(TimeSpan.FromSeconds(5));
 }

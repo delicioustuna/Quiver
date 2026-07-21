@@ -1,6 +1,6 @@
 # ベクトル検索
 
-> as-built 仕様（QUIVER-SW family version 2、2026-07-18）
+> as-built 仕様（QUIVER-SW family version 2、2026-07-19）
 
 ## Primary vector property
 
@@ -71,6 +71,9 @@ derived segment と manifest は primary value の正本ではない。
 reopen 後や derived state が不足する場合、KNN は同じ read snapshot の primary property を exact scan し、バックグラウンド rebuild を要求する。
 そのため、derived state の欠落は committed vector property の消失や database open の失敗を意味しない。
 
+vacuum は最古 reader の horizon より新しい manifest を残し、それより古い retired manifest だけを回収する。
+long reader は開始時に可視だった manifest と primary vector property を使い続ける。
+
 ## Candidate validation
 
 segment candidate は logical result に変換する前に primary store で再検証する。
@@ -108,4 +111,7 @@ while (cursor.MoveNext())
 pipeline は embedding を生成した後、write transaction の `SetVectorProperty` で target property を保存する。
 
 `Quiver.Rag` は read transaction の `KnnSearch` と graph property read を同じ snapshot で実行する。
+`MetadataEquals` が指定された場合は、一致文書の chunk candidate だけを scorer へ渡してから top-k を確定する。
+候補集合を global KNN の後で絞らないため、候補外の近傍が上位を占めても該当 chunk を取りこぼさない。
+vector-only hit は similarity を `RagHit.Score.VectorSimilarity` と `FusedScore` の両方へ返す。
 database または backend から vector store を取得する公開 API は存在しない。

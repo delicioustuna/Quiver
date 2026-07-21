@@ -8,6 +8,7 @@ using Quiver.Storage;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
 using Quiver.Storage.Wal;
+using Quiver.Telemetry;
 using System.Diagnostics;
 
 namespace Quiver;
@@ -56,6 +57,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     private readonly ILogicalMutationSink? _logicalSink;
     private readonly EdgeDeltaHeadStore? _edgeDeltaHeads;
     private readonly PersistentEdgeDeltaStore? _edgeDeltas;
+    private readonly RelationshipReuseCoordinator _relationshipReuse;
     private readonly CancellationTokenSource _scalarIndexRebuildCancellation = new();
     private readonly object _scalarIndexRebuildSync = new();
     private Task? _scalarIndexRebuildTask;
@@ -132,6 +134,13 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _edgeDeltas = edgeDeltas;
         _txManager = txManager;
         _columnManager = columnManager;
+        _relationshipReuse = new RelationshipReuseCoordinator(
+            _container.OpenTenant(
+                BinaryGraphStorageBackendFactory.TenantRelationshipReuse,
+                PageKind.Header),
+            _edgeStore,
+            CompactAdjacencyCore,
+            _container.Flush);
 
         _schema = new SchemaApi(_labelTokens, _edgeTypeTokens, _propKeyTokens, _indexManager,
             nexusTypes: _nexusTypeTokens,
@@ -170,6 +179,9 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
                 _txManager.AcquireMutationLease(),
                 RefreshDerivedIndexesAfterBulkLoad),
         };
+
+        using (_txManager.AcquireMutationLease())
+            _relationshipReuse.Resume();
 
         if (_indexManager.ListIndexDefinitions()
             .Any(x => x.State != IndexLifecycleState.Ready))
@@ -224,6 +236,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
     private void RebuildScalarIndexes(CancellationToken cancellationToken)
     {
+        using IDisposable rebuildMeasurement = QuiverTelemetry.TrackRebuild();
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -298,7 +311,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         }
     }
 
-    // *.quiver の親ディレクトリ (operational metadata = migrations.history の保存先)。
+    // *.quiver の親ディレクトリ。backend-local artifact の配置基準として保持する。
     public string DataDirectory => Path.GetDirectoryName(_containerPath) is { Length: > 0 } d ? d : ".";
 
     /// <summary>
@@ -510,6 +523,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
     private void MergeVectorSegments(CancellationToken cancellationToken)
     {
+        using IDisposable rebuildMeasurement = QuiverTelemetry.TrackRebuild();
         try
         {
             while (!cancellationToken.IsCancellationRequested
@@ -601,6 +615,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
 
     private void MergeFullTextSegments(CancellationToken cancellationToken)
     {
+        using IDisposable rebuildMeasurement = QuiverTelemetry.TrackRebuild();
         try
         {
             while (!cancellationToken.IsCancellationRequested
@@ -663,14 +678,16 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     /// tombstone を除去して epoch を進める。呼び出し後、すべての生存エッジは base から供給され、
     /// 新しいEdgeが作成されるまで delta 走査は何も返さない。
     ///
-    /// 呼び出し元はアクティブなトランザクションが無いことを保証すること。
+    /// writer lease が更新を直列化し、既存 reader は snapshot visibility で結果を絞り込む。
     /// </summary>
     public void CompactAdjacency()
     {
         using var mutationLease = _txManager.AcquireMutationLease();
-        if (_txManager.ActiveCount > 0)
-            throw new InvalidOperationException(
-                "CompactAdjacency requires no active transactions.");
+        CompactAdjacencyCore();
+    }
+
+    private void CompactAdjacencyCore()
+    {
         PayloadLaneSpec payloadSpec = (_adjStore as IAdjacencyPayloadView)?.PayloadSpec
             ?? new PayloadLaneSpec(PayloadKind.None, -1, 0);
 
@@ -734,6 +751,7 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         _edgeDeltas?.Reset();
         _edgeDeltaHeads?.ReloadMeta();
         _edgeDeltas?.ReloadMeta();
+        _edgeStore.RebuildLocators();
         AdjacencyContainer.WriteDescriptor(
             adjData,
             AdjacencyContainer.KindSegment,
@@ -835,11 +853,13 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
     /// target の recovery 後 LSN は snapshot WAL 末尾 LSN まで進む。
     /// </summary>
     /// <summary>
-    /// vertex store の dead version 物理回収 + committed registry の prune。
-    /// アクティブトランザクションが残っているときは安全側で何もせず Skip 報告する。
+    /// oldest snapshot horizon より古い dead version の物理回収と
+    /// committed registry の prune。
     /// </summary>
     public VacuumReport Vacuum(VacuumOptions? options = null)
     {
+        using IDisposable garbageCollectionMeasurement =
+            QuiverTelemetry.TrackGarbageCollection();
         using var mutationLease = _txManager.AcquireMutationLease();
         // WAL を渡して、dead version 回収後の末尾連続 free page を物理 truncate する。
         // WAL の FileTruncate レコード経由で crash recovery に対する冪等再生を保証する。
@@ -852,9 +872,30 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             _txManager.IncidenceStore as IncidenceStore,
             _txManager.VertexIncidenceHeadStore);
         VacuumReport report = vac.Run(options);
+        VacuumOptions effectiveOptions = options ?? new VacuumOptions();
+        if ((effectiveOptions.Targets & VacuumTarget.Indexes) != 0)
+        {
+            bool dryRun = effectiveOptions.Mode == VacuumMode.DryRun;
+            int retiredVectorManifests = _vectorSegments.CollectGarbage(
+                report.HorizonTxId,
+                dryRun);
+            SegmentGarbageCollectionResult fullTextGc =
+                _fullTextSegments.CollectGarbage(
+                    report.HorizonTxId,
+                    dryRun,
+                    _indexManager.ListFullTextCatalogEntries());
+            report = report with
+            {
+                RetiredVectorManifests = retiredVectorManifests,
+                RetiredFullTextManifests = fullTextGc.RetiredManifests,
+                ReclaimedFullTextArtifacts = fullTextGc.ReclaimedArtifacts,
+            };
+        }
+        if (vac.ReclaimedEdgeSequences.Count > 0)
+            _relationshipReuse.BeginAndRun(vac.ReclaimedEdgeSequences);
         // vacuum は正本の incidence slot を回収する。導出ビューは active transaction が
         // 無い同じ境界で作り直し、論理削除や abort 由来の無効 entry をまとめて除去する。
-        if (_txManager.ActiveCount == 0)
+        if (report.ReclaimedNexuses > 0 || _txManager.ActiveCount == 0)
             _coMembershipStore?.Rebuild(
                 _txManager.NexusStore,
                 _txManager.IncidenceStore);
@@ -894,8 +935,10 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
         //    artifact storeはappend-onlyなので、checkpoint後に増えた末尾recordを含んでも
         //    snapshot側manifestから参照されず、安全な孤児になる。
         string srcFullTextSegments = _containerPath + "-ftseg";
-        if (File.Exists(srcFullTextSegments))
-            CopySharedFile(srcFullTextSegments, targetFilePath + "-ftseg");
+        if (Directory.Exists(srcFullTextSegments))
+            CopyImmutableArtifactDirectory(
+                srcFullTextSegments,
+                targetFilePath + "-ftseg");
     }
 
     private static void CopyPagedFile(IPagedFile src, string dstPath)
@@ -927,6 +970,18 @@ internal sealed class BinaryGraphStorageBackend : IGraphStorageBackendInternal
             dstPath, FileMode.Create, FileAccess.Write, FileShare.None);
         src.CopyTo(dst);
         dst.Flush(flushToDisk: true);
+    }
+
+    private static void CopyImmutableArtifactDirectory(string srcPath, string dstPath)
+    {
+        Directory.CreateDirectory(dstPath);
+        foreach (string sourceFile in Directory.EnumerateFiles(
+                     srcPath,
+                     "*.qfts",
+                     SearchOption.TopDirectoryOnly))
+            CopySharedFile(
+                sourceFile,
+                Path.Combine(dstPath, Path.GetFileName(sourceFile)));
     }
 
     private bool _disposed;

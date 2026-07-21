@@ -58,6 +58,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     internal const byte TenantEdgeDeltaPages = 28;
     internal const byte TenantVectorPayloadMetadata = 29;
     internal const byte TenantVectorPayloadBlobs = 30;
+    internal const byte TenantRelationshipReuse = 31;
 
     public IGraphStorageBackend Open(string filePath, QuiverDatabaseOptions options)
     {
@@ -70,7 +71,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // WAL は単一サイドカー <filePath>-wal。クリーン終了で削除され、
         // 静止時は *.quiver のみが残る。
         var walPath = filePath + "-wal";
-        var wal = new WriteAheadLog(walPath, options.GroupCommitWindow);
+        var wal = new WriteAheadLog(walPath, TimeSpan.Zero);
 
         // 単一ファイルコンテナ。コア store / version sidecar / token / 索引 / 隣接ブロック /
         // epoch をすべて *.quiver に同居させ、全ページを単一 DATA fileKind で WAL に載せる。
@@ -319,7 +320,9 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
 
         var txManager = new TransactionManager(
             wal, vertexStore, edgeStore, propStore, indexManager, adjStore, access,
-            undoHandler, options.EnforceExclusiveWriter, options.LockTimeout,
+            undoHandler,
+            options.WriterContentionMode == WriterContentionMode.FailFast,
+            options.WriterWaitTimeout,
             committedRegistry,
             nexusStore, incidenceStore, vertexIncidenceHeadStore,
             coMembershipStore,

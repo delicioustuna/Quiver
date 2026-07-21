@@ -57,8 +57,8 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 | 新規 DB の初期確保 | デフォルト 1 MiB（8 KiB 境界） |
 | ファイル成長 | 1 / 2 / 4 / 8 / 16 / 32 / 64 MiB の適応成長、1 回の上限はデフォルト 64 MiB |
 | 文字列エンコーディング | UTF-8（長さプレフィックス付き） |
-| 静止時のファイル | `*.quiver`。全文 index があれば append-only `*.quiver-ftseg` も保持 |
-| 運用中のファイル | `*.quiver` + `*.quiver-wal`。全文 index があれば `*.quiver-ftseg` も保持 |
+| 静止時のファイル | `*.quiver`。全文 index があれば immutable artifact directory `*.quiver-ftseg/` も保持 |
+| 運用中のファイル | `*.quiver` + `*.quiver-wal`。全文 index があれば `*.quiver-ftseg/` も保持 |
 | format family | `QUIVER-SW` family version 2（旧 family からの自動移行なし） |
 | primary property | `PropertyAddress` と 84B record の `PropertyVersionStore`。xmin、xmax、Generation は record 内に置き、public property ID と entity inline property は持たない |
 | entity version sidecar | `EntityVersionMeta(xmin,xmax,generation)` の 24B record。page あたり 339 件、sidecar format version 4、旧 40B fallback なし |
@@ -67,7 +67,7 @@ Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
 | scalar index | `ScalarIndexDefinition` と `PropertyTarget` が永続定義。B+Tree value は `PropertyVersionRef` で、primary owner を snapshot 再検証 |
 | vector definition catalog | target property、scope、dimensions、metric、HNSW 構築パラメタ、segment policy |
 | full-text definition catalog | `FullTextIndexDefinition` の target、tokenizer/filter、BM25 parameter、segment policy、lifecycle state、artifact manifest |
-| full-text artifact | `*.quiver-ftseg` の checksum 付き append-only immutable delta/merged segment。full typed owner identity と `PropertyVersionRef` を持ち、mutable postings/norms tenant は持たない |
+| full-text artifact | `*.quiver-ftseg/` 内の checksum 付き immutable delta/merged segment file。full typed owner identity と `PropertyVersionRef` を持ち、mutable postings/norms tenant は持たない |
 
 `TransactionManager` は database instance ごとの `WriterLease` と `SnapshotRegistry` を所有する。
 facade は `BeginReadTransaction()` から `IReadTransaction`、`BeginWriteTransaction()` から `IWriteTransaction` を返す。
@@ -82,6 +82,28 @@ segment body は WAL 外で fsync してから manifest を publishする。
 正常 reopen は persisted manifest を使い、欠損または checksum 不一致の場合だけ `RebuildRequired` と primary scan fallbackへ移る。
 active writer の dirty page は commit fsync 前に data file へ書かない。
 checkpoint は同じ writer lease で sharp boundary を作り、reader を待たずに committed dirty page と transaction catalog を flush する。
+
+vacuum も同じ writer lease で mutation を直列化するが、active reader の終了は待たない。
+`SnapshotRegistry` の最古 horizon より前だけを回収し、derived entry、property と専有 payload、incidence、entity slot の順序を守る。
+vector と全文 manifest は reader horizon を越えてから退役させ、全文 artifact は committed manifest の参照集合から外れた file だけを削除する。
+
+Edge Sequence の free release は `RelationshipReuseCoordinator` に集約する。
+coordinator は horizon、base rebuild、delta/epoch reset、locator rebuild、derived durable の順を primary catalog へ記録し、全 phase の後だけ free list へ返す。
+release 前の crash は safe leak となり、reopen 後に未完了 phase から再開する。
+
+migration history は external file ではなく index catalog page に格納する。
+migration mutation と history append は同じ write transaction に属するため、rollback と loser recovery は両方を不可視にする。
+
+logical mutation は Vertex、Edge、Nexus の full identity と、owner-bound property address、vector property ref を運ぶ。
+replay は mutation kind だけから property owner を推測せず、記録された owner kind、Generation、property key を使う。
+
+writer、snapshot、maintenance の診断は `WriterLease`、`SnapshotRegistry`、rebuild/GC lifecycle を正本にする。
+OpenTelemetry と EventSource は writer wait、contention、active snapshot、oldest snapshot age、rebuild active、GC active を同じ lifecycle から発行する。
+`IDiagnosticsApi.GetSnapshotDiagnostics()` は最古 snapshot の開始位置と committed high-water を返す。
+
+`Quiver.Rag` は BM25 scorer、vector scorer、共通 RRF primitive の score を `RagHit` まで配線する。
+`MetadataEquals` は候補 Chunk を top-k 前に全文と vector の両経路へ渡す。
+Document の内容変更は旧 ID を cascade 削除して新 ID を作り、`UpsertResult` が再アンカー用の旧 ID と新 ID を返す。
 
 `QuiverDatabaseOptions.InitialFileAllocationBytes` と `MaximumFileGrowthStepBytes` で初期確保量と成長上限を変更できる。
 いずれの値も 8 KiB 境界へ整列する。

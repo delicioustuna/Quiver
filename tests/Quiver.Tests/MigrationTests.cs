@@ -443,6 +443,25 @@ public sealed class MigrationTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task Migration_history_is_stored_inside_the_database_file()
+    {
+        var path = System.IO.Path.Combine(_dir, "graph.quiver");
+        using (var db = QuiverDatabase.Open(path))
+        {
+            await db.MigrateAsync(
+            [
+                new VersionedMigration("catalog_history", 1, _ => { }),
+            ]);
+        }
+
+        File.Exists(System.IO.Path.Combine(_dir, "migrations.history")).Should().BeFalse();
+        using var reopened = QuiverDatabase.Open(path);
+        reopened.GetMigrationHistory()
+            .Should().ContainSingle()
+            .Which.Id.Should().Be("catalog_history");
+    }
+
     // ── CancellationToken respected ────────────────────────────
 
     [Fact]

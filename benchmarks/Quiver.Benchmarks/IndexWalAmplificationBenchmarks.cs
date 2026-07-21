@@ -135,10 +135,7 @@ public static class IndexWalAmplificationStandalone
         var dbPath = BenchTempDir.Create("ft20_standalone");
         try
         {
-            // 並列シナリオは group commit window を opt-in にして coalesce 窓を広げる。
-            var options = scenario == "per-tx-parallel"
-                ? new QuiverDatabaseOptions { GroupCommitWindow = TimeSpan.FromMicroseconds(100) }
-                : new QuiverDatabaseOptions();
+            var options = new QuiverDatabaseOptions();
 
             using var db = QuiverDatabase.Open(System.IO.Path.Combine(dbPath, "graph.quiver"), options);
             _ = db.EditSchema(schema => schema.GetOrCreateLabel("Doc"));

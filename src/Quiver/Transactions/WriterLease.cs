@@ -1,4 +1,6 @@
 using Quiver.Core;
+using Quiver.Telemetry;
+using System.Diagnostics;
 
 namespace Quiver.Transactions;
 
@@ -33,16 +35,28 @@ internal sealed class WriterLease : IDisposable
     internal WriterLeaseHandle Acquire(TransactionId transactionId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        bool acquired = _failFast
-            ? _semaphore.Wait(0)
-            : _semaphore.Wait(_timeout);
-        if (!acquired)
+        // timeout 付き Wait だけでは即時取得と実競合を区別できず、通常 write まで
+        // contention count に混ざる。最初の非待機 probe で競合を確定してから待機時間を測る。
+        bool acquired = _semaphore.Wait(0);
+        if (acquired)
         {
-            if (_failFast)
-                throw new TransactionException("Another write transaction is already active.");
-            throw new TransactionException(
-                $"Timed out waiting for the active write transaction to finish after {_timeout}.");
+            Volatile.Write(ref _ownerTransactionId, transactionId.Value);
+            return new WriterLeaseHandle(this, transactionId);
         }
+
+        QuiverTelemetry.WriterContentionCount.Add(1);
+        QuiverEventSource.Log.WriterContention();
+        if (_failFast)
+            throw new WriterBusyException(WriterContentionMode.FailFast, TimeSpan.Zero);
+
+        long waitStarted = Stopwatch.GetTimestamp();
+        acquired = _semaphore.Wait(_timeout);
+        double waitDurationMs =
+            Stopwatch.GetElapsedTime(waitStarted).TotalMilliseconds;
+        QuiverTelemetry.WriterWaitDurationMs.Record(waitDurationMs);
+        QuiverEventSource.Log.WriterWaitCompleted(waitDurationMs);
+        if (!acquired)
+            throw new WriterBusyException(WriterContentionMode.Wait, _timeout);
 
         Volatile.Write(ref _ownerTransactionId, transactionId.Value);
         return new WriterLeaseHandle(this, transactionId);

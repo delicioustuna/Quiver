@@ -268,9 +268,12 @@ dotnet-counters monitor -p <pid> --counters Quiver-EventSource
 | `active-tx-count` | gauge | アクティブな transaction 数 |
 | `tx-commit-per-sec` | rate | コミットスループット |
 | `tx-abort-per-sec` | rate | アボートスループット |
-| `tx-deadlock-victim-count` | rate | DeadlockDetector が中断した犠牲者 / 秒 |
-| `lock-wait-avg-ms` | gauge | 平均ロック取得待ち (ms) |
-| `lock-contention-count` | gauge | 累計コンテンション件数 |
+| `writer-wait-duration-ms` | gauge | writer lease 取得待ち時間の累計 (ms) |
+| `writer-contention-count` | gauge | writer lease の競合を観測した累計回数 |
+| `active-snapshot-count` | gauge | active な reader snapshot 数 |
+| `oldest-snapshot-age-seconds` | gauge | 最古 reader snapshot の経過時間 |
+| `maintenance-rebuild-active` | gauge | 実行中の derived index rebuild 数 |
+| `maintenance-gc-active` | gauge | 実行中の garbage collection 数 |
 | `index-orphan-count` | gauge | `CheckIndexConsistency()` 最新観測の orphan 件数 |
 | `vacuum-progress-percent` | gauge | vacuum 実行中の進捗 (0 = 非実行) |
 | `crash-recovery-count` | rate | crash recovery 起動回数 (通常 0) |
@@ -329,6 +332,8 @@ var doc = new IngestedDocument(
 
 var result = await store.UpsertDocumentAsync(doc, embedder);
 // result.Unchanged == true なら contentHash 一致の no-op (再取込はべき等)。
+// 内容変更なら result.ReplacedDocumentVertexId が旧 ID、
+// result.DocumentVertexId が新 ID。必要な利用者関係だけを明示的に再アンカーする。
 
 // 検索: queryText + queryVector の両方で RRF ハイブリッド、片方だけでも可。
 var searcher = new RagSearcher(store);
@@ -344,10 +349,16 @@ IReadOnlyList<RagHit> hits = searcher.Search(
     });
 
 foreach (var h in hits)
-    Console.WriteLine($"#{h.Rank} 〈{h.Document.Title}〉{h.HeadingPath}: {h.ChunkText}");
+{
+    Console.WriteLine(
+        $"#{h.Rank} {h.Score.FusionMethod} score={h.Score.FusedScore:F6} " +
+        $"bm25={h.Score.Bm25Score} vector={h.Score.VectorSimilarity}");
+    Console.WriteLine($"〈{h.Document.Title}〉{h.HeadingPath}: {h.ChunkText}");
+}
 
 // 文書差し替え (内容変更時) と削除。どちらも単一トランザクションで原子的。
-await store.UpsertDocumentAsync(updatedDoc, embedder);  // 旧チャンクを消して入れ直す
+UpsertResult replaced = await store.UpsertDocumentAsync(updatedDoc, embedder);
+// 旧 Document、旧チャンク、旧 ID に接続した Edge と参加 Nexus は cascade 済み。
 store.DeleteDocument("docs/intro.md");
 ```
 
@@ -361,6 +372,12 @@ store.DeleteDocument("docs/intro.md");
   `Title` / `Metadata` だけ変更しても no-op になり既存値が保たれる (再チャンク・再埋め込み回避)。
 - **差し替え・削除は単一トランザクション。** 取込中にプロセスが落ちても「旧版が無傷」か
   「新版が完全」のどちらかで、中間状態は残らない。クラッシュ安全性はこの原子性に委ねている。
+- **内容変更は Document ID を維持しない。** `UpsertResult` は `ReplacedDocumentVertexId` と
+  `DocumentVertexId` の対応を返す。旧 ID に接続した利用者 Edge と参加 Nexus は cascade 削除され、
+  新 ID へ暗黙継承されない。呼び出し側は返却された対応から、所有する関係だけを明示的に再アンカーする。
+- **`RagHit.Score` は検索経路の内訳を返す。** `Bm25Score`、`VectorSimilarity`、
+  `FusedScore`、`FusionMethod`、`ReciprocalRankConstant` を使い、片方のチャンネルを使わない場合は
+  対応する生 score が `null` になる。
 - **埋め込みはトランザクションの外で先に実行される。** `IChunkEmbedder` が失敗しても DB は無変更。
   `Dimensions` は `RagStoreOptions.EmbeddingDimensions` と一致している必要がある。
 - **見出し語は BM25 でも引ける。** 見出しパスを前置した `searchText` を全文索引の対象にしているため、

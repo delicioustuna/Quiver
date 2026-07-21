@@ -169,6 +169,7 @@ public sealed class RagIngestTests : IDisposable
 
         r.Unchanged.Should().BeFalse();
         r.ChunkCount.Should().Be(2);
+        r.ReplacedDocumentVertexId.Should().BeNull();
         embedder.CallCount.Should().Be(1);
 
         ChunkTextsOrdered(db, "d1").Should().Equal("alpha", "bravo");
@@ -191,18 +192,21 @@ public sealed class RagIngestTests : IDisposable
         r1.Unchanged.Should().BeFalse();
         r2.Unchanged.Should().BeTrue();
         r2.ChunkCount.Should().Be(2);
+        r2.DocumentVertexId.Should().Be(r1.DocumentVertexId);
+        r2.ReplacedDocumentVertexId.Should().BeNull();
         embedder.CallCount.Should().Be(1); // 2 回目は embed しない
         ChunkTextsOrdered(db, "d1").Should().Equal("alpha", "bravo");
     }
 
     [Fact]
-    public async Task Reingest_replaces_old_chunks_and_removes_stale_vectors()
+    public async Task Reingest_replaces_document_id_cascades_relations_and_removes_stale_chunks_and_vectors()
     {
         using var db = QuiverDatabase.Open(_path);
         var store = NewStore(db);
         var embedder = new FakeEmbedder(Dim);
 
-        await store.UpsertDocumentAsync(Doc("d1", "alpha", "bravo"), embedder);
+        UpsertResult initial =
+            await store.UpsertDocumentAsync(Doc("d1", "alpha", "bravo"), embedder);
 
         // 旧チャンクVertex ID を控える。
         List<VertexId> oldChunks;
@@ -214,10 +218,30 @@ public sealed class RagIngestTests : IDisposable
         oldChunks.Should().HaveCount(2);
 
         // 内容変更で再取込。
-        var r = await store.UpsertDocumentAsync(Doc("d1", "charlie", "delta", "echo"), embedder);
+        VertexId anchor;
+        NexusId nexus;
+        using (var tx = db.BeginWriteTransaction())
+        {
+            anchor = tx.CreateVertex("Anchor");
+            tx.CreateEdge(
+                initial.DocumentVertexId,
+                anchor,
+                "USER_LINK");
+            nexus = tx.CreateNexus("USER_CONTEXT", [
+                new("Document", initial.DocumentVertexId),
+                new("Anchor", anchor),
+            ]);
+            tx.Commit();
+        }
+
+        var r = await store.UpsertDocumentAsync(
+            Doc("d1", "charlie", "delta", "echo"),
+            embedder);
 
         r.Unchanged.Should().BeFalse();
         r.ChunkCount.Should().Be(3);
+        r.DocumentVertexId.Should().NotBe(initial.DocumentVertexId);
+        r.ReplacedDocumentVertexId.Should().Be(initial.DocumentVertexId);
         ChunkTextsOrdered(db, "d1").Should().Equal("charlie", "delta", "echo");
 
         // 旧チャンクVertexは消えている。
@@ -225,6 +249,22 @@ public sealed class RagIngestTests : IDisposable
         {
             foreach (var old in oldChunks)
                 tx.VertexExists(old).Should().BeFalse();
+            tx.VertexExists(initial.DocumentVertexId).Should().BeFalse();
+            tx.VertexExists(r.DocumentVertexId).Should().BeTrue();
+            var fromNew = tx.EnumerateEdges(
+                r.DocumentVertexId,
+                Direction.Outgoing,
+                "USER_LINK");
+            fromNew.MoveNext().Should().BeFalse(
+                "利用者 Edge は新しい Document ID へ暗黙継承しない");
+            var anchorEdges = tx.EnumerateEdges(
+                anchor,
+                Direction.Both,
+                "USER_LINK");
+            anchorEdges.MoveNext().Should().BeFalse();
+            var members = tx.GetMembers(nexus);
+            members.MoveNext().Should().BeFalse(
+                "旧 Document が参加した Nexus は置換境界で cascade される");
         }
 
         // ベクトルも stale が残っていない (live = 3 件のみ)。

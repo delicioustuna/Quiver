@@ -137,44 +137,26 @@ var opts = new QuiverDatabaseOptions
 - 「recovery 時間を SLA に収めたい」ときは Adaptive + `TargetRecoveryTime` が素直。
 - ワークロードが安定していて手で測れるなら `Fixed` + 実測値でも良い。
 
-## グループコミット (`GroupCommitWindow`, 既定 0 = 無効)
+## writer lease の競合
 
-**多数のスレッドが並列に commit する** ワークロード (Web API で各リクエストが小さな tx を commit する等)
-で効く。最初の commit 到着からこの window 経過まで待って後続 commit を貯め、まとめて 1 回の fsync で処理する。
+Quiver は一つの writer と任意数の snapshot reader を並走させる。
+複数の書き込み要求が同時に到着しても writer は並走せず、database instance ごとの lease が直列化する。
+reader は writer lease を取得せず、writer の終了を待たない。
 
 ```csharp
 var opts = new QuiverDatabaseOptions
 {
-    GroupCommitWindow = TimeSpan.FromMicroseconds(500)   // 推奨 100µs〜1ms
+    WriterContentionMode = WriterContentionMode.Wait,
+    WriterWaitTimeout = TimeSpan.FromSeconds(2),
 };
 ```
 
-- 効果: fsync 回数が激減し IOPS を節約。並列度が高いほど効く。
-- 代償: 単一 commit のレイテンシが (fsync 時間 + window) まで増える。
-- **単一スレッドで逐次 commit するワークロードでは効果が無い** (貯める相手がいない) のでむしろ有害。
-  並列 writer がいるときだけ有効化する。
-- 内部は Stopwatch + SpinWait の busy-wait で sub-ms 精度を確保 (Windows の `Task.Delay` ~15ms 解像度を回避)。
+`WriterContentionMode.Wait` は `WriterWaitTimeout` まで先行 writer を待つ。
+`WriterContentionMode.FailFast` は待機せず `WriterBusyException` を送出する。
+待機時間を伸ばしても書き込み処理能力は増えないため、競合が続く場合は書き込みキューで mutation をまとめ、トランザクション数と fsync 回数を減らす。
 
----
-
-## ロック戦略 (`LockingMode`, 既定 `ExclusiveOnly`)
-
-- `ExclusiveOnly` (既定): 読み取りロックを取らない現挙動。read-heavy でも reader 同士が
-  X ロックを取り合うと並列度が出ない。
-- `ReaderWriter`: 読み取りを Shared、書き込みを Exclusive ロックにする。**複数 reader が同時に進める** ので、
-  read が支配的なワークロードでスループットが上がる。
-
-```csharp
-var opts = new QuiverDatabaseOptions { LockingMode = LockingMode.ReaderWriter };
-```
-
-関連ノブ:
-
-- `LockTimeout` (既定 5 秒): ロック取得の上限。短くすると詰まりを早く検知できるが、正常な待ちも
-  打ち切ってしまう。
-- `DeadlockDetectionInterval` (既定 null = 無効): 設定すると wait-for graph を周期的に取り Tarjan SCC で
-  デッドロックを検出し、最も若い tx を犠牲にして `DeadlockException` で中断する。推奨 **100ms**
-  (検出遅延が短く CPU オーバーヘッドも 1% 未満を狙える)。無効のままだと `LockTimeout` でしか抜けられない。
+`quiver.writer.wait.duration` と `quiver.writer.contention.count` を観測すると、競合した取得だけの待機時間と回数を判別できる。
+reader 側は `quiver.snapshot.active.count` と `quiver.snapshot.oldest.age` で、長時間 snapshot が GC horizon を固定していないか確認する。
 
 ---
 
@@ -212,7 +194,7 @@ using (var schemaTx = db.BeginWriteTransaction())
 推測で回さない。Quiver は観測手段を持っている:
 
 - `db.Diagnostics.GetStatistics()` — Vertex/エッジ数、バッファプール hit/miss
-- `dotnet-counters -n <proc> --counters Quiver-EventSource` — buffer-pool、WAL、tx、lock、index、vacuum を
+- `dotnet-counters -n <proc> --counters Quiver-EventSource` — buffer-pool、WAL、tx、writer、snapshot、maintenance を
   1 秒粒度でライブ観測 ([docs/cookbook.md](../cookbook.md) §9)
 - `Quiver.OpenTelemetry` の `AddQuiverInstrumentation()` — OTel でメトリクスとトレースを送る
 
@@ -227,8 +209,7 @@ using (var schemaTx = db.BeginWriteTransaction())
 | 一括挿入が異常に遅い | **per-tx になっていないか** (鉄則) → 1 tx / チャンク commit に |
 | 読み取りが遅い・ディスク I/O 多い | `BufferPoolSize` を増やす / 索引を張る |
 | 起動 (recovery) が遅い | `CheckpointThresholdBytes` を下げる / `Adaptive` + `TargetRecoveryTime` |
-| 並列 commit で fsync が頭打ち | `GroupCommitWindow` を 100µs〜1ms |
-| read 並列が出ない | `LockingMode = ReaderWriter` |
+| writer 待機が増える | mutation を一つの writer queue へ集約し、複数件を 1 tx にまとめる |
 | KNN の latency / recall を調整したい | `VectorSearchOptions.EfSearch` を実測しながら変更 |
-| ロックで詰まる・デッドロック疑い | `DeadlockDetectionInterval = 100ms`、`LockTimeout` 見直し |
+| writer を待たせたくない | `WriterContentionMode = FailFast` と `WriterBusyException` の再試行方針を組み合わせる |
 | 特定プロパティ検索が遅い | `EditSchema` でスカラ索引を作成 |

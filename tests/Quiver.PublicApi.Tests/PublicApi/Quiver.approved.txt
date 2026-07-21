@@ -5,6 +5,7 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Index.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Operators.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.PropertyTests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Rag")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Storage.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Stores.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Quiver.Tests")]
@@ -639,6 +640,7 @@ namespace Quiver
         long CurrentCheckpointThresholdBytes { get; }
         Quiver.ConsistencyReport CheckConsistency();
         Quiver.IndexConsistencyReport CheckIndexConsistency();
+        Quiver.SnapshotRuntimeDiagnostics GetSnapshotDiagnostics();
         Quiver.DatabaseStatistics GetStatistics();
         Quiver.IndexRepairReport RepairIndexes(Quiver.IndexRepairMode mode);
         void SetCheckpointPolicy(Quiver.Transactions.CheckpointPolicy policy, long? fixedThresholdBytes = default);
@@ -754,6 +756,7 @@ namespace Quiver
                 "Created"})]
         System.ValueTuple<Quiver.Core.VertexId, bool> MergeVertex(string label, string matchKey, in Quiver.Storage.Records.PropertyValue matchValue);
         void ReleaseSavepoint(Quiver.Transactions.SavepointId savepoint);
+        void RemoveProperty(Quiver.Core.EdgeId edgeId, string key);
         void RemoveProperty(Quiver.Core.NexusId nexusId, string key);
         void RemoveProperty(Quiver.Core.VertexId vertexId, string key);
         void RemovePropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Storage.Records.PropertyValue value);
@@ -911,15 +914,14 @@ namespace Quiver
         public long CheckpointThresholdBytes { get; set; }
         public System.Collections.Generic.List<Quiver.CoMembershipRolePair> CoMembershipRolePairs { get; }
         public bool EnableChecksums { get; set; }
-        public bool EnforceExclusiveWriter { get; set; }
-        public System.TimeSpan GroupCommitWindow { get; set; }
         public long InitialFileAllocationBytes { get; set; }
-        public System.TimeSpan LockTimeout { get; set; }
         public Quiver.Logical.ILogicalMutationSink? LogicalMutationSink { get; set; }
         public long MaxCheckpointThresholdBytes { get; set; }
         public long MaximumFileGrowthStepBytes { get; set; }
         public long MinCheckpointThresholdBytes { get; set; }
         public System.TimeSpan TargetRecoveryTime { get; set; }
+        public Quiver.WriterContentionMode WriterContentionMode { get; set; }
+        public System.TimeSpan WriterWaitTimeout { get; set; }
     }
     public sealed class ReadTransaction : Quiver.IReadTransaction, System.IDisposable
     {
@@ -969,6 +971,14 @@ namespace Quiver
     {
         public SnapshotOptions() { }
         public bool IncludeIndexes { get; set; }
+    }
+    public sealed class SnapshotRuntimeDiagnostics : System.IEquatable<Quiver.SnapshotRuntimeDiagnostics>
+    {
+        public SnapshotRuntimeDiagnostics(int ActiveCount, System.TimeSpan OldestAge, string? OldestStartLocation, long? OldestCommittedHighWater) { }
+        public int ActiveCount { get; init; }
+        public System.TimeSpan OldestAge { get; init; }
+        public long? OldestCommittedHighWater { get; init; }
+        public string? OldestStartLocation { get; init; }
     }
     public sealed class VectorIndexDefinition : Quiver.IndexDefinition, System.IEquatable<Quiver.VectorIndexDefinition>
     {
@@ -1075,6 +1085,7 @@ namespace Quiver
         public void OnRolledBack(System.Action callback) { }
         public Quiver.EntityRefEnumerator RangeIndex(string indexName, in Quiver.Storage.Records.PropertyValue from, bool fromInclusive, in Quiver.Storage.Records.PropertyValue to, bool toInclusive) { }
         public void ReleaseSavepoint(Quiver.Transactions.SavepointId savepoint) { }
+        public void RemoveProperty(Quiver.Core.EdgeId edgeId, string key) { }
         public void RemoveProperty(Quiver.Core.NexusId nexusId, string key) { }
         public void RemoveProperty(Quiver.Core.VertexId vertexId, string key) { }
         public void RemovePropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Storage.Records.PropertyValue value) { }
@@ -1090,6 +1101,11 @@ namespace Quiver
         public void SetVectorProperty(Quiver.Core.EntityRef owner, string propertyKey, System.ReadOnlySpan<float> vector) { }
         public bool TryGetVectorProperty(Quiver.Core.EntityRef owner, string propertyKey, System.Span<float> destination) { }
         public bool VertexExists(Quiver.Core.VertexId vertexId) { }
+    }
+    public enum WriterContentionMode
+    {
+        Wait = 0,
+        FailFast = 1,
     }
 }
 namespace Quiver.Core
@@ -1334,6 +1350,12 @@ namespace Quiver.Core
         public string Expected { get; }
         public string Found { get; }
     }
+    public sealed class WriterBusyException : Quiver.Core.QuiverException
+    {
+        public WriterBusyException(Quiver.WriterContentionMode mode, System.TimeSpan waitTimeout) { }
+        public Quiver.WriterContentionMode Mode { get; }
+        public System.TimeSpan WaitTimeout { get; }
+    }
 }
 namespace Quiver.Logical
 {
@@ -1366,16 +1388,21 @@ namespace Quiver.Logical
         public Quiver.Core.VertexId TargetVertexId { get; }
         public string? TokenName { get; }
         public Quiver.Core.VertexId VertexId { get; }
+        public static Quiver.Logical.LogicalMutation AddEdgePropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation AddNexusPropertyValue(Quiver.Core.NexusId nexusId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
+        public static Quiver.Logical.LogicalMutation AddVertexPropertyValue(Quiver.Core.VertexId vertexId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation CreateEdge(Quiver.Core.EdgeId edgeId, Quiver.Core.VertexId source, Quiver.Core.VertexId target, string type) { }
         public static Quiver.Logical.LogicalMutation CreateNexus(Quiver.Core.NexusId nexusId, string type, System.Collections.Generic.IReadOnlyList<Quiver.NexusMember> members) { }
         public static Quiver.Logical.LogicalMutation CreateVertex(Quiver.Core.VertexId vertexId, string label) { }
         public static Quiver.Logical.LogicalMutation DeleteEdge(Quiver.Core.EdgeId edgeId) { }
         public static Quiver.Logical.LogicalMutation DeleteNexus(Quiver.Core.NexusId nexusId) { }
         public static Quiver.Logical.LogicalMutation DeleteVertex(Quiver.Core.VertexId vertexId) { }
+        public static Quiver.Logical.LogicalMutation RemoveEdgeProperty(Quiver.Core.EdgeId edgeId, string key) { }
+        public static Quiver.Logical.LogicalMutation RemoveEdgePropertyValue(Quiver.Core.EdgeId edgeId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation RemoveNexusProperty(Quiver.Core.NexusId nexusId, string key) { }
         public static Quiver.Logical.LogicalMutation RemoveNexusPropertyValue(Quiver.Core.NexusId nexusId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation RemoveVertexProperty(Quiver.Core.VertexId vertexId, string key) { }
+        public static Quiver.Logical.LogicalMutation RemoveVertexPropertyValue(Quiver.Core.VertexId vertexId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation SetEdgeProperty(Quiver.Core.EdgeId edgeId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation SetNexusProperty(Quiver.Core.NexusId nexusId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
         public static Quiver.Logical.LogicalMutation SetVertexProperty(Quiver.Core.VertexId vertexId, string key, in Quiver.Logical.LogicalPropertyValue value) { }
@@ -1395,6 +1422,11 @@ namespace Quiver.Logical
         RemoveNexusProperty = 11,
         AddNexusPropertyValue = 12,
         RemoveNexusPropertyValue = 13,
+        RemoveEdgeProperty = 14,
+        AddVertexPropertyValue = 15,
+        RemoveVertexPropertyValue = 16,
+        AddEdgePropertyValue = 17,
+        RemoveEdgePropertyValue = 18,
     }
     public static class LogicalMutationReplay
     {
@@ -1434,16 +1466,19 @@ namespace Quiver.Maintenance
     }
     public sealed class VacuumReport : System.IEquatable<Quiver.Maintenance.VacuumReport>
     {
-        public VacuumReport(int ReclaimedVertices, int ReclaimedEdges, int ReclaimedProperties, int PrunedCommittedTxEntries, long ElapsedMs, long HorizonTxId, bool Skipped, long TruncatedPages = 0, int ReclaimedColumnVersions = 0, int ReclaimedNexuses = 0, int ReclaimedIncidences = 0) { }
+        public VacuumReport(int ReclaimedVertices, int ReclaimedEdges, int ReclaimedProperties, int PrunedCommittedTxEntries, long ElapsedMs, long HorizonTxId, bool Skipped, long TruncatedPages = 0, int ReclaimedColumnVersions = 0, int ReclaimedNexuses = 0, int ReclaimedIncidences = 0, int RetiredVectorManifests = 0, int RetiredFullTextManifests = 0, int ReclaimedFullTextArtifacts = 0) { }
         public long ElapsedMs { get; init; }
         public long HorizonTxId { get; init; }
         public int PrunedCommittedTxEntries { get; init; }
         public int ReclaimedColumnVersions { get; init; }
         public int ReclaimedEdges { get; init; }
+        public int ReclaimedFullTextArtifacts { get; init; }
         public int ReclaimedIncidences { get; init; }
         public int ReclaimedNexuses { get; init; }
         public int ReclaimedProperties { get; init; }
         public int ReclaimedVertices { get; init; }
+        public int RetiredFullTextManifests { get; init; }
+        public int RetiredVectorManifests { get; init; }
         public bool Skipped { get; init; }
         public long TruncatedPages { get; init; }
     }
@@ -1660,12 +1695,16 @@ namespace Quiver.Telemetry
         public const string TransactionSourceName = "Quiver.Transaction";
         public const string Version = "1.0.0";
         public const string WalFlushSourceName = "Quiver.WalFlush";
+        public static readonly System.Diagnostics.Metrics.ObservableGauge<long> ActiveSnapshotCount;
         public static readonly string[] AllSourceNames;
         public static readonly System.Diagnostics.Metrics.Counter<long> BufferPoolHits;
         public static readonly System.Diagnostics.Metrics.Counter<long> BufferPoolMisses;
         public static readonly System.Diagnostics.ActivitySource CheckpointActivitySource;
         public static readonly System.Diagnostics.Metrics.Histogram<double> CheckpointDurationMs;
+        public static readonly System.Diagnostics.Metrics.UpDownCounter<long> MaintenanceGarbageCollectionActive;
+        public static readonly System.Diagnostics.Metrics.UpDownCounter<long> MaintenanceRebuildActive;
         public static readonly System.Diagnostics.Metrics.Meter Meter;
+        public static readonly System.Diagnostics.Metrics.ObservableGauge<double> OldestSnapshotAgeSeconds;
         public static readonly System.Diagnostics.ActivitySource QueryActivitySource;
         public static readonly System.Diagnostics.Metrics.Histogram<double> QueryDurationMs;
         public static readonly System.Diagnostics.ActivitySource TransactionActivitySource;
@@ -1676,6 +1715,8 @@ namespace Quiver.Telemetry
         public static readonly System.Diagnostics.Metrics.Counter<long> WalBytesWritten;
         public static readonly System.Diagnostics.ActivitySource WalFlushActivitySource;
         public static readonly System.Diagnostics.Metrics.Histogram<double> WalFlushDurationMs;
+        public static readonly System.Diagnostics.Metrics.Counter<long> WriterContentionCount;
+        public static readonly System.Diagnostics.Metrics.Histogram<double> WriterWaitDurationMs;
     }
 }
 namespace Quiver.Text

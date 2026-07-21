@@ -256,8 +256,8 @@ public sealed class LogicalMutationTests : IDisposable
             tx.Commit();
         }
 
-        heMap.Should().ContainKey(srcHe.Sequence);
-        var targetHe = heMap[srcHe.Sequence];
+        heMap.Should().ContainKey(srcHe.Value);
+        var targetHe = heMap[srcHe.Value];
 
         using (var ro = target.BeginReadTransaction())
         {
@@ -300,5 +300,92 @@ public sealed class LogicalMutationTests : IDisposable
         sink.Batches.Should().HaveCount(2);
         sink.Batches[0].Mutations.Should().HaveCount(1);
         sink.Batches[1].Mutations.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void Replay_preserves_edge_removal_and_set_property_mutations()
+    {
+        var sink = new InMemoryLogicalMutationSink();
+        using (var source = OpenWithSink(NewDir(), sink))
+        {
+            source.EditSchema(schema =>
+                schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
+            using var tx = source.BeginWriteTransaction();
+            VertexId a = tx.CreateVertex("A");
+            VertexId b = tx.CreateVertex("B");
+            EdgeId edge = tx.CreateEdge(a, b, "LINK");
+            tx.SetProperty(edge, "temporary", PropertyValue.FromInt32(1));
+            tx.RemoveProperty(edge, "temporary");
+            tx.AddPropertyValue(a, "tags", PropertyValue.FromString("keep"));
+            tx.AddPropertyValue(a, "tags", PropertyValue.FromString("drop"));
+            tx.RemovePropertyValue(a, "tags", PropertyValue.FromString("drop"));
+            tx.AddPropertyValue(edge, "tags", PropertyValue.FromString("keep"));
+            tx.AddPropertyValue(edge, "tags", PropertyValue.FromString("drop"));
+            tx.RemovePropertyValue(edge, "tags", PropertyValue.FromString("drop"));
+            tx.Commit();
+        }
+
+        using var target = QuiverDatabase.Open(
+            System.IO.Path.Combine(NewDir(), "graph.quiver"));
+        target.EditSchema(schema =>
+            schema.GetOrCreatePropertyKey("tags", PropertyCardinality.Set));
+        var vertexMap = new Dictionary<long, VertexId>();
+        var edgeMap = new Dictionary<long, EdgeId>();
+        using (var tx = target.BeginWriteTransaction())
+        {
+            LogicalMutationReplay.Apply(
+                tx,
+                sink.Mutations,
+                vertexMap,
+                edgeMap);
+            tx.Commit();
+        }
+
+        EdgeId targetEdge = edgeMap[sink.Mutations
+            .Single(m => m.Kind == LogicalMutationKind.CreateEdge)
+            .EdgeId.Value];
+        VertexId targetA = vertexMap[sink.Mutations
+            .First(m => m.Kind == LogicalMutationKind.CreateVertex)
+            .VertexId.Value];
+        using var read = target.BeginReadTransaction();
+        read.GetProperty(targetEdge, "temporary").Type.Should().Be(default);
+        ReadStrings(read.GetPropertyValues(targetA, "tags")).Should().Equal("keep");
+        ReadStrings(read.GetPropertyValues(targetEdge, "tags")).Should().Equal("keep");
+    }
+
+    [Fact]
+    public void Replay_maps_reused_sequences_by_full_generation_identity()
+    {
+        VertexId firstSource = VertexId.Create(7, 1);
+        VertexId secondSource = VertexId.Create(7, 2);
+        LogicalMutation[] mutations =
+        [
+            LogicalMutation.CreateVertex(firstSource, "First"),
+            LogicalMutation.CreateVertex(secondSource, "Second"),
+            LogicalMutation.DeleteVertex(firstSource),
+        ];
+
+        using var target = QuiverDatabase.Open(
+            System.IO.Path.Combine(NewDir(), "graph.quiver"));
+        var vertexMap = new Dictionary<long, VertexId>();
+        using (var tx = target.BeginWriteTransaction())
+        {
+            LogicalMutationReplay.Apply(tx, mutations, vertexMap);
+            tx.Commit();
+        }
+
+        vertexMap.Keys.Should().Contain([firstSource.Value, secondSource.Value]);
+        vertexMap[firstSource.Value].Should().NotBe(vertexMap[secondSource.Value]);
+        using var read = target.BeginReadTransaction();
+        read.VertexExists(vertexMap[firstSource.Value]).Should().BeFalse();
+        read.VertexExists(vertexMap[secondSource.Value]).Should().BeTrue();
+    }
+
+    private static string[] ReadStrings(PropertyValuesEnumerator values)
+    {
+        var result = new List<string>();
+        while (values.MoveNext())
+            result.Add(System.Text.Encoding.UTF8.GetString(values.Current.Utf8StringValue));
+        return result.ToArray();
     }
 }

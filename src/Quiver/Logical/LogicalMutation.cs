@@ -101,6 +101,42 @@ public readonly struct LogicalMutation
     public static LogicalMutation RemoveVertexProperty(VertexId vertexId, string key)
         => new(LogicalMutationKind.RemoveVertexProperty, vertexId: vertexId, propertyKey: key);
 
+    /// <summary>Edgeプロパティ削除のミューテーションレコードを生成する。</summary>
+    public static LogicalMutation RemoveEdgeProperty(EdgeId edgeId, string key)
+        => new(LogicalMutationKind.RemoveEdgeProperty, edgeId: edgeId, propertyKey: key);
+
+    /// <summary>Vertexのマルチバリュープロパティへ値を追加するレコードを生成する。</summary>
+    public static LogicalMutation AddVertexPropertyValue(
+        VertexId vertexId,
+        string key,
+        in LogicalPropertyValue value)
+        => new(LogicalMutationKind.AddVertexPropertyValue,
+            vertexId: vertexId, propertyKey: key, propertyValue: value);
+
+    /// <summary>Vertexのマルチバリュープロパティから値を除去するレコードを生成する。</summary>
+    public static LogicalMutation RemoveVertexPropertyValue(
+        VertexId vertexId,
+        string key,
+        in LogicalPropertyValue value)
+        => new(LogicalMutationKind.RemoveVertexPropertyValue,
+            vertexId: vertexId, propertyKey: key, propertyValue: value);
+
+    /// <summary>Edgeのマルチバリュープロパティへ値を追加するレコードを生成する。</summary>
+    public static LogicalMutation AddEdgePropertyValue(
+        EdgeId edgeId,
+        string key,
+        in LogicalPropertyValue value)
+        => new(LogicalMutationKind.AddEdgePropertyValue,
+            edgeId: edgeId, propertyKey: key, propertyValue: value);
+
+    /// <summary>Edgeのマルチバリュープロパティから値を除去するレコードを生成する。</summary>
+    public static LogicalMutation RemoveEdgePropertyValue(
+        EdgeId edgeId,
+        string key,
+        in LogicalPropertyValue value)
+        => new(LogicalMutationKind.RemoveEdgePropertyValue,
+            edgeId: edgeId, propertyKey: key, propertyValue: value);
+
     /// <summary>
     /// Nexus作成のミューテーションレコードを生成する。
     /// <paramref name="members"/> はロール名とソース側 <see cref="VertexId"/> を保持し、再生時に再マッピングされる。

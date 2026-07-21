@@ -78,7 +78,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         using (var tx = _db.BeginWriteTransaction())
         {
             // Delete the edge pointing 0→1 (id 0 by bulk-load order).
-            tx.DeleteEdge(new EdgeId(0));
+            tx.DeleteEdge(EdgeId.Create(0, 1));
             tx.Commit();
         }
         using (var tx = _db.BeginWriteTransaction())
@@ -107,7 +107,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         using (var tx = _db.BeginWriteTransaction())
         {
             // Delete one base edge (0→1) and one delta edge (0→4).
-            tx.DeleteEdge(new EdgeId(0));
+            tx.DeleteEdge(EdgeId.Create(0, 1));
             tx.DeleteEdge(new EdgeId(deltaEdgeId));
             tx.Commit();
         }
@@ -128,7 +128,7 @@ public sealed class AdjacencyEpochTests : IDisposable
 
         using (var writer = _db.BeginWriteTransaction())
         {
-            writer.DeleteEdge(new EdgeId(0));
+            writer.DeleteEdge(EdgeId.Create(0, 1));
             writer.Commit();
         }
 
@@ -217,21 +217,21 @@ public sealed class AdjacencyEpochTests : IDisposable
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var writer = _db.BeginWriteTransaction())
         {
-            writer.SetProperty(new EdgeId(0), "weight", PropertyValue.FromInt64(10));
+            writer.SetProperty(EdgeId.Create(0, 1), "weight", PropertyValue.FromInt64(10));
             writer.Commit();
         }
 
         using var reader = _db.BeginReadTransaction();
         using (var writer = _db.BeginWriteTransaction())
         {
-            writer.SetProperty(new EdgeId(0), "weight", PropertyValue.FromInt64(20));
+            writer.SetProperty(EdgeId.Create(0, 1), "weight", PropertyValue.FromInt64(20));
             writer.Commit();
         }
 
-        reader.GetProperty(new EdgeId(0), "weight").Int64Value.Should().Be(10);
+        reader.GetProperty(EdgeId.Create(0, 1), "weight").Int64Value.Should().Be(10);
 
         using var nextReader = _db.BeginReadTransaction();
-        nextReader.GetProperty(new EdgeId(0), "weight").Int64Value.Should().Be(20);
+        nextReader.GetProperty(EdgeId.Create(0, 1), "weight").Int64Value.Should().Be(20);
     }
 
     [Fact]
@@ -242,7 +242,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         using (var db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver")))
         using (var tx = db.BeginWriteTransaction())
         {
-            tx.DeleteEdge(new EdgeId(0));
+            tx.DeleteEdge(EdgeId.Create(0, 1));
             tx.Commit();
         }
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
@@ -292,7 +292,7 @@ public sealed class AdjacencyEpochTests : IDisposable
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));
         using (var tx = _db.BeginWriteTransaction())
         {
-            tx.DeleteEdge(new EdgeId(1)); // base edge 0→2
+            tx.DeleteEdge(EdgeId.Create(1, 1)); // base edge 0→2
             tx.Commit();
         }
         using (var tx = _db.BeginWriteTransaction())
@@ -310,17 +310,19 @@ public sealed class AdjacencyEpochTests : IDisposable
     }
 
     [Fact]
-    public void Compact_throws_when_a_transaction_is_active()
+    public void Compact_adjacency_fail_fast_reports_writer_busy_when_writer_is_active()
     {
         BulkLoad(vertexCount: 2, edges: new[] { (0L, 1L) });
 
         _db = QuiverDatabase.Open(
             System.IO.Path.Combine(_dir, "graph.quiver"),
-            new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
+            new QuiverDatabaseOptions { WriterContentionMode = WriterContentionMode.FailFast });
         using var tx = _db.BeginWriteTransaction();
         Action act = () => _db.CompactAdjacency();
-        act.Should().Throw<TransactionException>()
-            .WithMessage("*write transaction*");
+        WriterBusyException error =
+            act.Should().Throw<WriterBusyException>().Which;
+        error.Mode.Should().Be(WriterContentionMode.FailFast);
+        error.WaitTimeout.Should().Be(TimeSpan.Zero);
     }
 
     // ────────────────────── AdjacencyEpoch unit-level ────────────────────────

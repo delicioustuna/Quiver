@@ -80,18 +80,17 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
 
 ### トランザクション / 分離レベル
 
-- 既定は SnapshotIsolation。
-  Serializable (SSN) は実験的 API (`[Experimental("QUIVER001")]`) として提供されている。
-  Write skew を厳密に排除したいワークロードでの利用を想定するが、安定性保証の対象外である
-  ([api-stability.md §5](../api-stability.md) 参照)。
-- ロック競合が多い場合は `DeadlockDetectionInterval` を設定しないと `LockTimeout` でしか抜けられない
-  ([03_performance_tuning.md](03_performance_tuning.md))。
+- 分離レベルは snapshot isolation である。
+- writer は database instance ごとに一つであり、`WriterContentionMode` と `WriterWaitTimeout` が
+  二本目の書き込み要求を待機させるか即時拒否するかを決める。
+- reader は writer lease を取得せず、開始時の snapshot を並行して読む。
 
-### vacuum はアクティブ tx 0 が前提
+### vacuum と長時間 reader
 
-- `Vacuum()` はアクティブトランザクションがあると `Skipped = true` で何もしない。常時書き込みがある
-  ワークロードでは回収機会が来ないことがある。
-  AutoVacuum ワーカーや低トラフィック時間帯の明示実行を計画する。
+- `Vacuum()` は writer lease を取得するが、active reader の終了を待たない。
+- active reader が存在する場合は、その最古 snapshot が固定した visibility horizon より前だけを回収する。
+- 長時間 reader は安全性を壊さないが、古い property、payload、index manifest、segment artifact の回収を遅らせる。
+- `GetSnapshotDiagnostics()` または snapshot metrics で最古 reader を特定し、不要な read transaction を閉じる。
 
 ### バックエンド差異
 
@@ -120,8 +119,8 @@ Quiver は「ライブラリとしての DB」。アプリと同じプロセス�
 | 想定Vertex数 / エッジ数 | ドメインから見積もる。GA 目標 (100K/1M) を大きく超えるなら要実測 | — |
 | hot working set のサイズ | 頻繁に触るページ量。全件か一部か | `BufferPoolSize` |
 | ピーク書き込み速度 | inserts/sec。bulk か per-tx か (鉄則) | tx 設計 / `CheckpointThresholdBytes` |
-| 並列 reader 数 | 同時に読むスレッド数 | `LockingMode = ReaderWriter` |
-| 並列 writer 数 | 同時に commit するスレッド数 | `GroupCommitWindow` |
+| 並列 reader 数 | 同時に読むスレッド数 | snapshot age と working set |
+| writer 要求数 | 同時に到着する mutation 数 | writer queue、`WriterContentionMode`、`WriterWaitTimeout` |
 | 許容 recovery 時間 | 起動 SLA (秒) | `CheckpointPolicy = Adaptive` + `TargetRecoveryTime` |
 | 許容データ損失 (RPO) | スナップショット間隔を決める | バックアップ周期 ([02](02_backup_restore.md)) |
 | ディスク予算 | データ + dead version + WAL + バックアップ世代 | `Vacuum` 周期 / 世代数 |

@@ -89,7 +89,7 @@ internal static class VectorSegmentPublishRunner
             double writerP99 = Percentile(writerLatencies, 0.99);
             double publishP99 = Percentile(publishDurations.ToArray(), 0.99);
             double maximumPublishMs =
-                new QuiverDatabaseOptions().LockTimeout.TotalMilliseconds * 0.10;
+                new QuiverDatabaseOptions().WriterWaitTimeout.TotalMilliseconds * 0.10;
             bool passed = writerLatencies.Count > 0
                 && publishDurations.Count > 0
                 && publishP99 <= maximumPublishMs;

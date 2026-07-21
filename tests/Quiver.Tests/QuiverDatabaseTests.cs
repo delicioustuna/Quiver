@@ -355,7 +355,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     }
 
     [Fact]
-    public void Vacuum_keeps_raw_edge_sequence_from_retargeting()
+    public void Vacuum_reuses_edge_sequence_with_higher_generation_without_retargeting_stale_ids()
     {
         var path = Path.Combine(_dir, "edge_locator_reuse.quiver");
         using var db = QuiverDatabase.Open(path);
@@ -392,7 +392,8 @@ public sealed class QuiverDatabaseTests : IDisposable
             tx.Commit();
         }
 
-        replacement.Sequence.Should().BeGreaterThan(old.Sequence);
+        replacement.Sequence.Should().Be(old.Sequence);
+        replacement.Generation.Should().BeGreaterThan(old.Generation);
         db.CompactAdjacency();
 
         using (var tx = db.BeginWriteTransaction())
@@ -400,7 +401,9 @@ public sealed class QuiverDatabaseTests : IDisposable
             tx.GetProperty(stale, "weight").Type.Should().Be(default(PropertyValueType));
             tx.GetProperty(raw, "weight").Type.Should().Be(default(PropertyValueType));
             tx.SetProperty(stale, "weight", PropertyValue.FromInt64(99));
+            tx.SetProperty(raw, "weight", PropertyValue.FromInt64(100));
             tx.DeleteEdge(stale);
+            tx.DeleteEdge(raw);
             tx.Commit();
         }
 
@@ -1044,35 +1047,35 @@ public sealed class QuiverDatabaseTests : IDisposable
         results.Should().HaveCount(5);
     }
 
-    // ===== EnforceExclusiveWriter =====
+    // ===== writer contention =====
 
     [Fact]
-    public void EnforceExclusiveWriter_blocks_second_writer()
+    public void Fail_fast_contention_blocks_second_writer()
     {
         var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
         try
         {
             using var db = QuiverDatabase.Open(
                 Path.Combine(dir, "g.quiver"),
-                new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
+                new QuiverDatabaseOptions { WriterContentionMode = WriterContentionMode.FailFast });
 
             using var tx1 = db.BeginWriteTransaction();
             var act = () => db.BeginWriteTransaction();
-            act.Should().Throw<TransactionException>();
+            act.Should().Throw<WriterBusyException>();
             tx1.Commit();
         }
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
     }
 
     [Fact]
-    public void EnforceExclusiveWriter_allows_after_commit()
+    public void Writer_lease_is_available_after_commit()
     {
         var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
         try
         {
             using var db = QuiverDatabase.Open(
                 Path.Combine(dir, "g.quiver"),
-                new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
+                new QuiverDatabaseOptions { WriterContentionMode = WriterContentionMode.FailFast });
 
             using (var tx1 = db.BeginWriteTransaction()) { tx1.Commit(); }
             using var tx2 = db.BeginWriteTransaction();
@@ -1083,14 +1086,14 @@ public sealed class QuiverDatabaseTests : IDisposable
     }
 
     [Fact]
-    public void EnforceExclusiveWriter_allows_after_rollback()
+    public void Writer_lease_is_available_after_rollback()
     {
         var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
         try
         {
             using var db = QuiverDatabase.Open(
                 Path.Combine(dir, "g.quiver"),
-                new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
+                new QuiverDatabaseOptions { WriterContentionMode = WriterContentionMode.FailFast });
 
             using (var tx1 = db.BeginWriteTransaction()) { tx1.Rollback(); }
             using var tx2 = db.BeginWriteTransaction();
@@ -1101,14 +1104,14 @@ public sealed class QuiverDatabaseTests : IDisposable
     }
 
     [Fact]
-    public void EnforceExclusiveWriter_allows_after_dispose_without_commit()
+    public void Writer_lease_is_available_after_dispose_without_commit()
     {
         var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
         try
         {
             using var db = QuiverDatabase.Open(
                 Path.Combine(dir, "g.quiver"),
-                new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
+                new QuiverDatabaseOptions { WriterContentionMode = WriterContentionMode.FailFast });
 
             using (db.BeginWriteTransaction()) { /* dispose without commit/rollback */ }
             using var tx2 = db.BeginWriteTransaction();
@@ -1119,14 +1122,14 @@ public sealed class QuiverDatabaseTests : IDisposable
     }
 
     [Fact]
-    public void EnforceExclusiveWriter_does_not_block_readonly()
+    public void Active_writer_does_not_block_readonly_transaction()
     {
         var dir = Path.Combine(Path.GetTempPath(), "quiver_excl_" + Guid.NewGuid().ToString("N"));
         try
         {
             using var db = QuiverDatabase.Open(
                 Path.Combine(dir, "g.quiver"),
-                new QuiverDatabaseOptions { EnforceExclusiveWriter = true });
+                new QuiverDatabaseOptions { WriterContentionMode = WriterContentionMode.FailFast });
 
             using var tx1 = db.BeginWriteTransaction();
             using var ro = db.BeginReadTransaction();

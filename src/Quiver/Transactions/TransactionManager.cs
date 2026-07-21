@@ -39,6 +39,8 @@ internal sealed class TransactionManager : ITransactionManager
     private long _lastSampledWalBytes;
     private readonly IDisposable _activeTxCountRegistration;
     private readonly IDisposable _checkpointThresholdRegistration;
+    private readonly IDisposable _snapshotEventSourceRegistration;
+    private readonly IDisposable _snapshotMeterRegistration;
 
     internal TransactionManager(
         IWriteAheadLog wal,
@@ -73,7 +75,12 @@ internal sealed class TransactionManager : ITransactionManager
         _undoHandler = undoHandler;
         _committed = committedRegistry ?? new CommittedTxRegistry();
         _coMembershipStore = coMembershipStore;
-        _snapshotRegistry = snapshotRegistry ?? new SnapshotRegistry();
+        _snapshotRegistry = snapshotRegistry ?? new SnapshotRegistry(
+            warningSink: diagnostics => QuiverEventSource.Log.OldSnapshotDetected(
+                diagnostics.ActiveCount,
+                diagnostics.OldestAge.TotalSeconds,
+                diagnostics.OldestStartLocation ?? "unknown",
+                diagnostics.OldestCommittedHighWater ?? 0));
         _writerLease = new WriterLease(
             writerTimeout ?? TimeSpan.FromSeconds(5),
             rejectConcurrentWriters);
@@ -82,6 +89,14 @@ internal sealed class TransactionManager : ITransactionManager
             QuiverEventSource.Log.RegisterActiveTxCountProvider(() => _active.Count);
         _checkpointThresholdRegistration =
             QuiverEventSource.Log.RegisterCheckpointThresholdProvider(() => CurrentCheckpointThresholdBytes);
+        _snapshotEventSourceRegistration =
+            QuiverEventSource.Log.RegisterSnapshotProvider(
+                () => _snapshotRegistry.Diagnostics.ActiveCount,
+                () => _snapshotRegistry.Diagnostics.OldestAge.TotalSeconds);
+        _snapshotMeterRegistration =
+            QuiverTelemetry.RegisterSnapshotProvider(
+                () => _snapshotRegistry.Diagnostics.ActiveCount,
+                () => _snapshotRegistry.Diagnostics.OldestAge.TotalSeconds);
     }
 
     internal CommittedTxRegistry CommittedRegistry => _committed;
@@ -371,5 +386,7 @@ internal sealed class TransactionManager : ITransactionManager
         _writerLease.Dispose();
         _activeTxCountRegistration.Dispose();
         _checkpointThresholdRegistration.Dispose();
+        _snapshotEventSourceRegistration.Dispose();
+        _snapshotMeterRegistration.Dispose();
     }
 }

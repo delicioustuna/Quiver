@@ -88,6 +88,23 @@ public sealed class EventSourceLoggingTests : IDisposable
         entry.Level.Should().Be(EventLevel.Verbose);
     }
 
+    [Fact]
+    public void Old_snapshot_warning_preserves_start_location_and_high_water()
+    {
+        QuiverEventSource.Log.OldSnapshotDetected(
+            activeCount: 2,
+            oldestAgeSeconds: 301,
+            startLocation: "BeginRead",
+            committedHighWater: 42);
+
+        CapturedEvent entry = _listener.Events.First(e => e.EventId == 40);
+        entry.Level.Should().Be(EventLevel.Warning);
+        entry.Int32At(0).Should().Be(2);
+        entry.DoubleAt(1).Should().Be(301);
+        entry.StringAt(2).Should().Be("BeginRead");
+        entry.Int64At(3).Should().Be(42);
+    }
+
     private sealed class CapturingEventListener : EventListener
     {
         public ConcurrentBag<CapturedEvent> Events { get; } = new();
@@ -100,7 +117,7 @@ public sealed class EventSourceLoggingTests : IDisposable
 
         protected override void OnEventWritten(EventWrittenEventArgs eventData)
         {
-            if (eventData.EventId is not (1 or 2 or 3 or 10 or 20 or 30)) return;
+            if (eventData.EventId is not (1 or 2 or 3 or 10 or 20 or 30 or 40)) return;
             Events.Add(new CapturedEvent(
                 eventData.EventId,
                 eventData.Level,
@@ -113,5 +130,6 @@ public sealed class EventSourceLoggingTests : IDisposable
         public long Int64At(int index) => Convert.ToInt64(Payload[index]);
         public int Int32At(int index) => Convert.ToInt32(Payload[index]);
         public double DoubleAt(int index) => Convert.ToDouble(Payload[index]);
+        public string StringAt(int index) => Convert.ToString(Payload[index])!;
     }
 }

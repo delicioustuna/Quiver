@@ -5,7 +5,7 @@ namespace Quiver.Telemetry;
 
 /// <summary>
 /// <c>dotnet-counters monitor -n &lt;pid&gt; --counters Quiver-EventSource</c> で
-/// バッファプール / WAL / トランザクション / ロック / 索引 / vacuum の主要メトリクスを
+/// バッファプール / WAL / トランザクション / writer / snapshot / maintenance の主要メトリクスを
 /// in-box (追加 NuGet 不要) でリアルタイム観測するための <see cref="EventSource"/>。
 /// </summary>
 /// <remarks>
@@ -66,6 +66,10 @@ internal sealed class QuiverEventSource : EventSource
     private long _txCommitCount;
     private long _txAbortCount;
     private long _crashRecoveryCount;
+    private long _writerWaitDurationMicroseconds;
+    private long _writerContentionCount;
+    private long _rebuildActive;
+    private long _garbageCollectionActive;
 
     // Index orphan: 最後に CheckIndexConsistency が観測した orphan 件数 (進行中の vacuum 等で更新)。
     private long _indexOrphanLastObserved;
@@ -78,6 +82,7 @@ internal sealed class QuiverEventSource : EventSource
     private readonly ConcurrentDictionary<object, Func<long>> _activeTxCountProviders = new();
     private readonly ConcurrentDictionary<object, Func<long>> _checkpointThresholdProviders = new();
     private readonly ConcurrentDictionary<object, Func<long>> _bufferPoolSizeBytesProviders = new();
+    private readonly ConcurrentDictionary<object, SnapshotProvider> _snapshotProviders = new();
 
     // -------------------- 遅延生成する counter handle --------------------
 
@@ -89,6 +94,12 @@ internal sealed class QuiverEventSource : EventSource
     private PollingCounter? _activeTxCountCounter;
     private PollingCounter? _indexOrphanCountCounter;
     private PollingCounter? _vacuumProgressCounter;
+    private PollingCounter? _writerWaitDurationCounter;
+    private PollingCounter? _writerContentionCounter;
+    private PollingCounter? _activeSnapshotCountCounter;
+    private PollingCounter? _oldestSnapshotAgeCounter;
+    private PollingCounter? _rebuildActiveCounter;
+    private PollingCounter? _garbageCollectionActiveCounter;
 
     private IncrementingPollingCounter? _walBytesPerSecCounter;
     private IncrementingPollingCounter? _txCommitPerSecCounter;
@@ -161,6 +172,25 @@ internal sealed class QuiverEventSource : EventSource
             WriteEvent(30, txId, rows, durationMs);
     }
 
+    [Event(
+        40,
+        Level = EventLevel.Warning,
+        Message = "old snapshot: active={0}, age={1}s, start={2}, committedHighWater={3}")]
+    public void OldSnapshotDetected(
+        int activeCount,
+        double oldestAgeSeconds,
+        string startLocation,
+        long committedHighWater)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+            WriteEvent(
+                40,
+                activeCount,
+                oldestAgeSeconds,
+                startLocation ?? "unknown",
+                committedHighWater);
+    }
+
     /// <inheritdoc/>
     protected override void OnEventCommand(EventCommandEventArgs command)
     {
@@ -217,6 +247,52 @@ internal sealed class QuiverEventSource : EventSource
         {
             DisplayName = "Vacuum progress",
             DisplayUnits = "percent",
+        };
+        _writerWaitDurationCounter ??= new PollingCounter(
+            "writer-wait-duration-ms",
+            this,
+            () => Volatile.Read(ref _writerWaitDurationMicroseconds) / 1000.0)
+        {
+            DisplayName = "Writer lease wait duration (running total)",
+            DisplayUnits = "ms",
+        };
+        _writerContentionCounter ??= new PollingCounter(
+            "writer-contention-count",
+            this,
+            () => Volatile.Read(ref _writerContentionCount))
+        {
+            DisplayName = "Writer lease contentions (running total)",
+            DisplayUnits = "contentions",
+        };
+        _activeSnapshotCountCounter ??= new PollingCounter(
+            "active-snapshot-count",
+            this,
+            () => SumSnapshotProviders(static provider => provider.ActiveCount()))
+        {
+            DisplayName = "Active reader snapshots",
+            DisplayUnits = "snapshots",
+        };
+        _oldestSnapshotAgeCounter ??= new PollingCounter(
+            "oldest-snapshot-age-seconds",
+            this,
+            () => MaxSnapshotProviders(static provider => provider.OldestAgeSeconds()))
+        {
+            DisplayName = "Oldest reader snapshot age",
+            DisplayUnits = "seconds",
+        };
+        _rebuildActiveCounter ??= new PollingCounter(
+            "maintenance-rebuild-active",
+            this,
+            () => Volatile.Read(ref _rebuildActive))
+        {
+            DisplayName = "Active derived index rebuild operations",
+        };
+        _garbageCollectionActiveCounter ??= new PollingCounter(
+            "maintenance-gc-active",
+            this,
+            () => Volatile.Read(ref _garbageCollectionActive))
+        {
+            DisplayName = "Active garbage collection operations",
         };
 
         // ------- rate counter (累計 → 毎秒) -------
@@ -286,6 +362,33 @@ internal sealed class QuiverEventSource : EventSource
     [NonEvent]
     public void TxAbort() => Interlocked.Increment(ref _txAbortCount);
 
+    [NonEvent]
+    public void WriterContention()
+        => Interlocked.Increment(ref _writerContentionCount);
+
+    [NonEvent]
+    public void WriterWaitCompleted(double durationMs)
+    {
+        if (durationMs > 0)
+            Interlocked.Add(
+                ref _writerWaitDurationMicroseconds,
+                (long)Math.Round(durationMs * 1000));
+    }
+
+    [NonEvent]
+    public void RebuildStarted() => Interlocked.Increment(ref _rebuildActive);
+
+    [NonEvent]
+    public void RebuildCompleted() => Interlocked.Decrement(ref _rebuildActive);
+
+    [NonEvent]
+    public void GarbageCollectionStarted()
+        => Interlocked.Increment(ref _garbageCollectionActive);
+
+    [NonEvent]
+    public void GarbageCollectionCompleted()
+        => Interlocked.Decrement(ref _garbageCollectionActive);
+
     /// <summary>crash recovery が起動した (1 回 = 1)。<see cref="Quiver.Transactions.RecoveryManager.Recover"/> で 1 度呼ぶ。</summary>
     [NonEvent]
     public void CrashRecovery() => Interlocked.Increment(ref _crashRecoveryCount);
@@ -323,6 +426,17 @@ internal sealed class QuiverEventSource : EventSource
     public IDisposable RegisterBufferPoolSizeBytesProvider(Func<long> provider)
         => Register(_bufferPoolSizeBytesProviders, provider);
 
+    public IDisposable RegisterSnapshotProvider(
+        Func<long> activeCount,
+        Func<double> oldestAgeSeconds)
+    {
+        ArgumentNullException.ThrowIfNull(activeCount);
+        ArgumentNullException.ThrowIfNull(oldestAgeSeconds);
+        var key = new object();
+        _snapshotProviders[key] = new(activeCount, oldestAgeSeconds);
+        return new SnapshotRegistration(_snapshotProviders, key);
+    }
+
     // ============================================================================
     // ヘルパー
     // ============================================================================
@@ -345,6 +459,26 @@ internal sealed class QuiverEventSource : EventSource
         return sum;
     }
 
+    private double SumSnapshotProviders(Func<SnapshotProvider, double> selector)
+    {
+        double sum = 0;
+        foreach (SnapshotProvider provider in _snapshotProviders.Values)
+        {
+            try { sum += selector(provider); } catch { }
+        }
+        return sum;
+    }
+
+    private double MaxSnapshotProviders(Func<SnapshotProvider, double> selector)
+    {
+        double maximum = 0;
+        foreach (SnapshotProvider provider in _snapshotProviders.Values)
+        {
+            try { maximum = Math.Max(maximum, selector(provider)); } catch { }
+        }
+        return maximum;
+    }
+
     private static IDisposable Register(ConcurrentDictionary<object, Func<long>> bag, Func<long> provider)
     {
         ArgumentNullException.ThrowIfNull(provider);
@@ -362,6 +496,24 @@ internal sealed class QuiverEventSource : EventSource
         {
             var b = Interlocked.Exchange(ref _bag, null);
             b?.TryRemove(_key, out _);
+        }
+    }
+
+    private sealed record SnapshotProvider(
+        Func<long> ActiveCount,
+        Func<double> OldestAgeSeconds);
+
+    private sealed class SnapshotRegistration(
+        ConcurrentDictionary<object, SnapshotProvider> bag,
+        object key) : IDisposable
+    {
+        private ConcurrentDictionary<object, SnapshotProvider>? _bag = bag;
+        private readonly object _key = key;
+
+        public void Dispose()
+        {
+            var current = Interlocked.Exchange(ref _bag, null);
+            current?.TryRemove(_key, out _);
         }
     }
 }

@@ -90,12 +90,13 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 
 ## ハイブリッド検索の流れ（RAG）
 
-`RagSearcher.SearchAsync` は以下の手順で検索する。
+`RagSearcher.Search` は以下の手順で検索する。
 
-1. BM25 全文検索で term ベースの top-k を取得する
-2. KNN ベクトル検索で embedding ベースの top-k を取得する
-3. RRF（Reciprocal Rank Fusion）で両結果をマージする
+1. `MetadataEquals` があれば一致文書のチャンクを候補集合にする
+2. 候補集合を BM25 と vector scorer へ渡し、それぞれの top-k と score を取得する
+3. RRF（Reciprocal Rank Fusion）で両順位を統合する
 4. ヒットしたチャンクから `NEXT_CHUNK`、`HAS_CHUNK` を辿り、前後文脈と親文書を付与する
+5. BM25 score、vector similarity、融合後 score、融合方式と定数を `RagHit.Score` で返す
 
 手順 4 の graph expansion が、ベクトル DB にはない Quiver の差別化ポイントである。
 
@@ -108,7 +109,9 @@ NativeAOT に対応しているため、`dotnet publish -c Release -r <rid> /p:P
 
 さらに高速化するなら `BulkLoader` を使う（通常 TX 比 ~12× 高速）。
 
-並行書き込みでは `QuiverDatabaseOptions.GroupCommitWindow` を設定すると、複数トランザクションの WAL フラッシュを 1 回の fsync にまとめられる。
+複数スレッドが書き込みを要求しても、データベース内の writer lease が一つずつ直列化する。
+待機方針は `WriterContentionMode`、待機上限は `WriterWaitTimeout` で設定する。
+高スループットが必要な場合は、複数 writer を並走させず、一つのトランザクションへ mutation をまとめる。
 
 ### 読み取りの性能
 

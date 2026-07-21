@@ -232,7 +232,10 @@ public static class FullTextSegmentPublishRunner
             string artifact = Path.Combine(dir, "graph.quiver-ftseg");
             return new(
                 File.Exists(wal) ? new FileInfo(wal).Length : 0,
-                File.Exists(artifact) ? new FileInfo(artifact).Length : 0);
+                Directory.Exists(artifact)
+                    ? Directory.EnumerateFiles(artifact, "*.qfts")
+                        .Sum(static path => new FileInfo(path).Length)
+                    : 0);
         }
         finally
         {

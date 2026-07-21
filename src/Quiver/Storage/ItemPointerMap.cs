@@ -106,6 +106,10 @@ internal sealed class ItemPointerMap
         SaveMeta();
     }
 
+    /// <summary>指定 sequence が既に free list entry へ変換済みかを返す。</summary>
+    public bool IsFree(long seq)
+        => seq >= 0 && seq < _hwm && GetRaw(seq) < 0;
+
     /// <summary>recovery 用: ヘッダから hwm / freeHead を読み直す。</summary>
     public void ReloadMeta() => LoadMeta();
 

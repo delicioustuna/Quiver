@@ -156,6 +156,9 @@ public interface IWriteTransaction : IReadTransaction, ICommitHookRegistrar
     /// <summary>Vertexからプロパティを削除する。</summary>
     void RemoveProperty(VertexId vertexId, string key);
 
+    /// <summary>Edgeからプロパティを削除する。</summary>
+    void RemoveProperty(EdgeId edgeId, string key);
+
     /// <summary>Set cardinality のVertexプロパティへ値を追加する。</summary>
     void AddPropertyValue(VertexId vertexId, string key, in PropertyValue value);
 

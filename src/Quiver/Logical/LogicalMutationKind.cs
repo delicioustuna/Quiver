@@ -32,4 +32,14 @@ public enum LogicalMutationKind : byte
     AddNexusPropertyValue = 12,
     /// <summary>Nexusのマルチバリュープロパティからの値除去 (Set cardinality)。</summary>
     RemoveNexusPropertyValue = 13,
+    /// <summary>Edgeプロパティの削除 (Single cardinality)。</summary>
+    RemoveEdgeProperty = 14,
+    /// <summary>Vertexのマルチバリュープロパティへの値追加。</summary>
+    AddVertexPropertyValue = 15,
+    /// <summary>Vertexのマルチバリュープロパティからの値除去。</summary>
+    RemoveVertexPropertyValue = 16,
+    /// <summary>Edgeのマルチバリュープロパティへの値追加。</summary>
+    AddEdgePropertyValue = 17,
+    /// <summary>Edgeのマルチバリュープロパティからの値除去。</summary>
+    RemoveEdgePropertyValue = 18,
 }

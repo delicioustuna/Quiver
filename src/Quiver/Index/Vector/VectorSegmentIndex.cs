@@ -338,6 +338,43 @@ internal sealed class VectorSegmentIndex : IDisposable
         => transactionId <= snapshot.CommittedHighWater
             && !snapshot.AbortedGaps.Contains(transactionId);
 
+    internal int CollectGarbage(long horizonTransactionId, bool dryRun)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            int retiredManifests = 0;
+            foreach (IndexState state in _indexes.Values)
+            {
+                ManifestVersion[] retired = state.History
+                    .Where(manifest => manifest.Xmax < horizonTransactionId)
+                    .ToArray();
+                retiredManifests += retired.Length;
+                if (dryRun || retired.Length == 0)
+                    continue;
+
+                // old manifest を選べる reader が registry に残る間は segment を破棄しない。
+                // active reader 数だけで一括停止すると long reader と無関係な世代まで回収不能になるため、
+                // vacuum が固定した oldest snapshot horizon だけを退役境界に使う。
+                state.History.RemoveAll(manifest => manifest.Xmax < horizonTransactionId);
+                var retained = new HashSet<ImmutableVectorSegment>(
+                    ReferenceEqualityComparer.Instance);
+                foreach (ImmutableVectorSegment segment in state.Current.Segments)
+                    retained.Add(segment);
+                foreach (ManifestVersion manifest in state.History)
+                    foreach (ImmutableVectorSegment segment in manifest.Segments)
+                        retained.Add(segment);
+                var disposed = new HashSet<ImmutableVectorSegment>(
+                    ReferenceEqualityComparer.Instance);
+                foreach (ManifestVersion manifest in retired)
+                    foreach (ImmutableVectorSegment segment in manifest.Segments)
+                        if (!retained.Contains(segment) && disposed.Add(segment))
+                            segment.Dispose();
+            }
+            return retiredManifests;
+        }
+    }
+
     public void Dispose()
     {
         lock (_gate)

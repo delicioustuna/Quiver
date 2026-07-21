@@ -26,7 +26,7 @@ internal interface IGraphStorageBackendInternal : IGraphStorageBackend
 
     /// <summary>
     /// このバックエンドのデータが置かれているディレクトリ。
-    /// migration history (<c>migrations.history</c>) など operational metadata の保存先解決に使う。
+    /// backend-local artifact の保存先解決に使う。
     /// binary backend は <c>*.quiver</c> の親ディレクトリ。
     /// </summary>
     string DataDirectory { get; }
