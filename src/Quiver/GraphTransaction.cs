@@ -185,6 +185,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     public string? GetEdgeType(EdgeId edgeId)
     {
         using var usage = EnterUsage();
+        if (!IsLogicalEdgeIdentity(edgeId)) return null;
         EdgeReadHandle edge = _inner.Edges.Read(edgeId);
         return edge.InUse && edge.Type.IsValid
             ? _edgeTypeTokens.GetName(edge.Type)
@@ -510,6 +511,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        if (!IsLogicalEdgeIdentity(edgeId)) return;
         DeleteEdgeCore(edgeId);
     }
 
@@ -570,6 +572,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        if (!IsLogicalEdgeIdentity(edgeId)) return;
         var keyId = _propKeyTokens.GetOrCreate(key);
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use AddPropertyValue for Set-cardinality property '{key}'.");
@@ -635,8 +638,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         return _inner.Properties.Create(address, PropertyCardinality.Single, in value, firstProperty);
     }
 
-    // Generation 0 の typed ID は物理アドレスとして受け取る既存経路がある。
-    // property owner を永続化する境界では current generation を補い、別 incarnation への alias を防ぐ。
     private EntityRef PropertyOwner(VertexId id)
     {
         int generation = id.Generation == 0 ? _inner.Vertices.CurrentGeneration(id.Sequence) : id.Generation;
@@ -645,9 +646,15 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
 
     private EntityRef PropertyOwner(EdgeId id)
     {
+        // Generation 0 は primary record で検証済みの内部物理参照だけに使う。
+        // public 入力をここで current generation へ補うと、再利用前の raw Sequence が
+        // 新しい incarnation の owner に別名化するため、公開境界では先に拒否する。
         int generation = id.Generation == 0 ? _inner.Edges.CurrentGeneration(id.Sequence) : id.Generation;
         return EntityRef.From(generation > 0 ? EdgeId.Create(id.Sequence, generation) : id);
     }
+
+    private static bool IsLogicalEdgeIdentity(EdgeId id)
+        => id.IsValid && id.Generation > 0;
 
     private EntityRef PropertyOwner(NexusId id)
     {
@@ -721,6 +728,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     public PropertyValue GetProperty(EdgeId edgeId, string key)
     {
         using var usage = EnterUsage();
+        if (!IsLogicalEdgeIdentity(edgeId)) return default;
         if (!_propKeyTokens.TryGet(key, out var keyId)) return default;
         if (_propKeyTokens.GetCardinality(keyId) == PropertyCardinality.Set)
             throw new InvalidOperationException($"Use GetPropertyValues for Set-cardinality property '{key}'.");
@@ -793,6 +801,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        if (!IsLogicalEdgeIdentity(edgeId)) return;
         var keyId = _propKeyTokens.GetOrCreate(key, PropertyCardinality.Set);
         if (!_inner.Edges.Read(edgeId).InUse)
             return;
@@ -859,6 +868,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        if (!IsLogicalEdgeIdentity(edgeId)) return;
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
         if (_propKeyTokens.GetCardinality(keyId) != PropertyCardinality.Set)
             throw new InvalidOperationException($"Use RemoveProperty for Single-cardinality property '{key}'.");
@@ -913,6 +923,7 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     {
         EnsureWritable();
         using var usage = EnterUsage();
+        if (!IsLogicalEdgeIdentity(edgeId)) return;
         if (!_propKeyTokens.TryGet(key, out var keyId)) return;
         if (!_inner.Edges.Read(edgeId).InUse) return;
 
@@ -934,6 +945,12 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     public PropertyValuesEnumerator GetPropertyValues(EdgeId edgeId, string key)
     {
         var usage = EnterUsage();
+        if (!IsLogicalEdgeIdentity(edgeId))
+        {
+            usage.Dispose();
+            return new PropertyValuesEnumerator(
+                new PropertyCursor(null!, default, PropertyVersionRef.Invalid), default);
+        }
         if (!_propKeyTokens.TryGet(key, out var keyId))
         {
             usage.Dispose();

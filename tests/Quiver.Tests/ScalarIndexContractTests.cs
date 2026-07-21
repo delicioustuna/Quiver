@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Quiver.Tests;
 
+[Collection("binary-backend-maintenance")]
 public sealed class ScalarIndexContractTests : IDisposable
 {
     private readonly string _directory;
@@ -536,6 +537,16 @@ public sealed class ScalarIndexContractTests : IDisposable
 
         using (var rebuild = reopened.BeginWriteTransaction())
             rebuild.Commit();
+
+        bool rebuilt = SpinWait.SpinUntil(
+            () => reopened.Schema.ListIndexes()
+                .Single(x => x.Name == "idx_external_id")
+                .State == IndexLifecycleState.Ready,
+            TimeSpan.FromSeconds(5));
+        var backend = (BinaryGraphStorageBackend)reopened.BackendInternal;
+        rebuilt.Should().BeTrue(
+            "the replacement artifact should be published asynchronously; error: {0}",
+            backend.ScalarIndexRebuildErrorForTest);
 
         using var indexed = reopened.BeginReadTransaction();
         indexed.Schema.ListIndexes()

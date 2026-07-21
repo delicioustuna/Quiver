@@ -149,7 +149,7 @@ public sealed class EdgePropertyJoinIndexTests : IDisposable
         // Warm both paths.
         for (int i = 0; i < 32; i++)
         {
-            _ = tx.GetProperty(new EdgeId(i), "weight");
+            _ = tx.GetProperty(EdgeId.Create(i, 1), "weight");
             _ = idx.TryGetScalar(new EdgeId(i), idx.KeyId, out _, out _);
         }
 
@@ -161,7 +161,7 @@ public sealed class EdgePropertyJoinIndexTests : IDisposable
             var sw = Stopwatch.StartNew();
             long checksumChain = 0;
             for (long i = 0; i < edgeCount; i++)
-                checksumChain += tx.GetProperty(new EdgeId(i), "weight").Int64Value;
+                checksumChain += tx.GetProperty(EdgeId.Create(i, 1), "weight").Int64Value;
             sw.Stop();
             chainTicks += sw.ElapsedTicks;
 

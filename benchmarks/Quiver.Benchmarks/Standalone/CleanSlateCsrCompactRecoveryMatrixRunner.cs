@@ -140,11 +140,11 @@ public static class CleanSlateCsrCompactRecoveryMatrixRunner
         using (var db = QuiverDatabase.Open(path))
         using (var tx = db.BeginWriteTransaction())
         {
-            tx.SetProperty(new EdgeId(0), ScoreKey, PropertyValue.FromInt64(700));
+            tx.SetProperty(EdgeId.Create(0, 1), ScoreKey, PropertyValue.FromInt64(700));
             var deltaVertex = tx.CreateVertex("V");
             var deltaEdge = tx.CreateEdge(new VertexId(0), deltaVertex, "LINK");
             tx.SetProperty(deltaEdge, ScoreKey, PropertyValue.FromInt64(900));
-            tx.DeleteEdge(new EdgeId(2));
+            tx.DeleteEdge(EdgeId.Create(2, 1));
             tx.Commit();
         }
     }

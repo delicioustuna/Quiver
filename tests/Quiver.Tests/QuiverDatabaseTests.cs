@@ -355,7 +355,7 @@ public sealed class QuiverDatabaseTests : IDisposable
     }
 
     [Fact]
-    public void Vacuum_keeps_raw_edge_sequence_from_retargeting()
+    public void Vacuum_reuses_edge_sequence_with_higher_generation_without_retargeting_stale_ids()
     {
         var path = Path.Combine(_dir, "edge_locator_reuse.quiver");
         using var db = QuiverDatabase.Open(path);
@@ -392,7 +392,8 @@ public sealed class QuiverDatabaseTests : IDisposable
             tx.Commit();
         }
 
-        replacement.Sequence.Should().BeGreaterThan(old.Sequence);
+        replacement.Sequence.Should().Be(old.Sequence);
+        replacement.Generation.Should().BeGreaterThan(old.Generation);
         db.CompactAdjacency();
 
         using (var tx = db.BeginWriteTransaction())
@@ -400,7 +401,9 @@ public sealed class QuiverDatabaseTests : IDisposable
             tx.GetProperty(stale, "weight").Type.Should().Be(default(PropertyValueType));
             tx.GetProperty(raw, "weight").Type.Should().Be(default(PropertyValueType));
             tx.SetProperty(stale, "weight", PropertyValue.FromInt64(99));
+            tx.SetProperty(raw, "weight", PropertyValue.FromInt64(100));
             tx.DeleteEdge(stale);
+            tx.DeleteEdge(raw);
             tx.Commit();
         }
 

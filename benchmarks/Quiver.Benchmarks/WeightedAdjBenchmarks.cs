@@ -78,7 +78,7 @@ public class WeightedAdjBenchmarks
             using var tx = db.BeginWriteTransaction();
             for (int i = 1; i <= Degree; i++)
             {
-                tx.SetProperty(new EdgeId(i - 1), WeightProp, PropertyValue.FromInt64(100L + i));
+                tx.SetProperty(EdgeId.Create(i - 1, 1), WeightProp, PropertyValue.FromInt64(100L + i));
             }
             tx.Commit();
         }

@@ -767,11 +767,11 @@ public sealed class BinaryGraphStorageBackendCrashContractTests
             {
                 using (var tx = db.BeginWriteTransaction())
                 {
-                    tx.SetProperty(new EdgeId(0), "weight", PropertyValue.FromInt64(700));
+                    tx.SetProperty(EdgeId.Create(0, 1), "weight", PropertyValue.FromInt64(700));
                     deltaVertex = tx.CreateVertex("V");
                     deltaEdge = tx.CreateEdge(new VertexId(0), deltaVertex, "LINK");
                     tx.SetProperty(deltaEdge, "weight", PropertyValue.FromInt64(900));
-                    tx.DeleteEdge(new EdgeId(2));
+                    tx.DeleteEdge(EdgeId.Create(2, 1));
                     tx.Commit();
                 }
 

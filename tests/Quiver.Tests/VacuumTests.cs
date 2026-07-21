@@ -11,6 +11,7 @@ namespace Quiver.Tests;
 /// MVCC で論理削除されたVertexが <see cref="QuiverDatabase.Vacuum"/> によって
 /// 再利用可能な物理スロットへ戻ることを検証する。
 /// </summary>
+[Collection("binary-backend-maintenance")]
 public sealed class VacuumTests : IDisposable
 {
     private readonly string _dir;
