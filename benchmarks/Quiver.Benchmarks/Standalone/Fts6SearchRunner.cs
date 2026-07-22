@@ -7,13 +7,15 @@ using Quiver.Storage.Records;
 namespace Quiver.Benchmarks.Standalone;
 
 /// <summary>
-/// BenchmarkDotNet を経由しない短時間ランナーで、設計書 13 §9 の 3 つの
-/// 目標値を実測する:
+/// BenchmarkDotNet を経由せず、大規模 corpus の全文検索 ingest と latency の
+/// 情報値を実測する:
 /// <list type="bullet">
-///   <item><b>検索 p50/p90/p99</b>: N チャンク・2〜5 term クエリ (バッファプール常駐)。目標 p50 &lt; 10ms。</item>
-///   <item><b>取込増幅</b>: 全文索引維持込みの WAL バイト数 ÷ 素の SetProperty の WAL バイト数。目標 5× 以内。</item>
+///   <item><b>検索 p50/p90/p99</b>: N チャンク・2〜5 term クエリ (バッファプール常駐)。</item>
+///   <item><b>取込増幅</b>: 全文索引維持込みの WAL バイト数 ÷ 素の SetProperty の WAL バイト数。</item>
 ///   <item><b>WAL bytes/chunk</b>: 索引維持込みでチャンク 1 件あたりの WAL バイト数 (回帰 sentinel 値)。</item>
 /// </list>
+/// product の合否は segment runner が strict top-k、merge equivalence、4 segment p50、
+/// write amplification を同じ workload で検査するため、本 runner の値では判定しない。
 /// checkpoint は閾値を最大化して WAL truncate を止め、取込で発生した物理ログを
 /// 全量計測する。WAL は単一サイドカー <c>graph.quiver-wal</c> ()。
 ///
@@ -48,7 +50,7 @@ public static class Fts6SearchRunner
         long walPlain = MeasureWal(vocab, ampChunks, withIndex: false, out double ampMsPlain);
         double amplification = walPlain > 0 ? walWithFt / (double)walPlain : double.NaN;
 
-        Console.WriteLine($"--- ingest WAL amplification over {ampChunks:N0} chunks, checkpoint OFF (design 13 §9: target ≤ 5×) ---");
+        Console.WriteLine($"--- ingest WAL amplification over {ampChunks:N0} chunks, checkpoint OFF (informational) ---");
         Console.WriteLine($"WAL with FT:        {walWithFt,12:N0} bytes  ({walWithFt / (double)ampChunks,8:F1} bytes/chunk)  ingest {ampMsFt,7:F0} ms");
         Console.WriteLine($"WAL plain:          {walPlain,12:N0} bytes  ({walPlain / (double)ampChunks,8:F1} bytes/chunk)  ingest {ampMsPlain,7:F0} ms");
         Console.WriteLine($"amplification:      {amplification,12:F2}×");
@@ -170,7 +172,7 @@ public static class Fts6SearchRunner
 
     private static void ReportSearch(List<double> sortedMs, int chunkCount)
     {
-        Console.WriteLine($"--- search latency over {chunkCount:N0} chunks (design 13 §9: target p50 < 10ms) ---");
+        Console.WriteLine($"--- search latency over {chunkCount:N0} chunks (informational) ---");
         Console.WriteLine($"queries:            {sortedMs.Count}");
         Console.WriteLine($"p50:                {Percentile(sortedMs, 0.50),9:F3} ms");
         Console.WriteLine($"p90:                {Percentile(sortedMs, 0.90),9:F3} ms");
