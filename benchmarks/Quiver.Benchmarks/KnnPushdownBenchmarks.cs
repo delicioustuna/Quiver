@@ -81,8 +81,8 @@ public class KnnPushdownBenchmarks
     }
 
     /// <summary>
-    /// Legacy post-filter: top-K from full N, then drop by label. KNN top-K →
-    /// label post-filter の物理プランを直接構築して測る (=  pre-rewrite plan)。
+    /// Post-filter baseline: top-K from full N, then drop by label. KNN top-K →
+    /// label post-filter の物理プランを直接構築して測る。
     /// </summary>
     [Benchmark(Baseline = true)]
     public int PostFilter()

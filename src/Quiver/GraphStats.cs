@@ -294,7 +294,7 @@ public sealed class GraphStats
     /// バイナリ backend で <c>LabelVertexIndex</c> sidecar が接続されているとき <c>true</c>。
     /// <c>InlineGraphAccessMethods</c> 経路 / ANN bypass 等 sidecar 無し backend では <c>false</c>。
     /// <see cref="Quiver.Client.Internal.PendingKnnBuilder"/> の push-down 閾値判定で、
-    /// dim-aware piecewise table を引くか legacy 30% 単一閾値を引くかを切り替えるのに使う。
+    /// dim-aware piecewise table を引くか sidecar-free の保守的な単一閾値を引くかを切り替えるのに使う。
     /// テストから明示的に <c>false</c> 経路を再現できるよう <c>init</c> を公開している。
     /// </summary>
     public bool HasFastLabelIndex { get; init; }

@@ -510,7 +510,7 @@ public sealed class GraphStatsTests : IDisposable
         stats.VertexDegrees.EnumeratePowerVertices()
             .Select(s => s.VertexId).Should().Equal(hub);
 
-        // Legacy PowerVertices view is rebuilt from the dense data
+        // PowerVertices compatibility view is rebuilt from the dense data.
         stats.PowerVertices.Should().ContainKey(hub);
         stats.PowerVertices[hub].TotalDegree.Should().Be(10);
     }
