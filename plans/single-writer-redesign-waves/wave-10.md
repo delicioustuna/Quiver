@@ -83,3 +83,17 @@ Wave 10 は新しい互換層を追加する Wave ではない。Wave 0〜9 で�
 - 完成・補修 commit はsolution buildと該当focused gate成功後だけに作り、明示pathspec、staged diff、guardrailを確認して即pushする。branch tipはWIPではない。
 
 merge と tag はユーザの明示承認を別々に得る。
+
+## 6. 実施結果
+
+- 実装 commit: `acdf263e33680d853baf968a6a1bfbb3eb65883b`。
+- §7 disposition: column cache、direct-array edge property join、group commit、旧開発 runner と対応する API/test/benchmark を削除した。Keep 対象の physical latch、Sequence address、historical rejection fixture は維持した。
+- identity: CSR product integration の Generation 0 address を logical identity へ materialize し、identity/snapshot/single-writer/vector focused 57 tests と edge reuse/vacuum 33 tests が成功した。
+- durability: writer lease、vector payload atomicity、WAL winner/loser、derived index rebuild の test を追加・再編し、crash/Chaos 151 tests と segment crash 16 tests が成功した。
+- test convergence: Release solution build は 0 warnings、0 errors、全 1,985 tests、PublicApi 1 test、Fuzz 32 tests が成功した。旧 test/runner の inventory は 0 件だった。
+- addon/AOT: RAG 64 tests、zero-dependency 検査、Native AOT publish と生成 binary 実行が成功し、IL2xxx/IL3xxx warning は 0 件だった。
+- audit: legacy scan、track-marker scan、Markdown link、skill redirect、各 self-test、mirror hash、`git diff --check` がすべて成功した。
+- baseline: single writer 32 readers 比 0.767x、2-hop 1.5381 ms、durable edge update 1187.70 us、Nexus 最大 0.71x、full-text 4.984 ms / 2.01x、vector recall@10 1.000、publish p99 0.825 ms / 3.308 ms で全 gate に合格した。
+- 生記録: `docs/benchmarks/2026-07-22_SingleWriterSnapshotReaders_Baseline.md`。
+- Definition of Done §14 の18項目は、上記 source disposition、focused/full/crash/Fuzz test、PublicApi、AOT、repo scan、benchmark、as-built 文書に対応し、未達項目はない。
+- merge と tag は未実施であり、規定どおり別々のユーザ承認を待つ。
