@@ -11,12 +11,12 @@ namespace Quiver.Tests;
 /// 述語単位の論理合成 (P.Not、P.And、P.Or)、トラバーサル単位の And / Or サブクエリ、
 /// Cypher の IS NULL / IS NOT NULL 別名を検証する。
 /// </summary>
-public sealed class GremlinCompatGc2Tests : IDisposable
+public sealed class GremlinPredicateTests : IDisposable
 {
     private readonly string _dir;
     private readonly QuiverDatabase _db;
 
-    public GremlinCompatGc2Tests()
+    public GremlinPredicateTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_gc2_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));

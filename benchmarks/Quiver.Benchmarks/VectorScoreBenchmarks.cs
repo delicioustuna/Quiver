@@ -9,8 +9,7 @@ namespace Quiver.Benchmarks;
 ///
 /// Sweeps dim ∈ {128, 768, 1536} × N ∈ {1k, 10k, 100k} × metric. The benchmark
 /// runs N pair-scoring operations against a fixed query so the wall-clock
-/// reflects steady-state scoring cost (the dominant inner loop of
-/// <see cref="InMemoryVectorStore.KnnSearch"/>).
+/// reflects steady-state scoring cost in the flat vector-search inner loop.
 /// </summary>
 [MemoryDiagnoser]
 [ShortRunJob]

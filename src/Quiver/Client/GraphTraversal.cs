@@ -507,77 +507,26 @@ public sealed class GraphTraversal<T>
 
     /// <summary>プロパティ <paramref name="key"/> の <see cref="double"/> 合計を返す。空集合では 0 を返す。</summary>
     public double Sum(string key)
-    {
-        // full-scan + 数値列なら列スキャンで集計 (row path と同値、桁違いに高速)。
-        if (TryFullScanColumnAggregate(key, out var agg) && IsNumericColumn(agg.ValueType))
-            return agg.Count == 0 ? 0.0 : agg.Sum;
-        return AggregateNumeric(key, AggregateKind.Sum) ?? 0.0;
-    }
+        => AggregateNumeric(key, AggregateKind.Sum) ?? 0.0;
 
     /// <summary>プロパティ <paramref name="key"/> の <see cref="long"/> 合計を返す。空集合では 0 を返す。</summary>
     public long SumLong(string key)
-    {
-        // 整数列のみ列スキャン (row path の SumLong も Int64 スロットのみ合計するため同値)。
-        if (TryFullScanColumnAggregate(key, out var agg) && IsIntegralColumn(agg.ValueType))
-            return agg.LongSum;
-        return (long)(AggregateLongSum(key) ?? 0L);
-    }
+        => AggregateLongSum(key) ?? 0L;
 
     /// <summary>プロパティ <paramref name="key"/> の最大値を返す。要素が無い場合は <c>null</c>。</summary>
     public double? Max(string key)
-    {
-        if (TryFullScanColumnAggregate(key, out var agg) && IsNumericColumn(agg.ValueType))
-            return agg.Count == 0 ? null : agg.Max;
-        return AggregateNumeric(key, AggregateKind.Max);
-    }
+        => AggregateNumeric(key, AggregateKind.Max);
 
     /// <summary>プロパティ <paramref name="key"/> の最小値を返す。要素が無い場合は <c>null</c>。</summary>
     public double? Min(string key)
-    {
-        if (TryFullScanColumnAggregate(key, out var agg) && IsNumericColumn(agg.ValueType))
-            return agg.Count == 0 ? null : agg.Min;
-        return AggregateNumeric(key, AggregateKind.Min);
-    }
+        => AggregateNumeric(key, AggregateKind.Min);
 
     /// <summary>プロパティ <paramref name="key"/> の平均値を返す。要素が無い場合は <c>null</c>。</summary>
     public double? Mean(string key)
     {
-        if (TryFullScanColumnAggregate(key, out var agg) && IsNumericColumn(agg.ValueType))
-            return agg.Count == 0 ? null : agg.Sum / agg.Count;
         double sum = 0; long count = 0;
         ForEachNumeric(key, v => { sum += v; count++; });
         return count == 0 ? null : sum / count;
-    }
-
-    // row path が数値集約する型 (Int32/Int64 は Int64 スロット, Double) と合わせる。
-    private static bool IsNumericColumn(Storage.Records.PropertyValueType t)
-        => t is Storage.Records.PropertyValueType.Int32
-             or Storage.Records.PropertyValueType.Int64
-             or Storage.Records.PropertyValueType.Double;
-
-    private static bool IsIntegralColumn(Storage.Records.PropertyValueType t)
-        => t is Storage.Records.PropertyValueType.Int32
-             or Storage.Records.PropertyValueType.Int64;
-
-    /// <summary>
-    /// チェーンが「ある kind の全件 full scan」なら、対象 <paramref name="key"/> が
-    /// 列化済みかを backend に問い合わせ、列スキャンの集約結果を得る。full scan でない / 列が無い /
-    /// mixed のときは false で、呼び出し側が row path にフォールバックする。
-    /// </summary>
-    private bool TryFullScanColumnAggregate(string key, out Quiver.ColumnAggregate agg)
-    {
-        agg = default;
-        if (!TryDetectFullScanKind(out var kind)) return false;
-        return _tx.AsInternal().TryColumnAggregate(kind, key, out agg);
-    }
-
-    /// <summary>チェーン起点が無フィルタの全件スキャン (全Vertex / 全リレーション) かを判定する。</summary>
-    private bool TryDetectFullScanKind(out Core.EntityKind kind)
-    {
-        if (_plan is ScanOp { Kind: EntityKind.Vertex, Label: null }) { kind = Core.EntityKind.Vertex; return true; }
-        if (_plan is ScanOp { Kind: EntityKind.Edge }) { kind = Core.EntityKind.Edge; return true; }
-        kind = default;
-        return false;
     }
 
     /// <summary>row path のプロパティ参照対象を現在の ID 型から決定する。</summary>

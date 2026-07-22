@@ -29,8 +29,6 @@ internal sealed class Vacuum : IVacuum
     private readonly TransactionManager _txManager;
     private readonly CommittedTxRegistry _committed;
     private readonly IWriteAheadLog? _wal;
-    // opt-in 列の delta compaction 対象 (列無し DB では null)。
-    private readonly ColumnManager? _columns;
     // nexus 回収に必要な 3 ストア。nexus を持たない構成 (in-memory 等) では null。
     private readonly VersionedNexusStore? _nexusStore;
     private readonly IncidenceStore? _incidenceStore;
@@ -46,7 +44,6 @@ internal sealed class Vacuum : IVacuum
         TransactionManager txManager,
         CommittedTxRegistry committed,
         IWriteAheadLog? wal = null,
-        ColumnManager? columns = null,
         VersionedNexusStore? nexusStore = null,
         IncidenceStore? incidenceStore = null,
         IVertexIncidenceHeadStore? vertexHeads = null)
@@ -57,7 +54,6 @@ internal sealed class Vacuum : IVacuum
         _txManager = txManager;
         _committed = committed;
         _wal = wal;
-        _columns = columns;
         _nexusStore = nexusStore;
         _incidenceStore = incidenceStore;
         _vertexHeads = vertexHeads;
@@ -119,16 +115,6 @@ internal sealed class Vacuum : IVacuum
                 reclaimedProps += nexusProps;
             }
 
-            // opt-in 列の delta compaction。committed registry の prune より前に
-            // 走らせる (Merge は committed.IsCommitted を見るため、物理履歴を compact 済みとして
-            // 扱う前に判定する必要がある — dead version 回収と同じ順序制約)。targets に依らず常に実行する
-            // (in-memory delta の merge は安価で常に有益)。
-            int reclaimedColumnVersions = 0;
-            if (!dryRun && _columns != null)
-            {
-                reclaimedColumnVersions = _columns.Compact(horizon, _committed);
-            }
-
             // committed registry を horizon で prune。CompactedVisibilityHorizon を horizon-1 まで進めてから
             // 取り除かないと、データファイル上の xmin がまだ参照する committed tx を「未コミット」と
             // 誤判定してしまう。aborted tx は before-image undo で record ごと消えており、
@@ -175,7 +161,6 @@ internal sealed class Vacuum : IVacuum
                 HorizonTxId: horizon,
                 Skipped: false,
                 TruncatedPages: truncatedPages,
-                ReclaimedColumnVersions: reclaimedColumnVersions,
                 ReclaimedNexuses: reclaimedNexuses,
                 ReclaimedIncidences: reclaimedIncidences);
         }

@@ -24,6 +24,7 @@ public static class Fts6SearchRunner
     private const string Index = "idx_body";
     private const int BatchSize = 200;     // realistic batch ingest (design §4: 1 tx = 複数チャンク)
     private const int AmpSampleChunks = 5_000;  // bounded sample for the WAL amplification ratio
+    private const int MaintenanceIntervalChunks = 10_000;
 
     public static int Run(int searchChunks, int queryCount)
     {
@@ -116,6 +117,22 @@ public static class Fts6SearchRunner
             }
             tx.Commit();
             written += batch;
+
+            // Durable segment bodies are append-only until vacuum retires manifests that no
+            // reader can observe. A scale benchmark must exercise that production maintenance
+            // path, otherwise repeated merges retain O(N^2) historical artifacts and measure
+            // temporary disk exhaustion instead of steady-state ingest/search behavior.
+            if (chunkCount > AmpSampleChunks
+                && written % MaintenanceIntervalChunks == 0)
+            {
+                var backend = (BinaryGraphStorageBackend)db.BackendInternal;
+                backend.WaitForFullTextSegmentMergeForTest();
+                if (backend.FullTextSegmentMergeErrorForTest is Exception mergeError)
+                    throw new InvalidOperationException(
+                        "Full-text segment merge failed during benchmark maintenance.",
+                        mergeError);
+                db.Vacuum();
+            }
         }
         sw.Stop();
         return sw.Elapsed.TotalMilliseconds;

@@ -12,12 +12,12 @@ namespace Quiver.Tests;
 /// <c>GraphTraversalSource.MergeVertex</c> の簡略 API と
 /// ON CREATE SET / ON MATCH SET の分岐パターンを対象とする。
 /// </summary>
-public sealed class GremlinCompatGc5Tests : IDisposable
+public sealed class GremlinMergeVertexTests : IDisposable
 {
     private readonly string _dir;
     private readonly QuiverDatabase _db;
 
-    public GremlinCompatGc5Tests()
+    public GremlinMergeVertexTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_gc5_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));

@@ -24,7 +24,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     private readonly ITokenStore<RoleId> _roleTokens;
     private readonly ILogicalMutationSink? _logicalSink;
     private List<LogicalMutation>? _logicalBuffer;
-    private readonly Storage.Records.ColumnManager? _columns;
     private readonly VectorSegmentIndex? _vectorSegments;
     private List<VectorSegmentMutation>? _vectorMutations;
     private readonly FullTextSegmentIndex? _fullTextSegments;
@@ -45,7 +44,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         ISchemaCatalog schema,
         bool isReadOnly = false,
         ILogicalMutationSink? logicalSink = null,
-        Storage.Records.ColumnManager? columns = null,
         VectorSegmentIndex? vectorSegments = null,
         FullTextSegmentIndex? fullTextSegments = null,
         NexusMergeIndex? nexusMergeIndex = null)
@@ -63,20 +61,11 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         _vectorSegments = vectorSegments;
         _fullTextSegments = fullTextSegments;
         _nexusMergeIndex = nexusMergeIndex;
-        // 登録済み列があるときだけ列維持を有効化し、ホット path の
-        // 余計な hook 登録 / dict lookup を避ける。
-        _columns = columns is { HasAnyColumns: true } ? columns : null;
         if (_logicalSink != null)
         {
             // WAL フラッシュが完了した後にのみバッファをシンクへ引き渡す。
             // OnCommitted フックはロールバックやコミット失敗時には発火しない。
             _inner.OnCommitted(FlushLogicalBuffer);
-        }
-        if (_columns != null)
-        {
-            // abort 後: before-image undo + ReloadColumns で head は復元済み。中止 tx が
-            // 積んだ delta 版 (不可視ゴミ) をこの tx スコープで掃除する。
-            _inner.OnRolledBack(() => _columns.PruneAbortedTx(_inner.Id.Value));
         }
     }
 
@@ -160,7 +149,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         RemoveFullTextIndexEntries(PropertyOwner(vertexId));
 
         _inner.Vertices.Free(vertexId);
-        _columns?.OnDeleteEntity(Core.EntityKind.Vertex, vertexId.Sequence, _inner.Id.Value);
         if (_logicalSink != null)
             RecordLogical(LogicalMutation.DeleteVertex(vertexId));
     }
@@ -526,8 +514,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         // delta 側 ID に対してはストアは no-op。
         _inner.AdjacencySegments?.Tombstone(edgeId);
         _inner.Edges.Delete(_inner.Vertices, edgeId);
-        // リレーション削除に伴い、その kind の全列で seq を論理削除する。
-        _columns?.OnDeleteEntity(Core.EntityKind.Edge, edgeId.Sequence, _inner.Id.Value);
         if (_logicalSink != null)
             RecordLogical(LogicalMutation.DeleteEdge(edgeId));
     }
@@ -564,8 +550,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         var version = SetVertexProperty(vertexId, keyId, in value);
         MaintainScalarIndexes(PropertyOwner(vertexId), key, in value, version);
         StageFullTextPropertyMutation(PropertyOwner(vertexId), key, version, in value);
-        // 列化済み key なら同 tx で列を維持する。
-        _columns?.OnSetProperty(Core.EntityKind.Vertex, vertexId.Sequence, keyId, in value, _inner.Id.Value);
     }
 
     public void SetProperty(EdgeId edgeId, string key, in PropertyValue value)
@@ -586,8 +570,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         var version = SetEdgeProperty(edgeId, keyId, in value);
         MaintainScalarIndexes(PropertyOwner(edgeId), key, in value, version);
         StageFullTextPropertyMutation(PropertyOwner(edgeId), key, version, in value);
-        // 列化済み key なら同 tx で列を維持する。
-        _columns?.OnSetProperty(Core.EntityKind.Edge, edgeId.Sequence, keyId, in value, _inner.Id.Value);
     }
 
     private PropertyVersionRef SetEdgeProperty(EdgeId edgeId, PropertyKeyId keyId, in PropertyValue value)
@@ -706,8 +688,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         bool removed = RemovePropertyCore(PropertyOwner(vertexId), firstProperty, keyId);
         if (removed)
         {
-        // 列化済み key なら列も論理削除する。
-            _columns?.OnRemoveProperty(Core.EntityKind.Vertex, vertexId.Sequence, keyId, _inner.Id.Value);
             RemoveVectorIndexEntries(PropertyOwner(vertexId), key);
             RemoveFullTextIndexEntries(PropertyOwner(vertexId), key);
             if (_logicalSink != null)
@@ -931,11 +911,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         EntityRef owner = PropertyOwner(edgeId);
         if (!RemovePropertyCore(owner, firstProperty, keyId)) return;
 
-        _columns?.OnRemoveProperty(
-            Core.EntityKind.Edge,
-            edgeId.Sequence,
-            keyId,
-            _inner.Id.Value);
         RemoveVectorIndexEntries(owner, key);
         RemoveFullTextIndexEntries(owner, key);
         if (_logicalSink != null)
@@ -1163,22 +1138,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
     public IAdjacencySegmentStore? AdjacencySegments => _inner.AdjacencySegments;
 
     public IGraphAccessMethods Access => _inner.Access;
-
-        // full-scan 集約の列スキャン経路。列が無い / mixed / committed registry
-    // 無し (旧テスト互換経路) では false を返し、呼び出し側 (GraphTraversal) が row path へ。
-    public bool TryColumnAggregate(Core.EntityKind kind, string key, out ColumnAggregate result)
-    {
-        using var usage = EnterUsage();
-        result = default;
-        if (_columns == null) return false;
-        if (_inner.Committed is not { } committed) return false;
-        if (!_propKeyTokens.TryGet(key, out var keyId)) return false;
-        if (!_columns.TryAggregate(kind, keyId.Value, _inner.Snapshot, _inner.Id, committed,
-                out long count, out double sum, out double min, out double max, out long longSum, out var vt))
-            return false;
-        result = new ColumnAggregate(count, sum, min, max, longSum, vt);
-        return true;
-    }
 
     // ========== vector property ==========
 
@@ -1703,7 +1662,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         // ため、slot を回収できるよう先にチェーンを解放してから header をスタンプする。
         FreeNexusProperties(nexusId);
         _inner.Nexuses.Delete(nexusId);
-        _columns?.OnDeleteEntity(Core.EntityKind.Nexus, nexusId.Sequence, _inner.Id.Value);
         if (_logicalSink != null)
             RecordLogical(LogicalMutation.DeleteNexus(nexusId));
     }
@@ -1815,8 +1773,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         var version = SetNexusProperty(nexusId, keyId, in value);
         MaintainScalarIndexes(PropertyOwner(nexusId), key, in value, version);
         StageFullTextPropertyMutation(PropertyOwner(nexusId), key, version, in value);
-        // 列化済み key なら同 tx で列を維持する (列作成の公開糖衣は後続タスク)。
-        _columns?.OnSetProperty(Core.EntityKind.Nexus, nexusId.Sequence, keyId, in value, _inner.Id.Value);
     }
 
     private PropertyVersionRef SetNexusProperty(NexusId nexusId, PropertyKeyId keyId, in PropertyValue value)
@@ -1858,7 +1814,6 @@ internal sealed class GraphTransaction : IWriteTransaction, IReadTransactionInte
         bool removed = RemovePropertyCore(PropertyOwner(nexusId), firstProperty, keyId);
         if (removed)
         {
-            _columns?.OnRemoveProperty(Core.EntityKind.Nexus, nexusId.Sequence, keyId, _inner.Id.Value);
             RemoveVectorIndexEntries(PropertyOwner(nexusId), key);
             RemoveFullTextIndexEntries(PropertyOwner(nexusId), key);
             if (_logicalSink != null)

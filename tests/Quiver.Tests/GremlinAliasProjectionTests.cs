@@ -12,12 +12,12 @@ namespace Quiver.Tests;
 /// 型付き射影 <c>Select&lt;T&gt;(Func&lt;MatchTuple, T&gt;)</c> が
 /// 引き継いだ列を正しく読むことを確認する。
 /// </summary>
-public sealed class GremlinCompatGc6Tests : IDisposable
+public sealed class GremlinAliasProjectionTests : IDisposable
 {
     private readonly string _dir;
     private readonly QuiverDatabase _db;
 
-    public GremlinCompatGc6Tests()
+    public GremlinAliasProjectionTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_gc6_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));

@@ -1,7 +1,7 @@
 # Quiver 用語辞書
 
 Quiver の API やドキュメントに登場する用語を定義する。
-内部実装の用語は [内部実装の用語](design/internals-glossary.md) を参照。
+内部実装の用語と責務は [as-built 仕様](spec/00_overview.md) と [開発者向け実装 map](design/development.md) を参照。
 
 ---
 
@@ -115,7 +115,7 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | 用語 | 定義 |
 |---|---|
 | **RAG** | 検索拡張生成。外部知識を検索して LLM のプロンプトに注入する手法 |
-| **RagStore** | `Quiver.Rag` のエントリポイント。文書取込（`IngestAsync`）とハイブリッド検索（`SearchAsync`）を提供する |
+| **RagStore** | `Quiver.Rag` のエントリポイント。文書取込（`UpsertDocumentAsync`）とハイブリッド検索（`SearchAsync`）を提供する |
 | **IngestedDocument** | 取込契約。`SourceId`（一意キー）、`Title`、`Metadata`、`Blocks`（正規化ブロック列）を持つ |
 | **IChunkEmbedder** | チャンクテキストからベクトル埋め込みを生成するインタフェース。実装はアプリケーション側が注入する |
 | **Graph Expansion** | ヒットしたチャンクから `NEXT_CHUNK`、`HAS_CHUNK` を辿って前後文脈や親文書を復元する機能。ベクトル DB が返せるのはヒット単体だけだが、Quiver はグラフ走査で文脈を復元できる |
@@ -138,7 +138,7 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | **\*.quiver** | Quiver のデータファイル。静止時は単一ファイルにすべてのデータが格納される |
 | **\*.quiver-wal** | WAL（Write-Ahead Log）サイドカー。稼働中にのみ存在し、クリーンシャットダウン後は空か不在になる |
 | **WAL** | データファイルへの書き込みに先立ってログを書くことで、クラッシュリカバリを保証する仕組み |
-| **QUIVER-SW family version** | データファイルと WAL が共有するオンディスク形式の世代。現在は version 1。旧 DB は `StorageFormatMismatchException`、旧 WAL は `WalFormatMismatchException` で拒否する |
+| **QUIVER-SW family version** | データファイルと WAL が共有するオンディスク形式の世代。現在は version 2。旧 DB は `StorageFormatMismatchException`、旧 WAL は `WalFormatMismatchException` で拒否する |
 
 ## メンテナンス
 

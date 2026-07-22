@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
-using System.Threading.Channels;
 using Quiver.Core;
 using Quiver.Telemetry;
 
@@ -15,7 +14,7 @@ namespace Quiver.Storage.Wal;
 ///   <item><see cref="MarkDeleteOnDispose"/> されたクリーン終了では Dispose 時にファイルを削除する。
 ///     全データは graph.quiver へ durable 済みなので、静止時はサイドカーが消えて本体のみが残る。</item>
 /// </list>
-/// レコードフォーマット、group commit、checkpoint 用コンパクションを提供する。
+/// レコードフォーマット、同期 flush、checkpoint 用コンパクションを提供する。
 /// </summary>
 internal sealed class WriteAheadLog : IWriteAheadLog
 {
@@ -26,14 +25,6 @@ internal sealed class WriteAheadLog : IWriteAheadLog
 
     private readonly string _path;
     private readonly object _writeLock = new();
-    private readonly Channel<FlushRequest> _flushChannel;
-    private readonly Task _flushTask;
-    // group commit window を Stopwatch tick に変換して保持 (0 = 無効)。
-    private readonly long _groupCommitWindowTicks;
-    // 観測用カウンタ。
-    private long _flushBatchCount;
-    private long _flushRequestCount;
-
     private long _nextLsn;
     private long _flushedLsn = -1;
     private long _bytesWritten;
@@ -54,32 +45,15 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         set => Volatile.Write(ref _activeWriteSet, value);
     }
 
-    /// <summary>バックグラウンドフラッシュループが実際に fsync を起動した回数。</summary>
-    public long FlushBatchCount => Volatile.Read(ref _flushBatchCount);
-
-    /// <summary><see cref="FlushTo"/> 経由でフラッシュ要求された累計回数。</summary>
-    public long FlushRequestCount => Volatile.Read(ref _flushRequestCount);
-
     public WriteAheadLog(string path)
-        : this(path, TimeSpan.Zero) { }
-
-    public WriteAheadLog(string path, TimeSpan groupCommitWindow)
     {
         _path = path;
-        _groupCommitWindowTicks = groupCommitWindow > TimeSpan.Zero
-            ? (long)(groupCommitWindow.TotalSeconds * Stopwatch.Frequency)
-            : 0;
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        _flushChannel = Channel.CreateUnbounded<FlushRequest>(
-            new UnboundedChannelOptions { SingleReader = true });
         RebuildState();
         _stream = new FileStream(_path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
         WalFormat.Initialize(_stream);
         _stream.Seek(0, SeekOrigin.End);
-        _flushTask = Task.Factory.StartNew(
-            RunFlushLoopAsync, CancellationToken.None,
-            TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
     }
 
     /// <summary>
@@ -153,7 +127,6 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     public void FlushTo(long lsn)
     {
         if (Volatile.Read(ref _flushedLsn) >= lsn) return;
-        Interlocked.Increment(ref _flushRequestCount);
         using var activity = QuiverTelemetry.WalFlushActivitySource.StartActivity(
             "wal.flush", ActivityKind.Internal);
         activity?.SetTag("quiver.wal.target_lsn", lsn);
@@ -161,13 +134,17 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         QuiverEventSource.Log.WalFlushRequestStarted();
         try
         {
-            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (!_flushChannel.Writer.TryWrite(new FlushRequest(lsn, tcs)))
+            lock (_writeLock)
             {
-                if (Volatile.Read(ref _flushedLsn) >= lsn) return;
-                throw new ObjectDisposedException(nameof(WriteAheadLog));
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                if (_flushedLsn < lsn)
+                {
+                    FlushBufferLocked();
+                    _stream?.Flush(flushToDisk: true);
+                    long highestLsn = _nextLsn > 0 ? _nextLsn - 1 : -1;
+                    Volatile.Write(ref _flushedLsn, highestLsn);
+                }
             }
-            tcs.Task.GetAwaiter().GetResult();
             QuiverTelemetry.WalFlushDurationMs.Record(sw.Elapsed.TotalMilliseconds);
             QuiverEventSource.Log.WalFlushed(lsn, sw.Elapsed.TotalMilliseconds);
         }
@@ -246,8 +223,6 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         {
             // クリーン終了: データは graph.quiver へ durable 済み。WAL は捨てるので最終フラッシュ不要。
             _disposed = true;
-            _flushChannel.Writer.TryComplete();
-            try { _flushTask.GetAwaiter().GetResult(); } catch { }
             lock (_writeLock)
             {
                 _stream?.Dispose();
@@ -258,8 +233,6 @@ internal sealed class WriteAheadLog : IWriteAheadLog
         }
 
         _disposed = true;
-        _flushChannel.Writer.TryComplete();
-        try { _flushTask.GetAwaiter().GetResult(); } catch { }
         lock (_writeLock)
         {
             FlushBufferLocked();
@@ -376,50 +349,6 @@ internal sealed class WriteAheadLog : IWriteAheadLog
     }
 
     // -----------------------------------------------------------------------
-    // フラッシュループ (バックグラウンドタスク — グループコミット)
-    // -----------------------------------------------------------------------
-
-    private async Task RunFlushLoopAsync()
-    {
-        var pending = new List<FlushRequest>();
-        while (await _flushChannel.Reader.WaitToReadAsync())
-        {
-            // group commit window。
-            if (_groupCommitWindowTicks > 0 && !_disposed)
-            {
-                long deadline = Stopwatch.GetTimestamp() + _groupCommitWindowTicks;
-                while (Stopwatch.GetTimestamp() < deadline && !_disposed)
-                    Thread.SpinWait(50);
-            }
-
-            while (_flushChannel.Reader.TryRead(out var req))
-                pending.Add(req);
-
-            long highestLsn;
-            lock (_writeLock)
-            {
-                FlushBufferLocked();
-                _stream?.Flush(flushToDisk: true);
-                highestLsn = _nextLsn > 0 ? _nextLsn - 1 : -1;
-                Volatile.Write(ref _flushedLsn, highestLsn);
-            }
-            Interlocked.Increment(ref _flushBatchCount);
-
-            for (int i = pending.Count - 1; i >= 0; i--)
-            {
-                if (pending[i].TargetLsn <= highestLsn)
-                {
-                    pending[i].Tcs.TrySetResult(true);
-                    pending.RemoveAt(i);
-                }
-            }
-        }
-
-        foreach (var req in pending)
-            req.Tcs.TrySetCanceled();
-    }
-
-    // -----------------------------------------------------------------------
     // 状態復元
     // -----------------------------------------------------------------------
 
@@ -440,6 +369,4 @@ internal sealed class WriteAheadLog : IWriteAheadLog
 
         _nextLsn = maxLsn >= 0 ? maxLsn + 1 : 0;
     }
-
-    private readonly record struct FlushRequest(long TargetLsn, TaskCompletionSource<bool> Tcs);
 }

@@ -169,9 +169,7 @@ public static class IndexWalAmplificationStandalone
                 }
                 case "per-tx-parallel":
                 {
-                    // 並列 per-tx insert で cross-tx coalescing 効果を測定。
-                    // group commit window を opt-in (100µs) して flush ループ内で
-                    // 複数 tx の PageImage を 1 drain に集約させる。
+                    // 並列 caller が単一 writer lease で直列化されるときの contention を測定する。
                     int threadCount = Math.Max(8, Environment.ProcessorCount);
                     int perThread = entryCount / threadCount;
                     var threads = new Thread[threadCount];

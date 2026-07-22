@@ -10,10 +10,10 @@ $outputDirectory = Join-Path $repositoryRoot ".zero-dependency-gate"
 
 # 第 1 ゲート: コアプロジェクト自身に PackageReference がないことを確認する。
 [xml]$project = Get-Content -Raw -Encoding UTF8 -LiteralPath $projectPath
-$packageReferences = @($project.SelectVertices("/Project/ItemGroup/PackageReference"))
+$packageReferences = @($project.SelectNodes("/Project/ItemGroup/PackageReference"))
 if ($packageReferences.Count -ne 0) {
     $names = $packageReferences | ForEach-Object { $_.Include }
-    throw "Quiver.csproj に PackageReference があります: $($names -join ', ')"
+    throw "Quiver.csproj contains PackageReference items: $($names -join ', ')"
 }
 
 if (Test-Path -LiteralPath $outputDirectory) {
@@ -24,13 +24,13 @@ New-Item -ItemType Directory -Path $outputDirectory | Out-Null
 try {
     dotnet pack $projectPath --configuration $Configuration --no-restore --output $outputDirectory
     if ($LASTEXITCODE -ne 0) {
-        throw "dotnet pack が終了コード $LASTEXITCODE で失敗しました。"
+        throw "dotnet pack failed with exit code $LASTEXITCODE."
     }
 
     $packages = @(Get-ChildItem -LiteralPath $outputDirectory -Filter "Quiver.*.nupkg" |
         Where-Object { $_.Name -notlike "*.symbols.nupkg" })
     if ($packages.Count -ne 1) {
-        throw "検証対象の Quiver nupkg は 1 個である必要があります。実際: $($packages.Count)"
+        throw "Expected exactly one Quiver nupkg, found $($packages.Count)."
     }
 
     # 第 2 ゲート: SDK/props/ProjectReference の影響を含む最終 nuspec を検証する。
@@ -41,7 +41,7 @@ try {
             Where-Object { $_.FullName.EndsWith(".nuspec", [StringComparison]::OrdinalIgnoreCase) } |
             Select-Object -First 1
         if ($null -eq $nuspecEntry) {
-            throw "nupkg に nuspec がありません。"
+            throw "The nupkg does not contain a nuspec."
         }
 
         $reader = [System.IO.StreamReader]::new($nuspecEntry.Open())
@@ -52,19 +52,19 @@ try {
             $reader.Dispose()
         }
 
-        $dependencies = @($nuspec.SelectVertices(
+        $dependencies = @($nuspec.SelectNodes(
             "//*[local-name()='dependencies']/*[local-name()='dependency'] | " +
             "//*[local-name()='dependencies']/*[local-name()='group']/*[local-name()='dependency']"))
         if ($dependencies.Count -ne 0) {
             $names = $dependencies | ForEach-Object { $_.id }
-            throw "生成 nuspec に依存パッケージがあります: $($names -join ', ')"
+            throw "Generated nuspec contains dependencies: $($names -join ', ')"
         }
     }
     finally {
         $archive.Dispose()
     }
 
-    Write-Host "ゼロ依存ゲート成功: csproj PackageReference=0、nuspec dependency=0"
+    Write-Host "Zero-dependency gate passed: csproj PackageReference=0, nuspec dependency=0."
 }
 finally {
     if (Test-Path -LiteralPath $outputDirectory) {

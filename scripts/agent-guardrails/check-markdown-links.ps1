@@ -97,7 +97,8 @@ if ($SelfTest) {
     exit 0
 }
 
-$Roots = @($Roots) + @($AdditionalRoots)
+$Roots = @(@($Roots) + @($AdditionalRoots) |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 if (-not $Roots) { throw 'Specify -Roots <paths...>.' }
 $files = @()
 foreach ($root in $Roots) {

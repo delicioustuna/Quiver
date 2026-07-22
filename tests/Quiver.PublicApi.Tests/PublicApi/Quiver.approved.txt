@@ -884,15 +884,12 @@ namespace Quiver
         public Quiver.IReadTransaction BeginReadTransaction() { }
         public Quiver.Storage.Records.StreamingBulkLoader BeginStreamingBulkLoad(bool buildAdjacencyIndex = false) { }
         public Quiver.IWriteTransaction BeginWriteTransaction() { }
-        public Quiver.Storage.Records.IEdgePropertyJoinIndex BuildEdgePropertyJoinIndex(string propertyKey, Quiver.Storage.Records.PropertyValueType expectedType) { }
         public Quiver.GraphStats CollectStats() { }
         public Quiver.GraphStats CollectStats(int powerVertexThreshold) { }
         public Quiver.GraphStats CollectStats(int powerVertexThreshold, double denseThreshold) { }
         public void CompactAdjacency() { }
-        public bool CreateColumn(Quiver.Core.EntityKind kind, string propertyKey) { }
         public void CreateSnapshot(string targetFilePath, Quiver.SnapshotOptions? options = null) { }
         public void Dispose() { }
-        public bool DropColumn(Quiver.Core.EntityKind kind, string propertyKey) { }
         public System.Collections.Generic.IReadOnlyList<Quiver.Migrations.MigrationHistoryEntry> GetMigrationHistory() { }
         public System.Threading.Tasks.Task<Quiver.Migrations.MigrationResult> MigrateAsync(System.Collections.Generic.IEnumerable<Quiver.Migrations.IMigration> migrations, System.Threading.CancellationToken cancellationToken = default) { }
         public Quiver.Storage.Records.IGraphSnapshotView OpenSnapshotView() { }
@@ -1466,11 +1463,10 @@ namespace Quiver.Maintenance
     }
     public sealed class VacuumReport : System.IEquatable<Quiver.Maintenance.VacuumReport>
     {
-        public VacuumReport(int ReclaimedVertices, int ReclaimedEdges, int ReclaimedProperties, int PrunedCommittedTxEntries, long ElapsedMs, long HorizonTxId, bool Skipped, long TruncatedPages = 0, int ReclaimedColumnVersions = 0, int ReclaimedNexuses = 0, int ReclaimedIncidences = 0, int RetiredVectorManifests = 0, int RetiredFullTextManifests = 0, int ReclaimedFullTextArtifacts = 0) { }
+        public VacuumReport(int ReclaimedVertices, int ReclaimedEdges, int ReclaimedProperties, int PrunedCommittedTxEntries, long ElapsedMs, long HorizonTxId, bool Skipped, long TruncatedPages = 0, int ReclaimedNexuses = 0, int ReclaimedIncidences = 0, int RetiredVectorManifests = 0, int RetiredFullTextManifests = 0, int ReclaimedFullTextArtifacts = 0) { }
         public long ElapsedMs { get; init; }
         public long HorizonTxId { get; init; }
         public int PrunedCommittedTxEntries { get; init; }
-        public int ReclaimedColumnVersions { get; init; }
         public int ReclaimedEdges { get; init; }
         public int ReclaimedFullTextArtifacts { get; init; }
         public int ReclaimedIncidences { get; init; }
@@ -1570,13 +1566,6 @@ namespace Quiver.Storage.Records
     public static class GraphAlgorithms
     {
         public static double[] PageRank(Quiver.Storage.Records.IGraphSnapshotView view, double damping = 0.85, int iterations = 20) { }
-    }
-    public interface IEdgePropertyJoinIndex
-    {
-        long EntryCount { get; }
-        Quiver.Core.PropertyKeyId KeyId { get; }
-        Quiver.Storage.Records.PropertyValueType ValueType { get; }
-        bool TryGetScalar(Quiver.Core.EdgeId edgeId, Quiver.Core.PropertyKeyId keyId, out Quiver.Storage.Records.PropertyValueType type, out long scalarBits);
     }
     public interface IGraphSnapshotView : System.IDisposable
     {
