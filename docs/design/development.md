@@ -534,14 +534,15 @@ focused `tools/Quiver.Studio` build と `dotnet build Quiver.slnx -v minimal` �
 
 ### Wave 10 総合監査記録
 
-2026-07-22 に commit `acdf263e33680d853baf968a6a1bfbb3eb65883b` を対象として、Single Writer + Snapshot Readers 再設計の
+2026-07-22 に commit `d89c9fc8616a4bb04c21c608769b6f93b23d54b5` を対象として、Single Writer + Snapshot Readers 再設計の
 最終 cleanup と総合 gate を監査した。
 
 column cache、direct-array edge property join、group commit、旧開発 runner を active source/API/test/benchmark から削除し、
 transaction contract、snapshot visibility、writer lease、WAL winner/loser、vector payload atomicity、derived index rebuild の名称と配置へ統一した。
+full-text catalog と definition codec は current format のみを受理し、旧 mutable postings metadata と decode fallback を削除した。
 production source、tests、benchmarks、samples、tools、public docs の legacy scan と track-marker scan は 0 件だった。
 
-Release solution build は 0 warnings、0 errors、全 1,985 tests、crash/Chaos 151 tests、segment crash 16 tests、Fuzz 32 tests が成功した。
+Release solution build は 0 warnings、0 errors、全 1,988 tests、crash/Chaos 151 tests、segment crash 16 tests、Fuzz 32 tests が成功した。
 Native AOT publish は IL2xxx/IL3xxx warning 0 件で、生成 binary も正常終了した。
 zero-dependency、Markdown link、skill redirect と各 guardrail self-test は成功し、skill mirror の SHA-256 も一致した。
 
