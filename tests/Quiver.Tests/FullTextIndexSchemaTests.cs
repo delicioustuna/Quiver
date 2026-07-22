@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Quiver.Index.FullText;
 using Xunit;
 
 namespace Quiver.Tests;
@@ -76,5 +77,20 @@ public sealed class FullTextIndexSchemaTests : IDisposable
         using var reopened = QuiverDatabase.Open(_path);
         reopened.Schema.ListIndexes().Should().ContainSingle()
             .Which.Name.Should().Be("idx_body");
+    }
+
+    [Theory]
+    [InlineData("1:Doc")]
+    [InlineData("Doc")]
+    public void Definition_codec_rejects_non_current_payload(string encoded)
+    {
+        Action decode = () => FullTextDefinitionCodec.Decode(
+            "idx_body",
+            encoded,
+            "body",
+            "mixed-bigram-v1");
+
+        decode.Should().Throw<InvalidDataException>()
+            .WithMessage("*current qft2*");
     }
 }

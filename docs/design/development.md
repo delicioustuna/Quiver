@@ -14,8 +14,8 @@ README はライブラリ利用者向けの最小限に絞っているため、�
 |---|---|
 | `Quiver` | エンジン中核 + 公開ファサード。型付き属性（`[Vertex]` / `[Edge]` / `[Property]` / `[Indexed]`、namespace `Quiver.Api`）を本体に内包し、`Quiver.SourceGen` を analyzer として同梱。これ 1 つの参照で型安全 CRUD まで使える |
 | `Quiver.SourceGen` | Roslyn `IIncrementalGenerator`（CRUD / `FindBy*` / 型保存トラバーサル糖衣を生成）。単体公開せず `Quiver` に同梱する内部プロジェクト |
-| `Quiver.Embedding` | テキスト埋め込みパイプライン（VEC-4）。**incubating: NuGet 非公開**（`IsPackable=false`。「NuGet パッケージ化」§incubating 参照） |
-| `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ・取込・hybrid 検索 + graph expansion）。**開発中**（過去の設計ノートは historical record。現行の実装順序は再設計計画に従う） |
+| `Quiver.Embedding` | テキスト埋め込みパイプライン。**incubating: NuGet 非公開**（`IsPackable=false`。「NuGet パッケージ化」§incubating 参照） |
+| `Quiver.Rag` | ローカル RAG レイヤ（Document/Chunk スキーマ・取込・hybrid 検索 + graph expansion） |
 | `Quiver.Hosting` | `Microsoft.Extensions.Hosting` 連携（DI 登録） |
 | `Quiver.OpenTelemetry` | OpenTelemetry エクスポート |
 
@@ -28,8 +28,8 @@ Quiver.Api / Quiver.Api.Match  ← 公開ファサード: QuiverDatabase / IRead
 Quiver.Query.Logical
 Quiver.Query.Optimizer         ← ヒストグラム統計 + ルールベース最適化
 Quiver.Query.Physical          ← Volcano 型物理演算子
-Quiver.Transactions            ← TransactionManager / LockManager / RecoveryManager
-Quiver.Storage.Wal             ← Write-Ahead Log（group commit）
+Quiver.Transactions            ← TransactionManager / WriterLease / SnapshotRegistry / RecoveryManager
+Quiver.Storage.Wal             ← redo-only Write-Ahead Log（writer commit ごとの同期 flush）
 Quiver.Index                   ← B+Tree インデックス
 Quiver.Index.FullText          ← immutable全文segment / manifest / BM25 artifact
 Quiver.Storage.Records         ← Versioned Vertex / Edge / Nexus / owner-bound Property / Payload / Token ストア
@@ -42,7 +42,7 @@ Quiver.Core                    ← 共通型・例外・抽象インタフェー
 
 ```
 Quiver.SourceGen ─(analyzer 同梱)─► Quiver ─┬─► Quiver.Embedding
-                                            ├─► Quiver.Rag (開発中)
+                                            ├─► Quiver.Rag
                                             ├─► Quiver.Hosting
                                             └─► Quiver.OpenTelemetry
 ```
@@ -285,7 +285,7 @@ foreach (var name in g.Vertices().HasLabel("Person").Values("Name").AsEnumerable
 | Core ID / kind | `src/Quiver/Core/EntityRef.cs`（kind 付き packed identity）、`src/Quiver/Core/Ids.cs`（typed ID と Generation 込み equality）、`src/Quiver/Core/EntityId.cs`（Vertex / Edge / Nexus の strict internal tag） |
 | ストア | `src/Quiver/Stores/VersionedNexusStore.cs`、`IncidenceStore.cs`、`VertexIncidenceHeadStore.cs`、`CoMembershipBlockStore.cs` |
 | トランザクション | `src/Quiver/Transactions/TransactionManager.cs`、`WriterLease.cs`、`SnapshotRegistry.cs`、`TxNexusStore.cs`（snapshot / undo の配線） |
-| 公開 CRUD | `src/Quiver/IGraphTransaction.cs`（`IReadTransaction` / `IWriteTransaction`）、`TransactionHandles.cs`、`ISchemaApi.cs`（`ISchemaCatalog` / `ISchemaEditor`） |
+| 公開 CRUD | `src/Quiver/TransactionContracts.cs`（`IReadTransaction` / `IWriteTransaction`）、`TransactionHandles.cs`、`ISchemaApi.cs`（`ISchemaCatalog` / `ISchemaEditor`） |
 | クエリ | `src/Quiver/Operators/`（`AllNexusesScan` / `ExpandToNexus` / `ExpandMembers` / `CoMembership` の各 operator）、`src/Quiver/Query/PhysicalPlanner.cs` |
 | DSL / Match | `src/Quiver/Client/GraphTraversalSource.cs`、`GraphTraversal.cs`、`Match/GraphPattern.cs`（`NexusPattern`） |
 | SourceGen | `src/Quiver.SourceGen/GraphNexusGenerator.cs` / `GraphNexusModel.cs` / `GraphNexusEmitter.cs`、属性は `src/Quiver/Client/NexusAttribute.cs` |
@@ -317,7 +317,7 @@ nexus の回帰は `tests/Quiver.Stores.Tests/IncidenceStoreTests.cs`、
 `CoMembershipBlockTests`）、`tests/Quiver.Client.Tests/`（`NexusRagQueryTests` /
 `MatchPatternTests`）、`tests/Quiver.SourceGen.Tests/NexusGeneratorTests.cs` が担う。
 性能ゲートの実測は「Nexus統合性能」節と
-[docs/benchmarks/2026-07-06_HYP-6c_Nexus.md](../benchmarks/2026-07-06_HYP-6c_Nexus.md) を参照。
+[docs/benchmarks/2026-07-06_HYP-6c_Hyperedge.md](../benchmarks/2026-07-06_HYP-6c_Hyperedge.md) を参照。
 
 ## 性能（詳細計測）
 
@@ -350,9 +350,8 @@ nexus の回帰は `tests/Quiver.Stores.Tests/IncidenceStoreTests.cs`、
   ロード時検出は維持（crash contract / chaos テストで担保）。この 1 点で linked-list 1-hop が
   ~2.3 → ~0.11 µs/edge（~20×）短縮した。
 - **書き込みは単発 durable commit が ~1 ms（WAL flush 律速）。** 大量書き込みは 1 tx にまとめる
-  （償却 ~3.5–4 µs/vertex）か BulkLoader を使う。並行 commit では group commit
-  （`QuiverDatabaseOptions.GroupCommitWindow`）でスループットが桁違いに上がる
-  （64-thread で window=0 比 ~28×、別計測 FT-27）。
+  （償却 ~3.5–4 µs/vertex）か BulkLoader を使う。同時に開始された writer は database 単位の
+  writer lease で直列化され、各 commit は WAL を同期 flush する。
 - **WAL page-image の Encode（trim+RLE）は commit 時にページ毎 1 回だけ行う（書込ごとには行わない）。**
   トランザクション内で同一ページを繰り返し書いても WAL に出るのは最終状態 1 件（latest-wins coalesce）
   なので、中間状態の Encode は無駄。これを `FlushPending`（commit）へ遅延し、ホットページ反復書込
@@ -383,7 +382,7 @@ carry-column は no-alias 比 ±3% 以内。詳細:
 
 第一級Nexusの走査・書き込み・Match を製品 API（`QuiverDatabase` / DSL / Match）経由で
 再測定した（AMD64 / .NET 10.0.9 / workstation GC）。三ゲート全て合格。詳細:
-[docs/benchmarks/2026-07-06_HYP-6c_Nexus.md](../benchmarks/2026-07-06_HYP-6c_Nexus.md)。
+[docs/benchmarks/2026-07-06_HYP-6c_Hyperedge.md](../benchmarks/2026-07-06_HYP-6c_Hyperedge.md)。
 runner: `--nexus-traversal` / `--nexus-write` / `--nexus-match`。
 
 - **走査**（`g.Vertex(hub).Nexuses("Fact","subject").OtherMembers("object")` の co-membership view
@@ -399,11 +398,11 @@ runner: `--nexus-traversal` / `--nexus-write` / `--nexus-match`。
 
 ## 開発状況
 
-現在の実装トラックは [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md) である。
+現行アーキテクチャの設計判断と実装履歴は [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md) に記録する。
 
 `docs/spec/` は current as-built を記録する。
 
-target の設計は計画書を正本とし、実装されるまで as-built として記述しない。
+計画書にある未実装の提案は `docs/spec/` の as-built へ混ぜない。
 
 過去トラックの完了記録は historical record として残す。
 
@@ -419,11 +418,9 @@ bootstrap は `develop` で行い、その後の tracked な再設計作業は `
 
 物理コピーした別ライブラリや、後日の成果物差し替えで並行開発しない。
 
-この作業ではユーザー指示により外部 push と upstream 設定を保留している。
+各 Wave の commit は承認済み topic branch へ push し、tag と `develop` への統合はそれぞれ個別承認後に行う。
 
-ローカル commit と tag は有効な進行記録だが、remote との同期を意味しない。
-
-外部公開や `develop` への統合を再開する前に、[再設計の実行手順](../../plans/single-writer-redesign-process.md) §2〜§6 で定める未実施条件を満たす。
+`develop` へ統合する前に、[再設計の実行手順](../../plans/single-writer-redesign-process.md) §2〜§6 の gate と承認手順を満たす。
 
 `.agents/` と `.claude/` は git 管理外のローカル設定である。
 
@@ -535,6 +532,25 @@ focused `tools/Quiver.Studio` build と `dotnet build Quiver.slnx -v minimal` �
 
 `git diff redesign-baseline -- src/Quiver/Transactions src/Quiver/Wal src/Quiver/Storage` と `git diff redesign-baseline -- src tests benchmarks` は差分なしだった。
 
+### Wave 10 総合監査記録
+
+2026-07-22 に commit `d89c9fc8616a4bb04c21c608769b6f93b23d54b5` を対象として、Single Writer + Snapshot Readers 再設計の
+最終 cleanup と総合 gate を監査した。
+
+column cache、direct-array edge property join、group commit、旧開発 runner を active source/API/test/benchmark から削除し、
+transaction contract、snapshot visibility、writer lease、WAL winner/loser、vector payload atomicity、derived index rebuild の名称と配置へ統一した。
+full-text catalog と definition codec は current format のみを受理し、旧 mutable postings metadata と decode fallback を削除した。
+production source、tests、benchmarks、samples、tools、public docs の legacy scan と track-marker scan は 0 件だった。
+
+Release solution build は 0 warnings、0 errors、全 1,988 tests、crash/Chaos 151 tests、segment crash 16 tests、Fuzz 32 tests が成功した。
+Native AOT publish は IL2xxx/IL3xxx warning 0 件で、生成 binary も正常終了した。
+zero-dependency、Markdown link、skill redirect と各 guardrail self-test は成功し、skill mirror の SHA-256 も一致した。
+
+同一 commit・同一環境で single writer、32 readers、page/WAL、CSR、Nexus、full-text、vector、segment publish、recall、vacuum を再測定し、
+設計正本 §10.4 の correctness と数値 gate はすべて合格した。
+環境、コマンド、出力値、判定は
+[Single Writer + Snapshot Readers 総合 baseline](../benchmarks/2026-07-22_SingleWriterSnapshotReaders_Baseline.md) に保存している。
+
 ## Versioning / API 安定性
 
 Quiver は [Semantic Versioning](https://semver.org/lang/ja/)（`MAJOR.MINOR.PATCH`）に従う。
@@ -564,7 +580,7 @@ public API surface は [tests/Quiver.PublicApi.Tests/](../../tests/Quiver.Public
 
 #### incubating（非公開）
 
-`Quiver.Embedding`（テキスト埋め込みパイプライン、VEC-4）は**現状 NuGet 公開しない**（`IsPackable=false`、
+`Quiver.Embedding`（テキスト埋め込みパイプライン）は**現状 NuGet 公開しない**（`IsPackable=false`、
 リポジトリには残しビルド/テスト対象）。理由: ①具体プロバイダ未同梱で単体では動かない（`IEmbeddingProvider` を
 利用者が実装する必要がある）②実消費者が単体テストのみ ③主用途の `Quiver.Rag` はチャンク埋め込みを
 `IChunkEmbedder` のインライン注入で行い本パイプラインを使わない。参照プロバイダ実装・サンプル・実消費者

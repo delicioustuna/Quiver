@@ -181,7 +181,7 @@ cosine の決定的コーパスで true recall@10 **0.950**、30% 削除後 **0.
 
 **設計根拠**: efSearch=200 まで広げても旧構築グラフは 0.825 止まりで、検索時パラメタだけでは
 0.95 に届かない。payload cache 導入後は新既定の 1.51 ms も導入前の旧既定 2.21 ms より速い。
-`Quiver.Benchmarks.RecallCheck` は旧構成を比較基準、新既定を 0.95 SLA ゲートとして維持する。
+`Quiver.Benchmarks.RecallCheck` は current default の構築前後を測定し、recall@10 0.95 を SLA gate として維持する。
 
 ## 自動マイグレーションなし {#no-migration}
 

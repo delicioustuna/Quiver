@@ -4,7 +4,7 @@ using Quiver.Text;
 
 namespace Quiver.Index.FullText;
 
-/// <summary>全文definitionを既存catalogのtarget payloadへversion付きで格納するcodec。</summary>
+/// <summary>全文definitionをcatalogのtarget payloadへ現行形式で格納するcodec。</summary>
 internal static class FullTextDefinitionCodec
 {
     private const string Prefix = "qft2;";
@@ -38,7 +38,7 @@ internal static class FullTextDefinitionCodec
         if (encoded.StartsWith(Prefix, StringComparison.Ordinal))
         {
             string[] parts = encoded.Split(';');
-            if (parts.Length is 8 or 9
+            if (parts.Length == 9
                 && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int rawKind)
                 && Enum.IsDefined((PropertyOwnerKind)rawKind)
                 && double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out double k1)
@@ -49,10 +49,8 @@ internal static class FullTextDefinitionCodec
             {
                 string decodedScope = Encoding.UTF8.GetString(
                     Convert.FromBase64String(parts[2]));
-                IReadOnlyList<ITokenFilter>? filters = parts.Length == 9
-                    ? DecodeFilters(Encoding.UTF8.GetString(
-                        Convert.FromBase64String(parts[8])))
-                    : null;
+                IReadOnlyList<ITokenFilter>? filters = DecodeFilters(
+                    Encoding.UTF8.GetString(Convert.FromBase64String(parts[8])));
                 return new(
                     name,
                     new(
@@ -70,24 +68,8 @@ internal static class FullTextDefinitionCodec
             }
         }
 
-        int separator = encoded.IndexOf(':');
-        if (separator > 0
-            && int.TryParse(encoded.AsSpan(0, separator), out int legacyKind)
-            && Enum.IsDefined((PropertyOwnerKind)legacyKind))
-        {
-            string scope = encoded[(separator + 1)..];
-            return new(
-                name,
-                new(
-                    (PropertyOwnerKind)legacyKind,
-                    propertyKey,
-                    scope.Length == 0 ? null : scope),
-                tokenizerId);
-        }
-        return new(
-            name,
-            new(PropertyOwnerKind.Vertex, propertyKey, encoded),
-            tokenizerId);
+        throw new InvalidDataException(
+            "Full-text definition does not use the current qft2 catalog format.");
     }
 
     private static string EncodeFilters(IReadOnlyList<ITokenFilter>? filters)

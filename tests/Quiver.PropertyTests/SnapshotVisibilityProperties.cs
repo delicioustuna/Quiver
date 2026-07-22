@@ -5,7 +5,7 @@ using Quiver.Core;
 
 namespace Quiver.PropertyTests;
 
-public class MvccVisibilityProperties
+public class SnapshotVisibilityProperties
 {
     private const long HighWater = 90;
     private const long SelfTxId = 100;
@@ -27,28 +27,28 @@ public class MvccVisibilityProperties
     private static SnapshotState Snapshot(VisibilityCase c)
         => new(HighWater, new HashSet<long>(c.AbortedGaps));
 
-    [Property(MaxTest = 1000, Arbitrary = [typeof(MvccVisibilityProperties)])]
+    [Property(MaxTest = 1000, Arbitrary = [typeof(SnapshotVisibilityProperties)])]
     public Property Zero_xmin_is_always_invisible(VisibilityCase c)
     {
         SnapshotState snapshot = Snapshot(c);
         return (!Visibility.IsVisible(0, c.Xmax, in snapshot, Self)).ToProperty();
     }
 
-    [Property(MaxTest = 1000, Arbitrary = [typeof(MvccVisibilityProperties)])]
+    [Property(MaxTest = 1000, Arbitrary = [typeof(SnapshotVisibilityProperties)])]
     public Property Own_live_write_is_visible(VisibilityCase c)
     {
         SnapshotState snapshot = Snapshot(c);
         return Visibility.IsVisible(SelfTxId, 0, in snapshot, Self).ToProperty();
     }
 
-    [Property(MaxTest = 1000, Arbitrary = [typeof(MvccVisibilityProperties)])]
+    [Property(MaxTest = 1000, Arbitrary = [typeof(SnapshotVisibilityProperties)])]
     public Property Own_delete_is_invisible(VisibilityCase c)
     {
         SnapshotState snapshot = Snapshot(c);
         return (!Visibility.IsVisible(SelfTxId, SelfTxId, in snapshot, Self)).ToProperty();
     }
 
-    [Property(MaxTest = 1000, Arbitrary = [typeof(MvccVisibilityProperties)])]
+    [Property(MaxTest = 1000, Arbitrary = [typeof(SnapshotVisibilityProperties)])]
     public Property Future_xmin_is_invisible(VisibilityCase c)
     {
         SnapshotState snapshot = Snapshot(c);
@@ -56,7 +56,7 @@ public class MvccVisibilityProperties
         return (!Visibility.IsVisible(future, 0, in snapshot, Self)).ToProperty();
     }
 
-    [Property(MaxTest = 1000, Arbitrary = [typeof(MvccVisibilityProperties)])]
+    [Property(MaxTest = 1000, Arbitrary = [typeof(SnapshotVisibilityProperties)])]
     public Property Aborted_xmin_is_invisible(VisibilityCase c)
     {
         long xmin = 1 + Math.Abs(c.Xmin % (HighWater - 1));
@@ -65,7 +65,7 @@ public class MvccVisibilityProperties
         return (!Visibility.IsVisible(xmin, 0, in snapshot, Self)).ToProperty();
     }
 
-    [Property(MaxTest = 1000, Arbitrary = [typeof(MvccVisibilityProperties)])]
+    [Property(MaxTest = 1000, Arbitrary = [typeof(SnapshotVisibilityProperties)])]
     public Property Aborted_xmax_does_not_hide_visible_record(VisibilityCase c)
     {
         long xmax = 2 + Math.Abs(c.Xmax % (HighWater - 2));

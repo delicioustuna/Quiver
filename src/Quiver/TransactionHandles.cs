@@ -143,11 +143,6 @@ public sealed class ReadTransaction : IReadTransaction, IReadTransactionInternal
     IAdjacencySegmentStore? IReadTransactionInternal.AdjacencySegments => _core.AdjacencySegments;
     QueryResult IReadTransactionInternal.Execute(IPhysicalOperator plan) => _core.Execute(plan);
     IQueryCursor IReadTransactionInternal.ExecuteCursor(IPhysicalOperator plan) => _core.ExecuteCursor(plan);
-    bool IReadTransactionInternal.TryColumnAggregate(
-        EntityKind kind,
-        string key,
-        out ColumnAggregate result)
-        => _core.TryColumnAggregate(kind, key, out result);
 }
 
 /// <summary>
@@ -351,9 +346,4 @@ public sealed class WriteTransaction : IWriteTransaction, IReadTransactionIntern
     IAdjacencySegmentStore? IReadTransactionInternal.AdjacencySegments => _core.AdjacencySegments;
     QueryResult IReadTransactionInternal.Execute(IPhysicalOperator plan) => _core.Execute(plan);
     IQueryCursor IReadTransactionInternal.ExecuteCursor(IPhysicalOperator plan) => _core.ExecuteCursor(plan);
-    bool IReadTransactionInternal.TryColumnAggregate(
-        EntityKind kind,
-        string key,
-        out ColumnAggregate result)
-        => _core.TryColumnAggregate(kind, key, out result);
 }

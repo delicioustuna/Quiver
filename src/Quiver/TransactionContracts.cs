@@ -7,7 +7,7 @@ namespace Quiver;
 
 /// <summary>
 /// 開始時点のスナップショットを読むトランザクション。
-/// entity/property read、query、read-only schema catalog を提供する。
+/// エンティティとプロパティの読み取り、query、read-only schema catalog を提供する。
 /// </summary>
 public interface IReadTransaction : IDisposable
 {

@@ -39,10 +39,10 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     private const int CatalogBlobLenOffset = 0;   // int32: 直列化ブロブ長 (secondary + FT 両セクション合計)
     private const int CatalogEntryCountOffset = 4; // int32: secondary 索引件数
     private const int CatalogFtCountOffset = 8;    // int32: 全文索引件数
-    private const int CatalogFormatVersionOffset = 12;
+    internal const int CatalogFormatVersionOffset = 12;
     private const int CatalogMigrationCountOffset = 16;
     private const int CatalogHeaderLength = 20;
-    private const int CatalogFormatVersion = 4;
+    internal const byte CatalogFormatVersion = 5;
 
     private readonly SingleFileContainer _container;
     private readonly bool _ownsContainer;
@@ -93,7 +93,17 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     {
         Directory.CreateDirectory(directory);
         var container = new SingleFileContainer(Path.Combine(directory, "graph.quiver"));
-        return new IndexManager(container, ownsContainer: true);
+        try
+        {
+            return new IndexManager(container, ownsContainer: true);
+        }
+        catch
+        {
+            // Constructor failure transfers no ownership to a returned manager.
+            // Leaving disposal to the caller is impossible because no instance exists.
+            container.Dispose();
+            throw;
+        }
     }
 
     public IBTreeIndex<int>    CreateInt32Index(string name)  => GetOrCreate(name, new Int32KeyCodec(),  PropertyTypeFlags.Int32,  IndexKeyKind.Int32);
@@ -502,8 +512,6 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             target,
             propertyKey,
             tokenizerId,
-            legacyPostingsTenant: 0,
-            legacyNormsTenant: 0,
             state: IndexLifecycleState.RebuildRequired,
             manifest: string.Empty);
         PersistCatalog();
@@ -532,8 +540,6 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     {
         if (!_fullTextDefinitions.Remove(name, out FullTextCatalogEntry? definition))
             return false;
-        _usedTenantIds.Remove(definition.LegacyPostingsTenantId);
-        _usedTenantIds.Remove(definition.LegacyNormsTenantId);
         PersistCatalog();
         return true;
     }
@@ -572,8 +578,6 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         string target,
         string propertyKey,
         string tokenizerId,
-        byte legacyPostingsTenant,
-        byte legacyNormsTenant,
         IndexLifecycleState state,
         string manifest)
     {
@@ -582,15 +586,9 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             target,
             propertyKey,
             tokenizerId,
-            legacyPostingsTenant,
-            legacyNormsTenant,
             state,
             manifest);
         _fullTextDefinitions[name] = definition;
-        if (legacyPostingsTenant != 0)
-            _usedTenantIds.Add(legacyPostingsTenant);
-        if (legacyNormsTenant != 0)
-            _usedTenantIds.Add(legacyNormsTenant);
         return definition;
     }
 
@@ -612,12 +610,22 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             ftCount = BinaryPrimitives.ReadInt32LittleEndian(hh.Data[CatalogFtCountOffset..]);
             formatVersion = BinaryPrimitives.ReadInt32LittleEndian(
                 hh.Data[CatalogFormatVersionOffset..]);
-            migrationCount = formatVersion >= 4
-                ? BinaryPrimitives.ReadInt32LittleEndian(
-                    hh.Data[CatalogMigrationCountOffset..])
-                : 0;
+            migrationCount = BinaryPrimitives.ReadInt32LittleEndian(
+                hh.Data[CatalogMigrationCountOffset..]);
         }
         finally { hh.Dispose(); }
+        if (formatVersion != CatalogFormatVersion)
+        {
+            if ((uint)formatVersion > byte.MaxValue)
+            {
+                throw new CorruptionException(
+                    $"Index catalog format version {formatVersion} is outside the encoded range.");
+            }
+            throw new StorageFormatMismatchException(
+                "indexcatalog",
+                (byte)formatVersion,
+                CatalogFormatVersion);
+        }
         if (blobLen <= 0) return;
 
         byte[] blob = new byte[blobLen];
@@ -644,25 +652,22 @@ internal sealed class IndexManager : IIndexManager, IDisposable
             int nameLen = BinaryPrimitives.ReadUInt16LittleEndian(blob.AsSpan(pos)); pos += 2;
             string indexName = Encoding.UTF8.GetString(blob, pos, nameLen); pos += nameLen;
 
-            if (formatVersion >= 2)
+            var ownerKind = (PropertyOwnerKind)blob[pos++];
+            var state = (IndexLifecycleState)blob[pos++];
+            string scope = ReadString(blob, ref pos);
+            string propertyKey = ReadString(blob, ref pos);
+            IndexKind kind = IndexKindFromFlags(typeFlags);
+            var target = new PropertyTarget(
+                ownerKind,
+                propertyKey,
+                string.IsNullOrEmpty(scope) ? null : scope);
+            var definition = new ScalarIndexDefinition(indexName, target, kind);
+            _definitions[indexName] = new ScalarIndexMetadata(definition, state);
+            if (ownerKind == PropertyOwnerKind.Vertex && !string.IsNullOrEmpty(scope))
             {
-                var ownerKind = (PropertyOwnerKind)blob[pos++];
-                var state = (IndexLifecycleState)blob[pos++];
-                string scope = ReadString(blob, ref pos);
-                string propertyKey = ReadString(blob, ref pos);
-                IndexKind kind = IndexKindFromFlags(typeFlags);
-                var target = new PropertyTarget(
-                    ownerKind,
-                    propertyKey,
-                    string.IsNullOrEmpty(scope) ? null : scope);
-                var definition = new ScalarIndexDefinition(indexName, target, kind);
-                _definitions[indexName] = new ScalarIndexMetadata(definition, state);
-                if (ownerKind == PropertyOwnerKind.Vertex && !string.IsNullOrEmpty(scope))
-                {
-                    var binding = (scope, propertyKey);
-                    _bindings[binding] = indexName;
-                    _bindingByName[indexName] = binding;
-                }
+                var binding = (scope, propertyKey);
+                _bindings[binding] = indexName;
+                _bindingByName[indexName] = binding;
             }
 
             _indexTenantIds[indexName] = tenantId;
@@ -674,23 +679,17 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         // 全文索引レコードセクション (secondary の直後)。
         for (int i = 0; i < ftCount; i++)
         {
-            byte postingsTenant = blob[pos]; pos += 1;
-            byte normsTenant = blob[pos]; pos += 1;
             string label = ReadString(blob, ref pos);
             string propKey = ReadString(blob, ref pos);
             string tokenizerId = ReadString(blob, ref pos);
             string name = ReadString(blob, ref pos);
-            IndexLifecycleState state = formatVersion >= 3
-                ? (IndexLifecycleState)blob[pos++]
-                : IndexLifecycleState.RebuildRequired;
-            string manifest = formatVersion >= 3 ? ReadString(blob, ref pos) : string.Empty;
+            var state = (IndexLifecycleState)blob[pos++];
+            string manifest = ReadString(blob, ref pos);
             MaterializeFullTextDefinition(
                 name,
                 label,
                 propKey,
                 tokenizerId,
-                postingsTenant,
-                normsTenant,
                 state,
                 manifest);
         }
@@ -784,7 +783,7 @@ internal sealed class IndexManager : IIndexManager, IDisposable
     {
         // 1. カタログを直列化する。
         //    secondary セクション (索引件数=entryCount): tenantId(1) typeFlags(8) nameLen(2) nameBytes。
-        //    全文索引セクション (件数=ftCount): postingsTenant(1) normsTenant(1)
+        //    全文索引セクション (件数=ftCount):
         //       label(len+utf8) propKey(len+utf8) tokenizerId(len+utf8) name(len+utf8)
         //       lifecycleState(1) manifest(len+utf8)。
         var blobList = new List<byte>();
@@ -815,8 +814,6 @@ internal sealed class IndexManager : IIndexManager, IDisposable
         int ftCount = 0;
         foreach (FullTextCatalogEntry definition in _fullTextDefinitions.Values)
         {
-            blobList.Add(definition.LegacyPostingsTenantId);
-            blobList.Add(definition.LegacyNormsTenantId);
             WriteString(blobList, definition.Target);
             WriteString(blobList, definition.PropertyKey);
             WriteString(blobList, definition.TokenizerId);

@@ -199,64 +199,6 @@ public sealed class QuiverDatabase : IDisposable
     }
 
     /// <summary>
-    /// <see cref="EdgeId"/> から
-    /// <paramref name="propertyKey"/> のスカラ値へのジョインインデックス (SID 風) を構築する。
-    /// 重み付きトラバーサル、エッジフィルタ、リレーション ID を既に持っているアルゴリズムカーネルで、
-    /// プロパティチェーンを辿らずに値を取り出す用途を想定。
-    /// </summary>
-    /// <remarks>
-    /// 構築コストは O(R + P) (リレーションストアの 1 パス + 各エッジのプロパティチェーン走査)。
-    /// 構築後のミューテーションは可視化されない — 鮮度が必要なら、グラフを変更した後に再構築する。
-    /// 返却インデックスは構築トランザクションよりも長く生存可能。
-    /// </remarks>
-    /// <param name="propertyKey">プロパティキー名。書き込みトランザクションの schema editor で事前に作成済みであること。</param>
-    /// <param name="expectedType">射影するスカラ型。他の型の値はスキップされる。</param>
-    public Storage.Records.IEdgePropertyJoinIndex BuildEdgePropertyJoinIndex(
-        string propertyKey,
-        Storage.Records.PropertyValueType expectedType)
-    {
-        ArgumentNullException.ThrowIfNull(propertyKey);
-        if (!_backend.SchemaCatalog.TryGetPropertyKeyId(propertyKey, out var keyId))
-            throw new ArgumentException(
-                $"未登録のプロパティキーです: '{propertyKey}'。",
-                nameof(propertyKey));
-        using var tx = _backend.Transactions.BeginRead();
-        return Storage.Records.DirectArrayEdgePropertyJoinIndex.Build(
-            tx.Edges, tx.Properties, keyId, expectedType);
-    }
-
-    // ===== opt-in 列指向 (CreateColumn / DropColumn) =====
-
-    private BinaryGraphStorageBackend RequireBinaryForColumns()
-        => _backend as BinaryGraphStorageBackend
-           ?? throw new NotSupportedException("列指向 (CreateColumn) は binary backend 専用です。");
-
-    /// <summary>
-    /// 指定 <paramref name="kind"/> の scalar プロパティ <paramref name="propertyKey"/> を
-    /// 列化登録する (opt-in)。現データから列を構築し登録を永続化する。既に列化済みなら false。
-    /// Vertex、Edge、Nexusを対象にできる。
-    /// </summary>
-    public bool CreateColumn(Core.EntityKind kind, string propertyKey)
-    {
-        ArgumentNullException.ThrowIfNull(propertyKey);
-        return RequireBinaryForColumns().CreateColumn(kind, propertyKey);
-    }
-
-    /// <summary>列化登録を解除する。未登録なら false。</summary>
-    public bool DropColumn(Core.EntityKind kind, string propertyKey)
-    {
-        ArgumentNullException.ThrowIfNull(propertyKey);
-        return RequireBinaryForColumns().DropColumn(kind, propertyKey);
-    }
-
-    /// <summary>列指向の読み取り経路を検証するため、列の可視値合計を返す。未登録なら -1。</summary>
-    internal long ColumnProjectSumForTest(Core.EntityKind kind, string propertyKey)
-    {
-        if (!_backend.SchemaCatalog.TryGetPropertyKeyId(propertyKey, out var keyId)) return -1;
-        return RequireBinaryForColumns().ColumnProjectSumForTest(kind, keyId.Value);
-    }
-
-    /// <summary>
     /// 現在のEdge状態から不変ベースビューを再構築し、
     /// tombstone を破棄してエポックを進める。本呼び出し以降、生存中のエッジはすべてベースビューから
     /// 提供され、新しいEdgeが作成されるまで delta ウォークは no-op になる。

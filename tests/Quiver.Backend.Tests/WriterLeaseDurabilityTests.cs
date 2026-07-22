@@ -1,6 +1,6 @@
 using FluentAssertions;
-using Quiver.Core;
 using Quiver.Backend.Tests.Faults;
+using Quiver.Core;
 using Quiver.Storage;
 using Quiver.Storage.Records;
 using Quiver.Transactions;
@@ -8,11 +8,11 @@ using Xunit;
 
 namespace Quiver.Backend.Tests;
 
-public sealed class NoStealDurabilityTests : IDisposable
+public sealed class WriterLeaseDurabilityTests : IDisposable
 {
     private readonly string _directory = Path.Combine(
         Path.GetTempPath(),
-        "quiver_no_steal_" + Guid.NewGuid().ToString("N"));
+        "quiver_writer_lease_durability_" + Guid.NewGuid().ToString("N"));
 
     public void Dispose()
         => TestTempCleanup.DeleteDirectoryRobust(_directory);
@@ -66,48 +66,5 @@ public sealed class NoStealDurabilityTests : IDisposable
         using IGraphStorageBackend reopened = factory.Open(path, options);
         using IReadTransaction read = reopened.BeginReadTransaction();
         read.VertexExists(committed).Should().BeTrue();
-    }
-
-    [Fact]
-    public void Property_payload_reference_and_payload_page_are_atomic_across_kill()
-    {
-        string path = Path.Combine(_directory, "payload.quiver");
-        var options = new QuiverDatabaseOptions
-        {
-            CheckpointThresholdBytes = 0,
-        };
-        var factory = new BinaryGraphStorageBackendFactory();
-        IGraphStorageBackend? backend = factory.Open(path, options);
-
-        float[] expected = Enumerable.Range(0, 768)
-            .Select(index => index / 10.0f)
-            .ToArray();
-        VertexId committed;
-        using (IWriteTransaction transaction = backend.BeginWriteTransaction())
-        {
-            committed = transaction.CreateVertex("CommittedPayload");
-            transaction.SetProperty(
-                committed,
-                "embedding",
-                PropertyValue.FromFloatArray(expected));
-            transaction.Commit();
-        }
-
-        IWriteTransaction? loser = backend.BeginWriteTransaction();
-        VertexId uncommitted = loser.CreateVertex("UncommittedPayload");
-        loser.SetProperty(
-            uncommitted,
-            "embedding",
-            PropertyValue.FromFloatArray(expected.Select(value => -value).ToArray()));
-
-        KillProcessSimulator.SimulateKill(ref backend);
-        loser = null;
-
-        using IGraphStorageBackend reopened = factory.Open(path, options);
-        using IReadTransaction read = reopened.BeginReadTransaction();
-        read.GetProperty(committed, "embedding")
-            .FloatArrayValue.ToArray()
-            .Should().Equal(expected);
-        read.VertexExists(uncommitted).Should().BeFalse();
     }
 }

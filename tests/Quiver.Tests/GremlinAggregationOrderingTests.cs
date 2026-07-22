@@ -10,12 +10,12 @@ namespace Quiver.Tests;
 /// 数値集約 (Sum、Max、Min、Mean)、ブロッキングソート
 /// (Order、OrderBy、OrderByDescending)、グループ化 (GroupCount)、Fold を検証する。
 /// </summary>
-public sealed class GremlinCompatGc3Tests : IDisposable
+public sealed class GremlinAggregationOrderingTests : IDisposable
 {
     private readonly string _dir;
     private readonly QuiverDatabase _db;
 
-    public GremlinCompatGc3Tests()
+    public GremlinAggregationOrderingTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_gc3_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));

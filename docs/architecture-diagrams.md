@@ -1,7 +1,7 @@
 # Quiver アーキテクチャ図
 
 用途別の Mermaid 図集。
-内部実装の図（書き込みフロー、リカバリ、クエリパイプライン、MVCC 可視性）は [内部実装の図](design/internals-diagrams.md) を参照。
+内部実装の契約は [as-built 仕様](spec/00_overview.md) と [開発者向け実装 map](design/development.md) を参照。
 
 ---
 
@@ -18,7 +18,7 @@ flowchart TB
     end
 
     subgraph core["Quiver（エンジン中核）"]
-        API["QuiverDatabase / GraphTransaction<br/>Fluent Traversal / Match DSL"]
+        API["QuiverDatabase / IReadTransaction / IWriteTransaction<br/>Fluent Traversal / Match DSL"]
         Query["Query Engine"]
         TxMgr["Transaction Manager<br/>MVCC / Checkpoint"]
         Index["Scalar B+Tree / Immutable Full-Text Segments"]
@@ -83,9 +83,9 @@ sequenceDiagram
     participant Rag as RagStore
     participant Chk as Chunker
     participant Emb as IChunkEmbedder
-    participant DB as GraphTransaction
+    participant DB as IWriteTransaction
 
-    Ext->>Rag: IngestAsync(IngestedDocument)
+    Ext->>Rag: UpsertDocumentAsync(IngestedDocument)
     Rag->>Chk: ブロック列をチャンク分割
     Rag->>Emb: EmbedAsync(チャンクテキスト[])
     Emb-->>Rag: float[][]

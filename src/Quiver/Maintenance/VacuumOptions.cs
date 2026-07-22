@@ -77,7 +77,6 @@ public enum VacuumTarget
 /// <param name="HorizonTxId">この実行で採用した visibility horizon。これ未満の xmax を持つ dead version が回収対象。</param>
 /// <param name="Skipped">バックエンドが vacuum を実行しなかったとき <see langword="true"/>。</param>
 /// <param name="TruncatedPages">物理 truncate で vertices/edges/props 3 ストア合計から削減したページ数。</param>
-/// <param name="ReclaimedColumnVersions">列 (opt-in) の delta から merge した超過版数。</param>
 /// <param name="ReclaimedNexuses">物理回収した dead Nexus header 数。</param>
 /// <param name="ReclaimedIncidences">dead Nexusに付随して回収した incidence 数。</param>
 /// <param name="RetiredVectorManifests">snapshot horizon を越えて退役した vector manifest 数。</param>
@@ -92,7 +91,6 @@ public sealed record VacuumReport(
     long HorizonTxId,
     bool Skipped,
     long TruncatedPages = 0,
-    int ReclaimedColumnVersions = 0,
     int ReclaimedNexuses = 0,
     int ReclaimedIncidences = 0,
     int RetiredVectorManifests = 0,

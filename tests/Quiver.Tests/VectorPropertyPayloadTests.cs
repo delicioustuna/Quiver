@@ -7,12 +7,12 @@ using Xunit;
 
 namespace Quiver.Tests;
 
-public sealed class FloatArrayPropertyTests : IDisposable
+public sealed class VectorPropertyPayloadTests : IDisposable
 {
     private readonly string _dir;
     private readonly QuiverDatabase _db;
 
-    public FloatArrayPropertyTests()
+    public VectorPropertyPayloadTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_fa_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(Path.Combine(_dir, "graph.quiver"));

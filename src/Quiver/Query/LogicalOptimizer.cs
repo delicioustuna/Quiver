@@ -29,7 +29,7 @@ internal static class LogicalOptimizer
 {
     /// <summary>
     /// 構造ヒントが graph-first を示唆していても、label cardinality / TotalVertices が
-    /// この値以上なら vector-first にフォールバックする (sidecar 不在 backend で使う legacy 単一閾値)。
+    /// この値以上なら vector-first にフォールバックする (sidecar 不在 backend の保守的な単一閾値)。
     /// </summary>
     internal const double VectorFirstLabelFraction = 0.30;
 
@@ -62,7 +62,7 @@ internal static class LogicalOptimizer
     /// 構造ヒントが graph-first を示唆していても、label cardinality / TotalVertices が
     /// この値以上なら全文検索を text-first に据え置く保守閾値。BM25 graph-first は df のため
     /// postings を全走査するので、候補集合が十分小さい (低選択率ラベル) ときだけ得をする。KNN と違い
-    /// dim 概念が無いため単一定数 (legacy KnnPushdown と同値)。ベンチ実測で調整する余地がある。
+    /// dim 概念が無いため、sidecar 不在時と同じ単一定数を使う。ベンチ実測で調整する余地がある。
     /// </summary>
     internal const double TextFirstLabelFraction = 0.30;
 

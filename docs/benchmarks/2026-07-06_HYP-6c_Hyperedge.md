@@ -5,13 +5,13 @@
   ハーネスではなく **製品 API** (`QuiverDatabase` / `IReadTransaction` / `IWriteTransaction` / fluent DSL / Match) を
   通して再測定する。
 - ベンチ:
-  - [benchmarks/Quiver.Benchmarks/HyperedgeTraversalBenchmarks.cs](../../benchmarks/Quiver.Benchmarks/HyperedgeTraversalBenchmarks.cs)
-  - [benchmarks/Quiver.Benchmarks/HyperedgeWriteBenchmarks.cs](../../benchmarks/Quiver.Benchmarks/HyperedgeWriteBenchmarks.cs)
-  - [benchmarks/Quiver.Benchmarks/HyperedgeMatchBenchmarks.cs](../../benchmarks/Quiver.Benchmarks/HyperedgeMatchBenchmarks.cs)
+  - [benchmarks/Quiver.Benchmarks/NexusTraversalBenchmarks.cs](../../benchmarks/Quiver.Benchmarks/NexusTraversalBenchmarks.cs)
+  - [benchmarks/Quiver.Benchmarks/NexusWriteBenchmarks.cs](../../benchmarks/Quiver.Benchmarks/NexusWriteBenchmarks.cs)
+  - [benchmarks/Quiver.Benchmarks/NexusMatchBenchmarks.cs](../../benchmarks/Quiver.Benchmarks/NexusMatchBenchmarks.cs)
 - コマンド:
-  - `dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --hyperedge-traversal`
-  - `dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --hyperedge-write`
-  - `dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --hyperedge-match`
+  - `dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --nexus-traversal`
+  - `dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --nexus-write`
+  - `dotnet run -c Release --project benchmarks/Quiver.Benchmarks -- --nexus-match`
 
 ## 環境
 

@@ -10,12 +10,12 @@ namespace Quiver.Tests;
 /// 可変長反復 (.Repeat.Times / .Emit)、最短経路距離、重複除去、
 /// 行単位の分岐 (.Union / .Coalesce / .Optional) を検証する。
 /// </summary>
-public sealed class GremlinCompatGc4Tests : IDisposable
+public sealed class GremlinBranchingPathTests : IDisposable
 {
     private readonly string _dir;
     private readonly QuiverDatabase _db;
 
-    public GremlinCompatGc4Tests()
+    public GremlinBranchingPathTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_gc4_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));

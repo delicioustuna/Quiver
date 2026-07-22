@@ -16,12 +16,12 @@ namespace Quiver.Tests;
 /// committed high-water が進む一連の経路を確認する。
 /// </para>
 /// </summary>
-public sealed class MvccVisibilityTests : IDisposable
+public sealed class SnapshotVisibilityTests : IDisposable
 {
     private readonly string _dir;
     private readonly QuiverDatabase _db;
 
-    public MvccVisibilityTests()
+    public SnapshotVisibilityTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "quiver_mvcc_" + Guid.NewGuid().ToString("N"));
         _db = QuiverDatabase.Open(System.IO.Path.Combine(_dir, "graph.quiver"));

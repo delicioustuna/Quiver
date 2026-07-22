@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Quiver;
 using Quiver.Core;
 using Quiver.Storage.Records;
+using Quiver.Transactions;
 
 namespace Quiver.Benchmarks.Standalone;
 
@@ -334,6 +335,10 @@ public static class CleanSlateCsrProductIntegrationRunner
 
         var adj = tx.AsInternal().AdjacencySegments
             ?? throw new InvalidOperationException("Adjacency block store was not built.");
+        var materializer = new EntityIdentityMaterializer(
+            tx.AsInternal().Inner.Vertices,
+            tx.AsInternal().Inner.Edges,
+            tx.AsInternal().Inner.Nexuses);
 
         using var first = adj.OpenCursor(hub, Direction.Outgoing, null);
         while (first.MoveNext())
@@ -348,7 +353,12 @@ public static class CleanSlateCsrProductIntegrationRunner
                     continue;
 
                 long payloadScore = second.WeightRaw;
-                var rowValue = tx.GetProperty(second.Edge, ScoreKey);
+                if (!materializer.TryEdge(second.Edge, out EdgeId logicalEdge))
+                {
+                    mismatches++;
+                    continue;
+                }
+                var rowValue = tx.GetProperty(logicalEdge, ScoreKey);
                 long rowScore = rowValue.Type == PropertyValueType.Int64 ? rowValue.Int64Value : 0;
                 if (payloadScore != rowScore)
                     mismatches++;

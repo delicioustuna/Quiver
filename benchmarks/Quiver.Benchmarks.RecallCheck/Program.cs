@@ -3,38 +3,25 @@ using Quiver.Core;
 using Quiver.Testing;
 using System.Diagnostics;
 
-// true recall@10 の二段ゲート。
-//   1) legacy ゲート — 旧既定 (M=16/Mmax0=32/efC=200) の比較基準を維持する。
-//   2) default ゲート — recall@10 ≥ 0.95 を満たす新既定 (M=32/Mmax0=64/efC=400)
-//      がその水準を維持し続けることを保証する。
-// どちらも brute-force exact top-10 を ground truth とし、30% 削除後は生存集合で再計算する。
+// 現行 HNSW 既定値の true recall@10 gate。
+// brute-force exact top-10 を ground truth とし、30% 削除後は生存集合で再計算する。
+var scenario = new RecallScenario(
+    Name: "default",
+    HnswM: 32,
+    HnswMMax0: 64,
+    HnswEfConstruction: 400,
+    MinimumRecall: 0.95);
 
-var scenarios = new[]
+if (!RunScenario(scenario))
 {
-    new Scenario(
-        Name: "legacy",
-        HnswM: 16, HnswMMax0: 32, HnswEfConstruction: 200,
-        MinimumRecall: 0.80),
-    new Scenario(
-        Name: "default",
-        HnswM: 32, HnswMMax0: 64, HnswEfConstruction: 400,
-        MinimumRecall: 0.95),
-};
-
-bool allPassed = true;
-foreach (var scenario in scenarios)
-    allPassed &= RunScenario(scenario);
-
-if (!allPassed)
-{
-    Console.Error.WriteLine("RecallCheck FAILED: one or more recall gates fell below their threshold.");
+    Console.Error.WriteLine("RecallCheck FAILED: recall fell below the current threshold.");
     return 1;
 }
 
 Console.WriteLine("RecallCheck PASSED");
 return 0;
 
-static bool RunScenario(Scenario scenario)
+static bool RunScenario(RecallScenario scenario)
 {
     const string IndexName = "recall_check";
     string directory = Path.Combine(
@@ -83,8 +70,7 @@ static bool RunScenario(Scenario scenario)
                 random, VectorRecallCorpus.RecallDimensions))
             .ToArray();
 
-        if (scenario.Name == "legacy")
-            MeasureEfSearchSweep(db, IndexName, corpus, live, queries);
+        MeasureEfSearchSweep(db, IndexName, corpus, live, queries);
 
         var before = MeasureRecallAndLatency(db, IndexName, corpus, live, queries);
         Console.WriteLine(
@@ -208,7 +194,7 @@ static float Cosine(float[] left, float[] right)
     return denominator == 0 ? 0 : (float)(dot / denominator);
 }
 
-internal sealed record Scenario(
+internal sealed record RecallScenario(
     string Name,
     int HnswM,
     int HnswMMax0,

@@ -36,8 +36,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
     internal const byte TenantVertexMap = 14;
     // VersionedEdgeStore の ItemPointerMap テナント。
     private const byte TenantEdgeMap = 15;
-    // opt-in 列の catalog テナント (各列テナントは ColumnCatalog が 64+ で採番)。
-    private const byte TenantColumnCatalog = 16;
+    // 16 は削除済み column catalog の欠番。永続 tenant ID は再利用しない。
     // transactional vector definition catalog の固定テナント。
     private const byte TenantVectorCatalog = 17;
     // 第一級Nexus。18..24 は固定 tenant で、後続 store 実装でも変更しない。
@@ -71,7 +70,7 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
         // WAL は単一サイドカー <filePath>-wal。クリーン終了で削除され、
         // 静止時は *.quiver のみが残る。
         var walPath = filePath + "-wal";
-        var wal = new WriteAheadLog(walPath, TimeSpan.Zero);
+        var wal = new WriteAheadLog(walPath);
 
         // 単一ファイルコンテナ。コア store / version sidecar / token / 索引 / 隣接ブロック /
         // epoch をすべて *.quiver に同居させ、全ページを単一 DATA fileKind で WAL に載せる。
@@ -258,12 +257,6 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             coMembershipStore.Rebuild(nexusStore, incidenceStore);
         }
 
-        // 列マネージャを startup で eager に開く。
-        // 登録済み列の head cache を開いておくことで (1) write 経路が列を維持でき、
-        // (2) abort の ReloadStoreMeta から列 cache を head ページへ再同期できる。
-        var columnManager = new ColumnManager(
-            container, TenantColumnCatalog, edgeStore, vertexStore, nexusStore, propStore);
-
         var vectorDefinitions = new PersistentVectorDefinitionCatalog(
             container,
             TenantVectorCatalog);
@@ -288,10 +281,6 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             // epoch テナントも container WAL 対象。abort で before-image がページを戻すので
             // in-memory の epoch / baseEdgeHwm / tombstone を読み直してディスクと一致させる。
             adjEpoch?.Reload();
-            // 列 head ページも container WAL 対象。abort の before-image undo で
-            // head ページが tx 開始前へ戻るので、列の in-memory cache をページから再構築して
-            // head 値の正当性を回復する。delta の中止 tx 分は OnRolledBack の PruneAbortedTx で掃除。
-            columnManager.ReloadColumns();
             // definition catalog も container WAL 対象なので、abort undo 後は
             // page の winner state から in-memory view を再構成する。
             vectorDefinitions.Reload();
@@ -372,7 +361,6 @@ internal sealed class BinaryGraphStorageBackendFactory : IGraphStorageBackendFac
             filePath, container, pageManager, wal, vertexStore, edgeStore, propStore,
             labelTokens, edgeTypeTokens, propKeyTokens, nexusTypeTokens, roleTokens, indexManager,
             adjStore, txManager, access, vectorDefinitions,
-            columnManager,
             coMembershipStore,
             labelIndex,
             edgeDeltaHeads,
