@@ -1,19 +1,48 @@
 # 数理ユースケース トラック 親計画書（実装委譲用）
 
-> 起案日: 2026-07-07。HYP トラック（第一級ハイパーエッジ）完了を承けて起こす後続トラック。
+> 起案日: 2026-07-07。現行アーキテクチャ追従: 2026-07-23。
+> HYP トラック（現在の Nexus 機能）完了を承けて起こした後続トラック。
 > 本書は「Quiver = 箙（quiver）をデータベースにする」という名前に照応する数理ユースケース群を、
 > **実装エージェントとオーケストレーションエージェント（いずれも本セッション外の Opus 等）へ委譲する**
-> ための親計画である。個別の実装増分は
-> [plans/math-usecases-implementation-tasks.md](math-usecases-implementation-tasks.md) を正本とする。
+> ための親計画である。
+> BR と MT の実装増分は [plans/math-usecases-implementation-tasks.md](math-usecases-implementation-tasks.md)、
+> PV、PB、HG、FCA、WC の実装増分は
+> [plans/math-usecases-foundational-tracks.md](math-usecases-foundational-tracks.md) を正本とする。
 >
 > 位置づけ:
 > - 各案の目的・論文参照・Quiver 内接続点・spike の kill criteria の一次資料:
 >   [plans/math-usecases-cornerstone.md](math-usecases-cornerstone.md) /
 >   [plans/math-usecases-research.md](math-usecases-research.md)。
-> - フォーマット（親計画 + 実装タスク分割 + as-built は docs/spec へ）は
->   [plans/hyperedge-track.md](hyperedge-track.md) /
->   [plans/hyperedge-implementation-tasks.md](hyperedge-implementation-tasks.md) を踏襲する。
-> - 実装前提となる既存資産（HYP 完了物・Entail・LeWorldModel・HNSW・SIG）はコーナーストーン §0 を参照。
+> - 現行実装の契約は [docs/spec/](../docs/spec/) を正本とし、未実装の目標は本計画と実装タスクへ分けて記録する。
+> - 実装前提となる既存資産（Nexus、Entail、LeWorldModel、vector segment、ApplyDyadic）は
+>   コーナーストーン §0 を参照。
+
+---
+
+## 0. 現行アーキテクチャとの対応
+
+本計画の数理用語と Quiver の実装語彙を次のように対応づける。
+
+| 数理上の対象 | 現行 Quiver の対象 | 主な接続点 |
+|---|---|---|
+| node / vertex | `Vertex` / `VertexId` | `IReadTransaction`、`IWriteTransaction`、`GraphTraversal<VertexId>` |
+| binary edge | `Edge` / `EdgeId` | Edge 隣接、`ExpandOp`、`GraphKernel` |
+| role 付き hyperedge | `Nexus` / `NexusId` | `GetNexuses`、`GetMembers`、`ExpandToNexusOp`、`ExpandMembersOp` |
+| 星型 hyperedge pattern | `NexusPattern` | `GraphPattern.Nexus`、`MatchCompiler` |
+| vector 近傍検索 | immutable vector segment ごとの HNSW | `VectorSegmentIndex`、`KnnSearch` |
+| ダイアディックスコア | `ApplyDyadic` | `ApplyDyadicOp`、`TypedGraphTraversal.ApplyDyadic` |
+
+現行エンジンは Single Writer + Snapshot Readers であり、読み取り API は開始時点の snapshot に束縛される。
+
+`VertexId`、`EdgeId`、`NexusId` は Generation を含む公開 identity であり、物理 Sequence を公開結果や一時集合の同一性に使わない。
+
+Nexus のメンバー集合は作成時確定で、incidence は独立した MVCC entity ではなく Nexus header の可視性に従う。
+
+vector index は snapshot 可視な複数の immutable segment から検索する。
+各 HNSW の近傍リストは segment 内部の private state であり、全 snapshot を表す単一の公開 k-NN グラフではない。
+
+この節は接続点の正本ではない。
+実装時は [docs/spec/](../docs/spec/) の as-built と現行コードを読み、計画書に残る旧識別子を根拠に互換 API を追加しない。
 
 ---
 
@@ -23,7 +52,7 @@
 
 | 役割 | 担当 | 責務 |
 |---|---|---|
-| 起案（本書の作成者） | 本セッション | 親計画・上位 2 件の実装タスク分割・共通規約の確定 |
+| 起案（本書の作成者） | 本セッション | 親計画、実装タスク分割、共通規約の確定 |
 | オーケストレーション | 別 Opus | トラック選択、spike 結果の検証、撤回/是正/続行の判断、実装エージェントへの割当、決定記録の追記 |
 | 実装 | 実装エージェント | 増分ごとの実装・テスト・ベンチ・spike。`/quiver-implement <track>` から着手 |
 
@@ -32,9 +61,10 @@
 - **並列展開しない。優先度（＝価値）の高いものから 1〜2 件だけ着手する。** 本書の
   トラック一覧（§6）は全体像であって同時着手指示ではない。1 件を「実装 → spike →
   検証ゲート通過 → as-built + サンプル」まで通してから次へ進む。
-- 上位 2 件（有向ハイパーエッジ到達可能性、制約最適化クエリ）だけを実装タスクへ分割済み。
-  3 件目以降は、上位が完了に近づいた時点でオーケストレータが本書と実装タスク書へ追記して分割する。
-  **未着手トラックを先回りで詳細化しない**（優先順位が実測で入れ替わりうるため）。
+- BR と MT は `math-usecases-implementation-tasks.md`、基礎寄りの後続候補は
+  `math-usecases-foundational-tracks.md` に分割済みである。
+  分割済みであることは着手承認を意味しない。
+  オーケストレータは本書の順序、外部検証、ユーザ承認から着手対象を決める。
 
 ---
 
@@ -160,7 +190,7 @@ HYP と同じ実験ループ契約に従う。
 ## 4. サンプル実装の方針（良いユースケースサンプルとは）
 
 各トラックの完了物には、機能を「物語として一気通貫で見せる」実行可能サンプルを 1 本付ける。
-基準は既存の [samples/Quiver.Samples.Hyperedges/](../samples/Quiver.Samples.Hyperedges/) を範とする。
+基準は既存の [samples/Quiver.Samples.Nexuses/](../samples/Quiver.Samples.Nexuses/) を範とする。
 そのサンプルが良い理由を分解して、本トラックの方針とする。
 
 - **実ユースケースの一気通貫を 1 ファイルで見せる。** 取込 →（複数の読み経路で）読み戻し → 実利の回収、
@@ -204,17 +234,20 @@ HYP と同じ実験ループ契約に従う。
 ## 6. トラック一覧と優先順位
 
 コーナーストーン §実装優先順位（圧倒性 × 実装コスト × 既存資産活用）を継承する。
-状態はすべて未着手。**上位 2 件のみ実装タスク書へ分割済み。**
+状態はすべて未着手。
+BR と MT は `math-usecases-implementation-tasks.md`、PV、PB、HG、FCA、WC は
+`math-usecases-foundational-tracks.md` に分割済みである。
 
 | ID | 対応 | 内容 | 圧倒性 | コスト | 資産活用 | 優先 | 状態 |
 |---|---|---|---|---|---|---|---|
 | **BR** | C-2, D-1 | 有向ハイパーエッジ B-到達可能性 / 最短 B-hyperpath | 高（表現力） | 低 | 高（incidence 走査） | **P0** | 分割済み・未着手 |
 | **MT** | C-3, C-5 | 制約最適化クエリ / 最小出典集合（MinimumTransversal） | 高（実利） | 中 | 高（incidence + SIG） | **P0** | 分割済み・未着手 |
-| HG | C-4 | HodgeRank / 離散 Hodge 分解（順位 + 信頼度） | 中 | 低（疎最小二乗 CG） | 高（SIG） | P1 | 未分割 |
-| PB | C-5 | パーシステントホモロジー barcode（名前照応） | 高（物語 + 実利） | 中〜高（Ripser 移植） | 高（HNSW 近傍） | P1 | 未分割 |
-| WC | C-1, C-1' | WCOJ + hypertree 分解（漸近優位 + 証明書） | 最高（漸近） | 高（LFTJ + trie） | 中（HYP-4 依存） | P2 | 未分割 |
-| PV | D-5 | Provenance 半環（出典代数、MT の上屋） | 中 | 低（注釈フック） | 高（走査 + MT） | P2 | 未分割 |
-| — | C-6/7/8, D-2/3/4 | 箙表現格納 / CQL / FCA / 単体複体力学 / 軌跡ストア | 中〜低 | 中〜高 | 中 | P3 | 研究・物語要員 |
+| HG | C-4 | HodgeRank / 離散 Hodge 分解（順位 + 信頼度） | 中 | 低（疎最小二乗 CG） | 高（ApplyDyadic） | P1 | 分割済み・未着手 |
+| PB | C-5 | パーシステントホモロジー barcode（名前照応） | 高（物語 + 実利） | 中〜高（Ripser 移植） | 高（vector segment） | P1 | 分割済み・未着手 |
+| WC | C-1, C-1' | WCOJ + hypertree 分解（漸近優位 + 証明書） | 最高（漸近） | 高（LFTJ + trie） | 中（NexusPattern 依存） | P2 | 分割済み・未着手 |
+| PV | D-5 | Provenance 半環（出典代数、MT の上屋） | 中 | 低（注釈フック） | 高（走査 + MT） | P2 | 分割済み・未着手 |
+| FCA | C-8 | 形式概念分析（incidence からの概念束マイニング） | 中 | 中 | 高（incidence） | P2 | 分割済み・未着手 |
+| — | C-6/7, D-2/3/4 | 箙表現格納 / CQL / 単体複体力学 / 軌跡ストア | 中〜低 | 中〜高 | 中 | P3 | 研究・物語要員 |
 
 推奨着手順（コーナーストーン申し送りを継承）:
 
@@ -225,15 +258,15 @@ HYP と同じ実験ループ契約に従う。
 
 ---
 
-## 7. 配線（トラック着手時）
+## 7. Skill とタスク参照の配線
 
-各トラック着手時に、HYP-0 と同じ配線を最初の増分（`*-0`）で行う。両 skill を同期する
-（[[project_quiver_implement_skill]]、`.claude` と `.agents` の 2 か所必須）。
+`quiver-implement` Skill は実装手順と正本へのルーティングだけを保持する。
+進捗、着手対象、検証結果は git 管理下の本書と実装タスク書へ記録し、gitignore 対象の Skill には書かない。
 
-- [ ] `.agents/skills/quiver-implement/tasks/<track>.md` を新設し、実装タスク書の増分・読むべきファイル・
-      完了条件を登録。`.claude/skills/quiver-implement/tasks/<track>.md` から共有参照する。
-- [ ] 両 `SKILL.md` に本トラックの分類・依存・進捗行を追加。
-- [ ] `docs/design/roadmap.md` に本トラックの epic 表と本書へのリンクを追加。
+- `.agents/skills/quiver-implement/tasks/math-usecases.md` を数理トラック共通の不変 router とする。
+- `.claude/skills/quiver-implement/tasks/math-usecases.md` は Agents 側 router と tracked な計画書を参照する。
+- 両 `SKILL.md` は byte-for-byte 同一に保ち、数理トラックの正本一覧と実装前ゲートだけを定義する。
+- `docs/design/roadmap.md` は本書への入口だけを持ち、個別タスクの可変状態を複製しない。
 
 ---
 
@@ -244,3 +277,24 @@ HYP と同じ実験ループ契約に従う。
 - `docs/spec/` に as-built を追記済み、公開文書に管理系文言が無い。
 - 実行可能サンプル 1 本が §4 の基準を満たして完走する。
 - 統合性能ゲート（製品 API 経由の再測定）を通過、または努力目標未達分を残差として記録済み。
+
+---
+
+## 9. リポジトリ適合性の予備評価（未検証）
+
+この節は 2026-07-23 時点の Codex による予備評価であり、トラックの採否、優先度、着手順を決定しない。
+
+別の検証エージェントは、一次資料、現行実装、spike 条件を独立に確認し、採用、修正、棄却の判断を決定記録へ残す。
+
+| 対象 | 予備評価 | 理由 |
+|---|---|---|
+| BR-1 B-到達 | 現行基盤へ接続できる可能性が高い | 双方向 incidence、snapshot 可視性、Logical IR、物理 planner、Traversal DSL が存在する。比較 oracle の妥当性は別途検証が必要 |
+| BR-2 最短導出 | 目的関数と公開契約の検証が必要 | B-tree 型の再帰コストと、共有を含む最小 B-path を区別する必要がある可能性がある |
+| MT-1 最小出典集合 | 専用 solver として接続できる可能性がある | incidence から候補集合を作れる。厳密解と近似 fallback の結果契約、規模別性能は未検証 |
+| PV provenance | overhead spike が必要 | 既存走査のホットパスへ注釈合成を加えるため、注釈なし経路の回帰を測る必要がある |
+| HG HodgeRank | 現行の Edge 走査と ApplyDyadic へ接続できる可能性がある | 旧 `EntityCandidateSet` は存在しないため、現在の traversal 結果を入力にする契約が必要 |
+| FCA | incidence を入力にできる可能性がある | 列挙結果数の爆発と support 契約は spike での確認が必要 |
+| PB H0 | 入力アダプタの設計が必要 | HNSW 近傍は private かつ segment 単位であり、snapshot 全体の k-NN グラフを直接公開していない |
+| PB H1 | 実装規模と検証方法の精査が必要 | Ripser 相当の低次 persistent homology は独立したアルゴリズム実装になる |
+| WC | query/index 基盤の追加範囲を精査する必要がある | 現行 IR に汎用 join、ソート済み trie iterator、EXPLAIN 相当の契約がない |
+| P3 候補 | 実需と公開契約の検証が必要 | 現時点の文書は研究スタブであり、個別の実装境界を持たない |

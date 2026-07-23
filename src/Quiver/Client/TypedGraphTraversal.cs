@@ -192,7 +192,7 @@ public sealed class TypedGraphTraversal<T> where T : IGraphVertex<T>
 
     /// <summary>
     /// Set cardinality プロパティの全値を <see cref="List{TElem}"/> として取り出す。
-    /// 各Vertexに対し <see cref="IWriteTransaction.GetPropertyValues(VertexId, string)"/> を呼び、
+    /// 各Vertexに対しread transactionの複数値プロパティ列挙を呼び、
     /// 要素を collect して返す。
     /// </summary>
     /// <typeparam name="TElem">リストの要素型。</typeparam>

@@ -507,5 +507,12 @@ CLAUDE.md
 # Codex管理ファイル類
 .agents
 AGENTS.md
+
+# Retired projects and historical development documents
+.archive/
+
+# Generated documentation build output
+docs/api/_apispec/
+docs/api/_site/
 # PublicApi approval transient output
 *.received.txt

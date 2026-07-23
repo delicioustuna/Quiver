@@ -1,11 +1,12 @@
-# 数理ユースケース 実装タスク（上位 2 トラック）
+# 数理ユースケース 実装タスク（BR / MT）
 
 > 親計画は [plans/math-usecases-track.md](math-usecases-track.md)。一次資料は
 > [plans/math-usecases-cornerstone.md](math-usecases-cornerstone.md) /
 > [plans/math-usecases-research.md](math-usecases-research.md)。
-> 本書は優先度最上位の 2 トラック（BR: 有向ハイパーエッジ到達、MT: 制約最適化 / 最小出典集合）を、
-> 単独でビルドと検証ができる増分へ分割する。3 件目以降（HG / PB / WC）は §後続トラックにスタブのみ置き、
-> 上位が完了に近づいた時点でオーケストレータが本書へ追記して分割する（親計画 §1 のペース規律）。
+> 本書は BR（有向 Nexus 到達）と MT（制約最適化 / 最小出典集合）を、
+> 単独でビルドと検証ができる増分へ分割する。PV / PB / HG / FCA / WC は
+> [plans/math-usecases-foundational-tracks.md](math-usecases-foundational-tracks.md) に分割済みである。
+> 分割済みであることは着手承認を意味しない。
 > 実装中に確定した利用者向け仕様は本書ではなく `docs/spec/` へ反映する。
 
 ## 共通の実装契約
@@ -15,10 +16,10 @@
 
 | 項目 | 契約 |
 |---|---|
-| 前提 | HYP トラック（第一級ハイパーエッジ、incidence 直行、role 付き）は完了済み。有向は head/tail ロールで表す |
+| 前提 | 第一級 `Nexus`（role 付き incidence）は実装済み。有向意味論は tail/head ロールで表す |
 | 新規ストア | BR は原則ストア追加なし（既存 incidence チェーンの再走査）。MT の solver は永続状態を持たない |
 | 外部ソルバ | Entail / Z3 / CP-SAT は**テストの正解照合専用**。製品依存に加えない（親計画 §3.4） |
-| 命名 | HYP 命名原則に従う。公開動詞名は実装時に確定（本書の名は作業名）。`MinimumTransversal` の扱いは MT 節で整合を取る |
+| 命名 | 現行の `Vertex` / `Edge` / `Nexus` 語彙に従う。公開動詞名は実装時に確定（本書の名は作業名）。`MinimumTransversal` の扱いは MT 節で整合を取る |
 | FormatVersion | BR は on-disk 変更なしを目標（変えるなら理由を決定記録へ）。開発中 bump の扱いは親計画 §5 |
 
 ## 実験ループ
@@ -47,6 +48,15 @@ MT-0 ─ MT-S ─ MT-1 ─ MT-2(後続・実需 gate)
 - 永続レイアウトを変更した増分は、再オープン・rollback・savepoint・crash recovery を検証する。
 - spike は計測値と採否理由を記録し、不採用コードを残さない。
 
+## 現行 API / アーキテクチャ基準
+
+- 公開 identity は `VertexId`、`EdgeId`、`NexusId` であり、いずれも Generation を含む。
+- 読み取り入口は `IReadTransaction`、書き込み入口は `IWriteTransaction` である。
+- Nexus の公開走査は `GetNexuses` / `GetMembers`、DSL は `Nexuses` / `Members` を使う。
+- 論理 IR は `ExpandToNexusOp` / `ExpandMembersOp`、物理実行は対応する operator へ lower する。
+- 読み取りは Single Writer + Snapshot Readers の snapshot 契約に従う。
+- 本書の node / hyperedge は数理説明では維持するが、コード上の対象は `Vertex` / `Nexus` とする。
+
 ---
 
 # BR トラック: 有向ハイパーエッジ B-到達可能性
@@ -61,18 +71,18 @@ MT-0 ─ MT-S ─ MT-1 ─ MT-2(後続・実需 gate)
 
 ### 目的
 
-実装前にタスク管理と設計参照先を現行リポジトリへ接続する（HYP-0 と同型）。
+実装前に、状態を持たない Skill router と tracked な設計参照先を現行リポジトリへ接続する。
 
 ### 変更
 
-- `.agents/skills/quiver-implement/tasks/math-usecases.md` を新設し、本書 BR/MT の増分・読むべきファイル・
-  完了条件を登録する。`.claude/skills/quiver-implement/tasks/math-usecases.md` から共有参照する。
-- 両 `SKILL.md` に本トラックの分類・依存・進捗行を追加する（`.claude` と `.agents` を同内容で同期）。
-- `docs/design/roadmap.md` に BR/MT の epic 表と親計画へのリンクを追加する。
+- `.agents/skills/quiver-implement/tasks/math-usecases.md` を新設し、tracked な正本、現行 API、実装前ゲートを登録する。
+- `.claude/skills/quiver-implement/tasks/math-usecases.md` から Agents 側 router と tracked な正本を参照する。
+- 両 `SKILL.md` は byte-for-byte 同一に保ち、進捗、依存状態、着手対象を記録しない。
+- `docs/design/roadmap.md` は親計画への入口だけを持ち、個別タスクの可変状態を複製しない。
 
 ### 完了条件
 
-- BR/MT タスクを skill から一意に特定でき、親計画・本書・roadmap の ID と依存が一致する。
+- Skill から親計画と本書を一意に特定でき、可変状態が tracked な計画書だけに存在する。
 
 ## BR-S B-到達線形性 spike
 
@@ -94,7 +104,8 @@ binary reification（中間ノード経由の AND ゲート表現）版に対し
 各 hyperedge に「未到達 tail 数」カウンタを持たせ、ノード到達時に、そのノードが tail として参加する
 hyperedge のカウンタをデクリメントし、0 になったら head をキューへ入れる（Dowling–Gallier の unit propagation と同型）。
 カウンタは**クエリ内の一時状態**で永続化しない。tail 参加 hyperedge の列挙は既存の
-`GetHyperedges(node, role = tailRole)`（incidence の NextInNode チェーン）で得る。追加索引は不要。
+公開境界では `IReadTransaction.GetNexuses(vertexId, nexusType, tailRole)` で得る。
+内部 hot path は `VertexIncidenceHeadStore` と `NextInVertex` を使う。追加索引は不要。
 
 ### 採否基準（数値の階層を明記）
 
@@ -125,12 +136,12 @@ seed ノード集合から、指定型・tail/head ロールの有向ハイパ�
 
 ### 実装
 
-- BR-S で採用したカウンタ法を物理オペレータ化する。カウンタは `HyperedgeId` キーの一時辞書で持ち、
+- BR-S で採用したカウンタ法を物理オペレータ化する。カウンタは `NexusId` キーの一時辞書で持ち、
   hyperedge の tail 数は初回タッチ時に lazy 初期化してキャッシュする（全体で O(tail 次数総和) を保つ）。
-- seed・hyperType・tailRole・headRole を受け取り、到達 `NodeId` を snapshot 可視性込みで列挙する。
+- seed・nexusType・tailRole・headRole を受け取り、到達 `VertexId` を snapshot 可視性込みで列挙する。
 - オペレータは `ref struct` enumerator を使い、1 行ごとの managed allocation を出さない
   （一時カウンタ辞書はクエリ全体で 1 回確保する固定費として許容し、行ごと確保と区別する）。
-- DSL 作業名（実装時に HYP 命名原則で確定）: node 起点の `.ReachableBy(hyperType, tailRole, headRole)` 等。
+- DSL 作業名（実装時に現行命名規約で確定）: vertex 起点の `.ReachableBy(nexusType, tailRole, headRole)` 等。
   `Transversal` は使わない。方向はロールで表すため Out/In 接頭辞を使わない。
 
 ### テスト
@@ -210,7 +221,7 @@ transversal = hitting set と、`Traversal` との編集距離 1 の衝突が理
 
 ## MT-0 トラック配線
 
-BR-0 と同じ配線を MT 分として行う（BR-0 で `math-usecases.md` を作成済みなら追記のみ）。
+BR-0 の共通 router から本節を参照する。Skill に MT の進捗行や依存状態を追記しない。
 
 ## MT-S 最小出典集合 spike
 
@@ -245,7 +256,7 @@ hyperedge 集合と被覆ロールを受け、全 hyperedge を被覆する最�
 ### 主な変更先（現行ツリーで確認）
 
 - `src/Quiver/`（optimization/analytics 面。走査層と混ぜない）
-- `src/Quiver/IGraphTransaction.cs` 系（公開動詞の口）
+- `src/Quiver/TransactionContracts.cs`（`IReadTransaction` の公開動詞の口）
 - `tests/Quiver.Tests/`（solver 単体 + 実 DB 統合）
 - `benchmarks/Quiver.Benchmarks/`（規模別の回帰 sentinel）
 
@@ -296,3 +307,4 @@ hyperedge 集合と被覆ロールを受け、全 hyperedge を被覆する最�
 
 > 実装エージェントは spike と本実装の決定をここへ追記する（HYP の決定記録に倣う。計測環境・多点数値・
 > 階層分類・続行/是正/撤回の別を残す）。着手までは空。
+> 親計画 §9 の見解は未検証の予備評価であり、このタスク定義の採否、優先度、順序を変更しない。

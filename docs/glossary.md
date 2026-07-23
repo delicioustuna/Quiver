@@ -129,7 +129,6 @@ Quiver の API やドキュメントに登場する用語を定義する。
 | **Quiver.Rag** | RAG レイヤ。Document/Chunk スキーマ、文書取込、ハイブリッド検索 + graph expansion |
 | **Quiver.Hosting** | `Microsoft.Extensions.Hosting` / DI 統合 |
 | **Quiver.OpenTelemetry** | OpenTelemetry 計装登録 |
-| **Quiver.Embedding** | テキスト埋め込みパイプライン（incubating、NuGet 非公開） |
 
 ## ファイルとフォーマット
 

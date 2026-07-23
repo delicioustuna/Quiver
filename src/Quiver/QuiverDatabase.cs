@@ -239,8 +239,8 @@ public sealed class QuiverDatabase : IDisposable
         => _backend.Vacuum(options);
 
     /// <summary>
-    /// 与えたマイグレーションのうち未適用のものを <see cref="IMigration.Version"/> 昇順 →
-    /// <see cref="IMigration.Id"/> Ordinal 昇順で適用する。各マイグレーションは独立した tx で実行され、
+    /// 与えたマイグレーションのうち未適用のものを <see cref="Migrations.IMigration.Version"/>昇順、
+    /// <see cref="Migrations.IMigration.Id"/>のOrdinal昇順で適用する。各マイグレーションは独立したtxで実行され、
     /// 失敗時はその tx のミューテーションだけ rollback される (schema rename は tx 境界を跨ぐ点に注意)。
     /// 既に適用済みの ID は skip される (冪等)。
     /// </summary>

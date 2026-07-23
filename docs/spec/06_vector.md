@@ -105,10 +105,10 @@ while (cursor.MoveNext())
 すべての metric は「スコアが大きいほど近い」という規約にそろえる。
 `Dot` は内積、`Cosine` は cosine similarity、`Euclidean` は二乗距離の符号反転を返す。
 
-## Embedding と RAG
+## 埋め込み生成と RAG
 
-`Quiver.Embedding` は source property と vector target property を別々の task metadata として扱う。
-pipeline は embedding を生成した後、write transaction の `SetVectorProperty` で target property を保存する。
+Quiver は埋め込みモデルを呼び出さない。
+呼び出し側は埋め込みを生成し、write transaction の `SetVectorProperty` で vector property を保存する。
 
 `Quiver.Rag` は read transaction の `KnnSearch` と graph property read を同じ snapshot で実行する。
 `MetadataEquals` が指定された場合は、一致文書の chunk candidate だけを scorer へ渡してから top-k を確定する。

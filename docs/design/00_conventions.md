@@ -1,11 +1,9 @@
 # 開発規約
 
 > 開発者向けの規約である。
-> 現行実装の仕様は `docs/spec/`、再設計の target は [Single Writer + Snapshot Readers 抜本再設計](../../plans/single-writer-redesign.md) を正本とする。
+> 現行実装の仕様は `docs/spec/` を正本とする。
 
 ## 正本の優先順位
-
-Single Writer 再設計では、設計内容は [再設計計画](../../plans/single-writer-redesign.md)、実行手順は [再設計の実行手順](../../plans/single-writer-redesign-process.md) を正本とする。
 
 `docs/spec/` は current as-built 仕様である。
 
@@ -15,7 +13,7 @@ target の API、永続形式、並行性を current の実装済み契約とし
 
 ## 現行トラックと historical record
 
-現在の実装トラックは Single Writer + Snapshot Readers 再設計だけである。
+現在の計画は [plans/README.md](../../plans/README.md) から辿る。
 
 過去トラックの完了記録、commit hash、当時の API、実測値は historical record として保存する。
 
@@ -27,19 +25,9 @@ tracked 文書から historical record を参照するときは、現行指示�
 
 ## ローカルの作業モデル
 
-bootstrap は `develop` で行う。
-
-bootstrap 後の再設計の tracked file は、`redesign/single-writer` の専用 worktree でだけ編集する。
-
-専用 worktree は同じ Git repository を共有する。
+開発は `develop` を基準に行う。
 
 物理コピーした別ライブラリや、成果物を後から差し替える並行開発は行わない。
-
-このローカル運用では、ユーザー指示により外部 push と upstream 設定を保留している。
-
-保留は remote と同期済みであることを意味しない。
-
-外部公開や `develop` への統合を再開する前に、[再設計の実行手順](../../plans/single-writer-redesign-process.md) §2〜§6 で定める未実施条件を満たす。
 
 ## skill mirror と可変状態
 
@@ -49,21 +37,17 @@ bootstrap 後の再設計の tracked file は、`redesign/single-writer` の専�
 
 mirror の更新は tracked commit に混ぜない。
 
-専用 worktree に mirror は複製されないため、必要なときはメインツリー側を read-only で参照する。
-
-Wave の合否と着手対象は git tag で判定する。
-
 承認済み計画と decision log は tracked な `plans/` に置く。
 
-## Wave の検証
+## 変更の検証
 
-各 Wave は機能 test、crash test、baseline gate、as-built 更新を満たしてから統合候補に進む。
+各変更は機能 test、必要な crash test、性能への影響がある場合の baseline gate、as-built 更新を満たしてから統合候補に進む。
 
 crash test または baseline gate を `N/A` とするには、対象挙動を変更していないことを差分で示す。
 
-solution build、変更した contract の as-built 更新、Wave 固有の機能 test は `N/A` にできない。
+solution build、変更した contract の as-built 更新、変更固有の機能 test は `N/A` にできない。
 
-性能 gate が未達なら、次の Wave へ進めず、原因と再設計案を decision log に記録してユーザー判断を得る。
+性能 gate が未達なら、統合せず、原因と再設計案を decision log に記録してユーザー判断を得る。
 
 ## コメントと内部管理表記
 

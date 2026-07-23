@@ -67,5 +67,5 @@ var candidates = read.Query
     .ToList();
 ```
 
-埋め込みの生成は利用者または `Quiver.Embedding` が担う。
+埋め込みの生成は利用者のアプリケーションが担う。
 保存先は index 名ではなく vector property key で指定する。

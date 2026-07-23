@@ -38,7 +38,7 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     /// トランザクション内に savepoint を作成し、その識別子を返す。
     /// 以後の変更を <see cref="RollbackTo"/> で巻き戻したり、<see cref="ReleaseSavepoint"/> で
     /// 親スコープへマージしたりできる。Nested savepoint をサポート。
-    /// 非アクティブな tx では <see cref="TransactionException"/> をスロー。
+    /// 非アクティブなtxでは <see cref="Quiver.Core.TransactionException"/>をスロー。
     /// 部分ロールバックは durable ではない (クラッシュ復旧では tx 全体の abort/commit のみ反映される)。
     /// </summary>
     /// <param name="name">診断用の任意名。一意性は要求しない。</param>
@@ -47,7 +47,7 @@ internal interface ITransaction : IDisposable, ICommitHookRegistrar
     /// <summary>
     /// 指定 savepoint 以降の変更を巻き戻す。Savepoint 自体は消費されず、再度
     /// <see cref="RollbackTo"/> を呼ぶことができる (SQL 標準準拠)。
-    /// 解放済みの savepoint や別 tx の savepoint を渡すと <see cref="TransactionException"/>。
+    /// 解放済みのsavepointや別txのsavepointを渡すと <see cref="Quiver.Core.TransactionException"/>をスロー。
     /// </summary>
     void RollbackTo(SavepointId savepoint);
 

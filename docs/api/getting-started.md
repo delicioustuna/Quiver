@@ -37,4 +37,4 @@ tx.Commit();
 
 - [Concepts](concepts/index.md) — モデル、トランザクション、トラバーサルの概念
 - [Tutorials](tutorials/index.md) — 段階的に動かして学ぶ
-- [API surface snapshot](../../tests/Quiver.PublicApi.Tests/PublicApi/Quiver.approved.txt) — 承認済みの公開 API 一覧
+- [API surface snapshot](https://github.com/delicioustuna/Quiver/blob/main/tests/Quiver.PublicApi.Tests/PublicApi/Quiver.approved.txt) — 承認済みの公開 API 一覧

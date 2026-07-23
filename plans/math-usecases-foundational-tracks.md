@@ -9,13 +9,20 @@
 > 応用ユースケース（化学・世界モデル・GNN 等のドメイン適用）より高い優先度**に置き直した上で、
 > BR/MT と同じ粒度の実装タスクへ分割したものである（ユーザ方針、2026-07-07）。
 >
-> **全体計画（親計画 §6 の優先度表・§7 配線・roadmap）はまだ更新しない。** 各トラック節の末尾に
-> 「全体計画への転記ブロック」を用意したので、オーケストレータが着手を決めた時点でそのブロックを
-> 親計画と roadmap へ貼り込む（§0.3 の手順）。本書は「いつでも反映できる状態の詳細設計」を保持する。
+> 親計画 §6 には全トラックを「分割済み・未着手」として反映済みである。
+> これは着手承認や採否判断ではない。可変状態は tracked な計画書へだけ記録し、Skill には複製しない。
 
 ---
 
 ## 0. 概観：優先度の再編・着手順序・転記手順
+
+### 0.0 現行アーキテクチャ基準
+
+- コード上の entity は `Vertex` / `Edge` / `Nexus`、identity は `VertexId` / `EdgeId` / `NexusId` である。
+- Nexus の星型 pattern は `NexusPattern`、走査は `GetNexuses` / `GetMembers` と対応する DSL / operator を使う。
+- 現行エンジンは Single Writer + Snapshot Readers であり、各読み取りは開始時点の snapshot に束縛される。
+- vector search は snapshot 可視な複数の immutable segment を横断する。HNSW の近傍リストは segment 内部の private state である。
+- 現行のダイアディック処理は `ApplyDyadic` であり、旧 `EntityCandidateSet` を前提にしない。
 
 ### 0.1 基礎寄り優先の再編（本書が扱うトラックの序列）
 
@@ -25,10 +32,10 @@
 | ID | 対応 | 内容 | 基礎度 | 圧倒性 | コスト | 資産活用 | 依存 |
 |---|---|---|---|---|---|---|---|
 | **PV** | D-5 | Provenance 半環（走査注釈の代数、到達/最短路の一般化） | 最高（実行層の汎用注釈） | 中 | 低 | 高（走査 + MT） | 走査オペレータ層（完） |
-| **WC** | C-1, C-1' | WCOJ + hypertree 分解（結合アルゴリズムと証明書付きプラン） | 最高（結合の中核） | 最高（漸近優位） | 高 | 中 | HYP-4（完）+ ソート索引（新規） |
-| **PB** | C-5 | パーシステントホモロジー barcode（ベクトル集合のトポロジー解析） | 高（ベクトル解析の汎用プリミティブ） | 高（物語 + 実利） | 中〜高 | 高（HNSW 近傍） | HNSW（完） |
+| **WC** | C-1, C-1' | WCOJ + hypertree 分解（結合アルゴリズムと証明書付きプラン） | 最高（結合の中核） | 最高（漸近優位） | 高 | 中 | `NexusPattern`（完）+ ソート索引（新規） |
+| **PB** | C-5 | パーシステントホモロジー barcode（ベクトル集合のトポロジー解析） | 高（ベクトル解析の汎用プリミティブ） | 高（物語 + 実利） | 中〜高 | 高（vector segment） | HNSW 近傍抽出 adapter（新規） |
 | **FCA** | C-8 | 形式概念分析（incidence 構造からの概念束マイニング） | 高（構造マイニングの汎用プリミティブ） | 中 | 中 | 高（incidence） | incidence ストア（完） |
-| **HG** | C-4 | HodgeRank / 離散 Hodge 分解（順位 + 矛盾スコア） | 中〜高（グラフ Laplacian 解法。入力は SIG 応用寄り） | 中 | 低（疎 CG） | 高（SIG、三角形は WC 共有） | SIG（完）、curl は WC 望ましい |
+| **HG** | C-4 | HodgeRank / 離散 Hodge 分解（順位 + 矛盾スコア） | 中〜高（グラフ Laplacian 解法。入力は ApplyDyadic 応用寄り） | 中 | 低（疎 CG） | 高（ApplyDyadic、三角形は WC 共有） | ApplyDyadic（完）、curl は WC 望ましい |
 
 > 最下位（応用・研究要員、詳細化を保留）は §6 に理由付きでスタブのみ置く。
 
@@ -39,10 +46,10 @@
 - **依存はいずれも「完了済み既存インフラ」に対してのみ**（相互依存は無く、独立並行は技術的に可能）。
   ただし親計画 §1 により**並列展開はしない**。1 本ずつ通す。
   - PV → 走査オペレータ層（完）。追加ストアなし。
-  - PB → HNSW 近傍グラフ（完）。追加ストアなし（barcode キャッシュを持つ場合のみ format 判定）。
+  - PB → immutable vector segment と HNSW 検索（完）。snapshot 全体の近傍グラフを作る adapter は新規。
   - FCA → incidence ストア（完）。追加ストアなし。
-  - HG → SIG（完）。curl 残差の三角形列挙は素朴実装で足りるが、**WC 完了後はその三角形経路を再利用**できる。
-  - WC → HYP-4 HyperedgePattern（完）＋ **新規のソート済み隣接 / trie 索引**（FormatVersion 影響を着手時に判定、親計画 §5）。最重量。
+  - HG → `ApplyDyadic`（完）。curl 残差の三角形列挙は素朴実装で足りるが、**WC 完了後はその三角形経路を再利用**できる。
+  - WC → `NexusPattern`（完）＋ **新規のソート済み隣接 / trie 索引**（FormatVersion 影響を着手時に判定、親計画 §5）。最重量。
 - **共有基盤の芽**（着手時に共通部品化を検討）:
   - 疎線形代数 / 共役勾配（CG）: HG が最初に必要とし、将来の高次力学（D-2）と共有。
   - 分解器（GYO / hypertree）: WC が作り、テンソルネットワーク縮約（D-4）と共有（研究 §2 の「Quiver.Decomposition」構想）。
@@ -53,15 +60,15 @@
     WC は基礎度最高だが新規索引インフラと format 影響で最重量ゆえ最後（完了で HG の curl と D-4 を解錠）。
   - オーケストレータは基礎度優先（WC/PV を前へ）へ倒す裁量を持つ。倒す場合は WC のインフラ費用を先払いする判断を明記する。
 
-### 0.3 全体計画への転記手順（共通）
+### 0.3 状態記録と Skill routing（共通）
 
-各トラックの着手を決めたら、そのトラック節末尾の「転記ブロック」を次の 3 箇所へ貼る（親計画 §7 の配線と同時）。
+親計画 §7 に従い、Skill は tracked な正本への不変 router と実装前ゲートだけを持つ。
 
-1. **親計画 [math-usecases-track.md](math-usecases-track.md) §6 のトラック一覧表**に、転記ブロックの「§6 行」を追加し、状態を「分割済み・未着手」にする。
-2. **[docs/design/roadmap.md](../docs/design/roadmap.md)** の数理トラック epic 表に、転記ブロックの「roadmap 行」を追加する（HYP と同じ列: ID / 概要 / 依存 / 優先度）。
-3. **両 `SKILL.md`**（`.claude` と `.agents`、[[project_quiver_implement_skill]]）に、転記ブロックの「SKILL 進捗行」を追加する。タスク定義ファイル `tasks/math-usecases.md` は BR-0 で新設済みの想定なので、本トラックの増分を追記する。
+1. 採否、優先度、着手順、spike 結果は親計画または本書の決定記録へ追記する。
+2. [plans/README.md](README.md) は現行計画への入口だけを持ち、個別状態を複製しない。
+3. `.agents/skills/quiver-implement/tasks/math-usecases.md` と Claude 側 stub から本書の該当節を参照する。Skill に進捗行を追加しない。
 
-転記は plan 上の管理情報の複製に過ぎず、公開 API・ソース・公開 docs へは何も出さない（親計画 §3.1）。
+各節末尾の転記ブロックは起案時の候補情報として保持するが、Skill 進捗行は使用しない。
 
 ---
 
@@ -75,7 +82,7 @@
 
 ## PV-0 トラック配線
 
-BR-0 と同型。`tasks/math-usecases.md` へ PV 増分を追記し、両 SKILL.md を同期、roadmap は着手時に転記ブロックで更新する。
+共通 router から本節を参照する。状態は本書にのみ記録し、Skill には追記しない。
 
 ## PV-S 注釈フック overhead spike
 
@@ -137,7 +144,7 @@ BR-0 と同型。`tasks/math-usecases.md` へ PV 増分を追記し、両 SKILL.
 
 - **§6 行**: `| **PV** | D-5 | Provenance 半環（走査注釈の代数、到達/最短路の一般化） | 中 | 低 | 高（走査 + MT） | P1 | 分割済み・未着手 |`
 - **roadmap 行**: `| **PV** | Provenance 半環: ISemiring 注釈フック + 到達/最短路/why/信頼度、MT 接続 | 走査層 | P1 |`
-- **SKILL 進捗行**: `PV（Provenance 半環）: 未着手。詳細 plans/math-usecases-foundational-tracks.md`
+- **Skill router**: 共通 `math-usecases.md` から本節を参照する。状態は本書にのみ記録する。
 
 ---
 
@@ -145,24 +152,25 @@ BR-0 と同型。`tasks/math-usecases.md` へ PV 増分を追記し、両 SKILL.
 
 > 対応: コーナーストーン C-5、research §7。基礎度: 高（ベクトル集合の汎用トポロジー解析）。
 > 目的仮説: persistence module は A_n 型 quiver の表現で、barcode 分解は Gabriel の定理の系。
-> Quiver は HNSW で既に近傍グラフを持つため Vietoris–Rips 濾過の構築が構造的に安い。
+> Quiver は immutable vector segment ごとに HNSW を持つ。snapshot 全体の k-NN グラフを構成する adapter の要否を spike で検証する。
 > 「埋め込み集合のクラスタ数と安定スケール」「ループ構造の有無」を**しきい値非依存**で barcode に返す。
 > 名前照応の旗艦であり、クラスタリング・外れ値・埋め込み品質診断の実利を持つ。
 
 ## PB-0 トラック配線
 
-BR-0 と同型。
+共通 router から本節を参照する。状態は本書にのみ記録する。
 
 ## PB-S H0 barcode spike（段階 0）
 
 ### 仮説
 
-H0 persistence は「距離順に辺を足す Kruskal + Union-Find」で済み、HNSW 近傍リストから作った疎 k-NN グラフを
+H0 persistence は「距離順に辺を足す Kruskal + Union-Find」で済み、segment 内部の HNSW 近傍または公開 k-NN 検索から構成した疎 k-NN グラフを
 入力にすれば実用時間でクラスタ併合の樹形図と安定性が出る。
 
 ### 比較・データセット・採否基準
 
-- HNSW の近傍から k-NN グラフを取り、辺長ソート + Union-Find で H0 を計算する。
+- snapshot 可視な全 vector segment を横断して k-NN グラフを構成し、辺長ソート + Union-Find で H0 を計算する。
+  private な HNSW 近傍を直接公開 API 化することは前提にせず、adapter の境界を spike で決める。
 - **必達（hard）**: 小規模（N≤500）で全点対 naive Rips の barcode と H0 が一致（k-NN 近似前の厳密性確認）。
 - **必達（hard）**: 合成 GMM の既知クラスタ構造の復元（クラスタ数一致率 ≥95%）。
 - **努力目標（aspirational）**: N=10^4・d=384 の実埋め込みで H0 <300ms。未達でも近似誤差と時間を記録して PB-1 へ。
@@ -172,7 +180,7 @@ H0 persistence は「距離順に辺を足す Kruskal + Union-Find」で済み�
 
 ### 実装
 
-- 作業名 `PersistenceBarcode(vectorIndex, maxDim: 0, maxScale)` 相当を追加する。HNSW 近傍 → k-NN グラフ →
+- 作業名 `PersistenceBarcode(vectorIndex, maxDim: 0, maxScale)` 相当を追加する。segment 横断の近傍抽出 → k-NN グラフ →
   辺長ソート → Union-Find でクラスタ併合の birth/death 区間と安定性を返す。
 - 近似である旨（k-NN 濾過）と全点対切替閾値を返り値/ドキュメントで明示する（厳密性の嘘をつかない）。
 - SIG の SIMD 距離カーネルを全点対経路で再利用する。
@@ -204,7 +212,7 @@ H0 persistence は「距離順に辺を足す Kruskal + Union-Find」で済み�
 
 - **§6 行**: `| **PB** | C-5 | パーシステントホモロジー barcode（埋め込みのトポロジー解析） | 高 | 中〜高 | 高（HNSW） | P1 | 分割済み・未着手 |`
 - **roadmap 行**: `| **PB** | TDA barcode: H0（Union-Find）→ H1（Ripser 簡易版）、HNSW 近傍濾過 | HNSW | P1 |`
-- **SKILL 進捗行**: `PB（TDA barcode）: 未着手。詳細 plans/math-usecases-foundational-tracks.md`
+- **Skill router**: 共通 `math-usecases.md` から本節を参照する。状態は本書にのみ記録する。
 
 ---
 
@@ -217,7 +225,7 @@ H0 persistence は「距離順に辺を足す Kruskal + Union-Find」で済み�
 
 ## HG-0 トラック配線
 
-BR-0 と同型。
+共通 router から本節を参照する。状態は本書にのみ記録する。
 
 ## HG-S 疎 CG spike
 
@@ -237,15 +245,15 @@ BR-0 と同型。
 
 ### 実装
 
-- 行列フリー CG を実装する。グラフ Laplacian の行列-ベクトル積を **Relationship 隣接の incidence 走査で評価**し、
+- 行列フリー CG を実装する。グラフ Laplacian の行列-ベクトル積を **Edge 隣接の走査で評価**し、
   疎行列を明示構築しない（メモリ効率。コーナーストーン C-4）。前処理は不要か Jacobi で十分。
-- 入力は SIG が吐く対スコア Y_ij（歪対称化）。作業名 `RankByHodge(candidates, dyadicScorer)` →（score[], …）。
-  SIG の `EntityCandidateSet` 出力に接続する。`System.Numerics.Tensors` の TensorPrimitives を使える。
+- 入力は `ApplyDyadic` が返す対スコア Y_ij（歪対称化）。作業名 `RankByHodge(candidates, dyadicScorer)` →（score[], …）。
+  `GraphTraversal` / `TypedGraphTraversal` の `ApplyDyadic` 結果へ接続する。`System.Numerics.Tensors` の TensorPrimitives を使える。
 
 ### テスト
 
 - 手計算できる小グラフで大域スコアの正しさ、CG の収束を検証する。
-- SIG 出力からの接続を統合テストで固定する。
+- `ApplyDyadic` 出力からの接続を統合テストで固定する。
 
 ## HG-2 curl / harmonic 矛盾スコア
 
@@ -266,9 +274,9 @@ BR-0 と同型。
 
 ## 全体計画への転記ブロック（HG）
 
-- **§6 行**: `| **HG** | C-4 | HodgeRank / 離散 Hodge 分解（順位 + 信頼度） | 中 | 低（疎 CG） | 高（SIG） | P1 | 分割済み・未着手 |`
-- **roadmap 行**: `| **HG** | HodgeRank: 行列フリー CG で L_0 s=-div Y、curl/harmonic 矛盾スコア | SIG（curl は WC 望） | P1 |`
-- **SKILL 進捗行**: `HG（HodgeRank）: 未着手。詳細 plans/math-usecases-foundational-tracks.md`
+- **§6 行**: `| **HG** | C-4 | HodgeRank / 離散 Hodge 分解（順位 + 信頼度） | 中 | 低（疎 CG） | 高（ApplyDyadic） | P1 | 分割済み・未着手 |`
+- **roadmap 行**: `| **HG** | HodgeRank: 行列フリー CG で L_0 s=-div Y、curl/harmonic 矛盾スコア | ApplyDyadic（curl は WC 望） | P1 |`
+- **Skill router**: 共通 `math-usecases.md` から本節を参照する。状態は本書にのみ記録する。
 
 ---
 
@@ -281,7 +289,7 @@ BR-0 と同型。
 
 ## FCA-0 トラック配線
 
-BR-0 と同型。
+共通 router から本節を参照する。状態は本書にのみ記録する。
 
 ## FCA-S 概念数分布 spike
 
@@ -319,7 +327,7 @@ incidence の edge 側チェーンをビット集合化すれば In-Close / CbO 
 
 - **§6 行**: `| **FCA** | C-8 | 形式概念分析（incidence からの概念束マイニング） | 中 | 中 | 高（incidence） | P2 | 分割済み・未着手 |`
 - **roadmap 行**: `| **FCA** | 形式概念分析: In-Close/CbO で概念束、minsupport 必須、暗黙スキーマ発見 | incidence | P2 |`
-- **SKILL 進捗行**: `FCA（形式概念分析）: 未着手。詳細 plans/math-usecases-foundational-tracks.md`
+- **Skill router**: 共通 `math-usecases.md` から本節を参照する。状態は本書にのみ記録する。
 
 ---
 
@@ -334,7 +342,7 @@ incidence の edge 側チェーンをビット集合化すれば In-Close / CbO 
 
 ## WC-0 トラック配線
 
-BR-0 と同型。**着手時に FormatVersion 影響（ソート済み隣接 / trie 索引の永続化要否）を最初に判定**し、
+共通 router から本節を参照する。**着手時に FormatVersion 影響（ソート済み隣接 / trie 索引の永続化要否）を最初に判定**し、
 親計画 §5 に従って開発中 bump の扱いを決める。
 
 ## WC-S1 LFTJ crossover spike（binary 3-clique で先行）
@@ -342,12 +350,12 @@ BR-0 と同型。**着手時に FormatVersion 影響（ソート済み隣接 / t
 ### 仮説
 
 Leapfrog Triejoin（LFTJ）の単変数 leapfrog（ソート順 iterator + seek）だけで三角形列挙を中間結果ゼロで走らせ、
-ある N 以上で binary plan を上回る。**spike は hyperedge を待たず binary Relationship 3 本の三角形で開始できる**。
+ある N 以上で binary plan を上回る。**spike は Nexus 経路とは独立に binary Edge 3 本の三角形で開始できる**。
 
 ### 比較・データセット・採否基準
 
 - 三角形列挙を N（辺数）を 10^4〜10^6 で振り、一様 + Zipf で LFTJ と既存 binary plan を比較する。
-  IncidenceStore チェーンは未ソートなので、spike は「走査時ソート（小次数で十分）」で始める（research §1）。
+  Nexus incidence チェーンは未ソートなので、spike は「走査時ソート（小次数で十分）」で始める（research §1）。
 - **必達（hard）**: cyclic（三角形）で N を振ると LFTJ が binary を上回る crossover が存在する。
   存在しなければ **「dense/cyclic 専用の隠し経路に留める」縮小スコープへ倒すか撤回**（親計画 §2.3）。
 - **必達（hard）**: acyclic（path-2/path-3）で既存比 ≥0.8×（劣化 20% 以内。Free Join 不使用の許容線）。
@@ -357,11 +365,11 @@ Leapfrog Triejoin（LFTJ）の単変数 leapfrog（ソート順 iterator + seek�
 
 ### 実装
 
-- ソート済み隣接（結合キー順の走査イテレータ）を用意する。B+Tree があるので `(RoleId, NodeId, HyperedgeId)`
+- ソート済み隣接（結合キー順の走査イテレータ）を用意する。B+Tree があるので `(RoleId, VertexId, NexusId)`
   キーの二次索引 か 走査時ソートのどちらで始めるかを WC-S1 の結果で決める。
 - Generic Join（NPRR の簡略形、Ngo–Ré–Rudra *Skew Strikes Back* の再帰構造）の 1 オペレータを追加する。
   変数（ノード変数・hyperedge 変数）へ全順序を与え、各リレーションをその順序の trie と見なす。
-- binary Relationship を「アリティ 2 のリレーション」として同じ枠に載せる（lifting ビュー）。
+- binary Edge を「アリティ 2 のリレーション」として同じ枠に載せる（lifting ビュー）。
 - **オプティマイザに「結合ハイパーグラフが cyclic か」の判定を足し、cyclic→WCOJ / acyclic→既存 binary の
   ハイブリッド経路選択にする**（Free Join の但し書き: acyclic では素の WCOJ が binary に負ける、を回避）。
 
@@ -393,9 +401,9 @@ Leapfrog Triejoin（LFTJ）の単変数 leapfrog（ソート順 iterator + seek�
 
 ## 全体計画への転記ブロック（WC）
 
-- **§6 行**: `| **WC** | C-1, C-1' | WCOJ + hypertree 分解（漸近優位 + 証明書） | 最高 | 高 | 中（HYP-4） | P2 | 分割済み・未着手 |`
-- **roadmap 行**: `| **WC** | WCOJ（LFTJ/Generic Join）+ GYO/Yannakakis 二段オプティマイザ、証明書付きプラン | HYP-4 + ソート索引 | P2 |`
-- **SKILL 進捗行**: `WC（WCOJ + hypertree）: 未着手・最重量（FormatVersion 影響判定要）。詳細 plans/math-usecases-foundational-tracks.md`
+- **§6 行**: `| **WC** | C-1, C-1' | WCOJ + hypertree 分解（漸近優位 + 証明書） | 最高 | 高 | 中（NexusPattern） | P2 | 分割済み・未着手 |`
+- **roadmap 行**: `| **WC** | WCOJ（LFTJ/Generic Join）+ GYO/Yannakakis 二段オプティマイザ、証明書付きプラン | NexusPattern + ソート索引 | P2 |`
+- **Skill router**: 共通 `math-usecases.md` から本節を参照する。状態は本書にのみ記録する。
 
 ---
 
@@ -423,3 +431,4 @@ Leapfrog Triejoin（LFTJ）の単変数 leapfrog（ソート順 iterator + seek�
 
 > 実装エージェントは spike と本実装の決定をここへ追記する（HYP の決定記録に倣う。計測環境・多点数値・
 > 階層分類・続行/是正/撤回の別を残す）。着手までは空。
+> 親計画 §9 の見解は未検証の予備評価であり、このタスク定義の採否、優先度、順序を変更しない。

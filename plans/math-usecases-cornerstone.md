@@ -6,7 +6,7 @@
 >
 > 位置づけ: plans/usecase-ideas.md C 節の各案を「どの論文のどこを見て、Quiver の何に接続し、
 > 何を最初に測るか」まで具体化したもの。実用系 (A/B 節) は usecase-ideas.md を参照。
-> hyperedge の正本計画は plans/hyperedge-track.md。
+> role 付き hyperedge の現行実装名は Nexus である。historical な正本計画は plans/hyperedge-track.md。
 >
 > 重要な前提 (このリポジトリの既定方針):
 > - 「推論より実地検証」— 各案は spike で kill criteria を数値固定してから本実装可否を判断する
@@ -60,10 +60,13 @@
 
 ### D:\csharp\Quiver — 本体の既存資産
 
-- graph (Node/Relationship + 双方向チェーン)、vector (PersistentVectorStore + 永続 HNSW、
-  `(EntityKind, id)` キー)、FTS (BM25 + HybridSearch)、SIG (ダイアディックスコアリング、
-  0.148µs/候補)、hyperedge (HYP トラック進行中、incidence 直行表現)。
-- HNSW が既に近傍グラフを保持している点が C-5 (TDA) の前提条件として効く。
+- graph (`Vertex` / `Edge` + 双方向走査)、vector (immutable `VectorSegmentIndex` + segment ごとの HNSW)、
+  FTS (BM25 + HybridSearch)、`ApplyDyadic` (ダイアディックスコアリング)、
+  Nexus (role 付き incidence、`NexusPattern`、`GetNexuses` / `GetMembers`)。
+- 現行エンジンは Single Writer + Snapshot Readers であり、公開 identity は
+  `VertexId` / `EdgeId` / `NexusId`（Generation 付き）である。
+- HNSW の近傍リストは segment 内部の private state である。
+  C-5 (TDA) には snapshot 可視な複数 segment から k-NN グラフを構成する adapter が必要になる。
 
 ---
 
@@ -91,7 +94,7 @@ Quiver (hyperedge) だからこそ成立する差別化になる。
   https://arxiv.org/abs/2301.10841 / https://www.mwillsey.com/papers/freejoin
 
 ### Quiver 内の接続点
-- HYP-4 の `HyperedgePattern` (星型パターン) の複数結合が自然な実装座標。
+- `NexusPattern` (星型パターン) の複数結合が自然な実装座標。
 - 前提: 各リレーション/hyperedge をロール (列) ごとにソートした trie/索引で引けること。
   B+Tree は既にあるので、結合キー順の走査イテレータを用意できるかが鍵。
 - クエリオプティマイザに「結合ハイパーグラフが cyclic か」の判定を足し、経路を分岐させる (C-1' 参照)。
@@ -121,7 +124,7 @@ Quiver (hyperedge) だからこそ成立する差別化になる。
   https://arxiv.org/pdf/cs/9812022
 
 ### Quiver 内の接続点
-- C-1 と同じ `HyperedgePattern` コンパイラ。プラン生成時に GYO を回して acyclic 判定 →
+- C-1 と同じ `NexusPattern` コンパイラ。プラン生成時に GYO を回して acyclic 判定 →
   acyclic なら Yannakakis 経路、cyclic なら C-1 の WCOJ 経路、という**二段オプティマイザ**。
 - 出力: `EXPLAIN` 相当に「width=k, method=Yannakakis/WCOJ」を載せる。
 
@@ -208,7 +211,7 @@ B-connectivity (全ての tail が到達済みのとき head に到達) は **�
 ## C-4. HodgeRank / 離散 Hodge 分解 — SIG トラックの数学的出口
 
 ### 何が起きるか
-SIG のダイアディックスコア (ペア比較) を**辺上の flow** と見なすと、組合せ Hodge 分解で
+`ApplyDyadic` のダイアディックスコア (ペア比較) を**辺上の flow** と見なすと、組合せ Hodge 分解で
 `flow = gradient (大域順位) ⊕ curl (局所矛盾) ⊕ harmonic (大域矛盾)` に一意分解される。
 効果: ペア比較集合から (1) 大域ランキング と (2) **その順位がどれだけ信用できるか (curl/harmonic ノルム)**
 が同時に、しかも**線形最小二乗 1 本**で出る (Kemeny 最適化の NP 困難を回避)。
@@ -223,9 +226,9 @@ SIG のダイアディックスコア (ペア比較) を**辺上の flow** と�
   arXiv:2101.05510)。hyperedge を単体に持ち上げれば k 次 Hodge Laplacian へ。
 
 ### Quiver 内の接続点
-- SIG の出力 (候補ペアのスコア) を flow ベクトルとして受け、グラフ (Relationship) 上で分解。
+- `ApplyDyadic` の出力 (候補ペアのスコア) を flow ベクトルとして受け、グラフ (Edge) 上で分解。
 - 新 API: `HodgeRank(edgeFlows)` → (globalScore per node, inconsistency metrics)。
-- グラフラプラシアンは Relationship の隣接から構成でき、既存の走査で行列-ベクトル積が書ける
+- グラフラプラシアンは Edge の隣接から構成でき、既存の走査で行列-ベクトル積が書ける
   (疎行列を明示構築せず incidence 走査で CG を回す = メモリ効率的)。
 
 ### kill criteria
@@ -256,8 +259,9 @@ barcode で返す。しきい値非依存のクラスタリング・外れ値検
 - 理論の照応 (persistence = quiver 表現): "Persistence modules" の区間分解定理。Gabriel の定理。
 
 ### Quiver 内の接続点
-- **HNSW が既に近傍グラフを持つ**のが決定的優位。Vietoris–Rips の全点対距離を計算せず、
-  HNSW の近傍から疎な距離グラフ (k-NN グラフ) を作って濾過を構築 → 構築コストが他ベクトル DB より安い。
+- immutable vector segment ごとの HNSW を入力候補にできる。
+  ただし近傍リストは private で、snapshot 全体の k-NN グラフは公開されていないため、
+  Vietoris–Rips 濾過には segment 横断 adapter または公開 k-NN 検索からの再構成が要る。
 - 新 API: `PersistenceBarcode(vectorIndex, maxDim, maxScale)` → barcodes (次元別 birth/death 区間)。
 - 発展: zigzag persistence も A_n 表現 → 時間発展する埋め込み集合 (D 節と接続) のトポロジー追跡。
 
@@ -283,12 +287,12 @@ node に R^d (既存 float[])、edge に線形写像 (d×d 行列プロパティ
 
 ### Quiver 内の接続点
 - edge プロパティに d×d 行列 codec を追加 (float[] の拡張)。
-- `PushForward(representation)` オペレータ = 1-hop message passing。SIG のダイアディック経路と隣接。
+- `PushForward(representation)` オペレータ = 1-hop message passing。`ApplyDyadic` の経路と隣接。
 - 実務価値は C-5/C-4 に劣る (やや衒学的) ため優先度は低。「名前の物語」の完成度要員。
 
 ### kill criteria
 - まず小規模 (Dynkin A_3〜A_5) で直既約分解が理論と一致するデモが書けるか (機能実証)。
-- 実用性能目標は設定せず、in-DB GNN 1-hop が既存 SIG 経路のオーバーヘッド内に収まるかだけ確認。
+- 実用性能目標は設定せず、in-DB GNN 1-hop が既存 `ApplyDyadic` 経路のオーバーヘッド内に収まるかだけ確認。
 
 ---
 
@@ -330,7 +334,7 @@ Galois 接続から**概念束 (concept lattice)** を構成 = 「共起する�
 - incidence 表現と formal context が一対一なので、hyperedge ストアからの変換は素直。
 
 ### Quiver 内の接続点
-- HYP の incidence ストアを formal context として読み、`ConceptLattice(nodeType, hyperedgeType)` を計算。
+- Nexus の incidence ストアを formal context として読み、`ConceptLattice(vertexType, nexusType)` を計算。
 - FTS のトークン-文書関係も formal context になる (語 × 文書) → 語彙階層の自動抽出に転用可。
 
 ### kill criteria
@@ -396,17 +400,17 @@ Galois 接続から**概念束 (concept lattice)** を構成 = 「共起する�
 | C-3 最適化 (Entail 核) | 高 (実利直結) | 中 (Entail 拡張のみ) | 高 (Entail + SIG + hyperedge) | **本命** |
 | C-2 有向 hyperedge/Horn | 高 (表現力) | 低 (forward chaining) | 高 (incidence 走査) | **本命** |
 | C-5 TDA (barcode) | 高 (名前照応) | 中〜高 (Ripser 移植) | 高 (HNSW 近傍グラフ) | **本命 (物語)** |
-| C-1/C-1' WCOJ+hypertree | 最高 (漸近優位) | 高 (LFTJ + trie 索引) | 中 (HYP-4 依存) | 有望 (HYP 成熟後) |
+| C-1/C-1' WCOJ+hypertree | 最高 (漸近優位) | 高 (LFTJ + trie 索引) | 中 (`NexusPattern` 依存) | 有望 (Nexus 成熟後) |
 | C-4 HodgeRank | 中 (SIG 出口) | 低 (疎最小二乗) | 高 (SIG) | 有望 (軽い) |
 | C-6/C-7/C-8 | 中〜低 (衒学寄り) | 中〜高 | 中 | 研究・物語要員 |
 | D-1〜D-5 応用 | — | 上記の再利用 | — | ショーケース/docs 素材 |
 
 推奨着手順:
-1. **C-2 (有向 hyperedge / B-到達)** — HYP トラックの有向モデルの正当な出口。実装最小。D-1 化学反応と直結。
+1. **C-2 (有向 hyperedge / B-到達)** — Nexus の有向モデルの正当な出口。実装最小。D-1 化学反応と直結。
 2. **C-3 (Entail 最適化)** — Entail に分枝限定 or IHS を足して `MinimumTransversal`。RAG citation 最小化で実利。
 3. **C-4 (HodgeRank)** — SIG の出口として軽量に。C-3 と共有する疎最小二乗 (CG) 基盤を先に作る。
 4. **C-5 (TDA barcode)** — HNSW 近傍グラフを濾過に使う spike。Quiver の名前を体現する旗艦機能。
-5. **C-1/C-1' (WCOJ)** — HYP-4 の HyperedgePattern 成熟後。最も強い漸近優位だが前提が重い。
+5. **C-1/C-1' (WCOJ)** — `NexusPattern` 成熟後。最も強い漸近優位だが前提が重い。
 
 各案とも本実装前に上記 kill criteria を数値固定して spike すること ([[empirical-verification-over-reasoning]])。
 

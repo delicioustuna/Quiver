@@ -4,7 +4,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Api;
 
 /// <summary>
-/// <see cref="GraphTraversalSource.AddEdge"/> から開始するEdge追加ビルダ。
+/// <see cref="GraphMutationSource.AddEdge"/>から開始するEdge追加ビルダ。
 /// <see cref="From"/> と <see cref="To"/> で両端Vertexを指定し、必要なら <c>.P(...)</c> で
 /// プロパティを追加し、最後に <see cref="Next"/> で実際にエッジを作成する。
 /// </summary>

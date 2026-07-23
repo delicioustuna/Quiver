@@ -9,8 +9,8 @@ namespace Quiver;
 /// </summary>
 /// <typeparam name="TSelf">自分自身の型 (CRTP)。</typeparam>
 /// <remarks>
-/// 通常は <see cref="QuiverDatabaseSchemaExtensions.EnsureIndexes{T}"/> /
-/// <see cref="QuiverDatabaseSchemaExtensions.EnsureIndex{T}"/> 経由で呼ぶ。手動実装は不要。
+/// 通常は <see cref="SchemaEditorExtensions.EnsureIndexes{T}"/>または
+/// <see cref="SchemaEditorExtensions.EnsureIndex{T}"/>経由で呼ぶ。手動実装は不要。
 /// </remarks>
 public interface IGraphVertexSchema<TSelf> where TSelf : IGraphVertexSchema<TSelf>
 {
@@ -24,7 +24,7 @@ public interface IGraphVertexSchema<TSelf> where TSelf : IGraphVertexSchema<TSel
 
     /// <summary>
     /// 単一プロパティのインデックスを冪等に作成する。<paramref name="propertyName"/> は呼び出し側
-    /// (典型的には <see cref="QuiverDatabaseSchemaExtensions.EnsureIndex{T}"/>) が
+    /// (典型的には <see cref="SchemaEditorExtensions.EnsureIndex{T}"/>) が
     /// ラムダから抽出した CLR プロパティ名。<paramref name="kindOverride"/> を渡すと
     /// 推論された既定 kind を上書きできる (例: 文字列プロパティに対し
     /// <see cref="IndexKind.StringRange"/> を使う)。

@@ -160,7 +160,6 @@ internal sealed class QueryOptimizer
     // 直接の隣接で停止するのに対し、スキャン経路は常に O(TotalEdges) のコストを払う。
     // バイナリバックエンド (リンクリスト、隣接ブロックなし) では frontier カバー率約 85% でクロスオーバー、
     // 隣接ブロックあり構成ではクロスオーバーはさらに高くなる。
-    // 詳細は docs/benchmarks/2026-05-15__after.md。
     private const double EdgeScanFrontierFraction = 0.85;
 
     /// <summary>

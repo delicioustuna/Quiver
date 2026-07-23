@@ -8,8 +8,8 @@ namespace Quiver.Migrations;
 /// 順に <see cref="ApplyAsync"/> される。同じ <see cref="Id"/> は 1 度しか適用されないため、
 /// 再実行 (アプリ再起動 / 障害復旧後) でも冪等。失敗時はトランザクションが rollback され、
 /// migration history にも登録されない (= 次回起動時に再度 Apply が試みられる)。
-/// 注意: ラベル / プロパティキー / 索引のリネームは <see cref="ITokenStore{TToken}"/> / 索引ファイル
-/// の物理操作で、データミューテーションと違いトランザクション境界では巻き戻らない。
+/// 注意: ラベル、プロパティキー、索引のリネームはtoken catalogと索引ファイルの物理操作であり、
+/// データミューテーションと違ってトランザクション境界では巻き戻らない。
 /// よって rename を含む migration が途中で失敗すると名前空間は中途半端な状態で残る。
 /// rename は <see cref="ApplyAsync"/> の最初に置き、データミューテーションをその後に置く構成を推奨する。
 /// </remarks>

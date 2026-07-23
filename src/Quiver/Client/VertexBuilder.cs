@@ -4,7 +4,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Api;
 
 /// <summary>
-/// <see cref="GraphTraversalSource.AddVertex"/> から開始するVertex追加ビルダ。
+/// <see cref="GraphMutationSource.AddVertex"/>から開始するVertex追加ビルダ。
 /// <c>.P(key, value)</c> をチェーンしてプロパティを蓄積し、最後に <see cref="Next"/> で
 /// 実際にVertexを作成・コミット (トランザクション内) する。
 /// </summary>

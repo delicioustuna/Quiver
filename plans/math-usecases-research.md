@@ -11,18 +11,19 @@
 
 ### Quiver (D:\csharp\Quiver) — 本体
 
-- **HyperedgeStore / IncidenceStore** (HYP トラック、plans/hyperedge-track.md):
-  ロール付き incidence モデル。IncidenceEntry は `HyperedgeId | NodeId | RoleId | NextInNode | NextInEdge`
-  の固定レコードで、「ノードごとのチェーン」「エッジごとのメンバーチェーン」の 2 本を貫通。
+- **VersionedNexusStore / IncidenceStore**:
+  ロール付き incidence モデル。incidence は `NexusId | VertexId | RoleId | NextInVertex | NextInNexus`
+  の固定レコードで、「Vertex ごとのチェーン」「Nexus ごとのメンバーチェーン」の 2 本を貫通。
   メンバー集合は作成時確定 (immutable-first)。有向は head/tail ロールで表現。
-- **GraphKernel**: `VisitNeighbor(source, target, relId)` 契約の走査カーネル。BFS/最短経路/Dijkstra は
+- **GraphKernel**: `VisitNeighbor(source, target, edgeId)` 契約の走査カーネル。BFS/最短経路/Dijkstra は
   binary view を供給すれば無改造で動く。
-- **Match / GraphPattern**: 線形 node-edge-node パターン + 星型 HyperedgePattern (HYP-4)。
+- **Match / GraphPattern**: 線形 Vertex-Edge-Vertex パターン + 星型 `NexusPattern`。
 - **B+Tree / ページング / Clock buffer pool**: 8KB ページ、順序付き走査が可能。
-- **PersistentVectorStore + HNSW**: `(EntityKind, id)` キーの float[] 格納と近傍グラフ。
-- **SIG (ApplyDyadic / EntityCandidateSet)**: 候補集合 × float[] プロパティのダイアディックスコアリング。
+- **VectorSegmentIndex + HNSW**: immutable vector segment ごとの float[] 格納と private な近傍リスト。
+  snapshot 可視な複数 segment の検索結果を統合するが、snapshot 全体の近傍グラフは公開しない。
+- **ApplyDyadic**: traversal の候補集合 × float[] プロパティのダイアディックスコアリング。
   エンジンオーバーヘッド 0.148µs/候補。
-- **MVCC / WAL / savepoint**: スナップショット分離、時点指定読み。
+- **Single Writer + Snapshot Readers / redo-only WAL / savepoint**: 読み取り開始時点の snapshot による可視性。
 
 ### Entail (D:\csharp\Entail) — 充足可能性の予備実装
 
@@ -81,14 +82,14 @@ WCOJ は出力サイズの理論上界 (AGM bound) に比例した時間で走�
 1. **LFTJ 論文の §3 (leapfrog join) をまず単変数で実装する**。必要なのは
    「ソート順 iterator + seek(値) 」だけ。Quiver では B+Tree の順序付き走査がこれに相当する。
    IncidenceStore のチェーンは挿入順で**ソートされていない**ので、
-   (a) role 別ソート済み二次索引 (B+Tree キー `(RoleId, NodeId, HyperedgeId)`) を足すか、
+   (a) role 別ソート済み二次索引 (B+Tree キー `(RoleId, VertexId, NexusId)`) を足すか、
    (b) 走査時ソート (小さい次数なら十分) で始めるかの選択になる。spike は (b) で足りる。
-2. trie の「レベル」= 変数順序。HyperedgePattern (HYP-4) の変数 (ノード変数・hyperedge 変数) に
+2. trie の「レベル」= 変数順序。`NexusPattern` の変数 (Vertex 変数・Nexus 変数) に
    全順序を与え、各リレーションをその順序の trie と見なす。Generic Join
    (NPRR の簡略形、Ngo–Ré–Rudra *Skew Strikes Back* が読みやすい) の再帰構造で書くと小さい。
-3. binary Relationship も「アリティ 2 のリレーション」として同じ枠に載せる
-   (計画書の lifting ビューがここで効く)。三角形クエリは Relationship 3 本でも作れるので、
-   **spike は hyperedge 実装を待たず binary 3-clique で開始できる**。
+3. binary Edge も「アリティ 2 のリレーション」として同じ枠に載せる
+   (計画書の lifting ビューがここで効く)。三角形クエリは Edge 3 本でも作れるので、
+   **spike は Nexus 経路とは独立に binary 3-clique で開始できる**。
 4. 本実装フェーズでは Free Join の COLT (列遅延 hash trie) を検討。
    Quiver はページ常駐ストアなので「trie をどこまで具現化するか」が設計の勘所。
 
@@ -99,7 +100,7 @@ WCOJ は出力サイズの理論上界 (AGM bound) に比例した時間で走�
 
 ### 規模感・依存
 
-spike は独立 (binary で可能)。本実装は HYP-3/4 後。Quiver のクエリ層に
+spike は独立 (binary で可能)。`NexusPattern` は実装済み。Quiver のクエリ層に
 新オペレータ 1 個 (GenericJoinOperator) + ソート済み隣接の用意。
 
 ---
@@ -165,11 +166,11 @@ Horn-SAT (Dowling–Gallier) と同一の計算。応用: ビルド依存・権�
 
 1. アルゴリズムはカウンタ法 1 本: 各 hyperedge に「未到達 tail 数」カウンタを持ち、
    ノード到達時にデクリメント、0 になったら head をキューへ。Dowling–Gallier の
-   unit propagation と同じ構造。**IncidenceStore の NextInNode チェーン (role=tail) の
+   unit propagation と同じ構造。**IncidenceStore の NextInVertex チェーン (role=tail) の
    走査がそのまま「ノード→関与 hyperedge」列挙**なので、追加索引は不要。
 2. 最短 B-hyperpath は上記を Dijkstra 化 (Gallo らの SBT)。コスト関数は
    sum (加法) と max (ボトルネック) の 2 種を用意すると応用が広い。
-3. DSL は `ReachableBy(hyperType, tailRole, headRole)` /
+3. DSL は `ReachableBy(nexusType, tailRole, headRole)` /
    `ShortestDerivation(...)` のような動詞になる (命名は hyperedge-track の原則に従い再検討)。
 4. Entail の Phase 2 (選言の単位伝播) と概念的に同じ計算であることを意識しておく —
    将来「グラフ上の Horn 推論」と「制約伝播」を統合するときの接合点。
@@ -258,11 +259,11 @@ Quiver の Fact hyperedge (出典ロール) と MinimumTransversal (テーマ 4)
 
 ---
 
-## 6. HodgeRank / 離散 Hodge 分解 — SIG トラックの数学的出口
+## 6. HodgeRank / 離散 Hodge 分解 — ApplyDyadic の数学的出口
 
 ### 目的と主張
 
-SIG のダイアディックスコア (候補対のスコア) は有向グラフの辺上の flow と見なせる。
+`ApplyDyadic` のダイアディックスコア (候補対のスコア) は有向グラフの辺上の flow と見なせる。
 組合せ Hodge 分解 flow = gradient ⊕ curl ⊕ harmonic により、
 **大域ランキング (gradient 成分のポテンシャル) と、その信頼度 (curl/harmonic 残差)** が
 最小二乗 1 本で同時に得られる。Kemeny 最適化 (NP-hard) と違い線形代数で済むのが要点。
@@ -278,12 +279,12 @@ SIG のダイアディックスコア (候補対のスコア) は有向グラフ
 
 ### 実装の道筋
 
-1. 入力: SIG が吐く対スコア Y_ij (歪対称化)。グラフ勾配 (grad s)_ij = s_j − s_i に対し
+1. 入力: `ApplyDyadic` が返す対スコア Y_ij (歪対称化)。グラフ勾配 (grad s)_ij = s_j − s_i に対し
    min_s Σ w_ij (Y_ij − (grad s)_ij)² を解く — 正規方程式は **L_0 s = −div Y**
    (グラフ Laplacian 系の疎線形系)。共役勾配 (CG) で解く。前処理は不要か Jacobi で十分。
 2. curl 残差は三角形 (2-clique) 上の巡回和。三角形列挙は**テーマ 1 の WCOJ 三角形クエリの再利用**。
 3. API 形: `RankByHodge(candidates, dyadicScorer)` → (score[], inconsistency)。
-   SIG の EntityCandidateSet 出力に接続するのが自然。
+   `GraphTraversal` / `TypedGraphTraversal` の `ApplyDyadic` 結果に接続する。
 4. 疎行列 CG は Pure C# で 200 行程度。System.Numerics.Tensors の TensorPrimitives が使える
    (LeWorldModel の autograd 資産とも共有可能)。
 
@@ -299,8 +300,9 @@ SIG のダイアディックスコア (候補対のスコア) は有向グラフ
 ### 目的と主張
 
 persistence module は **A_n 型 quiver の表現**であり、barcode への区間分解は
-Gabriel の定理の系。Quiver は HNSW で既に近傍グラフを持つため、Vietoris–Rips 濾過の
-構築コストが構造的に安い。「埋め込み集合のクラスタ数と安定スケール」を barcode で返す。
+Gabriel の定理の系。Quiver は immutable vector segment ごとに HNSW を持つが、近傍リストは private である。
+Vietoris–Rips 濾過には snapshot 全体の k-NN グラフを構成する adapter が要る。
+「埋め込み集合のクラスタ数と安定スケール」を barcode で返す。
 機能価値と同時に「Quiver という名の DB が箙の表現論でベクトルを解析する」物語になる。
 
 ### 一次資料
@@ -315,8 +317,9 @@ Gabriel の定理の系。Quiver は HNSW で既に近傍グラフを持つた�
 
 ### 実装の道筋
 
-1. **段階 0**: H_0 persistence = 距離順に辺を足す Kruskal + Union-Find。HNSW の近傍リストから
-   kNN グラフを取り、辺長ソート。これだけで「クラスタ併合の樹形図 + 安定性」が返せる。
+1. **段階 0**: H_0 persistence = 距離順に辺を足す Kruskal + Union-Find。segment 内部の近傍または
+   公開 k-NN 検索から snapshot 全体の k-NN グラフを構成し、辺長ソートする。
+   private state の直接公開は前提にせず、adapter の境界を spike で決める。
    実装 1 日規模。API 形: `PersistenceDiagram(vectorIndex, maxDim: 0)`。
 2. **段階 1**: H_1 (ループ)。Ripser の 4 技法のうち (1)(2) だけ入れた簡易版でも
    N=10^3〜10^4 は動く。simplex は k-枝の組合せ数系エンコード (Ripser §3)。

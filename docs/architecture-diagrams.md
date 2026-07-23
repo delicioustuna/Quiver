@@ -128,7 +128,7 @@ flowchart LR
 
 ## 5. パッケージ依存関係
 
-NuGet パッケージとしての依存グラフ。破線は incubating（NuGet 非公開）を示す。
+NuGet パッケージとしての依存グラフ。矢印はパッケージ参照の向きを示す。
 
 ```mermaid
 flowchart LR
@@ -137,13 +137,8 @@ flowchart LR
     Rag["Quiver.Rag"]
     Host["Quiver.Hosting"]
     OTel["Quiver.OpenTelemetry"]
-    Emb["Quiver.Embedding<br/>(incubating)"]
-
     SG -- analyzer --> Core
-    Core --> Rag
-    Core --> Host
-    Core --> OTel
-    Core --> Emb
-
-    style Emb stroke-dasharray: 5 5
+    Rag --> Core
+    Host --> Core
+    OTel --> Core
 ```

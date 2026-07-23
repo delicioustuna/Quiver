@@ -4,7 +4,7 @@ using Quiver.Storage.Records;
 namespace Quiver.Api;
 
 /// <summary>
-/// <see cref="GraphTraversalSource.AddNexus"/> から開始し、ロール付きメンバーと
+/// <see cref="GraphMutationSource.AddNexus"/>から開始し、ロール付きメンバーと
 /// プロパティを蓄積してNexusを作成するビルダ。
 /// </summary>
 /// <remarks>

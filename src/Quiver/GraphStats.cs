@@ -293,8 +293,8 @@ public sealed class GraphStats
     /// 観測対象 backend が <c>VertexByLabelScan</c> を O(|L|) で提供できるか。
     /// バイナリ backend で <c>LabelVertexIndex</c> sidecar が接続されているとき <c>true</c>。
     /// <c>InlineGraphAccessMethods</c> 経路 / ANN bypass 等 sidecar 無し backend では <c>false</c>。
-    /// <see cref="Quiver.Client.Internal.PendingKnnBuilder"/> の push-down 閾値判定で、
-    /// dim-aware piecewise table を引くか sidecar-free の保守的な単一閾値を引くかを切り替えるのに使う。
+    /// optimizer の push-down 閾値判定で、dim-aware piecewise table を引くか
+    /// sidecar-free の保守的な単一閾値を引くかを切り替えるのに使う。
     /// テストから明示的に <c>false</c> 経路を再現できるよう <c>init</c> を公開している。
     /// </summary>
     public bool HasFastLabelIndex { get; init; }

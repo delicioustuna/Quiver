@@ -186,9 +186,8 @@ public abstract class VectorSearchCursor : IDisposable
 }
 
 /// <summary>
-/// float ベクトルの格納と KNN 実行を担う最小のコア契約。テキスト処理 / プロバイダ呼び出し /
-/// リトライ / タスクログは意図的に除外され、それらは <c>Quiver.Embedding</c> にある
-/// 。
+/// float ベクトルの格納と KNN 実行を担う最小のコア契約。
+/// テキスト処理、モデル呼び出し、リトライは呼び出し側が担う。
 /// </summary>
 internal interface IVectorDefinitionCatalog
 {
