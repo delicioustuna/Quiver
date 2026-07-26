@@ -6,8 +6,6 @@
   href: concepts/index.md
 - name: Tutorials
   href: tutorials/index.md
-- name: Generated Architecture
-  href: ../generated/architecture.md
 - name: API Reference
   href: ../api/
   homepage: ../api/index.md

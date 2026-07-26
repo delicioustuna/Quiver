@@ -64,7 +64,7 @@ var known = tx.Query.Vertices<Person>()
 `Quiver`パッケージには、モデル属性とSource Generatorが含まれます。
 `ImplicitUsings`が有効なプロジェクトには、`Quiver`と`Quiver.Api`の名前空間が自動的に追加されます。
 
-公開バージョンは現在`0.1.0`であり、1.0未満です。
+公開バージョンは現在`0.2.0`であり、1.0未満です。
 
 ## ローカルRAG
 
@@ -113,7 +113,6 @@ AMD Ryzen 7 5700Xと.NET 10を使用し、in-processで計測した参考値で�
 | [運用ガイド](docs/operations/README.md) | バックアップ、リカバリ、性能調整 |
 | [アーキテクチャ](docs/architecture.md) | システム構成とデータフロー |
 | [現行仕様](docs/spec/00_overview.md) | 現在のストレージと実行契約 |
-| [開発者向け文書](docs/design/development.md) | ビルド、テスト、パッケージ、リポジトリ規則 |
 
 ## サンプル
 

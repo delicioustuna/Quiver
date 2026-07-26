@@ -192,6 +192,5 @@ Get-ChildItem tests/Quiver.PublicApi.Tests/PublicApi/*.received.txt | ForEach-Ob
 
 ## 関連ドキュメント
 
-- [README の Versioning セクション](../README.md#versioning)
-- [00_conventions.md](design/00_conventions.md) — 命名・ID 型・例外型の正本
-- [docs/api/](api/) — docfx で生成した API リファレンス
+- [現行仕様](spec/00_overview.md) — ストレージと実行契約
+- [docs/api/](api/) — docfxで生成したAPIリファレンス

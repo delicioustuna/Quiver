@@ -12,7 +12,7 @@
 **bulk パス (まとめて 1 tx) は ~69 B/entry、per-tx パターン (1 件 1 commit) は約 100 倍遅い。**
 
 これは Quiver で最も効く一手であり、他のどのノブよりも先に守るべき。
-根拠は [索引付き書き込みの WAL 増幅](../benchmark-results.md#索引付き書き込みの-wal-増幅):
+根拠は[索引付き書き込みのWAL増幅](../benchmark-results.md#索引付き書き込みのwal増幅)を参照。
 
 | パス | EntryCount | WAL bytes/entry | wall time | スループット |
 |---|---:|---:|---:|---:|

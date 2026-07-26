@@ -64,7 +64,7 @@ var known = tx.Query.Vertices<Person>()
 The `Quiver` package includes the model attributes and source generator.
 Projects with `ImplicitUsings` enabled receive the `Quiver` and `Quiver.Api` namespaces automatically.
 
-The public version is currently `0.1.0` and remains pre-1.0.
+The public version is currently `0.2.0` and remains pre-1.0.
 
 ## Local RAG
 
@@ -113,7 +113,6 @@ See the [known limits](docs/spec/08_known_limits.md) for the complete contract.
 | [Operations](docs/operations/README.md) | Backup, recovery, and performance tuning |
 | [Architecture](docs/architecture.md) | System structure and data flow |
 | [As-built specification](docs/spec/00_overview.md) | Current storage and execution contracts |
-| [Development](docs/design/development.md) | Build, test, packaging, and repository rules |
 
 ## Samples
 

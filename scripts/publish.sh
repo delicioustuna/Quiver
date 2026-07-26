@@ -4,7 +4,9 @@ set -euo pipefail
 EXCLUDE_PATHS=(
     "plans/"
     "sandbox/"
-    "scripts/"
+    "docs/design/"
+    "docs/generated/"
+    "benchmarks/baselines/README.md"
 )
 
 SANDBOX_SLNX_PATTERNS=(

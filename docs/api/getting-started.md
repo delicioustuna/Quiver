@@ -7,12 +7,10 @@
 
 ## インストール
 
-現状 Quiver は NuGet パッケージ化されていません。リポジトリをクローンして直接プロジェクト参照する想定です。
+`Quiver`パッケージには、コアエンジン、モデル属性、Source Generatorが含まれます。
 
 ```bash
-git clone <quiver-repo-url>
-cd Quiver
-dotnet build Quiver.slnx
+dotnet add package Quiver --version 0.2.0
 ```
 
 ## はじめてのグラフ

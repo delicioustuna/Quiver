@@ -1,7 +1,7 @@
 # Quiver アーキテクチャ図
 
 用途別の Mermaid 図集。
-内部実装の契約は [as-built 仕様](spec/00_overview.md) と [開発者向け実装 map](design/development.md) を参照。
+内部実装の契約は[現行仕様](spec/00_overview.md)を参照。
 
 ---
 

@@ -1,7 +1,7 @@
 # Quiver 用語辞書
 
 Quiver の API やドキュメントに登場する用語を定義する。
-内部実装の用語と責務は [as-built 仕様](spec/00_overview.md) と [開発者向け実装 map](design/development.md) を参照。
+内部実装の用語と責務は[現行仕様](spec/00_overview.md)を参照。
 
 ---
 

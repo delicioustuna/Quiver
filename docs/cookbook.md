@@ -636,7 +636,7 @@ var names = g.People().Adults().Out("WROTE").Values("Title").ToList();
 コストが顕在化する** (10×10 直積 × degree 1,000 ≈ 12ms)。その場合は
 `AddEdge` (存在チェックなし、~6µs/call で degree 非依存) を使うか、
 アプリ層で重複制御すること。エッジ存在インデックスは現時点で非目標。
-詳細: [MergeEdge の degree 依存コスト](benchmark-results.md#mergeedge-の-degree-依存コスト)。
+詳細は[MergeEdgeのdegree依存コスト](benchmark-results.md#mergeedgeのdegree依存コスト)を参照。
 
 ---
 
